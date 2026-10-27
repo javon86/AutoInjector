@@ -70,7 +70,9 @@ async function main() {
   assert(c.ok && c.lists && c.lists.loras === 2 && persisted > 0, 'connect() fetches the lists and saves the setting');
   g = await studio.generate({ prompt: 'portrait of odile', negativePrompt: 'blurry', loras: [{ name: 'odile_face', weight: 0.8 }], checkpoint: 'juggernautXL_v9.safetensors [c9e3e68f89]', steps: 12, width: 512, height: 512, seed: 99, batchSize: 2, sampler: 'Euler a' });
   assert(g.ok && g.images.length === 2 && fs.existsSync(g.images[0].path) && fs.existsSync(g.images[1].path), 'both pictures saved to the images/ folder');
-  assert(g.warnings.length === 1 && g.warnings[0].level === 'hard' && /SD1\.5/.test(g.warnings[0].message), 'the SD1.5 LoRA on the SDXL checkpoint gives a warning (the picture is still made)');
+  const hardW = g.warnings.filter((w) => w.level === 'hard');
+  assert(hardW.length === 1 && /SD1\.5/.test(hardW[0].message), 'the SD1.5 LoRA on the SDXL checkpoint gives a warning (the picture is still made)');
+  assert(g.warnings.some((w) => w.kind === 'safe' && w.field === 'size' && /SDXL checkpoints are made for about 1024/.test(w.message)), '…and 512×512 on an SDXL checkpoint gets a soft size warning (not blocked)');
   const rec = JSON.parse(fs.readFileSync(g.images[0].json, 'utf8'));
   assert(rec.prompt === 'portrait of odile' && rec.negativePrompt === 'blurry' && rec.seed === 99 && rec.steps === 12 && rec.sampler === 'Euler a' && rec.loras[0].name === 'odile_face' && rec.backend === 'a1111', 'the .json sidecar records prompt, negative, seed, steps, sampler, LoRAs, backend');
   assert(JSON.parse(fs.readFileSync(g.images[1].json, 'utf8')).seed === 100, 'the 2nd image of the batch records its own seed (all_seeds)');
@@ -136,7 +138,9 @@ async function main() {
   r = await req(st.port, 'POST', '/image/request', { prompt: 'a ferry', hires: { scale: 2, denoise: 0.4 }, clipSkip: 2 }, TOKEN);
   assert(r.status === 200 && a.state.lastTxt2img.enable_hr === true && a.state.lastTxt2img.denoising_strength === 0.4 && a.state.lastTxt2img.override_settings.CLIP_stop_at_last_layers === 2, 'POST /image/request accepts the advanced settings (hires fix, clip skip)');
   r = await req(st.port, 'POST', '/image/request', { prompt: 'x', hires: { upscaler: 'Magic 8x' } }, TOKEN);
-  assert(r.status === 400 && r.json.error === 'UNKNOWN_VALUE' && r.json.field === 'hires.upscaler' && r.json.hint, 'a wrong advanced setting → 400 with the field and a hint');
+  assert(r.status === 200 && r.json.ok && a.state.lastTxt2img.enable_hr === true && a.state.lastTxt2img.hr_upscaler === 'Latent' && r.json.warnings.some((w) => /no upscaler called “Magic 8x”/.test(w.message)), 'an upscaler the app doesn\'t have is left out (its default is used) with a plain warning — not a 400 / 500');
+  r = await req(st.port, 'POST', '/image/request', { prompt: 'x', hires: { upscaler: 'r-esrgan 4x+' } }, TOKEN);
+  assert(r.status === 200 && a.state.lastTxt2img.hr_upscaler === 'R-ESRGAN 4x+', 'an upscaler name in other case / punctuation is sent in the app\'s own spelling');
   await a.close();
   r = await req(st.port, 'POST', '/image/request', { prompt: 'x' }, TOKEN);
   assert(r.status === 502 && /Nothing is answering|closed the connection/.test(r.json.message), 'SD app gone → 502 with a plain message');

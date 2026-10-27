@@ -7,6 +7,11 @@
 //       (override_settings.sd_vae, else options.sd_vae) — so "Use Automatic VAE
 //       and retry" really fixes it. failWith (or state.failWith at run time):
 //       'vae' | 'oom' | 'nan' | 'ckpt' | 'lora' | 'html' | 'traceback' → that 500.
+//       strictNames: a sampler / scheduler / checkpoint / VAE the lists don't have → an
+//       unexplained 500 (like Forge). rejectNonBasic (or state.rejectNonBasic): any
+//       sampler_name / scheduler / hires fix / override_settings.sd_model_checkpoint → an
+//       unexplained 500 (a setting the app can't take). oomAbove (or state.oomAbove): a
+//       CUDA out-of-memory 500 when width × height × batch is above that many pixels.
 //       /sdapi/v1/* like A1111 / Forge / SD.Next — incl. /openapi.json (real field
 //       names, test/fixtures/a1111-openapi.js), options get/set, upscalers, latent
 //       modes, prompt-styles, scripts + script-info, extra-single-image, skip,
@@ -142,6 +147,17 @@ async function fakeA1111(opts = {}) {
         state.txt2imgCalls = (state.txt2imgCalls || 0) + 1;
         const effVae = (body.override_settings && body.override_settings.sd_vae) || state.options.sd_vae;
         if (opts.badVae && effVae === opts.badVae) return send(res, 500, A1111_ERRORS.vae);
+        const ov = body.override_settings || {};
+        if (opts.strictNames) {
+          const bad = (body.sampler_name && !['Euler a', 'DPM++ 2M'].includes(body.sampler_name) && body.sampler_name)
+            || (body.scheduler && !['Automatic', 'Karras', 'automatic', 'karras'].includes(body.scheduler) && body.scheduler)
+            || (ov.sd_model_checkpoint && !['dreamshaper_8.safetensors [879db523c3]', 'juggernautXL_v9.safetensors [c9e3e68f89]', 'dreamshaper_8', 'juggernautXL_v9'].includes(ov.sd_model_checkpoint) && ov.sd_model_checkpoint)
+            || (ov.sd_vae && !['Automatic', 'None', 'vae-ft-mse-840000', opts.badVae].includes(ov.sd_vae) && ov.sd_vae);
+          if (bad) return send(res, 500, { error: 'KeyError', detail: '', body: '', errors: `'${bad}'` });
+        }
+        if ((state.rejectNonBasic || opts.rejectNonBasic) && (body.sampler_name || body.scheduler || body.enable_hr || ov.sd_model_checkpoint)) return send(res, 500, { error: 'TypeError', detail: '', body: '', errors: "'NoneType' object is not subscriptable" });
+        const oomAbove = state.oomAbove || opts.oomAbove;
+        if (oomAbove && body.width * body.height * (body.batch_size || 1) * (body.n_iter || 1) > oomAbove) return send(res, 500, A1111_ERRORS.oom);
         const fw = state.failWith || opts.failWith;
         if (fw === 'html') return send(res, 500, '<html><head><title>500 Internal Server Error</title></head><body><h1>Internal Server Error</h1></body></html>');
         if (fw && A1111_ERRORS[fw]) return send(res, 500, A1111_ERRORS[fw]);
