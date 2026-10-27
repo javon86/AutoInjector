@@ -197,11 +197,61 @@ class BaseWindow extends EventEmitter {
   close() { if (this._destroyed) return; this._destroyed = true; this.emit("closed"); }
 }
 
+// 🎩 Alfred's floating side panel (alfred-window.js) is a BrowserWindow: enough of one to check what
+// it was made with (parent / alwaysOnTop / bounds), shown / hidden / focused, and what was sent to it.
+const browserWindows = [];
+class BrowserWindow extends EventEmitter {
+  constructor(opts) {
+    super();
+    this.opts = opts || {};
+    this.webContents = new FakeWebContents("alfred-window");
+    this.webContents.on = this.webContents.on.bind(this.webContents);
+    this.webContents.sentLog = [];
+    const origSend = this.webContents.send.bind(this.webContents);
+    this.webContents.send = (channel, payload) => { this.webContents.sentLog.push({ channel, payload }); origSend(channel, payload); };
+    this._bounds = { x: this.opts.x || 0, y: this.opts.y || 0, width: this.opts.width || 800, height: this.opts.height || 600 };
+    this._parent = this.opts.parent || null;
+    this._onTop = !!this.opts.alwaysOnTop;
+    this._onTopLevel = this._onTop ? "floating" : null;
+    this._visible = false;
+    this._destroyed = false;
+    this.calls = [];
+    browserWindows.push(this);
+  }
+  loadFile(f) { this.calls.push("loadFile"); this.webContents.loadFile(f); }
+  show() { this.calls.push("show"); this._visible = true; this.emit("show"); }
+  showInactive() { this.calls.push("showInactive"); this._visible = true; this.emit("show"); }
+  hide() { this.calls.push("hide"); this._visible = false; this.emit("hide"); }
+  focus() { this.calls.push("focus"); }
+  isVisible() { return this._visible; }
+  isDestroyed() { return this._destroyed; }
+  getBounds() { return { ...this._bounds }; }
+  setBounds(b) { this._bounds = { ...this._bounds, ...b }; this.emit("move"); }
+  setAlwaysOnTop(v, level) { this._onTop = !!v; this._onTopLevel = v ? (level || "floating") : null; }
+  isAlwaysOnTop() { return this._onTop; }
+  getParentWindow() { return this._parent; }
+  close() {
+    if (this._destroyed) return;
+    let prevented = false;
+    this.emit("close", { preventDefault: () => { prevented = true; } });
+    if (!prevented) this.destroy();
+  }
+  destroy() { if (this._destroyed) return; this._destroyed = true; this._visible = false; this.webContents.destroyedFlag = true; this.emit("closed"); }
+}
+// screen: one 1920x1080 display unless a test sets others (__setDisplays).
+let displays = [{ id: 1, bounds: { x: 0, y: 0, width: 1920, height: 1080 }, workArea: { x: 0, y: 0, width: 1920, height: 1040 } }];
+const screen = { getAllDisplays: () => displays.map((d) => ({ ...d })) };
+function __setDisplays(d) { displays = d; }
+
+// app.on() listeners are kept (never fired by the mock itself) so a test can fire one, e.g.
+// "web-contents-created" for Alfred's Ctrl+Shift+A, via __emitApp(event, ...args).
+const appListeners = {};
 const app = {
   whenReady: () => Promise.resolve(),
   getPath: () => userDataDir,
-  on() {}
+  on(evt, fn) { (appListeners[evt] = appListeners[evt] || []).push(fn); }
 };
+function __emitApp(evt, ...args) { for (const fn of appListeners[evt] || []) { try { fn(...args); } catch (_) {} } }
 
 let dialogResult = { canceled: true, filePaths: [] };
 const dialog = {
@@ -224,7 +274,7 @@ const safeStorage = {
 function __setEncryptionAvailable(v) { __encryptionAvailable = v; }
 
 module.exports = {
-  app, BaseWindow, WebContentsView, ipcMain, dialog, safeStorage,
+  app, BaseWindow, WebContentsView, ipcMain, dialog, safeStorage, BrowserWindow, screen, __browserWindows: browserWindows, __setDisplays, __emitApp,
   __ipcHandlers: ipcHandlers, __registry: registry, __windowRegistry: windowRegistry, __userDataDir: userDataDir,
   __setDialogResult, __setEncryptionAvailable
 };
