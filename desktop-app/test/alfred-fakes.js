@@ -67,6 +67,10 @@ async function fakeAkowe(token) {
           { key: 'fear', label: 'What they fear', letters: ['P'], text: 'The sea.', status: 'approved', protected: false }] }],
       art: { portrait: null, views: { front: { asset_id: 'a1' } }, sheet: null } },
     forgeCalls: [],
+    pictures: { style: 'ink wash', styles: ['ink wash', 'painterly'], chapters: [
+      { chapter_id: 'ch1', number: 1, title: 'The Lamp Room', state: 'chosen', pictures: [{ pic_id: 'pic-001', chosen: 0, candidates: [{}, {}], caption: 'Mara climbs', placement: { where: 'start' } }] },
+      { chapter_id: 'ch2', number: 2, title: 'Fog', state: 'none', pictures: [] }], map: null },
+    pictureCalls: [],
   };
   const server = http.createServer(async (req, res) => {
     const body = await readBody(req);
@@ -98,6 +102,18 @@ async function fakeAkowe(token) {
     if (m === 'POST' && p === `${B}/report`) return send(res, 202, { job_id: 'rep-1' });
     if (m === 'POST' && p === `${B}/save`) return send(res, 202, { ok: true });
     if (m === 'POST' && p === `${B}/journal/note`) return send(res, 201, { ok: true, event_id: 'evt-1' });
+    if (p.startsWith(`${B}/pictures`)) {
+      st.pictureCalls.push({ m, p, body });
+      if (m === 'GET' && p === `${B}/pictures`) return send(res, 200, st.pictures);
+      if (m === 'PUT' && p === `${B}/pictures/style`) { st.pictures.style = body.style; return send(res, 200, { ok: true, style: body.style }); }
+      if (m === 'POST' && p === `${B}/pictures/illustrate`) return st.pictures.chapters.some((c) => c.chapter_id === body.chapter_id) ? send(res, 202, { job_id: 'job-ill', pic_id: 'pic-002' }) : send(res, 404, { errors: [{ code: 'NOT_FOUND', message: 'no chapter' }] });
+      if (m === 'POST' && p === `${B}/pictures/illustrate-all`) return send(res, 202, { job_id: 'job-all' });
+      if (m === 'POST' && p === `${B}/pictures/map`) return body.kind === 'svg' ? send(res, 200, { ok: true, map: { kind: 'svg' } }) : send(res, 202, { job_id: 'job-map' });
+      const pm = /^\/api\/projects\/proj-1\/branches\/main\/pictures\/(pic-\d+)$/.exec(p);
+      if (pm && m === 'PUT') return send(res, 200, Object.assign({ pic_id: pm[1] }, body));
+      if (pm && m === 'DELETE') return send(res, 200, { ok: true });
+      return send(res, 404, { errors: [{ code: 'NOT_FOUND', message: 'no such pictures endpoint' }] });
+    }
     const D = st.dossier;
     if (m === 'GET' && p === `${B}/forge/characters`) return send(res, 200, { characters: [{ record_id: D.record_id, name: D.name, kind: 'character', code: D.code, revision: D.revision, readiness: D.readiness, has_portrait: !!D.art.portrait, views_done: Object.keys(D.art.views).length }] });
     mm = /^\/api\/projects\/proj-1\/branches\/main\/forge\/characters\/([^/]+)(?:\/(forge|approve|art))?$/.exec(p);

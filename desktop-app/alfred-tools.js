@@ -24,7 +24,7 @@ const LENGTHS = ['short_story', 'novelette', 'novella', 'novel'];
 const RULE_KINDS = ['hard_rule', 'seen', 'belief', 'mystery'];
 const DETAIL_KINDS = ['work', 'weather', 'institution', 'people', 'economy'];
 const PROFILE_KEYS = ['title', 'author', 'genre', 'audience', 'length', 'tone', 'idea', 'chapters'];
-const AKOWE_PAGES = { book: 'book', report: 'report', grid: 'grid', journal: 'journal', world: 'world', review: 'review', forge: 'forge', home: null, shelf: null };
+const AKOWE_PAGES = { book: 'book', report: 'report', grid: 'grid', journal: 'journal', world: 'world', review: 'review', forge: 'forge', pictures: 'pictures', cover: 'cover', home: null, shelf: null };
 const OUTPUT_CATEGORIES = ['images', 'videos', 'books', 'logs', 'uploads'];
 
 // ----------------------------------------------------------------------------- small helpers
@@ -468,6 +468,117 @@ def({
     return { ok: true, message: `Making ${a.what === 'views' ? 'the reference views' : `the ${a.what}`} for ${r.d.name} in the background (${a.what === 'clip' ? 'a video takes a few minutes — watch the 🎬 Video tab' : body.engine === 'chatgpt' ? 'ChatGPT takes about a minute per picture' : 'watch the 🎨 Images tab'}).`, data: { job_id: p.json && p.json.job_id, project_id: r.pid } };
   },
 });
+// ---- 🖼 Book pictures: chapter / scene illustrations and the map (Akọwe docs/PICTURES.md) -----------------
+const PIC_ENGINES = ['auto', 'sd', 'chatgpt'];
+async function picturesOf(ctx, a) {
+  const b = await resolveBook(ctx, a);
+  if (!b.ok) return b;
+  const g = await ctx.akowe('GET', `/api/projects/${enc(b.pid)}/branches/main/pictures`);
+  if (!okStatus(g)) return akoweError(g);
+  return { ok: true, pid: b.pid, j: g.json || {} };
+}
+function chapterOf(j, which) {
+  const chs = j.chapters || [];
+  const w = String(which == null ? '' : which).trim().toLowerCase();
+  return chs.find((c) => String(c.chapter_id).toLowerCase() === w) || chs.find((c) => String(c.number) === w.replace(/^(chapter|ch)\s*/, ''))
+    || chs.find((c) => String(c.title || '').toLowerCase() === w) || chs.find((c) => w && String(c.title || '').toLowerCase().includes(w)) || null;
+}
+def({
+  name: 'book_pictures', title: 'Book pictures: what is illustrated', group: 'books', book: true,
+  description: 'The book\'s pictures: the art style, each chapter with its pictures (chosen / candidates waiting / none), the map. Read-only.',
+  args: { type: 'object', properties: { project_id: { type: 'string', maxLength: 80 } }, additionalProperties: false },
+  async run(a, ctx) {
+    const r = await picturesOf(ctx, a);
+    if (!r.ok) return r;
+    const j = r.j;
+    const chapters = (j.chapters || []).map((c) => ({ chapter_id: c.chapter_id, number: c.number, title: clip(c.title, 80), state: c.state,
+      pictures: (c.pictures || []).map((p) => ({ pic_id: p.pic_id || p.id, chosen: p.chosen != null, candidates: (p.candidates || []).length, caption: clip(p.caption, 120), where: p.placement && p.placement.where })) }));
+    return { ok: true, message: `Art style: ${j.style || 'none set'}; ${chapters.filter((c) => c.pictures.some((p) => p.chosen)).length} of ${chapters.length} chapters illustrated${j.map ? '; the map is made' : ''}.`,
+      data: { project_id: r.pid, style: j.style || null, styles: (j.styles || []).slice(0, 20), chapters, map: j.map ? { kind: j.map.kind || null } : null, out_of_date: !!j.out_of_date } };
+  },
+});
+def({
+  name: 'set_art_style', title: 'Book pictures: set the art style', group: 'books', changes: true, book: true,
+  description: 'Set the one art style every picture of the book uses (e.g. "ink wash", "painterly oil", "manga", "watercolour storybook").',
+  args: { type: 'object', required: ['style'], properties: { project_id: { type: 'string', maxLength: 80 }, style: { type: 'string', minLength: 2, maxLength: 200 } }, additionalProperties: false },
+  describe: (a) => `Set the book's art style to ${q(a.style)} (every new picture uses it).`,
+  async run(a, ctx) {
+    const b = await resolveBook(ctx, a);
+    if (!b.ok) return b;
+    const r = await ctx.akowe('PUT', `/api/projects/${enc(b.pid)}/branches/main/pictures/style`, { style: a.style });
+    return okStatus(r) ? { ok: true, message: `Art style set to ${q(a.style)}.` } : akoweError(r);
+  },
+});
+def({
+  name: 'illustrate', title: 'Book pictures: illustrate a chapter (or all)', group: 'books', changes: true, book: true,
+  description: 'Make a picture for a chapter (or one scene of it) from its scene cards, with the characters\' looks and the book\'s art style; count 1–3 candidates to pick from. all=true illustrates every chapter that has no chosen picture yet (a background job you can stop). engine sd / chatgpt / auto.',
+  args: { type: 'object', properties: {
+    project_id: { type: 'string', maxLength: 80 },
+    chapter: { type: 'string', maxLength: 120, description: 'Chapter number, id or title' },
+    scene: { type: 'integer', minimum: 1, maximum: 200 },
+    count: { type: 'integer', minimum: 1, maximum: 3 },
+    all: { type: 'boolean' },
+    engine: { type: 'string', enum: PIC_ENGINES },
+  }, additionalProperties: false },
+  async check(a) { return a.all || a.chapter ? { ok: true } : { ok: false, error: 'say which chapter, or all: true' }; },
+  describe: (a) => `${a.all ? 'Illustrate every chapter that has no picture yet' : `Illustrate chapter ${q(a.chapter)}${a.scene ? `, scene ${a.scene}` : ''}${a.count > 1 ? ` (${a.count} candidates to pick from)` : ''}`} with ${{ sd: 'Stable Diffusion', chatgpt: 'ChatGPT' }[a.engine] || 'Stable Diffusion if connected, else ChatGPT'}. It runs in the background.`,
+  async run(a, ctx) {
+    const r = await picturesOf(ctx, a);
+    if (!r.ok) return r;
+    const base = `/api/projects/${enc(r.pid)}/branches/main/pictures`;
+    if (a.all) {
+      const p = await ctx.akowe('POST', `${base}/illustrate-all`, { engine: a.engine || 'auto' });
+      return okStatus(p) ? { ok: true, message: 'Illustrating every chapter without a picture, in the background (see the 🖼 Pictures page; you can Stop it there).', data: { job_id: p.json && p.json.job_id } } : akoweError(p);
+    }
+    const ch = chapterOf(r.j, a.chapter);
+    if (!ch) return { ok: false, error: 'NO_CHAPTER', message: `There is no chapter ${q(a.chapter)}. Chapters: ${(r.j.chapters || []).map((c) => c.number).join(', ') || 'none yet'}.` };
+    const body = { chapter_id: ch.chapter_id, engine: a.engine || 'auto' };
+    if (a.scene) body.scene = a.scene;
+    if (a.count) body.count = a.count;
+    const p = await ctx.akowe('POST', `${base}/illustrate`, body);
+    return okStatus(p) ? { ok: true, message: `Illustrating chapter ${ch.number}${a.scene ? `, scene ${a.scene}` : ''} in the background${a.count > 1 ? ' — pick your favourite on the 🖼 Pictures page' : ''}.`, data: { job_id: p.json && p.json.job_id, pic_id: p.json && p.json.pic_id } } : akoweError(p);
+  },
+});
+def({
+  name: 'edit_picture', title: 'Book pictures: caption, placement, pick or remove', group: 'books', changes: true, book: true,
+  description: 'Change one picture (pic_id from book_pictures): caption, alt text, placement (where: before / start / after_scene (with scene) / end), chosen = which candidate (0-based) or null to leave it out, remove = delete it.',
+  args: { type: 'object', required: ['pic_id'], properties: {
+    project_id: { type: 'string', maxLength: 80 },
+    pic_id: { type: 'string', minLength: 1, maxLength: 80 },
+    caption: { type: 'string', maxLength: 300 }, alt: { type: 'string', maxLength: 300 },
+    where: { type: 'string', enum: ['before', 'start', 'after_scene', 'end'] }, scene: { type: 'integer', minimum: 1, maximum: 200 },
+    chosen: { type: ['integer', 'null'], minimum: 0, maximum: 5 },
+    remove: { type: 'boolean' },
+  }, additionalProperties: false },
+  describe: (a) => (a.remove ? `Delete picture ${q(a.pic_id)}.` : `Change picture ${q(a.pic_id)}: ${[a.caption != null && `caption ${q(a.caption)}`, a.alt != null && 'alt text', a.where && `placed ${a.where}${a.scene ? ` ${a.scene}` : ''}`, a.chosen !== undefined && (a.chosen === null ? 'left out' : `candidate ${a.chosen + 1}`)].filter(Boolean).join(', ') || 'nothing'}.`),
+  async run(a, ctx) {
+    const b = await resolveBook(ctx, a);
+    if (!b.ok) return b;
+    const url = `/api/projects/${enc(b.pid)}/branches/main/pictures/${enc(a.pic_id)}`;
+    if (a.remove) { const d = await ctx.akowe('DELETE', url); return okStatus(d) ? { ok: true, message: 'Picture removed.' } : akoweError(d); }
+    const body = {};
+    for (const k of ['caption', 'alt', 'chosen']) if (a[k] !== undefined) body[k] = a[k];
+    if (a.where) body.placement = Object.assign({ where: a.where }, a.scene ? { scene: a.scene } : {});
+    if (!Object.keys(body).length) return { ok: false, error: 'NOTHING_TO_CHANGE', message: 'Say what to change (caption, alt, where, chosen) or remove: true.' };
+    const r = await ctx.akowe('PUT', url, body);
+    return okStatus(r) ? { ok: true, message: 'Picture updated.' } : akoweError(r);
+  },
+});
+def({
+  name: 'book_map', title: 'Book pictures: make the map', group: 'books', changes: true, book: true,
+  description: 'Make the book\'s world map: kind "svg" = drawn from the book\'s places (instant), "illustrated" = an illustrated map picture (engine sd / chatgpt / auto, background job). It goes before chapter 1.',
+  args: { type: 'object', properties: { project_id: { type: 'string', maxLength: 80 }, kind: { type: 'string', enum: ['svg', 'illustrated'] }, engine: { type: 'string', enum: PIC_ENGINES } }, additionalProperties: false },
+  describe: (a) => ((a.kind || 'svg') === 'svg' ? 'Draw the world map from the book\'s places (it goes before chapter 1).' : `Make an illustrated world map with ${{ sd: 'Stable Diffusion', chatgpt: 'ChatGPT' }[a.engine] || 'Stable Diffusion if connected, else ChatGPT'} (it goes before chapter 1).`),
+  async run(a, ctx) {
+    const b = await resolveBook(ctx, a);
+    if (!b.ok) return b;
+    const body = { kind: a.kind || 'svg' };
+    if (body.kind === 'illustrated') body.engine = a.engine || 'auto';
+    const r = await ctx.akowe('POST', `/api/projects/${enc(b.pid)}/branches/main/pictures/map`, body);
+    return okStatus(r) ? { ok: true, message: body.kind === 'svg' ? 'The map is drawn from the book\'s places.' : 'Making the illustrated map in the background.', data: { job_id: r.json && r.json.job_id } } : akoweError(r);
+  },
+});
+
 def({
   name: 'make_book_report', title: 'Make the book report', group: 'books', changes: true, book: true, allowAlways: true,
   description: 'Make (or refresh) the book report in Akọwe. It runs in the background.',
