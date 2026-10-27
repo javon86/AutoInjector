@@ -324,13 +324,51 @@
     $('btn-vd-install-all').disabled = false; $('btn-vd-dl-cancel').disabled = true;
     refreshSetup();
   };
-  $('btn-vd-start').onclick = async () => {
+  // The ComfyUI runner's state (the same one 🎨 Images starts): "Starting…" while it starts,
+  // why it crashed (plain words + fix), and what to try next.
+  let runnerSt = null;
+  function renderRunner(r) {
+    if (!r) return;
+    const prev = runnerSt && runnerSt.phase;
+    runnerSt = r;
+    const waiting = r.phase === 'waiting';
+    const busy = r.phase === 'starting' || r.phase === 'restarting' || waiting;
+    const b = $('btn-vd-start');
+    if (b) { if (!b.dataset.label) b.dataset.label = b.textContent; b.textContent = busy ? (waiting ? '⏳ Waiting for the install…' : '⏳ Starting…') : b.dataset.label; b.disabled = busy; }
+    const box = $('vd-run-state');
+    const show = busy || r.phase === 'failed';
+    if (box) { box.hidden = !show; box.textContent = !show ? '' : busy ? `⏳ ${r.message || 'Starting ComfyUI…'}` : `✖ ${r.message || 'ComfyUI could not start.'}${r.fix ? `\nHow to fix it: ${r.fix}` : ''}`; }
+    const acts = r.phase === 'failed' && Array.isArray(r.actions) ? r.actions : [];
+    const cpuAct = acts.find((a) => a.id === 'sd-start-cpu');
+    const otherAct = acts.find((a) => a.id === 'sd-other-build');
+    if ($('btn-vd-start-cpu')) { $('btn-vd-start-cpu').hidden = !cpuAct; $('btn-vd-start-cpu').disabled = busy; }
+    if ($('btn-vd-other-build')) { $('btn-vd-other-build').hidden = !otherAct; $('btn-vd-other-build').disabled = busy; if (otherAct) $('btn-vd-other-build').textContent = `🔁 ${otherAct.label}`; }
+    if (r.phase === 'running' && prev && prev !== 'running' && st.loaded) refreshSetup();
+  }
+  if (sdApi && typeof sdApi.onRunner === 'function') sdApi.onRunner((r) => renderRunner(r));
+  async function startComfy(how) {
+    const cur = runnerSt && runnerSt.phase;
+    if (cur === 'starting' || cur === 'restarting' || cur === 'waiting') return; // already starting — no second start
     const t = await sdCall('targets');
+    if (t && t.runner) renderRunner(t.runner);
     const pick = ((t && t.targets) || []).find((x) => x.kind === 'comfy' && x.supported);
-    if (!pick) { setText('vd-setup-comfy', 'No ComfyUI was found to start. Install it first.'); return; }
-    setText('vd-setup-comfy', 'Starting ComfyUI… the first start can take several minutes.');
-    const r = await sdCall('start', pick.id);
-    if (r && !r.ok && r.message) setText('vd-setup-comfy', r.message);
+    const installing = !!(t && t.install && t.install.busy);
+    if (!pick && !installing) { setText('vd-setup-comfy', 'No ComfyUI was found to start. Install it first.'); return; }
+    renderRunner({ phase: 'starting', message: how === 'cpu' ? 'Starting ComfyUI on the processor… slow, but works on any PC.' : 'Starting ComfyUI… the first start can take several minutes.' });
+    const r = how === 'cpu' ? await sdCall('startCpu', pick ? pick.id : undefined) : await sdCall('start', pick ? pick.id : undefined);
+    if (r && r.runner) renderRunner(r.runner);
+    else if (r && !r.ok && r.message) setText('vd-setup-comfy', r.message);
+    refreshSetup();
+  }
+  $('btn-vd-start').onclick = () => startComfy();
+  if ($('btn-vd-start-cpu')) $('btn-vd-start-cpu').onclick = () => startComfy('cpu');
+  if ($('btn-vd-other-build')) $('btn-vd-other-build').onclick = async () => {
+    $('btn-vd-other-build').disabled = true;
+    setText('vd-dl-msg', 'Switching to the other ComfyUI build… (downloaded first if it isn\'t there yet; your models are shared)');
+    const r = await sdCall('useOtherBuild');
+    if (r && r.runner) renderRunner(r.runner);
+    setText('vd-dl-msg', r && r.ok ? '✔ ComfyUI is running with the other build.' : `✖ ${(r && r.message) || 'Could not switch the ComfyUI build.'}`);
+    $('btn-vd-other-build').disabled = false;
     refreshSetup();
   };
   $('btn-vd-recheck').onclick = () => refreshSetup();

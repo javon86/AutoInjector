@@ -166,6 +166,8 @@ contextBridge.exposeInMainWorld("api", {
     // Managed Stable Diffusion (sd-runner.js) + the ComfyUI installer (sd-installer.js)
     targets: () => ipcRenderer.invoke("sd:targets"),
     start: (id) => ipcRenderer.invoke("sd:start", { id }),
+    startCpu: (id) => ipcRenderer.invoke("sd:start-cpu", { id }),
+    useOtherBuild: () => ipcRenderer.invoke("sd:use-other-build"),
     stop: () => ipcRenderer.invoke("sd:stop"),
     openLog: () => ipcRenderer.invoke("sd:open-log"),
     setAutostart: (on) => ipcRenderer.invoke("sd:set-autostart", { on }),

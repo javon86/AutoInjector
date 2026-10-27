@@ -106,6 +106,129 @@ async function main() {
   s = await r5.start(Object.assign({}, target, { extraArgs: ['--delay', '5000'] }), { port: await freePort() });
   assert(s.phase === 'failed' && s.error === 'HEALTH_TIMEOUT' && !r5.isOwnedAlive(), 'never answers → HEALTH_TIMEOUT and the process is stopped');
 
+  console.log('\n== ComfyUI crashes on start (0xC0000005): why, safer retry, what to try ==');
+  const E = require('../sd-errors');
+  const { EventEmitter } = require('events');
+  // A fake spawn: each start prints `lines` then exits with `code` (or stays up when code is null).
+  function fakeSpawn(plan) {
+    const calls = [];
+    const fn = (cmd, args) => {
+      const c = new EventEmitter(); c.stdout = new EventEmitter(); c.stderr = new EventEmitter(); c.pid = 4000 + calls.length;
+      c.kill = () => { setTimeout(() => c.emit('exit', 0, null), 5); return true; };
+      const step = typeof plan === 'function' ? plan(calls.length, args) : plan;
+      calls.push({ cmd, args: args.slice() });
+      setTimeout(() => { for (const l of step.lines || []) c.stderr.emit('data', Buffer.from(l + '\n')); if (step.code !== null && step.code !== undefined) setTimeout(() => c.emit('exit', step.code, null), step.after || 15); }, 5);
+      return c;
+    };
+    fn.calls = calls;
+    return fn;
+  }
+  const HOME = 'C:\\Users\\Ada'; // a Windows home folder, as in the user's log
+  const wjoin = (...a) => a.join('\\');
+  const portableT = { id: 'portable:comfyui', label: 'ComfyUI', kind: 'comfy', supported: true, portable: true, source: 'AutoInjector', python: process.execPath, launchCommand: path.join('ComfyUI', 'main.py'), extraArgs: [], dir: tmp };
+  const noise = Array.from({ length: 50 }, (_, i) => `loading custom node ${i} from ${wjoin(HOME, 'AppData', 'Local', 'AutoInjector', 'comfyui', 'ComfyUI', 'custom_nodes', `n${i}`)}`);
+  const avLines = [...noise, `Total VRAM 12227 MB, total RAM 32535 MB  token=SECRET999`, ' 45%|████▌     | 9/20 [00:01<00:02]', 'Using pytorch attention', `Set vram state to: NORMAL_VRAM ${wjoin(HOME, 'models')}`];
+  const evC = [];
+  const sp = fakeSpawn({ lines: avLines, code: 3221225477 });
+  const rc = R.createSdRunner({ spawn: sp, identify: async () => null, logger: (k, d) => evC.push([k, d]), healthPollMs: 10, backoffMs: [10, 10, 10], maxRestarts: 3,
+    redaction: () => ({ home: HOME, appDirs: [wjoin(HOME, 'AppData', 'Local', 'AutoInjector')] }), gpu: () => ({ vendor: 'nvidia', name: 'NVIDIA GeForce RTX 5070' }), otherBuild: () => ({ build: 'nvidia_cu126', label: 'NVIDIA (GeForce GTX 10xx and older)' }) });
+  s = await rc.start(portableT, { port: await freePort() });
+  const crashEv = evC.filter(([k]) => k === 'sd-runner-crash').map(([, d]) => d);
+  assert(sp.calls.length === 3 && crashEv.length === 3, `crash, crash, then ONE safer restart — 3 starts, not an endless loop (${sp.calls.length} starts)`);
+  assert(!sp.calls[0].args.includes('--disable-cuda-malloc') && !sp.calls[1].args.includes('--disable-cuda-malloc') && sp.calls[2].args.includes('--disable-cuda-malloc'), 'after the 2nd identical 0xC0000005 it restarts with --disable-cuda-malloc');
+  assert(evC.some(([k, d]) => k === 'sd-runner-safe-mode' && d.flags.includes('--disable-cuda-malloc') && d.after === 2), 'the safer restart is logged (sd-runner-safe-mode, after crash 2)');
+  assert(evC.some(([k, d]) => k === 'sd-runner-start' && d.attempt === 3 && d.flags && d.flags.includes('--disable-cuda-malloc')), 'the 3rd start logs its flags');
+  const c0 = crashEv[0];
+  assert(c0.code === 3221225477 && c0.hex === '0xC0000005' && c0.cause === 'ACCESS_VIOLATION', `sd-runner-crash says code + hex + cause (${c0.hex} ${c0.cause})`);
+  assert(typeof c0.tail === 'string' && c0.tail.length > 0 && c0.tail.length <= 600 && /Using pytorch attention/.test(c0.tail) && /Total VRAM/.test(c0.tail), `…and the last useful lines it printed (${c0.tail.length} chars ≤ 600)`);
+  assert(!c0.tail.includes('Ada') && /~\\AppData\\Local\\AutoInjector\\comfyui/.test(c0.tail) && /\[private path\]/.test(c0.tail) && !/SECRET999/.test(c0.tail) && !/45%\|/.test(c0.tail), 'the tail hides the home folder like the app\'s logs (~\\AppData\\Local\\AutoInjector…, other private paths), tokens, and drops progress bars');
+  s = rc.status();
+  assert(s.phase === 'failed' && s.error === 'CRASHED' && s.cause === 'ACCESS_VIOLATION' && /0xC0000005/.test(s.message) && /access violation/.test(s.message) && /safer settings/.test(s.message), `status explains it in plain words: "${s.message.slice(0, 110)}…"`);
+  assert(/graphics driver/.test(s.fix) && /RTX 50/.test(s.fix) && /cu128/.test(s.fix) && /Visual C\+\+/.test(s.fix) && /processor/.test(s.fix), 'the fix: update the driver, RTX 50 needs the cu128 build, VC++ runtime, or the processor');
+  assert(s.actions.some((a) => a.id === 'sd-start-cpu') && s.actions.some((a) => a.id === 'sd-other-build' && /GTX 10xx/.test(a.label)), 'it OFFERS “Start on the processor” and “Use the other ComfyUI build”…');
+  assert(!sp.calls.some((x) => x.args.includes('--cpu')), '…but does not run --cpu by itself');
+  assert(s.crash && /^Set vram state to: NORMAL_VRAM \[private path\]$/.test(s.crash.line) && s.message.includes(s.crash.line), `the important line is in the status (“${s.crash && s.crash.line}”)`);
+  assert(s.lastOutput && s.lastOutput.length <= 600 && s.tried.length === 1, 'status carries the redacted last output and what was tried');
+  // Start on the processor: --cpu, works.
+  const spCpu = fakeSpawn({ code: null });
+  let up = false;
+  const rcpu = R.createSdRunner({ spawn: spCpu, identify: async () => (up ? { usable: true, kind: 'comfy', base: 'x', label: 'ComfyUI' } : null), healthPollMs: 10 });
+  setTimeout(() => { up = true; }, 80);
+  s = await rcpu.start(portableT, { port: await freePort(), cpu: true });
+  assert(s.phase === 'running' && spCpu.calls.length === 1 && spCpu.calls[0].args.includes('--cpu') && s.mode === 'cpu' && /processor/.test(s.message), 'start(t, {cpu:true}) runs ComfyUI with --cpu and says so');
+  await rcpu.stop();
+
+  console.log('\n== other crashes: the 4-start cap, Python errors, the user\'s own flags ==');
+  const ev4 = [];
+  const sp4 = fakeSpawn({ lines: ['Traceback (most recent call last):', '  File "main.py", line 1', 'RuntimeError: CUDA error: no kernel image is available for execution on the device'], code: 1 });
+  const r4b = R.createSdRunner({ spawn: sp4, identify: async () => null, logger: (k, d) => ev4.push([k, d]), healthPollMs: 10, backoffMs: [5, 5, 5], maxRestarts: 3 });
+  s = await r4b.start(portableT, { port: await freePort() });
+  assert(sp4.calls.length === 4 && s.phase === 'failed' && s.error === 'CRASHED' && !sp4.calls.some((x) => x.args.includes('--disable-cuda-malloc')), 'a non-access-violation crash: 4 starts at most, no safer-flags retry');
+  assert(s.cause === 'WRONG_BUILD' && /no kernel image/.test(s.message) && /build/.test(s.fix), `exit 1 + "no kernel image" → the wrong ComfyUI build for this card ("${s.message.slice(0, 80)}…")`);
+  const own = Object.assign({}, portableT, { extraArgs: ['--disable-cuda-malloc', '--lowvram'] });
+  assert(R.safeFlagsFor(own).length === 0 && R.launchSpec(own, 8188, { safe: true }).args.join(' ') === `-s ${own.launchCommand} --windows-standalone-build --port 8188 --disable-cuda-malloc --lowvram`, 'the user\'s own launch options are kept and never doubled');
+  const sp5 = fakeSpawn({ code: 3221225477 });
+  const r5b = R.createSdRunner({ spawn: sp5, identify: async () => null, healthPollMs: 10, backoffMs: [5, 5, 5], maxRestarts: 3 });
+  s = await r5b.start(own, { port: await freePort() });
+  assert(sp5.calls.length === 4 && sp5.calls.every((x) => x.args.filter((a) => a === '--disable-cuda-malloc').length === 1), 'already on --disable-cuda-malloc: no extra retry mode, the 4-start cap holds');
+  assert(R.launchSpec(Object.assign({}, portableT, { kind: 'forge', portable: false, launchCommand: 'launch.py' }), 7860, { safe: true }).args.join(' ') === 'launch.py --api --port 7860', 'safer ComfyUI flags are never given to Forge');
+  // Plain-English Windows exit codes.
+  let x = E.explainExit(3221225781, { label: 'ComfyUI' });
+  assert(x.code === 'DLL_NOT_FOUND' && x.hex === '0xC0000135' && /Visual C\+\+ Redistributable/.test(x.fix) && /vc_redist/.test(x.fix), '0xC0000135 → a missing DLL → install the VC++ redistributable');
+  x = E.explainExit(3221226505, { label: 'ComfyUI', kind: 'comfy' });
+  assert(x.code === 'STACK_BUFFER_OVERRUN' && x.hex === '0xC0000409' && x.actions.some((a) => a.id === 'sd-start-cpu'), '3221226505 = 0xC0000409 → a Windows safety check (DLL / driver mismatch), offers the processor');
+  x = E.explainExit(-1073741819, { label: 'ComfyUI', gpu: { vendor: 'amd', name: 'AMD Radeon RX 6600' } });
+  assert(x.code === 'ACCESS_VIOLATION' && /AMD build/.test(x.fix) && /DirectML/.test(x.fix), 'a signed 0xC0000005 is read too; on an AMD card the fix names the AMD / DirectML build');
+  x = E.explainExit(1, { label: 'ComfyUI', tail: 'Traceback (most recent call last):\n  File "x.py"\nModuleNotFoundError: No module named \'torchsde\'' });
+  assert(x.code === 'MISSING_MODULE' && /torchsde/.test(x.message), 'exit 1 shows the Python error line (“No module named …”)');
+  x = E.explainExit(1, { label: 'ComfyUI', tail: 'ValueError: something odd' });
+  assert(x.code === 'PYTHON_ERROR' && /ValueError: something odd/.test(x.message), 'an unknown Python error: the line itself, plainly');
+  assert(R.usefulTail(Object.assign(Array.from({ length: 40 }, (_, i) => 'x'.repeat(50) + i), { __partial: '' })).length <= 600, 'the tail never exceeds 600 chars');
+  const buf = []; for (let i = 0; i < 100; i++) R.pushTail(buf, `line ${i}\n`);
+  assert(buf.length === 40 && buf[39] === 'line 99', 'only the last 40 lines are kept in memory');
+
+  console.log('\n== pressing Start again while it starts / before the install finished ==');
+  const evB = [];
+  const spB = fakeSpawn({ code: null });
+  let upB = false;
+  const rB = R.createSdRunner({ spawn: spB, identify: async () => (upB ? { usable: true, kind: 'comfy', base: 'x', label: 'ComfyUI' } : null), logger: (k, d) => evB.push([k, d]), healthPollMs: 10 });
+  const pB = await freePort();
+  const q1 = rB.start(portableT, { port: pB });
+  await sleep(30);
+  assert(rB.isBusy() && rB.status().busy, 'while starting, the runner says it is busy (the buttons show “Starting…”)');
+  const q2 = rB.start(portableT, { port: pB });
+  const q3 = rB.start(portableT, { port: pB });
+  setTimeout(() => { upB = true; }, 60);
+  const [s1, s2, s3] = await Promise.all([q1, q2, q3]);
+  assert(spB.calls.length === 1 && s1.phase === 'running' && s2.phase === 'running' && s3.phase === 'running' && s2.alreadyStarting && !s1.alreadyStarting, 'Start pressed 3 times → ONE start; the extra presses get the same result ("already starting")');
+  assert(evB.filter(([k]) => k === 'sd-runner-already-starting').length === 2 && evB.filter(([k]) => k === 'sd-runner-start').length === 1, 'logged as sd-runner-already-starting, not a new start');
+  await rB.stop();
+  // NO_PYTHON while the install is still running → waits, then starts by itself.
+  const pyLater = path.join(tmp, 'later', 'python_embeded', 'python');
+  const notYet = Object.assign({}, portableT, { python: pyLater });
+  let installingNow = true;
+  const evW = [];
+  const spW = fakeSpawn({ code: null });
+  let upW = false;
+  const rW = R.createSdRunner({ spawn: spW, identify: async () => (upW ? { usable: true, kind: 'comfy', base: 'x', label: 'ComfyUI' } : null), logger: (k, d) => evW.push([k, d]), healthPollMs: 10,
+    installing: () => installingNow, refreshTarget: (old) => Object.assign({}, old, { python: pyLater }) });
+  s = await rW.start(notYet, { port: await freePort() });
+  assert(s.phase === 'waiting' && s.error === 'INSTALLING' && s.message === 'ComfyUI is still being installed — it starts by itself when the install finishes.' && spW.calls.length === 0, `Start during the install: "${s.message}"`);
+  s = await rW.start(notYet);
+  assert(s.alreadyStarting && s.phase === 'waiting' && spW.calls.length === 0 && rW.isBusy(), 'pressing it again just says it is already waiting');
+  fs.mkdirSync(path.dirname(pyLater), { recursive: true }); fs.writeFileSync(pyLater, '');
+  installingNow = false;
+  setTimeout(() => { upW = true; }, 50);
+  s = await rW.installFinished(true);
+  assert(s.phase === 'running' && spW.calls.length === 1 && evW.some(([k]) => k === 'sd-runner-wait-install') && evW.some(([k]) => k === 'sd-runner-install-done-start'), 'the install finished → it started by itself');
+  await rW.stop();
+  const rW2 = R.createSdRunner({ spawn: fakeSpawn({ code: null }), identify: async () => null, installing: () => true });
+  await rW2.start(Object.assign({}, portableT, { python: path.join(tmp, 'nope2', 'python') }));
+  s = await rW2.installFinished(false);
+  assert(s.phase === 'failed' && s.error === 'INSTALL_NOT_FINISHED' && /Install/.test(s.message), 'the install stopped instead → a plain message, nothing started');
+  s = await R.createSdRunner({ installing: () => false }).start(Object.assign({}, portableT, { python: path.join(tmp, 'nope3', 'python') }), { port: await freePort() });
+  assert(s.error === 'NO_PYTHON' && /Install Stable Diffusion/.test(s.message) && !/Stability Matrix/.test(s.message), 'NO_PYTHON for AutoInjector\'s own ComfyUI points at ⬇ Install (not Stability Matrix)');
+
   console.log('\n== GPU check ==');
   let g = await I.detectGpu({ run: async (cmd) => (/nvidia-smi/.test(cmd) ? 'NVIDIA GeForce RTX 4070, 12282\n' : null) });
   assert(g.vendor === 'nvidia' && g.build === 'nvidia' && g.vramMB === 12282 && /RTX 4070/.test(g.message), 'nvidia-smi: RTX 4070 → the NVIDIA build');
@@ -135,7 +258,7 @@ async function main() {
     const u = new URL(req.url, 'http://x');
     if (u.pathname === '/api/latest') { res.writeHead(200, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ tag_name: 'v0.42.1', assets: [{ name: 'ComfyUI_windows_portable_nvidia.7z', size: ARCH.length, digest: `sha256:${hits.badHash ? '0'.repeat(64) : ARCH_SHA}`, browser_download_url: `http://127.0.0.1:${srv.address().port}/redirect` }] })); }
     if (u.pathname === '/redirect') { res.writeHead(302, { Location: '/files/portable.7z' }); return res.end(); }
-    if (u.pathname === '/files/portable.7z' || u.pathname === '/model.safetensors') {
+    if (u.pathname.startsWith('/files/') || u.pathname === '/model.safetensors') {
       const buf = u.pathname === '/model.safetensors' ? MODEL : ARCH;
       if (u.pathname !== '/model.safetensors') hits.archive++;
       const m = /bytes=(\d+)-/.exec(req.headers.range || '');
@@ -179,6 +302,32 @@ async function main() {
   assert(fs.readFileSync(userFile, 'utf8') === 'mine', 'the user\'s own model file is untouched');
   const tgs = R.targets({ findStabilityMatrix: () => [], portableHome: home });
   assert(tgs.length === 1 && tgs[0].portable && tgs[0].kind === 'comfy' && tgs[0].models === res2.portable.models, 'the installed portable shows up as a startable target (and its models folder for the library)');
+  assert(I.readBuilds(home).active === 'nvidia' && inst.currentBuild() === 'nvidia' && /NVIDIA \(GeForce RTX 20xx and newer\) build/.test(tgs[0].displayName), 'the install remembers which build it is (shown in “What to start”)');
+
+  console.log('\n== “Use the other ComfyUI build” ==');
+  let ob = inst.otherBuild();
+  assert(ob && ob.build === 'nvidia_cu126' && !ob.installed, 'the NVIDIA build → the other one to try is cu126 (not installed yet)');
+  const firstModels = res2.portable.models;
+  const sw = await inst.useOtherBuild({ ignoreSpace: true });
+  const altRoot = path.join(home, 'build-nvidia_cu126', 'ComfyUI_windows_portable');
+  assert(sw.ok && sw.build === 'nvidia_cu126' && fs.existsSync(path.join(altRoot, 'ComfyUI', 'main.py')), 'it is downloaded next to the first one (build-nvidia_cu126), the first install is untouched');
+  assert(fs.existsSync(path.join(firstModels, 'checkpoints', 'my_own.safetensors')), 'the user\'s models in the first install are still there');
+  const yaml = fs.readFileSync(path.join(altRoot, 'ComfyUI', 'extra_model_paths.yaml'), 'utf8');
+  assert(yaml.includes(firstModels.replace(/\\/g, '/')) && /checkpoints: checkpoints\//.test(yaml) && /loras: loras\//.test(yaml), 'the new ComfyUI reads the first one\'s models (extra_model_paths.yaml) — nothing is downloaded twice');
+  let pnow = inst.portable();
+  assert(pnow.root === altRoot && pnow.build === 'nvidia_cu126' && pnow.models === firstModels, 'the other build is now the one that starts; models still go to the first folder');
+  const tgs2 = R.targets({ findStabilityMatrix: () => [], portableHome: home });
+  assert(tgs2.length === 1 && tgs2[0].dir === altRoot && /GTX 10xx/.test(tgs2[0].displayName), 'the runner\'s target is the other build');
+  ob = inst.otherBuild();
+  assert(ob && ob.build === 'nvidia' && ob.installed, 'and back again needs no download');
+  const back = await inst.useOtherBuild();
+  assert(back.ok && back.switched && inst.portable().root === res2.portable.root && hits.archive === 3, 'switching back is instant (no third download)');
+  assert(I.createInstaller({ home: path.join(tmp, 'none') }).otherBuild() === null, 'nothing installed → no other build offered');
+  const amdInst = I.createInstaller({ home, platform: 'win32', allowAnyPlatform: true, run: async (cmd) => (/powershell/.test(cmd) ? 'AMD Radeon RX 6600|4293918720' : null) });
+  await amdInst.check();
+  assert(amdInst.otherBuild() && amdInst.otherBuild().build === 'amd', 'an NVIDIA build on an AMD card → the AMD build is the one to try');
+
+
 
   console.log('\n== download edge cases ==');
   const dest = path.join(tmp, 'dl', 'x.bin');

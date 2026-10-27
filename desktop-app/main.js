@@ -6304,6 +6304,13 @@ function sdRunner() {
   _sdRunner = sdRunnerMod.createSdRunner({
     logFile: sdLogFile(),
     logger: (k, d) => logEvent(k, d),
+    // The crash tail hides the home folder / secrets the same way the log extract does.
+    redaction: () => extractRedaction(),
+    // Start pressed while ⬇ Install is still downloading / unpacking → it waits, then starts by itself.
+    installing: () => { const s = sdInstallerInst().status(); return !!s.busy && (s.phase === "downloading" || s.phase === "extracting"); },
+    refreshTarget: (old) => { const list = sdTargets(); return list.find((x) => old && x.id === old.id) || list.find((x) => x.portable) || list.find((x) => x.supported) || old; },
+    gpu: () => sdInstallerInst().gpu(), // filled by the installer's GPU check (sdStart starts one in the background)
+    otherBuild: () => sdInstallerInst().otherBuild(),
     onChange: (st) => {
       broadcast("sd-runner", st);
       // When it comes up, point the image module at it (once per start).
@@ -6316,7 +6323,16 @@ function sdRunner() {
 let _sdInstaller = null;
 function sdInstallerInst() {
   if (_sdInstaller) return _sdInstaller;
-  _sdInstaller = sdInstallerMod.createInstaller({ home: process.env.AUTOINJECTOR_SD_HOME || undefined, log: (k, d) => logEvent(k, d), onChange: (st) => broadcast("sd-install", st) });
+  let lastPhase = null;
+  _sdInstaller = sdInstallerMod.createInstaller({ home: process.env.AUTOINJECTOR_SD_HOME || undefined, log: (k, d) => logEvent(k, d), onChange: (st) => {
+    broadcast("sd-install", st);
+    // A Start pressed during the install starts now (or says the install stopped).
+    if (st.phase !== lastPhase && _sdRunner && _sdRunner.status().phase === "waiting") {
+      if (st.phase === "installed") _sdRunner.installFinished(true).catch(() => {});
+      else if (st.phase === "failed" || st.phase === "paused") _sdRunner.installFinished(false).catch(() => {});
+    }
+    lastPhase = st.phase;
+  } });
   return _sdInstaller;
 }
 function sdTargets() {
@@ -6330,17 +6346,45 @@ function sdTargetsPublic() {
     platform: process.platform,
   };
 }
-async function sdStart(targetId) {
+// so: { cpu } — "Start on the processor (slow, but works on any PC)".
+async function sdStart(targetId, so = {}) {
+  const r = sdRunner();
   const list = sdTargets();
   const t = list.find((x) => x.id === targetId) || list.find((x) => x.id === state.sdManaged.targetId && x.supported) || list.find((x) => x.supported);
-  if (!t) return Object.assign({ ok: false, error: "NO_TARGET", message: "No Stable Diffusion app was found to start. Press ⬇ Install Stable Diffusion, or add Forge / ComfyUI in Stability Matrix." }, { runner: sdRunner().status() });
-  if (state.sdManaged.targetId !== t.id) { state.sdManaged.targetId = t.id; saveStateDebounced(); }
-  logEvent("sd-runner-begin", { target: t.kind, source: t.source });
-  const st = await sdRunner().start(t);
-  return { ok: st.phase === "running", runner: st, message: st.message };
+  const installing = (() => { try { const s = sdInstallerInst().status(); return !!s.busy && (s.phase === "downloading" || s.phase === "extracting"); } catch (_) { return false; } })();
+  if (!t && !installing) return Object.assign({ ok: false, error: "NO_TARGET", message: "No Stable Diffusion app was found to start. Press ⬇ Install Stable Diffusion, or add Forge / ComfyUI in Stability Matrix." }, { runner: r.status() });
+  if (t && state.sdManaged.targetId !== t.id) { state.sdManaged.targetId = t.id; saveStateDebounced(); }
+  // Know the graphics card before a crash needs explaining (nvidia-smi / WMI, in the background).
+  if (t && t.portable && process.env.AUTOINJECTOR_SD_GPU_CHECK !== "0") { try { if (!sdInstallerInst().gpu()) sdInstallerInst().check().catch(() => {}); } catch (_) {} }
+  // Already starting: the runner hands back the same start (no second start sequence).
+  if (!r.isBusy()) {
+    // Switching to the processor while our own GPU start is running: stop that one first.
+    if (so.cpu && r.status().phase === "running" && r.status().owned) await r.stop();
+    logEvent("sd-runner-begin", Object.assign({ target: t ? t.kind : null, source: t ? t.source : null }, so.cpu ? { cpu: true } : {}));
+  }
+  const st = await r.start(t || null, so.cpu ? { cpu: true } : {});
+  const out = { ok: st.phase === "running", runner: st, message: st.message };
+  if (st.alreadyStarting) out.alreadyStarting = true;
+  if (st.phase === "waiting") { out.waiting = true; out.error = "INSTALLING"; }
+  else if (st.phase !== "running" && st.error) { out.error = st.error; if (st.fix) out.fix = st.fix; if (st.actions && st.actions.length) out.actions = st.actions; }
+  return out;
+}
+// "Use the other ComfyUI build": switch to it (or download it next to the first one, sharing the models), then start it.
+async function sdUseOtherBuild() {
+  const r = sdRunner();
+  if (r.isBusy()) return { ok: false, error: "BUSY", message: "Stable Diffusion is starting right now — wait until it is running or has stopped.", runner: r.status() };
+  if (r.status().owned && r.status().phase === "running") await r.stop();
+  logEvent("sd-other-build", { from: sdInstallerInst().currentBuild() || null });
+  const res = await sdInstallerInst().useOtherBuild({ ignoreSpace: false });
+  if (!res || !res.ok) return Object.assign({ runner: r.status() }, res || { ok: false });
+  try { sdLibrary().scan(); } catch (_) {}
+  const st = await sdStart("portable:comfyui");
+  return Object.assign({ build: res.build, switched: !!res.switched, installed: !res.switched }, st);
 }
 ipcMain.handle("sd:targets", sdSafe(() => sdTargetsPublic()));
 ipcMain.handle("sd:start", sdSafe((a) => sdStart(a.id)));
+ipcMain.handle("sd:start-cpu", sdSafe((a) => sdStart(a && a.id, { cpu: true })));
+ipcMain.handle("sd:use-other-build", sdSafe(() => sdUseOtherBuild()));
 ipcMain.handle("sd:stop", sdSafe(async () => ({ ok: true, runner: await sdRunner().stop() })));
 ipcMain.handle("sd:open-log", sdSafe(async () => { const f = sdLogFile(); try { fs.mkdirSync(path.dirname(f), { recursive: true }); if (!fs.existsSync(f)) fs.writeFileSync(f, ""); } catch (_) {} const err = await shell.openPath(f); return err ? { ok: false, error: err } : { ok: true }; }));
 ipcMain.handle("sd:set-autostart", sdSafe((a) => { state.sdManaged.startWithApp = !!a.on; saveStateDebounced(); logEvent("sd-autostart", { on: !!a.on }); return sdTargetsPublic(); }));
@@ -6384,7 +6428,7 @@ async function videoComfy(o = {}) {
   if (!o.start || process.env.AUTOINJECTOR_VIDEO_AUTOSTART === "0") return null;
   // Nothing answers: start the installed ComfyUI (only when AutoInjector isn't already running another SD app).
   const t = sdTargets().find((x) => x.kind === "comfy" && x.supported);
-  if (!t || (rs && (rs.phase === "running" || rs.phase === "starting" || rs.phase === "restarting"))) return null;
+  if (!t || (rs && (rs.phase === "running" || rs.phase === "starting" || rs.phase === "restarting" || rs.phase === "waiting"))) return null;
   logEvent("video-comfy-autostart", { target: t.source });
   const st = await sdStart(t.id);
   return st && st.ok && st.runner && st.runner.base ? ok(st.runner.base, "ComfyUI", "started by AutoInjector") : null;
