@@ -16,7 +16,14 @@ const DEFAULT_ENDPOINT = 'http://127.0.0.1:11434';
 // system Ollama already on 11434). Its store is pointed at "stuff and thing".
 const DEFAULT_MANAGED_HOST = '127.0.0.1:11435';
 
-function _ollamaBin() { return process.env.OLLAMA_BIN || 'ollama'; }
+// The Ollama program to run. setBin() lets the app point at an Ollama it just
+// installed (or found in a standard install place) WITHOUT a restart — a running
+// app's PATH never picks up a fresh install. OLLAMA_BIN (env) still wins over
+// the plain 'ollama' on PATH when nothing was set.
+let _binOverride = null;
+function setBin(bin) { _binOverride = bin ? String(bin) : null; return _ollamaBin(); }
+function getBin() { return _ollamaBin(); }
+function _ollamaBin() { return _binOverride || process.env.OLLAMA_BIN || 'ollama'; }
 
 /**
  * Where Ollama keeps its model store when nothing redirects it. This is the
@@ -249,6 +256,6 @@ function migrateStore(opts = {}) {
 
 module.exports = {
   DEFAULT_ENDPOINT, DEFAULT_MANAGED_HOST,
-  detect, listInstalled, recommended, recommendedUncensored, pull,
+  detect, listInstalled, recommended, recommendedUncensored, pull, setBin, getBin,
   defaultStoreDir, startManaged, stopManaged, managedStatus, waitReady, migrateStore,
 };

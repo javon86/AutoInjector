@@ -462,6 +462,37 @@
     #butler-controls > p { flex:1 1 100%; margin:0 0 2px; }
     /* The "run & check" block spans the full 2/3 column as the primary surface,
        sitting above the settings cards. */
+    /* B6 🎩 Alfred's AI setup (llm-setup-ui.js) */
+    #butler-controls > #llm-zone { flex:1 1 100%; display:flex; flex-direction:column; gap:8px; }
+    #llm-zone > div:empty { display:none; }
+    .llm-setup [hidden] { display:none !important; }
+    .llm-setup { background:#0c130e; border:1px solid #2f5c3e; border-radius:9px; padding:9px 11px; }
+    .llm-head { display:flex; align-items:baseline; gap:8px; flex-wrap:wrap; }
+    .llm-current { font-size:11.5px; opacity:.8; }
+    .llm-sub { font-size:11px; opacity:.75; }
+    .llm-btns { margin:7px 0 5px; align-items:center; flex-wrap:wrap; }
+    .llm-big { font-size:13px; padding:6px 12px; }
+    .llm-unc { display:flex; align-items:center; gap:4px; font-size:11.5px; opacity:.9; }
+    .llm-progress { margin:4px 0; }
+    .llm-bar { height:8px; background:#1a2a1f; border-radius:4px; overflow:hidden; }
+    .llm-fill { height:100%; background:#3fbf6f; transition:width .2s; }
+    .llm-fill.llm-indet { width:30% !important; animation:llm-slide 1.2s linear infinite; }
+    @keyframes llm-slide { from { margin-left:-30%; } to { margin-left:100%; } }
+    .llm-steps { margin:4px 0; padding-left:18px; font-size:11.5px; }
+    .llm-step.llm-failed, .llm-row.llm-bad, .llm-msg.llm-bad, .llm-line.llm-bad { color:#ff8f8f; }
+    .llm-step.llm-done, .llm-row.llm-ok, .llm-msg.llm-good, .llm-line.llm-good { color:#8ef0b0; }
+    .llm-row.llm-warn, .llm-msg.llm-warn, .llm-line.llm-warn { color:#f0d58e; }
+    .llm-msg { font-size:12px; margin:3px 0; min-height:14px; }
+    .llm-rows { list-style:none; margin:4px 0; padding:0; font-size:11.5px; }
+    .llm-row { margin:2px 0; }
+    .llm-row .llm-detail { opacity:.8; color:#cfd8d2; }
+    .llm-row button, .llm-model button { font-size:11px; padding:1px 7px; margin-left:4px; }
+    .llm-installed-wrap > summary { font-size:12px; cursor:pointer; }
+    .llm-model { display:flex; align-items:center; gap:4px; font-size:11.5px; margin:2px 0; flex-wrap:wrap; }
+    .llm-model .spacer { flex:1; }
+    .llm-current-model .llm-mname { font-weight:600; }
+    .llm-fit-great, .llm-fit-good { color:#8ef0b0; } .llm-fit-slow { color:#f0d58e; } .llm-fit-too-big { color:#ff8f8f; }
+    .llm-log { max-height:90px; overflow:auto; font-size:10.5px; opacity:.8; font-family:ui-monospace, Menlo, Consolas, monospace; }
     #butler-controls > #col-device { flex:1 1 100%; background:#0c130e; border:1px solid #26402e; border-radius:9px; padding:9px 11px; }
     #col-device .device-title { font-weight:700; font-size:13px; color:#8ef0b0; letter-spacing:.01em; margin:0 0 2px; }
     #butler-controls > .sai-sec { flex:1 1 240px; min-width:210px; margin:0; background:#0b110d; border:1px solid #1c2a20; border-radius:8px; padding:6px 9px; transition:border-color .12s, background .12s; }
@@ -1911,6 +1942,14 @@
         <!-- his controls, sitting under the goal box on the 2/3 side -->
         <div id="butler-controls">
 
+        <!-- B6 🎩 Alfred's AI: the ONE-button setup + 🩺 check (llm-setup-ui.js), the model finder
+             (llm-models-ui.js) and his personality + saved set-ups (alfred-persona-ui.js). -->
+        <div id="llm-zone">
+          <div id="llm-setup"></div>
+          <div id="llm-models"></div>
+          <div id="alfred-persona"></div>
+        </div>
+
         <!-- Run & check him: the former "Butler Device" panel, now folded into
              the one butler surface. Keeps id col-device so wiring + tests hold. -->
         <div id="col-device" class="device-sec">
@@ -2311,5 +2350,9 @@
   <script src="images-studio.js"></script>
   <script src="videos-studio.js"></script>
   <script src="alfred-panel.js"></script><!-- 🎩 Alfred panel (off by default) -->
+  <script src="llm-setup-ui.js"></script><!-- B6 🎩 Alfred's AI: one-button setup + check (#llm-setup) -->
+  <script src="llm-hardware.js"></script><!-- B6 fit ratings (window.LlmHardware), needed by llm-models-ui.js -->
+  <script src="llm-models-ui.js"></script><!-- B6 🔎 model finder (#llm-models) -->
+  <script src="alfred-persona-ui.js"></script><!-- B6 🎩 personality + saved set-ups (#alfred-persona) -->
 </body>
 </html>
