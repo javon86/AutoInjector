@@ -1815,6 +1815,47 @@ what order, what the UI actually renders, and whether the DOM-reading logic
 matches real markup — which is also where the subtlest bugs turned out to
 live.
 
+## Live checks (outside sites changing under us)
+
+The app depends on websites we don't control. They change without warning —
+e.g. ollama.com/search got a new layout and the model finder silently found
+nothing until `parseOllamaSearchHtml` in `model-catalog.js` was fixed. The live
+check catches that kind of change before a user does.
+
+```bash
+node scripts/live-check.js                      # needs internet; prints a table
+node scripts/live-check.js --only "video"       # just the checks whose group/name matches
+node scripts/live-check.js --markdown out.md --json out.json
+```
+
+What it checks (URLs are read from the app's own modules, so it follows any change there):
+
+| Group | What | Passes when |
+|---|---|---|
+| model finder | `searchOllama('qwen')` (+ tools-only), `searchHf('qwen gguf')`, `searchHf('qwen')`, `hfFiles('bartowski/Qwen2.5-7B-Instruct-GGUF')` | ≥5 / ≥3 / ≥5 models with names, sizes and capabilities; ≥3 GGUF variants all with sizes |
+| ollama installer | `OllamaSetup.exe`, `Ollama-darwin.zip`, `ollama-linux-{amd64,arm64}.tgz` or `.tar.zst` (`llm-setup.js`) | reachable after redirects, plausible size (one of .tgz/.tar.zst per arch) |
+| comfyui | every Windows portable build in `sd-installer.js` `BUILDS` | reachable, plausible size |
+| sd checkpoint | DreamShaper 8, SDXL base (`STARTER_MODELS`) | reachable, about the stated size |
+| video model | every file in `video-installer.js` `MODELS` | reachable **and exactly** the byte size the app expects (its download size check would reject anything else) |
+| setup download / hand-off page | piper voice files, Stability Matrix releases, ollama.com/download, python.org downloads | reachable |
+| info only | ChatGPT / Claude / Gemini home pages, RunPod REST API, GitHub release API for ComfyUI | answered at all (never fails the run) |
+
+Each check has a timeout, is retried once and never throws. Results:
+**ok**; **CHANGED** — the site answered but not the way the app expects (layout
+changed, file renamed/removed, size differs: the app needs a fix); **UNREACHABLE**
+— no usable answer (network, timeout, 5xx, rate limit: maybe temporary). Exit
+code 0 = all required checks ok, 1 = something CHANGED, 2 = only UNREACHABLE.
+Nothing big is downloaded: HEAD, or a 1-byte ranged GET.
+
+It runs weekly on GitHub Actions (`.github/workflows/live-sites.yml`, Mondays
+06:17 UTC, or by hand from the Actions tab — never on pull requests). When it
+fails it opens, or updates, an issue titled **"Live check: an outside site
+changed"** with the table. Fix the app (usually a parser or a URL/size constant),
+re-run the workflow, and close the issue once it's green. The browser panes'
+page layouts (selectors) need a login, so they are not covered here — use
+`npm run test:browser` and the in-app 🩺 checks for those. The pure parts of the
+script are unit-tested with fakes in `test/live-check.test.js`.
+
 ## Building a real installer (.exe / .dmg / .AppImage)
 
 The `run-*` scripts above are the fastest way to get running (they still need
