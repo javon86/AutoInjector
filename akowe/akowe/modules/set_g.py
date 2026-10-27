@@ -249,17 +249,20 @@ class Assembly:
     images: dict = field(default_factory=dict)      # key -> (bytes, ImageInfo)
     asset_recs: list = field(default_factory=list)
     excluded_art: bool = False
+    pictures: dict = field(default_factory=dict)     # 🖼 B3 the author's pictures: key -> (bytes, ImageInfo)
+    picture_recs: list = field(default_factory=list)
 
     def pins(self) -> list[dict]:
         refs = [self.manifest_rec["ref"], self.g01_rec["ref"]] + [r["ref"] for r in self.chapter_recs]
         refs += [rec["ref"] for rec, _ in self.matter.values()] + [r["ref"] for r in self.asset_recs]
+        refs += [r["ref"] for r in self.picture_recs]
         return refs
 
     def image_dims(self) -> dict:
-        return {k: (info.width, info.height) for k, (_, info) in self.images.items()}
+        return {k: (info.width, info.height) for k, (_, info) in {**self.images, **self.pictures}.items()}
 
     def pdf_images(self) -> dict:
-        return {k: info for k, (_, info) in self.images.items()}
+        return {k: info for k, (_, info) in {**self.images, **self.pictures}.items()}
 
 
 def chapters_of(ctx: Context, g01: dict, path: str) -> list[dict]:
@@ -308,6 +311,8 @@ def assemble(ctx: Context, g01_rec: dict, path: str, *, meta: dict | None = None
             placements=placements, toc=toc)
     except KeyError as exc:
         raise _rej("INVALID_INPUT", path, f"placement anchor {exc} no longer exists in the manuscript") from exc
+    from ..pictures import overlay  # noqa: PLC0415 - 🖼 B3 the pictures snapshot taken when the book was put together
+    overlay(ctx, asm)
     return asm
 
 
@@ -1243,7 +1248,7 @@ class EpubExport(_Export):
         toc = [dict(e, page=None) for e in entries] if entries is not None else None
         final = ctx.field_record("final_book_ref")
         data = build_epub(asm.book, modified=_iso_seconds(final["created_at"]), toc_entries=toc,
-                          images=images, cover=cover)
+                          images={**images, **asm.pictures}, cover=cover)
         findings.append(ctx.finding("EPUBCHECK", "EPUBCheck is not bundled; structural OCF/OPF/XHTML/nav checks "
                                     "passed but conformance remains UNKNOWN until EPUBCheck runs (H09)",
                                     severity="MAJOR", decision="UNKNOWN"))
@@ -1285,7 +1290,7 @@ class DocxExport(_Export):
         toc = [dict(e, page=None) for e in entries] if entries is not None else None
         data = build_docx(asm.book, created=_iso_seconds(final["created_at"]), family=fam,
                           size_pt=float(fp["font_size_pt"]), leading_pt=float(fp["line_height_pt"]),
-                          toc_entries=toc, images=images, page=page)
+                          toc_entries=toc, images={**images, **asm.pictures}, page=page)
         findings.append(ctx.finding("FONT_REFERENCE", f"document styles name the system font for family '{fam}'; "
                                     "pinned font files are not embedded in the DOCX", severity="MINOR",
                                     decision="UNKNOWN", source_refs=list(fp["font_refs"])))

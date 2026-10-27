@@ -11,6 +11,7 @@ uses both). Each book gets ONE folder, named once as ``<Book title> (<short id>)
     Book Bible/    book-bible.json (book_bible.build) + book-bible.md
     Reports/       Book report.md/.pdf (latest), Editor summary.md, Planned to page.md, Continuity.md
     Character Forge/  <code> <name> - dossier.pdf/.json per saved dossier + its pictures and motion clip (B5)
+    Pictures/      pictures.json + the chosen chapter / scene pictures (chNN … .png/.jpg) and map.svg/.png (B3)
     Log/           Book journal.md (journal.py) + run-events.json (runs: steps, states, AI per step, times, problems)
     Progress/      progress.json (book steps, next step, the run's state)
     book.akowe the complete re-importable package (book_package.py)
@@ -95,6 +96,8 @@ Book Bible/    Everything the book is built on: the book profile, ending and sty
 Reports/       The book report (scores, strengths, weaknesses) and the editor's and
                planned-to-page summaries, when they exist.
 Character Forge/  Each character's dossier (PDF to read, JSON for Akọwe), its pictures and motion clip.
+Pictures/      The chapter and scene pictures and the map you chose (🖼 Pictures), with
+               pictures.json (captions, alt text and where each one goes in the book).
 Log/           The book's journal (what happened, step by step, which AI did what) and
                run-events.json (every step of the Make-a-book run). No keys, no prompts.
 Progress/      progress.json: what is done and what comes next (for an unfinished book).
@@ -497,6 +500,12 @@ class SaveService:
             self._forge_files(pid, branch, files, text)
         except Exception:  # noqa: BLE001 - the rest of the save still happens
             log.exception("character forge files for the save failed")
+        # Pictures/ (B3): the chosen chapter / scene pictures and the map, with pictures.json
+        try:
+            from . import pictures  # noqa: PLC0415
+            pictures.save_files(app, pid, branch, files, text)
+        except Exception:  # noqa: BLE001 - the rest of the save still happens
+            log.exception("picture files for the save failed")
         # Log/
         phase("Writing the log")
         try:
