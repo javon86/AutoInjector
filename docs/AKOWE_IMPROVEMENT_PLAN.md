@@ -330,6 +330,17 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
     every chapter" as a job with Stop. Placed in PDF / EPUB / DOCX with captions (snapshot at "Put the book
     together"). The SVG map is never rasterised (no Pillow): EPUB carries the SVG, the PDF draws it as vectors, the
     DOCX names where it is. In the book save (`Pictures/`). Still open: a real ChatGPT/GPU run.
+  - [x] **Covers (lane A), DONE 2026-10-27**: the 🎨 Cover page (`#/p/<pid>/<b>/cover`). It has seven typographic
+    templates (light and dark, by genre), colours, title fitting (autoscale, balanced line breaks, safe area 0.375 in),
+    scrims over the artwork, and AI art through AutoInjector `/image/request` `purpose:"cover"` (with `size`, `upscale`
+    and the character lock), upload, or no art.
+    - The ebook cover is a PDF or SVG. The EPUB uses the art as its cover image plus an inline-SVG cover page; the
+      DOCX gets a cover page.
+    - The print wrap PDF has 0.125 in bleed, a KDP spine (white 0.002252 in / cream 0.0025 in per page), spine text
+      from 100 pages (rotated and centred), a back cover with the blurb and author bio, and a blank 2 × 1.2 in barcode
+      box.
+    - The exported PDF/EPUB/DOCX can be had with the cover, and the book save writes `Cover/`.
+    - No Pillow: Akọwe does not rasterise (see `docs/COVERS.md`).
 - [x] **B4** 🧭 Local AI book manager — DONE 2026-10-25 as **🎩 Alfred (app-wide)**: not only a book manager but the
   user's assistant for the whole of AutoInjector (books, images, video, the three AI panes, files/logs). A local LLM
   through Ollama (or a connected AI / a web pane) with a FIXED tool registry (direct controls, no free code): book
