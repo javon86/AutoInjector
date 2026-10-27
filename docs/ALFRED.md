@@ -67,46 +67,42 @@ The one button also sets the Butler's local model.
 
 **Test my AI** in ⚙ checks the connection (it sends no question) **and that the model is really installed** in Ollama. If it isn't, it lists the installed models with a **Use …** button for each. Very small models (under 3B, e.g. `qwen2.5:0.5b`) work but often pick the wrong tool, and he says so. Small slips by the model (arguments wrapped twice, extra arguments, numbers sent as text) are forgiven; extra arguments are dropped and he is told which.
 
-### Setting up his AI with one button (🤵 Butler section)
+### Starting his AI (🎩 Butler section)
 
-Everything to get him running lives at the top of the **🤵 Butler** section. You only need it for setup;
-you talk to him in his side panel.
+Everything for getting him running is at the top of the **🎩 Butler** section. You talk to him in his side panel.
 
-1. **⚡ Set up Alfred's AI (one button).** It works out your graphics card and memory, installs **Ollama**
-   if it is missing (Windows: the official installer, run silently; macOS: into ~/Applications; Linux: into
-   the app's own folder, no admin needed) and starts it. It then downloads the best recommended model that
-   **fits your PC**, makes it Alfred's model (and the Butler's, if the Butler has no other AI set), and runs
-   the check. A progress bar and plain messages show each step. Pressing it again is harmless. Tick
-   **🔓 Prefer uncensored** first if you want an uncensored model; it is still one that follows his
-   commands.
-2. **🩺 Check everything** lists:
-   - Ollama installed (and its version) and the server answering (which address);
-   - the models folder and free disk;
-   - whether a model is installed, and whether Alfred's model is installed;
-   - whether his model answers and whether it can call his tools;
-   - your graphics card, and whether the model fits it;
-   - the Butler's model.
-   Each line shows ✔, ⚠ or ✖, and a problem has a one-click **Fix** (install, start, download the
-   recommended model, use an installed one…). **Start / Stop Ollama** are next to it.
-3. **🔎 Find a model** searches the **Ollama library** and **Hugging Face**. Hugging Face models are GGUF
-   files, which Ollama downloads directly as `hf.co/<repo>:<size>`. When you're offline, a built-in
-   recommended list still works.
-   - **Your PC** line: e.g. "RTX 3060 12 GB · 32 GB RAM".
-   - **Fit rating** on every model: ★★★ Great fit, ★★ Good fit, ★ Runs, slowly, or ✖ Too big for this
-     PC, with the reason in plain words. **Only models that can run here can be downloaded**: Download is
-     switched off for "too big". For a Hugging Face model it picks the best size (quantization) that fits,
-     and you can choose another.
-   - **Badges:** 🔓 uncensored (abliterated, Dolphin, Hermes…), 🛠 can use tools (what Alfred needs),
-     👁 sees images, 🔒 gated.
-   - **Filters:** 🔓 **Uncensored** brings uncensored models to the top and widens the search. They are
-     never hidden. 🛠 **Can use tools** is the other filter.
-   - **Hugging Face token (optional):** connect yours for gated or private models. It is stored encrypted
-     on this PC and never logged.
-   - Installed models show their size and fit, with **Use** and **Remove** buttons.
-4. **Personality** and **saved set-ups** are just below (see above).
+- **▶ Start Alfred** (the everyday button). It uses only what is **already downloaded** and never downloads:
+  1. It finds Ollama and starts it. If your models are in Ollama's usual folder rather than AutoInjector's, it starts
+     Ollama on that folder.
+  2. It picks your model: the one he already uses, or else the best one you have.
+  3. It loads the model into memory, turns Alfred on and opens his panel.
 
-You can also ask him: "check your AI", "find me an uncensored 8B model that fits", "download it and use it"
-(each change shows an "I will" card first).
+  Tick **Start him when the app opens** and you don't need to click at all.
+- **🔍 Find what's installed** looks on this PC for:
+  - Ollama itself;
+  - every running Ollama and its models, each with a **Use** button;
+  - other Ollama model folders that already have models, each with a **Use this folder** button;
+  - model files (`.gguf`) that LM Studio, GPT4All, Jan or your Downloads folder already have, each with a
+    **➕ Add to Ollama** button. Ollama reads the file it already has; nothing is downloaded.
+- **⚡ Set up (first time)** is only needed once, or for a better model:
+  1. It installs Ollama if it's missing (on Windows the official installer runs silently; on macOS it goes into
+     ~/Applications; on Linux into the app's own folder, no admin needed).
+  2. If you already have a capable model, it **uses it and downloads nothing**. Otherwise it downloads one that
+     fits your PC.
+  3. It ends with the check.
+
+  Tick **🔓 Prefer uncensored** first if you want an uncensored model.
+- **🩺 Check everything** shows ✔, ⚠ or ✖ lines with one-click **Fix** buttons. **Start / Stop Ollama** are next
+  to it. **📦 Models on this PC** lists your models with **Use** and **Remove** buttons.
+- **🔎 Find & download more models** is folded so it doesn't take up space; click it to open it, and it remembers.
+  - It searches the Ollama library and Hugging Face.
+  - Every result is rated for your PC (★★★ / ★★ / ★ / ✖), and models that are too big can't be downloaded.
+  - The 🔓 filter brings uncensored models to the top.
+  - You can connect an optional Hugging Face token.
+- **Personality** and **saved set-ups** are on the left. **⚙ More settings** and the **activity log** are on the
+  right.
+
+You can also ask him: "check your AI", "find me an uncensored 8B model that fits", or "download it and use it".
 
 **Doing it by hand** (if the one button can't install, e.g. your PC blocks installers): get Ollama from
 **https://ollama.com/download**, run it, then use **🔎 Find a model** → **Download** → **Use**. Or, in Command

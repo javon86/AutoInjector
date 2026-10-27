@@ -70,7 +70,7 @@ async function main() {
   let { api, calls } = makeApi();
   let w = await boot(api);
   const d = w.document;
-  assert(d.querySelector('#llm-models h3').textContent.includes('Find a model'), 'renders "🔎 Find a model" into #llm-models');
+  assert(d.querySelector('#llm-models h3').textContent.includes('Find & download more models') && !d.querySelector('#llmm-fold').open, 'renders "🔎 Find & download more models" into #llm-models, folded by default');
   assert(d.getElementById('llmm-hw').textContent === 'Your PC: RTX 3060 12 GB · 32 GB RAM', `hardware line: "${d.getElementById('llmm-hw').textContent}"`);
   assert(calls.some((c) => c[0] === 'curated'), 'loads the recommended list on start');
   assert(cards(w).length >= 10, `${cards(w).length} recommended cards`);

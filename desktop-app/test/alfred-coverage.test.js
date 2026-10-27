@@ -90,7 +90,7 @@ const IPC_INVENTORY = [
   'logins:delete', 'logins:fill', 'logins:list', 'logins:save', 'logs:download-all', 'logs:extract-all', 'logs:extract-options', 'logs:extract-preview', 'logs:tags',
   'manager:approve', 'manager:configure-provider', 'manager:get-state', 'manager:pause', 'manager:reject', 'manager:resume', 'manager:start-task',
   'manager:stop', 'manager:test-connection', 'memory:search', 'memory:summary', 'models:info', 'models:open',
-  'llm:status', 'llm:hardware', 'llm:check', 'llm:fix', 'llm:setup-all', 'llm:install-ollama', 'llm:start', 'llm:stop', 'llm:search', 'llm:curated', 'llm:hf-files', 'llm:pull', 'llm:cancel', 'llm:remove', 'llm:use', 'llm:hf-token',
+  'llm:status', 'llm:hardware', 'llm:check', 'llm:fix', 'llm:setup-all', 'llm:start-alfred', 'llm:scan', 'llm:use-store', 'llm:import-gguf', 'llm:install-ollama', 'llm:start', 'llm:stop', 'llm:search', 'llm:curated', 'llm:hf-files', 'llm:pull', 'llm:cancel', 'llm:remove', 'llm:use', 'llm:hf-token',
   'ollama:detect', 'ollama:list', 'ollama:managed-status', 'ollama:migrate', 'ollama:pull', 'ollama:recommended', 'panes:sync', 'participants:set',
   'phone:info', 'phone:set-lan', 'picker:cancel', 'picker:clear', 'picker:save', 'picker:start', 'picker:status', 'picker:test',
   'prompt-editor:close', 'prompts:delete', 'prompts:open-editor', 'prompts:save', 'prompts:send', 'relay:hop-limit', 'relay:silence', 'roles:set',

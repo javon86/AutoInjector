@@ -57,6 +57,8 @@ function makeFs(virtual) {
     createWriteStream: (p, o) => fs.createWriteStream(norm(p), o),
     renameSync: (a, b) => fs.renameSync(norm(a), norm(b)),
     statfsSync: (p) => fs.statfsSync(norm(p)),
+    readdirSync: (p, o) => fs.readdirSync(norm(p), o),
+    writeFileSync: (p, d2) => fs.writeFileSync(norm(p), d2),
   };
 }
 function makeWorld(opts = {}) {
@@ -374,7 +376,7 @@ async function testSetupAll() {
   const spawnsBefore = w.spawned.length, pullsBefore = OLL.st.pulls.length;
   const r2 = await s.setupAll();
   assert(r2.ok && w.spawned.length === spawnsBefore && OLL.st.pulls.length === pullsBefore, 'running it again installs/downloads nothing');
-  assert(r2.steps.find((x) => x.id === 'model').message.includes('keeping it'), 'and says it keeps the model it has');
+  assert(r2.steps.find((x) => x.id === 'model').message.includes('already downloaded'), 'and says it keeps the model it has');
 
   console.log('\n== setupAll: 🔓 prefer uncensored; the catalog (Lane A) when present; busy; errors stop with a fix ==');
   const r3 = await s.setupAll({ uncensored: true });
@@ -449,13 +451,105 @@ async function testSafety() {
   assert(lib.isUncensored('huihui_ai/qwen3-abliterated:8b') && lib.isUncensored('dolphin3') && !lib.isUncensored('qwen2.5:7b'), 'isUncensored');
 }
 
+
+async function testStartAlfred() {
+  console.log('\n== ▶ Start Alfred: one click, only what is already downloaded (never a download) ==');
+  await reset();
+  let w = makeWorld();
+  let s = lib.createLlmSetup(w.deps({ systemBase: SYS_CLOSED, managedHost: `127.0.0.1:${OLL.port}` }));
+  let r = await s.startAlfred();
+  assert(!r.ok && r.needSetup && r.fix && r.fix.action === 'setup' && /isn't installed/.test(r.error), 'no Ollama → "press ⚡ Set up once" (with that fix)');
+
+  // the user's OWN model (not one of the recommended picks), already downloaded in the app's store
+  await reset();
+  ({ w, s } = serverWorld());
+  fs.mkdirSync(path.join(w.tmp, 'models', 'llm', 'manifests', 'registry', 'x'), { recursive: true });
+  fs.writeFileSync(path.join(w.tmp, 'models', 'llm', 'manifests', 'registry', 'x', 'latest'), '{}');
+  OLL.st.models = [{ name: 'mistral-nemo:12b', size: 7 * GB }, { name: 'nomic-embed-text:latest', size: 0.3 * GB }];
+  const msgs = [];
+  r = await s.startAlfred({ onProgress: (e) => msgs.push(e.message) });
+  assert(r.ok && r.model === 'mistral-nemo:12b' && w.alfred.local.model === 'mistral-nemo:12b' && /\/v1$/.test(w.alfred.local.endpoint), `starts Ollama and uses the model you already have (${r.message || r.error})`);
+  assert(OLL.st.pulls.length === 0, 'downloads NOTHING');
+  assert(msgs.some((m) => /already have/.test(m)) && msgs.some((m) => /Loading/.test(m)), 'says what it is doing (looking, loading)');
+  const pulls = OLL.st.pulls.length;
+  const r2 = await s.setupAll();
+  assert(r2.ok && OLL.st.pulls.length === pulls && r2.model === 'mistral-nemo:12b', `⚡ Set up keeps your own model too — no download (${r2.model})`);
+  r = await s.startAlfred();
+  assert(r.ok && r.model === 'mistral-nemo:12b', 'pressing it again is harmless');
+
+  // Alfred's own choice wins over a bigger one
+  OLL.st.models.push({ name: 'qwen3:14b', size: 9 * GB });
+  w.alfred.local.model = 'mistral-nemo:12b';
+  r = await s.startAlfred();
+  assert(r.ok && r.model === 'mistral-nemo:12b', 'the model Alfred already uses is kept');
+  w.alfred.local.model = 'gone:1b';
+  r = await s.startAlfred();
+  assert(r.ok && ['qwen3:14b', 'mistral-nemo:12b'].includes(r.model) && OLL.st.pulls.length === pulls, `his model is gone → the best fit you already have (${r.model}), not a download`);
+
+  // nothing downloaded anywhere
+  await reset();
+  ({ w, s } = serverWorld());
+  r = await s.startAlfred();
+  assert(!r.ok && r.needSetup && /No models/.test(r.error) && OLL.st.pulls.length === 0, 'no models anywhere → "press ⚡ Set up once", still no download');
+
+  // the models live in Ollama's usual folder (~/.ollama/models), the app's own folder is empty
+  await reset();
+  const home = path.join(os.tmpdir(), `llm-home-${process.pid}`);
+  fs.mkdirSync(path.join(home, '.ollama', 'models', 'manifests', 'registry.ollama.ai', 'library', 'qwen3'), { recursive: true });
+  fs.writeFileSync(path.join(home, '.ollama', 'models', 'manifests', 'registry.ollama.ai', 'library', 'qwen3', '8b'), '{}');
+  ({ w, s } = serverWorld({ deps: { env: { HOME: home, PATH: '/usr/bin' }, homedir: home } }));
+  assert(s.storeHasModels(path.join(home, '.ollama', 'models')) && !s.storeHasModels(path.join(w.tmp, 'models', 'llm')), 'storeHasModels: Ollama\'s usual folder has models, the app\'s is empty');
+  OLL.st.models = [{ name: 'qwen3:8b', size: 5 * GB }];
+  r = await s.startAlfred();
+  const ms = om.managedStatus();
+  assert(r.ok && r.model === 'qwen3:8b' && ms.modelsDir === path.join(home, '.ollama', 'models'), `starts Ollama on the folder that HAS your models (${ms.modelsDir}) — nothing downloaded again`);
+  await reset();
+}
+
+async function testScan() {
+  console.log('\n== 🔍 Find what\'s installed: Ollama, folders with models, the servers\' models, .gguf files — and use them ==');
+  await reset();
+  const home = path.join(os.tmpdir(), `llm-scan-${process.pid}`);
+  fs.rmSync(home, { recursive: true, force: true });
+  // Ollama's usual folder has models; LM Studio downloaded a .gguf; a tiny .gguf in Downloads is ignored
+  fs.mkdirSync(path.join(home, '.ollama', 'models', 'manifests', 'registry.ollama.ai', 'library', 'qwen3'), { recursive: true });
+  fs.writeFileSync(path.join(home, '.ollama', 'models', 'manifests', 'registry.ollama.ai', 'library', 'qwen3', '8b'), '{}');
+  const lm = path.join(home, '.lmstudio', 'models', 'bartowski', 'Mistral-Nemo-GGUF');
+  fs.mkdirSync(lm, { recursive: true });
+  const big = path.join(lm, 'Mistral-Nemo-Instruct-Q4_K_M.gguf');
+  fs.writeFileSync(big, ''); fs.truncateSync(big, 60 * 1024 * 1024);
+  fs.mkdirSync(path.join(home, 'Downloads'), { recursive: true });
+  fs.writeFileSync(path.join(home, 'Downloads', 'vocab.gguf'), 'x');
+  const created = [];
+  const { w, s } = serverWorld({ deps: { env: { HOME: home, PATH: '/usr/bin' }, homedir: home }, onSpawn: (bin, args, c) => {
+    if (args[0] === 'serve') { OLL.up(); c.kill = () => { c.killed = true; OLL.down().then(() => c.emit('close', 0)); }; return 'handled'; }
+    if (args[0] === 'create') { created.push({ name: args[1], modelfile: fs.readFileSync(args[3], 'utf8') }); OLL.st.models.push({ name: `${args[1]}:latest`, size: 60 * 1024 * 1024 }); setTimeout(() => c.emit('close', 0), 5); return 'handled'; }
+  } });
+  OLL.st.models = [{ name: 'qwen2.5:7b', size: 4.7 * GB }];
+  await s.startOllama();
+  let r = await s.scanInstalled();
+  assert(r.ok && r.ollama.installed && r.servers.length === 1 && r.servers[0].models[0].name === 'qwen2.5:7b', `finds Ollama and the models it has (${r.summary})`);
+  const usual = r.stores.find((x) => x.dir === path.join(home, '.ollama', 'models'));
+  assert(usual && usual.hasModels && !usual.inUse, 'finds Ollama\'s usual folder has models (not the one in use)');
+  assert(r.ggufs.length === 1 && r.ggufs[0].path === big && r.ggufs[0].from === 'LM Studio' && /mistral-nemo/.test(r.ggufs[0].suggestedName), `finds LM Studio's .gguf, skips a tiny file (${r.ggufs.map((g) => g.file).join(', ')})`);
+  r = await s.useStore(usual.dir);
+  assert(r.ok && om.managedStatus().modelsDir === usual.dir && /nothing downloaded/.test(r.message), 'Use this folder → the app\'s Ollama runs on it (nothing downloaded)');
+  r = await s.importGguf(big, 'mistral-nemo-lm');
+  assert(r.ok && created.length === 1 && created[0].name === 'mistral-nemo-lm' && created[0].modelfile.trim() === `FROM ${big}` && OLL.st.pulls.length === 0, `➕ Add to Ollama → ollama create from the file, no download (${r.message || r.error})`);
+  r = await s.importGguf(path.join(home, 'nope.gguf'));
+  assert(!r.ok && /isn't there/.test(r.error), 'a missing file → plain error');
+  assert(!(await s.useStore(path.join(home, 'empty'))).ok, 'a folder without models is refused');
+  fs.rmSync(home, { recursive: true, force: true });
+  await reset();
+}
+
 (async () => {
   const p = await freePort();
   OLL = fakeOllama(p);
   SYS_CLOSED = `http://127.0.0.1:${await freePort()}`;
   DL = fakeDownloads();
   DL_BASE = await DL.listen();
-  const tests = [testFind, testInstallLinux, testInstallWindows, testInstallMacAndErrors, testStartStop, testPull, testUseAndCheck, testSetupAll, testSafety];
+  const tests = [testFind, testInstallLinux, testInstallWindows, testInstallMacAndErrors, testStartStop, testPull, testUseAndCheck, testSetupAll, testStartAlfred, testScan, testSafety];
   for (const t of tests) { try { await t(); } catch (e) { failed++; console.log(`  FAIL - ${t.name} threw: ${e && e.stack}`); } }
   await reset();
   DL.server.closeAllConnections && DL.server.closeAllConnections(); DL.server.close();

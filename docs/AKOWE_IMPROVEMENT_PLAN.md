@@ -444,6 +444,17 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
   list, so an installed copy would have crashed when it reached them. They are added, and `test/build-files.test.js`
   now fails whenever a file the app loads isn't shipped.
 
+- [x] **No downloading twice** (2026-10-27, the user's request):
+  - **▶ Start Alfred** uses only what is downloaded: it starts Ollama (on the folder that has the models), picks his
+    model or your best one, loads it, and turns him on with his panel. There is an optional "Start him when the app
+    opens".
+  - **🔍 Find what's installed** looks for Ollama, the running servers' models, the model folders and other apps'
+    `.gguf` files, with Use / Use this folder / ➕ Add to Ollama buttons (`ollama create` from the file).
+  - **⚡ Set up** keeps ANY capable model you already have, including slow-fit ones and ones not on its list, and the
+    app's Ollama starts on Ollama's usual folder when that's where your models are.
+  - The model finder is folded, and the activity log sits under ⚙ More settings, so the Butler section is about
+    690 px tall instead of about 1,700.
+
 ## Problems to come back to
 
 - **Refinement from the user's 2026-10-25 evening log (FIXED, 2026-10-26)**, one update:

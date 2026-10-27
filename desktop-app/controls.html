@@ -472,6 +472,16 @@
     #butler-more .butler-more-title { font-weight:600; font-size:12.5px; }
     #butler-more > details.sai-sec { margin:0; width:auto; flex:none; }
     #butler-legacy[hidden] { display:none !important; }
+    .llm-scan { margin:6px 0; padding:7px 9px; border:1px solid #2f5c3e; border-radius:8px; background:#0b120d; max-height:300px; overflow:auto; }
+    .llm-scan-head { display:flex; align-items:center; gap:6px; margin-bottom:4px; }
+    .llm-scan-group { margin:6px 0 2px; font-weight:600; font-size:11.5px; }
+    .llm-scan-head .spacer { flex:1; }
+    /* The log lives in the right half (under ⚙ More settings) — no tall empty column beside everything. */
+    #systemai-body.butler-body > #butler-main { flex:1 1 100%; }
+    #llm-zone .llm-right { display:flex; flex-direction:column; gap:8px; min-width:0; }
+    #llm-zone .llm-pair { align-items:stretch; }
+    #llm-zone .llm-right #butler-chat { display:flex; flex-direction:column; flex:1 1 auto; min-height:0; }
+    #llm-zone .llm-right .butler-chat-log { flex:1 1 0; min-height:160px; max-height:none; }
     .llm-setup [hidden] { display:none !important; }
     .llm-setup { background:#0c130e; border:1px solid #2f5c3e; border-radius:9px; padding:9px 11px; }
     .llm-head { display:flex; align-items:baseline; gap:8px; flex-wrap:wrap; }
@@ -1938,6 +1948,7 @@
           <div id="llm-models"></div>
           <div class="llm-pair">
             <div id="alfred-persona"></div>
+            <div class="llm-right">
             <div id="butler-more">
               <div class="butler-more-title">⚙ More settings</div>
         <details class="sai-sec">
@@ -2006,6 +2017,12 @@
           </div>
           <div id="voice-msg" style="font-size:11.5px; opacity:.8;"></div>
         </details>
+            </div>
+                <!-- the activity log: what Alfred, his AI setup and the Butler did -->
+            <div id="butler-chat">
+              <div class="butler-chat-title">📜 Activity — what Alfred and the Butler did</div>
+              <div id="jarvis-log" class="butler-chat-log"></div>
+            </div>
             </div>
           </div>
         </div>
@@ -2094,11 +2111,6 @@
         </div><!-- /butler-controls -->
         </div><!-- /butler-main (2/3) -->
 
-        <!-- ONE-THIRD: the butler's chat window. -->
-        <div id="butler-chat">
-          <div class="butler-chat-title">📜 Activity — what Alfred and the Butler did</div>
-          <div id="jarvis-log" class="butler-chat-log"></div>
-        </div>
       </div><!-- /systemai-body -->
     </div><!-- /butler-bar (col-systemai) -->
 

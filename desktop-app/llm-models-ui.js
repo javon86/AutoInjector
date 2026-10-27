@@ -41,8 +41,11 @@
     const style = document.createElement('style');
     style.id = 'llmm-style';
     style.textContent = [
-      '#llm-models{border:1px solid #1c2a20;border-radius:8px;padding:8px 10px;margin:6px 0;background:#0b110d;font-size:12px;}',
+      '#llm-models{border:1px solid #1c2a20;border-radius:8px;padding:6px 10px;margin:0;background:#0b110d;font-size:12px;}',
       '#llm-models .llmm-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}',
+      '#llm-models .llmm-fold>summary{cursor:pointer;list-style:none;}#llm-models .llmm-fold>summary::-webkit-details-marker{display:none;}',
+      '#llm-models .llmm-fold>summary h3::before{content:"▸ ";}#llm-models .llmm-fold[open]>summary h3::before{content:"▾ ";}',
+      '#llm-models .llmm-fold[open]>summary{margin-bottom:4px;}',
       '#llm-models h3{margin:0;font-size:13px;}',
       '#llm-models .llmm-hw{opacity:.8;font-size:11.5px;}',
       '#llm-models .llmm-row{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:6px 0;}',
@@ -72,7 +75,8 @@
   }
 
   root.innerHTML = `
-    <div class="llmm-head"><h3>🔎 Find a model</h3><span class="llmm-hw" id="llmm-hw">Checking this PC…</span></div>
+    <details class="llmm-fold" id="llmm-fold">
+    <summary class="llmm-head"><h3>🔎 Find &amp; download more models</h3><span class="llmm-hw" id="llmm-hw">Checking this PC…</span></summary>
     <div class="llmm-row">
       <input type="search" id="llmm-q" placeholder="Search models, e.g. qwen, llama, hermes, coder" aria-label="Search models">
       <button id="llmm-go" class="primary">Search</button>
@@ -95,8 +99,13 @@
         <button id="llmm-hf-clear">Disconnect</button>
       </div>
       <div class="llmm-msg" id="llmm-hf-msg"></div>
+    </details>
     </details>`;
 
+  // Folded by default (it is long); remembers your choice.
+  const fold = root.querySelector('#llmm-fold');
+  try { if (window.localStorage && window.localStorage.getItem('llmm-open') === '1') fold.open = true; } catch (_) {}
+  fold.addEventListener('toggle', () => { try { if (window.localStorage) window.localStorage.setItem('llmm-open', fold.open ? '1' : '0'); } catch (_) {} });
   function msg(text, isErr) { const m = $('#llmm-msg'); m.textContent = text || ''; m.classList[isErr ? 'add' : 'remove']('llmm-err'); }
 
   // ------------------------------------------------------------------ hardware
@@ -341,5 +350,5 @@
     if (missing.length === 4) msg('The model finder isn\'t connected yet (update or restart AutoInjector).', true);
   })();
 
-  window.llmModelsUI = { state: st, ready, render, search: doSearch, curated: loadCurated, loadHardware };
+  window.llmModelsUI = { open: (v) => { fold.open = v !== false; }, state: st, ready, render, search: doSearch, curated: loadCurated, loadHardware };
 })();
