@@ -2423,7 +2423,11 @@ async function saveTaskCheckpoint() {
   const m = state.manager;
   if (!m.projectDir) return;
   try {
-    await fs.promises.writeFile(path.join(m.projectDir, "project.json"), JSON.stringify(managerSnapshot(), null, 2), "utf8");
+    // Write a temp file, then rename: a reader (or a crash) never sees a half-written checkpoint.
+    const file = path.join(m.projectDir, "project.json");
+    const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
+    await fs.promises.writeFile(tmp, JSON.stringify(managerSnapshot(), null, 2), "utf8");
+    await fs.promises.rename(tmp, file);
   } catch (e) {
     logManagerEvent({ category: "error", severity: "error", summary: `Failed to save checkpoint: ${String(e)}` });
   }
@@ -3625,8 +3629,8 @@ async function finishManagedTask({ ok, reason, message }) {
   m.endMessage = message ? String(message).slice(0, 300) : null;
   m.pendingModels = [];
   m.waitingSince = null;
-  await saveTaskCheckpoint();
   logManagerEvent({ category: "task", severity: ok ? "success" : "error", summary: ok ? "Task completed" : `Task ended: ${reason || "unknown"}${m.endMessage ? ` — ${m.endMessage}` : ""}`, details: { reason: reason || null } });
+  await saveTaskCheckpoint();
   if (m.endMessage) broadcast("manager-ack", { taskId: m.taskId, text: m.endMessage, ts: Date.now() });
   speakIfEnabled(ok ? "Done." : (m.endMessage || `Stopped: ${reason || "unknown"}`)); // N2
   broadcastManagerState();
