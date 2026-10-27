@@ -18,7 +18,7 @@
 // reaches the transcript/UI — used for Chargeback's Referee acknowledgments
 // and Rotation's "UPDATED" confirmations, neither of which should ever be
 // shown to the user.
-const { app, BaseWindow, WebContentsView, ipcMain, dialog, safeStorage, Menu, shell, clipboard } = require("electron");
+const { app, BaseWindow, WebContentsView, ipcMain, dialog, safeStorage, Menu, shell, clipboard, BrowserWindow, screen } = require("electron");
 require("./alfred-main").captureIpc(ipcMain); // 🎩 ALFRED HOOK: remembers each IPC handler so Alfred's app controls run the same code as the buttons
 const path = require("path");
 const fs = require("fs");
@@ -4541,12 +4541,151 @@ ipcMain.handle("ollama:migrate", async () => {
   } catch (e) { return { ok: false, error: String(e) }; }
 });
 
+// ============================================================================
+// B6 — 🎩 Alfred's AI: one-button setup + 🩺 check + model finder (llm:*)
+// ----------------------------------------------------------------------------
+// llm-setup.js is the Electron-free core (find/install/start Ollama, pull with
+// % progress, use a model, the check rows and their fixes, the ONE button).
+// model-catalog.js / llm-hardware.js (the model finder + "does it fit this PC")
+// are optional here: required guarded, so this block works without them.
+// Progress + state go to the renderer on the "llm" channel. Nothing here
+// throws back to the renderer; the Hugging Face token is sealed with
+// secret-store.js and never logged, broadcast or returned.
+// ============================================================================
+const llmSetupLib = require("./llm-setup");
+function llmOptional(name) { try { return require(name); } catch (_) { return null; } }
+const llmHardwareLib = llmOptional("./llm-hardware");
+const modelCatalogLib = llmOptional("./model-catalog");
+let llmHfToken = null; let llmHfLoaded = false;
+function llmSecretsFile() { return path.join(userDataDir(), "llm-secrets.json"); }
+function llmLoadHfToken() {
+  if (llmHfLoaded) return llmHfToken;
+  llmHfLoaded = true;
+  try { const j = JSON.parse(fs.readFileSync(llmSecretsFile(), "utf8")); llmHfToken = j && j.hfTokenEnc ? (secretStore.open(j.hfTokenEnc) || null) : null; } catch (_) { llmHfToken = null; }
+  return llmHfToken;
+}
+let llmCatalog = null;
+function llmGetCatalog() {
+  if (llmCatalog || !modelCatalogLib || typeof modelCatalogLib.createCatalog !== "function") return llmCatalog;
+  try { llmCatalog = modelCatalogLib.createCatalog({ fetch: (...a) => fetch(...a), hfToken: () => llmLoadHfToken(), timeoutMs: 15000, ollamaBase: process.env.AUTOINJECTOR_OLLAMA_LIBRARY || undefined, hfBase: process.env.AUTOINJECTOR_HF_BASE || undefined }); } catch (_) { llmCatalog = null; }
+  return llmCatalog;
+}
+const llmSetup = llmSetupLib.createLlmSetup({
+  ollamaManager,
+  llmHardware: () => llmHardwareLib,
+  catalog: () => llmGetCatalog(),
+  paths: {
+    downloadsDir: () => path.join(userDataDir(), "downloads"),
+    modelsDir: () => outputManager.modelsDir("llm"),
+    appInstallDir: () => path.join(userDataDir(), "ollama"),
+  },
+  log: (kind, detail) => logEvent(kind, detail),
+  emit: (payload) => broadcast("llm", payload),
+  secrets: () => [llmHfToken].filter(Boolean),
+  // `alfred` is created further down (installAlfred); these run only at IPC time, after it exists.
+  alfred: { getSettings: () => alfred.getSettings(), setSettings: (patch) => alfred.setSettings(patch) },
+  butler: {
+    get: () => managerConfigSnapshot(),
+    set: (cfg) => {
+      state.managerConfig = { ...state.managerConfig, provider: cfg.provider || "openai-compatible", endpoint: String(cfg.endpoint || ""), model: String(cfg.model || "") };
+      saveStateDebounced();
+      logManagerEvent({ category: "config", summary: `Butler's local model set to ${state.managerConfig.model} (🎩 AI setup)`, details: { provider: state.managerConfig.provider, model: state.managerConfig.model } });
+      return { ok: true };
+    },
+  },
+});
+const LLM_OOPS = "Something went wrong on my side — please try again.";
+function llmSafe(fn) { return async (...a) => { try { const r = await fn(...a); return r == null ? { ok: false, error: LLM_OOPS } : r; } catch (e) { try { logEvent("llm-error", { error: String((e && e.message) || e).slice(0, 200) }); } catch (_) {} return { ok: false, error: LLM_OOPS }; } }; }
+const llmArg = (a, key) => (a && typeof a === "object" ? a[key] : a);
+async function llmRateModels(models, hw) {
+  return (Array.isArray(models) ? models : []).map((m) => {
+    if (!m || m.fit) return m;
+    const out = { ...m };
+    try {
+      if (Array.isArray(out.variants)) out.variants = out.variants.map((v) => (v && !v.fit ? { ...v, fit: llmSetup.fitFor(v.sizeBytes, hw) } : v));
+      out.fit = llmSetup.fitFor(out.sizeBytes, hw);
+    } catch (_) {}
+    return out;
+  });
+}
+ipcMain.handle("llm:status", llmSafe(async () => ({ ...(await llmSetup.status()), hfConnected: !!llmLoadHfToken(), finder: !!llmGetCatalog(), hardwareRating: !!llmHardwareLib })));
+ipcMain.handle("llm:hardware", llmSafe(async (_e, a) => { const hw = await llmSetup.hardware(!!llmArg(a, "fresh")); return { ok: true, ...hw, line: llmSetup.hwLine(hw) }; }));
+ipcMain.handle("llm:check", llmSafe((_e, opts) => llmSetup.check(opts && typeof opts === "object" ? opts : {})));
+ipcMain.handle("llm:fix", llmSafe((_e, action) => llmSetup.fix(action)));
+ipcMain.handle("llm:setup-all", llmSafe((_e, opts) => llmSetup.setupAll({ uncensored: !!(opts && opts.uncensored) })));
+ipcMain.handle("llm:install-ollama", llmSafe(() => llmSetup.installOllama()));
+ipcMain.handle("llm:start", llmSafe(() => llmSetup.startOllama()));
+ipcMain.handle("llm:stop", llmSafe(() => llmSetup.stopOllama()));
+ipcMain.handle("llm:search", llmSafe(async (_e, q, opts) => {
+  const cat = llmGetCatalog();
+  if (!cat || typeof cat.search !== "function") return { ok: false, models: [], errors: [], error: "The model finder isn't part of this build yet." };
+  const query = String(llmArg(q, "query") || "").slice(0, 200);
+  const o = { ...((q && typeof q === "object") ? q : {}), ...((opts && typeof opts === "object") ? opts : {}) };
+  delete o.query;
+  const hw = await llmSetup.hardware();
+  const r = await cat.search(query, { ...o, hardware: hw });
+  return r && typeof r === "object" ? { ...r, models: await llmRateModels(r.models, hw) } : { ok: false, models: [], error: "The search didn't work — try again." };
+}));
+ipcMain.handle("llm:curated", llmSafe(async (_e, opts) => {
+  const uncensored = !!(opts && opts.uncensored);
+  const hw = await llmSetup.hardware();
+  const cat = llmGetCatalog();
+  if (cat && typeof cat.curated === "function") {
+    const r = await cat.curated(hw, { uncensored });
+    const models = Array.isArray(r) ? r : (r && r.models) || [];
+    return { ok: true, models: await llmRateModels(models, hw), hardware: llmSetup.hwLine(hw) };
+  }
+  const picks = await llmSetup.recommendedPicks(hw, { uncensored });
+  const models = picks.map((p) => ({ id: p.pullName, source: "curated", name: p.pullName, title: p.title, description: "", pullName: p.pullName, params: llmSetupLib.paramsFromName(p.pullName), sizeBytes: p.sizeBytes, quant: "Q4", uncensored: p.uncensored, tools: p.tools, vision: false, gated: false, variants: [{ tag: String(p.pullName).split(":")[1] || "latest", pullName: p.pullName, sizeBytes: p.sizeBytes, fit: p.fit }], fit: p.fit }));
+  return { ok: true, models, hardware: llmSetup.hwLine(hw), builtIn: true };
+}));
+ipcMain.handle("llm:hf-files", llmSafe(async (_e, repo) => {
+  const cat = llmGetCatalog();
+  if (!cat || typeof cat.hfFiles !== "function") return { ok: false, variants: [], error: "The model finder isn't part of this build yet." };
+  const repoId = String(llmArg(repo, "repoId") || llmArg(repo, "repo") || "").trim();
+  if (!/^[A-Za-z0-9][\w.-]*\/[\w.-]+$/.test(repoId)) return { ok: false, variants: [], error: "That doesn't look like a Hugging Face model (owner/name)." };
+  const hw = await llmSetup.hardware();
+  const r = await cat.hfFiles(repoId, { hardware: hw });
+  if (r && Array.isArray(r.variants)) r.variants = r.variants.map((v) => (v && !v.fit ? { ...v, fit: llmSetup.fitFor(v.sizeBytes, hw) } : v));
+  return r;
+}));
+// llm:pull(pullName, {sizeBytes}) — or one object {pullName|name, sizeBytes}. A size that is rated
+// "too big for this PC" is refused (llm-setup.pullModel checks the fit before downloading).
+ipcMain.handle("llm:pull", llmSafe((_e, a, o) => {
+  const name = llmArg(a, "pullName") || llmArg(a, "name");
+  const size = Number((o && typeof o === "object" && o.sizeBytes) || (a && typeof a === "object" && a.sizeBytes)) || null;
+  return llmSetup.pullModel(name, { sizeBytes: size });
+}));
+ipcMain.handle("llm:cancel", llmSafe(() => llmSetup.cancel()));
+ipcMain.handle("llm:remove", llmSafe((_e, a) => llmSetup.removeModel(llmArg(a, "name"))));
+ipcMain.handle("llm:use", llmSafe((_e, a) => llmSetup.useModel(llmArg(a, "name"), { alsoButler: !(a && typeof a === "object" && a.alsoButler === false) })));
+ipcMain.handle("llm:hf-token", llmSafe((_e, a) => {
+  const clear = !!(a && typeof a === "object" && a.clear) || a === null || a === "";
+  const token = clear ? "" : String(llmArg(a, "token") || "").trim();
+  if (!clear && !/^hf_[A-Za-z0-9]{10,}$/.test(token)) return { ok: false, connected: !!llmLoadHfToken(), error: "That doesn't look like a Hugging Face token (it starts with hf_). Copy it from huggingface.co → Settings → Access Tokens." };
+  llmLoadHfToken();
+  llmHfToken = clear ? null : token;
+  let persisted = false;
+  try {
+    const sealed = clear ? null : secretStore.seal(token);
+    fs.writeFileSync(llmSecretsFile(), JSON.stringify(sealed ? { hfTokenEnc: sealed } : {}));
+    persisted = !!sealed;
+  } catch (_) { persisted = false; }
+  logEvent("llm-hf-token", { connected: !clear, persisted }); // never the token itself
+  broadcast("llm", { type: "hf-token", connected: !clear });
+  return { ok: true, connected: !clear, persisted, message: clear ? "Hugging Face disconnected." : persisted ? "✓ Hugging Face connected (the token is stored encrypted on this PC)." : "✓ Hugging Face connected for this session (this PC can't store it encrypted, so it isn't saved)." };
+}));
+// ============================================================ end B6 llm:* block
+
 
 // Bring up the app-managed Ollama server pointed at models/llm inside the
 // content folder. Only if Ollama is actually installed; never throws, never
 // blocks startup. The renderer reads managed-status to prefer this endpoint.
 async function startManagedOllama() {
   try {
+    // B6: find Ollama in the standard install places / the app's own folder too (not only PATH),
+    // so one installed by the 🎩 setup button (or after the app started) is used without a restart.
+    try { await llmSetup.findOllama(); } catch (_) {}
     const det = await ollamaManager.detect();
     if (!det || !det.available) { logEvent("ollama-managed-skip", { reason: "Ollama isn't installed (optional) — the app's own Ollama server was not started", severity: "info" }); return; }
     let modelsDir; try { modelsDir = outputManager.modelsDir("llm"); } catch (_) { return; }
@@ -8190,6 +8329,8 @@ const alfred = require("./alfred-main").installAlfred({
   akoweApi, akoweServerBase, akoweShowInTab, akoweLoadView,
   sendTextTo, withEnvelope, selfRepair, selfRepairStatus, buildExtract,
   outputManager, dbService, imageProvider, videoProvider, interpreterProvider, ollamaManager,
+  // his floating side panel (alfred-window.js): a child window of the main one, over everything in the app
+  app, BrowserWindow, screen, mainWindow: () => win,
 });
 // ==== end 🎩 ALFRED HOOK ====
 
@@ -8221,6 +8362,7 @@ app.whenReady().then(() => {
   } catch (e) { logEvent("output-init-error", { error: String(e) }); }
   try { buildAppMenu(); } catch (e) { logEvent("menu-init-error", { error: String(e) }); }
   createWindow();
+  try { alfred.panel.sync(); } catch (_) {} // 🎩 ALFRED HOOK: his floating panel, when he is on
   startServiceBridge();
   startManagedInterpreter();
   startManagedVoice();
@@ -8254,5 +8396,5 @@ app.on("before-quit", (event) => {
 process.on("exit", () => { try { if (akoweServer) akoweServer.killNow(); } catch (_) {} });
 app.on("will-quit", () => { stopAkoweBridge(); });
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
-app.on("activate", () => { if (!win) createWindow(); });
+app.on("activate", () => { if (!win) { createWindow(); try { alfred.panel.sync(); } catch (_) {} } });
 app.on("before-quit", () => { try { if (terminal) terminal.stop(); } catch (_) {} try { if (lockers) lockers.stopAll(); } catch (_) {} try { serviceBridge.stop(); } catch (_) {} try { interpreterProvider.stopManaged(); } catch (_) {} try { voiceProvider.stopManaged(); } catch (_) {} try { ollamaManager.stopManaged(); } catch (_) {} });

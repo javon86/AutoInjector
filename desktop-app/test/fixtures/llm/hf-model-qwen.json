@@ -1,0 +1,21 @@
+{
+  "_id":"66f0a1","id":"bartowski/Qwen2.5-7B-Instruct-GGUF","modelId":"bartowski/Qwen2.5-7B-Instruct-GGUF","gated":false,"private":false,
+  "tags":["gguf","text-generation","conversational"],
+  "cardData":{"license":"apache-2.0","base_model":"Qwen/Qwen2.5-7B-Instruct","tags":["chat"]},
+  "gguf":{"total":7615616512,"architecture":"qwen2","context_length":32768,
+    "chat_template":"{%- if tools %}\n    {{- '<|im_start|>system\\n' }}\n  {%- for tool in tools %}{{- tool | tojson }}{%- endfor %}\n  <tool_call>\n{%- endif %}",
+    "bos_token":"<|endoftext|>","eos_token":"<|im_end|>"},
+  "siblings":[
+    {"rfilename":".gitattributes","size":2500},
+    {"rfilename":"README.md","size":9100},
+    {"rfilename":"Qwen2.5-7B-Instruct-IQ2_M.gguf","size":2780000000},
+    {"rfilename":"Qwen2.5-7B-Instruct-Q3_K_M.gguf","size":3810000000},
+    {"rfilename":"Qwen2.5-7B-Instruct-Q4_K_M.gguf","size":4680000000},
+    {"rfilename":"Qwen2.5-7B-Instruct-Q6_K.gguf","size":6250000000},
+    {"rfilename":"Qwen2.5-7B-Instruct-Q8_0.gguf","size":8100000000},
+    {"rfilename":"Qwen2.5-7B-Instruct-f16/Qwen2.5-7B-Instruct-f16-00001-of-00002.gguf","size":7900000000},
+    {"rfilename":"Qwen2.5-7B-Instruct-f16/Qwen2.5-7B-Instruct-f16-00002-of-00002.gguf","size":7330000000},
+    {"rfilename":"mmproj-Qwen2.5-f16.gguf","size":600000000},
+    {"rfilename":"Qwen2.5-7B-Instruct.imatrix","size":4500000}
+  ]
+}

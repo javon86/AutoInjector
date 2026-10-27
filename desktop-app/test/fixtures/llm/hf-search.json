@@ -1,0 +1,6 @@
+[
+  {"_id":"66f0a1","id":"bartowski/Qwen2.5-7B-Instruct-GGUF","modelId":"bartowski/Qwen2.5-7B-Instruct-GGUF","likes":120,"downloads":845000,"tags":["gguf","text-generation","en","base_model:Qwen/Qwen2.5-7B-Instruct","license:apache-2.0","endpoints_compatible","region:us","conversational"],"pipeline_tag":"text-generation","library_name":"gguf","gated":false,"lastModified":"2024-09-19T12:00:00.000Z","private":false},
+  {"_id":"66f0a2","id":"mlabonne/Meta-Llama-3.1-8B-Instruct-abliterated-GGUF","modelId":"mlabonne/Meta-Llama-3.1-8B-Instruct-abliterated-GGUF","likes":210,"downloads":96000,"tags":["gguf","abliterated","uncensored","text-generation"],"pipeline_tag":"text-generation","gated":false,"lastModified":"2024-07-30T09:00:00.000Z"},
+  {"_id":"66f0a3","id":"meta-llama/Llama-3.3-70B-Instruct-GGUF","modelId":"meta-llama/Llama-3.3-70B-Instruct-GGUF","likes":900,"downloads":50000,"tags":["gguf","facebook","meta","llama-3"],"pipeline_tag":"text-generation","gated":"manual","lastModified":"2024-12-06T09:00:00.000Z"},
+  {"_id":"66f0a4","id":"someone/mystery-model-GGUF","modelId":"someone/mystery-model-GGUF","likes":1,"downloads":12,"tags":["gguf"],"gated":false}
+]

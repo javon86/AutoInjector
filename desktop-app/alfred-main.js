@@ -9,12 +9,14 @@
  *   AI panes         sendTextTo + the captured replies, the self-repair check-in, pane health
  *   files / logs     the output folders, the log Extract ("This book only")
  *   Open Interpreter interpreter-provider.js (only when turned on in Alfred's settings)
- * IPC: alfred:* handlers; UI events go out on the "alfred" channel.
+ * IPC: alfred:* handlers; UI events go out on the "alfred" channel — to the control panel AND to his
+ * floating side panel window (alfred-window.js / alfred-window.html), so both show the same state.
  */
 const fs = require('fs');
 const path = require('path');
 const { createAlfred } = require('./alfred');
 const { createImageAdapter } = require('./alfred-image');
+const { createAlfredWindow } = require('./alfred-window');
 
 const NEVER_OPEN = /\.(exe|bat|cmd|com|ps1|psm1|vbs|vbe|js|jse|wsf|wsh|msi|msp|scr|lnk|jar|sh|bash|py|pyw|app|command|reg|hta|cpl|dll)$/i;
 
@@ -280,11 +282,18 @@ function installAlfred(h) {
     },
   };
 
+  // 🎩 his floating side panel (alfred-window.js). Every Alfred event goes to BOTH the control panel
+  // (h.broadcast) and this window; the window follows his state (on/off, mode, open).
+  let panel = null;
+  const alfredEmit = (payload) => {
+    h.broadcast('alfred', payload);
+    if (panel) { panel.send('alfred', payload); if (payload && payload.type === 'state') { try { panel.sync(); } catch (_) {} } }
+  };
   const alfred = createAlfred({
     settingsFile: path.join(h.userDataDir(), 'alfred-settings.json'),
     ctx,
     log: (kind, detail) => h.logEvent(kind, detail),
-    emit: (payload) => h.broadcast('alfred', payload),
+    emit: alfredEmit,
     journal: (pid, code, title) => h.akoweApi('POST', `/api/projects/${encodeURIComponent(pid)}/branches/main/journal/note`, { source: 'alfred', code, title }, 8000),
     managerConfig: () => { const c = h.state.managerConfig || {}; return c.endpoint && c.model ? { endpoint: c.endpoint, apiKey: c.apiKey, model: c.model } : null; },
     managedOllama: () => { try { return h.ollamaManager.managedStatus(); } catch (_) { return null; } },
@@ -296,6 +305,22 @@ function installAlfred(h) {
       return { akowe: !!h.akoweServerBase(), images: !!(im.enabled && im.configured), video: !!(vi.enabled && vi.configured), panes: SITE_IDS.filter((s) => h.state.enabled[s]).length, interpreter: !!(oi.enabled && oi.configured) };
     },
   });
+
+  panel = createAlfredWindow({
+    BrowserWindow: h.BrowserWindow, screen: h.screen, platform: h.platform || process.platform,
+    getMainWindow: () => (typeof h.mainWindow === 'function' ? h.mainWindow() : null),
+    getSettings: () => alfred.getSettings(),
+    setPanel: (patch, opts) => alfred.setPanel(patch, opts),
+    htmlFile: path.join(__dirname, 'alfred-window.html'),
+    preload: path.join(__dirname, 'alfred-window-preload.js'),
+    log: (kind, detail) => h.logEvent(kind, detail),
+    toggleDocked: (open) => h.broadcast('alfred', { type: 'toggle-panel', open: typeof open === 'boolean' ? open : null }),
+  });
+  // Ctrl/Cmd+Shift+A from ANY page of the app (control panel, AI panes, Akọwe, the panel itself).
+  if (h.app && typeof h.app.on === 'function') {
+    try { h.app.on('web-contents-created', (_e, wc) => panel.attachShortcut(wc)); } catch (_) {}
+    try { h.app.on('before-quit', () => panel.markQuitting()); } catch (_) {}
+  }
 
   // App events -> the watcher (ignored while Alfred is off; the listener itself does nothing then).
   h.broadcastListeners.add((channel, payload) => {
@@ -318,6 +343,31 @@ function installAlfred(h) {
     try { return await h.ollamaManager.listInstalled(base, 3000); } catch (_) { return { ok: false, models: [] }; }
   });
   ipcMain.handle('alfred:open-path', async (_e, p) => openOutput(String((p && p.path) || '')));
+  // personality (voice only) + saved set-ups
+  const safe = (fn, fallback) => async (...a) => { try { return await fn(...a); } catch (_) { return Object.assign({ ok: false, error: 'ERROR', message: 'Something went wrong on my side.' }, fallback || {}); } };
+  ipcMain.handle('alfred:personality', safe((_e, p) => (p && typeof p === 'object' && Object.keys(p).length ? alfred.setPersonality(p) : alfred.personality())));
+  ipcMain.handle('alfred:profiles', safe(() => alfred.profiles()));
+  ipcMain.handle('alfred:profile-save', safe((_e, p) => alfred.saveProfile(p || {})));
+  ipcMain.handle('alfred:profile-use', safe((_e, p) => alfred.useProfile(p && p.name)));
+  ipcMain.handle('alfred:profile-delete', safe((_e, p) => alfred.deleteProfile(p && p.name)));
+  // his side panel: mode (floating / docked), on top of other programs, show / hide, "Set up his AI"
+  ipcMain.handle('alfred:panel', safe((_e, patch) => {
+    if (patch && typeof patch === 'object') {
+      const pick = {};
+      if ('mode' in patch) pick.mode = patch.mode;
+      if ('otherApps' in patch) pick.otherApps = !!patch.otherApps;
+      if (Object.keys(pick).length) alfred.setPanel(pick);
+    }
+    return panel.sync();
+  }));
+  ipcMain.handle('alfred:panel-toggle', safe((_e, p) => panel.toggle(p && typeof p.open === 'boolean' ? p.open : undefined, { focus: true })));
+  ipcMain.handle('alfred:show-butler', safe(() => {
+    const m = typeof h.mainWindow === 'function' ? h.mainWindow() : null;
+    try { if (m && !m.isDestroyed()) { if (m.isMinimized && m.isMinimized()) m.restore(); m.focus(); } } catch (_) {}
+    h.broadcast('alfred', { type: 'show-butler' });
+    return { ok: true };
+  }));
+  alfred.panel = panel;
   return alfred;
 }
 

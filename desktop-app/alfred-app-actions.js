@@ -129,6 +129,22 @@ A('ollama.recommended', 'ollama:recommended', { t: 'Recommended local models for
 A('ollama.pull', 'ollama:pull', { t: 'Download a local model (ollama pull)', c: true, a: { model: text(120) }, r: ['model'], call: (a) => [a.model], ex: { model: 'qwen2.5:7b' } });
 A('ollama.managed_status', 'ollama:managed-status', { t: 'The app\'s own Ollama', c: false });
 A('ollama.migrate', 'ollama:migrate', { t: 'Move downloaded models into "stuff and thing"', c: true });
+// ---- 🎩 his own AI: one-button setup, the check, the model finder (llm-setup.js / model-catalog.js) ---------
+A('llm.status', 'llm:status', { t: 'His AI: Ollama, the server, installed models, the model he uses', c: false });
+A('llm.hardware', 'llm:hardware', { t: 'This PC\'s graphics card and memory (what models fit)', c: false, a: { fresh: { type: 'boolean' } } });
+A('llm.check', 'llm:check', { t: 'Check everything for his AI (installed, running, model answers, tools, fit)', c: false, a: { quick: { type: 'boolean' } } });
+A('llm.fix', 'llm:fix', { t: 'Fix one problem the check found', c: true, a: { action: { type: 'string', enum: ['install', 'start', 'stop', 'use', 'butler-use', 'download-recommended', 'setup'] }, model: opt(200) }, r: ['action'], ex: { action: 'start' } });
+A('llm.setup_all', 'llm:setup-all', { t: 'Set up his AI with one button (install Ollama, start it, download the best model that fits, use it, check)', c: true, a: { uncensored: { type: 'boolean' } }, ex: { uncensored: false } });
+A('llm.install_ollama', 'llm:install-ollama', { t: 'Install Ollama', c: true });
+A('llm.start', 'llm:start', { t: 'Start Ollama', c: true, aa: true });
+A('llm.stop', 'llm:stop', { t: 'Stop the app\'s Ollama', c: true, aa: true });
+A('llm.search', 'llm:search', { t: 'Find models on the Ollama library and Hugging Face, rated for this PC', c: false, a: { query: opt(200), sources: { type: 'array', maxItems: 2, items: { type: 'string', enum: ['ollama', 'hf'] } }, uncensored: { type: 'boolean' }, toolsOnly: { type: 'boolean' } }, call: (a) => [a.query || '', { sources: a.sources, uncensored: !!a.uncensored, toolsOnly: !!a.toolsOnly }], ex: { query: 'qwen', uncensored: true } });
+A('llm.curated', 'llm:curated', { t: 'Recommended models for this PC (works offline)', c: false, a: { uncensored: { type: 'boolean' } }, ex: { uncensored: true } });
+A('llm.hf_files', 'llm:hf-files', { t: 'The sizes (quantizations) of a Hugging Face model and which fit', c: false, a: { repo: text(300) }, r: ['repo'], call: (a) => [a.repo], ex: { repo: 'bartowski/Qwen2.5-7B-Instruct-GGUF' } });
+A('llm.pull', 'llm:pull', { t: 'Download a model (only ones that fit this PC)', c: true, a: { pullName: text(300), sizeBytes: { type: 'number', minimum: 0 } }, r: ['pullName'], call: (a) => [a.pullName, { sizeBytes: a.sizeBytes }], ex: { pullName: 'qwen2.5:7b' } });
+A('llm.cancel', 'llm:cancel', { t: 'Stop the download / install', c: true, aa: true });
+A('llm.remove', 'llm:remove', { t: 'Delete a downloaded model', c: true, a: { name: text(300) }, r: ['name'], call: (a) => [a.name], ex: { name: 'llama3.2:1b' } });
+A('llm.use', 'llm:use', { t: 'Make a model his AI (and the Butler\'s)', c: true, a: { name: text(300), alsoButler: { type: 'boolean' } }, r: ['name'], ex: { name: 'qwen2.5:7b' } });
 A('voice.status', 'voice:status', { t: 'Voice status', c: false });
 A('voice.check', 'voice:check', { t: 'Check the voice service', c: false });
 A('voice.configure', 'voice:configure', { t: 'Change voice settings', c: true, a: { settings: pass }, r: ['settings'], call: (a) => [a.settings], ex: { settings: { enabled: true } } });
@@ -207,6 +223,7 @@ A('ui.show_tab', null, { t: 'Show a tab (🤖 AutoInjector, 📖 Akọwe, 🎨 I
 const EXCLUDED = {
   'logins:list': 'saved logins (usernames) — secrets stay with the user',
   'logins:save': 'stores a password — secrets stay with the user',
+  'llm:hf-token': 'stores the Hugging Face token — secrets stay with the user',
   'logins:delete': 'saved logins — secrets stay with the user',
   'logins:fill': 'types a saved password into a page — secrets stay with the user',
   'akowe:copy-token': 'the Akọwe connection key — secret',

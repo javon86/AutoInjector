@@ -1,0 +1,153 @@
+// test/llm-setup-ui.test.js — the 🎩 Alfred's AI box in the 🤵 Butler section (llm-setup-ui.js) in jsdom with a
+// stub window.api.llm*: the containers + script tags in controls.html, the one button (with 🔓), progress + steps
+// from "llm" events, the check rows (✔ / ⚠ / ✖) and their Fix buttons, Start/Stop, the models list (Use / Remove),
+// Cancel, and that it degrades when the API is missing. Run: node test/llm-setup-ui.test.js
+'use strict';
+const fs = require('fs');
+const path = require('path');
+const { JSDOM } = require('jsdom');
+
+let passed = 0, failed = 0;
+function assert(c, m) { if (c) { passed++; console.log(`  ok   - ${m}`); } else { failed++; console.log(`  FAIL - ${m}`); } return c; }
+const tick = (ms = 20) => new Promise((r) => setTimeout(r, ms));
+const SRC = fs.readFileSync(path.join(__dirname, '..', 'llm-setup-ui.js'), 'utf8');
+
+function makeApi(over = {}) {
+  const calls = [];
+  let listener = null;
+  let status = { ok: true, ollama: { installed: true, version: '0.5.7' }, server: { running: true, base: 'http://127.0.0.1:11435', which: 'app' }, models: [{ name: 'qwen2.5:7b', sizeBytes: 4.7 * 1024 ** 3, sizeText: '4.7 GB', params: '7.6B', fit: { rating: 'great', label: '★★★ Great fit', reason: 'plenty of room' } }, { name: 'dolphin3:8b', sizeBytes: 4.9 * 1024 ** 3, sizeText: '4.9 GB', uncensored: true, fit: { rating: 'good', label: '★★ Good fit', reason: 'fits' } }], alfred: { model: 'qwen2.5:7b' }, hardware: 'Your PC: RTX 3060 12 GB · 32 GB RAM', busy: null };
+  const checkResult = { ok: false, summary: '1 thing needs attention: it can use alfred\'s tools.', hardware: 'Your PC: RTX 3060 12 GB · 32 GB RAM', rows: [
+    { id: 'installed', label: 'Ollama installed', ok: true, detail: 'Ollama 0.5.7', fix: null },
+    { id: 'tools', label: 'It can use Alfred\'s tools', ok: false, detail: 'It did not call the test tool.', fix: { action: 'download-recommended', label: '⬇ Download qwen2.5:7b' } },
+    { id: 'gpu', label: 'Graphics card found', ok: null, detail: 'No graphics card', fix: null },
+  ] };
+  const api = {
+    llmStatus: async () => { calls.push(['status']); return status; },
+    llmCheck: async (o) => { calls.push(['check', o]); return checkResult; },
+    llmFix: async (f) => { calls.push(['fix', f]); return { ok: true, message: '✓ Fixed.' }; },
+    llmSetupAll: async (o) => {
+      calls.push(['setupAll', o]);
+      listener({ type: 'step', task: 'setup', step: 'hardware', label: 'Look at this PC', state: 'done', message: 'Your PC: RTX 3060' });
+      listener({ type: 'progress', task: 'pull', percent: 42, message: 'qwen2.5:7b: downloading — 42%' });
+      await tick(30);
+      if (over.setupFail) return { ok: false, error: 'I couldn\'t install Ollama: no internet.', fix: { action: 'install', label: '⬇ Try installing Ollama again' }, steps: [] };
+      return { ok: true, model: 'qwen2.5:7b', summary: '✓ Alfred\'s AI is ready: qwen2.5:7b.', check: Object.assign({}, checkResult, { ok: true, rows: checkResult.rows.slice(0, 1), summary: '✓ All set' }) };
+    },
+    llmStart: async () => { calls.push(['start']); return { ok: true, message: 'Ollama is running.' }; },
+    llmStop: async () => { calls.push(['stop']); status = Object.assign({}, status, { server: { running: false } }); return { ok: true, stopped: true, message: 'Stopped AutoInjector\'s Ollama.' }; },
+    llmUse: async (a) => { calls.push(['use', a]); return { ok: true, message: `Alfred now uses ${a.name}.` }; },
+    llmRemove: async (n) => { calls.push(['remove', n]); return { ok: true, message: `Removed ${n}.` }; },
+    llmCancel: async () => { calls.push(['cancel']); return { ok: true, cancelled: true }; },
+    onLlm: (cb) => { listener = cb; },
+  };
+  return { api, calls, emit: (e) => listener && listener(e), setStatus: (s) => { status = s; } };
+}
+function load(api, opts = {}) {
+  const dom = new JSDOM('<!doctype html><body><div id="butler-controls"><div id="llm-zone"><div id="llm-setup"></div><div id="llm-models"></div></div></div></body>', { runScripts: 'outside-only', url: 'http://localhost/controls.html' });
+  const w = dom.window;
+  w.api = api;
+  w.confirm = () => (opts.confirm !== undefined ? opts.confirm : true);
+  w.eval(SRC);
+  return w;
+}
+
+(async () => {
+  console.log('\n== controls.html: the containers sit at the top of the Butler controls, with the three scripts ==');
+  const html = fs.readFileSync(path.join(__dirname, '..', 'controls.html'), 'utf8');
+  const dom = new JSDOM(html);
+  const d = dom.window.document;
+  const bc = d.getElementById('butler-controls');
+  assert(bc && bc.firstElementChild && bc.firstElementChild.id === 'llm-zone', '#llm-zone is the first thing in #butler-controls');
+  assert(['llm-setup', 'llm-models', 'alfred-persona'].every((id) => d.getElementById(id) && d.getElementById(id).parentElement.id === 'llm-zone'), '#llm-setup, then #llm-models and #alfred-persona below it');
+  const order = [...d.getElementById('llm-zone').children].map((e) => e.id).join(',');
+  assert(order === 'llm-setup,llm-models,alfred-persona', `in that order (${order})`);
+  const scripts = [...d.querySelectorAll('script[src]')].map((s) => s.getAttribute('src'));
+  assert(['llm-setup-ui.js', 'llm-models-ui.js', 'alfred-persona-ui.js'].every((s) => scripts.includes(s)) && scripts.indexOf('llm-setup-ui.js') > scripts.indexOf('controls.js'), 'the three <script> tags, after controls.js');
+  assert(scripts.includes('llm-hardware.js') && scripts.indexOf('llm-hardware.js') < scripts.indexOf('llm-models-ui.js'), 'llm-hardware.js loads before llm-models-ui.js');
+  assert(['lsi-endpoint', 'lsi-model', 'btn-lsi-save', 'col-device', 'jarvis-goal', 'col-systemai'].every((id) => d.getElementById(id)), 'every existing Butler id still there');
+
+  console.log('\n== renders: the one button, 🔓, check, start/stop, current model, models on this PC ==');
+  let s = makeApi();
+  let w = load(s.api);
+  await tick(40);
+  const $ = (id) => w.document.getElementById(id);
+  assert($('llm-btn-setup') && /Set up Alfred's AI \(one button\)/.test($('llm-btn-setup').textContent), '⚡ Set up Alfred\'s AI (one button)');
+  assert($('llm-btn-check') && /Check everything/.test($('llm-btn-check').textContent), '🩺 Check everything');
+  assert($('llm-uncensored') && $('llm-uncensored').type === 'checkbox', '🔓 Prefer uncensored');
+  assert(/qwen2\.5:7b/.test($('llm-current').textContent) && /0\.5\.7 running/.test($('llm-current').textContent), `current model + Ollama state (${$('llm-current').textContent})`);
+  assert($('llm-btn-start').hidden && !$('llm-btn-stop').hidden, 'running → shows Stop, hides Start');
+  assert(/RTX 3060/.test($('llm-hw').textContent), 'the hardware line');
+  const rows = w.document.querySelectorAll('.llm-model');
+  assert(rows.length === 2 && /★★★ Great fit/.test(rows[0].textContent) && /4\.7 GB/.test(rows[0].textContent), 'installed models with size + fit');
+  assert(/in use/.test(rows[0].textContent) && !rows[0].querySelector('.llm-use') && rows[1].querySelector('.llm-use') && /🔓/.test(rows[1].textContent), 'the current one says "in use"; others have Use; uncensored ones a 🔓');
+
+  console.log('\n== the one button: sends 🔓, shows steps + progress, then the rows and the summary ==');
+  $('llm-uncensored').checked = true; $('llm-uncensored').dispatchEvent(new w.Event('change'));
+  $('llm-btn-setup').click();
+  await tick(10);
+  assert($('llm-btn-setup').disabled && !$('llm-btn-cancel').hidden, 'busy: buttons disabled, Cancel shown');
+  assert(/42%/.test($('llm-progress-text').textContent) && $('llm-progress-fill').style.width === '42%' && !$('llm-progress').hidden, 'progress bar follows the "llm" events');
+  assert(/Look at this PC/.test($('llm-steps').textContent), 'step list');
+  await tick(80);
+  const setupCall = s.calls.find((c) => c[0] === 'setupAll');
+  assert(setupCall && setupCall[1].uncensored === true, 'setupAll({uncensored:true})');
+  assert(/ready: qwen2\.5:7b/.test($('llm-msg').textContent) && !$('llm-btn-setup').disabled && $('llm-btn-cancel').hidden, 'done: summary shown, buttons back');
+  assert(w.document.querySelectorAll('.llm-row').length === 1, 'the check rows from the result');
+
+  console.log('\n== 🩺 check: ✔ / ✖ / ⚠ rows; Fix runs the fix, then re-checks ==');
+  $('llm-btn-check').click();
+  await tick(40);
+  const r = [...w.document.querySelectorAll('.llm-row')];
+  assert(r.length === 3 && /✔/.test(r[0].textContent) && /✖/.test(r[1].textContent) && /⚠/.test(r[2].textContent), '✔ / ✖ / ⚠ icons');
+  const fixBtn = r[1].querySelector('.llm-fix');
+  assert(fixBtn && /Download qwen2\.5:7b/.test(fixBtn.textContent) && !r[0].querySelector('.llm-fix'), 'a Fix button only on rows that have one');
+  assert(/needs attention/.test($('llm-msg').textContent), 'the summary');
+  const before = s.calls.filter((c) => c[0] === 'check').length;
+  fixBtn.click();
+  await tick(60);
+  const fixCall = s.calls.find((c) => c[0] === 'fix');
+  assert(fixCall && fixCall[1].action === 'download-recommended', 'Fix → llmFix({action})');
+  assert(s.calls.filter((c) => c[0] === 'check').length === before + 1, 'and checks again');
+
+  console.log('\n== Use / Remove / Stop / Cancel ==');
+  w.document.querySelectorAll('.llm-model')[1].querySelector('.llm-use').click();
+  await tick(30);
+  assert(s.calls.some((c) => c[0] === 'use' && c[1].name === 'dolphin3:8b') && /dolphin3:8b/.test($('llm-msg').textContent), 'Use → llmUse({name})');
+  w.document.querySelectorAll('.llm-model')[1].querySelector('.llm-remove').click();
+  await tick(30);
+  assert(s.calls.some((c) => c[0] === 'remove' && c[1] === 'dolphin3:8b'), 'Remove (after confirming) → llmRemove(name)');
+  const s2 = makeApi();
+  const w2 = load(s2.api, { confirm: false });
+  await tick(40);
+  w2.document.querySelector('.llm-remove').click();
+  await tick(20);
+  assert(!s2.calls.some((c) => c[0] === 'remove'), 'Remove asks first — "No" removes nothing');
+  $('llm-btn-stop').click();
+  await tick(40);
+  assert(s.calls.some((c) => c[0] === 'stop') && !$('llm-btn-start').hidden, 'Stop → llmStop, then Start comes back');
+  $('llm-btn-cancel').click();
+  await tick(10);
+  assert(s.calls.some((c) => c[0] === 'cancel'), 'Cancel → llmCancel');
+  s.emit({ type: 'log', level: 'warn', message: 'retrying (2 of 3)…' });
+  assert(/retrying/.test($('llm-log').textContent), 'log lines from the "llm" events');
+
+  console.log('\n== a failing setup shows the plain message + its fix button ==');
+  s = makeApi({ setupFail: true });
+  w = load(s.api);
+  await tick(30);
+  w.document.getElementById('llm-btn-setup').click();
+  await tick(80);
+  const m = w.document.getElementById('llm-msg');
+  assert(/no internet/.test(m.textContent) && m.querySelector('.llm-fix') && /Try installing/.test(m.querySelector('.llm-fix').textContent), 'error + "Try installing Ollama again"');
+
+  console.log('\n== degrades: no window.api.llm* (an older build) ==');
+  const w3 = load({});
+  await tick(10);
+  assert(/isn't available in this build/.test(w3.document.getElementById('llm-setup').textContent) && !w3.document.getElementById('llm-btn-setup'), 'a plain note instead of dead buttons');
+  const w4 = load({ llmStatus: async () => { throw new Error('boom'); } });
+  await tick(20);
+  assert(w4.document.getElementById('llm-btn-setup') && /unavailable|wrong/i.test(w4.document.getElementById('llm-current').textContent), 'a failing status call doesn\'t break the page');
+
+  console.log(`\n${passed} passed, ${failed} failed`);
+  process.exit(failed ? 1 : 0);
+})();

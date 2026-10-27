@@ -223,6 +223,24 @@ contextBridge.exposeInMainWorld("api", {
   ollamaManagedStatus: () => ipcRenderer.invoke("ollama:managed-status"),
   ollamaMigrate: () => ipcRenderer.invoke("ollama:migrate"),
   onOllamaProgress: (cb) => ipcRenderer.on("ollama-progress", (_e, payload) => cb(payload)),
+  // B6 🎩 Alfred's AI: one-button setup + check + model finder (main.js llm:* block). Events on "llm".
+  llmStatus: () => ipcRenderer.invoke("llm:status"),
+  llmHardware: (opts) => ipcRenderer.invoke("llm:hardware", opts),
+  llmCheck: (opts) => ipcRenderer.invoke("llm:check", opts),
+  llmFix: (action) => ipcRenderer.invoke("llm:fix", action),
+  llmSetupAll: (opts) => ipcRenderer.invoke("llm:setup-all", opts),
+  llmInstallOllama: () => ipcRenderer.invoke("llm:install-ollama"),
+  llmStart: () => ipcRenderer.invoke("llm:start"),
+  llmStop: () => ipcRenderer.invoke("llm:stop"),
+  llmSearch: (query, opts) => ipcRenderer.invoke("llm:search", query, opts),
+  llmCurated: (opts) => ipcRenderer.invoke("llm:curated", opts),
+  llmHfFiles: (repoId) => ipcRenderer.invoke("llm:hf-files", repoId),
+  llmPull: (pullName, opts) => ipcRenderer.invoke("llm:pull", pullName, opts), // (pullName, {sizeBytes}) or ({pullName, sizeBytes})
+  llmCancel: () => ipcRenderer.invoke("llm:cancel"),
+  llmRemove: (name) => ipcRenderer.invoke("llm:remove", name),
+  llmUse: (arg) => ipcRenderer.invoke("llm:use", arg),
+  llmSetHfToken: (arg) => ipcRenderer.invoke("llm:hf-token", arg),
+  onLlm: (cb) => ipcRenderer.on("llm", (_e, payload) => cb(payload)),
   openWizard: (tab) => ipcRenderer.invoke("wizard:open", { tab }),
   openExternal: (url) => ipcRenderer.invoke("external:open", url),
   closeWizard: () => ipcRenderer.invoke("wizard-window:close"),
@@ -311,6 +329,15 @@ contextBridge.exposeInMainWorld("api", {
   alfredTestAi: () => ipcRenderer.invoke("alfred:test-ai"),
   alfredModels: () => ipcRenderer.invoke("alfred:models"),
   alfredOpenPath: (path) => ipcRenderer.invoke("alfred:open-path", { path }),
+  // personality (voice only) + saved set-ups (alfred.js); his side panel (alfred-window.js)
+  alfredPersonality: (patch) => ipcRenderer.invoke("alfred:personality", patch || null),
+  alfredProfiles: () => ipcRenderer.invoke("alfred:profiles"),
+  alfredSaveProfile: (name, renameFrom) => ipcRenderer.invoke("alfred:profile-save", { name, renameFrom: renameFrom == null ? undefined : renameFrom }),
+  alfredUseProfile: (name) => ipcRenderer.invoke("alfred:profile-use", { name }),
+  alfredDeleteProfile: (name) => ipcRenderer.invoke("alfred:profile-delete", { name }),
+  alfredPanel: (patch) => ipcRenderer.invoke("alfred:panel", patch || null),
+  alfredPanelToggle: (open) => ipcRenderer.invoke("alfred:panel-toggle", { open: typeof open === "boolean" ? open : undefined }),
+  alfredShowButler: () => ipcRenderer.invoke("alfred:show-butler"),
   onAlfred: (cb) => ipcRenderer.on("alfred", (_e, payload) => cb(payload))
   // ==== end 🎩 Alfred ====
 });
