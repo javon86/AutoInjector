@@ -104,7 +104,10 @@ const IPC_INVENTORY = [
   'setup:auto', 'setup:detect', 'setup:install', 'setup:list', 'site:inspect', 'site:list', 'site:reload', 'site:zoom', 'sites:new-chat-all', 'state:get',
   'terminal:approve', 'terminal:clear', 'terminal:input', 'terminal:reject', 'terminal:run', 'terminal:send-output', 'terminal:settings', 'terminal:start',
   'terminal:state', 'terminal:stop', 'tools:list', 'tools:run', 'trace:report', 'transcript:clear', 'transcript:toggle-pin', 'tuner:run', 'ui:log',
-  'video:configure', 'video:generate', 'video:status', 'voice:check', 'voice:configure', 'voice:listen', 'voice:redownload', 'voice:speak', 'voice:status',
+  'video:configure', 'video:generate', 'video:status',
+  'video:full-status', 'video:models', 'video:capabilities', 'video:settings', 'video:generate-t2v', 'video:animate', 'video:progress', 'video:cancel', 'video:gallery', 'video:test',
+  'video:install-check', 'video:install-model', 'video:install-all', 'video:install-cancel', 'video:open-folder', 'video:show-file',
+  'voice:check', 'voice:configure', 'voice:listen', 'voice:redownload', 'voice:speak', 'voice:status',
   'window:toggle-collapse', 'wizard-window:close', 'wizard:catalog', 'wizard:open',
 ];
 // Live updates the window listens to (not actions). The ones that matter to the user feed Alfred's watcher.
@@ -115,7 +118,7 @@ const EVENTS = {
   'akowe-tab-show': 'UI live update', 'brigade-progress': 'UI live update', 'capability-test-step': 'UI live update', 'capture': 'UI live update (replies → read_latest_reply)',
   'featuretest-progress': 'UI live update', 'houserule-state': 'UI live update', 'ledger-entry': 'UI live update', 'locker-changed': 'UI live update', 'log': 'UI live update',
   'manager-ack': 'UI live update', 'manager-state': 'UI live update', 'ollama-progress': 'UI live update', 'pane-health': 'UI live update (→ ai_health)', 'picker': 'UI live update',
-  'prompts-changed': 'UI live update', 'relay-paused': 'UI live update', 'sd-connected': 'UI live update', 'sd-install': 'UI live update', 'sd-runner': 'UI live update',
+  'prompts-changed': 'UI live update', 'relay-paused': 'UI live update', 'sd-connected': 'UI live update', 'sd-install': 'UI live update', 'sd-runner': 'UI live update', 'video-install': 'UI live update (model download progress — Alfred reads video.install.check / video.status)', 'video-done': 'UI live update (a video finished — Alfred gets the result from video_call)',
   'send-error': 'UI live update', 'sent': 'UI live update', 'sequence-state': 'UI live update', 'setup-progress': 'UI live update', 'setup-status': 'UI live update',
   'terminal-data': 'UI live update', 'terminal-state': 'UI live update', 'tuner-state': 'UI live update', 'voice-speaking': 'UI live update', 'waiting-changed': 'UI live update',
   'window-collapse-changed': 'UI live update',
@@ -138,7 +141,8 @@ const SERVICE_BRIDGE_ROUTES = {
   'GET /tools/list': 'app_info:tools.list', 'POST /tools/run': 'EXCLUDE: free code (see tools:run)',
   'GET /voice/status': 'app_info:voice.status', 'POST /voice/settings': 'app_control:voice.configure', 'POST /voice/speak': 'app_control:voice.speak', 'POST /voice/listen': 'app_control:voice.listen',
   'GET /image/status': 'image_generator_status', 'POST /image/settings': 'app_control:image.configure', 'POST /image/generate': 'generate_image',
-  'GET /image/backend': 'image_generator_status', 'GET /image/locks': 'character_locks', 'POST /image/request': 'generate_image', 'GET /events': 'EXCLUDE: event stream for external programs (Alfred has the watcher)',
+  'GET /image/backend': 'image_generator_status', 'GET /image/locks': 'character_locks', 'POST /image/request': 'generate_image',
+  'GET /video/backend': 'video_call:video.status', 'POST /video/request': 'video_call:video.generate', 'GET /events': 'EXCLUDE: event stream for external programs (Alfred has the watcher)',
 };
 // akowe-bridge.js — Akọwe's own channel INTO AutoInjector (Akọwe → the AI panes): not a user control.
 const AKOWE_BRIDGE_ROUTES = {
@@ -151,6 +155,9 @@ const SD_API_METHODS = ['images.status', 'images.generate', 'images.progress', '
   'library.characterLock', 'library.locks', 'library.scan',
   'images.img2img', 'images.inpaint', 'images.upscale', 'sd.lists', 'sd.options.get', 'sd.options.set', 'sd.options.schema', 'sd.controlnet.models', 'sd.controlnet.modules', 'sd.adetailer.models', 'sd.styles', 'sd.scripts', 'sd.embeddings', 'sd.upscalers', 'sd.extraFields', 'sd.interrupt', 'sd.skip', 'sd.refresh', 'sd.memory', 'sd.workflows.list', 'sd.workflows.get', 'sd.workflows.save', 'sd.workflows.delete', 'sd.workflows.run', 'sd.comfy.objectInfo', 'sd.comfy.queue', 'sd.comfy.upload', 'sd.comfy.free',
   'images.chatgptStatus', 'images.chatgptCancel', 'images.chatgptSettings'];
+// The 🎬 Video module (video-api.js): every method through video_call.
+const VIDEO_API_METHODS = ['video.status', 'video.capabilities', 'video.models', 'video.progress', 'video.gallery', 'video.cancel', 'video.generate', 'video.animate', 'video.test', 'video.settings',
+  'video.install.check', 'video.install.downloadModel', 'video.install.installAll', 'video.install.cancel'];
 // The 📖 Akọwe API Alfred uses (method + path pattern) → the tool that calls it.
 const AKOWE_API_USED = {
   'GET /api/projects': 'book_status, list_books', 'GET /api/autobook': 'book_status, pause_run/resume_run/cancel_run', 'GET /api/slots/states': 'book_status',
@@ -174,7 +181,7 @@ const MENU_ITEMS = {
   'Open Content Folder ("stuff and thing")': 'app_control:models.open', 'User Guide': 'EXCLUDE: opens the online guide (window chrome)',
   'Under Construction / Status': 'EXCLUDE: opens the online status page (window chrome)', 'About AutoInjector': 'EXCLUDE: about box (window chrome)',
 };
-const TABS = { 'tab-app-main': 'app_info:ui.show_tab', 'tab-app-akowe': 'open_akowe_page / app_info:ui.show_tab', 'tab-app-images': 'app_info:ui.show_tab' };
+const TABS = { 'tab-app-main': 'app_info:ui.show_tab', 'tab-app-akowe': 'open_akowe_page / app_info:ui.show_tab', 'tab-app-images': 'app_info:ui.show_tab', 'tab-app-video': 'app_info:ui.show_tab' };
 
 // =====================================================================================================
 // scanning the sources
@@ -195,6 +202,7 @@ function toolOf(ref) { // 'app_control:routing.set' | 'sd_call:images.generate' 
   if (!registry.get(tool)) return null;
   if (tool === 'app_control' || tool === 'app_info') { const e = appActions.get(sub); return e && (e.changes === (tool === 'app_control')) ? `${tool}:${sub}` : null; }
   if (tool === 'sd_call') return SD_API_METHODS.includes(sub) ? ref : null;
+  if (tool === 'video_call') return VIDEO_API_METHODS.includes(sub) ? ref : null;
   return tool;
 }
 
@@ -213,6 +221,8 @@ async function main() {
   sameSet('Akọwe-bridge routes', new Set([...read('akowe-bridge.js').matchAll(/url === '(\/v1\/[^']+)'/g)].map((m) => m[1])), new Set(Object.keys(AKOWE_BRIDGE_ROUTES)));
   const sdApi = require('../sd-api');
   const shape = sdApi.createImagesApi({ studio: {}, library: {}, runner: () => ({}), installer: () => ({}) });
+  sameSet('🎬 Video module (video-api) methods', new Set(require('../video-api').operationNames().filter((n) => n !== 'capabilities' && n !== 'call')), new Set(VIDEO_API_METHODS));
+  assert(require('../video-api').OPS.every((o) => typeof o.changes === 'boolean' && o.params && o.params.type === 'object'), '🎬 every video-api operation has a JSON schema and a changes flag');
   sameSet('🎨 Images module (sd-api) methods', new Set(alfredMain.sdMethodsOf ? (await alfredMain.sdMethodsOf(shape)).map((m) => m.method) : []), new Set(SD_API_METHODS));
   const akoweUsed = new Set();
   for (const m of read('alfred-tools.js').matchAll(/ctx\.akowe\('([A-Z]+)', `([^`]+)`/g)) akoweUsed.add(`${m[1]} ${m[2].replace(/\$\{enc\(b\.pid\)\}/g, ':pid').replace(/\$\{enc\(rr\.runId\)\}\/\$\{verb\}/g, ':run/:verb').replace(/\$\{base\}\/\$\{enc\(c\.record_id\)\}/, '/api/projects/:pid/branches/main/review/characters/:rid').replace(/\$\{enc\(r\.pid\)\}/g, ':pid').replace(/\$\{enc\(r\.d\.record_id\)\}/g, ':rid')}`);
