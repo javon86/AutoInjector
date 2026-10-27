@@ -497,6 +497,12 @@ class SaveService:
             self._forge_files(pid, branch, files, text)
         except Exception:  # noqa: BLE001 - the rest of the save still happens
             log.exception("character forge files for the save failed")
+        # Cover/ (B3): the cover design, the ebook and print covers, the art, the book files with the cover
+        try:
+            from . import cover as cover_mod  # noqa: PLC0415
+            cover_mod.save_files(app, pid, branch, files, stem)
+        except Exception:  # noqa: BLE001 - the rest of the save still happens
+            log.exception("cover files for the save failed")
         # Log/
         phase("Writing the log")
         try:

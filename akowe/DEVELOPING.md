@@ -64,6 +64,10 @@ akowe/
                            with the sheet / voice card / canon, "Invent the rest" job, approvals, art via AutoInjector
                            POST /image/request, routes …/forge/…, chapter_brief helper; forge_pdf.py (the dark dossier PDF),
                            forge_example.py + examples/moki_vey/ (the Moki Vey example); web/forge.js; docs/CHARACTER_FORGE.md
+    cover.py               🎨 B3 cover designer: design (settings cover:<pid>:<b>; blurb/author_bio in the profile), art job
+                           (AutoInjector /image/request purpose "cover"), routes …/cover/…, book save Cover/;
+                           exporters/cover.py (templates, layout, KDP print maths, PDF/SVG, cover added to PDF/EPUB/DOCX);
+                           web/cover.js; docs/COVERS.md
     fact_checks.py         🔎 Section 7a glue: chapter/book views, editor context + keep list, fixes, run report, HTTP
     continuity.py          🧭 Section 7 P32-P35: tracked state storage (physical_state:/character_state:<pid>:<branch>),
                            AI tracking + run hooks (approved under the run consent), brief section, review context,

@@ -34,7 +34,8 @@ from .errors import AkoweError
 from .requests import build_request, candidate_payload
 
 PROFILE_FIELDS = {"title": 200, "author": 200, "genre": 120, "audience": 120, "length": 20, "tone": 200,
-                  "idea": 4000, "ai_slot": 20, "chapters": 3}
+                  "idea": 4000, "ai_slot": 20, "chapters": 3,
+                  "blurb": 3000, "author_bio": 1500}  # 🎨 B3: the back-cover blurb and author bio
 # P15: (label, default chapters, most chapters) per length preset (lengths.py holds the word targets).
 from .lengths import ORDER as _LENGTH_ORDER, PRESETS as _LENGTH_PRESETS  # noqa: E402
 LENGTHS = {k: (_LENGTH_PRESETS[k]["label"], _LENGTH_PRESETS[k]["default_chapters"], _LENGTH_PRESETS[k]["chapters"][1])
