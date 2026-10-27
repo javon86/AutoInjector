@@ -79,6 +79,7 @@
       .al-you { align-self:flex-end; background:#1e2a47; }
       .al-alfred { align-self:flex-start; background:#171b26; border:1px solid #262e44; }
       .al-notice { align-self:stretch; background:#1c1a10; border:1px solid #4a4220; color:#f1e3b0; font-size:12px; }
+      .al-notice .al-fix { margin-top:6px; font-size:12px; padding:2px 10px; } .al-notice .al-fix-note { margin-top:4px; color:#e8a0a0; }
       .al-msg img { display:block; max-width:100%; max-height:180px; margin-top:6px; border-radius:6px; }
       #alfred-card { margin:0 10px 8px; padding:9px 10px; border:1px solid #c79a3a; background:#1d1709; border-radius:10px; overflow:auto; max-height:50vh; }
       #alfred-card[hidden] { display:none; }
@@ -386,6 +387,20 @@
   function msgEl(m) {
     const e = h('div', { class: `al-msg al-${m.role}`, 'data-role': m.role }, m.text);
     if (m.image) e.append(h('img', { src: fileUrl(m.image), alt: 'the image Alfred made' }));
+    // 🩺 a health notice with a one-click fix (health-watch.js → health:fix)
+    if (m.action && m.action.code && typeof api.healthFix === 'function') {
+      const b = h('button', { class: 'al-fix', type: 'button', 'data-code': m.action.code }, m.action.label || 'Fix it');
+      b.addEventListener('click', async () => {
+        b.disabled = true; const was = b.textContent; b.textContent = '…';
+        let r = null;
+        try { r = await api.healthFix(m.action.code); } catch (_) { r = null; }
+        b.textContent = r && r.ok ? (r.fixed ? '✔ Fixed' : '✔ Done') : was;
+        b.disabled = !!(r && r.ok);
+        const note = r && !r.ok && (r.message || r.error);
+        if (note) e.append(h('div', { class: 'al-fix-note' }, String(note).slice(0, 200)));
+      });
+      e.append(h('div', null, b));
+    }
     return e;
   }
   function renderCard(card) {

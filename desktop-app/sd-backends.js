@@ -608,7 +608,7 @@ module.exports = {
   explainSdError: sdErrors.explainSdError,
   configure, request, baseOf, portOf, errDetail, explain, noApiMessage, NO_API_HINT,
   identify, detect, DETECT_PORTS,
-  parseLoraTags, loraTag, a1111Prompt, toComfySampler, randomSeed,
+  parseLoraTags, loraTag, a1111Prompt, toComfySampler, randomSeed, SAMPLER_MAP, SCHED_MAP,
   a1111Lists, a1111Payload, a1111Generate, a1111Progress, a1111Interrupt,
   comboOptions, comfyLists, resolveName, buildComfyWorkflow, comfyRejectReason, comfyGenerate, comfyProgress, comfyInterrupt,
   comfyUpload, comfyRunGraph, comfyPrepare, COMFY_FEATURE_NODES, getJson, postJson,

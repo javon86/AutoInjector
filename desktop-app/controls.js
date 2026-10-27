@@ -2532,6 +2532,26 @@ if (window.api.onManagerLog) window.api.onManagerLog((e) => {
   }
 });
 
+// 🩺 Health watch (health-watch.js): one short line per problem — before it breaks something — and one
+// when it's fixed, with its one-click fix as a small button (works whether or not 🎩 Alfred is on).
+if (window.api.onHealth) window.api.onHealth((e) => {
+  if (!e || !e.text) return;
+  appendButlerLine({ cls: e.type === "fixed" ? "bl-butler" : "bl-system", who: "🩺 Health", text: e.text });
+  const p = e.problem;
+  const row = el("jarvis-log") && el("jarvis-log").lastElementChild;
+  if (e.type !== "problem" || !p || !p.fix || !row || !window.api.healthFix) return;
+  const b = document.createElement("button");
+  b.type = "button"; b.className = "bl-fix"; b.dataset.code = p.code; b.textContent = p.fix.label || "Fix it";
+  b.style.cssText = "margin-left:8px;font-size:11px;padding:1px 8px";
+  b.onclick = async () => {
+    b.disabled = true; const was = b.textContent; b.textContent = "…";
+    let r = null; try { r = await window.api.healthFix(p.code); } catch (_) {}
+    b.textContent = r && r.ok ? (r.fixed ? "✔ Fixed" : "✔ Done") : `${was} — ${(r && (r.message || r.error)) || "didn't work"}`.slice(0, 120);
+    b.disabled = !!(r && r.ok);
+  };
+  row.appendChild(b);
+});
+
 // N5 Tools: show the registry so the user sees what the butler can call.
 async function refreshToolsList() {
   const box = el("jarvis-tools"); if (!box || !window.api.toolsList) return;

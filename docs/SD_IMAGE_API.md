@@ -107,6 +107,18 @@ PNG) and saved as `chatgpt-…png`, `view-<view>-…png`, `sheet-…png`, `portr
 keeps its bytes as `.jpg`); the sidecar records `engine:"chatgpt"`, the exact request typed
 (`chatgptPrompt`), the size and how long it took.
 
+Made safe before sending (Stable Diffusion engine, every caller — `sd-sanitize.js`): sampler,
+schedule, checkpoint, VAE, LoRA and upscaler names are matched to the connected app's own lists
+(any case / punctuation; `"dpm++ 2m karras"` → sampler `DPM++ 2M` + scheduler `Karras`; a
+checkpoint by its file name). A name the app doesn't list is left out (the app's current one is
+used) and `warnings[]` says so — e.g. `There's no sampler called “Heun” — used Euler a.`
+Width / height go to multiples of 8 in 64–2048, steps 1–150, CFG 1–30, denoise 0–1; an SDXL
+checkpoint below 768 px or SD1.5 at 1024 px+ only warns. If the app still fails, ONE retry:
+an unexplained 500 (`SD_ERROR`) with extra settings → only the basics (prompt, negative, size,
+steps, CFG, seed, the loaded checkpoint, Automatic VAE); out of memory → a smaller size, batch 1;
+a VAE that can't be loaded → Automatic VAE. The answer says what happened in `warnings[]` and
+`retried: { kind: "basics" | "smaller" | "vae-automatic", after, ok }`. ChatGPT is never retried.
+
 Errors (always `{ ok:false, error, message }`, `message` is plain English for the user):
 
 | Status | `error` | When |

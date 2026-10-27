@@ -29,6 +29,7 @@ const sdParams = require('./sd-params');
 const control = require('./sd-control');
 const sdWorkflows = require('./sd-workflows');
 const sdErrors = require('./sd-errors');
+const sdSanitize = require('./sd-sanitize');
 const views = require('./image-views');
 
 const PURPOSES = ['portrait', 'cover', 'scene', 'illustration', 'map', 'test', 'free', 'view', 'sheet'];
@@ -68,6 +69,7 @@ function createSdStudio(deps) {
   const wfStore = deps.workflowsDir ? sdWorkflows.createWorkflowStore({ dir: deps.workflowsDir() }) : null;
   const chatgpt = deps.chatgpt || null; // chatgpt-image.js engine (optional)
   let lastLists = null;
+  let lastListsAt = 0;
 
   function withUrls(item) { return item && item.preview ? Object.assign({}, item, { previewUrl: fileUrl(item.preview) }) : item; }
 
@@ -88,8 +90,43 @@ function createSdStudio(deps) {
 
   async function lists() {
     const l = await ip.lists();
-    if (l && l.ok) { lastLists = l; try { lib && lib.mergeBackend(l); } catch (_) {} }
+    if (l && l.ok) { lastLists = l; lastListsAt = Date.now(); try { lib && lib.mergeBackend(l); } catch (_) {} }
     return l;
+  }
+
+  // The live lists for "make it safe before sending" (sd-sanitize.js): the cached ones when
+  // they belong to the connected backend, else fetched once. null = unknown → names are left alone.
+  async function liveLists(fresh) {
+    const st = ip.status();
+    if (!st.endpoint) return null;
+    if (fresh || !lastLists || lastLists.backend !== st.backend || Date.now() - lastListsAt > 10 * 60000) {
+      try { await lists(); } catch (_) {}
+    }
+    return lastLists && lastLists.backend === st.backend ? lastLists : null;
+  }
+  function familyOf(ck) {
+    const name = ck || ip.status().checkpoint || ip.status().model || (lastLists && lastLists.current && lastLists.current.checkpoint) || '';
+    if (!name) return '';
+    let fam = '';
+    try { fam = lib ? lib.checkLoras([], name).checkpointBase || '' : ''; } catch (_) { fam = ''; }
+    if (!fam && /sdxl|xl(?:[_\-\s.]|v?\d)|pony|illustrious|noob/i.test(String(name))) fam = 'SDXL';
+    return fam;
+  }
+  // Names / numbers / model family checked against the connected app before anything is sent.
+  async function makeSafe(opts) {
+    const st = ip.status();
+    const ctxFor = async (L) => {
+      const ls = L ? { samplers: L.samplers, schedulers: L.schedulers, checkpoints: L.checkpoints, vaes: L.vaes, loras: L.loras, upscalers: L.upscalers } : {};
+      if (opts.hires && opts.hires.upscaler && st.backend === 'a1111' && st.base) {
+        try { const u = await control.upscalers(st.base); if (u && u.ok) ls.upscalers = u.all; } catch (_) {}
+      }
+      return { backend: st.backend, lists: ls, current: { sampler: st.sampler, scheduler: st.scheduler, checkpoint: st.checkpoint, vae: st.vae }, family: familyOf };
+    };
+    let L = await liveLists(false);
+    let r = sdSanitize.sanitize(opts, await ctxFor(L));
+    // a name we don't know may be a model added since the lists were read: read them again once
+    if (r.unknown.some((f) => f !== 'hires.upscaler') && L && Date.now() - lastListsAt > 20000) { L = await liveLists(true); r = sdSanitize.sanitize(opts, await ctxFor(L)); }
+    return r;
   }
 
   function settings(patch) { const s = ip.setSettings(patch || {}); persist(); return Object.assign({ ok: true }, ip.status(), { settings: s }); }
@@ -143,10 +180,17 @@ function createSdStudio(deps) {
   }
 
   // Generate + save + record. from = 'images-tab' | 'bridge:akowe' | …
-  async function generate(req, from) {
+  // gopts: { noRetry } — fixAndRetry's own retry must not retry again.
+  async function generate(req, from, gopts) {
     const b = buildRequest(req);
     if (b.error) return { ok: false, error: b.error, message: b.message };
     const warnings = [];
+    // Make it safe before sending: real names, sane numbers, size vs model family (sd-sanitize.js).
+    let safe = null;
+    try { safe = await makeSafe(b.opts); } catch (_) { safe = null; }
+    if (safe) { b.opts = safe.opts; warnings.push(...safe.warnings); }
+    const corrected = safe && safe.fixes.length ? safe.fixes.map((f) => `${f.field}:${f.to === '' ? 'dropped' : 'fixed'}`).slice(0, 16) : undefined;
+    const fixedNames = safe && safe.fixes.length ? safe.fixes.filter((f) => /^(sampler|scheduler|checkpoint|vae|lora|hires\.upscaler|refiner\.checkpoint|hires\.checkpoint)$/.test(f.field)).map((f) => `${f.field}: ${f.from} → ${f.to || '(dropped)'}`).slice(0, 12) : undefined;
     if (lib && b.opts.loras && b.opts.loras.length) {
       const ck = b.opts.checkpoint || ip.status().checkpoint || ip.status().model || (lastLists && lastLists.current && lastLists.current.checkpoint) || '';
       try { warnings.push(...lib.checkLoras(b.opts.loras, ck).warnings); } catch (_) {}
@@ -161,17 +205,31 @@ function createSdStudio(deps) {
         if (vaeInfo && (vaeInfo.level === 'hard' || vaeInfo.level === 'soft')) warnings.push({ level: vaeInfo.level, name: vaeInfo.name, kind: 'vae', message: vaeInfo.message });
       } catch (_) { vaeInfo = null; }
     }
-    const r = await ip.generate(b.prompt, b.opts);
+    let r = await ip.generate(b.prompt, b.opts);
+    let retried;
+    // One safe retry (never more): unknown 500 → only the basics; OOM → smaller; a broken VAE → Automatic (not for the Images tab, which has its button).
+    if ((!r || !r.ok) && !(gopts && gopts.noRetry)) {
+      const st = ip.status();
+      const plan = sdSanitize.retryPlan(r, b.opts, { interactive: !from || String(from).startsWith('images-tab'), family: safe ? safe.family : familyOf(b.opts.checkpoint), backend: st.backend, current: { sampler: st.sampler, scheduler: st.scheduler, checkpoint: st.checkpoint, vae: st.vae }, why: whyOf(r) });
+      if (plan) {
+        const r2 = await ip.generate(b.prompt, plan.opts);
+        retried = { kind: plan.kind, after: r.code || r.error, ok: !!(r2 && r2.ok), code: r2 && !r2.ok ? (r2.code || r2.error) : undefined, left: plan.left };
+        log('sd-generate', { retry: plan.kind, from, after: retried.after, ok: retried.ok, code: retried.code, left: plan.left, backend: r.backend });
+        if (r2 && r2.ok) { r = r2; b.opts = plan.opts; warnings.push(plan.warning); }
+        else warnings.push({ level: 'soft', kind: 'retry', message: `Tried once more (${plan.kind === 'basics' ? 'with only the basic settings' : plan.kind === 'smaller' ? 'at a smaller size' : 'with Automatic VAE'}) — that failed too${r2 && r2.code && r2.code !== retried.after ? ` (${r2.code})` : ''}.` });
+      }
+    }
     if (!r || !r.ok) {
       const out = Object.assign({ ok: false, warnings }, r || {}, { message: (r && r.message) || sdBackends.explain(r) });
+      if (retried) out.retried = retried;
       if (out.code === 'VAE_LOAD_FAILED') await explainVae(out, vaeName, vaeInfo);
       // Log the cause, never the prompt (the log is shared with the user).
       // …plus the server's own first line (why) and the settings used, so a bare "HTTP 500" can be diagnosed from the log.
       const o = b.opts || {};
-      let why; try { const t = sdErrors.serverText(out) || ''; why = (t ? sdErrors.firstUsefulLine(t) : '').slice(0, 200) || undefined; } catch (_) { why = undefined; }
+      const why = whyOf(out);
       const used = { w: o.width, h: o.height, steps: o.steps, cfg: o.cfgScale, sampler: o.sampler, scheduler: o.scheduler, checkpoint: o.checkpoint, loras: o.loras && o.loras.length ? o.loras.length : undefined, extra: o.extra && typeof o.extra === 'object' ? Object.keys(o.extra).slice(0, 12) : undefined, options: o.options && typeof o.options === 'object' ? Object.keys(o.options).slice(0, 12) : undefined };
       for (const k of Object.keys(used)) if (used[k] === undefined || used[k] === '') delete used[k];
-      log('sd-generate', { ok: false, from, error: out.error, code: out.code || out.error, status: out.status, backend: out.backend, vae: vaeName || undefined, why, used: Object.keys(used).length ? used : undefined });
+      log('sd-generate', { ok: false, from, error: out.error, code: out.code || out.error, status: out.status, backend: out.backend, vae: vaeName || undefined, why, used: Object.keys(used).length ? used : undefined, corrected, names: fixedNames, retried: retried ? retried.kind : undefined });
       return out;
     }
     if (Array.isArray(r.warnings)) warnings.push(...r.warnings);
@@ -187,14 +245,17 @@ function createSdStudio(deps) {
     try { saved = sdImages.saveGeneration(imagesDir(), r.images, record, { prefix }); }
     catch (e) { return { ok: false, error: 'SAVE_FAILED', message: `The picture was made but couldn't be saved: ${e.message || e}` }; }
     for (const s of saved) { try { recordImage({ path: s.path, prompt: s.record.prompt, seed: s.record.seed, model: s.record.checkpoint || '', from: from || 'images-tab', sha256: s.sha256 }); } catch (_) {} }
-    log('sd-generate', { ok: true, from, count: saved.length, backend: r.backend, lock: b.lock ? b.lock.character : null });
+    log('sd-generate', { ok: true, from, count: saved.length, backend: r.backend, lock: b.lock ? b.lock.character : null, corrected, names: fixedNames, retried: retried ? retried.kind : undefined });
     const out = {
       ok: true, engine: 'sd', backend: r.backend, seed: r.seed, warnings, settings: record,
       images: saved.map((s) => ({ path: s.path, url: fileUrl(s.path), json: s.json, seed: s.record.seed, sha256: s.sha256 })),
     };
+    if (retried) out.retried = retried;
     if (req && req.returnImage) out.images.forEach((im, i) => { im.imageBase64 = r.images[i]; });
     return out;
   }
+  // The server's own first line (no prompt): "KeyError: 'sd_xl_refiner'".
+  function whyOf(r) { try { const t = sdErrors.serverText(r) || ''; return (t ? sdErrors.firstUsefulLine(t) : '').slice(0, 200) || undefined; } catch (_) { return undefined; } }
 
   // A VAE that can't be loaded: name it (the form's choice, else the VAE A1111
   // itself is set to) and add what the library's header check found.
@@ -224,12 +285,13 @@ function createSdStudio(deps) {
     }
     log('sd-fix', { fix, applied });
     const q = Object.assign({}, req || {}, { vae: 'Automatic' });
-    const r = q.test ? await testRender({ vae: 'Automatic' }) : q.mask ? await inpaint(q, from || 'images-tab:fix') : q.initImage ? await img2img(q, from || 'images-tab:fix') : await generate(q, from || 'images-tab:fix');
+    const once = { noRetry: true }; // this IS the one retry
+    const r = q.test ? await testRender({ vae: 'Automatic' }, once) : q.mask ? await inpaint(q, from || 'images-tab:fix', once) : q.initImage ? await img2img(q, from || 'images-tab:fix', once) : await generate(q, from || 'images-tab:fix', once);
     return Object.assign(r || { ok: false }, { fixed: fix, applied, retried: true });
   }
 
   // "🧪 Test: make a 512px image" (o: overrides, e.g. { vae: 'Automatic' } for the retry)
-  function testRender(o) { return generate(Object.assign({ prompt: 'a red apple on a white table, studio photo, simple', width: 512, height: 512, steps: Math.min(ip.status().steps || 20, 20), batchSize: 1, seed: -1, purpose: 'test' }, o || {}), 'images-tab:test'); }
+  function testRender(o, gopts) { return generate(Object.assign({ prompt: 'a red apple on a white table, studio photo, simple', width: 512, height: 512, steps: Math.min(ip.status().steps || 20, 20), batchSize: 1, seed: -1, purpose: 'test' }, o || {}), 'images-tab:test', gopts); }
 
   // Save pictures that are not from generate() (upscale, workflows) the same way.
   function saveOther(r, record, prefix, from, req) {
@@ -245,14 +307,14 @@ function createSdStudio(deps) {
   }
 
   // ---- img2img / inpaint / upscale
-  async function img2img(req, from) {
+  async function img2img(req, from, gopts) {
     if (!req || !req.initImage) return { ok: false, error: 'INVALID_PARAM', code: 'INVALID_PARAM', field: 'initImage', message: 'img2img needs a start picture (initImage).' };
-    return generate(req, from || 'images-tab:img2img');
+    return generate(req, from || 'images-tab:img2img', gopts);
   }
-  async function inpaint(req, from) {
+  async function inpaint(req, from, gopts) {
     if (!req || !req.initImage) return { ok: false, error: 'INVALID_PARAM', code: 'INVALID_PARAM', field: 'initImage', message: 'Inpaint needs the picture to repaint (initImage).' };
     if (!req.mask) return { ok: false, error: 'INVALID_PARAM', code: 'INVALID_PARAM', field: 'mask', message: 'Inpaint needs a mask (white = repaint, black = keep).' };
-    return generate(req, from || 'images-tab:inpaint');
+    return generate(req, from || 'images-tab:inpaint', gopts);
   }
   async function upscale(req, from) {
     const q = Object.assign({}, req || {});
@@ -278,7 +340,7 @@ function createSdStudio(deps) {
   }
   const A1111_HINT = 'This is an Automatic1111 / Forge feature. Connect to Forge or A1111 (started with --api) to use it.';
   const COMFY_HINT = 'This is a ComfyUI feature. Connect to ComfyUI (http://127.0.0.1:8188) to use it.';
-  async function comfyLists() { const l = await ip.lists(); if (l && l.ok) lastLists = l; return l; }
+  async function comfyLists() { const l = await ip.lists(); if (l && l.ok) { lastLists = l; lastListsAt = Date.now(); } return l; }
 
   // ---- settings menu (A1111 /sdapi/v1/options)
   async function optionsGet(keys) {
