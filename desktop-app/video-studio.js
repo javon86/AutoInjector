@@ -79,8 +79,9 @@ function imageSize(buf) {
 
 // A picture given as a file path, a data: URL or plain base64 → { buf, type, width, height, sourcePath }.
 function readImage(img) {
-  if (img == null || img === '') return { error: bad('image', 'Picture→video needs a picture (image: a file path or base64).') };
-  if (typeof img !== 'string') return { error: bad('image', 'image must be a file path or a base64 string.') };
+  const IMG_HINT = 'image must be the full path of a .png / .jpg / .webp picture file, a data:image/…;base64 URL, or base64 — or leave image out for text→video.';
+  if (img == null || img === '') return { error: bad('image', 'Picture→video needs a picture (image: a file path or base64).', IMG_HINT) };
+  if (typeof img !== 'string') return { error: bad('image', 'image must be a file path or a base64 string.', IMG_HINT) };
   const s = img.trim();
   let buf = null; let sourcePath = null;
   const dataUrl = s.match(/^data:image\/[\w.+-]+;base64,(.*)$/s);
@@ -89,15 +90,15 @@ function readImage(img) {
     let p = s;
     if (/^file:\/\//i.test(p)) { try { p = require('url').fileURLToPath(p); } catch (_) {} }
     let st; try { st = fs.statSync(p); } catch (_) { return { error: bad('image', `The picture “${s}” was not found.`, 'Give the full path of a .png / .jpg / .webp file, or the picture as base64.') }; }
-    if (!st.isFile()) return { error: bad('image', `“${s}” is not a file.`) };
+    if (!st.isFile()) return { error: bad('image', `“${s}” is not a file.`, IMG_HINT) };
     if (st.size > MAX_IMAGE_BYTES) return { error: bad('image', 'The picture is too big (over 25 MB).') };
     try { buf = fs.readFileSync(p); sourcePath = p; } catch (e) { return { error: bad('image', `The picture could not be read (${e.code || e.message}).`) }; }
   } else if (/^[A-Za-z0-9+/=\s]+$/.test(s) && s.length > 32) buf = Buffer.from(s.replace(/\s+/g, ''), 'base64');
-  else return { error: bad('image', 'image is neither a picture file path nor base64.') };
+  else return { error: bad('image', `image “${s.slice(0, 60)}” is neither a picture file path nor base64.`, IMG_HINT) };
   if (!buf || !buf.length) return { error: bad('image', 'The picture is empty.') };
   if (buf.length > MAX_IMAGE_BYTES) return { error: bad('image', 'The picture is too big (over 25 MB).') };
   const size = imageSize(buf);
-  if (!size) return { error: bad('image', 'That is not a picture AutoInjector can read (use PNG, JPEG or WEBP).') };
+  if (!size) return { error: bad('image', 'That is not a picture AutoInjector can read (use PNG, JPEG or WEBP).', IMG_HINT) };
   return { buf, type: size.type, width: size.width, height: size.height, sourcePath };
 }
 
@@ -133,17 +134,21 @@ function normalize(mode, req, ctx = {}) {
   const purpose = r.purpose == null || r.purpose === '' ? 'free' : String(r.purpose);
   if (!PURPOSES.includes(purpose)) return { error: bad('purpose', `“${r.purpose}” is not a purpose.`, 'purpose is "clip", "trailer_shot" or "free".') };
   // numbers
+  // What each number may be, in words (for the error that names the field).
+  const maxSecs = Math.floor((L.maxFrames - 1) / d.fps);
+  const RANGE = { width: `${L.minSide}–${L.maxSide} pixels (a multiple of ${L.sizeStep})`, height: `${L.minSide}–${L.maxSide} pixels (a multiple of ${L.sizeStep})`,
+    seconds: `more than 0, up to about ${maxSecs} for ${M.short} (e.g. 4)`, frames: `5–${L.maxFrames}`, fps: `${L.minFps}–${L.maxFps}`, steps: '1–100', cfgScale: '1–20', seed: 'a whole number, or -1 for random', shift: '0–20' };
   for (const k of ['width', 'height', 'seconds', 'frames', 'fps', 'steps', 'cfgScale', 'seed', 'shift']) {
-    if (r[k] !== undefined && r[k] !== null && r[k] !== '' && !isNum(r[k])) return { error: bad(k, `${k} must be a number (got “${r[k]}”).`) };
+    if (r[k] !== undefined && r[k] !== null && r[k] !== '' && !isNum(r[k])) return { error: bad(k, `${k} must be a number (got “${String(r[k]).slice(0, 40)}”).`, `${k} may be ${RANGE[k]}.`) };
   }
   for (const k of ['prompt', 'negativePrompt', 'sampler', 'scheduler', 'characterLock', 'from', 'book']) {
-    if (r[k] !== undefined && r[k] !== null && typeof r[k] !== 'string') return { error: bad(k, `${k} must be text.`) };
+    if (r[k] !== undefined && r[k] !== null && typeof r[k] !== 'string') return { error: bad(k, `${k} must be text.`, k === 'characterLock' ? 'characterLock is the name or id of a character lock (🎨 Images → Character locks).' : '') };
   }
   const fps = clamp(Math.round(isNum(r.fps) ? Number(r.fps) : d.fps), L.minFps, L.maxFps);
   if (isNum(r.fps) && fps !== Number(r.fps)) warn('fps', `fps ${r.fps} → ${fps} (${L.minFps}–${L.maxFps}).`);
   let want;
   if (isNum(r.frames)) want = Number(r.frames);
-  else if (isNum(r.seconds)) { if (Number(r.seconds) <= 0) return { error: bad('seconds', 'seconds must be more than 0.') }; want = Number(r.seconds) * fps + 1; }
+  else if (isNum(r.seconds)) { if (Number(r.seconds) <= 0) return { error: bad('seconds', `seconds must be more than 0 (got ${r.seconds}).`, `seconds may be ${RANGE.seconds}; longer values are shortened to what the model can make.`) }; want = Number(r.seconds) * fps + 1; }
   else if (purpose === 'clip') want = 4 * fps + 1;
   else if (purpose === 'trailer_shot') want = 5 * fps + 1;
   else if (purpose === 'test') want = fps + 1;
@@ -347,7 +352,7 @@ function createVideoStudio(deps = {}) {
     // picture first (its shape decides the size)
     let image = null;
     if (mode === 'i2v') { image = readImage(r.image); if (image.error) return image.error; }
-    else if (r.image != null && r.image !== '') return bad('image', 'video.generate is text→video; use video.animate for a picture.');
+    else if (r.image != null && r.image !== '') return bad('image', 'video.generate is text→video; use video.animate for a picture.', 'Leave image out here, or call video.animate with image = a picture file path.');
     const nz = normalize(mode, r, { settings, imageInfo: image ? { width: image.width, height: image.height } : null });
     if (nz.error) return nz.error;
     const p = nz.params; const warnings = nz.warnings;

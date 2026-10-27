@@ -451,6 +451,146 @@ async function main() {
     assert(d.ok && !d.already && fs.existsSync(path.join(port, 'vae', 'v.bin')), 'Download puts it into the TARGET ComfyUI instead of answering "already downloaded"');
     try { srv.closeAllConnections(); } catch (_) {} srv.close();
   }
+  console.log('\n== a long download survives network hiccups (automatic Range resume) ==');
+  {
+    const SD = require('../sd-installer');
+    const T = fs.mkdtempSync(path.join(os.tmpdir(), 'vflaky-'));
+    const SIZE = 300000; const body = Buffer.alloc(SIZE); for (let i = 0; i < SIZE; i++) body[i] = i % 251;
+    // plan[name] = what each request does in turn: 'ok' | ['cut', n] (send n bytes, then reset the connection) |
+    // 'reset' (reset before any byte) | ['hang', n] (send n bytes, then nothing) | 503
+    const plan = {}; const hits = [];
+    const srv = http.createServer((req, res) => {
+      const name = req.url.split('/').pop(); const m = /bytes=(\d+)-/.exec(req.headers.range || ''); const from = m ? Number(m[1]) : 0;
+      hits.push({ name, range: req.headers.range || '' });
+      const step = (plan[name] || []).length ? plan[name].shift() : 'ok';
+      if (step === 'reset') return req.socket.destroy();
+      if (step === 503) { res.writeHead(503); return res.end('busy'); }
+      res.writeHead(m ? 206 : 200, { 'Content-Length': SIZE - from });
+      if (step === 'ok') return res.end(body.slice(from));
+      const [kind, n] = step;
+      res.write(body.slice(from, from + n), () => { if (kind === 'cut') setTimeout(() => req.socket.destroy(), 20); });
+    });
+    await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+    const base = `http://127.0.0.1:${srv.address().port}`;
+    const modelOf = (name) => ({ id: 'flaky', label: 'Flaky', short: 'Flaky', family: 'wan21', modes: ['t2v'], vramGB: 1, defaults: {}, limits: {}, files: [{ kind: 'diffusion_models', name, url: `${base}/${name}`, bytes: SIZE }] });
+    const fast = { maxTries: 8, retryDelaysMs: [20, 30, 40], stallMs: 300 };
+    const same = (f) => { try { return Buffer.compare(fs.readFileSync(f), body) === 0; } catch (_) { return false; } };
+
+    // 1. ECONNRESET in the middle of the file → waits, resumes with Range from the .part, completes.
+    plan['r.bin'] = [['cut', 120000]];
+    const ev = []; const logs = [];
+    const root = path.join(T, 'one');
+    const vi = VI.createVideoInstaller({ models: { flaky: modelOf('r.bin') }, roots: () => [{ path: root }], freeBytes: () => 1e12, retry: fast, onChange: (s) => ev.push(s), log: (e, d) => logs.push({ e, d }) });
+    let d = await vi.downloadModel('flaky');
+    const rh = hits.filter((h) => h.name === 'r.bin');
+    assert(d.ok && rh.length === 2 && rh[0].range === '' && /^bytes=\d+-$/.test(rh[1].range) && Number(rh[1].range.match(/\d+/)[0]) >= 100000, `ECONNRESET mid-file → resumed by itself with ${rh[1] && rh[1].range} (no second press)`);
+    assert(same(path.join(root, 'diffusion_models', 'r.bin')) && !fs.existsSync(path.join(root, 'diffusion_models', 'r.bin.part')), 'the resumed file is byte-for-byte complete; the .part is renamed into place (size checked)');
+    const rv = ev.find((s) => s.retry);
+    assert(rv && rv.phase === 'downloading' && rv.busy && /Connection dropped — resuming \(try 2 of 8\)/.test(rv.message) && rv.pct > 0.3, `while it waits the bar keeps its place: “${rv && rv.message}”`);
+    assert(logs.some((l) => l.e === 'video-model-download-retry' && l.d.attempt === 2 && /ECONNRESET|ABORTED/.test(l.d.error)) && !logs.some((l) => l.e === 'video-model-download-failed'), 'logged as video-model-download-retry (not a failure)');
+
+    // 2. A stall (bytes stop, the socket stays open) and a 503 are retried too.
+    plan['s.bin'] = [['hang', 50000], 503];
+    const root2 = path.join(T, 'two');
+    const vi2 = VI.createVideoInstaller({ models: { flaky: modelOf('s.bin') }, roots: () => [{ path: root2 }], freeBytes: () => 1e12, retry: fast });
+    d = await vi2.downloadModel('flaky');
+    const sh = hits.filter((h) => h.name === 's.bin');
+    assert(d.ok && sh.length === 3 && sh[2].range === 'bytes=50000-' && same(path.join(root2, 'diffusion_models', 's.bin')), 'no data for a while (stalled) → retried; a 503 → retried; finished from byte 50000');
+
+    // 3. The connection stays down → after the tries a plain message + canResume; Resume continues from the partial.
+    plan['d.bin'] = [['cut', 70000], 'reset', ['cut', 5000], 'reset', 'reset', 'reset'];
+    const root3 = path.join(T, 'three'); const ev3 = [];
+    const vi3 = VI.createVideoInstaller({ models: { flaky: modelOf('d.bin') }, roots: () => [{ path: root3 }], freeBytes: () => 1e12, retry: { maxTries: 4, retryDelaysMs: [10], stallMs: 300 }, onChange: (s) => ev3.push(s) });
+    d = await vi3.downloadModel('flaky');
+    const partFile = path.join(root3, 'diffusion_models', 'd.bin.part');
+    const kept = fs.existsSync(partFile) ? fs.statSync(partFile).size : 0;
+    assert(!d.ok && d.canResume && d.partialBytes === kept && kept >= 75000 && d.tries === 6, `after 4 tries in a row without progress it stops (${d.tries} requests), the .part (${kept} bytes) is kept`);
+    assert(/kept dropping/.test(d.message) && /did not come back after 4 tries/.test(d.message) && /Resume download/.test(d.message) && /not from the start/.test(d.message) && !/undefined/.test(d.message), `a plain message: “${d.message}”`);
+    assert(vi3.status().phase === 'failed' && vi3.status().canResume && !vi3.status().busy && ev3.filter((s) => s.retry).map((s) => s.retry.attempt).join(',') === '2,3,2,3,4', `status: failed + canResume (the Resume button); tries shown 2,3 then 2,3,4 (the count starts over when bytes come): ${ev3.filter((s) => s.retry).map((s) => s.retry.attempt).join(',')}`);
+    assert(vi3.check().models.find((m) => m.id === 'flaky').files[0].partialBytes === kept, 'check() sees the partial (the button says “Resume download … kept”)');
+    hits.length = 0;
+    d = await vi3.downloadModel('flaky'); // = “Resume download”
+    assert(d.ok && hits.length === 1 && hits[0].range === `bytes=${kept}-` && same(path.join(root3, 'diffusion_models', 'd.bin')), `Resume download continues from byte ${kept} (never from zero) and completes`);
+
+    // 4. Cancel during the pause before a retry ends at once (and keeps the partial).
+    plan['c.bin'] = [['cut', 40000], 'reset', 'reset'];
+    const root4 = path.join(T, 'four'); let sawRetry = null;
+    const vi4 = VI.createVideoInstaller({ models: { flaky: modelOf('c.bin') }, roots: () => [{ path: root4 }], freeBytes: () => 1e12, retry: { maxTries: 8, retryDelaysMs: [60000], stallMs: 300 }, onChange: (s) => { if (s.retry && !sawRetry) sawRetry = Date.now(); } });
+    const pc = vi4.downloadModel('flaky');
+    for (let i = 0; i < 200 && !sawRetry; i++) await sleep(10);
+    const t0 = Date.now(); vi4.cancel(); d = await pc;
+    assert(sawRetry && !d.ok && d.error === 'CANCELLED' && Date.now() - t0 < 2000 && vi4.status().phase === 'paused' && vi4.status().canResume && fs.statSync(path.join(root4, 'diffusion_models', 'c.bin.part')).size >= 40000, 'Pause while it waits to retry → paused at once, the partial kept');
+
+    // 5. Pressing ⬇ Download five times in two seconds starts ONE download.
+    plan['p.bin'] = [['cut', 30000]];
+    const root5 = path.join(T, 'five'); const logs5 = [];
+    const vi5 = VI.createVideoInstaller({ models: { flaky: modelOf('p.bin') }, roots: () => [{ path: root5 }], freeBytes: () => 1e12, retry: { maxTries: 8, retryDelaysMs: [150], stallMs: 300 }, log: (e) => logs5.push(e) });
+    hits.length = 0;
+    const presses = [vi5.downloadModel('flaky'), vi5.downloadModel('flaky'), vi5.downloadModel('flaky')];
+    await sleep(60); presses.push(vi5.downloadModel('flaky'), vi5.installAll('flaky'));
+    const rs = await Promise.all(presses);
+    assert(rs[0].ok && rs.slice(1).every((x) => !x.ok && x.error === 'BUSY' && x.alreadyDownloading && /Already downloading Flaky/.test(x.message) && /ignored/.test(x.message)), `presses 2–5 → “${rs[1].message}”`);
+    assert(hits.filter((h) => h.name === 'p.bin' && !h.range).length === 1 && logs5.filter((e) => e === 'video-model-download-start').length === 1 && same(path.join(root5, 'diffusion_models', 'p.bin')), 'only one download ran (one request from byte 0, one start in the log), and it finished');
+
+    // 6. The same downloader serves the 🎨 starter checkpoints (sd-installer.downloadModel).
+    const home = path.join(T, 'sdhome'); fs.mkdirSync(path.join(home, 'ComfyUI_windows_portable', 'ComfyUI'), { recursive: true });
+    fs.writeFileSync(path.join(home, 'ComfyUI_windows_portable', 'ComfyUI', 'main.py'), '');
+    plan['k.bin'] = [['cut', 90000]];
+    const sev = [];
+    const sdi = SD.createInstaller({ home, models: { tiny: { id: 'tiny', label: 'tiny', file: 'k.bin', url: `${base}/k.bin`, approxBytes: 1, expectedSize: SIZE, base: 'SD1.5' } }, retry: fast, onChange: (s) => sev.push(s) });
+    const sp = sdi.downloadModel('tiny');
+    const sp2 = await sdi.downloadModel('tiny');
+    d = await sp;
+    assert(d.ok && same(path.join(home, 'ComfyUI_windows_portable', 'ComfyUI', 'models', 'checkpoints', 'k.bin')) && sev.some((s) => s.retry && /Connection dropped — resuming \(try 2 of 8\)/.test(s.message)), 'sd-installer starter checkpoint: ECONNRESET → resumed by itself, completes');
+    assert(sp2.error === 'BUSY' && /Already downloading/.test(sp2.message), 'sd-installer: a second press while it downloads → “Already downloading”');
+    // a server whose file has another size is NOT retried (trying again would not fix it)
+    let tries = 0;
+    const odd = http.createServer((req, res) => { tries++; res.writeHead(200, { 'Content-Length': 1000 }); res.end(Buffer.alloc(1000)); });
+    await new Promise((r) => odd.listen(0, '127.0.0.1', r));
+    d = await SD.download(`http://127.0.0.1:${odd.address().port}/x`, path.join(T, 'odd', 'x.bin'), { expectedSize: 2000, retryDelaysMs: [10] });
+    assert(!d.ok && d.error === 'SIZE_MISMATCH' && tries === 1 && fs.existsSync(path.join(T, 'odd', 'x.bin.part')) && !fs.existsSync(path.join(T, 'odd', 'x.bin')), 'a file of another size → SIZE_MISMATCH at once (not retried), never renamed into place');
+    assert(SD.isRetryable('ECONNRESET') && SD.isRetryable('HTTP_502') && SD.isRetryable('STALLED') && !SD.isRetryable('HTTP_404') && !SD.isRetryable('ENOSPC') && SD.MAX_TRIES === 8 && SD.RETRY_DELAYS_MS.reduce((a, b) => a + b, 0) >= 7 * 60000, 'retried: resets / timeouts / stalls / 5xx — not 404 or a full disk; 8 tries over several minutes by default');
+    try { odd.closeAllConnections(); srv.closeAllConnections(); } catch (_) {} odd.close(); srv.close();
+  }
+  console.log('\n== the Setup tab: one download per press-storm, the bar while it resumes, “Resume download” ==');
+  {
+    const { JSDOM } = require('jsdom');
+    const html = fs.readFileSync(path.join(__dirname, '..', 'controls.html'), 'utf8');
+    const dom = new JSDOM(html, { runScripts: 'outside-only', url: 'http://localhost/controls.html' });
+    const calls = []; let onInstall = null; let release = null; let partial = 0;
+    const model = () => ({ id: 'wan22-ti2v-5b', label: 'Wan 2.2 TI2V 5B', short: 'Wan 2.2 5B', installed: false, sizeText: '17.0 GB', missing: ['a', 'b', 'c'], modes: ['t2v', 'i2v'], vramNote: '', files: [{ name: 'a', present: false, partialBytes: partial }] });
+    const video = {
+      status: async () => ({ ok: true, ready: false, comfy: { connected: false, installed: true }, settings: { model: 'wan22-ti2v-5b' }, message: 'not set up' }),
+      models: async () => ({ ok: true, anyComfy: true, roots: [{ source: 'test' }], target: { path: '/x' }, models: [model()] }),
+      downloadModel: (id) => { calls.push(['downloadModel', id]); return new Promise((r) => { release = r; }); },
+      installCancel: async () => { calls.push(['cancel']); return { ok: true }; },
+      onInstall: (fn) => { onInstall = fn; },
+    };
+    dom.window.api = new Proxy({ video, akoweTab: async () => ({}) }, { get(t, k) { if (k in t) return t[k]; if (typeof k === 'string' && /^on[A-Z]/.test(k)) return () => {}; return async () => ({ ok: true }); } });
+    const tk = (ms = 30) => sleep(ms);
+    const $ = (id) => dom.window.document.getElementById(id);
+    const click = (el) => el.dispatchEvent(new dom.window.Event('click', { bubbles: true }));
+    dom.window.eval(fs.readFileSync(path.join(__dirname, '..', 'videos-studio.js'), 'utf8'));
+    click($('tab-app-video')); await tk(80);
+    click($('vd-sub-setup')); await tk(80);
+    const btn = () => $('btn-vd-dl-wan22-ti2v-5b');
+    assert(btn() && !btn().disabled && /⬇ Download/.test(btn().textContent) && $('btn-vd-dl-resume').hidden, 'Setup lists the model with ⬇ Download (Resume hidden)');
+    for (let i = 0; i < 5; i++) { click(btn()); await tk(5); } // five presses in a row
+    assert(calls.filter((c) => c[0] === 'downloadModel').length === 1, `five presses → ONE download asked for (${calls.filter((c) => c[0] === 'downloadModel').length})`);
+    assert(/Already downloading/.test($('vd-dl-msg').textContent) && btn().disabled && !$('btn-vd-dl-cancel').disabled, `the extra presses say so: “${$('vd-dl-msg').textContent}”; Download greyed, Pause stays usable`);
+    onInstall({ busy: true, phase: 'downloading', model: 'wan22-ti2v-5b', pct: 0.42, retry: { attempt: 2, max: 8 }, message: 'Connection dropped — resuming (try 2 of 8)… Wan 2.2 5B: 7.1 GB of 17.0 GB is kept.' });
+    assert(/resuming \(try 2 of 8\)/.test($('vd-dl-msg').textContent) && $('vd-dl-bar').style.width === '42%' && $('btn-vd-dl-resume').hidden, 'a dropped connection: “resuming (try 2 of 8)” and the bar stays at 42%');
+    partial = 7.1 * 1073741824;
+    onInstall({ busy: false, phase: 'failed', model: 'wan22-ti2v-5b', pct: 0.42, canResume: true, message: 'The internet connection kept dropping…' });
+    release({ ok: false, error: 'ECONNRESET', canResume: true, model: 'wan22-ti2v-5b', message: 'The internet connection kept dropping (ECONNRESET) … Nothing is lost: press “Resume download” — it continues from there, not from the start.' });
+    await tk(80);
+    assert(!$('btn-vd-dl-resume').hidden && /Resume download/.test($('vd-dl-msg').textContent) && $('vd-dl-bar').style.width === '42%', 'it gives up → the plain message + a visible “↻ Resume download” button, the bar still shows what is kept');
+    assert(btn() && /Resume download \(7\.1 GB kept\)/.test(btn().textContent) && !btn().disabled, `the model's own button says so too: “${btn() && btn().textContent}”`);
+    click($('btn-vd-dl-resume')); await tk(20);
+    assert(calls.filter((c) => c[0] === 'downloadModel').length === 2 && calls.slice(-1)[0][1] === 'wan22-ti2v-5b' && $('btn-vd-dl-resume').hidden, '“Resume download” asks for the same model again (it continues from the .part)');
+    release({ ok: true, model: 'wan22-ti2v-5b' }); await tk(50);
+    dom.window.close();
+  }
   console.log('\n== an oversized bridge body is refused and its connection closed ==');
   {
     const b = createServiceBridge({ video: { backend: () => ({}), request: async () => ({ ok: true }) } });
