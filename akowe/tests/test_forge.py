@@ -589,10 +589,99 @@ def test_book_save_includes_the_dossier(fx):
     forge_example.load(app, "author", pid, BR, {})
     files, _info = app.saver.collect(pid, BR)
     names = sorted(k for k in files if k.startswith("Character Forge/"))
-    assert "Character Forge/CH-001 Moki Vey - Character Forge dossier.pdf" in names
-    assert "Character Forge/CH-001 Moki Vey - Character Forge dossier.json" in names
+    assert "Character Forge/CH-001 Moki Vey - dossier.pdf" in names
+    assert "Character Forge/CH-001 Moki Vey - dossier.json" in names
     assert "Character Forge/CH-001 pictures/portrait.jpg" in names and "Character Forge/CH-001 pictures/dash.jpg" in names
-    assert json.loads(files["Character Forge/CH-001 Moki Vey - Character Forge dossier.json"])["code"] == "CH-001"
+    assert json.loads(files["Character Forge/CH-001 Moki Vey - dossier.json"])["code"] == "CH-001"
+
+
+def test_book_save_with_a_long_name_and_a_long_books_folder(fx, tmp_path):
+    from akowe import book_save
+    app, _f, pid = fx
+    books = tmp_path / ("b" * max(10, 100 - len(str(tmp_path)) - 1))  # a books folder of about 100 characters
+    app.store.set_setting(book_save.SETTINGS_KEY, {"path": str(books)})
+    rid = make_char(app, pid, "Captain Alexander Montgomery Whitfield")
+    put(app, pid, rid, {"inner_life": {"wants": {"text": "the fleet back"}}})
+    app.forge.upload("author", pid, BR, rid, "portrait", png(), {})
+    res = app.saver.save_now(pid, BR)
+    assert res["ok"]
+    files, _info = app.saver.collect(pid, BR)
+    forge_files = [k for k in files if k.startswith("Character Forge/")]
+    assert len(forge_files) == 3 and all(len(k) <= 60 for k in forge_files), forge_files
+    assert any(k.startswith("Character Forge/CH-001 Captain") and k.endswith(".pdf") for k in forge_files)
+
+
+def test_chapter_brief_keeps_the_authors_own_canon_field_text(fx):
+    app, _f, pid = fx
+    own = make_char(app, pid, "Ada Vey")
+    canon = make_char(app, pid, "Bo Rook", {"appearance": "Tall, grey coat."})
+    put(app, pid, own, {"record": {"appearance": {"text": "Short, red scarf."}}})
+    put(app, pid, canon, {"inner_life": {"wants": {"text": "the log"}}})
+    present = chars_mod.canon_characters(app.store, pid, BR)
+    b = forge.chapter_brief(app.store, pid, BR, present, {own: ["A", "E"], canon: ["A", "E"]})
+    assert [x["name"] for x in b] == ["Ada Vey"]  # Bo Rook's appearance is canon: already in the brief
+    assert b[0]["details"] == {"Appearance": "Short, red scarf."}
+
+
+def test_cover_summary_never_runs_into_the_footer(fx):
+    app, _f, pid = fx
+    rid = make_char(app, pid, "Bo Rook")
+    line = " ".join(["harbour"] * 20)[:160]
+    put(app, pid, rid, {}, summary=[line, line, line])
+    d = forge.public(app.store, pid, BR, rid)
+    assert d["summary"] == [line] * 3
+    captured = {}
+    real = forge_pdf.render_pdf
+
+    def spy(layout, **kw):
+        captured["layout"] = layout
+        return real(layout, **kw)
+    forge_pdf.render_pdf = spy
+    try:
+        forge_pdf.render(d, {})
+    finally:
+        forge_pdf.render_pdf = real
+    body = [op for op in captured["layout"].pages[0].ops if op[0] == "text" and op[2] != 6.8]  # 6.8: the footer
+    assert any("harbour" in op[5] for op in body)
+    assert all(op[4] >= forge_pdf.FOOT_TOP for op in body), [(op[4], op[5][:20]) for op in body]
+
+
+def test_first_appearance_counts_earlier_scene_cards(monkeypatch):
+    from akowe import chapter_brief
+    from akowe import scenes as scenes_mod
+
+    def item(cid, summary):
+        return {"summary": summary, "facts": [{"subject_id": cid, "predicate": "plan.item_id", "value": cid},
+                                              {"subject_id": cid, "predicate": "plan.order", "value": int(cid[2:])}]}
+    outline = {"record_id": "OUT", "data": {"chapters": [item("ch1", "A storm at sea."), item("ch2", "The quay.")]}}
+    cs = [{"subject_id": "tom_reed", "record_id": "R1", "name": "Tom Reed"}]
+    cards = {"ch1": [{"characters": ["Tom Reed"], "goals": []}]}
+    monkeypatch.setattr(scenes_mod, "get_entry", lambda _s, _p, _b, _o, cid: {"cid": cid})
+    monkeypatch.setattr(scenes_mod, "usable", lambda _e, _o: True)
+    monkeypatch.setattr(scenes_mod, "brief_cards", lambda e: cards.get(e["cid"], []))
+    got = {}
+    monkeypatch.setattr(forge, "chapter_brief", lambda _s, _p, _b, _present, letters: got.update(letters) or [])
+    chapter_brief._forge_details(None, "p", BR, outline, "ch2", cs, cs, ["The quay."])
+    assert got == {"R1": ["E"]}  # Tom Reed was in a ch1 scene card: not a first appearance
+    chapter_brief._forge_details(None, "p", BR, outline, "ch1", cs, cs, ["A storm at sea."])
+    assert got == {"R1": ["E", "A"]}
+
+
+def test_dossier_text_of_a_canon_field_survives_canon_filling_it(fx, monkeypatch):
+    app, _f, pid = fx
+    rid = make_char(app, pid, "Ada Vey")
+    put(app, pid, rid, {"record": {"appearance": {"text": "Short, red scarf."}}})
+    real = forge._canon_of
+
+    def filled(*a):
+        c = real(*a)
+        return dict(c, attributes=dict(c.get("attributes") or {}, appearance="Tall, grey coat."))
+    monkeypatch.setattr(forge, "_canon_of", filled)
+    d = put(app, pid, rid, {"inner_life": {"wants": {"text": "the log"}}})
+    assert field(d, "appearance")["text"] == "Tall, grey coat." and field(d, "appearance")["readonly"]
+    assert forge.raw_entry(app.store, pid, BR, rid)["fields"]["appearance"]["text"] == "Short, red scarf."
+    monkeypatch.setattr(forge, "_canon_of", real)  # the canon attribute is emptied again: the author's text is back
+    assert field(forge.public(app.store, pid, BR, rid), "appearance")["text"] == "Short, red scarf."
 
 
 def test_http_api_contract(fx, no_provider_sleep):  # noqa: F811

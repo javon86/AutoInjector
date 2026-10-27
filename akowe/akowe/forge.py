@@ -669,8 +669,11 @@ def _write_through(store, pid, branch, rid, canon, fields: dict, changed: set) -
 
 def _store_fields(entry: dict, fields: dict):
     out = {}
+    stored = entry.get("fields") or {}
     for k, d in fields.items():
         if d.get("readonly"):
+            if isinstance(stored.get(k), dict):
+                out[k] = stored[k]  # the dossier's own text stays, shown again if the canon record is emptied
             continue
         rec = {"text": d["text"], "status": d["status"], "protected": bool(d["protected"]),
                "letters": d["letters"]}
@@ -1803,11 +1806,12 @@ def chapter_brief(store, pid, branch, present: list[dict], letters_by_rid: dict,
             if not entry or not want:
                 continue
             fields = entry.get("fields") or {}
+            attrs = c.get("attributes") or {}
             details = {}
             for key, f in FIELDS.items():
                 if key in SHEET_SCALAR or key in VOICE_SCALAR or key in VOICE_LIST or key in PRESSURE \
-                        or key in MUST_KEYS or key in REL_KEYS or key in CANON_ATTRS:
-                    continue
+                        or key in MUST_KEYS or key in REL_KEYS or (key in CANON_ATTRS and clip(attrs.get(key))):
+                    continue  # (a canon field only while the canon record fills it: else it is the author's own)
                 d = fields.get(key) or {}
                 t = clip(d.get("text"), 300)
                 if not t or d.get("status") not in ("supplied", "approved"):
