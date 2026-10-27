@@ -509,18 +509,19 @@ def({
     negative_prompt: { type: 'string', maxLength: 1000 },
     loras: { type: 'array', maxItems: 4, items: { type: 'object', required: ['name'], properties: { name: { type: 'string', minLength: 1, maxLength: 200 }, weight: { type: 'number' } }, additionalProperties: false } },
     engine: { type: 'string', enum: ['auto', 'sd', 'chatgpt'] },
-    purpose: { type: 'string', enum: ['free', 'portrait', 'cover', 'scene', 'illustration', 'view', 'sheet'] },
+    purpose: { type: 'string', enum: ['free', 'portrait', 'cover', 'scene', 'illustration', 'map', 'view', 'sheet'] },
     view: { type: 'string', enum: ['front', 'three_quarter_front', 'side', 'three_quarter_back', 'back', 'idle', 'draw', 'attack', 'dash', 'defend'] },
     new_chat: { type: 'boolean', description: 'ChatGPT engine: start a fresh ChatGPT chat first' },
+    upscale: { type: 'integer', enum: [2, 4], description: 'Upscale the finished picture ×2 or ×4 (needs a connected Stable Diffusion app)' },
   }, additionalProperties: false },
   check(a) {
     if (!a.prompt && !a.character && !a.appearance) return { ok: false, error: 'say what to draw (prompt), or give a character / appearance' };
     if (a.purpose === 'view' && !a.view) return { ok: false, error: 'purpose "view" needs a view (front, side, back, …)' };
     return { ok: true, args: a };
   },
-  describe: (a) => `Make ${a.purpose === 'sheet' ? 'a turnaround sheet' : a.purpose === 'view' ? `the ${String(a.view || '').replace(/_/g, ' ')} reference view` : a.purpose === 'portrait' ? 'a portrait' : 'an image'}${a.prompt ? ` of ${q(a.prompt)}` : ''}${a.width && a.height ? ` at ${a.width}×${a.height}` : ''}${a.style ? `, style ${q(a.style)}` : ''}${a.character ? `, with ${q(a.character)} (their character lock if saved)` : ''}${a.appearance ? ` (${clip(a.appearance, 120)})` : ''}${a.loras && a.loras.length ? `, LoRAs ${a.loras.map((l) => l.name).join(', ')}` : ''}${a.engine === 'chatgpt' ? ' with ChatGPT' : a.engine === 'sd' ? ' with Stable Diffusion' : ''}, and save it in the images folder.`,
+  describe: (a) => `Make ${a.purpose === 'sheet' ? 'a turnaround sheet' : a.purpose === 'view' ? `the ${String(a.view || '').replace(/_/g, ' ')} reference view` : a.purpose === 'portrait' ? 'a portrait' : a.purpose === 'map' ? 'a map' : a.purpose === 'cover' ? 'cover art' : 'an image'}${a.prompt ? ` of ${q(a.prompt)}` : ''}${a.width && a.height ? ` at ${a.width}×${a.height}` : ''}${a.style ? `, style ${q(a.style)}` : ''}${a.character ? `, with ${q(a.character)} (their character lock if saved)` : ''}${a.appearance ? ` (${clip(a.appearance, 120)})` : ''}${a.loras && a.loras.length ? `, LoRAs ${a.loras.map((l) => l.name).join(', ')}` : ''}${a.engine === 'chatgpt' ? ' with ChatGPT' : a.engine === 'sd' ? ' with Stable Diffusion' : ''}, and save it in the images folder.`,
   async run(a, ctx) {
-    const r = await ctx.generateImage({ prompt: a.prompt, width: a.width, height: a.height, style: a.style, character: a.character, appearance: a.appearance, negativePrompt: a.negative_prompt, loras: a.loras, engine: a.engine, purpose: a.purpose, view: a.view, newChat: a.new_chat });
+    const r = await ctx.generateImage({ prompt: a.prompt, width: a.width, height: a.height, style: a.style, character: a.character, appearance: a.appearance, negativePrompt: a.negative_prompt, loras: a.loras, engine: a.engine, purpose: a.purpose, view: a.view, newChat: a.new_chat, upscale: a.upscale });
     if (!r || !r.ok) return { ok: false, error: (r && r.error) || 'IMAGE_FAILED', message: (r && r.message) || `The image couldn't be made (${(r && r.error) || 'unknown'}). Check the 🎨 Images tab.` };
     return { ok: true, message: `Saved ${r.count || 1} image(s)${r.engine === 'chatgpt' ? ' (made by ChatGPT)' : ''}.`, data: { path: r.path, paths: r.paths || [r.path], engine: r.engine || null, view: r.view || null }, image: r.path };
   },

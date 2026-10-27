@@ -45,10 +45,11 @@ const PASS = { 'x-passthrough': true };
 const VIEW_IDS = ['front', 'three_quarter_front', 'side', 'three_quarter_back', 'back', 'idle', 'draw', 'attack', 'dash', 'defend'];
 const GENERATE_SCHEMA = { type: 'object', additionalProperties: false, required: [], properties: {
   prompt: { type: 'string', minLength: 1, maxLength: 4000 }, negativePrompt: str, loras: LORAS, characterLock: { type: 'string', maxLength: 120 },
-  purpose: { type: 'string', enum: ['portrait', 'cover', 'scene', 'illustration', 'test', 'free', 'view', 'sheet'] },
+  purpose: { type: 'string', enum: ['portrait', 'cover', 'scene', 'illustration', 'map', 'test', 'free', 'view', 'sheet'] },
   engine: { type: 'string', enum: ['auto', 'sd', 'chatgpt'], description: 'sd = Stable Diffusion, chatgpt = ChatGPT\'s own image generation in its pane, auto = SD when connected, else ChatGPT' },
   view: { type: 'string', enum: VIEW_IDS, description: 'with purpose "view": which full-body reference view' },
   appearance: { type: 'string', maxLength: 2000, description: 'what the character looks like, in words' },
+  upscale: { type: 'integer', minimum: 2, maximum: 4, description: 'upscale the finished picture ×2 or ×4' }, size: { type: 'object', description: 'shape hint {width, height}, e.g. {width:6,height:9} for a 6×9 in cover' },
   newChat: { type: 'boolean', description: 'ChatGPT engine: start a fresh ChatGPT chat' }, series: { type: 'string', maxLength: 120 },
   width: { type: 'integer', minimum: 64, maximum: 4096 }, height: { type: 'integer', minimum: 64, maximum: 4096 },
   steps: { type: 'integer', minimum: 1, maximum: 200 }, cfgScale: { type: 'number', minimum: 0, maximum: 40 }, seed: { type: 'integer' },

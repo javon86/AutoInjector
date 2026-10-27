@@ -148,7 +148,7 @@ function createImagesApi(d) {
       generate: wrap((opts) => {
         const bad = checkGenKeys(opts); if (bad) return bad;
         const o = opts || {}; const from = `api:${String(o.from || 'alfred').slice(0, 40)}`;
-        if ((o.engine && o.engine !== 'sd') || o.purpose === 'view' || o.purpose === 'sheet' || o.view || o.appearance) {
+        if ((o.engine && o.engine !== 'sd') || ['view', 'sheet', 'map'].includes(o.purpose) || o.view || o.appearance || o.upscale || o.size) {
           if (typeof studio.requestFrom !== 'function') return notWired('The ChatGPT image engine');
           return studio.requestFrom(Object.assign({}, o), from);
         }

@@ -31,7 +31,7 @@ const sdWorkflows = require('./sd-workflows');
 const sdErrors = require('./sd-errors');
 const views = require('./image-views');
 
-const PURPOSES = ['portrait', 'cover', 'scene', 'illustration', 'test', 'free', 'view', 'sheet'];
+const PURPOSES = ['portrait', 'cover', 'scene', 'illustration', 'map', 'test', 'free', 'view', 'sheet'];
 const ENGINES = ['auto', 'sd', 'chatgpt'];
 
 // Width × height for a purpose on a model family (multiples of 64).
@@ -40,8 +40,22 @@ function sizeFor(purpose, base) {
   const big = ['SDXL', 'Pony', 'Illustrious', 'NoobAI', 'Flux', 'SD3'].includes(base);
   if (purpose === 'portrait' || purpose === 'cover') return big ? { width: 832, height: 1216 } : { width: 512, height: 768 };
   if (purpose === 'scene' || purpose === 'illustration') return big ? { width: 1216, height: 832 } : { width: 768, height: 512 };
+  if (purpose === 'map') return big ? { width: 1344, height: 768 } : { width: 768, height: 448 };
   return big ? { width: 1024, height: 1024 } : { width: 512, height: 512 };
 }
+// A shape hint ({width, height} in any unit, e.g. a 6×9 in cover) → the purpose's pixel area in that shape, on a 64 grid.
+function sizeForShape(purpose, base, shape) {
+  const w0 = Number(shape && shape.width), h0 = Number(shape && shape.height);
+  if (!(w0 > 0 && h0 > 0)) return null;
+  const ref = sizeFor(purpose, base);
+  const area = ref.width * ref.height;
+  const r = Math.min(4, Math.max(0.25, w0 / h0));
+  const snap = (v) => Math.max(256, Math.min(2048, Math.round(v / 64) * 64));
+  return { width: snap(Math.sqrt(area * r)), height: snap(Math.sqrt(area / r)) };
+}
+// Map pictures: the words that make a picture a map (both engines), and what to keep out of it.
+const MAP_WORDS = 'illustrated map seen from directly above, top-down cartography, clear coastlines, rivers, roads and landmarks, no text, no letters, no labels';
+const MAP_NEGATIVE = 'text, letters, words, labels, watermark, signature, perspective view, people';
 
 function createSdStudio(deps) {
   const ip = deps.imageProvider;
@@ -112,10 +126,16 @@ function createSdStudio(deps) {
       prompt = vp.prompt;
       opts.negativePrompt = views.mergeNegative(opts.negativePrompt, vp.negative);
     }
+    if (purpose === 'map') {
+      prompt = [prompt, MAP_WORDS].filter(Boolean).join(', ');
+      opts.negativePrompt = views.mergeNegative(opts.negativePrompt, MAP_NEGATIVE);
+    }
     if (!opts.width || !opts.height) {
       const ck = opts.checkpoint || ip.status().checkpoint || ip.status().model;
       const base = lib ? lib.checkLoras([], ck).checkpointBase : '';
-      if (purpose !== 'free' || !ip.status().width) Object.assign(opts, sizeFor(purpose, base));
+      const shaped = r.size ? sizeForShape(purpose, base, r.size) : null;
+      if (shaped) Object.assign(opts, shaped);
+      else if (purpose !== 'free' || !ip.status().width) Object.assign(opts, sizeFor(purpose, base));
     }
     for (const k of Object.keys(opts)) if (opts[k] === undefined || opts[k] === '') delete opts[k];
     if (opts.negativePrompt === undefined) opts.negativePrompt = '';
@@ -429,7 +449,7 @@ function createSdStudio(deps) {
   }
   // The contract's answer: today's shape + engine, view echoed, paths.
   function contractShape(r, engine, purpose, view, withUrl) {
-    const images = (r.images || []).map((im) => { const o = { path: im.path, seed: im.seed, sha256: im.sha256 }; if (im.width) { o.width = im.width; o.height = im.height; } if (withUrl && im.url) o.url = im.url; if (im.imageBase64) o.imageBase64 = im.imageBase64; return o; });
+    const images = (r.images || []).map((im) => { const o = { path: im.path, seed: im.seed, sha256: im.sha256 }; if (im.width) { o.width = im.width; o.height = im.height; } if (withUrl && im.url) o.url = im.url; if (im.imageBase64) o.imageBase64 = im.imageBase64; if (im.upscaled) { o.upscaled = im.upscaled; o.original = im.original; } return o; });
     const out = { ok: true, engine, purpose: (r.settings && r.settings.purpose) || purpose, backend: r.backend || engine, seed: r.seed == null ? null : r.seed, warnings: r.warnings || [], settings: r.settings, paths: images.map((im) => im.path), images };
     if (view) out.view = view;
     return out;
@@ -464,11 +484,22 @@ function createSdStudio(deps) {
   // One request from any caller (the bridge, the Images tab, Alfred): from = 'bridge:akowe' | 'images-tab' | 'api:alfred' …
   async function requestFrom(body, from) {
     const b = Object.assign({}, body || {});
+    // upscale: 2 | 4 after the picture is made (Stable Diffusion Extras); size: a shape hint {width, height}.
+    let up = null;
+    if (b.upscale != null && b.upscale !== false && b.upscale !== 1) {
+      up = Number(b.upscale);
+      if (![2, 4].includes(up)) return { ok: false, error: 'INVALID_PARAM', code: 'INVALID_PARAM', field: 'upscale', message: `upscale must be 2 or 4 (got “${b.upscale}”).`, hint: 'Leave it out for no upscaling.' };
+    }
+    delete b.upscale;
+    if (b.size != null && !(b.size && Number(b.size.width) > 0 && Number(b.size.height) > 0)) return { ok: false, error: 'INVALID_PARAM', code: 'INVALID_PARAM', field: 'size', message: 'size must be {width, height} with two positive numbers (any unit — only the shape counts).' };
     const pick = resolveEngine(b);
     if (pick.fail) { log('image-request', { from, ok: false, error: pick.fail.error, engine: b.engine || 'auto' }); return pick.fail; }
     const view = pick.purpose === 'view' ? b.view : undefined;
     if (pick.engine === 'chatgpt') {
+      if (pick.purpose === 'map') b.prompt = [String(b.prompt || '').trim(), MAP_WORDS].filter(Boolean).join(', ');
+      if (b.size) { const ratio = Number(b.size.width) / Number(b.size.height); b.prompt = `${String(b.prompt || '').trim()}${b.prompt ? ', ' : ''}${ratio < 0.9 ? 'tall (portrait) format' : ratio > 1.1 ? 'wide (landscape) format' : 'square format'}`; }
       const r = await viaChatgpt(b, pick.purpose, from);
+      if (r.ok && up) await upscaleAll(r, up, from);
       return r.ok ? contractShape(r, 'chatgpt', pick.purpose, view, !String(from).startsWith('bridge:')) : r;
     }
     const st = ip.status();
@@ -476,7 +507,24 @@ function createSdStudio(deps) {
     for (const k of ['engine', 'series', 'newChat', 'timeoutMs']) delete b[k];
     const r = await generate(Object.assign(b, { purpose: pick.purpose, batchSize: Math.max(1, Math.min(4, Number(b.count) || 1)) }), from);
     if (!r.ok) return Object.assign({ engine: 'sd' }, r);
+    if (up) await upscaleAll(r, up, from);
     return contractShape(r, 'sd', pick.purpose, view, !String(from).startsWith('bridge:'));
+  }
+  // Upscale every picture of a result in place (the bigger file replaces the entry; the original stays on disk).
+  // Needs a connected Stable Diffusion app (Extras / an upscale model); otherwise a soft warning, never a failure.
+  async function upscaleAll(r, factor, from) {
+    r.warnings = r.warnings || [];
+    if (!ip.status().endpoint) { r.warnings.push({ level: 'soft', kind: 'upscale', message: `Not upscaled ×${factor}: upscaling needs a connected Stable Diffusion app.` }); return; }
+    for (const im of r.images || []) {
+      if (!im || !im.path) continue;
+      let u;
+      try { u = await upscale({ image: im.path, factor }, from); } catch (e) { u = { ok: false, message: String((e && e.message) || e) }; }
+      const out = u && u.ok && u.images && u.images[0];
+      if (!out || !out.path) { r.warnings.push({ level: 'soft', kind: 'upscale', message: `Not upscaled: ${(u && u.message) || 'the upscale failed'}.` }); continue; }
+      const keepB64 = im.imageBase64 !== undefined;
+      Object.assign(im, { path: out.path, url: out.url, sha256: out.sha256, width: out.width || im.width, height: out.height || im.height, upscaled: factor, original: im.path });
+      if (keepB64) { try { im.imageBase64 = require('fs').readFileSync(out.path).toString('base64'); } catch (_) {} }
+    }
   }
   function request(body) { return requestFrom(body, `bridge:${String((body && body.from) || 'akowe').slice(0, 40)}`); }
   function chatgptStatus() {
@@ -513,4 +561,4 @@ function createSdStudio(deps) {
     test: () => testRender() };
 }
 
-module.exports = { createSdStudio, sizeFor, PURPOSES, ENGINES };
+module.exports = { createSdStudio, sizeFor, sizeForShape, PURPOSES, ENGINES, MAP_WORDS };

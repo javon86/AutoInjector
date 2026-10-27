@@ -39,7 +39,7 @@ const RESIZE_MODES = ['just resize', 'crop and resize', 'resize and fill', 'just
 const INPAINT_FILL = ['fill', 'original', 'latent noise', 'latent nothing'];
 const CN_CONTROL_MODES = ['Balanced', 'My prompt is more important', 'ControlNet is more important'];
 const CN_RESIZE_MODES = ['Just Resize', 'Crop and Resize', 'Resize and Fill'];
-const PURPOSES = ['portrait', 'cover', 'scene', 'illustration', 'test', 'free', 'view', 'sheet'];
+const PURPOSES = ['portrait', 'cover', 'scene', 'illustration', 'map', 'test', 'free', 'view', 'sheet'];
 const ENGINES = ['auto', 'sd', 'chatgpt'];
 const VIEWS = ['front', 'three_quarter_front', 'side', 'three_quarter_back', 'back', 'idle', 'draw', 'attack', 'dash', 'defend'];
 
@@ -87,6 +87,8 @@ const GENERATE_SCHEMA = {
     engine: Object.assign(T.str('"sd" = Stable Diffusion, "chatgpt" = ChatGPT\'s own image generation in its logged-in pane, "auto" = SD when connected, else ChatGPT', { enum: ENGINES }), { 'x-a1111': [], 'x-comfy': 'yes' }),
     view: Object.assign(T.str('Which reference view (with purpose "view"); AutoInjector adds the framing words', { enum: VIEWS }), { 'x-a1111': [], 'x-comfy': 'yes' }),
     appearance: Object.assign(T.str('What the character looks like, in words (instead of / besides a character lock)'), { 'x-a1111': [], 'x-comfy': 'yes' }),
+    upscale: Object.assign(T.int('Upscale the finished picture ×2 or ×4 (Stable Diffusion Extras / an upscale model; also for ChatGPT pictures when an SD app is connected)', 2, 4), { 'x-a1111': [], 'x-comfy': 'yes' }),
+    size: Object.assign({ type: 'object', description: 'A shape hint {width, height} in any unit (e.g. a 6×9 in cover): the picture gets the purpose\'s pixel area in that shape', properties: { width: { type: 'number', minimum: 0.01 }, height: { type: 'number', minimum: 0.01 } }, required: ['width', 'height'], additionalProperties: false }, { 'x-a1111': [], 'x-comfy': 'yes' }),
     newChat: Object.assign(T.bool('ChatGPT engine: start a fresh ChatGPT chat for this picture'), { 'x-a1111': [], 'x-comfy': 'yes' }),
     series: Object.assign(T.str('ChatGPT engine: a name for a view series (with the "fresh chat per series" setting, a new series opens a new chat)'), { 'x-a1111': [], 'x-comfy': 'yes' }),
     loras: Object.assign(T.arr('LoRAs', LORA), { 'x-a1111': ['prompt'], 'x-comfy': 'yes', 'x-comfy-note': 'LoraLoader chain' }),
