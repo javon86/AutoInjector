@@ -142,6 +142,11 @@ function pull(model, onProgress, opts = {}) {
 }
 
 // --- The app's own Ollama server -------------------------------------------
+// Settings for the app's own server (the user's own environment variables win):
+//  - a context window big enough for Alfred's tool list (Ollama's default 2–4k tokens silently cuts it off);
+//  - keep a model loaded for 30 minutes (no 10–60 s reload after every short pause);
+//  - flash attention + an 8-bit context cache: the bigger context costs about half the graphics memory.
+const MANAGED_DEFAULTS = Object.freeze({ OLLAMA_CONTEXT_LENGTH: '16384', OLLAMA_KEEP_ALIVE: '30m', OLLAMA_FLASH_ATTENTION: '1', OLLAMA_KV_CACHE_TYPE: 'q8_0' });
 // We run `ollama serve` ourselves with OLLAMA_MODELS pointed at the shared
 // models/llm folder and OLLAMA_HOST on a dedicated port. Then everything the
 // app pulls (which we target at this same host) is stored in "stuff and thing".
@@ -164,7 +169,7 @@ function startManaged(opts = {}) {
   try {
     child = spawnFn(bin, ['serve'], {
       windowsHide: true,
-      env: Object.assign({}, process.env, { OLLAMA_HOST: host, OLLAMA_MODELS: modelsDir }),
+      env: Object.assign({}, MANAGED_DEFAULTS, process.env, { OLLAMA_HOST: host, OLLAMA_MODELS: modelsDir }),
     });
   } catch (e) { return { ok: false, error: String((e && e.message) || e) }; }
   _managed = { child, host, modelsDir };
@@ -255,7 +260,7 @@ function migrateStore(opts = {}) {
 }
 
 module.exports = {
-  DEFAULT_ENDPOINT, DEFAULT_MANAGED_HOST,
+  DEFAULT_ENDPOINT, DEFAULT_MANAGED_HOST, MANAGED_DEFAULTS,
   detect, listInstalled, recommended, recommendedUncensored, pull, setBin, getBin,
   defaultStoreDir, startManaged, stopManaged, managedStatus, waitReady, migrateStore,
 };

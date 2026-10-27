@@ -1242,8 +1242,20 @@ function allowableKey(key) {
 }
 function allowKeyOf(tool, args) { return typeof tool.allowKey === 'function' ? tool.allowKey(args || {}) : tool.name; }
 function canAllowAlways(tool, args) { return typeof tool.allowAlwaysFor === 'function' ? !!tool.allowAlwaysFor(args || {}) : !!tool.allowAlways; }
+/** "name(a, b?, mode?: x|y)" — what a model should send, for the "arguments were not right" reply. */
+function usage(tool) {
+  try {
+    const sch = (tool && tool.args) || {}; const props = sch.properties || {}; const req = new Set(sch.required || []);
+    const parts = Object.keys(props).slice(0, 16).map((k) => {
+      const p = props[k] || {};
+      const kind = Array.isArray(p.enum) ? `: ${p.enum.slice(0, 8).join('|')}` : p.type ? `: ${p.type}` : '';
+      return `${k}${req.has(k) ? '' : '?'}${kind}`;
+    });
+    return `${tool.name}({${parts.join(', ')}})`;
+  } catch (_) { return tool && tool.name ? `${tool.name}({…})` : ''; }
+}
 function describe(tool, args) {
   try { return typeof tool.describe === 'function' ? tool.describe(args || {}) : tool.title; } catch (_) { return tool.title; }
 }
 
-module.exports = { TOOLS, SITES, SITE_LABEL, get, list, openAiTools, publicList, validate, describe, directToolFor, akoweError, allowableKey, allowKeyOf, canAllowAlways, checkPassthrough, _resolveBook: resolveBook };
+module.exports = { TOOLS, SITES, SITE_LABEL, get, list, openAiTools, publicList, validate, describe, usage, directToolFor, akoweError, allowableKey, allowKeyOf, canAllowAlways, checkPassthrough, _resolveBook: resolveBook };

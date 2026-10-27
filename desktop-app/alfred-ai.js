@@ -46,8 +46,16 @@ function textReply(content) {
 }
 
 /** Normalize one OpenAI-style assistant message -> { content, toolCalls:[{id,name,args,native}] }. */
+/** Reasoning models (qwen3, deepseek-r1 …) can put their thinking in the answer: <think>…</think>. Drop it. */
+function stripThinking(text) {
+  let t = String(text || '');
+  t = t.replace(/<think>[\s\S]*?<\/think>/gi, '');
+  if (/<\/think>/i.test(t)) t = t.slice(t.search(/<\/think>/i) + 8); // the opening tag was cut off
+  if (/^\s*<think>/i.test(t)) t = ''; // thinking that never finished: nothing usable
+  return t.trim();
+}
 function normalizeMessage(m) {
-  const content = m && typeof m.content === 'string' ? m.content : '';
+  const content = m && typeof m.content === 'string' ? stripThinking(m.content) : '';
   const calls = [];
   for (const tc of (m && Array.isArray(m.tool_calls) ? m.tool_calls : [])) {
     const fn = tc && (tc.function || tc);
@@ -101,6 +109,80 @@ async function chatWithTools({ endpoint, apiKey, model, messages, tools, timeout
     clearTimeout(timer);
     if (signal) signal.removeEventListener('abort', onAbort);
   }
+}
+
+// ---------------------------------------------------------------------------- Ollama's own API
+// Ollama's OpenAI-compatible /v1 cannot set the context size, and Ollama's default (2–4k tokens) is far smaller
+// than Alfred's tool list (~10k tokens): the model would silently lose its instructions and tools. Ollama's own
+// /api/chat takes options.num_ctx per request, so a local brain on Ollama uses it (falls back to /v1 otherwise).
+const nativeBases = new Map(); // base -> true (use /api/chat) | false (not Ollama: use /v1)
+const ollamaBase = (endpoint) => baseUrl(endpoint).replace(/\/v1$/, '');
+/** The context window a request needs: everything we send, with room for the answer, in 4k steps (8k–32k). */
+function contextFor(messages, tools) {
+  const chars = JSON.stringify(messages || []).length + JSON.stringify(tools || []).length;
+  const tokens = Math.ceil(chars / 3.2) + 2048;
+  return Math.min(32768, Math.max(8192, Math.ceil(tokens / 4096) * 4096));
+}
+/** OpenAI-shaped history -> Ollama /api/chat messages (tool calls carry objects, tool results carry tool_name). */
+function toOllamaMessages(messages) {
+  return (messages || []).map((m) => {
+    if (m.role === 'tool') return { role: 'tool', content: String(m.content == null ? '' : m.content), tool_name: m.name || undefined };
+    const out = { role: m.role, content: String(m.content == null ? '' : m.content) };
+    if (Array.isArray(m.tool_calls) && m.tool_calls.length) {
+      out.tool_calls = m.tool_calls.map((tc) => {
+        const fn = tc.function || tc; let args = fn.arguments;
+        if (typeof args === 'string') { try { args = args.trim() ? JSON.parse(args) : {}; } catch (_) { args = {}; } }
+        return { function: { name: fn.name, arguments: args && typeof args === 'object' ? args : {} } };
+      });
+    }
+    return out;
+  });
+}
+async function ollamaChat({ endpoint, model, messages, tools, timeoutMs, signal, temperature }) {
+  const base = ollamaBase(endpoint);
+  const controller = new AbortController();
+  const onAbort = () => controller.abort();
+  if (signal) { if (signal.aborted) return { ok: false, kind: 'cancelled' }; signal.addEventListener('abort', onAbort, { once: true }); }
+  let timedOut = false;
+  const timer = setTimeout(() => { timedOut = true; controller.abort(); }, Math.max(1000, timeoutMs || 300000));
+  try {
+    const body = { model, messages: toOllamaMessages(messages), stream: false, keep_alive: '30m', options: { num_ctx: contextFor(messages, tools), temperature: temperature == null ? 0.2 : temperature } };
+    if (tools && tools.length) body.tools = tools;
+    let res;
+    try { res = await fetch(`${base}/api/chat`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: controller.signal }); }
+    catch (e) {
+      if (signal && signal.aborted) return { ok: false, kind: 'cancelled' };
+      if (timedOut || (e && e.name === 'AbortError')) return { ok: false, kind: 'timeout' };
+      return { ok: false, kind: 'network', detail: String(e && e.cause ? `${e.message} (${e.cause.code || e.cause.message || ''})` : e).slice(0, 300) };
+    }
+    if (!res.ok) {
+      let detail = ''; try { detail = await res.text(); } catch (_) { /* best effort */ }
+      return { ok: false, kind: 'http', status: res.status, detail: String(detail).slice(0, 400), noTools: res.status === 400 && /tool/i.test(detail), notOllama: res.status === 404 && !/model/i.test(detail) };
+    }
+    let j; try { j = await res.json(); } catch (_) { return { ok: false, kind: 'bad-body' }; }
+    if (!j || !j.message) return { ok: false, kind: 'bad-body', notOllama: true };
+    return { ok: true, message: normalizeMessage(j.message), numCtx: body.options.num_ctx };
+  } finally {
+    clearTimeout(timer);
+    if (signal) signal.removeEventListener('abort', onAbort);
+  }
+}
+/** Is this endpoint an Ollama server (it has /api/version)? Cached per address. */
+async function isOllama(endpoint) {
+  const base = ollamaBase(endpoint);
+  if (nativeBases.has(base)) return nativeBases.get(base);
+  let yes = false;
+  try {
+    const c = new AbortController(); const t = setTimeout(() => c.abort(), 2500);
+    try { const r = await fetch(`${base}/api/version`, { signal: c.signal }); if (r.ok) { const j = await r.json().catch(() => null); yes = !!(j && typeof j.version === 'string'); } } finally { clearTimeout(t); }
+  } catch (_) { yes = false; }
+  nativeBases.set(base, yes);
+  return yes;
+}
+/** qwen3's documented switch to answer without a long thinking pass (faster, and nothing to strip). */
+function withNoThink(messages, model) {
+  if (!/qwen3/i.test(String(model || ''))) return messages;
+  return messages.map((m, i) => (i === 0 && m.role === 'system' && !/\/no_think/.test(m.content) ? Object.assign({}, m, { content: `${m.content}\n/no_think` }) : m));
 }
 
 /** Is an OpenAI-compatible server answering? GET {base}/models. */
@@ -157,6 +239,16 @@ async function next(cfg, messages, tools, deps = {}, opts = {}) {
     if (!r || !r.ok) return { ok: false, kind: r && r.error === 'TIMEOUT' ? 'timeout' : 'network', error: (r && r.error) || 'PANE_FAILED' };
     return { ok: true, message: normalizeMessage({ content: String(r.text || '') }) };
   }
+  if (cfg.kind === 'local') messages = withNoThink(messages, cfg.model);
+  if (cfg.kind === 'local' && !cfg.noNative && await isOllama(cfg.endpoint)) {
+    let n = await ollamaChat({ endpoint: cfg.endpoint, model: cfg.model, messages, tools, timeoutMs: cfg.timeoutMs, signal: opts.signal });
+    if (!n.ok && n.noTools) {
+      const m2 = messages.slice(); m2.splice(1, 0, { role: 'system', content: `${TEXT_PROTOCOL}\n\nTools:\n${toolCatalogText(tools)}` });
+      n = await ollamaChat({ endpoint: cfg.endpoint, model: cfg.model, messages: m2.map((m) => (m.role === 'tool' ? { role: 'user', content: `Result of ${m.name || 'the tool'}: ${m.content}` } : m)), tools: null, timeoutMs: cfg.timeoutMs, signal: opts.signal });
+    }
+    if (n.ok || !n.notOllama) return n;
+    nativeBases.set(ollamaBase(cfg.endpoint), false); // not Ollama after all: use /v1 from now on
+  }
   const base = { endpoint: cfg.endpoint, apiKey: cfg.apiKey, model: cfg.model, timeoutMs: cfg.timeoutMs, signal: opts.signal };
   let r = await chatWithTools(Object.assign({ messages, tools }, base));
   if (!r.ok && r.noTools) {
@@ -168,4 +260,4 @@ async function next(cfg, messages, tools, deps = {}, opts = {}) {
   return r;
 }
 
-module.exports = { DEFAULT_LOCAL_BASE, chatUrl, baseUrl, chatWithTools, probe, next, normalizeMessage, panePrompt, textToolCall, TEXT_PROTOCOL };
+module.exports = { DEFAULT_LOCAL_BASE, chatUrl, baseUrl, chatWithTools, probe, next, normalizeMessage, panePrompt, textToolCall, TEXT_PROTOCOL, stripThinking, contextFor, toOllamaMessages, ollamaChat, isOllama, _resetOllamaCache: () => nativeBases.clear() };
