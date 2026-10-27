@@ -3,11 +3,15 @@
 A book is a dict:
     {"meta": {title, author, language, identifier, rights},
      "sections": [Section, ...]}
-Section: {"id", "kind": title_page|front|toc|chapter|back, "heading", "number", "blocks"}
+Section: {"id", "kind": title_page|front|toc|chapter|back|plate, "heading", "number", "blocks"}
+         (a "plate" is a page of its own holding one placed picture: no heading, not in the contents)
 Block:   {"t": "p", "id", "text", "first": bool}   paragraph (first = no indent)
          {"t": "h2", "id", "text"}                  sub-heading inside a chapter
          {"t": "break"}                             scene break
-         {"t": "img", "id", "key", "w_mm", "h_mm", "fit"}   placed asset (key -> image bytes)
+         {"t": "img", "id", "key", "w_mm", "h_mm", "fit"[, "caption", "alt"]}   placed asset (key -> image bytes)
+         {"t": "vmap", "id", "svg", "w_mm", "h_mm"[, "caption", "alt"]}   a vector map (d_maps SVG text): drawn
+                                                    with vector operations in the PDF, the SVG itself in the EPUB
+                                                    (the DOCX says where it is: see docs/PICTURES.md)
          {"t": "meta", "text"}                      centred metadata line (title page etc.)
 
          A "p" block may also carry "runs": [(text, style)] (style "" | "i" | "b" | "bi") when the
@@ -366,15 +370,64 @@ def place_assets(sections: list[dict], placements: list[dict]) -> None:
         sec, i = index[p["anchor_id"]]
         resolved.append((sections.index(sec), i, order, sec, p))
     for _, i, _, sec, p in sorted(resolved, key=lambda x: (x[0], x[1], x[2]), reverse=True):
-        sec["blocks"].insert(i + 1, {"t": "img", "id": p["placement_id"], "key": p["key"], "w_mm": p["width_mm"],
-                                     "h_mm": p["height_mm"], "fit": p["fit"]})
+        blk = {"t": "img", "id": p["placement_id"], "key": p["key"], "w_mm": p["width_mm"], "h_mm": p["height_mm"],
+               "fit": p["fit"]}
+        for k in ("caption", "alt"):  # 🖼 B3 pictures: shown under the picture / read aloud (optional)
+            if p.get(k):
+                blk[k] = squash(clean_text(p[k]))
+        sec["blocks"].insert(i + 1, blk)
+
+
+def scene_ends(blocks: list[dict]) -> list[int]:
+    """Block index where each scene of a chapter ends (the index of its scene break, or len(blocks) for the last)."""
+    return [i for i, b in enumerate(blocks) if b["t"] == "break"] + [len(blocks)]
+
+
+def place_pictures(sections: list[dict], pictures: list[dict]) -> None:
+    """🖼 B3: place the author's chosen pictures (pictures.py) into the book sections.
+
+    pictures: [{"block": img/vmap block, "section_id", "where": before|start|after_scene|end, "scene": n}] in the
+    order they should appear. ``before`` puts the picture on a page of its own (a "plate" section) in front of the
+    chapter; ``start`` right under the chapter heading; ``after_scene`` at the end of scene n (before its scene
+    break; the last scene's end when the chapter has fewer scenes); ``end`` at the end of the chapter. An unknown
+    section is skipped (the picture's chapter is not in this book)."""
+    by_id = {s["id"]: s for s in sections}
+    plates: dict[str, list] = {}
+    for p in pictures:
+        sec = by_id.get(p.get("section_id"))
+        if sec is None:
+            continue
+        blk = dict(p["block"])
+        where = p.get("where") or "start"
+        if where == "before":
+            plates.setdefault(sec["id"], []).append({"id": f"plate-{blk['id']}", "kind": "plate", "heading": "",
+                                                     "number": None, "blocks": [blk]})
+        elif where == "start":
+            starts = [i for i, b in enumerate(sec["blocks"]) if b.get("_pic_start")]
+            blk["_pic_start"] = True
+            sec["blocks"].insert(len(starts), blk)
+        elif where == "after_scene":
+            ends = scene_ends(sec["blocks"])
+            n = max(1, int(p.get("scene") or 1))
+            sec["blocks"].insert(ends[min(n, len(ends)) - 1], blk)
+        else:
+            sec["blocks"].append(blk)
+    for s in sections:
+        for b in s["blocks"]:
+            b.pop("_pic_start", None)
+    if plates:
+        out = []
+        for s in sections:
+            out.extend(plates.get(s["id"], []))
+            out.append(s)
+        sections[:] = out
 
 
 def heading_entries(book: dict, max_depth: int = 2) -> list[dict]:
     """TOC candidates in reading order: (heading_id, title, level)."""
     out = []
     for s in book["sections"]:
-        if s["kind"] in ("title_page", "toc") or s["id"] == "front-copyright":
+        if s["kind"] in ("title_page", "toc", "plate") or s["id"] == "front-copyright":
             continue
         out.append({"heading_id": s["id"], "title": s["heading"], "level": 1})
         if max_depth >= 2:

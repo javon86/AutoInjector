@@ -6,6 +6,7 @@ import { viewContinuity } from './continuity.js';   // 🧭 Section 7 (P32–P35
 import { estimateBox, runCostLine, viewCosts, viewSceneGrid } from './grid.js';  // 🗂 P27 · ⏱ P28
 import * as S7C from './section7c.js';  // P23 beta reader + P25 your writing style (Section 7c)
 import { viewForge, viewForgeList } from './forge.js';  // 🗂 B5 Character Forge dossiers
+import { viewPictures } from './pictures.js';  // 🖼 B3 chapter/scene pictures and the map
 
 /* ======================================================================= constants */
 // Fallback names; the full guide (purpose, build order, featured actions) comes from GET /api/sets.
@@ -652,6 +653,7 @@ async function pickView(parts) {
     if (rest[0] === 'continuity') return m => viewContinuity(m, { h, clear, api, bpath, plink, S, crumbs, problemBox, toProblem, runAiJob, choiceDialog, toast, infoTip, route });
     if (rest[0] === 'report') return viewReport;
     if (rest[0] === 'forge') return m => (rest[1] ? viewForge(m, rest[1], forgeUI()) : viewForgeList(m, forgeUI()));  // 🗂 B5
+    if (rest[0] === 'pictures') return m => viewPictures(m, forgeUI());  // 🖼 B3
     if (rest[0] === 'manifest') return viewManifest;
     if (rest[0] === 'activity') return viewActivity;
     if (rest[0] === 'progress') return viewProgress;
@@ -714,6 +716,7 @@ function renderTop(parts) {
     add(more, link('p', S.pid, S.branch, 'world'), '🌍 Story rules and world');
     add(more, link('p', S.pid, S.branch, 'continuity'), '🧭 Continuity');
     add(more, link('p', S.pid, S.branch, 'forge'), '🗂 Character Forge');
+    add(more, link('p', S.pid, S.branch, 'pictures'), '🖼 Pictures');
     add(more, link('p', S.pid, S.branch, 'progress'), '📊 Progress');
     add(more, link('p', S.pid, S.branch, 'activity'), '🕘 Activity');
     add(more, link('p', S.pid, S.branch, 'manifest'), '🎛️ Book features');
@@ -6189,7 +6192,7 @@ async function viewScenes(main, cid) {
   main.appendChild(h('div', { class: 'page-head' }, h('div', null,
     crumbs(['Your books', '#/'], [S.project.name, plink()], ['Make my book', plink('book')], `${label}: scene cards`),
     h('h1', null, `🎬 Scene cards — ${label}`)),
-  h('div', { class: 'row' }, infoTip('Scene cards', h('p', null, 'Before a chapter is written, its scenes are planned: for each scene the place and time, who is there, what each one wants (and hides), an obstacle from the book’s world, what changes and what stays unsaid.'),
+  h('div', { class: 'row' }, h('a', { class: 'btn small', href: plink('pictures'), 'data-testid': 'scenes-illustrate', title: 'Make a picture of this chapter or one of its scenes (🖼 Pictures)' }, '🖼 Illustrate'), infoTip('Scene cards', h('p', null, 'Before a chapter is written, its scenes are planned: for each scene the place and time, who is there, what each one wants (and hides), an obstacle from the book’s world, what changes and what stays unsaid.'),
     h('p', null, 'The chapter outline stays the plan of the whole chapter; scene cards refine it. The writer follows them and the editor checks the chapter against them.')))));
   main.appendChild(h('p', { class: 'notice small' }, h('strong', null, 'The outline says: '), plainText(ch.objective || ch.summary || '')));
   const msg = h('div', { 'aria-live': 'polite' });

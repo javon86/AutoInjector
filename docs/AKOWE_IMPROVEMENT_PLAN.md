@@ -322,6 +322,14 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
 - [ ] **B3 (P19)** 🎨 Book cover and pictures (LATER — not started): cover design (title/author on a template,
   AI-generated artwork when an image AI is connected), chapter images/illustrations, maps; placement in
   PDF/EPUB/DOCX; print-ready cover size and spine.
+  - 🖼 **Interior pictures DONE 2026-10-27** (`docs/PICTURES.md`): the 🖼 Pictures page — a book-wide art style,
+    🖼 Illustrate per chapter or scene card (prompt from the scene card + the characters' approved looks + the
+    character lock, ≤ 1 200 characters; `/image/request` `purpose: "illustration"`, 1-3 candidates to pick from),
+    upload, caption / alt text / placement (a page before the chapter, under the heading, after scene n, the end),
+    the map (SVG drawn from the places, illustrated `purpose: "map"`, or uploaded; before chapter 1), "Illustrate
+    every chapter" as a job with Stop. Placed in PDF / EPUB / DOCX with captions (snapshot at "Put the book
+    together"). The SVG map is never rasterised (no Pillow): EPUB carries the SVG, the PDF draws it as vectors, the
+    DOCX names where it is. In the book save (`Pictures/`). Still open: a real ChatGPT/GPU run.
 - [x] **B4** 🧭 Local AI book manager — DONE 2026-10-25 as **🎩 Alfred (app-wide)**: not only a book manager but the
   user's assistant for the whole of AutoInjector (books, images, video, the three AI panes, files/logs). A local LLM
   through Ollama (or a connected AI / a web pane) with a FIXED tool registry (direct controls, no free code): book

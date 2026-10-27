@@ -591,6 +591,21 @@ The full description (model, sync rules, API, AI groups, pictures, PDF, letters 
   `tests/campaign/ui/test_ui_forge.py`. Example data was built once from the author's sample with Pillow (not a runtime
   dependency).
 
+## 🖼 B3 interior pictures (pictures.py, web/pictures.js)
+
+The full description is `../docs/PICTURES.md`.
+* **Data**: companion settings `pictures:<pid>:<branch>` (style, pictures with candidates = I01 binary assets); the
+  snapshot `pictures_snap:<pid>:<branch>:<G02 id>` is written by `book_path.a_assemble` and read by
+  `set_g.assemble` → `pictures.overlay` → `exporters/book.place_pictures` (so G04/G07/G11-13 agree);
+  `asm["pictures"]` holds the signature and `assembly_out_of_date` compares it.
+* **Jobs** run in `ReviewService` like the forge art jobs (`PicturesJob` with `total` and `pic_id`); the bridge,
+  `ArtProblem` codes and the NO_LOCK fallback are forge.py's.
+* **Exporters**: block `img` gained optional `caption` / `alt`; new block `vmap` (SVG text) and section kind `plate`;
+  the PDF writer gained the op `circle`; `layout.winansi` for captions and map labels. Pictures are kept apart from
+  G03 art (`Assembly.pictures`), so `artwork_selected` is unchanged.
+* **HTTP**: `DELETE` is accepted for `…/pictures/<pic_id>` only (every other DELETE stays 405).
+* Tests: `tests/test_pictures.py` (fake bridge `Bridge` with `script` / `hold`), UI `tests/campaign/ui/test_ui_pictures.py`.
+
 ## 🔎 Section 7a: timeline (P26), trade facts (P31), repetition sorter (P30)
 
 * **Modules.** `timeline_check.check_book([(cid, text)], names=, characters=, story_year=)` reads ages (with an age

@@ -67,6 +67,20 @@ def unencodable(text: str) -> list[str]:
     return bad
 
 
+def winansi(text: str) -> str:
+    """Text the PDF fonts can print: book text mapping, then characters outside WinAnsi as their plain-letter form
+    (é stays, ō -> o) or '?'. Used for picture captions and map labels, which never block an export."""
+    import unicodedata  # noqa: PLC0415
+    out = []
+    for ch in pdf_text(text):
+        if not unencodable(ch):
+            out.append(ch)
+            continue
+        base = "".join(c for c in unicodedata.normalize("NFKD", ch) if not unicodedata.combining(c))
+        out.append(base if base and not unencodable(base) else "?")
+    return "".join(out)
+
+
 def encode(text: str) -> bytes:
     return text.encode("cp1252")
 
@@ -144,6 +158,7 @@ def check_geometry(g: Geometry, typo: Typography) -> list[str]:
 class Page:
     # ("text", font, size, x, y, str, tw[, colour]) | ("img", key, x, y, w, h, clip)
     # | ("rect", x, y, w, h, fill colour|None, stroke colour|None, line width) | ("line", x0, y0, x1, y1, colour, width)
+    # | ("circle", cx, cy, r, fill colour|None, stroke colour|None, line width)
     ops: list = field(default_factory=list)
     links: list = field(default_factory=list)  # (x0, y0, x1, y1, heading_id)
     number: int = 0
@@ -422,18 +437,93 @@ class _Composer:
             self.line(words, self.t.bold, size, align="left")
         self.y -= self.t.leading * 0.3
 
+    def caption_lines(self, block: dict) -> list:
+        """🖼 B3: the caption under a placed picture (italic, a little smaller, centred), wrapped to the text width."""
+        cap = winansi(block.get("caption") or "")
+        if not cap.strip():
+            return []
+        return wrap(cap, self.t.italic, self.t.size * 0.9, self.g.content_width * 0.9)
+
+    def caption(self, lines: list):
+        size = self.t.size * 0.9
+        self.y -= self.t.leading * 0.2
+        for words in lines:
+            self.line(words, self.t.italic, size, align="center")
+        self.y -= self.t.leading * 0.5
+
+    def plate_start(self, block: dict):
+        """A plate page: the picture (and its caption) centred on the page of its own."""
+        box_w, box_h = self.box(block, len(self.caption_lines(block)))
+        cap_h = len(self.caption_lines(block)) * self.t.leading * 0.9 + (self.t.leading * 0.7 if block.get("caption")
+                                                                        else 0)
+        free = self.y - self.floor - (box_h + cap_h + self.t.leading * 0.5)
+        if free > 0:
+            self.y -= free / 2.0
+
+    def box(self, block: dict, caption_lines: int = 0) -> tuple:
+        box_w = min(mm_to_pt(block["w_mm"]), self.g.content_width)
+        box_h = mm_to_pt(block["h_mm"]) * box_w / mm_to_pt(block["w_mm"])
+        # Tallest box a page can hold: from the top of the text area down to the composer floor (which
+        # keeps clear of the page number), less the space ensure() reserves around the image (and its caption).
+        max_h = max(self.g.height - self.g.top - self.floor - self.t.leading * 0.5
+                    - caption_lines * self.t.leading * 0.9 - (self.t.leading * 0.7 if caption_lines else 0), 1.0)
+        if box_h > max_h:
+            scale = max_h / box_h
+            box_w, box_h = box_w * scale, box_h * scale
+        return box_w, box_h
+
+    def vector_map(self, block: dict):
+        """🖼 B3: a d_maps SVG map drawn with vector operations (lines, circles, text) inside its box."""
+        from ..d_maps import read_svg  # noqa: PLC0415
+        labels, edges = read_svg(block["svg"].encode("utf-8") if isinstance(block["svg"], str) else block["svg"])
+        cap = self.caption_lines(block)
+        box_w, box_h = self.box(block, len(cap))
+        cap_h = len(cap) * self.t.leading * 0.9 + (self.t.leading * 0.7 if cap else 0)
+        self.ensure(box_h + cap_h + self.t.leading * 0.5)
+        self.y -= self.t.leading * 0.25
+        x_box = self.g.left + (self.g.content_width - box_w) / 2.0
+        y_box = self.y - box_h
+        ink, paper, line = (0.16, 0.14, 0.12), (0.97, 0.95, 0.9), (0.45, 0.4, 0.33)
+        self.page.ops.append(("rect", x_box, y_box, box_w, box_h, paper, line, 0.8))
+        pos = {lab["node_id"]: (lab["x"], lab["y"]) for lab in labels}
+        if pos:
+            xs, ys = [p[0] for p in pos.values()], [p[1] for p in pos.values()]
+            span_x, span_y = max(max(xs) - min(xs), 1e-9), max(max(ys) - min(ys), 1e-9)
+            pad = min(box_w, box_h) * 0.12
+            s = min((box_w - 2 * pad) / span_x if span_x > 1e-6 else 1e9, (box_h - 2 * pad) / span_y if span_y > 1e-6
+                    else 1e9)
+            s = s if s < 1e8 else 1.0
+            ox = x_box + (box_w - span_x * s) / 2.0 if span_x > 1e-6 else x_box + box_w / 2.0
+            oy = y_box + (box_h - span_y * s) / 2.0 if span_y > 1e-6 else y_box + box_h / 2.0
+            minx, maxy = min(xs), max(ys)
+
+            def at(nid):  # SVG y grows downwards, PDF y upwards
+                x, y = pos[nid]
+                return ox + (x - minx) * s, oy + (maxy - y) * s
+            for e in edges:
+                if e["from"] in pos and e["to"] in pos:
+                    (x0, y0), (x1, y1) = at(e["from"]), at(e["to"])
+                    self.page.ops.append(("line", x0, y0, x1, y1, line, 1.0))
+            size = max(6.0, min(self.t.size * 0.85, box_w / 22.0))
+            font = self.t.regular
+            for lab in sorted(labels, key=lambda d: d["node_id"]):
+                x, y = at(lab["node_id"])
+                rad = max(2.0, size * 0.32)
+                self.page.ops.append(("circle", x, y, rad, ink, None, 0))
+                text = winansi(lab["rendered_text"])
+                w = text_width(text, font, size)
+                tx = min(max(x - w / 2.0, x_box + 3), x_box + box_w - w - 3)
+                self.page.ops.append(("text", font, size, tx, y + rad + size * 0.35, text, 0.0, ink))
+        self.y = y_box - self.t.leading * 0.25
+        if cap:
+            self.caption(cap)
+
     def image(self, block: dict):
         info = self.images.get(block["key"])
         if info is None:
             raise LayoutError(f"image {block['key']} not supplied")
-        box_w = min(mm_to_pt(block["w_mm"]), self.g.content_width)
-        box_h = mm_to_pt(block["h_mm"]) * box_w / mm_to_pt(block["w_mm"])
-        # Tallest box a page can hold: from the top of the text area down to the composer floor (which
-        # keeps clear of the page number), less the space ensure() reserves around the image.
-        max_h = max(self.g.height - self.g.top - self.floor - self.t.leading * 0.5, 1.0)
-        if box_h > max_h:
-            scale = max_h / box_h
-            box_w, box_h = box_w * scale, box_h * scale
+        cap = self.caption_lines(block)
+        box_w, box_h = self.box(block, len(cap))
         iw, ih = info
         if block["fit"] == "CONTAIN":
             s = min(box_w / iw, box_h / ih)
@@ -443,7 +533,8 @@ class _Composer:
             s = max(box_w / iw, box_h / ih)
             dw, dh = iw * s, ih * s
             clip = True
-        self.ensure(box_h + self.t.leading * 0.5)
+        cap_h = len(cap) * self.t.leading * 0.9 + (self.t.leading * 0.7 if cap else 0)
+        self.ensure(box_h + cap_h + self.t.leading * 0.5)
         self.y -= self.t.leading * 0.25
         x_box = self.g.left + (self.g.content_width - box_w) / 2.0
         y_box = self.y - box_h
@@ -452,6 +543,8 @@ class _Composer:
         self.page.ops.append(("img", block["key"], x, y, dw, dh,
                               (x_box, y_box, box_w, box_h) if clip else None))
         self.y = y_box - self.t.leading * 0.25
+        if cap:
+            self.caption(cap)
 
     def title_page(self, sec: dict):
         self.mark(sec["id"], sec["heading"], 1)
@@ -538,7 +631,11 @@ def paginate(book: dict, geom: Geometry, typo: Typography, *, toc_entries: list[
         if sec["kind"] == "toc":
             c.toc(sec, toc_entries, style["include_pages"], style["link_targets"])
             continue
-        c.heading(sec)
+        if sec["kind"] == "plate":  # 🖼 B3: one picture on a page of its own (no heading, not in the contents)
+            if sec["blocks"]:
+                c.plate_start(sec["blocks"][0])
+        else:
+            c.heading(sec)
         for b in sec["blocks"]:
             t = b["t"]
             if t == "p" and b.get("runs"):
@@ -553,6 +650,8 @@ def paginate(book: dict, geom: Geometry, typo: Typography, *, toc_entries: list[
                 c.scene_break()
             elif t == "img":
                 c.image(b)
+            elif t == "vmap":
+                c.vector_map(b)
     if not c.pages:
         c.new_page()
     c.footer()

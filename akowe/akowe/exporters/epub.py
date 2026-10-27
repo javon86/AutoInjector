@@ -57,6 +57,9 @@ p.scene-break { text-indent: 0; text-align: center; margin: 1em 0; }
 section.title-page h1 { margin-top: 30%; font-size: 2em; }
 figure { margin: 1em 0; text-align: center; }
 figure img { max-width: 100%; height: auto; }
+figure img.map { width: 100%; }
+figcaption { font-style: italic; font-size: 0.9em; margin-top: 0.4em; text-align: center; }
+section.plate figure { margin-top: 10%; }
 nav ol { list-style: none; padding-left: 1em; }
 """
 
@@ -94,6 +97,7 @@ def build_epub(book: dict, *, modified: str, toc_entries: list[dict] | None = No
         data, info = images[k]
         img_href[k] = f"images/{k[:16]}.{info.ext}"
     used_imgs = set()
+    vmaps: dict[str, bytes] = {}  # 🖼 B3 href -> SVG map bytes
 
     if cover is not None:
         cdata, cinfo = cover
@@ -107,11 +111,14 @@ def build_epub(book: dict, *, modified: str, toc_entries: list[dict] | None = No
 
     for i, s in enumerate(sections, start=1):
         sid = f"s{i:03d}"
-        kind = {"title_page": "titlepage", "front": "frontmatter", "toc": "toc", "chapter": "chapter",
-                "back": "backmatter"}[s["kind"]]
         cls = s["kind"].replace("_", "-")
-        parts = [f"<section epub:type=\"{kind}\" class=\"{cls}\" aria-labelledby={quoteattr(s['id'])}>\n",
-                 f"<h1 id={quoteattr(s['id'])}>{escape(s['heading'])}</h1>\n"]
+        if s["kind"] == "plate":  # 🖼 B3: a picture on a page of its own (no heading, not in the contents)
+            parts = [f"<section class=\"plate\" id={quoteattr(s['id'])}>\n"]
+        else:
+            kind = {"title_page": "titlepage", "front": "frontmatter", "toc": "toc", "chapter": "chapter",
+                    "back": "backmatter"}[s["kind"]]
+            parts = [f"<section epub:type=\"{kind}\" class=\"{cls}\" aria-labelledby={quoteattr(s['id'])}>\n",
+                     f"<h1 id={quoteattr(s['id'])}>{escape(s['heading'])}</h1>\n"]
         if s["kind"] == "toc":
             parts.append("<ol>\n")
             for e in toc_entries or []:
@@ -134,9 +141,18 @@ def build_epub(book: dict, *, modified: str, toc_entries: list[dict] | None = No
                 if b["key"] not in img_href:
                     continue
                 used_imgs.add(b["key"])
-                parts.append(f"<figure id={quoteattr(b['id'])}><img src=\"../{img_href[b['key']]}\" alt=\"\"/></figure>\n")
+                cap = f"<figcaption>{escape(b['caption'])}</figcaption>" if b.get("caption") else ""
+                parts.append(f"<figure id={quoteattr(b['id'])}><img src=\"../{img_href[b['key']]}\" "
+                             f"alt={quoteattr(b.get('alt') or '')}/>{cap}</figure>\n")
+            elif t == "vmap":  # 🖼 B3: the SVG map itself (an EPUB 3 core media type)
+                href = f"images/map-{b['id'][:24]}.svg"
+                if href not in vmaps:
+                    vmaps[href] = b["svg"].encode("utf-8") if isinstance(b["svg"], str) else bytes(b["svg"])
+                cap = f"<figcaption>{escape(b['caption'])}</figcaption>" if b.get("caption") else ""
+                parts.append(f"<figure id={quoteattr(b['id'])}><img class=\"map\" src=\"../{href}\" "
+                             f"alt={quoteattr(b.get('alt') or b.get('caption') or 'Map')}/>{cap}</figure>\n")
         parts.append("</section>\n")
-        files.append((f"OEBPS/{names[s['id']]}", _xhtml(s["heading"], lang, "".join(parts))))
+        files.append((f"OEBPS/{names[s['id']]}", _xhtml(s["heading"] or "Illustration", lang, "".join(parts))))
         manifest.append((sid, names[s["id"]], "application/xhtml+xml", ""))
         spine.append(sid)
 
@@ -144,6 +160,9 @@ def build_epub(book: dict, *, modified: str, toc_entries: list[dict] | None = No
         data, info = images[k]
         files.append((f"OEBPS/{img_href[k]}", data))
         manifest.append((f"img-{k[:16]}", img_href[k], info.mime, ""))
+    for i, href in enumerate(sorted(vmaps), start=1):
+        files.append((f"OEBPS/{href}", vmaps[href]))
+        manifest.append((f"map-{i}", href, "image/svg+xml", ""))
 
     # Navigation document: hierarchical toc from headings (or the converged G07 entries).
     from .book import heading_entries
