@@ -329,6 +329,15 @@ contextBridge.exposeInMainWorld("api", {
   alfredTestAi: () => ipcRenderer.invoke("alfred:test-ai"),
   alfredModels: () => ipcRenderer.invoke("alfred:models"),
   alfredOpenPath: (path) => ipcRenderer.invoke("alfred:open-path", { path }),
+  // personality (voice only) + saved set-ups (alfred.js); his side panel (alfred-window.js)
+  alfredPersonality: (patch) => ipcRenderer.invoke("alfred:personality", patch || null),
+  alfredProfiles: () => ipcRenderer.invoke("alfred:profiles"),
+  alfredSaveProfile: (name, renameFrom) => ipcRenderer.invoke("alfred:profile-save", { name, renameFrom: renameFrom == null ? undefined : renameFrom }),
+  alfredUseProfile: (name) => ipcRenderer.invoke("alfred:profile-use", { name }),
+  alfredDeleteProfile: (name) => ipcRenderer.invoke("alfred:profile-delete", { name }),
+  alfredPanel: (patch) => ipcRenderer.invoke("alfred:panel", patch || null),
+  alfredPanelToggle: (open) => ipcRenderer.invoke("alfred:panel-toggle", { open: typeof open === "boolean" ? open : undefined }),
+  alfredShowButler: () => ipcRenderer.invoke("alfred:show-butler"),
   onAlfred: (cb) => ipcRenderer.on("alfred", (_e, payload) => cb(payload))
   // ==== end 🎩 Alfred ====
 });

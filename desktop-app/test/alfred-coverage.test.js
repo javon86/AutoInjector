@@ -80,6 +80,8 @@ const IPC_INVENTORY = [
   'akowe:linktest-stop', 'akowe:open-url', 'akowe:regenerate-token', 'akowe:reveal-token', 'akowe:set-enabled', 'akowe:start-app', 'akowe:status',
   'alfred:ask', 'alfred:cancel', 'alfred:clear', 'alfred:confirm', 'alfred:models', 'alfred:open-path', 'alfred:reject', 'alfred:set-enabled',
   'alfred:settings', 'alfred:status', 'alfred:test-ai',
+  'alfred:personality', 'alfred:profiles', 'alfred:profile-save', 'alfred:profile-use', 'alfred:profile-delete',
+  'alfred:panel', 'alfred:panel-toggle', 'alfred:show-butler',
   'brigade:run', 'brigade:stop', 'butler:capability-test', 'butler:chat', 'butler:install-missing', 'butler:selfcheck', 'butler:send-intro',
   'db:recent-messages', 'db:status', 'endpoints:detect', 'endpoints:presets', 'endpoints:test', 'external:open',
   'featuretest:open-report', 'featuretest:run', 'featuretest:stop', 'feed-window:close', 'feed:history', 'feed:open', 'gpu:info',

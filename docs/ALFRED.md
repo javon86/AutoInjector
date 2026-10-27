@@ -11,13 +11,38 @@ turn him on.
 
 1. Start AutoInjector as usual.
 2. In the title bar (top right) press **🎩 Alfred: Off** — it becomes **🎩 Alfred: On** and his
-   panel opens on the right. It stays available on every tab (🤖 AutoInjector, 📖 Akọwe, 🎨 Images).
-   **▸ Panel** hides/shows the panel while he stays on.
+   panel opens on the right, floating over the app. It stays available on every tab (🤖 AutoInjector,
+   📖 Akọwe, 🎨 Images). **🗗 Panel** (or Ctrl+Shift+A) hides/shows the panel while he stays on.
 3. He needs an AI to think with (see the next section). If he can't reach it, he says so plainly —
    everything else in the app keeps working.
 
 Press the switch again to turn him **off**: the panel disappears, he stops what he was doing, and
 he makes no more calls.
+
+### His side panel: floating over everything (or docked)
+
+- **Floating (over everything)** — the default. His panel is its own small window that floats over the
+  whole app: over the AI panes, the 📖 Akọwe tab, everything. Drag it by its header, resize it from its
+  edges; it remembers where you put it (and comes back on screen if that monitor is gone). The first
+  time it sits against the app's right edge. It moves with the app and stays above it.
+  ⚙ → **Stay on top of other programs too** keeps it above other programs as well.
+- **Docked (beside)** — ⚙ → *His panel* → *Docked*: the drawer on the right of the control panel, the
+  way it used to be (the app makes room for it).
+- **Ctrl+Shift+A** (**Cmd+Shift+A** on a Mac) shows / hides the panel from anywhere in the app — also
+  from inside an AI pane. The title-bar **🗗 Panel** button does the same. Closing the panel only hides
+  it: Alfred stays on. **Escape** hides the floating panel, but never while an "I will" card waits.
+- Quick buttons: **📊 Status**, **🩺 Check his AI**, **🎨 Make a picture**, **📖 My book**,
+  **⚙ Set up his AI** (opens the 🤵 Butler section). The set-up list in the header switches between
+  saved set-ups; 💾 saves the current one.
+
+### His personality and saved set-ups (🤵 Butler section)
+
+- **Personality**: Butler (default), Friendly, Brief, Witty, Coach or Custom (your own words, up to 1500
+  characters); his name; a tone; chattiness 1–5. It changes **how he talks only** — never what he may do:
+  every change still goes on the "I will" card and waits for ✔ Do it (that is enforced by the app, not by
+  his instructions, so no personality text can switch it off).
+- **Saved set-ups**: his AI, model, web AI, max steps and personality under a name (up to 20). Save the
+  current one as…, use, rename, delete — here, or switch from his side panel.
 
 ## His AI (choose in the panel's ⚙)
 
@@ -159,7 +184,10 @@ At most one of each every 5 minutes and 6 in 10 minutes.
 | `desktop-app/alfred-ai.js` | his AI: OpenAI-compatible tool calling (Ollama `/v1`, the connected AI), the JSON text protocol (web panes / models without tools) |
 | `desktop-app/alfred-image.js` | the ONE image adapter (sd-api `images.generate`; falls back to image-provider) |
 | `desktop-app/alfred-main.js` | wiring into Electron: tool context, IPC `alfred:*`, app events → watcher |
-| `desktop-app/alfred-panel.js` | the drawer UI (built only when on) |
+| `desktop-app/alfred-panel.js` | the panel UI (built only when on) — the SAME code renders in the floating window (`alfred-window.html`, `<body data-alfred-host="window">`) or as the docked drawer in `controls.html` |
+| `desktop-app/alfred-window.js` | the floating side panel window: Electron-free (injected BrowserWindow / screen), modes, parent vs on-top, bounds clamp + memory, Ctrl/Cmd+Shift+A via `before-input-event` on every page; `alfred-window-preload.js` exposes only `alfred*` |
+| `desktop-app/alfred-persona-ui.js` | personality editor + saved set-ups in `<div id="alfred-persona">` (🤵 Butler section) |
+| IPC (B6) | `alfred:personality` (get / set, clamped with plain notes), `alfred:profiles`, `alfred:profile-save` `{name, renameFrom?}`, `alfred:profile-use` `{name}`, `alfred:profile-delete` `{name}`, `alfred:panel` (get / `{mode, otherApps}`), `alfred:panel-toggle` `{open?}`, `alfred:show-butler`; events on `alfred` also: `toggle-panel`, `show-butler` |
 | hooks | `captureIpc(ipcMain)` right after Electron is required + one marked block in `main.js`, `preload.js` (`alfred*`), the switch + script tag in `controls.html`, `alfred-` log tag in `log-tags.js` |
 | Akọwe | `POST /api/projects/{id}/branches/{b}/journal/note` `{source:"alfred", code, title}`; optional `note` on `POST …/review/fix` |
 
