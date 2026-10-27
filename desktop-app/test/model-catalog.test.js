@@ -66,6 +66,11 @@ async function main() {
   assert(q3.capabilities.join() === 'tools,thinking' && q3.sizes.join() === '0.6b,8b,32b,235b', 'capabilities and sizes');
   assert(q3.pulls === 4200000 && /latest generation/.test(q3.description), 'pull count + description');
   assert(parsed[1].name === 'huihui_ai/qwen3-abliterated' && /abliterated & uncensored/.test(parsed[1].description), 'community model keeps its user/ prefix; entities decoded');
+  const live = mc.parseOllamaSearchHtml(fx('ollama-search-2026.html'));
+  assert(live.length === 2 && live[0].name === 'qwen3.8' && live[1].name === 'huihui_ai/qwen3-abliterated', `the 2026 layout (no x-test markers) parses: ${live.map((p) => p.name).join(', ')}`);
+  assert(live[0].capabilities.join() === 'vision,tools,thinking' && live[0].sizes.join() === '4b,27b', `2026 layout: capabilities ${live[0].capabilities} and sizes ${live[0].sizes} (not "13 tags", "17h" or "5.1M")`);
+  assert(live[0].pulls === 5075057 && /long-horizon agentic/.test(live[0].description) && live[0].url === 'https://ollama.com/library/qwen3.8', '2026 layout: downloads, description, url');
+  assert(live[1].sizes.join() === '8b,14b' && live[1].pulls === 312450 && /abliteration/.test(live[1].description), '2026 layout: a community model');
   assert(mc.parseOllamaSearchHtml('<html>garbage</html>').length === 0 && mc.parseOllamaSearchHtml(null).length === 0, 'garbage → []');
 
   console.log('\n== searchOllama ==');
@@ -85,6 +90,9 @@ async function main() {
   assert(r.models[2].vision === true, 'vision capability');
   await cat.searchOllama('x', { toolsOnly: true });
   assert(/&c=tools/.test(calls[calls.length - 1].url), 'toolsOnly adds the tools filter to the Ollama search');
+  cat = mc.createCatalog({ fetch: fakeFetch([[/ollama\.com\/search/, () => res(200, fx('ollama-search-2026.html'))]]) });
+  r = await cat.searchOllama('qwen', { hardware: HW12 });
+  assert(r.ok && r.models.length === 2 && r.models[0].pullName === 'qwen3.8:4b' && r.models[1].uncensored && r.models[1].tools, `searchOllama on the 2026 layout: ${r.ok ? r.models.map((x) => x.pullName).join(', ') : r.error}`);
   cat = mc.createCatalog({ fetch: fakeFetch([[/ollama\.com/, () => res(200, '<html><ul><li class="new-layout">qwen3</li></ul></html>')]]) });
   r = await cat.searchOllama('qwen');
   assert(r.ok === false && /page changed/.test(r.error), 'a changed page layout → plain error, not a crash');

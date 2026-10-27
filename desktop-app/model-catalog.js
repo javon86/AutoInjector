@@ -130,20 +130,37 @@ function attrTexts(chunk, attr) {
 }
 
 /** ollama.com/search HTML → [{ name, title, description, capabilities, sizes, pulls, url }] (defensive). */
+// ollama.com/search, two layouts: the older one marked its parts with x-test-* attributes; the current one
+// (seen live 2026-10) is plain markup: <li><a href="/library/NAME"><h2 title="NAME">…</h2> capability badges
+// (<span>tools</span>), <p>description</p>, <span title="5,075,057 downloads">, size badges (<span>27b</span>).
+const CAPS = new Set(['tools', 'vision', 'thinking', 'embedding', 'audio', 'cloud', 'insert']);
+const SIZE_RE = /^(?:\d+(?:\.\d+)?(?:x\d+(?:\.\d+)?)?[bm]|e\d+(?:\.\d+)?b)$/; // lowercase: "8b", "135m", "8x7b", "e4b" — not the "5.1M" download count
+function spanTexts(chunk) {
+  const out = []; const re = /<span\b[^>]*>([^<]*)<\/span>/gi; let m;
+  while ((m = re.exec(chunk))) { const t = stripTags(m[1]); if (t) out.push(t); }
+  return out;
+}
 function parseOllamaSearchHtml(html) {
   const s = String(html || '');
-  const chunks = s.split(/<li\b/i).slice(1).filter((c) => /x-test-search-response-title|x-test-model/i.test(c));
+  const chunks = s.split(/<li\b/i).slice(1).filter((c) => /x-test-search-response-title|x-test-model/i.test(c) || (/<h2\b/i.test(c) && /href="\/[^"]+"/i.test(c)));
   const out = [];
   for (const raw of chunks) {
     const chunk = raw.split(/<\/li>/i)[0];
     const href = /href="\/([^"?#]+)"/i.exec(chunk);
-    const title = attrTexts(chunk, 'x-test-search-response-title')[0] || '';
+    const h2 = /<h2\b([^>]*)>([\s\S]*?)<\/h2>/i.exec(chunk);
+    const h2Title = h2 ? ((/\btitle="([^"]*)"/i.exec(h2[1]) || [])[1] || stripTags(h2[2])) : '';
+    const title = attrTexts(chunk, 'x-test-search-response-title')[0] || h2Title || '';
     let name = href ? decodeURIComponent(href[1]).replace(/^library\//, '') : title;
     name = String(name || '').trim();
-    if (!name || /\s/.test(name)) continue;
-    const caps = attrTexts(chunk, 'x-test-capability').map((c) => c.toLowerCase());
-    const sizes = attrTexts(chunk, 'x-test-size').map((c) => c.toLowerCase());
-    const pulls = parseCount(attrTexts(chunk, 'x-test-pull-count')[0]);
+    if (!name || /\s/.test(name) || /^(search|models|blog|download|signin|signup|docs)\b/i.test(name)) continue;
+    const spans = spanTexts(chunk).map((t) => t.trim());
+    let caps = attrTexts(chunk, 'x-test-capability').map((c) => c.toLowerCase());
+    if (!caps.length) caps = spans.map((t) => t.toLowerCase()).filter((t) => CAPS.has(t));
+    let sizes = attrTexts(chunk, 'x-test-size').map((c) => c.toLowerCase());
+    if (!sizes.length) sizes = spans.filter((t) => SIZE_RE.test(t)).map((t) => t.toLowerCase());
+    sizes = [...new Set(sizes)];
+    const pullTitle = /title="([\d,.]+)\s+(?:downloads|pulls)"/i.exec(chunk);
+    const pulls = pullTitle ? Number(pullTitle[1].replace(/[,.]/g, '')) : parseCount(attrTexts(chunk, 'x-test-pull-count')[0]);
     let description = '';
     const pre = /<p\b[^>]*>([\s\S]*?)<\/p>/gi; let pm;
     while ((pm = pre.exec(chunk))) {
@@ -151,7 +168,7 @@ function parseOllamaSearchHtml(html) {
       const t = stripTags(pm[1]);
       if (t) { description = t; break; }
     }
-    out.push({ name, title: title || name, description, capabilities: caps, sizes, pulls, url: `${OLLAMA_BASE}/${href ? href[1] : `library/${name}`}` });
+    out.push({ name, title: title || name, description, capabilities: caps, sizes, pulls: Number.isFinite(pulls) ? pulls : null, url: `${OLLAMA_BASE}/${href ? href[1] : `library/${name}`}` });
   }
   return out;
 }

@@ -75,15 +75,6 @@ function fakeOllama() {
       const lr = await fn();
       console.log(`  (live ${src}: ${lr.ok ? `${lr.models.length} models, e.g. ${lr.models.slice(0, 3).map((m) => m.pullName).join(', ')}` : `not ok — ${lr.error}`})`);
     }
-    if (process.env.CI) { // TEMPORARY: show the real ollama.com/search markup so the reader can be matched to it
-      try {
-        const res = await fetch('https://ollama.com/search?q=qwen', { signal: AbortSignal.timeout(8000) });
-        const html = await res.text();
-        const at = Math.max(0, html.search(/href="\/(library\/)?qwen/i) - 1200);
-        console.log(`  (live ollama page: HTTP ${res.status}, ${html.length} chars; excerpt:)`);
-        console.log(html.slice(at, at + 4000).replace(/\s+/g, ' '));
-      } catch (e) { console.log(`  (live ollama page: ${String((e && e.message) || e).slice(0, 120)})`); }
-    }
   } catch (e) { console.log(`  (live look skipped: ${String((e && e.message) || e).slice(0, 120)})`); }
   // The checks below never touch the internet: ollama.com / huggingface.co answer from the test fixtures.
   const realFetch = global.fetch;
