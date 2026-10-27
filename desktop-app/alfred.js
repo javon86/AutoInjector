@@ -381,13 +381,15 @@ function createAlfred(deps = {}) {
       return brainLib.DEFAULT_LOCAL_BASE;
     };
     const api = () => { try { const c = deps.managerConfig && deps.managerConfig(); return c && c.endpoint && c.model ? c : null; } catch (_) { return null; } };
-    if (settings.brain === 'local') return Object.assign(base, { kind: 'local', endpoint: localEndpoint(), model: settings.local.model });
+    // A local model can be slow (big model, part on the processor, first load): give it at least 5 minutes.
+    const localTimeout = Math.max(settings.aiTimeoutMs, 300000);
+    if (settings.brain === 'local') return Object.assign(base, { kind: 'local', endpoint: localEndpoint(), model: settings.local.model, timeoutMs: localTimeout });
     if (settings.brain === 'pane') return Object.assign(base, { kind: 'pane', site: settings.pane.site, timeoutMs: Math.max(settings.aiTimeoutMs, 180000) });
     if (settings.brain === 'api') { const c = api(); return c ? Object.assign(base, { kind: 'api', endpoint: c.endpoint, apiKey: c.apiKey, model: c.model }) : Object.assign(base, { kind: 'api', missing: true }); }
     // auto: the local model when it answers, else the connected API
     const ep = localEndpoint();
     const pr = await brainLib.probe({ endpoint: ep, timeoutMs: 2500 });
-    if (pr.reachable) return Object.assign(base, { kind: 'local', endpoint: ep, model: settings.local.model });
+    if (pr.reachable) return Object.assign(base, { kind: 'local', endpoint: ep, model: settings.local.model, timeoutMs: localTimeout });
     const c = api();
     if (c) return Object.assign(base, { kind: 'api', endpoint: c.endpoint, apiKey: c.apiKey, model: c.model });
     return Object.assign(base, { kind: 'local', endpoint: ep, model: settings.local.model, unreachable: true });
@@ -538,7 +540,7 @@ function createAlfred(deps = {}) {
         }
         if (!v.ok) {
           log('alfred-refused', { req: r.id, tool: tool.name, reason: 'BAD_ARGS', why: String(v.error || '').replace(/"[^"]*"|'[^']*'|“[^”]*”/g, '…').slice(0, 140) });
-          history.push(toolMessage(call, { ok: false, error: 'BAD_ARGS', message: `The arguments for ${tool.name} were not right: ${v.error}.` }));
+          history.push(toolMessage(call, { ok: false, error: 'BAD_ARGS', message: `The arguments for ${tool.name} were not right: ${v.error}. Call it again like this (? = optional): ${typeof registry.usage === 'function' ? registry.usage(tool) : tool.name}` }));
           continue;
         }
         if (tool.interpreter) {
