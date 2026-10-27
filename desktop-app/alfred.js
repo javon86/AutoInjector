@@ -33,6 +33,7 @@ const DEFAULTS = Object.freeze({
   interpreter: false,            // the Open Interpreter tool (always asks first)
   alwaysAllow: {},               // { tool_name: true } — only tools marked allowAlways
   notices: true,                 // the proactive watcher
+  autoStart: false,              // ▶ Start Alfred by itself when AutoInjector opens (uses only what is downloaded)
   personality: { preset: 'butler', name: 'Alfred', tone: '', chattiness: 3, custom: '' }, // his VOICE only
   profiles: [],                  // saved set-ups: [{ name, brain, local:{endpoint, model}, pane:{site}, maxSteps, personality }]
   activeProfile: '',             // the name of the set-up last switched to ('' = none)
@@ -212,6 +213,7 @@ function createAlfred(deps = {}) {
     out.aiTimeoutMs = Math.min(600000, Math.max(5000, Math.round(Number(s.aiTimeoutMs) || DEFAULTS.aiTimeoutMs)));
     out.interpreter = s.interpreter === true;
     out.notices = s.notices !== false;
+    out.autoStart = s.autoStart === true;
     out.alwaysAllow = {};
     for (const [k, v] of Object.entries(s.alwaysAllow || {})) { if (v === true && registry.allowableKey(k)) out.alwaysAllow[k] = true; }
     out.personality = sanitizePersonality(s.personality);
@@ -252,7 +254,7 @@ function createAlfred(deps = {}) {
   function setSettings(patch) {
     if (!patch || typeof patch !== 'object') return publicSettings();
     const next = clone(settings);
-    for (const k of ['brain', 'maxSteps', 'aiTimeoutMs', 'interpreter', 'notices']) if (k in patch) next[k] = patch[k];
+    for (const k of ['brain', 'maxSteps', 'aiTimeoutMs', 'interpreter', 'notices', 'autoStart']) if (k in patch) next[k] = patch[k];
     if (patch.local && typeof patch.local === 'object') next.local = Object.assign({}, next.local, patch.local);
     if (patch.pane && typeof patch.pane === 'object') next.pane = Object.assign({}, next.pane, patch.pane);
     if (patch.alwaysAllow && typeof patch.alwaysAllow === 'object') next.alwaysAllow = Object.assign({}, next.alwaysAllow, patch.alwaysAllow);

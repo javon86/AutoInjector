@@ -4658,6 +4658,18 @@ ipcMain.handle("llm:pull", llmSafe((_e, a, o) => {
 }));
 ipcMain.handle("llm:cancel", llmSafe(() => llmSetup.cancel()));
 ipcMain.handle("llm:remove", llmSafe((_e, a) => llmSetup.removeModel(llmArg(a, "name"))));
+// ▶ Start Alfred: only what is already downloaded — start Ollama, use + load the model, turn him on (his panel opens).
+async function llmStartAlfred(reason) {
+  const r = await llmSetup.startAlfred();
+  if (r && r.ok) { try { alfred.setEnabled(true); } catch (_) {} }
+  logEvent("alfred-start", { reason, ok: !!(r && r.ok), model: r && r.model, code: r && r.code });
+  return r;
+}
+ipcMain.handle("llm:start-alfred", llmSafe(() => llmStartAlfred("button")));
+// 🔍 Find what's installed (Ollama, its model folders, running servers' models, loose .gguf files) — and use them, no download.
+ipcMain.handle("llm:scan", llmSafe(() => llmSetup.scanInstalled()));
+ipcMain.handle("llm:use-store", llmSafe((_e, a) => llmSetup.useStore(llmArg(a, "dir"))));
+ipcMain.handle("llm:import-gguf", llmSafe((_e, a) => llmSetup.importGguf(llmArg(a, "file"), a && typeof a === "object" ? a.name : undefined)));
 ipcMain.handle("llm:use", llmSafe((_e, a) => llmSetup.useModel(llmArg(a, "name"), { alsoButler: !(a && typeof a === "object" && a.alsoButler === false) })));
 ipcMain.handle("llm:hf-token", llmSafe((_e, a) => {
   const clear = !!(a && typeof a === "object" && a.clear) || a === null || a === "";
@@ -4689,6 +4701,9 @@ async function startManagedOllama() {
     const det = await ollamaManager.detect();
     if (!det || !det.available) { logEvent("ollama-managed-skip", { reason: "Ollama isn't installed (optional) — the app's own Ollama server was not started", severity: "info" }); return; }
     let modelsDir; try { modelsDir = outputManager.modelsDir("llm"); } catch (_) { return; }
+    // Models you already downloaded with Ollama's own app live in its usual folder: when "stuff and thing" has none,
+    // use that folder instead of starting empty (so nothing ever has to be downloaded twice).
+    try { const def = ollamaManager.defaultStoreDir(); if (!llmSetup.storeHasModels(modelsDir) && llmSetup.storeHasModels(def)) modelsDir = def; } catch (_) {}
     const host = process.env.AUTOINJECTOR_OLLAMA_HOST || ollamaManager.DEFAULT_MANAGED_HOST;
     const r = ollamaManager.startManaged({ modelsDir, host, onLog: (line) => { if (line) broadcast("ollama-progress", { model: "(server)", line }); } });
     if (!r.ok) { logEvent("ollama-managed-error", { error: r.error }); return; }
@@ -8436,6 +8451,8 @@ app.whenReady().then(() => {
   if (state.sdManaged && state.sdManaged.startWithApp && process.env.AUTOINJECTOR_SD_AUTOSTART !== "0") setTimeout(() => { sdStart(state.sdManaged.targetId).catch((e) => logEvent("sd-runner-error", { error: String(e) })); }, 1500);
   // 🩺 the health watch: first look a minute after start, then every ~10 minutes
   if (process.env.AUTOINJECTOR_HEALTH !== "0") healthWatch.start();
+  // ▶ "Start Alfred when AutoInjector opens" (🎩 Butler section, default off): no clicks at all.
+  try { if (alfred.getSettings().autoStart) setTimeout(() => { llmStartAlfred("app-start").catch((e) => logEvent("alfred-start", { reason: "app-start", ok: false, error: String(e) })); }, 4000); } catch (_) {}
 });
 // Stop OUR Stable Diffusion process before quitting (one started outside AutoInjector keeps running).
 let sdQuitDone = false;

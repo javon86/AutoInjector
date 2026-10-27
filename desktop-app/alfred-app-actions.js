@@ -137,6 +137,10 @@ A('llm.hardware', 'llm:hardware', { t: 'This PC\'s graphics card and memory (wha
 A('llm.check', 'llm:check', { t: 'Check everything for his AI (installed, running, model answers, tools, fit)', c: false, a: { quick: { type: 'boolean' } } });
 A('llm.fix', 'llm:fix', { t: 'Fix one problem the check found', c: true, a: { action: { type: 'string', enum: ['install', 'start', 'stop', 'use', 'butler-use', 'download-recommended', 'setup'] }, model: opt(200) }, r: ['action'], ex: { action: 'start' } });
 A('llm.setup_all', 'llm:setup-all', { t: 'Set up his AI with one button (install Ollama, start it, download the best model that fits, use it, check)', c: true, a: { uncensored: { type: 'boolean' } }, ex: { uncensored: false } });
+A('llm.start_alfred', 'llm:start-alfred', { t: 'Start his AI with what is already downloaded (no download): Ollama, the model, loaded', c: true, aa: true });
+A('llm.scan', 'llm:scan', { t: 'Find what is already installed: Ollama, model folders, models, .gguf files from other apps', c: false });
+A('llm.use_store', 'llm:use-store', { t: 'Use an Ollama model folder that already has models (no download)', c: true, a: { dir: text(1000) }, r: ['dir'], ex: { dir: '/home/me/.ollama/models' } });
+A('llm.import_gguf', 'llm:import-gguf', { t: 'Add a .gguf model file another app downloaded into Ollama (no download)', c: true, a: { file: text(1000), name: opt(60) }, r: ['file'], ex: { file: '/home/me/Downloads/model.gguf', name: 'my-model' } });
 A('llm.install_ollama', 'llm:install-ollama', { t: 'Install Ollama', c: true });
 A('llm.start', 'llm:start', { t: 'Start Ollama', c: true, aa: true });
 A('llm.stop', 'llm:stop', { t: 'Stop the app\'s Ollama', c: true, aa: true });

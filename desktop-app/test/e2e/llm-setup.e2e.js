@@ -79,7 +79,7 @@ async function main() {
     console.log('\n== the Butler section shows the setup box ==');
     if (!(await controls.isVisible('#llm-setup'))) { await controls.click('#btn-collapse-systemai').catch(() => {}); await sleep(300); }
     await controls.locator('#llm-setup').scrollIntoViewIfNeeded();
-    assert(await controls.isVisible('#llm-btn-setup'), 'the "⚡ Set up Alfred\'s AI" button is visible');
+    assert(await controls.isVisible('#llm-btn-setup'), 'the "⚡ Set up (first time)" button is visible');
     const cur = await until(async () => { const t = await controls.textContent('#llm-current'); return /running/.test(t) ? t : null; }, 20000);
     assert(!!cur, `the current line says Ollama is running (${cur || await controls.textContent('#llm-current')})`);
 
@@ -108,8 +108,25 @@ async function main() {
     let s = await controls.evaluate(() => window.api.alfredStatus());
     assert(s.settings.local.model === 'qwen2.5:0.5b', `the fix pointed Alfred at qwen2.5:0.5b (${s.settings.local.model})`);
 
-    console.log('\n== 🔎 Find a model: hardware + fit ratings (offline list) ==');
+    console.log('\n== ▶ Start Alfred: uses the model already downloaded, downloads nothing, turns him on ==');
+    const pullsBefore = oll.st.pulls.length;
+    assert(await controls.isVisible('#llm-btn-go'), 'the "▶ Start Alfred" button is visible');
+    await controls.click('#llm-btn-go');
+    const ready = await until(async () => { const t = await controls.textContent('#llm-msg'); return /Alfred is ready with/.test(t) && !(await controls.isDisabled('#llm-btn-go')) ? t : null; }, 60000, 300);
+    assert(!!ready, `it says he is ready ("${(ready || await controls.textContent('#llm-msg')).slice(0, 140)}")`);
+    s = await controls.evaluate(() => window.api.alfredStatus());
+    assert(s.enabled === true && s.settings.local.model === 'qwen2.5:0.5b' && oll.st.pulls.length === pullsBefore, `Alfred is on with the model he already had (${s.settings.local.model}); nothing was downloaded`);
+    assert(!!(await until(() => controls.isVisible('#alfred-drawer'), 8000, 200)), 'his side panel opened');
+
+    console.log('\n== 🔍 Find what\'s installed ==');
+    await controls.click('#llm-btn-scan');
+    const scanned = await until(async () => { if (!(await controls.isVisible('#llm-scan'))) return null; const t = await controls.textContent('#llm-scan'); return /Ollama 0\.5\.7/.test(t) && /qwen2\.5:0\.5b/.test(t) ? t : null; }, 30000, 300);
+    assert(!!scanned, 'lists Ollama and the models it already has, each with a button');
+
+    console.log('\n== 🔎 Find a model: folded by default, then hardware + fit ratings (offline list) ==');
     await controls.locator('#llm-models').scrollIntoViewIfNeeded();
+    assert(!(await controls.$eval('#llmm-fold', (d) => d.open)) && !(await controls.isVisible('#llmm-results')), 'the model finder is folded by default (saves space)');
+    await controls.click('#llmm-fold > summary');
     const hwLine = await until(async () => { const t = await controls.textContent('#llmm-hw'); return /RTX 3060/.test(t) ? t : null; }, 20000);
     assert(!!hwLine && /6 GB/.test(hwLine) && /RAM/.test(hwLine), `the hardware line names the card and RAM ("${hwLine}")`);
     const cardsOk = await until(async () => (await controls.$$('#llmm-results .llmm-card')).length >= 5, 20000);

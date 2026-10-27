@@ -34,6 +34,12 @@ function makeApi(over = {}) {
       return { ok: true, model: 'qwen2.5:7b', summary: '✓ Alfred\'s AI is ready: qwen2.5:7b.', check: Object.assign({}, checkResult, { ok: true, rows: checkResult.rows.slice(0, 1), summary: '✓ All set' }) };
     },
     llmStart: async () => { calls.push(['start']); return { ok: true, message: 'Ollama is running.' }; },
+    llmStartAlfred: async () => { calls.push(['startAlfred']); listener({ type: 'step', task: 'start-alfred', message: 'Loading qwen3:14b into memory…' }); await tick(20); if (over.noModels) return { ok: false, needSetup: true, error: 'No models are downloaded on this PC yet. Press ⚡ Set up once.', fix: { action: 'setup', label: '⚡ Set up (once)' } }; return { ok: true, model: 'qwen3:14b', message: '✓ Alfred is ready with qwen3:14b.' }; },
+    alfredStatus: async () => ({ settings: { autoStart: !!over.autoStart } }),
+    llmScan: async () => { calls.push(['scan']); return { ok: true, summary: 'Ollama 0.5.7 is installed · 1 model ready in Ollama · 1 other model folder with models · 1 model file (.gguf) Ollama can take in.', ollama: { installed: true, version: '0.5.7', bin: '/usr/bin/ollama' }, alfredModel: 'qwen3:14b', servers: [{ base: 'http://127.0.0.1:11435', which: 'app', where: "AutoInjector's own Ollama", models: [{ name: 'qwen3:14b', sizeBytes: 9e9 }, { name: 'mistral-nemo:12b', sizeBytes: 7e9 }] }], stores: [{ dir: '/home/me/.ollama/models', label: "Ollama's usual folder", hasModels: true, inUse: false }], ggufs: [{ path: '/home/me/.lmstudio/models/x/Nemo-Q4.gguf', file: 'Nemo-Q4.gguf', sizeBytes: 7e9, from: 'LM Studio', suggestedName: 'nemo-q4' }] }; },
+    llmUseStore: async (dir) => { calls.push(['useStore', dir]); return { ok: true, message: '✓ now uses that folder (nothing downloaded).' }; },
+    llmImportGguf: async (file, name) => { calls.push(['import', file, name]); return { ok: true, message: '✓ nemo-q4 is now in Ollama.' }; },
+    alfredSettings: async (p) => { calls.push(['alfredSettings', p]); return { ok: true }; },
     llmStop: async () => { calls.push(['stop']); status = Object.assign({}, status, { server: { running: false } }); return { ok: true, stopped: true, message: 'Stopped AutoInjector\'s Ollama.' }; },
     llmUse: async (a) => { calls.push(['use', a]); return { ok: true, message: `Alfred now uses ${a.name}.` }; },
     llmRemove: async (n) => { calls.push(['remove', n]); return { ok: true, message: `Removed ${n}.` }; },
@@ -61,8 +67,9 @@ function load(api, opts = {}) {
   assert(['llm-setup', 'llm-models'].every((id) => d.getElementById(id) && d.getElementById(id).parentElement.id === 'llm-zone'), '#llm-setup, then #llm-models');
   const order = [...d.getElementById('llm-zone').children].map((e) => e.id || e.className).join(',');
   assert(order === 'llm-setup,llm-models,llm-pair', `in that order, then the pair row (${order})`);
-  const pair = [...d.querySelector('#llm-zone .llm-pair').children].map((e) => e.id).join(',');
-  assert(pair === 'alfred-persona,butler-more', `personality (half) beside ⚙ More settings (${pair})`);
+  const pair = [...d.querySelector('#llm-zone .llm-pair').children].map((e) => e.id || e.className).join(',');
+  const right = [...d.querySelector('#llm-zone .llm-right').children].map((e) => e.id).join(',');
+  assert(pair === 'alfred-persona,llm-right' && right === 'butler-more,butler-chat', `personality (half) beside ⚙ More settings + the activity log (${pair} | ${right})`);
   const legacy = d.getElementById('butler-legacy');
   assert(legacy && legacy.hidden && legacy.contains(d.getElementById('jarvis-goal')) && legacy.contains(d.getElementById('lsi-model')) && legacy.contains(d.getElementById('col-device')), 'the old Butler controls are out of sight (still wired)');
   const scripts = [...d.querySelectorAll('script[src]')].map((s) => s.getAttribute('src'));
@@ -75,15 +82,37 @@ function load(api, opts = {}) {
   let w = load(s.api);
   await tick(40);
   const $ = (id) => w.document.getElementById(id);
-  assert($('llm-btn-setup') && /Set up Alfred's AI \(one button\)/.test($('llm-btn-setup').textContent), '⚡ Set up Alfred\'s AI (one button)');
+  assert($('llm-btn-go') && /Start Alfred/.test($('llm-btn-go').textContent) && $('llm-btn-go').classList.contains('primary'), '▶ Start Alfred is the main button');
+  assert($('llm-btn-setup') && /Set up \(first time\)/.test($('llm-btn-setup').textContent), '⚡ Set up (first time) beside it');
+  assert($('llm-autostart') && $('llm-autostart').type === 'checkbox', '"Start him when the app opens" box');
   assert($('llm-btn-check') && /Check everything/.test($('llm-btn-check').textContent), '🩺 Check everything');
   assert($('llm-uncensored') && $('llm-uncensored').type === 'checkbox', '🔓 Prefer uncensored');
   assert(/qwen2\.5:7b/.test($('llm-current').textContent) && /0\.5\.7 running/.test($('llm-current').textContent), `current model + Ollama state (${$('llm-current').textContent})`);
   assert($('llm-btn-start').hidden && !$('llm-btn-stop').hidden, 'running → shows Stop, hides Start');
   assert(/RTX 3060/.test($('llm-hw').textContent), 'the hardware line');
-  const rows = w.document.querySelectorAll('.llm-model');
+  const rows = w.document.querySelectorAll('#llm-installed .llm-model');
   assert(rows.length === 2 && /★★★ Great fit/.test(rows[0].textContent) && /4\.7 GB/.test(rows[0].textContent), 'installed models with size + fit');
   assert(/in use/.test(rows[0].textContent) && !rows[0].querySelector('.llm-use') && rows[1].querySelector('.llm-use') && /🔓/.test(rows[1].textContent), 'the current one says "in use"; others have Use; uncensored ones a 🔓');
+
+  console.log('\n== ▶ Start Alfred: what is already downloaded, no download ==');
+  $('llm-btn-go').click();
+  await tick(5);
+  assert($('llm-btn-go').disabled && /Loading qwen3:14b/.test($('llm-msg').textContent), 'busy while it starts; says what it is doing');
+  await tick(60);
+  assert(s.calls.some((c) => c[0] === 'startAlfred') && !s.calls.some((c) => c[0] === 'setupAll') && /ready with qwen3:14b/.test($('llm-msg').textContent) && !$('llm-btn-go').disabled, 'calls llmStartAlfred (never setupAll) and shows "ready"');
+  $('llm-autostart').checked = true; $('llm-autostart').dispatchEvent(new w.Event('change')); await tick(5);
+  assert(s.calls.some((c) => c[0] === 'alfredSettings' && c[1].autoStart === true) && /start by himself/.test($('llm-msg').textContent), 'ticking "Start him when the app opens" saves autoStart');
+
+  console.log('\n== 🔍 Find what\'s installed: lists it, each with a button to use it ==');
+  $('llm-btn-scan').click(); await tick(30);
+  const scanBox = $('llm-scan');
+  assert(!scanBox.hidden && /Already on this PC/.test(scanBox.textContent) && /1 model file/.test(scanBox.textContent), 'shows what it found');
+  const rowsS = scanBox.querySelectorAll('[data-scan-model]');
+  assert(rowsS.length === 2 && /in use/.test(rowsS[0].textContent) && rowsS[1].querySelector('.llm-use'), 'models: the one in use, a Use button on the other');
+  scanBox.querySelector('[data-scan-store] button').click(); await tick(30);
+  assert(s.calls.some((c) => c[0] === 'useStore' && c[1] === '/home/me/.ollama/models'), '"Use this folder" → llmUseStore(dir)');
+  scanBox.querySelector('[data-scan-gguf] button') && scanBox.querySelector('[data-scan-gguf] button').click(); await tick(30);
+  assert(s.calls.some((c) => c[0] === 'import' && /Nemo-Q4\.gguf$/.test(c[1]) && c[2] === 'nemo-q4'), '"➕ Add to Ollama" → llmImportGguf(file, name)');
 
   console.log('\n== the one button: sends 🔓, shows steps + progress, then the rows and the summary ==');
   $('llm-uncensored').checked = true; $('llm-uncensored').dispatchEvent(new w.Event('change'));
@@ -114,10 +143,10 @@ function load(api, opts = {}) {
   assert(s.calls.filter((c) => c[0] === 'check').length === before + 1, 'and checks again');
 
   console.log('\n== Use / Remove / Stop / Cancel ==');
-  w.document.querySelectorAll('.llm-model')[1].querySelector('.llm-use').click();
+  w.document.querySelectorAll('#llm-installed .llm-model')[1].querySelector('.llm-use').click();
   await tick(30);
   assert(s.calls.some((c) => c[0] === 'use' && c[1].name === 'dolphin3:8b') && /dolphin3:8b/.test($('llm-msg').textContent), 'Use → llmUse({name})');
-  w.document.querySelectorAll('.llm-model')[1].querySelector('.llm-remove').click();
+  w.document.querySelectorAll('#llm-installed .llm-model')[1].querySelector('.llm-remove').click();
   await tick(30);
   assert(s.calls.some((c) => c[0] === 'remove' && c[1] === 'dolphin3:8b'), 'Remove (after confirming) → llmRemove(name)');
   const s2 = makeApi();

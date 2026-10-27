@@ -49,8 +49,11 @@
       h('span', { id: 'llm-current', class: 'llm-current' }, 'Checking…')),
     h('div', { id: 'llm-hw', class: 'llm-sub' }),
     h('div', { class: 'btns llm-btns' },
-      h('button', { id: 'llm-btn-setup', class: 'primary llm-big', title: 'Installs Ollama if needed, starts it, picks the best model this PC can run, downloads it, points Alfred at it and checks everything.' }, '⚡ Set up Alfred\'s AI (one button)'),
+      h('button', { id: 'llm-btn-go', class: 'primary llm-big', title: 'Uses what you already downloaded — never downloads: starts Ollama, picks your model, loads it, turns Alfred on and opens his panel.' }, '▶ Start Alfred'),
+      h('button', { id: 'llm-btn-setup', class: 'llm-setup-btn', title: 'First time only (or for a new model): installs Ollama if needed, then downloads one model that fits this PC — but if you already have a model it uses that and downloads nothing.' }, '⚡ Set up (first time)'),
+      h('button', { id: 'llm-btn-scan', title: 'Looks on this PC for Ollama, its model folders, the models it has, and model files (.gguf) other apps downloaded — so nothing gets downloaded twice' }, '🔍 Find what\'s installed'),
       h('label', { class: 'llm-unc', title: 'Pick an uncensored model that still follows instructions (🔓)' }, h('input', { type: 'checkbox', id: 'llm-uncensored' }), ' 🔓 Prefer uncensored'),
+      h('label', { class: 'llm-unc', title: 'Every time AutoInjector opens, start Alfred with the model you already have (no download, no clicks)' }, h('input', { type: 'checkbox', id: 'llm-autostart' }), ' Start him when the app opens'),
       h('button', { id: 'llm-btn-check', title: 'Confirm Ollama is installed and running, the model is there, answers and can use tools' }, '🩺 Check everything'),
       h('button', { id: 'llm-btn-start' }, '▶ Start Ollama'),
       h('button', { id: 'llm-btn-stop' }, '⏹ Stop Ollama'),
@@ -60,6 +63,7 @@
       h('div', { id: 'llm-progress-text', class: 'llm-sub' })),
     h('ol', { id: 'llm-steps', class: 'llm-steps' }),
     h('div', { id: 'llm-msg', class: 'llm-msg', role: 'status', 'aria-live': 'polite' }),
+    h('div', { id: 'llm-scan', class: 'llm-scan', hidden: true }),
     h('ul', { id: 'llm-check-rows', class: 'llm-rows' }),
     h('details', { id: 'llm-installed-wrap', class: 'llm-installed-wrap' },
       h('summary', null, '📦 Models on this PC'),
@@ -75,8 +79,8 @@
   let last = null;
   function setBusy(on) {
     busy = !!on;
-    for (const id of ['llm-btn-setup', 'llm-btn-check', 'llm-btn-start', 'llm-btn-stop']) { const b = $(id); if (b) b.disabled = busy; }
-    for (const b of root.querySelectorAll('.llm-fix, .llm-use, .llm-remove')) b.disabled = busy;
+    for (const id of ['llm-btn-go', 'llm-btn-scan', 'llm-btn-setup', 'llm-btn-check', 'llm-btn-start', 'llm-btn-stop']) { const b = $(id); if (b) b.disabled = busy; }
+    for (const b of root.querySelectorAll('.llm-fix, .llm-use, .llm-remove, .llm-scan button')) b.disabled = busy;
     $('llm-btn-cancel').hidden = !busy;
     if (!busy) $('llm-progress').hidden = true;
   }
@@ -140,7 +144,7 @@
     const box = $('llm-installed');
     box.textContent = '';
     const models = Array.isArray(s.models) ? s.models : [];
-    if (!models.length) box.appendChild(h('div', { class: 'llm-sub' }, s.server && s.server.running ? 'No models downloaded yet — press ⚡ Set up, or find one below.' : 'Start Ollama to see the models on this PC.'));
+    if (!models.length) box.appendChild(h('div', { class: 'llm-sub' }, s.server && s.server.running ? 'No models downloaded yet — press ⚡ Set up (first time), or find one below.' : 'Start Ollama to see the models on this PC.'));
     const mine = s.alfred && s.alfred.model;
     const key = (m) => { const t = String(m || '').toLowerCase(); return t.includes(':') ? t : `${t}:latest`; };
     for (const m of models) {
@@ -210,6 +214,64 @@
     if (r) msg(r.ok ? r.message : r.error, r.ok ? 'good' : 'bad');
   }
 
+  async function go() {
+    $('llm-steps').textContent = '';
+    msg('Starting Alfred with what you already have…');
+    const r = await task(() => call('llmStartAlfred'));
+    if (!r) return;
+    msg(r.ok ? r.message : (r.error || 'Alfred didn\'t start.'), r.ok ? 'good' : 'bad');
+    if (!r.ok && r.fix && r.fix.action) {
+      const m = $('llm-msg');
+      m.appendChild(document.createTextNode(' '));
+      m.appendChild(h('button', { class: 'llm-fix', 'data-action': r.fix.action, onclick: () => (r.fix.action === 'setup' ? setupAll() : runFix(r.fix)) }, r.fix.label || 'Fix'));
+    }
+  }
+  // 🔍 what is already on this PC — every find has a button to use it (nothing is downloaded)
+  function renderScan(r) {
+    const box = $('llm-scan');
+    box.textContent = '';
+    box.hidden = false;
+    box.append(h('div', { class: 'llm-scan-head' }, h('b', null, '🔍 Already on this PC'), ' ', h('span', { class: 'llm-sub' }, r.summary || ''), h('span', { class: 'spacer' }), h('button', { class: 'llm-scan-close', title: 'Hide', onclick: () => { box.hidden = true; } }, '×')));
+    if (!r.ollama || !r.ollama.installed) box.append(h('div', { class: 'llm-sub' }, '✖ Ollama isn\'t installed — ', h('button', { onclick: setupAll }, '⚡ Set up (first time)')));
+    else box.append(h('div', { class: 'llm-sub' }, `✔ Ollama ${r.ollama.version || ''}${r.ollama.bin ? ` — ${r.ollama.bin}` : ''}`));
+    const mine = r.alfredModel;
+    const key = (m) => { const t = String(m || '').toLowerCase(); return t.includes(':') ? t : `${t}:latest`; };
+    for (const sv of r.servers || []) {
+      box.append(h('div', { class: 'llm-scan-group' }, `🟢 ${sv.where}: ${sv.models.length} model${sv.models.length === 1 ? '' : 's'}`));
+      for (const m of sv.models) {
+        const cur = mine && key(m.name) === key(mine);
+        box.append(h('div', { class: 'llm-model', 'data-scan-model': m.name },
+          h('span', { class: 'llm-mname' }, `${cur ? '★ ' : ''}${m.name}`), h('span', { class: 'llm-sub' }, ` ${m.sizeText || gb(m.sizeBytes)}`),
+          m.fit ? h('span', { class: `llm-fit llm-fit-${m.fit.rating}`, title: m.fit.reason || '' }, ` ${m.fit.label}`) : null,
+          h('span', { class: 'spacer' }),
+          cur ? h('span', { class: 'llm-sub' }, 'in use') : h('button', { class: 'llm-use', onclick: () => useModel(m.name) }, 'Use')));
+      }
+    }
+    for (const st of (r.stores || []).filter((x) => x.hasModels && !x.inUse)) {
+      box.append(h('div', { class: 'llm-model', 'data-scan-store': st.dir },
+        h('span', { class: 'llm-mname' }, `📁 ${st.label}`), h('span', { class: 'llm-sub' }, ` ${st.dir}`), h('span', { class: 'spacer' }),
+        h('button', { title: 'Run AutoInjector\'s Ollama on this folder, so its models are ready without downloading', onclick: async () => { msg('Switching to that folder…'); const x = await task(() => call('llmUseStore', st.dir)); if (x) { msg(x.ok ? x.message : x.error, x.ok ? 'good' : 'bad'); if (x.ok) scan(); } } }, 'Use this folder')));
+    }
+    if ((r.ggufs || []).length) box.append(h('div', { class: 'llm-scan-group' }, '📄 Model files other apps downloaded (Ollama can take them in — no download):'));
+    for (const g of r.ggufs || []) {
+      box.append(h('div', { class: 'llm-model', 'data-scan-gguf': g.path },
+        h('span', { class: 'llm-mname', title: g.path }, g.file), h('span', { class: 'llm-sub' }, ` ${g.sizeText || gb(g.sizeBytes)} · ${g.from}`), h('span', { class: 'spacer' }),
+        h('button', { onclick: async () => { msg(`Adding ${g.file} to Ollama…`); const x = await task(() => call('llmImportGguf', g.path, g.suggestedName)); if (x) { msg(x.ok ? x.message : x.error, x.ok ? 'good' : 'bad'); if (x.ok) scan(); } } }, '➕ Add to Ollama')));
+    }
+  }
+  async function scan() {
+    msg('Looking for what is already installed on this PC…');
+    const r = await task(() => call('llmScan'));
+    if (!r) return;
+    if (r.ok === false) { msg(r.error || 'I couldn\'t look.', 'bad'); return; }
+    renderScan(r);
+    msg(r.summary, 'good');
+  }
+  $('llm-btn-scan').addEventListener('click', scan);
+  $('llm-btn-go').addEventListener('click', go);
+  const auto = $('llm-autostart');
+  if (typeof api.alfredStatus === 'function') Promise.resolve(api.alfredStatus()).then((st) => { auto.checked = !!(st && st.settings && st.settings.autoStart); }).catch(() => {});
+  auto.addEventListener('change', () => { if (typeof api.alfredSettings === 'function') Promise.resolve(api.alfredSettings({ autoStart: auto.checked })).catch(() => {}); msg(auto.checked ? '✓ Alfred will start by himself when AutoInjector opens (with the model you already have).' : 'Alfred won\'t start by himself.', 'good'); });
   $('llm-btn-setup').addEventListener('click', setupAll);
   $('llm-btn-check').addEventListener('click', check);
   $('llm-btn-start').addEventListener('click', start);
@@ -221,6 +283,7 @@
     api.onLlm((ev) => {
       if (!ev || typeof ev !== 'object') return;
       if (ev.type === 'progress') progress(ev);
+      else if (ev.type === 'step' && ev.task === 'start-alfred') msg(ev.message);
       else if (ev.type === 'step') { renderStep(ev); if (ev.state === 'running') msg(ev.message); }
       else if (ev.type === 'log') logLine(ev.message, ev.level);
       else if (ev.type === 'done') {
@@ -233,6 +296,6 @@
   }
 
   // Other panels (🎩 "⚙ Set up his AI", the model finder) can ask for a refresh / a check.
-  window.llmSetupUI = { refresh, check, setupAll, status: () => last };
+  window.llmSetupUI = { refresh, check, setupAll, start: go, scan, status: () => last };
   refresh();
 })();

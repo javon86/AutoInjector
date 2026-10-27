@@ -896,6 +896,223 @@ function createLlmSetup(deps = {}) {
     } catch (e) { return { ok: false, error: friendlyError(e, 'apply the fix') }; }
   }
 
+  // ---- what is ALREADY on this PC (never download what is there) ----
+  const usableInstalled = (fit) => !fit || fit.rating !== 'too-big'; // a model you already have is used even when slow
+  const FIT_RANK = { great: 3, good: 2, slow: 1, unknown: 0 };
+  /** Does an Ollama model folder hold any downloaded model? (it has manifests) */
+  function storeHasModels(dir) {
+    if (!dir) return false;
+    const walk = (p, depth) => {
+      let ents; try { ents = d.fs.readdirSync(p, { withFileTypes: true }); } catch (_) { return false; }
+      for (const e of ents) {
+        if (e.isFile && e.isFile()) return true;
+        if (depth < 5 && e.isDirectory && e.isDirectory() && walk(path.join(p, e.name), depth + 1)) return true;
+      }
+      return false;
+    };
+    return walk(path.join(dir, 'manifests'), 0);
+  }
+  /** Every Ollama answering on this PC (the app's own and the one Ollama's app runs) with its models. */
+  async function allServers(hw) {
+    const out = [];
+    const seen = new Set();
+    for (const [base, which] of [[alfredBase(), 'alfred'], [managedBase(), 'app'], [d.systemBase, 'system']]) {
+      if (!base || seen.has(base)) continue;
+      seen.add(base);
+      const p = await probe(base);
+      if (!p.ok) continue;
+      const l = await listModels({ base, hardware: hw });
+      out.push({ base, which: base === managedBase() ? 'app' : base === d.systemBase ? 'system' : which, models: l.ok ? l.models : [] });
+    }
+    return out;
+  }
+  /** The best model already downloaded: Alfred's own choice when it is there, else the best fit (biggest first). */
+  function bestInstalled(servers, opts = {}) {
+    const all = [];
+    for (const sv of servers) for (const m of sv.models) all.push({ m, sv });
+    const want = opts.prefer;
+    if (want) { const hit = all.find((x) => sameModel(x.m.name, want) && usableInstalled(x.m.fit)); if (hit && (!opts.uncensored || isUncensored(hit.m.name))) return hit; }
+    const ok = all.filter((x) => usableInstalled(x.m.fit) && !/embed/i.test(x.m.name) && (!opts.uncensored || isUncensored(x.m.name)));
+    if (!ok.length) return null;
+    const score = (x) => {
+      const p = paramsFromName(x.m.name);
+      return [(p == null || p >= 3) ? 1 : 0, FIT_RANK[(x.m.fit && x.m.fit.rating) || 'unknown'] || 0, Number(x.m.sizeBytes) || 0];
+    };
+    ok.sort((a, b) => { const A = score(a), B = score(b); for (let i = 0; i < A.length; i++) if (A[i] !== B[i]) return B[i] - A[i]; return 0; });
+    return ok[0];
+  }
+  /** Start the app's own Ollama on whichever model folder already HAS models (its own, else Ollama's usual one). */
+  async function startOnStoreWithModels(found) {
+    let appDir = null; try { appDir = d.paths.modelsDir(); } catch (_) {}
+    let defDir = null; try { defDir = om.defaultStoreDir ? om.defaultStoreDir(d.env) : null; } catch (_) {}
+    const dir = storeHasModels(appDir) ? appDir : storeHasModels(defDir) ? defDir : appDir;
+    if (!dir) return { ok: false, error: 'The app\'s content folder isn\'t ready yet. Wait a moment and try again.' };
+    try { d.fs.mkdirSync(dir, { recursive: true }); } catch (_) {}
+    const ms = om.managedStatus ? om.managedStatus() : { running: false };
+    if (ms.running && ms.modelsDir === dir) return { ok: true, base: managedBase(), which: 'app', dir };
+    if (ms.running) { try { om.stopManaged(); } catch (_) {} await sleep(400); }
+    const host = managedHost();
+    say(`Starting Ollama with the models in ${dir}…`, 'info', 'start');
+    const r = om.startManaged({ modelsDir: dir, host, bin: found.bin, spawnFn: d.spawn, onLog: () => {} });
+    if (!r || !r.ok) return { ok: false, error: friendlyError({ message: r && r.error }, 'start Ollama') };
+    const deadline = Date.now() + d.readyTimeoutMs;
+    while (Date.now() < deadline) {
+      const p = await probe(`http://${host}`, 1500);
+      if (p.ok) { emit({ type: 'server', running: true, base: `http://${host}`, which: 'app' }); return { ok: true, base: `http://${host}`, which: 'app', dir, started: true }; }
+      await sleep(300);
+    }
+    return { ok: false, error: 'Ollama started but isn\'t answering yet. Wait a few seconds and try again.' };
+  }
+
+  // ---- 🔍 FIND WHAT'S INSTALLED: Ollama, its model folders, the servers' models, loose .gguf files ----
+  /** Model files other programs downloaded (LM Studio, GPT4All, Jan, Downloads…): Ollama can take them in. */
+  function ggufPlaces() {
+    const home = d.homedir, env = d.env || {}, out = [];
+    const add = (dir, from) => { if (dir && !out.some((x) => x.dir === dir)) out.push({ dir, from }); };
+    add(P.join(home, '.lmstudio', 'models'), 'LM Studio');
+    add(P.join(home, '.cache', 'lm-studio', 'models'), 'LM Studio');
+    add(P.join(home, 'jan', 'models'), 'Jan');
+    if (env.LOCALAPPDATA) add(P.join(env.LOCALAPPDATA, 'nomic.ai', 'GPT4All'), 'GPT4All');
+    add(P.join(home, '.local', 'share', 'nomic.ai', 'GPT4All'), 'GPT4All');
+    add(P.join(home, 'Library', 'Application Support', 'nomic.ai', 'GPT4All'), 'GPT4All');
+    add(P.join(home, 'Downloads'), 'Downloads');
+    try { const m = d.paths.modelsDir(); if (m) add(m, 'AutoInjector'); } catch (_) {}
+    return out;
+  }
+  function findGgufs(limit = 60) {
+    const found = [];
+    const walk = (dir, depth, from) => {
+      if (found.length >= limit) return;
+      let ents; try { ents = d.fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { return; }
+      for (const e of ents) {
+        if (found.length >= limit) return;
+        const full = P.join(dir, e.name);
+        if (e.isDirectory && e.isDirectory()) { if (depth < 4 && !/^(blobs|manifests|\.git|node_modules)$/i.test(e.name)) walk(full, depth + 1, from); continue; }
+        if (!/\.gguf$/i.test(e.name) || /mmproj|-0000[2-9]-of-/i.test(e.name)) continue;
+        let size = 0; try { size = d.fs.statSync(full).size; } catch (_) {}
+        if (size < 50 * 1024 * 1024) continue; // not a model (a vocab / test file)
+        found.push({ path: full, file: e.name, sizeBytes: size, sizeText: gbText(size), from, suggestedName: ggufName(e.name) });
+      }
+    };
+    for (const pl of ggufPlaces()) walk(pl.dir, 0, pl.from);
+    return found;
+  }
+  function ggufName(file) {
+    return String(file).replace(/\.gguf$/i, '').replace(/-0000\d-of-\d+$/i, '').toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'my-model';
+  }
+  function storeCandidates() {
+    const out = [];
+    const add = (dir, label) => { if (dir && !out.some((x) => x.dir === dir)) out.push({ dir, label }); };
+    try { add(d.paths.modelsDir(), 'AutoInjector\'s folder ("stuff and thing")'); } catch (_) {}
+    try { if (d.env && d.env.OLLAMA_MODELS) add(d.env.OLLAMA_MODELS, 'OLLAMA_MODELS setting'); } catch (_) {}
+    try { add(om.defaultStoreDir ? om.defaultStoreDir(Object.assign({}, d.env, { OLLAMA_MODELS: '' })) : null, 'Ollama\'s usual folder'); } catch (_) {}
+    return out;
+  }
+  async function scanInstalled() {
+    let hw = null; try { hw = await hardware(); } catch (_) {}
+    const ollama = await findOllama();
+    const servers = await allServers(hw);
+    const ms = om.managedStatus ? om.managedStatus() : {};
+    const stores = storeCandidates().map((st) => ({ dir: st.dir, label: st.label, hasModels: storeHasModels(st.dir), inUse: !!(ms.running && ms.modelsDir === st.dir) }));
+    const ggufs = findGgufs();
+    const n = servers.reduce((a, sv) => a + sv.models.length, 0);
+    const parts = [ollama.ok ? `Ollama ${ollama.version || ''} is installed`.replace('  ', ' ') : 'Ollama isn\'t installed', `${n} model${n === 1 ? '' : 's'} ready in Ollama`];
+    const other = stores.filter((x) => x.hasModels && !x.inUse).length;
+    if (other) parts.push(`${other} other model folder${other === 1 ? '' : 's'} with models`);
+    if (ggufs.length) parts.push(`${ggufs.length} model file${ggufs.length === 1 ? '' : 's'} (.gguf) Ollama can take in`);
+    log('llm-scan', { ollama: !!ollama.ok, servers: servers.length, models: n, stores: stores.filter((x) => x.hasModels).length, ggufs: ggufs.length });
+    return { ok: true, ollama: { installed: !!ollama.ok, version: ollama.version || null, bin: ollama.bin || null }, servers: servers.map((sv) => ({ base: sv.base, which: sv.which, where: whereText(sv), models: sv.models })), stores, ggufs, alfredModel: (alfredSettings() || { local: {} }).local.model || null, summary: `${parts.join(' · ')}.` };
+  }
+  /** Run the app's Ollama on a folder that already has models (instead of downloading them again). */
+  async function useStore(dir) {
+    if (!dir || !storeHasModels(dir)) return { ok: false, error: 'That folder has no Ollama models in it.' };
+    const found = await findOllama();
+    if (!found.ok) return { ok: false, error: 'Ollama isn\'t installed yet — press ⚡ Set up (first time).' };
+    if (om.managedStatus && om.managedStatus().running) { try { om.stopManaged(); } catch (_) {} await sleep(400); }
+    const host = managedHost();
+    const r = om.startManaged({ modelsDir: dir, host, bin: found.bin, spawnFn: d.spawn, onLog: () => {} });
+    if (!r || !r.ok) return { ok: false, error: friendlyError({ message: r && r.error }, 'start Ollama') };
+    const deadline = Date.now() + d.readyTimeoutMs;
+    while (Date.now() < deadline) { if ((await probe(`http://${host}`, 1500)).ok) break; await sleep(300); }
+    const l = await listModels({ base: `http://${host}` });
+    log('llm-use-store', { ok: !!l.ok, models: l.ok ? l.models.length : 0 });
+    emit({ type: 'models-changed' });
+    return l.ok ? { ok: true, base: `http://${host}`, models: l.models, message: `✓ AutoInjector's Ollama now uses ${dir} — ${l.models.length} model${l.models.length === 1 ? '' : 's'} ready (nothing downloaded).` } : { ok: false, error: 'Ollama started on that folder but didn\'t list its models — press 🔍 again in a moment.' };
+  }
+  /** Take a .gguf another program downloaded into Ollama (ollama create … FROM <file>): no download. */
+  async function importGguf(file, name) {
+    const f = String(file || '');
+    if (!/\.gguf$/i.test(f) || !exists(f)) return { ok: false, error: 'That model file isn\'t there any more.' };
+    const n = ggufName(name || P.basename(f));
+    if (!MODEL_NAME_RE.test(n)) return { ok: false, error: 'Pick a simple name for it (letters, numbers, - and _).' };
+    const found = await findOllama();
+    if (!found.ok) return { ok: false, error: 'Ollama isn\'t installed yet — press ⚡ Set up (first time).' };
+    let srv = await currentServer();
+    if (!srv.ok) { const st = await startOllama(); if (!st.ok) return { ok: false, error: st.error }; srv = { ok: true, base: st.base }; }
+    if (busy) return { ok: false, busy: true, error: 'I am already busy with something — wait for it to finish.' };
+    begin('import');
+    try {
+      const dir = d.paths.downloadsDir();
+      try { d.fs.mkdirSync(dir, { recursive: true }); } catch (_) {}
+      const mf = P.join(dir, `Modelfile-${n.replace(/[^a-z0-9._-]/gi, '_')}`);
+      d.fs.writeFileSync(mf, `FROM ${f}\n`);
+      say(`Adding ${P.basename(f)} to Ollama as ${n} (it reads the file — no download)…`, 'info', 'import');
+      const host = srv.base.replace(/^https?:\/\//, '');
+      const res = await new Promise((resolve) => {
+        let c; let out = '';
+        try { c = d.spawn(found.bin, ['create', n, '-f', mf], { windowsHide: true, env: Object.assign({}, process.env, d.env, { OLLAMA_HOST: host }) }); } catch (e) { return resolve({ ok: false, error: friendlyError(e, 'add it to Ollama') }); }
+        const grab = (b) => { out = (out + String(b)).slice(-600); };
+        if (c.stdout) c.stdout.on('data', grab); if (c.stderr) c.stderr.on('data', grab);
+        c.on('error', (e) => resolve({ ok: false, error: friendlyError(e, 'add it to Ollama') }));
+        c.on('close', (code) => resolve(code === 0 ? { ok: true } : { ok: false, error: `Ollama couldn't take that file in${out ? ` (${out.trim().split('\n').pop().slice(0, 160)})` : ''}.` }));
+      });
+      log('llm-import', { ok: !!res.ok });
+      emit({ type: 'models-changed' });
+      return res.ok ? { ok: true, name: n, message: `✓ ${n} is now in Ollama — press Use (or ▶ Start Alfred).` } : res;
+    } catch (e) { return { ok: false, error: friendlyError(e, 'add it to Ollama') }; } finally { end('import'); }
+  }
+
+  // ---- ▶ START ALFRED: one click, uses only what is already downloaded ----
+  async function startAlfred(opts = {}) {
+    if (busy) return { ok: false, busy: true, error: 'I am already busy with something — wait for it to finish (or press Cancel).' };
+    begin('start-alfred');
+    const onProgress = typeof opts.onProgress === 'function' ? opts.onProgress : null;
+    const tell = (message) => { const ev = { type: 'step', task: 'start-alfred', message }; emit(ev); if (onProgress) { try { onProgress(ev); } catch (_) {} } };
+    const done = (out) => { emit({ type: 'done', task: 'start-alfred', ok: !!out.ok, message: out.ok ? out.message : out.error }); log('llm-start-alfred', { ok: !!out.ok, model: out.model || null, which: out.which || null, error: out.ok ? undefined : out.code }); end('start-alfred'); return out; };
+    try {
+      const found = await findOllama();
+      if (!found.ok) return done({ ok: false, code: 'NO_OLLAMA', needSetup: true, error: 'Ollama isn\'t installed yet. Press ⚡ Set up once — it installs Ollama and one model.', fix: { action: 'setup', label: '⚡ Set up (once)' } });
+      tell('Looking for the models you already have…');
+      let hw = null; try { hw = await hardware(); } catch (_) {}
+      const s = alfredSettings() || { local: {} };
+      const prefer = s.local && s.local.model;
+      let servers = await allServers(hw);
+      let pick = bestInstalled(servers, { prefer });
+      if (!pick) {
+        // Nothing running has a model: start the app's Ollama on a folder that does (e.g. Ollama's usual one).
+        tell('Starting Ollama…');
+        const st = await startOnStoreWithModels(found);
+        if (!st.ok) return done({ ok: false, code: 'START_FAILED', error: st.error });
+        servers = await allServers(hw);
+        pick = bestInstalled(servers, { prefer });
+      }
+      if (!pick) return done({ ok: false, code: 'NO_MODELS', needSetup: true, error: 'No models are downloaded on this PC yet. Press ⚡ Set up once — it downloads one that fits (you never need to again).', fix: { action: 'setup', label: '⚡ Set up (once)' } });
+      const name = pick.m.name; const base = pick.sv.base;
+      tell(`Using ${name}…`);
+      const same = prefer && sameModel(prefer, name) && alfredBase() === base;
+      if (!same) {
+        const u = await useModel(name, { base, alsoButler: true, skipTest: true });
+        if (!u.ok) return done({ ok: false, code: 'USE_FAILED', error: u.error || 'I couldn\'t save the model choice.' });
+      }
+      tell(`Loading ${name} into memory (the first time can take a minute)…`);
+      const warm = await http(`${base}/api/generate`, { method: 'POST', body: { model: name, prompt: '', keep_alive: '30m' }, timeoutMs: 240000 });
+      const where = whereText({ base, which: pick.sv.which });
+      const pp = paramsFromName(name);
+      const fit = (pick.m.fit && pick.m.fit.rating === 'slow' ? ' It is big for this PC, so answers will be slow.' : '') + (pp != null && pp < 3 ? ' It is a very small model, so he may pick the wrong tool — ⚡ Set up gets a better one.' : '');
+      return done({ ok: true, model: name, base, which: pick.sv.which, warmed: !!warm.ok, message: `✓ Alfred is ready with ${name} (${where}).${fit}${warm.ok ? '' : ' (It will load when you first ask him something.)'}` });
+    } catch (e) { return done({ ok: false, code: 'ERROR', error: friendlyError(e, 'start Alfred') }); }
+  }
+
   // ---- ⚡ THE ONE BUTTON ----
   async function setupAll(opts = {}) {
     if (busy) return { ok: false, busy: true, error: 'I am already busy with something — wait for it to finish (or press Cancel).' };
@@ -936,10 +1153,20 @@ function createLlmSetup(deps = {}) {
       step('ollama', 'Install Ollama', 'done', `Ollama ${found.version || ''} is installed.`.replace('  ', ' '));
 
       step('start', 'Start Ollama', 'running', 'Starting Ollama…');
-      const st = await startOllama();
+      let st = await startOllama();
       if (!st.ok) return stop('start', 'Start Ollama', st.error, { action: 'start', label: '▶ Start Ollama' });
       step('start', 'Start Ollama', 'done', st.message);
-      const base = st.base;
+      let base = st.base;
+      // A model you already downloaded — on this Ollama, the other one, or in Ollama's usual folder — is used, never downloaded again.
+      let existing = bestInstalled(await allServers(hw), { prefer: (alfredSettings() || { local: {} }).local.model, uncensored });
+      if (!existing) {
+        const st2 = await startOnStoreWithModels(found);
+        if (st2.ok) existing = bestInstalled(await allServers(hw), { prefer: (alfredSettings() || { local: {} }).local.model, uncensored });
+      }
+      // …but ⚡ Set up is for a CAPABLE model: a tiny one (under 3B) you have is not enough for his tools.
+      const tiny = (x) => x && paramsFromName(x.m.name) != null && paramsFromName(x.m.name) < 3;
+      if (tiny(existing)) existing = null;
+      if (existing) base = existing.sv.base;
 
       step('model', 'Choose a model', 'running', 'Choosing the best model for this PC…');
       const l = await listModels({ base, hardware: hw });
@@ -948,9 +1175,9 @@ function createLlmSetup(deps = {}) {
       const s = alfredSettings() || { local: {} };
       const current = installed.find((m) => sameModel(m.name, s.local && s.local.model));
       const okFor = (m) => m && fitUsable(m.fit || fitFor(m.sizeBytes, hw)) && (!uncensored || isUncensored(m.name)) && (paramsFromName(m.name) == null || paramsFromName(m.name) >= 3);
-      let keep = okFor(current) ? current : installed.find((m) => okFor(m) && picks.some((p) => sameModel(p.pullName, m.name)));
+      let keep = existing ? existing.m : okFor(current) ? current : installed.find((m) => okFor(m) && picks.some((p) => sameModel(p.pullName, m.name)));
       let chosen = null;
-      if (keep) step('model', 'Choose a model', 'done', `${keep.name} is already downloaded and fits this PC — keeping it.`, { model: keep.name });
+      if (keep) step('model', 'Choose a model', 'done', `${keep.name} is already downloaded — using it (nothing new to download).`, { model: keep.name });
       else {
         chosen = choose(picks);
         if (!chosen) return stop('model', 'Choose a model', 'None of the recommended models fit this PC (it needs more memory). You can still connect Alfred to an online AI in 🎩 settings.');
@@ -1012,7 +1239,7 @@ function createLlmSetup(deps = {}) {
   }
 
   return {
-    findOllama, installOllama, startOllama, stopOllama, pullModel, removeModel, listModels, useModel,
+    findOllama, installOllama, startOllama, stopOllama, pullModel, removeModel, listModels, useModel, startAlfred, allServers, bestInstalled, storeHasModels, scanInstalled, useStore, importGguf, findGgufs,
     check, fix, setupAll, cancel, status, hardware, hwLine, recommendedPicks, fitFor, currentServer, download,
     isBusy: () => busy,
   };
