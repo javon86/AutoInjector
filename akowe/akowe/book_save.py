@@ -12,7 +12,7 @@ uses both). Each book gets ONE folder, named once as ``<Book title> (<short id>)
     Reports/       Book report.md/.pdf (latest), Editor summary.md, Planned to page.md, Continuity.md
     Character Forge/  <code> <name> - dossier.pdf/.json per saved dossier (characters, items, places, magic
                       systems) + its pictures and motion clip (B5)
-Pictures/      pictures.json + the chosen chapter / scene pictures (chNN … .png/.jpg) and map.svg/.png (B3)
+    Pictures/      pictures.json + the chosen chapter / scene pictures (chNN … .png/.jpg) and map.svg/.png (B3)
     Log/           Book journal.md (journal.py) + run-events.json (runs: steps, states, AI per step, times, problems)
     Progress/      progress.json (book steps, next step, the run's state)
     book.akowe the complete re-importable package (book_package.py)
