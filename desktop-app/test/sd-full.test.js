@@ -101,7 +101,7 @@ async function main() {
   r = await api.images.generate({ prompt: 'x', styles: ['Vaporwave'] });
   assert(!r.ok && r.field === 'styles' && /Cinematic/.test(r.hint), 'an unknown style is refused');
   r = await api.images.generate({ prompt: 'x', hires: { upscaler: 'Magic 8x' } });
-  assert(!r.ok && r.field === 'hires.upscaler' && /R-ESRGAN/.test(r.hint), 'an unknown hires upscaler is refused');
+  assert(r.ok && last().hr_upscaler === 'Latent' && r.warnings.some((w) => w.field === 'hires.upscaler' && /no upscaler called “Magic 8x”/.test(w.message)), 'an unknown hires upscaler is left out (the app\'s default) with a plain warning — never sent');
   r = await api.images.generate({ prompt: 'x', hirez: { scale: 2 } });
   assert(!r.ok && r.code === 'INVALID_PARAM' && r.field === 'hirez' && /hires/.test(r.hint), 'a misspelt top-level parameter is refused with a suggestion (not silently ignored)');
   r = await api.images.generate({ prompt: 'x', hires: { scale: 'big' } });
@@ -244,7 +244,7 @@ async function main() {
   r = await api.images.generate({ prompt: 'castle', width: 512, height: 512, hires: { scale: 2, upscaler: '4x-UltraSharp' }, pollMs: 20 });
   assert(r.ok && one('UpscaleModelLoader')[1].inputs.model_name === '4x-UltraSharp.pth' && one('ImageUpscaleWithModel')[1] && one('ImageScale')[1].inputs.width === 1024 && byType('VAEEncode').length === 1 && byType('KSampler').length === 2, 'hires (model): VAEDecode → UpscaleModelLoader + ImageUpscaleWithModel → ImageScale 1024 → VAEEncode → KSampler');
   r = await api.images.generate({ prompt: 'x', hires: { upscaler: 'Magic' }, pollMs: 20 });
-  assert(!r.ok && r.code === 'UNKNOWN_VALUE' && /4x-UltraSharp/.test(r.hint), 'an upscaler ComfyUI doesn\'t have is refused (hint lists models)');
+  assert(r.ok && !one('UpscaleModelLoader')[1] && r.warnings.some((w) => /no upscaler called “Magic”/.test(w.message)), 'an upscaler ComfyUI doesn\'t have is left out with a plain warning (no upscale-model node)');
   const upBefore = comfy.state.uploads.length;
   r = await api.images.img2img({ prompt: 'night', initImage: pic, denoise: 0.45, width: 512, height: 512, resizeMode: 'crop and resize', batchSize: 2, pollMs: 20 });
   const li = one('LoadImage')[1];
@@ -261,7 +261,7 @@ async function main() {
   assert(r.ok && kas.length === 2 && G()['3'].inputs.end_at_step === 24 && G()['3'].inputs.return_with_leftover_noise === 'enable' && G()['43'].inputs.start_at_step === 24 && G()['43'].inputs.add_noise === 'disable' && G()['40'].inputs.ckpt_name === 'sdxl_refiner_1.0.safetensors' && G()['43'].inputs.model[0] === '40', 'refiner: base KSamplerAdvanced steps 0–24, refiner checkpoint continues 24–30');
   assert(G()['41'].inputs.clip[0] === '40' && G()['8'].inputs.samples[0] === '43', 'refiner: own text encoders; its output is decoded');
   r = await api.images.generate({ prompt: 'x', refiner: { checkpoint: 'ghost_refiner' }, pollMs: 20 });
-  assert(!r.ok && r.code === 'UNKNOWN_VALUE' && r.field === 'refiner.checkpoint', 'an unknown refiner is refused');
+  assert(r.ok && !byType('KSamplerAdvanced').length && r.warnings.some((w) => w.field === 'refiner' && /“ghost_refiner”/.test(w.message)), 'an unknown refiner checkpoint → made without the refiner, with a plain warning');
   r = await api.images.generate({ prompt: 'dancer', controlnet: [{ image: pic, model: 'control_v11p_sd15_canny', module: 'none', weight: 0.7, guidanceStart: 0.1, guidanceEnd: 0.8 }], pollMs: 20 });
   const cna = one('ControlNetApplyAdvanced');
   assert(r.ok && one('ControlNetLoader')[1].inputs.control_net_name === 'control_v11p_sd15_canny.pth' && cna[1].inputs.strength === 0.7 && cna[1].inputs.start_percent === 0.1 && cna[1].inputs.end_percent === 0.8, 'ControlNet: ControlNetLoader + ControlNetApplyAdvanced (strength, start, end)');

@@ -778,7 +778,8 @@ def({
   async run(a, ctx) {
     const r = await ctx.generateImage({ prompt: a.prompt, width: a.width, height: a.height, style: a.style, character: a.character, appearance: a.appearance, negativePrompt: a.negative_prompt, loras: a.loras, engine: a.engine, purpose: a.purpose, view: a.view, newChat: a.new_chat, upscale: a.upscale });
     if (!r || !r.ok) return { ok: false, error: (r && r.error) || 'IMAGE_FAILED', message: (r && r.message) || `The image couldn't be made (${(r && r.error) || 'unknown'}). Check the 🎨 Images tab.` };
-    return { ok: true, message: `Saved ${r.count || 1} image(s)${r.engine === 'chatgpt' ? ' (made by ChatGPT)' : ''}.`, data: { path: r.path, paths: r.paths || [r.path], engine: r.engine || null, view: r.view || null }, image: r.path };
+    const notes = imageNotes(r.warnings);
+    return { ok: true, message: `Saved ${r.count || 1} image(s)${r.engine === 'chatgpt' ? ' (made by ChatGPT)' : ''}.${notes.length ? ` Notes: ${clip(notes.join(' '), 600)}` : ''}`, data: { path: r.path, paths: r.paths || [r.path], engine: r.engine || null, view: r.view || null, warnings: notes }, image: r.path };
   },
 });
 def({
@@ -1076,11 +1077,15 @@ def({
   describe: (a) => `${a.method} in the 🎨 Images module${a.args && (Array.isArray(a.args) ? a.args.length : Object.keys(a.args).length) ? ` with ${clip(JSON.stringify(a.args), 400)}` : ''}`,
   async run(a, ctx) {
     const r = await ctx.sdInvoke(a.method, a.args);
-    if (r && r.ok === false) return { ok: false, error: str(r.error || 'FAILED', 60), message: clip(r.message || `It didn't work (${r.error || 'failed'}).`, 400) };
+    if (r && r.ok === false) return { ok: false, error: str(r.error || 'FAILED', 60), message: clip(r.message || `It didn't work (${r.error || 'failed'}).`, 400), data: r.code || r.fix || (r.warnings && r.warnings.length) ? { code: r.code ? str(r.code, 60) : undefined, fix: r.fix ? clip(r.fix, 400) : undefined, warnings: imageNotes(r.warnings) } : undefined };
     const images = r && Array.isArray(r.images) ? r.images.map((x) => x.path).filter(Boolean) : [];
-    return { ok: true, message: images.length ? `Saved ${images.length} picture(s).` : 'Done.', data: shrink(r), image: images[0] || null };
+    // what the Images module corrected or retried (unknown sampler, size, "made it with the basics") — Alfred should see it
+    const notes = imageNotes(r && r.warnings);
+    return { ok: true, message: `${images.length ? `Saved ${images.length} picture(s).` : 'Done.'}${notes.length ? ` Notes: ${clip(notes.join(' '), 600)}` : ''}`, data: shrink(r), image: images[0] || null };
   },
 });
+// The plain sentences of an image result's warnings (strings or {message}), at most 6.
+function imageNotes(ws) { return (Array.isArray(ws) ? ws : []).map((w) => (typeof w === 'string' ? w : w && w.message)).filter(Boolean).map((m) => clip(String(m), 240)).slice(0, 6); }
 async function sdMethod(ctx, name) {
   if (!ctx || typeof ctx.sdMethods !== 'function') return null;
   const list = await ctx.sdMethods();
