@@ -6,7 +6,8 @@ plate and 14 numbered sections of bordered cards. The
 AutoInjector side (pictures) is `docs/SD_IMAGE_API.md`; this file is the Akọwe side. Code: `akowe/akowe/forge.py`
 (model, storage, API, AI, art), `forge_pdf.py` (the PDF), `forge_example.py` (the Moki Vey example), `web/forge.js`
 (the pages), tests `akowe/tests/test_forge.py`, `test_forge_clip.py` (motion clips) and
-`tests/campaign/ui/test_ui_forge.py`.
+`tests/campaign/ui/test_ui_forge.py`. Items, places, magic systems and the manuscript check: `forge_kinds_spec.py`,
+`forge_kinds.py`, `forge_check.py`, tests `test_forge_kinds.py`, `test_forge_check.py`, `test_ui_forge_kinds.py`.
 
 ## The dossier
 
@@ -27,8 +28,8 @@ AutoInjector side (pictures) is `docs/SD_IMAGE_API.md`; this file is the Akọwe
 * **Code and revision**: `CH-001` … per book (the lowest free number in the book's character order; fixed once the
   dossier is first saved). The revision starts at 1 and goes up with every author edit and approval (not with AI
   proposals or pictures). The last 12 changes are kept as history (what, by, fields, the old text of edited fields).
-* Items (`AR-`), places (`PL-`) and magic systems (`MG-`) use the same machinery later (`forge.KINDS`); only
-  characters are built now.
+* Items (`AR-`), places (`PL-`) and magic systems (`MG-`) use the same machinery: see "Items, places and magic
+  systems" below.
 
 ### One source of truth (no copies)
 
@@ -190,7 +191,8 @@ switch.
 
 ## The web pages
 
-`#/p/<pid>/<branch>/forge` (the list: portrait tiles, code, readiness, progress; "🧪 Load the Moki Vey example") and
+Tabs Characters · Items · Places · Magic systems on every Forge page; `#/p/<pid>/<branch>/forge/<items|places|magic>[/<id>]`
+for the other kinds (＋ New, "📘 From your book" candidates, 🗑 Delete, ✎ Name and cover). `#/p/<pid>/<branch>/forge` (the list: portrait tiles, code, readiness, progress; "🧪 Load the Moki Vey example") and
 `#/p/<pid>/<branch>/forge/<record_id>` (the dossier). Entry points: "🗂 Character Forge" on every character's card and
 in More ▾. The page: hero portrait (🎨 Stable Diffusion / 💬 ChatGPT / ⬆ Upload), gold name, teal tagline, cover
 lines, counts, ✨ Invent the rest (with the AI choice), ✔ Approve all proposals, ⬇ Dossier PDF, ✎ Edit the cover;
@@ -209,11 +211,108 @@ supplied + protected, everything else proposed, as in the sample) and JPEG copie
 ten views (≈ 307 × 512), downscaled once with Pillow when the example was made — the app itself needs no image library.
 The author's own sample, used with permission.
 
+## Items, places and magic systems (lane C)
+
+Code: `forge_kinds_spec.py` (the ONE place their sections and fields are named), `forge_kinds.py` (model, storage,
+seeding, cross-links, AI, art, PDF, API), tests `tests/test_forge_kinds.py`. Same letters, statuses, proposals,
+approvals, revisions, history, readiness and PDF look as a character. Differences: the dossier is its own record (id
+`FK-…`, stored under `records.item|place|magic` of the same forge settings document), it has its own `name` and
+`aliases` (≤ 6; the links and the check look for them too), every field is its own text (no read-only mirrors), and the
+code is given when it is made (the lowest free number of its kind).
+
+| Kind | Code | Sections (fields) | Hero picture (`purpose`) | Plate (`purpose`) |
+|---|---|---|---|---|
+| item | AR-001 | 01 Item record · 02 Appearance and materials · 03 History and provenance · 04 Powers and limits · 05 Use and maintenance · 06 Ownership · 07 Appearances in the story · 08 Continuity ledger (69) | `portrait` item portrait (`portrait`) | TURNAROUND REFERENCE: front / side / back / detail (`illustration`) |
+| place | PL-001 | 01 Place record · 02 Geography and layout · 03 Atmosphere and senses · 04 History · 05 People and factions · 06 Rules and dangers · 07 Routes and connections · 08 Appearances in the story · 09 Continuity ledger (69) | `establishing` shot (`scene`) | MOOD VIEWS: day / night / interior-or-detail (`scene`) |
+| magic | MG-001 | 01 Source and nature · 02 Access and cost · 03 Rules and hard limits · 04 Practitioners and training · 05 Named powers and techniques · 06 Visible and sensory signs · 07 Failure and backlash · 08 History and lore · 09 Society's view · 10 Appearances in the story · 11 Continuity ledger (70) | `sigil` (`illustration`) | IN USE: one scene (`scene`) |
+
+Art: the character art's bridge, token, timeout, errors and job; no `characterLock`, no `view`; the prompt is the name
+and kind + "Fixed visual anchors: …" + the kind's appearance fields + a fixed framing per slot ("a single object …",
+"wide establishing shot …", "one flat, symmetric symbol …"); the first plate view's seed goes with the others.
+"✨ Invent the rest" asks in 2-3 section groups per kind (`groups`), with the other dossiers' names and codes as context.
+
+**Create dossier / seeding.** `GET /forge/<kind>` lists `candidates` — what the book already has: places from the A04
+records (one per `entity.name`; attributes geography → Location, containment → Layout, travel → Routes; description and
+the rest → Supplied canon; `x.map.x/y` → Map notes, `x.map.connects_to` → Routes), magic systems from the A09 records
+(powers → What it is, costs → Cost, limits and `x.a09.limit` → Hard limits, prerequisites → How it is gained,
+exceptions) and from the story rules (`source_id: "rules"`: hard rules → Core rules / Hard limits, seen → What it looks
+like, beliefs → What ordinary people think, mysteries → Lore; rules that name the system go into its Rules ledger),
+items from the A12 records and from a character dossier's "Primary option". Seeded text is `supplied`
+(`by: {kind: "canon"}`), never a proposal; a candidate that already has a dossier answers that one.
+
+**Cross-links** (`attach_links`, every kind, characters too): every field that names another dossier (its code
+CH-/AR-/PL-/MG-, its name or an alias; a one-word name with capitals only as written) gets `links:
+[{kind, segment, record_id, code, name}]`; the dossier gets `links` (with the field labels) and `backlinks` (who names
+it). So a character's possessions link to items, where they come from and live to places, their powers to magic
+systems, and back. The page shows clickable chips on the cards and under the cover ("Names" / "Named by"); the PDF adds
+"-> AR-001 Rescue baton" under a card and a closing "Linked records" block (places and magic also one LINKED line on
+the cover).
+
+### API (under `/api/projects/:pid/branches/:branch/forge`, `<kind>` = `items` | `places` | `magic`)
+
+| Route | Answer |
+|---|---|
+| `GET /<kind>` | `{<kind>: [tile], dossiers: [tile], candidates: [{source_id, name, from, summary}], fields, kind, word, image_bridge}`; a tile is `{record_id, name, kind, code, revision, readiness, filled, proposed, total, tagline, hero, views_done, views_total, source}` |
+| `POST /<kind>` | `{name, aliases?}` or `{from: source_id, name?}` → 201 `{ok, record_id, created, dossier, message}` (200 + `created: false` for a candidate that already has one) |
+| `GET /<kind>/:rid` | the dossier: the character dossier's shape + `segment`, `aliases`, `source`, `links`, `backlinks`, `art: {<hero>: …, views: {…}}`, `counts.views_total` |
+| `PUT /<kind>/:rid` | `{sections: {<section>: {<field>: {text?, letters?, protected?}}}, name?, aliases?, tagline?, summary?, revision?}` (409 `VERSION_CONFLICT`) |
+| `POST /<kind>/:rid/delete` | `{ok, record_id, message}` (the server has no DELETE; pictures stay with the book's files) |
+| `POST /<kind>/:rid/forge` · `POST …/approve` | as for characters |
+| `POST /<kind>/:rid/art` | `{what: <hero slot> \| "views", engine, views?}` → 202 job |
+| `PUT /<kind>/:rid/art/:slot` | raw PNG/JPEG for the hero slot or a plate slot |
+| `GET /<kind>/:rid/pdf[?download=1]` | "`AR-001 Name - Item Forge dossier.pdf`" |
+| `POST /<kind>/:rid/check` · `GET …/check` · `PUT …/check/:finding_id` | the manuscript check (below); the same three routes exist under `/characters/:rid/` |
+
+`/forge/characters` is unchanged (its dossier view gains `links` / `backlinks`, a "Change dossier" proposal shows its
+old text as `was`). Book save: `Character Forge/AR-001 Rescue baton - dossier.pdf|.json` and `AR-001 pictures/<slot>.jpg`
+(every path ≤ 60 characters).
+
+## 🔎 Check against the book (`forge_check.py`, every kind)
+
+`POST …/check {ai?: true, slot_id?}` → 202 review job (`forge_check`: progress per chapter, Stop keeps the findings so
+far: `status: "stopped"`). It compares the dossier's ACCEPTED fields (supplied / approved; never proposals) with the
+newest text of every written outline chapter (`fact_checks.book_texts`):
+
+1. Akọwe's own checks, no AI: **age** (`timeline_check.extract`, present ages only, vs Identity / Facts), **eyes** /
+   **hair** (a colour on the page the field does not have; a sentence naming another character is skipped),
+   **height** (> 5 cm from Physique), **born** (birth year), **year** (made / founded / built / discovered in a
+   different year — items, places, magic), **limit** (a stated limit in numbers — "up to eight seconds", "eight
+   seconds maximum", "three bursts within ten minutes" — passed on the page: a longer time or distance with a cue such
+   as "for / held / lasted", never "ten minutes later"; more uses, or "the fourth burst"; in sentences naming the power
+   or system), **holder** (an item held, gripped, carried or used by a character its Ownership section does not list,
+   or forbids), **name** (a near-miss spelling, one letter off, that the book uses nowhere in lower case).
+2. The AI slot, one call per chapter that names the dossier: the accepted fields (≤ 7 000 characters), the chapter
+   (≤ 24 000; longer chapters: the paragraphs around the mentions), the rule findings already made (not repeated);
+   schema `{findings: [{field, quote, problem, fix, dossier_text?}]}` (≤ 8) through the bridge's JSON repair; every
+   finding is checked again — an accepted field, a quote that really is in the chapter — the rest is dropped and
+   counted. A failing AI keeps the rule findings and says from which chapter the AI part was skipped.
+
+A finding: `{id (stable: F-…), field, field_label, chapter_id, chapter, quote (≤ 240), problem, dossier_says, fix,
+dossier_text, check, source: rule|ai, verdict, verdict_at?, proposal?, stale?}`. `GET …/check` → `{status:
+never|running|done|stopped|error, job_id, at, chapters_total, chapters_done, ai, ai_problem, message, appearances:
+[{chapter, mentions}], findings, counts: {total, open, fix, fine, change_dossier}}`. `PUT …/check/:id {verdict:
+fix|fine|change_dossier|null, text?}`: **Change dossier** makes a proposal on the field (`text`, else the finding's
+`dossier_text`): the new text waits as `proposed` with the accepted text kept as `was` (no revision, nothing written
+through, chapter briefs keep the accepted text); ✔ Approve makes it approved; another verdict withdraws it while it
+waits. Protected, canon (read-only) and relationship fields refuse (`LOCKED_FACT`). Verdicts survive a new run; a
+finding with a verdict that no longer appears stays as `stale`. Storage: settings `forge_check:<project>:<branch>`.
+
+The page: a "🔎 Check against the book" panel under the plate (Use the AI for the fuzzy parts; progress and Stop;
+the findings with chapter, field — click to jump to the card — quote, problem, fix and 🛠 Fix the book / ✓ Fine /
+✎ Change dossier, which asks for the new text first).
+
+## The example world
+
+`examples/moki_vey/world.json` (+ small JPEG drawings made once with Pillow): AR-001 Rescue baton (held by Moki,
+forbidden to Director Sael), PL-001 Nacre (founded 2091, 40 decks) and MG-001 Biofilament mutation (Anchor: up to
+eight seconds per burst, three bursts within ten minutes). "Load the Moki Vey example" loads them with Moki (once each,
+by name), so all four kinds show linked.
+
 ## Not done yet
 
-* Items, places and magic systems (the machinery is there: `KINDS`, codes `AR-`/`PL-`/`MG-`).
-* The dossier is not yet checked against the manuscript (the sample's "verification pending").
 * A real ChatGPT/Stable Diffusion run against the other agent's finished `/image/request` (tested against a fake bridge
   that follows the contract).
 * A real GPU run of the motion clip against AutoInjector's finished `/video/request` (tested against a fake bridge
   that follows the video contract). Clips for items, places and magic systems.
+* The manuscript check reads English sentences; its rule checks are heuristics (the AI path and the author's verdicts
+  are the safety net).

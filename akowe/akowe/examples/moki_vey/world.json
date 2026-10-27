@@ -1,0 +1,895 @@
+{
+ "schema_version": 1,
+ "source": "Akowe example world for the Moki Vey sample (invented proposals)",
+ "dossiers": [
+  {
+   "kind": "item",
+   "name": "Rescue baton",
+   "aliases": [
+    "telescoping baton"
+   ],
+   "tagline": "The tool that keeps a door open",
+   "summary": [
+    "A dark ceramic evacuation baton issued to Nacre's service crews.",
+    "Supplied description preserved. Additional item details are proposed.",
+    "Profile, turnaround reference and continuity ledger."
+   ],
+   "fields": {
+    "supplied_canon": {
+     "text": "Telescoping rescue baton with a dark ceramic exterior and a worn grip, carried by Moki Vey. These details are protected.",
+     "status": "supplied",
+     "protected": true
+    },
+    "proposed_additions": {
+     "text": "All maker names, numbers, events and ledger entries below are invented proposals for review.",
+     "status": "proposed"
+    },
+    "name": {
+     "text": "Rescue baton. Crews call it a door-key; manifests list it as Evacuation Tool E-7.",
+     "status": "proposed"
+    },
+    "item_type": {
+     "text": "Non-lethal evacuation tool, issued equipment of the Nacre service crews.",
+     "status": "proposed"
+    },
+    "purpose": {
+     "text": "Holding open jammed hatches, breaking safety glass and keeping space around a rescue.",
+     "status": "proposed"
+    },
+    "one_line": {
+     "text": "A scuffed black baton that has opened more doors than it has struck people.",
+     "status": "proposed"
+    },
+    "status_now": {
+     "text": "Clipped to Moki Vey's belt at the opening of 2189; its lock is stiff and needs cleaning.",
+     "status": "proposed"
+    },
+    "significance": {
+     "text": "It shows Moki still thinks like an evacuation worker; drawing it means he has run out of ordinary options.",
+     "status": "proposed"
+    },
+    "record_controls": {
+     "text": "AR-001 / revision 1 / effective story time: opening of 2189. Supplied description protected.",
+     "status": "proposed"
+    },
+    "overall_look": {
+     "text": "A short matte-black cylinder with three telescoping segments and a rubbered grip worn pale at the thumb.",
+     "status": "proposed"
+    },
+    "size_weight": {
+     "text": "Closed 21 cm (8.3 in); extended 60 cm (23.6 in); weight 640 g (1.4 lb).",
+     "status": "proposed"
+    },
+    "shape": {
+     "text": "Straight, slightly tapered segments ending in a blunt ceramic cap; no blade, hook or point.",
+     "status": "proposed"
+    },
+    "materials": {
+     "text": "Ceramic-composite outer shells over a steel spring lock; nitrile grip sleeve.",
+     "status": "proposed"
+    },
+    "colours": {
+     "text": "Charcoal black with a faded orange crew band below the grip.",
+     "status": "proposed"
+    },
+    "markings": {
+     "text": "Stencilled E-7 and a scratched-out crew number; a hairline crack repaired with resin near the cap.",
+     "status": "proposed"
+    },
+    "sound_smell": {
+     "text": "Locks with a hard double click; smells faintly of machine oil and salt.",
+     "status": "proposed"
+    },
+    "condition": {
+     "text": "Worn but sound; the second segment drags when wet.",
+     "status": "proposed"
+    },
+    "visual_anchors": {
+     "text": "Matte charcoal segments, faded orange band, worn pale grip, blunt ceramic cap. Always clipped at Moki's right hip.",
+     "status": "proposed"
+    },
+    "origin": {
+     "text": "Made in Nacre's municipal workshops for the service crews.",
+     "status": "proposed"
+    },
+    "made_when": {
+     "text": "Made in 2181 on the Eastern service deck.",
+     "status": "proposed"
+    },
+    "made_how": {
+     "text": "Pressed ceramic shells around a standard steel lock; crews fit their own grips.",
+     "status": "proposed"
+    },
+    "previous_owners": {
+     "text": "Issued new to Moki Vey / CH-001 in 2181; no earlier owner.",
+     "status": "proposed"
+    },
+    "key_events": {
+     "text": "Used to brace a stalled transit-deck hatch during the 2183 evacuation; cracked against a coolant valve in the 2186 accident.",
+     "status": "proposed"
+    },
+    "legends": {
+     "text": "Crews joke that an E-7 is worth more than a supervisor's word.",
+     "status": "proposed"
+    },
+    "how_acquired": {
+     "text": "Issued by his old evacuation crew; he kept it legally when he left corporate employment.",
+     "status": "proposed"
+    },
+    "provenance_gaps": {
+     "text": "Nobody logged the 2186 crack; the company record says the tool was returned.",
+     "status": "proposed"
+    },
+    "abilities": {
+     "text": "None: an ordinary tool. Its value is reach, a hard cap for glass and a lock that holds a hatch open.",
+     "status": "proposed"
+    },
+    "how_it_works": {
+     "text": "A spring lock fixes each extended segment; a twist releases it.",
+     "status": "proposed"
+    },
+    "activation": {
+     "text": "Snapped open with a flick; closed by twisting the grip and pressing the cap.",
+     "status": "proposed"
+    },
+    "limits": {
+     "text": "Holds a hatch against up to 80 kg of load; extends to 60 cm at most.",
+     "status": "proposed"
+    },
+    "costs": {
+     "text": "Occupies one hand and slows climbing.",
+     "status": "proposed"
+    },
+    "weaknesses": {
+     "text": "Limited reach; saltwater can jam the lock; useless against a ranged threat.",
+     "status": "proposed"
+    },
+    "side_effects": {
+     "text": "Carrying it makes checkpoint guards more suspicious.",
+     "status": "proposed"
+    },
+    "cannot_do": {
+     "text": "No electric charge, no blade, no projectile and no hidden lethal mode.",
+     "status": "proposed"
+    },
+    "linked_system": {
+     "text": "Not applicable: it runs on no magic system.",
+     "status": "proposed"
+    },
+    "who_can_use": {
+     "text": "Anyone with two hands; crews train with it.",
+     "status": "proposed"
+    },
+    "skill_needed": {
+     "text": "Crew drills: opening, bracing and glass-breaking.",
+     "status": "proposed"
+    },
+    "handling": {
+     "text": "Clipped closed at the right hip; drawn with the right hand.",
+     "status": "proposed"
+    },
+    "combat_use": {
+     "text": "A last resort to keep space around a rescue; a character beat, never a duel.",
+     "status": "proposed"
+    },
+    "everyday_use": {
+     "text": "Bracing access panels while he works.",
+     "status": "proposed"
+    },
+    "maintenance": {
+     "text": "He checks its lock after every use and wipes salt from the segments.",
+     "status": "proposed"
+    },
+    "damage": {
+     "text": "Repeated saltwater use jams the lock; a crushed segment must be replaced.",
+     "status": "proposed"
+    },
+    "legal": {
+     "text": "Legal for registered service workers; questioned at corporate checkpoints.",
+     "status": "proposed"
+    },
+    "signature_use": {
+     "text": "He taps it twice against a hatch before trusting it.",
+     "status": "proposed"
+    },
+    "owner": {
+     "text": "Moki Vey / CH-001",
+     "status": "proposed"
+    },
+    "current_holder": {
+     "text": "Moki Vey / CH-001",
+     "status": "proposed"
+    },
+    "allowed_users": {
+     "text": "Moki Vey / CH-001; Tavi Rook / CH-004 in an emergency.",
+     "status": "proposed"
+    },
+    "forbidden_users": {
+     "text": "Director Oren Sael / CH-005 and his security staff must never take it.",
+     "status": "proposed"
+    },
+    "who_wants_it": {
+     "text": "Sael's security wants it as evidence of unauthorised repair work.",
+     "status": "proposed"
+    },
+    "transfers": {
+     "text": "Opening: Moki. Setback: seized with the workshop. Climax: back in Moki's hands.",
+     "status": "proposed"
+    },
+    "bond": {
+     "text": "It is the last piece of his crew years he trusts.",
+     "status": "proposed"
+    },
+    "value": {
+     "text": "About forty credits new; worthless to anyone but a crew worker.",
+     "status": "proposed"
+    },
+    "first_appearance": {
+     "text": "Chapter 1, clipped to his belt while he repairs an intake.",
+     "status": "proposed"
+    },
+    "introduction": {
+     "text": "Seen before it is named: a click at his hip as he crouches.",
+     "status": "proposed"
+    },
+    "key_scenes": {
+     "text": "The intake failure; the seized workshop; the climax shutdown.",
+     "status": "proposed"
+    },
+    "turning_point": {
+     "text": "Its seizure at the setback leaves Moki without his oldest tool.",
+     "status": "proposed"
+    },
+    "final_state": {
+     "text": "Clipped back on his belt, lock cleaned.",
+     "status": "proposed"
+    },
+    "reveal_points": {
+     "text": "The 2186 crack is explained at the midpoint.",
+     "status": "proposed"
+    },
+    "must_show_1": {
+     "text": "The double click when it locks open.",
+     "status": "proposed"
+    },
+    "must_show_2": {
+     "text": "The resin-repaired crack near the cap.",
+     "status": "proposed"
+    },
+    "must_show_3": {
+     "text": "Moki hands it to Tavi rather than holding the hatch himself.",
+     "status": "proposed"
+    },
+    "location_ledger": {
+     "text": "Opening: Moki's belt. Setback: sealed workshop. Climax: Moki's belt.",
+     "status": "proposed"
+    },
+    "condition_ledger": {
+     "text": "Lock drags when wet from the opening; no new damage unless the author adds it.",
+     "status": "proposed"
+    },
+    "uses_ledger": {
+     "text": "One bracing use per scene at most; no combat use before the setback.",
+     "status": "proposed"
+    },
+    "secrets_ledger": {
+     "text": "The crack proves he was at the 2186 valve; only Moki knows at the opening.",
+     "status": "proposed"
+    },
+    "linked_records": {
+     "text": "CH-001 Moki Vey; CH-004 Tavi Rook; PL-001 Nacre.",
+     "status": "proposed"
+    },
+    "unresolved_choices": {
+     "text": "The author may keep or drop the orange crew band.",
+     "status": "proposed"
+    },
+    "artwork_note": {
+     "text": "Portrait and turnaround are simple reference drawings; replace them with Stable Diffusion or ChatGPT art.",
+     "status": "proposed"
+    },
+    "verification_scope": {
+     "text": "Checked against the Moki Vey dossier; manuscript check pending.",
+     "status": "proposed"
+    }
+   },
+   "art": {
+    "portrait": "baton_portrait.jpg",
+    "front": "baton_front.jpg",
+    "side": "baton_side.jpg",
+    "back": "baton_back.jpg",
+    "detail": "baton_detail.jpg"
+   }
+  },
+  {
+   "kind": "place",
+   "name": "Nacre",
+   "aliases": [
+    "the vertical city"
+   ],
+   "tagline": "A city built on borrowed time",
+   "summary": [
+    "A vertical coastal city of pumps, decks and salt.",
+    "Supplied description preserved. Additional place details are proposed.",
+    "Profile, mood views and continuity ledger."
+   ],
+   "fields": {
+    "supplied_canon": {
+     "text": "Vertical coastal city in the year 2189, built in stacked decks above a cold sea. These details are protected.",
+     "status": "supplied",
+     "protected": true
+    },
+    "proposed_additions": {
+     "text": "All districts, numbers, factions and events below are invented proposals for review.",
+     "status": "proposed"
+    },
+    "name": {
+     "text": "Nacre. Dockers say the Stack; the company calls it Nacre Municipal Platform.",
+     "status": "proposed"
+    },
+    "place_type": {
+     "text": "A vertical city of stacked residential, industrial and service decks.",
+     "status": "proposed"
+    },
+    "one_line": {
+     "text": "A tower-city that drinks the sea through pumps nobody upstairs ever sees.",
+     "status": "proposed"
+    },
+    "setting_time": {
+     "text": "A northern coast, year 2189.",
+     "status": "proposed"
+    },
+    "role_in_story": {
+     "text": "Home, workplace and battleground: whoever controls its pumps controls its people.",
+     "status": "proposed"
+    },
+    "first_impression": {
+     "text": "Wet light, steel stairs, waterfalls of runoff between the decks.",
+     "status": "proposed"
+    },
+    "record_controls": {
+     "text": "PL-001 / revision 1 / effective story time: opening of 2189.",
+     "status": "proposed"
+    },
+    "location": {
+     "text": "On a basalt shelf two kilometres off the mainland, joined by one rail causeway.",
+     "status": "proposed"
+    },
+    "size_scale": {
+     "text": "About 1.2 km tall in 40 decks; roughly 310,000 residents.",
+     "status": "proposed"
+    },
+    "layout": {
+     "text": "Corporate offices on decks 30-40, homes on decks 8-29, service decks and pump halls on decks 1-7.",
+     "status": "proposed"
+    },
+    "landmarks": {
+     "text": "The Spillway, a curtain of runoff down the east face; the Intake Halls at sea level.",
+     "status": "proposed"
+    },
+    "districts": {
+     "text": "Lower service decks; the Mid-Stack markets; the Crown, where the company sits.",
+     "status": "proposed"
+    },
+    "terrain": {
+     "text": "Cold, wet, windy; fog most mornings, storms in autumn.",
+     "status": "proposed"
+    },
+    "architecture": {
+     "text": "Grey composite, steel gantries, patched pipes; newer glass only near the Crown.",
+     "status": "proposed"
+    },
+    "map_notes": {
+     "text": "The causeway enters on deck 4 from the west; the Intake Halls face east.",
+     "status": "proposed"
+    },
+    "sights": {
+     "text": "Lit gantries, rust streaks, teal safety lamps on the service decks.",
+     "status": "proposed"
+    },
+    "sounds": {
+     "text": "Pump thrum through every wall; gulls; the hiss of runoff.",
+     "status": "proposed"
+    },
+    "smells": {
+     "text": "Salt, hot oil and wet concrete.",
+     "status": "proposed"
+    },
+    "touch": {
+     "text": "Cold rails, damp air, warm pipes you learn not to lean on.",
+     "status": "proposed"
+    },
+    "light": {
+     "text": "Grey daylight above deck 20; amber work lights and teal lamps below.",
+     "status": "proposed"
+    },
+    "mood": {
+     "text": "Tired, proud and watchful.",
+     "status": "proposed"
+    },
+    "seasons": {
+     "text": "A short summer of clear days; long foggy winters.",
+     "status": "proposed"
+    },
+    "signature_detail": {
+     "text": "A pump thrum you feel in your teeth.",
+     "status": "proposed"
+    },
+    "founding": {
+     "text": "Founded in 2091 as a desalination platform; residents came later.",
+     "status": "proposed"
+    },
+    "eras": {
+     "text": "Platform era (2091-2120); Stack era (2120-2170); company era (2170 onward).",
+     "status": "proposed"
+    },
+    "key_events": {
+     "text": "The 2186 coolant accident on the Eastern service deck, officially a worker's negligence.",
+     "status": "proposed"
+    },
+    "ruins": {
+     "text": "Sealed first-generation pump rooms under deck 1.",
+     "status": "proposed"
+    },
+    "recent_change": {
+     "text": "The company is planning a citywide restart of the water system.",
+     "status": "proposed"
+    },
+    "myths": {
+     "text": "Old crews say the first pumps still run behind the sealed doors.",
+     "status": "proposed"
+    },
+    "timeline_facts": {
+     "text": "Founded 2091; 40 decks; about 310,000 residents in 2189; accident 2186.",
+     "status": "proposed"
+    },
+    "population": {
+     "text": "Service families on the low decks; clerks and traders mid-Stack; company staff at the Crown.",
+     "status": "proposed"
+    },
+    "factions": {
+     "text": "The company (Director Oren Sael / CH-005); neighbourhood repair crews; the water analysts.",
+     "status": "proposed"
+    },
+    "rulers": {
+     "text": "Director Oren Sael / CH-005 controls infrastructure access, which is power in Nacre.",
+     "status": "proposed"
+    },
+    "economy": {
+     "text": "Water, repair work and shipping.",
+     "status": "proposed"
+    },
+    "culture": {
+     "text": "Outage rituals: neighbours share stored water and keep a light at every stairwell.",
+     "status": "proposed"
+    },
+    "language": {
+     "text": "Nacre Dock Cant on the service decks: head pressure, drift, clearance.",
+     "status": "proposed"
+    },
+    "notable_people": {
+     "text": "Moki Vey / CH-001; Imani Vey / CH-002; Tavi Rook / CH-004.",
+     "status": "proposed"
+    },
+    "outsiders": {
+     "text": "Welcomed if they can fix something; distrusted if they carry company passes.",
+     "status": "proposed"
+    },
+    "laws": {
+     "text": "Unlicensed work on the water system is forbidden.",
+     "status": "proposed"
+    },
+    "dangers": {
+     "text": "Failing pumps, flooded service decks, company security.",
+     "status": "proposed"
+    },
+    "hazards": {
+     "text": "Storm surge up to deck 3; slick gantries.",
+     "status": "proposed"
+    },
+    "forbidden": {
+     "text": "The sealed pump rooms under deck 1.",
+     "status": "proposed"
+    },
+    "magic_here": {
+     "text": "MG-001 Biofilament mutation: only the trial survivors carry it.",
+     "status": "proposed"
+    },
+    "defences": {
+     "text": "Company checkpoints between decks 29 and 30.",
+     "status": "proposed"
+    },
+    "safe_havens": {
+     "text": "Moki's rented workshop on deck 6.",
+     "status": "proposed"
+    },
+    "access": {
+     "text": "The rail causeway on deck 4, the ferry quays at sea level.",
+     "status": "proposed"
+    },
+    "routes": {
+     "text": "Inside the Stack: lifts, stairwells and service ladders.",
+     "status": "proposed"
+    },
+    "travel_times": {
+     "text": "Deck 6 to the Intake Halls: eight minutes on foot; deck 6 to the Crown: twenty minutes by lift.",
+     "status": "proposed"
+    },
+    "hidden_ways": {
+     "text": "Old maintenance crawlways between decks 2 and 7.",
+     "status": "proposed"
+    },
+    "transport": {
+     "text": "Freight lifts, a slow passenger lift, the causeway train.",
+     "status": "proposed"
+    },
+    "borders": {
+     "text": "Checkpoints at deck 30 and at the causeway gate.",
+     "status": "proposed"
+    },
+    "first_appearance": {
+     "text": "Chapter 1, the Intake Halls at dawn.",
+     "status": "proposed"
+    },
+    "scenes_set_here": {
+     "text": "Every scene of the first arc.",
+     "status": "proposed"
+    },
+    "how_it_changes": {
+     "text": "From a city that hides its pumps to one that watches them.",
+     "status": "proposed"
+    },
+    "characters_here": {
+     "text": "Moki Vey / CH-001 was born here on the lower decks.",
+     "status": "proposed"
+    },
+    "reveal_points": {
+     "text": "The sealed pump rooms are part of the trial at the midpoint.",
+     "status": "proposed"
+    },
+    "must_show_1": {
+     "text": "The pump thrum felt through walls.",
+     "status": "proposed"
+    },
+    "must_show_2": {
+     "text": "Runoff falling past the stairwells.",
+     "status": "proposed"
+    },
+    "must_show_3": {
+     "text": "Neighbours sharing water during an outage.",
+     "status": "proposed"
+    },
+    "fixed_anchors": {
+     "text": "Stacked grey decks, gantries, teal service lamps, a curtain of runoff on the east face.",
+     "status": "proposed"
+    },
+    "state_ledger": {
+     "text": "Opening: eastern intake failing. Climax: restart halted.",
+     "status": "proposed"
+    },
+    "occupancy_ledger": {
+     "text": "Moki works on deck 6; Imani's lab is on deck 12.",
+     "status": "proposed"
+    },
+    "secrets_ledger": {
+     "text": "The trial ran in the Intake Halls; Sael and a small circle know.",
+     "status": "proposed"
+    },
+    "linked_records": {
+     "text": "CH-001 Moki Vey; AR-001 rescue baton; MG-001 Biofilament mutation.",
+     "status": "proposed"
+    },
+    "unresolved_choices": {
+     "text": "The author may rename districts or change the number of decks.",
+     "status": "proposed"
+    },
+    "artwork_note": {
+     "text": "Establishing shot and mood views are simple reference drawings; replace them with Stable Diffusion or ChatGPT art.",
+     "status": "proposed"
+    },
+    "verification_scope": {
+     "text": "Checked against the Moki Vey dossier; manuscript check pending.",
+     "status": "proposed"
+    }
+   },
+   "art": {
+    "establishing": "nacre_establishing.jpg",
+    "day": "nacre_day.jpg",
+    "night": "nacre_night.jpg",
+    "interior": "nacre_interior.jpg"
+   }
+  },
+  {
+   "kind": "magic",
+   "name": "Biofilament mutation",
+   "aliases": [
+    "biofilaments",
+    "the trial mutation"
+   ],
+   "tagline": "Strength with a timer",
+   "summary": [
+    "A non-magical acquired mutation from an illegal coolant trial.",
+    "Supplied rules preserved. Additional system details are proposed.",
+    "Profile, sigil, in-use study and use ledger."
+   ],
+   "fields": {
+    "supplied_canon": {
+     "text": "Non-magical acquired mutation: adaptive biofilaments from an experimental coolant reinforce tendons and sense vibration, always at a physical cost. These rules are protected.",
+     "status": "supplied",
+     "protected": true
+    },
+    "proposed_additions": {
+     "text": "Numbers, names and history below are invented proposals for review.",
+     "status": "proposed"
+    },
+    "name": {
+     "text": "Biofilament mutation. Survivors say the filaments; the company file says Trial 7 adverse effect.",
+     "status": "proposed"
+    },
+    "kind_of_power": {
+     "text": "Invented science-fiction biology, not magic and not a real medical mechanism.",
+     "status": "proposed"
+    },
+    "source": {
+     "text": "Adaptive biofilaments carried by an experimental coolant into damaged tissue.",
+     "status": "proposed"
+    },
+    "nature": {
+     "text": "Living filaments that brace tendons and carry vibration to the nerves.",
+     "status": "proposed"
+    },
+    "one_line": {
+     "text": "Borrowed strength that sends the bill as heat and tremor.",
+     "status": "proposed"
+    },
+    "record_controls": {
+     "text": "MG-001 / revision 1 / effective story time: opening of 2189.",
+     "status": "proposed"
+    },
+    "who_has_it": {
+     "text": "Only people exposed in the 2186 coolant trial, among them Moki Vey / CH-001.",
+     "status": "proposed"
+    },
+    "how_gained": {
+     "text": "Exposure to the trial coolant through a wound; it cannot be learned.",
+     "status": "proposed"
+    },
+    "activation": {
+     "text": "Intentional muscle recruitment and a controlled breath; panic triggers it unevenly.",
+     "status": "proposed"
+    },
+    "cost": {
+     "text": "Each use brings heat, dehydration and loss of fine motor control.",
+     "status": "proposed"
+    },
+    "recovery": {
+     "text": "At least twenty minutes of cooling and rest after the third burst; full recovery may take hours.",
+     "status": "proposed"
+    },
+    "price_long": {
+     "text": "Ignored tremor can leave days of weakness; long-term effects are unknown.",
+     "status": "proposed"
+    },
+    "rarity": {
+     "text": "Perhaps a dozen survivors in Nacre.",
+     "status": "proposed"
+    },
+    "core_rules": {
+     "text": "Reinforcement and vibration sense only; every use costs heat and control.",
+     "status": "proposed"
+    },
+    "hard_limits": {
+     "text": "Anchor lasts up to eight seconds per burst; three bursts within ten minutes at most.",
+     "status": "proposed"
+    },
+    "range_duration": {
+     "text": "Touch range only; Resonance needs direct contact and several quiet seconds.",
+     "status": "proposed"
+    },
+    "cannot_do": {
+     "text": "No electricity, no teleportation, no bullet resistance, no remote control, no healing.",
+     "status": "proposed"
+    },
+    "counters": {
+     "text": "Heat, dehydration, sustained exertion; insulated gloves block Resonance.",
+     "status": "proposed"
+    },
+    "exceptions": {
+     "text": "None: panic can trigger a burst, but it still counts against the three.",
+     "status": "proposed"
+    },
+    "interactions": {
+     "text": "Coolant exposure can renew the filaments; strong machine vibration confuses Resonance.",
+     "status": "proposed"
+    },
+    "practitioners": {
+     "text": "Moki Vey / CH-001; other survivors unknown at the opening.",
+     "status": "proposed"
+    },
+    "training": {
+     "text": "Rehabilitation with Dr. Sera Noll / CH-003 taught pacing and warning signs.",
+     "status": "proposed"
+    },
+    "ranks": {
+     "text": "None; only experience with the stop signals.",
+     "status": "proposed"
+    },
+    "schools": {
+     "text": "None: it is a medical secret, not a tradition.",
+     "status": "proposed"
+    },
+    "mastery": {
+     "text": "Knowing when to stop before the tremor starts.",
+     "status": "proposed"
+    },
+    "beginners": {
+     "text": "Ignoring the tremor and collapsing.",
+     "status": "proposed"
+    },
+    "named_power_1": {
+     "text": "Anchor: reinforces tendons for a brief brace or controlled lift. It cannot protect skin or bones.",
+     "status": "proposed"
+    },
+    "named_power_2": {
+     "text": "Resonance: through direct touch, reads broad vibration changes in known machinery. It cannot read data or thoughts.",
+     "status": "proposed"
+    },
+    "combinations": {
+     "text": "Resonance to find the failing part, then Anchor to hold it while someone else repairs it.",
+     "status": "proposed"
+    },
+    "rituals": {
+     "text": "A controlled breath; water before and after.",
+     "status": "proposed"
+    },
+    "visual_signs": {
+     "text": "Faint teal lines at the wrists brighten; graphite ridges along the forearms rise.",
+     "status": "proposed"
+    },
+    "sounds_smells": {
+     "text": "No sound; skin smells of hot metal after a burst.",
+     "status": "proposed"
+    },
+    "on_the_body": {
+     "text": "Fine raised graphite ridges on the outer forearms; teal wrist lines.",
+     "status": "proposed"
+    },
+    "environment_signs": {
+     "text": "None beyond the user's body.",
+     "status": "proposed"
+    },
+    "tells": {
+     "text": "A fine hand tremor before failure: a stop signal.",
+     "status": "proposed"
+    },
+    "sigil": {
+     "text": "A teal ring crossed by three vertical filaments, the trial survivors' private mark.",
+     "status": "proposed"
+    },
+    "failure_conditions": {
+     "text": "Fever, injury, dehydration, or a fourth burst inside ten minutes.",
+     "status": "proposed"
+    },
+    "backlash": {
+     "text": "Painful involuntary contraction and collapse.",
+     "status": "proposed"
+    },
+    "overuse": {
+     "text": "Heat and tremor that last into the next scene; no reset at a scene cut.",
+     "status": "proposed"
+    },
+    "misuse": {
+     "text": "The company wants to make it repeatable in workers.",
+     "status": "proposed"
+    },
+    "worst_case": {
+     "text": "Collapse at the wrong moment while holding a failing machine.",
+     "status": "proposed"
+    },
+    "origin_story": {
+     "text": "Trial 7, an unauthorised coolant trial on Nacre's Eastern service deck.",
+     "status": "proposed"
+    },
+    "discovery": {
+     "text": "Discovered in 2186 when the trial failed and exposed Moki Vey.",
+     "status": "proposed"
+    },
+    "key_events": {
+     "text": "2186 exposure; 2186-2188 rehabilitation; 2189 evidence of an ongoing programme.",
+     "status": "proposed"
+    },
+    "lore": {
+     "text": "Survivors whisper that the filaments are learning; nobody knows.",
+     "status": "proposed"
+    },
+    "lost_knowledge": {
+     "text": "Whether the filaments can safely be removed.",
+     "status": "proposed"
+    },
+    "public_view": {
+     "text": "Most of Nacre has never heard of it.",
+     "status": "proposed"
+    },
+    "law": {
+     "text": "Officially it does not exist; the trial was erased.",
+     "status": "proposed"
+    },
+    "institutions": {
+     "text": "The company holds the trial records.",
+     "status": "proposed"
+    },
+    "prejudice": {
+     "text": "Survivors fear being called contaminated.",
+     "status": "proposed"
+    },
+    "economy": {
+     "text": "None yet; the company sees a product.",
+     "status": "proposed"
+    },
+    "first_use": {
+     "text": "Chapter 1, Anchor holds a failing intake housing.",
+     "status": "proposed"
+    },
+    "key_uses": {
+     "text": "The intake repair; the evidence relay; the climax shutdown.",
+     "status": "proposed"
+    },
+    "escalation": {
+     "text": "Each use costs more as the arc goes on; no new powers appear.",
+     "status": "proposed"
+    },
+    "climax_use": {
+     "text": "Moki holds a failing actuator for one burst while Tavi completes the isolation.",
+     "status": "proposed"
+    },
+    "reveal_points": {
+     "text": "Glow and tremor early; the trial's scope at the midpoint.",
+     "status": "proposed"
+    },
+    "must_show_1": {
+     "text": "The tremor appears before a failure.",
+     "status": "proposed"
+    },
+    "must_show_2": {
+     "text": "Wrist lines brighten with exertion.",
+     "status": "proposed"
+    },
+    "must_show_3": {
+     "text": "Rest after the third burst.",
+     "status": "proposed"
+    },
+    "power_ledger": {
+     "text": "Count every Anchor burst per scene; three within ten minutes is the ceiling; no reset at a scene cut.",
+     "status": "proposed"
+    },
+    "rules_ledger": {
+     "text": "Stated on the page so far: none (manuscript check pending).",
+     "status": "proposed"
+    },
+    "secrets_ledger": {
+     "text": "The trial's scope: Sael and a small circle until the midpoint.",
+     "status": "proposed"
+    },
+    "linked_records": {
+     "text": "CH-001 Moki Vey; CH-003 Dr. Sera Noll; PL-001 Nacre.",
+     "status": "proposed"
+    },
+    "unresolved_choices": {
+     "text": "The author may change the colour of the signs.",
+     "status": "proposed"
+    },
+    "artwork_note": {
+     "text": "The sigil is a simple reference drawing; make the in-use study in Akowe or upload your own.",
+     "status": "proposed"
+    },
+    "verification_scope": {
+     "text": "Checked against the Moki Vey dossier; manuscript check pending.",
+     "status": "proposed"
+    }
+   },
+   "art": {
+    "sigil": "sigil.jpg"
+   }
+  }
+ ]
+}

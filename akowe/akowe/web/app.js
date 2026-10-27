@@ -5,7 +5,7 @@ import { AI_STATE, plainCheck, problemFor, siteProblemWords, slugName } from './
 import { viewContinuity } from './continuity.js';   // 🧭 Section 7 (P32–P35)
 import { estimateBox, runCostLine, viewCosts, viewSceneGrid } from './grid.js';  // 🗂 P27 · ⏱ P28
 import * as S7C from './section7c.js';  // P23 beta reader + P25 your writing style (Section 7c)
-import { viewForge, viewForgeList } from './forge.js';  // 🗂 B5 Character Forge dossiers
+import { forgeRoute } from './forge.js';  // 🗂 B5 Character Forge dossiers (characters, items, places, magic)
 import { viewPictures } from './pictures.js';  // 🖼 B3 chapter/scene pictures and the map
 import { viewCover } from './cover.js';  // 🎨 B3 book covers
 
@@ -653,7 +653,7 @@ async function pickView(parts) {
     if (rest[0] === 'world') return viewWorld;
     if (rest[0] === 'continuity') return m => viewContinuity(m, { h, clear, api, bpath, plink, S, crumbs, problemBox, toProblem, runAiJob, choiceDialog, toast, infoTip, route });
     if (rest[0] === 'report') return viewReport;
-    if (rest[0] === 'forge') return m => (rest[1] ? viewForge(m, rest[1], forgeUI()) : viewForgeList(m, forgeUI()));  // 🗂 B5
+    if (rest[0] === 'forge') return m => forgeRoute(m, rest.slice(1), forgeUI());  // 🗂 B5 (…/forge/<rid>, …/forge/items/<rid>)
     if (rest[0] === 'pictures') return m => viewPictures(m, forgeUI());  // 🖼 B3
     if (rest[0] === 'cover') return m => viewCover(m, forgeUI());  // 🎨 B3 cover designer
     if (rest[0] === 'manifest') return viewManifest;
