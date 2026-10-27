@@ -47,9 +47,10 @@
   // ------------------------------------------------------------ the tab itself
   function showTab() {
     document.body.dataset.appTab = 'images';
-    for (const id of ['tab-app-main', 'tab-app-akowe']) if ($(id)) $(id).setAttribute('aria-selected', 'false');
+    for (const id of ['tab-app-main', 'tab-app-akowe', 'tab-app-video']) if ($(id)) $(id).setAttribute('aria-selected', 'false');
     $('tab-app-images').setAttribute('aria-selected', 'true');
     if ($('akowe-tab')) $('akowe-tab').hidden = true;
+    if ($('video-tab')) $('video-tab').hidden = true;
     $('images-tab').hidden = false;
     try { if (window.api && window.api.akoweTab) window.api.akoweTab(false); } catch (_) {}
     if (!st.loaded) { st.loaded = true; init(); }
@@ -57,9 +58,9 @@
   function hideTab() { $('images-tab').hidden = true; if ($('tab-app-images')) $('tab-app-images').setAttribute('aria-selected', 'false'); }
   window.sdShowImagesTab = showTab;
   $('tab-app-images').addEventListener('click', showTab);
-  for (const id of ['tab-app-main', 'tab-app-akowe']) if ($(id)) $(id).addEventListener('click', () => {
+  for (const id of ['tab-app-main', 'tab-app-akowe', 'tab-app-video']) if ($(id)) $(id).addEventListener('click', () => {
     hideTab();
-    if (document.body.dataset.appTab === 'images') document.body.dataset.appTab = id === 'tab-app-akowe' ? 'akowe' : 'main';
+    if (document.body.dataset.appTab === 'images' && id !== 'tab-app-video') document.body.dataset.appTab = id === 'tab-app-akowe' ? 'akowe' : 'main';
   });
 
   function subTab(which) {

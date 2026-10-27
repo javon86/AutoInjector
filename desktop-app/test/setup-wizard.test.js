@@ -46,7 +46,7 @@ async function main() {
   assert(panel && panel.classList.contains("active"), "?tab=video opens the wizard on the Video step");
   assert(!/placeholder|coming next|Planned/i.test(panel.textContent), "the Video step no longer says it is a placeholder / planned");
   assert(/AnimateDiff extension is installed/.test(panel.textContent) && /still images/.test(panel.textContent), "the Video step says the A1111 address needs the AnimateDiff extension (otherwise still images)");
-  assert(/ComfyUI isn't supported for video yet/.test(panel.textContent), "the Video step says ComfyUI isn't supported for video yet");
+  assert(/🎬 Video/.test(panel.textContent) && /installs and runs inside AutoInjector/.test(panel.textContent) && /Advanced: other video server/.test(panel.textContent), "the Video step points to the in-app 🎬 Video tab and keeps the other video server as Advanced");
   assert(/AnimateDiff extension/.test(doc.getElementById("vd-endpoint").getAttribute("placeholder")), "the endpoint hint says the 7860 address needs the AnimateDiff extension");
   for (const id of ["vd-endpoint", "vd-enabled", "vd-frames", "vd-fps", "vd-width", "vd-height", "btn-vd-save", "btn-vd-check", "btn-vd-test", "vd-msg"]) {
     assert(!!doc.getElementById(id), `the Video step has #${id}`);

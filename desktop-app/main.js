@@ -237,6 +237,7 @@ const state = {
   chatImage: { freshChatPerSeries: false }, // 🎨 ChatGPT image engine: a new ChatGPT chat for each reference-view series (default: one chat, keeps the character)
   imageConfig: null, // Stable Diffusion settings mirror (imageProvider owns the live copy); persisted so the endpoint survives a restart
   videoConfig: null, // text-to-video settings mirror (videoProvider owns the live copy); persisted so the endpoint survives a restart
+  videoStudio: null, // 🎬 Video engine settings (video-studio.js): backend auto/comfy-wan/endpoint, default model, ComfyUI address, time limit
   voiceConfig: null, // voice settings the USER saved (voiceProvider owns the live copy); persisted so they survive a restart. Only set on a user change or a restore, so a managed/env-started shim's address isn't written as if the user chose it
   setupStatus: {}, // last-known install state per setup-manager target id (true/false/null); refreshed by refreshSetupStatus()
   // Akọwe: enabled = the bridge (persisted; OFF by default, see startAkoweBridge()). startWithApp = AutoInjector
@@ -691,6 +692,7 @@ function saveStateDebounced() {
         chatImage: state.chatImage,
         imageConfig: state.imageConfig || imageProvider.getSettings(), // Stable Diffusion endpoint/size — no secret, stored as-is
         videoConfig: state.videoConfig || videoProvider.getSettings(), // text-to-video endpoint/size — no secret, stored as-is
+        videoStudio: state.videoStudio || null, // 🎬 Video engine settings — no secret
         voiceConfig: state.voiceConfig || null, // voice address/on-off/speaker voices/devices — no secret (the voice shim has no key), stored as-is
         akowe: { enabled: !!state.akowe.enabled, startWithApp: state.akowe.startWithApp !== false, autoConnect: state.akowe.autoConnect !== false }, // the bridge token itself lives in its own 0600 file, never here
         hr: hr && hr.mode ? {
@@ -810,6 +812,9 @@ function loadPersistedState() {
   if (snap.videoConfig && typeof snap.videoConfig === "object") {
     videoProvider.setSettings(snap.videoConfig);
     state.videoConfig = videoProvider.getSettings();
+  }
+  if (snap.videoStudio && typeof snap.videoStudio === "object") {
+    state.videoStudio = Object.assign({}, snap.videoStudio); // read when the video engine is first created
   }
   // Voice: settings only — restoring never starts the voice shim (that is still
   // AUTOINJECTOR_VOICE_SPAWN / the Setup Wizard's job, and it runs after this,
@@ -4610,6 +4615,7 @@ ipcMain.handle("wizard:catalog", async () => {
         stabilityMatrix: { name: "Stability Matrix (easy image installer) ⭐", url: "https://github.com/LykosAI/StabilityMatrix", note: "One-click installer + manager for Stable Diffusion (A1111/ComfyUI/Fooocus) with a built-in model downloader. Recommended: install it, launch A1111/Comfy from it with the API on, point its shared Models folder at AutoInjector's models/ (or copy models into models/image), then set the app's Image endpoint." },
         stableDiffusion: { name: "Stable Diffusion (Automatic1111, manual)", url: "https://github.com/AUTOMATIC1111/stable-diffusion-webui#installation-and-running", note: "Manual alternative to Stability Matrix. Run it with --api, then set its URL in the Images tab." },
         comfyui: { name: "ComfyUI (alt. image backend)", url: "https://github.com/comfyanonymous/ComfyUI#installing", note: "A more powerful node-based image backend. Stability Matrix can install this for you." },
+        video: { name: "🎬 Video (Wan on ComfyUI, installs inside AutoInjector)", inApp: true, tab: "video", models: Object.values(videoInstallerMod.MODELS).map((m) => ({ id: m.id, label: m.label, bytes: videoInstallerMod.modelBytes(m), vramGB: m.vramGB, modes: m.modes })), note: "Text→video and picture→video with Wan 2.2 5B (about 12 GB graphics memory) or Wan 2.1 1.3B (about 8 GB), on the same ComfyUI as 🎨 Images. Open the 🎬 Video tab → Setup: one click installs ComfyUI and the model." },
       },
     };
   } catch (e) { return { ok: false, error: String(e) }; }
@@ -6182,35 +6188,145 @@ sdApiMod.register(sdApiMod.createImagesApi({
   targets: () => sdTargetsPublic(), start: (id) => sdStart(id), stop: async () => ({ ok: true, runner: await sdRunner().stop() }),
 }));
 
-// Video generation (text-to-video). Same shape as image: a configurable local
-// endpoint; a base64 clip is saved into the videos/ output folder and a data URL
-// is handed back for the panel's inline preview.
-ipcMain.handle("video:status", () => ({ ok: true, ...videoProvider.status() }));
+// ---- 🎬 Video: Wan models on the same ComfyUI as 🎨 Images (video-studio.js) ----------------
+// The engine is video-studio.js (Electron-free): text→video and picture→video with
+// Wan 2.2 5B / Wan 2.1 1.3B on the ComfyUI that AutoInjector installs, starts and
+// connects for pictures; the old generic text-to-video URL (video-provider.js) stays
+// as the "endpoint" backend. video-installer.js downloads the models into ComfyUI's
+// model folders. video-api.js is the module API (Alfred's video_call, the bridge).
+const sdBackends = require("./sd-backends");
+const videoInstallerMod = require("./video-installer");
+const videoStudioMod = require("./video-studio");
+const videoApiMod = require("./video-api");
+// Which ComfyUI video uses, without disturbing 🎨 Images: the address set in 🎬 Video
+// settings, else the ComfyUI Images is connected to, else the one AutoInjector runs,
+// else whatever answers on :8188. o.start: start the installed ComfyUI when none answers.
+let _comfyProbe = { at: 0, base: null };
+async function videoComfy(o = {}) {
+  const ok = async (base, label, source) => { try { const r = await sdBackends.identify(base, { timeoutMs: 2500 }); return r && r.usable && r.kind === "comfy" ? { base: r.base, label: r.label || label, source, version: r.version || "" } : null; } catch (_) { return null; } };
+  if (o.url) { const r = await ok(o.url, "ComfyUI", "set in 🎬 Video"); if (r) return r; }
+  const im = imageProvider.status();
+  if (im && im.endpoint && im.backend === "comfy" && im.base) { const r = await ok(im.base, "ComfyUI", "connected for 🎨 Images"); if (r) return r; }
+  let rs = null; try { rs = _sdRunner ? _sdRunner.status() : null; } catch (_) { rs = null; }
+  if (rs && rs.phase === "running" && rs.kind === "comfy" && rs.base) { const r = await ok(rs.base, "ComfyUI", rs.owned ? "started by AutoInjector" : "already running"); if (r) return r; }
+  if (Date.now() - _comfyProbe.at > 5000) { _comfyProbe = { at: Date.now(), base: null }; const r = await ok("http://127.0.0.1:8188", "ComfyUI", "found on :8188"); _comfyProbe.base = r; }
+  if (_comfyProbe.base) return _comfyProbe.base;
+  if (!o.start || process.env.AUTOINJECTOR_VIDEO_AUTOSTART === "0") return null;
+  // Nothing answers: start the installed ComfyUI (only when AutoInjector isn't already running another SD app).
+  const t = sdTargets().find((x) => x.kind === "comfy" && x.supported);
+  if (!t || (rs && (rs.phase === "running" || rs.phase === "starting" || rs.phase === "restarting"))) return null;
+  logEvent("video-comfy-autostart", { target: t.source });
+  const st = await sdStart(t.id);
+  return st && st.ok && st.runner && st.runner.base ? ok(st.runner.base, "ComfyUI", "started by AutoInjector") : null;
+}
+// The models folders video can use: Stability Matrix's shared Data/Models when a Stability
+// Matrix ComfyUI is there (its own folder names), plus AutoInjector's ComfyUI portable.
+function videoModelRoots() {
+  const out = [];
+  try { for (const t of sdTargets()) if (t.kind === "comfy" && t.source === "Stability Matrix" && t.models) out.push({ path: t.models, layout: "sm", source: `Stability Matrix (${t.displayName || "ComfyUI"})` }); } catch (_) {}
+  for (const d of String(process.env.AUTOINJECTOR_VIDEO_MODEL_DIRS || "").split(path.delimiter).filter(Boolean)) out.push({ path: d, layout: "comfy", source: "ComfyUI models folder" });
+  return out;
+}
+// Downloads go where the ComfyUI in use reads them: the running target's models folder.
+function videoPreferredRoot() {
+  try {
+    const rs = _sdRunner ? _sdRunner.status() : null;
+    const id = rs && rs.target && rs.target.kind === "comfy" ? rs.target.id : (state.sdManaged.targetId || "");
+    const t = sdTargets().find((x) => x.id === id && x.kind === "comfy");
+    if (t && t.models) return { path: t.models, layout: t.source === "Stability Matrix" ? "sm" : "comfy", source: t.displayName || "ComfyUI" };
+  } catch (_) {}
+  return null;
+}
+let _videoInstaller = null;
+function videoInstaller() {
+  if (_videoInstaller) return _videoInstaller;
+  _videoInstaller = videoInstallerMod.createVideoInstaller({
+    sdInstaller: () => sdInstallerInst(), roots: () => videoModelRoots(), preferredRoot: () => videoPreferredRoot(),
+    log: (k, d) => logEvent(k, d), onChange: (st) => broadcast("video-install", st),
+  });
+  return _videoInstaller;
+}
+let _videoStudio = null;
+let _videoLastStatus = null; // the last full status, for the quick System Check
+function videoStudio() {
+  if (_videoStudio) return _videoStudio;
+  let nativeImage = null;
+  try { nativeImage = require("electron").nativeImage || null; } catch (_) { nativeImage = null; }
+  _videoStudio = videoStudioMod.createVideoStudio({
+    comfy: (o) => videoComfy(o), installer: () => videoInstaller(), library: sdLibrary(), videoProvider,
+    videosDir: () => outputManager.videosDir(),
+    fileUrl: (p) => { try { return pathToFileURL(p).href; } catch (_) { return ""; } },
+    log: (t, d) => logEvent(t, d),
+    settings: state.videoStudio || {},
+    persist: (st) => { state.videoStudio = st; saveStateDebounced(); },
+    pollMs: Number(process.env.AUTOINJECTOR_VIDEO_POLL_MS) || undefined,
+    toPng: (buf) => { if (!nativeImage || typeof nativeImage.createFromBuffer !== "function") return null; try { const im = nativeImage.createFromBuffer(buf); return im && !im.isEmpty() ? im.toPNG() : null; } catch (_) { return null; } },
+  });
+  return _videoStudio;
+}
+async function videoStatusFull(o) { const s = await videoStudio().status(o || {}); _videoLastStatus = s; return s; }
+// A fast, synchronous view for the quick System Check: the Wan engine counts as "on" with ComfyUI's address.
+function videoQuickStatus() {
+  const s = _videoLastStatus;
+  if (s && s.backend === "comfy-wan" && s.comfy && s.comfy.base) return { enabled: true, configured: true, endpoint: s.comfy.base };
+  return videoProvider.status();
+}
+// Start one video job from the window without waiting (the tab polls video:progress); the
+// final result is broadcast as "video-done" and also returned to the caller that awaits it.
+function videoSafe(fn) {
+  return async (_evt, arg) => { try { return await fn(arg || {}); } catch (e) { logEvent("video-ipc-error", { error: String((e && e.message) || e) }); return { ok: false, error: "VIDEO_FAILED", code: "VIDEO_FAILED", message: `Something went wrong: ${(e && e.message) || e}` }; } };
+}
+async function videoRun(kind, a, from) {
+  const r = kind === "animate" ? await videoStudio().animate(a, from) : kind === "request" ? await videoStudio().request(a, from) : await videoStudio().generate(a, from);
+  broadcast("video-done", { ok: !!(r && r.ok), path: r && r.path, poster: r && r.poster, error: r && !r.ok ? r.error : undefined });
+  return r;
+}
+// Legacy channels (the old Video panel, the Setup Wizard, Alfred's video_status / generate_video):
+// video:status keeps the old fields (videoProvider's) and adds the engine's; video:generate now goes
+// through video-studio (Wan on ComfyUI, else the endpoint) and keeps its old answer shape.
+ipcMain.handle("video:status", videoSafe(async () => {
+  const s = await videoStatusFull();
+  return Object.assign({ ok: true }, videoProvider.status(), { engine: { ready: s.ready, backend: s.backend, message: s.message, comfy: s.comfy, installed: s.installed, busy: s.busy } });
+}));
 ipcMain.handle("video:configure", (_evt, patch) => {
-  videoProvider.setSettings(patch || {});
-  state.videoConfig = videoProvider.getSettings();
-  saveStateDebounced();
-  logEvent("video-config", { enabled: state.videoConfig.enabled, endpoint: state.videoConfig.endpoint });
-  return { ok: true, ...videoProvider.status() };
+  try {
+    videoProvider.setSettings(patch || {});
+    state.videoConfig = videoProvider.getSettings();
+    saveStateDebounced();
+    logEvent("video-config", { enabled: state.videoConfig.enabled, endpoint: state.videoConfig.endpoint });
+    return { ok: true, ...videoProvider.status() };
+  } catch (e) { return { ok: false, error: "INTERNAL", message: String((e && e.message) || e) }; }
 });
-ipcMain.handle("video:generate", async (_evt, { prompt, negativePrompt } = {}) => {
-  const r = await videoProvider.generate(prompt, { negativePrompt });
-  // OP-13: hand back the plain-language `message` (e.g. what NO_VIDEO means and
-  // how to set up a backend) alongside the short code.
-  if (!r || !r.ok) {
-    const fail = { ok: false, error: (r && r.error) || "FAILED" };
-    return { ...fail, message: (r && r.message) || videoProvider.explainError(fail) };
-  }
-  if (r.videoBase64) {
-    try {
-      const buf = Buffer.from(r.videoBase64, "base64");
-      const savedPath = outputManager.saveBuffer(outputManager.videosDir(), `vid-${Date.now()}.mp4`, buf);
-      return { ok: true, path: savedPath, preview: `data:video/mp4;base64,${r.videoBase64}` };
-    } catch (e) { const fail = { ok: false, error: `SAVE_FAILED: ${e}` }; return { ...fail, message: videoProvider.explainError(fail) }; }
-  }
-  // A backend that returns a URL (rendered file on its own server) — hand it through.
-  return { ok: true, url: r.videoUrl || null, preview: r.videoUrl || null };
-});
+ipcMain.handle("video:generate", videoSafe(async (a) => {
+  // Wan on ComfyUI when it is ready; else, when the old endpoint is switched on, that endpoint
+  // exactly as before (its own codes: NO_ENDPOINT, NO_VIDEO, … with their plain messages).
+  const st = await videoStatusFull();
+  const backend = st.backend === "comfy-wan" ? undefined : (videoProvider.status().enabled ? "endpoint" : undefined);
+  const r = await videoRun("generate", { prompt: a.prompt, negativePrompt: a.negativePrompt || undefined, backend }, "legacy");
+  if (!r || !r.ok) return Object.assign({ ok: false }, r || {}, { error: (r && (r.providerError || r.error)) || "VIDEO_FAILED", code: (r && r.code) || "VIDEO_FAILED", message: (r && r.message) || "The video could not be made." });
+  return Object.assign({}, r, { preview: r.url || r.path || null });
+}));
+// The 🎬 Video tab.
+ipcMain.handle("video:full-status", videoSafe((a) => videoStatusFull({ fresh: !!a.fresh })));
+ipcMain.handle("video:models", videoSafe(() => videoStudio().models()));
+ipcMain.handle("video:capabilities", videoSafe(() => (videoApiMod.get() ? videoApiMod.get().capabilities() : { ok: false, error: "NOT_WIRED" })));
+ipcMain.handle("video:settings", videoSafe((a) => videoStudio().settings(a.patch || {})));
+ipcMain.handle("video:generate-t2v", videoSafe((a) => videoRun("generate", a, "video-tab")));
+ipcMain.handle("video:animate", videoSafe((a) => videoRun("animate", a, "video-tab")));
+ipcMain.handle("video:progress", videoSafe(() => videoStudio().progress()));
+ipcMain.handle("video:cancel", videoSafe(() => videoStudio().cancel()));
+ipcMain.handle("video:gallery", videoSafe((a) => videoStudio().gallery(a.limit)));
+ipcMain.handle("video:test", videoSafe(() => videoStudio().test()));
+ipcMain.handle("video:install-check", videoSafe(() => videoStudio().install.check()));
+ipcMain.handle("video:install-model", videoSafe((a) => videoStudio().install.downloadModel(a.id)));
+ipcMain.handle("video:install-all", videoSafe((a) => videoStudio().install.installAll(a.id)));
+ipcMain.handle("video:install-cancel", videoSafe(() => videoStudio().install.cancel()));
+ipcMain.handle("video:open-folder", videoSafe(async () => { const d = outputManager.videosDir(); try { fs.mkdirSync(d, { recursive: true }); } catch (_) {} const err = await shell.openPath(d); return err ? { ok: false, error: err } : { ok: true }; }));
+ipcMain.handle("video:show-file", videoSafe((a) => { if (a.path) shell.showItemInFolder(a.path); return { ok: true }; }));
+// The module API for Alfred (video_call) and other callers in the main process (docs/VIDEO_API.md).
+videoApiMod.register(videoApiMod.createVideoApi({
+  studio: new Proxy({}, { get: (_t, k) => { const s = videoStudio(); const v = s[k]; return typeof v === "function" ? v.bind(s) : v; }, has: (_t, k) => k in videoStudio() }),
+}));
 
 // Endpoint help: so the user never has to guess the SD/video URL. Presets is a
 // curated dropdown; detect probes localhost for a running backend; test pings one.
@@ -6235,7 +6351,7 @@ async function butlerSelfCheck() {
     // it like this" message instead of a generic "isn't answering".
     voiceCheck: (timeoutMs) => voiceProvider.checkConnection({ timeoutMs }),
     imageStatus: () => imageProvider.status(),
-    videoStatus: () => videoProvider.status(),
+    videoStatus: () => videoQuickStatus(),
     pythonStatus: () => setupManager.pythonStatus(),
     toolList: () => toolProvider.list(),
     dbStatus: () => dbService.status(),
@@ -6371,18 +6487,21 @@ async function butlerCapabilityTest() {
       }
     } catch (e) { step("Image generation", false, String(e)); }
 
-    // 7) Video — really make a short test clip and save it.
+    // 7) Video — really make a 1-second test clip (Wan on ComfyUI, or the old endpoint) and save it.
     try {
+      const vs = await _withTimeout(videoStatusFull({ fresh: true }), 20000);
       const vi = videoProvider.status();
-      let down = null;
-      if (!vi.enabled) step("Video generation", null, vi.configured ? "not set up (optional) — configured but turned off" : "not set up (optional) — no video backend set up yet (Setup Wizard → Video)");
-      else if (vi.endpoint && (down = await _captestUnreachable(vi.endpoint))) step("Video generation", false, `couldn't make one: ${down}`);
-      else {
-        let r = await _withTimeout(videoProvider.generate("a short test clip: a simple spinning cube", { onEvent: () => {} }), (vi.timeoutMs || 300000) + 5000);
-        let saved = null;
-        if (r && r.ok && r.videoBase64) { try { saved = outputManager.saveBuffer(outputManager.videosDir(), `captest-${Date.now()}.mp4`, Buffer.from(r.videoBase64, "base64")); } catch (e) { r = { ok: false, error: `SAVE_FAILED: ${e}` }; } }
-        else if (r && r.ok && r.videoUrl) saved = r.videoUrl;
-        step("Video generation", !!(r && r.ok && saved), saved ? `made a clip (${typeof saved === "string" && /^https?:/.test(saved) ? saved : path.basename(saved)})` : `couldn't make one: ${(r && (r.message || r.error)) || "no video"}`);
+      let vdown = null;
+      if (!vs || !vs.ready) {
+        if (vs && vs.comfy && vs.comfy.connected && !(vs.installed || []).length) step("Video generation", null, `not set up (optional) — ComfyUI is connected but no video model is downloaded (🎬 Video → Setup → ⬇ ${videoInstallerMod.MODELS[videoInstallerMod.DEFAULT_MODEL].short})`);
+        else if (vs && vs.comfy && vs.comfy.connected && (vs.comfy.missingNodes || []).length) step("Video generation", false, `ComfyUI is too old for video (missing ${vs.comfy.missingNodes.join(", ")}) — update ComfyUI`);
+        else if (vi.configured && !vi.enabled && !(vs && vs.comfy && vs.comfy.installed)) step("Video generation", null, "not set up (optional) — the other video server address is saved but turned off; or set up Wan in 🎬 Video");
+        else step("Video generation", null, `not set up (optional) — ${(vs && vs.message) || "open 🎬 Video → Setup"}`);
+      } else if (vs.backend === "endpoint" && vi.endpoint && (vdown = await _captestUnreachable(vi.endpoint))) {
+        step("Video generation", false, `couldn't make one: ${vdown}`);
+      } else {
+        const r = await _withTimeout(videoStudio().test(), (vs.settings && vs.settings.timeoutMs ? vs.settings.timeoutMs : 2700000) + 10000);
+        step("Video generation", !!(r && r.ok && (r.path || r.url)), r && r.ok ? `made a ${r.seconds || 1}-second test clip with ${r.engine === "comfy-wan" ? r.model : "the video server"} (${r.path ? path.basename(r.path) : r.url})` : `couldn't make one: ${(r && (r.message || r.error)) || "no video"}${r && r.fix ? ` — ${r.fix}` : ""}`);
       }
     } catch (e) { step("Video generation", false, String(e)); }
 
@@ -6641,6 +6760,11 @@ const serviceBridge = createServiceBridge({
   },
   // 🎨 The Akọwe image contract (POST /image/request with a character lock,
   // GET /image/locks, GET /image/backend) — docs/SD_IMAGE_API.md.
+  // 🎬 GET /video/backend · POST /video/request (docs/VIDEO_API.md).
+  video: {
+    backend: () => videoStudio().backendInfo(),
+    request: (body) => videoStudio().request(body, `bridge:${String((body && body.from) || "akowe").slice(0, 40)}`),
+  },
   sdStudio: {
     request: (body) => sdStudio().request(body),
     locks: () => sdStudio().locks(),

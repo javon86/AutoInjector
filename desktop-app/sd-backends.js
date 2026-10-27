@@ -612,4 +612,5 @@ module.exports = {
   a1111Lists, a1111Payload, a1111Generate, a1111Progress, a1111Interrupt,
   comboOptions, comfyLists, resolveName, buildComfyWorkflow, comfyRejectReason, comfyGenerate, comfyProgress, comfyInterrupt,
   comfyUpload, comfyRunGraph, comfyPrepare, COMFY_FEATURE_NODES, getJson, postJson,
+  comfySocket: _comfySocket, // live step progress over /ws (video-studio.js uses it too)
 };

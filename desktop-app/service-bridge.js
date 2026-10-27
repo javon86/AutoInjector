@@ -54,6 +54,8 @@ function createServiceBridge(deps) {
   const image = d.image || null; // { status(), configure(patch), generate(prompt, {onEvent}) }
   // 🎨 Akọwe's image contract: { request(body), locks(), backend() } — docs/SD_IMAGE_API.md
   const sdStudio = d.sdStudio || null;
+  // 🎬 Video: { backend(), request(body) } — docs/VIDEO_API.md (Wan on ComfyUI, or the old endpoint)
+  const video = d.video || null;
   // The minimal phone client: the bridge serves this HTML shell (no token needed
   // to LOAD it — it carries the token from the pairing URL and uses it for data).
   const mobilePage = d.mobilePage || null; // string of HTML, or null to disable
@@ -109,11 +111,12 @@ function createServiceBridge(deps) {
     return false;
   }
 
-  function readJsonBody(req) {
+  function readJsonBody(req, maxBytes) {
+    const limit = maxBytes || 1e6;
     return new Promise((resolve) => {
       let buf = '';
       let tooBig = false;
-      req.on('data', (c) => { buf += c; if (buf.length > 1e6) { tooBig = true; req.destroy(); } });
+      req.on('data', (c) => { if (tooBig) return; buf += c; if (buf.length > limit) { tooBig = true; buf = ''; try { req.pause(); } catch (_) {} resolve(undefined); } });
       req.on('end', () => {
         if (tooBig) return resolve(undefined);
         if (!buf) return resolve({});
@@ -334,6 +337,31 @@ function createServiceBridge(deps) {
         const err = r && r.error;
         const code = r && r.ok ? 200 : CLIENT.includes(err) ? 400 : UNAVAILABLE.includes(err) ? 503 : BY_CODE[err] || 502;
         return reply(res, code, Object.assign({ ok: false }, r || {}));
+      }
+      // --- 🎬 Video for Akọwe / other programs (docs/VIDEO_API.md) ---
+      if (video && method === 'GET' && path === '/video/backend') {
+        let b;
+        try { b = await video.backend(); } catch (e) { b = { ok: false, error: 'INTERNAL', message: String((e && e.message) || e) }; }
+        return reply(res, 200, Object.assign({ ok: true }, b || {}));
+      }
+      if (video && method === 'POST' && path === '/video/request') {
+        // A picture may come as base64 in the body: up to 40 MB of JSON. Long-running (minutes):
+        // the server never times it out (see start()); a request that throws still answers.
+        const body = await readJsonBody(req, 40 * 1024 * 1024);
+        if (body === undefined) return reply(res, 400, { ok: false, error: 'BAD_JSON', code: 'BAD_JSON', message: 'The body must be JSON (at most 40 MB; send a large picture as a file path instead).' });
+        emit('video', { type: 'request', mode: body.image ? 'animate' : 'generate', purpose: body.purpose || 'free', from: body.from || null });
+        let r;
+        try { r = await video.request(body || {}); } catch (e) { r = { ok: false, error: 'VIDEO_FAILED', code: 'VIDEO_FAILED', message: `Something went wrong: ${(e && e.message) || e}` }; }
+        emit('video', { type: 'done', ok: !!(r && r.ok), engine: (r && r.engine) || null, error: r && !r.ok ? r.error : undefined });
+        const CLIENT = ['INVALID_PARAM', 'NEED_PROMPT', 'NO_LOCK', 'UNSUPPORTED_ON_BACKEND'];
+        const UNAVAILABLE = ['VIDEO_NOT_SET_UP', 'VIDEO_MODEL_MISSING', 'BUSY'];
+        const BY_CODE = { VIDEO_TIMEOUT: 504, VIDEO_CANCELLED: 409, VIDEO_OOM: 507 };
+        const err = r && r.error;
+        const code = r && r.ok ? 200 : CLIENT.includes(err) ? 400 : UNAVAILABLE.includes(err) ? 503 : BY_CODE[err] || 502;
+        return reply(res, code, Object.assign({ ok: false }, r || {}));
+      }
+      if (!video && (path === '/video/backend' || path === '/video/request')) {
+        return reply(res, 501, { ok: false, error: 'VIDEO_NOT_WIRED' });
       }
       if (!sdStudio && (path === '/image/backend' || path === '/image/locks' || path === '/image/request')) {
         return reply(res, 501, { ok: false, error: 'IMAGE_NOT_WIRED' });

@@ -40,6 +40,8 @@ function renderInstallers() {
     const row = document.createElement("div");
     row.className = "item";
     row.innerHTML = `<div style="flex:1 1 auto; min-width:0;"><div class="name">${esc(it.name)}</div><div class="why">${esc(it.note)}</div></div>`;
+    // Installs inside AutoInjector (🎬 Video): no web page to open — say where it is.
+    if (it.inApp) { const t = document.createElement("span"); t.className = "muted"; t.textContent = "In AutoInjector: 🎬 Video tab → Setup & models"; row.appendChild(t); box.appendChild(row); continue; }
     const btn = document.createElement("button");
     btn.className = "primary";
     btn.textContent = `Install ${it.name} ↗`;

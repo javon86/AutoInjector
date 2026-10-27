@@ -1058,6 +1058,56 @@
     .bf-health-list { list-style:none; margin:0 0 6px; padding:0; }
     .bf-health-list li { display:flex; gap:6px; align-items:baseline; }
 
+    /* 🎬 Video tab (videos-studio.js): Wan text→video / picture→video on ComfyUI. Reuses the 🎨 .sd-* cards. */
+    body[data-app-tab="video"] #wrap { display:none; }
+    body.window-collapsed #video-tab { display:none; }
+    #video-tab { flex:1 1 auto; min-height:0; display:flex; flex-direction:column; background:#101010; }
+    #video-tab[hidden] { display:none; }
+    #vd-bar { flex:0 0 auto; display:flex; align-items:center; gap:6px; flex-wrap:wrap; padding:6px 10px; background:#151515; border-bottom:1px solid #2a2a2a; font-size:12px; }
+    #vd-bar button { font-size:12px; padding:3px 8px; }
+    #vd-bar .spacer { flex:1 1 auto; }
+    #vd-status { display:inline-flex; align-items:center; gap:6px; font-weight:600; max-width:640px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    #vd-hint { margin:8px 10px 0; padding:9px 12px; border:1px solid #6b5a2a; background:#1d1a10; border-radius:8px; font-size:12.5px; line-height:1.5; white-space:pre-line; }
+    #vd-hint[hidden] { display:none; }
+    #vd-hint[data-tone="error"] { border-color:#6b3a3a; background:#1d1212; }
+    #vd-hint[data-tone="ok"] { border-color:#2d5a3a; background:#101d14; }
+    #vd-view-make { display:grid; grid-template-columns:minmax(300px, 440px) 1fr; gap:12px; align-items:start; }
+    @media (max-width:820px) { #vd-view-make { grid-template-columns:1fr; } }
+    #vd-mode-row { display:flex; gap:6px; margin-bottom:6px; }
+    #vd-mode-row button[aria-pressed="true"] { background:#22202e; border-color:#5a4ca0; color:#f0ecff; }
+    #vd-drop { border:1px dashed #3a3a4a; border-radius:8px; padding:10px; text-align:center; font-size:12px; margin:4px 0; }
+    #vd-drop[hidden] { display:none; }
+    #vd-drop.vd-over { border-color:#8a6cf0; background:#1a1726; }
+    #vd-image-preview { max-width:100%; max-height:180px; border-radius:6px; margin-top:6px; }
+    #vd-image-preview[hidden] { display:none; }
+    #vd-pick-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(64px, 1fr)); gap:5px; margin-top:5px; max-height:220px; overflow:auto; }
+    #vd-pick-grid img { width:100%; aspect-ratio:1; object-fit:cover; border-radius:4px; border:1px solid #2a2a2a; cursor:pointer; }
+    #vd-progress { height:8px; background:#222; border-radius:4px; overflow:hidden; margin:6px 0 2px; }
+    #vd-progress-bar, #vd-dl-bar { height:100%; width:0; background:linear-gradient(90deg,#5a4ca0,#8a6cf0); transition:width .3s; }
+    #vd-dl-progress { height:8px; background:#222; border-radius:4px; overflow:hidden; margin:6px 0 2px; }
+    #vd-msg, #vd-dl-msg { font-size:12px; opacity:.9; min-height:18px; white-space:pre-line; }
+    #vd-error { margin:6px 0 4px; padding:9px 12px; border:1px solid #8a3a3a; background:#241212; border-radius:8px; font-size:12.5px; line-height:1.5; }
+    #vd-error[hidden], #vd-error [hidden] { display:none; }
+    #vd-error .sd-err-title { color:#ff9c9c; font-weight:600; white-space:pre-line; }
+    #vd-error .sd-err-fix { margin-top:4px; opacity:.9; white-space:pre-line; }
+    #vd-error .sd-err-actions { margin-top:6px; display:flex; gap:6px; flex-wrap:wrap; }
+    #vd-error details { margin-top:6px; font-size:11.5px; }
+    #vd-error pre { white-space:pre-wrap; word-break:break-word; max-height:180px; overflow:auto; margin:4px 0 0; padding:6px; background:#160c0c; border-radius:4px; font-size:11px; }
+    #vd-player { display:block; width:100%; max-height:62vh; background:#000; border-radius:6px; border:1px solid #2a2a2a; }
+    #vd-player[hidden] { display:none; }
+    #vd-player-empty { padding:40px 12px; text-align:center; opacity:.5; border:1px dashed #2a2a2a; border-radius:8px; }
+    #vd-player-info { font-size:11.5px; opacity:.8; margin-top:6px; white-space:pre-wrap; word-break:break-word; }
+    #vd-gallery { display:grid; grid-template-columns:repeat(auto-fill, minmax(120px, 1fr)); gap:6px; margin-top:8px; }
+    .vd-thumb { position:relative; cursor:pointer; border-radius:5px; overflow:hidden; border:1px solid #2a2a2a; background:#000; }
+    .vd-thumb img, .vd-thumb video { display:block; width:100%; aspect-ratio:16/9; object-fit:cover; }
+    .vd-thumb span { position:absolute; right:4px; bottom:3px; font-size:10.5px; background:rgba(0,0,0,.65); padding:0 4px; border-radius:4px; }
+    .vd-thumb:focus-visible { outline:2px solid #7c5ce0; }
+    .vd-model { border:1px solid #2a2a2a; border-radius:6px; padding:7px 9px; margin:6px 0; font-size:12px; }
+    .vd-model[data-installed="true"] { border-color:#2d5a3a; }
+    .vd-model .vd-model-head { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    .vd-model .vd-model-head b { flex:1 1 auto; }
+    .vd-model .sd-note { font-size:11px; opacity:.7; margin-top:3px; }
+
     @media (max-width:620px) {
       .bf-exp { display:none; }
       .bf-head-text { flex-basis:100%; order:9; }
@@ -1075,6 +1125,7 @@
       <button id="tab-app-main" class="app-tab" role="tab" aria-selected="true" aria-controls="wrap" title="The AIs, the butler and everything else">🤖 AutoInjector</button>
       <button id="tab-app-akowe" class="app-tab" role="tab" aria-selected="false" aria-controls="akowe-tab" title="Akọwe, the book workspace — it starts with AutoInjector">📖 Akọwe <span id="akowe-tab-dot" class="ak-dot" data-tone="off" aria-hidden="true"></span></button>
       <button id="tab-app-images" class="app-tab" role="tab" aria-selected="false" aria-controls="images-tab" title="Stable Diffusion: make pictures with your checkpoints and LoRAs, and organise them">🎨 Images <span id="sd-tab-dot" class="ak-dot" data-tone="off" aria-hidden="true"></span></button>
+      <button id="tab-app-video" class="app-tab" role="tab" aria-selected="false" aria-controls="video-tab" title="Make short videos from text or from a picture (Wan on ComfyUI, installs inside AutoInjector)">🎬 Video <span id="vd-tab-dot" class="ak-dot" data-tone="off" aria-hidden="true"></span></button>
     </div>
     <!-- 🎩 Alfred master switch (alfred-panel.js). Off by default: nothing else of Alfred exists until it is on. -->
     <button id="btn-alfred-switch" type="button" role="switch" aria-checked="false" title="Alfred, your assistant who can use everything in the app (off by default)" style="font-size:12px;padding:3px 10px;margin-right:8px;border-radius:7px;border:1px solid #2a2a2a;background:#151515;color:#cfcfcf;cursor:pointer;">🎩 Alfred: Off</button>
@@ -1407,6 +1458,130 @@
       </div>
     </div>
   </div>
+  <!-- 🎬 Video tab: Wan text→video / picture→video on the same ComfyUI as 🎨 Images. videos-studio.js -->
+  <div id="video-tab" role="tabpanel" aria-labelledby="tab-app-video" hidden>
+    <div id="vd-bar">
+      <span id="vd-status" role="status" aria-live="polite"><span id="vd-dot" class="ak-dot" data-tone="off" aria-hidden="true"></span><span id="vd-status-text">Checking video…</span></span>
+      <span class="spacer"></span>
+      <div role="tablist" aria-label="Video views" class="sd-row" style="flex:0 0 auto;">
+        <button class="sd-subtab sd-fixed" id="vd-sub-make" role="tab" aria-selected="true" aria-controls="vd-view-make">🎬 Make video</button>
+        <button class="sd-subtab sd-fixed" id="vd-sub-setup" role="tab" aria-selected="false" aria-controls="vd-view-setup">⚙ Setup &amp; models</button>
+      </div>
+    </div>
+    <div id="vd-hint" role="note" hidden></div>
+
+    <div id="vd-view-make" class="sd-view" role="tabpanel" aria-labelledby="vd-sub-make">
+      <div class="sd-card">
+        <div id="vd-mode-row" role="group" aria-label="What to make">
+          <button id="btn-vd-mode-t2v" aria-pressed="true" title="Describe the video in words">✍ Text → video</button>
+          <button id="btn-vd-mode-i2v" aria-pressed="false" title="Bring a picture to life">🖼 Picture → video</button>
+        </div>
+        <div id="vd-drop" hidden>
+          <div>Drop a picture here, or <input type="file" id="vd-file" accept="image/png,image/jpeg,image/webp" aria-label="Choose a picture"></div>
+          <details id="vd-pick" style="margin-top:5px;text-align:left;"><summary style="cursor:pointer;font-size:12px;">🎨 Use a picture from the 🎨 gallery</summary><div id="vd-pick-grid" aria-label="Recent pictures"></div></details>
+          <img id="vd-image-preview" alt="The picture to animate" hidden>
+          <div class="sd-note" id="vd-image-note"></div>
+        </div>
+        <h3>Prompt</h3>
+        <textarea id="vd-prompt" rows="4" placeholder="What happens… e.g. a lighthouse keeper climbs the spiral stairs at night, lantern swinging, camera follows"></textarea>
+        <label class="sd-l" for="vd-negative">Negative prompt (what to avoid — empty = a good default)</label>
+        <textarea id="vd-negative" rows="2" placeholder="static, blurry, low quality, deformed hands, text, watermark"></textarea>
+        <div class="sd-row">
+          <div><label class="sd-l" for="vd-lock">Character lock (adds their looks)</label><select id="vd-lock"><option value="">— none —</option></select></div>
+          <div><label class="sd-l" for="vd-purpose">Purpose</label><select id="vd-purpose"><option value="free">Free</option><option value="clip">Character clip (4 s)</option><option value="trailer_shot">Trailer shot (5 s)</option></select></div>
+        </div>
+        <div class="sd-row">
+          <div><label class="sd-l" for="vd-model">Model</label><select id="vd-model"></select></div>
+          <div><label class="sd-l" for="vd-size-preset">Size</label><select id="vd-size-preset"><option value="">Size…</option><option value="1280x704">1280×704 wide (5B)</option><option value="704x1280">704×1280 tall (5B)</option><option value="832x480">832×480 wide (fast)</option><option value="480x832">480×832 tall (fast)</option><option value="640x640">640×640 square</option></select></div>
+        </div>
+        <div style="margin-top:6px;">
+          <div class="sd-slider"><label for="vd-seconds">Seconds</label><input type="range" id="vd-seconds" min="1" max="5" step="0.5" value="5"><span id="vd-seconds-v">5</span></div>
+          <div class="sd-slider"><label for="vd-fps">FPS</label><input type="range" id="vd-fps" min="8" max="30" step="1" value="24"><span id="vd-fps-v">24</span></div>
+          <div class="sd-slider"><label for="vd-width">Width</label><input type="range" id="vd-width" min="256" max="1280" step="32" value="1280"><span id="vd-width-v">1280</span></div>
+          <div class="sd-slider"><label for="vd-height">Height</label><input type="range" id="vd-height" min="256" max="1280" step="32" value="704"><span id="vd-height-v">704</span></div>
+          <div class="sd-slider"><label for="vd-steps">Steps</label><input type="range" id="vd-steps" min="1" max="60" value="20"><span id="vd-steps-v">20</span></div>
+          <div class="sd-slider"><label for="vd-cfg">CFG</label><input type="range" id="vd-cfg" min="1" max="12" step="0.5" value="5"><span id="vd-cfg-v">5</span></div>
+          <div class="sd-slider"><label for="vd-shift">Shift</label><input type="range" id="vd-shift" min="0" max="16" step="0.5" value="8"><span id="vd-shift-v">8</span></div>
+        </div>
+        <div class="sd-row" style="margin-top:4px;">
+          <div><label class="sd-l" for="vd-sampler">Sampler</label><input type="text" id="vd-sampler" value="uni_pc" list="vd-samplers"></div>
+          <div><label class="sd-l" for="vd-scheduler">Scheduler</label><input type="text" id="vd-scheduler" value="simple" list="vd-schedulers"></div>
+          <datalist id="vd-samplers"><option value="uni_pc"><option value="euler"><option value="dpmpp_2m"><option value="res_multistep"><option value="lcm"></datalist>
+          <datalist id="vd-schedulers"><option value="simple"><option value="normal"><option value="beta"><option value="karras"></datalist>
+        </div>
+        <div class="sd-row" style="margin-top:4px;">
+          <label class="sd-fixed" for="vd-seed" style="font-size:11.5px;">Seed</label>
+          <input type="number" id="vd-seed" value="-1" title="-1 = a new random video each time">
+          <button class="sd-fixed" id="btn-vd-seed-rand" title="Random seed (-1)">🎲</button>
+          <button class="sd-fixed" id="btn-vd-seed-last" title="Reuse the last video's seed">♻</button>
+        </div>
+        <div class="sd-note" id="vd-frames-note" style="font-size:11px;opacity:.65;margin-top:3px;"></div>
+        <div class="sd-row" style="margin-top:8px;">
+          <button id="btn-vd-generate" class="primary">🎬 Make video</button>
+          <button id="btn-vd-stop" class="sd-fixed" disabled>⏹ Stop</button>
+        </div>
+        <div id="vd-progress" aria-hidden="true"><div id="vd-progress-bar"></div></div>
+        <div id="vd-msg" role="status" aria-live="polite"></div>
+        <div id="vd-error" role="alert" hidden>
+          <div id="vd-error-msg" class="sd-err-title"></div>
+          <div id="vd-error-fix" class="sd-err-fix"></div>
+          <div id="vd-error-actions" class="sd-err-actions"></div>
+          <details id="vd-error-details"><summary>details (what ComfyUI said)</summary><pre id="vd-error-raw"></pre></details>
+        </div>
+      </div>
+      <div class="sd-card">
+        <h3>Result</h3>
+        <div id="vd-player-empty">Your videos appear here. They are saved in the <b>videos/</b> folder with a poster picture and their settings.</div>
+        <video id="vd-player" controls loop playsinline hidden></video>
+        <div id="vd-player-info"></div>
+        <div class="sd-row" style="margin-top:6px;">
+          <button id="btn-vd-remake" disabled title="Put this video's settings (and seed) back into the form">♻ Remake</button>
+          <button id="btn-vd-showfile" disabled title="Show the file in its folder">📂 Show file</button>
+          <button id="btn-vd-folder" title="Open the videos folder">🗂 Videos folder</button>
+        </div>
+        <h3 style="margin-top:10px;">Gallery</h3>
+        <div id="vd-gallery" aria-label="Recent videos"></div>
+      </div>
+    </div>
+
+    <div id="vd-view-setup" class="sd-view" role="tabpanel" aria-labelledby="vd-sub-setup" hidden>
+      <div class="sd-card" style="max-width:760px;">
+        <h3>1 · ComfyUI (the engine)</h3>
+        <div id="vd-setup-comfy" style="font-size:12.5px;line-height:1.5;">Checking…</div>
+        <div class="sd-row" style="margin-top:6px;">
+          <button class="sd-fixed primary" id="btn-vd-install-all" title="Installs ComfyUI (if there is none) and the recommended video model">⬇ Install ComfyUI + video model</button>
+          <button class="sd-fixed" id="btn-vd-start" title="Start the installed ComfyUI (the same one 🎨 Images uses)">▶ Start ComfyUI</button>
+          <button class="sd-fixed" id="btn-vd-recheck">↻ Check again</button>
+          <button class="sd-fixed" id="btn-vd-test" title="Make a tiny 1-second video to prove it works">🧪 1-second test</button>
+        </div>
+      </div>
+      <div class="sd-card" style="max-width:760px;margin-top:10px;">
+        <h3>2 · Video models</h3>
+        <div id="vd-models"></div>
+        <div id="vd-dl-progress" aria-hidden="true"><div id="vd-dl-bar"></div></div>
+        <div id="vd-dl-msg" role="status" aria-live="polite"></div>
+        <button id="btn-vd-dl-cancel" disabled>⏸ Pause / cancel download</button>
+        <div class="sd-note" style="font-size:11px;opacity:.65;margin-top:5px;">The files go into ComfyUI's own model folders (diffusion_models, text_encoders, vae — or Stability Matrix's shared Data/Models). A stopped download continues where it stopped.</div>
+      </div>
+      <div class="sd-card" style="max-width:760px;margin-top:10px;">
+        <h3>Settings</h3>
+        <div class="sd-row">
+          <div><label class="sd-l" for="vd-backend">Video engine</label><select id="vd-backend"><option value="auto">Auto (ComfyUI + Wan, else the other video server)</option><option value="comfy-wan">ComfyUI + Wan only</option><option value="endpoint">The other video server only</option></select></div>
+          <div><label class="sd-l" for="vd-timeout">Time limit (minutes)</label><input type="number" id="vd-timeout" min="1" max="360" value="45"></div>
+        </div>
+        <label class="sd-l" for="vd-comfy-url">ComfyUI address (empty = find it by itself)</label>
+        <input type="text" id="vd-comfy-url" placeholder="http://127.0.0.1:8188">
+        <div class="sd-row" style="margin-top:6px;"><button class="sd-fixed" id="btn-vd-save-settings">Save settings</button><span id="vd-settings-msg" style="font-size:12px;"></span></div>
+        <details class="sd-adv" id="vd-advanced" style="margin-top:8px;"><summary>Advanced: other video server</summary><div class="sd-adv-body">
+          <div class="sd-note">A separate text-to-video HTTP server that sends the finished clip back (the old “video endpoint”). Text→video only.</div>
+          <label class="sd-fixed" style="font-size:12px;"><input type="checkbox" id="vd-ep-enabled"> Use the other video server</label>
+          <label class="sd-l" for="vd-ep-url">Its generate address</label>
+          <input type="text" id="vd-ep-url" placeholder="http://127.0.0.1:7860/…">
+          <div class="sd-row" style="margin-top:6px;"><button class="sd-fixed" id="btn-vd-ep-save">Save</button><span id="vd-ep-msg" style="font-size:12px;"></span></div>
+        </div></details>
+      </div>
+    </div>
+  </div>
   <div id="wrap">
     <div id="top-tab-strip"></div>
 
@@ -1677,7 +1852,7 @@
           <input type="text" id="vid-endpoint" placeholder="http://127.0.0.1:7860/… (AnimateDiff / Stable Video Diffusion API)" style="width:100%; box-sizing:border-box; margin:3px 0;">
           <div class="btns" style="margin:3px 0;"><button id="btn-vid-save">Save</button><button id="btn-vid-test" title="Check the address is reachable right now">✓ Test</button></div>
           <div id="vid-conn-msg" style="font-size:11px; opacity:.8; margin:2px 0;"></div>
-          <p style="opacity:.6; font-size:10.5px; margin:2px 0;">Point this at a local text-to-video HTTP API that sends the finished clip back (AnimateDiff in A1111/Forge — needs the AnimateDiff extension, otherwise you get still images — or a Stable Video Diffusion server). ComfyUI isn't supported for video yet (its API only queues jobs). Pick one above, or press <b>Auto-detect</b>. Clips save into the <code>videos/</code> output folder.</p>
+          <p style="opacity:.6; font-size:10.5px; margin:2px 0;">Point this at a local text-to-video HTTP API that sends the finished clip back (AnimateDiff in A1111/Forge — needs the AnimateDiff extension, otherwise you get still images — or a Stable Video Diffusion server). For ComfyUI use the 🎬 Video tab instead (Wan, installs inside AutoInjector). Pick one above, or press <b>Auto-detect</b>. Clips save into the <code>videos/</code> output folder.</p>
         </details>
       </div>
     </div>
@@ -2134,6 +2309,7 @@
 
   <script src="controls.js"></script>
   <script src="images-studio.js"></script>
+  <script src="videos-studio.js"></script>
   <script src="alfred-panel.js"></script><!-- 🎩 Alfred panel (off by default) -->
 </body>
 </html>

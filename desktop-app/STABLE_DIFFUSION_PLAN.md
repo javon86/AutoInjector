@@ -159,7 +159,7 @@ Generated from `sd-params.js` (`x-a1111` / `x-comfy`) and checked by `test/sd-fu
 - Starter model URLs are Hugging Face links (no size/hash pinned); the ComfyUI download is
   verified against GitHub's published size + SHA-256 when GitHub provides the digest.
 - `.ckpt` / `.pt` files are listed but never unpickled (base model unknown unless a sidecar says).
-- Video (B2) still uses the separate video provider.
+- Video (B2) now runs on the same ComfyUI as pictures: Wan 2.2 5B / Wan 2.1 1.3B through video-studio.js, video-installer.js and video-api.js (the 🎬 Video tab). The old video provider stays as the "endpoint" backend. See docs/VIDEO_API.md.
 
 ## Original design
 
