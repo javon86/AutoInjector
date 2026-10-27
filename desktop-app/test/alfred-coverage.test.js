@@ -85,7 +85,7 @@ const IPC_INVENTORY = [
   'brigade:run', 'brigade:stop', 'butler:capability-test', 'butler:chat', 'butler:install-missing', 'butler:selfcheck', 'butler:send-intro',
   'db:recent-messages', 'db:status', 'endpoints:detect', 'endpoints:presets', 'endpoints:test', 'external:open',
   'featuretest:open-report', 'featuretest:run', 'featuretest:stop', 'feed-window:close', 'feed:history', 'feed:open', 'gpu:info',
-  'health:check', 'health:get', 'houserule:pause', 'houserule:resume', 'houserule:start', 'houserule:stop', 'houserule:wrap-up-brainstorm',
+  'health:check', 'health:get', 'health:status', 'health:fix', 'houserule:pause', 'houserule:resume', 'houserule:start', 'houserule:stop', 'houserule:wrap-up-brainstorm',
   'image:configure', 'image:generate', 'image:status', 'lockers:attach', 'lockers:list', 'lockers:open', 'lockers:read', 'lockers:status',
   'logins:delete', 'logins:fill', 'logins:list', 'logins:save', 'logs:download-all', 'logs:extract-all', 'logs:extract-options', 'logs:extract-preview', 'logs:tags',
   'manager:approve', 'manager:configure-provider', 'manager:get-state', 'manager:pause', 'manager:reject', 'manager:resume', 'manager:start-task',
@@ -117,6 +117,7 @@ const IPC_INVENTORY = [
 const EVENTS = {
   'self-repair': 'watcher: "an AI broke / was fixed" notices', 'manager-log': 'watcher: "an image finished" notices',
   'alfred': 'Alfred\'s own panel updates',
+  'health': 'the 🩺 health watch tells Alfred itself (alfred.notice) — Alfred reads health.status',
   'akowe-activity': 'UI live update (Akọwe link feed) — book runs are watched by polling Akọwe', 'chatgpt-image': 'UI live update (ChatGPT is drawing / done — Alfred reads images.chatgptStatus)', 'akowe-linktest-progress': 'UI live update', 'akowe-server': 'UI live update',
   'akowe-tab-show': 'UI live update', 'brigade-progress': 'UI live update', 'capability-test-step': 'UI live update', 'capture': 'UI live update (replies → read_latest_reply)',
   'featuretest-progress': 'UI live update', 'houserule-state': 'UI live update', 'ledger-entry': 'UI live update', 'locker-changed': 'UI live update', 'log': 'UI live update',
