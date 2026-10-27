@@ -86,10 +86,11 @@ def _chapter_item(outline: dict, chapter_id: str) -> dict | None:
     return None
 
 
-def _forge_details(store, pid, branch, outline, chapter_id, present, cs, texts) -> list:
+def _forge_details(store, pid, branch, outline, chapter_id, present, cs, texts, scenes_on: bool = True) -> list:
     """🗂 B5: the Character Forge letters each present character needs here — E always, A on their first appearance
-    (no earlier outline chapter mentions them), F / M when the chapter's plan reads like a fight / powers. Only
-    accepted dossier fields; the voice card and sheet parts (V, P) are already in voice_cards. Never raises."""
+    (no earlier outline chapter or its scene cards mention them), F / M when the chapter's plan reads like a fight /
+    powers. Only accepted dossier fields; the voice card and sheet parts (V, P) are already in voice_cards. Never
+    raises."""
     try:
         from . import forge  # noqa: PLC0415
         from .book_path import BookPath  # noqa: PLC0415
@@ -101,7 +102,11 @@ def _forge_details(store, pid, branch, outline, chapter_id, present, cs, texts) 
             facts = [f for f in it.get("facts") or [] if isinstance(f, dict)]
             t = [str(it.get("summary") or "")] + [str(f.get("value")) for f in facts if isinstance(f.get("value"), str)]
             ids = [f.get("subject_id") for f in facts] + [f.get("value") for f in facts if isinstance(f.get("value"), str)]
-            seen |= {c["record_id"] for c in chars_mod.present_in(cs, *t, ids=ids)}
+            entry = scenes_mod.get_entry(store, pid, branch, outline["record_id"], cid)
+            cards = scenes_mod.brief_cards(entry) if scenes_on and scenes_mod.usable(entry, outline) else []
+            names = [n for c in cards for n in (c.get("characters") or [])] + \
+                [g.get("character") for c in cards for g in (c.get("goals") or [])]
+            seen |= {c["record_id"] for c in chars_mod.present_in(cs, *t, *[n for n in names if n], ids=ids)}
         letters = {c["record_id"]: forge.letters_for(texts, c["record_id"] not in seen) for c in present}
         return forge.chapter_brief(store, pid, branch, present, letters)
     except Exception:  # noqa: BLE001 - a brief is best effort
@@ -162,8 +167,8 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str) -
                 break
         brief = {"pov": _pov_view(pov) if pov else None, "voice_cards": vb["cards"], "other_voices": vb["others"],
                  "scene_cards": cards, "planned_details": planned}
-        details = _forge_details(store, pid, branch, outline, chapter_id, present, cs, texts) if flags["voices"] \
-            else []
+        details = _forge_details(store, pid, branch, outline, chapter_id, present, cs, texts, flags["scenes"]) \
+            if flags["voices"] else []
         if details:  # 🗂 B5: approved dossier fields with only the letters this chapter needs (≤ 2 500 chars)
             brief["character_details"] = details
         extra = _section4(store, pid, branch, outline, chapter_id, cards, texts)
