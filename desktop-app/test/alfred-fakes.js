@@ -118,6 +118,11 @@ async function fakeAkowe(token) {
     if (p === `${B}/cover` && m === 'GET') return send(res, 200, st.cover);
     if (p === `${B}/cover` && m === 'PUT') { Object.assign(st.cover.design, body || {}); if (body && body.print) Object.assign(st.cover.design.print, body.print); return send(res, 200, st.cover); }
     if (p === `${B}/cover/art` && m === 'POST') return send(res, 202, { job_id: 'job-cover' });
+    // other dossier kinds + the manuscript check (Akọwe docs/CHARACTER_FORGE.md)
+    if (m === 'GET' && p === `${B}/forge/places`) return send(res, 200, { places: [{ record_id: 'FK-p1', name: 'Gullhaven', code: 'PL-001', readiness: 'draft' }], candidates: [{ source_id: 'A04-x', name: 'The Lighthouse', from: 'place record' }] });
+    if (m === 'POST' && p === `${B}/forge/places`) return send(res, 201, { record_id: 'FK-p2', created: true, dossier: { code: 'PL-002', name: (body && body.name) || 'The Lighthouse' }, message: 'Started PL-002.' });
+    if (/\/forge\/(characters|places)\/[^/]+\/check$/.test(p)) { st.forgeCalls.push({ kind: 'check', m, body }); return m === 'POST' ? send(res, 202, { job_id: 'job-check' }) : send(res, 200, { findings: [{ finding_id: 'f1', field: 'eyes', chapter: 'ch2', quote: 'her blue eyes', what: 'the dossier says grey' }], counts: { open: 1 } }); }
+    if (/\/forge\/(characters|places)\/[^/]+\/check\/[^/]+$/.test(p) && m === 'PUT') { st.forgeCalls.push({ kind: 'verdict', body }); return send(res, 200, { ok: true }); }
     const D = st.dossier;
     if (m === 'GET' && p === `${B}/forge/characters`) return send(res, 200, { characters: [{ record_id: D.record_id, name: D.name, kind: 'character', code: D.code, revision: D.revision, readiness: D.readiness, has_portrait: !!D.art.portrait, views_done: Object.keys(D.art.views).length }] });
     mm = /^\/api\/projects\/proj-1\/branches\/main\/forge\/characters\/([^/]+)(?:\/(forge|approve|art))?$/.exec(p);

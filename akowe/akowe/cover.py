@@ -81,7 +81,7 @@ def resolved_texts(store, pid: str, design: dict) -> dict:
     profile's blurb and author bio."""
     prof = _profile(store, pid)
     tx = dict(design.get("texts") or {})
-    title = (tx.get("title") or "").strip() or prof.get("title") or (store.project(pid) or {}).get("name") or ""
+    title = (tx.get("title") or "").strip() or prof.get("title") or dict(store.project(pid) or {}).get("name") or ""
     author = (tx.get("author") or "").strip() or prof.get("author") or ""
     out = {k: (tx.get(k) or "").strip() for k in TEXT_MAX}
     out.update(title=title, author=author, blurb=prof.get("blurb") or "", author_bio=prof.get("author_bio") or "")

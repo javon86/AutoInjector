@@ -168,12 +168,16 @@ const AKOWE_API_USED = {
   'PUT /api/projects/:pid/branches/main/review/world/texture': 'add_world_detail', 'POST /api/projects/:pid/branches/main/review/fix': 'rewrite_chapter',
   'POST /api/projects/:pid/branches/main/report': 'make_book_report', 'POST /api/projects/:pid/branches/main/save': 'save_book',
   'POST /api/projects/:pid/branches/main/journal/note': '(every book action → the journal)',
-  'GET /api/projects/:pid/branches/main/forge/characters': 'character_dossier (list) and every forge tool (find the character)',
-  'GET /api/projects/:pid/branches/main/forge/characters/:rid': 'character_dossier, edit_dossier',
-  'PUT /api/projects/:pid/branches/main/forge/characters/:rid': 'edit_dossier',
-  'POST /api/projects/:pid/branches/main/forge/characters/:rid/forge': 'forge_character',
-  'POST /api/projects/:pid/branches/main/forge/characters/:rid/approve': 'approve_dossier',
-  'POST /api/projects/:pid/branches/main/forge/characters/:rid/art': 'make_character_art',
+  'GET /api/projects/:pid/branches/main/forge/:kind': 'character_dossier (list) and every forge tool (find the character)',
+  'GET /api/projects/:pid/branches/main/forge/:kind/:rid': 'character_dossier, edit_dossier',
+  'PUT /api/projects/:pid/branches/main/forge/:kind/:rid': 'edit_dossier',
+  'POST /api/projects/:pid/branches/main/forge/:kind/:rid/forge': 'forge_character',
+  'POST /api/projects/:pid/branches/main/forge/:kind/:rid/approve': 'approve_dossier',
+  'POST /api/projects/:pid/branches/main/forge/:kind/:rid/art': 'make_character_art',
+  'POST /api/projects/:pid/branches/main/forge/:kind': 'create_dossier',
+  'POST /api/projects/:pid/branches/main/forge/:kind/:rid/check': 'check_dossier (run)',
+  'GET /api/projects/:pid/branches/main/forge/:kind/:rid/check': 'check_dossier (results)',
+  'PUT /api/projects/:pid/branches/main/forge/:kind/:rid/check/:finding': 'check_dossier (verdict)',
   'GET /api/projects/:pid/branches/main/pictures': 'book_pictures, illustrate',
   'GET /api/projects/:pid/branches/main/cover': 'book_cover',
   'PUT /api/projects/:pid/branches/main/cover': 'design_cover, make_cover_art (lock / note)',
@@ -235,7 +239,7 @@ async function main() {
   assert(require('../video-api').OPS.every((o) => typeof o.changes === 'boolean' && o.params && o.params.type === 'object'), '🎬 every video-api operation has a JSON schema and a changes flag');
   sameSet('🎨 Images module (sd-api) methods', new Set(alfredMain.sdMethodsOf ? (await alfredMain.sdMethodsOf(shape)).map((m) => m.method) : []), new Set(SD_API_METHODS));
   const akoweUsed = new Set();
-  for (const m of read('alfred-tools.js').matchAll(/ctx\.akowe\('([A-Z]+)', `([^`]+)`/g)) akoweUsed.add(`${m[1]} ${m[2].replace(/\$\{enc\(b\.pid\)\}/g, ':pid').replace(/\$\{enc\(rr\.runId\)\}\/\$\{verb\}/g, ':run/:verb').replace(/\$\{base\}\/\$\{enc\(c\.record_id\)\}/, '/api/projects/:pid/branches/main/review/characters/:rid').replace(/\$\{enc\(r\.pid\)\}/g, ':pid').replace(/\$\{enc\(r\.d\.record_id\)\}/g, ':rid').replace(/\$\{enc\(b\.pid\)\}/g, ':pid').replace(/\$\{base\}\//, '/api/projects/:pid/branches/main/pictures/').replace(/\$\{url\}/, '/api/projects/:pid/branches/main/pictures/:pic')}`);
+  for (const m of read('alfred-tools.js').matchAll(/ctx\.akowe\('([A-Z]+)', `([^`]+)`/g)) akoweUsed.add(`${m[1]} ${m[2].replace(/\$\{enc\(b\.pid\)\}/g, ':pid').replace(/\$\{enc\(rr\.runId\)\}\/\$\{verb\}/g, ':run/:verb').replace(/\$\{base\}\/\$\{enc\(c\.record_id\)\}/, '/api/projects/:pid/branches/main/review/characters/:rid').replace(/\$\{enc\(r\.pid\)\}/g, ':pid').replace(/\$\{enc\(r\.d\.record_id\)\}/g, ':rid').replace(/\$\{enc\(b\.pid\)\}/g, ':pid').replace(/\$\{base\}\//, '/api/projects/:pid/branches/main/pictures/').replace(/\$\{url\}/, '/api/projects/:pid/branches/main/pictures/:pic').replace(/\$\{(r\.kp|kp|a\.kind)\}/g, ':kind').replace(/\$\{enc\(a\.finding_id\)\}/g, ':finding')}`);
   for (const m of read('alfred-tools.js').matchAll(/ctx\.akowe\('([A-Z]+)', '([^']+)'/g)) akoweUsed.add(`${m[1]} ${m[2]}`);
   akoweUsed.add('GET /api/projects/:pid/branches/main/review/characters'); // via const base
   akoweUsed.add('POST /api/projects/:pid/branches/main/journal/note'); // alfred-main.js journal()
@@ -657,6 +661,8 @@ async function main() {
       ['forge_character', { character: 'Mara Vell' }, true, () => hit('POST', `${B}/forge/characters/rec-mara/forge`)],
       ['edit_dossier', { character: 'Mara Vell', fields: { goals: 'Keep the lamp lit.' } }, true, () => hit('PUT', `${B}/forge/characters/rec-mara`)],
       ['approve_dossier', { character: 'Mara Vell', fields: ['traits'] }, true, () => ak.requests.some((x) => x.path === `${B}/forge/characters/rec-mara/approve` && x.body.fields[0] === 'traits')],
+      ['create_dossier', { kind: 'places', from: 'A04-x' }, true, () => ak.requests.some((x) => x.method === 'POST' && x.path === `${B}/forge/places` && x.body.from === 'A04-x')],
+      ['check_dossier', { character: 'Mara Vell', action: 'run' }, true, () => ak.requests.some((x) => x.method === 'POST' && x.path === `${B}/forge/characters/rec-mara/check`)],
       ['book_cover', {}, false, () => hit('GET', `${B}/cover`)],
       ['design_cover', { template: 'thriller', texts: { tagline: 'Every light hides a debt.' }, print: { trim: '5.5x8.5', paper: 'white' } }, true, () => ak.requests.some((x) => x.method === 'PUT' && x.path === `${B}/cover` && x.body.template === 'thriller' && x.body.print.trim === '5.5x8.5')],
       ['make_cover_art', { engine: 'sd', upscale: 2, character: 'Mara Vell', note: 'the lighthouse in a storm' }, true, () => ak.requests.some((x) => x.path === `${B}/cover/art` && x.body.upscale === 2) && ak.requests.some((x) => x.method === 'PUT' && x.path === `${B}/cover` && x.body.character_lock === 'Mara Vell')],

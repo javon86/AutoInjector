@@ -608,3 +608,14 @@ def test_rendered_png_samples(tmp_path):
     img = pdfium.PdfDocument(pdf)[0].render(scale=0.4).to_pil()
     assert abs(img.size[0] - cx.EBOOK_PT[0] * 0.4) <= 1 and abs(img.size[1] - cx.EBOOK_PT[1] * 0.4) <= 1
     assert isinstance(img, Image.Image)
+
+
+def test_cover_get_works_for_a_book_without_any_title(tmp_path):
+    """Regression (found by the cross-program check): GET /cover on a book with no profile title fell back to the
+    project row, a sqlite3.Row without .get -> INTERNAL_ERROR."""
+    from akowe.server import App
+    from akowe import cover
+    app = App(str(tmp_path / "d"))
+    pid = app.create_project(app.store.query_one("SELECT principal_id FROM principals")["principal_id"], {"name": "Untitled"})["project_id"]
+    out = cover.public(app, pid, "main")
+    assert out["texts"]["title"] in ("Untitled", "")

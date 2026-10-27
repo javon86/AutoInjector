@@ -329,19 +329,29 @@ def({
 // ---- 🗂 Character Forge dossiers (Akọwe; the dark "Moki Vey" look) --------------------------------------
 const FORGE_VIEWS = ['front', 'three_quarter_front', 'side', 'three_quarter_back', 'back', 'idle', 'draw', 'attack', 'dash', 'defend'];
 const IMAGE_ENGINES = ['auto', 'sd', 'chatgpt'];
-/** The book + the character's dossier entry (by name or record id). */
+// Dossier kinds: characters (CH-), items (AR-), places (PL-), magic systems (MG-). A code picks its own kind.
+const FORGE_KINDS = ['characters', 'items', 'places', 'magic'];
+const KIND_WORD = { characters: 'character', items: 'item', places: 'place', magic: 'magic system' };
+const KIND_OF_CODE = { CH: 'characters', AR: 'items', PL: 'places', MG: 'magic' };
+const KIND_ARG = { type: 'string', enum: FORGE_KINDS, description: 'characters (default), items, places or magic (magic systems); a code like AR-001 picks its kind' };
+function kindOf(a) {
+  const m = /^(CH|AR|PL|MG)-\d+$/i.exec(String((a && (a.character || a.name)) || '').trim());
+  return m ? KIND_OF_CODE[m[1].toUpperCase()] : (a && a.kind) || 'characters';
+}
+/** The book + the dossier entry (by name, record id or code) of one kind. -> { pid, kp (path part), list, d } */
 async function resolveDossier(ctx, a) {
   const b = await resolveBook(ctx, a);
   if (!b.ok) return b;
-  const list = await ctx.akowe('GET', `/api/projects/${enc(b.pid)}/branches/main/forge/characters`);
+  const kp = kindOf(a); const word = KIND_WORD[kp] || 'character';
+  const list = await ctx.akowe('GET', `/api/projects/${enc(b.pid)}/branches/main/forge/${kp}`);
   if (!okStatus(list)) return akoweError(list);
-  const all = (list.json && (list.json.characters || list.json.dossiers || (Array.isArray(list.json) ? list.json : null))) || [];
-  if (!a.character) return { ok: true, pid: b.pid, list: all };
+  const all = (list.json && (list.json[kp] || list.json.characters || list.json.dossiers || (Array.isArray(list.json) ? list.json : null))) || [];
+  if (!a.character) return { ok: true, pid: b.pid, kp, list: all, candidates: (list.json && list.json.candidates) || [] };
   const want = String(a.character).trim().toLowerCase();
   const d = all.find((x) => x.record_id === a.character || String(x.code || '').toLowerCase() === want)
     || all.find((x) => String(x.name || '').toLowerCase() === want) || all.find((x) => String(x.name || '').toLowerCase().includes(want));
-  if (!d) return { ok: false, error: 'NO_CHARACTER', message: `I couldn't find a character called ${q(a.character)}. Characters: ${all.map((x) => x.name).join(', ') || 'none yet'}.` };
-  return { ok: true, pid: b.pid, list: all, d };
+  if (!d) return { ok: false, error: kp === 'characters' ? 'NO_CHARACTER' : 'NO_DOSSIER', message: `I couldn't find a ${word} called ${q(a.character)}. ${word[0].toUpperCase()}${word.slice(1)}s: ${all.map((x) => x.name).join(', ') || 'none yet'}.` };
+  return { ok: true, pid: b.pid, kp, list: all, d };
 }
 function dossierBrief(j) {
   if (!j) return null;
@@ -360,6 +370,7 @@ def({
   description: 'Read Character Forge dossiers (deep character profiles with portrait + ten-view art): without "character" the list; with it that dossier\'s state (filled / proposed fields per section, readiness, which art exists). With "section" also that section\'s text.',
   args: { type: 'object', properties: {
     project_id: { type: 'string', maxLength: 80 },
+    kind: KIND_ARG,
     character: { type: 'string', maxLength: 120, description: 'Name, record id or code (CH-001)' },
     section: { type: 'string', maxLength: 60, description: 'Optional: a section number or title to read in full' },
   }, additionalProperties: false },
@@ -367,7 +378,7 @@ def({
     const r = await resolveDossier(ctx, a);
     if (!r.ok) return r;
     if (!r.d) return { ok: true, message: `${r.list.length} dossier(s).`, data: { project_id: r.pid, dossiers: r.list.slice(0, 40).map((x) => ({ name: x.name, code: x.code, readiness: x.readiness, has_portrait: !!x.has_portrait, views_done: x.views_done })) } };
-    const g = await ctx.akowe('GET', `/api/projects/${enc(r.pid)}/branches/main/forge/characters/${enc(r.d.record_id)}`);
+    const g = await ctx.akowe('GET', `/api/projects/${enc(r.pid)}/branches/main/forge/${r.kp}/${enc(r.d.record_id)}`);
     if (!okStatus(g)) return akoweError(g);
     const data = dossierBrief(g.json);
     if (a.section) {
@@ -384,13 +395,14 @@ def({
   description: 'Fill a character\'s empty dossier fields with AI proposals (appearance, inner life, voice, fighting, powers, skills, backstory, storyline, continuity…). Supplied and protected text is never changed; everything new is a PROPOSAL the author approves. Runs in the background.',
   args: { type: 'object', required: ['character'], properties: {
     project_id: { type: 'string', maxLength: 80 },
+    kind: KIND_ARG,
     character: { type: 'string', minLength: 1, maxLength: 120 },
   }, additionalProperties: false },
   describe: (a) => `Let the book's AI fill ${q(a.character)}'s empty dossier fields as proposals (nothing you wrote or protected changes; you approve each proposal).`,
   async run(a, ctx) {
     const r = await resolveDossier(ctx, a);
     if (!r.ok) return r;
-    const p = await ctx.akowe('POST', `/api/projects/${enc(r.pid)}/branches/main/forge/characters/${enc(r.d.record_id)}/forge`, {});
+    const p = await ctx.akowe('POST', `/api/projects/${enc(r.pid)}/branches/main/forge/${r.kp}/${enc(r.d.record_id)}/forge`, {});
     if (!okStatus(p)) return akoweError(p);
     return { ok: true, message: `Inventing the rest of ${r.d.name}'s dossier in the background. The new details arrive as proposals for you to approve.`, data: { job_id: p.json && p.json.job_id, project_id: r.pid } };
   },
@@ -400,6 +412,7 @@ def({
   description: 'Approve proposed dossier fields (all, or the listed field keys). Approved details become part of the character.',
   args: { type: 'object', required: ['character'], properties: {
     project_id: { type: 'string', maxLength: 80 },
+    kind: KIND_ARG,
     character: { type: 'string', minLength: 1, maxLength: 120 },
     fields: { type: 'array', maxItems: 120, items: { type: 'string', maxLength: 60 }, description: 'Field keys; leave out to approve every proposal' },
   }, additionalProperties: false },
@@ -407,7 +420,7 @@ def({
   async run(a, ctx) {
     const r = await resolveDossier(ctx, a);
     if (!r.ok) return r;
-    const p = await ctx.akowe('POST', `/api/projects/${enc(r.pid)}/branches/main/forge/characters/${enc(r.d.record_id)}/approve`, a.fields && a.fields.length ? { fields: a.fields } : { all: true });
+    const p = await ctx.akowe('POST', `/api/projects/${enc(r.pid)}/branches/main/forge/${r.kp}/${enc(r.d.record_id)}/approve`, a.fields && a.fields.length ? { fields: a.fields } : { all: true });
     if (!okStatus(p)) return akoweError(p);
     return { ok: true, message: clip((p.json && p.json.message) || 'Approved.', 200), data: { readiness: p.json && p.json.readiness, revision: p.json && p.json.revision } };
   },
@@ -417,6 +430,7 @@ def({
   description: 'Write dossier fields yourself (the author\'s words, status "supplied"). fields = { "<field_key>": "text" } — keys from character_dossier with "section".',
   args: { type: 'object', required: ['character', 'fields'], properties: {
     project_id: { type: 'string', maxLength: 80 },
+    kind: KIND_ARG,
     character: { type: 'string', minLength: 1, maxLength: 120 },
     fields: { type: 'object', description: 'field_key -> new text (max 1200 characters each)' },
     protect: { type: 'boolean', description: 'Also lock these fields so "invent the rest" never changes them' },
@@ -431,14 +445,14 @@ def({
   async run(a, ctx) {
     const r = await resolveDossier(ctx, a);
     if (!r.ok) return r;
-    const g = await ctx.akowe('GET', `/api/projects/${enc(r.pid)}/branches/main/forge/characters/${enc(r.d.record_id)}`);
+    const g = await ctx.akowe('GET', `/api/projects/${enc(r.pid)}/branches/main/forge/${r.kp}/${enc(r.d.record_id)}`);
     if (!okStatus(g)) return akoweError(g);
     const where = {}; for (const s of (g.json && g.json.sections) || []) for (const f of s.fields || []) where[f.key] = s.key;
     const unknown = Object.keys(a.fields).filter((k) => !where[k]);
     if (unknown.length) return { ok: false, error: 'UNKNOWN_FIELD', message: `The dossier has no field ${unknown.map(q).join(', ')}. Ask character_dossier with a section to see the keys.` };
     const sections = {};
     for (const [k, text] of Object.entries(a.fields)) { sections[where[k]] = sections[where[k]] || {}; sections[where[k]][k] = Object.assign({ text }, a.protect ? { protected: true } : {}); }
-    const p = await ctx.akowe('PUT', `/api/projects/${enc(r.pid)}/branches/main/forge/characters/${enc(r.d.record_id)}`, { sections });
+    const p = await ctx.akowe('PUT', `/api/projects/${enc(r.pid)}/branches/main/forge/${r.kp}/${enc(r.d.record_id)}`, { sections });
     if (!okStatus(p)) return akoweError(p);
     return { ok: true, message: `Saved ${Object.keys(a.fields).length} field(s) on ${r.d.name}'s dossier.` };
   },
@@ -448,10 +462,11 @@ def({
   description: 'Make a character\'s dossier art: the portrait, a short motion clip (what="clip": the portrait brought to life with the 🎬 Video module), any of the ten full-body reference views (front, three_quarter_front, side, three_quarter_back, back, idle, draw, attack, dash, defend), or one turnaround sheet. engine: "sd" = Stable Diffusion (uses the character lock), "chatgpt" = ChatGPT draws it in its pane, "auto" = SD when connected, else ChatGPT. Runs in the background; pictures are saved into the book.',
   args: { type: 'object', required: ['character', 'what'], properties: {
     project_id: { type: 'string', maxLength: 80 },
+    kind: KIND_ARG,
     character: { type: 'string', minLength: 1, maxLength: 120 },
-    what: { type: 'string', enum: ['portrait', 'views', 'sheet', 'clip'] },
+    what: { type: 'string', enum: ['portrait', 'views', 'sheet', 'clip', 'hero'], description: 'Characters: portrait / views / sheet / clip. Items, places, magic: hero (item portrait / establishing shot / sigil) or views' },
     engine: { type: 'string', enum: IMAGE_ENGINES },
-    views: { type: 'array', maxItems: 10, items: { type: 'string', enum: FORGE_VIEWS }, description: 'Only with what="views": which ones (default: the missing ones)' },
+    views: { type: 'array', maxItems: 10, items: { type: 'string', maxLength: 40 }, description: 'Only with what="views": which ones (default: the missing ones). Characters: front … defend; items: front, side, back, detail; places: day, night, interior; magic: in_use' },
   }, additionalProperties: false },
   describe: (a) => {
     const eng = { sd: 'Stable Diffusion', chatgpt: 'ChatGPT', auto: 'Stable Diffusion if connected, else ChatGPT' }[a.engine || 'auto'];
@@ -461,13 +476,71 @@ def({
   async run(a, ctx) {
     const r = await resolveDossier(ctx, a);
     if (!r.ok) return r;
-    const body = { what: a.what, engine: a.engine || 'auto' };
+    if (r.kp !== 'characters' && ['sheet', 'clip'].includes(a.what)) return { ok: false, error: 'NOT_FOR_KIND', message: `A ${a.what} is only made for characters. For ${KIND_WORD[r.kp]}s: hero (the main picture) or views.` };
+    if (r.kp === 'characters' && a.what === 'hero') a.what = 'portrait';
+    if (r.kp === 'characters' && a.views && a.views.some((v) => !FORGE_VIEWS.includes(v))) return { ok: false, error: 'BAD_VIEW', message: `Character views are: ${FORGE_VIEWS.join(', ')}.` };
+    const body = { what: r.kp !== 'characters' && a.what === 'portrait' ? 'hero' : a.what, engine: a.engine || 'auto' };
     if (a.what === 'views' && a.views && a.views.length) body.views = a.views;
-    const p = await ctx.akowe('POST', `/api/projects/${enc(r.pid)}/branches/main/forge/characters/${enc(r.d.record_id)}/art`, body);
+    const p = await ctx.akowe('POST', `/api/projects/${enc(r.pid)}/branches/main/forge/${r.kp}/${enc(r.d.record_id)}/art`, body);
     if (!okStatus(p)) return akoweError(p);
     return { ok: true, message: `Making ${a.what === 'views' ? 'the reference views' : `the ${a.what}`} for ${r.d.name} in the background (${a.what === 'clip' ? 'a video takes a few minutes — watch the 🎬 Video tab' : body.engine === 'chatgpt' ? 'ChatGPT takes about a minute per picture' : 'watch the 🎨 Images tab'}).`, data: { job_id: p.json && p.json.job_id, project_id: r.pid } };
   },
 });
+def({
+  name: 'create_dossier', title: 'Character Forge: start a dossier', group: 'books', changes: true, book: true,
+  description: 'Start a dossier for an item, place or magic system (or a character) — by name, or from a record the book already has (from = a candidate source_id; see character_dossier with kind). Then forge_character fills it, make_character_art draws it.',
+  args: { type: 'object', required: ['kind'], properties: {
+    project_id: { type: 'string', maxLength: 80 }, kind: KIND_ARG,
+    name: { type: 'string', maxLength: 120 }, from: { type: 'string', maxLength: 80, description: 'A candidate source_id (a place / artifact / power record of the book)' },
+    aliases: { type: 'array', maxItems: 8, items: { type: 'string', maxLength: 80 } },
+  }, additionalProperties: false },
+  async check(a) { return a.name || a.from ? { ok: true } : { ok: false, error: 'give a name, or from = a candidate source_id' }; },
+  describe: (a) => `Start a ${KIND_WORD[a.kind] || 'character'} dossier${a.name ? ` for ${q(a.name)}` : ''}${a.from ? ` from the book's record ${q(a.from)}` : ''}.`,
+  async run(a, ctx) {
+    const b = await resolveBook(ctx, a);
+    if (!b.ok) return b;
+    const body = {};
+    for (const k of ['name', 'from', 'aliases']) if (a[k] !== undefined) body[k] = a[k];
+    const r = await ctx.akowe('POST', `/api/projects/${enc(b.pid)}/branches/main/forge/${a.kind}`, body);
+    if (!okStatus(r)) return akoweError(r);
+    const d = (r.json && r.json.dossier) || {};
+    return { ok: true, message: clip((r.json && r.json.message) || `${r.json && r.json.created === false ? 'Already there' : 'Started'}: ${d.code || ''} ${d.name || a.name || ''}.`, 200), data: { record_id: r.json && r.json.record_id, code: d.code, created: r.json && r.json.created } };
+  },
+});
+def({
+  name: 'check_dossier', title: 'Character Forge: check a dossier against the book', group: 'books', book: true,
+  description: 'Compare a dossier\'s approved facts with the written chapters (ages, colours, heights, years, stated limits, who holds an item; plus an AI pass for the fuzzy parts). action "run" starts the check (background), "results" lists the findings, "verdict" marks one: fix | fine | change_dossier (makes a proposal you approve) | null.',
+  args: { type: 'object', required: ['character'], properties: {
+    project_id: { type: 'string', maxLength: 80 }, kind: KIND_ARG,
+    character: { type: 'string', minLength: 1, maxLength: 120, description: 'Name, record id or code (CH-/AR-/PL-/MG-001)' },
+    action: { type: 'string', enum: ['run', 'results', 'verdict'] },
+    ai: { type: 'boolean', description: 'run: also the AI pass (default true)' },
+    finding_id: { type: 'string', maxLength: 80 }, verdict: { type: ['string', 'null'], enum: ['fix', 'fine', 'change_dossier', null] },
+    text: { type: 'string', maxLength: 1200, description: 'verdict change_dossier: your own wording for the proposal' },
+  }, additionalProperties: false },
+  dynamicChanges: async (a) => (a.action || 'results') !== 'results',
+  async check(a) { return (a.action || 'results') === 'verdict' && (!a.finding_id || a.verdict === undefined) ? { ok: false, error: 'verdict needs finding_id and verdict' } : { ok: true }; },
+  describe: (a) => ((a.action || 'results') === 'run' ? `Check ${q(a.character)}'s dossier against the written chapters (in the background).` : `Mark finding ${q(a.finding_id)} as ${a.verdict === 'change_dossier' ? '"change the dossier" (a proposal you approve)' : a.verdict || 'not decided'}.`),
+  async run(a, ctx) {
+    const r = await resolveDossier(ctx, a);
+    if (!r.ok) return r;
+    const act = a.action || 'results';
+    if (act === 'run') {
+      const p = await ctx.akowe('POST', `/api/projects/${enc(r.pid)}/branches/main/forge/${r.kp}/${enc(r.d.record_id)}/check`, a.ai === false ? { ai: false } : {});
+      return okStatus(p) ? { ok: true, message: `Checking ${r.d.name} against the book in the background.`, data: { job_id: p.json && p.json.job_id } } : akoweError(p);
+    }
+    if (act === 'verdict') {
+      const p = await ctx.akowe('PUT', `/api/projects/${enc(r.pid)}/branches/main/forge/${r.kp}/${enc(r.d.record_id)}/check/${enc(a.finding_id)}`, Object.assign({ verdict: a.verdict }, a.text ? { text: a.text } : {}));
+      return okStatus(p) ? { ok: true, message: a.verdict === 'change_dossier' ? 'Marked: a proposal to change the dossier is waiting for your approval.' : 'Marked.' } : akoweError(p);
+    }
+    const g = await ctx.akowe('GET', `/api/projects/${enc(r.pid)}/branches/main/forge/${r.kp}/${enc(r.d.record_id)}/check`);
+    if (!okStatus(g)) return akoweError(g);
+    const j = g.json || {};
+    const findings = (j.findings || []).slice(0, 30).map((f) => ({ finding_id: f.finding_id || f.id, field: f.field, chapter: f.chapter || f.chapter_id, quote: clip(f.quote, 240), disagrees: clip(f.what || f.disagrees || f.message, 240), verdict: f.verdict || null }));
+    return { ok: true, message: `${(j.findings || []).length} finding(s) for ${r.d.name}.`, data: { counts: j.counts || null, findings, status: j.status || null } };
+  },
+});
+
 // ---- 🖼 Book pictures: chapter / scene illustrations and the map (Akọwe docs/PICTURES.md) -----------------
 const PIC_ENGINES = ['auto', 'sd', 'chatgpt'];
 async function picturesOf(ctx, a) {
