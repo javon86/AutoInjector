@@ -10,7 +10,7 @@ uses both). Each book gets ONE folder, named once as ``<Book title> (<short id>)
     Chapters/      01 - <title>.md … (the approved text, or the newest draft marked DRAFT)
     Book Bible/    book-bible.json (book_bible.build) + book-bible.md
     Reports/       Book report.md/.pdf (latest), Editor summary.md, Planned to page.md, Continuity.md
-    Character Forge/  <code> <name> - Character Forge dossier.pdf/.json per saved dossier + its pictures (B5)
+    Character Forge/  <code> <name> - Character Forge dossier.pdf/.json per saved dossier + its pictures and motion clip (B5)
     Log/           Book journal.md (journal.py) + run-events.json (runs: steps, states, AI per step, times, problems)
     Progress/      progress.json (book steps, next step, the run's state)
     book.akowe the complete re-importable package (book_package.py)
@@ -94,7 +94,7 @@ Book Bible/    Everything the book is built on: the book profile, ending and sty
                book-bible.md is for reading; book-bible.json is what Akọwe reads back.
 Reports/       The book report (scores, strengths, weaknesses) and the editor's and
                planned-to-page summaries, when they exist.
-Character Forge/  Each character's dossier (PDF to read, JSON for Akọwe) and its pictures.
+Character Forge/  Each character's dossier (PDF to read, JSON for Akọwe), its pictures and motion clip.
 Log/           The book's journal (what happened, step by step, which AI did what) and
                run-events.json (every step of the Make-a-book run). No keys, no prompts.
 Progress/      progress.json: what is done and what comes next (for an unfinished book).
@@ -399,6 +399,16 @@ class SaveService:
                 if pic:
                     ext = "jpg" if pic[:3] == b"\xff\xd8\xff" else "png"
                     files[f"Character Forge/{item['code']} pictures/{slot}.{ext}"] = pic
+            clip = art.get("clip") if isinstance(art.get("clip"), dict) else None
+            if clip:  # 🎬 the motion clip and its poster
+                vid = forge.picture_bytes(store, pid, branch, clip)
+                if vid:
+                    ext = "webm" if forge.sniff_video(vid) == "video/webm" else "mp4"
+                    files[f"Character Forge/{item['code']} pictures/motion clip.{ext}"] = vid
+                pic = forge.picture_bytes(store, pid, branch, clip.get("poster"))
+                if pic:
+                    ext = "jpg" if pic[:3] == b"\xff\xd8\xff" else "png"
+                    files[f"Character Forge/{item['code']} pictures/motion clip poster.{ext}"] = pic
 
     def collect(self, pid: str, branch: str, *, on_phase=None) -> tuple[dict, dict]:
         """{relative path: bytes} for everything that exists now, and info about it (read-only)."""

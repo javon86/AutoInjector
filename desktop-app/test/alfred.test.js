@@ -62,7 +62,7 @@ async function main() {
   assert(new Set(names).size === names.length, `tool names are unique (${names.length} tools)`);
   assert(registry.TOOLS.every((t) => t.name && t.title && t.description && t.args && t.args.type === 'object' && typeof t.changes === 'boolean' && typeof t.run === 'function'), 'every tool has a name, title, plain description, JSON args schema, a "changes things?" flag and an implementation');
   assert(registry.TOOLS.filter((t) => t.changes).every((t) => typeof t.describe === 'function'), 'every tool that changes something says what it will do (the "I will" line)');
-  for (const n of ['image_generator_status', 'start_image_generator', 'stop_image_generator', 'find_models', 'character_locks', 'book_status', 'start_book', 'pause_run', 'resume_run', 'cancel_run', 'edit_profile', 'edit_character', 'add_story_rule', 'add_world_detail', 'rewrite_chapter', 'open_akowe_page', 'make_book_report', 'save_book', 'generate_image', 'list_images', 'video_status', 'generate_video', 'send_to_ai', 'read_latest_reply', 'ai_health', 'run_checkin', 'list_outputs', 'open_output', 'export_logs', 'run_code', 'character_dossier', 'forge_character', 'approve_dossier', 'edit_dossier', 'make_character_art']) assert(!!registry.get(n), `tool ${n} exists`);
+  for (const n of ['image_generator_status', 'start_image_generator', 'stop_image_generator', 'find_models', 'character_locks', 'book_status', 'start_book', 'pause_run', 'resume_run', 'cancel_run', 'edit_profile', 'edit_character', 'add_story_rule', 'add_world_detail', 'rewrite_chapter', 'open_akowe_page', 'make_book_report', 'save_book', 'generate_image', 'list_images', 'video_status', 'generate_video', 'send_to_ai', 'read_latest_reply', 'ai_health', 'run_checkin', 'list_outputs', 'open_output', 'export_logs', 'run_code', 'character_dossier', 'forge_character', 'approve_dossier', 'edit_dossier', 'make_character_art', 'video_call']) assert(!!registry.get(n), `tool ${n} exists`);
   assert(['book_status', 'list_images', 'read_latest_reply', 'ai_health', 'list_outputs', 'open_akowe_page', 'video_status'].every((n) => !registry.get(n).changes), 'status / list / read tools are read-only');
   assert(['start_book', 'edit_profile', 'generate_image', 'send_to_ai', 'run_code', 'export_logs', 'rewrite_chapter'].every((n) => registry.get(n).changes), 'tools that change or create something are flagged');
   assert(registry.get('generate_image').allowAlways && !registry.get('start_book').allowAlways && !registry.get('run_code').allowAlways && !registry.get('send_to_ai').allowAlways, '"always allow" only for harmless ones (generate image yes; start a book, send to an AI, run code no)');
@@ -298,6 +298,43 @@ async function main() {
     const red = await brain.chatWithTools({ endpoint: leak.base, apiKey: KEY, model: 'm', messages: [{ role: 'user', content: 'x' }] });
     assert(red.ok === false && !String(red.detail).includes(KEY) && /REDACTED/.test(red.detail), 'error details from the AI are redacted');
     await llm.close(); await ak.close(); await leak.close();
+  }
+
+  // ------------------------------------------------------------------------------------------
+  console.log('\n== 🎬 video: generate_video / video_call over the Video module ==');
+  {
+    const vcalls = [];
+    const VM = [
+      { method: 'video.status', changes: false, schema: null }, { method: 'video.models', changes: false, schema: null },
+      { method: 'video.generate', changes: true, schema: { type: 'object', properties: { prompt: { type: 'string' }, seconds: { type: 'number', maximum: 10 }, from: { type: 'string' }, characterLock: { type: 'string' }, negativePrompt: { type: 'string' } }, additionalProperties: false } },
+      { method: 'video.animate', changes: true, schema: null }, { method: 'video.install.downloadModel', changes: true, schema: null },
+    ];
+    const ctx = {
+      videoMethods: async () => VM,
+      videoInvoke: async (m, a) => { vcalls.push({ m, a }); if (m === 'video.status') return { ok: true, backend: 'comfy-wan', models: { 'wan22-ti2v-5b': 'installed' } }; if (m === 'video.install.downloadModel') return { ok: false, code: 'VIDEO_MODEL_MISSING', message: 'Not enough disk space.' }; return { ok: true, path: '/out/videos/v-1.mp4', poster: '/out/videos/v-1.png', seconds: a.seconds || 4, model: 'wan22-ti2v-5b', seed: 7 }; },
+    };
+    const queue = [];
+    const llm = await fakeLlm((body) => (lastMsg(body).role === 'tool' ? { content: 'ok' } : queue.shift()));
+    const { a } = make({ llm, ctx });
+    const run = async (tool, args, yes = true) => { queue.push(toolCall(tool, args)); const r = await a.ask(`do ${tool}`); const last = () => JSON.parse(llm.requests.slice(-1)[0].body.messages.slice(-1)[0].content); return r.type === 'confirm' ? (yes ? a.confirm(r.card.id).then(() => ({ card: r.card, res: last() })) : { card: r.card }) : { res: last() }; };
+    let x = await run('video_status', {});
+    assert(!x.card && x.res.data.backend === 'comfy-wan', 'video_status reads the Video module (no card)');
+    x = await run('generate_video', { prompt: 'waves at night', seconds: 5, character: 'Moki Vey' });
+    assert(x.card && /waves at night/.test(x.card.steps[0].text) && vcalls.slice(-1)[0].m === 'video.generate' && vcalls.slice(-1)[0].a.characterLock === 'Moki Vey' && vcalls.slice(-1)[0].a.from === 'alfred' && x.res.data.path === '/out/videos/v-1.mp4', 'generate_video: text → video through the module (lock + seconds passed; asks first)');
+    x = await run('generate_video', { image: '/out/images/moki.png', prompt: 'he breathes' });
+    assert(vcalls.slice(-1)[0].m === 'video.animate' && vcalls.slice(-1)[0].a.image === '/out/images/moki.png' && /Bring the picture/.test(x.card.steps[0].text), 'generate_video with a picture → video.animate');
+    x = await run('generate_video', {});
+    assert(x.res.ok === false && x.res.error === 'BAD_ARGS', 'generate_video needs a prompt, a picture or a character');
+    x = await run('video_call', { method: 'video.models' });
+    assert(!x.card && vcalls.slice(-1)[0].m === 'video.models', 'video_call: a read-only method runs without a card');
+    x = await run('video_call', { method: 'video.generate', args: { prompt: 'x', seconds: 30 } });
+    assert(x.res.ok === false && /seconds must be at most 10/.test(x.res.message), 'video_call: the module\'s own schema is checked before anything runs');
+    x = await run('video_call', { method: 'video.install.downloadModel', args: { id: 'wan22-ti2v-5b' } });
+    assert(x.card && x.res.ok === false && x.res.error === 'VIDEO_MODEL_MISSING' && /disk space/.test(x.res.message), 'video_call: a changing method asks first; a failure comes back as its code + plain message');
+    x = await run('video_call', { method: 'video.nope' });
+    assert(x.res.ok === false && /has no method/.test(x.res.message), 'video_call refuses a method the module does not have');
+    assert(!registry.canAllowAlways(registry.get('video_call'), { method: 'video.generate' }), 'video_call can never be "always allowed"');
+    await llm.close();
   }
 
   // ------------------------------------------------------------------------------------------

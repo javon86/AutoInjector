@@ -80,7 +80,12 @@ your decision stays yours to decide in Akọwe.
 - 🔍 recent images · 🔍 is Stable Diffusion connected / running? · 🔍 search the model & LoRA library ·
   🔍 character locks · ✋ start / stop the Stable Diffusion app AutoInjector knows about
 
-**🎬 Video** — 🔍 status; ✋ make a clip only when a text-to-video backend is set up (usually not yet; he says so).
+**🎬 Video:**
+- 🔍 Status, models, progress and gallery run without a card.
+- ✋ `generate_video` makes a clip from a description, brings a picture to life (`image`), or keeps a character's looks (`character`).
+- ✋ `video_call` reaches every setting of the 🎬 Video module (size, seconds, fps, model, steps, CFG, seed, sampler, scheduler, shift) and the model installs.
+- It uses ComfyUI with Wan; see `docs/VIDEO_API.md`.
+- The Character Forge `make_character_art` with `what:"clip"` makes a dossier's motion study.
 
 **💬 AI panes** — ✋ send a message to ChatGPT / Claude / Gemini / all · 🔍 read the latest reply ·
 🔍 their health · ✋ run the self-repair check-in.

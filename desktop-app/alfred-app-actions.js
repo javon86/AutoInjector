@@ -194,10 +194,13 @@ A('sdlib.remove_folder', 'sdlib:remove-folder', { t: 'Remove a models folder fro
 A('sdlib.collection', 'sdlib:collection', { t: 'Add / rename / delete a library collection', c: true, a: { op: { type: 'string', enum: ['add', 'rename', 'delete'] }, name: text(120), to: opt(120) }, r: ['op', 'name'], ex: { op: 'add', name: 'Faces' } });
 A('sdlib.save_lock', 'sdlib:save-lock', { t: 'Save a character lock', c: true, a: { lock: { type: 'object', required: ['character'], properties: { id: opt(80), character: text(120), book: opt(200), loras: { type: 'array', maxItems: 8, items: { type: 'object', required: ['name'], properties: { name: text(200), weight: { type: 'number' } }, additionalProperties: false } }, triggerWords: { type: 'array', maxItems: 30, items: { type: 'string', maxLength: 80 } }, prompt: opt(2000), negative: opt(2000), checkpoint: opt(200), seed: { type: 'integer' }, width: { type: 'integer', minimum: 64, maximum: 4096 }, height: { type: 'integer', minimum: 64, maximum: 4096 }, notes: opt(2000) }, additionalProperties: false } }, r: ['lock'], ex: { lock: { character: 'Odile', loras: [{ name: 'odile_face', weight: 0.8 }], prompt: 'red hair' } } });
 A('sdlib.delete_lock', 'sdlib:delete-lock', { t: 'Delete a character lock', c: true, a: { id: text(80) }, r: ['id'], ex: { id: 'lock-1' } });
+// ---- 🎬 Video tab extras (generate / animate / models / install go through video_call / video-api) ------------
+A('video.open_folder', 'video:open-folder', { t: 'Open the videos folder', c: true, aa: true });
+A('video.show_file', 'video:show-file', { t: 'Show a video in its folder', c: true, aa: true, a: { path: text(1000) }, r: ['path'], ex: { path: '/out/videos/video-1.mp4' } });
 A('sdlib.check', 'sdlib:check', { t: 'Check LoRAs fit a checkpoint', c: false, a: { loras: { type: 'array', maxItems: 8, items: { type: 'object', required: ['name'], properties: { name: text(200), weight: { type: 'number' } }, additionalProperties: false } }, checkpoint: opt(200) }, ex: { loras: [{ name: 'odile_face' }], checkpoint: 'dreamshaper_8' } });
 
 // ---- 🪟 what the window shows (inside Alfred: no IPC) ---------------------------------------------------------
-A('ui.show_tab', null, { t: 'Show a tab (🤖 AutoInjector, 📖 Akọwe, 🎨 Images)', c: false, local: 'showTab', a: { tab: { type: 'string', enum: ['main', 'akowe', 'images'] } }, r: ['tab'], ex: { tab: 'images' } });
+A('ui.show_tab', null, { t: 'Show a tab (🤖 AutoInjector, 📖 Akọwe, 🎨 Images, 🎬 Video)', c: false, local: 'showTab', a: { tab: { type: 'string', enum: ['main', 'akowe', 'images', 'video'] } }, r: ['tab'], ex: { tab: 'images' } });
 
 /** Channels the AI must not drive — each with the reason. The coverage test checks every channel is
  *  either an ACTIONS entry, a direct Alfred tool (TOOL_CHANNELS), or here. */
@@ -229,6 +232,7 @@ const EXCLUDED = {
   'sd:extras': 'internal: the Images tab\'s one-call bundle (upscalers, ControlNet, ADetailer, styles, scripts, options, workflows); Alfred reads each through sd_call (sd.upscalers, sd.controlnet.*, sd.adetailer.models, sd.styles, sd.scripts, sd.options.get, sd.workflows.list)',
   'sd:capabilities': 'internal: Alfred reads sd-api capabilities() directly when he builds his sd_call method list and schemas (alfred-main.js sdMethodsOf)',
   'akowe-view:tab': 'internal: the tab tells main it is showing (Alfred uses ui.show_tab / open_akowe_page)',
+  'video:capabilities': 'internal: Alfred reads video-api capabilities() directly when he builds his video_call method list and schemas',
 };
 /** IPC channels that a dedicated Alfred tool covers (alfred-tools.js). */
 const TOOL_CHANNELS = {
@@ -250,6 +254,12 @@ const TOOL_CHANNELS = {
   'sd:workflow-save': 'sd_call:sd.workflows.save', 'sd:workflow-delete': 'sd_call:sd.workflows.delete', 'sd:workflow-run': 'sd_call:sd.workflows.run',
   // 🎨 the second engine (ChatGPT) + reference views / sheets: images.generate with engine / purpose / view is the same path as sd:request
   'sd:request': 'sd_call:images.generate', 'sd:chatgpt-status': 'sd_call:images.chatgptStatus', 'sd:chatgpt-cancel': 'sd_call:images.chatgptCancel', 'sd:chatgpt-settings': 'sd_call:images.chatgptSettings',
+  // 🎬 the Video tab → the video module API (video-api.js) through video_call
+  'video:full-status': 'video_call:video.status', 'video:models': 'video_call:video.models', 'video:settings': 'video_call:video.settings',
+  'video:generate-t2v': 'video_call:video.generate', 'video:animate': 'video_call:video.animate', 'video:progress': 'video_call:video.progress',
+  'video:cancel': 'video_call:video.cancel', 'video:gallery': 'video_call:video.gallery', 'video:test': 'video_call:video.test',
+  'video:install-check': 'video_call:video.install.check', 'video:install-model': 'video_call:video.install.downloadModel',
+  'video:install-all': 'video_call:video.install.installAll', 'video:install-cancel': 'video_call:video.install.cancel',
 };
 
 function get(id) { return ACTIONS.find((a) => a.id === id) || null; }

@@ -18,6 +18,14 @@
 //       unknown node types, dangling links, missing uploads), /history, /view,
 //       /queue, /interrupt, /upload/image (multipart), /free. aux: true adds
 //       comfyui_controlnet_aux's AIO_Preprocessor.
+//       🎬 Video (Wan): /object_info also has UNETLoader, CLIPLoader (type wan), Wan22ImageToVideoLatent,
+//       EmptyHunyuanLatentVideo, ModelSamplingSD3, CreateVideo, SaveVideo, SaveWEBM, ImageFromBatch;
+//       a video graph "renders" for videoPolls polls (progress via /queue), then /history lists an
+//       .mp4 (or .webm from SaveWEBM) under the save node and a poster .png under SaveImage; /view
+//       sends a tiny MP4 / WEBM stub. Options: wanModels (file names ComfyUI lists; default every
+//       catalog file), noWan (no video nodes at all — an old ComfyUI), noSaveVideo (only SaveWEBM),
+//       noPosterNodes, videoPolls (default 3), rejectSaveVideo (400 on SaveVideo's inputs → the engine
+//       retries with SaveWEBM). failWith works for video too (e.g. 'torch.OutOfMemoryError: Allocation on device').
 // Each resolves { server, port, base, seen, state, close() }.
 const http = require('http');
 const { openapi: makeOpenapi } = require('./a1111-openapi');
@@ -43,6 +51,14 @@ const A1111_ERRORS = {
   traceback: { error: 'KeyError', detail: '', body: '', errors: "Traceback (most recent call last):\n  File \"modules/processing.py\", line 732, in process_images\nKeyError: 'sd_xl_refiner'" },
 };
 const PNG_B64 = PNG.toString('base64');
+// Tiny stand-ins for a rendered clip: an MP4 that starts with a real ftyp box, and a WEBM (EBML magic).
+const MP4 = Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from('ftypisom', 'latin1'), Buffer.from([0, 0, 2, 0]), Buffer.from('isomiso2', 'latin1'), Buffer.from([0, 0, 0, 8]), Buffer.from('free', 'latin1')]);
+const WEBM = Buffer.concat([Buffer.from([0x1a, 0x45, 0xdf, 0xa3, 0x9f]), Buffer.alloc(31)]);
+const WAN_FILES = {
+  unet: ['wan2.2_ti2v_5B_fp16.safetensors', 'wan2.1_t2v_1.3B_fp16.safetensors'],
+  clip: ['umt5_xxl_fp8_e4m3fn_scaled.safetensors'],
+  vae: ['wan2.2_vae.safetensors', 'wan_2.1_vae.safetensors'],
+};
 
 function send(res, code, body, type) {
   const isBuf = Buffer.isBuffer(body);
@@ -159,12 +175,32 @@ function comfyNodes(CKPTS, LORAS, opts) {
     ControlNetLoader: req({ control_net_name: [['control_v11p_sd15_canny.pth', 'control_v11f1p_sd15_depth.pth'], {}] }), ControlNetApplyAdvanced: req({}),
   };
   if (opts.aux) n.AIO_Preprocessor = req({ image: ['IMAGE'], preprocessor: [['none', 'CannyEdgePreprocessor', 'DepthAnythingPreprocessor', 'OpenposePreprocessor'], {}], resolution: ['INT', {}] });
+  if (!opts.noWan) {
+    const have = opts.wanModels || [...WAN_FILES.unet, ...WAN_FILES.clip, ...WAN_FILES.vae];
+    const pick = (list) => list.filter((x) => have.includes(x));
+    n.UNETLoader = req({ unet_name: [pick(WAN_FILES.unet), {}], weight_dtype: [['default', 'fp8_e4m3fn', 'fp8_e5m2'], {}] });
+    n.CLIPLoader = { input: { required: { clip_name: [pick(WAN_FILES.clip), {}], type: [['stable_diffusion', 'sd3', 'wan', 'hunyuan_video'], {}] }, optional: { device: [['default', 'cpu'], {}] } }, output: ['CLIP'], category: 'x' };
+    n.VAELoader = req({ vae_name: [['vae-ft-mse-840000.safetensors', ...pick(WAN_FILES.vae)], {}] });
+    n.KSampler = req({ sampler_name: [['euler', 'euler_ancestral', 'dpmpp_2m', 'uni_pc'], {}], scheduler: [['normal', 'karras', 'simple'], {}] });
+    n.ModelSamplingSD3 = req({ model: ['MODEL'], shift: ['FLOAT', {}] });
+    n.Wan22ImageToVideoLatent = { input: { required: { vae: ['VAE'], width: ['INT', { step: 32 }], height: ['INT', { step: 32 }], length: ['INT', { step: 4 }], batch_size: ['INT', {}] }, optional: { start_image: ['IMAGE'] } }, output: ['LATENT'], category: 'x' };
+    n.WanImageToVideo = req({});
+    n.EmptyHunyuanLatentVideo = req({ width: ['INT', { step: 16 }], height: ['INT', { step: 16 }], length: ['INT', { step: 4 }], batch_size: ['INT', {}] });
+    n.ImageFromBatch = req({ image: ['IMAGE'], batch_index: ['INT', {}], length: ['INT', {}] });
+    n.SaveWEBM = Object.assign(req({ images: ['IMAGE'], filename_prefix: ['STRING', {}], codec: [['vp9', 'av1'], {}], fps: ['FLOAT', {}], crf: ['FLOAT', {}] }), { output_node: true });
+    if (!opts.noSaveVideo) {
+      n.CreateVideo = req({ images: ['IMAGE'], fps: ['FLOAT', {}] });
+      n.SaveVideo = Object.assign(req({ video: ['VIDEO'], filename_prefix: ['STRING', {}], format: [['auto', 'mp4'], {}], codec: [['auto', 'h264'], {}] }), { output_node: true });
+    }
+    if (opts.noPosterNodes) delete n.ImageFromBatch;
+  }
   return n;
 }
 
+function sdComboList(node, key) { const i = node && node.input ? Object.assign({}, node.input.required || {}, node.input.optional || {}) : {}; const v = i[key]; return Array.isArray(v) && Array.isArray(v[0]) ? v[0] : null; }
 async function fakeComfy(opts = {}) {
   const seen = [];
-  const state = { prompts: {}, polls: 0, interrupted: false, deleted: [], lastGraph: null, uploads: [], freed: null };
+  const state = { prompts: {}, polls: 0, interrupted: false, deleted: [], lastGraph: null, uploads: [], freed: null, videoGraphs: [], views: [] };
   const CKPTS = ['sd15/dreamshaper_8.safetensors', 'juggernautXL_v9.safetensors', 'sdxl_refiner_1.0.safetensors'];
   const LORAS = ['Characters\\odile_face.safetensors', 'ink_style.safetensors'];
   const NODES = comfyNodes(CKPTS, LORAS, opts);
@@ -192,10 +228,17 @@ async function fakeComfy(opts = {}) {
         if (!NODES[n.class_type]) return send(res, 400, { error: { type: 'invalid_prompt', message: `Cannot execute because node ${n.class_type} does not exist.`, details: `Node ID '#${id}'` }, node_errors: {} });
         for (const [k, v] of Object.entries(n.inputs || {})) if (Array.isArray(v) && v.length === 2 && typeof v[0] === 'string' && Number.isInteger(v[1]) && !g[v[0]]) return reject(res, id, n.class_type, 'invalid_link', 'Linked node missing', `${k} -> ${v[0]}`);
         if (n.class_type === 'CheckpointLoaderSimple' && !CKPTS.includes(n.inputs.ckpt_name)) return reject(res, id, 'CheckpointLoaderSimple', 'value_not_in_list', 'Value not in list', `ckpt_name: '${n.inputs.ckpt_name}' not in ${JSON.stringify(CKPTS)}`);
+        for (const [cls, key] of [['UNETLoader', 'unet_name'], ['CLIPLoader', 'clip_name'], ['VAELoader', 'vae_name']]) {
+          const isVideo = Object.values(g).some((x) => x.class_type === 'SaveVideo' || x.class_type === 'SaveWEBM');
+          const list = isVideo && n.class_type === cls ? sdComboList(NODES[cls], key) : null;
+          if (list && !list.includes(n.inputs[key])) return reject(res, id, cls, 'value_not_in_list', 'Value not in list', `${key}: '${n.inputs[key]}' not in ${JSON.stringify(list)}`);
+        }
+        if (n.class_type === 'SaveVideo' && opts.rejectSaveVideo) return reject(res, id, 'SaveVideo', 'required_input_missing', 'Required input is missing', 'format.codec');
         if ((n.class_type === 'LoadImage' || n.class_type === 'LoadImageMask') && n.inputs.image !== 'example.png' && !state.uploads.some((x) => x.name === n.inputs.image)) return reject(res, id, n.class_type, 'custom_validation_failed', 'Invalid image file', `image - Invalid image file: ${n.inputs.image}`);
       }
       const id = `p${Object.keys(state.prompts).length + 1}`;
-      state.prompts[id] = { graph: g, polls: 0 };
+      state.prompts[id] = { graph: g, polls: 0, video: Object.values(g).some((n) => n.class_type === 'SaveVideo' || n.class_type === 'SaveWEBM') };
+      if (state.prompts[id].video) state.videoGraphs.push(g);
       return send(res, 200, { prompt_id: id, number: 0, node_errors: {} });
     }
     if (u.pathname.startsWith('/history/')) {
@@ -205,7 +248,16 @@ async function fakeComfy(opts = {}) {
       p.polls++;
       if (state.interrupted) return send(res, 200, { [id]: { outputs: {}, status: { status_str: 'error', completed: false, messages: [['execution_start', {}], ['execution_interrupted', { prompt_id: id }]] } } });
       if (opts.failWith) return send(res, 200, { [id]: { outputs: {}, status: { status_str: 'error', completed: false, messages: [['execution_error', { node_type: opts.failNode || 'KSampler', exception_type: opts.failType || 'RuntimeError', exception_message: opts.failWith }]] } } });
-      if (opts.slow ? true : p.polls < 2) return send(res, 200, {});
+      if (opts.slow ? true : p.polls < (p.video ? (opts.videoPolls || 3) : 2)) { if (p.video) state.videoStep = Math.min(p.polls, 10); return send(res, 200, {}); }
+      if (p.video) {
+        const outs = {};
+        for (const [nid, n] of Object.entries(p.graph)) {
+          if (n.class_type === 'SaveVideo') outs[nid] = { images: [{ filename: `AutoInjector_00001_.mp4`, subfolder: 'video', type: 'output' }], animated: [true] };
+          if (n.class_type === 'SaveWEBM') outs[nid] = { images: [{ filename: `AutoInjector_00001_.webm`, subfolder: 'video', type: 'output' }], animated: [true] };
+          if (n.class_type === 'SaveImage') outs[nid] = { images: [{ filename: 'AutoInjector-poster_00001_.png', subfolder: 'video', type: 'output' }] };
+        }
+        return send(res, 200, { [id]: { outputs: outs, status: { status_str: 'success', completed: true, messages: [] } } });
+      }
       const nodes = Object.values(p.graph);
       const lat = nodes.find((n) => n.class_type === 'EmptyLatentImage');
       const rep = nodes.find((n) => n.class_type === 'RepeatLatentBatch');
@@ -213,7 +265,7 @@ async function fakeComfy(opts = {}) {
       const outId = (Object.entries(p.graph).find(([, n]) => n.class_type === 'SaveImage') || ['9'])[0];
       return send(res, 200, { [id]: { outputs: { [outId]: { images: Array.from({ length: batch }, (_, i) => ({ filename: `AutoInjector_0000${i + 1}_.png`, subfolder: '', type: 'output' })) } }, status: { status_str: 'success', completed: true, messages: [] } } });
     }
-    if (u.pathname === '/view') return send(res, 200, PNG);
+    if (u.pathname === '/view') { const fn = u.searchParams.get('filename') || ''; state.views.push(fn); return /\.mp4$/.test(fn) ? send(res, 200, MP4, 'video/mp4') : /\.webm$/.test(fn) ? send(res, 200, WEBM, 'video/webm') : send(res, 200, PNG); }
     if (u.pathname === '/queue' && req.method === 'GET') { const ids = Object.keys(state.prompts); return send(res, 200, { queue_running: ids.length && !state.interrupted ? [[0, ids[ids.length - 1], {}, {}, ['9']]] : [], queue_pending: [] }); }
     if (u.pathname === '/queue' && req.method === 'POST') { state.deleted.push(...((body && body.delete) || [])); return send(res, 200, {}); }
     if (u.pathname === '/interrupt') { state.interrupted = true; return send(res, 200, {}); }
@@ -232,4 +284,4 @@ async function fakeOther(opts = {}) {
 }
 async function freePort() { const s = http.createServer(); const p = await listen(s); await new Promise((r) => s.close(r)); return p; }
 
-module.exports = { fakeA1111, fakeComfy, fakeOther, freePort, PNG_B64, PNG, A1111_ERRORS, VAE_MISSING };
+module.exports = { fakeA1111, fakeComfy, fakeOther, freePort, PNG_B64, PNG, MP4, WEBM, WAN_FILES, A1111_ERRORS, VAE_MISSING };
