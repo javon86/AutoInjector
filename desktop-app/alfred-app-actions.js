@@ -141,6 +141,11 @@ A('llm.start_alfred', 'llm:start-alfred', { t: 'Start his AI with what is alread
 A('llm.scan', 'llm:scan', { t: 'Find what is already installed: Ollama, model folders, models, .gguf files from other apps', c: false });
 A('llm.use_store', 'llm:use-store', { t: 'Use an Ollama model folder that already has models (no download)', c: true, a: { dir: text(1000) }, r: ['dir'], ex: { dir: '/home/me/.ollama/models' } });
 A('llm.import_gguf', 'llm:import-gguf', { t: 'Add a .gguf model file another app downloaded into Ollama (no download)', c: true, a: { file: text(1000), name: opt(60) }, r: ['file'], ex: { file: '/home/me/Downloads/model.gguf', name: 'my-model' } });
+A('folders.map', 'folders:map', { t: 'Where everything is kept (one tidy list: "stuff and thing", ComfyUI, models, settings…)', c: false });
+A('folders.open', 'folders:open', { t: 'Open one of the folders in the "where everything is" list', c: true, aa: true, a: { path: text(1000) }, r: ['path'], ex: { path: '/home/me/AutoInjector/stuff and thing' } });
+A('folders.move_comfy', 'folders:move-comfy', { t: 'Move an older ComfyUI (and its models) into "stuff and thing" (the app restarts)', c: true });
+A('content.roots', 'content:roots', { t: 'Where your downloads are kept ("stuff and thing"), and earlier AutoInjector folders that also have downloads', c: false, a: { fresh: { type: 'boolean' } } });
+A('content.use_root', 'content:use-root', { t: 'Keep downloads in another AutoInjector folder (the app restarts)', c: true, a: { root: text(1000) }, r: ['root'], ex: { root: '/home/me/Documents/git/AutoInjector' } });
 A('llm.install_ollama', 'llm:install-ollama', { t: 'Install Ollama', c: true });
 A('llm.start', 'llm:start', { t: 'Start Ollama', c: true, aa: true });
 A('llm.stop', 'llm:stop', { t: 'Stop the app\'s Ollama', c: true, aa: true });

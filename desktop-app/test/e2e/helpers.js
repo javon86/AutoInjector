@@ -14,6 +14,8 @@ catch (_) {
   process.exit(2);
 }
 
+// The app looks around for an earlier copy's "stuff and thing" (content-home.js); e2e runs keep their own.
+process.env.AUTOINJECTOR_CONTENT_SCAN = process.env.AUTOINJECTOR_CONTENT_SCAN || '0';
 const APP_DIR = path.join(__dirname, '..', '..');
 const SHOT_DIR = path.join(__dirname, '__screenshots__');
 

@@ -472,6 +472,13 @@
     #butler-more .butler-more-title { font-weight:600; font-size:12.5px; }
     #butler-more > details.sai-sec { margin:0; width:auto; flex:none; }
     #butler-legacy[hidden] { display:none !important; }
+    .content-others { margin:5px 0; padding:6px 8px; border:1px solid #6b5a2f; border-radius:7px; background:#16130a; font-size:11.5px; }
+    .content-others[hidden] { display:none; }
+    .folders-map-wrap > summary { cursor:pointer; font-size:11.5px; margin:4px 0; }
+    .folders-map .fm-row { display:flex; gap:6px; align-items:baseline; flex-wrap:wrap; font-size:11px; margin:3px 0; }
+    .folders-map .fm-path { font-family:ui-monospace,monospace; opacity:.8; word-break:break-all; }
+    .folders-map .fm-out { color:#f0c46b; }
+    .content-others .co-row { display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin:3px 0; }
     .llm-scan { margin:6px 0; padding:7px 9px; border:1px solid #2f5c3e; border-radius:8px; background:#0b120d; max-height:300px; overflow:auto; }
     .llm-scan-head { display:flex; align-items:center; gap:6px; margin-bottom:4px; }
     .llm-scan-group { margin:6px 0 2px; font-weight:600; font-size:11.5px; }
@@ -1955,6 +1962,10 @@
           <summary>📁 Downloads &amp; creations folder ("stuff and thing")</summary>
           <p style="opacity:.7; font-size:11px; margin:2px 0 5px;">One folder inside AutoInjector holds everything — downloaded models/LoRAs/voice under <b>models/</b>, and everything the app makes (images, videos, books) at the top. Open it and drop files into the matching subfolder; each folder's README says how to point its backend here.</p>
           <div id="models-path" style="font-size:11px; font-family:ui-monospace,monospace; opacity:.85; word-break:break-all; margin:2px 0;"></div>
+          <!-- earlier AutoInjector folders that also hold downloads (content-home.js) — use one instead of downloading again -->
+          <div id="content-others" class="content-others" hidden></div>
+          <!-- 📁 where everything is (folders.js) -->
+          <details id="folders-map-wrap" class="folders-map-wrap"><summary>📁 Where everything is</summary><div id="folders-map" class="folders-map"></div></details>
           <div id="models-inventory" style="font-size:11px; opacity:.8; margin:2px 0;"></div>
           <div id="models-ollama" style="font-size:11px; opacity:.8; margin:2px 0;"></div>
 

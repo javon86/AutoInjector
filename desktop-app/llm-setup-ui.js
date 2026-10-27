@@ -295,7 +295,61 @@
     });
   }
 
+  // 📁 Downloads in ANOTHER AutoInjector folder (an earlier copy): use them instead of downloading again.
+  async function renderContentOthers(fresh) {
+    const box = document.getElementById('content-others');
+    if (!box || typeof api.contentRoots !== 'function') return null;
+    const r = await call('contentRoots', !!fresh);
+    box.textContent = '';
+    const others = (r && r.ok && Array.isArray(r.others)) ? r.others : [];
+    box.hidden = !others.length;
+    if (!others.length) return r;
+    box.append(h('div', null, h('b', null, '📁 Your downloads are also in another AutoInjector folder'), ' — use it so nothing has to be downloaded again:'));
+    for (const o of others) {
+      box.append(h('div', { class: 'co-row', 'data-root': o.root },
+        h('span', { title: o.dir }, o.dir), h('span', { class: 'llm-sub' }, ` ${(o.what || []).join(', ')}${o.bytes ? ` · ${gb(o.bytes)}` : ''}`),
+        h('button', { class: 'co-use', onclick: async () => {
+          let sure = true; try { if (typeof window.confirm === 'function') sure = window.confirm(`Use ${o.dir} for downloads and creations? AutoInjector restarts.`); } catch (_) { sure = true; }
+          if (!sure) return;
+          const x = await call('contentUseRoot', o.root);
+          msg(x && x.ok ? x.message : ((x && x.error) || 'That didn\'t work.'), x && x.ok ? 'good' : 'bad');
+        } }, 'Use this folder (restarts)')));
+    }
+    box.append(h('div', { class: 'co-row' }, h('span', { class: 'llm-sub' }, `In use now: ${r.dir}`),
+      h('button', { class: 'co-keep', onclick: async () => { const x = await call('contentUseRoot', r.current, true); if (x && x.ok) { box.hidden = true; msg('✓ Keeping the folder in use now.', 'good'); } } }, 'Keep this one')));
+    return r;
+  }
+  renderContentOthers(false);
+
+  // 📁 Where everything is (in ⚙ More settings → Downloads & creations folder): every place, with Open.
+  async function renderFolders() {
+    const box = document.getElementById('folders-map');
+    if (!box || typeof api.foldersMap !== 'function') return;
+    box.textContent = 'Looking…';
+    const r = await call('foldersMap');
+    box.textContent = '';
+    if (!r || !r.ok) { box.append(h('div', { class: 'llm-sub' }, (r && r.error) || 'I couldn\'t list the folders.')); return; }
+    for (const row of r.rows || []) {
+      box.append(h('div', { class: `fm-row${row.inStuff ? '' : ' fm-out'}`, 'data-folder': row.path },
+        h('b', null, row.what), row.bytes ? h('span', { class: 'llm-sub' }, ` ${gb(row.bytes)}`) : null,
+        h('span', { class: 'fm-path' }, row.path),
+        row.exists ? h('button', { onclick: () => call('foldersOpen', row.path) }, 'Open') : h('span', { class: 'llm-sub' }, '(not made yet)'),
+        row.note ? h('div', { class: 'llm-sub', style: 'flex-basis:100%' }, row.note) : null));
+    }
+    if (r.comfy && r.comfy.where === 'legacy') {
+      box.append(h('div', { class: 'fm-row' }, h('button', { class: 'primary', onclick: async () => {
+        let sure = true; try { if (typeof window.confirm === 'function') sure = window.confirm('Move ComfyUI and its models into "stuff and thing"? Stop ComfyUI first. AutoInjector restarts afterwards.'); } catch (_) { sure = true; }
+        if (!sure) return;
+        const x = await call('foldersMoveComfy');
+        msg(x && x.ok ? x.message : ((x && x.error) || 'The move didn\'t work.'), x && x.ok ? 'good' : 'bad');
+        renderFolders();
+      } }, '📦 Move ComfyUI into "stuff and thing"')));
+    }
+  }
+  const fmWrap = document.getElementById('folders-map-wrap');
+  if (fmWrap) fmWrap.addEventListener('toggle', () => { if (fmWrap.open) renderFolders(); });
+
   // Other panels (🎩 "⚙ Set up his AI", the model finder) can ask for a refresh / a check.
-  window.llmSetupUI = { refresh, check, setupAll, start: go, scan, status: () => last };
+  window.llmSetupUI = { refresh, check, setupAll, start: go, scan, contentOthers: renderContentOthers, folders: renderFolders, status: () => last };
   refresh();
 })();

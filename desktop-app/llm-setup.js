@@ -119,6 +119,7 @@ function createLlmSetup(deps = {}) {
     managedHost: deps.managedHost || null,
     downloadBase: (deps.downloadBase || DOWNLOAD_BASE).replace(/\/+$/, ''),
     secrets: typeof deps.secrets === 'function' ? deps.secrets : () => [],
+    otherModelDirs: typeof deps.otherModelDirs === 'function' ? deps.otherModelDirs : () => [],
     readyTimeoutMs: deps.readyTimeoutMs || 25000,
     retryDelayMs: deps.retryDelayMs != null ? deps.retryDelayMs : 1500,
     idleMs: deps.idleMs || 120000,
@@ -1006,6 +1007,7 @@ function createLlmSetup(deps = {}) {
     try { add(d.paths.modelsDir(), 'AutoInjector\'s folder ("stuff and thing")'); } catch (_) {}
     try { if (d.env && d.env.OLLAMA_MODELS) add(d.env.OLLAMA_MODELS, 'OLLAMA_MODELS setting'); } catch (_) {}
     try { add(om.defaultStoreDir ? om.defaultStoreDir(Object.assign({}, d.env, { OLLAMA_MODELS: '' })) : null, 'Ollama\'s usual folder'); } catch (_) {}
+    try { for (const o of (typeof d.otherModelDirs === 'function' ? d.otherModelDirs() : []) || []) add(o.dir, o.label); } catch (_) {}
     return out;
   }
   async function scanInstalled() {
