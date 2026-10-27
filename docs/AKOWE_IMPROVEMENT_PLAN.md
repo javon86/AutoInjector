@@ -33,7 +33,7 @@ Legend: `[ ]` to do · `[~]` in progress · `[x]` done · `[!]` problem (see "Pr
   run on the user's PC is the real test (see "Problems to come back to").
 - **One app, one launcher (done 2026-10-25):** start AutoInjector — Akọwe starts with it (📖 Akọwe tab, connected
   by itself). `akowe/run-akowe.*` remain optional for Akọwe alone.
-- Last updated: 2026-10-25 (Section 7 and 8 done; Akọwe merged into AutoInjector's window; 🎩 Alfred added (B4); full Stable Diffusion controls, all usable by Alfred; refinement from the 2026-10-25 log; B5 Character Forge for characters done (2026-10-26) with ChatGPT or Stable Diffusion pictures; book #2 next).
+- Last updated: 2026-10-27 (B2 video: local Wan engine + 🎬 Video tab + Character Forge motion clips, all usable by Alfred; Section 7 and 8 done; Akọwe merged into AutoInjector's window; 🎩 Alfred added (B4); full Stable Diffusion controls, all usable by Alfred; refinement from the 2026-10-25 log; B5 Character Forge for characters done (2026-10-26) with ChatGPT or Stable Diffusion pictures; book #2 next).
 
 ## Section 1 — AIs that always answer (self-repair) and independent review  (Phase 1)
 
@@ -306,6 +306,14 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
   Akọwe can ask via `POST /image/request` with a character lock (`docs/SD_IMAGE_API.md`). Setup guide:
   `docs/STABLE_DIFFUSION_SETUP.md`. Still to do: the Akọwe side (store pictures as book assets, UI) — with B3/B5.
 - [~] **B2** 🎬 Video: hook up AutoInjector's Video Generation panel for book trailers / scenes.
+  AutoInjector side, DONE 2026-10-27: a real local video engine (`video-studio.js`, `docs/VIDEO_API.md`).
+  - It renders with the ComfyUI the app already installs, using Wan 2.2 TI2V 5B (text or picture → video, about 12 GB VRAM) or Wan 2.1 T2V 1.3B (text → video, about 8 GB).
+  - In-app model downloads (16.9 GB / 9.2 GB, the shared text encoder fetched once). ComfyUI itself installs first when it is missing. Stability Matrix model folders are supported.
+  - A 🎬 Video tab: setup, text → video, picture → video, every Wan setting, progress and Stop, a player and gallery, plain error boxes.
+  - Bridge: `GET /video/backend` and `POST /video/request`. The capability test renders a real 1 s clip.
+  - 🎩 Alfred: `video_call` over every video-api method, plus `generate_video` (text, picture or a character's looks) and the dossier `clip`.
+  - Checked across the two real programs: an Akọwe clip job → the bridge → video-studio → a ComfyUI stand-in → clip and poster stored with the book.
+  - Still open: a first run on a real GPU, and book trailers (several shots joined).
   Akọwe side, first use DONE 2026-10-27: Character Forge **motion clips** — a 4 s picture→video "motion study" per
   dossier through AutoInjector `POST /video/request` (portrait as a temp-file path, idle-motion prompt from the
   appearance / posture / gait / expressions fields, 900 s timeout, plain words for every `VIDEO_*` code), stored with
