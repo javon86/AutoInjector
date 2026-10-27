@@ -73,7 +73,7 @@ LETTERS = (("C", "Canon"), ("P", "Personality"), ("V", "Voice"), ("A", "Appearan
            ("M", "Magic"), ("K", "Knowledge/skills"), ("R", "Relationships"), ("S", "Story development"),
            ("E", "Essential on-page detail"))
 LETTER_KEYS = tuple(k for k, _ in LETTERS)
-KINDS = {"character": "CH", "item": "AR", "place": "PL", "magic": "MG"}  # only "character" is built now
+KINDS = {"character": "CH", "item": "AR", "place": "PL", "magic": "MG"}  # the others: forge_kinds.py
 STATUSES = ("supplied", "proposed", "approved")
 FIELD_MAX = 1200        # characters per field
 TITLE_MAX = 80
@@ -419,7 +419,8 @@ def _resolve(entry: dict, canon: dict, cent: dict) -> dict:
         return {"text": clip(d.get("text")), "status": d.get("status") if d.get("status") in STATUSES else "supplied",
                 "protected": bool(d.get("protected")), "letters": d.get("letters"), "title": clip(d.get("title"),
                                                                                                    TITLE_MAX),
-                "by": d.get("by"), "at": d.get("at"), "sync": d.get("sync")}
+                "by": d.get("by"), "at": d.get("at"), "sync": d.get("sync"),
+                "was": d.get("was") if isinstance(d.get("was"), dict) and d.get("status") == "proposed" else None}
 
     for key in FIELDS:
         d = own(key)
@@ -502,6 +503,8 @@ def _resolve(entry: dict, canon: dict, cent: dict) -> dict:
         d["letters"] = clean_letters(d.get("letters"), FIELDS[key]["letters"])
         if not d["text"]:
             d["status"] = "supplied"
+        if d["status"] != "proposed":
+            d["was"] = None
     return out
 
 
@@ -559,6 +562,8 @@ def public(store, pid: str, branch: str, rid: str, *, kind: str = "character") -
                 item["title"] = d["title"]
             if d.get("by"):
                 item["by"] = d["by"]
+            if d.get("was") and d["status"] == "proposed":
+                item["was"] = clip(d["was"].get("text"))  # a "Change dossier" proposal: the accepted text it replaces
             fl.append(item)
         sections.append({"key": skey, "n": i + 1, "title": title, "fields": fl})
     art = entry.get("art") or {}
@@ -677,7 +682,7 @@ def _store_fields(entry: dict, fields: dict):
             continue
         rec = {"text": d["text"], "status": d["status"], "protected": bool(d["protected"]),
                "letters": d["letters"]}
-        for x in ("title", "by", "at", "sync"):
+        for x in ("title", "by", "at", "sync", "was"):
             if d.get(x) not in (None, ""):
                 rec[x] = d[x]
         if rec["text"] or rec["protected"] or rec["letters"] != FIELDS[k]["letters"]:
@@ -805,6 +810,7 @@ def edit(store, pid, branch, rid, body) -> dict:
                     old[k] = d["text"]
                     d["status"] = "approved" if (d["status"] == "proposed" and t) else "supplied"
                     d["text"] = t
+                    d["was"] = None
                     d["by"] = {"kind": "author"}
                     d["at"] = _now()
                     changed.add(k)
@@ -852,6 +858,7 @@ def approve(store, pid, branch, rid, body) -> dict:
             if d["text"] and d["status"] == "proposed":
                 d["status"] = "approved"
                 d["at"] = _now()
+                d["was"] = None
                 done.append(k)
         return set(done), {}
     out = mutate(store, pid, branch, rid, fn, what="approve")
@@ -1705,6 +1712,23 @@ class ForgeService:
         out = set_clip(self.store, pid, branch, rid, None, poster=asset)
         return {"ok": True, "slot": slot, "art": out["art"], "message": "Poster saved with the clip."}
 
+    # 🗂 items, places and magic systems (forge_kinds.py) and the 🔎 manuscript check (forge_check.py)
+    def start_kind_forge(self, principal, pid, branch, kind, rid, body) -> dict:
+        from .forge_kinds import KindJobs  # noqa: PLC0415
+        return KindJobs.start_kind_forge(self, principal, pid, branch, kind, rid, body)
+
+    def start_kind_art(self, principal, pid, branch, kind, rid, body) -> dict:
+        from .forge_kinds import KindJobs  # noqa: PLC0415
+        return KindJobs.start_kind_art(self, principal, pid, branch, kind, rid, body)
+
+    def upload_kind(self, principal, pid, branch, kind, rid, slot, body) -> dict:
+        from .forge_kinds import KindJobs  # noqa: PLC0415
+        return KindJobs.upload_kind(self, principal, pid, branch, kind, rid, slot, body)
+
+    def start_check(self, principal, pid, branch, kind, rid, body) -> dict:
+        from .forge_check import start_check  # noqa: PLC0415
+        return start_check(self, principal, pid, branch, kind, rid, body)
+
     def upload(self, principal, pid, branch, rid, slot, body, headers) -> dict:
         if slot in ("clip", "clip_poster"):
             return self.upload_clip(principal, pid, branch, rid, slot, body)
@@ -1723,8 +1747,8 @@ class ForgeService:
 
 
 def pdf_bytes(app, pid, branch, rid) -> tuple[bytes, str]:
-    from . import forge_pdf  # noqa: PLC0415
-    d = public(app.store, pid, branch, rid)
+    from . import forge_kinds, forge_pdf  # noqa: PLC0415
+    d = forge_kinds.attach_links(app.store, pid, branch, public(app.store, pid, branch, rid))
     art = raw_entry(app.store, pid, branch, rid).get("art") or {}
     pics = {"portrait": picture_bytes(app.store, pid, branch, art.get("portrait")),
             "sheet": picture_bytes(app.store, pid, branch, art.get("sheet"))}
@@ -1741,6 +1765,13 @@ def route(app, method: str, rest: list, query: dict, body, principal: str, pid: 
     """/api/projects/:pid/branches/:b/forge/… (one block in server.py)."""
     svc = app.forge
     store = app.store
+    from . import forge_kinds  # noqa: PLC0415 - items, places, magic systems; cross-links
+    from .forge_kinds_spec import SEGMENTS  # noqa: PLC0415
+    if rest and rest[0] in SEGMENTS and rest[0] != "characters":
+        return forge_kinds.route(app, method, rest[0], rest[1:], query, body, principal, pid, branch, headers)
+
+    def linked(d):
+        return forge_kinds.attach_links(store, pid, branch, d)
     if rest in (["characters"], []) and method == "GET":
         return 200, {"characters": list_dossiers(store, pid, branch), "fields": field_info(),
                      "image_bridge": {"uses": [u for u, _t in bridge_targets(app)]}}
@@ -1751,14 +1782,15 @@ def route(app, method: str, rest: list, query: dict, body, principal: str, pid: 
         rid = rest[1]
         tail = rest[2:]
         if tail == [] and method == "GET":
-            return 200, public(store, pid, branch, rid)
+            return 200, linked(public(store, pid, branch, rid))
         if tail == [] and method == "PUT":
             out = edit(store, pid, branch, rid, body)
-            return 200, out
+            return 200, linked(out)
         if tail == ["forge"] and method == "POST":
             return 202, svc.start_forge(principal, pid, branch, rid, body)
         if tail == ["approve"] and method == "POST":
             out = approve(store, pid, branch, rid, body)
+            out["dossier"] = linked(out["dossier"])
             return 200, out
         if tail == ["art"] and method == "POST":
             return 202, svc.start_art(principal, pid, branch, rid, body)
@@ -1770,6 +1802,9 @@ def route(app, method: str, rest: list, query: dict, body, principal: str, pid: 
             return 200, ("__binary__", "application/pdf", data, name, disposition)
         if len(tail) == 2 and tail[0] == "jobs" and method == "GET":
             return 200, app.review.get_job(principal, tail[1])
+        if tail and tail[0] == "check":  # 🔎 the manuscript check (forge_check.py)
+            from . import forge_check  # noqa: PLC0415
+            return forge_check.route(app, method, "character", rid, tail[1:], body, principal, pid, branch)
     raise AkoweError("NOT_FOUND", "/forge", "no such Character Forge endpoint", status="REJECTED")
 
 
