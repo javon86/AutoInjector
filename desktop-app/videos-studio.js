@@ -295,31 +295,60 @@
       const head = document.createElement('div'); head.className = 'vd-model-head';
       const b = document.createElement('b'); b.textContent = x.label; head.appendChild(b);
       const stt = document.createElement('span'); stt.textContent = x.installed ? '✔ downloaded' : `${x.sizeText} to download${x.missing.length < 3 ? ` (missing ${x.missing.join(', ')})` : ''}`; head.appendChild(stt);
-      if (!x.installed) { const btn = document.createElement('button'); btn.className = 'primary'; btn.id = `btn-vd-dl-${x.id}`; btn.textContent = '⬇ Download'; btn.disabled = !(m && m.anyComfy); btn.onclick = () => download(x.id); head.appendChild(btn); }
+      if (!x.installed) {
+        const kept = (x.files || []).reduce((n, f) => n + (f.present ? 0 : (f.partialBytes || 0)), 0);
+        const btn = document.createElement('button'); btn.className = 'primary'; btn.id = `btn-vd-dl-${x.id}`; btn.dataset.vdDownload = x.id;
+        btn.textContent = kept ? `⬇ Resume download (${fmtGB(kept)} kept)` : '⬇ Download';
+        btn.disabled = !(m && m.anyComfy) || dl.busy; btn.onclick = () => download(x.id); head.appendChild(btn);
+      }
       d.appendChild(head);
       const n = document.createElement('div'); n.className = 'sd-note'; n.textContent = `${x.vramNote || ''} ${x.modes.includes('i2v') ? 'Text→video and picture→video.' : 'Text→video only.'}`; d.appendChild(n);
       box.appendChild(d);
     }
   }
+  // One download at a time: a second press while one runs only says so (the main process refuses it too).
+  const dl = { local: false, remote: false, model: null, get busy() { return this.local || this.remote; } };
+  function setDownloadButtons(busy) {
+    for (const b of document.querySelectorAll('[data-vd-download]')) b.disabled = !!busy;
+    if ($('btn-vd-install-all')) $('btn-vd-install-all').disabled = !!busy;
+  }
   function renderDownload(i) {
     if (!i) return;
     const pct = Math.round((i.pct || 0) * 100);
-    $('vd-dl-bar').style.width = `${i.busy || i.phase === 'installed' ? pct : 0}%`;
+    // While it waits to resume after a dropped connection the bar stays where it got to.
+    $('vd-dl-bar').style.width = `${i.busy || i.phase === 'installed' || i.canResume ? pct : 0}%`;
     if (i.message) setText('vd-dl-msg', i.message);
     $('btn-vd-dl-cancel').disabled = !i.busy;
+    dl.remote = !!i.busy; if (i.busy && i.model) dl.model = i.model;
+    const resume = $('btn-vd-dl-resume');
+    if (resume) { resume.hidden = !!i.busy || !i.canResume || !i.model; if (i.model) resume.dataset.model = i.model; }
+    setDownloadButtons(dl.busy);
   }
   async function download(id) {
+    if (dl.busy) { setText('vd-dl-msg', `Already downloading${dl.model && dl.model !== id ? ` another model (${dl.model})` : ''} — this press was ignored. Wait for it, or press ⏸ Pause.`); return; }
+    dl.local = true; dl.model = id; setDownloadButtons(true);
+    if ($('btn-vd-dl-resume')) $('btn-vd-dl-resume').hidden = true;
     setText('vd-dl-msg', 'Starting the download…'); $('btn-vd-dl-cancel').disabled = false;
-    const r = await call('downloadModel', id);
+    let r;
+    try { r = await call('downloadModel', id); } finally { dl.local = false; }
+    if (r && r.alreadyDownloading) { setText('vd-dl-msg', r.message); dl.remote = true; return; } // another window's download is running: leave its bar alone
     setText('vd-dl-msg', r && r.ok ? `✔ ${r.already ? 'Already downloaded.' : 'Downloaded.'}` : `✖ ${(r && r.message) || 'The download failed.'}${r && r.fix ? ` ${r.fix}` : ''}`);
     $('btn-vd-dl-cancel').disabled = true;
+    if ($('btn-vd-dl-resume')) { $('btn-vd-dl-resume').hidden = !(r && !r.ok && r.canResume); $('btn-vd-dl-resume').dataset.model = id; }
+    setDownloadButtons(false);
     refreshSetup();
   }
+  if ($('btn-vd-dl-resume')) $('btn-vd-dl-resume').onclick = () => download($('btn-vd-dl-resume').dataset.model || undefined);
   $('btn-vd-dl-cancel').onclick = () => call('installCancel');
   $('btn-vd-install-all').onclick = async () => {
-    $('btn-vd-install-all').disabled = true; $('btn-vd-dl-cancel').disabled = false;
+    if (dl.busy) { setText('vd-dl-msg', 'Already downloading — this press was ignored. Wait for it, or press ⏸ Pause.'); return; }
+    dl.local = true; setDownloadButtons(true); $('btn-vd-dl-cancel').disabled = false;
     setText('vd-dl-msg', 'Installing… (ComfyUI first if there is none, then the video model)');
-    const r = await call('installAll', $('vd-model').value || undefined);
+    let r;
+    try { r = await call('installAll', $('vd-model').value || undefined); } finally { dl.local = false; }
+    if (r && (r.alreadyDownloading || r.alreadyRunning)) { setText('vd-dl-msg', r.message); dl.remote = true; return; }
+    if ($('btn-vd-dl-resume') && r && !r.ok && r.canResume) { $('btn-vd-dl-resume').hidden = false; $('btn-vd-dl-resume').dataset.model = r.model || ''; }
+    setDownloadButtons(false);
     setText('vd-dl-msg', r && r.ok ? '✔ Installed. Press ▶ Start ComfyUI (or just make a video — it starts by itself).' : `✖ ${(r && r.message) || 'The install failed.'}${r && r.fix ? ` ${r.fix}` : ''}`);
     $('btn-vd-install-all').disabled = false; $('btn-vd-dl-cancel').disabled = true;
     refreshSetup();

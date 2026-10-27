@@ -277,7 +277,7 @@ async function main() {
   const progress = [];
   const inst = I.createInstaller({ home, allowAnyPlatform: true, sevenZip: null, tar: 'tar', run: async (cmd) => (/nvidia-smi/.test(cmd) ? 'NVIDIA GeForce RTX 3060, 12288' : null),
     urls: { githubApi: `${B}/api/latest`, downloadBase: `${B}/files/` }, models: { sd15: { id: 'sd15', label: 'test model', file: 'tiny.safetensors', url: `${B}/model.safetensors`, approxBytes: 50000, base: 'SD1.5' } },
-    onChange: (st) => progress.push(st) });
+    onChange: (st) => progress.push(st), retry: { maxTries: 1 } }); // automatic retries off here: this checks the press-Install-again resume (video.test.js checks the automatic one)
   const chk = await inst.check();
   assert(chk.ok && chk.gpu.build === 'nvidia' && !chk.installed && chk.needBytes > 4 * 1024 ** 3 && typeof chk.freeBytes === 'number' && /4 GB for ComfyUI plus 2–7 GB per model/.test(chk.spaceMessage), 'check(): GPU, free space vs. what is needed (in plain words), not installed yet');
   const noWin = await I.createInstaller({ home, platform: 'linux' }).install();

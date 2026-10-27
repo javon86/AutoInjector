@@ -15,6 +15,9 @@
  *   2. space      — free disk space (fs.statfs) ≥ the need (archive + unpacked + a model).
  *   3. download   — resumable (.part + HTTP Range), cancellable, follows redirects,
  *                   SHA-256 + size checked against GitHub's release info when published.
+ *                   A dropped / stalled connection or a 5xx is retried by itself (Range resume,
+ *                   backoff, up to 8 tries in a row without progress ≈ 10 min); this download()
+ *                   is shared with video-installer.js (the 🎬 Video models).
  *   4. extract    — 7-Zip if installed, else Windows' own tar.exe (bsdtar reads .7z on
  *                   recent Windows 10/11). Plain error + "install 7-Zip" if neither works;
  *                   the download is kept so Install continues where it stopped.
@@ -101,6 +104,23 @@ function freeBytes(dir) {
 }
 
 // ------------------------------------------------------------------ HTTP download
+// Retries: a long download (a 10 GB model over an hour) meets network hiccups. A dropped connection,
+// a timeout, a stall (no bytes for stallMs), a cut-short body or a 5xx/429 answer is retried by
+// itself with an HTTP Range resume from the bytes already in the .part file, with a growing pause.
+// The try counter starts over whenever bytes arrive, so only a connection that stays down for good
+// (8 tries ≈ 10 minutes) gives up — with a plain message; the .part is kept and the next
+// Download / Resume continues from it.
+const RETRY_DELAYS_MS = [5000, 10000, 20000, 40000, 80000, 120000, 180000]; // between tries 1→2 … 7→8 (≈ 7.5 min + the tries)
+const MAX_TRIES = 8;
+const STALL_MS = 60000;
+const RETRYABLE = new Set(['ECONNRESET', 'ETIMEDOUT', 'TIMEOUT', 'ESOCKETTIMEDOUT', 'ABORTED', 'STALLED', 'EPIPE', 'ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'ENETUNREACH', 'ENETDOWN', 'EHOSTUNREACH', 'ECONNABORTED', 'ERR_STREAM_PREMATURE_CLOSE', 'CUT_SHORT', 'NETWORK', 'HTTP_408', 'HTTP_425', 'HTTP_429']);
+function isRetryable(code) { return RETRYABLE.has(code) || /^HTTP_5\d\d$/.test(String(code || '')); }
+function _errCode(e) {
+  if (!e) return 'NETWORK';
+  if (e.code) return e.code;
+  if (/socket hang up|aborted/i.test(String(e.message || ''))) return 'ECONNRESET';
+  return 'NETWORK';
+}
 function _get(url, headers, deps, redirects = 0) {
   return new Promise((resolve, reject) => {
     let u; try { u = new URL(url); } catch { return reject(Object.assign(new Error('BAD_URL'), { code: 'BAD_URL' })); }
@@ -114,7 +134,7 @@ function _get(url, headers, deps, redirects = 0) {
       resolve({ res, req, url });
     });
     req.on('error', reject);
-    req.setTimeout(60000, () => req.destroy(Object.assign(new Error('TIMEOUT'), { code: 'TIMEOUT' })));
+    req.setTimeout(deps.socketTimeoutMs || 60000, () => req.destroy(Object.assign(new Error('TIMEOUT'), { code: 'TIMEOUT' })));
   });
 }
 async function _json(url, deps) {
@@ -131,11 +151,96 @@ async function _hashFile(file) {
   return h;
 }
 
-// Download url → dest with resume. job: { cancelled, cancel() } set by the caller.
-// → { ok, file, bytes, sha256, resumed } | { ok:false, error, message }
-async function download(url, dest, opts = {}) {
+// One try: url → dest.part (resuming from what is already there), renamed to dest when complete.
+// → { ok, file, bytes, sha256, resumed } | { ok:false, error, retryable, message, partial }
+async function _downloadOnce(url, dest, opts) {
   const deps = opts.deps || {};
   const onProgress = opts.onProgress || (() => {});
+  const job = opts.job;
+  const again = opts.againText || 'Press Install again';
+  const part = `${dest}.part`;
+  const paused = () => ({ ok: false, error: 'CANCELLED', message: `Download paused. ${again} to continue where it stopped.`, partial: part });
+  let have = 0; try { have = fs.statSync(part).size; } catch {}
+  if (opts.expectedSize && have > opts.expectedSize) { fs.unlinkSync(part); have = 0; } // our own broken partial
+  const hash = opts.expectedSha256 && have ? await _hashFile(part) : (opts.expectedSha256 ? crypto.createHash('sha256') : null);
+  let got;
+  try { got = await _get(url, have ? { Range: `bytes=${have}-` } : {}, deps); }
+  catch (e) { const code = _errCode(e); return { ok: false, error: code, retryable: isRetryable(code), message: `The download could not start (${code}). Check the internet connection and ${again.toLowerCase()} — it continues where it stopped.`, partial: have ? part : undefined }; }
+  const { res, req } = got;
+  job.cancel = () => { job.cancelled = true; try { req.destroy(); } catch {} };
+  if (job.cancelled) { try { req.destroy(); } catch {} return paused(); }
+  if (res.statusCode === 416 && opts.expectedSize && have === opts.expectedSize) { res.resume(); }
+  else if (res.statusCode === 200 && have) { have = 0; if (hash) hash.__reset = true; }
+  else if (res.statusCode !== 200 && res.statusCode !== 206) { res.resume(); const code = `HTTP_${res.statusCode}`; return { ok: false, error: code, retryable: isRetryable(code), message: `The download server said ${res.statusCode}. Try again later.`, partial: have ? part : undefined }; }
+  const total = res.statusCode === 206 ? have + Number(res.headers['content-length'] || 0) : Number(res.headers['content-length'] || opts.expectedSize || 0);
+  const resumed = res.statusCode === 206 && have > 0;
+  const h = hash && hash.__reset ? crypto.createHash('sha256') : hash;
+  if (res.statusCode !== 416) {
+    const out = fs.createWriteStream(part, { flags: resumed ? 'a' : 'w' });
+    let done = have, last = 0, stall = null, stalled = false;
+    const stallMs = opts.stallMs || STALL_MS;
+    const kick = () => { clearTimeout(stall); stall = setTimeout(() => { stalled = true; try { req.destroy(Object.assign(new Error('STALLED'), { code: 'STALLED' })); } catch {} }, stallMs); };
+    try {
+      await new Promise((resolve, reject) => {
+        kick();
+        res.on('data', (c) => {
+          kick();
+          if (h) h.update(c);
+          done += c.length;
+          if (!out.write(c)) { res.pause(); out.once('drain', () => res.resume()); }
+          const t = Date.now(); if (t - last > 250) { last = t; onProgress({ step: 'download', done, total, pct: total ? done / total : 0 }); }
+        });
+        res.on('end', resolve);
+        res.on('error', reject);
+        res.on('aborted', () => reject(Object.assign(new Error('ABORTED'), { code: 'ABORTED' })));
+        res.on('close', () => { if (!res.complete) reject(Object.assign(new Error('ABORTED'), { code: 'ABORTED' })); });
+        req.on('error', reject);
+        out.on('error', reject);
+      });
+    } catch (e) {
+      clearTimeout(stall);
+      await new Promise((r) => { if (out.destroyed || out.closed) r(); else out.end(r); });
+      if (job.cancelled) return paused();
+      const code = stalled ? 'STALLED' : _errCode(e);
+      if (['ENOSPC', 'EACCES', 'EPERM', 'EROFS'].includes(code)) return { ok: false, error: code, retryable: false, message: code === 'ENOSPC' ? 'The disk is full — the download could not be saved. Free some space, then continue (nothing already downloaded is lost).' : `The download could not be saved (${code}: no permission to write ${dest}).`, partial: part };
+      return { ok: false, error: code, retryable: isRetryable(code), message: `The download was interrupted (${code === 'STALLED' ? 'no data arrived for a while' : code}). ${again} — it continues where it stopped.`, partial: part };
+    }
+    clearTimeout(stall);
+    await new Promise((r) => out.end(r));
+    if (job.cancelled) return paused();
+    onProgress({ step: 'download', done, total, pct: 1 });
+  }
+  const size = fs.statSync(part).size;
+  if (opts.expectedSize && size !== opts.expectedSize) {
+    // Fewer bytes than the server announced = the connection was cut short (worth another try);
+    // a server whose file has another size is not fixed by trying again.
+    const cut = size < opts.expectedSize && (!total || total === opts.expectedSize);
+    return { ok: false, error: 'SIZE_MISMATCH', retryable: cut, message: `The download is incomplete (${fmtBytes(size)} of ${fmtBytes(opts.expectedSize)}). ${again} to continue.`, partial: part };
+  }
+  const sha = h ? h.digest('hex') : null;
+  if (opts.expectedSha256 && sha && sha.toLowerCase() !== String(opts.expectedSha256).toLowerCase()) {
+    fs.renameSync(part, `${dest}.bad`);
+    return { ok: false, error: 'HASH_MISMATCH', message: `The downloaded file is damaged (its checksum does not match the published one). It was set aside as .bad — ${again.toLowerCase()} to download it again.` };
+  }
+  fs.renameSync(part, dest);
+  return { ok: true, file: dest, bytes: size, sha256: sha, resumed };
+}
+
+// A pause between tries that Cancel ends at once.
+function _pause(ms, job) {
+  return new Promise((resolve) => {
+    let t = null;
+    const done = () => { clearTimeout(t); resolve(); };
+    t = setTimeout(done, ms);
+    job.cancel = () => { job.cancelled = true; done(); };
+  });
+}
+
+// Download url → dest with resume and automatic retries. job: { cancelled, cancel() } set by the caller.
+// opts: expectedSize, expectedSha256, onProgress({done,total,pct}), onRetry({attempt,max,error,delayMs,done,total}),
+//       maxTries (8), retryDelaysMs, stallMs (60 s), againText ('Press Install again'), deps.
+// → { ok, file, bytes, sha256, resumed, tries } | { ok:false, error, message, partial, partialBytes, canResume, gaveUp }
+async function download(url, dest, opts = {}) {
   const job = opts.job || {};
   const part = `${dest}.part`;
   fs.mkdirSync(path.dirname(dest), { recursive: true });
@@ -144,54 +249,30 @@ async function download(url, dest, opts = {}) {
     if (!opts.expectedSize || sz === opts.expectedSize) return { ok: true, file: dest, bytes: sz, already: true };
     return { ok: false, error: 'EXISTS', message: `A different file is already at ${dest}. AutoInjector won't overwrite it — move or rename it, then try again.` };
   }
-  let have = 0; try { have = fs.statSync(part).size; } catch {}
-  if (opts.expectedSize && have > opts.expectedSize) { fs.unlinkSync(part); have = 0; } // our own broken partial
-  const hash = opts.expectedSha256 && have ? await _hashFile(part) : (opts.expectedSha256 ? crypto.createHash('sha256') : null);
-  let got;
-  try { got = await _get(url, have ? { Range: `bytes=${have}-` } : {}, deps); }
-  catch (e) { return { ok: false, error: e.code || 'NETWORK', message: `The download could not start (${e.code || e.message}). Check the internet connection and press Install again — it continues where it stopped.` }; }
-  const { res, req } = got;
-  job.cancel = () => { job.cancelled = true; try { req.destroy(); } catch {} };
-  if (res.statusCode === 416 && opts.expectedSize && have === opts.expectedSize) { res.resume(); }
-  else if (res.statusCode === 200 && have) { have = 0; if (hash) hash.__reset = true; }
-  else if (res.statusCode !== 200 && res.statusCode !== 206) { res.resume(); return { ok: false, error: `HTTP_${res.statusCode}`, message: `The download server said ${res.statusCode}. Try again later.` }; }
-  const total = res.statusCode === 206 ? have + Number(res.headers['content-length'] || 0) : Number(res.headers['content-length'] || opts.expectedSize || 0);
-  const resumed = res.statusCode === 206 && have > 0;
-  const h = hash && hash.__reset ? crypto.createHash('sha256') : hash;
-  if (res.statusCode !== 416) {
-    const out = fs.createWriteStream(part, { flags: resumed ? 'a' : 'w' });
-    let done = have, last = 0;
-    try {
-      await new Promise((resolve, reject) => {
-        res.on('data', (c) => {
-          if (h) h.update(c);
-          done += c.length;
-          if (!out.write(c)) { res.pause(); out.once('drain', () => res.resume()); }
-          const t = Date.now(); if (t - last > 250) { last = t; onProgress({ step: 'download', done, total, pct: total ? done / total : 0 }); }
-        });
-        res.on('end', resolve);
-        res.on('error', reject);
-        res.on('aborted', () => reject(Object.assign(new Error('ABORTED'), { code: job.cancelled ? 'CANCELLED' : 'ABORTED' })));
-        req.on('error', reject);
-      });
-    } catch (e) {
-      await new Promise((r) => out.end(r));
-      if (job.cancelled) return { ok: false, error: 'CANCELLED', message: 'Download paused. Press Install again to continue where it stopped.', partial: part };
-      return { ok: false, error: e.code || 'NETWORK', message: `The download was interrupted (${e.code || e.message}). Press Install again — it continues where it stopped.`, partial: part };
+  const maxTries = Math.max(1, opts.maxTries || MAX_TRIES);
+  const delays = Array.isArray(opts.retryDelaysMs) && opts.retryDelaysMs.length ? opts.retryDelaysMs : RETRY_DELAYS_MS;
+  const partSize = () => { try { return fs.statSync(part).size; } catch { return 0; } };
+  const finish = (r, tries) => { const o = Object.assign({}, r, { tries }); delete o.retryable; const pb = r.ok ? 0 : partSize(); if (!r.ok && pb > 0) { o.partial = part; o.partialBytes = pb; o.canResume = true; } return o; };
+  let fails = 0, tries = 0;
+  for (;;) {
+    const before = partSize();
+    tries++;
+    const r = await _downloadOnce(url, dest, Object.assign({}, opts, { job }));
+    if (r.ok || job.cancelled || r.error === 'CANCELLED' || !r.retryable) return finish(job.cancelled && !r.ok ? Object.assign({}, r, { error: 'CANCELLED', message: `Download paused. ${opts.againText || 'Press Install again'} to continue where it stopped.` }) : r, tries);
+    const after = partSize();
+    if (after > before) fails = 0; // bytes arrived: the connection works, the count starts over
+    fails++;
+    if (fails >= maxTries && maxTries === 1) return finish(r, tries); // retries turned off: the try's own message
+    if (fails >= maxTries) {
+      const total = opts.expectedSize || null;
+      const again = opts.resumeText || opts.againText || 'Press Install again';
+      return finish(Object.assign({}, r, { gaveUp: true, message: `The internet connection kept dropping (${r.error}) and did not come back after ${maxTries} tries, so the download stopped at ${fmtBytes(after)}${total ? ` of ${fmtBytes(total)}` : ''}. Nothing is lost: ${again.charAt(0).toLowerCase()}${again.slice(1)} — it continues from there, not from the start.` }), tries);
     }
-    await new Promise((r) => out.end(r));
-    if (job.cancelled) return { ok: false, error: 'CANCELLED', message: 'Download paused. Press Install again to continue where it stopped.', partial: part };
-    onProgress({ step: 'download', done, total, pct: 1 });
+    const delayMs = delays[Math.min(fails - 1, delays.length - 1)];
+    try { if (opts.onRetry) opts.onRetry({ attempt: fails + 1, max: maxTries, error: r.error, delayMs, done: after, total: opts.expectedSize || null }); } catch {}
+    await _pause(delayMs, job);
+    if (job.cancelled) return finish({ ok: false, error: 'CANCELLED', message: `Download paused. ${opts.againText || 'Press Install again'} to continue where it stopped.` }, tries);
   }
-  const size = fs.statSync(part).size;
-  if (opts.expectedSize && size !== opts.expectedSize) return { ok: false, error: 'SIZE_MISMATCH', message: `The download is incomplete (${fmtBytes(size)} of ${fmtBytes(opts.expectedSize)}). Press Install again to continue.`, partial: part };
-  const sha = h ? h.digest('hex') : null;
-  if (opts.expectedSha256 && sha && sha.toLowerCase() !== String(opts.expectedSha256).toLowerCase()) {
-    fs.renameSync(part, `${dest}.bad`);
-    return { ok: false, error: 'HASH_MISMATCH', message: 'The downloaded file is damaged (its checksum does not match the published one). It was set aside as .bad — press Install to download it again.' };
-  }
-  fs.renameSync(part, dest);
-  return { ok: true, file: dest, bytes: size, sha256: sha, resumed };
 }
 
 // ------------------------------------------------------------------ extract
@@ -279,6 +360,7 @@ function createInstaller(opts = {}) {
   const platform = opts.platform || process.platform;
   const urls = Object.assign({ githubApi: GITHUB_API, downloadBase: DOWNLOAD_BASE }, opts.urls || {});
   const models = Object.assign({}, STARTER_MODELS, opts.models || {});
+  const retry = opts.retry || {}; // { maxTries, retryDelaysMs, stallMs } — the tests make these short
   let st = { phase: 'idle', step: null, pct: 0, done: 0, total: 0, message: '', error: null };
   let job = null;
   const onChange = opts.onChange || (() => {});
@@ -302,8 +384,12 @@ function createInstaller(opts = {}) {
   }
 
   async function install(o = {}) {
-    if (job) return { ok: false, error: 'BUSY', message: 'An install is already running.' };
-    const c = await check();
+    if (job) return { ok: false, error: 'BUSY', code: 'BUSY', alreadyRunning: true, message: 'Already installing — this press was ignored. Wait for it, or press Cancel.' };
+    // Claimed before the first await, so a second press while the GPU / space check runs is refused too.
+    const checking = { cancelled: false }; job = checking;
+    let c;
+    try { c = await check(); } finally { if (job === checking) job = null; }
+    if (checking.cancelled) return { ok: false, error: 'CANCELLED', message: 'Install cancelled.' };
     if (!c.supported) return { ok: false, error: 'NOT_WINDOWS', message: 'The one-click install is for Windows. On this computer install ComfyUI or Forge yourself (see docs/STABLE_DIFFUSION_SETUP.md); AutoInjector will find and drive it.' };
     const alongside = !!(o.alongside && c.installed && o.build && BUILDS[o.build]);
     if (c.installed && !alongside) { set({ phase: 'installed', message: 'ComfyUI is already installed.' }); return { ok: true, already: true, portable: c.portable }; }
@@ -315,7 +401,7 @@ function createInstaller(opts = {}) {
     job = { cancelled: false };
     const myJob = job;
     try {
-      set({ phase: 'downloading', step: 'download', pct: 0, error: null, message: `Downloading ComfyUI (${BUILDS[build].label})…` });
+      set({ phase: 'downloading', step: 'download', pct: 0, error: null, retry: null, message: `Downloading ComfyUI (${BUILDS[build].label})…` });
       log('sd-install-start', { build, home, alongside });
       // Size + SHA-256 from GitHub when it publishes them (never fatal if not).
       let expectedSize = null, expectedSha256 = null;
@@ -324,8 +410,9 @@ function createInstaller(opts = {}) {
       if (a) { expectedSize = Number(a.size) || null; const m = String(a.digest || '').match(/^sha256:([0-9a-f]{64})$/i); if (m) expectedSha256 = m[1]; }
       const archive = path.join(dest, asset);
       const d = await download(a && a.browser_download_url ? a.browser_download_url : urls.downloadBase + asset, archive, {
-        deps, job: myJob, expectedSize, expectedSha256,
-        onProgress: (p) => set({ step: 'download', pct: p.pct, done: p.done, total: p.total, message: `Downloading ComfyUI… ${fmtBytes(p.done)}${p.total ? ` of ${fmtBytes(p.total)}` : ''}` }),
+        deps, job: myJob, expectedSize, expectedSha256, maxTries: retry.maxTries, retryDelaysMs: retry.retryDelaysMs, stallMs: retry.stallMs,
+        onProgress: (p) => set({ step: 'download', pct: p.pct, done: p.done, total: p.total, retry: null, message: `Downloading ComfyUI… ${fmtBytes(p.done)}${p.total ? ` of ${fmtBytes(p.total)}` : ''}` }),
+        onRetry: (r) => { set({ retry: { attempt: r.attempt, max: r.max }, message: `Connection dropped — resuming (try ${r.attempt} of ${r.max})…` }); log('sd-install-download-retry', { error: r.error, attempt: r.attempt, max: r.max }); },
       });
       if (!d.ok) { set({ phase: d.error === 'CANCELLED' ? 'paused' : 'failed', error: d.error, message: d.message }); log('sd-install-download-failed', { error: d.error }); return d; }
       set({ phase: 'extracting', step: 'extract', pct: 0, message: 'Unpacking ComfyUI… (a few minutes)' });
@@ -353,15 +440,17 @@ function createInstaller(opts = {}) {
     if (!m) return { ok: false, error: 'BAD_MODEL', message: 'Unknown starter model.' };
     const portable = findPortable(home);
     if (!portable) return { ok: false, error: 'NOT_INSTALLED', message: 'Install ComfyUI first.' };
-    if (job) return { ok: false, error: 'BUSY', message: 'A download is already running.' };
+    if (job) return { ok: false, error: 'BUSY', code: 'BUSY', alreadyRunning: true, message: 'Already downloading — this press was ignored. Wait for it, or press Cancel.' };
     const free = freeBytes(portable.models);
     if (free != null && free < m.approxBytes * 1.05) return { ok: false, error: 'NO_SPACE', message: `Not enough free disk space for ${m.file} (${fmtBytes(m.approxBytes)}); this drive has ${fmtBytes(free)} free.` };
     job = { cancelled: false }; const myJob = job;
     try {
-      set({ phase: 'downloading-model', step: 'model', pct: 0, error: null, message: `Downloading ${m.file}…` });
+      set({ phase: 'downloading-model', step: 'model', pct: 0, error: null, retry: null, message: `Downloading ${m.file}…` });
       const d = await download(m.url, path.join(portable.models, 'checkpoints', m.file), {
-        deps, job: myJob, expectedSize: m.expectedSize || null, expectedSha256: m.sha256 || null,
-        onProgress: (p) => set({ step: 'model', pct: p.pct, done: p.done, total: p.total, message: `Downloading ${m.file}… ${fmtBytes(p.done)}${p.total ? ` of ${fmtBytes(p.total)}` : ''}` }),
+        deps, job: myJob, expectedSize: m.expectedSize || null, expectedSha256: m.sha256 || null, maxTries: retry.maxTries, retryDelaysMs: retry.retryDelaysMs, stallMs: retry.stallMs,
+        onProgress: (p) => set({ step: 'model', pct: p.pct, done: p.done, total: p.total, retry: null, message: `Downloading ${m.file}… ${fmtBytes(p.done)}${p.total ? ` of ${fmtBytes(p.total)}` : ''}` }),
+        onRetry: (r) => { set({ retry: { attempt: r.attempt, max: r.max }, message: `Connection dropped — resuming (try ${r.attempt} of ${r.max})…` }); log('sd-model-download-retry', { model: m.id, error: r.error, attempt: r.attempt, max: r.max }); },
+        againText: 'Press Download again',
       });
       if (!d.ok) { set({ phase: d.error === 'CANCELLED' ? 'paused' : 'failed', error: d.error, message: d.message }); return d; }
       set({ phase: 'installed', step: null, pct: 1, message: `✔ ${m.file} is ready in ComfyUI's models\\checkpoints.` });
@@ -412,4 +501,4 @@ function createInstaller(opts = {}) {
   return { status, check, install, downloadModel, cancel, home, portable: () => findPortable(home), currentBuild, otherBuild, useOtherBuild, useBuild, gpu: () => lastGpu };
 }
 
-module.exports = { createInstaller, detectGpu, chooseBuild, download, extract, find7z, findPortable, readBuilds, linkModels, OTHER_BUILD, BUILD_FILE, freeBytes, defaultHome, fmtBytes, BUILDS, STARTER_MODELS, GITHUB_API, DOWNLOAD_BASE };
+module.exports = { createInstaller, detectGpu, chooseBuild, download, extract, find7z, findPortable, readBuilds, linkModels, OTHER_BUILD, BUILD_FILE, freeBytes, defaultHome, fmtBytes, BUILDS, STARTER_MODELS, GITHUB_API, DOWNLOAD_BASE, isRetryable, RETRY_DELAYS_MS, MAX_TRIES, STALL_MS };

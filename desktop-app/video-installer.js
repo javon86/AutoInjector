@@ -2,7 +2,11 @@
 /*
  * video-installer.js — the 🎬 Video models: what they are, where their files go,
  * what is installed / missing, and the in-app download (with progress, resume,
- * a size check and cancel). Reuses sd-installer.js (its download() and its
+ * a size check and cancel). A dropped or stalled connection is retried by itself
+ * (sd-installer.download: Range resume from the .part, backoff, the count starts
+ * over whenever bytes arrive); only a connection that stays down fails, with
+ * canResume:true for the “Resume download” button. A second Download while one
+ * runs starts nothing (BUSY, alreadyDownloading). Reuses sd-installer.js (its download() and its
  * one-click ComfyUI portable install) — nothing is duplicated here.
  *
  * Models (docs/VIDEO_API.md has the sources):
@@ -98,10 +102,18 @@ function createVideoInstaller(opts = {}) {
   const models = Object.assign({}, MODELS, opts.models || {});
   const inst = () => { try { return opts.sdInstaller ? opts.sdInstaller() : null; } catch { return null; } };
   const freeBytes = opts.freeBytes || sdInstaller.freeBytes;
+  const retry = opts.retry || {}; // { maxTries, retryDelaysMs, stallMs } for download() — the tests make these short
   let st = { phase: 'idle', model: null, file: null, pct: 0, done: 0, total: 0, message: '', error: null };
   let job = null;
   function set(p) { st = Object.assign({}, st, p); try { onChange(status()); } catch {} }
   function status() { return Object.assign({ busy: !!job }, st); }
+  // A second press while a download runs: nothing new starts; the running one is named.
+  function busyAnswer() {
+    const what = st.model && models[st.model] ? models[st.model].short : 'the video model';
+    const pct = st.total ? ` (${Math.floor((st.pct || 0) * 100)}% so far)` : '';
+    log('video-model-download-busy', { model: st.model });
+    return { ok: false, error: 'BUSY', code: 'BUSY', alreadyDownloading: true, model: st.model, message: `Already downloading ${what}${pct} — this press was ignored. Wait for it, or press ⏸ Pause.` };
+  }
 
   // Every models folder video can use. [{ path, layout: 'comfy'|'sm', source }]
   function roots() {
@@ -150,7 +162,7 @@ function createVideoInstaller(opts = {}) {
   async function downloadModel(id, o = {}) {
     const m = models[id || DEFAULT_MODEL];
     if (!m) return { ok: false, error: 'BAD_MODEL', code: 'INVALID_PARAM', field: 'id', message: `There is no video model “${id}”.`, hint: `Models: ${Object.keys(models).join(', ')}` };
-    if (job) return { ok: false, error: 'BUSY', code: 'BUSY', message: 'A download is already running. Wait for it, or press Cancel.' };
+    if (job) return busyAnswer();
     const t = o.root ? Object.assign({ layout: 'comfy' }, o.root) : target();
     if (!t) return { ok: false, error: 'NO_COMFYUI', code: 'VIDEO_NOT_SET_UP', message: 'No ComfyUI was found to put the video model into.', fix: 'Press “Install ComfyUI + video model”, or install ComfyUI in Stability Matrix (or start your own ComfyUI), then try again.' };
     // Only files already in the TARGET ComfyUI (or listed by the running one) count as done: a copy in another
@@ -171,22 +183,32 @@ function createVideoInstaller(opts = {}) {
       for (const f of todo) {
         if (myJob.cancelled) break;
         const dest = path.join(folderFor(t, f.kind), f.name);
-        set({ phase: 'downloading', model: m.id, file: f.name, error: null, message: `Downloading ${f.name}…` });
+        set({ phase: 'downloading', model: m.id, file: f.name, error: null, retry: null, canResume: false, message: `Downloading ${f.name}…` });
         const d = await sdInstaller.download(f.url, dest, {
-          deps, job: myJob, expectedSize: f.bytes,
-          onProgress: (p) => { const done = before + (p.done || 0); set({ pct: total ? Math.min(1, done / total) : 0, done, total, message: `Downloading ${m.short}: ${f.name} — ${sdInstaller.fmtBytes(done)} of ${sdInstaller.fmtBytes(total)}` }); },
+          deps, job: myJob, expectedSize: f.bytes, maxTries: retry.maxTries, retryDelaysMs: retry.retryDelaysMs, stallMs: retry.stallMs,
+          againText: 'Press Download again', resumeText: 'Press “Resume download”',
+          onProgress: (p) => { const done = before + (p.done || 0); set({ pct: total ? Math.min(1, done / total) : 0, done, total, retry: null, message: `Downloading ${m.short}: ${f.name} — ${sdInstaller.fmtBytes(done)} of ${sdInstaller.fmtBytes(total)}` }); },
+          // The connection dropped: download() waits and resumes by itself — the bar stays where it is.
+          onRetry: (r) => {
+            const done = before + (r.done || 0);
+            set({ phase: 'downloading', retry: { attempt: r.attempt, max: r.max, error: r.error }, done, total, pct: total ? Math.min(1, done / total) : 0, message: `Connection dropped — resuming (try ${r.attempt} of ${r.max})… ${m.short}: ${sdInstaller.fmtBytes(done)} of ${sdInstaller.fmtBytes(total)} is kept.` });
+            log('video-model-download-retry', { model: m.id, file: f.name, error: r.error, attempt: r.attempt, max: r.max, waitS: Math.round(r.delayMs / 1000) });
+          },
         });
         if (!d.ok) {
           const paused = d.error === 'CANCELLED';
-          const msg = d.error === 'SIZE_MISMATCH' ? `${f.name} did not download completely (${d.message}). Press Download again — it continues where it stopped.` : d.message;
-          set({ phase: paused ? 'paused' : 'failed', error: d.error, message: paused ? 'Download paused. Press Download again to continue where it stopped.' : msg });
-          log('video-model-download-failed', { model: m.id, file: f.name, error: d.error });
-          return { ok: false, error: d.error, code: paused ? 'CANCELLED' : d.error, model: m.id, file: f.name, message: paused ? 'Download paused. Press Download again to continue where it stopped.' : msg, partial: d.partial };
+          const canResume = paused || !!d.canResume;
+          const msg = paused ? 'Download paused. Press “Resume download” to continue where it stopped.'
+            : d.error === 'SIZE_MISMATCH' && !d.gaveUp ? `${f.name} did not download completely (${d.message}). Press Download again — it continues where it stopped.`
+            : d.message;
+          set({ phase: paused ? 'paused' : 'failed', error: d.error, retry: null, canResume, message: msg });
+          log('video-model-download-failed', { model: m.id, file: f.name, error: d.error, tries: d.tries, kept: d.partialBytes || 0 });
+          return { ok: false, error: d.error, code: paused ? 'CANCELLED' : d.error, model: m.id, file: f.name, message: msg, partial: d.partial, partialBytes: d.partialBytes || 0, canResume, tries: d.tries };
         }
         before += f.bytes;
       }
-      if (myJob.cancelled) { set({ phase: 'paused', error: 'CANCELLED', message: 'Download paused. Press Download again to continue where it stopped.' }); return { ok: false, error: 'CANCELLED', code: 'CANCELLED', model: m.id, message: 'Download paused.' }; }
-      set({ phase: 'installed', model: m.id, file: null, pct: 1, done: total, total, error: null, message: `✔ ${m.short} is downloaded into ${t.path}.` });
+      if (myJob.cancelled) { set({ phase: 'paused', error: 'CANCELLED', canResume: true, message: 'Download paused. Press “Resume download” to continue where it stopped.' }); return { ok: false, error: 'CANCELLED', code: 'CANCELLED', model: m.id, canResume: true, message: 'Download paused.' }; }
+      set({ phase: 'installed', model: m.id, file: null, pct: 1, done: total, total, error: null, retry: null, canResume: false, message: `✔ ${m.short} is downloaded into ${t.path}.` });
       log('video-model-downloaded', { model: m.id });
       return { ok: true, model: m.id, root: t.path, files: m.files.map((f) => f.name) };
     } catch (e) {
@@ -202,7 +224,7 @@ function createVideoInstaller(opts = {}) {
     let haveComfy = roots().length > 0;
     if (!haveComfy) {
       if (!i) return { ok: false, error: 'NOT_WIRED', message: 'The ComfyUI installer is not available in this build.' };
-      if (job) return { ok: false, error: 'BUSY', code: 'BUSY', message: 'A download is already running.' };
+      if (job) return busyAnswer();
       job = { cancelled: false, cancel: () => { try { i.cancel(); } catch {} } }; const myJob = job;
       try {
         set({ phase: 'installing-comfyui', model: id || DEFAULT_MODEL, error: null, message: 'Installing ComfyUI first (about 2 GB)…' });

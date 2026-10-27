@@ -527,6 +527,15 @@ async function main() {
   check('generate_video', d.carded && comfy.state.videoGraphs.length === vg0 + 1 && /waves at night/.test(JSON.stringify(comfy.state.videoGraphs[vg0])) && vpath && fs.existsSync(vpath), 'card → ✔ → a Wan text→video graph on ComfyUI → the clip is saved', 'real video-api + fake ComfyUI');
   d = await drive('generate_video', { image: png, prompt: 'he breathes', seconds: 1 });
   check('generate_video', d.carded && comfy.state.videoGraphs.length === vg0 + 2 && /LoadImage/.test(JSON.stringify(comfy.state.videoGraphs[vg0 + 1])) && d.result.ok, 'with a picture → picture→video (the picture is uploaded and loaded)', 'real video-api + fake ComfyUI');
+  // the call a small local model sent in the user's log: {character, image, prompt, seconds} → no INVALID_PARAM
+  d = await drive('generate_video', { character: 'Odile', image: png, prompt: 'she turns her head', seconds: 30 });
+  assert(d.carded && d.result && d.result.ok && comfy.state.videoGraphs.length === vg0 + 3 && /LoadImage/.test(JSON.stringify(comfy.state.videoGraphs[vg0 + 2])) && !/odile woman/.test(JSON.stringify(comfy.state.videoGraphs[vg0 + 2])) && (d.result.notes || []).some((n) => /picture was used/.test(n)) && (d.result.notes || []).some((n) => /seconds 30 is outside 1–10/.test(n)), 'generate_video: picture + character + seconds 30 → the picture is used, seconds clamped, both noted');
+  d = await drive('generate_video', { character: 'Odile', image: path.join(os.tmpdir(), 'no-such-picture-for-alfred.png'), prompt: 'she waves', seconds: '2 seconds' });
+  assert(d.carded && d.result && d.result.ok && comfy.state.videoGraphs.length === vg0 + 4 && !/LoadImage/.test(JSON.stringify(comfy.state.videoGraphs[vg0 + 3])) && /odile woman/.test(JSON.stringify(comfy.state.videoGraphs[vg0 + 3])) && (d.result.notes || []).some((n) => /could not be used/.test(n)), 'generate_video: a picture path that does not exist → text→video with the character lock, noted (no INVALID_PARAM)');
+  d = await drive('generate_video', { image: 'Odile', prompt: 'rain on a window', seconds: 'none' });
+  assert(d.carded && d.result && d.result.ok && comfy.state.videoGraphs.length === vg0 + 5 && (d.result.notes || []).some((n) => /image “Odile” is not a picture/.test(n)), 'generate_video: an image that is no picture → dropped with a note, text→video');
+  d = await drive('generate_video', { image: path.join(os.tmpdir(), 'no-such-picture-for-alfred.png') });
+  assert(d.carded && d.result && d.result.ok === false && d.result.error === 'INVALID_PARAM' && /image/.test(d.result.message) && /\.png \/ \.jpg \/ \.webp/.test(d.result.message) && comfy.state.videoGraphs.length === vg0 + 5, `generate_video: only a missing picture → the error names the field and what it may be: “${d.result && d.result.message}”`);
   for (const m of ['video.status', 'video.models', 'video.progress', 'video.gallery', 'video.capabilities', 'video.install.check']) {
     d = await drive('video_call', { method: m, args: {} });
     if (assert(!d.carded && /^RESULT \{"ok":true/.test(d.text), `video_call ${m}: read-only, runs directly against the real module`)) mark(`video:${m}`, 'real video-api');
