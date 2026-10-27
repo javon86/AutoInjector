@@ -125,6 +125,21 @@ async function main() {
     assert(/view-side-/.test(path.basename(f2)) && fs.existsSync(f2), `saved as ${path.basename(f2)}`);
     await c.screenshot({ path: path.join(SHOTS, 'chatimg-03-reference-view.png') }).catch(() => {});
 
+    console.log('\n== back-to-back pictures: a message that waited goes in BETWEEN them (360 review) ==');
+    {
+      const p1 = req(port, 'POST', '/image/request', { prompt: 'first back-to-back picture', engine: 'chatgpt' }, TOKEN);
+      await until(async () => { const d = await inPane('chatgpt', 'window.__fake.dump()'); return d && d.posted.some((x) => /first back-to-back picture/.test(x.text)); }, 20000);
+      const cp = c.evaluate(() => window.api.sendCompose('A message that waited for the first picture.', ['chatgpt']));
+      await sleep(400); // the message is now waiting on the held pane
+      const p2 = req(port, 'POST', '/image/request', { prompt: 'second back-to-back picture', engine: 'chatgpt' }, TOKEN);
+      const [r1, r2] = await Promise.all([p1, p2]); await cp;
+      if (r1.json && r1.json.paths) made.push(...r1.json.paths); if (r2.json && r2.json.paths) made.push(...r2.json.paths);
+      const d = await until(async () => { const x = await inPane('chatgpt', 'window.__fake.dump()'); return x && x.posted.some((y) => /A message that waited/.test(y.text)) ? x : null; }, 20000);
+      const idx = (re) => (d ? d.posted.findIndex((x) => re.test(x.text)) : -1);
+      const a = idx(/first back-to-back picture/), m = idx(/A message that waited/), b = idx(/second back-to-back picture/);
+      assert(r1.status === 200 && r2.status === 200 && a >= 0 && m > a && b > m, `order typed into ChatGPT: picture 1 (${a}) → the waiting message (${m}) → picture 2 (${b})`);
+    }
+
     console.log('\n== the service bridge (Akọwe\'s contract) ==');
     let r = await req(port, 'GET', '/image/backend', null, TOKEN);
     assert(r.status === 200 && r.json.engines && r.json.engines.chatgpt.ready === true && r.json.engines.sd.connected === false, `GET /image/backend → engines ${JSON.stringify(r.json && r.json.engines)}`);

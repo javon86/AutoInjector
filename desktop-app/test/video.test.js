@@ -414,6 +414,57 @@ async function main() {
     assert(r3 === 501, 'no video wired → 501');
     await bridge.stop(); await throwing.stop(); await unwired.stop();
   }
+  // ---- from the 360 review: stop / time out, model in another ComfyUI's folder, an oversized bridge body ----
+  console.log('\n== stopping a video never leaves it rendering; a time-out stops it too ==');
+  {
+    const slow = await fakeComfy({ videoPolls: 1000 });
+    const T = fs.mkdtempSync(path.join(os.tmpdir(), 'vcancel-'));
+    const st = VS.createVideoStudio({ comfy: async () => { await new Promise((r) => setTimeout(r, 300)); return { base: slow.base }; }, installer: () => VI.createVideoInstaller({ roots: () => [] }), videosDir: () => T, pollMs: 40, noWs: true });
+    const pr = st.generate({ prompt: 'slow' });
+    await new Promise((r) => setTimeout(r, 50));
+    await st.cancel();
+    const r = await pr;
+    assert(r.error === 'VIDEO_CANCELLED' && Object.keys(slow.state.prompts).length === 0 && slow.state.interrupted === false, 'Stop while ComfyUI is still starting: nothing is queued, and nothing else ComfyUI renders is interrupted');
+    const st2 = VS.createVideoStudio({ comfy: async () => ({ base: slow.base }), installer: () => VI.createVideoInstaller({ roots: () => [] }), videosDir: () => T, pollMs: 40, noWs: true });
+    const pr2 = st2.generate({ prompt: 'slow' });
+    for (let i = 0; i < 100 && !Object.keys(slow.state.prompts).length; i++) await new Promise((res) => setTimeout(res, 20));
+    await st2.cancel();
+    const r2 = await pr2;
+    assert(r2.error === 'VIDEO_CANCELLED' && slow.state.deleted.length >= 1, 'Stop while it renders: this job\'s prompt is interrupted and taken off the queue');
+    await slow.close();
+  }
+  console.log('\n== a model file in ANOTHER ComfyUI\'s folder is not "installed" for the running one ==');
+  {
+    const T = fs.mkdtempSync(path.join(os.tmpdir(), 'vroot-'));
+    const files = new Map([['/v.bin', Buffer.from('abcd')]]);
+    const srv = http.createServer((req, res) => { const b = files.get(req.url); if (!b) { res.writeHead(404); return res.end(); } res.writeHead(200, { 'Content-Length': b.length }); res.end(b); });
+    await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+    const url = `http://127.0.0.1:${srv.address().port}/v.bin`;
+    const tiny = { id: 'tiny', label: 't', short: 'Tiny', family: 'wan22', modes: ['t2v'], vramGB: 1, files: [{ kind: 'vae', name: 'v.bin', url, bytes: 4 }], defaults: {}, limits: {} };
+    const sm = path.join(T, 'sm'); const port = path.join(T, 'portable');
+    fs.mkdirSync(path.join(sm, 'VAE'), { recursive: true }); fs.mkdirSync(port, { recursive: true });
+    fs.writeFileSync(path.join(sm, 'VAE', 'v.bin'), 'abcd');
+    const vi = VI.createVideoInstaller({ models: { tiny }, roots: () => [{ path: sm, layout: 'sm' }], sdInstaller: () => ({ portable: () => ({ models: port }) }), preferredRoot: () => ({ path: port }), freeBytes: () => 1e12 });
+    const c = vi.check({ diffusion_models: [], text_encoders: [], vae: [] });
+    assert(!c.models.find((m) => m.id === 'tiny').installed, 'check(): the running ComfyUI lists no such VAE → not installed (even though Stability Matrix has it)');
+    const d = await vi.downloadModel('tiny');
+    assert(d.ok && !d.already && fs.existsSync(path.join(port, 'vae', 'v.bin')), 'Download puts it into the TARGET ComfyUI instead of answering "already downloaded"');
+    try { srv.closeAllConnections(); } catch (_) {} srv.close();
+  }
+  console.log('\n== an oversized bridge body is refused and its connection closed ==');
+  {
+    const b = createServiceBridge({ video: { backend: () => ({}), request: async () => ({ ok: true }) } });
+    const s4 = await b.start({ port: 0, host: '127.0.0.1', token: 'tok' });
+    const r = await new Promise((resolve) => {
+      const rq = http.request({ host: '127.0.0.1', port: s4.port || s4.address.port, method: 'POST', path: '/video/request', headers: { Authorization: 'Bearer tok', 'Content-Type': 'application/json' } }, (res) => { res.resume(); res.on('end', () => resolve({ status: res.statusCode, conn: res.headers.connection })); });
+      rq.on('error', () => {});
+      const chunk = Buffer.alloc(1024 * 1024, 'a'); let n = 0;
+      const pump = () => { while (n < 45) { n++; if (!rq.write(chunk)) { rq.once('drain', pump); return; } } rq.end(); };
+      pump();
+    });
+    assert(r.status === 400 && r.conn === 'close', 'over 40 MB → 400 BAD_JSON with Connection: close (the socket is not left open)');
+    await b.stop();
+  }
   await comfy.close();
   console.log(`\n${passed} passed, ${failed} failed`);
   try { fs.rmSync(TMP, { recursive: true, force: true }); } catch (_) {}

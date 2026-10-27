@@ -457,6 +457,7 @@ function createVideoStudio(deps = {}) {
   async function runGraph(base, graph, job, timeoutMs) {
     const clientId = crypto.randomUUID();
     job.clientId = clientId; job.step = 0; job.steps = 0; job.phase = 'queued';
+    if (job.cancelled) return { ok: false, error: 'CANCELLED' }; // stopped while ComfyUI was starting / the picture uploading: queue nothing
     try { sdBackends.comfySocket(base, clientId, job); } catch (_) {}
     const q = await sdBackends.postJson(`${base}/prompt`, { prompt: graph, client_id: clientId }, 30000);
     if (!q.ok || !q.json || !q.json.prompt_id) {
@@ -464,6 +465,8 @@ function createVideoStudio(deps = {}) {
       return { ok: false, error: q.status === 400 ? 'COMFY_REJECTED' : (q.error || 'COMFY_ERROR'), status: q.status, detail: sdBackends.comfyRejectReason(q.json) || sdBackends.errDetail(q), raw: String(q.text || '').slice(0, 4000) };
     }
     job.promptId = q.json.prompt_id;
+    // Stopped while the prompt was being queued: take it off ComfyUI again (this job's prompt only).
+    if (job.cancelled) { try { await sdBackends.comfyInterrupt(base, job); } catch (_) {} try { job.closeWs && job.closeWs(); } catch (_) {} return { ok: false, error: 'CANCELLED' }; }
     const t0 = Date.now();
     try {
       while (Date.now() - t0 < timeoutMs) {
@@ -492,6 +495,8 @@ function createVideoStudio(deps = {}) {
         else if (job.steps) job.phase = 'sampling';
         await new Promise((r) => setTimeout(r, pollMs));
       }
+      // Gave up waiting: stop this render too, so it doesn't keep the GPU busy for a video nobody collects.
+      try { await sdBackends.comfyInterrupt(base, job); } catch (_) {}
       return { ok: false, error: 'TIMEOUT' };
     } finally { try { job.closeWs && job.closeWs(); } catch (_) {} }
   }
@@ -562,7 +567,9 @@ function createVideoStudio(deps = {}) {
     const j = current;
     if (!j) return { ok: true, cancelled: false, message: 'No video is being made.' };
     j.cancelled = true;
-    if (j.base) { try { await sdBackends.comfyInterrupt(j.base, j); } catch (_) {} }
+    // Only this job's prompt: before it is queued there is nothing to stop (runGraph sees `cancelled` and queues nothing),
+    // and a bare /interrupt would stop whatever else ComfyUI is rendering (e.g. a 🎨 Images picture).
+    if (j.base && j.promptId) { try { await sdBackends.comfyInterrupt(j.base, j); } catch (_) {} }
     log('video-cancel', { mode: j.mode, seconds: Math.round((Date.now() - j.startedAt) / 1000) });
     return { ok: true, cancelled: true };
   }
