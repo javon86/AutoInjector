@@ -40,6 +40,8 @@ A('participants.set', 'participants:set', { t: 'Make an AI active / inactive', c
 A('roles.set', 'roles:set', { t: 'Give an AI a role to play', c: true, aa: true, a: { site, role: opt(400) }, r: ['site', 'role'], ex: { site: 'claude', role: 'a strict editor' } });
 A('health.check', 'health:check', { t: 'Check one AI pane now', c: false, a: { site }, r: ['site'], ex: { site: 'claude' } });
 A('health.get', 'health:get', { t: 'AI pane health lights', c: false });
+A('health.status', 'health:status', { t: 'Is anything wrong? What the 🩺 health watch found (his brain/Ollama, free disk, Stable Diffusion, Akọwe\'s server, AI panes, logs folder) and the fix for each', c: false, a: { fresh: { type: 'boolean', description: 'look again now (cheap local checks)' } } });
+A('health.fix', 'health:fix', { t: 'Apply the one-click fix for a problem the health watch found', c: true, a: { code: text(80) }, r: ['code'], ex: { code: 'brain-ollama-down' } });
 A('sites.list', 'site:list', { t: 'The AI panes and their state', c: false });
 A('site.reload', 'site:reload', { t: 'Reload an AI pane', c: true, aa: true, a: { site }, r: ['site'], call: (a) => [a.site], ex: { site: 'gemini' } });
 A('sites.new_chat_all', 'sites:new-chat-all', { t: 'Start a new chat in every AI pane', c: true });

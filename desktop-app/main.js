@@ -8334,6 +8334,67 @@ const alfred = require("./alfred-main").installAlfred({
 });
 // ==== end 🎩 ALFRED HOOK ====
 
+// ==== 🩺 HEALTH WATCH (health-watch.js) — warn BEFORE something breaks ====
+// Cheap checks a minute after start, then every ~10 minutes (no AI calls, nothing beyond localhost):
+// Alfred's brain, free disk, Stable Diffusion, Akọwe's server, AI panes self-repair gave up on, the logs
+// folder. Each problem is told once (again after an hour, or when it gets worse) and once when it is fixed:
+// in the activity log (kind "health"), the 🎩 Butler section (the "health" event) and Alfred's notices.
+// AUTOINJECTOR_HEALTH=0 turns the timer off (health:status still answers).
+const healthWatchLib = require("./health-watch");
+async function healthProbe(url) {
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), 2500);
+  try { await fetch(url, { method: "GET", signal: ctl.signal }); return true; } catch (_) { return false; } finally { clearTimeout(t); }
+}
+const healthWatch = healthWatchLib.createHealthWatch({
+  alfred: () => {
+    if (!alfred.isEnabled()) return { enabled: false };
+    const s = alfred.getSettings();
+    let endpoint = s.local && s.local.endpoint;
+    if (!endpoint) { try { const m = ollamaManager.managedStatus(); if (m && m.running && m.endpoint) endpoint = m.endpoint; } catch (_) {} }
+    const c = state.managerConfig || {};
+    return { enabled: true, brain: s.brain, endpoint: endpoint || "http://127.0.0.1:11434/v1", model: s.local && s.local.model, hasApi: !!(c.endpoint && c.model) };
+  },
+  listModels: (base) => ollamaManager.listInstalled(base, 3000),
+  ollamaInstalled: async () => { try { const f = await llmSetup.findOllama({ cached: true }); return !!(f && f.ok); } catch (_) { return null; } },
+  diskPaths: () => {
+    const out = [];
+    try { const r = outputManager.root(); if (r) out.push({ id: "content", label: "the \"stuff and thing\" folder", path: r }); } catch (_) {}
+    try { const m = outputManager.modelsRoot(); if (m) out.push({ id: "models", label: "the models folder", path: m }); } catch (_) {}
+    return out;
+  },
+  sd: () => {
+    const im = imageProvider.status();
+    let phase = null; try { phase = sdRunner().status().phase; } catch (_) {}
+    return { enabled: !!im.enabled, configured: !!im.configured, base: im.base, runnerPhase: phase };
+  },
+  sdCanStart: () => sdTargets().some((t) => t.supported),
+  probe: healthProbe,
+  akowe: () => { const s = akoweServerPublicStatus(); return { enabled: s.enabled, phase: s.phase, error: s.error, message: s.message, restarts: s.restarts }; },
+  panes: () => { const sr = selfRepairStatus(); return SITE_IDS.map((s) => { const x = (sr.sites && sr.sites[s]) || {}; return { site: s, label: x.label || siteLabel(s), active: !!x.active, state: x.state, problem: x.problem }; }); },
+  logDirs: () => { try { return [outputManager.logsDir()]; } catch (_) { return []; } },
+  log: (kind, detail) => logEvent(kind, detail),
+  notify: ({ type, problem, text }) => {
+    broadcast("health", { type, problem, text, problems: healthWatch.problems() });
+    if (problem.alfred !== false) {
+      try { alfred.notice("health", `health:${type}:${problem.code}`, text, { force: true, action: type === "problem" && problem.fix ? { code: problem.code, label: problem.fix.label } : undefined }); } catch (_) {}
+    }
+  },
+  runFix: async (fix) => {
+    if (fix.open) { const err = await shell.openPath(fix.open); return err ? { ok: false, error: "OPEN_FAILED", message: "I couldn't open that folder." } : { ok: true, message: "Opened the folder." }; }
+    if (fix.channel) return require("./alfred-main").invokeChannel(fix.channel, ...(fix.args || []));
+    return { ok: false, error: "NO_FIX" };
+  },
+});
+// app events that say "look again now": Akọwe's server changing phase, an AI pane self-repair gave up on
+broadcastListeners.add((channel, payload) => {
+  if (channel === "akowe-server") healthWatch.poke("akowe");
+  else if (channel === "self-repair" && payload && payload.event && ["broken", "fixed"].includes(payload.event.kind)) healthWatch.poke("panes");
+});
+ipcMain.handle("health:status", async (_e, opts) => { try { return opts && opts.fresh ? await healthWatch.runOnce() : healthWatch.status(); } catch (_) { return { ok: false, problems: [], error: "Something went wrong on my side." }; } });
+ipcMain.handle("health:fix", async (_e, p) => { try { return await healthWatch.fix(p && typeof p === "object" ? p.code : p); } catch (_) { return { ok: false, error: "Something went wrong on my side." }; } });
+// ==== end 🩺 HEALTH WATCH ====
+
 app.whenReady().then(() => {
   loadPersistedState();
   selfRepairApplySettings(); // P18.1: the saved check-in interval
@@ -8373,6 +8434,8 @@ app.whenReady().then(() => {
   if (akoweServerEnabled()) setTimeout(() => { akoweServerStart("startup"); }, 0);
   // 🎨 "Start Stable Diffusion with AutoInjector" (default off): in the background, never blocking the window.
   if (state.sdManaged && state.sdManaged.startWithApp && process.env.AUTOINJECTOR_SD_AUTOSTART !== "0") setTimeout(() => { sdStart(state.sdManaged.targetId).catch((e) => logEvent("sd-runner-error", { error: String(e) })); }, 1500);
+  // 🩺 the health watch: first look a minute after start, then every ~10 minutes
+  if (process.env.AUTOINJECTOR_HEALTH !== "0") healthWatch.start();
 });
 // Stop OUR Stable Diffusion process before quitting (one started outside AutoInjector keeps running).
 let sdQuitDone = false;

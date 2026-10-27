@@ -25,5 +25,7 @@ contextBridge.exposeInMainWorld("api", {
   alfredShowButler: () => ipcRenderer.invoke("alfred:show-butler"),
   // "🩺 Check his AI": the one-button setup's check (llm:check) when this build has it, else alfred:test-ai
   llmCheck: () => ipcRenderer.invoke("llm:check"),
+  // 🩺 a health notice's one-click fix (health-watch.js)
+  healthFix: (code) => ipcRenderer.invoke("health:fix", { code }),
   onAlfred: (cb) => ipcRenderer.on("alfred", (_e, payload) => cb(payload)),
 });

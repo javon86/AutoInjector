@@ -643,7 +643,10 @@ function createAlfred(deps = {}) {
     }
     noticeLog.push({ key, at: t });
     log('alfred-notice', { kind });
-    say('notice', text, { kind, image: opts.image || undefined });
+    // a one-click fix (🩺 health watch): the panel shows a button that calls health:fix with this code
+    const action = opts.action && typeof opts.action === 'object' && /^[\w:.-]{1,80}$/.test(String(opts.action.code || ''))
+      ? { code: String(opts.action.code), label: String(opts.action.label || 'Fix it').slice(0, 60) } : undefined;
+    say('notice', text, { kind, image: opts.image || undefined, action });
     return true;
   }
   /** App events (main.js forwards broadcast channels here). Ignored entirely while Alfred is off. */

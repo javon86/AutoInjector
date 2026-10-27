@@ -338,6 +338,10 @@ contextBridge.exposeInMainWorld("api", {
   alfredPanel: (patch) => ipcRenderer.invoke("alfred:panel", patch || null),
   alfredPanelToggle: (open) => ipcRenderer.invoke("alfred:panel-toggle", { open: typeof open === "boolean" ? open : undefined }),
   alfredShowButler: () => ipcRenderer.invoke("alfred:show-butler"),
-  onAlfred: (cb) => ipcRenderer.on("alfred", (_e, payload) => cb(payload))
+  onAlfred: (cb) => ipcRenderer.on("alfred", (_e, payload) => cb(payload)),
+  // ==== 🩺 health watch (health-watch.js): problems found BEFORE something breaks ====
+  healthStatus: (opts) => ipcRenderer.invoke("health:status", opts || {}),
+  healthFix: (code) => ipcRenderer.invoke("health:fix", { code }),
+  onHealth: (cb) => ipcRenderer.on("health", (_e, payload) => cb(payload))
   // ==== end 🎩 Alfred ====
 });
