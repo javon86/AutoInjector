@@ -614,7 +614,7 @@ def test_http_api_contract(fx, no_provider_sleep):  # noqa: F811
         assert d["sections"][0]["key"] == "record" and d["sections"][0]["n"] == 1
         f0 = d["sections"][0]["fields"][0]
         assert set(f0) >= {"key", "label", "letters", "text", "status", "protected"}
-        assert set(d["art"]) == {"portrait", "views", "sheet"} and set(d["art"]["views"]) == set(forge.VIEW_KEYS)
+        assert set(d["art"]) == {"portrait", "views", "sheet", "clip"} and d["art"]["clip"] is None and set(d["art"]["views"]) == set(forge.VIEW_KEYS)
         st, d, _ = call(port, "PUT", f"{base}/characters/{rid}",
                         {"sections": {"record": {"supplied_canon": {"text": "Small build.", "protected": True,
                                                                     "letters": ["C", "A"]}}}})

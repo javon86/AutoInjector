@@ -305,7 +305,12 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
   one tested. See `STABLE_DIFFUSION_PLAN.md`.
   Akọwe can ask via `POST /image/request` with a character lock (`docs/SD_IMAGE_API.md`). Setup guide:
   `docs/STABLE_DIFFUSION_SETUP.md`. Still to do: the Akọwe side (store pictures as book assets, UI) — with B3/B5.
-- [ ] **B2** 🎬 Video: hook up AutoInjector's Video Generation panel for book trailers / scenes.
+- [~] **B2** 🎬 Video: hook up AutoInjector's Video Generation panel for book trailers / scenes.
+  Akọwe side, first use DONE 2026-10-27: Character Forge **motion clips** — a 4 s picture→video "motion study" per
+  dossier through AutoInjector `POST /video/request` (portrait as a temp-file path, idle-motion prompt from the
+  appearance / posture / gait / expressions fields, 900 s timeout, plain words for every `VIDEO_*` code), stored with
+  its poster as book assets, played on the dossier page, the poster as a MOTION STUDY still in the PDF, in the book
+  save (`docs/CHARACTER_FORGE.md` "Motion clip"). Still open: book trailers / scene clips; a real GPU run.
 - [ ] **B3 (P19)** 🎨 Book cover and pictures (LATER — not started): cover design (title/author on a template,
   AI-generated artwork when an image AI is connected), chapter images/illustrations, maps; placement in
   PDF/EPUB/DOCX; print-ready cover size and spine.
@@ -326,7 +331,7 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
 - [~] **B5** 🗂 Character Forge dossiers — characters DONE 2026-10-26 (`docs/CHARACTER_FORGE.md`): 14-section lettered
   dossiers that reuse the character sheet / voice card / canon record, ✨ Invent the rest as proposals, approvals with
   revisions, portrait + ten views (+ turnaround sheet) through AutoInjector `/image/request` or uploads, the dark
-  dossier PDF, letters in chapter prompts, the Moki Vey example. Pictures come from Stable Diffusion **or ChatGPT** (AutoInjector's new ChatGPT image engine draws in its pane; `engine` sd/chatgpt/auto); AutoInjector hands Akọwe the bridge address + token itself; 🎩 Alfred has 5 dossier tools (read, invent the rest, edit, approve, make art). Checked across the two real programs (Akọwe art job → bridge → Stable Diffusion stand-in → book assets → PDF). Still open: real ChatGPT/GPU run; items / places / magic systems (the
+  dossier PDF, letters in chapter prompts, the Moki Vey example. Pictures come from Stable Diffusion **or ChatGPT** (AutoInjector's new ChatGPT image engine draws in its pane; `engine` sd/chatgpt/auto); AutoInjector hands Akọwe the bridge address + token itself; 🎩 Alfred has 5 dossier tools (read, invent the rest, edit, approve, make art). Checked across the two real programs (Akọwe art job → bridge → Stable Diffusion stand-in → book assets → PDF). 🎬 Motion clips DONE 2026-10-27 (with B2): a looping 4 s clip from the portrait via `/video/request`, upload your own, MOTION STUDY still in the PDF, in the book save. Still open: real ChatGPT/GPU run; items / places / magic systems (the
   machinery is ready), a manuscript check of the dossier. Original idea: Deeper character/item/place/magic-system profiles like
   the ChatGPT 'Character Forge' plugin (sample: Moki Vey dossier): extra sections (detailed appearance, fighting,
   weapons, magic, skills, physical, knowledge, backstory timeline, storyline, continuity), category letters C P V A F

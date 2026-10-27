@@ -1236,6 +1236,22 @@ ul.samples q { font-style: italic; }
 .forge-stat strong { display: block; font-size: 1.35rem; color: var(--fg-text); }
 .forge-stat span { color: var(--fg-muted); font-size: .78rem; }
 .forge-stat.warn strong { color: var(--fg-amber); }
+/* 🎬 the motion study under the portrait */
+.forge-motion { margin-top: 1.1rem; padding: .7rem; border-radius: 10px; border: 1px solid var(--fg-line);
+  background: linear-gradient(180deg, rgba(255,255,255,.035), rgba(255,255,255,.01)); }
+.forge-motion-head { display: flex; align-items: baseline; justify-content: space-between; gap: .6rem; margin: 0 0 .5rem; }
+.forge-motion h3 { margin: 0; font-size: .8rem; letter-spacing: .14em; text-transform: uppercase; color: var(--fg-teal); font-weight: 700; }
+.forge-motion-meta { color: var(--fg-muted); font-size: .72rem; letter-spacing: .06em; text-align: right; }
+.forge-motion-frame { aspect-ratio: 4 / 5; border-radius: 6px; overflow: hidden; position: relative; background: linear-gradient(160deg, #262d34, #14181b);
+  border: 1px solid rgba(212,185,122,.55); box-shadow: 0 10px 28px rgba(0,0,0,.4), 0 0 0 3px rgba(212,185,122,.07); }
+.forge-motion-frame:not(.has-clip) { border-style: dashed; border-color: var(--fg-line2); box-shadow: none; }
+.forge-motion-frame video { width: 100%; height: 100%; object-fit: cover; display: block; background: #0f1214; }
+.forge-motion-frame.no-play::after { content: "This browser cannot play the clip; the poster is shown"; position: absolute; left: 8px; right: 8px; top: 8px;
+  font-size: .7rem; color: var(--fg-muted); background: rgba(15,18,20,.8); border-radius: 4px; padding: .2em .4em; pointer-events: none; }
+.forge-motion-glyph { font-size: 2rem; opacity: .55; }
+.forge-motion .forge-slot-actions { justify-content: center; margin-top: .6rem; }
+.forge-mini:disabled { opacity: .45; cursor: not-allowed; }
+.forge-mini:disabled:hover { border-color: var(--fg-line2); color: var(--fg-text); }
 .forge-msg:empty, .forge-prog:empty { display: none; }
 .forge-msg, .forge-prog { margin-top: .8rem; }
 
