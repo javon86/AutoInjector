@@ -50,6 +50,21 @@ const mk = (p, data) => { fs.mkdirSync(path.dirname(p), { recursive: true }); fs
   fs.mkdirSync(third, { recursive: true });
   c = ch.chooseRoot({ appFolder: third, userData, home });
   assert(c.root === newCopy && c.reason === 'remembered' && c.others.some((o) => o.root === oldCopy), 'a third copy uses the remembered folder (and still offers the other one, since you never picked)');
+  { // the scan of the home folder runs once, not on every launch
+    let walks = 0;
+    const cfs = Object.assign({}, fs, { readdirSync: (...a) => { walks++; return fs.readdirSync(...a); } });
+    assert(ch.readRememberedInfo(userData).scanned === true, 'after that scan, the remembered choice notes it was done (and what it found)');
+    walks = 0;
+    c = ch.chooseRoot({ appFolder: third, userData, home, fs: cfs });
+    assert(c.reason === 'remembered' && c.others.some((o) => o.root === oldCopy) && walks === 0, `the next launch does not walk the disk again (${walks} folder reads) and still offers the earlier copy`);
+    ch.remember(userData, newCopy, fs, 'auto', { others: c.others });
+    assert(ch.readRememberedInfo(userData).scanned && ch.readRememberedInfo(userData).others.length === 1, 'main.js remembering with this launch\'s others → marked as scanned');
+    ch.remember(userData, newCopy, fs, 'auto'); // an older record (no scan noted) → scanned once more, then remembered
+    walks = 0; c = ch.chooseRoot({ appFolder: third, userData, home, fs: cfs });
+    const w1 = walks; walks = 0; ch.chooseRoot({ appFolder: third, userData, home, fs: cfs });
+    assert(w1 > 0 && walks === 0, `an older record scans once (${w1} folder reads), then never again (${walks})`);
+    assert(/contentHome\.remember\(userDataDir\(\), contentBaseFolder\(\), undefined, "auto", \{ others: c\.others \|\| \[\] \}\)/.test(fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8')), 'main.js remembers the first launch\'s scan result with the folder');
+  }
   ch.remember(userData, oldCopy, fs, 'user');
   c = ch.chooseRoot({ appFolder: third, userData, home });
   assert(c.root === oldCopy && c.reason === 'chosen' && c.others.length === 0, 'after you pick one: that folder, and no more offers');

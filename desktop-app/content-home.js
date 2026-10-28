@@ -54,12 +54,22 @@ function describe(fs, stuffDir) {
 }
 
 /** -> { root, how: 'auto' (the app noted it) | 'user' (you picked it) } | null */
+// scanned: the other-copies scan already ran for this choice; others: what it found (root, dir, what, bytes)
 function readRememberedInfo(userData, fs = nodeFs) {
-  try { const j = JSON.parse(fs.readFileSync(path.join(userData, FILE), 'utf8')); return j && typeof j.root === 'string' && j.root ? { root: j.root, how: j.how === 'user' ? 'user' : 'auto' } : null; } catch (_) { return null; }
+  try {
+    const j = JSON.parse(fs.readFileSync(path.join(userData, FILE), 'utf8'));
+    if (!j || typeof j.root !== 'string' || !j.root) return null;
+    const others = Array.isArray(j.others) ? j.others.filter((o) => o && typeof o.root === 'string' && typeof o.dir === 'string').slice(0, 20)
+      .map((o) => ({ root: o.root, dir: o.dir, what: Array.isArray(o.what) ? o.what.map(String).slice(0, 10) : [], bytes: Number(o.bytes) || 0 })) : [];
+    return { root: j.root, how: j.how === 'user' ? 'user' : 'auto', scanned: j.scanned === true, others };
+  } catch (_) { return null; }
 }
 function readRemembered(userData, fs = nodeFs) { const r = readRememberedInfo(userData, fs); return r ? r.root : null; }
-function remember(userData, root, fs = nodeFs, how = 'user') {
-  try { fs.mkdirSync(userData, { recursive: true }); fs.writeFileSync(path.join(userData, FILE), JSON.stringify({ root, how, savedAt: new Date().toISOString() }, null, 2)); return true; } catch (_) { return false; }
+// extra.others (a scan's result) is stored with scanned:true, so later launches don't walk the disk again.
+function remember(userData, root, fs = nodeFs, how = 'user', extra = null) {
+  const rec = { root, how, savedAt: new Date().toISOString() };
+  if (extra && Array.isArray(extra.others)) { rec.scanned = true; rec.others = extra.others.slice(0, 20).map((o) => ({ root: o.root, dir: o.dir, what: o.what || [], bytes: o.bytes || 0 })); }
+  try { fs.mkdirSync(userData, { recursive: true }); fs.writeFileSync(path.join(userData, FILE), JSON.stringify(rec, null, 2)); return true; } catch (_) { return false; }
 }
 
 /** Other folders on this PC that hold a "stuff and thing" (a likely earlier copy of AutoInjector). */
@@ -98,8 +108,17 @@ function findOtherRoots({ home, appFolder, extra = [], fs = nodeFs, maxDepth = 3
 function chooseRoot({ appFolder, userData, home, fs = nodeFs, scan = true } = {}) {
   const rem = userData ? readRememberedInfo(userData, fs) : null;
   if (rem && isDir(fs, path.join(rem.root, STUFF))) {
-    // a folder you picked yourself: stay quiet; one the app only noted: still look for an earlier copy's downloads
-    const others = scan && rem.how !== 'user' ? findOtherRoots({ home, appFolder: rem.root, fs }) : [];
+    // a folder you picked yourself: stay quiet; one the app only noted: look for an earlier copy's downloads — once.
+    // The scan walks the home folder, so it is not repeated on every launch: its result is remembered (the
+    // 📁 folders panel's "look again" still scans afresh) and re-checked with a cheap "does it still exist".
+    let others = [];
+    if (scan && rem.how !== 'user') {
+      if (rem.scanned) others = rem.others.filter((o) => path.resolve(o.root) !== path.resolve(rem.root) && isDir(fs, o.dir));
+      else {
+        others = findOtherRoots({ home, appFolder: rem.root, fs });
+        if (userData) remember(userData, rem.root, fs, rem.how, { others });
+      }
+    }
     return { root: rem.root, reason: rem.how === 'user' ? 'chosen' : 'remembered', others };
   }
   const own = path.join(appFolder, STUFF);

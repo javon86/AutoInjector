@@ -8637,7 +8637,7 @@ app.whenReady().then(() => {
     try {
       const c = contentChoice || {};
       logEvent("content-root", { step: "chosen", reason: c.reason, others: (c.others || []).length });
-      if (!c.off && !contentHome.readRemembered(userDataDir())) contentHome.remember(userDataDir(), contentBaseFolder(), undefined, "auto"); // from now on every copy finds it
+      if (!c.off && !contentHome.readRemembered(userDataDir())) contentHome.remember(userDataDir(), contentBaseFolder(), undefined, "auto", { others: c.others || [] }); // from now on every copy finds it (and this launch's scan isn't repeated)
     } catch (_) {}
     // Give the tool registry its output sandbox + the computer-power deps (a
     // process runner, the OS "open" helpers, and where the butler's self-made
