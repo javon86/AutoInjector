@@ -1238,6 +1238,7 @@ def({
   },
 });
 const MCP_SHOW_MAX = 20000;
+const MCP_CALL_MS = 175000;
 def({
   name: 'mcp_call', title: 'Use a tool on a tool server', group: 'app', changes: true, timeoutMs: 180000,
   description: 'Use one tool of an outside tool server (MCP) the user added: server = its name, tool = the tool\'s name, arguments = the tool\'s arguments (see mcp_tools for the schemas). Always asks first.',
@@ -1271,7 +1272,7 @@ def({
   showCode: (a) => ({ language: 'JSON', code: JSON.stringify({ server: a.server, tool: a.tool, arguments: a.arguments || {} }, null, 2) }),
   async run(a, ctx) {
     if (!ctx || typeof ctx.mcpCall !== 'function') return { ok: false, error: 'NOT_WIRED', message: 'Tool servers are not available here.' };
-    const r = await ctx.mcpCall(a.server, a.tool, a.arguments || {});
+    const r = await ctx.mcpCall(a.server, a.tool, a.arguments || {}, { timeoutMs: MCP_CALL_MS }); // just inside this tool's own 180 s
     if (!r || r.ok === false) return { ok: false, error: str((r && r.error) || 'FAILED', 60), message: clip((r && r.message) || 'The tool server call did not work.', 600) };
     const pics = (r.images || []).map((x) => x.path).filter(Boolean);
     return { ok: true, message: clip(r.text || 'Done.', 6000), data: shrink({ images: r.images, resources: r.resources, structured: r.structured }), image: pics[0] || null };

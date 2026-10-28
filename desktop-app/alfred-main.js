@@ -272,7 +272,7 @@ function installAlfred(h) {
     },
     // 🧰 tool servers (MCP, mcp-manager.js) — the user's own list; null-safe in a build without it
     mcpTools: async (server) => (h.mcp ? h.mcp.tools(server) : { ok: true, servers: [], tools: [] }),
-    mcpCall: async (server, tool, args) => (h.mcp ? h.mcp.call(server, tool, args) : { ok: false, error: 'NO_TOOL_SERVERS', message: 'Tool servers are not available in this build.' }),
+    mcpCall: async (server, tool, args, opts) => (h.mcp ? h.mcp.call(server, tool, args, opts) : { ok: false, error: 'NO_TOOL_SERVERS', message: 'Tool servers are not available in this build.' }),
     akowe: (method, p, body) => h.akoweApi(method, p, body, 20000),
     openAkowePage,
     generateImage: (o) => image.generate(o),

@@ -255,7 +255,7 @@ function createMcpManager(opts = {}) {
     return { ok: true, servers, tools: out, missing: ref && !pick.length ? String(ref).slice(0, 60) : undefined };
   }
   /** Call a tool. A stopped (or failed) server is started first — the user confirmed the call. */
-  async function call(ref, tool, args) {
+  async function call(ref, tool, args, callOpts = {}) {
     const e = find(ref);
     if (!e) return { ok: false, error: 'NO_SERVER', message: `There is no tool server called "${String(ref || '').slice(0, 60)}".` };
     const c = clientFor(e);
@@ -263,7 +263,9 @@ function createMcpManager(opts = {}) {
       const r = await start(e.spec.id);
       if (!r.ok) return r;
     }
-    return c.callTool(String(tool || ''), args && typeof args === 'object' && !Array.isArray(args) ? args : {});
+    // The caller's own time limit (Alfred's mcp_call allows 180 s) — not the manager's default for every call.
+    const timeoutMs = Number(callOpts && callOpts.timeoutMs) > 0 ? Math.min(Number(callOpts.timeoutMs), 600000) : undefined;
+    return c.callTool(String(tool || ''), args && typeof args === 'object' && !Array.isArray(args) ? args : {}, timeoutMs ? { timeoutMs } : {});
   }
   /** App quit: stop every running server (keeps their "start with the app" state). */
   async function stopAll() {

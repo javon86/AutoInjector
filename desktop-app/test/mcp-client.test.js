@@ -101,6 +101,28 @@ async function main() {
     assert(!lin.length && await until(() => !alive(lpid), 2000), 'elsewhere it is a plain kill (no taskkill)');
   }
 
+  console.log('\n== a call\'s own time limit reaches the server (not the manager\'s default) ==');
+  {
+    const tm = createMcpManager({ file: path.join(TMP, 'timeouts.json'), seal: () => null, open: () => '', timeoutMs: 300 });
+    const ta = tm.add({ name: 'slowpoke', line: `"${process.execPath}" "${FAKE}"` });
+    await tm.start(ta.server.id);
+    let tr = await tm.call('slowpoke', 'slow', { ms: 900 });
+    assert(!tr.ok && tr.error === 'TIMEOUT', 'without a time limit the manager\'s default applies');
+    tr = await tm.call('slowpoke', 'slow', { ms: 900 }, { timeoutMs: 5000 });
+    assert(tr.ok && tr.text === 'finally', 'call(ref, tool, args, { timeoutMs }) passes the longer limit through to callTool');
+    await tm.stopAll();
+    const src = fs.readFileSync(path.join(__dirname, '..', 'alfred-tools.js'), 'utf8') + fs.readFileSync(path.join(__dirname, '..', 'alfred-main.js'), 'utf8');
+    assert(/ctx\.mcpCall\(a\.server, a\.tool, a\.arguments \|\| \{\}, \{ timeoutMs: MCP_CALL_MS \}\)/.test(src) && /h\.mcp\.call\(server, tool, args, opts\)/.test(src), 'Alfred\'s mcp_call hands its own (180 s) limit to the manager');
+    // HTTP: the socket idle timeout never cuts a request before the request's own limit
+    const hs2 = await startFakeMcpHttp({ callDelayMs: 2600 });
+    const slowHttp = createMcpClient({ name: 'slowweb', transport: 'http', url: hs2.url, timeoutMs: 300, initTimeoutMs: 300 });
+    assert(slowHttp.httpIdleMs(180000) === 182000 && slowHttp.httpIdleMs() === 3000, 'HTTP idle timeout = max(request limit, timeoutMs, initTimeoutMs) + 2 s');
+    await slowHttp.start();
+    tr = await slowHttp.callTool('when', {}, { timeoutMs: 6000 });
+    assert(tr.ok && tr.text === 'slow noon', `a slow HTTP tool call within its own limit is not cut by the socket timeout (${tr.message || 'ok'})`);
+    await slowHttp.stop(); await hs2.close();
+  }
+
   console.log('\n== stdio: start errors in plain words, secrets never shown ==');
   let e = await createMcpClient({ name: 'missing', command: 'definitely-not-a-program-xyz', args: [], initTimeoutMs: 3000 }).start();
   assert(!e.ok && /isn't installed/.test(e.message), `a program that isn't there → "${e.message}"`);
