@@ -744,7 +744,7 @@ async function main() {
     assert(!!d.getElementById('alfred-window') && !d.getElementById('btn-alfred-switch') && d.querySelectorAll('#alfred-chat .al-msg').length === 2, 'the window renders the same panel (chat and all) from the same state');
     assert(d.getElementById('alfred-title').textContent === '🎩 Jeeves' && wdom.window.document.title === '🎩 Jeeves', 'his name from the personality is on the header');
     const quick = Array.from(d.querySelectorAll('#alfred-quick button')).map((b) => b.textContent);
-    assert(quick.join('|') === '📊 Status|🩺 Check his AI|🎨 Make a picture|📖 My book|⚙ Set up his AI', `quick buttons: ${quick.join(' · ')}`);
+    assert(quick.join('|') === '📊 Status|🩺 Check his AI|🎨 Make a picture|📖 My book|⚙ Set up his AI|🧑 New character|✨ New magic system|🗡 New item|🗺 New place', `quick buttons: ${quick.join(' · ')}`);
     d.getElementById('alfred-q-status').click(); await sleep(10);
     assert(wc.some((x) => /^ask:What's the status of everything/.test(x)), '📊 Status asks him for the status');
     d.getElementById('alfred-q-picture').click();
@@ -753,6 +753,14 @@ async function main() {
     assert(wc.includes('test') && /My AI answers/.test(d.getElementById('alfred-quick-msg').textContent), '🩺 Check his AI: falls back to "Test my AI" when this build has no full check');
     d.getElementById('alfred-q-setup').click(); await sleep(10);
     assert(wc.includes('butler'), '⚙ Set up his AI asks main to show the Butler section');
+    d.getElementById('alfred-q-new-char').click(); await sleep(10);
+    assert(wc.some((x) => /^ask:Create a new character dossier/.test(x)), '🧑 New character sends forge prompt');
+    d.getElementById('alfred-q-new-magic').click(); await sleep(10);
+    assert(wc.some((x) => /^ask:Create a new magic system dossier/.test(x)), '✨ New magic system sends forge prompt');
+    d.getElementById('alfred-q-new-item').click(); await sleep(10);
+    assert(wc.some((x) => /^ask:Create a new item dossier/.test(x)), '🗡 New item sends forge prompt');
+    d.getElementById('alfred-q-new-place').click(); await sleep(10);
+    assert(wc.some((x) => /^ask:Create a new place dossier/.test(x)), '🗺 New place sends forge prompt');
     const sel = d.getElementById('alfred-profile');
     assert(Array.from(sel.options).map((o) => o.value).join(',') === ',Fast local,Claude brief' && sel.value === 'Fast local', 'the set-up switcher lists the saved set-ups, the active one selected');
     sel.value = 'Claude brief'; sel.dispatchEvent(new wdom.window.Event('change')); await sleep(10);
