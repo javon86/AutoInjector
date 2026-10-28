@@ -107,6 +107,8 @@ async function main() {
     assert(/win64/.test(f), 'AUTOINJECTOR_FFMPEG wins');
     assert(VT.findFfmpeg({ env: { PATH: path.join(TMP, 'none') }, platform: 'linux', roots: [] }) === null, 'none anywhere → null');
     assert(VT.findFfmpeg({ env: { PATH: pathDir, AUTOINJECTOR_FFMPEG: 'none' }, platform: 'linux', roots: [root] }) === null, 'AUTOINJECTOR_FFMPEG=none → never ffmpeg');
+    const reserved = ['Con', 'aux', 'NUL', 'COM1', 'lpt9', 'Prn', 'Aux.v2'].map((n) => VT.safeName(n));
+    assert(JSON.stringify(reserved) === JSON.stringify(['Con_', 'aux_', 'NUL_', 'COM1_', 'lpt9_', 'Prn_', 'Aux_.v2']) && VT.safeName('Console') === 'Console' && VT.safeName('COM10') === 'COM10' && VT.safeName('The Con') === 'The Con', `a book called Con / Aux / NUL / COM1 / LPT9 gets a Windows-safe folder (${reserved.join(', ')}); other names are untouched`);
     const a = VT.mp4Args('/t/trailer.webm', '/t/trailer.mp4', true);
     assert(a.join(' ').includes('-c:v libx264 -pix_fmt yuv420p') && a.includes('aac') && a.includes('+faststart') && a[a.length - 1] === '/t/trailer.mp4' && VT.mp4Args('a', 'b', false).includes('-an'), '.mp4 = H.264 yuv420p, faststart, AAC music (or no audio)');
   }

@@ -40,7 +40,9 @@ const bad = (field, message, hint) => ({ ok: false, error: 'INVALID_PARAM', code
 function fail(code, message, fix, extra) { return Object.assign({ ok: false, error: code, code, message, fix: fix || '' }, extra || {}); }
 // A folder name from a book title (Windows-safe).
 function safeName(s, dflt) {
-  const t = String(s || '').normalize('NFC').replace(/[<>:"/\\|?*\x00-\x1f]/g, ' ').replace(/\s+/g, ' ').trim().replace(/[. ]+$/, '').slice(0, 80);
+  let t = String(s || '').normalize('NFC').replace(/[<>:"/\\|?*\x00-\x1f]/g, ' ').replace(/\s+/g, ' ').trim().replace(/[. ]+$/, '').slice(0, 80);
+  // Windows device names (CON, PRN, AUX, NUL, COM1-9, LPT1-9 — also with an extension, "Con.txt") can't be folders
+  if (/^(con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³])(\..*)?$/i.test(t)) t = t.replace(/^([^.]+)/, '$1_'); // "Con" → "Con_", "Aux.v2" → "Aux_.v2"
   return t || dflt || 'trailer';
 }
 
