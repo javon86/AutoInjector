@@ -126,11 +126,15 @@ function createServiceBridge(deps) {
   function readJsonBody(req, maxBytes) {
     const limit = maxBytes || 1e6;
     return new Promise((resolve) => {
-      let buf = '';
+      // Raw Buffers, decoded once at the end: a multi-byte UTF-8 character split across two chunks stays whole
+      // (decoding chunk by chunk turned it into U+FFFD). The limit counts bytes.
+      const chunks = [];
+      let size = 0;
       let tooBig = false;
-      req.on('data', (c) => { if (tooBig) return; buf += c; if (buf.length > limit) { tooBig = true; buf = ''; req.bodyTooBig = true; resolve(undefined); } }); // the rest is read and dropped; reply() closes the socket
+      req.on('data', (c) => { if (tooBig) return; const b = Buffer.isBuffer(c) ? c : Buffer.from(String(c)); size += b.length; if (size > limit) { tooBig = true; chunks.length = 0; req.bodyTooBig = true; resolve(undefined); return; } chunks.push(b); }); // the rest is read and dropped; reply() closes the socket
       req.on('end', () => {
         if (tooBig) return resolve(undefined);
+        const buf = Buffer.concat(chunks, size).toString('utf8');
         if (!buf) return resolve({});
         try { resolve(JSON.parse(buf)); } catch (_) { resolve(undefined); }
       });

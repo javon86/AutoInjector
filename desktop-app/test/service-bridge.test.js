@@ -139,6 +139,26 @@ async function main() {
     assert(site.json.responses.length === 1 && site.json.responses[0].site === 'chatgpt', 'site= filters by participant');
   }
 
+  console.log('\n== request bodies: UTF-8 split across chunks stays whole; the size limit counts bytes ==');
+  {
+    const raw = (chunks, gapMs) => new Promise((resolve, reject) => {
+      const total = chunks.reduce((n, b) => n + b.length, 0);
+      const r = http.request({ host: '127.0.0.1', port: PORT, path: '/participants/chatgpt/send', method: 'POST', headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json', 'Content-Length': total } }, (res) => { let d = ''; res.on('data', (c) => { d += c; }); res.on('end', () => resolve({ status: res.statusCode, json: safeJson(d) })); });
+      r.on('error', reject);
+      (async () => { for (const b of chunks) { r.write(b); await new Promise((z) => setTimeout(z, gapMs)); } r.end(); })();
+    });
+    const body = Buffer.from(JSON.stringify({ text: 'héllo 🌍 wörld' }), 'utf8');
+    const cut = body.indexOf(Buffer.from('🌍', 'utf8')) + 2; // in the middle of the 4-byte emoji
+    const n0 = calls.sendTo.length;
+    const split = await raw([body.subarray(0, cut), body.subarray(cut)], 60);
+    const sent = calls.sendTo[n0];
+    assert(split.status === 200 && sent && sent.text === 'héllo 🌍 wörld', `a character split across two chunks arrives intact (${sent && JSON.stringify(sent.text)})`);
+    const big = Buffer.from(JSON.stringify({ text: '€'.repeat(400000) }), 'utf8'); // 400k characters, 1.2 MB
+    const n1 = calls.sendTo.length;
+    const tooBig = await raw([big], 0);
+    assert(tooBig.status >= 400 && calls.sendTo.length === n1, `the 1 MB limit is in bytes: 400k three-byte characters are refused (HTTP ${tooBig.status})`);    calls.sendTo.length = 0; // the next section counts its own sends
+  }
+
   console.log('\n== sending: one participant + all participants ==');
   {
     const one = await req('POST', '/participants/chatgpt/send', { token: TOKEN, body: { text: 'hello gpt' } });
