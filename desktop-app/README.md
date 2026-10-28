@@ -579,7 +579,12 @@ ComfyUI install, or a standalone Forge/A1111/ComfyUI): **[docs/STABLE_DIFFUSION_
   SD.Next, ComfyUI) hidden with the API on, restarts it after a crash and stops it on quit
   ("✔ ComfyUI running on :8188 (managed)"; log without secrets; "Start Stable Diffusion with
   AutoInjector" is off by default) — or *⬇ Install Stable Diffusion* downloads the official ComfyUI
-  portable (GPU + disk-space check, resumable, verified) and a starter model.
+  portable (GPU + disk-space check, resumable, verified) and a starter model. Its folded
+  *Advanced: another server* (moved here from the old Image Generation panel, now removed) picks a
+  common address, 🔍 auto-detects, *✓ Check it answers* and saves the address + on/off
+  (`image:configure`, the same setting 🎩 Alfred and the butler use) — e.g. an SD app on another PC.
+- **One way in:** the old Image / Video Generation panels in the AutoInjector tab are gone; the
+  *🎨 Images* / *🎬 Video* buttons in the User Panel action bar open these tabs.
 - **🖌 Generate:** prompt, negative, character lock, LoRA chips with weights (`<lora:name:w>` for the
   WebUIs, LoRA loader nodes for ComfyUI; trigger words added for you), checkpoint, VAE, sampler,
   scheduler, size, steps, CFG, seed, batch; progress + Stop; pictures saved in `stuff and thing/images/`

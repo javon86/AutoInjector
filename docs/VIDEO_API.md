@@ -103,7 +103,10 @@ is kept inside the model's pixel budget (a 832×1216 portrait → 800×1152 on t
 
 ## 2. Install (inside the app)
 
-🎬 Video → **⚙ Setup & models**:
+🎬 Video → **⚙ Setup & models** (the **🎬 Video** button in the AutoInjector tab's action bar opens it; the old
+Video Generation panel is gone). Its *Advanced: other video server* fold has what that panel had: a list of common
+servers, 🔍 Auto-detect, ✓ Check it answers, the on/off switch and that server's clip settings (frames, fps, size,
+steps, CFG, motion, seed) — all saved with `video:configure`:
 
 * **⬇ Install ComfyUI + video model** — when this PC has no ComfyUI, the official ComfyUI
   portable (Windows; `sd-installer.js`, the same as 🎨 Images → Start & install), then the model.

@@ -148,7 +148,7 @@ From top to bottom you'll typically see:
   can run *(see §11)*.
 - **System AI (Supervisor)** — switch on a small local AI that helps run the app,
   and download a model for it *(see §13)*.
-- **Image Studio (Stable Diffusion)** — generate images, with presets and a
+- **🎨 Images tab (Stable Diffusion)** — generate images, with presets and a
   built‑in viewer *(see §10)*.
 - **The three AI panes** — ChatGPT, Claude and Gemini live, side by side, always
   in that **fixed left‑to‑right order** (ChatGPT | Claude | Gemini). Each pane has
@@ -496,29 +496,30 @@ SD 1.5 model; you can **install bigger models later** and pick them from the
 panel's model dropdown.
 
 **Set it up:**
-1. Open **Image Studio (Stable Diffusion)**.
-2. Put your server address in the box (default `http://127.0.0.1:7860`) and click
-   **Test**.
-3. Tick **Enable image generation**, and optionally **Let AIs trigger with
-   `[IMAGE: …]`**. Click **Save settings**.
+1. Open the **🎨 Images** tab (or press **🎨 Images** in the User Panel's buttons).
+2. Press **🔍 Find my SD app**, or put your server address in the box (default
+   `http://127.0.0.1:7860`) and click **Connect**. For a server on another computer,
+   **⚙ Start & install → Advanced: another server** has common addresses, Auto-detect
+   and **✓ Check it answers**.
+3. When the bar says **✔ Connected to …**, image generation is on — nothing else to
+   tick or save. 🎩 Alfred, the butler and Akọwe use the same connection. (To switch
+   it off: **⚙ Start & install → Advanced: another server**, untick **Turn image
+   generation on**, press **Save**.) No Stable Diffusion yet? **⚙ Start & install**
+   can start a Stability Matrix package or install ComfyUI for you.
 
-**Choose a model:** the **model dropdown** lists the checkpoints your server has
-installed; **⟳** refreshes it. Pick the one to render with — no need to keep the
-lighter model if you've added a bigger one.
+**Choose a model:** the **Checkpoint** list on **🖌 Generate** shows the models your
+server has; the **📚 Library** tab lists every checkpoint, LoRA, embedding and VAE.
 
-**Presets & controls:** one‑click **presets** set sensible values for common
-looks, and you can fine‑tune **steps, CFG scale, width, height, sampler, batch
-size and seed** before generating.
+**Controls:** prompt, negative prompt, LoRAs (with weights), character lock,
+**steps, CFG, width, height, sampler, batch and seed**; more in the folded sections
+(hires fix, img2img / inpaint, ControlNet, upscale …). **🧪 Test** makes one small
+picture to prove the connection works.
 
-**You generate:** type a prompt (and optional negative prompt), click
-**Generate**. Or click **↳ ChatGPT / ↳ Claude / ↳ Gemini** to drop that AI's last
-reply into the prompt box first. The result shows in the **built‑in image
-viewer**, where you can **save the image**, **copy its prompt**, or **send it into
-the conversation**. Past renders stay in the gallery.
+**You generate:** type a prompt, click **Generate**. The result shows on the right
+with the gallery of past pictures; **♻ Remake** makes the same picture again.
 
-**The AIs generate:** with the checkbox on, any AI reply that **starts with**
-`[IMAGE: a lighthouse at dusk]` renders that image automatically — the same idea
-as `[TO: X]`.
+**The AIs generate:** ask **🎩 Alfred** for a picture, or let the butler use his
+**GENERATE_IMAGE** action — both draw through the same 🎨 Images connection.
 
 **Saved to the project ✅:** every render is stored as a searchable image record
 (prompt, seed, model, a content hash) plus a versioned artifact — find it later

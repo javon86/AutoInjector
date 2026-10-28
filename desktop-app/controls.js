@@ -1652,8 +1652,6 @@ const COLLAPSIBLE_PANELS = {
   global: { panelId: "col-global", label: "Global" },
   houserules: { panelId: "col-houserules", label: "House Rules" },
   prompts: { panelId: "col-prompts", label: "Prompt Library" },
-  image: { panelId: "col-image", label: "Image Generation" },
-  video: { panelId: "col-video", label: "Video Generation" },
   gpu: { panelId: "col-gpu", label: "GPU Usage" },
   systemai: { panelId: "col-systemai", label: "System AI" },
   akowe: { panelId: "col-akowe", label: "Akọwe bridge" }
@@ -1714,8 +1712,6 @@ async function databaseRefresh() {
 
 // --- System AI (Local Supervisor) panel + User Panel switch ----------------
 if (el("btn-collapse-systemai")) el("btn-collapse-systemai").onclick = () => collapseYellowPanel("systemai");
-if (el("btn-collapse-image")) el("btn-collapse-image").onclick = () => collapseYellowPanel("image");
-if (el("btn-collapse-video")) el("btn-collapse-video").onclick = () => collapseYellowPanel("video");
 if (el("btn-collapse-gpu")) el("btn-collapse-gpu").onclick = () => collapseYellowPanel("gpu");
 
 // Butler Device panel: System Check (what he can do) + Send Intro (tell the AIs
@@ -1951,217 +1947,12 @@ if (el("device-openmic")) el("device-openmic").onchange = (e) => {
   if (openMicOn) openMicLoop();
 };
 
-// Image Generation panel. Compact = prompt/negative/LoRA + Generate; expanding
-// (⤢ More) reveals a live preview, size/steps, a recent-renders strip, and the
-// connection config. There's also a button that opens the real SD web UI.
-// Wire a range slider to its value display (live) and return a getter.
-function wireSlider(rangeId, spanId) {
-  const r = el(rangeId), sp = el(spanId);
-  if (r) { const upd = () => { if (sp) sp.textContent = r.value; }; r.addEventListener("input", upd); upd(); }
-}
-function setSlider(rangeId, spanId, val) { const r = el(rangeId); if (r && val != null) { r.value = val; const sp = el(spanId); if (sp) sp.textContent = r.value; } }
-
-async function loadImagePanel() {
-  ["img-steps:img-steps-v", "img-cfg:img-cfg-v", "img-width:img-width-v", "img-height:img-height-v", "img-batch:img-batch-v"].forEach((p) => { const [r, s] = p.split(":"); wireSlider(r, s); });
-  if (!window.api.imageStatus) return;
-  try {
-    const s = await window.api.imageStatus();
-    if (!s) return;
-    if (el("img-endpoint")) el("img-endpoint").value = s.endpoint || "";
-    if (el("img-enabled")) el("img-enabled").checked = !!s.enabled;
-    setSlider("img-steps", "img-steps-v", s.steps);
-    setSlider("img-cfg", "img-cfg-v", s.cfgScale);
-    setSlider("img-width", "img-width-v", s.width);
-    setSlider("img-height", "img-height-v", s.height);
-    setSlider("img-batch", "img-batch-v", s.batchCount);
-    if (el("img-seed") && s.seed != null) el("img-seed").value = s.seed;
-  } catch (_) {}
-}
-if (el("btn-img-seed-rand")) el("btn-img-seed-rand").onclick = () => { if (el("img-seed")) el("img-seed").value = "-1"; };
-function imgMsg(t) { if (el("img-msg")) el("img-msg").textContent = t; }
-
-// --- Generic 3-size panel state (minimal → middle → large) -------------------
-// The ◱ button cycles a panel's data-size; CSS shows/hides .when-mid/.when-large.
-// This is separate from the ⌄ tab-collapse (which hides the whole panel to a tab).
-const PANEL_SIZES = ["minimal", "middle", "large"];
-const SIZE_GLYPH = { minimal: "◱", middle: "◲", large: "◼" };
-function setPanelSize(panelId, btnId, size) {
-  const p = el(panelId); if (!p) return;
-  if (!PANEL_SIZES.includes(size)) size = "minimal";
-  p.setAttribute("data-size", size);
-  const b = el(btnId);
-  if (b) { const next = PANEL_SIZES[(PANEL_SIZES.indexOf(size) + 1) % PANEL_SIZES.length]; b.textContent = SIZE_GLYPH[size]; b.title = `Size: ${size} — click for ${next}`; }
-  uiLog("panel", { msg: `${panelId} size → ${size}` });
-}
-function cyclePanelSize(panelId, btnId) {
-  const cur = (el(panelId) && el(panelId).getAttribute("data-size")) || "minimal";
-  setPanelSize(panelId, btnId, PANEL_SIZES[(PANEL_SIZES.indexOf(cur) + 1) % PANEL_SIZES.length]);
-}
-if (el("btn-img-size")) el("btn-img-size").onclick = () => cyclePanelSize("col-image", "btn-img-size");
-if (el("btn-vid-size")) el("btn-vid-size").onclick = () => cyclePanelSize("col-video", "btn-vid-size");
-if (el("btn-img-open-ui")) el("btn-img-open-ui").onclick = () => {
-  const ep = (el("img-endpoint") && el("img-endpoint").value || "").trim() || "http://127.0.0.1:7860";
-  let base = ep;
-  try { const u = new URL(ep); base = `${u.protocol}//${u.host}`; } catch (_) { base = ep.replace(/\/sdapi.*$/, ""); }
-  if (window.api.openExternal) window.api.openExternal(base);
-};
-if (el("btn-img-save")) el("btn-img-save").onclick = async () => {
-  if (!window.api.configureImage) return;
-  const r = await window.api.configureImage({ enabled: !!(el("img-enabled") && el("img-enabled").checked), endpoint: (el("img-endpoint") && el("img-endpoint").value || "").trim() });
-  imgMsg(r && r.ok ? (r.enabled ? "Saved — image generation on." : "Saved — off.") : `Save failed: ${(r && r.error) || "error"}`);
-};
-const imgHistory = [];
-function imgShowPreview(dataUrl, pathText) {
-  if (!dataUrl || !el("img-preview")) return;
-  el("img-preview").src = dataUrl;
-  el("img-preview").style.display = "block";
-  if (el("img-preview-empty")) el("img-preview-empty").style.display = "none";
-  setPanelSize("col-image", "btn-img-size", "large"); // grow to show the render
-  imgHistory.unshift({ dataUrl, pathText });
-  imgHistory.length = Math.min(imgHistory.length, 8);
-  const box = el("img-history");
-  if (box) {
-    box.innerHTML = "";
-    for (const it of imgHistory) {
-      const t = document.createElement("img");
-      t.src = it.dataUrl; t.title = it.pathText || "";
-      t.style.cssText = "width:44px;height:44px;object-fit:cover;border:1px solid #2a2a2a;border-radius:4px;cursor:pointer";
-      t.onclick = () => imgShowPreview(it.dataUrl, it.pathText);
-      box.appendChild(t);
-    }
-  }
-}
-if (el("btn-img-generate")) el("btn-img-generate").onclick = async () => {
-  if (!window.api.imageGenerate) return;
-  let prompt = (el("img-prompt") && el("img-prompt").value || "").trim();
-  const lora = (el("img-lora") && el("img-lora").value || "").trim();
-  if (lora) prompt = prompt ? `${prompt} ${lora}` : lora;
-  const negative = (el("img-negative") && el("img-negative").value || "").trim();
-  if (!prompt) { imgMsg("Type a prompt first."); return; }
-  const cfg = { enabled: true, endpoint: (el("img-endpoint") && el("img-endpoint").value || "").trim() };
-  const num = (id) => Number(el(id) && el(id).value);
-  const w = num("img-width"), h = num("img-height"), st = num("img-steps"), cf = num("img-cfg"), bt = num("img-batch"), sd = num("img-seed");
-  if (w) cfg.width = w; if (h) cfg.height = h; if (st) cfg.steps = st;
-  if (cf) cfg.cfgScale = cf; if (bt) cfg.batchCount = bt; if (Number.isFinite(sd)) cfg.seed = sd;
-  if (window.api.configureImage) await window.api.configureImage(cfg);
-  imgMsg("Rendering…");
-  const r = await window.api.imageGenerate(prompt, negative);
-  if (r && r.ok) { imgMsg(`Rendered ✓ → ${r.path}`); imgShowPreview(r.preview, r.path); }
-  else imgMsg(r && r.message ? `Failed: ${r.message}` : `Failed: ${(r && r.error) || "error"} (is your SD server running with --api?)`);
-};
-loadImagePanel();
-
-// Video Generation panel — same shape as Image (3 sizes + tab), wired to a local
-// text-to-video HTTP endpoint. minimal = prompt/negative; middle adds motion/LoRA
-// + frames/fps/size; large adds the clip preview, recent strip, and connection.
-async function loadVideoPanel() {
-  ["vid-frames:vid-frames-v", "vid-fps:vid-fps-v", "vid-steps:vid-steps-v", "vid-cfg:vid-cfg-v", "vid-motion:vid-motion-v"].forEach((p) => { const [r, s] = p.split(":"); wireSlider(r, s); });
-  if (!window.api.videoStatus) return;
-  try {
-    const s = await window.api.videoStatus();
-    if (!s) return;
-    if (el("vid-endpoint")) el("vid-endpoint").value = s.endpoint || "";
-    if (el("vid-enabled")) el("vid-enabled").checked = !!s.enabled;
-    if (el("vid-width") && s.width) el("vid-width").value = s.width;
-    if (el("vid-height") && s.height) el("vid-height").value = s.height;
-    if (el("vid-seed") && s.seed != null) el("vid-seed").value = s.seed;
-    setSlider("vid-frames", "vid-frames-v", s.frames);
-    setSlider("vid-fps", "vid-fps-v", s.fps);
-    setSlider("vid-steps", "vid-steps-v", s.steps);
-    setSlider("vid-cfg", "vid-cfg-v", s.cfgScale);
-    setSlider("vid-motion", "vid-motion-v", s.motion);
-  } catch (_) {}
-}
-if (el("btn-vid-seed-rand")) el("btn-vid-seed-rand").onclick = () => { if (el("vid-seed")) el("vid-seed").value = "-1"; };
-function vidMsg(t) { if (el("vid-msg")) el("vid-msg").textContent = t; }
-if (el("btn-vid-open-ui")) el("btn-vid-open-ui").onclick = () => {
-  const ep = (el("vid-endpoint") && el("vid-endpoint").value || "").trim() || "http://127.0.0.1:7860";
-  let base = ep;
-  try { const u = new URL(ep); base = `${u.protocol}//${u.host}`; } catch (_) { base = ep.replace(/\/[^/]*$/, ""); }
-  if (window.api.openExternal) window.api.openExternal(base);
-};
-if (el("btn-vid-save")) el("btn-vid-save").onclick = async () => {
-  if (!window.api.configureVideo) return;
-  const r = await window.api.configureVideo({ enabled: !!(el("vid-enabled") && el("vid-enabled").checked), endpoint: (el("vid-endpoint") && el("vid-endpoint").value || "").trim() });
-  vidMsg(r && r.ok ? (r.enabled ? "Saved — video generation on." : "Saved — off.") : `Save failed: ${(r && r.error) || "error"}`);
-};
-const vidHistory = [];
-function vidShowPreview(src, pathText) {
-  if (!src || !el("vid-preview")) return;
-  el("vid-preview").src = src;
-  el("vid-preview").style.display = "block";
-  if (el("vid-preview-empty")) el("vid-preview-empty").style.display = "none";
-  setPanelSize("col-video", "btn-vid-size", "large");
-  vidHistory.unshift({ src, pathText });
-  vidHistory.length = Math.min(vidHistory.length, 8);
-  const box = el("vid-history");
-  if (box) {
-    box.innerHTML = "";
-    vidHistory.forEach((it, i) => {
-      const chip = document.createElement("button");
-      chip.textContent = `▶ clip ${vidHistory.length - i}`;
-      chip.title = it.pathText || "";
-      chip.style.cssText = "font-size:10.5px; padding:2px 6px;";
-      chip.onclick = () => vidShowPreview(it.src, it.pathText);
-      box.appendChild(chip);
-    });
-  }
-}
-if (el("btn-vid-generate")) el("btn-vid-generate").onclick = async () => {
-  if (!window.api.videoGenerate) return;
-  let prompt = (el("vid-prompt") && el("vid-prompt").value || "").trim();
-  const lora = (el("vid-lora") && el("vid-lora").value || "").trim();
-  if (lora) prompt = prompt ? `${prompt} ${lora}` : lora;
-  const negative = (el("vid-negative") && el("vid-negative").value || "").trim();
-  if (!prompt) { vidMsg("Type a prompt first."); return; }
-  const cfg = { enabled: true, endpoint: (el("vid-endpoint") && el("vid-endpoint").value || "").trim() };
-  const num = (id) => Number(el(id) && el(id).value);
-  const w = num("vid-width"), h = num("vid-height"), fr = num("vid-frames"), fp = num("vid-fps"), st = num("vid-steps"), cf = num("vid-cfg"), mo = num("vid-motion"), sd = num("vid-seed");
-  if (w) cfg.width = w; if (h) cfg.height = h; if (fr) cfg.frames = fr; if (fp) cfg.fps = fp;
-  if (st) cfg.steps = st; if (cf) cfg.cfgScale = cf; if (Number.isFinite(mo)) cfg.motion = mo; if (Number.isFinite(sd)) cfg.seed = sd;
-  if (window.api.configureVideo) await window.api.configureVideo(cfg);
-  vidMsg("Rendering… (video can take a while)");
-  const r = await window.api.videoGenerate(prompt, negative);
-  if (r && r.ok) { vidMsg(`Rendered ✓ → ${r.path || r.url}`); vidShowPreview(r.preview, r.path || r.url); }
-  else vidMsg(r && r.message ? `Failed: ${r.message}` : `Failed: ${(r && r.error) || "error"} — set a video endpoint in ⚙️ Connection, and make sure the backend is running.`);
-};
-loadVideoPanel();
-
-// Endpoint helpers (shared by Image + Video) so the user never has to guess a URL:
-// a preset dropdown, an auto-detect that scans localhost, and a reachability test.
-async function loadEndpointPresets(kind, selectId, endpointId, msgId) {
-  const sel = el(selectId);
-  if (!sel || !window.api.endpointPresets) return;
-  try {
-    const r = await window.api.endpointPresets(kind);
-    if (r && r.ok) for (const p of r.presets) { const o = document.createElement("option"); o.value = p.endpoint; o.textContent = p.label; sel.appendChild(o); }
-  } catch (_) {}
-  sel.onchange = () => { if (sel.value && el(endpointId)) { el(endpointId).value = sel.value; if (el(msgId)) el(msgId).textContent = "Filled in — press Save, then ✓ Test."; } };
-}
-async function detectEndpoint(kind, endpointId, selectId, msgId) {
-  if (!window.api.detectEndpoints) return;
-  if (el(msgId)) el(msgId).textContent = "Scanning localhost…";
-  let r; try { r = await window.api.detectEndpoints(kind); } catch (_) { r = null; }
-  const reach = (r && r.reachable) || [];
-  if (!reach.length) { if (el(msgId)) el(msgId).textContent = "Nothing found running. Start your image/video app (with its API on), or pick one above."; return; }
-  if (el(endpointId)) el(endpointId).value = reach[0].endpoint;
-  if (el(selectId)) el(selectId).value = reach[0].endpoint;
-  if (el(msgId)) el(msgId).textContent = `Found: ${reach[0].label} ✓ — press Save.${reach.length > 1 ? ` (+${reach.length - 1} more)` : ""}`;
-}
-async function testEndpointUi(endpointId, msgId) {
-  if (!window.api.testEndpoint) return;
-  const url = (el(endpointId) && el(endpointId).value || "").trim();
-  if (!url) { if (el(msgId)) el(msgId).textContent = "Enter or pick an address first."; return; }
-  if (el(msgId)) el(msgId).textContent = "Testing…";
-  let r; try { r = await window.api.testEndpoint(url); } catch (_) { r = null; }
-  if (el(msgId)) el(msgId).textContent = r && r.reachable ? "Reachable ✓ — the server answered." : "Not reachable — is the app running with its API enabled?";
-}
-loadEndpointPresets("image", "img-preset", "img-endpoint", "img-conn-msg");
-if (el("btn-img-detect")) el("btn-img-detect").onclick = () => detectEndpoint("image", "img-endpoint", "img-preset", "img-conn-msg");
-if (el("btn-img-test")) el("btn-img-test").onclick = () => testEndpointUi("img-endpoint", "img-conn-msg");
-loadEndpointPresets("video", "vid-preset", "vid-endpoint", "vid-conn-msg");
-if (el("btn-vid-detect")) el("btn-vid-detect").onclick = () => detectEndpoint("video", "vid-endpoint", "vid-preset", "vid-conn-msg");
-if (el("btn-vid-test")) el("btn-vid-test").onclick = () => testEndpointUi("vid-endpoint", "vid-conn-msg");
+// The old Image Generation / Video Generation panels lived here. They are gone:
+// pictures are made in the 🎨 Images tab (images-studio.js) and clips in the 🎬 Video
+// tab (videos-studio.js). Their "point at another server" settings (preset list,
+// auto-detect, reachability test, on/off) moved into each tab's ⚙ setup view under
+// "Advanced: another server". The image:* / video:* / endpoints:* IPC stays for
+// Alfred, the butler, Akọwe's bridge and the Setup Wizard.
 
 // GPU Usage panel: poll "how much GPU are we using" and draw util + VRAM bars.
 function gpuEsc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
@@ -2839,9 +2630,18 @@ if (el("btn-mic")) el("btn-mic").onclick = async () => {
 
 // User Panel: 🧙 Setup -> open the Setup Wizard window (downloads run in bg).
 if (el("btn-open-wizard")) el("btn-open-wizard").onclick = () => { if (window.api.openWizard) window.api.openWizard(); };
-// Image / Video paddles: open the Setup Wizard straight to their own tab.
-if (el("btn-open-image")) el("btn-open-image").onclick = () => { if (window.api.openWizard) window.api.openWizard("images"); };
-if (el("btn-open-video")) el("btn-open-video").onclick = () => { if (window.api.openWizard) window.api.openWizard("video"); };
+// 🎨 Images / 🎬 Video buttons: switch the main window to that tab (the one place to make
+// pictures and clips). Only if the tab script is missing do they fall back to the Setup Wizard.
+if (el("btn-open-image")) el("btn-open-image").onclick = () => {
+  if (typeof window.sdShowImagesTab === "function") window.sdShowImagesTab();
+  else if (window.api.openWizard) window.api.openWizard("images");
+};
+if (el("btn-open-video")) el("btn-open-video").onclick = () => {
+  if (typeof window.vdShowVideoTab === "function") window.vdShowVideoTab();
+  else if (window.api.openWizard) window.api.openWizard("video");
+};
+// The Setup Wizard's "Open the Images / Video tab" buttons (wizard:open-app-tab) land here.
+if (window.api.onAppTabShow) window.api.onAppTabShow((p) => { const b = p && p.tab && el(`tab-app-${p.tab}`); if (b) b.click(); });
 
 // Open the consolidated AI feed window.
 if (el("btn-open-feed")) el("btn-open-feed").onclick = () => { if (window.api.openFeed) window.api.openFeed(); };

@@ -300,6 +300,7 @@ At most one of each every 5 minutes and 6 in 10 minutes.
 | `desktop-app/alfred-persona-ui.js` | personality editor + saved set-ups in `<div id="alfred-persona">` (🤵 Butler section) |
 | IPC (B6) | `alfred:personality` (get / set, clamped with plain notes), `alfred:profiles`, `alfred:profile-save` `{name, renameFrom?}`, `alfred:profile-use` `{name}`, `alfred:profile-delete` `{name}`, `alfred:panel` (get: `{mode:'docked', open, shortcut}`), `alfred:panel-toggle` `{open?}`, `alfred:show-butler`, `alfred:catalog` (read-only: the grouped list), `alfred:books` (read-only: `{akowe, books:[{project_id,title}]}` for the big buttons); events on `alfred` also: `toggle-panel`, `show-butler` |
 | hooks | `captureIpc(ipcMain)` right after Electron is required + one marked block in `main.js`, `preload.js` (`alfred*`), the switch + script tag in `controls.html`, `alfred-` log tag in `log-tags.js` |
+| tabs | `ui.show_tab` (in the main window) and `wizard.open_app_tab` → `wizard:open-app-tab` `{tab}` (closes the Setup Wizard, then main sends `app-tab-show` and controls.js clicks that tab). Pictures and videos are set up in the 🎨 Images / 🎬 Video tabs; `wizard.open` takes only `localai` / `advanced` |
 | Akọwe | `POST /api/projects/{id}/branches/{b}/journal/note` `{source:"alfred", code, title}`; optional `note` on `POST …/review/fix` |
 
 **Can he really control everything?** `desktop-app/test/alfred-coverage.test.js` (part of `npm run test:unit`)

@@ -70,7 +70,7 @@
     }
     if (which === 'library') refreshLibrary();
     if (which === 'locks') refreshLocks();
-    if (which === 'setup') { refreshTargets(); installCheck(); }
+    if (which === 'setup') { refreshTargets(); installCheck(); loadOtherServer(); }
   }
   if ($('sd-sub-setup')) $('sd-sub-setup').onclick = () => subTab('setup');
   $('sd-sub-generate').onclick = () => subTab('generate');
@@ -1122,6 +1122,52 @@
   if (api && api.onConnected) api.onConnected((r) => { if (r && r.status) renderStatus(r.status, r.ok ? `✔ ${r.message || 'Connected'}` : null); if (r && r.ok && st.loaded) loadLists(); });
 
   // ------------------------------------------------------------ start
+  // ------------------------------------------------------------ ⚙ Advanced: another server
+  // (moved here from the old Image Generation panel): a list of common addresses, 🔍 auto-detect,
+  // "✓ Check it answers" and the on/off switch — the same image:configure / endpoints:* calls.
+  const wapi = () => window.api || {};
+  function epMsg(t) { setText('sd-ep-msg', t || ''); }
+  let presetsLoaded = false;
+  async function loadOtherServer() {
+    const w = wapi();
+    if (!presetsLoaded && typeof w.endpointPresets === 'function') {
+      presetsLoaded = true;
+      try {
+        const r = await w.endpointPresets('image');
+        if (r && r.ok) for (const p of r.presets) { const o = document.createElement('option'); o.value = p.endpoint; o.textContent = p.label; $('sd-ep-preset').appendChild(o); }
+      } catch (_) {}
+    }
+    if (typeof w.imageStatus === 'function') {
+      try { const s = await w.imageStatus(); if (s) { $('sd-ep-enabled').checked = !!s.enabled; if (!$('sd-ep-url').value) $('sd-ep-url').value = s.endpoint || ''; } } catch (_) {}
+    }
+  }
+  if ($('sd-adv-server')) {
+    $('sd-ep-preset').onchange = () => { const v = $('sd-ep-preset').value; if (v) { $('sd-ep-url').value = v; epMsg('Filled in — press ✓ Check it answers, then Save.'); } };
+    $('btn-sd-ep-detect').onclick = async () => {
+      const w = wapi(); if (typeof w.detectEndpoints !== 'function') return;
+      epMsg('🔍 Looking on this PC…');
+      let r; try { r = await w.detectEndpoints('image'); } catch (_) { r = null; }
+      const reach = (r && r.reachable) || [];
+      if (!reach.length) { epMsg('Nothing found running. Start your Stable Diffusion app with its API on (--api), or pick one from the list.'); return; }
+      $('sd-ep-url').value = reach[0].endpoint; $('sd-ep-preset').value = reach[0].endpoint;
+      epMsg(`Found: ${reach[0].label} ✓ — press Save.${reach.length > 1 ? ` (+${reach.length - 1} more)` : ''}`);
+    };
+    $('btn-sd-ep-test').onclick = async () => {
+      const w = wapi(); if (typeof w.testEndpoint !== 'function') return;
+      const url = $('sd-ep-url').value.trim();
+      if (!url) { epMsg('Type an address or pick one from the list first.'); return; }
+      epMsg('Checking…');
+      let r; try { r = await w.testEndpoint(url); } catch (_) { r = null; }
+      epMsg(r && r.reachable ? 'It answers ✓ — press Save to use it.' : 'No answer — is the app running with its API turned on (--api)? Check the address.');
+    };
+    $('btn-sd-ep-save').onclick = async () => {
+      const w = wapi(); if (typeof w.configureImage !== 'function') return;
+      let r; try { r = await w.configureImage({ enabled: $('sd-ep-enabled').checked, endpoint: $('sd-ep-url').value.trim() }); } catch (e) { r = { ok: false, message: String(e) }; }
+      epMsg(r && r.ok ? (r.enabled ? 'Saved — image generation is on with this address.' : 'Saved — image generation is off.') : `✖ ${(r && (r.message || r.error)) || 'Not saved.'} Try again.`);
+      if (r && r.ok) { const s = await call('status'); if (s && s.ok) renderStatus(s); }
+    };
+  }
+
   async function init() {
     if (!api) { hint('The Images tab needs a newer AutoInjector (preload is missing window.api.sd). Restart the app.', 'error'); return; }
     const s = await call('status');

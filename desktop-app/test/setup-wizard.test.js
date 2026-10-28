@@ -1,8 +1,8 @@
 // test/setup-wizard.test.js — runs the REAL setup-wizard.html/setup-wizard.js in
-// jsdom with window.api stubbed the way preload.js exposes it. Focused on the
-// Video step (OP-13): it must be a real step — load the saved config, Save it,
-// check the address, and run a test render that shows a plain-language reason
-// when it fails — not a placeholder. Run: node test/setup-wizard.test.js
+// jsdom with window.api stubbed the way preload.js exposes it. The wizard's Images and
+// Video tabs are short notes now: pictures and videos are set up in the main window's
+// 🎨 Images / 🎬 Video tabs (one place). Their button closes the wizard and shows that
+// tab (wizard:open-app-tab). Run: node test/setup-wizard.test.js
 const fs = require("fs");
 const path = require("path");
 const { JSDOM } = require("jsdom");
@@ -17,11 +17,9 @@ function makeApi(over = {}) {
     calls,
     wizardCatalog: async () => ({ ok: true, ollama: { available: true }, models: [], installers: {} }),
     setupList: async () => ({ ok: true, targets: [], status: {} }),
-    imageStatus: async () => ({ ok: true, endpoint: "", enabled: false }),
-    videoStatus: async () => { calls.push({ fn: "videoStatus" }); return { ok: true, configured: true, enabled: true, endpoint: "http://127.0.0.1:7862/generate", frames: 24, fps: 12, width: 576, height: 320 }; },
-    configureVideo: async (patch) => { calls.push({ fn: "configureVideo", patch }); return { ok: true, enabled: !!(patch && patch.enabled) }; },
-    testEndpoint: async (url) => { calls.push({ fn: "testEndpoint", url }); return { reachable: true, base: "http://127.0.0.1:7862" }; },
-    videoGenerate: async (prompt) => { calls.push({ fn: "videoGenerate", prompt }); return { ok: true, path: "/out/videos/vid-1.mp4" }; },
+    imageStatus: async () => { calls.push({ fn: "imageStatus" }); return { ok: true, endpoint: "", enabled: false }; },
+    videoStatus: async () => { calls.push({ fn: "videoStatus" }); return { ok: true, configured: false, enabled: false, endpoint: "" }; },
+    openAppTab: async (tab) => { calls.push({ fn: "openAppTab", tab }); return { ok: true, tab }; },
     ...over,
   };
   return api;
@@ -38,69 +36,48 @@ async function loadWizard(api, query = "") {
 function click(dom, id) { dom.window.document.getElementById(id).dispatchEvent(new dom.window.Event("click", { bubbles: true })); }
 
 async function main() {
-  console.log("\n== OP-13: the wizard's Video step is a real step, not a placeholder ==");
+  console.log("\n== the wizard's Images tab is a note that opens the 🎨 Images tab ==");
   let api = makeApi();
-  let dom = await loadWizard(api, "?tab=video");
+  let dom = await loadWizard(api, "?tab=images");
   let doc = dom.window.document;
-  const panel = doc.getElementById("panel-video");
-  assert(panel && panel.classList.contains("active"), "?tab=video opens the wizard on the Video step");
-  assert(!/placeholder|coming next|Planned/i.test(panel.textContent), "the Video step no longer says it is a placeholder / planned");
-  assert(/AnimateDiff extension is installed/.test(panel.textContent) && /still images/.test(panel.textContent), "the Video step says the A1111 address needs the AnimateDiff extension (otherwise still images)");
-  assert(/🎬 Video/.test(panel.textContent) && /installs and runs inside AutoInjector/.test(panel.textContent) && /Advanced: other video server/.test(panel.textContent), "the Video step points to the in-app 🎬 Video tab and keeps the other video server as Advanced");
-  assert(/AnimateDiff extension/.test(doc.getElementById("vd-endpoint").getAttribute("placeholder")), "the endpoint hint says the 7860 address needs the AnimateDiff extension");
-  for (const id of ["vd-endpoint", "vd-enabled", "vd-frames", "vd-fps", "vd-width", "vd-height", "btn-vd-save", "btn-vd-check", "btn-vd-test", "vd-msg"]) {
-    assert(!!doc.getElementById(id), `the Video step has #${id}`);
-  }
-  assert(api.calls.some((c) => c.fn === "videoStatus"), "the Video step loads the saved video config");
-  assert(doc.getElementById("vd-endpoint").value === "http://127.0.0.1:7862/generate" && doc.getElementById("vd-enabled").checked, "the saved endpoint + on/off fill the fields");
-  assert(doc.getElementById("vd-frames").value === "24" && doc.getElementById("vd-fps").value === "12" && doc.getElementById("vd-width").value === "576", "the saved frames/fps/size fill the fields");
-
-  doc.getElementById("vd-endpoint").value = "  http://127.0.0.1:7860/sdapi/v1/txt2img  ";
-  doc.getElementById("vd-frames").value = "8";
-  click(dom, "btn-vd-save");
+  let panel = doc.getElementById("panel-images");
+  assert(panel && panel.classList.contains("active"), "?tab=images opens the wizard on the Images note");
+  assert(/Pictures are set up in the 🎨 Images tab of the main window/.test(panel.textContent) && /Advanced: another server/.test(panel.textContent), "it says pictures are set up in the 🎨 Images tab (and where the other-server setting is)");
+  for (const id of ["sd-endpoint", "sd-enabled", "btn-sd-save", "btn-sd-test", "sd-steps"]) assert(!doc.getElementById(id), `the old duplicate #${id} is gone`);
+  assert(!api.calls.some((c) => c.fn === "imageStatus" || c.fn === "videoStatus"), "the wizard no longer loads image/video settings of its own");
+  click(dom, "btn-wz-open-images");
   await tick();
-  const save = api.calls.filter((c) => c.fn === "configureVideo").pop();
-  assert(save && save.patch.endpoint === "http://127.0.0.1:7860/sdapi/v1/txt2img" && save.patch.enabled === true && save.patch.frames === 8, "Save sends the trimmed endpoint, on/off and frames to configureVideo (same path as the Images step)");
-  assert(/Saved — video generation is on/.test(doc.getElementById("vd-msg").textContent), "Save confirms in plain words");
+  assert(api.calls.some((c) => c.fn === "openAppTab" && c.tab === "images"), "🎨 Open the Images tab asks main to close the wizard and show the Images tab");
 
-  click(dom, "btn-vd-check");
-  await tick();
-  assert(api.calls.some((c) => c.fn === "testEndpoint" && /7860/.test(c.url)), "Check connection pings the entered address");
-  assert(/Reachable ✓/.test(doc.getElementById("vd-msg").textContent) && /Test render/.test(doc.getElementById("vd-msg").textContent), "a reachable backend says so and points to Test render");
-
-  click(dom, "btn-vd-test");
-  await tick();
-  assert(api.calls.some((c) => c.fn === "videoGenerate"), "Test render makes a real test clip");
-  assert(/Rendered ✓ → \/out\/videos\/vid-1\.mp4/.test(doc.getElementById("vd-msg").textContent), "a successful test render shows where the clip was saved");
-
-  console.log("\n== OP-13: failures are explained in plain words ==");
-  const NO_VIDEO_MSG = "The server at http://127.0.0.1:7860/sdapi/v1/txt2img answered, but it didn't send back a video, so no working video backend is configured yet.";
-  api = makeApi({
-    videoStatus: async () => ({ ok: true, configured: false, enabled: false, endpoint: "" }),
-    testEndpoint: async (url) => { api.calls.push({ fn: "testEndpoint", url }); return { reachable: false, base: "http://127.0.0.1:7999" }; },
-    videoGenerate: async () => ({ ok: false, error: "NO_VIDEO", message: NO_VIDEO_MSG }),
-  });
+  console.log("\n== the wizard's Video tab is a note that opens the 🎬 Video tab ==");
   dom = await loadWizard(api, "?tab=video");
   doc = dom.window.document;
-  click(dom, "btn-vd-check");
+  panel = doc.getElementById("panel-video");
+  assert(panel && panel.classList.contains("active"), "?tab=video opens the wizard on the Video note");
+  assert(/Videos are set up in the 🎬 Video tab of the main window/.test(panel.textContent) && /Advanced: other video server/.test(panel.textContent), "it says videos are set up in the 🎬 Video tab (and where the other video server is)");
+  for (const id of ["vd-endpoint", "vd-enabled", "vd-frames", "btn-vd-save", "btn-vd-check", "btn-vd-test"]) assert(!doc.getElementById(id), `the old duplicate #${id} is gone`);
+  click(dom, "btn-wz-open-video");
   await tick();
-  assert(/No video backend is set up yet/.test(doc.getElementById("vd-msg").textContent) && !api.calls.some((c) => c.fn === "testEndpoint"), "Check with no address explains no video backend is set up (no network call)");
-  click(dom, "btn-vd-test");
+  assert(api.calls.some((c) => c.fn === "openAppTab" && c.tab === "video"), "🎬 Open the Video tab asks main to show the Video tab");
+
+  console.log("\n== if switching fails, it says what to do ==");
+  api = makeApi({ openAppTab: async () => ({ ok: false, error: "BAD_TAB", message: "not a tab" }) });
+  dom = await loadWizard(api, "?tab=images");
+  doc = dom.window.document;
+  click(dom, "btn-wz-open-images");
   await tick();
-  assert(/No video backend is set up yet/.test(doc.getElementById("vd-msg").textContent), "Test render with no address explains the same");
-  doc.getElementById("vd-endpoint").value = "http://127.0.0.1:7999/gen";
-  click(dom, "btn-vd-check");
+  assert(/Couldn't switch the main window: not a tab/.test(doc.getElementById("wz-images-msg").textContent) && /click the tab at the top of the main window/.test(doc.getElementById("wz-images-msg").textContent), "a failed switch explains it and says what to do instead");
+  api = makeApi(); delete api.openAppTab;
+  dom = await loadWizard(api, "?tab=video");
+  doc = dom.window.document;
+  click(dom, "btn-wz-open-video");
   await tick();
-  assert(/Nothing is answering at http:\/\/127\.0\.0\.1:7999/.test(doc.getElementById("vd-msg").textContent), "an unreachable address is reported in plain words with the address");
-  doc.getElementById("vd-endpoint").value = "http://127.0.0.1:7860/sdapi/v1/txt2img";
-  click(dom, "btn-vd-test");
-  await tick();
-  assert(/Tick "Enable video generation" first/.test(doc.getElementById("vd-msg").textContent) && !api.calls.some((c) => c.fn === "videoGenerate"), "Test render with video switched off says to switch it on (doesn't save it off and fail)");
-  doc.getElementById("vd-enabled").checked = true;
-  click(dom, "btn-vd-test");
-  await tick();
-  const msg = doc.getElementById("vd-msg").textContent;
-  assert(msg.includes(NO_VIDEO_MSG) && !/^Test failed: NO_VIDEO$/.test(msg), "a NO_VIDEO test render shows the plain-language message, not the bare code");
+  assert(/Close this window and click the tab/.test(doc.getElementById("wz-video-msg").textContent), "an older app without the switch says what to do instead");
+
+  console.log("\n== the rest of the wizard is unchanged ==");
+  dom = await loadWizard(makeApi());
+  doc = dom.window.document;
+  assert(doc.getElementById("panel-localai").classList.contains("active") && !!doc.querySelector('.tab[data-tab="advanced"]') && !!doc.getElementById("btn-setup-auto"), "Local AI opens first; the Installs tab and 🚀 Auto-setup are still there");
 
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

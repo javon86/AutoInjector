@@ -18,22 +18,6 @@ async function main() {
       ['#btn-ai-toggle', '🎩 Alfred On/Off (User Panel)'],
       ['#col-systemai', 'System AI panel'],
       ['#col-houserules', 'House Rules panel'],
-      ['#col-image', 'Image Generation panel'],
-      ['#img-negative', 'Negative prompt field'],
-      ['#img-lora', 'LoRA / weights field'],
-      ['#btn-img-open-ui', 'Open Stable Diffusion UI button'],
-      ['#btn-img-size', 'Image panel size cycle button'],
-      ['#col-video', 'Video Generation panel'],
-      ['#vid-prompt', 'Video prompt field'],
-      ['#vid-negative', 'Video negative prompt field'],
-      ['#btn-vid-generate', 'Video Generate button'],
-      ['#btn-vid-size', 'Video panel size cycle button'],
-      ['#vid-preview', 'Video clip preview'],
-      ['#img-preset', 'Image endpoint preset dropdown'],
-      ['#btn-img-detect', 'Image endpoint auto-detect button'],
-      ['#btn-img-test', 'Image endpoint test button'],
-      ['#vid-preset', 'Video endpoint preset dropdown'],
-      ['#btn-vid-detect', 'Video endpoint auto-detect button'],
       ['#col-gpu', 'GPU Usage panel'],
       ['#gpu-body', 'GPU readout'],
       ['#col-device', 'Butler Device panel'],
@@ -52,8 +36,6 @@ async function main() {
       ['#voice-v-butler', 'Per-speaker voice (butler)'],
       ['#voice-mic', 'Microphone picker'],
       ['#voice-speaker', 'Speaker picker'],
-      ['#col-video', 'Video Generation panel'],
-      ['#btn-img-generate', 'Image Generate button'],
       ['#panels-grid', 'Tiled panels grid'],
       ['#ai-row', 'AI panes row'],
       ['#btn-extract-all', 'Extract All button'],
@@ -65,8 +47,16 @@ async function main() {
       ['#btn-open-phone', 'Phone companion button'],
       ['#phone-panel', 'Phone connect panel'],
       ['#phone-lan-toggle', 'Phone LAN-access toggle'],
-      ['#btn-open-image', 'Image paddle'],
-      ['#btn-open-video', 'Video paddle'],
+      ['#btn-open-image', '🎨 Images button (opens the Images tab)'],
+      ['#btn-open-video', '🎬 Video button (opens the Video tab)'],
+      ['#sd-adv-server', 'Images tab → ⚙ Start & install → Advanced: another server'],
+      ['#sd-ep-preset', 'Images tab: common SD addresses dropdown'],
+      ['#btn-sd-ep-detect', 'Images tab: SD address auto-detect button'],
+      ['#btn-sd-ep-test', 'Images tab: SD address check button'],
+      ['#vd-advanced', 'Video tab → ⚙ Setup & models → Advanced: other video server'],
+      ['#vd-ep-preset', 'Video tab: common video server addresses dropdown'],
+      ['#btn-vd-ep-detect', 'Video tab: video server auto-detect button'],
+      ['#btn-vd-ep-test', 'Video tab: video server check button'],
       ['#jarvis-goal', 'Butler goal box'],
       ['#btn-jarvis-start', 'Start Butler button'],
       ['#lsi-pull-name', 'Pull-any-model field'],
@@ -122,6 +112,37 @@ async function main() {
       `models folder created inside it with subfolders + README (${modelsRoot})`);
 
     await shot(controls, 'control-panel');
+
+    console.log('\n== ONE way to make pictures and clips: the old Image/Video panels are gone ==');
+    const leftovers = await controls.evaluate(() => ['col-image', 'col-video', 'img-endpoint', 'vid-endpoint', 'btn-img-generate', 'btn-vid-generate'].filter((id) => document.getElementById(id)));
+    assert(leftovers.length === 0, `no old Image/Video Generation panel is left (${leftovers.join(', ') || 'none'})`);
+    {
+      // The top area, for shots/control-panel-clean.png (the action bar with 🎨 Images / 🎬 Video).
+      const fs = require('fs'), pathMod = require('path');
+      const vp = await controls.evaluate(() => ({ w: window.innerWidth, h: window.innerHeight }));
+      const dir = pathMod.join(__dirname, '__screenshots__');
+      try { fs.mkdirSync(dir, { recursive: true }); } catch (_) {}
+      const file = pathMod.join(dir, 'control-panel-clean.png');
+      await controls.screenshot({ path: file, clip: { x: 0, y: 0, width: vp.w, height: Math.min(vp.h, 520) } });
+      try { fs.copyFileSync(file, pathMod.join(__dirname, '..', '..', '..', 'shots', 'control-panel-clean.png')); } catch (_) {}
+    }
+    await controls.click('#btn-open-image');
+    const imagesShown = await controls.waitForFunction(() => document.body.dataset.appTab === 'images' && !document.getElementById('images-tab').hidden, { timeout: 6000 }).then(() => true).catch(() => false);
+    assert(imagesShown, '🎨 Images in the action bar opens the 🎨 Images tab');
+    await controls.click('#sd-sub-setup');
+    await controls.click('#sd-adv-server summary');
+    const sdAdvOk = await controls.waitForFunction(() => { const s = document.getElementById('sd-ep-preset'); return !!(s && s.offsetParent && s.options.length >= 2); }, { timeout: 6000 }).then(() => true).catch(() => false);
+    assert(sdAdvOk, '⚙ Start & install → Advanced: another server shows the common SD addresses (moved from the old panel)');
+    await controls.click('#tab-app-main');
+    await controls.click('#btn-open-video');
+    const videoShown = await controls.waitForFunction(() => document.body.dataset.appTab === 'video' && !document.getElementById('video-tab').hidden, { timeout: 6000 }).then(() => true).catch(() => false);
+    assert(videoShown, '🎬 Video in the action bar opens the 🎬 Video tab');
+    await controls.click('#vd-sub-setup');
+    await controls.click('#vd-advanced summary');
+    const vdAdvOk = await controls.waitForFunction(() => { const s = document.getElementById('vd-ep-preset'); return !!(s && s.offsetParent && s.options.length >= 2 && document.getElementById('vd-ep-frames')); }, { timeout: 6000 }).then(() => true).catch(() => false);
+    assert(vdAdvOk, '⚙ Setup & models → Advanced: other video server shows the common video servers + clip settings (moved from the old panel)');
+    await controls.click('#tab-app-main');
+    await controls.waitForFunction(() => document.body.dataset.appTab === 'main', { timeout: 4000 }).catch(() => {});
 
     console.log('\n== Activity trace: a real button click is logged as ui-click ==');
     await controls.click('#btn-extract-all');
@@ -206,13 +227,21 @@ async function main() {
       assert(setupTargets && targetCount >= 3, `the Installs tab lists the self-install targets (${targetCount} shown)`);
       await shot(wizard, 'setup-wizard-advanced');
 
-      // The Images and Video tabs are back; Images carries the SD endpoint config.
-      assert(await wizard.$('.tab[data-tab="images"]'), 'the Images tab is present');
-      assert(await wizard.$('.tab[data-tab="video"]'), 'the Video tab is present');
+      // The wizard's Images / Video tabs are short notes: pictures and videos are set up in the main window's tabs.
+      assert(await wizard.$('.tab[data-tab="images"]') && await wizard.$('.tab[data-tab="video"]'), 'the wizard still has its Images and Video tabs (as notes)');
+      await wizard.click('.tab[data-tab="video"]');
+      assert(await wizard.$('#btn-wz-open-video') && !(await wizard.$('#vd-endpoint')), 'the Video note has “🎬 Open the Video tab” and no duplicate endpoint form');
       await wizard.click('.tab[data-tab="images"]');
-      await wizard.waitForSelector('#sd-endpoint', { timeout: 6000 }).catch(() => {});
-      assert(await wizard.$('#sd-endpoint') && await wizard.$('#btn-sd-test'), 'the Images tab has the Stable Diffusion endpoint config + a Test render button');
+      assert(await wizard.$('#btn-wz-open-images') && !(await wizard.$('#sd-endpoint')), 'the Images note has “🎨 Open the Images tab” and no duplicate endpoint form');
       await shot(wizard, 'setup-wizard-images');
+      // The button closes the wizard (so click from inside the page) and shows the 🎨 Images tab in the main window.
+      await wizard.evaluate(() => document.getElementById('btn-wz-open-images').click()).catch(() => {});
+      const switched = await controls.waitForFunction(() => document.body.dataset.appTab === 'images' && !document.getElementById('images-tab').hidden, { timeout: 8000 }).then(() => true).catch(() => false);
+      assert(switched, '“🎨 Open the Images tab” shows the 🎨 Images tab in the main window (wizard:open-app-tab)');
+      const wizardGone = await (async () => { for (let i = 0; i < 20; i++) { if (!app.windows().some((w) => !w.isClosed() && /setup-wizard\.html/.test(w.url()))) return true; await new Promise((r) => setTimeout(r, 250)); } return false; })();
+      assert(wizardGone, 'and the Setup Wizard closes');
+      await controls.click('#tab-app-main');
+      await controls.waitForFunction(() => document.body.dataset.appTab === 'main', { timeout: 4000 }).catch(() => {});
     }
 
     console.log('\n== 💬 AI Feed: the consolidated pop-up window opens with per-LLM bubbles ==');
