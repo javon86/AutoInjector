@@ -138,7 +138,7 @@
     const v = $('vd-tr-player');
     v.src = `${r.url}${r.url && r.url.includes('?') ? '&' : '?'}t=${Date.now()}`;
     v.hidden = false; $('vd-tr-empty').hidden = true;
-    setText('vd-tr-info', [r.book ? `“${r.book}”` : '', [r.seconds != null && `${r.seconds} s`, r.width && `${r.width}×${r.height}`, r.mp4 ? 'trailer.webm + trailer.mp4' : 'trailer.webm'].filter(Boolean).join(' · '), r.dir || ''].filter(Boolean).join('\n'));
+    setText('vd-tr-info', [r.book ? `“${r.book}”` : '', [r.seconds != null && `${r.seconds} s`, r.width && `${r.width}×${r.height}`, r.mp4 ? 'WebM + MP4' : 'WebM'].filter(Boolean).join(' · '), r.dir || ''].filter(Boolean).join('\n'));
     $('btn-vd-tr-showfile').disabled = !r.path;
   }
   $('btn-vd-tr-showfile').onclick = () => { if (st.current && st.current.path) call('showFile', st.current.mp4 || st.current.path); };

@@ -349,6 +349,7 @@ function createMcpClient(options = {}) {
         if (st === 202 || st === 204) { res.resume(); return done(null, true); }
         if (st >= 400) {
           let t = ''; res.setEncoding('utf8');
+          res.setEncoding('utf8'); // a character split across two chunks stays whole
           res.on('data', (d) => { if (t.length < 2000) t += d; });
           res.on('end', () => {
             let m = '';
@@ -374,6 +375,7 @@ function createMcpClient(options = {}) {
             try { handleMessage(JSON.parse(payload)); } catch (_) { /* not JSON: ignore */ }
             if (isRequest && !pending.has(msg.id)) { try { req.destroy(); } catch (_) {} done(null, true); } // got our answer: close the stream
           };
+          res.setEncoding('utf8'); // a character split across two chunks stays whole
           res.on('data', (d) => {
             size += d.length; if (size > MAX_BODY) { try { req.destroy(); } catch (_) {} return done(Object.assign(new Error(`The answer from ${shownUrl} was too big.`), { code: 'TOO_BIG' })); }
             buf += d;
@@ -391,6 +393,7 @@ function createMcpClient(options = {}) {
           return;
         }
         let t = '';
+        res.setEncoding('utf8'); // a character split across two chunks stays whole
         res.on('data', (d) => { size += d.length; if (size > MAX_BODY) { try { req.destroy(); } catch (_) {} return done(Object.assign(new Error(`The answer from ${shownUrl} was too big.`), { code: 'TOO_BIG' })); } t += d; });
         res.on('end', () => {
           if (t.trim()) { try { handleMessage(JSON.parse(t)); } catch (_) { return done(Object.assign(new Error(`The tool server at ${shownUrl} didn't answer in the MCP format (not JSON).`), { code: 'BAD_ANSWER' })); } }
