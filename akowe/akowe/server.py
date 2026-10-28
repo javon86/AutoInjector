@@ -518,6 +518,9 @@ class App:
                 if rest and rest[0] == "pictures":  # 🖼 B3 chapter/scene pictures and the map (pictures.py)
                     from . import pictures  # noqa: PLC0415
                     return pictures.route(self, method, rest[1:], query, body, principal, pid, branch, headers)
+                if rest and rest[0] == "trailer":  # 🎞 B2 book trailers (trailer.py; AutoInjector POST /video/trailer)
+                    from . import trailer  # noqa: PLC0415
+                    return trailer.route(self, method, rest[1:], query, body, principal, pid, branch, headers)
                 if rest and rest[0] == "cover":  # 🎨 B3 book covers (cover.py)
                     from . import cover  # noqa: PLC0415
                     return cover.route(self, method, rest[1:], query, body, principal, pid, branch, headers)

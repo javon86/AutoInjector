@@ -1157,6 +1157,32 @@
     .vd-thumb img, .vd-thumb video { display:block; width:100%; aspect-ratio:16/9; object-fit:cover; }
     .vd-thumb span { position:absolute; right:4px; bottom:3px; font-size:10.5px; background:rgba(0,0,0,.65); padding:0 4px; border-radius:4px; }
     .vd-thumb:focus-visible { outline:2px solid #7c5ce0; }
+    #vd-view-trailer { display:grid; grid-template-columns:minmax(340px, 560px) 1fr; gap:12px; align-items:start; }
+    #vd-view-trailer[hidden] { display:none !important; }
+    @media (max-width:900px) { #vd-view-trailer { grid-template-columns:1fr; } }
+    #vd-tr-items { list-style:none; margin:8px 0; padding:0; display:flex; flex-direction:column; gap:6px; }
+    .vd-tr-item { border:1px solid #2a2a2a; border-radius:6px; padding:6px 8px; background:#141414; font-size:12px; }
+    .vd-tr-item[data-type="card"] { border-color:#4a4030; }
+    .vd-tr-item[data-status="rendering"] { border-color:#5a4ca0; }
+    .vd-tr-item[data-status="done"], .vd-tr-item[data-status="reused"] { border-color:#2d5a3a; }
+    .vd-tr-item[data-status="failed"] { border-color:#8a3a3a; }
+    .vd-tr-head { display:flex; gap:6px; align-items:center; }
+    .vd-tr-head b { flex:1 1 auto; }
+    .vd-tr-head button { padding:1px 6px; font-size:11.5px; }
+    .vd-tr-item textarea { width:100%; box-sizing:border-box; min-height:44px; margin-top:4px; }
+    .vd-tr-item input[type="text"] { width:100%; box-sizing:border-box; margin-top:3px; }
+    .vd-tr-state { font-size:11px; opacity:.8; }
+    #vd-tr-progress { height:8px; background:#222; border-radius:4px; overflow:hidden; margin:6px 0 2px; }
+    #vd-tr-progress-bar { height:100%; width:0; background:linear-gradient(90deg,#5a4ca0,#8a6cf0); transition:width .3s; }
+    #vd-tr-msg { font-size:12px; opacity:.9; min-height:18px; white-space:pre-line; }
+    #vd-tr-error { margin:6px 0 4px; padding:9px 12px; border:1px solid #8a3a3a; background:#241212; border-radius:8px; font-size:12.5px; line-height:1.5; }
+    #vd-tr-error[hidden] { display:none; }
+    #vd-tr-error .sd-err-title { color:#ff9c9c; font-weight:600; white-space:pre-line; }
+    #vd-tr-player { display:block; width:100%; max-height:62vh; background:#000; border-radius:6px; border:1px solid #2a2a2a; }
+    #vd-tr-player[hidden] { display:none; }
+    #vd-tr-empty { padding:30px 12px; text-align:center; opacity:.5; border:1px dashed #2a2a2a; border-radius:8px; }
+    #vd-tr-list .vd-tr-saved { display:flex; gap:6px; align-items:center; font-size:12px; padding:3px 0; }
+    #vd-tr-list .vd-tr-saved span { flex:1 1 auto; }
     .vd-model { border:1px solid #2a2a2a; border-radius:6px; padding:7px 9px; margin:6px 0; font-size:12px; }
     .vd-model[data-installed="true"] { border-color:#2d5a3a; }
     .vd-model .vd-model-head { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
@@ -1526,6 +1552,7 @@
       <span class="spacer"></span>
       <div role="tablist" aria-label="Video views" class="sd-row" style="flex:0 0 auto;">
         <button class="sd-subtab sd-fixed" id="vd-sub-make" role="tab" aria-selected="true" aria-controls="vd-view-make">🎬 Make video</button>
+        <button class="sd-subtab sd-fixed" id="vd-sub-trailer" role="tab" aria-selected="false" aria-controls="vd-view-trailer" title="Join several shots and title cards into one book trailer">🎞 Trailer</button>
         <button class="sd-subtab sd-fixed" id="vd-sub-setup" role="tab" aria-selected="false" aria-controls="vd-view-setup">⚙ Setup &amp; models</button>
       </div>
     </div>
@@ -1602,6 +1629,54 @@
         </div>
         <h3 style="margin-top:10px;">Gallery</h3>
         <div id="vd-gallery" aria-label="Recent videos"></div>
+      </div>
+    </div>
+
+    <!-- 🎞 Book trailers: videos-trailer.js (engine: video-trailer.js + trailer-recorder.js in main) -->
+    <div id="vd-view-trailer" class="sd-view" role="tabpanel" aria-labelledby="vd-sub-trailer" hidden>
+      <div class="sd-card">
+        <h3>🎞 Book trailer</h3>
+        <div class="sd-note" style="font-size:12px;opacity:.8;">Shots (a short video made from words, or a picture brought to life) and title cards, in order. Each shot is made one after the other (minutes each), then everything is joined with fades into one video. Shots already made are kept: if you stop, “Make trailer” continues where it stopped.</div>
+        <div class="sd-row" style="margin-top:6px;">
+          <div><label class="sd-l" for="vd-tr-book">Book</label><input type="text" id="vd-tr-book" list="vd-tr-books" placeholder="The book's title" maxlength="200"><datalist id="vd-tr-books"></datalist></div>
+          <button class="sd-fixed" id="btn-vd-tr-load" title="Load this book's saved trailer plan" style="align-self:flex-end;">↺ Load saved plan</button>
+        </div>
+        <ol id="vd-tr-items" aria-label="Shots and title cards, in order"></ol>
+        <div class="sd-row">
+          <button class="sd-fixed" id="btn-vd-tr-add-shot">＋ Shot</button>
+          <button class="sd-fixed" id="btn-vd-tr-add-card">＋ Title card</button>
+          <span id="vd-tr-total" class="sd-note" style="font-size:12px;opacity:.75;"></span>
+        </div>
+        <label class="sd-l" for="vd-tr-music">Music (optional — mixed in, faded out at the end)</label>
+        <div class="sd-row">
+          <input type="text" id="vd-tr-music" placeholder="No music" readonly>
+          <button class="sd-fixed" id="btn-vd-tr-music">🎵 Choose…</button>
+          <button class="sd-fixed" id="btn-vd-tr-music-clear" title="No music">✕</button>
+        </div>
+        <div class="sd-row" style="margin-top:4px;">
+          <div><label class="sd-l" for="vd-tr-size">Trailer size</label><select id="vd-tr-size"><option value="1280x720">1280×720 (HD)</option><option value="1920x1080">1920×1080 (Full HD)</option><option value="854x480">854×480 (small)</option><option value="720x1280">720×1280 (tall, phones)</option></select></div>
+          <div><label class="sd-l" for="vd-tr-fade">Fades (seconds)</label><input type="number" id="vd-tr-fade" min="0" max="1" step="0.1" value="0.4"></div>
+          <div><label class="sd-l" for="vd-tr-volume">Music volume</label><input type="range" id="vd-tr-volume" min="0" max="1" step="0.05" value="0.8"></div>
+        </div>
+        <div class="sd-row" style="margin-top:8px;">
+          <button id="btn-vd-tr-make" class="primary">🎞 Make trailer</button>
+          <button id="btn-vd-tr-stop" class="sd-fixed" disabled>⏹ Stop</button>
+        </div>
+        <div id="vd-tr-progress" aria-hidden="true"><div id="vd-tr-progress-bar"></div></div>
+        <div id="vd-tr-msg" role="status" aria-live="polite"></div>
+        <div id="vd-tr-error" role="alert" hidden>
+          <div id="vd-tr-error-msg" class="sd-err-title"></div>
+          <div id="vd-tr-error-fix" class="sd-err-fix"></div>
+        </div>
+      </div>
+      <div class="sd-card">
+        <h3>The trailer</h3>
+        <div id="vd-tr-empty">Your trailer appears here. It is saved in <b>videos/trailers/&lt;book&gt;/</b> as trailer.webm (and trailer.mp4 when ffmpeg is on this PC).</div>
+        <video id="vd-tr-player" controls playsinline hidden></video>
+        <div id="vd-tr-info" style="font-size:11.5px;opacity:.8;margin-top:6px;white-space:pre-wrap;"></div>
+        <div class="sd-row" style="margin-top:6px;"><button id="btn-vd-tr-showfile" class="sd-fixed" disabled>📂 Show file</button></div>
+        <h3 style="margin-top:10px;">Saved trailers</h3>
+        <div id="vd-tr-list" aria-label="Saved trailers"></div>
       </div>
     </div>
 
@@ -2400,6 +2475,7 @@
   <script src="controls.js"></script>
   <script src="images-studio.js"></script>
   <script src="videos-studio.js"></script>
+  <script src="videos-trailer.js"></script><!-- 🎞 book trailers in the 🎬 Video tab -->
   <script src="alfred-panel.js"></script><!-- 🎩 Alfred panel (off by default) -->
   <script src="llm-setup-ui.js"></script><!-- B6 🎩 Alfred's AI: one-button setup + check (#llm-setup) -->
   <script src="llm-hardware.js"></script><!-- B6 fit ratings (window.LlmHardware), needed by llm-models-ui.js -->

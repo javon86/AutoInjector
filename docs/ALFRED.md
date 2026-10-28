@@ -141,6 +141,7 @@ your decision stays yours to decide in Akọwe.
 - 🔍 Status, models, progress and gallery run without a card.
 - ✋ `generate_video` makes a clip from a description, brings a picture to life (`image`), or keeps a character's looks (`character`).
 - ✋ `video_call` reaches every setting of the 🎬 Video module (size, seconds, fps, model, steps, CFG, seed, sampler, scheduler, shift) and the model installs.
+- ✋ `make_trailer` makes a book's trailer: Akọwe plans the shots from the book (or uses the plan the author edited on the 🎞 Trailer page) and AutoInjector's 🎬 Video makes and joins them (`video_call` with `trailer.make` / `trailer.status` / `trailer.cancel` drives the trailer module directly).
 - It uses ComfyUI with Wan; see `docs/VIDEO_API.md`.
 - The Character Forge `make_character_art` with `what:"clip"` makes a dossier's motion study.
 

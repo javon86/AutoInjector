@@ -161,6 +161,11 @@ Exports `{ createVideoApi, register, get, operationNames, OPS }`. Every method r
 | `video.install.downloadModel({id})` | yes | download one model |
 | `video.install.installAll({id})` | yes | ComfyUI (if none) + the model |
 | `video.install.cancel` | yes | pause / cancel the download |
+| `trailer.make(params)` | yes | 🎞 a book trailer (section 7): shots rendered one by one, joined with title cards → `trailer.webm` (+ `.mp4`) |
+| `trailer.status({id})` | no | the trailer being made (phase, shot n of m, each part's state) or the last result |
+| `trailer.cancel` | yes | stop the trailer (finished shots are kept for next time) |
+| `trailer.list({book})` | no | the saved trailers |
+| `trailer.plan({book})` | no | a book's saved trailer plan (to edit and make again) |
 
 `available:false` operations carry `hint` and `code` (`VIDEO_NOT_SET_UP`, or
 `UNSUPPORTED_ON_BACKEND` for `video.animate` on the endpoint backend).
@@ -271,3 +276,63 @@ models: the picture quality, real render times and VRAM use, that the current Co
 accepts `SaveVideo` with `format:"auto", codec:"auto"` in API format (the `SaveWEBM` retry
 covers a refusal), and that ComfyUI's history really lists the clip under `images` (also read:
 `videos`, `gifs`).
+
+---
+
+## 7. 🎞 Trailers (`video-trailer.js`, `trailer-recorder.js`, `webm-tools.js`)
+
+A trailer = **shots** `{type:"shot", prompt | image, seconds 1–5 (default 4), characterLock?, negativePrompt?, seed?, model?}`
+and **title cards** `{type:"card", text ≤ 120, subtitle? ≤ 160, seconds 1–10 (default 3)}` in order (`items`, at most 24
+parts / 16 shots) — or `shots` + `cards` (a card's `at`: `"start"`, `"end"`, or after the n-th shot; default: the first
+card opens, the rest close). Also: `book` (the folder), `title`, `music` (a local .mp3/.ogg/.opus/.wav/.m4a/.aac/.flac/.webm,
+mixed in and faded out at the end), `musicVolume` 0–1 (0.8), `width`×`height` (1280×720; 320–1920 × 240–1080), `fps`
+12–30 (24), `fade` 0–1 s (0.4, through black between parts), `model`, `resume` (true), `mp4` (true), `wait` (false).
+
+1. **Shots** go through the normal engine (`video.generate`, or `video.animate` with `image`; `purpose: "trailer_shot"`,
+   `from: "trailer…"`), one after the other. A video already being made in 🎬 Make video is waited for. Each finished
+   shot is copied to `videos/trailers/<book>/shots/shot-<key>.mp4`; the key is a hash of the shot (prompt, picture,
+   seconds, lock, model, seed), so the same shot asked for again is **reused** (resume after Stop or a failure; only
+   changed shots are rendered; `resume:false` renders all).
+2. **The join — no new dependency.** A hidden, offscreen `BrowserWindow` (`trailer-recorder.html` /
+   `trailer-recorder-page.js`, preload `trailer-recorder-preload.js`, `webSecurity:false` so local clips don't taint
+   the canvas) loads every clip, then plays the timeline onto a `<canvas>` in real time: clips cover-cropped to the
+   frame, cards drawn as text on black, fades through black. `canvas.captureStream(fps)` (+ the music through WebAudio
+   `MediaElementSource → Gain (fade-out) → MediaStreamDestination`) is recorded by `MediaRecorder` as WebM
+   (`vp9,opus`, else `vp8`). Chunks come back over `ipcMain.on('trailer-rec:*')`; then `webm-tools.setWebmDuration`
+   writes the missing Duration into the WebM (players can seek), checked against the frames (`probeWebm`).
+   Recording takes as long as the trailer.
+3. **MP4 (optional).** When an ffmpeg is found — `AUTOINJECTOR_FFMPEG` (`none` = never), `PATH`, the ComfyUI folders
+   (`ffmpeg.exe`, `ffmpeg/bin`), `imageio_ffmpeg/binaries/ffmpeg-*` inside ComfyUI's `python_embeded` or a venv —
+   `trailer.mp4` is made (`libx264 yuv420p +faststart`, AAC music). Without one: only the .webm, with a plain warning.
+
+Saved in `videos/trailers/<book>/`: `trailer.webm`, `trailer.mp4`, `trailer.json` (the plan, every shot, the last
+result), `shots/`. One trailer at a time (`BUSY`).
+
+Result: `{ok, id, book, dir, path (.webm), url, mp4, mp4Url, seconds, planned, width, height, fps, mime, bytes, music,
+shots:[{path, poster, seconds, reused}], cards, reused, warnings}`. A failed shot: the engine's code (`VIDEO_OOM`, …) with
+`shot: n`, `message: "Shot n could not be made: …"` and a fix that says the made shots are kept; a failed join:
+`TRAILER_JOIN_FAILED` (`cause`: `CLIP_UNREADABLE` / `MUSIC_UNREADABLE` / `NO_RECORDER` / `RECORD_FAILED` /
+`RECORD_TIMEOUT`); Stop: `VIDEO_CANCELLED`.
+
+Status (`trailer.status`): `{ok, busy, id, status:{phase: starting|shots|joining|mp4|done|failed|cancelled, shot, shots,
+shotsDone, pct, seconds, message, items:[{type, status: waiting|ready|rendering|done|reused|failed|stopped, label,
+path, error}]}, result?}`.
+
+**Bridge** (same auth as the other routes):
+* `POST /video/trailer` — the params above → **202** `{ok, started, id, status}` (or 200 with the finished trailer when
+  `wait:true`). 400 `INVALID_PARAM` · 409 `BUSY` · 501 `NOT_WIRED` / `VIDEO_NOT_WIRED`.
+* `GET /video/trailer?id=` → the status (+ `result` when finished); 404 `NOT_FOUND` for an id AutoInjector doesn't
+  know (it restarted).
+* `POST /video/trailer/cancel` → `{ok, cancelled}`.
+
+Akọwe's 🎞 Trailer page (`akowe/akowe/trailer.py`) uses these three: it plans the shots from the book, sends pictures
+as temp-file paths, follows `GET /video/trailer` every 2 s, and stores the finished .webm/.mp4 with the book.
+
+**IPC** (`window.api.video`): `trailerMake` (`video:trailer-make`), `trailerStatus` (`video:trailer-status`),
+`trailerCancel` (`video:trailer-cancel`), `trailerList` (`video:trailer-list`), `trailerPlan` (`video:trailer-plan`),
+`trailerPickFile` (`video:trailer-pick-file`, a file chooser for music / a picture). The 🎬 Video tab's 🎞 Trailer
+section (`videos-trailer.js`) is the UI. 🎩 Alfred: `video_call` with `trailer.*`, and `make_trailer` for a book.
+
+Tests: `test/video-trailer.test.js` (plan, join plan, ffmpeg finder, webm-tools, the maker against the fake ComfyUI,
+resume, Stop, errors, video-api, the bridge) and `test/e2e/trailer.e2e.js` (the real canvas + MediaRecorder join:
+2 clips + 1 card → a playable 3 s ± 0.5 WebM, and the .mp4 when ffmpeg is there).

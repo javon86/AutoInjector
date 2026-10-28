@@ -110,6 +110,7 @@ const IPC_INVENTORY = [
   'video:configure', 'video:generate', 'video:status',
   'video:full-status', 'video:models', 'video:capabilities', 'video:settings', 'video:generate-t2v', 'video:animate', 'video:progress', 'video:cancel', 'video:gallery', 'video:test',
   'video:install-check', 'video:install-model', 'video:install-all', 'video:install-cancel', 'video:open-folder', 'video:show-file',
+  'video:trailer-make', 'video:trailer-status', 'video:trailer-cancel', 'video:trailer-list', 'video:trailer-plan', 'video:trailer-pick-file',
   'voice:check', 'voice:configure', 'voice:listen', 'voice:redownload', 'voice:speak', 'voice:status',
   'window:toggle-collapse', 'wizard-window:close', 'wizard:catalog', 'wizard:open',
 ];
@@ -146,7 +147,8 @@ const SERVICE_BRIDGE_ROUTES = {
   'GET /voice/status': 'app_info:voice.status', 'POST /voice/settings': 'app_control:voice.configure', 'POST /voice/speak': 'app_control:voice.speak', 'POST /voice/listen': 'app_control:voice.listen',
   'GET /image/status': 'image_generator_status', 'POST /image/settings': 'app_control:image.configure', 'POST /image/generate': 'generate_image',
   'GET /image/backend': 'image_generator_status', 'GET /image/locks': 'character_locks', 'POST /image/request': 'generate_image',
-  'GET /video/backend': 'video_call:video.status', 'POST /video/request': 'video_call:video.generate', 'GET /events': 'EXCLUDE: event stream for external programs (Alfred has the watcher)',
+  'GET /video/backend': 'video_call:video.status', 'POST /video/request': 'video_call:video.generate',
+  'POST /video/trailer': 'video_call:trailer.make', 'GET /video/trailer': 'video_call:trailer.status', 'POST /video/trailer/cancel': 'video_call:trailer.cancel', 'GET /events': 'EXCLUDE: event stream for external programs (Alfred has the watcher)',
 };
 // akowe-bridge.js — Akọwe's own channel INTO AutoInjector (Akọwe → the AI panes): not a user control.
 const AKOWE_BRIDGE_ROUTES = {
@@ -161,7 +163,8 @@ const SD_API_METHODS = ['images.status', 'images.generate', 'images.progress', '
   'images.chatgptStatus', 'images.chatgptCancel', 'images.chatgptSettings'];
 // The 🎬 Video module (video-api.js): every method through video_call.
 const VIDEO_API_METHODS = ['video.status', 'video.capabilities', 'video.models', 'video.progress', 'video.gallery', 'video.cancel', 'video.generate', 'video.animate', 'video.test', 'video.settings',
-  'video.install.check', 'video.install.downloadModel', 'video.install.installAll', 'video.install.cancel'];
+  'video.install.check', 'video.install.downloadModel', 'video.install.installAll', 'video.install.cancel',
+  'trailer.make', 'trailer.status', 'trailer.cancel', 'trailer.list', 'trailer.plan'];
 // The 📖 Akọwe API Alfred uses (method + path pattern) → the tool that calls it.
 const AKOWE_API_USED = {
   'GET /api/projects': 'book_status, list_books', 'GET /api/autobook': 'book_status, pause_run/resume_run/cancel_run', 'GET /api/slots/states': 'book_status',
@@ -192,6 +195,9 @@ const AKOWE_API_USED = {
   'DELETE /api/projects/:pid/branches/main/pictures/:pic': 'edit_picture (remove)',
   'PUT /api/projects/:pid/branches/main/pictures/:pic': 'edit_picture',
   'POST /api/projects/:pid/branches/main/pictures/map': 'book_map',
+  'GET /api/projects/:pid/branches/main/trailer': 'make_trailer (is there a plan?)',
+  'POST /api/projects/:pid/branches/main/trailer/plan': 'make_trailer (plan it from the book)',
+  'POST /api/projects/:pid/branches/main/trailer/make': 'make_trailer',
 };
 const MENU_ITEMS = {
   'Setup Wizard': 'app_control:wizard.open', 'Relay Trace report (where every message went)': 'app_control:ledger.trace_save', 'Reset Relay Trace': 'app_control:ledger.trace_reset',
@@ -536,7 +542,7 @@ async function main() {
   assert(d.carded && d.result && d.result.ok && comfy.state.videoGraphs.length === vg0 + 5 && (d.result.notes || []).some((n) => /image “Odile” is not a picture/.test(n)), 'generate_video: an image that is no picture → dropped with a note, text→video');
   d = await drive('generate_video', { image: path.join(os.tmpdir(), 'no-such-picture-for-alfred.png') });
   assert(d.carded && d.result && d.result.ok === false && d.result.error === 'INVALID_PARAM' && /image/.test(d.result.message) && /\.png \/ \.jpg \/ \.webp/.test(d.result.message) && comfy.state.videoGraphs.length === vg0 + 5, `generate_video: only a missing picture → the error names the field and what it may be: “${d.result && d.result.message}”`);
-  for (const m of ['video.status', 'video.models', 'video.progress', 'video.gallery', 'video.capabilities', 'video.install.check']) {
+  for (const m of ['video.status', 'video.models', 'video.progress', 'video.gallery', 'video.capabilities', 'video.install.check', 'trailer.status', 'trailer.list']) {
     d = await drive('video_call', { method: m, args: {} });
     if (assert(!d.carded && /^RESULT \{"ok":true/.test(d.text), `video_call ${m}: read-only, runs directly against the real module`)) mark(`video:${m}`, 'real video-api');
   }
@@ -685,6 +691,7 @@ async function main() {
       ['edit_picture', { pic_id: 'pic-001', caption: 'At dawn', where: 'after_scene', scene: 2 }, true, () => ak.requests.some((x) => x.method === 'PUT' && x.path === `${B}/pictures/pic-001` && x.body.caption === 'At dawn' && x.body.placement.scene === 2)],
       ['book_map', { kind: 'illustrated', engine: 'sd' }, true, () => ak.requests.some((x) => x.path === `${B}/pictures/map` && x.body.kind === 'illustrated' && x.body.engine === 'sd')],
       ['make_character_art', { character: 'Mara Vell', what: 'sheet', engine: 'chatgpt' }, true, () => ak.requests.some((x) => x.path === `${B}/forge/characters/rec-mara/art` && x.body.what === 'sheet' && x.body.engine === 'chatgpt')],
+      ['make_trailer', {}, true, () => hit('GET', `${B}/trailer`) && hit('POST', `${B}/trailer/plan`) && hit('POST', `${B}/trailer/make`)],
     ];
     for (const [tool, args, changes, effect] of cases) {
       const r = await bd(tool, args);

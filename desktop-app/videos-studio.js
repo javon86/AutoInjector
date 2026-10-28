@@ -46,10 +46,13 @@
     if (document.body.dataset.appTab === 'video') document.body.dataset.appTab = id === 'tab-app-akowe' ? 'akowe' : id === 'tab-app-images' ? 'images' : 'main';
   });
   function subTab(which) {
-    for (const w of ['make', 'setup']) { $(`vd-sub-${w}`).setAttribute('aria-selected', String(w === which)); $(`vd-view-${w}`).hidden = w !== which; }
+    for (const w of ['make', 'trailer', 'setup']) { if (!$(`vd-sub-${w}`)) continue; $(`vd-sub-${w}`).setAttribute('aria-selected', String(w === which)); $(`vd-view-${w}`).hidden = w !== which; }
     if (which === 'setup') refreshSetup();
+    try { document.dispatchEvent(new CustomEvent('vd-subtab', { detail: which })); } catch (_) {}
   }
+  window.vdSubTab = subTab;
   $('vd-sub-make').onclick = () => subTab('make');
+  if ($('vd-sub-trailer')) $('vd-sub-trailer').onclick = () => subTab('trailer');
   $('vd-sub-setup').onclick = () => subTab('setup');
 
   // ------------------------------------------------------------ status

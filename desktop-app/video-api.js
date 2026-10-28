@@ -13,6 +13,8 @@
  *   video.gallery({ limit }) · video.generate(params) · video.animate(params) · video.test()
  *   video.settings({ backend, model, comfyUrl, timeoutMs })
  *   video.install.check() · video.install.downloadModel({ id }) · video.install.installAll({ id }) · video.install.cancel()
+ *   🎞 trailer.make({ book, items | shots + cards, music, … }) · trailer.status({ id }) · trailer.cancel() · trailer.list({ book })
+ *   · trailer.plan({ book }) — book trailers: shots rendered one by one, joined with title cards (video-trailer.js)
  * generate / animate params: prompt, negativePrompt, image (animate: a path or base64), width, height,
  *   seconds | frames, fps, model, steps, cfgScale, seed, sampler, scheduler, shift, characterLock,
  *   purpose (clip | trailer_shot | free), from, book, returnPoster, backend, timeoutMs
@@ -60,6 +62,29 @@ const GEN_PROPS = {
   backend: { type: 'string', enum: VS.BACKENDS, description: 'auto (default), comfy-wan or endpoint' },
   timeoutMs: { type: 'integer', minimum: 10000, maximum: 21600000, description: 'Give up after this long (default 45 min)' },
 };
+const SHOT_ITEM = { type: 'object', additionalProperties: false, properties: {
+  type: { type: 'string', enum: ['shot', 'card'], description: 'shot (a video made from prompt / image) or card (a title card: text + subtitle)' },
+  prompt: { type: 'string', maxLength: 4000, description: 'Shot: what happens' }, image: { type: 'string', description: 'Shot: a picture to animate (file path)' },
+  seconds: { type: 'number', minimum: 1, maximum: 10, description: 'Shot 1–5 s (default 4); card 1–10 s (default 3)' },
+  characterLock: { type: 'string', maxLength: 200 }, negativePrompt: { type: 'string', maxLength: 4000 }, seed: { type: 'integer' }, model: { type: 'string', enum: Object.keys(VI.MODELS) },
+  text: { type: 'string', maxLength: 120, description: 'Card: the big line (e.g. the title)' }, subtitle: { type: 'string', maxLength: 160, description: 'Card: the small line (e.g. "Coming soon")' },
+  at: { description: 'Card in shots+cards form: "start", "end" or after the n-th shot' },
+} };
+const TRAILER_PROPS = {
+  book: { type: 'string', maxLength: 200, description: 'The book (its folder under videos/trailers/)' },
+  title: { type: 'string', maxLength: 200 },
+  items: { type: 'array', maxItems: 24, items: SHOT_ITEM, description: 'Shots and title cards in order' },
+  shots: { type: 'array', maxItems: 16, items: SHOT_ITEM, description: 'Instead of items: the shots ({prompt | image, seconds})' },
+  cards: { type: 'array', maxItems: 8, items: SHOT_ITEM, description: 'With shots: title cards ({text, subtitle, seconds, at}); default the first opens, the rest close' },
+  music: { type: 'string', description: 'Optional music file path (.mp3/.ogg/.wav/.m4a…), mixed in and faded out' },
+  musicVolume: { type: 'number', minimum: 0, maximum: 1 },
+  width: { type: 'integer', minimum: 320, maximum: 1920, description: 'Trailer frame (default 1280×720)' }, height: { type: 'integer', minimum: 240, maximum: 1080 },
+  fps: { type: 'integer', minimum: 12, maximum: 30 }, fade: { type: 'number', minimum: 0, maximum: 1, description: 'Fade through black between parts, seconds (default 0.4)' },
+  model: { type: 'string', enum: Object.keys(VI.MODELS), description: 'Video model for every shot' },
+  resume: { type: 'boolean', description: 'Reuse shots already made for this trailer (default true)' },
+  mp4: { type: 'boolean', description: 'Also make an .mp4 copy when ffmpeg is found (default true)' },
+  from: { type: 'string', maxLength: 60 }, wait: { type: 'boolean', description: 'Wait for the finished trailer instead of returning at once' },
+};
 const ANIMATE_PROPS = Object.assign({}, GEN_PROPS, { image: { type: 'string', format: 'image', description: 'The picture to animate: a file path, or base64 / a data: URL (PNG, JPEG, WEBP)' } });
 
 // args: positional names, or 'object' = the params object is the one argument.
@@ -81,12 +106,19 @@ const OPS = [
   { name: 'video.install.downloadModel', description: 'Download a video model into ComfyUI\'s model folders (big: 2.8–18 GB; resumes where it stopped)', params: O({ id: { type: 'string', enum: MODEL_IDS } }), args: 'object', changes: true, needs: 'comfyInstalled' },
   { name: 'video.install.installAll', description: 'One click: install ComfyUI (when there is none) and then the video model', params: O({ id: { type: 'string', enum: MODEL_IDS } }), args: 'object', changes: true },
   { name: 'video.install.cancel', description: 'Stop / pause the video download (it continues where it stopped next time)', params: O(), args: [], changes: true },
+  { name: 'trailer.make', description: 'Make a book trailer: each shot is rendered (text→video, or a picture brought to life) one after the other, then joined with title cards (fades, optional music) into trailer.webm (+ trailer.mp4 when ffmpeg is found) in videos/trailers/<book>/. Shots already made are reused. Starts in the background (trailer.status) unless wait:true. Takes minutes per shot.', params: O(TRAILER_PROPS), args: 'object', changes: true, needs: 'ready' },
+  { name: 'trailer.status', description: 'The trailer being made: phase (shots / joining / mp4 / done), which shot, each part\'s state; the result when finished', params: O({ id: { type: 'string', maxLength: 80 } }), args: 'object', changes: false },
+  { name: 'trailer.cancel', description: 'Stop the trailer being made (the shots already made are kept for next time)', params: O(), args: [], changes: true },
+  { name: 'trailer.list', description: 'The saved trailers (one per book) with their .webm / .mp4', params: O({ book: { type: 'string', maxLength: 200 } }), args: 'object', changes: false },
+  { name: 'trailer.plan', description: 'The saved plan (shots, cards, music) of a book\'s trailer, to change and make again', params: O({ book: { type: 'string', maxLength: 200 } }, ['book']), args: 'object', changes: false },
 ];
 
 function _get(obj, p) { return p.split('.').reduce((o, k) => (o == null ? undefined : o[k]), obj); }
 
 function createVideoApi(d = {}) {
   const studio = d.studio;
+  const trailer = d.trailer || null;
+  const T = (name, ...a) => { const fn = trailer && trailer[name]; return typeof fn === 'function' ? fn(...a) : notWired(`trailer.${name}`); };
   const S = (name, ...a) => { const fn = name.split('.').reduce((o, k) => (o == null ? undefined : o[k]), studio); return typeof fn === 'function' ? fn(...a) : notWired(name); };
   const from = (o) => `api:${String((o && o.from) || 'alfred').slice(0, 40)}`;
   const strip = (o) => { const q = Object.assign({}, o || {}); return q; };
@@ -108,6 +140,13 @@ function createVideoApi(d = {}) {
         installAll: wrap((o) => S('install.installAll', o && typeof o === 'object' ? o.id : o)),
         cancel: wrap(() => S('install.cancel')),
       },
+    },
+    trailer: {
+      make: wrap((o) => checkKeys('trailer.make', o, TRAILER_PROPS) || T('make', Object.assign({}, o || {}, { from: (o && o.from) || 'alfred' }))),
+      status: wrap((o) => T('status', o && typeof o === 'object' ? o : {})),
+      cancel: wrap(() => T('cancel')),
+      list: wrap((o) => T('list', o && typeof o === 'object' ? o : {})),
+      plan: wrap((o) => T('plan', o && typeof o === 'object' ? o : { book: o })),
     },
   };
 
@@ -133,7 +172,7 @@ function createVideoApi(d = {}) {
     return {
       ok: true, version: 1, ready: !!(ok && st.ready), backend: (ok && st.backend) || '', message: (ok && st.message) || '', installed, defaultModel: VI.DEFAULT_MODEL,
       models: Object.values(VI.MODELS).map((m) => ({ id: m.id, label: m.label, modes: m.modes, vramGB: m.vramGB, bytes: VI.modelBytes(m), defaults: m.defaults, limits: m.limits, installed: installed.includes(m.id) })),
-      errors: ['VIDEO_NOT_SET_UP', 'VIDEO_MODEL_MISSING', 'VIDEO_OOM', 'VIDEO_TIMEOUT', 'VIDEO_CANCELLED', 'VIDEO_FAILED', 'UNSUPPORTED_ON_BACKEND', 'INVALID_PARAM', 'BUSY', 'NO_LOCK'],
+      errors: ['VIDEO_NOT_SET_UP', 'VIDEO_MODEL_MISSING', 'VIDEO_OOM', 'VIDEO_TIMEOUT', 'VIDEO_CANCELLED', 'VIDEO_FAILED', 'UNSUPPORTED_ON_BACKEND', 'INVALID_PARAM', 'BUSY', 'NO_LOCK', 'TRAILER_JOIN_FAILED'],
       operations,
     };
   });
@@ -173,4 +212,4 @@ function register(api) { registered = api; return api; }
 function get() { return registered; }
 function operationNames() { return OPS.map((o) => o.name); }
 
-module.exports = { createVideoApi, register, get, operationNames, OPS, GEN_PROPS, ANIMATE_PROPS };
+module.exports = { createVideoApi, register, get, operationNames, OPS, GEN_PROPS, ANIMATE_PROPS, TRAILER_PROPS };

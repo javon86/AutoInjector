@@ -71,6 +71,7 @@ async function fakeAkowe(token) {
       { chapter_id: 'ch1', number: 1, title: 'The Lamp Room', state: 'chosen', pictures: [{ pic_id: 'pic-001', chosen: 0, candidates: [{}, {}], caption: 'Mara climbs', placement: { where: 'start' } }] },
       { chapter_id: 'ch2', number: 2, title: 'Fog', state: 'none', pictures: [] }], map: null },
     pictureCalls: [],
+    trailerPlan: null,
     cover: { design: { template: 'gilded', colors: {}, texts: {}, art: null, print: { trim: '6x9', paper: 'cream', page_count: 320 } }, texts: { title: 'The Lighthouse Keeper', author: 'A. Writer' }, templates: [{ id: 'gilded' }, { id: 'thriller' }], print: { ok: true, spine_in: 0.8, notes: [] }, warnings: [] },
   };
   const server = http.createServer(async (req, res) => {
@@ -115,6 +116,10 @@ async function fakeAkowe(token) {
       if (pm && m === 'DELETE') return send(res, 200, { ok: true });
       return send(res, 404, { errors: [{ code: 'NOT_FOUND', message: 'no such pictures endpoint' }] });
     }
+    // 🎞 the book trailer (Akọwe trailer.py)
+    if (p === `${B}/trailer` && m === 'GET') return send(res, 200, { plan: st.trailerPlan, trailer: null, shots: st.trailerPlan ? 5 : 0 });
+    if (p === `${B}/trailer/plan` && m === 'POST') { st.trailerPlan = { made_from: 'book', items: [{ type: 'card', text: 'The Lighthouse Keeper' }] }; return send(res, 200, { plan: st.trailerPlan, shots: 5, notes: [] }); }
+    if (p === `${B}/trailer/make` && m === 'POST') return st.trailerPlan ? send(res, 202, { job_id: 'job-trailer', kind: 'trailer', total: 5, status: 'queued' }) : send(res, 400, { errors: [{ code: 'MISSING_INPUT', message: 'no plan' }] });
     if (p === `${B}/cover` && m === 'GET') return send(res, 200, st.cover);
     if (p === `${B}/cover` && m === 'PUT') { Object.assign(st.cover.design, body || {}); if (body && body.print) Object.assign(st.cover.design.print, body.print); return send(res, 200, st.cover); }
     if (p === `${B}/cover/art` && m === 'POST') return send(res, 202, { job_id: 'job-cover' });
