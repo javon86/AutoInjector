@@ -2516,6 +2516,7 @@ async function refreshToolsList() {
       ? tools.map((t) => `• ${t.name}${t.risk === "ask" ? " (asks first)" : ""} — ${t.description}`).join("\n")
       : "No tools loaded.";
     box.style.whiteSpace = "pre-wrap";
+    const n = el("jarvis-tools-count"); if (n) n.textContent = tools.length ? `(${tools.length})` : "";
   } catch { /* leave default */ }
 }
 refreshToolsList();

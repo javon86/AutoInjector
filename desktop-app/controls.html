@@ -417,6 +417,7 @@
     .ex-scope .t { font-weight:600; }
     .ex-scope .why { display:block; opacity:.72; font-size:11.5px; margin:2px 0 0 22px; }
     .ex-scope .opts { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin:6px 0 0 22px; }
+    .ex-scope .opts[hidden] { display:none; } /* no empty book picker when no book is known */
     .ex-scope .opts select, .ex-scope .opts input { font-size:12px; max-width:100%; min-width:0; }
     .ex-warn { display:block; color:#ffb4b4; font-size:11.5px; margin:3px 0 0 22px; }
     .ex-scope.sel .ex-warn { color:#ff8a8f; font-weight:600; }
@@ -2049,9 +2050,9 @@
 
         <details class="sai-sec" id="tools-sec">
           <summary>🧰 Tools — what the butler can call</summary>
-          <p style="opacity:.7; font-size:11px; margin:2px 0 5px;">The built-in tools, plus outside <b>tool servers</b> (MCP) you add below. The butler (USE_TOOL) and 🎩 Alfred always ask you before they use a tool server.</p>
-          <div id="jarvis-tools" style="font-size:11px; opacity:.85; margin:2px 0;">No tools loaded.</div>
-          <div style="font-size:12px; font-weight:600; margin:8px 0 3px;">Tool servers (MCP)</div>
+          <p style="opacity:.7; font-size:11px; margin:2px 0 6px;">The built-in tools, plus outside <b>tool servers</b> (MCP) you add below. The butler and 🎩 Alfred always ask you before they use a tool server.</p>
+          <!-- the long built-in list stays folded; the tool servers (what you add) come first -->
+          <div style="font-size:12px; font-weight:600; margin:6px 0 3px;">Tool servers (MCP)</div>
           <div id="mcp-servers" style="font-size:11.5px;">None yet — nothing runs until you add one.</div>
           <details id="mcp-add-box" style="margin-top:6px;">
             <summary style="font-size:12px; cursor:pointer;">➕ Add a tool server</summary>
@@ -2061,6 +2062,10 @@
             <div class="btns" style="margin:3px 0;"><button id="btn-mcp-add" class="primary">➕ Add and start</button></div>
             <div id="mcp-msg" style="font-size:11.5px; opacity:.9;"></div>
             <p style="opacity:.7; font-size:11px; margin:4px 0 0;">⚠ A command-line tool server is a program that runs on this computer with your permissions — add only ones you trust. Every call to it waits for your ✔.</p>
+          </details>
+          <details id="jarvis-tools-box" style="margin-top:8px;">
+            <summary style="font-size:12px; cursor:pointer;">🔧 Built-in tools <span id="jarvis-tools-count" style="opacity:.7;"></span></summary>
+            <div id="jarvis-tools" style="font-size:11px; opacity:.85; margin:4px 0 2px; line-height:1.45;">No tools loaded.</div>
           </details>
         </details>
 
