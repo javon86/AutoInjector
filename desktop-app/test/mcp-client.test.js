@@ -199,6 +199,9 @@ async function main() {
   assert(!tp.has('mcp:files/echo') && m.find('files').status === 'stopped', 'stop → stopped and its tools leave the registry');
   r = await m.call('files', 'echo', { text: 'wake' });
   assert(r.ok && r.text === 'echo: wake', 'a call to a stopped server starts it first');
+  assert(m.find('files').enabled === false && JSON.parse(fs.readFileSync(file, 'utf8')).servers.find((x) => x.name === 'files').enabled === false, '…without undoing the user\'s Stop (not saved as "start with the app")');
+  await m.start('files');
+  assert(m.find('files').enabled === true, 'pressing Start still turns "start with the app" on');
   // a fresh manager (= the app restarted) reads the file, opens the secret, starts the enabled server
   const m2 = createMcpManager({ file, seal, open, timeoutMs: 4000 });
   const as = await m2.autoStart();
@@ -209,6 +212,27 @@ async function main() {
   const m3 = createMcpManager({ file: path.join(TMP, 'plain.json'), seal: () => null, open: () => '' });
   a = m3.add({ name: 'nokeychain', line: 'node x.js', secrets: 'K=value-123456' });
   assert(a.ok && a.server.secretsNotSaved && /only until AutoInjector closes/.test(a.message) && !/value-123456/.test(fs.readFileSync(path.join(TMP, 'plain.json'), 'utf8')), 'without a keychain the secret is kept for this session only, never written');
+  { // a secret that couldn't be sealed leaves a placeholder → the next run says "needs its secrets again"
+    const pf = path.join(TMP, 'placeholder.json');
+    const p1 = createMcpManager({ file: pf, seal: () => null, open: () => '' });
+    p1.add({ name: 'nokc', line: 'node x.js', secrets: 'K=value-777777' });
+    const disk = fs.readFileSync(pf, 'utf8');
+    assert(!/value-777777/.test(disk) && JSON.parse(disk).servers[0].env.K && JSON.parse(disk).servers[0].env.K.enc === null, 'unsealable secret → {enc:null} on disk (never the value)');
+    const p2 = createMcpManager({ file: pf, seal, open });
+    const st2 = await p2.start('nokc');
+    assert(p2.find('nokc').missingSecrets.includes('K') && !st2.ok && st2.error === 'MISSING_SECRETS' && /needs its secrets again/.test(st2.message), 'next run: "needs its secrets again (K)" instead of starting without it');
+    // a keychain that can't open the blob this run: the sealed blob is carried over, not erased
+    const cf = path.join(TMP, 'carry.json');
+    const c1 = createMcpManager({ file: cf, seal, open });
+    c1.add({ name: 'carry', line: 'node x.js', secrets: 'API_KEY=carry-secret-1234' });
+    const blob = JSON.parse(fs.readFileSync(cf, 'utf8')).servers[0].env.API_KEY.enc;
+    const c2 = createMcpManager({ file: cf, seal, open: () => '' });
+    assert(c2.find('carry').missingSecrets.includes('API_KEY'), 'a run whose keychain can\'t open it lists the key as missing');
+    c2.add({ name: 'other', line: 'node y.js' }); // any save
+    assert(JSON.parse(fs.readFileSync(cf, 'utf8')).servers.find((x) => x.name === 'carry').env.API_KEY.enc === blob, 'saving in that run writes the original sealed blob back');
+    const c3m = createMcpManager({ file: cf, seal, open });
+    assert(!c3m.find('carry').missingSecrets.length && c3m.find('carry').envKeys.includes('API_KEY'), 'a later run with the keychain back has the secret again');
+  }
   await m.remove('files');
   assert(m.list().servers.length === 0 && !/files/.test(fs.readFileSync(file, 'utf8')), 'remove deletes it from the list and the file');
   assert(!logs.some((l) => /tok-MANAGER-4242/.test(l)), 'nothing logged contains the secret');
