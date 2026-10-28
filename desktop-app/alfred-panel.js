@@ -16,7 +16,8 @@
   const sw = document.getElementById('btn-alfred-switch');
   if (!sw) return;
 
-  const W = 390;
+  // His width: 380px on a laptop screen, up to 440px on a big one (the page is laid out beside it).
+  const W = 'clamp(380px, 22.5vw, 440px)';
   let built = false;     // the panel UI exists in this document
   let open = true;       // the drawer is shown
   let last = null;
@@ -45,25 +46,27 @@
     const s = document.createElement('style');
     s.id = 'alfred-style';
     s.textContent = `
-      body.alfred-open #wrap, body.alfred-open #akowe-tab, body.alfred-open #images-tab, body.alfred-open #video-tab { margin-right:${W}px; }
+      body.alfred-open #wrap, body.alfred-open #akowe-tab, body.alfred-open #images-tab, body.alfred-open #video-tab { margin-right:${W}; }
       .al-root { display:flex; flex-direction:column; background:#0d0f14; color:#e8ecf5; font-size:13px; }
-      #alfred-drawer { position:fixed; top:38px; right:0; bottom:0; width:${W}px; z-index:50; border-left:1px solid #2b3550; }
+      #alfred-drawer { position:fixed; top:38px; right:0; bottom:0; width:${W}; z-index:50; border-left:1px solid #2b3550; }
       .al-root[hidden] { display:none; }
       .al-root header { display:flex; align-items:center; gap:6px; padding:8px 10px; border-bottom:1px solid #222a3d; background:#121726; }
       .al-root header h2 { margin:0; font-size:14px; flex:1 1 auto; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
       .al-root button { font-size:12px; padding:3px 9px; border-radius:6px; border:1px solid #334064; background:#161d30; color:#e8ecf5; cursor:pointer; }
       .al-root button.primary { background:#2c4a8a; border-color:#4a6fc0; }
       .al-root button:disabled { opacity:.5; cursor:default; }
-      #alfred-profile { max-width:120px; font-size:11.5px; background:#0b0e16; color:#e8ecf5; border:1px solid #2b3550; border-radius:5px; padding:2px 3px; }
+      #alfred-profile[hidden] { display:none; }
+      .al-root header button { min-width:30px; }
+      #alfred-profile { max-width:130px; font-size:11.5px; background:#0b0e16; color:#e8ecf5; border:1px solid #2b3550; border-radius:5px; padding:2px 3px; }
       #alfred-profile-row { display:flex; gap:6px; padding:6px 10px; border-bottom:1px solid #1b2236; background:#10141f; }
       #alfred-profile-row[hidden] { display:none; }
       #alfred-profile-row input { flex:1 1 auto; background:#0b0e16; color:#e8ecf5; border:1px solid #2b3550; border-radius:5px; padding:3px 5px; font-size:12px; }
-      #alfred-actions { display:grid; grid-template-columns:1fr 1fr; gap:6px; padding:8px 10px; border-bottom:1px solid #1b2236; }
+      #alfred-actions { flex:0 0 auto; display:grid; grid-template-columns:1fr 1fr; grid-auto-rows:1fr; gap:6px; padding:8px 10px; border-bottom:1px solid #1b2236; }
       #alfred-actions button { display:flex; align-items:center; gap:7px; min-height:40px; padding:6px 9px; font-size:12.5px; font-weight:600; text-align:left; border-radius:9px; background:#141b2e; border-color:#2f3d63; line-height:1.2; }
       #alfred-actions button .al-ic { font-size:19px; flex:0 0 auto; }
       #alfred-actions button:hover:not(:disabled) { background:#1b2540; border-color:#4a6fc0; }
       #alfred-actions button[aria-pressed="true"] { background:#22325a; border-color:#6f93e0; }
-      #alfred-form { margin:0 10px 8px; padding:8px 9px; border:1px solid #2f3d63; background:#10162a; border-radius:9px; display:flex; flex-direction:column; gap:6px; }
+      #alfred-form { flex:0 0 auto; margin:0 10px 8px; padding:8px 9px; border:1px solid #2f3d63; background:#10162a; border-radius:9px; display:flex; flex-direction:column; gap:6px; }
       #alfred-form[hidden] { display:none; }
       #alfred-form h3 { margin:0; font-size:12.5px; color:#cfe0ff; }
       #alfred-form label { font-size:11.5px; color:#aab5cf; display:flex; flex-direction:column; gap:3px; }
@@ -71,8 +74,10 @@
       #alfred-form textarea { resize:vertical; min-height:40px; }
       #alfred-form .al-row { display:flex; gap:6px; }
       #alfred-form .al-note { font-size:11px; color:#8792ad; }
-      #alfred-quick-msg { padding:6px 10px; font-size:11.5px; color:#cdd6ee; white-space:pre-wrap; border-bottom:1px solid #1b2236; max-height:30vh; overflow:auto; }
-      #alfred-quick-msg:empty { display:none; }
+      #alfred-quick { position:relative; flex:0 0 auto; }
+      #alfred-quick-msg { padding:6px 34px 6px 10px; font-size:11.5px; color:#cdd6ee; white-space:pre-wrap; border-bottom:1px solid #1b2236; max-height:30vh; overflow:auto; line-height:1.45; }
+      #alfred-quick-msg:empty, #alfred-quick-msg:empty + #alfred-quick-close { display:none; }
+      #alfred-quick-close { position:absolute; top:4px; right:16px; padding:0 6px; font-size:12px; line-height:18px; min-width:0; }
       #alfred-quick-msg .al-fix { margin:3px 0 0 14px; font-size:11px; padding:1px 8px; }
       #alfred-catalog { flex:1 1 auto; overflow:hidden; display:flex; flex-direction:column; border-bottom:1px solid #1b2236; min-height:0; }
       #alfred-catalog[hidden] { display:none; }
@@ -87,14 +92,17 @@
       .al-cat-item .al-asks { font-size:10.5px; color:#d9b25e; margin-left:4px; font-weight:400; }
       .al-cat-item button { flex:0 0 auto; font-size:11px; padding:2px 7px; }
       #alfred-catalog-empty { padding:10px; font-size:12px; color:#8792ad; }
-      #alfred-statusline { padding:5px 10px; font-size:11.5px; color:#aab5cf; border-bottom:1px solid #1b2236; line-height:1.4; }
+      #alfred-statusline { flex:0 0 auto; padding:5px 10px; font-size:11.5px; color:#aab5cf; border-bottom:1px solid #1b2236; line-height:1.4; }
       #alfred-statusline .bad { color:#f0a35e; } #alfred-statusline .good { color:#7fd99a; }
-      #alfred-settings { padding:8px 10px; border-bottom:1px solid #1b2236; background:#10141f; font-size:12px; display:grid; grid-template-columns:auto 1fr; gap:6px 8px; align-items:center; overflow:auto; max-height:55vh; }
+      #alfred-settings { padding:10px; border-bottom:1px solid #1b2236; background:#10141f; font-size:12px; display:grid; grid-template-columns:auto 1fr; gap:8px; align-items:center; align-content:start; overflow:auto; flex:1 1 auto; min-height:0; }
+      .al-root.al-set-open #alfred-chat { display:none; }
       #alfred-settings[hidden] { display:none; }
       #alfred-settings input[type=text], #alfred-settings input[type=number], #alfred-settings select { width:100%; background:#0b0e16; color:#e8ecf5; border:1px solid #2b3550; border-radius:5px; padding:3px 5px; font-size:12px; box-sizing:border-box; }
       #alfred-settings .full { grid-column:1 / -1; }
+      #alfred-settings .al-set-head { display:flex; align-items:center; justify-content:space-between; font-size:12.5px; color:#cfe0ff; }
+      #alfred-settings label.full { display:flex; gap:6px; align-items:flex-start; line-height:1.4; }
       #alfred-settings .warn { color:#f0a35e; font-size:11px; }
-      #alfred-chat { flex:1 1 auto; overflow-y:auto; padding:8px 10px; display:flex; flex-direction:column; gap:6px; min-height:60px; }
+      #alfred-chat { flex:1 1 0; overflow-y:auto; padding:8px 10px; display:flex; flex-direction:column; gap:8px; min-height:96px; }
       #alfred-chat:empty::before { content:"🎩 Good day. Press a button above, or ask me anything about your books, pictures or AIs — e.g. “what's the status of my book?”. Type “what can you do?” for the full list. I ask before I change anything."; color:#8792ad; font-size:12px; white-space:pre-wrap; }
       .al-root.al-cat-open #alfred-chat { display:none; }
       .al-msg { padding:6px 9px; border-radius:9px; max-width:94%; white-space:pre-wrap; word-wrap:break-word; line-height:1.45; }
@@ -103,19 +111,22 @@
       .al-notice { align-self:stretch; background:#1c1a10; border:1px solid #4a4220; color:#f1e3b0; font-size:12px; }
       .al-notice .al-fix { margin-top:6px; font-size:12px; padding:2px 10px; } .al-notice .al-fix-note { margin-top:4px; color:#e8a0a0; }
       .al-msg img { display:block; max-width:100%; max-height:180px; margin-top:6px; border-radius:6px; }
-      #alfred-card { margin:0 10px 8px; padding:9px 10px; border:1px solid #c79a3a; background:#1d1709; border-radius:10px; overflow:auto; max-height:50vh; }
+      #alfred-card { flex:0 0 auto; margin:8px 10px; padding:9px 10px; border:1px solid #c79a3a; background:#1d1709; border-radius:10px; max-height:52vh; display:flex; flex-direction:column; min-height:0; box-shadow:0 -4px 14px rgba(0,0,0,.35); }
       #alfred-card[hidden] { display:none; }
+      #alfred-card .al-card-body { overflow:auto; min-height:0; flex:1 1 auto; }
       #alfred-card h3 { margin:0 0 6px; font-size:13px; color:#f3d488; }
-      #alfred-card ol { margin:0 0 8px; padding-left:20px; }
+      #alfred-card ol { margin:0 0 4px; padding-left:20px; }
       #alfred-card li { margin-bottom:6px; white-space:pre-wrap; }
       #alfred-card pre { background:#0b0e16; border:1px solid #333; padding:6px; border-radius:6px; overflow:auto; max-height:160px; font-size:11.5px; white-space:pre; }
       #alfred-card label { display:block; font-size:11.5px; color:#cbb98a; margin-top:2px; }
-      #alfred-card .al-actions { display:flex; gap:8px; }
-      #alfred-busy { padding:4px 10px; font-size:12px; color:#9fb2e0; display:flex; align-items:center; gap:8px; }
+      #alfred-card .al-actions { display:flex; gap:8px; padding-top:8px; border-top:1px solid #3a3018; flex:0 0 auto; }
+      #alfred-card .al-actions button { padding:5px 14px; font-size:12.5px; }
+      #alfred-busy { flex:0 0 auto; padding:4px 10px; font-size:12px; color:#9fb2e0; display:flex; align-items:center; gap:8px; }
       #alfred-busy[hidden] { display:none; }
-      #alfred-compose { display:flex; gap:6px; padding:8px 10px; border-top:1px solid #222a3d; }
+      #alfred-compose { flex:0 0 auto; display:flex; gap:6px; padding:8px 10px; border-top:1px solid #222a3d; }
+      #alfred-send { padding:0 14px; }
       #alfred-input { flex:1 1 auto; resize:none; height:52px; background:#0b0e16; color:#e8ecf5; border:1px solid #2b3550; border-radius:7px; padding:5px 7px; font:inherit; font-size:13px; }
-      #alfred-did { border-top:1px solid #222a3d; padding:6px 10px 8px; font-size:12px; max-height:24vh; overflow:auto; }
+      #alfred-did { flex:0 0 auto; border-top:1px solid #222a3d; padding:6px 10px 8px; font-size:12px; max-height:24vh; overflow:auto; }
       #alfred-did summary { cursor:pointer; color:#aab5cf; }
       #alfred-did ul { margin:5px 0 0; padding-left:18px; }
       #alfred-did li.fail { color:#f0a35e; }
@@ -159,7 +170,7 @@
         h('h2', { id: 'alfred-title' }, '🎩 Alfred'),
         h('select', { id: 'alfred-profile', title: 'Saved set-ups — switch his AI, model and personality in one go', 'aria-label': 'Saved set-up', onchange: (e) => useProfile(e.target.value) }),
         h('button', { id: 'alfred-btn-profile-save', type: 'button', title: 'Save the current set-up as…', onclick: () => { const r = $('alfred-profile-row'); r.hidden = !r.hidden; if (!r.hidden) { const i = $('alfred-profile-name'); i.value = (last && last.settings && last.settings.activeProfile) || ''; i.focus(); } } }, '💾'),
-        h('button', { id: 'alfred-btn-settings', type: 'button', title: 'Alfred\'s settings', onclick: () => { const s = $('alfred-settings'); s.hidden = !s.hidden; if (!s.hidden) fillSettings(); } }, '⚙'),
+        h('button', { id: 'alfred-btn-settings', type: 'button', title: 'Alfred\'s settings', onclick: () => showSettings($('alfred-settings').hidden) }, '⚙'),
         h('button', { id: 'alfred-btn-clear', type: 'button', title: 'Start a new conversation', onclick: () => api.alfredClear() }, '🧹'),
         h('button', { id: 'alfred-btn-hide', type: 'button', title: `Hide the panel — Alfred stays on (${SHORTCUT} brings it back)`, onclick: () => setOpen(false) }, '×')),
       h('div', { id: 'alfred-profile-row', hidden: true },
@@ -169,7 +180,7 @@
       h('div', { id: 'alfred-actions', role: 'toolbar', 'aria-label': 'What Alfred can do for you' },
         ACTIONS.map((a) => h('button', { id: `alfred-a-${a.id}`, type: 'button', title: a.tip, 'data-action': a.id, onclick: () => doAction(a.id) }, h('span', { class: 'al-ic', 'aria-hidden': 'true' }, a.ic), h('span', null, a.label)))),
       h('form', { id: 'alfred-form', hidden: true, 'aria-label': 'A detail Alfred needs', onsubmit: (e) => { e.preventDefault(); submitForm(); } }),
-      h('div', { id: 'alfred-quick-msg', role: 'status', 'aria-live': 'polite' }),
+      h('div', { id: 'alfred-quick' }, h('div', { id: 'alfred-quick-msg', role: 'status', 'aria-live': 'polite' }), h('button', { id: 'alfred-quick-close', type: 'button', title: 'Hide this note', 'aria-label': 'Hide this note', onclick: () => quickMsg('') }, '✕')),
       catalogBox(),
       settingsBox(),
       h('div', { id: 'alfred-chat', 'aria-live': 'polite' }),
@@ -184,7 +195,8 @@
   }
   function settingsBox() {
     const opt = (v, t) => h('option', { value: v }, t);
-    return h('div', { id: 'alfred-settings', hidden: true },
+    return h('div', { id: 'alfred-settings', hidden: true, role: 'region', 'aria-label': 'Alfred\'s settings' },
+      h('div', { class: 'full al-set-head' }, h('b', null, '⚙ His settings'), h('button', { id: 'alfred-set-close', type: 'button', title: 'Back to the chat', onclick: () => showSettings(false) }, '✕')),
       h('label', { for: 'alfred-set-brain' }, 'His AI'),
       h('select', { id: 'alfred-set-brain' }, opt('auto', 'Automatic (local model, else the connected AI)'), opt('local', 'Local model (Ollama)'), opt('api', 'The connected AI (manager / API)'), opt('pane', 'A web AI pane')),
       h('label', { for: 'alfred-set-endpoint' }, 'Ollama address'),
@@ -205,6 +217,15 @@
         h('button', { id: 'alfred-set-reset-allow', type: 'button', title: 'Ask again before every change', onclick: resetAllow }, 'Forget "always allow"'),
         h('button', { id: 'alfred-set-butler', type: 'button', title: 'One-button setup, the full check, models and his personality — the 🎩 Butler section', onclick: showButler }, '🛠 Set up his AI')),
       h('div', { id: 'alfred-set-msg', class: 'full', style: 'font-size:11.5px;color:#aab5cf' }));
+  }
+  /** ⚙ his settings take the chat's place (✕ / ⚙ again goes back to the chat). */
+  function showSettings(on) {
+    const s = $('alfred-settings'); const root = $('alfred-drawer'); if (!s) return;
+    if (on) showCatalog(false);
+    s.hidden = !on;
+    if (root) root.classList.toggle('al-set-open', !!on);
+    const b = $('alfred-btn-settings'); if (b) b.setAttribute('aria-pressed', String(!!on));
+    if (on) fillSettings();
   }
   function fillSettings() {
     const s = last && last.settings; if (!s) return;
@@ -390,6 +411,7 @@
   }
   async function showCatalog(on) {
     const c = $('alfred-catalog'); const root = $('alfred-drawer'); if (!c) return;
+    if (on && $('alfred-settings') && !$('alfred-settings').hidden) showSettings(false);
     c.hidden = !on;
     if (root) root.classList.toggle('al-cat-open', !!on);
     const b = $('alfred-a-catalog'); if (b) b.setAttribute('aria-pressed', String(!!on));
@@ -437,6 +459,7 @@
     for (const p of list) sel.append(h('option', { value: p.name }, p.name));
     sel.value = active;
     sel.disabled = !list.length;
+    sel.hidden = !list.length; // nothing saved yet: no empty drop-down (💾 saves the first one)
   }
   async function useProfile(name) {
     if (!name || typeof api.alfredUseProfile !== 'function') return;
@@ -568,8 +591,8 @@
     if (!card) { box.hidden = true; delete box.dataset.id; return; }
     box.hidden = false;
     box.dataset.id = card.id;
-    box.append(h('h3', null, '🎩 I will:'));
-    if (card.intro) box.append(h('p', { style: 'margin:0 0 6px;font-size:12px;color:#cbb98a' }, card.intro));
+    const body = h('div', { class: 'al-card-body' }, h('h3', null, '🎩 I will:'));
+    if (card.intro) body.append(h('p', { style: 'margin:0 0 6px;font-size:12px;color:#cbb98a' }, card.intro));
     const ol = h('ol');
     for (const s of card.steps) {
       const li = h('li', { 'data-tool': s.tool }, s.code ? `${s.title} — here is the exact ${s.code.language} code:` : s.text);
@@ -577,7 +600,8 @@
       if (s.allowAlways) li.append(h('label', null, h('input', { type: 'checkbox', class: 'al-always', 'data-tool': s.allowKey || s.tool, checked: ticked.includes(s.allowKey || s.tool) }), s.allowKey && s.allowKey.includes(':') ? ' Always allow this without asking' : ` Always allow "${s.title}" without asking`));
       ol.append(li);
     }
-    box.append(ol, h('div', { class: 'al-actions' },
+    body.append(ol);
+    box.append(body, h('div', { class: 'al-actions' },
       h('button', { id: 'alfred-do-it', type: 'button', class: 'primary', onclick: () => decide(true) }, '✔ Do it'),
       h('button', { id: 'alfred-no', type: 'button', onclick: () => decide(false) }, '✖ No')));
     if (catalogShown()) showCatalog(false); // the card must be seen

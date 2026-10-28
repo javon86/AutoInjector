@@ -6,8 +6,11 @@
   <style>
     * { box-sizing: border-box; }
     html, body { height: 100%; }
-    body { margin: 0; background:#111; color:#eee; font-size:12px; font-family: system-ui, sans-serif; padding:14px; display:flex; flex-direction:column; gap:10px; }
-    p.hint { opacity:.65; margin:0; }
+    body { margin: 0; background:#111; color:#eee; font-size:12.5px; font-family: system-ui, sans-serif; padding:16px; display:flex; flex-direction:column; gap:12px; }
+    /* one readable column on a big window */
+    body > * { width:100%; max-width:960px; margin-left:auto; margin-right:auto; }
+    h1 { font-size:15px; margin:0 auto; }
+    p.hint { opacity:.7; margin:0 auto; line-height:1.45; }
     select, input, button { background:#1a1a1a; color:#eee; border:1px solid #333; border-radius:6px; padding:5px 7px; font-family:inherit; font-size:12px; }
     button { cursor:pointer; }
     button:hover { background:#242424; }
@@ -17,17 +20,20 @@
 
     #steps { display:flex; flex-direction:column; gap:8px; flex:1 1 auto; min-height:0; overflow:auto; }
     .step { background:#171717; border:1px solid #2a2a2a; border-radius:6px; padding:8px; display:flex; gap:8px; align-items:flex-start; }
-    .step .num { opacity:.5; font-size:10px; padding-top:6px; min-width:16px; }
+    .step .num { opacity:.75; font-size:13px; font-weight:600; padding-top:5px; min-width:20px; text-align:right; }
     .step .fields { flex:1 1 auto; display:flex; flex-direction:column; gap:6px; }
     .step select { width:140px; }
     .step textarea { width:100%; height:56px; resize:vertical; background:#1a1a1a; color:#eee; border:1px solid #333; border-radius:6px; padding:5px 7px; font-family:inherit; font-size:12px; }
     .step .btn-remove { align-self:flex-start; }
 
     #actions { display:flex; gap:8px; flex:0 0 auto; }
+    #actions button { padding:6px 14px; }
+    #steps:empty::before { content:"No steps yet — press + Add Step."; opacity:.6; padding:10px 2px; }
     #status { opacity:.85; min-height:1em; flex:0 0 auto; }
   </style>
 </head>
 <body>
+  <h1>🧵 Prompt sequence</h1>
   <p class="hint">Build a numbered list of prompts, each sent to whoever you pick — the next one only goes out once that step's target has actually replied.</p>
 
   <div id="steps"></div>
