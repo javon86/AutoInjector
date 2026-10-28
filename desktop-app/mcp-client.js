@@ -134,7 +134,17 @@ function createMcpClient(options = {}) {
     name: 'tool server', transport: 'stdio', command: '', args: [], env: {}, cwd: undefined,
     url: '', headers: {}, timeoutMs: 30000, initTimeoutMs: 30000, maxRestarts: 3, restartWindowMs: 60000,
     restartDelayMs: 500, spawn: cp.spawn, platform: process.platform, log: () => {}, onChange: () => {}, saveImage: null,
+    execFile: cp.execFile, // for taskkill on Windows (injectable for tests)
   }, options);
+  // On Windows the server runs under cmd.exe (shell:true), so ch.kill() would only end cmd.exe and leave the real
+  // server (node / python …) running: taskkill /T /F ends the whole tree, like sd-runner does.
+  function killProc(ch, sig) {
+    if (!ch) return;
+    if (o.platform === 'win32' && ch.pid) {
+      try { o.execFile('taskkill', ['/pid', String(ch.pid), '/T', '/F'], { windowsHide: true }, () => {}); return; } catch (_) {}
+    }
+    try { ch.kill(sig); } catch (_) {}
+  }
   const name = String(o.name || 'tool server');
   const transport = o.transport === 'http' ? 'http' : 'stdio';
   const secretValues = [...Object.values(o.env || {}), ...Object.values(o.headers || {})];
@@ -466,7 +476,7 @@ function createMcpClient(options = {}) {
   }
   function killNow() {
     const ch = child; childGen++; child = null;
-    if (ch) { try { ch.stdin && ch.stdin.end(); } catch (_) {} try { ch.kill('SIGKILL'); } catch (_) {} }
+    if (ch) { try { ch.stdin && ch.stdin.end(); } catch (_) {} killProc(ch, 'SIGKILL'); }
     for (const r of httpReqs) { try { r.destroy(); } catch (_) {} }
     httpReqs.clear();
   }
@@ -483,8 +493,8 @@ function createMcpClient(options = {}) {
         ch.once('exit', end);
         if (ch.exitCode != null || ch.signalCode != null) return end();
         try { ch.stdin && ch.stdin.end(); } catch (_) {}
-        const t1 = setTimeout(() => { try { ch.kill('SIGTERM'); } catch (_) {} }, 1500);
-        const t2 = setTimeout(() => { try { ch.kill('SIGKILL'); } catch (_) {} setTimeout(end, 300); }, 3500);
+        const t1 = setTimeout(() => killProc(ch, 'SIGTERM'), 1500);
+        const t2 = setTimeout(() => { killProc(ch, 'SIGKILL'); setTimeout(end, 300); }, 3500);
       });
     }
     if (transport === 'http') {

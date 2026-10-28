@@ -72,6 +72,35 @@ async function main() {
   r = await c.callTool('echo', { text: 'x' });
   assert(!r.ok && r.error === 'NOT_CONNECTED', 'a stopped server says so');
 
+  console.log('\n== Windows: the whole process tree is ended (taskkill /T /F), not just cmd.exe ==');
+  {
+    const cp = require('child_process');
+    const killed = []; let plainKills = 0;
+    const wspawn = (cmdLine, args, opts) => { // shell:true on Windows: start the fake server, and spy on ch.kill()
+      const ch = cp.spawn(process.execPath, [FAKE], { stdio: opts.stdio });
+      const orig = ch.kill.bind(ch); ch.kill = (sig) => { plainKills++; return orig(sig); };
+      return ch;
+    };
+    const wexec = (cmd, args, o2, cb) => { killed.push([cmd, ...args].join(' ')); try { process.kill(Number(args[1]), 'SIGKILL'); } catch (_) {} if (cb) setImmediate(() => cb(null)); };
+    const w = stdio({ platform: 'win32', spawn: wspawn, execFile: wexec });
+    const ws = await w.start();
+    const wpid = w.status().pid;
+    assert(ws.ok && wpid, 'a Windows-style (shell) server starts');
+    w.killNow();
+    assert(killed.length === 1 && killed[0] === `taskkill /pid ${wpid} /T /F` && plainKills === 0, `killNow → taskkill /pid ${wpid} /T /F (not ch.kill)`);
+    assert(await until(() => !alive(wpid), 2000), 'and the server is gone');
+    // killAll (the app quitting) goes through killNow for every server
+    const wm = createMcpManager({ file: path.join(TMP, 'win.json'), seal: () => null, open: () => '', spawn: wspawn, clientOptions: { platform: 'win32', execFile: wexec } });
+    const wa = wm.add({ name: 'winsrv', line: `"${process.execPath}" "${FAKE}"` });
+    await wm.start(wa.server.id);
+    const before = killed.length;
+    wm.killAll();
+    assert(killed.length === before + 1 && /^taskkill \/pid \d+ \/T \/F$/.test(killed[killed.length - 1]), 'killAll on Windows → taskkill for each server');
+    const lin = []; const lc = stdio({ platform: 'linux', execFile: (...a) => lin.push(a) });
+    await lc.start(); const lpid = lc.status().pid; lc.killNow();
+    assert(!lin.length && await until(() => !alive(lpid), 2000), 'elsewhere it is a plain kill (no taskkill)');
+  }
+
   console.log('\n== stdio: start errors in plain words, secrets never shown ==');
   let e = await createMcpClient({ name: 'missing', command: 'definitely-not-a-program-xyz', args: [], initTimeoutMs: 3000 }).start();
   assert(!e.ok && /isn't installed/.test(e.message), `a program that isn't there → "${e.message}"`);
