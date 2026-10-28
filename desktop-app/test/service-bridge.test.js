@@ -314,6 +314,18 @@ async function main() {
     calls.render = { hang: true };
     const slow = await req('POST', '/render/image', { token: TOKEN, body: { svg: SVG, width: 100, height: 100, timeoutMs: 1000 } });
     assert(slow.status === 504 && slow.json.error === 'RENDER_TIMEOUT' && calls.render.destroyed === true, 'a render over its time limit answers 504 RENDER_TIMEOUT and the window is destroyed');
+    { // the timeout wins, then the work settles later: no unhandled rejection, and no window left open
+      const unhandled = []; const onU = (e) => unhandled.push(e); process.on('unhandledRejection', onU);
+      let lateDestroyed = 0;
+      const rl = renderImage.createRenderer({ makeWindow: async () => ({ load: () => new Promise((_, rej) => setTimeout(() => rej(new Error('window destroyed')), 1200)), capture: async () => null, destroy: () => {} }) });
+      const rt = await rl.render({ svg: SVG, width: 100, height: 100, timeoutMs: 1000 });
+      // a window that only arrives after the time ran out is destroyed at once
+      const rs = renderImage.createRenderer({ makeWindow: () => new Promise((res) => setTimeout(() => res({ load: async () => {}, capture: async () => null, destroy: () => { lateDestroyed++; } }), 1200)) });
+      const rt2 = await rs.render({ svg: SVG, width: 100, height: 100, timeoutMs: 1000 });
+      await new Promise((z) => setTimeout(z, 500));
+      process.removeListener('unhandledRejection', onU);
+      assert(rt.code === 'RENDER_TIMEOUT' && rt2.code === 'RENDER_TIMEOUT' && unhandled.length === 0 && lateDestroyed === 1, `a render that loses the race to its timeout leaves no unhandled rejection and no stray window (${unhandled.length} unhandled, ${lateDestroyed} late window destroyed)`);
+    }
     const r2 = renderImage.createRenderer({ makeWindow: async () => ({ load: async () => {}, capture: async () => { const sz = { width: 1280, height: 1024 }; const img = (z) => ({ getSize: () => z, resize: (to) => img(to), toJPEG: () => Buffer.from('ffd8ff', 'hex'), toPNG: () => Buffer.from('89', 'hex') }); return img(sz); }, destroy: () => {} }) });
     const rs = await r2.render({ svg: SVG, width: 1600, height: 2560, format: 'jpeg' });
     assert(rs.ok && rs.width === 1600 && rs.height === 2560, 'a capture of another size is resized to exactly the size asked');
