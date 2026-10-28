@@ -54,39 +54,15 @@
     </div>
 
     <div class="panel" id="panel-images">
-      <p class="muted">Image generation runs on a local Stable Diffusion server (a GPU app you run yourself). The butler's <span class="name">GENERATE_IMAGE</span> renders into it. <b>Easiest path:</b> install <span class="name">Stability Matrix</span> from the <span class="name">Installs</span> tab — it installs Automatic1111/ComfyUI and downloads models for you. Launch A1111/Comfy from it with the API on, set its shared Models folder to your <span class="name">AutoInjector/stuff and thing/models</span> folder, then paste its URL below.</p>
-      <p class="muted"><b>New:</b> the <span class="name">🎨 Images</span> tab in the main window finds Forge / A1111 / ComfyUI for you (and tells you if <span class="name">--api</span> is missing), can start Stability Matrix packages or install ComfyUI, and has the LoRA library and character locks. Guide: docs/STABLE_DIFFUSION_SETUP.md.</p>
-      <label class="muted">Stable Diffusion endpoint (Automatic1111 txt2img URL)</label>
-      <input type="text" id="sd-endpoint" placeholder="http://127.0.0.1:7860/sdapi/v1/txt2img" style="width:100%; box-sizing:border-box; margin:4px 0; background:#141414; color:#e8e8e8; border:1px solid #2a2a2a; border-radius:6px; padding:6px 8px;">
-      <div class="runtime-row">
-        <label>Size <input type="number" id="sd-width" value="512" min="64" step="64" style="width:64px; background:#141414; color:#e8e8e8; border:1px solid #2a2a2a; border-radius:4px;">×<input type="number" id="sd-height" value="512" min="64" step="64" style="width:64px; background:#141414; color:#e8e8e8; border:1px solid #2a2a2a; border-radius:4px;"></label>
-        <label>Steps <input type="number" id="sd-steps" value="20" min="1" style="width:56px; background:#141414; color:#e8e8e8; border:1px solid #2a2a2a; border-radius:4px;"></label>
-        <label><input type="checkbox" id="sd-enabled"> Enable image generation</label>
-      </div>
-      <div style="display:flex; gap:6px; align-items:center; margin:4px 0;">
-        <button class="primary" id="btn-sd-save">Save</button>
-        <button class="primary" id="btn-sd-test">Test render</button>
-      </div>
-      <div id="sd-msg" class="muted" style="font-size:11.5px;"></div>
+      <p id="wz-images-note"><b>Pictures are set up in the 🎨 Images tab of the main window.</b> It finds Forge / A1111 / ComfyUI for you (and tells you if <span class="name">--api</span> is missing), can start Stability Matrix packages or install ComfyUI (<b>⚙ Start &amp; install</b>), has the LoRA library and character locks, and — under <b>Advanced: another server</b> — lets you point at a Stable Diffusion app on another computer.</p>
+      <button class="primary" id="btn-wz-open-images">🎨 Open the Images tab</button>
+      <div id="wz-images-msg" class="muted" role="status" style="font-size:11.5px; margin-top:6px;"></div>
     </div>
 
     <div class="panel" id="panel-video">
-      <p class="muted"><b>Video now installs and runs inside AutoInjector:</b> open the <span class="name">🎬 Video</span> tab → <b>Setup &amp; models</b>. One click installs ComfyUI (the same one 🎨 Images uses) and the Wan 2.2 5B video model (text→video and picture→video, about 12 GB of graphics memory), or the small Wan 2.1 1.3B (text only, about 8 GB). It connects by itself and Alfred can use it.</p>
-      <p class="muted"><b>Advanced: other video server.</b> You can still point AutoInjector at a separate text-to-video server instead — for example <span class="name">AnimateDiff</span> (an extension for Automatic1111/Forge) or a <span class="name">Stable Video Diffusion</span> server. The plain A1111 address only makes video when the AnimateDiff extension is installed and turned on — without it you get still images. (For ComfyUI, use the 🎬 Video tab, not this address: ComfyUI's API only queues a job.) Start yours with its API turned on, paste its generate URL below, then press <b>Check connection</b> and <b>Test render</b>. Clips save into the <span class="name">videos/</span> output folder.</p>
-      <label class="muted" for="vd-endpoint">Video backend endpoint (full text-to-video generate URL)</label>
-      <input type="text" id="vd-endpoint" placeholder="http://127.0.0.1:7860/sdapi/v1/txt2img (needs the AnimateDiff extension) or your video server's generate URL" style="width:100%; box-sizing:border-box; margin:4px 0; background:#141414; color:#e8e8e8; border:1px solid #2a2a2a; border-radius:6px; padding:6px 8px;">
-      <div class="runtime-row">
-        <label>Size <input type="number" id="vd-width" value="512" min="64" step="64" style="width:64px; background:#141414; color:#e8e8e8; border:1px solid #2a2a2a; border-radius:4px;">×<input type="number" id="vd-height" value="512" min="64" step="64" style="width:64px; background:#141414; color:#e8e8e8; border:1px solid #2a2a2a; border-radius:4px;"></label>
-        <label>Frames <input type="number" id="vd-frames" value="16" min="1" style="width:56px; background:#141414; color:#e8e8e8; border:1px solid #2a2a2a; border-radius:4px;"></label>
-        <label>FPS <input type="number" id="vd-fps" value="8" min="1" style="width:56px; background:#141414; color:#e8e8e8; border:1px solid #2a2a2a; border-radius:4px;"></label>
-        <label><input type="checkbox" id="vd-enabled"> Enable video generation</label>
-      </div>
-      <div style="display:flex; gap:6px; align-items:center; margin:4px 0;">
-        <button class="primary" id="btn-vd-save">Save</button>
-        <button class="primary" id="btn-vd-check">Check connection</button>
-        <button class="primary" id="btn-vd-test">Test render</button>
-      </div>
-      <div id="vd-msg" class="muted" style="font-size:11.5px;"></div>
+      <p id="wz-video-note"><b>Videos are set up in the 🎬 Video tab of the main window.</b> Under <b>⚙ Setup &amp; models</b> one click installs ComfyUI and a Wan video model; <b>Advanced: other video server</b> connects a separate text-to-video server (AnimateDiff, Stable Video Diffusion) with its own clip settings.</p>
+      <button class="primary" id="btn-wz-open-video">🎬 Open the Video tab</button>
+      <div id="wz-video-msg" class="muted" role="status" style="font-size:11.5px; margin-top:6px;"></div>
     </div>
 
     <div class="panel" id="panel-advanced">

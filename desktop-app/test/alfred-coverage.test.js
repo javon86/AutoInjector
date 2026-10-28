@@ -111,7 +111,7 @@ const IPC_INVENTORY = [
   'video:full-status', 'video:models', 'video:capabilities', 'video:settings', 'video:generate-t2v', 'video:animate', 'video:progress', 'video:cancel', 'video:gallery', 'video:test',
   'video:install-check', 'video:install-model', 'video:install-all', 'video:install-cancel', 'video:open-folder', 'video:show-file',
   'voice:check', 'voice:configure', 'voice:listen', 'voice:redownload', 'voice:speak', 'voice:status',
-  'window:toggle-collapse', 'wizard-window:close', 'wizard:catalog', 'wizard:open',
+  'window:toggle-collapse', 'wizard-window:close', 'wizard:catalog', 'wizard:open', 'wizard:open-app-tab',
 ];
 // Live updates the window listens to (not actions). The ones that matter to the user feed Alfred's watcher.
 const EVENTS = {
@@ -119,7 +119,7 @@ const EVENTS = {
   'alfred': 'Alfred\'s own panel updates',
   'health': 'the 🩺 health watch tells Alfred itself (alfred.notice) — Alfred reads health.status',
   'akowe-activity': 'UI live update (Akọwe link feed) — book runs are watched by polling Akọwe', 'chatgpt-image': 'UI live update (ChatGPT is drawing / done — Alfred reads images.chatgptStatus)', 'akowe-linktest-progress': 'UI live update', 'akowe-server': 'UI live update',
-  'akowe-tab-show': 'UI live update', 'brigade-progress': 'UI live update', 'capability-test-step': 'UI live update', 'capture': 'UI live update (replies → read_latest_reply)',
+  'akowe-tab-show': 'UI live update', 'app-tab-show': 'UI live update (wizard:open-app-tab → the tab button)', 'brigade-progress': 'UI live update', 'capability-test-step': 'UI live update', 'capture': 'UI live update (replies → read_latest_reply)',
   'featuretest-progress': 'UI live update', 'houserule-state': 'UI live update', 'ledger-entry': 'UI live update', 'locker-changed': 'UI live update', 'log': 'UI live update',
   'manager-ack': 'UI live update', 'manager-state': 'UI live update', 'ollama-progress': 'UI live update', 'llm': 'UI live update (setup / download progress — Alfred reads llm.status / llm.check)', 'pane-health': 'UI live update (→ ai_health)', 'picker': 'UI live update',
   'prompts-changed': 'UI live update', 'relay-paused': 'UI live update', 'sd-connected': 'UI live update', 'sd-install': 'UI live update', 'sd-runner': 'UI live update', 'video-install': 'UI live update (model download progress — Alfred reads video.install.check / video.status)', 'video-done': 'UI live update (a video finished — Alfred gets the result from video_call)',

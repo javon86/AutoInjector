@@ -160,6 +160,7 @@ function makeApi({ initialPrompts, pickResult, selfTestResult, tunerRunResult, l
     voiceSpeak: async (text, who) => { calls.push({ fn: "voiceSpeak", text, who }); return { ok: true, ms: 5 }; },
     voiceListen: async (opts) => { calls.push({ fn: "voiceListen", opts }); return { ok: true, text: "hello from mic" }; },
     openWizard: async (tab) => { calls.push({ fn: "openWizard", tab }); return { ok: true }; },
+    onAppTabShow: (cb) => { calls.push({ fn: "onAppTabShow" }); api.__appTabShow = cb; },
     // Image generation panel
     imageStatus: async () => { calls.push({ fn: "imageStatus" }); return { ok: true, configured: false, enabled: false, endpoint: "" }; },
     configureImage: async (patch) => { calls.push({ fn: "configureImage", patch }); return { ok: true, enabled: !!(patch && patch.enabled) }; },
@@ -1668,6 +1669,14 @@ async function testCapabilityPanelsWired() {
   const vdAdv = doc.getElementById("vd-advanced");
   assert(vdAdv && vdAdv.closest("#vd-view-setup") && /Advanced: other video server/.test(vdAdv.querySelector("summary").textContent), "🎬 Video → ⚙ Setup & models has its “Advanced: other video server” fold");
   for (const id of ["vd-ep-enabled", "vd-ep-preset", "btn-vd-ep-detect", "vd-ep-url", "btn-vd-ep-save", "btn-vd-ep-test", "vd-ep-frames", "vd-ep-fps", "vd-ep-width", "vd-ep-height", "vd-ep-steps", "vd-ep-cfg", "vd-ep-motion", "vd-ep-seed"]) assert(vdAdv && vdAdv.querySelector(`#${id}`), `the Video fold has #${id}`);
+  // The Setup Wizard's "Open the Images / Video tab" (wizard:open-app-tab → app-tab-show) clicks that tab button.
+  assert(typeof api.__appTabShow === "function", "the control panel listens for app-tab-show (from the Setup Wizard's notes)");
+  let tabClicked = "";
+  for (const t of ["images", "video"]) { const b = doc.getElementById(`tab-app-${t}`); if (b) b.addEventListener("click", () => { tabClicked = t; }); }
+  api.__appTabShow({ tab: "video" });
+  assert(tabClicked === "video", "app-tab-show {tab:'video'} shows the 🎬 Video tab (clicks its tab button)");
+  api.__appTabShow({ tab: "nope" });
+  assert(tabClicked === "video", "an unknown tab is ignored");
   // A minimized-panel tab for the removed panels can never appear.
   assert(!doc.getElementById("tab-image") && !doc.getElementById("tab-video"), "no leftover tab-strip entries for the removed panels");
 

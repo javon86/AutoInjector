@@ -1304,7 +1304,8 @@ function openWizardWindow(tab) {
   };
   layoutWizard();
   wizardWin.on("resize", layoutWizard);
-  wizardWin.on("closed", () => { wizardWin = null; wizardView = null; });
+  // A WebContentsView's page is not destroyed with its window: close it too, so nothing lingers.
+  wizardWin.on("closed", () => { try { if (wizardView && !wizardView.webContents.isDestroyed()) wizardView.webContents.close(); } catch (_) {} wizardWin = null; wizardView = null; });
 }
 function closeWizardWindow() { if (wizardWin) wizardWin.close(); }
 
@@ -4756,6 +4757,16 @@ ipcMain.handle("setup:auto", async (_evt, opts = {}) => {
   } catch (e) { return { ok: false, error: String(e) }; }
 });
 ipcMain.handle("wizard:open", (_evt, { tab } = {}) => { openWizardWindow(tab); return { ok: true }; });
+// The wizard's Images / Video notes: close the wizard and show that tab in the main window
+// (controls.js clicks its tab button — the same path as Alfred's ui.show_tab).
+const APP_TABS = new Set(["main", "akowe", "images", "video"]);
+ipcMain.handle("wizard:open-app-tab", (_evt, { tab } = {}) => {
+  if (!APP_TABS.has(tab)) return { ok: false, error: "BAD_TAB", message: `“${tab}” is not a tab of the main window. Use images, video, akowe or main.` };
+  closeWizardWindow();
+  try { if (win && !win.isDestroyed()) { if (win.isMinimized()) win.restore(); win.show(); win.focus(); } } catch (_) {}
+  broadcast("app-tab-show", { tab });
+  return { ok: true, tab };
+});
 ipcMain.handle("wizard-window:close", () => { closeWizardWindow(); return { ok: true }; });
 // Consolidated AI feed window: open/close + backfill recent AI messages so the
 // window shows history, not a blank, when reopened.

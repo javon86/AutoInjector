@@ -227,13 +227,21 @@ async function main() {
       assert(setupTargets && targetCount >= 3, `the Installs tab lists the self-install targets (${targetCount} shown)`);
       await shot(wizard, 'setup-wizard-advanced');
 
-      // The Images and Video tabs are back; Images carries the SD endpoint config.
-      assert(await wizard.$('.tab[data-tab="images"]'), 'the Images tab is present');
-      assert(await wizard.$('.tab[data-tab="video"]'), 'the Video tab is present');
+      // The wizard's Images / Video tabs are short notes: pictures and videos are set up in the main window's tabs.
+      assert(await wizard.$('.tab[data-tab="images"]') && await wizard.$('.tab[data-tab="video"]'), 'the wizard still has its Images and Video tabs (as notes)');
+      await wizard.click('.tab[data-tab="video"]');
+      assert(await wizard.$('#btn-wz-open-video') && !(await wizard.$('#vd-endpoint')), 'the Video note has “🎬 Open the Video tab” and no duplicate endpoint form');
       await wizard.click('.tab[data-tab="images"]');
-      await wizard.waitForSelector('#sd-endpoint', { timeout: 6000 }).catch(() => {});
-      assert(await wizard.$('#sd-endpoint') && await wizard.$('#btn-sd-test'), 'the Images tab has the Stable Diffusion endpoint config + a Test render button');
+      assert(await wizard.$('#btn-wz-open-images') && !(await wizard.$('#sd-endpoint')), 'the Images note has “🎨 Open the Images tab” and no duplicate endpoint form');
       await shot(wizard, 'setup-wizard-images');
+      // The button closes the wizard (so click from inside the page) and shows the 🎨 Images tab in the main window.
+      await wizard.evaluate(() => document.getElementById('btn-wz-open-images').click()).catch(() => {});
+      const switched = await controls.waitForFunction(() => document.body.dataset.appTab === 'images' && !document.getElementById('images-tab').hidden, { timeout: 8000 }).then(() => true).catch(() => false);
+      assert(switched, '“🎨 Open the Images tab” shows the 🎨 Images tab in the main window (wizard:open-app-tab)');
+      const wizardGone = await (async () => { for (let i = 0; i < 20; i++) { if (!app.windows().some((w) => !w.isClosed() && /setup-wizard\.html/.test(w.url()))) return true; await new Promise((r) => setTimeout(r, 250)); } return false; })();
+      assert(wizardGone, 'and the Setup Wizard closes');
+      await controls.click('#tab-app-main');
+      await controls.waitForFunction(() => document.body.dataset.appTab === 'main', { timeout: 4000 }).catch(() => {});
     }
 
     console.log('\n== 💬 AI Feed: the consolidated pop-up window opens with per-LLM bubbles ==');

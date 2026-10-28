@@ -2465,6 +2465,8 @@ if (el("btn-open-video")) el("btn-open-video").onclick = () => {
   if (typeof window.vdShowVideoTab === "function") window.vdShowVideoTab();
   else if (window.api.openWizard) window.api.openWizard("video");
 };
+// The Setup Wizard's "Open the Images / Video tab" buttons (wizard:open-app-tab) land here.
+if (window.api.onAppTabShow) window.api.onAppTabShow((p) => { const b = p && p.tab && el(`tab-app-${p.tab}`); if (b) b.click(); });
 
 // Open the consolidated AI feed window.
 if (el("btn-open-feed")) el("btn-open-feed").onclick = () => { if (window.api.openFeed) window.api.openFeed(); };

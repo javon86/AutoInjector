@@ -186,97 +186,23 @@ if (dl.onSetupProgress) {
   dl.onSetupProgress(({ target, line }) => { if (line) setupLog(`${target ? target + ": " : ""}${line}`); });
 }
 
-// ---- Images tab: Stable Diffusion endpoint config + a test render ----
-async function loadImageConfig() {
-  if (!dl.imageStatus) return;
-  try {
-    const s = await dl.imageStatus();
-    if (!s) return;
-    if (el("sd-endpoint")) el("sd-endpoint").value = s.endpoint || "";
-    if (el("sd-enabled")) el("sd-enabled").checked = !!s.enabled;
-    if (el("sd-steps") && s.steps) el("sd-steps").value = s.steps;
-    if (el("sd-width") && s.width) el("sd-width").value = s.width;
-    if (el("sd-height") && s.height) el("sd-height").value = s.height;
-  } catch (_) {}
-}
-function imageConfigFromUI() {
-  return {
-    enabled: !!(el("sd-enabled") && el("sd-enabled").checked),
-    endpoint: (el("sd-endpoint") && el("sd-endpoint").value || "").trim(),
-    steps: Number(el("sd-steps") && el("sd-steps").value) || 20,
-    width: Number(el("sd-width") && el("sd-width").value) || 512,
-    height: Number(el("sd-height") && el("sd-height").value) || 512,
+// ---- Images / Video tabs: short notes. Pictures and videos are set up in the main window's
+// 🎨 Images / 🎬 Video tabs (one place); the button closes this wizard and shows that tab.
+function wireAppTabButton(btnId, tab, msgId) {
+  const b = el(btnId);
+  if (!b) return;
+  b.onclick = async () => {
+    const say = (t) => { if (el(msgId)) el(msgId).textContent = t; };
+    if (typeof dl.openAppTab !== "function") { say("Close this window and click the tab at the top of the main window."); return; }
+    let r; try { r = await dl.openAppTab(tab); } catch (e) { r = { ok: false, message: String(e) }; }
+    if (!r || !r.ok) say(`Couldn't switch the main window: ${(r && (r.message || r.error)) || "error"}. Close this window and click the tab at the top of the main window.`);
   };
 }
-function sdMsg(t) { if (el("sd-msg")) el("sd-msg").textContent = t; }
-if (el("btn-sd-save")) el("btn-sd-save").onclick = async () => {
-  if (!dl.configureImage) return;
-  const r = await dl.configureImage(imageConfigFromUI());
-  sdMsg(r && r.ok ? (r.enabled ? "Saved — image generation is on." : "Saved — image generation is off.") : `Save failed: ${(r && r.error) || "error"}`);
-};
-if (el("btn-sd-test")) el("btn-sd-test").onclick = async () => {
-  if (!dl.configureImage || !dl.imageGenerate) return;
-  await dl.configureImage(imageConfigFromUI());
-  sdMsg("Rendering a test image…");
-  const r = await dl.imageGenerate("a small red apple on a white table, product photo");
-  sdMsg(r && r.ok ? `Rendered ✓ → ${r.path}` : `Test failed: ${(r && r.error) || "error"} (is your SD server running with --api?)`);
-};
-
-// ---- Video tab: text-to-video endpoint config + check + a test render ----
-// Same shape as the Images tab. The backend isn't bundled, so this step is where
-// the user points the app at one and proves it works.
-async function loadVideoConfig() {
-  if (!dl.videoStatus) return;
-  try {
-    const s = await dl.videoStatus();
-    if (!s) return;
-    if (el("vd-endpoint")) el("vd-endpoint").value = s.endpoint || "";
-    if (el("vd-enabled")) el("vd-enabled").checked = !!s.enabled;
-    if (el("vd-width") && s.width) el("vd-width").value = s.width;
-    if (el("vd-height") && s.height) el("vd-height").value = s.height;
-    if (el("vd-frames") && s.frames) el("vd-frames").value = s.frames;
-    if (el("vd-fps") && s.fps) el("vd-fps").value = s.fps;
-  } catch (_) {}
-}
-function videoConfigFromUI() {
-  return {
-    enabled: !!(el("vd-enabled") && el("vd-enabled").checked),
-    endpoint: (el("vd-endpoint") && el("vd-endpoint").value || "").trim(),
-    width: Number(el("vd-width") && el("vd-width").value) || 512,
-    height: Number(el("vd-height") && el("vd-height").value) || 512,
-    frames: Number(el("vd-frames") && el("vd-frames").value) || 16,
-    fps: Number(el("vd-fps") && el("vd-fps").value) || 8,
-  };
-}
-function vdMsg(t) { if (el("vd-msg")) el("vd-msg").textContent = t; }
-const VD_NO_BACKEND = "No video backend is set up yet. Start a text-to-video server (e.g. AnimateDiff or Stable Video Diffusion) with its API on, then paste its generate URL above.";
-if (el("btn-vd-save")) el("btn-vd-save").onclick = async () => {
-  if (!dl.configureVideo) return;
-  const r = await dl.configureVideo(videoConfigFromUI());
-  vdMsg(r && r.ok ? (r.enabled ? "Saved — video generation is on." : "Saved — video generation is off.") : `Save failed: ${(r && (r.message || r.error)) || "error"}`);
-};
-if (el("btn-vd-check")) el("btn-vd-check").onclick = async () => {
-  const cfg = videoConfigFromUI();
-  if (!cfg.endpoint) { vdMsg(VD_NO_BACKEND); return; }
-  if (!dl.testEndpoint) return;
-  vdMsg(`Checking ${cfg.endpoint}…`);
-  let r; try { r = await dl.testEndpoint(cfg.endpoint); } catch (_) { r = null; }
-  if (r && r.reachable) vdMsg(`Reachable ✓ — something is answering at ${r.base || cfg.endpoint}. Press Test render to confirm it really sends back a video.`);
-  else vdMsg(`Nothing is answering at ${(r && r.base) || cfg.endpoint}. Start your video backend with its API turned on, or fix the address.`);
-};
-if (el("btn-vd-test")) el("btn-vd-test").onclick = async () => {
-  if (!dl.configureVideo || !dl.videoGenerate) return;
-  const cfg = videoConfigFromUI();
-  if (!cfg.endpoint) { vdMsg(VD_NO_BACKEND); return; }
-  if (!cfg.enabled) { vdMsg("Tick \"Enable video generation\" first, then press Test render."); return; }
-  await dl.configureVideo(cfg);
-  vdMsg("Rendering a short test clip… (video can take several minutes)");
-  let r; try { r = await dl.videoGenerate("a short test clip: a simple spinning cube"); } catch (e) { r = { ok: false, error: String(e) }; }
-  vdMsg(r && r.ok ? `Rendered ✓ → ${r.path || r.url}` : `Test failed: ${(r && (r.message || r.error)) || "error"}`);
-};
+wireAppTabButton("btn-wz-open-images", "images", "wz-images-msg");
+wireAppTabButton("btn-wz-open-video", "video", "wz-video-msg");
 
 // Open directly on a requested tab (?tab=images|video|advanced|localai), so the
-// Image/Video paddles in the main menu land the user on the right tab.
+// links (e.g. Alfred's wizard.open) land the user on the right tab.
 function activateRequestedTab() {
   try {
     const want = new URLSearchParams(location.search).get("tab");
@@ -289,6 +215,4 @@ function activateRequestedTab() {
 // ---- Boot ----
 loadCatalog();
 loadSetupTargets();
-loadImageConfig();
-loadVideoConfig();
 activateRequestedTab();

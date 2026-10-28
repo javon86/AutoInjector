@@ -488,8 +488,9 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
   the AutoInjector tab are gone. The User Panel's **🎨 Images** / **🎬 Video** buttons open those tabs. What only the
   old panels had (common addresses, 🔍 auto-detect, ✓ check, on/off, the other video server's clip settings) is in
   **🎨 Images → ⚙ Start & install → Advanced: another server** and **🎬 Video → ⚙ Setup & models → Advanced: other
-  video server**. The `image:*`, `video:*` and `endpoints:*` channels are unchanged (Alfred, the butler, Akọwe's bridge
-  and the Setup Wizard use them).
+  video server**. The `image:*`, `video:*` and `endpoints:*` channels are unchanged (Alfred, the butler and Akọwe's
+  bridge use them). The Setup Wizard's own Images / Video tabs are now short notes whose button closes the wizard and shows
+  that tab (`wizard:open-app-tab` {tab} → `app-tab-show`; Alfred: `wizard.open_app_tab`).
 
 ## Problems to come back to
 

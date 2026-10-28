@@ -253,6 +253,8 @@ contextBridge.exposeInMainWorld("api", {
   llmSetHfToken: (arg) => ipcRenderer.invoke("llm:hf-token", arg),
   onLlm: (cb) => ipcRenderer.on("llm", (_e, payload) => cb(payload)),
   openWizard: (tab) => ipcRenderer.invoke("wizard:open", { tab }),
+  openAppTab: (tab) => ipcRenderer.invoke("wizard:open-app-tab", { tab }),
+  onAppTabShow: (cb) => ipcRenderer.on("app-tab-show", (_e, payload) => cb(payload)),
   openExternal: (url) => ipcRenderer.invoke("external:open", url),
   closeWizard: () => ipcRenderer.invoke("wizard-window:close"),
   wizardCatalog: () => ipcRenderer.invoke("wizard:catalog"),
