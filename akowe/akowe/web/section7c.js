@@ -126,7 +126,7 @@ export async function viewStyle(main, c) {
     const list = h('div', { class: 's7-samples', 'data-testid': 'style-samples' });
     for (const s of (card && card.samples) || []) sampleBox(s, list);
     if (!list.children.length) sampleBox({}, list);
-    const file = h('input', { type: 'file', accept: '.txt,.md,text/plain,text/markdown', multiple: true, 'aria-label': 'Upload text files', 'data-testid': 'style-file' });
+    const file = h('input', { type: 'file', accept: '.txt,.md,text/plain,text/markdown', multiple: true, class: 'visually-hidden', 'aria-label': 'Upload text files', 'data-testid': 'style-file' });
     file.addEventListener('change', async () => {
       for (const f of file.files) {
         if (f.size > 200000) { c.toast(`${f.name} is too big (keep samples under 30 000 characters)`); continue; }
