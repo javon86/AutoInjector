@@ -1153,6 +1153,98 @@ def({
     return { ok: true, message: `${images.length ? `Saved ${images.length} picture(s).` : 'Done.'}${notes.length ? ` Notes: ${clip(notes.join(' '), 600)}` : ''}`, data: shrink(r), image: images[0] || null };
   },
 });
+// ---- 🧰 tool servers (MCP) the user added in ⚙ More settings → 🧰 Tools ----------------------------------
+// mcp_tools reads what the connected servers offer (with their input schemas); mcp_call uses one tool — always
+// on an "I will" card naming the server, the tool and the arguments, and never "always allowed" (a tool server
+// can be any program on this computer, or any web service).
+/** An MCP tool's inputSchema (full JSON Schema) → the subset checkValue understands. What it can't check
+ *  (anyOf, $ref, type lists, open objects) becomes a bounded pass-through; the server checks the rest. */
+function mcpSchema(s, d = 0) {
+  if (!s || typeof s !== 'object' || d > 6) return { 'x-passthrough': true };
+  if (s.anyOf || s.oneOf || s.allOf || s.$ref || s.not || Array.isArray(s.type)) return { 'x-passthrough': true };
+  const out = {};
+  if (Array.isArray(s.enum) && s.enum.length && s.enum.every((x) => x === null || typeof x !== 'object')) out.enum = s.enum.slice(0, 200);
+  const type = s.type || (s.properties ? 'object' : null);
+  const num = (k) => (typeof s[k] === 'number' && Number.isFinite(s[k]) ? s[k] : undefined);
+  switch (type) {
+    case 'string': out.type = 'string'; if (num('maxLength') !== undefined) out.maxLength = s.maxLength; if (num('minLength') !== undefined) out.minLength = s.minLength; return out;
+    case 'integer': case 'number': out.type = type; if (num('minimum') !== undefined) out.minimum = s.minimum; if (num('maximum') !== undefined) out.maximum = s.maximum; return out;
+    case 'boolean': out.type = 'boolean'; return out;
+    case 'array': out.type = 'array'; out.items = s.items && typeof s.items === 'object' && !Array.isArray(s.items) ? mcpSchema(s.items, d + 1) : { 'x-passthrough': true }; if (num('maxItems') !== undefined) out.maxItems = s.maxItems; return out;
+    case 'object': {
+      if (!s.properties || typeof s.properties !== 'object') return { 'x-passthrough': true };
+      out.type = 'object'; out.properties = {}; out['x-maxBytes'] = 400000;
+      for (const [k, v] of Object.entries(s.properties).slice(0, 200)) out.properties[k] = mcpSchema(v, d + 1);
+      out.required = Array.isArray(s.required) ? s.required.filter((k) => typeof k === 'string' && out.properties[k]) : [];
+      if (s.additionalProperties === false) out.additionalProperties = false;
+      return out;
+    }
+    default: return out.enum ? out : { 'x-passthrough': true };
+  }
+}
+async function mcpFind(ctx, server, tool) {
+  if (!ctx || typeof ctx.mcpTools !== 'function') return { error: 'tool servers are not available in this build' };
+  const r = await ctx.mcpTools();
+  const servers = (r && r.servers) || [];
+  const want = String(server || '').trim().toLowerCase();
+  const sv = servers.find((x) => x.name.toLowerCase() === want || x.id === want);
+  if (!sv) return { error: servers.length ? `there is no tool server "${str(server, 60)}" (there are: ${servers.map((x) => x.name).join(', ')})` : 'no tool servers are set up — the user adds them in ⚙ More settings → 🧰 Tools' };
+  const tools = ((r && r.tools) || []).filter((t) => t.serverId === sv.id);
+  if (sv.status !== 'connected') return { server: sv, tool: null, notConnected: true };
+  const t = tools.find((x) => x.tool === tool);
+  if (!t) return { error: `the tool server "${sv.name}" has no tool "${str(tool, 80)}"${tools.length ? ` (it has: ${tools.slice(0, 30).map((x) => x.tool).join(', ')})` : ''} — use mcp_tools to see them` };
+  return { server: sv, tool: t };
+}
+def({
+  name: 'mcp_tools', title: 'List the tool servers\' tools', group: 'app',
+  description: 'The outside tool servers (MCP) the user added in ⚙ More settings → 🧰 Tools: each one\'s status and the tools it offers with their argument schemas (optionally only one server). Read-only. Use mcp_call to use one.',
+  args: { type: 'object', properties: { server: { type: 'string', maxLength: 60, description: 'Only this server (optional)' } }, additionalProperties: false },
+  async run(a, ctx) {
+    if (!ctx || typeof ctx.mcpTools !== 'function') return { ok: false, error: 'NOT_WIRED', message: 'Tool servers are not available here.' };
+    const r = await ctx.mcpTools(a.server);
+    const servers = ((r && r.servers) || []).map((x) => ({ server: x.name, status: x.status, summary: clip(x.summary, 300), kind: x.runsProgram ? 'program on this computer' : 'web address' }));
+    if (!servers.length) return { ok: true, data: { servers: [], tools: [], note: a.server ? `There is no tool server called "${str(a.server, 60)}".` : 'No tool servers are set up. The user can add one in ⚙ More settings → 🧰 Tools (🎩 Butler section).' } };
+    const tools = ((r && r.tools) || []).slice(0, 200).map((t) => ({ server: t.server, tool: t.tool, description: clip(t.description || t.title || '', 400), arguments: shrink(t.inputSchema) }));
+    const off = servers.filter((x) => x.status !== 'connected').map((x) => x.server);
+    return { ok: true, data: Object.assign({ servers, tools }, off.length ? { note: `Not connected now: ${off.join(', ')} (mcp_call starts a stopped server; its tools are listed once it runs).` } : {}) };
+  },
+});
+def({
+  name: 'mcp_call', title: 'Use a tool on a tool server', group: 'app', changes: true, timeoutMs: 180000,
+  description: 'Use one tool of an outside tool server (MCP) the user added: server = its name, tool = the tool\'s name, arguments = the tool\'s arguments (see mcp_tools for the schemas). Always asks first.',
+  args: { type: 'object', required: ['server', 'tool'], properties: {
+    server: { type: 'string', minLength: 1, maxLength: 60 },
+    tool: { type: 'string', minLength: 1, maxLength: 128 },
+    arguments: { type: 'object', 'x-passthrough': true, description: 'The tool\'s arguments, as its schema says' },
+  }, additionalProperties: false },
+  allowAlwaysFor: () => false, // a tool server can be any program or web service: every call is confirmed
+  allowKey: (a) => `mcp_call:${a && a.server}/${a && a.tool}`,
+  async check(a, ctx) {
+    const f = await mcpFind(ctx, a.server, a.tool);
+    if (f.error) return { ok: false, error: f.error };
+    let args = a.arguments === undefined || a.arguments === null ? {} : a.arguments;
+    if (typeof args === 'string') { try { args = JSON.parse(args); } catch (_) { return { ok: false, error: 'arguments must be an object' }; } }
+    if (!args || typeof args !== 'object' || Array.isArray(args)) return { ok: false, error: 'arguments must be an object' };
+    const pe = checkPassthrough(args, 'arguments');
+    if (pe) return { ok: false, error: pe };
+    if (f.tool) { // connected: check the arguments against the server's own schema
+      const sch = mcpSchema(f.tool.inputSchema || { type: 'object' });
+      if (sch.type === 'object') args = tidyArgs(args, sch);
+      const e = checkValue(args, sch, 'arguments');
+      if (e) return { ok: false, error: e };
+    }
+    return { ok: true, args: { server: f.server.name, tool: a.tool, arguments: args } };
+  },
+  describe: (a) => `Use the tool “${clip(a.tool, 80)}” on the tool server “${clip(a.server, 60)}”${a.arguments && Object.keys(a.arguments).length ? ` with ${clip(JSON.stringify(a.arguments), 600)}` : ' (no arguments)'}.`,
+  async run(a, ctx) {
+    if (!ctx || typeof ctx.mcpCall !== 'function') return { ok: false, error: 'NOT_WIRED', message: 'Tool servers are not available here.' };
+    const r = await ctx.mcpCall(a.server, a.tool, a.arguments || {});
+    if (!r || r.ok === false) return { ok: false, error: str((r && r.error) || 'FAILED', 60), message: clip((r && r.message) || 'The tool server call did not work.', 600) };
+    const pics = (r.images || []).map((x) => x.path).filter(Boolean);
+    return { ok: true, message: clip(r.text || 'Done.', 6000), data: shrink({ images: r.images, resources: r.resources, structured: r.structured }), image: pics[0] || null };
+  },
+});
+
 // The plain sentences of an image result's warnings (strings or {message}), at most 6.
 function imageNotes(ws) { return (Array.isArray(ws) ? ws : []).map((w) => (typeof w === 'string' ? w : w && w.message)).filter(Boolean).map((m) => clip(String(m), 240)).slice(0, 6); }
 async function sdMethod(ctx, name) {
@@ -1236,7 +1328,7 @@ function checkValue(v, s, at) {
       // an open object from a module schema (e.g. a ComfyUI workflow graph): plain JSON, safe keys, size-capped
       if (!s.properties && s.additionalProperties === true) return checkPassthrough(v, at);
       if (!v || typeof v !== 'object' || Array.isArray(v)) return `${at} must be an object`;
-      if (JSON.stringify(v).length > 8000) return `${at} is too big`;
+      if (JSON.stringify(v).length > (s['x-maxBytes'] || 8000)) return `${at} is too big`;
       const props = s.properties || {};
       for (const k of s.required || []) if (v[k] === undefined || v[k] === null || v[k] === '') return `${at === 'args' ? '' : at + '.'}${k} is required`;
       for (const [k, val] of Object.entries(v)) {
@@ -1335,4 +1427,4 @@ function describe(tool, args) {
   try { return typeof tool.describe === 'function' ? tool.describe(args || {}) : tool.title; } catch (_) { return tool.title; }
 }
 
-module.exports = { TOOLS, SITES, SITE_LABEL, get, list, openAiTools, publicList, validate, describe, usage, directToolFor, akoweError, allowableKey, allowKeyOf, canAllowAlways, checkPassthrough, _resolveBook: resolveBook };
+module.exports = { TOOLS, SITES, SITE_LABEL, get, list, openAiTools, publicList, validate, describe, usage, directToolFor, akoweError, allowableKey, allowKeyOf, canAllowAlways, checkPassthrough, mcpSchema, _resolveBook: resolveBook };

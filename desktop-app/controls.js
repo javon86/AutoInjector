@@ -2674,6 +2674,73 @@ async function refreshToolsList() {
 }
 refreshToolsList();
 
+// 🧰 Tool servers (MCP): the saved list, each with its status, Start / Stop / Remove and its tools.
+// Everything a server says is shown as text (textContent), never as HTML. Secrets never come back from main.
+let mcpPollTimer = null;
+function mcpMsg(t, bad) { const m = el("mcp-msg"); if (m) { m.textContent = t || ""; m.style.color = bad ? "#e88" : ""; } }
+function mcpEl(tag, text, css) { const e = document.createElement(tag); if (text != null) e.textContent = text; if (css) e.style.cssText = css; return e; }
+function renderMcpServers(servers) {
+  const box = el("mcp-servers"); if (!box) return;
+  box.textContent = "";
+  if (!servers || !servers.length) { box.textContent = "None yet — nothing runs until you add one."; return; }
+  for (const s of servers) {
+    const row = mcpEl("div", null, "border:1px solid #333; border-radius:6px; padding:4px 6px; margin:3px 0;");
+    row.className = "mcp-server"; row.dataset.id = s.id;
+    const head = mcpEl("div", null, "display:flex; align-items:center; gap:6px; flex-wrap:wrap;");
+    const dot = s.status === "connected" ? "🟢" : s.status === "starting" ? "🟡" : s.status === "error" ? "🔴" : "⚪";
+    head.appendChild(mcpEl("b", `${dot} ${s.name}`));
+    const sum = mcpEl("span", s.status === "error" ? "not working" : s.summary, "opacity:.85;"); sum.className = "mcp-summary"; head.appendChild(sum);
+    const btns = mcpEl("span", null, "margin-left:auto; display:flex; gap:4px;");
+    const mk = (label, cls, fn) => { const b = mcpEl("button", label); b.className = `mini ${cls || ""}`; b.onclick = async () => { b.disabled = true; try { await fn(); } finally { b.disabled = false; refreshMcpServers(); refreshToolsList(); } }; btns.appendChild(b); return b; };
+    if (s.status === "connected" || s.status === "starting") mk("■ Stop", "", async () => { const r = await window.api.mcpStop(s.id); mcpMsg(r && r.message, !(r && r.ok)); });
+    else mk("▶ Start", "primary", async () => { mcpMsg(`Starting “${s.name}”… (the first start can take a minute while it downloads)`); const r = await window.api.mcpStart(s.id); mcpMsg(r && r.message, !(r && r.ok)); });
+    mk("✖ Remove", "danger", async () => { if (!window.confirm(`Remove the tool server “${s.name}”? Its saved keys are deleted too.`)) return; const r = await window.api.mcpRemove(s.id); mcpMsg(r && r.message, !(r && r.ok)); });
+    head.appendChild(btns);
+    row.appendChild(head);
+    const kind = s.transport === "http" ? "web address" : "program on this computer";
+    const keys = [...(s.envKeys || []), ...(s.headerKeys || [])];
+    row.appendChild(mcpEl("div", `${kind}: ${s.target}${keys.length ? ` · keys: ${keys.join(", ")} (hidden)` : ""}`, "font-size:10.5px; opacity:.65; word-break:break-all;"));
+    if (s.secretsNotSaved) row.appendChild(mcpEl("div", "This PC can't store keys encrypted, so its keys are kept only until AutoInjector closes.", "font-size:11px; color:#e0a24a;"));
+    if (s.status === "error" && s.message) {
+      const err = mcpEl("div", s.message, "font-size:11px; color:#e88; margin-top:2px;"); err.className = "mcp-error"; row.appendChild(err);
+    }
+    if (s.tools && s.tools.length) {
+      const d = mcpEl("details", null, "margin-top:2px;");
+      d.appendChild(mcpEl("summary", `${s.tools.length} tool${s.tools.length === 1 ? "" : "s"}`, "font-size:11px; cursor:pointer;"));
+      const ul = mcpEl("div", null, "font-size:11px; opacity:.85; white-space:pre-wrap;");
+      ul.className = "mcp-tools";
+      ul.textContent = s.tools.map((t) => `• ${t.name}${t.description ? ` — ${String(t.description).split("\n")[0].slice(0, 200)}` : ""}`).join("\n");
+      d.appendChild(ul);
+      row.appendChild(d);
+    }
+    box.appendChild(row);
+  }
+}
+async function refreshMcpServers() {
+  if (!window.api.mcpList) return;
+  let r = null; try { r = await window.api.mcpList(); } catch (_) { r = null; }
+  if (!r || !r.ok) return;
+  renderMcpServers(r.servers || []);
+  clearTimeout(mcpPollTimer);
+  const sec = el("tools-sec");
+  if (sec && sec.open && (r.servers || []).some((s) => s.status === "starting")) mcpPollTimer = setTimeout(refreshMcpServers, 2000);
+}
+if (el("tools-sec")) el("tools-sec").addEventListener("toggle", () => { if (el("tools-sec").open) { refreshMcpServers(); refreshToolsList(); } });
+if (el("btn-mcp-add")) el("btn-mcp-add").onclick = async () => {
+  const name = (el("mcp-name").value || "").trim();
+  const line = (el("mcp-line").value || "").trim();
+  if (!name || !line) { mcpMsg("Give it a short name and the command line (or web address) that starts it.", true); return; }
+  const b = el("btn-mcp-add"); b.disabled = true;
+  mcpMsg(`Adding “${name}” and starting it… (the first start can take a minute while it downloads)`);
+  let r = null;
+  try { r = await window.api.mcpAdd({ name, line, secrets: el("mcp-secrets").value || "" }); } catch (_) { r = null; }
+  b.disabled = false;
+  mcpMsg((r && r.message) || "That didn't work.", !(r && r.ok));
+  if (r && (r.ok || r.added)) { el("mcp-name").value = ""; el("mcp-line").value = ""; el("mcp-secrets").value = ""; }
+  refreshMcpServers(); refreshToolsList();
+};
+refreshMcpServers();
+
 // N3 Memory: a summary line for the panel.
 async function refreshMemoryLine() {
   const box = el("jarvis-memory"); if (!box || !window.api.memorySummary) return;

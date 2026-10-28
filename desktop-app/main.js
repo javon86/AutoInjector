@@ -8446,6 +8446,45 @@ ipcMain.handle("akowe-view:reload", () => { const ok = akoweLoadView(true); retu
 ipcMain.handle("akowe-view:pop-out", () => Object.assign(akowePopOut(), { status: akoweServerPublicStatus() }));
 ipcMain.handle("akowe-view:dock", () => Object.assign(akoweDock(), { status: akoweServerPublicStatus() }));
 
+// ==== 🧰 TOOL SERVERS (MCP: mcp-client.js / mcp-manager.js) — nothing runs until the user adds one ====
+// Outside tool servers the user adds in ⚙ More settings → 🧰 Tools (a program started over stdio, or a web
+// address over Streamable HTTP). Connected servers' tools go into tool-provider.js (the butler's USE_TOOL,
+// always "ask") and Alfred uses them through mcp_tools / mcp_call (every call on an "I will" card). Env values
+// and headers are sealed with secret-store.js and never logged, shown or returned. See docs/ALFRED.md.
+const mcpManager = require("./mcp-manager").createMcpManager({
+  file: path.join(userDataDir(), "autoinjector-mcp-servers.json"),
+  seal: (v) => secretStore.seal(v),
+  open: (v) => secretStore.open(v),
+  toolProvider,
+  log: (kind, detail) => logEvent(kind, detail),
+  saveImage: (buf, mime) => {
+    const ext = /jpe?g/i.test(mime) ? "jpg" : /webp/i.test(mime) ? "webp" : /gif/i.test(mime) ? "gif" : "png";
+    try { return outputManager.saveBuffer(outputManager.imagesDir(), `tool-server-${Date.now()}.${ext}`, buf); } catch (_) { return null; }
+  },
+});
+const mcpSafe = (fn) => async (_e, p) => { try { return await fn(p && typeof p === "object" ? p : {}); } catch (e) { return { ok: false, error: "ERROR", message: "Something went wrong with the tool server on my side." }; } };
+ipcMain.handle("mcp:list", mcpSafe(() => Object.assign(mcpManager.list(), { secureStorage: secretStore.available() })));
+ipcMain.handle("mcp:add", mcpSafe(async (p) => {
+  const r = mcpManager.add({ name: p.name, line: p.line, secrets: p.secrets });
+  if (!r.ok || p.start === false) return r;
+  const s = await mcpManager.start(r.server.id);
+  return Object.assign({}, s, { added: true, message: s.ok ? `${r.message} ${s.message}` : `${r.message} But it didn't start: ${s.message}` });
+}));
+ipcMain.handle("mcp:start", mcpSafe((p) => mcpManager.start(p.id)));
+ipcMain.handle("mcp:stop", mcpSafe((p) => mcpManager.stop(p.id)));
+ipcMain.handle("mcp:remove", mcpSafe((p) => mcpManager.remove(p.id)));
+// Stop OUR tool servers cleanly before quitting (stdin closed → SIGTERM → SIGKILL); never hang the quit.
+let mcpQuitDone = false;
+app.on("before-quit", (event) => {
+  if (mcpQuitDone || !mcpManager.list().servers.some((s) => s.status === "connected" || s.status === "starting")) return;
+  event.preventDefault();
+  mcpQuitDone = true;
+  const t = setTimeout(() => app.quit(), 5000);
+  mcpManager.stopAll().catch(() => {}).finally(() => { clearTimeout(t); app.quit(); });
+});
+process.on("exit", () => { try { mcpManager.killAll(); } catch (_) {} });
+// ==== end 🧰 TOOL SERVERS ====
+
 // ==== 🎩 ALFRED HOOK (alfred-main.js / alfred.js / alfred-tools.js) — OFF by default ====
 // Alfred is the butler grown into an assistant that can use the whole app through a fixed tool
 // registry. Everything lives in the alfred-*.js files; this block only hands him the app's own
@@ -8455,6 +8494,7 @@ const alfred = require("./alfred-main").installAlfred({
   akoweApi, akoweServerBase, akoweShowInTab, akoweLoadView,
   sendTextTo, withEnvelope, selfRepair, selfRepairStatus, buildExtract,
   outputManager, dbService, imageProvider, videoProvider, interpreterProvider, ollamaManager,
+  mcp: mcpManager, // 🧰 tool servers (mcp_tools / mcp_call)
   // his side panel is docked in the control panel; main hooks Ctrl/Cmd+Shift+A on every page of the app
   app, mainWindow: () => win,
 });
@@ -8545,6 +8585,8 @@ app.whenReady().then(() => {
       toolsFile: path.join(userDataDir(), "autoinjector-butler-tools.json"),
     });
     try { const lt = toolProvider.loadCreatedTools(); if (lt && lt.loaded) logEvent("tools-loaded", { count: lt.loaded }); } catch (e) { logEvent("tools-load-error", { error: String(e) }); }
+    // 🧰 tool servers the user started before (none until one is added) — in the background
+    if (process.env.AUTOINJECTOR_MCP_AUTOSTART !== "0" && mcpManager.count()) setTimeout(() => { mcpManager.autoStart().then((r) => { if (r.of) logEvent("mcp", { step: "autostart", started: r.started, of: r.of }); }).catch(() => {}); }, 1000);
     logEvent("models-init", { root: outputManager.modelsRoot() });
     configureSetupManager();
     refreshSetupStatus();

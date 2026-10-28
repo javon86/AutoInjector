@@ -220,6 +220,51 @@ params, delete), node info, queue, upload and freeing VRAM. A setting the connec
 **exact code** on the card and asks first, can never be "always allowed", and refuses it when a direct
 tool exists (images, books, the AIs, video, logs).
 
+## Tool servers (MCP)
+
+AutoInjector can use outside **tool servers** that speak MCP (the Model Context Protocol), the same kind Claude
+Desktop and other apps use: one for your files, one for a database, one for a web service and so on. Nothing runs
+until you add one.
+
+**Add one:** 🎩 Butler section → ⚙ More settings → **🧰 Tools** → **➕ Add a tool server**:
+- **Name:** a short name, for example `files`.
+- **Command line or web address:** what starts it. Either a program on this computer, such as the official
+  filesystem server (it needs Node.js from nodejs.org, which gives you `npx`):
+  ```
+  npx -y @modelcontextprotocol/server-filesystem C:\Users\me\Documents\Books
+  ```
+  or a web address such as `https://example.com/mcp`.
+- **Keys (optional):** one per line. Write `NAME=value` for a program (it gets them as environment variables), or
+  `Authorization: Bearer …` for a web address (sent as headers).
+
+Press **➕ Add and start**. The first start can take a minute while `npx` downloads the server. Each server shows
+its state in plain words: **connected · 12 tools**, or what went wrong (for example *"npx isn't installed on this
+computer"*). Under it you get its tools with their descriptions, and the buttons **▶ Start / ■ Stop / ✖ Remove**.
+A server you started starts again the next time you open AutoInjector, and one you stopped stays stopped.
+
+**Using them:**
+- 🔍 `mcp_tools` lets Alfred see the servers and their tools, with the arguments each tool takes. It runs without a card.
+- ✋ `mcp_call` uses one tool. The card always names the **server**, the **tool** and the **arguments**, for example
+  *Use the tool "read_text_file" on the tool server "files" with {"path":"C:\\Users\\me\\Documents\\Books\\ch1.md"}*.
+  Before the card appears, the arguments are checked against the server's own schema.
+- In `app_info` / `app_control`: `mcp.servers` (the list), `mcp.start`, `mcp.stop` and `mcp.remove`.
+  **Adding** a server is left to you.
+- The butler (USE_TOOL) sees the same tools as `mcp:<server>/<tool>`. They always need your approval.
+
+**Safety notes:**
+- A command-line tool server is a **program running on this computer with your permissions**. Add only servers you
+  trust, and give a filesystem server only the folders it needs.
+- Every call shows an "I will" card. It can **never** be "always allowed", whatever the server.
+- Keys are stored **encrypted** with the computer's keychain (the same mechanism as saved logins). They are never
+  shown again, written to the activity log or sent to the AI. The list shows only their names. If this PC can't
+  encrypt, the keys are kept only until AutoInjector closes (the server row says so).
+- What a server prints when it fails is shown with keys and tokens replaced by •••.
+- Timeouts apply everywhere: 90 s to start, 60 s per call. A server that crashes is restarted at most 3 times in a
+  minute, and after that it shows the error until you press ▶ Start. Quitting AutoInjector stops its servers
+  cleanly.
+- Pictures a tool returns are saved in the images output folder. Text is passed on (long text is cut). Links and
+  embedded files are listed.
+
 ## Safety, in short
 
 - **I will cards:** every change is listed step by step; ✔ Do it or ✖ No. For harmless ones
@@ -244,6 +289,8 @@ At most one of each every 5 minutes and 6 in 10 minutes.
 | `desktop-app/alfred.js` | the core: switch, settings (`alfred-settings.json` in the app data folder), the loop, cards, cancel, watcher |
 | `desktop-app/alfred-tools.js` | the fixed tool registry: name, title, description, JSON schema, `changes`, `allowAlways`, `describe`, `run` |
 | `desktop-app/alfred-app-actions.js` | the catalog of every other app control (→ `app_info` / `app_control`) and the EXCLUDED list with reasons |
+| `desktop-app/mcp-client.js` | the MCP client: JSON-RPC 2.0 over stdio or Streamable HTTP, initialize / tools/list (cursor) / tools/call, timeouts, bounded restart, clean stop, redaction |
+| `desktop-app/mcp-manager.js` | the saved tool servers (`autoinjector-mcp-servers.json` in the app data folder, keys sealed), start/stop/remove, registration into `tool-provider.js` |
 | `desktop-app/alfred-ai.js` | his AI: OpenAI-compatible tool calling (Ollama `/v1`, the connected AI), the JSON text protocol (web panes / models without tools) |
 | `desktop-app/alfred-image.js` | the ONE image adapter (sd-api `images.generate`; falls back to image-provider) |
 | `desktop-app/alfred-main.js` | wiring into Electron: tool context, IPC `alfred:*`, app events → watcher |

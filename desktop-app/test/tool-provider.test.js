@@ -120,9 +120,14 @@ async function main() {
   assert(lc.loaded >= 1 && tp.has('say-hi'), "loadCreatedTools re-registers the butler's saved tools on startup");
   try { fs.rmSync(sbox, { recursive: true, force: true }); } catch (_) {}
 
-  console.log('\n== the MCP seam is present but not yet implemented ==');
-  const mcp = tp.registerMcpServer({ url: 'stdio://whatever' });
-  assert(mcp.ok === false && mcp.error === 'MCP_NOT_IMPLEMENTED', 'registerMcpServer() is a documented, unimplemented seam');
+  console.log('\n== tool servers (MCP) register into the same registry ==');
+  assert(tp.registerMcpServer({ url: 'stdio://whatever' }).error === 'NEED_SERVER', 'registerMcpServer() without name + call -> NEED_SERVER');
+  const calls = [];
+  const reg = tp.registerMcpServer({ name: 'demo', tools: [{ name: 'ping', description: 'say pong' }], call: async (t, a) => { calls.push([t, a]); return { ok: true, text: 'pong' }; } });
+  assert(reg.ok && tp.has('mcp:demo/ping') && tp.get('mcp:demo/ping').risk === 'ask', 'a server\'s tool registers as mcp:<server>/<tool>, always risk "ask"');
+  const rp = await tp.run('mcp:demo/ping', { x: 1 });
+  assert(rp.ok && rp.message === 'pong' && calls[0][0] === 'ping' && calls[0][1].x === 1, 'running it forwards to the server');
+  assert(tp.unregisterMcpServer('demo') === 1 && !tp.has('mcp:demo/ping'), 'unregisterMcpServer removes its tools');
 
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

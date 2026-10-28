@@ -89,7 +89,7 @@ const IPC_INVENTORY = [
   'image:configure', 'image:generate', 'image:status', 'lockers:attach', 'lockers:list', 'lockers:open', 'lockers:read', 'lockers:status',
   'logins:delete', 'logins:fill', 'logins:list', 'logins:save', 'logs:download-all', 'logs:extract-all', 'logs:extract-options', 'logs:extract-preview', 'logs:tags',
   'manager:approve', 'manager:configure-provider', 'manager:get-state', 'manager:pause', 'manager:reject', 'manager:resume', 'manager:start-task',
-  'manager:stop', 'manager:test-connection', 'memory:search', 'memory:summary', 'models:info', 'models:open',
+  'manager:stop', 'manager:test-connection', 'mcp:list', 'mcp:add', 'mcp:start', 'mcp:stop', 'mcp:remove', 'memory:search', 'memory:summary', 'models:info', 'models:open',
   'llm:status', 'llm:hardware', 'llm:check', 'llm:fix', 'llm:setup-all', 'llm:start-alfred', 'content:roots', 'content:use-root', 'folders:map', 'folders:move-comfy', 'folders:open', 'llm:scan', 'llm:use-store', 'llm:import-gguf', 'llm:install-ollama', 'llm:start', 'llm:stop', 'llm:search', 'llm:curated', 'llm:hf-files', 'llm:pull', 'llm:cancel', 'llm:remove', 'llm:use', 'llm:hf-token',
   'ollama:detect', 'ollama:list', 'ollama:managed-status', 'ollama:migrate', 'ollama:pull', 'ollama:recommended', 'panes:sync', 'participants:set',
   'phone:info', 'phone:set-lan', 'picker:cancel', 'picker:clear', 'picker:save', 'picker:start', 'picker:status', 'picker:test',
@@ -693,6 +693,32 @@ async function main() {
     assert(['edit_profile', 'save_book', 'rewrite_chapter'].every((c) => journal.includes(c)), 'book actions are noted in the Akọwe journal');
     assert(!ak.requests.some((x) => /approve|decide/.test(x.path) && !/\/forge\/characters\//.test(x.path)), 'no book-draft approval is ever sent to Akọwe (dossier proposals only via approve_dossier\'s card)');
     await ak.close(); await bl.close();
+  }
+
+  // ---- 🧰 tool servers (MCP): a fake stdio server added through the real IPC, then used through Alfred -----------
+  console.log('\n== 🧰 tool servers (MCP): the real mcp:* handlers + a fake stdio MCP server ==');
+  {
+    const fakeMcp = path.join(__dirname, 'fixtures', 'fake-mcp-server.js');
+    let r = await call('mcp:add', { name: 'files', line: `"${process.execPath}" "${fakeMcp}"`, secrets: 'FAKE_TOKEN=cov-SECRET-31337' });
+    assert(r && r.ok && /connected · 8 tools/.test(r.server.summary), `mcp:add adds and starts the server (${r && (r.message || r.error)})`);
+    const listed = await call('mcp:list', {});
+    assert(listed.ok && listed.servers.length === 1 && !/cov-SECRET-31337/.test(JSON.stringify(listed)), 'mcp:list shows it (the key only by name)');
+    let d = await drive('mcp_tools', {});
+    check('mcp_tools', !d.carded && d.result && d.result.ok && d.result.data.tools.some((t) => t.server === 'files' && t.tool === 'add' && t.arguments && t.arguments.properties && t.arguments.properties.a), 'lists the servers\' tools with their argument schemas, without a card');
+    d = await drive('mcp_call', { server: 'files', tool: 'echo', arguments: { text: 'hello from Alfred' } }, { confirm: false });
+    const st = d.card && d.card.steps[0];
+    const cardOk = d.carded && st && /files/.test(st.text) && /echo/.test(st.text) && /hello from Alfred/.test(st.text) && st.allowAlways === false;
+    r = cardOk ? await call('alfred:confirm', { id: d.card.id }) : null;
+    check('mcp_call', cardOk && r && /echo: hello from Alfred/.test(r.text || ''), 'an "I will" card naming the server, the tool and the arguments (no "always allow") → ✔ → the server\'s answer');
+    d = await drive('mcp_call', { server: 'files', tool: 'add', arguments: { a: 'lots', b: 1 } });
+    assert(!d.carded && /must be a number/.test(d.text), 'arguments are checked against the server\'s inputSchema before any card');
+    d = await drive('mcp_call', { server: 'nope', tool: 'echo', arguments: {} });
+    assert(!d.carded && /no tool server \\?"nope/.test(d.text), 'an unknown server is refused with the list of servers');
+    assert(!registry.allowableKey('mcp_call:files/echo'), 'mcp_call can never be "always allowed"');
+    d = await drive('app_info', { action: 'mcp.servers' });
+    assert(!d.carded && /connected · 8 tools/.test(d.text), 'app_info mcp.servers reads the real list');
+    r = await call('mcp:remove', { id: 'files' });
+    assert(r.ok && (await call('mcp:list', {})).servers.length === 0, 'mcp:remove stops and removes it');
   }
 
   // =====================================================================================================
