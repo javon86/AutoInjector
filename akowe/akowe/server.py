@@ -1470,8 +1470,9 @@ def make_handler(app: App):
             self.end_headers()
 
         def do_DELETE(self):
-            # 🖼 B3: DELETE …/pictures/<pic_id> is the one place a DELETE means something (other paths stay 405)
-            if re.fullmatch(r"/api/projects/[^/]+/branches/[^/]+/pictures/[^/]+", urlparse(self.path).path):
+            # a DELETE means something only on these paths (🖼 B3 …/pictures/<pic_id>; P25 the style card); others 405
+            if re.fullmatch(r"/api/projects/[^/]+/branches/[^/]+/pictures/[^/]+|/api/style-card",
+                            urlparse(self.path).path):
                 return self._handle("DELETE")
             self._not_allowed()
 

@@ -19,6 +19,7 @@ from akowe import style_card as sc
 from akowe.errors import AkoweError
 
 from test_failover_review import SlotFake, make_app, run_book
+from test_server import server  # noqa: F401  (pytest fixture)
 
 CHAPTERS = [
     {"number": 1, "text": "# One\n\nThe fog rolled in over Gullhaven before dawn. Mara climbed the steps."},
@@ -210,6 +211,19 @@ def test_style_card_api(tmp_path):
     assert card["samples"][0]["name"] == "Diary" and card["in_words"]
     code, out = app.route("DELETE", "/api/style-card", {}, None, "author", {})
     assert out["card"] is None
+
+
+def test_style_card_delete_over_http(server):
+    from test_server import call
+    _app, port = server
+    st, out, _ = call(port, "PUT", "/api/style-card", {"samples": [{"name": "Diary", "text": SAMPLE}]})
+    assert st == 200 and out["card"]["samples"][0]["name"] == "Diary"
+    st, out, _ = call(port, "DELETE", "/api/style-card")
+    assert st == 200 and out["card"] is None
+    st, out, _ = call(port, "GET", "/api/style-card")
+    assert st == 200 and out["card"] is None
+    st, out, _ = call(port, "DELETE", "/api/style-card/learn")  # other DELETEs stay a JSON 405
+    assert st == 405 and out["errors"][0]["code"] == "INVALID_INPUT"
 
 
 def test_style_reaches_the_writer_and_the_editor(tmp_path):
