@@ -48,9 +48,38 @@ const mk = (p, data) => { fs.mkdirSync(path.dirname(p), { recursive: true }); fs
   const legacy2 = path.join(tmp, 'other-drive', 'comfyui');
   mk(path.join(legacy2, 'ComfyUI', 'main.py'));
   const to2 = path.join(tmp, 'stuff2', 'apps', 'comfyui');
-  const xfs = Object.assign({}, fs, { renameSync: () => { const e = new Error('cross-device'); e.code = 'EXDEV'; throw e; } });
+  const xfs = Object.assign({}, fs, { promises: fs.promises, renameSync: (a, b) => { if (path.resolve(a) === path.resolve(legacy2)) { const e = new Error('cross-device'); e.code = 'EXDEV'; throw e; } return fs.renameSync(a, b); } });
+  let syncCopies = 0; xfs.cpSync = (...a) => { syncCopies++; return fs.cpSync(...a); };
   m = await F.moveComfy({ from: legacy2, to: to2, fs: xfs });
   assert(m.ok && m.how === 'copy' && F.hasComfy(to2) && !fs.existsSync(legacy2), 'another drive: copied, checked, the old one deleted');
+  assert(syncCopies === 0 && !fs.existsSync(to2 + '.partial'), 'the cross-drive copy is asynchronous (no cpSync on the main thread) and its .partial folder is renamed into place');
+
+  console.log('\n== a locked / running ComfyUI is never copied ==');
+  for (const code of ['EPERM', 'EBUSY']) {
+    const legacy3 = path.join(tmp, 'locked-' + code, 'comfyui');
+    mk(path.join(legacy3, 'ComfyUI', 'main.py'));
+    const to3 = path.join(tmp, 'stuff-' + code, 'apps', 'comfyui');
+    let copied = 0;
+    const lfs = Object.assign({}, fs, { renameSync: () => { const e = new Error('locked'); e.code = code; throw e; }, cpSync: () => { copied++; }, promises: Object.assign({}, fs.promises, { cp: async () => { copied++; } }) });
+    m = await F.moveComfy({ from: legacy3, to: to3, fs: lfs });
+    assert(!m.ok && /stop ComfyUI/i.test(m.error) && copied === 0 && F.hasComfy(legacy3), `${code} on rename → "stop ComfyUI first", nothing copied, nothing deleted`);
+  }
+  // a half-finished copy left by a killed app never wins pickComfyHome
+  const stuff4 = path.join(tmp, 'stuff4');
+  const L4 = F.layout(stuff4);
+  mk(path.join(L4.comfyHome + '.partial', 'ComfyUI', 'main.py'));
+  mk(path.join(L4.comfyHome, 'x.partial', 'ComfyUI', 'main.py'));
+  const legacy4 = path.join(tmp, 'legacy4');
+  mk(path.join(legacy4, 'ComfyUI', 'main.py'));
+  assert(!F.hasComfy(L4.comfyHome + '.partial') && !F.hasComfy(L4.comfyHome), 'hasComfy ignores ".partial" folders');
+  assert(F.pickComfyHome({ stuffDir: stuff4, legacyHome: legacy4, platform: 'linux' }).where === 'legacy', 'a cut-off .partial copy does not replace the working install');
+
+  console.log('\n== "is ComfyUI running?" uses sd-runner\'s real status (phase) ==');
+  for (const ph of ['starting', 'running', 'restarting', 'waiting']) assert(F.comfyInUse({ phase: ph, kind: ph === 'waiting' ? null : 'comfy' }) === true, `phase ${ph} → in use`);
+  for (const ph of ['idle', 'stopped', 'failed']) assert(F.comfyInUse({ phase: ph, kind: 'comfy', ready: false, busy: false }) === false, `phase ${ph} → free`);
+  assert(F.comfyInUse({ phase: 'running', ready: true, kind: 'a1111' }) === false, 'a running A1111/Forge does not lock the ComfyUI folder');
+  assert(F.comfyInUse({ phase: 'idle' }, { busy: true, phase: 'extracting' }) === true, 'the installer unpacking into it counts as in use');
+  assert(!/st\.running \|\| st\.starting/.test(fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8')) && /foldersMod\.comfyInUse\(sdRunner\(\)\.status\(\)/.test(fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8')), 'main.js guards the move with comfyInUse(sdRunner().status(), …)');
   fs.rmSync(tmp, { recursive: true, force: true });
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
