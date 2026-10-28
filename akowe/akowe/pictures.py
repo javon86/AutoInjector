@@ -686,13 +686,17 @@ def make_map_png(app, principal, pid, branch) -> dict:
         png = map_png(app, principal, pid, branch, svg)
     except forge.ArtProblem as exc:
         raise render.as_error(exc, "Word copy of the map", "/kind") from None
-    idx = c
+    want = cands[c].get("asset_id")
 
-    def fn(dd):
+    def fn(dd):  # the candidates may have changed while AutoInjector drew: find the same map by its asset
         pp = dd["pictures"].get(p["id"])
-        if pp is None or idx >= len(pp.get("candidates") or []):
+        if pp is None:
             raise _bad("/pic_id", "this picture was deleted", "NOT_FOUND")
-        pp["candidates"][idx]["png"] = png
+        hit = next((x for x in pp.get("candidates") or [] if want and x.get("asset_id") == want), None)
+        if hit is None:
+            raise _bad("/pic_id", "the drawn map was removed while its Word copy was made: draw the map again",
+                       "NOT_FOUND")
+        hit["png"] = png
         pp["updated_at"] = _now()
         return pp
     out = _mutate(app.store, pid, branch, fn, "pictures.candidate")

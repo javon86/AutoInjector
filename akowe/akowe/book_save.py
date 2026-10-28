@@ -248,6 +248,22 @@ def write_atomic(path: Path, data: bytes) -> bool:
     return True
 
 
+def in_use(exc: OSError) -> bool:
+    """A file another program holds open (Windows: a PDF open in Acrobat → sharing violation / access denied)."""
+    return isinstance(exc, PermissionError) or getattr(exc, "winerror", None) in (5, 32, 33) or \
+        exc.errno in (errno.EACCES, errno.EBUSY, errno.ETXTBSY)
+
+
+def inside(folder: Path, rel: str) -> bool:
+    """Is ``folder / rel`` inside ``folder`` (no ``..``, no absolute or drive path, no link out)?"""
+    try:
+        root = folder.resolve()
+        target = (folder / rel).resolve()
+    except (OSError, ValueError, RuntimeError):
+        return False
+    return target != root and root in target.parents
+
+
 def check_folder(path: Path) -> SaveProblem | None:
     """Can Akọwe write into this books folder (made when missing)? Also: is the path short enough?"""
     if not path.is_absolute():
@@ -295,6 +311,8 @@ class SaveService:
         self._timers: dict[tuple, threading.Timer] = {}
         self._last: dict[tuple, float] = {}
         self._again: dict[tuple, dict] = {}
+        self._queue: list[tuple] = []     # the 10-minute check's changed books, saved one at a time
+        self._hold: set[str] = set()      # books being replaced (📂 update the one I have): no saves start
         self.count: dict[tuple, int] = {}
         self.launch = launch  # tests replace it
 
@@ -471,7 +489,8 @@ class SaveService:
         prof = get_profile(store, pid)
         title = prof.get("title") or (store.project(pid) or {"name": "Book"})["name"]
         stem = safe_name(title, 40)
-        info = {"title": title, "exports": 0, "chapters": 0, "drafts": 0, "report": False}
+        info = {"title": title, "exports": 0, "chapters": 0, "drafts": 0, "report": False, "keep": set()}
+        keep = info["keep"]  # paths (or folder prefixes) not written this time: the files saved before stay
         steps = {s["id"]: s for s in status["steps"]}
         # Book/ — the exported files, re-read and hash-checked by the store
         phase("Copying the finished book")
@@ -526,6 +545,7 @@ class SaveService:
                 files["Reports/Book report.pdf"] = br.render_pdf(rep)
             except Exception:  # noqa: BLE001 - the Markdown is there
                 log.exception("book report PDF for the save failed")
+                keep.add("Reports/Book report.pdf")
             info["report"] = True
         ed = self._editor_summary(pid, branch, chapters)
         if ed:
@@ -542,24 +562,28 @@ class SaveService:
             self._forge_files(pid, branch, files, text)
         except Exception:  # noqa: BLE001 - the rest of the save still happens
             log.exception("character forge files for the save failed")
+            keep.add("Character Forge/")
         # Pictures/ (B3): the chosen chapter / scene pictures and the map, with pictures.json
         try:
             from . import pictures  # noqa: PLC0415
             pictures.save_files(app, pid, branch, files, text)
         except Exception:  # noqa: BLE001 - the rest of the save still happens
             log.exception("picture files for the save failed")
+            keep.add("Pictures/")
         # Trailer/ (B2): the book trailer (trailer.webm, trailer.mp4 when there is one) and its plan
         try:
             from . import trailer as trailer_mod  # noqa: PLC0415
-            trailer_mod.save_files(app, pid, branch, files, text)
+            trailer_mod.save_files(app, pid, branch, files, text, keep)
         except Exception:  # noqa: BLE001 - the rest of the save still happens
             log.exception("trailer files for the save failed")
+            keep.add("Trailer/")
         # Cover/ (B3): the cover design, the ebook and print covers, the art, the book files with the cover
         try:
             from . import cover as cover_mod  # noqa: PLC0415
             cover_mod.save_files(app, pid, branch, files, stem)
         except Exception:  # noqa: BLE001 - the rest of the save still happens
             log.exception("cover files for the save failed")
+            keep.add("Cover/")
         # Log/
         phase("Writing the log")
         try:
@@ -567,6 +591,7 @@ class SaveService:
             text("Log/Book journal.md", journal_mod.render_markdown(j))
         except Exception:  # noqa: BLE001 - the rest of the save still happens
             log.exception("journal for the save failed")
+            keep.add("Log/Book journal.md")
         runs = self._runs(pid, branch)
         text("Log/run-events.json", json.dumps({"schema_version": 1, "book": title, "saved_at": now_iso(),
                                                 "note": "Steps, states, which AI did what, times and problems of the "
@@ -696,18 +721,34 @@ class SaveService:
             except (OSError, ValueError):
                 old = []
             written = 0
+            locked: list[str] = []
             for rel, data in files.items():
-                if write_atomic(folder / rel, data):
-                    written += 1
+                try:
+                    if write_atomic(folder / rel, data):
+                        written += 1
+                except OSError as exc:
+                    if not in_use(exc):
+                        raise
+                    locked.append(rel)  # open in another program (a PDF in Acrobat): the rest is still saved
+            if locked and len(locked) == len(files):
+                raise SaveProblem("SAVE_FOLDER_NOT_WRITABLE", "Akọwe may not write any file into the book's folder")
+            kept = set(locked) | set(info.get("keep") or ())
+            stays = [rel for rel in old if rel not in files and any(rel == k or (k.endswith("/") and
+                                                                             rel.startswith(k)) for k in kept)]
             for rel in old:  # files Akọwe wrote earlier that are not part of this save (a renamed chapter)
-                if rel not in files and ".." not in rel.split("/") and not rel.startswith("/"):
-                    try:
-                        (folder / rel).unlink()
-                    except FileNotFoundError:
-                        pass
+                if rel in files or rel in stays or not inside(folder, rel):
+                    continue
+                try:
+                    (folder / rel).unlink()
+                except FileNotFoundError:
+                    pass
+                except OSError as exc:
+                    if not in_use(exc):
+                        raise
+                    stays.append(rel)  # open in another program: removed by a later save
             marker = {"app": "Akọwe", "schema_version": FOLDER_SCHEMA, "project_id": pid, "branch_id": branch,
                       "title": info["title"], "saved_at": now_iso(), "kind": kind, "finished": info.get("finished"),
-                      "chapters": info["chapters"], "exports": info["exports"], "files": sorted(files)}
+                      "chapters": info["chapters"], "exports": info["exports"], "files": sorted(set(files) | set(stays))}
             write_atomic(folder / MARKER, json.dumps(marker, ensure_ascii=False, indent=2).encode("utf-8"))
             try:
                 (folder / legacy.OLD_MARKER).unlink()  # the marker of a save made before the rename is replaced
@@ -715,10 +756,22 @@ class SaveService:
                 pass
         except OSError as exc:
             raise classify(exc) from None
+        warnings = []
+        if locked:
+            names = ", ".join(locked[:3]) + (f" and {len(locked) - 3} more" if len(locked) > 3 else "")
+            warnings.append(f"Saved, except {names} (open in another program — close it and save again).")
+        pkg = len(files.get(PACKAGE) or b"")
+        if pkg > book_package.MAX_PACKAGE_BYTES:
+            warnings.append(f"book.akowe is {pkg // (1024 * 1024)} MB, more than the "
+                            f"{book_package.MAX_PACKAGE_BYTES // (1024 * 1024)} MB Akọwe can open again: the folder is "
+                            "saved, but 📂 Open a saved book will refuse this book.akowe. Delete trailers, clips or "
+                            "pictures you do not use any more, then save again.")
+        if warnings:
+            log.warning("book %s saved with a warning: %s", pid, " ".join(warnings))
         return {"ok": True, "path": str(folder), "folder": folder.name, "files": len(files), "written": written,
                 "bytes": sum(len(d) for d in files.values()), "finished": info.get("finished"),
                 "chapters": info["chapters"], "drafts": info["drafts"], "exports": info["exports"],
-                "report": info["report"]}
+                "report": info["report"], "skipped": locked, "warning": " ".join(warnings) or None}
 
     # ------------------------------------------------------------------ background saves
     def _status_key(self, pid, branch):
@@ -756,6 +809,9 @@ class SaveService:
         """Start a save in the background (a running one is returned instead of starting a second)."""
         key = (pid, branch)
         with self._lock:
+            if pid in self._hold:
+                raise problem_error("SAVE_FAILED", "this book is being replaced by a saved book right now; press 💾 "
+                                    "Save again in a moment")
             if self.busy(key):
                 if kind == "manual":
                     self._again[key] = {"kind": "manual", "force": True, "reason": "you pressed 💾 Save"}
@@ -810,6 +866,7 @@ class SaveService:
             if again:
                 self.auto(pid, branch, reason=again.get("reason") or "", force=again.get("force"),
                           kind=again.get("kind") or "auto", _check=False)
+            self._next_queued()
 
     def _record(self, pid, branch, rec: dict):
         try:
@@ -829,6 +886,8 @@ class SaveService:
                 return
             key = (pid, branch)
             with self._lock:
+                if pid in self._hold:
+                    return
                 if self.busy(key):
                     prev = self._again.get(key) or {}
                     self._again[key] = {"kind": prev.get("kind") if prev.get("kind") == "manual" else kind,
@@ -888,12 +947,13 @@ class SaveService:
             return None
 
     def periodic_tick(self) -> list:
-        """One quiet round: save (in the background) every book whose state changed since its last save. Returns the
-        (pid, branch) pairs it started. Never raises."""
-        started = []
+        """One quiet round: every book whose state changed since its last save is queued, and the queue is saved in
+        the background ONE BOOK AT A TIME (the next one starts when no save is running). Returns the (pid, branch)
+        pairs it queued. Never raises."""
+        queued = []
         try:
             if not self.auto_on():
-                return started
+                return queued
             for p in self.store.query("SELECT project_id FROM projects WHERE archived=0"):
                 pid = p["project_id"]
                 if self.app.is_test_project(pid):
@@ -911,11 +971,29 @@ class SaveService:
                             continue  # an empty book: nothing to save yet
                     elif fp is not None and last.get("fp") == fp and last.get("ok"):
                         continue  # unchanged since its last save: leave it alone
-                    self.auto(pid, branch, reason="saved every 10 minutes (the book changed)", force=True)
-                    started.append((pid, branch))
+                    with self._lock:
+                        if (pid, branch) not in self._queue:
+                            self._queue.append((pid, branch))
+                    queued.append((pid, branch))
+            self._next_queued()
         except Exception:  # noqa: BLE001 - a background check never breaks anything
             log.exception("the 10-minute save check failed")
-        return started
+        return queued
+
+    def _next_queued(self):
+        """Start the next queued 10-minute save when no save is running (called again when a save finishes)."""
+        try:
+            me = threading.current_thread()
+            with self._lock:
+                while self._queue:
+                    if any(t.is_alive() and t is not me for t in self._threads.values()):
+                        return  # one at a time: the running save starts the next one when it is done
+                    pid, branch = self._queue.pop(0)
+                    self.auto(pid, branch, reason="saved every 10 minutes (the book changed)", force=True)
+                    if self.busy((pid, branch)):
+                        return
+        except Exception:  # noqa: BLE001
+            log.exception("the next quiet save could not start")
 
     def start_periodic(self):
         """The background ticker of ``periodic_tick`` (every ``periodic_s``); a second call does nothing."""
@@ -941,11 +1019,36 @@ class SaveService:
         while time.monotonic() < end:
             with self._lock:
                 busy = any(t.is_alive() for t in self._threads.values()) or bool(self._again) or \
-                    (timers and bool(self._timers))
+                    bool(self._queue) or (timers and bool(self._timers))
             if not busy:
                 return True
             time.sleep(0.02)
         return False
+
+    def quiesce(self, pid: str, timeout: float = 30.0) -> bool:
+        """Before a book is replaced (📂 update the one I have): no new save of it starts (``_hold``; release with
+        ``release``), its pending auto-save timers and queued re-saves are dropped, and a save of it that is running
+        is waited for. False when one is still running after ``timeout`` (the hold is released then)."""
+        with self._lock:
+            self._hold.add(pid)
+            for key in [k for k in self._timers if k[0] == pid]:
+                self._timers.pop(key).cancel()
+            for key in [k for k in self._again if k[0] == pid]:
+                self._again.pop(key, None)
+            self._queue[:] = [k for k in self._queue if k[0] != pid]
+            threads = [t for k, t in self._threads.items() if k[0] == pid]
+        end = time.monotonic() + timeout
+        for t in threads:
+            t.join(max(0.0, end - time.monotonic()))
+        with self._lock:
+            still = any(t.is_alive() for k, t in self._threads.items() if k[0] == pid)
+            if still:
+                self._hold.discard(pid)
+        return not still
+
+    def release(self, pid: str):
+        with self._lock:
+            self._hold.discard(pid)
 
     def stop_timers(self):
         with self._lock:

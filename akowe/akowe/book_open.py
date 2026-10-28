@@ -39,6 +39,7 @@ from .errors import AkoweError
 from .jobs import now_iso
 
 log = logging.getLogger("akowe.book_open")
+UPDATE_WAIT_S = 30.0   # ⟳ update the one I have: how long a running save of that book is waited for
 
 KEEP_UPLOADS = 5
 MAX_FOLDERS = 500
@@ -263,8 +264,18 @@ class OpenService:
                     (j.get("kind") == "autobook" and self.app.autobook.alive(j["id"])):
                 raise _err("OPEN_FAILED", f"“{existing['name']}” is being worked on right now (a run or a job): stop "
                            "it first, or open the saved book as a copy", path="/mode")
-        if self.app.saver.busy((pid, "main")):
-            self.app.saver.wait_idle(30.0)
+        # its pending auto-save / queued re-save are dropped and a running save of it is waited for; no save of it
+        # starts until it is replaced (a save writing the old book over the new one's folder, or failing midway)
+        if not self.app.saver.quiesce(pid, UPDATE_WAIT_S):
+            raise _err("OPEN_FAILED", f"“{existing['name']}” is being saved right now: wait a moment, then try "
+                       "again (or open the saved book as a copy)", path="/mode")
+        try:
+            return self._replace(principal, data, pkg, existing, source)
+        finally:
+            self.app.saver.release(pid)
+
+    def _replace(self, principal: str, data: bytes, pkg: dict, existing: dict, source: str) -> dict:
+        pid = existing["project_id"]
         trial = book_package.import_package(self.app, data, principal, pkg=pkg, name=f"{existing['name']} (checking)")
         keep = [r for r in self.store.query("SELECT key, value FROM settings WHERE key LIKE 'book_folder:%' OR key "
                                             "LIKE 'book_save:%'") if pid in r["key"]]

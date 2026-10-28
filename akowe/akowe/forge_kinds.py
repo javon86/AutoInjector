@@ -261,6 +261,11 @@ def create(store, pid, branch, kind, body) -> dict:
     """POST /forge/<items|places|magic> — {name?, aliases?, from?: candidate source_id} -> {record_id, created,
     dossier, message}. ``from`` seeds the dossier from the book's existing records (see ``candidates``); a candidate
     that already has a dossier answers that dossier (created false)."""
+    with forge._CREATE_LOCK:  # noqa: SLF001 - the name check and the new dossier as one step
+        return _create(store, pid, branch, kind, body)
+
+
+def _create(store, pid, branch, kind, body) -> dict:
     sp = spec(kind)
     body = body if isinstance(body, dict) else {}
     src = body.get("from")
