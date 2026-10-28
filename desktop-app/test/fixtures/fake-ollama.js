@@ -49,6 +49,8 @@ function fakeOllama(port) {
         if (!st.models.some((m) => m.name === (j.model || j.name))) st.models.push({ name: j.model || j.name, size: total });
         return res.end();
       }
+      // loading a model into memory (an empty prompt): answers at once, like a real Ollama with the model loaded
+      if (req.url === '/api/generate' && req.method === 'POST') { st.warmed = (st.warmed || 0) + 1; return send(200, { model: 'x', response: '', done: true, done_reason: 'load' }); }
       if (req.url === '/v1/chat/completions' && req.method === 'POST') {
         st.chats.push(j);
         if (!st.models.some((m) => m.name === j.model || m.name === `${j.model}:latest`)) return send(404, { error: { message: `model "${j.model}" not found, try pulling it first` } });
