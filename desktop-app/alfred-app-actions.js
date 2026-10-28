@@ -92,6 +92,12 @@ A('manager.test_connection', 'manager:test-connection', { t: 'Test the butler\'s
 A('manager.get_state', 'manager:get-state', { t: 'The butler\'s task state and log', c: false });
 A('butler.chat', 'butler:chat', { t: 'Talk to the butler\'s model', c: false, a: { message: text(4000) }, r: ['message'], ex: { message: 'hello' } });
 A('tools.list', 'tools:list', { t: 'The butler\'s tool list', c: false });
+// 🧰 tool servers (MCP) the user added — reading and using their tools is mcp_tools / mcp_call; these are the list
+// and Start / Stop / Remove (never "always allowed": starting one runs the program the user added)
+A('mcp.servers', 'mcp:list', { t: 'The tool servers (MCP): each one\'s status (connected · N tools / the error) and tools', c: false });
+A('mcp.start', 'mcp:start', { t: 'Start a tool server the user added (runs its program / connects to its address)', c: true, a: { id: text(60) }, r: ['id'], ex: { id: 'files' } });
+A('mcp.stop', 'mcp:stop', { t: 'Stop a tool server', c: true, a: { id: text(60) }, r: ['id'], ex: { id: 'files' } });
+A('mcp.remove', 'mcp:remove', { t: 'Remove a tool server from the list (its saved keys too)', c: true, a: { id: text(60) }, r: ['id'], ex: { id: 'files' } });
 A('memory.summary', 'memory:summary', { t: 'What the butler remembers (summary)', c: false });
 A('memory.search', 'memory:search', { t: 'Search the butler\'s memory', c: false, a: { query: text(400) }, r: ['query'], ex: { query: 'lighthouse' } });
 
@@ -249,6 +255,7 @@ const EXCLUDED = {
   'terminal:input': 'free command execution (typing into the shell) — see terminal:run',
   'terminal:approve': 'approves a command an AI asked to run — a decision that stays with the user',
   'terminal:settings': 'can turn on auto-approve of commands — a security setting left to the user',
+  'mcp:add': 'adding a tool server means choosing a program to run (or an address to trust) and handing it keys — that choice stays with the user (⚙ More settings → 🧰 Tools)',
   'tools:run': 'the butler\'s tool runner includes run-command / install-package (free code) — Alfred\'s direct tools cover the safe ones',
   'selector:pick': 'legacy picker (superseded by the 🎯 picker:* actions Alfred has)',
   'site:inspect': 'opens developer tools — developer-only',

@@ -27,6 +27,9 @@ Legend: `[ ]` to do · `[~]` in progress · `[x]` done · `[!]` problem (see "Pr
 - **🎩 Alfred (done 2026-10-25, B4 → app-wide):** the butler grown into the user's assistant for the whole app — chat
   drawer on every tab, a fixed tool registry, "I will" cards before any change, proactive notices; OFF by default
   (🎩 switch); a local model via Ollama or a connected AI. See `docs/ALFRED.md`.
+- **🧰 Tool servers / MCP (done 2026-10-28, f10 "mcp"):** in ⚙ More settings → 🧰 Tools, add an outside MCP tool
+  server (a command line or a web address, with encrypted keys). Alfred uses it through `mcp_tools` and `mcp_call`
+  (always on a card, never "always allowed"), and the butler through USE_TOOL. See `docs/ALFRED.md` → "Tool servers (MCP)".
 - **Back burner (later, by the user's call):** images + Stable Diffusion (B1: AutoInjector side done — 🎨 Images tab),
   video (B2), covers and pictures (B3), Character Forge dossiers (B5).
 - **Still to try for real:** everything above has only been tested with stand-in AIs — the first real

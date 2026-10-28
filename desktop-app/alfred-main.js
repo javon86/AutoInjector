@@ -9,6 +9,7 @@
  *   AI panes         sendTextTo + the captured replies, the self-repair check-in, pane health
  *   files / logs     the output folders, the log Extract ("This book only")
  *   Open Interpreter interpreter-provider.js (only when turned on in Alfred's settings)
+ *   tool servers     mcp-manager.js (hooks.mcp): the MCP servers the user added (mcp_tools / mcp_call)
  * IPC: alfred:* handlers; UI events go out on the "alfred" channel — to the control panel AND to his
  * floating side panel window (alfred-window.js / alfred-window.html), so both show the same state.
  */
@@ -254,6 +255,9 @@ function installAlfred(h) {
       const owner = resolvePath(api, method.split('.').slice(0, -1).join('.')) || api;
       return fn.call(owner, params);
     },
+    // 🧰 tool servers (MCP, mcp-manager.js) — the user's own list; null-safe in a build without it
+    mcpTools: async (server) => (h.mcp ? h.mcp.tools(server) : { ok: true, servers: [], tools: [] }),
+    mcpCall: async (server, tool, args) => (h.mcp ? h.mcp.call(server, tool, args) : { ok: false, error: 'NO_TOOL_SERVERS', message: 'Tool servers are not available in this build.' }),
     akowe: (method, p, body) => h.akoweApi(method, p, body, 20000),
     openAkowePage,
     generateImage: (o) => image.generate(o),

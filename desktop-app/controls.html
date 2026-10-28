@@ -2007,10 +2007,21 @@
           </div>
         </details>
 
-        <details class="sai-sec">
+        <details class="sai-sec" id="tools-sec">
           <summary>🧰 Tools — what the butler can call</summary>
-          <p style="opacity:.7; font-size:11px; margin:2px 0 5px;">Registered tools (built-in now; MCP servers plug in later). The butler invokes these via USE_TOOL.</p>
+          <p style="opacity:.7; font-size:11px; margin:2px 0 5px;">The built-in tools, plus outside <b>tool servers</b> (MCP) you add below. The butler (USE_TOOL) and 🎩 Alfred always ask you before they use a tool server.</p>
           <div id="jarvis-tools" style="font-size:11px; opacity:.85; margin:2px 0;">No tools loaded.</div>
+          <div style="font-size:12px; font-weight:600; margin:8px 0 3px;">Tool servers (MCP)</div>
+          <div id="mcp-servers" style="font-size:11.5px;">None yet — nothing runs until you add one.</div>
+          <details id="mcp-add-box" style="margin-top:6px;">
+            <summary style="font-size:12px; cursor:pointer;">➕ Add a tool server</summary>
+            <input type="text" id="mcp-name" maxlength="40" placeholder="A short name, e.g. files" style="width:100%; box-sizing:border-box; margin:4px 0 2px;">
+            <input type="text" id="mcp-line" placeholder="Command line or web address, e.g. npx -y @modelcontextprotocol/server-filesystem C:\Users\me\Documents" style="width:100%; box-sizing:border-box; margin:2px 0;">
+            <textarea id="mcp-secrets" rows="2" placeholder="Keys (optional), one per line: NAME=value for a program, or Authorization: Bearer … for a web address. Stored encrypted; never shown again." style="width:100%; box-sizing:border-box; margin:2px 0; font-size:11.5px;"></textarea>
+            <div class="btns" style="margin:3px 0;"><button id="btn-mcp-add" class="primary">➕ Add and start</button></div>
+            <div id="mcp-msg" style="font-size:11.5px; opacity:.9;"></div>
+            <p style="opacity:.7; font-size:11px; margin:4px 0 0;">⚠ A command-line tool server is a program that runs on this computer with your permissions — add only ones you trust. Every call to it waits for your ✔.</p>
+          </details>
         </details>
 
         <details class="sai-sec">

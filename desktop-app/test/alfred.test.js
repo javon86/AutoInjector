@@ -835,6 +835,53 @@ async function main() {
     assert(/newer build/.test(dom2.window.document.getElementById('alfred-persona').textContent), 'without the API it shows a short note instead of failing');
   }
 
+  // ------------------------------------------------------------------------------------------
+  console.log('\n== 🧰 tool servers (MCP): mcp_tools reads, mcp_call always asks ==');
+  {
+    const mcpCalls = [];
+    const SCHEMA = { type: 'object', properties: { path: { type: 'string', minLength: 1 }, lines: { type: 'integer', minimum: 1 }, opts: { anyOf: [{ type: 'string' }, { type: 'object' }] } }, required: ['path'] };
+    const mctx = {
+      mcpTools: async (server) => ({ ok: true, servers: [{ id: 'files', name: 'files', status: 'connected', summary: 'connected · 1 tool', runsProgram: true }, { id: 'web', name: 'web', status: 'stopped', summary: 'stopped', runsProgram: false }].filter((x) => !server || x.name === server),
+        tools: [{ server: 'files', serverId: 'files', tool: 'read_file', description: 'Read a file', inputSchema: SCHEMA }].filter(() => !server || server === 'files') }),
+      mcpCall: async (server, tool, args) => { mcpCalls.push({ server, tool, args }); return { ok: true, text: 'line one', images: [], resources: [] }; },
+    };
+    const mt = registry.get('mcp_tools'); const mc = registry.get('mcp_call');
+    assert(mt && !mt.changes && mc && mc.changes && !registry.canAllowAlways(mc, { server: 'files', tool: 'read_file' }) && !registry.allowableKey('mcp_call:files/read_file'), 'mcp_tools is read-only; mcp_call changes things and can never be "always allowed"');
+    const sch = registry.mcpSchema(SCHEMA);
+    assert(sch.type === 'object' && sch.properties.lines.type === 'integer' && sch.properties.opts['x-passthrough'] && sch.required[0] === 'path', 'an MCP inputSchema becomes a checkable schema (anyOf → bounded pass-through)');
+    let c = await mc.check({ server: 'files', tool: 'read_file', arguments: { path: '/a.txt', lines: '3' } }, mctx);
+    assert(c.ok && c.args.arguments.lines === 3, 'valid arguments pass (a number sent as text is forgiven)');
+    c = await mc.check({ server: 'files', tool: 'read_file', arguments: { lines: 2 } }, mctx);
+    assert(!c.ok && /path is required/.test(c.error), `a missing required argument is refused (${c.error})`);
+    c = await mc.check({ server: 'files', tool: 'read_file', arguments: { path: 'x', lines: 0 } }, mctx);
+    assert(!c.ok && /at least 1/.test(c.error), 'the server\'s limits are checked');
+    c = await mc.check({ server: 'files', tool: 'write_file', arguments: {} }, mctx);
+    assert(!c.ok && /has no tool "write_file"/.test(c.error) && /read_file/.test(c.error), 'an unknown tool is refused with the tools it does have');
+    c = await mc.check({ server: 'web', tool: 'anything', arguments: { q: 1 } }, mctx);
+    assert(c.ok, 'a stopped server\'s call is allowed through to the card (it is started when confirmed)');
+    c = await mc.check({ server: 'files', tool: 'read_file' }, {});
+    assert(!c.ok && /not available/.test(c.error), 'without tool servers in this build → a plain refusal');
+
+    const llm = await fakeLlm((body) => {
+      if (lastMsg(body).role === 'tool') return { content: `RESULT ${lastMsg(body).content}` };
+      return /list/.test(lastUser(body).content) ? toolCall('mcp_tools', {}) : toolCall('mcp_call', { server: 'files', tool: 'read_file', arguments: { path: '/notes/todo.txt' } });
+    });
+    const { a, logs } = make({ llm, ctx: mctx });
+    let r = await a.ask('list the tool server tools');
+    assert(r.type === 'reply' && /read_file/.test(r.text) && /"path"/.test(r.text), 'mcp_tools answers directly with the tools and their argument schemas');
+    r = await a.ask('read my todo file with the files server');
+    const step = r.card && r.card.steps[0];
+    assert(r.type === 'confirm' && step.tool === 'mcp_call' && /“read_file”/.test(step.text) && /“files”/.test(step.text) && /todo\.txt/.test(step.text) && step.allowAlways === false && !mcpCalls.length, 'mcp_call shows an "I will" card naming the server, the tool and the arguments — nothing runs yet, no "always allow"');
+    r = await a.confirm(r.card.id, { alwaysAllow: [step.allowKey] });
+    assert(mcpCalls.length === 1 && mcpCalls[0].tool === 'read_file' && /line one/.test(r.text), '✔ Do it calls the server and the AI sees its text');
+    assert(!a.status().settings.alwaysAllow[step.allowKey], 'ticking "always allow" for it is ignored');
+    r = await a.ask('read my todo file again');
+    assert(r.type === 'confirm' && mcpCalls.length === 1, 'the next call asks again');
+    a.reject(r.card.id);
+    assert(!JSON.stringify(logs).includes('todo.txt'), 'the arguments are not written to the activity log');
+    await llm.close();
+  }
+
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 }

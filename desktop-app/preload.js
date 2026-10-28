@@ -99,6 +99,12 @@ contextBridge.exposeInMainWorld("api", {
   // N5 Tools
   toolsList: () => ipcRenderer.invoke("tools:list"),
   toolsRun: (tool, args) => ipcRenderer.invoke("tools:run", { tool, args }),
+  // 🧰 tool servers (MCP) — the user's saved list; secrets go in, never come back out
+  mcpList: () => ipcRenderer.invoke("mcp:list"),
+  mcpAdd: (p) => ipcRenderer.invoke("mcp:add", p),
+  mcpStart: (id) => ipcRenderer.invoke("mcp:start", { id }),
+  mcpStop: (id) => ipcRenderer.invoke("mcp:stop", { id }),
+  mcpRemove: (id) => ipcRenderer.invoke("mcp:remove", { id }),
   // N3 Memory
   memorySummary: () => ipcRenderer.invoke("memory:summary"),
   memorySearch: (query) => ipcRenderer.invoke("memory:search", { query }),
