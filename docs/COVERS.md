@@ -102,9 +102,15 @@ also need a whole DCT decoder in Python. So:
   page, the author, then a page break.
 - **PDF export**: a cover page is put in front of page 1, at the book's own page size (with bleed when the book has
   it). Every other object keeps its number, so the outline, the links and the named destinations still work.
-- Stores that want one flat JPEG with the title on it (KDP's ebook upload): use the picture (it is already a JPEG or
-  PNG) or open the ebook-cover PDF/SVG in any viewer and export it as an image. Rasterising inside AutoInjector
-  (Chromium) is possible later.
+- **⬇ Ebook cover (JPG)** — what Amazon KDP and most stores want (one flat JPEG with the title on it): Akọwe sends the
+  ebook-cover SVG (the artwork embedded as a data URI) to AutoInjector's `POST /render/image` (`render.py`), which draws
+  it in an offscreen, network-less Chromium page and answers the JPEG. Sizes (all the 1 : 1.6 ebook shape):
+  1600 × 2560 (KDP, the default), 2560 × 4096, 1000 × 1600, 625 × 1000. The last JPG of each size is kept as a book
+  asset (setting `cover_jpg:<pid>:<branch>`, keyed by a fingerprint of the SVG) and used again while the cover is
+  unchanged. AutoInjector not running → a plain error (“The JPG cover is drawn by AutoInjector, and AutoInjector is not
+  connected. Start the AutoInjector desktop app …”); the PDF and SVG work without it.
+- **EPUB with the JPG**: once a JPG of the current cover exists, `GET /cover/book?format=EPUB` uses it as the
+  `cover-image` (`images/cover.jpg`) and the cover page shows it (`<img>`); before that, as described above.
 
 ## AI artwork
 
@@ -135,7 +141,7 @@ and token from Settings → Pictures):
 | `PUT /cover` | partial design: `template`, `colors{background,text,accent}` (#rrggbb or null), `texts{title,subtitle,author,series,tagline}`, `blurb`, `author_bio` (→ profile), `print{trim,paper,page_count}`, `use_art`, `art: null`, `art_note`, `character_lock`, optional `revision` (stale → 409). Bad values → 400 in plain words |
 | `POST /cover/art` | `{engine, upscale?}` → 202 `{job_id}` |
 | `PUT /cover/art` | the picture bytes (PNG/JPEG) → the design |
-| `GET /cover/ebook?format=pdf\|svg\|art` | the front cover (PDF default) or the picture alone |
+| `GET /cover/ebook?format=pdf\|svg\|jpg\|art[&size=1600x2560]` | the front cover (PDF default; `jpg` is drawn by AutoInjector, `size` one of `ebook.jpg_sizes`) or the picture alone |
 | `GET /cover/print?trim=6x9&paper=cream[&pages=N][&format=svg&guides=1]` | the full wrap PDF (or SVG with trim, fold and safe-area guides) |
 | `GET /cover/book?format=PDF\|EPUB\|DOCX` | the last exported book file with the cover |
 | `POST /cover/preview[?what=print]` | SVG of an unsaved design (the live preview; nothing is saved) |
@@ -148,7 +154,7 @@ Add `download=1` to any file call to get it as an attachment.
 `Cover/` in the book's folder is written once the cover page has been used. Every path is at most 60 characters:
 
 - `cover-design.json`;
-- `ebook cover.pdf` and `ebook cover.svg`;
+- `ebook cover.pdf` and `ebook cover.svg`, and `ebook cover.jpg` when a JPG of the current cover was made;
 - `cover art.jpg|png`;
 - `print cover.pdf`, when the page count is known;
 - `<title> (with cover).pdf|epub|docx`, when the book has been exported.

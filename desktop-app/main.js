@@ -37,6 +37,7 @@ const secretStore = require("./secret-store");
 const akoweLegacy = require("./akowe-legacy"); // names from before the rename BookForge -> Akọwe (2026-10-25): old settings key, key file, env vars
 const akoweBridgeMod = require("./akowe-bridge"); // Akọwe bridge (pure Node HTTP server, OFF by default) — docs/AKOWE_AUTOINJECTOR_BRIDGE.md
 const { createServiceBridge } = require("./service-bridge");
+const renderImage = require("./render-image");
 const interpreterProvider = require("./interpreter-provider");
 const toolProvider = require("./tool-provider");
 const voiceProvider = require("./voice-provider");
@@ -6985,6 +6986,19 @@ const serviceBridge = createServiceBridge({
   video: {
     backend: () => videoStudio().backendInfo(),
     request: (body) => videoStudio().request(body, `bridge:${String((body && body.from) || "akowe").slice(0, 40)}`),
+  },
+  // 🖨 POST /render/image: SVG / HTML → JPEG / PNG in an offscreen, network-less Chromium page (render-image.js).
+  renderer: renderImage.createRenderer({ makeWindow: renderImage.electronWindowFactory(require("electron")), log: logEvent }),
+  // 📂 POST /dialog/choose-path: Akọwe's "Open a saved book" asks for a book folder (too big to upload); the user picks it here.
+  dialogs: {
+    choosePath: async (body) => {
+      const title = String((body && body.title) || "Choose the saved book's folder").slice(0, 120);
+      try { if (win && !win.isDestroyed()) { if (win.isMinimized()) win.restore(); win.focus(); } } catch (_) {}
+      const r = await dialog.showOpenDialog(win || undefined, { title, properties: ["openDirectory"] });
+      logEvent("dialog-choose-path", { cancelled: !!r.canceled }); // never the path itself
+      if (r.canceled || !r.filePaths || !r.filePaths[0]) return { ok: true, cancelled: true };
+      return { ok: true, path: r.filePaths[0] };
+    },
   },
   sdStudio: {
     request: (body) => sdStudio().request(body),

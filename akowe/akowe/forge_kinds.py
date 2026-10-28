@@ -21,6 +21,12 @@ portrait (``purpose: "portrait"``) and a turnaround of front / side / back / det
 establishing shot plus day / night / interior-or-detail (``scene``); magic systems a sigil (``illustration``) and an
 "in use" scene (``scene``). No ``characterLock``: these are not people. The first view's seed is reused for the rest.
 
+**Motion clip** (AutoInjector ``POST /video/request``, the character clip's job: ``forge.clip_job``): a 4-second clip
+made from a picture — an item a slow turntable / hover (from the item portrait, else the front view), a place a slow
+establishing pan (the establishing shot, else the day view), a magic system the effect in use (the in-use scene,
+else the sigil). Stored as ``art.clip`` (+ its poster), shown on the dossier page, drawn as a MOTION STUDY still in
+the PDF and saved with the book; ``PUT …/art/clip`` / ``…/art/clip_poster`` take the author's own.
+
 Storage: the forge settings document (``forge:<project>:<branch>`` → ``records.item|place|magic``), so the book
 package, the book bible and book save carry it. Prompts, replies and dossier text are never logged.
 """
@@ -141,7 +147,8 @@ def _art_view(pid, branch, kind, art: dict) -> dict:
     hero = sp["art"]["hero"]
     views = art.get("views") or {}
     return {hero: forge._art_public(pid, branch, art.get(hero)),
-            "views": {k: forge._art_public(pid, branch, views.get(k)) for k, _l, _p in sp["art"]["views"]}}
+            "views": {k: forge._art_public(pid, branch, views.get(k)) for k, _l, _p in sp["art"]["views"]},
+            "clip": forge._clip_public(pid, branch, art.get("clip"))}
 
 
 def public(store, pid: str, branch: str, kind: str, rid: str) -> dict:
@@ -194,7 +201,8 @@ def list_dossiers(store, pid: str, branch: str, kind: str) -> list[dict]:
                     "proposed": sum(1 for d in fields.values() if d["text"] and d["status"] == "proposed"),
                     "total": len(fields), "tagline": clip(e.get("tagline"), TAGLINE_MAX),
                     "hero": art[sp["art"]["hero"]], "views_done": sum(1 for v in art["views"].values() if v),
-                    "views_total": len(sp["art"]["views"]), "source": e.get("source")})
+                    "views_total": len(sp["art"]["views"]), "source": e.get("source"),
+                    "has_clip": bool(art["clip"])})
     return out
 
 
@@ -1036,7 +1044,7 @@ def art_plan(kind: str, what: str, views) -> list[tuple[str, str]]:
         if not isinstance(views, list) or not views or not all(v in vkeys for v in views):
             raise AkoweError("INVALID_INPUT", "/views", "views: one or more of " + ", ".join(vkeys), status="REJECTED")
         return [(k, p) for k, _l, p in vdefs if k in views]
-    raise AkoweError("INVALID_INPUT", "/what", f"what: {hero} or views", status="REJECTED")
+    raise AkoweError("INVALID_INPUT", "/what", f"what: {hero}, views or clip", status="REJECTED")
 
 
 def run_art(app, job, pid, branch, kind, rid, plan: list, engine: str) -> None:
@@ -1076,6 +1084,80 @@ def run_art(app, job, pid, branch, kind, rid, plan: list, engine: str) -> None:
                                                                  "book."})
 
 
+# ====================================================================== 🎬 the motion clip
+CLIP_MOTION = {
+    "item": "slow turntable rotation, the object hovering gently in place, soft light gliding over it, plain "
+            "background, camera still",
+    "place": "slow cinematic establishing pan across the place, gentle ambient motion of light, weather and water, "
+             "steady camera",
+    "magic": "the power in use: its visible signs flowing, glowing and spreading from the practitioner, subtle "
+             "camera push-in",
+}
+CLIP_SOURCES = {"item": ("portrait", "front"), "place": ("establishing", "day"), "magic": ("in_use", "sigil")}
+CLIP_WORDS = {"item": "a slow turntable", "place": "a slow establishing pan", "magic": "the effect in use"}
+
+
+def clip_prompt(d: dict, kind: str) -> str:
+    """The name, the visual anchors and appearance fields, then the motion of this kind (always kept)."""
+    sp = SPECS[kind]
+    texts = {f["key"]: f["text"] for s in d["sections"] for f in s["fields"] if f["text"]
+             and f["status"] in ("supplied", "approved", "proposed")}
+    parts = [f"{d['name']} ({sp['word']})"]
+    if texts.get(sp["anchor_key"]):
+        parts.append("Fixed visual anchors: " + texts[sp["anchor_key"]])
+    for k in sp["appearance_keys"]:
+        if texts.get(k) and k != sp["anchor_key"]:
+            parts.append(texts[k])
+    p = ". ".join(clip(x, 300).strip().rstrip(".") for x in parts if x and x.strip())
+    motion = CLIP_MOTION[kind]
+    return f"{p[:1200 - len(motion) - 2]}. {motion}"
+
+
+def clip_source(store, pid, branch, kind, rid) -> tuple[str, dict] | None:
+    """(slot, art) of the picture the clip is made from (CLIP_SOURCES order); None when there is none."""
+    sp = SPECS[kind]
+    art = raw_entry(store, pid, branch, kind, rid).get("art") or {}
+    for slot in CLIP_SOURCES[kind]:
+        a = art.get(slot) if slot == sp["art"]["hero"] else (art.get("views") or {}).get(slot)
+        if isinstance(a, dict) and a.get("asset_id"):
+            return slot, a
+    return None
+
+
+def set_clip(store, pid, branch, kind, rid, clip_: dict | None = None, *, poster: dict | None = None) -> dict:
+    """Set the dossier's motion clip (its poster with it), or only a new poster for the clip already there."""
+    sp = spec(kind)
+
+    def fn(entry, fields):
+        art = entry.setdefault("art", {sp["art"]["hero"]: None, "views": {}})
+        if clip_ is not None:
+            art["clip"] = dict(clip_, poster=poster)
+            return {"art:clip"}, {}
+        if not isinstance(art.get("clip"), dict):
+            raise AkoweError("MISSING_INPUT", "/slot", "there is no motion clip yet: make or upload the clip first",
+                             status="REJECTED")
+        art["clip"]["poster"] = poster
+        return {"art:clip_poster"}, {}
+    return mutate(store, pid, branch, kind, rid, fn, what="art", by=(clip_ or {}).get("source") or "author",
+                  bump=False)
+
+
+def run_clip(app, job, pid, branch, kind, rid) -> None:
+    store = app.store
+    sp = SPECS[kind]
+    d = public(store, pid, branch, kind, rid)
+    src = clip_source(store, pid, branch, kind, rid)
+    pic = forge.picture_bytes(store, pid, branch, src[1]) if src else None
+    labels = {sp["art"]["hero"]: sp["art"]["hero_label"], **{k: lb for k, lb, _p in sp["art"]["views"]}}
+    if not pic:
+        first = " or the ".join(labels[k].lower() for k in CLIP_SOURCES[kind])
+        raise ArtProblem("VIDEO_FAILED", f"There is no {first} picture to animate",
+                         f"Make or upload the {labels[CLIP_SOURCES[kind][0]].lower()} picture first.")
+    forge.clip_job(app, job, pid, branch, name=d["name"], src_slot=src[0], pic=pic, prompt=clip_prompt(d, kind),
+                   src_word=labels[src[0]].lower(),
+                   save=lambda asset, poster: set_clip(store, pid, branch, kind, rid, asset, poster=poster))
+
+
 # ====================================================================== the PDF
 def pdf_spec(kind: str) -> dict:
     sp = SPECS[kind]
@@ -1093,6 +1175,8 @@ def pdf_bytes(app, pid, branch, kind, rid) -> tuple[bytes, str]:
     pics = {sp["art"]["hero"]: forge.picture_bytes(app.store, pid, branch, art.get(sp["art"]["hero"]))}
     for k, _l, _p in sp["art"]["views"]:
         pics[k] = forge.picture_bytes(app.store, pid, branch, (art.get("views") or {}).get(k))
+    if isinstance(art.get("clip"), dict):  # 🎬 the clip's poster: a framed MOTION STUDY still on the cover
+        pics["clip_poster"] = forge.picture_bytes(app.store, pid, branch, art["clip"].get("poster"))
     data = forge_pdf.render(d, pics, spec=pdf_spec(kind))
     safe = re.sub(r"[^A-Za-z0-9 _-]+", "", d["name"]).strip() or sp["Word"]
     return data, f"{d['code']} {safe} - {sp['forge'].title()} dossier.pdf"
@@ -1163,6 +1247,8 @@ class KindJobs:
     def start_kind_art(self, principal, pid, branch, kind, rid, body) -> dict:
         body = body if isinstance(body, dict) else {}
         _get(self.store, pid, branch, kind, rid)
+        if body.get("what") == "clip":
+            return KindJobs.start_kind_clip(self, principal, pid, branch, kind, rid, body)
         plan = art_plan(kind, body.get("what"), body.get("views"))
         engine = body.get("engine", "auto")
         if engine not in forge.ENGINES:
@@ -1181,9 +1267,51 @@ class KindJobs:
                     j.error["message"] = f"{j.error['message']} — the {j.done} picture(s) made before are kept"
         return self.app.review._start(job, fn)
 
+    def start_kind_clip(self, principal, pid, branch, kind, rid, body) -> dict:
+        """POST …/art {what: "clip", engine: "auto"} -> 202 job (🎬 the motion clip of an item / place / magic)."""
+        sp = spec(kind)
+        if body.get("engine", "auto") != "auto":
+            raise AkoweError("INVALID_INPUT", "/engine", "engine: auto (AutoInjector picks its video maker)",
+                             status="REJECTED")
+        if clip_source(self.store, pid, branch, kind, rid) is None:
+            labels = {sp["art"]["hero"]: sp["art"]["hero_label"], **{k: lb for k, lb, _p in sp["art"]["views"]}}
+            first = " (or the ".join(labels[k].lower() for k in CLIP_SOURCES[kind]) + ")"
+            raise AkoweError("MISSING_INPUT", "/what", f"the motion clip is made from the {first} picture: make or "
+                             "upload that picture first", status="REJECTED")
+        if not self.store.has_scope(principal, pid, branch, "I01:create"):
+            raise AkoweError("PERMISSION_DENIED", "", "missing scope I01:create", status="REJECTED")
+        job = self._job("forge_kind_clip", principal, pid, branch, rid, None)
+
+        def fn(j):
+            j.current = rid
+            try:
+                run_clip(self.app, j, pid, branch, kind, rid)
+            except ArtProblem as exc:
+                j.status, j.phase, j.error = "error", "Failed", exc.as_error()
+        return self.app.review._start(job, fn)
+
     def upload_kind(self, principal, pid, branch, kind, rid, slot, body) -> dict:
         sp = spec(kind)
         e = _get(self.store, pid, branch, kind, rid)
+        if slot in ("clip", "clip_poster"):  # 🎬 the author's own clip (MP4/WebM) or a new poster (PNG/JPEG)
+            if not isinstance(body, (bytes, bytearray)):
+                what = "clip itself (MP4 or WebM bytes) with Content-Type video/mp4 or video/webm" if slot == "clip" \
+                    else "poster itself (PNG or JPEG bytes) with Content-Type image/png or image/jpeg"
+                raise AkoweError("INVALID_INPUT", "/body", f"send the {what}", status="REJECTED")
+            if slot == "clip":
+                asset = forge.store_clip(self.store, principal, pid, branch, bytes(body),
+                                         f"{e.get('name')} — motion clip")
+                asset["source"] = "upload"
+                out = set_clip(self.store, pid, branch, kind, rid, asset, poster=None)
+                return {"ok": True, "slot": slot, "art": out["art"], "message": "Clip saved with the book."}
+            if not isinstance((raw_entry(self.store, pid, branch, kind, rid).get("art") or {}).get("clip"), dict):
+                raise AkoweError("MISSING_INPUT", "/slot", "there is no motion clip yet: make or upload the clip first",
+                                 status="REJECTED")
+            asset = forge.store_picture(self.store, principal, pid, branch, bytes(body), "",
+                                        f"{e.get('name')} — motion clip poster")
+            asset["source"] = "upload"
+            out = set_clip(self.store, pid, branch, kind, rid, None, poster=asset)
+            return {"ok": True, "slot": slot, "art": out["art"], "message": "Poster saved with the clip."}
         if slot not in sp["slots"]:
             raise AkoweError("INVALID_INPUT", "/slot", "slot: " + ", ".join(sp["slots"]), status="REJECTED")
         if not isinstance(body, (bytes, bytearray)):

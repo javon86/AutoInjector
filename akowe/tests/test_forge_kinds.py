@@ -407,7 +407,7 @@ def test_http_api_for_the_kinds(fx, no_provider_sleep):  # noqa: F811
         st, d, _ = call(port, "GET", f"{base}/items/{rid}")
         assert st == 200 and set(d) >= {"record_id", "name", "code", "revision", "readiness", "sections", "art",
                                         "links", "backlinks", "aliases"}
-        assert set(d["art"]) == {"portrait", "views"} and set(d["art"]["views"]) == {"front", "side", "back", "detail"}
+        assert set(d["art"]) == {"portrait", "views", "clip"} and d["art"]["clip"] is None and set(d["art"]["views"]) == {"front", "side", "back", "detail"}
         st, d, _ = call(port, "PUT", f"{base}/items/{rid}", {"sections": {"ownership": {
             "current_holder": {"text": "Moki Vey / CH-001"}}}, "revision": 1})
         assert st == 200 and d["revision"] == 2 and fld(d, "current_holder")["links"][0]["record_id"] == rid_c

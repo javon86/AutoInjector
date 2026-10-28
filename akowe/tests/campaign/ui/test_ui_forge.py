@@ -189,3 +189,22 @@ def test_forge_motion_clip_player(make_context, fg, tmp_path):
         assert "MP4 and WebM" in page.inner_text("[data-testid=forge-motion]")
     finally:
         b.close()
+
+
+def test_new_character_from_the_forge_list(make_context, fg):
+    """🧑 ＋ New character: a character the book does not have yet, with its dossier (POST /forge/characters)."""
+    from akowe import characters as chars_mod
+    page = open_page(make_context, fg)
+    goto(page, f"#/p/{fg.pid}/main/forge")
+    page.wait_for_selector("[data-testid=forge-new-name]", timeout=15000)
+    page.click("[data-testid=forge-new]")  # no name: asks for one, nothing is made
+    assert not chars_mod.canon_characters(fg.app.store, fg.pid, "main")
+    page.fill("[data-testid=forge-new-name]", "Ada Quill")
+    page.fill("[data-testid=forge-new-role]", "the harbour master")
+    page.click("[data-testid=forge-new]")
+    page.wait_for_selector("[data-testid=forge-page] .forge-name", timeout=15000)
+    assert page.inner_text(".forge-name").lower() == "ada quill" and "CH-001" in page.inner_text("[data-testid=forge-code]")
+    c = chars_mod.canon_characters(fg.app.store, fg.pid, "main")
+    assert [x["name"] for x in c] == ["Ada Quill"] and not c[0]["approved"]
+    assert not bad_text(page) and not unnamed_controls(page)
+    assert_clean(page, "new character")

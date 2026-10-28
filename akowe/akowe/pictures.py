@@ -24,9 +24,11 @@ change on this page afterwards marks the assembly out of date (``signature``): p
 
 **The SVG map** (``svg_map``): d_maps.render_svg of the places (A04): their x.map.x / x.map.y coordinates when they
 have them (d_maps.extract_graph), else a deterministic route layout in story order (the places in the order the
-chapters visit them, joined by the route). The exporters take JPEG/PNG only and there is no Pillow at runtime, so the
-SVG is never rasterised: the EPUB carries the SVG itself, the PDF draws it with vector operations (lines, circles,
-text), and the DOCX names where the map is (an illustrated or uploaded PNG/JPEG map is placed in all three).
+chapters visit them, joined by the route). The EPUB carries the SVG itself and the PDF draws it with vector operations
+(lines, circles, text). Word cannot show an SVG and Akọwe has no image library at runtime (no Pillow), so a PNG copy
+of the map for the DOCX is drawn by AutoInjector (``POST /render/image``, ``render.py``) when the map is made (or
+with "Make the Word copy": ``POST …/pictures/map {kind: "png"}``) and kept on the candidate as ``png``; without it
+the DOCX names where the map is. An illustrated or uploaded PNG/JPEG map is placed in all three.
 
 Prompts and picture bytes are never logged; outbox events carry numbers and codes only.
 """
@@ -613,17 +615,89 @@ def start_illustrate_all(app, principal, pid, branch, body) -> dict:
     return app.review._start(job, fn)  # noqa: SLF001
 
 
+MAP_PNG_WIDTH = 2000
+
+
+def map_png_size(svg: bytes) -> tuple[int, int]:
+    """The PNG size of the Word copy: MAP_PNG_WIDTH wide (less when very tall), the SVG's viewBox shape."""
+    m = re.search(rb'viewBox="\s*[-0-9.eE]+[ ,]+[-0-9.eE]+[ ,]+([0-9.eE]+)[ ,]+([0-9.eE]+)\s*"', svg)
+    try:
+        vw, vh = (float(m.group(1)), float(m.group(2))) if m else (4.0, 3.0)
+    except ValueError:
+        vw, vh = 4.0, 3.0
+    if vw <= 0 or vh <= 0:
+        vw, vh = 4.0, 3.0
+    w, h = float(MAP_PNG_WIDTH), MAP_PNG_WIDTH * vh / vw
+    if h > 4096:
+        w, h = w * 4096 / h, 4096.0
+    return max(16, min(4096, int(round(w)))), max(16, min(4096, int(round(h))))
+
+
+def map_png(app, principal, pid, branch, svg: bytes) -> dict:
+    """🖨 The PNG copy of an SVG map for Word, drawn by AutoInjector → a book asset {asset_id, version, mime}.
+    Raises forge.ArtProblem when AutoInjector cannot draw it."""
+    from . import render  # noqa: PLC0415
+    w, h = map_png_size(svg)
+    data = render.render_image(app, svg, w, h, fmt="png")
+    asset = forge._store_asset(app.store, principal, pid, branch, data, "image/png",  # noqa: SLF001
+                               "Map of the book (PNG copy for Word)")
+    return {k: asset[k] for k in ("asset_id", "version", "mime")} | {"width": w, "height": h}
+
+
+WORD_NOTE = ("Word cannot show this map without a PNG copy, which AutoInjector draws: start AutoInjector, then press "
+             "“Make the Word copy”. Until then the Word file says where to find the map.")
+
+
 def make_svg_map(app, principal, pid, branch) -> dict:
-    """POST …/pictures/map {kind: "svg"}: the map drawn from the places (d_maps SVG), added as a candidate."""
+    """POST …/pictures/map {kind: "svg"}: the map drawn from the places (d_maps SVG), added as a candidate; its PNG
+    copy for Word is drawn by AutoInjector when it is connected."""
     _need_scope(app, principal, pid, branch)
     svg = svg_map(app, principal, pid, branch)
     asset = forge._store_asset(app.store, principal, pid, branch, svg, SVG_MIME, "Map of the book (SVG)")  # noqa: SLF001
     asset["source"] = "svg"
+    word = "Word files show a PNG copy of it."
+    try:
+        asset["png"] = map_png(app, principal, pid, branch, svg)
+    except forge.ArtProblem as exc:
+        log.info("the Word copy of the map was not drawn: %s", exc.code)
+        word = WORD_NOTE
     pic_id = ensure_picture(app.store, pid, branch, "map", None, None)
     p = add_candidate(app.store, pid, branch, pic_id, asset, choose=None)
     return {"ok": True, "picture": public_picture(pid, branch, p),
-            "message": "The map is drawn from your places. It is in the PDF (drawn as lines and text) and the EPUB; "
-                       "Word files say where to find it — choose an illustrated or uploaded map for Word."}
+            "message": f"The map is drawn from your places. It is in the PDF (drawn as lines and text) and the EPUB. "
+                       f"{word}"}
+
+
+def make_map_png(app, principal, pid, branch) -> dict:
+    """POST …/pictures/map {kind: "png"}: draw the missing Word copy of the chosen SVG map (AutoInjector)."""
+    from . import render  # noqa: PLC0415
+    _need_scope(app, principal, pid, branch)
+    d = doc(app.store, pid, branch)
+    p = next((x for x in d["pictures"].values() if x["kind"] == "map"), None)
+    cands = (p or {}).get("candidates") or []
+    c = (p or {}).get("chosen")
+    if p is None or c is None or c >= len(cands) or cands[c].get("mime") != SVG_MIME:
+        raise _bad("/kind", "the chosen map is not a drawn (SVG) map: only a drawn map needs a Word copy",
+                   "MISSING_INPUT")
+    svg = forge.picture_bytes(app.store, pid, branch, cands[c])
+    if not svg:
+        raise _bad("/kind", "the drawn map cannot be read any more: draw the map again", "MISSING_INPUT")
+    try:
+        png = map_png(app, principal, pid, branch, svg)
+    except forge.ArtProblem as exc:
+        raise render.as_error(exc, "Word copy of the map", "/kind") from None
+    idx = c
+
+    def fn(dd):
+        pp = dd["pictures"].get(p["id"])
+        if pp is None or idx >= len(pp.get("candidates") or []):
+            raise _bad("/pic_id", "this picture was deleted", "NOT_FOUND")
+        pp["candidates"][idx]["png"] = png
+        pp["updated_at"] = _now()
+        return pp
+    out = _mutate(app.store, pid, branch, fn, "pictures.candidate")
+    return {"ok": True, "picture": public_picture(pid, branch, out),
+            "message": "The Word copy of the map is made: put the book together again and the Word file shows it."}
 
 
 def start_map_illustrated(app, principal, pid, branch, body) -> dict:
@@ -746,6 +820,8 @@ def _cand_public(pid, branch, i, c, chosen):
     out["index"] = i
     out["chosen"] = i == chosen
     out["vector"] = c.get("mime") == SVG_MIME
+    if out["vector"]:
+        out["word_copy"] = bool(isinstance(c.get("png"), dict) and c["png"].get("asset_id"))
     return out
 
 
@@ -790,8 +866,11 @@ def signature(store, pid, branch) -> str:
         cands = p.get("candidates") or []
         if c is None or c >= len(cands):
             continue
-        rows.append([p["id"], p.get("kind"), p.get("chapter_id"), p.get("scene"), cands[c].get("asset_id"),
-                     cands[c].get("version"), p.get("caption"), p.get("alt"), p.get("placement")])
+        row = [p["id"], p.get("kind"), p.get("chapter_id"), p.get("scene"), cands[c].get("asset_id"),
+               cands[c].get("version"), p.get("caption"), p.get("alt"), p.get("placement")]
+        if isinstance(cands[c].get("png"), dict):  # 🖨 the Word copy of a drawn map (only then: older books keep theirs)
+            row.append(cands[c]["png"].get("asset_id"))
+        rows.append(row)
     if not rows:
         return ""
     return hashlib.sha256(json.dumps(rows, sort_keys=True).encode("utf-8")).hexdigest()[:24]
@@ -829,11 +908,18 @@ def snapshot(bp, g02_ref: dict) -> str:
         if rec is None or rec.get("representation") != "BINARY_ARTIFACT":
             continue
         pl = p.get("placement") or {}
-        items.append({"id": p["id"], "kind": p["kind"], "section_id": section[cid], "where": pl.get("where") or "start",
-                      "scene": pl.get("scene"), "caption": p.get("caption") or "", "alt": p.get("alt") or "",
-                      "asset": {"record_id": rec["record_id"], "version": rec["version"],
-                                "content_hash": rec["content_hash"]},
-                      "mime": rec["binary"]["mime_type"]})
+        item = {"id": p["id"], "kind": p["kind"], "section_id": section[cid], "where": pl.get("where") or "start",
+                "scene": pl.get("scene"), "caption": p.get("caption") or "", "alt": p.get("alt") or "",
+                "asset": {"record_id": rec["record_id"], "version": rec["version"],
+                          "content_hash": rec["content_hash"]},
+                "mime": rec["binary"]["mime_type"]}
+        png = cand.get("png") if item["mime"] == SVG_MIME else None
+        if isinstance(png, dict) and png.get("asset_id"):  # 🖨 the Word copy of a drawn map
+            prec = store.get_record(pid, branch, png["asset_id"], int(png.get("version") or 1))
+            if prec is not None and prec.get("representation") == "BINARY_ARTIFACT":
+                item["png"] = {"record_id": prec["record_id"], "version": prec["version"],
+                               "content_hash": prec["content_hash"]}
+        items.append(item)
     sig = signature(store, pid, branch)
     store.set_setting(snap_key(pid, branch, g02_ref["record_id"]), {"items": items, "signature": sig, "at": _now()})
     return sig
@@ -878,6 +964,19 @@ def overlay(ctx, asm) -> None:
         if it.get("mime") == SVG_MIME:
             blk.update(t="vmap", svg=raw.decode("utf-8"), w_mm=150.0 if it["where"] == "before" else 120.0,
                        h_mm=120.0 if it["where"] == "before" else 90.0)
+            pa = it.get("png") or {}
+            prec = ctx.store.get_record(ctx.project_id, ctx.branch_id, pa.get("record_id"), pa.get("version")) \
+                if pa else None
+            if prec is not None and prec.get("representation") == "BINARY_ARTIFACT" \
+                    and prec["content_hash"] == pa.get("content_hash"):
+                try:  # 🖨 the Word copy: the DOCX places it like a picture (the PDF / EPUB keep the SVG)
+                    praw = ctx.binary(prec)
+                    pkey = sha256_bytes(praw)
+                    asm.pictures[pkey] = (praw, load_image(praw, "image/png"))
+                    blk["png_key"] = pkey
+                    asm.picture_recs.append(prec)
+                except UnsupportedImage:
+                    log.warning("picture %s: its Word copy is not a usable PNG; left out", it.get("id"))
         else:
             try:
                 info_ = load_image(raw, it.get("mime"))
@@ -935,6 +1034,9 @@ def save_files(app, pid, branch, files: dict, text) -> None:
                     name += f" {p['id']}.{ext}"
                 files[name] = raw
                 entry["file"] = name.split("/", 1)[1]
+                png = forge.picture_bytes(app.store, pid, branch, cands[c].get("png")) if mime == SVG_MIME else None
+                if png and p["kind"] == "map":
+                    files["Pictures/map.png"] = png  # 🖨 the Word copy AutoInjector drew
         listing["pictures"].append(entry)
     text("Pictures/pictures.json", json.dumps(listing, ensure_ascii=False, indent=1))
 
@@ -971,7 +1073,10 @@ def route(app, method: str, rest: list, query: dict, body, principal: str, pid: 
             return 200, make_svg_map(app, principal, pid, branch)
         if kind == "illustrated":
             return 202, start_map_illustrated(app, principal, pid, branch, body)
-        raise _bad("/kind", "kind: svg (drawn from your places) or illustrated (made by the picture maker)")
+        if kind == "png":
+            return 200, make_map_png(app, principal, pid, branch)
+        raise _bad("/kind", "kind: svg (drawn from your places), illustrated (made by the picture maker) or png (the "
+                   "Word copy of the drawn map)")
     if rest == ["upload"] and method == "PUT":
         return 200, upload(app, principal, pid, branch, query, body)
     if len(rest) == 2 and rest[0] == "jobs" and method == "GET":

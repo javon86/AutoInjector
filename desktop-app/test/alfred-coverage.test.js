@@ -146,7 +146,9 @@ const SERVICE_BRIDGE_ROUTES = {
   'GET /voice/status': 'app_info:voice.status', 'POST /voice/settings': 'app_control:voice.configure', 'POST /voice/speak': 'app_control:voice.speak', 'POST /voice/listen': 'app_control:voice.listen',
   'GET /image/status': 'image_generator_status', 'POST /image/settings': 'app_control:image.configure', 'POST /image/generate': 'generate_image',
   'GET /image/backend': 'image_generator_status', 'GET /image/locks': 'character_locks', 'POST /image/request': 'generate_image',
-  'GET /video/backend': 'video_call:video.status', 'POST /video/request': 'video_call:video.generate', 'GET /events': 'EXCLUDE: event stream for external programs (Alfred has the watcher)',
+  'GET /video/backend': 'video_call:video.status', 'POST /video/request': 'video_call:video.generate',
+  'POST /render/image': 'EXCLUDE: draws an SVG into a JPEG/PNG for Akọwe (the ebook cover JPG, the Word map) — a file converter, not a user control',
+  'POST /dialog/choose-path': 'EXCLUDE: a folder picker the user answers in AutoInjector\'s window (Akọwe opens a big saved book from its folder)', 'GET /events': 'EXCLUDE: event stream for external programs (Alfred has the watcher)',
 };
 // akowe-bridge.js — Akọwe's own channel INTO AutoInjector (Akọwe → the AI panes): not a user control.
 const AKOWE_BRIDGE_ROUTES = {
@@ -178,7 +180,7 @@ const AKOWE_API_USED = {
   'POST /api/projects/:pid/branches/main/forge/:kind/:rid/forge': 'forge_character',
   'POST /api/projects/:pid/branches/main/forge/:kind/:rid/approve': 'approve_dossier',
   'POST /api/projects/:pid/branches/main/forge/:kind/:rid/art': 'make_character_art',
-  'POST /api/projects/:pid/branches/main/forge/:kind': 'create_dossier',
+  'POST /api/projects/:pid/branches/main/forge/:kind': 'create_dossier (items / places / magic, and characters: a new character)',
   'POST /api/projects/:pid/branches/main/forge/:kind/:rid/check': 'check_dossier (run)',
   'GET /api/projects/:pid/branches/main/forge/:kind/:rid/check': 'check_dossier (results)',
   'PUT /api/projects/:pid/branches/main/forge/:kind/:rid/check/:finding': 'check_dossier (verdict)',
@@ -685,6 +687,10 @@ async function main() {
       ['edit_picture', { pic_id: 'pic-001', caption: 'At dawn', where: 'after_scene', scene: 2 }, true, () => ak.requests.some((x) => x.method === 'PUT' && x.path === `${B}/pictures/pic-001` && x.body.caption === 'At dawn' && x.body.placement.scene === 2)],
       ['book_map', { kind: 'illustrated', engine: 'sd' }, true, () => ak.requests.some((x) => x.path === `${B}/pictures/map` && x.body.kind === 'illustrated' && x.body.engine === 'sd')],
       ['make_character_art', { character: 'Mara Vell', what: 'sheet', engine: 'chatgpt' }, true, () => ak.requests.some((x) => x.path === `${B}/forge/characters/rec-mara/art` && x.body.what === 'sheet' && x.body.engine === 'chatgpt')],
+      // 🧑 a new character the book does not have yet (POST /forge/characters)
+      ['create_dossier', { kind: 'characters', name: 'Ada Quill', role: 'the harbour master' }, true, () => ak.requests.some((x) => x.method === 'POST' && x.path === `${B}/forge/characters` && x.body.name === 'Ada Quill' && x.body.role === 'the harbour master')],
+      // 🎬 a place's motion clip (a slow establishing pan): allowed for every kind now; a clip always asks engine auto
+      ['make_character_art', { kind: 'places', character: 'Gullhaven', what: 'clip', engine: 'sd' }, true, () => ak.requests.some((x) => x.path === `${B}/forge/places/FK-p1/art` && x.body.what === 'clip' && x.body.engine === 'auto')],
     ];
     for (const [tool, args, changes, effect] of cases) {
       const r = await bd(tool, args);

@@ -372,24 +372,27 @@ def transplant(pkg: dict, new_pid: str, principal: str, *, name: str | None = No
     return tables, settings, {"ids": len(ids), "hashes": len(rw.hashes), "jobs": jobs}
 
 
-def import_package(app, data: bytes, principal: str) -> dict:
-    """Open a package as a NEW book. Returns {project_id, branch_id, name, title, jobs, manifest}."""
-    pkg = read(data)
+def import_package(app, data: bytes, principal: str, *, pkg: dict | None = None, as_pid: str | None = None,
+                   name: str | None = None) -> dict:
+    """Open a package as a NEW book (or, with ``as_pid``, under that project id: book_open's "Update the one I have",
+    which removes the old book first). Returns {project_id, branch_id, name, title, jobs, manifest}."""
+    pkg = pkg if pkg is not None else read(data)
     store = app.store
     old = pkg["tables"]["projects"][0]
     title = None
     for s in pkg["settings"]:
         if s["key"] == f"book_profile:{pkg['manifest']['project_id']}" and isinstance(s["value"], dict):
             title = s["value"].get("title")
-    name = str(old.get("name") or title or "Opened book")
-    taken = {r["name"] for r in store.query("SELECT name FROM projects")}
-    if name in taken:
-        name = f"{name} (opened)"
-        n = 2
-        while name in taken:
-            name = f"{str(old.get('name') or 'Opened book')} (opened {n})"
-            n += 1
-    new_pid = f"proj-{uuid.uuid4().hex[:12]}"
+    if name is None:
+        name = str(old.get("name") or title or "Opened book")
+        taken = {r["name"] for r in store.query("SELECT name FROM projects")}
+        if name in taken:
+            name = f"{name} (opened)"
+            n = 2
+            while name in taken:
+                name = f"{str(old.get('name') or 'Opened book')} (opened {n})"
+                n += 1
+    new_pid = as_pid or f"proj-{uuid.uuid4().hex[:12]}"
     tables, settings, info = transplant(pkg, new_pid, principal, name=name[:200])
     for fname, b in pkg["assets"].items():
         store.write_asset(b, fname[:64])

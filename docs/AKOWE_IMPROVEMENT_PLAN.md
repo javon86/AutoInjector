@@ -175,6 +175,23 @@ Legend: `[ ]` to do · `[~]` in progress · `[x]` done · `[!]` problem (see "Pr
   saved run; 🔁 Rerun from the book bible (book page, shelf, folder list, uploaded bible) = a new book whose canon,
   sheets, voices, rules, texture and — optionally — premise/plot/outline/scene cards come from the bible and are
   approved inside it under the run consent; new chapters.)*
+- [x] **F10 (2026-10-28) finished pieces (lane akowe):**
+  - 💾 **Quiet 10-minute save**: besides the saves after each step / approval / finished run, every 10 minutes
+    (`book_save.PERIODIC_S`) each book whose state changed since its last save is saved (`fingerprint`: records,
+    approvals, module state, its own settings) — work done by hand is saved too; an unchanged book is not touched.
+    Same Settings switch (on by default).
+  - 📂 **A saved book that is already here**: Open asks “⟳ Update the one I have / 📄 Open as a copy” (`mode`); update
+    keeps the book's id, folder and last-save note, checks the package as a copy first and is refused while a run works.
+  - 📂 **Books bigger than the upload limit** open straight from their folder (`POST /api/books/open-path`, this
+    computer only); 📁 Choose the folder uses AutoInjector's picker (`POST /api/books/choose-path` → bridge
+    `POST /dialog/choose-path`).
+  - 🖨 **Ebook cover JPG** (KDP 1600 × 2560, also 2560 × 4096 / 1000 × 1600 / 625 × 1000) and the **map's PNG copy for
+    Word**, drawn by AutoInjector's new `POST /render/image` (offscreen Chromium, no network); the EPUB with cover uses
+    the JPG; plain error when AutoInjector is not connected. 🎬 **Motion clips** for items (turntable), places
+    (establishing pan) and magic systems (the effect in use). 🧑 **New character** from the Forge / Alfred
+    (`POST …/forge/characters`). Fix: deleting the style card answered HTTP 405 (DELETE was only let through for
+    pictures).
+
 ## Section 8 — Fixes from the book-2 run log  (proposed — do before Section 7)
 
 From the 2026-10-24 AutoInjector log: Claude wrote, Gemini reviewed (independence worked), 48 Akọwe
@@ -745,14 +762,14 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
   never moved behind the author's back); (b) every save rewrites only changed files, but `book.akowe` changes on
   every step, so a progress save of a long novel rewrites a package of several MB each time (at most every 2 minutes);
   (c) the package holds every version of every record and file (exact restore) — opening a saved book on the same
-  computer copies all of it again as a new book; (d) an opened book's project name gets “(opened)” only when the name
+  computer asks: update the one you have, or open it as a copy (F10); (d) an opened book's project name gets “(opened)” only when the name
   exists, its profile title stays (so its exports stay current); (e) an approval's `action_hash` (a hash over the signed
   action) keeps its old value in an opened book — history only, never re-checked for engine approvals, but an
   H-set waiver checked again later would not match (`j_approvals.waiver_action_hash`); (f) an imported unfinished run
   can be resumed with its original consent record (pressing ▶ Resume is a new author action; ▶ Continue starts a new
   run with a new consent instead); (g) a 🔁 rerun keeps the saved story rules but the outline step still asks the AI
   for rule updates for the plan (one call, accepted under the run consent); (h) uploads are limited to 64 MB
-  (`MAX_BODY`): a larger book must be copied into the books folder and opened from the list; (i) auto-save is off in
+  (`MAX_BODY`): a larger book opens straight from its folder (📂 “From a folder on this computer”, F10); (i) auto-save is off in
   the test suite by default (`AKOWE_AUTOSAVE=0` in tests/conftest.py) — only tests/test_section6.py exercises it.
 - **P38 / P37.1–P37.4 — not tried against the live sites.** The 🎯 card, pick mode, the 🔢 number teach and the
   general-selector rules were tested on fake pages (fake DOM, jsdom, real Electron with `fake-chat.html`, headless

@@ -408,6 +408,11 @@ async function main() {
     assert(/ChatGPT/.test(x.card.steps[0].text) && art && art.body.engine === 'chatgpt' && art.body.views.join() === 'side,back', 'art: views with ChatGPT (engine + views passed on)');
     x = await run('make_character_art', { character: 'mara', what: 'portrait' });
     assert(ak.state.forgeCalls.filter((c) => c.kind === 'art')[1].body.engine === 'auto', 'art: the portrait with the default engine (auto)');
+    x = await run('make_character_art', { kind: 'places', character: 'Gullhaven', what: 'clip', engine: 'chatgpt' });
+    const pclip = ak.state.forgeCalls.find((c) => c.kp === 'places');
+    assert(/establishing pan/.test(x.card.steps[0].text) && pclip && pclip.body.what === 'clip' && pclip.body.engine === 'auto', 'art: a place\'s motion clip (a slow establishing pan) is allowed; a clip always goes with engine auto');
+    x = await run('make_character_art', { kind: 'places', character: 'Gullhaven', what: 'sheet' });
+    assert(ak.state.forgeCalls.filter((c) => c.kp === 'places').length === 1, 'art: a turnaround sheet is still only for characters (NOT_FOR_KIND, nothing sent)');
     x = await run('open_akowe_page', { page: 'forge', character: 'mara' });
     assert(calls.openAkowePage.slice(-1)[0] === '#/p/proj-1/main/forge/rec-mara', 'open a dossier page in the 📖 Akọwe tab');
     x = await run('add_story_rule', { text: 'Ghosts cannot cross salt.', category: 'belief' });

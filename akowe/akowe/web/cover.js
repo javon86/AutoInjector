@@ -244,7 +244,19 @@ export async function viewCover(main, x) {
     try { downloadBlob(h, await api('GET', bpath(path), { blob: true }), name); x.toast(`${label} downloaded`); }
     catch (e) { dlProg.appendChild(x.problemBox(x.toProblem(e, where), {}, `${label}: it could not be made`)); }
   }
+  // 🖨 the ebook cover as a JPG (what Amazon KDP and most stores want): AutoInjector draws it from the SVG
+  const jpgSizes = (d.ebook && d.ebook.jpg_sizes) || [{ id: '1600x2560', width: 1600, height: 2560, label: 'Amazon KDP (recommended)' }];
+  const jpgSize = h('select', { id: 'cd-jpg-size', 'data-testid': 'cover-jpg-size', 'aria-label': 'JPG size' },
+    ...jpgSizes.map(z => h('option', { value: z.id, selected: z.id === ((d.ebook && d.ebook.jpg_default) || '1600x2560') }, `${z.width} × ${z.height} — ${z.label}`)));
+  async function downloadJpg() {
+    const z = jpgSizes.find(v => v.id === jpgSize.value) || jpgSizes[0];
+    clear(dlProg).appendChild(h('p', { class: 'cover-hint' }, 'AutoInjector is drawing the JPG…'));
+    await download(`/cover/ebook?format=jpg&size=${encodeURIComponent(z.id)}&download=1`, `${title()} - ebook cover ${z.width}x${z.height}.jpg`, 'Ebook cover (JPG)');
+  }
   const dlBox = h('div', null,
+    h('div', { class: 'cover-actions' },
+      h('button', { type: 'button', class: 'cover-btn', 'data-testid': 'cover-dl-jpg', onclick: downloadJpg }, '⬇ Ebook cover (JPG)'),
+      jpgSize),
     h('div', { class: 'cover-actions' },
       h('button', { type: 'button', class: 'cover-btn', 'data-testid': 'cover-dl-ebook', onclick: () => download('/cover/ebook?download=1', `${title()} - ebook cover.pdf`, 'Ebook cover') }, '⬇ Ebook cover (PDF)'),
       h('button', { type: 'button', class: 'cover-btn ghost', 'data-testid': 'cover-dl-svg', onclick: () => download('/cover/ebook?format=svg&download=1', `${title()} - ebook cover.svg`, 'Ebook cover') }, '⬇ Ebook cover (SVG)'),
@@ -259,7 +271,7 @@ export async function viewCover(main, x) {
     h('p', { class: 'cover-hint' }, 'Your book with this cover (made from the last export):'),
     h('div', { class: 'cover-actions' }, ...['PDF', 'EPUB', 'DOCX'].map(f => h('button', { type: 'button', class: 'cover-btn ghost', 'data-testid': `cover-book-${f.toLowerCase()}`,
       onclick: () => download(`/cover/book?format=${f}&download=1`, `${title()} (with cover).${f.toLowerCase()}`, `${f} with cover`) }, `📘 ${f}`))),
-    h('p', { class: 'cover-hint' }, 'Ebook stores want a JPEG: the picture already is one when it came from AutoInjector; the SVG and PDF carry the title over it. EPUB files made here use the picture as the cover image and the typeset cover as the first page.'),
+    h('p', { class: 'cover-hint' }, 'Ebook stores (Amazon KDP and others) want a JPG of the whole front cover, 1600 × 2560: “Ebook cover (JPG)” has AutoInjector draw it — AutoInjector must be running. Once it is made, EPUB files made here use that JPG as the cover image; before that, the picture is the cover image and the typeset cover the first page.'),
     dlProg);
 
   const section = (title_, testid, ...kids) => h('section', { class: 'cover-card', 'data-testid': testid }, h('h2', null, title_), ...kids);

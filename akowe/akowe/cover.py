@@ -13,13 +13,17 @@ bridge address and token, every error code in plain words, the NO_LOCK fallback)
 trim), optional ``upscale`` 2|4 and ``characterLock``. The prompt asks for a picture without any lettering, calm
 where the title goes.
 
-**The files** (exporters/cover.py): the ebook cover (one-page PDF or SVG), the print wrap PDF (back + spine + front
+**The files** (exporters/cover.py): the ebook cover (one-page PDF or SVG; a **JPG** — what Amazon KDP and most
+stores want — is drawn from the SVG by AutoInjector, ``POST /render/image``, since Akọwe has no image library at
+runtime; the last JPG of each size is kept as a book asset and used again while the cover is unchanged, and the
+EPUB with the cover uses it as its cover image), the print wrap PDF (back + spine + front
 with 0.125 in bleed, KDP spine maths, barcode area), and the book's own exports with the cover added (PDF: a cover
 page in front; EPUB: cover image + cover page; DOCX: a cover page). See docs/COVERS.md.
 """
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import logging
 import re
@@ -37,6 +41,13 @@ NOTE_MAX = 600
 LOCK_MAX = 80
 UPSCALES = (1, 2, 4)
 PROFILE_TEXTS = {"blurb": 3000, "author_bio": 1500}
+# 🖨 the ebook cover as a JPG (drawn by AutoInjector): the 1 : 1.6 shape of the ebook cover at these sizes
+JPG_SIZES = {"1600x2560": (1600, 2560, "Amazon KDP (recommended)"),
+             "2560x4096": (2560, 4096, "High resolution"),
+             "1000x1600": (1000, 1600, "Small (for a website)"),
+             "625x1000": (625, 1000, "The smallest KDP accepts")}
+JPG_DEFAULT = "1600x2560"
+JPG_QUALITY = 92
 WORDS_PER_PAGE = 280      # a 6 × 9 in novel page (an estimate only: the exported PDF's page count is used first)
 _LOCK = threading.RLock()
 
@@ -326,7 +337,9 @@ def public(app, pid: str, branch: str) -> dict:
             "trims": [{"id": k, "w_in": v[0], "h_in": v[1]} for k, v in cx.TRIMS.items()],
             "papers": [{"id": k, "label": cx.PAPER_LABELS[k], "inches_per_page": v} for k, v in cx.PAPERS.items()],
             "print": print_info(app, pid, branch, d), "warnings": front_warn + warnings,
-            "ebook": {"width_pt": cx.EBOOK_PT[0], "height_pt": cx.EBOOK_PT[1], "width_px": 1600, "height_px": 2560},
+            "ebook": {"width_pt": cx.EBOOK_PT[0], "height_pt": cx.EBOOK_PT[1], "width_px": 1600, "height_px": 2560,
+                      "jpg_sizes": [{"id": k, "width": w, "height": h, "label": lb}
+                                    for k, (w, h, lb) in JPG_SIZES.items()], "jpg_default": JPG_DEFAULT},
             "characters": chars, "idea": prof.get("idea") or "",
             "image_bridge": {"uses": [u for u, _t in forge.bridge_targets(app)]},
             "rules": {"bleed_in": cx.BLEED_IN, "safe_in": cx.SAFE_IN, "spine_text_min_pages": cx.SPINE_TEXT_MIN_PAGES,
@@ -359,11 +372,75 @@ def ebook(app, pid, branch, *, fmt: str = "pdf", design: dict | None = None,
         svg = cx.render_svg(W, H, ops, hrefs=hrefs, title=f"Cover: {title}")
         return svg.encode("utf-8"), "image/svg+xml", f"{stem} - ebook cover.svg"
     if fmt != "pdf":
-        raise _err("INVALID_INPUT", "/format", "format: pdf, svg or art")
+        raise _err("INVALID_INPUT", "/format", "format: pdf, svg, jpg or art")
     pdf = cx.render_pdf([{"width": W, "height": H, "ops": ops}], images={"art": ai[1]} if ai else {},
                         meta={"title": f"{title} - cover", "author": lay["texts"]["author"], "language": "en"},
                         extra_info={"Keywords": "Akowe ebook cover"})
     return pdf, "application/pdf", f"{stem} - ebook cover.pdf"
+
+
+# ====================================================================== 🖨 the ebook cover as a JPG (AutoInjector)
+def _jpg_key(pid: str, branch: str) -> str:
+    return f"cover_jpg:{pid}:{branch}"
+
+
+def _jpg_size(size) -> str:
+    size = size or JPG_DEFAULT
+    if size not in JPG_SIZES:
+        raise _err("INVALID_INPUT", "/size", "size: " + ", ".join(JPG_SIZES))
+    return size
+
+
+def _fingerprint(svg: bytes, size: str) -> str:
+    return hashlib.sha256(svg + b"|" + size.encode("ascii")).hexdigest()[:32]
+
+
+def cached_jpg(app, pid, branch, size: str | None = None, *, svg: bytes | None = None) -> bytes | None:
+    """The JPG drawn earlier for exactly this cover (same SVG) at ``size`` (default: any size, the KDP one first),
+    or None. Never raises."""
+    try:
+        kept = (app.store.get_setting(_jpg_key(pid, branch)) or {}).get("sizes") or {}
+        svg = svg if svg is not None else ebook(app, pid, branch, fmt="svg")[0]
+        order = [size] if size else [JPG_DEFAULT] + [k for k in JPG_SIZES if k != JPG_DEFAULT]
+        from . import forge  # noqa: PLC0415
+        for k in order:
+            a = kept.get(k)
+            if isinstance(a, dict) and a.get("fingerprint") == _fingerprint(svg, k):
+                data = forge.picture_bytes(app.store, pid, branch, a)
+                if data and data[:3] == b"\xff\xd8\xff":
+                    return data
+    except Exception:  # noqa: BLE001 - no JPG: the callers fall back to the PDF / SVG cover
+        log.warning("the kept ebook cover JPG could not be read")
+    return None
+
+
+def ebook_jpg(app, principal, pid, branch, size: str | None = None) -> tuple[bytes, str, str]:
+    """(JPG bytes, mime, file name) of the front cover at ``size`` (``JPG_SIZES``): the SVG with its artwork embedded,
+    drawn by AutoInjector (``POST /render/image``). Plain-words error when AutoInjector is not connected."""
+    from . import forge, render  # noqa: PLC0415
+    size = _jpg_size(size)
+    w, h, _label = JPG_SIZES[size]
+    svg, _m, name = ebook(app, pid, branch, fmt="svg")
+    stem = name.rsplit(" - ebook cover", 1)[0]
+    fname = f"{stem} - ebook cover {w}x{h}.jpg"
+    data = cached_jpg(app, pid, branch, size, svg=svg)
+    if data:
+        return data, "image/jpeg", fname
+    try:
+        data = render.render_image(app, svg, w, h, fmt="jpeg", quality=JPG_QUALITY)
+    except forge.ArtProblem as exc:
+        raise render.as_error(exc, "JPG cover") from None
+    try:  # keep it: the EPUB and the book save use it while the cover stays the same
+        asset = forge._store_asset(app.store, principal, pid, branch, data, "image/jpeg",  # noqa: SLF001
+                                   f"Ebook cover {w} x {h} (JPG)")
+        with _LOCK:
+            kept = app.store.get_setting(_jpg_key(pid, branch)) or {}
+            sizes = kept.get("sizes") if isinstance(kept.get("sizes"), dict) else {}
+            sizes[size] = dict(asset, fingerprint=_fingerprint(svg, size), width=w, height=h)
+            app.store.set_setting(_jpg_key(pid, branch), {"sizes": sizes})
+    except AkoweError:
+        log.warning("the ebook cover JPG could not be kept with the book")
+    return data, "image/jpeg", fname
 
 
 def print_cover(app, pid, branch, *, trim=None, paper=None, pages=None, fmt: str = "pdf", guides: bool = False,
@@ -439,7 +516,8 @@ def book_with_cover(app, pid, branch, fmt: str) -> tuple[bytes, str, str]:
             inline = cx.render_svg(W, H, ops, hrefs={"art": f"../images/cover-art.{ext}"} if ai else {},
                                    title=f"Cover: {title}", standalone=False)
             svg_file = None if ai else cx.render_svg(W, H, ops, title=f"Cover: {title}")
-            out = cx.add_cover_epub(data, svg_inline=inline, art=ai, svg_file=svg_file, title=title)
+            out = cx.add_cover_epub(data, svg_inline=inline, art=ai, svg_file=svg_file, title=title,
+                                    jpg=cached_jpg(app, pid, branch))
         else:
             out = cx.add_cover_docx(data, texts=lay["texts"], art=ai)
     except cx.CoverError as exc:
@@ -594,6 +672,9 @@ def route(app, method: str, rest: list, query: dict, body, principal: str, pid: 
             data, mime, name = ebook(app, pid, branch, fmt="svg", design=d, extra=prof)
         return 200, ("__binary__", mime, data, name, "inline")
     if rest == ["ebook"] and method == "GET":
+        if _q(query, "format") in ("jpg", "jpeg"):
+            data, mime, name = ebook_jpg(app, principal, pid, branch, _q(query, "size"))
+            return 200, ("__binary__", mime, data, name, dl)
         data, mime, name = ebook(app, pid, branch, fmt=_q(query, "format", "pdf"))
         return 200, ("__binary__", mime, data, name, dl)
     if rest == ["print"] and method == "GET":
@@ -621,6 +702,9 @@ def save_files(app, pid: str, branch: str, files: dict, stem: str) -> None:
                                                   ensure_ascii=False, indent=1).encode("utf-8")
     files["Cover/ebook cover.pdf"] = ebook(app, pid, branch, fmt="pdf")[0]
     files["Cover/ebook cover.svg"] = ebook(app, pid, branch, fmt="svg")[0]
+    jpg = cached_jpg(app, pid, branch)  # 🖨 the JPG AutoInjector drew, while the cover is unchanged
+    if jpg:
+        files["Cover/ebook cover.jpg"] = jpg
     ai = art_image(app, pid, branch, d)
     if ai:
         files[f"Cover/cover art.{ai[1].ext}"] = ai[0]

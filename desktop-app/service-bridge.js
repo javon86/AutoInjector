@@ -16,6 +16,11 @@
 //   POST /send {text, targets?}              -> send to all enabled (or given) participants
 //   POST /council/start {mode, topic, rounds}-> start a Council/roundtable run
 //   POST /council/stop                       -> stop it
+//   POST /render/image {svg|html, width, height, format:'jpeg'|'png', quality?}
+//                                             -> { ok, mime, width, height, bytes, imageBase64 } (render-image.js:
+//                                                offscreen Chromium, no network; Akọwe's ebook cover JPG / map PNG)
+//   POST /dialog/choose-path {kind:'book', title?} -> { ok, path } | { ok, cancelled:true } (a folder picker in
+//                                                AutoInjector's window: Akọwe opens a big saved book from its folder)
 //   GET  /events   (SSE)               -> stream of: response, generation, sent,
 //                                         status, council, error, rate-limit
 const http = require('http');
@@ -56,6 +61,10 @@ function createServiceBridge(deps) {
   const sdStudio = d.sdStudio || null;
   // 🎬 Video: { backend(), request(body) } — docs/VIDEO_API.md (Wan on ComfyUI, or the old endpoint)
   const video = d.video || null;
+  // 🖨 Draw an SVG / small HTML page into a JPEG or PNG: { render(body) } — render-image.js
+  const renderer = d.renderer || null;
+  // 📂 A folder picker on this computer: { choosePath(body) } — Akọwe's "Open a saved book" for big books
+  const dialogs = d.dialogs || null;
   // The minimal phone client: the bridge serves this HTML shell (no token needed
   // to LOAD it — it carries the token from the pairing URL and uses it for data).
   const mobilePage = d.mobilePage || null; // string of HTML, or null to disable
@@ -362,6 +371,30 @@ function createServiceBridge(deps) {
         const err = r && r.error;
         const code = r && r.ok ? 200 : CLIENT.includes(err) ? 400 : UNAVAILABLE.includes(err) ? 503 : BY_CODE[err] || 502;
         return reply(res, code, Object.assign({ ok: false }, r || {}));
+      }
+      // --- 🖨 SVG / HTML → JPEG / PNG (render-image.js) ---
+      if (renderer && method === 'POST' && path === '/render/image') {
+        // An SVG with its artwork embedded as a data: URI: up to 40 MB of JSON (render-image.js checks 30 MB of SVG).
+        const body = await readJsonBody(req, 40 * 1024 * 1024);
+        if (body === undefined) return reply(res, 400, { ok: false, error: 'BAD_JSON', code: 'BAD_JSON', message: 'The body must be JSON (at most 40 MB).' });
+        let r;
+        try { r = await renderer.render(body || {}); } catch (e) { r = { ok: false, error: 'RENDER_FAILED', code: 'RENDER_FAILED', message: `Something went wrong: ${(e && e.message) || e}` }; }
+        const BY_CODE = { INVALID_PARAM: 400, RENDER_TIMEOUT: 504, RENDER_NOT_WIRED: 501 };
+        return reply(res, r && r.ok ? 200 : BY_CODE[r && r.error] || 502, Object.assign({ ok: false }, r || {}));
+      }
+      // --- 📂 a folder picker in AutoInjector's window (the user picks; only the chosen path comes back) ---
+      if (dialogs && method === 'POST' && path === '/dialog/choose-path') {
+        const body = await readJsonBody(req);
+        if (body === undefined) return reply(res, 400, { ok: false, error: 'BAD_JSON' });
+        let r;
+        try { r = await dialogs.choosePath(body || {}); } catch (e) { r = { ok: false, error: 'DIALOG_FAILED', message: `The folder picker could not open: ${(e && e.message) || e}` }; }
+        return reply(res, r && r.ok ? 200 : 502, Object.assign({ ok: false }, r || {}));
+      }
+      if (!dialogs && path === '/dialog/choose-path') {
+        return reply(res, 501, { ok: false, error: 'DIALOG_NOT_WIRED' });
+      }
+      if (!renderer && path === '/render/image') {
+        return reply(res, 501, { ok: false, error: 'RENDER_NOT_WIRED', code: 'RENDER_NOT_WIRED', message: 'This AutoInjector cannot draw pictures (update AutoInjector).' });
       }
       if (!video && (path === '/video/backend' || path === '/video/request')) {
         return reply(res, 501, { ok: false, error: 'VIDEO_NOT_WIRED' });

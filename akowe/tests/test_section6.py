@@ -339,6 +339,9 @@ def test_package_round_trip_opens_a_new_identical_book(tmp_path):
     row = next(r for r in lst["folders"] if r["name"] == folder.name)
     assert row["has_package"] and row["has_bible"] and row["finished"] and row["in_library"]
     st, res = route(app, "POST", "/api/books-folder/open", {"folder": folder.name})
+    # the book is already on this computer: nothing is opened yet, the page asks "update / open as a copy"
+    assert st == 200 and res["needs_choice"] and res["existing"]["project_id"] == pid and "project_id" not in res
+    st, res = route(app, "POST", "/api/books-folder/open", {"folder": folder.name, "mode": "copy"})
     assert st == 201 and res["kind"] == "package" and res["project_id"] != pid and res["finished"] is True
     new = res["project_id"]
     assert res["name"].endswith("(opened)") and app.store.project(new)["name"] == res["name"]
@@ -362,7 +365,7 @@ def test_package_round_trip_opens_a_new_identical_book(tmp_path):
     j = route(app, "GET", f"/api/projects/{new}/branches/main/journal")[1]
     assert j["count"] > 10
     # opening the same package again gives yet another new book; another computer gets the plain title
-    again = app.opener.import_bytes("author", data)
+    again = app.opener.import_bytes("author", data, mode="copy")
     assert again["project_id"] not in (pid, new) and again["name"].endswith("(opened 2)")
     other, _ = new_app(tmp_path, name="data2", books="books2")
     res2 = other.opener.import_bytes("author", data)

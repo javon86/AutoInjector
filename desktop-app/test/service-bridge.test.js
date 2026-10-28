@@ -4,6 +4,7 @@
 // any Electron or relay machinery. Run: node test/service-bridge.test.js
 const http = require('http');
 const { createServiceBridge } = require('../service-bridge');
+const renderImage = require('../render-image');
 
 let passed = 0, failed = 0;
 function assert(c, m) { if (c) { passed++; console.log(`  ok   - ${m}`); } else { failed++; console.log(`  FAIL - ${m}`); } return c; }
@@ -62,6 +63,23 @@ const bridge = createServiceBridge({
     configure: (patch) => ({ configured: true, enabled: !!patch.enabled, endpoint: patch.endpoint || 'http://127.0.0.1:7860/sdapi/v1/txt2img' }),
     generate: async (prompt, { onEvent }) => { calls.imageGen = prompt; onEvent({ type: 'image' }); return { ok: true, imageBase64: 'QUJD', info: 'ok' }; },
   },
+  // 🖨 POST /render/image with the real renderer and a FAKE window (the real Chromium one: test/e2e/render-image.e2e.js)
+  renderer: renderImage.createRenderer({
+    makeWindow: async ({ width, height, allow }) => {
+      calls.render = Object.assign(calls.render || {}, { width, height, allow, destroyed: false });
+      return {
+        load: async (url) => { calls.render.url = url; calls.render.page = require('fs').readFileSync(require('url').fileURLToPath(url), 'utf8'); if (calls.render.hang) await new Promise((r) => setTimeout(r, 5000)); },
+        capture: async () => {
+          const size = calls.render.capSize || { width, height };
+          const img = (sz) => ({ getSize: () => sz, isEmpty: () => false, resize: (to) => { calls.render.resized = to; return img(to); },
+            toJPEG: (q) => { calls.render.quality = q; return Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2]); }, toPNG: () => Buffer.from([0x89, 0x50, 0x4e, 0x47]) });
+          return img(size);
+        },
+        destroy: () => { calls.render.destroyed = true; },
+      };
+    },
+  }),
+  dialogs: { choosePath: async (body) => { calls.choose = body; return calls.chooseCancel ? { ok: true, cancelled: true } : { ok: true, path: '/home/me/Akowe Books/Salt (ab12)' }; } },
   mobilePage: '<!doctype html><title>AI Phone</title><body>phone shell</body>',
   silence: async () => { calls.silenced = (calls.silenced || 0) + 1; return { ok: true, global: { relayEnabled: false } }; },
 });
@@ -249,6 +267,56 @@ async function main() {
     assert(gen.json.bytes === 4 && gen.json.imageBase64 === undefined, 'the raw base64 is never streamed back — only the outcome + byte count');
     const noPrompt = await req('POST', '/image/generate', { token: TOKEN, body: {} });
     assert(noPrompt.status === 400 && noPrompt.json.error === 'NEED_PROMPT', 'a generate with no prompt is rejected');
+  }
+
+  console.log('\n== 🖨 POST /render/image (SVG → JPEG / PNG; fake window) ==');
+  {
+    const SVG = '<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 16"><rect width="10" height="16" fill="red"/></svg>';
+    const noTok = await req('POST', '/render/image', { body: { svg: SVG, width: 1600, height: 2560, format: 'jpeg' } });
+    assert(noTok.status === 401, '/render/image needs the token');
+    const j = await req('POST', '/render/image', { token: TOKEN, body: { svg: SVG, width: 1600, height: 2560, format: 'jpeg', quality: 88 } });
+    assert(j.status === 200 && j.json.ok === true && j.json.mime === 'image/jpeg' && j.json.width === 1600 && j.json.height === 2560, 'an SVG renders to a 1600 × 2560 JPEG');
+    assert(Buffer.from(j.json.imageBase64, 'base64').slice(0, 3).toString('hex') === 'ffd8ff' && calls.render.quality === 88, 'the JPEG bytes come back as base64, at the quality asked');
+    assert(/<svg[^>]*viewBox/.test(calls.render.page) && !/<\?xml/.test(calls.render.page) && /width:1600px;height:2560px/.test(calls.render.page), 'the SVG is drawn inline in a page of exactly that size (the XML prolog dropped)');
+    assert(calls.render.destroyed === true && calls.render.allow(calls.render.url) && calls.render.allow('data:image/png;base64,AA') && !calls.render.allow('https://example.com/x.png') && !calls.render.allow('file:///etc/passwd'), 'only the page itself and data: URIs may load (no network, no other files); the window is destroyed');
+    calls.render.capSize = null;
+    const p = await req('POST', '/render/image', { token: TOKEN, body: { svg: SVG, width: 400, height: 300, format: 'png' } });
+    assert(p.status === 200 && p.json.mime === 'image/png' && Buffer.from(p.json.imageBase64, 'base64')[1] === 0x50, 'format png gives a PNG');
+    calls.render = { capSize: { width: 1280, height: 1024 } };
+    for (const [body, why] of [[{ width: 100, height: 100 }, 'neither svg nor html'], [{ svg: SVG, html: '<p>x</p>', width: 100, height: 100 }, 'both svg and html'],
+      [{ svg: 'hello', width: 100, height: 100 }, 'svg text without <svg>'], [{ svg: SVG, width: 5000, height: 100 }, 'a side over 4096'], [{ svg: SVG, width: 10, height: 100 }, 'a side under 16'],
+      [{ svg: SVG, width: 100.5, height: 100 }, 'a fractional width'], [{ svg: SVG, width: 100, height: 100, format: 'gif' }, 'format gif'], [{ svg: SVG, width: 100, height: 100, quality: 0 }, 'quality 0']]) {
+      const r = await req('POST', '/render/image', { token: TOKEN, body });
+      assert(r.status === 400 && r.json.error === 'INVALID_PARAM' && r.json.message, `refused with a plain message: ${why}`);
+    }
+    const big = await req('POST', '/render/image', { token: TOKEN, body: { svg: '<svg>' + 'x'.repeat(31 * 1024 * 1024) + '</svg>', width: 100, height: 100 } });
+    assert(big.status === 400 && /larger than 30 MB/.test(big.json.message), 'an SVG over 30 MB is refused');
+    calls.render = { hang: true };
+    const slow = await req('POST', '/render/image', { token: TOKEN, body: { svg: SVG, width: 100, height: 100, timeoutMs: 1000 } });
+    assert(slow.status === 504 && slow.json.error === 'RENDER_TIMEOUT' && calls.render.destroyed === true, 'a render over its time limit answers 504 RENDER_TIMEOUT and the window is destroyed');
+    const r2 = renderImage.createRenderer({ makeWindow: async () => ({ load: async () => {}, capture: async () => { const sz = { width: 1280, height: 1024 }; const img = (z) => ({ getSize: () => z, resize: (to) => img(to), toJPEG: () => Buffer.from('ffd8ff', 'hex'), toPNG: () => Buffer.from('89', 'hex') }); return img(sz); }, destroy: () => {} }) });
+    const rs = await r2.render({ svg: SVG, width: 1600, height: 2560, format: 'jpeg' });
+    assert(rs.ok && rs.width === 1600 && rs.height === 2560, 'a capture of another size is resized to exactly the size asked');
+    const nw = await renderImage.createRenderer({}).render({ svg: SVG, width: 100, height: 100 });
+    assert(!nw.ok && nw.error === 'RENDER_NOT_WIRED', 'a renderer with no window maker says so');
+    const bare = createServiceBridge({});
+    const bs = await bare.start({ port: 0, token: TOKEN });
+    const nr = await new Promise((resolve) => { const data = JSON.stringify({ svg: SVG, width: 100, height: 100 }); const rq = http.request({ host: '127.0.0.1', port: bs.port, path: '/render/image', method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data), Authorization: `Bearer ${TOKEN}` } }, (res) => { let b = ''; res.on('data', (c) => { b += c; }); res.on('end', () => resolve({ status: res.statusCode, json: safeJson(b) })); }); rq.write(data); rq.end(); });
+    await bare.stop();
+    assert(nr.status === 501 && nr.json.error === 'RENDER_NOT_WIRED', 'a bridge without the renderer answers 501 RENDER_NOT_WIRED');
+  }
+
+  console.log('\n== 📂 POST /dialog/choose-path (a folder picker in AutoInjector) ==');
+  {
+    const no = await req('POST', '/dialog/choose-path', { body: { kind: 'book' } });
+    assert(no.status === 401, '/dialog/choose-path needs the token');
+    const ok = await req('POST', '/dialog/choose-path', { token: TOKEN, body: { kind: 'book', title: 'Choose the saved book' } });
+    assert(ok.status === 200 && ok.json.ok && ok.json.path === '/home/me/Akowe Books/Salt (ab12)' && calls.choose.title === 'Choose the saved book', 'the chosen folder path comes back');
+    calls.chooseCancel = true;
+    const c = await req('POST', '/dialog/choose-path', { token: TOKEN, body: {} });
+    assert(c.status === 200 && c.json.cancelled === true && !c.json.path, 'Cancel answers cancelled (no path)');
+    const foreign = await req('POST', '/dialog/choose-path', { token: TOKEN, body: {}, origin: 'https://evil.example' });
+    assert(foreign.status === 403, 'a foreign web page cannot open the picker');
   }
 
   console.log('\n== phone companion: the mobile shell + /silence + same-origin ==');

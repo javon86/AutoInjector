@@ -459,27 +459,27 @@ def({
 });
 def({
   name: 'make_character_art', title: 'Character Forge: make the portrait / ten views', group: 'books', changes: true, book: true,
-  description: 'Make a character\'s dossier art: the portrait, a short motion clip (what="clip": the portrait brought to life with the 🎬 Video module), any of the ten full-body reference views (front, three_quarter_front, side, three_quarter_back, back, idle, draw, attack, dash, defend), or one turnaround sheet. engine: "sd" = Stable Diffusion (uses the character lock), "chatgpt" = ChatGPT draws it in its pane, "auto" = SD when connected, else ChatGPT. Runs in the background; pictures are saved into the book.',
+  description: 'Make a dossier\'s art: the portrait, a short motion clip (what="clip", 🎬 Video module: a character\'s portrait brought to life, an item\'s slow turntable, a place\'s slow establishing pan, a magic system\'s effect in use), any of the ten full-body reference views (front, three_quarter_front, side, three_quarter_back, back, idle, draw, attack, dash, defend), or one turnaround sheet. engine: "sd" = Stable Diffusion (uses the character lock), "chatgpt" = ChatGPT draws it in its pane, "auto" = SD when connected, else ChatGPT. Runs in the background; pictures are saved into the book.',
   args: { type: 'object', required: ['character', 'what'], properties: {
     project_id: { type: 'string', maxLength: 80 },
     kind: KIND_ARG,
     character: { type: 'string', minLength: 1, maxLength: 120 },
-    what: { type: 'string', enum: ['portrait', 'views', 'sheet', 'clip', 'hero'], description: 'Characters: portrait / views / sheet / clip. Items, places, magic: hero (item portrait / establishing shot / sigil) or views' },
+    what: { type: 'string', enum: ['portrait', 'views', 'sheet', 'clip', 'hero'], description: 'Characters: portrait / views / sheet / clip. Items, places, magic: hero (item portrait / establishing shot / sigil), views or clip' },
     engine: { type: 'string', enum: IMAGE_ENGINES },
     views: { type: 'array', maxItems: 10, items: { type: 'string', maxLength: 40 }, description: 'Only with what="views": which ones (default: the missing ones). Characters: front … defend; items: front, side, back, detail; places: day, night, interior; magic: in_use' },
   }, additionalProperties: false },
   describe: (a) => {
     const eng = { sd: 'Stable Diffusion', chatgpt: 'ChatGPT', auto: 'Stable Diffusion if connected, else ChatGPT' }[a.engine || 'auto'];
-    const what = a.what === 'clip' ? 'a short motion clip (the portrait brought to life, 🎬 Video module)' : a.what === 'portrait' ? 'the portrait' : a.what === 'sheet' ? 'one turnaround sheet (all ten views)' : `${a.views && a.views.length ? a.views.length : 'the missing'} reference view(s)${a.views && a.views.length ? ` (${a.views.join(', ')})` : ''}`;
+    const what = a.what === 'clip' ? `a short motion clip (${{ items: 'a slow turntable of the item', places: 'a slow establishing pan', magic: 'the effect in use' }[a.kind] || 'the portrait brought to life'}, 🎬 Video module)` : a.what === 'portrait' ? 'the portrait' : a.what === 'sheet' ? 'one turnaround sheet (all ten views)' : `${a.views && a.views.length ? a.views.length : 'the missing'} reference view(s)${a.views && a.views.length ? ` (${a.views.join(', ')})` : ''}`;
     return `Make ${what} for ${q(a.character)}'s dossier with ${eng}. It runs in the background and the pictures are saved into the book.`;
   },
   async run(a, ctx) {
     const r = await resolveDossier(ctx, a);
     if (!r.ok) return r;
-    if (r.kp !== 'characters' && ['sheet', 'clip'].includes(a.what)) return { ok: false, error: 'NOT_FOR_KIND', message: `A ${a.what} is only made for characters. For ${KIND_WORD[r.kp]}s: hero (the main picture) or views.` };
+    if (r.kp !== 'characters' && a.what === 'sheet') return { ok: false, error: 'NOT_FOR_KIND', message: `A sheet is only made for characters. For ${KIND_WORD[r.kp]}s: hero (the main picture), views or clip.` };
     if (r.kp === 'characters' && a.what === 'hero') a.what = 'portrait';
     if (r.kp === 'characters' && a.views && a.views.some((v) => !FORGE_VIEWS.includes(v))) return { ok: false, error: 'BAD_VIEW', message: `Character views are: ${FORGE_VIEWS.join(', ')}.` };
-    const body = { what: r.kp !== 'characters' && a.what === 'portrait' ? 'hero' : a.what, engine: a.engine || 'auto' };
+    const body = { what: r.kp !== 'characters' && a.what === 'portrait' ? 'hero' : a.what, engine: a.what === 'clip' ? 'auto' : a.engine || 'auto' };
     if (a.what === 'views' && a.views && a.views.length) body.views = a.views;
     const p = await ctx.akowe('POST', `/api/projects/${enc(r.pid)}/branches/main/forge/${r.kp}/${enc(r.d.record_id)}/art`, body);
     if (!okStatus(p)) return akoweError(p);
@@ -493,14 +493,16 @@ def({
     project_id: { type: 'string', maxLength: 80 }, kind: KIND_ARG,
     name: { type: 'string', maxLength: 120 }, from: { type: 'string', maxLength: 80, description: 'A candidate source_id (a place / artifact / power record of the book)' },
     aliases: { type: 'array', maxItems: 8, items: { type: 'string', maxLength: 80 } },
+    role: { type: 'string', maxLength: 300, description: 'Characters: their role in the story (the author\'s words)' },
+    about: { type: 'string', maxLength: 1200, description: 'Characters: what the author says about them (kept as their own fixed description)' },
   }, additionalProperties: false },
   async check(a) { return a.name || a.from ? { ok: true } : { ok: false, error: 'give a name, or from = a candidate source_id' }; },
-  describe: (a) => `Start a ${KIND_WORD[a.kind] || 'character'} dossier${a.name ? ` for ${q(a.name)}` : ''}${a.from ? ` from the book's record ${q(a.from)}` : ''}.`,
+  describe: (a) => (a.kind === 'characters' && a.name && !a.from ? `Add a new character ${q(a.name)} to the book (a draft you approve) and start its dossier${a.role ? ` — ${q(a.role)}` : ''}.` : `Start a ${KIND_WORD[a.kind] || 'character'} dossier${a.name ? ` for ${q(a.name)}` : ''}${a.from ? ` from the book's record ${q(a.from)}` : ''}.`),
   async run(a, ctx) {
     const b = await resolveBook(ctx, a);
     if (!b.ok) return b;
     const body = {};
-    for (const k of ['name', 'from', 'aliases']) if (a[k] !== undefined) body[k] = a[k];
+    for (const k of ['name', 'from', 'aliases', ...(a.kind === 'characters' ? ['role', 'about'] : [])]) if (a[k] !== undefined) body[k] = a[k];
     const r = await ctx.akowe('POST', `/api/projects/${enc(b.pid)}/branches/main/forge/${a.kind}`, body);
     if (!okStatus(r)) return akoweError(r);
     const d = (r.json && r.json.dossier) || {};
