@@ -81,7 +81,10 @@
   function renderStatus(s, note) {
     st.status = s || st.status;
     const on = !!(s && s.enabled && s.endpoint);
+    const was = st.connected;
     st.connected = on;
+    // The Engine line under it ("not connected yet…") follows the connection.
+    if (was !== on && st.engine) engineNote();
     const dot = on ? 'ok' : 'off';
     $('sd-dot').dataset.tone = dot; if ($('sd-tab-dot')) $('sd-tab-dot').dataset.tone = dot;
     let port = ''; try { port = s && s.base ? new URL(s.base).port : ''; } catch (_) {}
@@ -117,8 +120,9 @@
       return;
     }
     if (d.problems && d.problems.length) { $('sd-url').value = d.problems[0].base; showFound(d.problems[0]); return; }
-    hint(d.message, 'error');
-    renderStatus(st.status, '✖ No SD app found');
+    // Still connected to the one typed in? Then say nothing new was found, but keep the connected line.
+    hint(st.connected ? `${d.message} (Still connected to the address above.)` : d.message, st.connected ? 'warn' : 'error');
+    renderStatus(st.status, st.connected ? null : '✖ No SD app found');
   }
   async function connect() {
     const url = $('sd-url').value.trim();
@@ -961,11 +965,16 @@
   $('btn-sd-lk-save').onclick = async () => {
     const r = await call('saveLock', lockFromForm());
     if (!r || !r.ok) { setText('sd-lk-msg', (r && r.message) || 'Could not save.'); return; }
-    setText('sd-lk-msg', `✔ Saved “${r.lock.character}”.`);
     st.lockSel = r.lock.id;
-    refreshLocks(r.lock.id);
+    await refreshLocks(r.lock.id); // (re-selecting it clears the message line, so the ✔ comes after)
+    setText('sd-lk-msg', `✔ Saved “${r.lock.character}”.`);
   };
-  $('btn-sd-lk-delete').onclick = async () => { if (!st.lockSel) return; await call('deleteLock', st.lockSel); st.lockSel = null; editLock(null); refreshLocks(); };
+  $('btn-sd-lk-delete').onclick = async () => {
+    if (!st.lockSel) { setText('sd-lk-msg', 'Choose a saved lock on the left first.'); return; }
+    const l = st.locks.find((x) => x.id === st.lockSel);
+    await call('deleteLock', st.lockSel); st.lockSel = null; editLock(null); await refreshLocks();
+    setText('sd-lk-msg', `🗑 Deleted${l ? ` “${l.character}”` : ''}.`);
+  };
   $('btn-sd-lk-try').onclick = async () => {
     const r = await call('saveLock', lockFromForm());
     if (!r || !r.ok) { setText('sd-lk-msg', (r && r.message) || 'Save the lock first.'); return; }
@@ -1064,6 +1073,7 @@
     if (!i) return;
     const pct = Math.round((i.pct || 0) * 100);
     $('sd-install-bar').style.width = `${i.busy || i.phase === 'installed' ? pct : 0}%`;
+    if ($('sd-install-progress')) $('sd-install-progress').hidden = !(i.busy || (i.phase === 'installed' && pct > 0)); // no empty bar while idle
     if (i.message) setText('sd-install-msg', i.message);
     $('btn-sd-install').disabled = !!i.busy;
     $('btn-sd-install-cancel').disabled = !i.busy;
@@ -1103,7 +1113,7 @@
     const c = st.installInfo || await call('installCheck');
     if (c && c.enoughSpace === false) { setText('sd-install-msg', `Not enough free disk space. ${c.spaceMessage}`); return; }
     setText('sd-install-msg', 'Starting the download…');
-    $('btn-sd-install').disabled = true; $('btn-sd-install-cancel').disabled = false;
+    $('btn-sd-install').disabled = true; $('btn-sd-install-cancel').disabled = false; $('sd-install-progress').hidden = false;
     const r = await call('install', {});
     setText('sd-install-msg', r && r.ok ? (r.already ? '✔ ComfyUI is already installed.' : `✔ ComfyUI is installed${r.verified ? ' (checksum verified)' : ''}. Now pick a starter model below, then press Start.`) : `✖ ${(r && r.message) || 'Install failed.'}`);
     await installCheck(); await refreshTargets();
@@ -1112,7 +1122,7 @@
   if ($('btn-sd-install-folder')) $('btn-sd-install-folder').onclick = () => call('openInstallFolder');
   if ($('btn-sd-model')) $('btn-sd-model').onclick = async () => {
     const id = (document.querySelector('input[name="sd-model"]:checked') || {}).value || 'sd15';
-    $('btn-sd-install-cancel').disabled = false;
+    $('btn-sd-install-cancel').disabled = false; $('sd-install-progress').hidden = false;
     const r = await call('installModel', id);
     setText('sd-install-msg', r && r.ok ? `✔ Model ready. Press ▶ Start, then Generate.` : `✖ ${(r && r.message) || 'Download failed.'}`);
     $('btn-sd-install-cancel').disabled = true;

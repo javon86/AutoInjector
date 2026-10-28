@@ -50,11 +50,16 @@
     body.window-collapsed #images-tab { display:none; }
     #images-tab { flex:1 1 auto; min-height:0; display:flex; flex-direction:column; background:#101010; }
     #images-tab[hidden] { display:none; }
-    #sd-bar { flex:0 0 auto; display:flex; align-items:center; gap:6px; flex-wrap:wrap; padding:6px 10px; background:#151515; border-bottom:1px solid #2a2a2a; font-size:12px; }
-    #sd-bar button, #sd-bar input, #sd-bar select { font-size:12px; padding:3px 8px; }
-    #sd-url { width:210px; }
-    #sd-status { display:inline-flex; align-items:center; gap:6px; font-weight:600; max-width:520px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-    #sd-bar .spacer { flex:1 1 auto; }
+    /* Row 1: status (left) + the view tabs (right). Row 2 (#sd-conn): the address and connect / start buttons. */
+    #images-tab, #video-tab { accent-color:#8a6cf0; }
+    #sd-bar { flex:0 0 auto; display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:6px 10px; background:#151515; font-size:12px; }
+    #sd-bar button, #sd-bar input, #sd-bar select, #sd-conn button, #sd-conn input { font-size:12px; padding:3px 8px; }
+    #sd-conn { flex:0 0 auto; display:flex; align-items:center; gap:6px; flex-wrap:wrap; padding:0 10px 6px; background:#151515; border-bottom:1px solid #2a2a2a; font-size:12px; }
+    #sd-url { width:240px; min-width:0; flex:0 1 240px; }
+    #sd-status { display:inline-flex; align-items:center; gap:6px; font-weight:600; flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    #sd-status-text { overflow:hidden; text-overflow:ellipsis; }
+    #sd-bar .spacer { flex:1 1 0; }
+    #sd-bar [role="tablist"], #vd-bar [role="tablist"] { flex:0 0 auto; }
     .sd-subtab { border-radius:6px; border:1px solid #2a2a2a; background:#151515; color:#cfcfcf; cursor:pointer; }
     .sd-subtab[aria-selected="true"] { background:#22202e; border-color:#5a4ca0; color:#f0ecff; }
     #sd-hint { margin:8px 10px 0; padding:9px 12px; border:1px solid #6b5a2a; background:#1d1a10; border-radius:8px; font-size:12.5px; line-height:1.5; white-space:pre-line; }
@@ -64,7 +69,8 @@
     .sd-view { flex:1 1 auto; min-height:0; overflow:auto; padding:10px; }
     .sd-view[hidden] { display:none !important; }
     .sd-badges { display:flex; gap:4px; flex-wrap:wrap; align-items:center; }
-    #sd-view-generate { display:grid; grid-template-columns:minmax(300px, 420px) 1fr; gap:12px; align-items:start; }
+    #sd-view-generate { display:grid; grid-template-columns:minmax(320px, 440px) minmax(0, 1fr); gap:12px; align-items:start; }
+    @media (min-width:1600px) { #sd-view-generate { grid-template-columns:520px minmax(0, 1fr); } }
     @media (max-width:820px) { #sd-view-generate { grid-template-columns:1fr; } }
     .sd-card { background:#171717; border:1px solid #2a2a2a; border-radius:8px; padding:9px 11px; }
     .sd-card h3 { font-size:11px; margin:0 0 6px; text-transform:uppercase; letter-spacing:.04em; opacity:.75; }
@@ -73,6 +79,17 @@
     .sd-row { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
     .sd-row > * { flex:1 1 0; min-width:0; }
     .sd-row > .sd-fixed { flex:0 0 auto; }
+    /* A row of action buttons: natural width, left-aligned (no stretched buttons on wide screens). */
+    .sd-actions { display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin-top:8px; }
+    .sd-actions > button { flex:0 0 auto; min-width:96px; }
+    .sd-card h3.sd-h-gap { margin-top:14px; }
+    /* Pause buttons only show while something downloads. */
+    #btn-sd-install-cancel:disabled, #btn-vd-dl-cancel:disabled { display:none; }
+    #vd-dl-progress[hidden], #sd-install-progress[hidden] { display:none; }
+    /* The main button of a form (Generate / Make video / Make trailer) + its progress bar stay in view while the form scrolls. */
+    .sd-gobar { position:sticky; bottom:-10px; z-index:5; margin:8px -11px 0; padding:8px 11px 10px; background:#171717; border-top:1px solid #242424; }
+    .sd-gobar .sd-row > button.primary { padding-top:6px; padding-bottom:6px; font-weight:600; }
+    .sd-gobar #sd-progress, .sd-gobar #vd-progress, .sd-gobar #vd-tr-progress { margin:6px 0 0; }
     .sd-slider { display:grid; grid-template-columns:62px 1fr 46px; gap:6px; align-items:center; font-size:11.5px; margin:3px 0; }
     .sd-slider span { text-align:right; font-variant-numeric:tabular-nums; }
     #sd-lora-chips { display:flex; flex-wrap:wrap; gap:5px; margin:5px 0; min-height:4px; }
@@ -131,9 +148,11 @@
     #sd-vae-warn[hidden] { display:none; }
     #sd-final-prompt { font-size:11px; opacity:.6; word-break:break-word; margin-top:3px; }
     #sd-preview { display:block; max-width:100%; max-height:62vh; margin:0 auto; border-radius:6px; border:1px solid #2a2a2a; }
+    #sd-preview[hidden] { display:none; }
     #sd-preview-empty { padding:40px 12px; text-align:center; opacity:.5; border:1px dashed #2a2a2a; border-radius:8px; }
     #sd-preview-info { font-size:11.5px; opacity:.8; margin-top:6px; white-space:pre-wrap; word-break:break-word; }
     #sd-gallery { display:grid; grid-template-columns:repeat(auto-fill, minmax(92px, 1fr)); gap:6px; margin-top:8px; }
+    #sd-gallery:empty::before { content:'No pictures yet.'; grid-column:1 / -1; font-size:12px; opacity:.55; }
     #sd-gallery img { width:100%; aspect-ratio:1; object-fit:cover; border-radius:5px; border:1px solid #2a2a2a; cursor:pointer; }
     #sd-gallery img:focus-visible, .sd-libcard:focus-visible { outline:2px solid #7c5ce0; }
     #sd-lib-tools { display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin-bottom:8px; }
@@ -151,7 +170,12 @@
     #sd-lib-editor[hidden] { display:none; }
     #sd-lib-folders { font-size:11.5px; margin-bottom:8px; }
     #sd-lib-folders li { margin:2px 0; word-break:break-all; }
-    #sd-lock-wrap { display:grid; grid-template-columns:minmax(200px, 260px) 1fr; gap:10px; align-items:start; }
+    #sd-lock-wrap { display:grid; grid-template-columns:minmax(200px, 260px) minmax(0, 820px); gap:10px; align-items:start; }
+    #sd-view-locks > p.sd-small { max-width:1090px; }
+    /* Setup pages (🎨 Start & install, 🎬 Setup & models): cards side by side when there is room, instead of one narrow column. */
+    #sd-view-setup:not([hidden]), #vd-view-setup:not([hidden]) { display:grid; grid-template-columns:repeat(auto-fill, minmax(540px, 1fr)); gap:10px; align-items:start; align-content:start; }
+    #sd-view-setup > .sd-card, #vd-view-setup > .sd-card { max-width:none !important; margin-top:0 !important; min-width:0; }
+    @media (max-width:1180px) { #sd-view-setup:not([hidden]), #vd-view-setup:not([hidden]) { grid-template-columns:minmax(0, 760px); } }
     @media (max-width:820px) { #sd-lock-wrap { grid-template-columns:1fr; } }
     .sd-lockitem { padding:6px 8px; border:1px solid #2a2a2a; border-radius:6px; margin-bottom:5px; cursor:pointer; background:#171717; }
     .sd-lockitem[aria-selected="true"] { border-color:#7c5ce0; }
@@ -1117,15 +1141,17 @@
     body.window-collapsed #video-tab { display:none; }
     #video-tab { flex:1 1 auto; min-height:0; display:flex; flex-direction:column; background:#101010; }
     #video-tab[hidden] { display:none; }
-    #vd-bar { flex:0 0 auto; display:flex; align-items:center; gap:6px; flex-wrap:wrap; padding:6px 10px; background:#151515; border-bottom:1px solid #2a2a2a; font-size:12px; }
+    #vd-bar { flex:0 0 auto; display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:6px 10px; background:#151515; border-bottom:1px solid #2a2a2a; font-size:12px; }
     #vd-bar button { font-size:12px; padding:3px 8px; }
-    #vd-bar .spacer { flex:1 1 auto; }
-    #vd-status { display:inline-flex; align-items:center; gap:6px; font-weight:600; max-width:640px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    #vd-bar .spacer { flex:1 1 0; }
+    #vd-status { display:inline-flex; align-items:center; gap:6px; font-weight:600; flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    #vd-status-text { overflow:hidden; text-overflow:ellipsis; }
     #vd-hint { margin:8px 10px 0; padding:9px 12px; border:1px solid #6b5a2a; background:#1d1a10; border-radius:8px; font-size:12.5px; line-height:1.5; white-space:pre-line; }
     #vd-hint[hidden] { display:none; }
     #vd-hint[data-tone="error"] { border-color:#6b3a3a; background:#1d1212; }
     #vd-hint[data-tone="ok"] { border-color:#2d5a3a; background:#101d14; }
-    #vd-view-make { display:grid; grid-template-columns:minmax(300px, 440px) 1fr; gap:12px; align-items:start; }
+    #vd-view-make { display:grid; grid-template-columns:minmax(320px, 440px) minmax(0, 1fr); gap:12px; align-items:start; }
+    @media (min-width:1600px) { #vd-view-make { grid-template-columns:520px minmax(0, 1fr); } }
     @media (max-width:820px) { #vd-view-make { grid-template-columns:1fr; } }
     #vd-mode-row { display:flex; gap:6px; margin-bottom:6px; }
     #vd-mode-row button[aria-pressed="true"] { background:#22202e; border-color:#5a4ca0; color:#f0ecff; }
@@ -1187,6 +1213,9 @@
     .vd-model .vd-model-head { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
     .vd-model .vd-model-head b { flex:1 1 auto; }
     .vd-model .sd-note { font-size:11px; opacity:.7; margin-top:3px; }
+    #vd-ep-clip { gap:6px 8px; }
+    #vd-ep-clip > div { flex:1 1 64px; min-width:56px; }
+    #vd-ep-clip input { width:100% !important; }
 
     @media (max-width:620px) {
       .bf-exp { display:none; }
@@ -1234,6 +1263,15 @@
   <div id="images-tab" role="tabpanel" aria-labelledby="tab-app-images" hidden>
     <div id="sd-bar">
       <span id="sd-status" role="status" aria-live="polite"><span id="sd-dot" class="ak-dot" data-tone="off" aria-hidden="true"></span><span id="sd-status-text">Not connected</span></span>
+      <span class="spacer"></span>
+      <div role="tablist" aria-label="Images views" class="sd-row">
+        <button class="sd-subtab sd-fixed" id="sd-sub-generate" role="tab" aria-selected="true" aria-controls="sd-view-generate">🖌 Generate</button>
+        <button class="sd-subtab sd-fixed" id="sd-sub-library" role="tab" aria-selected="false" aria-controls="sd-view-library">📚 Library</button>
+        <button class="sd-subtab sd-fixed" id="sd-sub-locks" role="tab" aria-selected="false" aria-controls="sd-view-locks">🔒 Character locks</button>
+        <button class="sd-subtab sd-fixed" id="sd-sub-setup" role="tab" aria-selected="false" aria-controls="sd-view-setup">⚙ Start &amp; install</button>
+      </div>
+    </div>
+    <div id="sd-conn" role="group" aria-label="Connect to Stable Diffusion">
       <input type="text" id="sd-url" placeholder="http://127.0.0.1:7860" aria-label="Stable Diffusion address" title="Where your SD app serves its API — Forge/A1111 usually :7860, ComfyUI :8188">
       <button id="btn-sd-find" title="Look on this PC for Forge, A1111, reForge, SD.Next or ComfyUI">🔍 Find my SD app</button>
       <button id="btn-sd-connect" class="primary" title="Connect to the address on the left">Connect</button>
@@ -1241,13 +1279,6 @@
       <button id="btn-sd-openui" title="Open your SD app's own page in the browser">Open SD UI ↗</button>
       <button id="btn-sd-run" hidden title="AutoInjector starts it hidden, with the API on, and looks after it">▶ Start</button>
       <button id="btn-sd-halt" hidden title="Stop the Stable Diffusion that AutoInjector started">⏹ Stop SD</button>
-      <span class="spacer"></span>
-      <div role="tablist" aria-label="Images views" class="sd-row" style="flex:0 0 auto;">
-        <button class="sd-subtab sd-fixed" id="sd-sub-generate" role="tab" aria-selected="true" aria-controls="sd-view-generate">🖌 Generate</button>
-        <button class="sd-subtab sd-fixed" id="sd-sub-library" role="tab" aria-selected="false" aria-controls="sd-view-library">📚 Library</button>
-        <button class="sd-subtab sd-fixed" id="sd-sub-locks" role="tab" aria-selected="false" aria-controls="sd-view-locks">🔒 Character locks</button>
-        <button class="sd-subtab sd-fixed" id="sd-sub-setup" role="tab" aria-selected="false" aria-controls="sd-view-setup">⚙ Start &amp; install</button>
-      </div>
     </div>
     <div id="sd-hint" role="note" hidden></div>
 
@@ -1399,11 +1430,13 @@
             <div class="sd-note" id="sd-wf-msg"></div>
           </div></details>
         </div>
-        <div class="sd-row" style="margin-top:8px;">
-          <button id="btn-sd-generate" class="primary">🎨 Generate</button>
-          <button id="btn-sd-stop" class="sd-fixed" disabled>⏹ Stop</button>
+        <div class="sd-gobar">
+          <div class="sd-row">
+            <button id="btn-sd-generate" class="primary">🎨 Generate</button>
+            <button id="btn-sd-stop" class="sd-fixed" disabled>⏹ Stop</button>
+          </div>
+          <div id="sd-progress" aria-hidden="true"><div id="sd-progress-bar"></div></div>
         </div>
-        <div id="sd-progress" aria-hidden="true"><div id="sd-progress-bar"></div></div>
         <div id="sd-msg" role="status" aria-live="polite"></div>
         <div id="sd-error" role="alert" hidden>
           <div id="sd-error-msg" class="sd-err-title"></div>
@@ -1418,13 +1451,13 @@
         <div id="sd-preview-empty">Your pictures appear here. They are saved in the <b>images/</b> folder with their settings, so any one can be made again.</div>
         <img id="sd-preview" alt="The selected picture" hidden>
         <div id="sd-preview-info"></div>
-        <div class="sd-row" style="margin-top:6px;">
+        <div class="sd-actions">
           <button id="btn-sd-remake" disabled title="Put this picture's exact settings (and seed) back into the form">♻ Remake</button>
           <button id="btn-sd-variation" disabled title="Same settings, new random seed">🎲 Variation</button>
           <button id="btn-sd-showfile" disabled title="Show the file in its folder">📂 Show file</button>
           <button id="btn-sd-folder" title="Open the images folder">🗂 Images folder</button>
         </div>
-        <h3 style="margin-top:10px;">Gallery</h3>
+        <h3 class="sd-h-gap">Gallery</h3>
         <div id="sd-gallery" aria-label="Recent pictures"></div>
       </div>
     </div>
@@ -1500,7 +1533,7 @@
           <button id="btn-sd-install-cancel" class="sd-fixed" disabled>⏸ Pause</button>
           <button id="btn-sd-install-folder" class="sd-fixed">📂 Open its folder</button>
         </div>
-        <div id="sd-install-progress" style="height:8px; background:#222; border-radius:4px; overflow:hidden; margin:6px 0 2px;"><div id="sd-install-bar" style="height:100%; width:0; background:linear-gradient(90deg,#2d6a4c,#57c07a); transition:width .3s;"></div></div>
+        <div id="sd-install-progress" hidden style="height:8px; background:#222; border-radius:4px; overflow:hidden; margin:6px 0 2px;"><div id="sd-install-bar" style="height:100%; width:0; background:linear-gradient(90deg,#2d6a4c,#57c07a); transition:width .3s;"></div></div>
         <div id="sd-install-msg" class="sd-small" role="status" aria-live="polite"></div>
         <div id="sd-model-pick" hidden style="margin-top:8px;">
           <label class="sd-l">Starter model (goes into ComfyUI's models\checkpoints)</label>
@@ -1551,7 +1584,7 @@
           </div>
           <label class="sd-l" for="sd-lk-notes">Notes</label>
           <input type="text" id="sd-lk-notes">
-          <div class="sd-row" style="margin-top:8px;">
+          <div class="sd-actions">
             <button id="btn-sd-lk-save" class="primary">Save lock</button>
             <button id="btn-sd-lk-try" title="Make a portrait with this lock">🎨 Try a portrait</button>
             <button id="btn-sd-lk-delete" class="danger">Delete</button>
@@ -1620,11 +1653,13 @@
           <button class="sd-fixed" id="btn-vd-seed-last" title="Reuse the last video's seed">♻</button>
         </div>
         <div class="sd-note" id="vd-frames-note" style="font-size:11px;opacity:.65;margin-top:3px;"></div>
-        <div class="sd-row" style="margin-top:8px;">
-          <button id="btn-vd-generate" class="primary">🎬 Make video</button>
-          <button id="btn-vd-stop" class="sd-fixed" disabled>⏹ Stop</button>
+        <div class="sd-gobar">
+          <div class="sd-row">
+            <button id="btn-vd-generate" class="primary">🎬 Make video</button>
+            <button id="btn-vd-stop" class="sd-fixed" disabled>⏹ Stop</button>
+          </div>
+          <div id="vd-progress" aria-hidden="true"><div id="vd-progress-bar"></div></div>
         </div>
-        <div id="vd-progress" aria-hidden="true"><div id="vd-progress-bar"></div></div>
         <div id="vd-msg" role="status" aria-live="polite"></div>
         <div id="vd-error" role="alert" hidden>
           <div id="vd-error-msg" class="sd-err-title"></div>
@@ -1638,12 +1673,12 @@
         <div id="vd-player-empty">Your videos appear here. They are saved in the <b>videos/</b> folder with a poster picture and their settings.</div>
         <video id="vd-player" controls loop playsinline hidden></video>
         <div id="vd-player-info"></div>
-        <div class="sd-row" style="margin-top:6px;">
+        <div class="sd-actions">
           <button id="btn-vd-remake" disabled title="Put this video's settings (and seed) back into the form">♻ Remake</button>
           <button id="btn-vd-showfile" disabled title="Show the file in its folder">📂 Show file</button>
           <button id="btn-vd-folder" title="Open the videos folder">🗂 Videos folder</button>
         </div>
-        <h3 style="margin-top:10px;">Gallery</h3>
+        <h3 class="sd-h-gap">Gallery</h3>
         <div id="vd-gallery" aria-label="Recent videos"></div>
       </div>
     </div>
@@ -1674,11 +1709,13 @@
           <div><label class="sd-l" for="vd-tr-fade">Fades (seconds)</label><input type="number" id="vd-tr-fade" min="0" max="1" step="0.1" value="0.4"></div>
           <div><label class="sd-l" for="vd-tr-volume">Music volume</label><input type="range" id="vd-tr-volume" min="0" max="1" step="0.05" value="0.8"></div>
         </div>
-        <div class="sd-row" style="margin-top:8px;">
-          <button id="btn-vd-tr-make" class="primary">🎞 Make trailer</button>
-          <button id="btn-vd-tr-stop" class="sd-fixed" disabled>⏹ Stop</button>
+        <div class="sd-gobar">
+          <div class="sd-row">
+            <button id="btn-vd-tr-make" class="primary">🎞 Make trailer</button>
+            <button id="btn-vd-tr-stop" class="sd-fixed" disabled>⏹ Stop</button>
+          </div>
+          <div id="vd-tr-progress" aria-hidden="true"><div id="vd-tr-progress-bar"></div></div>
         </div>
-        <div id="vd-tr-progress" aria-hidden="true"><div id="vd-tr-progress-bar"></div></div>
         <div id="vd-tr-msg" role="status" aria-live="polite"></div>
         <div id="vd-tr-error" role="alert" hidden>
           <div id="vd-tr-error-msg" class="sd-err-title"></div>
@@ -1690,8 +1727,8 @@
         <div id="vd-tr-empty">Your trailer appears here. It is saved in <b>videos/trailers/&lt;book&gt;/</b> as trailer.webm (and trailer.mp4 when ffmpeg is on this PC).</div>
         <video id="vd-tr-player" controls playsinline hidden></video>
         <div id="vd-tr-info" style="font-size:11.5px;opacity:.8;margin-top:6px;white-space:pre-wrap;"></div>
-        <div class="sd-row" style="margin-top:6px;"><button id="btn-vd-tr-showfile" class="sd-fixed" disabled>📂 Show file</button></div>
-        <h3 style="margin-top:10px;">Saved trailers</h3>
+        <div class="sd-actions"><button id="btn-vd-tr-showfile" class="sd-fixed" disabled>📂 Show file</button></div>
+        <h3 class="sd-h-gap">Saved trailers</h3>
         <div id="vd-tr-list" aria-label="Saved trailers"></div>
       </div>
     </div>
@@ -1713,7 +1750,7 @@
       <div class="sd-card" style="max-width:760px;margin-top:10px;">
         <h3>2 · Video models</h3>
         <div id="vd-models"></div>
-        <div id="vd-dl-progress" aria-hidden="true"><div id="vd-dl-bar"></div></div>
+        <div id="vd-dl-progress" aria-hidden="true" hidden><div id="vd-dl-bar"></div></div>
         <div id="vd-dl-msg" role="status" aria-live="polite"></div>
         <button id="btn-vd-dl-resume" class="primary" hidden title="Continues from the part already downloaded — nothing is downloaded twice">↻ Resume download</button>
         <button id="btn-vd-dl-cancel" disabled>⏸ Pause / cancel download</button>
