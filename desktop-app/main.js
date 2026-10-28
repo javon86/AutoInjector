@@ -7304,7 +7304,8 @@ ipcMain.handle("folders:move-comfy", async () => {
     sdInstallerInst();
     const c = comfyChoice || {};
     if (c.where !== "legacy") return { ok: false, error: c.where === "stuff" ? "ComfyUI is already in \"stuff and thing\"." : "There's no older ComfyUI to move." };
-    try { const st = sdRunner().status(); if (st && (st.running || st.starting) && /comfy/i.test(String(st.kind || st.target || ""))) return { ok: false, error: "Stop ComfyUI first (🎨 Images → ⚙ Start & install → Stop), then move it." }; } catch (_) {}
+    let inUse = false; try { inUse = foldersMod.comfyInUse(sdRunner().status(), sdInstallerInst().status()); } catch (_) {}
+    if (inUse) return { ok: false, error: "Stop ComfyUI first (🎨 Images → ⚙ Start & install → Stop), then move it." };
     const to = foldersMod.layout(outputManager.root()).comfyHome;
     const r = await foldersMod.moveComfy({ from: c.home, to, onProgress: (m) => broadcast("sd-install", { phase: "move", message: m }) });
     logEvent("comfy-move", { ok: !!r.ok, how: r.how || null });
@@ -8636,7 +8637,7 @@ app.whenReady().then(() => {
     try {
       const c = contentChoice || {};
       logEvent("content-root", { step: "chosen", reason: c.reason, others: (c.others || []).length });
-      if (!c.off && !contentHome.readRemembered(userDataDir())) contentHome.remember(userDataDir(), contentBaseFolder(), undefined, "auto"); // from now on every copy finds it
+      if (!c.off && !contentHome.readRemembered(userDataDir())) contentHome.remember(userDataDir(), contentBaseFolder(), undefined, "auto", { others: c.others || [] }); // from now on every copy finds it (and this launch's scan isn't repeated)
     } catch (_) {}
     // Give the tool registry its output sandbox + the computer-power deps (a
     // process runner, the OS "open" helpers, and where the butler's self-made

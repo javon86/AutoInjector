@@ -916,6 +916,14 @@ async function main() {
     assert(!c.ok && /has no tool "write_file"/.test(c.error) && /read_file/.test(c.error), 'an unknown tool is refused with the tools it does have');
     c = await mc.check({ server: 'web', tool: 'anything', arguments: { q: 1 } }, mctx);
     assert(c.ok, 'a stopped server\'s call is allowed through to the card (it is started when confirmed)');
+    { // long arguments: nothing the user approves is hidden — the card shows them in full, or the call is refused
+      const longPath = '/a/' + 'x'.repeat(700) + '/HIDDEN-TAIL.txt';
+      c = await mc.check({ server: 'files', tool: 'read_file', arguments: { path: longPath } }, mctx);
+      const shown = c.ok && mc.showCode(c.args);
+      assert(shown && shown.code.includes('HIDDEN-TAIL.txt') && shown.code.includes(longPath), 'arguments longer than the one-line summary are shown in full on the card (showCode)');
+      c = await mc.check({ server: 'files', tool: 'read_file', arguments: { path: 'y'.repeat(25000) } }, mctx);
+      assert(!c.ok && /too long to show/.test(c.error), 'arguments too long to show for approval are refused plainly');
+    }
     c = await mc.check({ server: 'files', tool: 'read_file' }, {});
     assert(!c.ok && /not available/.test(c.error), 'without tool servers in this build → a plain refusal');
 
@@ -929,6 +937,7 @@ async function main() {
     r = await a.ask('read my todo file with the files server');
     const step = r.card && r.card.steps[0];
     assert(r.type === 'confirm' && step.tool === 'mcp_call' && /“read_file”/.test(step.text) && /“files”/.test(step.text) && /todo\.txt/.test(step.text) && step.allowAlways === false && !mcpCalls.length, 'mcp_call shows an "I will" card naming the server, the tool and the arguments — nothing runs yet, no "always allow"');
+    assert(step.code && step.code.language === 'JSON' && JSON.parse(step.code.code).arguments.path === '/notes/todo.txt' && JSON.parse(step.code.code).server === 'files' && JSON.parse(step.code.code).tool === 'read_file', 'the card carries the full call (server, tool, every argument) in its scrolling code box');
     r = await a.confirm(r.card.id, { alwaysAllow: [step.allowKey] });
     assert(mcpCalls.length === 1 && mcpCalls[0].tool === 'read_file' && /line one/.test(r.text), '✔ Do it calls the server and the AI sees its text');
     assert(!a.status().settings.alwaysAllow[step.allowKey], 'ticking "always allow" for it is ignored');

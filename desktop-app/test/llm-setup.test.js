@@ -59,6 +59,8 @@ function makeFs(virtual) {
     statfsSync: (p) => fs.statfsSync(norm(p)),
     readdirSync: (p, o) => fs.readdirSync(norm(p), o),
     writeFileSync: (p, d2) => fs.writeFileSync(norm(p), d2),
+    readFileSync: (p, o) => fs.readFileSync(norm(p), o),
+    unlinkSync: (p) => fs.unlinkSync(norm(p)),
   };
 }
 function makeWorld(opts = {}) {
@@ -153,6 +155,65 @@ async function testInstallLinux() {
   const again = await s.installOllama();
   assert(again.ok && again.already, 'installing again is harmless (already installed)');
   om.setBin(null);
+}
+
+async function testStalePart() {
+  console.log('\n== a left-over OllamaSetup.exe.part: never resumed against a newer release ==');
+  const FULL = Buffer.alloc(5000, 1);
+  // a stub server: GET with Range/If-Range, HEAD with the size; `size` can change (a new release)
+  const mk = (srv) => async (url, o = {}) => {
+    const h = o.headers || {};
+    srv.reqs.push({ method: o.method || 'GET', range: h.Range || null, ifRange: h['If-Range'] || null });
+    const head = (k) => ({ 'content-length': String(srv.body.length), etag: srv.etag })[k] || null;
+    if (o.method === 'HEAD') return { status: 200, ok: true, headers: { get: head }, body: null };
+    const m = /bytes=(\d+)-/.exec(h.Range || '');
+    const st = m ? Number(m[1]) : 0;
+    const sameFile = !h['If-Range'] || h['If-Range'] === srv.etag;
+    if (m && sameFile && st >= srv.body.length) return { status: 416, ok: false, headers: { get: () => null }, body: null };
+    const resume = m && sameFile;
+    const b = resume ? srv.body.subarray(st) : srv.body;
+    return { status: resume ? 206 : 200, ok: true, headers: { get: (k) => (k === 'content-length' ? String(b.length) : k === 'etag' ? srv.etag : null) }, body: null, arrayBuffer: async () => b };
+  };
+  const w = makeWorld();
+  const dlDir = path.join(w.tmp, 'dl'); fs.mkdirSync(dlDir, { recursive: true });
+  const dest = path.join(dlDir, 'OllamaSetup.exe');
+  const URL1 = 'http://x/OllamaSetup.exe';
+  // 1) a .part older than a day is thrown away: the download starts from 0 (no Range)
+  let srv = { body: FULL, etag: '"v2"', reqs: [] };
+  let s = lib.createLlmSetup(w.deps({ fetch: mk(srv) }));
+  fs.writeFileSync(dest + '.part', Buffer.alloc(3000, 9));
+  const old = (Date.now() - 2 * 24 * 3600 * 1000) / 1000; fs.utimesSync(dest + '.part', old, old);
+  let r = await s.download(URL1, dest);
+  assert(r.ok && !srv.reqs[0].range && fs.readFileSync(dest).equals(FULL), 'a .part older than a day is deleted, not resumed (the whole file is downloaded again)');
+  fs.rmSync(dest);
+  // 2) a fresh .part resumes with If-Range = the stored ETag; a newer release (other ETag) → the server sends it whole
+  srv = { body: FULL, etag: '"v1"', reqs: [] };
+  s = lib.createLlmSetup(w.deps({ fetch: mk(srv) }));
+  fs.writeFileSync(dest + '.part', FULL.subarray(0, 2000));
+  fs.writeFileSync(dest + '.part.meta', JSON.stringify({ url: URL1, etag: '"v1"' }));
+  r = await s.download(URL1, dest);
+  assert(r.ok && srv.reqs[0].range === 'bytes=2000-' && srv.reqs[0].ifRange === '"v1"' && fs.readFileSync(dest).equals(FULL) && !fs.existsSync(dest + '.part.meta'), 'a fresh .part resumes with Range + If-Range (its stored ETag)');
+  fs.rmSync(dest);
+  const NEW = Buffer.alloc(6000, 2);
+  srv = { body: NEW, etag: '"v3"', reqs: [] };
+  s = lib.createLlmSetup(w.deps({ fetch: mk(srv) }));
+  fs.writeFileSync(dest + '.part', FULL.subarray(0, 2000));
+  fs.writeFileSync(dest + '.part.meta', JSON.stringify({ url: URL1, etag: '"v1"' }));
+  r = await s.download(URL1, dest);
+  assert(r.ok && fs.readFileSync(dest).equals(NEW), 'the release changed (ETag differs): the new file arrives whole, not old bytes + new bytes');
+  fs.rmSync(dest);
+  // 3) 416: accepted only when the .part is exactly the size HEAD reports; else the download starts over
+  srv = { body: FULL, etag: '"v1"', reqs: [] };
+  s = lib.createLlmSetup(w.deps({ fetch: mk(srv) }));
+  fs.writeFileSync(dest + '.part', FULL);
+  r = await s.download(URL1, dest);
+  assert(r.ok && srv.reqs.some((q) => q.method === 'HEAD') && fs.readFileSync(dest).equals(FULL), '416 with a .part the size HEAD reports → complete');
+  fs.rmSync(dest);
+  srv = { body: Buffer.alloc(4000, 3), etag: '"v4"', reqs: [] };
+  s = lib.createLlmSetup(w.deps({ fetch: mk(srv) }));
+  fs.writeFileSync(dest + '.part', Buffer.alloc(4500, 8)); // longer than the current file → 416
+  r = await s.download(URL1, dest);
+  assert(r.ok && fs.readFileSync(dest).equals(srv.body) && srv.reqs.filter((q) => q.method === 'GET').slice(-1)[0].range === null, '416 with a .part of another size → deleted and downloaded again (never renamed as if complete)');
 }
 
 async function testInstallWindows() {
@@ -549,7 +610,7 @@ async function testScan() {
   SYS_CLOSED = `http://127.0.0.1:${await freePort()}`;
   DL = fakeDownloads();
   DL_BASE = await DL.listen();
-  const tests = [testFind, testInstallLinux, testInstallWindows, testInstallMacAndErrors, testStartStop, testPull, testUseAndCheck, testSetupAll, testStartAlfred, testScan, testSafety];
+  const tests = [testFind, testInstallLinux, testInstallWindows, testStalePart, testInstallMacAndErrors, testStartStop, testPull, testUseAndCheck, testSetupAll, testStartAlfred, testScan, testSafety];
   for (const t of tests) { try { await t(); } catch (e) { failed++; console.log(`  FAIL - ${t.name} threw: ${e && e.stack}`); } }
   await reset();
   DL.server.closeAllConnections && DL.server.closeAllConnections(); DL.server.close();

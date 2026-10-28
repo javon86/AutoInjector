@@ -573,7 +573,7 @@ function createAlfred(deps = {}) {
         const id = `card-${seq}-${r.steps}`;
         card = {
           id, req: r, steps: pending,
-          public: { id, intro: msg.content ? String(msg.content).slice(0, 600) : '', steps: pending.map((p, i) => ({ n: i + 1, tool: p.tool.name, title: p.tool.title, text: p.text, allowAlways: registry.canAllowAlways(p.tool, p.args), allowKey: registry.allowKeyOf(p.tool, p.args), code: p.tool.interpreter ? { language: p.args.language, code: p.args.code } : null })) },
+          public: { id, intro: msg.content ? String(msg.content).slice(0, 600) : '', steps: pending.map((p, i) => ({ n: i + 1, tool: p.tool.name, title: p.tool.title, text: p.text, allowAlways: registry.canAllowAlways(p.tool, p.args), allowKey: registry.allowKeyOf(p.tool, p.args), code: p.tool.interpreter ? { language: p.args.language, code: p.args.code } : (typeof p.tool.showCode === 'function' ? p.tool.showCode(p.args) : null) })) },
         };
         log('alfred-card', { req: r.id, card: id, tools: pending.map((p) => p.tool.name) });
         emit({ type: 'card', card: card.public });

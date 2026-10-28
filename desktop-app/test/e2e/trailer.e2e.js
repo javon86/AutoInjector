@@ -99,7 +99,7 @@ async function main() {
     const file = decodeURIComponent(new URL(src).pathname).replace(/^\/([A-Za-z]:)/, '$1');
     made.push(path.dirname(file));
     videosDir = path.dirname(path.dirname(path.dirname(file)));
-    assert(fs.existsSync(file) && path.basename(file) === 'trailer.webm' && path.basename(path.dirname(file)) === book && path.basename(path.dirname(path.dirname(file))) === 'trailers', 'saved as videos/trailers/<book>/trailer.webm');
+    assert(fs.existsSync(file) && /^trailer-[a-z0-9]+-[A-Za-z0-9]+\.webm$/.test(path.basename(file)) && path.basename(path.dirname(file)) === book && path.basename(path.dirname(path.dirname(file))) === 'trailers', 'saved as videos/trailers/<book>/trailer-<stamp>.webm (a new name each time: Windows locks the one playing)');
     const buf = fs.readFileSync(file);
     const pr = W.probeWebm(buf);
     assert(pr.ok && pr.tracks.some((t) => t.type === 'video' && /V_VP[89]/.test(t.codec)), `a WebM with a VP9/VP8 video track (${pr.tracks.map((t) => t.codec).join(', ')})`);
@@ -128,9 +128,9 @@ async function main() {
     }));
     if (ffmpeg) assert(frames.length === 3 && frames[0].sat > 40 && frames[1].sat > 40 && frames[2].sat < 15 && frames[2].mean < 60, `the frames: two colourful clips, then the dark title card (${frames.map((f) => `${f.t}s mean ${Math.round(f.mean)} sat ${Math.round(f.sat)}`).join('; ')})`);
     else assert(frames.length === 3, 'the player seeks through it (clip, clip, card)');
-    const mp4 = path.join(path.dirname(file), 'trailer.mp4');
+    const mp4 = file.replace(/\.webm$/, '.mp4');
     if (ffmpeg) {
-      assert(fs.existsSync(mp4) && /\.mp4/.test(msg), 'ffmpeg is on this PC → trailer.mp4 too');
+      assert(fs.existsSync(mp4) && /\.mp4/.test(msg), 'ffmpeg is on this PC → the .mp4 too');
       const probe = childProcess.spawnSync(ffmpeg, ['-hide_banner', '-i', mp4], { encoding: 'utf8' }).stderr || '';
       const m = probe.match(/Duration: (\d+):(\d+):([\d.]+)/);
       const secs = m ? Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]) : -1;

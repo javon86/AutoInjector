@@ -4,7 +4,8 @@
 // It hands out an Mcp-Session-Id on initialize and wants it back; with `token` it wants
 // "Authorization: Bearer <token>". With sse:true tools/call answers as a short text/event-stream
 // (a notification first, then the result). tools/list is paged (one tool per page). forgetSessions()
-// makes the next request with an old session answer 404 (as after a server restart).
+// makes the next request with an old session answer 404 (as after a server restart). callDelayMs: tools/call
+// answers only after that long (the socket stays idle meanwhile).
 const http = require('http');
 function startFakeMcpHttp(opts = {}) {
   const state = { requests: [], sessions: new Set(), deleted: 0, auth: [] };
@@ -34,6 +35,10 @@ function startFakeMcpHttp(opts = {}) {
         const i = msg.params && msg.params.cursor ? Number(msg.params.cursor) : 0;
         res.writeHead(200, { 'Content-Type': 'application/json' });
         return res.end(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: Object.assign({ tools: TOOLS.slice(i, i + 1) }, i + 1 < TOOLS.length ? { nextCursor: String(i + 1) } : {}) }));
+      }
+      if (msg.method === 'tools/call' && opts.callDelayMs && !req.__delayed) { // a slow tool: nothing is sent for a while
+        req.__delayed = true;
+        return setTimeout(() => { if (!res.destroyed && !res.writableEnded) { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { content: [{ type: 'text', text: 'slow noon' }] } })); } }, opts.callDelayMs);
       }
       if (msg.method === 'tools/call') {
         const a = (msg.params && msg.params.arguments) || {};

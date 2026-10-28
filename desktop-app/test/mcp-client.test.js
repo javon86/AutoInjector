@@ -72,6 +72,57 @@ async function main() {
   r = await c.callTool('echo', { text: 'x' });
   assert(!r.ok && r.error === 'NOT_CONNECTED', 'a stopped server says so');
 
+  console.log('\n== Windows: the whole process tree is ended (taskkill /T /F), not just cmd.exe ==');
+  {
+    const cp = require('child_process');
+    const killed = []; let plainKills = 0;
+    const wspawn = (cmdLine, args, opts) => { // shell:true on Windows: start the fake server, and spy on ch.kill()
+      const ch = cp.spawn(process.execPath, [FAKE], { stdio: opts.stdio });
+      const orig = ch.kill.bind(ch); ch.kill = (sig) => { plainKills++; return orig(sig); };
+      return ch;
+    };
+    const wexec = (cmd, args, o2, cb) => { killed.push([cmd, ...args].join(' ')); try { process.kill(Number(args[1]), 'SIGKILL'); } catch (_) {} if (cb) setImmediate(() => cb(null)); };
+    const w = stdio({ platform: 'win32', spawn: wspawn, execFile: wexec });
+    const ws = await w.start();
+    const wpid = w.status().pid;
+    assert(ws.ok && wpid, 'a Windows-style (shell) server starts');
+    w.killNow();
+    assert(killed.length === 1 && killed[0] === `taskkill /pid ${wpid} /T /F` && plainKills === 0, `killNow → taskkill /pid ${wpid} /T /F (not ch.kill)`);
+    assert(await until(() => !alive(wpid), 2000), 'and the server is gone');
+    // killAll (the app quitting) goes through killNow for every server
+    const wm = createMcpManager({ file: path.join(TMP, 'win.json'), seal: () => null, open: () => '', spawn: wspawn, clientOptions: { platform: 'win32', execFile: wexec } });
+    const wa = wm.add({ name: 'winsrv', line: `"${process.execPath}" "${FAKE}"` });
+    await wm.start(wa.server.id);
+    const before = killed.length;
+    wm.killAll();
+    assert(killed.length === before + 1 && /^taskkill \/pid \d+ \/T \/F$/.test(killed[killed.length - 1]), 'killAll on Windows → taskkill for each server');
+    const lin = []; const lc = stdio({ platform: 'linux', execFile: (...a) => lin.push(a) });
+    await lc.start(); const lpid = lc.status().pid; lc.killNow();
+    assert(!lin.length && await until(() => !alive(lpid), 2000), 'elsewhere it is a plain kill (no taskkill)');
+  }
+
+  console.log('\n== a call\'s own time limit reaches the server (not the manager\'s default) ==');
+  {
+    const tm = createMcpManager({ file: path.join(TMP, 'timeouts.json'), seal: () => null, open: () => '', timeoutMs: 300 });
+    const ta = tm.add({ name: 'slowpoke', line: `"${process.execPath}" "${FAKE}"` });
+    await tm.start(ta.server.id);
+    let tr = await tm.call('slowpoke', 'slow', { ms: 900 });
+    assert(!tr.ok && tr.error === 'TIMEOUT', 'without a time limit the manager\'s default applies');
+    tr = await tm.call('slowpoke', 'slow', { ms: 900 }, { timeoutMs: 5000 });
+    assert(tr.ok && tr.text === 'finally', 'call(ref, tool, args, { timeoutMs }) passes the longer limit through to callTool');
+    await tm.stopAll();
+    const src = fs.readFileSync(path.join(__dirname, '..', 'alfred-tools.js'), 'utf8') + fs.readFileSync(path.join(__dirname, '..', 'alfred-main.js'), 'utf8');
+    assert(/ctx\.mcpCall\(a\.server, a\.tool, a\.arguments \|\| \{\}, \{ timeoutMs: MCP_CALL_MS \}\)/.test(src) && /h\.mcp\.call\(server, tool, args, opts\)/.test(src), 'Alfred\'s mcp_call hands its own (180 s) limit to the manager');
+    // HTTP: the socket idle timeout never cuts a request before the request's own limit
+    const hs2 = await startFakeMcpHttp({ callDelayMs: 2600 });
+    const slowHttp = createMcpClient({ name: 'slowweb', transport: 'http', url: hs2.url, timeoutMs: 300, initTimeoutMs: 300 });
+    assert(slowHttp.httpIdleMs(180000) === 182000 && slowHttp.httpIdleMs() === 3000, 'HTTP idle timeout = max(request limit, timeoutMs, initTimeoutMs) + 2 s');
+    await slowHttp.start();
+    tr = await slowHttp.callTool('when', {}, { timeoutMs: 6000 });
+    assert(tr.ok && tr.text === 'slow noon', `a slow HTTP tool call within its own limit is not cut by the socket timeout (${tr.message || 'ok'})`);
+    await slowHttp.stop(); await hs2.close();
+  }
+
   console.log('\n== stdio: start errors in plain words, secrets never shown ==');
   let e = await createMcpClient({ name: 'missing', command: 'definitely-not-a-program-xyz', args: [], initTimeoutMs: 3000 }).start();
   assert(!e.ok && /isn't installed/.test(e.message), `a program that isn't there → "${e.message}"`);
@@ -148,6 +199,9 @@ async function main() {
   assert(!tp.has('mcp:files/echo') && m.find('files').status === 'stopped', 'stop → stopped and its tools leave the registry');
   r = await m.call('files', 'echo', { text: 'wake' });
   assert(r.ok && r.text === 'echo: wake', 'a call to a stopped server starts it first');
+  assert(m.find('files').enabled === false && JSON.parse(fs.readFileSync(file, 'utf8')).servers.find((x) => x.name === 'files').enabled === false, '…without undoing the user\'s Stop (not saved as "start with the app")');
+  await m.start('files');
+  assert(m.find('files').enabled === true, 'pressing Start still turns "start with the app" on');
   // a fresh manager (= the app restarted) reads the file, opens the secret, starts the enabled server
   const m2 = createMcpManager({ file, seal, open, timeoutMs: 4000 });
   const as = await m2.autoStart();
@@ -158,6 +212,27 @@ async function main() {
   const m3 = createMcpManager({ file: path.join(TMP, 'plain.json'), seal: () => null, open: () => '' });
   a = m3.add({ name: 'nokeychain', line: 'node x.js', secrets: 'K=value-123456' });
   assert(a.ok && a.server.secretsNotSaved && /only until AutoInjector closes/.test(a.message) && !/value-123456/.test(fs.readFileSync(path.join(TMP, 'plain.json'), 'utf8')), 'without a keychain the secret is kept for this session only, never written');
+  { // a secret that couldn't be sealed leaves a placeholder → the next run says "needs its secrets again"
+    const pf = path.join(TMP, 'placeholder.json');
+    const p1 = createMcpManager({ file: pf, seal: () => null, open: () => '' });
+    p1.add({ name: 'nokc', line: 'node x.js', secrets: 'K=value-777777' });
+    const disk = fs.readFileSync(pf, 'utf8');
+    assert(!/value-777777/.test(disk) && JSON.parse(disk).servers[0].env.K && JSON.parse(disk).servers[0].env.K.enc === null, 'unsealable secret → {enc:null} on disk (never the value)');
+    const p2 = createMcpManager({ file: pf, seal, open });
+    const st2 = await p2.start('nokc');
+    assert(p2.find('nokc').missingSecrets.includes('K') && !st2.ok && st2.error === 'MISSING_SECRETS' && /needs its secrets again/.test(st2.message), 'next run: "needs its secrets again (K)" instead of starting without it');
+    // a keychain that can't open the blob this run: the sealed blob is carried over, not erased
+    const cf = path.join(TMP, 'carry.json');
+    const c1 = createMcpManager({ file: cf, seal, open });
+    c1.add({ name: 'carry', line: 'node x.js', secrets: 'API_KEY=carry-secret-1234' });
+    const blob = JSON.parse(fs.readFileSync(cf, 'utf8')).servers[0].env.API_KEY.enc;
+    const c2 = createMcpManager({ file: cf, seal, open: () => '' });
+    assert(c2.find('carry').missingSecrets.includes('API_KEY'), 'a run whose keychain can\'t open it lists the key as missing');
+    c2.add({ name: 'other', line: 'node y.js' }); // any save
+    assert(JSON.parse(fs.readFileSync(cf, 'utf8')).servers.find((x) => x.name === 'carry').env.API_KEY.enc === blob, 'saving in that run writes the original sealed blob back');
+    const c3m = createMcpManager({ file: cf, seal, open });
+    assert(!c3m.find('carry').missingSecrets.length && c3m.find('carry').envKeys.includes('API_KEY'), 'a later run with the keychain back has the secret again');
+  }
   await m.remove('files');
   assert(m.list().servers.length === 0 && !/files/.test(fs.readFileSync(file, 'utf8')), 'remove deletes it from the list and the file');
   assert(!logs.some((l) => /tok-MANAGER-4242/.test(l)), 'nothing logged contains the secret');

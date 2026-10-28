@@ -576,7 +576,18 @@ async function main() {
   d = await drive('open_output', { path: png });
   check('open_output', d.carded && opened.includes(path.resolve(png)), 'asks, then opens the file (shell.openPath)');
   d = await drive('open_output', { path: path.join(CONTENT, 'stuff and thing', 'evil.bat') });
-  assert(d.carded && /never open programs|does not exist|OUTSIDE/.test(d.text), 'open_output never opens programs/scripts or files outside the output folders');
+  assert(d.carded && /only open pictures|does not exist|OUTSIDE/.test(d.text), 'open_output never opens programs/scripts or files outside the output folders');
+  { // an allowlist: only documents and media open, even when the file exists in the output folder
+    const stuffDir = path.dirname(png);
+    for (const bad of ['evil.bat', 'evil.msix', 'evil.appref-ms', 'evil.url', 'evil.desktop', 'evil.scf', 'noext']) {
+      const f = path.join(stuffDir, bad); fs.writeFileSync(f, 'x');
+      const before = opened.length;
+      d = await drive('open_output', { path: f });
+      assert(d.carded && opened.length === before && /only open pictures, videos, sounds and documents/.test(d.text), `open_output refuses ${bad} plainly (allowlist)`);
+      fs.rmSync(f, { force: true });
+    }
+    assert(['a.png', 'b.JPG', 'c.mp4', 'd.pdf', 'e.docx', 'f.epub', 'g.csv', 'h.md', 'i.html', 'j.svg'].every(alfredMain.canOpenOutput) && !['x.exe', 'x.js', 'x.lnk', 'x.htm', 'x.zip', 'png', ''].some(alfredMain.canOpenOutput), 'canOpenOutput: documents/media yes, everything else no');
+  }
   d = await drive('export_logs', { scope: 'day' });
   const logFile = d.result && d.result.data && d.result.data.file;
   check('export_logs', d.carded && logFile && fs.existsSync(logFile), 'asks, then writes the log extract to the logs folder');

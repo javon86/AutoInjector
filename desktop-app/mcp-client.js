@@ -134,7 +134,17 @@ function createMcpClient(options = {}) {
     name: 'tool server', transport: 'stdio', command: '', args: [], env: {}, cwd: undefined,
     url: '', headers: {}, timeoutMs: 30000, initTimeoutMs: 30000, maxRestarts: 3, restartWindowMs: 60000,
     restartDelayMs: 500, spawn: cp.spawn, platform: process.platform, log: () => {}, onChange: () => {}, saveImage: null,
+    execFile: cp.execFile, // for taskkill on Windows (injectable for tests)
   }, options);
+  // On Windows the server runs under cmd.exe (shell:true), so ch.kill() would only end cmd.exe and leave the real
+  // server (node / python …) running: taskkill /T /F ends the whole tree, like sd-runner does.
+  function killProc(ch, sig) {
+    if (!ch) return;
+    if (o.platform === 'win32' && ch.pid) {
+      try { o.execFile('taskkill', ['/pid', String(ch.pid), '/T', '/F'], { windowsHide: true }, () => {}); return; } catch (_) {}
+    }
+    try { ch.kill(sig); } catch (_) {}
+  }
   const name = String(o.name || 'tool server');
   const transport = o.transport === 'http' ? 'http' : 'stdio';
   const secretValues = [...Object.values(o.env || {}), ...Object.values(o.headers || {})];
@@ -215,7 +225,7 @@ function createMcpClient(options = {}) {
       pending.set(id, { resolve, reject, timer, method });
       const msg = { jsonrpc: '2.0', id, method };
       if (params !== undefined) msg.params = params;
-      sendRaw(msg).then((delivered) => {
+      sendRaw(msg, ms).then((delivered) => {
         // http: the exchange is over; if our answer wasn't in it, it never will be
         if (transport === 'http' && delivered && pending.has(id)) {
           const p = pending.get(id); clearTimeout(p.timer); pending.delete(id);
@@ -233,7 +243,8 @@ function createMcpClient(options = {}) {
     if (params !== undefined) msg.params = params;
     return sendRaw(msg);
   }
-  function sendRaw(msg) { return transport === 'http' ? httpSend(msg) : stdioSend(msg); }
+  function httpIdleMs(waitMs) { return Math.max(1000, Number(waitMs) || 0, Number(o.timeoutMs) || 0, Number(o.initTimeoutMs) || 0) + 2000; }
+  function sendRaw(msg, ms) { return transport === 'http' ? httpSend(msg, ms) : stdioSend(msg); }
 
   // ---------------------------------------------------------------- stdio transport
   function stdioSend(msg) {
@@ -316,7 +327,7 @@ function createMcpClient(options = {}) {
   }
 
   // ---------------------------------------------------------------- http transport
-  function httpSend(msg) {
+  function httpSend(msg, waitMs) {
     let u;
     try { u = new URL(o.url); } catch (_) { return Promise.reject(Object.assign(new Error(`"${shownUrl}" is not a web address.`), { code: 'BAD_URL' })); }
     const lib = u.protocol === 'https:' ? https : http;
@@ -389,7 +400,9 @@ function createMcpClient(options = {}) {
       });
       httpReqs.add(req);
       req.on('error', (e) => done(Object.assign(new Error(plainNetError(e, shownUrl)), { code: e.code || 'NET_ERROR' })));
-      req.setTimeout(Math.max(1000, o.timeoutMs + 2000), () => { try { req.destroy(Object.assign(new Error('timeout'), { code: 'ETIMEDOUT' })); } catch (_) {} });
+      // The socket may sit idle for as long as this request may take (a 180 s tool call, a slow initialize):
+      // never cut it before the request's own timeout gives up.
+      req.setTimeout(httpIdleMs(waitMs), () => { try { req.destroy(Object.assign(new Error('timeout'), { code: 'ETIMEDOUT' })); } catch (_) {} });
       req.end(body);
     });
   }
@@ -466,7 +479,7 @@ function createMcpClient(options = {}) {
   }
   function killNow() {
     const ch = child; childGen++; child = null;
-    if (ch) { try { ch.stdin && ch.stdin.end(); } catch (_) {} try { ch.kill('SIGKILL'); } catch (_) {} }
+    if (ch) { try { ch.stdin && ch.stdin.end(); } catch (_) {} killProc(ch, 'SIGKILL'); }
     for (const r of httpReqs) { try { r.destroy(); } catch (_) {} }
     httpReqs.clear();
   }
@@ -483,8 +496,8 @@ function createMcpClient(options = {}) {
         ch.once('exit', end);
         if (ch.exitCode != null || ch.signalCode != null) return end();
         try { ch.stdin && ch.stdin.end(); } catch (_) {}
-        const t1 = setTimeout(() => { try { ch.kill('SIGTERM'); } catch (_) {} }, 1500);
-        const t2 = setTimeout(() => { try { ch.kill('SIGKILL'); } catch (_) {} setTimeout(end, 300); }, 3500);
+        const t1 = setTimeout(() => killProc(ch, 'SIGTERM'), 1500);
+        const t2 = setTimeout(() => { killProc(ch, 'SIGKILL'); setTimeout(end, 300); }, 3500);
       });
     }
     if (transport === 'http') {
@@ -544,7 +557,7 @@ function createMcpClient(options = {}) {
   }
 
   return {
-    start, stop, killNow, callTool,
+    start, stop, killNow, callTool, httpIdleMs,
     listTools: async (opts = {}) => {
       if (opts.refresh && status === 'connected') { try { tools = await listAllTools(); changed(); } catch (e) { return fail(e.code || 'LIST_FAILED', e.message); } }
       return { ok: status === 'connected', tools: tools.slice() };
