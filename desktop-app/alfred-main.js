@@ -9,14 +9,15 @@
  *   AI panes         sendTextTo + the captured replies, the self-repair check-in, pane health
  *   files / logs     the output folders, the log Extract ("This book only")
  *   Open Interpreter interpreter-provider.js (only when turned on in Alfred's settings)
- * IPC: alfred:* handlers; UI events go out on the "alfred" channel — to the control panel AND to his
- * floating side panel window (alfred-window.js / alfred-window.html), so both show the same state.
+ * IPC: alfred:* handlers; UI events go out on the "alfred" channel to the control panel, where his side
+ * panel (alfred-panel.js) is docked beside the app on every tab. Ctrl/Cmd+Shift+A from ANY page of the
+ * app (control panel, AI panes, Akọwe …) shows / hides it (before-input-event on every webContents).
  */
 const fs = require('fs');
 const path = require('path');
 const { createAlfred } = require('./alfred');
 const { createImageAdapter } = require('./alfred-image');
-const { createAlfredWindow } = require('./alfred-window');
+const catalogLib = require('./alfred-catalog');
 
 const NEVER_OPEN = /\.(exe|bat|cmd|com|ps1|psm1|vbs|vbe|js|jse|wsf|wsh|msi|msp|scr|lnk|jar|sh|bash|py|pyw|app|command|reg|hta|cpl|dll)$/i;
 
@@ -128,6 +129,17 @@ async function sdMethodsOf(api) {
   });
 }
 function resolvePath(api, method) { return method.split('.').reduce((o, k) => (o && typeof o === 'object' ? o[k] : undefined), api); }
+
+/** Ctrl+Shift+A (Cmd+Shift+A on macOS) as an Electron before-input-event `input`. */
+function isToggleShortcut(input, platform) {
+  if (!input || input.type !== 'keyDown' || input.isAutoRepeat) return false;
+  const key = String(input.key || '').toLowerCase();
+  const code = String(input.code || '');
+  if (key !== 'a' && code !== 'KeyA') return false;
+  if (!input.shift || input.alt) return false;
+  return platform === 'darwin' ? !!input.meta : !!input.control && !input.meta;
+}
+const SHORTCUT_LABEL = (platform) => (platform === 'darwin' ? 'Cmd+Shift+A' : 'Ctrl+Shift+A');
 
 function videoModule() { try { return require('./video-api').get(); } catch (_) { return null; } }
 
@@ -282,13 +294,7 @@ function installAlfred(h) {
     },
   };
 
-  // 🎩 his floating side panel (alfred-window.js). Every Alfred event goes to BOTH the control panel
-  // (h.broadcast) and this window; the window follows his state (on/off, mode, open).
-  let panel = null;
-  const alfredEmit = (payload) => {
-    h.broadcast('alfred', payload);
-    if (panel) { panel.send('alfred', payload); if (payload && payload.type === 'state') { try { panel.sync(); } catch (_) {} } }
-  };
+  const alfredEmit = (payload) => h.broadcast('alfred', payload);
   const alfred = createAlfred({
     settingsFile: path.join(h.userDataDir(), 'alfred-settings.json'),
     ctx,
@@ -306,20 +312,38 @@ function installAlfred(h) {
     },
   });
 
-  panel = createAlfredWindow({
-    BrowserWindow: h.BrowserWindow, screen: h.screen, platform: h.platform || process.platform,
-    getMainWindow: () => (typeof h.mainWindow === 'function' ? h.mainWindow() : null),
-    getSettings: () => alfred.getSettings(),
-    setPanel: (patch, opts) => alfred.setPanel(patch, opts),
-    htmlFile: path.join(__dirname, 'alfred-window.html'),
-    preload: path.join(__dirname, 'alfred-window-preload.js'),
-    log: (kind, detail) => h.logEvent(kind, detail),
-    toggleDocked: (open) => h.broadcast('alfred', { type: 'toggle-panel', open: typeof open === 'boolean' ? open : null }),
-  });
-  // Ctrl/Cmd+Shift+A from ANY page of the app (control panel, AI panes, Akọwe, the panel itself).
+  // 🎩 his side panel lives in the control panel (docked beside the app, on every tab). main only knows
+  // the shortcut: Ctrl/Cmd+Shift+A from ANY page of the app (control panel, AI panes, the Akọwe page …).
+  const platform = h.platform || process.platform;
+  const panel = {
+    shortcut: SHORTCUT_LABEL(platform),
+    state: () => ({ ok: true, mode: 'docked', open: alfred.getSettings().panel.open !== false, shortcut: SHORTCUT_LABEL(platform) }),
+    /** Show / hide the side panel (open: true / false, or undefined = flip). */
+    toggle(open) {
+      if (!alfred.isEnabled()) return Object.assign(panel.state(), { ok: false, error: 'OFF', message: 'Alfred is off. Turn him on with the 🎩 switch.' });
+      h.broadcast('alfred', { type: 'toggle-panel', open: typeof open === 'boolean' ? open : null });
+      if (open === true) {
+        const m = typeof h.mainWindow === 'function' ? h.mainWindow() : null;
+        try { if (m && !m.isDestroyed()) { if (m.isMinimized && m.isMinimized()) m.restore(); m.focus(); } } catch (_) {}
+      }
+      return Object.assign(panel.state(), { docked: true });
+    },
+    onInput(event, input) {
+      if (!isToggleShortcut(input, platform)) return false;
+      if (!alfred.isEnabled()) return false; // Alfred off: the key belongs to the page
+      try { if (event && event.preventDefault) event.preventDefault(); } catch (_) {}
+      h.logEvent('alfred-panel', { step: 'shortcut' });
+      panel.toggle();
+      return true;
+    },
+    attachShortcut(wc) {
+      if (!wc || typeof wc.on !== 'function' || wc.__alfredShortcut) return;
+      wc.__alfredShortcut = true;
+      wc.on('before-input-event', (e, input) => { panel.onInput(e, input); });
+    },
+  };
   if (h.app && typeof h.app.on === 'function') {
     try { h.app.on('web-contents-created', (_e, wc) => panel.attachShortcut(wc)); } catch (_) {}
-    try { h.app.on('before-quit', () => panel.markQuitting()); } catch (_) {}
   }
 
   // App events -> the watcher (ignored while Alfred is off; the listener itself does nothing then).
@@ -350,17 +374,19 @@ function installAlfred(h) {
   ipcMain.handle('alfred:profile-save', safe((_e, p) => alfred.saveProfile(p || {})));
   ipcMain.handle('alfred:profile-use', safe((_e, p) => alfred.useProfile(p && p.name)));
   ipcMain.handle('alfred:profile-delete', safe((_e, p) => alfred.deleteProfile(p && p.name)));
-  // his side panel: mode (floating / docked), on top of other programs, show / hide, "Set up his AI"
-  ipcMain.handle('alfred:panel', safe((_e, patch) => {
-    if (patch && typeof patch === 'object') {
-      const pick = {};
-      if ('mode' in patch) pick.mode = patch.mode;
-      if ('otherApps' in patch) pick.otherApps = !!patch.otherApps;
-      if (Object.keys(pick).length) alfred.setPanel(pick);
-    }
-    return panel.sync();
+  // his side panel: where it is (always docked) + show / hide; "Set up his AI"
+  ipcMain.handle('alfred:panel', safe(() => panel.state()));
+  ipcMain.handle('alfred:panel-toggle', safe((_e, p) => panel.toggle(p && typeof p.open === 'boolean' ? p.open : undefined)));
+  // "❓ Everything I can do" (read-only): the grouped list from the same registries he uses
+  ipcMain.handle('alfred:catalog', safe(() => catalogLib.build({ interpreter: !!alfred.getSettings().interpreter })));
+  // the side panel's big buttons ask first whether Akọwe has a book (read-only, no AI call)
+  ipcMain.handle('alfred:books', safe(async () => {
+    if (!h.akoweServerBase()) return { ok: true, akowe: false, books: [], message: 'Akọwe (the book app) is not running yet — open the 📖 Akọwe tab first.' };
+    const r = await h.akoweApi('GET', '/api/projects', undefined, 8000);
+    if (!r || !(r.status >= 200 && r.status < 300)) return { ok: false, akowe: true, books: [], message: 'I could not reach Akọwe just now — try again in a moment.' };
+    const books = (Array.isArray(r.json) ? r.json : []).slice(0, 50).map((b) => ({ project_id: b.project_id, title: String(b.name || b.title || b.project_id || '').slice(0, 120) }));
+    return { ok: true, akowe: true, books };
   }));
-  ipcMain.handle('alfred:panel-toggle', safe((_e, p) => panel.toggle(p && typeof p.open === 'boolean' ? p.open : undefined, { focus: true })));
   ipcMain.handle('alfred:show-butler', safe(() => {
     const m = typeof h.mainWindow === 'function' ? h.mainWindow() : null;
     try { if (m && !m.isDestroyed()) { if (m.isMinimized && m.isMinimized()) m.restore(); m.focus(); } } catch (_) {}
@@ -371,4 +397,4 @@ function installAlfred(h) {
   return alfred;
 }
 
-module.exports = { installAlfred, captureIpc, ipcHandlers, invokeChannel, sdMethodsOf, SD_META, GENERATE_SCHEMA };
+module.exports = { installAlfred, captureIpc, ipcHandlers, invokeChannel, sdMethodsOf, SD_META, GENERATE_SCHEMA, isToggleShortcut, SHORTCUT_LABEL };

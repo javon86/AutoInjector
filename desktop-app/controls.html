@@ -322,6 +322,7 @@
     .butler-status.working .dot { background:#38e07b; box-shadow:0 0 0 0 rgba(56,224,123,.6); animation:butlerPulse 1.2s ease-out infinite; }
     .butler-status.needs .dot { background:#f5b642; }
     .butler-status.error .dot { background:#e5484d; }
+    .butler-status.off { opacity:.75; } .butler-status.off .dot { background:#3a3f4a; }
     @keyframes butlerPulse { 0%{box-shadow:0 0 0 0 rgba(56,224,123,.55);} 70%{box-shadow:0 0 0 7px rgba(56,224,123,0);} 100%{box-shadow:0 0 0 0 rgba(56,224,123,0);} }
 
     /* ---- The User Panel stays put at the top; everything below scrolls past
@@ -1668,13 +1669,13 @@
             <p class="zone-label">Send</p>
             <p class="zone-label">Active</p>
           </div>
-          <button id="btn-butler-mode" class="butler-mode mode-auto" title="How the butler handles what you send him — click to change. Converse: just chat & he replies. Auto: he decides (computer tasks like 'install…' auto-go to him). Himself: he does it locally, never the AIs. Delegate: he routes it to ChatGPT/Claude/Gemini. Tip: start a message with ! to force 'himself'.">
-            <span class="mode-ic">🔀</span><span class="mode-tx">Auto</span>
+          <button id="btn-butler-mode" class="butler-mode mode-auto" title="What 🎩 Alfred thinks with — click to change: Auto (a local model, else the connected AI) → Local (Ollama on this PC) → Connected AI → a Web AI pane. Set it up in the 🎩 Butler section." aria-label="What Alfred thinks with — click to change">
+            <span class="mode-ic">🧠</span><span class="mode-tx">Auto</span>
           </button>
         </div>
         <div class="btns" id="up-actions-extra">
-          <button id="btn-butler-status" class="grid-full butler-status" title="The butler's live status — glows while he's working. Click to jump to his panel." aria-label="Butler status — click to open the butler panel">
-            <span class="dot"></span><span class="txt">Butler idle</span>
+          <button id="btn-butler-status" class="grid-full butler-status off" title="🎩 Alfred's state: off · idle · working · needs you (a card is waiting). Click to open his side panel (turns him on when he is off)." aria-label="Alfred's state — click to open his side panel">
+            <span class="dot"></span><span class="txt">🎩 Alfred off</span>
           </button>
           <button id="btn-open-roles">🎭 Roles</button>
           <button id="btn-open-sequence" title="Build a numbered list of prompts to fire off one after another" aria-label="Build a numbered list of prompts to fire off one after another">🧵 Sequence</button>
@@ -1682,10 +1683,10 @@
           <button id="btn-open-image" title="Set up image generation (Stable Diffusion)" aria-label="Set up image generation (Stable Diffusion)">🖼️ Image</button>
           <button id="btn-open-video" title="Set up video generation" aria-label="Set up video generation">🎬 Video</button>
           <button id="btn-new-chat-all" title="Start a fresh chat in all three AIs at once (ChatGPT, Claude and Gemini)" aria-label="Start a fresh chat in all three AIs at once (ChatGPT, Claude and Gemini)">🆕 New Chat</button>
-          <button id="btn-ai-toggle" class="auto-toggle" title="Turn the System AI (Local Supervisor) on/off. Open the System AI panel for detail." aria-label="Turn the System AI (Local Supervisor) on/off. Open the System AI panel for detail.">🤖 System AI: Off</button>
+          <button id="btn-ai-toggle" class="auto-toggle" role="switch" aria-checked="false" title="Turn 🎩 Alfred on or off (the same as the 🎩 switch in the title bar). On: his side panel opens beside the app." aria-label="Turn Alfred on or off">🎩 Alfred: Off</button>
           <button id="btn-open-feed" title="Open a separate window that shows every AI's messages as colour-coded bubbles — open/close it any time" aria-label="Open a separate window that shows every AI's messages as colour-coded bubbles — open/close it any time">💬 AI Feed</button>
           <button id="btn-open-phone" title="Connect an Android phone (or any phone) on the same Wi-Fi to watch the messages and send from your phone. The PC does all the work." aria-label="Connect a phone to view messages and send remotely">📱 Phone</button>
-          <button id="btn-capability-test" title="Actually run each of the butler's capabilities once (code, file, tool, memory, image, video, voice, and ping each AI). Results stream to the Activity Log below." aria-label="Run the butler capability test; results go to the Activity Log">🧪 Capability Test</button>
+          <button id="btn-capability-test" title="🩺 Check Alfred: his AI (installed, running, answering) and the whole app (disk, Stable Diffusion, Akọwe, the AI panes) — no AI needed. The results show in his side panel, or in the Activity Log while he is off." aria-label="Check Alfred and the whole app; results in his side panel or the Activity Log">🩺 Check Alfred</button>
           <button id="btn-feature-test" title="Feature Test: walks every Active AI through every feature for real (reply, locker write/read/give/send/share, safety, routing) one step at a time, checks each result itself, and shows what works and what doesn't — plus a saved report of how each AI's replies actually end. Click again to stop." aria-label="Run the feature test on every active AI">🔬 Feature Test</button>
           <button id="btn-extract-all" title="Save the AI conversation and the activity/error log to a text file in the program's logs folder — you choose what goes in (this Akọwe book only, a time range, or everything) and see a preview first" aria-label="Extract: choose what to save (this book only, a time range, or everything) and save it to a text file">⤓ Extract All</button>
           <button id="btn-silence" class="danger grid-full" title="Stop the AIs messaging each other — halts Auto, House Rules, Sequences and the Butler at once (keeps your participants checked)" aria-label="Stop the AIs messaging each other — halts all relay at once">🛑 Stop AIs Talking</button>

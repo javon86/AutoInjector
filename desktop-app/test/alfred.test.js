@@ -669,123 +669,175 @@ async function main() {
     const b = createAlfred({ settingsFile: file, noTimers: true });
     const bs = b.status().settings;
     assert(bs.profiles.length === 1 && bs.profiles[0].brain === 'auto' && bs.profiles[0].maxSteps === 20 && bs.profiles[0].personality.chattiness === 1 && bs.activeProfile === '', 'a corrupt file is cleaned: bad entries dropped, duplicates (any case) dropped, values clamped');
-    assert(bs.panel.mode === 'docked' && bs.panel.bounds === null && bs.panel.open === true && bs.panel.otherApps === false, 'panel settings default to the side panel (docked), open, in the app only');
-    fs.writeFileSync(file, JSON.stringify({ enabled: true, panel: { mode: 'floating' } }));
-    assert(createAlfred({ settingsFile: file, noTimers: true }).status().settings.panel.mode === 'docked', 'a "floating" saved by the old default becomes the side panel');
+    assert(bs.panel.mode === 'docked' && bs.panel.open === true && !('bounds' in bs.panel) && !('otherApps' in bs.panel), 'panel settings: the side panel (docked), open — nothing else');
+    fs.writeFileSync(file, JSON.stringify({ enabled: true, panel: { mode: 'floating', otherApps: true, v: 2, bounds: { x: 1, y: 1, width: 400, height: 500 } } }));
+    assert(createAlfred({ settingsFile: file, noTimers: true }).status().settings.panel.mode === 'docked', 'a "separate window" saved by an older build becomes the side panel');
     assert(b.setSettings({ profiles: [], activeProfile: 'x' }).profiles.length === 1, 'set-ups change only through the set-up functions (not alfred:settings)');
   }
 
-  console.log('\n== where his panel lives (settings.panel) ==');
+  console.log('\n== where his panel lives (settings.panel): always the side panel ==');
   {
     const { a, events } = make({});
     const n = events.length;
-    let p = a.setPanel({ bounds: { x: 10, y: 20, width: 400, height: 600 } }, { quiet: true });
-    assert(p.bounds.width === 400 && events.length === n, 'bounds are saved quietly (no UI refresh on every move)');
-    p = a.setPanel({ mode: 'floating' });
-    assert(p.mode === 'floating' && events.slice(n).some((e) => e.type === 'state'), 'choosing the separate window tells both panels');
-    p = a.setPanel({ mode: 'docked' });
-    assert(p.mode === 'docked', 'and back to the side panel');
-    p = a.setPanel({ mode: 'weird', otherApps: 'yes', bounds: { x: 1, y: 2, width: -5, height: 10 } });
-    assert(p.mode === 'docked' && p.otherApps === false && p.bounds === null, 'bad values are cleaned (unknown mode -> the side panel, otherApps only when true, bad bounds dropped)');
+    let p = a.setPanel({ mode: 'floating', otherApps: true });
+    assert(p.mode === 'docked' && !('otherApps' in p) && events.length === n, 'there is no separate window any more: a "floating" request changes nothing');
+    p = a.setPanel({ open: false });
+    assert(p.open === false && p.mode === 'docked' && events.slice(n).some((e) => e.type === 'state'), 'only open / closed is remembered');
+    a.setPanel({ open: true });
   }
 
-  console.log('\n== the same panel UI renders in the floating window and in the drawer ==');
+  console.log('\n== the side panel (alfred-panel.js in controls.html): 8 big buttons, forms, ❓ the catalog ==');
   {
-    const baseSettings = (extra) => Object.assign({ brain: 'local', local: { endpoint: '', model: 'qwen2.5:7b' }, pane: { site: 'chatgpt' }, maxSteps: 8, notices: true, interpreter: false, alwaysAllow: {}, personality: { preset: 'butler', name: 'Jeeves', tone: '', chattiness: 3, custom: '' }, profiles: [{ name: 'Fast local' }, { name: 'Claude brief' }], activeProfile: 'Fast local', panel: { mode: 'floating', otherApps: false, open: true, bounds: null } }, extra || {});
-    const status = (o) => Object.assign({ ok: true, enabled: true, settings: baseSettings(), chat: [{ role: 'you', text: 'hi', ts: 1 }, { role: 'alfred', text: 'Good day.', ts: 2 }], activity: [], card: null, busy: false, ai: {}, connected: {} }, o || {});
-    // 1) the control panel while Floating: no drawer, the "Panel" button toggles his window
+    const baseSettings = (extra) => Object.assign({ brain: 'local', local: { endpoint: '', model: 'qwen2.5:7b' }, pane: { site: 'chatgpt' }, maxSteps: 8, notices: true, interpreter: false, alwaysAllow: {}, personality: { preset: 'butler', name: 'Jeeves', tone: '', chattiness: 3, custom: '' }, profiles: [{ name: 'Fast local' }, { name: 'Claude brief' }], activeProfile: 'Fast local', panel: { mode: 'docked', open: true } }, extra || {});
+    const status = (o) => Object.assign({ ok: true, enabled: true, settings: baseSettings(), chat: [{ role: 'you', text: 'hi', ts: 1 }, { role: 'alfred', text: 'Good day.', ts: 2 }], activity: [], card: null, busy: false, ai: {}, connected: { akowe: true, images: true, panes: 3 } }, o || {});
     const html = fs.readFileSync(path.join(__dirname, '..', 'controls.html'), 'utf8');
     const dom = new JSDOM(html, { runScripts: 'outside-only', pretendToBeVisual: true });
-    const calls = []; let onAlfred = null; let cur = status();
+    const wc = []; let onAlfred = null; let cur = status();
+    let bookList = { ok: true, akowe: true, books: [] };
+    const realCatalog = require('../alfred-catalog').build({});
     dom.window.api = {
       alfredStatus: async () => cur, alfredSetEnabled: async () => cur, onAlfred: (cb) => { onAlfred = cb; }, syncPanes: async () => ({ ok: true }),
-      alfredPanelToggle: async (o) => { calls.push(`toggle:${o}`); return { ok: true }; },
+      alfredAsk: async (t) => { wc.push(`ask:${t}`); return { ok: true }; }, alfredConfirm: async (id) => { wc.push(`confirm:${id}`); return { ok: true }; }, alfredReject: async () => ({ ok: true }),
+      alfredClear: async () => ({ ok: true }), alfredCancel: async () => ({ ok: true }), alfredSettings: async (p) => { wc.push(`settings:${JSON.stringify(p)}`); return {}; }, alfredModels: async () => ({ ok: true, models: [] }),
+      alfredTestAi: async () => { wc.push('test'); return { ok: true, message: 'My AI answers (Ollama, model qwen2.5:7b).' }; },
+      llmCheck: async () => { wc.push('llmCheck'); return { ok: false, summary: '1 thing needs attention: ollama running.', rows: [{ label: 'Ollama installed', ok: true }, { label: 'Ollama running', ok: false, detail: 'press Start' }] }; },
+      healthStatus: async (o) => { wc.push(`health:${JSON.stringify(o)}`); return { ok: true, problems: [{ code: 'sd-down', severity: 'warn', text: 'Stable Diffusion is not running.', fix: { label: '▶ Start Stable Diffusion' } }] }; },
+      healthFix: async (code) => { wc.push(`fix:${code}`); return { ok: true }; },
+      alfredBooks: async () => { wc.push('books'); return bookList; },
+      alfredCatalog: async () => { wc.push('catalog'); return realCatalog; },
+      alfredUseProfile: async (n) => { wc.push(`use:${n}`); return { ok: true, message: `Switched to "${n}".` }; },
+      alfredSaveProfile: async (n) => { wc.push(`save:${n}`); return { ok: true, message: `Saved "${n}".` }; },
     };
     dom.window.eval(fs.readFileSync(path.join(__dirname, '..', 'alfred-panel.js'), 'utf8'));
     await sleep(30);
-    let d = dom.window.document;
-    assert(d.getElementById('btn-alfred-switch').textContent === '🎩 Alfred: On' && !d.getElementById('alfred-drawer') && !d.body.classList.contains('alfred-open'), 'Floating: the control panel has no drawer and reserves no width (his own window floats over the app)');
+    const d = dom.window.document;
+    const msg = () => d.getElementById('alfred-quick-msg').textContent;
+    const fill = (name, v) => { d.getElementById(`alfred-f-${name}`).value = v; };
+    const submit = async () => { d.getElementById('alfred-form').dispatchEvent(new dom.window.Event('submit', { cancelable: true })); await sleep(20); };
+    assert(!!d.getElementById('alfred-drawer') && d.body.classList.contains('alfred-open') && d.getElementById('alfred-title').textContent === '🎩 Jeeves', 'On: the side panel is docked beside the app (with his name)');
+    assert(!d.getElementById('alfred-set-mode') && !d.getElementById('alfred-set-ontop') && !d.getElementById('alfred-window'), 'no "His panel: separate window" choice and no "keep on top" box any more');
     const tg = d.getElementById('btn-alfred-drawer');
-    assert(!!tg && /Panel/.test(tg.textContent) && /Shift\+A/.test(tg.title) && tg.getAttribute('aria-pressed') === 'true', 'the title-bar "Panel" button stays (with the shortcut in its tooltip)');
+    assert(!!tg && tg.textContent === '▸ Panel' && /Shift\+A/.test(tg.title), 'the title-bar "▸ Panel" button (with the shortcut in its tooltip)');
     tg.click(); await sleep(10);
-    assert(calls.includes('toggle:undefined'), 'it shows / hides the floating window');
-    cur = status({ settings: baseSettings({ panel: { mode: 'docked', otherApps: false, open: true, bounds: null } }) });
-    onAlfred({ type: 'state', state: cur }); await sleep(10);
-    assert(!!d.getElementById('alfred-drawer') && d.body.classList.contains('alfred-open') && d.getElementById('alfred-title').textContent === '🎩 Jeeves', 'switched to Docked: the drawer appears beside, as before (with his name)');
+    assert(d.getElementById('alfred-drawer').hidden && !d.body.classList.contains('alfred-open') && tg.textContent === '◂ Panel', 'it hides the panel and gives the room back');
     onAlfred({ type: 'toggle-panel', open: null }); await sleep(10);
-    assert(d.getElementById('alfred-drawer').hidden && !d.body.classList.contains('alfred-open'), 'Docked: Ctrl+Shift+A (from main) hides the drawer');
-    onAlfred({ type: 'toggle-panel', open: null }); await sleep(10);
-    assert(!d.getElementById('alfred-drawer').hidden, '… and shows it again');
-    cur = status(); onAlfred({ type: 'state', state: cur }); await sleep(10);
-    assert(!d.getElementById('alfred-drawer') && !!d.getElementById('btn-alfred-drawer') && !d.body.classList.contains('alfred-open'), 'back to Floating: the drawer goes, the switch and Panel button stay');
-    // "⚙ Set up his AI" from the window -> the control panel shows the Butler section
-    let scrolled = null; dom.window.HTMLElement.prototype.scrollIntoView = function () { scrolled = this.id; };
-    onAlfred({ type: 'show-butler' }); await sleep(10);
-    assert(scrolled === 'alfred-persona' || scrolled === 'llm-setup' || scrolled === 'col-systemai', `"⚙ Set up his AI": the 🤵 Butler section is brought into view (#${scrolled})`);
+    assert(!d.getElementById('alfred-drawer').hidden && d.body.classList.contains('alfred-open'), 'Ctrl+Shift+A (from main, any page) shows it again');
+    onAlfred({ type: 'toggle-panel', open: false }); await sleep(10);
+    onAlfred({ type: 'toggle-panel', open: true }); await sleep(10);
+    assert(!d.getElementById('alfred-drawer').hidden, 'open:true / open:false from main');
 
-    // 2) his floating window: alfred-window.html
-    const whtml = fs.readFileSync(path.join(__dirname, '..', 'alfred-window.html'), 'utf8');
-    const wdom = new JSDOM(whtml, { runScripts: 'outside-only', pretendToBeVisual: true });
-    const wc = []; let wOn = null; let wcur = status();
-    wdom.window.api = {
-      alfredStatus: async () => wcur, onAlfred: (cb) => { wOn = cb; },
-      alfredAsk: async (t) => { wc.push(`ask:${t}`); return { ok: true }; }, alfredConfirm: async (id) => { wc.push(`confirm:${id}`); return { ok: true }; }, alfredReject: async () => ({ ok: true }),
-      alfredClear: async () => ({ ok: true }), alfredCancel: async () => ({ ok: true }), alfredSettings: async () => ({}), alfredModels: async () => ({ ok: true, models: [] }),
-      alfredTestAi: async () => { wc.push('test'); return { ok: true, message: 'My AI answers (Ollama, model qwen2.5:7b).' }; },
-      llmCheck: async () => { throw new Error('No handler registered for llm:check'); },
-      alfredPanelToggle: async (o) => { wc.push(`toggle:${o}`); return { ok: true }; }, alfredShowButler: async () => { wc.push('butler'); return { ok: true }; },
-      alfredUseProfile: async (n) => { wc.push(`use:${n}`); return { ok: true, message: `Switched to "${n}".` }; },
-      alfredSaveProfile: async (n) => { wc.push(`save:${n}`); return { ok: true, message: `Saved "${n}".` }; },
-      alfredPanel: async (p) => { wc.push(`panel:${JSON.stringify(p)}`); return { ok: true }; },
-    };
-    wdom.window.eval(fs.readFileSync(path.join(__dirname, '..', 'alfred-panel.js'), 'utf8'));
-    await sleep(30);
-    d = wdom.window.document;
-    assert(!!d.getElementById('alfred-window') && !d.getElementById('btn-alfred-switch') && d.querySelectorAll('#alfred-chat .al-msg').length === 2, 'the window renders the same panel (chat and all) from the same state');
-    assert(d.getElementById('alfred-title').textContent === '🎩 Jeeves' && wdom.window.document.title === '🎩 Jeeves', 'his name from the personality is on the header');
-    const quick = Array.from(d.querySelectorAll('#alfred-quick button')).map((b) => b.textContent);
-    assert(quick.join('|') === '📊 Status|🩺 Check his AI|🎨 Make a picture|📖 My book|⚙ Set up his AI', `quick buttons: ${quick.join(' · ')}`);
-    d.getElementById('alfred-q-status').click(); await sleep(10);
-    assert(wc.some((x) => /^ask:What's the status of everything/.test(x)), '📊 Status asks him for the status');
-    d.getElementById('alfred-q-picture').click();
-    assert(d.getElementById('alfred-input').value === 'Make a picture of ', '🎨 Make a picture starts the request in the box');
-    d.getElementById('alfred-q-check').click(); await sleep(20);
-    assert(wc.includes('test') && /My AI answers/.test(d.getElementById('alfred-quick-msg').textContent), '🩺 Check his AI: falls back to "Test my AI" when this build has no full check');
-    d.getElementById('alfred-q-setup').click(); await sleep(10);
-    assert(wc.includes('butler'), '⚙ Set up his AI asks main to show the Butler section');
+    const big = Array.from(d.querySelectorAll('#alfred-actions button')).map((b) => b.textContent);
+    assert(big.join('|') === '🧑Make a character|🎨Make a picture|🎬Make a video|🖼Design a cover|📖My book|✍Continue / make my book|🩺Check everything|❓Everything I can do', `8 big buttons: ${big.join(' · ')}`);
+    assert(Array.from(d.querySelectorAll('#alfred-actions button')).every((b) => b.title.length > 20), 'each says what it does (tooltip)');
+
+    // no book yet: the book buttons say so plainly
+    d.getElementById('alfred-a-character').click(); await sleep(20);
+    assert(/Akọwe has no book yet/.test(msg()) && d.getElementById('alfred-form').hidden && !wc.some((x) => x.startsWith('ask:')), '🧑 Make a character with no book: says so plainly (no form, no AI call)');
+    d.getElementById('alfred-a-cover').click(); await sleep(20);
+    assert(/no book yet/.test(msg()), '🖼 Design a cover: the same');
+    d.getElementById('alfred-a-book').click(); await sleep(20);
+    assert(/no book yet/.test(msg()) && !wc.some((x) => x.startsWith('ask:')), '📖 My book: the same');
+    bookList = { ok: true, akowe: false, books: [], message: 'Akọwe (the book app) is not running yet — open the 📖 Akọwe tab first.' };
+    d.getElementById('alfred-a-character').click(); await sleep(20);
+    assert(/not running yet/.test(msg()), 'Akọwe not running: says that instead');
+    // ✍ with no book: the idea form → start_book
+    bookList = { ok: true, akowe: true, books: [] };
+    d.getElementById('alfred-a-continue').click(); await sleep(20);
+    assert(!d.getElementById('alfred-form').hidden && /no book yet/.test(d.querySelector('#alfred-form h3').textContent) && !!d.getElementById('alfred-f-idea'), '✍ with no book: asks for your idea');
+    await submit();
+    assert(!wc.some((x) => x.startsWith('ask:')) && /fill in the first box/.test(msg()), 'an empty idea is not sent');
+    fill('idea', 'A lighthouse keeper finds a door under the sea'); fill('genre', 'cosy mystery');
+    await submit();
+    assert(wc.includes('ask:Make a book for me: A lighthouse keeper finds a door under the sea (genre: cosy mystery).') && d.getElementById('alfred-form').hidden, '… then asks Alfred to make the book (start_book)');
+
+    // with a book
+    bookList = { ok: true, akowe: true, books: [{ project_id: 'p1', title: 'The Lighthouse Keeper' }] };
+    d.getElementById('alfred-a-character').click(); await sleep(20);
+    assert(!d.getElementById('alfred-form').hidden && !!d.getElementById('alfred-f-name') && !!d.getElementById('alfred-f-about') && d.getElementById('alfred-a-character').getAttribute('aria-pressed') === 'true', '🧑 with a book: a tiny form (name + a line about them)');
+    fill('name', 'Mara'); fill('about', 'the keeper who hates the sea');
+    await submit();
+    assert(wc.includes('ask:Make a character for my book: “Mara” — the keeper who hates the sea. Open their Character Forge dossier and invent the rest as proposals for me to approve, with what I said about them. If they are not in my book yet, tell me plainly.'), '… sends Alfred the request (→ forge_character)');
+    d.getElementById('alfred-a-picture').click(); await sleep(10);
+    fill('what', 'a lighthouse at dusk'); await submit();
+    assert(wc.includes('ask:Make a picture of a lighthouse at dusk.'), '🎨 Make a picture: what → generate_image');
+    d.getElementById('alfred-a-video').click(); await sleep(10);
+    fill('what', 'waves on the rocks'); await submit();
+    assert(wc.includes('ask:Make a short video of waves on the rocks.'), '🎬 Make a video: what → generate_video');
+    d.getElementById('alfred-a-cover').click(); await sleep(20);
+    fill('what', 'a lighthouse in a storm'); await submit();
+    assert(wc.includes('ask:Design the cover for my book and make the cover art showing a lighthouse in a storm.'), '🖼 Design a cover → design_cover / make_cover_art');
+    d.getElementById('alfred-a-book').click(); await sleep(20);
+    assert(wc.includes("ask:What's the status of my book?"), '📖 My book → book_status');
+    d.getElementById('alfred-a-continue').click(); await sleep(20);
+    assert(wc.some((x) => /^ask:Continue my book: resume the “Make a book for me” run/.test(x)), '✍ with a book → resume / what the run waits for');
+    d.getElementById('alfred-a-picture').click(); await sleep(10);
+    d.getElementById('alfred-a-picture').click(); await sleep(10);
+    assert(d.getElementById('alfred-form').hidden, 'pressing a button again closes its form');
+
+    // busy / a card waiting: the sending buttons wait, 🩺 and ❓ still work
+    cur = status({ card: { id: 'card-1', intro: '', steps: [{ n: 1, tool: 'generate_image', title: 'Make an image', text: 'Make an image of a ship', allowAlways: true, allowKey: 'generate_image' }] } });
+    onAlfred({ type: 'state', state: cur }); await sleep(10);
+    assert(d.getElementById('alfred-a-picture').disabled && d.getElementById('alfred-a-book').disabled && !d.getElementById('alfred-a-check').disabled && !d.getElementById('alfred-a-catalog').disabled, 'a card waiting: the buttons that ask Alfred wait; 🩺 and ❓ still work');
+    d.querySelector('#alfred-card input.al-always').checked = true;
+    onAlfred({ type: 'state', state: cur }); await sleep(10);
+    assert(d.querySelector('#alfred-card input.al-always').checked, 'a state update does not undo a ticked "always allow" on the same card');
+    d.getElementById('alfred-do-it').click(); await sleep(10);
+    assert(wc.includes('confirm:card-1'), '✔ Do it');
+    cur = status(); onAlfred({ type: 'state', state: cur }); await sleep(10);
+
+    // 🩺 Check everything: llm:check + health:status, no AI
+    const asked = wc.filter((x) => x.startsWith('ask:')).length;
+    d.getElementById('alfred-a-check').click(); await sleep(40);
+    assert(wc.includes('llmCheck') && wc.includes('health:{"fresh":true}') && wc.filter((x) => x.startsWith('ask:')).length === asked, '🩺 Check everything: his AI check + the health watch, no AI call');
+    assert(/His AI: 1 thing needs attention/.test(msg()) && /✖ Ollama running — press Start/.test(msg()) && /Stable Diffusion is not running/.test(msg()) && /Connected: 📖 Akọwe ✔/.test(msg()), 'the results in plain words');
+    const fixBtn = d.querySelector('#alfred-quick-msg button.al-fix[data-code="sd-down"]');
+    assert(!!fixBtn && /Start Stable Diffusion/.test(fixBtn.textContent), 'a problem with a fix has its one-click button');
+    fixBtn.click(); await sleep(10);
+    assert(wc.includes('fix:sd-down') && /Done/.test(fixBtn.textContent), 'which runs health:fix');
+    let scrolled = null; dom.window.HTMLElement.prototype.scrollIntoView = function () { scrolled = this.id; };
+    d.getElementById('alfred-check-setup').click(); await sleep(10);
+    assert(scrolled === 'llm-setup' || scrolled === 'alfred-persona' || scrolled === 'col-systemai', `his AI not ready: "🛠 Set up his AI" brings the 🎩 Butler section (setup panel) into view (#${scrolled})`);
+
+    // ❓ Everything I can do: searchable, grouped, ▶ Try it
+    d.getElementById('alfred-a-catalog').click(); await sleep(30);
+    const cat = d.getElementById('alfred-catalog');
+    assert(!cat.hidden && wc.includes('catalog') && d.getElementById('alfred-drawer').classList.contains('al-cat-open'), '❓ opens the list inside the side panel (alfred:catalog)');
+    const heads = Array.from(d.querySelectorAll('#alfred-catalog-list h4')).map((x) => x.textContent.replace(/ \(\d+\)$/, ''));
+    assert(heads.join('|') === '📖 Books|🧑 Characters & world|🎨 Pictures & covers|🎬 Video|💬 The three AIs|🧠 His AI & setup|📁 Files & folders|⚙ App settings & tools', `grouped: ${heads.join(' · ')}`);
+    const items = d.querySelectorAll('#alfred-catalog-list .al-cat-item');
+    assert(items.length === realCatalog.count && Array.from(items).every((x) => x.querySelector('.al-cat-say').textContent && x.querySelector('button.al-try')), `every item (${items.length}) has a one-line description and ▶ Try it`);
+    const search = d.getElementById('alfred-catalog-search');
+    search.value = 'cover'; search.dispatchEvent(new dom.window.Event('input'));
+    const hits = Array.from(d.querySelectorAll('#alfred-catalog-list .al-cat-item')).map((x) => x.dataset.id);
+    assert(hits.includes('design_cover') && hits.includes('make_cover_art') && !hits.includes('send_to_ai') && hits.length < 15, `search "cover" narrows it (${hits.join(', ')})`);
+    search.value = 'zzzz nothing'; search.dispatchEvent(new dom.window.Event('input'));
+    assert(/Nothing matches/.test(d.getElementById('alfred-catalog-list').textContent), 'no match: says so, plainly');
+    search.value = 'portrait'; search.dispatchEvent(new dom.window.Event('input'));
+    const tryBtn = d.querySelector('#alfred-catalog-list .al-cat-item[data-id="make_character_art"] button.al-try');
+    tryBtn.click(); await sleep(10);
+    assert(d.getElementById('alfred-input').value === "Make Mara's portrait." && cat.hidden, '▶ Try it puts the example request in his input box (and goes back to the chat)');
+    const before = wc.filter((x) => x.startsWith('ask:')).length;
+    d.getElementById('alfred-input').value = 'What can you do?';
+    d.getElementById('alfred-send').click(); await sleep(20);
+    assert(!cat.hidden && wc.filter((x) => x.startsWith('ask:')).length === before && d.getElementById('alfred-input').value === '', 'typing "what can you do?" opens the list (no AI call)');
+    d.getElementById('alfred-catalog-close').click(); await sleep(10);
+    assert(cat.hidden && !d.getElementById('alfred-drawer').classList.contains('al-cat-open'), '✕ back to the chat');
+
+    // set-ups, settings
     const sel = d.getElementById('alfred-profile');
     assert(Array.from(sel.options).map((o) => o.value).join(',') === ',Fast local,Claude brief' && sel.value === 'Fast local', 'the set-up switcher lists the saved set-ups, the active one selected');
-    sel.value = 'Claude brief'; sel.dispatchEvent(new wdom.window.Event('change')); await sleep(10);
-    assert(wc.includes('use:Claude brief') && /Switched/.test(d.getElementById('alfred-quick-msg').textContent), 'picking one switches to it');
+    sel.value = 'Claude brief'; sel.dispatchEvent(new dom.window.Event('change')); await sleep(10);
+    assert(wc.includes('use:Claude brief') && /Switched/.test(msg()), 'picking one switches to it');
     d.getElementById('alfred-btn-profile-save').click();
     d.getElementById('alfred-profile-name').value = 'Mine';
     d.getElementById('alfred-profile-save').click(); await sleep(10);
     assert(wc.includes('save:Mine'), '💾 saves the current set-up under a name');
     d.getElementById('alfred-btn-settings').click();
-    assert(d.getElementById('alfred-set-mode').value === 'floating' && d.getElementById('alfred-set-ontop').checked === false, '⚙ shows "His panel: Floating" and the "stay on top of other programs" box');
-    d.getElementById('alfred-set-mode').value = 'docked'; d.getElementById('alfred-set-ontop').checked = true;
-    d.getElementById('alfred-set-save').click(); await sleep(20);
-    assert(wc.some((x) => x === 'panel:{"mode":"docked","otherApps":true}'), 'saving sends the panel mode / on-top choice');
-    d.getElementById('alfred-settings').hidden = true;
-    // Escape: hides the window — never while a card waits
-    wcur = status({ card: { id: 'card-1', intro: '', steps: [{ n: 1, tool: 'generate_image', title: 'Make an image', text: 'Make an image of a ship', allowAlways: true, allowKey: 'generate_image' }] } });
-    wOn({ type: 'state', state: wcur }); await sleep(10);
-    d.querySelector('#alfred-card input.al-always').checked = true;
-    wOn({ type: 'state', state: wcur }); await sleep(10);
-    assert(d.querySelector('#alfred-card input.al-always').checked, 'a state update does not undo a ticked "always allow" on the same card');
-    d.dispatchEvent(new wdom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-    await sleep(10);
-    assert(!wc.some((x) => x === 'toggle:false') && !d.getElementById('alfred-card').hidden, 'Escape never closes the panel while an "I will" card waits');
-    d.getElementById('alfred-do-it').click(); await sleep(10);
-    assert(wc.includes('confirm:card-1'), '✔ Do it works in the window');
-    wcur = status(); wOn({ type: 'state', state: wcur }); await sleep(10);
-    d.dispatchEvent(new wdom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-    await sleep(10);
-    assert(wc.includes('toggle:false'), 'Escape with no card hides the window (Alfred stays on)');
-    d.getElementById('alfred-btn-hide').click(); await sleep(10);
-    assert(wc.filter((x) => x === 'toggle:false').length === 2, '× hides the window too');
-    wOn({ type: 'state', state: status({ enabled: false }) }); await sleep(10);
-    assert(!d.getElementById('alfred-window') && /Alfred is off/.test(d.body.textContent), 'switched off: the window says so (main closes it)');
+    d.getElementById('alfred-set-save').click(); await sleep(10);
+    const saved = wc.filter((x) => x.startsWith('settings:')).pop();
+    assert(!!saved && !/panel|otherApps|floating/.test(saved), '⚙ Save saves his settings (nothing about a separate window)');
+    onAlfred({ type: 'state', state: status({ enabled: false }) }); await sleep(10);
+    assert(!d.getElementById('alfred-drawer') && !d.getElementById('btn-alfred-drawer') && !d.body.classList.contains('alfred-open'), 'switched off: the side panel and its button go, the layout is untouched');
   }
 
   console.log('\n== 🤵 Butler section: personality editor + saved set-ups (alfred-persona-ui.js) ==');

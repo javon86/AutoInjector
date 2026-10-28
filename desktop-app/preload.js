@@ -340,15 +340,18 @@ contextBridge.exposeInMainWorld("api", {
   alfredTestAi: () => ipcRenderer.invoke("alfred:test-ai"),
   alfredModels: () => ipcRenderer.invoke("alfred:models"),
   alfredOpenPath: (path) => ipcRenderer.invoke("alfred:open-path", { path }),
-  // personality (voice only) + saved set-ups (alfred.js); his side panel (alfred-window.js)
+  // personality (voice only) + saved set-ups (alfred.js); his side panel (docked; Ctrl/Cmd+Shift+A)
   alfredPersonality: (patch) => ipcRenderer.invoke("alfred:personality", patch || null),
   alfredProfiles: () => ipcRenderer.invoke("alfred:profiles"),
   alfredSaveProfile: (name, renameFrom) => ipcRenderer.invoke("alfred:profile-save", { name, renameFrom: renameFrom == null ? undefined : renameFrom }),
   alfredUseProfile: (name) => ipcRenderer.invoke("alfred:profile-use", { name }),
   alfredDeleteProfile: (name) => ipcRenderer.invoke("alfred:profile-delete", { name }),
-  alfredPanel: (patch) => ipcRenderer.invoke("alfred:panel", patch || null),
+  alfredPanel: () => ipcRenderer.invoke("alfred:panel"),
   alfredPanelToggle: (open) => ipcRenderer.invoke("alfred:panel-toggle", { open: typeof open === "boolean" ? open : undefined }),
   alfredShowButler: () => ipcRenderer.invoke("alfred:show-butler"),
+  // "❓ Everything I can do" and the side panel's big buttons (read-only)
+  alfredCatalog: () => ipcRenderer.invoke("alfred:catalog"),
+  alfredBooks: () => ipcRenderer.invoke("alfred:books"),
   onAlfred: (cb) => ipcRenderer.on("alfred", (_e, payload) => cb(payload)),
   // ==== 🩺 health watch (health-watch.js): problems found BEFORE something breaks ====
   healthStatus: (opts) => ipcRenderer.invoke("health:status", opts || {}),

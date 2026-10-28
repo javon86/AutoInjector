@@ -385,10 +385,7 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
       uncensored filter and ranking, 🛠 tools, an optional HF token (encrypted) and an offline curated list
       (`model-catalog.js`, `llm-hardware.js`).
     - **Personality** (presets + custom; voice only, approvals unchanged) and **saved set-ups** (`alfred-persona-ui.js`).
-  - **The side panel = where you talk to him.** It is its own window floating over the whole app (the AI panes and
-    📖 Akọwe included), with an option to stay on top of other programs too. You can drag and resize it, it remembers
-    its place, Ctrl/Cmd+Shift+A toggles it, and it has quick buttons and a set-up switcher. "Docked (beside)" keeps the
-    old drawer (`alfred-window.js`).
+  - **The side panel = where you talk to him.** (Was a floating window first; see below — now docked only.)
   - **Simplified (2026-10-27, the user's feedback):**
     - His panel is a **side panel again by default**: it moves the app over on every tab, the Video tab included,
       and never covers anything. The separate window is an option in ⚙, and a saved "floating" from the old
@@ -398,6 +395,16 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
       which now also lists what Alfred and his setup did.
     - The old Butler's goal box, System Check and local-model settings are out of view, replaced by Alfred and the one
       button.
+  - **Two Alfred surfaces only (f10-panel, 2026-10-28):** the SETUP panel (🎩 Butler section) and the TALK panel (his
+    docked side panel). The separate window is gone (`alfred-window*.js/html` removed; any saved "floating" → docked;
+    Ctrl/Cmd+Shift+A still toggles the drawer from every page, AI panes included). The side panel has 8 big buttons
+    (🧑 character, 🎨 picture, 🎬 video, 🖼 cover, 📖 my book, ✍ continue / make my book, 🩺 check everything, ❓ everything
+    I can do) — small forms first where a detail is needed, plain "Akọwe has no book yet" when there is none — and a
+    searchable "❓ Everything I can do" list (`alfred-catalog.js`, IPC `alfred:catalog`, `alfred:books`; "what can you
+    do?" opens it). The User Panel's old Butler buttons are Alfred's: → 🎩 Alfred, his status light, 🧠 what he thinks
+    with, 🎩 Alfred: On/Off, 🩺 Check Alfred.
+    - **Open:** 🧑 Make a character works for characters the book already has (forge_character). Akọwe has no API to
+      add a brand-new non-main character, so for a new name Alfred says so plainly — an Akọwe route + tool would close it.
   - Alfred can drive all of it (`llm.*` app controls: status, check, fix, setup-all, search, curated, pull, use, remove…).
   - **Still to try for real:** the installer and the online search have not been run against the live ollama.com /
     huggingface.co, and nothing has been run on a real GPU.

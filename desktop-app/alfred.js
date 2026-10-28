@@ -37,7 +37,7 @@ const DEFAULTS = Object.freeze({
   personality: { preset: 'butler', name: 'Alfred', tone: '', chattiness: 3, custom: '' }, // his VOICE only
   profiles: [],                  // saved set-ups: [{ name, brain, local:{endpoint, model}, pane:{site}, maxSteps, personality }]
   activeProfile: '',             // the name of the set-up last switched to ('' = none)
-  panel: { mode: 'docked', otherApps: false, open: true, bounds: null, v: 2 }, // where his panel lives: the side panel (docked) unless a window was chosen (alfred-window.js)
+  panel: { mode: 'docked', open: true, v: 3 }, // his side panel (docked beside the app, on every tab) — the only place he lives
 });
 // ---- personality: changes his VOICE and wording only (never tools, cards, approvals or safety) ----------------
 const PERSONALITY_PRESETS = Object.freeze({
@@ -115,15 +115,10 @@ function systemPromptFor(settings) { return `${SYSTEM_PROMPT} ${personalityPromp
 
 const profileName = (v) => cleanLine(v, 200);
 function sanitizePanel(p) {
-  const d = DEFAULTS.panel;
+  // There is ONE place for his panel: the side panel docked beside the app (it moves the app over, on
+  // every tab). The old "separate window" choice is gone — whatever an older build saved becomes docked.
   const x = p && typeof p === 'object' ? p : {};
-  const b = x.bounds && typeof x.bounds === 'object' ? x.bounds : null;
-  const n = (v) => (typeof v === 'number' && Number.isFinite(v) ? Math.round(v) : null);
-  const bounds = b && [b.x, b.y, b.width, b.height].every((v) => n(v) != null) && b.width > 0 && b.height > 0 && b.width < 20000 && b.height < 20000
-    ? { x: n(b.x), y: n(b.y), width: n(b.width), height: n(b.height) } : null;
-  // v2: the side panel is the default. A "floating" saved before v2 was the old default, not a choice → docked.
-  const mode = x.mode === 'floating' && x.v === 2 ? 'floating' : 'docked';
-  return { mode, otherApps: x.otherApps === true, open: x.open !== false, bounds, v: 2 };
+  return { mode: 'docked', open: x.open !== false, v: 3 };
 }
 const NOTICE_MIN_GAP_MS = 5 * 60 * 1000;   // same notice at most every 5 minutes
 const NOTICE_WINDOW_MS = 10 * 60 * 1000;   // and at most NOTICE_MAX notices per 10 minutes overall
@@ -345,14 +340,14 @@ function createAlfred(deps = {}) {
   }
 
   // ------------------------------------------------------------------ where his panel lives
-  /** quiet: save without telling the UI (window moves / resizes). */
+  /** Only `open` means anything now (the side panel is always docked). quiet: save without telling the UI. */
   function setPanel(patch, opts = {}) {
     if (!patch || typeof patch !== 'object') return clone(settings.panel);
     const before = JSON.stringify(settings.panel);
     settings.panel = sanitizePanel(Object.assign({}, settings.panel, patch));
     if (JSON.stringify(settings.panel) === before) return clone(settings.panel);
     save();
-    if (!opts.quiet) { log('alfred-panel', { mode: settings.panel.mode, otherApps: settings.panel.otherApps, open: settings.panel.open }); emitState(); }
+    if (!opts.quiet) { log('alfred-panel', { open: settings.panel.open }); emitState(); }
     return clone(settings.panel);
   }
 

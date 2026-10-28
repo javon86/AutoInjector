@@ -853,8 +853,8 @@ async function testUserPanelMergedAndNeverCollapses() {
     assert(children[i].tagName === "BUTTON" && children[i].textContent.includes(SITE_LABELS_FOR_TEST[site]), `row ${i / 2}: ${site}'s send button is in the Send column`);
     assert(children[i + 1].id === `p-${site}`, `row ${i / 2}: ${site}'s own checkbox is row-aligned right next to it, in the Active column (got id="${children[i + 1].id}")`);
   }
-  assert(children[6].tagName === "BUTTON" && /Butler/.test(children[6].textContent), "the Butler is a 4th participant row: its → send button sits in the Send column");
-  assert(children[7].id === "p-butler" && children[7].tagName === "INPUT", "the Butler has its own Active checkbox in the Active column, like the three AIs");
+  assert(children[6].tagName === "BUTTON" && children[6].id === "btn-send-butler" && children[6].textContent === "→ 🎩 Alfred", "🎩 Alfred is a 4th participant row: his → send button sits in the Send column");
+  assert(children[7].id === "p-butler" && children[7].tagName === "INPUT" && /Alfred/.test(children[7].title), "Alfred has his own Active checkbox in the Active column, like the three AIs");
   assert(children[8].tagName === "BUTTON" && children[8].textContent.trim() === "→ All", "→ All is the final row, spanning just the Send column (no checkbox of its own)");
 }
 const SITE_LABELS_FOR_TEST = { chatgpt: "ChatGPT", claude: "Claude", gemini: "Gemini" };
@@ -1304,7 +1304,7 @@ async function main() {
   await testExtractAllButton();
   await testButlerPanelWired();
   await testDeepCapabilityCheck();
-  await testButlerModeToggleAndConverse();
+  await testAlfredUserPanelButtons();
   await testButlerLightAndColoredLog();
   await testIss017StaleSavedAndConverseProse();
   await testIss018NoDuplicateTabs();
@@ -1379,44 +1379,96 @@ async function testDeepCapabilityCheck() {
   assert(api.calls.filter((c) => c.fn === "butlerCapabilityTest").length === before + 1, "System Check with the toggle checked also runs the deep test");
 }
 
-async function testButlerModeToggleAndConverse() {
-  console.log("\n== Butler handling-mode toggle + converse from the User Panel ==");
+/** window.api's 🎩 Alfred calls over a tiny fake Alfred (enough for the User Panel buttons). */
+function fakeAlfred(api, { enabled = false, brain = "auto" } = {}) {
+  const st = { ok: true, enabled, busy: false, card: null, settings: { brain } };
+  let cb = null;
+  const snap = () => JSON.parse(JSON.stringify(st));
+  Object.assign(api, {
+    alfredStatus: async () => snap(),
+    alfredSetEnabled: async (on) => { api.calls.push({ fn: "alfredSetEnabled", on }); st.enabled = !!on; return snap(); },
+    alfredPanelToggle: async (open) => { api.calls.push({ fn: "alfredPanelToggle", open }); return { ok: true }; },
+    alfredAsk: async (text) => { api.calls.push({ fn: "alfredAsk", text }); return { ok: true }; },
+    alfredSettings: async (patch) => { api.calls.push({ fn: "alfredSettings", patch }); Object.assign(st.settings, patch); return Object.assign({}, st.settings); },
+    llmCheck: async () => { api.calls.push({ fn: "llmCheck" }); return { ok: false, summary: "1 thing needs attention: ollama.", rows: [{ label: "Ollama installed", ok: true }, { label: "Ollama running", ok: false, detail: "press Start" }] }; },
+    healthStatus: async (o) => { api.calls.push({ fn: "healthStatus", o }); return { ok: true, problems: [{ code: "disk-low", severity: "warn", text: "Free disk space is low (3 GB).", fix: null }] }; },
+    onAlfred: (f) => { cb = f; },
+  });
+  return { st, fire: (p) => cb && cb(p) };
+}
+
+async function testAlfredUserPanelButtons() {
+  console.log("\n== User Panel: the old Butler buttons are 🎩 Alfred's now (send, light, 🧠, on/off, 🩺 check) ==");
   const api = makeApi();
+  const fa = fakeAlfred(api);
   const dom = await loadWindow(api);
   const doc = dom.window.document;
+  const tick = () => new Promise((r) => setTimeout(r, 20));
+  const light = doc.getElementById("btn-butler-status");
+  assert(light.classList.contains("off") && light.querySelector(".txt").textContent === "🎩 Alfred off", "the status light shows Alfred's state: off");
+  assert(doc.getElementById("btn-ai-toggle").textContent === "🎩 Alfred: Off", "'System AI' is now 🎩 Alfred: Off (the same as the title switch)");
+  assert(doc.getElementById("btn-capability-test").textContent === "🩺 Check Alfred", "'Capability Test' is now 🩺 Check Alfred");
   const modeBtn = doc.getElementById("btn-butler-mode");
-  assert(!!modeBtn && /Auto/.test(modeBtn.textContent), "the mode toggle is present and starts on Auto");
+  assert(/🧠/.test(modeBtn.textContent) && /Auto/.test(modeBtn.textContent), "the handling-mode toggle is 🧠 what Alfred thinks with (Auto)");
 
-  // Type a message and send it to the butler in Auto → startManagedTask with mode "auto".
-  doc.getElementById("composer-text").value = "compare three plans";
+  // → 🎩 Alfred while he is off: turns him on, opens his panel, sends the text
+  doc.getElementById("composer-text").value = "make a picture of a ship";
   click(dom, "btn-send-butler");
-  await new Promise((r) => setTimeout(r, 20));
-  let sc = api.calls.filter((c) => c.fn === "startManagedTask").pop();
-  assert(sc && sc.userRequest === "compare three plans" && sc.mode === "auto", "→ Butler sends the composed message with the current mode (auto)");
+  await tick();
+  assert(api.calls.some((c) => c.fn === "alfredSetEnabled" && c.on === true), "→ 🎩 Alfred turns him on when he is off");
+  assert(api.calls.some((c) => c.fn === "alfredPanelToggle" && c.open === true), "… opens his side panel");
+  assert(api.calls.some((c) => c.fn === "alfredAsk" && c.text === "make a picture of a ship"), "… and sends him the composed message (window.api.alfredAsk)");
+  assert(doc.getElementById("composer-text").value === "" && /Alfred/.test(doc.getElementById("status").textContent), "the box is cleared and the status line says where he answers");
+  assert(!api.calls.some((c) => c.fn === "startManagedTask" || c.fn === "butlerChat"), "the old butler is not used");
 
-  // Cycle: Auto → Himself → Delegate. Send in Delegate → mode "delegate".
-  click(dom, "btn-butler-mode"); // → Himself
-  assert(/Himself/.test(modeBtn.textContent) && modeBtn.classList.contains("mode-self"), "one click moves to 'Himself'");
-  click(dom, "btn-butler-mode"); // → Delegate
-  assert(/Delegate/.test(modeBtn.textContent) && modeBtn.classList.contains("mode-delegate"), "next click moves to 'Delegate'");
-  doc.getElementById("composer-text").value = "draft a memo";
-  click(dom, "btn-send-butler");
-  await new Promise((r) => setTimeout(r, 20));
-  sc = api.calls.filter((c) => c.fn === "startManagedTask").pop();
-  assert(sc && sc.mode === "delegate", "sending in Delegate passes mode 'delegate' to the butler");
+  // the light follows his state events
+  fa.fire({ type: "state", state: { enabled: true, busy: true, card: null, settings: { brain: "auto" } } });
+  assert(light.classList.contains("working") && /working/.test(light.textContent), "while he works the light glows (working)");
+  fa.fire({ type: "state", state: { enabled: true, busy: false, card: { id: "c1" }, settings: { brain: "auto" } } });
+  assert(light.classList.contains("needs") && /needs you/.test(light.textContent), "a card waiting turns the light amber (needs you)");
+  fa.fire({ type: "state", state: { enabled: true, busy: false, card: null, settings: { brain: "auto" } } });
+  assert(!light.classList.contains("needs") && !light.classList.contains("working") && /idle/.test(light.textContent), "then idle");
+  assert(doc.getElementById("btn-ai-toggle").textContent === "🎩 Alfred: On" && doc.getElementById("btn-ai-toggle").classList.contains("on"), "the On/Off button follows");
+  // a busy Alfred: → Alfred says so instead of piling up
+  fa.fire({ type: "state", state: { enabled: true, busy: false, card: { id: "c2" }, settings: { brain: "auto" } } });
+  const asks = api.calls.filter((c) => c.fn === "alfredAsk").length;
+  doc.getElementById("composer-text").value = "another";
+  click(dom, "btn-send-butler"); await tick();
+  assert(api.calls.filter((c) => c.fn === "alfredAsk").length === asks && /card/.test(doc.getElementById("status").textContent), "with a card waiting, → Alfred asks you to answer it first");
+  fa.fire({ type: "state", state: { enabled: true, busy: false, card: null, settings: { brain: "auto" } } });
 
-  // Cycle once more → Converse. Now sending goes to butlerChat, not a task.
-  click(dom, "btn-butler-mode"); // → Converse
-  assert(/Converse/.test(modeBtn.textContent), "next click reaches 'Converse'");
-  const beforeStart = api.calls.filter((c) => c.fn === "startManagedTask").length;
-  doc.getElementById("composer-text").value = "how's it going?";
-  click(dom, "btn-send-butler");
-  await new Promise((r) => setTimeout(r, 20));
-  assert(api.calls.some((c) => c.fn === "butlerChat" && c.message === "how's it going?"), "in Converse, the message goes to butler:chat");
-  assert(api.calls.filter((c) => c.fn === "startManagedTask").length === beforeStart, "Converse does NOT start a task");
-  // My own line is echoed into the butler window.
-  assert(/You → 🤵/.test(doc.getElementById("jarvis-log").textContent) && /how's it going\?/.test(doc.getElementById("jarvis-log").textContent),
-    "my converse message is echoed in the butler window");
+  // the light opens his panel
+  const toggles = api.calls.filter((c) => c.fn === "alfredPanelToggle").length;
+  click(dom, "btn-butler-status"); await tick();
+  assert(api.calls.filter((c) => c.fn === "alfredPanelToggle").length === toggles + 1, "clicking the light opens his side panel");
+
+  // → All with his Active box ticked also sends to him
+  doc.getElementById("p-butler").checked = true;
+  doc.getElementById("p-butler").dispatchEvent(new dom.window.Event("change"));
+  doc.getElementById("composer-text").value = "hello everyone";
+  const allBtn = Array.from(doc.getElementById("send-active-grid").querySelectorAll("button")).find((b) => b.textContent === "→ All");
+  allBtn.dispatchEvent(new dom.window.Event("click", { bubbles: true })); await tick();
+  assert(api.calls.some((c) => c.fn === "alfredAsk" && c.text === "hello everyone"), "→ All includes Alfred when his Active box is ticked");
+
+  // 🧠 cycles what he thinks with
+  click(dom, "btn-butler-mode"); await tick();
+  assert(api.calls.some((c) => c.fn === "alfredSettings" && c.patch.brain === "local") && /Local/.test(modeBtn.textContent) && modeBtn.classList.contains("mode-self"), "🧠 Auto → Local (saved in his settings)");
+  click(dom, "btn-butler-mode"); await tick();
+  click(dom, "btn-butler-mode"); await tick();
+  click(dom, "btn-butler-mode"); await tick();
+  assert(/Auto/.test(modeBtn.textContent) && api.calls.filter((c) => c.fn === "alfredSettings").map((c) => c.patch.brain).join(",") === "local,api,pane,auto", "… Connected AI → Web AI → back to Auto");
+
+  // 🩺 Check Alfred while he is off: llm:check + health:status into the Activity Log (no AI call)
+  fa.fire({ type: "state", state: { enabled: false, busy: false, card: null, settings: { brain: "auto" } } });
+  click(dom, "btn-capability-test"); await new Promise((r) => setTimeout(r, 40));
+  const log = doc.getElementById("activity-log").textContent;
+  assert(api.calls.some((c) => c.fn === "llmCheck") && api.calls.some((c) => c.fn === "healthStatus" && c.o.fresh), "🩺 Check Alfred runs his AI check and the health watch");
+  assert(/His AI: 1 thing needs attention/.test(log) && /Ollama running — press Start/.test(log) && /Free disk space is low/.test(log), "and writes the results to the Activity Log in plain words");
+  assert(!api.calls.some((c) => c.fn === "butlerCapabilityTest"), "it no longer runs the old butler's capability test");
+
+  // 🎩 Alfred: On/Off (no title-bar panel code in this test) — turns him on directly
+  click(dom, "btn-ai-toggle"); await tick();
+  assert(api.calls.filter((c) => c.fn === "alfredSetEnabled").pop().on === true && doc.getElementById("btn-ai-toggle").textContent === "🎩 Alfred: On", "🎩 Alfred: Off → On");
 }
 
 async function testIss017StaleSavedAndConverseProse() {
@@ -1454,16 +1506,13 @@ async function testButlerLightAndColoredLog() {
   const dom = await loadWindow(api);
   const doc = dom.window.document;
 
-  // The status light lives in the User Panel and reflects the butler's state.
+  // The status light in the User Panel is 🎩 Alfred's now: the old butler's state no longer drives it.
   const light = doc.getElementById("btn-butler-status");
-  assert(!!light, "the Butler status light is present in the User Panel");
+  assert(!!light, "the status light is present in the User Panel");
   if (api._managerStateCb) api._managerStateCb({ status: "delegating", turnNumber: 2, maximumTurns: 20 });
-  assert(light.classList.contains("working") && /turn 2/.test(light.querySelector(".txt").textContent), "while working, the light glows and shows what he's doing");
-  if (api._managerStateCb) api._managerStateCb({ status: "finished" });
-  assert(!light.classList.contains("working"), "when he finishes, the light stops glowing");
-  // A stall-break question flags it amber ('needs you').
+  assert(!light.classList.contains("working") && !/turn 2/.test(light.textContent), "the old butler's work no longer lights it (it is Alfred's light)");
   if (api._managerAckCb) api._managerAckCb({ text: "I've gone 5 turns without progress. Could you tell me what you'd like me to do?" });
-  assert(light.classList.contains("needs"), "a question to the user turns the light amber (needs you)");
+  assert(!light.classList.contains("needs"), "nor does an old-butler question");
 
   // The butler log colour-codes by who's speaking.
   const blog = doc.getElementById("jarvis-log");

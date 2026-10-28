@@ -11,13 +11,19 @@ turn him on.
 
 1. Start AutoInjector as usual.
 2. In the title bar (top right) press **🎩 Alfred: Off** — it becomes **🎩 Alfred: On** and his
-   panel opens on the right, floating over the app. It stays available on every tab (🤖 AutoInjector,
-   📖 Akọwe, 🎨 Images). **🗗 Panel** (or Ctrl+Shift+A) hides/shows the panel while he stays on.
+   side panel opens on the right; the app moves over to make room. It stays available on every tab
+   (🤖 AutoInjector, 📖 Akọwe, 🎨 Images, 🎬 Video). **▸ Panel** (or Ctrl+Shift+A) hides/shows the panel
+   while he stays on. (The User Panel's **🎩 Alfred: Off/On** button does the same as the switch.)
 3. He needs an AI to think with (see the next section). If he can't reach it, he says so plainly —
    everything else in the app keeps working.
 
 Press the switch again to turn him **off**: the panel disappears, he stops what he was doing, and
 he makes no more calls.
+
+### Two places: the TALK panel and the SETUP panel
+
+- **Talk to him** in his **side panel** (below). **Set him up** in the **🎩 Butler section** of the main tab
+  (one-button setup, the check, models, personality, the activity log). There is no other Alfred window.
 
 ### His side panel (it moves the app over, on every tab)
 
@@ -26,11 +32,36 @@ he makes no more calls.
   The title-bar **▸ Panel / ◂ Panel** button hides / shows it.
 - **Ctrl+Shift+A** (**Cmd+Shift+A** on a Mac) shows / hides it from anywhere in the app, even from inside an
   AI pane. Hiding the panel does not turn Alfred off.
-- Quick buttons: **📊 Status**, **🩺 Check his AI**, **🎨 Make a picture**, **📖 My book**, and
-  **⚙ Set up his AI**, which opens the 🎩 Butler section. The list in the header switches between saved
-  set-ups, and 💾 saves the current one.
-- If you'd rather have him in a separate window over the app, choose ⚙ → *His panel* → **Separate
-  window**. A tick box there keeps that window above other programs too.
+- **Eight big buttons** do something real for you through Alfred (he still shows an "I will" card before he
+  changes anything):
+  - **🧑 Make a character** — asks the name and a line about them, then Alfred opens their Character Forge
+    dossier and invents the rest as proposals you approve. (Akọwe makes the book's characters itself —
+    outline / Characters and places; when the name is not in the book yet, Alfred says so plainly.)
+  - **🎨 Make a picture** / **🎬 Make a video** — asks what it should show, then Alfred makes it.
+  - **🖼 Design a cover** — what the cover picture should show (optional), then the cover design and art.
+  - **📖 My book** — where your book is (checklist, the "Make a book for me" run, problems).
+  - **✍ Continue / make my book** — resumes the "Make a book for me" run; with no book yet it asks for your
+    idea and starts one.
+  - **🩺 Check everything** — his AI and the whole app (disk, Stable Diffusion, Akọwe, the AI panes, logs),
+    with a one-click fix where there is one. Needs no AI.
+  - **❓ Everything I can do** — a searchable list of everything Alfred can do, grouped (📖 Books,
+    🧑 Characters & world, 🎨 Pictures & covers, 🎬 Video, 💬 The three AIs, 🧠 His AI & setup,
+    📁 Files & folders, ⚙ App settings & tools), each with one plain line and **▶ Try it**, which puts an
+    example request in his box. Typing **"what can you do?"** opens it too.
+  The book buttons say plainly when Akọwe has no book yet (or is not running).
+- The list in the header switches between saved set-ups, 💾 saves the current one, ⚙ has his AI settings
+  and **🛠 Set up his AI** (opens the 🎩 Butler section).
+
+### The User Panel buttons (top of the main tab)
+
+The old Butler's buttons up there are Alfred's now:
+- **→ 🎩 Alfred** sends what you typed to Alfred (his panel opens; he is turned on if he was off). His
+  **Active** box includes him in **→ All**.
+- The **status light** shows his state — off, idle, working, or *needs you* (a card is waiting). Click it to
+  open his panel.
+- **🧠 Auto / Local / Connected AI / Web AI** — what he thinks with (click to change).
+- **🎩 Alfred: On/Off** — the same as the title-bar switch.
+- **🩺 Check Alfred** — the 🩺 check above (in his panel; in the Activity Log while he is off).
 
 ### The 🎩 Butler section (set-up + activity)
 
@@ -216,10 +247,11 @@ At most one of each every 5 minutes and 6 in 10 minutes.
 | `desktop-app/alfred-ai.js` | his AI: OpenAI-compatible tool calling (Ollama `/v1`, the connected AI), the JSON text protocol (web panes / models without tools) |
 | `desktop-app/alfred-image.js` | the ONE image adapter (sd-api `images.generate`; falls back to image-provider) |
 | `desktop-app/alfred-main.js` | wiring into Electron: tool context, IPC `alfred:*`, app events → watcher |
-| `desktop-app/alfred-panel.js` | the panel UI (built only when on) — the SAME code renders in the floating window (`alfred-window.html`, `<body data-alfred-host="window">`) or as the docked drawer in `controls.html` |
-| `desktop-app/alfred-window.js` | the floating side panel window: Electron-free (injected BrowserWindow / screen), modes, parent vs on-top, bounds clamp + memory, Ctrl/Cmd+Shift+A via `before-input-event` on every page; `alfred-window-preload.js` exposes only `alfred*` |
+| `desktop-app/alfred-panel.js` | his side panel (built only when on), docked in `controls.html`: the 8 big buttons and their forms, ❓ the catalog, chat, cards, settings, set-ups. Ctrl/Cmd+Shift+A is caught in main (`alfred-main.js`, `before-input-event` on every page) and sent as `toggle-panel` |
+| `desktop-app/alfred-catalog.js` | "❓ Everything I can do": the grouped list built from `alfred-tools.publicList()` + `alfred-app-actions.ACTIONS` (one plain line + an example request each) |
+| `desktop-app/controls.js` (🎩 Alfred in the User Panel) | → 🎩 Alfred, the status light, 🧠, 🎩 Alfred: On/Off, 🩺 Check Alfred (the old Butler's ids, kept) |
 | `desktop-app/alfred-persona-ui.js` | personality editor + saved set-ups in `<div id="alfred-persona">` (🤵 Butler section) |
-| IPC (B6) | `alfred:personality` (get / set, clamped with plain notes), `alfred:profiles`, `alfred:profile-save` `{name, renameFrom?}`, `alfred:profile-use` `{name}`, `alfred:profile-delete` `{name}`, `alfred:panel` (get / `{mode, otherApps}`), `alfred:panel-toggle` `{open?}`, `alfred:show-butler`; events on `alfred` also: `toggle-panel`, `show-butler` |
+| IPC (B6) | `alfred:personality` (get / set, clamped with plain notes), `alfred:profiles`, `alfred:profile-save` `{name, renameFrom?}`, `alfred:profile-use` `{name}`, `alfred:profile-delete` `{name}`, `alfred:panel` (get: `{mode:'docked', open, shortcut}`), `alfred:panel-toggle` `{open?}`, `alfred:show-butler`, `alfred:catalog` (read-only: the grouped list), `alfred:books` (read-only: `{akowe, books:[{project_id,title}]}` for the big buttons); events on `alfred` also: `toggle-panel`, `show-butler` |
 | hooks | `captureIpc(ipcMain)` right after Electron is required + one marked block in `main.js`, `preload.js` (`alfred*`), the switch + script tag in `controls.html`, `alfred-` log tag in `log-tags.js` |
 | Akọwe | `POST /api/projects/{id}/branches/{b}/journal/note` `{source:"alfred", code, title}`; optional `note` on `POST …/review/fix` |
 

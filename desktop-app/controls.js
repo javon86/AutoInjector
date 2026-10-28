@@ -21,7 +21,7 @@ const lastReplyBySite = {}; // most recent reply text per AI, for "use as image 
 let currentPrompts = [];
 let routing = { chatgpt: [], claude: [], gemini: [] };
 let enabled = { chatgpt: true, claude: true, gemini: true };
-let butlerActive = false; // whether → All also includes the butler (his Active checkbox)
+let butlerActive = false; // whether → All also includes 🎩 Alfred (his Active checkbox; id p-butler kept)
 // Default pane zoom: 60% (main.js applies the same default to the real pages).
 const DEFAULT_PANE_ZOOM = 0.6;
 let zoomLevels = { chatgpt: DEFAULT_PANE_ZOOM, claude: DEFAULT_PANE_ZOOM, gemini: DEFAULT_PANE_ZOOM };
@@ -520,30 +520,31 @@ function buildComposerButtons() {
     };
     grid.appendChild(checkbox);
   }
-  // The butler is a fourth participant row — same shape as an AI: a → send
-  // button in the Send column and its own Active checkbox in the Active column.
+  // 🎩 Alfred is a fourth participant row — same shape as an AI: a → send
+  // button in the Send column and his own Active checkbox in the Active column.
+  // (The ids are the old butler's, kept so everything that finds them still does.)
   const butler = document.createElement("button");
   butler.id = "btn-send-butler";
-  butler.textContent = "→ 🤵 Butler";
-  butler.title = "Send this message to the butler (give him a goal / talk to him)";
-  butler.setAttribute("aria-label", "Send this message to the butler");
-  butler.onclick = () => sendToButler();
+  butler.textContent = "→ 🎩 Alfred";
+  butler.title = "Send this message to 🎩 Alfred — his side panel opens and he answers there (he asks before he changes anything)";
+  butler.setAttribute("aria-label", "Send this message to Alfred");
+  butler.onclick = () => sendToAlfred();
   grid.appendChild(butler);
 
   const butlerChk = document.createElement("input");
   butlerChk.type = "checkbox";
   butlerChk.id = "p-butler";
   butlerChk.checked = butlerActive;
-  butlerChk.title = "Include the butler when you press → All";
-  butlerChk.setAttribute("aria-label", "Butler active");
+  butlerChk.title = "Include 🎩 Alfred when you press → All";
+  butlerChk.setAttribute("aria-label", "Alfred active");
   butlerChk.onchange = (e) => { butlerActive = e.target.checked; };
   grid.appendChild(butlerChk);
 
-  // → All: send to every checked AI, plus the butler when his box is checked.
+  // → All: send to every checked AI, plus Alfred when his box is checked.
   const all = document.createElement("button");
   all.className = "primary";
   all.textContent = "→ All";
-  all.onclick = () => { sendCompose(SITES.filter((s) => enabled[s])); if (butlerActive) sendToButler(); };
+  all.onclick = () => { const text = el("composer-text").value.trim(); sendCompose(SITES.filter((s) => enabled[s])); if (butlerActive) sendToAlfred(text); };
   grid.appendChild(all);
 }
 
@@ -706,7 +707,7 @@ const BUTLER_MODE_META = {
 let butlerMode = "auto";
 try { const s = localStorage.getItem("butlerMode"); if (BUTLER_MODES.includes(s)) butlerMode = s; } catch (_) {}
 function renderButlerMode() {
-  const b = el("btn-butler-mode"); if (!b) return;
+  const b = el("legacy-butler-mode"); if (!b) return; // the old butler's toggle is gone; #btn-butler-mode is Alfred's (below)
   const meta = BUTLER_MODE_META[butlerMode] || BUTLER_MODE_META.auto;
   b.classList.remove("mode-converse", "mode-auto", "mode-self", "mode-delegate");
   b.classList.add(meta.cls);
@@ -719,9 +720,9 @@ function setButlerMode(mode) {
   try { localStorage.setItem("butlerMode", mode); } catch (_) {}
   renderButlerMode();
 }
-if (el("btn-butler-mode")) {
+if (el("legacy-butler-mode")) {
   renderButlerMode();
-  el("btn-butler-mode").onclick = () => {
+  el("legacy-butler-mode").onclick = () => {
     const next = BUTLER_MODES[(BUTLER_MODES.indexOf(butlerMode) + 1) % BUTLER_MODES.length];
     setButlerMode(next);
     uiLog("click", { id: "btn-butler-mode", msg: `butler mode: ${next}` });
@@ -747,15 +748,6 @@ async function butlerHandle(text, opts = {}) {
   return r || { ok: false, error: "error" };
 }
 
-// Send the composer text to the butler — honours the handling-mode toggle.
-async function sendToButler() {
-  const text = el("composer-text").value.trim();
-  if (!text) { setStatus("Type a message first."); return; }
-  setStatus(butlerMode === "converse" ? "Talking to the butler…" : `Sending to the butler (${BUTLER_MODE_META[butlerMode].tx})…`);
-  const r = await butlerHandle(text, { mirror: true });
-  if (r && r.ok) setStatus(butlerMode === "converse" ? "Asked the butler." : "Sent to the butler.");
-  else { const hint = r && r.error === "NOT_CONFIGURED" ? " — give him a local model in the Butler bar (⚙️) first." : ""; setStatus(`Butler can't start: ${(r && r.error) || "error"}${hint}`); }
-}
 
 // The Prompt Library is just a compact dropdown + a few buttons here —
 // creating/editing a prompt's actual per-AI text happens in the separate
@@ -1846,7 +1838,7 @@ async function runCapabilityTest(triggerBtn) {
   if (capTestRunning) return;
   if (!window.api.butlerCapabilityTest) { logToCenter("Capability test unavailable.", { tag: "setup", err: true }); return; }
   capTestRunning = true; capReelActive = true; capReelReset();
-  const btns = ["btn-cap-run", "btn-capability-test", "btn-selfcheck"].map(el).filter(Boolean);
+  const btns = ["btn-cap-run", "btn-selfcheck"].map(el).filter(Boolean);
   const prev = btns.map((b) => b.textContent);
   btns.forEach((b) => { b.disabled = true; }); if (triggerBtn) triggerBtn.textContent = "🧪 Testing…";
   logToCenter("🧪 Capability test started — really running code, files, tools, memory, image, video, voice, and pinging the AIs…", { tag: "setup" });
@@ -1861,7 +1853,6 @@ async function runCapabilityTest(triggerBtn) {
 }
 // Every entry point runs the same test (reel + pop-up).
 if (el("btn-cap-run")) el("btn-cap-run").onclick = () => { uiLog("click", { id: "btn-cap-run", msg: "test all capabilities" }); runCapabilityTest(el("btn-cap-run")); };
-if (el("btn-capability-test")) el("btn-capability-test").onclick = () => { uiLog("click", { id: "btn-capability-test", msg: "run capability test" }); runCapabilityTest(el("btn-capability-test")); };
 
 if (el("btn-selfcheck")) el("btn-selfcheck").onclick = async () => {
   const deep = !!(el("cb-deep-check") && el("cb-deep-check").checked);
@@ -2202,8 +2193,6 @@ setInterval(pollGpu, 2500);
 
 function lsiReflect(enabled) {
   if (el("lsi-enabled")) el("lsi-enabled").checked = !!enabled;
-  const b = el("btn-ai-toggle");
-  if (b) { b.classList.toggle("on", !!enabled); b.textContent = `🤖 System AI: ${enabled ? "On" : "Off"}`; }
   const st = el("lsi-status");
   if (st) { st.textContent = enabled ? "· on" : "· off"; st.style.color = enabled ? "#7ad19a" : "#888"; }
 }
@@ -2216,7 +2205,6 @@ function lsiSetEnabled(on) {
   // locally so the switch still responds.
   lsiReflect(on);
 }
-if (el("btn-ai-toggle")) el("btn-ai-toggle").onclick = () => lsiSetEnabled(!(el("lsi-enabled") && el("lsi-enabled").checked));
 if (el("lsi-enabled")) el("lsi-enabled").onchange = () => lsiSetEnabled(el("lsi-enabled").checked);
 async function lsiRefreshModels() {
   const sel = el("lsi-model"); if (!sel || !window.api.ollamaList) return;
@@ -2429,20 +2417,144 @@ function jarvisShowRunning(on) {
   if (el("btn-jarvis-stop")) el("btn-jarvis-stop").style.display = on ? "" : "none";
   if (el("btn-jarvis-start")) el("btn-jarvis-start").disabled = !!on;
 }
-// The Butler status light in the User Panel: glows while he's working, shows a
-// one-line "what he's doing", and jumps to his panel on click.
+// The status light in the User Panel is 🎩 Alfred's: off / idle / working (glows) / needs you
+// (a card is waiting). Clicking it opens his side panel (alfredTop below).
 function setButlerLight(cls, text) {
   const b = el("btn-butler-status"); if (!b) return;
-  b.classList.remove("working", "needs", "error");
+  b.classList.remove("working", "needs", "error", "off");
   if (cls) b.classList.add(cls);
   const t = b.querySelector(".txt"); if (t && text != null) t.textContent = text;
 }
-if (el("btn-butler-status")) el("btn-butler-status").onclick = () => {
-  uiLog("click", { id: "btn-butler-status", msg: "open butler" });
-  const panel = el("col-systemai");
-  if (panel) { panel.classList.remove("hidden-collapsed"); panel.scrollIntoView({ behavior: "smooth", block: "start" }); }
-  const goal = el("jarvis-goal"); if (goal) try { goal.focus(); } catch (_) {}
+
+// ==== 🎩 Alfred in the User Panel ====================================================================
+// The old butler's buttons up here are Alfred's now (same ids): "→ 🎩 Alfred" + his Active box, the status
+// light, 🧠 what he thinks with (#btn-butler-mode), 🎩 Alfred: On/Off (#btn-ai-toggle, the same as the
+// title-bar switch) and 🩺 Check Alfred (#btn-capability-test). His TALK panel is alfred-panel.js.
+let alfredTop = null; // his last state ({ enabled, busy, card, settings })
+const ALFRED_BRAINS = ["auto", "local", "api", "pane"];
+const ALFRED_BRAIN_META = {
+  auto:  { tx: "Auto",         cls: "mode-auto",     say: "Automatic — a local model, else the connected AI" },
+  local: { tx: "Local",        cls: "mode-self",     say: "a local model on this PC (Ollama)" },
+  api:   { tx: "Connected AI", cls: "mode-delegate", say: "the connected AI (manager / API)" },
+  pane:  { tx: "Web AI",       cls: "mode-converse", say: "a web AI pane (ChatGPT, Claude or Gemini)" },
 };
+function paintAlfredTop(st) {
+  if (st) alfredTop = st;
+  const s = alfredTop || {};
+  const on = !!s.enabled;
+  if (!on) setButlerLight("off", "🎩 Alfred off");
+  else if (s.card) setButlerLight("needs", "🎩 Alfred needs you — a card is waiting");
+  else if (s.busy) setButlerLight("working", "🎩 Alfred working…");
+  else setButlerLight("", "🎩 Alfred idle");
+  const t = el("btn-ai-toggle");
+  if (t) { t.classList.toggle("on", on); t.setAttribute("aria-checked", String(on)); t.textContent = `🎩 Alfred: ${on ? "On" : "Off"}`; }
+  const m = el("btn-butler-mode");
+  if (m) {
+    const brain = (s.settings && ALFRED_BRAIN_META[s.settings.brain]) ? s.settings.brain : "auto";
+    const meta = ALFRED_BRAIN_META[brain];
+    m.classList.remove("mode-converse", "mode-auto", "mode-self", "mode-delegate");
+    m.classList.add(meta.cls);
+    m.dataset.brain = brain;
+    const ic = m.querySelector(".mode-ic"); if (ic) ic.textContent = "🧠";
+    const tx = m.querySelector(".mode-tx"); if (tx) tx.textContent = meta.tx;
+  }
+}
+async function alfredRefresh() {
+  if (typeof window.api.alfredStatus !== "function") return null;
+  try { const st = await window.api.alfredStatus(); paintAlfredTop(st); return st; } catch (_) { return null; }
+}
+/** Turn him on (when he is off) and open his side panel. Returns his state, or null. */
+async function alfredOpenPanel() {
+  let st = alfredTop || await alfredRefresh();
+  if (!st || !st.enabled) {
+    if (typeof window.api.alfredSetEnabled !== "function") return null;
+    try { st = await window.api.alfredSetEnabled(true); } catch (_) { st = null; }
+    if (!st || !st.enabled) return null;
+    paintAlfredTop(st);
+  }
+  if (typeof window.api.alfredPanelToggle === "function") { try { await window.api.alfredPanelToggle(true); } catch (_) {} }
+  return st;
+}
+// "→ 🎩 Alfred": the composed message goes to Alfred; his side panel opens and he answers there.
+async function sendToAlfred(preset) {
+  const text = String(typeof preset === "string" ? preset : el("composer-text").value).trim();
+  if (!text) { setStatus("Type a message first."); return; }
+  if (typeof window.api.alfredAsk !== "function") { setStatus("🎩 Alfred isn't available in this build."); return; }
+  uiLog("click", { id: "btn-send-butler", msg: "send to Alfred" });
+  const wasOn = !!(alfredTop && alfredTop.enabled);
+  const st = await alfredOpenPanel();
+  if (!st) { setStatus("Couldn't turn 🎩 Alfred on — try the 🎩 switch at the top."); return; }
+  if (st.card) { setStatus("🎩 Alfred is waiting for your answer on his card first (✔ Do it or ✖ No) — see his panel."); return; }
+  if (st.busy) { setStatus("🎩 Alfred is still working — see his panel (■ Stop cancels)."); return; }
+  setStatus(wasOn ? "Sent to 🎩 Alfred — he answers in his panel." : "Turned 🎩 Alfred on and sent him your message — he answers in his panel.");
+  if (typeof preset !== "string") { el("composer-text").value = ""; if (typeof updateCharCount === "function") try { updateCharCount(); } catch (_) {} }
+  let r = null;
+  try { r = await window.api.alfredAsk(text); } catch (_) { r = null; }
+  if (r && r.ok === false && r.message) setStatus(`🎩 ${r.message}`);
+}
+if (el("btn-butler-status")) el("btn-butler-status").onclick = async () => {
+  uiLog("click", { id: "btn-butler-status", msg: "open Alfred" });
+  const st = await alfredOpenPanel();
+  if (!st) setStatus("🎩 Alfred isn't available — try the 🎩 switch at the top.");
+};
+if (el("btn-ai-toggle")) el("btn-ai-toggle").onclick = async () => {
+  uiLog("click", { id: "btn-ai-toggle", msg: "Alfred on/off" });
+  const sw = el("btn-alfred-switch");
+  // the title-bar switch does the same (and its panel code builds / removes the drawer)
+  if (sw && sw.dataset.alfredWired === "yes") { sw.click(); setTimeout(alfredRefresh, 60); return; }
+  if (typeof window.api.alfredSetEnabled !== "function") { setStatus("🎩 Alfred isn't available in this build."); return; }
+  try { paintAlfredTop(await window.api.alfredSetEnabled(!(alfredTop && alfredTop.enabled))); } catch (_) {}
+};
+if (el("btn-butler-mode")) el("btn-butler-mode").onclick = async () => {
+  if (typeof window.api.alfredSettings !== "function") { setStatus("🎩 Alfred isn't available in this build."); return; }
+  const cur = (alfredTop && alfredTop.settings && alfredTop.settings.brain) || el("btn-butler-mode").dataset.brain || "auto";
+  const next = ALFRED_BRAINS[(ALFRED_BRAINS.indexOf(cur) + 1) % ALFRED_BRAINS.length];
+  uiLog("click", { id: "btn-butler-mode", msg: `Alfred thinks with: ${next}` });
+  let s = null;
+  try { s = await window.api.alfredSettings({ brain: next }); } catch (_) { s = null; }
+  const brain = (s && s.brain) || next;
+  paintAlfredTop(Object.assign({}, alfredTop || {}, { settings: Object.assign({}, (alfredTop && alfredTop.settings) || {}, s || {}, { brain }) }));
+  setStatus(`🧠 Alfred now thinks with ${ALFRED_BRAIN_META[brain].say}.${brain === "auto" ? "" : " Set it up in the 🎩 Butler section if it isn't ready."}`);
+};
+// 🩺 Check Alfred: his AI (llm:check) + the whole app (health:status) — no AI needed. With Alfred on, the
+// result shows in his side panel (its 🩺 Check everything button); while he is off, in the Activity Log.
+async function checkAlfredFromTop() {
+  uiLog("click", { id: "btn-capability-test", msg: "check Alfred" });
+  const panelBtn = el("alfred-a-check");
+  if (alfredTop && alfredTop.enabled && panelBtn) {
+    if (typeof window.api.alfredPanelToggle === "function") { try { await window.api.alfredPanelToggle(true); } catch (_) {} }
+    panelBtn.click();
+    setStatus("🩺 Checking — the result is in 🎩 Alfred's panel.");
+    return;
+  }
+  const b = el("btn-capability-test"); if (b) b.disabled = true;
+  logToCenter("🩺 Checking Alfred's AI and the whole app…", { tag: "setup" });
+  try {
+    let r = null;
+    if (typeof window.api.llmCheck === "function") { try { r = await window.api.llmCheck(); } catch (_) { r = null; } }
+    if (r && Array.isArray(r.rows)) {
+      logToCenter(`🧠 His AI: ${r.summary || (r.ok ? "ready." : "something needs fixing.")}`, { tag: "setup", err: r.ok === false });
+      for (const x of r.rows.slice(0, 10)) logToCenter(`  ${x.ok === true ? "✔" : x.ok === false ? "✖" : "⚠"} ${x.label}${x.detail ? ` — ${x.detail}` : ""}`, { tag: "setup", err: x.ok === false });
+    } else logToCenter("🧠 His AI: the check isn't available in this build — use the 🎩 Butler section.", { tag: "setup" });
+    let hs = null;
+    if (typeof window.api.healthStatus === "function") { try { hs = await window.api.healthStatus({ fresh: true }); } catch (_) { hs = null; } }
+    if (hs && Array.isArray(hs.problems)) {
+      if (!hs.problems.length) logToCenter("🩺 The app: ✔ nothing wrong found.", { tag: "setup" });
+      for (const p of hs.problems.slice(0, 8)) logToCenter(`  ${p.severity === "error" ? "✖" : "⚠"} ${p.text}${p.fix && p.fix.label ? ` — fix: ${p.fix.label} (in Alfred's panel)` : ""}`, { tag: "setup", err: p.severity === "error" });
+    }
+    setStatus(r && r.ok === false ? "🩺 Something needs fixing — see the Activity Log (⚡ Set up in the 🎩 Butler section)." : "🩺 Check done — see the Activity Log.");
+  } finally { if (b) b.disabled = false; }
+}
+if (el("btn-capability-test")) el("btn-capability-test").onclick = () => { checkAlfredFromTop(); };
+if (typeof window.api.onAlfred === "function") {
+  window.api.onAlfred((p) => {
+    if (!p) return;
+    if (p.type === "state" && p.state) paintAlfredTop(p.state);
+    else if (p.type === "card" || p.type === "message" || p.type === "activity") alfredRefresh();
+  });
+}
+paintAlfredTop(null);
+alfredRefresh();
 if (el("btn-jarvis-start")) el("btn-jarvis-start").onclick = async () => {
   if (!window.api.startManagedTask) return;
   const goal = (el("jarvis-goal") && el("jarvis-goal").value || "").trim();
@@ -2465,7 +2577,7 @@ if (window.api.onManagerAck) window.api.onManagerAck((a) => {
   if (!a || !a.text) return;
   if (el("jarvis-ack")) el("jarvis-ack").textContent = "🤵 " + a.text;
   // A stall-break question is the butler asking ME for input — flag it amber.
-  if (/\?\s*$/.test(a.text) || /would you like|tell me|need (more|the)|waiting on/i.test(a.text)) setButlerLight("needs", "Butler needs you");
+  // (the User Panel status light is 🎩 Alfred's now — see alfredTop below)
 });
 function renderAwareness(a) {
   const box = el("jarvis-awareness"); if (!box) return;
@@ -2487,10 +2599,6 @@ if (window.api.onManagerState) window.api.onManagerState((m) => {
   if (m.toolCalls && m.toolCalls.length) bits.push(`${m.toolCalls.length} tool call(s)`);
   if (m.memories && m.memories.length) bits.push(`${m.memories.length} memory item(s)`);
   jarvisSetStatus(bits.join(" · "));
-  // Drive the User Panel status light.
-  if (running) setButlerLight("working", `Butler: ${m.status}${m.turnNumber ? " · turn " + m.turnNumber : ""}`);
-  else if (m.status === "error") setButlerLight("error", "Butler stopped");
-  else setButlerLight("", m.status === "finished" ? "Butler done — idle" : "Butler idle");
   renderAwareness(m.awareness);
   renderPendingApproval(m);
 });

@@ -1,12 +1,13 @@
 'use strict';
-// alfred.e2e.js — 🎩 Alfred inside the REAL Electron app: the switch starts Off (no drawer), turning him
-// On opens his FLOATING side panel — its own window, a child of the main window, drawn over the whole app
-// (proved from the screen's own pixels, over the AI panes and over the native Akọwe view); Ctrl+Shift+A
-// shows / hides it from the control panel and from the panel itself. In that panel, with a fake OpenAI-compatible model (like Ollama /v1) that returns tool
-// calls he answers "what's the status of my book?" from the REAL Akọwe server AutoInjector starts,
-// and "make an image of a lighthouse" goes through the "I will" card -> ✔ Do it -> the image path
-// (the 🎨 Images module, sd-api.js, against a fake Forge server) -> a saved PNG. Then ⚙ "Docked (beside)" closes
-// the window and brings back the drawer exactly as before (room made beside it, works over the 📖 Akọwe tab).
+// alfred.e2e.js — 🎩 Alfred inside the REAL Electron app, docked: the switch starts Off (no drawer); turning
+// him On opens his SIDE PANEL — docked on the right, it moves the app over on every tab (🤖 main, 📖 Akọwe,
+// 🎨 Images, 🎬 Video), never covers anything, and there is no separate window any more. With a fake
+// OpenAI-compatible model (like Ollama /v1) that returns tool calls: 📖 My book answers from the REAL Akọwe
+// server AutoInjector starts; 🎨 Make a picture goes through the "I will" card -> ✔ Do it -> the 🎨 Images
+// module (sd-api.js, against a fake Forge server) -> a saved PNG; 🧑 Make a character goes to the Character
+// Forge in the real Akọwe. ❓ Everything I can do is searchable and ▶ Try it fills his box; "what can you
+// do?" opens it too. The User Panel's "→ 🎩 Alfred" sends there, its light shows his state. Ctrl+Shift+A
+// shows / hides the drawer from the control panel and from inside an AI pane.
 //   xvfb-run -a node test/e2e/alfred.e2e.js
 // Env: AKOWE_E2E_PYTHON (default python3); SHOTS=<dir> (default: test/e2e/__screenshots__/alfred).
 const fs = require('fs');
@@ -36,37 +37,15 @@ function screen(name) { // the whole screen, incl. the native Akọwe view over 
   catch (e) { console.log(`  (no screen shot: ${String(e.message || e).slice(0, 80)})`); }
 }
 
-/**
- * Proof the panel window is drawn on top: grab the whole X screen and the panel's own page, and
- * compare a few patches at the same spots. They match only when nothing covers the panel.
- */
-async function overProof(page, b, tag) {
-  if (!process.env.DISPLAY) return { ok: true, detail: 'no display — skipped' };
-  try {
-    fs.mkdirSync(SHOTS, { recursive: true });
-    const scr = path.join(SHOTS, `_screen-${tag}.png`); const own = path.join(SHOTS, `_panel-${tag}.png`);
-    await page.screenshot({ path: own });
-    execFileSync('import', ['-window', 'root', scr], { timeout: 15000 });
-    const mean = (file, x, y) => execFileSync('convert', [file, '-crop', `16x16+${x}+${y}`, '+repage', '-resize', '1x1!', '-format', '%[fx:int(255*r)],%[fx:int(255*g)],%[fx:int(255*b)]', 'info:'], { timeout: 10000 }).toString().split(',').map(Number);
-    const spots = [[8, 8], [Math.round(b.width / 2), 60], [20, Math.round(b.height / 2)], [b.width - 40, b.height - 30]];
-    let worst = 0; const seen = [];
-    for (const [x, y] of spots) {
-      const a = mean(scr, b.x + x, b.y + y); const c = mean(own, x, y);
-      const d = Math.max(...a.map((v, i) => Math.abs(v - c[i])));
-      worst = Math.max(worst, d); seen.push(`${a.join('/')}≈${c.join('/')}`);
-    }
-    try { fs.unlinkSync(scr); fs.unlinkSync(own); } catch (_) {}
-    return { ok: worst <= 24, detail: `max colour difference ${worst} at ${spots.length} spots (${seen.slice(0, 2).join(', ')})` };
-  } catch (e) { return { ok: true, detail: `could not grab the screen (${String(e.message || e).slice(0, 60)}) — skipped` }; }
-}
 /** Keep a feature screenshot in the repo's shots/ folder. */
 function keep(name, as) { try { const src = path.join(SHOTS, `${name}.png`); if (fs.existsSync(src)) fs.copyFileSync(src, path.join(APP_DIR, '..', 'shots', as)); } catch (_) {} }
 
-/** The fake model: call book_status / generate_image for the two questions, then answer from the result. */
+/** The fake model: book_status / generate_image / forge_character for the requests, then answer from the result. */
 function script(body) {
   const last = lastMsg(body);
   if (last.role === 'tool') {
     let r = {}; try { r = JSON.parse(last.content); } catch (_) {}
+    if (last.name === 'forge_character') return { content: r.ok ? `🧑 ${r.message}` : `🧑 About that character: ${r.message || r.error}` };
     if (last.name === 'book_status') {
       const d = r.data || {};
       const books = (d.books || []).map((b) => `“${b.title}”`).join(', ') || 'no books yet';
@@ -77,6 +56,7 @@ function script(body) {
     return { content: 'Done.' };
   }
   const u = String((lastUser(body) || {}).content || '').toLowerCase();
+  if (/make a character/.test(u)) return toolCall('forge_character', { character: 'Mara' });
   if (/status/.test(u)) return toolCall('book_status', {});
   if (/image|picture/.test(u)) return toolCall('generate_image', { prompt: 'a lighthouse on a cliff at dusk, warm light' });
   return { content: 'Good day.' };
@@ -131,96 +111,119 @@ async function main() {
     assert(made === 201, `a book "The Lighthouse Keeper" exists in Akọwe (${made})`);
     await controls.click('#tab-app-main');
 
-    console.log('\n== turn him On: his side panel (default), then the separate window ==');
+    console.log('\n== turn him On: his side panel, docked beside the app on every tab ==');
     const con = await controls.evaluate((u) => window.api.sd.connect(u), sd.base);
     assert(con && con.ok !== false, `Stable Diffusion (fake Forge) connected through the 🎨 Images module (${con && (con.label || con.message || con.error)})`);
+    await controls.evaluate((base) => window.api.alfredSettings({ brain: 'local', local: { endpoint: base, model: 'fake-model' } }), llm.base);
+    const lightOff = await controls.textContent('#btn-butler-status');
+    assert(/Alfred off/.test(lightOff), `the User Panel light is Alfred's: "${lightOff.trim()}"`);
+    const windowsBefore = await app.evaluate(({ BaseWindow }) => BaseWindow.getAllWindows().length);
     await controls.click('#btn-alfred-switch');
     const on = await until(async () => (await controls.textContent('#btn-alfred-switch')) === '🎩 Alfred: On', 5000, 150);
     assert(!!on, 'the switch reads On');
-    // The default is the SIDE PANEL: it moves the app over (every tab), it never covers anything.
     const side = await until(() => controls.isVisible('#alfred-drawer'), 8000, 150);
-    assert(!!side && await controls.evaluate(() => document.body.classList.contains('alfred-open')), 'the default is his side panel (docked): the drawer opens and the page makes room');
+    assert(!!side && await controls.evaluate(() => document.body.classList.contains('alfred-open')), 'his side panel opens (docked) and the page makes room');
     for (const t of ['main', 'akowe', 'images', 'video']) {
       await controls.click(`#tab-app-${t}`); await sleep(250);
       const ok = await controls.evaluate((id) => { const e = document.getElementById(id); const d = document.getElementById('alfred-drawer'); return !!(e && d && !d.hidden && e.getBoundingClientRect().right <= d.getBoundingClientRect().left + 1); }, t === 'main' ? 'wrap' : `${t}-tab`);
       assert(ok, `on the ${t} tab the side panel stays and the page is laid out beside it`);
     }
     await controls.click('#tab-app-main');
-    assert(!(await until(async () => { for (const w of app.windows()) { try { if (/alfred-window\.html/.test(w.url())) return true; } catch (_) {} } return false; }, 1500, 150)), 'no separate window by default');
-    // The separate window is still a choice in ⚙ ("Separate window (over the app)"): the rest of this test drives it.
-    await controls.click('#alfred-btn-settings');
-    await controls.selectOption('#alfred-set-mode', 'floating');
-    await controls.click('#alfred-set-save');
-    const panel = await until(async () => { for (const w of app.windows()) { try { if (/alfred-window\.html/.test(w.url()) && await w.$('#alfred-input')) return w; } catch (_) {} } return null; }, 15000, 200);
-    assert(!!panel, 'his floating panel window opens (alfred-window.html, the same chat UI)');
-    if (!panel) return 1;
-    assert(!(await controls.evaluate(() => document.body.classList.contains('alfred-open'))), 'with the separate window, the control panel keeps its full width');
-    const geo = () => app.evaluate(({ BaseWindow, BrowserWindow, screen }) => {
-      const p = BrowserWindow.getAllWindows().find((w) => /alfred-window\.html/.test(w.webContents.getURL()));
-      const m = BaseWindow.getAllWindows().find((w) => /Automation/.test(w.getTitle()));
-      if (!p || !m) return null;
-      const par = p.getParentWindow();
-      return { visible: p.isVisible(), parented: !!par && par.id === m.id, onTop: p.isAlwaysOnTop(), b: p.getBounds(), m: m.getContentBounds(), d: screen.getDisplayMatching(p.getBounds()).workArea, focusedPanel: p.isFocused() };
-    });
-    let g = await geo();
-    assert(!!g && g.visible && g.parented, 'it is a child window of the main window — it stays above the app and moves with it');
-    const rightEdge = g && Math.min(g.m.x + g.m.width - 12, g.d.x + g.d.width);
-    assert(!!g && g.b.x >= g.m.x && g.b.x + g.b.width <= g.m.x + g.m.width && Math.abs((g.b.x + g.b.width) - rightEdge) <= 2 && g.b.y >= g.m.y, `it sits against the main window's right edge (kept on the screen), over the app (${g && JSON.stringify({ panel: g.b, main: g.m, screen: g.d })})`);
-    assert(!!g && !g.focusedPanel, 'appearing on its own, it did not take the keyboard from the app');
-    await controls.evaluate((base) => window.api.alfredSettings({ brain: 'local', local: { endpoint: base, model: 'fake-model' } }), llm.base);
-    const quick = await panel.$$eval('#alfred-quick button', (els) => els.map((e) => e.textContent));
-    assert(quick.join('|') === '📊 Status|🩺 Check his AI|🎨 Make a picture|📖 My book|⚙ Set up his AI', `the quick buttons are there (${quick.join(' · ')})`);
-    // Proof it is drawn OVER the app (incl. the native AI panes): the screen shows the panel's own pixels there.
-    await sleep(600);
-    const over = await overProof(panel, g.b, 'f1');
-    assert(over.ok, `the screen shows the panel's own pixels where it is (over the app): ${over.detail}`);
-    screen('06-floating-panel-over-the-app-fullscreen');
+    const windowsAfter = await app.evaluate(({ BaseWindow }) => BaseWindow.getAllWindows().length);
+    assert(windowsAfter === windowsBefore && !(await controls.$('#alfred-set-mode')), `no separate window (${windowsAfter} app window(s), as before) and no "separate window" choice in ⚙`);
+    assert(/Alfred idle/.test(await controls.textContent('#btn-butler-status')) && (await controls.textContent('#btn-ai-toggle')) === '🎩 Alfred: On', 'the User Panel light and On/Off follow him (idle, On)');
+    const big = await controls.$$eval('#alfred-actions button', (els) => els.map((e) => e.textContent));
+    assert(big.join('|') === '🧑Make a character|🎨Make a picture|🎬Make a video|🖼Design a cover|📖My book|✍Continue / make my book|🩺Check everything|❓Everything I can do', `the 8 big buttons are there (${big.join(' · ')})`);
+    await controls.evaluate(() => { document.getElementById('alfred-did').open = false; });
+    await sleep(400);
+    await shot(controls, '02-side-panel-buttons');
+    keep('02-side-panel-buttons', 'alfred-side-panel.png');
 
-    console.log('\n== "what\'s the status of my book?" — in the floating panel ==');
-    await panel.fill('#alfred-input', "what's the status of my book?");
-    await panel.click('#alfred-send');
-    const ans = await until(async () => { const t = await panel.$$eval('#alfred-chat .al-alfred', (els) => els.map((e) => e.textContent)); return t.find((x) => /Your books/.test(x)); }, 30000, 300);
+    console.log('\n== 📖 My book — from the real Akọwe ==');
+    await controls.click('#alfred-a-book');
+    const ans = await until(async () => { const t = await controls.$$eval('#alfred-chat .al-alfred', (els) => els.map((e) => e.textContent)); return t.find((x) => /Your books/.test(x)); }, 30000, 300);
     assert(!!ans && /The Lighthouse Keeper/.test(ans), `Alfred answers from Akọwe: "${ans && ans.slice(0, 140)}"`);
     const toolMsg = llm.requests.map((r) => r.body.messages.find((m) => m.role === 'tool' && m.name === 'book_status')).find(Boolean);
     assert(!!toolMsg && /The Lighthouse Keeper/.test(toolMsg.content), 'the book_status tool read the real Akọwe (with the token AutoInjector holds)');
-    assert(!(await panel.isVisible('#alfred-card')), 'no card for a read-only question');
-    await sleep(300);
-    await shot(panel, '02-status-of-my-book');
+    assert(!(await controls.isVisible('#alfred-card')), 'no card for a read-only question');
 
-    console.log('\n== "make an image of a lighthouse" -> I will card -> Do it (in the floating panel) ==');
-    await panel.fill('#alfred-input', 'make an image of a lighthouse');
-    await panel.click('#alfred-send');
-    const card = await until(() => panel.isVisible('#alfred-card'), 20000, 200);
+    console.log('\n== 🎨 Make a picture -> a tiny form -> I will card -> Do it ==');
+    await until(async () => !(await controls.isDisabled('#alfred-a-picture')), 10000, 150);
+    await controls.click('#alfred-a-picture');
+    await controls.fill('#alfred-f-what', 'a lighthouse');
+    await controls.click('#alfred-f-go');
+    const card = await until(() => controls.isVisible('#alfred-card'), 20000, 200);
     assert(!!card, 'an "I will" card appears');
-    const cardText = await panel.textContent('#alfred-card');
+    const cardText = await controls.textContent('#alfred-card');
     assert(/I will/.test(cardText) && /a lighthouse on a cliff at dusk/.test(cardText) && /Do it/.test(cardText), 'it says exactly what will happen, with ✔ Do it / ✖ No');
     assert(!sd.state.lastTxt2img, 'nothing was generated before ✔ Do it');
-    await panel.keyboard.press('Escape');
-    await sleep(300);
-    g = await geo();
-    assert(g.visible && await panel.isVisible('#alfred-card'), 'Escape never closes the panel while the card waits');
-    await shot(panel, '03-i-will-card');
-    await panel.click('#alfred-do-it');
-    const done = await until(async () => { const t = await panel.$$eval('#alfred-chat .al-alfred', (els) => els.map((e) => e.textContent)); return t.find((x) => /Here is your lighthouse/.test(x)); }, 30000, 300);
+    assert(/needs you/.test(await controls.textContent('#btn-butler-status')), 'the User Panel light says Alfred needs you (a card is waiting)');
+    assert(await controls.isDisabled('#alfred-a-video') && !(await controls.isDisabled('#alfred-a-catalog')), 'while the card waits, the buttons that ask him wait too (❓ still works)');
+    await shot(controls, '03-i-will-card');
+    await controls.click('#alfred-do-it');
+    const done = await until(async () => { const t = await controls.$$eval('#alfred-chat .al-alfred', (els) => els.map((e) => e.textContent)); return t.find((x) => /Here is your lighthouse/.test(x)); }, 30000, 300);
     assert(!!done, `Alfred reports the image: "${done && done.slice(0, 120)}"`);
     assert(!!sd.state.lastTxt2img && /lighthouse/.test(sd.state.lastTxt2img.prompt), 'the image went through the 🎨 Images module (sd-api) to Stable Diffusion txt2img');
     const p = done && done.replace(/^.*Here is your lighthouse: /, '').trim();
     assert(!!p && fs.existsSync(p) && fs.statSync(p).size > 0, `the PNG was saved (${p})`);
     madeFiles.push(p, String(p).replace(/\.png$/, '.json'));
-    const did = await panel.textContent('#alfred-did-list');
+    const did = await controls.textContent('#alfred-did-list');
     assert(/Make an image of/.test(did), '"What Alfred did" lists it');
-    await panel.evaluate(() => { document.getElementById('alfred-did').open = true; });
-    await sleep(400);
-    await shot(panel, '04-image-done');
+    await shot(controls, '04-image-done');
+
+    console.log('\n== 🧑 Make a character -> the Character Forge in the real Akọwe ==');
+    await until(async () => !(await controls.isDisabled('#alfred-a-character')), 10000, 150);
+    await controls.click('#alfred-a-character');
+    const form = await until(() => controls.isVisible('#alfred-f-name'), 8000, 150);
+    assert(!!form, 'the book exists, so a tiny form asks for the name and a line about them');
+    await controls.fill('#alfred-f-name', 'Mara');
+    await controls.fill('#alfred-f-about', 'the keeper who hates the sea');
+    await controls.click('#alfred-f-go');
+    const ccard = await until(() => controls.isVisible('#alfred-card'), 20000, 200);
+    assert(!!ccard && /Mara/.test(await controls.textContent('#alfred-card')), 'Alfred asks first: the card names Mara\'s dossier');
+    await controls.click('#alfred-do-it');
+    const cans = await until(async () => { const t = await controls.$$eval('#alfred-chat .al-alfred', (els) => els.map((e) => e.textContent)); return t.find((x) => /^🧑/.test(x)); }, 30000, 300);
+    const forgeMsg = llm.requests.map((r) => r.body.messages.find((m) => m.role === 'tool' && m.name === 'forge_character')).find(Boolean);
+    assert(!!forgeMsg && /Mara/.test(forgeMsg.content), `forge_character went to the real Akọwe (${forgeMsg && forgeMsg.content.slice(0, 160)})`);
+    assert(!!cans && /Mara/.test(cans), `and he answers in plain words: "${cans && cans.slice(0, 160)}"`);
+    const umsg = llm.requests.map((r) => lastUser(r.body)).filter(Boolean).map((m) => m.content).find((t) => /Make a character for my book: “Mara” — the keeper who hates the sea/.test(t));
+    assert(!!umsg, 'the request carried the name and the line about them');
+
+    console.log('\n== ❓ Everything I can do (searchable) and "what can you do?" ==');
+    await controls.click('#alfred-a-catalog');
+    const catOpen = await until(async () => (await controls.$$eval('#alfred-catalog-list .al-cat-item', (els) => els.length)) > 100, 8000, 150);
+    assert(!!catOpen && await controls.isVisible('#alfred-catalog'), 'the list opens inside the side panel, with every capability');
+    const groups = await controls.$$eval('#alfred-catalog-list h4', (els) => els.map((e) => e.textContent.replace(/ \(\d+\)$/, '')));
+    assert(groups[0] === '📖 Books' && groups.includes('🧑 Characters & world') && groups.includes('🎨 Pictures & covers') && groups.includes('🧠 His AI & setup'), `grouped (${groups.join(' · ')})`);
+    await controls.fill('#alfred-catalog-search', 'cover');
+    const hits = await controls.$$eval('#alfred-catalog-list .al-cat-item', (els) => els.map((e) => e.dataset.id));
+    assert(hits.includes('design_cover') && hits.includes('make_cover_art') && hits.length < 15, `searching "cover" narrows it (${hits.join(', ')})`);
+    await sleep(200);
+    await shot(controls, '05-everything-i-can-do');
+    await controls.click('#alfred-catalog-list .al-cat-item[data-id="make_cover_art"] button.al-try');
+    const tried = await controls.inputValue('#alfred-input');
+    assert(tried === 'Make the cover art: a lighthouse in a storm.' && !(await controls.isVisible('#alfred-catalog')), `▶ Try it puts the example in his box ("${tried}")`);
+    await controls.fill('#alfred-input', 'what can you do?');
+    const nReq = llm.requests.length;
+    await controls.click('#alfred-send');
+    assert(!!(await until(() => controls.isVisible('#alfred-catalog'), 3000, 100)) && llm.requests.length === nReq, 'typing "what can you do?" opens the list (no AI call)');
+    await controls.click('#alfred-catalog-close');
+
+    console.log('\n== the User Panel: "→ 🎩 Alfred" sends the composed message to him ==');
+    await controls.fill('#composer-text', 'hello Alfred');
+    await controls.click('#btn-send-butler');
+    const hi = await until(async () => { const t = await controls.$$eval('#alfred-chat .al-you', (els) => els.map((e) => e.textContent)); return t.includes('hello Alfred'); }, 10000, 200);
+    assert(!!hi, '"→ 🎩 Alfred" put the message in his chat');
+    assert(!!(await until(async () => { const t = await controls.$$eval('#alfred-chat .al-alfred', (els) => els.map((e) => e.textContent)); return t[t.length - 1] === 'Good day.'; }, 20000, 200)), 'and he answered there');
 
     console.log('\n== records: activity log has codes/titles only ==');
     const logs = await controls.evaluate(() => window.api.getState().then((s) => (s.log || []).filter((e) => /^alfred-/.test(e.kind))));
-    assert(logs.some((e) => e.kind === 'alfred-tool' && e.detail.tool === 'generate_image' && e.detail.ok) && logs.some((e) => e.kind === 'alfred-tool' && e.detail.tool === 'book_status'), 'both actions are in the activity log');
-    assert(!JSON.stringify(logs).includes('lighthouse') && !JSON.stringify(logs).includes('status of my book'), 'no prompts or prose in the log');
+    assert(logs.some((e) => e.kind === 'alfred-tool' && e.detail.tool === 'generate_image' && e.detail.ok) && logs.some((e) => e.kind === 'alfred-tool' && e.detail.tool === 'book_status'), 'the actions are in the activity log');
+    assert(!JSON.stringify(logs).includes('lighthouse') && !JSON.stringify(logs).includes('status of my book') && !JSON.stringify(logs).includes('hates the sea'), 'no prompts or prose in the log');
 
-    console.log('\n== Ctrl+Shift+A shows / hides it from anywhere in the app ==');
+    console.log('\n== Ctrl+Shift+A shows / hides the side panel from anywhere in the app ==');
     // A real key press as the OS delivers it (webContents.sendInputEvent goes through before-input-event,
-    // like a keyboard does) — into the control panel, into an AI pane, into the panel itself.
+    // like a keyboard does) — into the control panel and into an AI pane (a native view).
     const press = (urlRe) => app.evaluate(({ webContents }, re) => {
       const wc = webContents.getAllWebContents().find((w) => new RegExp(re).test(w.getURL()));
       if (!wc) return false;
@@ -228,78 +231,40 @@ async function main() {
       wc.sendInputEvent({ type: 'keyUp', keyCode: 'A', modifiers: ['control', 'shift'] });
       return true;
     }, urlRe);
-    const vis = (want) => until(async () => { const x = await geo(); return x && x.visible === want; }, 4000, 100);
-    assert(await press('controls\\.html') && !!(await vis(false)), 'Ctrl+Shift+A in the control panel hides the panel');
-    assert(await controls.textContent('#btn-alfred-switch') === '🎩 Alfred: On', '… and Alfred stays on');
-    assert(await press('controls\\.html') && !!(await vis(true)), 'Ctrl+Shift+A again brings it back');
-    const kept = await panel.$$eval('#alfred-chat .al-alfred', (els) => els.length);
-    assert(kept >= 2, `the conversation is still there (${kept} replies)`);
-    assert(await press('fake-chat\\.html') && !!(await vis(false)), 'Ctrl+Shift+A inside an AI pane (a native view) hides it too');
-    assert(await press('fake-chat\\.html') && !!(await vis(true)), '… and shows it');
-    assert(await press('alfred-window\\.html') && !!(await vis(false)), 'the shortcut works inside the panel itself');
+    const shown = (want) => until(async () => (await controls.isVisible('#alfred-drawer')) === want, 4000, 100);
+    assert(await press('controls\\.html') && !!(await shown(false)), 'Ctrl+Shift+A in the control panel hides the side panel');
+    assert(!(await controls.evaluate(() => document.body.classList.contains('alfred-open'))) && await controls.textContent('#btn-alfred-switch') === '🎩 Alfred: On', '… gives the room back, and Alfred stays on');
+    assert(await press('controls\\.html') && !!(await shown(true)), 'Ctrl+Shift+A again brings it back');
+    const kept = await controls.$$eval('#alfred-chat .al-alfred', (els) => els.length);
+    assert(kept >= 3, `the conversation is still there (${kept} replies)`);
+    assert(await press('fake-chat\\.html') && !!(await shown(false)), 'Ctrl+Shift+A inside an AI pane (a native view) hides it too');
+    assert(await press('fake-chat\\.html') && !!(await shown(true)), '… and shows it');
     await controls.click('#btn-alfred-drawer');
-    assert(!!(await vis(true)), 'the title-bar "🗗 Panel" button brings it back');
-    await panel.keyboard.press('Control+Shift+A');
-    assert(!!(await vis(false)), 'a key that reaches the page (synthetic input) still toggles it');
+    assert(!!(await shown(false)), 'the title-bar "▸ Panel" button hides it');
     await controls.keyboard.press('Control+Shift+A');
-    assert(!!(await vis(true)), '… from the control panel too');
+    assert(!!(await shown(true)), 'a key that reaches the page (synthetic input) still toggles it');
+    await controls.click('#btn-butler-status');
+    assert(!!(await shown(true)), 'the User Panel light opens his panel');
 
-    console.log('\n== over the 📖 Akọwe tab (a native view) ==');
-    await controls.click('#tab-app-akowe');
-    const shown = await until(async () => { const s = await controls.evaluate(() => window.api.akoweServerStatus()); return s.view && s.view.shown; }, 8000, 200);
-    assert(!!shown, 'the Akọwe page is shown in its tab');
-    await sleep(800);
-    g = await geo();
-    const overAk = await overProof(panel, g.b, 'f2');
-    assert(g.visible && overAk.ok, `the floating panel stays over the Akọwe page: ${overAk.detail}`);
-    screen('07-floating-over-akowe-fullscreen');
-    keep('07-floating-over-akowe-fullscreen', 'alfred-floating-over-akowe.png');
-    keep('06-floating-panel-over-the-app-fullscreen', 'alfred-floating-panel.png');
-    await controls.click('#tab-app-main');
-
-    console.log('\n== back to the side panel (docked) ==');
-    await panel.click('#alfred-btn-settings');
-    assert(await panel.inputValue('#alfred-set-mode') === 'floating', '⚙ shows "His panel: Separate window (over the app)"');
-    await panel.selectOption('#alfred-set-mode', 'docked');
-    await panel.click('#alfred-set-save');
-    const gone = await until(async () => (await geo()) === null, 6000, 150);
-    assert(!!gone, 'choosing Docked closes the floating window');
-    const drawer = await until(() => controls.isVisible('#alfred-drawer'), 5000, 150);
-    assert(!!drawer, 'and the drawer opens in the control panel');
-    const room = await controls.evaluate(() => { const w = document.getElementById('wrap').getBoundingClientRect(); const d = document.getElementById('alfred-drawer').getBoundingClientRect(); return w.right <= d.left + 1; });
-    assert(room, 'the page makes room for the drawer (the AI panes are laid out beside it, not under it)');
-    const dchat = await controls.$$eval('#alfred-chat .al-alfred', (els) => els.map((e) => e.textContent));
-    assert(dchat.some((x) => /Here is your lighthouse/.test(x)), 'the drawer shows the same conversation (one source of truth in main)');
-    await controls.fill('#alfred-input', "what's the status of my book?");
-    await controls.click('#alfred-send');
-    const n0 = dchat.length;
-    const dans = await until(async () => { const t = await controls.$$eval('#alfred-chat .al-alfred', (els) => els.map((e) => e.textContent)); return t.length > n0 && /Your books/.test(t[t.length - 1]) ? t[t.length - 1] : null; }, 30000, 300);
-    assert(!!dans, 'chat works in the drawer too');
-    await press('fake-chat\\.html');
-    assert(!!(await until(async () => !(await controls.isVisible('#alfred-drawer')), 4000, 100)), 'Docked: Ctrl+Shift+A (here from an AI pane) hides the drawer');
-    await press('controls\\.html');
-    assert(!!(await until(() => controls.isVisible('#alfred-drawer'), 4000, 100)), '… and shows it');
-    await shot(controls, '01-docked-drawer');
+    console.log('\n== over the 📖 Akọwe tab (a native view): laid out beside it ==');
     await controls.click('#tab-app-akowe');
     const shown2 = await until(async () => { const s = await controls.evaluate(() => window.api.akoweServerStatus()); return s.view && s.view.shown; }, 8000, 200);
-    assert(!!shown2 && await controls.isVisible('#alfred-drawer'), 'the drawer stays available over the Akọwe tab');
+    assert(!!shown2 && await controls.isVisible('#alfred-drawer'), 'the side panel stays available over the Akọwe tab');
     const beside = await controls.evaluate(() => document.getElementById('akowe-slot').getBoundingClientRect().right <= document.getElementById('alfred-drawer').getBoundingClientRect().left + 1);
     assert(beside, 'the Akọwe page is laid out beside the drawer');
     await sleep(800);
-    screen('05-over-akowe-tab-fullscreen');
-    await shot(controls, '05-over-akowe-tab');
+    screen('06-over-akowe-tab-fullscreen');
     await controls.click('#tab-app-main');
 
     console.log('\n== Off again ==');
     await controls.click('#btn-alfred-switch');
     const off = await until(async () => (await controls.textContent('#btn-alfred-switch')) === '🎩 Alfred: Off' && !(await controls.$('#alfred-drawer')), 5000, 150);
-    assert(!!off, 'switching Off removes the drawer');
-    await controls.evaluate(() => window.api.alfredPanel({ mode: 'floating' }));
-    await sleep(500);
-    assert((await geo()) === null, 'and no floating window while he is Off');
+    assert(!!off, 'switching Off removes the side panel');
+    assert(!!(await until(async () => /Alfred off/.test(await controls.textContent('#btn-butler-status')), 3000, 100)), 'the User Panel light says Alfred off');
     const n = llm.requests.length;
+    await press('controls\\.html');
     await sleep(500);
-    assert(llm.requests.length === n, 'and no more AI calls');
+    assert(!(await controls.$('#alfred-drawer')) && llm.requests.length === n, 'Ctrl+Shift+A does nothing while he is off, and no more AI calls');
   } finally {
     await app.close().catch(() => {});
     await llm.close(); await sd.close();

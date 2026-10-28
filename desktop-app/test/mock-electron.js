@@ -197,7 +197,7 @@ class BaseWindow extends EventEmitter {
   close() { if (this._destroyed) return; this._destroyed = true; this.emit("closed"); }
 }
 
-// 🎩 Alfred's floating side panel (alfred-window.js) is a BrowserWindow: enough of one to check what
+// A BrowserWindow (no app window uses one any more — 🎩 Alfred's panel is docked): enough of one to check what
 // it was made with (parent / alwaysOnTop / bounds), shown / hidden / focused, and what was sent to it.
 const browserWindows = [];
 class BrowserWindow extends EventEmitter {

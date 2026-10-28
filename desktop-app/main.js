@@ -18,7 +18,7 @@
 // reaches the transcript/UI — used for Chargeback's Referee acknowledgments
 // and Rotation's "UPDATED" confirmations, neither of which should ever be
 // shown to the user.
-const { app, BaseWindow, WebContentsView, ipcMain, dialog, safeStorage, Menu, shell, clipboard, BrowserWindow, screen } = require("electron");
+const { app, BaseWindow, WebContentsView, ipcMain, dialog, safeStorage, Menu, shell, clipboard } = require("electron");
 require("./alfred-main").captureIpc(ipcMain); // 🎩 ALFRED HOOK: remembers each IPC handler so Alfred's app controls run the same code as the buttons
 const path = require("path");
 const fs = require("fs");
@@ -8455,8 +8455,8 @@ const alfred = require("./alfred-main").installAlfred({
   akoweApi, akoweServerBase, akoweShowInTab, akoweLoadView,
   sendTextTo, withEnvelope, selfRepair, selfRepairStatus, buildExtract,
   outputManager, dbService, imageProvider, videoProvider, interpreterProvider, ollamaManager,
-  // his floating side panel (alfred-window.js): a child window of the main one, over everything in the app
-  app, BrowserWindow, screen, mainWindow: () => win,
+  // his side panel is docked in the control panel; main hooks Ctrl/Cmd+Shift+A on every page of the app
+  app, mainWindow: () => win,
 });
 // ==== end 🎩 ALFRED HOOK ====
 
@@ -8555,7 +8555,6 @@ app.whenReady().then(() => {
   } catch (e) { logEvent("output-init-error", { error: String(e) }); }
   try { buildAppMenu(); } catch (e) { logEvent("menu-init-error", { error: String(e) }); }
   createWindow();
-  try { alfred.panel.sync(); } catch (_) {} // 🎩 ALFRED HOOK: his floating panel, when he is on
   startServiceBridge();
   startManagedInterpreter();
   startManagedVoice();
@@ -8593,5 +8592,5 @@ app.on("before-quit", (event) => {
 process.on("exit", () => { try { if (akoweServer) akoweServer.killNow(); } catch (_) {} });
 app.on("will-quit", () => { stopAkoweBridge(); });
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
-app.on("activate", () => { if (!win) { createWindow(); try { alfred.panel.sync(); } catch (_) {} } });
+app.on("activate", () => { if (!win) createWindow(); });
 app.on("before-quit", () => { try { if (terminal) terminal.stop(); } catch (_) {} try { if (lockers) lockers.stopAll(); } catch (_) {} try { serviceBridge.stop(); } catch (_) {} try { interpreterProvider.stopManaged(); } catch (_) {} try { voiceProvider.stopManaged(); } catch (_) {} try { ollamaManager.stopManaged(); } catch (_) {} });
