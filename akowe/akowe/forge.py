@@ -1193,6 +1193,14 @@ ART_PROBLEMS = {
                         "upload your own clip."),
     "VIDEO_BAD_ANSWER": ("No usable clip came back", "Try again. If it repeats, make the clip in AutoInjector's 🎬 "
                          "Video tab and upload it here."),
+    # 🖨 SVG → JPEG / PNG (AutoInjector POST /render/image: the ebook cover JPG, the Word copy of the map)
+    "RENDER_NOT_WIRED": ("This AutoInjector cannot draw pictures", "Update AutoInjector, then try again. (The PDF and "
+                         "SVG files work without it.)"),
+    "RENDER_TIMEOUT": ("Drawing the picture took too long", "Try again; close other big programs if it repeats."),
+    "RENDER_FAILED": ("AutoInjector could not draw the picture", "Try again. If it repeats, download the PDF or SVG "
+                      "instead."),
+    "RENDER_BAD_ANSWER": ("AutoInjector sent no usable picture", "Try again. If it repeats, download the PDF or SVG "
+                          "instead."),
 }
 # For these the fix above is always used (plain words the author can act on), the bridge's own hint never replaces it
 VIDEO_CODES = frozenset(("VIDEO_NOT_SET_UP", "VIDEO_MODEL_MISSING", "VIDEO_OOM", "VIDEO_TIMEOUT", "VIDEO_CANCELLED",
@@ -1272,13 +1280,17 @@ def bridge_info(app) -> dict:
             "uses": [u for u, _t in bridge_targets(app)]}
 
 
-def _post(url: str, token: str | None, body: dict, timeout_s: float, *, route: str = "/image/request") -> dict:
-    """One POST to the service bridge. ``route`` /image/request or /video/request (the codes for a missing route,
-    a timeout and an unusable answer follow the route; the key and reachability codes are shared)."""
+def _post(url: str, token: str | None, body: dict, timeout_s: float, *, route: str = "/image/request",
+          method: str = "POST") -> dict:
+    """One POST (or GET, ``method``) to the service bridge. ``route`` /image/request, /video/request, /video/trailer
+    or /render/image (the codes for a missing route, a timeout and an unusable answer follow the route; the key and
+    reachability codes are shared)."""
     video = route.startswith("/video/")
-    data = json.dumps(body, ensure_ascii=False).encode("utf-8")
-    req = urllib.request.Request(url + route, data=data, method="POST")
-    req.add_header("Content-Type", "application/json; charset=utf-8")
+    render = route.startswith("/render/")
+    data = None if method == "GET" else json.dumps(body, ensure_ascii=False).encode("utf-8")
+    req = urllib.request.Request(url + route, data=data, method=method)
+    if data is not None:
+        req.add_header("Content-Type", "application/json; charset=utf-8")
     req.add_header("Accept", "application/json")
     if token:
         req.add_header("Authorization", f"Bearer {token}")
@@ -1296,18 +1308,19 @@ def _post(url: str, token: str | None, body: dict, timeout_s: float, *, route: s
         if exc.code == 401:
             raise ArtProblem("IMAGE_BRIDGE_KEY") from None
         if exc.code == 404 and (not code or code == "NOT_FOUND"):
-            raise ArtProblem("VIDEO_NOT_WIRED" if video else "IMAGE_NOT_WIRED") from None
+            raise ArtProblem("VIDEO_NOT_WIRED" if video else "RENDER_NOT_WIRED" if render else "IMAGE_NOT_WIRED") \
+                from None
         raise ArtProblem(code or f"HTTP_{exc.code}", str(b.get("message") or "")[:300],
                          str(b.get("hint") or "")[:300], str(b.get("model") or b.get("modelId") or "")) from None
     except (socket.timeout, TimeoutError):
-        raise ArtProblem("VIDEO_TIMEOUT" if video else "IMAGE_TIMEOUT") from None
+        raise ArtProblem("VIDEO_TIMEOUT" if video else "RENDER_TIMEOUT" if render else "IMAGE_TIMEOUT") from None
     except urllib.error.URLError as exc:
         if isinstance(exc.reason, (socket.timeout, TimeoutError)):
-            raise ArtProblem("VIDEO_TIMEOUT" if video else "IMAGE_TIMEOUT") from None
+            raise ArtProblem("VIDEO_TIMEOUT" if video else "RENDER_TIMEOUT" if render else "IMAGE_TIMEOUT") from None
         raise ArtProblem("IMAGE_BRIDGE_UNREACHABLE", f"AutoInjector is not reachable at {url}") from None
     except (ConnectionError, OSError):
         raise ArtProblem("IMAGE_BRIDGE_UNREACHABLE", f"AutoInjector is not reachable at {url}") from None
-    bad = "VIDEO_BAD_ANSWER" if video else "IMAGE_BAD_ANSWER"
+    bad = "VIDEO_BAD_ANSWER" if video else "RENDER_BAD_ANSWER" if render else "IMAGE_BAD_ANSWER"
     try:
         out = json.loads(raw.decode("utf-8"))
     except (ValueError, UnicodeDecodeError):
@@ -1539,6 +1552,16 @@ def run_clip(app, job, pid, branch, rid) -> None:
     if not pic:
         raise ArtProblem("VIDEO_FAILED", "There is no portrait or front view to animate",
                          "Make or upload the portrait (or the front view) first.")
+    clip_job(app, job, pid, branch, name=dossier["name"], src_slot=src[0], pic=pic, prompt=clip_prompt(dossier),
+             src_word="portrait" if src[0] == "portrait" else "front view",
+             save=lambda asset, poster: set_clip(store, pid, branch, rid, asset, poster=poster))
+
+
+def clip_job(app, job, pid, branch, *, name: str, src_slot: str, pic: bytes, prompt: str, src_word: str,
+             save) -> None:
+    """The shared motion-clip work (characters here, items / places / magic systems in forge_kinds): ``pic`` to a
+    temp file, POST /video/request, the clip + poster as book assets, then ``save(asset, poster_asset)``."""
+    store = app.store
     try:
         from .book_path import get_profile  # noqa: PLC0415
         title = (get_profile(store, pid) or {}).get("title") or ""
@@ -1546,14 +1569,13 @@ def run_clip(app, job, pid, branch, rid) -> None:
         title = ""
     job.total = 1
     job.check()
-    job.phase = (f"Making the motion clip from the {'portrait' if src[0] == 'portrait' else 'front view'} — "
-                 "a clip can take 2-10 minutes")
+    job.phase = f"Making the motion clip from the {src_word} — a clip can take 2-10 minutes"
     tmpdir = tempfile.mkdtemp(prefix="akowe-clip-")
     ext = ".jpg" if pic[:3] == b"\xff\xd8\xff" else ".png"
-    img_path = os.path.join(tmpdir, f"{src[0]}{ext}")
+    img_path = os.path.join(tmpdir, f"{src_slot}{ext}")
     with open(img_path, "wb") as fh:
         fh.write(pic)
-    body = {"image": img_path, "prompt": clip_prompt(dossier), "seconds": CLIP_SECONDS, "purpose": "clip",
+    body = {"image": img_path, "prompt": prompt, "seconds": CLIP_SECONDS, "purpose": "clip",
             "from": "akowe-forge", "returnPoster": True, "book": title or None}
     body = {k: v for k, v in body.items() if v is not None}
     box: dict = {}
@@ -1587,15 +1609,14 @@ def run_clip(app, job, pid, branch, rid) -> None:
     if poster is None:
         poster = pic  # picture→video starts from this picture: the closest first frame there is
         warnings.append("AutoInjector sent no poster; the source picture is used")
-    name = dossier["name"]
     asset = store_clip(store, job.principal, pid, branch, data, f"{name} — motion clip")
     p_asset = store_picture(store, job.principal, pid, branch, poster, "", f"{name} — motion clip poster")
     asset.update(source=str(resp.get("engine") or "video"), engine=resp.get("engine"),
                  model=str(resp.get("model"))[:80] if resp.get("model") else None, seed=_num(resp.get("seed")),
                  seconds=_num(resp.get("seconds")) or CLIP_SECONDS, frames=_num(resp.get("frames")),
                  fps=_num(resp.get("fps")), width=_num(resp.get("width")), height=_num(resp.get("height")),
-                 made_from=src[0], warnings=warnings or None)
-    set_clip(store, pid, branch, rid, {k: v for k, v in asset.items() if v is not None}, poster=p_asset)
+                 made_from=src_slot, warnings=warnings or None)
+    save({k: v for k, v in asset.items() if v is not None}, p_asset)
     job.done = 1
     job.results.append({"ok": True, "slot": "clip", "engine": resp.get("engine"), "model": asset.get("model"),
                         "message": "Motion clip made and stored with the book."})
@@ -1746,6 +1767,69 @@ class ForgeService:
         return {"ok": True, "slot": slot, "art": out["art"], "message": "Picture saved with the book."}
 
 
+def create_character(app, principal: str, pid: str, branch: str, body) -> dict:
+    """POST …/forge/characters {name, aliases?, role?, about?, from?}: a NEW character for this book (one the book
+    does not have yet), made the way the book's own characters are: an A01 canon record (a draft — the author approves
+    it on the 🎭 Characters page like any other) and its dossier with the author's own words as supplied text (the
+    name, the role, "about" as the supplied canon). Nothing is invented here: ✨ Invent the rest makes proposals.
+    A character with that name already in the book (or ``from`` = its record id) is returned, not doubled."""
+    from . import forge_kinds  # noqa: PLC0415 - the same name / alias rules as the other kinds
+    body = body if isinstance(body, dict) else {}
+    store = app.store
+    chars = chars_mod.canon_characters(store, pid, branch)
+    if body.get("from"):
+        me = next((c for c in chars if c["record_id"] == body["from"]), None)
+        if me is None:
+            raise AkoweError("NOT_FOUND", "/from", "from: the record id of a character of this book",
+                             status="REJECTED")
+        return {"ok": True, "created": False, "record_id": me["record_id"],
+                "dossier": public(store, pid, branch, me["record_id"]),
+                "message": f"{me['name']} is already in the book: here is the dossier."}
+    name = forge_kinds.clean_name(body.get("name"))
+    if not name:
+        raise AkoweError("MISSING_INPUT", "/name", "name: the new character's name", status="REJECTED")
+    for k, n in (("role", 300), ("about", FIELD_MAX)):
+        if body.get(k) is not None and not isinstance(body[k], str):
+            raise AkoweError("INVALID_INPUT", f"/{k}", f"{k}: text", status="REJECTED")
+    aliases = forge_kinds.clean_aliases(body.get("aliases"), name)
+    me = next((c for c in chars if c["name"].strip().lower() == name.lower()), None)
+    if me is not None:
+        return {"ok": True, "created": False, "record_id": me["record_id"],
+                "dossier": public(store, pid, branch, me["record_id"]),
+                "message": f"{me['name']} is already in the book: here is the dossier."}
+    from .book_path import BookPath  # noqa: PLC0415
+    bp = BookPath(app.engine, principal, pid, branch)
+    sid = re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")[:60] or "character"
+    cand = {"concept": name, "attributes": {}, "linked_refs": [], "protected_fact_flags": [],
+            "facts": [{"subject_id": sid, "predicate": "entity.name", "value": name, "assertion_type": "FACT",
+                       "effective_from": None, "effective_to": None, "source_refs": []}]}
+    try:
+        ref, _r = bp.create("A01", {"concept": name}, manual_candidate=cand)
+    except AkoweError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - say it plainly
+        log.warning("a new character could not be made: %s", type(exc).__name__)
+        raise AkoweError("INVALID_INPUT", "/name", "the character could not be added to this book (is the book's "
+                         "canon locked?)", status="REJECTED") from None
+    rid = ref["record_id"]
+    texts = {"name": name + (f". Also called: {', '.join(aliases)}" if aliases else ""),
+             "role": clip(body.get("role"), 300), "supplied_canon": clip(body.get("about"))}
+
+    def fn(entry, fields, canon):
+        changed = set()
+        for key, t in texts.items():
+            d = fields.get(key)
+            if not t or d is None or d.get("readonly") or d["text"]:
+                continue
+            d.update(text=t, status="supplied", by={"kind": "author"}, at=_now())
+            changed.add(key)
+        return changed, {}
+    out = mutate(store, pid, branch, rid, fn, what="created", by="author", bump=False)
+    return {"ok": True, "created": True, "record_id": rid, "dossier": out,
+            "message": f"{name} is a new character of the book ({out['code']}, a draft: approve the character on the "
+                       "🎭 Characters page). ✨ Invent the rest fills the dossier with proposals."}
+
+
 def pdf_bytes(app, pid, branch, rid) -> tuple[bytes, str]:
     from . import forge_kinds, forge_pdf  # noqa: PLC0415
     d = forge_kinds.attach_links(app.store, pid, branch, public(app.store, pid, branch, rid))
@@ -1772,6 +1856,10 @@ def route(app, method: str, rest: list, query: dict, body, principal: str, pid: 
 
     def linked(d):
         return forge_kinds.attach_links(store, pid, branch, d)
+    if rest == ["characters"] and method == "POST":  # 🧑 a new character the book does not have yet
+        out = create_character(app, principal, pid, branch, body)
+        out["dossier"] = linked(out["dossier"])
+        return (201 if out["created"] else 200), out
     if rest in (["characters"], []) and method == "GET":
         return 200, {"characters": list_dossiers(store, pid, branch), "fields": field_info(),
                      "image_bridge": {"uses": [u for u, _t in bridge_targets(app)]}}

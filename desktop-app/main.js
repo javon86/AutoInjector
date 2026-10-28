@@ -18,7 +18,7 @@
 // reaches the transcript/UI — used for Chargeback's Referee acknowledgments
 // and Rotation's "UPDATED" confirmations, neither of which should ever be
 // shown to the user.
-const { app, BaseWindow, WebContentsView, ipcMain, dialog, safeStorage, Menu, shell, clipboard, BrowserWindow, screen } = require("electron");
+const { app, BaseWindow, WebContentsView, ipcMain, dialog, safeStorage, Menu, shell, clipboard } = require("electron");
 require("./alfred-main").captureIpc(ipcMain); // 🎩 ALFRED HOOK: remembers each IPC handler so Alfred's app controls run the same code as the buttons
 const path = require("path");
 const fs = require("fs");
@@ -37,6 +37,7 @@ const secretStore = require("./secret-store");
 const akoweLegacy = require("./akowe-legacy"); // names from before the rename BookForge -> Akọwe (2026-10-25): old settings key, key file, env vars
 const akoweBridgeMod = require("./akowe-bridge"); // Akọwe bridge (pure Node HTTP server, OFF by default) — docs/AKOWE_AUTOINJECTOR_BRIDGE.md
 const { createServiceBridge } = require("./service-bridge");
+const renderImage = require("./render-image");
 const interpreterProvider = require("./interpreter-provider");
 const toolProvider = require("./tool-provider");
 const voiceProvider = require("./voice-provider");
@@ -1304,7 +1305,8 @@ function openWizardWindow(tab) {
   };
   layoutWizard();
   wizardWin.on("resize", layoutWizard);
-  wizardWin.on("closed", () => { wizardWin = null; wizardView = null; });
+  // A WebContentsView's page is not destroyed with its window: close it too, so nothing lingers.
+  wizardWin.on("closed", () => { try { if (wizardView && !wizardView.webContents.isDestroyed()) wizardView.webContents.close(); } catch (_) {} wizardWin = null; wizardView = null; });
 }
 function closeWizardWindow() { if (wizardWin) wizardWin.close(); }
 
@@ -4756,6 +4758,16 @@ ipcMain.handle("setup:auto", async (_evt, opts = {}) => {
   } catch (e) { return { ok: false, error: String(e) }; }
 });
 ipcMain.handle("wizard:open", (_evt, { tab } = {}) => { openWizardWindow(tab); return { ok: true }; });
+// The wizard's Images / Video notes: close the wizard and show that tab in the main window
+// (controls.js clicks its tab button — the same path as Alfred's ui.show_tab).
+const APP_TABS = new Set(["main", "akowe", "images", "video"]);
+ipcMain.handle("wizard:open-app-tab", (_evt, { tab } = {}) => {
+  if (!APP_TABS.has(tab)) return { ok: false, error: "BAD_TAB", message: `“${tab}” is not a tab of the main window. Use images, video, akowe or main.` };
+  closeWizardWindow();
+  try { if (win && !win.isDestroyed()) { if (win.isMinimized()) win.restore(); win.show(); win.focus(); } } catch (_) {}
+  broadcast("app-tab-show", { tab });
+  return { ok: true, tab };
+});
 ipcMain.handle("wizard-window:close", () => { closeWizardWindow(); return { ok: true }; });
 // Consolidated AI feed window: open/close + backfill recent AI messages so the
 // window shows history, not a blank, when reopened.
@@ -6544,9 +6556,44 @@ ipcMain.handle("video:install-all", videoSafe((a) => videoStudio().install.insta
 ipcMain.handle("video:install-cancel", videoSafe(() => videoStudio().install.cancel()));
 ipcMain.handle("video:open-folder", videoSafe(async () => { const d = outputManager.videosDir(); try { fs.mkdirSync(d, { recursive: true }); } catch (_) {} const err = await shell.openPath(d); return err ? { ok: false, error: err } : { ok: true }; }));
 ipcMain.handle("video:show-file", videoSafe((a) => { if (a.path) shell.showItemInFolder(a.path); return { ok: true }; }));
+// 🎞 Book trailers (video-trailer.js): the shots go through video-studio one by one, then a hidden
+// offscreen window (trailer-recorder.js) plays them with title cards onto a canvas and records
+// trailer.webm with MediaRecorder; an ffmpeg found on this PC (PATH, the ComfyUI folders, imageio-ffmpeg
+// in ComfyUI's python_embeded) adds trailer.mp4. Saved in videos/trailers/<book>/.
+const videoTrailerMod = require("./video-trailer");
+const trailerRecorderMod = require("./trailer-recorder");
+let _trailerRecorder = null;
+let _videoTrailer = null;
+function videoTrailer() {
+  if (_videoTrailer) return _videoTrailer;
+  _videoTrailer = videoTrailerMod.createTrailerMaker({
+    studio: videoStudio(),
+    record: (plan, out, o) => { if (!_trailerRecorder) _trailerRecorder = trailerRecorderMod.createTrailerRecorder({ electron: require("electron"), dir: __dirname, log: (t, d) => logEvent(t, d) }); return _trailerRecorder.record(plan, out, o); },
+    trailersDir: () => path.join(outputManager.videosDir(), "trailers"),
+    fileUrl: (p) => { try { return pathToFileURL(p).href; } catch (_) { return ""; } },
+    log: (t, d) => logEvent(t, d),
+    comfyRoots: () => { const out = []; try { for (const t of sdTargets()) { if (t.dir) out.push(t.dir); if (t.python) out.push(path.dirname(path.dirname(t.python))); } } catch (_) {} return out; },
+    onDone: (r) => broadcast("video-done", { ok: !!(r && r.ok), path: r && r.path, trailer: true, error: r && !r.ok ? r.error : undefined }),
+  });
+  return _videoTrailer;
+}
+ipcMain.handle("video:trailer-make", videoSafe((a) => videoTrailer().make(Object.assign({}, a, { from: a.from || "video-tab" }))));
+ipcMain.handle("video:trailer-status", videoSafe((a) => videoTrailer().status(a)));
+ipcMain.handle("video:trailer-cancel", videoSafe(() => videoTrailer().cancel()));
+ipcMain.handle("video:trailer-list", videoSafe((a) => videoTrailer().list(a)));
+ipcMain.handle("video:trailer-plan", videoSafe((a) => videoTrailer().plan(a)));
+// Choose a music file or a picture for a trailer shot (the path goes into the plan).
+ipcMain.handle("video:trailer-pick-file", videoSafe(async (a) => {
+  const music = a.kind === "music";
+  const r = await dialog.showOpenDialog(win || undefined, { title: music ? "Choose music for the trailer" : "Choose a picture to bring to life",
+    properties: ["openFile"], filters: music ? [{ name: "Music", extensions: ["mp3", "ogg", "oga", "opus", "wav", "m4a", "aac", "flac", "webm"] }] : [{ name: "Pictures", extensions: ["png", "jpg", "jpeg", "webp"] }] });
+  if (r.canceled || !r.filePaths || !r.filePaths[0]) return { ok: false, error: "CANCELLED" };
+  return { ok: true, path: r.filePaths[0], url: pathToFileURL(r.filePaths[0]).href };
+}));
 // The module API for Alfred (video_call) and other callers in the main process (docs/VIDEO_API.md).
 videoApiMod.register(videoApiMod.createVideoApi({
   studio: new Proxy({}, { get: (_t, k) => { const s = videoStudio(); const v = s[k]; return typeof v === "function" ? v.bind(s) : v; }, has: (_t, k) => k in videoStudio() }),
+  trailer: new Proxy({}, { get: (_t, k) => { const s = videoTrailer(); const v = s[k]; return typeof v === "function" ? v.bind(s) : v; }, has: (_t, k) => k in videoTrailer() }),
 }));
 
 // Endpoint help: so the user never has to guess the SD/video URL. Presets is a
@@ -6985,6 +7032,23 @@ const serviceBridge = createServiceBridge({
   video: {
     backend: () => videoStudio().backendInfo(),
     request: (body) => videoStudio().request(body, `bridge:${String((body && body.from) || "akowe").slice(0, 40)}`),
+    // 🎞 POST /video/trailer · GET /video/trailer · POST /video/trailer/cancel
+    trailer: (body) => videoTrailer().make(Object.assign({}, body, { from: `bridge:${String((body && body.from) || "akowe").slice(0, 40)}` })),
+    trailerStatus: (q) => videoTrailer().status(q || {}),
+    trailerCancel: () => videoTrailer().cancel(),
+  },
+  // 🖨 POST /render/image: SVG / HTML → JPEG / PNG in an offscreen, network-less Chromium page (render-image.js).
+  renderer: renderImage.createRenderer({ makeWindow: renderImage.electronWindowFactory(require("electron")), log: logEvent }),
+  // 📂 POST /dialog/choose-path: Akọwe's "Open a saved book" asks for a book folder (too big to upload); the user picks it here.
+  dialogs: {
+    choosePath: async (body) => {
+      const title = String((body && body.title) || "Choose the saved book's folder").slice(0, 120);
+      try { if (win && !win.isDestroyed()) { if (win.isMinimized()) win.restore(); win.focus(); } } catch (_) {}
+      const r = await dialog.showOpenDialog(win || undefined, { title, properties: ["openDirectory"] });
+      logEvent("dialog-choose-path", { cancelled: !!r.canceled }); // never the path itself
+      if (r.canceled || !r.filePaths || !r.filePaths[0]) return { ok: true, cancelled: true };
+      return { ok: true, path: r.filePaths[0] };
+    },
   },
   sdStudio: {
     request: (body) => sdStudio().request(body),
@@ -8446,6 +8510,45 @@ ipcMain.handle("akowe-view:reload", () => { const ok = akoweLoadView(true); retu
 ipcMain.handle("akowe-view:pop-out", () => Object.assign(akowePopOut(), { status: akoweServerPublicStatus() }));
 ipcMain.handle("akowe-view:dock", () => Object.assign(akoweDock(), { status: akoweServerPublicStatus() }));
 
+// ==== 🧰 TOOL SERVERS (MCP: mcp-client.js / mcp-manager.js) — nothing runs until the user adds one ====
+// Outside tool servers the user adds in ⚙ More settings → 🧰 Tools (a program started over stdio, or a web
+// address over Streamable HTTP). Connected servers' tools go into tool-provider.js (the butler's USE_TOOL,
+// always "ask") and Alfred uses them through mcp_tools / mcp_call (every call on an "I will" card). Env values
+// and headers are sealed with secret-store.js and never logged, shown or returned. See docs/ALFRED.md.
+const mcpManager = require("./mcp-manager").createMcpManager({
+  file: path.join(userDataDir(), "autoinjector-mcp-servers.json"),
+  seal: (v) => secretStore.seal(v),
+  open: (v) => secretStore.open(v),
+  toolProvider,
+  log: (kind, detail) => logEvent(kind, detail),
+  saveImage: (buf, mime) => {
+    const ext = /jpe?g/i.test(mime) ? "jpg" : /webp/i.test(mime) ? "webp" : /gif/i.test(mime) ? "gif" : "png";
+    try { return outputManager.saveBuffer(outputManager.imagesDir(), `tool-server-${Date.now()}.${ext}`, buf); } catch (_) { return null; }
+  },
+});
+const mcpSafe = (fn) => async (_e, p) => { try { return await fn(p && typeof p === "object" ? p : {}); } catch (e) { return { ok: false, error: "ERROR", message: "Something went wrong with the tool server on my side." }; } };
+ipcMain.handle("mcp:list", mcpSafe(() => Object.assign(mcpManager.list(), { secureStorage: secretStore.available() })));
+ipcMain.handle("mcp:add", mcpSafe(async (p) => {
+  const r = mcpManager.add({ name: p.name, line: p.line, secrets: p.secrets });
+  if (!r.ok || p.start === false) return r;
+  const s = await mcpManager.start(r.server.id);
+  return Object.assign({}, s, { added: true, message: s.ok ? `${r.message} ${s.message}` : `${r.message} But it didn't start: ${s.message}` });
+}));
+ipcMain.handle("mcp:start", mcpSafe((p) => mcpManager.start(p.id)));
+ipcMain.handle("mcp:stop", mcpSafe((p) => mcpManager.stop(p.id)));
+ipcMain.handle("mcp:remove", mcpSafe((p) => mcpManager.remove(p.id)));
+// Stop OUR tool servers cleanly before quitting (stdin closed → SIGTERM → SIGKILL); never hang the quit.
+let mcpQuitDone = false;
+app.on("before-quit", (event) => {
+  if (mcpQuitDone || !mcpManager.list().servers.some((s) => s.status === "connected" || s.status === "starting")) return;
+  event.preventDefault();
+  mcpQuitDone = true;
+  const t = setTimeout(() => app.quit(), 5000);
+  mcpManager.stopAll().catch(() => {}).finally(() => { clearTimeout(t); app.quit(); });
+});
+process.on("exit", () => { try { mcpManager.killAll(); } catch (_) {} });
+// ==== end 🧰 TOOL SERVERS ====
+
 // ==== 🎩 ALFRED HOOK (alfred-main.js / alfred.js / alfred-tools.js) — OFF by default ====
 // Alfred is the butler grown into an assistant that can use the whole app through a fixed tool
 // registry. Everything lives in the alfred-*.js files; this block only hands him the app's own
@@ -8455,8 +8558,9 @@ const alfred = require("./alfred-main").installAlfred({
   akoweApi, akoweServerBase, akoweShowInTab, akoweLoadView,
   sendTextTo, withEnvelope, selfRepair, selfRepairStatus, buildExtract,
   outputManager, dbService, imageProvider, videoProvider, interpreterProvider, ollamaManager,
-  // his floating side panel (alfred-window.js): a child window of the main one, over everything in the app
-  app, BrowserWindow, screen, mainWindow: () => win,
+  mcp: mcpManager, // 🧰 tool servers (mcp_tools / mcp_call)
+  // his side panel is docked in the control panel; main hooks Ctrl/Cmd+Shift+A on every page of the app
+  app, mainWindow: () => win,
 });
 // ==== end 🎩 ALFRED HOOK ====
 
@@ -8545,6 +8649,8 @@ app.whenReady().then(() => {
       toolsFile: path.join(userDataDir(), "autoinjector-butler-tools.json"),
     });
     try { const lt = toolProvider.loadCreatedTools(); if (lt && lt.loaded) logEvent("tools-loaded", { count: lt.loaded }); } catch (e) { logEvent("tools-load-error", { error: String(e) }); }
+    // 🧰 tool servers the user started before (none until one is added) — in the background
+    if (process.env.AUTOINJECTOR_MCP_AUTOSTART !== "0" && mcpManager.count()) setTimeout(() => { mcpManager.autoStart().then((r) => { if (r.of) logEvent("mcp", { step: "autostart", started: r.started, of: r.of }); }).catch(() => {}); }, 1000);
     logEvent("models-init", { root: outputManager.modelsRoot() });
     configureSetupManager();
     refreshSetupStatus();
@@ -8555,7 +8661,6 @@ app.whenReady().then(() => {
   } catch (e) { logEvent("output-init-error", { error: String(e) }); }
   try { buildAppMenu(); } catch (e) { logEvent("menu-init-error", { error: String(e) }); }
   createWindow();
-  try { alfred.panel.sync(); } catch (_) {} // 🎩 ALFRED HOOK: his floating panel, when he is on
   startServiceBridge();
   startManagedInterpreter();
   startManagedVoice();
@@ -8593,5 +8698,5 @@ app.on("before-quit", (event) => {
 process.on("exit", () => { try { if (akoweServer) akoweServer.killNow(); } catch (_) {} });
 app.on("will-quit", () => { stopAkoweBridge(); });
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
-app.on("activate", () => { if (!win) { createWindow(); try { alfred.panel.sync(); } catch (_) {} } });
+app.on("activate", () => { if (!win) createWindow(); });
 app.on("before-quit", () => { try { if (terminal) terminal.stop(); } catch (_) {} try { if (lockers) lockers.stopAll(); } catch (_) {} try { serviceBridge.stop(); } catch (_) {} try { interpreterProvider.stopManaged(); } catch (_) {} try { voiceProvider.stopManaged(); } catch (_) {} try { ollamaManager.stopManaged(); } catch (_) {} });

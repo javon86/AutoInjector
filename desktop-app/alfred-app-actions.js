@@ -92,6 +92,12 @@ A('manager.test_connection', 'manager:test-connection', { t: 'Test the butler\'s
 A('manager.get_state', 'manager:get-state', { t: 'The butler\'s task state and log', c: false });
 A('butler.chat', 'butler:chat', { t: 'Talk to the butler\'s model', c: false, a: { message: text(4000) }, r: ['message'], ex: { message: 'hello' } });
 A('tools.list', 'tools:list', { t: 'The butler\'s tool list', c: false });
+// 🧰 tool servers (MCP) the user added — reading and using their tools is mcp_tools / mcp_call; these are the list
+// and Start / Stop / Remove (never "always allowed": starting one runs the program the user added)
+A('mcp.servers', 'mcp:list', { t: 'The tool servers (MCP): each one\'s status (connected · N tools / the error) and tools', c: false });
+A('mcp.start', 'mcp:start', { t: 'Start a tool server the user added (runs its program / connects to its address)', c: true, a: { id: text(60) }, r: ['id'], ex: { id: 'files' } });
+A('mcp.stop', 'mcp:stop', { t: 'Stop a tool server', c: true, a: { id: text(60) }, r: ['id'], ex: { id: 'files' } });
+A('mcp.remove', 'mcp:remove', { t: 'Remove a tool server from the list (its saved keys too)', c: true, a: { id: text(60) }, r: ['id'], ex: { id: 'files' } });
 A('memory.summary', 'memory:summary', { t: 'What the butler remembers (summary)', c: false });
 A('memory.search', 'memory:search', { t: 'Search the butler\'s memory', c: false, a: { query: text(400) }, r: ['query'], ex: { query: 'lighthouse' } });
 
@@ -123,7 +129,8 @@ A('setup.list', 'setup:list', { t: 'What can be installed', c: false });
 A('setup.detect', 'setup:detect', { t: 'Detect what is installed', c: false });
 A('setup.install', 'setup:install', { t: 'Install a component (fixed list: Open Interpreter, voice, a local model …)', c: true, a: { target: opt(60), model: opt(120) }, r: ['target'], ex: { target: 'open-interpreter' } });
 A('setup.auto', 'setup:auto', { t: 'Install everything recommended', c: true, a: { model: opt(120) }, ex: {} });
-A('wizard.open', 'wizard:open', { t: 'Open the Setup Wizard', c: true, aa: true, a: { tab: opt(40) }, ex: { tab: 'images' } });
+A('wizard.open', 'wizard:open', { t: 'Open the Setup Wizard (local AI, installs). Pictures and videos are set up in the 🎨 Images / 🎬 Video tabs — use wizard.open_app_tab or ui.show_tab', c: true, aa: true, a: { tab: { type: 'string', enum: ['localai', 'advanced'] } }, ex: { tab: 'advanced' } });
+A('wizard.open_app_tab', 'wizard:open-app-tab', { t: 'Close the Setup Wizard and show a main-window tab (🎨 Images, 🎬 Video, 📖 Akọwe, 🤖 AutoInjector)', c: false, a: { tab: { type: 'string', enum: ['main', 'akowe', 'images', 'video'] } }, r: ['tab'], ex: { tab: 'images' } });
 A('wizard.catalog', 'wizard:catalog', { t: 'Setup Wizard catalog', c: false });
 A('ollama.detect', 'ollama:detect', { t: 'Is Ollama installed?', c: false });
 A('ollama.list', 'ollama:list', { t: 'Local models installed in Ollama', c: false, a: { endpoint: opt(300) }, call: (a) => [a.endpoint || undefined] });
@@ -249,6 +256,7 @@ const EXCLUDED = {
   'terminal:input': 'free command execution (typing into the shell) — see terminal:run',
   'terminal:approve': 'approves a command an AI asked to run — a decision that stays with the user',
   'terminal:settings': 'can turn on auto-approve of commands — a security setting left to the user',
+  'mcp:add': 'adding a tool server means choosing a program to run (or an address to trust) and handing it keys — that choice stays with the user (⚙ More settings → 🧰 Tools)',
   'tools:run': 'the butler\'s tool runner includes run-command / install-package (free code) — Alfred\'s direct tools cover the safe ones',
   'selector:pick': 'legacy picker (superseded by the 🎯 picker:* actions Alfred has)',
   'site:inspect': 'opens developer tools — developer-only',
@@ -263,6 +271,7 @@ const EXCLUDED = {
   'sd:capabilities': 'internal: Alfred reads sd-api capabilities() directly when he builds his sd_call method list and schemas (alfred-main.js sdMethodsOf)',
   'akowe-view:tab': 'internal: the tab tells main it is showing (Alfred uses ui.show_tab / open_akowe_page)',
   'video:capabilities': 'internal: Alfred reads video-api capabilities() directly when he builds his video_call method list and schemas',
+  'video:trailer-pick-file': 'opens a file chooser for the person at the screen (music / a picture for a trailer shot) — Alfred passes the file path straight to trailer.make',
 };
 /** IPC channels that a dedicated Alfred tool covers (alfred-tools.js). */
 const TOOL_CHANNELS = {
@@ -290,6 +299,9 @@ const TOOL_CHANNELS = {
   'video:cancel': 'video_call:video.cancel', 'video:gallery': 'video_call:video.gallery', 'video:test': 'video_call:video.test',
   'video:install-check': 'video_call:video.install.check', 'video:install-model': 'video_call:video.install.downloadModel',
   'video:install-all': 'video_call:video.install.installAll', 'video:install-cancel': 'video_call:video.install.cancel',
+  // 🎞 book trailers (video-trailer.js) — also make_trailer for a book through Akọwe
+  'video:trailer-make': 'video_call:trailer.make', 'video:trailer-status': 'video_call:trailer.status', 'video:trailer-cancel': 'video_call:trailer.cancel',
+  'video:trailer-list': 'video_call:trailer.list', 'video:trailer-plan': 'video_call:trailer.plan',
 };
 
 function get(id) { return ACTIONS.find((a) => a.id === id) || null; }

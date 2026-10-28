@@ -281,7 +281,13 @@ async function fakeComfy(opts = {}) {
       const outId = (Object.entries(p.graph).find(([, n]) => n.class_type === 'SaveImage') || ['9'])[0];
       return send(res, 200, { [id]: { outputs: { [outId]: { images: Array.from({ length: batch }, (_, i) => ({ filename: `AutoInjector_0000${i + 1}_.png`, subfolder: '', type: 'output' })) } }, status: { status_str: 'success', completed: true, messages: [] } } });
     }
-    if (u.pathname === '/view') { const fn = u.searchParams.get('filename') || ''; state.views.push(fn); return /\.mp4$/.test(fn) ? send(res, 200, MP4, 'video/mp4') : /\.webm$/.test(fn) ? send(res, 200, WEBM, 'video/webm') : send(res, 200, PNG); }
+    if (u.pathname === '/view') {
+      const fn = u.searchParams.get('filename') || ''; state.views.push(fn);
+      // opts.clip(n) → a real clip's bytes for the n-th video fetched (the 🎞 trailer e2e plays them)
+      const real = opts.clip && /\.(mp4|webm)$/.test(fn) ? opts.clip(state.views.filter((x) => /\.(mp4|webm)$/.test(x)).length) : null;
+      if (real) return send(res, 200, real, /\.webm$/.test(fn) ? 'video/webm' : 'video/mp4');
+      return /\.mp4$/.test(fn) ? send(res, 200, MP4, 'video/mp4') : /\.webm$/.test(fn) ? send(res, 200, WEBM, 'video/webm') : send(res, 200, PNG);
+    }
     if (u.pathname === '/queue' && req.method === 'GET') { const ids = Object.keys(state.prompts); return send(res, 200, { queue_running: ids.length && !state.interrupted ? [[0, ids[ids.length - 1], {}, {}, ['9']]] : [], queue_pending: [] }); }
     if (u.pathname === '/queue' && req.method === 'POST') { state.deleted.push(...((body && body.delete) || [])); return send(res, 200, {}); }
     if (u.pathname === '/interrupt') { state.interrupted = true; return send(res, 200, {}); }

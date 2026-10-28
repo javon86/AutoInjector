@@ -350,7 +350,7 @@ async function resolveDossier(ctx, a) {
   const want = String(a.character).trim().toLowerCase();
   const d = all.find((x) => x.record_id === a.character || String(x.code || '').toLowerCase() === want)
     || all.find((x) => String(x.name || '').toLowerCase() === want) || all.find((x) => String(x.name || '').toLowerCase().includes(want));
-  if (!d) return { ok: false, error: kp === 'characters' ? 'NO_CHARACTER' : 'NO_DOSSIER', message: `I couldn't find a ${word} called ${q(a.character)}. ${word[0].toUpperCase()}${word.slice(1)}s: ${all.map((x) => x.name).join(', ') || 'none yet'}.` };
+  if (!d) return { ok: false, error: kp === 'characters' ? 'NO_CHARACTER' : 'NO_DOSSIER', message: `I couldn't find a ${word} called ${q(a.character)}. ${word[0].toUpperCase()}${word.slice(1)}s: ${all.map((x) => x.name).join(', ') || 'none yet'}.${kp === 'characters' ? ' To add a new one, use create_dossier with kind "characters" and their name.' : ''}` };
   return { ok: true, pid: b.pid, kp, list: all, d };
 }
 function dossierBrief(j) {
@@ -459,27 +459,27 @@ def({
 });
 def({
   name: 'make_character_art', title: 'Character Forge: make the portrait / ten views', group: 'books', changes: true, book: true,
-  description: 'Make a character\'s dossier art: the portrait, a short motion clip (what="clip": the portrait brought to life with the 🎬 Video module), any of the ten full-body reference views (front, three_quarter_front, side, three_quarter_back, back, idle, draw, attack, dash, defend), or one turnaround sheet. engine: "sd" = Stable Diffusion (uses the character lock), "chatgpt" = ChatGPT draws it in its pane, "auto" = SD when connected, else ChatGPT. Runs in the background; pictures are saved into the book.',
+  description: 'Make a dossier\'s art: the portrait, a short motion clip (what="clip", 🎬 Video module: a character\'s portrait brought to life, an item\'s slow turntable, a place\'s slow establishing pan, a magic system\'s effect in use), any of the ten full-body reference views (front, three_quarter_front, side, three_quarter_back, back, idle, draw, attack, dash, defend), or one turnaround sheet. engine: "sd" = Stable Diffusion (uses the character lock), "chatgpt" = ChatGPT draws it in its pane, "auto" = SD when connected, else ChatGPT. Runs in the background; pictures are saved into the book.',
   args: { type: 'object', required: ['character', 'what'], properties: {
     project_id: { type: 'string', maxLength: 80 },
     kind: KIND_ARG,
     character: { type: 'string', minLength: 1, maxLength: 120 },
-    what: { type: 'string', enum: ['portrait', 'views', 'sheet', 'clip', 'hero'], description: 'Characters: portrait / views / sheet / clip. Items, places, magic: hero (item portrait / establishing shot / sigil) or views' },
+    what: { type: 'string', enum: ['portrait', 'views', 'sheet', 'clip', 'hero'], description: 'Characters: portrait / views / sheet / clip. Items, places, magic: hero (item portrait / establishing shot / sigil), views or clip' },
     engine: { type: 'string', enum: IMAGE_ENGINES },
     views: { type: 'array', maxItems: 10, items: { type: 'string', maxLength: 40 }, description: 'Only with what="views": which ones (default: the missing ones). Characters: front … defend; items: front, side, back, detail; places: day, night, interior; magic: in_use' },
   }, additionalProperties: false },
   describe: (a) => {
     const eng = { sd: 'Stable Diffusion', chatgpt: 'ChatGPT', auto: 'Stable Diffusion if connected, else ChatGPT' }[a.engine || 'auto'];
-    const what = a.what === 'clip' ? 'a short motion clip (the portrait brought to life, 🎬 Video module)' : a.what === 'portrait' ? 'the portrait' : a.what === 'sheet' ? 'one turnaround sheet (all ten views)' : `${a.views && a.views.length ? a.views.length : 'the missing'} reference view(s)${a.views && a.views.length ? ` (${a.views.join(', ')})` : ''}`;
+    const what = a.what === 'clip' ? `a short motion clip (${{ items: 'a slow turntable of the item', places: 'a slow establishing pan', magic: 'the effect in use' }[a.kind] || 'the portrait brought to life'}, 🎬 Video module)` : a.what === 'portrait' ? 'the portrait' : a.what === 'sheet' ? 'one turnaround sheet (all ten views)' : `${a.views && a.views.length ? a.views.length : 'the missing'} reference view(s)${a.views && a.views.length ? ` (${a.views.join(', ')})` : ''}`;
     return `Make ${what} for ${q(a.character)}'s dossier with ${eng}. It runs in the background and the pictures are saved into the book.`;
   },
   async run(a, ctx) {
     const r = await resolveDossier(ctx, a);
     if (!r.ok) return r;
-    if (r.kp !== 'characters' && ['sheet', 'clip'].includes(a.what)) return { ok: false, error: 'NOT_FOR_KIND', message: `A ${a.what} is only made for characters. For ${KIND_WORD[r.kp]}s: hero (the main picture) or views.` };
+    if (r.kp !== 'characters' && a.what === 'sheet') return { ok: false, error: 'NOT_FOR_KIND', message: `A sheet is only made for characters. For ${KIND_WORD[r.kp]}s: hero (the main picture), views or clip.` };
     if (r.kp === 'characters' && a.what === 'hero') a.what = 'portrait';
     if (r.kp === 'characters' && a.views && a.views.some((v) => !FORGE_VIEWS.includes(v))) return { ok: false, error: 'BAD_VIEW', message: `Character views are: ${FORGE_VIEWS.join(', ')}.` };
-    const body = { what: r.kp !== 'characters' && a.what === 'portrait' ? 'hero' : a.what, engine: a.engine || 'auto' };
+    const body = { what: r.kp !== 'characters' && a.what === 'portrait' ? 'hero' : a.what, engine: a.what === 'clip' ? 'auto' : a.engine || 'auto' };
     if (a.what === 'views' && a.views && a.views.length) body.views = a.views;
     const p = await ctx.akowe('POST', `/api/projects/${enc(r.pid)}/branches/main/forge/${r.kp}/${enc(r.d.record_id)}/art`, body);
     if (!okStatus(p)) return akoweError(p);
@@ -493,14 +493,16 @@ def({
     project_id: { type: 'string', maxLength: 80 }, kind: KIND_ARG,
     name: { type: 'string', maxLength: 120 }, from: { type: 'string', maxLength: 80, description: 'A candidate source_id (a place / artifact / power record of the book)' },
     aliases: { type: 'array', maxItems: 8, items: { type: 'string', maxLength: 80 } },
+    role: { type: 'string', maxLength: 300, description: 'Characters: their role in the story (the author\'s words)' },
+    about: { type: 'string', maxLength: 1200, description: 'Characters: what the author says about them (kept as their own fixed description)' },
   }, additionalProperties: false },
   async check(a) { return a.name || a.from ? { ok: true } : { ok: false, error: 'give a name, or from = a candidate source_id' }; },
-  describe: (a) => `Start a ${KIND_WORD[a.kind] || 'character'} dossier${a.name ? ` for ${q(a.name)}` : ''}${a.from ? ` from the book's record ${q(a.from)}` : ''}.`,
+  describe: (a) => (a.kind === 'characters' && a.name && !a.from ? `Add a new character ${q(a.name)} to the book (a draft you approve) and start its dossier${a.role ? ` — ${q(a.role)}` : ''}.` : `Start a ${KIND_WORD[a.kind] || 'character'} dossier${a.name ? ` for ${q(a.name)}` : ''}${a.from ? ` from the book's record ${q(a.from)}` : ''}.`),
   async run(a, ctx) {
     const b = await resolveBook(ctx, a);
     if (!b.ok) return b;
     const body = {};
-    for (const k of ['name', 'from', 'aliases']) if (a[k] !== undefined) body[k] = a[k];
+    for (const k of ['name', 'from', 'aliases', ...(a.kind === 'characters' ? ['role', 'about'] : [])]) if (a[k] !== undefined) body[k] = a[k];
     const r = await ctx.akowe('POST', `/api/projects/${enc(b.pid)}/branches/main/forge/${a.kind}`, body);
     if (!okStatus(r)) return akoweError(r);
     const d = (r.json && r.json.dossier) || {};
@@ -635,6 +637,32 @@ def({
     if (!Object.keys(body).length) return { ok: false, error: 'NOTHING_TO_CHANGE', message: 'Say what to change (caption, alt, where, chosen) or remove: true.' };
     const r = await ctx.akowe('PUT', url, body);
     return okStatus(r) ? { ok: true, message: 'Picture updated.' } : akoweError(r);
+  },
+});
+// 🎞 B2: the book trailer (Akọwe trailer.py → AutoInjector 🎬 Video POST /video/trailer)
+def({
+  name: 'make_trailer', title: 'Make the book trailer', group: 'books', changes: true, book: true,
+  description: 'Make a short trailer of a book: Akọwe plans 5–8 video shots from the book (its key scenes, main place and characters\' looks, title cards with the logline) — or uses the plan the author already edited on the 🎞 Trailer page — and AutoInjector\'s 🎬 Video makes the shots and joins them. Runs in the background (a few minutes per shot); the trailer is stored with the book. replan = plan it again from the book first (the author\'s edits are replaced).',
+  args: { type: 'object', properties: {
+    project_id: { type: 'string', maxLength: 80 },
+    replan: { type: 'boolean', description: 'Plan the shots again from the book (replaces the author\'s edited plan)' },
+  }, additionalProperties: false },
+  describe: (a) => `${a.replan ? 'Plan the trailer again from the book (your edits to the plan are replaced), then make' : 'Make'} the book trailer: AutoInjector's 🎬 Video makes each shot (a few minutes each) and joins them with title cards; it is stored with the book.`,
+  async run(a, ctx) {
+    const b = await resolveBook(ctx, a);
+    if (!b.ok) return b;
+    const g = await ctx.akowe('GET', `/api/projects/${enc(b.pid)}/branches/main/trailer`);
+    if (!okStatus(g)) return akoweError(g);
+    let planned = false;
+    if (a.replan || !(g.json && g.json.plan)) {
+      const p = await ctx.akowe('POST', `/api/projects/${enc(b.pid)}/branches/main/trailer/plan`, {});
+      if (!okStatus(p)) return akoweError(p);
+      planned = true;
+    }
+    const m = await ctx.akowe('POST', `/api/projects/${enc(b.pid)}/branches/main/trailer/make`, {});
+    if (!okStatus(m)) return akoweError(m);
+    const shots = m.json && m.json.total;
+    return { ok: true, message: `Making the book trailer in the background${planned ? ' (planned from the book)' : ' (your plan)'}: ${shots || 'the'} shot(s), a few minutes each — watch 🎬 Video → 🎞 Trailer in AutoInjector, or the 🎞 Trailer page in Akọwe.`, data: { job_id: m.json && m.json.job_id, project_id: b.pid, shots, planned } };
   },
 });
 def({
@@ -1153,6 +1181,98 @@ def({
     return { ok: true, message: `${images.length ? `Saved ${images.length} picture(s).` : 'Done.'}${notes.length ? ` Notes: ${clip(notes.join(' '), 600)}` : ''}`, data: shrink(r), image: images[0] || null };
   },
 });
+// ---- 🧰 tool servers (MCP) the user added in ⚙ More settings → 🧰 Tools ----------------------------------
+// mcp_tools reads what the connected servers offer (with their input schemas); mcp_call uses one tool — always
+// on an "I will" card naming the server, the tool and the arguments, and never "always allowed" (a tool server
+// can be any program on this computer, or any web service).
+/** An MCP tool's inputSchema (full JSON Schema) → the subset checkValue understands. What it can't check
+ *  (anyOf, $ref, type lists, open objects) becomes a bounded pass-through; the server checks the rest. */
+function mcpSchema(s, d = 0) {
+  if (!s || typeof s !== 'object' || d > 6) return { 'x-passthrough': true };
+  if (s.anyOf || s.oneOf || s.allOf || s.$ref || s.not || Array.isArray(s.type)) return { 'x-passthrough': true };
+  const out = {};
+  if (Array.isArray(s.enum) && s.enum.length && s.enum.every((x) => x === null || typeof x !== 'object')) out.enum = s.enum.slice(0, 200);
+  const type = s.type || (s.properties ? 'object' : null);
+  const num = (k) => (typeof s[k] === 'number' && Number.isFinite(s[k]) ? s[k] : undefined);
+  switch (type) {
+    case 'string': out.type = 'string'; if (num('maxLength') !== undefined) out.maxLength = s.maxLength; if (num('minLength') !== undefined) out.minLength = s.minLength; return out;
+    case 'integer': case 'number': out.type = type; if (num('minimum') !== undefined) out.minimum = s.minimum; if (num('maximum') !== undefined) out.maximum = s.maximum; return out;
+    case 'boolean': out.type = 'boolean'; return out;
+    case 'array': out.type = 'array'; out.items = s.items && typeof s.items === 'object' && !Array.isArray(s.items) ? mcpSchema(s.items, d + 1) : { 'x-passthrough': true }; if (num('maxItems') !== undefined) out.maxItems = s.maxItems; return out;
+    case 'object': {
+      if (!s.properties || typeof s.properties !== 'object') return { 'x-passthrough': true };
+      out.type = 'object'; out.properties = {}; out['x-maxBytes'] = 400000;
+      for (const [k, v] of Object.entries(s.properties).slice(0, 200)) out.properties[k] = mcpSchema(v, d + 1);
+      out.required = Array.isArray(s.required) ? s.required.filter((k) => typeof k === 'string' && out.properties[k]) : [];
+      if (s.additionalProperties === false) out.additionalProperties = false;
+      return out;
+    }
+    default: return out.enum ? out : { 'x-passthrough': true };
+  }
+}
+async function mcpFind(ctx, server, tool) {
+  if (!ctx || typeof ctx.mcpTools !== 'function') return { error: 'tool servers are not available in this build' };
+  const r = await ctx.mcpTools();
+  const servers = (r && r.servers) || [];
+  const want = String(server || '').trim().toLowerCase();
+  const sv = servers.find((x) => x.name.toLowerCase() === want || x.id === want);
+  if (!sv) return { error: servers.length ? `there is no tool server "${str(server, 60)}" (there are: ${servers.map((x) => x.name).join(', ')})` : 'no tool servers are set up — the user adds them in ⚙ More settings → 🧰 Tools' };
+  const tools = ((r && r.tools) || []).filter((t) => t.serverId === sv.id);
+  if (sv.status !== 'connected') return { server: sv, tool: null, notConnected: true };
+  const t = tools.find((x) => x.tool === tool);
+  if (!t) return { error: `the tool server "${sv.name}" has no tool "${str(tool, 80)}"${tools.length ? ` (it has: ${tools.slice(0, 30).map((x) => x.tool).join(', ')})` : ''} — use mcp_tools to see them` };
+  return { server: sv, tool: t };
+}
+def({
+  name: 'mcp_tools', title: 'List the tool servers\' tools', group: 'app',
+  description: 'The outside tool servers (MCP) the user added in ⚙ More settings → 🧰 Tools: each one\'s status and the tools it offers with their argument schemas (optionally only one server). Read-only. Use mcp_call to use one.',
+  args: { type: 'object', properties: { server: { type: 'string', maxLength: 60, description: 'Only this server (optional)' } }, additionalProperties: false },
+  async run(a, ctx) {
+    if (!ctx || typeof ctx.mcpTools !== 'function') return { ok: false, error: 'NOT_WIRED', message: 'Tool servers are not available here.' };
+    const r = await ctx.mcpTools(a.server);
+    const servers = ((r && r.servers) || []).map((x) => ({ server: x.name, status: x.status, summary: clip(x.summary, 300), kind: x.runsProgram ? 'program on this computer' : 'web address' }));
+    if (!servers.length) return { ok: true, data: { servers: [], tools: [], note: a.server ? `There is no tool server called "${str(a.server, 60)}".` : 'No tool servers are set up. The user can add one in ⚙ More settings → 🧰 Tools (🎩 Butler section).' } };
+    const tools = ((r && r.tools) || []).slice(0, 200).map((t) => ({ server: t.server, tool: t.tool, description: clip(t.description || t.title || '', 400), arguments: shrink(t.inputSchema) }));
+    const off = servers.filter((x) => x.status !== 'connected').map((x) => x.server);
+    return { ok: true, data: Object.assign({ servers, tools }, off.length ? { note: `Not connected now: ${off.join(', ')} (mcp_call starts a stopped server; its tools are listed once it runs).` } : {}) };
+  },
+});
+def({
+  name: 'mcp_call', title: 'Use a tool on a tool server', group: 'app', changes: true, timeoutMs: 180000,
+  description: 'Use one tool of an outside tool server (MCP) the user added: server = its name, tool = the tool\'s name, arguments = the tool\'s arguments (see mcp_tools for the schemas). Always asks first.',
+  args: { type: 'object', required: ['server', 'tool'], properties: {
+    server: { type: 'string', minLength: 1, maxLength: 60 },
+    tool: { type: 'string', minLength: 1, maxLength: 128 },
+    arguments: { type: 'object', 'x-passthrough': true, description: 'The tool\'s arguments, as its schema says' },
+  }, additionalProperties: false },
+  allowAlwaysFor: () => false, // a tool server can be any program or web service: every call is confirmed
+  allowKey: (a) => `mcp_call:${a && a.server}/${a && a.tool}`,
+  async check(a, ctx) {
+    const f = await mcpFind(ctx, a.server, a.tool);
+    if (f.error) return { ok: false, error: f.error };
+    let args = a.arguments === undefined || a.arguments === null ? {} : a.arguments;
+    if (typeof args === 'string') { try { args = JSON.parse(args); } catch (_) { return { ok: false, error: 'arguments must be an object' }; } }
+    if (!args || typeof args !== 'object' || Array.isArray(args)) return { ok: false, error: 'arguments must be an object' };
+    const pe = checkPassthrough(args, 'arguments');
+    if (pe) return { ok: false, error: pe };
+    if (f.tool) { // connected: check the arguments against the server's own schema
+      const sch = mcpSchema(f.tool.inputSchema || { type: 'object' });
+      if (sch.type === 'object') args = tidyArgs(args, sch);
+      const e = checkValue(args, sch, 'arguments');
+      if (e) return { ok: false, error: e };
+    }
+    return { ok: true, args: { server: f.server.name, tool: a.tool, arguments: args } };
+  },
+  describe: (a) => `Use the tool “${clip(a.tool, 80)}” on the tool server “${clip(a.server, 60)}”${a.arguments && Object.keys(a.arguments).length ? ` with ${clip(JSON.stringify(a.arguments), 600)}` : ' (no arguments)'}.`,
+  async run(a, ctx) {
+    if (!ctx || typeof ctx.mcpCall !== 'function') return { ok: false, error: 'NOT_WIRED', message: 'Tool servers are not available here.' };
+    const r = await ctx.mcpCall(a.server, a.tool, a.arguments || {});
+    if (!r || r.ok === false) return { ok: false, error: str((r && r.error) || 'FAILED', 60), message: clip((r && r.message) || 'The tool server call did not work.', 600) };
+    const pics = (r.images || []).map((x) => x.path).filter(Boolean);
+    return { ok: true, message: clip(r.text || 'Done.', 6000), data: shrink({ images: r.images, resources: r.resources, structured: r.structured }), image: pics[0] || null };
+  },
+});
+
 // The plain sentences of an image result's warnings (strings or {message}), at most 6.
 function imageNotes(ws) { return (Array.isArray(ws) ? ws : []).map((w) => (typeof w === 'string' ? w : w && w.message)).filter(Boolean).map((m) => clip(String(m), 240)).slice(0, 6); }
 async function sdMethod(ctx, name) {
@@ -1169,6 +1289,7 @@ const DIRECT_FOR = [
   [/\b(image|picture|draw|illustrat|stable diffusion|png)\b/i, 'generate_image'],
   [/\b(book|chapter|akowe|akọwe|character|story rule|profile|manuscript)\b/i, 'the book tools'],
   [/\b(chatgpt|claude|gemini)\b/i, 'send_to_ai'],
+  [/\btrailer\b/i, 'make_trailer'],
   [/\b(video|clip|mp4)\b/i, 'generate_video'],
   [/\b(log|logs)\b/i, 'export_logs'],
 ];
@@ -1236,7 +1357,7 @@ function checkValue(v, s, at) {
       // an open object from a module schema (e.g. a ComfyUI workflow graph): plain JSON, safe keys, size-capped
       if (!s.properties && s.additionalProperties === true) return checkPassthrough(v, at);
       if (!v || typeof v !== 'object' || Array.isArray(v)) return `${at} must be an object`;
-      if (JSON.stringify(v).length > 8000) return `${at} is too big`;
+      if (JSON.stringify(v).length > (s['x-maxBytes'] || 8000)) return `${at} is too big`;
       const props = s.properties || {};
       for (const k of s.required || []) if (v[k] === undefined || v[k] === null || v[k] === '') return `${at === 'args' ? '' : at + '.'}${k} is required`;
       for (const [k, val] of Object.entries(v)) {
@@ -1335,4 +1456,4 @@ function describe(tool, args) {
   try { return typeof tool.describe === 'function' ? tool.describe(args || {}) : tool.title; } catch (_) { return tool.title; }
 }
 
-module.exports = { TOOLS, SITES, SITE_LABEL, get, list, openAiTools, publicList, validate, describe, usage, directToolFor, akoweError, allowableKey, allowKeyOf, canAllowAlways, checkPassthrough, _resolveBook: resolveBook };
+module.exports = { TOOLS, SITES, SITE_LABEL, get, list, openAiTools, publicList, validate, describe, usage, directToolFor, akoweError, allowableKey, allowKeyOf, canAllowAlways, checkPassthrough, mcpSchema, _resolveBook: resolveBook };

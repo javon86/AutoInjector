@@ -19,12 +19,15 @@ const VERDICT_WORDS = { fix: 'Fix the book', fine: 'Fine', change_dossier: 'Chan
 export const FORGE_KINDS = {
   characters: { kind: 'character', word: 'character', Word: 'Character', plural: 'Characters', icon: '👤' },
   items: { kind: 'item', word: 'item', Word: 'Item', plural: 'Items', icon: '🗡', hero: 'portrait', heroLabel: 'item portrait',
+    clip: { from: [['portrait', 'item portrait'], ['front', 'front view']], what: 'a slow turntable: the item turning and hovering' },
     views: [['front', 'FRONT'], ['side', 'SIDE'], ['back', 'BACK'], ['detail', 'DETAIL']], plate: 'TURNAROUND REFERENCE', shape: 'square',
     intro: 'Identity, appearance and materials, history, powers and limits, use and care, ownership, where it appears and a continuity ledger.' },
   places: { kind: 'place', word: 'place', Word: 'Place', plural: 'Places', icon: '🏙', hero: 'establishing', heroLabel: 'establishing shot',
+    clip: { from: [['establishing', 'establishing shot'], ['day', 'day view']], what: 'a slow establishing pan across the place' },
     views: [['day', 'DAY'], ['night', 'NIGHT'], ['interior', 'INTERIOR / DETAIL']], plate: 'MOOD VIEWS', shape: 'wide',
     intro: 'Overview, geography and layout, atmosphere and senses, history, people and factions, rules and dangers, routes, where it appears and a continuity ledger.' },
   magic: { kind: 'magic', word: 'magic system', Word: 'Magic system', plural: 'Magic systems', icon: '✴', hero: 'sigil', heroLabel: 'sigil',
+    clip: { from: [['in_use', 'in-use picture'], ['sigil', 'sigil']], what: 'the effect in use' },
     views: [['in_use', 'IN USE']], plate: 'IN USE', shape: 'square',
     intro: 'Source, access and cost, rules and hard limits, practitioners, named powers, signs, failure, history, society’s view, where it appears and a use ledger.' },
 };
@@ -123,14 +126,29 @@ export async function viewForgeList(main, x, seg = 'characters') {
   catch (e) { clear(body).appendChild(x.problemBox(x.toProblem(e, where), { retry: () => x.route() }, 'Could not open the Character Forge')); return; }
   clear(body);
   const exampleBtn = h('button', { type: 'button', class: 'forge-btn ghost', 'data-testid': 'forge-example', onclick: ev => loadExample(ev.currentTarget) }, '🧪 Load the Moki Vey example');
+  // 🧑 a new character the book does not have yet (POST /forge/characters): a draft character + its dossier
+  const charName = h('input', { type: 'text', maxlength: '80', placeholder: 'e.g. Ada Quill', 'aria-label': 'Name of the new character', 'data-testid': 'forge-new-name' });
+  const charRole = h('input', { type: 'text', maxlength: '300', placeholder: 'role (optional), e.g. the harbour master', 'aria-label': 'Role of the new character', 'data-testid': 'forge-new-role' });
+  const newChar = h('button', { type: 'button', class: 'forge-btn gold', 'data-testid': 'forge-new', onclick: async ev => {
+    if (!charName.value.trim()) { charName.focus(); x.toast('Give the character a name first'); return; }
+    const btn = ev.currentTarget; btn.disabled = true; clear(msg);
+    try {
+      const out = await api('POST', bpath('/forge/characters'), { body: Object.assign({ name: charName.value }, charRole.value.trim() ? { role: charRole.value } : {}) });
+      x.toast(out.message || 'Character made');
+      location.hash = dossierLink(x, 'characters', out.record_id);
+    } catch (e) { btn.disabled = false; msg.appendChild(x.problemBox(x.toProblem(e, where), {}, 'The character could not be made')); }
+  } }, '＋ New character');
+  charName.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); newChar.click(); } });
+  const newRow = h('section', { class: 'forge-new-row', 'aria-label': 'New character' }, h('div', { class: 'forge-actions' }, charName, charRole, newChar),
+    h('p', { class: 'forge-note' }, 'A new character starts as a draft (approve it on the 🎭 Characters page); ✨ Invent the rest proposes the details.'));
   const chars = info.characters || [];
   if (!chars.length) {
-    body.appendChild(h('section', { class: 'forge-empty' },
+    body.append(h('section', { class: 'forge-empty' },
       h('div', { class: 'forge-empty-glyph', 'aria-hidden': 'true' }, '🗂'),
       h('h2', null, 'No characters yet'),
-      h('p', null, 'Make your characters first (Make my book → characters, or the Bible Builder). Every character then gets a dossier here.'),
+      h('p', null, 'Make your characters (Make my book → characters, or the Bible Builder) — or add one below. Every character then gets a dossier here.'),
       h('p', null, 'Want to see what a finished dossier looks like? Load the example: a complete dossier with a portrait and ten reference views, plus a linked item, place and magic system.'),
-      h('div', { class: 'forge-actions' }, exampleBtn, h('a', { class: 'forge-btn ghost', href: plink('book') }, '📘 Make my book'))));
+      h('div', { class: 'forge-actions' }, exampleBtn, h('a', { class: 'forge-btn ghost', href: plink('book') }, '📘 Make my book'))), newRow);
     return;
   }
   const grid = h('div', { class: 'forge-grid', role: 'list' });
@@ -147,7 +165,7 @@ export async function viewForgeList(main, x, seg = 'characters') {
         h('div', { class: 'forge-meter', role: 'img', 'aria-label': `${c.filled} of ${c.total} fields filled` }, h('span', { style: `width:${pct}%` })),
         h('div', { class: 'forge-tile-stats' }, `${c.filled}/${c.total} fields`, c.proposed ? ` · ${c.proposed} proposed` : '', ` · ${c.views_done}/10 views`, c.has_portrait ? ' · portrait' : '', c.has_clip ? ' · 🎬 clip' : ''))));
   }
-  body.append(grid);
+  body.append(grid, newRow);
   if (!chars.some(c => c.name.toLowerCase() === 'moki vey')) body.appendChild(h('div', { class: 'forge-actions forge-foot' }, exampleBtn));
 }
 
@@ -188,7 +206,7 @@ async function kindList(x, seg, body, msg, loadExample) {
           h('div', { class: 'forge-tile-name' }, c.name),
           c.tagline ? h('div', { class: 'forge-tile-tag' }, c.tagline) : null,
           h('div', { class: 'forge-meter', role: 'img', 'aria-label': `${c.filled} of ${c.total} fields filled` }, h('span', { style: `width:${pct}%` })),
-          h('div', { class: 'forge-tile-stats' }, `${c.filled}/${c.total} fields`, c.proposed ? ` · ${c.proposed} proposed` : '', ` · ${c.views_done}/${c.views_total} views`, c.hero ? ` · ${K.heroLabel}` : ''))));
+          h('div', { class: 'forge-tile-stats' }, `${c.filled}/${c.total} fields`, c.proposed ? ` · ${c.proposed} proposed` : '', ` · ${c.views_done}/${c.views_total} views`, c.hero ? ` · ${K.heroLabel}` : '', c.has_clip ? ' · 🎬 clip' : ''))));
     }
     body.appendChild(grid);
   } else {
@@ -307,7 +325,8 @@ export async function viewForge(main, rid, x, seg = 'characters') {
       h('button', { type: 'button', class: 'forge-mini', title: `Make the ${label} with ChatGPT`, 'data-testid': `art-gpt-${slot}`, onclick: () => art(Object.assign({ engine: 'chatgpt' }, purpose), `Making the ${label} with ChatGPT`) }, '💬 ChatGPT'),
       h('button', { type: 'button', class: 'forge-mini', title: `Upload your own ${label}`, 'data-testid': `art-up-${slot}`, onclick: () => upload(slot) }, '⬆ Upload'));
   };
-  // 🎬 the motion clip (characters): made from the portrait (or the front view) by AutoInjector's video maker, or uploaded
+  // 🎬 the motion clip: made by AutoInjector's video maker from the portrait / front view (characters), the item portrait
+  // (a turntable), the establishing shot (a pan) or the in-use picture (the effect in use) — or uploaded
   const makeClip = async () => {
     clear(clipMsg);
     await job('art', { what: 'clip', engine: 'auto' }, 'Making the motion clip', clipProg);
@@ -340,7 +359,11 @@ export async function viewForge(main, rid, x, seg = 'characters') {
   };
   const motion = () => {
     const c = d.art.clip;
-    const source = d.art.portrait ? 'portrait' : d.art.views.front ? 'front view' : null;
+    const artOf = slot => (isChar ? (slot === 'portrait' ? d.art.portrait : d.art.views[slot]) : (slot === K.hero ? d.art[K.hero] : d.art.views[slot]));
+    const from = isChar ? [['portrait', 'portrait'], ['front', 'front view']] : K.clip.from;
+    const hit = from.find(([slot]) => artOf(slot));
+    const source = hit ? hit[1] : null;
+    const motionWords = isChar ? 'idle-motion clip' : `clip (${K.clip.what})`;
     const frame = h('div', { class: `forge-motion-frame${c ? ' has-clip' : ''}` });
     if (c) {
       const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -352,7 +375,7 @@ export async function viewForge(main, rid, x, seg = 'characters') {
       blobOf(c).then(u => { if (u) { vid.src = u; vid.addEventListener('error', () => frame.classList.add('no-play'), { once: true }); } }).catch(() => frame.classList.add('no-play'));
     } else {
       frame.appendChild(h('div', { class: 'forge-slot-empty' }, h('span', { class: 'forge-motion-glyph', 'aria-hidden': 'true' }, '🎬'),
-        h('span', null, source ? 'No clip yet' : 'Needs a portrait first')));
+        h('span', null, source ? 'No clip yet' : `Needs ${isChar ? 'a portrait' : `the ${from[0][1]}`} first`)));
     }
     const meta = c ? [c.seconds ? `${c.seconds} s loop` : 'loop', c.source === 'upload' ? 'your clip' : (c.model || c.engine || null)].filter(Boolean).join(' · ') : '';
     return h('section', { class: 'forge-motion', 'aria-labelledby': 'forge-motion-h', 'data-testid': 'forge-motion' },
@@ -360,7 +383,7 @@ export async function viewForge(main, rid, x, seg = 'characters') {
       frame,
       h('div', { class: 'forge-slot-actions' },
         h('button', { type: 'button', class: 'forge-mini', 'data-testid': 'clip-make', disabled: !source,
-          title: source ? `A 4-second idle-motion clip made from the ${source} (AutoInjector → 🎬 Video)` : 'Make or upload the portrait first: the clip is made from it',
+          title: source ? `A 4-second ${motionWords} made from the ${source} (AutoInjector → 🎬 Video)` : `Make or upload the ${from[0][1]} first: the clip is made from it`,
           onclick: makeClip }, c ? '🎬 Make the motion clip again' : '🎬 Make the motion clip'),
         h('button', { type: 'button', class: 'forge-mini', 'data-testid': 'clip-upload', title: `Upload your own MP4 or WebM clip (up to ${CLIP_MAX_MB} MB)`, onclick: uploadClip }, '⬆ Upload a clip')),
       clipMsg, clipProg);
@@ -402,7 +425,7 @@ export async function viewForge(main, rid, x, seg = 'characters') {
       linksPanel(),
       msg, prog);
     return h('section', { class: 'forge-hero', 'aria-label': 'Cover' },
-      h('div', { class: 'forge-portrait-col' }, frame, artButtons(heroKey, isChar ? 'portrait' : K.heroLabel), isChar ? motion() : null), cover);
+      h('div', { class: 'forge-portrait-col' }, frame, artButtons(heroKey, isChar ? 'portrait' : K.heroLabel), motion()), cover);
   };
   const linksPanel = () => {
     const out = (d.links || []); const back = (d.backlinks || []);

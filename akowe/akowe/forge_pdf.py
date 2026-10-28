@@ -1,7 +1,8 @@
 """🗂 The Character Forge dossier as a PDF, in the look of the author's Moki Vey sample (pure Python).
 
-Page 1: the cover (gold name, teal tagline, the portrait, three summary lines; with a motion clip the portrait moves
-left and the clip's poster stands beside it as a small framed "MOTION STUDY" still). Page 2 (landscape): "NAME / TEN-VIEW
+Page 1: the cover (gold name, teal tagline, the portrait, three summary lines; with a motion clip the portrait — or
+an item / place / magic system's cover picture — moves left and the clip's poster stands beside it as a small framed
+"MOTION STUDY" still). Page 2 (landscape): "NAME / TEN-VIEW
 REFERENCE" — the turnaround sheet when there is one, else a 5 × 2 grid of the ten views with their labels. Then the 14
 numbered sections, every field a dark bordered card: teal letter tags, a bold label, the text. Every page has the dark
 background, the letter legend and "CH-001 | REV 1 | DRAFT | n" in the footer; the section pages also the header
@@ -257,8 +258,10 @@ def render(d: dict, pictures: dict, spec: dict | None = None) -> bytes:
             bx, by, bw, bh = MARGIN, 300.0, pw - 2 * MARGIN, 400.0
         elif kind == "magic":  # a square sigil
             bx, by, bw, bh = 141.0, 260.0, 330.0, 330.0
-    if "clip_poster" in info and not spec:
-        bx = MARGIN  # the portrait moves left to make room for the motion-study still (else: unchanged)
+    if "clip_poster" in info:
+        bx = MARGIN  # the picture moves left to make room for the motion-study still (else: unchanged)
+        if kind == "place":  # the wide establishing shot gets narrower
+            bw = pw - 2 * MARGIN - 16.0 - 150.0
     _image_or_slot(p, images, hero, info, bx, by, bw, bh, cover=False, label=hero_label,
                    note="No picture yet: make one in Akowe or upload your own")
     if spec and kind in ("place", "magic"):
@@ -268,7 +271,7 @@ def render(d: dict, pictures: dict, spec: dict | None = None) -> bytes:
             while tw(line, REG, 8.5) > pw - 2 * MARGIN and len(line) > 10:
                 line = line[:-2]
             text_op(p, line, REG, 8.5, MARGIN, by - 22.0, TEAL)
-    if "clip_poster" in info and not spec:
+    if "clip_poster" in info:
         _motion_study(p, info["clip_poster"], (d.get("art") or {}).get("clip") or {}, bx + bw + 16.0, by,
                       pw - MARGIN - (bx + bw + 16.0))
     lines = [x for x in d.get("summary") or [] if x][:3]

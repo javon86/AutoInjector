@@ -99,6 +99,12 @@ contextBridge.exposeInMainWorld("api", {
   // N5 Tools
   toolsList: () => ipcRenderer.invoke("tools:list"),
   toolsRun: (tool, args) => ipcRenderer.invoke("tools:run", { tool, args }),
+  // 🧰 tool servers (MCP) — the user's saved list; secrets go in, never come back out
+  mcpList: () => ipcRenderer.invoke("mcp:list"),
+  mcpAdd: (p) => ipcRenderer.invoke("mcp:add", p),
+  mcpStart: (id) => ipcRenderer.invoke("mcp:start", { id }),
+  mcpStop: (id) => ipcRenderer.invoke("mcp:stop", { id }),
+  mcpRemove: (id) => ipcRenderer.invoke("mcp:remove", { id }),
   // N3 Memory
   memorySummary: () => ipcRenderer.invoke("memory:summary"),
   memorySearch: (query) => ipcRenderer.invoke("memory:search", { query }),
@@ -201,6 +207,13 @@ contextBridge.exposeInMainWorld("api", {
     installCancel: () => ipcRenderer.invoke("video:install-cancel"),
     openFolder: () => ipcRenderer.invoke("video:open-folder"),
     showFile: (path) => ipcRenderer.invoke("video:show-file", { path }),
+    // 🎞 book trailers (video-trailer.js)
+    trailerMake: (req) => ipcRenderer.invoke("video:trailer-make", req),
+    trailerStatus: (id) => ipcRenderer.invoke("video:trailer-status", id ? { id } : {}),
+    trailerCancel: () => ipcRenderer.invoke("video:trailer-cancel"),
+    trailerList: (book) => ipcRenderer.invoke("video:trailer-list", book ? { book } : {}),
+    trailerPlan: (book) => ipcRenderer.invoke("video:trailer-plan", { book }),
+    trailerPickFile: (kind) => ipcRenderer.invoke("video:trailer-pick-file", { kind }),
     onInstall: (cb) => ipcRenderer.on("video-install", (_e, st) => cb(st)),
     onDone: (cb) => ipcRenderer.on("video-done", (_e, r) => cb(r)),
   },
@@ -253,6 +266,8 @@ contextBridge.exposeInMainWorld("api", {
   llmSetHfToken: (arg) => ipcRenderer.invoke("llm:hf-token", arg),
   onLlm: (cb) => ipcRenderer.on("llm", (_e, payload) => cb(payload)),
   openWizard: (tab) => ipcRenderer.invoke("wizard:open", { tab }),
+  openAppTab: (tab) => ipcRenderer.invoke("wizard:open-app-tab", { tab }),
+  onAppTabShow: (cb) => ipcRenderer.on("app-tab-show", (_e, payload) => cb(payload)),
   openExternal: (url) => ipcRenderer.invoke("external:open", url),
   closeWizard: () => ipcRenderer.invoke("wizard-window:close"),
   wizardCatalog: () => ipcRenderer.invoke("wizard:catalog"),
@@ -340,15 +355,18 @@ contextBridge.exposeInMainWorld("api", {
   alfredTestAi: () => ipcRenderer.invoke("alfred:test-ai"),
   alfredModels: () => ipcRenderer.invoke("alfred:models"),
   alfredOpenPath: (path) => ipcRenderer.invoke("alfred:open-path", { path }),
-  // personality (voice only) + saved set-ups (alfred.js); his side panel (alfred-window.js)
+  // personality (voice only) + saved set-ups (alfred.js); his side panel (docked; Ctrl/Cmd+Shift+A)
   alfredPersonality: (patch) => ipcRenderer.invoke("alfred:personality", patch || null),
   alfredProfiles: () => ipcRenderer.invoke("alfred:profiles"),
   alfredSaveProfile: (name, renameFrom) => ipcRenderer.invoke("alfred:profile-save", { name, renameFrom: renameFrom == null ? undefined : renameFrom }),
   alfredUseProfile: (name) => ipcRenderer.invoke("alfred:profile-use", { name }),
   alfredDeleteProfile: (name) => ipcRenderer.invoke("alfred:profile-delete", { name }),
-  alfredPanel: (patch) => ipcRenderer.invoke("alfred:panel", patch || null),
+  alfredPanel: () => ipcRenderer.invoke("alfred:panel"),
   alfredPanelToggle: (open) => ipcRenderer.invoke("alfred:panel-toggle", { open: typeof open === "boolean" ? open : undefined }),
   alfredShowButler: () => ipcRenderer.invoke("alfred:show-butler"),
+  // "❓ Everything I can do" and the side panel's big buttons (read-only)
+  alfredCatalog: () => ipcRenderer.invoke("alfred:catalog"),
+  alfredBooks: () => ipcRenderer.invoke("alfred:books"),
   onAlfred: (cb) => ipcRenderer.on("alfred", (_e, payload) => cb(payload)),
   // ==== 🩺 health watch (health-watch.js): problems found BEFORE something breaks ====
   healthStatus: (opts) => ipcRenderer.invoke("health:status", opts || {}),

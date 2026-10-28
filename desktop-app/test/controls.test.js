@@ -160,6 +160,7 @@ function makeApi({ initialPrompts, pickResult, selfTestResult, tunerRunResult, l
     voiceSpeak: async (text, who) => { calls.push({ fn: "voiceSpeak", text, who }); return { ok: true, ms: 5 }; },
     voiceListen: async (opts) => { calls.push({ fn: "voiceListen", opts }); return { ok: true, text: "hello from mic" }; },
     openWizard: async (tab) => { calls.push({ fn: "openWizard", tab }); return { ok: true }; },
+    onAppTabShow: (cb) => { calls.push({ fn: "onAppTabShow" }); api.__appTabShow = cb; },
     // Image generation panel
     imageStatus: async () => { calls.push({ fn: "imageStatus" }); return { ok: true, configured: false, enabled: false, endpoint: "" }; },
     configureImage: async (patch) => { calls.push({ fn: "configureImage", patch }); return { ok: true, enabled: !!(patch && patch.enabled) }; },
@@ -853,8 +854,8 @@ async function testUserPanelMergedAndNeverCollapses() {
     assert(children[i].tagName === "BUTTON" && children[i].textContent.includes(SITE_LABELS_FOR_TEST[site]), `row ${i / 2}: ${site}'s send button is in the Send column`);
     assert(children[i + 1].id === `p-${site}`, `row ${i / 2}: ${site}'s own checkbox is row-aligned right next to it, in the Active column (got id="${children[i + 1].id}")`);
   }
-  assert(children[6].tagName === "BUTTON" && /Butler/.test(children[6].textContent), "the Butler is a 4th participant row: its → send button sits in the Send column");
-  assert(children[7].id === "p-butler" && children[7].tagName === "INPUT", "the Butler has its own Active checkbox in the Active column, like the three AIs");
+  assert(children[6].tagName === "BUTTON" && children[6].id === "btn-send-butler" && children[6].textContent === "→ 🎩 Alfred", "🎩 Alfred is a 4th participant row: his → send button sits in the Send column");
+  assert(children[7].id === "p-butler" && children[7].tagName === "INPUT" && /Alfred/.test(children[7].title), "Alfred has his own Active checkbox in the Active column, like the three AIs");
   assert(children[8].tagName === "BUTTON" && children[8].textContent.trim() === "→ All", "→ All is the final row, spanning just the Send column (no checkbox of its own)");
 }
 const SITE_LABELS_FOR_TEST = { chatgpt: "ChatGPT", claude: "Claude", gemini: "Gemini" };
@@ -1304,7 +1305,7 @@ async function main() {
   await testExtractAllButton();
   await testButlerPanelWired();
   await testDeepCapabilityCheck();
-  await testButlerModeToggleAndConverse();
+  await testAlfredUserPanelButtons();
   await testButlerLightAndColoredLog();
   await testIss017StaleSavedAndConverseProse();
   await testIss018NoDuplicateTabs();
@@ -1379,44 +1380,96 @@ async function testDeepCapabilityCheck() {
   assert(api.calls.filter((c) => c.fn === "butlerCapabilityTest").length === before + 1, "System Check with the toggle checked also runs the deep test");
 }
 
-async function testButlerModeToggleAndConverse() {
-  console.log("\n== Butler handling-mode toggle + converse from the User Panel ==");
+/** window.api's 🎩 Alfred calls over a tiny fake Alfred (enough for the User Panel buttons). */
+function fakeAlfred(api, { enabled = false, brain = "auto" } = {}) {
+  const st = { ok: true, enabled, busy: false, card: null, settings: { brain } };
+  let cb = null;
+  const snap = () => JSON.parse(JSON.stringify(st));
+  Object.assign(api, {
+    alfredStatus: async () => snap(),
+    alfredSetEnabled: async (on) => { api.calls.push({ fn: "alfredSetEnabled", on }); st.enabled = !!on; return snap(); },
+    alfredPanelToggle: async (open) => { api.calls.push({ fn: "alfredPanelToggle", open }); return { ok: true }; },
+    alfredAsk: async (text) => { api.calls.push({ fn: "alfredAsk", text }); return { ok: true }; },
+    alfredSettings: async (patch) => { api.calls.push({ fn: "alfredSettings", patch }); Object.assign(st.settings, patch); return Object.assign({}, st.settings); },
+    llmCheck: async () => { api.calls.push({ fn: "llmCheck" }); return { ok: false, summary: "1 thing needs attention: ollama.", rows: [{ label: "Ollama installed", ok: true }, { label: "Ollama running", ok: false, detail: "press Start" }] }; },
+    healthStatus: async (o) => { api.calls.push({ fn: "healthStatus", o }); return { ok: true, problems: [{ code: "disk-low", severity: "warn", text: "Free disk space is low (3 GB).", fix: null }] }; },
+    onAlfred: (f) => { cb = f; },
+  });
+  return { st, fire: (p) => cb && cb(p) };
+}
+
+async function testAlfredUserPanelButtons() {
+  console.log("\n== User Panel: the old Butler buttons are 🎩 Alfred's now (send, light, 🧠, on/off, 🩺 check) ==");
   const api = makeApi();
+  const fa = fakeAlfred(api);
   const dom = await loadWindow(api);
   const doc = dom.window.document;
+  const tick = () => new Promise((r) => setTimeout(r, 20));
+  const light = doc.getElementById("btn-butler-status");
+  assert(light.classList.contains("off") && light.querySelector(".txt").textContent === "🎩 Alfred off", "the status light shows Alfred's state: off");
+  assert(doc.getElementById("btn-ai-toggle").textContent === "🎩 Alfred: Off", "'System AI' is now 🎩 Alfred: Off (the same as the title switch)");
+  assert(doc.getElementById("btn-capability-test").textContent === "🩺 Check Alfred", "'Capability Test' is now 🩺 Check Alfred");
   const modeBtn = doc.getElementById("btn-butler-mode");
-  assert(!!modeBtn && /Auto/.test(modeBtn.textContent), "the mode toggle is present and starts on Auto");
+  assert(/🧠/.test(modeBtn.textContent) && /Auto/.test(modeBtn.textContent), "the handling-mode toggle is 🧠 what Alfred thinks with (Auto)");
 
-  // Type a message and send it to the butler in Auto → startManagedTask with mode "auto".
-  doc.getElementById("composer-text").value = "compare three plans";
+  // → 🎩 Alfred while he is off: turns him on, opens his panel, sends the text
+  doc.getElementById("composer-text").value = "make a picture of a ship";
   click(dom, "btn-send-butler");
-  await new Promise((r) => setTimeout(r, 20));
-  let sc = api.calls.filter((c) => c.fn === "startManagedTask").pop();
-  assert(sc && sc.userRequest === "compare three plans" && sc.mode === "auto", "→ Butler sends the composed message with the current mode (auto)");
+  await tick();
+  assert(api.calls.some((c) => c.fn === "alfredSetEnabled" && c.on === true), "→ 🎩 Alfred turns him on when he is off");
+  assert(api.calls.some((c) => c.fn === "alfredPanelToggle" && c.open === true), "… opens his side panel");
+  assert(api.calls.some((c) => c.fn === "alfredAsk" && c.text === "make a picture of a ship"), "… and sends him the composed message (window.api.alfredAsk)");
+  assert(doc.getElementById("composer-text").value === "" && /Alfred/.test(doc.getElementById("status").textContent), "the box is cleared and the status line says where he answers");
+  assert(!api.calls.some((c) => c.fn === "startManagedTask" || c.fn === "butlerChat"), "the old butler is not used");
 
-  // Cycle: Auto → Himself → Delegate. Send in Delegate → mode "delegate".
-  click(dom, "btn-butler-mode"); // → Himself
-  assert(/Himself/.test(modeBtn.textContent) && modeBtn.classList.contains("mode-self"), "one click moves to 'Himself'");
-  click(dom, "btn-butler-mode"); // → Delegate
-  assert(/Delegate/.test(modeBtn.textContent) && modeBtn.classList.contains("mode-delegate"), "next click moves to 'Delegate'");
-  doc.getElementById("composer-text").value = "draft a memo";
-  click(dom, "btn-send-butler");
-  await new Promise((r) => setTimeout(r, 20));
-  sc = api.calls.filter((c) => c.fn === "startManagedTask").pop();
-  assert(sc && sc.mode === "delegate", "sending in Delegate passes mode 'delegate' to the butler");
+  // the light follows his state events
+  fa.fire({ type: "state", state: { enabled: true, busy: true, card: null, settings: { brain: "auto" } } });
+  assert(light.classList.contains("working") && /working/.test(light.textContent), "while he works the light glows (working)");
+  fa.fire({ type: "state", state: { enabled: true, busy: false, card: { id: "c1" }, settings: { brain: "auto" } } });
+  assert(light.classList.contains("needs") && /needs you/.test(light.textContent), "a card waiting turns the light amber (needs you)");
+  fa.fire({ type: "state", state: { enabled: true, busy: false, card: null, settings: { brain: "auto" } } });
+  assert(!light.classList.contains("needs") && !light.classList.contains("working") && /idle/.test(light.textContent), "then idle");
+  assert(doc.getElementById("btn-ai-toggle").textContent === "🎩 Alfred: On" && doc.getElementById("btn-ai-toggle").classList.contains("on"), "the On/Off button follows");
+  // a busy Alfred: → Alfred says so instead of piling up
+  fa.fire({ type: "state", state: { enabled: true, busy: false, card: { id: "c2" }, settings: { brain: "auto" } } });
+  const asks = api.calls.filter((c) => c.fn === "alfredAsk").length;
+  doc.getElementById("composer-text").value = "another";
+  click(dom, "btn-send-butler"); await tick();
+  assert(api.calls.filter((c) => c.fn === "alfredAsk").length === asks && /card/.test(doc.getElementById("status").textContent), "with a card waiting, → Alfred asks you to answer it first");
+  fa.fire({ type: "state", state: { enabled: true, busy: false, card: null, settings: { brain: "auto" } } });
 
-  // Cycle once more → Converse. Now sending goes to butlerChat, not a task.
-  click(dom, "btn-butler-mode"); // → Converse
-  assert(/Converse/.test(modeBtn.textContent), "next click reaches 'Converse'");
-  const beforeStart = api.calls.filter((c) => c.fn === "startManagedTask").length;
-  doc.getElementById("composer-text").value = "how's it going?";
-  click(dom, "btn-send-butler");
-  await new Promise((r) => setTimeout(r, 20));
-  assert(api.calls.some((c) => c.fn === "butlerChat" && c.message === "how's it going?"), "in Converse, the message goes to butler:chat");
-  assert(api.calls.filter((c) => c.fn === "startManagedTask").length === beforeStart, "Converse does NOT start a task");
-  // My own line is echoed into the butler window.
-  assert(/You → 🤵/.test(doc.getElementById("jarvis-log").textContent) && /how's it going\?/.test(doc.getElementById("jarvis-log").textContent),
-    "my converse message is echoed in the butler window");
+  // the light opens his panel
+  const toggles = api.calls.filter((c) => c.fn === "alfredPanelToggle").length;
+  click(dom, "btn-butler-status"); await tick();
+  assert(api.calls.filter((c) => c.fn === "alfredPanelToggle").length === toggles + 1, "clicking the light opens his side panel");
+
+  // → All with his Active box ticked also sends to him
+  doc.getElementById("p-butler").checked = true;
+  doc.getElementById("p-butler").dispatchEvent(new dom.window.Event("change"));
+  doc.getElementById("composer-text").value = "hello everyone";
+  const allBtn = Array.from(doc.getElementById("send-active-grid").querySelectorAll("button")).find((b) => b.textContent === "→ All");
+  allBtn.dispatchEvent(new dom.window.Event("click", { bubbles: true })); await tick();
+  assert(api.calls.some((c) => c.fn === "alfredAsk" && c.text === "hello everyone"), "→ All includes Alfred when his Active box is ticked");
+
+  // 🧠 cycles what he thinks with
+  click(dom, "btn-butler-mode"); await tick();
+  assert(api.calls.some((c) => c.fn === "alfredSettings" && c.patch.brain === "local") && /Local/.test(modeBtn.textContent) && modeBtn.classList.contains("mode-self"), "🧠 Auto → Local (saved in his settings)");
+  click(dom, "btn-butler-mode"); await tick();
+  click(dom, "btn-butler-mode"); await tick();
+  click(dom, "btn-butler-mode"); await tick();
+  assert(/Auto/.test(modeBtn.textContent) && api.calls.filter((c) => c.fn === "alfredSettings").map((c) => c.patch.brain).join(",") === "local,api,pane,auto", "… Connected AI → Web AI → back to Auto");
+
+  // 🩺 Check Alfred while he is off: llm:check + health:status into the Activity Log (no AI call)
+  fa.fire({ type: "state", state: { enabled: false, busy: false, card: null, settings: { brain: "auto" } } });
+  click(dom, "btn-capability-test"); await new Promise((r) => setTimeout(r, 40));
+  const log = doc.getElementById("activity-log").textContent;
+  assert(api.calls.some((c) => c.fn === "llmCheck") && api.calls.some((c) => c.fn === "healthStatus" && c.o.fresh), "🩺 Check Alfred runs his AI check and the health watch");
+  assert(/His AI: 1 thing needs attention/.test(log) && /Ollama running — press Start/.test(log) && /Free disk space is low/.test(log), "and writes the results to the Activity Log in plain words");
+  assert(!api.calls.some((c) => c.fn === "butlerCapabilityTest"), "it no longer runs the old butler's capability test");
+
+  // 🎩 Alfred: On/Off (no title-bar panel code in this test) — turns him on directly
+  click(dom, "btn-ai-toggle"); await tick();
+  assert(api.calls.filter((c) => c.fn === "alfredSetEnabled").pop().on === true && doc.getElementById("btn-ai-toggle").textContent === "🎩 Alfred: On", "🎩 Alfred: Off → On");
 }
 
 async function testIss017StaleSavedAndConverseProse() {
@@ -1454,16 +1507,13 @@ async function testButlerLightAndColoredLog() {
   const dom = await loadWindow(api);
   const doc = dom.window.document;
 
-  // The status light lives in the User Panel and reflects the butler's state.
+  // The status light in the User Panel is 🎩 Alfred's now: the old butler's state no longer drives it.
   const light = doc.getElementById("btn-butler-status");
-  assert(!!light, "the Butler status light is present in the User Panel");
+  assert(!!light, "the status light is present in the User Panel");
   if (api._managerStateCb) api._managerStateCb({ status: "delegating", turnNumber: 2, maximumTurns: 20 });
-  assert(light.classList.contains("working") && /turn 2/.test(light.querySelector(".txt").textContent), "while working, the light glows and shows what he's doing");
-  if (api._managerStateCb) api._managerStateCb({ status: "finished" });
-  assert(!light.classList.contains("working"), "when he finishes, the light stops glowing");
-  // A stall-break question flags it amber ('needs you').
+  assert(!light.classList.contains("working") && !/turn 2/.test(light.textContent), "the old butler's work no longer lights it (it is Alfred's light)");
   if (api._managerAckCb) api._managerAckCb({ text: "I've gone 5 turns without progress. Could you tell me what you'd like me to do?" });
-  assert(light.classList.contains("needs"), "a question to the user turns the light amber (needs you)");
+  assert(!light.classList.contains("needs"), "nor does an old-butler question");
 
   // The butler log colour-codes by who's speaking.
   const blog = doc.getElementById("jarvis-log");
@@ -1639,115 +1689,45 @@ async function testCapabilityPanelsWired() {
   api.voiceListen = listenBefore;
   delete api.voiceCheck;
 
-  // The Image / Video paddles open the wizard on their own tab.
-  assert(doc.getElementById("btn-open-image") && doc.getElementById("btn-open-video"), "the Image and Video paddles are present in the action bar");
+  // ONE way to make pictures and clips: the 🎨 Images / 🎬 Video buttons in the action bar
+  // switch the main window to that tab (the old Image/Video Generation panels are gone).
+  assert(doc.getElementById("btn-open-image") && doc.getElementById("btn-open-video"), "the 🎨 Images and 🎬 Video buttons are present in the action bar");
+  assert(/Images/.test(doc.getElementById("btn-open-image").textContent) && /Video/.test(doc.getElementById("btn-open-video").textContent), "they are labelled 🎨 Images and 🎬 Video, like the tabs they open");
+  const shown = [];
+  dom.window.sdShowImagesTab = () => shown.push("images");
+  dom.window.vdShowVideoTab = () => shown.push("video");
+  const wizBefore = api.calls.filter((c) => c.fn === "openWizard").length;
   click(dom, "btn-open-image");
-  await new Promise((r) => setTimeout(r, 10));
-  assert(api.calls.some((c) => c.fn === "openWizard" && c.tab === "images"), "the Image paddle opens the wizard on the Images tab");
   click(dom, "btn-open-video");
   await new Promise((r) => setTimeout(r, 10));
-  assert(api.calls.some((c) => c.fn === "openWizard" && c.tab === "video"), "the Video paddle opens the wizard on the Video tab");
-
-  // Image Generation + Video panels exist in the tiled panel grid.
-  assert(doc.getElementById("col-image") && doc.getElementById("col-video"), "the Image Generation and Video panels are present");
-  assert(api.calls.some((c) => c.fn === "imageStatus"), "the Image panel loads the SD config on start");
-  doc.getElementById("img-endpoint").value = "http://127.0.0.1:7860/sdapi/v1/txt2img";
-  doc.getElementById("img-enabled").checked = true;
-  click(dom, "btn-img-save");
-  await new Promise((r) => setTimeout(r, 20));
-  assert(api.calls.some((c) => c.fn === "configureImage" && c.patch.enabled === true && /7860/.test(c.patch.endpoint)), "the Image panel Save wires to configureImage");
-  // The 5 main image sliders exist and show a live value.
-  for (const id of ["img-steps", "img-cfg", "img-width", "img-height", "img-batch"]) {
-    const sl = doc.getElementById(id);
-    assert(sl && sl.getAttribute("type") === "range", `image slider ${id} is a range control`);
-  }
-  const stepSlider = doc.getElementById("img-steps");
-  stepSlider.value = "40";
-  stepSlider.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
-  assert(doc.getElementById("img-steps-v").textContent === "40", "moving a slider updates its live value readout");
-  // Compact fields: prompt, negative prompt, and LoRA/weights (appended to prompt).
-  doc.getElementById("img-prompt").value = "a red apple";
-  doc.getElementById("img-negative").value = "blurry, text";
-  doc.getElementById("img-lora").value = "<lora:apple:0.7>";
-  doc.getElementById("img-cfg").value = "9";
-  doc.getElementById("img-seed").value = "1234";
-  click(dom, "btn-img-generate");
-  await new Promise((r) => setTimeout(r, 20));
-  const genCall = api.calls.find((c) => c.fn === "imageGenerate");
-  assert(genCall && /a red apple/.test(genCall.prompt) && /<lora:apple:0\.7>/.test(genCall.prompt), "Generate appends the LoRA/weights to the prompt");
-  assert(genCall && genCall.negative === "blurry, text", "the negative prompt is passed through");
-  const imgCfgCall = api.calls.filter((c) => c.fn === "configureImage").pop();
-  assert(imgCfgCall && imgCfgCall.patch.cfgScale === 9 && imgCfgCall.patch.seed === 1234 && imgCfgCall.patch.steps === 40, "the CFG / seed / steps slider values are sent with the render");
-  // 🎲 resets the seed to random (-1).
-  click(dom, "btn-img-seed-rand");
-  assert(doc.getElementById("img-seed").value === "-1", "the 🎲 button resets the seed to random (-1)");
-  // 3 sizes: the render grows the panel to "large" so the preview shows.
-  assert(doc.getElementById("col-image").getAttribute("data-size") === "large", "after a render the Image panel grows to the large size (shows the preview)");
-  assert(doc.getElementById("img-preview").getAttribute("src") === "data:image/png;base64,AAAA", "the rendered image is shown in the inline preview");
-  assert(doc.getElementById("img-history").children.length === 1, "the render is added to the recent-renders strip");
-  // The ◱ size button cycles minimal → middle → large → minimal.
-  doc.getElementById("col-image").setAttribute("data-size", "minimal");
-  click(dom, "btn-img-size");
-  assert(doc.getElementById("col-image").getAttribute("data-size") === "middle", "the size button cycles minimal → middle");
-  click(dom, "btn-img-size");
-  assert(doc.getElementById("col-image").getAttribute("data-size") === "large", "the size button cycles middle → large");
-  click(dom, "btn-img-size");
-  assert(doc.getElementById("col-image").getAttribute("data-size") === "minimal", "the size button wraps large → minimal (three states)");
-  // The Open SD UI button opens the web UI (base of the endpoint).
-  click(dom, "btn-img-open-ui");
+  assert(shown.join() === "images,video", "🎨 Images opens the Images tab and 🎬 Video opens the Video tab");
+  assert(api.calls.filter((c) => c.fn === "openWizard").length === wizBefore, "…and neither opens the Setup Wizard any more");
+  delete dom.window.sdShowImagesTab; delete dom.window.vdShowVideoTab;
+  click(dom, "btn-open-image");
+  click(dom, "btn-open-video");
   await new Promise((r) => setTimeout(r, 10));
-  assert(api.calls.some((c) => c.fn === "openExternal" && /127\.0\.0\.1:7860$/.test(c.url)), "the Open SD UI button opens the Stable Diffusion web UI (endpoint base)");
-
-  // Video module: same 3-size + generate shape, wired to the video provider.
-  assert(api.calls.some((c) => c.fn === "videoStatus"), "the Video panel loads its config on start");
-  for (const id of ["vid-frames", "vid-fps", "vid-steps", "vid-cfg", "vid-motion"]) {
-    const sl = doc.getElementById(id);
-    assert(sl && sl.getAttribute("type") === "range", `video slider ${id} is a range control`);
+  assert(api.calls.some((c) => c.fn === "openWizard" && c.tab === "images") && api.calls.some((c) => c.fn === "openWizard" && c.tab === "video"), "if a tab's script is missing they still lead somewhere (the Setup Wizard's tab)");
+  // The duplicate panels are gone…
+  for (const id of ["col-image", "col-video", "img-prompt", "img-endpoint", "img-preset", "btn-img-generate", "btn-img-detect", "btn-img-test", "vid-prompt", "vid-endpoint", "vid-preset", "vid-preview", "btn-vid-generate", "btn-vid-detect", "btn-vid-size", "btn-collapse-image", "btn-collapse-video"]) {
+    assert(!doc.getElementById(id), `the old panel's #${id} is gone`);
   }
-  doc.getElementById("vid-prompt").value = "a spinning cube";
-  doc.getElementById("vid-negative").value = "jitter";
-  doc.getElementById("vid-endpoint").value = "http://127.0.0.1:7861/txt2vid";
-  doc.getElementById("vid-motion").value = "1.5";
-  click(dom, "btn-vid-generate");
-  await new Promise((r) => setTimeout(r, 20));
-  const vgen = api.calls.find((c) => c.fn === "videoGenerate");
-  assert(vgen && /a spinning cube/.test(vgen.prompt) && vgen.negative === "jitter", "Video Generate passes the prompt + negative to the video provider");
-  const vidCfgCall = api.calls.filter((c) => c.fn === "configureVideo").pop();
-  assert(vidCfgCall && vidCfgCall.patch.motion === 1.5, "the video Motion slider value is sent with the render");
-  assert(doc.getElementById("col-video").getAttribute("data-size") === "large", "after a render the Video panel grows to large (shows the clip preview)");
-  assert(doc.getElementById("vid-preview").getAttribute("src") === "data:video/mp4;base64,BBBB", "the rendered clip is shown in the inline video preview");
-  // OP-13: a failed render shows the plain-language reason (e.g. NO_VIDEO).
-  const genBefore = api.videoGenerate;
-  api.videoGenerate = async () => ({ ok: false, error: "NO_VIDEO", message: "The server answered, but it didn't send back a video, so no working video backend is configured yet." });
-  click(dom, "btn-vid-generate");
-  await new Promise((r) => setTimeout(r, 20));
-  assert(/no working video backend is configured/.test(doc.getElementById("vid-msg").textContent) && !/Failed: NO_VIDEO/.test(doc.getElementById("vid-msg").textContent), "a NO_VIDEO render shows the plain-language message, not the bare code");
-  api.videoGenerate = genBefore;
-  click(dom, "btn-vid-size");
-  assert(["minimal", "middle", "large"].includes(doc.getElementById("col-video").getAttribute("data-size")), "the Video panel has its own working size button");
-  // Tab collapse: minimizing sends the panel up to a tab; clicking it restores.
-  click(dom, "btn-collapse-video");
-  assert(doc.getElementById("col-video").classList.contains("hidden-collapsed") && !!doc.getElementById("tab-video"), "collapsing the Video panel hides it and adds a tab");
-  doc.getElementById("tab-video").dispatchEvent(new dom.window.Event("click", { bubbles: true }));
-  assert(!doc.getElementById("col-video").classList.contains("hidden-collapsed") && !doc.getElementById("tab-video"), "clicking the tab brings the Video panel back");
-
-  // Endpoint help: preset dropdown fills the address; Auto-detect + Test are wired.
-  assert(api.calls.some((c) => c.fn === "endpointPresets" && c.kind === "image"), "the Image Connection loads its preset backends into a dropdown");
-  const preset = doc.getElementById("img-preset");
-  assert(preset && preset.querySelectorAll("option").length >= 3, "the preset dropdown is populated (Choose… + backends)");
-  preset.value = "http://127.0.0.1:7860/sdapi/v1/txt2img";
-  preset.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
-  assert(doc.getElementById("img-endpoint").value === "http://127.0.0.1:7860/sdapi/v1/txt2img", "picking a preset fills the endpoint field — no guessing");
-  doc.getElementById("img-endpoint").value = "";
-  click(dom, "btn-img-detect");
-  await new Promise((r) => setTimeout(r, 20));
-  assert(api.calls.some((c) => c.fn === "detectEndpoints" && c.kind === "image"), "Auto-detect scans localhost for a running backend");
-  assert(doc.getElementById("img-endpoint").value === "http://127.0.0.1:7860/sdapi/v1/txt2img", "a detected backend is filled into the endpoint field automatically");
-  click(dom, "btn-img-test");
-  await new Promise((r) => setTimeout(r, 20));
-  assert(api.calls.some((c) => c.fn === "testEndpoint"), "the Test button pings the endpoint for reachability");
-  assert(/Reachable/.test(doc.getElementById("img-conn-msg").textContent), "a reachable endpoint is reported clearly");
-  assert(!!doc.getElementById("vid-preset") && !!doc.getElementById("btn-vid-detect") && !!doc.getElementById("btn-vid-test"), "the Video Connection has the same preset + detect + test helpers");
+  // …and what only they offered lives in the tabs' setup views ("Advanced: another server").
+  const sdAdv = doc.getElementById("sd-adv-server");
+  assert(sdAdv && sdAdv.closest("#sd-view-setup") && /Advanced: another server/.test(sdAdv.querySelector("summary").textContent), "🎨 Images → ⚙ Start & install has an “Advanced: another server” fold");
+  for (const id of ["sd-ep-enabled", "sd-ep-preset", "btn-sd-ep-detect", "sd-ep-url", "btn-sd-ep-save", "btn-sd-ep-test", "sd-ep-msg"]) assert(sdAdv && sdAdv.querySelector(`#${id}`), `the Images fold has #${id}`);
+  const vdAdv = doc.getElementById("vd-advanced");
+  assert(vdAdv && vdAdv.closest("#vd-view-setup") && /Advanced: other video server/.test(vdAdv.querySelector("summary").textContent), "🎬 Video → ⚙ Setup & models has its “Advanced: other video server” fold");
+  for (const id of ["vd-ep-enabled", "vd-ep-preset", "btn-vd-ep-detect", "vd-ep-url", "btn-vd-ep-save", "btn-vd-ep-test", "vd-ep-frames", "vd-ep-fps", "vd-ep-width", "vd-ep-height", "vd-ep-steps", "vd-ep-cfg", "vd-ep-motion", "vd-ep-seed"]) assert(vdAdv && vdAdv.querySelector(`#${id}`), `the Video fold has #${id}`);
+  // The Setup Wizard's "Open the Images / Video tab" (wizard:open-app-tab → app-tab-show) clicks that tab button.
+  assert(typeof api.__appTabShow === "function", "the control panel listens for app-tab-show (from the Setup Wizard's notes)");
+  let tabClicked = "";
+  for (const t of ["images", "video"]) { const b = doc.getElementById(`tab-app-${t}`); if (b) b.addEventListener("click", () => { tabClicked = t; }); }
+  api.__appTabShow({ tab: "video" });
+  assert(tabClicked === "video", "app-tab-show {tab:'video'} shows the 🎬 Video tab (clicks its tab button)");
+  api.__appTabShow({ tab: "nope" });
+  assert(tabClicked === "video", "an unknown tab is ignored");
+  // A minimized-panel tab for the removed panels can never appear.
+  assert(!doc.getElementById("tab-image") && !doc.getElementById("tab-video"), "no leftover tab-strip entries for the removed panels");
 
   // GPU Usage panel: polls gpuInfo and draws the util + VRAM meters.
   assert(!!doc.getElementById("col-gpu"), "the GPU Usage panel is present");

@@ -81,7 +81,7 @@ const IPC_INVENTORY = [
   'alfred:ask', 'alfred:cancel', 'alfred:clear', 'alfred:confirm', 'alfred:models', 'alfred:open-path', 'alfred:reject', 'alfred:set-enabled',
   'alfred:settings', 'alfred:status', 'alfred:test-ai',
   'alfred:personality', 'alfred:profiles', 'alfred:profile-save', 'alfred:profile-use', 'alfred:profile-delete',
-  'alfred:panel', 'alfred:panel-toggle', 'alfred:show-butler',
+  'alfred:panel', 'alfred:panel-toggle', 'alfred:show-butler', 'alfred:catalog', 'alfred:books',
   'brigade:run', 'brigade:stop', 'butler:capability-test', 'butler:chat', 'butler:install-missing', 'butler:selfcheck', 'butler:send-intro',
   'db:recent-messages', 'db:status', 'endpoints:detect', 'endpoints:presets', 'endpoints:test', 'external:open',
   'featuretest:open-report', 'featuretest:run', 'featuretest:stop', 'feed-window:close', 'feed:history', 'feed:open', 'gpu:info',
@@ -89,7 +89,7 @@ const IPC_INVENTORY = [
   'image:configure', 'image:generate', 'image:status', 'lockers:attach', 'lockers:list', 'lockers:open', 'lockers:read', 'lockers:status',
   'logins:delete', 'logins:fill', 'logins:list', 'logins:save', 'logs:download-all', 'logs:extract-all', 'logs:extract-options', 'logs:extract-preview', 'logs:tags',
   'manager:approve', 'manager:configure-provider', 'manager:get-state', 'manager:pause', 'manager:reject', 'manager:resume', 'manager:start-task',
-  'manager:stop', 'manager:test-connection', 'memory:search', 'memory:summary', 'models:info', 'models:open',
+  'manager:stop', 'manager:test-connection', 'mcp:list', 'mcp:add', 'mcp:start', 'mcp:stop', 'mcp:remove', 'memory:search', 'memory:summary', 'models:info', 'models:open',
   'llm:status', 'llm:hardware', 'llm:check', 'llm:fix', 'llm:setup-all', 'llm:start-alfred', 'content:roots', 'content:use-root', 'folders:map', 'folders:move-comfy', 'folders:open', 'llm:scan', 'llm:use-store', 'llm:import-gguf', 'llm:install-ollama', 'llm:start', 'llm:stop', 'llm:search', 'llm:curated', 'llm:hf-files', 'llm:pull', 'llm:cancel', 'llm:remove', 'llm:use', 'llm:hf-token',
   'ollama:detect', 'ollama:list', 'ollama:managed-status', 'ollama:migrate', 'ollama:pull', 'ollama:recommended', 'panes:sync', 'participants:set',
   'phone:info', 'phone:set-lan', 'picker:cancel', 'picker:clear', 'picker:save', 'picker:start', 'picker:status', 'picker:test',
@@ -110,8 +110,9 @@ const IPC_INVENTORY = [
   'video:configure', 'video:generate', 'video:status',
   'video:full-status', 'video:models', 'video:capabilities', 'video:settings', 'video:generate-t2v', 'video:animate', 'video:progress', 'video:cancel', 'video:gallery', 'video:test',
   'video:install-check', 'video:install-model', 'video:install-all', 'video:install-cancel', 'video:open-folder', 'video:show-file',
+  'video:trailer-make', 'video:trailer-status', 'video:trailer-cancel', 'video:trailer-list', 'video:trailer-plan', 'video:trailer-pick-file',
   'voice:check', 'voice:configure', 'voice:listen', 'voice:redownload', 'voice:speak', 'voice:status',
-  'window:toggle-collapse', 'wizard-window:close', 'wizard:catalog', 'wizard:open',
+  'window:toggle-collapse', 'wizard-window:close', 'wizard:catalog', 'wizard:open', 'wizard:open-app-tab',
 ];
 // Live updates the window listens to (not actions). The ones that matter to the user feed Alfred's watcher.
 const EVENTS = {
@@ -119,7 +120,7 @@ const EVENTS = {
   'alfred': 'Alfred\'s own panel updates',
   'health': 'the 🩺 health watch tells Alfred itself (alfred.notice) — Alfred reads health.status',
   'akowe-activity': 'UI live update (Akọwe link feed) — book runs are watched by polling Akọwe', 'chatgpt-image': 'UI live update (ChatGPT is drawing / done — Alfred reads images.chatgptStatus)', 'akowe-linktest-progress': 'UI live update', 'akowe-server': 'UI live update',
-  'akowe-tab-show': 'UI live update', 'brigade-progress': 'UI live update', 'capability-test-step': 'UI live update', 'capture': 'UI live update (replies → read_latest_reply)',
+  'akowe-tab-show': 'UI live update', 'app-tab-show': 'UI live update (wizard:open-app-tab → the tab button)', 'brigade-progress': 'UI live update', 'capability-test-step': 'UI live update', 'capture': 'UI live update (replies → read_latest_reply)',
   'featuretest-progress': 'UI live update', 'houserule-state': 'UI live update', 'ledger-entry': 'UI live update', 'locker-changed': 'UI live update', 'log': 'UI live update',
   'manager-ack': 'UI live update', 'manager-state': 'UI live update', 'ollama-progress': 'UI live update', 'llm': 'UI live update (setup / download progress — Alfred reads llm.status / llm.check)', 'pane-health': 'UI live update (→ ai_health)', 'picker': 'UI live update',
   'prompts-changed': 'UI live update', 'relay-paused': 'UI live update', 'sd-connected': 'UI live update', 'sd-install': 'UI live update', 'sd-runner': 'UI live update', 'video-install': 'UI live update (model download progress — Alfred reads video.install.check / video.status)', 'video-done': 'UI live update (a video finished — Alfred gets the result from video_call)',
@@ -146,7 +147,10 @@ const SERVICE_BRIDGE_ROUTES = {
   'GET /voice/status': 'app_info:voice.status', 'POST /voice/settings': 'app_control:voice.configure', 'POST /voice/speak': 'app_control:voice.speak', 'POST /voice/listen': 'app_control:voice.listen',
   'GET /image/status': 'image_generator_status', 'POST /image/settings': 'app_control:image.configure', 'POST /image/generate': 'generate_image',
   'GET /image/backend': 'image_generator_status', 'GET /image/locks': 'character_locks', 'POST /image/request': 'generate_image',
-  'GET /video/backend': 'video_call:video.status', 'POST /video/request': 'video_call:video.generate', 'GET /events': 'EXCLUDE: event stream for external programs (Alfred has the watcher)',
+  'GET /video/backend': 'video_call:video.status', 'POST /video/request': 'video_call:video.generate',
+  'POST /render/image': 'EXCLUDE: draws an SVG into a JPEG/PNG for Akọwe (the ebook cover JPG, the Word map) — a file converter, not a user control',
+  'POST /dialog/choose-path': 'EXCLUDE: a folder picker the user answers in AutoInjector\'s window (Akọwe opens a big saved book from its folder)', 
+  'POST /video/trailer': 'video_call:trailer.make', 'GET /video/trailer': 'video_call:trailer.status', 'POST /video/trailer/cancel': 'video_call:trailer.cancel', 'GET /events': 'EXCLUDE: event stream for external programs (Alfred has the watcher)',
 };
 // akowe-bridge.js — Akọwe's own channel INTO AutoInjector (Akọwe → the AI panes): not a user control.
 const AKOWE_BRIDGE_ROUTES = {
@@ -161,7 +165,8 @@ const SD_API_METHODS = ['images.status', 'images.generate', 'images.progress', '
   'images.chatgptStatus', 'images.chatgptCancel', 'images.chatgptSettings'];
 // The 🎬 Video module (video-api.js): every method through video_call.
 const VIDEO_API_METHODS = ['video.status', 'video.capabilities', 'video.models', 'video.progress', 'video.gallery', 'video.cancel', 'video.generate', 'video.animate', 'video.test', 'video.settings',
-  'video.install.check', 'video.install.downloadModel', 'video.install.installAll', 'video.install.cancel'];
+  'video.install.check', 'video.install.downloadModel', 'video.install.installAll', 'video.install.cancel',
+  'trailer.make', 'trailer.status', 'trailer.cancel', 'trailer.list', 'trailer.plan'];
 // The 📖 Akọwe API Alfred uses (method + path pattern) → the tool that calls it.
 const AKOWE_API_USED = {
   'GET /api/projects': 'book_status, list_books', 'GET /api/autobook': 'book_status, pause_run/resume_run/cancel_run', 'GET /api/slots/states': 'book_status',
@@ -178,7 +183,7 @@ const AKOWE_API_USED = {
   'POST /api/projects/:pid/branches/main/forge/:kind/:rid/forge': 'forge_character',
   'POST /api/projects/:pid/branches/main/forge/:kind/:rid/approve': 'approve_dossier',
   'POST /api/projects/:pid/branches/main/forge/:kind/:rid/art': 'make_character_art',
-  'POST /api/projects/:pid/branches/main/forge/:kind': 'create_dossier',
+  'POST /api/projects/:pid/branches/main/forge/:kind': 'create_dossier (items / places / magic, and characters: a new character)',
   'POST /api/projects/:pid/branches/main/forge/:kind/:rid/check': 'check_dossier (run)',
   'GET /api/projects/:pid/branches/main/forge/:kind/:rid/check': 'check_dossier (results)',
   'PUT /api/projects/:pid/branches/main/forge/:kind/:rid/check/:finding': 'check_dossier (verdict)',
@@ -192,6 +197,9 @@ const AKOWE_API_USED = {
   'DELETE /api/projects/:pid/branches/main/pictures/:pic': 'edit_picture (remove)',
   'PUT /api/projects/:pid/branches/main/pictures/:pic': 'edit_picture',
   'POST /api/projects/:pid/branches/main/pictures/map': 'book_map',
+  'GET /api/projects/:pid/branches/main/trailer': 'make_trailer (is there a plan?)',
+  'POST /api/projects/:pid/branches/main/trailer/plan': 'make_trailer (plan it from the book)',
+  'POST /api/projects/:pid/branches/main/trailer/make': 'make_trailer',
 };
 const MENU_ITEMS = {
   'Setup Wizard': 'app_control:wizard.open', 'Relay Trace report (where every message went)': 'app_control:ledger.trace_save', 'Reset Relay Trace': 'app_control:ledger.trace_reset',
@@ -536,7 +544,7 @@ async function main() {
   assert(d.carded && d.result && d.result.ok && comfy.state.videoGraphs.length === vg0 + 5 && (d.result.notes || []).some((n) => /image “Odile” is not a picture/.test(n)), 'generate_video: an image that is no picture → dropped with a note, text→video');
   d = await drive('generate_video', { image: path.join(os.tmpdir(), 'no-such-picture-for-alfred.png') });
   assert(d.carded && d.result && d.result.ok === false && d.result.error === 'INVALID_PARAM' && /image/.test(d.result.message) && /\.png \/ \.jpg \/ \.webp/.test(d.result.message) && comfy.state.videoGraphs.length === vg0 + 5, `generate_video: only a missing picture → the error names the field and what it may be: “${d.result && d.result.message}”`);
-  for (const m of ['video.status', 'video.models', 'video.progress', 'video.gallery', 'video.capabilities', 'video.install.check']) {
+  for (const m of ['video.status', 'video.models', 'video.progress', 'video.gallery', 'video.capabilities', 'video.install.check', 'trailer.status', 'trailer.list']) {
     d = await drive('video_call', { method: m, args: {} });
     if (assert(!d.carded && /^RESULT \{"ok":true/.test(d.text), `video_call ${m}: read-only, runs directly against the real module`)) mark(`video:${m}`, 'real video-api');
   }
@@ -685,6 +693,11 @@ async function main() {
       ['edit_picture', { pic_id: 'pic-001', caption: 'At dawn', where: 'after_scene', scene: 2 }, true, () => ak.requests.some((x) => x.method === 'PUT' && x.path === `${B}/pictures/pic-001` && x.body.caption === 'At dawn' && x.body.placement.scene === 2)],
       ['book_map', { kind: 'illustrated', engine: 'sd' }, true, () => ak.requests.some((x) => x.path === `${B}/pictures/map` && x.body.kind === 'illustrated' && x.body.engine === 'sd')],
       ['make_character_art', { character: 'Mara Vell', what: 'sheet', engine: 'chatgpt' }, true, () => ak.requests.some((x) => x.path === `${B}/forge/characters/rec-mara/art` && x.body.what === 'sheet' && x.body.engine === 'chatgpt')],
+      // 🧑 a new character the book does not have yet (POST /forge/characters)
+      ['create_dossier', { kind: 'characters', name: 'Ada Quill', role: 'the harbour master' }, true, () => ak.requests.some((x) => x.method === 'POST' && x.path === `${B}/forge/characters` && x.body.name === 'Ada Quill' && x.body.role === 'the harbour master')],
+      // 🎬 a place's motion clip (a slow establishing pan): allowed for every kind now; a clip always asks engine auto
+      ['make_character_art', { kind: 'places', character: 'Gullhaven', what: 'clip', engine: 'sd' }, true, () => ak.requests.some((x) => x.path === `${B}/forge/places/FK-p1/art` && x.body.what === 'clip' && x.body.engine === 'auto')],
+      ['make_trailer', {}, true, () => hit('GET', `${B}/trailer`) && hit('POST', `${B}/trailer/plan`) && hit('POST', `${B}/trailer/make`)],
     ];
     for (const [tool, args, changes, effect] of cases) {
       const r = await bd(tool, args);
@@ -693,6 +706,32 @@ async function main() {
     assert(['edit_profile', 'save_book', 'rewrite_chapter'].every((c) => journal.includes(c)), 'book actions are noted in the Akọwe journal');
     assert(!ak.requests.some((x) => /approve|decide/.test(x.path) && !/\/forge\/characters\//.test(x.path)), 'no book-draft approval is ever sent to Akọwe (dossier proposals only via approve_dossier\'s card)');
     await ak.close(); await bl.close();
+  }
+
+  // ---- 🧰 tool servers (MCP): a fake stdio server added through the real IPC, then used through Alfred -----------
+  console.log('\n== 🧰 tool servers (MCP): the real mcp:* handlers + a fake stdio MCP server ==');
+  {
+    const fakeMcp = path.join(__dirname, 'fixtures', 'fake-mcp-server.js');
+    let r = await call('mcp:add', { name: 'files', line: `"${process.execPath}" "${fakeMcp}"`, secrets: 'FAKE_TOKEN=cov-SECRET-31337' });
+    assert(r && r.ok && /connected · 8 tools/.test(r.server.summary), `mcp:add adds and starts the server (${r && (r.message || r.error)})`);
+    const listed = await call('mcp:list', {});
+    assert(listed.ok && listed.servers.length === 1 && !/cov-SECRET-31337/.test(JSON.stringify(listed)), 'mcp:list shows it (the key only by name)');
+    let d = await drive('mcp_tools', {});
+    check('mcp_tools', !d.carded && d.result && d.result.ok && d.result.data.tools.some((t) => t.server === 'files' && t.tool === 'add' && t.arguments && t.arguments.properties && t.arguments.properties.a), 'lists the servers\' tools with their argument schemas, without a card');
+    d = await drive('mcp_call', { server: 'files', tool: 'echo', arguments: { text: 'hello from Alfred' } }, { confirm: false });
+    const st = d.card && d.card.steps[0];
+    const cardOk = d.carded && st && /files/.test(st.text) && /echo/.test(st.text) && /hello from Alfred/.test(st.text) && st.allowAlways === false;
+    r = cardOk ? await call('alfred:confirm', { id: d.card.id }) : null;
+    check('mcp_call', cardOk && r && /echo: hello from Alfred/.test(r.text || ''), 'an "I will" card naming the server, the tool and the arguments (no "always allow") → ✔ → the server\'s answer');
+    d = await drive('mcp_call', { server: 'files', tool: 'add', arguments: { a: 'lots', b: 1 } });
+    assert(!d.carded && /must be a number/.test(d.text), 'arguments are checked against the server\'s inputSchema before any card');
+    d = await drive('mcp_call', { server: 'nope', tool: 'echo', arguments: {} });
+    assert(!d.carded && /no tool server \\?"nope/.test(d.text), 'an unknown server is refused with the list of servers');
+    assert(!registry.allowableKey('mcp_call:files/echo'), 'mcp_call can never be "always allowed"');
+    d = await drive('app_info', { action: 'mcp.servers' });
+    assert(!d.carded && /connected · 8 tools/.test(d.text), 'app_info mcp.servers reads the real list');
+    r = await call('mcp:remove', { id: 'files' });
+    assert(r.ok && (await call('mcp:list', {})).servers.length === 0, 'mcp:remove stops and removes it');
   }
 
   // =====================================================================================================

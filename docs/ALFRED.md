@@ -11,13 +11,19 @@ turn him on.
 
 1. Start AutoInjector as usual.
 2. In the title bar (top right) press **🎩 Alfred: Off** — it becomes **🎩 Alfred: On** and his
-   panel opens on the right, floating over the app. It stays available on every tab (🤖 AutoInjector,
-   📖 Akọwe, 🎨 Images). **🗗 Panel** (or Ctrl+Shift+A) hides/shows the panel while he stays on.
+   side panel opens on the right; the app moves over to make room. It stays available on every tab
+   (🤖 AutoInjector, 📖 Akọwe, 🎨 Images, 🎬 Video). **▸ Panel** (or Ctrl+Shift+A) hides/shows the panel
+   while he stays on. (The User Panel's **🎩 Alfred: Off/On** button does the same as the switch.)
 3. He needs an AI to think with (see the next section). If he can't reach it, he says so plainly —
    everything else in the app keeps working.
 
 Press the switch again to turn him **off**: the panel disappears, he stops what he was doing, and
 he makes no more calls.
+
+### Two places: the TALK panel and the SETUP panel
+
+- **Talk to him** in his **side panel** (below). **Set him up** in the **🎩 Butler section** of the main tab
+  (one-button setup, the check, models, personality, the activity log). There is no other Alfred window.
 
 ### His side panel (it moves the app over, on every tab)
 
@@ -26,11 +32,36 @@ he makes no more calls.
   The title-bar **▸ Panel / ◂ Panel** button hides / shows it.
 - **Ctrl+Shift+A** (**Cmd+Shift+A** on a Mac) shows / hides it from anywhere in the app, even from inside an
   AI pane. Hiding the panel does not turn Alfred off.
-- Quick buttons: **📊 Status**, **🩺 Check his AI**, **🎨 Make a picture**, **📖 My book**, and
-  **⚙ Set up his AI**, which opens the 🎩 Butler section. The list in the header switches between saved
-  set-ups, and 💾 saves the current one.
-- If you'd rather have him in a separate window over the app, choose ⚙ → *His panel* → **Separate
-  window**. A tick box there keeps that window above other programs too.
+- **Eight big buttons** do something real for you through Alfred (he still shows an "I will" card before he
+  changes anything):
+  - **🧑 Make a character** — asks the name and a line about them, then Alfred opens their Character Forge
+    dossier and invents the rest as proposals you approve. (Akọwe makes the book's characters itself —
+    outline / Characters and places; when the name is not in the book yet, Alfred says so plainly.)
+  - **🎨 Make a picture** / **🎬 Make a video** — asks what it should show, then Alfred makes it.
+  - **🖼 Design a cover** — what the cover picture should show (optional), then the cover design and art.
+  - **📖 My book** — where your book is (checklist, the "Make a book for me" run, problems).
+  - **✍ Continue / make my book** — resumes the "Make a book for me" run; with no book yet it asks for your
+    idea and starts one.
+  - **🩺 Check everything** — his AI and the whole app (disk, Stable Diffusion, Akọwe, the AI panes, logs),
+    with a one-click fix where there is one. Needs no AI.
+  - **❓ Everything I can do** — a searchable list of everything Alfred can do, grouped (📖 Books,
+    🧑 Characters & world, 🎨 Pictures & covers, 🎬 Video, 💬 The three AIs, 🧠 His AI & setup,
+    📁 Files & folders, ⚙ App settings & tools), each with one plain line and **▶ Try it**, which puts an
+    example request in his box. Typing **"what can you do?"** opens it too.
+  The book buttons say plainly when Akọwe has no book yet (or is not running).
+- The list in the header switches between saved set-ups, 💾 saves the current one, ⚙ has his AI settings
+  and **🛠 Set up his AI** (opens the 🎩 Butler section).
+
+### The User Panel buttons (top of the main tab)
+
+The old Butler's buttons up there are Alfred's now:
+- **→ 🎩 Alfred** sends what you typed to Alfred (his panel opens; he is turned on if he was off). His
+  **Active** box includes him in **→ All**.
+- The **status light** shows his state — off, idle, working, or *needs you* (a card is waiting). Click it to
+  open his panel.
+- **🧠 Auto / Local / Connected AI / Web AI** — what he thinks with (click to change).
+- **🎩 Alfred: On/Off** — the same as the title-bar switch.
+- **🩺 Check Alfred** — the 🩺 check above (in his panel; in the Activity Log while he is off).
 
 ### The 🎩 Butler section (set-up + activity)
 
@@ -141,6 +172,7 @@ your decision stays yours to decide in Akọwe.
 - 🔍 Status, models, progress and gallery run without a card.
 - ✋ `generate_video` makes a clip from a description, brings a picture to life (`image`), or keeps a character's looks (`character`).
 - ✋ `video_call` reaches every setting of the 🎬 Video module (size, seconds, fps, model, steps, CFG, seed, sampler, scheduler, shift) and the model installs.
+- ✋ `make_trailer` makes a book's trailer: Akọwe plans the shots from the book (or uses the plan the author edited on the 🎞 Trailer page) and AutoInjector's 🎬 Video makes and joins them (`video_call` with `trailer.make` / `trailer.status` / `trailer.cancel` drives the trailer module directly).
 - It uses ComfyUI with Wan; see `docs/VIDEO_API.md`.
 - The Character Forge `make_character_art` with `what:"clip"` makes a dossier's motion study.
 
@@ -169,7 +201,8 @@ chrome.
 - `forge_character` fills empty fields as **proposals**. Nothing the author wrote or locked changes.
 - `edit_dossier` writes fields in the author's words, optionally locked.
 - `approve_dossier` approves proposals. It always shows its card and can never be "always allowed".
-- `make_character_art` makes the portrait, any of the ten reference views, or one turnaround sheet. It draws with Stable Diffusion (`engine: "sd"`, using the character lock), with ChatGPT in its pane (`"chatgpt"`), or `"auto"`.
+- `create_dossier` with `kind: "characters"` and a `name` (plus `role`, `about`) adds a new character the book does not have yet (a draft) with its dossier.
+- `make_character_art` makes the portrait, any of the ten reference views, one turnaround sheet, or a motion clip (`what: "clip"`: for items a turntable, places an establishing pan, magic systems the effect in use). It draws with Stable Diffusion (`engine: "sd"`, using the character lock), with ChatGPT in its pane (`"chatgpt"`), or `"auto"`.
 - `open_akowe_page` with `page: "forge"` (plus `character`) shows the dossier.
 
 **🎨 Every Stable Diffusion setting** — `sd_call` reaches every method of the 🎨 Images module (`sd-api.js`):
@@ -188,6 +221,51 @@ params, delete), node info, queue, upload and freeing VRAM. A setting the connec
 **🧪 Open Interpreter (optional)** — off unless you tick it in ⚙. Even then he always shows the
 **exact code** on the card and asks first, can never be "always allowed", and refuses it when a direct
 tool exists (images, books, the AIs, video, logs).
+
+## Tool servers (MCP)
+
+AutoInjector can use outside **tool servers** that speak MCP (the Model Context Protocol), the same kind Claude
+Desktop and other apps use: one for your files, one for a database, one for a web service and so on. Nothing runs
+until you add one.
+
+**Add one:** 🎩 Butler section → ⚙ More settings → **🧰 Tools** → **➕ Add a tool server**:
+- **Name:** a short name, for example `files`.
+- **Command line or web address:** what starts it. Either a program on this computer, such as the official
+  filesystem server (it needs Node.js from nodejs.org, which gives you `npx`):
+  ```
+  npx -y @modelcontextprotocol/server-filesystem C:\Users\me\Documents\Books
+  ```
+  or a web address such as `https://example.com/mcp`.
+- **Keys (optional):** one per line. Write `NAME=value` for a program (it gets them as environment variables), or
+  `Authorization: Bearer …` for a web address (sent as headers).
+
+Press **➕ Add and start**. The first start can take a minute while `npx` downloads the server. Each server shows
+its state in plain words: **connected · 12 tools**, or what went wrong (for example *"npx isn't installed on this
+computer"*). Under it you get its tools with their descriptions, and the buttons **▶ Start / ■ Stop / ✖ Remove**.
+A server you started starts again the next time you open AutoInjector, and one you stopped stays stopped.
+
+**Using them:**
+- 🔍 `mcp_tools` lets Alfred see the servers and their tools, with the arguments each tool takes. It runs without a card.
+- ✋ `mcp_call` uses one tool. The card always names the **server**, the **tool** and the **arguments**, for example
+  *Use the tool "read_text_file" on the tool server "files" with {"path":"C:\\Users\\me\\Documents\\Books\\ch1.md"}*.
+  Before the card appears, the arguments are checked against the server's own schema.
+- In `app_info` / `app_control`: `mcp.servers` (the list), `mcp.start`, `mcp.stop` and `mcp.remove`.
+  **Adding** a server is left to you.
+- The butler (USE_TOOL) sees the same tools as `mcp:<server>/<tool>`. They always need your approval.
+
+**Safety notes:**
+- A command-line tool server is a **program running on this computer with your permissions**. Add only servers you
+  trust, and give a filesystem server only the folders it needs.
+- Every call shows an "I will" card. It can **never** be "always allowed", whatever the server.
+- Keys are stored **encrypted** with the computer's keychain (the same mechanism as saved logins). They are never
+  shown again, written to the activity log or sent to the AI. The list shows only their names. If this PC can't
+  encrypt, the keys are kept only until AutoInjector closes (the server row says so).
+- What a server prints when it fails is shown with keys and tokens replaced by •••.
+- Timeouts apply everywhere: 90 s to start, 60 s per call. A server that crashes is restarted at most 3 times in a
+  minute, and after that it shows the error until you press ▶ Start. Quitting AutoInjector stops its servers
+  cleanly.
+- Pictures a tool returns are saved in the images output folder. Text is passed on (long text is cut). Links and
+  embedded files are listed.
 
 ## Safety, in short
 
@@ -213,14 +291,18 @@ At most one of each every 5 minutes and 6 in 10 minutes.
 | `desktop-app/alfred.js` | the core: switch, settings (`alfred-settings.json` in the app data folder), the loop, cards, cancel, watcher |
 | `desktop-app/alfred-tools.js` | the fixed tool registry: name, title, description, JSON schema, `changes`, `allowAlways`, `describe`, `run` |
 | `desktop-app/alfred-app-actions.js` | the catalog of every other app control (→ `app_info` / `app_control`) and the EXCLUDED list with reasons |
+| `desktop-app/mcp-client.js` | the MCP client: JSON-RPC 2.0 over stdio or Streamable HTTP, initialize / tools/list (cursor) / tools/call, timeouts, bounded restart, clean stop, redaction |
+| `desktop-app/mcp-manager.js` | the saved tool servers (`autoinjector-mcp-servers.json` in the app data folder, keys sealed), start/stop/remove, registration into `tool-provider.js` |
 | `desktop-app/alfred-ai.js` | his AI: OpenAI-compatible tool calling (Ollama `/v1`, the connected AI), the JSON text protocol (web panes / models without tools) |
 | `desktop-app/alfred-image.js` | the ONE image adapter (sd-api `images.generate`; falls back to image-provider) |
 | `desktop-app/alfred-main.js` | wiring into Electron: tool context, IPC `alfred:*`, app events → watcher |
-| `desktop-app/alfred-panel.js` | the panel UI (built only when on) — the SAME code renders in the floating window (`alfred-window.html`, `<body data-alfred-host="window">`) or as the docked drawer in `controls.html` |
-| `desktop-app/alfred-window.js` | the floating side panel window: Electron-free (injected BrowserWindow / screen), modes, parent vs on-top, bounds clamp + memory, Ctrl/Cmd+Shift+A via `before-input-event` on every page; `alfred-window-preload.js` exposes only `alfred*` |
+| `desktop-app/alfred-panel.js` | his side panel (built only when on), docked in `controls.html`: the 8 big buttons and their forms, ❓ the catalog, chat, cards, settings, set-ups. Ctrl/Cmd+Shift+A is caught in main (`alfred-main.js`, `before-input-event` on every page) and sent as `toggle-panel` |
+| `desktop-app/alfred-catalog.js` | "❓ Everything I can do": the grouped list built from `alfred-tools.publicList()` + `alfred-app-actions.ACTIONS` (one plain line + an example request each) |
+| `desktop-app/controls.js` (🎩 Alfred in the User Panel) | → 🎩 Alfred, the status light, 🧠, 🎩 Alfred: On/Off, 🩺 Check Alfred (the old Butler's ids, kept) |
 | `desktop-app/alfred-persona-ui.js` | personality editor + saved set-ups in `<div id="alfred-persona">` (🤵 Butler section) |
-| IPC (B6) | `alfred:personality` (get / set, clamped with plain notes), `alfred:profiles`, `alfred:profile-save` `{name, renameFrom?}`, `alfred:profile-use` `{name}`, `alfred:profile-delete` `{name}`, `alfred:panel` (get / `{mode, otherApps}`), `alfred:panel-toggle` `{open?}`, `alfred:show-butler`; events on `alfred` also: `toggle-panel`, `show-butler` |
+| IPC (B6) | `alfred:personality` (get / set, clamped with plain notes), `alfred:profiles`, `alfred:profile-save` `{name, renameFrom?}`, `alfred:profile-use` `{name}`, `alfred:profile-delete` `{name}`, `alfred:panel` (get: `{mode:'docked', open, shortcut}`), `alfred:panel-toggle` `{open?}`, `alfred:show-butler`, `alfred:catalog` (read-only: the grouped list), `alfred:books` (read-only: `{akowe, books:[{project_id,title}]}` for the big buttons); events on `alfred` also: `toggle-panel`, `show-butler` |
 | hooks | `captureIpc(ipcMain)` right after Electron is required + one marked block in `main.js`, `preload.js` (`alfred*`), the switch + script tag in `controls.html`, `alfred-` log tag in `log-tags.js` |
+| tabs | `ui.show_tab` (in the main window) and `wizard.open_app_tab` → `wizard:open-app-tab` `{tab}` (closes the Setup Wizard, then main sends `app-tab-show` and controls.js clicks that tab). Pictures and videos are set up in the 🎨 Images / 🎬 Video tabs; `wizard.open` takes only `localai` / `advanced` |
 | Akọwe | `POST /api/projects/{id}/branches/{b}/journal/note` `{source:"alfred", code, title}`; optional `note` on `POST …/review/fix` |
 
 **Can he really control everything?** `desktop-app/test/alfred-coverage.test.js` (part of `npm run test:unit`)

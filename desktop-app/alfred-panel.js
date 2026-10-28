@@ -1,26 +1,28 @@
-// alfred-panel.js — 🎩 Alfred's panel UI: chat, "I will" cards, what Alfred did, status line, settings,
-// quick buttons and the saved set-up switcher. ONE piece of UI code that renders in either place:
-//   • his floating side panel — alfred-window.html (<body data-alfred-host="window">), its own small
-//     window that floats over the whole app (alfred-window.js). The default ("Floating").
-//   • the drawer in the control panel (controls.html) — "Docked (beside)", exactly as before: it
-//     reserves its width on the right so the native AI panes and the Akọwe page are laid out beside it.
-// In controls.html the "🎩 Alfred: Off" switch in the title bar is all there is until he is turned on.
-// All state lives in main (alfred-main.js); both places get the same events. Talks to main only
-// through window.api.alfred* (preload.js / alfred-window-preload.js).
+// alfred-panel.js — 🎩 Alfred's TALK panel: his side panel, docked on the right of the control panel
+// (controls.html). It reserves its width, so the native AI panes, the 📖 Akọwe page, 🎨 Images and 🎬 Video
+// are laid out BESIDE it on every tab — it never covers anything. Ctrl/Cmd+Shift+A shows / hides it from
+// anywhere in the app (main catches the key on every page: alfred-main.js).
+//   • 8 big action buttons that do something real through Alfred (a tiny form first when he needs a detail)
+//   • "❓ Everything I can do": a searchable list of all he can do (alfred:catalog), ▶ Try it fills the box
+//   • chat, the "I will" cards, what Alfred did, his status line, ⚙ settings and the saved set-ups
+// His SETUP panel (one-button setup, check, models, personality, activity log) is the 🎩 Butler section of
+// the control panel (#col-systemai). In controls.html the "🎩 Alfred: Off" switch in the title bar is all
+// there is until he is turned on. All state lives in main (alfred-main.js); talks to main only through
+// window.api.alfred* (preload.js).
 (function () {
   'use strict';
   const api = window.api || {};
   if (typeof api.alfredStatus !== 'function') return;
-  const IN_WINDOW = !!(document.body && document.body.dataset && document.body.dataset.alfredHost === 'window');
-  const sw = IN_WINDOW ? null : document.getElementById('btn-alfred-switch');
-  if (!IN_WINDOW && !sw) return;
+  const sw = document.getElementById('btn-alfred-switch');
+  if (!sw) return;
 
   const W = 390;
-  const ROOT = IN_WINDOW ? 'alfred-window' : 'alfred-drawer';
   let built = false;     // the panel UI exists in this document
-  let open = true;       // the docked drawer is shown (control panel only)
+  let open = true;       // the drawer is shown
   let last = null;
   let sending = false;
+  let catalog = null;    // the "❓ Everything I can do" list, once loaded
+  let formKind = null;   // which big button's form is open
   const $ = (id) => document.getElementById(id);
   function h(tag, attrs, ...kids) {
     const e = document.createElement(tag);
@@ -33,10 +35,7 @@
     for (const k of kids.flat()) if (k != null && k !== false) e.append(k.nodeType ? k : document.createTextNode(String(k)));
     return e;
   }
-  const sync = () => { if (IN_WINDOW) return; try { requestAnimationFrame(() => { const p = api.syncPanes && api.syncPanes(); if (p && p.catch) p.catch(() => {}); }); } catch (_) {} };
-  // Where his panel lives. A main without the setting (older build) means the drawer.
-  const panelOf = (st) => (st && st.settings && st.settings.panel) || null;
-  const floating = (st) => { const p = panelOf(st); return !!(p && p.mode === 'floating'); };
+  const sync = () => { try { requestAnimationFrame(() => { const p = api.syncPanes && api.syncPanes(); if (p && p.catch) p.catch(() => {}); }); } catch (_) {} };
   const persona = (st) => (st && st.settings && st.settings.personality) || { name: 'Alfred' };
   const isMac = /Mac/i.test((navigator && (navigator.platform || navigator.userAgent)) || '');
   const SHORTCUT = isMac ? 'Cmd+Shift+A' : 'Ctrl+Shift+A';
@@ -49,11 +48,8 @@
       body.alfred-open #wrap, body.alfred-open #akowe-tab, body.alfred-open #images-tab, body.alfred-open #video-tab { margin-right:${W}px; }
       .al-root { display:flex; flex-direction:column; background:#0d0f14; color:#e8ecf5; font-size:13px; }
       #alfred-drawer { position:fixed; top:38px; right:0; bottom:0; width:${W}px; z-index:50; border-left:1px solid #2b3550; }
-      #alfred-window { position:fixed; inset:0; border:1px solid #2b3550; box-sizing:border-box; }
       .al-root[hidden] { display:none; }
       .al-root header { display:flex; align-items:center; gap:6px; padding:8px 10px; border-bottom:1px solid #222a3d; background:#121726; }
-      #alfred-window header { -webkit-app-region:drag; cursor:move; user-select:none; }
-      #alfred-window header button, #alfred-window header select, #alfred-window header input { -webkit-app-region:no-drag; cursor:pointer; }
       .al-root header h2 { margin:0; font-size:14px; flex:1 1 auto; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
       .al-root button { font-size:12px; padding:3px 9px; border-radius:6px; border:1px solid #334064; background:#161d30; color:#e8ecf5; cursor:pointer; }
       .al-root button.primary { background:#2c4a8a; border-color:#4a6fc0; }
@@ -62,10 +58,35 @@
       #alfred-profile-row { display:flex; gap:6px; padding:6px 10px; border-bottom:1px solid #1b2236; background:#10141f; }
       #alfred-profile-row[hidden] { display:none; }
       #alfred-profile-row input { flex:1 1 auto; background:#0b0e16; color:#e8ecf5; border:1px solid #2b3550; border-radius:5px; padding:3px 5px; font-size:12px; }
-      #alfred-quick { display:flex; flex-wrap:wrap; gap:5px; padding:6px 10px; border-bottom:1px solid #1b2236; }
-      #alfred-quick button { font-size:11.5px; padding:2px 7px; }
-      #alfred-quick-msg { padding:0 10px 6px; font-size:11.5px; color:#aab5cf; white-space:pre-wrap; }
+      #alfred-actions { display:grid; grid-template-columns:1fr 1fr; gap:6px; padding:8px 10px; border-bottom:1px solid #1b2236; }
+      #alfred-actions button { display:flex; align-items:center; gap:7px; min-height:40px; padding:6px 9px; font-size:12.5px; font-weight:600; text-align:left; border-radius:9px; background:#141b2e; border-color:#2f3d63; line-height:1.2; }
+      #alfred-actions button .al-ic { font-size:19px; flex:0 0 auto; }
+      #alfred-actions button:hover:not(:disabled) { background:#1b2540; border-color:#4a6fc0; }
+      #alfred-actions button[aria-pressed="true"] { background:#22325a; border-color:#6f93e0; }
+      #alfred-form { margin:0 10px 8px; padding:8px 9px; border:1px solid #2f3d63; background:#10162a; border-radius:9px; display:flex; flex-direction:column; gap:6px; }
+      #alfred-form[hidden] { display:none; }
+      #alfred-form h3 { margin:0; font-size:12.5px; color:#cfe0ff; }
+      #alfred-form label { font-size:11.5px; color:#aab5cf; display:flex; flex-direction:column; gap:3px; }
+      #alfred-form input, #alfred-form textarea { background:#0b0e16; color:#e8ecf5; border:1px solid #2b3550; border-radius:6px; padding:4px 6px; font:inherit; font-size:12.5px; }
+      #alfred-form textarea { resize:vertical; min-height:40px; }
+      #alfred-form .al-row { display:flex; gap:6px; }
+      #alfred-form .al-note { font-size:11px; color:#8792ad; }
+      #alfred-quick-msg { padding:6px 10px; font-size:11.5px; color:#cdd6ee; white-space:pre-wrap; border-bottom:1px solid #1b2236; max-height:30vh; overflow:auto; }
       #alfred-quick-msg:empty { display:none; }
+      #alfred-quick-msg .al-fix { margin:3px 0 0 14px; font-size:11px; padding:1px 8px; }
+      #alfred-catalog { flex:1 1 auto; overflow:hidden; display:flex; flex-direction:column; border-bottom:1px solid #1b2236; min-height:0; }
+      #alfred-catalog[hidden] { display:none; }
+      #alfred-catalog .al-cat-head { display:flex; gap:6px; align-items:center; padding:6px 10px; }
+      #alfred-catalog-search { flex:1 1 auto; background:#0b0e16; color:#e8ecf5; border:1px solid #2b3550; border-radius:6px; padding:4px 7px; font-size:12.5px; }
+      #alfred-catalog-list { overflow-y:auto; padding:0 10px 8px; flex:1 1 auto; }
+      #alfred-catalog-list h4 { margin:10px 0 4px; font-size:12.5px; color:#cfe0ff; position:sticky; top:0; background:#0d0f14; padding:2px 0; }
+      .al-cat-item { display:flex; gap:8px; align-items:flex-start; padding:5px 0; border-top:1px solid #171d2c; }
+      .al-cat-item .al-cat-text { flex:1 1 auto; min-width:0; }
+      .al-cat-item b { font-size:12px; font-weight:600; }
+      .al-cat-item .al-cat-say { font-size:11.5px; color:#9aa6c3; line-height:1.35; }
+      .al-cat-item .al-asks { font-size:10.5px; color:#d9b25e; margin-left:4px; font-weight:400; }
+      .al-cat-item button { flex:0 0 auto; font-size:11px; padding:2px 7px; }
+      #alfred-catalog-empty { padding:10px; font-size:12px; color:#8792ad; }
       #alfred-statusline { padding:5px 10px; font-size:11.5px; color:#aab5cf; border-bottom:1px solid #1b2236; line-height:1.4; }
       #alfred-statusline .bad { color:#f0a35e; } #alfred-statusline .good { color:#7fd99a; }
       #alfred-settings { padding:8px 10px; border-bottom:1px solid #1b2236; background:#10141f; font-size:12px; display:grid; grid-template-columns:auto 1fr; gap:6px 8px; align-items:center; overflow:auto; max-height:55vh; }
@@ -73,8 +94,9 @@
       #alfred-settings input[type=text], #alfred-settings input[type=number], #alfred-settings select { width:100%; background:#0b0e16; color:#e8ecf5; border:1px solid #2b3550; border-radius:5px; padding:3px 5px; font-size:12px; box-sizing:border-box; }
       #alfred-settings .full { grid-column:1 / -1; }
       #alfred-settings .warn { color:#f0a35e; font-size:11px; }
-      #alfred-chat { flex:1 1 auto; overflow-y:auto; padding:8px 10px; display:flex; flex-direction:column; gap:6px; }
-      #alfred-chat:empty::before { content:"🎩 Good day. Ask me anything about your books, images or AIs — e.g. “what's the status of my book?” or “make an image of a lighthouse”. I ask before I change anything."; color:#8792ad; font-size:12px; white-space:pre-wrap; }
+      #alfred-chat { flex:1 1 auto; overflow-y:auto; padding:8px 10px; display:flex; flex-direction:column; gap:6px; min-height:60px; }
+      #alfred-chat:empty::before { content:"🎩 Good day. Press a button above, or ask me anything about your books, pictures or AIs — e.g. “what's the status of my book?”. Type “what can you do?” for the full list. I ask before I change anything."; color:#8792ad; font-size:12px; white-space:pre-wrap; }
+      .al-root.al-cat-open #alfred-chat { display:none; }
       .al-msg { padding:6px 9px; border-radius:9px; max-width:94%; white-space:pre-wrap; word-wrap:break-word; line-height:1.45; }
       .al-you { align-self:flex-end; background:#1e2a47; }
       .al-alfred { align-self:flex-start; background:#171b26; border:1px solid #262e44; }
@@ -103,52 +125,52 @@
     document.head.appendChild(s);
   }
 
-  // ---- the toggle in the control panel's title bar ("◂ Panel" / "▸ Panel", or "🗗 Panel" when floating)
+  // ---- the toggle in the control panel's title bar ("◂ Panel" / "▸ Panel")
   function ensureToggle() {
-    if (IN_WINDOW || $('btn-alfred-drawer')) return;
-    const toggle = h('button', { id: 'btn-alfred-drawer', type: 'button', title: 'Show or hide Alfred\'s panel', style: 'font-size:12px;padding:3px 8px;margin-right:8px;border-radius:7px;border:1px solid #334064;background:#161d30;color:#e8ecf5;cursor:pointer;', onclick: () => {
-      if (floating(last)) { Promise.resolve(api.alfredPanelToggle && api.alfredPanelToggle()).catch(() => {}); return; }
-      setOpen(!open);
-    } }, '◂ Panel');
+    if ($('btn-alfred-drawer')) return;
+    const toggle = h('button', { id: 'btn-alfred-drawer', type: 'button', title: `Show or hide Alfred's panel (${SHORTCUT})`, style: 'font-size:12px;padding:3px 8px;margin-right:8px;border-radius:7px;border:1px solid #334064;background:#161d30;color:#e8ecf5;cursor:pointer;', onclick: () => setOpen(!open) }, '◂ Panel');
     sw.after(toggle);
   }
   function paintToggle() {
     const t = $('btn-alfred-drawer'); if (!t) return;
-    if (floating(last)) {
-      const p = panelOf(last);
-      t.textContent = '🗗 Panel';
-      t.title = `Show or hide Alfred's floating panel (${SHORTCUT})`;
-      t.setAttribute('aria-pressed', String(!!(p && p.open)));
-    } else {
-      t.textContent = open ? '▸ Panel' : '◂ Panel';
-      t.title = `Show or hide Alfred's panel (${SHORTCUT})`;
-      t.removeAttribute('aria-pressed');
-    }
+    t.textContent = open ? '▸ Panel' : '◂ Panel';
+    t.title = `Show or hide Alfred's panel (${SHORTCUT})`;
   }
+
+  // ---- the 8 big buttons: each does something real through Alfred
+  const ACTIONS = [
+    { id: 'character', ic: '🧑', label: 'Make a character', tip: 'A new character for your book: Alfred starts their dossier in the Character Forge and invents the rest (you approve it).' },
+    { id: 'picture', ic: '🎨', label: 'Make a picture', tip: 'Say what the picture should show; Alfred makes it (he asks first).' },
+    { id: 'video', ic: '🎬', label: 'Make a video', tip: 'Say what the short video should show; Alfred makes it with the 🎬 Video module (he asks first).' },
+    { id: 'cover', ic: '🖼', label: 'Design a cover', tip: 'Alfred designs your book\'s cover and makes the cover art (he asks first).' },
+    { id: 'book', ic: '📖', label: 'My book', tip: 'Where your book is: the checklist, the "Make a book for me" run, any problems.' },
+    { id: 'continue', ic: '✍', label: 'Continue / make my book', tip: 'Carry on with your book (resume the "Make a book for me" run), or start a new book from your idea.' },
+    { id: 'check', ic: '🩺', label: 'Check everything', tip: 'Checks his AI and the whole app (no AI needed) and shows what to fix.' },
+    { id: 'catalog', ic: '❓', label: 'Everything I can do', tip: 'A searchable list of everything Alfred can do, with ▶ Try it.' },
+  ];
+  const WORK = new Set(['character', 'picture', 'video', 'cover', 'book', 'continue']); // these send to Alfred
 
   function build() {
     if (built) return;
     built = true;
     css();
-    const root = h(IN_WINDOW ? 'div' : 'aside', { id: ROOT, class: 'al-root', role: 'complementary', 'aria-label': 'Alfred' },
+    const root = h('aside', { id: 'alfred-drawer', class: 'al-root', role: 'complementary', 'aria-label': 'Alfred' },
       h('header', null,
         h('h2', { id: 'alfred-title' }, '🎩 Alfred'),
         h('select', { id: 'alfred-profile', title: 'Saved set-ups — switch his AI, model and personality in one go', 'aria-label': 'Saved set-up', onchange: (e) => useProfile(e.target.value) }),
         h('button', { id: 'alfred-btn-profile-save', type: 'button', title: 'Save the current set-up as…', onclick: () => { const r = $('alfred-profile-row'); r.hidden = !r.hidden; if (!r.hidden) { const i = $('alfred-profile-name'); i.value = (last && last.settings && last.settings.activeProfile) || ''; i.focus(); } } }, '💾'),
         h('button', { id: 'alfred-btn-settings', type: 'button', title: 'Alfred\'s settings', onclick: () => { const s = $('alfred-settings'); s.hidden = !s.hidden; if (!s.hidden) fillSettings(); } }, '⚙'),
         h('button', { id: 'alfred-btn-clear', type: 'button', title: 'Start a new conversation', onclick: () => api.alfredClear() }, '🧹'),
-        h('button', { id: 'alfred-btn-hide', type: 'button', title: IN_WINDOW ? `Hide the panel — Alfred stays on (${SHORTCUT} brings it back)` : 'Hide the panel (Alfred stays on)', onclick: () => hidePanel() }, '×')),
+        h('button', { id: 'alfred-btn-hide', type: 'button', title: `Hide the panel — Alfred stays on (${SHORTCUT} brings it back)`, onclick: () => setOpen(false) }, '×')),
       h('div', { id: 'alfred-profile-row', hidden: true },
         h('input', { id: 'alfred-profile-name', type: 'text', maxlength: '40', placeholder: 'Name this set-up, e.g. "Fast local"', 'aria-label': 'Set-up name', onkeydown: (e) => { if (e.key === 'Enter') { e.preventDefault(); saveProfile(); } } }),
         h('button', { id: 'alfred-profile-save', type: 'button', class: 'primary', onclick: saveProfile }, 'Save')),
       h('div', { id: 'alfred-statusline', role: 'status', 'aria-live': 'polite' }, '…'),
-      h('div', { id: 'alfred-quick', role: 'toolbar', 'aria-label': 'Quick actions' },
-        h('button', { id: 'alfred-q-status', type: 'button', title: 'Ask him for the status of everything', onclick: () => quickAsk("What's the status of everything — my book, the AIs and the image generator?") }, '📊 Status'),
-        h('button', { id: 'alfred-q-check', type: 'button', title: 'Check that his AI is installed, running and answering', onclick: checkAi }, '🩺 Check his AI'),
-        h('button', { id: 'alfred-q-picture', type: 'button', title: 'Start a request for a picture', onclick: () => { const i = $('alfred-input'); i.value = 'Make a picture of '; i.focus(); try { i.setSelectionRange(i.value.length, i.value.length); } catch (_) {} } }, '🎨 Make a picture'),
-        h('button', { id: 'alfred-q-book', type: 'button', title: 'Ask about your book', onclick: () => quickAsk("What's the status of my book?") }, '📖 My book'),
-        h('button', { id: 'alfred-q-setup', type: 'button', title: 'Open the 🤵 Butler section where his AI is set up', onclick: () => { if (IN_WINDOW) Promise.resolve(api.alfredShowButler && api.alfredShowButler()).catch(() => {}); else showButler(); } }, '⚙ Set up his AI')),
+      h('div', { id: 'alfred-actions', role: 'toolbar', 'aria-label': 'What Alfred can do for you' },
+        ACTIONS.map((a) => h('button', { id: `alfred-a-${a.id}`, type: 'button', title: a.tip, 'data-action': a.id, onclick: () => doAction(a.id) }, h('span', { class: 'al-ic', 'aria-hidden': 'true' }, a.ic), h('span', null, a.label)))),
+      h('form', { id: 'alfred-form', hidden: true, 'aria-label': 'A detail Alfred needs', onsubmit: (e) => { e.preventDefault(); submitForm(); } }),
       h('div', { id: 'alfred-quick-msg', role: 'status', 'aria-live': 'polite' }),
+      catalogBox(),
       settingsBox(),
       h('div', { id: 'alfred-chat', 'aria-live': 'polite' }),
       h('div', { id: 'alfred-card', hidden: true, role: 'dialog', 'aria-label': 'Alfred asks before he does this' }),
@@ -174,16 +196,14 @@
       h('select', { id: 'alfred-set-pane' }, opt('chatgpt', 'ChatGPT'), opt('claude', 'Claude'), opt('gemini', 'Gemini')),
       h('label', { for: 'alfred-set-steps' }, 'Max steps'),
       h('input', { id: 'alfred-set-steps', type: 'number', min: '1', max: '20' }),
-      h('label', { for: 'alfred-set-mode' }, 'His panel'),
-      h('select', { id: 'alfred-set-mode', onchange: () => { const r = $('alfred-set-ontop-row'); if (r) r.hidden = $('alfred-set-mode').value !== 'floating'; } }, opt('docked', 'Side panel (moves the app over)'), opt('floating', 'Separate window (over the app)')),
-      h('label', { class: 'full', id: 'alfred-set-ontop-row', hidden: true }, h('input', { id: 'alfred-set-ontop', type: 'checkbox' }), ' Keep the window on top of other programs too'),
       h('label', { class: 'full' }, h('input', { id: 'alfred-set-notices', type: 'checkbox' }), ' Tell me when something happens (AI fixed, book paused/finished, image ready)'),
       h('label', { class: 'full' }, h('input', { id: 'alfred-set-interpreter', type: 'checkbox' }), ' Allow Open Interpreter (runs code on this computer — he always shows the exact code and asks first)'),
       h('div', { class: 'full warn' }, 'Open Interpreter stays off unless you tick it, and is never used when a direct tool exists.'),
       h('div', { class: 'full', style: 'display:flex;gap:6px;flex-wrap:wrap' },
         h('button', { id: 'alfred-set-save', type: 'button', class: 'primary', onclick: saveSettings }, 'Save'),
         h('button', { id: 'alfred-set-test', type: 'button', onclick: testAi }, 'Test my AI'),
-        h('button', { id: 'alfred-set-reset-allow', type: 'button', title: 'Ask again before every change', onclick: resetAllow }, 'Forget "always allow"')),
+        h('button', { id: 'alfred-set-reset-allow', type: 'button', title: 'Ask again before every change', onclick: resetAllow }, 'Forget "always allow"'),
+        h('button', { id: 'alfred-set-butler', type: 'button', title: 'One-button setup, the full check, models and his personality — the 🎩 Butler section', onclick: showButler }, '🛠 Set up his AI')),
       h('div', { id: 'alfred-set-msg', class: 'full', style: 'font-size:11.5px;color:#aab5cf' }));
   }
   function fillSettings() {
@@ -191,9 +211,6 @@
     $('alfred-set-brain').value = s.brain; $('alfred-set-endpoint').value = s.local.endpoint || ''; $('alfred-set-model').value = s.local.model || '';
     $('alfred-set-pane').value = s.pane.site; $('alfred-set-steps').value = String(s.maxSteps);
     $('alfred-set-notices').checked = !!s.notices; $('alfred-set-interpreter').checked = !!s.interpreter;
-    const p = s.panel || { mode: 'docked', otherApps: false };
-    $('alfred-set-mode').value = p.mode === 'floating' ? 'floating' : 'docked'; $('alfred-set-ontop').checked = !!p.otherApps;
-    $('alfred-set-ontop-row').hidden = p.mode !== 'floating';
     Promise.resolve(api.alfredModels && api.alfredModels()).then((r) => {
       const dl = $('alfred-models'); if (!dl || !r || !Array.isArray(r.models)) return;
       dl.textContent = ''; for (const m of r.models) dl.append(h('option', { value: m }));
@@ -203,11 +220,6 @@
   async function saveSettings() {
     const patch = { brain: $('alfred-set-brain').value, local: { endpoint: $('alfred-set-endpoint').value.trim(), model: $('alfred-set-model').value.trim() }, pane: { site: $('alfred-set-pane').value }, maxSteps: Number($('alfred-set-steps').value) || 8, notices: $('alfred-set-notices').checked, interpreter: $('alfred-set-interpreter').checked };
     await api.alfredSettings(patch);
-    const p = (last && last.settings && last.settings.panel) || null;
-    const mode = $('alfred-set-mode').value; const otherApps = $('alfred-set-ontop').checked;
-    if (typeof api.alfredPanel === 'function' && (!p || p.mode !== mode || !!p.otherApps !== otherApps)) {
-      try { await api.alfredPanel({ mode, otherApps }); } catch (_) {}
-    }
     const m = $('alfred-set-msg'); if (m) m.textContent = 'Saved.';
   }
   async function testAi() {
@@ -232,24 +244,190 @@
     $('alfred-set-msg').textContent = 'He will ask again before every change.';
   }
 
-  // ---- quick buttons + saved set-ups
+  // ---- what the big buttons do
   function quickMsg(t) { const q = $('alfred-quick-msg'); if (q) q.textContent = t || ''; }
+  function busyNote() {
+    if (last && last.card) return 'Please answer the card first (✔ Do it or ✖ No).';
+    if (last && last.busy) return 'He is still working — press ■ Stop to cancel.';
+    return null;
+  }
   function quickAsk(text) {
-    if (last && (last.busy || last.card)) { quickMsg(last.card ? 'Please answer the card first (✔ Do it or ✖ No).' : 'He is still working — press ■ Stop to cancel.'); return; }
+    const b = busyNote(); if (b) { quickMsg(b); return; }
+    quickMsg('');
     send(text);
   }
-  async function checkAi() {
-    quickMsg('🩺 Checking his AI…');
+  /** Akọwe's books, or a plain sentence why there are none. Old builds without alfred:books: assume ok. */
+  async function books() {
+    if (typeof api.alfredBooks !== 'function') return { ok: true, akowe: true, books: [{}], unknown: true };
+    let r = null; try { r = await api.alfredBooks(); } catch (_) { r = null; }
+    return r || { ok: false, books: [], message: 'I could not ask Akọwe just now — try again in a moment.' };
+  }
+  const NO_BOOK = 'Akọwe has no book yet. Press ✍ Continue / make my book to start one from your idea — then I can add characters and a cover to it.';
+  async function needBook() {
+    const r = await books();
+    if (!r.ok || r.akowe === false) { quickMsg(`📖 ${r.message || 'Akọwe (the book app) is not running yet — open the 📖 Akọwe tab first.'}`); return null; }
+    if (!r.books.length) { quickMsg(`📖 ${NO_BOOK}`); return null; }
+    return r;
+  }
+  function pressed(kind) { for (const b of document.querySelectorAll('#alfred-actions button')) b.setAttribute('aria-pressed', String(b.dataset.action === kind)); }
+  function closeForm() { const f = $('alfred-form'); if (f) { f.hidden = true; f.textContent = ''; } formKind = null; pressed(null); }
+  /** A tiny form before a request: fields [{ name, label, placeholder, long, required }]. */
+  function openForm(kind, title, fields, note) {
+    const f = $('alfred-form'); if (!f) return;
+    showCatalog(false);
+    formKind = kind; pressed(kind);
+    f.textContent = '';
+    f.dataset.kind = kind;
+    f.append(h('h3', null, title));
+    for (const x of fields) {
+      const attrs = { id: `alfred-f-${x.name}`, name: x.name, placeholder: x.placeholder || '', maxlength: x.long ? '1500' : '120', required: !!x.required };
+      f.append(h('label', null, x.label, x.long ? h('textarea', attrs) : h('input', Object.assign({ type: 'text' }, attrs))));
+    }
+    if (note) f.append(h('div', { class: 'al-note' }, note));
+    f.append(h('div', { class: 'al-row' }, h('button', { id: 'alfred-f-go', type: 'submit', class: 'primary' }, 'Ask Alfred'), h('button', { id: 'alfred-f-cancel', type: 'button', onclick: closeForm }, 'Cancel')));
+    f.hidden = false;
+    const first = f.querySelector('input, textarea'); if (first) { try { first.focus(); } catch (_) {} }
+  }
+  const val = (n) => { const e = $(`alfred-f-${n}`); return e ? e.value.replace(/\s+/g, ' ').trim() : ''; };
+  const REQUEST = {
+    // forge_character fills a book character's dossier; a name the book doesn't have yet is added first with
+    // create_dossier kind 'characters' (Akọwe POST /forge/characters — a draft the author approves).
+    character: () => { const n = val('name'); if (!n) return null; const a = val('about'); return `Make a character for my book: “${n}”${a ? ` — ${a}` : ''}. Open their Character Forge dossier and invent the rest as proposals for me to approve${a ? ', with what I said about them' : ''}. If they are not in my book yet, add them as a new character first.`; },
+    picture: () => { const w = val('what'); return w ? `Make a picture of ${w}.` : null; },
+    video: () => { const w = val('what'); return w ? `Make a short video of ${w}.` : null; },
+    cover: () => { const w = val('what'); return `Design the cover for my book and make the cover art${w ? ` showing ${w}` : ''}.`; },
+    newbook: () => { const i = val('idea'); if (!i) return null; const g = val('genre'); return `Make a book for me: ${i}${g ? ` (genre: ${g})` : ''}.`; },
+  };
+  function submitForm() {
+    const kind = formKind; if (!kind || !REQUEST[kind]) return;
+    const text = REQUEST[kind]();
+    if (!text) { const f = $('alfred-form').querySelector('[required]'); if (f) { try { f.focus(); } catch (_) {} } quickMsg('Please fill in the first box.'); return; }
+    const b = busyNote(); if (b) { quickMsg(b); return; }
+    closeForm();
+    quickAsk(text);
+  }
+  async function doAction(kind) {
+    if (formKind === kind) { closeForm(); return; } // a second press closes its form
+    if (WORK.has(kind)) { const b = busyNote(); if (b) { quickMsg(b); return; } }
+    quickMsg('');
+    if (kind === 'catalog') { closeForm(); showCatalog(!catalogShown()); return; }
+    if (kind === 'check') { closeForm(); showCatalog(false); checkEverything(); return; }
+    if (kind === 'picture') return openForm('picture', '🎨 What should the picture show?', [{ name: 'what', label: 'The picture', placeholder: 'a lighthouse on a cliff at dusk', long: true, required: true }]);
+    if (kind === 'video') return openForm('video', '🎬 What should the video show?', [{ name: 'what', label: 'The video', placeholder: 'waves crashing against a lighthouse', long: true, required: true }], 'Needs the 🎬 Video tab set up — he tells you plainly if it is not.');
+    closeForm(); showCatalog(false);
+    if (kind === 'character') { if (await needBook()) openForm('character', '🧑 A new character for your book', [{ name: 'name', label: 'Their name', placeholder: 'Mara', required: true }, { name: 'about', label: 'A line about them (optional)', placeholder: 'the lighthouse keeper who hates the sea', long: true }], 'He starts the dossier and invents the rest as proposals — you approve them.'); return; }
+    if (kind === 'cover') { if (await needBook()) openForm('cover', '🖼 Design the cover', [{ name: 'what', label: 'What the cover picture should show (optional)', placeholder: 'a lighthouse in a storm', long: true }]); return; }
+    if (kind === 'book') { if (await needBook()) quickAsk("What's the status of my book?"); return; }
+    if (kind === 'continue') {
+      const r = await books();
+      if (!r.ok || r.akowe === false) { quickMsg(`📖 ${r.message || 'Akọwe (the book app) is not running yet — open the 📖 Akọwe tab first.'}`); return; }
+      if (!r.books.length) { openForm('newbook', '✍ Akọwe has no book yet — what is your book about?', [{ name: 'idea', label: 'Your idea, in a few sentences', placeholder: 'A lighthouse keeper finds a door under the sea…', long: true, required: true }, { name: 'genre', label: 'Genre (optional)', placeholder: 'cosy mystery' }], 'He starts Akọwe\'s “⚡ Make a book for me” run — you say ✔ Do it first.'); return; }
+      quickAsk('Continue my book: resume the “Make a book for me” run if it is paused, or tell me what it is waiting for. If no run is going, tell me the next step.');
+    }
+  }
+
+  // ---- 🩺 Check everything: his AI (llm:check) + the whole app (health:status) — no AI needed
+  async function checkEverything() {
+    const box = $('alfred-quick-msg'); if (!box) return;
+    box.textContent = '🩺 Checking everything…';
+    const icon = (ok) => (ok === true ? '✔' : ok === false ? '✖' : '⚠');
+    const lines = []; const fixes = [];
     let r = null;
     if (typeof api.llmCheck === 'function') { try { r = await api.llmCheck(); } catch (_) { r = null; } }
     if (r && Array.isArray(r.rows)) {
-      const icon = (ok) => (ok === true ? '✔' : ok === false ? '✖' : '⚠');
-      quickMsg([r.summary || (r.ok ? 'Everything is ready.' : 'Something needs fixing — ⚙ Set up his AI.')].concat(r.rows.slice(0, 10).map((x) => `${icon(x.ok)} ${x.label}${x.detail ? ` — ${x.detail}` : ''}`)).join('\n'));
-      return;
+      lines.push(`🧠 His AI: ${r.summary || (r.ok ? 'ready.' : 'something needs fixing.')}`);
+      for (const x of r.rows.slice(0, 10)) lines.push(`  ${icon(x.ok)} ${x.label}${x.detail ? ` — ${x.detail}` : ''}`);
+    } else {
+      let t = null; try { t = await api.alfredTestAi(); } catch (_) { t = null; }
+      lines.push(`🧠 His AI: ${t && t.ok ? '✔' : '✖'} ${(t && t.message) || (t && t.ok ? 'it answers.' : 'it is not reachable.')}`);
     }
-    try { r = await api.alfredTestAi(); } catch (_) { r = null; }
-    quickMsg(`${r && r.ok ? '✔' : '✖'} ${(r && r.message) || (r && r.ok ? 'His AI answers.' : 'His AI is not reachable.')}${r && !r.ok ? ' — ⚙ Set up his AI.' : ''}`);
+    let hs = null;
+    if (typeof api.healthStatus === 'function') { try { hs = await api.healthStatus({ fresh: true }); } catch (_) { hs = null; } }
+    if (hs && Array.isArray(hs.problems)) {
+      if (!hs.problems.length) lines.push('🩺 The app: ✔ nothing wrong found (disk space, Stable Diffusion, Akọwe, the AI panes, the logs folder).');
+      else {
+        lines.push(`🩺 The app: ${hs.problems.length} thing${hs.problems.length === 1 ? '' : 's'} to look at:`);
+        for (const p of hs.problems.slice(0, 8)) { lines.push(`  ${p.severity === 'error' ? '✖' : '⚠'} ${p.text}`); if (p.fix && p.code) fixes.push(p); }
+      }
+    } else if (hs && hs.ok === false) lines.push(`🩺 The app: ${hs.error || 'the health check did not answer.'}`);
+    const c = last && last.connected;
+    if (c) lines.push(`🧰 Connected: 📖 Akọwe ${c.akowe ? '✔' : '✖'} · 🎨 pictures ${c.images ? '✔' : '✖'} · 🎬 video ${c.video ? '✔' : 'not yet'} · 💬 AIs ${c.panes || 0}/3`);
+    box.textContent = lines.join('\n');
+    for (const p of fixes) {
+      const b = h('button', { class: 'al-fix', type: 'button', 'data-code': p.code }, p.fix.label || 'Fix it');
+      b.addEventListener('click', async () => {
+        if (typeof api.healthFix !== 'function') return;
+        b.disabled = true; let x = null; try { x = await api.healthFix(p.code); } catch (_) { x = null; }
+        b.textContent = x && x.ok ? '✔ Done' : `✖ ${(x && (x.message || x.error)) || 'did not work'}`.slice(0, 120);
+      });
+      box.append('\n', b);
+    }
+    if (r && r.ok === false) box.append('\n', h('button', { class: 'al-fix', type: 'button', id: 'alfred-check-setup', onclick: showButler }, '🛠 Set up his AI'));
   }
+
+  // ---- ❓ Everything I can do (alfred:catalog), searchable, ▶ Try it fills his input box
+  function catalogBox() {
+    return h('div', { id: 'alfred-catalog', hidden: true, role: 'region', 'aria-label': 'Everything Alfred can do' },
+      h('div', { class: 'al-cat-head' },
+        h('input', { id: 'alfred-catalog-search', type: 'search', placeholder: 'Search, e.g. cover, character, video…', 'aria-label': 'Search what Alfred can do', oninput: paintCatalog }),
+        h('button', { id: 'alfred-catalog-close', type: 'button', title: 'Back to the chat', onclick: () => showCatalog(false) }, '✕')),
+      h('div', { id: 'alfred-catalog-list' }));
+  }
+  const catalogShown = () => { const c = $('alfred-catalog'); return !!(c && !c.hidden); };
+  async function loadCatalog() {
+    if (catalog) return catalog;
+    let r = null;
+    if (typeof api.alfredCatalog === 'function') { try { r = await api.alfredCatalog(); } catch (_) { r = null; } }
+    if (!r || !Array.isArray(r.groups)) { // older main: his own tool list, grouped as the registry groups them
+      const tools = (last && last.tools) || [];
+      const names = { books: '📖 Books', images: '🎨 Pictures', video: '🎬 Video', ais: '💬 The three AIs', files: '📁 Files', app: '⚙ The app', code: '🧪 Code' };
+      const gs = {};
+      for (const t of tools) (gs[t.group] = gs[t.group] || []).push({ id: t.name, title: t.title, say: t.title, example: `${t.title}.`, changes: t.changes });
+      r = { ok: true, groups: Object.keys(gs).map((g) => ({ id: g, icon: '', title: names[g] || g, items: gs[g] })) };
+    }
+    catalog = r;
+    return r;
+  }
+  async function showCatalog(on) {
+    const c = $('alfred-catalog'); const root = $('alfred-drawer'); if (!c) return;
+    c.hidden = !on;
+    if (root) root.classList.toggle('al-cat-open', !!on);
+    const b = $('alfred-a-catalog'); if (b) b.setAttribute('aria-pressed', String(!!on));
+    if (!on) return;
+    $('alfred-catalog-list').textContent = 'Loading…';
+    await loadCatalog();
+    paintCatalog();
+    try { $('alfred-catalog-search').focus(); } catch (_) {}
+  }
+  function paintCatalog() {
+    const list = $('alfred-catalog-list'); if (!list || !catalog) return;
+    const q = String(($('alfred-catalog-search') || {}).value || '').toLowerCase().trim();
+    const words = q.split(/\s+/).filter(Boolean);
+    list.textContent = '';
+    let shown = 0;
+    for (const g of catalog.groups) {
+      const head = `${g.icon ? `${g.icon} ` : ''}${g.title}`;
+      const items = g.items.filter((i) => { const hay = `${i.title} ${i.say} ${i.example}`.toLowerCase(); return words.every((w) => hay.includes(w)); });
+      if (!items.length) continue;
+      list.append(h('h4', { 'data-group': g.id }, `${head} (${items.length})`));
+      for (const i of items) {
+        shown++;
+        list.append(h('div', { class: 'al-cat-item', 'data-id': i.id },
+          h('div', { class: 'al-cat-text' }, h('b', null, i.title), i.changes ? h('span', { class: 'al-asks', title: 'He shows an "I will" card and asks before he does it' }, 'asks first') : null, h('div', { class: 'al-cat-say' }, i.say)),
+          h('button', { type: 'button', class: 'al-try', title: `Put an example in the box: ${i.example}`, onclick: () => tryIt(i.example) }, '▶ Try it')));
+      }
+    }
+    if (!shown) list.append(h('div', { id: 'alfred-catalog-empty' }, 'Nothing matches — try other words, or just ask me in your own words.'));
+  }
+  function tryIt(example) {
+    showCatalog(false);
+    const i = $('alfred-input'); if (!i) return;
+    i.value = example;
+    try { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } catch (_) {}
+    quickMsg('▶ Change the words if you like, then press Send.');
+  }
+  const WHAT_CAN_YOU_DO = /^\s*(what\s+(else\s+)?can\s+(you|alfred|he)\s+do|what\s+do\s+you\s+do|what\s+can\s+i\s+ask(\s+you)?|help|❓)\s*[?.!]*\s*$/i;
+
   function paintProfiles(s) {
     const sel = $('alfred-profile'); if (!sel) return;
     const list = (s && Array.isArray(s.profiles)) ? s.profiles : [];
@@ -273,10 +451,6 @@
   }
 
   // ---- showing / hiding
-  function hidePanel() {
-    if (IN_WINDOW) { Promise.resolve(api.alfredPanelToggle && api.alfredPanelToggle(false)).catch(() => {}); return; }
-    setOpen(false);
-  }
   function setOpen(v) {
     open = !!v;
     const d = $('alfred-drawer'); if (d) d.hidden = !open;
@@ -285,17 +459,14 @@
     try { localStorage.setItem('alfredOpen', open ? '1' : '0'); } catch (_) {}
     sync();
   }
-  function removePanel() {
-    const d = $(ROOT); if (d) d.remove();
-    if (!IN_WINDOW) document.body.classList.remove('alfred-open');
-    built = false;
+  function teardown() {
+    const d = $('alfred-drawer'); if (d) d.remove();
+    document.body.classList.remove('alfred-open');
+    built = false; formKind = null;
+    const t = $('btn-alfred-drawer'); if (t) t.remove();
     sync();
   }
-  function teardown() {
-    removePanel();
-    const t = $('btn-alfred-drawer'); if (t) t.remove();
-  }
-  /** "⚙ Set up his AI": bring the 🤵 Butler section into view (expanded), on the main tab. */
+  /** "🛠 Set up his AI": bring the 🎩 Butler section (his SETUP panel) into view, on the main tab. */
   function showButler() {
     try { const tab = $('tab-app-main'); if (tab && !tab.classList.contains('active')) tab.click(); } catch (_) {}
     try { const t = $('tab-systemai'); if (t) t.click(); } catch (_) {}
@@ -312,10 +483,10 @@
     if (s.brain === 'local') return `Ollama · ${s.local.model}`;
     return `automatic (Ollama · ${s.local.model}, else the connected AI)`;
   }
-  // What Alfred did also goes into the 🎩 Butler section's activity log (control panel only), once each.
+  // What Alfred did also goes into the 🎩 Butler section's activity log, once each.
   let mirroredTs = null;
   function mirrorActivity(st) {
-    if (IN_WINDOW || typeof window.appendButlerLine !== 'function') return;
+    if (typeof window.appendButlerLine !== 'function') return;
     const acts = Array.isArray(st.activity) ? st.activity : [];
     if (mirroredTs == null) { mirroredTs = acts.reduce((m, a) => Math.max(m, a.ts || 0), 0); return; } // history stays in his panel
     for (const a of acts) {
@@ -328,31 +499,16 @@
     if (!st) return;
     last = st;
     mirrorActivity(st);
-    if (sw) {
-      sw.setAttribute('aria-checked', String(!!st.enabled));
-      sw.textContent = st.enabled ? '🎩 Alfred: On' : '🎩 Alfred: Off';
-    }
-    if (!st.enabled) {
-      if (IN_WINDOW) { if (!built) { css(); } document.body.textContent = ''; built = false; document.body.append(h('div', { id: 'alfred-off', style: 'padding:16px;color:#8792ad;font-size:13px' }, '🎩 Alfred is off. Turn him on with the 🎩 switch in the control panel.')); return; }
-      teardown(); return;
-    }
-    if (IN_WINDOW) { const o = $('alfred-off'); if (o) o.remove(); }
-    // The control panel draws the drawer only when he is Docked; when Floating, his own window does.
-    if (!IN_WINDOW) {
-      ensureToggle();
-      if (floating(st)) {
-        if (built) removePanel();
-        paintToggle();
-        return;
-      }
-      if (!built) { build(); let o = '1'; try { o = localStorage.getItem('alfredOpen') || '1'; } catch (_) {} setOpen(o !== '0'); }
-      else document.body.classList.toggle('alfred-open', open);
-      paintToggle();
-    } else if (!built) build();
+    sw.setAttribute('aria-checked', String(!!st.enabled));
+    sw.textContent = st.enabled ? '🎩 Alfred: On' : '🎩 Alfred: Off';
+    if (!st.enabled) { teardown(); return; }
+    ensureToggle();
+    if (!built) { build(); let o = '1'; try { o = localStorage.getItem('alfredOpen') || '1'; } catch (_) {} setOpen(o !== '0'); }
+    else document.body.classList.toggle('alfred-open', open);
+    paintToggle();
     // title + set-ups
     const ps = persona(st);
     $('alfred-title').textContent = `🎩 ${ps.name || 'Alfred'}`;
-    if (IN_WINDOW) { try { document.title = `🎩 ${ps.name || 'Alfred'}`; } catch (_) {} }
     paintProfiles(st.settings);
     // status line
     const sl = $('alfred-statusline'); sl.textContent = '';
@@ -373,10 +529,11 @@
     if (atBottom || sending) chat.scrollTop = chat.scrollHeight;
     // card
     renderCard(st.card);
-    // busy
+    // busy: the buttons that send wait; 🩺 and ❓ always work
     $('alfred-busy').hidden = !st.busy;
     $('alfred-send').disabled = !!st.busy || !!st.card;
-    for (const id of ['alfred-q-status', 'alfred-q-book']) { const b = $(id); if (b) b.disabled = !!st.busy || !!st.card; }
+    for (const id of WORK) { const b = $(`alfred-a-${id}`); if (b) b.disabled = !!st.busy || !!st.card; }
+    const go = $('alfred-f-go'); if (go) go.disabled = !!st.busy || !!st.card;
     // what Alfred did
     const list = $('alfred-did-list'); list.textContent = '';
     const acts = (st.activity || []).slice().reverse();
@@ -423,6 +580,7 @@
     box.append(ol, h('div', { class: 'al-actions' },
       h('button', { id: 'alfred-do-it', type: 'button', class: 'primary', onclick: () => decide(true) }, '✔ Do it'),
       h('button', { id: 'alfred-no', type: 'button', onclick: () => decide(false) }, '✖ No')));
+    if (catalogShown()) showCatalog(false); // the card must be seen
   }
   async function decide(yes) {
     const box = $('alfred-card'); const id = box.dataset.id;
@@ -438,47 +596,39 @@
     const input = $('alfred-input');
     const text = (typeof preset === 'string' ? preset : input.value).trim();
     if (!text || sending) return;
+    // "what can you do?" → the list right here (no AI call needed)
+    if (WHAT_CAN_YOU_DO.test(text)) { if (typeof preset !== 'string') input.value = ''; closeForm(); showCatalog(true); return; }
     sending = true;
     if (typeof preset !== 'string') input.value = '';
+    if (catalogShown()) showCatalog(false);
     $('alfred-busy').hidden = false;
     try {
       const r = await api.alfredAsk(text);
       if (r && r.ok === false && r.message) { const chat = $('alfred-chat'); chat.append(msgEl({ role: 'alfred', text: r.message })); chat.scrollTop = chat.scrollHeight; if ((r.error === 'EMPTY' || r.error === 'BUSY') && typeof preset !== 'string') input.value = text; }
-    } finally { sending = false; }
+    } finally { sending = false; if (!(last && last.busy)) { const b = $('alfred-busy'); if (b) b.hidden = true; } }
   }
 
-  if (sw) {
-    sw.addEventListener('click', async () => {
-      const on = !(last && last.enabled);
-      sw.disabled = true;
-      try { render(await api.alfredSetEnabled(on)); } finally { sw.disabled = false; }
-    });
-  }
+  sw.dataset.alfredWired = 'yes'; // the User Panel's 🎩 Alfred: On/Off button clicks this switch
+  sw.addEventListener('click', async () => {
+    const on = !(last && last.enabled);
+    sw.disabled = true;
+    try { render(await api.alfredSetEnabled(on)); } finally { sw.disabled = false; }
+  });
   // Ctrl/Cmd+Shift+A: main catches it on every page of the app (before-input-event) and the page never
   // sees it. This is the fallback for a key that reached the page anyway (e.g. synthetic input).
   document.addEventListener('keydown', (e) => {
     if (e.repeat || !e.shiftKey || e.altKey || String(e.key || '').toLowerCase() !== 'a') return;
     if (!(isMac ? e.metaKey : (e.ctrlKey && !e.metaKey))) return;
-    if (!(last && last.enabled) || typeof api.alfredPanelToggle !== 'function') return;
+    if (!(last && last.enabled) || !built) return;
     e.preventDefault();
-    Promise.resolve(api.alfredPanelToggle()).catch(() => {});
+    setOpen(!open);
   }, true);
-  // The floating window: Escape hides it — but never while a card is waiting for your answer.
-  if (IN_WINDOW) {
-    document.addEventListener('keydown', (e) => {
-      if (e.key !== 'Escape' || e.defaultPrevented) return;
-      const card = $('alfred-card');
-      if ((card && !card.hidden) || (last && last.card)) return;
-      const s = $('alfred-settings'); if (s && !s.hidden) { s.hidden = true; return; }
-      hidePanel();
-    });
-  }
   if (typeof api.onAlfred === 'function') {
     api.onAlfred((p) => {
       if (!p) return;
-      if (p.type === 'show-tab') { if (!IN_WINDOW && p.tab) { const b = document.getElementById(`tab-app-${p.tab}`); if (b) b.click(); } return; }
-      if (p.type === 'show-butler') { if (!IN_WINDOW) showButler(); return; }
-      if (p.type === 'toggle-panel') { if (!IN_WINDOW && built && !floating(last)) setOpen(typeof p.open === 'boolean' ? p.open : !open); return; }
+      if (p.type === 'show-tab') { if (p.tab) { const b = document.getElementById(`tab-app-${p.tab}`); if (b) b.click(); } return; }
+      if (p.type === 'show-butler') { showButler(); return; }
+      if (p.type === 'toggle-panel') { if (built) setOpen(typeof p.open === 'boolean' ? p.open : !open); return; }
       if (p.type === 'state' && p.state) render(p.state);
       else if (last && last.enabled && built) {
         // message / card / activity events: refresh from a fresh status (cheap, no AI call)

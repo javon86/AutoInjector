@@ -27,13 +27,22 @@ Legend: `[ ]` to do · `[~]` in progress · `[x]` done · `[!]` problem (see "Pr
 - **🎩 Alfred (done 2026-10-25, B4 → app-wide):** the butler grown into the user's assistant for the whole app — chat
   drawer on every tab, a fixed tool registry, "I will" cards before any change, proactive notices; OFF by default
   (🎩 switch); a local model via Ollama or a connected AI. See `docs/ALFRED.md`.
-- **Back burner (later, by the user's call):** images + Stable Diffusion (B1: AutoInjector side done — 🎨 Images tab),
-  video (B2), covers and pictures (B3), Character Forge dossiers (B5).
+- **🧰 Tool servers / MCP (done 2026-10-28, f10 "mcp"):** in ⚙ More settings → 🧰 Tools, add an outside MCP tool
+  server (a command line or a web address, with encrypted keys). Alfred uses it through `mcp_tools` and `mcp_call`
+  (always on a card, never "always allowed"), and the butler through USE_TOOL. See `docs/ALFRED.md` → "Tool servers (MCP)".
+- **F10 (done 2026-10-28, "do all 10"):** Alfred has exactly two places — the 🎩 Butler section (setup) and his
+  docked talk panel (no separate window; Ctrl/Cmd+Shift+A). The old top User Panel butler buttons now drive Alfred, and
+  the panel has 8 big action buttons (🧑 character, 🎨 picture, 🎬 video, 🖼 cover, 📖 my book, ✍ continue/make a book,
+  🩺 check everything, ❓ everything I can do — a 230-item list in 8 groups). The old Image/Video panels and the setup
+  wizard's duplicate forms are gone (one place each: 🎨 Images, 🎬 Video). Also: ebook cover JPG, map PNG in Word,
+  style-card delete fix, motion clips for items/places/magic, new characters from scratch, auto-save + update-or-copy +
+  big books opened from a folder, MCP tool servers, book trailers (B2).
+- **Back burner (later, by the user's call):** a first real GPU run of video/trailers; the audiobook export (P29).
 - **Still to try for real:** everything above has only been tested with stand-in AIs — the first real
   run on the user's PC is the real test (see "Problems to come back to").
 - **One app, one launcher (done 2026-10-25):** start AutoInjector — Akọwe starts with it (📖 Akọwe tab, connected
   by itself). `akowe/run-akowe.*` remain optional for Akọwe alone.
-- Last updated: 2026-10-27 (B1 pictures in books, B3 covers (designer + print wrap) and B5 items / places / magic systems + the manuscript check DONE, all usable by 🎩 Alfred; earlier: video, Character Forge, 360 scan; B6 Alfred floating side panel + one-button AI setup + model finder DONE; book #2 next).
+- Last updated: 2026-10-28 (F10: all ten unfinished items done — see above). Before: 2026-10-27 (B1 pictures in books, B3 covers (designer + print wrap) and B5 items / places / magic systems + the manuscript check DONE, all usable by 🎩 Alfred; earlier: video, Character Forge, 360 scan; B6 Alfred floating side panel + one-button AI setup + model finder DONE; book #2 next).
 
 ## Section 1 — AIs that always answer (self-repair) and independent review  (Phase 1)
 
@@ -175,6 +184,23 @@ Legend: `[ ]` to do · `[~]` in progress · `[x]` done · `[!]` problem (see "Pr
   saved run; 🔁 Rerun from the book bible (book page, shelf, folder list, uploaded bible) = a new book whose canon,
   sheets, voices, rules, texture and — optionally — premise/plot/outline/scene cards come from the bible and are
   approved inside it under the run consent; new chapters.)*
+- [x] **F10 (2026-10-28) finished pieces (lane akowe):**
+  - 💾 **Quiet 10-minute save**: besides the saves after each step / approval / finished run, every 10 minutes
+    (`book_save.PERIODIC_S`) each book whose state changed since its last save is saved (`fingerprint`: records,
+    approvals, module state, its own settings) — work done by hand is saved too; an unchanged book is not touched.
+    Same Settings switch (on by default).
+  - 📂 **A saved book that is already here**: Open asks “⟳ Update the one I have / 📄 Open as a copy” (`mode`); update
+    keeps the book's id, folder and last-save note, checks the package as a copy first and is refused while a run works.
+  - 📂 **Books bigger than the upload limit** open straight from their folder (`POST /api/books/open-path`, this
+    computer only); 📁 Choose the folder uses AutoInjector's picker (`POST /api/books/choose-path` → bridge
+    `POST /dialog/choose-path`).
+  - 🖨 **Ebook cover JPG** (KDP 1600 × 2560, also 2560 × 4096 / 1000 × 1600 / 625 × 1000) and the **map's PNG copy for
+    Word**, drawn by AutoInjector's new `POST /render/image` (offscreen Chromium, no network); the EPUB with cover uses
+    the JPG; plain error when AutoInjector is not connected. 🎬 **Motion clips** for items (turntable), places
+    (establishing pan) and magic systems (the effect in use). 🧑 **New character** from the Forge / Alfred
+    (`POST …/forge/characters`). Fix: deleting the style card answered HTTP 405 (DELETE was only let through for
+    pictures).
+
 ## Section 8 — Fixes from the book-2 run log  (proposed — do before Section 7)
 
 From the 2026-10-24 AutoInjector log: Claude wrote, Gemini reviewed (independence worked), 48 Akọwe
@@ -305,7 +331,7 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
   one tested. See `STABLE_DIFFUSION_PLAN.md`.
   Akọwe can ask via `POST /image/request` with a character lock (`docs/SD_IMAGE_API.md`). Setup guide:
   `docs/STABLE_DIFFUSION_SETUP.md`. Still to do: the Akọwe side (store pictures as book assets, UI) — with B3/B5.
-- [~] **B2** 🎬 Video: hook up AutoInjector's Video Generation panel for book trailers / scenes.
+- [~] **B2** 🎬 Video: hook up AutoInjector's Video Generation panel for book trailers / scenes (trailers done; a real GPU run open).
   AutoInjector side, DONE 2026-10-27: a real local video engine (`video-studio.js`, `docs/VIDEO_API.md`).
   - It renders with the ComfyUI the app already installs, using Wan 2.2 TI2V 5B (text or picture → video, about 12 GB VRAM) or Wan 2.1 T2V 1.3B (text → video, about 8 GB).
   - In-app model downloads (16.9 GB / 9.2 GB, the shared text encoder fetched once). ComfyUI itself installs first when it is missing. Stability Matrix model folders are supported.
@@ -313,13 +339,22 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
   - Bridge: `GET /video/backend` and `POST /video/request`. The capability test renders a real 1 s clip.
   - 🎩 Alfred: `video_call` over every video-api method, plus `generate_video` (text, picture or a character's looks) and the dossier `clip`.
   - Checked across the two real programs: an Akọwe clip job → the bridge → video-studio → a ComfyUI stand-in → clip and poster stored with the book.
-  - Still open: a first run on a real GPU, and book trailers (several shots joined).
+  - Still open: a first run on a real GPU. Book trailers (several shots joined): done 2026-10-28, see below.
   Akọwe side, first use DONE 2026-10-27: Character Forge **motion clips** — a 4 s picture→video "motion study" per
   dossier through AutoInjector `POST /video/request` (portrait as a temp-file path, idle-motion prompt from the
   appearance / posture / gait / expressions fields, 900 s timeout, plain words for every `VIDEO_*` code), stored with
   its poster as book assets, played on the dossier page, the poster as a MOTION STUDY still in the PDF, in the book
-  save (`docs/CHARACTER_FORGE.md` "Motion clip"). Still open: book trailers / scene clips; a real GPU run.
-- [ ] **B3 (P19)** 🎨 Book cover and pictures (LATER — not started): cover design (title/author on a template,
+  save (`docs/CHARACTER_FORGE.md` "Motion clip"). Still open: a real GPU run.
+  🎞 **Book trailers DONE 2026-10-28** (`docs/VIDEO_API.md` §7): AutoInjector `video-trailer.js` renders the shots one by
+  one through the video engine (progress, Stop, finished shots kept and reused), joins them with title cards, fades and
+  optional music in a hidden offscreen window (canvas + MediaRecorder → `trailer.webm`, no new dependency), and adds
+  `trailer.mp4` when an ffmpeg is found (PATH, ComfyUI folders, imageio-ffmpeg). 🎬 Video → 🎞 Trailer section; video-api
+  `trailer.make/status/cancel/list/plan`; bridge `POST /video/trailer`, `GET /video/trailer`, `POST /video/trailer/cancel`.
+  Akọwe (`trailer.py`, page `#/p/<pid>/<b>/trailer`): 🎬 Plan a trailer builds 5–8 shots from the book (title and
+  logline cards, the main place, key chapters but never the ending, the characters' approved looks + locks, chosen
+  chapter pictures / portraits brought to life), the author edits them, 🎞 Make the trailer runs as a job and stores
+  the trailer with the book (book save `Trailer/`); plain words for every `VIDEO_*` code. 🎩 Alfred: `make_trailer`.
+- [x] **B3 (P19)** 🎨 Book cover and pictures (DONE — covers, interior pictures, map; ebook JPG + Word map 2026-10-28): cover design (title/author on a template,
   AI-generated artwork when an image AI is connected), chapter images/illustrations, maps; placement in
   PDF/EPUB/DOCX; print-ready cover size and spine.
   - 🖼 **Interior pictures DONE 2026-10-27** (`docs/PICTURES.md`): the 🖼 Pictures page — a book-wide art style,
@@ -385,10 +420,7 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
       uncensored filter and ranking, 🛠 tools, an optional HF token (encrypted) and an offline curated list
       (`model-catalog.js`, `llm-hardware.js`).
     - **Personality** (presets + custom; voice only, approvals unchanged) and **saved set-ups** (`alfred-persona-ui.js`).
-  - **The side panel = where you talk to him.** It is its own window floating over the whole app (the AI panes and
-    📖 Akọwe included), with an option to stay on top of other programs too. You can drag and resize it, it remembers
-    its place, Ctrl/Cmd+Shift+A toggles it, and it has quick buttons and a set-up switcher. "Docked (beside)" keeps the
-    old drawer (`alfred-window.js`).
+  - **The side panel = where you talk to him.** (Was a floating window first; see below — now docked only.)
   - **Simplified (2026-10-27, the user's feedback):**
     - His panel is a **side panel again by default**: it moves the app over on every tab, the Video tab included,
       and never covers anything. The separate window is an option in ⚙, and a saved "floating" from the old
@@ -398,6 +430,16 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
       which now also lists what Alfred and his setup did.
     - The old Butler's goal box, System Check and local-model settings are out of view, replaced by Alfred and the one
       button.
+  - **Two Alfred surfaces only (f10-panel, 2026-10-28):** the SETUP panel (🎩 Butler section) and the TALK panel (his
+    docked side panel). The separate window is gone (`alfred-window*.js/html` removed; any saved "floating" → docked;
+    Ctrl/Cmd+Shift+A still toggles the drawer from every page, AI panes included). The side panel has 8 big buttons
+    (🧑 character, 🎨 picture, 🎬 video, 🖼 cover, 📖 my book, ✍ continue / make my book, 🩺 check everything, ❓ everything
+    I can do) — small forms first where a detail is needed, plain "Akọwe has no book yet" when there is none — and a
+    searchable "❓ Everything I can do" list (`alfred-catalog.js`, IPC `alfred:catalog`, `alfred:books`; "what can you
+    do?" opens it). The User Panel's old Butler buttons are Alfred's: → 🎩 Alfred, his status light, 🧠 what he thinks
+    with, 🎩 Alfred: On/Off, 🩺 Check Alfred.
+    - **Open:** 🧑 Make a character works for characters the book already has (forge_character). Akọwe has no API to
+      add a brand-new non-main character, so for a new name Alfred says so plainly — an Akọwe route + tool would close it.
   - Alfred can drive all of it (`llm.*` app controls: status, check, fix, setup-all, search, curated, pull, use, remove…).
   - **Still to try for real:** the installer and the online search have not been run against the live ollama.com /
     huggingface.co, and nothing has been run on a real GPU.
@@ -484,6 +526,13 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
   - Double presses are ignored.
 - [x] **Forgiving `generate_video`:** a picture plus a character uses the picture; seconds are clamped; junk values are
   dropped with notes; and the errors that remain name the field and the allowed values.
+- [x] **One way to make pictures and clips (F10 old panels):** the old Image Generation / Video Generation panels in
+  the AutoInjector tab are gone. The User Panel's **🎨 Images** / **🎬 Video** buttons open those tabs. What only the
+  old panels had (common addresses, 🔍 auto-detect, ✓ check, on/off, the other video server's clip settings) is in
+  **🎨 Images → ⚙ Start & install → Advanced: another server** and **🎬 Video → ⚙ Setup & models → Advanced: other
+  video server**. The `image:*`, `video:*` and `endpoints:*` channels are unchanged (Alfred, the butler and Akọwe's
+  bridge use them). The Setup Wizard's own Images / Video tabs are now short notes whose button closes the wizard and shows
+  that tab (`wizard:open-app-tab` {tab} → `app-tab-show`; Alfred: `wizard.open_app_tab`).
 
 ## Problems to come back to
 
@@ -745,14 +794,14 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
   never moved behind the author's back); (b) every save rewrites only changed files, but `book.akowe` changes on
   every step, so a progress save of a long novel rewrites a package of several MB each time (at most every 2 minutes);
   (c) the package holds every version of every record and file (exact restore) — opening a saved book on the same
-  computer copies all of it again as a new book; (d) an opened book's project name gets “(opened)” only when the name
+  computer asks: update the one you have, or open it as a copy (F10); (d) an opened book's project name gets “(opened)” only when the name
   exists, its profile title stays (so its exports stay current); (e) an approval's `action_hash` (a hash over the signed
   action) keeps its old value in an opened book — history only, never re-checked for engine approvals, but an
   H-set waiver checked again later would not match (`j_approvals.waiver_action_hash`); (f) an imported unfinished run
   can be resumed with its original consent record (pressing ▶ Resume is a new author action; ▶ Continue starts a new
   run with a new consent instead); (g) a 🔁 rerun keeps the saved story rules but the outline step still asks the AI
   for rule updates for the plan (one call, accepted under the run consent); (h) uploads are limited to 64 MB
-  (`MAX_BODY`): a larger book must be copied into the books folder and opened from the list; (i) auto-save is off in
+  (`MAX_BODY`): a larger book opens straight from its folder (📂 “From a folder on this computer”, F10); (i) auto-save is off in
   the test suite by default (`AKOWE_AUTOSAVE=0` in tests/conftest.py) — only tests/test_section6.py exercises it.
 - **P38 / P37.1–P37.4 — not tried against the live sites.** The 🎯 card, pick mode, the 🔢 number teach and the
   general-selector rules were tested on fake pages (fake DOM, jsdom, real Electron with `fake-chat.html`, headless

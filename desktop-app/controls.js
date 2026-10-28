@@ -21,7 +21,7 @@ const lastReplyBySite = {}; // most recent reply text per AI, for "use as image 
 let currentPrompts = [];
 let routing = { chatgpt: [], claude: [], gemini: [] };
 let enabled = { chatgpt: true, claude: true, gemini: true };
-let butlerActive = false; // whether → All also includes the butler (his Active checkbox)
+let butlerActive = false; // whether → All also includes 🎩 Alfred (his Active checkbox; id p-butler kept)
 // Default pane zoom: 60% (main.js applies the same default to the real pages).
 const DEFAULT_PANE_ZOOM = 0.6;
 let zoomLevels = { chatgpt: DEFAULT_PANE_ZOOM, claude: DEFAULT_PANE_ZOOM, gemini: DEFAULT_PANE_ZOOM };
@@ -520,30 +520,31 @@ function buildComposerButtons() {
     };
     grid.appendChild(checkbox);
   }
-  // The butler is a fourth participant row — same shape as an AI: a → send
-  // button in the Send column and its own Active checkbox in the Active column.
+  // 🎩 Alfred is a fourth participant row — same shape as an AI: a → send
+  // button in the Send column and his own Active checkbox in the Active column.
+  // (The ids are the old butler's, kept so everything that finds them still does.)
   const butler = document.createElement("button");
   butler.id = "btn-send-butler";
-  butler.textContent = "→ 🤵 Butler";
-  butler.title = "Send this message to the butler (give him a goal / talk to him)";
-  butler.setAttribute("aria-label", "Send this message to the butler");
-  butler.onclick = () => sendToButler();
+  butler.textContent = "→ 🎩 Alfred";
+  butler.title = "Send this message to 🎩 Alfred — his side panel opens and he answers there (he asks before he changes anything)";
+  butler.setAttribute("aria-label", "Send this message to Alfred");
+  butler.onclick = () => sendToAlfred();
   grid.appendChild(butler);
 
   const butlerChk = document.createElement("input");
   butlerChk.type = "checkbox";
   butlerChk.id = "p-butler";
   butlerChk.checked = butlerActive;
-  butlerChk.title = "Include the butler when you press → All";
-  butlerChk.setAttribute("aria-label", "Butler active");
+  butlerChk.title = "Include 🎩 Alfred when you press → All";
+  butlerChk.setAttribute("aria-label", "Alfred active");
   butlerChk.onchange = (e) => { butlerActive = e.target.checked; };
   grid.appendChild(butlerChk);
 
-  // → All: send to every checked AI, plus the butler when his box is checked.
+  // → All: send to every checked AI, plus Alfred when his box is checked.
   const all = document.createElement("button");
   all.className = "primary";
   all.textContent = "→ All";
-  all.onclick = () => { sendCompose(SITES.filter((s) => enabled[s])); if (butlerActive) sendToButler(); };
+  all.onclick = () => { const text = el("composer-text").value.trim(); sendCompose(SITES.filter((s) => enabled[s])); if (butlerActive) sendToAlfred(text); };
   grid.appendChild(all);
 }
 
@@ -706,7 +707,7 @@ const BUTLER_MODE_META = {
 let butlerMode = "auto";
 try { const s = localStorage.getItem("butlerMode"); if (BUTLER_MODES.includes(s)) butlerMode = s; } catch (_) {}
 function renderButlerMode() {
-  const b = el("btn-butler-mode"); if (!b) return;
+  const b = el("legacy-butler-mode"); if (!b) return; // the old butler's toggle is gone; #btn-butler-mode is Alfred's (below)
   const meta = BUTLER_MODE_META[butlerMode] || BUTLER_MODE_META.auto;
   b.classList.remove("mode-converse", "mode-auto", "mode-self", "mode-delegate");
   b.classList.add(meta.cls);
@@ -719,9 +720,9 @@ function setButlerMode(mode) {
   try { localStorage.setItem("butlerMode", mode); } catch (_) {}
   renderButlerMode();
 }
-if (el("btn-butler-mode")) {
+if (el("legacy-butler-mode")) {
   renderButlerMode();
-  el("btn-butler-mode").onclick = () => {
+  el("legacy-butler-mode").onclick = () => {
     const next = BUTLER_MODES[(BUTLER_MODES.indexOf(butlerMode) + 1) % BUTLER_MODES.length];
     setButlerMode(next);
     uiLog("click", { id: "btn-butler-mode", msg: `butler mode: ${next}` });
@@ -747,15 +748,6 @@ async function butlerHandle(text, opts = {}) {
   return r || { ok: false, error: "error" };
 }
 
-// Send the composer text to the butler — honours the handling-mode toggle.
-async function sendToButler() {
-  const text = el("composer-text").value.trim();
-  if (!text) { setStatus("Type a message first."); return; }
-  setStatus(butlerMode === "converse" ? "Talking to the butler…" : `Sending to the butler (${BUTLER_MODE_META[butlerMode].tx})…`);
-  const r = await butlerHandle(text, { mirror: true });
-  if (r && r.ok) setStatus(butlerMode === "converse" ? "Asked the butler." : "Sent to the butler.");
-  else { const hint = r && r.error === "NOT_CONFIGURED" ? " — give him a local model in the Butler bar (⚙️) first." : ""; setStatus(`Butler can't start: ${(r && r.error) || "error"}${hint}`); }
-}
 
 // The Prompt Library is just a compact dropdown + a few buttons here —
 // creating/editing a prompt's actual per-AI text happens in the separate
@@ -1660,8 +1652,6 @@ const COLLAPSIBLE_PANELS = {
   global: { panelId: "col-global", label: "Global" },
   houserules: { panelId: "col-houserules", label: "House Rules" },
   prompts: { panelId: "col-prompts", label: "Prompt Library" },
-  image: { panelId: "col-image", label: "Image Generation" },
-  video: { panelId: "col-video", label: "Video Generation" },
   gpu: { panelId: "col-gpu", label: "GPU Usage" },
   systemai: { panelId: "col-systemai", label: "System AI" },
   akowe: { panelId: "col-akowe", label: "Akọwe bridge" }
@@ -1722,8 +1712,6 @@ async function databaseRefresh() {
 
 // --- System AI (Local Supervisor) panel + User Panel switch ----------------
 if (el("btn-collapse-systemai")) el("btn-collapse-systemai").onclick = () => collapseYellowPanel("systemai");
-if (el("btn-collapse-image")) el("btn-collapse-image").onclick = () => collapseYellowPanel("image");
-if (el("btn-collapse-video")) el("btn-collapse-video").onclick = () => collapseYellowPanel("video");
 if (el("btn-collapse-gpu")) el("btn-collapse-gpu").onclick = () => collapseYellowPanel("gpu");
 
 // Butler Device panel: System Check (what he can do) + Send Intro (tell the AIs
@@ -1846,7 +1834,7 @@ async function runCapabilityTest(triggerBtn) {
   if (capTestRunning) return;
   if (!window.api.butlerCapabilityTest) { logToCenter("Capability test unavailable.", { tag: "setup", err: true }); return; }
   capTestRunning = true; capReelActive = true; capReelReset();
-  const btns = ["btn-cap-run", "btn-capability-test", "btn-selfcheck"].map(el).filter(Boolean);
+  const btns = ["btn-cap-run", "btn-selfcheck"].map(el).filter(Boolean);
   const prev = btns.map((b) => b.textContent);
   btns.forEach((b) => { b.disabled = true; }); if (triggerBtn) triggerBtn.textContent = "🧪 Testing…";
   logToCenter("🧪 Capability test started — really running code, files, tools, memory, image, video, voice, and pinging the AIs…", { tag: "setup" });
@@ -1861,7 +1849,6 @@ async function runCapabilityTest(triggerBtn) {
 }
 // Every entry point runs the same test (reel + pop-up).
 if (el("btn-cap-run")) el("btn-cap-run").onclick = () => { uiLog("click", { id: "btn-cap-run", msg: "test all capabilities" }); runCapabilityTest(el("btn-cap-run")); };
-if (el("btn-capability-test")) el("btn-capability-test").onclick = () => { uiLog("click", { id: "btn-capability-test", msg: "run capability test" }); runCapabilityTest(el("btn-capability-test")); };
 
 if (el("btn-selfcheck")) el("btn-selfcheck").onclick = async () => {
   const deep = !!(el("cb-deep-check") && el("cb-deep-check").checked);
@@ -1960,217 +1947,12 @@ if (el("device-openmic")) el("device-openmic").onchange = (e) => {
   if (openMicOn) openMicLoop();
 };
 
-// Image Generation panel. Compact = prompt/negative/LoRA + Generate; expanding
-// (⤢ More) reveals a live preview, size/steps, a recent-renders strip, and the
-// connection config. There's also a button that opens the real SD web UI.
-// Wire a range slider to its value display (live) and return a getter.
-function wireSlider(rangeId, spanId) {
-  const r = el(rangeId), sp = el(spanId);
-  if (r) { const upd = () => { if (sp) sp.textContent = r.value; }; r.addEventListener("input", upd); upd(); }
-}
-function setSlider(rangeId, spanId, val) { const r = el(rangeId); if (r && val != null) { r.value = val; const sp = el(spanId); if (sp) sp.textContent = r.value; } }
-
-async function loadImagePanel() {
-  ["img-steps:img-steps-v", "img-cfg:img-cfg-v", "img-width:img-width-v", "img-height:img-height-v", "img-batch:img-batch-v"].forEach((p) => { const [r, s] = p.split(":"); wireSlider(r, s); });
-  if (!window.api.imageStatus) return;
-  try {
-    const s = await window.api.imageStatus();
-    if (!s) return;
-    if (el("img-endpoint")) el("img-endpoint").value = s.endpoint || "";
-    if (el("img-enabled")) el("img-enabled").checked = !!s.enabled;
-    setSlider("img-steps", "img-steps-v", s.steps);
-    setSlider("img-cfg", "img-cfg-v", s.cfgScale);
-    setSlider("img-width", "img-width-v", s.width);
-    setSlider("img-height", "img-height-v", s.height);
-    setSlider("img-batch", "img-batch-v", s.batchCount);
-    if (el("img-seed") && s.seed != null) el("img-seed").value = s.seed;
-  } catch (_) {}
-}
-if (el("btn-img-seed-rand")) el("btn-img-seed-rand").onclick = () => { if (el("img-seed")) el("img-seed").value = "-1"; };
-function imgMsg(t) { if (el("img-msg")) el("img-msg").textContent = t; }
-
-// --- Generic 3-size panel state (minimal → middle → large) -------------------
-// The ◱ button cycles a panel's data-size; CSS shows/hides .when-mid/.when-large.
-// This is separate from the ⌄ tab-collapse (which hides the whole panel to a tab).
-const PANEL_SIZES = ["minimal", "middle", "large"];
-const SIZE_GLYPH = { minimal: "◱", middle: "◲", large: "◼" };
-function setPanelSize(panelId, btnId, size) {
-  const p = el(panelId); if (!p) return;
-  if (!PANEL_SIZES.includes(size)) size = "minimal";
-  p.setAttribute("data-size", size);
-  const b = el(btnId);
-  if (b) { const next = PANEL_SIZES[(PANEL_SIZES.indexOf(size) + 1) % PANEL_SIZES.length]; b.textContent = SIZE_GLYPH[size]; b.title = `Size: ${size} — click for ${next}`; }
-  uiLog("panel", { msg: `${panelId} size → ${size}` });
-}
-function cyclePanelSize(panelId, btnId) {
-  const cur = (el(panelId) && el(panelId).getAttribute("data-size")) || "minimal";
-  setPanelSize(panelId, btnId, PANEL_SIZES[(PANEL_SIZES.indexOf(cur) + 1) % PANEL_SIZES.length]);
-}
-if (el("btn-img-size")) el("btn-img-size").onclick = () => cyclePanelSize("col-image", "btn-img-size");
-if (el("btn-vid-size")) el("btn-vid-size").onclick = () => cyclePanelSize("col-video", "btn-vid-size");
-if (el("btn-img-open-ui")) el("btn-img-open-ui").onclick = () => {
-  const ep = (el("img-endpoint") && el("img-endpoint").value || "").trim() || "http://127.0.0.1:7860";
-  let base = ep;
-  try { const u = new URL(ep); base = `${u.protocol}//${u.host}`; } catch (_) { base = ep.replace(/\/sdapi.*$/, ""); }
-  if (window.api.openExternal) window.api.openExternal(base);
-};
-if (el("btn-img-save")) el("btn-img-save").onclick = async () => {
-  if (!window.api.configureImage) return;
-  const r = await window.api.configureImage({ enabled: !!(el("img-enabled") && el("img-enabled").checked), endpoint: (el("img-endpoint") && el("img-endpoint").value || "").trim() });
-  imgMsg(r && r.ok ? (r.enabled ? "Saved — image generation on." : "Saved — off.") : `Save failed: ${(r && r.error) || "error"}`);
-};
-const imgHistory = [];
-function imgShowPreview(dataUrl, pathText) {
-  if (!dataUrl || !el("img-preview")) return;
-  el("img-preview").src = dataUrl;
-  el("img-preview").style.display = "block";
-  if (el("img-preview-empty")) el("img-preview-empty").style.display = "none";
-  setPanelSize("col-image", "btn-img-size", "large"); // grow to show the render
-  imgHistory.unshift({ dataUrl, pathText });
-  imgHistory.length = Math.min(imgHistory.length, 8);
-  const box = el("img-history");
-  if (box) {
-    box.innerHTML = "";
-    for (const it of imgHistory) {
-      const t = document.createElement("img");
-      t.src = it.dataUrl; t.title = it.pathText || "";
-      t.style.cssText = "width:44px;height:44px;object-fit:cover;border:1px solid #2a2a2a;border-radius:4px;cursor:pointer";
-      t.onclick = () => imgShowPreview(it.dataUrl, it.pathText);
-      box.appendChild(t);
-    }
-  }
-}
-if (el("btn-img-generate")) el("btn-img-generate").onclick = async () => {
-  if (!window.api.imageGenerate) return;
-  let prompt = (el("img-prompt") && el("img-prompt").value || "").trim();
-  const lora = (el("img-lora") && el("img-lora").value || "").trim();
-  if (lora) prompt = prompt ? `${prompt} ${lora}` : lora;
-  const negative = (el("img-negative") && el("img-negative").value || "").trim();
-  if (!prompt) { imgMsg("Type a prompt first."); return; }
-  const cfg = { enabled: true, endpoint: (el("img-endpoint") && el("img-endpoint").value || "").trim() };
-  const num = (id) => Number(el(id) && el(id).value);
-  const w = num("img-width"), h = num("img-height"), st = num("img-steps"), cf = num("img-cfg"), bt = num("img-batch"), sd = num("img-seed");
-  if (w) cfg.width = w; if (h) cfg.height = h; if (st) cfg.steps = st;
-  if (cf) cfg.cfgScale = cf; if (bt) cfg.batchCount = bt; if (Number.isFinite(sd)) cfg.seed = sd;
-  if (window.api.configureImage) await window.api.configureImage(cfg);
-  imgMsg("Rendering…");
-  const r = await window.api.imageGenerate(prompt, negative);
-  if (r && r.ok) { imgMsg(`Rendered ✓ → ${r.path}`); imgShowPreview(r.preview, r.path); }
-  else imgMsg(r && r.message ? `Failed: ${r.message}` : `Failed: ${(r && r.error) || "error"} (is your SD server running with --api?)`);
-};
-loadImagePanel();
-
-// Video Generation panel — same shape as Image (3 sizes + tab), wired to a local
-// text-to-video HTTP endpoint. minimal = prompt/negative; middle adds motion/LoRA
-// + frames/fps/size; large adds the clip preview, recent strip, and connection.
-async function loadVideoPanel() {
-  ["vid-frames:vid-frames-v", "vid-fps:vid-fps-v", "vid-steps:vid-steps-v", "vid-cfg:vid-cfg-v", "vid-motion:vid-motion-v"].forEach((p) => { const [r, s] = p.split(":"); wireSlider(r, s); });
-  if (!window.api.videoStatus) return;
-  try {
-    const s = await window.api.videoStatus();
-    if (!s) return;
-    if (el("vid-endpoint")) el("vid-endpoint").value = s.endpoint || "";
-    if (el("vid-enabled")) el("vid-enabled").checked = !!s.enabled;
-    if (el("vid-width") && s.width) el("vid-width").value = s.width;
-    if (el("vid-height") && s.height) el("vid-height").value = s.height;
-    if (el("vid-seed") && s.seed != null) el("vid-seed").value = s.seed;
-    setSlider("vid-frames", "vid-frames-v", s.frames);
-    setSlider("vid-fps", "vid-fps-v", s.fps);
-    setSlider("vid-steps", "vid-steps-v", s.steps);
-    setSlider("vid-cfg", "vid-cfg-v", s.cfgScale);
-    setSlider("vid-motion", "vid-motion-v", s.motion);
-  } catch (_) {}
-}
-if (el("btn-vid-seed-rand")) el("btn-vid-seed-rand").onclick = () => { if (el("vid-seed")) el("vid-seed").value = "-1"; };
-function vidMsg(t) { if (el("vid-msg")) el("vid-msg").textContent = t; }
-if (el("btn-vid-open-ui")) el("btn-vid-open-ui").onclick = () => {
-  const ep = (el("vid-endpoint") && el("vid-endpoint").value || "").trim() || "http://127.0.0.1:7860";
-  let base = ep;
-  try { const u = new URL(ep); base = `${u.protocol}//${u.host}`; } catch (_) { base = ep.replace(/\/[^/]*$/, ""); }
-  if (window.api.openExternal) window.api.openExternal(base);
-};
-if (el("btn-vid-save")) el("btn-vid-save").onclick = async () => {
-  if (!window.api.configureVideo) return;
-  const r = await window.api.configureVideo({ enabled: !!(el("vid-enabled") && el("vid-enabled").checked), endpoint: (el("vid-endpoint") && el("vid-endpoint").value || "").trim() });
-  vidMsg(r && r.ok ? (r.enabled ? "Saved — video generation on." : "Saved — off.") : `Save failed: ${(r && r.error) || "error"}`);
-};
-const vidHistory = [];
-function vidShowPreview(src, pathText) {
-  if (!src || !el("vid-preview")) return;
-  el("vid-preview").src = src;
-  el("vid-preview").style.display = "block";
-  if (el("vid-preview-empty")) el("vid-preview-empty").style.display = "none";
-  setPanelSize("col-video", "btn-vid-size", "large");
-  vidHistory.unshift({ src, pathText });
-  vidHistory.length = Math.min(vidHistory.length, 8);
-  const box = el("vid-history");
-  if (box) {
-    box.innerHTML = "";
-    vidHistory.forEach((it, i) => {
-      const chip = document.createElement("button");
-      chip.textContent = `▶ clip ${vidHistory.length - i}`;
-      chip.title = it.pathText || "";
-      chip.style.cssText = "font-size:10.5px; padding:2px 6px;";
-      chip.onclick = () => vidShowPreview(it.src, it.pathText);
-      box.appendChild(chip);
-    });
-  }
-}
-if (el("btn-vid-generate")) el("btn-vid-generate").onclick = async () => {
-  if (!window.api.videoGenerate) return;
-  let prompt = (el("vid-prompt") && el("vid-prompt").value || "").trim();
-  const lora = (el("vid-lora") && el("vid-lora").value || "").trim();
-  if (lora) prompt = prompt ? `${prompt} ${lora}` : lora;
-  const negative = (el("vid-negative") && el("vid-negative").value || "").trim();
-  if (!prompt) { vidMsg("Type a prompt first."); return; }
-  const cfg = { enabled: true, endpoint: (el("vid-endpoint") && el("vid-endpoint").value || "").trim() };
-  const num = (id) => Number(el(id) && el(id).value);
-  const w = num("vid-width"), h = num("vid-height"), fr = num("vid-frames"), fp = num("vid-fps"), st = num("vid-steps"), cf = num("vid-cfg"), mo = num("vid-motion"), sd = num("vid-seed");
-  if (w) cfg.width = w; if (h) cfg.height = h; if (fr) cfg.frames = fr; if (fp) cfg.fps = fp;
-  if (st) cfg.steps = st; if (cf) cfg.cfgScale = cf; if (Number.isFinite(mo)) cfg.motion = mo; if (Number.isFinite(sd)) cfg.seed = sd;
-  if (window.api.configureVideo) await window.api.configureVideo(cfg);
-  vidMsg("Rendering… (video can take a while)");
-  const r = await window.api.videoGenerate(prompt, negative);
-  if (r && r.ok) { vidMsg(`Rendered ✓ → ${r.path || r.url}`); vidShowPreview(r.preview, r.path || r.url); }
-  else vidMsg(r && r.message ? `Failed: ${r.message}` : `Failed: ${(r && r.error) || "error"} — set a video endpoint in ⚙️ Connection, and make sure the backend is running.`);
-};
-loadVideoPanel();
-
-// Endpoint helpers (shared by Image + Video) so the user never has to guess a URL:
-// a preset dropdown, an auto-detect that scans localhost, and a reachability test.
-async function loadEndpointPresets(kind, selectId, endpointId, msgId) {
-  const sel = el(selectId);
-  if (!sel || !window.api.endpointPresets) return;
-  try {
-    const r = await window.api.endpointPresets(kind);
-    if (r && r.ok) for (const p of r.presets) { const o = document.createElement("option"); o.value = p.endpoint; o.textContent = p.label; sel.appendChild(o); }
-  } catch (_) {}
-  sel.onchange = () => { if (sel.value && el(endpointId)) { el(endpointId).value = sel.value; if (el(msgId)) el(msgId).textContent = "Filled in — press Save, then ✓ Test."; } };
-}
-async function detectEndpoint(kind, endpointId, selectId, msgId) {
-  if (!window.api.detectEndpoints) return;
-  if (el(msgId)) el(msgId).textContent = "Scanning localhost…";
-  let r; try { r = await window.api.detectEndpoints(kind); } catch (_) { r = null; }
-  const reach = (r && r.reachable) || [];
-  if (!reach.length) { if (el(msgId)) el(msgId).textContent = "Nothing found running. Start your image/video app (with its API on), or pick one above."; return; }
-  if (el(endpointId)) el(endpointId).value = reach[0].endpoint;
-  if (el(selectId)) el(selectId).value = reach[0].endpoint;
-  if (el(msgId)) el(msgId).textContent = `Found: ${reach[0].label} ✓ — press Save.${reach.length > 1 ? ` (+${reach.length - 1} more)` : ""}`;
-}
-async function testEndpointUi(endpointId, msgId) {
-  if (!window.api.testEndpoint) return;
-  const url = (el(endpointId) && el(endpointId).value || "").trim();
-  if (!url) { if (el(msgId)) el(msgId).textContent = "Enter or pick an address first."; return; }
-  if (el(msgId)) el(msgId).textContent = "Testing…";
-  let r; try { r = await window.api.testEndpoint(url); } catch (_) { r = null; }
-  if (el(msgId)) el(msgId).textContent = r && r.reachable ? "Reachable ✓ — the server answered." : "Not reachable — is the app running with its API enabled?";
-}
-loadEndpointPresets("image", "img-preset", "img-endpoint", "img-conn-msg");
-if (el("btn-img-detect")) el("btn-img-detect").onclick = () => detectEndpoint("image", "img-endpoint", "img-preset", "img-conn-msg");
-if (el("btn-img-test")) el("btn-img-test").onclick = () => testEndpointUi("img-endpoint", "img-conn-msg");
-loadEndpointPresets("video", "vid-preset", "vid-endpoint", "vid-conn-msg");
-if (el("btn-vid-detect")) el("btn-vid-detect").onclick = () => detectEndpoint("video", "vid-endpoint", "vid-preset", "vid-conn-msg");
-if (el("btn-vid-test")) el("btn-vid-test").onclick = () => testEndpointUi("vid-endpoint", "vid-conn-msg");
+// The old Image Generation / Video Generation panels lived here. They are gone:
+// pictures are made in the 🎨 Images tab (images-studio.js) and clips in the 🎬 Video
+// tab (videos-studio.js). Their "point at another server" settings (preset list,
+// auto-detect, reachability test, on/off) moved into each tab's ⚙ setup view under
+// "Advanced: another server". The image:* / video:* / endpoints:* IPC stays for
+// Alfred, the butler, Akọwe's bridge and the Setup Wizard.
 
 // GPU Usage panel: poll "how much GPU are we using" and draw util + VRAM bars.
 function gpuEsc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
@@ -2202,8 +1984,6 @@ setInterval(pollGpu, 2500);
 
 function lsiReflect(enabled) {
   if (el("lsi-enabled")) el("lsi-enabled").checked = !!enabled;
-  const b = el("btn-ai-toggle");
-  if (b) { b.classList.toggle("on", !!enabled); b.textContent = `🤖 System AI: ${enabled ? "On" : "Off"}`; }
   const st = el("lsi-status");
   if (st) { st.textContent = enabled ? "· on" : "· off"; st.style.color = enabled ? "#7ad19a" : "#888"; }
 }
@@ -2216,7 +1996,6 @@ function lsiSetEnabled(on) {
   // locally so the switch still responds.
   lsiReflect(on);
 }
-if (el("btn-ai-toggle")) el("btn-ai-toggle").onclick = () => lsiSetEnabled(!(el("lsi-enabled") && el("lsi-enabled").checked));
 if (el("lsi-enabled")) el("lsi-enabled").onchange = () => lsiSetEnabled(el("lsi-enabled").checked);
 async function lsiRefreshModels() {
   const sel = el("lsi-model"); if (!sel || !window.api.ollamaList) return;
@@ -2429,20 +2208,144 @@ function jarvisShowRunning(on) {
   if (el("btn-jarvis-stop")) el("btn-jarvis-stop").style.display = on ? "" : "none";
   if (el("btn-jarvis-start")) el("btn-jarvis-start").disabled = !!on;
 }
-// The Butler status light in the User Panel: glows while he's working, shows a
-// one-line "what he's doing", and jumps to his panel on click.
+// The status light in the User Panel is 🎩 Alfred's: off / idle / working (glows) / needs you
+// (a card is waiting). Clicking it opens his side panel (alfredTop below).
 function setButlerLight(cls, text) {
   const b = el("btn-butler-status"); if (!b) return;
-  b.classList.remove("working", "needs", "error");
+  b.classList.remove("working", "needs", "error", "off");
   if (cls) b.classList.add(cls);
   const t = b.querySelector(".txt"); if (t && text != null) t.textContent = text;
 }
-if (el("btn-butler-status")) el("btn-butler-status").onclick = () => {
-  uiLog("click", { id: "btn-butler-status", msg: "open butler" });
-  const panel = el("col-systemai");
-  if (panel) { panel.classList.remove("hidden-collapsed"); panel.scrollIntoView({ behavior: "smooth", block: "start" }); }
-  const goal = el("jarvis-goal"); if (goal) try { goal.focus(); } catch (_) {}
+
+// ==== 🎩 Alfred in the User Panel ====================================================================
+// The old butler's buttons up here are Alfred's now (same ids): "→ 🎩 Alfred" + his Active box, the status
+// light, 🧠 what he thinks with (#btn-butler-mode), 🎩 Alfred: On/Off (#btn-ai-toggle, the same as the
+// title-bar switch) and 🩺 Check Alfred (#btn-capability-test). His TALK panel is alfred-panel.js.
+let alfredTop = null; // his last state ({ enabled, busy, card, settings })
+const ALFRED_BRAINS = ["auto", "local", "api", "pane"];
+const ALFRED_BRAIN_META = {
+  auto:  { tx: "Auto",         cls: "mode-auto",     say: "Automatic — a local model, else the connected AI" },
+  local: { tx: "Local",        cls: "mode-self",     say: "a local model on this PC (Ollama)" },
+  api:   { tx: "Connected AI", cls: "mode-delegate", say: "the connected AI (manager / API)" },
+  pane:  { tx: "Web AI",       cls: "mode-converse", say: "a web AI pane (ChatGPT, Claude or Gemini)" },
 };
+function paintAlfredTop(st) {
+  if (st) alfredTop = st;
+  const s = alfredTop || {};
+  const on = !!s.enabled;
+  if (!on) setButlerLight("off", "🎩 Alfred off");
+  else if (s.card) setButlerLight("needs", "🎩 Alfred needs you — a card is waiting");
+  else if (s.busy) setButlerLight("working", "🎩 Alfred working…");
+  else setButlerLight("", "🎩 Alfred idle");
+  const t = el("btn-ai-toggle");
+  if (t) { t.classList.toggle("on", on); t.setAttribute("aria-checked", String(on)); t.textContent = `🎩 Alfred: ${on ? "On" : "Off"}`; }
+  const m = el("btn-butler-mode");
+  if (m) {
+    const brain = (s.settings && ALFRED_BRAIN_META[s.settings.brain]) ? s.settings.brain : "auto";
+    const meta = ALFRED_BRAIN_META[brain];
+    m.classList.remove("mode-converse", "mode-auto", "mode-self", "mode-delegate");
+    m.classList.add(meta.cls);
+    m.dataset.brain = brain;
+    const ic = m.querySelector(".mode-ic"); if (ic) ic.textContent = "🧠";
+    const tx = m.querySelector(".mode-tx"); if (tx) tx.textContent = meta.tx;
+  }
+}
+async function alfredRefresh() {
+  if (typeof window.api.alfredStatus !== "function") return null;
+  try { const st = await window.api.alfredStatus(); paintAlfredTop(st); return st; } catch (_) { return null; }
+}
+/** Turn him on (when he is off) and open his side panel. Returns his state, or null. */
+async function alfredOpenPanel() {
+  let st = alfredTop || await alfredRefresh();
+  if (!st || !st.enabled) {
+    if (typeof window.api.alfredSetEnabled !== "function") return null;
+    try { st = await window.api.alfredSetEnabled(true); } catch (_) { st = null; }
+    if (!st || !st.enabled) return null;
+    paintAlfredTop(st);
+  }
+  if (typeof window.api.alfredPanelToggle === "function") { try { await window.api.alfredPanelToggle(true); } catch (_) {} }
+  return st;
+}
+// "→ 🎩 Alfred": the composed message goes to Alfred; his side panel opens and he answers there.
+async function sendToAlfred(preset) {
+  const text = String(typeof preset === "string" ? preset : el("composer-text").value).trim();
+  if (!text) { setStatus("Type a message first."); return; }
+  if (typeof window.api.alfredAsk !== "function") { setStatus("🎩 Alfred isn't available in this build."); return; }
+  uiLog("click", { id: "btn-send-butler", msg: "send to Alfred" });
+  const wasOn = !!(alfredTop && alfredTop.enabled);
+  const st = await alfredOpenPanel();
+  if (!st) { setStatus("Couldn't turn 🎩 Alfred on — try the 🎩 switch at the top."); return; }
+  if (st.card) { setStatus("🎩 Alfred is waiting for your answer on his card first (✔ Do it or ✖ No) — see his panel."); return; }
+  if (st.busy) { setStatus("🎩 Alfred is still working — see his panel (■ Stop cancels)."); return; }
+  setStatus(wasOn ? "Sent to 🎩 Alfred — he answers in his panel." : "Turned 🎩 Alfred on and sent him your message — he answers in his panel.");
+  if (typeof preset !== "string") { el("composer-text").value = ""; if (typeof updateCharCount === "function") try { updateCharCount(); } catch (_) {} }
+  let r = null;
+  try { r = await window.api.alfredAsk(text); } catch (_) { r = null; }
+  if (r && r.ok === false && r.message) setStatus(`🎩 ${r.message}`);
+}
+if (el("btn-butler-status")) el("btn-butler-status").onclick = async () => {
+  uiLog("click", { id: "btn-butler-status", msg: "open Alfred" });
+  const st = await alfredOpenPanel();
+  if (!st) setStatus("🎩 Alfred isn't available — try the 🎩 switch at the top.");
+};
+if (el("btn-ai-toggle")) el("btn-ai-toggle").onclick = async () => {
+  uiLog("click", { id: "btn-ai-toggle", msg: "Alfred on/off" });
+  const sw = el("btn-alfred-switch");
+  // the title-bar switch does the same (and its panel code builds / removes the drawer)
+  if (sw && sw.dataset.alfredWired === "yes") { sw.click(); setTimeout(alfredRefresh, 60); return; }
+  if (typeof window.api.alfredSetEnabled !== "function") { setStatus("🎩 Alfred isn't available in this build."); return; }
+  try { paintAlfredTop(await window.api.alfredSetEnabled(!(alfredTop && alfredTop.enabled))); } catch (_) {}
+};
+if (el("btn-butler-mode")) el("btn-butler-mode").onclick = async () => {
+  if (typeof window.api.alfredSettings !== "function") { setStatus("🎩 Alfred isn't available in this build."); return; }
+  const cur = (alfredTop && alfredTop.settings && alfredTop.settings.brain) || el("btn-butler-mode").dataset.brain || "auto";
+  const next = ALFRED_BRAINS[(ALFRED_BRAINS.indexOf(cur) + 1) % ALFRED_BRAINS.length];
+  uiLog("click", { id: "btn-butler-mode", msg: `Alfred thinks with: ${next}` });
+  let s = null;
+  try { s = await window.api.alfredSettings({ brain: next }); } catch (_) { s = null; }
+  const brain = (s && s.brain) || next;
+  paintAlfredTop(Object.assign({}, alfredTop || {}, { settings: Object.assign({}, (alfredTop && alfredTop.settings) || {}, s || {}, { brain }) }));
+  setStatus(`🧠 Alfred now thinks with ${ALFRED_BRAIN_META[brain].say}.${brain === "auto" ? "" : " Set it up in the 🎩 Butler section if it isn't ready."}`);
+};
+// 🩺 Check Alfred: his AI (llm:check) + the whole app (health:status) — no AI needed. With Alfred on, the
+// result shows in his side panel (its 🩺 Check everything button); while he is off, in the Activity Log.
+async function checkAlfredFromTop() {
+  uiLog("click", { id: "btn-capability-test", msg: "check Alfred" });
+  const panelBtn = el("alfred-a-check");
+  if (alfredTop && alfredTop.enabled && panelBtn) {
+    if (typeof window.api.alfredPanelToggle === "function") { try { await window.api.alfredPanelToggle(true); } catch (_) {} }
+    panelBtn.click();
+    setStatus("🩺 Checking — the result is in 🎩 Alfred's panel.");
+    return;
+  }
+  const b = el("btn-capability-test"); if (b) b.disabled = true;
+  logToCenter("🩺 Checking Alfred's AI and the whole app…", { tag: "setup" });
+  try {
+    let r = null;
+    if (typeof window.api.llmCheck === "function") { try { r = await window.api.llmCheck(); } catch (_) { r = null; } }
+    if (r && Array.isArray(r.rows)) {
+      logToCenter(`🧠 His AI: ${r.summary || (r.ok ? "ready." : "something needs fixing.")}`, { tag: "setup", err: r.ok === false });
+      for (const x of r.rows.slice(0, 10)) logToCenter(`  ${x.ok === true ? "✔" : x.ok === false ? "✖" : "⚠"} ${x.label}${x.detail ? ` — ${x.detail}` : ""}`, { tag: "setup", err: x.ok === false });
+    } else logToCenter("🧠 His AI: the check isn't available in this build — use the 🎩 Butler section.", { tag: "setup" });
+    let hs = null;
+    if (typeof window.api.healthStatus === "function") { try { hs = await window.api.healthStatus({ fresh: true }); } catch (_) { hs = null; } }
+    if (hs && Array.isArray(hs.problems)) {
+      if (!hs.problems.length) logToCenter("🩺 The app: ✔ nothing wrong found.", { tag: "setup" });
+      for (const p of hs.problems.slice(0, 8)) logToCenter(`  ${p.severity === "error" ? "✖" : "⚠"} ${p.text}${p.fix && p.fix.label ? ` — fix: ${p.fix.label} (in Alfred's panel)` : ""}`, { tag: "setup", err: p.severity === "error" });
+    }
+    setStatus(r && r.ok === false ? "🩺 Something needs fixing — see the Activity Log (⚡ Set up in the 🎩 Butler section)." : "🩺 Check done — see the Activity Log.");
+  } finally { if (b) b.disabled = false; }
+}
+if (el("btn-capability-test")) el("btn-capability-test").onclick = () => { checkAlfredFromTop(); };
+if (typeof window.api.onAlfred === "function") {
+  window.api.onAlfred((p) => {
+    if (!p) return;
+    if (p.type === "state" && p.state) paintAlfredTop(p.state);
+    else if (p.type === "card" || p.type === "message" || p.type === "activity") alfredRefresh();
+  });
+}
+paintAlfredTop(null);
+alfredRefresh();
 if (el("btn-jarvis-start")) el("btn-jarvis-start").onclick = async () => {
   if (!window.api.startManagedTask) return;
   const goal = (el("jarvis-goal") && el("jarvis-goal").value || "").trim();
@@ -2465,7 +2368,7 @@ if (window.api.onManagerAck) window.api.onManagerAck((a) => {
   if (!a || !a.text) return;
   if (el("jarvis-ack")) el("jarvis-ack").textContent = "🤵 " + a.text;
   // A stall-break question is the butler asking ME for input — flag it amber.
-  if (/\?\s*$/.test(a.text) || /would you like|tell me|need (more|the)|waiting on/i.test(a.text)) setButlerLight("needs", "Butler needs you");
+  // (the User Panel status light is 🎩 Alfred's now — see alfredTop below)
 });
 function renderAwareness(a) {
   const box = el("jarvis-awareness"); if (!box) return;
@@ -2487,10 +2390,6 @@ if (window.api.onManagerState) window.api.onManagerState((m) => {
   if (m.toolCalls && m.toolCalls.length) bits.push(`${m.toolCalls.length} tool call(s)`);
   if (m.memories && m.memories.length) bits.push(`${m.memories.length} memory item(s)`);
   jarvisSetStatus(bits.join(" · "));
-  // Drive the User Panel status light.
-  if (running) setButlerLight("working", `Butler: ${m.status}${m.turnNumber ? " · turn " + m.turnNumber : ""}`);
-  else if (m.status === "error") setButlerLight("error", "Butler stopped");
-  else setButlerLight("", m.status === "finished" ? "Butler done — idle" : "Butler idle");
   renderAwareness(m.awareness);
   renderPendingApproval(m);
 });
@@ -2565,6 +2464,73 @@ async function refreshToolsList() {
   } catch { /* leave default */ }
 }
 refreshToolsList();
+
+// 🧰 Tool servers (MCP): the saved list, each with its status, Start / Stop / Remove and its tools.
+// Everything a server says is shown as text (textContent), never as HTML. Secrets never come back from main.
+let mcpPollTimer = null;
+function mcpMsg(t, bad) { const m = el("mcp-msg"); if (m) { m.textContent = t || ""; m.style.color = bad ? "#e88" : ""; } }
+function mcpEl(tag, text, css) { const e = document.createElement(tag); if (text != null) e.textContent = text; if (css) e.style.cssText = css; return e; }
+function renderMcpServers(servers) {
+  const box = el("mcp-servers"); if (!box) return;
+  box.textContent = "";
+  if (!servers || !servers.length) { box.textContent = "None yet — nothing runs until you add one."; return; }
+  for (const s of servers) {
+    const row = mcpEl("div", null, "border:1px solid #333; border-radius:6px; padding:4px 6px; margin:3px 0;");
+    row.className = "mcp-server"; row.dataset.id = s.id;
+    const head = mcpEl("div", null, "display:flex; align-items:center; gap:6px; flex-wrap:wrap;");
+    const dot = s.status === "connected" ? "🟢" : s.status === "starting" ? "🟡" : s.status === "error" ? "🔴" : "⚪";
+    head.appendChild(mcpEl("b", `${dot} ${s.name}`));
+    const sum = mcpEl("span", s.status === "error" ? "not working" : s.summary, "opacity:.85;"); sum.className = "mcp-summary"; head.appendChild(sum);
+    const btns = mcpEl("span", null, "margin-left:auto; display:flex; gap:4px;");
+    const mk = (label, cls, fn) => { const b = mcpEl("button", label); b.className = `mini ${cls || ""}`; b.onclick = async () => { b.disabled = true; try { await fn(); } finally { b.disabled = false; refreshMcpServers(); refreshToolsList(); } }; btns.appendChild(b); return b; };
+    if (s.status === "connected" || s.status === "starting") mk("■ Stop", "", async () => { const r = await window.api.mcpStop(s.id); mcpMsg(r && r.message, !(r && r.ok)); });
+    else mk("▶ Start", "primary", async () => { mcpMsg(`Starting “${s.name}”… (the first start can take a minute while it downloads)`); const r = await window.api.mcpStart(s.id); mcpMsg(r && r.message, !(r && r.ok)); });
+    mk("✖ Remove", "danger", async () => { if (!window.confirm(`Remove the tool server “${s.name}”? Its saved keys are deleted too.`)) return; const r = await window.api.mcpRemove(s.id); mcpMsg(r && r.message, !(r && r.ok)); });
+    head.appendChild(btns);
+    row.appendChild(head);
+    const kind = s.transport === "http" ? "web address" : "program on this computer";
+    const keys = [...(s.envKeys || []), ...(s.headerKeys || [])];
+    row.appendChild(mcpEl("div", `${kind}: ${s.target}${keys.length ? ` · keys: ${keys.join(", ")} (hidden)` : ""}`, "font-size:10.5px; opacity:.65; word-break:break-all;"));
+    if (s.secretsNotSaved) row.appendChild(mcpEl("div", "This PC can't store keys encrypted, so its keys are kept only until AutoInjector closes.", "font-size:11px; color:#e0a24a;"));
+    if (s.status === "error" && s.message) {
+      const err = mcpEl("div", s.message, "font-size:11px; color:#e88; margin-top:2px;"); err.className = "mcp-error"; row.appendChild(err);
+    }
+    if (s.tools && s.tools.length) {
+      const d = mcpEl("details", null, "margin-top:2px;");
+      d.appendChild(mcpEl("summary", `${s.tools.length} tool${s.tools.length === 1 ? "" : "s"}`, "font-size:11px; cursor:pointer;"));
+      const ul = mcpEl("div", null, "font-size:11px; opacity:.85; white-space:pre-wrap;");
+      ul.className = "mcp-tools";
+      ul.textContent = s.tools.map((t) => `• ${t.name}${t.description ? ` — ${String(t.description).split("\n")[0].slice(0, 200)}` : ""}`).join("\n");
+      d.appendChild(ul);
+      row.appendChild(d);
+    }
+    box.appendChild(row);
+  }
+}
+async function refreshMcpServers() {
+  if (!window.api.mcpList) return;
+  let r = null; try { r = await window.api.mcpList(); } catch (_) { r = null; }
+  if (!r || !r.ok) return;
+  renderMcpServers(r.servers || []);
+  clearTimeout(mcpPollTimer);
+  const sec = el("tools-sec");
+  if (sec && sec.open && (r.servers || []).some((s) => s.status === "starting")) mcpPollTimer = setTimeout(refreshMcpServers, 2000);
+}
+if (el("tools-sec")) el("tools-sec").addEventListener("toggle", () => { if (el("tools-sec").open) { refreshMcpServers(); refreshToolsList(); } });
+if (el("btn-mcp-add")) el("btn-mcp-add").onclick = async () => {
+  const name = (el("mcp-name").value || "").trim();
+  const line = (el("mcp-line").value || "").trim();
+  if (!name || !line) { mcpMsg("Give it a short name and the command line (or web address) that starts it.", true); return; }
+  const b = el("btn-mcp-add"); b.disabled = true;
+  mcpMsg(`Adding “${name}” and starting it… (the first start can take a minute while it downloads)`);
+  let r = null;
+  try { r = await window.api.mcpAdd({ name, line, secrets: el("mcp-secrets").value || "" }); } catch (_) { r = null; }
+  b.disabled = false;
+  mcpMsg((r && r.message) || "That didn't work.", !(r && r.ok));
+  if (r && (r.ok || r.added)) { el("mcp-name").value = ""; el("mcp-line").value = ""; el("mcp-secrets").value = ""; }
+  refreshMcpServers(); refreshToolsList();
+};
+refreshMcpServers();
 
 // N3 Memory: a summary line for the panel.
 async function refreshMemoryLine() {
@@ -2664,9 +2630,18 @@ if (el("btn-mic")) el("btn-mic").onclick = async () => {
 
 // User Panel: 🧙 Setup -> open the Setup Wizard window (downloads run in bg).
 if (el("btn-open-wizard")) el("btn-open-wizard").onclick = () => { if (window.api.openWizard) window.api.openWizard(); };
-// Image / Video paddles: open the Setup Wizard straight to their own tab.
-if (el("btn-open-image")) el("btn-open-image").onclick = () => { if (window.api.openWizard) window.api.openWizard("images"); };
-if (el("btn-open-video")) el("btn-open-video").onclick = () => { if (window.api.openWizard) window.api.openWizard("video"); };
+// 🎨 Images / 🎬 Video buttons: switch the main window to that tab (the one place to make
+// pictures and clips). Only if the tab script is missing do they fall back to the Setup Wizard.
+if (el("btn-open-image")) el("btn-open-image").onclick = () => {
+  if (typeof window.sdShowImagesTab === "function") window.sdShowImagesTab();
+  else if (window.api.openWizard) window.api.openWizard("images");
+};
+if (el("btn-open-video")) el("btn-open-video").onclick = () => {
+  if (typeof window.vdShowVideoTab === "function") window.vdShowVideoTab();
+  else if (window.api.openWizard) window.api.openWizard("video");
+};
+// The Setup Wizard's "Open the Images / Video tab" buttons (wizard:open-app-tab) land here.
+if (window.api.onAppTabShow) window.api.onAppTabShow((p) => { const b = p && p.tab && el(`tab-app-${p.tab}`); if (b) b.click(); });
 
 // Open the consolidated AI feed window.
 if (el("btn-open-feed")) el("btn-open-feed").onclick = () => { if (window.api.openFeed) window.api.openFeed(); };

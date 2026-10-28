@@ -12,7 +12,9 @@ and 📖 Akọwe):
 | 🖌 **Generate** | prompt, negative prompt, character lock, LoRAs (with weights), checkpoint, VAE, sampler, size, steps, CFG, seed, batch → **Generate**, progress + **Stop**, result + gallery, **♻ Remake** / **🎲 Variation** |
 | 📚 **Library** | all your checkpoints, LoRAs, embeddings and VAEs with preview pictures, base model (SD1.5 / SDXL / Pony / Flux…), trigger words; your own tags, collections, ★, default weight, notes |
 | 🔒 **Character locks** | a LoRA + trigger words + fixed looks for one book character, so the face stays the same |
-| ⚙ **Start & install** | start a Stability Matrix package (or the ComfyUI AutoInjector installed) hidden, with the API on; or **⬇ Install Stable Diffusion** |
+| ⚙ **Start & install** | start a Stability Matrix package (or the ComfyUI AutoInjector installed) hidden, with the API on; or **⬇ Install Stable Diffusion**; **Advanced: another server** — a list of common addresses, 🔍 Auto-detect, ✓ Check it answers, and the on/off switch (for an SD app on another computer or an odd port) |
+
+The **🎨 Images** button in the AutoInjector tab's action bar opens this tab (the old Image Generation panel is gone — this is the one place).
 
 Pictures are saved in AutoInjector's **`stuff and thing/images/`** folder. Every
 picture carries its settings (inside the PNG, and in a `.json` file next to it), so

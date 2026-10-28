@@ -1,8 +1,8 @@
 'use strict';
 // tool-provider.js — the butler's external-tool capability (N5). A small,
 // in-process TOOL REGISTRY the manager can invoke via the USE_TOOL action,
-// deliberately shaped so a real MCP (Model Context Protocol) client can register
-// an external server's advertised tools into the SAME registry later, with no
+// and the user's tool servers (MCP, mcp-client.js / mcp-manager.js) register
+// their advertised tools into the SAME registry (registerMcpServer), with no
 // change to the USE_TOOL contract.
 //
 // A tool is { name, description, schema, risk, invoke(args) -> Promise<result> }:
@@ -109,13 +109,42 @@ async function run(name, args = {}, opts = {}) {
   }
 }
 
-// ---- MCP-ready seam -------------------------------------------------------
-// A future MCP client would connect to a server (stdio or HTTP), read its
-// advertised tools, and call register(...) once per tool with an invoke() that
-// forwards to that server. Not implemented now -- documented so the wiring point
-// is unambiguous and the USE_TOOL contract above never has to change.
-function registerMcpServer(/* cfg */) {
-  return { ok: false, error: 'MCP_NOT_IMPLEMENTED', hint: 'register() each advertised tool with an invoke() that forwards to the MCP server' };
+// ---- MCP tool servers ------------------------------------------------------
+// mcp-manager.js connects to the user's tool servers (mcp-client.js) and, for each
+// connected one, calls registerMcpServer({ name, label, tools, call }). Every
+// advertised tool lands in this SAME registry as "mcp:<server>/<tool>" with an
+// invoke() that forwards to the server — always risk "ask" (approval-gated), so
+// the USE_TOOL contract above never changes. unregisterMcpServer(name) removes
+// them again (server stopped / crashed / removed).
+function _mcpToolName(server, tool) { return `mcp:${server}/${tool}`; }
+function registerMcpServer(cfg) {
+  if (!cfg || !cfg.name || typeof cfg.call !== 'function') return { ok: false, error: 'NEED_SERVER', hint: 'registerMcpServer({ name, tools:[{name, description, inputSchema}], call(tool, args) })' };
+  const server = String(cfg.name);
+  unregisterMcpServer(server);
+  const names = [];
+  for (const t of (Array.isArray(cfg.tools) ? cfg.tools : []).slice(0, 1000)) {
+    if (!t || !t.name) continue;
+    const name = _mcpToolName(server, t.name);
+    register({
+      name,
+      description: `[tool server ${cfg.label || server}] ${String(t.description || t.title || t.name).slice(0, 300)}`,
+      schema: t.inputSchema || {},
+      risk: 'ask', // every tool-server call waits for the user's OK
+      source: `mcp:${server}`,
+      invoke: async (args) => {
+        const r = await cfg.call(t.name, args || {});
+        if (!r || r.ok === false) return { ok: false, error: (r && (r.message || r.error)) || 'TOOL_FAILED' };
+        return { ok: true, message: r.text || 'ok', data: { images: r.images, resources: r.resources, structured: r.structured } };
+      },
+    });
+    names.push(name);
+  }
+  return { ok: true, registered: names };
+}
+function unregisterMcpServer(server) {
+  let n = 0;
+  for (const [k, t] of registry) if (t.source === `mcp:${server}`) { registry.delete(k); n++; }
+  return n;
 }
 
 // ---- Built-in tools -------------------------------------------------------
@@ -306,4 +335,4 @@ register({ name: 'open-path', description: 'Open a URL, file or folder in the de
 register({ name: 'install-package', description: 'Install a package with pip or npm. Asks first.', schema: { manager: 'pip|pip3|pipx|npm', name: 'string (package name)' }, risk: 'ask', invoke: (args) => _installPackage(args) });
 register({ name: 'create-tool', description: "Create a NEW reusable tool the butler can call later — give it a name, description, language (shell|python|node) and the code to run. The tool (and every run) asks for your approval.", schema: { name: 'string', description: 'string', language: 'shell|python|node', code: 'string' }, risk: 'ask', invoke: (args) => _createTool(args) });
 
-module.exports = { configure, register, unregister, list, has, get, status, run, registerMcpServer, loadCreatedTools };
+module.exports = { configure, register, unregister, list, has, get, status, run, registerMcpServer, unregisterMcpServer, loadCreatedTools };

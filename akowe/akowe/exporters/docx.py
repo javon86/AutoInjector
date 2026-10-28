@@ -192,6 +192,9 @@ def build_docx(book: dict, *, created: str, family: str = "times", size_pt: floa
             body.append(_p("Heading1", bookmark(s["id"], _t(s["heading"]))))
         for b in s["blocks"]:
             t = b["t"]
+            if t == "vmap" and b.get("png_key") in images:  # 🖨 a drawn map with its PNG copy: placed as a picture
+                b = dict(b, t="img", key=b["png_key"])
+                t = "img"
             if t == "p":
                 body.append(_p("FirstParagraph" if b.get("first") else "BodyText", _runs(b)))
             elif t == "meta":
@@ -223,9 +226,9 @@ def build_docx(book: dict, *, created: str, family: str = "times", size_pt: floa
                 if b.get("caption"):
                     body.append(_p("Caption", _t(b["caption"])))
             elif t == "vmap":
-                # 🖼 B3: Word cannot show an SVG without a PNG copy and Akọwe makes no PNG (no Pillow at runtime):
-                # the caption and one line say where the map is (docs/PICTURES.md). An illustrated or uploaded
-                # PNG/JPEG map is placed like any picture.
+                # 🖼 B3: Word cannot show an SVG without a PNG copy (AutoInjector draws one: pictures.map_png, then
+                # the block has a png_key and is placed above). Without it the caption and one line say where the map
+                # is (docs/PICTURES.md). An illustrated or uploaded PNG/JPEG map is placed like any picture.
                 body.append(_p("Caption", _t((b.get("caption") + " — " if b.get("caption") else "")
                                               + "the map is in the PDF and EPUB editions of this book."),
                                "<w:pageBreakBefore/>" if plate else ""))

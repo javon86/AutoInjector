@@ -46,10 +46,13 @@
     if (document.body.dataset.appTab === 'video') document.body.dataset.appTab = id === 'tab-app-akowe' ? 'akowe' : id === 'tab-app-images' ? 'images' : 'main';
   });
   function subTab(which) {
-    for (const w of ['make', 'setup']) { $(`vd-sub-${w}`).setAttribute('aria-selected', String(w === which)); $(`vd-view-${w}`).hidden = w !== which; }
-    if (which === 'setup') refreshSetup();
+    for (const w of ['make', 'trailer', 'setup']) { if (!$(`vd-sub-${w}`)) continue; $(`vd-sub-${w}`).setAttribute('aria-selected', String(w === which)); $(`vd-view-${w}`).hidden = w !== which; }
+    if (which === 'setup') { refreshSetup(); loadOtherServer(); }
+    try { document.dispatchEvent(new CustomEvent('vd-subtab', { detail: which })); } catch (_) {}
   }
+  window.vdSubTab = subTab;
   $('vd-sub-make').onclick = () => subTab('make');
+  if ($('vd-sub-trailer')) $('vd-sub-trailer').onclick = () => subTab('trailer');
   $('vd-sub-setup').onclick = () => subTab('setup');
 
   // ------------------------------------------------------------ status
@@ -415,10 +418,46 @@
     setText('vd-settings-msg', r && r.ok ? 'Saved.' : `✖ ${(r && r.message) || 'Not saved.'}`);
     refreshStatus(true);
   };
+  // Advanced: other video server — also has what the old Video Generation panel offered:
+  // a list of common addresses, 🔍 auto-detect, "✓ Check it answers" and this server's clip settings.
+  const EP_FIELDS = [['vd-ep-frames', 'frames'], ['vd-ep-fps', 'fps'], ['vd-ep-width', 'width'], ['vd-ep-height', 'height'], ['vd-ep-steps', 'steps'], ['vd-ep-cfg', 'cfgScale'], ['vd-ep-motion', 'motion'], ['vd-ep-seed', 'seed']];
+  const wapi = () => window.api || {};
+  let epLoaded = false;
+  async function loadOtherServer() {
+    const w = wapi();
+    if (epLoaded) return;
+    epLoaded = true;
+    if (typeof w.endpointPresets === 'function') {
+      try { const r = await w.endpointPresets('video'); if (r && r.ok) for (const p of r.presets) { const o = document.createElement('option'); o.value = p.endpoint; o.textContent = p.label; $('vd-ep-preset').appendChild(o); } } catch (_) {}
+    }
+    if (typeof w.videoStatus === 'function') {
+      try { const s = await w.videoStatus(); if (s) { for (const [id, k] of EP_FIELDS) if (s[k] != null && $(id)) $(id).value = String(s[k]); if (!$('vd-ep-url').value && s.endpoint) $('vd-ep-url').value = s.endpoint; } } catch (_) {}
+    }
+  }
+  $('vd-ep-preset').onchange = () => { const v = $('vd-ep-preset').value; if (v) { $('vd-ep-url').value = v; setText('vd-ep-msg', 'Filled in — press ✓ Check it answers, then Save.'); } };
+  $('btn-vd-ep-detect').onclick = async () => {
+    const w = wapi(); if (typeof w.detectEndpoints !== 'function') return;
+    setText('vd-ep-msg', '🔍 Looking on this PC…');
+    let r; try { r = await w.detectEndpoints('video'); } catch (_) { r = null; }
+    const reach = (r && r.reachable) || [];
+    if (!reach.length) { setText('vd-ep-msg', 'Nothing found running. Start your video server with its API on, or pick one from the list.'); return; }
+    $('vd-ep-url').value = reach[0].endpoint; $('vd-ep-preset').value = reach[0].endpoint;
+    setText('vd-ep-msg', `Found: ${reach[0].label} ✓ — press Save.${reach.length > 1 ? ` (+${reach.length - 1} more)` : ''}`);
+  };
+  $('btn-vd-ep-test').onclick = async () => {
+    const w = wapi(); if (typeof w.testEndpoint !== 'function') return;
+    const url = $('vd-ep-url').value.trim();
+    if (!url) { setText('vd-ep-msg', 'Type an address or pick one from the list first.'); return; }
+    setText('vd-ep-msg', 'Checking…');
+    let r; try { r = await w.testEndpoint(url); } catch (_) { r = null; }
+    setText('vd-ep-msg', r && r.reachable ? 'It answers ✓ — press Save to use it.' : 'No answer — is the video server running with its API on? Check the address.');
+  };
   $('btn-vd-ep-save').onclick = async () => {
     if (!window.api || typeof window.api.configureVideo !== 'function') return;
-    let r; try { r = await window.api.configureVideo({ enabled: $('vd-ep-enabled').checked, endpoint: $('vd-ep-url').value.trim() }); } catch (e) { r = { ok: false, message: String(e) }; }
-    setText('vd-ep-msg', r && r.ok ? (r.enabled ? 'Saved — the other video server is on.' : 'Saved — off.') : `✖ ${(r && (r.message || r.error)) || 'Not saved.'}`);
+    const patch = { enabled: $('vd-ep-enabled').checked, endpoint: $('vd-ep-url').value.trim() };
+    for (const [id, k] of EP_FIELDS) { const e = $(id); if (e && String(e.value).trim() !== '') { const n = Number(e.value); if (Number.isFinite(n)) patch[k] = n; } }
+    let r; try { r = await window.api.configureVideo(patch); } catch (e) { r = { ok: false, message: String(e) }; }
+    setText('vd-ep-msg', r && r.ok ? (r.enabled ? 'Saved — the other video server is on.' : 'Saved — off.') : `✖ ${(r && (r.message || r.error)) || 'Not saved.'} Try again.`);
     refreshStatus(true);
   };
   if (api && api.onInstall) api.onInstall((i) => renderDownload(i));

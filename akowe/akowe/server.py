@@ -176,6 +176,7 @@ class App:
         self._last_project: dict | None = None
         if self.interrupted:  # runs that were working when Akọwe stopped: save how far they got
             threading.Thread(target=self.saver.after_start, name="akowe-save-interrupted", daemon=True).start()
+        self.saver.start_periodic()  # 💾 every 10 minutes: save the books that changed (quietly; auto-save setting)
 
     # ------------------------------------------------------------------ 💾/📂 which computer asks
     def set_client(self, host: str | None):
@@ -518,6 +519,9 @@ class App:
                 if rest and rest[0] == "pictures":  # 🖼 B3 chapter/scene pictures and the map (pictures.py)
                     from . import pictures  # noqa: PLC0415
                     return pictures.route(self, method, rest[1:], query, body, principal, pid, branch, headers)
+                if rest and rest[0] == "trailer":  # 🎞 B2 book trailers (trailer.py; AutoInjector POST /video/trailer)
+                    from . import trailer  # noqa: PLC0415
+                    return trailer.route(self, method, rest[1:], query, body, principal, pid, branch, headers)
                 if rest and rest[0] == "cover":  # 🎨 B3 book covers (cover.py)
                     from . import cover  # noqa: PLC0415
                     return cover.route(self, method, rest[1:], query, body, principal, pid, branch, headers)
@@ -600,13 +604,21 @@ class App:
             return 200, sv.open_folder(pid, b.get("branch_id") or "main")
         if parts == ["books-folder", "open"] and method == "POST":
             b = body if isinstance(body, dict) else {}
-            return 201, op.open_folder(principal, b.get("folder"))
+            out = op.open_folder(principal, b.get("folder"), b.get("mode"))
+            return (200 if out.get("needs_choice") else 201), out
+        if parts == ["books", "open-path"] and method == "POST":  # 📂 a big book straight from its folder (no upload)
+            b = body if isinstance(body, dict) else {}
+            out = op.open_path(principal, b.get("path"), b.get("mode"))
+            return (200 if out.get("needs_choice") else 201), out
+        if parts == ["books", "choose-path"] and method == "POST":  # AutoInjector's folder picker
+            return 200, op.choose_path()
         if parts == ["books-folder", "bible"] and method == "GET":
             from . import book_bible  # noqa: PLC0415
             name = (query.get("folder") or [None])[0]
             return 200, {"folder": name, "summary": book_bible.summary(op.folder_bible(name))}
         if parts == ["books", "open"] and method == "POST":
-            return 201, op.upload(principal, body, headers)
+            out = op.upload(principal, body, headers, (query.get("mode") or [None])[0])
+            return (200 if out.get("needs_choice") else 201), out
         if len(parts) == 3 and parts[:2] == ["books", "bible"] and method == "GET":
             from . import book_bible  # noqa: PLC0415
             b, _src = op.resolve_bible(principal, {"bible_id": parts[2]})
@@ -1470,8 +1482,9 @@ def make_handler(app: App):
             self.end_headers()
 
         def do_DELETE(self):
-            # 🖼 B3: DELETE …/pictures/<pic_id> is the one place a DELETE means something (other paths stay 405)
-            if re.fullmatch(r"/api/projects/[^/]+/branches/[^/]+/pictures/[^/]+", urlparse(self.path).path):
+            # Only the routes where a DELETE means something get through (every other path stays 405):
+            # 🖼 B3 a picture, ✒️ P25 the author's style card ("Delete my style card"), 🗂 an item / place / magic dossier
+            if any(r.fullmatch(urlparse(self.path).path) for r in DELETE_PATHS):
                 return self._handle("DELETE")
             self._not_allowed()
 
@@ -1487,6 +1500,9 @@ def make_handler(app: App):
     return Handler
 
 
+DELETE_PATHS = (re.compile(r"/api/projects/[^/]+/branches/[^/]+/pictures/[^/]+"),
+                re.compile(r"/api/style-card"),
+                re.compile(r"/api/projects/[^/]+/branches/[^/]+/forge/(?:items|places|magic)/[^/]+"))
 PING_CHALLENGE_RE = re.compile(r"^[0-9a-f]{16,64}$")
 
 
