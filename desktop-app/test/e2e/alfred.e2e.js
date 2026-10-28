@@ -169,7 +169,7 @@ async function main() {
     assert(!!g && !g.focusedPanel, 'appearing on its own, it did not take the keyboard from the app');
     await controls.evaluate((base) => window.api.alfredSettings({ brain: 'local', local: { endpoint: base, model: 'fake-model' } }), llm.base);
     const quick = await panel.$$eval('#alfred-quick button', (els) => els.map((e) => e.textContent));
-    assert(quick.join('|') === '📊 Status|🩺 Check his AI|🎨 Make a picture|📖 My book|⚙ Set up his AI', `the quick buttons are there (${quick.join(' · ')})`);
+    assert(quick.join('|') === '📊 Status|🩺 Check his AI|🎨 Make a picture|📖 My book|⚙ Set up his AI|🧑 New character|✨ New magic system|🗡 New item|🗺 New place', `the quick buttons are there (${quick.join(' · ')})`);
     // Proof it is drawn OVER the app (incl. the native AI panes): the screen shows the panel's own pixels there.
     await sleep(600);
     const over = await overProof(panel, g.b, 'f1');
