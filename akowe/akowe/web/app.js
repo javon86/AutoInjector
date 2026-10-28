@@ -8210,7 +8210,7 @@ function booksFolderCard() {
         cur.custom ? h('button', { type: 'button', class: 'small', onclick: () => save({ path: '' }) }, '↩ Use the default folder') : null,
         cur.local ? folderButton(cur.path, true) : h('button', { type: 'button', class: 'small', onclick: () => copyText(cur.path, 'Folder path copied') }, '📋 Copy the folder path')),
       cur.writable ? h('p', { class: 'small', 'data-testid': 'bf-ok' }, '✔ Akọwe can write there.') : h('div', null, problemBox(cur.problem || { code: 'SAVE_FOLDER_NOT_WRITABLE' })),
-      h('div', { class: 'field row' }, auto, h('label', { for: 'bf-auto' }, ' Save books automatically while they are made and when they are finished (at most every 2 minutes)'),
+      h('div', { class: 'field row' }, auto, h('label', { for: 'bf-auto' }, ' Save books automatically (on by default): after each finished step, when a book is finished, and every 10 minutes when a book changed'),
         h('button', { type: 'button', class: 'small', onclick: () => save({ auto_save: auto.checked }) }, 'Save')),
       cur.local ? null : h('p', { class: 'small muted' }, '⚠️ You use Akọwe from another device: folders can only be opened on the computer Akọwe runs on.'),
       out);
@@ -8344,18 +8344,35 @@ function openSavedBookDialog(opener) {
   modal('📂 Open a saved book', close => {
     const list = h('div', { 'data-testid': 'open-list' }, loadingState('Looking in your books folder…'));
     const msg = h('div', { 'aria-live': 'polite' });
-    const afterOpen = r => {
+    // again(mode) repeats the same open with mode 'update' | 'copy' (the book is already on this computer)
+    const afterOpen = async (r, again) => {
+      if (r && r.needs_choice && again) {
+        const ex = r.existing || {}; const sv = r.saved || {};
+        const pick = await choiceDialog('This book is already in Your books', h('div', { 'data-testid': 'open-choice' },
+          h('p', null, `“${ex.name}” is already on this computer. Update it to the saved book, or open the saved book as a copy next to it?`),
+          h('ul', { class: 'small' },
+            h('li', null, `The saved book: ${sv.saved_at ? `saved ${fmtTime(sv.saved_at)}` : 'saved'}`),
+            h('li', null, `The one you have: ${ex.updated_at ? `last changed ${fmtTime(ex.updated_at)}` : 'on this computer'}`)),
+          h('p', { class: 'small muted' }, '⟳ Update replaces the book you have with the saved one (same book, same folder). 📄 A copy leaves the book you have as it is.')),
+        [{ id: 'update', label: '⟳ Update the one I have' }, { id: 'copy', label: '📄 Open as a copy' }]);
+        if (pick !== 'update' && pick !== 'copy') return;
+        try { put(clear(msg), loadingState(pick === 'update' ? 'Updating the book…' : 'Opening a copy…')); await afterOpen(await again(pick)); }
+        catch (e) { put(clear(msg), problemBox(toProblem(e, { step: '📂 Open a saved book' }))); }
+        return;
+      }
       close();
       if (r.kind === 'bible') { openRerunDialog({ bible_id: r.bible_id }, r.summary.title, opener, r.summary); return; }
       toast(r.message || 'Opened');
       go(link('p', r.project_id, r.branch_id || 'main', 'book'));
     };
+    let maxUpload = 64 * 1024 * 1024;
     const load = async () => {
       put(clear(list), loadingState('Looking in your books folder…'));
       let out;
       try { out = await api('GET', '/books-folder'); }
       catch (e) { put(clear(list), problemBox(toProblem(e, { step: '📂 Open a saved book' }), { retry: load })); return; }
       const rows = out.folders || [];
+      if (out.max_upload) maxUpload = out.max_upload;
       put(clear(list), h('p', { class: 'small' }, 'Books folder: ', h('code', null, out.path), ' ', h('button', { type: 'button', class: 'small', onclick: load }, '🔄 Refresh')),
         rows.length ? h('ul', { class: 'record-list open-list' }, rows.map(f => h('li', { class: 'record-item', 'data-folder': f.name },
           h('div', { class: 'r-main' }, h('span', { class: 'r-title' }, f.title),
@@ -8363,7 +8380,8 @@ function openSavedBookDialog(opener) {
           h('div', { class: 'r-badges' },
             f.has_package ? h('button', { type: 'button', class: 'small primary', 'data-testid': 'open-folder-btn', onclick: async ev => {
               const b = ev.currentTarget; b.disabled = true; clear(msg);
-              try { afterOpen(await api('POST', '/books-folder/open', { body: { folder: f.name } })); }
+              const openIt = mode => api('POST', '/books-folder/open', { body: Object.assign({ folder: f.name }, mode ? { mode } : {}) });
+              try { await afterOpen(await openIt(), openIt); }
               catch (e) { msg.appendChild(problemBox(toProblem(e, { book: f.title, step: '📂 Open a saved book' }))); b.disabled = false; }
             } }, '📂 Open') : null,
             f.has_bible ? h('button', { type: 'button', class: 'small', 'data-testid': 'rerun-folder-btn', onclick: () => { close(); openRerunDialog({ folder: f.name }, f.title, opener); } }, '🔁 Rerun') : null))))
@@ -8374,17 +8392,40 @@ function openSavedBookDialog(opener) {
       clear(msg);
       const f = file.files && file.files[0];
       if (!f) { markFieldProblem(file, { code: 'MISSING_INPUT', message: 'Choose a book.akowe or book-bible.json file first.' }, { step: '📂 Open a saved book', field: 'File' }); return; }
+      if (f.size > maxUpload) { markFieldProblem(file, { code: 'OPEN_TOO_LARGE', message: `This file is larger than ${Math.round(maxUpload / 1048576)} MB, too big to upload. Open it from its folder instead (below): type or choose the book's folder.` }, { step: '📂 Open a saved book', field: 'File' }); pathIn.focus(); return; }
       up.disabled = true; put(msg, loadingState(`Opening ${f.name}…`));
-      try { const fd = new FormData(); fd.append('file', f, f.name); const r = await api('POST', '/books/open', { raw: fd }); clear(msg); afterOpen(r); }
+      const send = mode => { const fd = new FormData(); fd.append('file', f, f.name); return api('POST', `/books/open${mode ? `?mode=${mode}` : ''}`, { raw: fd }); };
+      try { const r = await send(); clear(msg); await afterOpen(r, send); up.disabled = false; }
       catch (e) { put(clear(msg), problemBox(toProblem(e, { step: '📂 Open a saved book', field: f.name }))); up.disabled = false; }
     } }, '📂 Open this file');
+    // 📂 a book straight from its folder on this computer (no upload: for books bigger than the upload limit)
+    const pathIn = h('input', { type: 'text', id: 'open-path', spellcheck: 'false', autocomplete: 'off', class: 'bf-path', 'data-testid': 'open-path', placeholder: 'D:\\Books\\My book (ab12cd)  or  …/book.akowe' });
+    const byPath = h('button', { type: 'button', class: 'small primary', 'data-testid': 'open-path-btn', onclick: async () => {
+      clear(msg);
+      const p = pathIn.value.trim();
+      if (!p) { markFieldProblem(pathIn, { code: 'MISSING_INPUT', message: 'Type the full path of the book\'s folder, or press 📁 Choose the folder.' }, { step: '📂 Open a saved book', field: 'Folder' }); return; }
+      byPath.disabled = true; put(msg, loadingState('Opening the book from its folder…'));
+      const openIt = mode => api('POST', '/books/open-path', { body: Object.assign({ path: p }, mode ? { mode } : {}) });
+      try { const r = await openIt(); clear(msg); await afterOpen(r, openIt); }
+      catch (e) { put(clear(msg), problemBox(toProblem(e, { step: '📂 Open a saved book', field: 'Folder' }))); }
+      byPath.disabled = false;
+    } }, '📂 Open from this folder');
+    const choose = h('button', { type: 'button', class: 'small', 'data-testid': 'open-choose', onclick: async () => {
+      clear(msg); choose.disabled = true;
+      try { const r = await api('POST', '/books/choose-path', { body: {} }); if (r && r.path) { pathIn.value = r.path; byPath.focus(); } }
+      catch (e) { msg.appendChild(problemBox(toProblem(e, { step: '📂 Choose the folder' }))); }
+      choose.disabled = false;
+    } }, '📁 Choose the folder (AutoInjector)');
     load();
     return h('div', { 'data-testid': 'open-dialog' },
-      h('p', null, 'A saved book opens as a NEW book: the books you have are never overwritten. An unfinished book can be continued. ', infoTip('Opening saved books', ...TIP_SAVE())),
+      h('p', null, 'A saved book opens as a new book. When the same book is already in Your books, Akọwe asks: update the one you have, or open a copy. An unfinished book can be continued. ', infoTip('Opening saved books', ...TIP_SAVE())),
       h('h3', null, 'From your books folder'), list,
       h('h3', null, 'From a file'),
       h('div', { class: 'field' }, h('label', { for: 'open-file' }, 'A book.akowe file (the whole book) or a book-bible.json (to make a new book from it)'), file),
-      h('div', { class: 'row' }, up), msg);
+      h('div', { class: 'row' }, up),
+      h('h3', null, 'From a folder on this computer'),
+      h('div', { class: 'field' }, h('label', { for: 'open-path' }, 'The saved book\'s folder (or its book.akowe file): no upload, so books of any size open'), pathIn),
+      h('div', { class: 'row' }, byPath, choose), msg);
   }, { wide: true });
 }
 /** Run window: 💾 where the book is saved (auto-save), with Save now. */

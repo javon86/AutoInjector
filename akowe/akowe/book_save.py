@@ -29,7 +29,10 @@ Saves never block or fail a run: ``auto()`` returns at once (the save runs in it
 ⚠️ on the book page / run window (``book_save:<pid>:<branch>`` = the last save: at, ok, path, problem). Automatic
 saves (on by default): after each step of a Make-a-book run and after chapter approvals at most once per
 ``interval_s`` (120 s; the last change is saved when the interval is over), and at once when a run finishes, pauses,
-is cancelled or stops on a problem, and for runs found interrupted at start-up.
+is cancelled or stops on a problem, and for runs found interrupted at start-up. And every ``PERIODIC_S`` (10 minutes)
+a quiet check (``periodic_tick``) saves every book whose state changed since its last save (``fingerprint``: its
+records, approvals, module state and its own settings — the dossiers, cover, pictures, profile), so work done by hand
+(no run) is saved too; an unchanged book is not touched.
 
 Nothing secret is written: keys and the access token are not in the database, and every text file is checked against
 the saved secrets (``book_package.guard``); the journal and run events never hold prompts or AI replies.
@@ -63,6 +66,7 @@ log = logging.getLogger("akowe.book_save")
 SETTINGS_KEY = "books_folder"
 MAX_PATH = 200
 INTERVAL_S = 120
+PERIODIC_S = 600          # 💾 the quiet "every 10 minutes when the book changed" save
 MARKER = ".akowe-folder.json"
 PACKAGE = "book.akowe"
 FOLDER_SCHEMA = 1
@@ -279,6 +283,9 @@ class SaveService:
         self.app = app
         self.store = app.store
         self.interval_s = INTERVAL_S
+        self.periodic_s = PERIODIC_S
+        self._ticker: threading.Thread | None = None
+        self._stop_ticker = threading.Event()
         self._lock = threading.RLock()
         self._threads: dict[tuple, threading.Thread] = {}
         self._jobs: dict[tuple, dict] = {}
@@ -296,7 +303,7 @@ class SaveService:
         path = cur.get("path") or str(dflt)
         return {"path": path, "default_path": str(dflt), "custom": bool(cur.get("path")),
                 "auto_save": bool(cur.get("auto_save", autosave_default())), "interval_s": self.interval_s,
-                "max_path": MAX_PATH}
+                "periodic_s": self.periodic_s, "max_path": MAX_PATH}
 
     def base(self) -> Path:
         return Path(self.settings()["path"])
@@ -436,6 +443,16 @@ class SaveService:
                     if pic:
                         ext = "jpg" if pic[:3] == b"\xff\xd8\xff" else "png"
                         files[f"Character Forge/{code} pictures/{slot}.{ext}"] = pic
+                clip = art.get("clip") if isinstance(art.get("clip"), dict) else None
+                if clip:  # 🎬 the motion clip (turntable / establishing pan / the effect in use) and its poster
+                    vid = forge.picture_bytes(store, pid, branch, clip)
+                    if vid:
+                        ext = "webm" if forge.sniff_video(vid) == "video/webm" else "mp4"
+                        files[f"Character Forge/{code} pictures/motion clip.{ext}"] = vid
+                    pic = forge.picture_bytes(store, pid, branch, clip.get("poster"))
+                    if pic:
+                        ext = "jpg" if pic[:3] == b"\xff\xd8\xff" else "png"
+                        files[f"Character Forge/{code} pictures/motion clip poster.{ext}"] = pic
 
     def collect(self, pid: str, branch: str, *, on_phase=None) -> tuple[dict, dict]:
         """{relative path: bytes} for everything that exists now, and info about it (read-only)."""
@@ -750,9 +767,10 @@ class SaveService:
     def _thread(self, key, job):
         pid, branch = key
         try:
+            fp = self.fingerprint(pid, branch)  # before collecting: a change made while saving is saved next time
             res = self.save_now(pid, branch, kind=job["kind"], on_phase=lambda p: job.update(phase=p))
             job.update(state="done", phase="Saved", path=res["path"], result=res, finished_at=now_iso())
-            self._record(pid, branch, dict(res, at=now_iso(), kind=job["kind"], problem=None))
+            self._record(pid, branch, dict(res, at=now_iso(), kind=job["kind"], problem=None, fp=fp))
         except Exception as exc:  # noqa: BLE001 - a save never breaks anything else
             prob = classify(exc)
             if not isinstance(exc, (SaveProblem, OSError)):
@@ -837,6 +855,77 @@ class SaveService:
             if j.get("kind") in ("autobook", "write_all") and j.get("status") == "interrupted" and \
                     j.get("project_id") and not j.get("opened_from_package"):
                 self.auto(j["project_id"], j.get("branch_id") or "main", reason="interrupted", force=True)
+
+    # ------------------------------------------------------------------ 💾 every 10 minutes, when the book changed
+    def fingerprint(self, pid: str, branch: str = "main") -> str | None:
+        """A cheap summary of everything a save writes: changes whenever a record, an approval, module state, the
+        project or one of the book's own settings (profile, dossiers, cover, pictures, …) changes. None on error."""
+        try:
+            q = self.store.query_one
+            rec = q("SELECT COUNT(*) AS n, MAX(created_at) AS m FROM records WHERE project_id=? AND branch_id=?",
+                    (pid, branch))
+            life = q("SELECT COUNT(*) AS n, MAX(updated_at) AS m FROM lifecycle WHERE project_id=? AND branch_id=?",
+                     (pid, branch))
+            mod = q("SELECT COUNT(*) AS n, MAX(updated_at) AS m FROM module_state WHERE project_id=? AND "
+                    "branch_id=?", (pid, branch))
+            sets = q("SELECT COUNT(*) AS n, MAX(updated_at) AS m FROM settings WHERE instr(key, ?) > 0 AND "
+                     "key NOT LIKE 'book_save:%' AND key NOT LIKE 'book_folder:%'", (pid,))
+            proj = q("SELECT name, settings FROM projects WHERE project_id=?", (pid,))
+            parts = [[r["n"], r["m"]] if r else None for r in (rec, life, mod, sets)]
+            parts.append([proj["name"], proj["settings"]] if proj else None)
+            return hashlib.sha256(json.dumps(parts, default=str).encode("utf-8")).hexdigest()[:24]
+        except Exception:  # noqa: BLE001 - unknown: the caller saves
+            log.warning("could not read the state of book %s", pid)
+            return None
+
+    def periodic_tick(self) -> list:
+        """One quiet round: save (in the background) every book whose state changed since its last save. Returns the
+        (pid, branch) pairs it started. Never raises."""
+        started = []
+        try:
+            if not self.auto_on():
+                return started
+            for p in self.store.query("SELECT project_id FROM projects WHERE archived=0"):
+                pid = p["project_id"]
+                if self.app.is_test_project(pid):
+                    continue
+                for b in self.store.query("SELECT branch_id FROM branches WHERE project_id=?", (pid,)):
+                    branch = b["branch_id"]
+                    last = self.last(pid, branch)
+                    fp = self.fingerprint(pid, branch)
+                    if last is None:
+                        has = self.store.query_one("SELECT 1 AS x FROM records WHERE project_id=? AND branch_id=? "
+                                                   "LIMIT 1", (pid, branch)) or self.store.query_one(
+                            "SELECT 1 AS x FROM settings WHERE instr(key, ?) > 0 AND key NOT LIKE 'book_save:%' AND "
+                            "key NOT LIKE 'book_folder:%' LIMIT 1", (pid,))
+                        if not has:
+                            continue  # an empty book: nothing to save yet
+                    elif fp is not None and last.get("fp") == fp and last.get("ok"):
+                        continue  # unchanged since its last save: leave it alone
+                    self.auto(pid, branch, reason="saved every 10 minutes (the book changed)", force=True)
+                    started.append((pid, branch))
+        except Exception:  # noqa: BLE001 - a background check never breaks anything
+            log.exception("the 10-minute save check failed")
+        return started
+
+    def start_periodic(self):
+        """The background ticker of ``periodic_tick`` (every ``periodic_s``); a second call does nothing."""
+        if self._ticker and self._ticker.is_alive():
+            return
+
+        def loop():
+            while not self._stop_ticker.wait(self.periodic_s):
+                self.periodic_tick()
+                try:
+                    self.store.close()  # this thread's database connection
+                except Exception:  # noqa: BLE001
+                    pass
+        self._stop_ticker.clear()
+        self._ticker = threading.Thread(target=loop, name="akowe-save-every-10-min", daemon=True)
+        self._ticker.start()
+
+    def stop_periodic(self):
+        self._stop_ticker.set()
 
     def wait_idle(self, timeout: float = 30.0, timers: bool = False) -> bool:
         end = time.monotonic() + timeout

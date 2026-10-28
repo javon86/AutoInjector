@@ -220,10 +220,10 @@ def test_a_book_folder_saved_by_bookforge_opens_and_is_taken_over_by_the_next_sa
     # the books folder list and 📂 Open see the old package
     row = next(r for r in route(app, "GET", "/api/books-folder")[1]["folders"] if r["name"] == folder.name)
     assert row["has_package"] and row["bytes"] == len(old_pkg) and row["in_library"]
-    st, res = route(app, "POST", "/api/books-folder/open", {"folder": folder.name})
+    st, res = route(app, "POST", "/api/books-folder/open", {"folder": folder.name, "mode": "copy"})
     assert st == 201 and res["kind"] == "package" and res["project_id"] != pid
     # an uploaded book.bookforge and an old book bible open too
-    assert app.opener.import_bytes("author", old_pkg)["kind"] == "package"
+    assert app.opener.import_bytes("author", old_pkg, mode="copy")["kind"] == "package"
     old_bible = (folder / "Book Bible" / "book-bible.json").read_bytes()
     assert book_bible.clean(old_bible)["kind"] == book_bible.KIND
     # the next save of the same book uses the same folder and replaces the old pair

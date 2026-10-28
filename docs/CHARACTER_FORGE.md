@@ -126,6 +126,16 @@ The bridge's own `hint` becomes the "how to fix it".
 
 ## 🎬 Motion clip (AutoInjector `POST /video/request`)
 
+Items, places and magic systems have one too (F10): an item a slow turntable / hover (from the item portrait, else the
+front view), a place a slow establishing pan (the establishing shot, else the day view), a magic system the effect in
+use (the in-use picture, else the sigil) — same job, upload slots (`clip`, `clip_poster`), MOTION STUDY still in the
+PDF and book save (`Character Forge/<code> pictures/motion clip.*`).
+
+**🧑 A new character** (one the book does not have yet): `POST …/forge/characters {name, aliases?, role?, about?}`
+makes a draft A01 character (approved on the 🎭 Characters page like any other) and its dossier with the author's
+words as supplied text (name + aliases, role, `about` as the supplied canon) → 201 `{record_id, created, dossier}`
+(code `CH-00N`); the same name (or `from` = its record id) returns the existing one (200). Nothing is invented.
+
 A short picture→video "motion study" per dossier (contract: `docs/VIDEO_API.md`, the engine side). `POST …/art`
 `{what: "clip", engine: "auto"}` starts a job (`forge_clip`) that:
 

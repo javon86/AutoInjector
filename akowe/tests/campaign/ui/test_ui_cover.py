@@ -115,9 +115,26 @@ def test_cover_page_designs_saves_and_downloads(make_context, cv):
         page.click("[data-testid=cover-book-epub]")
         page.wait_for_selector("[data-testid=cover-dl-msg] .state, [data-testid=cover-dl-msg] .problem", timeout=10000)
         assert "export" in page.inner_text("[data-testid=cover-dl-msg]").lower()
+        # 🖨 the ebook cover as a JPG: this (fake) AutoInjector cannot draw → a plain problem; one that can → the JPG
+        page.click("[data-testid=cover-dl-jpg]")
+        page.wait_for_function("() => /cannot draw pictures/.test(document.querySelector('[data-testid=cover-dl-msg]')"
+                               ".textContent)", timeout=15000)
+        from test_f10_finish import RenderBridge
+        rb = RenderBridge()
+        try:
+            forge.save_bridge_settings(cv.app, {"url": rb.url, "token": "t"})
+            page.select_option("[data-testid=cover-jpg-size]", "2560x4096")
+            with page.expect_download(timeout=30000) as dl:
+                page.click("[data-testid=cover-dl-jpg]")
+            assert dl.value.suggested_filename == "The Salt Road - ebook cover 2560x4096.jpg"
+            assert open(dl.value.path(), "rb").read(3) == b"\xff\xd8\xff"
+            assert rb.renders()[-1]["width"] == 2560 and rb.renders()[-1]["height"] == 4096
+        finally:
+            rb.close()
         assert not bad_text(page) and not unnamed_controls(page)
         # the expected 400 of the book download (no export yet) is not a browser problem
-        page.bf_problems[:] = [x for x in page.bf_problems if "/cover/book" not in x and "status of 400" not in x]
+        page.bf_problems[:] = [x for x in page.bf_problems if "/cover/book" not in x and "/cover/ebook" not in x
+                               and "status of 400" not in x]
         assert_clean(page, "cover page")
     finally:
         b.close()

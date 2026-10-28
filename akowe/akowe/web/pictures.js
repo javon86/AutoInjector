@@ -34,7 +34,7 @@ export async function viewPictures(main, x) {
     h('p', null, 'Pictures for your chapters and scenes, and a map of your world, placed in the PDF, EPUB and Word files of the book.'),
     h('p', null, '🖼 Illustrate makes a picture from the scene card (where, when, who is there and what happens) with each character’s approved look from the Character Forge (Fixed visual anchors and appearance) and the character lock of the main character, in the art style you set for the book.'),
     h('p', null, 'Make 2 or 3 candidates and pick the one you like. Only a picked picture goes into the book. After a change here, put the book together again (📘 Make my book) so the files show it.'),
-    h('p', null, 'The map drawn from your places is a vector drawing: it is in the PDF and the EPUB; Word files say where to find it. An illustrated or uploaded map is in all three.')))));
+    h('p', null, 'The map drawn from your places is a vector drawing: it is in the PDF and the EPUB; Word files show a PNG copy that AutoInjector draws (without AutoInjector they say where to find the map). An illustrated or uploaded map is in all three.')))));
   const wrap = h('div', { class: 'pics', 'data-testid': 'pictures-page' });
   main.appendChild(wrap);
   const msg = h('div', { class: 'pics-msg', 'aria-live': 'polite' });
@@ -164,6 +164,20 @@ export async function viewPictures(main, x) {
         h('button', { type: 'button', class: 'small', 'data-testid': 'pics-map-up', onclick: () => upload('chapter=map', 'Upload a map') }, '⬆ Upload a map')),
       mapProg);
     if (d.map) mapCard.appendChild(pictureBlock(d.map, 1, 'Map'));
+    // 🖨 Word needs a PNG copy of a drawn (SVG) map: AutoInjector draws it (POST /pictures/map {kind: 'png'})
+    const pick = d.map && d.map.picture;
+    if (pick && pick.vector) {
+      mapCard.appendChild(pick.word_copy
+        ? h('p', { class: 'small muted', 'data-testid': 'pics-map-word' }, '✔ Word files show a PNG copy of this map.')
+        : h('div', { class: 'row', 'data-testid': 'pics-map-word' },
+          h('span', { class: 'small muted' }, 'Word cannot show this drawn map without a PNG copy. AutoInjector draws it (it must be running).'),
+          h('button', { type: 'button', class: 'small', 'data-testid': 'pics-map-png', onclick: async () => {
+            clear(msg);
+            try { const out = await api('POST', bpath('/pictures/map'), { body: { kind: 'png' } }); x.toast('The Word copy of the map is made'); if (out.message) msg.appendChild(h('p', { class: 'small muted' }, out.message)); }
+            catch (e) { fail(e, 'The Word copy of the map could not be made'); }
+            await reload();
+          } }, '🖨 Make the Word copy')));
+    }
     body.appendChild(mapCard);
     // the chapters
     if (!d.chapters.length) {

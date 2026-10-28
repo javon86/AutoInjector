@@ -121,6 +121,8 @@ async function fakeAkowe(token) {
     // other dossier kinds + the manuscript check (Akọwe docs/CHARACTER_FORGE.md)
     if (m === 'GET' && p === `${B}/forge/places`) return send(res, 200, { places: [{ record_id: 'FK-p1', name: 'Gullhaven', code: 'PL-001', readiness: 'draft' }], candidates: [{ source_id: 'A04-x', name: 'The Lighthouse', from: 'place record' }] });
     if (m === 'POST' && p === `${B}/forge/places`) return send(res, 201, { record_id: 'FK-p2', created: true, dossier: { code: 'PL-002', name: (body && body.name) || 'The Lighthouse' }, message: 'Started PL-002.' });
+    if (m === 'POST' && p === `${B}/forge/characters`) { st.forgeCalls.push({ kind: 'create', kp: 'characters', body }); return send(res, 201, { record_id: 'A01-new1', created: true, dossier: { code: 'CH-002', name: body && body.name }, message: `${body && body.name} is a new character of the book (CH-002, a draft).` }); }
+    if (m === 'POST' && p === `${B}/forge/places/FK-p1/art`) { st.forgeCalls.push({ kind: 'art', kp: 'places', body }); return send(res, 202, { job_id: 'job-place-art' }); }
     if (/\/forge\/(characters|places)\/[^/]+\/check$/.test(p)) { st.forgeCalls.push({ kind: 'check', m, body }); return m === 'POST' ? send(res, 202, { job_id: 'job-check' }) : send(res, 200, { findings: [{ finding_id: 'f1', field: 'eyes', chapter: 'ch2', quote: 'her blue eyes', what: 'the dossier says grey' }], counts: { open: 1 } }); }
     if (/\/forge\/(characters|places)\/[^/]+\/check\/[^/]+$/.test(p) && m === 'PUT') { st.forgeCalls.push({ kind: 'verdict', body }); return send(res, 200, { ok: true }); }
     const D = st.dossier;

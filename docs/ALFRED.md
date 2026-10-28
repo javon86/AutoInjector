@@ -200,7 +200,8 @@ chrome.
 - `forge_character` fills empty fields as **proposals**. Nothing the author wrote or locked changes.
 - `edit_dossier` writes fields in the author's words, optionally locked.
 - `approve_dossier` approves proposals. It always shows its card and can never be "always allowed".
-- `make_character_art` makes the portrait, any of the ten reference views, or one turnaround sheet. It draws with Stable Diffusion (`engine: "sd"`, using the character lock), with ChatGPT in its pane (`"chatgpt"`), or `"auto"`.
+- `create_dossier` with `kind: "characters"` and a `name` (plus `role`, `about`) adds a new character the book does not have yet (a draft) with its dossier.
+- `make_character_art` makes the portrait, any of the ten reference views, one turnaround sheet, or a motion clip (`what: "clip"`: for items a turntable, places an establishing pan, magic systems the effect in use). It draws with Stable Diffusion (`engine: "sd"`, using the character lock), with ChatGPT in its pane (`"chatgpt"`), or `"auto"`.
 - `open_akowe_page` with `page: "forge"` (plus `character`) shows the dossier.
 
 **🎨 Every Stable Diffusion setting** — `sd_call` reaches every method of the 🎨 Images module (`sd-api.js`):

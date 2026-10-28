@@ -104,8 +104,12 @@ The exporters accept JPEG/PNG only and Akọwe has no Pillow at runtime, so the 
 * **PDF**: drawn with vector operations from the SVG (`d_maps.read_svg`): a parchment frame, the routes as lines,
   each place as a dot (a new `circle` op in the PDF writer) with its name; characters the base-14 fonts lack are
   printed as their plain letters (`layout.winansi`);
-* **DOCX**: not drawn (Word needs a PNG copy of an SVG); the caption is followed by “the map is in the PDF and EPUB
-  editions of this book”. An **illustrated or uploaded map** (PNG/JPEG) is placed in all three formats.
+* **DOCX**: Word needs a PNG copy of the SVG. AutoInjector draws it (`POST /render/image`, 2000 px wide, the SVG's
+  shape) when the map is drawn, or with **🖨 Make the Word copy** (`POST …/pictures/map {kind: "png"}`); it is kept on
+  the map's candidate (`png`, shown as `word_copy`) and placed in the DOCX like a picture (the PDF and EPUB keep the
+  vector map). Without it (AutoInjector not running) the caption is followed by “the map is in the PDF and EPUB
+  editions of this book”. The book save adds `Pictures/map.png`. An **illustrated or uploaded map** (PNG/JPEG) is
+  placed in all three formats.
 
 ## Book save
 

@@ -1086,9 +1086,11 @@ def data_uri(data: bytes, mime: str) -> str:
 
 # ====================================================================== EPUB and DOCX
 def add_cover_epub(epub: bytes, *, svg_inline: str, art: tuple | None, svg_file: str | None, title: str,
-                   lang: str = "en") -> bytes:
-    """The EPUB with a cover: ``cover.xhtml`` first in the spine (an inline SVG: the artwork with the typeset text
-    over it) and a ``cover-image`` (the artwork itself, else the SVG). ``art`` = (bytes, ImageInfo) or None.
+                   lang: str = "en", jpg: bytes | None = None) -> bytes:
+    """The EPUB with a cover: ``cover.xhtml`` first in the spine and a ``cover-image``. With ``jpg`` (the whole
+    front cover drawn as a JPG by AutoInjector, text included) that JPG is the cover image and the cover page shows
+    it; else the cover page is an inline SVG (the artwork with the typeset text over it) and the cover image the
+    artwork itself (or the SVG). ``art`` = (bytes, ImageInfo) or None.
     An EPUB that already has a cover-image is returned unchanged."""
     from .ziputil import build_zip, read_zip  # noqa: PLC0415
     zf = read_zip(epub)
@@ -1100,26 +1102,35 @@ def add_cover_epub(epub: bytes, *, svg_inline: str, art: tuple | None, svg_file:
     if "cover-image" in opf:
         return epub
     items, files = [], []
-    if art is not None:
-        data, info = art
-        href = f"images/cover-art.{info.ext}"
-        files.append((f"OEBPS/{href}", data))
-        items.append(f"<item id=\"cover-image\" href=\"{href}\" media-type=\"{info.mime}\" properties=\"cover-image\"/>")
-    else:
-        files.append(("OEBPS/images/cover.svg", (svg_file or "").encode("utf-8")))
-        items.append("<item id=\"cover-image\" href=\"images/cover.svg\" media-type=\"image/svg+xml\" "
+    if jpg is not None:
+        files.append(("OEBPS/images/cover.jpg", jpg))
+        items.append("<item id=\"cover-image\" href=\"images/cover.jpg\" media-type=\"image/jpeg\" "
                      "properties=\"cover-image\"/>")
+        page = f"<img src=\"../images/cover.jpg\" alt={_xml_quoteattr(title or 'Cover')}/>"
+        page_css = "section.cover img { display: block; height: 100vh; max-width: 100%; margin: 0 auto; }"
+    else:
+        if art is not None:
+            data, info = art
+            href = f"images/cover-art.{info.ext}"
+            files.append((f"OEBPS/{href}", data))
+            items.append(f"<item id=\"cover-image\" href=\"{href}\" media-type=\"{info.mime}\" "
+                         "properties=\"cover-image\"/>")
+        else:
+            files.append(("OEBPS/images/cover.svg", (svg_file or "").encode("utf-8")))
+            items.append("<item id=\"cover-image\" href=\"images/cover.svg\" media-type=\"image/svg+xml\" "
+                         "properties=\"cover-image\"/>")
+        page = svg_inline
+        page_css = "section.cover svg { display: block; width: 100%; height: 100vh; margin: 0 auto; }"
     xhtml = ("<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<!DOCTYPE html>\n"
              f"<html xmlns=\"http://www.w3.org/1999/xhtml\" xmlns:epub=\"http://www.idpf.org/2007/ops\" "
              f"lang={_xml_quoteattr(lang)} xml:lang={_xml_quoteattr(lang)}>\n<head>\n<meta charset=\"utf-8\"/>\n"
              f"<title>{_xml_escape(title or 'Cover')}</title>\n"
              "<style>html, body { margin: 0; padding: 0; height: 100%; text-align: center; } "
-             "section.cover { height: 100%; } section.cover svg { display: block; width: 100%; height: 100vh; "
-             "margin: 0 auto; }</style>\n</head>\n<body>\n"
-             f"<section epub:type=\"cover\" class=\"cover\">{svg_inline}</section>\n</body>\n</html>\n")
+             f"section.cover {{ height: 100%; }} {page_css}</style>\n</head>\n<body>\n"
+             f"<section epub:type=\"cover\" class=\"cover\">{page}</section>\n</body>\n</html>\n")
     files.append(("OEBPS/text/cover.xhtml", xhtml.encode("utf-8")))
-    items.append("<item id=\"cover\" href=\"text/cover.xhtml\" media-type=\"application/xhtml+xml\" "
-                 "properties=\"svg\"/>")
+    items.append("<item id=\"cover\" href=\"text/cover.xhtml\" media-type=\"application/xhtml+xml\""
+                 + ("/>" if jpg is not None else " properties=\"svg\"/>"))
     opf = opf.replace("</manifest>", "".join(i + "\n" for i in items) + "</manifest>", 1)
     opf = re.sub(r"<spine([^>]*)>\n?", lambda mm: f"<spine{mm.group(1)}>\n<itemref idref=\"cover\"/>\n", opf, count=1)
     opf = opf.replace("</metadata>", "<meta name=\"cover\" content=\"cover-image\"/>\n</metadata>", 1)
