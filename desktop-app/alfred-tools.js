@@ -864,38 +864,107 @@ def({
     return { ok: true, data: { enabled: !!s.enabled, configured: !!s.configured, note: s.enabled && s.configured ? 'Video generation is set up.' : 'Video generation is not set up yet: in the 🎬 Video tab, install ComfyUI + a video model (one click).' } };
   },
 });
+// generate_video forgives what small models send (seen: {character, image, prompt, seconds} with a
+// picture that wasn't one): seconds clamped to 1–10, an empty / "none" value dropped, an image that is
+// no picture path or picture data dropped (→ text→video), a picture + a character → the picture is used.
+// Each forgiven value is noted back to the AI; what still fails names the field and what it may be.
+const VIDEO_SECONDS = { min: 1, max: 10 };
+const EMPTYISH = /^\s*(none|null|undefined|n\/?a|no|false|-|nothing|empty)?\s*$/i;
+function looksLikePicture(v) {
+  if (typeof v !== 'string') return false;
+  const s = v.trim();
+  if (/^data:image\/[\w.+-]+;base64,/i.test(s)) return true;
+  if (s.length < 2048 && /\.(png|jpe?g|webp|gif)$/i.test(s)) return true;
+  if (s.length < 2048 && /^(file:\/\/|[a-z]:[\\/]|[\\/]|~[\\/]|\.{1,2}[\\/])/i.test(s)) return true;
+  return s.length > 200 && /^[A-Za-z0-9+/=\s]+$/.test(s); // plain base64
+}
+function forgiveVideoArgs(a, notes) {
+  const out = {};
+  for (const [k, v] of Object.entries(a || {})) {
+    if (v === undefined || v === null || (typeof v === 'string' && EMPTYISH.test(v))) continue; // empty / "none" = not given
+    out[k] = v;
+  }
+  if (out.seconds !== undefined) {
+    let n = typeof out.seconds === 'number' ? out.seconds : Number((String(out.seconds).match(/-?\d+(\.\d+)?/) || [])[0]);
+    if (!Number.isFinite(n)) { notes.push(`seconds “${str(out.seconds, 40)}” is not a number, so the usual length is used (seconds may be ${VIDEO_SECONDS.min} to ${VIDEO_SECONDS.max}).`); delete out.seconds; }
+    else {
+      const c = Math.min(VIDEO_SECONDS.max, Math.max(VIDEO_SECONDS.min, n));
+      if (c !== n) notes.push(`seconds ${n} is outside ${VIDEO_SECONDS.min}–${VIDEO_SECONDS.max}, so ${c} was used.`);
+      out.seconds = c;
+    }
+  }
+  for (const k of ['prompt', 'character', 'negative_prompt']) if (out[k] !== undefined && typeof out[k] !== 'string') { if (typeof out[k] === 'number') out[k] = String(out[k]); else { notes.push(`${k} must be text — it was left out.`); delete out[k]; } }
+  if (out.image !== undefined && !looksLikePicture(out.image)) {
+    notes.push(`image “${clip(typeof out.image === 'string' ? out.image : JSON.stringify(out.image), 60)}” is not a picture (image must be the path of a .png / .jpg / .webp file, or picture data), so it was left out — the video is made from the description instead (text → video).`);
+    delete out.image;
+  }
+  return out;
+}
 def({
   name: 'generate_video', title: 'Generate a video', group: 'video', changes: true, timeoutMs: 1200000,
-  description: 'Make a short video clip: from a description (text → video), or bring a picture to life (image = a picture path → video). character = a character lock (keeps their looks). seconds 1–10. Uses the 🎬 Video module (ComfyUI + Wan); for every other setting use video_call.',
+  description: 'Make a short video clip: from a description (prompt → text → video), or bring a picture to life (image = the path of a .png/.jpg/.webp file → video). character = a character lock name (keeps their looks; for text → video — with an image the picture is used). seconds 1–10. Uses the 🎬 Video module (ComfyUI + Wan); for every other setting use video_call.',
   args: { type: 'object', properties: {
-    prompt: { type: 'string', maxLength: 1000 },
-    image: { type: 'string', maxLength: 1000, description: 'A picture file to animate (path)' },
-    character: { type: 'string', maxLength: 120, description: 'A character lock name' },
-    seconds: { type: 'number', minimum: 1, maximum: 10 },
+    prompt: { type: 'string', maxLength: 1000, description: 'What happens in the video' },
+    image: { type: 'string', maxLength: 2000, description: 'A picture to animate: the path of a .png / .jpg / .webp file' },
+    character: { type: 'string', maxLength: 120, description: 'A character lock name (text → video)' },
+    seconds: { type: 'number', description: `Length in seconds, ${VIDEO_SECONDS.min}–${VIDEO_SECONDS.max} (clamped)` },
     negative_prompt: { type: 'string', maxLength: 1000 },
   }, additionalProperties: false },
-  async check(a) { return str(a.prompt, 1) || a.image || a.character ? { ok: true } : { ok: false, error: 'give a prompt, a picture (image) or a character' }; },
-  describe: (a) => `${a.image ? `Bring the picture ${q(a.image)} to life` : 'Make a short video'}${a.prompt ? ` — ${q(a.prompt)}` : ''}${a.character ? ` with ${q(a.character)}'s looks` : ''}${a.seconds ? ` (${a.seconds} s)` : ''}, and save it in the videos folder. It can take several minutes.`,
+  forgive: forgiveVideoArgs,
+  async check(a) { return str(a.prompt, 1) || a.image || a.character ? { ok: true } : { ok: false, error: 'give at least one of: prompt (what happens, as text), image (the path of a .png / .jpg / .webp picture to animate) or character (a character lock name)' }; },
+  describe: (a) => `${a.image ? `Bring the picture ${q(a.image)} to life` : 'Make a short video'}${a.prompt ? ` — ${q(a.prompt)}` : ''}${a.character ? (a.image ? ` (the picture is used, not ${q(a.character)}'s character lock)` : ` with ${q(a.character)}'s looks`) : ''}${a.seconds ? ` (${a.seconds} s)` : ''}, and save it in the videos folder. It can take several minutes.`,
   async run(a, ctx) {
+    const notes = [];
     const methods = ctx.videoMethods ? await ctx.videoMethods() : [];
     if (methods.some((m) => m.method === 'video.generate')) {
-      const params = { prompt: a.prompt || '', from: 'alfred' };
-      if (a.image) params.image = a.image;
-      if (a.character) params.characterLock = a.character;
-      if (a.seconds) params.seconds = a.seconds;
-      if (a.negative_prompt) params.negativePrompt = a.negative_prompt;
-      const r = await ctx.videoInvoke(a.image && methods.some((m) => m.method === 'video.animate') ? 'video.animate' : 'video.generate', params);
-      if (!r || r.ok === false) return { ok: false, error: str((r && (r.code || r.error)) || 'VIDEO_FAILED', 60), message: clip((r && (r.message || r.hint)) || 'The video could not be made.', 400) };
-      return { ok: true, message: `Saved the clip${r.seconds ? ` (${r.seconds} s)` : ''}.`, data: { path: r.path || null, poster: r.poster || null, model: r.model || null, seed: r.seed } };
+      const base = { from: 'alfred' };
+      if (a.seconds) base.seconds = a.seconds;
+      if (a.negative_prompt) base.negativePrompt = a.negative_prompt;
+      const textParams = () => { const p = Object.assign({ prompt: a.prompt || '' }, base); if (a.character) p.characterLock = a.character; return p; };
+      let r; let usedImage = false;
+      if (a.image && methods.some((m) => m.method === 'video.animate')) {
+        if (a.character) notes.push(`Both a picture and a character were given: the picture was used (it already shows who it is); the character lock “${str(a.character, 80)}” was not applied.`);
+        r = await ctx.videoInvoke('video.animate', Object.assign({ prompt: a.prompt || '', image: a.image }, base));
+        usedImage = true;
+        // The picture could not be used (not found / not a picture): make it from the description instead.
+        if (r && r.ok === false && r.code === 'INVALID_PARAM' && r.field === 'image' && (str(a.prompt, 1) || a.character)) {
+          notes.length = 0;
+          notes.push(`The picture could not be used (${clip(r.message || 'not a readable picture', 160)}), so the video was made from the description instead (text → video).`);
+          r = await ctx.videoInvoke('video.generate', textParams()); usedImage = false;
+        }
+      } else {
+        if (a.image) notes.push('Picture → video is not available in this build, so the video was made from the description (text → video).');
+        if (a.image && !str(a.prompt, 1) && !a.character) return { ok: false, error: 'UNSUPPORTED', message: 'Picture → video is not available here and there is no description (prompt) to make it from text.' };
+        r = await ctx.videoInvoke('video.generate', textParams());
+      }
+      // No such character lock: with a description the video is still made, without the lock.
+      if (r && r.ok === false && r.code === 'NO_LOCK' && !usedImage && a.character && str(a.prompt, 1)) {
+        notes.push(`There is no character lock “${str(a.character, 80)}”, so the video was made from the description without one (character_locks lists them).`);
+        const p = textParams(); delete p.characterLock;
+        r = await ctx.videoInvoke('video.generate', p);
+      }
+      if (!r || r.ok === false) return { ok: false, error: str((r && (r.code || r.error)) || 'VIDEO_FAILED', 60), message: clip(videoErrorText(r), 500), notes };
+      for (const w of imageNotes(r.warnings)) notes.push(w);
+      return { ok: true, message: `Saved the clip${usedImage ? ' (from the picture)' : ''}${r.seconds ? ` (${r.seconds} s)` : ''}.${notes.length ? ` ${notes[0]}` : ''}`, notes, data: { path: r.path || null, poster: r.poster || null, model: r.model || null, seed: r.seed, mode: usedImage ? 'picture→video' : 'text→video' } };
     }
-    if (a.image) return { ok: false, error: 'VIDEO_NOT_SET_UP', message: 'Bringing a picture to life needs the 🎬 Video module (ComfyUI + a video model): install it in the 🎬 Video tab.' };
+    if (a.image && !str(a.prompt, 1)) return { ok: false, error: 'VIDEO_NOT_SET_UP', message: 'Bringing a picture to life needs the 🎬 Video module (ComfyUI + a video model): install it in the 🎬 Video tab.' };
     const s = ctx.videoStatus();
     if (!s.enabled || !s.configured) return { ok: false, error: 'VIDEO_NOT_SET_UP', message: 'Video generation is not set up yet: in the 🎬 Video tab, install ComfyUI + a video model (one click).' };
+    if (a.image) notes.push('This video server makes video from text only, so the picture was not used.');
     const r = await ctx.generateVideo(a.prompt);
-    if (!r || !r.ok) return { ok: false, error: (r && r.error) || 'VIDEO_FAILED', message: (r && r.message) || 'The video could not be made.' };
-    return { ok: true, message: 'Saved the clip.', data: { path: r.path || r.url || null } };
+    if (!r || !r.ok) return { ok: false, error: (r && r.error) || 'VIDEO_FAILED', message: (r && r.message) || 'The video could not be made.', notes };
+    return { ok: true, message: 'Saved the clip.', notes, data: { path: r.path || r.url || null } };
   },
 });
+// A module failure in words the AI can act on: which field, what it may be.
+function videoErrorText(r) {
+  if (!r) return 'The video could not be made.';
+  const msg = String(r.message || r.error || 'The video could not be made.');
+  const parts = [r.code === 'INVALID_PARAM' && r.field && !msg.includes(r.field) ? `${r.field}: ${msg}` : msg];
+  if (r.hint && !msg.includes(r.hint)) parts.push(r.hint);
+  if (r.fix && !msg.includes(r.fix)) parts.push(r.fix);
+  return parts.join(' ');
+}
 def({
   name: 'video_call', title: 'Use the 🎬 Video module', group: 'video', changes: true, timeoutMs: 1200000,
   description: 'Any video control through the 🎬 Video module (video-api): method = a module method such as video.generate / video.animate (every setting: prompt, negativePrompt, image, width, height, seconds, frames, fps, model, steps, cfgScale, seed, sampler, scheduler, shift, characterLock), video.status/models/progress/cancel/gallery/capabilities, video.install.check/downloadModel/cancel, and any newer method the module lists. Read-only methods run directly; the rest ask first.',
@@ -1194,8 +1263,11 @@ function validate(tool, args) {
   if (!a || typeof a !== 'object' || Array.isArray(a)) return { ok: false, error: 'the arguments must be an object' };
   const ignored = [];
   a = tidyArgs(a, tool.args, ignored);
+  // A tool may forgive its own usual slips (clamp a number, drop a value it can't use) — each one noted.
+  const notes = [];
+  if (typeof tool.forgive === 'function') { try { a = tool.forgive(a, notes) || a; } catch (_) { /* keep a */ } }
   const e = checkValue(a, tool.args, 'args');
-  return e ? { ok: false, error: e } : Object.assign({ ok: true, args: a }, ignored.length ? { ignored } : {});
+  return e ? { ok: false, error: e } : Object.assign({ ok: true, args: a }, ignored.length ? { ignored } : {}, notes.length ? { notes } : {});
 }
 /**
  * Forgive the usual small-model slips before checking (the real limits are still checked after):

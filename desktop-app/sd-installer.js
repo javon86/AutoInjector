@@ -15,6 +15,9 @@
  *   2. space      — free disk space (fs.statfs) ≥ the need (archive + unpacked + a model).
  *   3. download   — resumable (.part + HTTP Range), cancellable, follows redirects,
  *                   SHA-256 + size checked against GitHub's release info when published.
+ *                   A dropped / stalled connection or a 5xx is retried by itself (Range resume,
+ *                   backoff, up to 8 tries in a row without progress ≈ 10 min); this download()
+ *                   is shared with video-installer.js (the 🎬 Video models).
  *   4. extract    — 7-Zip if installed, else Windows' own tar.exe (bsdtar reads .7z on
  *                   recent Windows 10/11). Plain error + "install 7-Zip" if neither works;
  *                   the download is kept so Install continues where it stopped.
@@ -101,6 +104,23 @@ function freeBytes(dir) {
 }
 
 // ------------------------------------------------------------------ HTTP download
+// Retries: a long download (a 10 GB model over an hour) meets network hiccups. A dropped connection,
+// a timeout, a stall (no bytes for stallMs), a cut-short body or a 5xx/429 answer is retried by
+// itself with an HTTP Range resume from the bytes already in the .part file, with a growing pause.
+// The try counter starts over whenever bytes arrive, so only a connection that stays down for good
+// (8 tries ≈ 10 minutes) gives up — with a plain message; the .part is kept and the next
+// Download / Resume continues from it.
+const RETRY_DELAYS_MS = [5000, 10000, 20000, 40000, 80000, 120000, 180000]; // between tries 1→2 … 7→8 (≈ 7.5 min + the tries)
+const MAX_TRIES = 8;
+const STALL_MS = 60000;
+const RETRYABLE = new Set(['ECONNRESET', 'ETIMEDOUT', 'TIMEOUT', 'ESOCKETTIMEDOUT', 'ABORTED', 'STALLED', 'EPIPE', 'ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'ENETUNREACH', 'ENETDOWN', 'EHOSTUNREACH', 'ECONNABORTED', 'ERR_STREAM_PREMATURE_CLOSE', 'CUT_SHORT', 'NETWORK', 'HTTP_408', 'HTTP_425', 'HTTP_429']);
+function isRetryable(code) { return RETRYABLE.has(code) || /^HTTP_5\d\d$/.test(String(code || '')); }
+function _errCode(e) {
+  if (!e) return 'NETWORK';
+  if (e.code) return e.code;
+  if (/socket hang up|aborted/i.test(String(e.message || ''))) return 'ECONNRESET';
+  return 'NETWORK';
+}
 function _get(url, headers, deps, redirects = 0) {
   return new Promise((resolve, reject) => {
     let u; try { u = new URL(url); } catch { return reject(Object.assign(new Error('BAD_URL'), { code: 'BAD_URL' })); }
@@ -114,7 +134,7 @@ function _get(url, headers, deps, redirects = 0) {
       resolve({ res, req, url });
     });
     req.on('error', reject);
-    req.setTimeout(60000, () => req.destroy(Object.assign(new Error('TIMEOUT'), { code: 'TIMEOUT' })));
+    req.setTimeout(deps.socketTimeoutMs || 60000, () => req.destroy(Object.assign(new Error('TIMEOUT'), { code: 'TIMEOUT' })));
   });
 }
 async function _json(url, deps) {
@@ -131,11 +151,96 @@ async function _hashFile(file) {
   return h;
 }
 
-// Download url → dest with resume. job: { cancelled, cancel() } set by the caller.
-// → { ok, file, bytes, sha256, resumed } | { ok:false, error, message }
-async function download(url, dest, opts = {}) {
+// One try: url → dest.part (resuming from what is already there), renamed to dest when complete.
+// → { ok, file, bytes, sha256, resumed } | { ok:false, error, retryable, message, partial }
+async function _downloadOnce(url, dest, opts) {
   const deps = opts.deps || {};
   const onProgress = opts.onProgress || (() => {});
+  const job = opts.job;
+  const again = opts.againText || 'Press Install again';
+  const part = `${dest}.part`;
+  const paused = () => ({ ok: false, error: 'CANCELLED', message: `Download paused. ${again} to continue where it stopped.`, partial: part });
+  let have = 0; try { have = fs.statSync(part).size; } catch {}
+  if (opts.expectedSize && have > opts.expectedSize) { fs.unlinkSync(part); have = 0; } // our own broken partial
+  const hash = opts.expectedSha256 && have ? await _hashFile(part) : (opts.expectedSha256 ? crypto.createHash('sha256') : null);
+  let got;
+  try { got = await _get(url, have ? { Range: `bytes=${have}-` } : {}, deps); }
+  catch (e) { const code = _errCode(e); return { ok: false, error: code, retryable: isRetryable(code), message: `The download could not start (${code}). Check the internet connection and ${again.toLowerCase()} — it continues where it stopped.`, partial: have ? part : undefined }; }
+  const { res, req } = got;
+  job.cancel = () => { job.cancelled = true; try { req.destroy(); } catch {} };
+  if (job.cancelled) { try { req.destroy(); } catch {} return paused(); }
+  if (res.statusCode === 416 && opts.expectedSize && have === opts.expectedSize) { res.resume(); }
+  else if (res.statusCode === 200 && have) { have = 0; if (hash) hash.__reset = true; }
+  else if (res.statusCode !== 200 && res.statusCode !== 206) { res.resume(); const code = `HTTP_${res.statusCode}`; return { ok: false, error: code, retryable: isRetryable(code), message: `The download server said ${res.statusCode}. Try again later.`, partial: have ? part : undefined }; }
+  const total = res.statusCode === 206 ? have + Number(res.headers['content-length'] || 0) : Number(res.headers['content-length'] || opts.expectedSize || 0);
+  const resumed = res.statusCode === 206 && have > 0;
+  const h = hash && hash.__reset ? crypto.createHash('sha256') : hash;
+  if (res.statusCode !== 416) {
+    const out = fs.createWriteStream(part, { flags: resumed ? 'a' : 'w' });
+    let done = have, last = 0, stall = null, stalled = false;
+    const stallMs = opts.stallMs || STALL_MS;
+    const kick = () => { clearTimeout(stall); stall = setTimeout(() => { stalled = true; try { req.destroy(Object.assign(new Error('STALLED'), { code: 'STALLED' })); } catch {} }, stallMs); };
+    try {
+      await new Promise((resolve, reject) => {
+        kick();
+        res.on('data', (c) => {
+          kick();
+          if (h) h.update(c);
+          done += c.length;
+          if (!out.write(c)) { res.pause(); out.once('drain', () => res.resume()); }
+          const t = Date.now(); if (t - last > 250) { last = t; onProgress({ step: 'download', done, total, pct: total ? done / total : 0 }); }
+        });
+        res.on('end', resolve);
+        res.on('error', reject);
+        res.on('aborted', () => reject(Object.assign(new Error('ABORTED'), { code: 'ABORTED' })));
+        res.on('close', () => { if (!res.complete) reject(Object.assign(new Error('ABORTED'), { code: 'ABORTED' })); });
+        req.on('error', reject);
+        out.on('error', reject);
+      });
+    } catch (e) {
+      clearTimeout(stall);
+      await new Promise((r) => { if (out.destroyed || out.closed) r(); else out.end(r); });
+      if (job.cancelled) return paused();
+      const code = stalled ? 'STALLED' : _errCode(e);
+      if (['ENOSPC', 'EACCES', 'EPERM', 'EROFS'].includes(code)) return { ok: false, error: code, retryable: false, message: code === 'ENOSPC' ? 'The disk is full — the download could not be saved. Free some space, then continue (nothing already downloaded is lost).' : `The download could not be saved (${code}: no permission to write ${dest}).`, partial: part };
+      return { ok: false, error: code, retryable: isRetryable(code), message: `The download was interrupted (${code === 'STALLED' ? 'no data arrived for a while' : code}). ${again} — it continues where it stopped.`, partial: part };
+    }
+    clearTimeout(stall);
+    await new Promise((r) => out.end(r));
+    if (job.cancelled) return paused();
+    onProgress({ step: 'download', done, total, pct: 1 });
+  }
+  const size = fs.statSync(part).size;
+  if (opts.expectedSize && size !== opts.expectedSize) {
+    // Fewer bytes than the server announced = the connection was cut short (worth another try);
+    // a server whose file has another size is not fixed by trying again.
+    const cut = size < opts.expectedSize && (!total || total === opts.expectedSize);
+    return { ok: false, error: 'SIZE_MISMATCH', retryable: cut, message: `The download is incomplete (${fmtBytes(size)} of ${fmtBytes(opts.expectedSize)}). ${again} to continue.`, partial: part };
+  }
+  const sha = h ? h.digest('hex') : null;
+  if (opts.expectedSha256 && sha && sha.toLowerCase() !== String(opts.expectedSha256).toLowerCase()) {
+    fs.renameSync(part, `${dest}.bad`);
+    return { ok: false, error: 'HASH_MISMATCH', message: `The downloaded file is damaged (its checksum does not match the published one). It was set aside as .bad — ${again.toLowerCase()} to download it again.` };
+  }
+  fs.renameSync(part, dest);
+  return { ok: true, file: dest, bytes: size, sha256: sha, resumed };
+}
+
+// A pause between tries that Cancel ends at once.
+function _pause(ms, job) {
+  return new Promise((resolve) => {
+    let t = null;
+    const done = () => { clearTimeout(t); resolve(); };
+    t = setTimeout(done, ms);
+    job.cancel = () => { job.cancelled = true; done(); };
+  });
+}
+
+// Download url → dest with resume and automatic retries. job: { cancelled, cancel() } set by the caller.
+// opts: expectedSize, expectedSha256, onProgress({done,total,pct}), onRetry({attempt,max,error,delayMs,done,total}),
+//       maxTries (8), retryDelaysMs, stallMs (60 s), againText ('Press Install again'), deps.
+// → { ok, file, bytes, sha256, resumed, tries } | { ok:false, error, message, partial, partialBytes, canResume, gaveUp }
+async function download(url, dest, opts = {}) {
   const job = opts.job || {};
   const part = `${dest}.part`;
   fs.mkdirSync(path.dirname(dest), { recursive: true });
@@ -144,54 +249,30 @@ async function download(url, dest, opts = {}) {
     if (!opts.expectedSize || sz === opts.expectedSize) return { ok: true, file: dest, bytes: sz, already: true };
     return { ok: false, error: 'EXISTS', message: `A different file is already at ${dest}. AutoInjector won't overwrite it — move or rename it, then try again.` };
   }
-  let have = 0; try { have = fs.statSync(part).size; } catch {}
-  if (opts.expectedSize && have > opts.expectedSize) { fs.unlinkSync(part); have = 0; } // our own broken partial
-  const hash = opts.expectedSha256 && have ? await _hashFile(part) : (opts.expectedSha256 ? crypto.createHash('sha256') : null);
-  let got;
-  try { got = await _get(url, have ? { Range: `bytes=${have}-` } : {}, deps); }
-  catch (e) { return { ok: false, error: e.code || 'NETWORK', message: `The download could not start (${e.code || e.message}). Check the internet connection and press Install again — it continues where it stopped.` }; }
-  const { res, req } = got;
-  job.cancel = () => { job.cancelled = true; try { req.destroy(); } catch {} };
-  if (res.statusCode === 416 && opts.expectedSize && have === opts.expectedSize) { res.resume(); }
-  else if (res.statusCode === 200 && have) { have = 0; if (hash) hash.__reset = true; }
-  else if (res.statusCode !== 200 && res.statusCode !== 206) { res.resume(); return { ok: false, error: `HTTP_${res.statusCode}`, message: `The download server said ${res.statusCode}. Try again later.` }; }
-  const total = res.statusCode === 206 ? have + Number(res.headers['content-length'] || 0) : Number(res.headers['content-length'] || opts.expectedSize || 0);
-  const resumed = res.statusCode === 206 && have > 0;
-  const h = hash && hash.__reset ? crypto.createHash('sha256') : hash;
-  if (res.statusCode !== 416) {
-    const out = fs.createWriteStream(part, { flags: resumed ? 'a' : 'w' });
-    let done = have, last = 0;
-    try {
-      await new Promise((resolve, reject) => {
-        res.on('data', (c) => {
-          if (h) h.update(c);
-          done += c.length;
-          if (!out.write(c)) { res.pause(); out.once('drain', () => res.resume()); }
-          const t = Date.now(); if (t - last > 250) { last = t; onProgress({ step: 'download', done, total, pct: total ? done / total : 0 }); }
-        });
-        res.on('end', resolve);
-        res.on('error', reject);
-        res.on('aborted', () => reject(Object.assign(new Error('ABORTED'), { code: job.cancelled ? 'CANCELLED' : 'ABORTED' })));
-        req.on('error', reject);
-      });
-    } catch (e) {
-      await new Promise((r) => out.end(r));
-      if (job.cancelled) return { ok: false, error: 'CANCELLED', message: 'Download paused. Press Install again to continue where it stopped.', partial: part };
-      return { ok: false, error: e.code || 'NETWORK', message: `The download was interrupted (${e.code || e.message}). Press Install again — it continues where it stopped.`, partial: part };
+  const maxTries = Math.max(1, opts.maxTries || MAX_TRIES);
+  const delays = Array.isArray(opts.retryDelaysMs) && opts.retryDelaysMs.length ? opts.retryDelaysMs : RETRY_DELAYS_MS;
+  const partSize = () => { try { return fs.statSync(part).size; } catch { return 0; } };
+  const finish = (r, tries) => { const o = Object.assign({}, r, { tries }); delete o.retryable; const pb = r.ok ? 0 : partSize(); if (!r.ok && pb > 0) { o.partial = part; o.partialBytes = pb; o.canResume = true; } return o; };
+  let fails = 0, tries = 0;
+  for (;;) {
+    const before = partSize();
+    tries++;
+    const r = await _downloadOnce(url, dest, Object.assign({}, opts, { job }));
+    if (r.ok || job.cancelled || r.error === 'CANCELLED' || !r.retryable) return finish(job.cancelled && !r.ok ? Object.assign({}, r, { error: 'CANCELLED', message: `Download paused. ${opts.againText || 'Press Install again'} to continue where it stopped.` }) : r, tries);
+    const after = partSize();
+    if (after > before) fails = 0; // bytes arrived: the connection works, the count starts over
+    fails++;
+    if (fails >= maxTries && maxTries === 1) return finish(r, tries); // retries turned off: the try's own message
+    if (fails >= maxTries) {
+      const total = opts.expectedSize || null;
+      const again = opts.resumeText || opts.againText || 'Press Install again';
+      return finish(Object.assign({}, r, { gaveUp: true, message: `The internet connection kept dropping (${r.error}) and did not come back after ${maxTries} tries, so the download stopped at ${fmtBytes(after)}${total ? ` of ${fmtBytes(total)}` : ''}. Nothing is lost: ${again.charAt(0).toLowerCase()}${again.slice(1)} — it continues from there, not from the start.` }), tries);
     }
-    await new Promise((r) => out.end(r));
-    if (job.cancelled) return { ok: false, error: 'CANCELLED', message: 'Download paused. Press Install again to continue where it stopped.', partial: part };
-    onProgress({ step: 'download', done, total, pct: 1 });
+    const delayMs = delays[Math.min(fails - 1, delays.length - 1)];
+    try { if (opts.onRetry) opts.onRetry({ attempt: fails + 1, max: maxTries, error: r.error, delayMs, done: after, total: opts.expectedSize || null }); } catch {}
+    await _pause(delayMs, job);
+    if (job.cancelled) return finish({ ok: false, error: 'CANCELLED', message: `Download paused. ${opts.againText || 'Press Install again'} to continue where it stopped.` }, tries);
   }
-  const size = fs.statSync(part).size;
-  if (opts.expectedSize && size !== opts.expectedSize) return { ok: false, error: 'SIZE_MISMATCH', message: `The download is incomplete (${fmtBytes(size)} of ${fmtBytes(opts.expectedSize)}). Press Install again to continue.`, partial: part };
-  const sha = h ? h.digest('hex') : null;
-  if (opts.expectedSha256 && sha && sha.toLowerCase() !== String(opts.expectedSha256).toLowerCase()) {
-    fs.renameSync(part, `${dest}.bad`);
-    return { ok: false, error: 'HASH_MISMATCH', message: 'The downloaded file is damaged (its checksum does not match the published one). It was set aside as .bad — press Install to download it again.' };
-  }
-  fs.renameSync(part, dest);
-  return { ok: true, file: dest, bytes: size, sha256: sha, resumed };
 }
 
 // ------------------------------------------------------------------ extract
@@ -229,16 +310,46 @@ async function extract(archive, destDir, opts = {}) {
 }
 
 // Find the unpacked portable folder (…/ComfyUI_windows_portable with python_embeded + ComfyUI/main.py).
+// Which build is installed where (written by install()): { active, builds: { <build>: { root, models } } }.
+// A second build ("Use the other ComfyUI build") goes into <home>/build-<name>/ and reads
+// the first one's models through ComfyUI's extra_model_paths.yaml, so nothing is downloaded twice.
+const BUILD_FILE = 'autoinjector-build.json';
+function readBuilds(home) {
+  try { const j = JSON.parse(fs.readFileSync(path.join(home, BUILD_FILE), 'utf8')); return j && typeof j === 'object' ? Object.assign({ active: null, builds: {} }, j) : { active: null, builds: {} }; } catch { return { active: null, builds: {} }; }
+}
+function writeBuilds(home, rec) { try { fs.mkdirSync(home, { recursive: true }); fs.writeFileSync(path.join(home, BUILD_FILE), JSON.stringify(rec, null, 2)); } catch {} }
+// The other build to try when ComfyUI crashes on this PC (null: there is none, use the CPU).
+const OTHER_BUILD = { nvidia: 'nvidia_cu126', nvidia_cu126: 'nvidia' };
 function findPortable(home) {
+  const rec = readBuilds(home);
+  const act = rec.active && rec.builds[rec.active];
+  if (act && act.root) {
+    const p = _portableAt(act.root);
+    if (p) return Object.assign(p, { build: rec.active }, act.models && fs.existsSync(act.models) ? { models: act.models } : {});
+  }
+  const p = _scanPortable(home);
+  if (p && rec.active && rec.builds[rec.active] && !rec.builds[rec.active].root) p.build = rec.active;
+  return p;
+}
+function _portableAt(d) {
+  if (!fs.existsSync(path.join(d, 'ComfyUI', 'main.py'))) return null;
+  const py = ['python_embeded', 'python_embedded'].map((p) => path.join(d, p, process.platform === 'win32' || fs.existsSync(path.join(d, p, 'python.exe')) ? 'python.exe' : 'python')).find((p) => fs.existsSync(p)) || null;
+  return { root: d, comfy: path.join(d, 'ComfyUI'), python: py, models: path.join(d, 'ComfyUI', 'models') };
+}
+function _scanPortable(home) {
   const cands = [home, path.join(home, 'ComfyUI_windows_portable')];
   try { for (const e of fs.readdirSync(home, { withFileTypes: true })) if (e.isDirectory()) cands.push(path.join(home, e.name)); } catch {}
-  for (const d of cands) {
-    if (fs.existsSync(path.join(d, 'ComfyUI', 'main.py'))) {
-      const py = ['python_embeded', 'python_embedded'].map((p) => path.join(d, p, process.platform === 'win32' || fs.existsSync(path.join(d, p, 'python.exe')) ? 'python.exe' : 'python')).find((p) => fs.existsSync(p)) || null;
-      return { root: d, comfy: path.join(d, 'ComfyUI'), python: py, models: path.join(d, 'ComfyUI', 'models') };
-    }
-  }
+  for (const d of cands) { const p = _portableAt(d); if (p) { const rec = readBuilds(home); const b = Object.keys(rec.builds).find((k) => rec.builds[k] && rec.builds[k].root && path.resolve(rec.builds[k].root) === path.resolve(d)); if (b) p.build = b; return p; } }
   return null;
+}
+// Let a second ComfyUI read the first one's model folders (ComfyUI loads ComfyUI/extra_model_paths.yaml by itself).
+function linkModels(comfyDir, modelsDir) {
+  const f = path.join(comfyDir, 'extra_model_paths.yaml');
+  if (fs.existsSync(f)) return false; // never overwrite the user's own file
+  const q = (p) => JSON.stringify(String(p).replace(/\\/g, '/'));
+  const kinds = ['checkpoints', 'clip', 'clip_vision', 'configs', 'controlnet', 'diffusion_models', 'embeddings', 'loras', 'upscale_models', 'vae', 'text_encoders', 'unet', 'vae_approx', 'hypernetworks', 'style_models', 'photomaker', 'gligen', 'audio_encoders', 'model_patches'];
+  const body = ['# Written by AutoInjector: this ComfyUI also uses the models of the first ComfyUI it installed.', 'autoinjector_shared:', `  base_path: ${q(modelsDir)}`, '  is_default: true', ...kinds.map((k) => `  ${k}: ${k}/`)].join('\n') + '\n';
+  try { fs.writeFileSync(f, body); return true; } catch { return false; }
 }
 
 // ------------------------------------------------------------------ the installer
@@ -249,14 +360,17 @@ function createInstaller(opts = {}) {
   const platform = opts.platform || process.platform;
   const urls = Object.assign({ githubApi: GITHUB_API, downloadBase: DOWNLOAD_BASE }, opts.urls || {});
   const models = Object.assign({}, STARTER_MODELS, opts.models || {});
+  const retry = opts.retry || {}; // { maxTries, retryDelaysMs, stallMs } — the tests make these short
   let st = { phase: 'idle', step: null, pct: 0, done: 0, total: 0, message: '', error: null };
   let job = null;
   const onChange = opts.onChange || (() => {});
   function set(p) { st = Object.assign({}, st, p); try { onChange(status()); } catch {} }
   function status() { return Object.assign({ home, installed: !!findPortable(home), busy: !!job }, st); }
 
+  let lastGpu = null;
   async function check() {
     const gpu = await detectGpu({ run: opts.run, platform });
+    lastGpu = gpu;
     const archiveBytes = BUILDS[gpu.build].approxBytes;
     const need = archiveBytes * 3.5 + 2.2 * GB; // archive + unpacked (~2.5×) + a small model
     const free = freeBytes(home);
@@ -270,38 +384,53 @@ function createInstaller(opts = {}) {
   }
 
   async function install(o = {}) {
-    if (job) return { ok: false, error: 'BUSY', message: 'An install is already running.' };
-    const c = await check();
+    if (job) return { ok: false, error: 'BUSY', code: 'BUSY', alreadyRunning: true, message: 'Already installing — this press was ignored. Wait for it, or press Cancel.' };
+    // Claimed before the first await, so a second press while the GPU / space check runs is refused too.
+    const checking = { cancelled: false }; job = checking;
+    let c;
+    try { c = await check(); } finally { if (job === checking) job = null; }
+    if (checking.cancelled) return { ok: false, error: 'CANCELLED', message: 'Install cancelled.' };
     if (!c.supported) return { ok: false, error: 'NOT_WINDOWS', message: 'The one-click install is for Windows. On this computer install ComfyUI or Forge yourself (see docs/STABLE_DIFFUSION_SETUP.md); AutoInjector will find and drive it.' };
-    if (c.installed) { set({ phase: 'installed', message: 'ComfyUI is already installed.' }); return { ok: true, already: true, portable: c.portable }; }
+    const alongside = !!(o.alongside && c.installed && o.build && BUILDS[o.build]);
+    if (c.installed && !alongside) { set({ phase: 'installed', message: 'ComfyUI is already installed.' }); return { ok: true, already: true, portable: c.portable }; }
     if (c.enoughSpace === false && !o.ignoreSpace) return { ok: false, error: 'NO_SPACE', message: `Not enough free disk space. ${c.spaceMessage}` };
     const build = o.build && BUILDS[o.build] ? o.build : c.gpu.build;
     const asset = BUILDS[build].asset;
+    const dest = alongside ? path.join(home, `build-${build}`) : home;
+    const firstModels = alongside && c.portable ? c.portable.models : null;
     job = { cancelled: false };
     const myJob = job;
     try {
-      set({ phase: 'downloading', step: 'download', pct: 0, error: null, message: `Downloading ComfyUI (${BUILDS[build].label})…` });
-      log('sd-install-start', { build, home });
+      set({ phase: 'downloading', step: 'download', pct: 0, error: null, retry: null, message: `Downloading ComfyUI (${BUILDS[build].label})…` });
+      log('sd-install-start', { build, home, alongside });
       // Size + SHA-256 from GitHub when it publishes them (never fatal if not).
       let expectedSize = null, expectedSha256 = null;
       const rel = await _json(urls.githubApi, deps);
       const a = rel && Array.isArray(rel.assets) ? rel.assets.find((x) => x.name === asset) : null;
       if (a) { expectedSize = Number(a.size) || null; const m = String(a.digest || '').match(/^sha256:([0-9a-f]{64})$/i); if (m) expectedSha256 = m[1]; }
-      const archive = path.join(home, asset);
+      const archive = path.join(dest, asset);
       const d = await download(a && a.browser_download_url ? a.browser_download_url : urls.downloadBase + asset, archive, {
-        deps, job: myJob, expectedSize, expectedSha256,
-        onProgress: (p) => set({ step: 'download', pct: p.pct, done: p.done, total: p.total, message: `Downloading ComfyUI… ${fmtBytes(p.done)}${p.total ? ` of ${fmtBytes(p.total)}` : ''}` }),
+        deps, job: myJob, expectedSize, expectedSha256, maxTries: retry.maxTries, retryDelaysMs: retry.retryDelaysMs, stallMs: retry.stallMs,
+        onProgress: (p) => set({ step: 'download', pct: p.pct, done: p.done, total: p.total, retry: null, message: `Downloading ComfyUI… ${fmtBytes(p.done)}${p.total ? ` of ${fmtBytes(p.total)}` : ''}` }),
+        onRetry: (r) => { set({ retry: { attempt: r.attempt, max: r.max }, message: `Connection dropped — resuming (try ${r.attempt} of ${r.max})…` }); log('sd-install-download-retry', { error: r.error, attempt: r.attempt, max: r.max }); },
       });
       if (!d.ok) { set({ phase: d.error === 'CANCELLED' ? 'paused' : 'failed', error: d.error, message: d.message }); log('sd-install-download-failed', { error: d.error }); return d; }
       set({ phase: 'extracting', step: 'extract', pct: 0, message: 'Unpacking ComfyUI… (a few minutes)' });
-      const x = await extract(archive, home, { spawn: deps.spawn, sevenZip: opts.sevenZip, tar: opts.tar, env: opts.env });
+      const x = await extract(archive, dest, { spawn: deps.spawn, sevenZip: opts.sevenZip, tar: opts.tar, env: opts.env });
       if (!x.ok) { set({ phase: 'failed', error: x.error, message: x.message }); log('sd-install-extract-failed', { detail: x.detail }); return x; }
-      const portable = findPortable(home);
-      if (!portable) { const r = { ok: false, error: 'NOT_FOUND_AFTER_EXTRACT', message: 'ComfyUI was unpacked, but its main.py was not found where expected. Open the folder and check, or press Install again.' }; set({ phase: 'failed', error: r.error, message: r.message }); return r; }
+      const found = _scanPortable(dest);
+      if (!found) { const r = { ok: false, error: 'NOT_FOUND_AFTER_EXTRACT', message: 'ComfyUI was unpacked, but its main.py was not found where expected. Open the folder and check, or press Install again.' }; set({ phase: 'failed', error: r.error, message: r.message }); return r; }
       // The archive is our own download; it is safe to remove now that it is unpacked.
       try { fs.unlinkSync(archive); } catch {}
-      log('sd-install-done', { tool: x.tool, sha256: d.sha256 ? 'checked' : 'not published' });
-      set({ phase: 'installed', step: null, pct: 1, message: `✔ ComfyUI is installed in ${portable.root}.`, verified: !!d.sha256 });
+      // Remember which build this is (and, for a second build, share the first one's models).
+      const rec = readBuilds(home);
+      if (firstModels && fs.existsSync(firstModels)) linkModels(found.comfy, firstModels);
+      rec.builds[build] = { root: found.root, models: firstModels && fs.existsSync(firstModels) ? firstModels : null };
+      rec.active = build;
+      writeBuilds(home, rec);
+      const portable = findPortable(home);
+      log('sd-install-done', { build, alongside, tool: x.tool, sha256: d.sha256 ? 'checked' : 'not published' });
+      set({ phase: 'installed', step: null, pct: 1, message: `✔ ComfyUI${alongside ? ` (${BUILDS[build].label} build)` : ''} is installed in ${portable.root}.`, verified: !!d.sha256 });
       return { ok: true, portable, verified: !!d.sha256, build, cpuOnly: !!c.gpu.cpuOnly };
     } finally { if (job === myJob) job = null; }
   }
@@ -311,15 +440,17 @@ function createInstaller(opts = {}) {
     if (!m) return { ok: false, error: 'BAD_MODEL', message: 'Unknown starter model.' };
     const portable = findPortable(home);
     if (!portable) return { ok: false, error: 'NOT_INSTALLED', message: 'Install ComfyUI first.' };
-    if (job) return { ok: false, error: 'BUSY', message: 'A download is already running.' };
+    if (job) return { ok: false, error: 'BUSY', code: 'BUSY', alreadyRunning: true, message: 'Already downloading — this press was ignored. Wait for it, or press Cancel.' };
     const free = freeBytes(portable.models);
     if (free != null && free < m.approxBytes * 1.05) return { ok: false, error: 'NO_SPACE', message: `Not enough free disk space for ${m.file} (${fmtBytes(m.approxBytes)}); this drive has ${fmtBytes(free)} free.` };
     job = { cancelled: false }; const myJob = job;
     try {
-      set({ phase: 'downloading-model', step: 'model', pct: 0, error: null, message: `Downloading ${m.file}…` });
+      set({ phase: 'downloading-model', step: 'model', pct: 0, error: null, retry: null, message: `Downloading ${m.file}…` });
       const d = await download(m.url, path.join(portable.models, 'checkpoints', m.file), {
-        deps, job: myJob, expectedSize: m.expectedSize || null, expectedSha256: m.sha256 || null,
-        onProgress: (p) => set({ step: 'model', pct: p.pct, done: p.done, total: p.total, message: `Downloading ${m.file}… ${fmtBytes(p.done)}${p.total ? ` of ${fmtBytes(p.total)}` : ''}` }),
+        deps, job: myJob, expectedSize: m.expectedSize || null, expectedSha256: m.sha256 || null, maxTries: retry.maxTries, retryDelaysMs: retry.retryDelaysMs, stallMs: retry.stallMs,
+        onProgress: (p) => set({ step: 'model', pct: p.pct, done: p.done, total: p.total, retry: null, message: `Downloading ${m.file}… ${fmtBytes(p.done)}${p.total ? ` of ${fmtBytes(p.total)}` : ''}` }),
+        onRetry: (r) => { set({ retry: { attempt: r.attempt, max: r.max }, message: `Connection dropped — resuming (try ${r.attempt} of ${r.max})…` }); log('sd-model-download-retry', { model: m.id, error: r.error, attempt: r.attempt, max: r.max }); },
+        againText: 'Press Download again',
       });
       if (!d.ok) { set({ phase: d.error === 'CANCELLED' ? 'paused' : 'failed', error: d.error, message: d.message }); return d; }
       set({ phase: 'installed', step: null, pct: 1, message: `✔ ${m.file} is ready in ComfyUI's models\\checkpoints.` });
@@ -329,7 +460,45 @@ function createInstaller(opts = {}) {
   }
 
   function cancel() { if (job && job.cancel) job.cancel(); else if (job) job.cancelled = true; return { ok: true }; }
-  return { status, check, install, downloadModel, cancel, home, portable: () => findPortable(home) };
+  // The build in use: recorded at install; for an older install, the one the GPU check picks.
+  function currentBuild() { const p = findPortable(home); if (!p) return null; return p.build || readBuilds(home).active || (lastGpu && lastGpu.build) || null; }
+  // The other build worth trying after a crash → { build, label, installed } | null (AMD / Intel: only one build — use the CPU instead).
+  function otherBuild() {
+    const cur = currentBuild();
+    if (!cur && !findPortable(home)) return null;
+    const v = lastGpu && lastGpu.vendor;
+    // The card isn't NVIDIA but an NVIDIA build is installed → its own build; no GPU at all → only the CPU helps.
+    const alt = (v === 'amd' || v === 'intel') && /^nvidia/.test(cur || 'nvidia') ? lastGpu.build : v === 'none' ? null : OTHER_BUILD[cur || 'nvidia'];
+    if (!alt || alt === cur) return null;
+    const rec = readBuilds(home);
+    return { build: alt, label: BUILDS[alt].label, from: cur, installed: !!(rec.builds[alt] && rec.builds[alt].root && _portableAt(rec.builds[alt].root)) };
+  }
+  // Switch to the other build: use it when it is already there, else download it next to the first one.
+  async function useOtherBuild(o = {}) {
+    if (!readBuilds(home).active && !lastGpu) { try { await check(); } catch {} }
+    const alt = otherBuild();
+    if (!alt) return { ok: false, error: 'NO_OTHER_BUILD', message: 'There is no other ComfyUI build for this graphics card. Use “Start on the processor (slow)” instead, or update the graphics driver.' };
+    const rec = readBuilds(home);
+    if (alt.installed) {
+      rec.active = alt.build; writeBuilds(home, rec);
+      log('sd-install-switch-build', { build: alt.build, from: alt.from || null });
+      set({ phase: 'installed', message: `✔ Switched to ComfyUI's ${alt.label} build.` });
+      return { ok: true, switched: true, build: alt.build, portable: findPortable(home) };
+    }
+    // An older install without a record: remember what it is before adding the second one.
+    const p = findPortable(home);
+    if (p && alt.from && !rec.builds[alt.from]) { rec.builds[alt.from] = { root: p.root, models: null }; rec.active = alt.from; writeBuilds(home, rec); }
+    const r = await install(Object.assign({}, o, { build: alt.build, alongside: true }));
+    return Object.assign({ build: alt.build }, r);
+  }
+  // Back to a build that is installed (e.g. the first one).
+  function useBuild(build) {
+    const rec = readBuilds(home);
+    if (!rec.builds[build] || !_portableAt(rec.builds[build].root)) return { ok: false, error: 'NOT_INSTALLED', message: 'That ComfyUI build is not installed.' };
+    rec.active = build; writeBuilds(home, rec);
+    return { ok: true, build, portable: findPortable(home) };
+  }
+  return { status, check, install, downloadModel, cancel, home, portable: () => findPortable(home), currentBuild, otherBuild, useOtherBuild, useBuild, gpu: () => lastGpu };
 }
 
-module.exports = { createInstaller, detectGpu, chooseBuild, download, extract, find7z, findPortable, freeBytes, defaultHome, fmtBytes, BUILDS, STARTER_MODELS, GITHUB_API, DOWNLOAD_BASE };
+module.exports = { createInstaller, detectGpu, chooseBuild, download, extract, find7z, findPortable, readBuilds, linkModels, OTHER_BUILD, BUILD_FILE, freeBytes, defaultHome, fmtBytes, BUILDS, STARTER_MODELS, GITHUB_API, DOWNLOAD_BASE, isRetryable, RETRY_DELAYS_MS, MAX_TRIES, STALL_MS };

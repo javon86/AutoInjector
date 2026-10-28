@@ -168,4 +168,95 @@ function annotate(result, ctx) {
   return result;
 }
 
-module.exports = { explainSdError, annotate, serverText, firstUsefulLine, DETAILS_MAX, VAE_ACTION };
+// ------------------------------------------------------------------ the SD app itself crashed
+// explainExit(code, ctx) — why the Stable Diffusion app (ComfyUI, Forge …) that
+// AutoInjector started stopped by itself, in plain English, from its exit code
+// and the last lines it printed. Windows reports crashes as NTSTATUS codes
+// (Node gives them unsigned: 0xC0000005 = 3221225477).
+//   ctx: { tail (its last output lines), gpu: { vendor, name }, kind ('comfy'…),
+//          canCpu (offer "Start on the processor"), otherBuild ({build,label}|null) }
+// → { known, code, exitCode, hex, message, fix, actions:[{id,label}], line }
+//   code: ACCESS_VIOLATION | STACK_BUFFER_OVERRUN | DLL_NOT_FOUND | DLL_INIT_FAILED |
+//         ILLEGAL_INSTRUCTION | NO_MEMORY | CLOSED | WRONG_BUILD | DRIVER_OLD |
+//         OOM | MISSING_MODULE | PORT_IN_USE | PYTHON_ERROR | EXITED
+const START_CPU_ACTION = { id: 'sd-start-cpu', label: 'Start on the processor (slow, but works on any PC)' };
+const OTHER_BUILD_ACTION = { id: 'sd-other-build', label: 'Use the other ComfyUI build' };
+const OPEN_LOG_ACTION = { id: 'sd-open-log', label: 'Open the log' };
+const VCREDIST = 'Install the Microsoft Visual C++ Redistributable (x64, free from Microsoft: aka.ms/vs/17/release/vc_redist.x64.exe), restart the PC, then press Start again.';
+const NT = {
+  0xC0000005: 'ACCESS_VIOLATION', 0xC0000409: 'STACK_BUFFER_OVERRUN', 0xC0000135: 'DLL_NOT_FOUND', 0xC0000142: 'DLL_INIT_FAILED',
+  0xC000001D: 'ILLEGAL_INSTRUCTION', 0xC0000017: 'NO_MEMORY', 0xC000012D: 'NO_MEMORY', 0xC000013A: 'CLOSED',
+};
+function hexOf(code) { const n = Number(code); if (!Number.isFinite(n)) return ''; return `0x${(n >>> 0).toString(16).toUpperCase().padStart(8, '0')}`; }
+function _gpuFix(ctx) {
+  const g = (ctx && ctx.gpu) || {};
+  const name = String(g.name || '');
+  const vendor = String(g.vendor || '').toLowerCase();
+  const steps = [];
+  steps.push(`Update the graphics driver${vendor === 'amd' ? ' (AMD Adrenalin, from amd.com)' : vendor === 'intel' ? ' (Intel Arc driver, from intel.com)' : ' (NVIDIA: nvidia.com/drivers or the NVIDIA app; AMD: Adrenalin)'} and restart the PC.`);
+  if (/RTX\s*50\d\d/i.test(name)) steps.push(`Your ${name} (RTX 50-series) needs the newest NVIDIA build of ComfyUI (PyTorch with CUDA 12.8 or newer — “cu128”/nightly); older builds crash on it.`);
+  else if (vendor === 'amd' || vendor === 'intel') steps.push(`Your ${vendor === 'amd' ? 'AMD' : 'Intel'} card needs ComfyUI's ${vendor === 'amd' ? 'AMD' : 'Intel'} build (or the DirectML / CPU version) — the NVIDIA build crashes on it.`);
+  else steps.push('Your graphics card may need a different ComfyUI build: RTX 50-series cards need the newest NVIDIA build (CUDA 12.8+, “cu128”/nightly), GTX 10xx and older need the cu126 build, AMD and Intel cards need their own build (or DirectML / CPU).');
+  steps.push(VCREDIST.replace(', then press Start again.', '.'));
+  if (ctx && ctx.canCpu !== false && (!ctx.kind || ctx.kind === 'comfy')) steps.push('Or press “Start on the processor (slow)” — it works on any PC, a picture just takes minutes.');
+  return steps.map((s, i) => `${i + 1}) ${s}`).join(' ');
+}
+function _actions(ctx, gpuRelated) {
+  const a = [];
+  const canCpu = ctx.canCpu !== undefined ? !!ctx.canCpu : (ctx.kind ? ctx.kind === 'comfy' : true);
+  if (gpuRelated && canCpu) a.push(START_CPU_ACTION);
+  if (gpuRelated && ctx.otherBuild) a.push(Object.assign({}, OTHER_BUILD_ACTION, ctx.otherBuild.label ? { label: `Use the other ComfyUI build (${ctx.otherBuild.label})` } : {}));
+  a.push(OPEN_LOG_ACTION);
+  return a;
+}
+// Rules on what it printed (checked before the bare exit code: a Python error says more).
+const TAIL_RULES = [
+  { code: 'WRONG_BUILD', re: /no kernel image is available|is not compatible with the current PyTorch|CUDA capability sm_\d+ is not compatible|Torch not compiled with CUDA enabled|not compiled with (?:CUDA|ROCm)/i },
+  { code: 'DRIVER_OLD', re: /CUDA driver version is insufficient|Found no NVIDIA driver|NVIDIA driver on your system is too old|driver (?:version )?is too old/i },
+  { code: 'DLL_NOT_FOUND', re: /WinError 126|DLL load failed|Error loading ".*\.dll"|c10\.dll|fbgemm\.dll|The specified module could not be found/i },
+  { code: 'OOM', re: /out of memory|OutOfMemoryError|DefaultCPUAllocator|not enough memory/i },
+  { code: 'PORT_IN_USE', re: /address already in use|WinError 10048|Errno 98|only one usage of each socket address/i },
+  { code: 'MISSING_MODULE', re: /ModuleNotFoundError|No module named/i },
+];
+function explainExit(code, ctx = {}) {
+  try { return _explainExit(code, ctx || {}); }
+  catch { return { known: false, code: 'EXITED', exitCode: code, hex: hexOf(code), message: 'It stopped unexpectedly.', fix: '', actions: [OPEN_LOG_ACTION], line: '' }; }
+}
+// The line of a crash's output worth showing: the Python exception, else the last real line.
+function importantLine(tail) {
+  const lines = String(tail || '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
+    .filter((l) => !/Traceback \(most recent call last\)/.test(l) && !/^File "/.test(l) && !/^\^+$/.test(l) && !/^\[AutoInjector\]/.test(l));
+  const exc = [...lines].reverse().find((l) => /\b\w*(Error|Exception)\b\s*:|^Error\b|\bfailed\b/i.test(l));
+  return String(exc || lines[lines.length - 1] || '').slice(0, 220);
+}
+function _explainExit(exitCode, ctx) {
+  const tail = String(ctx.tail || '');
+  const line = tail ? importantLine(tail) : '';
+  const n = Number(exitCode);
+  const u = Number.isFinite(n) ? n >>> 0 : null;
+  const hex = u != null && u > 0xFFFF ? hexOf(u) : '';
+  const nt = u != null ? NT[u] : null;
+  const app = ctx.label || 'Stable Diffusion';
+  const said = line ? ` It last said: “${line}”.` : '';
+  const out = (code, message, fix, gpuRelated) => ({ known: true, code, exitCode: exitCode == null ? null : exitCode, hex, message, fix, actions: _actions(ctx, gpuRelated), line });
+  const rule = tail ? TAIL_RULES.find((r) => r.re.test(tail)) : null;
+  // A Windows crash code says more than a stray line, except for the "wrong build" family.
+  if (rule && (!nt || rule.code === 'WRONG_BUILD' || rule.code === 'DRIVER_OLD')) {
+    if (rule.code === 'WRONG_BUILD') return out('WRONG_BUILD', `${app} can't use your graphics card with this build (its PyTorch doesn't support the card).${said}`, _gpuFix(ctx), true);
+    if (rule.code === 'DRIVER_OLD') return out('DRIVER_OLD', `${app} needs a newer graphics driver.${said}`, _gpuFix(ctx), true);
+    if (rule.code === 'DLL_NOT_FOUND') return out('DLL_NOT_FOUND', `${app} could not load a Windows file it needs (a DLL).${said}`, VCREDIST, false);
+    if (rule.code === 'OOM') return out('OOM', `${app} ran out of memory while starting.${said}`, 'Close other programs (games, browsers with many tabs, other AI apps), then press Start again. With little graphics memory, use small SD 1.5 models.', true);
+    if (rule.code === 'PORT_IN_USE') return out('PORT_IN_USE', `Another program is already using ${app}'s port.${said}`, 'Close the other copy (e.g. a ComfyUI window or Stability Matrix), or restart the PC, then press Start again.', false);
+    if (rule.code === 'MISSING_MODULE') return out('MISSING_MODULE', `A part of ${app} is missing.${said}`, 'If you added custom nodes, remove the last one you added. Otherwise the install is incomplete: install it again (your models are kept).', false);
+  }
+  if (nt === 'ACCESS_VIOLATION') return out(nt, `${app} crashed while starting (Windows error ${hex}, “access violation”). This happens inside the graphics driver or PyTorch's GPU code — it is not something you did.${said}`, _gpuFix(ctx), true);
+  if (nt === 'STACK_BUFFER_OVERRUN') return out(nt, `${app} was stopped by a Windows safety check (error ${hex}). Usually a DLL that doesn't match: an old Visual C++ runtime, a graphics driver that doesn't match the build, or another program hooking into Python (overlays, antivirus).${said}`, _gpuFix(ctx), true);
+  if (nt === 'DLL_NOT_FOUND' || nt === 'DLL_INIT_FAILED') return out(nt, `${app} could not start because a Windows file it needs is missing (error ${hex}${nt === 'DLL_NOT_FOUND' ? ', a DLL was not found' : ', a DLL failed to load'}) — usually the Microsoft Visual C++ Redistributable.${said}`, VCREDIST, false);
+  if (nt === 'ILLEGAL_INSTRUCTION') return out(nt, `${app} needs a processor feature (AVX) this PC doesn't have (error ${hex}).`, 'This PC is too old for this build of PyTorch. Use a newer PC, or ChatGPT as the image engine.', false);
+  if (nt === 'NO_MEMORY') return out(nt, `Windows ran out of memory starting ${app} (error ${hex}).`, 'Close other programs and make sure Windows manages the page file automatically (System → About → Advanced system settings → Performance → Virtual memory), then press Start again.', true);
+  if (nt === 'CLOSED') return out(nt, `${app} was closed (its window was closed or Ctrl+C was pressed).`, 'Press Start again.', false);
+  if (u === 1 || line) return { known: !!line, code: 'PYTHON_ERROR', exitCode, hex, message: line ? `${app} stopped with an error: ${line}` : `${app} stopped with an error (exit code 1).`, fix: 'Open the log to see the whole message. If it started after you added a custom node or changed a launch option, undo that and press Start again.', actions: _actions(ctx, false), line };
+  return { known: false, code: 'EXITED', exitCode, hex, message: `${app} stopped unexpectedly (exit ${hex || (exitCode == null ? 'unknown' : exitCode)}).`, fix: 'Open the log to see why, then press Start again.', actions: _actions(ctx, false), line };
+}
+
+module.exports = { explainSdError, annotate, serverText, firstUsefulLine, DETAILS_MAX, VAE_ACTION, explainExit, importantLine, hexOf, START_CPU_ACTION, OTHER_BUILD_ACTION, OPEN_LOG_ACTION };

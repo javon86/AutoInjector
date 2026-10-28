@@ -90,14 +90,14 @@ const IPC_INVENTORY = [
   'logins:delete', 'logins:fill', 'logins:list', 'logins:save', 'logs:download-all', 'logs:extract-all', 'logs:extract-options', 'logs:extract-preview', 'logs:tags',
   'manager:approve', 'manager:configure-provider', 'manager:get-state', 'manager:pause', 'manager:reject', 'manager:resume', 'manager:start-task',
   'manager:stop', 'manager:test-connection', 'memory:search', 'memory:summary', 'models:info', 'models:open',
-  'llm:status', 'llm:hardware', 'llm:check', 'llm:fix', 'llm:setup-all', 'llm:start-alfred', 'llm:scan', 'llm:use-store', 'llm:import-gguf', 'llm:install-ollama', 'llm:start', 'llm:stop', 'llm:search', 'llm:curated', 'llm:hf-files', 'llm:pull', 'llm:cancel', 'llm:remove', 'llm:use', 'llm:hf-token',
+  'llm:status', 'llm:hardware', 'llm:check', 'llm:fix', 'llm:setup-all', 'llm:start-alfred', 'content:roots', 'content:use-root', 'folders:map', 'folders:move-comfy', 'folders:open', 'llm:scan', 'llm:use-store', 'llm:import-gguf', 'llm:install-ollama', 'llm:start', 'llm:stop', 'llm:search', 'llm:curated', 'llm:hf-files', 'llm:pull', 'llm:cancel', 'llm:remove', 'llm:use', 'llm:hf-token',
   'ollama:detect', 'ollama:list', 'ollama:managed-status', 'ollama:migrate', 'ollama:pull', 'ollama:recommended', 'panes:sync', 'participants:set',
   'phone:info', 'phone:set-lan', 'picker:cancel', 'picker:clear', 'picker:save', 'picker:start', 'picker:status', 'picker:test',
   'prompt-editor:close', 'prompts:delete', 'prompts:open-editor', 'prompts:save', 'prompts:send', 'relay:hop-limit', 'relay:silence', 'roles:set',
   'routing:auto-all', 'routing:pause-all', 'routing:set', 'routing:stop-all',
   'sd:cancel', 'sd:connect', 'sd:detect', 'sd:gallery', 'sd:generate', 'sd:install', 'sd:install-cancel', 'sd:install-check', 'sd:install-model',
   'sd:lists', 'sd:open-images-folder', 'sd:open-install-folder', 'sd:open-log', 'sd:open-ui', 'sd:progress', 'sd:record', 'sd:set-autostart',
-  'sd:settings', 'sd:show-file', 'sd:start', 'sd:status', 'sd:stop', 'sd:targets', 'sd:test', 'sd:fix-retry',
+  'sd:settings', 'sd:show-file', 'sd:start', 'sd:start-cpu', 'sd:use-other-build', 'sd:status', 'sd:stop', 'sd:targets', 'sd:test', 'sd:fix-retry',
   'sd:img2img', 'sd:inpaint', 'sd:upscale', 'sd:extras', 'sd:options-get', 'sd:options-set', 'sd:interrupt', 'sd:skip', 'sd:refresh', 'sd:memory', 'sd:workflows', 'sd:workflow-get', 'sd:workflow-save', 'sd:workflow-delete', 'sd:workflow-run', 'sd:capabilities',
   'sd:request', 'sd:chatgpt-status', 'sd:chatgpt-cancel', 'sd:chatgpt-settings',
   'sdlib:add-folder', 'sdlib:check', 'sdlib:collection', 'sdlib:delete-lock', 'sdlib:folders', 'sdlib:list', 'sdlib:locks', 'sdlib:remove-folder',
@@ -527,6 +527,15 @@ async function main() {
   check('generate_video', d.carded && comfy.state.videoGraphs.length === vg0 + 1 && /waves at night/.test(JSON.stringify(comfy.state.videoGraphs[vg0])) && vpath && fs.existsSync(vpath), 'card → ✔ → a Wan text→video graph on ComfyUI → the clip is saved', 'real video-api + fake ComfyUI');
   d = await drive('generate_video', { image: png, prompt: 'he breathes', seconds: 1 });
   check('generate_video', d.carded && comfy.state.videoGraphs.length === vg0 + 2 && /LoadImage/.test(JSON.stringify(comfy.state.videoGraphs[vg0 + 1])) && d.result.ok, 'with a picture → picture→video (the picture is uploaded and loaded)', 'real video-api + fake ComfyUI');
+  // the call a small local model sent in the user's log: {character, image, prompt, seconds} → no INVALID_PARAM
+  d = await drive('generate_video', { character: 'Odile', image: png, prompt: 'she turns her head', seconds: 30 });
+  assert(d.carded && d.result && d.result.ok && comfy.state.videoGraphs.length === vg0 + 3 && /LoadImage/.test(JSON.stringify(comfy.state.videoGraphs[vg0 + 2])) && !/odile woman/.test(JSON.stringify(comfy.state.videoGraphs[vg0 + 2])) && (d.result.notes || []).some((n) => /picture was used/.test(n)) && (d.result.notes || []).some((n) => /seconds 30 is outside 1–10/.test(n)), 'generate_video: picture + character + seconds 30 → the picture is used, seconds clamped, both noted');
+  d = await drive('generate_video', { character: 'Odile', image: path.join(os.tmpdir(), 'no-such-picture-for-alfred.png'), prompt: 'she waves', seconds: '2 seconds' });
+  assert(d.carded && d.result && d.result.ok && comfy.state.videoGraphs.length === vg0 + 4 && !/LoadImage/.test(JSON.stringify(comfy.state.videoGraphs[vg0 + 3])) && /odile woman/.test(JSON.stringify(comfy.state.videoGraphs[vg0 + 3])) && (d.result.notes || []).some((n) => /could not be used/.test(n)), 'generate_video: a picture path that does not exist → text→video with the character lock, noted (no INVALID_PARAM)');
+  d = await drive('generate_video', { image: 'Odile', prompt: 'rain on a window', seconds: 'none' });
+  assert(d.carded && d.result && d.result.ok && comfy.state.videoGraphs.length === vg0 + 5 && (d.result.notes || []).some((n) => /image “Odile” is not a picture/.test(n)), 'generate_video: an image that is no picture → dropped with a note, text→video');
+  d = await drive('generate_video', { image: path.join(os.tmpdir(), 'no-such-picture-for-alfred.png') });
+  assert(d.carded && d.result && d.result.ok === false && d.result.error === 'INVALID_PARAM' && /image/.test(d.result.message) && /\.png \/ \.jpg \/ \.webp/.test(d.result.message) && comfy.state.videoGraphs.length === vg0 + 5, `generate_video: only a missing picture → the error names the field and what it may be: “${d.result && d.result.message}”`);
   for (const m of ['video.status', 'video.models', 'video.progress', 'video.gallery', 'video.capabilities', 'video.install.check']) {
     d = await drive('video_call', { method: m, args: {} });
     if (assert(!d.carded && /^RESULT \{"ok":true/.test(d.text), `video_call ${m}: read-only, runs directly against the real module`)) mark(`video:${m}`, 'real video-api');

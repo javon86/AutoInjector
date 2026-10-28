@@ -453,6 +453,8 @@ function createAlfred(deps = {}) {
   }
   function toolMessage(call, content) {
     if (call.ignored && call.ignored.length && content && typeof content === 'object') content = Object.assign({}, content, { ignored_arguments: call.ignored, note: `${call.name} doesn't take: ${call.ignored.join(', ')} (ignored).` });
+    // what the tool forgave in the call (a value clamped / dropped), so the AI learns the right shape
+    if (call.notes && call.notes.length && content && typeof content === 'object') content = Object.assign({}, content, { notes: [...call.notes, ...(Array.isArray(content.notes) ? content.notes : [])].slice(0, 8) });
     const text = typeof content === 'string' ? content : JSON.stringify(content);
     const c = text.length > 6000 ? `${text.slice(0, 6000)}… (cut)` : text;
     return call.native ? { role: 'tool', tool_call_id: call.id, name: call.name, content: c } : { role: 'user', _toolResult: true, _tool: call.name, content: `Result of ${call.name}: ${c}` };
@@ -462,6 +464,7 @@ function createAlfred(deps = {}) {
     if (r.message) o.message = r.message;
     if (r.error && !r.ok) o.error = r.error;
     if (r.data !== undefined) o.data = r.data;
+    if (Array.isArray(r.notes) && r.notes.length) o.notes = r.notes.slice(0, 8).map((n) => String(n).slice(0, 300));
     return o;
   }
 
@@ -535,10 +538,12 @@ function createAlfred(deps = {}) {
         }
         let v = registry.validate(tool, call.args);
         if (v.ok && v.ignored) call.ignored = v.ignored;
+        if (v.ok && v.notes && v.notes.length) call.notes = v.notes;
         if (v.ok && typeof tool.check === 'function') {
           let c;
           try { c = await tool.check(v.args, deps.ctx || {}); } catch (_) { c = { ok: false, error: 'the arguments could not be checked' }; }
-          v = c && c.ok ? { ok: true, args: c.args || v.args } : { ok: false, error: (c && c.error) || 'not allowed' };
+          const forgiven = v.notes && v.notes.length ? ` (${v.notes.join(' ')})` : '';
+          v = c && c.ok ? { ok: true, args: c.args || v.args } : { ok: false, error: `${(c && c.error) || 'not allowed'}${forgiven}` };
         }
         if (!v.ok) {
           log('alfred-refused', { req: r.id, tool: tool.name, reason: 'BAD_ARGS', why: String(v.error || '').replace(/"[^"]*"|'[^']*'|“[^”]*”/g, '…').slice(0, 140) });

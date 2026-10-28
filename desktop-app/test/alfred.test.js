@@ -311,7 +311,11 @@ async function main() {
     ];
     const ctx = {
       videoMethods: async () => VM,
-      videoInvoke: async (m, a) => { vcalls.push({ m, a }); if (m === 'video.status') return { ok: true, backend: 'comfy-wan', models: { 'wan22-ti2v-5b': 'installed' } }; if (m === 'video.install.downloadModel') return { ok: false, code: 'VIDEO_MODEL_MISSING', message: 'Not enough disk space.' }; return { ok: true, path: '/out/videos/v-1.mp4', poster: '/out/videos/v-1.png', seconds: a.seconds || 4, model: 'wan22-ti2v-5b', seed: 7 }; },
+      videoInvoke: async (m, a) => {
+        vcalls.push({ m, a });
+        if (m === 'video.animate' && a.image === '/gone.png') return { ok: false, error: 'INVALID_PARAM', code: 'INVALID_PARAM', field: 'image', message: 'The picture “/gone.png” was not found.', hint: 'Give the full path of a .png / .jpg / .webp file, or the picture as base64.' };
+        if (m === 'video.generate' && a.characterLock === 'Nobody') return { ok: false, error: 'NO_LOCK', code: 'NO_LOCK', message: 'There\'s no character lock called “Nobody”.' };
+        if (m === 'video.status') return { ok: true, backend: 'comfy-wan', models: { 'wan22-ti2v-5b': 'installed' } }; if (m === 'video.install.downloadModel') return { ok: false, code: 'VIDEO_MODEL_MISSING', message: 'Not enough disk space.' }; return { ok: true, path: '/out/videos/v-1.mp4', poster: '/out/videos/v-1.png', seconds: a.seconds || 4, model: 'wan22-ti2v-5b', seed: 7 }; },
     };
     const queue = [];
     const llm = await fakeLlm((body) => (lastMsg(body).role === 'tool' ? { content: 'ok' } : queue.shift()));
@@ -325,6 +329,25 @@ async function main() {
     assert(vcalls.slice(-1)[0].m === 'video.animate' && vcalls.slice(-1)[0].a.image === '/out/images/moki.png' && /Bring the picture/.test(x.card.steps[0].text), 'generate_video with a picture → video.animate');
     x = await run('generate_video', {});
     assert(x.res.ok === false && x.res.error === 'BAD_ARGS', 'generate_video needs a prompt, a picture or a character');
+    assert(/prompt \(what happens, as text\)/.test(x.res.message) && /image \(the path of a \.png/.test(x.res.message) && /character \(a character lock name\)/.test(x.res.message), 'its refusal names each field and what it may be');
+    // the small-model call from the user's log: {character, image, prompt, seconds} — forgiven, never INVALID_PARAM
+    x = await run('generate_video', { character: 'Moki Vey', image: '/out/images/moki.png', prompt: 'he waves', seconds: 30 });
+    let vc = vcalls.slice(-1)[0];
+    assert(x.res.ok && vc.m === 'video.animate' && vc.a.image === '/out/images/moki.png' && !('characterLock' in vc.a) && vc.a.seconds === 10, 'picture + character → the picture is used (no lock passed); seconds 30 → 10');
+    assert(x.res.notes.some((n) => /seconds 30 is outside 1–10, so 10 was used/.test(n)) && x.res.notes.some((n) => /picture was used/.test(n) && /Moki Vey/.test(n)) && /not Moki Vey|not “Moki Vey”/.test(x.card.steps[0].text), `both are explained to the AI (notes) and on the card: ${JSON.stringify(x.res.notes)}`);
+    x = await run('generate_video', { character: 'Moki Vey', image: 'Moki Vey', prompt: 'he waves', seconds: '3 seconds' });
+    vc = vcalls.slice(-1)[0];
+    assert(x.res.ok && vc.m === 'video.generate' && !('image' in vc.a) && vc.a.characterLock === 'Moki Vey' && vc.a.seconds === 3 && x.res.notes.some((n) => /image “Moki Vey” is not a picture/.test(n) && /text → video/.test(n)), 'an image that is no picture path is dropped with a note → text→video with the character; "3 seconds" → 3');
+    x = await run('generate_video', { prompt: 'rain', image: 'none', character: '', seconds: 'soon', negative_prompt: null });
+    vc = vcalls.slice(-1)[0];
+    assert(x.res.ok && vc.m === 'video.generate' && !('image' in vc.a) && !('characterLock' in vc.a) && !('seconds' in vc.a) && x.res.notes.some((n) => /seconds “soon” is not a number/.test(n) && /1 to 10/.test(n)), 'empty / "none" values are ignored; a seconds that is no number → the usual length, noted');
+    // the module refuses the picture (not found): with a description it falls back to text→video
+    x = await run('generate_video', { image: '/gone.png', prompt: 'leaves fall', character: 'Moki Vey' });
+    assert(x.res.ok && vcalls.slice(-2).map((c) => c.m).join() === 'video.animate,video.generate' && vcalls.slice(-1)[0].a.characterLock === 'Moki Vey' && x.res.notes.some((n) => /could not be used/.test(n) && /was not found/.test(n)) && x.res.data.mode === 'text→video', 'a picture the module can\'t read → made from the description instead (text→video), noted');
+    x = await run('generate_video', { image: '/gone.png' });
+    assert(x.res.ok === false && x.res.error === 'INVALID_PARAM' && /^image: /.test(x.res.message) && /\.png \/ \.jpg \/ \.webp/.test(x.res.message), `no description to fall back on → the error names the field and what it may be: “${x.res.message}”`);
+    x = await run('generate_video', { prompt: 'a cat', character: 'Nobody' });
+    assert(x.res.ok && !('characterLock' in vcalls.slice(-1)[0].a) && x.res.notes.some((n) => /no character lock “Nobody”/.test(n)), 'an unknown character lock with a description → made without it, noted');
     x = await run('video_call', { method: 'video.models' });
     assert(!x.card && vcalls.slice(-1)[0].m === 'video.models', 'video_call: a read-only method runs without a card');
     x = await run('video_call', { method: 'video.generate', args: { prompt: 'x', seconds: 30 } });

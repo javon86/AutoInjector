@@ -472,6 +472,13 @@
     #butler-more .butler-more-title { font-weight:600; font-size:12.5px; }
     #butler-more > details.sai-sec { margin:0; width:auto; flex:none; }
     #butler-legacy[hidden] { display:none !important; }
+    .content-others { margin:5px 0; padding:6px 8px; border:1px solid #6b5a2f; border-radius:7px; background:#16130a; font-size:11.5px; }
+    .content-others[hidden] { display:none; }
+    .folders-map-wrap > summary { cursor:pointer; font-size:11.5px; margin:4px 0; }
+    .folders-map .fm-row { display:flex; gap:6px; align-items:baseline; flex-wrap:wrap; font-size:11px; margin:3px 0; }
+    .folders-map .fm-path { font-family:ui-monospace,monospace; opacity:.8; word-break:break-all; }
+    .folders-map .fm-out { color:#f0c46b; }
+    .content-others .co-row { display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin:3px 0; }
     .llm-scan { margin:6px 0; padding:7px 9px; border:1px solid #2f5c3e; border-radius:8px; background:#0b120d; max-height:300px; overflow:auto; }
     .llm-scan-head { display:flex; align-items:center; gap:6px; margin-bottom:4px; }
     .llm-scan-group { margin:6px 0 2px; font-weight:600; font-size:11.5px; }
@@ -1450,6 +1457,12 @@
           <button id="btn-sd-runlog" class="sd-fixed" title="Stable Diffusion's own output (no passwords or tokens in it)">📄 Open log</button>
           <button id="btn-sd-refresh-targets" class="sd-fixed" title="Look for Stability Matrix packages again">↻ Look again</button>
         </div>
+        <div id="sd-run-why" class="sd-small" hidden style="white-space:pre-line; margin:6px 0 0;"></div>
+        <details id="sd-run-tail-box" hidden style="margin:4px 0 0;"><summary class="sd-small">What it printed last</summary><pre id="sd-run-tail" class="sd-small" style="white-space:pre-wrap; margin:4px 0 0;"></pre></details>
+        <div class="sd-row" id="sd-run-fixes" hidden style="margin-top:6px;">
+          <button id="btn-sd-run-cpu" class="sd-fixed" hidden title="Starts ComfyUI with --cpu: no graphics card needed, but a picture takes minutes">🐢 Start on the processor (slow, but works on any PC)</button>
+          <button id="btn-sd-other-build" class="sd-fixed" hidden title="Switches to (or downloads) the other ComfyUI portable build for your graphics card; your models are shared">🔁 Use the other ComfyUI build</button>
+        </div>
         <label class="sd-l"><input type="checkbox" id="sd-autostart"> Start Stable Diffusion with AutoInjector</label>
         <p class="sd-small" id="sd-run-help">AutoInjector looks for packages installed by Stability Matrix (Forge, reForge, Automatic1111, SD.Next, ComfyUI) and for the ComfyUI it installed itself. It starts them hidden, with the API switched on, restarts them if they crash, and stops them when you quit. Models stay in Stability Matrix's shared Data\Models folder.</p>
       </div>
@@ -1596,9 +1609,12 @@
       <div class="sd-card" style="max-width:760px;">
         <h3>1 · ComfyUI (the engine)</h3>
         <div id="vd-setup-comfy" style="font-size:12.5px;line-height:1.5;">Checking…</div>
+        <div id="vd-run-state" role="status" aria-live="polite" hidden style="font-size:12.5px;line-height:1.5;white-space:pre-line;margin-top:4px;"></div>
         <div class="sd-row" style="margin-top:6px;">
           <button class="sd-fixed primary" id="btn-vd-install-all" title="Installs ComfyUI (if there is none) and the recommended video model">⬇ Install ComfyUI + video model</button>
           <button class="sd-fixed" id="btn-vd-start" title="Start the installed ComfyUI (the same one 🎨 Images uses)">▶ Start ComfyUI</button>
+          <button class="sd-fixed" id="btn-vd-start-cpu" hidden title="Starts ComfyUI with --cpu: no graphics card needed, but very slow for video">🐢 Start on the processor (slow, but works on any PC)</button>
+          <button class="sd-fixed" id="btn-vd-other-build" hidden title="Switches to (or downloads) the other ComfyUI portable build; your models are shared">🔁 Use the other ComfyUI build</button>
           <button class="sd-fixed" id="btn-vd-recheck">↻ Check again</button>
           <button class="sd-fixed" id="btn-vd-test" title="Make a tiny 1-second video to prove it works">🧪 1-second test</button>
         </div>
@@ -1608,6 +1624,7 @@
         <div id="vd-models"></div>
         <div id="vd-dl-progress" aria-hidden="true"><div id="vd-dl-bar"></div></div>
         <div id="vd-dl-msg" role="status" aria-live="polite"></div>
+        <button id="btn-vd-dl-resume" class="primary" hidden title="Continues from the part already downloaded — nothing is downloaded twice">↻ Resume download</button>
         <button id="btn-vd-dl-cancel" disabled>⏸ Pause / cancel download</button>
         <div class="sd-note" style="font-size:11px;opacity:.65;margin-top:5px;">The files go into ComfyUI's own model folders (diffusion_models, text_encoders, vae — or Stability Matrix's shared Data/Models). A stopped download continues where it stopped.</div>
       </div>
@@ -1955,6 +1972,10 @@
           <summary>📁 Downloads &amp; creations folder ("stuff and thing")</summary>
           <p style="opacity:.7; font-size:11px; margin:2px 0 5px;">One folder inside AutoInjector holds everything — downloaded models/LoRAs/voice under <b>models/</b>, and everything the app makes (images, videos, books) at the top. Open it and drop files into the matching subfolder; each folder's README says how to point its backend here.</p>
           <div id="models-path" style="font-size:11px; font-family:ui-monospace,monospace; opacity:.85; word-break:break-all; margin:2px 0;"></div>
+          <!-- earlier AutoInjector folders that also hold downloads (content-home.js) — use one instead of downloading again -->
+          <div id="content-others" class="content-others" hidden></div>
+          <!-- 📁 where everything is (folders.js) -->
+          <details id="folders-map-wrap" class="folders-map-wrap"><summary>📁 Where everything is</summary><div id="folders-map" class="folders-map"></div></details>
           <div id="models-inventory" style="font-size:11px; opacity:.8; margin:2px 0;"></div>
           <div id="models-ollama" style="font-size:11px; opacity:.8; margin:2px 0;"></div>
 

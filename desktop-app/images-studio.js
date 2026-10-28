@@ -978,22 +978,43 @@
   };
 
   // ------------------------------------------------------------ run + install (sd-runner / sd-installer)
+  // Start buttons: "Starting…" and disabled while a start (or the wait for the install) runs.
+  function runButtons(busy, running, waiting) {
+    for (const id of ['btn-sd-run', 'btn-sd-run2']) {
+      const b = $(id); if (!b) continue;
+      if (!b.dataset.label) b.dataset.label = b.textContent;
+      b.textContent = busy ? (waiting ? '⏳ Waiting for the install…' : '⏳ Starting…') : b.dataset.label;
+      b.disabled = busy || (id === 'btn-sd-run2' && running);
+    }
+  }
   function renderRunner(r) {
     if (!r) return;
     st.runner = r;
     const t = r.target;
     const txt = r.phase === 'running' ? (r.message || `✔ ${t ? t.label : 'Stable Diffusion'} running on :${r.port}${r.owned ? ' (managed)' : ''}`)
-      : r.phase === 'starting' || r.phase === 'restarting' ? `⏳ ${r.message || 'Starting…'}`
+      : r.phase === 'starting' || r.phase === 'restarting' || r.phase === 'waiting' ? `⏳ ${r.message || 'Starting…'}`
       : r.phase === 'failed' ? `✖ ${r.message || 'Could not start.'}` : r.phase === 'stopped' ? '⏹ Stopped' : 'Not started';
     setText('sd-run-state', txt);
-    const busy = r.phase === 'starting' || r.phase === 'restarting';
+    const waiting = r.phase === 'waiting';
+    const busy = r.phase === 'starting' || r.phase === 'restarting' || waiting;
     const running = r.phase === 'running';
     if ($('btn-sd-halt')) $('btn-sd-halt').hidden = !(running && r.owned) && !busy;
-    if ($('btn-sd-run')) { $('btn-sd-run').disabled = busy; if (running) $('btn-sd-run').hidden = true; }
-    if ($('btn-sd-run2')) $('btn-sd-run2').disabled = busy || running;
+    if ($('btn-sd-run') && running) $('btn-sd-run').hidden = true;
+    runButtons(busy, running, waiting);
     if ($('btn-sd-halt2')) $('btn-sd-halt2').disabled = !(running || busy);
+    // Why it crashed (the important line is in the message), the fix, what it printed, and what to try.
+    const showWhy = (r.phase === 'failed' || r.phase === 'restarting') && (r.fix || r.lastOutput);
+    if ($('sd-run-why')) { $('sd-run-why').hidden = !(showWhy && r.fix); $('sd-run-why').textContent = showWhy && r.fix ? `How to fix it: ${r.fix}` : ''; }
+    if ($('sd-run-tail-box')) { $('sd-run-tail-box').hidden = !(showWhy && r.lastOutput); setText('sd-run-tail', showWhy ? (r.lastOutput || '') : ''); }
+    const acts = r.phase === 'failed' && Array.isArray(r.actions) ? r.actions : [];
+    const cpuAct = acts.find((a) => a.id === 'sd-start-cpu');
+    const otherAct = acts.find((a) => a.id === 'sd-other-build');
+    if ($('btn-sd-run-cpu')) { $('btn-sd-run-cpu').hidden = !cpuAct; $('btn-sd-run-cpu').disabled = busy; }
+    if ($('btn-sd-other-build')) { $('btn-sd-other-build').hidden = !otherAct; $('btn-sd-other-build').disabled = busy; if (otherAct) $('btn-sd-other-build').textContent = `🔁 ${otherAct.label}`; }
+    if ($('sd-run-fixes')) $('sd-run-fixes').hidden = !(cpuAct || otherAct);
     if (busy) renderStatus(st.status, `⏳ ${r.message || 'Starting Stable Diffusion…'}`);
-    if (r.phase === 'failed') hint(r.message, 'error');
+    if (r.phase === 'failed') hint(`${r.message}${r.fix ? ` ${r.fix}` : ''}`, 'error');
+    else if (waiting) hint(r.message, 'warn');
   }
   async function refreshTargets() {
     const r = await call('targets');
@@ -1009,19 +1030,34 @@
     // The quick button on the bar: "▶ Start Forge with API".
     const pick = r.targets.find((t) => t.id === sel.value);
     const b = $('btn-sd-run');
-    if (b) { b.hidden = !pick || (st.runner && st.runner.phase === 'running') || st.connected; b.textContent = pick ? `▶ Start ${pick.label}${pick.kind === 'comfy' ? '' : ' with API'}` : '▶ Start'; }
-    $('btn-sd-run2').textContent = pick ? `▶ Start ${pick.label}${pick.kind === 'comfy' ? '' : ' with API'}` : '▶ Start';
+    const label = pick ? `▶ Start ${pick.label}${pick.kind === 'comfy' ? '' : ' with API'}` : '▶ Start';
+    if (b) { b.hidden = !pick || (st.runner && st.runner.phase === 'running') || st.connected; b.dataset.label = label; b.textContent = label; }
+    $('btn-sd-run2').dataset.label = label; $('btn-sd-run2').textContent = label;
     $('sd-install-card').dataset.hasTargets = String(r.targets.some((t) => t.supported));
     renderRunner(r.runner);
     if (r.install) renderInstall(r.install);
   }
-  async function runStart() {
+  // Start (or, with cpu, start on the processor). Pressing it again while it starts does nothing new.
+  async function runStart(how) {
+    const cur = st.runner && st.runner.phase;
+    if (cur === 'starting' || cur === 'restarting' || cur === 'waiting') { hint(cur === 'waiting' ? st.runner.message : 'Stable Diffusion is already starting — one moment.', 'warn'); return; }
     const id = $('sd-run-target').value;
-    renderRunner({ phase: 'starting', message: 'Starting Stable Diffusion… the first start can take several minutes.' });
-    const r = await call('start', id);
+    const cpu = how === 'cpu';
+    renderRunner({ phase: 'starting', message: cpu ? 'Starting ComfyUI on the processor… slow, but works on any PC.' : 'Starting Stable Diffusion… the first start can take several minutes.' });
+    const r = cpu ? await call('startCpu', id) : await call('start', id);
     if (r && r.runner) renderRunner(r.runner);
     if (r && r.ok) { hint('', ''); const s = await call('status'); renderStatus(s); await loadLists(); }
-    else if (r && r.message) hint(r.message, 'error');
+    else if (r && r.waiting) hint(r.message, 'warn');
+    else if (r && r.message) hint(`${r.message}${r.fix && !(r.runner && r.runner.fix) ? ` ${r.fix}` : ''}`, 'error');
+  }
+  async function useOtherBuild() {
+    if ($('btn-sd-other-build')) $('btn-sd-other-build').disabled = true;
+    hint('Switching to the other ComfyUI build… (it is downloaded first if it isn\'t there yet; your models are shared)', 'warn');
+    const r = await call('useOtherBuild');
+    if (r && r.runner) renderRunner(r.runner);
+    if (r && r.ok) { hint('', ''); await refreshTargets(); const s = await call('status'); renderStatus(s); await loadLists(); }
+    else hint((r && r.message) || 'Could not switch the ComfyUI build.', 'error');
+    if ($('btn-sd-other-build')) $('btn-sd-other-build').disabled = false;
   }
   function fmtGB(n) { return n ? `${(n / 1073741824).toFixed(1)} GB` : '?'; }
   function renderInstall(i) {
@@ -1052,8 +1088,10 @@
     renderInstall(Object.assign({ installed: c.installed }, st.installState || {}, { installed: c.installed }));
     if (!c.supported) $('btn-sd-install').disabled = true;
   }
-  if ($('btn-sd-run')) $('btn-sd-run').onclick = runStart;
-  if ($('btn-sd-run2')) $('btn-sd-run2').onclick = runStart;
+  if ($('btn-sd-run')) $('btn-sd-run').onclick = () => runStart();
+  if ($('btn-sd-run2')) $('btn-sd-run2').onclick = () => runStart();
+  if ($('btn-sd-run-cpu')) $('btn-sd-run-cpu').onclick = () => runStart('cpu');
+  if ($('btn-sd-other-build')) $('btn-sd-other-build').onclick = useOtherBuild;
   const halt = async () => { const r = await call('stop'); if (r && r.runner) renderRunner(r.runner); renderStatus(Object.assign({}, st.status, { enabled: false }), '⏹ Stable Diffusion stopped'); };
   if ($('btn-sd-halt')) $('btn-sd-halt').onclick = halt;
   if ($('btn-sd-halt2')) $('btn-sd-halt2').onclick = halt;

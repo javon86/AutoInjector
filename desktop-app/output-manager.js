@@ -89,6 +89,12 @@ const STUFF_NOTE = [
   '    ai-work/  files the AIs produced that the app grabbed',
   '    logs/     "Extract All" text dumps',
   '',
+  '  PROGRAMS THE APP INSTALLS FOR YOU (inside apps/):',
+  '    apps/comfyui/   ComfyUI (pictures + video) with its own models/ folder',
+  '    apps/ollama/    Ollama, when the app installed it itself',
+  '',
+  '  INSTALLERS + UNFINISHED DOWNLOADS: downloads/ (safe to empty when nothing is downloading)',
+  '',
   '  DOWNLOADED (inside models/):',
   '    models/llm/     local language models (Ollama)',
   '    models/image/   Stable Diffusion checkpoints',
@@ -99,6 +105,10 @@ const STUFF_NOTE = [
   '',
   'See models/README.txt for how to point each backend (Ollama / A1111 /',
   'Stability Matrix / voice) at these folders.',
+  '',
+  'Where this folder is gets remembered outside the app folder, so a new copy of',
+  'AutoInjector keeps using it (nothing has to be downloaded again). The app lists',
+  'every place it uses under: More settings -> Downloads & creations -> Where everything is.',
 ].join('\n');
 
 // Write a top-level guide plus a per-folder note, once (never clobber edits).

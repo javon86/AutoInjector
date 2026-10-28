@@ -48,7 +48,7 @@ const LOGS_BIG = 500 * MB;
 const REPEAT_MS = 60 * 60 * 1000;      // the same problem at most once per hour
 const INTERVAL_MS = 10 * 60 * 1000;    // every ~10 minutes
 const FIRST_DELAY_MS = 60 * 1000;      // a minute after start (Ollama / Akọwe / SD get time to come up)
-const CHECKS = ['brain', 'disk', 'sd', 'akowe', 'panes', 'logs'];
+const CHECKS = ['brain', 'disk', 'sd', 'akowe', 'panes', 'logs', 'content'];
 const SEVERITY_RANK = { warn: 1, urgent: 2 };
 
 function gbText(bytes) {
@@ -255,6 +255,20 @@ function createHealthWatch(deps = {}) {
         fix: { label: '📂 Open the logs folder', open: dirs[0] },
         okText: '✔ The logs folder is a sensible size again.',
         bytes: total,
+      }];
+    },
+
+    // Your downloads are in ANOTHER AutoInjector folder (an earlier copy): offer to use them instead of downloading again.
+    async content() {
+      const c = await call('contentRoots');
+      if (!c) return null;
+      const other = Array.isArray(c.others) ? c.others[0] : null;
+      if (!other || c.reason === 'chosen' || c.reason === 'found-earlier') return []; // you picked it / already using the earlier copy's
+      return [{
+        code: 'content-elsewhere', check: 'content', severity: 'warn',
+        text: `📁 Your earlier downloads (${other.what.join(', ')}${other.bytes ? `, about ${gbText(other.bytes)}` : ''}) are in another AutoInjector folder: ${other.dir}. Use that folder so nothing has to be downloaded again.`,
+        fix: { label: '📁 Use that folder (restarts the app)', channel: 'content:use-root', args: [{ root: other.root }] },
+        okText: '✔ AutoInjector uses the folder with your downloads.',
       }];
     },
   };

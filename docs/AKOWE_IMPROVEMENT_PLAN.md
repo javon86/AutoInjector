@@ -455,6 +455,36 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
   - The model finder is folded, and the activity log sits under ⚙ More settings, so the Butler section is about
     690 px tall instead of about 1,700.
 
+- [x] **One tidy folder system + a new copy keeps your downloads** (2026-10-27, from the user's log: a new clone in
+  another folder started with an empty "stuff and thing" and everything was downloaded again).
+  - Where "stuff and thing" lives is remembered outside the app folder (`content-home.js`, userData/content-home.json).
+    A new copy that is still empty uses an earlier copy's folder by itself. If both copies have things, 🩺 offers "Use
+    that folder" (the app restarts), and you can choose "Keep this one".
+  - Everything the app installs or downloads now lives inside "stuff and thing" (`folders.js`):
+    - `apps/comfyui` (ComfyUI with its picture and video models);
+    - `apps/ollama`;
+    - `downloads/` (installers and unfinished downloads);
+    - `models/`;
+    - your creations.
+
+    A ComfyUI installed before keeps working in `%LOCALAPPDATA%\AutoInjector\comfyui` until you press
+    **📦 Move ComfyUI into "stuff and thing"**. Very long paths on Windows keep the short place.
+  - **📁 Where everything is** (⚙ More settings → Downloads & creations) lists every place with Open buttons. Alfred
+    has `folders.map`, `folders.open`, `folders.move_comfy`, `content.roots` and `content.use_root`.
+- [x] **ComfyUI crashing on start** (0xC0000005 ×4 in the user's log):
+  - The crash and the last lines ComfyUI printed are now recorded and explained in plain words.
+  - After the second crash it restarts once with `--disable-cuda-malloc`.
+  - It offers "Start on the processor" and "Use the other ComfyUI build" (shares the models).
+  - Pressing Start while it is already starting does nothing extra; Start during the install starts it when the
+    install finishes.
+- [x] **Downloads ride out network drops** (the 18 GB video model failed with ECONNRESET after an hour):
+  - One shared downloader with automatic Range-resume retries, up to 8 tries over about 10 minutes, with the count
+    reset whenever bytes arrive. After that there is a "↻ Resume download" button.
+  - The `.part` file is kept and the size and SHA checks still run.
+  - Double presses are ignored.
+- [x] **Forgiving `generate_video`:** a picture plus a character uses the picture; seconds are clamped; junk values are
+  dropped with notes; and the errors that remain name the field and the allowed values.
+
 ## Problems to come back to
 
 - **Refinement from the user's 2026-10-25 evening log (FIXED, 2026-10-26)**, one update:

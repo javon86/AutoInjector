@@ -141,6 +141,11 @@ A('llm.start_alfred', 'llm:start-alfred', { t: 'Start his AI with what is alread
 A('llm.scan', 'llm:scan', { t: 'Find what is already installed: Ollama, model folders, models, .gguf files from other apps', c: false });
 A('llm.use_store', 'llm:use-store', { t: 'Use an Ollama model folder that already has models (no download)', c: true, a: { dir: text(1000) }, r: ['dir'], ex: { dir: '/home/me/.ollama/models' } });
 A('llm.import_gguf', 'llm:import-gguf', { t: 'Add a .gguf model file another app downloaded into Ollama (no download)', c: true, a: { file: text(1000), name: opt(60) }, r: ['file'], ex: { file: '/home/me/Downloads/model.gguf', name: 'my-model' } });
+A('folders.map', 'folders:map', { t: 'Where everything is kept (one tidy list: "stuff and thing", ComfyUI, models, settings…)', c: false });
+A('folders.open', 'folders:open', { t: 'Open one of the folders in the "where everything is" list', c: true, aa: true, a: { path: text(1000) }, r: ['path'], ex: { path: '/home/me/AutoInjector/stuff and thing' } });
+A('folders.move_comfy', 'folders:move-comfy', { t: 'Move an older ComfyUI (and its models) into "stuff and thing" (the app restarts)', c: true });
+A('content.roots', 'content:roots', { t: 'Where your downloads are kept ("stuff and thing"), and earlier AutoInjector folders that also have downloads', c: false, a: { fresh: { type: 'boolean' } } });
+A('content.use_root', 'content:use-root', { t: 'Keep downloads in another AutoInjector folder (the app restarts)', c: true, a: { root: text(1000) }, r: ['root'], ex: { root: '/home/me/Documents/git/AutoInjector' } });
 A('llm.install_ollama', 'llm:install-ollama', { t: 'Install Ollama', c: true });
 A('llm.start', 'llm:start', { t: 'Start Ollama', c: true, aa: true });
 A('llm.stop', 'llm:stop', { t: 'Stop the app\'s Ollama', c: true, aa: true });
@@ -209,6 +214,8 @@ A('sd.show_file', 'sd:show-file', { t: 'Show a picture in its folder', c: true, 
 A('sd.open_log', 'sd:open-log', { t: 'Open the Stable Diffusion log', c: true, aa: true });
 A('sd.set_autostart', 'sd:set-autostart', { t: 'Start Stable Diffusion with AutoInjector on/off', c: true, a: { on: { type: 'boolean' } }, r: ['on'], ex: { on: false } });
 A('sd.open_install_folder', 'sd:open-install-folder', { t: 'Open the Stable Diffusion install folder', c: true, aa: true });
+A('sd.start_cpu', 'sd:start-cpu', { t: 'Start ComfyUI on the processor (slow, but works on any PC) — when it crashes on the graphics card', c: true, a: { id: opt(300) }, ex: { id: 'portable:comfyui' } });
+A('sd.use_other_build', 'sd:use-other-build', { t: 'Use the other ComfyUI build (switches to, or downloads, the other portable build for this graphics card, then starts it)', c: true });
 A('sdlib.update', 'sdlib:update', { t: 'Edit a library entry (tags, ★, notes, base, weight, triggers)', c: true, a: { id: text(300), patch: pass }, r: ['id', 'patch'], ex: { id: 'lora:odile_face', patch: { favorite: true } } });
 A('sdlib.folders', 'sdlib:folders', { t: 'Library model folders', c: false });
 A('sdlib.add_folder', 'sdlib:add-folder', { t: 'Add a models folder to the library', c: true, a: { path: text(1000), kind: { type: 'string', enum: ['checkpoint', 'lora', 'vae', 'embedding', 'auto'] } }, r: ['path'], ex: { path: 'C:/StabilityMatrix/Data/Models' } });

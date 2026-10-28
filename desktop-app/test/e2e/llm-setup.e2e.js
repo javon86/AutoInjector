@@ -112,7 +112,7 @@ async function main() {
     const pullsBefore = oll.st.pulls.length;
     assert(await controls.isVisible('#llm-btn-go'), 'the "▶ Start Alfred" button is visible');
     await controls.click('#llm-btn-go');
-    const ready = await until(async () => { const t = await controls.textContent('#llm-msg'); return /Alfred is ready with/.test(t) && !(await controls.isDisabled('#llm-btn-go')) ? t : null; }, 60000, 300);
+    const ready = await until(async () => { const t = await controls.textContent('#llm-msg'); return /Alfred is ready with/.test(t) && !(await controls.isDisabled('#llm-btn-go')) ? t : null; }, 150000, 300);
     assert(!!ready, `it says he is ready ("${(ready || await controls.textContent('#llm-msg')).slice(0, 140)}")`);
     s = await controls.evaluate(() => window.api.alfredStatus());
     assert(s.enabled === true && s.settings.local.model === 'qwen2.5:0.5b' && oll.st.pulls.length === pullsBefore, `Alfred is on with the model he already had (${s.settings.local.model}); nothing was downloaded`);

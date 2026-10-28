@@ -30,6 +30,8 @@ const { buildSendScript, buildReadScript, buildFileInputFinderExpression, buildP
 const managerProvider = require("./manager-provider");
 const dbService = require("./db-service");
 const ollamaManager = require("./ollama-manager");
+const contentHome = require("./content-home");
+const foldersMod = require("./folders");
 const outputManager = require("./output-manager");
 const secretStore = require("./secret-store");
 const akoweLegacy = require("./akowe-legacy"); // names from before the rename BookForge -> Akọwe (2026-10-25): old settings key, key file, env vars
@@ -4575,10 +4577,11 @@ const llmSetup = llmSetupLib.createLlmSetup({
   llmHardware: () => llmHardwareLib,
   catalog: () => llmGetCatalog(),
   paths: {
-    downloadsDir: () => path.join(userDataDir(), "downloads"),
+    downloadsDir: () => { try { return foldersMod.layout(outputManager.root()).downloads; } catch (_) { return path.join(userDataDir(), "downloads"); } },
     modelsDir: () => outputManager.modelsDir("llm"),
-    appInstallDir: () => path.join(userDataDir(), "ollama"),
+    appInstallDir: () => { const old = path.join(userDataDir(), "ollama"); try { return fs.existsSync(old) ? old : foldersMod.layout(outputManager.root()).ollamaApp; } catch (_) { return old; } },
   },
+  otherModelDirs: () => ((contentChoice && contentChoice.others) || []).map((o) => ({ dir: path.join(o.dir, "models", "llm"), label: `An earlier AutoInjector folder (${o.root})` })),
   log: (kind, detail) => logEvent(kind, detail),
   emit: (payload) => broadcast("llm", payload),
   secrets: () => [llmHfToken].filter(Boolean),
@@ -6304,6 +6307,13 @@ function sdRunner() {
   _sdRunner = sdRunnerMod.createSdRunner({
     logFile: sdLogFile(),
     logger: (k, d) => logEvent(k, d),
+    // The crash tail hides the home folder / secrets the same way the log extract does.
+    redaction: () => extractRedaction(),
+    // Start pressed while ⬇ Install is still downloading / unpacking → it waits, then starts by itself.
+    installing: () => { const s = sdInstallerInst().status(); return !!s.busy && (s.phase === "downloading" || s.phase === "extracting"); },
+    refreshTarget: (old) => { const list = sdTargets(); return list.find((x) => old && x.id === old.id) || list.find((x) => x.portable) || list.find((x) => x.supported) || old; },
+    gpu: () => sdInstallerInst().gpu(), // filled by the installer's GPU check (sdStart starts one in the background)
+    otherBuild: () => sdInstallerInst().otherBuild(),
     onChange: (st) => {
       broadcast("sd-runner", st);
       // When it comes up, point the image module at it (once per start).
@@ -6314,9 +6324,22 @@ function sdRunner() {
   return _sdRunner;
 }
 let _sdInstaller = null;
+let comfyChoice = null;
 function sdInstallerInst() {
   if (_sdInstaller) return _sdInstaller;
-  _sdInstaller = sdInstallerMod.createInstaller({ home: process.env.AUTOINJECTOR_SD_HOME || undefined, log: (k, d) => logEvent(k, d), onChange: (st) => broadcast("sd-install", st) });
+  // 📁 ComfyUI lives inside "stuff and thing" (apps/comfyui); one installed before the tidy-up keeps working where it is.
+  try { comfyChoice = foldersMod.pickComfyHome({ stuffDir: outputManager.root() || path.join(contentBaseFolder(), "stuff and thing"), legacyHome: sdInstallerMod.defaultHome(), envHome: process.env.AUTOINJECTOR_SD_HOME || null }); } catch (_) { comfyChoice = { home: process.env.AUTOINJECTOR_SD_HOME || sdInstallerMod.defaultHome(), where: "legacy" }; }
+  logEvent("comfy-home", { where: comfyChoice.where });
+  let lastPhase = null;
+  _sdInstaller = sdInstallerMod.createInstaller({ home: comfyChoice.home, log: (k, d) => logEvent(k, d), onChange: (st) => {
+    broadcast("sd-install", st);
+    // A Start pressed during the install starts now (or says the install stopped).
+    if (st.phase !== lastPhase && _sdRunner && _sdRunner.status().phase === "waiting") {
+      if (st.phase === "installed") _sdRunner.installFinished(true).catch(() => {});
+      else if (st.phase === "failed" || st.phase === "paused") _sdRunner.installFinished(false).catch(() => {});
+    }
+    lastPhase = st.phase;
+  } });
   return _sdInstaller;
 }
 function sdTargets() {
@@ -6330,17 +6353,45 @@ function sdTargetsPublic() {
     platform: process.platform,
   };
 }
-async function sdStart(targetId) {
+// so: { cpu } — "Start on the processor (slow, but works on any PC)".
+async function sdStart(targetId, so = {}) {
+  const r = sdRunner();
   const list = sdTargets();
   const t = list.find((x) => x.id === targetId) || list.find((x) => x.id === state.sdManaged.targetId && x.supported) || list.find((x) => x.supported);
-  if (!t) return Object.assign({ ok: false, error: "NO_TARGET", message: "No Stable Diffusion app was found to start. Press ⬇ Install Stable Diffusion, or add Forge / ComfyUI in Stability Matrix." }, { runner: sdRunner().status() });
-  if (state.sdManaged.targetId !== t.id) { state.sdManaged.targetId = t.id; saveStateDebounced(); }
-  logEvent("sd-runner-begin", { target: t.kind, source: t.source });
-  const st = await sdRunner().start(t);
-  return { ok: st.phase === "running", runner: st, message: st.message };
+  const installing = (() => { try { const s = sdInstallerInst().status(); return !!s.busy && (s.phase === "downloading" || s.phase === "extracting"); } catch (_) { return false; } })();
+  if (!t && !installing) return Object.assign({ ok: false, error: "NO_TARGET", message: "No Stable Diffusion app was found to start. Press ⬇ Install Stable Diffusion, or add Forge / ComfyUI in Stability Matrix." }, { runner: r.status() });
+  if (t && state.sdManaged.targetId !== t.id) { state.sdManaged.targetId = t.id; saveStateDebounced(); }
+  // Know the graphics card before a crash needs explaining (nvidia-smi / WMI, in the background).
+  if (t && t.portable && process.env.AUTOINJECTOR_SD_GPU_CHECK !== "0") { try { if (!sdInstallerInst().gpu()) sdInstallerInst().check().catch(() => {}); } catch (_) {} }
+  // Already starting: the runner hands back the same start (no second start sequence).
+  if (!r.isBusy()) {
+    // Switching to the processor while our own GPU start is running: stop that one first.
+    if (so.cpu && r.status().phase === "running" && r.status().owned) await r.stop();
+    logEvent("sd-runner-begin", Object.assign({ target: t ? t.kind : null, source: t ? t.source : null }, so.cpu ? { cpu: true } : {}));
+  }
+  const st = await r.start(t || null, so.cpu ? { cpu: true } : {});
+  const out = { ok: st.phase === "running", runner: st, message: st.message };
+  if (st.alreadyStarting) out.alreadyStarting = true;
+  if (st.phase === "waiting") { out.waiting = true; out.error = "INSTALLING"; }
+  else if (st.phase !== "running" && st.error) { out.error = st.error; if (st.fix) out.fix = st.fix; if (st.actions && st.actions.length) out.actions = st.actions; }
+  return out;
+}
+// "Use the other ComfyUI build": switch to it (or download it next to the first one, sharing the models), then start it.
+async function sdUseOtherBuild() {
+  const r = sdRunner();
+  if (r.isBusy()) return { ok: false, error: "BUSY", message: "Stable Diffusion is starting right now — wait until it is running or has stopped.", runner: r.status() };
+  if (r.status().owned && r.status().phase === "running") await r.stop();
+  logEvent("sd-other-build", { from: sdInstallerInst().currentBuild() || null });
+  const res = await sdInstallerInst().useOtherBuild({ ignoreSpace: false });
+  if (!res || !res.ok) return Object.assign({ runner: r.status() }, res || { ok: false });
+  try { sdLibrary().scan(); } catch (_) {}
+  const st = await sdStart("portable:comfyui");
+  return Object.assign({ build: res.build, switched: !!res.switched, installed: !res.switched }, st);
 }
 ipcMain.handle("sd:targets", sdSafe(() => sdTargetsPublic()));
 ipcMain.handle("sd:start", sdSafe((a) => sdStart(a.id)));
+ipcMain.handle("sd:start-cpu", sdSafe((a) => sdStart(a && a.id, { cpu: true })));
+ipcMain.handle("sd:use-other-build", sdSafe(() => sdUseOtherBuild()));
 ipcMain.handle("sd:stop", sdSafe(async () => ({ ok: true, runner: await sdRunner().stop() })));
 ipcMain.handle("sd:open-log", sdSafe(async () => { const f = sdLogFile(); try { fs.mkdirSync(path.dirname(f), { recursive: true }); if (!fs.existsSync(f)) fs.writeFileSync(f, ""); } catch (_) {} const err = await shell.openPath(f); return err ? { ok: false, error: err } : { ok: true }; }));
 ipcMain.handle("sd:set-autostart", sdSafe((a) => { state.sdManaged.startWithApp = !!a.on; saveStateDebounced(); logEvent("sd-autostart", { on: !!a.on }); return sdTargetsPublic(); }));
@@ -6384,7 +6435,7 @@ async function videoComfy(o = {}) {
   if (!o.start || process.env.AUTOINJECTOR_VIDEO_AUTOSTART === "0") return null;
   // Nothing answers: start the installed ComfyUI (only when AutoInjector isn't already running another SD app).
   const t = sdTargets().find((x) => x.kind === "comfy" && x.supported);
-  if (!t || (rs && (rs.phase === "running" || rs.phase === "starting" || rs.phase === "restarting"))) return null;
+  if (!t || (rs && (rs.phase === "running" || rs.phase === "starting" || rs.phase === "restarting" || rs.phase === "waiting"))) return null;
   logEvent("video-comfy-autostart", { target: t.source });
   const st = await sdStart(t.id);
   return st && st.ok && st.runner && st.runner.base ? ok(st.runner.base, "ComfyUI", "started by AutoInjector") : null;
@@ -7138,7 +7189,7 @@ async function startServiceBridge() {
 // not under Documents. That's the folder one level above this desktop-app dir.
 // If that location isn't writable (e.g. a packaged app installed read-only), fall
 // back to Documents/AutoInjector so downloads/creations still have a home.
-function contentBaseFolder() {
+function contentAppFolder() {
   const appFolder = path.join(__dirname, "..");
   try {
     fs.mkdirSync(appFolder, { recursive: true });
@@ -7148,6 +7199,66 @@ function contentBaseFolder() {
     try { return path.join(app.getPath("documents"), "AutoInjector"); } catch (_) { return appFolder; }
   }
 }
+// Where "stuff and thing" lives (content-home.js): the folder remembered OUTSIDE the app (so a fresh copy of
+// AutoInjector keeps your downloads), else an earlier copy's folder when this one is still empty, else this copy's.
+let contentChoice = null;
+function contentBaseFolder() {
+  if (contentChoice) return contentChoice.root;
+  const appFolder = contentAppFolder();
+  // The test harness (and anyone who wants the old behaviour) can turn the remember + look-around off.
+  if (process.env.AUTOINJECTOR_CONTENT_SCAN === "0") { contentChoice = { root: appFolder, reason: "default", others: [], off: true }; return appFolder; }
+  try {
+    contentChoice = contentHome.chooseRoot({ appFolder, userData: userDataDir(), home: app.getPath("home") });
+  } catch (_) { contentChoice = { root: appFolder, reason: "default", others: [] }; }
+  return contentChoice.root;
+}
+function contentRootsInfo(fresh) {
+  const current = contentBaseFolder();
+  let others = (contentChoice && contentChoice.others) || [];
+  if (fresh) { try { others = contentHome.findOtherRoots({ home: app.getPath("home"), appFolder: current }); } catch (_) { others = []; } }
+  others = others.filter((o) => path.resolve(o.root) !== path.resolve(current));
+  return { ok: true, current, dir: path.join(current, contentHome.STUFF), reason: contentChoice ? contentChoice.reason : "default", remembered: contentHome.readRemembered(userDataDir()), others: others.map((o) => ({ root: o.root, dir: o.dir, what: o.what, bytes: o.bytes })) };
+}
+// 📁 Where everything is — and moving an older ComfyUI into "stuff and thing".
+function foldersPlaces() {
+  let akoweData = null; try { akoweData = (require("./akowe-server").dataDirCandidates() || [])[0] || null; } catch (_) {}
+  let sm = null; try { const f = (require("./sd-library").findStabilityMatrix() || [])[0]; sm = f ? f.library : null; } catch (_) {}
+  try { sdInstallerInst(); } catch (_) {}
+  return { stuffDir: outputManager.root(), comfy: comfyChoice || {}, userData: userDataDir(), ollamaStore: ollamaManager.defaultStoreDir(), akoweData, stabilityMatrix: sm };
+}
+ipcMain.handle("folders:map", async () => { try { return { ok: true, rows: foldersMod.map(foldersPlaces()), comfy: comfyChoice || null }; } catch (e) { return { ok: false, error: String((e && e.message) || e) }; } });
+ipcMain.handle("folders:open", async (_e, a) => {
+  try {
+    const want = String((a && a.path) || "");
+    const rows = foldersMod.map(foldersPlaces(), { sizes: false });
+    if (!rows.some((r) => r.path === want && r.exists)) return { ok: false, error: "I only open the folders in this list." };
+    const err = await shell.openPath(want); return err ? { ok: false, error: err } : { ok: true };
+  } catch (e) { return { ok: false, error: String((e && e.message) || e) }; }
+});
+ipcMain.handle("folders:move-comfy", async () => {
+  try {
+    sdInstallerInst();
+    const c = comfyChoice || {};
+    if (c.where !== "legacy") return { ok: false, error: c.where === "stuff" ? "ComfyUI is already in \"stuff and thing\"." : "There's no older ComfyUI to move." };
+    try { const st = sdRunner().status(); if (st && (st.running || st.starting) && /comfy/i.test(String(st.kind || st.target || ""))) return { ok: false, error: "Stop ComfyUI first (🎨 Images → ⚙ Start & install → Stop), then move it." }; } catch (_) {}
+    const to = foldersMod.layout(outputManager.root()).comfyHome;
+    const r = await foldersMod.moveComfy({ from: c.home, to, onProgress: (m) => broadcast("sd-install", { phase: "move", message: m }) });
+    logEvent("comfy-move", { ok: !!r.ok, how: r.how || null });
+    if (r.ok) setTimeout(() => { try { app.relaunch(); app.exit(0); } catch (_) {} }, 800);
+    return r.ok ? Object.assign({ restarting: true }, r, { message: `${r.message} AutoInjector restarts to use it.` }) : r;
+  } catch (e) { return { ok: false, error: String((e && e.message) || e) }; }
+});
+ipcMain.handle("content:roots", (_e, a) => { try { return contentRootsInfo(!!(a && a.fresh)); } catch (e) { return { ok: false, error: String((e && e.message) || e) }; } });
+ipcMain.handle("content:use-root", (_e, a) => {
+  try {
+    const root = a && typeof a === "object" ? a.root : a;
+    if (!root || !fs.existsSync(path.join(String(root), contentHome.STUFF))) return { ok: false, error: "That folder has no \"stuff and thing\" in it." };
+    if (!contentHome.remember(userDataDir(), String(root), undefined, "user")) return { ok: false, error: "I couldn't save the choice." };
+    logEvent("content-root", { step: "use", reason: "user" });
+    if (!(a && a.noRestart)) setTimeout(() => { try { app.relaunch(); app.exit(0); } catch (_) {} }, 600);
+    return { ok: true, restarting: !(a && a.noRestart), message: `✓ AutoInjector will use ${path.join(String(root), contentHome.STUFF)} — restarting…` };
+  } catch (e) { return { ok: false, error: String((e && e.message) || e) }; }
+});
 
 // --- Akọwe bridge (experimental, OFF by default) ------------------------
 // docs/AKOWE_AUTOINJECTOR_BRIDGE.md is normative. A loopback-only HTTP
@@ -8388,6 +8499,7 @@ const healthWatch = healthWatchLib.createHealthWatch({
   akowe: () => { const s = akoweServerPublicStatus(); return { enabled: s.enabled, phase: s.phase, error: s.error, message: s.message, restarts: s.restarts }; },
   panes: () => { const sr = selfRepairStatus(); return SITE_IDS.map((s) => { const x = (sr.sites && sr.sites[s]) || {}; return { site: s, label: x.label || siteLabel(s), active: !!x.active, state: x.state, problem: x.problem }; }); },
   logDirs: () => { try { return [outputManager.logsDir()]; } catch (_) { return []; } },
+  contentRoots: () => { try { return contentRootsInfo(false); } catch (_) { return null; } },
   log: (kind, detail) => logEvent(kind, detail),
   notify: ({ type, problem, text }) => {
     broadcast("health", { type, problem, text, problems: healthWatch.problems() });
@@ -8417,6 +8529,11 @@ app.whenReady().then(() => {
   catch (e) { logEvent("db-init-error", { error: String(e) }); }
   try {
     const r = outputManager.init(contentBaseFolder()); logEvent("output-init", { root: r });
+    try {
+      const c = contentChoice || {};
+      logEvent("content-root", { step: "chosen", reason: c.reason, others: (c.others || []).length });
+      if (!c.off && !contentHome.readRemembered(userDataDir())) contentHome.remember(userDataDir(), contentBaseFolder(), undefined, "auto"); // from now on every copy finds it
+    } catch (_) {}
     // Give the tool registry its output sandbox + the computer-power deps (a
     // process runner, the OS "open" helpers, and where the butler's self-made
     // tools persist), then re-register any tools he made in a past session.
