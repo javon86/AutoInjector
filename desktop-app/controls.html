@@ -328,20 +328,24 @@
     /* ---- The User Panel stays put at the top; everything below scrolls past
        it. (Native AI panes float above HTML, so they're kept inside the fixed
        butler unit rather than a scroll region.) ---- */
-    #col-userpanel { position:sticky; top:0; z-index:6; }
+    /* top:-12px = minus #wrap's top padding, so the panel sticks flush under the title bar and
+       nothing scrolling past peeks out above it. */
+    #col-userpanel { position:sticky; top:-12px; z-index:6; box-shadow:0 6px 10px -6px rgba(0,0,0,.8); }
 
-    /* ---- Butler unit: the butler bar + the three AI panes read as ONE bordered
-       block — he sits on top and controls the three beneath him. ---- */
-    /* Order within #wrap (a flex column): the butler unit sits directly under
-       the sticky User Panel; the other utility panels and the log follow it. */
+    /* Order within #wrap (a flex column), for someone who mainly talks to the three AIs:
+       the sticky User Panel, then the three AI windows, then the 🎩 Butler section (folds to
+       one line once set up) + 📚 Akọwe bridge, the utility panels, the Activity Log and,
+       last, the conversation (transcript) buttons. */
     #top-tab-strip { order:-1; }
     #col-userpanel { order:0; }
-    #butler-unit { order:1; }
-    #panels-grid { order:2; }
-    #main-row { order:3; }
-    #butler-unit { border:1px solid #2a4a34; border-radius:11px; background:#0a0f0b; padding:5px; margin:0 0 12px; display:flex; flex-direction:column; gap:0; }
-    #butler-unit > #col-systemai { margin:0; border-bottom-left-radius:0; border-bottom-right-radius:0; }
-    #butler-unit > #ai-row { margin:0; }
+    #collapsed-strip { order:1; }
+    #ai-row { order:2; }
+    #butler-unit { order:3; }
+    #panels-grid { order:4; }
+    #main-row { order:5; }
+    #exportbar { order:6; }
+    #butler-unit { display:flex; flex-direction:column; gap:12px; flex:0 0 auto; }
+    #butler-unit > #col-systemai, #butler-unit > #col-akowe { margin:0; }
 
     /* ---- Butler capability reel: a live ticker of each capability as it runs. ---- */
     #cap-reel { display:none; gap:6px; overflow-x:auto; padding:5px 2px; margin:4px 0 2px; }
@@ -429,16 +433,22 @@
        (break-inside:avoid) and balance them across as many ~300px columns as fit. */
     /* Column basis chosen so the utility panels fill the width as whole columns
        (no lopsided empty column on the right) across the usual window sizes. */
-    #panels-grid { column-width: 440px; column-gap: 12px; flex:0 0 auto; }
+    #panels-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(290px, 1fr)); gap:12px; align-items:start; flex:0 0 auto; }
     #panels-grid:empty { display:none; }
-    #panels-grid > .yc-panel { display:inline-block; width:100%; margin:0 0 12px; break-inside:avoid; vertical-align:top; }
+    #panels-grid > .yc-panel { width:100%; margin:0; min-width:0; }
 
     /* Butler bar: a full-width band that sits directly ON TOP of the three AI
        panes (it's a sibling right before #ai-row), so the butler visibly
        oversees them. Chat is full-width on top; his tools sit underneath. */
-    .butler-bar { flex:0 0 auto; margin:0 0 8px; border:1px solid #2f6b45; border-radius:10px; background:#0e140f; box-shadow:0 1px 0 #163a26 inset; }
-    .butler-bar > .yc-head { border-bottom:1px solid #1c3a28; padding-bottom:5px; margin-bottom:6px; }
-    .butler-bar > .yc-head h2 { color:#8ef0b0; letter-spacing:.01em; }
+    .butler-bar { flex:0 0 auto; margin:0; padding:8px 12px 10px; border:1px solid #2f6b45; border-radius:8px; background:#0e140f; }
+    .butler-bar > .yc-head { border-bottom:1px solid #1c3a28; padding-bottom:6px; margin-bottom:8px; }
+    .butler-bar > .yc-head h2 { color:#8ef0b0; letter-spacing:.01em; font-size:14px; font-weight:700; }
+    .butler-bar .butler-sub { font-size:11.5px; opacity:.7; }
+    /* Folded (once set up, or by the ▾ button): ONE line in place — never hidden away. */
+    #col-systemai.hidden-collapsed { display:block; padding-bottom:8px; }
+    #col-systemai.hidden-collapsed > .yc-head { border-bottom:none; padding-bottom:0; margin-bottom:0; }
+    #col-systemai:not(.hidden-collapsed) .butler-sub, #col-systemai:not(.hidden-collapsed) #tab-systemai { display:none; }
+    #tab-systemai { font-size:12px; padding:3px 10px; }
     /* Two-thirds (everything: goal + controls) on the left, one-third (the
        chat window) on the right. flex:2 vs flex:1 = the 2/3 · 1/3 split. */
     .butler-body.butler-body { display:flex; flex-direction:row; gap:12px; align-items:stretch; }
@@ -459,7 +469,7 @@
     .butler-chat-log > div { padding:2px 0; border-bottom:1px solid #141414; }
     .butler-chat-log > div:last-child { border-bottom:none; }
     /* Controls under the goal box (still on the 2/3 side): a tidy row of cards. */
-    #butler-controls { width:100%; border-top:1px solid #1c3a28; padding-top:10px; margin-top:9px; display:flex; flex-wrap:wrap; gap:10px 12px; align-items:flex-start; }
+    #butler-controls { width:100%; display:flex; flex-wrap:wrap; gap:10px 12px; align-items:flex-start; }
     #butler-controls > p { flex:1 1 100%; margin:0 0 2px; }
     /* The "run & check" block spans the full 2/3 column as the primary surface,
        sitting above the settings cards. */
@@ -603,7 +613,8 @@
        adding more panels makes the whole #wrap scroll (it is overflow:auto)
        instead of crushing the panes. The floor is lifted when every pane is
        collapsed (see the .all-collapsed rule below) so no dead space is left. */
-    #ai-row { display:flex; flex-direction:column; gap:8px; flex:1 1 auto; min-height:427px; transition: flex-basis .2s ease; }
+    /* flex-shrink 0: in the scrolling #wrap the row must never be squeezed shorter than its panes. */
+    #ai-row { display:flex; flex-direction:column; gap:8px; flex:1 0 auto; min-height:427px; transition: flex-basis .2s ease; }
     #expanded-strip { display:flex; gap:8px; flex:1 1 auto; min-height:0; }
     /* All three AI panes collapsed = #expanded-strip is empty and would
        otherwise still claim its flex-grow share of #ai-row's height as dead
@@ -736,7 +747,7 @@
     .locker-tabs button { font-size:11px; padding:1px 7px; border-radius:5px; opacity:.7; }
     .locker-tabs button.active { opacity:1; border-color:#2d4a37; color:#8ef0b0; }
     .locker-tabs .lk-refresh { padding:1px 5px; }
-    .locker-list { height:96px; overflow-y:auto; overflow-x:hidden; background:#0e0e0e; border:1px solid #2a2a2a; border-radius:6px; padding:3px; display:flex; flex-direction:column; gap:1px; }
+    .locker-list { height:76px; overflow-y:auto; overflow-x:hidden; background:#0e0e0e; border:1px solid #2a2a2a; border-radius:6px; padding:3px; display:flex; flex-direction:column; gap:1px; }
     .locker-list:empty::after { content:"Empty — files this AI saves (or gets sent) show up here."; opacity:.6; font-size:11px; padding:4px 6px; }
     .lk-row { display:flex; align-items:center; gap:6px; font-size:11.5px; padding:2px 6px; border-radius:4px; cursor:pointer; border:none; background:none; color:inherit; text-align:left; width:100%; }
     .lk-row:hover, .lk-row:focus { background:#1a2a1f; outline:none; }
@@ -760,7 +771,8 @@
     .sai-sec > summary::before { content:"▸ "; opacity:.6; }
     .sai-sec[open] > summary::before { content:"▾ "; }
 
-    .pane-slot { flex:1 1 auto; min-height:280px; background:#0b0b0b; border-top:1px solid #2a2a2a; }
+    /* The AI's real web page is laid over this slot. 350px = 25% taller than the old 280px floor. */
+    .pane-slot { flex:1 1 auto; min-height:350px; background:#0b0b0b; border-top:1px solid #2a2a2a; }
     .ai-col.disabled .pane-slot { flex:0 0 0; min-height:0; }
 
     #main-row { display:flex; gap:8px; flex:0 0 220px; min-height:0; transition: flex-basis .2s ease; }
@@ -794,7 +806,8 @@
     #log-filters input { margin:0; }
     #btn-log-clear { font-size:11px; padding:2px 8px; }
 
-    #exportbar { display:flex; gap:8px; align-items:center; flex:0 0 auto; }
+    #exportbar { display:flex; gap:8px; align-items:center; flex:0 0 auto; flex-wrap:wrap; padding:7px 12px; }
+    #exportbar .exp-label { font-size:11px; text-transform:uppercase; letter-spacing:.04em; opacity:.75; margin-right:4px; }
 
     select, input, textarea, button { background:#1a1a1a; color:#eee; border:1px solid #333; border-radius:6px; padding:4px 6px; font-family:inherit; font-size:11px; }
     button { cursor:pointer; }
@@ -1844,6 +1857,15 @@
       </div>
     </div>
 
+    <!-- The three AI windows (ChatGPT · Claude · Gemini) sit right under the User Panel, so what you
+         mainly use is on screen first. Each .pane-slot is the spot main.js lays that AI's real web page
+         (a native view) over — see syncPaneBounds(). -->
+    <div id="collapsed-strip"></div>
+
+    <div id="ai-row">
+      <div id="expanded-strip"></div>
+    </div>
+
     <div id="panels-grid">
       <div id="col-global" class="col yc-panel">
         <div class="yc-head">
@@ -1918,10 +1940,8 @@
          now sit inside the Butler bar below (one unified butler surface). -->
     </div><!-- /panels-grid -->
 
-    <!-- Butler unit: the butler bar + the three AI panes wrapped as ONE bordered
-         block — the butler sits on top and controls the three panes beneath him,
-         so they read as a single "he + his three" workspace. Everything else on
-         the page is outside this unit. -->
+    <!-- Butler unit: the 🎩 Butler section (Alfred's AI, personality, settings, activity) and the
+         📚 Akọwe bridge, under the AI windows. The Butler section folds to one line once his AI is set up. -->
     <div id="butler-unit">
     <!-- Butler bar: the System AI (Supervisor) as a full-width band that sits
          ON TOP of the three AI panes, so the butler visibly oversees them. Left
@@ -1929,9 +1949,11 @@
          collapse mechanism + tests keep working. -->
     <div id="col-systemai" class="yc-panel butler-bar">
       <div class="yc-head">
-        <h2>🎩 Butler — set up Alfred's AI · activity</h2><span class="spacer"></span>
+        <h2>🎩 Butler — Alfred's AI, personality &amp; activity</h2>
+        <span class="butler-sub" id="butler-sub">Folded to save room. Open it to change his AI, personality or settings.</span>
+        <span class="spacer"></span>
         <span id="lsi-status" style="font-size:11px; opacity:.7;"></span>
-        <button class="collapse-btn" id="btn-collapse-systemai" title="Minimize this panel" aria-label="Minimize this panel">⌄</button>
+        <button class="collapse-btn" id="btn-collapse-systemai" title="Fold the Butler section to one line" aria-label="Fold the Butler section to one line" aria-expanded="true" aria-controls="systemai-body">⌄</button>
       </div>
       <div id="systemai-body" class="butler-body">
         <!-- TWO-THIRDS: everything else — the goal box + all of his controls. -->
@@ -2256,11 +2278,6 @@
       </div>
     </div>
 
-    <div id="collapsed-strip"></div>
-
-    <div id="ai-row">
-      <div id="expanded-strip"></div>
-    </div>
     </div><!-- /butler-unit -->
 
     <div id="main-row">
@@ -2290,6 +2307,7 @@
     </div>
 
     <div id="exportbar" class="col">
+      <span class="exp-label">Conversation</span>
       <button id="btn-copy">Copy Transcript</button>
       <button id="btn-download">Download .md</button>
       <button id="btn-clear">Clear Transcript</button>
