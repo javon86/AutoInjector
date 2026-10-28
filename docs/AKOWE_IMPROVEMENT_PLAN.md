@@ -30,13 +30,19 @@ Legend: `[ ]` to do · `[~]` in progress · `[x]` done · `[!]` problem (see "Pr
 - **🧰 Tool servers / MCP (done 2026-10-28, f10 "mcp"):** in ⚙ More settings → 🧰 Tools, add an outside MCP tool
   server (a command line or a web address, with encrypted keys). Alfred uses it through `mcp_tools` and `mcp_call`
   (always on a card, never "always allowed"), and the butler through USE_TOOL. See `docs/ALFRED.md` → "Tool servers (MCP)".
-- **Back burner (later, by the user's call):** images + Stable Diffusion (B1: AutoInjector side done — 🎨 Images tab),
-  video (B2), covers and pictures (B3), Character Forge dossiers (B5).
+- **F10 (done 2026-10-28, "do all 10"):** Alfred has exactly two places — the 🎩 Butler section (setup) and his
+  docked talk panel (no separate window; Ctrl/Cmd+Shift+A). The old top User Panel butler buttons now drive Alfred, and
+  the panel has 8 big action buttons (🧑 character, 🎨 picture, 🎬 video, 🖼 cover, 📖 my book, ✍ continue/make a book,
+  🩺 check everything, ❓ everything I can do — a 230-item list in 8 groups). The old Image/Video panels and the setup
+  wizard's duplicate forms are gone (one place each: 🎨 Images, 🎬 Video). Also: ebook cover JPG, map PNG in Word,
+  style-card delete fix, motion clips for items/places/magic, new characters from scratch, auto-save + update-or-copy +
+  big books opened from a folder, MCP tool servers, book trailers (B2).
+- **Back burner (later, by the user's call):** a first real GPU run of video/trailers; the audiobook export (P29).
 - **Still to try for real:** everything above has only been tested with stand-in AIs — the first real
   run on the user's PC is the real test (see "Problems to come back to").
 - **One app, one launcher (done 2026-10-25):** start AutoInjector — Akọwe starts with it (📖 Akọwe tab, connected
   by itself). `akowe/run-akowe.*` remain optional for Akọwe alone.
-- Last updated: 2026-10-27 (B1 pictures in books, B3 covers (designer + print wrap) and B5 items / places / magic systems + the manuscript check DONE, all usable by 🎩 Alfred; earlier: video, Character Forge, 360 scan; B6 Alfred floating side panel + one-button AI setup + model finder DONE; book #2 next).
+- Last updated: 2026-10-28 (F10: all ten unfinished items done — see above). Before: 2026-10-27 (B1 pictures in books, B3 covers (designer + print wrap) and B5 items / places / magic systems + the manuscript check DONE, all usable by 🎩 Alfred; earlier: video, Character Forge, 360 scan; B6 Alfred floating side panel + one-button AI setup + model finder DONE; book #2 next).
 
 ## Section 1 — AIs that always answer (self-repair) and independent review  (Phase 1)
 
@@ -348,7 +354,7 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
   logline cards, the main place, key chapters but never the ending, the characters' approved looks + locks, chosen
   chapter pictures / portraits brought to life), the author edits them, 🎞 Make the trailer runs as a job and stores
   the trailer with the book (book save `Trailer/`); plain words for every `VIDEO_*` code. 🎩 Alfred: `make_trailer`.
-- [ ] **B3 (P19)** 🎨 Book cover and pictures (LATER — not started): cover design (title/author on a template,
+- [x] **B3 (P19)** 🎨 Book cover and pictures (DONE — covers, interior pictures, map; ebook JPG + Word map 2026-10-28): cover design (title/author on a template,
   AI-generated artwork when an image AI is connected), chapter images/illustrations, maps; placement in
   PDF/EPUB/DOCX; print-ready cover size and spine.
   - 🖼 **Interior pictures DONE 2026-10-27** (`docs/PICTURES.md`): the 🖼 Pictures page — a book-wide art style,

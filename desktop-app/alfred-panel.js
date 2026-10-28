@@ -290,10 +290,9 @@
   }
   const val = (n) => { const e = $(`alfred-f-${n}`); return e ? e.value.replace(/\s+/g, ' ').trim() : ''; };
   const REQUEST = {
-    // forge_character fills a book character's dossier (create_dossier for items, places, magic); Akọwe makes
-    // the characters themselves (its outline / Characters and places) — when the name is not in the book yet,
-    // Alfred says so plainly (the tool answers with the book's characters).
-    character: () => { const n = val('name'); if (!n) return null; const a = val('about'); return `Make a character for my book: “${n}”${a ? ` — ${a}` : ''}. Open their Character Forge dossier and invent the rest as proposals for me to approve${a ? ', with what I said about them' : ''}. If they are not in my book yet, tell me plainly.`; },
+    // forge_character fills a book character's dossier; a name the book doesn't have yet is added first with
+    // create_dossier kind 'characters' (Akọwe POST /forge/characters — a draft the author approves).
+    character: () => { const n = val('name'); if (!n) return null; const a = val('about'); return `Make a character for my book: “${n}”${a ? ` — ${a}` : ''}. Open their Character Forge dossier and invent the rest as proposals for me to approve${a ? ', with what I said about them' : ''}. If they are not in my book yet, add them as a new character first.`; },
     picture: () => { const w = val('what'); return w ? `Make a picture of ${w}.` : null; },
     video: () => { const w = val('what'); return w ? `Make a short video of ${w}.` : null; },
     cover: () => { const w = val('what'); return `Design the cover for my book and make the cover art${w ? ` showing ${w}` : ''}.`; },

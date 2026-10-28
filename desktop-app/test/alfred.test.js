@@ -761,7 +761,7 @@ async function main() {
     assert(!d.getElementById('alfred-form').hidden && !!d.getElementById('alfred-f-name') && !!d.getElementById('alfred-f-about') && d.getElementById('alfred-a-character').getAttribute('aria-pressed') === 'true', '🧑 with a book: a tiny form (name + a line about them)');
     fill('name', 'Mara'); fill('about', 'the keeper who hates the sea');
     await submit();
-    assert(wc.includes('ask:Make a character for my book: “Mara” — the keeper who hates the sea. Open their Character Forge dossier and invent the rest as proposals for me to approve, with what I said about them. If they are not in my book yet, tell me plainly.'), '… sends Alfred the request (→ forge_character)');
+    assert(wc.includes('ask:Make a character for my book: “Mara” — the keeper who hates the sea. Open their Character Forge dossier and invent the rest as proposals for me to approve, with what I said about them. If they are not in my book yet, add them as a new character first.'), '… sends Alfred the request (→ forge_character)');
     d.getElementById('alfred-a-picture').click(); await sleep(10);
     fill('what', 'a lighthouse at dusk'); await submit();
     assert(wc.includes('ask:Make a picture of a lighthouse at dusk.'), '🎨 Make a picture: what → generate_image');

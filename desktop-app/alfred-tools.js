@@ -350,7 +350,7 @@ async function resolveDossier(ctx, a) {
   const want = String(a.character).trim().toLowerCase();
   const d = all.find((x) => x.record_id === a.character || String(x.code || '').toLowerCase() === want)
     || all.find((x) => String(x.name || '').toLowerCase() === want) || all.find((x) => String(x.name || '').toLowerCase().includes(want));
-  if (!d) return { ok: false, error: kp === 'characters' ? 'NO_CHARACTER' : 'NO_DOSSIER', message: `I couldn't find a ${word} called ${q(a.character)}. ${word[0].toUpperCase()}${word.slice(1)}s: ${all.map((x) => x.name).join(', ') || 'none yet'}.` };
+  if (!d) return { ok: false, error: kp === 'characters' ? 'NO_CHARACTER' : 'NO_DOSSIER', message: `I couldn't find a ${word} called ${q(a.character)}. ${word[0].toUpperCase()}${word.slice(1)}s: ${all.map((x) => x.name).join(', ') || 'none yet'}.${kp === 'characters' ? ' To add a new one, use create_dossier with kind "characters" and their name.' : ''}` };
   return { ok: true, pid: b.pid, kp, list: all, d };
 }
 function dossierBrief(j) {
