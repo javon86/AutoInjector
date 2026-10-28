@@ -591,6 +591,45 @@ async function main() {
     release({ ok: true, model: 'wan22-ti2v-5b' }); await tk(50);
     dom.window.close();
   }
+  console.log('\n== ⚙ Setup → Advanced: other video server (was the old Video Generation panel\'s Connection) ==');
+  {
+    const { JSDOM } = require('jsdom');
+    const html = fs.readFileSync(path.join(__dirname, '..', 'controls.html'), 'utf8');
+    const dom = new JSDOM(html, { runScripts: 'outside-only', url: 'http://localhost/controls.html' });
+    const calls = [];
+    const video = {
+      status: async () => ({ ok: true, ready: false, comfy: { connected: false, installed: false }, settings: { model: 'wan22-ti2v-5b', backend: 'auto' }, endpoint: { configured: true, enabled: false, endpoint: 'http://192.168.1.30:7862/generate' }, message: 'not set up' }),
+      models: async () => ({ ok: true, anyComfy: false, roots: [], models: [] }),
+    };
+    const known = {
+      video, akoweTab: async () => ({}),
+      videoStatus: async () => { calls.push(['videoStatus']); return { ok: true, configured: true, enabled: false, endpoint: 'http://192.168.1.30:7862/generate', frames: 24, fps: 12, width: 768, height: 432, steps: 25, cfgScale: 6.5, motion: 1.2, seed: 42 }; },
+      configureVideo: async (patch) => { calls.push(['configureVideo', patch]); return { ok: true, enabled: !!patch.enabled }; },
+      endpointPresets: async (kind) => { calls.push(['endpointPresets', kind]); return { ok: true, presets: [{ label: 'AnimateDiff — 7860', endpoint: 'http://127.0.0.1:7860/sdapi/v1/txt2img' }, { label: 'SVD — 7862', endpoint: 'http://127.0.0.1:7862/generate' }] }; },
+      detectEndpoints: async (kind) => { calls.push(['detectEndpoints', kind]); return { ok: true, reachable: [] }; },
+      testEndpoint: async (url) => { calls.push(['testEndpoint', url]); return { reachable: true }; },
+    };
+    dom.window.api = new Proxy(known, { get(t, k) { if (k in t) return t[k]; if (typeof k === 'string' && /^on[A-Z]/.test(k)) return () => {}; return async () => ({ ok: true }); } });
+    const $ = (id) => dom.window.document.getElementById(id);
+    const click = (el) => el.dispatchEvent(new dom.window.Event('click', { bubbles: true }));
+    dom.window.eval(fs.readFileSync(path.join(__dirname, '..', 'videos-studio.js'), 'utf8'));
+    click($('tab-app-video')); await sleep(80);
+    click($('vd-sub-setup')); await sleep(80);
+    assert($('vd-advanced') && $('vd-ep-preset').options.length === 3 && calls.some((c) => c[0] === 'endpointPresets' && c[1] === 'video'), 'the fold lists the common video servers (Choose… + 2)');
+    assert($('vd-ep-url').value === 'http://192.168.1.30:7862/generate' && $('vd-ep-frames').value === '24' && $('vd-ep-fps').value === '12' && $('vd-ep-motion').value === '1.2' && $('vd-ep-seed').value === '42', 'it shows the saved address and this server\'s clip settings (frames, fps, motion, seed …)');
+    $('vd-ep-preset').value = 'http://127.0.0.1:7862/generate'; $('vd-ep-preset').dispatchEvent(new dom.window.Event('change', { bubbles: true }));
+    assert($('vd-ep-url').value === 'http://127.0.0.1:7862/generate', 'picking a common one fills the address');
+    click($('btn-vd-ep-detect')); await sleep(30);
+    assert(/Nothing found running/.test($('vd-ep-msg').textContent), '🔍 Auto-detect with nothing running says what to do');
+    click($('btn-vd-ep-test')); await sleep(30);
+    assert(calls.some((c) => c[0] === 'testEndpoint' && c[1] === 'http://127.0.0.1:7862/generate') && /It answers ✓/.test($('vd-ep-msg').textContent), '✓ Check it answers pings the address');
+    $('vd-ep-enabled').checked = true; $('vd-ep-frames').value = '32'; $('vd-ep-motion').value = '0.8';
+    click($('btn-vd-ep-save')); await sleep(40);
+    const sv = calls.filter((c) => c[0] === 'configureVideo').pop();
+    assert(sv && sv[1].enabled === true && sv[1].endpoint === 'http://127.0.0.1:7862/generate' && sv[1].frames === 32 && sv[1].motion === 0.8 && sv[1].fps === 12 && sv[1].seed === 42, 'Save stores address, on/off and the clip settings (video:configure — the same setting Alfred uses)');
+    assert(/Saved — the other video server is on/.test($('vd-ep-msg').textContent), 'and says so in plain words');
+    dom.window.close();
+  }
   console.log('\n== an oversized bridge body is refused and its connection closed ==');
   {
     const b = createServiceBridge({ video: { backend: () => ({}), request: async () => ({ ok: true }) } });

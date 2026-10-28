@@ -496,9 +496,11 @@ SD 1.5 model; you can **install bigger models later** and pick them from the
 panel's model dropdown.
 
 **Set it up:**
-1. Open **Image Studio (Stable Diffusion)**.
-2. Put your server address in the box (default `http://127.0.0.1:7860`) and click
-   **Test**.
+1. Open the **🎨 Images** tab (or press **🎨 Images** in the User Panel's buttons).
+2. Press **🔍 Find my SD app**, or put your server address in the box (default
+   `http://127.0.0.1:7860`) and click **Connect**. For a server on another computer,
+   **⚙ Start & install → Advanced: another server** has common addresses, Auto-detect
+   and **✓ Check it answers**.
 3. Tick **Enable image generation**, and optionally **Let AIs trigger with
    `[IMAGE: …]`**. Click **Save settings**.
 

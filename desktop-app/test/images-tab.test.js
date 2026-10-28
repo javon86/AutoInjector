@@ -76,7 +76,13 @@ async function load(over) {
   const html = fs.readFileSync(path.join(__dirname, '..', 'controls.html'), 'utf8');
   const dom = new JSDOM(html, { runScripts: 'outside-only', url: 'http://localhost/controls.html' });
   const h = makeSd(over);
-  const known = { sd: h.sd, akoweTab: async (a) => { h.calls.push(['akoweTab', a]); return {}; } };
+  const known = { sd: h.sd, akoweTab: async (a) => { h.calls.push(['akoweTab', a]); return {}; },
+    // ⚙ Advanced: another server (moved here from the old Image Generation panel)
+    imageStatus: async () => { h.calls.push(['imageStatus']); return { ok: true, enabled: true, endpoint: 'http://192.168.1.20:7860/sdapi/v1/txt2img' }; },
+    configureImage: async (patch) => { h.calls.push(['configureImage', patch]); return { ok: true, enabled: !!patch.enabled }; },
+    endpointPresets: async (kind) => { h.calls.push(['endpointPresets', kind]); return { ok: true, presets: [{ label: 'Automatic1111 / Forge — port 7860', endpoint: 'http://127.0.0.1:7860/sdapi/v1/txt2img' }, { label: 'Automatic1111 — port 7861', endpoint: 'http://127.0.0.1:7861/sdapi/v1/txt2img' }] }; },
+    detectEndpoints: async (kind) => { h.calls.push(['detectEndpoints', kind]); return { ok: true, reachable: [{ label: 'Automatic1111 — port 7861', endpoint: 'http://127.0.0.1:7861/sdapi/v1/txt2img' }] }; },
+    testEndpoint: async (url) => { h.calls.push(['testEndpoint', url]); return { reachable: !/9999/.test(url) }; } };
   dom.window.api = new Proxy(known, { get(t, k) { if (k in t) return t[k]; if (typeof k === 'string' && /^on[A-Z]/.test(k)) return () => {}; return async () => ({}); } });
   dom.window.confirm = () => true;
   Object.defineProperty(dom.window.navigator, 'clipboard', { value: { writeText: async () => {} }, configurable: true });
@@ -205,6 +211,23 @@ async function load(over) {
   t.click('btn-sd-install');
   await tick(80);
   assert(t.calls.some((c) => c[0] === 'install') && /installed \(checksum verified\)/.test(t.$('sd-install-msg').textContent), '⬇ Install runs and reports the verified install');
+
+  console.log('== ⚙ Advanced: another server (was the old Image Generation panel\'s Connection) ==');
+  assert(t.$('sd-adv-server') && !t.$('sd-adv-server').open, 'the “Advanced: another server” fold is in ⚙ Start & install, closed');
+  assert(t.calls.some((c) => c[0] === 'endpointPresets' && c[1] === 'image') && t.$('sd-ep-preset').options.length === 3, 'it lists the common addresses (Choose… + 2)');
+  assert(t.$('sd-ep-url').value === 'http://192.168.1.20:7860/sdapi/v1/txt2img' && t.$('sd-ep-enabled').checked, 'it shows the saved address (another computer here) and the on/off switch');
+  t.$('sd-ep-preset').value = 'http://127.0.0.1:7860/sdapi/v1/txt2img'; t.fire(t.$('sd-ep-preset'), 'change');
+  assert(t.$('sd-ep-url').value === 'http://127.0.0.1:7860/sdapi/v1/txt2img' && /Filled in/.test(t.$('sd-ep-msg').textContent), 'picking a common one fills the address');
+  t.click('btn-sd-ep-detect'); await tick(30);
+  assert(t.$('sd-ep-url').value === 'http://127.0.0.1:7861/sdapi/v1/txt2img' && /Found: Automatic1111 — port 7861/.test(t.$('sd-ep-msg').textContent), '🔍 Auto-detect fills in what answers on this PC');
+  t.$('sd-ep-url').value = 'http://10.0.0.5:9999/sdapi/v1/txt2img';
+  t.click('btn-sd-ep-test'); await tick(30);
+  assert(/No answer — is the app running/.test(t.$('sd-ep-msg').textContent), '✓ Check it answers: a dead address says what to check, in plain words');
+  t.$('sd-ep-url').value = 'http://10.0.0.5:7860/sdapi/v1/txt2img';
+  t.click('btn-sd-ep-test'); await tick(30);
+  assert(/It answers ✓/.test(t.$('sd-ep-msg').textContent), '✓ Check it answers: a live address says so');
+  t.click('btn-sd-ep-save'); await tick(40);
+  assert(t.calls.some((c) => c[0] === 'configureImage' && c[1].enabled === true && c[1].endpoint === 'http://10.0.0.5:7860/sdapi/v1/txt2img') && /Saved — image generation is on/.test(t.$('sd-ep-msg').textContent), 'Save stores the address + on/off (image:configure — the same setting Alfred and the butler use)');
 
   console.log('== more settings: hires, refiner, clip skip, extra fields ==');
   t.click('sd-sub-generate');

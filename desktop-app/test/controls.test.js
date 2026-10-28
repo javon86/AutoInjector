@@ -1639,115 +1639,37 @@ async function testCapabilityPanelsWired() {
   api.voiceListen = listenBefore;
   delete api.voiceCheck;
 
-  // The Image / Video paddles open the wizard on their own tab.
-  assert(doc.getElementById("btn-open-image") && doc.getElementById("btn-open-video"), "the Image and Video paddles are present in the action bar");
+  // ONE way to make pictures and clips: the 🎨 Images / 🎬 Video buttons in the action bar
+  // switch the main window to that tab (the old Image/Video Generation panels are gone).
+  assert(doc.getElementById("btn-open-image") && doc.getElementById("btn-open-video"), "the 🎨 Images and 🎬 Video buttons are present in the action bar");
+  assert(/Images/.test(doc.getElementById("btn-open-image").textContent) && /Video/.test(doc.getElementById("btn-open-video").textContent), "they are labelled 🎨 Images and 🎬 Video, like the tabs they open");
+  const shown = [];
+  dom.window.sdShowImagesTab = () => shown.push("images");
+  dom.window.vdShowVideoTab = () => shown.push("video");
+  const wizBefore = api.calls.filter((c) => c.fn === "openWizard").length;
   click(dom, "btn-open-image");
-  await new Promise((r) => setTimeout(r, 10));
-  assert(api.calls.some((c) => c.fn === "openWizard" && c.tab === "images"), "the Image paddle opens the wizard on the Images tab");
   click(dom, "btn-open-video");
   await new Promise((r) => setTimeout(r, 10));
-  assert(api.calls.some((c) => c.fn === "openWizard" && c.tab === "video"), "the Video paddle opens the wizard on the Video tab");
-
-  // Image Generation + Video panels exist in the tiled panel grid.
-  assert(doc.getElementById("col-image") && doc.getElementById("col-video"), "the Image Generation and Video panels are present");
-  assert(api.calls.some((c) => c.fn === "imageStatus"), "the Image panel loads the SD config on start");
-  doc.getElementById("img-endpoint").value = "http://127.0.0.1:7860/sdapi/v1/txt2img";
-  doc.getElementById("img-enabled").checked = true;
-  click(dom, "btn-img-save");
-  await new Promise((r) => setTimeout(r, 20));
-  assert(api.calls.some((c) => c.fn === "configureImage" && c.patch.enabled === true && /7860/.test(c.patch.endpoint)), "the Image panel Save wires to configureImage");
-  // The 5 main image sliders exist and show a live value.
-  for (const id of ["img-steps", "img-cfg", "img-width", "img-height", "img-batch"]) {
-    const sl = doc.getElementById(id);
-    assert(sl && sl.getAttribute("type") === "range", `image slider ${id} is a range control`);
-  }
-  const stepSlider = doc.getElementById("img-steps");
-  stepSlider.value = "40";
-  stepSlider.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
-  assert(doc.getElementById("img-steps-v").textContent === "40", "moving a slider updates its live value readout");
-  // Compact fields: prompt, negative prompt, and LoRA/weights (appended to prompt).
-  doc.getElementById("img-prompt").value = "a red apple";
-  doc.getElementById("img-negative").value = "blurry, text";
-  doc.getElementById("img-lora").value = "<lora:apple:0.7>";
-  doc.getElementById("img-cfg").value = "9";
-  doc.getElementById("img-seed").value = "1234";
-  click(dom, "btn-img-generate");
-  await new Promise((r) => setTimeout(r, 20));
-  const genCall = api.calls.find((c) => c.fn === "imageGenerate");
-  assert(genCall && /a red apple/.test(genCall.prompt) && /<lora:apple:0\.7>/.test(genCall.prompt), "Generate appends the LoRA/weights to the prompt");
-  assert(genCall && genCall.negative === "blurry, text", "the negative prompt is passed through");
-  const imgCfgCall = api.calls.filter((c) => c.fn === "configureImage").pop();
-  assert(imgCfgCall && imgCfgCall.patch.cfgScale === 9 && imgCfgCall.patch.seed === 1234 && imgCfgCall.patch.steps === 40, "the CFG / seed / steps slider values are sent with the render");
-  // 🎲 resets the seed to random (-1).
-  click(dom, "btn-img-seed-rand");
-  assert(doc.getElementById("img-seed").value === "-1", "the 🎲 button resets the seed to random (-1)");
-  // 3 sizes: the render grows the panel to "large" so the preview shows.
-  assert(doc.getElementById("col-image").getAttribute("data-size") === "large", "after a render the Image panel grows to the large size (shows the preview)");
-  assert(doc.getElementById("img-preview").getAttribute("src") === "data:image/png;base64,AAAA", "the rendered image is shown in the inline preview");
-  assert(doc.getElementById("img-history").children.length === 1, "the render is added to the recent-renders strip");
-  // The ◱ size button cycles minimal → middle → large → minimal.
-  doc.getElementById("col-image").setAttribute("data-size", "minimal");
-  click(dom, "btn-img-size");
-  assert(doc.getElementById("col-image").getAttribute("data-size") === "middle", "the size button cycles minimal → middle");
-  click(dom, "btn-img-size");
-  assert(doc.getElementById("col-image").getAttribute("data-size") === "large", "the size button cycles middle → large");
-  click(dom, "btn-img-size");
-  assert(doc.getElementById("col-image").getAttribute("data-size") === "minimal", "the size button wraps large → minimal (three states)");
-  // The Open SD UI button opens the web UI (base of the endpoint).
-  click(dom, "btn-img-open-ui");
+  assert(shown.join() === "images,video", "🎨 Images opens the Images tab and 🎬 Video opens the Video tab");
+  assert(api.calls.filter((c) => c.fn === "openWizard").length === wizBefore, "…and neither opens the Setup Wizard any more");
+  delete dom.window.sdShowImagesTab; delete dom.window.vdShowVideoTab;
+  click(dom, "btn-open-image");
+  click(dom, "btn-open-video");
   await new Promise((r) => setTimeout(r, 10));
-  assert(api.calls.some((c) => c.fn === "openExternal" && /127\.0\.0\.1:7860$/.test(c.url)), "the Open SD UI button opens the Stable Diffusion web UI (endpoint base)");
-
-  // Video module: same 3-size + generate shape, wired to the video provider.
-  assert(api.calls.some((c) => c.fn === "videoStatus"), "the Video panel loads its config on start");
-  for (const id of ["vid-frames", "vid-fps", "vid-steps", "vid-cfg", "vid-motion"]) {
-    const sl = doc.getElementById(id);
-    assert(sl && sl.getAttribute("type") === "range", `video slider ${id} is a range control`);
+  assert(api.calls.some((c) => c.fn === "openWizard" && c.tab === "images") && api.calls.some((c) => c.fn === "openWizard" && c.tab === "video"), "if a tab's script is missing they still lead somewhere (the Setup Wizard's tab)");
+  // The duplicate panels are gone…
+  for (const id of ["col-image", "col-video", "img-prompt", "img-endpoint", "img-preset", "btn-img-generate", "btn-img-detect", "btn-img-test", "vid-prompt", "vid-endpoint", "vid-preset", "vid-preview", "btn-vid-generate", "btn-vid-detect", "btn-vid-size", "btn-collapse-image", "btn-collapse-video"]) {
+    assert(!doc.getElementById(id), `the old panel's #${id} is gone`);
   }
-  doc.getElementById("vid-prompt").value = "a spinning cube";
-  doc.getElementById("vid-negative").value = "jitter";
-  doc.getElementById("vid-endpoint").value = "http://127.0.0.1:7861/txt2vid";
-  doc.getElementById("vid-motion").value = "1.5";
-  click(dom, "btn-vid-generate");
-  await new Promise((r) => setTimeout(r, 20));
-  const vgen = api.calls.find((c) => c.fn === "videoGenerate");
-  assert(vgen && /a spinning cube/.test(vgen.prompt) && vgen.negative === "jitter", "Video Generate passes the prompt + negative to the video provider");
-  const vidCfgCall = api.calls.filter((c) => c.fn === "configureVideo").pop();
-  assert(vidCfgCall && vidCfgCall.patch.motion === 1.5, "the video Motion slider value is sent with the render");
-  assert(doc.getElementById("col-video").getAttribute("data-size") === "large", "after a render the Video panel grows to large (shows the clip preview)");
-  assert(doc.getElementById("vid-preview").getAttribute("src") === "data:video/mp4;base64,BBBB", "the rendered clip is shown in the inline video preview");
-  // OP-13: a failed render shows the plain-language reason (e.g. NO_VIDEO).
-  const genBefore = api.videoGenerate;
-  api.videoGenerate = async () => ({ ok: false, error: "NO_VIDEO", message: "The server answered, but it didn't send back a video, so no working video backend is configured yet." });
-  click(dom, "btn-vid-generate");
-  await new Promise((r) => setTimeout(r, 20));
-  assert(/no working video backend is configured/.test(doc.getElementById("vid-msg").textContent) && !/Failed: NO_VIDEO/.test(doc.getElementById("vid-msg").textContent), "a NO_VIDEO render shows the plain-language message, not the bare code");
-  api.videoGenerate = genBefore;
-  click(dom, "btn-vid-size");
-  assert(["minimal", "middle", "large"].includes(doc.getElementById("col-video").getAttribute("data-size")), "the Video panel has its own working size button");
-  // Tab collapse: minimizing sends the panel up to a tab; clicking it restores.
-  click(dom, "btn-collapse-video");
-  assert(doc.getElementById("col-video").classList.contains("hidden-collapsed") && !!doc.getElementById("tab-video"), "collapsing the Video panel hides it and adds a tab");
-  doc.getElementById("tab-video").dispatchEvent(new dom.window.Event("click", { bubbles: true }));
-  assert(!doc.getElementById("col-video").classList.contains("hidden-collapsed") && !doc.getElementById("tab-video"), "clicking the tab brings the Video panel back");
-
-  // Endpoint help: preset dropdown fills the address; Auto-detect + Test are wired.
-  assert(api.calls.some((c) => c.fn === "endpointPresets" && c.kind === "image"), "the Image Connection loads its preset backends into a dropdown");
-  const preset = doc.getElementById("img-preset");
-  assert(preset && preset.querySelectorAll("option").length >= 3, "the preset dropdown is populated (Choose… + backends)");
-  preset.value = "http://127.0.0.1:7860/sdapi/v1/txt2img";
-  preset.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
-  assert(doc.getElementById("img-endpoint").value === "http://127.0.0.1:7860/sdapi/v1/txt2img", "picking a preset fills the endpoint field — no guessing");
-  doc.getElementById("img-endpoint").value = "";
-  click(dom, "btn-img-detect");
-  await new Promise((r) => setTimeout(r, 20));
-  assert(api.calls.some((c) => c.fn === "detectEndpoints" && c.kind === "image"), "Auto-detect scans localhost for a running backend");
-  assert(doc.getElementById("img-endpoint").value === "http://127.0.0.1:7860/sdapi/v1/txt2img", "a detected backend is filled into the endpoint field automatically");
-  click(dom, "btn-img-test");
-  await new Promise((r) => setTimeout(r, 20));
-  assert(api.calls.some((c) => c.fn === "testEndpoint"), "the Test button pings the endpoint for reachability");
-  assert(/Reachable/.test(doc.getElementById("img-conn-msg").textContent), "a reachable endpoint is reported clearly");
-  assert(!!doc.getElementById("vid-preset") && !!doc.getElementById("btn-vid-detect") && !!doc.getElementById("btn-vid-test"), "the Video Connection has the same preset + detect + test helpers");
+  // …and what only they offered lives in the tabs' setup views ("Advanced: another server").
+  const sdAdv = doc.getElementById("sd-adv-server");
+  assert(sdAdv && sdAdv.closest("#sd-view-setup") && /Advanced: another server/.test(sdAdv.querySelector("summary").textContent), "🎨 Images → ⚙ Start & install has an “Advanced: another server” fold");
+  for (const id of ["sd-ep-enabled", "sd-ep-preset", "btn-sd-ep-detect", "sd-ep-url", "btn-sd-ep-save", "btn-sd-ep-test", "sd-ep-msg"]) assert(sdAdv && sdAdv.querySelector(`#${id}`), `the Images fold has #${id}`);
+  const vdAdv = doc.getElementById("vd-advanced");
+  assert(vdAdv && vdAdv.closest("#vd-view-setup") && /Advanced: other video server/.test(vdAdv.querySelector("summary").textContent), "🎬 Video → ⚙ Setup & models has its “Advanced: other video server” fold");
+  for (const id of ["vd-ep-enabled", "vd-ep-preset", "btn-vd-ep-detect", "vd-ep-url", "btn-vd-ep-save", "btn-vd-ep-test", "vd-ep-frames", "vd-ep-fps", "vd-ep-width", "vd-ep-height", "vd-ep-steps", "vd-ep-cfg", "vd-ep-motion", "vd-ep-seed"]) assert(vdAdv && vdAdv.querySelector(`#${id}`), `the Video fold has #${id}`);
+  // A minimized-panel tab for the removed panels can never appear.
+  assert(!doc.getElementById("tab-image") && !doc.getElementById("tab-video"), "no leftover tab-strip entries for the removed panels");
 
   // GPU Usage panel: polls gpuInfo and draws the util + VRAM meters.
   assert(!!doc.getElementById("col-gpu"), "the GPU Usage panel is present");

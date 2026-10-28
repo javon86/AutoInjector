@@ -530,21 +530,6 @@
     /* Narrow windows: stack the chat under everything else instead of squeezing. */
     @media (max-width: 900px) { .butler-body.butler-body { flex-direction:column; } }
 
-    /* Three content sizes for a panel (minimal → middle → large), driven by a
-       data-size attribute. Sections tagged .when-mid appear at middle+, and
-       .when-large only at large. The ⌄ tab-collapse is separate from this. */
-    .yc-panel[data-size="minimal"] .when-mid,
-    .yc-panel[data-size="minimal"] .when-large,
-    .yc-panel[data-size="middle"] .when-large { display:none; }
-    .size-btn { background:transparent; border:none; color:#cfcfcf; cursor:pointer; font-size:13px; padding:0 4px; opacity:.8; }
-    .size-btn:hover { opacity:1; }
-
-    /* Generation sliders (image/video main controls). */
-    .slider-row { display:flex; align-items:center; gap:8px; margin:3px 0; font-size:11.5px; }
-    .slider-row > label { width:60px; flex:0 0 auto; opacity:.82; }
-    .slider-row > input[type="range"] { flex:1 1 auto; min-width:0; accent-color:#3aa564; }
-    .slider-row > .sv { width:42px; flex:0 0 auto; text-align:right; font-family:ui-monospace,monospace; opacity:.9; }
-
     /* Who's-speaking indicator: dim chips that light in each speaker's colour. */
     .speak-row { display:flex; gap:5px; flex-wrap:wrap; margin:3px 0 5px; }
     .spk-chip { font-size:11px; padding:2px 8px; border-radius:11px; border:1px solid #2a2a2a; background:#141414; color:#9a9a9a; opacity:.55; transition:all .12s ease; }
@@ -1483,6 +1468,23 @@
           <button id="btn-sd-model" class="sd-fixed" style="margin-top:4px;">⬇ Download this model</button>
         </div>
       </div>
+      <div class="sd-card" style="max-width:760px; margin-top:10px;">
+        <details class="sd-adv" id="sd-adv-server"><summary>Advanced: another server</summary><div class="sd-adv-body">
+          <div class="sd-note">Use this when your Stable Diffusion app runs somewhere unusual — another computer on your network, or a port the 🔍 Find button doesn't check. Pick a common one, press 🔍 Auto-detect, or paste its full address (for Forge / A1111 that ends in <code>/sdapi/v1/txt2img</code>). Press <b>✓ Check it answers</b>, then <b>Save</b>. 🎩 Alfred and the butler use the same address.</div>
+          <label class="sd-fixed" style="font-size:12px;"><input type="checkbox" id="sd-ep-enabled"> Turn image generation on</label>
+          <div class="sd-row" style="margin-top:6px;">
+            <select id="sd-ep-preset" title="Pick a common Stable Diffusion app to fill in the address" aria-label="Common Stable Diffusion addresses" style="flex:1 1 220px; min-width:0;"><option value="">Choose a common one…</option></select>
+            <button id="btn-sd-ep-detect" class="sd-fixed" title="Look on this PC for a running Stable Diffusion server and fill in its address">🔍 Auto-detect</button>
+          </div>
+          <label class="sd-l" for="sd-ep-url">Its address</label>
+          <input type="text" id="sd-ep-url" placeholder="http://127.0.0.1:7860/sdapi/v1/txt2img">
+          <div class="sd-row" style="margin-top:6px;">
+            <button class="sd-fixed primary" id="btn-sd-ep-save">Save</button>
+            <button class="sd-fixed" id="btn-sd-ep-test" title="Check the address answers right now">✓ Check it answers</button>
+          </div>
+          <div id="sd-ep-msg" class="sd-small" role="status" aria-live="polite"></div>
+        </div></details>
+      </div>
     </div>
 
     <div id="sd-view-locks" class="sd-view" role="tabpanel" aria-labelledby="sd-sub-locks" hidden>
@@ -1638,11 +1640,26 @@
         <input type="text" id="vd-comfy-url" placeholder="http://127.0.0.1:8188">
         <div class="sd-row" style="margin-top:6px;"><button class="sd-fixed" id="btn-vd-save-settings">Save settings</button><span id="vd-settings-msg" style="font-size:12px;"></span></div>
         <details class="sd-adv" id="vd-advanced" style="margin-top:8px;"><summary>Advanced: other video server</summary><div class="sd-adv-body">
-          <div class="sd-note">A separate text-to-video HTTP server that sends the finished clip back (the old “video endpoint”). Text→video only.</div>
+          <div class="sd-note">A separate text-to-video HTTP server that sends the finished clip back — for example AnimateDiff in Automatic1111/Forge (needs the AnimateDiff extension, otherwise you get still pictures) or a Stable Video Diffusion server, on this PC or another one. Text→video only. Pick a common one, press 🔍 Auto-detect, or paste its address; press ✓ Check it answers, then Save. Clips save into the <code>videos/</code> folder.</div>
           <label class="sd-fixed" style="font-size:12px;"><input type="checkbox" id="vd-ep-enabled"> Use the other video server</label>
+          <div class="sd-row" style="margin-top:6px;">
+            <select id="vd-ep-preset" title="Pick a common video server to fill in the address" aria-label="Common video server addresses" style="flex:1 1 220px; min-width:0;"><option value="">Choose a common one…</option></select>
+            <button id="btn-vd-ep-detect" class="sd-fixed" title="Look on this PC for a running video server and fill in its address">🔍 Auto-detect</button>
+          </div>
           <label class="sd-l" for="vd-ep-url">Its generate address</label>
-          <input type="text" id="vd-ep-url" placeholder="http://127.0.0.1:7860/…">
-          <div class="sd-row" style="margin-top:6px;"><button class="sd-fixed" id="btn-vd-ep-save">Save</button><span id="vd-ep-msg" style="font-size:12px;"></span></div>
+          <input type="text" id="vd-ep-url" placeholder="http://127.0.0.1:7860/sdapi/v1/txt2img (needs the AnimateDiff extension) or your video server's generate URL">
+          <div class="sd-note" style="margin-top:6px;">Clip settings for this server (the Wan sliders on 🎬 Make don't apply to it):</div>
+          <div class="sd-row" id="vd-ep-clip">
+            <div><label class="sd-l" for="vd-ep-frames">Frames</label><input type="number" id="vd-ep-frames" min="1" max="512" value="16" style="width:70px;"></div>
+            <div><label class="sd-l" for="vd-ep-fps">FPS</label><input type="number" id="vd-ep-fps" min="1" max="60" value="8" style="width:60px;"></div>
+            <div><label class="sd-l" for="vd-ep-width">Width</label><input type="number" id="vd-ep-width" min="64" step="64" value="512" style="width:70px;"></div>
+            <div><label class="sd-l" for="vd-ep-height">Height</label><input type="number" id="vd-ep-height" min="64" step="64" value="512" style="width:70px;"></div>
+            <div><label class="sd-l" for="vd-ep-steps">Steps</label><input type="number" id="vd-ep-steps" min="1" max="150" value="20" style="width:60px;"></div>
+            <div><label class="sd-l" for="vd-ep-cfg">CFG</label><input type="number" id="vd-ep-cfg" min="0" max="30" step="0.5" value="7" style="width:60px;"></div>
+            <div><label class="sd-l" for="vd-ep-motion" title="How much movement in the clip">Motion</label><input type="number" id="vd-ep-motion" min="0" max="2" step="0.1" value="1" style="width:60px;"></div>
+            <div><label class="sd-l" for="vd-ep-seed" title="-1 = random each time">Seed</label><input type="number" id="vd-ep-seed" value="-1" style="width:84px;"></div>
+          </div>
+          <div class="sd-row" style="margin-top:6px;"><button class="sd-fixed primary" id="btn-vd-ep-save">Save</button><button class="sd-fixed" id="btn-vd-ep-test" title="Check the address answers right now">✓ Check it answers</button><span id="vd-ep-msg" role="status" aria-live="polite" style="font-size:12px;"></span></div>
         </div></details>
       </div>
     </div>
@@ -1679,8 +1696,8 @@
           <button id="btn-open-roles">🎭 Roles</button>
           <button id="btn-open-sequence" title="Build a numbered list of prompts to fire off one after another" aria-label="Build a numbered list of prompts to fire off one after another">🧵 Sequence</button>
           <button id="btn-open-wizard" title="Set up local AI, image generation, voice, and guided installs" aria-label="Set up local AI, image generation, voice, and guided installs">🧙 Setup</button>
-          <button id="btn-open-image" title="Set up image generation (Stable Diffusion)" aria-label="Set up image generation (Stable Diffusion)">🖼️ Image</button>
-          <button id="btn-open-video" title="Set up video generation" aria-label="Set up video generation">🎬 Video</button>
+          <button id="btn-open-image" title="Open the 🎨 Images tab — make pictures, set up Stable Diffusion (⚙ Start &amp; install)" aria-label="Open the Images tab">🎨 Images</button>
+          <button id="btn-open-video" title="Open the 🎬 Video tab — make clips, set up video (⚙ Setup &amp; models)" aria-label="Open the Video tab">🎬 Video</button>
           <button id="btn-new-chat-all" title="Start a fresh chat in all three AIs at once (ChatGPT, Claude and Gemini)" aria-label="Start a fresh chat in all three AIs at once (ChatGPT, Claude and Gemini)">🆕 New Chat</button>
           <button id="btn-ai-toggle" class="auto-toggle" title="Turn the System AI (Local Supervisor) on/off. Open the System AI panel for detail." aria-label="Turn the System AI (Local Supervisor) on/off. Open the System AI panel for detail.">🤖 System AI: Off</button>
           <button id="btn-open-feed" title="Open a separate window that shows every AI's messages as colour-coded bubbles — open/close it any time" aria-label="Open a separate window that shows every AI's messages as colour-coded bubbles — open/close it any time">💬 AI Feed</button>
@@ -1807,118 +1824,6 @@
         <button id="btn-prompt-new">+ New</button>
         <button id="btn-prompt-edit">Edit</button>
         <button id="btn-prompt-delete" class="danger">Delete</button>
-      </div>
-    </div>
-
-    <!-- Image module: 3 content sizes (minimal → middle → large) via the ◱ button,
-         plus ⌄ collapses the whole panel to a tab. minimal = prompt + negative only;
-         middle adds LoRA + size/steps; large adds the preview + recent + connection. -->
-    <div id="col-image" class="col yc-panel" data-size="minimal">
-      <div class="yc-head">
-        <h2>Image Generation</h2><span class="spacer"></span>
-        <button class="size-btn" id="btn-img-size" title="Panel size: minimal → middle → large" aria-label="Cycle image panel size">◱</button>
-        <button class="collapse-btn" id="btn-collapse-image" title="Minimize this panel to a tab" aria-label="Minimize this panel to a tab">⌄</button>
-      </div>
-      <label class="row-label" style="display:block; margin:2px 0 1px; opacity:.8;">Prompt</label>
-      <textarea id="img-prompt" rows="2" placeholder="Describe an image to render…" style="width:100%; box-sizing:border-box; resize:vertical;"></textarea>
-      <label class="row-label" style="display:block; margin:4px 0 1px; opacity:.8;">Negative prompt</label>
-      <textarea id="img-negative" rows="1" placeholder="What to avoid (blurry, extra fingers, text…)" style="width:100%; box-sizing:border-box; resize:vertical;"></textarea>
-      <div class="btns" style="margin:3px 0;">
-        <button id="btn-img-generate" class="primary">🖼️ Generate</button>
-        <button id="btn-img-open-ui" title="Open the Stable Diffusion web UI (A1111/ComfyUI) to tweak everything else">🎛️ Open SD UI ↗</button>
-      </div>
-      <div id="img-msg" style="font-size:11.5px; opacity:.8;"></div>
-
-      <div class="when-mid">
-        <label class="row-label" style="display:block; margin:4px 0 1px; opacity:.8;">LoRAs / weights</label>
-        <input type="text" id="img-lora" placeholder="&lt;lora:name:0.8&gt; (added to the prompt)" style="width:100%; box-sizing:border-box; margin:0 0 5px;">
-        <!-- The 5 main image sliders. -->
-        <div class="slider-row"><label title="How many refinement passes — higher = more detail, slower">Steps</label><input type="range" id="img-steps" min="1" max="150" value="20"><span class="sv" id="img-steps-v">20</span></div>
-        <div class="slider-row"><label title="How strictly it follows the prompt (guidance)">CFG</label><input type="range" id="img-cfg" min="1" max="30" step="0.5" value="7"><span class="sv" id="img-cfg-v">7</span></div>
-        <div class="slider-row"><label>Width</label><input type="range" id="img-width" min="256" max="1536" step="64" value="512"><span class="sv" id="img-width-v">512</span></div>
-        <div class="slider-row"><label>Height</label><input type="range" id="img-height" min="256" max="1536" step="64" value="512"><span class="sv" id="img-height-v">512</span></div>
-        <div class="slider-row"><label title="How many images per Generate">Batch</label><input type="range" id="img-batch" min="1" max="8" value="1"><span class="sv" id="img-batch-v">1</span></div>
-        <div class="btns" style="margin:4px 0; align-items:center;">
-          <label style="display:flex; align-items:center; gap:5px; font-size:11.5px;">Seed <input type="number" id="img-seed" value="-1" style="width:96px;"></label>
-          <button id="btn-img-seed-rand" title="Random seed (-1)">🎲</button>
-        </div>
-      </div>
-
-      <div class="when-large">
-        <div id="img-preview-wrap" style="margin:4px 0;">
-          <img id="img-preview" alt="Last generated image preview" style="display:none; width:100%; border:1px solid #2a2a2a; border-radius:6px;">
-          <div id="img-preview-empty" style="font-size:11px; opacity:.5; border:1px dashed #2a2a2a; border-radius:6px; padding:14px; text-align:center;">Your rendered image previews here.</div>
-        </div>
-        <label class="row-label" style="display:block; margin:4px 0 1px; opacity:.8;">Recent</label>
-        <div id="img-history" style="display:flex; gap:4px; flex-wrap:wrap; min-height:22px;"></div>
-        <details class="sai-sec" style="margin-top:6px;">
-          <summary>⚙️ Connection</summary>
-          <label style="display:flex; align-items:center; gap:6px; font-size:12px; margin:3px 0;"><input type="checkbox" id="img-enabled"> Enable image generation</label>
-          <div class="btns" style="margin:3px 0;">
-            <select id="img-preset" title="Pick a common backend to fill in the address" style="flex:1 1 150px; min-width:0;"><option value="">Choose a backend…</option></select>
-            <button id="btn-img-detect" title="Scan this PC for a running Stable Diffusion server and fill it in">🔍 Auto-detect</button>
-          </div>
-          <input type="text" id="img-endpoint" placeholder="http://127.0.0.1:7860/sdapi/v1/txt2img" style="width:100%; box-sizing:border-box; margin:3px 0;">
-          <div class="btns" style="margin:3px 0;"><button id="btn-img-save">Save</button><button id="btn-img-test" title="Check the address is reachable right now">✓ Test</button></div>
-          <div id="img-conn-msg" style="font-size:11px; opacity:.8; margin:2px 0;"></div>
-          <p style="opacity:.6; font-size:10.5px; margin:2px 0;">The address is just where your local image app serves its API. Easiest: install <b>Stability Matrix</b> (Setup Wizard → Installs) and launch Automatic1111/Forge from it <b>with the API on</b> — it runs at <code>127.0.0.1:7860</code>, so the address is <code>http://127.0.0.1:7860/sdapi/v1/txt2img</code>. Don't know it? Press <b>Auto-detect</b>.</p>
-        </details>
-      </div>
-    </div>
-
-    <!-- Video module: same 3-size + tab behaviour as the image module. -->
-    <div id="col-video" class="col yc-panel" data-size="minimal">
-      <div class="yc-head">
-        <h2>Video Generation</h2><span class="spacer"></span>
-        <button class="size-btn" id="btn-vid-size" title="Panel size: minimal → middle → large" aria-label="Cycle video panel size">◱</button>
-        <button class="collapse-btn" id="btn-collapse-video" title="Minimize this panel to a tab" aria-label="Minimize this panel to a tab">⌄</button>
-      </div>
-      <label class="row-label" style="display:block; margin:2px 0 1px; opacity:.8;">Prompt</label>
-      <textarea id="vid-prompt" rows="2" placeholder="Describe a short clip to render…" style="width:100%; box-sizing:border-box; resize:vertical;"></textarea>
-      <label class="row-label" style="display:block; margin:4px 0 1px; opacity:.8;">Negative prompt</label>
-      <textarea id="vid-negative" rows="1" placeholder="What to avoid" style="width:100%; box-sizing:border-box; resize:vertical;"></textarea>
-      <div class="btns" style="margin:3px 0;">
-        <button id="btn-vid-generate" class="primary">🎬 Generate</button>
-        <button id="btn-vid-open-ui" title="Open the video backend's web UI to tweak everything else">🎛️ Open UI ↗</button>
-      </div>
-      <div id="vid-msg" style="font-size:11.5px; opacity:.8;"></div>
-
-      <div class="when-mid">
-        <label class="row-label" style="display:block; margin:4px 0 1px; opacity:.8;">Motion / LoRAs</label>
-        <input type="text" id="vid-lora" placeholder="motion module / &lt;lora:…&gt; (added to the prompt)" style="width:100%; box-sizing:border-box; margin:0 0 5px;">
-        <!-- The 5 main video sliders. -->
-        <div class="slider-row"><label title="Clip length in frames">Frames</label><input type="range" id="vid-frames" min="8" max="64" value="16"><span class="sv" id="vid-frames-v">16</span></div>
-        <div class="slider-row"><label title="Playback speed (frames per second)">FPS</label><input type="range" id="vid-fps" min="4" max="30" value="8"><span class="sv" id="vid-fps-v">8</span></div>
-        <div class="slider-row"><label title="How many refinement passes per frame">Steps</label><input type="range" id="vid-steps" min="1" max="100" value="20"><span class="sv" id="vid-steps-v">20</span></div>
-        <div class="slider-row"><label title="How strictly it follows the prompt (guidance)">CFG</label><input type="range" id="vid-cfg" min="1" max="20" step="0.5" value="7"><span class="sv" id="vid-cfg-v">7</span></div>
-        <div class="slider-row"><label title="How much movement in the clip">Motion</label><input type="range" id="vid-motion" min="0" max="2" step="0.1" value="1"><span class="sv" id="vid-motion-v">1</span></div>
-        <div class="btns" style="margin:4px 0; align-items:center;">
-          <label style="display:flex; align-items:center; gap:5px; font-size:11.5px;">Size
-            <input type="number" id="vid-width" value="512" min="64" step="64" style="width:56px;">×<input type="number" id="vid-height" value="512" min="64" step="64" style="width:56px;"></label>
-          <label style="display:flex; align-items:center; gap:5px; font-size:11.5px;">Seed <input type="number" id="vid-seed" value="-1" style="width:84px;"></label>
-          <button id="btn-vid-seed-rand" title="Random seed (-1)">🎲</button>
-        </div>
-      </div>
-
-      <div class="when-large">
-        <div id="vid-preview-wrap" style="margin:4px 0;">
-          <video id="vid-preview" controls loop muted style="display:none; width:100%; border:1px solid #2a2a2a; border-radius:6px;"></video>
-          <div id="vid-preview-empty" style="font-size:11px; opacity:.5; border:1px dashed #2a2a2a; border-radius:6px; padding:14px; text-align:center;">Your rendered clip previews here.</div>
-        </div>
-        <label class="row-label" style="display:block; margin:4px 0 1px; opacity:.8;">Recent</label>
-        <div id="vid-history" style="display:flex; gap:4px; flex-wrap:wrap; min-height:20px;"></div>
-        <details class="sai-sec" style="margin-top:6px;">
-          <summary>⚙️ Connection</summary>
-          <label style="display:flex; align-items:center; gap:6px; font-size:12px; margin:3px 0;"><input type="checkbox" id="vid-enabled"> Enable video generation</label>
-          <div class="btns" style="margin:3px 0;">
-            <select id="vid-preset" title="Pick a common backend to fill in the address" style="flex:1 1 150px; min-width:0;"><option value="">Choose a backend…</option></select>
-            <button id="btn-vid-detect" title="Scan this PC for a running video backend and fill it in">🔍 Auto-detect</button>
-          </div>
-          <input type="text" id="vid-endpoint" placeholder="http://127.0.0.1:7860/… (AnimateDiff / Stable Video Diffusion API)" style="width:100%; box-sizing:border-box; margin:3px 0;">
-          <div class="btns" style="margin:3px 0;"><button id="btn-vid-save">Save</button><button id="btn-vid-test" title="Check the address is reachable right now">✓ Test</button></div>
-          <div id="vid-conn-msg" style="font-size:11px; opacity:.8; margin:2px 0;"></div>
-          <p style="opacity:.6; font-size:10.5px; margin:2px 0;">Point this at a local text-to-video HTTP API that sends the finished clip back (AnimateDiff in A1111/Forge — needs the AnimateDiff extension, otherwise you get still images — or a Stable Video Diffusion server). For ComfyUI use the 🎬 Video tab instead (Wan, installs inside AutoInjector). Pick one above, or press <b>Auto-detect</b>. Clips save into the <code>videos/</code> output folder.</p>
-        </details>
       </div>
     </div>
 

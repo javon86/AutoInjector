@@ -484,6 +484,12 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
   - Double presses are ignored.
 - [x] **Forgiving `generate_video`:** a picture plus a character uses the picture; seconds are clamped; junk values are
   dropped with notes; and the errors that remain name the field and the allowed values.
+- [x] **One way to make pictures and clips (F10 old panels):** the old Image Generation / Video Generation panels in
+  the AutoInjector tab are gone. The User Panel's **🎨 Images** / **🎬 Video** buttons open those tabs. What only the
+  old panels had (common addresses, 🔍 auto-detect, ✓ check, on/off, the other video server's clip settings) is in
+  **🎨 Images → ⚙ Start & install → Advanced: another server** and **🎬 Video → ⚙ Setup & models → Advanced: other
+  video server**. The `image:*`, `video:*` and `endpoints:*` channels are unchanged (Alfred, the butler, Akọwe's bridge
+  and the Setup Wizard use them).
 
 ## Problems to come back to
 
