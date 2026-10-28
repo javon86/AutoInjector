@@ -135,6 +135,7 @@ def made(tmp_path_factory):
     mp.setattr(prov_mod, "time", types.SimpleNamespace(sleep=lambda s: None, monotonic=time.monotonic, time=time.time))
     mp.setattr(trailer, "POLL_S", 0.02)
     tmp = tmp_path_factory.mktemp("trailer")
+    mp.setattr(trailer, "PICTURES_ROOT", str(tmp / "temp"))
     app = make_app(tmp, SlotFake())
     run = run_book(app, {"length": "short_story"})
     assert run["status"] == "done", (run["phase"], run.get("problem"))
@@ -217,11 +218,13 @@ def test_plan_uses_chosen_pictures_and_portraits_and_the_style(bk):
     close = next(s for s in shots if s["label"] == f"{main['name']}, close")
     assert close["picture"] == {"kind": "portrait", "id": main["record_id"]} and close["character"] is None
     assert all("Art style: ink wash." in s["prompt"] for s in shots)
-    # making it sends both pictures as temp files AutoInjector can read (gone afterwards)
+    # making it sends both pictures as files AutoInjector can read: in the book's own picture folder, named by their
+    # bytes and kept for the next Make (AutoInjector's shot cache knows them by their path)
     j, _ = make(app, pid)
     assert j["status"] == "done", j
     sent = _b.seen[0]
-    assert len(sent) == 2 and all(ok for _p, ok in sent) and all(not os.path.exists(p) for p, _ok in sent)
+    assert len(sent) == 2 and all(ok for _p, ok in sent) and all(os.path.exists(p) for p, _ok in sent)
+    assert all(os.path.dirname(p) == trailer.picture_dir(pid, BR) for p, _ok in sent)
     req_shots = shots_of(_b.requests[0]["items"])
     assert sum(1 for s in req_shots if s.get("image")) == 2 and not any(s.get("image") and s.get("characterLock")
                                                                          for s in req_shots)

@@ -18,8 +18,9 @@ title card ``{"type": "card", "text", "subtitle", "seconds"}`` or a shot ``{"typ
 "height", "shots", "at", "warnings"}``.
 
 **Make the trailer** (``start_make``, a background job polled like every job: GET /review/ai/:id): the pictures go to
-temp files AutoInjector can read, ``POST /video/trailer`` starts it there, ``GET /video/trailer?id=`` is followed
-every few seconds (the job's phase says which shot AutoInjector is making), Stop sends ``POST /video/trailer/cancel``.
+files AutoInjector can read (the book's own folder in the temp folder, named by their bytes, kept between Makes so
+AutoInjector's shot cache knows them; ``picture_dir``), ``POST /video/trailer`` starts it there,
+``GET /video/trailer?id=`` is followed every few seconds (the job's phase says which shot AutoInjector is making), Stop sends ``POST /video/trailer/cancel``.
 AutoInjector keeps the shots it made, so making it again continues where it stopped. A character lock AutoInjector
 does not have (``NO_LOCK``) is left out of that shot and the trailer continues. Every ``VIDEO_*`` code becomes plain
 words with what to do (``PROBLEMS``). The finished trailer.webm / trailer.mp4 are read from AutoInjector's folder
@@ -33,8 +34,8 @@ import copy
 import json
 import logging
 import os
+import hashlib
 import re
-import shutil
 import tempfile
 import threading
 import time
@@ -58,6 +59,9 @@ LABEL_MAX = 120
 MAX_TRAILER_BYTES = 200 * 1024 * 1024
 POLL_S = 2.0            # how often AutoInjector is asked how far it is (tests set it lower)
 START_TIMEOUT_S = 120.0
+STATUS_MISSES = 15      # status checks in a row that may go unanswered (unreachable / timed out) before giving up
+PICTURES_ROOT = None    # where the shot pictures' folder lives (None: the system temp folder; tests set it)
+PICTURE_KEEP_S = 14 * 24 * 3600.0  # a shot picture no Make has used for this long is removed
 TRAILER_TIMEOUT_S = 8 * 3600.0
 MUSIC_EXT = (".mp3", ".ogg", ".oga", ".opus", ".wav", ".m4a", ".aac", ".flac", ".webm")
 CINEMA = "Cinematic book-trailer shot, film lighting, slow camera movement, shallow depth of field."
@@ -509,8 +513,18 @@ def _problem(exc: forge.ArtProblem, shot=None) -> TrailerProblem:
     return tp
 
 
-def _picture_file(app, pid, branch, pic: dict, tmpdir: str) -> str | None:
-    """A shot's picture (a chosen chapter picture / a portrait) as a temp file AutoInjector can read, or None."""
+def picture_dir(pid: str, branch: str) -> str:
+    """The book's own folder for the shot pictures AutoInjector reads (``<temp>/akowe-trailer-pictures/<book>``). It
+    stays between Makes: the same picture is the same file (named by the SHA-256 of its bytes), so AutoInjector's shot
+    cache (its key holds the image path) finds the shots it made before, and a shot AutoInjector may still be making
+    keeps its picture."""
+    safe = re.sub(r"[^A-Za-z0-9_-]", "_", f"{pid}-{branch}")[:100] or "book"
+    return os.path.join(PICTURES_ROOT or tempfile.gettempdir(), "akowe-trailer-pictures", safe)
+
+
+def _picture_file(app, pid, branch, pic: dict, folder: str) -> str | None:
+    """A shot's picture (a chosen chapter picture / a portrait) as a file AutoInjector can read, or None. The file is
+    named by its bytes (``<sha256>.png|.jpg``), written atomically, and reused when it is already there."""
     data = None
     try:
         if pic["kind"] == "chapter":
@@ -527,11 +541,49 @@ def _picture_file(app, pid, branch, pic: dict, tmpdir: str) -> str | None:
     if not data:
         return None
     ext = ".jpg" if data[:3] == b"\xff\xd8\xff" else ".png"
-    safe = re.sub(r"[^A-Za-z0-9_-]", "", pic["id"])[:40]
-    path = os.path.join(tmpdir, f"{pic['kind']}-{safe}{ext}")
-    with open(path, "wb") as fh:
-        fh.write(data)
+    path = os.path.join(folder, hashlib.sha256(data).hexdigest() + ext)
+    try:
+        os.makedirs(folder, exist_ok=True)
+        if os.path.isfile(path) and os.path.getsize(path) == len(data):
+            try:
+                os.utime(path)  # in use again: the tidy-up keeps it
+            except OSError:
+                pass
+            return path
+        tmp = f"{path}.{os.getpid()}-{threading.get_ident()}.tmp"
+        try:
+            with open(tmp, "wb") as fh:
+                fh.write(data)
+            os.replace(tmp, path)
+        finally:
+            if os.path.exists(tmp):
+                os.unlink(tmp)
+    except OSError:
+        log.warning("a trailer picture could not be written for AutoInjector")
+        return None
     return path
+
+
+def _tidy_pictures(folder: str, keep: set, *, older_than_s: float = 0.0) -> None:
+    """Remove the pictures in the book's picture folder that ``keep`` does not name (and that are older than
+    ``older_than_s``): after a trailer was stored (AutoInjector is done with them), or old leftovers before a Make."""
+    try:
+        names = os.listdir(folder)
+    except OSError:
+        return
+    keep = {os.path.normcase(os.path.abspath(k)) for k in keep}
+    now = time.time()
+    for n in names:
+        f = os.path.join(folder, n)
+        if os.path.normcase(os.path.abspath(f)) in keep:
+            continue
+        try:
+            if older_than_s and now - os.path.getmtime(f) < older_than_s:
+                continue
+            if os.path.isfile(f):
+                os.unlink(f)
+        except OSError:
+            pass
 
 
 def _read_local(path, limit) -> bytes | None:
@@ -578,13 +630,12 @@ def start_make(app, principal, pid, branch, body) -> dict:
     title = _clip(_profile(app, pid).get("title") or "", 200) or "Untitled"
 
     def fn(j):
-        tmpdir = tempfile.mkdtemp(prefix="akowe-trailer-")
+        folder = picture_dir(pid, branch)
+        _tidy_pictures(folder, set(), older_than_s=PICTURE_KEEP_S)  # leftovers of plans long gone
         try:
-            run_make(app, j, pid, branch, plan, title, tmpdir)
+            run_make(app, j, pid, branch, plan, title, folder)
         except TrailerProblem as exc:
             j.status, j.phase, j.error = "error", "Failed", exc.as_error()
-        finally:
-            shutil.rmtree(tmpdir, ignore_errors=True)
     return app.review._start(job, fn)  # noqa: SLF001
 
 
@@ -634,12 +685,14 @@ def run_make(app, job, pid, branch, plan, title, tmpdir) -> None:
             raise _problem(exc) from None
         tid = resp.get("id")
         if not tid and resp.get("ok") and resp.get("path"):  # an AutoInjector that answered with the finished trailer
-            return _store(app, job, pid, branch, plan, resp, warnings)
+            _store(app, job, pid, branch, plan, resp, warnings)
+            return _tidy_pictures(tmpdir, {x["image"] for x in items if x.get("image")})
         if not tid:
             raise TrailerProblem("VIDEO_BAD_ANSWER", "AutoInjector did not say which trailer it started")
         result = _follow(app, job, [target], tid, n_shots, started)
         if result.get("ok"):
-            return _store(app, job, pid, branch, plan, result, warnings)
+            _store(app, job, pid, branch, plan, result, warnings)  # stored: AutoInjector is done with the pictures
+            return _tidy_pictures(tmpdir, {x["image"] for x in items if x.get("image")})
         code = str(result.get("error") or result.get("code") or "VIDEO_FAILED")
         shot = result.get("shot") if isinstance(result.get("shot"), int) else None
         if code == "NO_LOCK" and shot and 1 <= shot <= n_shots:
@@ -680,7 +733,8 @@ def _follow(app, job, targets, tid, n_shots, started) -> dict:
             if exc.code == "VIDEO_NOT_WIRED":  # 404: AutoInjector no longer knows this trailer
                 raise TrailerProblem("TRAILER_LOST") from None
             misses += 1
-            if exc.code == "IMAGE_BRIDGE_UNREACHABLE" and misses < 15:  # a short hiccup: keep following
+            # a short hiccup (AutoInjector busy joining the shots, or not reachable for a moment): keep following
+            if exc.code in ("IMAGE_BRIDGE_UNREACHABLE", "VIDEO_TIMEOUT") and misses < STATUS_MISSES:
                 _sleep(job, POLL_S)
                 continue
             raise _problem(exc) from None
@@ -752,8 +806,9 @@ def _store(app, job, pid, branch, plan, res, warnings) -> None:
 
 
 # ====================================================================== book save
-def save_files(app, pid, branch, files: dict, text) -> None:
-    """Trailer/ in the book's folder: trailer.webm (+ trailer.mp4) and trailer.json (the plan)."""
+def save_files(app, pid, branch, files: dict, text, keep: set | None = None) -> None:
+    """Trailer/ in the book's folder: trailer.webm (+ trailer.mp4) and trailer.json (the plan). A trailer file that
+    cannot be read now is named in ``keep`` (the book save then leaves the one it wrote before)."""
     d = doc(app.store, pid, branch)
     if not d.get("plan") and not d.get("trailer"):
         return
@@ -761,10 +816,20 @@ def save_files(app, pid, branch, files: dict, text) -> None:
     listing = {"plan": d.get("plan"), "trailer": None}
     if t:
         listing["trailer"] = {k: t.get(k) for k in ("seconds", "width", "height", "at", "shots", "cards")}
-        for key, name in (("webm", "trailer.webm"), ("mp4", "trailer.mp4")):
-            raw = forge.picture_bytes(app.store, pid, branch, t.get(key))
+        for key in ("webm", "mp4"):
+            a = t.get(key)
+            if not isinstance(a, dict) or not a.get("asset_id"):
+                continue
+            # the main file is a WebM, or an MP4 when AutoInjector made only that: the name says what it is
+            name = "trailer.mp4" if (key == "mp4" or a.get("mime") == "video/mp4") else "trailer.webm"
+            if key == "webm" and name == "trailer.mp4" and t.get("mp4"):
+                name = "trailer (main).mp4"
+            raw = forge.picture_bytes(app.store, pid, branch, a)
             if raw:
                 files[f"Trailer/{name}"] = raw
+                listing["trailer"][key] = name
+            elif keep is not None:  # cannot be read just now: the file saved before stays (not cleaned up)
+                keep.add(f"Trailer/{name}")
                 listing["trailer"][key] = name
     text("Trailer/trailer.json", json.dumps(listing, ensure_ascii=False, indent=1))
 
@@ -776,9 +841,14 @@ def route(app, method: str, rest: list, query: dict, body, principal: str, pid: 
         return 200, info(app, pid, branch)
     if rest == ["plan"] and method == "POST":  # "Plan a trailer": from the book (replaces the plan)
         p = plan_from_book(app, principal, pid, branch)
-        out = save_plan(app, pid, branch, {"items": p["items"], "music": (doc(app.store, pid, branch).get("plan") or {})
-                                           .get("music")}, made_from="book")
-        out["notes"] = p["notes"]
+        music = (doc(app.store, pid, branch).get("plan") or {}).get("music")
+        notes = list(p["notes"])
+        if music and not (isinstance(music, str) and os.path.isfile(music)):  # moved or deleted since: left out
+            notes.append(f"The music file {music} was not found on this computer any more, so the new plan has no "
+                         "music: choose it again if you want it.")
+            music = None
+        out = save_plan(app, pid, branch, {"items": p["items"], "music": music}, made_from="book")
+        out["notes"] = notes
         return 200, out
     if rest == ["plan"] and method == "PUT":  # the author's edits
         return 200, save_plan(app, pid, branch, body)

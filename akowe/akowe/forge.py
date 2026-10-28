@@ -98,6 +98,7 @@ CLIP_MOTION = "subtle idle motion, breathing, cloth moving, camera still"
 CLIP_PROMPT_FIELDS = (("appearance", "Appearance"), ("posture", "Posture"), ("gait", "Gait"),
                       ("presence", "Expressions"))
 _LOCK = threading.RLock()
+_CREATE_LOCK = threading.RLock()  # "is there one with this name?" and making it, as one step (a double-click makes one)
 
 
 def _f(key, label, letters, hint=""):
@@ -1773,6 +1774,11 @@ def create_character(app, principal: str, pid: str, branch: str, body) -> dict:
     it on the 🎭 Characters page like any other) and its dossier with the author's own words as supplied text (the
     name, the role, "about" as the supplied canon). Nothing is invented here: ✨ Invent the rest makes proposals.
     A character with that name already in the book (or ``from`` = its record id) is returned, not doubled."""
+    with _CREATE_LOCK:
+        return _create_character(app, principal, pid, branch, body)
+
+
+def _create_character(app, principal: str, pid: str, branch: str, body) -> dict:
     from . import forge_kinds  # noqa: PLC0415 - the same name / alias rules as the other kinds
     body = body if isinstance(body, dict) else {}
     store = app.store

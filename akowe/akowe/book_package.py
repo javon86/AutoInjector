@@ -107,10 +107,54 @@ def package_rows(store, pid: str) -> dict:
     return rows
 
 
+SUPERSEDED_MIMES = ("video/", "image/jpeg")   # made-again trailers / motion clips and the kept cover JPGs
+AKOWE_LABELS = ("Book trailer", "Ebook cover ")  # (+ "<name> — motion clip"): the labels those assets are stored with
+
+
+def drop_superseded(rows: dict) -> list[str]:
+    """Leave out of a package the stored videos (trailers, motion clips) and cover-cache JPGs that nothing refers
+    to any more (a trailer or clip made again, a cover JPG of a cover that changed): their records, binaries, heads
+    and lifecycle rows, and the asset files only they use. Only assets Akọwe stored itself (a trailer, a motion clip, an
+    ebook cover JPG: their "file.imported" label) are ever left out; one that any setting or record still names is
+    kept. Returns the record ids left
+    out (changes ``rows`` in place)."""
+    t = rows["tables"]
+    made = set()  # the assets Akọwe stored itself under these labels (an author's own upload is never left out)
+    for e in t.get("outbox") or []:
+        if e.get("event_type") != "file.imported":
+            continue
+        try:
+            pl = json.loads(e["payload"]) if isinstance(e.get("payload"), str) else e.get("payload") or {}
+            label, rid = str(pl.get("label") or ""), (pl.get("ref") or {}).get("record_id")
+        except (ValueError, TypeError, AttributeError):
+            continue
+        if rid and label.startswith(AKOWE_LABELS) or rid and label.endswith(" — motion clip"):
+            made.add(rid)
+    cand = {b["record_id"] for b in t.get("binaries") or []
+            if str(b.get("mime_type") or "").startswith(SUPERSEDED_MIMES) and b.get("record_id") in made}
+    if not cand:
+        return []
+    corpus = [json.dumps(s["value"], ensure_ascii=False) for s in rows["settings"]]
+    corpus += [json.dumps(r.get(k), ensure_ascii=False, default=str) for r in t.get("module_state") or [] for k in r]
+    corpus += [str((r.get("content") or {}).get("$blob", "")) for r in t.get("records") or []
+               if r.get("representation") != "BINARY_ARTIFACT"]
+    text = "\n".join(corpus)
+    gone = sorted(rid for rid in cand if rid not in text)
+    if not gone:
+        return []
+    out = set(gone)
+    for name in ("records", "binaries", "heads", "lifecycle"):
+        t[name] = [r for r in t.get(name) or [] if r.get("record_id") not in out]
+    rows["assets"] = sorted({r["storage_uri"].split("/")[-1] for r in t.get("binaries") or []})
+    return gone
+
+
 def build(app, pid: str, *, bible: dict | None = None, on_progress=None) -> bytes:
-    """The package bytes for one book (read-only)."""
+    """The package bytes for one book (read-only). Superseded videos and cover JPGs are left out
+    (``drop_superseded``)."""
     store = app.store
     rows = package_rows(store, pid)
+    drop_superseded(rows)
     proj = (rows["tables"].get("projects") or [{}])[0]
     secrets = secrets_of(app)
     tables_b = guard(_dump({"tables": rows["tables"]}).decode("utf-8"), secrets).encode("utf-8")
