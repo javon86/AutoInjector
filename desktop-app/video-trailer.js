@@ -10,7 +10,8 @@
  *      recorder (trailer-recorder.js) → trailer.webm (VP9/VP8, the music mixed in, fades between shots);
  *   3. when an ffmpeg binary is found (AUTOINJECTOR_FFMPEG, PATH, the ComfyUI folders, imageio-ffmpeg inside
  *      ComfyUI's python_embeded) it also writes trailer.mp4 (H.264) — optional.
- * Everything lands in <videos>/trailers/<book>/: trailer.webm, trailer.mp4, trailer.json (the plan, the shots,
+ * Everything lands in <videos>/trailers/<book>/: trailer-<stamp>.webm, trailer-<stamp>.mp4 (a new name each time —
+ * Windows keeps a playing file locked), trailer.json (the plan, the shots,
  * the result) and shots/. One trailer at a time.
  *
  * deps: studio (video-studio: generate / animate / cancel / busy), record(plan, outPath, { onProgress }) →
@@ -214,6 +215,30 @@ function createTrailerMaker(deps = {}) {
   let last = null; // the last finished one
 
   function trailersDir() { const d = deps.trailersDir(); fs.mkdirSync(d, { recursive: true }); return d; }
+  // trailer-<time>-<id>.webm / .mp4 (older versions: trailer.webm / trailer.mp4)
+  const TRAILER_FILE = /^trailer(?:-[A-Za-z0-9-]+)?\.(webm|mp4)$/;
+  function trailerStem(id) { return `trailer-${Date.now().toString(36)}-${String(id || '').replace(/[^A-Za-z0-9]/g, '').slice(0, 8) || 'x'}`; }
+  // The trailer a folder holds now: the one trailer.json names, else the newest trailer file there.
+  function currentFiles(dir, st) {
+    const inDir = (p) => !!p && path.dirname(path.resolve(String(p))) === path.resolve(dir) && fs.existsSync(p);
+    const lastOk = st && st.last && st.last.ok ? st.last : null;
+    if (lastOk && inDir(lastOk.path)) return { webm: lastOk.path, mp4: inDir(lastOk.mp4) ? lastOk.mp4 : null };
+    let names = []; try { names = fs.readdirSync(dir).filter((n) => TRAILER_FILE.test(n)); } catch (_) { names = []; }
+    const newest = (ext) => names.filter((n) => n.endsWith(ext)).map((n) => { const p = path.join(dir, n); let m = 0; try { m = fs.statSync(p).mtimeMs; } catch (_) {} return { p, m }; }).sort((a, b) => b.m - a.m)[0];
+    const w = newest('.webm'); const m4 = newest('.mp4');
+    return { webm: w ? w.p : null, mp4: m4 ? m4.p : null };
+  }
+  // Delete the older trailer files of a folder (best effort: one still open in a player stays until next time).
+  function dropOlder(dir, keep) {
+    const k = new Set((keep || []).filter(Boolean).map((p) => path.resolve(p)));
+    let names = []; try { names = fs.readdirSync(dir); } catch (_) { return; }
+    for (const n of names) {
+      if (!TRAILER_FILE.test(n) && !/^trailer(?:-[A-Za-z0-9-]+)?\.part\.webm$/.test(n)) continue;
+      const p = path.resolve(path.join(dir, n));
+      if (k.has(p)) continue;
+      try { fs.unlinkSync(p); } catch (_) {}
+    }
+  }
   function readState(dir) { try { const j = JSON.parse(fs.readFileSync(path.join(dir, 'trailer.json'), 'utf8')); return j && typeof j === 'object' ? j : {}; } catch (_) { return {}; } }
   function writeState(dir, st) { try { fs.writeFileSync(path.join(dir, 'trailer.json'), JSON.stringify(st, null, 2)); } catch (_) {} }
 
@@ -299,8 +324,12 @@ function createTrailerMaker(deps = {}) {
     let timeline;
     try { timeline = joinPlan(plan, j.items, fileUrl); } catch (e) { return fail('TRAILER_JOIN_FAILED', `${ERRORS.TRAILER_JOIN_FAILED} (${e.message})`); }
     if (!deps.record) return fail('NOT_WIRED', 'Joining videos is not available in this build.');
-    const webm = path.join(j.dir, 'trailer.webm');
-    const part = path.join(j.dir, 'trailer.part.webm');
+    // A new name each time: on Windows the Trailer panel's <video> keeps the last trailer open, so replacing
+    // trailer.webm would fail (EPERM/EBUSY) after a minutes-long recording. Older ones are deleted afterwards
+    // (best effort, see dropOlder); trailer.json and the result point at this one.
+    const stem = trailerStem(j.id);
+    const webm = path.join(j.dir, `${stem}.webm`);
+    const part = path.join(j.dir, `${stem}.part.webm`);
     j.rec = deps.record(timeline, part, { onProgress: (p) => { j.joinPct = p && p.total ? clamp(p.t / p.total, 0, 1) : 0; } });
     const rr = await j.rec.done;
     j.rec = null;
@@ -310,8 +339,7 @@ function createTrailerMaker(deps = {}) {
     // 3. the optional .mp4
     const warnings = j.warnings.slice();
     let mp4 = null;
-    const mp4Path = path.join(j.dir, 'trailer.mp4');
-    try { fs.unlinkSync(mp4Path); } catch (_) {}
+    const mp4Path = path.join(j.dir, `${stem}.mp4`);
     if (plan.mp4) {
       const bin = ffmpeg();
       if (bin) {
@@ -358,6 +386,7 @@ function createTrailerMaker(deps = {}) {
       j.state.plan = { book: plan.book, title: plan.title, items: plan.items, music: plan.music || null, musicVolume: plan.musicVolume, width: plan.width, height: plan.height, fps: plan.fps, fade: plan.fade, model: plan.model || null };
       j.state.last = out.ok ? { ok: true, at: new Date().toISOString(), path: out.path, mp4: out.mp4, seconds: out.seconds, bytes: out.bytes, warnings: out.warnings } : { ok: false, at: new Date().toISOString(), error: out.error, message: out.message, shot: out.shot };
       writeState(dir, j.state);
+      if (out.ok) dropOlder(dir, [out.path, out.mp4]);
       last = Object.assign({ at: Date.now() }, out, { status: publicJob(j) });
       log('trailer-done', { id: j.id, ok: !!out.ok, error: out.ok ? undefined : out.error, shot: out.shot, seconds: Math.round((Date.now() - j.startedAt) / 1000), reused: out.reused });
       if (deps.onDone) { try { deps.onDone(out); } catch (_) {} }
@@ -395,10 +424,10 @@ function createTrailerMaker(deps = {}) {
     for (const name of names) {
       if (want && name !== want) continue;
       const dir = path.join(root, name);
-      const webm = path.join(dir, 'trailer.webm');
-      if (!fs.existsSync(webm)) continue;
       const st = readState(dir);
-      const mp4 = fs.existsSync(path.join(dir, 'trailer.mp4')) ? path.join(dir, 'trailer.mp4') : null;
+      const f = currentFiles(dir, st);
+      if (!f.webm) continue;
+      const webm = f.webm, mp4 = f.mp4;
       let mtime = 0; try { mtime = fs.statSync(webm).mtimeMs; } catch (_) {}
       items.push({ book: (st.plan && st.plan.book) || name, dir, path: webm, url: fileUrl(webm), mp4, mp4Url: mp4 ? fileUrl(mp4) : null, seconds: st.last && st.last.seconds, mtime, plan: st.plan || null });
     }
