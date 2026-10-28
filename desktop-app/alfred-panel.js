@@ -16,8 +16,9 @@
   const sw = document.getElementById('btn-alfred-switch');
   if (!sw) return;
 
-  // His width: 380px on a laptop screen, up to 440px on a big one (the page is laid out beside it).
-  const W = 'clamp(380px, 22.5vw, 440px)';
+  // His width: 320px on a small or laptop screen, up to 440px on a big one (the page is laid out beside it,
+  // so on a 1024–1280px window the app keeps enough room for the User Panel and the three AI windows).
+  const W = 'clamp(320px, 22.5vw, 440px)';
   let built = false;     // the panel UI exists in this document
   let open = true;       // the drawer is shown
   let last = null;

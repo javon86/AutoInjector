@@ -326,8 +326,11 @@
     /* ---- Phone companion panel (User Panel) ---- */
     /* ISS-012: float the panel over the zone to the right instead of adding a
        flex column to #up-zone-actions (which squeezed Compose/Messages). */
-    .phone-panel { position:absolute; top:4px; bottom:4px; left:100%; width:340px; z-index:7; overflow:auto;
+    .phone-panel { position:absolute; inset:0; z-index:7; overflow:auto;
       box-sizing:border-box; padding:8px 9px; background:#0c1016; border:1px solid #26303c; border-radius:8px; }
+    .phone-head { display:flex; align-items:center; justify-content:space-between; margin:0 0 4px; }
+    .phone-close { background:none; border:1px solid transparent; border-radius:6px; color:inherit; font-size:12px; line-height:1; min-height:20px; padding:2px 6px; opacity:.85; cursor:pointer; }
+    .phone-close:hover { opacity:1; background:#2a2a2a; border-color:#3a3a3a; }
     .phone-lan-row { display:flex; align-items:center; gap:7px; font-size:12px; font-weight:600; cursor:pointer; }
     .phone-hint { font-size:11px; opacity:.75; margin:6px 0; }
     .phone-url { width:100%; box-sizing:border-box; font-size:11px; padding:6px 7px; border-radius:6px;
@@ -355,6 +358,21 @@
     /* top:-12px = minus #wrap's top padding, so the panel sticks flush under the title bar and
        nothing scrolling past peeks out above it. */
     #col-userpanel { position:sticky; top:-12px; z-index:6; box-shadow:0 6px 10px -6px rgba(0,0,0,.8); }
+    /* Narrow page (a small window, or 🎩 Alfred's panel open beside a laptop-size one): the User Panel
+       never cuts its buttons or the Terminal off at the right edge — the Terminal moves to its own row
+       under Compose + buttons, and the panel stops sticking so it doesn't fill half the screen. */
+    #wrap { container-type:inline-size; container-name:mainpage; }
+    @container mainpage (max-width: 1000px) {
+      #up-zone-compose { flex:1 1 160px; min-width:150px; }
+      #up-zone-messages { min-width:230px; }
+    }
+    @container mainpage (max-width: 860px) {
+      #col-userpanel { flex-wrap:wrap; position:relative; top:auto; }
+      #up-zone-compose { flex:1 1 180px; min-width:160px; }
+      #up-zone-actions { flex:0 1 auto; min-width:0; }
+      #up-actions-extra { grid-template-columns:repeat(3, minmax(0, 1fr)); }
+      #up-zone-messages { flex:1 1 100%; height:190px; border-left:0; border-top:1px solid #2a2a2a; }
+    }
 
     /* Order within #wrap (a flex column), for someone who mainly talks to the three AIs:
        the sticky User Panel, then the three AI windows, then the 🎩 Butler section (folds to
@@ -488,7 +506,7 @@
     /* Friendlier idle state: centre a short, welcoming hint instead of a flat line. */
     .butler-chat-log:empty { align-items:center; justify-content:center; text-align:center; }
     .butler-chat-log:empty::before {
-      content:"🎩  Alfred is standing by.\A\ATalk to him in his side panel (◂ Panel, or Ctrl+Shift+A).\AWhat he does shows up here.";
+      content:"🎩  Alfred is standing by.\A\ATurn him on with 🎩 Alfred (top right), then talk to him in his side panel (Ctrl+Shift+A).\AWhat he does shows up here.";
       white-space:pre-line; opacity:.5; max-width:34ch; font-family:system-ui, sans-serif; font-size:12px; line-height:1.6;
     }
     .butler-chat-log > div { padding:2px 0; border-bottom:1px solid #141414; }
@@ -710,6 +728,29 @@
     }
     .zoom-level { font-size:11px; opacity:.78; min-width:34px; text-align:center; }
     .ai-col.state-min .zoom-btn, .ai-col.state-min .zoom-level { display:none; }
+    /* Narrow AI columns (small windows, ~1024px): keep every header button on one line instead of
+       cutting ⟳ reload and ⌄ fold off the right edge — tighter gaps, and the name can shorten. */
+    .ai-col:not(.state-min) { container-type:inline-size; }
+    .ai-col:not(.state-min) .card-head > .pane-name { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    @container (max-width: 460px) {
+      .card-head { gap:2px; }
+      .card-head .zoom-btn, .card-head .pick-btn, .card-head .login-btn, .card-head .inspect-btn, .card-head .reload-btn { padding:3px 2px; min-width:22px; }
+      .card-head .collapse-btn { padding:3px 3px; min-width:22px; }
+      .card-head .zoom-level { min-width:28px; }
+      .card-head > .pane-name { margin:0 3px; }
+    }
+    @container (max-width: 320px) {
+      .card-head .zoom-btn, .card-head .pick-btn, .card-head .login-btn, .card-head .inspect-btn, .card-head .reload-btn { padding:3px 1px; min-width:20px; }
+      .card-head .collapse-btn { padding:3px 1px; min-width:20px; }
+      .card-head .zoom-level { min-width:0; font-size:10.5px; }
+      .card-head { gap:1px; }
+    }
+    /* very narrow (🎩 panel open on a ~1024px window): the buttons go to a second line in all three
+       columns alike, so the three AI pages still start at the same height */
+    @container (max-width: 240px) {
+      .card-head { flex-wrap:wrap; row-gap:2px; }
+      .card-head > .spacer { flex:0 0 100%; height:0; }
+    }
     .pick-menu { display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin:0 0 6px; font-size:11px; }
     .pick-menu.collapsed { display:none; }
     .pick-menu button { font-size:11px; padding:2px 6px; }
@@ -1835,19 +1876,6 @@
           <button id="btn-silence" class="danger grid-full" title="Stop the AIs messaging each other — halts Auto, House Rules, Sequences and the Butler at once (keeps your participants checked)" aria-label="Stop the AIs messaging each other — halts all relay at once">🛑 Stop AIs Talking</button>
           <span id="extract-status" class="grid-full" style="font-size:11px; opacity:.8;"></span>
         </div>
-        <div id="phone-panel" class="phone-panel" hidden aria-label="Phone connection">
-          <p class="zone-label" style="margin:2px 0 6px;">📱 Connect your phone</p>
-          <label class="phone-lan-row">
-            <input type="checkbox" id="phone-lan-toggle" />
-            <span>Allow phone access on this Wi-Fi (LAN)</span>
-          </label>
-          <p id="phone-hint" class="phone-hint">Turn this on, then open the link below on your phone (same Wi-Fi). Your PC does all the work — the phone just shows the messages and lets you send.</p>
-          <input id="phone-url" class="phone-url" type="text" readonly value="" placeholder="Enable LAN access to get a link" />
-          <div class="phone-btns">
-            <button id="btn-phone-copy" title="Copy the phone link">📋 Copy link</button>
-          </div>
-          <p class="phone-warn">Anyone with this link on your network can read the messages and send. Keep it to your own phone.</p>
-        </div>
       </div>
 
       <!-- Third zone: the Command Prompt connection (⌨ Terminal), with the
@@ -1857,6 +1885,19 @@
            wait in the approval strip until you click Run (unless Auto-run is
            on and the command is low-risk), and the output goes back to it. -->
       <div class="up-zone" id="up-zone-messages">
+       <div id="phone-panel" class="phone-panel" hidden aria-label="Phone connection">
+         <div class="phone-head"><p class="zone-label">📱 Connect your phone</p><button id="btn-phone-close" type="button" class="phone-close" title="Close (the 📱 Phone button opens it again)" aria-label="Close the phone panel">✕</button></div>
+         <label class="phone-lan-row">
+           <input type="checkbox" id="phone-lan-toggle" />
+           <span>Allow phone access on this Wi-Fi (LAN)</span>
+         </label>
+         <p id="phone-hint" class="phone-hint">Turn this on, then open the link below on your phone (same Wi-Fi). Your PC does all the work — the phone just shows the messages and lets you send.</p>
+         <input id="phone-url" class="phone-url" type="text" readonly value="" placeholder="Enable LAN access to get a link" />
+         <div class="phone-btns">
+           <button id="btn-phone-copy" title="Copy the phone link">📋 Copy link</button>
+         </div>
+         <p class="phone-warn">Anyone with this link on your network can read the messages and send. Keep it to your own phone.</p>
+       </div>
        <div class="zone-fill">
         <div class="zone-tabs" role="tablist">
           <button class="zone-tab active" id="tab-terminal" role="tab" aria-selected="true" aria-controls="term-pane">⌨ Terminal <span class="term-dot" id="term-dot" title="Shell not started"></span><span class="msg-badge term-badge" id="term-pending-badge" data-zero>0</span></button>
@@ -2356,7 +2397,7 @@
     </div>
   </div>
 
-  <div class="popup-overlay" id="messages-popup">
+  <div class="popup-overlay" id="messages-popup" role="dialog" aria-modal="true" aria-label="Messages">
     <div class="popup-window">
       <div class="popup-titlebar">
         <span>Messages to you</span>
@@ -2366,7 +2407,7 @@
     </div>
   </div>
 
-  <div class="popup-overlay" id="roles-popup">
+  <div class="popup-overlay" id="roles-popup" role="dialog" aria-modal="true" aria-label="Role assignment">
     <div class="popup-window">
       <div class="popup-titlebar">
         <span>Role Assignment</span>

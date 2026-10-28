@@ -1622,3 +1622,18 @@ label.btn:has(> input:focus-visible) { outline: 3px solid var(--focus); outline-
 .shelf-book .sb-main > a.small { order: 4; align-self: flex-start; }
 /* a save that partly worked: the files that were not written, in plain words */
 .save-warn { display: block; margin-top: 4px; padding: 4px 8px; border-left: 4px solid var(--warn-line); background: var(--warn-soft); color: var(--warn); font-weight: 600; overflow-wrap: anywhere; }
+
+/* small laptop window (e.g. AutoInjector at 1024px) inside a book: Save / Open / Make a book show their icons only
+   (their names stay in the tooltip and for screen readers) so the book and branch pickers keep their room instead of
+   being drawn under the 🔍 and Sets buttons; if it still does not fit, the bar wraps to a second line. */
+@media (min-width: 801px) and (max-width: 1279px) {
+  .topbar { flex-wrap: wrap; row-gap: 6px; gap: 4px; padding-left: 12px; padding-right: 12px; }
+  .topbar-context { flex: 0 0 auto; min-width: 10rem; gap: 4px; }
+  .topbar-context #project-select { flex: 0 1 7rem; }
+  .topbar-context #branch-select { flex: 0 0 4.25rem; min-width: 4.25rem; }
+  .topbar-links a { padding: 6px 5px; }
+  .topbar .tb-btn { padding-left: 7px; padding-right: 7px; }
+  .topbar .tb-save .tb-label, .topbar .tb-open .tb-label, .topbar .mab-btn .tb-label {
+    position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
+  }
+}

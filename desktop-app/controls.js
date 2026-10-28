@@ -2725,6 +2725,7 @@ if (el("btn-open-phone")) el("btn-open-phone").onclick = async () => {
   panel.hidden = !panel.hidden;
   if (!panel.hidden) await refreshPhonePanel();
 };
+if (el("btn-phone-close")) el("btn-phone-close").onclick = () => { const panel = el("phone-panel"); if (panel) panel.hidden = true; };
 if (el("phone-lan-toggle")) el("phone-lan-toggle").onchange = async (e) => {
   const on = !!e.target.checked;
   const hint = el("phone-hint");
