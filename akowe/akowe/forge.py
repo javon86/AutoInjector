@@ -1280,15 +1280,17 @@ def bridge_info(app) -> dict:
             "uses": [u for u, _t in bridge_targets(app)]}
 
 
-def _post(url: str, token: str | None, body: dict, timeout_s: float, *, route: str = "/image/request") -> dict:
-    """One POST to the service bridge. ``route`` /image/request, /video/request or /render/image (the codes for a
-    missing route,
-    a timeout and an unusable answer follow the route; the key and reachability codes are shared)."""
+def _post(url: str, token: str | None, body: dict, timeout_s: float, *, route: str = "/image/request",
+          method: str = "POST") -> dict:
+    """One POST (or GET, ``method``) to the service bridge. ``route`` /image/request, /video/request, /video/trailer
+    or /render/image (the codes for a missing route, a timeout and an unusable answer follow the route; the key and
+    reachability codes are shared)."""
     video = route.startswith("/video/")
     render = route.startswith("/render/")
-    data = json.dumps(body, ensure_ascii=False).encode("utf-8")
-    req = urllib.request.Request(url + route, data=data, method="POST")
-    req.add_header("Content-Type", "application/json; charset=utf-8")
+    data = None if method == "GET" else json.dumps(body, ensure_ascii=False).encode("utf-8")
+    req = urllib.request.Request(url + route, data=data, method=method)
+    if data is not None:
+        req.add_header("Content-Type", "application/json; charset=utf-8")
     req.add_header("Accept", "application/json")
     if token:
         req.add_header("Authorization", f"Bearer {token}")

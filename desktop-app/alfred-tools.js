@@ -639,6 +639,32 @@ def({
     return okStatus(r) ? { ok: true, message: 'Picture updated.' } : akoweError(r);
   },
 });
+// 🎞 B2: the book trailer (Akọwe trailer.py → AutoInjector 🎬 Video POST /video/trailer)
+def({
+  name: 'make_trailer', title: 'Make the book trailer', group: 'books', changes: true, book: true,
+  description: 'Make a short trailer of a book: Akọwe plans 5–8 video shots from the book (its key scenes, main place and characters\' looks, title cards with the logline) — or uses the plan the author already edited on the 🎞 Trailer page — and AutoInjector\'s 🎬 Video makes the shots and joins them. Runs in the background (a few minutes per shot); the trailer is stored with the book. replan = plan it again from the book first (the author\'s edits are replaced).',
+  args: { type: 'object', properties: {
+    project_id: { type: 'string', maxLength: 80 },
+    replan: { type: 'boolean', description: 'Plan the shots again from the book (replaces the author\'s edited plan)' },
+  }, additionalProperties: false },
+  describe: (a) => `${a.replan ? 'Plan the trailer again from the book (your edits to the plan are replaced), then make' : 'Make'} the book trailer: AutoInjector's 🎬 Video makes each shot (a few minutes each) and joins them with title cards; it is stored with the book.`,
+  async run(a, ctx) {
+    const b = await resolveBook(ctx, a);
+    if (!b.ok) return b;
+    const g = await ctx.akowe('GET', `/api/projects/${enc(b.pid)}/branches/main/trailer`);
+    if (!okStatus(g)) return akoweError(g);
+    let planned = false;
+    if (a.replan || !(g.json && g.json.plan)) {
+      const p = await ctx.akowe('POST', `/api/projects/${enc(b.pid)}/branches/main/trailer/plan`, {});
+      if (!okStatus(p)) return akoweError(p);
+      planned = true;
+    }
+    const m = await ctx.akowe('POST', `/api/projects/${enc(b.pid)}/branches/main/trailer/make`, {});
+    if (!okStatus(m)) return akoweError(m);
+    const shots = m.json && m.json.total;
+    return { ok: true, message: `Making the book trailer in the background${planned ? ' (planned from the book)' : ' (your plan)'}: ${shots || 'the'} shot(s), a few minutes each — watch 🎬 Video → 🎞 Trailer in AutoInjector, or the 🎞 Trailer page in Akọwe.`, data: { job_id: m.json && m.json.job_id, project_id: b.pid, shots, planned } };
+  },
+});
 def({
   name: 'book_map', title: 'Book pictures: make the map', group: 'books', changes: true, book: true,
   description: 'Make the book\'s world map: kind "svg" = drawn from the book\'s places (instant), "illustrated" = an illustrated map picture (engine sd / chatgpt / auto, background job). It goes before chapter 1.',
@@ -1263,6 +1289,7 @@ const DIRECT_FOR = [
   [/\b(image|picture|draw|illustrat|stable diffusion|png)\b/i, 'generate_image'],
   [/\b(book|chapter|akowe|akọwe|character|story rule|profile|manuscript)\b/i, 'the book tools'],
   [/\b(chatgpt|claude|gemini)\b/i, 'send_to_ai'],
+  [/\btrailer\b/i, 'make_trailer'],
   [/\b(video|clip|mp4)\b/i, 'generate_video'],
   [/\b(log|logs)\b/i, 'export_logs'],
 ];

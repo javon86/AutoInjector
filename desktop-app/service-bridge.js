@@ -396,6 +396,33 @@ function createServiceBridge(deps) {
       if (!renderer && path === '/render/image') {
         return reply(res, 501, { ok: false, error: 'RENDER_NOT_WIRED', code: 'RENDER_NOT_WIRED', message: 'This AutoInjector cannot draw pictures (update AutoInjector).' });
       }
+      // --- 🎞 Book trailers (docs/VIDEO_API.md "Trailers"): start one, follow it, stop it ---
+      if (video && video.trailer && method === 'POST' && path === '/video/trailer') {
+        // Shots may carry a picture as base64: up to 40 MB of JSON. Answers at once (202 + the job) unless
+        // wait:true, then with the finished trailer (minutes per shot; never timed out by the server).
+        const body = await readJsonBody(req, 40 * 1024 * 1024);
+        if (body === undefined) return reply(res, 400, { ok: false, error: 'BAD_JSON', code: 'BAD_JSON', message: 'The body must be JSON (at most 40 MB; send pictures as file paths instead).' });
+        emit('video', { type: 'trailer', from: (body && body.from) || null });
+        let r;
+        try { r = await video.trailer(body || {}); } catch (e) { r = { ok: false, error: 'VIDEO_FAILED', code: 'VIDEO_FAILED', message: `Something went wrong: ${(e && e.message) || e}` }; }
+        const err = r && r.error;
+        const code = r && r.ok ? (r.started ? 202 : 200) : err === 'INVALID_PARAM' || err === 'NO_LOCK' ? 400 : err === 'BUSY' ? 409 : err === 'NOT_WIRED' ? 501
+          : ['VIDEO_NOT_SET_UP', 'VIDEO_MODEL_MISSING'].includes(err) ? 503 : err === 'VIDEO_CANCELLED' ? 409 : err === 'VIDEO_TIMEOUT' ? 504 : err === 'VIDEO_OOM' ? 507 : 502;
+        return reply(res, code, Object.assign({ ok: false }, r || {}));
+      }
+      if (video && video.trailerStatus && method === 'GET' && path === '/video/trailer') {
+        let r;
+        try { r = await video.trailerStatus({ id: url.searchParams.get('id') || undefined }); } catch (e) { r = { ok: false, error: 'INTERNAL', message: String((e && e.message) || e) }; }
+        return reply(res, r && r.ok ? 200 : r && r.error === 'NOT_FOUND' ? 404 : 500, Object.assign({ ok: false }, r || {}));
+      }
+      if (video && video.trailerCancel && method === 'POST' && path === '/video/trailer/cancel') {
+        let r;
+        try { r = await video.trailerCancel(); } catch (e) { r = { ok: false, error: 'INTERNAL', message: String((e && e.message) || e) }; }
+        return reply(res, 200, Object.assign({ ok: false }, r || {}));
+      }
+      if ((!video || !video.trailer) && (path === '/video/trailer' || path === '/video/trailer/cancel')) {
+        return reply(res, 501, { ok: false, error: 'VIDEO_NOT_WIRED', code: 'VIDEO_NOT_WIRED', message: 'This AutoInjector cannot make trailers.' });
+      }
       if (!video && (path === '/video/backend' || path === '/video/request')) {
         return reply(res, 501, { ok: false, error: 'VIDEO_NOT_WIRED' });
       }

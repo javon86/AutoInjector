@@ -271,6 +271,7 @@ const EXCLUDED = {
   'sd:capabilities': 'internal: Alfred reads sd-api capabilities() directly when he builds his sd_call method list and schemas (alfred-main.js sdMethodsOf)',
   'akowe-view:tab': 'internal: the tab tells main it is showing (Alfred uses ui.show_tab / open_akowe_page)',
   'video:capabilities': 'internal: Alfred reads video-api capabilities() directly when he builds his video_call method list and schemas',
+  'video:trailer-pick-file': 'opens a file chooser for the person at the screen (music / a picture for a trailer shot) — Alfred passes the file path straight to trailer.make',
 };
 /** IPC channels that a dedicated Alfred tool covers (alfred-tools.js). */
 const TOOL_CHANNELS = {
@@ -298,6 +299,9 @@ const TOOL_CHANNELS = {
   'video:cancel': 'video_call:video.cancel', 'video:gallery': 'video_call:video.gallery', 'video:test': 'video_call:video.test',
   'video:install-check': 'video_call:video.install.check', 'video:install-model': 'video_call:video.install.downloadModel',
   'video:install-all': 'video_call:video.install.installAll', 'video:install-cancel': 'video_call:video.install.cancel',
+  // 🎞 book trailers (video-trailer.js) — also make_trailer for a book through Akọwe
+  'video:trailer-make': 'video_call:trailer.make', 'video:trailer-status': 'video_call:trailer.status', 'video:trailer-cancel': 'video_call:trailer.cancel',
+  'video:trailer-list': 'video_call:trailer.list', 'video:trailer-plan': 'video_call:trailer.plan',
 };
 
 function get(id) { return ACTIONS.find((a) => a.id === id) || null; }

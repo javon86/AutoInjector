@@ -13,6 +13,7 @@ uses both). Each book gets ONE folder, named once as ``<Book title> (<short id>)
     Character Forge/  <code> <name> - dossier.pdf/.json per saved dossier (characters, items, places, magic
                       systems) + its pictures and motion clip (B5)
     Pictures/      pictures.json + the chosen chapter / scene pictures (chNN … .png/.jpg) and map.svg/.png (B3)
+    Trailer/       trailer.webm (+ trailer.mp4) and trailer.json, the book trailer and its plan (B2, trailer.py)
     Log/           Book journal.md (journal.py) + run-events.json (runs: steps, states, AI per step, times, problems)
     Progress/      progress.json (book steps, next step, the run's state)
     book.akowe the complete re-importable package (book_package.py)
@@ -104,6 +105,8 @@ Character Forge/  Each dossier (characters, items, places, magic systems: PDF to
                   and motion clip.
 Pictures/      The chapter and scene pictures and the map you chose (🖼 Pictures), with
                pictures.json (captions, alt text and where each one goes in the book).
+Trailer/       The book trailer (🎞 Trailer): trailer.webm, trailer.mp4 when AutoInjector
+               could make one, and trailer.json (its shots and title cards).
 Log/           The book's journal (what happened, step by step, which AI did what) and
                run-events.json (every step of the Make-a-book run). No keys, no prompts.
 Progress/      progress.json: what is done and what comes next (for an unfinished book).
@@ -545,6 +548,12 @@ class SaveService:
             pictures.save_files(app, pid, branch, files, text)
         except Exception:  # noqa: BLE001 - the rest of the save still happens
             log.exception("picture files for the save failed")
+        # Trailer/ (B2): the book trailer (trailer.webm, trailer.mp4 when there is one) and its plan
+        try:
+            from . import trailer as trailer_mod  # noqa: PLC0415
+            trailer_mod.save_files(app, pid, branch, files, text)
+        except Exception:  # noqa: BLE001 - the rest of the save still happens
+            log.exception("trailer files for the save failed")
         # Cover/ (B3): the cover design, the ebook and print covers, the art, the book files with the cover
         try:
             from . import cover as cover_mod  # noqa: PLC0415

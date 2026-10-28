@@ -7,6 +7,7 @@ import { estimateBox, runCostLine, viewCosts, viewSceneGrid } from './grid.js'; 
 import * as S7C from './section7c.js';  // P23 beta reader + P25 your writing style (Section 7c)
 import { forgeRoute } from './forge.js';  // 🗂 B5 Character Forge dossiers (characters, items, places, magic)
 import { viewPictures } from './pictures.js';  // 🖼 B3 chapter/scene pictures and the map
+import { viewTrailer } from './trailer.js';  // 🎞 B2 the book trailer (AutoInjector 🎬 Video)
 import { viewCover } from './cover.js';  // 🎨 B3 book covers
 
 /* ======================================================================= constants */
@@ -655,6 +656,7 @@ async function pickView(parts) {
     if (rest[0] === 'report') return viewReport;
     if (rest[0] === 'forge') return m => forgeRoute(m, rest.slice(1), forgeUI());  // 🗂 B5 (…/forge/<rid>, …/forge/items/<rid>)
     if (rest[0] === 'pictures') return m => viewPictures(m, forgeUI());  // 🖼 B3
+    if (rest[0] === 'trailer') return m => viewTrailer(m, Object.assign(forgeUI(), { fmtClock }));  // 🎞 B2
     if (rest[0] === 'cover') return m => viewCover(m, forgeUI());  // 🎨 B3 cover designer
     if (rest[0] === 'manifest') return viewManifest;
     if (rest[0] === 'activity') return viewActivity;
@@ -720,6 +722,7 @@ function renderTop(parts) {
     add(more, link('p', S.pid, S.branch, 'forge'), '🗂 Character Forge');
     add(more, link('p', S.pid, S.branch, 'pictures'), '🖼 Pictures');
     add(more, link('p', S.pid, S.branch, 'cover'), '🎨 Cover');
+    add(more, link('p', S.pid, S.branch, 'trailer'), '🎞 Trailer');
     add(more, link('p', S.pid, S.branch, 'progress'), '📊 Progress');
     add(more, link('p', S.pid, S.branch, 'activity'), '🕘 Activity');
     add(more, link('p', S.pid, S.branch, 'manifest'), '🎛️ Book features');

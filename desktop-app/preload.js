@@ -207,6 +207,13 @@ contextBridge.exposeInMainWorld("api", {
     installCancel: () => ipcRenderer.invoke("video:install-cancel"),
     openFolder: () => ipcRenderer.invoke("video:open-folder"),
     showFile: (path) => ipcRenderer.invoke("video:show-file", { path }),
+    // 🎞 book trailers (video-trailer.js)
+    trailerMake: (req) => ipcRenderer.invoke("video:trailer-make", req),
+    trailerStatus: (id) => ipcRenderer.invoke("video:trailer-status", id ? { id } : {}),
+    trailerCancel: () => ipcRenderer.invoke("video:trailer-cancel"),
+    trailerList: (book) => ipcRenderer.invoke("video:trailer-list", book ? { book } : {}),
+    trailerPlan: (book) => ipcRenderer.invoke("video:trailer-plan", { book }),
+    trailerPickFile: (kind) => ipcRenderer.invoke("video:trailer-pick-file", { kind }),
     onInstall: (cb) => ipcRenderer.on("video-install", (_e, st) => cb(st)),
     onDone: (cb) => ipcRenderer.on("video-done", (_e, r) => cb(r)),
   },

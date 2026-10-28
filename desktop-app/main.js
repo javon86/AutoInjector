@@ -6556,9 +6556,44 @@ ipcMain.handle("video:install-all", videoSafe((a) => videoStudio().install.insta
 ipcMain.handle("video:install-cancel", videoSafe(() => videoStudio().install.cancel()));
 ipcMain.handle("video:open-folder", videoSafe(async () => { const d = outputManager.videosDir(); try { fs.mkdirSync(d, { recursive: true }); } catch (_) {} const err = await shell.openPath(d); return err ? { ok: false, error: err } : { ok: true }; }));
 ipcMain.handle("video:show-file", videoSafe((a) => { if (a.path) shell.showItemInFolder(a.path); return { ok: true }; }));
+// 🎞 Book trailers (video-trailer.js): the shots go through video-studio one by one, then a hidden
+// offscreen window (trailer-recorder.js) plays them with title cards onto a canvas and records
+// trailer.webm with MediaRecorder; an ffmpeg found on this PC (PATH, the ComfyUI folders, imageio-ffmpeg
+// in ComfyUI's python_embeded) adds trailer.mp4. Saved in videos/trailers/<book>/.
+const videoTrailerMod = require("./video-trailer");
+const trailerRecorderMod = require("./trailer-recorder");
+let _trailerRecorder = null;
+let _videoTrailer = null;
+function videoTrailer() {
+  if (_videoTrailer) return _videoTrailer;
+  _videoTrailer = videoTrailerMod.createTrailerMaker({
+    studio: videoStudio(),
+    record: (plan, out, o) => { if (!_trailerRecorder) _trailerRecorder = trailerRecorderMod.createTrailerRecorder({ electron: require("electron"), dir: __dirname, log: (t, d) => logEvent(t, d) }); return _trailerRecorder.record(plan, out, o); },
+    trailersDir: () => path.join(outputManager.videosDir(), "trailers"),
+    fileUrl: (p) => { try { return pathToFileURL(p).href; } catch (_) { return ""; } },
+    log: (t, d) => logEvent(t, d),
+    comfyRoots: () => { const out = []; try { for (const t of sdTargets()) { if (t.dir) out.push(t.dir); if (t.python) out.push(path.dirname(path.dirname(t.python))); } } catch (_) {} return out; },
+    onDone: (r) => broadcast("video-done", { ok: !!(r && r.ok), path: r && r.path, trailer: true, error: r && !r.ok ? r.error : undefined }),
+  });
+  return _videoTrailer;
+}
+ipcMain.handle("video:trailer-make", videoSafe((a) => videoTrailer().make(Object.assign({}, a, { from: a.from || "video-tab" }))));
+ipcMain.handle("video:trailer-status", videoSafe((a) => videoTrailer().status(a)));
+ipcMain.handle("video:trailer-cancel", videoSafe(() => videoTrailer().cancel()));
+ipcMain.handle("video:trailer-list", videoSafe((a) => videoTrailer().list(a)));
+ipcMain.handle("video:trailer-plan", videoSafe((a) => videoTrailer().plan(a)));
+// Choose a music file or a picture for a trailer shot (the path goes into the plan).
+ipcMain.handle("video:trailer-pick-file", videoSafe(async (a) => {
+  const music = a.kind === "music";
+  const r = await dialog.showOpenDialog(win || undefined, { title: music ? "Choose music for the trailer" : "Choose a picture to bring to life",
+    properties: ["openFile"], filters: music ? [{ name: "Music", extensions: ["mp3", "ogg", "oga", "opus", "wav", "m4a", "aac", "flac", "webm"] }] : [{ name: "Pictures", extensions: ["png", "jpg", "jpeg", "webp"] }] });
+  if (r.canceled || !r.filePaths || !r.filePaths[0]) return { ok: false, error: "CANCELLED" };
+  return { ok: true, path: r.filePaths[0], url: pathToFileURL(r.filePaths[0]).href };
+}));
 // The module API for Alfred (video_call) and other callers in the main process (docs/VIDEO_API.md).
 videoApiMod.register(videoApiMod.createVideoApi({
   studio: new Proxy({}, { get: (_t, k) => { const s = videoStudio(); const v = s[k]; return typeof v === "function" ? v.bind(s) : v; }, has: (_t, k) => k in videoStudio() }),
+  trailer: new Proxy({}, { get: (_t, k) => { const s = videoTrailer(); const v = s[k]; return typeof v === "function" ? v.bind(s) : v; }, has: (_t, k) => k in videoTrailer() }),
 }));
 
 // Endpoint help: so the user never has to guess the SD/video URL. Presets is a
@@ -6997,6 +7032,10 @@ const serviceBridge = createServiceBridge({
   video: {
     backend: () => videoStudio().backendInfo(),
     request: (body) => videoStudio().request(body, `bridge:${String((body && body.from) || "akowe").slice(0, 40)}`),
+    // 🎞 POST /video/trailer · GET /video/trailer · POST /video/trailer/cancel
+    trailer: (body) => videoTrailer().make(Object.assign({}, body, { from: `bridge:${String((body && body.from) || "akowe").slice(0, 40)}` })),
+    trailerStatus: (q) => videoTrailer().status(q || {}),
+    trailerCancel: () => videoTrailer().cancel(),
   },
   // 🖨 POST /render/image: SVG / HTML → JPEG / PNG in an offscreen, network-less Chromium page (render-image.js).
   renderer: renderImage.createRenderer({ makeWindow: renderImage.electronWindowFactory(require("electron")), log: logEvent }),

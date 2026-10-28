@@ -325,7 +325,7 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
   one tested. See `STABLE_DIFFUSION_PLAN.md`.
   Akọwe can ask via `POST /image/request` with a character lock (`docs/SD_IMAGE_API.md`). Setup guide:
   `docs/STABLE_DIFFUSION_SETUP.md`. Still to do: the Akọwe side (store pictures as book assets, UI) — with B3/B5.
-- [~] **B2** 🎬 Video: hook up AutoInjector's Video Generation panel for book trailers / scenes.
+- [~] **B2** 🎬 Video: hook up AutoInjector's Video Generation panel for book trailers / scenes (trailers done; a real GPU run open).
   AutoInjector side, DONE 2026-10-27: a real local video engine (`video-studio.js`, `docs/VIDEO_API.md`).
   - It renders with the ComfyUI the app already installs, using Wan 2.2 TI2V 5B (text or picture → video, about 12 GB VRAM) or Wan 2.1 T2V 1.3B (text → video, about 8 GB).
   - In-app model downloads (16.9 GB / 9.2 GB, the shared text encoder fetched once). ComfyUI itself installs first when it is missing. Stability Matrix model folders are supported.
@@ -333,12 +333,21 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
   - Bridge: `GET /video/backend` and `POST /video/request`. The capability test renders a real 1 s clip.
   - 🎩 Alfred: `video_call` over every video-api method, plus `generate_video` (text, picture or a character's looks) and the dossier `clip`.
   - Checked across the two real programs: an Akọwe clip job → the bridge → video-studio → a ComfyUI stand-in → clip and poster stored with the book.
-  - Still open: a first run on a real GPU, and book trailers (several shots joined).
+  - Still open: a first run on a real GPU. Book trailers (several shots joined): done 2026-10-28, see below.
   Akọwe side, first use DONE 2026-10-27: Character Forge **motion clips** — a 4 s picture→video "motion study" per
   dossier through AutoInjector `POST /video/request` (portrait as a temp-file path, idle-motion prompt from the
   appearance / posture / gait / expressions fields, 900 s timeout, plain words for every `VIDEO_*` code), stored with
   its poster as book assets, played on the dossier page, the poster as a MOTION STUDY still in the PDF, in the book
-  save (`docs/CHARACTER_FORGE.md` "Motion clip"). Still open: book trailers / scene clips; a real GPU run.
+  save (`docs/CHARACTER_FORGE.md` "Motion clip"). Still open: a real GPU run.
+  🎞 **Book trailers DONE 2026-10-28** (`docs/VIDEO_API.md` §7): AutoInjector `video-trailer.js` renders the shots one by
+  one through the video engine (progress, Stop, finished shots kept and reused), joins them with title cards, fades and
+  optional music in a hidden offscreen window (canvas + MediaRecorder → `trailer.webm`, no new dependency), and adds
+  `trailer.mp4` when an ffmpeg is found (PATH, ComfyUI folders, imageio-ffmpeg). 🎬 Video → 🎞 Trailer section; video-api
+  `trailer.make/status/cancel/list/plan`; bridge `POST /video/trailer`, `GET /video/trailer`, `POST /video/trailer/cancel`.
+  Akọwe (`trailer.py`, page `#/p/<pid>/<b>/trailer`): 🎬 Plan a trailer builds 5–8 shots from the book (title and
+  logline cards, the main place, key chapters but never the ending, the characters' approved looks + locks, chosen
+  chapter pictures / portraits brought to life), the author edits them, 🎞 Make the trailer runs as a job and stores
+  the trailer with the book (book save `Trailer/`); plain words for every `VIDEO_*` code. 🎩 Alfred: `make_trailer`.
 - [ ] **B3 (P19)** 🎨 Book cover and pictures (LATER — not started): cover design (title/author on a template,
   AI-generated artwork when an image AI is connected), chapter images/illustrations, maps; placement in
   PDF/EPUB/DOCX; print-ready cover size and spine.
