@@ -355,6 +355,39 @@ async function main() {
   assert(I.defaultHome('win32', { LOCALAPPDATA: 'C:\\Users\\Ada\\AppData\\Local' }) === 'C:\\Users\\Ada\\AppData\\Local\\AutoInjector\\comfyui', 'installs into %LOCALAPPDATA%\\AutoInjector\\comfyui');
   assert(I.find7z({ ProgramFiles: 'C:\\Program Files' }, (p) => p === path.join('C:\\Program Files', '7-Zip', '7z.exe')) !== null, '7-Zip is found in Program Files when installed');
 
+  { // a .part that is already complete, with no expected size: the server answers 416 → it is finished, not an error forever
+    const full = Buffer.alloc(3000, 7);
+    const s416 = http.createServer((req, res) => { const m = /bytes=(\d+)-/.exec(req.headers.range || ''); const st = m ? Number(m[1]) : 0; if (st >= full.length) { res.writeHead(416, { 'Content-Range': `bytes */${full.length}` }); return res.end(); } const b = full.subarray(st); res.writeHead(m ? 206 : 200, { 'Content-Length': b.length }); res.end(b); });
+    await new Promise((r) => s416.listen(0, '127.0.0.1', r));
+    const d416 = path.join(tmp, 'dl', 'done-already.bin');
+    fs.writeFileSync(d416 + '.part', full);
+    const r416 = await I.download(`http://127.0.0.1:${s416.address().port}/f`, d416, { maxTries: 1 });
+    assert(r416.ok && fs.existsSync(d416) && !fs.existsSync(d416 + '.part') && fs.statSync(d416).size === full.length, 'a complete .part with no known size: 416 → renamed and done (not HTTP_416 forever)');
+    s416.close();
+  }
+
+  console.log('\n== a cut-off unpack is not "installed" ==');
+  { // the app was closed while unpacking: ComfyUI/main.py is there, its Python is not, and the download is kept
+    const home3 = path.join(tmp, 'h3');
+    fs.mkdirSync(path.join(home3, 'ComfyUI_windows_portable', 'ComfyUI'), { recursive: true });
+    fs.writeFileSync(path.join(home3, 'ComfyUI_windows_portable', 'ComfyUI', 'main.py'), 'print("half")');
+    fs.writeFileSync(path.join(home3, 'ComfyUI_windows_portable_nvidia.7z'), ARCH);
+    const inst3 = I.createInstaller({ home: home3, allowAnyPlatform: true, sevenZip: null, tar: 'tar', run: async () => 'NVIDIA GeForce RTX 3060, 12288', urls: { githubApi: `${B}/api/latest`, downloadBase: `${B}/files/` } });
+    const c3 = await inst3.check();
+    assert(!c3.installed && c3.unfinished && !inst3.status().installed && !I.isInstalled(home3), 'main.py without its Python (and no "unpacked" marker) is not counted as installed');
+    const before = hits.archive;
+    const r3 = await inst3.install({ ignoreSpace: true });
+    assert(r3.ok && !r3.already && hits.archive === before && r3.portable && r3.portable.python && fs.existsSync(path.join(r3.portable.root, I.UNPACKED_MARKER)), 'Install unpacks it again from the kept download (nothing downloaded) and writes the "unpacked" marker');
+    assert(inst3.status().installed && I.isInstalled(home3), 'afterwards it counts as installed');
+    // an install from before the marker existed (python_embeded is there) still counts as installed
+    const home4 = path.join(tmp, 'h4');
+    fs.mkdirSync(path.join(home4, 'ComfyUI_windows_portable', 'ComfyUI'), { recursive: true });
+    fs.mkdirSync(path.join(home4, 'ComfyUI_windows_portable', 'python_embeded'), { recursive: true });
+    fs.writeFileSync(path.join(home4, 'ComfyUI_windows_portable', 'ComfyUI', 'main.py'), '');
+    fs.writeFileSync(path.join(home4, 'ComfyUI_windows_portable', 'python_embeded', process.platform === 'win32' ? 'python.exe' : 'python'), '');
+    assert(I.isInstalled(home4) && !fs.existsSync(path.join(home4, 'ComfyUI_windows_portable', I.UNPACKED_MARKER)), 'an older install without the marker but with python_embeded still counts as installed');
+  }
+
   srv.close(); slowSrv.close();
   fs.rmSync(tmp, { recursive: true, force: true });
   console.log(`\n${passed} passed, ${failed} failed`);
