@@ -65,14 +65,17 @@ function createMcpManager(opts = {}) {
       if (!s || !NAME_RE.test(String(s.name || '')) || entries.has(slug(s.name))) continue;
       const spec = { id: slug(s.name), name: String(s.name), transport: s.transport === 'http' ? 'http' : 'stdio', command: String(s.command || '').slice(0, 1000), args: Array.isArray(s.args) ? s.args.map((x) => String(x).slice(0, 2000)).slice(0, 60) : [], url: String(s.url || '').slice(0, 2000), env: {}, headers: {}, enabled: s.enabled === true, added: s.added || null };
       const missing = [];
+      // keys this run couldn't open: their sealed blob (or the {enc:null} placeholder) is written back unchanged on
+      // save, so a keychain that is unavailable today doesn't erase the secret for good.
+      const keep = { env: {}, headers: {} };
       for (const kind of ['env', 'headers']) {
         for (const [k, v] of Object.entries(s[kind] || {})) {
           if (kind === 'env' ? !ENV_KEY.test(k) : !HEADER_KEY.test(k)) continue;
-          const val = v && typeof v === 'object' && v.enc ? o.open(v.enc) : '';
-          if (val) spec[kind][k] = val; else missing.push(k);
+          let val = ''; try { val = v && typeof v === 'object' && v.enc ? o.open(v.enc) : ''; } catch (_) { val = ''; }
+          if (val) spec[kind][k] = val; else { missing.push(k); keep[kind][k] = v && typeof v === 'object' && typeof v.enc === 'string' ? v.enc : null; }
         }
       }
-      entries.set(spec.id, { spec, client: null, unsaved: false, missing });
+      entries.set(spec.id, { spec, client: null, unsaved: false, missing, keep });
     }
   }
   function save() {
@@ -85,9 +88,13 @@ function createMcpManager(opts = {}) {
       let sealedHere = true;
       for (const kind of ['env', 'headers']) {
         for (const [k, v] of Object.entries(s[kind] || {})) {
-          const enc = v ? o.seal(v) : null;
-          if (enc) out[kind][k] = { enc }; else if (v) sealedHere = false; // never plain text on disk
+          let enc = null; try { enc = v ? o.seal(v) : null; } catch (_) { enc = null; }
+          // never plain text on disk: a secret that can't be sealed leaves a placeholder, so the next run says
+          // "needs its secrets again" instead of starting the server without it
+          if (enc) out[kind][k] = { enc }; else if (v) { sealedHere = false; out[kind][k] = { enc: null }; }
         }
+        const kept = (e.keep && e.keep[kind]) || {};
+        for (const [k, enc] of Object.entries(kept)) if (!(k in out[kind])) out[kind][k] = { enc: enc || null };
       }
       e.unsaved = !sealedHere;
       if (!sealedHere) allSealed = false;
@@ -196,7 +203,7 @@ function createMcpManager(opts = {}) {
     if (transport === 'stdio' && Object.keys(headers).length) return { ok: false, error: 'BAD_SECRETS', message: 'Header lines (Name: value) are for web-address tool servers. For a program, write NAME=value.' };
     const spec = { id: slug(name), name, transport, command, args, url, env, headers, enabled: false, added: new Date().toISOString() };
     if (entries.has(spec.id)) return { ok: false, error: 'NAME_TAKEN', message: `There is already a tool server called "${name}".` };
-    const e = { spec, client: null, unsaved: false, missing: [] };
+    const e = { spec, client: null, unsaved: false, missing: [], keep: { env: {}, headers: {} } };
     entries.set(spec.id, e);
     const sv = save();
     log('added', { server: spec.id, transport, env: Object.keys(env).length, headers: Object.keys(headers).length, sealed: sv.sealed });
@@ -204,11 +211,12 @@ function createMcpManager(opts = {}) {
     return { ok: true, server: publicOne(e), message: e.unsaved ? `Added "${name}". This PC can't store secrets encrypted, so its keys are kept only until AutoInjector closes.` : `Added "${name}".` };
   }
 
-  async function start(ref) {
+  // persist:false (a one-off start for a confirmed tool call) leaves "start with the app" as the user set it.
+  async function start(ref, { persist = true } = {}) {
     const e = find(ref);
     if (!e) return { ok: false, error: 'NO_SERVER', message: `There is no tool server called "${String(ref || '').slice(0, 60)}".` };
     if (e.missing.length) return { ok: false, error: 'MISSING_SECRETS', message: `"${e.spec.name}" needs its secrets again (${e.missing.join(', ')}) — this PC couldn't unlock them. Remove it and add it again.`, server: publicOne(e) };
-    e.spec.enabled = true; save();
+    if (persist) { e.spec.enabled = true; save(); }
     const r = await clientFor(e).start();
     syncRegistry(e);
     changed();
@@ -255,15 +263,17 @@ function createMcpManager(opts = {}) {
     return { ok: true, servers, tools: out, missing: ref && !pick.length ? String(ref).slice(0, 60) : undefined };
   }
   /** Call a tool. A stopped (or failed) server is started first — the user confirmed the call. */
-  async function call(ref, tool, args) {
+  async function call(ref, tool, args, callOpts = {}) {
     const e = find(ref);
     if (!e) return { ok: false, error: 'NO_SERVER', message: `There is no tool server called "${String(ref || '').slice(0, 60)}".` };
     const c = clientFor(e);
     if (c.status().status !== 'connected') {
-      const r = await start(e.spec.id);
+      const r = await start(e.spec.id, { persist: false }); // the user's Stop (enabled=false) stays as it was
       if (!r.ok) return r;
     }
-    return c.callTool(String(tool || ''), args && typeof args === 'object' && !Array.isArray(args) ? args : {});
+    // The caller's own time limit (Alfred's mcp_call allows 180 s) — not the manager's default for every call.
+    const timeoutMs = Number(callOpts && callOpts.timeoutMs) > 0 ? Math.min(Number(callOpts.timeoutMs), 600000) : undefined;
+    return c.callTool(String(tool || ''), args && typeof args === 'object' && !Array.isArray(args) ? args : {}, timeoutMs ? { timeoutMs } : {});
   }
   /** App quit: stop every running server (keeps their "start with the app" state). */
   async function stopAll() {

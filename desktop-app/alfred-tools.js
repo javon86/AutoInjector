@@ -1237,6 +1237,8 @@ def({
     return { ok: true, data: Object.assign({ servers, tools }, off.length ? { note: `Not connected now: ${off.join(', ')} (mcp_call starts a stopped server; its tools are listed once it runs).` } : {}) };
   },
 });
+const MCP_SHOW_MAX = 20000;
+const MCP_CALL_MS = 175000;
 def({
   name: 'mcp_call', title: 'Use a tool on a tool server', group: 'app', changes: true, timeoutMs: 180000,
   description: 'Use one tool of an outside tool server (MCP) the user added: server = its name, tool = the tool\'s name, arguments = the tool\'s arguments (see mcp_tools for the schemas). Always asks first.',
@@ -1261,12 +1263,16 @@ def({
       const e = checkValue(args, sch, 'arguments');
       if (e) return { ok: false, error: e };
     }
+    // The card shows the arguments in full (showCode); refuse what is too long to read before approving.
+    if (JSON.stringify(args, null, 2).length > MCP_SHOW_MAX) return { ok: false, error: `the arguments are too long to show for approval (over ${MCP_SHOW_MAX} characters) — send less at once` };
     return { ok: true, args: { server: f.server.name, tool: a.tool, arguments: args } };
   },
   describe: (a) => `Use the tool “${clip(a.tool, 80)}” on the tool server “${clip(a.server, 60)}”${a.arguments && Object.keys(a.arguments).length ? ` with ${clip(JSON.stringify(a.arguments), 600)}` : ' (no arguments)'}.`,
+  // Everything the user approves is on the card: server, tool and the full arguments (a scrolling box).
+  showCode: (a) => ({ language: 'JSON', code: JSON.stringify({ server: a.server, tool: a.tool, arguments: a.arguments || {} }, null, 2) }),
   async run(a, ctx) {
     if (!ctx || typeof ctx.mcpCall !== 'function') return { ok: false, error: 'NOT_WIRED', message: 'Tool servers are not available here.' };
-    const r = await ctx.mcpCall(a.server, a.tool, a.arguments || {});
+    const r = await ctx.mcpCall(a.server, a.tool, a.arguments || {}, { timeoutMs: MCP_CALL_MS }); // just inside this tool's own 180 s
     if (!r || r.ok === false) return { ok: false, error: str((r && r.error) || 'FAILED', 60), message: clip((r && r.message) || 'The tool server call did not work.', 600) };
     const pics = (r.images || []).map((x) => x.path).filter(Boolean);
     return { ok: true, message: clip(r.text || 'Done.', 6000), data: shrink({ images: r.images, resources: r.resources, structured: r.structured }), image: pics[0] || null };

@@ -20,7 +20,10 @@ const { createAlfred } = require('./alfred');
 const { createImageAdapter } = require('./alfred-image');
 const catalogLib = require('./alfred-catalog');
 
-const NEVER_OPEN = /\.(exe|bat|cmd|com|ps1|psm1|vbs|vbe|js|jse|wsf|wsh|msi|msp|scr|lnk|jar|sh|bash|py|pyw|app|command|reg|hta|cpl|dll)$/i;
+// open_output can be "always allowed", so it opens only plain documents and media — an allowlist, never a blocklist
+// (a blocklist always misses some program or script type: .msix, .appref-ms, .url, .desktop, .scf …).
+const SAFE_OPEN = new Set(['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg', 'mp4', 'webm', 'mp3', 'wav', 'ogg', 'txt', 'md', 'pdf', 'json', 'html', 'docx', 'epub', 'csv']);
+function canOpenOutput(p) { const m = /\.([a-z0-9]+)$/i.exec(path.basename(String(p || ''))); return !!m && SAFE_OPEN.has(m[1].toLowerCase()); }
 
 // ---- IPC capture: Alfred's app controls call the SAME handlers the buttons call ----------------------------
 // main.js calls captureIpc(ipcMain) right after requiring Electron, before any handler is registered.
@@ -164,7 +167,7 @@ function installAlfred(h) {
     const full = path.resolve(path.isAbsolute(p) ? p : path.join(root, p));
     const rel = path.relative(root, full);
     if (rel.startsWith('..') || path.isAbsolute(rel)) return { ok: false, error: 'OUTSIDE_OUTPUTS', message: 'I only open files from the app\'s output folders.' };
-    if (NEVER_OPEN.test(full)) return { ok: false, error: 'NOT_ALLOWED', message: 'I never open programs or scripts.' };
+    if (!canOpenOutput(full)) return { ok: false, error: 'NOT_ALLOWED', message: `I only open pictures, videos, sounds and documents (${[...SAFE_OPEN].join(', ')}) — never programs, scripts or other kinds of file.` };
     if (!fs.existsSync(full)) return { ok: false, error: 'NOT_FOUND', message: 'That file does not exist.' };
     try { const err = await shell.openPath(full); return err ? { ok: false, error: 'OPEN_FAILED' } : { ok: true }; } catch (_) { return { ok: false, error: 'OPEN_FAILED' }; }
   }
@@ -269,7 +272,7 @@ function installAlfred(h) {
     },
     // 🧰 tool servers (MCP, mcp-manager.js) — the user's own list; null-safe in a build without it
     mcpTools: async (server) => (h.mcp ? h.mcp.tools(server) : { ok: true, servers: [], tools: [] }),
-    mcpCall: async (server, tool, args) => (h.mcp ? h.mcp.call(server, tool, args) : { ok: false, error: 'NO_TOOL_SERVERS', message: 'Tool servers are not available in this build.' }),
+    mcpCall: async (server, tool, args, opts) => (h.mcp ? h.mcp.call(server, tool, args, opts) : { ok: false, error: 'NO_TOOL_SERVERS', message: 'Tool servers are not available in this build.' }),
     akowe: (method, p, body) => h.akoweApi(method, p, body, 20000),
     openAkowePage,
     generateImage: (o) => image.generate(o),
@@ -401,4 +404,4 @@ function installAlfred(h) {
   return alfred;
 }
 
-module.exports = { installAlfred, captureIpc, ipcHandlers, invokeChannel, sdMethodsOf, SD_META, GENERATE_SCHEMA, isToggleShortcut, SHORTCUT_LABEL };
+module.exports = { canOpenOutput, SAFE_OPEN, installAlfred, captureIpc, ipcHandlers, invokeChannel, sdMethodsOf, SD_META, GENERATE_SCHEMA, isToggleShortcut, SHORTCUT_LABEL };

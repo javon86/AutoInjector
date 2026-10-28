@@ -98,6 +98,8 @@ async function main() {
       `AI panes are in fixed order (${order.join(', ') || 'not yet built'})`
     );
 
+    await checkPaneRects(app, controls, assert);
+
     // The one "stuff and thing" folder is laid out INSIDE the app folder (one
     // level above desktop-app), same as main.js's contentBaseFolder().
     const fs = require('fs'), pathMod = require('path');
@@ -305,6 +307,109 @@ async function main() {
     await shutdown(app);
     process.exit(1);
   }
+}
+
+// The AI windows: each real web page (a native WebContentsView) must sit EXACTLY on
+// its .pane-slot — clipped below the sticky User Panel and to the window bottom —
+// at the common window sizes, after scrolling, and when a pane is reduced or
+// minimized. The slots are 25% taller than the old 280px (350px).
+const PANE_SITES = ['chatgpt', 'claude', 'gemini'];
+async function paneViewBounds(app) {
+  return app.evaluate(({ BaseWindow }, sites) => {
+    const w = BaseWindow.getAllWindows().find((b) => b.contentView && b.contentView.children.length >= 4);
+    const out = {};
+    for (const v of (w ? w.contentView.children : [])) {
+      let p = '';
+      try { p = String(v.webContents.session.getStoragePath() || ''); } catch (_) {}
+      const site = sites.find((s) => new RegExp(`[\\\\/]${s}$`).test(p));
+      if (site) out[site] = v.getBounds();
+    }
+    return out;
+  }, PANE_SITES);
+}
+// Where the page says each pane should be (the same clipping as main.js / pane-layout.js).
+async function expectedPaneRects(controls) {
+  return controls.evaluate((sites) => {
+    const up = document.getElementById('col-userpanel').getBoundingClientRect();
+    const top = Math.max(0, Math.round(up.bottom)), bottom = window.innerHeight;
+    const out = {};
+    for (const s of sites) {
+      const e = document.getElementById('pane-slot-' + s);
+      const r = e && e.getBoundingClientRect();
+      if (!r) { out[s] = null; continue; }
+      const x = Math.round(r.x), y = Math.round(r.y), w = Math.round(r.width), h = Math.round(r.height);
+      const y1 = Math.max(y, top), y2 = Math.min(y + h, bottom);
+      out[s] = { slotH: h, rect: (w < 4 || y2 - y1 < 40) ? null : { x, y: y1, width: w, height: y2 - y1 } };
+    }
+    return out;
+  }, PANE_SITES);
+}
+async function panesMatch(app, controls) {
+  // Ask main to place the panes now, then compare (a couple of tries: layout may still be settling).
+  let last = '';
+  for (let i = 0; i < 6; i++) {
+    await controls.evaluate(() => window.api.syncPanes && window.api.syncPanes()).catch(() => {});
+    const [exp, got] = [await expectedPaneRects(controls), await paneViewBounds(app)];
+    const bad = [];
+    for (const s of PANE_SITES) {
+      const e = exp[s] && exp[s].rect, g = got[s];
+      if (!g) { bad.push(`${s}: no view`); continue; }
+      if (!e) { if (!(g.x <= -1000 || g.width === 0)) bad.push(`${s}: should be off-screen, is ${JSON.stringify(g)}`); continue; }
+      const off = Math.max(Math.abs(e.x - g.x), Math.abs(e.y - g.y), Math.abs(e.width - g.width), Math.abs(e.height - g.height));
+      if (off > 1) bad.push(`${s}: slot ${JSON.stringify(e)} vs view ${JSON.stringify(g)}`);
+    }
+    if (!bad.length) return { ok: true, exp };
+    last = bad.join('; ');
+    await new Promise((r) => setTimeout(r, 400));
+  }
+  return { ok: false, why: last };
+}
+async function checkPaneRects(app, controls, assert) {
+  console.log('\n== AI windows: 25% taller, and each real page sits exactly on its slot ==');
+  const before = await app.evaluate(({ BaseWindow }) => { const w = BaseWindow.getAllWindows().find((b) => b.contentView && b.contentView.children.length >= 4); return w ? w.getContentSize() : null; });
+  const setSize = (W, H) => app.evaluate(({ BaseWindow }, [W, H]) => { const w = BaseWindow.getAllWindows().find((b) => b.contentView && b.contentView.children.length >= 4); if (w) w.setContentSize(W, H); }, [W, H]);
+  const scrollTo = (y) => controls.evaluate((y) => { document.getElementById('wrap').scrollTop = y; }, y);
+  for (const [W, H] of [[1280, 800], [1920, 1080]]) {
+    await setSize(W, H);
+    await controls.waitForFunction((w) => Math.abs(window.innerWidth - w) <= 2, W, { timeout: 5000 }).catch(() => {});
+    await scrollTo(0);
+    await new Promise((r) => setTimeout(r, 500));
+    const exp = await expectedPaneRects(controls);
+    const heights = PANE_SITES.map((s) => exp[s] && exp[s].slotH);
+    assert(heights.every((h) => h >= 350), `${W}×${H}: every AI window is at least 350px tall — 25% more than the old 280px (${heights.join(', ')})`);
+    const atTop = await controls.evaluate(() => { const a = document.getElementById('ai-row').getBoundingClientRect(); const u = document.getElementById('col-userpanel').getBoundingClientRect(); return a.top - u.bottom; });
+    assert(atTop >= 0 && atTop <= 20, `${W}×${H}: the AI windows come right under the User Panel (gap ${Math.round(atTop)}px)`);
+    let m = await panesMatch(app, controls);
+    assert(m.ok, `${W}×${H}: the three AI pages sit exactly on their slots${m.ok ? '' : ` — ${m.why}`}`);
+    await scrollTo(300);
+    m = await panesMatch(app, controls);
+    assert(m.ok, `${W}×${H}, scrolled 300px: the AI pages follow their slots and stay below the User Panel${m.ok ? '' : ` — ${m.why}`}`);
+    await scrollTo(1e6);
+    m = await panesMatch(app, controls);
+    assert(m.ok, `${W}×${H}, scrolled to the bottom: AI pages scrolled out of view are moved off-screen${m.ok ? '' : ` — ${m.why}`}`);
+    await scrollTo(0);
+  }
+  // Reduce / minimize Claude: its page leaves, the other two widen and stay on their slots.
+  const cycle = () => controls.click('#col-claude .card-head .collapse-btn');
+  await cycle();
+  let m = await panesMatch(app, controls);
+  assert(m.ok && await controls.evaluate(() => document.getElementById('col-claude').classList.contains('state-reduced')), `Claude reduced: its page is hidden, the others stay on their slots${m.ok ? '' : ` — ${m.why}`}`);
+  await cycle();
+  m = await panesMatch(app, controls);
+  assert(m.ok && await controls.evaluate(() => document.getElementById('col-claude').classList.contains('state-min')), `Claude minimized: ChatGPT and Gemini widen and their pages follow${m.ok ? '' : ` — ${m.why}`}`);
+  await controls.click('#col-claude');
+  m = await panesMatch(app, controls);
+  assert(m.ok && await controls.evaluate(() => document.getElementById('col-claude').classList.contains('state-open')), `Claude opened again: all three pages back on their slots${m.ok ? '' : ` — ${m.why}`}`);
+  // The 🎩 Butler section (below the AI windows) folds in place to its one-line header and opens again.
+  const wasFolded = await controls.evaluate(() => document.getElementById('col-systemai').classList.contains('hidden-collapsed'));
+  if (!wasFolded) await controls.click('#btn-collapse-systemai');
+  const folded = await controls.evaluate(() => { const p = document.getElementById('col-systemai'); const b = document.getElementById('systemai-body'); const r = p.getBoundingClientRect(); return { panel: p.offsetParent !== null && r.height > 20 && r.height < 80, body: b.offsetParent !== null, open: !!document.getElementById('tab-systemai') }; });
+  assert(folded.panel && !folded.body && folded.open, `the 🎩 Butler section folds to one visible line with an ▸ Open button (${JSON.stringify(folded)})`);
+  await controls.click('#tab-systemai');
+  assert(await controls.isVisible('#llm-setup'), '▸ Open shows the Butler section again (his AI setup box)');
+  if (wasFolded) await controls.click('#btn-collapse-systemai');
+  if (before) await setSize(before[0], before[1]);
+  await new Promise((r) => setTimeout(r, 400));
 }
 
 // Close the app, but never wait forever: CI runs used to sit until GitHub's

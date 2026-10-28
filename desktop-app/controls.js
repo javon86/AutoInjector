@@ -1653,7 +1653,7 @@ const COLLAPSIBLE_PANELS = {
   houserules: { panelId: "col-houserules", label: "House Rules" },
   prompts: { panelId: "col-prompts", label: "Prompt Library" },
   gpu: { panelId: "col-gpu", label: "GPU Usage" },
-  systemai: { panelId: "col-systemai", label: "System AI" },
+  systemai: { panelId: "col-systemai", label: "🎩 Butler" },
   akowe: { panelId: "col-akowe", label: "Akọwe bridge" }
 };
 function collapseYellowPanel(key) {
@@ -1661,18 +1661,70 @@ function collapseYellowPanel(key) {
   if (el(`tab-${key}`)) return; // already minimized: never add a second tab
   el(panelId).classList.add("hidden-collapsed");
   const tab = document.createElement("button");
-  tab.className = "collapsed-tab";
   tab.id = `tab-${key}`;
   tab.title = `Expand ${label}`;
-  tab.innerHTML = `<span class="tab-color"></span>${label}`;
   tab.onclick = () => expandYellowPanel(key);
-  el("top-tab-strip").appendChild(tab);
+  if (key === "systemai") {
+    // The 🎩 Butler section folds IN PLACE to its one-line header (it is never
+    // hidden away in the top strip), with a plain "▸ Open" button on that line.
+    tab.className = "primary";
+    tab.textContent = "▸ Open";
+    tab.onclick = () => setButlerFolded(false, true);
+    tab.title = "Open the Butler section (Alfred's AI, personality, settings, activity)";
+    const btn = el("btn-collapse-systemai");
+    if (btn) {
+      btn.before(tab);
+      btn.textContent = "▸";
+      btn.title = "Open the Butler section"; btn.setAttribute("aria-label", btn.title);
+      btn.setAttribute("aria-expanded", "false");
+    } else el("top-tab-strip").appendChild(tab);
+  } else {
+    tab.className = "collapsed-tab";
+    tab.innerHTML = `<span class="tab-color"></span>${label}`;
+    el("top-tab-strip").appendChild(tab);
+  }
   uiLog("panel", { msg: `${label} panel minimized` });
 }
 function expandYellowPanel(key) {
   el(COLLAPSIBLE_PANELS[key].panelId).classList.remove("hidden-collapsed");
   el(`tab-${key}`)?.remove();
+  if (key === "systemai" && el("btn-collapse-systemai")) {
+    const btn = el("btn-collapse-systemai");
+    btn.textContent = "⌄";
+    btn.title = "Fold the Butler section to one line"; btn.setAttribute("aria-label", btn.title);
+    btn.setAttribute("aria-expanded", "true");
+  }
   uiLog("panel", { msg: `${COLLAPSIBLE_PANELS[key].label} panel restored` });
+}
+// 🎩 Butler section: fold/unfold (the ▾ button and the heading toggle it). The
+// user's choice is remembered; with no choice yet it starts folded once Alfred's
+// AI is set up (Ollama installed and his model downloaded), open until then.
+const BUTLER_FOLD_KEY = "butler-folded";
+let butlerFoldTouched = false;
+function butlerFoldPref() { try { return window.localStorage.getItem(BUTLER_FOLD_KEY); } catch (_) { return null; } }
+function setButlerFolded(on, save) {
+  if (on) collapseYellowPanel("systemai"); else expandYellowPanel("systemai");
+  if (save) {
+    butlerFoldTouched = true;
+    try { window.localStorage.setItem(BUTLER_FOLD_KEY, on ? "1" : "0"); } catch (_) {}
+  }
+}
+function toggleButlerFolded() { setButlerFolded(!el("col-systemai").classList.contains("hidden-collapsed"), true); }
+function butlerAiIsSetUp(st) {
+  if (!st || !st.ok || !st.ollama || !st.ollama.installed) return false;
+  const want = st.alfred && st.alfred.model;
+  if (!want) return false;
+  const key = (n) => String(n || "").trim().toLowerCase().replace(/:latest$/, "");
+  return (st.models || []).some((m) => key(m && m.name) === key(want));
+}
+function initButlerFold() {
+  const pref = butlerFoldPref();
+  if (pref === "1") { setButlerFolded(true, false); return; }
+  if (pref === "0") return;
+  if (!window.api || typeof window.api.llmStatus !== "function") return;
+  Promise.resolve(window.api.llmStatus()).then((st) => {
+    if (!butlerFoldTouched && butlerAiIsSetUp(st)) setButlerFolded(true, false);
+  }).catch(() => {});
 }
 // Make each utility panel's heading a second, larger click target for collapsing
 // it — and keyboard-operable (Enter/Space), with a visible focus ring via CSS.
@@ -1683,8 +1735,10 @@ for (const key of Object.keys(COLLAPSIBLE_PANELS)) {
   h2.setAttribute("role", "button");
   h2.setAttribute("tabindex", "0");
   h2.title = "Minimize this panel to the top tab strip";
-  h2.addEventListener("click", () => collapseYellowPanel(key));
-  h2.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); collapseYellowPanel(key); } });
+  const act = key === "systemai" ? toggleButlerFolded : () => collapseYellowPanel(key);
+  if (key === "systemai") h2.title = "Fold or open the Butler section";
+  h2.addEventListener("click", act);
+  h2.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); act(); } });
 }
 el("btn-collapse-global").onclick = () => collapseYellowPanel("global");
 el("btn-collapse-houserules").onclick = () => collapseYellowPanel("houserules");
@@ -1711,7 +1765,8 @@ async function databaseRefresh() {
 }
 
 // --- System AI (Local Supervisor) panel + User Panel switch ----------------
-if (el("btn-collapse-systemai")) el("btn-collapse-systemai").onclick = () => collapseYellowPanel("systemai");
+if (el("btn-collapse-systemai")) el("btn-collapse-systemai").onclick = toggleButlerFolded;
+try { initButlerFold(); } catch (_) {}
 if (el("btn-collapse-gpu")) el("btn-collapse-gpu").onclick = () => collapseYellowPanel("gpu");
 
 // Butler Device panel: System Check (what he can do) + Send Intro (tell the AIs
@@ -2461,6 +2516,7 @@ async function refreshToolsList() {
       ? tools.map((t) => `• ${t.name}${t.risk === "ask" ? " (asks first)" : ""} — ${t.description}`).join("\n")
       : "No tools loaded.";
     box.style.whiteSpace = "pre-wrap";
+    const n = el("jarvis-tools-count"); if (n) n.textContent = tools.length ? `(${tools.length})` : "";
   } catch { /* leave default */ }
 }
 refreshToolsList();
@@ -2669,6 +2725,7 @@ if (el("btn-open-phone")) el("btn-open-phone").onclick = async () => {
   panel.hidden = !panel.hidden;
   if (!panel.hidden) await refreshPhonePanel();
 };
+if (el("btn-phone-close")) el("btn-phone-close").onclick = () => { const panel = el("phone-panel"); if (panel) panel.hidden = true; };
 if (el("phone-lan-toggle")) el("phone-lan-toggle").onchange = async (e) => {
   const on = !!e.target.checked;
   const hint = el("phone-hint");
@@ -4881,6 +4938,20 @@ function wirePaneSync() {
   window.addEventListener("resize", kick, { passive: true });
   const mo = new MutationObserver(kick);
   for (const d of document.querySelectorAll('[role="dialog"], dialog')) mo.observe(d, { attributes: true, attributeFilter: ["class", "style", "open", "hidden"] });
+  // Anything that changes size ABOVE or IN the AI windows (the User Panel, the
+  // top tab strip, a pane opened/reduced/minimized, a slot resizing) moves the
+  // slots: re-place the panes right away instead of on the next timer tick.
+  if (typeof ResizeObserver === "function") {
+    const ro = new ResizeObserver(kick);
+    for (const id of ["top-tab-strip", "col-userpanel", "collapsed-strip", "ai-row", "expanded-strip"]) { const n = el(id); if (n) ro.observe(n); }
+    for (const n of document.querySelectorAll(".pane-slot")) ro.observe(n);
+  }
+  // A pane switching open / reduced / minimized (a class change), or the panes being built.
+  // (Class changes only — not text, so a streaming reply preview doesn't re-place the panes all the time.)
+  if (el("expanded-strip")) {
+    mo.observe(el("expanded-strip"), { subtree: true, attributes: true, attributeFilter: ["class", "hidden"] });
+    new MutationObserver(kick).observe(el("expanded-strip"), { childList: true });
+  }
 }
 try { wirePaneSync(); } catch (e) { console.error("pane sync init failed", e); }
 

@@ -123,6 +123,7 @@ function createLlmSetup(deps = {}) {
     readyTimeoutMs: deps.readyTimeoutMs || 25000,
     retryDelayMs: deps.retryDelayMs != null ? deps.retryDelayMs : 1500,
     idleMs: deps.idleMs || 120000,
+    now: typeof deps.now === 'function' ? deps.now : () => Date.now(),
     chatTimeoutMs: deps.chatTimeoutMs || 120000,
     installerTimeoutMs: deps.installerTimeoutMs || 15 * 60 * 1000,
   };
@@ -315,10 +316,26 @@ function createLlmSetup(deps = {}) {
       return Number(st.bavail) * Number(st.bsize);
     } catch (_) { return null; }
   }
+  // A .part is resumed only when it is from the same file: the download addresses point at "the latest" release, so
+  // a .part left for a long time may belong to an older one. <dest>.part.meta remembers its url, ETag / Last-Modified.
+  const PART_STALE_MS = 24 * 3600 * 1000;
   async function download(url, dest, { signal, onProgress, label = 'Downloading', retries = 3 } = {}) {
     const part = `${dest}.part`;
+    const metaFile = `${part}.meta`;
+    const rm = (p) => { try { d.fs.unlinkSync(p); } catch (_) {} };
+    const dropPart = () => { rm(part); rm(metaFile); };
+    const readMeta = () => { try { const j = JSON.parse(String(d.fs.readFileSync(metaFile, 'utf8'))); return j && typeof j === 'object' ? j : null; } catch (_) { return null; } };
+    const hdr = (res, k) => { try { return (res.headers && res.headers.get && res.headers.get(k)) || ''; } catch (_) { return ''; } };
     try { d.fs.mkdirSync(P.dirname(dest), { recursive: true }); } catch (e) { return { ok: false, error: friendlyError(e, 'make the download folder') }; }
+    try { // an old .part (or one from another address) is thrown away, not resumed against a newer release
+      if (exists(part)) {
+        const age = d.now() - Number(d.fs.statSync(part).mtimeMs || 0);
+        const m = readMeta();
+        if (age > PART_STALE_MS || (m && m.url && m.url !== url)) dropPart();
+      }
+    } catch (_) {}
     let lastErr = null;
+    let restarted416 = false;
     for (let attempt = 1; attempt <= retries; attempt++) {
       if (signal && signal.aborted) return { ok: false, cancelled: true, error: 'Cancelled.' };
       let start = 0;
@@ -331,8 +348,25 @@ function createLlmSetup(deps = {}) {
       let ws = null;
       try {
         kick();
-        const res = await d.fetch(url, { headers: start ? { Range: `bytes=${start}-` } : {}, signal: c.signal, redirect: 'follow' });
-        if (res.status === 416 && start > 0) { d.fs.renameSync(part, dest); return { ok: true, file: dest, bytes: start, resumed: true }; }
+        const headers = {};
+        if (start) {
+          headers.Range = `bytes=${start}-`;
+          // If-Range: the server sends the rest only when the file is still the same one, else the whole new file (200)
+          const m = readMeta();
+          const validator = m && m.etag && !/^W\//.test(m.etag) ? m.etag : (m && m.lastModified) || '';
+          if (validator) headers['If-Range'] = validator;
+        }
+        const res = await d.fetch(url, { headers, signal: c.signal, redirect: 'follow' });
+        if (res.status === 416 && start > 0) {
+          // "nothing after byte <start>": complete only if the file really is that long — ask (HEAD) before trusting it
+          try { if (res.body && res.body.cancel) await res.body.cancel(); } catch (_) {}
+          let size = 0;
+          try { const h = await d.fetch(url, { method: 'HEAD', signal: c.signal, redirect: 'follow' }); size = Number(hdr(h, 'content-length')) || 0; } catch (_) { size = 0; }
+          if (size && size === start) { d.fs.renameSync(part, dest); rm(metaFile); return { ok: true, file: dest, bytes: start, resumed: true }; }
+          dropPart(); // another size (or unknown): start the download again
+          if (!restarted416) { restarted416 = true; attempt--; }
+          continue;
+        }
         if (res.status === 404) return { ok: false, notFound: true, error: 'The download address was not found (404).' };
         if (!res.ok) { lastErr = new Error(`the server answered HTTP ${res.status}`); throw lastErr; }
         if (res.status !== 206 && start > 0) start = 0; // the server ignored the resume: start over
@@ -342,6 +376,7 @@ function createLlmSetup(deps = {}) {
           const free = freeBytes(P.dirname(dest));
           if (free != null && free < len * 1.1 + 50 * MB) return { ok: false, error: `Not enough free disk space: the download needs about ${gbText(len)} and the drive has ${gbText(free)} free. Free up some space and try again.` };
         }
+        try { d.fs.writeFileSync(metaFile, JSON.stringify({ url, etag: hdr(res, 'etag') || null, lastModified: hdr(res, 'last-modified') || null })); } catch (_) {}
         ws = d.fs.createWriteStream(part, { flags: start ? 'a' : 'w' });
         let wsErr = null; ws.on('error', (e) => { wsErr = e; });
         let got = start, lastEmit = 0, t0 = Date.now(), base = start;
@@ -370,7 +405,7 @@ function createLlmSetup(deps = {}) {
         ws = null;
         if (wsErr) throw wsErr;
         if (total && got < total) { lastErr = new Error('the download was cut off'); throw lastErr; }
-        d.fs.renameSync(part, dest);
+        d.fs.renameSync(part, dest); rm(metaFile);
         if (onProgress) onProgress({ percent: 100, completedBytes: got, totalBytes: total || got, message: `${label} — done (${gbText(got)})` });
         return { ok: true, file: dest, bytes: got, resumed: base > 0 };
       } catch (e) {

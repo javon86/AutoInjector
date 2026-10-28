@@ -1532,3 +1532,108 @@ ul.samples q { font-style: italic; }
 .forge-problem { margin: .2rem 0; }
 .forge-finding .forge-slot-actions { margin-top: .5rem; }
 .forge-mini.on { background: rgba(95,199,192,.18); border-color: var(--fg-teal); color: var(--fg-text); }
+
+/* ======================================================================= UI tidy pass (2026-10): proportion, one-line top bar,
+   no mid-word breaks, no duplicate cards. Later rules on purpose: they settle the layers above. */
+
+/* work area: wider on big screens and centred in the space beside the side bar (no empty right half at 1920px) */
+main { max-width: 1360px; margin: 0 auto; }
+
+/* top bar at laptop width: the two selects shrink instead of spilling under the 🔍 button */
+.topbar-context { flex: 0 1 auto; }
+.topbar-context select { min-width: 0; }
+.topbar-context #project-select { flex: 1 1 10rem; min-width: 5.5rem; width: auto; }
+.topbar-context #branch-select { flex: 0 1 5.5rem; min-width: 4rem; width: auto; }
+.topbar .brand { flex: 0 0 auto; margin-right: 4px; }
+.topbar-links { align-items: center; }
+.topbar-links a { white-space: nowrap; }
+.topbar-links .tb-btn { min-height: 34px; }
+.topbar .tb-btn, .topbar .nav-toggle { min-height: 36px; }
+.more-links .more-new { display: none; }
+@media (min-width: 801px) and (max-width: 1599px) {
+  /* inside a book: "🚀 New book" lives in the More menu so the bar keeps one line */
+  .topbar-links .tb-new.in-project { display: none; }
+  .more-links .more-new { display: block; }
+}
+
+/* phone: the page links become one row that scrolls sideways instead of two wrapped rows */
+@media (max-width: 800px) {
+  .topbar { row-gap: 8px; padding-top: 8px; padding-bottom: 8px; }
+  .topbar-links { position: relative; /* clips the screen-reader-only labels inside it */ flex-wrap: nowrap; white-space: nowrap; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch;
+    margin: 0 calc(-1 * var(--gutter)); padding: 0 var(--gutter); max-width: calc(100% + 2 * var(--gutter)); flex-basis: calc(100% + 2 * var(--gutter)); }
+  .topbar-links::-webkit-scrollbar { display: none; }
+  .topbar-links > * { flex: 0 0 auto; }
+  .topbar-context { flex: 1 1 100%; }
+  .topbar-context #project-select { flex: 1 1 auto; }
+  .topbar-context #branch-select { flex: 0 1 7rem; }
+}
+
+/* side bar: set names on one line (the record count is a small number pill), step names break between words only */
+.set-toggle { gap: 6px; }
+.set-toggle .set-name { min-width: 0; line-height: 1.3; }
+.set-toggle .set-count { flex: 0 0 auto; min-width: 1.8em; padding: 0 6px; border-radius: 999px; text-align: center;
+  background: var(--surface-2); border: 1px solid var(--border); font-size: .75rem; line-height: 1.5; font-variant-numeric: tabular-nums; }
+.set-links li a { flex-wrap: wrap; row-gap: 0; }
+.set-links .op-name { flex: 1 1 7em; overflow-wrap: break-word; }
+.set-links .op-meta { margin-left: auto; }
+
+/* overview: the side bar already shows "Current task" on a laptop; the page shows it only on a phone (side bar hidden) */
+@media (min-width: 801px) { main > .task-slot { display: none; } }
+
+/* page head: a lone ⓘ stays beside the title instead of dropping to its own line on a phone */
+.page-head:has(> .row > .info-wrap:only-child) { flex-wrap: nowrap; }
+.page-head > div:first-child { min-width: 0; }
+.page-head > .row { flex: 0 1 auto; }
+
+/* tables: column titles and dates are not split in the middle of a word ("CHATGP T", "10/28/2 026") */
+th { overflow-wrap: break-word; }
+.table-wrap thead th { white-space: nowrap; overflow-wrap: normal; }
+.table-wrap td { overflow-wrap: break-word; }
+
+/* Make my book: ten steps sit in two even rows of five (one row on a wide screen), not eight and an orphan two */
+@media (min-width: 641px) { .step-rail:has(> li:nth-child(9)) { grid-template-columns: repeat(5, minmax(0, 1fr)); } }
+@media (min-width: 1700px) { .step-rail:has(> li:nth-child(9)):not(:has(> li:nth-child(11))) { grid-template-columns: repeat(10, minmax(0, 1fr)); } }
+
+/* finished books: cards wide enough that their buttons do not stack one per line */
+.shelf { grid-template-columns: repeat(auto-fill, minmax(min(100%, 470px), 1fr)); }
+
+/* a small button next to an input or select in the same row is as tall as it */
+.row:has(> input:not([type=checkbox]):not([type=radio]), > select) > :is(button, .btn) { min-height: 38px; }
+/* a label styled as a button around a hidden file input shows the keyboard focus of that input */
+label.btn:has(> input:focus-visible) { outline: 3px solid var(--focus); outline-offset: 2px; }
+/* the icon-only ⚙️ Settings link looks like the other icon buttons next to it */
+@media (min-width: 801px) and (max-width: 1599px) {
+  .topbar-links a.tb-settings { display: inline-flex; align-items: center; min-height: 34px; padding: 4px 9px; margin: 0 2px;
+    border: 1px solid rgba(255, 255, 255, .38); background: rgba(255, 255, 255, .08); }
+}
+/* inside AutoInjector (Electron shows real scrollbars) the side bar keeps room for its set names */
+.sidenav { scrollbar-width: thin; padding-left: 6px; padding-right: 6px; }
+.set-toggle { padding: 7px 6px; }
+.set-toggle .set-name { font-size: .97rem; }
+@media (min-width: 1600px) { .topbar-context #project-select { max-width: 16rem; } }
+.settings-about > summary { cursor: pointer; font-weight: 600; }
+.settings-about[open] > summary { margin-bottom: 8px; }
+/* finished book card: title, who, when · then the downloads · then report/compare/variant/rerun in one even row · then saving */
+.shelf-book .sb-main { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.shelf-book .sb-main > * { margin: 0; }
+.shelf-book .sb-main > .downloads { order: 1; }
+.shelf-book .sb-report { order: 2; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.shelf-book .sb-save { order: 3; }
+.shelf-book .sb-main > a.small { order: 4; align-self: flex-start; }
+/* a save that partly worked: the files that were not written, in plain words */
+.save-warn { display: block; margin-top: 4px; padding: 4px 8px; border-left: 4px solid var(--warn-line); background: var(--warn-soft); color: var(--warn); font-weight: 600; overflow-wrap: anywhere; }
+
+/* small laptop window (e.g. AutoInjector at 1024px) inside a book: Save / Open / Make a book show their icons only
+   (their names stay in the tooltip and for screen readers) so the book and branch pickers keep their room instead of
+   being drawn under the 🔍 and Sets buttons; if it still does not fit, the bar wraps to a second line. */
+@media (min-width: 801px) and (max-width: 1279px) {
+  .topbar { flex-wrap: wrap; row-gap: 6px; gap: 4px; padding-left: 12px; padding-right: 12px; }
+  .topbar-context { flex: 0 0 auto; min-width: 10rem; gap: 4px; }
+  .topbar-context #project-select { flex: 0 1 7rem; }
+  .topbar-context #branch-select { flex: 0 0 4.25rem; min-width: 4.25rem; }
+  .topbar-links a { padding: 6px 5px; }
+  .topbar .tb-btn { padding-left: 7px; padding-right: 7px; }
+  .topbar .tb-save .tb-label, .topbar .tb-open .tb-label, .topbar .mab-btn .tb-label {
+    position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
+  }
+}

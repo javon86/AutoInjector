@@ -6,8 +6,12 @@
   <style>
     * { box-sizing: border-box; }
     html, body { height: 100%; }
-    body { margin: 0; background:#111; color:#eee; font-size:12px; font-family: system-ui, sans-serif; padding:14px; display:flex; flex-direction:column; gap:10px; }
-    label { display:block; font-size:10px; opacity:.6; text-transform:uppercase; letter-spacing:.03em; margin-bottom:3px; }
+    body { margin: 0; background:#111; color:#eee; font-size:12.5px; font-family: system-ui, sans-serif; padding:16px; display:flex; flex-direction:column; gap:12px; }
+    /* one readable column on a big window */
+    body > * { width:100%; max-width:960px; margin-left:auto; margin-right:auto; }
+    h1 { font-size:15px; margin:0 auto; }
+    label { display:block; font-size:12px; color:#bbb; margin-bottom:4px; font-weight:600; }
+    .hint { font-size:11.5px; color:#999; font-weight:400; }
     input, textarea, button { background:#1a1a1a; color:#eee; border:1px solid #333; border-radius:6px; padding:5px 7px; font-family:inherit; font-size:12px; }
     button { cursor:pointer; }
     button:hover { background:#242424; }
@@ -15,34 +19,41 @@
     #name { width:100%; }
     .fill-all-row { display:flex; gap:6px; }
     #fill-all-text { flex:1 1 auto; min-width:0; }
-    .field textarea { width:100%; height:110px; resize:vertical; }
+    .field { flex:1 1 0; min-height:96px; display:flex; flex-direction:column; }
+    .field textarea { width:100%; flex:1 1 auto; min-height:70px; resize:none; line-height:1.4; }
     .fields { display:flex; flex-direction:column; gap:10px; flex:1 1 auto; min-height:0; overflow:auto; }
+    .field .site-chatgpt { color:#57c07a; } .field .site-claude { color:#e0a24a; } .field .site-gemini { color:#6ea8ff; }
     .actions { display:flex; gap:8px; justify-content:flex-end; }
+    .actions button { padding:6px 16px; }
     #error { color:#e88; min-height:1em; }
   </style>
 </head>
 <body>
+  <h1>✏ Edit prompt</h1>
   <div>
     <label for="name">Prompt name</label>
     <input id="name" placeholder="e.g. Kickoff brief">
   </div>
 
-  <div class="fill-all-row">
-    <input id="fill-all-text" placeholder="Type once, then → All to copy it into every box below">
-    <button id="btn-fill-all">→ All</button>
+  <div>
+    <label for="fill-all-text">Same text for all three <span class="hint">(optional — fills every box below)</span></label>
+    <div class="fill-all-row">
+      <input id="fill-all-text" placeholder="Type once, then press → All">
+      <button id="btn-fill-all" title="Copy this text into the ChatGPT, Claude and Gemini boxes">→ All</button>
+    </div>
   </div>
 
   <div class="fields">
     <div class="field">
-      <label>ChatGPT</label>
+      <label for="text-chatgpt" class="site-chatgpt">ChatGPT</label>
       <textarea id="text-chatgpt" placeholder="Leave blank to skip ChatGPT"></textarea>
     </div>
     <div class="field">
-      <label>Claude</label>
+      <label for="text-claude" class="site-claude">Claude</label>
       <textarea id="text-claude" placeholder="Leave blank to skip Claude"></textarea>
     </div>
     <div class="field">
-      <label>Gemini</label>
+      <label for="text-gemini" class="site-gemini">Gemini</label>
       <textarea id="text-gemini" placeholder="Leave blank to skip Gemini"></textarea>
     </div>
   </div>

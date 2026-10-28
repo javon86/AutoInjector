@@ -107,6 +107,8 @@ async function main() {
     assert(/win64/.test(f), 'AUTOINJECTOR_FFMPEG wins');
     assert(VT.findFfmpeg({ env: { PATH: path.join(TMP, 'none') }, platform: 'linux', roots: [] }) === null, 'none anywhere → null');
     assert(VT.findFfmpeg({ env: { PATH: pathDir, AUTOINJECTOR_FFMPEG: 'none' }, platform: 'linux', roots: [root] }) === null, 'AUTOINJECTOR_FFMPEG=none → never ffmpeg');
+    const reserved = ['Con', 'aux', 'NUL', 'COM1', 'lpt9', 'Prn', 'Aux.v2'].map((n) => VT.safeName(n));
+    assert(JSON.stringify(reserved) === JSON.stringify(['Con_', 'aux_', 'NUL_', 'COM1_', 'lpt9_', 'Prn_', 'Aux_.v2']) && VT.safeName('Console') === 'Console' && VT.safeName('COM10') === 'COM10' && VT.safeName('The Con') === 'The Con', `a book called Con / Aux / NUL / COM1 / LPT9 gets a Windows-safe folder (${reserved.join(', ')}); other names are untouched`);
     const a = VT.mp4Args('/t/trailer.webm', '/t/trailer.mp4', true);
     assert(a.join(' ').includes('-c:v libx264 -pix_fmt yuv420p') && a.includes('aac') && a.includes('+faststart') && a[a.length - 1] === '/t/trailer.mp4' && VT.mp4Args('a', 'b', false).includes('-an'), '.mp4 = H.264 yuv420p, faststart, AAC music (or no audio)');
   }
@@ -179,12 +181,13 @@ async function main() {
     assert(tl.items.map((x) => x.kind).join(',') === 'card,clip,clip,clip,card' && tl.total === 8 && tl.items.filter((x) => x.kind === 'clip').every((x) => x.src.startsWith('file://') && x.src.includes(`${path.sep}trailers${path.sep}The Ferry${path.sep}shots${path.sep}shot-`)), 'the recorder gets the timeline: card, 3 clips (the copies in trailers/The Ferry/shots), card');
     assert(tl.music && tl.music.src === `file://${music}` && tl.music.fadeOut > 0, 'the music goes to the recorder (faded out at the end)');
     const dir = path.join(videos, 'trailers', 'The Ferry');
-    assert(result.path === path.join(dir, 'trailer.webm') && fs.existsSync(result.path) && W.probeWebm(fs.readFileSync(result.path)).durationMs === 8000 && result.seconds === 8, 'trailer.webm in videos/trailers/The Ferry/ (8 s)');
-    assert(result.mp4 === path.join(dir, 'trailer.mp4') && fs.existsSync(result.mp4) && ffRuns.length === 1 && ffRuns[0].bin === '/opt/ffmpeg' && ffRuns[0].args.includes('libx264') && ffRuns[0].args.includes('aac'), 'ffmpeg found → trailer.mp4 (H.264 + the music as AAC)');
+    assert(path.dirname(result.path) === dir && /^trailer-[a-z0-9]+-[A-Za-z0-9]+\.webm$/.test(path.basename(result.path)) && fs.existsSync(result.path) && W.probeWebm(fs.readFileSync(result.path)).durationMs === 8000 && result.seconds === 8, 'trailer-<stamp>.webm in videos/trailers/The Ferry/ (8 s)');
+    assert(result.mp4 === result.path.replace(/\.webm$/, '.mp4') && fs.existsSync(result.mp4) && ffRuns.length === 1 && ffRuns[0].bin === '/opt/ffmpeg' && ffRuns[0].args.includes('libx264') && ffRuns[0].args.includes('aac'), 'ffmpeg found → trailer.mp4 (H.264 + the music as AAC)');
     assert(fs.readdirSync(path.join(dir, 'shots')).filter((x) => /\.mp4$/.test(x)).length === 3 && result.shots.length === 3 && result.shots.every((s) => !s.reused) && result.cards.length === 2, 'the three shots are kept with the trailer');
     const side = JSON.parse(fs.readFileSync(path.join(dir, 'trailer.json'), 'utf8'));
     assert(side.plan && side.plan.items.length === 5 && side.plan.music === music && Object.keys(side.shots).length === 3 && side.last.ok && side.last.seconds === 8, 'trailer.json keeps the plan, the shots and the result');
-    assert(!fs.existsSync(path.join(dir, 'trailer.part.webm')), 'no half-written file is left');
+    assert(!fs.readdirSync(dir).some((n) => /\.part\.webm$/.test(n)), 'no half-written file is left');
+    assert(side.last.path === result.path && side.last.mp4 === result.mp4, 'trailer.json points at this trailer\'s own file names');
     assert(maker.status().result.ok && maker.status().status.pct === 1 && maker.status().status.phase === 'done', 'status() after: done, 100 %, with the result');
     const ls = maker.list();
     assert(ls.items.length === 1 && ls.items[0].book === 'The Ferry' && ls.items[0].mp4 && ls.items[0].plan.items.length === 5, 'list(): the saved trailer with its plan');
@@ -193,7 +196,12 @@ async function main() {
   // resume: the same trailer again → nothing is rendered; one shot changed → only that one
   {
     const g0 = comfy.state.videoGraphs.length;
+    const firstFiles = [result.path, result.mp4];
+    fs.writeFileSync(path.join(path.dirname(result.path), 'trailer.webm'), 'an old-style trailer'); // from before the unique names
     const r = await maker.make(Object.assign({}, REQ, { wait: true }));
+    const tdir = path.dirname(r.path);
+    assert(r.ok && r.path !== firstFiles[0] && fs.existsSync(r.path) && firstFiles.every((f) => !fs.existsSync(f)) && !fs.existsSync(path.join(tdir, 'trailer.webm')) && fs.readdirSync(tdir).filter((n) => /^trailer.*\.(webm|mp4)$/.test(n)).length === 2, 'a new trailer gets a new name (the old one may be open in a player on Windows); the older files are deleted afterwards');
+    assert(maker.list().items[0].path === r.path && maker.list().items[0].mp4 === r.mp4 && maker.status().result.path === r.path, 'list() and status() name the new file');
     assert(r.ok && comfy.state.videoGraphs.length === g0 && r.reused === 3 && r.shots.every((s) => s.reused), 'the same trailer again: all 3 shots reused, nothing rendered (wait:true → the result)');
     const changed = JSON.parse(JSON.stringify(REQ)); changed.items[2].prompt = 'she waves'; changed.wait = true;
     const r2 = await maker.make(changed);
@@ -205,7 +213,7 @@ async function main() {
   {
     ffBin = null;
     const r = await maker.make(Object.assign({}, REQ, { wait: true }));
-    assert(r.ok && r.mp4 === null && r.warnings.some((w) => w.field === 'mp4' && /No ffmpeg was found/.test(w.message)) && !fs.existsSync(path.join(videos, 'trailers', 'The Ferry', 'trailer.mp4')), 'no ffmpeg → only the .webm, with a plain note (the old .mp4 is not left behind)');
+    assert(r.ok && r.mp4 === null && r.warnings.some((w) => w.field === 'mp4' && /No ffmpeg was found/.test(w.message)) && !fs.readdirSync(path.join(videos, 'trailers', 'The Ferry')).some((n) => /\.mp4$/.test(n)), 'no ffmpeg → only the .webm, with a plain note (the old .mp4 is not left behind)');
     ffBin = '/opt/ffmpeg';
     rec.fail = 'Shot 2 could not be read (media error 4).';
     const j = await maker.make(Object.assign({}, REQ, { wait: true }));
@@ -269,7 +277,7 @@ async function main() {
     const op = (n) => caps.operations.find((o) => o.name === n);
     assert(op('trailer.make').changes === true && op('trailer.status').changes === false && op('trailer.list').changes === false && op('trailer.cancel').changes === true && op('trailer.make').params.properties.items.items.properties.subtitle, 'make / cancel change things (a card first); status / list / plan are read-only; the schema describes shots and cards');
     let r = await api.call('trailer.make', { book: 'API', items: [{ text: 'API card', seconds: 1 }], wait: true, mp4: false });
-    assert(r.ok && r.seconds === 1 && /trailers.API.trailer\.webm$/.test(r.path), 'call("trailer.make", …) makes it');
+    assert(r.ok && r.seconds === 1 && /trailers.API.trailer-[a-z0-9]+-[A-Za-z0-9]+\.webm$/.test(r.path), 'call("trailer.make", …) makes it');
     r = await api.call('trailer.make', { book: 'API', items: [{ text: 'x' }], colour: 'red' });
     assert(r.error === 'INVALID_PARAM' && r.field === 'colour', 'an unknown parameter → INVALID_PARAM');
     r = await api.trailer.make({ book: 'API', itmes: [] });
@@ -305,7 +313,7 @@ async function main() {
     assert(busy.status === 409 && busy.json.error === 'BUSY', 'a second one while it runs → 409 BUSY');
     let st;
     for (let i = 0; i < 200; i++) { st = await req('GET', `/video/trailer?id=${id}`); if (st.json && st.json.status && !st.json.status.busy) break; await sleep(50); }
-    assert(st.status === 200 && st.json.result && st.json.result.ok && /Bridge Book.trailer\.webm$/.test(st.json.result.path) && comfy.state.videoGraphs.length === g0 + 1, 'GET /video/trailer?id= follows it to the finished trailer (path of trailer.webm)');
+    assert(st.status === 200 && st.json.result && st.json.result.ok && /Bridge Book.trailer-[a-z0-9]+-[A-Za-z0-9]+\.webm$/.test(st.json.result.path) && comfy.state.videoGraphs.length === g0 + 1, 'GET /video/trailer?id= follows it to the finished trailer (path of its trailer-<stamp>.webm)');
     assert(logs.some((l) => l.t === 'trailer-start' && l.d.from === 'bridge:akowe-trailer'), 'the log says who asked (bridge:akowe-trailer)');
     r = await req('GET', '/video/trailer?id=nope');
     assert(r.status === 404 && r.json.error === 'NOT_FOUND', 'an unknown id → 404 NOT_FOUND');

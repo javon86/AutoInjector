@@ -169,7 +169,9 @@ async function _downloadOnce(url, dest, opts) {
   const { res, req } = got;
   job.cancel = () => { job.cancelled = true; try { req.destroy(); } catch {} };
   if (job.cancelled) { try { req.destroy(); } catch {} return paused(); }
-  if (res.statusCode === 416 && opts.expectedSize && have === opts.expectedSize) { res.resume(); }
+  // 416 "range not satisfiable" for bytes=<have>-: the .part already holds the whole file. With a known size it must
+  // match; with no expected size, a non-empty .part is taken as complete (else it would get 416 on every try).
+  if (res.statusCode === 416 && have > 0 && (opts.expectedSize ? have === opts.expectedSize : true)) { res.resume(); }
   else if (res.statusCode === 200 && have) { have = 0; if (hash) hash.__reset = true; }
   else if (res.statusCode !== 200 && res.statusCode !== 206) { res.resume(); const code = `HTTP_${res.statusCode}`; return { ok: false, error: code, retryable: isRetryable(code), message: `The download server said ${res.statusCode}. Try again later.`, partial: have ? part : undefined }; }
   const total = res.statusCode === 206 ? have + Number(res.headers['content-length'] || 0) : Number(res.headers['content-length'] || opts.expectedSize || 0);
@@ -334,8 +336,14 @@ function findPortable(home) {
 function _portableAt(d) {
   if (!fs.existsSync(path.join(d, 'ComfyUI', 'main.py'))) return null;
   const py = ['python_embeded', 'python_embedded'].map((p) => path.join(d, p, process.platform === 'win32' || fs.existsSync(path.join(d, p, 'python.exe')) ? 'python.exe' : 'python')).find((p) => fs.existsSync(p)) || null;
-  return { root: d, comfy: path.join(d, 'ComfyUI'), python: py, models: path.join(d, 'ComfyUI', 'models') };
+  // complete: unpacked to the end (our marker, written after a successful extract) or — an install from before the
+  // marker existed — its Python is there. A cut-off unpack has ComfyUI/main.py but is not complete.
+  const marked = fs.existsSync(path.join(d, UNPACKED_MARKER));
+  return { root: d, comfy: path.join(d, 'ComfyUI'), python: py, models: path.join(d, 'ComfyUI', 'models'), complete: !!(marked || py) };
 }
+const UNPACKED_MARKER = '.autoinjector-unpacked';
+/** Installed = a portable ComfyUI that was unpacked to the end (see _portableAt). */
+function isInstalled(home) { const p = findPortable(home); return !!(p && p.complete); }
 function _scanPortable(home) {
   const cands = [home, path.join(home, 'ComfyUI_windows_portable')];
   try { for (const e of fs.readdirSync(home, { withFileTypes: true })) if (e.isDirectory()) cands.push(path.join(home, e.name)); } catch {}
@@ -365,7 +373,7 @@ function createInstaller(opts = {}) {
   let job = null;
   const onChange = opts.onChange || (() => {});
   function set(p) { st = Object.assign({}, st, p); try { onChange(status()); } catch {} }
-  function status() { return Object.assign({ home, installed: !!findPortable(home), busy: !!job }, st); }
+  function status() { return Object.assign({ home, installed: isInstalled(home), busy: !!job }, st); }
 
   let lastGpu = null;
   async function check() {
@@ -376,7 +384,8 @@ function createInstaller(opts = {}) {
     const free = freeBytes(home);
     const portable = findPortable(home);
     return {
-      ok: true, platform, supported: platform === 'win32' || !!opts.allowAnyPlatform, gpu, home, installed: !!portable, portable,
+      ok: true, platform, supported: platform === 'win32' || !!opts.allowAnyPlatform, gpu, home, installed: !!(portable && portable.complete), portable,
+      unfinished: !!(portable && !portable.complete), // unpacking was cut off: Install unpacks it again (from the kept download)
       freeBytes: free, needBytes: need, enoughSpace: free == null ? null : free >= need,
       spaceMessage: free == null ? 'Could not check the free disk space.' : `Needs about ${fmtBytes(need)} free (about 4 GB for ComfyUI plus 2–7 GB per model); this drive has ${fmtBytes(free)} free.`,
       models: Object.values(models).map((m) => ({ id: m.id, label: m.label, file: m.file, approxBytes: m.approxBytes, base: m.base })),
@@ -419,6 +428,7 @@ function createInstaller(opts = {}) {
       const x = await extract(archive, dest, { spawn: deps.spawn, sevenZip: opts.sevenZip, tar: opts.tar, env: opts.env });
       if (!x.ok) { set({ phase: 'failed', error: x.error, message: x.message }); log('sd-install-extract-failed', { detail: x.detail }); return x; }
       const found = _scanPortable(dest);
+      if (found) { try { fs.writeFileSync(path.join(found.root, UNPACKED_MARKER), JSON.stringify({ at: new Date().toISOString(), build, tool: x.tool }) + '\n'); } catch {} found.complete = true; }
       if (!found) { const r = { ok: false, error: 'NOT_FOUND_AFTER_EXTRACT', message: 'ComfyUI was unpacked, but its main.py was not found where expected. Open the folder and check, or press Install again.' }; set({ phase: 'failed', error: r.error, message: r.message }); return r; }
       // The archive is our own download; it is safe to remove now that it is unpacked.
       try { fs.unlinkSync(archive); } catch {}
@@ -501,4 +511,4 @@ function createInstaller(opts = {}) {
   return { status, check, install, downloadModel, cancel, home, portable: () => findPortable(home), currentBuild, otherBuild, useOtherBuild, useBuild, gpu: () => lastGpu };
 }
 
-module.exports = { createInstaller, detectGpu, chooseBuild, download, extract, find7z, findPortable, readBuilds, linkModels, OTHER_BUILD, BUILD_FILE, freeBytes, defaultHome, fmtBytes, BUILDS, STARTER_MODELS, GITHUB_API, DOWNLOAD_BASE, isRetryable, RETRY_DELAYS_MS, MAX_TRIES, STALL_MS };
+module.exports = { createInstaller, detectGpu, chooseBuild, download, extract, find7z, findPortable, isInstalled, UNPACKED_MARKER, readBuilds, linkModels, OTHER_BUILD, BUILD_FILE, freeBytes, defaultHome, fmtBytes, BUILDS, STARTER_MODELS, GITHUB_API, DOWNLOAD_BASE, isRetryable, RETRY_DELAYS_MS, MAX_TRIES, STALL_MS };

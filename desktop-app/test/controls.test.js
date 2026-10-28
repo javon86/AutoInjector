@@ -271,6 +271,36 @@ async function testUtilityPanelHeadingCollapses() {
   assert(!!doc.getElementById("tab-systemai"), "a tab appears in the top strip when collapsed");
 }
 
+async function testButlerFoldsInPlace() {
+  console.log("\n== 🎩 Butler section: folds in place to one line; starts folded once Alfred's AI is set up ==");
+  // Not set up yet: open, so the setup buttons are right there.
+  let api = makeApi();
+  api.llmStatus = async () => ({ ok: true, ollama: { installed: false }, models: [], alfred: { model: "qwen2.5:7b" } });
+  let dom = await loadWindow(api);
+  let doc = dom.window.document;
+  assert(!doc.getElementById("col-systemai").classList.contains("hidden-collapsed"), "not set up yet: the Butler section starts open");
+  click(dom, "btn-collapse-systemai");
+  const panel = doc.getElementById("col-systemai");
+  assert(panel.classList.contains("hidden-collapsed"), "▾ folds it");
+  const open = doc.getElementById("tab-systemai");
+  assert(!!open && panel.contains(open) && !doc.getElementById("top-tab-strip").contains(open), "the ▸ Open button sits on the Butler's own line, not in the top strip");
+  assert(dom.window.localStorage.getItem("butler-folded") === "1", "the choice is remembered");
+  click(dom, "btn-collapse-systemai");
+  assert(!panel.classList.contains("hidden-collapsed") && !doc.getElementById("tab-systemai"), "▸ opens it again (the same button toggles)");
+  click(dom, "btn-collapse-systemai");
+  click(dom, "tab-systemai");
+  assert(!panel.classList.contains("hidden-collapsed"), "▸ Open opens it too");
+  // Set up (Ollama installed + his model downloaded), no choice made yet: folded.
+  api = makeApi();
+  api.llmStatus = async () => ({ ok: true, ollama: { installed: true }, models: [{ name: "qwen2.5:7b" }], alfred: { model: "qwen2.5:7b" } });
+  dom = await loadWindow(api);
+  dom.window.localStorage.removeItem("butler-folded");
+  dom = await loadWindow(api);
+  doc = dom.window.document;
+  await new Promise((r) => setTimeout(r, 20));
+  assert(doc.getElementById("col-systemai").classList.contains("hidden-collapsed"), "Alfred's AI is set up: the Butler section starts folded to one line");
+}
+
 async function testWindowTitlebarCollapse() {
   console.log("\n== Automation window titlebar collapse ==");
   const api = makeApi();
@@ -1266,6 +1296,7 @@ async function testLockerBrowser() {
 async function main() {
   await testPaneCollapseToggle();
   await testUtilityPanelHeadingCollapses();
+  await testButlerFoldsInPlace();
   await testWindowTitlebarCollapse();
   await testHouseRuleStopConfirmation();
   await testNoRoundtableDropdownOption();

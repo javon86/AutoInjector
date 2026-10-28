@@ -50,11 +50,16 @@
     body.window-collapsed #images-tab { display:none; }
     #images-tab { flex:1 1 auto; min-height:0; display:flex; flex-direction:column; background:#101010; }
     #images-tab[hidden] { display:none; }
-    #sd-bar { flex:0 0 auto; display:flex; align-items:center; gap:6px; flex-wrap:wrap; padding:6px 10px; background:#151515; border-bottom:1px solid #2a2a2a; font-size:12px; }
-    #sd-bar button, #sd-bar input, #sd-bar select { font-size:12px; padding:3px 8px; }
-    #sd-url { width:210px; }
-    #sd-status { display:inline-flex; align-items:center; gap:6px; font-weight:600; max-width:520px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-    #sd-bar .spacer { flex:1 1 auto; }
+    /* Row 1: status (left) + the view tabs (right). Row 2 (#sd-conn): the address and connect / start buttons. */
+    #images-tab, #video-tab { accent-color:#8a6cf0; }
+    #sd-bar { flex:0 0 auto; display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:6px 10px; background:#151515; font-size:12px; }
+    #sd-bar button, #sd-bar input, #sd-bar select, #sd-conn button, #sd-conn input { font-size:12px; padding:3px 8px; }
+    #sd-conn { flex:0 0 auto; display:flex; align-items:center; gap:6px; flex-wrap:wrap; padding:0 10px 6px; background:#151515; border-bottom:1px solid #2a2a2a; font-size:12px; }
+    #sd-url { width:240px; min-width:0; flex:0 1 240px; }
+    #sd-status { display:inline-flex; align-items:center; gap:6px; font-weight:600; flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    #sd-status-text { overflow:hidden; text-overflow:ellipsis; }
+    #sd-bar .spacer { flex:1 1 0; }
+    #sd-bar [role="tablist"], #vd-bar [role="tablist"] { flex:0 0 auto; }
     .sd-subtab { border-radius:6px; border:1px solid #2a2a2a; background:#151515; color:#cfcfcf; cursor:pointer; }
     .sd-subtab[aria-selected="true"] { background:#22202e; border-color:#5a4ca0; color:#f0ecff; }
     #sd-hint { margin:8px 10px 0; padding:9px 12px; border:1px solid #6b5a2a; background:#1d1a10; border-radius:8px; font-size:12.5px; line-height:1.5; white-space:pre-line; }
@@ -64,7 +69,8 @@
     .sd-view { flex:1 1 auto; min-height:0; overflow:auto; padding:10px; }
     .sd-view[hidden] { display:none !important; }
     .sd-badges { display:flex; gap:4px; flex-wrap:wrap; align-items:center; }
-    #sd-view-generate { display:grid; grid-template-columns:minmax(300px, 420px) 1fr; gap:12px; align-items:start; }
+    #sd-view-generate { display:grid; grid-template-columns:minmax(320px, 440px) minmax(0, 1fr); gap:12px; align-items:start; }
+    @media (min-width:1600px) { #sd-view-generate { grid-template-columns:520px minmax(0, 1fr); } }
     @media (max-width:820px) { #sd-view-generate { grid-template-columns:1fr; } }
     .sd-card { background:#171717; border:1px solid #2a2a2a; border-radius:8px; padding:9px 11px; }
     .sd-card h3 { font-size:11px; margin:0 0 6px; text-transform:uppercase; letter-spacing:.04em; opacity:.75; }
@@ -73,6 +79,17 @@
     .sd-row { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
     .sd-row > * { flex:1 1 0; min-width:0; }
     .sd-row > .sd-fixed { flex:0 0 auto; }
+    /* A row of action buttons: natural width, left-aligned (no stretched buttons on wide screens). */
+    .sd-actions { display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin-top:8px; }
+    .sd-actions > button { flex:0 0 auto; min-width:96px; }
+    .sd-card h3.sd-h-gap { margin-top:14px; }
+    /* Pause buttons only show while something downloads. */
+    #btn-sd-install-cancel:disabled, #btn-vd-dl-cancel:disabled { display:none; }
+    #vd-dl-progress[hidden], #sd-install-progress[hidden] { display:none; }
+    /* The main button of a form (Generate / Make video / Make trailer) + its progress bar stay in view while the form scrolls. */
+    .sd-gobar { position:sticky; bottom:-10px; z-index:5; margin:8px -11px 0; padding:8px 11px 10px; background:#171717; border-top:1px solid #242424; }
+    .sd-gobar .sd-row > button.primary { padding-top:6px; padding-bottom:6px; font-weight:600; }
+    .sd-gobar #sd-progress, .sd-gobar #vd-progress, .sd-gobar #vd-tr-progress { margin:6px 0 0; }
     .sd-slider { display:grid; grid-template-columns:62px 1fr 46px; gap:6px; align-items:center; font-size:11.5px; margin:3px 0; }
     .sd-slider span { text-align:right; font-variant-numeric:tabular-nums; }
     #sd-lora-chips { display:flex; flex-wrap:wrap; gap:5px; margin:5px 0; min-height:4px; }
@@ -131,9 +148,11 @@
     #sd-vae-warn[hidden] { display:none; }
     #sd-final-prompt { font-size:11px; opacity:.6; word-break:break-word; margin-top:3px; }
     #sd-preview { display:block; max-width:100%; max-height:62vh; margin:0 auto; border-radius:6px; border:1px solid #2a2a2a; }
+    #sd-preview[hidden] { display:none; }
     #sd-preview-empty { padding:40px 12px; text-align:center; opacity:.5; border:1px dashed #2a2a2a; border-radius:8px; }
     #sd-preview-info { font-size:11.5px; opacity:.8; margin-top:6px; white-space:pre-wrap; word-break:break-word; }
     #sd-gallery { display:grid; grid-template-columns:repeat(auto-fill, minmax(92px, 1fr)); gap:6px; margin-top:8px; }
+    #sd-gallery:empty::before { content:'No pictures yet.'; grid-column:1 / -1; font-size:12px; opacity:.55; }
     #sd-gallery img { width:100%; aspect-ratio:1; object-fit:cover; border-radius:5px; border:1px solid #2a2a2a; cursor:pointer; }
     #sd-gallery img:focus-visible, .sd-libcard:focus-visible { outline:2px solid #7c5ce0; }
     #sd-lib-tools { display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin-bottom:8px; }
@@ -151,7 +170,12 @@
     #sd-lib-editor[hidden] { display:none; }
     #sd-lib-folders { font-size:11.5px; margin-bottom:8px; }
     #sd-lib-folders li { margin:2px 0; word-break:break-all; }
-    #sd-lock-wrap { display:grid; grid-template-columns:minmax(200px, 260px) 1fr; gap:10px; align-items:start; }
+    #sd-lock-wrap { display:grid; grid-template-columns:minmax(200px, 260px) minmax(0, 820px); gap:10px; align-items:start; }
+    #sd-view-locks > p.sd-small { max-width:1090px; }
+    /* Setup pages (🎨 Start & install, 🎬 Setup & models): cards side by side when there is room, instead of one narrow column. */
+    #sd-view-setup:not([hidden]), #vd-view-setup:not([hidden]) { display:grid; grid-template-columns:repeat(auto-fill, minmax(540px, 1fr)); gap:10px; align-items:start; align-content:start; }
+    #sd-view-setup > .sd-card, #vd-view-setup > .sd-card { max-width:none !important; margin-top:0 !important; min-width:0; }
+    @media (max-width:1180px) { #sd-view-setup:not([hidden]), #vd-view-setup:not([hidden]) { grid-template-columns:minmax(0, 760px); } }
     @media (max-width:820px) { #sd-lock-wrap { grid-template-columns:1fr; } }
     .sd-lockitem { padding:6px 8px; border:1px solid #2a2a2a; border-radius:6px; margin-bottom:5px; cursor:pointer; background:#171717; }
     .sd-lockitem[aria-selected="true"] { border-color:#7c5ce0; }
@@ -302,8 +326,11 @@
     /* ---- Phone companion panel (User Panel) ---- */
     /* ISS-012: float the panel over the zone to the right instead of adding a
        flex column to #up-zone-actions (which squeezed Compose/Messages). */
-    .phone-panel { position:absolute; top:4px; bottom:4px; left:100%; width:340px; z-index:7; overflow:auto;
+    .phone-panel { position:absolute; inset:0; z-index:7; overflow:auto;
       box-sizing:border-box; padding:8px 9px; background:#0c1016; border:1px solid #26303c; border-radius:8px; }
+    .phone-head { display:flex; align-items:center; justify-content:space-between; margin:0 0 4px; }
+    .phone-close { background:none; border:1px solid transparent; border-radius:6px; color:inherit; font-size:12px; line-height:1; min-height:20px; padding:2px 6px; opacity:.85; cursor:pointer; }
+    .phone-close:hover { opacity:1; background:#2a2a2a; border-color:#3a3a3a; }
     .phone-lan-row { display:flex; align-items:center; gap:7px; font-size:12px; font-weight:600; cursor:pointer; }
     .phone-hint { font-size:11px; opacity:.75; margin:6px 0; }
     .phone-url { width:100%; box-sizing:border-box; font-size:11px; padding:6px 7px; border-radius:6px;
@@ -328,20 +355,39 @@
     /* ---- The User Panel stays put at the top; everything below scrolls past
        it. (Native AI panes float above HTML, so they're kept inside the fixed
        butler unit rather than a scroll region.) ---- */
-    #col-userpanel { position:sticky; top:0; z-index:6; }
+    /* top:-12px = minus #wrap's top padding, so the panel sticks flush under the title bar and
+       nothing scrolling past peeks out above it. */
+    #col-userpanel { position:sticky; top:-12px; z-index:6; box-shadow:0 6px 10px -6px rgba(0,0,0,.8); }
+    /* Narrow page (a small window, or 🎩 Alfred's panel open beside a laptop-size one): the User Panel
+       never cuts its buttons or the Terminal off at the right edge — the Terminal moves to its own row
+       under Compose + buttons, and the panel stops sticking so it doesn't fill half the screen. */
+    #wrap { container-type:inline-size; container-name:mainpage; }
+    @container mainpage (max-width: 1000px) {
+      #up-zone-compose { flex:1 1 160px; min-width:150px; }
+      #up-zone-messages { min-width:230px; }
+    }
+    @container mainpage (max-width: 860px) {
+      #col-userpanel { flex-wrap:wrap; position:relative; top:auto; }
+      #up-zone-compose { flex:1 1 180px; min-width:160px; }
+      #up-zone-actions { flex:0 1 auto; min-width:0; }
+      #up-actions-extra { grid-template-columns:repeat(3, minmax(0, 1fr)); }
+      #up-zone-messages { flex:1 1 100%; height:190px; border-left:0; border-top:1px solid #2a2a2a; }
+    }
 
-    /* ---- Butler unit: the butler bar + the three AI panes read as ONE bordered
-       block — he sits on top and controls the three beneath him. ---- */
-    /* Order within #wrap (a flex column): the butler unit sits directly under
-       the sticky User Panel; the other utility panels and the log follow it. */
+    /* Order within #wrap (a flex column), for someone who mainly talks to the three AIs:
+       the sticky User Panel, then the three AI windows, then the 🎩 Butler section (folds to
+       one line once set up) + 📚 Akọwe bridge, the utility panels, the Activity Log and,
+       last, the conversation (transcript) buttons. */
     #top-tab-strip { order:-1; }
     #col-userpanel { order:0; }
-    #butler-unit { order:1; }
-    #panels-grid { order:2; }
-    #main-row { order:3; }
-    #butler-unit { border:1px solid #2a4a34; border-radius:11px; background:#0a0f0b; padding:5px; margin:0 0 12px; display:flex; flex-direction:column; gap:0; }
-    #butler-unit > #col-systemai { margin:0; border-bottom-left-radius:0; border-bottom-right-radius:0; }
-    #butler-unit > #ai-row { margin:0; }
+    #collapsed-strip { order:1; }
+    #ai-row { order:2; }
+    #butler-unit { order:3; }
+    #panels-grid { order:4; }
+    #main-row { order:5; }
+    #exportbar { order:6; }
+    #butler-unit { display:flex; flex-direction:column; gap:12px; flex:0 0 auto; }
+    #butler-unit > #col-systemai, #butler-unit > #col-akowe { margin:0; }
 
     /* ---- Butler capability reel: a live ticker of each capability as it runs. ---- */
     #cap-reel { display:none; gap:6px; overflow-x:auto; padding:5px 2px; margin:4px 0 2px; }
@@ -389,6 +435,7 @@
     .ex-scope .t { font-weight:600; }
     .ex-scope .why { display:block; opacity:.72; font-size:11.5px; margin:2px 0 0 22px; }
     .ex-scope .opts { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin:6px 0 0 22px; }
+    .ex-scope .opts[hidden] { display:none; } /* no empty book picker when no book is known */
     .ex-scope .opts select, .ex-scope .opts input { font-size:12px; max-width:100%; min-width:0; }
     .ex-warn { display:block; color:#ffb4b4; font-size:11.5px; margin:3px 0 0 22px; }
     .ex-scope.sel .ex-warn { color:#ff8a8f; font-weight:600; }
@@ -429,16 +476,22 @@
        (break-inside:avoid) and balance them across as many ~300px columns as fit. */
     /* Column basis chosen so the utility panels fill the width as whole columns
        (no lopsided empty column on the right) across the usual window sizes. */
-    #panels-grid { column-width: 440px; column-gap: 12px; flex:0 0 auto; }
+    #panels-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(290px, 1fr)); gap:12px; align-items:start; flex:0 0 auto; }
     #panels-grid:empty { display:none; }
-    #panels-grid > .yc-panel { display:inline-block; width:100%; margin:0 0 12px; break-inside:avoid; vertical-align:top; }
+    #panels-grid > .yc-panel { width:100%; margin:0; min-width:0; }
 
     /* Butler bar: a full-width band that sits directly ON TOP of the three AI
        panes (it's a sibling right before #ai-row), so the butler visibly
        oversees them. Chat is full-width on top; his tools sit underneath. */
-    .butler-bar { flex:0 0 auto; margin:0 0 8px; border:1px solid #2f6b45; border-radius:10px; background:#0e140f; box-shadow:0 1px 0 #163a26 inset; }
-    .butler-bar > .yc-head { border-bottom:1px solid #1c3a28; padding-bottom:5px; margin-bottom:6px; }
-    .butler-bar > .yc-head h2 { color:#8ef0b0; letter-spacing:.01em; }
+    .butler-bar { flex:0 0 auto; margin:0; padding:8px 12px 10px; border:1px solid #2f6b45; border-radius:8px; background:#0e140f; }
+    .butler-bar > .yc-head { border-bottom:1px solid #1c3a28; padding-bottom:6px; margin-bottom:8px; }
+    .butler-bar > .yc-head h2 { color:#8ef0b0; letter-spacing:.01em; font-size:14px; font-weight:700; }
+    .butler-bar .butler-sub { font-size:11.5px; opacity:.7; }
+    /* Folded (once set up, or by the ▾ button): ONE line in place — never hidden away. */
+    #col-systemai.hidden-collapsed { display:block; padding-bottom:8px; }
+    #col-systemai.hidden-collapsed > .yc-head { border-bottom:none; padding-bottom:0; margin-bottom:0; }
+    #col-systemai:not(.hidden-collapsed) .butler-sub, #col-systemai:not(.hidden-collapsed) #tab-systemai { display:none; }
+    #tab-systemai { font-size:12px; padding:3px 10px; }
     /* Two-thirds (everything: goal + controls) on the left, one-third (the
        chat window) on the right. flex:2 vs flex:1 = the 2/3 · 1/3 split. */
     .butler-body.butler-body { display:flex; flex-direction:row; gap:12px; align-items:stretch; }
@@ -453,13 +506,13 @@
     /* Friendlier idle state: centre a short, welcoming hint instead of a flat line. */
     .butler-chat-log:empty { align-items:center; justify-content:center; text-align:center; }
     .butler-chat-log:empty::before {
-      content:"🎩  Alfred is standing by.\A\ATalk to him in his side panel (◂ Panel, or Ctrl+Shift+A).\AWhat he does shows up here.";
+      content:"🎩  Alfred is standing by.\A\ATurn him on with 🎩 Alfred (top right), then talk to him in his side panel (Ctrl+Shift+A).\AWhat he does shows up here.";
       white-space:pre-line; opacity:.5; max-width:34ch; font-family:system-ui, sans-serif; font-size:12px; line-height:1.6;
     }
     .butler-chat-log > div { padding:2px 0; border-bottom:1px solid #141414; }
     .butler-chat-log > div:last-child { border-bottom:none; }
     /* Controls under the goal box (still on the 2/3 side): a tidy row of cards. */
-    #butler-controls { width:100%; border-top:1px solid #1c3a28; padding-top:10px; margin-top:9px; display:flex; flex-wrap:wrap; gap:10px 12px; align-items:flex-start; }
+    #butler-controls { width:100%; display:flex; flex-wrap:wrap; gap:10px 12px; align-items:flex-start; }
     #butler-controls > p { flex:1 1 100%; margin:0 0 2px; }
     /* The "run & check" block spans the full 2/3 column as the primary surface,
        sitting above the settings cards. */
@@ -603,7 +656,8 @@
        adding more panels makes the whole #wrap scroll (it is overflow:auto)
        instead of crushing the panes. The floor is lifted when every pane is
        collapsed (see the .all-collapsed rule below) so no dead space is left. */
-    #ai-row { display:flex; flex-direction:column; gap:8px; flex:1 1 auto; min-height:427px; transition: flex-basis .2s ease; }
+    /* flex-shrink 0: in the scrolling #wrap the row must never be squeezed shorter than its panes. */
+    #ai-row { display:flex; flex-direction:column; gap:8px; flex:1 0 auto; min-height:427px; transition: flex-basis .2s ease; }
     #expanded-strip { display:flex; gap:8px; flex:1 1 auto; min-height:0; }
     /* All three AI panes collapsed = #expanded-strip is empty and would
        otherwise still claim its flex-grow share of #ai-row's height as dead
@@ -674,6 +728,29 @@
     }
     .zoom-level { font-size:11px; opacity:.78; min-width:34px; text-align:center; }
     .ai-col.state-min .zoom-btn, .ai-col.state-min .zoom-level { display:none; }
+    /* Narrow AI columns (small windows, ~1024px): keep every header button on one line instead of
+       cutting ⟳ reload and ⌄ fold off the right edge — tighter gaps, and the name can shorten. */
+    .ai-col:not(.state-min) { container-type:inline-size; }
+    .ai-col:not(.state-min) .card-head > .pane-name { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    @container (max-width: 460px) {
+      .card-head { gap:2px; }
+      .card-head .zoom-btn, .card-head .pick-btn, .card-head .login-btn, .card-head .inspect-btn, .card-head .reload-btn { padding:3px 2px; min-width:22px; }
+      .card-head .collapse-btn { padding:3px 3px; min-width:22px; }
+      .card-head .zoom-level { min-width:28px; }
+      .card-head > .pane-name { margin:0 3px; }
+    }
+    @container (max-width: 320px) {
+      .card-head .zoom-btn, .card-head .pick-btn, .card-head .login-btn, .card-head .inspect-btn, .card-head .reload-btn { padding:3px 1px; min-width:20px; }
+      .card-head .collapse-btn { padding:3px 1px; min-width:20px; }
+      .card-head .zoom-level { min-width:0; font-size:10.5px; }
+      .card-head { gap:1px; }
+    }
+    /* very narrow (🎩 panel open on a ~1024px window): the buttons go to a second line in all three
+       columns alike, so the three AI pages still start at the same height */
+    @container (max-width: 240px) {
+      .card-head { flex-wrap:wrap; row-gap:2px; }
+      .card-head > .spacer { flex:0 0 100%; height:0; }
+    }
     .pick-menu { display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin:0 0 6px; font-size:11px; }
     .pick-menu.collapsed { display:none; }
     .pick-menu button { font-size:11px; padding:2px 6px; }
@@ -736,7 +813,7 @@
     .locker-tabs button { font-size:11px; padding:1px 7px; border-radius:5px; opacity:.7; }
     .locker-tabs button.active { opacity:1; border-color:#2d4a37; color:#8ef0b0; }
     .locker-tabs .lk-refresh { padding:1px 5px; }
-    .locker-list { height:96px; overflow-y:auto; overflow-x:hidden; background:#0e0e0e; border:1px solid #2a2a2a; border-radius:6px; padding:3px; display:flex; flex-direction:column; gap:1px; }
+    .locker-list { height:76px; overflow-y:auto; overflow-x:hidden; background:#0e0e0e; border:1px solid #2a2a2a; border-radius:6px; padding:3px; display:flex; flex-direction:column; gap:1px; }
     .locker-list:empty::after { content:"Empty — files this AI saves (or gets sent) show up here."; opacity:.6; font-size:11px; padding:4px 6px; }
     .lk-row { display:flex; align-items:center; gap:6px; font-size:11.5px; padding:2px 6px; border-radius:4px; cursor:pointer; border:none; background:none; color:inherit; text-align:left; width:100%; }
     .lk-row:hover, .lk-row:focus { background:#1a2a1f; outline:none; }
@@ -760,7 +837,8 @@
     .sai-sec > summary::before { content:"▸ "; opacity:.6; }
     .sai-sec[open] > summary::before { content:"▾ "; }
 
-    .pane-slot { flex:1 1 auto; min-height:280px; background:#0b0b0b; border-top:1px solid #2a2a2a; }
+    /* The AI's real web page is laid over this slot. 350px = 25% taller than the old 280px floor. */
+    .pane-slot { flex:1 1 auto; min-height:350px; background:#0b0b0b; border-top:1px solid #2a2a2a; }
     .ai-col.disabled .pane-slot { flex:0 0 0; min-height:0; }
 
     #main-row { display:flex; gap:8px; flex:0 0 220px; min-height:0; transition: flex-basis .2s ease; }
@@ -794,7 +872,8 @@
     #log-filters input { margin:0; }
     #btn-log-clear { font-size:11px; padding:2px 8px; }
 
-    #exportbar { display:flex; gap:8px; align-items:center; flex:0 0 auto; }
+    #exportbar { display:flex; gap:8px; align-items:center; flex:0 0 auto; flex-wrap:wrap; padding:7px 12px; }
+    #exportbar .exp-label { font-size:11px; text-transform:uppercase; letter-spacing:.04em; opacity:.75; margin-right:4px; }
 
     select, input, textarea, button { background:#1a1a1a; color:#eee; border:1px solid #333; border-radius:6px; padding:4px 6px; font-family:inherit; font-size:11px; }
     button { cursor:pointer; }
@@ -1104,15 +1183,17 @@
     body.window-collapsed #video-tab { display:none; }
     #video-tab { flex:1 1 auto; min-height:0; display:flex; flex-direction:column; background:#101010; }
     #video-tab[hidden] { display:none; }
-    #vd-bar { flex:0 0 auto; display:flex; align-items:center; gap:6px; flex-wrap:wrap; padding:6px 10px; background:#151515; border-bottom:1px solid #2a2a2a; font-size:12px; }
+    #vd-bar { flex:0 0 auto; display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:6px 10px; background:#151515; border-bottom:1px solid #2a2a2a; font-size:12px; }
     #vd-bar button { font-size:12px; padding:3px 8px; }
-    #vd-bar .spacer { flex:1 1 auto; }
-    #vd-status { display:inline-flex; align-items:center; gap:6px; font-weight:600; max-width:640px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    #vd-bar .spacer { flex:1 1 0; }
+    #vd-status { display:inline-flex; align-items:center; gap:6px; font-weight:600; flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    #vd-status-text { overflow:hidden; text-overflow:ellipsis; }
     #vd-hint { margin:8px 10px 0; padding:9px 12px; border:1px solid #6b5a2a; background:#1d1a10; border-radius:8px; font-size:12.5px; line-height:1.5; white-space:pre-line; }
     #vd-hint[hidden] { display:none; }
     #vd-hint[data-tone="error"] { border-color:#6b3a3a; background:#1d1212; }
     #vd-hint[data-tone="ok"] { border-color:#2d5a3a; background:#101d14; }
-    #vd-view-make { display:grid; grid-template-columns:minmax(300px, 440px) 1fr; gap:12px; align-items:start; }
+    #vd-view-make { display:grid; grid-template-columns:minmax(320px, 440px) minmax(0, 1fr); gap:12px; align-items:start; }
+    @media (min-width:1600px) { #vd-view-make { grid-template-columns:520px minmax(0, 1fr); } }
     @media (max-width:820px) { #vd-view-make { grid-template-columns:1fr; } }
     #vd-mode-row { display:flex; gap:6px; margin-bottom:6px; }
     #vd-mode-row button[aria-pressed="true"] { background:#22202e; border-color:#5a4ca0; color:#f0ecff; }
@@ -1174,6 +1255,9 @@
     .vd-model .vd-model-head { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
     .vd-model .vd-model-head b { flex:1 1 auto; }
     .vd-model .sd-note { font-size:11px; opacity:.7; margin-top:3px; }
+    #vd-ep-clip { gap:6px 8px; }
+    #vd-ep-clip > div { flex:1 1 64px; min-width:56px; }
+    #vd-ep-clip input { width:100% !important; }
 
     @media (max-width:620px) {
       .bf-exp { display:none; }
@@ -1221,6 +1305,15 @@
   <div id="images-tab" role="tabpanel" aria-labelledby="tab-app-images" hidden>
     <div id="sd-bar">
       <span id="sd-status" role="status" aria-live="polite"><span id="sd-dot" class="ak-dot" data-tone="off" aria-hidden="true"></span><span id="sd-status-text">Not connected</span></span>
+      <span class="spacer"></span>
+      <div role="tablist" aria-label="Images views" class="sd-row">
+        <button class="sd-subtab sd-fixed" id="sd-sub-generate" role="tab" aria-selected="true" aria-controls="sd-view-generate">🖌 Generate</button>
+        <button class="sd-subtab sd-fixed" id="sd-sub-library" role="tab" aria-selected="false" aria-controls="sd-view-library">📚 Library</button>
+        <button class="sd-subtab sd-fixed" id="sd-sub-locks" role="tab" aria-selected="false" aria-controls="sd-view-locks">🔒 Character locks</button>
+        <button class="sd-subtab sd-fixed" id="sd-sub-setup" role="tab" aria-selected="false" aria-controls="sd-view-setup">⚙ Start &amp; install</button>
+      </div>
+    </div>
+    <div id="sd-conn" role="group" aria-label="Connect to Stable Diffusion">
       <input type="text" id="sd-url" placeholder="http://127.0.0.1:7860" aria-label="Stable Diffusion address" title="Where your SD app serves its API — Forge/A1111 usually :7860, ComfyUI :8188">
       <button id="btn-sd-find" title="Look on this PC for Forge, A1111, reForge, SD.Next or ComfyUI">🔍 Find my SD app</button>
       <button id="btn-sd-connect" class="primary" title="Connect to the address on the left">Connect</button>
@@ -1228,13 +1321,6 @@
       <button id="btn-sd-openui" title="Open your SD app's own page in the browser">Open SD UI ↗</button>
       <button id="btn-sd-run" hidden title="AutoInjector starts it hidden, with the API on, and looks after it">▶ Start</button>
       <button id="btn-sd-halt" hidden title="Stop the Stable Diffusion that AutoInjector started">⏹ Stop SD</button>
-      <span class="spacer"></span>
-      <div role="tablist" aria-label="Images views" class="sd-row" style="flex:0 0 auto;">
-        <button class="sd-subtab sd-fixed" id="sd-sub-generate" role="tab" aria-selected="true" aria-controls="sd-view-generate">🖌 Generate</button>
-        <button class="sd-subtab sd-fixed" id="sd-sub-library" role="tab" aria-selected="false" aria-controls="sd-view-library">📚 Library</button>
-        <button class="sd-subtab sd-fixed" id="sd-sub-locks" role="tab" aria-selected="false" aria-controls="sd-view-locks">🔒 Character locks</button>
-        <button class="sd-subtab sd-fixed" id="sd-sub-setup" role="tab" aria-selected="false" aria-controls="sd-view-setup">⚙ Start &amp; install</button>
-      </div>
     </div>
     <div id="sd-hint" role="note" hidden></div>
 
@@ -1386,11 +1472,13 @@
             <div class="sd-note" id="sd-wf-msg"></div>
           </div></details>
         </div>
-        <div class="sd-row" style="margin-top:8px;">
-          <button id="btn-sd-generate" class="primary">🎨 Generate</button>
-          <button id="btn-sd-stop" class="sd-fixed" disabled>⏹ Stop</button>
+        <div class="sd-gobar">
+          <div class="sd-row">
+            <button id="btn-sd-generate" class="primary">🎨 Generate</button>
+            <button id="btn-sd-stop" class="sd-fixed" disabled>⏹ Stop</button>
+          </div>
+          <div id="sd-progress" aria-hidden="true"><div id="sd-progress-bar"></div></div>
         </div>
-        <div id="sd-progress" aria-hidden="true"><div id="sd-progress-bar"></div></div>
         <div id="sd-msg" role="status" aria-live="polite"></div>
         <div id="sd-error" role="alert" hidden>
           <div id="sd-error-msg" class="sd-err-title"></div>
@@ -1405,13 +1493,13 @@
         <div id="sd-preview-empty">Your pictures appear here. They are saved in the <b>images/</b> folder with their settings, so any one can be made again.</div>
         <img id="sd-preview" alt="The selected picture" hidden>
         <div id="sd-preview-info"></div>
-        <div class="sd-row" style="margin-top:6px;">
+        <div class="sd-actions">
           <button id="btn-sd-remake" disabled title="Put this picture's exact settings (and seed) back into the form">♻ Remake</button>
           <button id="btn-sd-variation" disabled title="Same settings, new random seed">🎲 Variation</button>
           <button id="btn-sd-showfile" disabled title="Show the file in its folder">📂 Show file</button>
           <button id="btn-sd-folder" title="Open the images folder">🗂 Images folder</button>
         </div>
-        <h3 style="margin-top:10px;">Gallery</h3>
+        <h3 class="sd-h-gap">Gallery</h3>
         <div id="sd-gallery" aria-label="Recent pictures"></div>
       </div>
     </div>
@@ -1487,7 +1575,7 @@
           <button id="btn-sd-install-cancel" class="sd-fixed" disabled>⏸ Pause</button>
           <button id="btn-sd-install-folder" class="sd-fixed">📂 Open its folder</button>
         </div>
-        <div id="sd-install-progress" style="height:8px; background:#222; border-radius:4px; overflow:hidden; margin:6px 0 2px;"><div id="sd-install-bar" style="height:100%; width:0; background:linear-gradient(90deg,#2d6a4c,#57c07a); transition:width .3s;"></div></div>
+        <div id="sd-install-progress" hidden style="height:8px; background:#222; border-radius:4px; overflow:hidden; margin:6px 0 2px;"><div id="sd-install-bar" style="height:100%; width:0; background:linear-gradient(90deg,#2d6a4c,#57c07a); transition:width .3s;"></div></div>
         <div id="sd-install-msg" class="sd-small" role="status" aria-live="polite"></div>
         <div id="sd-model-pick" hidden style="margin-top:8px;">
           <label class="sd-l">Starter model (goes into ComfyUI's models\checkpoints)</label>
@@ -1538,7 +1626,7 @@
           </div>
           <label class="sd-l" for="sd-lk-notes">Notes</label>
           <input type="text" id="sd-lk-notes">
-          <div class="sd-row" style="margin-top:8px;">
+          <div class="sd-actions">
             <button id="btn-sd-lk-save" class="primary">Save lock</button>
             <button id="btn-sd-lk-try" title="Make a portrait with this lock">🎨 Try a portrait</button>
             <button id="btn-sd-lk-delete" class="danger">Delete</button>
@@ -1607,11 +1695,13 @@
           <button class="sd-fixed" id="btn-vd-seed-last" title="Reuse the last video's seed">♻</button>
         </div>
         <div class="sd-note" id="vd-frames-note" style="font-size:11px;opacity:.65;margin-top:3px;"></div>
-        <div class="sd-row" style="margin-top:8px;">
-          <button id="btn-vd-generate" class="primary">🎬 Make video</button>
-          <button id="btn-vd-stop" class="sd-fixed" disabled>⏹ Stop</button>
+        <div class="sd-gobar">
+          <div class="sd-row">
+            <button id="btn-vd-generate" class="primary">🎬 Make video</button>
+            <button id="btn-vd-stop" class="sd-fixed" disabled>⏹ Stop</button>
+          </div>
+          <div id="vd-progress" aria-hidden="true"><div id="vd-progress-bar"></div></div>
         </div>
-        <div id="vd-progress" aria-hidden="true"><div id="vd-progress-bar"></div></div>
         <div id="vd-msg" role="status" aria-live="polite"></div>
         <div id="vd-error" role="alert" hidden>
           <div id="vd-error-msg" class="sd-err-title"></div>
@@ -1625,12 +1715,12 @@
         <div id="vd-player-empty">Your videos appear here. They are saved in the <b>videos/</b> folder with a poster picture and their settings.</div>
         <video id="vd-player" controls loop playsinline hidden></video>
         <div id="vd-player-info"></div>
-        <div class="sd-row" style="margin-top:6px;">
+        <div class="sd-actions">
           <button id="btn-vd-remake" disabled title="Put this video's settings (and seed) back into the form">♻ Remake</button>
           <button id="btn-vd-showfile" disabled title="Show the file in its folder">📂 Show file</button>
           <button id="btn-vd-folder" title="Open the videos folder">🗂 Videos folder</button>
         </div>
-        <h3 style="margin-top:10px;">Gallery</h3>
+        <h3 class="sd-h-gap">Gallery</h3>
         <div id="vd-gallery" aria-label="Recent videos"></div>
       </div>
     </div>
@@ -1661,11 +1751,13 @@
           <div><label class="sd-l" for="vd-tr-fade">Fades (seconds)</label><input type="number" id="vd-tr-fade" min="0" max="1" step="0.1" value="0.4"></div>
           <div><label class="sd-l" for="vd-tr-volume">Music volume</label><input type="range" id="vd-tr-volume" min="0" max="1" step="0.05" value="0.8"></div>
         </div>
-        <div class="sd-row" style="margin-top:8px;">
-          <button id="btn-vd-tr-make" class="primary">🎞 Make trailer</button>
-          <button id="btn-vd-tr-stop" class="sd-fixed" disabled>⏹ Stop</button>
+        <div class="sd-gobar">
+          <div class="sd-row">
+            <button id="btn-vd-tr-make" class="primary">🎞 Make trailer</button>
+            <button id="btn-vd-tr-stop" class="sd-fixed" disabled>⏹ Stop</button>
+          </div>
+          <div id="vd-tr-progress" aria-hidden="true"><div id="vd-tr-progress-bar"></div></div>
         </div>
-        <div id="vd-tr-progress" aria-hidden="true"><div id="vd-tr-progress-bar"></div></div>
         <div id="vd-tr-msg" role="status" aria-live="polite"></div>
         <div id="vd-tr-error" role="alert" hidden>
           <div id="vd-tr-error-msg" class="sd-err-title"></div>
@@ -1677,8 +1769,8 @@
         <div id="vd-tr-empty">Your trailer appears here. It is saved in <b>videos/trailers/&lt;book&gt;/</b> as trailer.webm (and trailer.mp4 when ffmpeg is on this PC).</div>
         <video id="vd-tr-player" controls playsinline hidden></video>
         <div id="vd-tr-info" style="font-size:11.5px;opacity:.8;margin-top:6px;white-space:pre-wrap;"></div>
-        <div class="sd-row" style="margin-top:6px;"><button id="btn-vd-tr-showfile" class="sd-fixed" disabled>📂 Show file</button></div>
-        <h3 style="margin-top:10px;">Saved trailers</h3>
+        <div class="sd-actions"><button id="btn-vd-tr-showfile" class="sd-fixed" disabled>📂 Show file</button></div>
+        <h3 class="sd-h-gap">Saved trailers</h3>
         <div id="vd-tr-list" aria-label="Saved trailers"></div>
       </div>
     </div>
@@ -1700,7 +1792,7 @@
       <div class="sd-card" style="max-width:760px;margin-top:10px;">
         <h3>2 · Video models</h3>
         <div id="vd-models"></div>
-        <div id="vd-dl-progress" aria-hidden="true"><div id="vd-dl-bar"></div></div>
+        <div id="vd-dl-progress" aria-hidden="true" hidden><div id="vd-dl-bar"></div></div>
         <div id="vd-dl-msg" role="status" aria-live="polite"></div>
         <button id="btn-vd-dl-resume" class="primary" hidden title="Continues from the part already downloaded — nothing is downloaded twice">↻ Resume download</button>
         <button id="btn-vd-dl-cancel" disabled>⏸ Pause / cancel download</button>
@@ -1784,19 +1876,6 @@
           <button id="btn-silence" class="danger grid-full" title="Stop the AIs messaging each other — halts Auto, House Rules, Sequences and the Butler at once (keeps your participants checked)" aria-label="Stop the AIs messaging each other — halts all relay at once">🛑 Stop AIs Talking</button>
           <span id="extract-status" class="grid-full" style="font-size:11px; opacity:.8;"></span>
         </div>
-        <div id="phone-panel" class="phone-panel" hidden aria-label="Phone connection">
-          <p class="zone-label" style="margin:2px 0 6px;">📱 Connect your phone</p>
-          <label class="phone-lan-row">
-            <input type="checkbox" id="phone-lan-toggle" />
-            <span>Allow phone access on this Wi-Fi (LAN)</span>
-          </label>
-          <p id="phone-hint" class="phone-hint">Turn this on, then open the link below on your phone (same Wi-Fi). Your PC does all the work — the phone just shows the messages and lets you send.</p>
-          <input id="phone-url" class="phone-url" type="text" readonly value="" placeholder="Enable LAN access to get a link" />
-          <div class="phone-btns">
-            <button id="btn-phone-copy" title="Copy the phone link">📋 Copy link</button>
-          </div>
-          <p class="phone-warn">Anyone with this link on your network can read the messages and send. Keep it to your own phone.</p>
-        </div>
       </div>
 
       <!-- Third zone: the Command Prompt connection (⌨ Terminal), with the
@@ -1806,6 +1885,19 @@
            wait in the approval strip until you click Run (unless Auto-run is
            on and the command is low-risk), and the output goes back to it. -->
       <div class="up-zone" id="up-zone-messages">
+       <div id="phone-panel" class="phone-panel" hidden aria-label="Phone connection">
+         <div class="phone-head"><p class="zone-label">📱 Connect your phone</p><button id="btn-phone-close" type="button" class="phone-close" title="Close (the 📱 Phone button opens it again)" aria-label="Close the phone panel">✕</button></div>
+         <label class="phone-lan-row">
+           <input type="checkbox" id="phone-lan-toggle" />
+           <span>Allow phone access on this Wi-Fi (LAN)</span>
+         </label>
+         <p id="phone-hint" class="phone-hint">Turn this on, then open the link below on your phone (same Wi-Fi). Your PC does all the work — the phone just shows the messages and lets you send.</p>
+         <input id="phone-url" class="phone-url" type="text" readonly value="" placeholder="Enable LAN access to get a link" />
+         <div class="phone-btns">
+           <button id="btn-phone-copy" title="Copy the phone link">📋 Copy link</button>
+         </div>
+         <p class="phone-warn">Anyone with this link on your network can read the messages and send. Keep it to your own phone.</p>
+       </div>
        <div class="zone-fill">
         <div class="zone-tabs" role="tablist">
           <button class="zone-tab active" id="tab-terminal" role="tab" aria-selected="true" aria-controls="term-pane">⌨ Terminal <span class="term-dot" id="term-dot" title="Shell not started"></span><span class="msg-badge term-badge" id="term-pending-badge" data-zero>0</span></button>
@@ -1842,6 +1934,15 @@
         </div>
        </div>
       </div>
+    </div>
+
+    <!-- The three AI windows (ChatGPT · Claude · Gemini) sit right under the User Panel, so what you
+         mainly use is on screen first. Each .pane-slot is the spot main.js lays that AI's real web page
+         (a native view) over — see syncPaneBounds(). -->
+    <div id="collapsed-strip"></div>
+
+    <div id="ai-row">
+      <div id="expanded-strip"></div>
     </div>
 
     <div id="panels-grid">
@@ -1918,10 +2019,8 @@
          now sit inside the Butler bar below (one unified butler surface). -->
     </div><!-- /panels-grid -->
 
-    <!-- Butler unit: the butler bar + the three AI panes wrapped as ONE bordered
-         block — the butler sits on top and controls the three panes beneath him,
-         so they read as a single "he + his three" workspace. Everything else on
-         the page is outside this unit. -->
+    <!-- Butler unit: the 🎩 Butler section (Alfred's AI, personality, settings, activity) and the
+         📚 Akọwe bridge, under the AI windows. The Butler section folds to one line once his AI is set up. -->
     <div id="butler-unit">
     <!-- Butler bar: the System AI (Supervisor) as a full-width band that sits
          ON TOP of the three AI panes, so the butler visibly oversees them. Left
@@ -1929,9 +2028,11 @@
          collapse mechanism + tests keep working. -->
     <div id="col-systemai" class="yc-panel butler-bar">
       <div class="yc-head">
-        <h2>🎩 Butler — set up Alfred's AI · activity</h2><span class="spacer"></span>
+        <h2>🎩 Butler — Alfred's AI, personality &amp; activity</h2>
+        <span class="butler-sub" id="butler-sub">Folded to save room. Open it to change his AI, personality or settings.</span>
+        <span class="spacer"></span>
         <span id="lsi-status" style="font-size:11px; opacity:.7;"></span>
-        <button class="collapse-btn" id="btn-collapse-systemai" title="Minimize this panel" aria-label="Minimize this panel">⌄</button>
+        <button class="collapse-btn" id="btn-collapse-systemai" title="Fold the Butler section to one line" aria-label="Fold the Butler section to one line" aria-expanded="true" aria-controls="systemai-body">⌄</button>
       </div>
       <div id="systemai-body" class="butler-body">
         <!-- TWO-THIRDS: everything else — the goal box + all of his controls. -->
@@ -1990,9 +2091,9 @@
 
         <details class="sai-sec" id="tools-sec">
           <summary>🧰 Tools — what the butler can call</summary>
-          <p style="opacity:.7; font-size:11px; margin:2px 0 5px;">The built-in tools, plus outside <b>tool servers</b> (MCP) you add below. The butler (USE_TOOL) and 🎩 Alfred always ask you before they use a tool server.</p>
-          <div id="jarvis-tools" style="font-size:11px; opacity:.85; margin:2px 0;">No tools loaded.</div>
-          <div style="font-size:12px; font-weight:600; margin:8px 0 3px;">Tool servers (MCP)</div>
+          <p style="opacity:.7; font-size:11px; margin:2px 0 6px;">The built-in tools, plus outside <b>tool servers</b> (MCP) you add below. The butler and 🎩 Alfred always ask you before they use a tool server.</p>
+          <!-- the long built-in list stays folded; the tool servers (what you add) come first -->
+          <div style="font-size:12px; font-weight:600; margin:6px 0 3px;">Tool servers (MCP)</div>
           <div id="mcp-servers" style="font-size:11.5px;">None yet — nothing runs until you add one.</div>
           <details id="mcp-add-box" style="margin-top:6px;">
             <summary style="font-size:12px; cursor:pointer;">➕ Add a tool server</summary>
@@ -2002,6 +2103,10 @@
             <div class="btns" style="margin:3px 0;"><button id="btn-mcp-add" class="primary">➕ Add and start</button></div>
             <div id="mcp-msg" style="font-size:11.5px; opacity:.9;"></div>
             <p style="opacity:.7; font-size:11px; margin:4px 0 0;">⚠ A command-line tool server is a program that runs on this computer with your permissions — add only ones you trust. Every call to it waits for your ✔.</p>
+          </details>
+          <details id="jarvis-tools-box" style="margin-top:8px;">
+            <summary style="font-size:12px; cursor:pointer;">🔧 Built-in tools <span id="jarvis-tools-count" style="opacity:.7;"></span></summary>
+            <div id="jarvis-tools" style="font-size:11px; opacity:.85; margin:4px 0 2px; line-height:1.45;">No tools loaded.</div>
           </details>
         </details>
 
@@ -2256,11 +2361,6 @@
       </div>
     </div>
 
-    <div id="collapsed-strip"></div>
-
-    <div id="ai-row">
-      <div id="expanded-strip"></div>
-    </div>
     </div><!-- /butler-unit -->
 
     <div id="main-row">
@@ -2290,13 +2390,14 @@
     </div>
 
     <div id="exportbar" class="col">
+      <span class="exp-label">Conversation</span>
       <button id="btn-copy">Copy Transcript</button>
       <button id="btn-download">Download .md</button>
       <button id="btn-clear">Clear Transcript</button>
     </div>
   </div>
 
-  <div class="popup-overlay" id="messages-popup">
+  <div class="popup-overlay" id="messages-popup" role="dialog" aria-modal="true" aria-label="Messages">
     <div class="popup-window">
       <div class="popup-titlebar">
         <span>Messages to you</span>
@@ -2306,7 +2407,7 @@
     </div>
   </div>
 
-  <div class="popup-overlay" id="roles-popup">
+  <div class="popup-overlay" id="roles-popup" role="dialog" aria-modal="true" aria-label="Role assignment">
     <div class="popup-window">
       <div class="popup-titlebar">
         <span>Role Assignment</span>

@@ -57,6 +57,11 @@
   .banner { display: none; background: #3a2417; color: #ffb787; border-bottom: 1px solid #5a3a22;
     padding: 8px 14px; font-size: 13px; text-align: center; }
   .banner.show { display: block; }
+  /* Opened on a computer or a tablet: keep one phone-like column in the middle. */
+  @media (min-width: 760px) {
+    #feed { padding-left: calc((100% - 720px) / 2); padding-right: calc((100% - 720px) / 2); }
+    footer > * { max-width: 720px; margin-left: auto; margin-right: auto; }
+  }
 </style>
 </head>
 <body>

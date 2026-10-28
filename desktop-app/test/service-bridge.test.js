@@ -139,6 +139,26 @@ async function main() {
     assert(site.json.responses.length === 1 && site.json.responses[0].site === 'chatgpt', 'site= filters by participant');
   }
 
+  console.log('\n== request bodies: UTF-8 split across chunks stays whole; the size limit counts bytes ==');
+  {
+    const raw = (chunks, gapMs) => new Promise((resolve, reject) => {
+      const total = chunks.reduce((n, b) => n + b.length, 0);
+      const r = http.request({ host: '127.0.0.1', port: PORT, path: '/participants/chatgpt/send', method: 'POST', headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json', 'Content-Length': total } }, (res) => { let d = ''; res.on('data', (c) => { d += c; }); res.on('end', () => resolve({ status: res.statusCode, json: safeJson(d) })); });
+      r.on('error', reject);
+      (async () => { for (const b of chunks) { r.write(b); await new Promise((z) => setTimeout(z, gapMs)); } r.end(); })();
+    });
+    const body = Buffer.from(JSON.stringify({ text: 'héllo 🌍 wörld' }), 'utf8');
+    const cut = body.indexOf(Buffer.from('🌍', 'utf8')) + 2; // in the middle of the 4-byte emoji
+    const n0 = calls.sendTo.length;
+    const split = await raw([body.subarray(0, cut), body.subarray(cut)], 60);
+    const sent = calls.sendTo[n0];
+    assert(split.status === 200 && sent && sent.text === 'héllo 🌍 wörld', `a character split across two chunks arrives intact (${sent && JSON.stringify(sent.text)})`);
+    const big = Buffer.from(JSON.stringify({ text: '€'.repeat(400000) }), 'utf8'); // 400k characters, 1.2 MB
+    const n1 = calls.sendTo.length;
+    const tooBig = await raw([big], 0);
+    assert(tooBig.status >= 400 && calls.sendTo.length === n1, `the 1 MB limit is in bytes: 400k three-byte characters are refused (HTTP ${tooBig.status})`);    calls.sendTo.length = 0; // the next section counts its own sends
+  }
+
   console.log('\n== sending: one participant + all participants ==');
   {
     const one = await req('POST', '/participants/chatgpt/send', { token: TOKEN, body: { text: 'hello gpt' } });
@@ -294,6 +314,18 @@ async function main() {
     calls.render = { hang: true };
     const slow = await req('POST', '/render/image', { token: TOKEN, body: { svg: SVG, width: 100, height: 100, timeoutMs: 1000 } });
     assert(slow.status === 504 && slow.json.error === 'RENDER_TIMEOUT' && calls.render.destroyed === true, 'a render over its time limit answers 504 RENDER_TIMEOUT and the window is destroyed');
+    { // the timeout wins, then the work settles later: no unhandled rejection, and no window left open
+      const unhandled = []; const onU = (e) => unhandled.push(e); process.on('unhandledRejection', onU);
+      let lateDestroyed = 0;
+      const rl = renderImage.createRenderer({ makeWindow: async () => ({ load: () => new Promise((_, rej) => setTimeout(() => rej(new Error('window destroyed')), 1200)), capture: async () => null, destroy: () => {} }) });
+      const rt = await rl.render({ svg: SVG, width: 100, height: 100, timeoutMs: 1000 });
+      // a window that only arrives after the time ran out is destroyed at once
+      const rs = renderImage.createRenderer({ makeWindow: () => new Promise((res) => setTimeout(() => res({ load: async () => {}, capture: async () => null, destroy: () => { lateDestroyed++; } }), 1200)) });
+      const rt2 = await rs.render({ svg: SVG, width: 100, height: 100, timeoutMs: 1000 });
+      await new Promise((z) => setTimeout(z, 500));
+      process.removeListener('unhandledRejection', onU);
+      assert(rt.code === 'RENDER_TIMEOUT' && rt2.code === 'RENDER_TIMEOUT' && unhandled.length === 0 && lateDestroyed === 1, `a render that loses the race to its timeout leaves no unhandled rejection and no stray window (${unhandled.length} unhandled, ${lateDestroyed} late window destroyed)`);
+    }
     const r2 = renderImage.createRenderer({ makeWindow: async () => ({ load: async () => {}, capture: async () => { const sz = { width: 1280, height: 1024 }; const img = (z) => ({ getSize: () => z, resize: (to) => img(to), toJPEG: () => Buffer.from('ffd8ff', 'hex'), toPNG: () => Buffer.from('89', 'hex') }); return img(sz); }, destroy: () => {} }) });
     const rs = await r2.render({ svg: SVG, width: 1600, height: 2560, format: 'jpeg' });
     assert(rs.ok && rs.width === 1600 && rs.height === 2560, 'a capture of another size is resized to exactly the size asked');

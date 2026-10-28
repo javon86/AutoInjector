@@ -85,9 +85,15 @@ function createRenderer(deps) {
     let win = null;
     let timer = null;
     const t0 = Date.now();
+    let gaveUp = false;
     try {
       const work = (async () => {
-        win = await makeWindow({ width: body.width, height: body.height, allow });
+        const w = await makeWindow({ width: body.width, height: body.height, allow });
+        // A window that only arrives after the time ran out: `finally` below has already run with win === null,
+        // so it would never be destroyed — destroy it here. (A late rejection of `work` is handled: Promise.race
+        // subscribes to it.)
+        if (gaveUp) { try { w.destroy(); } catch (_) {} throw Object.assign(new Error('timeout'), { code: 'RENDER_TIMEOUT' }); }
+        win = w;
         await win.load(fileUrl);
         let img = await win.capture();
         if (!img || (img.isEmpty && img.isEmpty())) throw Object.assign(new Error('nothing was drawn'), { code: 'RENDER_FAILED' });
@@ -96,7 +102,7 @@ function createRenderer(deps) {
         const buf = fmt === 'jpeg' ? img.toJPEG(quality) : img.toPNG();
         return buf;
       })();
-      const timeout = new Promise((_, rej) => { timer = setTimeout(() => rej(Object.assign(new Error('timeout'), { code: 'RENDER_TIMEOUT' })), timeoutMs); });
+      const timeout = new Promise((_, rej) => { timer = setTimeout(() => { gaveUp = true; rej(Object.assign(new Error('timeout'), { code: 'RENDER_TIMEOUT' })); }, timeoutMs); });
       const buf = await Promise.race([work, timeout]);
       log('render-image', { format: fmt, width: body.width, height: body.height, bytes: buf.length, ms: Date.now() - t0 });
       return { ok: true, format: fmt, mime: fmt === 'jpeg' ? 'image/jpeg' : 'image/png', width: body.width, height: body.height, bytes: buf.length, imageBase64: buf.toString('base64') };

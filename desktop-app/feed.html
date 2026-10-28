@@ -34,8 +34,10 @@
       border: 1px solid var(--line); background: #20242c; color: var(--text);
     }
     button.btn:hover { background: #2a2f38; }
-    #feed { flex: 1 1 auto; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
-    .empty { color: var(--muted); text-align: center; margin-top: 40px; font-size: 12px; }
+    #feed { flex: 1 1 auto; overflow-y: auto; padding: 12px max(12px, calc((100% - 1000px) / 2)); display: flex; flex-direction: column; gap: 10px; }
+    #composer > * { width: 100%; max-width: 1000px; margin-left: auto; margin-right: auto; }
+    /* the waiting note in the feed (NOT the empty preset slots — they share the word "empty") */
+    #feed > .empty { color: var(--muted); text-align: center; margin-top: 40px; font-size: 12px; }
     .bubble {
       max-width: 82%; border-radius: 12px; padding: 8px 11px; border: 1px solid var(--line);
       background: var(--panel); position: relative; white-space: pre-wrap; word-break: break-word; line-height: 1.42;
@@ -54,7 +56,7 @@
     .count { color: var(--muted); font-size: 11px; }
 
     /* Composer: reply box + preset buttons, pinned to the bottom. */
-    #composer { flex: 0 0 auto; border-top: 1px solid var(--line); background: var(--panel); padding: 8px 10px; display: flex; flex-direction: column; gap: 7px; }
+    #composer { flex: 0 0 auto; border-top: 1px solid var(--line); background: var(--panel); padding: 8px 12px; display: flex; flex-direction: column; gap: 7px; }
     #preset-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; }
     .preset {
       font-size: 11px; padding: 5px 7px; border-radius: 6px; cursor: pointer; text-align: left;

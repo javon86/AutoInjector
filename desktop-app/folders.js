@@ -29,11 +29,15 @@ function layout(stuffDir) {
 
 /** Is there a ComfyUI install in this folder (the Windows portable, or a plain ComfyUI checkout)? */
 function hasComfy(dir, fs = nodeFs) {
-  if (!dir) return false;
+  if (!dir || /\.partial$/i.test(String(dir))) return false;
+  return hasComfyFiles(dir, fs);
+}
+function hasComfyFiles(dir, fs = nodeFs) {
   const at = (...p) => { try { return fs.existsSync(path.join(dir, ...p)); } catch (_) { return false; } };
   if (at('ComfyUI', 'main.py')) return true;
   let ents = []; try { ents = fs.readdirSync(dir); } catch (_) { return false; }
-  return ents.some((n) => at(n, 'ComfyUI', 'main.py'));
+  // A half-finished copy ("<name>.partial") is never an install.
+  return ents.some((n) => !/\.partial$/i.test(n) && at(n, 'ComfyUI', 'main.py'));
 }
 
 /**
@@ -90,7 +94,28 @@ function map(places, { fs = nodeFs, sizes = true } = {}) {
   return rows;
 }
 
-/** Move ComfyUI (with its models) into "stuff and thing/apps/comfyui". Not while it is running. */
+/**
+ * Is ComfyUI busy, so its folder must not be moved? sd-runner's status() reports a `phase` (idle / starting /
+ * running / restarting / waiting / failed / stopped); anything but idle/failed/stopped means its files may be open.
+ * A running A1111/Forge (kind 'a1111') doesn't use the ComfyUI folder. The installer downloading / unpacking into
+ * it counts too.
+ */
+const COMFY_ACTIVE = new Set(['starting', 'running', 'restarting', 'waiting']);
+function comfyInUse(runner, installer) {
+  const r = runner || {};
+  const kind = String(r.kind || (r.target && r.target.kind) || '');
+  const runBusy = (COMFY_ACTIVE.has(r.phase) || !!r.busy || !!r.ready) && !/a1111|forge|fooocus/i.test(kind);
+  const inst = installer || {};
+  const instBusy = !!inst.busy && (inst.phase === 'downloading' || inst.phase === 'extracting');
+  return runBusy || instBusy;
+}
+
+/**
+ * Move ComfyUI (with its models) into "stuff and thing/apps/comfyui". Not while it is running.
+ * Same drive: a rename (instant). Another drive (EXDEV only): an asynchronous copy into "<to>.partial", renamed to
+ * <to> once complete, then the old folder is deleted. EPERM/EBUSY mean something holds the files → "stop ComfyUI
+ * first", never a copy (that would copy a live install and then delete files under it).
+ */
 async function moveComfy({ from, to, fs = nodeFs, onProgress } = {}) {
   try {
     if (!from || !hasComfy(from, fs)) return { ok: false, error: 'There is no ComfyUI to move there.' };
@@ -104,17 +129,26 @@ async function moveComfy({ from, to, fs = nodeFs, onProgress } = {}) {
       fs.renameSync(from, to);
       return { ok: true, how: 'rename', message: `✓ ComfyUI and its models are now in ${to}.` };
     } catch (e) {
-      if (!e || (e.code !== 'EXDEV' && e.code !== 'EPERM')) throw e;
+      if (!e || e.code !== 'EXDEV') throw e;
     }
     say('Copying ComfyUI to the other drive — this takes a while for big models…');
-    fs.cpSync(from, to, { recursive: true, errorOnExist: false });
+    const partial = to + '.partial';
+    const P = (fs.promises) || nodeFs.promises;
+    await P.rm(partial, { recursive: true, force: true }); // a copy that was cut off before
+    await P.cp(from, partial, { recursive: true, errorOnExist: false });
+    if (!hasComfyFiles(partial, fs)) {
+      try { await P.rm(partial, { recursive: true, force: true }); } catch (_) {}
+      return { ok: false, error: 'The copy didn\'t finish — the original was left where it was.' };
+    }
+    if (fs.existsSync(to)) fs.rmdirSync(to);
+    fs.renameSync(partial, to);
     if (!hasComfy(to, fs)) return { ok: false, error: 'The copy didn\'t finish — the original was left where it was.' };
-    try { fs.rmSync(from, { recursive: true, force: true }); } catch (_) { return { ok: true, how: 'copy', leftBehind: from, message: `✓ Copied to ${to}. The old folder couldn't be deleted — delete ${from} yourself when convenient.` }; }
+    try { await P.rm(from, { recursive: true, force: true }); } catch (_) { return { ok: true, how: 'copy', leftBehind: from, message: `✓ Copied to ${to}. The old folder couldn't be deleted — delete ${from} yourself when convenient.` }; }
     return { ok: true, how: 'copy', message: `✓ ComfyUI and its models are now in ${to}.` };
   } catch (e) {
     const code = e && e.code;
-    return { ok: false, error: code === 'EBUSY' || code === 'EPERM' ? 'Something is still using ComfyUI\'s files — stop ComfyUI (and close its window), then try again.' : code === 'ENOSPC' ? 'The disk is full — free some space and try again.' : `The move didn't work (${String((e && e.message) || e).slice(0, 160)}). Nothing was deleted.` };
+    return { ok: false, error: code === 'EBUSY' || code === 'EPERM' || code === 'EACCES' ? 'Something is still using ComfyUI\'s files — stop ComfyUI (and close its window), then try again.' : code === 'ENOSPC' ? 'The disk is full — free some space and try again. The original was left where it was.' : `The move didn't work (${String((e && e.message) || e).slice(0, 160)}). Nothing was deleted.` };
   }
 }
 
-module.exports = { layout, hasComfy, pickComfyHome, map, moveComfy, sizeOf };
+module.exports = { layout, hasComfy, comfyInUse, pickComfyHome, map, moveComfy, sizeOf };
