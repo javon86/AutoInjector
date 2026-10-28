@@ -697,7 +697,7 @@ function renderTop(parts) {
   const links = clear($('#top-links'));
   const here = location.hash || '#/';
   const add = (el, href, text) => el.appendChild(h('a', { href, 'aria-current': here === href ? 'page' : null }, text));
-  links.appendChild(h('a', { href: '#/start', class: 'tb-new', 'aria-current': here === '#/start' ? 'page' : null, title: 'Start a new book (step by step)' }, '🚀 New book'));
+  links.appendChild(h('a', { href: '#/start', class: inProject ? 'tb-new in-project' : 'tb-new', 'aria-current': here === '#/start' ? 'page' : null, title: 'Start a new book (step by step)' }, '🚀 New book'));
   links.appendChild(h('a', { href: '#/', class: inProject ? 'tb-books in-project' : 'tb-books', 'aria-current': here === '#/' ? 'page' : null }, 'Books'));
   if (inProject) {
     add(links, link('p', S.pid, S.branch), 'Overview');
@@ -711,6 +711,8 @@ function renderTop(parts) {
     h('span', { class: 'tb-set-ico', 'aria-hidden': 'true' }, '⚙️ '), h('span', { class: 'tb-label' }, 'Settings')));
   // Less frequent pages live in the "More" menu so the bar stays on one line.
   const more = clear($('#more-links'));
+  // inside a book the bar is full at laptop width: "🚀 New book" moves into this menu there (CSS shows one or the other)
+  if (inProject) more.appendChild(h('a', { href: '#/start', class: 'more-new', 'aria-current': here === '#/start' ? 'page' : null }, '🚀 Start a new book'));
   add(more, '#/shelf', '📚 My finished books');
   add(more, '#/style', '✒️ My writing style');  // P25 (Section 7c)
   if (inProject) {
@@ -776,7 +778,7 @@ function renderNav() {
     h('span', { class: 'chev', 'aria-hidden': 'true' }, '▸'),
     h('span', { class: `set-letter set-${letter}` }, letter), h('span', { class: 'set-name' }, name),
     staleSet ? h('span', { class: 'set-warn', title: `${staleSet} approved part(s) here were made from something that changed since (for example a chapter you edited). 📘 Make my book shows what to redo.`, 'aria-label': `${staleSet} out of date` }, '⚠️') : null,
-    h('span', { class: 'set-count' }, `${total} rec`));
+    h('span', { class: 'set-count', title: `${total} saved record(s) in this set` }, String(total), h('span', { class: 'visually-hidden' }, ' records')));
     nav.appendChild(h('div', { class: `set-group set-${letter}${letter === curSet ? ' here' : ''}` }, btn, ul));
   }
 }
@@ -2608,8 +2610,8 @@ async function viewWrite(main, rid, mode) {
         h('p', null, `You were changing version ${older}; version ${latest.version} was saved since (in another window, by an AI job, or by someone else). `
           + `Your text is in the boxes below and saving makes it the next version. Check that it still has what changed in version ${latest.version} `
           + '(🔧 Developer view shows every version).'),
-        h('button', { type: 'button', class: 'small', 'data-discard-draft': '1', onclick: () => { removeKey(draftKey); editor(); } }, 'Discard my changes and show the newest version')) : null,
-      form);
+        h('button', { type: 'button', class: 'small', 'data-discard-draft': '1', onclick: () => { removeKey(draftKey); editor(); } }, 'Discard my changes and show the newest version')) : '',
+      form);  // '' not null: the DOM's own append() would print a null as the word "null
     if (isChapter) {
       const parts = draft ? draft.v : splitChapter(latest.data.text);
       const tIn = h('input', { type: 'text', id: 'sd-title', value: parts.title || '', 'aria-describedby': 'sd-title-h' });
@@ -2887,7 +2889,8 @@ const TOS_CAUTION = 'Experimental: automating the ChatGPT, Claude and Gemini web
 async function viewSettings(main) {
   const slots = await api('GET', '/slots');
   main.appendChild(h('div', { class: 'page-head' }, h('h1', null, 'Settings: AI slots')));
-  main.appendChild(h('section', { class: 'card', 'aria-labelledby': 'priv-h' }, h('h2', { id: 'priv-h' }, 'How AI slots are used'),
+  // the background notes are folded away, so the page opens on what you can do (connect AutoInjector, the three slots)
+  main.appendChild(h('details', { class: 'card settings-about' }, h('summary', { id: 'priv-h' }, 'ⓘ How AI slots are used (and what stays on this computer)'),
     h('ul', null,
       h('li', null, 'Akọwe has exactly three AI slots: AI-1, AI-2 and AI-3. All are optional.'),
       h('li', null, 'When a creative operation runs, its context package (only the records that operation needs from the current project) is sent to the one slot selected for that job — never to the other slots, and never with secrets or unrelated projects.'),
@@ -2895,7 +2898,7 @@ async function viewSettings(main) {
       h('li', null, 'Deterministic (LOGIC) operations never use an AI slot.'),
       h('li', null, 'Roles route work: when a connected slot lists an operation ID (C02) or set letter (B) in its roles, that work goes only to such slots.'),
       h('li', null, 'API keys and AutoInjector connection keys are stored in the local secrets file on this computer, never in project data, exports, reports or logs. Key fields are write-only: a saved key is never shown again.'),
-      h('li', null, 'Not sure everything works? Press “🧪 Test everything” at the top: it builds a small test book in a separate project and writes a report.'))));
+      h('li', null, 'Not sure everything works? Open “More ▾” at the top and press “🧪 Test everything”: it builds a small test book in a separate project and writes a report.'))));
   main.appendChild(autoInjectorCard(main));
   for (const s of slots) main.appendChild(slotForm(s));
   main.appendChild(retryCard());
@@ -8125,6 +8128,17 @@ const TIP_SAVE = () => [h('p', null, 'Akọwe keeps every book inside itself. �
 const TIP_RERUN = () => [h('p', null, 'The book bible is everything a book is built on: the book profile, the ending and style choices, the characters with their character sheets and voice cards, the places and world, the story rules and world texture, and the premise, main plot, chapter outline and scene cards.'),
   h('p', null, '🔁 Rerun makes a NEW book from it: the same characters, world and (if you keep it) plan, with new chapters written by the AI. The book it came from is never changed.')];
 const BIBLE_PATH = (pid, branch) => `/projects/${encodeURIComponent(pid)}/branches/${encodeURIComponent(branch || 'main')}`;
+/** A save that partly worked (newer servers): `warning` (plain words) and/or `skipped` (file names that were not written).
+ *  Returns "⚠ Saved, except Book/Title.pdf (open in another program — close it and save again)" or '' when all went well. */
+function saveWarningText(last) {
+  if (!last) return '';
+  const skipped = Array.isArray(last.skipped) ? last.skipped.filter(x => typeof x === 'string' && x) : [];
+  const warning = typeof last.warning === 'string' ? last.warning.trim() : '';
+  if (!skipped.length && !warning) return '';
+  const names = skipped.length > 4 ? `${skipped.slice(0, 4).join(', ')} and ${skipped.length - 4} more` : skipped.join(', ');
+  if (names) return `⚠ Saved, except ${names}${warning ? ` (${warning})` : ''}`;
+  return `⚠ Saved, but: ${warning}`;
+}
 /** “Saved to …” (or ⚠️ not saved) for the last save of a book. */
 function savedLine(st, { pid, branch } = {}) {
   const last = st && st.last;
@@ -8135,7 +8149,9 @@ function savedLine(st, { pid, branch } = {}) {
     return h('span', { class: 'small', 'data-testid': 'saved-line' }, hazard(Object.assign({ where: { step: '💾 Save the book' } }, last.problem || { code: 'SAVE_FAILED' }), { retry: pid ? () => runSave(pid, branch) : null, retryLabel: '💾 Save again', settings: true }, { small: true }),
       ` Not saved at ${fmtTime(last.at)}: ${(last.problem && last.problem.message) || 'the save failed'}.`);
   }
-  return h('span', { class: 'small', 'data-testid': 'saved-line' }, `💾 Saved to `, h('code', { class: 'save-path' }, last.path), ` · ${fmtTime(last.at)}${last.kind === 'auto' ? ' (automatic)' : ''}${last.finished ? '' : ' · progress (not finished)'}`);
+  const warn = saveWarningText(last);
+  return h('span', { class: 'small', 'data-testid': 'saved-line' }, `💾 Saved to `, h('code', { class: 'save-path' }, last.path), ` · ${fmtTime(last.at)}${last.kind === 'auto' ? ' (automatic)' : ''}${last.finished ? '' : ' · progress (not finished)'}`,
+    warn ? h('span', { class: 'save-warn', role: 'status', 'data-testid': 'save-warning' }, warn) : null);
 }
 /** 📂 Show the folder (this computer) or 📋 copy its path (another device). */
 function folderButton(path, local, pid, branch) {
@@ -8172,7 +8188,7 @@ function saveBox(pid, branch, { label = '💾 Save', primary = false, testid = '
     try {
       const st = await runSave(pid, branch, show);
       show(st);
-      if (st && st.last && st.last.ok) toast(`Saved to ${st.last.path}`);
+      if (st && st.last && st.last.ok) toast(saveWarningText(st.last) || `Saved to ${st.last.path}`);
     } catch (e) { put(clear(line), problemBox(toProblem(e, { step: '💾 Save the book' }), { settings: true })); }
     btn.disabled = false;
   } }, label);
@@ -8185,7 +8201,7 @@ async function quickSave(btn) {
   btn.disabled = true; toast('💾 Saving the book…');
   try {
     const st = await runSave(S.pid, S.branch);
-    if (st && st.last && st.last.ok) toast(`💾 Saved to ${st.last.path}`);
+    if (st && st.last && st.last.ok) toast(saveWarningText(st.last) || `💾 Saved to ${st.last.path}`);
     else modal('💾 The book was not saved', () => problemBox(toProblem(Object.assign({ where: { book: profileOf().title || S.project.name, step: '💾 Save the book' } }, (st && st.last && st.last.problem) || { code: 'SAVE_FAILED' })), { settings: true }));
   } catch (e) { modal('💾 The book was not saved', () => problemBox(toProblem(e, { step: '💾 Save the book' }), { settings: true })); }
   btn.disabled = false;
@@ -8439,7 +8455,7 @@ function runSaveLine(r) {
     sv.auto_save === false ? h('span', { class: 'muted' }, ' · auto-save is off (Settings › 📁 Where books are saved)') : (sv.last ? null : h('span', { class: 'muted' }, ' · saved automatically as it goes')),
     h('button', { type: 'button', class: 'small', 'data-testid': 'mb-save-btn', onclick: async ev => {
       const b = ev.currentTarget; b.disabled = true;
-      try { const st = await runSave(r.project_id, r.branch_id || 'main'); if (st && st.last && st.last.ok) toast(`Saved to ${st.last.path}`); }
+      try { const st = await runSave(r.project_id, r.branch_id || 'main'); if (st && st.last && st.last.ok) toast(saveWarningText(st.last) || `Saved to ${st.last.path}`); }
       catch (e) { const p = toProblem(e, { step: '💾 Save the book' }); toast(`${p.title}: ${p.message}`); }
       b.disabled = false;
     } }, '💾 Save now'));
