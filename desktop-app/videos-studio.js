@@ -61,9 +61,11 @@
     st.status = s;
     const tone = s.ready ? 'ok' : (s.comfy && s.comfy.connected) || (s.comfy && s.comfy.installed) ? 'busy' : 'off';
     $('vd-dot').dataset.tone = tone; if ($('vd-tab-dot')) $('vd-tab-dot').dataset.tone = tone;
-    setText('vd-status-text', s.message || (s.ready ? '✔ Ready' : 'Video is not set up'));
-    $('vd-status').title = s.message || '';
-    if (!s.ready && !st.generating) hint(`${s.message}\nOpen ⚙ Setup & models to finish (one click).`, 'warn'); else if (s.ready && !st.generating) hint('', '');
+    // The message is also used outside this tab; here "in 🎬 Video" is where the person already is.
+    const text = String(s.message || (s.ready ? '✔ Ready' : 'Video is not set up')).replace(/ in 🎬 Video(?= \(| —|,|\.)/g, '');
+    setText('vd-status-text', text);
+    $('vd-status').title = text;
+    if (!s.ready && !st.generating) hint(`${text}\nOpen ⚙ Setup & models to finish (one click).`, 'warn'); else if (s.ready && !st.generating) hint('', '');
     // the model list
     st.models = s.models || [];
     const sel = $('vd-model'); const cur = sel.value || (s.settings && s.settings.model) || s.defaultModel;
@@ -291,7 +293,8 @@
     setText('vd-setup-comfy', lines.join('\n'));
     $('vd-setup-comfy').style.whiteSpace = 'pre-line';
     $('btn-vd-start').hidden = !!(s && s.comfy && s.comfy.connected) || !(m && m.anyComfy);
-    $('btn-vd-install-all').hidden = !!(m && m.models && m.models.some((x) => x.installed) && m.anyComfy);
+    // Nothing to install once video is ready (ComfyUI answers and a model is there), or ComfyUI is here with a model.
+    $('btn-vd-install-all').hidden = !!(s && s.ready) || !!(m && m.models && m.models.some((x) => x.installed) && m.anyComfy);
     const box = $('vd-models'); box.textContent = '';
     for (const x of (m && m.models) || []) {
       const d = document.createElement('div'); d.className = 'vd-model'; d.dataset.installed = String(!!x.installed); d.dataset.model = x.id;
@@ -320,6 +323,7 @@
     const pct = Math.round((i.pct || 0) * 100);
     // While it waits to resume after a dropped connection the bar stays where it got to.
     $('vd-dl-bar').style.width = `${i.busy || i.phase === 'installed' || i.canResume ? pct : 0}%`;
+    if ($('vd-dl-progress')) $('vd-dl-progress').hidden = !(i.busy || i.canResume || (i.phase === 'installed' && pct > 0)); // no empty bar while idle
     if (i.message) setText('vd-dl-msg', i.message);
     $('btn-vd-dl-cancel').disabled = !i.busy;
     dl.remote = !!i.busy; if (i.busy && i.model) dl.model = i.model;
@@ -331,7 +335,7 @@
     if (dl.busy) { setText('vd-dl-msg', `Already downloading${dl.model && dl.model !== id ? ` another model (${dl.model})` : ''} — this press was ignored. Wait for it, or press ⏸ Pause.`); return; }
     dl.local = true; dl.model = id; setDownloadButtons(true);
     if ($('btn-vd-dl-resume')) $('btn-vd-dl-resume').hidden = true;
-    setText('vd-dl-msg', 'Starting the download…'); $('btn-vd-dl-cancel').disabled = false;
+    setText('vd-dl-msg', 'Starting the download…'); $('btn-vd-dl-cancel').disabled = false; $('vd-dl-progress').hidden = false;
     let r;
     try { r = await call('downloadModel', id); } finally { dl.local = false; }
     if (r && r.alreadyDownloading) { setText('vd-dl-msg', r.message); dl.remote = true; return; } // another window's download is running: leave its bar alone
@@ -345,7 +349,7 @@
   $('btn-vd-dl-cancel').onclick = () => call('installCancel');
   $('btn-vd-install-all').onclick = async () => {
     if (dl.busy) { setText('vd-dl-msg', 'Already downloading — this press was ignored. Wait for it, or press ⏸ Pause.'); return; }
-    dl.local = true; setDownloadButtons(true); $('btn-vd-dl-cancel').disabled = false;
+    dl.local = true; setDownloadButtons(true); $('btn-vd-dl-cancel').disabled = false; $('vd-dl-progress').hidden = false;
     setText('vd-dl-msg', 'Installing… (ComfyUI first if there is none, then the video model)');
     let r;
     try { r = await call('installAll', $('vd-model').value || undefined); } finally { dl.local = false; }
