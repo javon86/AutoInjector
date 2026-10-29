@@ -78,3 +78,46 @@ def test_hopeless_text_still_returns_none():
 def test_prompt_asks_for_a_json_code_block():
     p = AutoInjectorAdapter.build_prompt("sys", "user", {"type": "object"})
     assert "```json code block" in p
+
+
+# ---------------------------------------------------------------------- first real PC test (problem 1): Claude's site
+# renders a short unfenced answer as prose and turns its JSON quote marks curly. Copied in shape from the saved report.
+CLAUDE_SHORT = "{“ok”: true, “site”: “claude”, “number”: 7}"
+CLAUDE_REVIEW = ("Claude said:\n\n{“verdict”: “REVISE”, “reasons”: [“The line "
+                 "“Can they save the line?” is told, not shown.”, “The Lamplighter’s ferry "
+                 "never costs anything — add a price.”], “score”: –2, “notes”: "
+                 "{“keep”: [‘Odile’s silence’]}}\n\nLet me know if you’d like more.")
+
+
+def test_claude_curly_quotes_short_answer_parses():
+    assert extract_json_object(CLAUDE_SHORT) == {"ok": True, "site": "claude", "number": 7}
+
+
+def test_claude_curly_quotes_keep_prose_quotes_inside_values():
+    r = extract_json_object(CLAUDE_REVIEW)
+    assert r["verdict"] == "REVISE" and r["score"] == -2
+    # curly quotes and apostrophes that are part of the text stay exactly as written
+    assert r["reasons"][0] == "The line “Can they save the line?” is told, not shown."
+    assert r["reasons"][1] == "The Lamplighter’s ferry never costs anything — add a price."
+    assert r["notes"] == {"keep": ["Odile’s silence"]}
+
+
+def test_curly_quotes_are_only_touched_when_strict_parsing_fails():
+    obj = {"quote": "“Can they save the line?”", "who": "Odile’s"}
+    assert extract_json_object(json.dumps(obj, ensure_ascii=False)) == obj
+    assert extract_json_object("Here:\n" + json.dumps(obj, ensure_ascii=False) + "\nDone.") == obj
+    assert extract_json_object("He said “hello” and left.") is None
+
+
+def test_claude_curly_answer_through_the_bridge(h):
+    from test_autoinjector_adapter import B01_OUT, FakeBridge, b01, connect  # noqa: PLC0415
+    bridge = FakeBridge()
+    try:
+        connect(h, bridge.url)
+        curly = json.dumps(B01_OUT, ensure_ascii=False).replace('"', "”").replace("”", "“", 1)
+        bridge.script = [("ok", curly)]
+        r = b01(h)
+        assert r["status"] == "DRAFT", r
+        assert h.record(r["output_refs"][0])["data"] == B01_OUT and len(bridge.sends) == 1
+    finally:
+        bridge.close()

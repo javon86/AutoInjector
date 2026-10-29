@@ -474,7 +474,9 @@ def _repaired_object(text: str) -> dict | None:
 def extract_json_object(text: str) -> dict | None:
     """The answer's JSON object: whole reply, else the first ```json fence holding one, else the
     first balanced top-level {...} in the prose that parses as an object, else (unfenced JSON whose
-    inner quote marks lost their backslashes on the chat page) the repaired {...} span."""
+    inner quote marks lost their backslashes on the chat page) the repaired {...} span, else (a chat page that
+    turned the JSON's quote marks curly, as Claude's site does with a short unfenced answer) the same with the
+    curly quote marks that act as JSON syntax made straight (``straighten_json_quotes``)."""
     if not isinstance(text, str):
         return None
     try:
@@ -487,7 +489,104 @@ def extract_json_object(text: str) -> dict | None:
         obj = _outer_object(m.group(1))
         if obj is not None:
             return obj
-    return _outer_object(text)
+    obj = _outer_object(text)
+    if obj is not None or not _SMART_ANY.search(text):
+        return obj
+    return _smart_object(text)
+
+
+# ---------------------------------------------------------------------- curly ("smart") quotes from a chat page
+# Claude's site (and some others) render a short unfenced answer as prose and turn its quote marks into “ ” ‘ ’, and
+# a minus sign into a dash. Only the marks that act as JSON syntax are made straight; curly quotes inside a text
+# value (“Can they save the line?” or Lamplighter’s) stay exactly as the AI wrote them.
+_SMART_ANY = re.compile("[“”„‟‘’‚‛′″«»–—−]")
+_DQ_OPEN = '"“”„‟″«»'      # a double quote mark that can open a JSON string
+_SQ_OPEN = "'‘’‚‛′"                    # a single one (the AI or the page used ' for ")
+_DQ_CLOSE = '"“”‟″»«'
+_SQ_CLOSE = "'’‘‛′"
+_DASHES = "–—−"
+# after a closing quote mark, only these can follow in JSON: } ] : , (then the next key/value) or the end
+_AFTER_SMART = re.compile("\\s*(?:[}\\]:]|,\\s*(?:[\"'“”„‘’{\\[\\-–−0-9]|true\\b|"
+                          "false\\b|null\\b|$)|$)")
+
+
+def straighten_json_quotes(text: str) -> str:
+    """The JSON object starting at the first '{' of ``text`` with its curly string delimiters made straight (and a
+    dash before a number made a minus); everything after the object's closing brace and every curly quote inside a
+    text value is kept as it is. A straight " inside a value is escaped (as ``repair_json_quotes`` does) and a raw
+    line break becomes \\n. Text without a '{' comes back unchanged."""
+    start = text.find("{")
+    if start < 0:
+        return text
+    out = [text[:start]]
+    depth, in_str, closers, i, n = 0, False, "", start, len(text)
+    while i < n:
+        c = text[i]
+        if in_str:
+            if c == "\\" and i + 1 < n:
+                out.append(text[i:i + 2])
+                i += 2
+                continue
+            if c in closers and _AFTER_SMART.match(text, i + 1):
+                out.append('"')
+                in_str = False
+            elif c == '"':
+                out.append('\\"')
+            elif c == "\n":
+                out.append("\\n")
+            elif c == "\r":
+                pass
+            else:
+                out.append(c)
+        elif c in _DQ_OPEN or (c in _SQ_OPEN and _prev_syntax(out)):
+            out.append('"')
+            in_str, closers = True, (_DQ_CLOSE if c in _DQ_OPEN else _SQ_CLOSE)
+        elif c in _DASHES and i + 1 < n and text[i + 1].isdigit():
+            out.append("-")
+        elif c in "{[":
+            depth += 1
+            out.append(c)
+        elif c in "}]":
+            depth -= 1
+            out.append(c)
+            if depth == 0:
+                out.append(text[i + 1:])
+                return "".join(out)
+        else:
+            out.append(c)
+        i += 1
+    return "".join(out)
+
+
+def _prev_syntax(out: list[str]) -> bool:
+    """True when the last non-space character written is JSON syntax that a string may follow ({ [ , :)."""
+    for chunk in reversed(out):
+        s = chunk.rstrip()
+        if s:
+            return s[-1] in "{[,:"
+    return False
+
+
+def _smart_object(text: str) -> dict | None:
+    """Last resort for a reply whose JSON quote marks the chat page turned curly: try each '{' (at most 20) as the
+    start of the object, straighten it, parse it (with ``repair_json_quotes`` for stray straight quotes inside)."""
+    pos = 0
+    for _ in range(20):
+        start = text.find("{", pos)
+        if start < 0:
+            return None
+        fixed = straighten_json_quotes(text[start:])
+        end = _match_brace(fixed, 0)
+        span = fixed[:end + 1] if end is not None else fixed
+        for cand in (span, repair_json_quotes(span)):
+            try:
+                value = json.loads(cand)
+            except ValueError:
+                continue
+            if isinstance(value, dict):
+                return value
+        pos = start + 1
+    return None
 
 
 def _outer_object(text: str) -> dict | None:
