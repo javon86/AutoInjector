@@ -270,6 +270,7 @@ fieldset fieldset { background: var(--surface-2); }
   border-radius: 10px; border: 1px solid currentColor; white-space: nowrap; line-height: 1.6; }
 .badge .ico { font-weight: 700; }
 .b-ok { color: var(--ok); background: var(--ok-soft); }
+.save-done:not(:empty) { color: var(--ok); background: var(--ok-soft); border-radius: 6px; padding: 2px 8px; font-weight: 600; }
 .b-warn { color: var(--warn); background: var(--warn-soft); }
 .b-bad { color: var(--bad); background: var(--bad-soft); }
 .b-info { color: var(--info); background: var(--info-soft); }

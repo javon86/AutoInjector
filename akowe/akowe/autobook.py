@@ -62,6 +62,7 @@ from .jobs import BUSY_CODES, JobStore, RetryPolicy, busy_code, now_iso, slot_wo
 from .providers import PROBE_POLL_S, PROBE_WAIT_S, PinnedProviders  # noqa: F401 - re-exported (older imports)
 from .editor import judge_rewrite, keep_quotes_of, lost_keeps
 from .editor_rubric import LABELS as EDITOR_LABELS
+from .book_report import clip_words
 from .review import NOT_INDEPENDENT, REVIEWABLE, ReviewJob, ReviewService, plain_problem, safe_title
 
 log = logging.getLogger("akowe.autobook")
@@ -225,7 +226,7 @@ class _Runner:
             pass
 
     def event(self, run: dict, kind: str, message: str, step: str | None = None, **extra):
-        ev = dict({"at": now_iso(), "kind": kind, "step": step or run.get("current"), "message": message[:400]},
+        ev = dict({"at": now_iso(), "kind": kind, "step": step or run.get("current"), "message": clip_words(message, 400)},
                   **{k: v for k, v in extra.items() if v is not None})
         run.setdefault("events", []).append(ev)
         if len(run["events"]) > MAX_EVENTS:
@@ -557,7 +558,7 @@ class AutoBookService(_Runner):
         if status in ("queued", "running"):
             return "working", "Working."
         if status == "paused":
-            if prob.get("record_id") or "approve_anyway" in (prob.get("options") or []):
+            if {"approve_anyway", "edit"} & set(prob.get("options") or []):
                 return "needs_decision", "Paused: it needs your decision (approve anyway, edit it, or try again)."
             if run.get("pause_reason") == "author":
                 return "paused", "Paused by you. Press ▶ Resume to continue."
@@ -800,6 +801,10 @@ class AutoBookService(_Runner):
             if not rid:
                 raise AkoweError("INVALID_INPUT", "/action", "there is no draft waiting for a decision",
                                      status="REJECTED")
+            if "approve_anyway" not in (prob.get("options") or []) and prob.get("code") != "REVIEW_NOT_PASSED":
+                # e.g. the AI reviewer could not answer: the draft was never reviewed, so it is not approved blind
+                raise AkoweError("INVALID_INPUT", "/action", "this step stopped on a problem, not on a review "
+                                     "decision: press 🔁 Try again (nothing was approved)", status="REJECTED")
             out = self.app.review.approve(principal, run["project_id"], run["branch_id"],
                                           {"record_ids": [rid], "author_confirms": True, "how": "one"})
             res = out["results"][0] if out.get("results") else {"ok": False, "message": "not approved"}
@@ -1446,7 +1451,7 @@ class AutoBookService(_Runner):
         notes = []
         for f in (craft or {}).get("findings") or []:
             notes.append({"id": f["id"], "label": f.get("label"), "severity": f.get("severity"),
-                          "why": str(f.get("why") or "")[:200], "passage": str(f.get("passage") or "")[:80]})
+                          "why": clip_words(f.get("why"), 200), "passage": clip_words(f.get("passage"), 80)})
         ed.update(flagged=True, done_version=head["version"], notes=notes[:6], flag_reason=why, code=code)
         self.event(run, "note", f"⚠️ Editor still had notes on the {ed.get('label')} ({why}); it is approved under "
                    "your run consent — see the run summary", code="EDITOR_NOTES", record_id=head["record_id"])
@@ -1582,10 +1587,10 @@ class AutoBookService(_Runner):
         head = bp.rec(rid)
         missing = [i for i in res["items"] if i.get("required") and i["status"] != "on_page"]
         pl.update(done_version=head["version"], counts=res["counts"], flagged=bool(missing),
-                  missing=[i["label"][:160] for i in missing][:8], ai=bool(res.get("ai")))
+                  missing=[clip_words(i["label"], 160) for i in missing][:8], ai=bool(res.get("ai")))
         if missing:
             self.event(run, "note", f"⚠️ Planned but not on the page in the {label}: "
-                       + "; ".join(i["label"][:80] for i in missing[:4]) + (" …" if len(missing) > 4 else ""),
+                       + "; ".join(clip_words(i["label"], 80) for i in missing[:4]) + (" …" if len(missing) > 4 else ""),
                        code="PLANNED_MISSING", record_id=rid)
         st["planned_note"] = self._planned_line(run)
         self._planned_summary(run)
@@ -1622,7 +1627,7 @@ class AutoBookService(_Runner):
             return
         self._planned_summary(run)
         run["planned_summary"]["book"] = {"missing": res["counts"]["missing"], "names": res["names_never_on_page"],
-                                          "items": [{"chapter_id": m["chapter_id"], "label": m["label"][:160]}
+                                          "items": [{"chapter_id": m["chapter_id"], "label": clip_words(m["label"], 160)}
                                                     for m in res["missing"]][:20]}
         st["items"] = [{"id": r["chapter_id"], "label": f"Chapter {r['chapter_id']}",
                         "state": "done" if r.get("written") and not (r.get("counts") or {}).get("missing") else
