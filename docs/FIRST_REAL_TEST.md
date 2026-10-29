@@ -68,7 +68,8 @@ If 🔢 fails on a part, it names the part (message box / Send button / reply ar
 ## Known gaps to watch
 
 - Live ChatGPT/Claude/Gemini page layouts may differ from the built-in lists: that is what 🎯 / 🔢 are for.
-  To help fix them for good, run `desktop-app/tools/chatgpt-page-check.js` in that AI's DevTools Console and send
-  the result.
+  To help fix them for good, press 🎯 → **📋 Copy page structure** on that AI's pane (or run
+  `desktop-app/tools/page-check.js` in that AI's DevTools Console — ChatGPT, Claude or Gemini) and send the
+  result. It holds no message text.
 - Gemini's split reply (P37.2) is only partly confirmed — tell Claude if a Gemini answer is cut short.
 - The checks (readability, timeline, repeats) are English-only.

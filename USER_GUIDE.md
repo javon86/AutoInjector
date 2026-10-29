@@ -722,6 +722,22 @@ instead.
   usually means you're signed out in that pane. "No reply found on the page" means
   the site changed how it shows replies — use **🎯 Fix selectors → Pick Reply**.
   "No closing [FROM:] tag" means the AI forgot its envelope; it is asked to resend.
+- **Something you taught with 🎯 / 🔢 made it worse.** Open the pane's **🎯** card
+  and press **↺ Forget what I taught for …** — every part you saved and everything
+  the app learned by itself for that AI is cleared, and it goes back to its
+  built-in way of reading the page. (If a saved reply part finds nothing while
+  the built-in reader does, the app already uses the built-in one and says so in
+  the log.)
+- **🎯 says "That looks like your own message".** If you are sure you clicked
+  the AI's answer, press **OK** on "This looks like your own message. Use it
+  anyway?" — the same click is taken.
+- **Sending a page report.** If a site changed its page and the app still can't
+  read it, press **🎯 → 📋 Copy page structure** and paste the result into your
+  report. It holds only how the page is built (tags, structural attributes,
+  counts, text lengths) — never what you or the AI wrote, chat titles or the
+  sidebar. Without the app: open the pane's DevTools (**🔍**), go to the
+  **Console**, paste the contents of `desktop-app/tools/page-check.js`, press
+  Enter — the same report is copied to the clipboard.
 - **An optional panel says "off" or "not active".** That feature needs its server
   configured — see [section 15](#15-what-you-need-to-run-each-part). Nothing
   breaks; the rest of the app keeps working.

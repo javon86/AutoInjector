@@ -115,6 +115,7 @@ function pickerSay(site, text, tone) { const ps = pickerState(site); ps.msg = te
 const PICK_REJECT = {
   WRONG_ELEMENT_TYPE: (d) => `that doesn't look like ${d} — try clicking right on it`,
   LOOKS_LIKE_USER: () => "that is your own message — click the AI's latest answer instead",
+  IN_SIDEBAR: () => "that is in the sidebar / page header (the list of chats), not a reply — click the AI's answer in the conversation",
   LOOKS_LIKE_ECHO: () => "that looks like the last message sent, not a real reply — click the AI's answer",
   TOO_GENERIC: () => "that would match too many things on the page — click more precisely",
   TOO_SMALL: () => "that picture is too small (an icon or avatar) — click the big picture ChatGPT made",
@@ -137,7 +138,14 @@ async function runPick(site, role) {
   renderPicker(site);
   pickerSay(site, `Click ${desc} in ${SITE_LABELS[site]}'s window… (hovering outlines it · Esc or Cancel to stop)`);
   setStatus(`Waiting for a click in ${SITE_LABELS[site]}'s window to pick ${desc}…`);
-  const res = window.api.pickerStart ? await window.api.pickerStart(site, role) : await window.api.pickSelector(site, role);
+  let res = window.api.pickerStart ? await window.api.pickerStart(site, role) : await window.api.pickSelector(site, role);
+  // 2026-10-29: a deliberate pick is never refused for good (Claude's new page made
+  // every reply "look like" the user's own message — refused 4× on the PC)
+  if (res && !res.ok && res.error === "LOOKS_LIKE_USER" && res.canForce && window.api.pickerForce) {
+    let yes = false;
+    try { yes = window.confirm("This looks like your own message. Use it anyway?"); } catch (_) { yes = false; }
+    if (yes) res = await window.api.pickerForce(site, role);
+  }
   ps.busy = null;
   if (res && res.ok) {
     pickerSay(site, `✓ ${PICK_ROLE_NAME[role]}: ${res.preview || "found"}. Press Save to lock it in (or Clear).`, "ok");
@@ -171,6 +179,23 @@ async function pickerTest(site) {
   else if (r && r.deferred) pickerSay(site, `${SITE_LABELS[site]} was busy — try “Test it” again in a moment.`, "warn");
   else pickerSay(site, r && r.error === "CHECKING" ? `${SITE_LABELS[site]} is being checked right now — try again in a moment.` : r && r.error === "TEACHING" ? "A 🔢 number teach is running — wait for it to finish." : r && r.error === "INACTIVE" ? `${SITE_LABELS[site]} isn't Active — tick it first.` : `✕ The check-in didn't work${r && r.say ? `: ${r.say}` : ""}`, "err");
   await refreshPicker(site);
+}
+// 2026-10-29: one button to undo every taught / learned part for this AI.
+async function pickerForgetAll(site) {
+  if (!window.api.pickerForgetAll) return;
+  let yes = false;
+  try { yes = window.confirm(`Forget everything you taught (🎯 / 🔢) and everything AutoInjector learned for ${SITE_LABELS[site]}?\n\nIt goes back to the built-in way of finding the message box, Send button and replies.`); } catch (_) { yes = false; }
+  if (!yes) return;
+  const r = await window.api.pickerForgetAll(site);
+  if (r && r.ok) { pickerState(site).status = r; pickerSay(site, `↺ Forgot what was taught for ${SITE_LABELS[site]} — back to the built-in way. Press “Test it” to check it works.`, "ok"); }
+  else pickerSay(site, `Couldn't forget (${(r && r.error) || "error"}).`, "err");
+  renderPicker(site);
+}
+async function pickerCopyStructure(site) {
+  if (!window.api.pickerPageStructure) return;
+  const r = await window.api.pickerPageStructure(site);
+  if (r && r.ok) pickerSay(site, `📋 Copied ${SITE_LABELS[site]}'s page structure (${r.rows || 0} message rows; no message text) — paste it into your report.`, "ok");
+  else pickerSay(site, `Couldn't read the page structure (${(r && r.error) || "error"}).`, "err");
 }
 async function pickerCancel(site) {
   if (window.api.pickerCancel) await window.api.pickerCancel(site);
@@ -256,6 +281,8 @@ function renderPicker(site, menuEl) {
     mk("pk-test", "Test it", () => pickerTest(site), "Send a check-in (a tiny message) to confirm the AI works");
     const testBtn = mk("pk-roundtrip", "🧪 Test", () => runSelfTest(site), "Round-trip test: send a real test prompt, wait for the reply, and light up green/red");
     testBtn.classList.add("pk-more");
+    mk("pk-forget", `↺ Forget what I taught for ${L}`, () => pickerForgetAll(site), `Clear every part you saved with 🎯 / 🔢 and everything AutoInjector learned for ${L} — back to the built-in way of reading it`).classList.add("pk-more");
+    mk("pk-structure", "📋 Copy page structure", () => pickerCopyStructure(site), `Copy a report of how ${L}'s page is built (tags and counts only — never what anyone wrote) to paste into a bug report`).classList.add("pk-more");
     menu.appendChild(acts);
     const status = document.createElement("div");
     status.className = "pick-status"; status.id = `pick-status-${site}`; status.setAttribute("aria-live", "polite");

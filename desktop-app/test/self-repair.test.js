@@ -787,6 +787,111 @@ async function testTeachFastAndOwned() {
   assert(sim2.engine.expects("chatgpt", t2.number, ["0042"]) === false, "after the teach, the number is nobody's special word any more");
 }
 
+
+// ---------------------------------------------------------------------------------
+// Claude's page since 2026-10-29 (PC log): message rows with a hidden h3 heading in
+// every row, the text in div[data-cds="Prose"] for both roles, and a sidebar whose
+// recent-chats list was learned as "the reply" (div[data-testid="sidebar-recents"]).
+const ROWS_HTML = require("fs").readFileSync(require("path").join(__dirname, "fixtures", "claude-rows.html"), "utf8");
+function rowsPage(edit) { return parseHTML(edit ? edit(ROWS_HTML) : ROWS_HTML, { url: "https://claude.ai/chat/1" }); }
+const KC = SR.pageKitFor("claude", SITES);
+const userRow = (t) => `<div data-testid="transcript-row" class="row"><h3 data-find-omitted class="sr-only">You said: ${t}</h3><div class="user-turn"><span class="avatar">JC</span><div data-cds="Prose"><p>${t}</p></div></div><div class="row-actions"><button aria-label="Edit">e</button></div></div>`;
+const claudeRow = (t) => `<div data-testid="transcript-row" class="row"><h3 data-find-omitted class="sr-only">Claude said: ${t}</h3><div data-cds="Prose"><p>${t}</p></div><div class="row-actions"><button aria-label="Copy">c</button><button aria-label="Retry">r</button></div></div>`;
+async function testClaudeRows() {
+  console.log("\n== Claude 2026-10-29 rows: who wrote each row; the sidebar is never a reply ==");
+  const doc = rowsPage();
+  const info = KC.RK.classify(doc);
+  assert(info.rows.length === 4 && info.rows.map((r) => r.role).join(",") === "user,assistant,user,assistant" && info.rows.every((r) => /heading/.test(r.why)), `rows and roles from the hidden headings (${info.rows.map((r) => r.role + ":" + r.why).join(" ")})`);
+  // any case, and "Claude" / "You" alone in a hidden heading
+  const lower = rowsPage((h) => h.replace(/You said:/g, "you said").replace(/Claude said:/g, "CLAUDE"));
+  assert(KC.RK.classify(lower).rows.map((r) => r.role).join(",") === "user,assistant,user,assistant", "heading words in any case (\"you said\" / \"CLAUDE\")");
+  // no headings at all: Edit / Retry buttons and the avatar still tell
+  const noHead = rowsPage((h) => h.replace(/<h3 data-find-omitted class="sr-only">[^<]*<\/h3>/g, ""));
+  const nh = KC.RK.classify(noHead);
+  assert(nh.rows.map((r) => r.role).join(",") === "user,assistant,user,assistant" && !nh.rows.some((r) => /heading/.test(r.why)), `without headings: buttons / avatar (${nh.rows.map((r) => r.why).join(" ")})`);
+  // nothing to tell them apart: alternation (user first)
+  const bare = parseHTML(`<main><div id="t"><div data-testid="transcript-row"><div data-cds="Prose"><p>q one</p></div></div><div data-testid="transcript-row"><div data-cds="Prose"><p>a one</p></div></div><div data-testid="transcript-row"><div data-cds="Prose"><p>q two</p></div></div></div><div data-cds="Editor" contenteditable="true"></div></main>`, { url: "https://claude.ai/chat/2" });
+  const bi = KC.RK.classify(bare);
+  assert(bi.rows.map((r) => r.role).join(",") === "user,assistant,user" && bi.rows.every((r) => r.why === "order"), "nothing distinguishes the rows: by order (user, Claude, user)");
+  // streaming flag wins for a row without anything else
+  const stream = parseHTML(`<main><div data-testid="transcript-row"><div data-cds="Prose"><p>q</p></div></div><div data-testid="transcript-row" data-is-streaming="true"><div data-cds="Prose"><p>a</p></div></div><div data-cds="Editor" contenteditable="true"></div></main>`, { url: "https://claude.ai/chat/3" });
+  assert(KC.RK.classify(stream).rows[1].role === "assistant", "data-is-streaming marks Claude's row");
+
+  // the PC's cause: the check-in word only in the sidebar's recent chats (Claude names
+  // the chat after it) — the old page search learned the sidebar list as "the reply"
+  const sideOnly = () => rowsPage((h) => h.replace("Marigold check-in test chat", "Zinnia").replace('<a href="#3">Reply with only this word quokka</a>', ""));
+  const old = SR.pageKit().learnReply(sideOnly(), "zinnia", PHRASE, SR.userSelFor("claude"));
+  assert(old.ok && /sidebar-recents/.test(old.selector), `before: the page search learned the sidebar (${old.selector}) — the PC's replySelector`);
+  const now = await runScript(SR.buildLearnReplyScript("zinnia", PHRASE, "claude"), sideOnly());
+  assert(!now.ok && now.reason === "WORD_NOT_FOUND", `now: the sidebar is never searched (${now.reason})`);
+  const both = sideOnly();
+  append(both, both.getElementById("transcript"), userRow("[MSG #0009] Reply with only this word: zinnia") + claudeRow("zinnia"));
+  const lr = await runScript(SR.buildLearnReplyScript("zinnia", PHRASE, "claude"), both);
+  const hit = lr.ok ? both.querySelectorAll(lr.selector) : [];
+  assert(lr.ok && !/sidebar|recents/.test(lr.selector) && hit.length && /zinnia/.test(hit[hit.length - 1].textContent) && !hit.some((x) => KC.RK.inChrome(x)), `with the word in Claude's row too, a reply selector is learned — not the sidebar (${lr.selector})`);
+  assert(KC.validateReply(both, 'div[data-testid="sidebar-recents"]', "zinnia", () => false).reason === "IN_SIDEBAR", "a selector that matches the sidebar is refused (IN_SIDEBAR)");
+  const san = SR.sanitizeLearned({ sites: { claude: { assistant: { selector: 'div[data-testid="sidebar-recents"]', how: "page-search", learnedAt: 1 }, input: { selector: 'div[data-cds="Editor"]', learnedAt: 1 } } } }, ["claude"]);
+  assert(!san.claude.assistant && san.claude.input, "a saved learned sidebar selector is dropped when the app starts (the input one is kept)");
+  const alt = await runScript(SR.buildAlternativesScript("claude", SITES, {}, ["assistant"], "zinnia", PHRASE), both);
+  assert(!alt.found.assistant || !/sidebar/.test(alt.found.assistant), `alternatives never pick the sidebar (${alt.found.assistant || "none"})`);
+
+  console.log("\n== Claude 2026-10-29 rows: 🎯 on Claude's reply is accepted (the old rule refused it 4× as LOOKS_LIKE_USER) ==");
+  const pk = rowsPage((h) => h.replace('<div id="transcript">', '<div id="transcript" class="user-message-list">'));
+  const prose = pk.querySelectorAll('[data-cds="Prose"]');
+  const cfg = { role: "assistant", markers: SR.replyMarkers("claude", SITES), userSel: SR.userSelFor("claude") };
+  const oldPick = SR.pageKit().pickResolve(pk, prose[3].querySelector("p"), cfg);
+  assert(!oldPick.ok && oldPick.error === "LOOKS_LIKE_USER", `before: refused as LOOKS_LIKE_USER (${oldPick.error})`);
+  const p1 = KC.pickResolve(pk, prose[3].querySelector("p"), cfg);
+  assert(p1.ok && p1.selector, `now: accepted (${p1.selector}, ${p1.rows})`);
+  const p2 = KC.pickResolve(pk, prose[2].querySelector("p"), cfg);
+  assert(!p2.ok && p2.error === "LOOKS_LIKE_USER" && p2.canForce, "the user's own row: asked, not refused for good (canForce)");
+  const p3 = KC.pickResolve(pk, prose[2].querySelector("p"), Object.assign({ force: true }, cfg));
+  const spans = p3.ok ? pk.querySelectorAll(p3.selector).some((x) => KC.RK.holdsRows(KC.RK.classify(pk), x).length > 1) : true;
+  assert(p3.ok && !spans, `forced: saved as a per-row selector (the reader keeps only Claude's rows) (${p3.selector})`);
+  const p4 = KC.pickResolve(pk, pk.querySelector('[data-testid="sidebar-recents"] a'), cfg);
+  assert(!p4.ok && p4.error === "IN_SIDEBAR", "a click in the sidebar is refused");
+  const ok = SR.buildPickForceScript("claude", SITES);
+  assert(/pickForce/.test(ok), "the force script re-uses the last click");
+
+  console.log("\n== Claude 2026-10-29 rows: 🔢 never saves a \"user\" selector that also finds Claude's rows ==");
+  const LOG_USER = 'div[data-testid="transcript-row"] h3[data-find-omitted]';
+  const tdoc = rowsPage();
+  assert(KC.userSelBad(tdoc, LOG_USER, tdoc.querySelectorAll('[data-cds="Prose"]')[3]) === true, "the PC's saved user selector (the hidden heading of EVERY row) is recognised as matching Claude's rows");
+  const r0 = await runScript(SR.buildTeachStartScript("Claude", "4827", "claude"), tdoc);
+  const st = tdoc.__window.__aiTeach;
+  const box = tdoc.querySelector('[data-cds="Editor"]');
+  const send = tdoc.querySelector('[data-testid="chat-input-send"]');
+  let t = 1000;
+  typeInto(box, "4827");
+  let s = KC.teachStep(tdoc, st, t += 300);
+  assert(r0.ok && s.phase === "typed" && s.selectors.input && tdoc.querySelector(s.selectors.input) === box, `the Editor box learned (${s.selectors.input})`);
+  st.events.push({ type: "click", t: t + 100, el: send });
+  box.textContent = "";
+  s = KC.teachStep(tdoc, st, t += 400);
+  assert(s.phase === "sent" && s.selectors.send && tdoc.querySelector(s.selectors.send) === send, `chat-input-send learned (${s.selectors.send})`);
+  append(tdoc, tdoc.getElementById("transcript"), userRow("4827"));
+  s = KC.teachStep(tdoc, st, t += 300);
+  const claudeEls = () => KC.RK.classify(tdoc).rows.filter((r) => r.role === "assistant").map((r) => r.el);
+  const userBad = (sel) => !!sel && tdoc.querySelectorAll(sel).some((x) => claudeEls().some((c) => c === x || c.contains(x)));
+  assert(s.phase === "user_seen" && !userBad(s.selectors.user), `the user's message learned without matching Claude's rows (${s.selectors.user || "none"})`);
+  append(tdoc, tdoc.getElementById("transcript"), claudeRow("You sent 4827."));
+  KC.teachAsked(tdoc, st, t += 50);
+  append(tdoc, tdoc.getElementById("transcript"), userRow(SR.followupText("4827")));
+  append(tdoc, tdoc.getElementById("transcript"), claudeRow("[TO: USER] 7284 [FROM: CLAUDE]"));
+  KC.teachStep(tdoc, st, t += 300);
+  s = KC.teachStep(tdoc, st, t += 1500);
+  assert(s.phase === "done" && s.selectors.assistant, `the reply learned (${s.selectors.assistant})`);
+  assert(!userBad(s.selectors.user), `the saved "user" selector never matches Claude's rows (${s.selectors.user || "none"})`);
+  // force the PC's bad one in and finish again: it is dropped (checked against the reply)
+  st.user = LOG_USER; st.phase = "wait_reply"; st.replyKey = null;
+  KC.teachStep(tdoc, st, t += 300);
+  s = KC.teachStep(tdoc, st, t += 1500);
+  assert(s.phase === "done" && s.selectors.user !== LOG_USER && s.userRejected === "MATCHES_REPLY" && !userBad(s.selectors.user), `a both-roles "user" selector is not saved (${s.selectors.user || "none"})`);
+  const lines = KC.RK.classify(tdoc).rows.filter((r) => r.role === "assistant");
+  const read = tdoc.querySelectorAll(s.selectors.assistant).filter((x) => lines.some((r) => r.el === x || r.el.contains(x)));
+  assert(read.length && /7284/.test(read[read.length - 1].textContent), "the learned reply selector finds Claude's newest reply");
+}
+
 (async () => {
   try {
     testClassifier();
@@ -801,6 +906,7 @@ async function testTeachFastAndOwned() {
     await testPicker();
     await testNoNags();
     testLearnedStore();
+    await testClaudeRows();
   } catch (e) { failed++; console.log(`  FAIL - crashed: ${e && e.stack || e}`); }
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

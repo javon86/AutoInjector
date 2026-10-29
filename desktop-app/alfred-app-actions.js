@@ -190,6 +190,9 @@ A('picker.cancel', 'picker:cancel', { t: '🎯 Cancel pointing', c: true, aa: tr
 A('picker.save', 'picker:save', { t: '🎯 Save what you pointed at', c: true, a: { site, role: { type: 'string', enum: ['input', 'send', 'assistant'] } }, r: ['site', 'role'], ex: { site: 'claude', role: 'input' } });
 A('picker.clear', 'picker:clear', { t: '🎯 Clear a saved part', c: true, a: { site, role: { type: 'string', enum: ['input', 'send', 'assistant'] } }, r: ['site', 'role'], ex: { site: 'claude', role: 'input' } });
 A('picker.test', 'picker:test', { t: '🎯 Test the saved parts', c: true, aa: true, a: { site }, r: ['site'], ex: { site: 'claude' } });
+A('picker.force', 'picker:force', { t: '🎯 "Use it anyway": take the reply pick that looked like your own message', c: true, a: { site, role: { type: 'string', enum: ['assistant'] } }, r: ['site'], ex: { site: 'claude', role: 'assistant' } });
+A('picker.forget_all', 'picker:forget-all', { t: '↺ Forget everything taught (🎯 / 🔢) and learned for an AI — back to the built-in reader', c: true, a: { site }, r: ['site'], ex: { site: 'claude' } });
+A('picker.page_structure', 'picker:page-structure', { t: '📋 Copy how an AI page is built (tags and counts only, no message text) to the clipboard', c: true, aa: true, a: { site }, r: ['site'], ex: { site: 'claude' } });
 A('selector.clear', 'selector:clear', { t: 'Clear a hand-picked selector', c: true, a: { site, role: opt(20) }, r: ['site', 'role'], ex: { site: 'claude', role: 'input' } });
 
 // ---- 📖 Akọwe connection / server / view -------------------------------------------------------------------

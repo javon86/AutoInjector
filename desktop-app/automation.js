@@ -10,6 +10,11 @@
 // any other pane, on demand or automatically) instead of a fixed turn order.
 const SITES = require("./selectors");
 const { excludeSelectorsFor } = require("./reply-clean");
+// Claude's page since 2026-10-29: messages in rows, who-wrote-what per row, and
+// page chrome (the sidebar's recent chats) that is never a reply — embedded by
+// source into the read / send / probe scripts below.
+const { rowKit, rowConfigFor } = require("./transcript-rows");
+const ROWKIT_SRC = rowKit.toString();
 
 // TR-24: a selector that is only a tag name ("span", "p", "div") matches
 // hundreds of unrelated elements — never a usable override. Shared by the
@@ -72,6 +77,11 @@ function buildSendScript(site, text, overrides, sendOpts) {
     OVERRIDE_SEND: usableOverride(ov.send) || null,
     SURVEYS: SURVEY_PHRASES[site] || SURVEY_PHRASES.generic,
     USER_TURNS: USER_TURNS[site] || USER_TURNS.generic,
+    // the user's own "this is my message" selector (🔢 / 🎯), when there is one:
+    // on Claude's 2026-10-29 page it can be the hidden heading of EVERY row, so
+    // it is counted once per row and never in Claude's rows (userTurns() below)
+    USER_OVERRIDE: usableOverride(sendOpts && sendOpts.userSel) || null,
+    ROWKIT: rowConfigFor(SITES, site),
     INPUT_CANDIDATES: usableOverride(ov.input) ? [ov.input, ...cfg.INPUT_CANDIDATES] : cfg.INPUT_CANDIDATES,
     SEND_CANDIDATES: usableOverride(ov.send) ? [ov.send, ...cfg.SEND_CANDIDATES] : cfg.SEND_CANDIDATES,
     STOP_CANDIDATES: usableOverride(ov.stop) ? [ov.stop, ...(cfg.STOP_CANDIDATES || [])] : (cfg.STOP_CANDIDATES || []),
@@ -306,12 +316,32 @@ function buildSendScript(site, text, overrides, sendOpts) {
     function markerShown() { return !!CFG.marker && markerCount() > baseline; }
     // How many messages of the user's the conversation shows (-1: none of the
     // site's user-message selectors match anything, so this can't tell).
+    // 2026-10-29: Claude's page shows every message as a row; who wrote each row
+    // is decided per row (transcript-rows.js), and page chrome never counts.
+    const RK = (${ROWKIT_SRC})(CFG.ROWKIT);
     function userTurns() {
+      let info = null;
+      try { info = RK.enabled ? RK.classify(document) : null; } catch (_) { info = null; }
+      const rowMode = !!(info && info.rows.length);
+      if (CFG.USER_OVERRIDE) {
+        let list = [];
+        try { list = Array.from(document.querySelectorAll(CFG.USER_OVERRIDE)); } catch (_) { list = []; }
+        const seen = new Set();
+        for (const n of list) {
+          if (RK.inChrome(n)) continue;
+          if (RK.says(n) === "assistant") continue; // a "Claude said:" heading
+          const r = rowMode ? RK.rowOf(info, n) : null;
+          if (r && r.role !== "user") continue;
+          seen.add(r ? r.el : n);
+        }
+        if (seen.size) return seen.size;
+      }
       for (const sel of (CFG.USER_TURNS || [])) {
         let list = [];
-        try { list = document.querySelectorAll(sel); } catch { continue; }
+        try { list = Array.from(document.querySelectorAll(sel)).filter((n) => !RK.inChrome(n)); } catch { continue; }
         if (list.length) return list.length;
       }
+      if (rowMode) return info.users;
       return -1;
     }
     const turnsBefore = userTurns();
@@ -520,7 +550,8 @@ function buildReadScript(site, overrides) {
     // Page chrome inside a reply that is never part of its words (screen-reader
     // headings, Claude's thinking summary, code-block headers, timestamps) —
     // see reply-clean.js. Skipped when the reply's text is read.
-    EXCLUDE: excludeSelectorsFor(site).join(", ")
+    EXCLUDE: excludeSelectorsFor(site).join(", "),
+    ROWKIT: rowConfigFor(SITES, site)
   });
 
   // Returns { ok, text, generating, sendReady }. `generating` is the site's own
@@ -590,24 +621,59 @@ function buildReadScript(site, overrides) {
     }
     const textOf = (n) => innerOf(n) || tcOf(n);
 
-    let all = [];
-    if (CFG.STRICT) { try { all = Array.from(document.querySelectorAll(CFG.OVERRIDE)); } catch (_) { all = []; } }
-    const strictHit = all.length > 0;
-    if (!strictHit) for (const sel of CFG.ASSISTANT_CANDIDATES) {
-      try { document.querySelectorAll(sel).forEach((n) => all.push(n)); } catch (_) {}
+    // 2026-10-29: never page chrome (the sidebar's recent chats matched as "the
+    // reply"); on a page of message ROWS never a node in the user's row, outside
+    // every row, or holding several rows (transcript-rows.js).
+    const RK = (${ROWKIT_SRC})(CFG.ROWKIT);
+    let rowInfo = null;
+    try { rowInfo = RK.enabled ? RK.classify(document) : null; } catch (_) { rowInfo = null; }
+    const rowMode = !!(rowInfo && rowInfo.rows.length);
+    function okNode(n) {
+      if (!n) return false;
+      try { if (RK.inChrome(n)) return false; } catch (_) {}
+      if (rowMode) { const r = RK.rowOf(rowInfo, n); if (!r || r.role !== "assistant") return false; }
+      return true;
     }
+    function qsaOk(sel) { try { return Array.from(document.querySelectorAll(sel)).filter(okNode); } catch (_) { return []; } }
+
+    let all = [];
+    const overrideOk = CFG.OVERRIDE ? qsaOk(CFG.OVERRIDE).length : 0;
+    if (CFG.STRICT) all = qsaOk(CFG.OVERRIDE);
+    const strictHit = all.length > 0;
+    if (!strictHit) for (const sel of CFG.ASSISTANT_CANDIDATES) all.push(...qsaOk(sel));
     let node = all.length ? all[all.length - 1] : null;
     let text = node ? textOf(node) : "";
+    // Rows: the reply is Claude's LATEST row — and only when it comes after the
+    // user's latest row (before that, Claude hasn't started answering: nothing to
+    // read yet, never the previous reply or the user's own message). Inside that
+    // row: the one block of message text, or the whole row (minus its hidden
+    // heading and buttons, CFG.EXCLUDE) when the text is in several blocks.
+    let via = null;
+    if (rowMode) {
+      const A = rowInfo.lastAsst >= 0 ? rowInfo.rows[rowInfo.lastAsst] : null;
+      if (!A || rowInfo.lastUser > rowInfo.lastAsst) { node = null; text = ""; via = "rows-waiting"; }
+      else {
+        const inRow = all.filter((n) => n === A.el || A.el.contains(n));
+        const blocks = Array.from(new Set(inRow.concat(RK.contentIn(A.el))));
+        const outer = blocks.filter((n) => !blocks.some((m) => m !== n && m.contains(n)));
+        node = outer.length === 1 ? outer[0] : A.el;
+        text = textOf(node);
+        via = "rows";
+      }
+    }
+    // A saved / learned reply selector that finds no proper reply (nothing, only
+    // the user's rows or page chrome) is passed over for the built-in reader.
+    const overrideIgnored = !!(CFG.OVERRIDE && overrideOk === 0 && (via === "rows" || (node && text.trim())));
     // TR-23: a saved "reply" selector that only reaches PART of the reply (a
     // single paragraph — e.g. just the "[FROM: X]" line) made whole replies
     // look empty. If the built-in selectors find a reply whose text ENDS WITH
     // what the override read, the override is reading a fragment: use the
     // whole reply instead.
     let fragmentFixed = false;
-    if (CFG.OVERRIDE && text.trim() && !strictHit) {
+    if (!via && CFG.OVERRIDE && text.trim() && !strictHit) {
       let full = null;
       for (const sel of CFG.DEFAULT_ASSISTANT) {
-        try { const list = document.querySelectorAll(sel); if (list.length) { full = list[list.length - 1]; break; } } catch (_) {}
+        const list = qsaOk(sel); if (list.length) { full = list[list.length - 1]; break; }
       }
       const fullText = full ? textOf(full) : "";
       if (full && fullText.trim().length > text.trim().length && fullText.trim().endsWith(text.trim())) { node = full; text = fullText; fragmentFixed = "defaults"; }
@@ -620,7 +686,7 @@ function buildReadScript(site, overrides) {
     const startsWithTo = (s) => /^\\s*\\[\\s*TO\\s*:/i.test(s);
     // Only when the block we read has no [TO: anywhere — if it does, the AI
     // wrote (or quoted) it there and climbing could pick up a quoted tag.
-    if (node && hasFrom(text) && !startsWithTo(text) && !/\\[\\s*TO\\s*:/i.test(text)) {
+    if (!via && node && hasFrom(text) && !startsWithTo(text) && !/\\[\\s*TO\\s*:/i.test(text)) {
       const USER_MARKERS = '[data-message-author-role="user"], [data-testid="user-message"], user-query, .user-query';
       let cur = node;
       for (let i = 0; i < 10 && cur.parentElement && cur.parentElement !== document.body; i++) {
@@ -645,7 +711,7 @@ function buildReadScript(site, overrides) {
     // "[TO:" (seen live on Gemini) — because the page split the reply into
     // pieces the selector doesn't cover. Climb to the element holding the
     // whole reply, with the same guards (no user message, one reply only).
-    if (node && !fragmentFixed && !hasFrom(text) && text.trim().length <= 40 && startsWithTo(text)) {
+    if (!via && node && !fragmentFixed && !hasFrom(text) && text.trim().length <= 40 && startsWithTo(text)) {
       const USER_MARKERS2 = '[data-message-author-role="user"], [data-testid="user-message"], user-query, .user-query';
       let cur = node;
       for (let i = 0; i < 10 && cur.parentElement && cur.parentElement !== document.body; i++) {
@@ -673,7 +739,7 @@ function buildReadScript(site, overrides) {
     const fullOf = (n) => { let t = ""; try { t = innerOf(n) || ""; } catch (_) {} const tc = tcOf(n); return t.trim().length >= tc.trim().length * 0.6 ? t : tc; };
     const squash = (s) => String(s || "").replace(/\\s+/g, " ").trim();
     let containerChars = null;
-    if (node && !fragmentFixed) {
+    if (!via && node && !fragmentFixed) {
       // innerText of a part the page hasn't laid out (collapsed / not yet painted)
       // can be shorter than its real text
       const tcText = tcOf(node);
@@ -757,12 +823,14 @@ function buildReadScript(site, overrides) {
     let count = 0;
     const countWith = strictHit ? [CFG.OVERRIDE] : fragmentFixed === "defaults" ? CFG.DEFAULT_ASSISTANT : CFG.ASSISTANT_CANDIDATES;
     for (const sel of countWith) {
-      try { const n = document.querySelectorAll(sel).length; if (n) { count = n; break; } } catch (_) {}
+      const n = qsaOk(sel).length; if (n) { count = n; break; }
     }
     if (fragmentFixed === "climb") count = null;
+    if (rowMode) count = rowInfo.assistants; // one row = one message
     const stopShown = !!(stopBtn && isVisible(stopBtn)); // TR-28: the page's own "still writing" signal, on its own
     const inputFound = !!inputBox; // the AI's message box is on the page (a signed-out page has none)
-    return { ok: true, text, generating, stopShown, sendReady, composerEmpty, inputFound, count, fragmentFixed, nodeInfo };
+    const rows = rowMode ? { n: rowInfo.rows.length, user: rowInfo.users, assistant: rowInfo.assistants, how: rowInfo.how, waiting: via === "rows-waiting" } : null;
+    return { ok: true, text, generating, stopShown, sendReady, composerEmpty, inputFound, count, fragmentFixed, nodeInfo, rows, overrideIgnored };
   })();
   `;
 }
@@ -974,6 +1042,9 @@ function buildProbeScript(site, overrides) {
     SEND: usableOverride(ov.send) ? [ov.send, ...cfg.SEND_CANDIDATES] : cfg.SEND_CANDIDATES,
     ASSISTANT: usableOverride(ov.assistant) ? [ov.assistant, ...cfg.ASSISTANT_CANDIDATES] : cfg.ASSISTANT_CANDIDATES,
     STOP: usableOverride(ov.stop) ? [ov.stop, ...(cfg.STOP_CANDIDATES || [])] : (cfg.STOP_CANDIDATES || []),
+    OVERRIDE: usableOverride(ov.assistant) || null,
+    DEFAULT_ASSISTANT: cfg.ASSISTANT_CANDIDATES,
+    ROWKIT: rowConfigFor(SITES, site),
   });
   return `
   (() => {
@@ -982,10 +1053,36 @@ function buildProbeScript(site, overrides) {
       for (const sel of list || []) { try { if (document.querySelector(sel)) return sel; } catch (_) {} }
       return null;
     }
-    let assistantCount = 0, assistantSel = null;
-    for (const sel of CFG.ASSISTANT) {
-      try { const n = document.querySelectorAll(sel).length; if (n && !assistantSel) { assistantSel = sel; assistantCount = n; } } catch (_) {}
+    // Same rules as the reader: never page chrome (the sidebar's recent chats),
+    // and on a page of message rows only matches in the AI's rows count.
+    const RK = (${ROWKIT_SRC})(CFG.ROWKIT);
+    let rowInfo = null;
+    try { rowInfo = RK.enabled ? RK.classify(document) : null; } catch (_) { rowInfo = null; }
+    const rowMode = !!(rowInfo && rowInfo.rows.length);
+    function okNode(n) {
+      try { if (RK.inChrome(n)) return false; } catch (_) {}
+      if (rowMode) { const r = RK.rowOf(rowInfo, n); if (!r || r.role !== "assistant") return false; }
+      return true;
     }
+    function countOk(sel) { try { return Array.from(document.querySelectorAll(sel)).filter(okNode).length; } catch (_) { return 0; } }
+    function firstReply(list) {
+      for (const sel of list || []) { const n = countOk(sel); if (n) return { sel, n }; }
+      return null;
+    }
+    const withOv = firstReply(CFG.ASSISTANT);
+    const builtIn = firstReply(CFG.DEFAULT_ASSISTANT);
+    let assistantCount = withOv ? withOv.n : 0, assistantSel = withOv ? withOv.sel : null;
+    let builtinCount = builtIn ? builtIn.n : 0, builtinSel = builtIn ? builtIn.sel : null;
+    if (rowMode) {
+      // one row = one message; the reader takes the AI's latest row
+      assistantCount = rowInfo.assistants; builtinCount = rowInfo.assistants;
+      if (!assistantSel && assistantCount) assistantSel = "rows:" + (rowInfo.selector || rowInfo.how);
+      if (!builtinSel && builtinCount) builtinSel = "rows:" + (rowInfo.selector || rowInfo.how);
+    }
+    const overrideFinds = CFG.OVERRIDE ? countOk(CFG.OVERRIDE) : null;
+    // the saved / learned reply selector finds no proper reply but the built-in
+    // reader does: the built-in one is used (the reader passes the saved one over)
+    const overrideMisses = !!(CFG.OVERRIDE && overrideFinds === 0 && builtinCount > 0);
     const inputSel = first(CFG.INPUT);
     let body = "";
     try { body = String(document.body ? document.body.innerText : "").slice(0, 4000).toLowerCase(); } catch (_) {}
@@ -995,7 +1092,8 @@ function buildProbeScript(site, overrides) {
       url: String(location.href || ""),
       input: { found: !!inputSel, selector: inputSel },
       send: { found: !!first(CFG.SEND), selector: first(CFG.SEND) },
-      assistant: { count: assistantCount, selector: assistantSel },
+      assistant: { count: assistantCount, selector: assistantSel, builtinCount, builtinSelector: builtinSel, overrideFinds, overrideMisses },
+      rows: rowMode ? { n: rowInfo.rows.length, user: rowInfo.users, assistant: rowInfo.assistants, how: rowInfo.how, roleBy: Array.from(new Set(rowInfo.rows.map((r) => r.why || "order"))).slice(0, 4) } : null,
       stop: { found: !!first(CFG.STOP) },
       signedOutHint,
     };

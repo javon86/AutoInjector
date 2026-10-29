@@ -92,7 +92,7 @@ const IPC_INVENTORY = [
   'manager:stop', 'manager:test-connection', 'mcp:list', 'mcp:add', 'mcp:start', 'mcp:stop', 'mcp:remove', 'memory:search', 'memory:summary', 'models:info', 'models:open',
   'llm:status', 'llm:hardware', 'llm:check', 'llm:fix', 'llm:setup-all', 'llm:start-alfred', 'content:roots', 'content:use-root', 'folders:map', 'folders:move-comfy', 'folders:open', 'llm:scan', 'llm:use-store', 'llm:import-gguf', 'llm:install-ollama', 'llm:start', 'llm:stop', 'llm:search', 'llm:curated', 'llm:hf-files', 'llm:pull', 'llm:cancel', 'llm:remove', 'llm:use', 'llm:hf-token',
   'ollama:detect', 'ollama:list', 'ollama:managed-status', 'ollama:migrate', 'ollama:pull', 'ollama:recommended', 'panes:sync', 'participants:set',
-  'phone:info', 'phone:set-lan', 'picker:cancel', 'picker:clear', 'picker:save', 'picker:start', 'picker:status', 'picker:test',
+  'phone:info', 'phone:set-lan', 'picker:cancel', 'picker:clear', 'picker:save', 'picker:start', 'picker:status', 'picker:test', 'picker:force', 'picker:forget-all', 'picker:page-structure',
   'prompt-editor:close', 'prompts:delete', 'prompts:open-editor', 'prompts:save', 'prompts:send', 'relay:hop-limit', 'relay:silence', 'roles:set',
   'routing:auto-all', 'routing:pause-all', 'routing:set', 'routing:stop-all',
   'sd:cancel', 'sd:connect', 'sd:detect', 'sd:gallery', 'sd:generate', 'sd:install', 'sd:install-cancel', 'sd:install-check', 'sd:install-model',

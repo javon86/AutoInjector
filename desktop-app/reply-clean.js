@@ -31,6 +31,11 @@ const COMMON_EXCLUDE = [
 const SITE_EXCLUDE = {
   chatgpt: [],
   claude: [
+    // Claude's page since 2026-10-29: each message row carries a visually-hidden
+    // heading (h3[data-find-omitted], "You said:" / "Claude said:" …) and an
+    // action bar (Copy / Retry / Edit buttons) — never part of the reply's words
+    '[data-find-omitted]',
+    'button',
     // the extended-thinking / "thought process" disclosure above the answer
     '[data-testid*="thinking" i]',
     '[class*="thinking-block" i]',

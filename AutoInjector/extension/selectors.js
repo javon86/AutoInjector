@@ -28,6 +28,9 @@
       label: "Claude",
       match: (host) => /(^|\.)claude\.ai$/.test(host),
       INPUT_CANDIDATES: [
+        'div[data-cds="Editor"][contenteditable="true"]',
+        'div[data-cds="Editor"]',
+        '[data-cds="Editor"] [contenteditable="true"]',
         'div[contenteditable="true"][data-testid]',
         'div[contenteditable="true"].ProseMirror',
         'div[contenteditable="true"][class*="composer"]',
@@ -36,6 +39,7 @@
         "textarea"
       ],
       SEND_CANDIDATES: [
+        'button[data-testid="chat-input-send"]',
         'button[aria-label="Send Message"]',
         'button[aria-label="Send message"]',
         'button[data-testid="send-message-button"]',

@@ -45,6 +45,8 @@
  * booleans, counts, codes and CSS selectors.
  */
 const crypto = require('crypto');
+const { rowKit, rowConfigFor, isChromeSelector } = require('./transcript-rows');
+const DEFAULT_SITES = require('./selectors');
 
 const MARKER = '__AUTOINJECTOR_SELFREPAIR__';
 const LEARNED_VERSION = 1;
@@ -150,7 +152,12 @@ function altsFor(site, role) {
 
 // ---- the page kit: runs INSIDE the pane (and in Node tests on a fake DOM) -----------
 // Must stay self-contained (no closure over module scope): it is embedded by source.
-function pageKit() {
+function pageKit(rk) {
+  // 2026-10-29: rk = transcript-rows.js rowKit() for the site (page chrome such as
+  // the sidebar's recent chats is never a message; on a page of message ROWS who
+  // wrote each row is decided per row). Without one: no rows, nothing is chrome.
+  const NO_ROWS = { rows: [], how: null, selector: null, lastUser: -1, lastAsst: -1, users: 0, assistants: 0 };
+  const RK = rk && typeof rk.inChrome === 'function' ? rk : { enabled: false, inChrome: () => false, chromeRoot: () => false, classify: () => NO_ROWS, rowOf: () => null, holdsRows: () => [], contentIn: () => [], says: () => null };
   const OVERLAY = '[data-autoinjector-overlay]';
   const EDITABLE = 'textarea, [contenteditable="true"], [contenteditable=""], [contenteditable="plaintext-only"]';
   const SKIP_TAGS = { SCRIPT: 1, STYLE: 1, NOSCRIPT: 1, TEMPLATE: 1, SVG: 1, HEAD: 1 };
@@ -180,12 +187,12 @@ function pageKit() {
       for (const c of Array.from(n.childNodes || [])) {
         if (c.nodeType === 3) {
           if (lc(c.data).indexOf(want) !== -1 && n.nodeType === 1 && !seen.has(n)) { seen.add(n); if (ok(n)) out.push(n); }
-        } else if (c.nodeType === 1 && !SKIP_TAGS[c.tagName] && !(c.matches && safeMatches(c, OVERLAY)) && !isEditable(c)) walk(c);
+        } else if (c.nodeType === 1 && !SKIP_TAGS[c.tagName] && !(c.matches && safeMatches(c, OVERLAY)) && !isEditable(c) && !RK.chromeRoot(c)) walk(c);
       }
     })(doc.body);
     if (out.length) return out;
     for (const e of qsa(doc.body, '*') || []) {
-      if (SKIP_TAGS[e.tagName] || inOverlay(e) || inEditable(e)) continue;
+      if (SKIP_TAGS[e.tagName] || inOverlay(e) || inEditable(e) || RK.inChrome(e)) continue;
       if (lc(textOf(e)).indexOf(want) === -1) continue;
       if (Array.from(e.children).some((k) => lc(textOf(k)).indexOf(want) !== -1)) continue;
       if (ok(e)) out.push(e);
@@ -289,6 +296,21 @@ function pageKit() {
       return false;
     };
   }
+  // 2026-10-29: on a page of message rows the row decides (a "You said" / "Claude
+  // said" heading, role attributes, Edit / Retry buttons … see transcript-rows.js);
+  // the generic markers only where the rows can't tell.
+  function rowAware(doc, isUser, info) {
+    let inf = info;
+    if (!inf) { try { inf = RK.classify(doc); } catch (_) { inf = NO_ROWS; } }
+    if (!inf || !inf.rows.length) return isUser;
+    return (e) => {
+      if (!e || e.nodeType !== 1) return false;
+      const r = RK.rowOf(inf, e);
+      if (r) return r.role === 'user' || (!r.sure && isUser(e));
+      if (RK.holdsRows(inf, e).some((x) => x.role === 'user')) return true;
+      return isUser(e);
+    };
+  }
   // P37.1: the highest ancestor of `base` that is still only this message (the next
   // one up holds the user's message, the message box or our overlay).
   function turnOf(base, isUser) {
@@ -324,6 +346,9 @@ function pageKit() {
     const l = list.filter((x) => !inOverlay(x));
     if (!l.length) return { ok: false, reason: 'NO_MATCH' };
     if (l.length > 200) return { ok: false, reason: 'TOO_BROAD' };
+    if (l.some((x) => RK.inChrome(x))) return { ok: false, reason: 'IN_SIDEBAR' }; // 2026-10-29: the sidebar's recent chats
+    const info = o.info || (RK.enabled ? RK.classify(doc) : NO_ROWS);
+    if (info.rows.length && l.some((x) => RK.holdsRows(info, x).length > 1)) return { ok: false, reason: 'SPANS_ROWS' }; // a block holding several messages
     if (l.some((x) => o.isUser(x))) return { ok: false, reason: 'MATCHES_USER_MESSAGE' };
     if (l.some((x) => inEditable(x) || holdsEditable(x))) return { ok: false, reason: 'MATCHES_MESSAGE_BOX' };
     if (l.length > 1 && l.some((x) => l.some((y) => y !== x && x.contains(y)))) return { ok: false, reason: 'NESTED' };
@@ -348,6 +373,7 @@ function pageKit() {
     if (!levels.length) return { ok: false, reason: 'NO_CONTAINER' };
     const peers = peersOf(doc, turnOf(base, isUser), isUser);
     const minCount = peers >= 2 ? 2 : 0;
+    const info = RK.enabled ? RK.classify(doc) : NO_ROWS;
     const baseLen = textOf(base).trim().length;
     let best = null; let tried = 0; let narrow = 0;
     levels.forEach((node, li) => {
@@ -355,20 +381,32 @@ function pageKit() {
       const tight = t.trim().length <= baseLen + 160 && (t.match(/\[\s*FROM\s*:/gi) || []).length <= 1;
       for (const c of withAncestors(node, candidatesFor(node, 'assistant'))) {
         tried++;
-        const v = validateBlocks(doc, c.sel, { word, isUser, cover: o.cover || null, minCount });
+        const v = validateBlocks(doc, c.sel, { word, isUser, cover: o.cover || null, minCount, info });
         if (!v.ok) { if (v.reason === 'TOO_NARROW') narrow++; continue; }
         const score = c.score + (tight ? li * 3 : -40);
         if (!best || score > best.score) best = { selector: c.sel, score, count: v.count, level: li };
       }
     });
-    if (!best) return { ok: false, reason: narrow ? 'ONLY_ONE_MESSAGE' : 'NO_STABLE_SELECTOR', tried, peers };
+    if (!best) {
+      // 2026-10-29: Claude's rows look exactly alike for both roles (same row, same
+      // text block) — no CSS selector can name only Claude's. Then the ROW selector
+      // is the answer: the reader decides per row who wrote it and reads only the
+      // AI's latest row (transcript-rows.js).
+      const r = info.rows.length && info.selector ? RK.rowOf(info, base) : null;
+      if (r && r.role === 'assistant' && !RK.inChrome(base)) {
+        const mine = info.rows.filter((x) => x.role === 'assistant');
+        const newest = mine[mine.length - 1];
+        if (!word || (newest && lc(textOf(newest.el)).indexOf(lc(word)) !== -1)) return { ok: true, selector: info.selector, count: mine.length, level: 0, score: 0, tried, peers, rows: true };
+      }
+      return { ok: false, reason: narrow ? 'ONLY_ONE_MESSAGE' : 'NO_STABLE_SELECTOR', tried, peers };
+    }
     return { ok: true, selector: best.selector, count: best.count, level: best.level, score: best.score, tried, peers };
   }
   // P18.4: the check-in word in a NEW element that is not the user's message (which
   // holds `phrase`, e.g. "reply with only this word") and not the message box.
   function learnReply(doc, word, phrase, userSel) {
-    const isUser = userTest(phrase, userSel);
-    const bases = findText(doc, word, (e) => !isUser(e) && !inEditable(e) && !inOverlay(e));
+    const isUser = rowAware(doc, userTest(phrase, userSel));
+    const bases = findText(doc, word, (e) => !isUser(e) && !inEditable(e) && !inOverlay(e) && !RK.inChrome(e));
     if (!bases.length) return { ok: false, reason: 'WORD_NOT_FOUND' };
     return learnReplyFrom(doc, bases[bases.length - 1], word, isUser);
   }
@@ -381,7 +419,7 @@ function pageKit() {
     const replyHits = findText(doc, word, (e) => !isUser(e) && !inEditable(e) && !inOverlay(e));
     let readerHasWord = false, readerCount = 0;
     for (const sel of assistantSelectors || []) {
-      const l = qsa(doc, sel);
+      const l = (qsa(doc, sel) || []).filter((x) => !RK.inChrome(x));
       if (l && l.length) { readerCount = l.length; readerHasWord = lc(textOf(l[l.length - 1])).indexOf(lc(word)) !== -1; break; }
     }
     return { ok: true, wordOnPage: replyHits.length > 0, userBubble: findText(doc, phrase, (e) => !inEditable(e) && !inOverlay(e)).length > 0, readerCount, readerHasWord };
@@ -389,7 +427,7 @@ function pageKit() {
 
   // ---- P18.3 try built-in alternatives in order -----------------------------------
   function tryAlternatives(doc, alts, roles, word, phrase, skip) {
-    const isUser = (e) => !!phrase && lc(textOf(e)).indexOf(lc(phrase)) !== -1;
+    const isUser = rowAware(doc, (e) => !!phrase && lc(textOf(e)).indexOf(lc(phrase)) !== -1);
     const out = {};
     const skipSet = new Set(skip || []);
     for (const role of roles) {
@@ -583,7 +621,24 @@ function pageKit() {
   function teachIsUser(doc, st) {
     const userEls = st.user ? (qsa(doc, st.user) || []) : [];
     const known = userTest(null, st.userSel);
-    return (e) => (st.userTop && overlaps(e, st.userTop)) || userEls.some((u) => overlaps(u, e)) || lc(textOf(e)).indexOf(st.phrase) !== -1 || known(e);
+    return rowAware(doc, (e) => (st.userTop && overlaps(e, st.userTop)) || userEls.some((u) => overlaps(u, e)) || lc(textOf(e)).indexOf(st.phrase) !== -1 || known(e));
+  }
+  // 2026-10-29: a "your message" selector that also finds the AI's messages (Claude's
+  // hidden row heading is in EVERY row) is no use — it would count Claude's rows as
+  // the user's. Checked against the reply the teach just saw and the AI's rows.
+  function userSelBad(doc, sel, reply, info) {
+    const l = qsa(doc, sel) || [];
+    if (!l.length) return true;
+    const inf = info || RK.classify(doc);
+    const replyRow = reply ? RK.rowOf(inf, reply) : null;
+    return l.some((x) => {
+      if (RK.inChrome(x)) return true;
+      if (RK.says(x) === 'assistant') return true;
+      const r = RK.rowOf(inf, x);
+      if (r && (r.role === 'assistant' || r === replyRow)) return true;
+      if (reply && (overlaps(x, reply) || (replyRow && overlaps(x, replyRow.el)))) return true;
+      return false;
+    });
   }
   // One step of the teach watcher. Pure apart from `st`; `now` passed in for tests.
   function teachStep(doc, st, now) {
@@ -620,10 +675,12 @@ function pageKit() {
       // the user's message: the digits in a NEW block (not the box, not our banner)
       const hits = findText(doc, num, (e) => !inEditable(e) && !inOverlay(e) && !st.pre.has(e));
       if (hits.length) {
-        st.userBase = hits[0];
+        // the message itself, not a hidden "You said: …" heading in front of it
+        st.userBase = hits.find((h) => !safeMatches(h, RK.HIDDEN_HEAD || '[data-find-omitted]') && !(h.closest && h.closest('[data-find-omitted], .sr-only, .visually-hidden'))) || hits[0];
         st.userTop = blockTop(st.userBase, (p) => findText(p, num, () => true).length > 1);
         const ut = st.userTop;
-        st.user = deriveFor(doc, ut, 'user', (sel) => { const l = qsa(doc, sel); return !!l && l.length >= 1 && l.length <= 200 && l.some((x) => overlaps(x, ut)) && !l.some((x) => holdsEditable(x) || inOverlay(x)); });
+        const info = RK.classify(doc);
+        st.user = deriveFor(doc, ut, 'user', (sel) => { const l = qsa(doc, sel); return !!l && l.length >= 1 && l.length <= 200 && l.some((x) => overlaps(x, ut)) && !l.some((x) => holdsEditable(x) || inOverlay(x)) && !userSelBad(doc, sel, null, info); });
         st.phase = 'user_seen';
       } else if (now - st.sentAt > 20000) st.phase = 'user_seen';
     }
@@ -639,6 +696,14 @@ function pageKit() {
           const res = learnReplyFrom(doc, r, st.reversed, isUser);
           st.reply = res.ok ? res.selector : null;
           st.replyReason = res.ok ? null : res.reason;
+          // never keep a "your message" selector that also finds this reply / the AI's rows
+          if (st.user && userSelBad(doc, st.user, r)) {
+            const ut = st.userTop && doc.contains && doc.contains(st.userTop) ? st.userTop : null;
+            const info = RK.classify(doc);
+            const again = ut ? deriveFor(doc, ut, 'user', (sel) => { const l = qsa(doc, sel); return !!l && l.length >= 1 && l.length <= 200 && l.some((x) => overlaps(x, ut)) && !l.some((x) => holdsEditable(x) || inOverlay(x)) && !userSelBad(doc, sel, r, info); }) : null;
+            st.userRejected = st.user;
+            st.user = again || null;
+          }
           st.phase = 'done';
         }
       }
@@ -646,7 +711,7 @@ function pageKit() {
     return teachSummary(st);
   }
   function teachSummary(st) {
-    return { ok: true, phase: st.phase, polls: st.polls, sendHow: st.sendHow, selectors: { input: st.input, send: st.send, user: st.user, assistant: st.reply }, replyReason: st.replyReason || null };
+    return { ok: true, phase: st.phase, polls: st.polls, sendHow: st.sendHow, selectors: { input: st.input, send: st.send, user: st.user, assistant: st.reply }, replyReason: st.replyReason || null, userRejected: st.userRejected ? 'MATCHES_REPLY' : null };
   }
 
   // ---- P38 🎯 picker: point at ONE thing in the AI's window --------------------------
@@ -694,15 +759,33 @@ function pageKit() {
       const sel = deriveSend(doc, target);
       return sel ? { ok: true, role: 'send', selector: sel, preview: 'Send button found', count: (qsa(doc, sel) || []).length, tag: target.localName } : { ok: false, error: 'NO_STABLE_SELECTOR' };
     }
-    const isUser = userTest(null, cfg.userSel);
     if (inEditable(target) || holdsEditable(target)) return { ok: false, error: 'WRONG_ELEMENT_TYPE' };
-    if (isUser(target)) return { ok: false, error: 'LOOKS_LIKE_USER' };
-    const res = learnReplyFrom(doc, target, null, isUser, { cover: el });
+    if (RK.inChrome(target)) return { ok: false, error: 'IN_SIDEBAR' }; // the sidebar's recent chats, the page header
+    const info = RK.classify(doc);
+    const baseUser = userTest(null, cfg.userSel);
+    const isUser = rowAware(doc, baseUser, info);
+    const row = RK.rowOf(info, target);
+    // 2026-10-29: a deliberate pick is never refused for good — the panel asks
+    // "This looks like your own message. Use it anyway?" and repeats it with force.
+    if (isUser(target) && !cfg.force) return { ok: false, error: 'LOOKS_LIKE_USER', canForce: true };
+    // forced: the picked message (and its row) is the AI's, by the user's word
+    const userNow = cfg.force ? (e) => !overlaps(e, target) && !(row && overlaps(e, row.el)) && isUser(e) : isUser;
+    let res = null;
+    let rowFiltered = false;
+    if (cfg.force && row && info.selector) { res = { ok: true, selector: info.selector, count: info.assistants }; rowFiltered = true; }
+    else res = learnReplyFrom(doc, target, null, userNow, { cover: el });
+    if (!res.ok && row && info.selector) {
+      // the AI's rows look exactly like the user's: save the ROW selector — the
+      // reader decides per row who wrote it and reads only the AI's latest row
+      res = { ok: true, selector: info.selector, count: info.assistants };
+      rowFiltered = true;
+    }
     if (!res.ok) return { ok: false, error: res.reason || 'NO_STABLE_SELECTOR' };
-    const l = (qsa(doc, res.selector) || []).filter((x) => !inOverlay(x));
-    const mine = l.find((x) => overlaps(x, el)) || l[l.length - 1];
+    let l = (qsa(doc, res.selector) || []).filter((x) => !inOverlay(x));
+    if (rowFiltered) l = l.filter((x) => { const r = RK.rowOf(info, x); return r && r.role === 'assistant'; });
+    const mine = l.find((x) => overlaps(x, el)) || (row ? row.el : null) || l[l.length - 1];
     const words = String(wholeText(mine)).replace(/\s+/g, ' ').trim();
-    return { ok: true, role: 'assistant', selector: res.selector, preview: words.slice(0, 80) + (words.length > 80 ? '…' : ''), count: res.count, tag: mine ? mine.localName : null, latest: mine === l[l.length - 1] };
+    return { ok: true, role: 'assistant', selector: res.selector, preview: words.slice(0, 80) + (words.length > 80 ? '…' : ''), count: res.count, tag: mine ? mine.localName : null, latest: !!mine && mine === l[l.length - 1], forced: !!cfg.force, rows: row ? (rowFiltered ? 'row-selector' : 'assistant-only') : null };
   }
   function pickStart(doc, win, cfg, resolve) {
     if (win.__aiPick) { try { win.__aiPick.cancel('REPLACED'); } catch (_) {} }
@@ -730,7 +813,10 @@ function pageKit() {
     function onClick(ev) {
       if (ev && ev.target && inOverlay(ev.target)) return;
       block(ev);
-      finish(pickResolve(doc, ev.target, cfg));
+      const r = pickResolve(doc, ev.target, cfg);
+      // kept so "Use it anyway?" can take this very click without a second one
+      try { win.__aiPickLast = r && r.canForce ? { el: ev.target, cfg, at: Date.now() } : null; } catch (_) {}
+      finish(r);
     }
     function onKey(ev) { if (ev && ev.key === 'Escape') { block(ev); finish({ ok: false, error: 'CANCELLED' }); } }
     try {
@@ -741,6 +827,13 @@ function pageKit() {
     win.__aiPick = { cancel: (why) => finish({ ok: false, error: why || 'CANCELLED' }), cfg };
     timer = setTimeout(() => finish({ ok: false, error: 'TIMEOUT' }), Number(cfg.timeoutMs) || 60000);
     return { ok: true };
+  }
+  // "This looks like your own message. Use it anyway?" -> yes: the same click, forced.
+  function pickForce(doc, win) {
+    const last = win && win.__aiPickLast;
+    if (!last || !last.el || (doc.contains && !doc.contains(last.el))) return { ok: false, error: 'NOTHING_PICKED' };
+    try { win.__aiPickLast = null; } catch (_) {}
+    return pickResolve(doc, last.el, Object.assign({}, last.cfg, { force: true }));
   }
   function pickCancel(win) { if (win && win.__aiPick) { try { win.__aiPick.cancel('CANCELLED'); } catch (_) {} return { ok: true, cancelled: true }; } return { ok: true, cancelled: false }; }
   // Does each saved selector still find its thing on the page? (red ⚠️ when not)
@@ -754,18 +847,24 @@ function pageKit() {
       out[role] = { ok: vis.length > 0, count: vis.length };
     }
     let repliesOnPage = 0;
-    for (const s of replyHints || []) { const l = qsa(doc, s); if (l && l.length) { repliesOnPage = l.length; break; } }
+    for (const s of replyHints || []) { const l = (qsa(doc, s) || []).filter((x) => !RK.inChrome(x)); if (l && l.length) { repliesOnPage = l.length; break; } }
+    const info = RK.classify(doc);
+    if (info.rows.length) repliesOnPage = info.assistants;
     return { ok: true, roles: out, repliesOnPage };
   }
 
-  return { findText, candidatesFor, validateReply, validateBlocks, learnReply, learnReplyFrom, userTest, turnOf, peersOf, wholeText, scan, tryAlternatives, signals, pressStop, teachInstall, teachRemove, teachStep, teachAsked, teachSummary, teachState, teachDone, deriveInput, deriveSend, deriveImage, pickStart, pickCancel, pickResolve, matchCheck };
+  return { findText, candidatesFor, validateReply, validateBlocks, learnReply, learnReplyFrom, userTest, turnOf, peersOf, wholeText, scan, tryAlternatives, signals, pressStop, teachInstall, teachRemove, teachStep, teachAsked, teachSummary, teachState, teachDone, deriveInput, deriveSend, deriveImage, pickStart, pickCancel, pickForce, pickResolve, matchCheck, rowAware, userSelBad, RK };
 }
 
 // ---- script builders ----------------------------------------------------------------
 // Each returns ONE expression. `document`, `window`, `location` are the page's own.
-function kitScript(body) {
-  return `(() => { /* ${MARKER} */ const K = (${pageKit.toString()})(); ${body} })()`;
+// `site` picks the rowKit configuration (transcript-rows.js) the page kit runs with.
+function kitScript(body, site, SITES) {
+  const rk = `(${rowKit.toString()})(${cfgJson(rowConfigFor(SITES || DEFAULT_SITES, site || 'generic'))})`;
+  return `(() => { /* ${MARKER} */ const K = (${pageKit.toString()})(${rk}); ${body} })()`;
 }
+// The page kit for one site, in Node (tests): same rows / chrome rules as in the pane.
+function pageKitFor(site, SITES) { return pageKit(rowKit(rowConfigFor(SITES || DEFAULT_SITES, site))); }
 function cfgJson(o) { return JSON.stringify(o).replace(/</g, '\\u003c'); }
 function siteDefaults(SITES, site) { return (SITES && SITES[site]) || {}; }
 function currentLists(SITES, site, overrides) {
@@ -780,26 +879,26 @@ function currentLists(SITES, site, overrides) {
 function buildSignalScript(site, SITES, overrides) {
   const lists = currentLists(SITES, site, overrides);
   const msgs = Array.from(new Set(lists.assistant.concat(altsFor(site, 'assistant'), altsFor(site, 'user')))).join(', ');
-  return kitScript(`const CFG = ${cfgJson({ table: signaturesFor(site), input: Array.from(new Set(lists.input.concat(altsFor(site, 'input')))), notice: NOTICE_SELECTOR, messages: msgs })}; return K.signals(document, location, CFG.table, CFG.input, CFG.notice, CFG.messages);`);
+  return kitScript(`const CFG = ${cfgJson({ table: signaturesFor(site), input: Array.from(new Set(lists.input.concat(altsFor(site, 'input')))), notice: NOTICE_SELECTOR, messages: msgs })}; return K.signals(document, location, CFG.table, CFG.input, CFG.notice, CFG.messages);`, site, SITES);
 }
 function buildScanScript(site, SITES, overrides, word, phrase) {
   const lists = currentLists(SITES, site, overrides);
-  return kitScript(`const CFG = ${cfgJson({ word, phrase, assistant: lists.assistant })}; return K.scan(document, CFG.word, CFG.phrase, CFG.assistant);`);
+  return kitScript(`const CFG = ${cfgJson({ word, phrase, assistant: lists.assistant })}; return K.scan(document, CFG.word, CFG.phrase, CFG.assistant);`, site, SITES);
 }
 function buildAlternativesScript(site, SITES, overrides, roles, word, phrase) {
   const lists = currentLists(SITES, site, overrides);
   const alts = {}; for (const r of roles) alts[r] = altsFor(site, r);
   // never "find" what is already failing: skip the reply / stop selectors in use
   const skip = [].concat(roles.includes('assistant') ? lists.assistant : [], roles.includes('stop') ? lists.stop : []);
-  return kitScript(`const CFG = ${cfgJson({ alts, roles, word: word || '', phrase: phrase || '', skip })}; return K.tryAlternatives(document, CFG.alts, CFG.roles, CFG.word, CFG.phrase, CFG.skip);`);
+  return kitScript(`const CFG = ${cfgJson({ alts, roles, word: word || '', phrase: phrase || '', skip })}; return K.tryAlternatives(document, CFG.alts, CFG.roles, CFG.word, CFG.phrase, CFG.skip);`, site, SITES);
 }
 function userSelFor(site) { return altsFor(site || 'generic', 'user').join(', '); }
 function buildLearnReplyScript(word, phrase, site) {
-  return kitScript(`const CFG = ${cfgJson({ word, phrase, user: site ? userSelFor(site) : '' })}; return K.learnReply(document, CFG.word, CFG.phrase, CFG.user);`);
+  return kitScript(`const CFG = ${cfgJson({ word, phrase, user: site ? userSelFor(site) : '' })}; return K.learnReply(document, CFG.word, CFG.phrase, CFG.user);`, site);
 }
 function buildUnfreezeScript(site, SITES, overrides) {
   const lists = currentLists(SITES, site, overrides);
-  return kitScript(`const CFG = ${cfgJson({ stop: Array.from(new Set(lists.stop.concat(altsFor(site, 'stop')))) })}; return K.pressStop(document, CFG.stop);`);
+  return kitScript(`const CFG = ${cfgJson({ stop: Array.from(new Set(lists.stop.concat(altsFor(site, 'stop')))) })}; return K.pressStop(document, CFG.stop);`, site, SITES);
 }
 // P38 🔢 number teach: what the user is asked to type, and AutoInjector's follow-up.
 const FOLLOWUP_PHRASE = 'backwards, digits only';
@@ -812,13 +911,13 @@ function teachAskedBanner(label, number) {
   return `AutoInjector asked ${label} to write ${number} backwards — watching where the answer appears…`;
 }
 function buildTeachStartScript(label, number, site) {
-  return kitScript(`const CFG = ${cfgJson({ number: String(number), reversed: reverseDigits(number), banner: teachBanner(label, number), phrase: FOLLOWUP_PHRASE, user: userSelFor(site) })}; return K.teachInstall(document, window, CFG.number, CFG.banner, CFG.reversed, CFG.phrase, CFG.user);`);
+  return kitScript(`const CFG = ${cfgJson({ number: String(number), reversed: reverseDigits(number), banner: teachBanner(label, number), phrase: FOLLOWUP_PHRASE, user: userSelFor(site) })}; return K.teachInstall(document, window, CFG.number, CFG.banner, CFG.reversed, CFG.phrase, CFG.user);`, site);
 }
-function buildTeachPollScript() {
-  return kitScript('const st = K.teachState(window); if (!st) return { ok: false, error: "NO_TEACH" }; return K.teachStep(document, st, Date.now());');
+function buildTeachPollScript(site) {
+  return kitScript('const st = K.teachState(window); if (!st) return { ok: false, error: "NO_TEACH" }; return K.teachStep(document, st, Date.now());', site);
 }
-function buildTeachAskedScript(label, number) {
-  return kitScript(`const CFG = ${cfgJson({ banner: teachAskedBanner(label, number) })}; const st = K.teachState(window); if (!st) return { ok: false, error: "NO_TEACH" }; return K.teachAsked(document, st, Date.now(), CFG.banner);`);
+function buildTeachAskedScript(label, number, site) {
+  return kitScript(`const CFG = ${cfgJson({ banner: teachAskedBanner(label, number) })}; const st = K.teachState(window); if (!st) return { ok: false, error: "NO_TEACH" }; return K.teachAsked(document, st, Date.now(), CFG.banner);`, site);
 }
 function buildTeachDoneScript(text, ms, tone) {
   return kitScript(`const CFG = ${cfgJson({ text: String(text || ''), ms: Number(ms) || 12000, tone: tone || 'ok' })}; K.teachRemove(document, window); return K.teachDone(document, window, CFG.text, CFG.ms, CFG.tone);`);
@@ -851,12 +950,13 @@ function replyMarkers(site, SITES) {
 }
 function buildPickScript(site, role, label, SITES, timeoutMs) {
   const cfg = { role, banner: pickBanner(label || site, role), timeoutMs: Number(timeoutMs) || 60000, markers: role === 'assistant' ? replyMarkers(site, SITES) : [], userSel: userSelFor(site) };
-  return kitScript(`const CFG = ${cfgJson(cfg)}; return new Promise((resolve) => { K.pickStart(document, window, CFG, resolve); });`);
+  return kitScript(`const CFG = ${cfgJson(cfg)}; return new Promise((resolve) => { K.pickStart(document, window, CFG, resolve); });`, site, SITES);
 }
 function buildPickCancelScript() { return kitScript('return K.pickCancel(window);'); }
+function buildPickForceScript(site, SITES) { return kitScript('return K.pickForce(document, window);', site, SITES); }
 function buildMatchCheckScript(site, SITES, sels) {
   const hints = Array.from(new Set((siteDefaults(SITES, site).ASSISTANT_CANDIDATES || []).concat(altsFor(site, 'assistant'))));
-  return kitScript(`const CFG = ${cfgJson({ sels: sels || {}, hints })}; return K.matchCheck(document, CFG.sels, CFG.hints);`);
+  return kitScript(`const CFG = ${cfgJson({ sels: sels || {}, hints })}; return K.matchCheck(document, CFG.sels, CFG.hints);`, site, SITES);
 }
 
 // ---- P18.2 the classifier --------------------------------------------------------------
@@ -957,6 +1057,9 @@ function sanitizeLearned(raw, sites, isBadSelector) {
       if (!x || typeof x !== 'object' || typeof x.selector !== 'string') continue;
       const sel = x.selector.trim();
       if (!sel || sel.length > 300 || (isBadSelector && isBadSelector(sel))) continue;
+      // 2026-10-29: a reply / user-message selector that names the sidebar's recent
+      // chats (or history / navigation) is never a message — dropped on load
+      if ((role === 'assistant' || role === 'user') && isChromeSelector(sel)) continue;
       out[s][role] = { selector: sel, how: typeof x.how === 'string' ? x.how.slice(0, 20) : 'learned', learnedAt: Number(x.learnedAt) || 0, version: Number(x.version) || LEARNED_VERSION };
     }
   }
@@ -1427,10 +1530,10 @@ function createSelfRepair(deps) {
     while (!ctl.cancel && now() - t.startedAt < opt.teachTimeoutMs) {
       await sleep(opt.teachPollMs);
       if (ctl.cancel) break;
-      const r = await page(site, buildTeachPollScript());
+      const r = await page(site, buildTeachPollScript(site));
       if (!r || !r.ok) {
         // the page was reloaded / navigated: put the watcher back (same number)
-        if (!installed || !installed.ok || (r && r.error === 'NO_TEACH')) { installed = await page(site, buildTeachStartScript(L, t.number, site)); if (t.asked && installed && installed.ok) await page(site, buildTeachAskedScript(L, t.number)); }
+        if (!installed || !installed.ok || (r && r.error === 'NO_TEACH')) { installed = await page(site, buildTeachStartScript(L, t.number, site)); if (t.asked && installed && installed.ok) await page(site, buildTeachAskedScript(L, t.number, site)); }
         continue;
       }
       summary = r;
@@ -1464,7 +1567,7 @@ function createSelfRepair(deps) {
         event('teach', { site, outcome: res && res.ok ? 'ASKED' : 'ASK_FAILED', how: t.sendVia || undefined });
         if (!res || !res.ok) { sendFail = String((res && res.error) || 'UNKNOWN'); break; }
         fa.typed = true;
-        await page(site, buildTeachAskedScript(L, t.number));
+        await page(site, buildTeachAskedScript(L, t.number, site));
         t.phase = 'wait_reply';
         emit(site, { kind: 'teach', phase: 'wait_reply' });
       }
@@ -1654,5 +1757,6 @@ module.exports = {
   describeProblem, signaturesFor, altsFor, pageKit, classify, createSelfRepair, sanitizeLearned,
   buildSignalScript, buildScanScript, buildAlternativesScript, buildLearnReplyScript, buildUnfreezeScript,
   buildTeachStartScript, buildTeachPollScript, buildTeachAskedScript, buildTeachStopScript, buildTeachDoneScript, teachLearnedWords, teachBanner, teachAskedBanner, probeText, pickWord, pickNumber, containsWord,
-  FOLLOWUP_PHRASE, followupText, reverseDigits, PICK_THING, pickBanner, replyMarkers, buildPickScript, buildPickCancelScript, buildMatchCheckScript, userSelFor
+  FOLLOWUP_PHRASE, followupText, reverseDigits, PICK_THING, pickBanner, replyMarkers, buildPickScript, buildPickCancelScript, buildPickForceScript, buildMatchCheckScript, userSelFor,
+  pageKitFor, isChromeSelector
 };

@@ -38,7 +38,8 @@ Module._load = function (request) {
 };
 const mockElectron = require(mockElectronPath);
 mockElectron.shell = { openExternal: async () => {}, openPath: async () => "" };
-mockElectron.clipboard = { writeText: () => {} };
+const clipboardWrites = [];
+mockElectron.clipboard = { writeText: (t) => { clipboardWrites.push(String(t)); } };
 const { parseHTML } = require("./fake-dom");
 
 let passed = 0, failed = 0;
@@ -204,6 +205,58 @@ async function main() {
   assert(trip && trip.status === "fail" && trip.reply_excerpt === "I can’t help with that “test” right now.", `a reply that really is not the JSON: what Claude wrote travels with the failure for "Technical details" (${JSON.stringify(trip && trip.reply_excerpt)})`);
   const md = fs.readFileSync(lt.report, "utf8");
   assert(/What Claude wrote: I can’t help with that “test” right now\./.test(md) && !md.includes(token), "…and is in the saved report (never the key)");
+
+
+  // ---------------------------------------------------------------------------------
+  console.log("\n== Claude 2026-10-29: the page check prefers the built-ins, 🎯 “Use it anyway”, 📋 page structure, ↺ forget ==");
+  {
+    const { runScript } = require("./fake-dom");
+    const cdoc = parseHTML(fs.readFileSync(path.join(__dirname, "fixtures", "claude-rows.html"), "utf8"), { url: "https://claude.ai/chat/1" });
+    cw.selfRepairPage = cdoc;
+    // the page check and the page-structure report run on the same fake Claude page
+    cw.evaluator = async (script) => {
+      if (script.includes("overrideMisses") || script.includes("autoinjector-page-structure")) return runScript(script, cdoc);
+      const keep = cw.evaluator; cw.evaluator = null;
+      try { return await cw.executeJavaScript(script); } finally { cw.evaluator = keep; }
+    };
+    // the PC's learned "reply" — the sidebar's recent chats — can't be saved any more
+    cw._nextPickResult = { ok: true, selector: 'div[data-testid="sidebar-recents"]', tag: "div", matchCount: 1, visible: true, roleOk: true, sample: "Marigold" };
+    const side = await call("selector:pick", { site: "claude", role: "assistant" });
+    assert(!side.ok && side.error === "IN_SIDEBAR", `a reply selector that names the sidebar is refused (${side.error})`);
+    // a saved reply selector that finds nothing on the new page
+    cw._nextPickResult = { ok: true, selector: "div.font-claude-message-old", tag: "div", matchCount: 1, visible: true, roleOk: true, sample: "An older Claude answer that is not on the page any more" };
+    const oldPick = await call("selector:pick", { site: "claude", role: "assistant" });
+    assert(oldPick.ok, `(an old reply selector was saved earlier) ${JSON.stringify(oldPick)}`);
+    const log3 = logNow().length;
+    const hc = await call("health:check", { site: "claude" });
+    const pr = hc.results.claude;
+    const tail3 = logNow().slice(log3);
+    assert(pr.ok && pr.input.found && pr.send.found && pr.assistant.count === 2 && pr.assistant.overrideMisses === true, `the page check finds Claude's 2 replies with the built-ins (${JSON.stringify(pr.assistant)})`);
+    assert(/"kind":"pane-check"[^\n]*"site":"claude"[^\n]*"usingBuiltIns":true/.test(tail3) && /finds no reply on Claude's page, but the built-in reader finds 2/.test(tail3) && /Forget what I taught/.test(tail3), "the log says the saved one finds nothing and the built-in reader is used — and how to clear it");
+    assert(/"kind":"pane-check"[^\n]*"rows":\{"n":4,"user":2,"assistant":2/.test(tail3), "the log shows the rows the page check saw (no text)");
+    // 🎯 on the user's own row: asked, then taken with “Use it anyway”
+    const picking = call("picker:start", { site: "claude", role: "assistant" });
+    await sleep(30);
+    const userP = cdoc.querySelectorAll('[data-cds="Prose"]')[2].querySelector("p");
+    userP.dispatchEvent({ type: "click", target: userP, preventDefault() {}, stopImmediatePropagation() {} });
+    const pk1 = await picking;
+    assert(!pk1.ok && pk1.error === "LOOKS_LIKE_USER" && pk1.canForce === true, `a pick on the user's own row asks first (${JSON.stringify(pk1)})`);
+    const pk2 = await call("picker:force", { site: "claude", role: "assistant" });
+    assert(pk2.ok && pk2.forced && pk2.selector, `“Use it anyway” takes the same click (${pk2.selector})`);
+    let ps3 = await call("picker:status", { site: "claude" });
+    assert(ps3.items.assistant.state === "picked", "…as a draft to Save, like any pick");
+    // 📋 the page structure: copied, no message text
+    const cs = await call("picker:page-structure", { site: "claude" });
+    const copied = clipboardWrites[clipboardWrites.length - 1] || "";
+    assert(cs.ok && cs.rows === 4 && /"tool": "autoinjector-page-structure\/1"/.test(copied), `📋 copies the report (${cs.chars} characters, ${cs.rows} rows)`);
+    assert(!/tomatoes|beans|marigold|plant first|after that|Garden plans/i.test(copied) && !/page-structure-copied[^\n]*beans/.test(logNow()), "with no message, title or sidebar text in it (nor in the log)");
+    // ↺ forget everything taught for Claude
+    const fg = await call("picker:forget-all", { site: "claude" });
+    ps3 = await call("picker:status", { site: "claude" });
+    assert(fg.ok && fg.forgot.saved.includes("assistant") && ["input", "send", "assistant"].every((r) => ps3.items[r].state === "none"), `↺ forgets every saved / learned part for Claude (${JSON.stringify(fg.forgot)})`);
+    assert(/"kind":"selector-forget-all"[^\n]*"site":"claude"/.test(logNow()), "and says so in the log");
+    cw.evaluator = null; cw.selfRepairPage = null;
+  }
 
   await call("akowe:set-enabled", { enabled: false });
   console.log(`\n${passed} passed, ${failed} failed`);

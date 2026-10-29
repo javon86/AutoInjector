@@ -27,6 +27,12 @@ const SITES = require("./selectors");
 const { cleanReplyText } = require("./reply-clean");
 const { selftestPrompt, classifySelftestReply } = require("./selftest-verdict");
 const { buildSendScript, buildReadScript, buildFileInputFinderExpression, buildPickScript, buildLoginFillScript, buildProbeScript, isBareTagSelector } = require("./automation");
+const { isChromeSelector } = require("./transcript-rows");
+const { buildPageStructureScript } = require("./tools/page-structure");
+// 2026-10-29: a reply / your-message selector that names page chrome (the sidebar's
+// recent chats — the PC learned div[data-testid="sidebar-recents"] as "the reply")
+// is never kept, saved or learned.
+function badRoleSelector(role, sel) { return isBareTagSelector(sel) || ((role === "assistant" || role === "user") && isChromeSelector(sel)); }
 const managerProvider = require("./manager-provider");
 const dbService = require("./db-service");
 const ollamaManager = require("./ollama-manager");
@@ -771,6 +777,7 @@ function loadPersistedState() {
         // hundreds of things and made replies unreadable — drop it.
         for (const [role, sel] of Object.entries(state.selectorOverrides[site])) {
           if (isBareTagSelector(sel)) { delete state.selectorOverrides[site][role]; logEvent("selector-override-dropped", { site, role, selector: sel, reason: "too generic (a bare tag name)", severity: "warn" }); }
+          else if (badRoleSelector(role, sel)) { delete state.selectorOverrides[site][role]; logEvent("selector-override-dropped", { site, role, selector: sel, reason: "it points at the sidebar / page chrome, never a message", severity: "warn" }); }
         }
       }
     }
@@ -929,6 +936,7 @@ const readCount = {};
 const capturedCount = {};
 const tagSeenAt = {}; // when a [FROM:]-tagged reply first appeared on this pane (settle ceiling)
 const fragmentWarned = {}; // TR-23: logged the "override reads only part of the reply" warning
+const overrideIgnoredWarned = {}; // 2026-10-29: logged "the saved reply selector finds no reply — using the built-in reader"
 const settleKey = (s) => String(s || "").replace(/\s+/g, "");
 // M1: the AI was seen writing since the last capture (the Relay Trace then
 // counts the messages it was answering as started).
@@ -1011,6 +1019,15 @@ function effectiveOverrides(site) {
   if (t) { if (t.input) out.input = t.input; if (t.send) out.send = t.send; }
   return out;
 }
+// The user's own "this is my message" selector (🔢 / 🎯 / learned) for the send
+// script's proof-of-send count — counted once per message row, never in the AI's
+// rows (automation.js userTurns()).
+function userTurnSelector(site) {
+  const saved = (state.selectorOverrides[site] || {}).user;
+  const learned = ((state.learnedSelectors[site] || {}).user || {}).selector;
+  const sel = saved || learned || null;
+  return sel && !badRoleSelector("user", sel) ? sel : null;
+}
 // TR-08: a read-only page check (sends nothing) a few seconds after each pane
 // loads, so a signed-out pane or a site that changed its page shows up on the
 // light and in the log before any message is lost.
@@ -1024,7 +1041,13 @@ async function probePane(site) {
   catch (e) { r = { ok: false, error: String(e) }; }
   if (!r || typeof r !== "object" || !r.input) r = { ok: false, error: (r && r.error) || "NO_RESULT" };
   paneHealth.onProbe(site, r);
-  logEvent("pane-check", { site, overrides: Object.keys(state.selectorOverrides[site] || {}).length ? { ...state.selectorOverrides[site] } : null, ok: !!r.ok, input: r.input ? r.input.found : null, send: r.send ? r.send.found : null, replies: r.assistant ? r.assistant.count : null, replySelector: r.assistant ? r.assistant.selector : null, signedOutHint: !!r.signedOutHint, severity: r.ok && r.input && !r.input.found ? "warn" : undefined });
+  const eff = effectiveOverrides(site);
+  const learnedNow = Object.fromEntries(Object.entries(state.learnedSelectors[site] || {}).map(([role, v]) => [role, v && v.selector]).filter(([, v]) => v));
+  // 2026-10-29: a saved / learned reply selector that finds no proper reply while the
+  // built-in reader does — the reader uses the built-in one (it passes the saved one
+  // over); say so, and how to clear it.
+  const ovMiss = !!(r.assistant && r.assistant.overrideMisses);
+  logEvent("pane-check", { site, overrides: Object.keys(state.selectorOverrides[site] || {}).length ? { ...state.selectorOverrides[site] } : null, learned: Object.keys(learnedNow).length ? learnedNow : undefined, ok: !!r.ok, input: r.input ? r.input.found : null, send: r.send ? r.send.found : null, replies: r.assistant ? r.assistant.count : null, replySelector: r.assistant ? r.assistant.selector : null, rows: r.rows || undefined, usingBuiltIns: ovMiss || undefined, note: ovMiss ? `the saved reply selector (${eff.assistant}) finds no reply on ${siteLabel(site)}'s page, but the built-in reader finds ${r.assistant.builtinCount} — using the built-in one. Press 🎯 → "↺ Forget what I taught" to clear it.` : undefined, signedOutHint: !!r.signedOutHint, severity: (r.ok && r.input && !r.input.found) || ovMiss ? "warn" : undefined });
   broadcastHealth();
   return r;
 }
@@ -1794,7 +1817,7 @@ async function sendTextTo(target, text, fromSite, opts = {}) {
         if (token) token.typing = true;
         try {
           if (attempt === 1 || markerBaseline == null) { try { relayTrace.noteTyping(seq); } catch (_) {} } // P18.5
-          r = await view.webContents.executeJavaScript(buildSendScript(target, prompt, effectiveOverrides(target), { markerBaseline }), true);
+          r = await view.webContents.executeJavaScript(buildSendScript(target, prompt, effectiveOverrides(target), { markerBaseline, userSel: userTurnSelector(target) }), true);
         } catch (e) {
           r = { ok: false, error: String(e) };
         } finally {
@@ -4007,6 +4030,10 @@ async function pollSite(site) {
     // TR-28: the Stop button alone (older read results without the field fall back to `generating`).
     state.stopShown[site] = res && typeof res.stopShown === "boolean" ? res.stopShown : generating;
     readCount[site] = res && Number.isInteger(res.count) ? res.count : null;
+    if (res && res.overrideIgnored && !overrideIgnoredWarned[site]) {
+      overrideIgnoredWarned[site] = true;
+      logEvent("reply-selector-ignored", { site, selector: effectiveOverrides(site).assistant || null, severity: "warn", note: `the saved reply selector finds no reply of ${siteLabel(site)}'s (nothing, only your own messages, or the sidebar) — reading with the built-in reader instead. Press 🎯 → "↺ Forget what I taught" to clear it.` });
+    } else if (res && res.ok && !res.overrideIgnored && overrideIgnoredWarned[site] && res.text) overrideIgnoredWarned[site] = false;
     if (res && res.fragmentFixed && !fragmentWarned[site]) {
       fragmentWarned[site] = true;
       logEvent("reply-selector-fragment", { site, selector: (state.selectorOverrides[site] || {}).assistant || null, severity: "warn", note: "the saved reply selector only reads part of each reply; using the whole reply instead — clear it with 🎯 → Clear Overrides" });
@@ -5564,6 +5591,7 @@ ipcMain.handle("selector:pick", async (_evt, { site, role }) => {
     if (res.roleOk === false) problems.push("WRONG_ELEMENT_TYPE");
     if (role === "assistant" && looksLikeEcho(res.sample, state.lastSentTo[site])) problems.push("LOOKS_LIKE_ECHO");
     if (isBareTagSelector(res.selector)) problems.push("TOO_GENERIC");
+    else if (badRoleSelector(role, res.selector)) problems.push("IN_SIDEBAR");
     if (role === "assistant" && typeof res.matchCount === "number" && res.matchCount > 60) problems.push("TOO_BROAD");
     if (problems.length) {
       logEvent("selector-pick-rejected", { site, role, selector: res.selector, reasons: problems, sample: res.sample || null });
@@ -5690,17 +5718,72 @@ ipcMain.handle("picker:start", async (_evt, payload) => {
   try { res = await view.webContents.executeJavaScript(selfRepairLib.buildPickScript(site, role, siteLabel(site), SITES, PICK_TIMEOUT_MS), true); }
   catch (e) { res = { ok: false, error: "SCRIPT_FAILED" }; }
   if (pickRunning[site] === role) delete pickRunning[site];
+  return pickerTakeResult(site, role, res);
+});
+// A pick from the page (or a forced one) -> a draft, or the reason it wasn't taken.
+function pickerTakeResult(site, role, res, forced) {
   if (res && res.ok && res.selector) {
     const problems = [];
     if (isBareTagSelector(res.selector)) problems.push("TOO_GENERIC");
+    if (badRoleSelector(role, res.selector)) problems.push("IN_SIDEBAR");
     if (role === "assistant" && Number(res.count) > 60) problems.push("TOO_BROAD");
-    if (role === "assistant" && looksLikeEcho(res.preview, state.lastSentTo[site])) problems.push("LOOKS_LIKE_ECHO");
+    if (role === "assistant" && !forced && looksLikeEcho(res.preview, state.lastSentTo[site])) problems.push("LOOKS_LIKE_ECHO");
     if (problems.length) { logEvent("picker-rejected", { site, role, selector: res.selector, reasons: problems }); broadcastPicker(site); return { ok: false, error: problems[0], reasons: problems }; }
     pickDrafts[site] = { ...(pickDrafts[site] || {}), [role]: { selector: res.selector, preview: String(res.preview || "").slice(0, 120), pickedAt: Date.now(), count: Number(res.count) || 0, latest: res.latest !== false } };
-    logEvent("picker-picked", { site, role, selector: res.selector, matches: Number(res.count) || 0 }); // never the preview text
-  } else logEvent("picker-no-pick", { site, role, error: (res && res.error) || "unknown" });
+    logEvent("picker-picked", { site, role, selector: res.selector, matches: Number(res.count) || 0, forced: forced || undefined, rows: res.rows || undefined }); // never the preview text
+  } else logEvent("picker-no-pick", { site, role, error: (res && res.error) || "unknown", canForce: (res && res.canForce) || undefined });
   broadcastPicker(site);
-  return res && res.ok ? { ok: true, role, selector: res.selector, preview: res.preview, count: res.count, latest: res.latest !== false } : (res || { ok: false, error: "unknown" });
+  return res && res.ok ? { ok: true, role, selector: res.selector, preview: res.preview, count: res.count, latest: res.latest !== false, forced: !!forced } : Object.assign({ ok: false, error: "unknown" }, res || {});
+}
+// 2026-10-29: "This looks like your own message. Use it anyway?" -> yes: the same
+// click is taken (no second click), saved as a draft like any pick.
+ipcMain.handle("picker:force", async (_evt, payload) => {
+  const site = payload && payload.site; const role = (payload && payload.role) || "assistant";
+  if (!SITES[site]) return { ok: false, error: "BAD_SITE" };
+  if (role !== "assistant") return { ok: false, error: "BAD_ROLE" };
+  const view = siteViews[site];
+  if (!view || view.webContents.isDestroyed()) return { ok: false, error: "NO_VIEW" };
+  let res;
+  try { res = await view.webContents.executeJavaScript(selfRepairLib.buildPickForceScript(site, SITES), true); }
+  catch (e) { res = { ok: false, error: "SCRIPT_FAILED" }; }
+  return pickerTakeResult(site, role, res, true);
+});
+// 2026-10-29: "↺ Forget what I taught": every saved 🎯 / 🔢 part AND every part the
+// self-repair learned for this AI — back to AutoInjector's built-in way of reading it.
+ipcMain.handle("picker:forget-all", async (_evt, payload) => {
+  const site = payload && payload.site;
+  if (!SITES[site]) return { ok: false, error: "BAD_SITE" };
+  const had = { saved: Object.keys(state.selectorOverrides[site] || {}), learned: Object.keys(state.learnedSelectors[site] || {}) };
+  state.selectorOverrides[site] = {};
+  state.learnedSelectors[site] = {};
+  state.pickMeta[site] = {};
+  pickDrafts[site] = {};
+  delete teachOverrides[site];
+  overrideIgnoredWarned[site] = false; fragmentWarned[site] = false;
+  saveStateDebounced();
+  logEvent("selector-forget-all", { site, saved: had.saved, learned: had.learned, note: `forgot everything taught / learned for ${siteLabel(site)} — back to the built-in reader` });
+  try { selfRepair.userActed(site); } catch (_) {}
+  try { selfRepair.requestCheck(site, "after-forget"); } catch (_) {}
+  const st = await pickerStatus(site);
+  broadcast("picker", st);
+  return Object.assign({ forgot: had }, st);
+});
+// 2026-10-29: "📋 Copy page structure" — a READ-ONLY report of how the AI's page is
+// built (tools/page-structure.js): tags, structural attributes, counts and lengths,
+// never anything anyone wrote. Copied to the clipboard for pasting into a bug report.
+ipcMain.handle("picker:page-structure", async (_evt, payload) => {
+  const site = payload && payload.site;
+  if (!SITES[site]) return { ok: false, error: "BAD_SITE" };
+  const view = siteViews[site];
+  if (!view || view.webContents.isDestroyed()) return { ok: false, error: "NO_VIEW" };
+  let rep;
+  try { rep = await view.webContents.executeJavaScript(buildPageStructureScript(site, SITES), true); }
+  catch (e) { rep = { ok: false, error: "SCRIPT_FAILED" }; }
+  if (!rep || !rep.ok) return { ok: false, error: (rep && rep.error) || "NO_RESULT" };
+  const json = JSON.stringify(rep, null, 1);
+  try { clipboard.writeText(json); } catch (_) { return { ok: false, error: "CLIPBOARD" }; }
+  logEvent("page-structure-copied", { site, chars: json.length, rows: rep.rows ? rep.rows.count : 0 }); // never the report itself
+  return { ok: true, chars: json.length, rows: rep.rows ? rep.rows.count : 0 };
 });
 ipcMain.handle("picker:cancel", async (_evt, payload) => {
   const site = payload && payload.site;
@@ -7660,7 +7743,7 @@ async function selfRepairMakeWay(site, token) {
 function selfRepairSaveLearned(site, role, selector, how) {
   if (!SITES[site] || !LEARNED_ROLES.has(role)) return false;
   const sel = String(selector || "").trim();
-  if (!sel || sel.length > 300 || isBareTagSelector(sel)) return false;
+  if (!sel || sel.length > 300 || badRoleSelector(role, sel)) return false;
   state.learnedSelectors[site] = { ...(state.learnedSelectors[site] || {}), [role]: { selector: sel, how: String(how || "learned").slice(0, 20), learnedAt: Date.now(), version: selfRepairLib.LEARNED_VERSION } };
   saveStateDebounced();
   logEvent("selector-learned", { site, role, how, selector: sel });
@@ -7694,7 +7777,7 @@ const selfRepair = selfRepairLib.createSelfRepair({
   savePick: (s, role, selector, how) => {
     if (!SITES[s] || !PICK_ROLES_ALL.includes(role)) return false;
     const sel = String(selector || "").trim();
-    if (!sel || sel.length > 300 || isBareTagSelector(sel)) return false;
+    if (!sel || sel.length > 300 || badRoleSelector(role, sel)) return false;
     savePickedSelector(s, role, sel, how || "number");
     if (pickDrafts[s] && pickDrafts[s][role]) { const nd = { ...pickDrafts[s] }; delete nd[role]; pickDrafts[s] = nd; }
     broadcastPicker(s);

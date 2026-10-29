@@ -81,7 +81,14 @@ module.exports = {
     label: "Claude",
     home: "https://claude.ai/new",
     newChat: "https://claude.ai/new",
+    // Claude's page since 2026-10-29 (PC log: the user's 🎯 picks matched exactly
+    // one each): the composer is div[data-cds="Editor"] (contenteditable itself)
+    // and Send is button[data-testid="chat-input-send"]. The older ones stay as
+    // fallbacks.
     INPUT_CANDIDATES: [
+      'div[data-cds="Editor"][contenteditable="true"]',
+      'div[data-cds="Editor"]',
+      '[data-cds="Editor"] [contenteditable="true"]',
       'div[contenteditable="true"][data-testid]',
       'div[contenteditable="true"].ProseMirror',
       'div[contenteditable="true"][class*="composer"]',
@@ -90,15 +97,29 @@ module.exports = {
       "textarea"
     ],
     SEND_CANDIDATES: [
+      'button[data-testid="chat-input-send"]',
       'button[aria-label="Send Message"]',
       'button[aria-label="Send message"]',
       'button[data-testid="send-message-button"]',
       'form button[type="submit"]'
     ],
     STOP_CANDIDATES: [
+      'button[data-testid="chat-input-stop"]',
       'button[aria-label*="Stop"]',
       'button[aria-label*="stop"]',
       'button[data-testid="stop-button"]'
+    ],
+    // Claude's page since 2026-10-29: every message — yours AND Claude's — is a
+    // div[data-testid="transcript-row"] with a visually-hidden heading
+    // (h3[data-find-omitted]) and its text in div[data-cds="Prose"]. A selector
+    // can't tell the two apart, so the reader works per ROW (transcript-rows.js):
+    // it decides who wrote each row and reads Claude's latest row after your
+    // latest one. When no row selector matches, rows are found from the hidden
+    // "You said" / "Claude said" headings instead.
+    ROW_CANDIDATES: [
+      'div[data-testid="transcript-row"]',
+      '[data-testid="transcript-row"]',
+      '[data-testid^="transcript-row"]'
     ],
     ASSISTANT_CANDIDATES: [
       '[data-testid="chat-message"]',
