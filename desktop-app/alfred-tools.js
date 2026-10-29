@@ -1116,6 +1116,7 @@ def({
 
 // ---- 🧰 the rest of the app (alfred-app-actions.js) and the 🎨 Images module (sd-api.js) ---------------------
 const appActions = require('./alfred-app-actions');
+const smartJson = require('./smart-json'); // tool arguments with “curly” quotes still read (PC test 2026-10-28)
 function appTool(changes) {
   return {
     name: changes ? 'app_control' : 'app_info',
@@ -1386,7 +1387,7 @@ function checkValue(v, s, at) {
 function validate(tool, args) {
   let a = args;
   if (a == null || a === '') a = {};
-  if (typeof a === 'string') { try { a = JSON.parse(a); } catch (_) { return { ok: false, error: 'the arguments were not valid JSON' }; } }
+  if (typeof a === 'string') { const r = smartJson.parseJsonLenient(a); if (!r.ok) return { ok: false, error: 'the arguments were not valid JSON' }; a = r.value; }
   if (!a || typeof a !== 'object' || Array.isArray(a)) return { ok: false, error: 'the arguments must be an object' };
   const ignored = [];
   a = tidyArgs(a, tool.args, ignored);
@@ -1408,7 +1409,7 @@ function tidyArgs(a, schema, ignored = []) {
   const keys = Object.keys(a);
   if (keys.length === 1 && !props[keys[0]] && ['args', 'arguments', 'parameters', 'params', 'input'].includes(keys[0])) {
     let inner = a[keys[0]];
-    if (typeof inner === 'string') { try { inner = JSON.parse(inner); } catch (_) { inner = null; } }
+    if (typeof inner === 'string') inner = smartJson.tryParseJson(inner, null);
     if (inner && typeof inner === 'object' && !Array.isArray(inner)) a = inner;
   }
   const out = {};

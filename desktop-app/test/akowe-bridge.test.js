@@ -713,6 +713,55 @@ async function main() {
     await kill(h.child);
   }
 
+  console.log("PC test 2026-10-28: 🔢 setup releases a request still waiting for that AI (release)");
+  {
+    const R = makeHarness({ timeScale: 0.03 }); // 10000 ms -> 300 ms real; the late window the same
+    await R.bridge.start();
+    R.setSend(async () => ({ ok: true, seq: "0042", verified: true }));
+    // in its late window (timed out, answer still due) — the PC case
+    let rr = await request(R.port, "POST", "/v1/complete", { body: completeBody({ request_id: "late-teach", timeout_ms: 10000 }) });
+    assert(rr.status === 504 && R.bridge.awaitingReply("claude") === true, "timed out; the bridge still waits for the late answer");
+    const rel = R.bridge.release("claude", "teach");
+    assert(rel && rel.typed === true && rel.request_id === "late-teach", `release() ends it (${JSON.stringify(rel)})`);
+    assert(R.bridge.awaitingReply("claude") === false && R.bridge.onCaptured({ site: "claude", text: "4827", answers: ["0042"] }) === false, "the number the user types during 🔢 (4 characters) is NOT taken as the late answer");
+    const evs = R.bridge.status().events.filter((e) => e.kind === "outcome" && e.request_id === "late-teach");
+    assert(evs.some((e) => e.outcome === "LATE_EXPIRED" && e.reason === "teach") && !evs.some((e) => e.outcome === "LATE_REPLY_STORED"), "outcome LATE_EXPIRED (reason teach), never LATE_REPLY_STORED");
+    assert(/because you started 🔢 setup/.test(bridgeMod.describeEvent(evs.find((e) => e.outcome === "LATE_EXPIRED"), (x) => x).say), "the activity feed says why in plain words");
+    rr = await request(R.port, "GET", "/v1/health");
+    assert(rr.json.sites.claude.busy === false, "Claude is free again");
+    // still waiting inside its time (typed, not timed out yet): the HTTP caller gets a 504 at once
+    R.setSend(async () => ({ ok: true, seq: "0043", verified: true }));
+    const pending = request(R.port, "POST", "/v1/complete", { body: completeBody({ request_id: "wait-teach", timeout_ms: 10000 }) });
+    await sleep(60);
+    const rel2 = R.bridge.release("claude", "teach");
+    rr = await pending;
+    assert(rel2 && rel2.phase === "waiting" && rr.status === 504 && rr.json.released === true && rr.json.typed === true && /setting claude up/.test(rr.json.message), `a request still waiting gets its answer now: 504 released (${rr.status} ${rr.json && rr.json.message})`);
+    // not typed yet (queued behind something): withdrawn
+    let resolveSend;
+    R.setSend((site, text, meta) => new Promise((res) => { resolveSend = () => res(meta.cancelToken.cancelled ? { ok: false, error: "CANCELLED" } : { ok: true, seq: "0044" }); }));
+    const pending3 = request(R.port, "POST", "/v1/complete", { body: completeBody({ request_id: "queued-teach", timeout_ms: 10000 }) });
+    await sleep(60);
+    const rel3 = R.bridge.release("claude", "teach");
+    resolveSend();
+    rr = await pending3;
+    assert(rel3 && rel3.typed === false && rr.status === 503 && rr.json.released === true && R.sends[R.sends.length - 1].meta.cancelToken.cancelled === true, "a prompt not typed yet is withdrawn (503, nothing typed)");
+    assert(R.bridge.release("claude", "teach") === null && R.bridge.release("gemini", "teach") === null, "nothing waiting -> release() is a no-op");
+    await R.bridge.stop();
+  }
+
+  console.log("PC test 2026-10-28: a prompt that never showed up in the chat (delivered: false)");
+  {
+    const D = makeHarness();
+    await D.bridge.start();
+    D.setSend(async () => ({ ok: true, seq: "0050", verified: false }));
+    const rr = await request(D.port, "POST", "/v1/complete", { body: completeBody({ request_id: "lost-1", timeout_ms: 10000 }) });
+    assert(rr.status === 504 && rr.json.delivered === false && /never showed up in claude's chat/.test(rr.json.message), `504 says it never arrived (${rr.json && rr.json.message})`);
+    const ev = D.bridge.status().events.find((e) => e.kind === "outcome" && e.outcome === "TIMEOUT" && e.request_id === "lost-1");
+    assert(ev && ev.delivered === "no" && /never arrived in Claude's chat/.test(bridgeMod.describeEvent(ev, () => "Claude").say), "the activity line says the message never arrived — not that Claude hadn't answered");
+    assert(!D.logs.join("\n").includes(SECRET_PROMPT), "still no prompt text in the log");
+    await D.bridge.stop();
+  }
+
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 }

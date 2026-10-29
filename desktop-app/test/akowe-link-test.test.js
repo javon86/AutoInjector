@@ -245,6 +245,67 @@ async function main() {
     await B.bridge.stop();
   }
 
+  console.log("PC test 2026-10-28: Claude's site shows quotes as “ ”");
+  {
+    const curly = (t) => t.replace(/"([^"]*)"/g, "“$1”");
+    let a = LT.analyzeReply(curly('{"ok": true, "site": "claude", "word": "harbor"}'));
+    assert(a.obj && a.obj.word === "harbor" && a.curly === true && /curly/.test(a.how), `curly-quote JSON is read (${a.how})`);
+    a = LT.analyzeReply("```json\n" + curly('{"ok": true, "word": "maple"}') + "\n```");
+    assert(a.obj && a.obj.word === "maple", "…also inside a code block");
+    a = LT.analyzeReply('{"ok": true, "word": "maple", "note": "the “best”"}');
+    assert(a.obj && a.obj.note === "the “best”" && a.curly === false && !/curly/.test(a.how), "valid JSON with curly quotes in its words is read as it is");
+    // the whole round trip: the AI's answer arrives with curly quotes
+    const B = await makeBridge({ mode: (site, text) => curly(goodReply(site, text)) });
+    let r = await LT.runLinkTest(baseDeps(B, { sites: ["claude"], akoweUrl: await closedPortUrl() }));
+    let t = byId(r, "roundtrip:claude");
+    assert(t.status === "pass" && /curly/.test(t.detail) && t.curly_quotes === true, `round trip PASSES with curly quotes (${t.status}: ${t.detail})`);
+    const want = curly(goodReply("claude", B.sends[0].text)).length; // 47–49 characters, by the random word (48 in the PC log)
+    assert(t.reply_chars === want && !t.reply_excerpt, `the whole ${want}-character answer arrived (in the PC log 48 = the whole reply, not a cut-off) and a pass keeps no excerpt (${t.reply_chars})`);
+    await B.bridge.stop();
+    // a reply that really is not the JSON: "Technical details" shows what the AI wrote
+    const B2 = await makeBridge({ mode: () => "Sure! Here is a fun fact about harbors instead." });
+    const progress = [];
+    r = await LT.runLinkTest(baseDeps(B2, { sites: ["claude"], akoweUrl: await closedPortUrl(), onProgress: (p) => progress.push(p) }));
+    t = byId(r, "roundtrip:claude");
+    assert(t.status === "fail" && t.reply_excerpt === "Sure! Here is a fun fact about harbors instead.", `a failed reply keeps a one-line excerpt of what the AI wrote (${JSON.stringify(t.reply_excerpt)})`);
+    assert(progress.some((p) => p.id === "roundtrip:claude" && p.status === "fail" && p.reply_excerpt === t.reply_excerpt && p.http_status === 200), "…and the progress event the panel gets carries it (and the HTTP status)");
+    const md = LT.formatReport(r, {});
+    const js = LT.reportJson(r, {});
+    assert(/What Claude wrote: Sure! Here is a fun fact/.test(md) && js.steps.find((x) => x.id === "roundtrip:claude").reply_excerpt === t.reply_excerpt, "the saved report (Markdown + JSON) shows it too");
+    assert(!md.includes(KEY) && !JSON.stringify(js).includes(KEY), "still never the key");
+    await B2.bridge.stop();
+    const long = "x".repeat(900);
+    const B3 = await makeBridge({ mode: () => long });
+    r = await LT.runLinkTest(baseDeps(B3, { sites: ["claude"], akoweUrl: await closedPortUrl() }));
+    t = byId(r, "roundtrip:claude");
+    assert(t.reply_excerpt.length === LT.REPLY_EXCERPT_CHARS && t.reply_excerpt.endsWith("…"), `a long reply is cut to ${LT.REPLY_EXCERPT_CHARS} characters`);
+    await B3.bridge.stop();
+  }
+
+  console.log("PC test 2026-10-28: a message that never arrived is not 'had not finished answering'");
+  {
+    const bridge = bridgeMod.createBridge({
+      port: 0, getToken: () => KEY, siteReady: () => true, timeScale: 0.002,
+      // typed, the box emptied, but it never showed up in the chat (verified: false)
+      sendToSite: async () => ({ ok: true, seq: "0007", verified: false })
+    });
+    await bridge.start();
+    const B = { bridge, port: bridge.status().port, ready: { chatgpt: true, claude: true, gemini: true } };
+    const r = await LT.runLinkTest(baseDeps(B, { sites: ["chatgpt"], akoweUrl: await closedPortUrl() }));
+    const t = byId(r, "roundtrip:chatgpt");
+    assert(t.status === "fail" && /never showed up in ChatGPT's chat/.test(t.detail) && !/had not finished answering/.test(t.detail), `says it never arrived (${t.detail})`);
+    assert(t.tip === LT.TIPS.roundtrip_not_delivered && /🎯/.test(t.tip), "the tip points at a saved Send button (🎯 / 🔢)");
+    const ev = bridge.status().events.find((e) => e.kind === "outcome" && e.outcome === "TIMEOUT");
+    assert(ev && ev.delivered === "no" && /never arrived/.test(bridgeMod.describeEvent(ev, label).say), `the activity feed says so too (${ev && bridgeMod.describeEvent(ev, label).say})`);
+    await bridge.stop();
+    // a proven send that timed out still says "had not finished answering"
+    const bridge2 = bridgeMod.createBridge({ port: 0, getToken: () => KEY, siteReady: () => true, timeScale: 0.002, sendToSite: async () => ({ ok: true, seq: "0008", verified: true }) });
+    await bridge2.start();
+    const r2 = await LT.runLinkTest(baseDeps({ bridge: bridge2, port: bridge2.status().port, ready: B.ready }, { sites: ["chatgpt"], akoweUrl: await closedPortUrl() }));
+    assert(/had not finished answering/.test(byId(r2, "roundtrip:chatgpt").detail), "a send that DID arrive and timed out keeps the old wording");
+    await bridge2.stop();
+  }
+
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 }

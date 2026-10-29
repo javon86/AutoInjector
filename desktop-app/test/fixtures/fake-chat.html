@@ -53,6 +53,15 @@
                        OUTSIDE the message's [data-message-author-role] div
     imgdelay  ms until the finished picture (default 1500 × speed)
     avatar    1 = every assistant turn also has a 28 px avatar <img> (to ignore)
+    (PC test 2026-10-28)
+    curly     1 = replies are SHOWN with curly quotes (" -> “ ”, ' -> ’), the way
+              Claude's site renders them; the AI "wrote" straight ones
+    eat       n = the n-th message posted is swallowed: the box empties but nothing
+              is sent (no new user message, no reply) — e.g. a Send that the page
+              ignores; window.__fake.eaten counts them
+    survey    1 = an in-pane feedback card ("How is Claude doing this session?")
+              with rating buttons and a Dismiss ✕ above the message box;
+              window.__fake.survey says what was clicked
   Check-ins: "Reply with only this word: X" is answered with X (tagged). A typed
   "Repeat this number: 1234" (the old teach step, no [MSG #]) is answered with the
   number, untagged — like a real AI would. P38 number teach: a typed bare "4827" is
@@ -101,6 +110,9 @@
   const IMAGE_MODE = (Q.get("image") || "ok").toLowerCase();
   const IMG_DELAY = Q.has("imgdelay") ? Number(Q.get("imgdelay")) : 1500 * (Number(Q.get("speed")) || 1);
   const AVATAR = Q.get("avatar") === "1";
+  const CURLY = Q.get("curly") === "1";
+  const EAT = Number(Q.get("eat")) || 0;
+  const SURVEY = Q.get("survey") === "1";
   const ALL_QUIRKS = ["rich", "disabledsend", "stop", "stream", "redraw", "hiddensend", "wrapper", "slowclear", "nofrom"];
   const SITE_DEFAULTS = {
     chatgpt: ["rich", "disabledsend", "stop", "stream", "hiddensend", "wrapper", "slowclear", "nofrom"],
@@ -186,6 +198,20 @@
     // Gemini has ONE button that morphs into Stop while writing (see setGenerating).
   }
 
+  // PC test 2026-10-28: Claude's "How is Claude doing this session?" card in the pane.
+  const surveyState = { shown: SURVEY, dismissed: false, rated: null };
+  if (SURVEY) {
+    const card = el("div", { "data-testid": "feedback-survey", class: "survey-card" });
+    area.parentNode.insertBefore(card, area);
+    el("p", { text: "How is Claude doing this session? (optional)" }, card);
+    for (const [n, lab] of [["1", "Bad"], ["2", "Fine"], ["3", "Good"]]) {
+      const b = el("button", { type: "button", "aria-label": lab, text: n }, card);
+      b.addEventListener("click", () => { surveyState.rated = lab; });
+    }
+    const x = el("button", { type: "button", "aria-label": "Dismiss", text: "✕" }, card);
+    x.addEventListener("click", () => { surveyState.dismissed = true; card.remove(); });
+  }
+
   // ---- the composer ------------------------------------------------------
   let state = "";            // the editor's OWN copy of the text (rich mode)
   const composerText = () => (has("rich") ? state : (ed.innerText || ""));
@@ -249,11 +275,13 @@
   ed.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (!generating) post(); } });
 
   // ---- posting a message ---------------------------------------------------
-  const F = window.__fake = { site: SITE, quirks: Array.from(QUIRKS), posted: [], replies: [], stopClicks: 0, ignoredPosts: 0, redraws: 0, jobs: 0 };
+  const F = window.__fake = { site: SITE, quirks: Array.from(QUIRKS), posted: [], replies: [], stopClicks: 0, ignoredPosts: 0, redraws: 0, jobs: 0, eaten: 0, survey: surveyState };
+  let postNo = 0;
   function post() {
     const text = composerText();
     if (!text.trim()) return;
     if (generating) { F.ignoredPosts++; return; } // a real page won't take a message mid-reply
+    if (++postNo === EAT) { F.eaten++; clearComposer(text); return; } // the box empties, nothing is sent
     F.posted.push({ text, at: Date.now() });
     let u;
     if (LAYOUT === "changed") { u = el("div", { class: "convo-turn human-turn", "data-turn-role": "human" }, log); el("div", { class: "ask-body user-text", text }, u); }
@@ -293,8 +321,15 @@
     else { const b = el("model-response", {}, log); const mc = el("message-content", {}, b); md = el("div", { class: "markdown" }, mc); }
     return md;
   }
+  // Claude's site shows straight quotes as curly ones: "x" -> “x”, it's -> it’s
+  function pretty(t) {
+    if (!CURLY) return t;
+    let open = true;
+    return String(t).replace(/"/g, () => { const q = open ? "\u201C" : "\u201D"; open = !open; return q; }).replace(/'/g, "\u2019");
+  }
   function paint(md, text, redrawn, raw) {
     md.innerHTML = "";
+    text = pretty(text);
     const lines = text.split("\n");
     if (!redrawn) { for (const l of lines) el("p", { text: l }, md); return; }
     if (raw) { for (const l of lines) el("p", { text: l }, md); if (SITE === "gemini") el("p", { text: "PDF", class: "chip" }, md); return; }

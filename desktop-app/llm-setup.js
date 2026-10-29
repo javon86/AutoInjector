@@ -27,6 +27,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const child_process = require('child_process');
+const smartJson = require('./smart-json');
 
 const GB = 1024 * 1024 * 1024;
 const MB = 1024 * 1024;
@@ -757,7 +758,7 @@ function createLlmSetup(deps = {}) {
     const tm = t.ok && t.json && t.json.choices && t.json.choices[0] && t.json.choices[0].message;
     const txt = tm ? String(tm.content || '') : '';
     const js = /\{[\s\S]*\}/.exec(txt);
-    let obj = null; try { obj = js ? JSON.parse(js[0]) : null; } catch (_) { obj = null; }
+    const obj = js ? smartJson.tryParseJson(js[0], null) : null; // “curly” quotes still read (smart-json.js)
     if (obj && (obj.tool === 'get_time' || obj.name === 'get_time')) return { ok: true, native: false, text: true };
     if (!t.ok && t.error) return { ok: false, error: chatError(t, model) };
     return { ok: false, native: false, text: false };

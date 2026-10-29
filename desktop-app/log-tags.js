@@ -66,6 +66,8 @@ const EXACT = {
   'zoom-changed': 'user', 'window-collapse-changed': 'user',
   // P18 self-repair (check-ins, automatic fixes, teach step) — about the web AIs
   'self-repair': 'chat', 'checkin-reply': 'chat', 'selector-learned': 'chat', 'selector-learned-cleared': 'chat',
+  // PC test 2026-10-28: a saved Send button that is gone, a pop-up closed, waiting parked for 🔢
+  'send-saved-button-missing': 'chat', 'popup-dismissed': 'chat', 'teach-parked-waiting': 'chat',
 };
 
 // Manager sub-categories that belong to a topical tag instead of "manager".

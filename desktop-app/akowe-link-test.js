@@ -21,17 +21,21 @@
 //                      sent a status). PASS or SKIPPED with instructions.
 //
 // The report NEVER contains the connection key or the prompt text; for each
-// reply it keeps only the last 80 characters (to show how the reply ended).
+// reply it keeps only the last 80 characters (to show how the reply ended), and
+// for a reply that failed the check, a one-line excerpt (up to 200 characters) of
+// what the AI wrote, so "Technical details" shows WHY it failed.
 //
 // Pure orchestration with injected deps (like feature-test.js), so it's
 // unit-testable without Electron.
 const http = require('http');
 const crypto = require('crypto');
 const legacy = require('./akowe-legacy'); // an Akọwe from before the rename answers /api/ping with app "bookforge"
+const smartJson = require('./smart-json'); // Claude's site shows quotes as “ ” — read the JSON anyway (PC test 2026-10-28)
 
 const DEFAULT_AKOWE_URL = 'http://127.0.0.1:8780/api/ping';
 const DEFAULT_REPLY_TIMEOUT_MS = 180000;
 const ENDING_CHARS = 80;
+const REPLY_EXCERPT_CHARS = 200; // a failed round trip keeps this much of what the AI wrote (one line)
 const WORDS = ['maple', 'harbor', 'lantern', 'meadow', 'copper', 'violet', 'pebble', 'falcon', 'orchard', 'cobalt',
   'willow', 'saffron', 'glacier', 'thistle', 'ember', 'juniper', 'quartz', 'tundra', 'marble', 'sparrow'];
 
@@ -52,6 +56,7 @@ const TIPS = {
   right_key: 'The bridge did not accept its own key. Click “Make a new key”, paste the new key into Akọwe, and run the test again.',
   pane_missing: 'Tick this AI as Active in the app and let its window finish loading (log in if it asks), then run the test again.',
   roundtrip_timeout: 'Look at that AI’s window: is it still typing, showing an error, or asking you to log in? Its reply must end with its [FROM: NAME] tag so the app knows it has finished. Let it go idle, then test again.',
+  roundtrip_not_delivered: 'Look at that AI’s window: the question is not in its chat. A Send button you saved with 🎯 may no longer be on the page — open the 🎯 card on that pane (a red ⚠️ shows a saved item that is not found), press Clear on it or use 🔢, then test again.',
   roundtrip_send: 'The app could not type into that AI’s window. Make sure it is logged in and no pop-up is covering the message box, or run that pane’s own 🧪 Test, then test again.',
   roundtrip_not_ready: 'That AI’s window is not loaded. Reload it (or log in), wait until it is idle, then test again.',
   roundtrip_auth: 'The connection key changed while the test was running. Run the test again.',
@@ -92,18 +97,29 @@ function buildPrompt(site, word) {
 function analyzeReply(text) {
   const raw = String(text == null ? '' : text);
   const t = raw.trim();
-  const tryParse = (s) => { try { const v = JSON.parse(s); return v && typeof v === 'object' && !Array.isArray(v) ? v : null; } catch (_) { return null; } };
+  // Strict JSON first; when that fails, the same text with the site's curly
+  // quotes (“ ” ‘ ’) and odd spaces repaired (smart-json.js) — valid JSON is
+  // never changed, so curly quotes inside its words stay as they are.
+  let curly = false;
+  const tryParse = (s) => {
+    const r = smartJson.parseJsonLenient(s);
+    const v = r.ok ? r.value : null;
+    if (!(v && typeof v === 'object' && !Array.isArray(v))) return null;
+    if (r.repaired) curly = true;
+    return v;
+  };
+  const note = (how) => (curly ? `${how} — the site showed its quotes as curly “ ”; read anyway` : how);
   let obj = tryParse(t);
-  if (obj) return { obj, how: 'just the JSON object (perfect)' };
+  if (obj) return { obj, how: note('just the JSON object (perfect)'), curly };
   const fence = /```(?:json)?\s*([\s\S]*?)```/i.exec(t);
   if (fence && (obj = tryParse(fence[1].trim()))) {
     const outside = t.replace(fence[0], '').trim();
-    return { obj, how: outside ? 'JSON in a code block, with extra words around it' : 'JSON in a ```json code block (fine)' };
+    return { obj, how: note(outside ? 'JSON in a code block, with extra words around it' : 'JSON in a ```json code block (fine)'), curly };
   }
   const a = t.indexOf('{');
   const b = t.lastIndexOf('}');
-  if (a >= 0 && b > a && (obj = tryParse(t.slice(a, b + 1)))) return { obj, how: 'JSON with extra words around it (Akọwe copes with this)' };
-  return { obj: null, how: t ? 'no JSON object found in the reply' : 'an empty reply' };
+  if (a >= 0 && b > a && (obj = tryParse(t.slice(a, b + 1)))) return { obj, how: note('JSON with extra words around it (Akọwe copes with this)'), curly };
+  return { obj: null, how: t ? 'no JSON object found in the reply' : 'an empty reply', curly: false };
 }
 
 // Default HTTP client (Node http, loopback). Resolves { status, json, text };
@@ -185,7 +201,7 @@ async function runLinkTest(deps) {
     const r = Object.assign({ id, name: nameOf(id), site, status, detail: String(detail || ''), ms: Math.max(0, d.now() - t0) }, extra || {});
     if (status !== 'fail') delete r.tip;
     results.push(r);
-    progress({ id, name: r.name, site, index: results.length, total, status, detail: r.detail, tip: r.tip || null, ms: r.ms });
+    progress({ id, name: r.name, site, index: results.length, total, status, detail: r.detail, tip: r.tip || null, ms: r.ms, reply_excerpt: r.reply_excerpt || null, http_status: r.http_status != null ? r.http_status : null });
     return r;
   };
   const begin = (id) => {
@@ -306,12 +322,18 @@ async function runLinkTest(deps) {
       extra.how_ended = a.how;
       extra.ending = text.slice(-ENDING_CHARS);
       extra.reply_chars = text.length;
+      if (a.curly) extra.curly_quotes = true;
       const took = fmtMs(extra.elapsed_ms != null ? extra.elapsed_ms : d.now() - t0);
-      if (!a.obj) record(id, 'fail', `${L} answered in ${took}, but the reply had ${a.how}.`, t0, Object.assign(extra, { tip: TIPS.roundtrip_json }));
-      else if (String(a.obj.word || '').trim().toLowerCase() !== word.toLowerCase()) record(id, 'fail', `${L} answered in ${took} with JSON, but did not repeat the test word.`, t0, Object.assign(extra, { tip: TIPS.roundtrip_word }));
-      else if (a.obj.ok !== true) record(id, 'fail', `${L} answered in ${took}, but "ok" was not true.`, t0, Object.assign(extra, { tip: TIPS.roundtrip_json }));
+      // On a failure, what the AI actually wrote (a short one-line excerpt — the
+      // reply to this test question, never anything else) goes to "Technical details".
+      const wrote = () => ({ reply_excerpt: smartJson.replyExcerpt(text, REPLY_EXCERPT_CHARS) || '(nothing)' });
+      if (!a.obj) record(id, 'fail', `${L} answered in ${took}, but the reply had ${a.how}.`, t0, Object.assign(extra, wrote(), { tip: TIPS.roundtrip_json }));
+      else if (String(a.obj.word || '').trim().toLowerCase() !== word.toLowerCase()) record(id, 'fail', `${L} answered in ${took} with JSON, but did not repeat the test word.`, t0, Object.assign(extra, wrote(), { tip: TIPS.roundtrip_word }));
+      else if (a.obj.ok !== true) record(id, 'fail', `${L} answered in ${took}, but "ok" was not true.`, t0, Object.assign(extra, wrote(), { tip: TIPS.roundtrip_json }));
       else record(id, 'pass', `${L} answered in ${took} with the right JSON (${a.how}).`, t0, extra);
-    } else if (res.status === 504) record(id, 'fail', `Sent, but ${L} had not finished answering after ${fmtMs(replyTimeoutMs)} (timed out).`, t0, Object.assign(extra, { tip: TIPS.roundtrip_timeout }));
+    } else if (res.status === 504 && j.delivered === false) record(id, 'fail', `The test question was typed into ${L}'s message box, but it never showed up in ${L}'s chat — so ${L} never got it (nothing to answer). Waited ${fmtMs(replyTimeoutMs)}.`, t0, Object.assign(extra, { tip: TIPS.roundtrip_not_delivered }));
+    else if (res.status === 504 && j.typed === false) record(id, 'fail', `${L} stayed busy for ${fmtMs(replyTimeoutMs)}, so the test question was never typed in (nothing was sent).`, t0, Object.assign(extra, { tip: TIPS.roundtrip_timeout }));
+    else if (res.status === 504) record(id, 'fail', `Sent, but ${L} had not finished answering after ${fmtMs(replyTimeoutMs)} (timed out).`, t0, Object.assign(extra, { tip: TIPS.roundtrip_timeout }));
     else if (res.status === 503) record(id, 'fail', `${L}'s window was not ready when the test asked.`, t0, Object.assign(extra, { tip: TIPS.roundtrip_not_ready }));
     else if (res.status === 502) record(id, 'fail', `The test question could not be typed into ${L}'s window.`, t0, Object.assign(extra, { tip: TIPS.roundtrip_send }));
     else if (res.status === 409) record(id, 'skip', `${L} is busy with an Akọwe request right now — run the test again when it's done.`, t0, extra);
@@ -391,11 +413,12 @@ function formatReport(r, meta = {}) {
   const trips = r.results.filter((x) => x.id.startsWith('roundtrip:') && (x.ending != null || x.http_status != null));
   if (trips.length) {
     L.push('', '## How each reply ended', '',
-      `Only the last ${ENDING_CHARS} characters of each test reply are kept (never the question or the full reply).`, '');
+      `Only the last ${ENDING_CHARS} characters of each test reply are kept (never the question), plus a one-line excerpt of a reply that failed the check.`, '');
     for (const t of trips) {
       L.push(`### ${t.name.split(' — ')[0]}`, '');
       L.push(`- Request: \`${t.request_id || '?'}\` · HTTP ${t.http_status != null ? t.http_status : '—'}${t.elapsed_ms != null ? ` · answered in ${fmtMs(t.elapsed_ms)}` : ''}${t.reply_chars != null ? ` · ${t.reply_chars} characters` : ''}`);
       if (t.how_ended) L.push(`- Shape: ${t.how_ended}`);
+      if (t.reply_excerpt) L.push(`- What ${t.name.split(' — ')[0]} wrote: ${cell(t.reply_excerpt)}`);
       if (t.ending != null) L.push('', '```', String(t.ending).replace(/```/g, "'''"), '```');
       L.push('');
     }
@@ -424,7 +447,7 @@ function reportJson(r, meta = {}) {
     reply_timeout_ms: r.replyTimeoutMs,
     steps: r.results.map((x) => {
       const o = { id: x.id, name: x.name, site: x.site, result: x.status, detail: x.detail, ms: x.ms };
-      for (const k of ['tip', 'http_status', 'request_id', 'elapsed_ms', 'how_ended', 'ending', 'reply_chars', 'url']) if (x[k] !== undefined && x[k] !== null) o[k] = x[k];
+      for (const k of ['tip', 'http_status', 'request_id', 'elapsed_ms', 'how_ended', 'ending', 'reply_chars', 'reply_excerpt', 'curly_quotes', 'url']) if (x[k] !== undefined && x[k] !== null) o[k] = x[k];
       return o;
     }),
     activity: (Array.isArray(meta.activity) ? meta.activity : []).map((a) => ({ at: a.at ? new Date(a.at).toISOString() : null, kind: a.kind, site: a.site || null, outcome: a.outcome || null, http_status: a.http_status != null ? a.http_status : null, say: a.say || null })),
@@ -433,4 +456,4 @@ function reportJson(r, meta = {}) {
 
 const REPORT_NAME_RE = /^akowe-link-test-[0-9A-Za-z-]+\.(md|json)$/;
 
-module.exports = { runLinkTest, formatReport, reportJson, buildPrompt, analyzeReply, nodeHttp, stampNow, fmtMs, STEP_NAMES, TIPS, REPORT_NAME_RE, DEFAULT_AKOWE_URL, DEFAULT_REPLY_TIMEOUT_MS, ENDING_CHARS };
+module.exports = { runLinkTest, formatReport, reportJson, buildPrompt, analyzeReply, nodeHttp, stampNow, fmtMs, STEP_NAMES, TIPS, REPORT_NAME_RE, DEFAULT_AKOWE_URL, DEFAULT_REPLY_TIMEOUT_MS, ENDING_CHARS, REPLY_EXCERPT_CHARS };
