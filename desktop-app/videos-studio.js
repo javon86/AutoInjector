@@ -66,6 +66,9 @@
     setText('vd-status-text', text);
     $('vd-status').title = text;
     if (!s.ready && !st.generating) hint(`${text}\nOpen ⚙ Setup & models to finish (one click).`, 'warn'); else if (s.ready && !st.generating) hint('', '');
+    // Video models in "stuff and thing" the engine can't use yet (FramePack's HunyuanVideo files from Stability Matrix).
+    const lm = $('vd-local-models');
+    if (lm) { const note = (s.localModels && s.localModels.framepack && s.localModels.note) || ''; lm.hidden = !note; lm.textContent = note ? `🎞 ${note}` : ''; }
     // the model list
     st.models = s.models || [];
     const sel = $('vd-model'); const cur = sel.value || (s.settings && s.settings.model) || s.defaultModel;

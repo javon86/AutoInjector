@@ -2136,6 +2136,7 @@ async function loadModelsInfo() {
       const c = info.categories || {};
       el("models-inventory").textContent = "Installed: " + ["llm", "image", "loras", "video", "voice", "assets"].map((k) => `${k} ${c[k] || 0}`).join(" · ");
     }
+    renderModelsSummary(info);
     if (el("models-ollama")) {
       el("models-ollama").textContent = info.ollamaHere
         ? "✓ Ollama is pointed at this folder — pulls land here."
@@ -2144,6 +2145,31 @@ async function loadModelsInfo() {
   } catch (_) {}
   await loadModelsStore();
 }
+
+// 📦 Your models: one plain line per "stuff and thing"/models folder that has files; the empty ones in one line.
+function renderModelsSummary(info) {
+  const box = el("models-summary-list");
+  if (!box) return;
+  const folders = (info && Array.isArray(info.folders)) ? info.folders : [];
+  if (!folders.length) { box.textContent = "(the models folder is not ready yet)"; return; }
+  const full = folders.filter((f) => f.files > 0 && f.key !== "detectors");
+  const empty = folders.filter((f) => !f.files && f.key !== "detectors");
+  const gb = (b) => (b >= 1073741824 ? `${(b / 1073741824).toFixed(1)} GB` : b >= 1048576 ? `${Math.round(b / 1048576)} MB` : "");
+  box.innerHTML = (full.length
+    ? `<ul style="margin:2px 0 2px 16px; padding:0;">${full.map((f) => `<li>${gpuEsc(f.label)}: <b>${f.files}</b> file${f.files === 1 ? "" : "s"}${gb(f.bytes) ? ` (${gb(f.bytes)})` : ""} <span style="opacity:.6;">— models/${gpuEsc(f.rel)}</span></li>`).join("")}</ul>`
+    : `<div>No model files here yet. Put them in the matching folder (each one's README says which Stability Matrix folder it matches).</div>`) +
+    (empty.length ? `<div style="opacity:.6;">Empty: ${empty.map((f) => gpuEsc(f.rel)).join(", ")}</div>` : "") +
+    (info.workflows ? `<div style="opacity:.8;">🧩 ComfyUI workflows: <b>${info.workflows}</b> in workflows/</div>` : "");
+}
+if (el("btn-comfy-use-stuff")) el("btn-comfy-use-stuff").onclick = async () => {
+  const sd = window.api && window.api.sd;
+  if (!sd || !sd.comfyUseStuff) return;
+  const btn = el("btn-comfy-use-stuff"); btn.disabled = true;
+  let r; try { r = await sd.comfyUseStuff(); } catch (e) { r = { ok: false, message: String(e) }; }
+  btn.disabled = false;
+  if (el("models-summary-msg")) el("models-summary-msg").textContent = (r && r.message) || (r && r.ok ? "✔ Done." : "It didn't work.");
+  logToCenter((r && r.message) || "ComfyUI model folders", { tag: "models", err: !(r && r.ok) });
+};
 
 // Language-model storage: is the app's own Ollama running (so downloads land in
 // "stuff and thing"), and where do already-downloaded models currently live?

@@ -32,7 +32,7 @@ async function main() {
   const imagesDir = path.join(tmp, 'images');
   const pic = path.join(tmp, 'start.png'); fs.writeFileSync(pic, PNG);
   const maskFile = path.join(tmp, 'mask.png'); fs.writeFileSync(maskFile, PNG);
-  const studio = createSdStudio({ imageProvider: ip, library: null, imagesDir: () => imagesDir, workflowsDir: () => path.join(tmp, 'workflows'), fileUrl: (p) => `file://${p}` });
+  const studio = createSdStudio({ imageProvider: ip, library: null, imagesDir: () => imagesDir, workflowsDir: () => path.join(tmp, 'workflows'), workflowFilesDir: () => path.join(tmp, 'stuff and thing', 'workflows'), fileUrl: (p) => `file://${p}` });
   const api = sdApi.createImagesApi({ studio, library: { list: () => ({ items: [] }), get: () => null, getLock: () => null, listLocks: () => ({ locks: [] }), scan: () => ({ ok: true }) } });
 
   console.log('\n== not connected ==');
@@ -363,6 +363,25 @@ async function main() {
   assert(r.ok && r.bindings.strength[0].node === '3', 'workflows.get()');
   r = await api.sd.workflows.delete('templated');
   assert(r.ok && !(await api.sd.workflows.list()).workflows.some((w) => w.id === 'templated'), 'workflows.delete()');
+
+  console.log('\n== ComfyUI: workflow files in "stuff and thing"/workflows are listed too ==');
+  const wfDir = path.join(tmp, 'stuff and thing', 'workflows'); fs.mkdirSync(wfDir, { recursive: true });
+  fs.writeFileSync(path.join(wfDir, 'Portrait API.json'), JSON.stringify(WF));
+  fs.writeFileSync(path.join(wfDir, 'qwen edit (from Stability Matrix).json'), JSON.stringify({ last_node_id: 9, nodes: [{ id: 1, type: 'KSampler' }], links: [] }));
+  fs.writeFileSync(path.join(wfDir, 'notes.json'), '{ not json');
+  r = await api.sd.workflows.list();
+  const fApi = r.workflows.find((w) => w.id === 'folder:Portrait API.json');
+  const fUi = r.workflows.find((w) => w.id === 'folder:qwen edit (from Stability Matrix).json');
+  assert(r.ok && fApi && fApi.folder && fApi.params.includes('prompt') && r.workflows.some((w) => w.id === 'basic-txt2img'), 'an "Export (API)" file in the folder is listed (with its parameters) next to the saved ones');
+  assert(fUi && fUi.ui && fUi.runnable === false && /open it in ComfyUI/i.test(fUi.description) && r.workflows.some((w) => w.id === 'folder:notes.json' && w.runnable === false), 'a normal (UI) save and a broken file are listed, marked "open it in ComfyUI" / not readable');
+  r = await api.sd.workflows.run({ id: 'folder:Portrait API.json', params: { prompt: 'a lighthouse' }, pollMs: 20 });
+  assert(r.ok && G()['6'].inputs.text === 'a lighthouse', 'the API file runs like a saved workflow');
+  r = await api.sd.workflows.run({ id: 'folder:qwen edit (from Stability Matrix).json', pollMs: 20 });
+  assert(!r.ok && r.code === 'UI_FORMAT' && /Export \(API\)/.test(r.hint), 'the UI save is not run: "open it in ComfyUI / Export (API)"');
+  r = await api.sd.workflows.delete('folder:Portrait API.json');
+  assert(!r.ok && fs.existsSync(path.join(wfDir, 'Portrait API.json')), 'a file in the workflows folder is never deleted by the app');
+  const exw = await studio.extras();
+  assert(exw.ok && exw.workflowsFolder === wfDir && exw.workflows.some((w) => w.id === 'folder:Portrait API.json'), 'the Images tab bundle (extras) carries the folder files + the folder');
   // Pure substitution helpers.
   const det = W.detectBindings({ 1: { class_type: 'KSamplerAdvanced', inputs: { noise_seed: 1, steps: 9, cfg: 7, sampler_name: 'euler', scheduler: 'normal', positive: ['2', 0], negative: ['3', 1], model: ['9', 0], latent_image: ['9', 0] } }, 2: { class_type: 'CLIPTextEncode', inputs: { text: 'p', clip: ['9', 1] } }, 3: { class_type: 'ControlNetApplyAdvanced', inputs: { positive: ['2', 0], negative: ['4', 0] } }, 4: { class_type: 'CLIPTextEncode', inputs: { text: 'n', clip: ['9', 1] } }, 9: { class_type: 'CheckpointLoaderSimple', inputs: { ckpt_name: 'a' } } });
   assert(det.seed[0].input === 'noise_seed' && det.prompt[0].node === '2' && det.negativePrompt[0].node === '4', 'detectBindings follows conditioning through ControlNet nodes and knows KSamplerAdvanced noise_seed');

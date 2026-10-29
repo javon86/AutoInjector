@@ -115,7 +115,7 @@ A('terminal.reject', 'terminal:reject', { t: 'Reject a command an AI asked to ru
 A('terminal.send_output', 'terminal:send-output', { t: 'Send the terminal output to AIs', c: true, a: { targets: sites }, r: ['targets'], ex: { targets: ['claude'] } });
 A('db.status', 'db:status', { t: 'Shared database status', c: false });
 A('db.recent_messages', 'db:recent-messages', { t: 'Recent messages from the database', c: false, a: { limit: { type: 'integer', minimum: 1, maximum: 200 } }, call: (a) => [a.limit || 20], ex: { limit: 5 } });
-A('models.info', 'models:info', { t: 'Downloaded models (the "stuff and thing" folder)', c: false });
+A('models.info', 'models:info', { t: 'Downloaded models (the "stuff and thing" folder): how many files each model folder has (checkpoints, LoRAs, VAEs, ControlNet, upscalers, detectors, FramePack…)', c: false });
 A('models.open', 'models:open', { t: 'Open the models / content folder', c: true, aa: true, a: { category: opt(40) }, ex: { category: 'llm' } });
 A('logs.extract_options', 'logs:extract-options', { t: 'Log extract choices (books, ranges)', c: false });
 A('logs.extract_preview', 'logs:extract-preview', { t: 'Preview a log extract', c: false, a: { scope: { type: 'string', enum: ['book', 'time', 'everything'] }, bookId: opt(80), preset: opt(20) }, ex: { scope: 'time', preset: 'day' } });
@@ -214,10 +214,12 @@ A('akowe_view.dock', 'akowe-view:dock', { t: 'Bring Akọwe back into the tab', 
 // ---- 🎨 Images tab extras (the main generate/library calls go through sd_call / sd-api) ---------------------
 A('sd.lists', 'sd:lists', { t: 'Checkpoints, samplers, VAEs, LoRAs the SD app lists', c: false });
 A('sd.model_check', 'sd:model-check', { t: 'Has the SD app a picture model loaded? (if not: where your models are and how to point it there)', c: false });
-A('sd.restart_with_models', 'sd:restart-with-models', { t: 'Restart Forge with my models (--ckpt-dir the folder they are in)', c: true });
+A('sd.restart_with_models', 'sd:restart-with-models', { t: 'Restart Forge with my models ("stuff and thing" model folders, or --ckpt-dir the folder they are in)', c: true });
 A('sd.settings', 'sd:settings', { t: 'Change the Images tab defaults (size, steps, sampler, checkpoint …)', c: true, a: { patch: pass }, r: ['patch'], ex: { patch: { steps: 30 } } });
 A('sd.record', 'sd:record', { t: 'The settings a picture was made with', c: false, a: { path: text(1000) }, r: ['path'], ex: { path: '/out/images/sd-1.png' } });
 A('sd.open_images_folder', 'sd:open-images-folder', { t: 'Open the images folder', c: true, aa: true });
+A('sd.open_workflows_folder', 'sd:open-workflows-folder', { t: 'Open the ComfyUI workflows folder ("stuff and thing"/workflows)', c: true, aa: true });
+A('sd.comfy_use_stuff', 'sd:comfy-use-stuff', { t: 'Let ComfyUI (AutoInjector\'s own and Stability Matrix\'s) use the models in "stuff and thing" (adds an autoinjector_stuff section to its extra_model_paths.yaml, keeps the rest)', c: true, a: { id: opt(200) }, ex: {} });
 A('sd.open_ui', 'sd:open-ui', { t: 'Open the Stable Diffusion app\'s own page', c: true, aa: true });
 A('sd.show_file', 'sd:show-file', { t: 'Show a picture in its folder', c: true, aa: true, a: { path: text(1000) }, r: ['path'], ex: { path: '/out/images/sd-1.png' } });
 A('sd.open_log', 'sd:open-log', { t: 'Open the Stable Diffusion log', c: true, aa: true });

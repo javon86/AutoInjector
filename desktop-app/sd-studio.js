@@ -20,7 +20,8 @@
  * live in image-views.js.
  *
  * main.js passes: imageProvider, library, imagesDir(), recordImage(entry),
- * persist() (save settings), log(type, data), fileUrl(path), workflowsDir(),
+ * persist() (save settings), log(type, data), fileUrl(path), workflowsDir(), workflowFilesDir()
+ * ("stuff and thing"/workflows: plain ComfyUI workflow files, listed with the saved ones),
  * chatgpt (the ChatGPT engine: generate(job) / status() / readiness()).
  */
 const sdImages = require('./sd-images');
@@ -68,7 +69,7 @@ function createSdStudio(deps) {
   const fileUrl = deps.fileUrl || ((p) => p);
   const imagesDir = deps.imagesDir;
   const recordImage = deps.recordImage || (() => {});
-  const wfStore = deps.workflowsDir ? sdWorkflows.createWorkflowStore({ dir: deps.workflowsDir() }) : null;
+  const wfStore = deps.workflowsDir ? sdWorkflows.createWorkflowStore({ dir: deps.workflowsDir(), extraDir: () => { try { return typeof deps.workflowFilesDir === 'function' ? deps.workflowFilesDir() : null; } catch (_) { return null; } } }) : null;
   const chatgpt = deps.chatgpt || null; // chatgpt-image.js engine (optional)
   let lastLists = null;
   let lastListsAt = 0;
@@ -530,7 +531,7 @@ function createSdStudio(deps) {
       controlnet: cnm ? { models: cnm.models, modules: cnmod ? cnmod.modules : ['none'] } : null,
       adetailer: ad ? { models: ad.models } : null, styles: sty ? sty.styles.map((s) => s.name) : [],
       scripts: scr ? { txt2img: scr.txt2img, img2img: scr.img2img } : null,
-      optionKeys: opts ? Object.keys(opts.options) : [], workflows: wf && wf.ok ? wf.workflows : [] };
+      optionKeys: opts ? Object.keys(opts.options) : [], workflows: wf && wf.ok ? wf.workflows : [], workflowsFolder: (wf && wf.folder) || null };
   }
 
   // What the connected app can do (drives capabilities()).

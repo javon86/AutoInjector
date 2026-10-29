@@ -7,7 +7,11 @@
  *     apps/         programs AutoInjector installs for you
  *       comfyui/      ComfyUI (Stable Diffusion pictures + Wan video) — with its own models/ inside
  *       ollama/       Ollama, when AutoInjector installed it itself (Linux / no-admin installs)
- *     models/       models: llm/ (Ollama) image/ loras/ video/ voice/ assets/
+ *     models/       models, one folder per kind (output-manager.MODEL_FOLDERS — the names match Stability
+ *                   Matrix's Data\Models): llm/ image/ loras/ (lycoris/) vae/ (approx/) embeddings/ controlnet/
+ *                   upscale/ text_encoders/ diffusion_models/ clip_vision/ ipadapter/ detectors/ (ultralytics/bbox,
+ *                   ultralytics/segm, sams) faces/ video/ (framepack/hf) voice/ assets/
+ *     workflows/    ComfyUI workflow .json files
  *     downloads/    installers and unfinished downloads (safe to empty when nothing is downloading)
  *     images/ videos/ books/ uploads/ ai-work/ logs/   what you make
  *
@@ -20,11 +24,13 @@
  */
 const nodeFs = require('fs');
 const path = require('path');
+const { MODEL_FOLDERS } = require('./output-manager');
 
 /** The layout under one "stuff and thing" folder. */
 function layout(stuffDir) {
   const j = (...p) => path.join(stuffDir, ...p);
-  return { stuff: stuffDir, apps: j('apps'), comfyHome: j('apps', 'comfyui'), ollamaApp: j('apps', 'ollama'), downloads: j('downloads'), models: j('models'), llm: j('models', 'llm') };
+  const modelDirs = Object.fromEntries(MODEL_FOLDERS.map((f) => [f.key, j('models', ...f.rel.split('/'))]));
+  return { stuff: stuffDir, apps: j('apps'), comfyHome: j('apps', 'comfyui'), ollamaApp: j('apps', 'ollama'), downloads: j('downloads'), models: j('models'), llm: j('models', 'llm'), workflows: j('workflows'), modelDirs };
 }
 
 /** Is there a ComfyUI install in this folder (the Windows portable, or a plain ComfyUI checkout)? */
@@ -81,12 +87,13 @@ function map(places, { fs = nodeFs, sizes = true } = {}) {
   const add = (what, p, inStuff, note) => { if (!p) return; const r = { what, path: p, exists: exists(p), inStuff: !!inStuff, note: note || '' }; if (sizes && r.exists) r.bytes = sizeOf(p, fs).bytes; rows.push(r); };
   add('📁 "stuff and thing" — everything below lives here', L.stuff, true, 'Remembered by the app, so a new copy of AutoInjector keeps using it.');
   add('🤖 AI models (Ollama)', L.llm, true);
-  for (const [k, label] of [['image', '🎨 Picture models'], ['loras', '🎨 LoRAs'], ['video', '🎬 Video models'], ['voice', '🔊 Voice models']]) add(label, path.join(L.models, k), true);
+  for (const f of MODEL_FOLDERS) if (f.key !== 'llm' && f.key !== 'detectors') add(`${f.label} — models/${f.rel}`, L.modelDirs[f.key], true, f.sm ? `Stability Matrix: ${f.sm}` : '');
   const c = places.comfy || {};
   if (c.home) add('🧩 ComfyUI (pictures + video) and its models', c.home, c.where === 'stuff' || c.where === 'setting' && c.home.startsWith(L.stuff),
     c.where === 'legacy' ? 'Installed before the tidy-up, outside "stuff and thing" — press "Move into stuff and thing".' : c.where === 'legacy-long-path' ? 'Kept in the short system folder: this PC\'s path to "stuff and thing" is too long for ComfyUI on Windows.' : '');
   add('⬇ Installers and unfinished downloads', L.downloads, true, 'Safe to empty when nothing is downloading.');
   for (const [k, label] of [['images', '🖼 Your pictures'], ['videos', '🎬 Your videos'], ['books', '📚 Your books'], ['logs', '🧾 Logs and reports']]) add(label, path.join(L.stuff, k), true);
+  add('🧩 ComfyUI workflows (.json)', L.workflows, true, 'Listed in 🎨 Images → ComfyUI workflow.');
   add('⚙ Settings (the system\'s place for program settings — survives reinstalling)', places.userData, false);
   if (places.ollamaStore && exists(places.ollamaStore)) add('🤖 Models downloaded with Ollama\'s own app', places.ollamaStore, false, 'Ollama\'s own folder — AutoInjector can use these too (🔍 Find what\'s installed).');
   if (places.akoweData && exists(places.akoweData)) add('📖 Akọwe\'s book database', places.akoweData, false, 'Akọwe\'s working data; saved books go into "stuff and thing/books".');
