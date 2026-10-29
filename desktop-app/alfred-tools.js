@@ -66,18 +66,21 @@ async function resolveRun(ctx, a) {
   if (!okStatus(runs)) return akoweError(runs);
   if (a && a.run_id) return { ok: true, runId: String(a.run_id) };
   const j = runs.json || {};
-  const act = (j.active || [])[0] || (j.runs || []).find((r) => ['paused', 'interrupted', 'running', 'waiting', 'pausing', 'queued'].includes(r.status));
+  // a newer Akọwe names the run that matters (`current`); runs a newer one replaced are never acted on
+  const live = (r) => r && !r.replaced_by && r.state !== 'replaced' && ['paused', 'interrupted', 'running', 'waiting', 'pausing', 'queued', 'error'].includes(r.status);
+  const act = (j.active || [])[0] || (live(j.current) ? j.current : null) || (j.runs || []).find(live);
   if (!act) return { ok: false, error: 'NO_RUN', message: 'No “Make a book for me” run is going right now.' };
   return { ok: true, runId: act.id, run: act };
 }
 function runBrief(r) {
   if (!r) return null;
   return {
-    run_id: r.id, status: r.status, phase: clip(r.phase, 160), title: clip(r.title || '', 160), project_id: r.project_id || null,
+    run_id: r.id, status: r.status, state: r.state || undefined, state_words: r.state_words ? clip(r.state_words, 200) : undefined,
+    steps_done: r.steps_done != null ? r.steps_done : undefined, steps_total: r.steps_total != null ? r.steps_total : undefined, phase: clip(r.phase, 160), title: clip(r.title || '', 160), project_id: r.project_id || null,
     steps: (r.steps || []).map((s) => ({ title: clip(s.title, 80), state: s.state })),
     recent_events: (r.events || []).slice(-8).map((e) => clip(e.message, 200)),
     problem: r.problem ? { code: r.problem.code || null, message: clip(r.problem.message, 300), options: r.problem.options || null } : null,
-    needs_decision: r.status === 'paused' && !!(r.problem && r.problem.record_id),
+    needs_decision: typeof r.needs_decision === 'boolean' ? r.needs_decision : r.status === 'paused' && !!(r.problem && r.problem.record_id),
   };
 }
 
@@ -96,7 +99,7 @@ def({
     if (!okStatus(list)) return akoweError(list);
     out.books = (Array.isArray(list.json) ? list.json : []).slice(0, 12).map((b) => ({ project_id: b.project_id, title: clip(b.name || b.title || b.project_id, 120) }));
     const runs = await ctx.akowe('GET', '/api/autobook');
-    if (okStatus(runs) && runs.json) out.run = runBrief((runs.json.active || [])[0] || (runs.json.runs || [])[0]);
+    if (okStatus(runs) && runs.json) out.run = runBrief((runs.json.active || [])[0] || runs.json.current || (runs.json.runs || []).find((r) => !r.replaced_by && r.state !== 'replaced'));
     const slots = await ctx.akowe('GET', '/api/slots/states');
     if (okStatus(slots) && slots.json) out.ais = (slots.json.slots || []).map((s) => ({ slot: s.slot_id, name: clip(s.name, 40), state: s.state, word: clip(s.word, 60) }));
     if (!out.books.length) { out.note = 'No books yet.'; return { ok: true, data: out }; }
@@ -829,7 +832,9 @@ def({
     if (!r || r.ok === false) return { ok: false, error: (r && r.error) || 'NO_IMAGES_MODULE', message: (r && r.message) || 'The image module is not available in this build.' };
     const im = r.image || {}; const mg = r.managed || {};
     const cg = r.chatgpt || null;
-    return { ok: true, data: { connected: !!(im.enabled && im.endpoint), app: im.label || im.backend || null, checkpoint: im.checkpoint || im.model || null, busy: !!im.busy, started_by_autoinjector: mg.phase || null, endpoint: im.endpoint || null,
+    // connected but no picture model: every picture would fail — say so plainly (PC test)
+    const noModel = !!(im.enabled && im.endpoint && im.noModels);
+    return { ok: true, message: noModel ? `${im.label || 'Stable Diffusion'} is connected, but it has no picture model loaded, so it can't make pictures until it is pointed at a model folder (see the 🎨 Images tab).` : undefined, data: { connected: !!(im.enabled && im.endpoint), can_make_pictures: !!(im.enabled && im.endpoint) && !noModel, app: im.label || im.backend || null, checkpoint: noModel ? null : (im.checkpoint || im.model || null), busy: !!im.busy, started_by_autoinjector: mg.phase || null, endpoint: im.endpoint || null,
       chatgpt: cg ? { ready: !!cg.ready, why: cg.why || null, drawing: !!cg.busy, seconds: cg.drawingMs ? Math.round(cg.drawingMs / 1000) : 0 } : null } };
   },
 });

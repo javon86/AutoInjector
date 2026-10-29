@@ -85,11 +85,15 @@
     st.connected = on;
     // The Engine line under it ("not connected yet…") follows the connection.
     if (was !== on && st.engine) engineNote();
-    const dot = on ? 'ok' : 'off';
+    // Connected but with no picture model (PC test: "Connected ✓" while every picture failed): amber, and said plainly.
+    const noModels = !!(on && s && s.noModels);
+    const dot = on ? (noModels ? 'warn' : 'ok') : 'off';
     $('sd-dot').dataset.tone = dot; if ($('sd-tab-dot')) $('sd-tab-dot').dataset.tone = dot;
     let port = ''; try { port = s && s.base ? new URL(s.base).port : ''; } catch (_) {}
     const model = s && (s.checkpoint || s.model);
-    const text = note || (on ? `✔ Connected to ${s.label || (s.backend === 'comfy' ? 'ComfyUI' : 'Stable Diffusion')}${port ? ` on :${port}` : ''}${model ? ` — model ${model}` : ''}` : 'Not connected');
+    const who = s ? (s.label || (s.backend === 'comfy' ? 'ComfyUI' : 'Stable Diffusion')) : '';
+    const text = noModels && (!note || /^✔/.test(note)) ? `⚠ Connected, but ${who} has no picture model loaded`
+      : note || (on ? `✔ Connected to ${who}${port ? ` on :${port}` : ''}${model ? ` — model ${model}` : ''}` : 'Not connected');
     setText('sd-status-text', text);
     $('sd-status').title = text;
     if (s && s.base && !$('sd-url').value) $('sd-url').value = s.base;
@@ -97,6 +101,13 @@
 
   function showFound(r) {
     if (!r) return;
+    if (r.ok && r.noModels) {
+      // what to do, with the folder the library found the models in, and (when it can) a one-click restart
+      hint(`⚠ ${r.message || 'Connected, but it has no picture model loaded.'}\n${r.fix || ''}`.trim(), 'warn');
+      renderStatus(r.status);
+      showError({ code: 'NO_MODEL', message: r.message, fix: r.fix, actions: (r.help && r.help.actions) || [] }, { isTest: true });
+      return;
+    }
     if (r.ok) {
       hint('', '');
       renderStatus(r.status, r.message ? `✔ ${r.message}${r.model && !/model/.test(r.message) ? ` — model ${r.model}` : ''}` : null);
@@ -574,6 +585,15 @@
   }
   async function applyFix(id, ctx) {
     if (st.generating) return;
+    if (id === 'restart-with-models') {
+      for (const btn of document.querySelectorAll('#sd-error-actions button')) btn.disabled = true;
+      msg('↻ Restarting with your models… (loading a model can take a minute or two)');
+      const r = await call('restartWithModels');
+      msg(r.ok ? r.message : `✖ ${r.message || 'Could not restart it.'}`);
+      for (const btn of document.querySelectorAll('#sd-error-actions button')) btn.disabled = false;
+      if (r.ok) { hideError(); hint('', ''); const s = await call('status'); if (s && s.ok) renderStatus(s); await loadLists(); }
+      return;
+    }
     if (id === 'vae-automatic') { $('sd-vae').value = ''; vaeWarn(); }
     for (const btn of document.querySelectorAll('#sd-error-actions button')) btn.disabled = true;
     const req = ctx && ctx.isTest ? { test: true } : Object.assign({}, (ctx && ctx.req) || {}, id === 'vae-automatic' ? { vae: 'Automatic' } : {});
@@ -1201,5 +1221,5 @@
     engineNote();
   }
   // Keep the dot honest without opening the tab: a cheap status read at start.
-  if (api) call('status').then((s) => { if (s && s.ok && s.enabled && s.endpoint && $('sd-tab-dot')) $('sd-tab-dot').dataset.tone = 'ok'; });
+  if (api) call('status').then((s) => { if (s && s.ok && s.enabled && s.endpoint && $('sd-tab-dot')) $('sd-tab-dot').dataset.tone = s.noModels ? 'warn' : 'ok'; });
 })();

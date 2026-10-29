@@ -315,7 +315,7 @@ function installAlfred(h) {
     akoweReady: () => !!h.akoweServerBase(),
     connected: () => {
       const im = h.imageProvider.status(); const vi = h.videoProvider.status(); const oi = h.interpreterProvider.status();
-      return { akowe: !!h.akoweServerBase(), images: !!(im.enabled && im.configured), video: !!(vi.enabled && vi.configured), panes: SITE_IDS.filter((s) => h.state.enabled[s]).length, interpreter: !!(oi.enabled && oi.configured) };
+      return { akowe: !!h.akoweServerBase(), images: !!(im.enabled && im.configured && !im.noModels), video: !!(vi.enabled && vi.configured), panes: SITE_IDS.filter((s) => h.state.enabled[s]).length, interpreter: !!(oi.enabled && oi.configured) };
     },
   });
 

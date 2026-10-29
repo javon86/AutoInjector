@@ -22,6 +22,8 @@ const fs = require('fs');
 const path = require('path');
 const registry = require('./alfred-tools');
 const brainLib = require('./alfred-ai');
+const akoweRun = require('./akowe-run');
+const replyFormat = require('./alfred-format');
 
 const DEFAULTS = Object.freeze({
   enabled: false,
@@ -136,6 +138,7 @@ const SYSTEM_PROMPT = [
   'Character Forge dossiers: character_dossier reads them, forge_character fills empty fields as proposals, approve_dossier only when the user asks you to approve, make_character_art makes the portrait / ten views / sheet (engine "sd" = Stable Diffusion, "chatgpt" = ChatGPT draws it).',
   'Prefer the direct tools. Use run_code (Open Interpreter) only if it is offered AND no other tool can do the job.',
   'Answer in short, plain, friendly English (a sentence or a few bullet points). Say plainly when something is not available yet.',
+  'Write for a person, not a computer: never show JSON, tool names, ids or field names (like project_id or needs_decision) — turn tool results into plain sentences. Simple formatting is fine: **bold** and short "- " bullet lists.',
 ].join(' ');
 
 const safeName = (s) => String(s == null ? '' : s).replace(/[^A-Za-z0-9_.-]/g, '').slice(0, 40) || '?';
@@ -397,6 +400,8 @@ function createAlfred(deps = {}) {
   function status() {
     return {
       ok: true, enabled: settings.enabled, settings: publicSettings(), busy: !!req && !card, card: card ? card.public : null,
+      // what he is doing right now, for the "🎩 Thinking… 12 s" line (so a slow local model doesn't look stuck)
+      progress: req && !card ? { doing: req.doing || 'thinking', tool: req.toolTitle || null, step: req.steps, elapsedMs: Math.max(0, now() - (req.startedAt || now())), brain: lastAi.kind || null } : null,
       ai: lastAi, chat: chat.slice(-60), activity: activity.slice(-ACTIVITY_MAX),
       tools: registry.publicList({ interpreter: settings.interpreter }).map((t) => ({ name: t.name, title: t.title, group: t.group, changes: t.changes, allowAlways: t.allowAlways })),
       connected: connectedTools(),
@@ -427,6 +432,7 @@ function createAlfred(deps = {}) {
 
   // ------------------------------------------------------------------ running one tool
   async function execute(tool, args, { auto, readOnly } = {}) {
+    if (req) { req.doing = 'tool'; req.toolTitle = tool.title; emitState(); }
     let r;
     try { r = await withTimeout(Promise.resolve().then(() => tool.run(args, deps.ctx || {})), tool.timeoutMs || 60000); }
     catch (e) { r = { ok: false, error: 'TOOL_ERROR', message: `Something went wrong while doing "${tool.title}".` }; }
@@ -498,6 +504,8 @@ function createAlfred(deps = {}) {
       }
       if (cfg.missing) { lastAi = { kind: cfg.kind, ok: false, at: now(), model: null }; log('alfred-ai-error', { brain: cfg.kind, code: 'NO_AI' }); return reply(plainAiError({ kind: 'config', error: 'NO_AI' }, cfg), { notice: true }); }
       r.steps += 1;
+      r.doing = 'thinking'; r.toolTitle = null;
+      if (r.steps > 1) emitState();
       const messages = [{ role: 'system', content: systemPromptFor(settings) }].concat(history.map((m) => { const c = Object.assign({}, m); delete c._toolResult; delete c._tool; return c; }));
       let res;
       try { res = await brainLib.next(cfg, messages, tools(), { paneAsk: deps.paneAsk }, { signal: r.controller.signal }); }
@@ -514,10 +522,15 @@ function createAlfred(deps = {}) {
       lastAi = { kind: cfg.kind, ok: true, at: now(), model: cfg.model || cfg.site || null };
       const msg = res.message;
       if (!msg.toolCalls.length) {
-        const textOut = String(msg.content || '').trim() || 'Done.';
+        // what he says: no tool echoes, raw JSON or computer words (markdown stays: the panel formats it)
+        const textOut = replyFormat.cleanReply(msg.content) || 'Done.';
         history.push({ role: 'assistant', content: textOut });
         trimHistory();
-        return reply(textOut);
+        const out = reply(textOut);
+        // the model's own words before cleaning, for callers/tests that look at what the AI saw (never shown)
+        const raw = String(msg.content || '').trim();
+        if (raw && raw !== textOut) out.raw = raw;
+        return out;
       }
       // Record the assistant's tool calls (native shape when the model used native tool calling).
       const native = msg.toolCalls.filter((c) => c.native);
@@ -573,7 +586,7 @@ function createAlfred(deps = {}) {
         const id = `card-${seq}-${r.steps}`;
         card = {
           id, req: r, steps: pending,
-          public: { id, intro: msg.content ? String(msg.content).slice(0, 600) : '', steps: pending.map((p, i) => ({ n: i + 1, tool: p.tool.name, title: p.tool.title, text: p.text, allowAlways: registry.canAllowAlways(p.tool, p.args), allowKey: registry.allowKeyOf(p.tool, p.args), code: p.tool.interpreter ? { language: p.args.language, code: p.args.code } : (typeof p.tool.showCode === 'function' ? p.tool.showCode(p.args) : null) })) },
+          public: { id, intro: msg.content ? replyFormat.cleanReply(msg.content).slice(0, 600) : '', steps: pending.map((p, i) => ({ n: i + 1, tool: p.tool.name, title: p.tool.title, text: p.text, allowAlways: registry.canAllowAlways(p.tool, p.args), allowKey: registry.allowKeyOf(p.tool, p.args), code: p.tool.interpreter ? { language: p.args.language, code: p.args.code } : (typeof p.tool.showCode === 'function' ? p.tool.showCode(p.args) : null) })) },
         };
         log('alfred-card', { req: r.id, card: id, tools: pending.map((p) => p.tool.name) });
         emit({ type: 'card', card: card.public });
@@ -635,8 +648,33 @@ function createAlfred(deps = {}) {
   function clearChat() { history = []; chat = []; emitState(); return { ok: true }; }
 
   // ------------------------------------------------------------------ the watcher (rule-based, no AI call)
+  // A notice can be about something that keeps changing (a book run, a health problem): it carries a `ref`, and
+  // when that thing's state changes the older notices about it are marked outdated (the panel greys them out and
+  // says what is true now) — on the PC test his "paused, needs your decision" note kept showing after the run had
+  // been resumed and finished.
+  function refOf(key, opts) {
+    if (opts && opts.ref) return String(opts.ref);
+    const h = /^health:(?:problem|fixed):(.+)$/.exec(String(key || '')); // health-watch: a problem and its "fixed"
+    return h ? `health:${h[1]}` : null;
+  }
+  function outdate(ref, nowText) {
+    if (!ref) return 0;
+    let n = 0;
+    const nt = nowText ? String(nowText).slice(0, 200) : '';
+    for (const m of chat) {
+      if (m.role !== 'notice' || m.ref !== ref) continue;
+      if (m.outdated && m.nowText === nt) continue;
+      m.outdated = true; // older notes about it say what is true NOW (kept up to date)
+      m.nowText = nt;
+      n++;
+    }
+    if (n) emitState();
+    return n;
+  }
   function notice(kind, key, text, opts = {}) {
     if (!settings.enabled || !settings.notices) return false;
+    const ref = refOf(key, opts);
+    if (ref && !opts.ref) outdate(ref, opts.nowText || text); // (onRun outdates its own notes with the run's state)
     const t = now();
     while (noticeLog.length && t - noticeLog[0].at > NOTICE_WINDOW_MS) noticeLog.shift();
     if (!opts.force) {
@@ -648,7 +686,7 @@ function createAlfred(deps = {}) {
     // a one-click fix (🩺 health watch): the panel shows a button that calls health:fix with this code
     const action = opts.action && typeof opts.action === 'object' && /^[\w:.-]{1,80}$/.test(String(opts.action.code || ''))
       ? { code: String(opts.action.code), label: String(opts.action.label || 'Fix it').slice(0, 60) } : undefined;
-    say('notice', text, { kind, image: opts.image || undefined, action });
+    say('notice', text, { kind, image: opts.image || undefined, action, ref: ref || undefined });
     return true;
   }
   /** App events (main.js forwards broadcast channels here). Ignored entirely while Alfred is off. */
@@ -668,16 +706,26 @@ function createAlfred(deps = {}) {
     if (!run || !run.id) return;
     const prev = runSeen.get(run.id);
     runSeen.set(run.id, run.status);
+    const sum = akoweRun.summarizeRun(run) || { text: String(run.status || '') };
+    const ref = `run:${run.id}`;
+    // a run a newer one replaced (newer Akọwe: replaced_by / state "replaced"): its old notes are old news, nothing new
+    if (sum.state === 'replaced') { outdate(ref, sum.text); return; }
+    const needsDecision = !!sum.needsDecision;
     // First sight of a run: quiet, unless it is already waiting for the author's decision.
-    if (prev === undefined && !(run.status === 'paused' && run.problem && run.problem.record_id)) return;
+    if (prev === undefined && !needsDecision) return;
     if (prev === run.status) return;
     const name = run.title ? `“${String(run.title).slice(0, 80)}”` : 'your book';
+    // whatever happens next, the older notes about this run are old news now
+    outdate(ref, sum.text);
+    const step = sum.total ? ` (step ${sum.at || Math.min((sum.done || 0) + 1, sum.total)} of ${sum.total})` : '';
     if (run.status === 'paused') {
-      const needs = run.problem && run.problem.record_id;
-      notice('book', `run-${run.id}-paused`, needs ? `📖 The book run for ${name} paused and needs your decision (approve anyway / edit / try again) — open it in the 📖 Akọwe tab.` : `📖 The book run for ${name} paused${run.problem && run.problem.message ? `: ${String(run.problem.message).slice(0, 160)}` : '.'}`);
-    } else if (run.status === 'done') notice('book', `run-${run.id}-done`, `📖 The book run for ${name} finished.`);
-    else if (run.status === 'interrupted' || run.status === 'error') notice('book', `run-${run.id}-stop`, `📖 The book run for ${name} stopped (${run.status}). Ask me "resume the book run" or open the 📖 Akọwe tab.`);
-    else if (run.status === 'cancelled') notice('book', `run-${run.id}-cancel`, `📖 The book run for ${name} was cancelled.`);
+      const needs = needsDecision;
+      notice('book', `run-${run.id}-paused`, needs ? `📖 The book run for ${name} paused and needs your decision${step} (approve anyway / edit / try again) — open it in the 📖 Akọwe tab.` : `📖 The book run for ${name} paused${step}${run.problem && run.problem.message ? `: ${String(run.problem.message).slice(0, 160)}` : '.'}`, { ref });
+    } else if (run.status === 'done') notice('book', `run-${run.id}-done`, `📖 The book run for ${name} finished.`, { ref, force: true });
+    else if (run.status === 'interrupted') notice('book', `run-${run.id}-stop`, `📖 The book run for ${name} stopped when Akọwe closed${step}. Ask me "resume the book run" or press ▶ Resume in the 📚 Akọwe panel.`, { ref });
+    else if (run.status === 'error') notice('book', `run-${run.id}-stop`, `📖 The book run for ${name} stopped because of a problem${step}. Ask me "resume the book run" or open the 📖 Akọwe tab.`, { ref });
+    else if (run.status === 'cancelled') notice('book', `run-${run.id}-cancel`, `📖 The book run for ${name} was cancelled.`, { ref });
+    else if ((run.status === 'running' || run.status === 'queued') && ['paused', 'interrupted', 'error'].includes(prev)) notice('book', `run-${run.id}-resumed`, `📖 The book run for ${name} is writing again${step}.`, { ref });
   }
   async function pollBooks() {
     if (!settings.enabled || !settings.notices) return;

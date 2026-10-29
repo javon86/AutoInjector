@@ -164,8 +164,10 @@ async function identify(rawBase, opts = {}) {
   if (models.ok && Array.isArray(models.json)) {
     const fl = await _a1111Flavor(base, ms);
     const model = fl.model || (models.json[0] && (models.json[0].title || models.json[0].model_name)) || '';
-    return { base, port, kind: 'a1111', flavor: fl.flavor, label: fl.flavor, model, vae: fl.vae, models: models.json.length, usable: true,
-      message: `Connected to ${fl.flavor} on :${port}${model ? ` — model ${model}` : ''}` };
+    // It answers, but with an empty Checkpoint list it can't make a single picture ("Failed to find available model").
+    const noModels = models.json.length === 0;
+    return { base, port, kind: 'a1111', flavor: fl.flavor, label: fl.flavor, model: noModels ? '' : model, vae: fl.vae, models: models.json.length, usable: true, noModels,
+      message: noModels ? `Connected to ${fl.flavor} on :${port}, but ${fl.flavor} has no picture model loaded — it can't make pictures yet` : `Connected to ${fl.flavor} on :${port}${model ? ` — model ${model}` : ''}` };
   }
   if (comfy.ok && comfy.json && typeof comfy.json === 'object' && (comfy.json.system || comfy.json.devices)) {
     const sys = comfy.json.system || {};

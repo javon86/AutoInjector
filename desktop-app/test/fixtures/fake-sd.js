@@ -1,6 +1,8 @@
 'use strict';
 // fake-sd.js — tiny fake Stable Diffusion servers for the tests:
-//   fakeA1111({ flavor, noApi, oom, slow, noOpenapi, noExtensions, badVae, failWith })
+//   fakeA1111({ flavor, noApi, oom, slow, noOpenapi, noExtensions, badVae, failWith, noModels })
+//       noModels (or state.noModels): Forge with NO checkpoint — /sd-models is [], options.sd_model_checkpoint
+//       is null and every txt2img/img2img fails with Forge's 500 "Failed to find available model" (PC test).
 //       badVae: a VAE name (also listed by /sd-vae) that fails EVERY txt2img/img2img
 //       with A1111's real 500 body ("Error(s) in loading state_dict for
 //       AutoencoderKL: Missing key(s) …") while it is the effective VAE
@@ -123,11 +125,11 @@ async function fakeA1111(opts = {}) {
       case '/sdapi/v1/skip': state.skipped = true; return send(res, 200, null);
       case '/sdapi/v1/refresh-checkpoints': case '/sdapi/v1/refresh-loras': case '/sdapi/v1/refresh-vae': case '/sdapi/v1/refresh-embeddings': state.refreshed.push(u.pathname.split('/').pop()); return send(res, 200, null);
       case '/sdapi/v1/memory': return send(res, 200, { ram: { free: 8e9, used: 8e9, total: 16e9 }, cuda: { system: { free: 6e9, used: 6e9, total: 12e9 }, active: {}, allocated: {} } });
-      case '/sdapi/v1/sd-models': return send(res, 200, [
+      case '/sdapi/v1/sd-models': if (state.noModels || opts.noModels) return send(res, 200, []); return send(res, 200, [
         { title: 'dreamshaper_8.safetensors [879db523c3]', model_name: 'dreamshaper_8', hash: '879db523c3', filename: opts.ckptFile || '/models/Stable-diffusion/dreamshaper_8.safetensors' },
         { title: 'juggernautXL_v9.safetensors [c9e3e68f89]', model_name: 'juggernautXL_v9', hash: 'c9e3e68f89', filename: '/models/Stable-diffusion/juggernautXL_v9.safetensors' },
       ]);
-      case '/sdapi/v1/options': return send(res, 200, state.options);
+      case '/sdapi/v1/options': return send(res, 200, state.noModels || opts.noModels ? Object.assign({}, state.options, { sd_model_checkpoint: null }) : state.options);
       case '/sdapi/v1/cmd-flags': return send(res, 200, { api: true, listen: false });
       case '/sdapi/v1/version': return opts.flavor === 'sdnext' ? send(res, 200, { app: 'sd.next', updated: '2025-01-01' }) : send(res, 404, { detail: 'Not Found' });
       case '/sdapi/v1/loras': return send(res, 200, [
@@ -143,6 +145,7 @@ async function fakeA1111(opts = {}) {
       case '/sdapi/v1/txt2img':
       case '/sdapi/v1/img2img': {
         state.lastTxt2img = body; state.lastPath = u.pathname;
+        if (state.noModels || opts.noModels) return send(res, 500, { error: 'ValueError', detail: '', body: '', errors: 'Failed to find available model' });
         if (opts.oom) return send(res, 500, { error: 'OutOfMemoryError', detail: 'CUDA out of memory. Tried to allocate 2.00 GiB', body: '', errors: '' });
         state.txt2imgCalls = (state.txt2imgCalls || 0) + 1;
         const effVae = (body.override_settings && body.override_settings.sd_vae) || state.options.sd_vae;

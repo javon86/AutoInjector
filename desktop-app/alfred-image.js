@@ -37,7 +37,8 @@ function createImageAdapter({ imageProvider, outputManager, dbService, sdApi, fr
     for (const k of ['engine', 'purpose', 'view', 'appearance', 'newChat', 'upscale']) if (o[k] !== undefined && o[k] !== null && o[k] !== '') req[k] = o[k];
     if (!req.prompt) delete req.prompt;
     const r = await m.images.generate(req);
-    if (!r || !r.ok) return { ok: false, error: (r && r.error) || 'IMAGE_FAILED', message: (r && r.message) || 'The image could not be made.' };
+    // the plain cause AND what to do (e.g. "Forge has no picture model loaded … point it at <folder>")
+    if (!r || !r.ok) return { ok: false, error: (r && (r.code || r.error)) || 'IMAGE_FAILED', message: [(r && r.message) || 'The image could not be made.', r && r.fix].filter(Boolean).join(' ') };
     const paths = (r.images || []).map((x) => x.path).filter(Boolean);
     if (!paths.length) return { ok: false, error: 'NO_IMAGE', message: 'The image generator answered without a picture.' };
     return { ok: true, path: paths[0], paths, count: paths.length, warnings: r.warnings || [], characterLock: characterLock || null, engine: r.engine || 'sd', view: r.view || undefined };
@@ -56,8 +57,8 @@ function createImageAdapter({ imageProvider, outputManager, dbService, sdApi, fr
     catch (e) { r = { ok: false, error: 'IMAGE_ERROR' }; }
     finally { if (sized) imageProvider.setSettings({ width: before.width, height: before.height }); }
     if (!r || !r.ok) {
-      const code = (r && r.error) || 'FAILED';
-      const message = r && r.message ? r.message
+      const code = (r && (r.code || r.error)) || 'FAILED';
+      const message = r && r.message ? [r.message, r.fix].filter(Boolean).join(' ')
         : code === 'IMAGE_DISABLED' ? 'Image generation is turned off. Connect Stable Diffusion in the 🎨 Images tab.'
         : code === 'NO_ENDPOINT' ? 'No image generator is connected yet: open the 🎨 Images tab and press 🔍 Find or ▶ Start.'
         : `The image generator reported a problem (${code}).`;

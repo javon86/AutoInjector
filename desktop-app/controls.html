@@ -25,6 +25,7 @@
     .ak-dot[data-tone="ok"] { background:#57c07a; }
     .ak-dot[data-tone="busy"] { background:#e0b84a; animation:akpulse 1.2s ease-in-out infinite; }
     .ak-dot[data-tone="error"] { background:#e05a5a; }
+    .ak-dot[data-tone="warn"] { background:#e0b84a; }
     @keyframes akpulse { 50% { opacity:.35; } }
     @media (prefers-reduced-motion: reduce) { .ak-dot { animation:none !important; } }
     body[data-app-tab="akowe"] #wrap { display:none; }
@@ -1103,6 +1104,11 @@
     .bf-now-actions { display:flex; flex-wrap:wrap; gap:5px; margin-top:4px; }
     .bf-stale { position:relative; font-size:12px; color:#e9d9a6; background:#1c1910; border:1px dashed #6a5a2a; border-radius:7px; padding:2px 7px; margin-top:4px; }
     .bf-book-top { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+    .bf-run { display:flex; align-items:center; gap:6px; flex-wrap:wrap; font-size:12px; margin-top:4px; padding:2px 7px; border-radius:7px; border:1px solid #2c3550; background:#141a28; }
+    .bf-run[hidden] { display:none; }
+    .bf-run[data-tone="work"] { border-color:#3a5a9a; } .bf-run[data-tone="warn"] { border-color:#6a5a2a; background:#1c1910; color:#e9d9a6; }
+    .bf-run[data-tone="err"] { border-color:#7a3030; background:#1f1214; } .bf-run[data-tone="ok"] { border-color:#2f6a40; }
+    .bf-run-label { color:#9aa6c4; } .bf-run-text { font-weight:700; } .bf-run button { font-size:11.5px; padding:1px 9px; } .bf-run-msg { color:#c9d2ea; }
     .bf-book-title { font-weight:700; font-size:13px; color:#f1efff; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; max-width:100%; }
     .bf-progress-wrap { display:flex; align-items:center; gap:6px; flex:1 1 140px; min-width:120px; }
     .bf-progress { flex:1 1 auto; height:8px; border-radius:6px; background:#1d1d2a; overflow:hidden; border:1px solid #2a2a3c; }
@@ -2326,6 +2332,13 @@
                 <span class="bf-progress-wrap"><span class="bf-progress" role="progressbar" aria-valuemin="0" id="bf-progress" aria-label="Book progress"><span class="bf-progress-bar" id="bf-progress-bar" style="display:block"></span></span><span id="bf-progress-text" class="bf-progress-text"></span></span>
                 <button id="btn-bf-book-more" class="bf-toggle" type="button" aria-expanded="false" aria-controls="bf-checklist">List ▸</button>
               </div>
+              <!-- the "⚡ Make a book for me" run's REAL state (akowe-run.js), not the checklist's -->
+              <div id="bf-run" class="bf-run" data-tone="off" role="status" aria-live="polite" hidden>
+                <span class="bf-run-label">⚡ Make-a-book run:</span> <span id="bf-run-text" class="bf-run-text"></span>
+                <button id="btn-bf-run-resume" class="bf-primary" type="button" hidden title="Continue the book run where it stopped">▶ Resume</button>
+                <button id="btn-bf-run-decide" type="button" hidden title="Open the book in Akọwe to decide (approve anyway / edit / try again)">Decide in Akọwe</button>
+                <span id="bf-run-msg" class="bf-run-msg"></span>
+              </div>
               <ol id="bf-stepper" class="bf-stepper" aria-label="Book checklist (summary)"></ol>
               <ol id="bf-checklist" class="bf-checklist" aria-label="Book checklist" hidden></ol>
             </div>
@@ -2494,7 +2507,8 @@
   <script src="images-studio.js"></script>
   <script src="videos-studio.js"></script>
   <script src="videos-trailer.js"></script><!-- 🎞 book trailers in the 🎬 Video tab -->
-  <script src="alfred-panel.js"></script><!-- 🎩 Alfred panel (off by default) -->
+  <script src="alfred-format.js"></script><!-- 🎩 his replies as simple, safe formatting (used by alfred-panel.js) -->
+    <script src="alfred-panel.js"></script><!-- 🎩 Alfred panel (off by default) -->
   <script src="llm-setup-ui.js"></script><!-- B6 🎩 Alfred's AI: one-button setup + check (#llm-setup) -->
   <script src="llm-hardware.js"></script><!-- B6 fit ratings (window.LlmHardware), needed by llm-models-ui.js -->
   <script src="llm-models-ui.js"></script><!-- B6 🔎 model finder (#llm-models) -->

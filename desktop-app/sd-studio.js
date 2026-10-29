@@ -31,6 +31,8 @@ const sdWorkflows = require('./sd-workflows');
 const sdErrors = require('./sd-errors');
 const sdSanitize = require('./sd-sanitize');
 const views = require('./image-views');
+const fsMod = require('fs');
+const pathMod = require('path');
 
 const PURPOSES = ['portrait', 'cover', 'scene', 'illustration', 'map', 'test', 'free', 'view', 'sheet'];
 const ENGINES = ['auto', 'sd', 'chatgpt'];
@@ -82,10 +84,75 @@ function createSdStudio(deps) {
       persist();
       const l = await lists();
       r.lists = l.ok ? { checkpoints: l.checkpoints.length, loras: l.loras.length, samplers: l.samplers.length } : null;
-      if (l.ok && l.current && l.current.checkpoint) r.model = l.current.checkpoint;
+      if (l.ok && l.current && l.current.checkpoint && l.checkpoints.length) r.model = l.current.checkpoint;
+      // Connected, but no picture model: say so (PC test: "Connected ✓" while every picture failed).
+      if (ip.status().noModels) {
+        const h = modelHelp();
+        Object.assign(r, { noModels: true, model: '', help: h, message: h.message, fix: h.fix });
+        log('sd-no-models', { label: r.label, found: h.folders.length, files: h.files });
+      }
     }
     r.status = ip.status();
     return r;
+  }
+
+  // ---- "Connected, but Forge has no picture model loaded": where the user's models are and how to point at them.
+  // The library already scans Stability Matrix's shared Data/Models, AutoInjector's "stuff and thing"/models/image
+  // and the user's folders — its checkpoints are grouped by folder (the folder to give Forge: --ckpt-dir).
+  function modelFolders() {
+    const by = new Map();
+    let items = [];
+    try { items = (lib && lib.list({ kind: 'checkpoint', limit: 5000 }).items) || []; } catch (_) { items = []; }
+    for (const it of items) {
+      if (!it || !it.file || it.onDisk === false) continue;
+      const dir = it.folder || pathMod.dirname(it.file); // the scanned folder (Forge's --ckpt-dir looks in sub-folders too)
+      const k = dir.toLowerCase();
+      const cur = by.get(k) || { path: dir, count: 0, source: it.source || '', examples: [] };
+      cur.count++;
+      if (cur.examples.length < 3) cur.examples.push(pathMod.basename(it.file));
+      by.set(k, cur);
+    }
+    if (!by.size && lib) { // not scanned yet: count the model files in the checkpoint folders (top level only, cheap)
+      let folders = [];
+      try { folders = lib.folders().filter((f) => f.exists && f.kind === 'checkpoint'); } catch (_) { folders = []; }
+      for (const f of folders) {
+        let names = [];
+        try { names = fsMod.readdirSync(f.path).filter((n) => /\.(safetensors|ckpt|gguf)$/i.test(n)); } catch (_) { names = []; }
+        if (names.length) by.set(f.path.toLowerCase(), { path: f.path, count: names.length, source: f.source || '', examples: names.slice(0, 3) });
+      }
+    }
+    return [...by.values()].sort((a, b) => (b.count - a.count) || (/stability matrix/i.test(b.source) - /stability matrix/i.test(a.source)));
+  }
+  function modelHelp() {
+    const st = ip.status();
+    const label = st.label || (st.backend === 'comfy' ? 'ComfyUI' : 'Forge');
+    const folders = modelFolders();
+    const files = folders.reduce((n, f) => n + f.count, 0);
+    const top = folders[0] || null;
+    const canRestart = !!(top && typeof deps.canRestartWithModels === 'function' && (() => { try { return deps.canRestartWithModels(); } catch (_) { return false; } })());
+    const message = `Connected, but ${label} has no picture model loaded — it can't make pictures yet.`;
+    let fix;
+    if (top) {
+      const where = folders.length > 1 ? ` (and ${files - top.count} more in ${folders.length - 1} other folder${folders.length > 2 ? 's' : ''})` : '';
+      fix = st.backend === 'comfy'
+        ? `There ${top.count === 1 ? 'is 1 picture model' : `are ${top.count} picture models`} on this PC in ${top.path}${where}, but ComfyUI isn't using that folder. Put the files into ComfyUI's models/checkpoints folder (or add the folder to ComfyUI's extra_model_paths.yaml), restart ComfyUI and press Refresh.`
+        : `There ${top.count === 1 ? 'is 1 picture model' : `are ${top.count} picture models`} on this PC in ${top.path}${where}, but ${label} isn't using that folder. Point ${label} at it: in Stability Matrix open ${label}'s ⚙ Launch Options and add  --ckpt-dir "${top.path}"  (or in Stability Matrix's Settings let the package use the shared model folders), relaunch ${label}, then press Refresh here.${canRestart ? ` Or press “↻ Restart ${label} with my models” and AutoInjector does it for you.` : ''}`;
+    } else {
+      fix = `No picture model files were found on this PC. Download one (🎨 Images → Setup → ⬇ starter model, SD 1.5 or SDXL), or put a .safetensors checkpoint into Stability Matrix's Data/Models/StableDiffusion folder (or the app's “stuff and thing”/models/image folder), then point ${label} at it and press Refresh.`;
+    }
+    const actions = canRestart && st.backend !== 'comfy' ? [{ id: 'restart-with-models', label: `↻ Restart ${label} with my models` }] : [];
+    return { ok: true, noModels: !!st.noModels, label, backend: st.backend || '', folders, files, ckptDir: top ? top.path : '', launchArg: top ? `--ckpt-dir "${top.path}"` : '', canRestart, actions, message, fix };
+  }
+  /** Is a picture model loaded? Reads the connected app's Checkpoint list fresh. Used by 🧪 Test, 🩺 health and Check everything. */
+  async function modelCheck() {
+    const st = ip.status();
+    if (!st.endpoint || st.enabled === false) return { ok: true, connected: false, noModels: false };
+    let l = null;
+    try { l = await lists(); } catch (_) { l = null; }
+    const reachable = !!(l && l.ok);
+    const none = reachable ? (l.checkpoints || []).length === 0 : !!ip.status().noModels;
+    const out = { ok: true, connected: true, reachable, noModels: none, checkpoints: reachable ? l.checkpoints.length : null, label: st.label || '' };
+    return none ? Object.assign(out, modelHelp(), { noModels: true }) : out;
   }
 
   async function lists() {
@@ -222,6 +289,11 @@ function createSdStudio(deps) {
     if (!r || !r.ok) {
       const out = Object.assign({ ok: false, warnings }, r || {}, { message: (r && r.message) || sdBackends.explain(r) });
       if (retried) out.retried = retried;
+      // "Failed to find available model": in plain words, with where the user's models are and how to point at them
+      if (out.code === 'NO_MODEL' || out.error === 'NO_CHECKPOINT') {
+        const h = modelHelp();
+        Object.assign(out, { code: 'NO_MODEL', message: sdErrors.NO_MODEL_MESSAGE({ label: h.label }), fix: h.fix, help: h, actions: h.actions });
+      }
       if (out.code === 'VAE_LOAD_FAILED') await explainVae(out, vaeName, vaeInfo);
       // Log the cause, never the prompt (the log is shared with the user).
       // …plus the server's own first line (why) and the settings used, so a bare "HTTP 500" can be diagnosed from the log.
@@ -510,8 +582,10 @@ function createSdStudio(deps) {
       if (!cg.ready) return { fail: { ok: false, engine: 'chatgpt', error: 'CHATGPT_NOT_READY', code: 'CHATGPT_NOT_READY', message: `ChatGPT can't make pictures right now: ${cg.why}.`, hint: 'Open AutoInjector, make sure the ChatGPT pane is logged in and shows its message box, then try again (or use engine "sd").' } };
       return { engine: 'chatgpt', purpose };
     }
-    if (sdOn) return { engine: 'sd', purpose };
+    // auto: an SD app with no picture model can't draw — ChatGPT does it when it can
+    if (sdOn && !ip.status().noModels) return { engine: 'sd', purpose };
     if (cg.ready) return { engine: 'chatgpt', purpose };
+    if (sdOn) return { engine: 'sd', purpose };
     return { fail: { ok: false, error: 'NO_IMAGE_ENGINE', code: 'NO_IMAGE_ENGINE', message: `No image engine is available: ${sdWhy}, and ChatGPT can't be used (${cg.why}).`, hint: 'Start a Stable Diffusion app (🎨 Images → ▶ Start), or open AutoInjector with ChatGPT logged in.' } };
   }
   // The contract's answer: today's shape + engine, view echoed, paths.
@@ -615,6 +689,7 @@ function createSdStudio(deps) {
     let cgs = {};
     try { cgs = chatgpt && typeof chatgpt.status === 'function' ? chatgpt.status() || {} : {}; } catch (_) { cgs = {}; }
     const sd = { connected: !!(s.enabled && s.endpoint), backend: s.backend, label: s.label, base: s.base, checkpoint: s.checkpoint || s.model, busy: !!s.busy };
+    if (s.noModels) { const h = modelHelp(); Object.assign(sd, { noModels: true, problem: h.message, fix: h.fix }); }
     const cgOut = { ready: cg.ready, busy: !!cgs.busy };
     if (!cg.ready) cgOut.why = cg.why;
     return Object.assign({ ok: true }, sd, { engines: { sd, chatgpt: cgOut } });
@@ -625,7 +700,7 @@ function createSdStudio(deps) {
     img2img, inpaint, upscale, optionsGet, optionsSet, optionsSchema, upscalers, controlnetModels, controlnetModules, adetailerModels, styles, scripts, embeddings, extraFields,
     interrupt, skip, refresh, memory, objectInfo, queue, uploadImage, free, workflowsList, workflowGet, workflowSave, workflowDelete, runWorkflow, extras, features,
     progress: () => ip.progress(), cancel: () => ip.cancel(), status: () => Object.assign({ ok: true }, ip.status()),
-    test: () => testRender() };
+    test: () => testRender(), modelHelp, modelCheck };
 }
 
 module.exports = { createSdStudio, sizeFor, sizeForShape, PURPOSES, ENGINES, MAP_WORDS };

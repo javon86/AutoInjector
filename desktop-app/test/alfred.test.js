@@ -933,7 +933,7 @@ async function main() {
     });
     const { a, logs } = make({ llm, ctx: mctx });
     let r = await a.ask('list the tool server tools');
-    assert(r.type === 'reply' && /read_file/.test(r.text) && /"path"/.test(r.text), 'mcp_tools answers directly with the tools and their argument schemas');
+    assert(r.type === 'reply' && /read_file/.test(r.raw || r.text) && /"path"/.test(r.raw || r.text), 'mcp_tools answers directly with the tools and their argument schemas');
     r = await a.ask('read my todo file with the files server');
     const step = r.card && r.card.steps[0];
     assert(r.type === 'confirm' && step.tool === 'mcp_call' && /“read_file”/.test(step.text) && /“files”/.test(step.text) && /todo\.txt/.test(step.text) && step.allowAlways === false && !mcpCalls.length, 'mcp_call shows an "I will" card naming the server, the tool and the arguments — nothing runs yet, no "always allow"');
