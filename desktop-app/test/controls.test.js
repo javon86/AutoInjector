@@ -530,6 +530,21 @@ async function testPickerDialogFlow() {
   api._pk.claude = { input: { state: "stale", savedAt: Date.now() - 60000, how: "pick" } };
   api._pickerCb(api._pkStatus("claude"));
   assert(chip("input").dataset.st === "stale" && /⚠️/.test(chip("input").textContent), "a saved pick that no longer matches shows RED ⚠️");
+  // PC test 2026-10-28: the Send row agrees with reality — Enter sends, so not "⚠️ not found"
+  api._pk.claude.send = { state: "stale", savedAt: Date.now() - 60000, how: "pick", works: "enter" };
+  api._pickerCb(api._pkStatus("claude"));
+  assert(chip("send").dataset.st === "works" && chip("send").textContent === "Send: Enter key (works)" && !/⚠️/.test(chip("send").textContent) && /isn't on the page any more/.test(chip("send").title), `a saved Send button that is gone but Enter works: “${chip("send").textContent}”`);
+  api._pk.claude.send = { state: "none", works: "enter" };
+  api._pickerCb(api._pkStatus("claude"));
+  assert(chip("send").textContent === "Send: Enter key (works)", "no saved button, Enter works: the same words");
+  api._pk.claude.send = { state: "stale", works: "button" };
+  api._pickerCb(api._pkStatus("claude"));
+  assert(chip("send").textContent === "Send: usual button (works)", "a saved button that is gone but the site's usual button works: said so");
+  api._pk.claude.send = { state: "none", works: "button" };
+  api._pickerCb(api._pkStatus("claude"));
+  assert(chip("send").dataset.st === "none" && /Not set/.test(chip("send").textContent), "nothing saved and the usual button works: still the plain “Not set”");
+  delete api._pk.claude.send;
+  api._pickerCb(api._pkStatus("claude"));
   // Test it
   btn(".pk-test").dispatchEvent(new w.Event("click", { bubbles: true }));
   await tick();
@@ -583,6 +598,19 @@ async function testPickerNumberTeach() {
   fire({ active: false, phase: "done", result: "fixed", saved: ["input", "send", "assistant"], learned: { input: true, send: true, reply: true } });
   box = menu.querySelector(".pk-teach");
   assert(/✔ Saved — ChatGPT is working again\./.test(box.textContent) && box.dataset.tone === "ok", "finished: “✔ Saved — ChatGPT is working again.”");
+  assert(/learned ChatGPT's message box and reply area; the Send button \(saved\)/.test(box.textContent), `…and says what it learned (${box.querySelector(".pk-teach-text").textContent})`);
+  // PC test 2026-10-28: sent with Enter, no Send button learned — never claims one
+  fire({ active: false, phase: "done", result: "fixed", saved: ["input", "assistant"], sendHow: "enter", learned: { input: true, send: true, reply: true } });
+  box = menu.querySelector(".pk-teach");
+  assert(/Send: the Enter key works/.test(box.textContent) && !/Send button \(saved\)/.test(box.textContent) && !/learned the message box, the Send button/.test(box.textContent), `with Enter: “${box.querySelector(".pk-teach-text").textContent}”`);
+  // the success message stays until it is closed (it vanished too quickly on the PC)
+  await new Promise((r) => setTimeout(r, 60));
+  api._pickerCb(api._pkStatus("chatgpt"));
+  box = menu.querySelector(".pk-teach");
+  const closeBtn = Array.from(box.querySelectorAll("button")).find((b) => b.textContent === "Close");
+  assert(!box.hidden && /✔ Saved/.test(box.textContent) && !!closeBtn, "the ✔ Saved message stays on the card, with a Close button");
+  closeBtn.dispatchEvent(new w.Event("click", { bubbles: true }));
+  assert(menu.querySelector(".pk-teach").hidden, "Close hides it");
   fire({ active: false, phase: "wait_reply", result: "failed", failedPart: "assistant", saved: ["input", "send"] });
   box = menu.querySelector(".pk-teach");
   const fixBtn = Array.from(box.querySelectorAll("button")).find((b) => /Point at the reply area/.test(b.textContent));
@@ -1293,6 +1321,29 @@ async function testLockerBrowser() {
   assert(!doc.getElementById("preview-claude").hidden && list.hidden, "💬 Last reply tab shows the reply preview again");
 }
 
+// PC test 2026-10-28: the connection test's failure said only "failed" under
+// "Technical details" — now it shows what the AI actually wrote.
+async function testLinkTestTechnicalDetails() {
+  console.log("\n== Akọwe panel: a failed connection-test round trip shows what the AI wrote (Technical details) ==");
+  const api = makeApi();
+  const snap = { ok: true, enabled: true, listening: true, host: "127.0.0.1", port: 17891, tokenPresent: true, sites: { claude: { active: true, ready: true, label: "Claude" }, chatgpt: { active: false }, gemini: { active: false } }, activity: [], connect: {}, linkTest: {} };
+  api.akoweStatus = async () => snap;
+  api.akoweLinkTestRun = async () => ({ ok: true, headline: "1 problem found", passCount: 0, failCount: 1, skipCount: 0, total: 1, report: null,
+    steps: [{ id: "roundtrip:claude", name: "Claude — real round trip through the bridge", status: "fail", detail: "Claude answered in 5s, but the reply had no JSON object found in the reply.", tip: "Start a new chat.", ms: 5000, http_status: 200, reply_excerpt: "Sorry — I can’t do “tests” today." }] });
+  const dom = await loadWindow(api);
+  const doc = dom.window.document;
+  doc.getElementById("btn-bf-test").dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 120));
+  const m = Array.from(doc.querySelectorAll(".bf-hz")).find((x) => /Test failed/.test(x.title));
+  assert(!!m, "the failed round trip gets a ⚠️ marker");
+  if (!m) return;
+  m.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 30));
+  const code = doc.querySelector("#bf-pop-body details code");
+  const tech = code ? code.textContent : "";
+  assert(/link test step roundtrip:claude: fail \(HTTP 200\)/.test(tech) && /Claude wrote: Sorry — I can’t do “tests” today\./.test(tech) && /no JSON object found/.test(tech), `Technical details: ${tech}`);
+}
+
 async function main() {
   await testPaneCollapseToggle();
   await testUtilityPanelHeadingCollapses();
@@ -1307,6 +1358,7 @@ async function main() {
   await testZoomControls();
   await testSelectorPickMenuToggle();
   await testPickerDialogFlow();
+  await testLinkTestTechnicalDetails();
   await testPickerRejections();
   await testPickerNumberTeach();
   await testSavedLoginsAddAndFill();

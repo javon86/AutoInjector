@@ -16,6 +16,7 @@ function selftestPrompt(token) {
   return `[AutoInjector connectivity test -- not a real task, no need to elaborate] Reverse the letters of this token in your head and reply with ONLY the reversed text as plain words, nothing else -- do not run code or use any tools, no code block, no punctuation, no explanation: ${token}`;
 }
 
+const Q = '["\'`\u201C\u201D\u2018\u2019]'; // a quote mark, straight or curly
 function escapeRe(s) { return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 const norm = (s) => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim();
 
@@ -50,8 +51,9 @@ function onlyInCode(text, token) {
     if (!line.includes(token)) continue;
     seen++;
     if (inFence) continue;
-    const quoted = new RegExp('["\'`]' + escapeRe(token) + '["\'`]').test(line);
-    const codey = /[=(]/.test(line.replace(new RegExp('["\'`]' + escapeRe(token) + '["\'`]', 'g'), ''));
+    // straight or curly quotes (Claude's site shows "…" as “…”, PC test 2026-10-28)
+    const quoted = new RegExp(Q + escapeRe(token) + Q).test(line);
+    const codey = /[=(]/.test(line.replace(new RegExp(Q + escapeRe(token) + Q, 'g'), ''));
     if (!(quoted && codey)) return false;
   }
   return seen > 0;

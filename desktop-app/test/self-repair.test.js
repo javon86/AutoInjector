@@ -457,6 +457,7 @@ async function testEngine() {
   sim.block = flat;
   await waitUntil(() => !sim.engine.state("chatgpt").running);
   sim.engine.options.teachTimeoutMs = 8000;
+  sim.engine.options.teachDoneMs = 1000; // the ✔ Saved note in the AI's window (12 s in the app)
   const tr = await sim.engine.startTeach("chatgpt", null, { auto: false });
   st = sim.engine.state("chatgpt");
   assert(tr.ok && /^\d{4}$/.test(tr.number) && st.teach && st.teach.active && st.teach.reversed === SR.reverseDigits(tr.number), `teach started on request (number ${tr.number}, reversed ${st.teach && st.teach.reversed})`);
@@ -486,7 +487,10 @@ async function testEngine() {
   assert(asel && sim.doc.querySelectorAll(asel).length >= 2 && !/\d/.test(asel), `the reply area is general (${asel} matches ${asel ? sim.doc.querySelectorAll(asel).length : 0} replies)`);
   assert(st.teach.saved.join() === "input,send,assistant" && !st.teach.failedPart, "the snapshot lists what was saved, nothing failed");
   assert(sim.teachOvLog[sim.teachOvLog.length - 1] === null, "the temporary teach overrides are cleared afterwards");
-  assert(!sim.doc.querySelector("[data-autoinjector-overlay]"), "the banner is removed afterwards");
+  const doneNote = sim.doc.querySelector("[data-autoinjector-done]");
+  assert(!Array.from(sim.doc.querySelectorAll("[data-autoinjector-overlay]")).some((o) => /please type/.test(o.textContent)), "the “please type” banner is removed afterwards");
+  assert(doneNote && /✔ Saved/.test(doneNote.textContent) && /message box and reply area/.test(doneNote.textContent) && /the Send button \(saved\)/.test(doneNote.textContent), `PC test 2026-10-28: a ✔ Saved note stays in the AI's window saying what was learned (${doneNote && doneNote.textContent})`);
+  assert(await waitUntil(() => !sim.doc.querySelector("[data-autoinjector-done]"), 3000), "…and closes by itself after a while (teachDoneMs)");
   assert(textFree(sim, [`Write the number ${N}`, REV + "\n"]), "the follow-up text never reaches logs/events");
   assert(sim.engine.probeReplyKind("chatgpt", `[TO: USER]\n${REV}\n[FROM: CHATGPT]`, []) && sim.engine.probeReplyKind("chatgpt", `${N}`, null), "the teach answers (the number, the reversed number) are never nagged (P37.4)");
 
@@ -724,6 +728,65 @@ function testLearnedStore() {
   assert(Object.keys(SR.sanitizeLearned(null, ["chatgpt"])).join() === "chatgpt", "nothing saved -> empty per site");
 }
 
+// PC test 2026-10-28 (Problem 3): typed + Send faster than one poll hung at "You type
+// the number"; the typed number was taken as a late answer to an older message.
+async function testTeachFastAndOwned() {
+  console.log("\n== PC test: 🔢 typed and sent faster than one poll — still seen, still finishes ==");
+  const sim = makeSite({ options: { teachPollMs: 300 } });
+  sim.block = (who, text) => { const l = sim.doc.getElementById("thread"); append(sim.doc, l, `<section class="${who === "bot" ? "bot-zone" : "me-zone"}" data-who="${who}"><div class="tx">${String(text).replace(/</g, "&lt;")}</div></section>`); };
+  const worked = [];
+  sim.engine = SR.createSelfRepair({
+    sites: ["chatgpt"], SITES, label: () => "ChatGPT",
+    overrides: () => (sim.learned.assistant ? { assistant: sim.learned.assistant, assistantStrict: true } : {}),
+    runPage: (_s, script) => runScript(script, sim.doc),
+    reload: async () => ({ ok: true }),
+    readState: () => ({ text: sim.readerText(), textLen: sim.readerText().length, generating: false, generatingMs: 0, loadFailed: false }),
+    sendProbe: async (_s, text, token) => { const r = await sim.onSend(text, token); return Object.assign({ method: "enter" }, r); },
+    saveLearned: (_s, role, sel, how) => { sim.learned[role] = sel; sim.saved.push({ role, sel, how }); },
+    savePick: (_s, role, sel, how) => { sim.learned[role] = sel; sim.saved.push({ role, sel, how }); return true; },
+    sendWorks: async (_s, how) => { worked.push(how); },
+    teachOverrides: () => {}, busyReason: () => null, isActive: () => true,
+    log: (k, d) => sim.logs.push({ k, d }), onChange: () => {},
+    options: { probeTimeoutMs: 700, sendTimeoutMs: 400, earlyQuietMs: 120, pollStepMs: 15, teachPollMs: 300, teachTimeoutMs: 5000, teachDoneMs: 400, intervalMs: 0 }
+  });
+  const tr = await sim.engine.startTeach("chatgpt", null, { auto: false });
+  const N = tr.number;
+  await waitUntil(() => sim.doc.querySelector("[data-autoinjector-overlay]"));
+  // between two polls: the digits are typed (an input event), Enter, the box empties, the message shows
+  const box = sim.doc.getElementById("prompt-textarea");
+  typeInto(box, N);
+  box.firstChild.dispatchEvent({ type: "input", target: box.firstChild });
+  box.dispatchEvent({ type: "keydown", key: "Enter", shiftKey: false, target: box });
+  box.textContent = "";
+  sim.block("human", N);
+  // still in the same 300 ms poll gap: the AI answers the bare number (it is not the teach's reply)
+  sim.block("bot", `Got it: ${N}. What would you like me to do with it?`);
+  const asked = await waitUntil(() => sim.engine.state("chatgpt").teach && sim.engine.state("chatgpt").teach.asked, 3000);
+  let st = sim.engine.state("chatgpt");
+  assert(asked, `the teach went past “You type the number” (phase ${st.teach && st.teach.phase})`);
+  assert(st.teach.sendHow === "enter" && st.teach.learned.input, `it learned the message box and that Enter sends (${st.teach.sendHow}, ${JSON.stringify(st.teach.learned)})`);
+  const res = await waitUntil(() => sim.engine.state("chatgpt").teach.result, 5000);
+  st = sim.engine.state("chatgpt");
+  assert(res === "fixed" && st.state === "ok", `…and finished: ${res}`);
+  assert(!sim.saved.some((x) => x.role === "send") && worked.join() === "enter", `no Send button is claimed; the host is told Enter works (saved ${sim.saved.map((x) => x.role).join(",")}; told ${worked.join(",")})`);
+  const note = sim.doc.querySelector("[data-autoinjector-done]");
+  assert(note && /Enter key works/.test(note.textContent) && !/Send button \(saved\)/.test(note.textContent), `the ✔ Saved note says Enter sends (${note && note.textContent})`);
+  assert(SR.teachLearnedWords({ saved: ["input", "assistant"], sendHow: "enter" }, "ChatGPT") === "learned ChatGPT's message box and reply area; Send: the Enter key works (no button needed)", "teachLearnedWords: Enter, no button claimed");
+  assert(/Send button \(saved\)/.test(SR.teachLearnedWords({ saved: ["input", "send", "assistant"] }, "Claude")), "teachLearnedWords: a learned button is named");
+
+  console.log("\n== PC test: while 🔢 runs, the typed number is the teach's — not a late answer to an older message ==");
+  const sim2 = makeSite();
+  await sim2.engine.runCheck("chatgpt", "startup");
+  const t2 = await sim2.engine.startTeach("chatgpt", null, { auto: false });
+  // the Relay Trace ties the AI's next reply to an Akọwe prompt (#0042) that never got its answer
+  assert(sim2.engine.probeReplyKind("chatgpt", t2.number, ["0042"]) === "owned", "the bare number (4 characters, like the PC log) is owned by the teach");
+  assert(sim2.engine.expects("chatgpt", `Got it: ${t2.number}.`, ["0042"]) === true, "so is the AI's echo of it");
+  assert(sim2.engine.expects("chatgpt", "Chapter 3. The ferry left at dawn.", ["0042"]) === false, "a reply WITHOUT the number still belongs to its own message");
+  sim2.engine.cancelTeach("chatgpt");
+  await waitUntil(() => !sim2.engine.teachActive("chatgpt"));
+  assert(sim2.engine.expects("chatgpt", t2.number, ["0042"]) === false, "after the teach, the number is nobody's special word any more");
+}
+
 (async () => {
   try {
     testClassifier();
@@ -733,6 +796,7 @@ function testLearnedStore() {
     await testTeachLearner();
     await testGeneralise();
     await testEngine();
+    await testTeachFastAndOwned();
     await testOwnership();
     await testPicker();
     await testNoNags();

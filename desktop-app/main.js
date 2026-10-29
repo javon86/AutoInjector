@@ -1502,6 +1502,19 @@ const sendQueues = {};
 // in the chat (see sendTextTo). Per run; a pane that never proves one is still
 // trusted on "box emptied" alone, with a send-unverified warning in the log.
 const sendVerifiedSeen = {};
+// How the last PROVEN send to each pane went out: { method: "click"|"enter", savedSend, at }.
+// The 🎯 card's Send row uses it ("Send: Enter key (works)"), not only the saved selector.
+const lastSendHow = {};
+// A saved / learned Send button that is no longer on the page: the send uses the
+// built-in buttons and Enter instead, and the log says so plainly (once per selector).
+const staleSendNoted = {};
+function noteStaleSavedSend(target, r) {
+  const sel = (effectiveOverrides(target) || {}).send || "";
+  if (staleSendNoted[target] === sel) return;
+  staleSendNoted[target] = sel;
+  const L = siteLabel(target);
+  logEvent("send-saved-button-missing", { target, selector: sel, severity: "warn", note: `The Send button saved for ${L} (🎯 / 🔢 / learned) isn't on ${L}'s page any more — AutoInjector used ${L}'s usual Send button or the Enter key instead${r && r.ok === false ? ", and that didn't send either" : ""}. Clear it on ${L}'s 🎯 card (or run 🔢 again) to stop this warning.` });
+}
 // TR-25: how long a send waits for an AI that is still writing its last reply.
 const SEND_BUSY_WAIT_MS = Number(process.env.AUTOINJECTOR_SEND_BUSY_WAIT_MS) || 5 * 60 * 1000;
 const SEND_BUSY_POLL_MS = Number(process.env.AUTOINJECTOR_SEND_BUSY_POLL_MS) || 2000;
@@ -1793,7 +1806,12 @@ async function sendTextTo(target, text, fromSite, opts = {}) {
       // only "emptied the box" without showing up is NOT trusted: the page can
       // clear its box without sending (that is how ChatGPT went silent).
       if (r && markerBaseline == null && Number.isInteger(r.markerBaseline)) markerBaseline = r.markerBaseline;
-      if (r && r.ok && r.verified === false && sendVerifiedSeen[target]) r = { ok: false, error: "SEND_UNVERIFIED" };
+      // PC test 2026-10-28: and when the page shows the user's messages in a way the
+      // script can count, "the box emptied but no new message appeared and its
+      // number never showed" means it did NOT arrive — even on a pane's first send.
+      if (r && r.ok && r.verified === false && (sendVerifiedSeen[target] || r.turnsCountable === true)) r = { ok: false, error: "SEND_UNVERIFIED", savedSend: r.savedSend, markerBaseline: r.markerBaseline };
+      if (r && r.savedSend && r.savedSend !== "found") noteStaleSavedSend(target, r);
+      if (r && Array.isArray(r.dismissed) && r.dismissed.length) logEvent("popup-dismissed", { target, seq, what: r.dismissed.slice(0, 3), note: `closed a feedback pop-up inside ${siteLabel(target)}'s window (its own Dismiss / Close button) before typing` });
       if (r && r.ok) { if (r.verified) sendVerifiedSeen[target] = true; break; }
       // TR-25: the AI is still writing its previous reply — wait for it to
       // finish (it can't take a new message yet) instead of burning retries.
@@ -1884,7 +1902,8 @@ async function sendTextTo(target, text, fromSite, opts = {}) {
     broadcast("sent", { target, from: fromSite || null, ts: Date.now(), seq });
     if (!answeredEarly) broadcast("waiting-changed", { site: target, waiting: true });
     else logEvent("reply-before-confirm", { target, seq, note: "its answer was captured while the send was still being confirmed (P18.5)" });
-    logEvent("sent", { target, from: fromSite || null, attempts, selfRecovered: attempts > 1, seq, verified: res.verified === true, method: res.method || null });
+    logEvent("sent", { target, from: fromSite || null, attempts, selfRecovered: attempts > 1, seq, verified: res.verified === true, proof: res.proof || null, method: res.method || null });
+    if (res.verified === true && res.method && res.method !== "already-sent") lastSendHow[target] = { method: res.method, savedSend: res.savedSend || "found", at: Date.now() };
     if (res.verified === false) logEvent("send-unverified", { target, seq, severity: "warn", note: "the box emptied but this message's number never showed in the chat" });
   }
   return res;
@@ -5615,8 +5634,39 @@ async function pickerStatus(site) {
     }
     items[role] = { state: st, preview: d ? d.preview : null, latest: d ? d.latest !== false : null, savedAt: sel ? (m ? m.savedAt || null : null) : null, how: sel ? (m ? m.how : "pick") : null, rev: m ? m.rev : null, picking: pickRunning[site] === role, selector: d ? d.selector : sel || null };
   }
+  if (items.send) { const w = pickerSendWorks(site); if (w) items.send.works = w; } // how Send really works (PC test 2026-10-28)
   let repair = null; try { repair = selfRepair.state(site); } catch (_) {}
   return { ok: true, site, label: siteLabel(site), items, picking: pickRunning[site] || null, repair };
+}
+// 🔢 sent with Enter (or the usual Send button) and learned no Send button: drop a
+// saved / learned Send button that is not on the page any more, so the 🎯 card
+// says how Send really works instead of "⚠️ not found". One that IS on the page is kept.
+async function teachSendWorks(site, how) {
+  if (!SITES[site]) return { ok: false };
+  lastSendHow[site] = { method: how === "enter" ? "enter" : "click", savedSend: "missing", at: Date.now(), by: "number" };
+  const sel = pickerSavedSel(site, "send") || ((state.learnedSelectors[site] || {}).send || {}).selector || null;
+  if (!sel) { broadcastPicker(site); return { ok: true, cleared: false }; }
+  let check = null;
+  const view = siteViews[site];
+  if (view && !view.webContents.isDestroyed()) {
+    try { check = await view.webContents.executeJavaScript(selfRepairLib.buildMatchCheckScript(site, SITES, { send: sel }), true); } catch (_) { check = null; }
+  }
+  const c = check && check.ok && check.roles ? check.roles.send : null;
+  if (!c || c.ok) { broadcastPicker(site); return { ok: true, cleared: false }; }
+  const next = { ...(state.selectorOverrides[site] || {}) }; delete next.send; state.selectorOverrides[site] = next;
+  if (state.pickMeta[site] && state.pickMeta[site].send) { const m = { ...state.pickMeta[site] }; delete m.send; state.pickMeta[site] = m; }
+  if (state.learnedSelectors[site] && state.learnedSelectors[site].send) { const l = { ...state.learnedSelectors[site] }; delete l.send; state.learnedSelectors[site] = l; }
+  saveStateDebounced();
+  logEvent("selector-override-cleared", { site, role: "send", via: "number", selector: sel, note: `🔢 showed that ${siteLabel(site)} sends with ${how === "enter" ? "the Enter key" : "its usual Send button"}; the saved Send button wasn't on the page any more, so it was removed` });
+  broadcastPicker(site);
+  return { ok: true, cleared: true };
+}
+// How Send works right now, for the 🎯 card's Send row (from the last proven send).
+function pickerSendWorks(site) {
+  const lh = lastSendHow[site];
+  if (!lh || Date.now() - lh.at > 6 * 3600000) return null;
+  if (lh.method === "enter") return "enter";
+  return lh.savedSend === "found" && pickerSavedSel(site, "send") ? "saved" : "button";
 }
 function broadcastPicker(site) {
   pickerStatus(site).then((st) => broadcast("picker", st)).catch(() => {});
@@ -7533,7 +7583,10 @@ const selfRepair = selfRepairLib.createSelfRepair({
     const lr = lastRead[s] || {};
     return { text: lr.text || "", textLen: lr.textLen || 0, generating: !!state.generating[s], generatingMs: generatingSince[s] ? Date.now() - generatingSince[s] : 0, loadFailed: !!paneLoadFailed[s], inputFound: lr.inputFound };
   },
-  sendProbe: (s, text, token) => sendTextTo(s, withEnvelope(text, s), null, { probe: true, automatic: true, cancelToken: token }).then((r) => ({ ok: !!(r && r.ok), error: r && r.error, verified: r ? r.verified : undefined })),
+  sendProbe: (s, text, token) => sendTextTo(s, withEnvelope(text, s), null, { probe: true, automatic: true, cancelToken: token }).then((r) => ({ ok: !!(r && r.ok), error: r && r.error, verified: r ? r.verified : undefined, method: r && r.ok ? r.method || null : null })),
+  // 🔢 found that Send works without a saved button (Enter / the usual one): a
+  // saved Send button that isn't on the page any more is dropped (PC test 2026-10-28)
+  sendWorks: (s, how) => teachSendWorks(s, how),
   saveLearned: selfRepairSaveLearned,
   // P38 🔢: what the number teach learned is SAVED like a 🎯 Save (per site, versioned)
   savePick: (s, role, selector, how) => {
@@ -7585,12 +7638,25 @@ ipcMain.handle("selfrepair:probe", (_evt, payload) => {
   logEvent("self-repair", { step: "check", reason: "you-asked", outcome: `started:${r.started.length}` });
   return Object.assign({ ok: true }, r);
 });
-ipcMain.handle("selfrepair:teach-start", (_evt, payload) => {
+ipcMain.handle("selfrepair:teach-start", async (_evt, payload) => {
   const site = payload && payload.site;
   if (!SITES[site]) return { ok: false, error: "BAD_SITE" };
   if (!state.enabled[site]) return { ok: false, error: "INACTIVE" };
-  return selfRepair.startTeach(site, null, { auto: false });
+  const r = await selfRepair.startTeach(site, null, { auto: false });
+  // PC test 2026-10-28: an Akọwe request still waiting for this AI's (late) answer
+  // took the number the user typed during 🔢 as that answer. Stop waiting for it
+  // now — while 🔢 runs, everything in this pane belongs to the setup.
+  if (r && r.ok && !r.already) teachParkWaiting(site);
+  return r;
 });
+function teachParkWaiting(site) {
+  let rel = null;
+  try { rel = akoweBridge && typeof akoweBridge.release === "function" ? akoweBridge.release(site, "teach") : null; } catch (_) { rel = null; }
+  if (rel) logEvent("teach-parked-waiting", { site, request_id: rel.request_id, typed: rel.typed, note: `🔢 setup started: stopped waiting for ${siteLabel(site)}'s answer to an Akọwe request, so nothing typed during the setup is taken as that answer` });
+  // the pane's own "waiting for a reply" flag: a reply now is the setup's, not an old message's
+  if (state.waiting[site]) { state.waiting[site] = false; state.waitingSince[site] = null; broadcast("waiting-changed", { site, waiting: false }); }
+  return rel;
+}
 ipcMain.handle("selfrepair:teach-cancel", (_evt, payload) => {
   const site = payload && payload.site;
   if (!SITES[site]) return { ok: false, error: "BAD_SITE" };
@@ -7661,7 +7727,9 @@ async function startAkoweBridgeNow() {
       // bridge: verbatim, no hop-count reset, no tag flags (BF-03/BF-16);
       // cancelToken: the bridge withdraws it if its request times out first (BF-02).
       const res = await sendTextTo(site, text, null, { bridge: true, cancelToken: meta && meta.cancelToken ? meta.cancelToken : null });
-      return { ok: !!(res && res.ok), error: res && res.error, seq: res && res.ok ? seq : null };
+      // verified: was it PROVEN to show up in the chat? (false = the box emptied but it never
+      // showed up — the bridge then says "never arrived" on a timeout, not "hadn't answered")
+      return { ok: !!(res && res.ok), error: res && res.error, seq: res && res.ok ? seq : null, verified: res && res.ok ? (res.verified === true ? true : res.verified === false ? false : null) : null };
     },
     // Only site/request_id/chars/outcome/elapsed ever reach here (never text or the token).
     logger: (kind, detail) => logEvent(`akowe-${kind}`, detail),
@@ -8082,7 +8150,7 @@ async function runAkoweLinkTestNow() {
   const out = {
     ok: true, stopped: r.stopped, headline: r.headline, passCount: r.passCount, failCount: r.failCount, skipCount: r.skipCount, total: r.total,
     report: file, reportJson: jsonFile,
-    steps: r.results.map((x) => ({ id: x.id, name: x.name, status: x.status, detail: x.detail, tip: x.tip || null, ms: x.ms }))
+    steps: r.results.map((x) => ({ id: x.id, name: x.name, status: x.status, detail: x.detail, tip: x.tip || null, ms: x.ms, http_status: x.http_status != null ? x.http_status : null, reply_excerpt: x.reply_excerpt || null }))
   };
   broadcast("akowe-linktest-progress", { status: "done", ok: true, summary: out });
   return out;

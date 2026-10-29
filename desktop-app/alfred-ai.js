@@ -16,6 +16,7 @@
  * Secrets (an API key) are redacted from every error detail that comes back.
  */
 const client = require('./openai-client');
+const smartJson = require('./smart-json'); // “curly” quotes in a model's tool arguments (PC test 2026-10-28)
 
 const DEFAULT_LOCAL_BASE = 'http://127.0.0.1:11434/v1';
 
@@ -36,7 +37,7 @@ function textToolCall(content) {
   const name = typeof obj.tool === 'string' ? obj.tool : typeof obj.name === 'string' && (obj.arguments !== undefined || obj.args !== undefined) ? obj.name : null;
   if (!name) return null;
   let args = obj.args !== undefined ? obj.args : obj.arguments !== undefined ? obj.arguments : {};
-  if (typeof args === 'string') { try { args = JSON.parse(args); } catch (_) { /* validated later */ } }
+  if (typeof args === 'string') { const r = smartJson.parseJsonLenient(args); if (r.ok) args = r.value; /* else validated later */ }
   return { id: newCallId(), name: String(name), args, native: false };
 }
 /** {"reply":"..."} from the text protocol, else null. */
@@ -61,7 +62,7 @@ function normalizeMessage(m) {
     const fn = tc && (tc.function || tc);
     if (!fn || !fn.name) continue;
     let args = fn.arguments;
-    if (typeof args === 'string') { try { args = args.trim() ? JSON.parse(args) : {}; } catch (_) { /* keep the string: validation explains */ } }
+    if (typeof args === 'string') { if (!args.trim()) args = {}; else { const r = smartJson.parseJsonLenient(args); if (r.ok) args = r.value; /* else keep the string: validation explains */ } }
     calls.push({ id: tc.id || newCallId(), name: String(fn.name), args: args == null ? {} : args, native: true });
   }
   if (!calls.length && content) {
@@ -147,7 +148,7 @@ function toOllamaMessages(messages) {
     if (Array.isArray(m.tool_calls) && m.tool_calls.length) {
       out.tool_calls = m.tool_calls.map((tc) => {
         const fn = tc.function || tc; let args = fn.arguments;
-        if (typeof args === 'string') { try { args = args.trim() ? JSON.parse(args) : {}; } catch (_) { args = {}; } }
+        if (typeof args === 'string') { args = args.trim() ? smartJson.tryParseJson(args, {}) : {}; }
         return { function: { name: fn.name, arguments: args && typeof args === 'object' ? args : {} } };
       });
     }

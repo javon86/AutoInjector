@@ -386,6 +386,77 @@ async function testChatImageSelectorsReal() {
   }, "?site=chatgpt&quirks=none");
 }
 
+// ---- PC test 2026-10-28 (the first real Windows run), in real Chromium on fake-chat.html ----
+const smartJson = require("../smart-json");
+const waitFake = (page) => page.waitForFunction(() => window.__fake && window.__fake.idle(), null, { timeout: 8000 });
+async function testCurlyQuotesReadWhole() {
+  console.log("\n== PC test: Claude's site shows the JSON with curly quotes — read whole, then parsed ==");
+  await withFixture("fake-chat.html", async (page) => {
+    await page.evaluate(() => { window.__fakeHook = async () => ({ lines: ['{"ok": true, "site": "claude", "word": "harbor"}'], to: "USER", bare: true }); });
+    const sent = await page.evaluate(buildSendScript("claude", "[MSG #0001]\nReply with exactly this JSON object"));
+    assert(sent.ok === true && sent.verified === true, `sent and proven (${JSON.stringify(sent)})`);
+    await waitFake(page);
+    const res = await page.evaluate(buildReadScript("claude"));
+    const body = String(res.text).replace(/\n?\[FROM: CLAUDE\]\s*$/, "").trim();
+    assert(body === "{“ok”: true, “site”: “claude”, “word”: “harbor”}" && body.length === 48, `the reader gets the WHOLE answer as the page shows it — 48 characters with curly quotes (${JSON.stringify(body)})`);
+    let strict = null; try { strict = JSON.parse(body); } catch (_) {}
+    const lenient = smartJson.parseJsonLenient(body);
+    assert(strict === null && lenient.ok && lenient.value.word === "harbor", "plain JSON.parse fails on it (the PC failure); smart-json reads it");
+  }, "?site=claude&quirks=none&curly=1");
+}
+async function testStaleSavedSendFallsBack() {
+  console.log("\n== PC test: a saved Send button that is gone — built-in Send, then Enter; said plainly ==");
+  await withFixture("fake-chat.html", async (page) => {
+    const ov = { send: 'button[data-testid="composer-send-old"]' };
+    let res = await page.evaluate(buildSendScript("chatgpt", "[MSG #0001]\nfirst", ov));
+    assert(res.ok === true && res.verified === true && res.savedSend === "missing" && res.method === "click", `the built-in Send button is used and the result says the saved one is missing (${JSON.stringify(res)})`);
+    await waitFake(page);
+    // the site changes its Send button too: nothing matches any more -> Enter
+    await page.evaluate(() => { const b = document.getElementById("send"); b.setAttribute("data-testid", "renamed"); b.setAttribute("aria-label", "Submit"); });
+    res = await page.evaluate(buildSendScript("chatgpt", "[MSG #0002]\nsecond", ov));
+    const posted = await page.evaluate(() => window.__fake.posted.map((p) => p.text));
+    assert(res.ok === true && res.verified === true && res.method === "enter" && res.savedSend === "missing" && posted.length === 2, `then the Enter key sends it — proven, with method "enter" (${JSON.stringify(res)})`);
+  }, "?site=chatgpt&quirks=none");
+}
+async function testBoxEmptiedNothingSent() {
+  console.log("\n== PC test: the box empties but nothing is sent — never 'verified' ==");
+  await withFixture("fake-chat.html", async (page) => {
+    let res = await page.evaluate(buildSendScript("chatgpt", "[MSG #0001]\na normal message"));
+    assert(res.ok && res.verified === true, "a normal send is proven");
+    await waitFake(page);
+    res = await page.evaluate(buildSendScript("chatgpt", "[MSG #0002]\nthis one the page swallows"));
+    const f = await page.evaluate(() => ({ eaten: window.__fake.eaten, posted: window.__fake.posted.length }));
+    assert(f.eaten === 1 && f.posted === 1, "(the page emptied its box and sent nothing)");
+    assert(res.verified === false && res.turnsCountable === true && res.proof === null, `the result is NOT verified and says the user's messages can be counted — so main.js reports SEND_UNVERIFIED and tries again (${JSON.stringify(res)})`);
+  }, "?site=chatgpt&quirks=none&eat=2");
+  await withFixture("fake-chat.html", async (page) => {
+    // a stale saved message box that points at ANOTHER editable: the text still sits in the real box
+    await page.evaluate(() => { const d = document.createElement("div"); d.id = "notes"; d.setAttribute("contenteditable", "true"); d.textContent = "my notes"; document.body.appendChild(d); });
+    const res = await page.evaluate(buildSendScript("chatgpt", "[MSG #0003]\nwhere does it go", { input: "#notes", send: 'button[data-testid="nothing-here"]' }));
+    const posted = await page.evaluate(() => window.__fake.posted.length);
+    assert(!(res.ok && res.verified === true && posted === 0), `a number sitting in some message box never counts as proof (${JSON.stringify({ ok: res.ok, verified: res.verified, error: res.error })}, posted ${posted})`);
+  }, "?site=chatgpt&quirks=none");
+}
+async function testSurveyDismissed() {
+  console.log("\n== PC test: Claude's “How is Claude doing?” card — closed with its own ✕, never rated ==");
+  await withFixture("fake-chat.html", async (page) => {
+    const res = await page.evaluate(buildSendScript("claude", "[MSG #0001]\nhello"));
+    const sv = await page.evaluate(() => window.__fake.survey);
+    assert(res.ok === true && res.verified === true, "the message goes out");
+    assert(sv.dismissed === true && sv.rated === null, `the card was dismissed and no rating was clicked (${JSON.stringify(sv)})`);
+    assert(Array.isArray(res.dismissed) && /How is Claude doing/.test(res.dismissed[0]), `the result says what was closed (for the log) (${JSON.stringify(res.dismissed)})`);
+    await waitFake(page);
+    const rd = await page.evaluate(buildReadScript("claude"));
+    assert(rd.ok && /CLAUDE-R1/.test(rd.text) && !/How is Claude doing/.test(rd.text), "reading the reply is unaffected");
+  }, "?site=claude&quirks=none&survey=1");
+  await withFixture("fake-chat.html", async (page) => {
+    await page.evaluate(() => { const d = document.createElement("div"); d.innerHTML = "<p>Rate this conversation in your own words below.</p><textarea id='fb'></textarea><button aria-label='Close'>x</button>"; document.getElementById("log").appendChild(d); });
+    const res = await page.evaluate(buildSendScript("claude", "[MSG #0002]\nhi"));
+    const still = await page.evaluate(() => !!document.getElementById("fb"));
+    assert(res.ok && still && !res.dismissed, "a card that holds a text box (not a small survey) is never touched");
+  }, "?site=claude&quirks=none");
+}
+
 async function main() {
   await testClaudeReadReal();
   await testClaudeReadMultiParagraph();
@@ -407,6 +478,10 @@ async function main() {
   await testWrapperHiddenFallback();
   await testReplyChromeSkipped();
   await testChatImageSelectorsReal();
+  await testCurlyQuotesReadWhole();
+  await testStaleSavedSendFallsBack();
+  await testBoxEmptiedNothingSent();
+  await testSurveyDismissed();
 
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

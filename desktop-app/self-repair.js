@@ -523,6 +523,21 @@ function pageKit() {
     return b;
   }
   function teachState(win) { return win && win.__aiTeach ? win.__aiTeach : null; }
+  // PC test 2026-10-28: the success message vanished at once. After the teach, a
+  // green note stays in the AI's window for `ms` (default 12 s) or until its ✕ is
+  // clicked. It never blocks the page (only the ✕ takes clicks).
+  function teachDone(doc, win, text, ms, tone) {
+    for (const o of qsa(doc, OVERLAY) || []) { try { o.remove(); } catch (_) {} }
+    const b = overlay(doc, text, tone === 'err' ? ';background:#6b2c30' : ';background:#1f7a4a');
+    b.setAttribute('data-autoinjector-done', '1');
+    const x = doc.createElement('button');
+    x.type = 'button'; x.textContent = '✕'; x.title = 'Close'; x.setAttribute('aria-label', 'Close');
+    x.style.cssText = 'pointer-events:auto;margin-left:12px;background:transparent;color:#fff;border:1px solid rgba(255,255,255,.6);border-radius:4px;cursor:pointer;font:inherit;padding:0 6px';
+    x.addEventListener('click', (ev) => { try { ev.preventDefault(); ev.stopPropagation(); b.remove(); } catch (_) {} }, true);
+    b.appendChild(x);
+    try { setTimeout(() => { try { b.remove(); } catch (_) {} }, Math.max(1000, Number(ms) || 12000)); } catch (_) {}
+    return { ok: true };
+  }
   // The user types the shown digits into the AI's box and presses Send; the watcher
   // learns the box (where the digits appear while typing), how it was sent (the
   // click / Enter that emptied the box) and the user's message block (the digits in
@@ -538,12 +553,23 @@ function pageKit() {
     try { st.banner = overlay(doc, bannerText); } catch (_) {}
     st.onClick = (ev) => { try { const t = ev.target && ev.target.closest ? ev.target.closest('button, [role="button"], input[type="submit"]') : null; if (t && !inOverlay(t)) st.events.push({ type: 'click', t: Date.now(), el: t }); } catch (_) {} };
     st.onKey = (ev) => { try { if (ev.key === 'Enter' && !ev.shiftKey && ev.target && inEditable(ev.target)) st.events.push({ type: 'enter', t: Date.now() }); } catch (_) {} };
-    try { doc.addEventListener('click', st.onClick, true); doc.addEventListener('mousedown', st.onClick, true); doc.addEventListener('keydown', st.onKey, true); } catch (_) {}
+    // PC test 2026-10-28: typed and sent faster than one poll (0.8 s), the box was
+    // never SEEN holding the digits and the teach hung at "You type the number".
+    // Every keystroke now notes the box that holds the digits the moment it does.
+    st.onInput = (ev) => {
+      try {
+        const tg = ev.target && ev.target.nodeType === 1 ? ev.target : (ev.target && ev.target.parentElement);
+        if (!tg || inOverlay(tg)) return;
+        const box = inEditable(tg) ? outerEditable(tg.closest ? (tg.closest('textarea, [contenteditable="true"], [contenteditable=""], [contenteditable="plaintext-only"]') || tg) : tg) : null;
+        if (box && editableValue(box).indexOf(st.number) !== -1) { st.seenBox = box; if (!st.seenTypedAt) st.seenTypedAt = Date.now(); }
+      } catch (_) {}
+    };
+    try { doc.addEventListener('click', st.onClick, true); doc.addEventListener('mousedown', st.onClick, true); doc.addEventListener('keydown', st.onKey, true); doc.addEventListener('input', st.onInput, true); } catch (_) {}
     return { ok: true };
   }
   function teachRemove(doc, win) {
     const st = teachState(win);
-    if (st) { try { doc.removeEventListener('click', st.onClick, true); doc.removeEventListener('mousedown', st.onClick, true); doc.removeEventListener('keydown', st.onKey, true); } catch (_) {} }
+    if (st) { try { doc.removeEventListener('click', st.onClick, true); doc.removeEventListener('mousedown', st.onClick, true); doc.removeEventListener('keydown', st.onKey, true); if (st.onInput) doc.removeEventListener('input', st.onInput, true); } catch (_) {} }
     for (const o of qsa(doc, OVERLAY) || []) { try { o.remove(); } catch (_) {} }
     if (win) { try { delete win.__aiTeach; } catch (_) { win.__aiTeach = undefined; } }
     return { ok: true };
@@ -573,7 +599,15 @@ function pageKit() {
         if (st.box !== holding || !st.input) { st.box = holding; st.input = deriveInput(doc, holding); }
         st.phase = 'typed';
         if (!st.typedAt) st.typedAt = now;
-      } else if (st.phase === 'typed') {
+      } else if (st.phase === 'type' && (st.seenBox || findText(doc, num, (e) => !inEditable(e) && !inOverlay(e) && !st.pre.has(e)).length)) {
+        // typed AND sent between two polls: the box was only seen by the input
+        // listener (or not at all) — the digits are already in a new message
+        if (st.seenBox && (doc.contains ? doc.contains(st.seenBox) : true)) { st.box = st.seenBox; st.input = deriveInput(doc, st.seenBox); }
+        st.typedAt = st.seenTypedAt || now;
+        st.phase = 'typed';
+        st.fast = true;
+      }
+      if (!holding && st.phase === 'typed') {
         st.phase = 'sent'; st.sentAt = now;
         const recent = (type) => st.events.filter((x) => x.type === type && now - x.t < 5000).pop();
         const click = recent('click'); const enter = recent('enter');
@@ -724,7 +758,7 @@ function pageKit() {
     return { ok: true, roles: out, repliesOnPage };
   }
 
-  return { findText, candidatesFor, validateReply, validateBlocks, learnReply, learnReplyFrom, userTest, turnOf, peersOf, wholeText, scan, tryAlternatives, signals, pressStop, teachInstall, teachRemove, teachStep, teachAsked, teachSummary, teachState, deriveInput, deriveSend, deriveImage, pickStart, pickCancel, pickResolve, matchCheck };
+  return { findText, candidatesFor, validateReply, validateBlocks, learnReply, learnReplyFrom, userTest, turnOf, peersOf, wholeText, scan, tryAlternatives, signals, pressStop, teachInstall, teachRemove, teachStep, teachAsked, teachSummary, teachState, teachDone, deriveInput, deriveSend, deriveImage, pickStart, pickCancel, pickResolve, matchCheck };
 }
 
 // ---- script builders ----------------------------------------------------------------
@@ -785,6 +819,23 @@ function buildTeachPollScript() {
 }
 function buildTeachAskedScript(label, number) {
   return kitScript(`const CFG = ${cfgJson({ banner: teachAskedBanner(label, number) })}; const st = K.teachState(window); if (!st) return { ok: false, error: "NO_TEACH" }; return K.teachAsked(document, st, Date.now(), CFG.banner);`);
+}
+function buildTeachDoneScript(text, ms, tone) {
+  return kitScript(`const CFG = ${cfgJson({ text: String(text || ''), ms: Number(ms) || 12000, tone: tone || 'ok' })}; K.teachRemove(document, window); return K.teachDone(document, window, CFG.text, CFG.ms, CFG.tone);`);
+}
+// What the number teach found out, in words (the panel, the 🎯 card and the
+// AI's window all say the same): which parts were saved, and how Send works.
+function teachLearnedWords(t, label) {
+  const saved = (t && Array.isArray(t.saved)) ? t.saved : [];
+  const parts = [];
+  if (saved.includes('input')) parts.push('message box');
+  if (saved.includes('assistant')) parts.push('reply area');
+  const send = saved.includes('send') ? 'the Send button (saved)'
+    : (t && (t.sendHow === 'enter' || t.sendVia === 'enter')) ? 'Send: the Enter key works (no button needed)'
+    : (t && t.sendVia === 'click') ? `Send: ${label || 'the AI'}'s usual Send button works`
+    : null;
+  const learned = parts.length ? `learned ${label ? `${label}'s ` : ''}${parts.join(' and ')}` : 'checked the page';
+  return send ? `${learned}; ${send}` : learned;
 }
 function buildTeachStopScript() {
   return kitScript('return K.teachRemove(document, window);');
@@ -887,7 +938,9 @@ function containsWord(text, word) {
   const w = String(word == null ? '' : word).trim();
   if (!w) return false;
   const esc = w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  try { return new RegExp(`(^|[^\\p{L}\\p{N}_])${esc}($|[^\\p{L}\\p{N}_])`, 'iu').test(String(text == null ? '' : text)); } catch (_) { return false; }
+  // zero-width characters / soft hyphens a site may slip into words are ignored (PC test 2026-10-28)
+  const t = String(text == null ? '' : text).replace(/[\u200B-\u200D\u2060\uFEFF\u00AD]/g, '');
+  try { return new RegExp(`(^|[^\\p{L}\\p{N}_])${esc}($|[^\\p{L}\\p{N}_])`, 'iu').test(t); } catch (_) { return false; }
 }
 
 // Learned selectors (persisted by main.js): { version, sites: { site: { role: { selector, how, learnedAt, version } } } }
@@ -921,7 +974,7 @@ function createSelfRepair(deps) {
   const log = (detail) => { try { if (typeof d.log === 'function') d.log('self-repair', detail); } catch (_) {} };
   const opt = Object.assign({
     probeTimeoutMs: 90000, sendTimeoutMs: 45000, earlyQuietMs: 10000, stuckMs: 120000,
-    intervalMs: 20 * 60000, needsUserRecheckMs: 60000, teachTimeoutMs: 4 * 60000, teachPollMs: 800,
+    intervalMs: 20 * 60000, needsUserRecheckMs: 60000, teachTimeoutMs: 4 * 60000, teachPollMs: 800, teachDoneMs: 12000,
     reloadSettleMs: 4000, unfreezeWaitMs: 3000, recentWordsMs: 10 * 60000, pollStepMs: 1000,
     autoChecks: true, // false: no automatic check-ins at all (startup / after a failure); on-demand ones still run
     // P37.3: after an AI is marked "not working" it is re-checked (check-in only,
@@ -963,7 +1016,7 @@ function createSelfRepair(deps) {
       say: x.problem ? describeProblem(x.problem, label(site)).say : null,
       fix: x.problem ? describeProblem(x.problem, label(site)).fix : null,
       tried: x.tried.slice(-12).map((r) => ({ step: r.step, outcome: r.outcome, code: r.code, at: r.at, say: STEP_TEXT[r.step] || r.step })),
-      teach: t ? { active: !!t.active, number: t.number, reversed: t.reversed, phase: t.phase, asked: !!t.asked, startedAt: t.startedAt, learned: Object.assign({}, t.learned), saved: (t.saved || []).slice(), sendHow: t.sendHow || null, missing: (t.missing || []).slice(), failedPart: t.failedPart || null, result: t.result || null, code: t.code || null } : null
+      teach: t ? { active: !!t.active, number: t.number, reversed: t.reversed, phase: t.phase, asked: !!t.asked, startedAt: t.startedAt, learned: Object.assign({}, t.learned), saved: (t.saved || []).slice(), sendHow: t.sendHow || null, sendVia: t.sendVia || null, missing: (t.missing || []).slice(), failedPart: t.failedPart || null, result: t.result || null, code: t.code || null } : null
     };
   }
   function emit(site, ev) { try { if (typeof d.onChange === 'function') d.onChange(site, snap(site), ev || null); } catch (_) {} }
@@ -1033,10 +1086,14 @@ function createSelfRepair(deps) {
         if (!ans.length && a.orphaned) return { kind: 'checkin', a };
       }
     }
-    // the teach message is typed by the user (no [MSG #]); its answer must not
-    // answer any message the app sent (other than a check-in)
+    // the teach message is typed by the user (no [MSG #]). While 🔢 runs nothing
+    // else is typed into this pane and any Akọwe request still waiting here was
+    // released (main.js teachParkWaiting), so a reply holding the teach number is
+    // the setup's — even when the Relay Trace still ties it to an older message
+    // that never got its answer (PC test 2026-10-28: the typed number was taken
+    // as ChatGPT's late answer to a failed test, LATE_REPLY_STORED, 4 characters).
     const tc = S[site].teach;
-    if (tc && tc.active && (containsWord(t, tc.number) || containsWord(t, tc.reversed)) && (!ans || ans.every((q) => isCheckinSeq(site, q)))) return { kind: 'teach' };
+    if (tc && tc.active && (containsWord(t, tc.number) || containsWord(t, tc.reversed))) return { kind: 'teach' };
     return null;
   }
   // P37.4: a reply that is (very likely) the answer to a check-in or a number-teach
@@ -1403,7 +1460,8 @@ function createSelfRepair(deps) {
           if (res && res.timedOut) { token.cancelled = true; res = await sendP.catch(() => ({ ok: false, error: 'CANCELLED' })); }
         } catch (_) { res = { ok: false, error: 'EXCEPTION' }; }
         rememberProbe(site, null, token.seq);
-        event('teach', { site, outcome: res && res.ok ? 'ASKED' : 'ASK_FAILED' });
+        if (res && res.ok && res.method) t.sendVia = res.method === 'enter' ? 'enter' : res.method === 'click' ? 'click' : null;
+        event('teach', { site, outcome: res && res.ok ? 'ASKED' : 'ASK_FAILED', how: t.sendVia || undefined });
         if (!res || !res.ok) { sendFail = String((res && res.error) || 'UNKNOWN'); break; }
         fa.typed = true;
         await page(site, buildTeachAskedScript(L, t.number));
@@ -1431,6 +1489,10 @@ function createSelfRepair(deps) {
     if (sel.assistant && savePart(site, 'assistant', sel.assistant)) saved.push('assistant');
     for (const role of saved) event('learned', { site, role, how: 'number' });
     t.saved = saved;
+    // Sent by Enter (the user's message or AutoInjector's follow-up) and no Send
+    // button learned: a saved Send button that isn't on the page is useless — the
+    // host drops it, so the 🎯 card stops saying "⚠️ not found" (PC test 2026-10-28).
+    if (!sel.send && (t.sendHow === 'enter' || t.sendVia)) { try { if (typeof d.sendWorks === 'function') await d.sendWorks(site, t.sendHow === 'enter' ? 'enter' : t.sendVia); } catch (_) {} }
     t.missing = [];
     if (!sel.input) t.missing.push('input');
     if (!sel.send && t.sendHow !== 'enter') t.missing.push('send');
@@ -1463,7 +1525,12 @@ function createSelfRepair(deps) {
     x.running = true; x.step = 'check'; emit(site, { kind: 'teach', phase: 'confirming' });
     let r;
     try { r = await probeOnce(site, 'after-teach'); } finally { x.running = false; x.step = null; }
-    if (r.ok) { t.result = 'fixed'; note(site, 'teach', t.code, 'FIXED'); return markOk(site, 'number'); }
+    if (r.ok) {
+      t.result = 'fixed'; note(site, 'teach', t.code, 'FIXED');
+      const out = markOk(site, 'number');
+      try { await page(site, buildTeachDoneScript(`✔ Saved — AutoInjector ${teachLearnedWords(t, L)}, and a check-in worked. ${L} is ready.`, opt.teachDoneMs)); } catch (_) {}
+      return out;
+    }
     if (r.displaced) { t.result = 'deferred'; if (opt.autoChecks) x.pending = { reason: 'after-teach', at: now() }; event('result', { site, outcome: 'DEFERRED', reason: 'after-teach' }); emit(site, { kind: 'teach', phase: 'deferred' }); return { ok: false, deferred: true }; }
     t.result = 'failed';
     t.failedPart = (ALT_ROLES[r.code] || ['assistant']).filter((role) => role !== 'stop')[0] || 'assistant';
@@ -1586,6 +1653,6 @@ module.exports = {
   LEARNED_VERSION, MARKER, PROBE_PHRASE, TEACH_PHRASE, WORDS,
   describeProblem, signaturesFor, altsFor, pageKit, classify, createSelfRepair, sanitizeLearned,
   buildSignalScript, buildScanScript, buildAlternativesScript, buildLearnReplyScript, buildUnfreezeScript,
-  buildTeachStartScript, buildTeachPollScript, buildTeachAskedScript, buildTeachStopScript, teachBanner, teachAskedBanner, probeText, pickWord, pickNumber, containsWord,
+  buildTeachStartScript, buildTeachPollScript, buildTeachAskedScript, buildTeachStopScript, buildTeachDoneScript, teachLearnedWords, teachBanner, teachAskedBanner, probeText, pickWord, pickNumber, containsWord,
   FOLLOWUP_PHRASE, followupText, reverseDigits, PICK_THING, pickBanner, replyMarkers, buildPickScript, buildPickCancelScript, buildMatchCheckScript, userSelFor
 };

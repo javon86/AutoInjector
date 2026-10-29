@@ -41,11 +41,37 @@ function messageMarker(text) {
   return m ? m[0] : null;
 }
 
+// In-pane feedback pop-ups the sites show now and then (PC test 2026-10-28:
+// Claude's "How is Claude doing this session?" card inside its pane). They are not
+// part of the chat; before typing, the send script closes one with its own
+// Dismiss / Close / ✕ button — never a rating button, never anything else. Only a
+// card whose text holds one of these phrases is touched.
+const SURVEY_PHRASES = {
+  claude: ["how is claude doing", "how's claude doing", "how’s claude doing", "rate this conversation", "how was this conversation"],
+  chatgpt: ["is this conversation helpful so far", "do you like this personality", "how was this conversation", "rate this conversation"],
+  gemini: ["how was this conversation", "rate this conversation", "how is gemini doing"],
+  generic: ["how was this conversation", "rate this conversation"]
+};
+// The elements that hold ONE message of the user's in the conversation, per site.
+// A send that empties the box but adds no such message (and whose [MSG #] never
+// shows) did not arrive (PC test 2026-10-28: ChatGPT's box emptied, nothing was
+// sent, and the app waited 3 minutes for an answer to a message ChatGPT never got).
+const USER_TURNS = {
+  chatgpt: ['[data-message-author-role="user"]'],
+  claude: ['[data-testid="user-message"]', '.font-user-message'],
+  gemini: ['user-query'],
+  generic: ['[data-message-author-role="user"]', '[data-testid="user-message"]', 'user-query']
+};
 function buildSendScript(site, text, overrides, sendOpts) {
   const cfg = siteConfig(site);
   const ov = overrides || {};
   const payload = JSON.stringify({
     text,
+    // a SAVED / learned Send button (🎯, 🔢, self-repair): reported as stale when
+    // it is no longer on the page — the built-in ones and Enter are used instead
+    OVERRIDE_SEND: usableOverride(ov.send) || null,
+    SURVEYS: SURVEY_PHRASES[site] || SURVEY_PHRASES.generic,
+    USER_TURNS: USER_TURNS[site] || USER_TURNS.generic,
     INPUT_CANDIDATES: usableOverride(ov.input) ? [ov.input, ...cfg.INPUT_CANDIDATES] : cfg.INPUT_CANDIDATES,
     SEND_CANDIDATES: usableOverride(ov.send) ? [ov.send, ...cfg.SEND_CANDIDATES] : cfg.SEND_CANDIDATES,
     STOP_CANDIDATES: usableOverride(ov.stop) ? [ov.stop, ...(cfg.STOP_CANDIDATES || [])] : (cfg.STOP_CANDIDATES || []),
@@ -256,17 +282,48 @@ function buildSendScript(site, text, overrides, sendOpts) {
     // actually confirm, instead of a one-shot guess.
     // How many times our [MSG #n] marker shows in the page OUTSIDE the composer
     // (i.e. in the conversation). > 0 = the message is really in the chat.
+    // Every message box on the page counts as "the box", not only the one
+    // findInput() picks: a stale saved selector can point at a different box than
+    // the one the text sits in, and the text still sitting in ANY box is no proof.
     function markerCount() {
       if (!CFG.marker) return 0;
       const count = (s) => String(s || "").split(CFG.marker).length - 1;
       let page = "";
       try { page = document.body.innerText || ""; } catch { return 0; }
-      const input = findInput();
-      const inBox = input && input.tagName !== "TEXTAREA" ? count(composerText(input)) : 0;
-      return Math.max(0, count(page) - inBox);
+      let inBoxes = 0;
+      try {
+        const seen = new Set();
+        for (const n of document.querySelectorAll('[contenteditable="true"], [contenteditable=""], [contenteditable="plaintext-only"]')) {
+          const r = resolveEditable(n);
+          if (!r || seen.has(r) || r.tagName === "TEXTAREA") continue;
+          seen.add(r);
+          inBoxes += count(r.innerText || r.textContent || "");
+        }
+      } catch {}
+      return Math.max(0, count(page) - inBoxes);
     }
     const baseline = CFG.markerBaseline != null ? CFG.markerBaseline : markerCount();
     function markerShown() { return !!CFG.marker && markerCount() > baseline; }
+    // How many messages of the user's the conversation shows (-1: none of the
+    // site's user-message selectors match anything, so this can't tell).
+    function userTurns() {
+      for (const sel of (CFG.USER_TURNS || [])) {
+        let list = [];
+        try { list = document.querySelectorAll(sel); } catch { continue; }
+        if (list.length) return list.length;
+      }
+      return -1;
+    }
+    const turnsBefore = userTurns();
+    function turnAdded() { const n = userTurns(); return turnsBefore >= 0 && n > turnsBefore; }
+    // Is the saved / learned Send button still on the page (visible)?
+    function savedSendState() {
+      if (!CFG.OVERRIDE_SEND) return null;
+      let list = [];
+      try { list = Array.from(document.querySelectorAll(CFG.OVERRIDE_SEND)); } catch { return "bad"; }
+      return list.some(isShown) ? "found" : "missing";
+    }
+    const savedSend = savedSendState();
 
     // -> "seen" (marker in the conversation: proof), "empty" (box cleared, no
     // proof yet), or "" (still sitting in the box). With a marker we keep
@@ -277,6 +334,8 @@ function buildSendScript(site, text, overrides, sendOpts) {
       while (Date.now() - start < 6000) {
         if (markerShown()) return "seen";
         if (await inputIsEmpty()) {
+          // the box emptied AND a new message of the user's appeared: proof too
+          if (turnAdded()) return "turn";
           if (!CFG.marker) return "empty";
           if (!emptySince) emptySince = Date.now();
           if (Date.now() - emptySince > 3000) return "empty";
@@ -285,9 +344,14 @@ function buildSendScript(site, text, overrides, sendOpts) {
         }
         await new Promise((r) => setTimeout(r, 150));
       }
-      return markerShown() ? "seen" : (await inputIsEmpty()) ? "empty" : "";
+      return markerShown() ? "seen" : (await inputIsEmpty()) ? (turnAdded() ? "turn" : "empty") : "";
     }
-    const result = (how, method) => ({ ok: true, method, verified: how === "seen", markerBaseline: baseline });
+    // verified: proven to be in the chat (its [MSG #] showed, or the box emptied
+    // and a new message of the user's appeared). turnsCountable: the page shows
+    // the user's messages in a way this script can count — so "the box emptied
+    // but no new message appeared" really means it did not arrive.
+    const extra = () => Object.assign(savedSend && savedSend !== "found" ? { savedSend } : {}, dismissed.length ? { dismissed } : {});
+    const result = (how, method) => Object.assign({ ok: true, method, verified: how === "seen" || how === "turn", proof: how === "seen" ? "number" : how === "turn" ? "new-message" : null, turnsCountable: turnsBefore >= 0, markerBaseline: baseline }, extra());
 
     // The AI's latest reply (count + length) — it changes while an AI is still
     // writing. Falls back to the page text outside the message box when no
@@ -346,7 +410,7 @@ function buildSendScript(site, text, overrides, sendOpts) {
       } catch {}
       const how = await confirmSent();
       if (how) return result(how, "enter");
-      return { ok: false, error: "SEND_NOT_CONFIRMED", markerBaseline: baseline, diag: diag(btn ? "click+enter" : "enter (no Send button found)") };
+      return Object.assign({ ok: false, error: "SEND_NOT_CONFIRMED", markerBaseline: baseline, diag: diag(btn ? "click+enter" : "enter (no Send button found)") }, extra());
     }
 
     // E11: distinguish a provider-paused conversation from a plain missing box.
@@ -361,9 +425,48 @@ function buildSendScript(site, text, overrides, sendOpts) {
       return null;
     }
 
+    // A feedback pop-up inside the pane ("How is Claude doing this session?"):
+    // close it with its own Dismiss / Close / ✕ button. A card is only touched when
+    // its text holds one of CFG.SURVEYS, is small (not the conversation), and
+    // holds no message box; a button is only pressed when it plainly closes.
+    function dismissSurveys() {
+      const out = [];
+      const phrases = (CFG.SURVEYS || []).map((p) => String(p).toLowerCase());
+      if (!phrases.length || !document.body) return out;
+      const closeRe = /^(dismiss|close|skip|not now|no thanks|maybe later|×|✕|x)$/i;
+      const closeLabelRe = /\b(dismiss|close|skip|not now|no thanks)\b/i;
+      let walker;
+      try { walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT); } catch { return out; }
+      const hits = [];
+      for (let n = walker.nextNode(), i = 0; n && i < 20000; n = walker.nextNode(), i++) {
+        const t = String(n.nodeValue || "").toLowerCase();
+        if (t.length < 8 || t.length > 200) continue;
+        if (phrases.some((p) => t.indexOf(p) !== -1)) hits.push(n.parentElement);
+      }
+      for (const h of hits) {
+        if (!h || h.closest('[data-autoinjector-overlay]') || isEditable(h) || (h.closest && h.closest(EDITABLE))) continue;
+        let card = h;
+        let btn = null;
+        for (let up = 0; card && up < 6 && !btn; up++) {
+          const txt = String(card.innerText || card.textContent || "");
+          if (txt.length > 600 || card.querySelector(EDITABLE)) break; // grew past a small card
+          for (const b of card.querySelectorAll('button, [role="button"]')) {
+            const label = String(b.getAttribute("aria-label") || b.getAttribute("title") || "").trim();
+            const words = String(b.innerText || b.textContent || "").trim();
+            if ((label && closeLabelRe.test(label)) || (words && closeRe.test(words))) { btn = b; break; }
+          }
+          if (!btn) card = card.parentElement;
+        }
+        if (btn && isShown(btn)) { try { btn.click(); out.push(String(h.textContent || "").trim().slice(0, 60)); } catch {} }
+      }
+      return out;
+    }
+    let dismissed = [];
+    try { dismissed = dismissSurveys(); } catch {}
+    if (dismissed.length) await new Promise((r) => setTimeout(r, 150));
     // A retry of a send whose first try DID land (just too slowly to confirm)
     // must not post the message twice.
-    if (markerShown()) return { ok: true, method: "already-sent", verified: true, markerBaseline: baseline };
+    if (markerShown()) return { ok: true, method: "already-sent", verified: true, proof: "number", markerBaseline: baseline };
     // TR-25: the AI is still writing its last reply (its Stop button shows).
     // Chat sites won't take a new message then — say so instead of typing
     // into the box and failing three times.
@@ -900,4 +1003,5 @@ function buildProbeScript(site, overrides) {
   `;
 }
 
-module.exports = { MESSAGE_CONTAINERS, buildSendScript, buildReadScript, buildFileInputFinderExpression, buildPickScript, buildLoginFillScript, buildProbeScript, isBareTagSelector, usableOverride };
+module.exports = {
+  USER_TURNS, SURVEY_PHRASES, MESSAGE_CONTAINERS, buildSendScript, buildReadScript, buildFileInputFinderExpression, buildPickScript, buildLoginFillScript, buildProbeScript, isBareTagSelector, usableOverride };
