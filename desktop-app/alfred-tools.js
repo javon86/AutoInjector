@@ -935,17 +935,18 @@ function forgiveVideoArgs(a, notes) {
 }
 def({
   name: 'generate_video', title: 'Generate a video', group: 'video', changes: true, timeoutMs: 1200000,
-  description: 'Make a short video clip: from a description (prompt → text → video), or bring a picture to life (image = the path of a .png/.jpg/.webp file → video). character = a character lock name (keeps their looks; for text → video — with an image the picture is used). seconds 1–10. Uses the 🎬 Video module (ComfyUI + Wan); for every other setting use video_call.',
+  description: 'Make a short video clip: from a description (prompt → text → video), or bring a picture to life (image = the path of a .png/.jpg/.webp file → video). character = a character lock name (keeps their looks; for text → video — with an image the picture is used). seconds 1–10. engine: "auto" (default: whatever 🎬 Video is set to), "wan" (ComfyUI + Wan) or "framepack" (FramePack, already on this PC: brings a picture to life; from a description it makes the picture first with 🎨 Images). Uses the 🎬 Video module; for every other setting use video_call.',
   args: { type: 'object', properties: {
     prompt: { type: 'string', maxLength: 1000, description: 'What happens in the video' },
     image: { type: 'string', maxLength: 2000, description: 'A picture to animate: the path of a .png / .jpg / .webp file' },
     character: { type: 'string', maxLength: 120, description: 'A character lock name (text → video)' },
     seconds: { type: 'number', description: `Length in seconds, ${VIDEO_SECONDS.min}–${VIDEO_SECONDS.max} (clamped)` },
     negative_prompt: { type: 'string', maxLength: 1000 },
+    engine: { type: 'string', enum: ['auto', 'wan', 'framepack'], description: 'Which video engine (default auto)' },
   }, additionalProperties: false },
   forgive: forgiveVideoArgs,
   async check(a) { return str(a.prompt, 1) || a.image || a.character ? { ok: true } : { ok: false, error: 'give at least one of: prompt (what happens, as text), image (the path of a .png / .jpg / .webp picture to animate) or character (a character lock name)' }; },
-  describe: (a) => `${a.image ? `Bring the picture ${q(a.image)} to life` : 'Make a short video'}${a.prompt ? ` — ${q(a.prompt)}` : ''}${a.character ? (a.image ? ` (the picture is used, not ${q(a.character)}'s character lock)` : ` with ${q(a.character)}'s looks`) : ''}${a.seconds ? ` (${a.seconds} s)` : ''}, and save it in the videos folder. It can take several minutes.`,
+  describe: (a) => `${a.image ? `Bring the picture ${q(a.image)} to life` : 'Make a short video'}${a.prompt ? ` — ${q(a.prompt)}` : ''}${a.character ? (a.image ? ` (the picture is used, not ${q(a.character)}'s character lock)` : ` with ${q(a.character)}'s looks`) : ''}${a.seconds ? ` (${a.seconds} s)` : ''}${a.engine === 'framepack' ? ` with FramePack${a.image ? '' : ' (a picture is made first with 🎨 Images, then brought to life)'}` : a.engine === 'wan' ? ' with ComfyUI + Wan' : ''}, and save it in the videos folder. It can take several minutes.`,
   async run(a, ctx) {
     const notes = [];
     const methods = ctx.videoMethods ? await ctx.videoMethods() : [];
@@ -953,6 +954,7 @@ def({
       const base = { from: 'alfred' };
       if (a.seconds) base.seconds = a.seconds;
       if (a.negative_prompt) base.negativePrompt = a.negative_prompt;
+      if (a.engine && a.engine !== 'auto') base.engine = a.engine;
       const textParams = () => { const p = Object.assign({ prompt: a.prompt || '' }, base); if (a.character) p.characterLock = a.character; return p; };
       let r; let usedImage = false;
       if (a.image && methods.some((m) => m.method === 'video.animate')) {
@@ -978,7 +980,7 @@ def({
       }
       if (!r || r.ok === false) return { ok: false, error: str((r && (r.code || r.error)) || 'VIDEO_FAILED', 60), message: clip(videoErrorText(r), 500), notes };
       for (const w of imageNotes(r.warnings)) notes.push(w);
-      return { ok: true, message: `Saved the clip${usedImage ? ' (from the picture)' : ''}${r.seconds ? ` (${r.seconds} s)` : ''}.${notes.length ? ` ${notes[0]}` : ''}`, notes, data: { path: r.path || null, poster: r.poster || null, model: r.model || null, seed: r.seed, mode: usedImage ? 'picture→video' : 'text→video' } };
+      return { ok: true, message: `Saved the clip${usedImage ? ' (from the picture)' : ''}${r.seconds ? ` (${r.seconds} s)` : ''}.${notes.length ? ` ${notes[0]}` : ''}`, notes, data: { path: r.path || null, poster: r.poster || null, model: r.model || null, engine: r.engine || null, seed: r.seed, mode: usedImage ? 'picture→video' : 'text→video' } };
     }
     if (a.image && !str(a.prompt, 1)) return { ok: false, error: 'VIDEO_NOT_SET_UP', message: 'Bringing a picture to life needs the 🎬 Video module (ComfyUI + a video model): install it in the 🎬 Video tab.' };
     const s = ctx.videoStatus();
@@ -1000,7 +1002,7 @@ function videoErrorText(r) {
 }
 def({
   name: 'video_call', title: 'Use the 🎬 Video module', group: 'video', changes: true, timeoutMs: 1200000,
-  description: 'Any video control through the 🎬 Video module (video-api): method = a module method such as video.generate / video.animate (every setting: prompt, negativePrompt, image, width, height, seconds, frames, fps, model, steps, cfgScale, seed, sampler, scheduler, shift, characterLock), video.status/models/progress/cancel/gallery/capabilities, video.install.check/downloadModel/cancel, and any newer method the module lists. Read-only methods run directly; the rest ask first.',
+  description: 'Any video control through the 🎬 Video module (video-api): method = a module method such as video.generate / video.animate (every setting: prompt, negativePrompt, image, width, height, seconds, frames, fps, model, steps, cfgScale, seed, sampler, scheduler, shift, characterLock, engine = auto / wan / framepack, FramePack: teacache, gpuMemoryPreservation), video.status/models/progress/cancel/gallery/capabilities, video.install.check/downloadModel/cancel, video.framepack.status/load/unload/test (FramePack, already on this PC), and any newer method the module lists. Read-only methods run directly; the rest ask first.',
   args: { type: 'object', required: ['method'], properties: { method: { type: 'string', minLength: 3, maxLength: 80 }, args: { 'x-passthrough': true } }, additionalProperties: false },
   allowAlwaysFor: () => false,
   allowKey: (a) => `video_call:${a && a.method}`,

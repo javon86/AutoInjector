@@ -8,8 +8,11 @@
  *     seconds so far, the red error box (cause + fix + what ComfyUI said), a <video> player
  *     with the poster, and the gallery of saved videos;
  *   • ⚙ Setup & models: install / start ComfyUI, download each model (size, graphics memory,
- *     progress, pause), settings, a 1-second test, and "Advanced: other video server" (the
- *     old text-to-video endpoint).
+ *     progress, pause), the 🎞 FramePack card (found / its folder / models ✔✖ / graphics memory,
+ *     ▶ Load, 🧪 2-second test, 📂 Choose FramePack folder, ⏏ Unload), settings, a 1-second test,
+ *     and "Advanced: other video server" (the old text-to-video endpoint).
+ *   • the engine picker (Auto / ComfyUI + Wan / FramePack): FramePack has its own settings (seconds,
+ *     steps, TeaCache, GPU memory to keep free); text → video with FramePack makes a picture first.
  * Talks only to window.api.video (+ window.api.sd for the gallery pictures, locks and Start).
  */
 (function () {
@@ -47,7 +50,7 @@
   });
   function subTab(which) {
     for (const w of ['make', 'trailer', 'setup']) { if (!$(`vd-sub-${w}`)) continue; $(`vd-sub-${w}`).setAttribute('aria-selected', String(w === which)); $(`vd-view-${w}`).hidden = w !== which; }
-    if (which === 'setup') { refreshSetup(); loadOtherServer(); }
+    if (which === 'setup') { refreshSetup(); loadOtherServer(); refreshFramePack(); }
     try { document.dispatchEvent(new CustomEvent('vd-subtab', { detail: which })); } catch (_) {}
   }
   window.vdSubTab = subTab;
@@ -66,9 +69,18 @@
     setText('vd-status-text', text);
     $('vd-status').title = text;
     if (!s.ready && !st.generating) hint(`${text}\nOpen ⚙ Setup & models to finish (one click).`, 'warn'); else if (s.ready && !st.generating) hint('', '');
-    // Video models in "stuff and thing" the engine can't use yet (FramePack's HunyuanVideo files from Stability Matrix).
+    // FramePack's model files in "stuff and thing" while FramePack itself isn't ready yet (the Setup card says what is missing).
     const lm = $('vd-local-models');
     if (lm) { const note = (s.localModels && s.localModels.framepack && s.localModels.note) || ''; lm.hidden = !note; lm.textContent = note ? `🎞 ${note}` : ''; }
+    // the engine picker: say which engines are there
+    const fp = s.framepack || {};
+    const eo = $('vd-engine') && [...$('vd-engine').options].find((o) => o.value === 'framepack');
+    if (eo) eo.textContent = `FramePack (picture → video)${fp.ready ? '' : fp.found ? ' — not ready' : ' — not found'}`;
+    const ao = $('vd-engine') && [...$('vd-engine').options].find((o) => o.value === 'auto');
+    if (ao) ao.textContent = `Auto (${s.backend === 'framepack' ? 'FramePack' : s.backend === 'comfy-wan' ? 'ComfyUI + Wan' : s.backend === 'endpoint' ? 'the other video server' : 'what is set up'})`;
+    if (!st.enginePicked && s.settings && $('vd-engine')) { const b = s.settings.backend; $('vd-engine').value = b === 'framepack' || b === 'comfy-wan' ? b : 'auto'; }
+    if (s.settings && s.settings.framepackGpuMemory && !st.gpuPicked) setSlider('vd-fp-gpu', s.settings.framepackGpuMemory);
+    applyEngine();
     // the model list
     st.models = s.models || [];
     const sel = $('vd-model'); const cur = sel.value || (s.settings && s.settings.model) || s.defaultModel;
@@ -90,7 +102,7 @@
   async function refreshStatus(fresh) { const s = await call('status', !!fresh); renderStatus(s); return s; }
 
   // ------------------------------------------------------------ the form
-  const SLIDERS = ['vd-seconds', 'vd-fps', 'vd-width', 'vd-height', 'vd-steps', 'vd-cfg', 'vd-shift'];
+  const SLIDERS = ['vd-seconds', 'vd-fps', 'vd-width', 'vd-height', 'vd-steps', 'vd-cfg', 'vd-shift', 'vd-fp-seconds', 'vd-fp-steps', 'vd-fp-gpu'];
   for (const id of SLIDERS) { const r = $(id); const upd = () => { setText(`${id}-v`, r.value); framesNote(); }; r.addEventListener('input', upd); upd(); }
   function setSlider(id, v) { if (v == null || !$(id)) return; $(id).value = v; setText(`${id}-v`, $(id).value); }
   function model() { return st.models.find((m) => m.id === $('vd-model').value) || null; }
@@ -103,14 +115,29 @@
     framesNote();
   }
   function setNote(id, t) { setText(id, t || ''); }
+  // The engine the form is for: the picker, or (Auto) the one video would use now.
+  function effEngine() { const v = $('vd-engine') ? $('vd-engine').value : 'auto'; if (v !== 'auto') return v; return st.status && st.status.backend === 'framepack' ? 'framepack' : 'comfy-wan'; }
+  function applyEngine() {
+    const fp = effEngine() === 'framepack';
+    if ($('vd-fp-settings')) $('vd-fp-settings').hidden = !fp;
+    if ($('vd-wan-settings')) $('vd-wan-settings').hidden = fp;
+    framesNote();
+  }
   function framesNote() {
+    if (effEngine() === 'framepack' && $('vd-fp-seconds')) {
+      const sec = Number($('vd-fp-seconds').value); const sections = Math.max(1, Math.round(sec * 30 / 36)); const frames = (sections * 9 + 1) * 4 - 3;
+      setText('vd-frames-note', `FramePack: ${frames} frames at 30 fps ≈ ${(frames / 30).toFixed(1)} s (${sections} part${sections === 1 ? '' : 's'} of about 1.2 s each). The picture's shape is kept (about 640 px). Longer = slower.`);
+      return;
+    }
     const fps = Number($('vd-fps').value); const sec = Number($('vd-seconds').value);
     const k = Math.max(1, Math.round((sec * fps) / 4)); const frames = 4 * k + 1;
     setText('vd-frames-note', `${frames} frames at ${fps} fps ≈ ${((frames - 1) / fps).toFixed(1)} s · ${$('vd-width').value}×${$('vd-height').value}. Longer and bigger = slower and more graphics memory.`);
   }
   $('vd-model').onchange = () => applyModelLimits(true);
+  if ($('vd-engine')) $('vd-engine').onchange = () => { st.enginePicked = true; applyEngine(); };
+  if ($('vd-fp-gpu')) $('vd-fp-gpu').addEventListener('change', () => { st.gpuPicked = true; call('settings', { framepackGpuMemory: Number($('vd-fp-gpu').value) }); });
   $('vd-size-preset').onchange = (e) => { const v = e.target.value; if (!v) return; const [w, h] = v.split('x'); setSlider('vd-width', w); setSlider('vd-height', h); e.target.value = ''; framesNote(); };
-  $('vd-purpose').onchange = (e) => { if (e.target.value === 'clip') setSlider('vd-seconds', 4); if (e.target.value === 'trailer_shot') { setSlider('vd-seconds', 5); } framesNote(); };
+  $('vd-purpose').onchange = (e) => { if (e.target.value === 'clip') { setSlider('vd-seconds', 4); setSlider('vd-fp-seconds', 4); } if (e.target.value === 'trailer_shot') { setSlider('vd-seconds', 5); setSlider('vd-fp-seconds', 5); } framesNote(); };
   $('btn-vd-seed-rand').onclick = () => { $('vd-seed').value = '-1'; };
   $('btn-vd-seed-last').onclick = () => { if (st.lastSeed != null) $('vd-seed').value = String(st.lastSeed); };
 
@@ -168,6 +195,13 @@
 
   function formRequest() {
     const num = (id) => Number($(id).value);
+    if (effEngine() === 'framepack') {
+      const f = { prompt: $('vd-prompt').value.trim(), seconds: num('vd-fp-seconds'), steps: num('vd-fp-steps'), teacache: !!$('vd-fp-teacache').checked, gpuMemoryPreservation: num('vd-fp-gpu'),
+        seed: Number.isFinite(num('vd-seed')) ? num('vd-seed') : -1, purpose: $('vd-purpose').value || 'free', characterLock: $('vd-lock').value || undefined, backend: 'framepack' };
+      if ($('vd-negative').value.trim()) f.negativePrompt = $('vd-negative').value.trim();
+      if (st.mode === 'i2v') f.image = st.image;
+      return f;
+    }
     const r = {
       prompt: $('vd-prompt').value.trim(), seconds: num('vd-seconds'), fps: num('vd-fps'), width: num('vd-width'), height: num('vd-height'),
       steps: num('vd-steps'), cfgScale: num('vd-cfg'), shift: num('vd-shift'), sampler: $('vd-sampler').value.trim() || undefined, scheduler: $('vd-scheduler').value.trim() || undefined,
@@ -176,6 +210,7 @@
     };
     if ($('vd-negative').value.trim()) r.negativePrompt = $('vd-negative').value.trim();
     if (st.mode === 'i2v') r.image = st.image;
+    if ($('vd-engine') && $('vd-engine').value === 'comfy-wan') r.backend = 'comfy-wan';
     return r;
   }
 
@@ -190,6 +225,17 @@
       const b = document.createElement('button'); b.className = 'primary';
       b.textContent = r.error === 'VIDEO_MODEL_MISSING' ? `⬇ Download ${r.model || 'the model'}` : '⚙ Open Setup';
       b.onclick = () => { subTab('setup'); if (r.error === 'VIDEO_MODEL_MISSING' && r.model) download(r.model); };
+      acts.appendChild(b);
+    }
+    if (r && /^FRAMEPACK_(NOT_FOUND|PYTHON_MISSING|MODEL_MISSING)$/.test(r.error || '')) {
+      const b = document.createElement('button'); b.className = 'primary'; b.textContent = '⚙ Open Setup (FramePack)';
+      b.onclick = () => subTab('setup'); acts.appendChild(b);
+    }
+    if (r && r.error === 'FRAMEPACK_OOM' && $('vd-fp-gpu')) {
+      const b = document.createElement('button'); b.className = 'primary'; b.id = 'btn-vd-fp-more-gpu';
+      const next = Math.min(32, Number($('vd-fp-gpu').value) + 2);
+      b.textContent = `Keep more graphics memory free (${next} GB) and try again`;
+      b.onclick = () => { setSlider('vd-fp-gpu', next); st.gpuPicked = true; call('settings', { framepackGpuMemory: next }); hideError(); generate(); };
       acts.appendChild(b);
     }
     acts.hidden = !acts.children.length;
@@ -212,7 +258,9 @@
         const secs = Math.round((Date.now() - st.startedAt) / 1000);
         const bits = [`${secs} s`];
         if (p && p.busy) {
-          if (p.phase) bits.push({ queued: 'waiting in ComfyUI\'s queue', uploading: 'sending the picture', sampling: 'making the frames', decoding: 'decoding the frames', saving: 'saving', starting: 'loading the model', rendering: 'rendering' }[p.phase] || p.phase);
+          if (p.phase) bits.push({ queued: 'waiting in ComfyUI\'s queue', uploading: 'sending the picture', sampling: 'making the frames', decoding: 'decoding the frames', saving: 'saving', starting: 'loading the model', rendering: 'rendering',
+            picture: 'making the picture first (🎨 Images)', loading: `loading FramePack${p.stage ? ` (${p.stage})` : ''} — the first time takes a few minutes`, preparing: 'reading the picture and the description' }[p.phase] || p.phase);
+          if (p.engine === 'framepack' && p.sections) bits.push(`part ${Math.max(1, p.section || 0)} of ${p.sections}`);
           if (p.steps) bits.push(`step ${p.step} of ${p.steps}`);
           $('vd-progress-bar').style.width = `${Math.round((p.pct || 0) * 100)}%`;
         }
@@ -271,6 +319,18 @@
     const r = st.current && st.current.record; if (!r) return;
     if (r.prompt) $('vd-prompt').value = r.prompt;
     if (r.negativePrompt) $('vd-negative').value = r.negativePrompt;
+    if (r.engine === 'framepack' || r.model === 'framepack-i2v-hy') {
+      if ($('vd-engine')) { $('vd-engine').value = 'framepack'; st.enginePicked = true; }
+      if (r.seconds != null) setSlider('vd-fp-seconds', Math.min(10, Math.max(1, Math.round(r.seconds * 2) / 2)));
+      if (r.steps != null) setSlider('vd-fp-steps', r.steps);
+      if (r.gpuMemoryPreservation != null) setSlider('vd-fp-gpu', r.gpuMemoryPreservation);
+      if (r.teacache != null) $('vd-fp-teacache').checked = !!r.teacache;
+      if (r.seed != null) $('vd-seed').value = String(r.seed);
+      setMode(r.mode === 'i2v' ? 'i2v' : 't2v');
+      applyEngine();
+      return;
+    }
+    if ($('vd-engine') && r.engine === 'comfy-wan') { $('vd-engine').value = 'comfy-wan'; st.enginePicked = true; applyEngine(); }
     if (r.model && [...$('vd-model').options].some((o) => o.value === r.model)) { $('vd-model').value = r.model; applyModelLimits(false); }
     for (const [id, k] of [['vd-width', 'width'], ['vd-height', 'height'], ['vd-fps', 'fps'], ['vd-steps', 'steps'], ['vd-cfg', 'cfgScale'], ['vd-shift', 'shift'], ['vd-seconds', 'seconds']]) if (r[k] != null) setSlider(id, r[k]);
     if (r.seed != null) $('vd-seed').value = String(r.seed);
@@ -470,10 +530,80 @@
   if (api && api.onInstall) api.onInstall((i) => renderDownload(i));
   if (sdApi && sdApi.onInstall) sdApi.onInstall((i) => { if (i && i.busy) renderDownload(Object.assign({}, i, { message: `ComfyUI: ${i.message || ''}` })); });
 
+  // ------------------------------------------------------------ 🎞 FramePack (Setup)
+  function fpMsg(t) { setText('vd-fp-msg', t || ''); }
+  function renderFramePack(f) {
+    if (!f || f.ok === false && !f.available) return;
+    st.fp = f;
+    const lines = [];
+    if (f.available === false) lines.push('FramePack is not part of this build.');
+    else if (!f.found) lines.push(`✖ ${f.message || 'FramePack was not found.'}`);
+    else {
+      lines.push(`✔ FramePack found (${f.source || 'found'}): ${f.dir}`);
+      lines.push(f.pythonOk ? `✔ Its own Python: ${f.python}` : '✖ Its own Python (venv) is missing — open FramePack once in Stability Matrix so it makes it.');
+      lines.push(f.models && f.models.ok ? `✔ All its models are there (${f.hfSource}: ${f.hfHome}).` : `✖ Some models are missing (looked in ${f.hfSource || 'the models folder'}${f.hfHome ? `: ${f.hfHome}` : ''}).`);
+      if (f.loaded) lines.push(`✔ Loaded and ready${f.vramGB != null ? ` (${f.vramGB} GB of graphics memory free when it loaded)` : ''}.`);
+      else if (f.loading) lines.push(`⏳ Loading ${f.loading.stage || ''}…`);
+      if (f.lastError && f.lastError.message) lines.push(`Last problem: ${f.lastError.message}`);
+    }
+    setText('vd-fp-state', lines.join('\n'));
+    const ul = $('vd-fp-models'); ul.textContent = '';
+    if (f.found) for (const m of (f.models && f.models.repos) || []) {
+      const li = document.createElement('li'); li.dataset.ok = String(!!m.ok);
+      li.textContent = `${m.ok ? '✔' : '✖'} ${m.label} — ${m.repo}${m.ok ? '' : ` (missing: ${m.missing.join(', ')})`}`;
+      ul.appendChild(li);
+    }
+    setText('vd-fp-vram', f.found ? (f.vramHint || '') : '');
+    const ready = !!f.ready;
+    $('btn-vd-fp-load').disabled = !ready || !!f.loaded || !!f.busy;
+    $('btn-vd-fp-load').textContent = f.loaded ? '✔ FramePack loaded' : '▶ Load FramePack';
+    $('btn-vd-fp-test').disabled = !ready || st.generating;
+    $('btn-vd-fp-unload').disabled = !f.running || !!f.busy;
+  }
+  async function refreshFramePack(gpu) {
+    if (!api || typeof api.framepackStatus !== 'function') return null;
+    const f = await call('framepackStatus', gpu !== false);
+    renderFramePack(f);
+    return f;
+  }
+  if ($('btn-vd-fp-load')) $('btn-vd-fp-load').onclick = async () => {
+    $('btn-vd-fp-load').disabled = true; fpMsg('⏳ Loading FramePack… the first time takes a few minutes (it reads about 40 GB of model files).');
+    const r = await call('framepackLoad');
+    fpMsg(r && r.ok ? (r.message || '✔ FramePack is loaded.') : `✖ ${(r && r.message) || 'FramePack could not be loaded.'}${r && r.fix ? `\nHow to fix: ${r.fix}` : ''}`);
+    refreshFramePack(false); refreshStatus();
+  };
+  if ($('btn-vd-fp-test')) $('btn-vd-fp-test').onclick = async () => {
+    subTab('make'); hideError(); busy(true); msg('🧪 Making a 2-second FramePack test clip from a test picture…');
+    const r = await call('framepackTest');
+    busy(false);
+    if (!r || !r.ok) { msg(''); showError(r); refreshFramePack(false); return; }
+    msg(`✔ FramePack test video saved: ${String(r.path || '').split(/[\\/]/).pop()} (${r.seconds} s, ${r.width}×${r.height})`);
+    play({ path: r.path, url: r.url, posterUrl: r.posterUrl, record: Object.assign({}, r, { engine: 'framepack' }) });
+    loadGallery();
+  };
+  if ($('btn-vd-fp-choose')) $('btn-vd-fp-choose').onclick = async () => {
+    const r = await call('framepackChooseFolder');
+    if (r && r.error === 'CANCELLED') return;
+    if (!r || r.ok === false) { fpMsg(`✖ ${(r && r.message) || 'That folder could not be used.'}${r && r.fix ? ` ${r.fix}` : ''}`); return; }
+    fpMsg(`✔ FramePack folder: ${r.chosen || r.dir}`);
+    renderFramePack(r); refreshStatus(true);
+  };
+  if ($('btn-vd-fp-unload')) $('btn-vd-fp-unload').onclick = async () => {
+    const r = await call('framepackUnload');
+    fpMsg(r && r.ok !== false ? (r.message || 'Unloaded.') : `✖ ${(r && r.message) || 'Could not unload.'}`);
+    setTimeout(() => refreshFramePack(false), 600);
+  };
+  if (api && typeof api.onFramePack === 'function') api.onFramePack((ev) => {
+    if (!ev) return;
+    if (ev.type === 'loading') fpMsg(`⏳ Loading FramePack: ${ev.stage || ''}${ev.steps ? ` (${ev.step} of ${ev.steps})` : ''}…`);
+    else if (ev.type === 'loaded' || ev.type === 'exit') refreshFramePack(false);
+  });
+
   async function init() {
     await refreshStatus();
     const s = st.status;
     if (s && s.settings && s.settings.model) { $('vd-model').value = s.settings.model; applyModelLimits(true); } else applyModelLimits(true);
+    applyEngine();
     loadLocks(); loadGallery();
     if (s && !s.ready) subTab('setup');
   }

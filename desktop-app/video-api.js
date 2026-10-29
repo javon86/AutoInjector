@@ -11,14 +11,16 @@
  *
  *   video.status() · video.capabilities() · video.models() · video.progress() · video.cancel()
  *   video.gallery({ limit }) · video.generate(params) · video.animate(params) · video.test()
- *   video.settings({ backend, model, comfyUrl, timeoutMs })
+ *   video.settings({ backend, model, comfyUrl, timeoutMs, framepackDir, framepackGpuMemory })
+ *   video.framepack.status() · video.framepack.load() · video.framepack.unload() · video.framepack.test() — FramePack (framepack.js)
  *   video.install.check() · video.install.downloadModel({ id }) · video.install.installAll({ id }) · video.install.cancel()
  *   🎞 trailer.make({ book, items | shots + cards, music, … }) · trailer.status({ id }) · trailer.cancel() · trailer.list({ book })
  *   · trailer.plan({ book }) — book trailers: shots rendered one by one, joined with title cards (video-trailer.js)
  * generate / animate params: prompt, negativePrompt, image (animate: a path or base64), width, height,
  *   seconds | frames, fps, model, steps, cfgScale, seed, sampler, scheduler, shift, characterLock,
- *   purpose (clip | trailer_shot | free), from, book, returnPoster, backend, timeoutMs
- *   → { ok, engine: "comfy-wan"|"endpoint", model, path, poster, seconds, frames, fps, width, height, seed, warnings }
+ *   purpose (clip | trailer_shot | free), from, book, returnPoster, backend | engine (auto | wan | framepack | endpoint), timeoutMs,
+ *   FramePack: teacache, gpuMemoryPreservation, distilledCfg
+ *   → { ok, engine: "comfy-wan"|"framepack"|"endpoint", model, path, poster, seconds, frames, fps, width, height, seed, warnings }
  *   | { ok:false, error, code, message, fix } — VIDEO_NOT_SET_UP · VIDEO_MODEL_MISSING (+ model) · VIDEO_OOM ·
  *     VIDEO_TIMEOUT · VIDEO_CANCELLED · VIDEO_FAILED · UNSUPPORTED_ON_BACKEND · INVALID_PARAM · BUSY · NO_LOCK
  * Every call resolves (never throws). See docs/VIDEO_API.md.
@@ -44,10 +46,10 @@ const GEN_PROPS = {
   negativePrompt: { type: 'string', maxLength: 4000, description: 'What to avoid (a sensible default is used when left out)' },
   width: { type: 'integer', minimum: 256, maximum: 1280, description: 'Wan 2.2 5B: multiple of 32 (default 1280); Wan 2.1 1.3B: multiple of 16 (default 832). Clamped to the model.' },
   height: { type: 'integer', minimum: 256, maximum: 1280, description: 'Default 704 (5B) / 480 (1.3B). For animate the picture\'s shape is kept when left out.' },
-  seconds: { type: 'number', exclusiveMinimum: 0, maximum: 10, description: 'Length in seconds (5B: up to 5 s at 24 fps; 1.3B: up to 5 s at 16 fps)' },
+  seconds: { type: 'number', exclusiveMinimum: 0, maximum: 10, description: 'Length in seconds (5B: up to 5 s at 24 fps; 1.3B: up to 5 s at 16 fps; FramePack: 1–10 s at 30 fps)' },
   frames: { type: 'integer', minimum: 5, maximum: 121, description: 'Instead of seconds: frame count, snapped to 4n+1' },
   fps: { type: 'integer', minimum: 1, maximum: 60, description: 'Frames per second (default 24 for 5B, 16 for 1.3B)' },
-  model: { type: 'string', enum: MODEL_IDS, description: `Default ${VI.DEFAULT_MODEL}` },
+  model: { type: 'string', enum: [...MODEL_IDS, VS.FRAMEPACK_MODEL], description: `Default ${VI.DEFAULT_MODEL} (${VS.FRAMEPACK_MODEL} = FramePack)` },
   steps: { type: 'integer', minimum: 1, maximum: 100, description: 'Sampling steps (default 20 / 30)' },
   cfgScale: { type: 'number', minimum: 1, maximum: 20, description: 'Prompt strength (default 5 / 6)' },
   seed: { type: 'integer', description: '-1 = random' },
@@ -59,7 +61,11 @@ const GEN_PROPS = {
   from: { type: 'string', maxLength: 60, description: 'Who asks (logged), e.g. "akowe-forge"' },
   book: { type: 'string', maxLength: 200, description: 'The book this is for (recorded in the sidecar)' },
   returnPoster: { type: 'boolean', description: 'Also return the poster PNG as base64 (posterBase64)' },
-  backend: { type: 'string', enum: VS.BACKENDS, description: 'auto (default), comfy-wan or endpoint' },
+  backend: { type: 'string', enum: VS.BACKENDS, description: 'auto (default), comfy-wan, framepack or endpoint' },
+  engine: { type: 'string', enum: ['auto', 'wan', 'framepack', 'endpoint'], description: 'The same in plain words: wan = ComfyUI + Wan, framepack = FramePack (picture → video; text → video makes a picture first with 🎨 Images)' },
+  teacache: { type: 'boolean', description: 'FramePack: TeaCache (default true — faster, very slightly softer)' },
+  gpuMemoryPreservation: { type: 'number', minimum: 6, maximum: 128, description: 'FramePack: graphics memory (GB) to keep free (default 6; raise it when the card runs out of memory)' },
+  distilledCfg: { type: 'number', minimum: 1, maximum: 32, description: 'FramePack: distilled CFG (default 10)' },
   timeoutMs: { type: 'integer', minimum: 10000, maximum: 21600000, description: 'Give up after this long (default 45 min)' },
 };
 const SHOT_ITEM = { type: 'object', additionalProperties: false, properties: {
@@ -81,6 +87,7 @@ const TRAILER_PROPS = {
   width: { type: 'integer', minimum: 320, maximum: 1920, description: 'Trailer frame (default 1280×720)' }, height: { type: 'integer', minimum: 240, maximum: 1080 },
   fps: { type: 'integer', minimum: 12, maximum: 30 }, fade: { type: 'number', minimum: 0, maximum: 1, description: 'Fade through black between parts, seconds (default 0.4)' },
   model: { type: 'string', enum: Object.keys(VI.MODELS), description: 'Video model for every shot' },
+  engine: { type: 'string', enum: ['auto', 'wan', 'framepack', 'endpoint'], description: 'The video engine for every shot (default: the one picked in 🎬 Video → Settings). framepack = FramePack (a shot from text gets its picture made first)' },
   resume: { type: 'boolean', description: 'Reuse shots already made for this trailer (default true)' },
   mp4: { type: 'boolean', description: 'Also make an .mp4 copy when ffmpeg is found (default true)' },
   from: { type: 'string', maxLength: 60 }, wait: { type: 'boolean', description: 'Wait for the finished trailer instead of returning at once' },
@@ -99,9 +106,13 @@ const OPS = [
   { name: 'video.gallery', description: 'Recent saved videos with posters and their settings', params: O({ limit: { type: 'integer', minimum: 1, maximum: 500 } }), args: 'object', changes: false },
   { name: 'video.cancel', description: 'Stop the video being made', params: O(), args: [], changes: true },
   { name: 'video.generate', description: 'Make a video from text (text→video). Saved to videos/ as .mp4 (or .webm) with a .json sidecar and a .png poster. Takes minutes.', params: O(GEN_PROPS, ['prompt']), args: 'object', changes: true, needs: 'ready' },
-  { name: 'video.animate', description: 'Make a video from a picture (picture→video, Wan 2.2 5B). The picture\'s shape is kept. Takes minutes.', params: O(ANIMATE_PROPS, ['image']), args: 'object', changes: true, needs: 'i2v' },
+  { name: 'video.animate', description: 'Make a video from a picture (picture→video: Wan 2.2 5B, or FramePack). The picture\'s shape is kept. Takes minutes.', params: O(ANIMATE_PROPS, ['image']), args: 'object', changes: true, needs: 'i2v' },
   { name: 'video.test', description: 'Make a tiny 1-second test video to prove video works', params: O(), args: [], changes: true, needs: 'ready' },
-  { name: 'video.settings', description: 'Video settings: backend (auto / comfy-wan / endpoint), default model, a ComfyUI address, the time limit', params: O({ backend: { type: 'string', enum: VS.BACKENDS }, model: { type: 'string', enum: MODEL_IDS }, comfyUrl: { type: 'string', maxLength: 300 }, timeoutMs: { type: 'integer', minimum: 60000, maximum: 21600000 } }), args: 'object', changes: true },
+  { name: 'video.settings', description: 'Video settings: backend (auto / comfy-wan / framepack / endpoint), default model, a ComfyUI address, the time limit, the FramePack folder (empty = find it by itself) and the graphics memory FramePack keeps free', params: O({ backend: { type: 'string', enum: VS.BACKENDS }, model: { type: 'string', enum: MODEL_IDS }, comfyUrl: { type: 'string', maxLength: 300 }, timeoutMs: { type: 'integer', minimum: 60000, maximum: 21600000 }, framepackDir: { type: 'string', maxLength: 1000 }, framepackGpuMemory: { type: 'number', minimum: 6, maximum: 128 } }), args: 'object', changes: true },
+  { name: 'video.framepack.status', description: 'FramePack (picture → video, already on this PC — nothing is downloaded): found where, its Python, which of its models are there or missing, loaded or not, graphics memory', params: O(), args: [], changes: false },
+  { name: 'video.framepack.load', description: 'Start FramePack and load its models now (a warm-up: the next FramePack video starts straight away). Takes a few minutes the first time.', params: O(), args: [], changes: true },
+  { name: 'video.framepack.unload', description: 'Unload FramePack (frees the graphics memory)', params: O(), args: [], changes: true },
+  { name: 'video.framepack.test', description: 'Make a 2-second FramePack clip from a built-in test picture, to prove FramePack works', params: O(), args: [], changes: true, needs: 'framepack' },
   { name: 'video.install.check', description: 'What the video install has and is missing: ComfyUI found where, each model\'s files, free disk space', params: O(), args: [], changes: false },
   { name: 'video.install.downloadModel', description: 'Download a video model into ComfyUI\'s model folders (big: 2.8–18 GB; resumes where it stopped)', params: O({ id: { type: 'string', enum: MODEL_IDS } }), args: 'object', changes: true, needs: 'comfyInstalled' },
   { name: 'video.install.installAll', description: 'One click: install ComfyUI (when there is none) and then the video model', params: O({ id: { type: 'string', enum: MODEL_IDS } }), args: 'object', changes: true },
@@ -134,6 +145,12 @@ function createVideoApi(d = {}) {
       animate: wrap((o) => checkKeys('video.animate', o, ANIMATE_PROPS) || S('animate', strip(o), from(o))),
       test: wrap(() => S('test')),
       settings: wrap((o) => S('settings', o || {})),
+      framepack: {
+        status: wrap(() => S('framepack.status', { gpu: true })),
+        load: wrap(() => S('framepack.load')),
+        unload: wrap(() => S('framepack.unload')),
+        test: wrap(() => S('framepack.test')),
+      },
       install: {
         check: wrap(() => S('install.check')),
         downloadModel: wrap((o) => S('install.downloadModel', o && typeof o === 'object' ? o.id : o)),
@@ -161,18 +178,22 @@ function createVideoApi(d = {}) {
       if (op.needs === 'ready' && !(ok && st.ready)) { available = false; hint = (ok && st.message) || 'Video is not set up yet (video.install.installAll).'; }
       if (op.needs === 'i2v') {
         if (!(ok && st.ready)) { available = false; hint = (ok && st.message) || 'Video is not set up yet.'; }
-        else if (st.backend === 'endpoint') { available = false; hint = 'The other video server (endpoint) makes video from text only. Picture→video needs ComfyUI with Wan 2.2 5B.'; }
+        else if (st.backend === 'endpoint') { available = false; hint = 'The other video server (endpoint) makes video from text only. Picture→video needs ComfyUI with Wan 2.2 5B, or FramePack.'; }
+        else if (st.backend === 'framepack') { /* FramePack is picture → video */ }
         else if (!installed.some((id) => VI.MODELS[id] && VI.MODELS[id].modes.includes('i2v'))) { available = false; hint = `Picture→video needs ${VI.MODELS[VI.DEFAULT_MODEL].short} (video.install.downloadModel { id: "${VI.DEFAULT_MODEL}" }).`; }
       }
+      if (op.needs === 'framepack' && !(ok && st.framepack && st.framepack.ready)) { available = false; hint = (ok && st.framepack && st.framepack.message) || 'FramePack was not found (🎬 Video → Setup → 📂 Choose FramePack folder).'; }
       if (op.needs === 'comfyInstalled' && !comfyInstalled && !(ok && st.comfy && st.comfy.connected)) { available = false; hint = 'No ComfyUI was found yet: use video.install.installAll (installs ComfyUI and the model).'; }
       const o = { name: op.name, description: op.description, params: op.params, args: op.args, changes: op.changes, available, hint };
-      if (!available) o.code = op.needs === 'i2v' && ok && st.backend === 'endpoint' ? 'UNSUPPORTED_ON_BACKEND' : 'VIDEO_NOT_SET_UP';
+      if (!available) o.code = op.needs === 'i2v' && ok && st.backend === 'endpoint' ? 'UNSUPPORTED_ON_BACKEND' : op.needs === 'framepack' ? 'FRAMEPACK_NOT_FOUND' : 'VIDEO_NOT_SET_UP';
       return o;
     });
     return {
       ok: true, version: 1, ready: !!(ok && st.ready), backend: (ok && st.backend) || '', message: (ok && st.message) || '', installed, defaultModel: VI.DEFAULT_MODEL,
       models: Object.values(VI.MODELS).map((m) => ({ id: m.id, label: m.label, modes: m.modes, vramGB: m.vramGB, bytes: VI.modelBytes(m), defaults: m.defaults, limits: m.limits, installed: installed.includes(m.id) })),
-      errors: ['VIDEO_NOT_SET_UP', 'VIDEO_MODEL_MISSING', 'VIDEO_OOM', 'VIDEO_TIMEOUT', 'VIDEO_CANCELLED', 'VIDEO_FAILED', 'UNSUPPORTED_ON_BACKEND', 'INVALID_PARAM', 'BUSY', 'NO_LOCK', 'TRAILER_JOIN_FAILED'],
+      errors: ['VIDEO_NOT_SET_UP', 'VIDEO_MODEL_MISSING', 'VIDEO_OOM', 'VIDEO_TIMEOUT', 'VIDEO_CANCELLED', 'VIDEO_FAILED', 'UNSUPPORTED_ON_BACKEND', 'INVALID_PARAM', 'BUSY', 'NO_LOCK', 'TRAILER_JOIN_FAILED',
+        'FRAMEPACK_NOT_FOUND', 'FRAMEPACK_PYTHON_MISSING', 'FRAMEPACK_MODEL_MISSING', 'FRAMEPACK_OOM', 'FRAMEPACK_PICTURE_FAILED', 'FRAMEPACK_TIMEOUT', 'FRAMEPACK_FAILED'],
+      framepack: ok && st.framepack ? { found: st.framepack.found, ready: st.framepack.ready, loaded: st.framepack.loaded, dir: st.framepack.dir, missing: st.framepack.models ? st.framepack.models.missing : [], message: st.framepack.message } : null,
       operations,
     };
   });

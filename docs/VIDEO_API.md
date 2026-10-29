@@ -16,6 +16,7 @@ a fallback backend called **`endpoint`** (🎬 Video → Setup → *Advanced: ot
 | `video-api.js` | The module API (`capabilities()`, `call()`, `video.*`) — shaped like `sd-api.js` |
 | `videos-studio.js` | The 🎬 Video tab in the control panel |
 | `service-bridge.js` | `GET /video/backend`, `POST /video/request` |
+| `framepack.js` + `integrations/framepack/framepack_runner.py` | The **FramePack** engine (the FramePack already on the PC; §8) |
 
 ---
 
@@ -339,3 +340,90 @@ section (`videos-trailer.js`) is the UI. 🎩 Alfred: `video_call` with `trailer
 Tests: `test/video-trailer.test.js` (plan, join plan, ffmpeg finder, webm-tools, the maker against the fake ComfyUI,
 resume, Stop, errors, video-api, the bridge) and `test/e2e/trailer.e2e.js` (the real canvas + MediaRecorder join:
 2 clips + 1 card → a playable 3 s ± 0.5 WebM, and the .mp4 when ffmpeg is there).
+
+---
+
+## 8. 🎞 FramePack (`framepack.js`, `integrations/framepack/framepack_runner.py`)
+
+A second video engine, **`framepack`**: lllyasviel's FramePack (HunyuanVideo-based, picture → video) that the person
+**already has** — nothing is downloaded, ever. It is used exactly the way FramePack's own `demo_gradio.py` runs the
+original image-to-video model (`lllyasviel/FramePackI2V_HY`; FramePack F1 is not used).
+
+| File (`desktop-app/`) | What it is |
+|---|---|
+| `framepack.js` | Finding FramePack + its models, the runner process (start once, keep the models loaded), errors in plain words |
+| `integrations/framepack/framepack_runner.py` | Our runner: started with **FramePack's own venv python**, in the FramePack folder; reuses `diffusers_helper` like `demo_gradio.py`'s `worker()` |
+| `video-studio.js` | `backend: "framepack"` next to `comfy-wan` / `endpoint` |
+
+**Where it is found** (first match): the folder chosen with **📂 Choose FramePack folder** (setting `framepackDir`),
+`AUTOINJECTOR_FRAMEPACK`, then Stability Matrix's `Data/Packages/*` (found the same way as its ComfyUI / Forge
+packages, `sd-runner.findSmPackages`). A FramePack folder has `demo_gradio.py` and `diffusers_helper/`. Its python:
+`venv/Scripts/python.exe` (Windows) or `venv/bin/python`.
+
+**Its models** (the Hugging Face cache, `HF_HOME`): `"stuff and thing"/models/video/framepack/hf` first, else
+FramePack's own `hf_download`. Checked before anything starts — every folder below must have files, and every part a
+`*.safetensors.index.json` names must exist:
+
+* `hunyuanvideo-community/HunyuanVideo`: `text_encoder`, `text_encoder_2`, `tokenizer`, `tokenizer_2`, `vae`
+* `lllyasviel/flux_redux_bfl`: `image_encoder`, `feature_extractor`
+* `lllyasviel/FramePackI2V_HY` (the transformer, 3 parts)
+
+The runner gets `HF_HOME`, `HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1` (set again inside the runner before any
+Hugging Face import), so a missing file is an error (`FRAMEPACK_MODEL_MISSING`), never a download.
+
+**Engine choice.** `auto` = ComfyUI + Wan when it is ready; **FramePack when it is found and Wan isn't installed**;
+the other video server; FramePack also when ComfyUI answers but can't make Wan video, or when ComfyUI (Wan installed)
+can't be started. `backend` / `engine` (`auto` · `wan` · `framepack` · `endpoint`) on a request picks one for that video.
+
+**Picture → video** goes straight to FramePack. **Text → video with FramePack** first makes a picture from the
+prompt with 🎨 Images (`sd-api` `images.generate`, engine `auto`: Stable Diffusion when connected, else ChatGPT;
+896×512, or 512×768 for a `clip`; the same seed), then animates it with the same prompt. The UI and the result's
+warnings say so; the sidecar keeps `sourcePicture` and `pictureEngine`.
+
+**Params** (on top of the common ones: `prompt`, `negativePrompt`, `image`, `seed`, `purpose`, `characterLock`, …):
+`seconds` 1–10 (default 5; clip 4, trailer shot 5, test 2 — FramePack makes parts of ~1.2 s at 30 fps:
+1 s → 37 frames, 2 s → 73, 5 s → 145), `steps` (25), `distilledCfg` (10), `teacache` (true), `gpuMemoryPreservation`
+(GB to keep free, 6–128, default the `framepackGpuMemory` setting, 6). CFG stays 1 like the demo. Wan's `width` /
+`height` / `fps` / `sampler` … don't apply (FramePack keeps the picture's shape at about 640 px, 30 fps). The result
+is the usual one with `engine: "framepack"`, `model: "framepack-i2v-hy"`, `fps: 30`; the clip lands in
+`"stuff and thing"/videos` with its poster (the picture as FramePack saw it) and `.json` sidecar.
+
+**Errors:** `FRAMEPACK_NOT_FOUND` · `FRAMEPACK_PYTHON_MISSING` · `FRAMEPACK_MODEL_MISSING` (+ `missing: [...]`) ·
+`FRAMEPACK_OOM` (fix: raise “GPU memory to keep free”, a shorter clip) · `FRAMEPACK_PICTURE_FAILED` (text → video's
+first picture) · `FRAMEPACK_TIMEOUT` · `FRAMEPACK_FAILED` (with what FramePack printed in `serverError`) ·
+`VIDEO_CANCELLED` · `BUSY`.
+
+**The runner protocol** (JSON lines; FramePack's own prints go to stderr). In: `{"cmd":"load"}`,
+`{"cmd":"generate","id","image","prompt","negative","seconds","seed","steps","cfg","gs","rs","use_teacache","mp4_crf","gpu_memory_preservation","out","poster"}`,
+`{"cmd":"cancel"}`, `{"cmd":"status"}`, `{"cmd":"ping"}`, `{"cmd":"quit"}`. Out: `ready` → `loading` (stage, step,
+steps) → `loaded` (vram_gb, high_vram) · `accepted` (sections, frames) → `progress` (phase text / picture / vae-encode /
+vision / sampling / decoding, section, sections, step, steps, percent) → `result` (path, frames, fps 30, seconds, width,
+height) | `error` (code, message, fix) | `cancelled`. The high-VRAM / low-VRAM switch (`get_cuda_free_memory_gb`,
+`DynamicSwapInstaller`, `move_model_to_device_with_memory_preservation`) is FramePack's own, unchanged. Stop is checked
+between sampling steps; if FramePack doesn't answer within 30 s the process is stopped (frees the card).
+
+**Module API:** `video.framepack.status()` (found where, python, models ✔/✖, loaded, graphics memory) ·
+`video.framepack.load()` (warm-up) · `video.framepack.unload()` · `video.framepack.test()` (a 2-second clip from a
+built-in test picture) · `video.settings({ backend: "framepack", framepackDir, framepackGpuMemory })`. `capabilities()`
+has a `framepack` block; picture → video is available when FramePack is the engine. Trailers take `engine` too, and the
+shot cache key includes the engine (a FramePack shot is not reused for Wan, and back; Wan keys are unchanged).
+
+**IPC** (`window.api.video`): `framepackStatus` (`video:framepack-status`), `framepackLoad` (`video:framepack-load`),
+`framepackUnload` (`video:framepack-unload`), `framepackTest` (`video:framepack-test`), `framepackChooseFolder`
+(`video:framepack-choose-folder`, a folder chooser — Alfred sets `framepackDir` instead), event `video-framepack`
+(loading / loaded / exit). 🎩 Alfred: `generate_video` with `engine: "framepack"`, `video_call` `video.framepack.*`;
+dossier clips and `make_trailer` use whichever engine 🎬 Video is set to. 🩺 Check everything shows a FramePack row
+once it is set up; the health watch warns when its folder / python / a model goes missing or it stopped with a problem.
+
+**UI** (🎬 Video): ⚙ Setup has a FramePack card (found / its folder / python / each model ✔✖ / a graphics-memory hint,
+▶ Load FramePack, 🧪 Test (2-second clip from a test picture), 📂 Choose FramePack folder, ⏏ Unload); the Make tab has a
+Video engine picker and, for FramePack, its own settings (Seconds, Steps, GPU memory to keep free, Faster (TeaCache));
+progress shows “part i of n · step s of S”; Stop, the gallery and ♻ Remake work the same.
+
+**Tests (no GPU):** `test/framepack.test.js` (finding, models, the runner process, the studio, video-api, trailers,
+health) and `test/e2e/framepack.e2e.js` (the real app) use `test/fixtures/fake-framepack-runner.js` — a stand-in that
+speaks the same protocol — started through `AUTOINJECTOR_FRAMEPACK_PYTHON` / `AUTOINJECTOR_FRAMEPACK_RUNNER`.
+`test/framepack-runner.test.js` compiles the real runner (`py_compile`) and checks its request / JSON handling and
+its server with a fake engine — any Python 3, no torch. **Not yet confirmed on a real GPU:** the real models loading
+and a real clip. To try it on the PC: 🎬 Video → ⚙ Setup & models → the FramePack card → ▶ Load FramePack, then
+🧪 Test (2-second clip from a test picture).

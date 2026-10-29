@@ -1263,6 +1263,8 @@
     .vd-model .vd-model-head b { flex:1 1 auto; }
     .vd-model .sd-note { font-size:11px; opacity:.7; margin-top:3px; }
     #vd-ep-clip { gap:6px 8px; }
+    #vd-fp-settings[hidden], #vd-wan-settings[hidden] { display:none; }
+    #vd-fp-models li[data-ok="false"] { color:#ff9c9c; }
     #vd-ep-clip > div { flex:1 1 64px; min-width:56px; }
     #vd-ep-clip input { width:100% !important; }
 
@@ -1679,6 +1681,17 @@
           <div><label class="sd-l" for="vd-purpose">Purpose</label><select id="vd-purpose"><option value="free">Free</option><option value="clip">Character clip (4 s)</option><option value="trailer_shot">Trailer shot (5 s)</option></select></div>
         </div>
         <div class="sd-row">
+          <div><label class="sd-l" for="vd-engine">Video engine</label><select id="vd-engine" title="Which program makes the video"><option value="auto">Auto (what is set up)</option><option value="comfy-wan">ComfyUI + Wan</option><option value="framepack">FramePack (picture → video)</option></select></div>
+        </div>
+        <div id="vd-fp-settings" hidden>
+          <div class="sd-note" id="vd-fp-note" style="font-size:11.5px;opacity:.85;margin:4px 0;">FramePack brings a picture to life (30 frames a second). For ✍ Text → video it first makes a picture from your description with 🎨 Images, then animates it.</div>
+          <div class="sd-slider"><label for="vd-fp-seconds">Seconds</label><input type="range" id="vd-fp-seconds" min="1" max="10" step="0.5" value="5"><span id="vd-fp-seconds-v">5</span></div>
+          <div class="sd-slider"><label for="vd-fp-steps" title="More steps = a little better, slower (FramePack's default 25)">Steps</label><input type="range" id="vd-fp-steps" min="5" max="60" step="1" value="25"><span id="vd-fp-steps-v">25</span></div>
+          <div class="sd-slider"><label for="vd-fp-gpu" title="Graphics memory FramePack leaves free. Raise it if your card runs out of memory (slower).">GPU memory to keep free (GB)</label><input type="range" id="vd-fp-gpu" min="6" max="32" step="1" value="6"><span id="vd-fp-gpu-v">6</span></div>
+          <label class="sd-fixed" style="font-size:12px;" title="TeaCache makes FramePack about twice as fast; hands and faces can come out a little softer"><input type="checkbox" id="vd-fp-teacache" checked> Faster (TeaCache)</label>
+        </div>
+        <div id="vd-wan-settings">
+        <div class="sd-row">
           <div><label class="sd-l" for="vd-model">Model</label><select id="vd-model"></select></div>
           <div><label class="sd-l" for="vd-size-preset">Size</label><select id="vd-size-preset"><option value="">Size…</option><option value="1280x704">1280×704 wide (5B)</option><option value="704x1280">704×1280 tall (5B)</option><option value="832x480">832×480 wide (fast)</option><option value="480x832">480×832 tall (fast)</option><option value="640x640">640×640 square</option></select></div>
         </div>
@@ -1696,6 +1709,7 @@
           <div><label class="sd-l" for="vd-scheduler">Scheduler</label><input type="text" id="vd-scheduler" value="simple" list="vd-schedulers"></div>
           <datalist id="vd-samplers"><option value="uni_pc"><option value="euler"><option value="dpmpp_2m"><option value="res_multistep"><option value="lcm"></datalist>
           <datalist id="vd-schedulers"><option value="simple"><option value="normal"><option value="beta"><option value="karras"></datalist>
+        </div>
         </div>
         <div class="sd-row" style="margin-top:4px;">
           <label class="sd-fixed" for="vd-seed" style="font-size:11.5px;">Seed</label>
@@ -1807,10 +1821,23 @@
         <button id="btn-vd-dl-cancel" disabled>⏸ Pause / cancel download</button>
         <div class="sd-note" style="font-size:11px;opacity:.65;margin-top:5px;">The files go into ComfyUI's own model folders (diffusion_models, text_encoders, vae — or Stability Matrix's shared Data/Models). A stopped download continues where it stopped.</div>
       </div>
+      <div class="sd-card" id="vd-fp-card" style="max-width:760px;margin-top:10px;">
+        <h3>🎞 FramePack (already on this PC — nothing to download)</h3>
+        <div id="vd-fp-state" style="font-size:12.5px;line-height:1.5;white-space:pre-line;">Looking for FramePack…</div>
+        <ul id="vd-fp-models" style="font-size:12px;margin:4px 0;padding-left:18px;"></ul>
+        <div id="vd-fp-vram" class="sd-note" style="font-size:11.5px;opacity:.8;"></div>
+        <div class="sd-row" style="margin-top:6px;">
+          <button class="sd-fixed primary" id="btn-vd-fp-load" title="Starts FramePack and loads its models now, so your next video starts straight away">▶ Load FramePack</button>
+          <button class="sd-fixed" id="btn-vd-fp-test" title="Makes a 2-second clip from a built-in test picture">🧪 Test (2-second clip from a test picture)</button>
+          <button class="sd-fixed" id="btn-vd-fp-choose" title="Point AutoInjector at your FramePack folder (Stability Matrix: Data\Packages\FramePack)">📂 Choose FramePack folder</button>
+          <button class="sd-fixed" id="btn-vd-fp-unload" title="Frees the graphics memory FramePack uses">⏏ Unload</button>
+        </div>
+        <div id="vd-fp-msg" role="status" aria-live="polite" style="font-size:12px;white-space:pre-line;min-height:18px;"></div>
+      </div>
       <div class="sd-card" style="max-width:760px;margin-top:10px;">
         <h3>Settings</h3>
         <div class="sd-row">
-          <div><label class="sd-l" for="vd-backend">Video engine</label><select id="vd-backend"><option value="auto">Auto (ComfyUI + Wan, else the other video server)</option><option value="comfy-wan">ComfyUI + Wan only</option><option value="endpoint">The other video server only</option></select></div>
+          <div><label class="sd-l" for="vd-backend">Video engine</label><select id="vd-backend"><option value="auto">Auto (ComfyUI + Wan; FramePack when Wan isn't installed; else the other video server)</option><option value="comfy-wan">ComfyUI + Wan only</option><option value="framepack">FramePack only</option><option value="endpoint">The other video server only</option></select></div>
           <div><label class="sd-l" for="vd-timeout">Time limit (minutes)</label><input type="number" id="vd-timeout" min="1" max="360" value="45"></div>
         </div>
         <label class="sd-l" for="vd-comfy-url">ComfyUI address (empty = find it by itself)</label>

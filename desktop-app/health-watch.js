@@ -14,6 +14,8 @@
  *   akowe   Akọwe's server gave up (failed) or keeps restarting
  *   panes   an AI pane self-repair gave up on (state "broken"); while it is still repairing we stay quiet
  *   logs    the logs folder grew huge (> 500 MB)
+ *   framepack  FramePack (🎬 Video) was set up but its folder / its Python / a model is gone, or it stopped
+ *           unexpectedly; status().info carries a ✔/✖ FramePack row for 🩺 Check everything while it is set up
  *
  * Each problem: { code, check, severity: 'warn'|'urgent', text (one plain-English sentence), fix?: { label,
  * channel, args } | { label, open }, okText, alfred (false = Alfred already announces it himself) }.
@@ -33,6 +35,7 @@
  *     akowe()         -> { enabled, phase, error, message, restarts } | null
  *     panes()         -> [{ site, label, active, state, problem }]
  *     logDirs()       -> [path]
+ *     framepack()     -> { setUp, found, ready, dir, pythonOk, missing: [..], lastError: { code, message, at } } | null
  *     dirSize(path)   -> bytes | null    (default: a capped walk)
  *     notify({ type: 'problem'|'fixed', problem, text })
  *     runFix(fix, problem) -> result
@@ -50,7 +53,7 @@ const LOGS_BIG = 500 * MB;
 const REPEAT_MS = 60 * 60 * 1000;      // the same problem at most once per hour
 const INTERVAL_MS = 10 * 60 * 1000;    // every ~10 minutes
 const FIRST_DELAY_MS = 60 * 1000;      // a minute after start (Ollama / Akọwe / SD get time to come up)
-const CHECKS = ['brain', 'disk', 'sd', 'akowe', 'panes', 'logs', 'content'];
+const CHECKS = ['brain', 'disk', 'sd', 'akowe', 'panes', 'logs', 'content', 'framepack'];
 const SEVERITY_RANK = { warn: 1, urgent: 2 };
 
 function gbText(bytes) {
@@ -113,6 +116,7 @@ function createHealthWatch(deps = {}) {
   const OFF = { off: true }; // a check that doesn't apply now: its problems go away quietly (no "fixed" line)
 
   const active = new Map(); // code -> { problem, since, toldAt, toldSeverity, quiet }
+  const info = new Map(); // check -> { check, ok, text }: a ✔/✖ row for 🩺 Check everything (FramePack)
   const lastTold = new Map(); // code -> { at, severity } of the last time it was told (survives a fix: no flapping lines)
   let lastRun = null;
   let chain = Promise.resolve();
@@ -274,6 +278,20 @@ function createHealthWatch(deps = {}) {
     },
 
     // Your downloads are in ANOTHER AutoInjector folder (an earlier copy): offer to use them instead of downloading again.
+    async framepack() {
+      const f = await call('framepack');
+      if (f === undefined) return null; // couldn't tell
+      if (!f || !f.setUp) { info.delete('framepack'); return OFF; }
+      const open = { label: '⚙ Open 🎬 Video → Setup', channel: 'wizard:open-app-tab', args: [{ tab: 'video' }] };
+      const out = [];
+      if (!f.found) out.push({ code: 'framepack-gone', check: 'framepack', severity: 'warn', text: `🎞 FramePack was set up for 🎬 Video, but it isn't there any more${f.dir ? ` (${f.dir})` : ''}, so FramePack videos will fail.`, fix: open, okText: '✔ FramePack is found again.' });
+      else if (!f.pythonOk) out.push({ code: 'framepack-no-python', check: 'framepack', severity: 'warn', text: `🎞 FramePack is in ${f.dir}, but its own Python (venv) is missing, so it can't run. Open FramePack once in Stability Matrix to make it again.`, fix: open, okText: '✔ FramePack\'s Python is there again.' });
+      else if (f.missing && f.missing.length) out.push({ code: 'framepack-models', check: 'framepack', severity: 'warn', text: `🎞 FramePack is missing ${f.missing.length} model part${f.missing.length === 1 ? '' : 's'} (${f.missing.slice(0, 3).join(', ')}${f.missing.length > 3 ? ', …' : ''}), so FramePack videos will fail. Nothing is downloaded by AutoInjector — put FramePack's “hub” folder back into “stuff and thing”/models/video/framepack/hf.`, fix: open, okText: '✔ FramePack\'s models are all there again.' });
+      else if (f.lastError && /^FRAMEPACK_(FAILED|OOM)$/.test(f.lastError.code || '') && now() - (f.lastError.at || 0) < REPEAT_MS) out.push({ code: 'framepack-stopped', check: 'framepack', severity: 'warn', text: `🎞 FramePack stopped with a problem last time: ${f.lastError.message}${f.lastError.code === 'FRAMEPACK_OOM' ? ' Raise “GPU memory to keep free” in 🎬 Video, or make shorter clips.' : ''}`, fix: open, okText: '✔ FramePack made a video again.' });
+      info.set('framepack', { check: 'framepack', ok: !out.length && !!f.ready, text: out.length ? out[0].text : f.ready ? `🎞 FramePack: ✔ ready${f.dir ? ` (${f.dir})` : ''}${f.loaded ? ', loaded' : ''}.` : '🎞 FramePack: found, not ready yet (see 🎬 Video → Setup).' });
+      return out;
+    },
+
     async content() {
       const c = await call('contentRoots');
       if (!c) return null;
@@ -344,7 +362,7 @@ function createHealthWatch(deps = {}) {
   function status() {
     const list = problems();
     return {
-      ok: true, problems: list, checkedAt: lastRun, watching: !!timer || !!firstTimer, checks: CHECKS.slice(),
+      ok: true, problems: list, checkedAt: lastRun, watching: !!timer || !!firstTimer, checks: CHECKS.slice(), info: [...info.values()],
       summary: lastRun == null ? 'Not checked yet.' : list.length ? `${list.length} thing${list.length === 1 ? '' : 's'} need${list.length === 1 ? 's' : ''} attention: ${list.map((p) => p.text).join(' ')}` : '✓ Nothing is wrong right now.',
     };
   }
