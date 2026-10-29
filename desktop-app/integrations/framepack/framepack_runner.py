@@ -36,9 +36,12 @@ checked (and its JSON handling tested) by any Python 3 without them.
 from __future__ import print_function
 
 import argparse
+import gc
+import io
 import json
 import math
 import os
+import re
 import sys
 import threading
 import time
@@ -189,6 +192,70 @@ def first_line(text):
     return str(text).strip()[:300]
 
 
+def safe_name(text, limit=40):
+    """A piece of a file name that is valid on Windows too (no : / \\ ? * " < > | or control characters)."""
+    t = re.sub(r'[^A-Za-z0-9._-]+', '_', str(text or ''))[:limit].strip('._')
+    return t or 'job'
+
+
+def save_mp4(history_pixels, path, fps, crf):
+    """demo_gradio.py: save_bcthw_as_mp4(history_pixels, path, fps=30, crf=mp4_crf).
+
+    FramePack's save_bcthw_as_mp4 calls torchvision.io.write_video, which torchvision REMOVED in 0.25 (torch 2.10+;
+    Stability Matrix's FramePack has torch 2.11 -> torchvision 0.26). Then the same thing is written with PyAV
+    (FramePack's own `av`), exactly as torchvision's write_video did: libx264, yuv420p, {'crf': str(crf)}."""
+    try:
+        import torchvision.io as tvio
+        has_write_video = hasattr(tvio, 'write_video')
+    except Exception:
+        has_write_video = False
+    if has_write_video:
+        from diffusers_helper.utils import save_bcthw_as_mp4
+        return save_bcthw_as_mp4(history_pixels, path, fps=fps, crf=crf)
+    return _save_bcthw_as_mp4_av(history_pixels, path, fps=fps, crf=crf)
+
+
+def _save_bcthw_as_mp4_av(x, output_filename, fps=10, crf=0):
+    """diffusers_helper.utils.save_bcthw_as_mp4 + torchvision 0.24's write_video, with PyAV directly."""
+    import av
+    import einops
+    import torch
+    b, c, t, h, w = x.shape
+    per_row = b
+    for n in [6, 5, 4, 3, 2]:
+        if b % n == 0:
+            per_row = n
+            break
+    os.makedirs(os.path.dirname(os.path.abspath(os.path.realpath(output_filename))), exist_ok=True)
+    x = torch.clamp(x.float(), -1., 1.) * 127.5 + 127.5
+    x = x.detach().cpu().to(torch.uint8)
+    x = einops.rearrange(x, '(m n) c t h w -> t (m h) (n w) c', n=per_row)
+    frames = x.numpy()
+    if isinstance(fps, float):
+        fps = int(round(fps))
+    with av.open(output_filename, mode='w') as container:
+        stream = container.add_stream('libx264', rate=fps)
+        stream.width = frames.shape[2]
+        stream.height = frames.shape[1]
+        stream.pix_fmt = 'yuv420p'
+        stream.options = {'crf': str(int(crf))}
+        for img in frames:
+            frame = av.VideoFrame.from_ndarray(img, format='rgb24')
+            try:
+                frame.pict_type = 'NONE'
+            except (TypeError, ValueError, AttributeError):
+                try:
+                    from av.video.frame import PictureType
+                    frame.pict_type = PictureType.NONE
+                except Exception:
+                    pass
+            for packet in stream.encode(frame):
+                container.mux(packet)
+        for packet in stream.encode():
+            container.mux(packet)
+    return x
+
+
 def _snapshot_dir(repo_dir):
     """The snapshot folder of an HF cache repo: refs/main's revision, else the newest snapshot."""
     snaps = os.path.join(repo_dir, 'snapshots')
@@ -245,6 +312,7 @@ class Engine(object):
         self.high_vram = False
         self.vram_gb = None
         self.m = {}
+        self._tmp_files = []
 
     def status(self):
         return {'loaded': self.loaded, 'high_vram': self.high_vram, 'vram_gb': self.vram_gb}
@@ -332,17 +400,36 @@ class Engine(object):
 
     def generate(self, p, emit, should_stop):
         import torch
-        with torch.no_grad():
-            try:
+        err = None
+        try:
+            with torch.no_grad():
                 return self._generate(p, emit, should_stop)
-            except BaseException:
-                if not self.high_vram:
-                    self._unload_all()
-                try:
-                    torch.cuda.empty_cache()
-                except Exception:
-                    pass
-                raise
+        except BaseException as e:  # noqa: B902 - cancel / OOM / anything: free the graphics card, then pass it on
+            err = e
+        # Outside the except block: the traceback still holds _generate's frames (latents on the GPU);
+        # clear their locals so the memory really goes back (demo_gradio.py's except: unload_complete_models(...)).
+        if not isinstance(err, Cancelled):
+            traceback.print_exception(type(err), err, err.__traceback__, file=sys.stderr)
+        ex = err
+        while ex is not None:
+            if ex.__traceback__ is not None:
+                traceback.clear_frames(ex.__traceback__)
+            ex = ex.__context__
+        for f in self._tmp_files:
+            try:
+                if os.path.exists(f):
+                    os.remove(f)
+            except OSError:
+                pass
+        self._tmp_files = []
+        if not self.high_vram:
+            self._unload_all()
+        gc.collect()
+        try:
+            torch.cuda.empty_cache()
+        except Exception:
+            pass
+        raise err
 
     def _generate(self, p, emit, should_stop):
         import numpy as np
@@ -350,7 +437,7 @@ class Engine(object):
         import einops  # noqa: F401  (FramePack's helpers use it)
         from PIL import Image
         from diffusers_helper.hunyuan import encode_prompt_conds, vae_decode, vae_encode
-        from diffusers_helper.utils import save_bcthw_as_mp4, crop_or_pad_yield_mask, soft_append_bcthw, resize_and_center_crop
+        from diffusers_helper.utils import crop_or_pad_yield_mask, soft_append_bcthw, resize_and_center_crop
         from diffusers_helper.pipelines.k_diffusion_hunyuan import sample_hunyuan
         from diffusers_helper.memory import gpu, move_model_to_device_with_memory_preservation, offload_model_from_device_for_memory_preservation
         from diffusers_helper.memory import fake_diffusers_current_device, unload_complete_models, load_model_as_complete
@@ -394,7 +481,13 @@ class Engine(object):
 
         # The picture
         phase('picture')
-        input_image = np.array(Image.open(p['image']).convert('RGB'))
+        with Image.open(p['image']) as im:
+            try:
+                from PIL import ImageOps
+                im = ImageOps.exif_transpose(im)
+            except Exception:
+                pass
+            input_image = np.array(im.convert('RGB'))
         H, W, C = input_image.shape
         height, width = find_nearest_bucket(H, W, resolution=640)
         input_image_np = resize_and_center_crop(input_image, target_width=width, target_height=height)
@@ -437,7 +530,7 @@ class Engine(object):
         out_dir = os.path.dirname(os.path.abspath(out)) or '.'
         if not os.path.isdir(out_dir):
             os.makedirs(out_dir)
-        tmp_files = []
+        tmp_files = self._tmp_files = []  # removed by generate() if this stops half-way
         section_no = 0
         for latent_padding in latent_paddings_for(total_latent_sections):
             section_no += 1
@@ -511,12 +604,9 @@ class Engine(object):
                 unload_complete_models()
 
             # Like the demo, every section is saved (a growing clip); only the last one is kept.
-            part = os.path.join(out_dir, '.framepack-%s-%d.mp4' % (str(jid or 'job')[:40], total_generated_latent_frames))
-            try:
-                save_bcthw_as_mp4(history_pixels, part, fps=FPS, crf=p['mp4_crf'])
-            except TypeError:  # an older FramePack without the crf option
-                save_bcthw_as_mp4(history_pixels, part, fps=FPS)
+            part = os.path.join(out_dir, '.framepack-%s-%d.mp4' % (safe_name(jid), total_generated_latent_frames))
             tmp_files.append(part)
+            save_mp4(history_pixels, part, fps=FPS, crf=p['mp4_crf'])
             print('Decoded. Current latent shape %s; pixel shape %s' % (tuple(real_history_latents.shape), tuple(history_pixels.shape)), file=sys.stderr)
             if is_last_section:
                 break
@@ -641,7 +731,7 @@ class Server(object):
         for raw in inp:
             if isinstance(raw, bytes):
                 raw = raw.decode('utf-8', 'replace')
-            line = raw.strip()
+            line = raw.strip().lstrip(u'\ufeff')
             if not line:
                 continue
             try:
@@ -667,13 +757,17 @@ def parse_args(argv=None):
 
 def setup_env(framepack_dir, hf_home):
     """Before ANY Hugging Face import: offline, the right cache, FramePack's helpers importable."""
+    if not hf_home and framepack_dir:
+        # demo_gradio.py: HF_HOME = <FramePack>/hf_download
+        hf_home = os.path.join(framepack_dir, 'hf_download')
     if hf_home:
         os.environ['HF_HOME'] = os.path.abspath(hf_home)
+    elif not os.environ.get('HF_HOME'):
+        os.environ.pop('HF_HOME', None)  # an empty HF_HOME would make the cache folder relative
     os.environ['HF_HUB_OFFLINE'] = '1'
     os.environ['TRANSFORMERS_OFFLINE'] = '1'
     os.environ['HF_DATASETS_OFFLINE'] = '1'
     os.environ['HF_HUB_DISABLE_TELEMETRY'] = '1'
-    os.environ.setdefault('PYTORCH_CUDA_ALLOC_CONF', 'expandable_segments:True')
     if framepack_dir:
         fd = os.path.abspath(framepack_dir)
         if fd not in sys.path:
@@ -684,23 +778,63 @@ def setup_env(framepack_dir, hf_home):
             pass
 
 
+def protocol_stream():
+    """The real stdout for our JSON lines only; everything else (Python prints, tqdm, warnings AND native code that
+    writes to file descriptor 1, e.g. CUDA / FFmpeg) goes to stderr. Returns a text stream writing utf-8 with '\\n'
+    line ends (no '\\r\\n' on Windows)."""
+    try:
+        sys.stdout.flush()
+    except Exception:
+        pass
+    proto = None
+    try:
+        fd = os.dup(sys.stdout.fileno())
+        os.dup2(sys.stderr.fileno(), sys.stdout.fileno())  # fd 1 -> stderr from now on
+        proto = io.open(fd, 'w', encoding='utf-8', errors='replace', newline='\n', buffering=1)
+    except Exception:
+        proto = sys.stdout  # no real file descriptors (tests, embedded): Python-level redirect only
+    for st in (sys.stderr,):
+        try:
+            st.reconfigure(encoding='utf-8', errors='backslashreplace')  # a cp1252 console must not crash a print
+        except Exception:
+            pass
+    sys.stdout = sys.stderr  # FramePack / torch print a lot: only our JSON lines go to the real stdout
+    return proto
+
+
+def stdin_lines():
+    """stdin as bytes lines (decoded as utf-8 by Server.serve), so Windows' code page and '\\r\\n' do not matter."""
+    return getattr(sys.stdin, 'buffer', sys.stdin)
+
+
 def main(argv=None):
     args = parse_args(argv)
-    proto = sys.stdout
-    sys.stdout = sys.stderr  # FramePack / torch print a lot: only our JSON lines go to the real stdout
+    proto = protocol_stream()
     if args.framepack_dir and not os.path.isdir(os.path.join(args.framepack_dir, 'diffusers_helper')):
         proto.write(json.dumps({'event': 'error', 'code': 'FRAMEPACK_NOT_FOUND', 'message': 'There is no FramePack in "%s" (no diffusers_helper folder).' % args.framepack_dir}) + '\n')
         proto.flush()
         return 2
     setup_env(args.framepack_dir, args.hf_home)
+    hf_home = os.environ.get('HF_HOME') or ''
     if args.check:
-        missing = check_models(args.hf_home) if args.hf_home else []
-        proto.write(json.dumps({'event': 'check', 'ok': not missing, 'missing': missing, 'hf_home': args.hf_home, 'python': sys.version.split()[0]}) + '\n')
+        missing = check_models(hf_home) if hf_home else []
+        proto.write(json.dumps({'event': 'check', 'ok': not missing, 'missing': missing, 'hf_home': hf_home, 'python': sys.version.split()[0]}) + '\n')
         proto.flush()
         return 0
-    server = Server(Engine(args.hf_home or None), proto)
-    stdin = getattr(sys.stdin, 'buffer', sys.stdin)
-    server.serve(stdin)
+    server = Server(Engine(hf_home or None), proto)
+    server.serve(stdin_lines())
+    # quit / stdin closed: the job was told to stop; give it a moment to free the graphics card, then leave
+    # without waiting on CUDA's shutdown in a still-running thread (AutoInjector kills us after 3 s anyway).
+    j = server.job
+    if j and j['thread'].is_alive():
+        j['thread'].join(2.5)
+    try:
+        proto.flush()
+        sys.stderr.flush()
+    except Exception:
+        pass
+    if j and j['thread'].is_alive():
+        os._exit(0)
     return 0
 
 

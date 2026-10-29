@@ -71,6 +71,15 @@ async function main() {
     });
     assert(got.some((e) => e.event === 'ready' && e.protocol === 1) && got.some((e) => e.event === 'pong' && e.id === 'x') && got.some((e) => e.event === 'status' && e.loaded === false && e.busy === false), 'the real server over stdin/stdout: ready → pong → status (not loaded) → quit');
     assert(got.every((e) => e && e.event), 'stdout carries only JSON lines');
+    // native code writing straight to file descriptor 1 (CUDA, FFmpeg) and plain prints must not reach the JSON stdout
+    const noisy = spawnSync(py, ['-B', '-c', [
+      'import importlib.util, os, sys',
+      'spec = importlib.util.spec_from_file_location("r", sys.argv[1]); R = importlib.util.module_from_spec(spec); spec.loader.exec_module(R)',
+      'proto = R.protocol_stream()',
+      'os.write(1, b"native noise\\n"); print("print noise"); sys.stdout.flush()',
+      'proto.write("{\\"event\\": \\"x\\"}\\n"); proto.flush()',
+    ].join('\n'), RUNNER], { encoding: 'utf8', timeout: 30000 });
+    assert(noisy.status === 0 && noisy.stdout === '{"event": "x"}\n' && /native noise/.test(noisy.stderr) && /print noise/.test(noisy.stderr), `stdout keeps only JSON lines even when native code writes to it (got ${JSON.stringify(noisy.stdout)})`);
   } finally { fs.rmSync(TMP, { recursive: true, force: true }); }
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
