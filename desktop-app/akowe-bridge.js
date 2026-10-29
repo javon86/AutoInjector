@@ -284,10 +284,14 @@ function sanitizeAkoweStatus(body) {
   out.total = capInt(body.total, 100000);
   // Optional (a newer Akọwe): the "Make a book for me" run itself — its real state, not the checklist's.
   const run = obj(body.run);
+  const rp = run && obj(run.problem);
   out.run = run ? {
-    id: capStr(run.id, 80), status: capStr(run.status, 40), phase: capStr(run.phase, 300), title: capStr(run.title, 200),
-    project_id: capStr(run.project_id, 100), step: capInt(run.step, 1000), steps_done: capInt(run.steps_done, 1000),
-    steps_total: capInt(run.steps_total, 1000), needs_decision: run.needs_decision === true, updated_at: toEpochMs(run.updated_at)
+    id: capStr(run.id, 80), title: capStr(run.title, 200), state: capStr(run.state, 40), state_words: capStr(run.state_words, 300),
+    status: capStr(run.status, 40), phase: capStr(run.phase, 300), project_id: capStr(run.project_id, 100),
+    needs_you: run.needs_you === true, needs_decision: typeof run.needs_decision === 'boolean' ? run.needs_decision : null,
+    step: capInt(run.step, 1000), steps_done: capInt(run.steps_done, 1000), steps_total: capInt(run.steps_total, 1000),
+    problem: rp ? { code: capStr(rp.code, 60), message: capStr(rp.message, 300) } : (typeof run.problem === 'string' ? { code: null, message: capStr(run.problem, 300) } : null),
+    replaced_by: capStr(run.replaced_by, 80), updated_at: toEpochMs(run.updated_at), finished_at: toEpochMs(run.finished_at), url: loopbackUrl(run.url)
   } : null;
   out.updated_at = toEpochMs(body.updated_at);
   return { ok: true, value: out };

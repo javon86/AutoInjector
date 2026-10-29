@@ -56,13 +56,19 @@ function stepsOf(run) {
  */
 function summarizeRun(run) {
   if (!run || typeof run !== 'object') return null;
-  const status = str(run.status || run.state, 40).toLowerCase();
+  // A newer Akọwe sends ONE `state` word (+ `state_words`, a plain sentence) for where the run really stands;
+  // older ones only `status`. Map the new words onto the same states.
+  const NEW_STATE = { working: 'running', waiting: 'waiting', pausing: 'pausing', paused: 'paused', needs_decision: 'paused', problem: 'error', interrupted: 'interrupted', done: 'done', cancelled: 'cancelled', replaced: 'replaced' };
+  const stateWord = str(run.state, 40).toLowerCase();
+  const status = (NEW_STATE[stateWord] && stateWord !== 'paused' && stateWord !== 'needs_decision' ? NEW_STATE[stateWord] : '') || str(run.status || NEW_STATE[stateWord] || run.state, 40).toLowerCase();
   const s = stepsOf(run);
   const stepNo = s.total ? (s.at || Math.min((s.done || 0) + 1, s.total)) : null;
   const of = s.total ? ` — step ${stepNo} of ${s.total}` : '';
   const ofAt = s.total ? ` at step ${stepNo} of ${s.total}` : '';
   const problem = run.problem && typeof run.problem === 'object' ? run.problem : null;
-  const needsDecision = (status === 'paused' && !!(problem && (problem.record_id || problem.options))) || run.needs_decision === true;
+  // `needs_decision` (newer Akọwe) is the truth: an AI-error pause has a problem too, but nothing to decide.
+  const needsDecision = typeof run.needs_decision === 'boolean' ? run.needs_decision || stateWord === 'needs_decision'
+    : stateWord === 'needs_decision' || (status === 'paused' && !!(problem && (problem.record_id || problem.options)));
   let state; let text; let tone;
   if (status === 'running' || status === 'queued') { state = 'writing'; text = `Writing${of}`; tone = 'work'; }
   else if (status === 'waiting') { state = 'waiting'; text = `Waiting for an AI${of}`; tone = 'work'; }
@@ -72,12 +78,16 @@ function summarizeRun(run) {
   else if (status === 'interrupted') { state = 'interrupted'; text = `Stopped when Akọwe closed${of} — ▶ Resume`; tone = 'warn'; }
   else if (status === 'error' || status === 'failed') { state = 'problem'; text = `Stopped by a problem${of} — ▶ Resume to try again`; tone = 'err'; }
   else if (status === 'done' || status === 'finished' || status === 'complete' || status === 'completed') { state = 'finished'; text = 'Finished'; tone = 'ok'; }
-  else if (status === 'cancelled' || status === 'canceled') { state = 'cancelled'; text = `Cancelled${ofAt}`; tone = 'off'; }
+  else if (status === 'cancelled' || status === 'canceled') { state = run.replaced_by ? 'replaced' : 'cancelled'; text = run.replaced_by ? 'Not needed any more: a newer run of this book took over.' : `Cancelled${ofAt}`; tone = 'off'; }
+  else if (status === 'replaced') { state = 'replaced'; text = 'Not needed any more: a newer run of this book took over.'; tone = 'off'; }
   else { state = 'unknown'; text = str(run.phase, 160) || (status ? status.replace(/[_-]+/g, ' ') : 'Unknown'); tone = 'off'; }
+  // Akọwe's own sentence, shown as it is (with the step number in front while the run is not finished)
+  const words = str(run.state_words, 300);
+  if (words) text = state === 'finished' || state === 'replaced' || state === 'cancelled' || !stepNo ? words : `Step ${stepNo} of ${s.total}: ${words}`;
   return {
     id: str(run.id || run.run_id, 80) || null, project_id: str(run.project_id, 100) || null, title: str(run.title, 160),
     status, state, text, tone, done: s.done, total: s.total, at: s.at, stepTitle: s.stepTitle,
-    resumable: RESUMABLE.has(status) && !needsDecision, needsDecision, live: LIVE.has(status),
+    resumable: RESUMABLE.has(status) && !needsDecision && !run.replaced_by, needsDecision, live: LIVE.has(status),
     phase: str(run.phase, 200), problem: problem ? str(problem.message, 200) : '',
     updated_at: str(run.updated_at || run.finished_at || run.started_at, 40) || null,
   };
@@ -91,13 +101,16 @@ function pickRun(autobook, projectId) {
   const j = autobook && typeof autobook === 'object' ? autobook : {};
   const active = (Array.isArray(j.active) ? j.active : []).filter((r) => r && typeof r === 'object');
   const runs = (Array.isArray(j.runs) ? j.runs : []).filter((r) => r && typeof r === 'object');
-  const forBook = (r) => !projectId || !r.project_id || r.project_id === projectId;
+  const replaced = (r) => !!r.replaced_by || String(r.state || '') === 'replaced';
+  const forBook = (r) => !replaced(r) && (!projectId || !r.project_id || r.project_id === projectId);
+  // a newer Akọwe names the run that matters: `current` (the running one, else the newest not replaced)
+  if (j.current && typeof j.current === 'object' && forBook(j.current)) return j.current;
   const stamp = (r) => String(r.updated_at || r.finished_at || r.started_at || r.created_at || '');
   const newestFirst = (list) => list.slice().sort((a, b) => stamp(b).localeCompare(stamp(a)));
   const live = active.find(forBook) || runs.find((r) => forBook(r) && LIVE.has(String(r.status)));
   if (live) return live;
-  if (projectId) { const mine = newestFirst(runs.filter((r) => r.project_id === projectId)); if (mine.length) return mine[0]; }
-  return newestFirst(runs)[0] || null;
+  if (projectId) { const mine = newestFirst(runs.filter((r) => r.project_id === projectId && !replaced(r))); if (mine.length) return mine[0]; }
+  return newestFirst(runs.filter((r) => !replaced(r)))[0] || null;
 }
 
 /**

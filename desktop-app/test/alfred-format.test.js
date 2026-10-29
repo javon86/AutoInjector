@@ -130,6 +130,17 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'alfred-fmt-'));
     await a.pollBooks();
     const n = notes();
     assert(/finished/.test(n[n.length - 1].text) && !n[n.length - 1].outdated && n.slice(0, -1).every((m) => m.outdated && m.nowText === 'Finished'), 'finished: only “finished” is current; every older note about the run says “now: Finished”');
+    // a newer Akọwe: an AI-error pause is not a decision; a replaced run's notes become old news, nothing new is said
+    runs = [{ id: 'ab-9', status: 'running', title: 'B', project_id: 'p2', steps: steps(2, 'running') }];
+    await a.pollBooks();
+    runs = [Object.assign({}, runs[0], { status: 'paused', state: 'problem', needs_decision: false, problem: { record_id: 'r-2', message: 'The AI did not answer' } })];
+    await a.pollBooks();
+    const last = notes()[notes().length - 1];
+    assert(!/needs your decision/.test(last.text) && /paused/.test(last.text), `an AI-error pause is not “needs your decision”: “${last.text}”`);
+    const count = notes().length;
+    runs = [Object.assign({}, runs[0], { status: 'cancelled', state: 'replaced', replaced_by: 'ab-10' })];
+    await a.pollBooks();
+    assert(notes().length === count && notes()[count - 1].outdated && /newer run/.test(notes()[count - 1].nowText), 'replaced by a newer run: no new note, the old one is old news');
     a.notice('health', 'health:problem:SD_DOWN', '🩺 Stable Diffusion stopped answering.', { force: true });
     a.notice('health', 'health:fixed:SD_DOWN', '✔ Stable Diffusion answers again.', { force: true });
     const h = notes().filter((m) => m.kind === 'health');

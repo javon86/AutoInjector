@@ -53,6 +53,30 @@ const needsYou = Object.assign({}, interrupted, { status: "paused", pause_reason
     assert(runLib.summarizeRun(null) === null && runLib.summarizeRun("x") === null, "nothing -> null");
   }
 
+  console.log("\n== a newer Akọwe: state / state_words / needs_decision / steps_* / replaced_by (pc-akowe) ==");
+  {
+    const base = { id: "ab-1", project_id: PID, title: "T", steps_done: 6, steps_total: 16 };
+    const i = runLib.summarizeRun(Object.assign({}, base, { status: "interrupted", state: "interrupted", state_words: "Stopped because Akọwe was closed while it worked. Press ▶ Resume.", needs_you: true, needs_decision: false }));
+    assert(i.state === "interrupted" && i.text === "Step 7 of 16: Stopped because Akọwe was closed while it worked. Press ▶ Resume." && i.resumable, `state_words shown as they are, with the step: “${i.text}”`);
+    const aiErr = runLib.summarizeRun(Object.assign({}, base, { status: "paused", state: "problem", state_words: "Stopped on a problem. Press 🔁 Try again.", needs_decision: false, problem: { record_id: "r-1", code: "TIMEOUT", message: "The AI did not answer" } }));
+    assert(aiErr.state === "problem" && !aiErr.needsDecision && aiErr.resumable && aiErr.tone === "err", "an AI-error pause (problem.record_id but needs_decision false) is NOT “needs your decision”");
+    const dec = runLib.summarizeRun(Object.assign({}, base, { status: "paused", state: "needs_decision", state_words: "Paused: it needs your decision (approve anyway, edit it, or try again).", needs_decision: true, problem: { options: ["approve_anyway", "edit", "retry"] } }));
+    assert(dec.state === "needs_you" && dec.needsDecision && !dec.resumable, "needs_decision: the author decides (no Resume button)");
+    const done = runLib.summarizeRun(Object.assign({}, base, { status: "done", state: "done", state_words: "Finished: the book is made.", steps_done: 16 }));
+    assert(done.state === "finished" && done.text === "Finished: the book is made." && done.done === 16, "done: Akọwe's words, 16 of 16");
+    const rep = runLib.summarizeRun(Object.assign({}, base, { status: "cancelled", state: "replaced", replaced_by: "ab-2" }));
+    assert(rep.state === "replaced" && !rep.resumable && rep.tone === "off", "replaced: not resumable, grey");
+    const newer = Object.assign({}, base, { id: "ab-2", status: "done", state: "done" });
+    const old = Object.assign({}, base, { status: "cancelled", state: "replaced", replaced_by: "ab-2", updated_at: "2099-01-01T00:00:00Z" });
+    assert(runLib.pickRun({ runs: [old, newer], active: [], current: newer }, PID).id === "ab-2", "GET /api/autobook `current` is used");
+    assert(runLib.pickRun({ runs: [old, newer], active: [] }, PID).id === "ab-2", "without `current`: a replaced run is never picked, even if it looks newer");
+    const pushedOnly = runLib.createRunWatch({}).peek(PID, { id: "ab-3", state: "working", status: "running", state_words: "Working.", steps_done: 2, steps_total: 16 });
+    assert(pushedOnly && pushedOnly.text === "Step 3 of 16: Working.", `the run Akọwe pushes in /v1/status is shown without the API: “${pushedOnly && pushedOnly.text}”`);
+    const san = bridgeMod.sanitizeAkoweStatus({ app: "akowe", version: 1, checklist: [], done: 10, total: 10, run: { id: "ab-1", title: "T", state: "interrupted", state_words: "Stopped because Akọwe was closed while it worked. Press ▶ Resume.", status: "interrupted", needs_you: true, needs_decision: false, steps_done: 6, steps_total: 16, phase: "x", problem: { code: "X", message: "m", secret: 1 }, updated_at: 1700000000, finished_at: null, url: "http://127.0.0.1:8780/#/run/ab-1" } });
+    const sr = san.value.run;
+    assert(sr.state === "interrupted" && /Press ▶ Resume/.test(sr.state_words) && sr.needs_you === true && sr.needs_decision === false && sr.steps_total === 16 && sr.problem.message === "m" && !("secret" in sr.problem) && sr.url && sr.updated_at === 1700000000000, "the bridge keeps the pushed run's state, words, flags, steps, problem (sanitised) and url");
+  }
+
   console.log("\n== pickRun: the run of the book on show ==");
   {
     const other = Object.assign({}, finished, { id: "ab-0", project_id: "p-other", updated_at: "2026-10-29T10:00:00Z" });

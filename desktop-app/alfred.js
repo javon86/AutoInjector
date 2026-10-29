@@ -706,17 +706,20 @@ function createAlfred(deps = {}) {
     if (!run || !run.id) return;
     const prev = runSeen.get(run.id);
     runSeen.set(run.id, run.status);
-    // First sight of a run: quiet, unless it is already waiting for the author's decision.
-    if (prev === undefined && !(run.status === 'paused' && run.problem && run.problem.record_id)) return;
-    if (prev === run.status) return;
-    const name = run.title ? `“${String(run.title).slice(0, 80)}”` : 'your book';
     const sum = akoweRun.summarizeRun(run) || { text: String(run.status || '') };
     const ref = `run:${run.id}`;
+    // a run a newer one replaced (newer Akọwe: replaced_by / state "replaced"): its old notes are old news, nothing new
+    if (sum.state === 'replaced') { outdate(ref, sum.text); return; }
+    const needsDecision = !!sum.needsDecision;
+    // First sight of a run: quiet, unless it is already waiting for the author's decision.
+    if (prev === undefined && !needsDecision) return;
+    if (prev === run.status) return;
+    const name = run.title ? `“${String(run.title).slice(0, 80)}”` : 'your book';
     // whatever happens next, the older notes about this run are old news now
     outdate(ref, sum.text);
     const step = sum.total ? ` (step ${sum.at || Math.min((sum.done || 0) + 1, sum.total)} of ${sum.total})` : '';
     if (run.status === 'paused') {
-      const needs = run.problem && run.problem.record_id;
+      const needs = needsDecision;
       notice('book', `run-${run.id}-paused`, needs ? `📖 The book run for ${name} paused and needs your decision${step} (approve anyway / edit / try again) — open it in the 📖 Akọwe tab.` : `📖 The book run for ${name} paused${step}${run.problem && run.problem.message ? `: ${String(run.problem.message).slice(0, 160)}` : '.'}`, { ref });
     } else if (run.status === 'done') notice('book', `run-${run.id}-done`, `📖 The book run for ${name} finished.`, { ref, force: true });
     else if (run.status === 'interrupted') notice('book', `run-${run.id}-stop`, `📖 The book run for ${name} stopped when Akọwe closed${step}. Ask me "resume the book run" or press ▶ Resume in the 📚 Akọwe panel.`, { ref });
