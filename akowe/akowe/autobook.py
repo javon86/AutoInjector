@@ -518,15 +518,85 @@ class AutoBookService(_Runner):
 
     # ------------------------------------------------------------------ API
     def list(self, principal: str, limit: int = 20) -> list[dict]:
+        """The newest runs first; runs a newer run of the same book made unnecessary (``replaced_by``) come last, so
+        ``runs[0]`` is always the newest run that counts."""
         out = []
         for r in self.jobs.list(kind=self.KIND, limit=limit):
             if r.get("principal") in (None, principal):
                 out.append(self.public(self._cache.get(r["id"], r)))
-        return out
+        return [r for r in out if not r.get("replaced_by")] + [r for r in out if r.get("replaced_by")]
+
+    def current(self, principal: str, runs: list[dict] | None = None) -> dict | None:
+        """The run that matters now: the one working, else the newest run that was not replaced (any state)."""
+        act = [self.public(r) for r in self.active() if r.get("principal") in (None, principal)]
+        if act:
+            return act[0]
+        runs = self.list(principal) if runs is None else runs
+        return next((r for r in runs if not r.get("replaced_by")), None)
+
+    def run_state(self, run: dict) -> tuple[str, str]:
+        """(state, plain words): ONE word for where a run really stands, the same for the run window, the button in the
+        top bar, the jobs list, AutoInjector's Akọwe panel and Alfred. working | waiting | pausing | paused (by the
+        author) | needs_decision (the AI reviewer did not pass a draft: approve anyway / edit / try again) | problem
+        (stopped on a problem: try again) | interrupted (Akọwe was closed while it worked: Resume) | done | cancelled
+        | replaced (a newer run of the same book took over)."""
+        status, alive = run.get("status"), self.alive(run.get("id") or "")
+        prob = run.get("problem") or {}
+        if status == "done":
+            return "done", "Finished: the book is made."
+        if status == "cancelled":
+            if run.get("replaced_by"):
+                return "replaced", "Not needed any more: a newer run of this book took over."
+            return "cancelled", "Cancelled."
+        if status == "interrupted" or (status in ("queued", "running", "waiting", "pausing") and not alive):
+            return "interrupted", "Stopped because Akọwe was closed while it worked. Press ▶ Resume."
+        if status == "pausing":
+            return "pausing", "Pausing after the current answer."
+        if status == "waiting":
+            return "waiting", "Waiting for the AI."
+        if status in ("queued", "running"):
+            return "working", "Working."
+        if status == "paused":
+            if prob.get("record_id") or "approve_anyway" in (prob.get("options") or []):
+                return "needs_decision", "Paused: it needs your decision (approve anyway, edit it, or try again)."
+            if run.get("pause_reason") == "author":
+                return "paused", "Paused by you. Press ▶ Resume to continue."
+            return "problem", "Stopped on a problem. Press 🔁 Try again."
+        return str(status or "unknown"), str(status or "unknown")
+
+    def _retire_older(self, run: dict, why: str):
+        """Older runs of the same book that stopped part-way (paused, interrupted) are not needed once a newer run
+        finished the book or took over: they are marked replaced (status cancelled, ``replaced_by``), so no button,
+        list, AutoInjector or Alfred still says the book is paused or interrupted. Never raises."""
+        pid = run.get("project_id")
+        if not pid:
+            return
+        try:
+            for j in self.jobs.list(kind=self.KIND, project_id=pid, limit=100):
+                if j.get("id") == run["id"] or self.alive(j["id"]) or j.get("status") in ("done", "cancelled"):
+                    continue
+                old = self.get(j["id"]) or j
+                for s in old.get("steps") or []:
+                    if s.get("state") in ("running", "waiting", "paused"):
+                        s["state"] = "cancelled"
+                old.update(status="cancelled", replaced_by=run["id"], finished_at=old.get("finished_at") or now_iso(),
+                           waiting=None, old_status=old.get("status"),
+                           phase=f"Not needed any more: a newer run ({run['id']}) {why}.")
+                if old.get("problem"):
+                    old["old_problem"], old["problem"] = old["problem"], None
+                self.event(old, "replaced", f"Not needed any more: run {run['id']} {why}")
+                self.save(old)
+        except Exception:  # noqa: BLE001 - tidying up older runs never breaks this one
+            log.exception("could not mark the older runs of %s as replaced", pid)
 
     def public(self, run: dict) -> dict:
         out = dict(run)
         out["alive"] = self.alive(run["id"])
+        out["state"], out["state_words"] = self.run_state(run)
+        out["needs_you"] = out["state"] in ("paused", "needs_decision", "problem", "interrupted")
+        out["needs_decision"] = out["state"] == "needs_decision"
+        out["steps_done"] = sum(1 for s in run.get("steps") or [] if s.get("state") in ("done", "skipped"))
+        out["steps_total"] = len(run.get("steps") or [])
         out["elapsed_ms"] = _elapsed(run.get("started_at"), run.get("finished_at")) if run.get("started_at") else 0
         steps = []
         for s in run.get("steps") or []:
@@ -655,6 +725,8 @@ class AutoBookService(_Runner):
                        + ". They come into the NEW book as drafts and each one is reviewed and approved there under "
                        "your consent for this run; the chapters are written new.", step="backup", code="BIBLE_RERUN")
         self.save(run)
+        if settings.get("continue"):
+            self._retire_older(run, "continues this book")
         self._launch(run, self._run)
         return self.public(run)
 
@@ -952,8 +1024,11 @@ class AutoBookService(_Runner):
                 self.save(run)
                 if sid != STEP_IDS[-1]:  # the last step is followed by the run's own save (below)
                     self._autosave(run, reason=f"step {sid}")
-            run.update(status="done", finished_at=now_iso(), current=None, waiting=None,
+            run.update(status="done", finished_at=now_iso(), current=None, waiting=None, pause_reason=None,
                        phase="Your book is made — download it below")
+            if (run.get("problem") or {}).get("severity") != "warning":
+                run["problem"] = None  # a finished run has nothing left to decide
+            self._retire_older(run, "finished this book")
             self.event(run, "finished", "Your book is made: PDF, EPUB and Word files are ready")
             es = run.get("editor_summary") or {}
             if es.get("reviewed"):

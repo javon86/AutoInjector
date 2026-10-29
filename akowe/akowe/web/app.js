@@ -7227,7 +7227,8 @@ async function refreshRunChip() {
   let out;
   try { out = await api('GET', '/autobook'); } catch { return; }
   const live = (out.active || [])[0];
-  const pend = (out.runs || []).find(r => ['paused', 'interrupted', 'pausing'].includes(r.status));
+  // a run a newer run of the same book replaced (replaced_by) never makes the button say Paused / Interrupted
+  const pend = (out.runs || []).find(r => ['paused', 'interrupted', 'pausing'].includes(r.status) && !r.replaced_by);
   MB.latest = live || pend || null;
   const btn = $('#mab-btn'); if (!btn) return;
   const lab = btn.querySelector('.tb-label');
@@ -7238,8 +7239,8 @@ async function refreshRunChip() {
     lab.textContent = live.status === 'waiting' ? `Waiting… ${done}/${live.steps.length}` : `Making… ${done}/${live.steps.length}`;
     btn.setAttribute('aria-label', `Make a book for me: working, ${done} of ${live.steps.length} steps done. Open the progress window`);
   } else if (pend) {
-    lab.textContent = pend.status === 'interrupted' ? 'Interrupted' : 'Paused';
-    btn.setAttribute('aria-label', 'Make a book for me: paused, needs you. Open the progress window');
+    lab.textContent = pend.state === 'needs_decision' ? 'Needs you' : (pend.state === 'interrupted' || pend.status === 'interrupted') ? 'Interrupted' : 'Paused';
+    btn.setAttribute('aria-label', `Make a book for me${pend.title ? ` (“${pend.title}”)` : ''}: ${pend.state_words || 'paused, needs you.'} Open the progress window`);
   } else { lab.textContent = 'Make a book'; btn.setAttribute('aria-label', 'Make a book for me'); }
 }
 async function openMakeBook(opener, { runId = null, fresh = false } = {}) {
@@ -7398,7 +7399,8 @@ function renderRun() {
   const sig = JSON.stringify([r.status, r.phase, r.current, r.problem && r.problem.code, (r.waiting || {}).retry_at, r.steps.map(s => [s.state, s.message, s.review_note, s.editor_note, (s.items || []).map(i => [i.state, i.editor, i.scenes, i.phase, i.note, i.planned, i.length]), s.planned_note]), (r.files || []).length, r.ais, r.ai_alerts, r.review_summary, r.editor_summary, r.planned_summary, r.eta, r.report, r.save, r.costs && [r.costs.calls, r.costs.ais]]);
   if (sig === MB.sig && MB.dialog.querySelector('.mb-steps')) { updateRunClocks(); return; }
   MB.sig = sig;
-  const w = RUN_WORD[r.status] || ['?', r.status, 'b-muted'];
+  const w = r.state === 'replaced' ? ['↪', 'Replaced by a newer run', 'b-muted'] : r.state === 'interrupted' ? RUN_WORD.interrupted
+    : r.state === 'needs_decision' ? ['⏸', 'Paused — needs your decision', 'b-warn'] : RUN_WORD[r.status] || ['?', r.status, 'b-muted'];
   const done = r.steps.filter(s => s.state === 'done').length;
   const head = h('div', { class: 'mb-head' },
     h('div', null, h('p', { class: 'mb-book' }, r.title ? `“${r.title}”` : 'A new book', r.settings && r.settings.length ? h('span', { class: 'muted small' }, ` · ${(LENGTH_INFO[r.settings.length] || [''])[0]}`) : null),

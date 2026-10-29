@@ -233,6 +233,77 @@ def test_restart_shows_interrupted_and_resumes(tmp_path):
     assert app2.autobook.get(r["id"])["status"] == "done"
 
 
+def _interrupted_run(tmp_path, fake):
+    """A run that stopped part-way because Akọwe closed while it worked; returns (the restarted app, run id)."""
+    import threading
+    app = make_app(tmp_path, fake=fake)
+    fake.gate = threading.Event()
+    r = app.autobook.start("author", {"author_confirms": True})
+    assert fake.waiting.wait(30), "the run never asked the AI"
+    app.autobook.pause("author", r["id"])
+    fake.gate.set()
+    app.autobook.wait_for(r["id"], 60)
+    saved = app.autobook.get(r["id"])
+    saved["status"] = "running"  # Akọwe stopped in the middle of a step
+    app.jobstore.save(saved)
+    app.store.close()
+    fake.gate = None
+    return make_app(tmp_path, fake=fake), r["id"]
+
+
+def test_interrupt_resume_finish_says_done_everywhere(tmp_path):
+    """First real PC test (problem 4): a run interrupted when Akọwe closed, resumed to the end, must say Done in the
+    run, the run list, the jobs list and the status AutoInjector / Alfred read — never Paused or Interrupted."""
+    from akowe.status_push import build_summary
+    fake = BookFakeAI()
+    app, rid = _interrupted_run(tmp_path, fake)
+    run = app.autobook.public(app.autobook.get(rid))
+    assert run["state"] == "interrupted" and run["needs_you"] and not run["needs_decision"]
+    app.autobook.resume("author", rid)
+    app.autobook.wait_for(rid, 120)
+    run = app.autobook.public(app.autobook.get(rid))
+    assert run["status"] == "done" and run["state"] == "done" and not run["needs_you"]
+    assert run["steps_done"] == run["steps_total"] and run["pause_reason"] is None
+    assert (run.get("problem") or {}).get("severity") in (None, "warning")
+    out = app.route("GET", "/api/autobook", {}, None, "author", {})[1]
+    assert out["current"]["id"] == rid and out["current"]["state"] == "done"
+    assert not [r for r in out["runs"] if r["status"] in ("paused", "interrupted", "pausing")]
+    jobs = app.route("GET", "/api/jobs", {}, None, "author", {})[1]
+    assert [j["state"] for j in jobs["jobs"] if j["id"] == rid] == ["done"]
+    app.last_project = lambda: {"project_id": run["project_id"], "branch_id": "main"}
+    body = build_summary(app, "http://127.0.0.1:1/")
+    assert body["run"]["id"] == rid and body["run"]["state"] == "done" and body["run"]["needs_you"] is False
+    assert body["run"]["steps_done"] == body["run"]["steps_total"]
+
+
+def test_continuing_a_book_replaces_its_stopped_run(tmp_path):
+    """The older stopped run of a book is not left saying Interrupted / Paused (the button in the top bar, Alfred's
+    note) once ▶ Continue making this book takes over and finishes the book."""
+    fake = BookFakeAI()
+    app, old = _interrupted_run(tmp_path, fake)
+    pid = app.autobook.get(old)["project_id"]
+    assert pid
+    new = app.autobook.start("author", {"author_confirms": True, "continue_project": pid})
+    app.autobook.wait_for(new["id"], 120)
+    o = app.autobook.public(app.autobook.get(old))
+    assert o["status"] == "cancelled" and o["replaced_by"] == new["id"] and o["state"] == "replaced"
+    assert not o["needs_you"] and o.get("problem") is None
+    out = app.route("GET", "/api/autobook", {}, None, "author", {})[1]
+    assert out["runs"][0]["id"] == new["id"] and out["runs"][-1]["id"] == old
+    assert out["current"]["id"] == new["id"] and out["current"]["state"] == "done"
+    assert not [r for r in out["runs"] if r["status"] in ("paused", "interrupted", "pausing")]
+    with pytest.raises(AkoweError):
+        app.autobook.resume("author", old)
+    assert app.opener.opened(pid)["resumable_run"] is None
+
+
+def test_a_paused_decision_is_needs_decision(tmp_path):
+    app = make_app(tmp_path, fake=BookFakeAI(verdicts=["REVISE", "REVISE", "REJECT"]))
+    run = run_book(app)
+    assert run["state"] == "needs_decision" and run["needs_decision"] and run["needs_you"]
+    assert "decision" in run["state_words"]
+
+
 # ---------------------------------------------------------------------------------------------- S10 / TIMEOUT
 def test_retry_queue_waits_on_busy_then_succeeds(tmp_path):
     fake = BookFakeAI()
