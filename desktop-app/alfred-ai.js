@@ -116,6 +116,22 @@ async function chatWithTools({ endpoint, apiKey, model, messages, tools, timeout
 // than Alfred's tool list (~10k tokens): the model would silently lose its instructions and tools. Ollama's own
 // /api/chat takes options.num_ctx per request, so a local brain on Ollama uses it (falls back to /v1 otherwise).
 const nativeBases = new Map(); // base -> true (use /api/chat) | false (not Ollama: use /v1)
+// Speed (PC test: ~1½ min per answer on a local model). Ollama RELOADS the model whenever num_ctx changes, and a
+// reload also throws away its cached prompt (the ~11k-token tool list it would otherwise re-use between calls).
+// contextFor() grows in 4k steps with the conversation, so one question (ask -> tool -> answer) and the next could
+// each land on a different size: a reload + a full re-read of the tool list every time. The size is now STICKY per
+// server + model: it only ever grows (with a 4k head-room the first time), so after the first call it stays put.
+const ctxSticky = new Map();   // `${base}|${model}` -> num_ctx last used
+// A model that refused "tools" once (HTTP 400) is asked with the text protocol straight away from then on,
+// instead of a failing call + a retry on EVERY step.
+const noToolsModels = new Set(); // `${base}|${model}`
+function stickyContext(base, model, need) {
+  const key = `${base}|${String(model || '').toLowerCase()}`;
+  const prev = ctxSticky.get(key);
+  const want = prev ? Math.max(prev, need) : Math.min(32768, need + 4096);
+  ctxSticky.set(key, want);
+  return want;
+}
 const ollamaBase = (endpoint) => baseUrl(endpoint).replace(/\/v1$/, '');
 /** The context window a request needs: everything we send, with room for the answer, in 4k steps (8k–32k). */
 function contextFor(messages, tools) {
@@ -146,7 +162,7 @@ async function ollamaChat({ endpoint, model, messages, tools, timeoutMs, signal,
   let timedOut = false;
   const timer = setTimeout(() => { timedOut = true; controller.abort(); }, Math.max(1000, timeoutMs || 300000));
   try {
-    const body = { model, messages: toOllamaMessages(messages), stream: false, keep_alive: '30m', options: { num_ctx: contextFor(messages, tools), temperature: temperature == null ? 0.2 : temperature } };
+    const body = { model, messages: toOllamaMessages(messages), stream: false, keep_alive: '30m', options: { num_ctx: stickyContext(base, model, contextFor(messages, tools)), temperature: temperature == null ? 0.2 : temperature } };
     if (tools && tools.length) body.tools = tools;
     let res;
     try { res = await fetch(`${base}/api/chat`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: controller.signal }); }
@@ -241,17 +257,21 @@ async function next(cfg, messages, tools, deps = {}, opts = {}) {
   }
   if (cfg.kind === 'local') messages = withNoThink(messages, cfg.model);
   if (cfg.kind === 'local' && !cfg.noNative && await isOllama(cfg.endpoint)) {
-    let n = await ollamaChat({ endpoint: cfg.endpoint, model: cfg.model, messages, tools, timeoutMs: cfg.timeoutMs, signal: opts.signal });
-    if (!n.ok && n.noTools) {
+    const ntKey = `${ollamaBase(cfg.endpoint)}|${String(cfg.model || '').toLowerCase()}`;
+    const textOnly = () => {
       const m2 = messages.slice(); m2.splice(1, 0, { role: 'system', content: `${TEXT_PROTOCOL}\n\nTools:\n${toolCatalogText(tools)}` });
-      n = await ollamaChat({ endpoint: cfg.endpoint, model: cfg.model, messages: m2.map((m) => (m.role === 'tool' ? { role: 'user', content: `Result of ${m.name || 'the tool'}: ${m.content}` } : m)), tools: null, timeoutMs: cfg.timeoutMs, signal: opts.signal });
-    }
+      return ollamaChat({ endpoint: cfg.endpoint, model: cfg.model, messages: m2.map((m) => (m.role === 'tool' ? { role: 'user', content: `Result of ${m.name || 'the tool'}: ${m.content}` } : m)), tools: null, timeoutMs: cfg.timeoutMs, signal: opts.signal });
+    };
+    let n = noToolsModels.has(ntKey) && tools && tools.length ? await textOnly() : await ollamaChat({ endpoint: cfg.endpoint, model: cfg.model, messages, tools, timeoutMs: cfg.timeoutMs, signal: opts.signal });
+    if (!n.ok && n.noTools) { noToolsModels.add(ntKey); n = await textOnly(); }
     if (n.ok || !n.notOllama) return n;
     nativeBases.set(ollamaBase(cfg.endpoint), false); // not Ollama after all: use /v1 from now on
   }
   const base = { endpoint: cfg.endpoint, apiKey: cfg.apiKey, model: cfg.model, timeoutMs: cfg.timeoutMs, signal: opts.signal };
-  let r = await chatWithTools(Object.assign({ messages, tools }, base));
+  const ntKey = `${baseUrl(cfg.endpoint)}|${String(cfg.model || '').toLowerCase()}`;
+  let r = noToolsModels.has(ntKey) && tools && tools.length ? { ok: false, noTools: true } : await chatWithTools(Object.assign({ messages, tools }, base));
   if (!r.ok && r.noTools) {
+    noToolsModels.add(ntKey);
     // The model can't take "tools": explain the text protocol instead and ask again once.
     const m2 = messages.map((m) => (m.role === 'tool' ? { role: 'user', content: `Result of ${m.name || 'the tool'}: ${m.content}` } : m.role === 'assistant' && m.tool_calls ? { role: 'assistant', content: m.content || JSON.stringify({ tool: m.tool_calls[0].function.name, args: m.tool_calls[0].function.arguments }) } : m));
     m2.splice(1, 0, { role: 'system', content: `${TEXT_PROTOCOL}\n\nTools:\n${toolCatalogText(tools)}` });
@@ -260,4 +280,4 @@ async function next(cfg, messages, tools, deps = {}, opts = {}) {
   return r;
 }
 
-module.exports = { DEFAULT_LOCAL_BASE, chatUrl, baseUrl, chatWithTools, probe, next, normalizeMessage, panePrompt, textToolCall, TEXT_PROTOCOL, stripThinking, contextFor, toOllamaMessages, ollamaChat, isOllama, _resetOllamaCache: () => nativeBases.clear() };
+module.exports = { DEFAULT_LOCAL_BASE, chatUrl, baseUrl, chatWithTools, probe, next, normalizeMessage, panePrompt, textToolCall, TEXT_PROTOCOL, stripThinking, contextFor, toOllamaMessages, ollamaChat, isOllama, _resetOllamaCache: () => { nativeBases.clear(); ctxSticky.clear(); noToolsModels.clear(); }, stickyContext };

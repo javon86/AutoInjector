@@ -10,7 +10,7 @@ const tools = require('../alfred-tools');
 let passed = 0, failed = 0;
 function assert(c, m) { if (c) { passed++; console.log(`  ok   - ${m}`); } else { failed++; console.log(`  FAIL - ${m}`); } return c; }
 
-function fakeServer({ ollama = true, reply }) {
+function fakeServer({ ollama = true, reply, noTools = false }) {
   const st = { chats: [], v1: [] };
   const srv = http.createServer((req, res) => {
     let body = ''; req.on('data', (c) => { body += c; });
@@ -18,7 +18,7 @@ function fakeServer({ ollama = true, reply }) {
       const j = (() => { try { return JSON.parse(body || '{}'); } catch (_) { return {}; } })();
       const send = (code, o) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(o)); };
       if (ollama && req.url === '/api/version') return send(200, { version: '0.12.3' });
-      if (ollama && req.url === '/api/chat') { st.chats.push(j); return send(200, { model: j.model, message: reply(j) }); }
+      if (ollama && req.url === '/api/chat') { st.chats.push(j); if (noTools && j.tools) return send(400, { error: `registry.ollama.ai/library/${j.model} does not support tools` }); return send(200, { model: j.model, message: reply(j) }); }
       if (req.url === '/v1/chat/completions') { st.v1.push(j); return send(200, { choices: [{ message: { role: 'assistant', content: 'from v1' } }] }); }
       res.writeHead(404); res.end('404 page not found');
     });
@@ -68,6 +68,32 @@ function fakeServer({ ollama = true, reply }) {
   r = await ai.next({ kind: 'local', endpoint: v.ep, model: 'some-model', timeoutMs: 5000 }, msgs, all);
   assert(r.ok && v.st.v1.length === 1 && r.message.content === 'from v1', 'LM Studio / llama.cpp style servers still work through /v1');
   v.srv.close();
+
+  console.log('\n== speed: no model reloads, no needless round-trips (PC test: ~1½ min per answer) ==');
+  {
+    ai._resetOllamaCache();
+    const sp = await fakeServer({ reply: (j) => (j.messages.some((m) => m.role === 'tool') ? { role: 'assistant', content: 'Done.' } : { role: 'assistant', content: '', tool_calls: [{ function: { name: 'book_status', arguments: {} } }] }) });
+    const c = { kind: 'local', endpoint: sp.ep, model: 'qwen2.5:7b', timeoutMs: 5000 };
+    const base = [{ role: 'system', content: 'You are Alfred.' }, { role: 'user', content: 'status?' }];
+    await ai.next(c, base, all);
+    // the tool result makes the conversation bigger — before, this crossed into the next 4k step: a different
+    // num_ctx = Ollama reloads the model and re-reads the whole tool list
+    const big = base.concat([{ role: 'assistant', content: '', tool_calls: [{ id: 'c1', type: 'function', function: { name: 'book_status', arguments: '{}' } }] }, { role: 'tool', tool_call_id: 'c1', name: 'book_status', content: JSON.stringify({ ok: true, data: 'x'.repeat(14000) }) }]);
+    await ai.next(c, big, all);
+    await ai.next(c, base, all); // a new, short question after that
+    const sizes = sp.st.chats.map((x) => x.options.num_ctx);
+    assert(ai.contextFor(base, all) !== ai.contextFor(big, all), `(the two requests alone would ask for ${ai.contextFor(base, all)} and ${ai.contextFor(big, all)})`);
+    assert(sizes.length === 3 && sizes.every((n) => n === sizes[0]), `num_ctx stays the same for every call (${sizes.join(', ')}) — no reload between ask, tool result and the next question`);
+    sp.srv.close();
+    ai._resetOllamaCache();
+    const nt = await fakeServer({ noTools: true, reply: () => ({ role: 'assistant', content: '{"reply":"Hello."}' }) });
+    const c2 = { kind: 'local', endpoint: nt.ep, model: 'tinyllama', timeoutMs: 5000 };
+    let x = await ai.next(c2, base, all);
+    assert(x.ok && x.message.content === 'Hello.' && nt.st.chats.length === 2, 'a model without tool support: refused once, then asked with the text protocol');
+    x = await ai.next(c2, base, all);
+    assert(x.ok && nt.st.chats.length === 3 && !nt.st.chats[2].tools, 'the next step goes straight to the text protocol (one call, not a failing call + a retry)');
+    nt.srv.close();
+  }
 
   console.log('\n== a wrong call gets the right shape back ==');
   assert(tools.usage(tools.get('generate_video')).startsWith('generate_video({prompt?: string'), `usage: ${tools.usage(tools.get('generate_video'))}`);
