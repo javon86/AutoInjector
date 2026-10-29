@@ -207,6 +207,35 @@ def test_pause_resume_and_cancel(tmp_path):
         app.autobook.resume("author", r2["id"])
 
 
+@pytest.mark.parametrize("press", ["cancel", "pause"])
+def test_a_step_that_fails_because_it_was_stopped_obeys_the_author(tmp_path, press):
+    """CI race (PR #90): Cancel (or Pause) pressed while a step works; the interrupted step then fails on its own
+    (an AI call or a session swallowed the stop and found nothing made). The run must end Cancelled (or Paused by
+    the author) — never "paused on a problem" with a step marked failed."""
+    import threading
+    fake = BookFakeAI()
+    app = make_app(tmp_path, fake=fake)
+    fake.gate = threading.Event()
+    r = app.autobook.start("author", {"author_confirms": True})
+    assert fake.waiting.wait(30), "the run never asked the AI"
+    orig = fake._answer
+
+    def broken(ctx, props, schema):  # the call in flight comes back unusable after the stop
+        raise AkoweError("INVALID_INPUT", "/", "the answer was cut off", status="REJECTED")
+    fake._answer = broken
+    getattr(app.autobook, press)("author", r["id"])
+    fake.gate.set()
+    app.autobook.wait_for(r["id"], 60)
+    fake._answer = orig
+    run = app.autobook.public(app.autobook.get(r["id"]))
+    if press == "cancel":
+        assert run["status"] == "cancelled" and run["state"] == "cancelled", (run["status"], run.get("problem"))
+    else:
+        assert run["status"] == "paused" and run["pause_reason"] == "author" and run["state"] == "paused", \
+            (run["status"], run.get("pause_reason"), run.get("problem"))
+    assert not run.get("problem")
+
+
 def test_restart_shows_interrupted_and_resumes(tmp_path):
     import threading
     fake = BookFakeAI()

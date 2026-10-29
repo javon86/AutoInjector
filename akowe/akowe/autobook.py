@@ -1109,6 +1109,20 @@ class AutoBookService(_Runner):
     def _pause_problem(self, run, problem: dict):
         sid = run.get("current") or "backup"
         st = self._step(run, sid)
+        # The author pressed Cancel or Pause while this step was working: the step may have failed *because* it was
+        # interrupted (an AI call or a session swallowed the stop and the step then found nothing made). What the
+        # author asked for wins over that problem — never "paused on a problem" after a Cancel.
+        ctl = self._ctl.get(run["id"]) or {}
+        if threading.current_thread() is self._threads.get(run["id"]) and (ctl.get("cancel") or ctl.get("pause")):
+            if ctl.get("cancel"):
+                self._finish_cancel(run)
+            else:
+                if st["state"] in ("running", "waiting"):
+                    st["state"], st["message"] = "paused", "Paused by you"
+                run.update(status="paused", pause_reason="author", waiting=None,
+                           phase="Paused — press ▶ Resume to continue")
+            self.save(run)
+            return
         where = {"book": run.get("title") or "New book", "step": st["title"], "set": st.get("set"),
                  "set_name": SET_NAMES.get(st.get("set") or "", None), "op": problem.get("op") or st.get("op")}
         if problem.get("chapter_id"):
