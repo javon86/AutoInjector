@@ -280,6 +280,7 @@ function describeFile(file, kindHint, folderRoot) {
 }
 function itemId(kind, name) { return `${kind}:${String(name || '').replace(/\\/g, '/').split('/').pop().replace(/\.(safetensors|ckpt|pt|pth|bin|gguf)$/i, '').toLowerCase()}`; }
 
+const PREVIEW_VAE_DIR = /^(approx|vae[-_]?approx|vae[-_]?taesd|taesd)$/i;
 // Walk one folder (bounded depth / count) → [{file, kind}].
 function walk(root, kind, opts = {}) {
   const out = [];
@@ -290,7 +291,8 @@ function walk(root, kind, opts = {}) {
     let ents; try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch { continue; }
     for (const e of ents) {
       const full = path.join(dir, e.name);
-      if (e.isDirectory()) { if (depth < maxDepth && !e.name.startsWith('.')) stack.push([full, depth + 1]); continue; }
+      // a VAE folder's preview decoders ("stuff and thing"/models/vae/approx, A1111's VAE-approx / VAE-taesd) are not VAEs
+      if (e.isDirectory()) { if (depth < maxDepth && !e.name.startsWith('.') && !(kind === 'vae' && PREVIEW_VAE_DIR.test(e.name))) stack.push([full, depth + 1]); continue; }
       if (!e.isFile()) continue;
       const ext = path.extname(e.name).toLowerCase();
       if (!MODEL_EXT.has(ext)) continue;

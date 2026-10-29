@@ -51,6 +51,27 @@ async function main() {
   assert(r && r.ok === false && r.error === 'VIDEO_NOT_SET_UP' && /ComfyUI/.test(r.message + r.fix), `video:generate (legacy) → VIDEO_NOT_SET_UP in plain words (${r.message})`);
   const fsT = await call('video:full-status', {});
   assert(fsT.ok && !fsT.ready && /not set up/i.test(fsT.message) && fsT.models.length === 2, 'video:full-status says what is missing');
+  assert(fsT.localModels && fsT.localModels.framepack === false && !fsT.localModels.note, 'no FramePack files in "stuff and thing" → no FramePack note');
+  const fpFile = path.join(outputManager.modelsDir('framepack'), 'hub', 'models--lllyasviel--FramePackI2V_HY', 'snapshots', '86c', 'diffusion_pytorch_model-00001-of-00003.safetensors');
+  fs.mkdirSync(path.dirname(fpFile), { recursive: true }); fs.writeFileSync(fpFile, 'x');
+  const fsT2 = await call('video:full-status', {});
+  assert(fsT2.localModels.framepack && /FramePack models found/.test(fsT2.localModels.note) && /support is coming/.test(fsT2.localModels.note) && /video\/framepack\/hf/.test(fsT2.localModels.note), `video/framepack/hf has files → the Video tab says so (${fsT2.localModels.note})`);
+
+  console.log('\n== ComfyUI uses "stuff and thing" (extra_model_paths.yaml) ==');
+  let cu = await call('sd:comfy-use-stuff', {});
+  assert(!cu.ok && /No ComfyUI was found/.test(cu.message), 'no ComfyUI anywhere → said plainly');
+  const pc = path.join(TMP, 'sdhome', 'ComfyUI_windows_portable');
+  fs.mkdirSync(path.join(pc, 'ComfyUI'), { recursive: true }); fs.writeFileSync(path.join(pc, 'ComfyUI', 'main.py'), '');
+  fs.mkdirSync(path.join(pc, 'python_embeded'), { recursive: true }); fs.writeFileSync(path.join(pc, 'python_embeded', process.platform === 'win32' ? 'python.exe' : 'python'), '');
+  fs.writeFileSync(path.join(pc, 'ComfyUI', 'extra_model_paths.yaml'), 'mine:\n  base_path: D:/x\n  loras: l/\n');
+  cu = await call('sd:comfy-use-stuff', {});
+  const yml = fs.readFileSync(path.join(pc, 'ComfyUI', 'extra_model_paths.yaml'), 'utf8');
+  assert(cu.ok && /now uses the models in "stuff and thing"/.test(cu.message) && /^mine:\n  base_path: D:\/x\n  loras: l\/\n/.test(yml) && yml.includes(`base_path: ${JSON.stringify(outputManager.modelsRoot().replace(/\\/g, '/'))}`) && /\n  checkpoints: image\/\n/.test(yml), 'the app\'s own ComfyUI gets the autoinjector_stuff section; the user\'s section is kept');
+  fs.rmSync(pc, { recursive: true, force: true }); // the rest of this test needs "no ComfyUI yet"
+  const wo = await call('sd:open-workflows-folder', {});
+  assert(wo.ok && opened.includes(path.join(outputManager.root(), 'workflows')), '📂 Open workflows folder opens "stuff and thing"/workflows');
+  const mi = await call('models:info');
+  assert(mi.ok && Array.isArray(mi.folders) && mi.folders.find((f) => f.key === 'framepack').files === 1 && mi.folders.some((f) => f.key === 'ultralytics_bbox'), 'models:info (📦 Your models, Alfred) has the count per folder');
   const cat = await call('wizard:catalog');
   assert(cat.ok && cat.installers.video && cat.installers.video.inApp && cat.installers.video.models.length === 2, 'the setup wizard catalog lists 🎬 Video (in the app, two models)');
   const mods = await call('video:models');

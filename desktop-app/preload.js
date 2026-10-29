@@ -153,6 +153,9 @@ contextBridge.exposeInMainWorld("api", {
     workflowSave: (workflow) => ipcRenderer.invoke("sd:workflow-save", { workflow }),
     workflowDelete: (id) => ipcRenderer.invoke("sd:workflow-delete", { id }),
     workflowRun: (req) => ipcRenderer.invoke("sd:workflow-run", req),
+    openWorkflowsFolder: () => ipcRenderer.invoke("sd:open-workflows-folder"),
+    // ComfyUI (the app's own and Stability Matrix's) also uses the "stuff and thing" model folders (extra_model_paths.yaml)
+    comfyUseStuff: (id) => ipcRenderer.invoke("sd:comfy-use-stuff", { id }),
     capabilities: () => ipcRenderer.invoke("sd:capabilities"),
     // 🎨 two engines (Stable Diffusion / ChatGPT / Auto) + reference views & sheets (= POST /image/request)
     request: (req) => ipcRenderer.invoke("sd:request", req),

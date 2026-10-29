@@ -24,6 +24,8 @@
  *   r.installFinished(ok) — main.js calls it when sd-installer finishes; a Start pressed
  *                    during the install (phase 'waiting') then starts by itself
  *   r.start(target, { ckptDir }) — Forge / A1111 with --ckpt-dir <folder> (the user's models, when it had none)
+ *   r.start(target, { modelDirs }) — Forge / A1111 / SD.Next with the "stuff and thing" model folders that have
+ *                    files (--ckpt-dir(s), --lora-dir(s), --vae-dir(s), --embeddings-dir, … — see MODEL_ARGS)
  * Phases: idle · waiting (for the install) · starting · running · restarting · failed · stopped.
  * Errors: NO_TARGET | NO_PYTHON | INSTALLING | INSTALL_NOT_FINISHED | SPAWN_FAILED | HEALTH_TIMEOUT | CRASHED | UNSUPPORTED.
  *
@@ -132,6 +134,90 @@ function targets(opts = {}) {
   return list.sort((a, b) => (b.supported - a.supported) || ((rank[a.kind] ?? 9) - (rank[b.kind] ?? 9)));
 }
 
+// ------------------------------------------------------------ model folders on the command line
+// "stuff and thing"/models/<kind> → the WebUI's own option. The FIRST name the package understands is used.
+// Checked against the real argument lists (2026): A1111 (modules/cmd_args.py + extensions-builtin/*/preload.py):
+//   --ckpt-dir --vae-dir --embeddings-dir --lora-dir --lyco-dir-backcompat --esrgan-models-path
+//   --codeformer-models-path --gfpgan-models-path (+ --controlnet-dir from the sd-webui-controlnet extension);
+// Forge: the same + --text-encoder-dir --controlnet-dir; Forge Neo (sd-webui-forge-classic, neo): --ckpt-dirs
+//   --lora-dirs --vae-dirs --text-encoder-dirs (each may be given more than once) --embeddings-dir
+//   --esrgan-models-path --codeformer-models-path --gfpgan-models-path; SD.Next: --lora-dir --vae-dir
+//   --embeddings-dir (it has NO checkpoint-folder option — only its Settings page).
+// A1111 / Forge / SD.Next refuse to start on an option they don't know, so nothing is guessed: the package's own
+// source is read (acceptedArgs) and only those options are passed; the user's own options always win.
+const MODEL_ARGS = [
+  { key: 'image', args: ['--ckpt-dirs', '--ckpt-dir'] },
+  { key: 'diffusion_models', args: ['--ckpt-dirs'] }, // only where it can be ADDED next to the checkpoints (Forge Neo)
+  { key: 'loras', args: ['--lora-dirs', '--lora-dir'] },
+  { key: 'lycoris', args: ['--lyco-dir', '--lyco-dir-backcompat'], unlessKey: 'loras' }, // lycoris/ is inside loras/ (searched with it)
+  { key: 'vae', args: ['--vae-dirs', '--vae-dir'] },
+  { key: 'embeddings', args: ['--embeddings-dir'] },
+  { key: 'controlnet', args: ['--controlnet-dirs', '--controlnet-dir'] },
+  { key: 'text_encoders', args: ['--text-encoder-dirs', '--text-encoder-dir'] },
+  { key: 'upscale', args: ['--esrgan-models-path'] },
+  { key: 'faces', args: ['--codeformer-models-path'], has: /codeformer/i },
+  { key: 'faces', args: ['--gfpgan-models-path'], has: /gfpgan/i },
+];
+// When the package's source can't be read: only options these packages have had for years
+// (Forge Neo accepts these too — argparse takes "--ckpt-dir" as short for its "--ckpt-dirs").
+const FALLBACK_ARGS = {
+  a1111: ['--ckpt-dir', '--lora-dir', '--vae-dir', '--embeddings-dir'],
+  forge: ['--ckpt-dir', '--lora-dir', '--vae-dir', '--embeddings-dir'],
+  reforge: ['--ckpt-dir', '--lora-dir', '--vae-dir', '--embeddings-dir'],
+  sdnext: ['--lora-dir', '--vae-dir', '--embeddings-dir'],
+};
+const ARG_RE = /add_argument\(\s*["'](--[A-Za-z0-9][A-Za-z0-9_-]*)["']/g;
+function _argsIn(file, set) { let txt = ''; try { txt = fs.readFileSync(file, 'utf8'); } catch { return false; } for (const m of txt.matchAll(ARG_RE)) set.add(m[1]); return true; }
+/**
+ * The command-line options a WebUI package (A1111 / Forge / Forge Neo / SD.Next) understands, read from its own
+ * files: modules/cmd_args.py and the preload.py of its built-in extensions and of the
+ * enabled user extensions (config.json "disabled_extensions" / "disable_all_extensions" are respected).
+ * → Set of "--names", or null when there is no modules/cmd_args.py to read.
+ */
+function acceptedArgs(dir) {
+  if (!dir) return null;
+  const set = new Set();
+  if (!_argsIn(path.join(dir, 'modules', 'cmd_args.py'), set)) return null;
+  // (modules_forge/shared.py is NOT read: in Forge Neo it adds --controlnet-dir(s) to a pre-parser only, so the
+  //  strict main parser would refuse them. Forge has --controlnet-dir in cmd_args.py itself.)
+  let cfg = {}; try { cfg = JSON.parse(fs.readFileSync(path.join(dir, 'config.json'), 'utf8')) || {}; } catch {}
+  const disabled = new Set(Array.isArray(cfg.disabled_extensions) ? cfg.disabled_extensions : []);
+  const all = cfg.disable_all_extensions;
+  for (const [sub, builtin] of [['extensions-builtin', true], ['extensions', false]]) {
+    if (all === 'all' || (!builtin && all === 'extra')) continue;
+    let ents = []; try { ents = fs.readdirSync(path.join(dir, sub), { withFileTypes: true }); } catch {}
+    for (const e of ents) if (e.isDirectory() && !disabled.has(e.name)) _argsIn(path.join(dir, sub, e.name, 'preload.py'), set);
+  }
+  return set;
+}
+/**
+ * The model-folder options for one WebUI start. dirs: { image, loras, lycoris, vae, … } (only folders with files).
+ * accepted: Set from acceptedArgs (null → FALLBACK_ARGS for the kind). user: the user's own args (they win: a
+ * kind the user already set — under either name — is left alone). → ['--ckpt-dir', '<path>', …]
+ */
+function modelDirArgs(kind, dirs, accepted, user, opts = {}) {
+  if (!dirs || kind === 'comfy') return [];
+  const ok = accepted || new Set(FALLBACK_ARGS[kind] || []);
+  const mine = new Set((user || []).map((a) => String(a).split('=')[0]));
+  const out = [];
+  const used = new Set();
+  const listFiles = opts.listFiles || ((p) => { try { return fs.readdirSync(p); } catch { return []; } });
+  for (const m of MODEL_ARGS) {
+    const p = dirs[m.key];
+    if (!p) continue;
+    if (m.args.some((a) => mine.has(a))) continue;
+    if (m.unlessKey && used.has(m.unlessKey)) continue;
+    if (m.has && !listFiles(p).some((n) => m.has.test(n))) continue;
+    const a = m.args.find((x) => ok.has(x));
+    if (!a) continue;
+    // a single-folder option is given once only (the first kind that wanted it)
+    if (!a.endsWith('dirs') && out.includes(a)) continue;
+    out.push(a, String(p));
+    used.add(m.key);
+  }
+  return out;
+}
+
 function defaultPort(kind) { return kind === 'comfy' ? 8188 : 7860; }
 // Safer start flags after repeated crashes (ComfyUI only): no CUDA malloc (the async
 // allocator crashes some driver / card combinations with 0xC0000005).
@@ -151,8 +237,15 @@ function launchSpec(t, port, opts = {}) {
   const extra = [];
   if (opts.safe) for (const f of safeFlagsFor(t)) extra.push(f);
   if (opts.cpu && t.kind === 'comfy' && !user.includes('--cpu')) extra.push('--cpu');
-  // "Restart Forge with my models": the folder the library found the user's checkpoints in (Forge / A1111 only)
-  if (opts.ckptDir && t.kind !== 'comfy' && !user.includes('--ckpt-dir')) extra.push('--ckpt-dir', String(opts.ckptDir));
+  // The "stuff and thing" model folders that have files (Forge / A1111 / SD.Next: only the options the package
+  // understands); "Restart Forge with my models" without a stuff-and-thing checkpoint: the folder the library
+  // found the user's checkpoints in.
+  if (t.kind !== 'comfy') {
+    const dirs = Object.assign({}, opts.modelDirs || {});
+    if (!dirs.image && opts.ckptDir) dirs.image = String(opts.ckptDir);
+    const accepted = t.acceptedArgs !== undefined ? t.acceptedArgs : acceptedArgs(t.dir);
+    extra.push(...modelDirArgs(t.kind, dirs, accepted, user));
+  }
   if (t.portable) {
     const args = ['-s', t.launchCommand, '--windows-standalone-build', '--port', String(port), ...user, ...extra];
     return { cmd: t.python, args, cwd: t.dir, env };
@@ -292,7 +385,7 @@ function createSdRunner(opts = {}) {
     if (!t.supported) return fail('UNSUPPORTED', `${t.label || 'This package'} can't be driven by AutoInjector. Add “SD WebUI Forge” or “ComfyUI” in Stability Matrix.`);
     current = t; stopping = false; gen++;
     const myGen = gen;
-    mode = { cpu: !!(so.cpu || opts.cpu), safe: false, ckptDir: so.ckptDir ? String(so.ckptDir) : '' };
+    mode = { cpu: !!(so.cpu || opts.cpu), safe: false, ckptDir: so.ckptDir ? String(so.ckptDir) : '', modelDirs: so.modelDirs && typeof so.modelDirs === 'object' ? Object.assign({}, so.modelDirs) : null };
     crashes = [];
     set({ phase: 'starting', error: null, cause: null, fix: '', actions: [], crash: null, tried: [], message: `Starting ${t.label}${mode.cpu ? ' on the processor' : ''}…`, restarts: so.keepRestarts ? st.restarts : 0, kind: t.kind === 'comfy' ? 'comfy' : 'a1111', mode: mode.cpu ? 'cpu' : null });
     // Already running (started by hand / by Stability Matrix)? Use it.
@@ -326,7 +419,7 @@ function createSdRunner(opts = {}) {
       if (t.portable) return fail('NO_PYTHON', `${t.label}'s install is not finished (its Python is missing). Press ⬇ Install Stable Diffusion to finish it — or, if it is installing now, wait: it starts by itself when the install finishes.`);
       return fail('NO_PYTHON', `${t.label}'s Python was not found (${t.python || 'no venv folder'}). Start it once from Stability Matrix so it finishes installing, then try again.`);
     }
-    const spec = launchSpec(t, port, { cpu: mode.cpu, safe: mode.safe, ckptDir: mode.ckptDir, env: opts.env });
+    const spec = launchSpec(t, port, { cpu: mode.cpu, safe: mode.safe, ckptDir: mode.ckptDir, modelDirs: mode.modelDirs, env: opts.env });
     let c;
     try { c = spawnFn(spec.cmd, spec.args, { cwd: spec.cwd, env: spec.env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }); }
     catch (e) { return fail('SPAWN_FAILED', `${t.label} could not be started (${(e && e.code) || 'error'}). Details are in the log.`); }
@@ -433,4 +526,4 @@ function createSdRunner(opts = {}) {
   return { start, stop, status, killNow, installFinished, isBusy: () => !!inflight || BUSY.has(st.phase) || st.phase === 'waiting', isOwnedAlive: () => !!(child && !child.__exited), logFile: o.logFile };
 }
 
-module.exports = { createSdRunner, findSmPackages, targets, launchSpec, safeFlagsFor, SAFE_FLAGS, smArgs, kindOfPackage, redact, redactOutput, pushTail, usefulTail, venvPythonOf, defaultPort, portFree, DEFAULTS, INSTALLING_MSG };
+module.exports = { acceptedArgs, modelDirArgs, MODEL_ARGS, FALLBACK_ARGS, createSdRunner, findSmPackages, targets, launchSpec, safeFlagsFor, SAFE_FLAGS, smArgs, kindOfPackage, redact, redactOutput, pushTail, usefulTail, venvPythonOf, defaultPort, portFree, DEFAULTS, INSTALLING_MSG };
