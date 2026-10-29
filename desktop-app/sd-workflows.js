@@ -17,6 +17,10 @@
  * Unknown names are refused (UNKNOWN_PARAM, with the names this workflow has).
  *
  * createWorkflowStore({ dir }) keeps saved workflows as <dir>/<id>.json.
+ * createWorkflowStore({ dir, extraDir }) also lists every plain ComfyUI workflow .json in extraDir ("stuff and
+ * thing"/workflows — e.g. the ones moved from Stability Matrix's Data\Workflows): an "Export (API)" one can be
+ * run like a saved one (id "folder:<file name>"); a normal (UI) save is listed with the hint to open it in
+ * ComfyUI (or export it as API there), never changed.
  */
 const fs = require('fs');
 const path = require('path');
@@ -139,6 +143,30 @@ function _slug(s) { return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, 
 
 function createWorkflowStore(o = {}) {
   const dir = o.dir;
+  const extraDir = typeof o.extraDir === 'function' ? o.extraDir : () => o.extraDir || null;
+  const FOLDER = 'folder:';
+  // Plain workflow files in the extra folder → records (API ones runnable; UI ones listed with a hint).
+  function readFolder() {
+    const d = extraDir();
+    if (!d) return [];
+    let names = []; try { names = fs.readdirSync(d).filter((n) => /\.json$/i.test(n)); } catch { return []; }
+    const out = [];
+    for (const n of names) {
+      const file = path.join(d, n);
+      let j = null; try { const st = fs.statSync(file); if (st.size > 20 * 1024 * 1024) continue; j = JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, '')); } catch { j = null; }
+      const base = { id: FOLDER + n, name: n.replace(/\.json$/i, ''), file, folder: true, description: '' };
+      if (j && j.workflow && typeof j.workflow === 'object' && !isUiFormat(j.workflow)) { const c = checkWorkflow(j.workflow); if (c.ok) { out.push(Object.assign(base, { name: j.name || base.name, description: j.description || '', workflow: c.workflow, bindings: j.bindings || {} })); continue; } }
+      if (isUiFormat(j)) { out.push(Object.assign(base, { ui: true, workflow: null, bindings: {} })); continue; }
+      const c = j ? checkWorkflow(j) : null;
+      if (c && c.ok) out.push(Object.assign(base, { workflow: c.workflow, bindings: {} }));
+      else out.push(Object.assign(base, { broken: true, workflow: null, bindings: {} }));
+    }
+    return out.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  }
+  function folderSummary(r) {
+    if (r.workflow) return Object.assign(summary(r), { folder: true, file: r.file });
+    return { id: r.id, name: r.name, description: r.ui ? 'Saved in ComfyUI\'s normal format — open it in ComfyUI, or there use Workflow → Export (API) and put that file here to run it from AutoInjector.' : 'Not a ComfyUI workflow AutoInjector can read.', savedAt: null, nodes: 0, params: [], outputs: 0, folder: true, file: r.file, ui: !!r.ui, runnable: false };
+  }
   const file = (id) => path.join(dir, `${_slug(id)}.json`);
   function readAll() {
     let names = []; try { names = fs.readdirSync(dir).filter((n) => n.endsWith('.json')); } catch { return []; }
@@ -149,9 +177,16 @@ function createWorkflowStore(o = {}) {
   function summary(r) { return { id: r.id, name: r.name, description: r.description || '', savedAt: r.savedAt, nodes: Object.keys(r.workflow).length, params: paramNames(r.workflow, r.bindings), outputs: Object.values(r.workflow).filter((n) => /Save|Preview/.test(n.class_type)).length }; }
   return {
     dir,
-    list() { return { ok: true, workflows: readAll().map(summary) }; },
+    extraDir,
+    list() { return { ok: true, workflows: readAll().map(summary).concat(readFolder().map(folderSummary)), folder: extraDir() || null }; },
     get(idOrName) {
       const k = String(idOrName || '');
+      if (k.startsWith(FOLDER)) {
+        const f = readFolder().find((x) => x.id === k);
+        if (!f) return { ok: false, error: 'NO_WORKFLOW', code: 'NO_WORKFLOW', message: `There's no workflow file “${k.slice(FOLDER.length)}” in the workflows folder.` };
+        if (!f.workflow) return f.ui ? { ok: false, error: 'UI_FORMAT', code: 'UI_FORMAT', message: `“${f.name}” is ComfyUI's normal (UI) save, so AutoInjector can't run it.`, hint: 'Open it in ComfyUI (drag the file in), then Workflow → Export (API) and put that file in the workflows folder.' } : { ok: false, error: 'BAD_WORKFLOW', code: 'BAD_WORKFLOW', message: `“${f.name}” is not a ComfyUI workflow.` };
+        return Object.assign({ ok: true }, f, { params: paramNames(f.workflow, f.bindings) });
+      }
       const r = readAll().find((x) => x.id === k || x.id === _slug(k) || String(x.name).toLowerCase() === k.toLowerCase());
       return r ? Object.assign({ ok: true }, r, { params: paramNames(r.workflow, r.bindings) }) : { ok: false, error: 'NO_WORKFLOW', code: 'NO_WORKFLOW', message: `There's no saved workflow called “${k}”.`, hint: 'sd.workflows.list() shows the saved ones.' };
     },
@@ -171,6 +206,7 @@ function createWorkflowStore(o = {}) {
       return { ok: true, workflow: summary(out) };
     },
     remove(id) {
+      if (String(id || '').startsWith(FOLDER)) return { ok: false, error: 'IN_FOLDER', code: 'IN_FOLDER', message: 'That workflow is a file in the "stuff and thing"/workflows folder — remove it there (📂 Open workflows folder).' };
       const g = this.get(id);
       if (!g.ok) return g;
       try { fs.unlinkSync(file(g.id)); } catch (e) { return { ok: false, error: 'DELETE_FAILED', message: String(e.message || e) }; }

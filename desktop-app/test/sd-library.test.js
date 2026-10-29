@@ -187,6 +187,27 @@ async function main() {
   assert(created.every((p) => p.startsWith(path.join(tmp, 'userdata')) || p.startsWith(lib2dir) || p.startsWith(env.APPDATA)), 'nothing new was written next to the models — only AutoInjector\'s own sd-library.json');
   assert(JSON.parse(fs.readFileSync(store, 'utf8')).version === 1, 'the library is one JSON file in AutoInjector\'s data folder');
 
+  console.log('\n== "stuff and thing" model folders are scanned (after the Stability Matrix move) ==');
+  {
+    const om = require('../output-manager');
+    const app = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlib-stuff-'));
+    om.init(app);
+    writeSafetensors(path.join(om.modelsDir('image'), 'zavychromaxl_v100.safetensors'), null, { 'conditioner.embedders.1.model.ln_final.weight': { dtype: 'F16', shape: [2], data_offsets: [0, 4] } });
+    writeSafetensors(path.join(om.modelsDir('lycoris'), 'blackSkinV1.safetensors'), { ss_base_model_version: 'sdxl_base_v1-0' }, { 'lora_unet_x.hada_w1_a': { dtype: 'F16', shape: [2], data_offsets: [0, 4] } });
+    writeSafetensors(path.join(om.modelsDir('vae'), 'qwen_image_vae.safetensors'), null, { 'decoder.conv_in.weight': { dtype: 'F16', shape: [2], data_offsets: [0, 4] } });
+    fs.writeFileSync(path.join(om.modelsDir('vae_approx'), 'model.pt'), Buffer.alloc(64));
+    writeSafetensors(path.join(om.modelsDir('embeddings'), 'negative_hand.safetensors'), null, { emb_params: { dtype: 'F32', shape: [8, 768], data_offsets: [0, 4] } });
+    const sl = L.createLibrary({ storePath: path.join(app, 'lib.json'), env: {}, findStabilityMatrix: () => [], defaultFolders: () => om.libraryFolders() });
+    sl.scan();
+    const items = sl.list({ limit: 100 }).items;
+    const it = (n) => items.find((x) => x.name === n);
+    assert(it('zavychromaxl_v100') && it('zavychromaxl_v100').kind === 'checkpoint' && /stuff and thing/.test(it('zavychromaxl_v100').source), 'a checkpoint in models/image is found (source: "stuff and thing")');
+    assert(it('blackSkinV1') && it('blackSkinV1').kind === 'lora', 'a LyCORIS in models/loras/lycoris is listed with the LoRAs');
+    assert(it('qwen_image_vae') && it('qwen_image_vae').kind === 'vae' && it('negative_hand') && it('negative_hand').kind === 'embedding', 'VAEs and embeddings are found');
+    assert(!items.some((x) => x.name === 'model' && x.kind === 'vae'), 'the preview decoder in models/vae/approx is NOT offered as a VAE');
+    fs.rmSync(app, { recursive: true, force: true });
+  }
+
   fs.rmSync(tmp, { recursive: true, force: true });
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

@@ -6171,7 +6171,8 @@ function sdLibrary() {
     storePath: path.join(userDataDir(), "sd-library.json"),
     defaultFolders: () => {
       const out = [];
-      try { out.push({ path: outputManager.modelsDir("image"), kind: "checkpoint" }, { path: outputManager.modelsDir("loras"), kind: "lora" }); } catch (_) {}
+      // "stuff and thing": image/ (checkpoints), loras/ (+ lycoris/), vae/, embeddings/
+      try { out.push(...outputManager.libraryFolders()); } catch (_) {}
       try { const pt = sdInstallerInst().portable(); if (pt) out.push({ path: pt.models, kind: "auto", source: "ComfyUI (installed by AutoInjector)" }); } catch (_) {}
       return out;
     },
@@ -6284,6 +6285,7 @@ function sdStudio() {
     log: (t, d) => logEvent(t, d),
     fileUrl: (p) => { try { return pathToFileURL(p).href; } catch (_) { return ""; } },
     workflowsDir: () => path.join(userDataDir(), "sd-workflows"),
+    workflowFilesDir: () => outputManager.workflowsDir(), // "stuff and thing"/workflows: plain ComfyUI .json files
     canRestartWithModels: () => sdTargets().some((t) => t.supported && t.kind !== "comfy"),
   });
   return _sdStudio;
@@ -6305,6 +6307,7 @@ ipcMain.handle("sd:cancel", sdSafe(() => sdStudio().cancel()));
 ipcMain.handle("sd:gallery", sdSafe((a) => sdStudio().gallery(a.limit)));
 ipcMain.handle("sd:record", sdSafe((a) => sdStudio().record(a.path)));
 ipcMain.handle("sd:open-images-folder", sdSafe(async () => { const err = await shell.openPath(outputManager.imagesDir()); return err ? { ok: false, error: err } : { ok: true }; }));
+ipcMain.handle("sd:open-workflows-folder", sdSafe(async () => { const d = outputManager.workflowsDir(); const err = await shell.openPath(d); return err ? { ok: false, error: err } : { ok: true, path: d }; }));
 ipcMain.handle("sd:open-ui", sdSafe(async () => { const b = imageProvider.status().base; if (!b) return { ok: false, error: "NO_ENDPOINT" }; await shell.openExternal(b); return { ok: true }; }));
 ipcMain.handle("sd:show-file", sdSafe((a) => { if (a.path) shell.showItemInFolder(a.path); return { ok: true }; }));
 // Everything beyond txt2img (sd-control.js / sd-workflows.js via sd-studio.js).
@@ -6394,7 +6397,7 @@ function sdInstallerInst() {
   try { comfyChoice = foldersMod.pickComfyHome({ stuffDir: outputManager.root() || path.join(contentBaseFolder(), "stuff and thing"), legacyHome: sdInstallerMod.defaultHome(), envHome: process.env.AUTOINJECTOR_SD_HOME || null }); } catch (_) { comfyChoice = { home: process.env.AUTOINJECTOR_SD_HOME || sdInstallerMod.defaultHome(), where: "legacy" }; }
   logEvent("comfy-home", { where: comfyChoice.where });
   let lastPhase = null;
-  _sdInstaller = sdInstallerMod.createInstaller({ home: comfyChoice.home, log: (k, d) => logEvent(k, d), onChange: (st) => {
+  _sdInstaller = sdInstallerMod.createInstaller({ home: comfyChoice.home, log: (k, d) => logEvent(k, d), stuffModels: () => outputManager.modelsRoot(), onChange: (st) => {
     broadcast("sd-install", st);
     // A Start pressed during the install starts now (or says the install stopped).
     if (st.phase !== lastPhase && _sdRunner && _sdRunner.status().phase === "waiting") {
@@ -6432,7 +6435,11 @@ async function sdStart(targetId, so = {}) {
     if (so.cpu && r.status().phase === "running" && r.status().owned) await r.stop();
     logEvent("sd-runner-begin", Object.assign({ target: t ? t.kind : null, source: t ? t.source : null }, so.cpu ? { cpu: true } : {}));
   }
-  const st = await r.start(t || null, so.cpu ? { cpu: true } : {});
+  // ComfyUI: make sure it reads "stuff and thing" too (extra_model_paths.yaml, our own section only).
+  if (t && t.kind === "comfy") comfyUseStuffFor(t);
+  // Forge / A1111 / SD.Next: the "stuff and thing" model folders that have files go on its command line
+  // (only the options that program understands — sd-runner reads its argument list; your own options win).
+  const st = await r.start(t || null, Object.assign(so.cpu ? { cpu: true } : {}, { modelDirs: stuffModelDirs() }));
   const out = { ok: st.phase === "running", runner: st, message: st.message };
   if (st.alreadyStarting) out.alreadyStarting = true;
   if (st.phase === "waiting") { out.waiting = true; out.error = "INSTALLING"; }
@@ -6455,7 +6462,11 @@ async function sdUseOtherBuild() {
 // --ckpt-dir "<the folder the library found the user's models in>". Only what AutoInjector started can be restarted.
 async function sdRestartWithModels() {
   const h = sdStudio().modelHelp();
-  if (!h.ckptDir) return { ok: false, error: "NO_MODELS_FOUND", message: h.fix };
+  // "stuff and thing" first: when its image/ folder has checkpoints, Forge gets ALL its model folders;
+  // else the folder the library found the user's checkpoints in (e.g. Stability Matrix's Data/Models/StableDiffusion).
+  const dirs = stuffModelDirs();
+  const ckptDir = dirs.image || h.ckptDir;
+  if (!ckptDir) return { ok: false, error: "NO_MODELS_FOUND", message: h.fix };
   const r = sdRunner();
   const st = r.status();
   if (r.isBusy()) return { ok: false, error: "BUSY", message: "Stable Diffusion is starting right now — wait until it is running or has stopped.", runner: st };
@@ -6463,17 +6474,37 @@ async function sdRestartWithModels() {
   const list = sdTargets().filter((t) => t.supported && t.kind !== "comfy");
   const t = list.find((x) => st.target && x.id === st.target.id) || list.find((x) => x.id === state.sdManaged.targetId) || list[0];
   if (!t) return { ok: false, error: "NO_TARGET", message: h.fix };
-  logEvent("sd-restart-with-models", { target: t.kind, files: h.files });
+  logEvent("sd-restart-with-models", { target: t.kind, files: h.files, stuff: Object.keys(dirs) });
   if (st.owned && st.phase === "running") await r.stop();
-  const s2 = await r.start(t, { ckptDir: h.ckptDir });
+  const s2 = await r.start(t, { modelDirs: dirs, ckptDir: dirs.image ? "" : h.ckptDir });
   if (s2.phase !== "running") return { ok: false, error: s2.error || "NOT_RUNNING", message: s2.message || `${t.label} did not start.`, runner: s2 };
   try { await sdStudio().connect(s2.base); } catch (_) {}
   const mc = await sdStudio().modelCheck();
   return mc.noModels
-    ? { ok: false, error: "NO_MODEL", message: `${t.label} restarted with ${h.ckptDir}, but it still lists no picture model. ${mc.fix || ""}`.trim(), runner: s2 }
+    ? { ok: false, error: "NO_MODEL", message: `${t.label} restarted with ${ckptDir}, but it still lists no picture model. ${mc.fix || ""}`.trim(), runner: s2 }
     : { ok: true, message: `✔ ${t.label} restarted with your models (${mc.checkpoints} found).`, runner: s2, checkpoints: mc.checkpoints };
 }
 ipcMain.handle("sd:restart-with-models", sdSafe(() => sdRestartWithModels()));
+// The "stuff and thing" model folders that hold files → { image, loras, vae, … } (sd-runner passes them to Forge & co).
+function stuffModelDirs() { try { return outputManager.modelDirsWithFiles(); } catch (_) { return {}; } }
+// The folder with ComfyUI's main.py for a ComfyUI target (the app's portable: <root>/ComfyUI; Stability Matrix: the package).
+function comfyDirOf(t) { if (!t || t.kind !== "comfy" || !t.dir) return null; const d = t.portable ? path.join(t.dir, "ComfyUI") : t.dir; return fs.existsSync(path.join(d, "main.py")) ? d : null; }
+function comfyUseStuffFor(t) {
+  const d = comfyDirOf(t);
+  if (!d) return { ok: false, error: "NO_COMFY", message: "That ComfyUI's folder was not found." };
+  let root = null; try { root = outputManager.modelsRoot(); } catch (_) {}
+  const r = sdInstallerMod.writeExtraModelPaths(d, root, { log: (k, x) => logEvent(k, Object.assign({ source: t.source }, x)) });
+  return Object.assign({ target: t.displayName || t.label, source: t.source }, r);
+}
+// "Let ComfyUI use my models": the app's own ComfyUI and every Stability Matrix ComfyUI (or the one with id) get the
+// "autoinjector_stuff:" section in extra_model_paths.yaml. Their other sections (Stability Matrix's own) are kept.
+ipcMain.handle("sd:comfy-use-stuff", sdSafe((a) => {
+  const list = sdTargets().filter((t) => t.kind === "comfy" && (!a.id || t.id === a.id));
+  if (!list.length) return { ok: false, error: "NO_COMFY", message: a.id ? "That ComfyUI was not found." : "No ComfyUI was found (neither AutoInjector's own nor one in Stability Matrix)." };
+  const results = list.map((t) => comfyUseStuffFor(t));
+  const okN = results.filter((r) => r.ok).length;
+  return { ok: okN > 0, results, message: okN ? `✔ ${results.filter((r) => r.ok).map((r) => r.target).join(", ")} ${okN === 1 ? "now uses" : "now use"} the models in "stuff and thing" (restart ComfyUI if it is running).` : (results[0] && results[0].message) || "It didn't work." };
+}));
 ipcMain.handle("sd:model-check", sdSafe(() => sdStudio().modelCheck()));
 ipcMain.handle("sd:targets", sdSafe(() => sdTargetsPublic()));
 ipcMain.handle("sd:start", sdSafe((a) => sdStart(a.id)));
@@ -6615,7 +6646,13 @@ ipcMain.handle("video:generate", videoSafe(async (a) => {
   return Object.assign({}, r, { preview: r.url || r.path || null });
 }));
 // The 🎬 Video tab.
-ipcMain.handle("video:full-status", videoSafe((a) => videoStatusFull({ fresh: !!a.fresh })));
+ipcMain.handle("video:full-status", videoSafe(async (a) => Object.assign({}, await videoStatusFull({ fresh: !!a.fresh }), { localModels: videoLocalModels() })));
+// Video model files in "stuff and thing" the engine doesn't use yet (FramePack's HunyuanVideo cache in video/framepack/hf).
+function videoLocalModels() {
+  let fp = null; try { fp = outputManager.modelsPath("framepack"); } catch (_) {}
+  let n = 0; try { n = fp ? outputManager.countModelFiles(fp).files : 0; } catch (_) { n = 0; }
+  return { framepack: n > 0, framepackFiles: n, framepackDir: fp, note: n > 0 ? `FramePack models found (${n} file${n === 1 ? "" : "s"} in "stuff and thing"/models/video/framepack/hf) — FramePack support is coming; the files are kept there.` : "" };
+}
 ipcMain.handle("video:models", videoSafe(() => videoStudio().models()));
 ipcMain.handle("video:capabilities", videoSafe(() => (videoApiMod.get() ? videoApiMod.get().capabilities() : { ok: false, error: "NOT_WIRED" })));
 ipcMain.handle("video:settings", videoSafe((a) => videoStudio().settings(a.patch || {})));

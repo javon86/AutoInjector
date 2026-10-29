@@ -37,6 +37,12 @@ const mk = (p, data) => { fs.mkdirSync(path.dirname(p), { recursive: true }); fs
   assert(rows[0].path === stuff && rows[0].inStuff, 'first: "stuff and thing"');
   assert(comfyRow && !comfyRow.inStuff && /Move into stuff and thing/.test(comfyRow.note) && comfyRow.bytes >= 4096, 'the older ComfyUI is marked as outside, with how to move it and its size');
   assert(rows.some((r) => /Settings/.test(r.what) && !r.inStuff) && !rows.some((r) => /Ollama's own app/.test(r.what)), 'settings listed (outside, on purpose); a missing Ollama folder is not');
+  assert(L.workflows === path.join(stuff, 'workflows') && L.modelDirs.ultralytics_segm === path.join(stuff, 'models', 'detectors', 'ultralytics', 'segm') && L.modelDirs.framepack === path.join(stuff, 'models', 'video', 'framepack', 'hf') && L.modelDirs.lycoris === path.join(stuff, 'models', 'loras', 'lycoris'), 'the layout knows every model folder + workflows/');
+  for (const rel of ['image', 'loras/lycoris', 'vae/approx', 'embeddings', 'controlnet', 'upscale', 'text_encoders', 'diffusion_models', 'clip_vision', 'ipadapter', 'detectors/ultralytics/bbox', 'detectors/ultralytics/segm', 'detectors/sams', 'faces', 'video/framepack/hf']) {
+    const r = rows.find((x) => x.path === path.join(stuff, 'models', ...rel.split('/')));
+    assert(r && r.inStuff && r.what.includes(`models/${rel}`), `"Where everything is" lists models/${rel}${r && r.note ? ` (${r.note})` : ''}`);
+  }
+  assert(rows.some((r) => r.path === path.join(stuff, 'workflows') && /workflow/i.test(r.what)), '"Where everything is" lists the ComfyUI workflows folder');
 
   console.log('\n== moving ComfyUI into "stuff and thing" ==');
   let m = await F.moveComfy({ from: legacy, to: L.comfyHome });

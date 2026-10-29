@@ -41,6 +41,40 @@ function main() {
   const inv = om.modelsInventory();
   assert(inv.root === om.modelsRoot() && inv.categories.image === 1 && inv.categories.llm === 0, "modelsInventory counts files per category (ignoring READMEs)");
 
+  console.log("\n== the Stability Matrix folder set (fixed names the transfer and the programs use) ==");
+  const want = ["image", "loras", "loras/lycoris", "vae", "vae/approx", "embeddings", "controlnet", "upscale", "text_encoders", "diffusion_models", "clip_vision", "ipadapter", "detectors/ultralytics/bbox", "detectors/ultralytics/segm", "detectors/sams", "faces", "video/framepack/hf", "llm", "voice", "assets"];
+  for (const rel of want) {
+    const d = path.join(om.modelsRoot(), ...rel.split("/"));
+    const readme = path.join(d, "README.txt");
+    assert(fs.existsSync(d) && fs.existsSync(readme) && fs.readFileSync(readme, "utf8").length > 40, `models/${rel}/ exists with a plain README`);
+  }
+  const smNames = { image: "StableDiffusion", loras: "Lora", "loras/lycoris": "LyCORIS", vae: "VAE", "vae/approx": "ApproxVAE", embeddings: "Embeddings", controlnet: "ControlNet", upscale: "ESRGAN", text_encoders: "TextEncoders", diffusion_models: "DiffusionModels", clip_vision: "ClipVision", ipadapter: "IpAdapter", "detectors/ultralytics/bbox": "Ultralytics", "detectors/sams": "Sams", faces: "insightface", "video/framepack/hf": "FramePack" };
+  for (const [rel, sm] of Object.entries(smNames)) assert(fs.readFileSync(path.join(om.modelsRoot(), ...rel.split("/"), "README.txt"), "utf8").includes(sm), `models/${rel}/README.txt names the Stability Matrix folder (${sm})`);
+  assert(/RealESRGAN, SwinIR, ScuNET, BSRGAN, LDSR, upscale_models/.test(fs.readFileSync(path.join(om.modelsDir("upscale"), "README.txt"), "utf8")), "upscale/ README lists every Stability Matrix upscaler folder");
+  assert(om.modelsDir("lycoris") === path.join(om.modelsRoot(), "loras", "lycoris") && om.modelsDir("ultralytics_bbox") === path.join(om.modelsRoot(), "detectors", "ultralytics", "bbox") && om.modelsDir("framepack") === path.join(om.modelsRoot(), "video", "framepack", "hf"), "modelsDir knows the nested folders");
+  assert(om.workflowsDir() === path.join(root, "workflows") && fs.existsSync(path.join(root, "workflows", "README.txt")), "workflows/ (ComfyUI workflow .json files) exists with a README");
+  assert(/models\/detectors\/ultralytics\/bbox\//.test(fs.readFileSync(path.join(root, "README.txt"), "utf8")) && /workflows\//.test(fs.readFileSync(path.join(root, "README.txt"), "utf8")), "the top README shows the whole folder set");
+  const mr = fs.readFileSync(path.join(om.modelsRoot(), "README.txt"), "utf8");
+  assert(/autoinjector_stuff/.test(mr) && /--lora-dir/.test(mr) && /video\/framepack\/hf\//.test(mr), "models/README explains Forge args + the ComfyUI section + every folder");
+
+  console.log("\n== what is in each folder (📦 Your models) and which folders the programs get ==");
+  fs.writeFileSync(path.join(om.modelsDir("loras"), "a.safetensors"), "x");
+  fs.writeFileSync(path.join(om.modelsDir("lycoris"), "b.safetensors"), "x");
+  fs.writeFileSync(path.join(om.modelsDir("lycoris"), "c.safetensors"), "x");
+  fs.writeFileSync(path.join(om.modelsDir("ultralytics_bbox"), "face_yolov8m.pt"), "x");
+  fs.mkdirSync(path.join(om.modelsDir("framepack"), "hub", "models--lllyasviel--FramePackI2V_HY", "snapshots", "86c"), { recursive: true });
+  fs.writeFileSync(path.join(om.modelsDir("framepack"), "hub", "models--lllyasviel--FramePackI2V_HY", "snapshots", "86c", "diffusion_pytorch_model-00001-of-00003.safetensors"), "x");
+  fs.writeFileSync(path.join(root, "workflows", "flow.json"), "{}");
+  const inv2 = om.modelsInventory();
+  const F = (k) => inv2.folders.find((f) => f.key === k);
+  assert(F("loras").files === 1 && F("lycoris").files === 2, "loras/ counts its own files, loras/lycoris/ its own (not double)");
+  assert(F("ultralytics_bbox").files === 1 && F("framepack").files === 1 && F("image").files === 1 && F("vae").files === 0, "nested folders are counted (YOLO bbox, FramePack's HF cache)");
+  assert(inv2.workflows === 1 && F("image").label && F("image").sm === "StableDiffusion", "workflows counted; each folder has a label + its Stability Matrix name");
+  const md = om.modelDirsWithFiles();
+  assert(md.image === om.modelsDir("image") && md.loras === om.modelsDir("loras") && md.lycoris === om.modelsDir("lycoris") && md.ultralytics_bbox && !md.vae && !md.embeddings && !md.llm, `only folders with model files are handed to the programs (${Object.keys(md).join(", ")})`);
+  const lf = om.libraryFolders();
+  assert(["checkpoint", "lora", "vae", "embedding"].every((k) => lf.some((f) => f.kind === k)) && lf.find((f) => f.kind === "vae").path === om.modelsDir("vae") && lf.every((f) => /stuff and thing/.test(f.source)), "the Model & LoRA library scans image/, loras/, vae/, embeddings/ of \"stuff and thing\"");
+
   console.log("\n== name sanitization blocks path traversal and illegal chars ==");
   assert(om.safeName("../../etc/passwd") === "etc passwd", "strips ../ and separators");
   assert(om.safeName("..") === "untitled", "a pure-traversal name falls back");

@@ -1470,7 +1470,8 @@
             </div>
           </div></details>
           <details class="sd-adv" id="sd-sec-wf" data-backend="comfy"><summary>ComfyUI workflow</summary><div class="sd-adv-body">
-            <div class="sd-row"><div><label class="sd-l" for="sd-wf-pick">Saved workflow</label><select id="sd-wf-pick"><option value="">(none saved yet)</option></select></div></div>
+            <div class="sd-row"><div><label class="sd-l" for="sd-wf-pick">Saved workflow</label><select id="sd-wf-pick"><option value="">(none saved yet)</option></select></div><button class="sd-fixed" id="btn-sd-wf-folder" title="Open the &quot;stuff and thing&quot;/workflows folder (ComfyUI workflow .json files)">📂 Open workflows folder</button></div>
+            <div class="sd-note" id="sd-wf-folder-note"></div>
             <div class="sd-note" id="sd-wf-params-list"></div>
             <label class="sd-l" for="sd-wf-params">Parameters (JSON) — empty "prompt" = the prompt above</label><textarea id="sd-wf-params" rows="2" placeholder='{ "seed": 42, "6.text": "…" }'></textarea>
             <button id="btn-sd-wf-run" style="margin-top:4px;">▶ Run workflow</button>
@@ -1655,6 +1656,7 @@
       </div>
     </div>
     <div id="vd-hint" role="note" hidden></div>
+    <div id="vd-local-models" class="sd-note" role="note" hidden></div>
 
     <div id="vd-view-make" class="sd-view" role="tabpanel" aria-labelledby="vd-sub-make">
       <div class="sd-card">
@@ -2065,6 +2067,13 @@
           <div id="content-others" class="content-others" hidden></div>
           <!-- 📁 where everything is (folders.js) -->
           <details id="folders-map-wrap" class="folders-map-wrap"><summary>📁 Where everything is</summary><div id="folders-map" class="folders-map"></div></details>
+          <!-- 📦 Your models: how many files each "stuff and thing"/models folder holds (output-manager.modelsInventory) -->
+          <div id="models-summary" class="models-summary" style="font-size:11px; margin:4px 0;">
+            <div style="font-weight:600; margin-bottom:2px;">📦 Your models</div>
+            <div id="models-summary-list">Checking…</div>
+            <div class="btns" style="margin:4px 0;"><button id="btn-comfy-use-stuff" title="Add an &quot;autoinjector_stuff:&quot; section to ComfyUI's extra_model_paths.yaml (AutoInjector's own ComfyUI and the one in Stability Matrix) so ComfyUI also uses these folders. Your other sections are kept.">🧩 Let ComfyUI use these models</button></div>
+            <div id="models-summary-msg" style="opacity:.8;"></div>
+          </div>
           <div id="models-inventory" style="font-size:11px; opacity:.8; margin:2px 0;"></div>
           <div id="models-ollama" style="font-size:11px; opacity:.8; margin:2px 0;"></div>
 

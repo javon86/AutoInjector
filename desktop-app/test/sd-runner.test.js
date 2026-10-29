@@ -52,6 +52,76 @@ async function main() {
   assert(R.launchSpec(byKind('fooocus'), 1) === null, 'no launch for unsupported packages');
   assert(R.redact('url?token=abc123 Bearer xyz.987 hf_abcdefghijklmnop --api-auth user:pass') === 'url?token=*** Bearer *** hf_*** --api-auth ***', 'log lines are scrubbed of tokens and passwords');
 
+  console.log('\n== "stuff and thing" model folders on the command line (only the options each package knows) ==');
+  {
+    const src = (dir, files) => { for (const [f, body] of Object.entries(files)) { fs.mkdirSync(path.dirname(path.join(dir, f)), { recursive: true }); fs.writeFileSync(path.join(dir, f), body); } return dir; };
+    const argsPy = (names) => names.map((n) => `parser.add_argument("${n}", type=str, default=None)`).join('\n') + '\n';
+    // A1111 (modules/cmd_args.py + built-in Lora / ScuNET extension preloads), as on GitHub
+    const a1 = src(path.join(tmp, 'pk-a1111'), { 'modules/cmd_args.py': argsPy(['--ckpt-dir', '--vae-dir', '--embeddings-dir', '--esrgan-models-path', '--codeformer-models-path', '--gfpgan-models-path']),
+      'extensions-builtin/Lora/preload.py': 'def preload(parser):\n    parser.add_argument("--lora-dir", type=str)\n    parser.add_argument(\n        "--lyco-dir-backcompat", type=str)\n',
+      'extensions/sd-webui-controlnet/preload.py': 'def preload(parser):\n    parser.add_argument("--controlnet-dir", type=str)\n' });
+    // Forge Neo: --ckpt-dirs / --lora-dirs / --vae-dirs / --text-encoder-dirs (append), no --lyco-dir; modules_forge/shared.py
+    // adds --controlnet-dir(s) to a PRE-parser only — never passed.
+    const neo = src(path.join(tmp, 'pk-neo'), { 'modules/cmd_args.py': argsPy(['--ckpt-dirs', '--lora-dirs', '--vae-dirs', '--text-encoder-dirs', '--embeddings-dir', '--esrgan-models-path']),
+      'modules_forge/shared.py': 'parser.add_argument(\n    "--controlnet-dir",\n)\nparser.add_argument("--controlnet-dirs", action="append")\n' });
+    const sdn = src(path.join(tmp, 'pk-sdnext'), { 'modules/cmd_args.py': "    p.add_argument(\"--models-dir\", type=str)\n    p.add_argument(\"--lora-dir\", type=str)\n    p.add_argument('--vae-dir', type=str)\n    p.add_argument(\"--embeddings-dir\", type=str)\n" });
+    assert(R.acceptedArgs(a1).has('--lyco-dir-backcompat') && R.acceptedArgs(a1).has('--controlnet-dir') && R.acceptedArgs(path.join(tmp, 'nothing-here')) === null, 'acceptedArgs reads cmd_args.py + extension preloads (multi-line too); no source → null');
+    fs.writeFileSync(path.join(a1, 'config.json'), JSON.stringify({ disabled_extensions: ['sd-webui-controlnet'] }));
+    assert(!R.acceptedArgs(a1).has('--controlnet-dir'), 'a disabled extension\'s options are not counted (A1111 would refuse them)');
+    fs.unlinkSync(path.join(a1, 'config.json'));
+    assert(!R.acceptedArgs(neo).has('--controlnet-dir'), 'Forge Neo: modules_forge/shared.py is not read (its --controlnet-dir is not on the strict parser)');
+    const M = path.join(tmp, 'stuff and thing', 'models');
+    const dirs = { image: path.join(M, 'image'), diffusion_models: path.join(M, 'diffusion_models'), loras: path.join(M, 'loras'), lycoris: path.join(M, 'loras', 'lycoris'), vae: path.join(M, 'vae'), embeddings: path.join(M, 'embeddings'), controlnet: path.join(M, 'controlnet'), text_encoders: path.join(M, 'text_encoders'), upscale: path.join(M, 'upscale'), faces: path.join(M, 'faces'), ultralytics_bbox: path.join(M, 'detectors', 'ultralytics', 'bbox') };
+    fs.mkdirSync(dirs.faces, { recursive: true }); fs.writeFileSync(path.join(dirs.faces, 'inswapper_128.onnx'), 'x'); fs.writeFileSync(path.join(dirs.faces, 'codeformer-v0.1.0.pth'), 'x');
+    const T = (kind, dir, extraArgs) => ({ id: 'x', kind, label: kind, supported: true, python: '/py', launchCommand: 'launch.py', dir, extraArgs: extraArgs || [] });
+    const pairs = (args) => { const o = {}; for (let i = 0; i < args.length; i++) if (/^--/.test(args[i]) && args[i + 1] && !/^--/.test(args[i + 1])) (o[args[i]] = o[args[i]] || []).push(args[i + 1]); return o; };
+    let p = pairs(R.launchSpec(T('a1111', a1), 7860, { modelDirs: dirs }).args);
+    assert(p['--ckpt-dir'][0] === dirs.image && p['--lora-dir'][0] === dirs.loras && p['--vae-dir'][0] === dirs.vae && p['--embeddings-dir'][0] === dirs.embeddings && p['--controlnet-dir'][0] === dirs.controlnet && p['--esrgan-models-path'][0] === dirs.upscale && p['--codeformer-models-path'][0] === dirs.faces, `A1111: ${Object.keys(p).join(' ')}`);
+    assert(!p['--lyco-dir-backcompat'] && !p['--gfpgan-models-path'] && !p['--text-encoder-dir'] && !p['--ckpt-dirs'] && p['--ckpt-dir'].length === 1, 'A1111: no option it lacks (text encoders), LyCORIS found inside --lora-dir, GFPGAN only when such a file is there, the diffusion_models folder is not crammed into --ckpt-dir');
+    p = pairs(R.launchSpec(T('a1111', a1), 7860, { modelDirs: { lycoris: dirs.lycoris } }).args);
+    assert(p['--lyco-dir-backcompat'] && p['--lyco-dir-backcompat'][0] === dirs.lycoris, 'A1111: LyCORIS alone (no LoRAs) → --lyco-dir-backcompat');
+    p = pairs(R.launchSpec(T('forge', neo), 7860, { modelDirs: dirs }).args);
+    assert(p['--ckpt-dirs'].join('|') === `${dirs.image}|${dirs.diffusion_models}` && p['--lora-dirs'][0] === dirs.loras && p['--vae-dirs'][0] === dirs.vae && p['--text-encoder-dirs'][0] === dirs.text_encoders && p['--embeddings-dir'][0] === dirs.embeddings && p['--esrgan-models-path'][0] === dirs.upscale, `Forge Neo: ${Object.keys(p).join(' ')}`);
+    assert(!p['--ckpt-dir'] && !p['--lora-dir'] && !p['--controlnet-dir'] && !p['--controlnet-dirs'] && !p['--codeformer-models-path'], 'Forge Neo: only its own (…-dirs) names — never one it would refuse');
+    p = pairs(R.launchSpec(T('sdnext', sdn), 7860, { modelDirs: dirs }).args);
+    assert(p['--lora-dir'] && p['--vae-dir'] && p['--embeddings-dir'] && !p['--ckpt-dir'] && !p['--models-dir'], 'SD.Next: LoRA / VAE / embeddings folders; it has no checkpoint-folder option, so none is passed');
+    const own = R.launchSpec(T('forge', neo, ['--ckpt-dirs', 'D:\\mine', '--xformers']), 7860, { modelDirs: dirs }).args;
+    assert(own.filter((a) => a === '--ckpt-dirs').length === 1 && own.includes('D:\\mine') && own.includes('--lora-dirs'), 'the user\'s own --ckpt-dirs wins (stuff and thing checkpoints are left out), the rest is still added');
+    assert(R.launchSpec(T('comfy', a1), 8188, { modelDirs: dirs }).args.join(' ') === 'launch.py --port 8188', 'ComfyUI gets no command-line folders (it reads extra_model_paths.yaml)');
+    p = pairs(R.launchSpec(T('forge', path.join(tmp, 'pk-unreadable')), 7860, { modelDirs: dirs }).args);
+    assert(Object.keys(p).sort().join(' ') === '--ckpt-dir --embeddings-dir --lora-dir --port --vae-dir', `source unreadable → only the long-standing options (${Object.keys(p).join(' ')})`);
+    p = pairs(R.launchSpec(T('forge', neo), 7860, { modelDirs: { loras: dirs.loras }, ckptDir: 'C:\\SM\\Data\\Models\\StableDiffusion' }).args);
+    assert(p['--ckpt-dirs'][0] === 'C:\\SM\\Data\\Models\\StableDiffusion', 'no checkpoints in "stuff and thing": the library\'s folder (ckptDir) is used, under the package\'s own name');
+  }
+
+  console.log('\n== ComfyUI: the "autoinjector_stuff:" section in extra_model_paths.yaml ==');
+  {
+    const cdir = path.join(tmp, 'SMComfy'); fs.mkdirSync(cdir, { recursive: true });
+    const yf = path.join(cdir, 'extra_model_paths.yaml');
+    const theirs = 'stability_matrix:\n  base_path: C:/SM/Data/Models\n  checkpoints: StableDiffusion\n  loras: |\n    Lora\n    LyCORIS\n\n# my own folders\nmine:\n  base_path: D:/models\n  checkpoints: ckpt/\n';
+    fs.writeFileSync(yf, theirs);
+    const stuffM = 'C:\\Users\\javon\\AutoInjector\\stuff and thing\\models';
+    let w = I.writeExtraModelPaths(cdir, stuffM);
+    let y = fs.readFileSync(yf, 'utf8');
+    assert(w.ok && w.changed && y.startsWith(theirs.trimEnd()) && /\nautoinjector_stuff:\n  base_path: "C:\/Users\/javon\/AutoInjector\/stuff and thing\/models"\n/.test(y), 'merged: the user\'s sections (Stability Matrix + their own + the comment) kept word for word, ours added');
+    for (const [k, v] of [['checkpoints', 'image/'], ['loras', 'loras/'], ['vae', 'vae/'], ['embeddings', 'embeddings/'], ['controlnet', 'controlnet/'], ['upscale_models', 'upscale/'], ['text_encoders', 'text_encoders/'], ['clip', 'text_encoders/'], ['diffusion_models', 'diffusion_models/'], ['unet', 'diffusion_models/'], ['clip_vision', 'clip_vision/'], ['ipadapter', 'ipadapter/'], ['ultralytics_bbox', 'detectors/ultralytics/bbox/'], ['ultralytics_segm', 'detectors/ultralytics/segm/'], ['sams', 'detectors/sams/'], ['insightface', 'faces/']]) assert(new RegExp(`\\n  ${k}: ${v.replace(/\//g, '\\/')}\\n`).test(y.slice(y.indexOf('autoinjector_stuff:'))), `autoinjector_stuff maps ${k} → ${v}`);
+    assert(fs.readFileSync(yf + '.autoinjector-backup', 'utf8') === theirs, 'the original file is backed up once');
+    w = I.writeExtraModelPaths(cdir, stuffM);
+    assert(w.ok && !w.changed && fs.readFileSync(yf, 'utf8') === y, 'written again: nothing changes (no second section)');
+    w = I.writeExtraModelPaths(cdir, 'E:\\moved\\stuff and thing\\models');
+    y = fs.readFileSync(yf, 'utf8');
+    assert(w.changed && (y.match(/autoinjector_stuff:/g) || []).length === 1 && /E:\/moved/.test(y) && !/C:\/Users\/javon/.test(y) && y.startsWith(theirs.trimEnd()), 'the folder moved: our ONE section is updated in place, theirs untouched');
+    const fresh = path.join(tmp, 'FreshComfy'); fs.mkdirSync(fresh, { recursive: true });
+    w = I.writeExtraModelPaths(fresh, stuffM);
+    assert(w.ok && w.created && /^# Written by AutoInjector/.test(fs.readFileSync(path.join(fresh, 'extra_model_paths.yaml'), 'utf8')), 'no file yet → created with only our section');
+    assert(!I.writeExtraModelPaths(path.join(tmp, 'no-comfy'), stuffM).ok, 'a missing ComfyUI folder → a plain error, nothing written');
+    // a section of ours in the MIDDLE (e.g. the user moved it) is replaced without eating the next section
+    fs.writeFileSync(yf, `a:\n  base_path: x\n\n${I.stuffSection('/old')}\nb:\n  base_path: y\n`);
+    I.writeExtraModelPaths(cdir, '/new');
+    y = fs.readFileSync(yf, 'utf8');
+    assert(/^a:\n  base_path: x\n/.test(y) && /\nb:\n  base_path: y\n/.test(y) && (y.match(/autoinjector_stuff:/g) || []).length === 1 && /"\/new"/.test(y) && !/"\/old"/.test(y), 'our section in the middle: replaced, the sections around it kept');
+  }
+
   console.log('\n== the managed process ==');
   const logFile = path.join(tmp, 'logs', 'sd.log');
   const events = []; const changes = [];

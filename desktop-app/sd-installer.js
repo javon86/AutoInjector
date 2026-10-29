@@ -360,6 +360,74 @@ function linkModels(comfyDir, modelsDir) {
   try { fs.writeFileSync(f, body); return true; } catch { return false; }
 }
 
+// ------------------------------------------------------------------ "stuff and thing" in ComfyUI
+// ComfyUI reads extra model folders from ComfyUI/extra_model_paths.yaml: top-level sections, each with a
+// base_path and "<folder kind>: <path under base_path>". AutoInjector keeps ONE section of its own,
+// "autoinjector_stuff:", pointing at "stuff and thing"/models; every other section (Stability Matrix's
+// "stability_matrix:", the user's own, comments) is kept exactly as it was.
+// ComfyUI kind → folder under models/. ComfyUI searches sub-folders too (so loras/ includes loras/lycoris/).
+// clip / unet are the old names of text_encoders / diffusion_models; ipadapter (ComfyUI_IPAdapter_plus),
+// ultralytics_bbox / ultralytics_segm / sams (Impact Pack), insightface / facerestore_models (ReActor, IPAdapter
+// FaceID) are custom nodes' kinds — a ComfyUI without them simply ignores those lines.
+const STUFF_SECTION = 'autoinjector_stuff';
+const STUFF_COMFY_KINDS = [
+  ['checkpoints', 'image'], ['loras', 'loras'], ['vae', 'vae'], ['vae_approx', 'vae/approx'], ['embeddings', 'embeddings'],
+  ['controlnet', 'controlnet'], ['upscale_models', 'upscale'], ['text_encoders', 'text_encoders'], ['clip', 'text_encoders'],
+  ['diffusion_models', 'diffusion_models'], ['unet', 'diffusion_models'], ['clip_vision', 'clip_vision'], ['ipadapter', 'ipadapter'],
+  ['ultralytics_bbox', 'detectors/ultralytics/bbox'], ['ultralytics_segm', 'detectors/ultralytics/segm'],
+  ['sams', 'detectors/sams'], ['insightface', 'faces'], ['facerestore_models', 'faces'],
+];
+function stuffSection(modelsRoot) {
+  const q = (p) => JSON.stringify(String(p).replace(/\\/g, '/'));
+  return [
+    `# Written by AutoInjector: ComfyUI also uses the models in "stuff and thing" (AutoInjector's folder).`,
+    `# AutoInjector only ever changes this section; the rest of the file is yours.`,
+    `${STUFF_SECTION}:`,
+    `  base_path: ${q(modelsRoot)}`,
+    ...STUFF_COMFY_KINDS.map(([k, rel]) => `  ${k}: ${rel}/`),
+  ].join('\n') + '\n';
+}
+// Take our section (and the two comment lines written above it) out of a YAML text; everything else stays.
+function removeStuffSection(text) {
+  const lines = String(text || '').replace(/\r\n/g, '\n').split('\n');
+  const out = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (new RegExp(`^${STUFF_SECTION}\\s*:\\s*(#.*)?$`).test(lines[i])) {
+      while (out.length && /^# (Written by AutoInjector: ComfyUI also uses|AutoInjector only ever changes this section)/.test(out[out.length - 1])) out.pop();
+      i++;
+      while (i < lines.length && (/^\s/.test(lines[i]) || lines[i] === '')) i++;
+      i--;
+      continue;
+    }
+    out.push(lines[i]);
+  }
+  while (out.length && out[out.length - 1] === '') out.pop();
+  return out.join('\n');
+}
+/**
+ * Write / update the "autoinjector_stuff:" section in <comfyDir>/extra_model_paths.yaml (comfyDir = the folder
+ * with ComfyUI's main.py). Merges: the user's other sections are never touched; a backup of the original file is
+ * kept once (extra_model_paths.yaml.autoinjector-backup). → { ok, changed, file, created } | { ok:false, error }
+ */
+function writeExtraModelPaths(comfyDir, modelsRoot, o = {}) {
+  const f = path.join(comfyDir, 'extra_model_paths.yaml');
+  try {
+    if (!comfyDir || !fs.existsSync(comfyDir)) return { ok: false, error: 'NO_COMFY', message: 'That ComfyUI folder was not found.' };
+    if (!modelsRoot) return { ok: false, error: 'NO_MODELS', message: 'The "stuff and thing" models folder is not ready.' };
+    let old = null;
+    try { old = fs.readFileSync(f, 'utf8'); } catch { old = null; }
+    const kept = old == null ? '' : removeStuffSection(old.replace(/^\uFEFF/, ''));
+    const next = (kept ? kept + '\n\n' : '') + stuffSection(modelsRoot);
+    if (old != null && old.replace(/\r\n/g, '\n') === next) return { ok: true, changed: false, file: f };
+    if (old != null) { const bak = f + '.autoinjector-backup'; if (!fs.existsSync(bak)) fs.writeFileSync(bak, old); }
+    const tmp = `${f}.tmp-${process.pid}`;
+    fs.writeFileSync(tmp, next);
+    fs.renameSync(tmp, f);
+    if (o.log) o.log('comfy-extra-model-paths', { created: old == null });
+    return { ok: true, changed: true, created: old == null, file: f };
+  } catch (e) { return { ok: false, error: 'WRITE_FAILED', message: `Could not write ${f}: ${String((e && e.message) || e).slice(0, 160)}` }; }
+}
+
 // ------------------------------------------------------------------ the installer
 function createInstaller(opts = {}) {
   const home = opts.home || defaultHome(opts.platform, opts.env);
@@ -435,6 +503,8 @@ function createInstaller(opts = {}) {
       // Remember which build this is (and, for a second build, share the first one's models).
       const rec = readBuilds(home);
       if (firstModels && fs.existsSync(firstModels)) linkModels(found.comfy, firstModels);
+      // ComfyUI also reads "stuff and thing"/models (its own models/ folder stays the default for downloads).
+      if (opts.stuffModels) { try { writeExtraModelPaths(found.comfy, typeof opts.stuffModels === 'function' ? opts.stuffModels() : opts.stuffModels, { log }); } catch {} }
       rec.builds[build] = { root: found.root, models: firstModels && fs.existsSync(firstModels) ? firstModels : null };
       rec.active = build;
       writeBuilds(home, rec);
@@ -511,4 +581,4 @@ function createInstaller(opts = {}) {
   return { status, check, install, downloadModel, cancel, home, portable: () => findPortable(home), currentBuild, otherBuild, useOtherBuild, useBuild, gpu: () => lastGpu };
 }
 
-module.exports = { createInstaller, detectGpu, chooseBuild, download, extract, find7z, findPortable, isInstalled, UNPACKED_MARKER, readBuilds, linkModels, OTHER_BUILD, BUILD_FILE, freeBytes, defaultHome, fmtBytes, BUILDS, STARTER_MODELS, GITHUB_API, DOWNLOAD_BASE, isRetryable, RETRY_DELAYS_MS, MAX_TRIES, STALL_MS };
+module.exports = { writeExtraModelPaths, removeStuffSection, stuffSection, STUFF_COMFY_KINDS, STUFF_SECTION, createInstaller, detectGpu, chooseBuild, download, extract, find7z, findPortable, isInstalled, UNPACKED_MARKER, readBuilds, linkModels, OTHER_BUILD, BUILD_FILE, freeBytes, defaultHome, fmtBytes, BUILDS, STARTER_MODELS, GITHUB_API, DOWNLOAD_BASE, isRetryable, RETRY_DELAYS_MS, MAX_TRIES, STALL_MS };

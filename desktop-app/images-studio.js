@@ -266,7 +266,10 @@
     const sty = $('sd-adv-styles'); sty.textContent = ''; for (const n of x.styles) { const o = document.createElement('option'); o.value = n; o.textContent = n; sty.appendChild(o); }
     fillSelect('sd-adv-script', x.scripts ? x.scripts.txt2img : [], null, 'None');
     const dl = $('sd-opt-keys'); dl.textContent = ''; for (const k of x.optionKeys) { const o = document.createElement('option'); o.value = k; dl.appendChild(o); }
-    fillSelect('sd-wf-pick', x.workflows.map((w) => ({ value: w.id, label: w.name })), null, x.workflows.length ? '(choose)' : '(none saved yet)');
+    // Saved workflows + the .json files in "stuff and thing"/workflows (📁; a normal-format one can only be opened in ComfyUI).
+    fillSelect('sd-wf-pick', x.workflows.map((w) => ({ value: w.id, label: w.folder ? `📁 ${w.name}${w.ui ? ' (ComfyUI format — open it in ComfyUI)' : w.runnable === false ? ' (not readable)' : ''}` : w.name })), null, x.workflows.length ? '(choose)' : '(none saved yet)');
+    const nFolder = x.workflows.filter((w) => w.folder).length;
+    setText('sd-wf-folder-note', x.workflowsFolder ? `📁 = a file in "stuff and thing"/workflows (${nFolder} found). Put ComfyUI workflow .json files there.` : '');
     renderWfParams();
     setText('sd-cn-note', x.controlnet ? (comfy && x.controlnet.modules.length <= 1 ? 'ComfyUI: use an already-processed control picture (preprocessor "none"), or install comfyui_controlnet_aux for preprocessors.' : '') : (comfy ? 'This ComfyUI has no ControlNet models (models/controlnet).' : 'ControlNet isn\'t installed in this WebUI (Forge has it built in; A1111: install sd-webui-controlnet).'));
     $('btn-sd-cn-add').disabled = !x.controlnet;
@@ -387,8 +390,9 @@
   function renderWfParams() {
     const id = $('sd-wf-pick').value;
     const w = st.extras && st.extras.workflows.find((x) => x.id === id);
-    setText('sd-wf-params-list', w ? `Parameters: ${w.params.join(', ') || '(none — use "<node id>.<input>")'}` : '');
+    setText('sd-wf-params-list', w ? (w.folder && w.runnable === false ? w.description : `Parameters: ${w.params.join(', ') || '(none — use "<node id>.<input>")'}`) : '');
   }
+  if ($('btn-sd-wf-folder')) $('btn-sd-wf-folder').onclick = async () => { const r = await call('openWorkflowsFolder'); if (r && !r.ok) setText('sd-wf-msg', `✖ ${r.message || r.error || 'Could not open the folder.'}`); };
   $('sd-wf-pick').onchange = renderWfParams;
   $('btn-sd-wf-save').onclick = async () => {
     let wf; try { wf = JSON.parse($('sd-wf-json').value); } catch (e) { setText('sd-wf-msg', `✖ That isn't valid JSON (${e.message}).`); return; }
