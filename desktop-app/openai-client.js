@@ -8,6 +8,7 @@
  * building and its own response schema/validation; this module never decides
  * what the model is asked or what a valid answer looks like.
  */
+const smartJson = require('./smart-json');
 const DEFAULT_TIMEOUT_MS = 60000;
 
 // fetch with an abort timeout. Any host-provided global fetch is used (so tests
@@ -49,6 +50,9 @@ function _tryParse(candidate) {
   try { return JSON.parse(candidate); } catch (_) {}
   // Forgive trailing commas (a very common local-model slip).
   try { return JSON.parse(candidate.replace(/,\s*([}\]])/g, '$1')); } catch (_) {}
+  // Curly quotes (“ ”), odd spaces — some models and every copy from Claude's site (smart-json.js).
+  const r = smartJson.parseJsonLenient(candidate);
+  if (r.ok) return r.value;
   return null;
 }
 function extractJsonObject(text) {

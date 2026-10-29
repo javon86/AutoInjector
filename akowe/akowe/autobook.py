@@ -62,6 +62,7 @@ from .jobs import BUSY_CODES, JobStore, RetryPolicy, busy_code, now_iso, slot_wo
 from .providers import PROBE_POLL_S, PROBE_WAIT_S, PinnedProviders  # noqa: F401 - re-exported (older imports)
 from .editor import judge_rewrite, keep_quotes_of, lost_keeps
 from .editor_rubric import LABELS as EDITOR_LABELS
+from .book_report import clip_words
 from .review import NOT_INDEPENDENT, REVIEWABLE, ReviewJob, ReviewService, plain_problem, safe_title
 
 log = logging.getLogger("akowe.autobook")
@@ -225,7 +226,7 @@ class _Runner:
             pass
 
     def event(self, run: dict, kind: str, message: str, step: str | None = None, **extra):
-        ev = dict({"at": now_iso(), "kind": kind, "step": step or run.get("current"), "message": message[:400]},
+        ev = dict({"at": now_iso(), "kind": kind, "step": step or run.get("current"), "message": clip_words(message, 400)},
                   **{k: v for k, v in extra.items() if v is not None})
         run.setdefault("events", []).append(ev)
         if len(run["events"]) > MAX_EVENTS:
@@ -518,15 +519,85 @@ class AutoBookService(_Runner):
 
     # ------------------------------------------------------------------ API
     def list(self, principal: str, limit: int = 20) -> list[dict]:
+        """The newest runs first; runs a newer run of the same book made unnecessary (``replaced_by``) come last, so
+        ``runs[0]`` is always the newest run that counts."""
         out = []
         for r in self.jobs.list(kind=self.KIND, limit=limit):
             if r.get("principal") in (None, principal):
                 out.append(self.public(self._cache.get(r["id"], r)))
-        return out
+        return [r for r in out if not r.get("replaced_by")] + [r for r in out if r.get("replaced_by")]
+
+    def current(self, principal: str, runs: list[dict] | None = None) -> dict | None:
+        """The run that matters now: the one working, else the newest run that was not replaced (any state)."""
+        act = [self.public(r) for r in self.active() if r.get("principal") in (None, principal)]
+        if act:
+            return act[0]
+        runs = self.list(principal) if runs is None else runs
+        return next((r for r in runs if not r.get("replaced_by")), None)
+
+    def run_state(self, run: dict) -> tuple[str, str]:
+        """(state, plain words): ONE word for where a run really stands, the same for the run window, the button in the
+        top bar, the jobs list, AutoInjector's Akọwe panel and Alfred. working | waiting | pausing | paused (by the
+        author) | needs_decision (the AI reviewer did not pass a draft: approve anyway / edit / try again) | problem
+        (stopped on a problem: try again) | interrupted (Akọwe was closed while it worked: Resume) | done | cancelled
+        | replaced (a newer run of the same book took over)."""
+        status, alive = run.get("status"), self.alive(run.get("id") or "")
+        prob = run.get("problem") or {}
+        if status == "done":
+            return "done", "Finished: the book is made."
+        if status == "cancelled":
+            if run.get("replaced_by"):
+                return "replaced", "Not needed any more: a newer run of this book took over."
+            return "cancelled", "Cancelled."
+        if status == "interrupted" or (status in ("queued", "running", "waiting", "pausing") and not alive):
+            return "interrupted", "Stopped because Akọwe was closed while it worked. Press ▶ Resume."
+        if status == "pausing":
+            return "pausing", "Pausing after the current answer."
+        if status == "waiting":
+            return "waiting", "Waiting for the AI."
+        if status in ("queued", "running"):
+            return "working", "Working."
+        if status == "paused":
+            if {"approve_anyway", "edit"} & set(prob.get("options") or []):
+                return "needs_decision", "Paused: it needs your decision (approve anyway, edit it, or try again)."
+            if run.get("pause_reason") == "author":
+                return "paused", "Paused by you. Press ▶ Resume to continue."
+            return "problem", "Stopped on a problem. Press 🔁 Try again."
+        return str(status or "unknown"), str(status or "unknown")
+
+    def _retire_older(self, run: dict, why: str):
+        """Older runs of the same book that stopped part-way (paused, interrupted) are not needed once a newer run
+        finished the book or took over: they are marked replaced (status cancelled, ``replaced_by``), so no button,
+        list, AutoInjector or Alfred still says the book is paused or interrupted. Never raises."""
+        pid = run.get("project_id")
+        if not pid:
+            return
+        try:
+            for j in self.jobs.list(kind=self.KIND, project_id=pid, limit=100):
+                if j.get("id") == run["id"] or self.alive(j["id"]) or j.get("status") in ("done", "cancelled"):
+                    continue
+                old = self.get(j["id"]) or j
+                for s in old.get("steps") or []:
+                    if s.get("state") in ("running", "waiting", "paused"):
+                        s["state"] = "cancelled"
+                old.update(status="cancelled", replaced_by=run["id"], finished_at=old.get("finished_at") or now_iso(),
+                           waiting=None, old_status=old.get("status"),
+                           phase=f"Not needed any more: a newer run ({run['id']}) {why}.")
+                if old.get("problem"):
+                    old["old_problem"], old["problem"] = old["problem"], None
+                self.event(old, "replaced", f"Not needed any more: run {run['id']} {why}")
+                self.save(old)
+        except Exception:  # noqa: BLE001 - tidying up older runs never breaks this one
+            log.exception("could not mark the older runs of %s as replaced", pid)
 
     def public(self, run: dict) -> dict:
         out = dict(run)
         out["alive"] = self.alive(run["id"])
+        out["state"], out["state_words"] = self.run_state(run)
+        out["needs_you"] = out["state"] in ("paused", "needs_decision", "problem", "interrupted")
+        out["needs_decision"] = out["state"] == "needs_decision"
+        out["steps_done"] = sum(1 for s in run.get("steps") or [] if s.get("state") in ("done", "skipped"))
+        out["steps_total"] = len(run.get("steps") or [])
         out["elapsed_ms"] = _elapsed(run.get("started_at"), run.get("finished_at")) if run.get("started_at") else 0
         steps = []
         for s in run.get("steps") or []:
@@ -655,6 +726,8 @@ class AutoBookService(_Runner):
                        + ". They come into the NEW book as drafts and each one is reviewed and approved there under "
                        "your consent for this run; the chapters are written new.", step="backup", code="BIBLE_RERUN")
         self.save(run)
+        if settings.get("continue"):
+            self._retire_older(run, "continues this book")
         self._launch(run, self._run)
         return self.public(run)
 
@@ -728,6 +801,10 @@ class AutoBookService(_Runner):
             if not rid:
                 raise AkoweError("INVALID_INPUT", "/action", "there is no draft waiting for a decision",
                                      status="REJECTED")
+            if "approve_anyway" not in (prob.get("options") or []) and prob.get("code") != "REVIEW_NOT_PASSED":
+                # e.g. the AI reviewer could not answer: the draft was never reviewed, so it is not approved blind
+                raise AkoweError("INVALID_INPUT", "/action", "this step stopped on a problem, not on a review "
+                                     "decision: press 🔁 Try again (nothing was approved)", status="REJECTED")
             out = self.app.review.approve(principal, run["project_id"], run["branch_id"],
                                           {"record_ids": [rid], "author_confirms": True, "how": "one"})
             res = out["results"][0] if out.get("results") else {"ok": False, "message": "not approved"}
@@ -952,8 +1029,11 @@ class AutoBookService(_Runner):
                 self.save(run)
                 if sid != STEP_IDS[-1]:  # the last step is followed by the run's own save (below)
                     self._autosave(run, reason=f"step {sid}")
-            run.update(status="done", finished_at=now_iso(), current=None, waiting=None,
+            run.update(status="done", finished_at=now_iso(), current=None, waiting=None, pause_reason=None,
                        phase="Your book is made — download it below")
+            if (run.get("problem") or {}).get("severity") != "warning":
+                run["problem"] = None  # a finished run has nothing left to decide
+            self._retire_older(run, "finished this book")
             self.event(run, "finished", "Your book is made: PDF, EPUB and Word files are ready")
             es = run.get("editor_summary") or {}
             if es.get("reviewed"):
@@ -1029,6 +1109,20 @@ class AutoBookService(_Runner):
     def _pause_problem(self, run, problem: dict):
         sid = run.get("current") or "backup"
         st = self._step(run, sid)
+        # The author pressed Cancel or Pause while this step was working: the step may have failed *because* it was
+        # interrupted (an AI call or a session swallowed the stop and the step then found nothing made). What the
+        # author asked for wins over that problem — never "paused on a problem" after a Cancel.
+        ctl = self._ctl.get(run["id"]) or {}
+        if threading.current_thread() is self._threads.get(run["id"]) and (ctl.get("cancel") or ctl.get("pause")):
+            if ctl.get("cancel"):
+                self._finish_cancel(run)
+            else:
+                if st["state"] in ("running", "waiting"):
+                    st["state"], st["message"] = "paused", "Paused by you"
+                run.update(status="paused", pause_reason="author", waiting=None,
+                           phase="Paused — press ▶ Resume to continue")
+            self.save(run)
+            return
         where = {"book": run.get("title") or "New book", "step": st["title"], "set": st.get("set"),
                  "set_name": SET_NAMES.get(st.get("set") or "", None), "op": problem.get("op") or st.get("op")}
         if problem.get("chapter_id"):
@@ -1371,7 +1465,7 @@ class AutoBookService(_Runner):
         notes = []
         for f in (craft or {}).get("findings") or []:
             notes.append({"id": f["id"], "label": f.get("label"), "severity": f.get("severity"),
-                          "why": str(f.get("why") or "")[:200], "passage": str(f.get("passage") or "")[:80]})
+                          "why": clip_words(f.get("why"), 200), "passage": clip_words(f.get("passage"), 80)})
         ed.update(flagged=True, done_version=head["version"], notes=notes[:6], flag_reason=why, code=code)
         self.event(run, "note", f"⚠️ Editor still had notes on the {ed.get('label')} ({why}); it is approved under "
                    "your run consent — see the run summary", code="EDITOR_NOTES", record_id=head["record_id"])
@@ -1507,10 +1601,10 @@ class AutoBookService(_Runner):
         head = bp.rec(rid)
         missing = [i for i in res["items"] if i.get("required") and i["status"] != "on_page"]
         pl.update(done_version=head["version"], counts=res["counts"], flagged=bool(missing),
-                  missing=[i["label"][:160] for i in missing][:8], ai=bool(res.get("ai")))
+                  missing=[clip_words(i["label"], 160) for i in missing][:8], ai=bool(res.get("ai")))
         if missing:
             self.event(run, "note", f"⚠️ Planned but not on the page in the {label}: "
-                       + "; ".join(i["label"][:80] for i in missing[:4]) + (" …" if len(missing) > 4 else ""),
+                       + "; ".join(clip_words(i["label"], 80) for i in missing[:4]) + (" …" if len(missing) > 4 else ""),
                        code="PLANNED_MISSING", record_id=rid)
         st["planned_note"] = self._planned_line(run)
         self._planned_summary(run)
@@ -1547,7 +1641,7 @@ class AutoBookService(_Runner):
             return
         self._planned_summary(run)
         run["planned_summary"]["book"] = {"missing": res["counts"]["missing"], "names": res["names_never_on_page"],
-                                          "items": [{"chapter_id": m["chapter_id"], "label": m["label"][:160]}
+                                          "items": [{"chapter_id": m["chapter_id"], "label": clip_words(m["label"], 160)}
                                                     for m in res["missing"]][:20]}
         st["items"] = [{"id": r["chapter_id"], "label": f"Chapter {r['chapter_id']}",
                         "state": "done" if r.get("written") and not (r.get("counts") or {}).get("missing") else

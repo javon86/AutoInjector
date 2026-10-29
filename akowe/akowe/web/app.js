@@ -328,9 +328,9 @@ function announce(msg) {
   setTimeout(() => { live.textContent = msg; }, 30);
 }
 let toastTimer = null;
-function toast(msg) {
+function toast(msg, ms = 3500) {
   const t = $('#toast'); t.textContent = msg; t.hidden = false;
-  clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, 3500);
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, ms);
 }
 /** "⚡ label" for the yellow ⚡ buttons: the bolt sits in a dark disc, else a yellow emoji vanishes on the yellow button. */
 function boltLabel(label) {
@@ -961,7 +961,10 @@ async function viewOverview(main) {
     h('div', { class: 'bc-text' }, h('h2', null, '📘 Make my book'), h('p', { class: 'small' }, 'One guided checklist from characters to a downloadable PDF, EPUB and Word file. It shows what is done, what needs you and what your AI can do.'),
       h('div', { class: 'ov-words' }, t0 && t0.book ? wordsLine(t0.book.words) : null)),
     h('div', { class: 'row' }, h('a', { class: 'btn primary big', href: plink('book') }, '▶ Open Make my book'),
-      h('a', { class: 'btn', href: plink('journal') }, '📜 Book journal'), h('a', { class: 'btn', href: '#/shelf' }, '📚 Finished books'))));
+      h('a', { class: 'btn', href: plink('journal') }, '📜 Book journal'), h('a', { class: 'btn', href: '#/shelf' }, '📚 Finished books'),
+      // the 🔎 Timeline card lives at the bottom of Make my book: this opens that page and scrolls down to it
+      h('a', { class: 'btn', href: plink('book'), 'data-testid': 'ov-timeline-link', title: 'At the bottom of 📘 Make my book (after the characters and places are done)',
+        onclick: () => { S.scrollToFacts = true; } }, '🔎 Timeline, trade facts and repeats'))));
   main.appendChild(h('section', { class: 'card mab-card' },
     h('div', null, h('h2', null, '⚡ Make a book for me'), h('p', { class: 'small' }, 'Let your AI make a whole NEW book in one go — you watch every step, can pause or cancel, and get PDF, EPUB and Word at the end. This book is not touched.')),
     h('button', { type: 'button', class: 'primary big mab-cta', onclick: ev => openMakeBook(ev.currentTarget) }, boltLabel('Make a book for me'))));
@@ -1420,7 +1423,7 @@ function refChip(ref) {
   const rec = recordById(ref.record_id);
   const title = rec ? recordTitle(rec) : ref.record_id;
   const same = (!ref.project_id || ref.project_id === S.pid) && (!ref.branch_id || ref.branch_id === S.branch);
-  const label = `${ref.module_id} · ${title.length > 60 ? title.slice(0, 57) + '…' : title} · v${ref.version}`;
+  const label = `${ref.module_id} · ${clipWords(title, 60)} · v${ref.version}`;
   return h('span', { class: 'ref-chip', title: `${ref.record_id} v${ref.version} ${ref.content_hash || ''}` },
     same ? h('a', { href: recLink(ref) }, label) : h('span', null, `${label} (${ref.project_id}/${ref.branch_id})`));
 }
@@ -3580,7 +3583,7 @@ function buildAssistPanel(opId, pid, branch, projectName) {
       p.job = await api('POST', '/assist', { body: { project_id: pid, branch_id: branch, target_operation: opId, prompt: prompt.value.trim(),
         slot_id: picker.value(), context_refs: pickedRefs(), current_values: cv, keep_values: keep.checked } });
       p.startedAt = Date.now();
-      reqText.textContent = prompt.value.trim().length > 140 ? prompt.value.trim().slice(0, 137) + '…' : prompt.value.trim();
+      reqText.textContent = clipWords(prompt.value.trim(), 140);
       formPart.hidden = true; reqLine.hidden = false;
       renderRunning();
       announce(`${opId}: asking the AI`);
@@ -5315,6 +5318,12 @@ function renderBook(holder, book, redraw) {
   holder.appendChild(ol);
   if (book.steps.some(x => x.id === 'canon' && x.state === 'done')) holder.appendChild(bookSection4Card());
   if (book.steps.some(x => x.id === 'canon' && x.state === 'done')) holder.appendChild(bookFactsCard()); // 🔎 P26/P30/P31
+  if (S.scrollToFacts) {  // the book's overview page → 🔎 Timeline, trade facts and repeats
+    S.scrollToFacts = false;
+    const fc = holder.querySelector('[data-testid="book-facts"]');
+    if (fc) setTimeout(() => fc.scrollIntoView({ block: 'start' }), 0);
+    else toast('🔎 Timeline, trade facts and repeats appears at the bottom of this page once the characters and places are done.', 6000);
+  }
   holder.appendChild(bookSection5Card(book));
   if (S.pendingBookStep) {
     const want = S.pendingBookStep; S.pendingBookStep = null;
@@ -5838,10 +5847,10 @@ function findingItem(f) {
   return h('li', { class: `ed-finding sev-${f.severity}`, 'data-finding': f.id },
     h('div', { class: 'row' }, badge(f.severity === 'major' ? '⚠️' : '•', f.severity === 'major' ? 'major' : 'minor', f.severity === 'major' ? 'b-warn' : 'b-muted'),
       h('strong', null, f.label || ED_DIMS[f.dimension] || f.dimension), tech(`#${f.id}`)),
-    f.passage ? h('blockquote', { class: 'ed-quote' }, `“${f.passage}”`, f.found === false ? h('span', { class: 'small muted' }, ' (not found word for word in the text)') : null) : null,
+    f.passage ? h('blockquote', { class: 'ed-quote' }, quoted(f.passage), f.found === false ? h('span', { class: 'small muted' }, ' (not found word for word in the text)') : null) : null,
     f.why ? h('p', { class: 'small' }, h('strong', null, 'Why: '), f.why) : null,
     f.suggestion ? h('p', { class: 'small' }, h('strong', null, 'Try: '), f.suggestion) : null,
-    (f.keep_nearby || []).length ? h('p', { class: 'small muted' }, 'Keep nearby: ', f.keep_nearby.map(k => `“${k}”`).join(' · ')) : null);
+    (f.keep_nearby || []).length ? h('p', { class: 'small muted' }, 'Keep nearby: ', f.keep_nearby.map(k => quoted(k)).join(' · ')) : null);
 }
 function patternBox(p, open = false) {
   if (!p) return null;
@@ -5851,7 +5860,7 @@ function patternBox(p, open = false) {
     h('summary', null, `🔎 Pattern check (no AI): ${s.major || 0} major · ${s.minor || 0} minor · ${p.words} words`),
     shown.length ? h('ul', { class: 'small' }, shown.map(f => h('li', null, badge(f.severity === 'major' ? '⚠️' : '•', f.severity, f.severity === 'major' ? 'b-warn' : 'b-muted'), ' ',
       h('strong', null, f.label), ` — ${f.detail || `${f.count}×`}`,
-      (f.passages || []).length ? h('ul', null, f.passages.slice(0, 3).map(x => h('li', { class: 'muted' }, `¶${x.paragraph}: “${x.excerpt}”`))) : null,
+      (f.passages || []).length ? h('ul', null, f.passages.slice(0, 3).map(x => h('li', { class: 'muted' }, `¶${x.paragraph}: ${quoted(x.excerpt)}`))) : null,
       h('div', { class: 'muted' }, f.advice)))) : h('p', { class: 'small muted' }, 'No repeated tics above the thresholds.'));
 }
 function craftView(c, settings) {
@@ -5884,7 +5893,7 @@ function calibrationBox(c) {
           revs.map(r => h('td', { class: 'num' }, r.scores && r.scores[k] != null ? String(r.scores[k]) : '–', r.adjusted && r.scores && r.adjusted[k] !== r.scores[k] ? ` → ${r.adjusted[k]}` : '')),
           h('td', { class: 'num' }, h('strong', null, String(c.scores[k]))))))))) : null,
     revs.some(r => (r.weakest || []).length) ? h('details', { class: 'small' }, h('summary', null, 'Weakest passages the editors named'),
-      h('ul', null, revs.flatMap(r => (r.weakest || []).map(w => h('li', null, `“${w.passage}”`, w.why ? ` — ${w.why}` : '', w.found ? '' : h('span', { class: 'muted' }, ' (not found word for word)'), h('span', { class: 'muted' }, ` (${r.reviewer})`)))))) : null);
+      h('ul', null, revs.flatMap(r => (r.weakest || []).map(w => h('li', null, quoted(w.passage), w.why ? ` — ${w.why}` : '', w.found ? '' : h('span', { class: 'muted' }, ' (not found word for word)'), h('span', { class: 'muted' }, ` (${r.reviewer})`)))))) : null);
 }
 /** Chapter page / review step: the editor's scores and notes for exactly this version, and its fixes. */
 function editorCard(cur, { onSaved } = {}) {
@@ -5959,7 +5968,7 @@ function fixesBox(prop, info, msg, redraw, onSaved) {
     })) : null,
     bad.length ? h('div', { class: 'words-warn', role: 'note', 'data-testid': 'ed-unresolved' }, h('span', { 'aria-hidden': 'true' }, '⚠️ '),
       h('strong', null, `${bad.length} note(s) could not be fixed word for word, so nothing was guessed there:`),
-      h('ul', { class: 'small' }, bad.map(i => h('li', null, `${ED_DIMS[i.dimension] || 'Note'}${i.passage ? ` (“${i.passage.slice(0, 80)}”)` : ''}: ${i.message || i.reason}`)))) : null,
+      h('ul', { class: 'small' }, bad.map(i => h('li', null, `${ED_DIMS[i.dimension] || 'Note'}${i.passage ? ` (${quoted(clipWords(i.passage, 80))})` : ''}: ${i.message || i.reason}`)))) : null,
     h('div', { class: 'row' }, save));
   save.addEventListener('click', async () => {
     const accept = Object.entries(boxes).filter(([, b]) => b.checked).map(([k]) => k);
@@ -6650,7 +6659,7 @@ function plannedCard(rid, { onSaved } = {}) {
       h('span', { 'aria-hidden': 'true' }, PLANNED_ICON[i.status] || '•'), ' ', i.label,
       i.required ? null : h('span', { class: 'small muted' }, ' (nice to have)'),
       i.status !== 'on_page' && i.required ? [' ', hazard({ code: 'PLANNED_MISSING', message: i.label }, {}, { small: true })] : null,
-      i.quote ? h('span', { class: 'small muted' }, ` — “${i.quote.slice(0, 90)}”`) : null))));
+      i.quote ? h('span', { class: 'small muted' }, ` — ${quoted(clipWords(i.quote, 90))}`) : null))));
     let edInfo = null;
     try { edInfo = await api('GET', bpath(`/review/editor/${encodeURIComponent(rid)}`)); } catch { /* no fixes to show */ }
     const prop = edInfo && edInfo.proposal && (edInfo.proposal.items || []).some(x => x.dimension === 'planned_to_page') ? edInfo.proposal : null;
@@ -7098,7 +7107,7 @@ function showGlobalProblem(prob) {
   const host = [...document.querySelectorAll('dialog[open]')].pop() || document.body;  // stay visible above an open dialog
   if (bar.parentElement !== host) host.appendChild(bar);
   put(clear(bar), hazard(p, { retry: p.action === 'reload' ? () => location.reload() : null, retryLabel: '🔁 Reload the page' }),
-    h('span', { class: 'gp-text' }, h('strong', null, p.title), ' — ', p.message.length > 140 ? p.message.slice(0, 137) + '…' : p.message),
+    h('span', { class: 'gp-text' }, h('strong', null, p.title), ' — ', clipWords(p.message, 140)),
     h('button', { type: 'button', class: 'small', onclick: () => copyDiagnostics() }, '📋 Copy diagnostics'),
     h('button', { type: 'button', class: 'small', 'aria-label': 'Dismiss', onclick: () => bar.remove() }, '✕'));
 }
@@ -7227,7 +7236,8 @@ async function refreshRunChip() {
   let out;
   try { out = await api('GET', '/autobook'); } catch { return; }
   const live = (out.active || [])[0];
-  const pend = (out.runs || []).find(r => ['paused', 'interrupted', 'pausing'].includes(r.status));
+  // a run a newer run of the same book replaced (replaced_by) never makes the button say Paused / Interrupted
+  const pend = (out.runs || []).find(r => ['paused', 'interrupted', 'pausing'].includes(r.status) && !r.replaced_by);
   MB.latest = live || pend || null;
   const btn = $('#mab-btn'); if (!btn) return;
   const lab = btn.querySelector('.tb-label');
@@ -7238,8 +7248,8 @@ async function refreshRunChip() {
     lab.textContent = live.status === 'waiting' ? `Waiting… ${done}/${live.steps.length}` : `Making… ${done}/${live.steps.length}`;
     btn.setAttribute('aria-label', `Make a book for me: working, ${done} of ${live.steps.length} steps done. Open the progress window`);
   } else if (pend) {
-    lab.textContent = pend.status === 'interrupted' ? 'Interrupted' : 'Paused';
-    btn.setAttribute('aria-label', 'Make a book for me: paused, needs you. Open the progress window');
+    lab.textContent = pend.state === 'needs_decision' ? 'Needs you' : (pend.state === 'interrupted' || pend.status === 'interrupted') ? 'Interrupted' : 'Paused';
+    btn.setAttribute('aria-label', `Make a book for me${pend.title ? ` (“${pend.title}”)` : ''}: ${pend.state_words || 'paused, needs you.'} Open the progress window`);
   } else { lab.textContent = 'Make a book'; btn.setAttribute('aria-label', 'Make a book for me'); }
 }
 async function openMakeBook(opener, { runId = null, fresh = false } = {}) {
@@ -7393,12 +7403,31 @@ function runDecision(prob) {
   }
   return extra;
 }
+/** A quoted line of the book: “…” added only when the text is not already in quote marks (no ""…"" doubles). */
+function quoted(t) {
+  const x = String(t == null ? '' : t).trim();
+  if (!x) return '';
+  return /^["“”‘’'«]/.test(x) || /["“”’'»]$/.test(x) ? x : `“${x}”`;
+}
+/** Text cut to at most n characters at a word boundary, with … when it was cut (never mid-word). */
+function clipWords(t, n) {
+  const x = String(t == null ? '' : t).replace(/\s+/g, ' ').trim();
+  if (x.length <= n) return x;
+  const cut = x.slice(0, n - 1); const sp = cut.lastIndexOf(' ');
+  return `${(sp > n * 0.5 ? cut.slice(0, sp) : cut).replace(/[\s,;:.\-–—]+$/, '')}…`;
+}
+/** Who read a chapter in the book report: the name, “(read version N)” when an earlier version was read, or “not read”. */
+function whoRead(u, who, at) {
+  if (!u[who]) return 'not read';
+  return u[at] && u.version && u[at] !== u.version ? `${u[who]} (read version ${u[at]})` : u[who];
+}
 function renderRun() {
   const r = MB.run; if (!r || !MB.dialog) return;
   const sig = JSON.stringify([r.status, r.phase, r.current, r.problem && r.problem.code, (r.waiting || {}).retry_at, r.steps.map(s => [s.state, s.message, s.review_note, s.editor_note, (s.items || []).map(i => [i.state, i.editor, i.scenes, i.phase, i.note, i.planned, i.length]), s.planned_note]), (r.files || []).length, r.ais, r.ai_alerts, r.review_summary, r.editor_summary, r.planned_summary, r.eta, r.report, r.save, r.costs && [r.costs.calls, r.costs.ais]]);
   if (sig === MB.sig && MB.dialog.querySelector('.mb-steps')) { updateRunClocks(); return; }
   MB.sig = sig;
-  const w = RUN_WORD[r.status] || ['?', r.status, 'b-muted'];
+  const w = r.state === 'replaced' ? ['↪', 'Replaced by a newer run', 'b-muted'] : r.state === 'interrupted' ? RUN_WORD.interrupted
+    : r.state === 'needs_decision' ? ['⏸', 'Paused — needs your decision', 'b-warn'] : RUN_WORD[r.status] || ['?', r.status, 'b-muted'];
   const done = r.steps.filter(s => s.state === 'done').length;
   const head = h('div', { class: 'mb-head' },
     h('div', null, h('p', { class: 'mb-book' }, r.title ? `“${r.title}”` : 'A new book', r.settings && r.settings.length ? h('span', { class: 'muted small' }, ` · ${(LENGTH_INFO[r.settings.length] || [''])[0]}`) : null),
@@ -7580,7 +7609,7 @@ function editorRunSummary(r) {
       `Editor: ${es.reviewed} chapter(s) read, ${es.passed} passed, ${es.rounds} rewrite round(s), ${es.kept} rewrite(s) kept, ${es.rejected} not kept.`),
     fl.length ? [h('p', null, h('strong', null, 'The editor still had notes on: '), 'these chapters were approved under your run consent anyway (the book was not held up). Open each one to read the notes and use 🖋 Editor / ✍ Apply editor’s fixes if you like.'),
       h('ul', { class: 'small' }, fl.map(f => h('li', null, h('strong', null, f.label || f.chapter_id), f.reason ? ` — ${f.reason}` : '',
-        (f.notes || []).length ? h('ul', null, f.notes.slice(0, 4).map(n => h('li', null, `${n.severity === 'major' ? '⚠️ ' : ''}${n.label || ''}${n.passage ? ` (“${n.passage}”)` : ''}${n.why ? `: ${n.why}` : ''}`))) : null)))] : null);
+        (f.notes || []).length ? h('ul', null, f.notes.slice(0, 4).map(n => h('li', null, `${n.severity === 'major' ? '⚠️ ' : ''}${n.label || ''}${n.passage ? ` (${quoted(n.passage)})` : ''}${n.why ? `: ${n.why}` : ''}`))) : null)))] : null);
 }
 
 /* ======================================================================= ✍ Write all chapters (S2) */
@@ -7923,7 +7952,7 @@ async function viewReport(main) {
           scoreCell(d.median, 'strong'), h('td', { class: 'num small' }, `${d.min}–${d.max}`), reviews.map(r => scoreCell((d.by || {})[r.slot]))))));
       holder.appendChild(h('section', { class: 'card' }, h('h2', null, 'Scores (whole book)'), h('div', { class: 'table-wrap' }, t)));
     }
-    const pts = kind => reviews.flatMap(r => (r[kind] || []).map(p => h('li', null, p.point, p.quote ? [' — ', h('q', null, p.quote), p.verified ? null : [' ', hazard({ code: 'QUOTE_NOT_FOUND' }, {}, { small: true })]] : null, h('span', { class: 'small muted' }, ` (${r.name})`))));
+    const pts = kind => reviews.flatMap(r => (r[kind] || []).map(p => h('li', null, p.point, p.quote ? [' — ', h('span', { class: 'rp-quote' }, quoted(p.quote)), p.verified ? null : [' ', hazard({ code: 'QUOTE_NOT_FOUND' }, {}, { small: true })]] : null, h('span', { class: 'small muted' }, ` (${r.name})`))));
     if (reviews.length) {
       holder.appendChild(h('div', { class: 'grid-2' },
         h('section', { class: 'card', 'data-testid': 'rp-strengths' }, h('h2', null, '👍 Strengths'), h('ul', null, pts('strengths'))),
@@ -7940,12 +7969,15 @@ async function viewReport(main) {
       h('section', { class: 'card', 'data-testid': 'rp-editor' }, h('h2', null, '🖋 Editor across the chapters'),
         ed.read ? [h('p', { class: 'small' }, `${ed.read} of ${ed.of} chapter(s) read · ${ed.major} major / ${ed.minor} minor note(s)`, (ed.flagged_chapters || []).length ? ` · ⚠️ still had notes on chapter(s) ${ed.flagged_chapters.join(', ')}` : ''),
           h('ul', { class: 'small' }, (ed.dimensions || []).map(d => h('li', null, `${d.label}: ${d.average}/10`))),
-          (ed.notes || []).length ? h('details', null, h('summary', null, 'Notes'), h('ul', { class: 'small' }, ed.notes.map(n => h('li', null, `Chapter ${n.chapter}: “${n.passage}” — ${n.why}`)))) : null]
-          : h('p', { class: 'small muted' }, 'The editor did not read these chapter versions.')),
+          (ed.earlier || []).length || (ed.unread || []).length ? h('ul', { class: 'small muted', 'data-testid': 'rp-editor-versions' },
+            (ed.earlier || []).map(e => h('li', null, `Chapter ${e.chapter}: the editor read version ${e.read_version}; version ${e.version} (the planned details worked in, or earlier text put back) was not read again.`)),
+            (ed.unread || []).length ? h('li', null, `Not read by the editor: chapter(s) ${ed.unread.join(', ')}.`) : null) : null,
+          (ed.notes || []).length ? h('details', null, h('summary', null, 'Notes'), h('ul', { class: 'small' }, ed.notes.map(n => h('li', null, `Chapter ${n.chapter}: ${quoted(n.passage)} — ${n.why}`)))) : null]
+          : h('p', { class: 'small muted' }, 'The editor did not read these chapter versions (the editor was off, or it could not read them: see the run’s notes).')),
       h('section', { class: 'card', 'data-testid': 'rp-planned' }, h('h2', null, '✅ Planned to page and 🔎 patterns'),
         h('p', { class: 'small' }, pl.missing ? [hazard({ code: 'PLANNED_MISSING' }, { open: plink('book'), openLabel: '📘 Open the book' }, { small: true }), ` ${pl.missing} planned item(s) not on the page`] : '✔ Everything planned is on the page.'),
         (pl.items || []).length ? h('ul', { class: 'small' }, pl.items.map(m => h('li', null, `Chapter ${m.number || m.chapter_id}: ${m.label}`))) : null,
-        (pa.findings || []).length ? h('ul', { class: 'small' }, pa.findings.map(f => h('li', null, `${f.label}: ${f.count} (${f.per_1000} per 1 000 words)`, f.example ? h('span', { class: 'muted' }, ` — “${f.example}”`) : null))) : h('p', { class: 'small muted' }, 'No strong repeated habits.'))));
+        (pa.findings || []).length ? h('ul', { class: 'small' }, pa.findings.map(f => h('li', null, `${f.label}: ${f.count} (${f.per_1000} per 1 000 words)`, f.example ? h('span', { class: 'muted' }, ` — ${quoted(f.example)}`) : null))) : h('p', { class: 'small muted' }, 'No strong repeated habits.'))));
     const rd = rep.readability || {}; const rt = rd.totals || {};  // P24 readability and pacing (no AI)
     if (rt.grade != null) {
       const au = rd.audience || { label: 'Adult', grade: [5, 10] }; const pct = x => `${Math.round(100 * (x || 0))}%`;
@@ -7966,7 +7998,7 @@ async function viewReport(main) {
       h('div', { class: 'table-wrap' }, h('table', { class: 'rp-table' }, h('thead', null, h('tr', null, ['Chapter', 'Words', 'Written by', 'Reviewed by', 'Editor'].map(x => h('th', null, x)))),
         h('tbody', null, (wd.chapters || []).map((c, i) => { const u = (us.chapters || [])[i] || {};
           return h('tr', null, h('th', { scope: 'row' }, `${c.number}${c.title ? ` · ${c.title}` : ''}`), h('td', { class: 'num' }, c.words.toLocaleString(), c.under ? [' ', hazard({ code: 'CHAPTER_UNDER_TARGET', message: `${c.words} of about ${wd.per_chapter_target} words` }, {}, { small: true })] : null),
-            h('td', null, u.writer || '–'), h('td', null, u.reviewer || '–', u.review_independent === false ? ' ⚠️' : ''), h('td', null, u.editor || '–', u.editor_independent === false ? ' ⚠️' : '')); }))))));
+            h('td', null, u.writer || '–'), h('td', null, whoRead(u, 'reviewer', 'reviewed_version'), u.review_independent === false ? ' ⚠️' : ''), h('td', null, whoRead(u, 'editor', 'editor_version'), u.editor_independent === false ? ' ⚠️' : '')); }))))));
     const len = leniencyCard(ov.leniency, ov.calibration);
     if (len) holder.appendChild(len);
     holder.appendChild(askBox(rep));
@@ -8167,33 +8199,44 @@ function folderButton(path, local, pid, branch) {
 /** Save now and wait for it (at most 3 minutes); resolves with the save status. */
 async function runSave(pid, branch, onState) {
   const path = `${BIBLE_PATH(pid, branch)}/save`;
-  await api('POST', path);
+  const job = await api('POST', path);
+  const since = (job && job.started_at) || '';
   const t0 = Date.now();
   let st = null;
   while (Date.now() - t0 < 180000) {
     await new Promise(r => setTimeout(r, 400));
     st = await api('GET', path);
     if (onState) onState(st);
-    if (!st.job || st.job.state !== 'running') break;
+    // done when no save is running AND the result is this save's (not the one from before the press)
+    if ((!st.job || st.job.state !== 'running') && (!since || (st.last && String(st.last.at || '') >= since))) break;
   }
   return st;
+}
+/** The words of a finished save that stay on screen next to the 💾 button (the toast alone was easy to miss). */
+function savedNowText(last) {
+  const n = last.files ? `${last.files} file(s)` : 'the book';
+  return `✔ Saved ${n} just now (${fmtTime(last.at)})${last.warning ? ` — ${last.warning}` : ''}`;
 }
 /** The 💾 Save button with its “Saved to …” line (book page, run window, shelf). */
 function saveBox(pid, branch, { label = '💾 Save', primary = false, testid = 'save-btn' } = {}) {
   const line = h('span', { class: 'save-line', 'aria-live': 'polite' });
   const extra = h('span', { class: 'row save-extra' });
+  const done = h('span', { class: 'save-done small', role: 'status', 'aria-live': 'polite', 'data-testid': 'save-done' });
   const show = st => { put(clear(line), savedLine(st, { pid, branch })); put(clear(extra), st && st.last && st.last.ok ? folderButton(st.last.path, st.local, pid, branch) : null); };
   const btn = h('button', { type: 'button', class: `small${primary ? ' primary' : ''}`, 'data-testid': testid, title: 'Save this book into its folder in your books folder (Settings › 📁 Where books are saved)', onclick: async () => {
-    btn.disabled = true;
+    btn.disabled = true; btn.textContent = '💾 Saving…'; clear(done);
     try {
       const st = await runSave(pid, branch, show);
       show(st);
-      if (st && st.last && st.last.ok) toast(saveWarningText(st.last) || `Saved to ${st.last.path}`);
+      if (st && st.last && st.last.ok) {
+        done.textContent = savedNowText(st.last);
+        toast(saveWarningText(st.last) || `💾 Saved to ${st.last.path}`, 6000);
+      }
     } catch (e) { put(clear(line), problemBox(toProblem(e, { step: '💾 Save the book' }), { settings: true })); }
-    btn.disabled = false;
+    btn.disabled = false; btn.textContent = label;
   } }, label);
   (async () => { try { show(await api('GET', `${BIBLE_PATH(pid, branch)}/save`)); } catch { /* the line stays empty */ } })();
-  return h('span', { class: 'save-box row', 'data-testid': 'save-box' }, btn, line, extra);
+  return h('span', { class: 'save-box row', 'data-testid': 'save-box' }, btn, done, line, extra);
 }
 /** Top bar 💾: save the open book, report in a toast (a problem opens a box). */
 async function quickSave(btn) {
@@ -8201,7 +8244,7 @@ async function quickSave(btn) {
   btn.disabled = true; toast('💾 Saving the book…');
   try {
     const st = await runSave(S.pid, S.branch);
-    if (st && st.last && st.last.ok) toast(saveWarningText(st.last) || `💾 Saved to ${st.last.path}`);
+    if (st && st.last && st.last.ok) toast(saveWarningText(st.last) || `${savedNowText(st.last)} — ${st.last.path}`, 6000);
     else modal('💾 The book was not saved', () => problemBox(toProblem(Object.assign({ where: { book: profileOf().title || S.project.name, step: '💾 Save the book' } }, (st && st.last && st.last.problem) || { code: 'SAVE_FAILED' })), { settings: true }));
   } catch (e) { modal('💾 The book was not saved', () => problemBox(toProblem(e, { step: '💾 Save the book' }), { settings: true })); }
   btn.disabled = false;
@@ -8816,7 +8859,7 @@ function factsCard(rid, { onSaved } = {}) {
     body.appendChild(h('p', { class: 'small', 'data-testid': 'facts-repeats' }, trim.length ? `${trim.length} repeat(s) could be trimmed here.` : '✔ Nothing to trim.',
       keep.length ? ` ${keep.length} voice or motif repeat(s) are kept on purpose.` : ''));
     if (reps.length) body.appendChild(h('ul', { class: 'small fact-list' }, reps.slice(0, 12).map(r => h('li', { 'data-class': r.class },
-      `${(FACT_CLASS[r.class] || ['•'])[0]} “${r.phrase.slice(0, 60)}” — ${(FACT_CLASS[r.class] || ['', r.class])[1]} (${r.why}; ${r.here} here${r.trim_here ? `, ${r.trim_here} to trim` : ''}) `,
+      `${(FACT_CLASS[r.class] || ['•'])[0]} ${quoted(clipWords(r.phrase, 60))} — ${(FACT_CLASS[r.class] || ['', r.class])[1]} (${r.why}; ${r.here} here${r.trim_here ? `, ${r.trim_here} to trim` : ''}) `,
       repeatLabel(r, info.repetition.labels_version, draw)))));
     // ✨ fixes (proposal shown with the editor's fixes box when it is ours)
     let edInfo = null;
@@ -8891,7 +8934,7 @@ function bookFactsCard() {
     body.appendChild(h('p', { class: 'small', 'data-testid': 'book-facts-repeats' }, h('strong', null, '🔁 Repeats: '),
       `🗣️ ${rc.voice} voice · 🔁 ${rc.motif} motif (kept) · 🧹 ${rc.filler} filler · ✂️ ${rc.accident} accidental — ${rc.trim} use(s) could be trimmed`));
     if (trim.length) body.appendChild(h('ul', { class: 'small fact-list' }, trim.slice(0, 10).map(r => h('li', null,
-      `${(FACT_CLASS[r.class] || ['•'])[0]} “${r.phrase.slice(0, 60)}” (${r.why}) — `,
+      `${(FACT_CLASS[r.class] || ['•'])[0]} ${quoted(clipWords(r.phrase, 60))} (${r.why}) — `,
       r.occurrences.filter(o => o.trim && o.record_id).slice(0, 3).map(o => [h('a', { href: plink('write', o.record_id) }, `chapter ${o.number}`), ' ']),
       repeatLabel(r, bk.repetition.labels_version, draw)))));
   };

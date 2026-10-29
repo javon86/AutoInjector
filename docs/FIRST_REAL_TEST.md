@@ -6,7 +6,9 @@ real ChatGPT, Claude and Gemini. Tick each box; if something fails, stop there a
 
 ## 0. Get the newest version
 
-- [ ] Download / pull the latest `main` (GitHub Desktop: **Fetch origin → Pull**).
+- [ ] Download / pull the latest `main` (GitHub Desktop: **Fetch origin → Pull**). The repository is wherever
+      you cloned it — often `Documents\git\AutoInjector` (or `Documents\GitHub\AutoInjector`); every path below
+      (`desktop-app\…`, `akowe\…`) is inside that folder.
 - [ ] Close any old AutoInjector and Akọwe windows first.
 
 ## 1. Start AutoInjector — Akọwe starts with it
@@ -52,9 +54,12 @@ If 🔢 fails on a part, it names the part (message box / Send button / reply ar
 
 - [ ] **📊 Book report**: scores, 📖 Readability and pacing (reading level vs your audience), "How generous each AI
       reviewer is".
-- [ ] Book page → **🔎 Timeline, trade facts and repeats**: trade terms marked "research needed"; mark a couple
+- [ ] **📘 Make my book** → scroll to the **bottom** → **🔎 Timeline, trade facts and repeats** (it shows once the
+      characters and places are done; the book's own page also has a **🔎 Timeline, trade facts and repeats** button
+      that opens Make my book and scrolls there): trade terms marked "research needed"; mark a couple
       ✔ Verified / ✕ Wrong. Character catchphrases show as *voice* (protected).
-- [ ] **💾 Save** the book → the folder has Book/, Chapters/, Book Bible/, Reports/, Log/.
+- [ ] **💾 Save** the book → a green **✔ Saved … just now** appears next to the button (and a message at the
+      bottom); the folder has Book/, Chapters/, Book Bible/, Reports/, Log/.
 
 ## 6. Send back
 

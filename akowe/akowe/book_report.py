@@ -160,7 +160,49 @@ def _now() -> str:
 
 
 def _clip(v, n: int) -> str:
-    return " ".join(str(v or "").split())[:n]
+    """One line of at most ``n`` characters, cut at a word boundary with … when it was cut (never mid-word)."""
+    return clip_words(v, n)
+
+
+def clip_words(v, n: int) -> str:
+    s = " ".join(str(v or "").split())
+    if len(s) <= n:
+        return s
+    cut = s[:max(1, n - 1)]
+    sp = cut.rfind(" ")
+    if sp > n * 0.5:
+        cut = cut[:sp]
+    return cut.rstrip(" ,;:.-\u2013\u2014") + "\u2026"
+
+
+_QUOTE_MARKS = "\"'\u201c\u201d\u2018\u2019\u00ab\u00bb"
+
+
+def quoted(text) -> str:
+    """A line of the book in “ ” — only when it is not already in quote marks (a quoted line of dialogue would
+    otherwise show doubled marks: “"Can they save the line?"”)."""
+    t = str(text or "").strip()
+    if not t:
+        return ""
+    return t if t[0] in _QUOTE_MARKS or t[-1] in _QUOTE_MARKS else f"\u201c{t}\u201d"
+
+
+def latest_read(reads: dict, record_id: str, version: int) -> tuple[dict | None, int | None]:
+    """The newest stored review / editor read of a chapter at ``version`` or, when that exact version was never read,
+    at the newest EARLIER version (a later version that only worked the planned details in, or put earlier text back,
+    was not read again): (the entry, the version it was made for) or (None, None)."""
+    if not isinstance(reads, dict):
+        return None, None
+    exact = reads.get(f"{record_id}:{version}")
+    if isinstance(exact, dict):
+        return exact, version
+    if not isinstance(version, int) or isinstance(version, bool):
+        return None, None
+    for n in range(version - 1, 0, -1):
+        e = reads.get(f"{record_id}:{n}")
+        if isinstance(e, dict):
+            return e, n
+    return None, None
 
 
 def _norm(s: str) -> str:
@@ -392,12 +434,15 @@ class ReportService:
         sums: dict[str, list] = {}
         major = minor = 0
         flagged, read = [], 0
-        notes = []
+        notes, earlier, unread = [], [], []
         for c in chapters:
-            cr = crafts.get(f"{c['record_id']}:{c['version']}")
+            cr, at = latest_read(crafts, c["record_id"], c["version"])
             if not cr:
+                unread.append(c["number"])
                 continue
             read += 1
+            if at != c["version"]:
+                earlier.append({"chapter": c["number"], "read_version": at, "version": c["version"]})
             for d, v in (cr.get("scores") or {}).items():
                 sums.setdefault(d, []).append(v)
             major += int((cr.get("counts") or {}).get("major") or 0)
@@ -413,7 +458,7 @@ class ReportService:
                 for d, v in sums.items()]
         dims.sort(key=lambda x: x["average"])
         return {"read": read, "of": len(chapters), "major": major, "minor": minor, "flagged_chapters": flagged,
-                "dimensions": dims, "notes": notes}
+                "dimensions": dims, "notes": notes, "earlier": earlier, "unread": unread}
 
     @staticmethod
     def _planned(review, bp) -> dict:
@@ -455,11 +500,14 @@ class ReportService:
             w = review.writer_of(pid, branch, rec) if rec else {"label": "?", "slot": None}
             if w.get("slot"):
                 writers[w["slot"]] += 1
-            v = verdicts.get(f"{c['record_id']}:{c['version']}") or {}
-            cr = crafts.get(f"{c['record_id']}:{c['version']}") or {}
+            v, v_at = latest_read(verdicts, c["record_id"], c["version"])
+            cr, cr_at = latest_read(crafts, c["record_id"], c["version"])
+            v, cr = v or {}, cr or {}
             rows.append({"number": c["number"], "writer": w.get("label"), "writer_slot": w.get("slot"),
                          "reviewer": v.get("reviewer"), "review_independent": v.get("independent"),
-                         "editor": cr.get("reviewer"), "editor_independent": cr.get("independent")})
+                         "reviewed_version": v_at, "editor": cr.get("reviewer"),
+                         "editor_independent": cr.get("independent"), "editor_version": cr_at,
+                         "version": c["version"]})
         major = writers.most_common(1)[0][0] if writers else None
         fam = providers_mod.slot_family(review._slot(major)) if major else None
         return {"chapters": rows, "writer_slot": major, "writer": review.slot_label(major) if major else None,
@@ -866,7 +914,7 @@ def render_markdown(rep: dict) -> str:
         if items:
             L += [f"## {title}", ""]
             for who, p in items:
-                q = f" — “{p['quote']}”" + ("" if p.get("verified") else " *(not found word for word in the book)*") \
+                q = f" — {quoted(p['quote'])}" + ("" if p.get("verified") else " *(not found word for word in the book)*") \
                     if p.get("quote") else ""
                 L.append(f"- {p['point']}{q} ({who})")
             L.append("")
@@ -890,9 +938,15 @@ def render_markdown(rep: dict) -> str:
         for d in ed.get("dimensions") or []:
             L.append(f"- {d['label']}: {d['average']}/10")
         for n in ed.get("notes") or []:
-            L.append(f"- Chapter {n['chapter']} ({n.get('severity')}): “{n.get('passage')}” — {n.get('why')}")
+            L.append(f"- Chapter {n['chapter']} ({n.get('severity')}): {quoted(n.get('passage'))} — {n.get('why')}")
+        for e in ed.get("earlier") or []:
+            L.append(f"- Chapter {e['chapter']}: the editor read version {e['read_version']}; version {e['version']} "
+                     "(the planned details worked in, or earlier text put back) was not read again.")
+        if ed.get("unread"):
+            L.append(f"- Not read by the editor: chapter(s) {', '.join(map(str, ed['unread']))}.")
     else:
-        L.append("The editor did not read these chapter versions.")
+        L.append("The editor did not read these chapter versions (the editor was off, or it could not read them: see "
+                 "the run's notes).")
     L.append("")
     pl = rep.get("planned") or {}
     L += ["## Planned to page", "", f"{pl.get('missing', 0)} planned item(s) not on the page"
@@ -905,7 +959,7 @@ def render_markdown(rep: dict) -> str:
     L += ["## Patterns (no AI)", ""]
     for f in pa.get("findings") or []:
         L.append(f"- {f['label']}: {f['count']} ({f['per_1000']} per 1 000 words, {f['severity']})"
-                 + (f" — e.g. “{f['example']}”" if f.get("example") else ""))
+                 + (f" — e.g. {quoted(f['example'])}" if f.get("example") else ""))
     if not pa.get("findings"):
         L.append("No strong repeated habits found.")
     L.append("")
@@ -932,8 +986,8 @@ def render_markdown(rep: dict) -> str:
           + (f" ⚠️ {us['same_ai_reviews']} chapter review(s) were made by the writer itself." if us.get("same_ai_reviews")
              else ""), "", "| Chapter | Written by | Reviewed by | Editor |", "|---|---|---|---|"]
     for c in us.get("chapters") or []:
-        L.append(f"| {c['number']} | {c.get('writer') or ''} | {c.get('reviewer') or '–'}"
-                 f"{' ⚠️' if c.get('review_independent') is False else ''} | {c.get('editor') or '–'}"
+        L.append(f"| {c['number']} | {c.get('writer') or ''} | {_who_read(c, 'reviewer', 'reviewed_version')}"
+                 f"{' ⚠️' if c.get('review_independent') is False else ''} | {_who_read(c, 'editor', 'editor_version')}"
                  f"{' ⚠️' if c.get('editor_independent') is False else ''} |")
     for r in rep.get("reviews") or []:
         L.append(f"\nWhole-book review: {r['name']} — {r.get('status')}"
@@ -946,6 +1000,15 @@ def render_markdown(rep: dict) -> str:
     if not rep.get("try_next"):
         L.append("- Nothing stands out: compare a variant (⚖️ Compare) to see what the pipeline changes.")
     return "\n".join(L) + "\n"
+
+
+def _who_read(row: dict, who: str, at: str) -> str:
+    """'ChatGPT', 'ChatGPT (read version 2)' when an earlier version was read, or 'not read' (plain words)."""
+    name = row.get(who)
+    if not name:
+        return "not read"
+    v, cur = row.get(at), row.get("version")
+    return f"{name} (read version {v})" if v and cur and v != cur else str(name)
 
 
 _PDF_MAP = {"⚠️": "(!)", "⚠": "(!)", "✔": "OK", "✅": "OK", "✖": "x", "📨": "", "📊": "", "🖋": "", "✨": "",

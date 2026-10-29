@@ -9,7 +9,8 @@
  *   brain   Alfred's brain — when he is on with a local model: is Ollama answering? is his model installed?
  *   disk    free space on the drive(s) holding the "stuff and thing" folder and the models folder
  *           (warn < 15 GB, urgent < 5 GB — one model is 5–20 GB)
- *   sd      Stable Diffusion was connected (Images module enabled with a local address) but isn't answering
+ *   sd      Stable Diffusion was connected (Images module enabled with a local address) but isn't answering —
+ *           or answers with NO picture model loaded (empty Checkpoint list)
  *   akowe   Akọwe's server gave up (failed) or keeps restarting
  *   panes   an AI pane self-repair gave up on (state "broken"); while it is still repairing we stay quiet
  *   logs    the logs folder grew huge (> 500 MB)
@@ -27,6 +28,7 @@
  *     freeBytes(path) -> number | null   (default: fs.statfs; null when unknown)
  *     deviceOf(path)  -> id | null       (default: fs.stat().dev — two folders on one drive = one warning)
  *     sd()            -> { enabled, configured, base, runnerPhase } | null;  sdCanStart() -> bool (only asked when down)
+ *     sdModels()      -> { noModels, label, fix, canRestart } | null   (only asked when it answers)
  *     probe(url)      -> bool            (any HTTP answer = up)
  *     akowe()         -> { enabled, phase, error, message, restarts } | null
  *     panes()         -> [{ site, label, active, state, problem }]
@@ -196,7 +198,20 @@ function createHealthWatch(deps = {}) {
       if (['starting', 'restarting', 'stopped'].includes(s.runnerPhase)) return OFF; // coming up, or the user stopped it
       const up = await call('probe', s.base);
       if (up === undefined) return null;
-      if (up) return [];
+      if (up) {
+        // Answering is not enough: with no picture model loaded every picture fails ("Failed to find available model")
+        // while the Images tab used to say "Connected ✓" (PC test). sdModels() -> { noModels, fix, canRestart, label }.
+        const m = await call('sdModels');
+        if (m && m.noModels) {
+          return [{
+            code: 'sd-no-model', check: 'sd', severity: 'warn',
+            text: `🎨 ${m.label || 'Stable Diffusion'} is connected, but it has no picture model loaded, so every picture fails (“Failed to find available model”). ${m.fix || 'Point it at a folder with a model (.safetensors) and press Refresh on the 🎨 Images tab.'}`,
+            fix: m.canRestart ? { label: `↻ Restart ${m.label || 'it'} with my models`, channel: 'sd:restart-with-models', args: [] } : null,
+            okText: `✔ ${m.label || 'Stable Diffusion'} has a picture model now.`,
+          }];
+        }
+        return [];
+      }
       const canStart = s.canStart != null ? !!s.canStart : !!(await call('sdCanStart')); // looked up only when it's down
       return [{
         code: 'sd-down', check: 'sd', severity: 'warn',

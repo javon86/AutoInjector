@@ -676,8 +676,15 @@ SKIPPED and a manual candidate keeps dependent rows going. Projects with `workfl
 
 * **Runs** (`AutoBookService`, kind `autobook`): `POST /api/autobook {author_confirms: true, genre?, length?,
   slot_id?, idea?}` -> 202 run (409 while another run works; 400 `CAPABILITY_UNAVAILABLE` without an AI);
-  `GET /api/autobook` -> `{runs, active}`; `GET /api/autobook/{id}`; `POST .../{pause|resume|cancel}`;
-  `POST .../decide {action: approve_anyway (needs author_confirms) | retry | edited}`. A run is one daemon thread;
+  `GET /api/autobook` -> `{runs, active, current}` (`current`: the run working, else the newest run not replaced;
+  `runs` newest first with replaced runs last); every run carries `state` (working | waiting | pausing | paused |
+  needs_decision | problem | interrupted | done | cancelled | replaced), `state_words`, `needs_you`,
+  `needs_decision`, `steps_done`, `steps_total` (`AutoBookService.run_state`, also in `GET /api/jobs` and the status
+  push's `run`). When a run finishes a book (or ▶ Continue starts on it), older runs of that book that stopped
+  part-way become `cancelled` with `replaced_by` (no button or note keeps saying Paused / Interrupted);
+  `GET /api/autobook/{id}`; `POST .../{pause|resume|cancel}`;
+  `POST .../decide {action: approve_anyway (needs author_confirms; only when the pause offers it, i.e. a review
+  decision — never for a draft no AI could review) | retry | edited}`. A run is one daemon thread;
   its whole state (steps with state/message/problem/items, consent `{by, at, run_id, scope}`, fix counts, files,
   events) is saved to the JobStore after every change. Steps: backup, profile (new project, AI-invented profile via
   `AssistService._call_ai`), canon (programmatic `BibleSession._run_sections` + `create`), premise/plot/outline

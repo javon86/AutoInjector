@@ -111,6 +111,9 @@
       .al-alfred { align-self:flex-start; background:#171b26; border:1px solid #262e44; }
       .al-notice { align-self:stretch; background:#1c1a10; border:1px solid #4a4220; color:#f1e3b0; font-size:12px; }
       .al-notice .al-fix { margin-top:6px; font-size:12px; padding:2px 10px; } .al-notice .al-fix-note { margin-top:4px; color:#e8a0a0; }
+      .al-rich p { margin:0 0 5px; } .al-rich p:last-child { margin-bottom:0; } .al-rich ul, .al-rich ol { margin:2px 0 5px; padding-left:20px; white-space:normal; } .al-rich li { margin:1px 0; white-space:pre-wrap; }
+      .al-rich code { background:#0b0e16; border:1px solid #2b3550; border-radius:4px; padding:0 3px; font-size:11.5px; } .al-rich pre { background:#0b0e16; border:1px solid #2b3550; border-radius:6px; padding:5px 7px; margin:3px 0; overflow:auto; white-space:pre; font-size:11.5px; } .al-rich .al-h { margin:2px 0 4px; }
+      .al-outdated { opacity:.62; } .al-outdated .al-rich { text-decoration:line-through; text-decoration-color:rgba(241,227,176,.45); } .al-old { font-size:11px; color:#cfe0ff; margin-bottom:3px; text-decoration:none; }
       .al-msg img { display:block; max-width:100%; max-height:180px; margin-top:6px; border-radius:6px; }
       #alfred-card { flex:0 0 auto; margin:8px 10px; padding:9px 10px; border:1px solid #c79a3a; background:#1d1709; border-radius:10px; max-height:52vh; display:flex; flex-direction:column; min-height:0; box-shadow:0 -4px 14px rgba(0,0,0,.35); }
       #alfred-card[hidden] { display:none; }
@@ -555,6 +558,7 @@
     renderCard(st.card);
     // busy: the buttons that send wait; 🩺 and ❓ always work
     $('alfred-busy').hidden = !st.busy;
+    busyTicker(st);
     $('alfred-send').disabled = !!st.busy || !!st.card;
     for (const id of WORK) { const b = $(`alfred-a-${id}`); if (b) b.disabled = !!st.busy || !!st.card; }
     const go = $('alfred-f-go'); if (go) go.disabled = !!st.busy || !!st.card;
@@ -564,9 +568,55 @@
     $('alfred-did-count').textContent = `(${acts.length})`;
     for (const a of acts) list.append(h('li', { class: a.ok ? '' : 'fail', title: a.message || '' }, `${new Date(a.ts).toLocaleTimeString()} ${a.ok ? '✔' : '✖'} ${a.text}${a.auto ? ' (always allowed)' : ''}${a.ok ? '' : ` — ${a.message}`}`));
   }
+  // "🎩 Thinking… 12 s" — a local model can take a minute; the seconds show he is not stuck.
+  let busyTimer = null; let busyFrom = 0; let busyWhat = null;
+  function busyLine() {
+    const t = $('alfred-busy-text'); if (!t) return;
+    const sec = Math.max(0, Math.round((Date.now() - busyFrom) / 1000));
+    const p = busyWhat || {};
+    const what = p.doing === 'tool' && p.tool ? `Using “${p.tool}”…` : 'Thinking…';
+    const slow = sec >= 20 && p.doing !== 'tool' ? (p.brain === 'local' ? ' (a local model can take a minute)' : ' (still waiting for my AI)') : '';
+    t.textContent = `🎩 ${what} ${sec} s${slow}`;
+  }
+  function busyTicker(st) {
+    const on = !!(st && st.busy);
+    if (!on) { if (busyTimer) clearInterval(busyTimer); busyTimer = null; const t = $('alfred-busy-text'); if (t) t.textContent = '🎩 Working on it…'; return; }
+    busyWhat = st.progress || null;
+    const from = Date.now() - ((busyWhat && busyWhat.elapsedMs) || 0);
+    if (!busyTimer || Math.abs(from - busyFrom) > 1500) busyFrom = from;
+    busyLine();
+    if (!busyTimer) busyTimer = setInterval(busyLine, 1000);
+  }
   function fileUrl(p) { return 'file:///' + String(p).replace(/\\/g, '/').replace(/^\/+/, '').split('/').map(encodeURIComponent).join('/'); }
+  // His words as simple formatting (bold, lists, code) — built from alfred-format.js blocks with text nodes
+  // only, never innerHTML, so nothing a model writes can inject HTML. Your own words stay plain text.
+  const FMT = window.AlfredFormat || null;
+  function spansEl(spans) {
+    const out = [];
+    for (const sp of spans || []) {
+      if (sp.t === 'b') out.push(h('strong', null, sp.v));
+      else if (sp.t === 'i') out.push(h('em', null, sp.v));
+      else if (sp.t === 'code') out.push(h('code', null, sp.v));
+      else out.push(document.createTextNode(sp.v));
+    }
+    return out;
+  }
+  function richEl(text) {
+    const box = h('div', { class: 'al-rich' });
+    if (!FMT || typeof FMT.toBlocks !== 'function') { box.append(String(text || '')); return box; }
+    for (const b of FMT.toBlocks(text)) {
+      if (b.type === 'code') box.append(h('pre', null, b.text));
+      else if (b.type === 'ul' || b.type === 'ol') box.append(h(b.type, b.type === 'ol' && b.start > 1 ? { start: b.start } : null, b.items.map((it) => h('li', null, spansEl(it)))));
+      else if (b.type === 'h') box.append(h('div', { class: 'al-h' }, h('strong', null, spansEl(b.spans))));
+      else box.append(h('p', null, spansEl(b.spans)));
+    }
+    return box;
+  }
   function msgEl(m) {
-    const e = h('div', { class: `al-msg al-${m.role}`, 'data-role': m.role }, m.text);
+    const rich = m.role === 'alfred' || m.role === 'notice';
+    const e = h('div', { class: `al-msg al-${m.role}${m.outdated ? ' al-outdated' : ''}`, 'data-role': m.role }, rich ? richEl(m.text) : m.text);
+    // a note about something that has changed since (a book run resumed / finished, a problem fixed)
+    if (m.outdated) e.prepend(h('div', { class: 'al-old' }, `Old news${m.nowText ? ` — now: ${m.nowText}` : ''}`));
     if (m.image) e.append(h('img', { src: fileUrl(m.image), alt: 'the image Alfred made' }));
     // 🩺 a health notice with a one-click fix (health-watch.js → health:fix)
     if (m.action && m.action.code && typeof api.healthFix === 'function') {

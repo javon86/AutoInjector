@@ -80,6 +80,10 @@ function pickChip(item) {
   if (item && item.picking) return { st: "picking", text: "Click it in the AI's window…" };
   if (st === "picked") return { st, text: `Picked: ${item.preview || "found"}${item.latest === false ? " (not the latest answer)" : ""}` };
   if (st === "saved") return { st, text: `✓ Saved${item.savedAt ? ` ${pickTime(item.savedAt)}` : ""}${item.how === "number" ? " (🔢)" : ""}` };
+  // PC test 2026-10-28: the Send row says how Send REALLY works (from the last send
+  // that was proven to arrive) — "Enter key (works)" instead of a stale "⚠️ not found"
+  if (item && item.works === "enter" && (st === "stale" || st === "none")) return { st: "works", text: "Send: Enter key (works)", title: st === "stale" ? "The saved Send button isn't on the page any more, but the Enter key sends — nothing to fix. Press Clear to forget the old button." : "Messages go out with the Enter key — no button needed." };
+  if (item && item.works === "button" && st === "stale") return { st: "works", text: "Send: usual button (works)", title: "The saved Send button isn't on the page any more, but the site's usual Send button works — nothing to fix. Press Clear to forget the old one." };
   if (st === "stale") return { st, text: "⚠️ Saved — not found on the page now" };
   return { st: "none", text: "Not set" };
 }
@@ -175,6 +179,20 @@ async function pickerCancel(site) {
 }
 // The number teach as the card (and the Akọwe panel's box) shows it.
 const TEACH_PART_WORD = { input: "message box", send: "Send button", assistant: "reply area" };
+// What the number teach really learned (same words as self-repair.js teachLearnedWords):
+// never claims a Send button it didn't learn — "Send: the Enter key works" instead.
+function teachLearnedText(t, L) {
+  const saved = (t && Array.isArray(t.saved)) ? t.saved : [];
+  const parts = [];
+  if (saved.includes("input")) parts.push("message box");
+  if (saved.includes("assistant")) parts.push("reply area");
+  const send = saved.includes("send") ? "the Send button (saved)"
+    : (t && (t.sendHow === "enter" || t.sendVia === "enter")) ? "Send: the Enter key works (no button needed)"
+    : (t && t.sendVia === "click") ? `Send: ${L}'s usual Send button works`
+    : null;
+  const learned = parts.length ? `learned ${L}'s ${parts.join(" and ")}` : "checked the page";
+  return send ? `${learned}; ${send}` : learned;
+}
 function teachSteps(t, L) {
   const ph = String((t && t.phase) || "type");
   const order = ["type", "typed", "sent", "user_seen", "asking", "wait_reply", "done"];
@@ -251,7 +269,7 @@ function renderPicker(site, menuEl) {
     const item = (st.items || {})[role] || { state: "none" };
     const c = pickChip(Object.assign({}, item, { picking: item.picking || ps.busy === role }));
     const chip = row.querySelector(".pk-chip");
-    chip.dataset.st = c.st; chip.textContent = c.text; chip.title = c.text;
+    chip.dataset.st = c.st; chip.textContent = c.text; chip.title = c.title || c.text;
     row.classList.toggle("sel", ps.role === role);
     const radio = row.querySelector("input[type=radio]"); radio.checked = ps.role === role;
     row.querySelector(".pk-save").disabled = item.state !== "picked";
@@ -270,7 +288,9 @@ function renderPicker(site, menuEl) {
 }
 function renderPickerTeach(site, box, t) {
   if (!box) return;
-  const recent = t && (t.active || (t.result && t.result !== "cancelled" && Date.now() - (t.startedAt || 0) < 15 * 60000));
+  const ps = pickerState(site);
+  // a finished teach stays on the card until its Close is pressed (or 15 minutes)
+  const recent = t && (t.active || (t.result && t.result !== "cancelled" && ps.teachClosed !== t.startedAt && Date.now() - (t.startedAt || 0) < 15 * 60000));
   if (!recent) { box.hidden = true; box.textContent = ""; return; }
   const L = SITE_LABELS[site];
   box.hidden = false;
@@ -278,7 +298,7 @@ function renderPickerTeach(site, box, t) {
   box.dataset.tone = t.result === "fixed" ? "ok" : t.result ? "err" : "";
   const h = document.createElement("div"); h.className = "pk-teach-title";
   const p = document.createElement("div"); p.className = "pk-teach-text";
-  if (t.result === "fixed") { h.textContent = `✔ Saved — ${L} is working again.`; p.textContent = "The number teach learned the message box, the Send button and the reply area, saved them and a check-in worked."; }
+  if (t.result === "fixed") { h.textContent = `✔ Saved — ${L} is working again.`; p.textContent = `The number teach ${teachLearnedText(t, L)}. It was saved and a check-in worked.`; }
   else if (t.result === "timeout") { h.textContent = "🔢 The number didn't show up in time"; p.textContent = `Nothing was changed. Press “🔢 Do it for me with a number” to try again — type the number exactly, then press Send.`; }
   else if (t.result) { const part = TEACH_PART_WORD[t.failedPart] || "reply area"; h.textContent = `🔢 The ${part} part didn't work`; p.textContent = `${t.saved && t.saved.length ? `Saved: ${t.saved.map((x) => TEACH_PART_WORD[x]).join(", ")}. ` : ""}Use 🎯 for just the ${part}: choose it above, press OK and click it in ${L}'s window.`; }
   else { h.textContent = `🔢 Type ${t.number} into ${L}'s message box and press Send`; p.textContent = "AutoInjector watches where the number appears, then asks the AI to write it backwards to find its replies."; }
@@ -289,6 +309,8 @@ function renderPickerTeach(site, box, t) {
   const acts = document.createElement("div"); acts.className = "pk-actions";
   if (t.active) { const b = document.createElement("button"); b.type = "button"; b.textContent = "Cancel"; b.onclick = async () => { await window.api.selfRepairTeachCancel(site); pickerSay(site, `Cancelled — nothing was changed for ${L}.`); refreshPicker(site); }; acts.appendChild(b); }
   else if (t.result && t.result !== "fixed" && t.failedPart && PICK_ROLES.includes(t.failedPart)) { const b = document.createElement("button"); b.type = "button"; b.className = "pk-ok"; b.textContent = `🎯 Point at the ${TEACH_PART_WORD[t.failedPart]}`; b.onclick = () => { pickerState(site).role = t.failedPart; renderPicker(site); runPick(site, t.failedPart); }; acts.appendChild(b); }
+  // a finished teach's message stays until it is closed (PC test 2026-10-28: it vanished too quickly)
+  if (!t.active && t.result) { const c = document.createElement("button"); c.type = "button"; c.className = "pk-teach-close"; c.textContent = "Close"; c.title = "Hide this message"; c.onclick = () => { pickerState(site).teachClosed = t.startedAt; renderPicker(site); }; acts.appendChild(c); }
   if (acts.children.length) box.appendChild(acts);
 }
 async function pickerNumber(site) {
@@ -3539,6 +3561,41 @@ function bfSetBadge(set) {
   b.title = `Module set ${bfSetLetter(set)}`;
   return b;
 }
+// The "⚡ Make a book for me" run (main: akowe-run.js) — null when there is none for this book.
+function bfRunFor(s) {
+  const r = s && s.run;
+  return r && typeof r === "object" && r.text ? r : null;
+}
+function bfRunLine(run) {
+  if (!run) return "";
+  return `${run.text}${run.stale ? " (last known — Akọwe isn't answering right now)" : ""}`;
+}
+function bfRenderRun(run) {
+  const box = el("bf-run");
+  if (!box) return;
+  box.hidden = !run;
+  if (!run) return;
+  box.dataset.tone = run.tone || "off";
+  box.dataset.state = run.state || "";
+  bfText("bf-run-text", bfRunLine(run));
+  const res = el("btn-bf-run-resume");
+  if (res) res.hidden = !(run.resumable && !run.stale && run.id);
+  const dec = el("btn-bf-run-decide");
+  if (dec) dec.hidden = !(run.needsDecision && !run.stale);
+}
+async function bfRunResume() {
+  const run = bfRunFor(bf.snap || {});
+  const btn = el("btn-bf-run-resume");
+  if (!run || !run.id || !window.api || typeof window.api.akoweRunResume !== "function") return;
+  if (btn) btn.disabled = true;
+  bfText("bf-run-msg", "Resuming…");
+  let r = null;
+  try { r = await window.api.akoweRunResume(run.id); } catch (_) { r = null; }
+  if (btn) btn.disabled = false;
+  bfText("bf-run-msg", (r && r.message) || (r && r.ok ? "Resumed." : "Couldn't resume it — open Akọwe and press ▶ Resume there."));
+  if (r && r.run && bf.snap) { bf.snap = Object.assign({}, bf.snap, { run: r.run }); bfRenderAll(); }
+  setTimeout(() => bfText("bf-run-msg", ""), 8000);
+}
 function bfRenderBook(s, d) {
   const b = s.akowe;
   const rows = b && Array.isArray(b.checklist) ? b.checklist.filter((r) => r && typeof r === "object") : [];
@@ -3546,17 +3603,23 @@ function bfRenderBook(s, d) {
   bfShow("bf-book", has);
   bfShow("bf-book-empty", !has);
   if (!has) bfText("bf-book-empty", d.connected ? "Connected — open a book in Akọwe and its progress shows here." : "When Akọwe is connected, your book's progress shows here.");
+  if (!has) bfRenderRun(null);
   if (has) {
     bfText("bf-book-title", (b.project && b.project.title) ? `“${b.project.title}”` : "Your book");
     const doneCount = rows.filter((r) => bfCheckState(r.state).tone === "ok").length;
-    const total = Number.isFinite(b.total) && b.total > 0 ? b.total : rows.length;
-    const done = Math.min(total, Number.isFinite(b.done) ? b.done : doneCount);
+    const run = bfRunFor(s);
+    // The bar follows the Make-a-book RUN when there is one (its real step, e.g. 7 of 16) — the checklist
+    // alone said "10/10 Done" for a run that had stopped at step 7 when Akọwe closed.
+    const useRun = !!(run && run.total);
+    const total = useRun ? run.total : (Number.isFinite(b.total) && b.total > 0 ? b.total : rows.length);
+    const done = useRun ? (run.state === "finished" ? run.total : Math.min(run.total, run.done || 0)) : Math.min(total, Number.isFinite(b.done) ? b.done : doneCount);
     const pct = total ? Math.round((done / total) * 100) : 0;
     const bar = el("bf-progress-bar");
     if (bar) bar.style.width = `${pct}%`;
     const pb = el("bf-progress");
-    if (pb) { pb.setAttribute("aria-valuemax", String(total)); pb.setAttribute("aria-valuenow", String(done)); pb.title = `${done} of ${total} done (${pct}%)`; }
+    if (pb) { pb.setAttribute("aria-valuemax", String(total)); pb.setAttribute("aria-valuenow", String(done)); pb.title = useRun ? `Make-a-book run: ${run.text} (${done} of ${total} steps done)` : `${done} of ${total} done (${pct}%)`; pb.dataset.tone = useRun ? run.tone : ""; }
     bfText("bf-progress-text", total ? `${done}/${total}` : "–");
+    bfRenderRun(run);
     const stepper = el("bf-stepper");
     bfKeyed(stepper, rows, (r) => r.id || r.op || r.title, (r) => {
       const li = bfNode("li");
@@ -3683,7 +3746,7 @@ function bfProblemsFor(s, d, rows) {
   for (const r of rows) {
     const t = r.test && r.test.status === "fail" ? r.test : null;
     if (anchored.has(r.id) || (r.st !== "bad" && !t)) continue;
-    if (t) add(`lt:${r.id}`, "LINKTEST_FAIL", `Connection check → “${r.label}”`, [`chip:${r.id}`, `row:${r.id}`], { step: r.label, msg: t.detail, tip: t.tip, L: r.site ? bfLabel(r.site, s) : "", site: r.site }, { tech: `link test step ${t.id}: fail${t.http_status ? ` (HTTP ${t.http_status})` : ""}`, extraRetry: r.site ? "reloadPane" : null });
+    if (t) add(`lt:${r.id}`, "LINKTEST_FAIL", `Connection check → “${r.label}”`, [`chip:${r.id}`, `row:${r.id}`], { step: r.label, msg: t.detail, tip: t.tip, L: r.site ? bfLabel(r.site, s) : "", site: r.site }, { tech: `link test step ${t.id}: fail${t.http_status ? ` (HTTP ${t.http_status})` : ""}${t.detail ? ` · ${t.detail}` : ""}${t.reply_excerpt ? ` · ${r.site ? bfLabel(r.site, s) : "The AI"} wrote: ${t.reply_excerpt}` : ""}`, extraRetry: r.site ? "reloadPane" : null });
     else if (r.outcome && bfCodeInfo(r.outcome)) add(`trip:${r.id}`, r.outcome, `Connection check → “${r.label}”`, [`chip:${r.id}`, `row:${r.id}`], { L: bfLabel(r.site, s), site: r.site }, { tech: `last link-test round trip: ${r.outcome}`, retryOverride: "linktest" });
   }
   // failed actions (buttons / IPC) and the panel's own errors
@@ -4001,7 +4064,7 @@ function bfRenderTeach(s) {
   if (t.result === "fixed") {
     box.dataset.tone = "ok";
     title.textContent = `✔ Saved — ${L} is working again.`;
-    text.textContent = `AutoInjector learned ${L}'s message box, Send button and reply area from the number, saved them, and a new check-in worked. Nothing else to do.`;
+    text.textContent = `AutoInjector ${teachLearnedText(t, L)} — from the number. It was saved, and a new check-in worked. Nothing else to do.`;
     for (const st of teachSteps(t, L)) row(st);
     btn("Close", close, "bf-primary");
     return;
@@ -4175,7 +4238,8 @@ function bfRenderAll() {
 function bfRenderSlim(s, d) {
   const b = s.akowe;
   const t = b && b.current_task;
-  const step = t ? `${bfStepLabel(t) || "Current step"}${t.state ? ` — ${bfStateWord(t.state).word}` : ""}` : d.title;
+  const run = bfRunFor(s);
+  const step = run && run.state !== "finished" ? `⚡ ${bfRunLine(run)}` : t ? `${bfStepLabel(t) || "Current step"}${t.state ? ` — ${bfStateWord(t.state).word}` : ""}` : d.title;
   bfText("bf-slim-step", step);
   const st = el("bf-slim-step"); if (st) st.title = step;
   const n = Number((b && b.approvals && b.approvals.count) || 0);
@@ -4303,6 +4367,8 @@ async function bfOpen(url, what, action) {
 if (el("btn-bf-approve")) el("btn-bf-approve").onclick = () => { const s = bf.snap || {}; const b = s.akowe || {}; bfOpen((b.approvals && b.approvals.url) || bfOpenFor(s), "the approvals page", "approve"); };
 if (el("btn-bf-goto-task")) el("btn-bf-goto-task").onclick = () => { const s = bf.snap || {}; const b = s.akowe || {}; bfOpen((b.current_task && b.current_task.url) || bfOpenFor(s), "the current task", "goto"); };
 if (el("btn-bf-open")) el("btn-bf-open").onclick = () => bfOpen(bfOpenFor(bf.snap || {}), "Akọwe", "open");
+if (el("btn-bf-run-resume")) el("btn-bf-run-resume").onclick = () => { bfRunResume(); };
+if (el("btn-bf-run-decide")) el("btn-bf-run-decide").onclick = () => { const s = bf.snap || {}; const b = s.akowe || {}; bfOpen((b.current_task && b.current_task.url) || bfOpenFor(s), "the book", "goto"); };
 // 🔁 Reload an AI's window (the app's own reload).
 async function bfReloadPane(site, L) {
   if (!site) return;

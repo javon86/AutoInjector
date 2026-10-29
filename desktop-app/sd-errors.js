@@ -75,6 +75,9 @@ const VAE_ACTION = { id: 'vae-automatic', label: 'Use Automatic VAE and retry' }
 // One table of known causes; the first match wins (order matters: the VAE
 // state_dict error is a "loading state_dict" error too, so it comes first).
 const RULES = [
+  // Forge / A1111 with NO checkpoint loaded (PC test: Forge "connected", its Checkpoint list empty, every picture
+  // failed "Failed to find available model"). Before the checkpoint rules: it is not a broken file, there is none.
+  { code: 'NO_MODEL', test: (h) => /Failed to find available model|You do not have any model|No checkpoints found|no checkpoint(?:s)? (?:is |was )?(?:loaded|available|found)|model_data\.sd_model is None|sd_model is None/i.test(h) },
   { code: 'VAE_LOAD_FAILED', test: (h) => /AutoencoderKL|first_stage_model/i.test(h) && /state_dict|missing key|unexpected key|size mismatch/i.test(h) },
   { code: 'OOM', test: (h) => /out of memory|OutOfMemory|not enough memory|DefaultCPUAllocator|allocation on device|Tried to allocate/i.test(h) },
   { code: 'NAN', test: (h) => /tensor with all NaNs|NansException|all NaNs|produced NaN/i.test(h) },
@@ -84,6 +87,14 @@ const RULES = [
   { code: 'CHECKPOINT_LOAD_FAILED', test: (h) => /state_dict for (?:LatentDiffusion|DiffusionEngine|UNet|SDXL|BaseModel|DiffusionWrapper)|Error loading (?:model|checkpoint)|failed to load (?:model|checkpoint)|SafetensorError|Error while deserializing header|HeaderTooLarge|CheckpointLoaderSimple|ckpt_name|checkpoint.{0,40}not found|No checkpoints found|model failed to load|could not (?:detect|load) model/i.test(h) },
 ];
 
+// "Connected, but Forge has no picture model loaded" — in plain words, with what to do (ctx.modelHelp: the
+// folders on this PC that hold models, found by the library — sd-studio.js modelHelp()).
+const NO_MODEL_MESSAGE = (ctx) => `${(ctx && ctx.label) || 'Your Stable Diffusion app'} is running, but it has no picture model (checkpoint) loaded, so it can't make pictures. (It said: “Failed to find available model”.)`;
+function NO_MODEL_FIX(ctx) {
+  const h = ctx && ctx.modelHelp;
+  if (h && h.fix) return h.fix;
+  return 'Put a model file (.safetensors) into its checkpoint folder (Stability Matrix: Data/Models/StableDiffusion), or start it with --ckpt-dir "<the folder with your models>" (Stability Matrix: the package\'s ⚙ Launch Options), then press Refresh on the Images tab. No model yet? Images → Setup → download a starter model.';
+}
 function _name(h, re) { const m = String(h || '').match(re); return m ? m[1].replace(/["'\\]+/g, '').trim() : ''; }
 
 function explainSdError(result, ctx = {}) {
@@ -111,6 +122,7 @@ function _explain(r, ctx) {
       const fixes = { VAE_LOAD_FAILED: 'Set VAE to Automatic, or put the file into ComfyUI\'s models/vae folder and press Refresh.', LORA_MISSING: 'Put the file into the Lora folder and press Refresh, or remove that LoRA.', CHECKPOINT_LOAD_FAILED: 'Pick a checkpoint from the list (press Refresh first).' };
       return out(code, r.message, fixes[code] || 'Press Refresh and pick one from the list.', code === 'VAE_LOAD_FAILED' ? [VAE_ACTION] : []);
     }
+    if (code === 'NO_MODEL') return out(code, NO_MODEL_MESSAGE(ctx), NO_MODEL_FIX(ctx));
     if (code === 'VAE_LOAD_FAILED') {
       const vae = !AUTO_VAE(ctx.vae) ? ctx.vae : _name(hay, /vae_name:\s*'([^']+)'/);
       const who = vae ? `The VAE you picked (${_q(vae)})` : 'The VAE your SD app is set to';
@@ -259,4 +271,4 @@ function _explainExit(exitCode, ctx) {
   return { known: false, code: 'EXITED', exitCode, hex, message: `${app} stopped unexpectedly (exit ${hex || (exitCode == null ? 'unknown' : exitCode)}).`, fix: 'Open the log to see why, then press Start again.', actions: _actions(ctx, false), line };
 }
 
-module.exports = { explainSdError, annotate, serverText, firstUsefulLine, DETAILS_MAX, VAE_ACTION, explainExit, importantLine, hexOf, START_CPU_ACTION, OTHER_BUILD_ACTION, OPEN_LOG_ACTION };
+module.exports = { explainSdError, annotate, NO_MODEL_MESSAGE, NO_MODEL_FIX, serverText, firstUsefulLine, DETAILS_MAX, VAE_ACTION, explainExit, importantLine, hexOf, START_CPU_ACTION, OTHER_BUILD_ACTION, OPEN_LOG_ACTION };

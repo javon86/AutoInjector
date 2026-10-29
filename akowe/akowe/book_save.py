@@ -623,11 +623,14 @@ class SaveService:
         if not isinstance(crafts, dict) or not crafts:
             return None
         out = ["# 🖋 Editor summary", "", "| Chapter | Version | Editor | Average score | Notes |", "|---|---|---|---|---|"]
+        from .book_report import latest_read  # noqa: PLC0415
         for c in chapters:
-            cr = crafts.get(f"{c['record_id']}:{c['version']}")
+            cr, at = latest_read(crafts, c["record_id"], c["version"])
             if not isinstance(cr, dict):
                 out.append(f"| {c['number']} | {c['version']} | not read | – | – |")
                 continue
+            if at != c["version"]:
+                c = dict(c, version=f"{c['version']} (the editor read version {at})")
             scores = [v for v in (cr.get("scores") or {}).values() if isinstance(v, (int, float))]
             avg = round(sum(scores) / len(scores), 1) if scores else "–"
             out.append(f"| {c['number']} | {c['version']} | {cr.get('verdict') or '?'} | {avg} | "
@@ -636,18 +639,38 @@ class SaveService:
         return "\n".join(out)
 
     def _planned_summary(self, pid, branch) -> str | None:
+        """Reports/Planned to page.md: what the plan (scene cards, must-show details, the outline) asked for and whether
+        it is on the page, per chapter. None (the file is not written; an older copy is removed) when no chapter is
+        written yet or nothing was planned to check; a short note when the check itself failed."""
         try:
             res = self.app.review.planned.book(self.app.principal_id, pid, branch)
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
+            log.exception("planned-to-page summary for the save failed")
+            return ("# ✅ Planned to page\n\nAkọwe could not check the planned details for this save "
+                    f"({getattr(exc, 'code', None) or type(exc).__name__}). Open the book in Akọwe and look at "
+                    "✅ Planned to page on each chapter, then save again.\n")
+        rows = [r for r in res.get("chapters") or [] if r.get("written")]
+        planned_n = sum(int((r.get("counts") or {}).get("items") or 0) for r in rows)
+        if not rows or (not planned_n and not res.get("names_never_on_page")):
             return None
-        if not res.get("chapters"):
-            return None
-        out = ["# ✅ Planned to page", "", f"Missing planned items in the whole book: {res['counts'].get('missing', 0)}",
-               "", "| Chapter | On the page | Unclear | Missing |", "|---|---|---|---|"]
+        missing_n = res["counts"].get("missing", 0)
+        on_page = sum(int((r.get("counts") or {}).get("on_page") or 0) for r in rows)
+        out = ["# ✅ Planned to page", "",
+               f"What the plan asked each chapter to show (scene cards, must-show details, the outline) and whether "
+               f"it is on the page: {on_page} of {planned_n} planned item(s) are on the page; "
+               + (f"{missing_n} required item(s) are still missing." if missing_n else "nothing required is missing."),
+               "", "| Chapter | Planned items | On the page | Unclear | Missing | Checked by an AI |",
+               "|---|---|---|---|---|---|"]
         for r in res["chapters"]:
             c = r.get("counts") or {}
-            out.append(f"| {r.get('number')} | {c.get('on_page', '–')} | {c.get('unclear', '–')} | "
-                       f"{c.get('missing', '–') if r.get('written') else 'not written'} |")
+            if not r.get("written"):
+                out.append(f"| {r.get('number')} | – | – | – | not written | – |")
+                continue
+            out.append(f"| {r.get('number')} | {c.get('items', 0)} | {c.get('on_page', 0)} | {c.get('unclear', 0)} | "
+                       f"{c.get('missing', 0)} | {'yes' if r.get('ai_checked') else 'no (Akọwe only)'} |")
+        if res.get("names_never_on_page"):
+            out += ["", "Point-of-view characters whose name never appears in the book: "
+                    + ", ".join(res["names_never_on_page"]) + "."]
         if res.get("missing"):
             out += ["", "## Not on the page yet", ""] + [f"- Chapter {m.get('number')}: {m.get('label')}"
                                                           for m in res["missing"][:60]]

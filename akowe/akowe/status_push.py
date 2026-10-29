@@ -9,7 +9,14 @@ summary of where the most recently opened book stands to ``POST <bridge_url>/v1/
      "current_task": {"set", "op", "title", "state", "message", "url"},
      "working_on": {"op", "title", "started_at"} | null,
      "approvals": {"count", "items": [{"op", "set", "title"}] (max 20), "url"},
-     "checklist": [{"id", "title", "set", "state"}], "done", "total", "words": {"total", "target"}, "updated_at"}
+     "checklist": [{"id", "title", "set", "state"}], "done", "total", "words": {"total", "target"},
+     "run": {"id", "title", "state", "state_words", "status", "needs_you", "needs_decision", "steps_done",
+             "steps_total", "phase", "problem", "updated_at", "finished_at", "url"} | null, "updated_at"}
+
+``checklist``/``done``/``total`` are the BOOK's steps (Make my book), not a run: a book can be 10/10 while its last
+⚡ Make-a-book run stopped part-way. ``run`` is the newest ⚡ Make-a-book run of that book (the working one first; runs
+a newer run replaced are skipped) and ``run.state`` is the one word to show for it: working | waiting | pausing |
+paused | needs_decision | problem | interrupted | done | cancelled (``AutoBookService.run_state``).
 
 Titles only - never chapter text, prompts or keys (canon entries are named by their concept, every other draft by
 its step name). Sent on change (at most every 5 s) and as a heartbeat every 30 s; the body stays below 32 KiB.
@@ -53,7 +60,7 @@ def build_summary(app, base_url: str) -> dict:
                              "message": "No book is open yet. Open Akọwe and start a new book.",
                              "url": base + "#/start"},
             "working_on": app.work.current(None), "approvals": {"count": 0, "items": [], "url": base + "#/"},
-            "checklist": [], "done": 0, "total": 0, "updated_at": _now_iso()}
+            "checklist": [], "done": 0, "total": 0, "run": None, "updated_at": _now_iso()}
     if not last:
         return body
     pid, branch = last["project_id"], last.get("branch_id") or "main"
@@ -83,7 +90,31 @@ def build_summary(app, base_url: str) -> dict:
                   "target": (status.get("words") or {}).get("target_words", 0)}})
     if body["current_task"]["state"] in ("ai_can", "needs_you") and body["working_on"]:
         body["current_task"]["state"] = "working"
+    body["run"] = run_brief(app, pid, base + "#/" + "/".join(quote(x, safe="") for x in ("p", pid, branch, "book")))
     return body
+
+
+def run_brief(app, pid: str, url: str) -> dict | None:
+    """The newest ⚡ Make-a-book run of the book ``pid`` in a few plain fields (None: no run, or it cannot be read)."""
+    ab = getattr(app, "autobook", None)
+    if ab is None:
+        return None
+    try:
+        runs = [ab._cache.get(j["id"], j) for j in app.jobstore.list(kind=ab.KIND, project_id=pid, limit=20)]
+        live = [r for r in runs if ab.alive(r["id"])]
+        run = (live or [r for r in runs if not r.get("replaced_by")] or [None])[0]
+        if run is None:
+            return None
+        p = ab.public(run)
+        prob = run.get("problem") or {}
+        return {"id": p["id"], "title": str(p.get("title") or "")[:120], "state": p["state"],
+                "state_words": p["state_words"], "status": p.get("status"), "needs_you": p["needs_you"],
+                "needs_decision": p["needs_decision"], "steps_done": p["steps_done"], "steps_total": p["steps_total"],
+                "phase": str(p.get("phase") or "")[:200], "problem": str(prob.get("message") or "")[:300] or None,
+                "updated_at": p.get("updated_at"), "finished_at": p.get("finished_at"), "url": url}
+    except Exception:  # noqa: BLE001 - status is a convenience
+        log.debug("could not read the book's run for the status push", exc_info=True)
+        return None
 
 
 def encode(body: dict) -> bytes:

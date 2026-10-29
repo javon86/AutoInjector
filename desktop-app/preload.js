@@ -128,6 +128,8 @@ contextBridge.exposeInMainWorld("api", {
     settings: (patch) => ipcRenderer.invoke("sd:settings", { patch }),
     generate: (req) => ipcRenderer.invoke("sd:generate", req),
     test: () => ipcRenderer.invoke("sd:test"),
+    modelCheck: () => ipcRenderer.invoke("sd:model-check"),
+    restartWithModels: () => ipcRenderer.invoke("sd:restart-with-models"),
     fixAndRetry: (fix, request) => ipcRenderer.invoke("sd:fix-retry", { fix, request }),
     progress: () => ipcRenderer.invoke("sd:progress"),
     cancel: () => ipcRenderer.invoke("sd:cancel"),
@@ -305,6 +307,7 @@ contextBridge.exposeInMainWorld("api", {
   onTerminalState: (cb) => ipcRenderer.on("terminal-state", (_e, payload) => cb(payload)),
   // Akọwe bridge (experimental) — see docs/AKOWE_AUTOINJECTOR_BRIDGE.md
   akoweStatus: (opts) => ipcRenderer.invoke("akowe:status", opts || {}),
+  akoweRunResume: (id) => ipcRenderer.invoke("akowe:run-resume", { id }),
   // 📖 Akọwe tab: the server AutoInjector runs itself, and the view showing it
   akoweServerStatus: () => ipcRenderer.invoke("akowe-server:status"),
   akoweServerRetry: () => ipcRenderer.invoke("akowe-server:retry"),

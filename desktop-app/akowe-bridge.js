@@ -99,6 +99,15 @@
  *   soon as it is stamped — and a declined reply is remembered briefly so a send
  *   that confirms a moment later still collects its answer.
  *
+ * PC test 2026-10-28 (backward compatible): sendToSite may also return verified
+ *   (true = the prompt was proven to show up in the chat, false = the box emptied
+ *   but it never showed up); a 504 then carries delivered: true|false|null and,
+ *   for false, says the prompt never arrived instead of "not captured".
+ *   release(site, reason) ends a request still waiting on that site (main.js calls
+ *   it when the user starts the 🔢 number teach there), so nothing typed during the
+ *   setup is taken as its late answer: 503 if not typed yet (withdrawn), else 504
+ *   late_expired + released.
+ *
  * timeScale (default 1) multiplies every real wait (request timeout and the
  * post-504 late window). It exists only so tests / the fake host can exercise
  * timeout behaviour quickly; validation of timeout_ms still uses the contract's
@@ -150,7 +159,7 @@ const OUTCOME_HTTP = {
   BAD_REQUEST: 400, UNKNOWN_SITE: 404, NOT_FOUND: 404, UNAUTHORIZED: 401,
   PAIRED: 200, PAIRING_CODE_INVALID: 401, PAIRING_CODE_EXPIRED: 410, TOO_MANY_ATTEMPTS: 429, NOT_READY: 503
 };
-const EVENT_FIELDS = ['site', 'request_id', 'outcome', 'elapsed_ms', 'http_status', 'port', 'error', 'state', 'problem'];
+const EVENT_FIELDS = ['site', 'request_id', 'outcome', 'elapsed_ms', 'http_status', 'port', 'error', 'state', 'problem', 'delivered', 'reason'];
 // --- contract v1.2: self-repair states ---
 const SITE_STATES = ['ok', 'repairing', 'needs_user', 'broken', 'unknown'];
 const NOT_USABLE_STATES = new Set(['repairing', 'needs_user', 'broken']);
@@ -282,6 +291,17 @@ function sanitizeAkoweStatus(body) {
     .map((c) => ({ id: capStr(c.id, 60), title: capStr(c.title, 200), set: capStr(c.set, 20), state: capStr(c.state, 40) }));
   out.done = capInt(body.done, 100000);
   out.total = capInt(body.total, 100000);
+  // Optional (a newer Akọwe): the "Make a book for me" run itself — its real state, not the checklist's.
+  const run = obj(body.run);
+  const rp = run && obj(run.problem);
+  out.run = run ? {
+    id: capStr(run.id, 80), title: capStr(run.title, 200), state: capStr(run.state, 40), state_words: capStr(run.state_words, 300),
+    status: capStr(run.status, 40), phase: capStr(run.phase, 300), project_id: capStr(run.project_id, 100),
+    needs_you: run.needs_you === true, needs_decision: typeof run.needs_decision === 'boolean' ? run.needs_decision : null,
+    step: capInt(run.step, 1000), steps_done: capInt(run.steps_done, 1000), steps_total: capInt(run.steps_total, 1000),
+    problem: rp ? { code: capStr(rp.code, 60), message: capStr(rp.message, 300) } : (typeof run.problem === 'string' ? { code: null, message: capStr(run.problem, 300) } : null),
+    replaced_by: capStr(run.replaced_by, 80), updated_at: toEpochMs(run.updated_at), finished_at: toEpochMs(run.finished_at), url: loopbackUrl(run.url)
+  } : null;
   out.updated_at = toEpochMs(body.updated_at);
   return { ok: true, value: out };
 }
@@ -441,7 +461,11 @@ function createBridge(opts) {
     const entry = {
       site, requestId, startedAt: now(), seq: null, typed: false, typedAt: null, phase: 'sending',
       outcome, resolve, done: false, lateTimer: null, lateWindowMs: 0, promptChars: prompt.length,
-      cancelToken, sendSettled: null
+      cancelToken, sendSettled: null,
+      // PC test 2026-10-28: did the prompt really show up in the AI's chat? true =
+      // proven ([MSG #] seen / a new message of the user's appeared), false = the
+      // box emptied but it never showed up, null = the host didn't say.
+      delivered: null
     };
     active.set(site, entry);
     inflight.set(requestId, entry);
@@ -455,8 +479,9 @@ function createBridge(opts) {
         entry.typed = true;
         entry.typedAt = now();
         if (r.seq != null) entry.seq = String(r.seq);
+        entry.delivered = r.verified === true ? true : r.verified === false ? false : null;
         if (entry.phase === 'sending') entry.phase = 'waiting';
-        log('sent', { site, request_id: requestId, seq: entry.seq });
+        log('sent', { site, request_id: requestId, seq: entry.seq, delivered: entry.delivered === false ? 'no' : undefined });
         // P18.5: its answer may already have been captured while the send was
         // still being confirmed (the AI answered during a retry). Take it now.
         const early = takeDeclined(site, entry.seq);
@@ -507,16 +532,18 @@ function createBridge(opts) {
       entry.lateWindowMs = Math.min(timeoutMs, LATE_WINDOW_MAX_MS);
       entry.lateTimer = setTimeout(() => {
         if (entry.done) return;
-        log('outcome', { site: entry.site, request_id: entry.requestId, outcome: 'LATE_EXPIRED', elapsed_ms: now() - entry.startedAt });
-        finish(entry, { status: 504, body: Object.assign(errBody('TIMEOUT',
-          `the prompt was typed into ${entry.site} as [MSG #${entry.seq}], but no answer to it was captured, even after another ${lateSeconds(entry)} s; ${entry.site} is free again`, true),
-          { typed: true, seq: entry.seq, late_expired: true }) });
+        log('outcome', { site: entry.site, request_id: entry.requestId, outcome: 'LATE_EXPIRED', elapsed_ms: now() - entry.startedAt, delivered: entry.delivered === false ? 'no' : undefined });
+        finish(entry, { status: 504, body: Object.assign(errBody('TIMEOUT', entry.delivered === false
+          ? `the prompt was typed into ${entry.site} as [MSG #${entry.seq}], but it never showed up in ${entry.site}'s chat (the message box emptied without sending), so no answer could come; ${entry.site} is free again`
+          : `the prompt was typed into ${entry.site} as [MSG #${entry.seq}], but no answer to it was captured, even after another ${lateSeconds(entry)} s; ${entry.site} is free again`, true),
+          { typed: true, seq: entry.seq, late_expired: true, delivered: entry.delivered }) });
       }, Math.max(1, Math.round(entry.lateWindowMs * timeScale)));
     }
-    log('outcome', { site: entry.site, request_id: entry.requestId, outcome: 'TIMEOUT', elapsed_ms: now() - entry.startedAt });
-    return { status: 504, body: Object.assign(errBody('TIMEOUT',
-      `the prompt was typed into ${entry.site} as [MSG #${entry.seq}], but its answer was not captured within ${timeoutMs} ms; it may still arrive — ask again with the same request_id within ${lateSeconds(entry)} s to collect it`, true),
-      { typed: true, seq: entry.seq, late_window_ms: entry.lateWindowMs }) };
+    log('outcome', { site: entry.site, request_id: entry.requestId, outcome: 'TIMEOUT', elapsed_ms: now() - entry.startedAt, delivered: entry.delivered === false ? 'no' : undefined });
+    return { status: 504, body: Object.assign(errBody('TIMEOUT', entry.delivered === false
+      ? `the prompt was typed into ${entry.site} as [MSG #${entry.seq}], but it never showed up in ${entry.site}'s chat (the message box emptied without sending), so ${entry.site} could not answer it within ${timeoutMs} ms`
+      : `the prompt was typed into ${entry.site} as [MSG #${entry.seq}], but its answer was not captured within ${timeoutMs} ms; it may still arrive — ask again with the same request_id within ${lateSeconds(entry)} s to collect it`, true),
+      { typed: true, seq: entry.seq, late_window_ms: entry.lateWindowMs, delivered: entry.delivered }) };
   }
 
   // Wait for an entry's outcome for at most timeoutMs (see expire()).
@@ -584,6 +611,29 @@ function createBridge(opts) {
     } else if (typeof turn.ts === 'number' && entry.typedAt != null && turn.ts < entry.typedAt) return false;
     ownTurn(entry, turn);
     return true;
+  }
+
+  // PC test 2026-10-28: the user is setting this AI up (🔢 number teach) — stop
+  // waiting for an answer here, so nothing the user types (or the AI answers to
+  // it) during the setup is taken as a late answer. A prompt not typed yet is
+  // withdrawn (503); a typed one ends now (504, late_expired, released) and the
+  // site is free. Returns what was released, or null.
+  function release(site, reason) {
+    const entry = active.get(site);
+    if (!entry || entry.done) return null;
+    const why = String(reason || 'released').slice(0, 40);
+    const phase = entry.phase;
+    if (!entry.typed) {
+      entry.cancelToken.cancelled = true;
+      log('outcome', { site, request_id: entry.requestId, outcome: 'SITE_NOT_READY', elapsed_ms: now() - entry.startedAt, reason: why });
+      finish(entry, { status: 503, body: Object.assign(errBody('SITE_NOT_READY', `${site} is being set up by the user right now (${why}); the prompt was withdrawn before it was typed — asking again later is safe`, false), { typed: false, released: true }) });
+      return { site, request_id: entry.requestId, phase, typed: false };
+    }
+    log('outcome', { site, request_id: entry.requestId, outcome: 'LATE_EXPIRED', elapsed_ms: now() - entry.startedAt, reason: why });
+    finish(entry, { status: 504, body: Object.assign(errBody('TIMEOUT',
+      `the prompt was typed into ${site} as [MSG #${entry.seq}], but the user started setting ${site} up (${why}) before its answer was captured; AutoInjector stopped waiting for it and ${site} is free again`, true),
+      { typed: true, seq: entry.seq, late_expired: true, released: true, delivered: entry.delivered }) });
+    return { site, request_id: entry.requestId, phase, typed: true };
   }
 
   // A typed bridge prompt on this site is waiting for its answer.
@@ -953,7 +1003,7 @@ function createBridge(opts) {
     });
   }
 
-  return { start, stop, onCaptured, awaitingReply, status, recordEvent, createPairingCode, akoweStatus, pairingStatus, address: () => (server ? server.address() : null) };
+  return { start, stop, onCaptured, awaitingReply, release, status, recordEvent, createPairingCode, akoweStatus, pairingStatus, address: () => (server ? server.address() : null) };
 }
 
 // --- plain-English activity lines (for the desktop panel + link-test report) ---
@@ -1000,8 +1050,14 @@ function describeEvent(ev, label) {
   switch (e.outcome) {
     case 'OK': return { say: `${L} answered in ${dur}${e.selftest ? ' (link test)' : ''}`, tone: 'ok' };
     case 'LATE_REPLY_STORED': return { say: `${L} answered late (after ${dur}) — saved so ${who} gets it if it asks again`, tone: 'warn' };
-    case 'TIMEOUT': return { say: `${L} hadn't answered after ${dur} — timed out${e.selftest ? '' : '. Akọwe will ask you before retrying'}`, tone: 'error' };
-    case 'LATE_EXPIRED': return { say: `${L} never answered${id}; ${L} is free again`, tone: 'warn' };
+    case 'TIMEOUT': return e.delivered === 'no'
+      ? { say: `The message never arrived in ${L}'s chat (typed in, but it never showed up) — waited ${dur}${e.selftest ? '' : '. Akọwe will ask you before retrying'}`, tone: 'error' }
+      : { say: `${L} hadn't answered after ${dur} — timed out${e.selftest ? '' : '. Akọwe will ask you before retrying'}`, tone: 'error' };
+    case 'LATE_EXPIRED': return e.reason === 'teach'
+      ? { say: `Stopped waiting for ${L}'s answer${id} because you started 🔢 setup for ${L}; ${L} is free again`, tone: 'info' }
+      : e.delivered === 'no'
+        ? { say: `The message${id} never arrived in ${L}'s chat, so ${L} never answered; ${L} is free again`, tone: 'warn' }
+        : { say: `${L} never answered${id}; ${L} is free again`, tone: 'warn' };
     case 'CACHED': return { say: `${who} collected ${L}'s earlier answer again (nothing re-sent)`, tone: 'info' };
     case 'SITE_NOT_READY': return { say: `${L}'s window isn't loaded, so the request was turned away`, tone: 'error' };
     case 'SEND_FAILED': return { say: `Couldn't type the prompt into ${L}'s window`, tone: 'error' };

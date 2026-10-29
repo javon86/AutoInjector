@@ -77,7 +77,7 @@ const IPC_INVENTORY = [
   'akowe-server:get-python', 'akowe-server:open-log', 'akowe-server:retry', 'akowe-server:set-autostart', 'akowe-server:status',
   'akowe-view:dock', 'akowe-view:pop-out', 'akowe-view:reload', 'akowe-view:tab',
   'akowe:connect', 'akowe:copy-diagnostics', 'akowe:copy-token', 'akowe:diagnostics', 'akowe:linktest-open-report', 'akowe:linktest-run',
-  'akowe:linktest-stop', 'akowe:open-url', 'akowe:regenerate-token', 'akowe:reveal-token', 'akowe:set-enabled', 'akowe:start-app', 'akowe:status',
+  'akowe:linktest-stop', 'akowe:open-url', 'akowe:run-resume', 'akowe:regenerate-token', 'akowe:reveal-token', 'akowe:set-enabled', 'akowe:start-app', 'akowe:status',
   'alfred:ask', 'alfred:cancel', 'alfred:clear', 'alfred:confirm', 'alfred:models', 'alfred:open-path', 'alfred:reject', 'alfred:set-enabled',
   'alfred:settings', 'alfred:status', 'alfred:test-ai',
   'alfred:personality', 'alfred:profiles', 'alfred:profile-save', 'alfred:profile-use', 'alfred:profile-delete',
@@ -99,7 +99,7 @@ const IPC_INVENTORY = [
   'sd:lists', 'sd:open-images-folder', 'sd:open-install-folder', 'sd:open-log', 'sd:open-ui', 'sd:progress', 'sd:record', 'sd:set-autostart',
   'sd:settings', 'sd:show-file', 'sd:start', 'sd:start-cpu', 'sd:use-other-build', 'sd:status', 'sd:stop', 'sd:targets', 'sd:test', 'sd:fix-retry',
   'sd:img2img', 'sd:inpaint', 'sd:upscale', 'sd:extras', 'sd:options-get', 'sd:options-set', 'sd:interrupt', 'sd:skip', 'sd:refresh', 'sd:memory', 'sd:workflows', 'sd:workflow-get', 'sd:workflow-save', 'sd:workflow-delete', 'sd:workflow-run', 'sd:capabilities',
-  'sd:request', 'sd:chatgpt-status', 'sd:chatgpt-cancel', 'sd:chatgpt-settings',
+  'sd:request', 'sd:chatgpt-status', 'sd:chatgpt-cancel', 'sd:chatgpt-settings', 'sd:model-check', 'sd:restart-with-models',
   'sdlib:add-folder', 'sdlib:check', 'sdlib:collection', 'sdlib:delete-lock', 'sdlib:folders', 'sdlib:list', 'sdlib:locks', 'sdlib:remove-folder',
   'sdlib:save-lock', 'sdlib:scan', 'sdlib:update', 'selector:clear', 'selector:pick',
   'selfrepair:forget-learned', 'selfrepair:probe', 'selfrepair:reload', 'selfrepair:settings', 'selfrepair:status', 'selfrepair:teach-cancel', 'selfrepair:teach-start',
@@ -299,7 +299,7 @@ async function main() {
       const carded = r.type === 'confirm';
       if (carded) r = await a.confirm(r.card.id);
       const want = e.local ? { ch: `local:${e.local}`, args: [e.example] } : { ch: e.channel, args: e.call(e.example) };
-      const good = carded === e.changes && invoked.length === 1 && invoked[0].ch === want.ch && JSON.stringify(invoked[0].args) === JSON.stringify(want.args) && /RESULT/.test(r.text || '');
+      const good = carded === e.changes && invoked.length === 1 && invoked[0].ch === want.ch && JSON.stringify(invoked[0].args) === JSON.stringify(want.args) && /RESULT/.test(r.raw || r.text || '');
       if (good) { okAll++; mark(`app:${e.id}`, 'fake-LLM→IPC'); } else console.log(`      ! ${e.id}: carded=${carded} invoked=${JSON.stringify(invoked)}`);
     }
     assert(okAll === appActions.ACTIONS.length, `all ${appActions.ACTIONS.length} app actions reach their channel with the right arguments; the ${appActions.ACTIONS.filter((x) => x.changes).length} that change something only after ✔ Do it (${okAll} ok)`);
@@ -344,7 +344,7 @@ async function main() {
     const carded = r && r.type === 'confirm';
     const card = carded ? r.card : null;
     if (carded && confirm) r = await call('alfred:confirm', { id: card.id });
-    const text = (r && r.text) || '';
+    const text = (r && (r.raw || r.text)) || ''; // (raw: the AI's own words before the reply is cleaned for the user)
     let result = null; try { result = JSON.parse(text.replace(/^RESULT /, '')); } catch (_) { result = null; }
     return { carded, card, text, result, r };
   }
@@ -671,7 +671,7 @@ async function main() {
       akowe: (m, p, body) => nodeHttp({ method: m, url: ak.base + p, headers: { Authorization: `Bearer ${TOKEN}` }, body, timeoutMs: 5000 }).catch(() => ({ status: 0 })),
       openAkowePage: async (h) => { pages.push(h); return { ok: true }; },
     } });
-    const bd = async (tool, args) => { bq.push(toolCall(tool, args)); let r = await b.ask(`use ${tool}`); const carded = r.type === 'confirm'; if (carded) r = await b.confirm(r.card.id); return { carded, text: r.text || '' }; };
+    const bd = async (tool, args) => { bq.push(toolCall(tool, args)); let r = await b.ask(`use ${tool}`); const carded = r.type === 'confirm'; if (carded) r = await b.confirm(r.card.id); return { carded, text: r.raw || r.text || '' }; };
     const hit = (m, p) => ak.requests.some((x) => x.method === m && x.path === p);
     const B = '/api/projects/proj-1/branches/main';
     const cases = [

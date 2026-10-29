@@ -1502,6 +1502,19 @@ const sendQueues = {};
 // in the chat (see sendTextTo). Per run; a pane that never proves one is still
 // trusted on "box emptied" alone, with a send-unverified warning in the log.
 const sendVerifiedSeen = {};
+// How the last PROVEN send to each pane went out: { method: "click"|"enter", savedSend, at }.
+// The 🎯 card's Send row uses it ("Send: Enter key (works)"), not only the saved selector.
+const lastSendHow = {};
+// A saved / learned Send button that is no longer on the page: the send uses the
+// built-in buttons and Enter instead, and the log says so plainly (once per selector).
+const staleSendNoted = {};
+function noteStaleSavedSend(target, r) {
+  const sel = (effectiveOverrides(target) || {}).send || "";
+  if (staleSendNoted[target] === sel) return;
+  staleSendNoted[target] = sel;
+  const L = siteLabel(target);
+  logEvent("send-saved-button-missing", { target, selector: sel, severity: "warn", note: `The Send button saved for ${L} (🎯 / 🔢 / learned) isn't on ${L}'s page any more — AutoInjector used ${L}'s usual Send button or the Enter key instead${r && r.ok === false ? ", and that didn't send either" : ""}. Clear it on ${L}'s 🎯 card (or run 🔢 again) to stop this warning.` });
+}
 // TR-25: how long a send waits for an AI that is still writing its last reply.
 const SEND_BUSY_WAIT_MS = Number(process.env.AUTOINJECTOR_SEND_BUSY_WAIT_MS) || 5 * 60 * 1000;
 const SEND_BUSY_POLL_MS = Number(process.env.AUTOINJECTOR_SEND_BUSY_POLL_MS) || 2000;
@@ -1793,7 +1806,12 @@ async function sendTextTo(target, text, fromSite, opts = {}) {
       // only "emptied the box" without showing up is NOT trusted: the page can
       // clear its box without sending (that is how ChatGPT went silent).
       if (r && markerBaseline == null && Number.isInteger(r.markerBaseline)) markerBaseline = r.markerBaseline;
-      if (r && r.ok && r.verified === false && sendVerifiedSeen[target]) r = { ok: false, error: "SEND_UNVERIFIED" };
+      // PC test 2026-10-28: and when the page shows the user's messages in a way the
+      // script can count, "the box emptied but no new message appeared and its
+      // number never showed" means it did NOT arrive — even on a pane's first send.
+      if (r && r.ok && r.verified === false && (sendVerifiedSeen[target] || r.turnsCountable === true)) r = { ok: false, error: "SEND_UNVERIFIED", savedSend: r.savedSend, markerBaseline: r.markerBaseline };
+      if (r && r.savedSend && r.savedSend !== "found") noteStaleSavedSend(target, r);
+      if (r && Array.isArray(r.dismissed) && r.dismissed.length) logEvent("popup-dismissed", { target, seq, what: r.dismissed.slice(0, 3), note: `closed a feedback pop-up inside ${siteLabel(target)}'s window (its own Dismiss / Close button) before typing` });
       if (r && r.ok) { if (r.verified) sendVerifiedSeen[target] = true; break; }
       // TR-25: the AI is still writing its previous reply — wait for it to
       // finish (it can't take a new message yet) instead of burning retries.
@@ -1884,7 +1902,8 @@ async function sendTextTo(target, text, fromSite, opts = {}) {
     broadcast("sent", { target, from: fromSite || null, ts: Date.now(), seq });
     if (!answeredEarly) broadcast("waiting-changed", { site: target, waiting: true });
     else logEvent("reply-before-confirm", { target, seq, note: "its answer was captured while the send was still being confirmed (P18.5)" });
-    logEvent("sent", { target, from: fromSite || null, attempts, selfRecovered: attempts > 1, seq, verified: res.verified === true, method: res.method || null });
+    logEvent("sent", { target, from: fromSite || null, attempts, selfRecovered: attempts > 1, seq, verified: res.verified === true, proof: res.proof || null, method: res.method || null });
+    if (res.verified === true && res.method && res.method !== "already-sent") lastSendHow[target] = { method: res.method, savedSend: res.savedSend || "found", at: Date.now() };
     if (res.verified === false) logEvent("send-unverified", { target, seq, severity: "warn", note: "the box emptied but this message's number never showed in the chat" });
   }
   return res;
@@ -5615,8 +5634,39 @@ async function pickerStatus(site) {
     }
     items[role] = { state: st, preview: d ? d.preview : null, latest: d ? d.latest !== false : null, savedAt: sel ? (m ? m.savedAt || null : null) : null, how: sel ? (m ? m.how : "pick") : null, rev: m ? m.rev : null, picking: pickRunning[site] === role, selector: d ? d.selector : sel || null };
   }
+  if (items.send) { const w = pickerSendWorks(site); if (w) items.send.works = w; } // how Send really works (PC test 2026-10-28)
   let repair = null; try { repair = selfRepair.state(site); } catch (_) {}
   return { ok: true, site, label: siteLabel(site), items, picking: pickRunning[site] || null, repair };
+}
+// 🔢 sent with Enter (or the usual Send button) and learned no Send button: drop a
+// saved / learned Send button that is not on the page any more, so the 🎯 card
+// says how Send really works instead of "⚠️ not found". One that IS on the page is kept.
+async function teachSendWorks(site, how) {
+  if (!SITES[site]) return { ok: false };
+  lastSendHow[site] = { method: how === "enter" ? "enter" : "click", savedSend: "missing", at: Date.now(), by: "number" };
+  const sel = pickerSavedSel(site, "send") || ((state.learnedSelectors[site] || {}).send || {}).selector || null;
+  if (!sel) { broadcastPicker(site); return { ok: true, cleared: false }; }
+  let check = null;
+  const view = siteViews[site];
+  if (view && !view.webContents.isDestroyed()) {
+    try { check = await view.webContents.executeJavaScript(selfRepairLib.buildMatchCheckScript(site, SITES, { send: sel }), true); } catch (_) { check = null; }
+  }
+  const c = check && check.ok && check.roles ? check.roles.send : null;
+  if (!c || c.ok) { broadcastPicker(site); return { ok: true, cleared: false }; }
+  const next = { ...(state.selectorOverrides[site] || {}) }; delete next.send; state.selectorOverrides[site] = next;
+  if (state.pickMeta[site] && state.pickMeta[site].send) { const m = { ...state.pickMeta[site] }; delete m.send; state.pickMeta[site] = m; }
+  if (state.learnedSelectors[site] && state.learnedSelectors[site].send) { const l = { ...state.learnedSelectors[site] }; delete l.send; state.learnedSelectors[site] = l; }
+  saveStateDebounced();
+  logEvent("selector-override-cleared", { site, role: "send", via: "number", selector: sel, note: `🔢 showed that ${siteLabel(site)} sends with ${how === "enter" ? "the Enter key" : "its usual Send button"}; the saved Send button wasn't on the page any more, so it was removed` });
+  broadcastPicker(site);
+  return { ok: true, cleared: true };
+}
+// How Send works right now, for the 🎯 card's Send row (from the last proven send).
+function pickerSendWorks(site) {
+  const lh = lastSendHow[site];
+  if (!lh || Date.now() - lh.at > 6 * 3600000) return null;
+  if (lh.method === "enter") return "enter";
+  return lh.savedSend === "found" && pickerSavedSel(site, "send") ? "saved" : "button";
 }
 function broadcastPicker(site) {
   pickerStatus(site).then((st) => broadcast("picker", st)).catch(() => {});
@@ -6234,6 +6284,7 @@ function sdStudio() {
     log: (t, d) => logEvent(t, d),
     fileUrl: (p) => { try { return pathToFileURL(p).href; } catch (_) { return ""; } },
     workflowsDir: () => path.join(userDataDir(), "sd-workflows"),
+    canRestartWithModels: () => sdTargets().some((t) => t.supported && t.kind !== "comfy"),
   });
   return _sdStudio;
 }
@@ -6400,6 +6451,30 @@ async function sdUseOtherBuild() {
   const st = await sdStart("portable:comfyui");
   return Object.assign({ build: res.build, switched: !!res.switched, installed: !res.switched }, st);
 }
+// Forge connected but with NO picture model: (re)start it through the Stability Matrix package with
+// --ckpt-dir "<the folder the library found the user's models in>". Only what AutoInjector started can be restarted.
+async function sdRestartWithModels() {
+  const h = sdStudio().modelHelp();
+  if (!h.ckptDir) return { ok: false, error: "NO_MODELS_FOUND", message: h.fix };
+  const r = sdRunner();
+  const st = r.status();
+  if (r.isBusy()) return { ok: false, error: "BUSY", message: "Stable Diffusion is starting right now — wait until it is running or has stopped.", runner: st };
+  if (st.phase === "running" && !st.owned) return { ok: false, error: "NOT_STARTED_HERE", message: `${h.label} was started outside AutoInjector (in Stability Matrix or by hand), so AutoInjector can't restart it. Close it there and press this again — or add  ${h.launchArg}  to its Launch Options in Stability Matrix and relaunch it.`, runner: st };
+  const list = sdTargets().filter((t) => t.supported && t.kind !== "comfy");
+  const t = list.find((x) => st.target && x.id === st.target.id) || list.find((x) => x.id === state.sdManaged.targetId) || list[0];
+  if (!t) return { ok: false, error: "NO_TARGET", message: h.fix };
+  logEvent("sd-restart-with-models", { target: t.kind, files: h.files });
+  if (st.owned && st.phase === "running") await r.stop();
+  const s2 = await r.start(t, { ckptDir: h.ckptDir });
+  if (s2.phase !== "running") return { ok: false, error: s2.error || "NOT_RUNNING", message: s2.message || `${t.label} did not start.`, runner: s2 };
+  try { await sdStudio().connect(s2.base); } catch (_) {}
+  const mc = await sdStudio().modelCheck();
+  return mc.noModels
+    ? { ok: false, error: "NO_MODEL", message: `${t.label} restarted with ${h.ckptDir}, but it still lists no picture model. ${mc.fix || ""}`.trim(), runner: s2 }
+    : { ok: true, message: `✔ ${t.label} restarted with your models (${mc.checkpoints} found).`, runner: s2, checkpoints: mc.checkpoints };
+}
+ipcMain.handle("sd:restart-with-models", sdSafe(() => sdRestartWithModels()));
+ipcMain.handle("sd:model-check", sdSafe(() => sdStudio().modelCheck()));
 ipcMain.handle("sd:targets", sdSafe(() => sdTargetsPublic()));
 ipcMain.handle("sd:start", sdSafe((a) => sdStart(a.id)));
 ipcMain.handle("sd:start-cpu", sdSafe((a) => sdStart(a && a.id, { cpu: true })));
@@ -7508,7 +7583,10 @@ const selfRepair = selfRepairLib.createSelfRepair({
     const lr = lastRead[s] || {};
     return { text: lr.text || "", textLen: lr.textLen || 0, generating: !!state.generating[s], generatingMs: generatingSince[s] ? Date.now() - generatingSince[s] : 0, loadFailed: !!paneLoadFailed[s], inputFound: lr.inputFound };
   },
-  sendProbe: (s, text, token) => sendTextTo(s, withEnvelope(text, s), null, { probe: true, automatic: true, cancelToken: token }).then((r) => ({ ok: !!(r && r.ok), error: r && r.error, verified: r ? r.verified : undefined })),
+  sendProbe: (s, text, token) => sendTextTo(s, withEnvelope(text, s), null, { probe: true, automatic: true, cancelToken: token }).then((r) => ({ ok: !!(r && r.ok), error: r && r.error, verified: r ? r.verified : undefined, method: r && r.ok ? r.method || null : null })),
+  // 🔢 found that Send works without a saved button (Enter / the usual one): a
+  // saved Send button that isn't on the page any more is dropped (PC test 2026-10-28)
+  sendWorks: (s, how) => teachSendWorks(s, how),
   saveLearned: selfRepairSaveLearned,
   // P38 🔢: what the number teach learned is SAVED like a 🎯 Save (per site, versioned)
   savePick: (s, role, selector, how) => {
@@ -7560,12 +7638,25 @@ ipcMain.handle("selfrepair:probe", (_evt, payload) => {
   logEvent("self-repair", { step: "check", reason: "you-asked", outcome: `started:${r.started.length}` });
   return Object.assign({ ok: true }, r);
 });
-ipcMain.handle("selfrepair:teach-start", (_evt, payload) => {
+ipcMain.handle("selfrepair:teach-start", async (_evt, payload) => {
   const site = payload && payload.site;
   if (!SITES[site]) return { ok: false, error: "BAD_SITE" };
   if (!state.enabled[site]) return { ok: false, error: "INACTIVE" };
-  return selfRepair.startTeach(site, null, { auto: false });
+  const r = await selfRepair.startTeach(site, null, { auto: false });
+  // PC test 2026-10-28: an Akọwe request still waiting for this AI's (late) answer
+  // took the number the user typed during 🔢 as that answer. Stop waiting for it
+  // now — while 🔢 runs, everything in this pane belongs to the setup.
+  if (r && r.ok && !r.already) teachParkWaiting(site);
+  return r;
 });
+function teachParkWaiting(site) {
+  let rel = null;
+  try { rel = akoweBridge && typeof akoweBridge.release === "function" ? akoweBridge.release(site, "teach") : null; } catch (_) { rel = null; }
+  if (rel) logEvent("teach-parked-waiting", { site, request_id: rel.request_id, typed: rel.typed, note: `🔢 setup started: stopped waiting for ${siteLabel(site)}'s answer to an Akọwe request, so nothing typed during the setup is taken as that answer` });
+  // the pane's own "waiting for a reply" flag: a reply now is the setup's, not an old message's
+  if (state.waiting[site]) { state.waiting[site] = false; state.waitingSince[site] = null; broadcast("waiting-changed", { site, waiting: false }); }
+  return rel;
+}
 ipcMain.handle("selfrepair:teach-cancel", (_evt, payload) => {
   const site = payload && payload.site;
   if (!SITES[site]) return { ok: false, error: "BAD_SITE" };
@@ -7636,7 +7727,9 @@ async function startAkoweBridgeNow() {
       // bridge: verbatim, no hop-count reset, no tag flags (BF-03/BF-16);
       // cancelToken: the bridge withdraws it if its request times out first (BF-02).
       const res = await sendTextTo(site, text, null, { bridge: true, cancelToken: meta && meta.cancelToken ? meta.cancelToken : null });
-      return { ok: !!(res && res.ok), error: res && res.error, seq: res && res.ok ? seq : null };
+      // verified: was it PROVEN to show up in the chat? (false = the box emptied but it never
+      // showed up — the bridge then says "never arrived" on a timeout, not "hadn't answered")
+      return { ok: !!(res && res.ok), error: res && res.error, seq: res && res.ok ? seq : null, verified: res && res.ok ? (res.verified === true ? true : res.verified === false ? false : null) : null };
     },
     // Only site/request_id/chars/outcome/elapsed ever reach here (never text or the token).
     logger: (kind, detail) => logEvent(`akowe-${kind}`, detail),
@@ -7740,6 +7833,9 @@ function akoweStatusSnapshotBase() {
     pairing: st && st.pairing ? { pending: st.pairing.pending, expiresAt: st.pairing.expiresAt, lastPairedAt: st.pairing.lastPairedAt, locked: st.pairing.locked } : null
   };
 }
+// The real state of the "⚡ Make a book for me" run (akowe-run.js) — the checklist alone said "10/10 Done"
+// for a run that had stopped at step 7 of 16.
+const akoweRunWatch = require("./akowe-run").createRunWatch({ api: (m, p) => akoweApi(m, p, null, 8000) });
 function akoweStatusSnapshot(opts) {
   const snap = akoweStatusSnapshotBase();
   snap.connection = akoweConnection(snap);
@@ -7750,6 +7846,8 @@ function akoweStatusSnapshot(opts) {
   // pressed Connect / the link test / Start Akọwe (they check right away and
   // keep the status current from then on).
   if (snap.enabled || bfApp.userAsked || (opts && opts.panelOpen)) akoweAppCheckSoon();
+  const bfb = snap.akowe || {};
+  snap.run = (snap.enabled || bfApp.userAsked || (opts && opts.panelOpen)) && (akoweServerBase() || bfb.run) ? akoweRunWatch.peek(bfb.project && bfb.project.id, bfb.run) : null;
   snap.app = { running: bfApp.running, base: bfApp.base, version: bfApp.version, checkedAt: bfApp.checkedAt, launcherAvailable: !!akoweLauncher() };
   snap.server = akoweServerPublicStatus();
   snap.health = akoweHealth(snap);
@@ -7858,6 +7956,16 @@ function akoweDiagnostics(extra) {
   return L.join("\n") + "\n";
 }
 ipcMain.handle("akowe:status", (_evt, payload) => akoweStatusSnapshot({ panelOpen: !!(payload && payload.panelOpen) }));
+ipcMain.handle("akowe:run-resume", async (_evt, payload) => {
+  const id = String((payload && payload.id) || "").replace(/[^\w.:-]/g, "").slice(0, 80);
+  if (!id) return { ok: false, message: "There is no stopped book run to resume." };
+  const r = await akoweApi("POST", `/api/autobook/${encodeURIComponent(id)}/resume`, {}, 20000);
+  logEvent("akowe-run-resume", { ok: !!(r && r.status >= 200 && r.status < 300), status: r ? r.status : 0 });
+  const run = await akoweRunWatch.refresh();
+  if (r && r.status >= 200 && r.status < 300) return { ok: true, run, message: "Resumed — the book run is writing again." };
+  const e = r && r.json && Array.isArray(r.json.errors) && r.json.errors[0];
+  return { ok: false, run, message: r && r.status === 0 ? "Akọwe isn't running right now — start it (📖 Akọwe tab), then press ▶ Resume." : `Akọwe couldn't resume it${e && e.message ? `: ${String(e.message).slice(0, 200)}` : ""}.` };
+});
 ipcMain.handle("akowe:diagnostics", (_evt, extra) => {
   try { return { ok: true, text: akoweDiagnostics(extra) }; }
   catch (e) { return { ok: false, error: "DIAGNOSTICS_FAILED" }; }
@@ -8042,7 +8150,7 @@ async function runAkoweLinkTestNow() {
   const out = {
     ok: true, stopped: r.stopped, headline: r.headline, passCount: r.passCount, failCount: r.failCount, skipCount: r.skipCount, total: r.total,
     report: file, reportJson: jsonFile,
-    steps: r.results.map((x) => ({ id: x.id, name: x.name, status: x.status, detail: x.detail, tip: x.tip || null, ms: x.ms }))
+    steps: r.results.map((x) => ({ id: x.id, name: x.name, status: x.status, detail: x.detail, tip: x.tip || null, ms: x.ms, http_status: x.http_status != null ? x.http_status : null, reply_excerpt: x.reply_excerpt || null }))
   };
   broadcast("akowe-linktest-progress", { status: "done", ok: true, summary: out });
   return out;
@@ -8600,6 +8708,7 @@ const healthWatch = healthWatchLib.createHealthWatch({
     return { enabled: !!im.enabled, configured: !!im.configured, base: im.base, runnerPhase: phase };
   },
   sdCanStart: () => sdTargets().some((t) => t.supported),
+  sdModels: async () => { try { const m = await sdStudio().modelCheck(); return m && m.connected && m.reachable ? m : null; } catch (_) { return null; } },
   probe: healthProbe,
   akowe: () => { const s = akoweServerPublicStatus(); return { enabled: s.enabled, phase: s.phase, error: s.error, message: s.message, restarts: s.restarts }; },
   panes: () => { const sr = selfRepairStatus(); return SITE_IDS.map((s) => { const x = (sr.sites && sr.sites[s]) || {}; return { site: s, label: x.label || siteLabel(s), active: !!x.active, state: x.state, problem: x.problem }; }); },

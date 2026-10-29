@@ -723,7 +723,9 @@ class App:
         if head == "autobook":
             ab = self.autobook
             if parts == ["autobook"] and method == "GET":
-                return 200, {"runs": ab.list(principal), "active": [ab.public(r) for r in ab.active()]}
+                runs = ab.list(principal)
+                return 200, {"runs": runs, "active": [ab.public(r) for r in ab.active()],
+                             "current": ab.current(principal, runs)}
             if parts == ["autobook"] and method == "POST":
                 for k in ("genre", "length", "slot_id", "idea"):
                     if body.get(k) is not None and not isinstance(body.get(k), str):
@@ -834,6 +836,9 @@ class App:
         if j.get("kind") == "autobook":
             out["steps_done"] = sum(1 for s in j.get("steps") or [] if s.get("state") == "done")
             out["steps_total"] = len(j.get("steps") or [])
+            out["state"], out["state_words"] = self.autobook.run_state(j)
+            if j.get("replaced_by"):
+                out["replaced_by"] = j["replaced_by"]
         if j.get("kind") == "write_all":
             out["done"] = sum(1 for i in j.get("items") or [] if i.get("state") == "done")
             out["total"] = len(j.get("items") or [])

@@ -74,6 +74,9 @@ function backendOf(s = settings) {
 }
 function baseUrl() { return sd.baseOf(settings.endpoint); }
 
+// The connected app answers but has NO picture model (checkpoint) — PC test: Forge "Connected ✓" while every
+// picture failed "Failed to find available model". Learned on connect, from the lists and from a failed picture.
+let noModels = false;
 function getSettings() { return { ...settings }; }
 function setSettings(patch) {
   if (!patch || typeof patch !== 'object') return getSettings();
@@ -95,7 +98,7 @@ function status() {
     backend: settings.endpoint ? backendOf() : '', base: baseUrl(), label: settings.label, checkpoint: settings.checkpoint, vae: settings.vae,
     sampler: settings.sampler, scheduler: settings.scheduler,
     steps: settings.steps, cfgScale: settings.cfgScale, width: settings.width, height: settings.height, batchCount: settings.batchCount, batchSize: settings.batchSize, seed: settings.seed,
-    timeoutMs: settings.timeoutMs, busy: !!job,
+    timeoutMs: settings.timeoutMs, busy: !!job, noModels: !!(settings.endpoint && noModels),
   };
 }
 
@@ -111,8 +114,9 @@ async function connect(url, opts = {}) {
     found.detect = { found: d.found, problems: d.problems };
   }
   if (found && found.usable) {
+    noModels = !!found.noModels;
     const backend = found.kind === 'comfy' ? 'comfy' : 'a1111';
-    setSettings({ enabled: true, backend, endpoint: backend === 'comfy' ? found.base : `${found.base}/sdapi/v1/txt2img`, label: found.label || '', model: found.model || settings.model });
+    setSettings({ enabled: true, backend, endpoint: backend === 'comfy' ? found.base : `${found.base}/sdapi/v1/txt2img`, label: found.label || '', model: found.noModels ? '' : (found.model || settings.model) });
   }
   return Object.assign({ ok: !!(found && found.usable) }, found);
 }
@@ -120,8 +124,11 @@ async function connect(url, opts = {}) {
 async function lists() {
   if (!settings.endpoint) return { ok: false, error: 'NO_ENDPOINT', message: sd.explain('NO_ENDPOINT') };
   const base = baseUrl();
-  try { return backendOf() === 'comfy' ? await sd.comfyLists(base) : await sd.a1111Lists(base); }
-  catch (e) { return { ok: false, error: String(e), message: sd.explain(String(e)) }; }
+  try {
+    const l = backendOf() === 'comfy' ? await sd.comfyLists(base) : await sd.a1111Lists(base);
+    if (l && l.ok && Array.isArray(l.checkpoints)) noModels = l.checkpoints.length === 0;
+    return l;
+  } catch (e) { return { ok: false, error: String(e), message: sd.explain(String(e)) }; }
 }
 
 // ---------------------------------------------------------------- generate
@@ -183,9 +190,11 @@ async function _withJob(steps, fn, ctx) {
     const out = Object.assign({ ok: false, backend }, r || { error: 'FAILED' });
     if (!out.message) out.message = sd.explain(out, { base });
     // Read the server's own error (VAE / checkpoint load failure, OOM, NaN, missing LoRA …).
-    if (out.error !== 'CANCELLED') sdErrors.annotate(out, Object.assign({ base, backend }, ctx || {}));
+    if (out.error !== 'CANCELLED') sdErrors.annotate(out, Object.assign({ base, backend, label: settings.label }, ctx || {}));
+    if (out.code === 'NO_MODEL' || out.error === 'NO_CHECKPOINT') noModels = true;
     return out;
   }
+  noModels = false;
   return Object.assign(r, { backend });
 }
 
