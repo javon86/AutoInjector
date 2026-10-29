@@ -829,7 +829,9 @@ def({
     if (!r || r.ok === false) return { ok: false, error: (r && r.error) || 'NO_IMAGES_MODULE', message: (r && r.message) || 'The image module is not available in this build.' };
     const im = r.image || {}; const mg = r.managed || {};
     const cg = r.chatgpt || null;
-    return { ok: true, data: { connected: !!(im.enabled && im.endpoint), app: im.label || im.backend || null, checkpoint: im.checkpoint || im.model || null, busy: !!im.busy, started_by_autoinjector: mg.phase || null, endpoint: im.endpoint || null,
+    // connected but no picture model: every picture would fail — say so plainly (PC test)
+    const noModel = !!(im.enabled && im.endpoint && im.noModels);
+    return { ok: true, message: noModel ? `${im.label || 'Stable Diffusion'} is connected, but it has no picture model loaded, so it can't make pictures until it is pointed at a model folder (see the 🎨 Images tab).` : undefined, data: { connected: !!(im.enabled && im.endpoint), can_make_pictures: !!(im.enabled && im.endpoint) && !noModel, app: im.label || im.backend || null, checkpoint: noModel ? null : (im.checkpoint || im.model || null), busy: !!im.busy, started_by_autoinjector: mg.phase || null, endpoint: im.endpoint || null,
       chatgpt: cg ? { ready: !!cg.ready, why: cg.why || null, drawing: !!cg.busy, seconds: cg.drawingMs ? Math.round(cg.drawingMs / 1000) : 0 } : null } };
   },
 });

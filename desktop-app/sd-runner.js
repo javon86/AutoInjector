@@ -23,6 +23,7 @@
  *   r.start(target, { cpu:true }) — ComfyUI on the processor (slow, works on any PC)
  *   r.installFinished(ok) — main.js calls it when sd-installer finishes; a Start pressed
  *                    during the install (phase 'waiting') then starts by itself
+ *   r.start(target, { ckptDir }) — Forge / A1111 with --ckpt-dir <folder> (the user's models, when it had none)
  * Phases: idle · waiting (for the install) · starting · running · restarting · failed · stopped.
  * Errors: NO_TARGET | NO_PYTHON | INSTALLING | INSTALL_NOT_FINISHED | SPAWN_FAILED | HEALTH_TIMEOUT | CRASHED | UNSUPPORTED.
  *
@@ -150,6 +151,8 @@ function launchSpec(t, port, opts = {}) {
   const extra = [];
   if (opts.safe) for (const f of safeFlagsFor(t)) extra.push(f);
   if (opts.cpu && t.kind === 'comfy' && !user.includes('--cpu')) extra.push('--cpu');
+  // "Restart Forge with my models": the folder the library found the user's checkpoints in (Forge / A1111 only)
+  if (opts.ckptDir && t.kind !== 'comfy' && !user.includes('--ckpt-dir')) extra.push('--ckpt-dir', String(opts.ckptDir));
   if (t.portable) {
     const args = ['-s', t.launchCommand, '--windows-standalone-build', '--port', String(port), ...user, ...extra];
     return { cmd: t.python, args, cwd: t.dir, env };
@@ -289,7 +292,7 @@ function createSdRunner(opts = {}) {
     if (!t.supported) return fail('UNSUPPORTED', `${t.label || 'This package'} can't be driven by AutoInjector. Add “SD WebUI Forge” or “ComfyUI” in Stability Matrix.`);
     current = t; stopping = false; gen++;
     const myGen = gen;
-    mode = { cpu: !!(so.cpu || opts.cpu), safe: false };
+    mode = { cpu: !!(so.cpu || opts.cpu), safe: false, ckptDir: so.ckptDir ? String(so.ckptDir) : '' };
     crashes = [];
     set({ phase: 'starting', error: null, cause: null, fix: '', actions: [], crash: null, tried: [], message: `Starting ${t.label}${mode.cpu ? ' on the processor' : ''}…`, restarts: so.keepRestarts ? st.restarts : 0, kind: t.kind === 'comfy' ? 'comfy' : 'a1111', mode: mode.cpu ? 'cpu' : null });
     // Already running (started by hand / by Stability Matrix)? Use it.
@@ -323,7 +326,7 @@ function createSdRunner(opts = {}) {
       if (t.portable) return fail('NO_PYTHON', `${t.label}'s install is not finished (its Python is missing). Press ⬇ Install Stable Diffusion to finish it — or, if it is installing now, wait: it starts by itself when the install finishes.`);
       return fail('NO_PYTHON', `${t.label}'s Python was not found (${t.python || 'no venv folder'}). Start it once from Stability Matrix so it finishes installing, then try again.`);
     }
-    const spec = launchSpec(t, port, { cpu: mode.cpu, safe: mode.safe, env: opts.env });
+    const spec = launchSpec(t, port, { cpu: mode.cpu, safe: mode.safe, ckptDir: mode.ckptDir, env: opts.env });
     let c;
     try { c = spawnFn(spec.cmd, spec.args, { cwd: spec.cwd, env: spec.env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }); }
     catch (e) { return fail('SPAWN_FAILED', `${t.label} could not be started (${(e && e.code) || 'error'}). Details are in the log.`); }

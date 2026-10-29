@@ -6234,6 +6234,7 @@ function sdStudio() {
     log: (t, d) => logEvent(t, d),
     fileUrl: (p) => { try { return pathToFileURL(p).href; } catch (_) { return ""; } },
     workflowsDir: () => path.join(userDataDir(), "sd-workflows"),
+    canRestartWithModels: () => sdTargets().some((t) => t.supported && t.kind !== "comfy"),
   });
   return _sdStudio;
 }
@@ -6400,6 +6401,30 @@ async function sdUseOtherBuild() {
   const st = await sdStart("portable:comfyui");
   return Object.assign({ build: res.build, switched: !!res.switched, installed: !res.switched }, st);
 }
+// Forge connected but with NO picture model: (re)start it through the Stability Matrix package with
+// --ckpt-dir "<the folder the library found the user's models in>". Only what AutoInjector started can be restarted.
+async function sdRestartWithModels() {
+  const h = sdStudio().modelHelp();
+  if (!h.ckptDir) return { ok: false, error: "NO_MODELS_FOUND", message: h.fix };
+  const r = sdRunner();
+  const st = r.status();
+  if (r.isBusy()) return { ok: false, error: "BUSY", message: "Stable Diffusion is starting right now — wait until it is running or has stopped.", runner: st };
+  if (st.phase === "running" && !st.owned) return { ok: false, error: "NOT_STARTED_HERE", message: `${h.label} was started outside AutoInjector (in Stability Matrix or by hand), so AutoInjector can't restart it. Close it there and press this again — or add  ${h.launchArg}  to its Launch Options in Stability Matrix and relaunch it.`, runner: st };
+  const list = sdTargets().filter((t) => t.supported && t.kind !== "comfy");
+  const t = list.find((x) => st.target && x.id === st.target.id) || list.find((x) => x.id === state.sdManaged.targetId) || list[0];
+  if (!t) return { ok: false, error: "NO_TARGET", message: h.fix };
+  logEvent("sd-restart-with-models", { target: t.kind, files: h.files });
+  if (st.owned && st.phase === "running") await r.stop();
+  const s2 = await r.start(t, { ckptDir: h.ckptDir });
+  if (s2.phase !== "running") return { ok: false, error: s2.error || "NOT_RUNNING", message: s2.message || `${t.label} did not start.`, runner: s2 };
+  try { await sdStudio().connect(s2.base); } catch (_) {}
+  const mc = await sdStudio().modelCheck();
+  return mc.noModels
+    ? { ok: false, error: "NO_MODEL", message: `${t.label} restarted with ${h.ckptDir}, but it still lists no picture model. ${mc.fix || ""}`.trim(), runner: s2 }
+    : { ok: true, message: `✔ ${t.label} restarted with your models (${mc.checkpoints} found).`, runner: s2, checkpoints: mc.checkpoints };
+}
+ipcMain.handle("sd:restart-with-models", sdSafe(() => sdRestartWithModels()));
+ipcMain.handle("sd:model-check", sdSafe(() => sdStudio().modelCheck()));
 ipcMain.handle("sd:targets", sdSafe(() => sdTargetsPublic()));
 ipcMain.handle("sd:start", sdSafe((a) => sdStart(a.id)));
 ipcMain.handle("sd:start-cpu", sdSafe((a) => sdStart(a && a.id, { cpu: true })));
@@ -8615,6 +8640,7 @@ const healthWatch = healthWatchLib.createHealthWatch({
     return { enabled: !!im.enabled, configured: !!im.configured, base: im.base, runnerPhase: phase };
   },
   sdCanStart: () => sdTargets().some((t) => t.supported),
+  sdModels: async () => { try { const m = await sdStudio().modelCheck(); return m && m.connected && m.reachable ? m : null; } catch (_) { return null; } },
   probe: healthProbe,
   akowe: () => { const s = akoweServerPublicStatus(); return { enabled: s.enabled, phase: s.phase, error: s.error, message: s.message, restarts: s.restarts }; },
   panes: () => { const sr = selfRepairStatus(); return SITE_IDS.map((s) => { const x = (sr.sites && sr.sites[s]) || {}; return { site: s, label: x.label || siteLabel(s), active: !!x.active, state: x.state, problem: x.problem }; }); },

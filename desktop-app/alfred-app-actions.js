@@ -213,6 +213,8 @@ A('akowe_view.dock', 'akowe-view:dock', { t: 'Bring Akọwe back into the tab', 
 
 // ---- 🎨 Images tab extras (the main generate/library calls go through sd_call / sd-api) ---------------------
 A('sd.lists', 'sd:lists', { t: 'Checkpoints, samplers, VAEs, LoRAs the SD app lists', c: false });
+A('sd.model_check', 'sd:model-check', { t: 'Has the SD app a picture model loaded? (if not: where your models are and how to point it there)', c: false });
+A('sd.restart_with_models', 'sd:restart-with-models', { t: 'Restart Forge with my models (--ckpt-dir the folder they are in)', c: true });
 A('sd.settings', 'sd:settings', { t: 'Change the Images tab defaults (size, steps, sampler, checkpoint …)', c: true, a: { patch: pass }, r: ['patch'], ex: { patch: { steps: 30 } } });
 A('sd.record', 'sd:record', { t: 'The settings a picture was made with', c: false, a: { path: text(1000) }, r: ['path'], ex: { path: '/out/images/sd-1.png' } });
 A('sd.open_images_folder', 'sd:open-images-folder', { t: 'Open the images folder', c: true, aa: true });

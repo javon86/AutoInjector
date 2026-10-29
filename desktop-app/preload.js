@@ -128,6 +128,8 @@ contextBridge.exposeInMainWorld("api", {
     settings: (patch) => ipcRenderer.invoke("sd:settings", { patch }),
     generate: (req) => ipcRenderer.invoke("sd:generate", req),
     test: () => ipcRenderer.invoke("sd:test"),
+    modelCheck: () => ipcRenderer.invoke("sd:model-check"),
+    restartWithModels: () => ipcRenderer.invoke("sd:restart-with-models"),
     fixAndRetry: (fix, request) => ipcRenderer.invoke("sd:fix-retry", { fix, request }),
     progress: () => ipcRenderer.invoke("sd:progress"),
     cancel: () => ipcRenderer.invoke("sd:cancel"),
