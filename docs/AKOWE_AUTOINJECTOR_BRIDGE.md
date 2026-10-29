@@ -175,6 +175,15 @@ Akọwe sends this whenever something changes and at least every ~30 s while it 
   `http://127.0.0.1…` or `http://localhost…` (anything else becomes `null`);
   `started_at`/`updated_at` may be ISO 8601 or Unix epoch seconds/ms and are normalized to epoch ms.
   `working_on` may be `null`.
+* `run` (Akọwe sends it since the first PC test; the bridge must add it to `sanitizeAkoweStatus` to keep it): the
+  newest ⚡ Make-a-book run of this book, or `null` —
+  `{"id", "title", "state", "state_words", "status", "needs_you", "needs_decision", "steps_done", "steps_total",
+  "phase", "problem", "updated_at", "finished_at", "url"}`. `checklist`/`done`/`total` are the BOOK's steps (Make my
+  book): a book can be 10/10 while its last run stopped part-way, so show the run from `run`, never from the
+  checklist. `run.state` is one of `working`, `waiting`, `pausing`, `paused` (by the author), `needs_decision` (the AI
+  reviewer did not pass a draft: approve anyway / edit / try again), `problem` (stopped on a problem: Try again),
+  `interrupted` (Akọwe was closed while it worked: Resume), `done`, `cancelled`; `needs_you` is true for paused,
+  needs_decision, problem and interrupted. `state_words` is a plain sentence to show as it is.
 * Suggested `state` words (the panel maps synonyms): task — `running`, `waiting`,
   `needs_approval`, `done`, `error`, `idle`; checklist — `done`, `current`, `needs_approval`,
   `todo`, `blocked`, `skipped`.
