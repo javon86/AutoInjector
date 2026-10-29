@@ -45,6 +45,11 @@ contextBridge.exposeInMainWorld("api", {
   pickerSave: (site, role) => ipcRenderer.invoke("picker:save", { site, role }),
   pickerClear: (site, role) => ipcRenderer.invoke("picker:clear", { site, role }),
   pickerTest: (site) => ipcRenderer.invoke("picker:test", { site }),
+  // 2026-10-29: "Use it anyway?" after LOOKS_LIKE_USER, ↺ forget everything taught,
+  // 📋 copy the page's structure (no message text) for a bug report
+  pickerForce: (site, role) => ipcRenderer.invoke("picker:force", { site, role }),
+  pickerForgetAll: (site) => ipcRenderer.invoke("picker:forget-all", { site }),
+  pickerPageStructure: (site) => ipcRenderer.invoke("picker:page-structure", { site }),
   onPicker: (cb) => ipcRenderer.on("picker", (_e, payload) => cb(payload)),
   runSelfTest: (site) => ipcRenderer.invoke("selftest:run", { site }),
   runTuner: () => ipcRenderer.invoke("tuner:run"),

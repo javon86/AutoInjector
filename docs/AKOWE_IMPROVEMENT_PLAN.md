@@ -22,7 +22,7 @@ Legend: `[ ]` to do · `[~]` in progress · `[x]` done · `[!]` problem (see "Pr
 - **Done and in `main`:** Sections 1–6 (P3, P4–P18, P20, P21), Section 8 (P36, P37.1, P37.3–P37.5, P38; P37.2 partly [!]),
   Section 7 (P23–P28, P30–P35; P22 skipped by the user, P29 audiobook later), Akọwe GitHub CI, the follow-through fix.
 - **Now:** the FIRST REAL TEST on the user's PC — step by step in `docs/FIRST_REAL_TEST.md`. Waiting on the user's
-  ChatGPT page check (`desktop-app/tools/chatgpt-page-check.js`) to hard-code ChatGPT's live selectors.
+  ChatGPT page check (`desktop-app/tools/page-check.js`, formerly `chatgpt-page-check.js`) to hard-code ChatGPT's live selectors.
 - **Latest feedback:** ChatGPT's 2026-10-24 comparison of book 1 vs book 2 — book 2 better on character (5→8), voices (5→8), subtext (5→8), peril (4→7), realism (5→7); weaker on closure (9→6) and scope (9→6); added P30–P35 from it.
 - **🎩 Alfred (done 2026-10-25, B4 → app-wide):** the butler grown into the user's assistant for the whole app — chat
   drawer on every tab, a fixed tool registry, "I will" cards before any change, proactive notices; OFF by default

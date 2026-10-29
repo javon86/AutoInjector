@@ -12,6 +12,8 @@ const path = require("path");
 const fs = require("fs");
 const { chromium } = require("playwright");
 const { buildSendScript, buildReadScript, buildFileInputFinderExpression, buildProbeScript, buildPickScript } = require("../automation");
+const SR = require("../self-repair");
+const SITES = require("../selectors");
 
 // Playwright's own auto-detected browser (e.g. what `npx playwright install`
 // puts in ~/.cache/ms-playwright on a normal machine or CI runner) is tried
@@ -457,6 +459,112 @@ async function testSurveyDismissed() {
   }, "?site=claude&quirks=none");
 }
 
+
+// ---- Claude's page since 2026-10-29 (PC log): messages in transcript rows, a hidden
+// h3 heading in every row, the text in div[data-cds="Prose"] for BOTH roles, the
+// Editor composer, chat-input-send, and a sidebar list that matched as "the reply".
+const LOG_OVERRIDES = { input: 'div[data-cds="Editor"]', assistant: 'div[data-cds="Prose"]', assistantStrict: true }; // what 🔢 saved on the PC
+const LOG_USER_SEL = 'div[data-testid="transcript-row"] h3[data-find-omitted]';
+async function testClaudeRowsRead() {
+  console.log("\n== Claude 2026-10-29 rows: the built-ins read Claude's LATEST reply — never the sidebar, never the user's own row ==");
+  await withFixture("claude-rows.html", async (page) => {
+    const r = await page.evaluate(buildReadScript("claude"));
+    assert(r.ok && /Then the beans, and marigolds around the edge\./.test(r.text) && /Water them every morning\./.test(r.text), `reads the latest Claude reply, whole (${JSON.stringify(r.text.slice(0, 80))})`);
+    assert(/^\s*\[TO: USER\]/.test(r.text) && /\[FROM: CLAUDE\]\s*$/.test(r.text), "from its [TO:] to its [FROM:] — no hidden heading, no buttons");
+    assert(!/Claude said|You said|Marigold check-in|Planning the garden|And after that|Retry|Edit/.test(r.text), "nothing from the sidebar, the hidden heading, the user's rows or the action bar");
+    assert(r.count === 2 && r.rows && r.rows.user === 2 && r.rows.assistant === 2, `counts one message per row (count ${r.count}, rows ${JSON.stringify(r.rows)})`);
+    const pr = await page.evaluate(buildProbeScript("claude"));
+    assert(pr.input.found && pr.input.selector === 'div[data-cds="Editor"][contenteditable="true"]' && pr.send.found, `the page check finds the Editor composer and chat-input-send (${pr.input.selector})`);
+    assert(pr.assistant.count === 2 && !/sidebar/.test(String(pr.assistant.selector)), `the page check counts Claude's 2 replies, not the sidebar (${JSON.stringify(pr.assistant)})`);
+    // the PC's learned selector — the sidebar's recent chats — is never read as a reply
+    const side = await page.evaluate(buildReadScript("claude", { assistant: 'div[data-testid="sidebar-recents"]', assistantStrict: true }));
+    assert(/Then the beans/.test(side.text) && side.overrideIgnored === true, `a learned "reply" selector that names the sidebar is passed over (${JSON.stringify(side.text.slice(0, 40))})`);
+    const sideProbe = await page.evaluate(buildProbeScript("claude", { assistant: 'div[data-testid="sidebar-recents"]' }));
+    assert(sideProbe.assistant.overrideMisses === true && sideProbe.assistant.builtinCount === 2, `the page check says the built-ins find the reply instead (${JSON.stringify(sideProbe.assistant)})`);
+  });
+}
+async function testClaudeRowsTaughtSelectors() {
+  console.log("\n== Claude 2026-10-29 rows: the parts the user taught on the PC don't break reading ==");
+  await withFixture("claude-rows.html", async (page) => {
+    const r = await page.evaluate(buildReadScript("claude", LOG_OVERRIDES));
+    assert(/Then the beans/.test(r.text) && !/And after that/.test(r.text), `with the saved Prose selector (it matches the user's rows too) the reply is Claude's latest (${JSON.stringify(r.text.slice(0, 60))})`);
+    const pr = await page.evaluate(buildProbeScript("claude", LOG_OVERRIDES));
+    assert(pr.assistant.count === 2 && pr.assistant.selector, `the page check finds replies with those overrides (was "replies: 0, replySelector: null" on the PC) (${JSON.stringify(pr.assistant)})`);
+    // the user's latest row comes AFTER Claude's latest: nothing to read yet (never the old reply, never the user's)
+    await page.evaluate(() => window.__addRow("user", "[MSG #0003]\nAnything else?"));
+    const w = await page.evaluate(buildReadScript("claude", LOG_OVERRIDES));
+    assert(w.text === "" && w.rows && w.rows.waiting, `while Claude hasn't answered the newest message, nothing is read (${JSON.stringify(w.text)})`);
+    await page.evaluate(() => window.__addRow("assistant", "[TO: USER]\nYes: compost.\n[FROM: CLAUDE]"));
+    const n = await page.evaluate(buildReadScript("claude", LOG_OVERRIDES));
+    assert(/Yes: compost\./.test(n.text) && n.count === 3, `then Claude's new row is read (${JSON.stringify(n.text)}, count ${n.count})`);
+    // the rows lose their test-ids: found again from the hidden "You said / Claude said" headings
+    await page.evaluate(() => document.querySelectorAll('[data-testid="transcript-row"]').forEach((e) => e.removeAttribute("data-testid")));
+    const h = await page.evaluate(buildReadScript("claude"));
+    assert(/Yes: compost\./.test(h.text) && h.rows && h.rows.how === "headings", `without the row test-ids the rows are found from the hidden headings (${JSON.stringify(h.rows)})`);
+  });
+}
+async function testClaudeRowsSendProof() {
+  console.log("\n== Claude 2026-10-29 rows: proof-of-send counts the user's rows (also with the saved every-row heading selector) ==");
+  for (const userSel of [null, LOG_USER_SEL]) {
+    await withFixture("claude-rows.html", async (page) => {
+      const res = await page.evaluate(buildSendScript("claude", "[MSG #0042]\nHello Claude", LOG_OVERRIDES, userSel ? { userSel } : {}));
+      assert(res.ok === true && res.verified === true && res.proof === "new-message" && res.turnsCountable === true, `${userSel ? "with" : "without"} the saved "user" selector: verified by the new user row (no [MSG #] shown) (${JSON.stringify(res)})`);
+      assert((await page.evaluate(() => window.__sent.slice())).length === 1, "sent once, through chat-input-send");
+    }, "?nomarker&noreply");
+  }
+  await withFixture("claude-rows.html", async (page) => {
+    await page.evaluate(() => { document.querySelector('[data-testid="chat-input-send"]').addEventListener("click", (e) => { e.stopImmediatePropagation(); document.querySelector('[data-cds="Editor"]').textContent = ""; }, true); });
+    const res = await page.evaluate(buildSendScript("claude", "[MSG #0043]\nLost message", LOG_OVERRIDES, { userSel: LOG_USER_SEL }));
+    assert(res.ok === true && res.verified === false && res.turnsCountable === true, `a box that empties with no new row is NOT verified, even though the saved heading selector matches every row (${JSON.stringify(res)})`);
+  }, "?nomarker&noreply");
+}
+async function testClaudeRowsPicker() {
+  console.log("\n== Claude 2026-10-29 rows: 🎯 on Claude's reply is accepted; on the user's own row it asks first ==");
+  await withFixture("claude-rows.html", async (page) => {
+    // the generic user markers misfire on this page (the transcript sits in a block
+    // the old rules took for "the user's message") — the row decides instead
+    await page.evaluate(() => document.getElementById("transcript").setAttribute("class", "user-message-list"));
+    let pending = page.evaluate(SR.buildPickScript("claude", "assistant", "Claude", SITES, 5000));
+    await page.waitForTimeout(150);
+    await page.evaluate(() => { const ps = document.querySelectorAll('[data-cds="Prose"]'); ps[3].querySelector("p:nth-child(2)").dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true })); });
+    let r = await pending;
+    assert(r.ok && r.selector, `picking Claude's reply is not refused as LOOKS_LIKE_USER (${JSON.stringify({ ok: r.ok, error: r.error, selector: r.selector })})`);
+    const read = await page.evaluate(buildReadScript("claude", { assistant: r.selector, assistantStrict: true }));
+    assert(/Then the beans/.test(read.text), `the saved pick reads Claude's latest reply, not the user's (${r.selector})`);
+    pending = page.evaluate(SR.buildPickScript("claude", "assistant", "Claude", SITES, 5000));
+    await page.waitForTimeout(150);
+    await page.evaluate(() => { const ps = document.querySelectorAll('[data-cds="Prose"]'); ps[2].querySelector("p:nth-child(2)").dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true })); });
+    r = await pending;
+    assert(!r.ok && r.error === "LOOKS_LIKE_USER" && r.canForce === true, `a click on the user's own row asks first (${JSON.stringify(r)})`);
+    const forced = await page.evaluate(SR.buildPickForceScript("claude", SITES));
+    assert(forced.ok && forced.forced && forced.selector, `"Use it anyway" takes that same click (${JSON.stringify({ ok: forced.ok, error: forced.error, selector: forced.selector })})`);
+    pending = page.evaluate(SR.buildPickScript("claude", "assistant", "Claude", SITES, 5000));
+    await page.waitForTimeout(150);
+    await page.evaluate(() => document.querySelector('[data-testid="sidebar-recents"] a').dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true })));
+    r = await pending;
+    assert(!r.ok && r.error === "IN_SIDEBAR", `a click in the sidebar is refused (${r.error})`);
+  });
+}
+async function testPageStructureReport() {
+  console.log("\n== 📋 page-structure report: tags / attributes / counts, never message text ==");
+  const { buildPageStructureScript } = require("../tools/page-structure");
+  await withFixture("claude-rows.html", async (page) => {
+    const rep = await page.evaluate(buildPageStructureScript("claude"));
+    const json = JSON.stringify(rep);
+    assert(rep.ok && rep.rows && rep.rows.count === 4 && rep.rows.items.length === 4, `reports the 4 transcript rows (${rep.rows && rep.rows.count})`);
+    assert(rep.rows.items[0].role === "user" && rep.rows.items[1].role === "assistant", `with who wrote each (${rep.rows.items.map((x) => x.role).join(",")})`);
+    assert(rep.rows.items.some((x) => (x.headings || []).some((h) => h.says === "You said")) && rep.rows.items.some((x) => (x.headings || []).some((h) => h.says === "Claude said")), "hidden headings only as 'You said' / 'Claude said'");
+    assert(rep.dataCds && rep.dataCds.Prose === 4 && rep.dataCds.Editor === 1 && rep.dataTestid["chat-input-send"] === 1 && rep.dataTestid["sidebar-recents"] === 1, "data-cds / data-testid values with counts");
+    assert(!/tomatoes|beans|marigold|plant first|after that|Garden plans|quokka|Planning/i.test(json), "no message, title or sidebar text anywhere in the report");
+    // the DevTools snippet (tools/page-check.js) is generated from the same code and runs as pasted
+    const { buildSnippet } = require("../tools/page-structure");
+    const snippet = fs.readFileSync(path.join(__dirname, "..", "tools", "page-check.js"), "utf8");
+    assert(snippet === buildSnippet(), "tools/page-check.js is up to date (node tools/page-structure.js --snippet > tools/page-check.js)");
+    const viaSnippet = await page.evaluate(snippet);
+    assert(viaSnippet && viaSnippet.ok && viaSnippet.site === "chatgpt" && viaSnippet.dataCds.Prose === 4 && !/tomatoes|beans/i.test(JSON.stringify(viaSnippet)), "pasted into the console it runs and reports (the address picks the site — a file page counts as ChatGPT)");
+  });
+}
+
 async function main() {
   await testClaudeReadReal();
   await testClaudeReadMultiParagraph();
@@ -482,6 +590,11 @@ async function main() {
   await testStaleSavedSendFallsBack();
   await testBoxEmptiedNothingSent();
   await testSurveyDismissed();
+  await testClaudeRowsRead();
+  await testClaudeRowsTaughtSelectors();
+  await testClaudeRowsSendProof();
+  await testClaudeRowsPicker();
+  await testPageStructureReport();
 
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

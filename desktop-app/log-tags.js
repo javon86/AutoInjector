@@ -66,6 +66,8 @@ const EXACT = {
   'zoom-changed': 'user', 'window-collapse-changed': 'user',
   // P18 self-repair (check-ins, automatic fixes, teach step) — about the web AIs
   'self-repair': 'chat', 'checkin-reply': 'chat', 'selector-learned': 'chat', 'selector-learned-cleared': 'chat',
+  // Claude's page change 2026-10-29: a saved reply selector passed over, ↺ forget, 📋 page structure
+  'reply-selector-ignored': 'chat', 'selector-forget-all': 'chat', 'page-structure-copied': 'chat',
   // PC test 2026-10-28: a saved Send button that is gone, a pop-up closed, waiting parked for 🔢
   'send-saved-button-missing': 'chat', 'popup-dismissed': 'chat', 'teach-parked-waiting': 'chat',
 };

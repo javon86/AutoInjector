@@ -306,6 +306,14 @@ async function main() {
     await bridge2.stop();
   }
 
+  console.log("\n== two runs in the same second never share a stamp (request_ids / reports) ==");
+  {
+    const taken = new Set(["20261015-120000", "20261015-120000-2"]);
+    assert(LT.uniqueStamp("20261015-120001", (s) => taken.has(s)) === "20261015-120001", "a free stamp is kept as it is");
+    const st = LT.uniqueStamp("20261015-120000", (s) => taken.has(s));
+    assert(st === "20261015-120000-3" && LT.REPORT_NAME_RE.test(`akowe-link-test-${st}.md`), `a stamp already used gets the next free suffix (${st}) and is still a valid report name`);
+  }
+
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 }

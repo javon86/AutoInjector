@@ -69,6 +69,18 @@ function stampNow(d) {
   const t = d instanceof Date ? d : new Date();
   return t.toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15); // 20261015-140233
 }
+// Each run needs its OWN stamp: it names the reports and is part of every
+// round trip's request_id ("selftest-<stamp>-<site>"). stampNow() only has
+// one-second precision, and the bridge answers a request_id it has already
+// completed from its cache — so a second run started within the same second
+// would "pass" or "fail" on the FIRST run's answers without asking the AI at
+// all (and overwrite its reports). isTaken(stamp) -> bool; the first free one
+// of base, base-2, base-3, ... is returned.
+function uniqueStamp(base, isTaken) {
+  let stamp = base;
+  for (let n = 2; isTaken(stamp) && n < 1000; n++) stamp = `${base}-${n}`;
+  return stamp;
+}
 function fmtMs(ms) {
   const s = Math.max(0, Math.round(Number(ms || 0) / 1000));
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
@@ -456,4 +468,4 @@ function reportJson(r, meta = {}) {
 
 const REPORT_NAME_RE = /^akowe-link-test-[0-9A-Za-z-]+\.(md|json)$/;
 
-module.exports = { runLinkTest, formatReport, reportJson, buildPrompt, analyzeReply, nodeHttp, stampNow, fmtMs, STEP_NAMES, TIPS, REPORT_NAME_RE, DEFAULT_AKOWE_URL, DEFAULT_REPLY_TIMEOUT_MS, ENDING_CHARS, REPLY_EXCERPT_CHARS };
+module.exports = { runLinkTest, formatReport, reportJson, buildPrompt, analyzeReply, nodeHttp, stampNow, uniqueStamp, fmtMs, STEP_NAMES, TIPS, REPORT_NAME_RE, DEFAULT_AKOWE_URL, DEFAULT_REPLY_TIMEOUT_MS, ENDING_CHARS, REPLY_EXCERPT_CHARS };

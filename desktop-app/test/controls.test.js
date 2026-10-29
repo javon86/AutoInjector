@@ -479,6 +479,50 @@ function findByText(nodes, text) {
   return Array.from(nodes).find((n) => n.textContent === text);
 }
 
+
+// Claude's page change 2026-10-29: the reply pick was refused 4× as LOOKS_LIKE_USER.
+async function testPickerUseAnywayForgetCopy() {
+  console.log("\n== 2026-10-29 🎯: “Use it anyway?” after LOOKS_LIKE_USER, ↺ Forget what I taught, 📋 Copy page structure ==");
+  for (const yes of [true, false]) {
+    const api = makeApi({ pickResult: { ok: false, error: "LOOKS_LIKE_USER", canForce: true } });
+    api.pickerForce = async (site, role) => { api.calls.push({ fn: "pickerForce", site, role }); api._pk[site] = { [role]: { state: "picked", preview: "Then the beans…", latest: true } }; return { ok: true, role, selector: 'div[data-testid="transcript-row"]', preview: "Then the beans…", forced: true }; };
+    const asked = [];
+    const dom = await loadWindow(api, { confirmReturns: yes });
+    const w = dom.window; const doc = w.document;
+    const conf = w.confirm; w.confirm = (m) => { asked.push(m); return conf(m); };
+    const tick = () => new Promise((r) => setTimeout(r, 25));
+    const menu = doc.getElementById("pick-menu-claude");
+    doc.querySelector("#col-claude .pick-btn").dispatchEvent(new w.Event("click", { bubbles: true }));
+    await tick();
+    const r = menu.querySelector('.pk-row[data-role="assistant"] input[type=radio]');
+    r.checked = true; r.dispatchEvent(new w.Event("change", { bubbles: true }));
+    menu.querySelector(".pk-ok").dispatchEvent(new w.Event("click", { bubbles: true }));
+    await tick(); await tick();
+    assert(asked.some((m) => m === "This looks like your own message. Use it anyway?"), `(${yes ? "yes" : "no"}) it asks “This looks like your own message. Use it anyway?”`);
+    const forced = api.calls.some((c) => c.fn === "pickerForce" && c.site === "claude" && c.role === "assistant");
+    const status = doc.getElementById("pick-status-claude").textContent;
+    if (yes) assert(forced && /✓ AI's reply/.test(status), `yes: the same click is taken (${status})`);
+    else assert(!forced && /your own message/.test(status), `no: nothing is taken (${status})`);
+  }
+  const api = makeApi();
+  api.pickerForgetAll = async (site) => { api.calls.push({ fn: "pickerForgetAll", site }); return Object.assign({ forgot: { saved: ["user", "assistant"], learned: ["assistant"] } }, api._pkStatus(site)); };
+  api.pickerPageStructure = async (site) => { api.calls.push({ fn: "pickerPageStructure", site }); return { ok: true, chars: 1234, rows: 4 }; };
+  const dom = await loadWindow(api, { confirmReturns: true });
+  const w = dom.window; const doc = w.document;
+  const tick = () => new Promise((r) => setTimeout(r, 25));
+  doc.querySelector("#col-claude .pick-btn").dispatchEvent(new w.Event("click", { bubbles: true }));
+  await tick();
+  const menu = doc.getElementById("pick-menu-claude");
+  const fb = menu.querySelector(".pk-forget");
+  assert(fb && fb.textContent === "↺ Forget what I taught for Claude", `the card has “${fb && fb.textContent}”`);
+  fb.dispatchEvent(new w.Event("click", { bubbles: true }));
+  await tick();
+  assert(api.calls.some((c) => c.fn === "pickerForgetAll" && c.site === "claude") && /Forgot what was taught for Claude/.test(doc.getElementById("pick-status-claude").textContent), "↺ forgets everything taught / learned for Claude (after a confirm)");
+  menu.querySelector(".pk-structure").dispatchEvent(new w.Event("click", { bubbles: true }));
+  await tick();
+  assert(api.calls.some((c) => c.fn === "pickerPageStructure" && c.site === "claude") && /Copied Claude's page structure \(4 message rows; no message text\)/.test(doc.getElementById("pick-status-claude").textContent), "📋 copies the page structure and says so");
+}
+
 async function testPickerDialogFlow() {
   console.log("\n== P38 🎯 picker card: choose ONE thing, OK, pick it (blue -> green), Save one only, Clear, Test it ==");
   const api = makeApi();
@@ -1358,6 +1402,7 @@ async function main() {
   await testZoomControls();
   await testSelectorPickMenuToggle();
   await testPickerDialogFlow();
+  await testPickerUseAnywayForgetCopy();
   await testLinkTestTechnicalDetails();
   await testPickerRejections();
   await testPickerNumberTeach();
