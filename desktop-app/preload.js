@@ -219,6 +219,13 @@ contextBridge.exposeInMainWorld("api", {
     trailerList: (book) => ipcRenderer.invoke("video:trailer-list", book ? { book } : {}),
     trailerPlan: (book) => ipcRenderer.invoke("video:trailer-plan", { book }),
     trailerPickFile: (kind) => ipcRenderer.invoke("video:trailer-pick-file", { kind }),
+    // 🎞 FramePack (framepack.js): found / models, warm-up, 2-second test, choose its folder, unload
+    framepackStatus: (gpu) => ipcRenderer.invoke("video:framepack-status", { gpu: gpu !== false }),
+    framepackLoad: () => ipcRenderer.invoke("video:framepack-load"),
+    framepackUnload: () => ipcRenderer.invoke("video:framepack-unload"),
+    framepackTest: () => ipcRenderer.invoke("video:framepack-test"),
+    framepackChooseFolder: () => ipcRenderer.invoke("video:framepack-choose-folder"),
+    onFramePack: (cb) => ipcRenderer.on("video-framepack", (_e, ev) => cb(ev)),
     onInstall: (cb) => ipcRenderer.on("video-install", (_e, st) => cb(st)),
     onDone: (cb) => ipcRenderer.on("video-done", (_e, r) => cb(r)),
   },

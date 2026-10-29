@@ -4818,7 +4818,7 @@ ipcMain.handle("wizard:catalog", async () => {
         stabilityMatrix: { name: "Stability Matrix (easy image installer) ⭐", url: "https://github.com/LykosAI/StabilityMatrix", note: "One-click installer + manager for Stable Diffusion (A1111/ComfyUI/Fooocus) with a built-in model downloader. Recommended: install it, launch A1111/Comfy from it with the API on, point its shared Models folder at AutoInjector's models/ (or copy models into models/image), then set the app's Image endpoint." },
         stableDiffusion: { name: "Stable Diffusion (Automatic1111, manual)", url: "https://github.com/AUTOMATIC1111/stable-diffusion-webui#installation-and-running", note: "Manual alternative to Stability Matrix. Run it with --api, then set its URL in the Images tab." },
         comfyui: { name: "ComfyUI (alt. image backend)", url: "https://github.com/comfyanonymous/ComfyUI#installing", note: "A more powerful node-based image backend. Stability Matrix can install this for you." },
-        video: { name: "🎬 Video (Wan on ComfyUI, installs inside AutoInjector)", inApp: true, tab: "video", models: Object.values(videoInstallerMod.MODELS).map((m) => ({ id: m.id, label: m.label, bytes: videoInstallerMod.modelBytes(m), vramGB: m.vramGB, modes: m.modes })), note: "Text→video and picture→video with Wan 2.2 5B (about 12 GB graphics memory) or Wan 2.1 1.3B (about 8 GB), on the same ComfyUI as 🎨 Images. Open the 🎬 Video tab → Setup: one click installs ComfyUI and the model." },
+        video: { name: "🎬 Video (Wan on ComfyUI, installs inside AutoInjector)", inApp: true, tab: "video", models: Object.values(videoInstallerMod.MODELS).map((m) => ({ id: m.id, label: m.label, bytes: videoInstallerMod.modelBytes(m), vramGB: m.vramGB, modes: m.modes })), note: "Text→video and picture→video with Wan 2.2 5B (about 12 GB graphics memory) or Wan 2.1 1.3B (about 8 GB), on the same ComfyUI as 🎨 Images. Open the 🎬 Video tab → Setup: one click installs ComfyUI and the model. Already have FramePack (Stability Matrix)? It is used as it is — nothing to download." },
       },
     };
   } catch (e) { return { ok: false, error: String(e) }; }
@@ -6585,6 +6585,53 @@ function videoInstaller() {
   });
   return _videoInstaller;
 }
+// 🎞 FramePack (framepack.js): the FramePack the person already has (Stability Matrix's Packages\FramePack,
+// or a folder they choose) as a video engine. Its models: "stuff and thing"/models/video/framepack/hf first,
+// else FramePack's own hf_download. Nothing is downloaded. The runner (integrations/framepack/framepack_runner.py)
+// runs with FramePack's own venv python and keeps the models loaded between videos.
+const framepackMod = require("./framepack");
+let _framepack = null;
+let _framepackGpu = null;
+function framepackSettingsDir() {
+  try { if (_videoStudio) return _videoStudio.getSettings().framepackDir || ""; } catch (_) {}
+  return (state.videoStudio && state.videoStudio.framepackDir) || "";
+}
+function framepack() {
+  if (_framepack) return _framepack;
+  _framepack = framepackMod.createFramePack({
+    find: () => framepackMod.findFramePack({
+      dir: framepackSettingsDir(),
+      smPackages: () => { try { return sdRunnerMod.findSmPackages(); } catch (_) { return []; } },
+      modelsDir: (() => { try { return outputManager.modelsPath("framepack"); } catch (_) { return null; } })(),
+    }),
+    log: (k, d) => logEvent(k, d),
+    onEvent: (ev) => broadcast("video-framepack", ev),
+    gpu: async () => {
+      if (_framepackGpu) return _framepackGpu;
+      try { const g = sdInstallerInst().gpu(); if (g && g.name) return (_framepackGpu = g); } catch (_) {}
+      if (process.env.AUTOINJECTOR_SD_GPU_CHECK === "0") return null;
+      try { _framepackGpu = await require("./sd-installer").detectGpu(); } catch (_) { _framepackGpu = null; }
+      return _framepackGpu;
+    },
+  });
+  return _framepack;
+}
+// Text → video with FramePack: the picture is made first by 🎨 Images (sd-api: Stable Diffusion, or ChatGPT when
+// that is what's ready — engine "auto"), then FramePack brings it to life.
+async function videoMakePicture(o) {
+  const api = sdApiMod.get();
+  if (!api || !api.images || typeof api.images.generate !== "function") return { ok: false, error: "NOT_WIRED", message: "🎨 Images is not available in this build." };
+  const req = { prompt: o.prompt, width: o.width, height: o.height, engine: "auto", from: o.from || "video-framepack" };
+  if (o.negativePrompt) req.negativePrompt = o.negativePrompt;
+  if (o.seed != null && o.seed >= 0) req.seed = o.seed;
+  let r = await api.images.generate(req);
+  // ChatGPT ignores a seed / size it can't do: try once more with just the description.
+  if (r && r.ok === false && r.code === "INVALID_PARAM" && (r.field === "seed" || r.field === "width" || r.field === "height")) r = await api.images.generate({ prompt: o.prompt, engine: "auto", from: req.from });
+  if (!r || !r.ok) return { ok: false, error: (r && (r.code || r.error)) || "IMAGE_FAILED", message: (r && r.message) || "The picture could not be made.", fix: (r && r.fix) || "" };
+  const first = (r.images || []).find((x) => x && x.path);
+  if (!first) return { ok: false, error: "NO_IMAGE", message: "🎨 Images answered without a picture." };
+  return { ok: true, path: first.path, engine: r.engine || "sd" };
+}
 let _videoStudio = null;
 let _videoLastStatus = null; // the last full status, for the quick System Check
 function videoStudio() {
@@ -6593,6 +6640,7 @@ function videoStudio() {
   try { nativeImage = require("electron").nativeImage || null; } catch (_) { nativeImage = null; }
   _videoStudio = videoStudioMod.createVideoStudio({
     comfy: (o) => videoComfy(o), installer: () => videoInstaller(), library: sdLibrary(), videoProvider,
+    framepack: () => framepack(), makePicture: (o) => videoMakePicture(o),
     videosDir: () => outputManager.videosDir(),
     fileUrl: (p) => { try { return pathToFileURL(p).href; } catch (_) { return ""; } },
     log: (t, d) => logEvent(t, d),
@@ -6608,6 +6656,7 @@ async function videoStatusFull(o) { const s = await videoStudio().status(o || {}
 function videoQuickStatus() {
   const s = _videoLastStatus;
   if (s && s.backend === "comfy-wan" && s.comfy && s.comfy.base) return { enabled: true, configured: true, endpoint: s.comfy.base };
+  if (s && s.backend === "framepack") return { enabled: true, configured: true, endpoint: `FramePack (${(s.framepack && s.framepack.dir) || "found"})`, engine: "framepack" };
   return videoProvider.status();
 }
 // Start one video job from the window without waiting (the tab polls video:progress); the
@@ -6616,7 +6665,7 @@ function videoSafe(fn) {
   return async (_evt, arg) => { try { return await fn(arg || {}); } catch (e) { logEvent("video-ipc-error", { error: String((e && e.message) || e) }); return { ok: false, error: "VIDEO_FAILED", code: "VIDEO_FAILED", message: `Something went wrong: ${(e && e.message) || e}` }; } };
 }
 async function videoRun(kind, a, from) {
-  const r = kind === "animate" ? await videoStudio().animate(a, from) : kind === "request" ? await videoStudio().request(a, from) : await videoStudio().generate(a, from);
+  const r = kind === "animate" ? await videoStudio().animate(a, from) : kind === "request" ? await videoStudio().request(a, from) : kind === "framepack-test" ? await videoStudio().framepack.test(a) : await videoStudio().generate(a, from);
   broadcast("video-done", { ok: !!(r && r.ok), path: r && r.path, poster: r && r.poster, error: r && !r.ok ? r.error : undefined });
   return r;
 }
@@ -6647,12 +6696,28 @@ ipcMain.handle("video:generate", videoSafe(async (a) => {
 }));
 // The 🎬 Video tab.
 ipcMain.handle("video:full-status", videoSafe(async (a) => Object.assign({}, await videoStatusFull({ fresh: !!a.fresh }), { localModels: videoLocalModels() })));
-// Video model files in "stuff and thing" the engine doesn't use yet (FramePack's HunyuanVideo cache in video/framepack/hf).
+// FramePack's HunyuanVideo files in "stuff and thing" (video/framepack/hf): a note while FramePack itself isn't set up.
 function videoLocalModels() {
   let fp = null; try { fp = outputManager.modelsPath("framepack"); } catch (_) {}
   let n = 0; try { n = fp ? outputManager.countModelFiles(fp).files : 0; } catch (_) { n = 0; }
-  return { framepack: n > 0, framepackFiles: n, framepackDir: fp, note: n > 0 ? `FramePack models found (${n} file${n === 1 ? "" : "s"} in "stuff and thing"/models/video/framepack/hf) — FramePack support is coming; the files are kept there.` : "" };
+  let ready = false; try { const f = framepack().status(); ready = !!(f.found && f.pythonOk && f.models && f.models.ok); } catch (_) { ready = false; }
+  return { framepack: n > 0, framepackFiles: n, framepackDir: fp, framepackReady: ready,
+    note: n > 0 && !ready ? `FramePack models found (${n} file${n === 1 ? "" : "s"} in "stuff and thing"/models/video/framepack/hf). FramePack can use them — see ⚙ Setup & models → FramePack.` : "" };
 }
+// 🎞 FramePack in the Setup tab: found / models / VRAM, ▶ Load (warm-up), 🧪 2-second test, 📂 Choose its folder, ⏏ Unload.
+ipcMain.handle("video:framepack-status", videoSafe((a) => videoStudio().framepack.status({ gpu: a.gpu !== false })));
+ipcMain.handle("video:framepack-load", videoSafe(() => videoStudio().framepack.load()));
+ipcMain.handle("video:framepack-unload", videoSafe(() => videoStudio().framepack.unload()));
+ipcMain.handle("video:framepack-test", videoSafe(() => videoRun("framepack-test", {}, "video-tab")));
+ipcMain.handle("video:framepack-choose-folder", videoSafe(async () => {
+  const r = await dialog.showOpenDialog(win || undefined, { title: "Choose the FramePack folder (it has demo_gradio.py and diffusers_helper)", properties: ["openDirectory"] });
+  if (r.canceled || !r.filePaths || !r.filePaths[0]) return { ok: false, error: "CANCELLED" };
+  const dir = r.filePaths[0];
+  if (!framepackMod.isFramePackDir(dir)) return { ok: false, error: "FRAMEPACK_NOT_FOUND", code: "FRAMEPACK_NOT_FOUND", message: `“${dir}” is not a FramePack folder — it needs demo_gradio.py and the diffusers_helper folder.`, fix: "Stability Matrix keeps it in Data\\Packages\\FramePack." };
+  const st = videoStudio().settings({ framepackDir: dir });
+  if (!st.ok) return st;
+  return Object.assign({ chosen: dir }, await videoStudio().framepack.status({ gpu: false }));
+}));
 ipcMain.handle("video:models", videoSafe(() => videoStudio().models()));
 ipcMain.handle("video:capabilities", videoSafe(() => (videoApiMod.get() ? videoApiMod.get().capabilities() : { ok: false, error: "NOT_WIRED" })));
 ipcMain.handle("video:settings", videoSafe((a) => videoStudio().settings(a.patch || {})));
@@ -6881,7 +6946,7 @@ async function butlerCapabilityTest() {
         step("Video generation", false, `couldn't make one: ${vdown}`);
       } else {
         const r = await _withTimeout(videoStudio().test(), (vs.settings && vs.settings.timeoutMs ? vs.settings.timeoutMs : 2700000) + 10000);
-        step("Video generation", !!(r && r.ok && (r.path || r.url)), r && r.ok ? `made a ${r.seconds || 1}-second test clip with ${r.engine === "comfy-wan" ? r.model : "the video server"} (${r.path ? path.basename(r.path) : r.url})` : `couldn't make one: ${(r && (r.message || r.error)) || "no video"}${r && r.fix ? ` — ${r.fix}` : ""}`);
+        step("Video generation", !!(r && r.ok && (r.path || r.url)), r && r.ok ? `made a ${r.seconds || 1}-second test clip with ${r.engine === "comfy-wan" ? r.model : r.engine === "framepack" ? "FramePack" : "the video server"} (${r.path ? path.basename(r.path) : r.url})` : `couldn't make one: ${(r && (r.message || r.error)) || "no video"}${r && r.fix ? ` — ${r.fix}` : ""}`);
       }
     } catch (e) { step("Video generation", false, String(e)); }
 
@@ -8751,6 +8816,15 @@ const healthWatch = healthWatchLib.createHealthWatch({
   panes: () => { const sr = selfRepairStatus(); return SITE_IDS.map((s) => { const x = (sr.sites && sr.sites[s]) || {}; return { site: s, label: x.label || siteLabel(s), active: !!x.active, state: x.state, problem: x.problem }; }); },
   logDirs: () => { try { return [outputManager.logsDir()]; } catch (_) { return []; } },
   contentRoots: () => { try { return contentRootsInfo(false); } catch (_) { return null; } },
+  // 🎞 FramePack: only once it is set up (found, chosen, or picked as the engine)
+  framepack: () => {
+    try {
+      const st = videoStudio().getSettings();
+      const f = framepack().status();
+      const setUp = !!(f.found || st.framepackDir || st.backend === "framepack");
+      return { setUp, found: !!f.found, ready: !!(f.found && f.pythonOk && f.models && f.models.ok), dir: f.dir || st.framepackDir || "", pythonOk: !!f.pythonOk, missing: (f.models && f.models.missing) || [], loaded: !!f.loaded, lastError: f.lastError || null };
+    } catch (_) { return null; }
+  },
   log: (kind, detail) => logEvent(kind, detail),
   notify: ({ type, problem, text }) => {
     broadcast("health", { type, problem, text, problems: healthWatch.problems() });
@@ -8846,4 +8920,4 @@ process.on("exit", () => { try { if (akoweServer) akoweServer.killNow(); } catch
 app.on("will-quit", () => { stopAkoweBridge(); });
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
 app.on("activate", () => { if (!win) createWindow(); });
-app.on("before-quit", () => { try { if (terminal) terminal.stop(); } catch (_) {} try { if (lockers) lockers.stopAll(); } catch (_) {} try { serviceBridge.stop(); } catch (_) {} try { interpreterProvider.stopManaged(); } catch (_) {} try { voiceProvider.stopManaged(); } catch (_) {} try { ollamaManager.stopManaged(); } catch (_) {} });
+app.on("before-quit", () => { try { if (_framepack) _framepack.stop(); } catch (_) {} try { if (terminal) terminal.stop(); } catch (_) {} try { if (lockers) lockers.stopAll(); } catch (_) {} try { serviceBridge.stop(); } catch (_) {} try { interpreterProvider.stopManaged(); } catch (_) {} try { voiceProvider.stopManaged(); } catch (_) {} try { ollamaManager.stopManaged(); } catch (_) {} });

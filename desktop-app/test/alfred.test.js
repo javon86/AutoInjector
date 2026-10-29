@@ -325,6 +325,8 @@ async function main() {
     assert(!x.card && x.res.data.backend === 'comfy-wan', 'video_status reads the Video module (no card)');
     x = await run('generate_video', { prompt: 'waves at night', seconds: 5, character: 'Moki Vey' });
     assert(x.card && /waves at night/.test(x.card.steps[0].text) && vcalls.slice(-1)[0].m === 'video.generate' && vcalls.slice(-1)[0].a.characterLock === 'Moki Vey' && vcalls.slice(-1)[0].a.from === 'alfred' && x.res.data.path === '/out/videos/v-1.mp4', 'generate_video: text → video through the module (lock + seconds passed; asks first)');
+    x = await run('generate_video', { prompt: 'a lighthouse', seconds: 3, engine: 'framepack' });
+    assert(x.card && /with FramePack \(a picture is made first/.test(x.card.steps[0].text) && vcalls.slice(-1)[0].m === 'video.generate' && vcalls.slice(-1)[0].a.engine === 'framepack', 'generate_video engine framepack: the card says a picture is made first; engine passed to the module');
     x = await run('generate_video', { image: '/out/images/moki.png', prompt: 'he breathes' });
     assert(vcalls.slice(-1)[0].m === 'video.animate' && vcalls.slice(-1)[0].a.image === '/out/images/moki.png' && /Bring the picture/.test(x.card.steps[0].text), 'generate_video with a picture → video.animate');
     x = await run('generate_video', {});

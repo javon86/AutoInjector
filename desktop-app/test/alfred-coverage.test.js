@@ -111,6 +111,7 @@ const IPC_INVENTORY = [
   'video:full-status', 'video:models', 'video:capabilities', 'video:settings', 'video:generate-t2v', 'video:animate', 'video:progress', 'video:cancel', 'video:gallery', 'video:test',
   'video:install-check', 'video:install-model', 'video:install-all', 'video:install-cancel', 'video:open-folder', 'video:show-file',
   'video:trailer-make', 'video:trailer-status', 'video:trailer-cancel', 'video:trailer-list', 'video:trailer-plan', 'video:trailer-pick-file',
+  'video:framepack-status', 'video:framepack-load', 'video:framepack-unload', 'video:framepack-test', 'video:framepack-choose-folder',
   'voice:check', 'voice:configure', 'voice:listen', 'voice:redownload', 'voice:speak', 'voice:status',
   'window:toggle-collapse', 'wizard-window:close', 'wizard:catalog', 'wizard:open', 'wizard:open-app-tab',
 ];
@@ -123,7 +124,7 @@ const EVENTS = {
   'akowe-tab-show': 'UI live update', 'app-tab-show': 'UI live update (wizard:open-app-tab → the tab button)', 'brigade-progress': 'UI live update', 'capability-test-step': 'UI live update', 'capture': 'UI live update (replies → read_latest_reply)',
   'featuretest-progress': 'UI live update', 'houserule-state': 'UI live update', 'ledger-entry': 'UI live update', 'locker-changed': 'UI live update', 'log': 'UI live update',
   'manager-ack': 'UI live update', 'manager-state': 'UI live update', 'ollama-progress': 'UI live update', 'llm': 'UI live update (setup / download progress — Alfred reads llm.status / llm.check)', 'pane-health': 'UI live update (→ ai_health)', 'picker': 'UI live update',
-  'prompts-changed': 'UI live update', 'relay-paused': 'UI live update', 'sd-connected': 'UI live update', 'sd-install': 'UI live update', 'sd-runner': 'UI live update', 'video-install': 'UI live update (model download progress — Alfred reads video.install.check / video.status)', 'video-done': 'UI live update (a video finished — Alfred gets the result from video_call)',
+  'prompts-changed': 'UI live update', 'relay-paused': 'UI live update', 'sd-connected': 'UI live update', 'sd-install': 'UI live update', 'sd-runner': 'UI live update', 'video-install': 'UI live update (model download progress — Alfred reads video.install.check / video.status)', 'video-done': 'UI live update (a video finished — Alfred gets the result from video_call)', 'video-framepack': 'UI live update (FramePack loading / loaded — Alfred reads video.framepack.status)',
   'send-error': 'UI live update', 'sent': 'UI live update', 'sequence-state': 'UI live update', 'setup-progress': 'UI live update', 'setup-status': 'UI live update',
   'terminal-data': 'UI live update', 'terminal-state': 'UI live update', 'tuner-state': 'UI live update', 'voice-speaking': 'UI live update', 'waiting-changed': 'UI live update',
   'window-collapse-changed': 'UI live update',
@@ -166,6 +167,7 @@ const SD_API_METHODS = ['images.status', 'images.generate', 'images.progress', '
 // The 🎬 Video module (video-api.js): every method through video_call.
 const VIDEO_API_METHODS = ['video.status', 'video.capabilities', 'video.models', 'video.progress', 'video.gallery', 'video.cancel', 'video.generate', 'video.animate', 'video.test', 'video.settings',
   'video.install.check', 'video.install.downloadModel', 'video.install.installAll', 'video.install.cancel',
+  'video.framepack.status', 'video.framepack.load', 'video.framepack.unload', 'video.framepack.test',
   'trailer.make', 'trailer.status', 'trailer.cancel', 'trailer.list', 'trailer.plan'];
 // The 📖 Akọwe API Alfred uses (method + path pattern) → the tool that calls it.
 const AKOWE_API_USED = {
@@ -544,7 +546,7 @@ async function main() {
   assert(d.carded && d.result && d.result.ok && comfy.state.videoGraphs.length === vg0 + 5 && (d.result.notes || []).some((n) => /image “Odile” is not a picture/.test(n)), 'generate_video: an image that is no picture → dropped with a note, text→video');
   d = await drive('generate_video', { image: path.join(os.tmpdir(), 'no-such-picture-for-alfred.png') });
   assert(d.carded && d.result && d.result.ok === false && d.result.error === 'INVALID_PARAM' && /image/.test(d.result.message) && /\.png \/ \.jpg \/ \.webp/.test(d.result.message) && comfy.state.videoGraphs.length === vg0 + 5, `generate_video: only a missing picture → the error names the field and what it may be: “${d.result && d.result.message}”`);
-  for (const m of ['video.status', 'video.models', 'video.progress', 'video.gallery', 'video.capabilities', 'video.install.check', 'trailer.status', 'trailer.list']) {
+  for (const m of ['video.status', 'video.models', 'video.progress', 'video.gallery', 'video.capabilities', 'video.install.check', 'video.framepack.status', 'trailer.status', 'trailer.list']) {
     d = await drive('video_call', { method: m, args: {} });
     if (assert(!d.carded && /^RESULT \{"ok":true/.test(d.text), `video_call ${m}: read-only, runs directly against the real module`)) mark(`video:${m}`, 'real video-api');
   }

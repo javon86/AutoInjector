@@ -21,15 +21,22 @@
  * settings (saved), toPng(buf) (optional: any picture → PNG), recordVideo(entry) (optional).
  */
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 const sdBackends = require('./sd-backends');
 const VI = require('./video-installer');
 const VE = require('./video-errors');
 const { fmtBytes } = require('./sd-installer');
+const FP = require('./framepack');
 
 const PURPOSES = ['clip', 'trailer_shot', 'free', 'test'];
-const BACKENDS = ['auto', 'comfy-wan', 'endpoint'];
+const BACKENDS = ['auto', 'comfy-wan', 'framepack', 'endpoint'];
+// "engine" is the plain-word alias of "backend" (Alfred, the bridge): wan = ComfyUI + Wan.
+const ENGINE_ALIASES = { wan: 'comfy-wan', comfy: 'comfy-wan', 'comfy-wan': 'comfy-wan', framepack: 'framepack', endpoint: 'endpoint', auto: 'auto' };
+const FRAMEPACK_MODEL = 'framepack-i2v-hy';
+const FP_DEFAULTS = { steps: 25, distilledCfg: 10, teacache: true, gpuMemoryPreservation: 6, mp4Crf: 16 };
+const FP_SECONDS = { clip: 4, trailer_shot: 5, test: 2, free: 5 };
 const DEFAULT_NEGATIVE = 'static, still picture, frozen, blurry, low quality, jpeg artifacts, distorted, deformed face, deformed hands, extra fingers, watermark, text, subtitles, oversaturated, overexposed';
 const IDLE_PROMPT = 'subtle natural motion, breathing, slight movement of hair and cloth, camera still';
 const BASE_NODES = ['UNETLoader', 'CLIPLoader', 'VAELoader', 'ModelSamplingSD3', 'CLIPTextEncode', 'KSampler', 'VAEDecode'];
@@ -38,7 +45,7 @@ const SAVE_NODES = ['CreateVideo', 'SaveVideo', 'SaveWEBM'];
 const POSTER_NODES = ['ImageFromBatch', 'SaveImage'];
 const ALL_NODES = [...new Set([...BASE_NODES, ...FAMILY_NODES.wan22, ...FAMILY_NODES.wan21, 'LoadImage', ...SAVE_NODES, ...POSTER_NODES])];
 const MAX_IMAGE_BYTES = 25 * 1024 * 1024;
-const DEFAULT_SETTINGS = { backend: 'auto', model: VI.DEFAULT_MODEL, comfyUrl: '', timeoutMs: 45 * 60 * 1000 };
+const DEFAULT_SETTINGS = { backend: 'auto', model: VI.DEFAULT_MODEL, comfyUrl: '', timeoutMs: 45 * 60 * 1000, framepackDir: '', framepackGpuMemory: FP_DEFAULTS.gpuMemoryPreservation };
 
 // --------------------------------------------------------------- small helpers
 const isNum = (v) => v !== undefined && v !== null && v !== '' && Number.isFinite(Number(v));
@@ -116,7 +123,33 @@ function fitSize(w, h, model) {
 
 // Every param checked and clamped to the model → { params, warnings } | { error }.
 // mode: 't2v' | 'i2v'. ctx: { settings, models, imageInfo }
-const PARAM_KEYS = ['prompt', 'negativePrompt', 'image', 'width', 'height', 'seconds', 'frames', 'fps', 'model', 'steps', 'cfgScale', 'seed', 'sampler', 'scheduler', 'shift', 'characterLock', 'purpose', 'from', 'book', 'returnPoster', 'backend', 'timeoutMs'];
+const PARAM_KEYS = ['prompt', 'negativePrompt', 'image', 'width', 'height', 'seconds', 'frames', 'fps', 'model', 'steps', 'cfgScale', 'seed', 'sampler', 'scheduler', 'shift', 'characterLock', 'purpose', 'from', 'book', 'returnPoster', 'backend', 'engine', 'timeoutMs', 'teacache', 'gpuMemoryPreservation', 'distilledCfg'];
+function engineOf(v) { return v == null || v === '' ? '' : (ENGINE_ALIASES[String(v).toLowerCase()] || ''); }
+
+// FramePack's own settings on top of the checked common ones → { fp, warnings } | { error }.
+// seconds 1–10 (FramePack makes about 1.2 s per section at 30 fps), steps (25), distilled CFG (10),
+// TeaCache (on: faster), GPU memory to keep free (6 GB; more = less chance of running out, slower).
+function normalizeFramePack(r, p, settings) {
+  const warnings = [];
+  const warn = (field, message) => warnings.push({ level: 'soft', field, message });
+  for (const k of ['distilledCfg', 'gpuMemoryPreservation']) if (r[k] !== undefined && r[k] !== null && r[k] !== '' && !isNum(r[k])) return { error: bad(k, `${k} must be a number (got “${String(r[k]).slice(0, 40)}”).`, k === 'distilledCfg' ? 'distilledCfg may be 1–32 (FramePack\'s default 10).' : 'gpuMemoryPreservation is the graphics memory to keep free, 6–128 GB (default 6).') };
+  if (r.teacache !== undefined && r.teacache !== null && typeof r.teacache !== 'boolean') return { error: bad('teacache', 'teacache must be true or false.') };
+  let seconds = isNum(r.seconds) ? Number(r.seconds) : (FP_SECONDS[p.purpose] || FP_SECONDS.free);
+  if (isNum(r.seconds) && (seconds < 1 || seconds > 10)) { const c = clamp(seconds, 1, 10); warn('seconds', `FramePack makes 1–10 seconds here, so ${c} s was used (asked ${seconds}).`); seconds = c; }
+  const sections = Math.max(1, Math.round((seconds * 30) / 36));
+  const frames = (sections * 9 + 1) * 4 - 3;
+  const steps = clamp(Math.round(isNum(r.steps) ? Number(r.steps) : (p.purpose === 'test' ? 15 : FP_DEFAULTS.steps)), 1, 100);
+  const distilledCfg = clamp(isNum(r.distilledCfg) ? Number(r.distilledCfg) : FP_DEFAULTS.distilledCfg, 1, 32);
+  const gpuDef = settings && isNum(settings.framepackGpuMemory) ? Number(settings.framepackGpuMemory) : FP_DEFAULTS.gpuMemoryPreservation;
+  const gpuMemoryPreservation = clamp(isNum(r.gpuMemoryPreservation) ? Number(r.gpuMemoryPreservation) : gpuDef, 6, 128);
+  if (isNum(r.gpuMemoryPreservation) && gpuMemoryPreservation !== Number(r.gpuMemoryPreservation)) warn('gpuMemoryPreservation', `GPU memory to keep free → ${gpuMemoryPreservation} GB (6–128).`);
+  const teacache = r.teacache !== false;
+  // The picture for text → video (made first with 🎨 Images): the asked size on a 64 px grid, else wide (or tall for a clip).
+  let picW = 896; let picH = 512;
+  if (p.purpose === 'clip') { picW = 512; picH = 768; }
+  if (isNum(r.width) || isNum(r.height)) { picW = snapSide(isNum(r.width) ? Number(r.width) : picW, 64, 256, 1280); picH = snapSide(isNum(r.height) ? Number(r.height) : picH, 64, 256, 1280); }
+  return { fp: { seconds: Math.round(frames / 30 * 100) / 100, wantSeconds: seconds, sections, frames, fps: 30, steps, distilledCfg, gpuMemoryPreservation, teacache, mp4Crf: FP_DEFAULTS.mp4Crf, picWidth: picW, picHeight: picH }, warnings };
+}
 function normalize(mode, req, ctx = {}) {
   const r = req || {};
   const models = ctx.models || VI.MODELS;
@@ -258,6 +291,27 @@ function createVideoStudio(deps = {}) {
 
   function videosDir() { const d = deps.videosDir(); fs.mkdirSync(d, { recursive: true }); return d; }
   const models = () => VI.MODELS;
+  // FramePack (framepack.js): found / models / the runner. null when this build has none.
+  const fpOf = () => { try { return (typeof deps.framepack === 'function' ? deps.framepack() : deps.framepack) || null; } catch (_) { return null; } };
+  function fpState(fresh) { const f = fpOf(); if (!f) return null; try { return f.status({ fresh: !!fresh }); } catch (_) { return null; } }
+  const fpReady = (s) => !!(s && s.found && s.pythonOk && s.models && s.models.ok);
+  function fpPublic(s) {
+    if (!s) return { available: false, found: false, ready: false, message: 'FramePack is not part of this build.' };
+    return { available: true, found: !!s.found, ready: fpReady(s), dir: s.dir || '', source: s.source || '', python: s.python || '', pythonOk: !!s.pythonOk, hfHome: s.hfHome || '', hfSource: s.hfSource || '',
+      models: { ok: !!(s.models && s.models.ok), missing: (s.models && s.models.missing) || [], repos: (s.models && s.models.repos) || [] }, chosenDir: s.chosenDir || '', chosenMissing: !!s.chosenMissing,
+      running: !!s.running, loaded: !!s.loaded, loading: s.loading || null, busy: !!s.busy, vramGB: s.vramGB == null ? null : s.vramGB, highVram: s.highVram == null ? null : s.highVram,
+      gpu: s.gpu || null, vramHint: s.vramHint || '', lastError: s.lastError || null, message: s.message || '' };
+  }
+  // engine "auto": ComfyUI + Wan when it is ready; FramePack when it is found and Wan isn't installed;
+  // the other video server; FramePack also when ComfyUI answers but can't make Wan video.
+  function pickAuto({ comfyReady, installed, ep, fps, comfyAnswers }) {
+    if (comfyReady) return 'comfy-wan';
+    const fpOk = fpReady(fps);
+    if (fpOk && !(installed && installed.length)) return 'framepack';
+    if (ep && ep.configured && ep.enabled) return 'endpoint';
+    if (fpOk && comfyAnswers) return 'framepack';
+    return '';
+  }
 
   async function facts(base, fresh) {
     if (!fresh && factsCache && factsCache.base === base && Date.now() - factsCache.at < 15000) return factsCache.facts;
@@ -289,21 +343,27 @@ function createVideoStudio(deps = {}) {
     const missingNodes = f && f.ok ? [...BASE_NODES, ...FAMILY_NODES.wan22].filter((n) => !f.nodes.has(n)) : [];
     const canSave = f && f.ok ? (f.nodes.has('SaveVideo') && f.nodes.has('CreateVideo')) || f.nodes.has('SaveWEBM') : false;
     const comfyReady = !!(c && f && f.ok && installed.length && !missingNodes.length && canSave);
+    const fps = fpState(!!o.fresh);
     let backend = '';
     if (settings.backend === 'endpoint') backend = ep.configured && ep.enabled ? 'endpoint' : '';
     else if (settings.backend === 'comfy-wan') backend = comfyReady ? 'comfy-wan' : '';
-    else backend = comfyReady ? 'comfy-wan' : ep.configured && ep.enabled ? 'endpoint' : '';
+    else if (settings.backend === 'framepack') backend = fpReady(fps) ? 'framepack' : '';
+    else backend = pickAuto({ comfyReady, installed, ep, fps, comfyAnswers: !!(c && f && f.ok) });
     let message;
     if (backend === 'comfy-wan') message = `✔ Ready: ComfyUI on ${c.base} with ${installed.map((id) => VI.MODELS[id].short).join(' + ')}.`;
+    else if (backend === 'framepack') message = `✔ Ready: FramePack (${fps.source || 'found'}) — picture → video; text → video makes a picture first with 🎨 Images.`;
+    else if (settings.backend === 'framepack') message = `FramePack is chosen as the video engine, but it isn't ready: ${(fps && fps.message) || 'FramePack is not part of this build.'}`;
     else if (backend === 'endpoint') message = `✔ Ready: the video server at ${ep.endpoint} (Advanced: other video server).`;
     else if (c && f && f.ok && missingNodes.length) message = `ComfyUI on ${c.base} is too old for Wan video (missing ${missingNodes.join(', ')}). Update ComfyUI.`;
     else if (c && f && f.ok && !installed.length) message = `ComfyUI is connected (${c.base}), but no video model is downloaded yet. Download ${VI.MODELS[VI.DEFAULT_MODEL].short} in 🎬 Video → Setup.`;
     else if (!c && chk.anyComfy) message = `ComfyUI is installed (${chk.roots[0].source}) but not running. Press “▶ Start ComfyUI”${installed.length ? '' : ', then download a video model'}.`;
     else message = 'Video is not set up yet. Press “Install ComfyUI + video model” in 🎬 Video (one click), or start your own ComfyUI.';
+    if (!backend && fps && fps.found && !fpReady(fps) && settings.backend !== 'framepack') message += ` (FramePack was found too, but: ${fps.message})`;
     const i = installer();
     return {
       ok: true, ready: !!backend, backend, message, busy: !!current,
-      job: current ? { mode: current.mode, model: current.model, seconds: Math.round((Date.now() - current.startedAt) / 1000), phase: current.phase } : null,
+      job: current ? { mode: current.mode, model: current.model, engine: current.engine || '', seconds: Math.round((Date.now() - current.startedAt) / 1000), phase: current.phase } : null,
+      framepack: fpPublic(fps),
       comfy: c ? { connected: !!(f && f.ok), base: c.base, label: c.label || 'ComfyUI', source: c.source || '', missingNodes, canSave, saveFormat: f && f.ok ? (f.nodes.has('SaveVideo') ? 'mp4' : f.nodes.has('SaveWEBM') ? 'webm' : '') : '' } : { connected: false, installed: !!chk.anyComfy },
       endpoint: ep, models: (chk.models || []).map((m) => ({ id: m.id, label: m.label, short: m.short, installed: m.installed, missing: m.missing, modes: m.modes, vramGB: m.vramGB, sizeText: m.sizeText, default: m.default })),
       installed, defaultModel: VI.DEFAULT_MODEL, settings: Object.assign({}, settings), install: i ? i.status() : null, last,
@@ -313,7 +373,8 @@ function createVideoStudio(deps = {}) {
   async function backendInfo() {
     const s = await status();
     return { ok: true, ready: s.ready, backend: s.backend, message: s.message, busy: s.busy, comfy: s.comfy, endpoint: { configured: s.endpoint.configured, enabled: s.endpoint.enabled }, installed: s.installed, defaultModel: s.defaultModel,
-      models: s.models.map((m) => ({ id: m.id, installed: m.installed, modes: m.modes, vramGB: m.vramGB })) };
+      models: s.models.map((m) => ({ id: m.id, installed: m.installed, modes: m.modes, vramGB: m.vramGB })),
+      framepack: { found: s.framepack.found, ready: s.framepack.ready, loaded: s.framepack.loaded, modes: ['i2v', 't2v (picture first)'] } };
   }
   async function modelsInfo() {
     const c = await connection(false);
@@ -325,13 +386,20 @@ function createVideoStudio(deps = {}) {
   function setSettings(patch) {
     const p = patch || {};
     const next = Object.assign({}, settings);
-    if (p.backend !== undefined) { if (!BACKENDS.includes(p.backend)) return bad('backend', `“${p.backend}” is not a video backend.`, 'backend is "auto", "comfy-wan" or "endpoint".'); next.backend = p.backend; }
+    if (p.backend !== undefined) { const b = engineOf(p.backend); if (!b) return bad('backend', `“${p.backend}” is not a video backend.`, 'backend is "auto", "comfy-wan", "framepack" or "endpoint".'); next.backend = b; }
+    if (p.framepackDir !== undefined) {
+      if (p.framepackDir !== null && typeof p.framepackDir !== 'string') return bad('framepackDir', 'framepackDir must be the path of the FramePack folder (or empty to find it by itself).');
+      next.framepackDir = String(p.framepackDir || '').trim().slice(0, 1000);
+    }
+    if (p.framepackGpuMemory !== undefined) { if (!isNum(p.framepackGpuMemory)) return bad('framepackGpuMemory', 'framepackGpuMemory must be a number of GB (6–128).'); next.framepackGpuMemory = clamp(Number(p.framepackGpuMemory), 6, 128); }
     if (p.model !== undefined) { if (!VI.MODELS[p.model]) return bad('model', `There is no video model “${p.model}”.`, `model is one of: ${Object.keys(VI.MODELS).join(', ')}.`); next.model = p.model; }
     if (p.comfyUrl !== undefined) { const b = p.comfyUrl ? sdBackends.baseOf(p.comfyUrl) : ''; if (p.comfyUrl && !b) return bad('comfyUrl', 'That address doesn\'t look right (e.g. http://127.0.0.1:8188).'); next.comfyUrl = b; }
     if (p.timeoutMs !== undefined) { if (!isNum(p.timeoutMs)) return bad('timeoutMs', 'timeoutMs must be a number.'); next.timeoutMs = clamp(Math.round(Number(p.timeoutMs)), 60000, 6 * 3600000); }
+    const dirChanged = next.framepackDir !== settings.framepackDir;
     settings = next; factsCache = null;
     try { persist(Object.assign({}, settings)); } catch (_) {}
-    log('video-settings', { backend: settings.backend, model: settings.model, comfyUrl: !!settings.comfyUrl });
+    if (dirChanged) { const f = fpOf(); if (f && typeof f.refresh === 'function') { try { f.refresh(); } catch (_) {} } }
+    log('video-settings', { backend: settings.backend, model: settings.model, comfyUrl: !!settings.comfyUrl, framepackDir: !!settings.framepackDir });
     return { ok: true, settings: Object.assign({}, settings) };
   }
 
@@ -353,6 +421,11 @@ function createVideoStudio(deps = {}) {
     let image = null;
     if (mode === 'i2v') { image = readImage(r.image); if (image.error) return image.error; }
     else if (r.image != null && r.image !== '') return bad('image', 'video.generate is text→video; use video.animate for a picture.', 'Leave image out here, or call video.animate with image = a picture file path.');
+    // which engine: backend / engine (plain words: wan, framepack, endpoint, auto); a FramePack remake asks for FramePack
+    if (r.engine != null && r.engine !== '' && !engineOf(r.engine)) return bad('engine', `“${r.engine}” is not a video engine.`, 'engine is "auto", "wan" (ComfyUI + Wan), "framepack" or "endpoint".');
+    let want = engineOf(r.backend) || engineOf(r.engine) || settings.backend;
+    if (r.model === FRAMEPACK_MODEL) { if (want === 'auto') want = 'framepack'; delete r.model; }
+    if (want === 'framepack' && r.model != null && !VI.MODELS[r.model]) delete r.model;
     const nz = normalize(mode, r, { settings, imageInfo: image ? { width: image.width, height: image.height } : null });
     if (nz.error) return nz.error;
     const p = nz.params; const warnings = nz.warnings;
@@ -360,17 +433,18 @@ function createVideoStudio(deps = {}) {
     if (lk && lk.error) return lk.error;
     if (lk) { p.prompt = lk.prompt; p.negativePrompt = lk.negativePrompt; p.lock = { id: lk.lock.id, character: lk.lock.character, book: lk.lock.book }; }
     if (!p.prompt) { if (mode === 'i2v') p.prompt = IDLE_PROMPT; else return fail('NEED_PROMPT', 'Describe the video first (prompt), or give a characterLock.', '', { error: 'NEED_PROMPT' }); }
-    // which backend
-    const want = r.backend && BACKENDS.includes(r.backend) ? r.backend : settings.backend;
     const job = { id: crypto.randomUUID(), mode, model: p.model, startedAt: Date.now(), phase: 'starting', cancelled: false, from: from || 'video-tab', noWs: !!deps.noWs };
     current = job;
     try {
       let out;
-      if (want === 'endpoint') out = await viaEndpoint(p, job);
+      if (want === 'auto') want = await autoEngine(); // FramePack when it is found and Wan isn't installed
+      if (want === 'framepack') out = await viaFramePack(p, image, job, warnings, r);
+      else if (want === 'endpoint') out = await viaEndpoint(p, job);
       else {
         const c = await connection(true);
         if (!c) {
           if (want === 'auto' && endpointReady()) out = await viaEndpoint(p, job);
+          else if (want === 'auto' && fpReady(fpState(false))) out = await viaFramePack(p, image, job, warnings, r); // ComfyUI could not start: FramePack instead
           else { const chk = installCheck(null); out = fail('VIDEO_NOT_SET_UP', chk.anyComfy ? 'ComfyUI is installed but not running, and AutoInjector could not start it.' : 'Video is not set up: there is no ComfyUI to make it.', chk.anyComfy ? 'Open 🎬 Video and press “▶ Start ComfyUI”, then try again.' : 'Open 🎬 Video and press “Install ComfyUI + video model” (one click), or start your own ComfyUI.', { engine: 'comfy-wan' }); }
         } else {
           const f = await facts(c.base, true);
@@ -381,12 +455,100 @@ function createVideoStudio(deps = {}) {
       }
       if (out.ok) out.warnings = warnings.concat(out.warnings || []);
       last = out.ok ? { ok: true, path: out.path, poster: out.poster, engine: out.engine, model: out.model, seconds: out.seconds, at: Date.now() } : { ok: false, error: out.error, message: out.message, at: Date.now() };
-      log('video-generate', { ok: out.ok, from: job.from, mode, engine: out.engine, model: p.model, error: out.ok ? undefined : out.error, seconds: Math.round((Date.now() - job.startedAt) / 1000), frames: p.frames, size: `${p.width}x${p.height}` });
+      log('video-generate', { ok: out.ok, from: job.from, mode, engine: out.engine, model: out.model || p.model, error: out.ok ? undefined : out.error, seconds: Math.round((Date.now() - job.startedAt) / 1000), frames: out.frames || p.frames, size: out.ok ? `${out.width}x${out.height}` : `${p.width}x${p.height}` });
       return out;
     } catch (e) {
       log('video-generate', { ok: false, from: job.from, error: 'INTERNAL', detail: String((e && e.message) || e).slice(0, 200) });
       return fail('VIDEO_FAILED', `Something went wrong: ${(e && e.message) || e}`);
     } finally { if (current === job) current = null; }
+  }
+
+  // "auto" before a video: FramePack only when it is ready and Wan can't be used (ComfyUI is asked without starting it).
+  async function autoEngine() {
+    const fps = fpState(false);
+    if (!fpReady(fps)) return 'auto';
+    const c0 = await connection(false);
+    const f0 = c0 ? await facts(c0.base) : null;
+    const chk0 = installCheck(f0 && f0.ok ? f0 : null);
+    const inst0 = chk0.installed || [];
+    const ok0 = !!(f0 && f0.ok);
+    const missing0 = ok0 ? [...BASE_NODES, ...FAMILY_NODES.wan22].filter((n) => !f0.nodes.has(n)) : [];
+    const canSave0 = ok0 && ((f0.nodes.has('SaveVideo') && f0.nodes.has('CreateVideo')) || f0.nodes.has('SaveWEBM'));
+    const pick = pickAuto({ comfyReady: !!(c0 && ok0 && inst0.length && !missing0.length && canSave0), installed: inst0, ep: endpointState(), fps, comfyAnswers: !!(c0 && ok0) });
+    return pick === 'framepack' ? 'framepack' : 'auto';
+  }
+  /** Which engine a video would use now: comfy-wan | framepack | endpoint | '' (the trailer's shot key). */
+  async function engineFor() {
+    if (settings.backend !== 'auto') return settings.backend;
+    try { const s = await status(); return s.backend || ''; } catch (_) { return ''; }
+  }
+
+  // FramePack: picture → video (text → video makes the picture first with 🎨 Images: deps.makePicture).
+  async function viaFramePack(p, image, job, warnings, req) {
+    job.engine = 'framepack'; job.model = FRAMEPACK_MODEL;
+    const f = fpOf();
+    if (!f) return fail('VIDEO_NOT_SET_UP', 'FramePack is not part of this build.', 'Use ComfyUI + Wan (🎬 Video → Setup).', { engine: 'framepack' });
+    const s = fpState(true);
+    if (!fpReady(s)) return FP.notReady(s) || fail('FRAMEPACK_NOT_FOUND', 'FramePack was not found on this PC.', '', { engine: 'framepack' });
+    const nf = normalizeFramePack(req || {}, p, settings);
+    if (nf.error) return nf.error;
+    const q = nf.fp;
+    warnings.length = 0; warnings.push(...nf.warnings); // the Wan size / frame notes don't apply to FramePack
+    const dir = videosDir();
+    const tmp = [];
+    const tmpOf = (suffix) => { const t = path.join(dir, `.framepack-${job.id}${suffix}`); tmp.push(t); return t; };
+    let imgPath = image && image.sourcePath ? image.sourcePath : null;
+    let picture = null;
+    try {
+      if (p.mode === 't2v') {
+        if (typeof deps.makePicture !== 'function') return fail('UNSUPPORTED_ON_BACKEND', 'FramePack brings a picture to life, and this build cannot make the first picture from text.', 'Use 🖼 Picture → video with FramePack, or ComfyUI + Wan for text → video.', { engine: 'framepack' });
+        job.phase = 'picture';
+        let pic;
+        try { pic = await deps.makePicture({ prompt: p.prompt, negativePrompt: p.negativePrompt === DEFAULT_NEGATIVE ? undefined : p.negativePrompt, width: q.picWidth, height: q.picHeight, seed: p.seed, from: 'video-framepack' }); }
+        catch (e) { pic = { ok: false, message: String((e && e.message) || e) }; }
+        if (job.cancelled) return fail('VIDEO_CANCELLED', 'Stopped.', '', { engine: 'framepack' });
+        if (!pic || !pic.ok || !pic.path) {
+          return fail('FRAMEPACK_PICTURE_FAILED', `Text → video with FramePack makes a picture first (🎨 Images), and that picture could not be made: ${(pic && (pic.message || pic.error)) || 'no picture came back'}`,
+            (pic && pic.fix) || 'Set up 🎨 Images (Stable Diffusion, or ChatGPT in its pane), or choose 🖼 Picture → video and give FramePack a picture.', { engine: 'framepack', cause: pic && (pic.code || pic.error) });
+        }
+        picture = pic; imgPath = pic.path;
+        const im = readImage(pic.path); image = im.error ? null : im;
+        warnings.push({ level: 'info', field: 'engine', message: `FramePack makes video from a picture, so the picture was made first with ${pic.engine === 'chatgpt' ? 'ChatGPT' : 'Stable Diffusion'} (🎨 Images: ${path.basename(pic.path)}), then brought to life.` });
+      } else if (!imgPath) {
+        imgPath = tmpOf(`-input.${image.type === 'jpeg' ? 'jpg' : image.type}`);
+        fs.writeFileSync(imgPath, image.buf);
+      }
+      const out = tmpOf('.mp4'); const posterTmp = tmpOf('.png');
+      job.phase = s.loaded ? 'starting' : 'loading';
+      job.step = 0; job.steps = q.sections * q.steps; job.pct = 0; job.section = 0; job.sections = q.sections;
+      const timeoutMs = isNum(req && req.timeoutMs) ? clamp(Number(req.timeoutMs), 10000, 6 * 3600000) : settings.timeoutMs;
+      if (job.cancelled) return fail('VIDEO_CANCELLED', 'Stopped.', '', { engine: 'framepack' });
+      const r = await f.generate({
+        id: job.id, image: imgPath, prompt: p.prompt, negative: p.negativePrompt === DEFAULT_NEGATIVE ? '' : (p.negativePrompt || ''), seconds: q.wantSeconds, seed: p.seed,
+        steps: q.steps, cfg: 1, gs: q.distilledCfg, rs: 0, use_teacache: q.teacache, mp4_crf: q.mp4Crf, gpu_memory_preservation: q.gpuMemoryPreservation, out, poster: posterTmp,
+      }, (ev) => {
+        if (!ev) return;
+        if (ev.phase === 'loading') { job.phase = 'loading'; job.stage = ev.stage || ''; return; }
+        job.phase = ev.phase === 'sampling' ? 'sampling' : ev.phase === 'decoding' ? 'decoding' : 'preparing';
+        if (ev.section) { job.section = ev.section; job.sections = ev.sections || job.sections; }
+        if (ev.steps && ev.section) { job.step = (ev.section - 1) * ev.steps + (ev.step || 0); job.steps = (ev.sections || job.sections) * ev.steps; }
+        if (ev.percent != null) job.pct = Number(ev.percent) || 0;
+      }, { timeoutMs });
+      if (!r || !r.ok) {
+        if (r && r.code === 'FRAMEPACK_CANCELLED') return fail('VIDEO_CANCELLED', 'Stopped.', '', { engine: 'framepack' });
+        return Object.assign({}, r || fail('FRAMEPACK_FAILED', 'FramePack could not make the video.'), { ok: false, engine: 'framepack', model: FRAMEPACK_MODEL });
+      }
+      job.phase = 'saving';
+      let vbuf = null; try { vbuf = fs.readFileSync(r.path || out); } catch (_) { vbuf = null; }
+      if (!vbuf || !vbuf.length) return fail('VIDEO_FAILED', 'FramePack said it finished, but the video file is not there.', 'Try again; look at FramePack\'s outputs folder too.', { engine: 'framepack' });
+      let pbuf = null; try { if (fs.existsSync(r.poster || posterTmp)) pbuf = fs.readFileSync(r.poster || posterTmp); } catch (_) { pbuf = null; }
+      if (!pbuf && image) pbuf = image.type === 'png' ? image.buf : (deps.toPng ? safeToPng(image.buf) : null);
+      const rec = Object.assign({}, p, { model: FRAMEPACK_MODEL, width: r.width || null, height: r.height || null, frames: r.frames || q.frames, fps: r.fps || 30, seconds: r.seconds || q.seconds,
+        steps: q.steps, cfgScale: undefined, sampler: undefined, scheduler: undefined, shift: undefined });
+      const fpRec = { sections: r.sections || q.sections, steps: q.steps, distilledCfg: q.distilledCfg, teacache: q.teacache, gpuMemoryPreservation: q.gpuMemoryPreservation, folder: s.dir, models: s.hfSource };
+      return save1({ engine: 'framepack', p: rec, vbuf, ext: '.mp4', pbuf, image: p.mode === 'i2v' ? image : null,
+        extra: { framepack: fpRec, distilledCfg: q.distilledCfg, teacache: q.teacache, gpuMemoryPreservation: q.gpuMemoryPreservation, sourcePicture: picture ? picture.path : undefined, pictureEngine: picture ? (picture.engine || 'sd') : undefined }, req });
+    } finally { for (const t of tmp) { try { fs.unlinkSync(t); } catch (_) {} } }
   }
 
   function explain(r, base, model, engine) {
@@ -563,6 +725,7 @@ function createVideoStudio(deps = {}) {
     if (!j) return { ok: true, busy: false, last };
     const out = { ok: true, busy: true, mode: j.mode, model: j.model, phase: j.phase, seconds: Math.round((Date.now() - j.startedAt) / 1000), step: j.step || 0, steps: j.steps || 0, from: j.from };
     out.pct = out.steps ? Math.min(1, out.step / out.steps) : 0;
+    if (j.engine === 'framepack') { out.engine = 'framepack'; out.section = j.section || 0; out.sections = j.sections || 0; out.stage = j.stage || ''; if (j.pct != null) out.pct = Math.min(1, Number(j.pct) || 0); }
     if (j.base && j.promptId) {
       try { const p = await sdBackends.comfyProgress(j.base, j); if (p && p.ok) { out.queue = p.job; if (p.steps) { out.step = p.step; out.steps = p.steps; out.pct = p.progress; } if (/queued/.test(p.job || '')) out.phase = 'queued'; } } catch (_) {}
     }
@@ -572,6 +735,7 @@ function createVideoStudio(deps = {}) {
     const j = current;
     if (!j) return { ok: true, cancelled: false, message: 'No video is being made.' };
     j.cancelled = true;
+    if (j.engine === 'framepack') { const f = fpOf(); if (f) { try { f.cancel(); } catch (_) {} } }
     // Only this job's prompt: before it is queued there is nothing to stop (runGraph sees `cancelled` and queues nothing),
     // and a bare /interrupt would stop whatever else ComfyUI is rendering (e.g. a 🎨 Images picture).
     if (j.base && j.promptId) { try { await sdBackends.comfyInterrupt(j.base, j); } catch (_) {} }
@@ -581,7 +745,7 @@ function createVideoStudio(deps = {}) {
   function gallery(limit) {
     const n = clamp(Math.round(Number(limit) || 40), 1, 500);
     let dir; try { dir = videosDir(); } catch (_) { return { ok: true, items: [] }; }
-    let names = []; try { names = fs.readdirSync(dir).filter((x) => /\.(mp4|webm|mkv|mov)$/i.test(x)); } catch (_) { names = []; }
+    let names = []; try { names = fs.readdirSync(dir).filter((x) => /\.(mp4|webm|mkv|mov)$/i.test(x) && !x.startsWith('.')); } catch (_) { names = []; }
     const items = names.map((name) => {
       const p = path.join(dir, name); const stem = name.replace(/\.[^.]+$/, '');
       let mtime = 0; try { mtime = fs.statSync(p).mtimeMs; } catch (_) {}
@@ -597,11 +761,31 @@ function createVideoStudio(deps = {}) {
   async function test(o = {}) {
     const st = await status();
     if (!st.ready) return fail('VIDEO_NOT_SET_UP', st.message, 'Open 🎬 Video → Setup.');
+    if (st.backend === 'framepack') return framepackTest(o);
     const model = st.backend === 'comfy-wan' ? (st.installed.includes('wan21-t2v-1.3b') ? 'wan21-t2v-1.3b' : st.installed[0]) : undefined;
     return make('t2v', Object.assign({ prompt: 'a red ball bouncing on a white floor, simple test clip', purpose: 'test', seconds: 1, model }, o), 'video-test');
   }
 
+  // 🧪 FramePack: a 2-second clip from a built-in test picture (sky, sun, hills, a lake).
+  async function framepackTest(o = {}) {
+    const pic = path.join(os.tmpdir(), 'autoinjector-framepack-test.png');
+    try { fs.writeFileSync(pic, FP.testPicture()); } catch (e) { return fail('VIDEO_FAILED', `The test picture could not be written (${e.code || e.message}).`); }
+    return make('i2v', Object.assign({ image: pic, prompt: 'the clouds drift slowly, the water ripples, the sun shimmers, gentle camera push', purpose: 'test', seconds: 2, backend: 'framepack' }, o), 'video-test');
+  }
+  const framepack = {
+    status: async (o = {}) => { const f = fpOf(); if (!f) return Object.assign({ ok: true }, fpPublic(null)); if (o.gpu && typeof f.refreshGpu === 'function') { try { await f.refreshGpu(); } catch (_) {} } return Object.assign({ ok: true }, fpPublic(fpState(true))); },
+    load: async () => {
+      const f = fpOf(); if (!f) return fail('VIDEO_NOT_SET_UP', 'FramePack is not part of this build.');
+      const nr = FP.notReady(fpState(true)); if (nr) return nr;
+      const r = await f.load();
+      return r && r.ok ? Object.assign({ message: `✔ FramePack is loaded${r.vramGB != null ? ` (${r.vramGB} GB of graphics memory free)` : ''} — the next video starts straight away.` }, r) : r;
+    },
+    unload: async () => { const f = fpOf(); if (!f) return { ok: true, stopped: false }; if (current && current.engine === 'framepack') return fail('BUSY', 'FramePack is making a video right now.', 'Stop it first (⏹ Stop).'); return Object.assign({ message: 'FramePack is unloaded: the graphics memory is free again.' }, f.stop()); },
+    test: (o) => framepackTest(o || {}),
+  };
+
   return {
+    framepack, engineFor,
     status, backendInfo, models: modelsInfo, settings: setSettings, getSettings: () => Object.assign({}, settings),
     generate: (req, from) => make('t2v', req, from),
     animate: (req, from) => make('i2v', req, from),
@@ -616,4 +800,4 @@ function createVideoStudio(deps = {}) {
   };
 }
 
-module.exports = { createVideoStudio, buildWanGraph, normalize, comfyFacts, comfyName, imageSize, readImage, fitSize, snapFrames, snapSide, PARAM_KEYS, PURPOSES, BACKENDS, DEFAULT_NEGATIVE, DEFAULT_SETTINGS, IDLE_PROMPT, ALL_NODES };
+module.exports = { createVideoStudio, buildWanGraph, normalize, normalizeFramePack, engineOf, FRAMEPACK_MODEL, FP_DEFAULTS, comfyFacts, comfyName, imageSize, readImage, fitSize, snapFrames, snapSide, PARAM_KEYS, PURPOSES, BACKENDS, DEFAULT_NEGATIVE, DEFAULT_SETTINGS, IDLE_PROMPT, ALL_NODES };

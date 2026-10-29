@@ -28,7 +28,8 @@ const DEFAULTS = { shotSeconds: 4, cardSeconds: 3, width: 1280, height: 720, fps
 const MUSIC_EXT = /\.(mp3|ogg|oga|opus|wav|m4a|aac|flac|webm)$/i;
 const SHOT_KEYS = ['type', 'prompt', 'image', 'seconds', 'characterLock', 'negativePrompt', 'seed', 'model'];
 const CARD_KEYS = ['type', 'text', 'subtitle', 'seconds', 'at'];
-const TOP_KEYS = ['book', 'title', 'items', 'shots', 'cards', 'music', 'musicVolume', 'width', 'height', 'fps', 'fade', 'model', 'resume', 'mp4', 'from', 'wait'];
+const TOP_KEYS = ['book', 'title', 'items', 'shots', 'cards', 'music', 'musicVolume', 'width', 'height', 'fps', 'fade', 'model', 'engine', 'resume', 'mp4', 'from', 'wait'];
+const ENGINES = { auto: 'auto', wan: 'comfy-wan', comfy: 'comfy-wan', 'comfy-wan': 'comfy-wan', framepack: 'framepack', endpoint: 'endpoint' };
 const ERRORS = {
   TRAILER_JOIN_FAILED: 'The shots were made, but joining them into one video failed.',
   BUSY: 'A trailer is already being made.',
@@ -132,21 +133,25 @@ function normalizeTrailer(req) {
     if (!st || !st.isFile()) return { error: bad('music', `The music file “${p}” was not found.`, 'Give the full path of the music file, or leave music out.') };
     music = p;
   }
-  for (const k of ['book', 'title', 'model', 'from']) if (r[k] != null && typeof r[k] !== 'string') return { error: bad(k, `${k} must be text.`) };
+  for (const k of ['book', 'title', 'model', 'from', 'engine']) if (r[k] != null && typeof r[k] !== 'string') return { error: bad(k, `${k} must be text.`) };
+  if (r.engine != null && r.engine !== '' && !ENGINES[String(r.engine).toLowerCase()]) return { error: bad('engine', `“${r.engine}” is not a video engine.`, 'engine is "auto", "wan", "framepack" or "endpoint".') };
   const book = String(r.book || r.title || '').trim().slice(0, 200);
   const plan = {
     book: book || 'Untitled', title: String(r.title || book || '').trim().slice(0, 200), folder: safeName(book, 'Untitled'),
     items, music, musicVolume: MV.v, width: W.v, height: H.v, fps: F.v, fade: Math.round(FD.v * 100) / 100,
-    model: r.model ? String(r.model).slice(0, 80) : undefined, resume: r.resume !== false, mp4: r.mp4 !== false, from: r.from ? String(r.from).slice(0, 60) : '',
+    model: r.model ? String(r.model).slice(0, 80) : undefined, engine: r.engine ? ENGINES[String(r.engine).toLowerCase()] : undefined, resume: r.resume !== false, mp4: r.mp4 !== false, from: r.from ? String(r.from).slice(0, 60) : '',
   };
   plan.total = Math.round(items.reduce((n, x) => n + x.seconds, 0) * 100) / 100;
   return { plan, warnings };
 }
 
-// The same shot asked for again → the same key (resume).
-function shotKey(shot, model) {
+// The same shot asked for again → the same key (resume). The engine is part of it: a shot FramePack made
+// is not reused when Wan makes the trailer (and back). Wan / endpoint keys are the same as before engines existed.
+function shotKey(shot, model, engine) {
   const img = shot.image ? (shot.image.length > 300 ? `b64:${crypto.createHash('sha1').update(shot.image).digest('hex')}` : shot.image) : '';
-  const k = JSON.stringify([shot.prompt || '', img, shot.seconds, shot.characterLock || '', shot.negativePrompt || '', shot.model || model || '', shot.seed == null ? null : shot.seed]);
+  const parts = [shot.prompt || '', img, shot.seconds, shot.characterLock || '', shot.negativePrompt || '', shot.model || model || '', shot.seed == null ? null : shot.seed];
+  if (engine === 'framepack') parts.push('framepack');
+  const k = JSON.stringify(parts);
   return crypto.createHash('sha1').update(k).digest('hex').slice(0, 16);
 }
 
@@ -273,7 +278,10 @@ function createTrailerMaker(deps = {}) {
 
   async function renderShot(j, it, i) {
     const shot = j.plan.items[i];
-    const key = shotKey(shot, j.plan.model);
+    // which engine makes it: the trailer's own choice, else what 🎬 Video would use now
+    let engine = j.plan.engine && j.plan.engine !== 'auto' ? j.plan.engine : '';
+    if (!engine && studio && typeof studio.engineFor === 'function') { try { engine = (await studio.engineFor(shot.image ? 'i2v' : 't2v')) || ''; } catch (_) { engine = ''; } }
+    const key = shotKey(shot, j.plan.model, engine);
     const cache = j.state.shots || (j.state.shots = {});
     const c = cache[key];
     if (j.plan.resume && c && c.file && fs.existsSync(path.join(j.dir, 'shots', c.file))) {
@@ -285,18 +293,19 @@ function createTrailerMaker(deps = {}) {
     j.message = `Making shot ${j.shotNo} of ${j.items.filter((x) => x.type === 'shot').length} (${shot.seconds} s)… the first one loads the video model.`;
     const req = { prompt: shot.prompt || undefined, seconds: shot.seconds, purpose: 'trailer_shot', book: j.plan.book, from: `trailer${j.plan.from ? `:${j.plan.from}` : ''}`.slice(0, 60) };
     for (const k of ['characterLock', 'negativePrompt', 'seed']) if (shot[k] != null) req[k] = shot[k];
-    if (shot.model || j.plan.model) req.model = shot.model || j.plan.model;
+    if ((shot.model || j.plan.model) && engine !== 'framepack') req.model = shot.model || j.plan.model;
+    if (j.plan.engine && j.plan.engine !== 'auto') req.backend = j.plan.engine;
     let r;
     if (shot.image) { req.image = shot.image; r = await studio.animate(req, 'trailer'); } else r = await studio.generate(req, 'trailer');
     if (!r || !r.ok) return r || fail('VIDEO_FAILED', 'The shot could not be made.');
-    if (!r.path) return fail('VIDEO_FAILED', 'The video engine answered with an address, not a file — a trailer needs the clip on this computer.', 'Use ComfyUI + Wan in 🎬 Video → Setup.');
+    if (!r.path) return fail('VIDEO_FAILED', 'The video engine answered with an address, not a file — a trailer needs the clip on this computer.', 'Use ComfyUI + Wan or FramePack (🎬 Video → Setup).');
     // keep a copy with the trailer (resume, and so deleting it from videos/ doesn't break the trailer)
     const sd = path.join(j.dir, 'shots'); fs.mkdirSync(sd, { recursive: true });
     const file = `shot-${key}${path.extname(r.path) || '.mp4'}`;
     try { fs.copyFileSync(r.path, path.join(sd, file)); } catch (e) { return fail('VIDEO_FAILED', `The shot was made but couldn't be copied into the trailer folder (${e.code || e.message}).`); }
     let poster = null;
     if (r.poster) { try { poster = `shot-${key}.png`; fs.copyFileSync(r.poster, path.join(sd, poster)); } catch (_) { poster = null; } }
-    cache[key] = { file, poster, seconds: r.seconds, model: r.model, seed: r.seed, source: r.path, at: new Date().toISOString(), prompt: (shot.prompt || '').slice(0, 300) };
+    cache[key] = { file, poster, seconds: r.seconds, model: r.model, engine: r.engine || engine || undefined, seed: r.seed, source: r.path, at: new Date().toISOString(), prompt: (shot.prompt || '').slice(0, 300) };
     writeState(j.dir, j.state);
     it.status = 'done'; it.path = path.join(sd, file); it.poster = poster ? path.join(sd, poster) : null; it.key = key; it.model = r.model; it.seed = r.seed;
     return { ok: true, path: it.path };
@@ -385,7 +394,7 @@ function createTrailerMaker(deps = {}) {
       j.finished = true; j.phase = out.ok ? 'done' : out.error === 'VIDEO_CANCELLED' ? 'cancelled' : 'failed';
       j.message = out.ok ? `✔ Trailer saved (${out.seconds} s).` : out.message;
       j.result = out;
-      j.state.plan = { book: plan.book, title: plan.title, items: plan.items, music: plan.music || null, musicVolume: plan.musicVolume, width: plan.width, height: plan.height, fps: plan.fps, fade: plan.fade, model: plan.model || null };
+      j.state.plan = { book: plan.book, title: plan.title, items: plan.items, music: plan.music || null, musicVolume: plan.musicVolume, width: plan.width, height: plan.height, fps: plan.fps, fade: plan.fade, model: plan.model || null, engine: plan.engine || null };
       j.state.last = out.ok ? { ok: true, at: new Date().toISOString(), path: out.path, mp4: out.mp4, seconds: out.seconds, bytes: out.bytes, warnings: out.warnings } : { ok: false, at: new Date().toISOString(), error: out.error, message: out.message, shot: out.shot };
       writeState(dir, j.state);
       if (out.ok) dropOlder(dir, [out.path, out.mp4]);

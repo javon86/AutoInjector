@@ -375,6 +375,7 @@
         for (const p of hs.problems.slice(0, 8)) { lines.push(`  ${p.severity === 'error' ? '✖' : '⚠'} ${p.text}`); if (p.fix && p.code) fixes.push(p); }
       }
     } else if (hs && hs.ok === false) lines.push(`🩺 The app: ${hs.error || 'the health check did not answer.'}`);
+    if (hs && Array.isArray(hs.info)) for (const row of hs.info.slice(0, 4)) if (row && row.text && !(hs.problems || []).some((p) => p.check === row.check)) lines.push(`  ${row.text}`);
     const c = last && last.connected;
     if (c) lines.push(`🧰 Connected: 📖 Akọwe ${c.akowe ? '✔' : '✖'} · 🎨 pictures ${c.images ? '✔' : '✖'} · 🎬 video ${c.video ? '✔' : 'not yet'} · 💬 AIs ${c.panes || 0}/3`);
     box.textContent = lines.join('\n');
