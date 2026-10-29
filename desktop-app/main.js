@@ -2476,15 +2476,22 @@ async function saveRawResponse(entry) {
   }
 }
 
-async function saveTaskCheckpoint() {
+// Synchronous on purpose: finishManagedTask() marks the task finished and then
+// saves this file. With an async write there was a window in which the task
+// already showed "finished" (state:get, the UI, the manager log) while
+// project.json was not on disk yet — anyone opening the project right then
+// (a user, a script, the integration test) found no project.json. Writing it
+// before control returns to the event loop means "finished" is never visible
+// without its checkpoint. The file is a small JSON snapshot.
+function saveTaskCheckpoint() {
   const m = state.manager;
   if (!m.projectDir) return;
   try {
     // Write a temp file, then rename: a reader (or a crash) never sees a half-written checkpoint.
     const file = path.join(m.projectDir, "project.json");
     const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
-    await fs.promises.writeFile(tmp, JSON.stringify(managerSnapshot(), null, 2), "utf8");
-    await fs.promises.rename(tmp, file);
+    fs.writeFileSync(tmp, JSON.stringify(managerSnapshot(), null, 2), "utf8");
+    fs.renameSync(tmp, file);
   } catch (e) {
     logManagerEvent({ category: "error", severity: "error", summary: `Failed to save checkpoint: ${String(e)}` });
   }
@@ -3687,7 +3694,7 @@ async function finishManagedTask({ ok, reason, message }) {
   m.pendingModels = [];
   m.waitingSince = null;
   logManagerEvent({ category: "task", severity: ok ? "success" : "error", summary: ok ? "Task completed" : `Task ended: ${reason || "unknown"}${m.endMessage ? ` — ${m.endMessage}` : ""}`, details: { reason: reason || null } });
-  await saveTaskCheckpoint();
+  saveTaskCheckpoint(); // synchronous: no await between "finished" and project.json existing (see saveTaskCheckpoint)
   if (m.endMessage) broadcast("manager-ack", { taskId: m.taskId, text: m.endMessage, ts: Date.now() });
   speakIfEnabled(ok ? "Done." : (m.endMessage || `Stopped: ${reason || "unknown"}`)); // N2
   broadcastManagerState();
@@ -8210,7 +8217,7 @@ ipcMain.handle("akowe:regenerate-token", () => {
 // Node's http client — so the round trips go through the bridge's own HTTP API
 // exactly like Akọwe's do. Reports go to the logs folder as
 // akowe-link-test-<stamp>.md / .json (no key, no prompt text).
-const bfLinkTest = { running: false, stop: false, lastReport: null, lastSummary: null, lastSteps: null };
+const bfLinkTest = { running: false, stop: false, lastReport: null, lastSummary: null, lastSteps: null, stamps: new Set() };
 // Where Akọwe itself runs. Default http://127.0.0.1:8780 (Akọwe's own
 // default); AKOWE_PORT (the same variable Akọwe reads) changes the port;
 // AUTOINJECTOR_AKOWE_APP_URL (a full loopback .../api/ping URL) overrides both.
@@ -8277,7 +8284,12 @@ async function runAkoweLinkTestNow() {
   if (bfLinkTest.running) return { ok: false, error: "ALREADY_RUNNING" };
   const sites = SITE_IDS.filter((s) => state.enabled && state.enabled[s]);
   Object.assign(bfLinkTest, { running: true, stop: false });
-  const stamp = akoweLinkTest.stampNow();
+  // never reuse a stamp: its request_ids would get the bridge's cached answers from that earlier run
+  const stamp = akoweLinkTest.uniqueStamp(akoweLinkTest.stampNow(), (st) => {
+    if (bfLinkTest.stamps.has(st)) return true;
+    try { return fs.existsSync(path.join(outputManager.logsDir(), `akowe-link-test-${st}.md`)); } catch (_) { return false; }
+  });
+  bfLinkTest.stamps.add(stamp);
   logEvent("akowe-linktest-start", { sites });
   akoweNoteActivity({ kind: "linktest", say: "Link test started", tone: "info" });
   broadcast("akowe-linktest-progress", { status: "start", sites, stamp });
