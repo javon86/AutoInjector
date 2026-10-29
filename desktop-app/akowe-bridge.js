@@ -282,6 +282,13 @@ function sanitizeAkoweStatus(body) {
     .map((c) => ({ id: capStr(c.id, 60), title: capStr(c.title, 200), set: capStr(c.set, 20), state: capStr(c.state, 40) }));
   out.done = capInt(body.done, 100000);
   out.total = capInt(body.total, 100000);
+  // Optional (a newer Akọwe): the "Make a book for me" run itself — its real state, not the checklist's.
+  const run = obj(body.run);
+  out.run = run ? {
+    id: capStr(run.id, 80), status: capStr(run.status, 40), phase: capStr(run.phase, 300), title: capStr(run.title, 200),
+    project_id: capStr(run.project_id, 100), step: capInt(run.step, 1000), steps_done: capInt(run.steps_done, 1000),
+    steps_total: capInt(run.steps_total, 1000), needs_decision: run.needs_decision === true, updated_at: toEpochMs(run.updated_at)
+  } : null;
   out.updated_at = toEpochMs(body.updated_at);
   return { ok: true, value: out };
 }

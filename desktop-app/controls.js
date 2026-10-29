@@ -3539,6 +3539,41 @@ function bfSetBadge(set) {
   b.title = `Module set ${bfSetLetter(set)}`;
   return b;
 }
+// The "⚡ Make a book for me" run (main: akowe-run.js) — null when there is none for this book.
+function bfRunFor(s) {
+  const r = s && s.run;
+  return r && typeof r === "object" && r.text ? r : null;
+}
+function bfRunLine(run) {
+  if (!run) return "";
+  return `${run.text}${run.stale ? " (last known — Akọwe isn't answering right now)" : ""}`;
+}
+function bfRenderRun(run) {
+  const box = el("bf-run");
+  if (!box) return;
+  box.hidden = !run;
+  if (!run) return;
+  box.dataset.tone = run.tone || "off";
+  box.dataset.state = run.state || "";
+  bfText("bf-run-text", bfRunLine(run));
+  const res = el("btn-bf-run-resume");
+  if (res) res.hidden = !(run.resumable && !run.stale && run.id);
+  const dec = el("btn-bf-run-decide");
+  if (dec) dec.hidden = !(run.needsDecision && !run.stale);
+}
+async function bfRunResume() {
+  const run = bfRunFor(bf.snap || {});
+  const btn = el("btn-bf-run-resume");
+  if (!run || !run.id || !window.api || typeof window.api.akoweRunResume !== "function") return;
+  if (btn) btn.disabled = true;
+  bfText("bf-run-msg", "Resuming…");
+  let r = null;
+  try { r = await window.api.akoweRunResume(run.id); } catch (_) { r = null; }
+  if (btn) btn.disabled = false;
+  bfText("bf-run-msg", (r && r.message) || (r && r.ok ? "Resumed." : "Couldn't resume it — open Akọwe and press ▶ Resume there."));
+  if (r && r.run && bf.snap) { bf.snap = Object.assign({}, bf.snap, { run: r.run }); bfRenderAll(); }
+  setTimeout(() => bfText("bf-run-msg", ""), 8000);
+}
 function bfRenderBook(s, d) {
   const b = s.akowe;
   const rows = b && Array.isArray(b.checklist) ? b.checklist.filter((r) => r && typeof r === "object") : [];
@@ -3546,17 +3581,23 @@ function bfRenderBook(s, d) {
   bfShow("bf-book", has);
   bfShow("bf-book-empty", !has);
   if (!has) bfText("bf-book-empty", d.connected ? "Connected — open a book in Akọwe and its progress shows here." : "When Akọwe is connected, your book's progress shows here.");
+  if (!has) bfRenderRun(null);
   if (has) {
     bfText("bf-book-title", (b.project && b.project.title) ? `“${b.project.title}”` : "Your book");
     const doneCount = rows.filter((r) => bfCheckState(r.state).tone === "ok").length;
-    const total = Number.isFinite(b.total) && b.total > 0 ? b.total : rows.length;
-    const done = Math.min(total, Number.isFinite(b.done) ? b.done : doneCount);
+    const run = bfRunFor(s);
+    // The bar follows the Make-a-book RUN when there is one (its real step, e.g. 7 of 16) — the checklist
+    // alone said "10/10 Done" for a run that had stopped at step 7 when Akọwe closed.
+    const useRun = !!(run && run.total);
+    const total = useRun ? run.total : (Number.isFinite(b.total) && b.total > 0 ? b.total : rows.length);
+    const done = useRun ? (run.state === "finished" ? run.total : Math.min(run.total, run.done || 0)) : Math.min(total, Number.isFinite(b.done) ? b.done : doneCount);
     const pct = total ? Math.round((done / total) * 100) : 0;
     const bar = el("bf-progress-bar");
     if (bar) bar.style.width = `${pct}%`;
     const pb = el("bf-progress");
-    if (pb) { pb.setAttribute("aria-valuemax", String(total)); pb.setAttribute("aria-valuenow", String(done)); pb.title = `${done} of ${total} done (${pct}%)`; }
+    if (pb) { pb.setAttribute("aria-valuemax", String(total)); pb.setAttribute("aria-valuenow", String(done)); pb.title = useRun ? `Make-a-book run: ${run.text} (${done} of ${total} steps done)` : `${done} of ${total} done (${pct}%)`; pb.dataset.tone = useRun ? run.tone : ""; }
     bfText("bf-progress-text", total ? `${done}/${total}` : "–");
+    bfRenderRun(run);
     const stepper = el("bf-stepper");
     bfKeyed(stepper, rows, (r) => r.id || r.op || r.title, (r) => {
       const li = bfNode("li");
@@ -4175,7 +4216,8 @@ function bfRenderAll() {
 function bfRenderSlim(s, d) {
   const b = s.akowe;
   const t = b && b.current_task;
-  const step = t ? `${bfStepLabel(t) || "Current step"}${t.state ? ` — ${bfStateWord(t.state).word}` : ""}` : d.title;
+  const run = bfRunFor(s);
+  const step = run && run.state !== "finished" ? `⚡ ${bfRunLine(run)}` : t ? `${bfStepLabel(t) || "Current step"}${t.state ? ` — ${bfStateWord(t.state).word}` : ""}` : d.title;
   bfText("bf-slim-step", step);
   const st = el("bf-slim-step"); if (st) st.title = step;
   const n = Number((b && b.approvals && b.approvals.count) || 0);
@@ -4303,6 +4345,8 @@ async function bfOpen(url, what, action) {
 if (el("btn-bf-approve")) el("btn-bf-approve").onclick = () => { const s = bf.snap || {}; const b = s.akowe || {}; bfOpen((b.approvals && b.approvals.url) || bfOpenFor(s), "the approvals page", "approve"); };
 if (el("btn-bf-goto-task")) el("btn-bf-goto-task").onclick = () => { const s = bf.snap || {}; const b = s.akowe || {}; bfOpen((b.current_task && b.current_task.url) || bfOpenFor(s), "the current task", "goto"); };
 if (el("btn-bf-open")) el("btn-bf-open").onclick = () => bfOpen(bfOpenFor(bf.snap || {}), "Akọwe", "open");
+if (el("btn-bf-run-resume")) el("btn-bf-run-resume").onclick = () => { bfRunResume(); };
+if (el("btn-bf-run-decide")) el("btn-bf-run-decide").onclick = () => { const s = bf.snap || {}; const b = s.akowe || {}; bfOpen((b.current_task && b.current_task.url) || bfOpenFor(s), "the book", "goto"); };
 // 🔁 Reload an AI's window (the app's own reload).
 async function bfReloadPane(site, L) {
   if (!site) return;

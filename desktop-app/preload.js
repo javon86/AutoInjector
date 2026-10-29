@@ -305,6 +305,7 @@ contextBridge.exposeInMainWorld("api", {
   onTerminalState: (cb) => ipcRenderer.on("terminal-state", (_e, payload) => cb(payload)),
   // Akọwe bridge (experimental) — see docs/AKOWE_AUTOINJECTOR_BRIDGE.md
   akoweStatus: (opts) => ipcRenderer.invoke("akowe:status", opts || {}),
+  akoweRunResume: (id) => ipcRenderer.invoke("akowe:run-resume", { id }),
   // 📖 Akọwe tab: the server AutoInjector runs itself, and the view showing it
   akoweServerStatus: () => ipcRenderer.invoke("akowe-server:status"),
   akoweServerRetry: () => ipcRenderer.invoke("akowe-server:retry"),

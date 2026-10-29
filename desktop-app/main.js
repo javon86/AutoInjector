@@ -7740,6 +7740,9 @@ function akoweStatusSnapshotBase() {
     pairing: st && st.pairing ? { pending: st.pairing.pending, expiresAt: st.pairing.expiresAt, lastPairedAt: st.pairing.lastPairedAt, locked: st.pairing.locked } : null
   };
 }
+// The real state of the "⚡ Make a book for me" run (akowe-run.js) — the checklist alone said "10/10 Done"
+// for a run that had stopped at step 7 of 16.
+const akoweRunWatch = require("./akowe-run").createRunWatch({ api: (m, p) => akoweApi(m, p, null, 8000) });
 function akoweStatusSnapshot(opts) {
   const snap = akoweStatusSnapshotBase();
   snap.connection = akoweConnection(snap);
@@ -7750,6 +7753,8 @@ function akoweStatusSnapshot(opts) {
   // pressed Connect / the link test / Start Akọwe (they check right away and
   // keep the status current from then on).
   if (snap.enabled || bfApp.userAsked || (opts && opts.panelOpen)) akoweAppCheckSoon();
+  const bfb = snap.akowe || {};
+  snap.run = (snap.enabled || bfApp.userAsked || (opts && opts.panelOpen)) && (akoweServerBase() || bfb.run) ? akoweRunWatch.peek(bfb.project && bfb.project.id, bfb.run) : null;
   snap.app = { running: bfApp.running, base: bfApp.base, version: bfApp.version, checkedAt: bfApp.checkedAt, launcherAvailable: !!akoweLauncher() };
   snap.server = akoweServerPublicStatus();
   snap.health = akoweHealth(snap);
@@ -7858,6 +7863,16 @@ function akoweDiagnostics(extra) {
   return L.join("\n") + "\n";
 }
 ipcMain.handle("akowe:status", (_evt, payload) => akoweStatusSnapshot({ panelOpen: !!(payload && payload.panelOpen) }));
+ipcMain.handle("akowe:run-resume", async (_evt, payload) => {
+  const id = String((payload && payload.id) || "").replace(/[^\w.:-]/g, "").slice(0, 80);
+  if (!id) return { ok: false, message: "There is no stopped book run to resume." };
+  const r = await akoweApi("POST", `/api/autobook/${encodeURIComponent(id)}/resume`, {}, 20000);
+  logEvent("akowe-run-resume", { ok: !!(r && r.status >= 200 && r.status < 300), status: r ? r.status : 0 });
+  const run = await akoweRunWatch.refresh();
+  if (r && r.status >= 200 && r.status < 300) return { ok: true, run, message: "Resumed — the book run is writing again." };
+  const e = r && r.json && Array.isArray(r.json.errors) && r.json.errors[0];
+  return { ok: false, run, message: r && r.status === 0 ? "Akọwe isn't running right now — start it (📖 Akọwe tab), then press ▶ Resume." : `Akọwe couldn't resume it${e && e.message ? `: ${String(e.message).slice(0, 200)}` : ""}.` };
+});
 ipcMain.handle("akowe:diagnostics", (_evt, extra) => {
   try { return { ok: true, text: akoweDiagnostics(extra) }; }
   catch (e) { return { ok: false, error: "DIAGNOSTICS_FAILED" }; }

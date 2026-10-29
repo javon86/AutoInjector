@@ -282,6 +282,7 @@ const TOOL_CHANNELS = {
   'video:generate': 'generate_video',
   'video:status': 'video_status',
   'akowe:open-url': 'open_akowe_page',
+  'akowe:run-resume': 'resume_run', // the 📚 panel's ▶ Resume on a stopped Make-a-book run
   'sd:status': 'sd_call:images.status', 'sd:detect': 'sd_call:sd.detect', 'sd:connect': 'sd_call:sd.connect', 'sd:generate': 'sd_call:images.generate',
   'sd:test': 'sd_call:images.test', 'sd:fix-retry': 'sd_call:images.fixAndRetry', 'sd:progress': 'sd_call:images.progress', 'sd:cancel': 'sd_call:images.cancel', 'sd:gallery': 'sd_call:images.gallery',
   'sdlib:list': 'sd_call:library.find', 'sdlib:scan': 'sd_call:library.scan', 'sdlib:locks': 'sd_call:library.locks',
