@@ -4176,7 +4176,15 @@ function bfRenderCheckinSetting(s) {
   const v = String(s.selfRepair.intervalMin);
   if (!Array.from(sel.options).some((o) => o.value === v)) { const o = document.createElement("option"); o.value = v; o.textContent = `every ${v} min`; sel.appendChild(o); }
   if (sel.value !== v) sel.value = v;
+  const co = el("bf-carryon");
+  if (co && document.activeElement !== co) co.checked = s.selfRepair.carryOn !== false;
 }
+if (el("bf-carryon")) el("bf-carryon").onchange = bfSafe(async (e) => {
+  const on = !!e.target.checked;
+  const r = await bfCall("checkin-carryon", "selfRepairSettings", [{ carryOn: on }], { where: "Check-ins", anchor: "#bf-checkin-anchor" });
+  if (r && r.ok) bfMsg(on ? "✓ After a check-in, an AI that was in the middle of something is asked to carry on where it left off." : "✓ After a check-in, AutoInjector no longer asks the AI to carry on.");
+  akoweRefresh();
+}, "checkin-carryon");
 if (el("btn-bf-checkin")) el("btn-bf-checkin").onclick = bfSafe(() => bfCheckIn(null), "checkin");
 if (el("bf-checkin-every")) el("bf-checkin-every").onchange = bfSafe(async (e) => {
   const v = Number(e.target.value);

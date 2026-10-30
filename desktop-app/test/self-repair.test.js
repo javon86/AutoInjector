@@ -339,6 +339,7 @@ function makeSite(opts) {
     savePick: o.noSavePick ? undefined : (_s, role, sel, how) => { sim.learned[role] = sel; sim.saved.push({ role, sel, how }); return true; },
     teachOverrides: (_s, sel) => { sim.teachOv = sel; sim.teachOvLog = (sim.teachOvLog || []).concat([sel]); },
     busyReason: () => sim.busy, isActive: () => true,
+    carryOnContext: o.carryCtx, carryOn: o.carryOn,
     log: (k, d) => sim.logs.push({ k, d }),
     onChange: (site, snap, ev) => sim.changes.push({ state: snap.state, ev })
   }, { options: Object.assign({ probeTimeoutMs: 700, sendTimeoutMs: 400, earlyQuietMs: 120, pollStepMs: 15, reloadSettleMs: 5, unfreezeWaitMs: 5, teachPollMs: 25, teachTimeoutMs: 6000, needsUserRecheckMs: 40, intervalMs: 0 }, o.options || {}) }));
@@ -789,6 +790,115 @@ async function testTeachFastAndOwned() {
 
 
 // ---------------------------------------------------------------------------------
+// After a check-in / 🔢 teach, an AI that was in the middle of something is asked to
+// carry on (the fake AI answers ONLY the check-in word and then stops).
+async function testCarryOn() {
+  console.log("\n== carry on: the follow-up text ==");
+  const t = SR.carryOnText("claude", []);
+  assert(t.startsWith(SR.CARRY_ON_TEXT) && /start with \[TO: who it's for\] and end with \[FROM: CLAUDE\]/.test(t) && /reply NONE/.test(t), "CARRY_ON_TEXT + the usual tags (so the reply is routed like any other) + NONE when there is nothing to add");
+  assert(SR.CARRY_ON_TEXT === "Thanks — that was only a quick connection check from AutoInjector; please ignore it. Continue exactly where you left off in our conversation.", "the message is one constant");
+  const long = "x".repeat(5000);
+  const t2 = SR.carryOnText("gemini", [{ seq: "0042", text: "[ChatGPT → you]\n\nWhat next?" }, { seq: "0043", text: long }]);
+  assert(t2.includes("You had not answered [MSG #0042] yet, so here it is again:\n\n[ChatGPT → you]\n\nWhat next?") && t2.includes("[MSG #0043]") && t2.length < SR.CARRY_ON_TEXT.length + 2 * SR.CARRY_ON_RESEND_MAX + 600 && /cut short here/.test(t2), "an owed message is sent again with its [MSG #], and a long one is cut short");
+  const low = t2.toLowerCase();
+  assert(!low.includes(SR.PROBE_PHRASE) && !low.includes(SR.TEACH_PHRASE) && !low.includes(SR.FOLLOWUP_PHRASE), "the follow-up never looks like a check-in / teach message");
+
+  console.log("\n== carry on: mid-task -> ONE follow-up after the answer; idle -> none ==");
+  const calls = [];
+  let ctxAt = null;
+  let sim = makeSite({ carryCtx: (s) => { ctxAt = sim.sends; return { reasons: ["recent"], owed: [] }; }, carryOn: (s, ctx, info) => { calls.push({ s, ctx, info, sendsThen: sim.sends, captured: sim.capturedTexts.length }); return { ok: true }; } });
+  let r = await sim.engine.runCheck("chatgpt", "stalled");
+  await sleep(20);
+  assert(r.ok && ctxAt === 0, "what the AI was doing is asked for BEFORE the check-in is typed");
+  assert(calls.length === 1 && calls[0].info.kind === "checkin" && calls[0].info.reason === "stalled" && calls[0].ctx.reasons[0] === "recent", `one follow-up asked for (${calls.length}, ${calls[0] && calls[0].info.reason})`);
+  assert(calls[0] && calls[0].sendsThen === 1 && calls[0].captured === 1, "…after the check-in's answer was captured");
+  assert(sim.engine.events().some((e) => e.kind === "continue" && e.outcome === "ASK"), "an event says it (no text)");
+  sim = makeSite({ carryCtx: () => null, carryOn: () => { calls.push("idle"); } });
+  await sim.engine.runCheck("chatgpt", "periodic");
+  await sleep(20);
+  assert(!calls.includes("idle"), "an idle AI (nothing going on) gets no follow-up");
+
+  console.log("\n== carry on: a repair with several check-ins -> still only ONE follow-up, at the end ==");
+  calls.length = 0;
+  sim = makeSite({ layout: "changed", carryCtx: () => ({ reasons: ["owed"], owed: ["0007"] }), carryOn: (s, ctx, info) => { calls.push({ info, state: sim.engine.state("chatgpt").state, running: sim.engine.state("chatgpt").running }); } });
+  r = await sim.engine.runCheck("chatgpt", "after-reload");
+  await sleep(20);
+  assert(r.ok && sim.sends >= 2 && calls.length === 1 && calls[0].state === "ok" && calls[0].running === false, `fixed after ${sim.sends} check-ins, one follow-up once the check-in is over (${calls.length})`);
+  calls.length = 0;
+  sim = makeSite({ layout: "changed", carryCtx: () => ({ reasons: ["recent"], owed: [] }), carryOn: (s, ctx, info) => { calls.push(info); } });
+  sim.block = (who, text) => { const l = sim.doc.getElementById("thread"); if (l) append(sim.doc, l, `<p class="flat">${String(text).replace(/</g, "&lt;")}</p>`); };
+  sim.engine.options.probeTimeoutMs = 250;
+  r = await sim.engine.runCheck("chatgpt", "broken-recheck", { repair: false });
+  await sleep(20);
+  assert(r.state === "broken" && calls.length === 1 && calls[0].state === "broken", "even when the check-in's answer couldn't be read, the AI got it — so it is asked to carry on");
+  calls.length = 0;
+  sim = makeSite({ sendError: "INPUT_NOT_FOUND", carryCtx: () => ({ reasons: ["recent"], owed: [] }), carryOn: () => { calls.push(1); } });
+  sim.engine.options.probeTimeoutMs = 100;
+  await sim.engine.runCheck("chatgpt", "x", { repair: false });
+  await sleep(20);
+  assert(calls.length === 0, "nothing was typed (the box wasn't found) -> nothing interrupted, no follow-up");
+  sim = makeSite({ page: "login", carryCtx: () => ({ reasons: ["recent"], owed: [] }), carryOn: () => { calls.push(1); } });
+  await sim.engine.runCheck("chatgpt", "startup");
+  assert(calls.length === 0, "a logged-out AI: no follow-up");
+
+  console.log("\n== carry on: a check-in that made way for an Akọwe request -> no follow-up ==");
+  sim = makeSite({ options: { sendTimeoutMs: 2000 }, carryCtx: () => ({ reasons: ["akowe"], owed: [] }), carryOn: () => { calls.push("akowe"); } });
+  sim.o.sendDelayMs = 300;
+  const pr = sim.engine.runCheck("chatgpt", "periodic");
+  await sleep(40);
+  assert(sim.engine.makeWay("chatgpt") === "withdrawn", "(the check-in is withdrawn before it is typed)");
+  r = await pr;
+  await sleep(20);
+  assert(r.deferred && !calls.includes("akowe"), "deferred check-in -> no follow-up");
+
+  console.log("\n== carry on: the follow-up's answer is a normal reply, never a check-in answer ==");
+  sim = makeSite();
+  await sim.engine.runCheck("chatgpt", "startup");
+  const word = /Reply with only this word: ([a-z]+)/.exec(sim.doc.body.textContent)[1];
+  const reply = `[TO: CLAUDE]\nOK, ${word} aside — back to the plan.\n[FROM: CHATGPT]`;
+  assert(sim.engine.probeReplyKind("chatgpt", reply, ["0099"], { loose: true }) === "has-word", "(without the fix: a short reply that happens to hold the check-in word is held back as a check-in answer)");
+  assert(sim.engine.noteContinueSeq("chatgpt", "0099") && sim.engine.isContinueSeq("chatgpt", "0099"), "the follow-up's [MSG #] is noted");
+  assert(sim.engine.probeReplyKind("chatgpt", reply, ["0099"], { loose: true }) === null && sim.engine.probeReplyKind("chatgpt", reply, ["0099"]) === null && !sim.engine.expects("chatgpt", reply, ["0099"]), "its answer goes through as a normal reply (transcript, auto-forward, Akọwe)");
+  assert(sim.engine.isProbeSeq("chatgpt", sim.lastSeq) && !sim.engine.isProbeSeq("chatgpt", "0099"), "check-in [MSG #]s are known; the follow-up is NOT marked as a check-in");
+
+  console.log("\n== carry on: 🔢 number teach mid-task -> follow-up; cancelled -> none ==");
+  calls.length = 0;
+  let ctxCalls = 0, busyNow = false;
+  sim = makeSite({ carryCtx: () => { if (!busyNow) return null; ctxCalls++; return { reasons: ["house-rule"], owed: [] }; }, carryOn: (s, ctx, info) => { calls.push(info); } });
+  sim.engine.options.teachTimeoutMs = 8000; sim.engine.options.teachDoneMs = 300;
+  sim.block = (who, text) => { const l = sim.doc.getElementById("thread"); append(sim.doc, l, `<section class="${who === "bot" ? "bot-zone" : "me-zone"}" data-who="${who}"><div class="tx">${String(text).replace(/</g, "&lt;")}</div></section>`); };
+  await sim.engine.runCheck("chatgpt", "startup"); // (an earlier reply on the page, while idle: no follow-up)
+  assert(calls.length === 0, "(an idle check-in before it: no follow-up)");
+  busyNow = true; // now a House Rule runs
+  const tr = await sim.engine.startTeach("chatgpt", null, { auto: false });
+  assert(ctxCalls === 1, "what the AI was doing is noted when the teach starts (before the user types the number)");
+  await waitUntil(() => sim.doc.querySelector("[data-autoinjector-overlay]"));
+  const box = sim.doc.getElementById("prompt-textarea");
+  typeInto(box, tr.number);
+  await waitUntil(() => sim.engine.state("chatgpt").teach.phase === "typed");
+  sim.doc.__window.__aiTeach.events.push({ type: "click", t: Date.now(), el: sim.doc.querySelector('[data-testid="send-button"]') });
+  box.textContent = "";
+  sim.block("human", tr.number);
+  const res = await waitUntil(() => sim.engine.state("chatgpt").teach.result, 8000);
+  await waitUntil(() => calls.length, 2000);
+  assert(res === "fixed" && calls.length === 1 && calls[0].kind === "teach" && ctxCalls === 1, `the teach finished (${res}) -> ONE follow-up (kind ${calls[0] && calls[0].kind}); its confirming check-in did not add a second`);
+  calls.length = 0;
+  sim = makeSite({ carryCtx: () => ({ reasons: ["recent"], owed: [] }), carryOn: (s, ctx, info) => { calls.push(info); } });
+  const t3 = await sim.engine.startTeach("chatgpt", null, { auto: false });
+  await waitUntil(() => sim.doc.querySelector("[data-autoinjector-overlay]"));
+  typeInto(sim.doc.getElementById("prompt-textarea"), t3.number);
+  await waitUntil(() => sim.engine.state("chatgpt").teach.phase === "typed");
+  sim.doc.__window.__aiTeach.events.push({ type: "click", t: Date.now(), el: sim.doc.querySelector('[data-testid="send-button"]') });
+  sim.doc.getElementById("prompt-textarea").textContent = "";
+  sim.block("human", t3.number);
+  await waitUntil(() => sim.engine.state("chatgpt").teach.asked);
+  sim.engine.cancelTeach("chatgpt");
+  await waitUntil(() => !sim.engine.teachActive("chatgpt"));
+  await sleep(50);
+  assert(calls.length === 0 && sim.engine.events().some((e) => e.kind === "continue" && e.outcome === "SKIPPED" && e.reason === "cancelled"), "the user cancelled the teach -> no follow-up");
+}
+
+// ---------------------------------------------------------------------------------
 // Claude's page since 2026-10-29 (PC log): message rows with a hidden h3 heading in
 // every row, the text in div[data-cds="Prose"] for both roles, and a sidebar whose
 // recent-chats list was learned as "the reply" (div[data-testid="sidebar-recents"]).
@@ -902,6 +1012,7 @@ async function testClaudeRows() {
     await testGeneralise();
     await testEngine();
     await testTeachFastAndOwned();
+    await testCarryOn();
     await testOwnership();
     await testPicker();
     await testNoNags();

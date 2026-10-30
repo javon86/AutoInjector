@@ -227,7 +227,7 @@ const state = {
   selectorOverrides: {}, // site -> { input?, send?, assistant? } — user-picked CSS selectors (see selector:pick), tried before the built-in candidates in selectors.js
   learnedSelectors: {}, // site -> { input?|send?|assistant?|stop?|user?: { selector, how: alternative|page-search|teach, learnedAt, version } } — found by the self-repair (P18.3/4/7) and proved by a check-in; persisted (versioned)
   pickMeta: {}, // P38: site -> { input?|send?|assistant?|user?: { savedAt, how: pick|number, rev, version } } — when each 🎯 / 🔢 SAVED selector (in selectorOverrides) was locked in; persisted (versioned)
-  selfRepair: { intervalMin: 20, startup: true }, // P18.1 check-ins: every N minutes while an AI is idle (0 = off), and once at start
+  selfRepair: { intervalMin: 20, startup: true, carryOn: true }, // P18.1 check-ins: every N minutes while an AI is idle (0 = off), and once at start; carryOn: after a check-in / 🔢, ask a busy AI to carry on
   savedLogins: {}, // site -> [{ id, label, username, encryptedPassword }] — encryptedPassword is a safeStorage-encrypted (OS keychain) ciphertext, base64-encoded; the plaintext password is never stored, never sent to the renderer, never logged. See logins:save/logins:fill.
   nextLoginId: 1,
   managerConfig: {
@@ -693,7 +693,7 @@ function saveStateDebounced() {
         selectorOverrides: state.selectorOverrides,
         pickMeta: { version: PICK_VERSION, sites: state.pickMeta }, // P38: when each saved pick was locked in (no page text)
         learnedSelectors: { version: selfRepairLib.LEARNED_VERSION, sites: state.learnedSelectors }, // P18: selectors the self-repair learned (CSS only — never page text)
-        selfRepair: { intervalMin: state.selfRepair.intervalMin, startup: state.selfRepair.startup !== false },
+        selfRepair: { intervalMin: state.selfRepair.intervalMin, startup: state.selfRepair.startup !== false, carryOn: state.selfRepair.carryOn !== false },
         nextMsgSeq: state.nextMsgSeq, // TR-29: [MSG #] numbers carry on after a restart (the AIs remember the old ones)
         savedLogins: state.savedLogins, // safe to persist as-is -- every password in here is already safeStorage ciphertext, not plaintext
         managerConfig: sealManagerConfig(state.managerConfig), // AI-001: the API key is sealed (apiKeyEnc), never written plaintext
@@ -800,6 +800,7 @@ function loadPersistedState() {
     const n = Number(snap.selfRepair.intervalMin);
     if (Number.isFinite(n) && n >= 0 && n <= 24 * 60) state.selfRepair.intervalMin = Math.round(n);
     state.selfRepair.startup = snap.selfRepair.startup !== false;
+    state.selfRepair.carryOn = snap.selfRepair.carryOn !== false;
   }
   if (snap.savedLogins && typeof snap.savedLogins === "object") {
     let maxId = 0;
@@ -945,6 +946,9 @@ const genReads = {};        // P18.5: reads that saw the AI writing since its la
 const generatingSince = {}; // P18: when the current "writing" phase began (0 = not writing)
 const lastRead = {};        // P18: the last read per pane { text, textLen, generating, composerEmpty, inputFound, at } (memory only)
 const lastActivityAt = {};  // P18: last send/capture per pane (check-ins wait for a quiet AI)
+const convoActivityAt = {}; // last REAL conversation send/capture per pane (not check-ins, teach messages or carry-on follow-ups)
+const sentTexts = new Map(); // [MSG #] -> { site, text, auto, bridge } of recent sends (a carry-on follow-up re-sends an owed one)
+const SENT_TEXTS_MAX = 300;
 const lastUserInputAt = {}; // P18: last real keyboard/mouse input the user gave a pane (Electron before-input-event)
 // M1: a second identical NONE reply is swallowed without a capture. When it is
 // really a new reply — the AI was seen writing since the last capture and, on
@@ -1917,7 +1921,12 @@ async function sendTextTo(target, text, fromSite, opts = {}) {
     }
   } else {
     lastActivityAt[target] = Date.now();
-    if (!opts.probe) state.lastSentTo[target] = framed; // stored WITHOUT the [MSG #] header so Regenerate re-stamps a fresh number (never a check-in)
+    if (!opts.probe && !opts.carryOn) {
+      convoActivityAt[target] = Date.now();
+      sentTexts.set(seq, { site: target, text: framed, auto: !!opts.automatic, bridge: !!opts.bridge });
+      if (sentTexts.size > SENT_TEXTS_MAX) sentTexts.delete(sentTexts.keys().next().value);
+    }
+    if (!opts.probe && !opts.carryOn) state.lastSentTo[target] = framed; // stored WITHOUT the [MSG #] header so Regenerate re-stamps a fresh number (never a check-in)
     if (!answeredEarly) {
       state.waiting[target] = true;
       state.waitingSince[target] = Date.now();
@@ -4380,6 +4389,7 @@ async function pollSite(site) {
     state.captured[site] = (text !== turn.text) ? { ...turn, text } : turn;
     markCaptured(site);
     lastActivityAt[site] = Date.now();
+    convoActivityAt[site] = Date.now();
     // P18: a normal reply that answers a delivered message proves this AI works.
     try { const ans = relayTrace.answersOf(turn.id); if (selfRepair && ans && ans.length) selfRepair.noteWorking(site); } catch (_) {}
     state.noTagReprompts[site] = 0; // a valid reply landed — clear any missing-tag nudge streak
@@ -7660,8 +7670,8 @@ const CHECKIN_USER_IDLE_MS = Number(process.env.AUTOINJECTOR_CHECKIN_USER_IDLE_M
 const CHECKIN_STARTUP_DELAY_MS = Number(process.env.AUTOINJECTOR_CHECKIN_STARTUP_DELAY_MS) || 6000; // after the page check that follows a load
 const CHECKINS_ENABLED = process.env.AUTOINJECTOR_CHECKIN !== "0"; // tests / power users can switch the automatic ones off (on-demand still works)
 const CHECKIN_YIELD_MAX_MS = Number(process.env.AUTOINJECTOR_CHECKIN_YIELD_MS) || 60000; // an Akọwe request waits at most this long for a check-in to settle
-const CHECKIN_OWED_DEMAND_MS = 3 * 60000; // an unanswered message to an AI blocks an asked-for check-in this long…
-const CHECKIN_OWED_MS = 10 * 60000;       // …and an automatic one this long
+const CHECKIN_OWED_DEMAND_MS = Number(process.env.AUTOINJECTOR_CHECKIN_OWED_DEMAND_MS) || 3 * 60000; // an unanswered message to an AI blocks an asked-for check-in this long…
+const CHECKIN_OWED_MS = Number(process.env.AUTOINJECTOR_CHECKIN_OWED_MS) || 10 * 60000;       // …and an automatic one this long
 const PAGE_SCRIPT_TIMEOUT_MS = Number(process.env.AUTOINJECTOR_PAGE_SCRIPT_TIMEOUT_MS) || 15000;
 const RELOAD_WAIT_MS = Number(process.env.AUTOINJECTOR_RELOAD_WAIT_MS) || 45000;
 const LEARNED_ROLES = new Set(["input", "send", "assistant", "stop", "user"]);
@@ -7724,7 +7734,7 @@ function selfRepairBusy(site, level) {
   const lr = lastRead[site];
   if (lr && lr.composerEmpty === false && Date.now() - lr.at < 30000) return "typing";
   const waitingFor = state.waiting[site] && state.waitingSince[site] ? Date.now() - state.waitingSince[site] : 0;
-  if (waitingFor && waitingFor < (level === "demand" ? 3 * 60000 : 10 * 60000)) return "waiting";
+  if (waitingFor && waitingFor < (level === "demand" ? CHECKIN_OWED_DEMAND_MS : CHECKIN_OWED_MS)) return "waiting";
   if (level !== "demand") {
     if ((state.hr && state.hr.active) || (state.sequence && state.sequence.active) || (state.manager && ["waiting", "running", "thinking", "executing"].includes(state.manager.status))) return "relay";
     if (Date.now() - (lastActivityAt[site] || 0) < (level === "periodic" ? 5 * 60000 : 20000)) return "recent";
@@ -7764,6 +7774,89 @@ const SELF_REPAIR_SAY = {
     : ev && ev.phase === "asking" ? { say: `🔢 AutoInjector is asking ${L} to write the number backwards…`, tone: "info" }
     : ev && (ev.phase === "failed" || ev.phase === "timeout") ? { say: `🔢 Number teach for ${L} didn't finish${ev.part ? ` — the ${ev.part === "assistant" ? "reply area" : ev.part === "send" ? "Send button" : "message box"} part` : ""}. Use 🎯 for just that part.`, tone: "warn" } : null)
 };
+// --- Carry on after a check-in / 🔢 teach ---------------------------------------------
+// A check-in ("Reply with only this word: …") or a 🔢 teach can land while an AI is
+// in the middle of something (a repair check-in after a stall, a 🔢 the user
+// started). The AI answers it and then has nothing more to say, so the
+// conversation would die there. What the AI was doing is noted BEFORE the
+// check-in is typed; once the check-in is over AutoInjector sends ONE follow-up
+// (self-repair.js CARRY_ON_TEXT) — with any message it still owed an answer to,
+// sent again — as a normal message with its own [MSG #] (never a check-in), so the
+// AI's reply is captured and passed on like any other. Nothing is sent to an AI
+// that was idle, while a new check-in runs, after Stop AIs Talking, or when a
+// House Rule / sequence it was part of was stopped or paused.
+const CARRY_ON_RECENT_MS = Number(process.env.AUTOINJECTOR_CARRY_ON_RECENT_MS) || 15 * 60000; // "in the middle of a conversation" = talked this recently
+const CARRY_ON_RESEND = 2; // at most this many owed messages are sent again
+function carryOnEnabled() { return state.selfRepair.carryOn !== false; }
+function carryOnContext(site) {
+  if (!carryOnEnabled() || !SITES[site]) return null;
+  const now = Date.now();
+  const reasons = [];
+  let owed = [];
+  try {
+    owed = relayTrace.openMessages(site)
+      .filter((m) => now - m.at < CARRY_ON_RECENT_MS && !selfRepair.isProbeSeq(site, m.seq) && !selfRepair.isContinueSeq(site, m.seq))
+      .map((m) => m.seq);
+  } catch (_) { owed = []; }
+  if (owed.length) reasons.push("owed");
+  let akowe = false;
+  try { const st = akoweBridge && akoweBridge.status(); akowe = !!(st && st.active && st.active[site]); } catch (_) {}
+  if (akowe || akoweAwaitingReply(site)) reasons.push("akowe");
+  if (sendQueues[site]) reasons.push("sending");
+  const hr = !!(state.hr && state.hr.active);
+  const sequence = !!(state.sequence && state.sequence.active);
+  const manager = !!(state.manager && ["waiting", "running", "thinking", "executing"].includes(state.manager.status));
+  if (hr) reasons.push("house-rule");
+  if (sequence) reasons.push("sequence");
+  if (manager) reasons.push("manager");
+  const recent = now - (convoActivityAt[site] || 0) < CARRY_ON_RECENT_MS;
+  if (recent) reasons.push(meshInvolves(site) ? "auto-forward" : "recent");
+  if (!reasons.length) return null;
+  return { at: now, reasons, owed, hr, sequence, relayOn: state.relayEnabled !== false };
+}
+function meshInvolves(site) {
+  try { if (state.routing[site] && state.routing[site].size) return true; return SITE_IDS.some((s) => state.routing[s] && state.routing[s].has(site)); } catch (_) { return false; }
+}
+// Why no follow-up may go out right now (null = send it).
+function carryOnBlocked(site, ctx) {
+  if (!carryOnEnabled()) return "setting-off";
+  if (!state.enabled[site]) return "inactive";
+  if (!state.relayEnabled) return "stopped"; // Stop AIs Talking
+  if (ctx.hr && !state.hr.active) return "stopped"; // its House Rule was stopped or paused meanwhile
+  if (ctx.sequence && !state.sequence.active) return "stopped";
+  if (state.hr && state.hr.pauseReason && !state.hr.active && ctx.hr) return "stopped";
+  try { if (selfRepair.busyWithSite(site) || selfRepair.teachActive(site)) return "checking"; } catch (_) {}
+  if (state.generating[site]) return "already-writing"; // it carried on by itself
+  if ((convoActivityAt[site] || 0) > ctx.at) return "moved-on"; // a new message / reply since the check-in: the conversation went on
+  return null;
+}
+async function carryOnAfterCheckin(site, ctx, info) {
+  const L = siteLabel(site);
+  const kind = info && info.kind === "teach" ? "teach" : "check-in";
+  const why = carryOnBlocked(site, ctx || {});
+  if (why) { logEvent("checkin-continue", { site, after: kind, reason: (ctx && ctx.reasons || []).join("+"), sent: false, skipped: why }); return { ok: false, skipped: why }; }
+  // messages it still owed a real answer to (the check-in may have taken the
+  // reply slot of a stalled one): sent again, newest last, bounded
+  const owed = [];
+  for (const q of (ctx.owed || [])) {
+    let still = null; try { still = relayTrace.stillOwed(q); } catch (_) {}
+    const rec = sentTexts.get(String(q));
+    if (still && rec && rec.site === site && !rec.auto && !rec.bridge && rec.text) owed.push({ seq: String(q), text: rec.text });
+  }
+  const resend = owed.slice(-CARRY_ON_RESEND);
+  const token = { cancelled: false, typing: false, seq: null };
+  const p = sendTextTo(site, selfRepairLib.carryOnText(site, resend), null, { raw: true, automatic: true, carryOn: true, cancelToken: token });
+  if (token.seq) selfRepair.noteContinueSeq(site, token.seq); // its answer is a normal reply, never a check-in answer
+  let r;
+  try { r = await p; } catch (e) { r = { ok: false, error: String(e) }; }
+  if (token.seq) selfRepair.noteContinueSeq(site, token.seq);
+  const resent = resend.map((m) => m.seq);
+  logEvent("checkin-continue", { site, after: kind, reason: (ctx.reasons || []).join("+"), sent: !!(r && r.ok), seq: token.seq || null, resent: resent.length ? resent : "none", error: r && !r.ok ? r.error || "unknown" : undefined, severity: r && r.ok ? undefined : "warn" });
+  if (r && r.ok) {
+    try { akoweNoteActivity({ kind: "repair", site, outcome: "CONTINUE", say: `↪ Asked ${L} to carry on where it left off${resent.length ? ` (and sent it ${resent.map((q) => `[MSG #${q}]`).join(", ")} again)` : ""}`, tone: "info" }); } catch (_) {}
+  }
+  return Object.assign({ seq: token.seq || null, resent }, r || {});
+}
 const selfRepair = selfRepairLib.createSelfRepair({
   sites: SITE_IDS,
   SITES,
@@ -7793,6 +7886,8 @@ const selfRepair = selfRepairLib.createSelfRepair({
   teachOverrides: (s, sel) => { if (sel && (sel.input || sel.send)) teachOverrides[s] = { input: sel.input || null, send: sel.send || null }; else delete teachOverrides[s]; },
   busyReason: selfRepairBusy,
   isActive: (s) => !!state.enabled[s],
+  carryOnContext: (s) => carryOnContext(s),
+  carryOn: (s, ctx, info) => carryOnAfterCheckin(s, ctx, info),
   log: (kind, detail) => logEvent(kind, Object.assign({}, detail, /BROKEN|NEEDS_USER|STILL_FAILING|TIMEOUT|EXCEPTION/.test(String(detail && detail.outcome)) ? { severity: "warn" } : {})),
   onChange: (site, snap, ev) => {
     broadcast("self-repair", { site, repair: snap, event: ev || null });
@@ -7817,7 +7912,7 @@ const selfRepair = selfRepairLib.createSelfRepair({
 function selfRepairApplySettings() { selfRepair.setIntervalMs((CHECKINS_ENABLED ? state.selfRepair.intervalMin : 0) * 60000); }
 function selfRepairStatus() {
   return {
-    ok: true, settings: { intervalMin: state.selfRepair.intervalMin, startup: state.selfRepair.startup !== false, automatic: CHECKINS_ENABLED },
+    ok: true, settings: { intervalMin: state.selfRepair.intervalMin, startup: state.selfRepair.startup !== false, carryOn: carryOnEnabled(), automatic: CHECKINS_ENABLED },
     sites: Object.fromEntries(SITE_IDS.map((s) => [s, Object.assign({ label: siteLabel(s), active: !!state.enabled[s], learned: Object.fromEntries(Object.entries(state.learnedSelectors[s] || {}).map(([r, v]) => [r, { how: v.how, learnedAt: v.learnedAt }])) }, selfRepair.state(s))])),
     events: selfRepair.events().slice(-30)
   };
@@ -7877,9 +7972,10 @@ ipcMain.handle("selfrepair:settings", (_evt, payload) => {
     state.selfRepair.intervalMin = Math.round(n);
   }
   if (p.startup !== undefined) state.selfRepair.startup = !!p.startup;
+  if (p.carryOn !== undefined) state.selfRepair.carryOn = !!p.carryOn;
   selfRepairApplySettings();
   saveStateDebounced();
-  logEvent("self-repair", { step: "settings", outcome: `every:${state.selfRepair.intervalMin}min` });
+  logEvent("self-repair", { step: "settings", outcome: `every:${state.selfRepair.intervalMin}min carry-on:${carryOnEnabled() ? "on" : "off"}` });
   return selfRepairStatus();
 });
 let akoweStarting = null; // in-flight start, so a double toggle can't race two listeners onto the port
@@ -8021,7 +8117,7 @@ function akoweStatusSnapshotBase() {
     linkTest: { running: bfLinkTest.running, lastReport: bfLinkTest.lastReport, lastSummary: bfLinkTest.lastSummary },
     sites,
     akowe: bfStatus,
-    selfRepair: { intervalMin: state.selfRepair.intervalMin, startup: state.selfRepair.startup !== false, automatic: CHECKINS_ENABLED }, // P18.1 check-in settings
+    selfRepair: { intervalMin: state.selfRepair.intervalMin, startup: state.selfRepair.startup !== false, carryOn: carryOnEnabled(), automatic: CHECKINS_ENABLED }, // P18.1 check-in settings
     pairing: st && st.pairing ? { pending: st.pairing.pending, expiresAt: st.pairing.expiresAt, lastPairedAt: st.pairing.lastPairedAt, locked: st.pairing.locked } : null
   };
 }
@@ -8113,7 +8209,7 @@ function akoweDiagnostics(extra) {
     L.push(`AI ${s}: active ${x.active ? "yes" : "no"} · ready ${x.ready ? "yes" : "no"} · busy ${x.busy || x.inFlight ? "yes" : "no"} · last ${last}`);
   }
   // P18.10: the self-repair, per AI — codes, steps and outcomes only (never page text).
-  L.push(`Check-ins: every ${state.selfRepair.intervalMin ? `${state.selfRepair.intervalMin} min` : "— (off)"} · at start ${state.selfRepair.startup !== false ? "yes" : "no"}${CHECKINS_ENABLED ? "" : " · automatic check-ins disabled (AUTOINJECTOR_CHECKIN=0)"}`);
+  L.push(`Check-ins: every ${state.selfRepair.intervalMin ? `${state.selfRepair.intervalMin} min` : "— (off)"} · at start ${state.selfRepair.startup !== false ? "yes" : "no"} · carry on after ${carryOnEnabled() ? "yes" : "no"}${CHECKINS_ENABLED ? "" : " · automatic check-ins disabled (AUTOINJECTOR_CHECKIN=0)"}`);
   for (const s of SITE_IDS) {
     const r = selfRepair.state(s) || {};
     const learned = Object.entries(state.learnedSelectors[s] || {}).map(([role, v]) => `${role}(${bfSafeCode(v.how)} ${ago(v.learnedAt)})`).join(" ");

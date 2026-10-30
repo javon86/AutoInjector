@@ -98,6 +98,9 @@ async function main() {
   const userData = mockElectron.app.getPath("userData");
   const broadcasts = [];
   reg("controls-ui").webContents.on("ipc-send", (channel, payload) => { if (channel === "self-repair" || channel === "capture" || channel === "akowe-activity") broadcasts.push({ channel, payload }); });
+  // the carry-on follow-up after a check-in has its own test (test/checkin-continue-main.test.js);
+  // here every check-in is checked on its own
+  assert((await call("selfrepair:settings", { carryOn: false })).settings.carryOn === false, "carry-on after a check-in can be switched off");
   let st = await call("akowe:set-enabled", { enabled: true });
   assert(st.listening === true, "bridge on");
   const token = (await call("akowe:reveal-token")).token;

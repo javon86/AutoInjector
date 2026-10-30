@@ -42,7 +42,7 @@ async function main() {
       AUTOINJECTOR_SITE_URL_GEMINI: url('site=gemini&page=login'),
       AUTOINJECTOR_PROBE_DELAY_MS: '1500', AUTOINJECTOR_CHECKIN_STARTUP_DELAY_MS: '800', AUTOINJECTOR_CHECKIN_TICK_MS: '700',
       AUTOINJECTOR_PROBE_TIMEOUT_MS: '20000', AUTOINJECTOR_PROBE_EARLY_MS: '3000', AUTOINJECTOR_NEEDS_USER_RECHECK_MS: '1500',
-      AUTOINJECTOR_RELOAD_SETTLE_MS: '600', AUTOINJECTOR_TEACH_POLL_MS: '300', AUTOINJECTOR_CAPTURE_SETTLE_MS: '400',
+      AUTOINJECTOR_RELOAD_SETTLE_MS: '600', AUTOINJECTOR_CHECKIN_OWED_DEMAND_MS: '1500', AUTOINJECTOR_TEACH_POLL_MS: '300', AUTOINJECTOR_CAPTURE_SETTLE_MS: '400',
       AUTOINJECTOR_AKOWE_DIR: fs.mkdtempSync(path.join(os.tmpdir(), 'ai-nobf-')), AUTOINJECTOR_AKOWE_SERVER: '0', NO_PROXY: '127.0.0.1,localhost', no_proxy: '127.0.0.1,localhost'
     }),
   });
@@ -243,6 +243,43 @@ async function main() {
     const diag = await controls.evaluate(() => window.api.akoweDiagnostics({}));
     assert(diag && diag.ok && /Self-repair chatgpt: state ok/.test(diag.text) && /Self-repair claude: state ok/.test(diag.text) && /Self-repair claude: .*🎯 saved .*assistant\(number/.test(diag.text) && /Self-repair chatgpt: .*🎯 saved assistant\(pick/.test(diag.text), `diagnostics list the self-repair and the saved picks per AI [${diag && String(diag.text).split('\n').filter((l) => /Self-repair/.test(l)).join(' | ')}]`);
     assert(!/Repeat this number|Reply with only this word|backwards, digits only/.test(diag.text), 'diagnostics carry no message text');
+    console.log('\n== Claude stalls mid-conversation, gets a check-in, answers only the word — and is asked to carry on ==');
+    const CARRY = 'Thanks — that was only a quick connection check from AutoInjector; please ignore it. Continue exactly where you left off in our conversation.';
+    await controls.evaluate(() => window.api.hopLimit(4)); // keep the fake AIs' own conversation short
+    await inPane('claude', 'window.__fake.stallNext = true; true');
+    const cPosted0 = await inPane('claude', 'window.__fake.posted.length');
+    await controls.evaluate(() => window.api.sendCompose('Plan a picnic with the others, step by step. PICNIC-START', ['claude']));
+    const stalledSeq = await waitFor(() => inPane('claude', '(window.__fake.stalled || []).slice(-1)[0] || null'), 15000);
+    assert(!!stalledSeq, `Claude got the message and stalled (no answer to [MSG #${stalledSeq}])`);
+    await sleep(2200); // a stalled message stops blocking a check-in after a while (3 min in the app; 1.5 s here)
+    const pr2 = await controls.evaluate(() => window.api.selfRepairProbe(['claude']));
+    assert(pr2 && pr2.started && pr2.started.includes('claude'), `a check-in goes to the stalled Claude (${JSON.stringify(pr2 && pr2.skipped)})`);
+    const fuPost = await waitFor(() => inPane('claude', `(window.__fake.posted.slice(${cPosted0}).find((p) => p.text.includes(${JSON.stringify(CARRY)})) || {}).text || null`), 60000, 300);
+    assert(!!fuPost, 'after Claude answered the check-in with only its word, AutoInjector asked it to carry on');
+    const cPosts = await inPane('claude', `window.__fake.posted.slice(${cPosted0}).map((p) => p.text)`);
+    const iCk = cPosts.map((t) => /Reply with only this word/.test(t)).lastIndexOf(true);
+    const iFu = cPosts.findIndex((t) => t.includes(CARRY));
+    assert(iCk >= 0 && iFu > iCk && cPosts.filter((t) => t.includes(CARRY)).length === 1, `in Claude's chat: the check-in, then ONE follow-up (posts: ${cPosts.map((t) => (t.includes(CARRY) ? 'CARRY-ON' : /Reply with only/.test(t) ? 'CHECK-IN' : 'MSG')).join(', ')})`);
+    assert(fuPost && fuPost.includes(`You had not answered [MSG #${stalledSeq}] yet`) && /PICNIC-START/.test(fuPost), 'the follow-up sends the stalled message again, with its [MSG #]');
+    const fuSeq = fuPost && (/^\[MSG #(\d+)\]/.exec(fuPost) || [])[1];
+    const cReply = await waitFor(async () => (await controls.evaluate(() => window.api.getState())).transcript.find((t) => t.site === 'claude' && new RegExp(`to #${fuSeq}\\b`).test(t.text)) || null, 30000, 300);
+    assert(!!cReply, `Claude's answer to the follow-up is in the conversation like any reply (${cReply && cReply.text.slice(0, 60)})`);
+    const tokenM = cReply && /token (CLAUDE-R\d+)/.exec(cReply.text);
+    const passedOn = tokenM && await waitFor(async () => {
+      for (const s of ['chatgpt', 'gemini']) { if (await inPane(s, `window.__fake.posted.some((p) => p.text.includes(${JSON.stringify(tokenM[1])}))`)) return s; }
+      return null;
+    }, 30000, 300);
+    assert(!!passedOn, `…and it was passed on to ${passedOn || 'the next AI'}: the conversation goes on`);
+    const contLog = await controls.evaluate(() => window.api.getState().then((s) => (s.log || []).filter((e) => e.kind === 'checkin-continue' && e.detail && e.detail.site === 'claude').map((e) => e.detail)));
+    assert(contLog.length === 1 && contLog[0].sent === true && Array.isArray(contLog[0].resent) && contLog[0].resent.includes(stalledSeq), `logged once: checkin-continue (claude, ${contLog[0] && contLog[0].reason}, resent ${contLog[0] && JSON.stringify(contLog[0].resent)})`);
+    const feedLine = await waitFor(() => controls.evaluate(() => window.api.akoweStatus({}).then((st) => ((st.activity || []).find((e) => /Asked Claude to carry on where it left off/.test(e.say || '')) || {}).say || null)), 8000);
+    assert(!!feedLine, `the activity feed says it in plain words (${feedLine})`);
+    const box = await controls.$eval('#bf-carryon', (e) => ({ checked: e.checked, label: e.parentElement.textContent.trim() })).catch(() => null);
+    assert(box && box.checked && /After a check-in, ask the AI to carry on/.test(box.label), 'the setting “After a check-in, ask the AI to carry on” is shown, ticked');
+    await panelShot('checkin_continue_01_feed');
+    await controls.evaluate(() => window.api.silenceAll()); // stop the fake AIs' conversation
+    await controls.evaluate(() => window.api.hopLimit(30));
+    await sleep(1500);
     assert(errors.length === 0, `no page errors in the control panel (${errors.slice(0, 3).join(' | ')})`);
     console.log('screenshots:\n  ' + shots.join('\n  '));
   } finally {

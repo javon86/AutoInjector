@@ -183,7 +183,7 @@ A('selfrepair.teach_start', 'selfrepair:teach-start', { t: 'Start the number tea
 A('selfrepair.teach_cancel', 'selfrepair:teach-cancel', { t: 'Cancel the number teach', c: true, aa: true, a: { site }, r: ['site'], ex: { site: 'gemini' } });
 A('selfrepair.reload', 'selfrepair:reload', { t: 'Reload an AI pane and re-check it', c: true, aa: true, a: { site }, r: ['site'], ex: { site: 'gemini' } });
 A('selfrepair.forget_learned', 'selfrepair:forget-learned', { t: 'Forget what self-repair learned about an AI page', c: true, a: { site }, r: ['site'], ex: { site: 'gemini' } });
-A('selfrepair.settings', 'selfrepair:settings', { t: 'Check-in settings (every N minutes, at start)', c: true, aa: true, a: { intervalMin: { type: 'integer', minimum: 0, maximum: 1440 }, startup: { type: 'boolean' } }, ex: { intervalMin: 30 } });
+A('selfrepair.settings', 'selfrepair:settings', { t: 'Check-in settings (every N minutes, at start, ask the AI to carry on after a check-in)', c: true, aa: true, a: { intervalMin: { type: 'integer', minimum: 0, maximum: 1440 }, startup: { type: 'boolean' }, carryOn: { type: 'boolean' } }, ex: { intervalMin: 30 } });
 A('picker.status', 'picker:status', { t: '🎯 picker state for an AI', c: false, a: { site }, r: ['site'], ex: { site: 'claude' } });
 A('picker.start', 'picker:start', { t: '🎯 Start pointing at a part of an AI page (you point)', c: true, a: { site, role: { type: 'string', enum: ['input', 'send', 'assistant'] } }, r: ['site', 'role'], ex: { site: 'claude', role: 'input' } });
 A('picker.cancel', 'picker:cancel', { t: '🎯 Cancel pointing', c: true, aa: true, a: { site }, r: ['site'], ex: { site: 'claude' } });

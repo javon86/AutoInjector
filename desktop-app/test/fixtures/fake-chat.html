@@ -62,6 +62,8 @@
     survey    1 = an in-pane feedback card ("How is Claude doing this session?")
               with rating buttons and a Dismiss ✕ above the message box;
               window.__fake.survey says what was clicked
+  Stall: set window.__fake.stallNext = true and the next ordinary [MSG #] message
+  gets no reply at all (window.__fake.stalled lists their numbers).
   Check-ins: "Reply with only this word: X" is answered with X (tagged). A typed
   "Repeat this number: 1234" (the old teach step, no [MSG #]) is answered with the
   number, untagged — like a real AI would. P38 number teach: a typed bare "4827" is
@@ -290,6 +292,9 @@
     else if (SITE === "claude") { u = el("div", { "data-testid": "user-message", class: "user-text", text }, log); }
     else { u = el("user-query", {}, log); el("div", { class: "query-text user-text", text }, u); }
     if (has("slowclear")) setTimeout(() => clearComposer(text), between(500, 1500)); else clearComposer(text);
+    // window.__fake.stallNext = true: the next ordinary message gets NO reply (the AI
+    // stalls); check-ins are still answered — with only their word, then it stops
+    if (F.stallNext && /^\[MSG #\d+\]/.test(text) && !/Reply with only this word:/.test(text)) { F.stallNext = false; F.stalled = (F.stalled || []).concat([(/^\[MSG #(\d+)\]/.exec(text) || [])[1]]); return; }
     if (/^\[MSG #\d+\]/.test(text) || /Repeat this number:\s*\d{4}/.test(text) || /^\s*\d{4}\s*$/.test(text)) { F.jobs++; reply(text).finally(() => { F.jobs--; }); }
   }
 

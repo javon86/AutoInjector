@@ -1026,6 +1026,7 @@
     .bf-ai-check { font-size:12px; color:var(--bf-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
     .bf-ai-check:empty { display:none; }
     .bf-checkin { display:inline-flex; align-items:center; gap:4px; font-size:12px; color:#cfc8f5; text-transform:none; letter-spacing:0; font-weight:600; }
+    .bf-carryon-row { margin:0 0 4px; }
     .bf-checkin select { font-size:12px; padding:1px 3px; background:#17172a; color:#e6e4f5; border:1px solid #33334a; border-radius:6px; }
     /* P18.7 teach step card */
     .bf-teach { margin-top:6px; padding:8px 11px; border-radius:9px; border:1px solid #6d5ce0; border-left:4px solid var(--bf-wait); background:linear-gradient(180deg, #221d40, #19162e); color:#f1efff; }
@@ -2321,6 +2322,7 @@
           <section class="bf-card" id="bf-ais-card" aria-labelledby="bf-ais-h">
             <h3 id="bf-ais-h">🤖 Your AIs <button class="bf-info" type="button" data-info="ais" aria-expanded="false" aria-controls="bf-pop" aria-label="What do the AI statuses mean?">ⓘ</button>
               <span class="bf-h3-extra"><label class="bf-checkin" title="AutoInjector sends each idle AI a tiny check-in message (“Reply with only this word: …”) this often, and fixes what it can by itself. Check-ins never go to an AI that is busy or that you are typing in, and are never passed on to the other AIs.">Check-ins <select id="bf-checkin-every" aria-label="How often to check in with each AI"><option value="0">off</option><option value="10">every 10 min</option><option value="20" selected>every 20 min</option><option value="30">every 30 min</option><option value="60">every hour</option></select></label><label class="bf-checkin" title="Play a short sound when an AI stops working and AutoInjector needs you (it asks only once)"><input type="checkbox" id="bf-sound"> 🔔 sound</label><span class="bf-anchor" id="bf-checkin-anchor"><button id="btn-bf-checkin" type="button" title="Check in with every Active AI now (a tiny automatic message), and fix what can be fixed">🩺 Check now</button></span></span></h3>
+            <div class="bf-carryon-row"><label class="bf-checkin" title="When a check-in (or a 🔢 number teach) lands while an AI is in the middle of a conversation, AutoInjector then tells it the check-in was only a test and asks it to continue where it left off (sending again any message it still owed an answer to). An AI that was doing nothing gets no extra message, and nothing is sent after Stop AIs Talking."><input type="checkbox" id="bf-carryon" checked> After a check-in, ask the AI to carry on</label></div>
             <div class="bf-ais" id="bf-ais"></div>
           </section>
           <!-- connection check: chips; the full list opens on click or when something fails -->

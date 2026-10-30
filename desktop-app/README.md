@@ -774,6 +774,18 @@ when you press **🩺 Check now**, and when Akọwe asks before a book. Never wh
 typing in that AI or it is busy. Check-ins and their answers are not shown in the
 conversation and never passed on to the other AIs.
 
+**After a check-in, ask the AI to carry on** (on by default, next to *Check-ins*): an AI answers a
+check-in (or a 🔢 number teach) and then has nothing more to say, so a conversation it was in would
+stop there. When the AI was in the middle of something — it still owed an answer to a message, an
+Akọwe request or a House Rule / sequence / Butler task was running, or it had talked in the last
+15 minutes — AutoInjector sends it ONE more message right after the check-in answer: *“Thanks —
+that was only a quick connection check from AutoInjector; please ignore it. Continue exactly where
+you left off in our conversation.”* (plus any message it still owed an answer to, sent again with
+its [MSG #], and the usual [TO:] / [FROM:] rule). Its reply is shown and passed on like any other
+reply. An AI that was doing nothing gets no extra message; nothing is sent after **Stop AIs
+Talking**, when its House Rule / sequence was stopped meanwhile, or while a new check-in runs. The
+activity feed says *“Asked Claude to carry on where it left off”*.
+
 When a check-in fails, the AI's card says **🔧 Repairing…** and AutoInjector works out why
 (can't type / message not sent / can't find replies / reply taken as old / stuck writing /
 logged out / “are you human?” check / usage limit / page error) and fixes what it can by
