@@ -1031,6 +1031,27 @@ function pickNumber() {
 const PROBE_PHRASE = 'reply with only this word';
 const TEACH_PHRASE = 'repeat this number';
 function probeText(word) { return `Reply with only this word: ${word}`; }
+// After a check-in or a 🔢 teach, an AI that was in the middle of something gets
+// ONE follow-up so it carries on (it would otherwise answer the check-in and stop).
+// The first sentence is the message; change it here.
+const CARRY_ON_TEXT = 'Thanks — that was only a quick connection check from AutoInjector; please ignore it. Continue exactly where you left off in our conversation.';
+const CARRY_ON_RESEND_MAX = 1500; // characters of an owed message sent again (it is cut after that)
+// The follow-up: CARRY_ON_TEXT, any message the AI still owed an answer to (sent
+// again with its [MSG #] number, cut to CARRY_ON_RESEND_MAX), and the usual
+// [TO:] / [FROM:] envelope so its reply is routed like any other reply.
+// owed: [{ seq, text }] (oldest first).
+function carryOnText(site, owed) {
+  const name = String(site || '').toUpperCase() || 'YOU';
+  let out = CARRY_ON_TEXT;
+  for (const m of Array.isArray(owed) ? owed : []) {
+    if (!m || !m.text) continue;
+    let t = String(m.text).trim();
+    if (t.length > CARRY_ON_RESEND_MAX) t = t.slice(0, CARRY_ON_RESEND_MAX).trimEnd() + ' …(cut short here)';
+    out += `\n\nYou had not answered [MSG #${m.seq}] yet, so here it is again:\n\n${t}`;
+  }
+  out += `\n\nReply the way you normally do in our conversation: start with [TO: who it's for] and end with [FROM: ${name}]. If you have nothing more to add, just reply NONE.`;
+  return out;
+}
 // Does `text` hold `word` as a whole word (case-insensitive)? "harbor" is in
 // "the harbor." but not in "harbormaster" — a chapter that merely contains the
 // letters must never pass for a check-in answer.
@@ -1087,7 +1108,7 @@ function createSelfRepair(deps) {
     probeWordsMs: 60 * 60000 // P37.4: replies holding a check-in / teach word this recent are never nagged
   }, d.options || {});
   const S = {};
-  for (const s of sites) S[s] = { state: 'unknown', problem: null, since: null, lastProbeOkAt: null, lastProbeAt: 0, lastCheckReason: null, running: false, step: null, tried: [], teach: null, pending: null, lastSignalCheckAt: 0, startupDone: false, fixedAt: null, yieldReq: false, displacedCount: 0, backoffN: 0, askNotified: false, askedAt: null, nextCheckAt: null };
+  for (const s of sites) S[s] = { state: 'unknown', problem: null, since: null, lastProbeOkAt: null, lastProbeAt: 0, lastCheckReason: null, running: false, step: null, tried: [], teach: null, pending: null, lastSignalCheckAt: 0, startupDone: false, fixedAt: null, yieldReq: false, displacedCount: 0, backoffN: 0, askNotified: false, askedAt: null, nextCheckAt: null, carry: null };
   const events = [];
   const createdAt = now(); // periodic check-ins count from app start (the start-up one is separate)
   const awaiting = {}; // site -> check-in record { word, resolve, captured, token (token.seq = its [MSG #]), typed, withdrawn, displaced, orphaned }
@@ -1095,6 +1116,7 @@ function createSelfRepair(deps) {
   const teachCtl = {}; // site -> { cancel: bool }
   const seenSeqs = {};  // site -> Set of every check-in / teach follow-up [MSG #] (P37.4)
   const probeWords = {}; // site -> [{ word, until }] check-in words, teach numbers (P37.4)
+  const continueSeqs = {}; // site -> Set of carry-on follow-up [MSG #] numbers: their answers are normal replies, never check-in answers
   function rememberProbe(site, word, seq) {
     if (word) { (probeWords[site] = (probeWords[site] || []).filter((r) => r.until > now())).push({ word: String(word), until: now() + opt.probeWordsMs }); }
     if (seq != null) { const set = seenSeqs[site] || (seenSeqs[site] = new Set()); set.add(String(seq)); if (set.size > 200) set.delete(set.values().next().value); }
@@ -1208,6 +1230,8 @@ function createSelfRepair(deps) {
   // request is waiting for this AI's answer).
   function probeReplyKind(site, text, answers, o) {
     if (!S[site]) return null;
+    // the answer to a carry-on follow-up is the conversation going on: a normal reply
+    if (Array.isArray(answers) && answers.some((q) => isContinueSeq(site, q))) return null;
     if (ownerOf(site, text, answers)) return 'owned';
     const t = String(text || '');
     const low = t.toLowerCase();
@@ -1248,6 +1272,37 @@ function createSelfRepair(deps) {
   }
   function awaitingReply(site) { return !!awaiting[site] || !!(S[site] && S[site].teach && S[site].teach.active); }
   function teachActive(site) { return !!(S[site] && S[site].teach && S[site].teach.active); }
+  function isContinueSeq(site, q) { const set = continueSeqs[site]; return !!(set && q != null && set.has(String(q))); }
+  function noteContinueSeq(site, seq) {
+    if (!S[site] || seq == null) return false;
+    const set = continueSeqs[site] || (continueSeqs[site] = new Set());
+    set.add(String(seq)); if (set.size > 100) set.delete(set.values().next().value);
+    return true;
+  }
+  // A check-in / teach message (or a carry-on follow-up) of this AI's, by [MSG #].
+  function isProbeSeq(site, q) { return q != null && (!!(seenSeqs[site] && seenSeqs[site].has(String(q))) || isCheckinSeq(site, q)); }
+
+  // ---- carry on after a check-in / 🔢 teach ------------------------------------------------
+  // What the AI was doing is asked for BEFORE anything is typed (the check-in
+  // itself changes "last activity"): d.carryOnContext(site) -> null (idle) or the
+  // host's record of it. When the check-in (or the teach) is over and at least one
+  // of its messages was typed, d.carryOn(site, ctx, info) sends ONE follow-up —
+  // never twice for one check-in, never when the check-in made way for an Akọwe
+  // request, never after Cancel, never when the AI needs the user (logged out…).
+  function carryCtx(site) { try { return typeof d.carryOnContext === 'function' ? d.carryOnContext(site) || null : null; } catch (_) { return null; } }
+  function startCarry(site, kind, reason) { const x = S[site]; x.carry = { ctx: carryCtx(site), typed: false, kind, reason: String(reason || kind).slice(0, 40) }; return x.carry; }
+  function finishCarry(site, c, r) {
+    const x = S[site];
+    if (!c || x.carry !== c) return null;
+    x.carry = null;
+    if (!c.ctx || !c.typed) return null;
+    const res = r || {};
+    const why = res.deferred ? 'deferred' : res.cancelled ? 'cancelled' : res.state === 'needs_user' ? 'needs-user' : null;
+    if (why) { event('continue', { site, outcome: 'SKIPPED', reason: why }); return null; }
+    if (typeof d.carryOn !== 'function') return null;
+    event('continue', { site, outcome: 'ASK', reason: c.reason });
+    try { return Promise.resolve(d.carryOn(site, c.ctx, { kind: c.kind, reason: c.reason, ok: !!res.ok, state: res.state || (S[site] && S[site].state) || null })).catch(() => null); } catch (_) { return null; }
+  }
 
   // ---- one check-in ---------------------------------------------------------------------
   async function signalsOf(site) {
@@ -1293,7 +1348,7 @@ function createSelfRepair(deps) {
       if (sendRes && sendRes.timedOut) { token.cancelled = true; sendRes = await sendP.catch(() => ({ ok: false, error: 'CANCELLED' })); }
     } catch (e) { sendRes = { ok: false, error: 'EXCEPTION' }; }
     sendRes = sendRes && typeof sendRes === 'object' ? { ok: !!sendRes.ok, error: sendRes.error || null, verified: sendRes.verified } : { ok: false, error: 'UNKNOWN' };
-    if (sendRes.ok) a.typed = true;
+    if (sendRes.ok) { a.typed = true; if (x.carry) x.carry.typed = true; }
     rememberProbe(site, word, token.seq);
     try {
       // withdrawn before it was typed, to make way for an Akọwe request: not a failure
@@ -1417,6 +1472,13 @@ function createSelfRepair(deps) {
     if (!x) return { skipped: 'unknown_site' };
     if (x.running) return { skipped: 'checking' };
     if (x.teach && x.teach.active) return { skipped: 'teaching' };
+    const c = startCarry(site, 'checkin', reason); // BEFORE anything is typed
+    const r = await runCheckNow(site, reason, o);
+    finishCarry(site, c, r);
+    return r;
+  }
+  async function runCheckNow(site, reason, o) {
+    const x = S[site];
     x.running = true; x.step = 'check'; x.pending = null; x.yieldReq = false;
     const prev = { state: x.state, problem: x.problem };
     emit(site);
@@ -1509,10 +1571,11 @@ function createSelfRepair(deps) {
     const number = pickNumber();
     x.teach = { active: true, number, reversed: reverseDigits(number), phase: 'type', asked: false, startedAt: now(), learned: {}, saved: [], sendHow: null, missing: [], failedPart: null, result: null, code: code || x.problem || null, prev: { state: x.state, problem: x.problem } };
     teachCtl[site] = { cancel: false };
+    const c = startCarry(site, 'teach', 'number-teach'); // what the AI was doing, before the user types the number
     userActed(site);
     event('teach', { site, outcome: 'STARTED', code: x.teach.code });
     emit(site, { kind: 'teach', phase: 'type' });
-    teachLoop(site).catch(() => { try { const t = x.teach; if (t && t.active) { t.active = false; t.result = 'failed'; emit(site, { kind: 'teach', phase: 'failed' }); } } catch (_) {} });
+    teachLoop(site).then((r) => finishCarry(site, c, r), () => { try { const t = x.teach; if (t && t.active) { t.active = false; t.result = 'failed'; emit(site, { kind: 'teach', phase: 'failed' }); } } catch (_) {} finishCarry(site, c, { ok: false }); });
     return { ok: true, number };
   }
   function savePart(site, role, sel) {
@@ -1545,6 +1608,7 @@ function createSelfRepair(deps) {
         event('teach', { site, outcome: `PHASE_${String(t.phase).toUpperCase()}`, how: t.sendHow || undefined });
         emit(site, { kind: 'teach', phase: t.phase });
       }
+      if (x.carry && (r.phase === 'user_seen' || r.phase === 'done' || t.asked)) x.carry.typed = true; // the user's number went in
       if (r.phase === 'done') break;
       if (r.phase === 'user_seen' && !t.asked) {
         // step 2: AutoInjector asks for the number backwards, with what was just learned
@@ -1746,6 +1810,7 @@ function createSelfRepair(deps) {
   return {
     runCheck, probeMany, requestCheck, startup, tick, onPageChanged, noteWorking,
     onCaptured, expects, probeReplyKind, noteForeignReply, awaitingReply, teachActive, startTeach, cancelTeach, makeWay, busyWithSite, userActed,
+    noteContinueSeq, isContinueSeq, isProbeSeq,
     state: snap, snapshot: () => Object.fromEntries(sites.map((s) => [s, snap(s)])), health, isUsable,
     events: () => events.map((e) => Object.assign({}, e)), setIntervalMs, options: opt, lastTick: () => lastTick
   };
@@ -1757,6 +1822,7 @@ module.exports = {
   describeProblem, signaturesFor, altsFor, pageKit, classify, createSelfRepair, sanitizeLearned,
   buildSignalScript, buildScanScript, buildAlternativesScript, buildLearnReplyScript, buildUnfreezeScript,
   buildTeachStartScript, buildTeachPollScript, buildTeachAskedScript, buildTeachStopScript, buildTeachDoneScript, teachLearnedWords, teachBanner, teachAskedBanner, probeText, pickWord, pickNumber, containsWord,
+  CARRY_ON_TEXT, CARRY_ON_RESEND_MAX, carryOnText,
   FOLLOWUP_PHRASE, followupText, reverseDigits, PICK_THING, pickBanner, replyMarkers, buildPickScript, buildPickCancelScript, buildPickForceScript, buildMatchCheckScript, userSelFor,
   pageKitFor, isChromeSelector
 };

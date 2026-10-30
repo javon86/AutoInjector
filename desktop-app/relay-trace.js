@@ -127,6 +127,16 @@ function createRelayTrace({ now = () => Date.now(), maxMessages = 2000, noReplyM
   // Messages to `site` still owed a reply, oldest first: { seq, kind, at } (no text).
   function openMessages(site) { return waiting(site).map((m) => ({ seq: m.seq, kind: m.kind, at: m.at })); }
   function wouldAnswer(site) { return openFor(site).map((m) => m.seq); }
+  // Is this message still owed a real answer? Not answered yet, or "answered" only
+  // by a reply that was held back as a check-in answer (the AI answered the
+  // check-in, not this message). null = unknown message.
+  function stillOwed(seq) {
+    const m = bySeq.get(String(seq)); if (!m) return null;
+    if (m.result === "failed" || m.result === "cancelled") return false;
+    if (!m.answeredAt) return true;
+    const t = m.answerTurn != null ? turns.get(m.answerTurn) : null;
+    return !!(t && t.held === "check-in");
+  }
   function noteCapture(site, turnId, { none = false, rateLimited = false } = {}) {
     writing[site] = false; // a reply is only captured once the AI has finished it
     const open = openFor(site);
@@ -224,7 +234,7 @@ function createRelayTrace({ now = () => Date.now(), maxMessages = 2000, noReplyM
   }
 
   function reset() { msgs = []; bySeq.clear(); turns.clear(); }
-  return { noteSend, noteTyping, openStarted, isAnswered, noteSendResult, noteGenerating, noteIdle, noteCapture, noteHandoff, noteHeld, answersOf, wouldAnswer, openMessages, report, reset, _msgs: () => msgs };
+  return { noteSend, noteTyping, openStarted, isAnswered, noteSendResult, noteGenerating, noteIdle, noteCapture, noteHandoff, noteHeld, answersOf, wouldAnswer, openMessages, stillOwed, report, reset, _msgs: () => msgs };
 }
 
 const LABEL = { chatgpt: "ChatGPT", claude: "Claude", gemini: "Gemini" };

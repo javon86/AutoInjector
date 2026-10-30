@@ -97,6 +97,22 @@ console.log('\n== P18.1: wouldAnswer() predicts answersOf() without recording ==
   assert(R.answersOf(7).join() === before.join() && R.wouldAnswer('gemini').length === 0, 'noteCapture records exactly what wouldAnswer said');
 }
 
+console.log('\n== stillOwed: a message "answered" only by a check-in answer is still owed ==');
+{
+  let c4 = 0;
+  const R = createRelayTrace({ now: () => c4, noReplyMs: 600000 });
+  R.noteSend({ seq: '0020', target: 'claude', kind: 'program', text: 'a question' }); R.noteSendResult('0020', { ok: true, verified: true });
+  R.noteSend({ seq: '0021', target: 'claude', kind: 'auto', text: 'Reply with only this word: lark' }); R.noteSendResult('0021', { ok: true, verified: true });
+  assert(R.stillOwed('0020') === true && R.stillOwed('9999') === null, 'open -> owed; unknown -> null');
+  c4 += 1000; R.noteCapture('claude', 31); R.noteHeld(31, 'check-in'); // the check-in answer took both [MSG #]s
+  assert(R.stillOwed('0020') === true, 'answered only by a reply held back as a check-in answer -> still owed');
+  R.noteSend({ seq: '0022', target: 'claude', kind: 'auto', text: 'carry on' }); R.noteSendResult('0022', { ok: true, verified: true });
+  c4 += 1000; R.noteCapture('claude', 32);
+  assert(R.stillOwed('0022') === false, 'answered by a normal reply -> not owed');
+  R.noteSend({ seq: '0023', target: 'claude', kind: 'program', text: 'x' }); R.noteSendResult('0023', { ok: false, error: 'INPUT_NOT_FOUND' });
+  assert(R.stillOwed('0023') === false, 'a send that failed is not owed');
+}
+
 console.log('\n== cap + reset ==');
 const S = createRelayTrace({ now: () => 0, maxMessages: 5 });
 for (let i = 0; i < 9; i++) S.noteSend({ seq: String(i), target: 'claude', text: `x${i}` });
