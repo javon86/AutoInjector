@@ -1,0 +1,4606 @@
+{
+  "1": {
+    "title": "Cover",
+    "sections": [
+      {
+        "code": "1.1",
+        "name": "Title block",
+        "info": "(4)",
+        "fields": [
+          {
+            "num": 1,
+            "id": "1.1.1",
+            "label": "Book title",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "1.1.2",
+            "label": "Subtitle",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "1.1.3",
+            "label": "Author name",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 4,
+            "id": "1.1.4",
+            "label": "Series name & book number 🆕 (optional)",
+            "pic": false,
+            "auto": false,
+            "new": true
+          }
+        ]
+      },
+      {
+        "code": "1.2",
+        "name": "Artwork",
+        "info": "(2)",
+        "fields": [
+          {
+            "num": 1,
+            "id": "1.2.1",
+            "label": "Cover art *(pic)* — falls back to a styled title page in the genre colours",
+            "pic": true,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "1.2.2",
+            "label": "Art credit (which engine / \"your upload\") *(auto)*",
+            "pic": false,
+            "auto": true,
+            "new": false
+          }
+        ]
+      },
+      {
+        "code": "1.3",
+        "name": "Label strip",
+        "info": "(5)",
+        "fields": [
+          {
+            "num": 1,
+            "id": "1.3.1",
+            "label": "\"BOOK BIBLE\" label",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "1.3.2",
+            "label": "Genre",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "1.3.3",
+            "label": "Length (short story / novella / novel)",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 4,
+            "id": "1.3.4",
+            "label": "Audience",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 5,
+            "id": "1.3.5",
+            "label": "Number of chapters *(auto)*",
+            "pic": false,
+            "auto": true,
+            "new": false
+          }
+        ]
+      },
+      {
+        "code": "1.4",
+        "name": "Status",
+        "info": "(4)",
+        "fields": [
+          {
+            "num": 1,
+            "id": "1.4.1",
+            "label": "Approved % (progress bar) *(auto)*",
+            "pic": false,
+            "auto": true,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "1.4.2",
+            "label": "Drafts waiting for approval *(auto)*",
+            "pic": false,
+            "auto": true,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "1.4.3",
+            "label": "Missing pictures *(auto)*",
+            "pic": false,
+            "auto": true,
+            "new": false
+          },
+          {
+            "num": 4,
+            "id": "1.4.4",
+            "label": "Last updated date *(auto)*",
+            "pic": false,
+            "auto": true,
+            "new": false
+          }
+        ]
+      },
+      {
+        "code": "1.5",
+        "name": "Version",
+        "info": "(3)",
+        "fields": [
+          {
+            "num": 1,
+            "id": "1.5.1",
+            "label": "Book version / revision *(auto)*",
+            "pic": false,
+            "auto": true,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "1.5.2",
+            "label": "Book Bible schema version *(auto)*",
+            "pic": false,
+            "auto": true,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "1.5.3",
+            "label": "\"Made with Akọwe + AutoInjector\" line",
+            "pic": false,
+            "auto": false,
+            "new": false
+          }
+        ]
+      }
+    ]
+  },
+  "2": {
+    "title": "Contents",
+    "sections": [
+      {
+        "code": "2.1",
+        "name": "Section list",
+        "info": "(one row per section — 8 rows × 3 fields = repeating)",
+        "fields": [
+          {
+            "num": 1,
+            "id": "2.1.1",
+            "label": "Section icon & name",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "2.1.2",
+            "label": "Entries in it (e.g. \"6 characters\") *(auto)*",
+            "pic": false,
+            "auto": true,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "2.1.3",
+            "label": "Page number *(auto)*",
+            "pic": false,
+            "auto": true,
+            "new": false
+          }
+        ],
+        "repeat": 9
+      },
+      {
+        "code": "2.2",
+        "name": "Quick-jump grid",
+        "info": "(repeating tiles)",
+        "fields": [
+          {
+            "num": 1,
+            "id": "2.2.1",
+            "label": "Character portrait thumbnails *(pic)* + name → link",
+            "pic": true,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "2.2.2",
+            "label": "Place thumbnails *(pic)* + name → link",
+            "pic": true,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "2.2.3",
+            "label": "World entry sigils/icons *(pic)* + name → link",
+            "pic": true,
+            "auto": false,
+            "new": false
+          }
+        ],
+        "repeat": 6
+      },
+      {
+        "code": "2.3",
+        "name": "Still to do",
+        "info": "(up to 10 rows)",
+        "fields": [
+          {
+            "num": 1,
+            "id": "2.3.1",
+            "label": "Item needing attention (draft / missing picture / ⚠ check)",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "2.3.2",
+            "label": "Where it is (page)",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "2.3.3",
+            "label": "Action link (✔ Approve / 🎨 Make picture / ✏ Fix)",
+            "pic": false,
+            "auto": false,
+            "new": false
+          }
+        ],
+        "repeat": 8
+      }
+    ]
+  },
+  "3": {
+    "title": "At a glance",
+    "sections": [
+      {
+        "code": "3.1",
+        "name": "The idea",
+        "info": "(2)",
+        "fields": [
+          {
+            "num": 1,
+            "id": "3.1.1",
+            "label": "The author's original idea (own words)",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "3.1.2",
+            "label": "Date the book was started *(auto)*",
+            "pic": false,
+            "auto": true,
+            "new": false
+          }
+        ]
+      },
+      {
+        "code": "3.2",
+        "name": "Logline",
+        "info": "(1)",
+        "fields": [
+          {
+            "num": 1,
+            "id": "3.2.1",
+            "label": "One-sentence pitch (big text)",
+            "pic": false,
+            "auto": false,
+            "new": false
+          }
+        ]
+      },
+      {
+        "code": "3.3",
+        "name": "Premise",
+        "info": "(1)",
+        "fields": [
+          {
+            "num": 1,
+            "id": "3.3.1",
+            "label": "Premise paragraph",
+            "pic": false,
+            "auto": false,
+            "new": false
+          }
+        ]
+      },
+      {
+        "code": "3.4",
+        "name": "Book facts chips",
+        "info": "(9)",
+        "fields": [
+          {
+            "num": 1,
+            "id": "3.4.1",
+            "label": "Genre",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "3.4.2",
+            "label": "Sub-genre 🆕",
+            "pic": false,
+            "auto": false,
+            "new": true
+          },
+          {
+            "num": 3,
+            "id": "3.4.3",
+            "label": "Audience / age range",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 4,
+            "id": "3.4.4",
+            "label": "Tone",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 5,
+            "id": "3.4.5",
+            "label": "Point of view (first / third limited / …)",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 6,
+            "id": "3.4.6",
+            "label": "Tense",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 7,
+            "id": "3.4.7",
+            "label": "Length + word target",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 8,
+            "id": "3.4.8",
+            "label": "Chapters (planned / written) *(auto)*",
+            "pic": false,
+            "auto": true,
+            "new": false
+          },
+          {
+            "num": 9,
+            "id": "3.4.9",
+            "label": "Reading level *(auto)*",
+            "pic": false,
+            "auto": true,
+            "new": false
+          }
+        ]
+      },
+      {
+        "code": "3.5",
+        "name": "Ending & style",
+        "info": "(4)",
+        "fields": [
+          {
+            "num": 1,
+            "id": "3.5.1",
+            "label": "Ending type (happy / bittersweet / tragic / open)",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "3.5.2",
+            "label": "What must be resolved",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "3.5.3",
+            "label": "Style choices (voice, pace)",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 4,
+            "id": "3.5.4",
+            "label": "Content limits (what the book won't show) 🆕",
+            "pic": false,
+            "auto": false,
+            "new": true
+          }
+        ]
+      },
+      {
+        "code": "3.6",
+        "name": "Main cast strip",
+        "info": "(repeating, 3–5)",
+        "fields": [
+          {
+            "num": 1,
+            "id": "3.6.1",
+            "label": "Portrait *(pic)*",
+            "pic": true,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "3.6.2",
+            "label": "Name",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "3.6.3",
+            "label": "Role",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 4,
+            "id": "3.6.4",
+            "label": "One-line description",
+            "pic": false,
+            "auto": false,
+            "new": false
+          }
+        ],
+        "repeat": 5
+      },
+      {
+        "code": "3.7",
+        "name": "Main places & themes",
+        "info": "(5)",
+        "fields": [
+          {
+            "num": 1,
+            "id": "3.7.1",
+            "label": "Key place thumbnails (2–4) *(pic)* + names",
+            "pic": true,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "3.7.2",
+            "label": "Theme 1 🆕",
+            "pic": false,
+            "auto": false,
+            "new": true
+          },
+          {
+            "num": 3,
+            "id": "3.7.3",
+            "label": "Theme 2 🆕",
+            "pic": false,
+            "auto": false,
+            "new": true
+          },
+          {
+            "num": 4,
+            "id": "3.7.4",
+            "label": "Theme 3 🆕",
+            "pic": false,
+            "auto": false,
+            "new": true
+          },
+          {
+            "num": 5,
+            "id": "3.7.5",
+            "label": "Central question of the book 🆕",
+            "pic": false,
+            "auto": false,
+            "new": true
+          }
+        ]
+      }
+    ]
+  },
+  "4": {
+    "title": "Cast list",
+    "sections": [
+      {
+        "code": "4.1",
+        "name": "Group heading",
+        "info": "(2)",
+        "fields": [
+          {
+            "num": 1,
+            "id": "4.1.1",
+            "label": "Group name (Main / Supporting / Minor)",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "4.1.2",
+            "label": "Count *(auto)*",
+            "pic": false,
+            "auto": true,
+            "new": false
+          }
+        ]
+      },
+      {
+        "code": "4.2",
+        "name": "Character card",
+        "info": "(repeating, one per character)",
+        "fields": [
+          {
+            "num": 1,
+            "id": "4.2.1",
+            "label": "Portrait *(pic)*",
+            "pic": true,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "4.2.2",
+            "label": "Name",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "4.2.3",
+            "label": "Code (CH-001) *(auto)*",
+            "pic": false,
+            "auto": true,
+            "new": false
+          },
+          {
+            "num": 4,
+            "id": "4.2.4",
+            "label": "Role",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 5,
+            "id": "4.2.5",
+            "label": "One-line description",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 6,
+            "id": "4.2.6",
+            "label": "Age 🆕 (from Quick stats)",
+            "pic": false,
+            "auto": false,
+            "new": true
+          },
+          {
+            "num": 7,
+            "id": "4.2.7",
+            "label": "First chapter they appear *(auto)*",
+            "pic": false,
+            "auto": true,
+            "new": false
+          },
+          {
+            "num": 8,
+            "id": "4.2.8",
+            "label": "Status badge *(auto)*",
+            "pic": false,
+            "auto": true,
+            "new": false
+          }
+        ],
+        "repeat": 6
+      },
+      {
+        "code": "4.3",
+        "name": "Filters (screen only)",
+        "info": "",
+        "fields": [
+          {
+            "num": 1,
+            "id": "4.3.1",
+            "label": "By role · by status · \"no portrait yet\"",
+            "pic": false,
+            "auto": false,
+            "new": false
+          }
+        ]
+      }
+    ]
+  },
+  "5": {
+    "title": "Character page",
+    "sections": [
+      {
+        "code": "5.1",
+        "name": "Header band",
+        "info": "(6)",
+        "fields": [
+          {
+            "num": 1,
+            "id": "5.1.1",
+            "label": "Main portrait *(pic)*",
+            "pic": true,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "5.1.2",
+            "label": "Full name",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "5.1.3",
+            "label": "Nicknames / aliases (and who uses each)",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 4,
+            "id": "5.1.4",
+            "label": "Code (CH-001) + revision *(auto)*",
+            "pic": false,
+            "auto": true,
+            "new": false
+          },
+          {
+            "num": 5,
+            "id": "5.1.5",
+            "label": "Role in the story",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 6,
+            "id": "5.1.6",
+            "label": "One-line summary",
+            "pic": false,
+            "auto": false,
+            "new": false
+          }
+        ]
+      },
+      {
+        "code": "5.2",
+        "name": "📋 Quick stats",
+        "info": "(16) — the boxed fact sheet",
+        "fields": [
+          {
+            "num": 1,
+            "id": "5.2.1",
+            "label": "Age",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "5.2.2",
+            "label": "Birth date / year",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "5.2.3",
+            "label": "Pronouns",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 4,
+            "id": "5.2.4",
+            "label": "Species / people",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 5,
+            "id": "5.2.5",
+            "label": "Height 🆕",
+            "pic": false,
+            "auto": false,
+            "new": true
+          },
+          {
+            "num": 6,
+            "id": "5.2.6",
+            "label": "Weight 🆕",
+            "pic": false,
+            "auto": false,
+            "new": true
+          },
+          {
+            "num": 7,
+            "id": "5.2.7",
+            "label": "Build / body type 🆕",
+            "pic": false,
+            "auto": false,
+            "new": true
+          },
+          {
+            "num": 8,
+            "id": "5.2.8",
+            "label": "Eye colour",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 9,
+            "id": "5.2.9",
+            "label": "Hair (colour / style)",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 10,
+            "id": "5.2.10",
+            "label": "Skin / colouring",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 11,
+            "id": "5.2.11",
+            "label": "Distinguishing marks (scars, tattoos)",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 12,
+            "id": "5.2.12",
+            "label": "Occupation / job",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 13,
+            "id": "5.2.13",
+            "label": "Home (place → link)",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 14,
+            "id": "5.2.14",
+            "label": "Family status 🆕",
+            "pic": false,
+            "auto": false,
+            "new": true
+          },
+          {
+            "num": 15,
+            "id": "5.2.15",
+            "label": "Era / when they live",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 16,
+            "id": "5.2.16",
+            "label": "Handedness 🆕",
+            "pic": false,
+            "auto": false,
+            "new": true
+          }
+        ]
+      },
+      {
+        "code": "5.3",
+        "name": "🖼 Reference views",
+        "info": "(6)",
+        "fields": [
+          {
+            "num": 1,
+            "id": "5.3.1",
+            "label": "Turnaround sheet *(pic)*",
+            "pic": true,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "5.3.2",
+            "label": "Front view *(pic)*",
+            "pic": true,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "5.3.3",
+            "label": "Side view *(pic)*",
+            "pic": true,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 4,
+            "id": "5.3.4",
+            "label": "Back view *(pic)*",
+            "pic": true,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 5,
+            "id": "5.3.5",
+            "label": "Expression sheet / extra views (up to 6) *(pic)*",
+            "pic": true,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 6,
+            "id": "5.3.6",
+            "label": "Motion clip still + ▶ play (screen) *(pic)*",
+            "pic": true,
+            "auto": false,
+            "new": false
+          }
+        ]
+      },
+      {
+        "code": "5.4",
+        "name": "🧠 Personality & inner life",
+        "info": "(12)",
+        "fields": [
+          {
+            "num": 1,
+            "id": "5.4.1",
+            "label": "Traits (4–5)",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "5.4.2",
+            "label": "Their contradiction",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "5.4.3",
+            "label": "What they want",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 4,
+            "id": "5.4.4",
+            "label": "What they really need",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 5,
+            "id": "5.4.5",
+            "label": "What they fear",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 6,
+            "id": "5.4.6",
+            "label": "What they hide",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 7,
+            "id": "5.4.7",
+            "label": "What they wrongly believe",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 8,
+            "id": "5.4.8",
+            "label": "Under pressure they…",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 9,
+            "id": "5.4.9",
+            "label": "What they'd never say out loud",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 10,
+            "id": "5.4.10",
+            "label": "A private memory",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 11,
+            "id": "5.4.11",
+            "label": "How far they can change",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 12,
+            "id": "5.4.12",
+            "label": "Public self vs private self",
+            "pic": false,
+            "auto": false,
+            "new": false
+          }
+        ]
+      },
+      {
+        "code": "5.5",
+        "name": "🎯 Goals & limits",
+        "info": "(4)",
+        "fields": [
+          {
+            "num": 1,
+            "id": "5.5.1",
+            "label": "Goal in this story",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "5.5.2",
+            "label": "Concrete objective",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "5.5.3",
+            "label": "What they won't do",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 4,
+            "id": "5.5.4",
+            "label": "What they can't do",
+            "pic": false,
+            "auto": false,
+            "new": false
+          }
+        ]
+      },
+      {
+        "code": "5.6",
+        "name": "👗 Appearance (details)",
+        "info": "(10)",
+        "fields": [
+          {
+            "num": 1,
+            "id": "5.6.1",
+            "label": "Overall look (two sentences)",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "5.6.2",
+            "label": "Physique",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "5.6.3",
+            "label": "Face and features",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 4,
+            "id": "5.6.4",
+            "label": "Posture",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 5,
+            "id": "5.6.5",
+            "label": "Gait",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 6,
+            "id": "5.6.6",
+            "label": "Expressions & presence",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 7,
+            "id": "5.6.7",
+            "label": "Everyday clothing",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 8,
+            "id": "5.6.8",
+            "label": "Combat clothing / armour",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 9,
+            "id": "5.6.9",
+            "label": "Accessories",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 10,
+            "id": "5.6.10",
+            "label": "Species-specific anatomy",
+            "pic": false,
+            "auto": false,
+            "new": false
+          }
+        ]
+      },
+      {
+        "code": "5.7",
+        "name": "🗣 Voice card",
+        "info": "(12)",
+        "fields": [
+          {
+            "num": 1,
+            "id": "5.7.1",
+            "label": "Sentence rhythm",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "5.7.2",
+            "label": "Register",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "5.7.3",
+            "label": "Words from their job / era / place",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 4,
+            "id": "5.7.4",
+            "label": "Favourite phrases & tics",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 5,
+            "id": "5.7.5",
+            "label": "Words they'd never use",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 6,
+            "id": "5.7.6",
+            "label": "Habits in conversation",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 7,
+            "id": "5.7.7",
+            "label": "Speech under fear",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 8,
+            "id": "5.7.8",
+            "label": "Speech under anger",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 9,
+            "id": "5.7.9",
+            "label": "Speech under grief",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 10,
+            "id": "5.7.10",
+            "label": "What they talk around",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 11,
+            "id": "5.7.11",
+            "label": "Sample line 1 (quote box)",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 12,
+            "id": "5.7.12",
+            "label": "Sample line 2 (quote box)",
+            "pic": false,
+            "auto": false,
+            "new": false
+          }
+        ]
+      },
+      {
+        "code": "5.8",
+        "name": "❤ Relationships",
+        "info": "(6 rows × 4 = 24)",
+        "fields": [
+          {
+            "num": 1,
+            "id": "5.8.1",
+            "label": "Other character's portrait *(pic, auto)*",
+            "pic": true,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "5.8.2",
+            "label": "Name → link",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "5.8.3",
+            "label": "Relationship type (family / love / ally / rival / enemy / mentor) 🆕 type label",
+            "pic": false,
+            "auto": false,
+            "new": true
+          },
+          {
+            "num": 4,
+            "id": "5.8.4",
+            "label": "One-line note",
+            "pic": false,
+            "auto": false,
+            "new": false
+          }
+        ],
+        "repeat": 6
+      },
+      {
+        "code": "5.9",
+        "name": "⚔ Abilities",
+        "info": "(14)",
+        "fields": [
+          {
+            "num": 1,
+            "id": "5.9.1",
+            "label": "Learned practical skills",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "5.9.2",
+            "label": "Combat skills",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "5.9.3",
+            "label": "Social & leadership skills",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 4,
+            "id": "5.9.4",
+            "label": "Natural talents",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 5,
+            "id": "5.9.5",
+            "label": "Supernatural abilities (→ magic page link)",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 6,
+            "id": "5.9.6",
+            "label": "Senses",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 7,
+            "id": "5.9.7",
+            "label": "Strength (1–10 bar) 🆕 number",
+            "pic": false,
+            "auto": false,
+            "new": true
+          },
+          {
+            "num": 8,
+            "id": "5.9.8",
+            "label": "Speed (1–10) 🆕",
+            "pic": false,
+            "auto": false,
+            "new": true
+          },
+          {
+            "num": 9,
+            "id": "5.9.9",
+            "label": "Agility (1–10) 🆕",
+            "pic": false,
+            "auto": false,
+            "new": true
+          },
+          {
+            "num": 10,
+            "id": "5.9.10",
+            "label": "Stamina (1–10) 🆕",
+            "pic": false,
+            "auto": false,
+            "new": true
+          },
+          {
+            "num": 11,
+            "id": "5.9.11",
+            "label": "Durability (1–10) 🆕",
+            "pic": false,
+            "auto": false,
+            "new": true
+          },
+          {
+            "num": 12,
+            "id": "5.9.12",
+            "label": "Fighting style (primary / secondary)",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 13,
+            "id": "5.9.13",
+            "label": "Signature moves",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 14,
+            "id": "5.9.14",
+            "label": "Weakness in a fight (exploitable habits)",
+            "pic": false,
+            "auto": false,
+            "new": false
+          }
+        ]
+      },
+      {
+        "code": "5.10",
+        "name": "🎒 Possessions",
+        "info": "(5)",
+        "fields": [
+          {
+            "num": 1,
+            "id": "5.10.1",
+            "label": "Primary weapon / tool (→ item page)",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "5.10.2",
+            "label": "Backup / ranged option",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "5.10.3",
+            "label": "Signature possessions",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 4,
+            "id": "5.10.4",
+            "label": "Resources (money, contacts)",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 5,
+            "id": "5.10.5",
+            "label": "Weaknesses & costs of their gear",
+            "pic": false,
+            "auto": false,
+            "new": false
+          }
+        ]
+      },
+      {
+        "code": "5.11",
+        "name": "📚 Knowledge",
+        "info": "(6)",
+        "fields": [
+          {
+            "num": 1,
+            "id": "5.11.1",
+            "label": "Education",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "5.11.2",
+            "label": "Languages & fluency",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "5.11.3",
+            "label": "Specialist subjects",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 4,
+            "id": "5.11.4",
+            "label": "Blind spots",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 5,
+            "id": "5.11.5",
+            "label": "Things they don't know",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 6,
+            "id": "5.11.6",
+            "label": "What they know that the reader doesn't",
+            "pic": false,
+            "auto": false,
+            "new": false
+          }
+        ]
+      },
+      {
+        "code": "5.12",
+        "name": "⏳ Backstory timeline",
+        "info": "(8 rows × 2 = 16)",
+        "fields": [
+          {
+            "num": 1,
+            "id": "5.12.1",
+            "label": "Date / age (title)",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "5.12.2",
+            "label": "What happened",
+            "pic": false,
+            "auto": false,
+            "new": false
+          }
+        ],
+        "repeat": 8
+      },
+      {
+        "code": "5.13",
+        "name": "📖 Story arc",
+        "info": "(10)",
+        "fields": [
+          {
+            "num": 1,
+            "id": "5.13.1",
+            "label": "Opening status quo",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "5.13.2",
+            "label": "Inciting incident",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "5.13.3",
+            "label": "Escalating obstacles",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 4,
+            "id": "5.13.4",
+            "label": "Midpoint revelation",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 5,
+            "id": "5.13.5",
+            "label": "Major setback",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 6,
+            "id": "5.13.6",
+            "label": "Decisive choice",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 7,
+            "id": "5.13.7",
+            "label": "Climax",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 8,
+            "id": "5.13.8",
+            "label": "Resolution",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 9,
+            "id": "5.13.9",
+            "label": "Resulting change",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 10,
+            "id": "5.13.10",
+            "label": "Optional hook (sequel)",
+            "pic": false,
+            "auto": false,
+            "new": false
+          }
+        ]
+      },
+      {
+        "code": "5.14",
+        "name": "📍 In the book & 🔒 continuity",
+        "info": "(13)",
+        "fields": [
+          {
+            "num": 1,
+            "id": "5.14.1",
+            "label": "First appearance (chapter) *(auto)*",
+            "pic": false,
+            "auto": true,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "5.14.2",
+            "label": "Chapters they appear in (chips) *(auto)*",
+            "pic": false,
+            "auto": true,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "5.14.3",
+            "label": "Must reach the page 1",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 4,
+            "id": "5.14.4",
+            "label": "Must reach the page 2",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 5,
+            "id": "5.14.5",
+            "label": "Must reach the page 3",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 6,
+            "id": "5.14.6",
+            "label": "Must reach the page 4",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 7,
+            "id": "5.14.7",
+            "label": "Must reach the page 5",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 8,
+            "id": "5.14.8",
+            "label": "Fixed visual anchors (never change)",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 9,
+            "id": "5.14.9",
+            "label": "Timeline & injury ledger",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 10,
+            "id": "5.14.10",
+            "label": "Power ledger",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 11,
+            "id": "5.14.11",
+            "label": "Secrets & who knows",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 12,
+            "id": "5.14.12",
+            "label": "Reader reveal points",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 13,
+            "id": "5.14.13",
+            "label": "Linked records (items, places, magic) *(auto)*",
+            "pic": false,
+            "auto": true,
+            "new": false
+          }
+        ]
+      }
+    ]
+  },
+  "6": {
+    "title": "Relationship map",
+    "sections": [
+      {
+        "code": "6.1",
+        "name": "The map",
+        "info": "(4)",
+        "fields": [
+          {
+            "num": 1,
+            "id": "6.1.1",
+            "label": "Character bubbles (portrait + name) *(pic, auto)*",
+            "pic": true,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "6.1.2",
+            "label": "Lines between them (type = colour/style) *(auto from 5.8)*",
+            "pic": false,
+            "auto": true,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "6.1.3",
+            "label": "Main character in the centre *(auto)*",
+            "pic": false,
+            "auto": true,
+            "new": false
+          },
+          {
+            "num": 4,
+            "id": "6.1.4",
+            "label": "Closeness = distance from centre *(auto)*",
+            "pic": false,
+            "auto": true,
+            "new": false
+          }
+        ]
+      },
+      {
+        "code": "6.2",
+        "name": "Key / legend",
+        "info": "(6)",
+        "fields": [
+          {
+            "num": 1,
+            "id": "6.2.1",
+            "label": "Family",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "6.2.2",
+            "label": "Love",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "6.2.3",
+            "label": "Allies",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 4,
+            "id": "6.2.4",
+            "label": "Rivals",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 5,
+            "id": "6.2.5",
+            "label": "Enemies",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 6,
+            "id": "6.2.6",
+            "label": "Mentor / student",
+            "pic": false,
+            "auto": false,
+            "new": false
+          }
+        ]
+      },
+      {
+        "code": "6.3",
+        "name": "Strongest ties",
+        "info": "(5 rows)",
+        "fields": [
+          {
+            "num": 1,
+            "id": "6.3.1",
+            "label": "\"A ↔ B — one line\" ×5",
+            "pic": false,
+            "auto": false,
+            "new": false
+          }
+        ],
+        "repeat": 5
+      },
+      {
+        "code": "6.4",
+        "name": "Groups",
+        "info": "(repeating)",
+        "fields": [
+          {
+            "num": 1,
+            "id": "6.4.1",
+            "label": "Faction / family cluster name → link",
+            "pic": false,
+            "auto": false,
+            "new": false
+          }
+        ],
+        "repeat": 4
+      }
+    ]
+  },
+  "7": {
+    "title": "Place page",
+    "sections": [
+      {
+        "code": "7.1",
+        "name": "Header band",
+        "info": "(6)",
+        "fields": [
+          {
+            "num": 1,
+            "id": "7.1.1",
+            "label": "Establishing shot *(pic)*",
+            "pic": true,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "7.1.2",
+            "label": "Name + other names",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "7.1.3",
+            "label": "Code (PL-001) *(auto)*",
+            "pic": false,
+            "auto": true,
+            "new": false
+          },
+          {
+            "num": 4,
+            "id": "7.1.4",
+            "label": "Kind of place (town, ship, forest…)",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 5,
+            "id": "7.1.5",
+            "label": "One-line description",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 6,
+            "id": "7.1.6",
+            "label": "Role in the story",
+            "pic": false,
+            "auto": false,
+            "new": false
+          }
+        ]
+      },
+      {
+        "code": "7.2",
+        "name": "📋 Quick facts",
+        "info": "(8)",
+        "fields": [
+          {
+            "num": 1,
+            "id": "7.2.1",
+            "label": "Where (region / near what)",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "7.2.2",
+            "label": "When (era)",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "7.2.3",
+            "label": "Size / scale",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 4,
+            "id": "7.2.4",
+            "label": "Climate",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 5,
+            "id": "7.2.5",
+            "label": "Population",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 6,
+            "id": "7.2.6",
+            "label": "Who's in charge",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 7,
+            "id": "7.2.7",
+            "label": "Danger level (1–5) 🆕",
+            "pic": false,
+            "auto": false,
+            "new": true
+          },
+          {
+            "num": 8,
+            "id": "7.2.8",
+            "label": "First impression (one line)",
+            "pic": false,
+            "auto": false,
+            "new": false
+          }
+        ]
+      },
+      {
+        "code": "7.3",
+        "name": "🖼 Mood views",
+        "info": "(3)",
+        "fields": [
+          {
+            "num": 1,
+            "id": "7.3.1",
+            "label": "Day *(pic)*",
+            "pic": true,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "7.3.2",
+            "label": "Night *(pic)*",
+            "pic": true,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "7.3.3",
+            "label": "Interior / detail *(pic)*",
+            "pic": true,
+            "auto": false,
+            "new": false
+          }
+        ]
+      },
+      {
+        "code": "7.4",
+        "name": "👁 Senses",
+        "info": "(9)",
+        "fields": [
+          {
+            "num": 1,
+            "id": "7.4.1",
+            "label": "Sights",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "7.4.2",
+            "label": "Sounds",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "7.4.3",
+            "label": "Smells",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 4,
+            "id": "7.4.4",
+            "label": "Touch, temperature, air",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 5,
+            "id": "7.4.5",
+            "label": "Light by day",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 6,
+            "id": "7.4.6",
+            "label": "Light by night",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 7,
+            "id": "7.4.7",
+            "label": "Mood",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 8,
+            "id": "7.4.8",
+            "label": "Seasons & weather",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 9,
+            "id": "7.4.9",
+            "label": "Signature sensory detail (highlighted)",
+            "pic": false,
+            "auto": false,
+            "new": false
+          }
+        ]
+      },
+      {
+        "code": "7.5",
+        "name": "🗺 Layout",
+        "info": "(7)",
+        "fields": [
+          {
+            "num": 1,
+            "id": "7.5.1",
+            "label": "Location & surroundings",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "7.5.2",
+            "label": "Layout",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "7.5.3",
+            "label": "Landmarks",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 4,
+            "id": "7.5.4",
+            "label": "Districts / rooms / zones",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 5,
+            "id": "7.5.5",
+            "label": "Terrain",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 6,
+            "id": "7.5.6",
+            "label": "Architecture & materials",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 7,
+            "id": "7.5.7",
+            "label": "Map crop *(pic, auto if on the book map)*",
+            "pic": true,
+            "auto": false,
+            "new": false
+          }
+        ]
+      },
+      {
+        "code": "7.6",
+        "name": "🏛 History",
+        "info": "(7)",
+        "fields": [
+          {
+            "num": 1,
+            "id": "7.6.1",
+            "label": "Founding & origin",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "7.6.2",
+            "label": "Eras & turning points",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "7.6.3",
+            "label": "Key events",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 4,
+            "id": "7.6.4",
+            "label": "Ruins & traces",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 5,
+            "id": "7.6.5",
+            "label": "Recent change",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 6,
+            "id": "7.6.6",
+            "label": "Myths & local stories",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 7,
+            "id": "7.6.7",
+            "label": "Dates & numbers",
+            "pic": false,
+            "auto": false,
+            "new": false
+          }
+        ]
+      },
+      {
+        "code": "7.7",
+        "name": "👥 People & factions",
+        "info": "(8)",
+        "fields": [
+          {
+            "num": 1,
+            "id": "7.7.1",
+            "label": "Who lives here",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "7.7.2",
+            "label": "Factions & power",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "7.7.3",
+            "label": "Who is in charge",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 4,
+            "id": "7.7.4",
+            "label": "Economy & trade",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 5,
+            "id": "7.7.5",
+            "label": "Customs & culture",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 6,
+            "id": "7.7.6",
+            "label": "Speech & dialect",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 7,
+            "id": "7.7.7",
+            "label": "Notable residents (→ character links)",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 8,
+            "id": "7.7.8",
+            "label": "How outsiders are treated",
+            "pic": false,
+            "auto": false,
+            "new": false
+          }
+        ]
+      },
+      {
+        "code": "7.8",
+        "name": "⚠ Rules & dangers",
+        "info": "(7)",
+        "fields": [
+          {
+            "num": 1,
+            "id": "7.8.1",
+            "label": "Laws & rules",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "7.8.2",
+            "label": "Dangers",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "7.8.3",
+            "label": "Natural hazards",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 4,
+            "id": "7.8.4",
+            "label": "Forbidden places & acts",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 5,
+            "id": "7.8.5",
+            "label": "Magic / technology here",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 6,
+            "id": "7.8.6",
+            "label": "Defences & security",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 7,
+            "id": "7.8.7",
+            "label": "Safe places",
+            "pic": false,
+            "auto": false,
+            "new": false
+          }
+        ]
+      },
+      {
+        "code": "7.9",
+        "name": "🛤 Routes",
+        "info": "(6)",
+        "fields": [
+          {
+            "num": 1,
+            "id": "7.9.1",
+            "label": "How to get in & out",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "7.9.2",
+            "label": "Routes to other places (→ links)",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "7.9.3",
+            "label": "Travel times & distances",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 4,
+            "id": "7.9.4",
+            "label": "Hidden ways",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 5,
+            "id": "7.9.5",
+            "label": "Transport",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 6,
+            "id": "7.9.6",
+            "label": "Borders & checkpoints",
+            "pic": false,
+            "auto": false,
+            "new": false
+          }
+        ]
+      },
+      {
+        "code": "7.10",
+        "name": "📍 In the book & 🔒 continuity",
+        "info": "(13)",
+        "fields": [
+          {
+            "num": 1,
+            "id": "7.10.1",
+            "label": "First appearance (chapter)",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "7.10.2",
+            "label": "Scenes set here *(auto)*",
+            "pic": false,
+            "auto": true,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "7.10.3",
+            "label": "How it changes over the story",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 4,
+            "id": "7.10.4",
+            "label": "Characters tied to it (→ links)",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 5,
+            "id": "7.10.5",
+            "label": "Reader reveal points",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 6,
+            "id": "7.10.6",
+            "label": "Must reach the page 1",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 7,
+            "id": "7.10.7",
+            "label": "Must reach the page 2",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 8,
+            "id": "7.10.8",
+            "label": "Must reach the page 3",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 9,
+            "id": "7.10.9",
+            "label": "Fixed visual anchors",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 10,
+            "id": "7.10.10",
+            "label": "State & damage ledger",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 11,
+            "id": "7.10.11",
+            "label": "Who is where",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 12,
+            "id": "7.10.12",
+            "label": "Secrets & who knows",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 13,
+            "id": "7.10.13",
+            "label": "Linked records *(auto)*",
+            "pic": false,
+            "auto": true,
+            "new": false
+          }
+        ]
+      }
+    ]
+  },
+  "8A": {
+    "title": "Magic system",
+    "sections": [
+      {
+        "code": "8A.1",
+        "name": "Header band",
+        "info": "(5) — 1 Sigil *(pic)* · 2 Name + other names · 3 Code (MG-001) *(auto)* · 4 Kind of system · 5 One-line description",
+        "fields": [
+          {
+            "num": 1,
+            "id": "8A.1.1",
+            "label": "Sigil *(pic)*",
+            "pic": true,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "8A.1.2",
+            "label": "Name + other names",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "8A.1.3",
+            "label": "Code (MG-001) *(auto)*",
+            "pic": false,
+            "auto": true,
+            "new": false
+          },
+          {
+            "num": 4,
+            "id": "8A.1.4",
+            "label": "Kind of system",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 5,
+            "id": "8A.1.5",
+            "label": "One-line description",
+            "pic": false,
+            "auto": false,
+            "new": false
+          }
+        ]
+      },
+      {
+        "code": "8A.2",
+        "name": "📋 Quick facts",
+        "info": "(5) — 1 Where the power comes from · 2 Who can use it · 3 How it's gained · 4 How rare · 5 Cost of use",
+        "fields": [
+          {
+            "num": 1,
+            "id": "8A.2.1",
+            "label": "Where the power comes from",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "8A.2.2",
+            "label": "Who can use it",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "8A.2.3",
+            "label": "How it's gained",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 4,
+            "id": "8A.2.4",
+            "label": "How rare",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 5,
+            "id": "8A.2.5",
+            "label": "Cost of use",
+            "pic": false,
+            "auto": false,
+            "new": false
+          }
+        ]
+      },
+      {
+        "code": "8A.3",
+        "name": "📜 Hard rules",
+        "info": "(highlighted, 7) — 1 Core rules · 2 Hard limits · 3 Range & duration · 4 What it can never do · 5 Counters & protections · 6 Exceptions · 7 Interaction with technology / other powers",
+        "fields": [
+          {
+            "num": 1,
+            "id": "8A.3.1",
+            "label": "Core rules",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "8A.3.2",
+            "label": "Hard limits",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "8A.3.3",
+            "label": "Range & duration",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 4,
+            "id": "8A.3.4",
+            "label": "What it can never do",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 5,
+            "id": "8A.3.5",
+            "label": "Counters & protections",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 6,
+            "id": "8A.3.6",
+            "label": "Exceptions",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 7,
+            "id": "8A.3.7",
+            "label": "Interaction with technology / other powers",
+            "pic": false,
+            "auto": false,
+            "new": false
+          }
+        ]
+      },
+      {
+        "code": "8A.4",
+        "name": "⚡ Named powers",
+        "info": "(4 cards × 3 = 12) — each card: 1 Power name · 2 What it does · 3 Who uses it",
+        "fields": [
+          {
+            "num": 1,
+            "id": "8A.4.1",
+            "label": "Power name",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "8A.4.2",
+            "label": "What it does",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "8A.4.3",
+            "label": "Who uses it",
+            "pic": false,
+            "auto": false,
+            "new": false
+          }
+        ],
+        "repeat": 4
+      },
+      {
+        "code": "8A.5",
+        "name": "🔁 Access & recovery",
+        "info": "(4) — 1 Activation & method · 2 Recovery · 3 Long-term price · 4 Combinations / rituals & tools",
+        "fields": [
+          {
+            "num": 1,
+            "id": "8A.5.1",
+            "label": "Activation & method",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "8A.5.2",
+            "label": "Recovery",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "8A.5.3",
+            "label": "Long-term price",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 4,
+            "id": "8A.5.4",
+            "label": "Combinations / rituals & tools",
+            "pic": false,
+            "auto": false,
+            "new": false
+          }
+        ]
+      },
+      {
+        "code": "8A.6",
+        "name": "👁 Visible signs",
+        "info": "(5) — 1 What it looks like · 2 Sounds, smells, feel · 3 Marks on the body · 4 Effects on surroundings · 5 Tells before use",
+        "fields": [
+          {
+            "num": 1,
+            "id": "8A.6.1",
+            "label": "What it looks like",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "8A.6.2",
+            "label": "Sounds, smells, feel",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "8A.6.3",
+            "label": "Marks on the body",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 4,
+            "id": "8A.6.4",
+            "label": "Effects on surroundings",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 5,
+            "id": "8A.6.5",
+            "label": "Tells before use",
+            "pic": false,
+            "auto": false,
+            "new": false
+          }
+        ]
+      },
+      {
+        "code": "8A.7",
+        "name": "💥 Failure & backlash",
+        "info": "(5) — 1 Failure conditions · 2 Backlash · 3 Overuse · 4 Misuse & corruption · 5 Worst case",
+        "fields": [
+          {
+            "num": 1,
+            "id": "8A.7.1",
+            "label": "Failure conditions",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "8A.7.2",
+            "label": "Backlash",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "8A.7.3",
+            "label": "Overuse",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 4,
+            "id": "8A.7.4",
+            "label": "Misuse & corruption",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 5,
+            "id": "8A.7.5",
+            "label": "Worst case",
+            "pic": false,
+            "auto": false,
+            "new": false
+          }
+        ]
+      },
+      {
+        "code": "8A.8",
+        "name": "🏫 Practitioners",
+        "info": "(5) — 1 Known practitioners (→ links) · 2 Training · 3 Ranks & levels · 4 Schools & orders · 5 What mastery looks like",
+        "fields": [
+          {
+            "num": 1,
+            "id": "8A.8.1",
+            "label": "Known practitioners (→ links)",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "8A.8.2",
+            "label": "Training",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "8A.8.3",
+            "label": "Ranks & levels",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 4,
+            "id": "8A.8.4",
+            "label": "Schools & orders",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 5,
+            "id": "8A.8.5",
+            "label": "What mastery looks like",
+            "pic": false,
+            "auto": false,
+            "new": false
+          }
+        ]
+      },
+      {
+        "code": "8A.9",
+        "name": "🏛 Lore",
+        "info": "(4) — 1 Origin · 2 Key events · 3 Myths & misreadings · 4 Lost knowledge",
+        "fields": [
+          {
+            "num": 1,
+            "id": "8A.9.1",
+            "label": "Origin",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "8A.9.2",
+            "label": "Key events",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "8A.9.3",
+            "label": "Myths & misreadings",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 4,
+            "id": "8A.9.4",
+            "label": "Lost knowledge",
+            "pic": false,
+            "auto": false,
+            "new": false
+          }
+        ]
+      },
+      {
+        "code": "8A.10",
+        "name": "⚖ Society's view",
+        "info": "(4) — 1 What ordinary people think · 2 Laws & control · 3 Who controls it · 4 Fear, prejudice & status",
+        "fields": [
+          {
+            "num": 1,
+            "id": "8A.10.1",
+            "label": "What ordinary people think",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "8A.10.2",
+            "label": "Laws & control",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "8A.10.3",
+            "label": "Who controls it",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 4,
+            "id": "8A.10.4",
+            "label": "Fear, prejudice & status",
+            "pic": false,
+            "auto": false,
+            "new": false
+          }
+        ]
+      },
+      {
+        "code": "8A.11",
+        "name": "📍 In the book & 🔒 continuity",
+        "info": "(6) — 1 In-use scene *(pic)* · 2 First use on the page · 3 How use escalates · 4 Use at the climax · 5 Use ledger · 6 Secrets & who knows",
+        "fields": [
+          {
+            "num": 1,
+            "id": "8A.11.1",
+            "label": "In-use scene *(pic)*",
+            "pic": true,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "8A.11.2",
+            "label": "First use on the page",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "8A.11.3",
+            "label": "How use escalates",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 4,
+            "id": "8A.11.4",
+            "label": "Use at the climax",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 5,
+            "id": "8A.11.5",
+            "label": "Use ledger",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 6,
+            "id": "8A.11.6",
+            "label": "Secrets & who knows",
+            "pic": false,
+            "auto": false,
+            "new": false
+          }
+        ]
+      }
+    ]
+  },
+  "8B": {
+    "title": "Item",
+    "sections": [
+      {
+        "code": "8B.1",
+        "name": "Header band",
+        "info": "(5) — 1 Item portrait *(pic)* · 2 Name + aliases · 3 Code (AR-001) *(auto)* · 4 Type & class · 5 One-line description",
+        "fields": [
+          {
+            "num": 1,
+            "id": "8B.1.1",
+            "label": "Item portrait *(pic)*",
+            "pic": true,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "8B.1.2",
+            "label": "Name + aliases",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "8B.1.3",
+            "label": "Code (AR-001) *(auto)*",
+            "pic": false,
+            "auto": true,
+            "new": false
+          },
+          {
+            "num": 4,
+            "id": "8B.1.4",
+            "label": "Type & class",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 5,
+            "id": "8B.1.5",
+            "label": "One-line description",
+            "pic": false,
+            "auto": false,
+            "new": false
+          }
+        ]
+      },
+      {
+        "code": "8B.2",
+        "name": "📋 Quick facts",
+        "info": "(6) — 1 Size & weight · 2 Materials · 3 Colours & finish · 4 Current holder (→ link) · 5 Current state · 6 Value / price",
+        "fields": [
+          {
+            "num": 1,
+            "id": "8B.2.1",
+            "label": "Size & weight",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "8B.2.2",
+            "label": "Materials",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "8B.2.3",
+            "label": "Colours & finish",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 4,
+            "id": "8B.2.4",
+            "label": "Current holder (→ link)",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 5,
+            "id": "8B.2.5",
+            "label": "Current state",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 6,
+            "id": "8B.2.6",
+            "label": "Value / price",
+            "pic": false,
+            "auto": false,
+            "new": false
+          }
+        ]
+      },
+      {
+        "code": "8B.3",
+        "name": "🖼 Turnaround",
+        "info": "(4) — 1 Front · 2 Side · 3 Back · 4 Detail *(pics)*",
+        "fields": [
+          {
+            "num": 1,
+            "id": "8B.3.1",
+            "label": "Front",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "8B.3.2",
+            "label": "Side",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "8B.3.3",
+            "label": "Back",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 4,
+            "id": "8B.3.4",
+            "label": "Detail *(pics)*",
+            "pic": true,
+            "auto": false,
+            "new": false
+          }
+        ]
+      },
+      {
+        "code": "8B.4",
+        "name": "✨ Powers & limits",
+        "info": "(7) — 1 What it can do · 2 How it works · 3 Activation · 4 Hard limits · 5 Costs to the user · 6 Weaknesses & counters · 7 What it can never do",
+        "fields": [
+          {
+            "num": 1,
+            "id": "8B.4.1",
+            "label": "What it can do",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "8B.4.2",
+            "label": "How it works",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "8B.4.3",
+            "label": "Activation",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 4,
+            "id": "8B.4.4",
+            "label": "Hard limits",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 5,
+            "id": "8B.4.5",
+            "label": "Costs to the user",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 6,
+            "id": "8B.4.6",
+            "label": "Weaknesses & counters",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 7,
+            "id": "8B.4.7",
+            "label": "What it can never do",
+            "pic": false,
+            "auto": false,
+            "new": false
+          }
+        ]
+      },
+      {
+        "code": "8B.5",
+        "name": "🔧 Use & care",
+        "info": "(5) — 1 Who can use it · 2 Skill needed · 3 Use in a fight · 4 Maintenance · 5 Damage, repair & destruction",
+        "fields": [
+          {
+            "num": 1,
+            "id": "8B.5.1",
+            "label": "Who can use it",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "8B.5.2",
+            "label": "Skill needed",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "8B.5.3",
+            "label": "Use in a fight",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 4,
+            "id": "8B.5.4",
+            "label": "Maintenance",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 5,
+            "id": "8B.5.5",
+            "label": "Damage, repair & destruction",
+            "pic": false,
+            "auto": false,
+            "new": false
+          }
+        ]
+      },
+      {
+        "code": "8B.6",
+        "name": "📜 History",
+        "info": "(6) — 1 Origin & maker · 2 When & where made · 3 Previous owners · 4 Key events · 5 Legends & rumours · 6 What nobody knows",
+        "fields": [
+          {
+            "num": 1,
+            "id": "8B.6.1",
+            "label": "Origin & maker",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "8B.6.2",
+            "label": "When & where made",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "8B.6.3",
+            "label": "Previous owners",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 4,
+            "id": "8B.6.4",
+            "label": "Key events",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 5,
+            "id": "8B.6.5",
+            "label": "Legends & rumours",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 6,
+            "id": "8B.6.6",
+            "label": "What nobody knows",
+            "pic": false,
+            "auto": false,
+            "new": false
+          }
+        ]
+      },
+      {
+        "code": "8B.7",
+        "name": "🤝 Ownership",
+        "info": "(6) — 1 Rightful owner · 2 Who must never have it · 3 Who wants it & why · 4 Changes of hands · 5 Bond with its holder · 6 Story significance",
+        "fields": [
+          {
+            "num": 1,
+            "id": "8B.7.1",
+            "label": "Rightful owner",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "8B.7.2",
+            "label": "Who must never have it",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "8B.7.3",
+            "label": "Who wants it & why",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 4,
+            "id": "8B.7.4",
+            "label": "Changes of hands",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 5,
+            "id": "8B.7.5",
+            "label": "Bond with its holder",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 6,
+            "id": "8B.7.6",
+            "label": "Story significance",
+            "pic": false,
+            "auto": false,
+            "new": false
+          }
+        ]
+      },
+      {
+        "code": "8B.8",
+        "name": "📍 Where it is & 🔒 continuity",
+        "info": "(11) — 1 First appearance · 2 How it's introduced · 3 Key scenes · 4 Turning point · 5 Where it ends up · 6 Location chapter-by-chapter (strip) · 7 Condition & damage ledger · 8 Uses & charges ledger · 9 Secrets & who knows · 10 Fixed visual anchors · 11 Linked records *(auto)*",
+        "fields": [
+          {
+            "num": 1,
+            "id": "8B.8.1",
+            "label": "First appearance",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "8B.8.2",
+            "label": "How it's introduced",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "8B.8.3",
+            "label": "Key scenes",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 4,
+            "id": "8B.8.4",
+            "label": "Turning point",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 5,
+            "id": "8B.8.5",
+            "label": "Where it ends up",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 6,
+            "id": "8B.8.6",
+            "label": "Location chapter-by-chapter (strip)",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 7,
+            "id": "8B.8.7",
+            "label": "Condition & damage ledger",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 8,
+            "id": "8B.8.8",
+            "label": "Uses & charges ledger",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 9,
+            "id": "8B.8.9",
+            "label": "Secrets & who knows",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 10,
+            "id": "8B.8.10",
+            "label": "Fixed visual anchors",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 11,
+            "id": "8B.8.11",
+            "label": "Linked records *(auto)*",
+            "pic": false,
+            "auto": true,
+            "new": false
+          }
+        ]
+      }
+    ]
+  },
+  "8C": {
+    "title": "Other world entry (the world itself, beliefs, groups/factions, organisations)",
+    "sections": [
+      {
+        "code": "8C.1",
+        "name": "Header",
+        "info": "(4) — 1 Emblem / picture *(pic, optional)* · 2 Name · 3 Kind (world / belief / group / organisation) · 4 One-line description",
+        "fields": [
+          {
+            "num": 1,
+            "id": "8C.1.1",
+            "label": "Emblem / picture *(pic, optional)*",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "8C.1.2",
+            "label": "Name",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "8C.1.3",
+            "label": "Kind (world / belief / group / organisation)",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 4,
+            "id": "8C.1.4",
+            "label": "One-line description",
+            "pic": false,
+            "auto": false,
+            "new": false
+          }
+        ]
+      },
+      {
+        "code": "8C.2",
+        "name": "Description",
+        "info": "(1) — 1 Full description",
+        "fields": [
+          {
+            "num": 1,
+            "id": "8C.2.1",
+            "label": "Full description",
+            "pic": false,
+            "auto": false,
+            "new": false
+          }
+        ]
+      },
+      {
+        "code": "8C.3",
+        "name": "📋 Key facts",
+        "info": "(5) — 1 Founded / origin · 2 Size / reach · 3 Leader(s) · 4 Base / where (→ place link) · 5 Symbol / colours 🆕",
+        "fields": [
+          {
+            "num": 1,
+            "id": "8C.3.1",
+            "label": "Founded / origin",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "8C.3.2",
+            "label": "Size / reach",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "8C.3.3",
+            "label": "Leader(s)",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 4,
+            "id": "8C.3.4",
+            "label": "Base / where (→ place link)",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 5,
+            "id": "8C.3.5",
+            "label": "Symbol / colours 🆕",
+            "pic": false,
+            "auto": false,
+            "new": true
+          }
+        ]
+      },
+      {
+        "code": "8C.4",
+        "name": "📜 Rules / beliefs",
+        "info": "(3) — 1 Main rules or tenets · 2 What's forbidden · 3 What members believe about others",
+        "fields": [
+          {
+            "num": 1,
+            "id": "8C.4.1",
+            "label": "Main rules or tenets",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "8C.4.2",
+            "label": "What's forbidden",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "8C.4.3",
+            "label": "What members believe about others",
+            "pic": false,
+            "auto": false,
+            "new": false
+          }
+        ]
+      },
+      {
+        "code": "8C.5",
+        "name": "👥 Members",
+        "info": "(3) — 1 Members / followers (→ character links) · 2 Allies · 3 Enemies",
+        "fields": [
+          {
+            "num": 1,
+            "id": "8C.5.1",
+            "label": "Members / followers (→ character links)",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "8C.5.2",
+            "label": "Allies",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "8C.5.3",
+            "label": "Enemies",
+            "pic": false,
+            "auto": false,
+            "new": false
+          }
+        ]
+      },
+      {
+        "code": "8C.6",
+        "name": "📍 In the book",
+        "info": "(4) — 1 First appearance · 2 Role in the plot · 3 Secrets & who knows · 4 Linked records *(auto)*",
+        "fields": [
+          {
+            "num": 1,
+            "id": "8C.6.1",
+            "label": "First appearance",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "8C.6.2",
+            "label": "Role in the plot",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "8C.6.3",
+            "label": "Secrets & who knows",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 4,
+            "id": "8C.6.4",
+            "label": "Linked records *(auto)*",
+            "pic": false,
+            "auto": true,
+            "new": false
+          }
+        ]
+      }
+    ]
+  },
+  "9": {
+    "title": "Map page",
+    "sections": [
+      {
+        "code": "9.1",
+        "name": "The map",
+        "info": "(2) — 1 Map image (drawn SVG or illustrated) *(pic)* · 2 Numbered markers *(auto)*",
+        "fields": [
+          {
+            "num": 1,
+            "id": "9.1.1",
+            "label": "Map image (drawn SVG or illustrated) *(pic)*",
+            "pic": true,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "9.1.2",
+            "label": "Numbered markers *(auto)*",
+            "pic": false,
+            "auto": true,
+            "new": false
+          }
+        ]
+      },
+      {
+        "code": "9.2",
+        "name": "Key",
+        "info": "(repeating rows × 3) — 1 Marker number · 2 Place name · 3 Page number *(auto)*",
+        "fields": [
+          {
+            "num": 1,
+            "id": "9.2.1",
+            "label": "Marker number",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "9.2.2",
+            "label": "Place name",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "9.2.3",
+            "label": "Page number *(auto)*",
+            "pic": false,
+            "auto": true,
+            "new": false
+          }
+        ],
+        "repeat": 8
+      },
+      {
+        "code": "9.3",
+        "name": "Distances",
+        "info": "(repeating rows × 3) — 1 From → to · 2 Travel time · 3 How (road, sea…)",
+        "fields": [
+          {
+            "num": 1,
+            "id": "9.3.1",
+            "label": "From → to",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "9.3.2",
+            "label": "Travel time",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "9.3.3",
+            "label": "How (road, sea…)",
+            "pic": false,
+            "auto": false,
+            "new": false
+          }
+        ],
+        "repeat": 4
+      },
+      {
+        "code": "9.4",
+        "name": "Compass & scale",
+        "info": "(2) — 1 Compass *(auto)* · 2 Scale bar (only if distances are known) *(auto)*",
+        "fields": [
+          {
+            "num": 1,
+            "id": "9.4.1",
+            "label": "Compass *(auto)*",
+            "pic": false,
+            "auto": true,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "9.4.2",
+            "label": "Scale bar (only if distances are known) *(auto)*",
+            "pic": false,
+            "auto": true,
+            "new": false
+          }
+        ]
+      }
+    ]
+  },
+  "10": {
+    "title": "Story plan",
+    "sections": [
+      {
+        "code": "10.1",
+        "name": "🧭 Premise",
+        "info": "(2) — 1 Premise paragraph · 2 Central conflict",
+        "fields": [
+          {
+            "num": 1,
+            "id": "10.1.1",
+            "label": "Premise paragraph",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "10.1.2",
+            "label": "Central conflict",
+            "pic": false,
+            "auto": false,
+            "new": false
+          }
+        ]
+      },
+      {
+        "code": "10.2",
+        "name": "📈 Plot line",
+        "info": "(8 markers × chapter + note = 16) — 1 Opening · 2 Inciting incident · 3 First plot point · 4 Midpoint · 5 Crisis / all is lost · 6 Climax · 7 Resolution · 8 Final image — each with its chapter number *(auto)* and a one-line note",
+        "fields": [
+          {
+            "num": 1,
+            "id": "10.2.1",
+            "label": "Opening",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "10.2.2",
+            "label": "Inciting incident",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "10.2.3",
+            "label": "First plot point",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 4,
+            "id": "10.2.4",
+            "label": "Midpoint",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 5,
+            "id": "10.2.5",
+            "label": "Crisis / all is lost",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 6,
+            "id": "10.2.6",
+            "label": "Climax",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 7,
+            "id": "10.2.7",
+            "label": "Resolution",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 8,
+            "id": "10.2.8",
+            "label": "Final image — each with its chapter number *(auto)* and a one-line note",
+            "pic": false,
+            "auto": true,
+            "new": false
+          }
+        ]
+      },
+      {
+        "code": "10.3",
+        "name": "🎭 Character arcs",
+        "info": "(per main character × 3) — 1 Name + portrait · 2 Starts as… · 3 Ends as…",
+        "fields": [
+          {
+            "num": 1,
+            "id": "10.3.1",
+            "label": "Name + portrait",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "10.3.2",
+            "label": "Starts as…",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "10.3.3",
+            "label": "Ends as…",
+            "pic": false,
+            "auto": false,
+            "new": false
+          }
+        ],
+        "repeat": 4
+      },
+      {
+        "code": "10.4",
+        "name": "🧩 Subplots",
+        "info": "(repeating × 3) — 1 Subplot name · 2 What it's about · 3 Chapters it runs through *(auto)*",
+        "fields": [
+          {
+            "num": 1,
+            "id": "10.4.1",
+            "label": "Subplot name",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "10.4.2",
+            "label": "What it's about",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "10.4.3",
+            "label": "Chapters it runs through *(auto)*",
+            "pic": false,
+            "auto": true,
+            "new": false
+          }
+        ],
+        "repeat": 3
+      },
+      {
+        "code": "10.5",
+        "name": "🎨 Themes & motifs",
+        "info": "(4) — 1 Themes 🆕 · 2 Motifs & symbols · 3 Recurring images · 4 Central question 🆕",
+        "fields": [
+          {
+            "num": 1,
+            "id": "10.5.1",
+            "label": "Themes 🆕",
+            "pic": false,
+            "auto": false,
+            "new": true
+          },
+          {
+            "num": 2,
+            "id": "10.5.2",
+            "label": "Motifs & symbols",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "10.5.3",
+            "label": "Recurring images",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 4,
+            "id": "10.5.4",
+            "label": "Central question 🆕",
+            "pic": false,
+            "auto": false,
+            "new": true
+          }
+        ]
+      },
+      {
+        "code": "10.6",
+        "name": "🔚 Ending",
+        "info": "(4) — 1 Ending type · 2 What's resolved · 3 What's left open · 4 Sequel hook",
+        "fields": [
+          {
+            "num": 1,
+            "id": "10.6.1",
+            "label": "Ending type",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "10.6.2",
+            "label": "What's resolved",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "10.6.3",
+            "label": "What's left open",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 4,
+            "id": "10.6.4",
+            "label": "Sequel hook",
+            "pic": false,
+            "auto": false,
+            "new": false
+          }
+        ]
+      }
+    ]
+  },
+  "11": {
+    "title": "Chapter page",
+    "sections": [
+      {
+        "code": "11.1",
+        "name": "Header band",
+        "info": "(6) — 1 Chapter number · 2 Chapter title · 3 Chapter picture *(pic)* · 4 Status (Planned / Written / Approved) *(auto)* · 5 Word count *(auto)* · 6 Word target",
+        "fields": [
+          {
+            "num": 1,
+            "id": "11.1.1",
+            "label": "Chapter number",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "11.1.2",
+            "label": "Chapter title",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "11.1.3",
+            "label": "Chapter picture *(pic)*",
+            "pic": true,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 4,
+            "id": "11.1.4",
+            "label": "Status (Planned / Written / Approved) *(auto)*",
+            "pic": false,
+            "auto": true,
+            "new": false
+          },
+          {
+            "num": 5,
+            "id": "11.1.5",
+            "label": "Word count *(auto)*",
+            "pic": false,
+            "auto": true,
+            "new": false
+          },
+          {
+            "num": 6,
+            "id": "11.1.6",
+            "label": "Word target",
+            "pic": false,
+            "auto": false,
+            "new": false
+          }
+        ]
+      },
+      {
+        "code": "11.2",
+        "name": "📋 Quick facts",
+        "info": "(4) — 1 POV character (portrait + name) · 2 Main place (thumbnail + name) · 3 Story time / date · 4 Time since previous chapter 🆕",
+        "fields": [
+          {
+            "num": 1,
+            "id": "11.2.1",
+            "label": "POV character (portrait + name)",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "11.2.2",
+            "label": "Main place (thumbnail + name)",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "11.2.3",
+            "label": "Story time / date",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 4,
+            "id": "11.2.4",
+            "label": "Time since previous chapter 🆕",
+            "pic": false,
+            "auto": false,
+            "new": true
+          }
+        ]
+      },
+      {
+        "code": "11.3",
+        "name": "📝 What happens",
+        "info": "(2) — 1 Chapter summary (outline) · 2 Chapter goal (why it exists)",
+        "fields": [
+          {
+            "num": 1,
+            "id": "11.3.1",
+            "label": "Chapter summary (outline)",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "11.3.2",
+            "label": "Chapter goal (why it exists)",
+            "pic": false,
+            "auto": false,
+            "new": false
+          }
+        ]
+      },
+      {
+        "code": "11.4",
+        "name": "🎬 Scene cards",
+        "info": "(repeating, per scene × 6) — 1 Scene number · 2 Goal · 3 Conflict · 4 Outcome · 5 Who's in it · 6 Where & when",
+        "fields": [
+          {
+            "num": 1,
+            "id": "11.4.1",
+            "label": "Scene number",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "11.4.2",
+            "label": "Goal",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "11.4.3",
+            "label": "Conflict",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 4,
+            "id": "11.4.4",
+            "label": "Outcome",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 5,
+            "id": "11.4.5",
+            "label": "Who's in it",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 6,
+            "id": "11.4.6",
+            "label": "Where & when",
+            "pic": false,
+            "auto": false,
+            "new": false
+          }
+        ],
+        "repeat": 8
+      },
+      {
+        "code": "11.5",
+        "name": "👥 Who's here",
+        "info": "(repeating) — 1 Portraits + names (→ links) *(auto)*",
+        "fields": [
+          {
+            "num": 1,
+            "id": "11.5.1",
+            "label": "Portraits + names (→ links) *(auto)*",
+            "pic": false,
+            "auto": true,
+            "new": false
+          }
+        ],
+        "repeat": 6
+      },
+      {
+        "code": "11.6",
+        "name": "📌 Must reach the page",
+        "info": "(repeating × 2) — 1 Planned detail · 2 ✔ on the page / ⚠ missing *(auto)*",
+        "fields": [
+          {
+            "num": 1,
+            "id": "11.6.1",
+            "label": "Planned detail",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "11.6.2",
+            "label": "✔ on the page / ⚠ missing *(auto)*",
+            "pic": false,
+            "auto": true,
+            "new": false
+          }
+        ],
+        "repeat": 5
+      },
+      {
+        "code": "11.7",
+        "name": "🔗 Threads",
+        "info": "(2) — 1 Setups paid off here · 2 Setups planted here for later",
+        "fields": [
+          {
+            "num": 1,
+            "id": "11.7.1",
+            "label": "Setups paid off here",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "11.7.2",
+            "label": "Setups planted here for later",
+            "pic": false,
+            "auto": false,
+            "new": false
+          }
+        ]
+      },
+      {
+        "code": "11.8",
+        "name": "📊 Checks",
+        "info": "(4) — 1 Readability *(auto)* · 2 Editor score *(auto)* · 3 Repeats flagged *(auto)* · 4 Continuity warnings *(auto)*",
+        "fields": [
+          {
+            "num": 1,
+            "id": "11.8.1",
+            "label": "Readability *(auto)*",
+            "pic": false,
+            "auto": true,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "11.8.2",
+            "label": "Editor score *(auto)*",
+            "pic": false,
+            "auto": true,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "11.8.3",
+            "label": "Repeats flagged *(auto)*",
+            "pic": false,
+            "auto": true,
+            "new": false
+          },
+          {
+            "num": 4,
+            "id": "11.8.4",
+            "label": "Continuity warnings *(auto)*",
+            "pic": false,
+            "auto": true,
+            "new": false
+          }
+        ]
+      }
+    ]
+  },
+  "12": {
+    "title": "Rules & facts",
+    "sections": [
+      {
+        "code": "12.1",
+        "name": "🔒 Protected facts",
+        "info": "(repeating × 3) — 1 The fact · 2 What it's about (→ link) · 3 Why it's locked",
+        "fields": [
+          {
+            "num": 1,
+            "id": "12.1.1",
+            "label": "The fact",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "12.1.2",
+            "label": "What it's about (→ link)",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "12.1.3",
+            "label": "Why it's locked",
+            "pic": false,
+            "auto": false,
+            "new": false
+          }
+        ],
+        "repeat": 6
+      },
+      {
+        "code": "12.2",
+        "name": "📜 Story rules",
+        "info": "(4) — 1 Hard rules (highlighted) · 2 Soft rules · 3 Beliefs in the world · 4 Mysteries (what the reader doesn't know yet)",
+        "fields": [
+          {
+            "num": 1,
+            "id": "12.2.1",
+            "label": "Hard rules (highlighted)",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "12.2.2",
+            "label": "Soft rules",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "12.2.3",
+            "label": "Beliefs in the world",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 4,
+            "id": "12.2.4",
+            "label": "Mysteries (what the reader doesn't know yet)",
+            "pic": false,
+            "auto": false,
+            "new": false
+          }
+        ]
+      },
+      {
+        "code": "12.3",
+        "name": "⏱ Timeline",
+        "info": "(repeating × 4) — 1 Date / story time · 2 Event · 3 Chapter *(auto)* · 4 ⚠ clash flag *(auto)*",
+        "fields": [
+          {
+            "num": 1,
+            "id": "12.3.1",
+            "label": "Date / story time",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "12.3.2",
+            "label": "Event",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "12.3.3",
+            "label": "Chapter *(auto)*",
+            "pic": false,
+            "auto": true,
+            "new": false
+          },
+          {
+            "num": 4,
+            "id": "12.3.4",
+            "label": "⚠ clash flag *(auto)*",
+            "pic": false,
+            "auto": true,
+            "new": false
+          }
+        ],
+        "repeat": 8
+      },
+      {
+        "code": "12.4",
+        "name": "🔤 Names & terms",
+        "info": "(repeating × 4) — 1 Term · 2 Meaning · 3 Type (invented / trade / name) · 4 ✔ checked / 🔎 research needed",
+        "fields": [
+          {
+            "num": 1,
+            "id": "12.4.1",
+            "label": "Term",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "12.4.2",
+            "label": "Meaning",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "12.4.3",
+            "label": "Type (invented / trade / name)",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 4,
+            "id": "12.4.4",
+            "label": "✔ checked / 🔎 research needed",
+            "pic": false,
+            "auto": false,
+            "new": false
+          }
+        ],
+        "repeat": 8
+      },
+      {
+        "code": "12.5",
+        "name": "🎨 World details",
+        "info": "(repeating × 2) — 1 Detail (food, custom, object, saying) · 2 Where it shows up",
+        "fields": [
+          {
+            "num": 1,
+            "id": "12.5.1",
+            "label": "Detail (food, custom, object, saying)",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "12.5.2",
+            "label": "Where it shows up",
+            "pic": false,
+            "auto": false,
+            "new": false
+          }
+        ],
+        "repeat": 6
+      },
+      {
+        "code": "12.6",
+        "name": "✍ Style sheet",
+        "info": "(7) — 1 Narrative voice · 2 Tense · 3 POV rules · 4 Reading level · 5 Dialogue style · 6 Spelling (UK / US) · 7 Words to avoid",
+        "fields": [
+          {
+            "num": 1,
+            "id": "12.6.1",
+            "label": "Narrative voice",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "12.6.2",
+            "label": "Tense",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 3,
+            "id": "12.6.3",
+            "label": "POV rules",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 4,
+            "id": "12.6.4",
+            "label": "Reading level",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 5,
+            "id": "12.6.5",
+            "label": "Dialogue style",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 6,
+            "id": "12.6.6",
+            "label": "Spelling (UK / US)",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 7,
+            "id": "12.6.7",
+            "label": "Words to avoid",
+            "pic": false,
+            "auto": false,
+            "new": false
+          }
+        ]
+      },
+      {
+        "code": "12.7",
+        "name": "🔁 Repeats to watch",
+        "info": "(repeating × 2) — 1 Phrase · 2 Kind (accidental repeat / character catchphrase — protected)",
+        "fields": [
+          {
+            "num": 1,
+            "id": "12.7.1",
+            "label": "Phrase",
+            "pic": false,
+            "auto": false,
+            "new": false
+          },
+          {
+            "num": 2,
+            "id": "12.7.2",
+            "label": "Kind (accidental repeat / character catchphrase — protected)",
+            "pic": false,
+            "auto": false,
+            "new": false
+          }
+        ],
+        "repeat": 6
+      }
+    ]
+  }
+}

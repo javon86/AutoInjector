@@ -150,6 +150,7 @@ const SERVICE_BRIDGE_ROUTES = {
   'GET /image/backend': 'image_generator_status', 'GET /image/locks': 'character_locks', 'POST /image/request': 'generate_image',
   'GET /video/backend': 'video_call:video.status', 'POST /video/request': 'video_call:video.generate',
   'POST /render/image': 'EXCLUDE: draws an SVG into a JPEG/PNG for Akọwe (the ebook cover JPG, the Word map) — a file converter, not a user control',
+  'POST /render/pdf': 'EXCLUDE: prints Akọwe\'s 📖 Book Bible binder (a self-contained HTML page) into a PDF — a file converter for Akọwe, not a user control',
   'POST /dialog/choose-path': 'EXCLUDE: a folder picker the user answers in AutoInjector\'s window (Akọwe opens a big saved book from its folder)', 
   'POST /video/trailer': 'video_call:trailer.make', 'GET /video/trailer': 'video_call:trailer.status', 'POST /video/trailer/cancel': 'video_call:trailer.cancel', 'GET /events': 'EXCLUDE: event stream for external programs (Alfred has the watcher)',
 };

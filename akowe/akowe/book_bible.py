@@ -45,7 +45,9 @@ MAX_BYTES = 8 * 1024 * 1024        # a bible file larger than this is refused (a
 MAX_CANON = 200
 PLAN_OPS = {"B01": "premise", "B03": "main_plot", "B11": "outline"}
 PLAN_LABELS = {"premise": "Premise", "main_plot": "Main plot", "outline": "Chapter outline"}
-PROFILE_KEYS = ("title", "author", "genre", "audience", "tone", "idea", "length", "chapters")
+PROFILE_KEYS = ("title", "author", "genre", "audience", "tone", "idea", "length", "chapters",
+                # 📖 the binder's book values (binder_fields.py)
+                "series", "series_number", "subgenre", "content_limits", "themes", "central_question")
 
 
 class BibleProblem(Exception):
@@ -83,7 +85,7 @@ def build(app, pid: str, branch: str = "main") -> dict:
     store = app.store
     prof = get_profile(store, pid)
     proj = store.project(pid)
-    profile = {k: prof.get(k) for k in PROFILE_KEYS if prof.get(k) not in (None, "")}
+    profile = {k: prof.get(k) for k in PROFILE_KEYS if prof.get(k) not in (None, "", [])}
     choices = story_choices.clean(prof.get("choices")) if isinstance(prof.get("choices"), dict) else {}
     pinfo = pipeline_mod.info_of(store, pid)
     pipe = {"preset": pinfo.get("preset"), "flags": dict(pinfo.get("flags") or {})} if pinfo else None
@@ -204,7 +206,7 @@ def clean(raw) -> dict:
                                                  f"{sv}; this Akọwe reads format {SCHEMA_VERSION} and older)")
     prof_raw = raw.get("profile") if isinstance(raw.get("profile"), dict) else {}
     try:
-        profile = clean_profile({k: prof_raw.get(k) for k in PROFILE_KEYS if prof_raw.get(k) not in (None, "")})
+        profile = clean_profile({k: prof_raw.get(k) for k in PROFILE_KEYS if prof_raw.get(k) not in (None, "", [])})
     except Exception as exc:  # noqa: BLE001 - AkoweError: a field out of range
         raise BibleProblem("BIBLE_BAD", f"the book profile in the bible is not usable: {exc}") from None
     if not profile.get("title"):
@@ -335,7 +337,8 @@ def render_markdown(b: dict) -> str:
            "## The book", ""]
     for k in PROFILE_KEYS:
         if prof.get(k) not in (None, ""):
-            out.append(f"- **{k.capitalize()}:** {prof[k]}")
+            v = " · ".join(prof[k]) if isinstance(prof[k], list) else prof[k]
+            out.append(f"- **{k.replace('_', ' ').capitalize()}:** {v}")
     ch = b.get("choices") or {}
     if ch:
         out += ["", "**Ending and style choices:**"] + [f"- {x}" for x in story_choices.summary(ch)]

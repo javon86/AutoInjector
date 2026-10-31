@@ -8,7 +8,7 @@ uses both). Each book gets ONE folder, named once as ``<Book title> (<short id>)
 
     Book/          the latest exports (PDF, EPUB, DOCX) with readable names, copied from the verified stored files
     Chapters/      01 - <title>.md … (the approved text, or the newest draft marked DRAFT)
-    Book Bible/    book-bible.json (book_bible.build) + book-bible.md
+    Book Bible/    book-bible.json (book_bible.build) + book-bible.md + Book Bible.docx/.pdf (binder.save_files)
     Reports/       Book report.md/.pdf (latest), Editor summary.md, Planned to page.md, Continuity.md
     Character Forge/  <code> <name> - dossier.pdf/.json per saved dossier (characters, items, places, magic
                       systems) + its pictures and motion clip (B5)
@@ -99,6 +99,8 @@ Book Bible/    Everything the book is built on: the book profile, ending and sty
                characters (with their character sheets and voice cards), places and world,
                premise, main plot, chapter outline, scene cards, story rules and world texture.
                book-bible.md is for reading; book-bible.json is what Akọwe reads back.
+               Book Bible.docx (and Book Bible.pdf when AutoInjector is running) is the
+               illustrated binder: one page per character, place, world entry and chapter.
 Reports/       The book report (scores, strengths, weaknesses) and the editor's and
                planned-to-page summaries, when they exist.
 Character Forge/  Each dossier (characters, items, places, magic systems: PDF to read, JSON for Akọwe), its pictures
@@ -531,6 +533,14 @@ class SaveService:
         bible = book_bible.build(app, pid, branch)
         text("Book Bible/book-bible.json", json.dumps(bible, ensure_ascii=False, indent=2))
         text("Book Bible/book-bible.md", book_bible.render_markdown(bible))
+        # 📖 the binder: Book Bible.docx always, Book Bible.pdf when AutoInjector can print it (binder.save_files)
+        phase("Writing the Book Bible binder")
+        try:
+            from . import binder  # noqa: PLC0415
+            binder.save_files(app, pid, branch, files, keep, info)
+        except Exception:  # noqa: BLE001 - the rest of the save still happens
+            log.exception("binder files for the save failed")
+            keep.update({"Book Bible/Book Bible.docx", "Book Bible/Book Bible.pdf"})
         # Reports/
         phase("Writing the reports")
         rep = None
@@ -794,7 +804,8 @@ class SaveService:
         return {"ok": True, "path": str(folder), "folder": folder.name, "files": len(files), "written": written,
                 "bytes": sum(len(d) for d in files.values()), "finished": info.get("finished"),
                 "chapters": info["chapters"], "drafts": info["drafts"], "exports": info["exports"],
-                "report": info["report"], "skipped": locked, "warning": " ".join(warnings) or None}
+                "report": info["report"], "skipped": locked, "not_made": info.get("skipped_parts") or [],
+                "warning": " ".join(warnings) or None}
 
     # ------------------------------------------------------------------ background saves
     def _status_key(self, pid, branch):

@@ -9,6 +9,7 @@ import { forgeRoute } from './forge.js';  // 🗂 B5 Character Forge dossiers (c
 import { viewPictures } from './pictures.js';  // 🖼 B3 chapter/scene pictures and the map
 import { viewTrailer } from './trailer.js';  // 🎞 B2 the book trailer (AutoInjector 🎬 Video)
 import { viewCover } from './cover.js';  // 🎨 B3 book covers
+import { viewBinder } from './binder.js';  // 📖 Book Bible binder (the author's template studio design)
 
 /* ======================================================================= constants */
 // Fallback names; the full guide (purpose, build order, featured actions) comes from GET /api/sets.
@@ -658,6 +659,7 @@ async function pickView(parts) {
     if (rest[0] === 'pictures') return m => viewPictures(m, forgeUI());  // 🖼 B3
     if (rest[0] === 'trailer') return m => viewTrailer(m, Object.assign(forgeUI(), { fmtClock }));  // 🎞 B2
     if (rest[0] === 'cover') return m => viewCover(m, forgeUI());  // 🎨 B3 cover designer
+    if (rest[0] === 'bible' || rest[0] === 'binder') return m => viewBinder(m, forgeUI(), rest.slice(1));  // 📖 Book Bible binder (…/binder: the 🆕 fields' edit route)
     if (rest[0] === 'manifest') return viewManifest;
     if (rest[0] === 'activity') return viewActivity;
     if (rest[0] === 'progress') return viewProgress;
@@ -719,6 +721,7 @@ function renderTop(parts) {
     add(more, link('p', S.pid, S.branch, 'journal'), '📜 Book journal');
     add(more, link('p', S.pid, S.branch, 'grid'), '🗂 Scene grid');
     add(more, link('p', S.pid, S.branch, 'costs'), '⏱ Time and AI use');
+    add(more, link('p', S.pid, S.branch, 'bible'), '📖 Book Bible');
     add(more, link('p', S.pid, S.branch, 'world'), '🌍 Story rules and world');
     add(more, link('p', S.pid, S.branch, 'continuity'), '🧭 Continuity');
     add(more, link('p', S.pid, S.branch, 'forge'), '🗂 Character Forge');
@@ -8318,6 +8321,7 @@ function bookSaveCard(redraw) {
     h('div', { class: 'row' }, saveBox(pid, branch, { primary: true, testid: 'book-save-btn' })),
     h('div', { class: 'row' },
       h('button', { type: 'button', class: 'small', 'data-testid': 'rerun-btn', onclick: ev => openRerunDialog({ project_id: pid, branch_id: branch }, title, ev.currentTarget) }, '🔁 Rerun from the book bible'), infoTip('Rerun from the book bible', ...TIP_RERUN()),
+      h('a', { class: 'btn small primary', href: link('p', pid, branch, 'bible'), 'data-testid': 'open-binder', title: 'The Book Bible binder: every character, place, world entry and chapter on its own page, in your book’s look' }, '📖 Open the Book Bible'),
       h('button', { type: 'button', class: 'small', onclick: () => downloadBible(pid, branch, 'json', title) }, '⬇ book-bible.json'),
       h('button', { type: 'button', class: 'small', onclick: () => downloadBible(pid, branch, 'md', title) }, '⬇ book-bible.md')),
     opened);

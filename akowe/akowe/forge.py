@@ -1200,6 +1200,8 @@ ART_PROBLEMS = {
     "RENDER_TIMEOUT": ("Drawing the picture took too long", "Try again; close other big programs if it repeats."),
     "RENDER_FAILED": ("AutoInjector could not draw the picture", "Try again. If it repeats, download the PDF or SVG "
                       "instead."),
+    "TOO_BIG": ("The page is too big for AutoInjector to print", "Use fewer or smaller pictures, or use 🖨 Print → "
+                "Save as PDF in the browser."),
     "RENDER_BAD_ANSWER": ("AutoInjector sent no usable picture", "Try again. If it repeats, download the PDF or SVG "
                           "instead."),
 }

@@ -254,6 +254,15 @@ def build(app, pid: str, branch: str, *, step: str | None = None, problems_only:
             ent = {"kind": "assistant", "step": _step(contracts, None), "who": "Alfred (AutoInjector)",
                    "what": f"Alfred: {SAFE_TEXT.sub(' ', str(p.get('title') or p.get('code') or 'an action'))[:160]}",
                    "outcome": "SUCCESS", "code": p.get("code")}
+        elif et in ("bible.fields_saved", "bible.fields_proposed"):  # 📖 the binder's 🆕 fields (binder_fields.py)
+            proposed = et == "bible.fields_proposed"
+            ent = {"kind": "binder", "step": _step(contracts, None),
+                   "who": ("AI" if p.get("by") == "ai" else "Akọwe") if proposed else "you",
+                   "ai": {"slot": p.get("ai_slot")} if p.get("ai_slot") else None,
+                   "what": (f"Book Bible: {p.get('fields', 0)} {p.get('target_kind')} value(s) proposed from the book"
+                            if proposed else f"Book Bible: {p.get('target_kind')} quick facts "
+                            f"{ {'edit': 'edited', 'approve': 'approved', 'dismiss': 'dismissed'}.get(p.get('what'), 'changed') }"),
+                   "outcome": "SUCCESS"}
         elif et == "manifest.changed":
             ent = {"kind": "setting", "step": _step(contracts, None), "who": "you",
                    "what": "Book features changed", "outcome": "SUCCESS"}
