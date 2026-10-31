@@ -5,6 +5,7 @@
 const http = require('http');
 const { createServiceBridge } = require('../service-bridge');
 const renderImage = require('../render-image');
+const renderPdf = require('../render-pdf');
 
 let passed = 0, failed = 0;
 function assert(c, m) { if (c) { passed++; console.log(`  ok   - ${m}`); } else { failed++; console.log(`  FAIL - ${m}`); } return c; }
@@ -76,6 +77,25 @@ const bridge = createServiceBridge({
           return img(size);
         },
         destroy: () => { calls.render.destroyed = true; },
+      };
+    },
+  }),
+  // 🖨 POST /render/pdf with the real PDF renderer and a FAKE window (the real Chromium one: test/e2e/render-pdf.e2e.js)
+  pdfRenderer: renderPdf.createPdfRenderer({
+    makeWindow: async ({ allow }) => {
+      calls.pdf = Object.assign(calls.pdf || {}, { allow, destroyed: false });
+      return {
+        load: async (url) => {
+          calls.pdf.url = url; calls.pdf.file = require('url').fileURLToPath(url); calls.pdf.page = require('fs').readFileSync(calls.pdf.file, 'utf8');
+          if (calls.pdf.hang) await new Promise((r) => setTimeout(r, 5000));
+        },
+        printToPDF: async (opts) => {
+          calls.pdf.opts = opts;
+          if (calls.pdf.throwPrint) throw new Error('printing failed');
+          if (calls.pdf.notPdf) return Buffer.from('<html>nope</html>');
+          return Buffer.from('%PDF-1.4\n1 0 obj << /Type /Pages /Count 3 >>\n2 0 obj << /Type /Page >>\n3 0 obj << /Type/Page >>\n4 0 obj << /Type /Page /Parent 1 0 R >>\n%%EOF', 'latin1');
+        },
+        destroy: () => { calls.pdf.destroyed = true; },
       };
     },
   }),
@@ -336,6 +356,105 @@ async function main() {
     const nr = await new Promise((resolve) => { const data = JSON.stringify({ svg: SVG, width: 100, height: 100 }); const rq = http.request({ host: '127.0.0.1', port: bs.port, path: '/render/image', method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data), Authorization: `Bearer ${TOKEN}` } }, (res) => { let b = ''; res.on('data', (c) => { b += c; }); res.on('end', () => resolve({ status: res.statusCode, json: safeJson(b) })); }); rq.write(data); rq.end(); });
     await bare.stop();
     assert(nr.status === 501 && nr.json.error === 'RENDER_NOT_WIRED', 'a bridge without the renderer answers 501 RENDER_NOT_WIRED');
+  }
+
+  console.log('\n== 🖨 POST /render/pdf (HTML → PDF; fake window) ==');
+  {
+    const fs = require('fs');
+    const HTML = '<!doctype html><html><head><title>old</title></head><body><h1>Book Bible</h1></body></html>';
+    const noTok = await req('POST', '/render/pdf', { body: { html: HTML } });
+    assert(noTok.status === 401, '/render/pdf needs the token');
+    const foreign = await req('POST', '/render/pdf', { token: TOKEN, body: { html: HTML }, origin: 'https://evil.example' });
+    assert(foreign.status === 403 && foreign.json.error === 'FORBIDDEN_ORIGIN', 'a foreign browser Origin is refused');
+    const local = await req('POST', '/render/pdf', { token: TOKEN, body: { html: HTML }, origin: 'http://127.0.0.1:8000' });
+    assert(local.status === 200, 'a localhost Origin (Akọwe\'s web page) may print');
+
+    calls.pdf = {};
+    const a = await req('POST', '/render/pdf', { token: TOKEN, body: { html: HTML } });
+    const pdf = Buffer.from(a.json.pdfBase64 || '', 'base64');
+    assert(a.status === 200 && a.json.ok === true && a.json.mime === 'application/pdf' && pdf.slice(0, 5).toString() === '%PDF-' && a.json.bytes === pdf.length, 'an HTML page prints to a PDF: { ok, pdfBase64, bytes }');
+    assert(a.json.pages === 3, `"pages" counts the /Type /Page objects, not /Pages (${a.json.pages})`);
+    const o = calls.pdf.opts;
+    assert(o.pageSize === 'A4' && o.landscape === false && o.printBackground === true && !o.margins && !o.displayHeaderFooter, 'defaults: A4, portrait, backgrounds printed, Chromium margins, no header/footer');
+    assert(calls.pdf.page === HTML, 'the page is printed exactly as sent when no title is given');
+    assert(calls.pdf.destroyed === true && !fs.existsSync(calls.pdf.file) && !fs.existsSync(require('path').dirname(calls.pdf.file)), 'the window is destroyed and the temp folder removed');
+    assert(calls.pdf.allow(calls.pdf.url) && calls.pdf.allow('data:image/png;base64,AA') && !calls.pdf.allow('https://example.com/x.png') && !calls.pdf.allow('http://127.0.0.1:8000/api/asset') && !calls.pdf.allow('file:///etc/passwd'), 'only the page itself and data: URIs may load (no network, no other files)');
+
+    calls.pdf = {};
+    const b = await req('POST', '/render/pdf', { token: TOKEN, body: { html: HTML, title: 'Salt <Bible> & co', pageSize: 'Letter', landscape: true, printBackground: false, margins: { top: 25.4, bottom: 12.7, left: 0 } } });
+    const ob = calls.pdf.opts;
+    assert(b.status === 200 && ob.pageSize === 'Letter' && ob.landscape === true && ob.printBackground === false, 'Letter, landscape, printBackground:false are passed on');
+    assert(ob.margins && ob.margins.top === 1 && ob.margins.bottom === 0.5 && ob.margins.left === 0 && Math.abs(ob.margins.right - 10 / 25.4) < 1e-9, 'margins in mm become inches for printToPDF (a side left out is 10 mm)');
+    assert(/<title>Salt &lt;Bible&gt; &amp; co<\/title>/.test(calls.pdf.page) && !/<title>old/.test(calls.pdf.page), '"title" replaces the page\'s <title> (escaped) — it becomes the PDF title');
+    assert(renderPdf.pageFor({ html: '<!DOCTYPE html><p>x</p>', title: 'T' }).startsWith('<!DOCTYPE html><title>T</title>') && renderPdf.pageFor({ html: '<html><head><meta charset="utf-8"></head></html>', title: 'T' }).includes('<head><title>T</title><meta'), 'a title is added after the doctype (no quirks mode) or at the top of <head>');
+
+    calls.pdf = {};
+    const header = '<div style="font-size:8px;background:url(https://evil.example/t.png)"><style>@import url("https://evil.example/x.css"); .x{background-image:url(\'data:image/png;base64,AA\')}</style>'
+      + '<span class="title"></span><img src="https://evil.example/logo.png" onerror="alert(1)"><img src=\'data:image/png;base64,QUJD\' alt="logo"><a href="javascript:alert(1)">x</a>'
+      + '<script>fetch("https://evil.example")</script><iframe src="https://evil.example"></iframe><link rel="stylesheet" href="https://evil.example/s.css"><svg><image href="http://evil.example/i.png"/></svg></div>';
+    const c = await req('POST', '/render/pdf', { token: TOKEN, body: { html: HTML, headerFooter: { header, footer: '<div><span class="pageNumber"></span> / <span class="totalPages"></span></div>' } } });
+    const oc = calls.pdf.opts;
+    const h = oc.headerTemplate || '';
+    assert(c.status === 200 && oc.displayHeaderFooter === true && oc.footerTemplate === '<div><span class="pageNumber"></span> / <span class="totalPages"></span></div>', 'header/footer templates are passed on (pageNumber / totalPages kept as they are)');
+    assert(!/evil\.example/.test(h) && !/<script|<iframe|<link|onerror|javascript:|@import/i.test(h), `the header is cleaned: no scripts, frames, links, event handlers, javascript: or outside URLs (${h.length} chars left)`);
+    assert(/class="title"/.test(h) && /src='data:image\/png;base64,QUJD'/.test(h) && /url\('data:image\/png;base64,AA'\)/.test(h) && /font-size:8px/.test(h), 'what is safe stays: the title span, data: pictures, inline styles');
+    calls.pdf = {};
+    await req('POST', '/render/pdf', { token: TOKEN, body: { html: HTML, headerFooter: { footer: '<span class="pageNumber"></span>' } } });
+    assert(calls.pdf.opts.headerTemplate === '<span></span>' && calls.pdf.opts.displayHeaderFooter === true, 'a footer alone gets an empty header (not Chromium\'s default date + title)');
+
+    for (const [body, why] of [[{}, 'no html'], [{ html: '   ' }, 'blank html'], [{ html: 5 }, 'html not text'], [{ html: HTML, pageSize: 'A3' }, 'pageSize A3'],
+      [{ html: HTML, landscape: 'yes' }, 'landscape not true/false'], [{ html: HTML, printBackground: 1 }, 'printBackground not true/false'], [{ html: HTML, title: 7 }, 'title not text'],
+      [{ html: HTML, margins: { top: -1 } }, 'a negative margin'], [{ html: HTML, margins: { top: 101 } }, 'a margin over 100 mm'], [{ html: HTML, margins: { middle: 5 } }, 'an unknown margin side'], [{ html: HTML, margins: [1, 2] }, 'margins as a list'],
+      [{ html: HTML, headerFooter: 'x' }, 'headerFooter not an object'], [{ html: HTML, headerFooter: { header: 3 } }, 'a header that is not text'],
+      [{ html: HTML, timeoutMs: 500 }, 'timeoutMs under 1 s'], [{ html: HTML, timeoutMs: 180001 }, 'timeoutMs over 180 s'], [{ html: HTML, timeoutMs: 1500.5 }, 'a fractional timeoutMs']]) {
+      const r = await req('POST', '/render/pdf', { token: TOKEN, body });
+      assert(r.status === 400 && r.json.error === 'INVALID_PARAM' && r.json.message, `refused with a plain message: ${why}`);
+    }
+    assert(renderPdf.validatePdfBody({ html: HTML, timeoutMs: 180000, margins: { top: 0, bottom: 100 } }) === null, 'timeoutMs 180000 and margins 0–100 mm are accepted');
+    const notJson = await new Promise((resolve) => { const data = '{ html: nope'; const rq = http.request({ host: '127.0.0.1', port: PORT, path: '/render/pdf', method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data), Authorization: `Bearer ${TOKEN}` } }, (res) => { let bb = ''; res.on('data', (x) => { bb += x; }); res.on('end', () => resolve({ status: res.statusCode, json: safeJson(bb) })); }); rq.write(data); rq.end(); });
+    assert(notJson.status === 400 && notJson.json.error === 'INVALID_PARAM' && /JSON/.test(notJson.json.message), 'a body that is not JSON: 400 INVALID_PARAM');
+    const big = await req('POST', '/render/pdf', { token: TOKEN, body: { html: '<p>' + 'x'.repeat(41 * 1024 * 1024) + '</p>' } });
+    assert(big.status === 413 && big.json.error === 'TOO_BIG' && /40 MB/.test(big.json.message), 'HTML over 40 MB: 413 TOO_BIG');
+    const huge = await req('POST', '/render/pdf', { token: TOKEN, body: { html: 'x'.repeat(49 * 1024 * 1024) } });
+    assert(huge.status === 413 && huge.json.error === 'TOO_BIG', 'a request body over 48 MB: 413 TOO_BIG (not read into memory)');
+    const bigHdr = await req('POST', '/render/pdf', { token: TOKEN, body: { html: HTML, headerFooter: { footer: 'x'.repeat(1024 * 1024 + 1) } } });
+    assert(bigHdr.status === 413 && bigHdr.json.error === 'TOO_BIG', 'a footer over 1 MB: 413 TOO_BIG');
+
+    calls.pdf = { hang: true };
+    const slow = await req('POST', '/render/pdf', { token: TOKEN, body: { html: HTML, timeoutMs: 1000 } });
+    assert(slow.status === 504 && slow.json.error === 'RENDER_TIMEOUT' && /1 seconds/.test(slow.json.message) && calls.pdf.destroyed === true && !fs.existsSync(calls.pdf.file), 'over its time limit: 504 RENDER_TIMEOUT, the window destroyed, the temp file gone');
+    await new Promise((z) => setTimeout(z, 4500)); // let the hung fake load finish (it must not print after giving up)
+    assert(!calls.pdf.opts, 'a render that timed out never goes on to print');
+    calls.pdf = { notPdf: true };
+    const np = await req('POST', '/render/pdf', { token: TOKEN, body: { html: HTML } });
+    assert(np.status === 502 && np.json.error === 'RENDER_FAILED' && /not a PDF/.test(np.json.message) && calls.pdf.destroyed === true, 'output that is not a PDF: 502 RENDER_FAILED');
+    calls.pdf = { throwPrint: true };
+    const tp = await req('POST', '/render/pdf', { token: TOKEN, body: { html: HTML } });
+    assert(tp.status === 502 && tp.json.error === 'RENDER_FAILED' && /printing failed/.test(tp.json.message) && calls.pdf.destroyed === true && !fs.existsSync(calls.pdf.file), 'printToPDF throwing: 502 RENDER_FAILED in plain words, cleaned up');
+    { // the timeout wins, then the work settles later: no unhandled rejection, and no window left open
+      const unhandled = []; const onU = (e) => unhandled.push(e); process.on('unhandledRejection', onU);
+      let lateDestroyed = 0;
+      const rl = renderPdf.createPdfRenderer({ makeWindow: async () => ({ load: () => new Promise((_, rej) => setTimeout(() => rej(new Error('window destroyed')), 1200)), printToPDF: async () => null, destroy: () => {} }) });
+      const rt = await rl.render({ html: HTML, timeoutMs: 1000 });
+      const rs = renderPdf.createPdfRenderer({ makeWindow: () => new Promise((res) => setTimeout(() => res({ load: async () => {}, printToPDF: async () => null, destroy: () => { lateDestroyed++; } }), 1200)) });
+      const rt2 = await rs.render({ html: HTML, timeoutMs: 1000 });
+      await new Promise((z) => setTimeout(z, 500));
+      process.removeListener('unhandledRejection', onU);
+      assert(rt.code === 'RENDER_TIMEOUT' && rt2.code === 'RENDER_TIMEOUT' && unhandled.length === 0 && lateDestroyed === 1, `a render that loses the race to its timeout leaves no unhandled rejection and no stray window (${unhandled.length} unhandled, ${lateDestroyed} late window destroyed)`);
+    }
+    { // one render at a time
+      let live = 0, most = 0;
+      const one = renderPdf.createPdfRenderer({ makeWindow: async () => { live++; most = Math.max(most, live); return { load: () => new Promise((r) => setTimeout(r, 80)), printToPDF: async () => Buffer.from('%PDF-1.7 /Type /Page'), destroy: () => { live--; } }; } });
+      const all = await Promise.all([1, 2, 3].map(() => one.render({ html: HTML })));
+      assert(all.every((x) => x.ok && x.pages === 1) && most === 1, `renders run one at a time (at most ${most} window open)`);
+    }
+    const nw = await renderPdf.createPdfRenderer({}).render({ html: HTML });
+    assert(!nw.ok && nw.error === 'RENDER_NOT_WIRED', 'a PDF renderer with no window maker says so');
+    const bare = createServiceBridge({});
+    const bs = await bare.start({ port: 0, token: TOKEN });
+    const nr = await new Promise((resolve) => { const data = JSON.stringify({ html: HTML }); const rq = http.request({ host: '127.0.0.1', port: bs.port, path: '/render/pdf', method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data), Authorization: `Bearer ${TOKEN}` } }, (res) => { let bb = ''; res.on('data', (x) => { bb += x; }); res.on('end', () => resolve({ status: res.statusCode, json: safeJson(bb) })); }); rq.write(data); rq.end(); });
+    await bare.stop();
+    assert(nr.status === 501 && nr.json.error === 'RENDER_NOT_WIRED' && nr.json.message, 'a bridge without the PDF renderer answers 501 RENDER_NOT_WIRED');
   }
 
   console.log('\n== 📂 POST /dialog/choose-path (a folder picker in AutoInjector) ==');
