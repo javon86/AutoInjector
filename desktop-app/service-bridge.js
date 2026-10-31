@@ -19,6 +19,9 @@
 //   POST /render/image {svg|html, width, height, format:'jpeg'|'png', quality?}
 //                                             -> { ok, mime, width, height, bytes, imageBase64 } (render-image.js:
 //                                                offscreen Chromium, no network; Akọwe's ebook cover JPG / map PNG)
+//   POST /render/pdf {html, title?, pageSize:'A4'|'Letter', landscape?, printBackground?, margins?, headerFooter?, timeoutMs?}
+//                                             -> { ok, mime, pdfBase64, pages?, bytes } (render-pdf.js: offscreen
+//                                                Chromium printToPDF, no network; Akọwe's 📖 Book Bible PDF)
 //   POST /dialog/choose-path {kind:'book', title?} -> { ok, path } | { ok, cancelled:true } (a folder picker in
 //                                                AutoInjector's window: Akọwe opens a big saved book from its folder)
 //   GET  /events   (SSE)               -> stream of: response, generation, sent,
@@ -63,6 +66,8 @@ function createServiceBridge(deps) {
   const video = d.video || null;
   // 🖨 Draw an SVG / small HTML page into a JPEG or PNG: { render(body) } — render-image.js
   const renderer = d.renderer || null;
+  // 🖨 Print a self-contained HTML page into a PDF: { render(body) } — render-pdf.js
+  const pdfRenderer = d.pdfRenderer || null;
   // 📂 A folder picker on this computer: { choosePath(body) } — Akọwe's "Open a saved book" for big books
   const dialogs = d.dialogs || null;
   // The minimal phone client: the bridge serves this HTML shell (no token needed
@@ -385,6 +390,20 @@ function createServiceBridge(deps) {
         try { r = await renderer.render(body || {}); } catch (e) { r = { ok: false, error: 'RENDER_FAILED', code: 'RENDER_FAILED', message: `Something went wrong: ${(e && e.message) || e}` }; }
         const BY_CODE = { INVALID_PARAM: 400, RENDER_TIMEOUT: 504, RENDER_NOT_WIRED: 501 };
         return reply(res, r && r.ok ? 200 : BY_CODE[r && r.error] || 502, Object.assign({ ok: false }, r || {}));
+      }
+      // --- 🖨 HTML → PDF (render-pdf.js): Akọwe's 📖 Book Bible binder ---
+      if (pdfRenderer && method === 'POST' && path === '/render/pdf') {
+        // The page with its pictures embedded as data: URIs: up to 40 MB of HTML (render-pdf.js checks it) in up to 48 MB of JSON.
+        const body = await readJsonBody(req, 48 * 1024 * 1024);
+        if (body === undefined && req.bodyTooBig) return reply(res, 413, { ok: false, error: 'TOO_BIG', code: 'TOO_BIG', message: 'The request is too big (the HTML may be at most 40 MB).' });
+        if (body === undefined) return reply(res, 400, { ok: false, error: 'INVALID_PARAM', code: 'INVALID_PARAM', message: 'The body must be JSON: { "html": "…" }.' });
+        let r;
+        try { r = await pdfRenderer.render(body || {}); } catch (e) { r = { ok: false, error: 'RENDER_FAILED', code: 'RENDER_FAILED', message: `Something went wrong: ${(e && e.message) || e}` }; }
+        const BY_CODE = { INVALID_PARAM: 400, TOO_BIG: 413, RENDER_TIMEOUT: 504, RENDER_NOT_WIRED: 501 };
+        return reply(res, r && r.ok ? 200 : BY_CODE[r && r.error] || 502, Object.assign({ ok: false }, r || {}));
+      }
+      if (!pdfRenderer && path === '/render/pdf') {
+        return reply(res, 501, { ok: false, error: 'RENDER_NOT_WIRED', code: 'RENDER_NOT_WIRED', message: 'This AutoInjector cannot make PDFs (update AutoInjector).' });
       }
       // --- 📂 a folder picker in AutoInjector's window (the user picks; only the chosen path comes back) ---
       if (dialogs && method === 'POST' && path === '/dialog/choose-path') {

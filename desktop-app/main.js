@@ -44,6 +44,7 @@ const akoweLegacy = require("./akowe-legacy"); // names from before the rename B
 const akoweBridgeMod = require("./akowe-bridge"); // Akọwe bridge (pure Node HTTP server, OFF by default) — docs/AKOWE_AUTOINJECTOR_BRIDGE.md
 const { createServiceBridge } = require("./service-bridge");
 const renderImage = require("./render-image");
+const renderPdf = require("./render-pdf");
 const interpreterProvider = require("./interpreter-provider");
 const toolProvider = require("./tool-provider");
 const voiceProvider = require("./voice-provider");
@@ -7316,6 +7317,8 @@ const serviceBridge = createServiceBridge({
   },
   // 🖨 POST /render/image: SVG / HTML → JPEG / PNG in an offscreen, network-less Chromium page (render-image.js).
   renderer: renderImage.createRenderer({ makeWindow: renderImage.electronWindowFactory(require("electron")), log: logEvent }),
+  // 🖨 POST /render/pdf: a self-contained HTML page → PDF (printToPDF) in the same kind of sandbox (render-pdf.js) — Akọwe's 📖 Book Bible.
+  pdfRenderer: renderPdf.createPdfRenderer({ makeWindow: renderPdf.electronWindowFactory(require("electron")), log: logEvent }),
   // 📂 POST /dialog/choose-path: Akọwe's "Open a saved book" asks for a book folder (too big to upload); the user picks it here.
   dialogs: {
     choosePath: async (body) => {
