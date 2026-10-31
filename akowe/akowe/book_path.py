@@ -35,7 +35,11 @@ from .requests import build_request, candidate_payload
 
 PROFILE_FIELDS = {"title": 200, "author": 200, "genre": 120, "audience": 120, "length": 20, "tone": 200,
                   "idea": 4000, "ai_slot": 20, "chapters": 3,
-                  "blurb": 3000, "author_bio": 1500}  # 🎨 B3: the back-cover blurb and author bio
+                  "blurb": 3000, "author_bio": 1500,  # 🎨 B3: the back-cover blurb and author bio
+                  # 📖 Book Bible binder (binder_fields.py): series, sub-genre, content limits, central question
+                  "series": 200, "subgenre": 120, "content_limits": 1000, "central_question": 300}
+# 📖 Book Bible binder: profile values that are not plain text (cleaned in clean_profile)
+THEMES_MAX, THEME_MAX, SERIES_NUMBER_MAX = 3, 120, 999
 # P15: (label, default chapters, most chapters) per length preset (lengths.py holds the word targets).
 from .lengths import ORDER as _LENGTH_ORDER, PRESETS as _LENGTH_PRESETS  # noqa: E402
 LENGTHS = {k: (_LENGTH_PRESETS[k]["label"], _LENGTH_PRESETS[k]["default_chapters"], _LENGTH_PRESETS[k]["chapters"][1])
@@ -91,6 +95,9 @@ def clean_profile(body) -> dict:
             from .story_choices import clean as clean_choices  # noqa: PLC0415
             out[k] = clean_choices(v)
             continue
+        if k in ("themes", "series_number", "binder_look"):  # 📖 Book Bible binder (binder_fields.py)
+            out[k] = _clean_binder_value(k, v)
+            continue
         if k not in PROFILE_FIELDS:
             continue  # unknown fields are ignored, not stored
         if k == "chapters":
@@ -115,6 +122,38 @@ def clean_profile(body) -> dict:
             raise _err("INVALID_INPUT", "/ai_slot", "AI choice: empty (automatic), AI-1, AI-2, AI-3 or manual")
         out[k] = v
     return out
+
+
+def _clean_binder_value(k: str, v):
+    """📖 themes (≤ 3 short texts), series_number (1-999 or empty) and binder_look (a look id or empty)."""
+    if k == "themes":
+        if v in (None, ""):
+            return []
+        if isinstance(v, str):
+            v = [x for x in v.replace(";", "\n").split("\n")]
+        if not isinstance(v, list) or not all(isinstance(x, str) for x in v):
+            raise _err("INVALID_INPUT", "/themes", "themes: up to three short texts")
+        items = [" ".join(x.split()) for x in v if x.strip()]
+        if len(items) > THEMES_MAX:
+            raise _err("INVALID_INPUT", "/themes", f"themes: at most {THEMES_MAX}")
+        if any(len(x) > THEME_MAX for x in items):
+            raise _err("INVALID_INPUT", "/themes", f"each theme is limited to {THEME_MAX} characters")
+        return items
+    if k == "series_number":
+        if v in (None, ""):
+            return None
+        if isinstance(v, str) and v.strip().isdigit():
+            v = int(v.strip())
+        if not isinstance(v, int) or isinstance(v, bool) or not 1 <= v <= SERIES_NUMBER_MAX:
+            raise _err("INVALID_INPUT", "/series_number", f"book number in the series: a whole number from 1 to "
+                       f"{SERIES_NUMBER_MAX}")
+        return v
+    from .binder import LOOKS  # noqa: PLC0415 - binder_look
+    if v in (None, ""):
+        return ""
+    if v not in LOOKS:
+        raise _err("INVALID_INPUT", "/binder_look", "look: one of " + ", ".join(LOOKS))
+    return v
 
 
 def get_profile(store, pid: str) -> dict:
