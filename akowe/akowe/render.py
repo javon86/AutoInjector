@@ -71,3 +71,46 @@ def as_error(exc: forge.ArtProblem, what: str, path: str = "/format") -> AkoweEr
         return AkoweError("CAPABILITY_UNAVAILABLE", path, f"{head}. {exc.hint}", status="REJECTED")
     return AkoweError("CAPABILITY_UNAVAILABLE", path, f"The {what} could not be made: {exc.message}. {exc.hint}",
                       status="REJECTED")
+
+
+PDF_TIMEOUT_S = 120.0
+MAX_PDF_BYTES = 60 * 1024 * 1024
+
+
+def render_pdf(app, html: str, *, title: str = "", page_size: str = "A4", landscape: bool = False,
+               margins: dict | None = None, footer: str | None = None, timeout_s: float = PDF_TIMEOUT_S) -> bytes:
+    """A self-contained HTML page (inline CSS, data: URIs only) printed to PDF by AutoInjector
+    (``POST /render/pdf``: {html, title, pageSize, landscape, printBackground, margins, headerFooter, timeoutMs} ->
+    {ok, mime, pdfBase64, bytes, pages}). Raises ``forge.ArtProblem`` (RENDER_NOT_WIRED when no AutoInjector has the
+    route, IMAGE_BRIDGE_UNREACHABLE, RENDER_TIMEOUT, RENDER_FAILED, TOO_BIG, RENDER_BAD_ANSWER)."""
+    body = {"html": html, "title": str(title or "")[:200], "pageSize": page_size if page_size in ("A4", "Letter")
+            else "A4", "landscape": bool(landscape), "printBackground": True,
+            "timeoutMs": int(max(1.0, min(timeout_s, 180.0)) * 1000)}
+    if margins:
+        body["margins"] = margins
+    if footer is not None:
+        body["headerFooter"] = {"header": "<span></span>", "footer": footer}
+    targets = forge.bridge_targets(app)
+    if not targets:
+        raise forge.ArtProblem("IMAGE_BRIDGE_UNREACHABLE", "no local AutoInjector address is set")
+    last = None
+    for url, token in targets:
+        try:
+            resp = forge._post(url, token, body, timeout_s + 10, route="/render/pdf")  # noqa: SLF001
+            break
+        except forge.ArtProblem as exc:
+            if exc.code not in ("IMAGE_BRIDGE_UNREACHABLE", "RENDER_NOT_WIRED"):
+                raise
+            last = exc
+    else:
+        raise last
+    b64 = resp.get("pdfBase64")
+    if not isinstance(b64, str) or not b64 or len(b64) > MAX_PDF_BYTES * 4 // 3 + 8:
+        raise forge.ArtProblem("RENDER_BAD_ANSWER", "AutoInjector sent no PDF")
+    try:
+        data = base64.b64decode(b64, validate=True)
+    except (ValueError, binascii.Error):
+        raise forge.ArtProblem("RENDER_BAD_ANSWER", "AutoInjector's PDF cannot be read") from None
+    if data[:5] != b"%PDF-":
+        raise forge.ArtProblem("RENDER_BAD_ANSWER", "AutoInjector's answer is not a PDF")
+    return data

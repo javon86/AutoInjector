@@ -83,6 +83,12 @@ akowe/
     costs.py               ⏱ P28 AI calls and minutes per AI / per run / per book, estimate before a run (web/grid.js)
     book_bible.py          📖 P20/P21 the book bible: build (versioned JSON), Markdown, clean (a file from outside),
                            summary, remap_refs
+    binder.py              📖 Book Bible binder: build() = the binder contract (pages per template of binder_schema.json,
+                           every field id), MAP = the ONE field id -> source table (UNAVAILABLE = why not), looks
+                           (genre -> look, profile binder_look), routes …/binder[/look|/schema|/fields|/fill|/export],
+                           save_files (Book Bible/Book Bible.docx + .pdf through AutoInjector POST /render/pdf);
+                           binder_fields.py (🆕 values: profile keys + bible_fields:<pid>:<b>, validation, migrate(),
+                           proposals, ✨ Fill from the book job), binder_html.py (print HTML, 7 looks), binder_docx.py
     book_package.py        📦 P20/P21 book.akowe: build, read + check, transplant into a NEW project, import, verify
     book_save.py           💾 P20 books folder settings, one folder per book, atomic writes, debounced auto-saves
     book_open.py           📂 P21 books-folder list, open a folder / upload (package or book-bible.json), resolve_bible
