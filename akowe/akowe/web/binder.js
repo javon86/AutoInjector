@@ -7,6 +7,7 @@
    ornaments; system fonts only. Print gives clean pages (light paper for every look). Everything is drawn with DOM APIs
    (no innerHTML with book data); the ornaments are constant SVG strings of this file. Styles are scoped under .bnd. */
 import { SCHEMA } from './binder-schema.js';
+import { problemFor } from './problems.js';
 
 /* ======================================================================= constants */
 export const LOOKS = {
@@ -171,46 +172,56 @@ export async function viewBinder(main, x, rest = []) {
     } else root.appendChild(x.problemBox(x.toProblem(e, where), { retry: () => x.route() }, 'Could not open the Book Bible'));
     return;
   }
-  const pages = Array.isArray(data && data.pages) ? data.pages.filter(p => p && SCHEMA[String(p.template)]) : [];
-  const book = Object.assign({ title: S.project.name, author: '', genre: '', look: '' }, (data && data.book) || {});
+  let pages = []; let book = {}; let byId = new Map(); let byName = new Map(); let firstNames = new Map(); let characters = [];
+  let lastUpdated = ''; let fieldsInfo = {};
+  /** (re)index a binder document: page numbers, name lookups (the first load and every reload after an edit) */
+  function setData(d) {
+    data = d || {};
+    pages = Array.isArray(data.pages) ? data.pages.filter(p => p && SCHEMA[String(p.template)]) : [];
+    book = Object.assign({ title: S.project.name, author: '', genre: '', look: '' }, data.book || {});
+    fieldsInfo = data.fields_info || {};
+    pages.forEach((p, i) => {
+      p.template = String(p.template); p._n = i + 1; p.page_id = p.page_id || `page-${i + 1}`;
+      for (const sec of Object.values(p.sections || {})) (sec && Array.isArray(sec.rows) ? sec.rows : []).forEach((r, j) => { if (r && typeof r === 'object') r._i = j; });
+    });
+    byId = new Map(pages.map(p => [p.page_id, p]));
+    byName = new Map();
+    const addName = (n, p) => { const k = fold(n).trim(); if (k && !byName.has(k)) byName.set(k, p); };
+    for (const p of pages) {
+      if (p.template === '1' || p.template === '2') continue;
+      addName(p.title, p);
+      const tf = { 5: '5.1.2', 7: '7.1.2', '8A': '8A.1.2', '8B': '8B.1.2', '8C': '8C.1.2', 11: '11.1.2' }[p.template];
+      if (tf) addName(txt(fld(p, tf)).split(/\s*[("]/)[0], p);
+    }
+    firstNames = new Map();
+    for (const p of pages.filter(q => q.template === '5')) {
+      const f = fold(p.title).split(/\s+/)[0];
+      if (f) firstNames.set(f, firstNames.has(f) ? null : p);
+    }
+    characters = pages.filter(p => p.template === '5');
+    const dt = data.updated_at || data.generated_at ? new Date(data.updated_at || data.generated_at) : null;
+    lastUpdated = dt && !isNaN(dt) ? dt.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : '';
+  }
+  setData(data);
   if (!pages.length) {
     clear(root).appendChild(x.stateBox('empty', 'The Book Bible has no pages yet',
       h('p', null, 'Start the book first (a book profile and some characters), then come back: the binder fills itself from the book.')));
     return;
   }
-  pages.forEach((p, i) => { p.template = String(p.template); p._n = i + 1; p.page_id = p.page_id || `page-${i + 1}`; });
-
-  // ------------------------------------------------------------------ lookups
-  const byId = new Map(pages.map(p => [p.page_id, p]));
-  const byName = new Map();
-  const addName = (s, p) => { const k = fold(s).trim(); if (k && !byName.has(k)) byName.set(k, p); };
-  for (const p of pages) {
-    if (p.template === '1' || p.template === '2') continue;
-    addName(p.title, p);
-    const tf = { 5: '5.1.2', 7: '7.1.2', '8A': '8A.1.2', '8B': '8B.1.2', '8C': '8C.1.2', 11: '11.1.2' }[p.template];
-    if (tf) addName(txt(fld(p, tf)).split(/\s*[("]/)[0], p);
-  }
-  const firstNames = new Map();
-  for (const p of pages.filter(q => q.template === '5')) {
-    const f = fold(p.title).split(/\s+/)[0];
-    if (f) firstNames.set(f, firstNames.has(f) ? null : p);
-  }
   function findPage(name) {
-    const k = fold(name).replace(/^(the|a)\s+/, '').trim();
+    const k = fold(name).replace(/^(the|a)\s+/, '').replace(/\s*\/\s*[A-Z]{2}-\d+$/i, '').trim();
     if (!k) return null;
     return byName.get(fold(name).trim()) || byName.get(k) || byName.get('the ' + k) || firstNames.get(k) || null;
   }
-  const characters = pages.filter(p => p.template === '5');
   const pageTitle = p => (p.template === '1' ? 'Cover' : p.title) || (SCHEMA[p.template] || [''])[0];
-  const lastUpdated = (() => { const d = data.generated_at ? new Date(data.generated_at) : null; return d && !isNaN(d) ? d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : ''; })();
 
   // ------------------------------------------------------------------ state
   const lsKey = `bf:binder:${S.pid}:${S.branch}`;
   const saved = (() => { try { return JSON.parse(localStorage.getItem(lsKey) || '{}') || {}; } catch { return {}; } })();
   const persist = () => { try { localStorage.setItem(lsKey, JSON.stringify(st.keep)); } catch { /* private mode */ } };
-  const autoLook = LOOKS[book.look] ? book.look : lookForGenre(book.genre);
+  const autoLook = LOOKS[book.look_default] ? book.look_default : lookForGenre(book.genre);
   const st = {
-    look: LOOKS[saved.look] ? saved.look : autoLook,
+    look: LOOKS[book.look_stored] ? book.look_stored : LOOKS[saved.look] ? saved.look : LOOKS[book.look] ? book.look : autoLook,
     mode: saved.mode === 'all' ? 'all' : 'one',
     fids: !!saved.fids,
     idx: Math.max(0, pages.findIndex(p => p.page_id === rest[0])),
@@ -226,9 +237,15 @@ export async function viewBinder(main, x, rest = []) {
   function rowsOf(p, code) {
     const sec = (p.sections || {})[code];
     const rs = sec && Array.isArray(sec.rows) ? sec.rows : [];
-    return rs.filter(r => r && Object.values(r).some(f => !empty(f)));
+    return rs.filter(r => r && Object.entries(r).some(([k, f]) => !k.startsWith('_') && !empty(f)));
   }
-  const rf = (row, id) => (row && row[id]) || EMPTY;
+  const rf = (row, id) => (row && !String(id).startsWith('_') && row[id]) || EMPTY;
+  const rowMeta = r => (r && r._meta && typeof r._meta === 'object') ? r._meta : {};
+  const rowPage = r => byId.get(rowMeta(r).page_id) || null;
+  /** a row's picture: pics["<id>#<row number>"], or a picture url in the field itself */
+  const rowPic = (p, id, r) => ((p.pics || {})[`${id}#${(r && r._i !== undefined ? r._i : 0) + 1}`]) || asPic(rf(r, id));
+  const asPic = f => (f && f.url) ? f : (/^(\/api\/|data:image\/)/.test(txt(f)) ? { url: txt(f) } : null);
+  const isFieldEntry = ([k, f]) => !k.startsWith('_') && f && typeof f === 'object' && !f.repeat;
   const pageEdit = p => {
     for (const sec of Object.values(p.sections || {})) {
       if (sec && sec.edit && sec.edit.route) return sec.edit.route;
@@ -258,21 +275,28 @@ export async function viewBinder(main, x, rest = []) {
     if (parts.length < 3 || !parts.some((s, i) => i % 2 === 0 && findPage(s.replace(/\s*\(.*\)$/, '')))) return text;
     return parts.map((s, i) => { if (i % 2) return s; const t = findPage(s.replace(/\s*\(.*\)$/, '')); return t ? pageLink(t, s) : s; });
   }
-  function placeholder(p, id, f, kind = 'text') {
+  function placeholder(p, id, f, kind = 'text', row = null) {
     const route = safeRoute(f.edit && f.edit.route) || safeRoute(pageEdit(p));
     const m = META[id] || {};
+    if (f && f.unavailable) {   // nothing in Akọwe stores this yet: a quiet note, no button
+      return h('span', { class: 'bnd-empty bnd-unavail', title: typeof f.unavailable === 'string' ? f.unavailable : (f.reason || '') }, 'Not stored yet');
+    }
     if (kind === 'pic') {
       const what = /portrait|character/i.test(m.label || '') || (m.sec || '').startsWith('5.') ? 'No portrait yet' : 'No picture yet';
       return h('span', { class: 'bnd-empty bnd-empty-pic' }, what, h('span', { class: 'bnd-act' }, ' — ',
         route ? h('a', { href: route, 'data-field': id }, '🎨 Make one') : '🎨 Make one'));
     }
-    if (m.auto) return h('span', { class: 'bnd-empty' }, 'Not worked out yet');
+    const spec = editSpec(p, id, f, row);
+    if (m.auto && !spec) return h('span', { class: 'bnd-empty' }, 'Not worked out yet');
     return h('span', { class: 'bnd-empty' }, 'Not filled yet', h('span', { class: 'bnd-act' }, ' — ',
-      route ? h('a', { href: route, 'data-field': id, class: 'bnd-fill' }, '✨ Fill from the book') : '✨ Fill from the book'));
+      spec ? h('button', { type: 'button', class: 'bnd-fill bnd-linkbtn', 'data-field': id, 'data-target': spec.target,
+        onclick: ev => runFill([spec.target], ev.currentTarget) }, '✨ Fill from the book')
+        : route ? h('a', { href: route, 'data-field': id, class: 'bnd-fill' }, '✨ Fill from the book') : '✨ Fill from the book'));
   }
   /** the value of a field: text (line breaks kept), page links, chips for lists, a placeholder when empty */
   function val(p, id, f = fld(p, id), opts = {}) {
-    if (empty(f)) return placeholder(p, id, f);
+    if (empty(f)) return placeholder(p, id, f, 'text', opts.row || null);
+    const linked = typeof f.link === 'string' ? byId.get(f.link) : null;
     if (opts.chips || CHIPPY.has(id) || Array.isArray(f.value)) {
       const items = list(f);
       return h('span', { class: 'bnd-chips' }, items.map(s => {
@@ -280,14 +304,121 @@ export async function viewBinder(main, x, rest = []) {
         return t ? pageLink(t, s, 'bnd-chip bnd-link') : h('span', { class: 'bnd-chip' }, s);
       }));
     }
+    if (linked) return h('span', { class: 'bnd-text' }, pageLink(linked, txt(f)));
     return h('span', { class: 'bnd-text' }, linkify(id, txt(f)));
+  }
+
+  /* ------------------------------------------------------------------ 🆕 fields: inline editor, approve / dismiss */
+  const BOOK_SOURCES = { 'auto:series_line': ['series', 'series_number'], 'auto:themes': ['themes'], 'auto:theme_1': ['themes'],
+    'auto:theme_2': ['themes'], 'auto:theme_3': ['themes'] };
+  /** what the binder can store for a field ({target, kind, keys, info}), or null when it is edited elsewhere */
+  function editSpec(p, id, f, row) {
+    if (!f || f.unavailable || f.repeat) return null;
+    const src = String(f.source || '');
+    let target = (f.edit && f.edit.target) || (row && rowMeta(row).target) || null;
+    let keys = null;
+    if (f.edit && f.edit.target && f.edit.field) keys = [f.edit.field];
+    else if (src.startsWith('new:')) keys = [src.slice(4)];
+    else if (src === 'row:type') keys = ['type'];
+    else if (BOOK_SOURCES[src]) { keys = BOOK_SOURCES[src]; target = 'book'; }
+    if (!keys) return null;
+    if (!target) target = p.target || (['1', '2', '3', '4', '10', '12'].includes(p.template) ? 'book' : null);
+    if (!target) return null;
+    const kind = String(target).split(':')[0];
+    const info = fieldsInfo[kind] || {};
+    if (!keys.every(k => info[k])) return null;
+    return { target, kind, keys, info };
+  }
+  function editBtn(p, id, f, row) {
+    const spec = editSpec(p, id, f, row);
+    if (!spec) return null;
+    const label = (META[id] || {}).short || id;
+    return h('button', { type: 'button', class: 'bnd-fedit no-print', 'data-edit': id, 'aria-label': `Edit ${label}`, title: `Edit ${label}`,
+      onclick: ev => openEditor(p, id, spec, ev.currentTarget) }, '✏️');
+  }
+  async function openEditor(p, id, spec, btn) {
+    const box = btn.closest('[data-fid]') || btn.parentElement;
+    const old = box.querySelector(':scope > .bnd-editor');
+    if (old) { old.remove(); return; }
+    const form = h('form', { class: 'bnd-editor no-print', 'data-testid': 'binder-editor', novalidate: true }, x.loadingState('Opening…'));
+    box.appendChild(form);
+    let cur;
+    try { cur = await api('GET', bpath(`/binder/fields?target=${encodeURIComponent(spec.target)}`)); }
+    catch (e) { clear(form).appendChild(h('p', { class: 'bnd-err-inline', role: 'alert' }, plainError(e))); return; }
+    const vals = (cur && cur.fields) || {};
+    const inputs = {};
+    clear(form);
+    for (const k of spec.keys) {
+      const rule = spec.info[k] || {}; const v = (vals[k] || {}).value;
+      const iid = `bnd-ed-${p.page_id}-${id}-${k}`.replace(/[^\w-]/g, '-');
+      let inp;
+      if (rule.type === 'int') inp = h('input', { type: 'number', id: iid, min: rule.min, max: rule.max, step: '1', value: v === null || v === undefined ? '' : String(v) });
+      else if (rule.type === 'list') inp = h('input', { type: 'text', id: iid, value: Array.isArray(v) ? v.join(', ') : (v || ''), placeholder: `up to ${rule.max_items || 3}, separated by commas` });
+      else if ((rule.max || 0) > 200) inp = h('textarea', { id: iid, rows: '3', maxlength: rule.max }, v || '');
+      else inp = h('input', { type: 'text', id: iid, maxlength: rule.max || null, value: v || '' });
+      if (Array.isArray(rule.choices)) inp.setAttribute('list', `${iid}-l`);
+      inputs[k] = inp;
+      form.appendChild(h('div', { class: 'bnd-ed-row' }, h('label', { for: iid }, rule.label || k, (vals[k] || {}).status === 'proposed' ? h('span', { class: 'bnd-prop' }, ' ✎ proposed') : null),
+        inp, Array.isArray(rule.choices) ? h('datalist', { id: `${iid}-l` }, rule.choices.map(c => h('option', { value: c }))) : null,
+        rule.hint ? h('small', null, rule.hint) : rule.type === 'int' ? h('small', null, `${rule.min}–${rule.max}`) : null));
+    }
+    const out = h('p', { class: 'bnd-ed-msg', 'aria-live': 'polite' });
+    const proposed = spec.keys.filter(k => (vals[k] || {}).status === 'proposed');
+    const done = async (what, call) => {
+      for (const b of form.querySelectorAll('button')) b.disabled = true;
+      try { await call(); x.toast(what); await reloadData(); }
+      catch (e) { out.textContent = plainError(e); for (const b of form.querySelectorAll('button')) b.disabled = false; }
+    };
+    form.addEventListener('submit', ev => {
+      ev.preventDefault();
+      const fields = {};
+      for (const k of spec.keys) {
+        const rule = spec.info[k] || {}; const raw = inputs[k].value.trim();
+        if (!raw) { fields[k] = null; continue; }
+        if (rule.type === 'int') {
+          const n = Number(raw);
+          if (!Number.isInteger(n) || (rule.min !== undefined && n < rule.min) || (rule.max !== undefined && n > rule.max)) {
+            out.textContent = `${rule.label || k}: a whole number from ${rule.min} to ${rule.max}.`; inputs[k].focus(); return;
+          }
+          fields[k] = n;
+        } else if (rule.type === 'list') fields[k] = raw.split(/\s*[,·]\s*/).filter(Boolean).slice(0, rule.max_items || 3);
+        else fields[k] = raw;
+      }
+      done('Saved', () => api('PUT', bpath('/binder/fields'), { body: { target: spec.target, fields } }));
+    });
+    form.appendChild(out);
+    form.appendChild(h('div', { class: 'bnd-ed-btns' },
+      h('button', { type: 'submit', class: 'primary', 'data-testid': 'binder-ed-save' }, '💾 Save'),
+      proposed.length ? h('button', { type: 'button', 'data-testid': 'binder-ed-approve', onclick: () => done('Approved', () => api('POST', bpath('/binder/fields/approve'), { body: { target: spec.target, fields: proposed } })) }, '✔ Approve') : null,
+      proposed.length ? h('button', { type: 'button', 'data-testid': 'binder-ed-dismiss', onclick: () => done('Proposal dismissed', () => api('POST', bpath('/binder/fields/dismiss'), { body: { target: spec.target, fields: proposed } })) }, '✕ Dismiss') : null,
+      h('button', { type: 'button', onclick: () => form.remove() }, 'Cancel')));
+    const first = Object.values(inputs)[0]; if (first) first.focus();
+  }
+  /** the proposals of 🆕 fields on a page that ✔ Approve all can accept: {target: [keys]} */
+  function pageProposals(p) {
+    const out = {};
+    for (const sec of Object.values(p.sections || {})) {
+      const entries = [...Object.entries((sec && sec.fields) || {}).map(e => [e, null]),
+        ...((sec && sec.rows) || []).flatMap(r => Object.entries(r || {}).map(e => [e, r]))];
+      for (const [[id, f], r] of entries) {
+        if (id.startsWith('_') || !f || f.status !== 'proposed') continue;
+        const spec = editSpec(p, id, f, r);
+        if (spec) for (const k of spec.keys) (out[spec.target] = out[spec.target] || new Set()).add(k);
+      }
+    }
+    return Object.fromEntries(Object.entries(out).map(([t, ks]) => [t, [...ks]]));
+  }
+  function plainError(e) {
+    const err = (e && e.body && Array.isArray(e.body.errors) && e.body.errors[0]) || {};
+    const words = problemFor(err.problem || err.code, e && e.status);
+    return [err.message || words.what, err.fix || words.fix].filter(Boolean).join(' — ');
   }
   function fidTag(id) {
     const m = META[id] || {};
     return [h('span', { class: 'bnd-fid' }, id), m.nw ? h('span', { class: 'bnd-tag bnd-fid' }, 'NEW') : null, m.auto ? h('span', { class: 'bnd-tag bnd-fid' }, 'AUTO') : null];
   }
   function proposedMark(f) {
-    return f && f.status === 'proposed' ? h('span', { class: 'bnd-prop', title: 'Proposed — waiting for your approval' }, '✎', h('span', { class: 'bnd-sr' }, ' proposed')) : null;
+    return f && (f.status === 'proposed' || f.draft === true) ? h('span', { class: 'bnd-prop', title: 'Proposed — waiting for your approval' }, '✎', h('span', { class: 'bnd-sr' }, ' proposed')) : null;
   }
   /** one labelled field box */
   function field(p, id, opts = {}) {
@@ -295,7 +426,7 @@ export async function viewBinder(main, x, rest = []) {
     const m = META[id] || { short: id };
     return h(opts.tag || 'div', { class: `bnd-f${opts.cls ? ' ' + opts.cls : ''}${empty(f) ? ' is-empty' : ''}${f.status === 'proposed' ? ' is-proposed' : ''}`,
       'data-fid': id, 'data-st': f.status || 'empty' },
-    h('div', { class: 'bnd-k' }, fidTag(id), h('span', { class: 'bnd-kl', title: m.label }, opts.label || m.short), proposedMark(f)),
+    h('div', { class: 'bnd-k' }, fidTag(id), h('span', { class: 'bnd-kl', title: m.label }, opts.label || m.short), proposedMark(f), editBtn(p, id, f)),
     h('div', { class: 'bnd-v' }, opts.render ? opts.render(f) : val(p, id, f, opts)));
   }
   const grid = (p, ids, cls = '') => h('div', { class: `bnd-grid ${cls}` }, ids.map(id => field(p, id, { cls: /\.(1|2)$/.test(id) && cls.includes('lead') ? 'bnd-wide' : '' })));
@@ -304,7 +435,7 @@ export async function viewBinder(main, x, rest = []) {
     return h('dl', { class: 'bnd-facts' }, ids.map(id => {
       const f = fld(p, id); const m = META[id];
       return h('div', { class: `bnd-fact${empty(f) ? ' is-empty' : ''}${f.status === 'proposed' ? ' is-proposed' : ''}`, 'data-fid': id, 'data-st': f.status || 'empty' },
-        h('dt', null, fidTag(id), h('span', { title: m.label }, m.short), proposedMark(f)),
+        h('dt', null, fidTag(id), h('span', { title: m.label }, m.short), proposedMark(f), editBtn(p, id, f)),
         h('dd', null, special[id] ? special[id](f) : val(p, id, f)));
     }));
   }
@@ -312,20 +443,20 @@ export async function viewBinder(main, x, rest = []) {
     return h('div', { class: 'bnd-factchips' }, ids.map(id => {
       const f = fld(p, id);
       return h('div', { class: `bnd-fchip${empty(f) ? ' is-empty' : ''}`, 'data-fid': id, 'data-st': f.status || 'empty' },
-        h('small', null, fidTag(id), META[id].short, proposedMark(f)), h('b', null, val(p, id, f)));
+        h('small', null, fidTag(id), META[id].short, proposedMark(f), editBtn(p, id, f)), h('b', null, val(p, id, f)));
     }));
   }
   function quote(p, id, cls = '') {
     const f = fld(p, id);
     return h('figure', { class: `bnd-quote ${cls}${empty(f) ? ' is-empty' : ''}`, 'data-fid': id, 'data-st': f.status || 'empty' },
-      h('figcaption', null, fidTag(id), META[id].short, proposedMark(f)), h('blockquote', null, val(p, id, f)));
+      h('figcaption', null, fidTag(id), META[id].short, proposedMark(f), editBtn(p, id, f)), h('blockquote', null, val(p, id, f)));
   }
   function bars(p, ids, max = 10) {
     return h('div', { class: 'bnd-bars' }, ids.map(id => {
       const f = fld(p, id); const n = num(txt(f));
       const v = n === null ? null : Math.max(0, Math.min(max, Math.round(n)));
       return h('div', { class: `bnd-bar${v === null ? ' is-empty' : ''}${f.status === 'proposed' ? ' is-proposed' : ''}`, 'data-fid': id, 'data-st': f.status || 'empty' },
-        h('span', { class: 'bnd-bar-l' }, fidTag(id), META[id].short, proposedMark(f)),
+        h('span', { class: 'bnd-bar-l' }, fidTag(id), META[id].short, proposedMark(f), editBtn(p, id, f)),
         h('span', { class: 'bnd-bar-track', role: 'img', 'aria-label': v === null ? `${META[id].short}: not filled yet` : `${META[id].short}: ${v} of ${max}` },
           Array.from({ length: max }, (_, i) => h('i', { class: v !== null && i < v ? 'on' : null }))),
         h('span', { class: 'bnd-bar-n' }, v === null ? placeholder(p, id, f) : `${v}/${max}`));
@@ -359,7 +490,7 @@ export async function viewBinder(main, x, rest = []) {
       opts.caption === false ? null : h('figcaption', null, fidTag(id), opts.label || META[id].short));
     const ph = h('div', { class: 'bnd-pic-ph' }, h('span', { class: 'bnd-pic-ico', 'aria-hidden': 'true' }, opts.icon || '🖼'), placeholder(p, id, f, 'pic'));
     box.appendChild(ph);
-    if (pc) {
+    if (pc && pc.url) {
       box.setAttribute('data-img-loading', '1');
       loadImg(pc.url).then(u => {
         box.removeAttribute('data-img-loading');
@@ -368,11 +499,35 @@ export async function viewBinder(main, x, rest = []) {
         ph.replaceWith(img);
       });
     }
+    // a slot with several pictures (expression sheet, extra views): the others as a strip of thumbnails
+    const more = pc && Array.isArray(pc.items) ? pc.items.filter(it => it && it.url && it.url !== pc.url).slice(0, 8) : [];
+    if (more.length) {
+      const strip = h('div', { class: 'bnd-pic-more' });
+      for (const it of more) {
+        const th = h('span', { class: 'bnd-pic-th' });
+        strip.appendChild(th);
+        loadImg(it.url).then(u => { if (u) th.appendChild(h('img', { src: u, alt: it.alt || '' })); });
+      }
+      box.appendChild(strip);
+    }
+    // the motion clip: ▶ plays it here (screen only)
+    if (pc && pc.video) {
+      const play = h('button', { type: 'button', class: 'bnd-play no-print', 'data-testid': 'binder-play' }, '▶ Play the clip');
+      play.addEventListener('click', async () => {
+        play.disabled = true;
+        try {
+          const u = pc.video.startsWith('/api/') ? URL.createObjectURL(await api('GET', pc.video.slice(4), { blob: true })) : pc.video;
+          if (u.startsWith('blob:')) S.blobUrls.push(u);
+          play.replaceWith(h('video', { src: u, controls: true, autoplay: true, muted: true, loop: true, playsinline: true, class: 'bnd-video', 'aria-label': `${META[id].short} — ${pageTitle(p)}` }));
+        } catch (e) { play.disabled = false; play.textContent = '▶ The clip could not be loaded — try again'; }
+      });
+      box.appendChild(play);
+    }
     return box;
   }
   /** a round portrait bubble for a person (their own page's main portrait), initials when there is none */
   function bubble(name, size = 'm', row = null) {
-    const t = findPage(name);
+    const t = findPage(String(name || '').replace(/\s*\/\s*[A-Z]{2}-\d+$/, ''));
     const pc = (row && row.url) ? row : t ? picOf(t, { 5: '5.1.1', 7: '7.1.1', '8A': '8A.1.1', '8B': '8B.1.1', '8C': '8C.1.1', 11: '11.1.3' }[t.template]) : null;
     const initials = String(name || '?').split(/\s+/).filter(Boolean).slice(0, 2).map(s => s[0]).join('').toUpperCase();
     const el = h('span', { class: `bnd-bubble bnd-bubble-${size}`, 'aria-hidden': 'true' }, h('span', null, initials || '?'));
@@ -384,7 +539,7 @@ export async function viewBinder(main, x, rest = []) {
   function secStatus(p, code) {
     const sec = (p.sections || {})[code] || {};
     if (sec.status) return sec.status;
-    const all = [...Object.values(sec.fields || {}), ...(sec.rows || []).flatMap(r => Object.values(r || {}))].filter(Boolean);
+    const all = [...Object.entries(sec.fields || {}), ...(sec.rows || []).flatMap(r => Object.entries(r || {}))].filter(isFieldEntry).map(e => e[1]).filter(f => !f.unavailable);
     const filled = all.filter(f => !empty(f));
     if (!filled.length) return all.length ? 'needs_you' : 'approved';
     if (filled.some(f => f.status === 'proposed' || f.status === 'draft')) return 'draft';
@@ -473,11 +628,11 @@ export async function viewBinder(main, x, rest = []) {
   T[2] = p => {
     const rows = rowsOf(p, '2.1');
     const toc = (Array.isArray(data.contents) && data.contents.length ? data.contents.map(c => ({
-      icon: (TPL[c.template] || ['•'])[0], name: c.title || (TPL[c.template] || ['', c.template])[1], count: c.count, page: c.page,
+      icon: c.icon || (TPL[c.template] || ['•'])[0], name: c.title || (TPL[c.template] || ['', c.template])[1], count: c.count, page: c.page, page_id: c.page_id,
     })) : rows.map(r => ({ icon: '', name: txt(rf(r, '2.1.1')), countText: txt(rf(r, '2.1.2')), page: num(txt(rf(r, '2.1.3'))) })));
     const entriesWord = (c) => c.countText || (c.count > 1 ? `${c.count} pages` : c.count === 1 ? '1 page' : '');
     const tocEl = toc.length ? h('ol', { class: 'bnd-toc' }, toc.map((c, i) => {
-      const target = pages[(c.page || 0) - 1];
+      const target = (c.page_id && byId.get(c.page_id)) || pages[(c.page || 0) - 1];
       const inner = [h('span', { class: 'bnd-toc-n' }, String(i + 1)), h('span', { class: 'bnd-toc-i', 'aria-hidden': 'true' }, c.icon),
         h('span', { class: 'bnd-toc-t' }, c.name), h('span', { class: 'bnd-toc-c' }, entriesWord(c)),
         h('span', { class: 'bnd-toc-p' }, c.page ? `p. ${String(c.page).padStart(2, '0')}` : '')];
@@ -485,21 +640,22 @@ export async function viewBinder(main, x, rest = []) {
     })) : rowsEmpty(p, '2.1', 'sections');
     // quick-jump tiles: characters, places and world entries with their pictures
     const tiles = [];
-    for (const r of rowsOf(p, '2.2')) for (const id of ['2.2.1', '2.2.2', '2.2.3']) if (!empty(rf(r, id))) tiles.push(txt(rf(r, id)));
-    const tileNames = tiles.length ? tiles : pages.filter(q => ['5', '7', '8A', '8B', '8C'].includes(q.template)).map(pageTitle);
-    const grid2 = tileNames.length ? h('div', { class: 'bnd-tiles' }, tileNames.map(n => {
-      const t = findPage(n);
-      const inner = [bubble(n, 's'), h('span', null, h('b', null, n), h('small', null, t ? `${TPL[t.template][2]} · p. ${t._n}` : ''))];
+    for (const r of rowsOf(p, '2.2')) for (const id of ['2.2.1', '2.2.2', '2.2.3']) if (!empty(rf(r, id)) && !asPic(rf(r, id))) tiles.push([txt(rf(r, id)), rowPic(p, id, r), rf(r, id).link]);
+    const tileNames = tiles.length ? tiles : pages.filter(q => ['5', '7', '8A', '8B', '8C'].includes(q.template)).map(q => [pageTitle(q), null, q.page_id]);
+    const grid2 = tileNames.length ? h('div', { class: 'bnd-tiles' }, tileNames.map(([n, pc, link]) => {
+      const t = (link && byId.get(link)) || findPage(n);
+      const inner = [bubble(n, 's', pc), h('span', null, h('b', null, n), h('small', null, t ? `${TPL[t.template][2]} · p. ${t._n}` : ''))];
       return t ? pageLink(t, inner, 'bnd-tile') : h('span', { class: 'bnd-tile' }, inner);
     })) : rowsEmpty(p, '2.2', 'entries');
     const todoRows = rowsOf(p, '2.3');
     const todo = todoRows.length ? todoRows.map(r => ({ what: txt(rf(r, '2.3.1')), where: txt(rf(r, '2.3.2')), action: txt(rf(r, '2.3.3')) }))
-      : (Array.isArray(data.todo) ? data.todo.map(t => ({ what: t.what, where: (byId.get(t.page_id) || {}).title || '', page_id: t.page_id, action: t.action })) : []);
+      : (Array.isArray(data.todo) ? data.todo.map(t => ({ what: t.what, where: (byId.get(t.page_id) || {}).title || '', page_id: t.page_id, page: t.page, action: t.action })) : []);
     const todoEl = todo.length ? h('ul', { class: 'bnd-todo' }, todo.slice(0, 10).map(t => {
-      const target = (t.page_id && byId.get(t.page_id)) || findPage(t.where);
+      const target = (t.page_id && byId.get(t.page_id)) || (t.page && pages[t.page - 1]) || findPage(t.where);
       return h('li', null, h('span', { class: 'bnd-todo-w' }, t.what),
         h('span', { class: 'bnd-todo-p' }, target ? pageLink(target, `${pageTitle(target)} · p. ${target._n}`) : t.where),
-        target ? h('a', { class: 'bnd-todo-a no-print', href: safeRoute(pageEdit(target)) || plink('bible', target.page_id) }, t.action ? actionWord(t.action) : '✏ Fix') : null);
+        target ? (/approve/i.test(t.action || '') ? pageLink(target, actionWord(t.action), 'bnd-todo-a no-print')
+          : h('a', { class: 'bnd-todo-a no-print', href: safeRoute(pageEdit(target)) || plink('bible', target.page_id) }, t.action ? actionWord(t.action) : '✏ Fix')) : null);
     })) : h('p', { class: 'bnd-done' }, '✔ Nothing waiting — every page is approved.');
     return [sec(p, '2.1', tocEl), sec(p, '2.2', grid2), sec(p, '2.3', todoEl, { cls: 'bnd-sec-hl' })];
   };
@@ -521,8 +677,8 @@ export async function viewBinder(main, x, rest = []) {
     const rs = rowsOf(p, '3.6');
     if (!rs.length) return rowsEmpty(p, '3.6', 'main characters');
     return h('div', { class: 'bnd-cast-strip' }, rs.map(r => {
-      const name = txt(rf(r, '3.6.2')); const t = findPage(name);
-      return h('div', { class: 'bnd-mini-card' }, bubble(name, 'l', rf(r, '3.6.1').url ? rf(r, '3.6.1') : null),
+      const name = txt(rf(r, '3.6.2')); const t = rowPage(r) || findPage(name);
+      return h('div', { class: 'bnd-mini-card' }, bubble(name, 'l', rowPic(p, '3.6.1', r)),
         h('div', null, h('b', null, t ? pageLink(t, name) : name || '—'), h('small', { class: 'bnd-role' }, txt(rf(r, '3.6.3'))),
           h('p', null, empty(rf(r, '3.6.4')) ? placeholder(p, '3.6.4', rf(r, '3.6.4')) : txt(rf(r, '3.6.4')))));
     }));
@@ -547,6 +703,7 @@ export async function viewBinder(main, x, rest = []) {
   T[4] = p => {
     const rs = rowsOf(p, '4.2');
     const groupOf = r => {
+      if (rowMeta(r).group) return String(rowMeta(r).group);
       const g = txt(rf(r, '4.1.1')).trim(); if (g && !/·/.test(g)) return g;
       const role = fold(txt(rf(r, '4.2.4')));
       if (/protag|antag|main|lead|hero|villain/.test(role)) return 'Main';
@@ -565,11 +722,11 @@ export async function viewBinder(main, x, rest = []) {
       if (!rs.length) { body.appendChild(rowsEmpty(p, '4.2', 'characters')); return; }
       for (const [g, list_] of groups) {
         const shown = list_.filter(r => {
-          const name = txt(rf(r, '4.2.2')); const t = findPage(name);
+          const name = txt(rf(r, '4.2.2')); const t = rowPage(r) || findPage(name);
           const s = String(txt(rf(r, '4.2.8')) || (t && t.status) || 'draft').toLowerCase().replace(/\s+/g, '_');
           if (roleSel.value && roleSel.value !== g) return false;
           if (statSel.value && statWord(s) !== statSel.value) return false;
-          if (noPic.checked && (rf(r, '4.2.1').url || (t && picOf(t, '5.1.1')))) return false;
+          if (noPic.checked && (rowPic(p, '4.2.1', r) || (t && picOf(t, '5.1.1')))) return false;
           return true;
         });
         if (!shown.length) continue;
@@ -590,9 +747,9 @@ export async function viewBinder(main, x, rest = []) {
     ];
   };
   function castCard(p, r) {
-    const name = txt(rf(r, '4.2.2')); const t = findPage(name);
+    const name = txt(rf(r, '4.2.2')); const t = rowPage(r) || findPage(name);
     const s = txt(rf(r, '4.2.8')) || (t && t.status) || 'draft';
-    const pc = rf(r, '4.2.1').url ? rf(r, '4.2.1') : t ? picOf(t, '5.1.1') : null;
+    const pc = rowPic(p, '4.2.1', r) || (t ? picOf(t, '5.1.1') : null);
     const ph = h('div', { class: 'bnd-card-pic' }, h('span', { class: 'bnd-empty bnd-empty-pic' }, 'No portrait yet', h('span', { class: 'bnd-act' }, ' — ',
       t && safeRoute(pageEdit(t)) ? h('a', { href: pageEdit(t) }, '🎨 Make one') : '🎨 Make one')));
     if (pc) loadImg(pc.url).then(u => { if (u) clear(ph).appendChild(h('img', { src: u, alt: `Portrait of ${name}` })); });
@@ -624,16 +781,17 @@ export async function viewBinder(main, x, rest = []) {
       mustReach(p, ['5.14.3', '5.14.4', '5.14.5', '5.14.6', '5.14.7']),
       grid(p, ['5.14.8', '5.14.9', '5.14.10', '5.14.11', '5.14.12']), field(p, '5.14.13', { cls: 'bnd-wide', chips: true }))),
   ];
-  function relType(t) { const s = fold(t); for (const [k, , re] of REL_TYPES) if (re.test(s)) return k; return 'other'; }
+  function relType(t) { const s = fold(t); if (s === 'other') return 'other'; for (const [k, , re] of REL_TYPES) if (re.test(s)) return k; return 'other'; }
   function relRows(p) {
     const rs = rowsOf(p, '5.8');
     if (!rs.length) return rowsEmpty(p, '5.8', 'relationships');
     return h('ul', { class: 'bnd-rels' }, rs.map(r => {
-      const name = txt(rf(r, '5.8.2')); const t = findPage(name); const typ = rf(r, '5.8.3'); const k = relType(txt(typ));
-      return h('li', { class: `bnd-rel bnd-rel-${k}` }, bubble(name, 'm', rf(r, '5.8.1').url ? rf(r, '5.8.1') : null),
+      const name = txt(rf(r, '5.8.2')).replace(/\s*\/\s*[A-Z]{2}-\d+$/, ''); const nf = rf(r, '5.8.2');
+      const t = (typeof nf.link === 'string' && byId.get(nf.link)) || findPage(name); const typ = rf(r, '5.8.3'); const k = relType(txt(typ));
+      return h('li', { class: `bnd-rel bnd-rel-${k}` }, bubble(name, 'm', rowPic(p, '5.8.1', r)),
         h('div', { class: 'bnd-rel-b' }, h('b', { 'data-fid': '5.8.2' }, t ? pageLink(t, name) : name || '—'),
-          empty(typ) ? h('span', { class: 'bnd-reltype bnd-rel-other', 'data-fid': '5.8.3' }, placeholder(p, '5.8.3', typ)) :
-            h('span', { class: `bnd-reltype bnd-rt-${k}`, 'data-fid': '5.8.3', 'data-st': typ.status }, txt(typ), proposedMark(typ)),
+          empty(typ) ? h('span', { class: 'bnd-reltype bnd-rel-other', 'data-fid': '5.8.3' }, placeholder(p, '5.8.3', typ, 'text', r), editBtn(p, '5.8.3', typ, r)) :
+            h('span', { class: `bnd-reltype bnd-rt-${k}`, 'data-fid': '5.8.3', 'data-st': typ.status }, txt(typ), proposedMark(typ), editBtn(p, '5.8.3', typ, r)),
           h('p', { 'data-fid': '5.8.4' }, empty(rf(r, '5.8.4')) ? placeholder(p, '5.8.4', rf(r, '5.8.4')) : txt(rf(r, '5.8.4')))));
     }));
   }
@@ -679,7 +837,20 @@ export async function viewBinder(main, x, rest = []) {
     const a = findPage(m[1]); const b = findPage(m[2]);
     return [a ? pageLink(a, m[1]) : m[1], ' ↔ ', b ? pageLink(b, m[2]) : m[2], m[3] || ''];
   }
+  /** the relationship graph: the binder's own (template 6 `graph`: centre, nodes, edges) or, without one, the 5.8 rows */
+  function graphOf(p) {
+    const g = p && p.graph;
+    if (!g || !Array.isArray(g.nodes)) return null;
+    const name = new Map(g.nodes.map(n => [n.id, n.name]));
+    const es = (g.edges || []).filter(e => name.has(e.from) && name.has(e.to)).map(e => ({ a: name.get(e.from), b: name.get(e.to),
+      type: relType(e.type || 'other'), label: e.type || '', note: e.note || '' }));
+    return { centre: name.get(g.centre) || null, names: g.nodes.map(n => n.name), edges: es,
+      portraits: new Map(g.nodes.filter(n => n.portrait).map(n => [n.name, n.portrait])),
+      pages: new Map(g.nodes.filter(n => n.page_id).map(n => [n.name, n.page_id])) };
+  }
   function edges() {
+    const gp = graphOf(pages.find(q => q.template === '6'));
+    if (gp) return gp.edges;
     const out = []; const seen = new Set();
     for (const c of characters) {
       for (const r of rowsOf(c, '5.8')) {
@@ -701,11 +872,15 @@ export async function viewBinder(main, x, rest = []) {
   }
   /** the map: main character in the centre, the others on rings (closer = more ties), one typed line per relationship */
   function relMap(p) {
-    const es = edges();
+    const gp = graphOf(p);
+    const es = gp ? gp.edges : edges();
     const names = []; const add = n => { if (n && !names.includes(n)) names.push(n); };
-    characters.forEach(c => add(pageTitle(c))); es.forEach(e => { add(e.a); add(e.b); });
+    if (gp && gp.centre) add(gp.centre);
+    (gp ? gp.names : characters.map(pageTitle)).forEach(add); es.forEach(e => { add(e.a); add(e.b); });
+    const nodePage = n => (gp && gp.pages.has(n) && byId.get(gp.pages.get(n))) || findPage(n);
     if (!names.length) return h('p', { class: 'bnd-empty' }, 'Not filled yet — add characters and their relationships first.');
     const centreName = (() => {
+      if (gp && gp.centre) return gp.centre;
       const want = txt(fld(p, '6.1.3')); const t = want ? findPage(want) : null;
       if (t) return pageTitle(t);
       const prot = characters.find(c => /protag|main|hero/i.test(txt(fld(c, '5.1.5'))));
@@ -756,14 +931,14 @@ export async function viewBinder(main, x, rest = []) {
     svg.appendChild(nodes);
     Object.entries(pos).forEach(([n, [x0, y0]], i) => {
       const main_ = n === centreName; const r = (main_ ? 54 : 38) * (narrow ? 0.9 : 1);
-      const t = findPage(n);
+      const t = nodePage(n);
       const clipId = `bbclip-${p.page_id}-${i}`;
       defs.appendChild(sv('clipPath', { id: clipId }, sv('circle', { cx: x0, cy: y0, r: r - 4 })));
       const g = sv('g', { class: `bnd-rm-node${main_ ? ' is-main' : ''}`, 'data-name': n, tabindex: t ? '0' : null, role: t ? 'link' : null, 'aria-label': t ? `${n} — open page ${t._n}` : null });
       g.appendChild(sv('circle', { cx: x0, cy: y0, r, class: 'bnd-rm-ring' }));
       const ini = String(n).split(/\s+/).slice(0, 2).map(s => s[0] || '').join('').toUpperCase();
       g.appendChild(sv('text', { x: x0, y: y0 + (main_ ? 10 : 7), 'text-anchor': 'middle', class: 'bnd-rm-ini' }, ini));
-      const pc = t ? picOf(t, '5.1.1') : null;
+      const pc = (gp && gp.portraits.has(n)) ? { url: gp.portraits.get(n) } : t ? picOf(t, '5.1.1') : null;
       if (pc) loadImg(pc.url).then(u => { if (u) g.insertBefore(sv('image', { href: u, x: x0 - r + 4, y: y0 - r + 4, width: 2 * r - 8, height: 2 * r - 8, 'clip-path': `url(#${clipId})`, preserveAspectRatio: 'xMidYMid slice' }), g.childNodes[2] || null); });
       const lw = Math.max(70, n.length * (narrow ? 10.4 : 8.4) + 18);
       const nh = narrow ? 30 : 24;
@@ -851,7 +1026,7 @@ export async function viewBinder(main, x, rest = []) {
     return [
       sec(p, '9.1', mapBox(p, keys), { cls: 'bnd-sec-map' }),
       sec(p, '9.2', keys.length ? h('ol', { class: 'bnd-mapkey' }, keys.map((r, i) => {
-        const n = txt(rf(r, '9.2.1')) || String(i + 1); const name = txt(rf(r, '9.2.2')); const t = findPage(name) || pages[(num(txt(rf(r, '9.2.3'))) || 0) - 1];
+        const n = txt(rf(r, '9.2.1')) || String(i + 1); const name = txt(rf(r, '9.2.2')); const t = rowPage(r) || findPage(name) || pages[(num(txt(rf(r, '9.2.3'))) || 0) - 1];
         return h('li', null, h('span', { class: 'bnd-marker', 'data-fid': '9.2.1' }, n), h('span', { 'data-fid': '9.2.2' }, t ? pageLink(t, name || pageTitle(t)) : name),
           h('small', { 'data-fid': '9.2.3' }, t ? `p. ${t._n}` : txt(rf(r, '9.2.3')) ? `p. ${txt(rf(r, '9.2.3'))}` : ''));
       })) : rowsEmpty(p, '9.2', 'markers')),
@@ -861,8 +1036,22 @@ export async function viewBinder(main, x, rest = []) {
     ];
   };
   function mapBox(p, keys) {
-    const pc = picOf(p, '9.1.1');
+    const pc = picOf(p, '9.1.1') || (p.map && p.map.png_url ? { url: p.map.png_url, alt: `Map of ${book.title}` } : null);
     const wrap = h('div', { class: 'bnd-map', 'data-fid': '9.1.1' });
+    // marker positions: the row's _meta x/y (or the field's), in the map's own units -> 12–88 % of the picture
+    const raw = keys.map(r => { const f = rf(r, '9.2.1'); const m = rowMeta(r);
+      const x0 = typeof m.x === 'number' ? m.x : typeof f.x === 'number' ? f.x : Array.isArray(f.pos) ? f.pos[0] : null;
+      const y0 = typeof m.y === 'number' ? m.y : typeof f.y === 'number' ? f.y : Array.isArray(f.pos) ? f.pos[1] : null;
+      return x0 === null || y0 === null ? null : [x0, y0]; });
+    const known = raw.filter(Boolean);
+    const unit = known.length && known.every(([a, b]) => a >= 0 && a <= 1 && b >= 0 && b <= 1) && known.some(([a, b]) => a > 0 || b > 0);
+    const [x1, x2] = [Math.min(...known.map(q => q[0])), Math.max(...known.map(q => q[0]))];
+    const [y1, y2] = [Math.min(...known.map(q => q[1])), Math.max(...known.map(q => q[1]))];
+    const place = (q, i) => {
+      if (!q) return [0.15 + ((i * 0.31) % 0.7), 0.2 + ((i * 0.23) % 0.6)];
+      if (unit) return q;
+      return [x2 > x1 ? 0.12 + 0.76 * (q[0] - x1) / (x2 - x1) : 0.5, y2 > y1 ? 0.18 + 0.64 * (q[1] - y1) / (y2 - y1) : 0.5];
+    };
     const art = h('div', { class: 'bnd-map-art' });
     wrap.appendChild(art);
     const drawFallback = () => {
@@ -875,11 +1064,8 @@ export async function viewBinder(main, x, rest = []) {
     } else drawFallback();
     keys.forEach((r, i) => {
       const f = rf(r, '9.2.1'); const n = txt(f) || String(i + 1);
-      let x0 = typeof f.x === 'number' ? f.x : Array.isArray(f.pos) ? f.pos[0] : null;
-      let y0 = typeof f.y === 'number' ? f.y : Array.isArray(f.pos) ? f.pos[1] : null;
-      if (x0 === null || y0 === null) { x0 = 0.15 + ((i * 0.31) % 0.7); y0 = 0.2 + ((i * 0.23) % 0.6); }
-      if (x0 > 1 || y0 > 1) { x0 /= 100; y0 /= 100; }
-      const name = txt(rf(r, '9.2.2')); const t = findPage(name);
+      const [x0, y0] = place(raw[i], i);
+      const name = txt(rf(r, '9.2.2')); const t = rowPage(r) || findPage(name);
       const pin = h(t ? 'a' : 'span', { class: 'bnd-pin', style: `left:${(x0 * 100).toFixed(1)}%;top:${(y0 * 100).toFixed(1)}%`,
         href: t ? plink('bible', t.page_id) : null, title: name, 'aria-label': `${n} · ${name}` }, h('b', null, n), h('span', { class: 'bnd-pin-n' }, name));
       if (t) pin.addEventListener('click', ev => { ev.preventDefault(); goto(t.page_id); });
@@ -959,7 +1145,7 @@ export async function viewBinder(main, x, rest = []) {
       }), { cls: 'bnd-sec-facts' }),
       sec(p, '11.3', h('div', null, field(p, '11.3.1', { cls: 'bnd-prose' }), field(p, '11.3.2', { cls: 'bnd-callout' }))),
       sec(p, '11.4', sceneCards(p)),
-      sec(p, '11.5', (() => { const rs = rowsOf(p, '11.5'); return rs.length ? h('div', { class: 'bnd-who-row' }, rs.map(r => { const n = txt(rf(r, '11.5.1')); const t = findPage(n); return h('span', { class: 'bnd-who-card' }, bubble(n, 'm'), t ? pageLink(t, n) : n); })) : rowsEmpty(p, '11.5', 'characters'); })()),
+      sec(p, '11.5', (() => { const rs = rowsOf(p, '11.5'); return rs.length ? h('div', { class: 'bnd-who-row' }, rs.map(r => { const n = txt(rf(r, '11.5.1')); const t = (typeof rf(r, '11.5.1').link === 'string' && byId.get(rf(r, '11.5.1').link)) || rowPage(r) || findPage(n); return h('span', { class: 'bnd-who-card' }, bubble(n, 'm', rowPic(p, '11.5.1', r)), t ? pageLink(t, n) : n); })) : rowsEmpty(p, '11.5', 'characters'); })()),
       sec(p, '11.6', (() => { const rs = rowsOf(p, '11.6'); return rs.length ? h('ul', { class: 'bnd-checklist' }, rs.map(r => {
         const ok = /✔|on the page|yes|done/i.test(txt(rf(r, '11.6.2'))); const known = !empty(rf(r, '11.6.2'));
         return h('li', { class: known ? (ok ? 'is-ok' : 'is-miss') : null }, h('span', { class: 'bnd-ck', 'aria-hidden': 'true' }, known ? (ok ? '✔' : '⚠') : '○'),
@@ -1021,6 +1207,7 @@ export async function viewBinder(main, x, rest = []) {
       corners,
       st.look === 'noir' ? orn(ORN.stamp, 'bnd-stamp') : null,
       h('div', { class: 'bnd-runhead' }, h('span', null, book.title), h('span', { 'aria-hidden': 'true' }, ` ${icon} `), h('span', null, pageTitle(p)), badge(p.status)),
+      pageTools(p),
       head,
       h('div', { class: 'bnd-body' }, content),
       h('footer', { class: 'bnd-foot' }, h('span', null, book.title), h('span', null, `Book Bible${lastUpdated ? ' · updated ' + lastUpdated : ''}`), h('span', { class: 'bnd-pno' }, `Page ${p._n} of ${pages.length}`)));
@@ -1028,6 +1215,85 @@ export async function viewBinder(main, x, rest = []) {
 
   /* ================================================================== chrome: toolbar, rail, pager */
   const msg = h('div', { class: 'bnd-msg', 'aria-live': 'polite', 'data-testid': 'binder-msg' });
+  /** on screen, under the header strip: ✨ Fill this page from the book · ✔ Approve the proposals of its 🆕 fields */
+  function pageTools(p) {
+    const targets = new Set();
+    for (const sec of Object.values(p.sections || {})) {
+      for (const [id, f] of Object.entries((sec && sec.fields) || {})) { const sp = editSpec(p, id, f, null); if (sp) targets.add(sp.target); }
+      for (const r of (sec && sec.rows) || []) for (const [id, f] of Object.entries(r || {})) { if (id.startsWith('_')) continue; const sp = editSpec(p, id, f, r); if (sp && sp.kind !== 'relationship') targets.add(sp.target); }
+    }
+    if (p.target) targets.add(p.target);
+    const props = pageProposals(p);
+    const n = Object.values(props).reduce((a, ks) => a + ks.length, 0);
+    const fillTargets = [...targets].filter(t => fieldsInfo[String(t).split(':')[0]]);
+    if (!fillTargets.length && !n) return null;
+    return h('div', { class: 'bnd-pagetools no-print' },
+      fillTargets.length ? h('button', { type: 'button', 'data-testid': 'binder-fill-page', title: 'The AI reads the book and proposes the 🆕 quick facts of this page. Nothing you wrote is replaced; you approve each proposal.',
+        onclick: ev => runFill(fillTargets, ev.currentTarget) }, '✨ Fill this page from the book') : null,
+      n ? h('button', { type: 'button', 'data-testid': 'binder-approve-page', onclick: ev => approveAll(props, ev.currentTarget) }, `✔ Approve ${n} proposal${n > 1 ? 's' : ''}`) : null,
+      n ? h('button', { type: 'button', 'data-testid': 'binder-dismiss-page', onclick: ev => dismissAll(props, ev.currentTarget) }, '✕ Dismiss them') : null);
+  }
+  async function approveAll(props, btn) {
+    btn.disabled = true;
+    try {
+      for (const [target, fields] of Object.entries(props)) await api('POST', bpath('/binder/fields/approve'), { body: { target, fields } });
+      x.toast('Approved'); await reloadData();
+    } catch (e) { btn.disabled = false; showMsg('bnd-err', '✔ Approve did not work: ', plainError(e)); }
+  }
+  async function dismissAll(props, btn) {
+    const ok = await x.choiceDialog('Dismiss these proposals?', h('p', null, 'The values the AI proposed for this page are removed. Values you wrote or approved stay.'), [{ id: 'yes', label: '✕ Dismiss them' }]);
+    if (ok !== 'yes') return;
+    btn.disabled = true;
+    try {
+      for (const [target, fields] of Object.entries(props)) await api('POST', bpath('/binder/fields/dismiss'), { body: { target, fields } });
+      x.toast('Proposals dismissed'); await reloadData();
+    } catch (e) { btn.disabled = false; showMsg('bnd-err', '✕ Dismiss did not work: ', plainError(e)); }
+  }
+  function showMsg(cls, lead, text, ...more) {
+    clear(msg).appendChild(h('div', { class: cls, role: cls === 'bnd-err' ? 'alert' : null }, h('p', null, h('b', null, lead), text), ...more));
+  }
+  /** ✨ Fill from the book: POST …/binder/fill (a job), its progress here, then the page again with the proposals */
+  let filling = false;
+  async function runFill(targets, btn) {
+    if (filling) return;
+    filling = true;
+    if (btn) btn.disabled = true;
+    let job;
+    try { job = await api('POST', bpath('/binder/fill'), { body: targets && targets.length ? { targets } : {} }); }
+    catch (e) { filling = false; if (btn) btn.disabled = false; showMsg('bnd-err', '✨ Fill from the book did not start: ', plainError(e)); return; }
+    const line = h('span', null, '✨ Reading the book…');
+    const bar = h('progress', { max: String(job.total || 1), value: '0', 'aria-label': 'Fill from the book progress' });
+    const stop = h('button', { type: 'button', class: 'bnd-inline-btn', onclick: async () => {
+      stop.disabled = true;
+      try { await api('POST', bpath(`/review/ai/${encodeURIComponent(job.job_id)}/cancel`)); } catch { /* it ends anyway */ }
+    } }, 'Stop');
+    clear(msg).appendChild(h('div', { class: 'bnd-progress-line', 'data-testid': 'binder-fill-progress' }, line, bar, stop));
+    const show = j => { line.textContent = `✨ ${j.phase || 'Reading the book'} — ${j.done || 0} of ${j.total || 1}`; bar.max = j.total || 1; bar.value = j.done || 0; };
+    show(job);
+    while (!['done', 'error', 'cancelled'].includes(job.status)) {
+      await new Promise(r => setTimeout(r, 900));
+      if (!document.body.contains(root)) { filling = false; return; }   // the page changed; the job keeps going
+      try { job = await api('GET', bpath(`/review/ai/${encodeURIComponent(job.job_id)}`)); } catch { continue; }
+      show(job);
+    }
+    filling = false;
+    if (btn) btn.disabled = false;
+    if (job.status === 'error') { showMsg('bnd-err', '✨ Fill from the book did not work: ', plainError({ body: { errors: [job.error || {}] } })); return; }
+    const last = (job.results || []).slice(-1)[0] || {};
+    await reloadData();
+    showMsg('bnd-ok-msg', job.status === 'cancelled' ? 'Stopped. ' : '✔ ', last.message || 'Done. The proposals are marked ✎ — ✔ approve them or ✏ edit them.');
+  }
+  /** after an edit, an approval or a fill: the binder again, on the same page */
+  async function reloadData() {
+    const keep = (pages[st.idx] || {}).page_id;
+    let d;
+    try { d = await api('GET', bpath('/binder')); } catch (e) { showMsg('bnd-err', 'The Book Bible could not be reloaded: ', plainError(e)); return; }
+    const y = window.scrollY;
+    setData(d); buildIndex();
+    st.idx = Math.max(0, pages.findIndex(q => q.page_id === keep));
+    drawContents(); drawPager(); drawStage();
+    window.scrollTo(0, y);
+  }
   const lookSel = h('select', { id: 'bnd-look', 'data-testid': 'binder-look' },
     Object.entries(LOOKS).map(([k, [w, ic]]) => h('option', { value: k, selected: k === st.look }, `${ic} ${w}${k === autoLook ? ' (auto)' : ''}`)));
   lookSel.addEventListener('change', () => setLook(lookSel.value));
@@ -1040,6 +1306,8 @@ export async function viewBinder(main, x, rest = []) {
     h('span', { class: 'bnd-segs', role: 'group', 'aria-label': 'How many pages to show' }, btnOne, btnAll),
     h('label', { class: 'bnd-check', for: 'bnd-fids' }, fidBox, ' Show field numbers'),
     h('span', { class: 'bnd-tb-gap' }),
+    h('button', { type: 'button', 'data-testid': 'binder-fill', title: 'The AI reads the book and proposes the 🆕 quick facts (heights, stat bars, relationship types, danger levels…). Nothing you wrote is replaced; you approve each proposal.',
+      onclick: ev => runFill(null, ev.currentTarget) }, '✨ Fill from the book'),
     h('button', { type: 'button', 'data-testid': 'binder-print', onclick: () => printBinder() }, '🖨 Print'),
     h('button', { type: 'button', 'data-testid': 'binder-pdf', onclick: ev => exportAs('pdf', ev.currentTarget) }, '⬇ PDF'),
     h('button', { type: 'button', 'data-testid': 'binder-docx', onclick: ev => exportAs('docx', ev.currentTarget) }, '⬇ Word'));
@@ -1118,7 +1386,8 @@ export async function viewBinder(main, x, rest = []) {
     if (!LOOKS[l]) return;
     st.look = l; st.keep.look = l; persist(); draw();
     const brand = rail.querySelector('.bnd-rail-brand small'); if (brand) brand.textContent = `${pages.length} pages · ${LOOKS[l][0]}`;
-    try { await api('PUT', bpath('/binder/look'), { body: { look: l } }); } catch { /* not wired yet: the choice stays on this computer */ }
+    // stored with the book (null = the genre's look again); kept on this computer too in case the server cannot
+    try { await api('PUT', bpath('/binder/look'), { body: { look: l === autoLook ? null : l } }); book.look_stored = l === autoLook ? null : l; } catch { /* the choice stays on this computer */ }
   }
   /** the print page box: header (book title) and footer (page number) in the page margins */
   function pageCss() {
@@ -1158,25 +1427,35 @@ export async function viewBinder(main, x, rest = []) {
       msg.appendChild(h('p', { class: 'bnd-ok-msg' }, `✔ Book Bible (${word}) downloaded.`));
     } catch (e) {
       const err = (e && e.body && Array.isArray(e.body.errors) && e.body.errors[0]) || {};
-      const notWired = err.code === 'RENDER_NOT_WIRED' || (e && e.status === 404 && !err.message) || (e && e.status === 404 && err.code === 'NOT_FOUND');
-      const plain = err.message || (e && e.status === 404 ? `Downloading the Book Bible as ${word} is not available in this Akọwe yet.` : (e && e.message) || 'The download did not work.');
-      msg.appendChild(h('div', { class: 'bnd-err', role: 'alert' },
+      const code = err.problem || err.code;
+      const words = problemFor(code, e && e.status);
+      const notWired = /RENDER_|TOO_BIG/.test(err.problem || '') || err.code === 'RENDER_NOT_WIRED' || (e && e.status === 404);
+      const plain = err.message || (e && e.status === 404 ? `Downloading the Book Bible as ${word} is not available in this Akọwe yet.` : words.what || (e && e.message) || 'The download did not work.');
+      const fix = err.fix || (code && problemFor(code) !== problemFor('') ? words.fix : '');
+      const sameFix = !fix || fold(fix).replace(/\W+/g, '') === fold(plain).replace(/\W+/g, '');
+      msg.appendChild(h('div', { class: 'bnd-err', role: 'alert', 'data-problem': code || null },
         h('p', null, h('b', null, `⬇ ${word} did not work: `), plain),
+        sameFix ? null : h('p', null, fix),
         fmt === 'pdf' || notWired ? h('p', null, 'You can still get a PDF now: press ', h('button', { type: 'button', class: 'bnd-inline-btn', onclick: () => printBinder() }, '🖨 Print'),
           ' and choose “Save as PDF” as the printer.') : null));
     } finally { btn.disabled = false; }
   }
 
   /* ------------------------------------------------------------------ search across every page */
-  const index = [];
-  for (const p of pages) {
-    index.push({ p, fid: null, label: TPL[p.template][2], text: pageTitle(p) });
-    for (const [code, secObj] of Object.entries(p.sections || {})) {
-      for (const [id, f] of Object.entries((secObj && secObj.fields) || {})) if (!empty(f)) index.push({ p, fid: id, label: (META[id] || {}).short || id, text: txt(f) });
-      for (const r of (secObj && secObj.rows) || []) for (const [id, f] of Object.entries(r || {})) if (!empty(f)) index.push({ p, fid: id, label: (META[id] || {}).short || (SECS[code] || {}).name || id, text: txt(f) });
+  let index = [];
+  function buildIndex() {
+    index = [];
+    const ok = ([id, f]) => isFieldEntry([id, f]) && !empty(f) && !(META[id] || {}).pic && !/^(\/api\/|data:)/.test(txt(f));
+    for (const p of pages) {
+      index.push({ p, fid: null, label: TPL[p.template][2], text: pageTitle(p) });
+      for (const [code, secObj] of Object.entries(p.sections || {})) {
+        for (const [id, f] of Object.entries((secObj && secObj.fields) || {}).filter(ok)) index.push({ p, fid: id, label: (META[id] || {}).short || id, text: txt(f) });
+        for (const r of (secObj && secObj.rows) || []) for (const [id, f] of Object.entries(r || {}).filter(ok)) index.push({ p, fid: id, label: (META[id] || {}).short || (SECS[code] || {}).name || id, text: txt(f) });
+      }
     }
+    index.forEach(e => { e.k = fold(e.text); });
   }
-  index.forEach(e => { e.k = fold(e.text); });
+  buildIndex();
   let searchTimer = null;
   search.addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(runSearch, 120); });
   search.addEventListener('keydown', ev => { if (ev.key === 'Escape') { search.value = ''; runSearch(); } });

@@ -659,7 +659,7 @@ async function pickView(parts) {
     if (rest[0] === 'pictures') return m => viewPictures(m, forgeUI());  // 🖼 B3
     if (rest[0] === 'trailer') return m => viewTrailer(m, Object.assign(forgeUI(), { fmtClock }));  // 🎞 B2
     if (rest[0] === 'cover') return m => viewCover(m, forgeUI());  // 🎨 B3 cover designer
-    if (rest[0] === 'bible') return m => viewBinder(m, forgeUI(), rest.slice(1));  // 📖 Book Bible binder
+    if (rest[0] === 'bible' || rest[0] === 'binder') return m => viewBinder(m, forgeUI(), rest.slice(1));  // 📖 Book Bible binder (…/binder: the 🆕 fields' edit route)
     if (rest[0] === 'manifest') return viewManifest;
     if (rest[0] === 'activity') return viewActivity;
     if (rest[0] === 'progress') return viewProgress;

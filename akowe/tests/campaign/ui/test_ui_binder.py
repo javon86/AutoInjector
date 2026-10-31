@@ -55,27 +55,110 @@ def fixture_doc(pid, **book):
     return doc
 
 
-def serve_binder(page, pid, doc=None, export=None, status=200):
-    """Answer the binder API from the fixture: GET …/binder, PUT …/binder/look (recorded), GET …/binder/export (an error)."""
-    body = json.dumps(doc or fixture_doc(pid))
-    calls = SimpleNamespace(looks=[], exports=[])
+BOOK_SOURCES = {"auto:series_line": ["series", "series_number"], "auto:themes": ["themes"], "auto:theme_1": ["themes"],
+                "auto:theme_2": ["themes"], "auto:theme_3": ["themes"]}
 
-    def handle(route):
+
+def stored_fields(doc, target):
+    """(key, field) pairs of the doc that hold the binder's own 🆕 value `key` of `target` (what PUT …/binder/fields changes)."""
+    for p in doc["pages"]:
+        page_target = p.get("target") or ("book" if p["template"] in ("1", "2", "3", "4", "10", "12") else None)
+        for sec in p["sections"].values():
+            for f in sec["fields"].values():
+                if f.get("repeat") or f.get("unavailable"):
+                    continue
+                src = f.get("source", "")
+                edit = f.get("edit") or {}
+                t = edit.get("target") or (("book" if src in BOOK_SOURCES else page_target) if (src.startswith("new:") or src in BOOK_SOURCES) else None)
+                keys = [edit["field"]] if edit.get("target") else [src[4:]] if src.startswith("new:") else BOOK_SOURCES.get(src, [])
+                if t == target:
+                    for k in keys:
+                        yield k, f
+            for r in sec.get("rows", []):
+                f = r.get("5.8.3")
+                if f and (r.get("_meta") or {}).get("target") == target:
+                    yield "type", f
+
+
+class FakeBinderApi:
+    """The binder API of the data side, answered from the fixture (a copy that edits, approvals and fills change)."""
+
+    def __init__(self, doc, export=None, status=200):
+        self.doc, self.export, self.status = doc, export, status
+        self.looks, self.exports, self.puts, self.approves, self.dismisses, self.fills = [], [], [], [], [], []
+        self.jobs = {}
+
+    def set(self, target, values, status):
+        for k, f in stored_fields(self.doc, target):
+            if k not in values:
+                continue
+            v = values[k]
+            if v in (None, "", []):
+                f.update(value="", status="empty")
+                f.pop("edit", None)
+                continue
+            f.update(value=" · ".join(v) if isinstance(v, list) else str(v), status=status)
+            f["edit"] = {"route": "#/p/x/main/binder", "field": k, "target": target, "api": "PUT …/binder/fields"}
+
+    def values(self, target):
+        out = {}
+        for k, f in stored_fields(self.doc, target):
+            out.setdefault(k, {"value": f["value"] or None, "status": f["status"] if f["value"] else "supplied", "protected": False, "new": True})
+        return out
+
+    def handle(self, route):
         req = route.request
-        if req.method == "PUT" and req.url.endswith("/binder/look"):
-            calls.looks.append(json.loads(req.post_data or "{}"))
-            return route.fulfill(status=200, content_type="application/json", body='{"ok": true}')
-        if "/binder/export" in req.url:
-            calls.exports.append(req.url)
-            err = export or {"code": "RENDER_NOT_WIRED", "path": "/format",
-                             "message": "Making the PDF needs AutoInjector's page renderer, which is not connected."}
-            return route.fulfill(status=501, content_type="application/json", body=json.dumps({"errors": [err]}))
-        if status != 200:
-            return route.fulfill(status=status, content_type="application/json",
-                                 body=json.dumps({"errors": [{"code": "NOT_FOUND", "path": "/", "message": "not found"}]}))
-        return route.fulfill(status=200, content_type="application/json", body=body)
-    page.route(re.compile(r"/api/projects/[^/]+/branches/[^/]+/binder(/|\?|$)"), handle)
-    return calls
+        path = req.url.split("/binder", 1)[-1] if "/binder" in req.url else req.url
+        body = json.loads(req.post_data or "{}") if req.method in ("PUT", "POST") else {}
+        ok = lambda obj, code=200: route.fulfill(status=code, content_type="application/json", body=json.dumps(obj))  # noqa: E731
+        if "/review/ai/" in req.url:
+            return ok(self.jobs[req.url.rsplit("/", 1)[-1]])
+        if req.method == "PUT" and path == "/look":
+            self.looks.append(body)
+            return ok({"ok": True, "look": body.get("look")})
+        if path.startswith("/export"):
+            self.exports.append(req.url)
+            err = self.export or {"code": "CAPABILITY_UNAVAILABLE", "path": "/format", "problem": "RENDER_NOT_WIRED",
+                                  "message": "Making the PDF needs AutoInjector's page renderer, which is not connected.",
+                                  "fix": "Open AutoInjector to make the PDF, or use 🖨 Print → Save as PDF"}
+            return ok({"errors": [err]}, 503)
+        if path.startswith("/fields?"):
+            target = path.split("target=", 1)[1].split("&")[0]
+            from urllib.parse import unquote
+            target = unquote(target)
+            return ok({"target": target, "fields": self.values(target), "info": self.doc["fields_info"]})
+        if req.method == "PUT" and path == "/fields":
+            self.puts.append(body)
+            self.set(body["target"], body["fields"], "supplied")
+            return ok({"ok": True, "fields": self.values(body["target"])})
+        if req.method == "POST" and path in ("/fields/approve", "/fields/dismiss"):
+            (self.approves if path.endswith("approve") else self.dismisses).append(body)
+            for k, f in stored_fields(self.doc, body["target"]):
+                if k in body.get("fields", []) and f["status"] == "proposed":
+                    if path.endswith("approve"):
+                        f["status"] = "approved"
+                    else:
+                        f.update(value="", status="empty")
+            return ok({"ok": True})
+        if req.method == "POST" and path == "/fill":
+            self.fills.append(body)
+            for t in body.get("targets") or ["character:rec-maren"]:
+                if t == "character:rec-maren":
+                    self.set(t, {"height": "1.62 m (5 ft 4 in)", "handedness": "right"}, "proposed")
+            jid = f"job-{len(self.fills)}"
+            self.jobs[jid] = {"job_id": jid, "kind": "binder_fill", "status": "done", "phase": "Reading Maren Vey", "done": 1, "total": 1,
+                              "results": [{"ok": True, "proposed": 2, "message": "2 value(s) proposed from the book. Read them, then ✔ approve or ✎ edit each one."}]}
+            return ok(dict(self.jobs[jid], status="running", done=0), 202)
+        if self.status != 200:
+            return ok({"errors": [{"code": "NOT_FOUND", "path": "/", "message": "not found"}]}, self.status)
+        return ok(self.doc)
+
+
+def serve_binder(page, pid, doc=None, export=None, status=200):
+    """Answer the binder API (GET …/binder, …/look, …/fields, …/fill, …/export, …/review/ai/<job>) from the fixture."""
+    fake = FakeBinderApi(doc or fixture_doc(pid), export, status)
+    page.route(re.compile(r"/api/projects/[^/]+/branches/[^/]+/(binder(/|\?|$)|review/ai/job-)"), fake.handle)
+    return fake
 
 
 def open_binder(make_context, bd, width=1280, height=900, look=None, mode=None, page_id=None, doc=None, status=200):
@@ -118,21 +201,22 @@ def heading_words(name):
 def test_fixture_follows_the_contract():
     sch = schema()
     doc = json.loads(FIXTURE.read_text(encoding="utf-8"))
-    assert doc["schema_version"] == 1 and set(doc["book"]) >= {"title", "author", "genre", "look"}
+    assert doc["schema_version"] == 1 and set(doc["book"]) >= {"title", "author", "genre", "look", "look_default", "look_stored", "looks"}
+    assert set(doc) >= {"pages", "contents", "todo", "counts", "fields_info"}
     assert {p["template"] for p in doc["pages"]} == set(sch), "every template has at least one page"
     for p in doc["pages"]:
         assert p["status"] in ("approved", "draft", "needs_you")
-        assert set(p) >= {"template", "entry_id", "title", "page_id", "status", "sections", "pics"}
+        assert set(p) >= {"template", "entry_id", "title", "page_id", "page", "status", "icon", "sections", "pics"}
         for code, _name, repeat, fields in sch[p["template"]][1]:
             sec = p["sections"][code]
             ids = {f[0] for f in fields}
+            assert set(sec["fields"]) == ids, f"{p['page_id']} {code}: every field id is present"
             if repeat:
                 assert "rows" in sec, f"{p['page_id']} {code}: a repeating section has rows"
+                assert all(f.get("repeat") is True for f in sec["fields"].values()), "placeholders only; the data is in rows"
                 for row in sec["rows"]:
-                    assert set(row) == ids
-            else:
-                assert set(sec["fields"]) == ids, f"{p['page_id']} {code}: every field id is present"
-            for f in list(sec["fields"].values()) + [f for r in sec.get("rows", []) for f in r.values()]:
+                    assert {k for k in row if not k.startswith("_")} == ids
+            for f in [f for f in sec["fields"].values() if not f.get("repeat")] + [f for r in sec.get("rows", []) for k, f in r.items() if not k.startswith("_")]:
                 assert f["status"] in ("approved", "proposed", "supplied", "empty", "auto")
                 assert (f["status"] == "empty") == (f["value"] in ("", [])), f
     assert [c["page"] for c in doc["contents"]] == sorted(c["page"] for c in doc["contents"])
@@ -229,6 +313,10 @@ def test_look_auto_pick_switch_and_persist(make_context, bd):
     page.wait_for_function("() => document.querySelector('[data-testid=binder]').dataset.look === 'scifi'")
     assert paper() != before
     assert page.bf_calls.looks == [{"look": "scifi"}]
+    page.select_option("[data-testid=binder-look]", "fantasy")          # the genre's own look again: stored as null
+    page.wait_for_function("() => document.querySelector('[data-testid=binder]').dataset.look === 'fantasy'")
+    assert page.bf_calls.looks[-1] == {"look": None}
+    page.select_option("[data-testid=binder-look]", "scifi")
     assert page.locator(".bnd-page svg.bnd-corner").count() == 4
     page.reload()
     page.wait_for_selector(".bnd-page", timeout=15000)
@@ -237,7 +325,7 @@ def test_look_auto_pick_switch_and_persist(make_context, bd):
     # no stored look: picked from the genre
     for genre, look in (("Mystery", "noir"), ("Children’s picture book", "playful"), ("Science fiction", "scifi"), ("Romance", "romance"),
                         ("Horror", "horror"), ("Historical", "classic"), ("Something new", "classic")):
-        p2 = open_binder(make_context, bd, doc=fixture_doc(bd.pid, look="", genre=genre))
+        p2 = open_binder(make_context, bd, doc=fixture_doc(bd.pid, look="", look_default="", genre=genre))
         assert p2.get_attribute(root, "data-look") == look, genre
         assert "(auto)" in p2.locator("[data-testid=binder-look] option:checked").inner_text()
         assert_clean(p2, genre)
@@ -315,7 +403,8 @@ def test_pdf_and_word_buttons_show_the_plain_error(make_context, bd):
     page.click("[data-testid=binder-docx]")
     page.wait_for_function("() => document.querySelector('[data-testid=binder-msg]').innerText.includes('Word did not work')")
     assert [u.split("?")[1] for u in page.bf_calls.exports] == ["format=pdf", "format=docx"]
-    probs = [p for p in page.bf_problems if "/binder/export" not in p and "status of 501" not in p]
+    assert "Open AutoInjector to make the PDF" in msg and page.get_attribute("[data-testid=binder-msg] .bnd-err", "data-problem") == "RENDER_NOT_WIRED"
+    probs = [p for p in page.bf_problems if "/binder/export" not in p and "status of 503" not in p]
     page.bf_problems[:] = probs
     assert_clean(page, "exports")
 
@@ -432,3 +521,71 @@ def test_no_horizontal_scroll(make_context, bd, width):
         assert cols == 1
         assert page.evaluate("() => document.querySelector('.bnd-rail').getBoundingClientRect().bottom <= document.querySelector('.bnd-page').getBoundingClientRect().top")
     assert_clean(page, f"widths {width}")
+
+
+# ------------------------------------------------------------------------------------------------ 🆕 fields
+def test_new_fields_inline_editor_saves_validates_and_approves(make_context, bd):
+    page = open_binder(make_context, bd, page_id="ch-maren")
+    art = page.locator('.bnd-page[data-page-id="ch-maren"]')
+    assert "Not stored yet" in art.locator('[data-fid="5.13.10"]').inner_text()          # `unavailable`: a quiet note
+    # height: a 🆕 quick stat — ✏️ opens the editor, 💾 Save stores it (PUT …/binder/fields) and the page shows it
+    art.locator('.bnd-fact[data-fid="5.2.5"] button.bnd-fedit').click()
+    page.wait_for_selector("[data-testid=binder-editor] input")
+    page.fill("[data-testid=binder-editor] input", "1.60 m (5 ft 3 in)")
+    page.click("[data-testid=binder-ed-save]")
+    page.wait_for_function("""() => document.querySelector('.bnd-fact[data-fid="5.2.5"] dd').innerText.includes('1.60 m')""")
+    assert page.bf_calls.puts == [{"target": "character:rec-maren", "fields": {"height": "1.60 m (5 ft 3 in)"}}]
+    # a stat bar takes a whole number 1-10: a wrong one is explained, not sent
+    art.locator('.bnd-bar[data-fid="5.9.7"] button.bnd-fedit').click()
+    page.wait_for_selector("[data-testid=binder-editor] input[type=number]")
+    page.fill("[data-testid=binder-editor] input", "12")
+    page.click("[data-testid=binder-ed-save]")
+    assert "whole number from 1 to 10" in page.inner_text(".bnd-ed-msg")
+    page.fill("[data-testid=binder-editor] input", "6")
+    page.click("[data-testid=binder-ed-save]")
+    page.wait_for_function("""() => document.querySelectorAll('.bnd-bar[data-fid="5.9.7"] i.on').length === 6""")
+    assert page.bf_calls.puts[-1] == {"target": "character:rec-maren", "fields": {"stat_strength": 6}}
+    # the relationship type (a row field): its proposal is approved from the editor
+    rel = page.locator('.bnd-page .bnd-reltype[data-fid="5.8.3"]').first
+    assert rel.locator(".bnd-prop").count() == 1
+    rel.locator("button.bnd-fedit").click()
+    page.click("[data-testid=binder-ed-approve]")
+    page.wait_for_function("""() => !document.querySelector('.bnd-reltype[data-fid="5.8.3"] .bnd-prop')""")
+    assert page.bf_calls.approves == [{"target": "relationship:rec-maren:odile marsh", "fields": ["type"]}]
+    # book-level 🆕 fields (At a glance: sub-genre) go to the target "book"
+    goto_page(page, "glance")
+    page.locator('.bnd-page [data-fid="3.4.2"] button.bnd-fedit').click()
+    page.wait_for_selector("[data-testid=binder-editor] input")
+    assert page.input_value("[data-testid=binder-editor] input") == "Gaslamp fantasy"
+    page.click("[data-testid=binder-ed-dismiss]")
+    page.wait_for_function("""() => document.querySelector('.bnd-page [data-fid="3.4.2"]').innerText.includes('Not filled yet')""")
+    assert page.bf_calls.dismisses == [{"target": "book", "fields": ["subgenre"]}]
+    assert not unnamed_controls(page)
+    shot(page, "binder-editor")
+    assert_clean(page, "editor")
+
+
+def test_fill_from_the_book_then_approve_the_proposals(make_context, bd):
+    page = open_binder(make_context, bd, page_id="ch-maren")
+    art = page.locator('.bnd-page[data-page-id="ch-maren"]')
+    assert art.locator("[data-testid=binder-approve-page]").inner_text() == "✔ Approve 1 proposal"   # the relationship type
+    # an empty 🆕 field's placeholder asks the AI for this page (a button, not a link)
+    assert art.locator('.bnd-fact[data-fid="5.2.5"] button.bnd-fill', has_text="✨ Fill from the book").count() == 1
+    art.locator("[data-testid=binder-fill-page]").click()
+    page.wait_for_selector("[data-testid=binder-msg] .bnd-ok-msg")
+    assert "2 value(s) proposed from the book" in page.inner_text("[data-testid=binder-msg]")
+    assert page.bf_calls.fills == [{"targets": ["character:rec-maren"]}]
+    page.wait_for_function("""() => document.querySelector('.bnd-fact[data-fid="5.2.5"] dd').innerText.includes('1.62 m')""")
+    assert page.locator('.bnd-fact.is-proposed[data-fid="5.2.5"]').count() == 1
+    approve = page.locator("[data-testid=binder-approve-page]")
+    assert approve.inner_text() == "✔ Approve 3 proposals"
+    approve.click()
+    page.wait_for_function("() => !document.querySelector('[data-testid=binder-approve-page]')")
+    assert sorted(page.bf_calls.approves, key=lambda b: b["target"]) == [
+        {"target": "character:rec-maren", "fields": ["height", "handedness"]}, {"target": "relationship:rec-maren:odile marsh", "fields": ["type"]}]
+    assert page.locator('.bnd-fact.is-proposed[data-fid="5.2.5"]').count() == 0
+    # the toolbar button fills the whole book
+    page.click("[data-testid=binder-fill]")
+    page.wait_for_function("() => document.querySelector('[data-testid=binder-fill]') && !document.querySelector('[data-testid=binder-fill]').disabled && document.querySelector('[data-testid=binder-msg] .bnd-ok-msg')")
+    assert len(page.bf_calls.fills) == 2 and page.bf_calls.fills[-1] == {}
+    assert_clean(page, "fill")

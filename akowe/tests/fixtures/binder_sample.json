@@ -1,19 +1,61 @@
 {
  "schema_version": 1,
+ "generated_at": "2026-10-30T21:14:00Z",
+ "updated_at": "2026-10-30T21:14:00Z",
  "book": {
   "title": "The Lamplighter's Last Ferry",
   "author": "Imogen Achterberg",
   "genre": "Fantasy",
-  "look": "fantasy"
+  "look": "fantasy",
+  "look_default": "fantasy",
+  "look_stored": null,
+  "looks": [
+   {
+    "id": "classic",
+    "label": "Classic",
+    "feel": "cream paper, deep green, gold rules, serif"
+   },
+   {
+    "id": "fantasy",
+    "label": "Fantasy",
+    "feel": "parchment, burgundy and antique gold, ornate corners"
+   },
+   {
+    "id": "scifi",
+    "label": "Science fiction",
+    "feel": "dark slate, cyan and violet, thin geometric lines"
+   },
+   {
+    "id": "noir",
+    "label": "Noir case file",
+    "feel": "charcoal and off-white, red accent, typewriter labels"
+   },
+   {
+    "id": "romance",
+    "label": "Romance",
+    "feel": "blush and ivory, rose and muted gold, rounded cards"
+   },
+   {
+    "id": "horror",
+    "label": "Horror",
+    "feel": "near-black, blood red, bone white, worn edges"
+   },
+   {
+    "id": "playful",
+    "label": "Playful",
+    "feel": "bright cheerful colours, rounded shapes, big friendly type"
+   }
+  ]
  },
- "generated_at": "2026-10-30T21:14:00Z",
  "pages": [
   {
    "template": "1",
    "entry_id": null,
    "title": "The Lamplighter's Last Ferry",
    "page_id": "cover",
+   "page": 1,
    "status": "draft",
+   "icon": "📕",
    "sections": {
     "1.1": {
      "fields": {
@@ -47,11 +89,8 @@
       "1.1.4": {
        "value": "The Vessmoor Lamps · Book One",
        "status": "proposed",
-       "source": "new:1.1.4",
-       "edit": {
-        "route": "#/p/PID/main/book",
-        "field": "1.1.4"
-       }
+       "source": "auto:series_line",
+       "new": true
       }
      }
     },
@@ -173,10 +212,34 @@
    "entry_id": null,
    "title": "Contents",
    "page_id": "contents",
+   "page": 2,
    "status": "approved",
+   "icon": "📑",
    "sections": {
     "2.1": {
-     "fields": {},
+     "fields": {
+      "2.1.1": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:2.1",
+       "repeat": true,
+       "rows": 9
+      },
+      "2.1.2": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:2.1",
+       "repeat": true,
+       "rows": 9
+      },
+      "2.1.3": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:2.1",
+       "repeat": true,
+       "rows": 9
+      }
+     },
      "rows": [
       {
        "2.1.1": {
@@ -334,7 +397,29 @@
      ]
     },
     "2.2": {
-     "fields": {},
+     "fields": {
+      "2.2.1": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:2.2",
+       "repeat": true,
+       "rows": 5
+      },
+      "2.2.2": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:2.2",
+       "repeat": true,
+       "rows": 5
+      },
+      "2.2.3": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:2.2",
+       "repeat": true,
+       "rows": 5
+      }
+     },
      "rows": [
       {
        "2.2.1": {
@@ -424,7 +509,29 @@
      ]
     },
     "2.3": {
-     "fields": {},
+     "fields": {
+      "2.3.1": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:2.3",
+       "repeat": true,
+       "rows": 3
+      },
+      "2.3.2": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:2.3",
+       "repeat": true,
+       "rows": 3
+      },
+      "2.3.3": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:2.3",
+       "repeat": true,
+       "rows": 3
+      }
+     },
      "rows": [
       {
        "2.3.1": {
@@ -487,7 +594,9 @@
    "entry_id": null,
    "title": "At a glance",
    "page_id": "glance",
+   "page": 3,
    "status": "draft",
+   "icon": "🔭",
    "sections": {
     "3.1": {
      "fields": {
@@ -547,10 +656,13 @@
       "3.4.2": {
        "value": "Gaslamp fantasy",
        "status": "proposed",
-       "source": "new:3.4.2",
+       "source": "new:subgenre",
+       "new": true,
        "edit": {
-        "route": "#/p/PID/main/book",
-        "field": "3.4.2"
+        "route": "#/p/PID/main/binder",
+        "field": "subgenre",
+        "target": "book",
+        "api": "PUT /api/projects/PID/branches/main/binder/fields"
        }
       },
       "3.4.3": {
@@ -642,26 +754,54 @@
       "3.5.4": {
        "value": "No on-page death of children; no gore; violence stays off-stage or brief.",
        "status": "proposed",
-       "source": "new:3.5.4",
+       "source": "new:content_limits",
+       "new": true,
        "edit": {
-        "route": "#/p/PID/main/book",
-        "field": "3.5.4"
+        "route": "#/p/PID/main/binder",
+        "field": "content_limits",
+        "target": "book",
+        "api": "PUT /api/projects/PID/branches/main/binder/fields"
        }
       }
      }
     },
     "3.6": {
-     "fields": {},
+     "fields": {
+      "3.6.1": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:3.6",
+       "repeat": true,
+       "rows": 4
+      },
+      "3.6.2": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:3.6",
+       "repeat": true,
+       "rows": 4
+      },
+      "3.6.3": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:3.6",
+       "repeat": true,
+       "rows": 4
+      },
+      "3.6.4": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:3.6",
+       "repeat": true,
+       "rows": 4
+      }
+     },
      "rows": [
       {
        "3.6.1": {
-        "value": "",
-        "status": "empty",
-        "source": "forge:3.6.1",
-        "edit": {
-         "route": "#/p/PID/main/book",
-         "field": "3.6.1"
-        }
+        "value": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAgMTUwIj4gPGRlZnM+PHJhZGlhbEdyYWRpZW50IGlkPSJnIiBjeD0iLjUiIGN5PSIuMzUiIHI9Ii44Ij48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiNmZmY2ZDgiIHN0b3Atb3BhY2l0eT0iLjkiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiNjOWEzNmEiLz48L3JhZGlhbEdyYWRpZW50PjwvZGVmcz4gPHJlY3Qgd2lkdGg9IjEyMCIgaGVpZ2h0PSIxNTAiIGZpbGw9InVybCgjZykiLz4gPHBhdGggZD0iTTE0IDE1MGM0LTM0IDIyLTQ4IDQ2LTQ4czQyIDE0IDQ2IDQ4eiIgZmlsbD0iIzJmNGE0NCIvPiA8cGF0aCBkPSJNNTAgOTZoMjB2MTRjLTYgNS0xNCA1LTIwIDB6IiBmaWxsPSIjYzY4YTVmIi8+IDxlbGxpcHNlIGN4PSI2MCIgY3k9IjcwIiByeD0iMjIiIHJ5PSIyNyIgZmlsbD0iI2M2OGE1ZiIvPiA8cGF0aCBkPSJNMzYgNzBjLTItMjYgMTItMzggMjYtMzhzMjcgMTAgMjQgMzhjLTQtMTItMTAtMjAtMjQtMjEtMTIgMC0yMCA4LTI2IDIxeiIgZmlsbD0iIzNhMjQxOCIvPiA8Y2lyY2xlIGN4PSI1MSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz48Y2lyY2xlIGN4PSI2OSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz4gPHBhdGggZD0iTTUzIDg2cTcgNCAxNCAwIiBzdHJva2U9IiM3YTNkMzIiIHN0cm9rZS13aWR0aD0iMiIgZmlsbD0ibm9uZSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+PHBhdGggZD0iTTMwIDE1MGwxMC0yNiAyMCA2IDIwLTYgMTAgMjZ6IiBmaWxsPSIjYzQ4ZDNjIiBvcGFjaXR5PSIuNyIvPjwvc3ZnPg==",
+        "status": "supplied",
+        "source": "pic"
        },
        "3.6.2": {
         "value": "Odile Marsh",
@@ -689,17 +829,16 @@
          "route": "#/p/PID/main/book",
          "field": "3.6.4"
         }
+       },
+       "_meta": {
+        "page_id": "ch-odile"
        }
       },
       {
        "3.6.1": {
-        "value": "",
-        "status": "empty",
-        "source": "forge:3.6.1",
-        "edit": {
-         "route": "#/p/PID/main/book",
-         "field": "3.6.1"
-        }
+        "value": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAgMTUwIj4gPGRlZnM+PHJhZGlhbEdyYWRpZW50IGlkPSJnIiBjeD0iLjUiIGN5PSIuMzUiIHI9Ii44Ij48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiNmZmY2ZDgiIHN0b3Atb3BhY2l0eT0iLjkiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiM4YWExYTgiLz48L3JhZGlhbEdyYWRpZW50PjwvZGVmcz4gPHJlY3Qgd2lkdGg9IjEyMCIgaGVpZ2h0PSIxNTAiIGZpbGw9InVybCgjZykiLz4gPHBhdGggZD0iTTE0IDE1MGM0LTM0IDIyLTQ4IDQ2LTQ4czQyIDE0IDQ2IDQ4eiIgZmlsbD0iIzJhMzQ0NiIvPiA8cGF0aCBkPSJNNTAgOTZoMjB2MTRjLTYgNS0xNCA1LTIwIDB6IiBmaWxsPSIjZDlhOTgyIi8+IDxlbGxpcHNlIGN4PSI2MCIgY3k9IjcwIiByeD0iMjIiIHJ5PSIyNyIgZmlsbD0iI2Q5YTk4MiIvPiA8cGF0aCBkPSJNMzYgNzBjLTItMjYgMTItMzggMjYtMzhzMjcgMTAgMjQgMzhjLTQtMTItMTAtMjAtMjQtMjEtMTIgMC0yMCA4LTI2IDIxeiIgZmlsbD0iI2Q4ZDRjYyIvPiA8Y2lyY2xlIGN4PSI1MSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz48Y2lyY2xlIGN4PSI2OSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz4gPHBhdGggZD0iTTUzIDg2cTcgNCAxNCAwIiBzdHJva2U9IiM3YTNkMzIiIHN0cm9rZS13aWR0aD0iMiIgZmlsbD0ibm9uZSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+PHBhdGggZD0iTTQyIDg0cTE4IDIyIDM2IDB2MTBxLTE4IDIwLTM2IDB6IiBmaWxsPSIjZTdlM2RhIi8+PC9zdmc+",
+        "status": "supplied",
+        "source": "pic"
        },
        "3.6.2": {
         "value": "Tobiah Reed",
@@ -727,17 +866,16 @@
          "route": "#/p/PID/main/book",
          "field": "3.6.4"
         }
+       },
+       "_meta": {
+        "page_id": "ch-tobiah"
        }
       },
       {
        "3.6.1": {
-        "value": "",
-        "status": "empty",
-        "source": "forge:3.6.1",
-        "edit": {
-         "route": "#/p/PID/main/book",
-         "field": "3.6.1"
-        }
+        "value": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAgMTUwIj4gPGRlZnM+PHJhZGlhbEdyYWRpZW50IGlkPSJnIiBjeD0iLjUiIGN5PSIuMzUiIHI9Ii44Ij48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiNmZmY2ZDgiIHN0b3Atb3BhY2l0eT0iLjkiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiM5YWEwYWEiLz48L3JhZGlhbEdyYWRpZW50PjwvZGVmcz4gPHJlY3Qgd2lkdGg9IjEyMCIgaGVpZ2h0PSIxNTAiIGZpbGw9InVybCgjZykiLz4gPHBhdGggZD0iTTE0IDE1MGM0LTM0IDIyLTQ4IDQ2LTQ4czQyIDE0IDQ2IDQ4eiIgZmlsbD0iIzE1MTcxYyIvPiA8cGF0aCBkPSJNNTAgOTZoMjB2MTRjLTYgNS0xNCA1LTIwIDB6IiBmaWxsPSIjZWFjN2E4Ii8+IDxlbGxpcHNlIGN4PSI2MCIgY3k9IjcwIiByeD0iMjIiIHJ5PSIyNyIgZmlsbD0iI2VhYzdhOCIvPiA8cGF0aCBkPSJNMzYgNzBjLTItMjYgMTItMzggMjYtMzhzMjcgMTAgMjQgMzhjLTQtMTItMTAtMjAtMjQtMjEtMTIgMC0yMCA4LTI2IDIxeiIgZmlsbD0iIzFiMWIxZiIvPiA8Y2lyY2xlIGN4PSI1MSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz48Y2lyY2xlIGN4PSI2OSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz4gPHBhdGggZD0iTTUzIDg2cTcgNCAxNCAwIiBzdHJva2U9IiM3YTNkMzIiIHN0cm9rZS13aWR0aD0iMiIgZmlsbD0ibm9uZSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+PHBhdGggZD0iTTM4IDUwaDQ0di04SDM4eiIgZmlsbD0iIzE1MTcxYyIvPjwvc3ZnPg==",
+        "status": "supplied",
+        "source": "pic"
        },
        "3.6.2": {
         "value": "Silas Crane",
@@ -765,17 +903,16 @@
          "route": "#/p/PID/main/book",
          "field": "3.6.4"
         }
+       },
+       "_meta": {
+        "page_id": "ch-silas"
        }
       },
       {
        "3.6.1": {
-        "value": "",
-        "status": "empty",
-        "source": "forge:3.6.1",
-        "edit": {
-         "route": "#/p/PID/main/book",
-         "field": "3.6.1"
-        }
+        "value": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAgMTUwIj4gPGRlZnM+PHJhZGlhbEdyYWRpZW50IGlkPSJnIiBjeD0iLjUiIGN5PSIuMzUiIHI9Ii44Ij48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiNmZmY2ZDgiIHN0b3Atb3BhY2l0eT0iLjkiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiNkN2I5OGEiLz48L3JhZGlhbEdyYWRpZW50PjwvZGVmcz4gPHJlY3Qgd2lkdGg9IjEyMCIgaGVpZ2h0PSIxNTAiIGZpbGw9InVybCgjZykiLz4gPHBhdGggZD0iTTE0IDE1MGM0LTM0IDIyLTQ4IDQ2LTQ4czQyIDE0IDQ2IDQ4eiIgZmlsbD0iIzdiNGIyYSIvPiA8cGF0aCBkPSJNNTAgOTZoMjB2MTRjLTYgNS0xNCA1LTIwIDB6IiBmaWxsPSIjYzY4YTVmIi8+IDxlbGxpcHNlIGN4PSI2MCIgY3k9IjcwIiByeD0iMjIiIHJ5PSIyNyIgZmlsbD0iI2M2OGE1ZiIvPiA8cGF0aCBkPSJNMzYgNzBjLTItMjYgMTItMzggMjYtMzhzMjcgMTAgMjQgMzhjLTQtMTItMTAtMjAtMjQtMjEtMTIgMC0yMCA4LTI2IDIxeiIgZmlsbD0iIzVhM2EyMiIvPiA8Y2lyY2xlIGN4PSI1MSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz48Y2lyY2xlIGN4PSI2OSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz4gPHBhdGggZD0iTTUzIDg2cTcgNCAxNCAwIiBzdHJva2U9IiM3YTNkMzIiIHN0cm9rZS13aWR0aD0iMiIgZmlsbD0ibm9uZSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+PC9zdmc+",
+        "status": "supplied",
+        "source": "pic"
        },
        "3.6.2": {
         "value": "Wren Marsh",
@@ -803,6 +940,9 @@
          "route": "#/p/PID/main/book",
          "field": "3.6.4"
         }
+       },
+       "_meta": {
+        "page_id": "ch-wren"
        }
       }
      ]
@@ -821,50 +961,67 @@
       "3.7.2": {
        "value": "Memory as inheritance",
        "status": "proposed",
-       "source": "new:3.7.2",
-       "edit": {
-        "route": "#/p/PID/main/book",
-        "field": "3.7.2"
-       }
+       "source": "auto:theme_1",
+       "new": true
       },
       "3.7.3": {
        "value": "Progress and what it costs",
        "status": "proposed",
-       "source": "new:3.7.3",
-       "edit": {
-        "route": "#/p/PID/main/book",
-        "field": "3.7.3"
-       }
+       "source": "auto:theme_2",
+       "new": true
       },
       "3.7.4": {
        "value": "Small lights against large dark",
        "status": "proposed",
-       "source": "new:3.7.4",
-       "edit": {
-        "route": "#/p/PID/main/book",
-        "field": "3.7.4"
-       }
+       "source": "auto:theme_3",
+       "new": true
       },
       "3.7.5": {
        "value": "Is a memory still yours if nobody else remembers it?",
        "status": "proposed",
-       "source": "new:3.7.5",
+       "source": "new:central_question",
+       "new": true,
        "edit": {
-        "route": "#/p/PID/main/book",
-        "field": "3.7.5"
+        "route": "#/p/PID/main/binder",
+        "field": "central_question",
+        "target": "book",
+        "api": "PUT /api/projects/PID/branches/main/binder/fields"
        }
       }
      }
     }
    },
-   "pics": {}
+   "pics": {
+    "3.6.1#1": {
+     "url": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAgMTUwIj4gPGRlZnM+PHJhZGlhbEdyYWRpZW50IGlkPSJnIiBjeD0iLjUiIGN5PSIuMzUiIHI9Ii44Ij48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiNmZmY2ZDgiIHN0b3Atb3BhY2l0eT0iLjkiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiNjOWEzNmEiLz48L3JhZGlhbEdyYWRpZW50PjwvZGVmcz4gPHJlY3Qgd2lkdGg9IjEyMCIgaGVpZ2h0PSIxNTAiIGZpbGw9InVybCgjZykiLz4gPHBhdGggZD0iTTE0IDE1MGM0LTM0IDIyLTQ4IDQ2LTQ4czQyIDE0IDQ2IDQ4eiIgZmlsbD0iIzJmNGE0NCIvPiA8cGF0aCBkPSJNNTAgOTZoMjB2MTRjLTYgNS0xNCA1LTIwIDB6IiBmaWxsPSIjYzY4YTVmIi8+IDxlbGxpcHNlIGN4PSI2MCIgY3k9IjcwIiByeD0iMjIiIHJ5PSIyNyIgZmlsbD0iI2M2OGE1ZiIvPiA8cGF0aCBkPSJNMzYgNzBjLTItMjYgMTItMzggMjYtMzhzMjcgMTAgMjQgMzhjLTQtMTItMTAtMjAtMjQtMjEtMTIgMC0yMCA4LTI2IDIxeiIgZmlsbD0iIzNhMjQxOCIvPiA8Y2lyY2xlIGN4PSI1MSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz48Y2lyY2xlIGN4PSI2OSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz4gPHBhdGggZD0iTTUzIDg2cTcgNCAxNCAwIiBzdHJva2U9IiM3YTNkMzIiIHN0cm9rZS13aWR0aD0iMiIgZmlsbD0ibm9uZSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+PHBhdGggZD0iTTMwIDE1MGwxMC0yNiAyMCA2IDIwLTYgMTAgMjZ6IiBmaWxsPSIjYzQ4ZDNjIiBvcGFjaXR5PSIuNyIvPjwvc3ZnPg==",
+     "alt": "At a glance — 3.6.1 row 1",
+     "mime": "image/svg+xml"
+    },
+    "3.6.1#2": {
+     "url": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAgMTUwIj4gPGRlZnM+PHJhZGlhbEdyYWRpZW50IGlkPSJnIiBjeD0iLjUiIGN5PSIuMzUiIHI9Ii44Ij48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiNmZmY2ZDgiIHN0b3Atb3BhY2l0eT0iLjkiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiM4YWExYTgiLz48L3JhZGlhbEdyYWRpZW50PjwvZGVmcz4gPHJlY3Qgd2lkdGg9IjEyMCIgaGVpZ2h0PSIxNTAiIGZpbGw9InVybCgjZykiLz4gPHBhdGggZD0iTTE0IDE1MGM0LTM0IDIyLTQ4IDQ2LTQ4czQyIDE0IDQ2IDQ4eiIgZmlsbD0iIzJhMzQ0NiIvPiA8cGF0aCBkPSJNNTAgOTZoMjB2MTRjLTYgNS0xNCA1LTIwIDB6IiBmaWxsPSIjZDlhOTgyIi8+IDxlbGxpcHNlIGN4PSI2MCIgY3k9IjcwIiByeD0iMjIiIHJ5PSIyNyIgZmlsbD0iI2Q5YTk4MiIvPiA8cGF0aCBkPSJNMzYgNzBjLTItMjYgMTItMzggMjYtMzhzMjcgMTAgMjQgMzhjLTQtMTItMTAtMjAtMjQtMjEtMTIgMC0yMCA4LTI2IDIxeiIgZmlsbD0iI2Q4ZDRjYyIvPiA8Y2lyY2xlIGN4PSI1MSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz48Y2lyY2xlIGN4PSI2OSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz4gPHBhdGggZD0iTTUzIDg2cTcgNCAxNCAwIiBzdHJva2U9IiM3YTNkMzIiIHN0cm9rZS13aWR0aD0iMiIgZmlsbD0ibm9uZSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+PHBhdGggZD0iTTQyIDg0cTE4IDIyIDM2IDB2MTBxLTE4IDIwLTM2IDB6IiBmaWxsPSIjZTdlM2RhIi8+PC9zdmc+",
+     "alt": "At a glance — 3.6.1 row 2",
+     "mime": "image/svg+xml"
+    },
+    "3.6.1#3": {
+     "url": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAgMTUwIj4gPGRlZnM+PHJhZGlhbEdyYWRpZW50IGlkPSJnIiBjeD0iLjUiIGN5PSIuMzUiIHI9Ii44Ij48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiNmZmY2ZDgiIHN0b3Atb3BhY2l0eT0iLjkiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiM5YWEwYWEiLz48L3JhZGlhbEdyYWRpZW50PjwvZGVmcz4gPHJlY3Qgd2lkdGg9IjEyMCIgaGVpZ2h0PSIxNTAiIGZpbGw9InVybCgjZykiLz4gPHBhdGggZD0iTTE0IDE1MGM0LTM0IDIyLTQ4IDQ2LTQ4czQyIDE0IDQ2IDQ4eiIgZmlsbD0iIzE1MTcxYyIvPiA8cGF0aCBkPSJNNTAgOTZoMjB2MTRjLTYgNS0xNCA1LTIwIDB6IiBmaWxsPSIjZWFjN2E4Ii8+IDxlbGxpcHNlIGN4PSI2MCIgY3k9IjcwIiByeD0iMjIiIHJ5PSIyNyIgZmlsbD0iI2VhYzdhOCIvPiA8cGF0aCBkPSJNMzYgNzBjLTItMjYgMTItMzggMjYtMzhzMjcgMTAgMjQgMzhjLTQtMTItMTAtMjAtMjQtMjEtMTIgMC0yMCA4LTI2IDIxeiIgZmlsbD0iIzFiMWIxZiIvPiA8Y2lyY2xlIGN4PSI1MSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz48Y2lyY2xlIGN4PSI2OSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz4gPHBhdGggZD0iTTUzIDg2cTcgNCAxNCAwIiBzdHJva2U9IiM3YTNkMzIiIHN0cm9rZS13aWR0aD0iMiIgZmlsbD0ibm9uZSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+PHBhdGggZD0iTTM4IDUwaDQ0di04SDM4eiIgZmlsbD0iIzE1MTcxYyIvPjwvc3ZnPg==",
+     "alt": "At a glance — 3.6.1 row 3",
+     "mime": "image/svg+xml"
+    },
+    "3.6.1#4": {
+     "url": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAgMTUwIj4gPGRlZnM+PHJhZGlhbEdyYWRpZW50IGlkPSJnIiBjeD0iLjUiIGN5PSIuMzUiIHI9Ii44Ij48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiNmZmY2ZDgiIHN0b3Atb3BhY2l0eT0iLjkiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiNkN2I5OGEiLz48L3JhZGlhbEdyYWRpZW50PjwvZGVmcz4gPHJlY3Qgd2lkdGg9IjEyMCIgaGVpZ2h0PSIxNTAiIGZpbGw9InVybCgjZykiLz4gPHBhdGggZD0iTTE0IDE1MGM0LTM0IDIyLTQ4IDQ2LTQ4czQyIDE0IDQ2IDQ4eiIgZmlsbD0iIzdiNGIyYSIvPiA8cGF0aCBkPSJNNTAgOTZoMjB2MTRjLTYgNS0xNCA1LTIwIDB6IiBmaWxsPSIjYzY4YTVmIi8+IDxlbGxpcHNlIGN4PSI2MCIgY3k9IjcwIiByeD0iMjIiIHJ5PSIyNyIgZmlsbD0iI2M2OGE1ZiIvPiA8cGF0aCBkPSJNMzYgNzBjLTItMjYgMTItMzggMjYtMzhzMjcgMTAgMjQgMzhjLTQtMTItMTAtMjAtMjQtMjEtMTIgMC0yMCA4LTI2IDIxeiIgZmlsbD0iIzVhM2EyMiIvPiA8Y2lyY2xlIGN4PSI1MSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz48Y2lyY2xlIGN4PSI2OSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz4gPHBhdGggZD0iTTUzIDg2cTcgNCAxNCAwIiBzdHJva2U9IiM3YTNkMzIiIHN0cm9rZS13aWR0aD0iMiIgZmlsbD0ibm9uZSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+PC9zdmc+",
+     "alt": "At a glance — 3.6.1 row 4",
+     "mime": "image/svg+xml"
+    }
+   }
   },
   {
    "template": "4",
    "entry_id": null,
    "title": "Cast list",
    "page_id": "cast",
+   "page": 4,
    "status": "draft",
+   "icon": "👥",
    "sections": {
     "4.1": {
      "fields": {
@@ -881,13 +1038,70 @@
      }
     },
     "4.2": {
-     "fields": {},
+     "fields": {
+      "4.2.1": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:4.2",
+       "repeat": true,
+       "rows": 5
+      },
+      "4.2.2": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:4.2",
+       "repeat": true,
+       "rows": 5
+      },
+      "4.2.3": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:4.2",
+       "repeat": true,
+       "rows": 5
+      },
+      "4.2.4": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:4.2",
+       "repeat": true,
+       "rows": 5
+      },
+      "4.2.5": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:4.2",
+       "repeat": true,
+       "rows": 5
+      },
+      "4.2.6": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:4.2",
+       "repeat": true,
+       "rows": 5
+      },
+      "4.2.7": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:4.2",
+       "repeat": true,
+       "rows": 5
+      },
+      "4.2.8": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:4.2",
+       "repeat": true,
+       "rows": 5
+      }
+     },
      "rows": [
       {
        "4.2.1": {
-        "value": "",
-        "status": "empty",
-        "source": "forge:4.2.1"
+        "value": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAgMTUwIj4gPGRlZnM+PHJhZGlhbEdyYWRpZW50IGlkPSJnIiBjeD0iLjUiIGN5PSIuMzUiIHI9Ii44Ij48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiNmZmY2ZDgiIHN0b3Atb3BhY2l0eT0iLjkiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiNjOWEzNmEiLz48L3JhZGlhbEdyYWRpZW50PjwvZGVmcz4gPHJlY3Qgd2lkdGg9IjEyMCIgaGVpZ2h0PSIxNTAiIGZpbGw9InVybCgjZykiLz4gPHBhdGggZD0iTTE0IDE1MGM0LTM0IDIyLTQ4IDQ2LTQ4czQyIDE0IDQ2IDQ4eiIgZmlsbD0iIzJmNGE0NCIvPiA8cGF0aCBkPSJNNTAgOTZoMjB2MTRjLTYgNS0xNCA1LTIwIDB6IiBmaWxsPSIjYzY4YTVmIi8+IDxlbGxpcHNlIGN4PSI2MCIgY3k9IjcwIiByeD0iMjIiIHJ5PSIyNyIgZmlsbD0iI2M2OGE1ZiIvPiA8cGF0aCBkPSJNMzYgNzBjLTItMjYgMTItMzggMjYtMzhzMjcgMTAgMjQgMzhjLTQtMTItMTAtMjAtMjQtMjEtMTIgMC0yMCA4LTI2IDIxeiIgZmlsbD0iIzNhMjQxOCIvPiA8Y2lyY2xlIGN4PSI1MSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz48Y2lyY2xlIGN4PSI2OSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz4gPHBhdGggZD0iTTUzIDg2cTcgNCAxNCAwIiBzdHJva2U9IiM3YTNkMzIiIHN0cm9rZS13aWR0aD0iMiIgZmlsbD0ibm9uZSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+PHBhdGggZD0iTTMwIDE1MGwxMC0yNiAyMCA2IDIwLTYgMTAgMjZ6IiBmaWxsPSIjYzQ4ZDNjIiBvcGFjaXR5PSIuNyIvPjwvc3ZnPg==",
+        "status": "supplied",
+        "source": "pic"
        },
        "4.2.2": {
         "value": "Odile Marsh",
@@ -911,8 +1125,8 @@
        },
        "4.2.6": {
         "value": "17",
-        "status": "proposed",
-        "source": "new:4.2.6"
+        "status": "approved",
+        "source": "forge:4.2.6"
        },
        "4.2.7": {
         "value": "Ch 1",
@@ -923,13 +1137,18 @@
         "value": "approved",
         "status": "auto",
         "source": "auto"
+       },
+       "_meta": {
+        "page_id": "ch-odile",
+        "group": "Main",
+        "has_portrait": true
        }
       },
       {
        "4.2.1": {
-        "value": "",
-        "status": "empty",
-        "source": "forge:4.2.1"
+        "value": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAgMTUwIj4gPGRlZnM+PHJhZGlhbEdyYWRpZW50IGlkPSJnIiBjeD0iLjUiIGN5PSIuMzUiIHI9Ii44Ij48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiNmZmY2ZDgiIHN0b3Atb3BhY2l0eT0iLjkiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiM5YWEwYWEiLz48L3JhZGlhbEdyYWRpZW50PjwvZGVmcz4gPHJlY3Qgd2lkdGg9IjEyMCIgaGVpZ2h0PSIxNTAiIGZpbGw9InVybCgjZykiLz4gPHBhdGggZD0iTTE0IDE1MGM0LTM0IDIyLTQ4IDQ2LTQ4czQyIDE0IDQ2IDQ4eiIgZmlsbD0iIzE1MTcxYyIvPiA8cGF0aCBkPSJNNTAgOTZoMjB2MTRjLTYgNS0xNCA1LTIwIDB6IiBmaWxsPSIjZWFjN2E4Ii8+IDxlbGxpcHNlIGN4PSI2MCIgY3k9IjcwIiByeD0iMjIiIHJ5PSIyNyIgZmlsbD0iI2VhYzdhOCIvPiA8cGF0aCBkPSJNMzYgNzBjLTItMjYgMTItMzggMjYtMzhzMjcgMTAgMjQgMzhjLTQtMTItMTAtMjAtMjQtMjEtMTIgMC0yMCA4LTI2IDIxeiIgZmlsbD0iIzFiMWIxZiIvPiA8Y2lyY2xlIGN4PSI1MSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz48Y2lyY2xlIGN4PSI2OSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz4gPHBhdGggZD0iTTUzIDg2cTcgNCAxNCAwIiBzdHJva2U9IiM3YTNkMzIiIHN0cm9rZS13aWR0aD0iMiIgZmlsbD0ibm9uZSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+PHBhdGggZD0iTTM4IDUwaDQ0di04SDM4eiIgZmlsbD0iIzE1MTcxYyIvPjwvc3ZnPg==",
+        "status": "supplied",
+        "source": "pic"
        },
        "4.2.2": {
         "value": "Silas Crane",
@@ -953,8 +1172,8 @@
        },
        "4.2.6": {
         "value": "44",
-        "status": "proposed",
-        "source": "new:4.2.6"
+        "status": "approved",
+        "source": "forge:4.2.6"
        },
        "4.2.7": {
         "value": "Ch 1",
@@ -965,13 +1184,18 @@
         "value": "draft",
         "status": "auto",
         "source": "auto"
+       },
+       "_meta": {
+        "page_id": "ch-silas",
+        "group": "Main",
+        "has_portrait": true
        }
       },
       {
        "4.2.1": {
-        "value": "",
-        "status": "empty",
-        "source": "forge:4.2.1"
+        "value": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAgMTUwIj4gPGRlZnM+PHJhZGlhbEdyYWRpZW50IGlkPSJnIiBjeD0iLjUiIGN5PSIuMzUiIHI9Ii44Ij48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiNmZmY2ZDgiIHN0b3Atb3BhY2l0eT0iLjkiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiM4YWExYTgiLz48L3JhZGlhbEdyYWRpZW50PjwvZGVmcz4gPHJlY3Qgd2lkdGg9IjEyMCIgaGVpZ2h0PSIxNTAiIGZpbGw9InVybCgjZykiLz4gPHBhdGggZD0iTTE0IDE1MGM0LTM0IDIyLTQ4IDQ2LTQ4czQyIDE0IDQ2IDQ4eiIgZmlsbD0iIzJhMzQ0NiIvPiA8cGF0aCBkPSJNNTAgOTZoMjB2MTRjLTYgNS0xNCA1LTIwIDB6IiBmaWxsPSIjZDlhOTgyIi8+IDxlbGxpcHNlIGN4PSI2MCIgY3k9IjcwIiByeD0iMjIiIHJ5PSIyNyIgZmlsbD0iI2Q5YTk4MiIvPiA8cGF0aCBkPSJNMzYgNzBjLTItMjYgMTItMzggMjYtMzhzMjcgMTAgMjQgMzhjLTQtMTItMTAtMjAtMjQtMjEtMTIgMC0yMCA4LTI2IDIxeiIgZmlsbD0iI2Q4ZDRjYyIvPiA8Y2lyY2xlIGN4PSI1MSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz48Y2lyY2xlIGN4PSI2OSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz4gPHBhdGggZD0iTTUzIDg2cTcgNCAxNCAwIiBzdHJva2U9IiM3YTNkMzIiIHN0cm9rZS13aWR0aD0iMiIgZmlsbD0ibm9uZSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+PHBhdGggZD0iTTQyIDg0cTE4IDIyIDM2IDB2MTBxLTE4IDIwLTM2IDB6IiBmaWxsPSIjZTdlM2RhIi8+PC9zdmc+",
+        "status": "supplied",
+        "source": "pic"
        },
        "4.2.2": {
         "value": "Tobiah Reed",
@@ -995,8 +1219,8 @@
        },
        "4.2.6": {
         "value": "71",
-        "status": "proposed",
-        "source": "new:4.2.6"
+        "status": "approved",
+        "source": "forge:4.2.6"
        },
        "4.2.7": {
         "value": "Ch 2",
@@ -1007,13 +1231,18 @@
         "value": "approved",
         "status": "auto",
         "source": "auto"
+       },
+       "_meta": {
+        "page_id": "ch-tobiah",
+        "group": "Supporting",
+        "has_portrait": true
        }
       },
       {
        "4.2.1": {
-        "value": "",
-        "status": "empty",
-        "source": "forge:4.2.1"
+        "value": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAgMTUwIj4gPGRlZnM+PHJhZGlhbEdyYWRpZW50IGlkPSJnIiBjeD0iLjUiIGN5PSIuMzUiIHI9Ii44Ij48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiNmZmY2ZDgiIHN0b3Atb3BhY2l0eT0iLjkiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiNkN2I5OGEiLz48L3JhZGlhbEdyYWRpZW50PjwvZGVmcz4gPHJlY3Qgd2lkdGg9IjEyMCIgaGVpZ2h0PSIxNTAiIGZpbGw9InVybCgjZykiLz4gPHBhdGggZD0iTTE0IDE1MGM0LTM0IDIyLTQ4IDQ2LTQ4czQyIDE0IDQ2IDQ4eiIgZmlsbD0iIzdiNGIyYSIvPiA8cGF0aCBkPSJNNTAgOTZoMjB2MTRjLTYgNS0xNCA1LTIwIDB6IiBmaWxsPSIjYzY4YTVmIi8+IDxlbGxpcHNlIGN4PSI2MCIgY3k9IjcwIiByeD0iMjIiIHJ5PSIyNyIgZmlsbD0iI2M2OGE1ZiIvPiA8cGF0aCBkPSJNMzYgNzBjLTItMjYgMTItMzggMjYtMzhzMjcgMTAgMjQgMzhjLTQtMTItMTAtMjAtMjQtMjEtMTIgMC0yMCA4LTI2IDIxeiIgZmlsbD0iIzVhM2EyMiIvPiA8Y2lyY2xlIGN4PSI1MSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz48Y2lyY2xlIGN4PSI2OSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz4gPHBhdGggZD0iTTUzIDg2cTcgNCAxNCAwIiBzdHJva2U9IiM3YTNkMzIiIHN0cm9rZS13aWR0aD0iMiIgZmlsbD0ibm9uZSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+PC9zdmc+",
+        "status": "supplied",
+        "source": "pic"
        },
        "4.2.2": {
         "value": "Wren Marsh",
@@ -1037,8 +1266,8 @@
        },
        "4.2.6": {
         "value": "9",
-        "status": "proposed",
-        "source": "new:4.2.6"
+        "status": "approved",
+        "source": "forge:4.2.6"
        },
        "4.2.7": {
         "value": "Ch 1",
@@ -1049,6 +1278,11 @@
         "value": "draft",
         "status": "auto",
         "source": "auto"
+       },
+       "_meta": {
+        "page_id": "ch-wren",
+        "group": "Supporting",
+        "has_portrait": true
        }
       },
       {
@@ -1080,7 +1314,7 @@
        "4.2.6": {
         "value": "",
         "status": "empty",
-        "source": "new:4.2.6"
+        "source": "forge:4.2.6"
        },
        "4.2.7": {
         "value": "Ch 3",
@@ -1091,6 +1325,11 @@
         "value": "needs_you",
         "status": "auto",
         "source": "auto"
+       },
+       "_meta": {
+        "page_id": "ch-maren",
+        "group": "Minor",
+        "has_portrait": false
        }
       }
      ]
@@ -1105,14 +1344,38 @@
      }
     }
    },
-   "pics": {}
+   "pics": {
+    "4.2.1#1": {
+     "url": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAgMTUwIj4gPGRlZnM+PHJhZGlhbEdyYWRpZW50IGlkPSJnIiBjeD0iLjUiIGN5PSIuMzUiIHI9Ii44Ij48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiNmZmY2ZDgiIHN0b3Atb3BhY2l0eT0iLjkiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiNjOWEzNmEiLz48L3JhZGlhbEdyYWRpZW50PjwvZGVmcz4gPHJlY3Qgd2lkdGg9IjEyMCIgaGVpZ2h0PSIxNTAiIGZpbGw9InVybCgjZykiLz4gPHBhdGggZD0iTTE0IDE1MGM0LTM0IDIyLTQ4IDQ2LTQ4czQyIDE0IDQ2IDQ4eiIgZmlsbD0iIzJmNGE0NCIvPiA8cGF0aCBkPSJNNTAgOTZoMjB2MTRjLTYgNS0xNCA1LTIwIDB6IiBmaWxsPSIjYzY4YTVmIi8+IDxlbGxpcHNlIGN4PSI2MCIgY3k9IjcwIiByeD0iMjIiIHJ5PSIyNyIgZmlsbD0iI2M2OGE1ZiIvPiA8cGF0aCBkPSJNMzYgNzBjLTItMjYgMTItMzggMjYtMzhzMjcgMTAgMjQgMzhjLTQtMTItMTAtMjAtMjQtMjEtMTIgMC0yMCA4LTI2IDIxeiIgZmlsbD0iIzNhMjQxOCIvPiA8Y2lyY2xlIGN4PSI1MSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz48Y2lyY2xlIGN4PSI2OSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz4gPHBhdGggZD0iTTUzIDg2cTcgNCAxNCAwIiBzdHJva2U9IiM3YTNkMzIiIHN0cm9rZS13aWR0aD0iMiIgZmlsbD0ibm9uZSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+PHBhdGggZD0iTTMwIDE1MGwxMC0yNiAyMCA2IDIwLTYgMTAgMjZ6IiBmaWxsPSIjYzQ4ZDNjIiBvcGFjaXR5PSIuNyIvPjwvc3ZnPg==",
+     "alt": "Cast list — 4.2.1 row 1",
+     "mime": "image/svg+xml"
+    },
+    "4.2.1#2": {
+     "url": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAgMTUwIj4gPGRlZnM+PHJhZGlhbEdyYWRpZW50IGlkPSJnIiBjeD0iLjUiIGN5PSIuMzUiIHI9Ii44Ij48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiNmZmY2ZDgiIHN0b3Atb3BhY2l0eT0iLjkiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiM5YWEwYWEiLz48L3JhZGlhbEdyYWRpZW50PjwvZGVmcz4gPHJlY3Qgd2lkdGg9IjEyMCIgaGVpZ2h0PSIxNTAiIGZpbGw9InVybCgjZykiLz4gPHBhdGggZD0iTTE0IDE1MGM0LTM0IDIyLTQ4IDQ2LTQ4czQyIDE0IDQ2IDQ4eiIgZmlsbD0iIzE1MTcxYyIvPiA8cGF0aCBkPSJNNTAgOTZoMjB2MTRjLTYgNS0xNCA1LTIwIDB6IiBmaWxsPSIjZWFjN2E4Ii8+IDxlbGxpcHNlIGN4PSI2MCIgY3k9IjcwIiByeD0iMjIiIHJ5PSIyNyIgZmlsbD0iI2VhYzdhOCIvPiA8cGF0aCBkPSJNMzYgNzBjLTItMjYgMTItMzggMjYtMzhzMjcgMTAgMjQgMzhjLTQtMTItMTAtMjAtMjQtMjEtMTIgMC0yMCA4LTI2IDIxeiIgZmlsbD0iIzFiMWIxZiIvPiA8Y2lyY2xlIGN4PSI1MSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz48Y2lyY2xlIGN4PSI2OSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz4gPHBhdGggZD0iTTUzIDg2cTcgNCAxNCAwIiBzdHJva2U9IiM3YTNkMzIiIHN0cm9rZS13aWR0aD0iMiIgZmlsbD0ibm9uZSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+PHBhdGggZD0iTTM4IDUwaDQ0di04SDM4eiIgZmlsbD0iIzE1MTcxYyIvPjwvc3ZnPg==",
+     "alt": "Cast list — 4.2.1 row 2",
+     "mime": "image/svg+xml"
+    },
+    "4.2.1#3": {
+     "url": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAgMTUwIj4gPGRlZnM+PHJhZGlhbEdyYWRpZW50IGlkPSJnIiBjeD0iLjUiIGN5PSIuMzUiIHI9Ii44Ij48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiNmZmY2ZDgiIHN0b3Atb3BhY2l0eT0iLjkiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiM4YWExYTgiLz48L3JhZGlhbEdyYWRpZW50PjwvZGVmcz4gPHJlY3Qgd2lkdGg9IjEyMCIgaGVpZ2h0PSIxNTAiIGZpbGw9InVybCgjZykiLz4gPHBhdGggZD0iTTE0IDE1MGM0LTM0IDIyLTQ4IDQ2LTQ4czQyIDE0IDQ2IDQ4eiIgZmlsbD0iIzJhMzQ0NiIvPiA8cGF0aCBkPSJNNTAgOTZoMjB2MTRjLTYgNS0xNCA1LTIwIDB6IiBmaWxsPSIjZDlhOTgyIi8+IDxlbGxpcHNlIGN4PSI2MCIgY3k9IjcwIiByeD0iMjIiIHJ5PSIyNyIgZmlsbD0iI2Q5YTk4MiIvPiA8cGF0aCBkPSJNMzYgNzBjLTItMjYgMTItMzggMjYtMzhzMjcgMTAgMjQgMzhjLTQtMTItMTAtMjAtMjQtMjEtMTIgMC0yMCA4LTI2IDIxeiIgZmlsbD0iI2Q4ZDRjYyIvPiA8Y2lyY2xlIGN4PSI1MSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz48Y2lyY2xlIGN4PSI2OSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz4gPHBhdGggZD0iTTUzIDg2cTcgNCAxNCAwIiBzdHJva2U9IiM3YTNkMzIiIHN0cm9rZS13aWR0aD0iMiIgZmlsbD0ibm9uZSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+PHBhdGggZD0iTTQyIDg0cTE4IDIyIDM2IDB2MTBxLTE4IDIwLTM2IDB6IiBmaWxsPSIjZTdlM2RhIi8+PC9zdmc+",
+     "alt": "Cast list — 4.2.1 row 3",
+     "mime": "image/svg+xml"
+    },
+    "4.2.1#4": {
+     "url": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAgMTUwIj4gPGRlZnM+PHJhZGlhbEdyYWRpZW50IGlkPSJnIiBjeD0iLjUiIGN5PSIuMzUiIHI9Ii44Ij48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiNmZmY2ZDgiIHN0b3Atb3BhY2l0eT0iLjkiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiNkN2I5OGEiLz48L3JhZGlhbEdyYWRpZW50PjwvZGVmcz4gPHJlY3Qgd2lkdGg9IjEyMCIgaGVpZ2h0PSIxNTAiIGZpbGw9InVybCgjZykiLz4gPHBhdGggZD0iTTE0IDE1MGM0LTM0IDIyLTQ4IDQ2LTQ4czQyIDE0IDQ2IDQ4eiIgZmlsbD0iIzdiNGIyYSIvPiA8cGF0aCBkPSJNNTAgOTZoMjB2MTRjLTYgNS0xNCA1LTIwIDB6IiBmaWxsPSIjYzY4YTVmIi8+IDxlbGxpcHNlIGN4PSI2MCIgY3k9IjcwIiByeD0iMjIiIHJ5PSIyNyIgZmlsbD0iI2M2OGE1ZiIvPiA8cGF0aCBkPSJNMzYgNzBjLTItMjYgMTItMzggMjYtMzhzMjcgMTAgMjQgMzhjLTQtMTItMTAtMjAtMjQtMjEtMTIgMC0yMCA4LTI2IDIxeiIgZmlsbD0iIzVhM2EyMiIvPiA8Y2lyY2xlIGN4PSI1MSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz48Y2lyY2xlIGN4PSI2OSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz4gPHBhdGggZD0iTTUzIDg2cTcgNCAxNCAwIiBzdHJva2U9IiM3YTNkMzIiIHN0cm9rZS13aWR0aD0iMiIgZmlsbD0ibm9uZSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+PC9zdmc+",
+     "alt": "Cast list — 4.2.1 row 4",
+     "mime": "image/svg+xml"
+    }
+   }
   },
   {
    "template": "5",
    "entry_id": "rec-odile",
    "title": "Odile Marsh",
    "page_id": "ch-odile",
+   "page": 5,
    "status": "draft",
+   "icon": "🧑",
+   "target": "character:rec-odile",
    "sections": {
     "5.1": {
      "fields": {
@@ -1172,146 +1435,194 @@
      "fields": {
       "5.2.1": {
        "value": "17",
-       "status": "approved",
-       "source": "forge:5.2.1",
+       "status": "proposed",
+       "source": "new:age",
+       "new": true,
        "edit": {
-        "route": "#/p/PID/main/forge/rec-odile",
-        "field": "5.2.1"
+        "route": "#/p/PID/main/binder",
+        "field": "age",
+        "target": "character:rec-odile",
+        "api": "PUT /api/projects/PID/branches/main/binder/fields"
        }
       },
       "5.2.2": {
        "value": "Spring of 1889 (Year of the Low Tide)",
-       "status": "approved",
-       "source": "forge:5.2.2",
+       "status": "proposed",
+       "source": "new:birth",
+       "new": true,
        "edit": {
-        "route": "#/p/PID/main/forge/rec-odile",
-        "field": "5.2.2"
+        "route": "#/p/PID/main/binder",
+        "field": "birth",
+        "target": "character:rec-odile",
+        "api": "PUT /api/projects/PID/branches/main/binder/fields"
        }
       },
       "5.2.3": {
        "value": "she / her",
-       "status": "approved",
-       "source": "forge:5.2.3",
+       "status": "proposed",
+       "source": "new:pronouns",
+       "new": true,
        "edit": {
-        "route": "#/p/PID/main/forge/rec-odile",
-        "field": "5.2.3"
+        "route": "#/p/PID/main/binder",
+        "field": "pronouns",
+        "target": "character:rec-odile",
+        "api": "PUT /api/projects/PID/branches/main/binder/fields"
        }
       },
       "5.2.4": {
        "value": "Human (river-born)",
-       "status": "approved",
-       "source": "forge:5.2.4",
+       "status": "proposed",
+       "source": "new:species",
+       "new": true,
        "edit": {
-        "route": "#/p/PID/main/forge/rec-odile",
-        "field": "5.2.4"
+        "route": "#/p/PID/main/binder",
+        "field": "species",
+        "target": "character:rec-odile",
+        "api": "PUT /api/projects/PID/branches/main/binder/fields"
        }
       },
       "5.2.5": {
        "value": "1.68 m",
        "status": "proposed",
-       "source": "new:5.2.5",
+       "source": "new:height",
+       "new": true,
        "edit": {
-        "route": "#/p/PID/main/forge/rec-odile",
-        "field": "5.2.5"
+        "route": "#/p/PID/main/binder",
+        "field": "height",
+        "target": "character:rec-odile",
+        "api": "PUT /api/projects/PID/branches/main/binder/fields"
        }
       },
       "5.2.6": {
        "value": "58 kg",
        "status": "proposed",
-       "source": "new:5.2.6",
+       "source": "new:weight",
+       "new": true,
        "edit": {
-        "route": "#/p/PID/main/forge/rec-odile",
-        "field": "5.2.6"
+        "route": "#/p/PID/main/binder",
+        "field": "weight",
+        "target": "character:rec-odile",
+        "api": "PUT /api/projects/PID/branches/main/binder/fields"
        }
       },
       "5.2.7": {
        "value": "Wiry; ladder-climber's shoulders",
        "status": "proposed",
-       "source": "new:5.2.7",
+       "source": "new:build",
+       "new": true,
        "edit": {
-        "route": "#/p/PID/main/forge/rec-odile",
-        "field": "5.2.7"
+        "route": "#/p/PID/main/binder",
+        "field": "build",
+        "target": "character:rec-odile",
+        "api": "PUT /api/projects/PID/branches/main/binder/fields"
        }
       },
       "5.2.8": {
        "value": "Grey-green, gold-flecked in lamplight",
-       "status": "approved",
-       "source": "forge:5.2.8",
+       "status": "proposed",
+       "source": "new:eyes",
+       "new": true,
        "edit": {
-        "route": "#/p/PID/main/forge/rec-odile",
-        "field": "5.2.8"
+        "route": "#/p/PID/main/binder",
+        "field": "eyes",
+        "target": "character:rec-odile",
+        "api": "PUT /api/projects/PID/branches/main/binder/fields"
        }
       },
       "5.2.9": {
        "value": "Dark brown, cropped at the jaw, singed at the ends",
-       "status": "approved",
-       "source": "forge:5.2.9",
+       "status": "proposed",
+       "source": "new:hair",
+       "new": true,
        "edit": {
-        "route": "#/p/PID/main/forge/rec-odile",
-        "field": "5.2.9"
+        "route": "#/p/PID/main/binder",
+        "field": "hair",
+        "target": "character:rec-odile",
+        "api": "PUT /api/projects/PID/branches/main/binder/fields"
        }
       },
       "5.2.10": {
        "value": "Warm brown, freckled across the nose",
-       "status": "approved",
-       "source": "forge:5.2.10",
+       "status": "proposed",
+       "source": "new:skin",
+       "new": true,
        "edit": {
-        "route": "#/p/PID/main/forge/rec-odile",
-        "field": "5.2.10"
+        "route": "#/p/PID/main/binder",
+        "field": "skin",
+        "target": "character:rec-odile",
+        "api": "PUT /api/projects/PID/branches/main/binder/fields"
        }
       },
       "5.2.11": {
        "value": "Burn scar shaped like a comma on the left wrist",
-       "status": "approved",
-       "source": "forge:5.2.11",
+       "status": "proposed",
+       "source": "new:marks",
+       "new": true,
        "edit": {
-        "route": "#/p/PID/main/forge/rec-odile",
-        "field": "5.2.11"
+        "route": "#/p/PID/main/binder",
+        "field": "marks",
+        "target": "character:rec-odile",
+        "api": "PUT /api/projects/PID/branches/main/binder/fields"
        }
       },
       "5.2.12": {
        "value": "Guild lamplighter (Copper Street round)",
-       "status": "approved",
-       "source": "forge:5.2.12",
+       "status": "proposed",
+       "source": "new:occupation",
+       "new": true,
        "edit": {
-        "route": "#/p/PID/main/forge/rec-odile",
-        "field": "5.2.12"
+        "route": "#/p/PID/main/binder",
+        "field": "occupation",
+        "target": "character:rec-odile",
+        "api": "PUT /api/projects/PID/branches/main/binder/fields"
        }
       },
       "5.2.13": {
        "value": "Vessmoor",
-       "status": "approved",
-       "source": "forge:5.2.13",
+       "status": "proposed",
+       "source": "new:home",
+       "new": true,
        "edit": {
-        "route": "#/p/PID/main/forge/rec-odile",
-        "field": "5.2.13"
+        "route": "#/p/PID/main/binder",
+        "field": "home",
+        "target": "character:rec-odile",
+        "api": "PUT /api/projects/PID/branches/main/binder/fields"
        }
       },
       "5.2.14": {
        "value": "Orphaned; raises her brother Wren",
        "status": "proposed",
-       "source": "new:5.2.14",
+       "source": "new:family_status",
+       "new": true,
        "edit": {
-        "route": "#/p/PID/main/forge/rec-odile",
-        "field": "5.2.14"
+        "route": "#/p/PID/main/binder",
+        "field": "family_status",
+        "target": "character:rec-odile",
+        "api": "PUT /api/projects/PID/branches/main/binder/fields"
        }
       },
       "5.2.15": {
        "value": "The last winter of the gas lamps",
-       "status": "approved",
-       "source": "forge:5.2.15",
+       "status": "proposed",
+       "source": "new:era",
+       "new": true,
        "edit": {
-        "route": "#/p/PID/main/forge/rec-odile",
-        "field": "5.2.15"
+        "route": "#/p/PID/main/binder",
+        "field": "era",
+        "target": "character:rec-odile",
+        "api": "PUT /api/projects/PID/branches/main/binder/fields"
        }
       },
       "5.2.16": {
        "value": "Left-handed",
        "status": "proposed",
-       "source": "new:5.2.16",
+       "source": "new:handedness",
+       "new": true,
        "edit": {
-        "route": "#/p/PID/main/forge/rec-odile",
-        "field": "5.2.16"
+        "route": "#/p/PID/main/binder",
+        "field": "handedness",
+        "target": "character:rec-odile",
+        "api": "PUT /api/projects/PID/branches/main/binder/fields"
        }
       }
      }
@@ -1739,22 +2050,49 @@
      }
     },
     "5.8": {
-     "fields": {},
+     "fields": {
+      "5.8.1": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:5.8",
+       "repeat": true,
+       "rows": 4
+      },
+      "5.8.2": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:5.8",
+       "repeat": true,
+       "rows": 4
+      },
+      "5.8.3": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:5.8",
+       "repeat": true,
+       "rows": 4,
+       "new": true
+      },
+      "5.8.4": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:5.8",
+       "repeat": true,
+       "rows": 4
+      }
+     },
      "rows": [
       {
        "5.8.1": {
-        "value": "",
-        "status": "empty",
-        "source": "forge:5.8.1",
-        "edit": {
-         "route": "#/p/PID/main/forge/rec-odile",
-         "field": "5.8.1"
-        }
+        "value": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAgMTUwIj4gPGRlZnM+PHJhZGlhbEdyYWRpZW50IGlkPSJnIiBjeD0iLjUiIGN5PSIuMzUiIHI9Ii44Ij48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiNmZmY2ZDgiIHN0b3Atb3BhY2l0eT0iLjkiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiNkN2I5OGEiLz48L3JhZGlhbEdyYWRpZW50PjwvZGVmcz4gPHJlY3Qgd2lkdGg9IjEyMCIgaGVpZ2h0PSIxNTAiIGZpbGw9InVybCgjZykiLz4gPHBhdGggZD0iTTE0IDE1MGM0LTM0IDIyLTQ4IDQ2LTQ4czQyIDE0IDQ2IDQ4eiIgZmlsbD0iIzdiNGIyYSIvPiA8cGF0aCBkPSJNNTAgOTZoMjB2MTRjLTYgNS0xNCA1LTIwIDB6IiBmaWxsPSIjYzY4YTVmIi8+IDxlbGxpcHNlIGN4PSI2MCIgY3k9IjcwIiByeD0iMjIiIHJ5PSIyNyIgZmlsbD0iI2M2OGE1ZiIvPiA8cGF0aCBkPSJNMzYgNzBjLTItMjYgMTItMzggMjYtMzhzMjcgMTAgMjQgMzhjLTQtMTItMTAtMjAtMjQtMjEtMTIgMC0yMCA4LTI2IDIxeiIgZmlsbD0iIzVhM2EyMiIvPiA8Y2lyY2xlIGN4PSI1MSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz48Y2lyY2xlIGN4PSI2OSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz4gPHBhdGggZD0iTTUzIDg2cTcgNCAxNCAwIiBzdHJva2U9IiM3YTNkMzIiIHN0cm9rZS13aWR0aD0iMiIgZmlsbD0ibm9uZSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+PC9zdmc+",
+        "status": "supplied",
+        "source": "pic"
        },
        "5.8.2": {
         "value": "Wren Marsh",
         "status": "approved",
         "source": "forge:5.8.2",
+        "link": "ch-wren",
         "edit": {
          "route": "#/p/PID/main/forge/rec-odile",
          "field": "5.8.2"
@@ -1763,10 +2101,13 @@
        "5.8.3": {
         "value": "family",
         "status": "proposed",
-        "source": "new:5.8.3",
+        "source": "row:type",
+        "new": true,
         "edit": {
-         "route": "#/p/PID/main/forge/rec-odile",
-         "field": "5.8.3"
+         "route": "#/p/PID/main/binder",
+         "field": "type",
+         "target": "relationship:rec-odile:wren marsh",
+         "api": "PUT /api/projects/PID/branches/main/binder/fields"
         }
        },
        "5.8.4": {
@@ -1777,22 +2118,23 @@
          "route": "#/p/PID/main/forge/rec-odile",
          "field": "5.8.4"
         }
+       },
+       "_meta": {
+        "target": "relationship:rec-odile:wren marsh",
+        "field_key": "relationship_1"
        }
       },
       {
        "5.8.1": {
-        "value": "",
-        "status": "empty",
-        "source": "forge:5.8.1",
-        "edit": {
-         "route": "#/p/PID/main/forge/rec-odile",
-         "field": "5.8.1"
-        }
+        "value": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAgMTUwIj4gPGRlZnM+PHJhZGlhbEdyYWRpZW50IGlkPSJnIiBjeD0iLjUiIGN5PSIuMzUiIHI9Ii44Ij48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiNmZmY2ZDgiIHN0b3Atb3BhY2l0eT0iLjkiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiM4YWExYTgiLz48L3JhZGlhbEdyYWRpZW50PjwvZGVmcz4gPHJlY3Qgd2lkdGg9IjEyMCIgaGVpZ2h0PSIxNTAiIGZpbGw9InVybCgjZykiLz4gPHBhdGggZD0iTTE0IDE1MGM0LTM0IDIyLTQ4IDQ2LTQ4czQyIDE0IDQ2IDQ4eiIgZmlsbD0iIzJhMzQ0NiIvPiA8cGF0aCBkPSJNNTAgOTZoMjB2MTRjLTYgNS0xNCA1LTIwIDB6IiBmaWxsPSIjZDlhOTgyIi8+IDxlbGxpcHNlIGN4PSI2MCIgY3k9IjcwIiByeD0iMjIiIHJ5PSIyNyIgZmlsbD0iI2Q5YTk4MiIvPiA8cGF0aCBkPSJNMzYgNzBjLTItMjYgMTItMzggMjYtMzhzMjcgMTAgMjQgMzhjLTQtMTItMTAtMjAtMjQtMjEtMTIgMC0yMCA4LTI2IDIxeiIgZmlsbD0iI2Q4ZDRjYyIvPiA8Y2lyY2xlIGN4PSI1MSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz48Y2lyY2xlIGN4PSI2OSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz4gPHBhdGggZD0iTTUzIDg2cTcgNCAxNCAwIiBzdHJva2U9IiM3YTNkMzIiIHN0cm9rZS13aWR0aD0iMiIgZmlsbD0ibm9uZSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+PHBhdGggZD0iTTQyIDg0cTE4IDIyIDM2IDB2MTBxLTE4IDIwLTM2IDB6IiBmaWxsPSIjZTdlM2RhIi8+PC9zdmc+",
+        "status": "supplied",
+        "source": "pic"
        },
        "5.8.2": {
         "value": "Tobiah Reed",
         "status": "approved",
         "source": "forge:5.8.2",
+        "link": "ch-tobiah",
         "edit": {
          "route": "#/p/PID/main/forge/rec-odile",
          "field": "5.8.2"
@@ -1801,10 +2143,13 @@
        "5.8.3": {
         "value": "mentor",
         "status": "proposed",
-        "source": "new:5.8.3",
+        "source": "row:type",
+        "new": true,
         "edit": {
-         "route": "#/p/PID/main/forge/rec-odile",
-         "field": "5.8.3"
+         "route": "#/p/PID/main/binder",
+         "field": "type",
+         "target": "relationship:rec-odile:tobiah reed",
+         "api": "PUT /api/projects/PID/branches/main/binder/fields"
         }
        },
        "5.8.4": {
@@ -1815,22 +2160,23 @@
          "route": "#/p/PID/main/forge/rec-odile",
          "field": "5.8.4"
         }
+       },
+       "_meta": {
+        "target": "relationship:rec-odile:tobiah reed",
+        "field_key": "relationship_2"
        }
       },
       {
        "5.8.1": {
-        "value": "",
-        "status": "empty",
-        "source": "forge:5.8.1",
-        "edit": {
-         "route": "#/p/PID/main/forge/rec-odile",
-         "field": "5.8.1"
-        }
+        "value": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAgMTUwIj4gPGRlZnM+PHJhZGlhbEdyYWRpZW50IGlkPSJnIiBjeD0iLjUiIGN5PSIuMzUiIHI9Ii44Ij48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiNmZmY2ZDgiIHN0b3Atb3BhY2l0eT0iLjkiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiM5YWEwYWEiLz48L3JhZGlhbEdyYWRpZW50PjwvZGVmcz4gPHJlY3Qgd2lkdGg9IjEyMCIgaGVpZ2h0PSIxNTAiIGZpbGw9InVybCgjZykiLz4gPHBhdGggZD0iTTE0IDE1MGM0LTM0IDIyLTQ4IDQ2LTQ4czQyIDE0IDQ2IDQ4eiIgZmlsbD0iIzE1MTcxYyIvPiA8cGF0aCBkPSJNNTAgOTZoMjB2MTRjLTYgNS0xNCA1LTIwIDB6IiBmaWxsPSIjZWFjN2E4Ii8+IDxlbGxpcHNlIGN4PSI2MCIgY3k9IjcwIiByeD0iMjIiIHJ5PSIyNyIgZmlsbD0iI2VhYzdhOCIvPiA8cGF0aCBkPSJNMzYgNzBjLTItMjYgMTItMzggMjYtMzhzMjcgMTAgMjQgMzhjLTQtMTItMTAtMjAtMjQtMjEtMTIgMC0yMCA4LTI2IDIxeiIgZmlsbD0iIzFiMWIxZiIvPiA8Y2lyY2xlIGN4PSI1MSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz48Y2lyY2xlIGN4PSI2OSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz4gPHBhdGggZD0iTTUzIDg2cTcgNCAxNCAwIiBzdHJva2U9IiM3YTNkMzIiIHN0cm9rZS13aWR0aD0iMiIgZmlsbD0ibm9uZSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+PHBhdGggZD0iTTM4IDUwaDQ0di04SDM4eiIgZmlsbD0iIzE1MTcxYyIvPjwvc3ZnPg==",
+        "status": "supplied",
+        "source": "pic"
        },
        "5.8.2": {
         "value": "Silas Crane",
         "status": "approved",
         "source": "forge:5.8.2",
+        "link": "ch-silas",
         "edit": {
          "route": "#/p/PID/main/forge/rec-odile",
          "field": "5.8.2"
@@ -1839,10 +2185,13 @@
        "5.8.3": {
         "value": "enemy",
         "status": "proposed",
-        "source": "new:5.8.3",
+        "source": "row:type",
+        "new": true,
         "edit": {
-         "route": "#/p/PID/main/forge/rec-odile",
-         "field": "5.8.3"
+         "route": "#/p/PID/main/binder",
+         "field": "type",
+         "target": "relationship:rec-odile:silas crane",
+         "api": "PUT /api/projects/PID/branches/main/binder/fields"
         }
        },
        "5.8.4": {
@@ -1853,6 +2202,10 @@
          "route": "#/p/PID/main/forge/rec-odile",
          "field": "5.8.4"
         }
+       },
+       "_meta": {
+        "target": "relationship:rec-odile:silas crane",
+        "field_key": "relationship_3"
        }
       },
       {
@@ -1869,6 +2222,7 @@
         "value": "Maren Vey",
         "status": "approved",
         "source": "forge:5.8.2",
+        "link": "ch-maren",
         "edit": {
          "route": "#/p/PID/main/forge/rec-odile",
          "field": "5.8.2"
@@ -1877,10 +2231,13 @@
        "5.8.3": {
         "value": "love",
         "status": "proposed",
-        "source": "new:5.8.3",
+        "source": "row:type",
+        "new": true,
         "edit": {
-         "route": "#/p/PID/main/forge/rec-odile",
-         "field": "5.8.3"
+         "route": "#/p/PID/main/binder",
+         "field": "type",
+         "target": "relationship:rec-odile:maren vey",
+         "api": "PUT /api/projects/PID/branches/main/binder/fields"
         }
        },
        "5.8.4": {
@@ -1891,6 +2248,10 @@
          "route": "#/p/PID/main/forge/rec-odile",
          "field": "5.8.4"
         }
+       },
+       "_meta": {
+        "target": "relationship:rec-odile:maren vey",
+        "field_key": "relationship_4"
        }
       }
      ]
@@ -1954,46 +2315,61 @@
       "5.9.7": {
        "value": "4",
        "status": "proposed",
-       "source": "new:5.9.7",
+       "source": "new:stat_strength",
+       "new": true,
        "edit": {
-        "route": "#/p/PID/main/forge/rec-odile",
-        "field": "5.9.7"
+        "route": "#/p/PID/main/binder",
+        "field": "stat_strength",
+        "target": "character:rec-odile",
+        "api": "PUT /api/projects/PID/branches/main/binder/fields"
        }
       },
       "5.9.8": {
        "value": "7",
        "status": "proposed",
-       "source": "new:5.9.8",
+       "source": "new:stat_speed",
+       "new": true,
        "edit": {
-        "route": "#/p/PID/main/forge/rec-odile",
-        "field": "5.9.8"
+        "route": "#/p/PID/main/binder",
+        "field": "stat_speed",
+        "target": "character:rec-odile",
+        "api": "PUT /api/projects/PID/branches/main/binder/fields"
        }
       },
       "5.9.9": {
        "value": "9",
        "status": "proposed",
-       "source": "new:5.9.9",
+       "source": "new:stat_agility",
+       "new": true,
        "edit": {
-        "route": "#/p/PID/main/forge/rec-odile",
-        "field": "5.9.9"
+        "route": "#/p/PID/main/binder",
+        "field": "stat_agility",
+        "target": "character:rec-odile",
+        "api": "PUT /api/projects/PID/branches/main/binder/fields"
        }
       },
       "5.9.10": {
        "value": "6",
        "status": "proposed",
-       "source": "new:5.9.10",
+       "source": "new:stat_stamina",
+       "new": true,
        "edit": {
-        "route": "#/p/PID/main/forge/rec-odile",
-        "field": "5.9.10"
+        "route": "#/p/PID/main/binder",
+        "field": "stat_stamina",
+        "target": "character:rec-odile",
+        "api": "PUT /api/projects/PID/branches/main/binder/fields"
        }
       },
       "5.9.11": {
        "value": "3",
        "status": "proposed",
-       "source": "new:5.9.11",
+       "source": "new:stat_durability",
+       "new": true,
        "edit": {
-        "route": "#/p/PID/main/forge/rec-odile",
-        "field": "5.9.11"
+        "route": "#/p/PID/main/binder",
+        "field": "stat_durability",
+        "target": "character:rec-odile",
+        "api": "PUT /api/projects/PID/branches/main/binder/fields"
        }
       },
       "5.9.12": {
@@ -2133,7 +2509,22 @@
      }
     },
     "5.12": {
-     "fields": {},
+     "fields": {
+      "5.12.1": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:5.12",
+       "repeat": true,
+       "rows": 5
+      },
+      "5.12.2": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:5.12",
+       "repeat": true,
+       "rows": 5
+      }
+     },
      "rows": [
       {
        "5.12.1": {
@@ -2448,11 +2839,28 @@
    "pics": {
     "5.1.1": {
      "url": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAgMTUwIj4gPGRlZnM+PHJhZGlhbEdyYWRpZW50IGlkPSJnIiBjeD0iLjUiIGN5PSIuMzUiIHI9Ii44Ij48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiNmZmY2ZDgiIHN0b3Atb3BhY2l0eT0iLjkiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiNjOWEzNmEiLz48L3JhZGlhbEdyYWRpZW50PjwvZGVmcz4gPHJlY3Qgd2lkdGg9IjEyMCIgaGVpZ2h0PSIxNTAiIGZpbGw9InVybCgjZykiLz4gPHBhdGggZD0iTTE0IDE1MGM0LTM0IDIyLTQ4IDQ2LTQ4czQyIDE0IDQ2IDQ4eiIgZmlsbD0iIzJmNGE0NCIvPiA8cGF0aCBkPSJNNTAgOTZoMjB2MTRjLTYgNS0xNCA1LTIwIDB6IiBmaWxsPSIjYzY4YTVmIi8+IDxlbGxpcHNlIGN4PSI2MCIgY3k9IjcwIiByeD0iMjIiIHJ5PSIyNyIgZmlsbD0iI2M2OGE1ZiIvPiA8cGF0aCBkPSJNMzYgNzBjLTItMjYgMTItMzggMjYtMzhzMjcgMTAgMjQgMzhjLTQtMTItMTAtMjAtMjQtMjEtMTIgMC0yMCA4LTI2IDIxeiIgZmlsbD0iIzNhMjQxOCIvPiA8Y2lyY2xlIGN4PSI1MSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz48Y2lyY2xlIGN4PSI2OSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz4gPHBhdGggZD0iTTUzIDg2cTcgNCAxNCAwIiBzdHJva2U9IiM3YTNkMzIiIHN0cm9rZS13aWR0aD0iMiIgZmlsbD0ibm9uZSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+PHBhdGggZD0iTTMwIDE1MGwxMC0yNiAyMCA2IDIwLTYgMTAgMjZ6IiBmaWxsPSIjYzQ4ZDNjIiBvcGFjaXR5PSIuNyIvPjwvc3ZnPg==",
-     "alt": "Odile Marsh — 5.1.1"
+     "alt": "Odile Marsh — 5.1.1",
+     "mime": "image/svg+xml"
     },
     "5.3.2": {
      "url": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAgMTUwIj4gPGRlZnM+PHJhZGlhbEdyYWRpZW50IGlkPSJnIiBjeD0iLjUiIGN5PSIuMzUiIHI9Ii44Ij48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiNmZmY2ZDgiIHN0b3Atb3BhY2l0eT0iLjkiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiNjOWEzNmEiLz48L3JhZGlhbEdyYWRpZW50PjwvZGVmcz4gPHJlY3Qgd2lkdGg9IjEyMCIgaGVpZ2h0PSIxNTAiIGZpbGw9InVybCgjZykiLz4gPHBhdGggZD0iTTE0IDE1MGM0LTM0IDIyLTQ4IDQ2LTQ4czQyIDE0IDQ2IDQ4eiIgZmlsbD0iIzJmNGE0NCIvPiA8cGF0aCBkPSJNNTAgOTZoMjB2MTRjLTYgNS0xNCA1LTIwIDB6IiBmaWxsPSIjYzY4YTVmIi8+IDxlbGxpcHNlIGN4PSI2MCIgY3k9IjcwIiByeD0iMjIiIHJ5PSIyNyIgZmlsbD0iI2M2OGE1ZiIvPiA8cGF0aCBkPSJNMzYgNzBjLTItMjYgMTItMzggMjYtMzhzMjcgMTAgMjQgMzhjLTQtMTItMTAtMjAtMjQtMjEtMTIgMC0yMCA4LTI2IDIxeiIgZmlsbD0iIzNhMjQxOCIvPiA8Y2lyY2xlIGN4PSI1MSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz48Y2lyY2xlIGN4PSI2OSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz4gPHBhdGggZD0iTTUzIDg2cTcgNCAxNCAwIiBzdHJva2U9IiM3YTNkMzIiIHN0cm9rZS13aWR0aD0iMiIgZmlsbD0ibm9uZSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+PHBhdGggZD0iTTMwIDE1MGwxMC0yNiAyMCA2IDIwLTYgMTAgMjZ6IiBmaWxsPSIjYzQ4ZDNjIiBvcGFjaXR5PSIuNyIvPjwvc3ZnPg==",
-     "alt": "Odile Marsh — 5.3.2"
+     "alt": "Odile Marsh — 5.3.2",
+     "mime": "image/svg+xml"
+    },
+    "5.8.1#1": {
+     "url": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAgMTUwIj4gPGRlZnM+PHJhZGlhbEdyYWRpZW50IGlkPSJnIiBjeD0iLjUiIGN5PSIuMzUiIHI9Ii44Ij48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiNmZmY2ZDgiIHN0b3Atb3BhY2l0eT0iLjkiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiNkN2I5OGEiLz48L3JhZGlhbEdyYWRpZW50PjwvZGVmcz4gPHJlY3Qgd2lkdGg9IjEyMCIgaGVpZ2h0PSIxNTAiIGZpbGw9InVybCgjZykiLz4gPHBhdGggZD0iTTE0IDE1MGM0LTM0IDIyLTQ4IDQ2LTQ4czQyIDE0IDQ2IDQ4eiIgZmlsbD0iIzdiNGIyYSIvPiA8cGF0aCBkPSJNNTAgOTZoMjB2MTRjLTYgNS0xNCA1LTIwIDB6IiBmaWxsPSIjYzY4YTVmIi8+IDxlbGxpcHNlIGN4PSI2MCIgY3k9IjcwIiByeD0iMjIiIHJ5PSIyNyIgZmlsbD0iI2M2OGE1ZiIvPiA8cGF0aCBkPSJNMzYgNzBjLTItMjYgMTItMzggMjYtMzhzMjcgMTAgMjQgMzhjLTQtMTItMTAtMjAtMjQtMjEtMTIgMC0yMCA4LTI2IDIxeiIgZmlsbD0iIzVhM2EyMiIvPiA8Y2lyY2xlIGN4PSI1MSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz48Y2lyY2xlIGN4PSI2OSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz4gPHBhdGggZD0iTTUzIDg2cTcgNCAxNCAwIiBzdHJva2U9IiM3YTNkMzIiIHN0cm9rZS13aWR0aD0iMiIgZmlsbD0ibm9uZSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+PC9zdmc+",
+     "alt": "Odile Marsh — 5.8.1 row 1",
+     "mime": "image/svg+xml"
+    },
+    "5.8.1#2": {
+     "url": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAgMTUwIj4gPGRlZnM+PHJhZGlhbEdyYWRpZW50IGlkPSJnIiBjeD0iLjUiIGN5PSIuMzUiIHI9Ii44Ij48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiNmZmY2ZDgiIHN0b3Atb3BhY2l0eT0iLjkiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiM4YWExYTgiLz48L3JhZGlhbEdyYWRpZW50PjwvZGVmcz4gPHJlY3Qgd2lkdGg9IjEyMCIgaGVpZ2h0PSIxNTAiIGZpbGw9InVybCgjZykiLz4gPHBhdGggZD0iTTE0IDE1MGM0LTM0IDIyLTQ4IDQ2LTQ4czQyIDE0IDQ2IDQ4eiIgZmlsbD0iIzJhMzQ0NiIvPiA8cGF0aCBkPSJNNTAgOTZoMjB2MTRjLTYgNS0xNCA1LTIwIDB6IiBmaWxsPSIjZDlhOTgyIi8+IDxlbGxpcHNlIGN4PSI2MCIgY3k9IjcwIiByeD0iMjIiIHJ5PSIyNyIgZmlsbD0iI2Q5YTk4MiIvPiA8cGF0aCBkPSJNMzYgNzBjLTItMjYgMTItMzggMjYtMzhzMjcgMTAgMjQgMzhjLTQtMTItMTAtMjAtMjQtMjEtMTIgMC0yMCA4LTI2IDIxeiIgZmlsbD0iI2Q4ZDRjYyIvPiA8Y2lyY2xlIGN4PSI1MSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz48Y2lyY2xlIGN4PSI2OSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz4gPHBhdGggZD0iTTUzIDg2cTcgNCAxNCAwIiBzdHJva2U9IiM3YTNkMzIiIHN0cm9rZS13aWR0aD0iMiIgZmlsbD0ibm9uZSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+PHBhdGggZD0iTTQyIDg0cTE4IDIyIDM2IDB2MTBxLTE4IDIwLTM2IDB6IiBmaWxsPSIjZTdlM2RhIi8+PC9zdmc+",
+     "alt": "Odile Marsh — 5.8.1 row 2",
+     "mime": "image/svg+xml"
+    },
+    "5.8.1#3": {
+     "url": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAgMTUwIj4gPGRlZnM+PHJhZGlhbEdyYWRpZW50IGlkPSJnIiBjeD0iLjUiIGN5PSIuMzUiIHI9Ii44Ij48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiNmZmY2ZDgiIHN0b3Atb3BhY2l0eT0iLjkiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiM5YWEwYWEiLz48L3JhZGlhbEdyYWRpZW50PjwvZGVmcz4gPHJlY3Qgd2lkdGg9IjEyMCIgaGVpZ2h0PSIxNTAiIGZpbGw9InVybCgjZykiLz4gPHBhdGggZD0iTTE0IDE1MGM0LTM0IDIyLTQ4IDQ2LTQ4czQyIDE0IDQ2IDQ4eiIgZmlsbD0iIzE1MTcxYyIvPiA8cGF0aCBkPSJNNTAgOTZoMjB2MTRjLTYgNS0xNCA1LTIwIDB6IiBmaWxsPSIjZWFjN2E4Ii8+IDxlbGxpcHNlIGN4PSI2MCIgY3k9IjcwIiByeD0iMjIiIHJ5PSIyNyIgZmlsbD0iI2VhYzdhOCIvPiA8cGF0aCBkPSJNMzYgNzBjLTItMjYgMTItMzggMjYtMzhzMjcgMTAgMjQgMzhjLTQtMTItMTAtMjAtMjQtMjEtMTIgMC0yMCA4LTI2IDIxeiIgZmlsbD0iIzFiMWIxZiIvPiA8Y2lyY2xlIGN4PSI1MSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz48Y2lyY2xlIGN4PSI2OSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz4gPHBhdGggZD0iTTUzIDg2cTcgNCAxNCAwIiBzdHJva2U9IiM3YTNkMzIiIHN0cm9rZS13aWR0aD0iMiIgZmlsbD0ibm9uZSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+PHBhdGggZD0iTTM4IDUwaDQ0di04SDM4eiIgZmlsbD0iIzE1MTcxYyIvPjwvc3ZnPg==",
+     "alt": "Odile Marsh — 5.8.1 row 3",
+     "mime": "image/svg+xml"
     }
    }
   },
@@ -2461,7 +2869,10 @@
    "entry_id": "rec-tobiah",
    "title": "Tobiah Reed",
    "page_id": "ch-tobiah",
+   "page": 6,
    "status": "approved",
+   "icon": "🧑",
+   "target": "character:rec-tobiah",
    "sections": {
     "5.1": {
      "fields": {
@@ -2521,146 +2932,152 @@
      "fields": {
       "5.2.1": {
        "value": "71",
-       "status": "approved",
-       "source": "forge:5.2.1",
+       "status": "proposed",
+       "source": "new:age",
+       "new": true,
        "edit": {
-        "route": "#/p/PID/main/forge/rec-tobiah",
-        "field": "5.2.1"
+        "route": "#/p/PID/main/binder",
+        "field": "age",
+        "target": "character:rec-tobiah",
+        "api": "PUT /api/projects/PID/branches/main/binder/fields"
        }
       },
       "5.2.2": {
        "value": "",
        "status": "empty",
-       "source": "forge:5.2.2",
-       "edit": {
-        "route": "#/p/PID/main/forge/rec-tobiah",
-        "field": "5.2.2"
-       }
+       "source": "new:birth",
+       "new": true
       },
       "5.2.3": {
        "value": "he / him",
-       "status": "approved",
-       "source": "forge:5.2.3",
+       "status": "proposed",
+       "source": "new:pronouns",
+       "new": true,
        "edit": {
-        "route": "#/p/PID/main/forge/rec-tobiah",
-        "field": "5.2.3"
+        "route": "#/p/PID/main/binder",
+        "field": "pronouns",
+        "target": "character:rec-tobiah",
+        "api": "PUT /api/projects/PID/branches/main/binder/fields"
        }
       },
       "5.2.4": {
        "value": "Human",
-       "status": "approved",
-       "source": "forge:5.2.4",
+       "status": "proposed",
+       "source": "new:species",
+       "new": true,
        "edit": {
-        "route": "#/p/PID/main/forge/rec-tobiah",
-        "field": "5.2.4"
+        "route": "#/p/PID/main/binder",
+        "field": "species",
+        "target": "character:rec-tobiah",
+        "api": "PUT /api/projects/PID/branches/main/binder/fields"
        }
       },
       "5.2.5": {
        "value": "1.80 m",
        "status": "proposed",
-       "source": "new:5.2.5",
+       "source": "new:height",
+       "new": true,
        "edit": {
-        "route": "#/p/PID/main/forge/rec-tobiah",
-        "field": "5.2.5"
+        "route": "#/p/PID/main/binder",
+        "field": "height",
+        "target": "character:rec-tobiah",
+        "api": "PUT /api/projects/PID/branches/main/binder/fields"
        }
       },
       "5.2.6": {
        "value": "",
        "status": "empty",
-       "source": "new:5.2.6",
-       "edit": {
-        "route": "#/p/PID/main/forge/rec-tobiah",
-        "field": "5.2.6"
-       }
+       "source": "new:weight",
+       "new": true
       },
       "5.2.7": {
        "value": "",
        "status": "empty",
-       "source": "new:5.2.7",
-       "edit": {
-        "route": "#/p/PID/main/forge/rec-tobiah",
-        "field": "5.2.7"
-       }
+       "source": "new:build",
+       "new": true
       },
       "5.2.8": {
        "value": "Pale blue",
-       "status": "approved",
-       "source": "forge:5.2.8",
+       "status": "proposed",
+       "source": "new:eyes",
+       "new": true,
        "edit": {
-        "route": "#/p/PID/main/forge/rec-tobiah",
-        "field": "5.2.8"
+        "route": "#/p/PID/main/binder",
+        "field": "eyes",
+        "target": "character:rec-tobiah",
+        "api": "PUT /api/projects/PID/branches/main/binder/fields"
        }
       },
       "5.2.9": {
        "value": "White, tied back",
-       "status": "approved",
-       "source": "forge:5.2.9",
+       "status": "proposed",
+       "source": "new:hair",
+       "new": true,
        "edit": {
-        "route": "#/p/PID/main/forge/rec-tobiah",
-        "field": "5.2.9"
+        "route": "#/p/PID/main/binder",
+        "field": "hair",
+        "target": "character:rec-tobiah",
+        "api": "PUT /api/projects/PID/branches/main/binder/fields"
        }
       },
       "5.2.10": {
        "value": "",
        "status": "empty",
-       "source": "forge:5.2.10",
-       "edit": {
-        "route": "#/p/PID/main/forge/rec-tobiah",
-        "field": "5.2.10"
-       }
+       "source": "new:skin",
+       "new": true
       },
       "5.2.11": {
        "value": "",
        "status": "empty",
-       "source": "forge:5.2.11",
-       "edit": {
-        "route": "#/p/PID/main/forge/rec-tobiah",
-        "field": "5.2.11"
-       }
+       "source": "new:marks",
+       "new": true
       },
       "5.2.12": {
        "value": "Ferryman",
-       "status": "approved",
-       "source": "forge:5.2.12",
+       "status": "proposed",
+       "source": "new:occupation",
+       "new": true,
        "edit": {
-        "route": "#/p/PID/main/forge/rec-tobiah",
-        "field": "5.2.12"
+        "route": "#/p/PID/main/binder",
+        "field": "occupation",
+        "target": "character:rec-tobiah",
+        "api": "PUT /api/projects/PID/branches/main/binder/fields"
        }
       },
       "5.2.13": {
        "value": "Gallows Landing",
-       "status": "approved",
-       "source": "forge:5.2.13",
+       "status": "proposed",
+       "source": "new:home",
+       "new": true,
        "edit": {
-        "route": "#/p/PID/main/forge/rec-tobiah",
-        "field": "5.2.13"
+        "route": "#/p/PID/main/binder",
+        "field": "home",
+        "target": "character:rec-tobiah",
+        "api": "PUT /api/projects/PID/branches/main/binder/fields"
        }
       },
       "5.2.14": {
        "value": "",
        "status": "empty",
-       "source": "new:5.2.14",
-       "edit": {
-        "route": "#/p/PID/main/forge/rec-tobiah",
-        "field": "5.2.14"
-       }
+       "source": "new:family_status",
+       "new": true
       },
       "5.2.15": {
        "value": "",
        "status": "empty",
-       "source": "forge:5.2.15",
-       "edit": {
-        "route": "#/p/PID/main/forge/rec-tobiah",
-        "field": "5.2.15"
-       }
+       "source": "new:era",
+       "new": true
       },
       "5.2.16": {
        "value": "Right-handed",
        "status": "proposed",
-       "source": "new:5.2.16",
+       "source": "new:handedness",
+       "new": true,
        "edit": {
-        "route": "#/p/PID/main/forge/rec-tobiah",
-        "field": "5.2.16"
+        "route": "#/p/PID/main/binder",
+        "field": "handedness",
+        "target": "character:rec-tobiah",
+        "api": "PUT /api/projects/PID/branches/main/binder/fields"
        }
       }
      }
@@ -3082,22 +3499,49 @@
      }
     },
     "5.8": {
-     "fields": {},
+     "fields": {
+      "5.8.1": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:5.8",
+       "repeat": true,
+       "rows": 2
+      },
+      "5.8.2": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:5.8",
+       "repeat": true,
+       "rows": 2
+      },
+      "5.8.3": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:5.8",
+       "repeat": true,
+       "rows": 2,
+       "new": true
+      },
+      "5.8.4": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:5.8",
+       "repeat": true,
+       "rows": 2
+      }
+     },
      "rows": [
       {
        "5.8.1": {
-        "value": "",
-        "status": "empty",
-        "source": "forge:5.8.1",
-        "edit": {
-         "route": "#/p/PID/main/forge/rec-tobiah",
-         "field": "5.8.1"
-        }
+        "value": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAgMTUwIj4gPGRlZnM+PHJhZGlhbEdyYWRpZW50IGlkPSJnIiBjeD0iLjUiIGN5PSIuMzUiIHI9Ii44Ij48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiNmZmY2ZDgiIHN0b3Atb3BhY2l0eT0iLjkiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiNjOWEzNmEiLz48L3JhZGlhbEdyYWRpZW50PjwvZGVmcz4gPHJlY3Qgd2lkdGg9IjEyMCIgaGVpZ2h0PSIxNTAiIGZpbGw9InVybCgjZykiLz4gPHBhdGggZD0iTTE0IDE1MGM0LTM0IDIyLTQ4IDQ2LTQ4czQyIDE0IDQ2IDQ4eiIgZmlsbD0iIzJmNGE0NCIvPiA8cGF0aCBkPSJNNTAgOTZoMjB2MTRjLTYgNS0xNCA1LTIwIDB6IiBmaWxsPSIjYzY4YTVmIi8+IDxlbGxpcHNlIGN4PSI2MCIgY3k9IjcwIiByeD0iMjIiIHJ5PSIyNyIgZmlsbD0iI2M2OGE1ZiIvPiA8cGF0aCBkPSJNMzYgNzBjLTItMjYgMTItMzggMjYtMzhzMjcgMTAgMjQgMzhjLTQtMTItMTAtMjAtMjQtMjEtMTIgMC0yMCA4LTI2IDIxeiIgZmlsbD0iIzNhMjQxOCIvPiA8Y2lyY2xlIGN4PSI1MSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz48Y2lyY2xlIGN4PSI2OSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz4gPHBhdGggZD0iTTUzIDg2cTcgNCAxNCAwIiBzdHJva2U9IiM3YTNkMzIiIHN0cm9rZS13aWR0aD0iMiIgZmlsbD0ibm9uZSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+PHBhdGggZD0iTTMwIDE1MGwxMC0yNiAyMCA2IDIwLTYgMTAgMjZ6IiBmaWxsPSIjYzQ4ZDNjIiBvcGFjaXR5PSIuNyIvPjwvc3ZnPg==",
+        "status": "supplied",
+        "source": "pic"
        },
        "5.8.2": {
         "value": "Odile Marsh",
         "status": "approved",
         "source": "forge:5.8.2",
+        "link": "ch-odile",
         "edit": {
          "route": "#/p/PID/main/forge/rec-tobiah",
          "field": "5.8.2"
@@ -3106,10 +3550,13 @@
        "5.8.3": {
         "value": "mentor",
         "status": "proposed",
-        "source": "new:5.8.3",
+        "source": "row:type",
+        "new": true,
         "edit": {
-         "route": "#/p/PID/main/forge/rec-tobiah",
-         "field": "5.8.3"
+         "route": "#/p/PID/main/binder",
+         "field": "type",
+         "target": "relationship:rec-tobiah:odile marsh",
+         "api": "PUT /api/projects/PID/branches/main/binder/fields"
         }
        },
        "5.8.4": {
@@ -3120,22 +3567,23 @@
          "route": "#/p/PID/main/forge/rec-tobiah",
          "field": "5.8.4"
         }
+       },
+       "_meta": {
+        "target": "relationship:rec-tobiah:odile marsh",
+        "field_key": "relationship_1"
        }
       },
       {
        "5.8.1": {
-        "value": "",
-        "status": "empty",
-        "source": "forge:5.8.1",
-        "edit": {
-         "route": "#/p/PID/main/forge/rec-tobiah",
-         "field": "5.8.1"
-        }
+        "value": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAgMTUwIj4gPGRlZnM+PHJhZGlhbEdyYWRpZW50IGlkPSJnIiBjeD0iLjUiIGN5PSIuMzUiIHI9Ii44Ij48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiNmZmY2ZDgiIHN0b3Atb3BhY2l0eT0iLjkiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiM5YWEwYWEiLz48L3JhZGlhbEdyYWRpZW50PjwvZGVmcz4gPHJlY3Qgd2lkdGg9IjEyMCIgaGVpZ2h0PSIxNTAiIGZpbGw9InVybCgjZykiLz4gPHBhdGggZD0iTTE0IDE1MGM0LTM0IDIyLTQ4IDQ2LTQ4czQyIDE0IDQ2IDQ4eiIgZmlsbD0iIzE1MTcxYyIvPiA8cGF0aCBkPSJNNTAgOTZoMjB2MTRjLTYgNS0xNCA1LTIwIDB6IiBmaWxsPSIjZWFjN2E4Ii8+IDxlbGxpcHNlIGN4PSI2MCIgY3k9IjcwIiByeD0iMjIiIHJ5PSIyNyIgZmlsbD0iI2VhYzdhOCIvPiA8cGF0aCBkPSJNMzYgNzBjLTItMjYgMTItMzggMjYtMzhzMjcgMTAgMjQgMzhjLTQtMTItMTAtMjAtMjQtMjEtMTIgMC0yMCA4LTI2IDIxeiIgZmlsbD0iIzFiMWIxZiIvPiA8Y2lyY2xlIGN4PSI1MSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz48Y2lyY2xlIGN4PSI2OSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz4gPHBhdGggZD0iTTUzIDg2cTcgNCAxNCAwIiBzdHJva2U9IiM3YTNkMzIiIHN0cm9rZS13aWR0aD0iMiIgZmlsbD0ibm9uZSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+PHBhdGggZD0iTTM4IDUwaDQ0di04SDM4eiIgZmlsbD0iIzE1MTcxYyIvPjwvc3ZnPg==",
+        "status": "supplied",
+        "source": "pic"
        },
        "5.8.2": {
         "value": "Silas Crane",
         "status": "approved",
         "source": "forge:5.8.2",
+        "link": "ch-silas",
         "edit": {
          "route": "#/p/PID/main/forge/rec-tobiah",
          "field": "5.8.2"
@@ -3144,10 +3592,13 @@
        "5.8.3": {
         "value": "rival",
         "status": "proposed",
-        "source": "new:5.8.3",
+        "source": "row:type",
+        "new": true,
         "edit": {
-         "route": "#/p/PID/main/forge/rec-tobiah",
-         "field": "5.8.3"
+         "route": "#/p/PID/main/binder",
+         "field": "type",
+         "target": "relationship:rec-tobiah:silas crane",
+         "api": "PUT /api/projects/PID/branches/main/binder/fields"
         }
        },
        "5.8.4": {
@@ -3158,6 +3609,10 @@
          "route": "#/p/PID/main/forge/rec-tobiah",
          "field": "5.8.4"
         }
+       },
+       "_meta": {
+        "target": "relationship:rec-tobiah:silas crane",
+        "field_key": "relationship_2"
        }
       }
      ]
@@ -3221,46 +3676,61 @@
       "5.9.7": {
        "value": "6",
        "status": "proposed",
-       "source": "new:5.9.7",
+       "source": "new:stat_strength",
+       "new": true,
        "edit": {
-        "route": "#/p/PID/main/forge/rec-tobiah",
-        "field": "5.9.7"
+        "route": "#/p/PID/main/binder",
+        "field": "stat_strength",
+        "target": "character:rec-tobiah",
+        "api": "PUT /api/projects/PID/branches/main/binder/fields"
        }
       },
       "5.9.8": {
        "value": "2",
        "status": "proposed",
-       "source": "new:5.9.8",
+       "source": "new:stat_speed",
+       "new": true,
        "edit": {
-        "route": "#/p/PID/main/forge/rec-tobiah",
-        "field": "5.9.8"
+        "route": "#/p/PID/main/binder",
+        "field": "stat_speed",
+        "target": "character:rec-tobiah",
+        "api": "PUT /api/projects/PID/branches/main/binder/fields"
        }
       },
       "5.9.9": {
        "value": "3",
        "status": "proposed",
-       "source": "new:5.9.9",
+       "source": "new:stat_agility",
+       "new": true,
        "edit": {
-        "route": "#/p/PID/main/forge/rec-tobiah",
-        "field": "5.9.9"
+        "route": "#/p/PID/main/binder",
+        "field": "stat_agility",
+        "target": "character:rec-tobiah",
+        "api": "PUT /api/projects/PID/branches/main/binder/fields"
        }
       },
       "5.9.10": {
        "value": "8",
        "status": "proposed",
-       "source": "new:5.9.10",
+       "source": "new:stat_stamina",
+       "new": true,
        "edit": {
-        "route": "#/p/PID/main/forge/rec-tobiah",
-        "field": "5.9.10"
+        "route": "#/p/PID/main/binder",
+        "field": "stat_stamina",
+        "target": "character:rec-tobiah",
+        "api": "PUT /api/projects/PID/branches/main/binder/fields"
        }
       },
       "5.9.11": {
        "value": "7",
        "status": "proposed",
-       "source": "new:5.9.11",
+       "source": "new:stat_durability",
+       "new": true,
        "edit": {
-        "route": "#/p/PID/main/forge/rec-tobiah",
-        "field": "5.9.11"
+        "route": "#/p/PID/main/binder",
+        "field": "stat_durability",
+        "target": "character:rec-tobiah",
+        "api": "PUT /api/projects/PID/branches/main/binder/fields"
        }
       },
       "5.9.12": {
@@ -3400,7 +3870,22 @@
      }
     },
     "5.12": {
-     "fields": {},
+     "fields": {
+      "5.12.1": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:5.12",
+       "repeat": true,
+       "rows": 1
+      },
+      "5.12.2": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:5.12",
+       "repeat": true,
+       "rows": 1
+      }
+     },
      "rows": [
       {
        "5.12.1": {
@@ -3634,7 +4119,18 @@
    "pics": {
     "5.1.1": {
      "url": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAgMTUwIj4gPGRlZnM+PHJhZGlhbEdyYWRpZW50IGlkPSJnIiBjeD0iLjUiIGN5PSIuMzUiIHI9Ii44Ij48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiNmZmY2ZDgiIHN0b3Atb3BhY2l0eT0iLjkiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiM4YWExYTgiLz48L3JhZGlhbEdyYWRpZW50PjwvZGVmcz4gPHJlY3Qgd2lkdGg9IjEyMCIgaGVpZ2h0PSIxNTAiIGZpbGw9InVybCgjZykiLz4gPHBhdGggZD0iTTE0IDE1MGM0LTM0IDIyLTQ4IDQ2LTQ4czQyIDE0IDQ2IDQ4eiIgZmlsbD0iIzJhMzQ0NiIvPiA8cGF0aCBkPSJNNTAgOTZoMjB2MTRjLTYgNS0xNCA1LTIwIDB6IiBmaWxsPSIjZDlhOTgyIi8+IDxlbGxpcHNlIGN4PSI2MCIgY3k9IjcwIiByeD0iMjIiIHJ5PSIyNyIgZmlsbD0iI2Q5YTk4MiIvPiA8cGF0aCBkPSJNMzYgNzBjLTItMjYgMTItMzggMjYtMzhzMjcgMTAgMjQgMzhjLTQtMTItMTAtMjAtMjQtMjEtMTIgMC0yMCA4LTI2IDIxeiIgZmlsbD0iI2Q4ZDRjYyIvPiA8Y2lyY2xlIGN4PSI1MSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz48Y2lyY2xlIGN4PSI2OSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz4gPHBhdGggZD0iTTUzIDg2cTcgNCAxNCAwIiBzdHJva2U9IiM3YTNkMzIiIHN0cm9rZS13aWR0aD0iMiIgZmlsbD0ibm9uZSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+PHBhdGggZD0iTTQyIDg0cTE4IDIyIDM2IDB2MTBxLTE4IDIwLTM2IDB6IiBmaWxsPSIjZTdlM2RhIi8+PC9zdmc+",
-     "alt": "Tobiah Reed — 5.1.1"
+     "alt": "Tobiah Reed — 5.1.1",
+     "mime": "image/svg+xml"
+    },
+    "5.8.1#1": {
+     "url": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAgMTUwIj4gPGRlZnM+PHJhZGlhbEdyYWRpZW50IGlkPSJnIiBjeD0iLjUiIGN5PSIuMzUiIHI9Ii44Ij48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiNmZmY2ZDgiIHN0b3Atb3BhY2l0eT0iLjkiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiNjOWEzNmEiLz48L3JhZGlhbEdyYWRpZW50PjwvZGVmcz4gPHJlY3Qgd2lkdGg9IjEyMCIgaGVpZ2h0PSIxNTAiIGZpbGw9InVybCgjZykiLz4gPHBhdGggZD0iTTE0IDE1MGM0LTM0IDIyLTQ4IDQ2LTQ4czQyIDE0IDQ2IDQ4eiIgZmlsbD0iIzJmNGE0NCIvPiA8cGF0aCBkPSJNNTAgOTZoMjB2MTRjLTYgNS0xNCA1LTIwIDB6IiBmaWxsPSIjYzY4YTVmIi8+IDxlbGxpcHNlIGN4PSI2MCIgY3k9IjcwIiByeD0iMjIiIHJ5PSIyNyIgZmlsbD0iI2M2OGE1ZiIvPiA8cGF0aCBkPSJNMzYgNzBjLTItMjYgMTItMzggMjYtMzhzMjcgMTAgMjQgMzhjLTQtMTItMTAtMjAtMjQtMjEtMTIgMC0yMCA4LTI2IDIxeiIgZmlsbD0iIzNhMjQxOCIvPiA8Y2lyY2xlIGN4PSI1MSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz48Y2lyY2xlIGN4PSI2OSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz4gPHBhdGggZD0iTTUzIDg2cTcgNCAxNCAwIiBzdHJva2U9IiM3YTNkMzIiIHN0cm9rZS13aWR0aD0iMiIgZmlsbD0ibm9uZSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+PHBhdGggZD0iTTMwIDE1MGwxMC0yNiAyMCA2IDIwLTYgMTAgMjZ6IiBmaWxsPSIjYzQ4ZDNjIiBvcGFjaXR5PSIuNyIvPjwvc3ZnPg==",
+     "alt": "Tobiah Reed — 5.8.1 row 1",
+     "mime": "image/svg+xml"
+    },
+    "5.8.1#2": {
+     "url": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAgMTUwIj4gPGRlZnM+PHJhZGlhbEdyYWRpZW50IGlkPSJnIiBjeD0iLjUiIGN5PSIuMzUiIHI9Ii44Ij48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiNmZmY2ZDgiIHN0b3Atb3BhY2l0eT0iLjkiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiM5YWEwYWEiLz48L3JhZGlhbEdyYWRpZW50PjwvZGVmcz4gPHJlY3Qgd2lkdGg9IjEyMCIgaGVpZ2h0PSIxNTAiIGZpbGw9InVybCgjZykiLz4gPHBhdGggZD0iTTE0IDE1MGM0LTM0IDIyLTQ4IDQ2LTQ4czQyIDE0IDQ2IDQ4eiIgZmlsbD0iIzE1MTcxYyIvPiA8cGF0aCBkPSJNNTAgOTZoMjB2MTRjLTYgNS0xNCA1LTIwIDB6IiBmaWxsPSIjZWFjN2E4Ii8+IDxlbGxpcHNlIGN4PSI2MCIgY3k9IjcwIiByeD0iMjIiIHJ5PSIyNyIgZmlsbD0iI2VhYzdhOCIvPiA8cGF0aCBkPSJNMzYgNzBjLTItMjYgMTItMzggMjYtMzhzMjcgMTAgMjQgMzhjLTQtMTItMTAtMjAtMjQtMjEtMTIgMC0yMCA4LTI2IDIxeiIgZmlsbD0iIzFiMWIxZiIvPiA8Y2lyY2xlIGN4PSI1MSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz48Y2lyY2xlIGN4PSI2OSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz4gPHBhdGggZD0iTTUzIDg2cTcgNCAxNCAwIiBzdHJva2U9IiM3YTNkMzIiIHN0cm9rZS13aWR0aD0iMiIgZmlsbD0ibm9uZSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+PHBhdGggZD0iTTM4IDUwaDQ0di04SDM4eiIgZmlsbD0iIzE1MTcxYyIvPjwvc3ZnPg==",
+     "alt": "Tobiah Reed — 5.8.1 row 2",
+     "mime": "image/svg+xml"
     }
    }
   },
@@ -3643,7 +4139,10 @@
    "entry_id": "rec-wren",
    "title": "Wren Marsh",
    "page_id": "ch-wren",
+   "page": 7,
    "status": "draft",
+   "icon": "🧑",
+   "target": "character:rec-wren",
    "sections": {
     "5.1": {
      "fields": {
@@ -3703,147 +4202,117 @@
      "fields": {
       "5.2.1": {
        "value": "9",
-       "status": "approved",
-       "source": "forge:5.2.1",
+       "status": "proposed",
+       "source": "new:age",
+       "new": true,
        "edit": {
-        "route": "#/p/PID/main/forge/rec-wren",
-        "field": "5.2.1"
+        "route": "#/p/PID/main/binder",
+        "field": "age",
+        "target": "character:rec-wren",
+        "api": "PUT /api/projects/PID/branches/main/binder/fields"
        }
       },
       "5.2.2": {
        "value": "",
        "status": "empty",
-       "source": "forge:5.2.2",
-       "edit": {
-        "route": "#/p/PID/main/forge/rec-wren",
-        "field": "5.2.2"
-       }
+       "source": "new:birth",
+       "new": true
       },
       "5.2.3": {
        "value": "he / him",
-       "status": "approved",
-       "source": "forge:5.2.3",
+       "status": "proposed",
+       "source": "new:pronouns",
+       "new": true,
        "edit": {
-        "route": "#/p/PID/main/forge/rec-wren",
-        "field": "5.2.3"
+        "route": "#/p/PID/main/binder",
+        "field": "pronouns",
+        "target": "character:rec-wren",
+        "api": "PUT /api/projects/PID/branches/main/binder/fields"
        }
       },
       "5.2.4": {
        "value": "",
        "status": "empty",
-       "source": "forge:5.2.4",
-       "edit": {
-        "route": "#/p/PID/main/forge/rec-wren",
-        "field": "5.2.4"
-       }
+       "source": "new:species",
+       "new": true
       },
       "5.2.5": {
        "value": "",
        "status": "empty",
-       "source": "new:5.2.5",
-       "edit": {
-        "route": "#/p/PID/main/forge/rec-wren",
-        "field": "5.2.5"
-       }
+       "source": "new:height",
+       "new": true
       },
       "5.2.6": {
        "value": "",
        "status": "empty",
-       "source": "new:5.2.6",
-       "edit": {
-        "route": "#/p/PID/main/forge/rec-wren",
-        "field": "5.2.6"
-       }
+       "source": "new:weight",
+       "new": true
       },
       "5.2.7": {
        "value": "",
        "status": "empty",
-       "source": "new:5.2.7",
-       "edit": {
-        "route": "#/p/PID/main/forge/rec-wren",
-        "field": "5.2.7"
-       }
+       "source": "new:build",
+       "new": true
       },
       "5.2.8": {
        "value": "",
        "status": "empty",
-       "source": "forge:5.2.8",
-       "edit": {
-        "route": "#/p/PID/main/forge/rec-wren",
-        "field": "5.2.8"
-       }
+       "source": "new:eyes",
+       "new": true
       },
       "5.2.9": {
        "value": "Brown curls",
-       "status": "approved",
-       "source": "forge:5.2.9",
+       "status": "proposed",
+       "source": "new:hair",
+       "new": true,
        "edit": {
-        "route": "#/p/PID/main/forge/rec-wren",
-        "field": "5.2.9"
+        "route": "#/p/PID/main/binder",
+        "field": "hair",
+        "target": "character:rec-wren",
+        "api": "PUT /api/projects/PID/branches/main/binder/fields"
        }
       },
       "5.2.10": {
        "value": "",
        "status": "empty",
-       "source": "forge:5.2.10",
-       "edit": {
-        "route": "#/p/PID/main/forge/rec-wren",
-        "field": "5.2.10"
-       }
+       "source": "new:skin",
+       "new": true
       },
       "5.2.11": {
        "value": "",
        "status": "empty",
-       "source": "forge:5.2.11",
-       "edit": {
-        "route": "#/p/PID/main/forge/rec-wren",
-        "field": "5.2.11"
-       }
+       "source": "new:marks",
+       "new": true
       },
       "5.2.12": {
        "value": "",
        "status": "empty",
-       "source": "forge:5.2.12",
-       "edit": {
-        "route": "#/p/PID/main/forge/rec-wren",
-        "field": "5.2.12"
-       }
+       "source": "new:occupation",
+       "new": true
       },
       "5.2.13": {
        "value": "",
        "status": "empty",
-       "source": "forge:5.2.13",
-       "edit": {
-        "route": "#/p/PID/main/forge/rec-wren",
-        "field": "5.2.13"
-       }
+       "source": "new:home",
+       "new": true
       },
       "5.2.14": {
        "value": "",
        "status": "empty",
-       "source": "new:5.2.14",
-       "edit": {
-        "route": "#/p/PID/main/forge/rec-wren",
-        "field": "5.2.14"
-       }
+       "source": "new:family_status",
+       "new": true
       },
       "5.2.15": {
        "value": "",
        "status": "empty",
-       "source": "forge:5.2.15",
-       "edit": {
-        "route": "#/p/PID/main/forge/rec-wren",
-        "field": "5.2.15"
-       }
+       "source": "new:era",
+       "new": true
       },
       "5.2.16": {
        "value": "",
        "status": "empty",
-       "source": "new:5.2.16",
-       "edit": {
-        "route": "#/p/PID/main/forge/rec-wren",
-        "field": "5.2.16"
-       }
+       "source": "new:handedness",
+       "new": true
       }
      }
     },
@@ -4264,22 +4733,49 @@
      }
     },
     "5.8": {
-     "fields": {},
+     "fields": {
+      "5.8.1": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:5.8",
+       "repeat": true,
+       "rows": 2
+      },
+      "5.8.2": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:5.8",
+       "repeat": true,
+       "rows": 2
+      },
+      "5.8.3": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:5.8",
+       "repeat": true,
+       "rows": 2,
+       "new": true
+      },
+      "5.8.4": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:5.8",
+       "repeat": true,
+       "rows": 2
+      }
+     },
      "rows": [
       {
        "5.8.1": {
-        "value": "",
-        "status": "empty",
-        "source": "forge:5.8.1",
-        "edit": {
-         "route": "#/p/PID/main/forge/rec-wren",
-         "field": "5.8.1"
-        }
+        "value": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAgMTUwIj4gPGRlZnM+PHJhZGlhbEdyYWRpZW50IGlkPSJnIiBjeD0iLjUiIGN5PSIuMzUiIHI9Ii44Ij48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiNmZmY2ZDgiIHN0b3Atb3BhY2l0eT0iLjkiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiNjOWEzNmEiLz48L3JhZGlhbEdyYWRpZW50PjwvZGVmcz4gPHJlY3Qgd2lkdGg9IjEyMCIgaGVpZ2h0PSIxNTAiIGZpbGw9InVybCgjZykiLz4gPHBhdGggZD0iTTE0IDE1MGM0LTM0IDIyLTQ4IDQ2LTQ4czQyIDE0IDQ2IDQ4eiIgZmlsbD0iIzJmNGE0NCIvPiA8cGF0aCBkPSJNNTAgOTZoMjB2MTRjLTYgNS0xNCA1LTIwIDB6IiBmaWxsPSIjYzY4YTVmIi8+IDxlbGxpcHNlIGN4PSI2MCIgY3k9IjcwIiByeD0iMjIiIHJ5PSIyNyIgZmlsbD0iI2M2OGE1ZiIvPiA8cGF0aCBkPSJNMzYgNzBjLTItMjYgMTItMzggMjYtMzhzMjcgMTAgMjQgMzhjLTQtMTItMTAtMjAtMjQtMjEtMTIgMC0yMCA4LTI2IDIxeiIgZmlsbD0iIzNhMjQxOCIvPiA8Y2lyY2xlIGN4PSI1MSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz48Y2lyY2xlIGN4PSI2OSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz4gPHBhdGggZD0iTTUzIDg2cTcgNCAxNCAwIiBzdHJva2U9IiM3YTNkMzIiIHN0cm9rZS13aWR0aD0iMiIgZmlsbD0ibm9uZSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+PHBhdGggZD0iTTMwIDE1MGwxMC0yNiAyMCA2IDIwLTYgMTAgMjZ6IiBmaWxsPSIjYzQ4ZDNjIiBvcGFjaXR5PSIuNyIvPjwvc3ZnPg==",
+        "status": "supplied",
+        "source": "pic"
        },
        "5.8.2": {
         "value": "Odile Marsh",
         "status": "approved",
         "source": "forge:5.8.2",
+        "link": "ch-odile",
         "edit": {
          "route": "#/p/PID/main/forge/rec-wren",
          "field": "5.8.2"
@@ -4288,10 +4784,13 @@
        "5.8.3": {
         "value": "family",
         "status": "proposed",
-        "source": "new:5.8.3",
+        "source": "row:type",
+        "new": true,
         "edit": {
-         "route": "#/p/PID/main/forge/rec-wren",
-         "field": "5.8.3"
+         "route": "#/p/PID/main/binder",
+         "field": "type",
+         "target": "relationship:rec-wren:odile marsh",
+         "api": "PUT /api/projects/PID/branches/main/binder/fields"
         }
        },
        "5.8.4": {
@@ -4302,6 +4801,10 @@
          "route": "#/p/PID/main/forge/rec-wren",
          "field": "5.8.4"
         }
+       },
+       "_meta": {
+        "target": "relationship:rec-wren:odile marsh",
+        "field_key": "relationship_1"
        }
       },
       {
@@ -4318,6 +4821,7 @@
         "value": "Maren Vey",
         "status": "approved",
         "source": "forge:5.8.2",
+        "link": "ch-maren",
         "edit": {
          "route": "#/p/PID/main/forge/rec-wren",
          "field": "5.8.2"
@@ -4326,10 +4830,13 @@
        "5.8.3": {
         "value": "ally",
         "status": "proposed",
-        "source": "new:5.8.3",
+        "source": "row:type",
+        "new": true,
         "edit": {
-         "route": "#/p/PID/main/forge/rec-wren",
-         "field": "5.8.3"
+         "route": "#/p/PID/main/binder",
+         "field": "type",
+         "target": "relationship:rec-wren:maren vey",
+         "api": "PUT /api/projects/PID/branches/main/binder/fields"
         }
        },
        "5.8.4": {
@@ -4340,6 +4847,10 @@
          "route": "#/p/PID/main/forge/rec-wren",
          "field": "5.8.4"
         }
+       },
+       "_meta": {
+        "target": "relationship:rec-wren:maren vey",
+        "field_key": "relationship_2"
        }
       }
      ]
@@ -4403,46 +4914,61 @@
       "5.9.7": {
        "value": "2",
        "status": "proposed",
-       "source": "new:5.9.7",
+       "source": "new:stat_strength",
+       "new": true,
        "edit": {
-        "route": "#/p/PID/main/forge/rec-wren",
-        "field": "5.9.7"
+        "route": "#/p/PID/main/binder",
+        "field": "stat_strength",
+        "target": "character:rec-wren",
+        "api": "PUT /api/projects/PID/branches/main/binder/fields"
        }
       },
       "5.9.8": {
        "value": "5",
        "status": "proposed",
-       "source": "new:5.9.8",
+       "source": "new:stat_speed",
+       "new": true,
        "edit": {
-        "route": "#/p/PID/main/forge/rec-wren",
-        "field": "5.9.8"
+        "route": "#/p/PID/main/binder",
+        "field": "stat_speed",
+        "target": "character:rec-wren",
+        "api": "PUT /api/projects/PID/branches/main/binder/fields"
        }
       },
       "5.9.9": {
        "value": "6",
        "status": "proposed",
-       "source": "new:5.9.9",
+       "source": "new:stat_agility",
+       "new": true,
        "edit": {
-        "route": "#/p/PID/main/forge/rec-wren",
-        "field": "5.9.9"
+        "route": "#/p/PID/main/binder",
+        "field": "stat_agility",
+        "target": "character:rec-wren",
+        "api": "PUT /api/projects/PID/branches/main/binder/fields"
        }
       },
       "5.9.10": {
        "value": "3",
        "status": "proposed",
-       "source": "new:5.9.10",
+       "source": "new:stat_stamina",
+       "new": true,
        "edit": {
-        "route": "#/p/PID/main/forge/rec-wren",
-        "field": "5.9.10"
+        "route": "#/p/PID/main/binder",
+        "field": "stat_stamina",
+        "target": "character:rec-wren",
+        "api": "PUT /api/projects/PID/branches/main/binder/fields"
        }
       },
       "5.9.11": {
        "value": "2",
        "status": "proposed",
-       "source": "new:5.9.11",
+       "source": "new:stat_durability",
+       "new": true,
        "edit": {
-        "route": "#/p/PID/main/forge/rec-wren",
-        "field": "5.9.11"
+        "route": "#/p/PID/main/binder",
+        "field": "stat_durability",
+        "target": "character:rec-wren",
+        "api": "PUT /api/projects/PID/branches/main/binder/fields"
        }
       },
       "5.9.12": {
@@ -4582,7 +5108,22 @@
      }
     },
     "5.12": {
-     "fields": {},
+     "fields": {
+      "5.12.1": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:5.12",
+       "repeat": true,
+       "rows": 0
+      },
+      "5.12.2": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:5.12",
+       "repeat": true,
+       "rows": 0
+      }
+     },
      "rows": []
     },
     "5.13": {
@@ -4795,7 +5336,13 @@
    "pics": {
     "5.1.1": {
      "url": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAgMTUwIj4gPGRlZnM+PHJhZGlhbEdyYWRpZW50IGlkPSJnIiBjeD0iLjUiIGN5PSIuMzUiIHI9Ii44Ij48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiNmZmY2ZDgiIHN0b3Atb3BhY2l0eT0iLjkiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiNkN2I5OGEiLz48L3JhZGlhbEdyYWRpZW50PjwvZGVmcz4gPHJlY3Qgd2lkdGg9IjEyMCIgaGVpZ2h0PSIxNTAiIGZpbGw9InVybCgjZykiLz4gPHBhdGggZD0iTTE0IDE1MGM0LTM0IDIyLTQ4IDQ2LTQ4czQyIDE0IDQ2IDQ4eiIgZmlsbD0iIzdiNGIyYSIvPiA8cGF0aCBkPSJNNTAgOTZoMjB2MTRjLTYgNS0xNCA1LTIwIDB6IiBmaWxsPSIjYzY4YTVmIi8+IDxlbGxpcHNlIGN4PSI2MCIgY3k9IjcwIiByeD0iMjIiIHJ5PSIyNyIgZmlsbD0iI2M2OGE1ZiIvPiA8cGF0aCBkPSJNMzYgNzBjLTItMjYgMTItMzggMjYtMzhzMjcgMTAgMjQgMzhjLTQtMTItMTAtMjAtMjQtMjEtMTIgMC0yMCA4LTI2IDIxeiIgZmlsbD0iIzVhM2EyMiIvPiA8Y2lyY2xlIGN4PSI1MSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz48Y2lyY2xlIGN4PSI2OSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz4gPHBhdGggZD0iTTUzIDg2cTcgNCAxNCAwIiBzdHJva2U9IiM3YTNkMzIiIHN0cm9rZS13aWR0aD0iMiIgZmlsbD0ibm9uZSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+PC9zdmc+",
-     "alt": "Wren Marsh — 5.1.1"
+     "alt": "Wren Marsh — 5.1.1",
+     "mime": "image/svg+xml"
+    },
+    "5.8.1#1": {
+     "url": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAgMTUwIj4gPGRlZnM+PHJhZGlhbEdyYWRpZW50IGlkPSJnIiBjeD0iLjUiIGN5PSIuMzUiIHI9Ii44Ij48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiNmZmY2ZDgiIHN0b3Atb3BhY2l0eT0iLjkiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiNjOWEzNmEiLz48L3JhZGlhbEdyYWRpZW50PjwvZGVmcz4gPHJlY3Qgd2lkdGg9IjEyMCIgaGVpZ2h0PSIxNTAiIGZpbGw9InVybCgjZykiLz4gPHBhdGggZD0iTTE0IDE1MGM0LTM0IDIyLTQ4IDQ2LTQ4czQyIDE0IDQ2IDQ4eiIgZmlsbD0iIzJmNGE0NCIvPiA8cGF0aCBkPSJNNTAgOTZoMjB2MTRjLTYgNS0xNCA1LTIwIDB6IiBmaWxsPSIjYzY4YTVmIi8+IDxlbGxpcHNlIGN4PSI2MCIgY3k9IjcwIiByeD0iMjIiIHJ5PSIyNyIgZmlsbD0iI2M2OGE1ZiIvPiA8cGF0aCBkPSJNMzYgNzBjLTItMjYgMTItMzggMjYtMzhzMjcgMTAgMjQgMzhjLTQtMTItMTAtMjAtMjQtMjEtMTIgMC0yMCA4LTI2IDIxeiIgZmlsbD0iIzNhMjQxOCIvPiA8Y2lyY2xlIGN4PSI1MSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz48Y2lyY2xlIGN4PSI2OSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz4gPHBhdGggZD0iTTUzIDg2cTcgNCAxNCAwIiBzdHJva2U9IiM3YTNkMzIiIHN0cm9rZS13aWR0aD0iMiIgZmlsbD0ibm9uZSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+PHBhdGggZD0iTTMwIDE1MGwxMC0yNiAyMCA2IDIwLTYgMTAgMjZ6IiBmaWxsPSIjYzQ4ZDNjIiBvcGFjaXR5PSIuNyIvPjwvc3ZnPg==",
+     "alt": "Wren Marsh — 5.8.1 row 1",
+     "mime": "image/svg+xml"
     }
    }
   },
@@ -4804,7 +5351,10 @@
    "entry_id": "rec-silas",
    "title": "Silas Crane",
    "page_id": "ch-silas",
+   "page": 8,
    "status": "draft",
+   "icon": "🧑",
+   "target": "character:rec-silas",
    "sections": {
     "5.1": {
      "fields": {
@@ -4864,147 +5414,117 @@
      "fields": {
       "5.2.1": {
        "value": "44",
-       "status": "approved",
-       "source": "forge:5.2.1",
+       "status": "proposed",
+       "source": "new:age",
+       "new": true,
        "edit": {
-        "route": "#/p/PID/main/forge/rec-silas",
-        "field": "5.2.1"
+        "route": "#/p/PID/main/binder",
+        "field": "age",
+        "target": "character:rec-silas",
+        "api": "PUT /api/projects/PID/branches/main/binder/fields"
        }
       },
       "5.2.2": {
        "value": "",
        "status": "empty",
-       "source": "forge:5.2.2",
-       "edit": {
-        "route": "#/p/PID/main/forge/rec-silas",
-        "field": "5.2.2"
-       }
+       "source": "new:birth",
+       "new": true
       },
       "5.2.3": {
        "value": "he / him",
-       "status": "approved",
-       "source": "forge:5.2.3",
+       "status": "proposed",
+       "source": "new:pronouns",
+       "new": true,
        "edit": {
-        "route": "#/p/PID/main/forge/rec-silas",
-        "field": "5.2.3"
+        "route": "#/p/PID/main/binder",
+        "field": "pronouns",
+        "target": "character:rec-silas",
+        "api": "PUT /api/projects/PID/branches/main/binder/fields"
        }
       },
       "5.2.4": {
        "value": "",
        "status": "empty",
-       "source": "forge:5.2.4",
-       "edit": {
-        "route": "#/p/PID/main/forge/rec-silas",
-        "field": "5.2.4"
-       }
+       "source": "new:species",
+       "new": true
       },
       "5.2.5": {
        "value": "",
        "status": "empty",
-       "source": "new:5.2.5",
-       "edit": {
-        "route": "#/p/PID/main/forge/rec-silas",
-        "field": "5.2.5"
-       }
+       "source": "new:height",
+       "new": true
       },
       "5.2.6": {
        "value": "",
        "status": "empty",
-       "source": "new:5.2.6",
-       "edit": {
-        "route": "#/p/PID/main/forge/rec-silas",
-        "field": "5.2.6"
-       }
+       "source": "new:weight",
+       "new": true
       },
       "5.2.7": {
        "value": "",
        "status": "empty",
-       "source": "new:5.2.7",
-       "edit": {
-        "route": "#/p/PID/main/forge/rec-silas",
-        "field": "5.2.7"
-       }
+       "source": "new:build",
+       "new": true
       },
       "5.2.8": {
        "value": "",
        "status": "empty",
-       "source": "forge:5.2.8",
-       "edit": {
-        "route": "#/p/PID/main/forge/rec-silas",
-        "field": "5.2.8"
-       }
+       "source": "new:eyes",
+       "new": true
       },
       "5.2.9": {
        "value": "",
        "status": "empty",
-       "source": "forge:5.2.9",
-       "edit": {
-        "route": "#/p/PID/main/forge/rec-silas",
-        "field": "5.2.9"
-       }
+       "source": "new:hair",
+       "new": true
       },
       "5.2.10": {
        "value": "",
        "status": "empty",
-       "source": "forge:5.2.10",
-       "edit": {
-        "route": "#/p/PID/main/forge/rec-silas",
-        "field": "5.2.10"
-       }
+       "source": "new:skin",
+       "new": true
       },
       "5.2.11": {
        "value": "",
        "status": "empty",
-       "source": "forge:5.2.11",
-       "edit": {
-        "route": "#/p/PID/main/forge/rec-silas",
-        "field": "5.2.11"
-       }
+       "source": "new:marks",
+       "new": true
       },
       "5.2.12": {
        "value": "Company Commissioner of Lighting",
-       "status": "approved",
-       "source": "forge:5.2.12",
+       "status": "proposed",
+       "source": "new:occupation",
+       "new": true,
        "edit": {
-        "route": "#/p/PID/main/forge/rec-silas",
-        "field": "5.2.12"
+        "route": "#/p/PID/main/binder",
+        "field": "occupation",
+        "target": "character:rec-silas",
+        "api": "PUT /api/projects/PID/branches/main/binder/fields"
        }
       },
       "5.2.13": {
        "value": "",
        "status": "empty",
-       "source": "forge:5.2.13",
-       "edit": {
-        "route": "#/p/PID/main/forge/rec-silas",
-        "field": "5.2.13"
-       }
+       "source": "new:home",
+       "new": true
       },
       "5.2.14": {
        "value": "",
        "status": "empty",
-       "source": "new:5.2.14",
-       "edit": {
-        "route": "#/p/PID/main/forge/rec-silas",
-        "field": "5.2.14"
-       }
+       "source": "new:family_status",
+       "new": true
       },
       "5.2.15": {
        "value": "",
        "status": "empty",
-       "source": "forge:5.2.15",
-       "edit": {
-        "route": "#/p/PID/main/forge/rec-silas",
-        "field": "5.2.15"
-       }
+       "source": "new:era",
+       "new": true
       },
       "5.2.16": {
        "value": "",
        "status": "empty",
-       "source": "new:5.2.16",
-       "edit": {
-        "route": "#/p/PID/main/forge/rec-silas",
-        "field": "5.2.16"
-       }
+       "source": "new:handedness",
+       "new": true
       }
      }
     },
@@ -5425,22 +5945,49 @@
      }
     },
     "5.8": {
-     "fields": {},
+     "fields": {
+      "5.8.1": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:5.8",
+       "repeat": true,
+       "rows": 2
+      },
+      "5.8.2": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:5.8",
+       "repeat": true,
+       "rows": 2
+      },
+      "5.8.3": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:5.8",
+       "repeat": true,
+       "rows": 2,
+       "new": true
+      },
+      "5.8.4": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:5.8",
+       "repeat": true,
+       "rows": 2
+      }
+     },
      "rows": [
       {
        "5.8.1": {
-        "value": "",
-        "status": "empty",
-        "source": "forge:5.8.1",
-        "edit": {
-         "route": "#/p/PID/main/forge/rec-silas",
-         "field": "5.8.1"
-        }
+        "value": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAgMTUwIj4gPGRlZnM+PHJhZGlhbEdyYWRpZW50IGlkPSJnIiBjeD0iLjUiIGN5PSIuMzUiIHI9Ii44Ij48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiNmZmY2ZDgiIHN0b3Atb3BhY2l0eT0iLjkiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiNjOWEzNmEiLz48L3JhZGlhbEdyYWRpZW50PjwvZGVmcz4gPHJlY3Qgd2lkdGg9IjEyMCIgaGVpZ2h0PSIxNTAiIGZpbGw9InVybCgjZykiLz4gPHBhdGggZD0iTTE0IDE1MGM0LTM0IDIyLTQ4IDQ2LTQ4czQyIDE0IDQ2IDQ4eiIgZmlsbD0iIzJmNGE0NCIvPiA8cGF0aCBkPSJNNTAgOTZoMjB2MTRjLTYgNS0xNCA1LTIwIDB6IiBmaWxsPSIjYzY4YTVmIi8+IDxlbGxpcHNlIGN4PSI2MCIgY3k9IjcwIiByeD0iMjIiIHJ5PSIyNyIgZmlsbD0iI2M2OGE1ZiIvPiA8cGF0aCBkPSJNMzYgNzBjLTItMjYgMTItMzggMjYtMzhzMjcgMTAgMjQgMzhjLTQtMTItMTAtMjAtMjQtMjEtMTIgMC0yMCA4LTI2IDIxeiIgZmlsbD0iIzNhMjQxOCIvPiA8Y2lyY2xlIGN4PSI1MSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz48Y2lyY2xlIGN4PSI2OSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz4gPHBhdGggZD0iTTUzIDg2cTcgNCAxNCAwIiBzdHJva2U9IiM3YTNkMzIiIHN0cm9rZS13aWR0aD0iMiIgZmlsbD0ibm9uZSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+PHBhdGggZD0iTTMwIDE1MGwxMC0yNiAyMCA2IDIwLTYgMTAgMjZ6IiBmaWxsPSIjYzQ4ZDNjIiBvcGFjaXR5PSIuNyIvPjwvc3ZnPg==",
+        "status": "supplied",
+        "source": "pic"
        },
        "5.8.2": {
         "value": "Odile Marsh",
         "status": "approved",
         "source": "forge:5.8.2",
+        "link": "ch-odile",
         "edit": {
          "route": "#/p/PID/main/forge/rec-silas",
          "field": "5.8.2"
@@ -5449,10 +5996,13 @@
        "5.8.3": {
         "value": "enemy",
         "status": "proposed",
-        "source": "new:5.8.3",
+        "source": "row:type",
+        "new": true,
         "edit": {
-         "route": "#/p/PID/main/forge/rec-silas",
-         "field": "5.8.3"
+         "route": "#/p/PID/main/binder",
+         "field": "type",
+         "target": "relationship:rec-silas:odile marsh",
+         "api": "PUT /api/projects/PID/branches/main/binder/fields"
         }
        },
        "5.8.4": {
@@ -5463,22 +6013,23 @@
          "route": "#/p/PID/main/forge/rec-silas",
          "field": "5.8.4"
         }
+       },
+       "_meta": {
+        "target": "relationship:rec-silas:odile marsh",
+        "field_key": "relationship_1"
        }
       },
       {
        "5.8.1": {
-        "value": "",
-        "status": "empty",
-        "source": "forge:5.8.1",
-        "edit": {
-         "route": "#/p/PID/main/forge/rec-silas",
-         "field": "5.8.1"
-        }
+        "value": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAgMTUwIj4gPGRlZnM+PHJhZGlhbEdyYWRpZW50IGlkPSJnIiBjeD0iLjUiIGN5PSIuMzUiIHI9Ii44Ij48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiNmZmY2ZDgiIHN0b3Atb3BhY2l0eT0iLjkiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiM4YWExYTgiLz48L3JhZGlhbEdyYWRpZW50PjwvZGVmcz4gPHJlY3Qgd2lkdGg9IjEyMCIgaGVpZ2h0PSIxNTAiIGZpbGw9InVybCgjZykiLz4gPHBhdGggZD0iTTE0IDE1MGM0LTM0IDIyLTQ4IDQ2LTQ4czQyIDE0IDQ2IDQ4eiIgZmlsbD0iIzJhMzQ0NiIvPiA8cGF0aCBkPSJNNTAgOTZoMjB2MTRjLTYgNS0xNCA1LTIwIDB6IiBmaWxsPSIjZDlhOTgyIi8+IDxlbGxpcHNlIGN4PSI2MCIgY3k9IjcwIiByeD0iMjIiIHJ5PSIyNyIgZmlsbD0iI2Q5YTk4MiIvPiA8cGF0aCBkPSJNMzYgNzBjLTItMjYgMTItMzggMjYtMzhzMjcgMTAgMjQgMzhjLTQtMTItMTAtMjAtMjQtMjEtMTIgMC0yMCA4LTI2IDIxeiIgZmlsbD0iI2Q4ZDRjYyIvPiA8Y2lyY2xlIGN4PSI1MSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz48Y2lyY2xlIGN4PSI2OSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz4gPHBhdGggZD0iTTUzIDg2cTcgNCAxNCAwIiBzdHJva2U9IiM3YTNkMzIiIHN0cm9rZS13aWR0aD0iMiIgZmlsbD0ibm9uZSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+PHBhdGggZD0iTTQyIDg0cTE4IDIyIDM2IDB2MTBxLTE4IDIwLTM2IDB6IiBmaWxsPSIjZTdlM2RhIi8+PC9zdmc+",
+        "status": "supplied",
+        "source": "pic"
        },
        "5.8.2": {
         "value": "Tobiah Reed",
         "status": "approved",
         "source": "forge:5.8.2",
+        "link": "ch-tobiah",
         "edit": {
          "route": "#/p/PID/main/forge/rec-silas",
          "field": "5.8.2"
@@ -5487,10 +6038,13 @@
        "5.8.3": {
         "value": "rival",
         "status": "proposed",
-        "source": "new:5.8.3",
+        "source": "row:type",
+        "new": true,
         "edit": {
-         "route": "#/p/PID/main/forge/rec-silas",
-         "field": "5.8.3"
+         "route": "#/p/PID/main/binder",
+         "field": "type",
+         "target": "relationship:rec-silas:tobiah reed",
+         "api": "PUT /api/projects/PID/branches/main/binder/fields"
         }
        },
        "5.8.4": {
@@ -5501,6 +6055,10 @@
          "route": "#/p/PID/main/forge/rec-silas",
          "field": "5.8.4"
         }
+       },
+       "_meta": {
+        "target": "relationship:rec-silas:tobiah reed",
+        "field_key": "relationship_2"
        }
       }
      ]
@@ -5564,46 +6122,61 @@
       "5.9.7": {
        "value": "5",
        "status": "proposed",
-       "source": "new:5.9.7",
+       "source": "new:stat_strength",
+       "new": true,
        "edit": {
-        "route": "#/p/PID/main/forge/rec-silas",
-        "field": "5.9.7"
+        "route": "#/p/PID/main/binder",
+        "field": "stat_strength",
+        "target": "character:rec-silas",
+        "api": "PUT /api/projects/PID/branches/main/binder/fields"
        }
       },
       "5.9.8": {
        "value": "5",
        "status": "proposed",
-       "source": "new:5.9.8",
+       "source": "new:stat_speed",
+       "new": true,
        "edit": {
-        "route": "#/p/PID/main/forge/rec-silas",
-        "field": "5.9.8"
+        "route": "#/p/PID/main/binder",
+        "field": "stat_speed",
+        "target": "character:rec-silas",
+        "api": "PUT /api/projects/PID/branches/main/binder/fields"
        }
       },
       "5.9.9": {
        "value": "4",
        "status": "proposed",
-       "source": "new:5.9.9",
+       "source": "new:stat_agility",
+       "new": true,
        "edit": {
-        "route": "#/p/PID/main/forge/rec-silas",
-        "field": "5.9.9"
+        "route": "#/p/PID/main/binder",
+        "field": "stat_agility",
+        "target": "character:rec-silas",
+        "api": "PUT /api/projects/PID/branches/main/binder/fields"
        }
       },
       "5.9.10": {
        "value": "6",
        "status": "proposed",
-       "source": "new:5.9.10",
+       "source": "new:stat_stamina",
+       "new": true,
        "edit": {
-        "route": "#/p/PID/main/forge/rec-silas",
-        "field": "5.9.10"
+        "route": "#/p/PID/main/binder",
+        "field": "stat_stamina",
+        "target": "character:rec-silas",
+        "api": "PUT /api/projects/PID/branches/main/binder/fields"
        }
       },
       "5.9.11": {
        "value": "5",
        "status": "proposed",
-       "source": "new:5.9.11",
+       "source": "new:stat_durability",
+       "new": true,
        "edit": {
-        "route": "#/p/PID/main/forge/rec-silas",
-        "field": "5.9.11"
+        "route": "#/p/PID/main/binder",
+        "field": "stat_durability",
+        "target": "character:rec-silas",
+        "api": "PUT /api/projects/PID/branches/main/binder/fields"
        }
       },
       "5.9.12": {
@@ -5743,7 +6316,22 @@
      }
     },
     "5.12": {
-     "fields": {},
+     "fields": {
+      "5.12.1": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:5.12",
+       "repeat": true,
+       "rows": 0
+      },
+      "5.12.2": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:5.12",
+       "repeat": true,
+       "rows": 0
+      }
+     },
      "rows": []
     },
     "5.13": {
@@ -5956,7 +6544,18 @@
    "pics": {
     "5.1.1": {
      "url": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAgMTUwIj4gPGRlZnM+PHJhZGlhbEdyYWRpZW50IGlkPSJnIiBjeD0iLjUiIGN5PSIuMzUiIHI9Ii44Ij48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiNmZmY2ZDgiIHN0b3Atb3BhY2l0eT0iLjkiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiM5YWEwYWEiLz48L3JhZGlhbEdyYWRpZW50PjwvZGVmcz4gPHJlY3Qgd2lkdGg9IjEyMCIgaGVpZ2h0PSIxNTAiIGZpbGw9InVybCgjZykiLz4gPHBhdGggZD0iTTE0IDE1MGM0LTM0IDIyLTQ4IDQ2LTQ4czQyIDE0IDQ2IDQ4eiIgZmlsbD0iIzE1MTcxYyIvPiA8cGF0aCBkPSJNNTAgOTZoMjB2MTRjLTYgNS0xNCA1LTIwIDB6IiBmaWxsPSIjZWFjN2E4Ii8+IDxlbGxpcHNlIGN4PSI2MCIgY3k9IjcwIiByeD0iMjIiIHJ5PSIyNyIgZmlsbD0iI2VhYzdhOCIvPiA8cGF0aCBkPSJNMzYgNzBjLTItMjYgMTItMzggMjYtMzhzMjcgMTAgMjQgMzhjLTQtMTItMTAtMjAtMjQtMjEtMTIgMC0yMCA4LTI2IDIxeiIgZmlsbD0iIzFiMWIxZiIvPiA8Y2lyY2xlIGN4PSI1MSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz48Y2lyY2xlIGN4PSI2OSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz4gPHBhdGggZD0iTTUzIDg2cTcgNCAxNCAwIiBzdHJva2U9IiM3YTNkMzIiIHN0cm9rZS13aWR0aD0iMiIgZmlsbD0ibm9uZSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+PHBhdGggZD0iTTM4IDUwaDQ0di04SDM4eiIgZmlsbD0iIzE1MTcxYyIvPjwvc3ZnPg==",
-     "alt": "Silas Crane — 5.1.1"
+     "alt": "Silas Crane — 5.1.1",
+     "mime": "image/svg+xml"
+    },
+    "5.8.1#1": {
+     "url": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAgMTUwIj4gPGRlZnM+PHJhZGlhbEdyYWRpZW50IGlkPSJnIiBjeD0iLjUiIGN5PSIuMzUiIHI9Ii44Ij48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiNmZmY2ZDgiIHN0b3Atb3BhY2l0eT0iLjkiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiNjOWEzNmEiLz48L3JhZGlhbEdyYWRpZW50PjwvZGVmcz4gPHJlY3Qgd2lkdGg9IjEyMCIgaGVpZ2h0PSIxNTAiIGZpbGw9InVybCgjZykiLz4gPHBhdGggZD0iTTE0IDE1MGM0LTM0IDIyLTQ4IDQ2LTQ4czQyIDE0IDQ2IDQ4eiIgZmlsbD0iIzJmNGE0NCIvPiA8cGF0aCBkPSJNNTAgOTZoMjB2MTRjLTYgNS0xNCA1LTIwIDB6IiBmaWxsPSIjYzY4YTVmIi8+IDxlbGxpcHNlIGN4PSI2MCIgY3k9IjcwIiByeD0iMjIiIHJ5PSIyNyIgZmlsbD0iI2M2OGE1ZiIvPiA8cGF0aCBkPSJNMzYgNzBjLTItMjYgMTItMzggMjYtMzhzMjcgMTAgMjQgMzhjLTQtMTItMTAtMjAtMjQtMjEtMTIgMC0yMCA4LTI2IDIxeiIgZmlsbD0iIzNhMjQxOCIvPiA8Y2lyY2xlIGN4PSI1MSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz48Y2lyY2xlIGN4PSI2OSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz4gPHBhdGggZD0iTTUzIDg2cTcgNCAxNCAwIiBzdHJva2U9IiM3YTNkMzIiIHN0cm9rZS13aWR0aD0iMiIgZmlsbD0ibm9uZSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+PHBhdGggZD0iTTMwIDE1MGwxMC0yNiAyMCA2IDIwLTYgMTAgMjZ6IiBmaWxsPSIjYzQ4ZDNjIiBvcGFjaXR5PSIuNyIvPjwvc3ZnPg==",
+     "alt": "Silas Crane — 5.8.1 row 1",
+     "mime": "image/svg+xml"
+    },
+    "5.8.1#2": {
+     "url": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAgMTUwIj4gPGRlZnM+PHJhZGlhbEdyYWRpZW50IGlkPSJnIiBjeD0iLjUiIGN5PSIuMzUiIHI9Ii44Ij48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiNmZmY2ZDgiIHN0b3Atb3BhY2l0eT0iLjkiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiM4YWExYTgiLz48L3JhZGlhbEdyYWRpZW50PjwvZGVmcz4gPHJlY3Qgd2lkdGg9IjEyMCIgaGVpZ2h0PSIxNTAiIGZpbGw9InVybCgjZykiLz4gPHBhdGggZD0iTTE0IDE1MGM0LTM0IDIyLTQ4IDQ2LTQ4czQyIDE0IDQ2IDQ4eiIgZmlsbD0iIzJhMzQ0NiIvPiA8cGF0aCBkPSJNNTAgOTZoMjB2MTRjLTYgNS0xNCA1LTIwIDB6IiBmaWxsPSIjZDlhOTgyIi8+IDxlbGxpcHNlIGN4PSI2MCIgY3k9IjcwIiByeD0iMjIiIHJ5PSIyNyIgZmlsbD0iI2Q5YTk4MiIvPiA8cGF0aCBkPSJNMzYgNzBjLTItMjYgMTItMzggMjYtMzhzMjcgMTAgMjQgMzhjLTQtMTItMTAtMjAtMjQtMjEtMTIgMC0yMCA4LTI2IDIxeiIgZmlsbD0iI2Q4ZDRjYyIvPiA8Y2lyY2xlIGN4PSI1MSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz48Y2lyY2xlIGN4PSI2OSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz4gPHBhdGggZD0iTTUzIDg2cTcgNCAxNCAwIiBzdHJva2U9IiM3YTNkMzIiIHN0cm9rZS13aWR0aD0iMiIgZmlsbD0ibm9uZSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+PHBhdGggZD0iTTQyIDg0cTE4IDIyIDM2IDB2MTBxLTE4IDIwLTM2IDB6IiBmaWxsPSIjZTdlM2RhIi8+PC9zdmc+",
+     "alt": "Silas Crane — 5.8.1 row 2",
+     "mime": "image/svg+xml"
     }
    }
   },
@@ -5965,7 +6564,10 @@
    "entry_id": "rec-maren",
    "title": "Maren Vey",
    "page_id": "ch-maren",
+   "page": 9,
    "status": "needs_you",
+   "icon": "🧑",
+   "target": "character:rec-maren",
    "sections": {
     "5.1": {
      "fields": {
@@ -6026,146 +6628,98 @@
       "5.2.1": {
        "value": "",
        "status": "empty",
-       "source": "forge:5.2.1",
-       "edit": {
-        "route": "#/p/PID/main/forge/rec-maren",
-        "field": "5.2.1"
-       }
+       "source": "new:age",
+       "new": true
       },
       "5.2.2": {
        "value": "",
        "status": "empty",
-       "source": "forge:5.2.2",
-       "edit": {
-        "route": "#/p/PID/main/forge/rec-maren",
-        "field": "5.2.2"
-       }
+       "source": "new:birth",
+       "new": true
       },
       "5.2.3": {
        "value": "",
        "status": "empty",
-       "source": "forge:5.2.3",
-       "edit": {
-        "route": "#/p/PID/main/forge/rec-maren",
-        "field": "5.2.3"
-       }
+       "source": "new:pronouns",
+       "new": true
       },
       "5.2.4": {
        "value": "",
        "status": "empty",
-       "source": "forge:5.2.4",
-       "edit": {
-        "route": "#/p/PID/main/forge/rec-maren",
-        "field": "5.2.4"
-       }
+       "source": "new:species",
+       "new": true
       },
       "5.2.5": {
        "value": "",
        "status": "empty",
-       "source": "new:5.2.5",
-       "edit": {
-        "route": "#/p/PID/main/forge/rec-maren",
-        "field": "5.2.5"
-       }
+       "source": "new:height",
+       "new": true
       },
       "5.2.6": {
        "value": "",
        "status": "empty",
-       "source": "new:5.2.6",
-       "edit": {
-        "route": "#/p/PID/main/forge/rec-maren",
-        "field": "5.2.6"
-       }
+       "source": "new:weight",
+       "new": true
       },
       "5.2.7": {
        "value": "",
        "status": "empty",
-       "source": "new:5.2.7",
-       "edit": {
-        "route": "#/p/PID/main/forge/rec-maren",
-        "field": "5.2.7"
-       }
+       "source": "new:build",
+       "new": true
       },
       "5.2.8": {
        "value": "",
        "status": "empty",
-       "source": "forge:5.2.8",
-       "edit": {
-        "route": "#/p/PID/main/forge/rec-maren",
-        "field": "5.2.8"
-       }
+       "source": "new:eyes",
+       "new": true
       },
       "5.2.9": {
        "value": "",
        "status": "empty",
-       "source": "forge:5.2.9",
-       "edit": {
-        "route": "#/p/PID/main/forge/rec-maren",
-        "field": "5.2.9"
-       }
+       "source": "new:hair",
+       "new": true
       },
       "5.2.10": {
        "value": "",
        "status": "empty",
-       "source": "forge:5.2.10",
-       "edit": {
-        "route": "#/p/PID/main/forge/rec-maren",
-        "field": "5.2.10"
-       }
+       "source": "new:skin",
+       "new": true
       },
       "5.2.11": {
        "value": "",
        "status": "empty",
-       "source": "forge:5.2.11",
-       "edit": {
-        "route": "#/p/PID/main/forge/rec-maren",
-        "field": "5.2.11"
-       }
+       "source": "new:marks",
+       "new": true
       },
       "5.2.12": {
        "value": "",
        "status": "empty",
-       "source": "forge:5.2.12",
-       "edit": {
-        "route": "#/p/PID/main/forge/rec-maren",
-        "field": "5.2.12"
-       }
+       "source": "new:occupation",
+       "new": true
       },
       "5.2.13": {
        "value": "",
        "status": "empty",
-       "source": "forge:5.2.13",
-       "edit": {
-        "route": "#/p/PID/main/forge/rec-maren",
-        "field": "5.2.13"
-       }
+       "source": "new:home",
+       "new": true
       },
       "5.2.14": {
        "value": "",
        "status": "empty",
-       "source": "new:5.2.14",
-       "edit": {
-        "route": "#/p/PID/main/forge/rec-maren",
-        "field": "5.2.14"
-       }
+       "source": "new:family_status",
+       "new": true
       },
       "5.2.15": {
        "value": "",
        "status": "empty",
-       "source": "forge:5.2.15",
-       "edit": {
-        "route": "#/p/PID/main/forge/rec-maren",
-        "field": "5.2.15"
-       }
+       "source": "new:era",
+       "new": true
       },
       "5.2.16": {
        "value": "",
        "status": "empty",
-       "source": "new:5.2.16",
-       "edit": {
-        "route": "#/p/PID/main/forge/rec-maren",
-        "field": "5.2.16"
-       }
+       "source": "new:handedness",
+       "new": true
       }
      }
     },
@@ -6586,22 +7140,49 @@
      }
     },
     "5.8": {
-     "fields": {},
+     "fields": {
+      "5.8.1": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:5.8",
+       "repeat": true,
+       "rows": 1
+      },
+      "5.8.2": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:5.8",
+       "repeat": true,
+       "rows": 1
+      },
+      "5.8.3": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:5.8",
+       "repeat": true,
+       "rows": 1,
+       "new": true
+      },
+      "5.8.4": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:5.8",
+       "repeat": true,
+       "rows": 1
+      }
+     },
      "rows": [
       {
        "5.8.1": {
-        "value": "",
-        "status": "empty",
-        "source": "forge:5.8.1",
-        "edit": {
-         "route": "#/p/PID/main/forge/rec-maren",
-         "field": "5.8.1"
-        }
+        "value": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAgMTUwIj4gPGRlZnM+PHJhZGlhbEdyYWRpZW50IGlkPSJnIiBjeD0iLjUiIGN5PSIuMzUiIHI9Ii44Ij48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiNmZmY2ZDgiIHN0b3Atb3BhY2l0eT0iLjkiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiNjOWEzNmEiLz48L3JhZGlhbEdyYWRpZW50PjwvZGVmcz4gPHJlY3Qgd2lkdGg9IjEyMCIgaGVpZ2h0PSIxNTAiIGZpbGw9InVybCgjZykiLz4gPHBhdGggZD0iTTE0IDE1MGM0LTM0IDIyLTQ4IDQ2LTQ4czQyIDE0IDQ2IDQ4eiIgZmlsbD0iIzJmNGE0NCIvPiA8cGF0aCBkPSJNNTAgOTZoMjB2MTRjLTYgNS0xNCA1LTIwIDB6IiBmaWxsPSIjYzY4YTVmIi8+IDxlbGxpcHNlIGN4PSI2MCIgY3k9IjcwIiByeD0iMjIiIHJ5PSIyNyIgZmlsbD0iI2M2OGE1ZiIvPiA8cGF0aCBkPSJNMzYgNzBjLTItMjYgMTItMzggMjYtMzhzMjcgMTAgMjQgMzhjLTQtMTItMTAtMjAtMjQtMjEtMTIgMC0yMCA4LTI2IDIxeiIgZmlsbD0iIzNhMjQxOCIvPiA8Y2lyY2xlIGN4PSI1MSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz48Y2lyY2xlIGN4PSI2OSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz4gPHBhdGggZD0iTTUzIDg2cTcgNCAxNCAwIiBzdHJva2U9IiM3YTNkMzIiIHN0cm9rZS13aWR0aD0iMiIgZmlsbD0ibm9uZSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+PHBhdGggZD0iTTMwIDE1MGwxMC0yNiAyMCA2IDIwLTYgMTAgMjZ6IiBmaWxsPSIjYzQ4ZDNjIiBvcGFjaXR5PSIuNyIvPjwvc3ZnPg==",
+        "status": "supplied",
+        "source": "pic"
        },
        "5.8.2": {
         "value": "Odile Marsh",
         "status": "approved",
         "source": "forge:5.8.2",
+        "link": "ch-odile",
         "edit": {
          "route": "#/p/PID/main/forge/rec-maren",
          "field": "5.8.2"
@@ -6610,10 +7191,13 @@
        "5.8.3": {
         "value": "love",
         "status": "proposed",
-        "source": "new:5.8.3",
+        "source": "row:type",
+        "new": true,
         "edit": {
-         "route": "#/p/PID/main/forge/rec-maren",
-         "field": "5.8.3"
+         "route": "#/p/PID/main/binder",
+         "field": "type",
+         "target": "relationship:rec-maren:odile marsh",
+         "api": "PUT /api/projects/PID/branches/main/binder/fields"
         }
        },
        "5.8.4": {
@@ -6624,6 +7208,10 @@
          "route": "#/p/PID/main/forge/rec-maren",
          "field": "5.8.4"
         }
+       },
+       "_meta": {
+        "target": "relationship:rec-maren:odile marsh",
+        "field_key": "relationship_1"
        }
       }
      ]
@@ -6687,47 +7275,32 @@
       "5.9.7": {
        "value": "",
        "status": "empty",
-       "source": "new:5.9.7",
-       "edit": {
-        "route": "#/p/PID/main/forge/rec-maren",
-        "field": "5.9.7"
-       }
+       "source": "new:stat_strength",
+       "new": true
       },
       "5.9.8": {
        "value": "",
        "status": "empty",
-       "source": "new:5.9.8",
-       "edit": {
-        "route": "#/p/PID/main/forge/rec-maren",
-        "field": "5.9.8"
-       }
+       "source": "new:stat_speed",
+       "new": true
       },
       "5.9.9": {
        "value": "",
        "status": "empty",
-       "source": "new:5.9.9",
-       "edit": {
-        "route": "#/p/PID/main/forge/rec-maren",
-        "field": "5.9.9"
-       }
+       "source": "new:stat_agility",
+       "new": true
       },
       "5.9.10": {
        "value": "",
        "status": "empty",
-       "source": "new:5.9.10",
-       "edit": {
-        "route": "#/p/PID/main/forge/rec-maren",
-        "field": "5.9.10"
-       }
+       "source": "new:stat_stamina",
+       "new": true
       },
       "5.9.11": {
        "value": "",
        "status": "empty",
-       "source": "new:5.9.11",
-       "edit": {
-        "route": "#/p/PID/main/forge/rec-maren",
-        "field": "5.9.11"
-       }
+       "source": "new:stat_durability",
+       "new": true
       },
       "5.9.12": {
        "value": "",
@@ -6866,7 +7439,22 @@
      }
     },
     "5.12": {
-     "fields": {},
+     "fields": {
+      "5.12.1": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:5.12",
+       "repeat": true,
+       "rows": 0
+      },
+      "5.12.2": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:5.12",
+       "repeat": true,
+       "rows": 0
+      }
+     },
      "rows": []
     },
     "5.13": {
@@ -6955,11 +7543,8 @@
       "5.13.10": {
        "value": "",
        "status": "empty",
-       "source": "forge:5.13.10",
-       "edit": {
-        "route": "#/p/PID/main/forge/rec-maren",
-        "field": "5.13.10"
-       }
+       "source": "none",
+       "unavailable": "the Forge keeps the resulting change and the optional hook in one field"
       }
      }
     },
@@ -7075,14 +7660,126 @@
      }
     }
    },
-   "pics": {}
+   "pics": {
+    "5.8.1#1": {
+     "url": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAgMTUwIj4gPGRlZnM+PHJhZGlhbEdyYWRpZW50IGlkPSJnIiBjeD0iLjUiIGN5PSIuMzUiIHI9Ii44Ij48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiNmZmY2ZDgiIHN0b3Atb3BhY2l0eT0iLjkiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiNjOWEzNmEiLz48L3JhZGlhbEdyYWRpZW50PjwvZGVmcz4gPHJlY3Qgd2lkdGg9IjEyMCIgaGVpZ2h0PSIxNTAiIGZpbGw9InVybCgjZykiLz4gPHBhdGggZD0iTTE0IDE1MGM0LTM0IDIyLTQ4IDQ2LTQ4czQyIDE0IDQ2IDQ4eiIgZmlsbD0iIzJmNGE0NCIvPiA8cGF0aCBkPSJNNTAgOTZoMjB2MTRjLTYgNS0xNCA1LTIwIDB6IiBmaWxsPSIjYzY4YTVmIi8+IDxlbGxpcHNlIGN4PSI2MCIgY3k9IjcwIiByeD0iMjIiIHJ5PSIyNyIgZmlsbD0iI2M2OGE1ZiIvPiA8cGF0aCBkPSJNMzYgNzBjLTItMjYgMTItMzggMjYtMzhzMjcgMTAgMjQgMzhjLTQtMTItMTAtMjAtMjQtMjEtMTIgMC0yMCA4LTI2IDIxeiIgZmlsbD0iIzNhMjQxOCIvPiA8Y2lyY2xlIGN4PSI1MSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz48Y2lyY2xlIGN4PSI2OSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz4gPHBhdGggZD0iTTUzIDg2cTcgNCAxNCAwIiBzdHJva2U9IiM3YTNkMzIiIHN0cm9rZS13aWR0aD0iMiIgZmlsbD0ibm9uZSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+PHBhdGggZD0iTTMwIDE1MGwxMC0yNiAyMCA2IDIwLTYgMTAgMjZ6IiBmaWxsPSIjYzQ4ZDNjIiBvcGFjaXR5PSIuNyIvPjwvc3ZnPg==",
+     "alt": "Maren Vey — 5.8.1 row 1",
+     "mime": "image/svg+xml"
+    }
+   }
   },
   {
    "template": "6",
    "entry_id": null,
    "title": "Relationship map",
    "page_id": "relmap",
+   "page": 10,
    "status": "draft",
+   "icon": "🕸",
+   "graph": {
+    "centre": "rec-odile",
+    "nodes": [
+     {
+      "id": "rec-odile",
+      "name": "Odile Marsh",
+      "page_id": "ch-odile",
+      "portrait": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAgMTUwIj4gPGRlZnM+PHJhZGlhbEdyYWRpZW50IGlkPSJnIiBjeD0iLjUiIGN5PSIuMzUiIHI9Ii44Ij48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiNmZmY2ZDgiIHN0b3Atb3BhY2l0eT0iLjkiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiNjOWEzNmEiLz48L3JhZGlhbEdyYWRpZW50PjwvZGVmcz4gPHJlY3Qgd2lkdGg9IjEyMCIgaGVpZ2h0PSIxNTAiIGZpbGw9InVybCgjZykiLz4gPHBhdGggZD0iTTE0IDE1MGM0LTM0IDIyLTQ4IDQ2LTQ4czQyIDE0IDQ2IDQ4eiIgZmlsbD0iIzJmNGE0NCIvPiA8cGF0aCBkPSJNNTAgOTZoMjB2MTRjLTYgNS0xNCA1LTIwIDB6IiBmaWxsPSIjYzY4YTVmIi8+IDxlbGxpcHNlIGN4PSI2MCIgY3k9IjcwIiByeD0iMjIiIHJ5PSIyNyIgZmlsbD0iI2M2OGE1ZiIvPiA8cGF0aCBkPSJNMzYgNzBjLTItMjYgMTItMzggMjYtMzhzMjcgMTAgMjQgMzhjLTQtMTItMTAtMjAtMjQtMjEtMTIgMC0yMCA4LTI2IDIxeiIgZmlsbD0iIzNhMjQxOCIvPiA8Y2lyY2xlIGN4PSI1MSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz48Y2lyY2xlIGN4PSI2OSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz4gPHBhdGggZD0iTTUzIDg2cTcgNCAxNCAwIiBzdHJva2U9IiM3YTNkMzIiIHN0cm9rZS13aWR0aD0iMiIgZmlsbD0ibm9uZSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+PHBhdGggZD0iTTMwIDE1MGwxMC0yNiAyMCA2IDIwLTYgMTAgMjZ6IiBmaWxsPSIjYzQ4ZDNjIiBvcGFjaXR5PSIuNyIvPjwvc3ZnPg==",
+      "role": "main",
+      "ring": 0
+     },
+     {
+      "id": "rec-tobiah",
+      "name": "Tobiah Reed",
+      "page_id": "ch-tobiah",
+      "portrait": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAgMTUwIj4gPGRlZnM+PHJhZGlhbEdyYWRpZW50IGlkPSJnIiBjeD0iLjUiIGN5PSIuMzUiIHI9Ii44Ij48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiNmZmY2ZDgiIHN0b3Atb3BhY2l0eT0iLjkiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiM4YWExYTgiLz48L3JhZGlhbEdyYWRpZW50PjwvZGVmcz4gPHJlY3Qgd2lkdGg9IjEyMCIgaGVpZ2h0PSIxNTAiIGZpbGw9InVybCgjZykiLz4gPHBhdGggZD0iTTE0IDE1MGM0LTM0IDIyLTQ4IDQ2LTQ4czQyIDE0IDQ2IDQ4eiIgZmlsbD0iIzJhMzQ0NiIvPiA8cGF0aCBkPSJNNTAgOTZoMjB2MTRjLTYgNS0xNCA1LTIwIDB6IiBmaWxsPSIjZDlhOTgyIi8+IDxlbGxpcHNlIGN4PSI2MCIgY3k9IjcwIiByeD0iMjIiIHJ5PSIyNyIgZmlsbD0iI2Q5YTk4MiIvPiA8cGF0aCBkPSJNMzYgNzBjLTItMjYgMTItMzggMjYtMzhzMjcgMTAgMjQgMzhjLTQtMTItMTAtMjAtMjQtMjEtMTIgMC0yMCA4LTI2IDIxeiIgZmlsbD0iI2Q4ZDRjYyIvPiA8Y2lyY2xlIGN4PSI1MSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz48Y2lyY2xlIGN4PSI2OSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz4gPHBhdGggZD0iTTUzIDg2cTcgNCAxNCAwIiBzdHJva2U9IiM3YTNkMzIiIHN0cm9rZS13aWR0aD0iMiIgZmlsbD0ibm9uZSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+PHBhdGggZD0iTTQyIDg0cTE4IDIyIDM2IDB2MTBxLTE4IDIwLTM2IDB6IiBmaWxsPSIjZTdlM2RhIi8+PC9zdmc+",
+      "role": "side",
+      "ring": 1
+     },
+     {
+      "id": "rec-wren",
+      "name": "Wren Marsh",
+      "page_id": "ch-wren",
+      "portrait": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAgMTUwIj4gPGRlZnM+PHJhZGlhbEdyYWRpZW50IGlkPSJnIiBjeD0iLjUiIGN5PSIuMzUiIHI9Ii44Ij48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiNmZmY2ZDgiIHN0b3Atb3BhY2l0eT0iLjkiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiNkN2I5OGEiLz48L3JhZGlhbEdyYWRpZW50PjwvZGVmcz4gPHJlY3Qgd2lkdGg9IjEyMCIgaGVpZ2h0PSIxNTAiIGZpbGw9InVybCgjZykiLz4gPHBhdGggZD0iTTE0IDE1MGM0LTM0IDIyLTQ4IDQ2LTQ4czQyIDE0IDQ2IDQ4eiIgZmlsbD0iIzdiNGIyYSIvPiA8cGF0aCBkPSJNNTAgOTZoMjB2MTRjLTYgNS0xNCA1LTIwIDB6IiBmaWxsPSIjYzY4YTVmIi8+IDxlbGxpcHNlIGN4PSI2MCIgY3k9IjcwIiByeD0iMjIiIHJ5PSIyNyIgZmlsbD0iI2M2OGE1ZiIvPiA8cGF0aCBkPSJNMzYgNzBjLTItMjYgMTItMzggMjYtMzhzMjcgMTAgMjQgMzhjLTQtMTItMTAtMjAtMjQtMjEtMTIgMC0yMCA4LTI2IDIxeiIgZmlsbD0iIzVhM2EyMiIvPiA8Y2lyY2xlIGN4PSI1MSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz48Y2lyY2xlIGN4PSI2OSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz4gPHBhdGggZD0iTTUzIDg2cTcgNCAxNCAwIiBzdHJva2U9IiM3YTNkMzIiIHN0cm9rZS13aWR0aD0iMiIgZmlsbD0ibm9uZSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+PC9zdmc+",
+      "role": "side",
+      "ring": 1
+     },
+     {
+      "id": "rec-silas",
+      "name": "Silas Crane",
+      "page_id": "ch-silas",
+      "portrait": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAgMTUwIj4gPGRlZnM+PHJhZGlhbEdyYWRpZW50IGlkPSJnIiBjeD0iLjUiIGN5PSIuMzUiIHI9Ii44Ij48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiNmZmY2ZDgiIHN0b3Atb3BhY2l0eT0iLjkiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiM5YWEwYWEiLz48L3JhZGlhbEdyYWRpZW50PjwvZGVmcz4gPHJlY3Qgd2lkdGg9IjEyMCIgaGVpZ2h0PSIxNTAiIGZpbGw9InVybCgjZykiLz4gPHBhdGggZD0iTTE0IDE1MGM0LTM0IDIyLTQ4IDQ2LTQ4czQyIDE0IDQ2IDQ4eiIgZmlsbD0iIzE1MTcxYyIvPiA8cGF0aCBkPSJNNTAgOTZoMjB2MTRjLTYgNS0xNCA1LTIwIDB6IiBmaWxsPSIjZWFjN2E4Ii8+IDxlbGxpcHNlIGN4PSI2MCIgY3k9IjcwIiByeD0iMjIiIHJ5PSIyNyIgZmlsbD0iI2VhYzdhOCIvPiA8cGF0aCBkPSJNMzYgNzBjLTItMjYgMTItMzggMjYtMzhzMjcgMTAgMjQgMzhjLTQtMTItMTAtMjAtMjQtMjEtMTIgMC0yMCA4LTI2IDIxeiIgZmlsbD0iIzFiMWIxZiIvPiA8Y2lyY2xlIGN4PSI1MSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz48Y2lyY2xlIGN4PSI2OSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz4gPHBhdGggZD0iTTUzIDg2cTcgNCAxNCAwIiBzdHJva2U9IiM3YTNkMzIiIHN0cm9rZS13aWR0aD0iMiIgZmlsbD0ibm9uZSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+PHBhdGggZD0iTTM4IDUwaDQ0di04SDM4eiIgZmlsbD0iIzE1MTcxYyIvPjwvc3ZnPg==",
+      "role": "side",
+      "ring": 1
+     },
+     {
+      "id": "rec-maren",
+      "name": "Maren Vey",
+      "page_id": "ch-maren",
+      "portrait": null,
+      "role": "side",
+      "ring": 2
+     }
+    ],
+    "edges": [
+     {
+      "from": "rec-odile",
+      "to": "rec-wren",
+      "type": "family",
+      "note": "Her brother; the only person she cannot lie to.",
+      "status": "approved",
+      "colour": "#2e7d32"
+     },
+     {
+      "from": "rec-odile",
+      "to": "rec-tobiah",
+      "type": "mentor",
+      "note": "Teaches her the river; knew her mother.",
+      "status": "approved",
+      "colour": "#6a1b9a"
+     },
+     {
+      "from": "rec-odile",
+      "to": "rec-silas",
+      "type": "enemy",
+      "note": "Snuffs her lamps with real regret.",
+      "status": "approved",
+      "colour": "#b71c1c"
+     },
+     {
+      "from": "rec-odile",
+      "to": "rec-maren",
+      "type": "love",
+      "note": "A clockmaker who fixes things Odile breaks.",
+      "status": "approved",
+      "colour": "#c2185b"
+     },
+     {
+      "from": "rec-tobiah",
+      "to": "rec-silas",
+      "type": "rival",
+      "note": "Once rowed the boy Silas across; regrets it.",
+      "status": "approved",
+      "colour": "#ef6c00"
+     },
+     {
+      "from": "rec-wren",
+      "to": "rec-maren",
+      "type": "ally",
+      "note": "She lets him wind the shop clocks.",
+      "status": "approved",
+      "colour": "#1565c0"
+     }
+    ],
+    "colours": {
+     "family": "#2e7d32",
+     "love": "#c2185b",
+     "ally": "#1565c0",
+     "rival": "#ef6c00",
+     "enemy": "#b71c1c",
+     "mentor": "#6a1b9a",
+     "other": "#757575"
+    }
+   },
    "sections": {
     "6.1": {
      "fields": {
@@ -7143,7 +7840,15 @@
      }
     },
     "6.3": {
-     "fields": {},
+     "fields": {
+      "6.3.1": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:6.3",
+       "repeat": true,
+       "rows": 3
+      }
+     },
      "rows": [
       {
        "6.3.1": {
@@ -7169,7 +7874,15 @@
      ]
     },
     "6.4": {
-     "fields": {},
+     "fields": {
+      "6.4.1": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:6.4",
+       "repeat": true,
+       "rows": 3
+      }
+     },
      "rows": [
       {
        "6.4.1": {
@@ -7202,7 +7915,10 @@
    "entry_id": "rec-vessmoor",
    "title": "Vessmoor",
    "page_id": "pl-vessmoor",
+   "page": 11,
    "status": "approved",
+   "icon": "🏙",
+   "target": "place:rec-vessmoor",
    "sections": {
     "7.1": {
      "fields": {
@@ -7317,10 +8033,13 @@
       "7.2.7": {
        "value": "3",
        "status": "proposed",
-       "source": "new:7.2.7",
+       "source": "new:danger_level",
+       "new": true,
        "edit": {
-        "route": "#/p/PID/main/forge/places/rec-vessmoor",
-        "field": "7.2.7"
+        "route": "#/p/PID/main/binder",
+        "field": "danger_level",
+        "target": "place:rec-vessmoor",
+        "api": "PUT /api/projects/PID/branches/main/binder/fields"
        }
       },
       "7.2.8": {
@@ -7902,11 +8621,13 @@
    "pics": {
     "7.1.1": {
      "url": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNDAgMTgwIj4gPGRlZnM+PGxpbmVhckdyYWRpZW50IGlkPSJzIiB4MT0iMCIgeTE9IjAiIHgyPSIwIiB5Mj0iMSI+PHN0b3Agb2Zmc2V0PSIwIiBzdG9wLWNvbG9yPSIjMmMzYTVjIi8+PHN0b3Agb2Zmc2V0PSIxIiBzdG9wLWNvbG9yPSIjZTlhOTZiIi8+PC9saW5lYXJHcmFkaWVudD48L2RlZnM+IDxyZWN0IHdpZHRoPSIyNDAiIGhlaWdodD0iMTgwIiBmaWxsPSJ1cmwoI3MpIi8+PGNpcmNsZSBjeD0iMTkwIiBjeT0iMzQiIHI9IjE0IiBmaWxsPSIjZjRlY2QyIiBvcGFjaXR5PSIuODUiLz4gPHBhdGggZD0iTTAgMTIwaDIwdi0zOGgxNHYyMGgxMnYtNDZoMTh2MzRoMTZ2LTI0aDIwdjQwaDE0di0zMGgxOHYyNmgxNHYtMjJoMjJ2NDBoMTJ2ODBIMHoiIGZpbGw9IiMxZDI0MzAiLz48cGF0aCBkPSJNMCAxNTBjNDAtOCA4MCA4IDEyMCAwczgwLTggMTIwIDB2MzBIMHoiIGZpbGw9IiMyYjNiNGEiLz48Y2lyY2xlIGN4PSIzMCIgY3k9IjExMiIgcj0iMy4yIiBmaWxsPSIjZmZkMjdhIi8+PGNpcmNsZSBjeD0iMzAiIGN5PSIxMTIiIHI9IjExIiBmaWxsPSIjZmZkMjdhIiBvcGFjaXR5PSIuMjIiLz48Y2lyY2xlIGN4PSI4OCIgY3k9IjEwNCIgcj0iMy4yIiBmaWxsPSIjZmZkMjdhIi8+PGNpcmNsZSBjeD0iODgiIGN5PSIxMDQiIHI9IjExIiBmaWxsPSIjZmZkMjdhIiBvcGFjaXR5PSIuMjIiLz48Y2lyY2xlIGN4PSIxNTAiIGN5PSIxMTAiIHI9IjMuMiIgZmlsbD0iI2ZmZDI3YSIvPjxjaXJjbGUgY3g9IjE1MCIgY3k9IjExMCIgcj0iMTEiIGZpbGw9IiNmZmQyN2EiIG9wYWNpdHk9Ii4yMiIvPjxjaXJjbGUgY3g9IjIwNiIgY3k9IjEwMCIgcj0iMy4yIiBmaWxsPSIjZmZkMjdhIi8+PGNpcmNsZSBjeD0iMjA2IiBjeT0iMTAwIiByPSIxMSIgZmlsbD0iI2ZmZDI3YSIgb3BhY2l0eT0iLjIyIi8+PC9zdmc+",
-     "alt": "Vessmoor — 7.1.1"
+     "alt": "Vessmoor — 7.1.1",
+     "mime": "image/svg+xml"
     },
     "7.3.2": {
      "url": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNDAgMTgwIj4gPGRlZnM+PGxpbmVhckdyYWRpZW50IGlkPSJzIiB4MT0iMCIgeTE9IjAiIHgyPSIwIiB5Mj0iMSI+PHN0b3Agb2Zmc2V0PSIwIiBzdG9wLWNvbG9yPSIjMmMzYTVjIi8+PHN0b3Agb2Zmc2V0PSIxIiBzdG9wLWNvbG9yPSIjZTlhOTZiIi8+PC9saW5lYXJHcmFkaWVudD48L2RlZnM+IDxyZWN0IHdpZHRoPSIyNDAiIGhlaWdodD0iMTgwIiBmaWxsPSJ1cmwoI3MpIi8+PGNpcmNsZSBjeD0iMTkwIiBjeT0iMzQiIHI9IjE0IiBmaWxsPSIjZjRlY2QyIiBvcGFjaXR5PSIuODUiLz4gPHBhdGggZD0iTTAgMTIwaDIwdi0zOGgxNHYyMGgxMnYtNDZoMTh2MzRoMTZ2LTI0aDIwdjQwaDE0di0zMGgxOHYyNmgxNHYtMjJoMjJ2NDBoMTJ2ODBIMHoiIGZpbGw9IiMxZDI0MzAiLz48cGF0aCBkPSJNMCAxNTBjNDAtOCA4MCA4IDEyMCAwczgwLTggMTIwIDB2MzBIMHoiIGZpbGw9IiMyYjNiNGEiLz48Y2lyY2xlIGN4PSIzMCIgY3k9IjExMiIgcj0iMy4yIiBmaWxsPSIjZmZkMjdhIi8+PGNpcmNsZSBjeD0iMzAiIGN5PSIxMTIiIHI9IjExIiBmaWxsPSIjZmZkMjdhIiBvcGFjaXR5PSIuMjIiLz48Y2lyY2xlIGN4PSI4OCIgY3k9IjEwNCIgcj0iMy4yIiBmaWxsPSIjZmZkMjdhIi8+PGNpcmNsZSBjeD0iODgiIGN5PSIxMDQiIHI9IjExIiBmaWxsPSIjZmZkMjdhIiBvcGFjaXR5PSIuMjIiLz48Y2lyY2xlIGN4PSIxNTAiIGN5PSIxMTAiIHI9IjMuMiIgZmlsbD0iI2ZmZDI3YSIvPjxjaXJjbGUgY3g9IjE1MCIgY3k9IjExMCIgcj0iMTEiIGZpbGw9IiNmZmQyN2EiIG9wYWNpdHk9Ii4yMiIvPjxjaXJjbGUgY3g9IjIwNiIgY3k9IjEwMCIgcj0iMy4yIiBmaWxsPSIjZmZkMjdhIi8+PGNpcmNsZSBjeD0iMjA2IiBjeT0iMTAwIiByPSIxMSIgZmlsbD0iI2ZmZDI3YSIgb3BhY2l0eT0iLjIyIi8+PC9zdmc+",
-     "alt": "Vessmoor — 7.3.2"
+     "alt": "Vessmoor — 7.3.2",
+     "mime": "image/svg+xml"
     }
    }
   },
@@ -7915,7 +8636,10 @@
    "entry_id": "rec-landing",
    "title": "Gallows Landing",
    "page_id": "pl-landing",
+   "page": 12,
    "status": "draft",
+   "icon": "🏙",
+   "target": "place:rec-landing",
    "sections": {
     "7.1": {
      "fields": {
@@ -8030,10 +8754,13 @@
       "7.2.7": {
        "value": "4",
        "status": "proposed",
-       "source": "new:7.2.7",
+       "source": "new:danger_level",
+       "new": true,
        "edit": {
-        "route": "#/p/PID/main/forge/places/rec-landing",
-        "field": "7.2.7"
+        "route": "#/p/PID/main/binder",
+        "field": "danger_level",
+        "target": "place:rec-landing",
+        "api": "PUT /api/projects/PID/branches/main/binder/fields"
        }
       },
       "7.2.8": {
@@ -8615,7 +9342,8 @@
    "pics": {
     "7.1.1": {
      "url": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNDAgMTgwIj4gPGRlZnM+PGxpbmVhckdyYWRpZW50IGlkPSJzIiB4MT0iMCIgeTE9IjAiIHgyPSIwIiB5Mj0iMSI+PHN0b3Agb2Zmc2V0PSIwIiBzdG9wLWNvbG9yPSIjMWQyYjQ0Ii8+PHN0b3Agb2Zmc2V0PSIxIiBzdG9wLWNvbG9yPSIjNmE3ZGEwIi8+PC9saW5lYXJHcmFkaWVudD48L2RlZnM+IDxyZWN0IHdpZHRoPSIyNDAiIGhlaWdodD0iMTgwIiBmaWxsPSJ1cmwoI3MpIi8+PGNpcmNsZSBjeD0iMTkwIiBjeT0iMzQiIHI9IjE0IiBmaWxsPSIjZjRlY2QyIiBvcGFjaXR5PSIuODUiLz4gPHBhdGggZD0iTTAgMTMyaDI0MHY0OEgweiIgZmlsbD0iIzIwMzIzYiIvPjxwYXRoIGQ9Ik02MCAxMjRoMTIwbC0xMiAxNEg3MnoiIGZpbGw9IiMzYTJhMjIiLz48cGF0aCBkPSJNMTE4IDgydjQyIiBzdHJva2U9IiMzYTJhMjIiIHN0cm9rZS13aWR0aD0iNCIvPjxwYXRoIGQ9Ik0xMTggODZsMzAgMzBoLTMweiIgZmlsbD0iI2U4ZGNjMCIvPjxwYXRoIGQ9Ik0wIDE1MGM0MC04IDgwIDggMTIwIDBzODAtOCAxMjAgMHYzMEgweiIgZmlsbD0iIzI0Mzk0YSIvPjxjaXJjbGUgY3g9IjMwIiBjeT0iMTEyIiByPSIzLjIiIGZpbGw9IiNmZmQyN2EiLz48Y2lyY2xlIGN4PSIzMCIgY3k9IjExMiIgcj0iMTEiIGZpbGw9IiNmZmQyN2EiIG9wYWNpdHk9Ii4yMiIvPjxjaXJjbGUgY3g9Ijg4IiBjeT0iMTA0IiByPSIzLjIiIGZpbGw9IiNmZmQyN2EiLz48Y2lyY2xlIGN4PSI4OCIgY3k9IjEwNCIgcj0iMTEiIGZpbGw9IiNmZmQyN2EiIG9wYWNpdHk9Ii4yMiIvPjxjaXJjbGUgY3g9IjE1MCIgY3k9IjExMCIgcj0iMy4yIiBmaWxsPSIjZmZkMjdhIi8+PGNpcmNsZSBjeD0iMTUwIiBjeT0iMTEwIiByPSIxMSIgZmlsbD0iI2ZmZDI3YSIgb3BhY2l0eT0iLjIyIi8+PGNpcmNsZSBjeD0iMjA2IiBjeT0iMTAwIiByPSIzLjIiIGZpbGw9IiNmZmQyN2EiLz48Y2lyY2xlIGN4PSIyMDYiIGN5PSIxMDAiIHI9IjExIiBmaWxsPSIjZmZkMjdhIiBvcGFjaXR5PSIuMjIiLz48L3N2Zz4=",
-     "alt": "Gallows Landing — 7.1.1"
+     "alt": "Gallows Landing — 7.1.1",
+     "mime": "image/svg+xml"
     }
    }
   },
@@ -8624,7 +9352,10 @@
    "entry_id": "rec-isle",
    "title": "Lantern Isle",
    "page_id": "pl-isle",
+   "page": 13,
    "status": "needs_you",
+   "icon": "🏙",
+   "target": "place:rec-isle",
    "sections": {
     "7.1": {
      "fields": {
@@ -8739,10 +9470,13 @@
       "7.2.7": {
        "value": "2",
        "status": "proposed",
-       "source": "new:7.2.7",
+       "source": "new:danger_level",
+       "new": true,
        "edit": {
-        "route": "#/p/PID/main/forge/places/rec-isle",
-        "field": "7.2.7"
+        "route": "#/p/PID/main/binder",
+        "field": "danger_level",
+        "target": "place:rec-isle",
+        "api": "PUT /api/projects/PID/branches/main/binder/fields"
        }
       },
       "7.2.8": {
@@ -8837,11 +9571,8 @@
       "7.4.6": {
        "value": "",
        "status": "empty",
-       "source": "forge:7.4.6",
-       "edit": {
-        "route": "#/p/PID/main/forge/places/rec-isle",
-        "field": "7.4.6"
-       }
+       "source": "none",
+       "unavailable": "the place dossier keeps light by day and by night in one field"
       },
       "7.4.7": {
        "value": "",
@@ -9324,7 +10055,8 @@
    "pics": {
     "7.1.1": {
      "url": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNDAgMTgwIj4gPGRlZnM+PGxpbmVhckdyYWRpZW50IGlkPSJzIiB4MT0iMCIgeTE9IjAiIHgyPSIwIiB5Mj0iMSI+PHN0b3Agb2Zmc2V0PSIwIiBzdG9wLWNvbG9yPSIjMzMyODVhIi8+PHN0b3Agb2Zmc2V0PSIxIiBzdG9wLWNvbG9yPSIjZDQ4YTZhIi8+PC9saW5lYXJHcmFkaWVudD48L2RlZnM+IDxyZWN0IHdpZHRoPSIyNDAiIGhlaWdodD0iMTgwIiBmaWxsPSJ1cmwoI3MpIi8+PGNpcmNsZSBjeD0iMTkwIiBjeT0iMzQiIHI9IjE0IiBmaWxsPSIjZjRlY2QyIiBvcGFjaXR5PSIuODUiLz4gPHBhdGggZD0iTTMwIDEzMmMzMC00MCA2MC01NiA5MC01NnM3MCAyMCA5MiA1NnoiIGZpbGw9IiMyNDM1MmQiLz48cGF0aCBkPSJNMTEyIDc2di0yNmw4LTggOCA4djI2eiIgZmlsbD0iI2Q4Yzc5YyIvPjxwYXRoIGQ9Ik0wIDE1MGM0MC04IDgwIDggMTIwIDBzODAtOCAxMjAgMHYzMEgweiIgZmlsbD0iIzJjM2U0NiIvPjwvc3ZnPg==",
-     "alt": "Lantern Isle — 7.1.1"
+     "alt": "Lantern Isle — 7.1.1",
+     "mime": "image/svg+xml"
     }
    }
   },
@@ -9333,7 +10065,9 @@
    "entry_id": "rec-wickcraft",
    "title": "Wickcraft",
    "page_id": "mg-wickcraft",
+   "page": 14,
    "status": "draft",
+   "icon": "✴",
    "sections": {
     "8A.1": {
      "fields": {
@@ -9497,7 +10231,29 @@
      }
     },
     "8A.4": {
-     "fields": {},
+     "fields": {
+      "8A.4.1": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:8A.4",
+       "repeat": true,
+       "rows": 3
+      },
+      "8A.4.2": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:8A.4",
+       "repeat": true,
+       "rows": 3
+      },
+      "8A.4.3": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:8A.4",
+       "repeat": true,
+       "rows": 3
+      }
+     },
      "rows": [
       {
        "8A.4.1": {
@@ -9917,7 +10673,8 @@
    "pics": {
     "8A.1.1": {
      "url": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAgMTIwIj48cmVjdCB3aWR0aD0iMTIwIiBoZWlnaHQ9IjEyMCIgZmlsbD0iIzIwMTYwZiIvPiA8Y2lyY2xlIGN4PSI2MCIgY3k9IjYwIiByPSI0NCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjZDlhNDQwIiBzdHJva2Utd2lkdGg9IjMiLz48Y2lyY2xlIGN4PSI2MCIgY3k9IjYwIiByPSIzNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjZDlhNDQwIiBzdHJva2Utd2lkdGg9IjEiIHN0cm9rZS1kYXNoYXJyYXk9IjMgNCIvPiA8cGF0aCBkPSJNNjAgMjZjMTAgMTYgMTYgMjYgMTYgMzhhMTYgMTYgMCAwIDEtMzIgMGMwLTEyIDYtMjIgMTYtMzh6IiBmaWxsPSIjZmZjZjZiIi8+PHBhdGggZD0iTTYwIDQ2YzUgOCA3IDEzIDcgMTlhNyA3IDAgMCAxLTE0IDBjMC02IDItMTEgNy0xOXoiIGZpbGw9IiNmZmYzYzkiLz48L3N2Zz4=",
-     "alt": "Wickcraft — 8A.1.1"
+     "alt": "Wickcraft — 8A.1.1",
+     "mime": "image/svg+xml"
     }
    }
   },
@@ -9926,7 +10683,9 @@
    "entry_id": "rec-ember",
    "title": "The Ember Lantern",
    "page_id": "ar-ember",
+   "page": 15,
    "status": "approved",
+   "icon": "🗡",
    "sections": {
     "8B.1": {
      "fields": {
@@ -10406,7 +11165,8 @@
    "pics": {
     "8B.1.1": {
      "url": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAgMTUwIj48cmVjdCB3aWR0aD0iMTIwIiBoZWlnaHQ9IjE1MCIgZmlsbD0iIzJhMjMyMCIvPiA8Y2lyY2xlIGN4PSI2MCIgY3k9Ijg0IiByPSI0NiIgZmlsbD0iI2ZmY2Y2YiIgb3BhY2l0eT0iLjE4Ii8+PHBhdGggZD0iTTQ4IDIyaDI0bDQgMTBINDR6IiBmaWxsPSIjOWI2YjJmIi8+PGNpcmNsZSBjeD0iNjAiIGN5PSIxNiIgcj0iNyIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjOWI2YjJmIiBzdHJva2Utd2lkdGg9IjMiLz4gPHBhdGggZD0iTTQyIDM0aDM2bDYgNzZIMzZ6IiBmaWxsPSIjM2IyZjI1IiBzdHJva2U9IiNjNDhkM2MiIHN0cm9rZS13aWR0aD0iMyIvPjxwYXRoIGQ9Ik00OCA0MmgyNGwzIDYwSDQ1eiIgZmlsbD0iI2ZmZDk4MiIvPiA8cGF0aCBkPSJNNjAgNThjNiAxMCA5IDE1IDkgMjFhOSA5IDAgMCAxLTE4IDBjMC02IDMtMTEgOS0yMXoiIGZpbGw9IiNmZmYxYzQiLz48cGF0aCBkPSJNMzIgMTEwaDU2djEwSDMyeiIgZmlsbD0iIzliNmIyZiIvPjwvc3ZnPg==",
-     "alt": "The Ember Lantern — 8B.1.1"
+     "alt": "The Ember Lantern — 8B.1.1",
+     "mime": "image/svg+xml"
     }
    }
   },
@@ -10415,7 +11175,10 @@
    "entry_id": "rec-guild",
    "title": "The Guild of Wicks",
    "page_id": "wd-guild",
+   "page": 16,
    "status": "draft",
+   "icon": "🌍",
+   "target": "group:rec-guild",
    "sections": {
     "8C.1": {
      "fields": {
@@ -10511,10 +11274,13 @@
       "8C.3.5": {
        "value": "Gold flame on teal · #1f4d4a / #d6b66a",
        "status": "proposed",
-       "source": "new:8C.3.5",
+       "source": "new:symbol_colours",
+       "new": true,
        "edit": {
-        "route": "#/p/PID/main/world",
-        "field": "8C.3.5"
+        "route": "#/p/PID/main/binder",
+        "field": "symbol_colours",
+        "target": "group:rec-guild",
+        "api": "PUT /api/projects/PID/branches/main/binder/fields"
        }
       }
      }
@@ -10621,7 +11387,8 @@
    "pics": {
     "8C.1.1": {
      "url": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAgMTIwIj48cmVjdCB3aWR0aD0iMTIwIiBoZWlnaHQ9IjEyMCIgZmlsbD0iIzEyMzIzMiIvPiA8cGF0aCBkPSJNNjAgMTRsMzggMTZ2MzBjMCAyNi0xOCA0MC0zOCA0Ni0yMC02LTM4LTIwLTM4LTQ2VjMweiIgZmlsbD0iIzFmNGQ0YSIgc3Ryb2tlPSIjZDZiNjZhIiBzdHJva2Utd2lkdGg9IjMiLz4gPHBhdGggZD0iTTYwIDM2djQ0TTQ0IDUyaDMyIiBzdHJva2U9IiNkNmI2NmEiIHN0cm9rZS13aWR0aD0iNCIvPjxjaXJjbGUgY3g9IjYwIiBjeT0iMzQiIHI9IjYiIGZpbGw9IiNmZmQyN2EiLz48L3N2Zz4=",
-     "alt": "The Guild of Wicks — 8C.1.1"
+     "alt": "The Guild of Wicks — 8C.1.1",
+     "mime": "image/svg+xml"
     }
    }
   },
@@ -10630,7 +11397,45 @@
    "entry_id": null,
    "title": "Map of the Hollow River",
    "page_id": "map",
+   "page": 17,
    "status": "draft",
+   "icon": "🗺",
+   "map": {
+    "coordinate_system": "story-route",
+    "nodes": [
+     {
+      "n": 1,
+      "id": "vessmoor",
+      "name": "Vessmoor",
+      "x": 0,
+      "y": 0
+     },
+     {
+      "n": 2,
+      "id": "gallows-landing",
+      "name": "Gallows Landing",
+      "x": 4,
+      "y": 5
+     },
+     {
+      "n": 3,
+      "id": "lantern-isle",
+      "name": "Lantern Isle",
+      "x": 12,
+      "y": 1
+     }
+    ],
+    "edges": [
+     {
+      "from": "vessmoor",
+      "to": "gallows-landing"
+     },
+     {
+      "from": "gallows-landing",
+      "to": "lantern-isle"
+     }
+    ]
+   },
    "sections": {
     "9.1": {
      "fields": {
@@ -10647,15 +11452,35 @@
      }
     },
     "9.2": {
-     "fields": {},
+     "fields": {
+      "9.2.1": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:9.2",
+       "repeat": true,
+       "rows": 3
+      },
+      "9.2.2": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:9.2",
+       "repeat": true,
+       "rows": 3
+      },
+      "9.2.3": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:9.2",
+       "repeat": true,
+       "rows": 3
+      }
+     },
      "rows": [
       {
        "9.2.1": {
         "value": "1",
         "status": "approved",
-        "source": "forge:9.2.1",
-        "x": 0.3,
-        "y": 0.36
+        "source": "forge:9.2.1"
        },
        "9.2.2": {
         "value": "Vessmoor",
@@ -10666,15 +11491,18 @@
         "value": "11",
         "status": "auto",
         "source": "auto"
+       },
+       "_meta": {
+        "page_id": "pl-vessmoor",
+        "x": 0,
+        "y": 0
        }
       },
       {
        "9.2.1": {
         "value": "2",
         "status": "approved",
-        "source": "forge:9.2.1",
-        "x": 0.47,
-        "y": 0.55
+        "source": "forge:9.2.1"
        },
        "9.2.2": {
         "value": "Gallows Landing",
@@ -10685,15 +11513,18 @@
         "value": "12",
         "status": "auto",
         "source": "auto"
+       },
+       "_meta": {
+        "page_id": "pl-landing",
+        "x": 4,
+        "y": 5
        }
       },
       {
        "9.2.1": {
         "value": "3",
         "status": "approved",
-        "source": "forge:9.2.1",
-        "x": 0.8,
-        "y": 0.4
+        "source": "forge:9.2.1"
        },
        "9.2.2": {
         "value": "Lantern Isle",
@@ -10704,12 +11535,39 @@
         "value": "13",
         "status": "auto",
         "source": "auto"
+       },
+       "_meta": {
+        "page_id": "pl-isle",
+        "x": 12,
+        "y": 1
        }
       }
      ]
     },
     "9.3": {
-     "fields": {},
+     "fields": {
+      "9.3.1": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:9.3",
+       "repeat": true,
+       "rows": 2
+      },
+      "9.3.2": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:9.3",
+       "repeat": true,
+       "rows": 2
+      },
+      "9.3.3": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:9.3",
+       "repeat": true,
+       "rows": 2
+      }
+     },
      "rows": [
       {
        "9.3.1": {
@@ -10765,7 +11623,8 @@
    "pics": {
     "9.1.1": {
      "url": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA4MDAgNTIwIj48cmVjdCB3aWR0aD0iODAwIiBoZWlnaHQ9IjUyMCIgZmlsbD0iI2NmZGNkNiIvPiA8ZyBmaWxsPSIjZWNlMmM4IiBzdHJva2U9IiM4YzlhODYiIHN0cm9rZS13aWR0aD0iMyI+PHBhdGggZD0iTTQwIDYwYzEyMC0zMCAyMzAtMjAgMzMwIDIwczkwIDEyMCA0MCAxOTAtNjAgMTYwLTE3MCAxOTAtMjEwLTQwLTIzMC0xNjBTLTEwIDgwIDQwIDYweiIvPiA8cGF0aCBkPSJNNDgwIDcwYzkwLTMwIDIxMC0yMCAyNzAgNDBzNDAgMTcwLTEwIDIzMC0xNTAgMTEwLTIzMCA3MC0xMTAtMTQwLTkwLTIxMCAxMC0xMTAgNjAtMTMweiIvPjxwYXRoIGQ9Ik00MjAgNDAwYzQwLTIwIDkwLTEwIDEwMCAyMHMtMzAgNjAtODAgNjAtNjAtNjAtMjAtODB6Ii8+PC9nPiA8cGF0aCBkPSJNNjAgMzAwYzkwLTMwIDE3MCA0MCAyNjAgMHMxMTAtOTAgMTYwLTYwIDEyMCA3MCAyMDAgMzAgOTAtNDAgMTIwLTMwIiBmaWxsPSJub25lIiBzdHJva2U9IiM3ZGEzYWUiIHN0cm9rZS13aWR0aD0iMTYiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPiA8ZyBmaWxsPSIjN2M5MzdhIj48cGF0aCBkPSJNMTUwIDE1MGwxNi0zMCAxNiAzMHoiLz48cGF0aCBkPSJNMTgwIDE1MGwxNi0zMCAxNiAzMHoiLz48cGF0aCBkPSJNNjAwIDE0MGwxOC0zNCAxOCAzNHoiLz48cGF0aCBkPSJNNjMyIDE0MGwxOC0zNCAxOCAzNHoiLz48L2c+IDxwYXRoIGQ9Ik0xMjAgNDIwYzgwLTQwIDIwMC02MCAzMjAtMzAiIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzhjN2I1YyIgc3Ryb2tlLXdpZHRoPSIzIiBzdHJva2UtZGFzaGFycmF5PSI4IDgiLz48L3N2Zz4=",
-     "alt": "Map of the Hollow River — 9.1.1"
+     "alt": "Map of the Hollow River — 9.1.1",
+     "mime": "image/svg+xml"
     }
    }
   },
@@ -10774,7 +11633,9 @@
    "entry_id": null,
    "title": "Story plan",
    "page_id": "plan",
+   "page": 18,
    "status": "draft",
+   "icon": "📈",
    "sections": {
     "10.1": {
      "fields": {
@@ -10801,37 +11662,40 @@
     "10.2": {
      "fields": {
       "10.2.1": {
-       "value": "Odile lights Copper Street the night the Company notice goes up.",
+       "value": "Chapter 1: Odile lights Copper Street the night the Company notice goes up.",
        "status": "approved",
        "source": "forge:10.2.1",
        "chapter": 1,
+       "link": "cp-01",
        "edit": {
         "route": "#/p/PID/main/book",
         "field": "10.2.1"
        }
       },
       "10.2.2": {
-       "value": "Silas snuffs her lamp; she sees a memory die.",
+       "value": "Chapter 2: Silas snuffs her lamp; she sees a memory die.",
        "status": "approved",
        "source": "forge:10.2.2",
        "chapter": 2,
+       "link": "cp-02",
        "edit": {
         "route": "#/p/PID/main/book",
         "field": "10.2.2"
        }
       },
       "10.2.3": {
-       "value": "She takes the Ember Lantern to Gallows Landing.",
+       "value": "Chapter 3: She takes the Ember Lantern to Gallows Landing.",
        "status": "approved",
        "source": "forge:10.2.3",
        "chapter": 3,
+       "link": "cp-03",
        "edit": {
         "route": "#/p/PID/main/book",
         "field": "10.2.3"
        }
       },
       "10.2.4": {
-       "value": "The lantern shows her own forgotten memory.",
+       "value": "Chapter 6: The lantern shows her own forgotten memory.",
        "status": "approved",
        "source": "forge:10.2.4",
        "chapter": 6,
@@ -10841,7 +11705,7 @@
        }
       },
       "10.2.5": {
-       "value": "Wren is taken across first; the Guild votes yes.",
+       "value": "Chapter 8: Wren is taken across first; the Guild votes yes.",
        "status": "approved",
        "source": "forge:10.2.5",
        "chapter": 8,
@@ -10851,7 +11715,7 @@
        }
       },
       "10.2.6": {
-       "value": "The crossing under the searchlights.",
+       "value": "Chapter 10: The crossing under the searchlights.",
        "status": "approved",
        "source": "forge:10.2.6",
        "chapter": 10,
@@ -10861,7 +11725,7 @@
        }
       },
       "10.2.7": {
-       "value": "The memories reach the Isle; the city goes electric.",
+       "value": "Chapter 11: The memories reach the Isle; the city goes electric.",
        "status": "approved",
        "source": "forge:10.2.7",
        "chapter": 11,
@@ -10871,7 +11735,7 @@
        }
       },
       "10.2.8": {
-       "value": "A single lamp burning on the Isle at dawn.",
+       "value": "Chapter 12: A single lamp burning on the Isle at dawn.",
        "status": "approved",
        "source": "forge:10.2.8",
        "chapter": 12,
@@ -10883,7 +11747,29 @@
      }
     },
     "10.3": {
-     "fields": {},
+     "fields": {
+      "10.3.1": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:10.3",
+       "repeat": true,
+       "rows": 3
+      },
+      "10.3.2": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:10.3",
+       "repeat": true,
+       "rows": 3
+      },
+      "10.3.3": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:10.3",
+       "repeat": true,
+       "rows": 3
+      }
+     },
      "rows": [
       {
        "10.3.1": {
@@ -10975,7 +11861,29 @@
      ]
     },
     "10.4": {
-     "fields": {},
+     "fields": {
+      "10.4.1": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:10.4",
+       "repeat": true,
+       "rows": 2
+      },
+      "10.4.2": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:10.4",
+       "repeat": true,
+       "rows": 2
+      },
+      "10.4.3": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:10.4",
+       "repeat": true,
+       "rows": 2
+      }
+     },
      "rows": [
       {
        "10.4.1": {
@@ -11034,11 +11942,8 @@
       "10.5.1": {
        "value": "Memory as inheritance · Progress and its cost · Small lights",
        "status": "proposed",
-       "source": "new:10.5.1",
-       "edit": {
-        "route": "#/p/PID/main/book",
-        "field": "10.5.1"
-       }
+       "source": "auto:themes",
+       "new": true
       },
       "10.5.2": {
        "value": "Matches, bells, the cracked pane",
@@ -11061,10 +11966,13 @@
       "10.5.4": {
        "value": "Is a memory still yours if nobody else remembers it?",
        "status": "proposed",
-       "source": "new:10.5.4",
+       "source": "new:central_question",
+       "new": true,
        "edit": {
-        "route": "#/p/PID/main/book",
-        "field": "10.5.4"
+        "route": "#/p/PID/main/binder",
+        "field": "central_question",
+        "target": "book",
+        "api": "PUT /api/projects/PID/branches/main/binder/fields"
        }
       }
      }
@@ -11117,7 +12025,10 @@
    "entry_id": "rec-ch1",
    "title": "Chapter 1 · The Last Lamp on Copper Street",
    "page_id": "cp-01",
+   "page": 19,
    "status": "approved",
+   "icon": "📖",
+   "target": "chapter:ch1",
    "sections": {
     "11.1": {
      "fields": {
@@ -11201,10 +12112,13 @@
       "11.2.4": {
        "value": "— (opening chapter)",
        "status": "proposed",
-       "source": "new:11.2.4",
+       "source": "new:time_since_previous",
+       "new": true,
        "edit": {
-        "route": "#/p/PID/main/write/rec-ch1",
-        "field": "11.2.4"
+        "route": "#/p/PID/main/binder",
+        "field": "time_since_previous",
+        "target": "chapter:ch1",
+        "api": "PUT /api/projects/PID/branches/main/binder/fields"
        }
       }
      }
@@ -11232,7 +12146,50 @@
      }
     },
     "11.4": {
-     "fields": {},
+     "fields": {
+      "11.4.1": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:11.4",
+       "repeat": true,
+       "rows": 2
+      },
+      "11.4.2": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:11.4",
+       "repeat": true,
+       "rows": 2
+      },
+      "11.4.3": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:11.4",
+       "repeat": true,
+       "rows": 2
+      },
+      "11.4.4": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:11.4",
+       "repeat": true,
+       "rows": 2
+      },
+      "11.4.5": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:11.4",
+       "repeat": true,
+       "rows": 2
+      },
+      "11.4.6": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:11.4",
+       "repeat": true,
+       "rows": 2
+      }
+     },
      "rows": [
       {
        "11.4.1": {
@@ -11349,33 +12306,59 @@
      ]
     },
     "11.5": {
-     "fields": {},
+     "fields": {
+      "11.5.1": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:11.5",
+       "repeat": true,
+       "rows": 3
+      }
+     },
      "rows": [
       {
        "11.5.1": {
         "value": "Odile Marsh",
         "status": "auto",
-        "source": "auto"
+        "source": "auto",
+        "link": "ch-odile"
        }
       },
       {
        "11.5.1": {
         "value": "Wren Marsh",
         "status": "auto",
-        "source": "auto"
+        "source": "auto",
+        "link": "ch-wren"
        }
       },
       {
        "11.5.1": {
         "value": "Silas Crane",
         "status": "auto",
-        "source": "auto"
+        "source": "auto",
+        "link": "ch-silas"
        }
       }
      ]
     },
     "11.6": {
-     "fields": {},
+     "fields": {
+      "11.6.1": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:11.6",
+       "repeat": true,
+       "rows": 2
+      },
+      "11.6.2": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:11.6",
+       "repeat": true,
+       "rows": 2
+      }
+     },
      "rows": [
       {
        "11.6.1": {
@@ -11461,7 +12444,8 @@
    "pics": {
     "11.1.3": {
      "url": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNDAgMTgwIj4gPGRlZnM+PGxpbmVhckdyYWRpZW50IGlkPSJzIiB4MT0iMCIgeTE9IjAiIHgyPSIwIiB5Mj0iMSI+PHN0b3Agb2Zmc2V0PSIwIiBzdG9wLWNvbG9yPSIjMmMzYTVjIi8+PHN0b3Agb2Zmc2V0PSIxIiBzdG9wLWNvbG9yPSIjZTlhOTZiIi8+PC9saW5lYXJHcmFkaWVudD48L2RlZnM+IDxyZWN0IHdpZHRoPSIyNDAiIGhlaWdodD0iMTgwIiBmaWxsPSJ1cmwoI3MpIi8+PGNpcmNsZSBjeD0iMTkwIiBjeT0iMzQiIHI9IjE0IiBmaWxsPSIjZjRlY2QyIiBvcGFjaXR5PSIuODUiLz4gPHBhdGggZD0iTTAgMTIwaDIwdi0zOGgxNHYyMGgxMnYtNDZoMTh2MzRoMTZ2LTI0aDIwdjQwaDE0di0zMGgxOHYyNmgxNHYtMjJoMjJ2NDBoMTJ2ODBIMHoiIGZpbGw9IiMxZDI0MzAiLz48cGF0aCBkPSJNMCAxNTBjNDAtOCA4MCA4IDEyMCAwczgwLTggMTIwIDB2MzBIMHoiIGZpbGw9IiMyYjNiNGEiLz48Y2lyY2xlIGN4PSIzMCIgY3k9IjExMiIgcj0iMy4yIiBmaWxsPSIjZmZkMjdhIi8+PGNpcmNsZSBjeD0iMzAiIGN5PSIxMTIiIHI9IjExIiBmaWxsPSIjZmZkMjdhIiBvcGFjaXR5PSIuMjIiLz48Y2lyY2xlIGN4PSI4OCIgY3k9IjEwNCIgcj0iMy4yIiBmaWxsPSIjZmZkMjdhIi8+PGNpcmNsZSBjeD0iODgiIGN5PSIxMDQiIHI9IjExIiBmaWxsPSIjZmZkMjdhIiBvcGFjaXR5PSIuMjIiLz48Y2lyY2xlIGN4PSIxNTAiIGN5PSIxMTAiIHI9IjMuMiIgZmlsbD0iI2ZmZDI3YSIvPjxjaXJjbGUgY3g9IjE1MCIgY3k9IjExMCIgcj0iMTEiIGZpbGw9IiNmZmQyN2EiIG9wYWNpdHk9Ii4yMiIvPjxjaXJjbGUgY3g9IjIwNiIgY3k9IjEwMCIgcj0iMy4yIiBmaWxsPSIjZmZkMjdhIi8+PGNpcmNsZSBjeD0iMjA2IiBjeT0iMTAwIiByPSIxMSIgZmlsbD0iI2ZmZDI3YSIgb3BhY2l0eT0iLjIyIi8+PC9zdmc+",
-     "alt": "Chapter 1 · The Last Lamp on Copper Street — 11.1.3"
+     "alt": "Chapter 1 · The Last Lamp on Copper Street — 11.1.3",
+     "mime": "image/svg+xml"
     }
    }
   },
@@ -11470,7 +12454,10 @@
    "entry_id": "rec-ch2",
    "title": "Chapter 2 · The Ferry That Wasn't Running",
    "page_id": "cp-02",
+   "page": 20,
    "status": "draft",
+   "icon": "📖",
+   "target": "chapter:ch2",
    "sections": {
     "11.1": {
      "fields": {
@@ -11554,10 +12541,13 @@
       "11.2.4": {
        "value": "1 hour",
        "status": "proposed",
-       "source": "new:11.2.4",
+       "source": "new:time_since_previous",
+       "new": true,
        "edit": {
-        "route": "#/p/PID/main/write/rec-ch2",
-        "field": "11.2.4"
+        "route": "#/p/PID/main/binder",
+        "field": "time_since_previous",
+        "target": "chapter:ch2",
+        "api": "PUT /api/projects/PID/branches/main/binder/fields"
        }
       }
      }
@@ -11585,7 +12575,50 @@
      }
     },
     "11.4": {
-     "fields": {},
+     "fields": {
+      "11.4.1": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:11.4",
+       "repeat": true,
+       "rows": 1
+      },
+      "11.4.2": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:11.4",
+       "repeat": true,
+       "rows": 1
+      },
+      "11.4.3": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:11.4",
+       "repeat": true,
+       "rows": 1
+      },
+      "11.4.4": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:11.4",
+       "repeat": true,
+       "rows": 1
+      },
+      "11.4.5": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:11.4",
+       "repeat": true,
+       "rows": 1
+      },
+      "11.4.6": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:11.4",
+       "repeat": true,
+       "rows": 1
+      }
+     },
      "rows": [
       {
        "11.4.1": {
@@ -11646,26 +12679,51 @@
      ]
     },
     "11.5": {
-     "fields": {},
+     "fields": {
+      "11.5.1": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:11.5",
+       "repeat": true,
+       "rows": 2
+      }
+     },
      "rows": [
       {
        "11.5.1": {
         "value": "Odile Marsh",
         "status": "auto",
-        "source": "auto"
+        "source": "auto",
+        "link": "ch-odile"
        }
       },
       {
        "11.5.1": {
         "value": "Tobiah Reed",
         "status": "auto",
-        "source": "auto"
+        "source": "auto",
+        "link": "ch-tobiah"
        }
       }
      ]
     },
     "11.6": {
-     "fields": {},
+     "fields": {
+      "11.6.1": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:11.6",
+       "repeat": true,
+       "rows": 0
+      },
+      "11.6.2": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:11.6",
+       "repeat": true,
+       "rows": 0
+      }
+     },
      "rows": []
     },
     "11.7": {
@@ -11718,7 +12776,8 @@
    "pics": {
     "11.1.3": {
      "url": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNDAgMTgwIj4gPGRlZnM+PGxpbmVhckdyYWRpZW50IGlkPSJzIiB4MT0iMCIgeTE9IjAiIHgyPSIwIiB5Mj0iMSI+PHN0b3Agb2Zmc2V0PSIwIiBzdG9wLWNvbG9yPSIjMWQyYjQ0Ii8+PHN0b3Agb2Zmc2V0PSIxIiBzdG9wLWNvbG9yPSIjNmE3ZGEwIi8+PC9saW5lYXJHcmFkaWVudD48L2RlZnM+IDxyZWN0IHdpZHRoPSIyNDAiIGhlaWdodD0iMTgwIiBmaWxsPSJ1cmwoI3MpIi8+PGNpcmNsZSBjeD0iMTkwIiBjeT0iMzQiIHI9IjE0IiBmaWxsPSIjZjRlY2QyIiBvcGFjaXR5PSIuODUiLz4gPHBhdGggZD0iTTAgMTMyaDI0MHY0OEgweiIgZmlsbD0iIzIwMzIzYiIvPjxwYXRoIGQ9Ik02MCAxMjRoMTIwbC0xMiAxNEg3MnoiIGZpbGw9IiMzYTJhMjIiLz48cGF0aCBkPSJNMTE4IDgydjQyIiBzdHJva2U9IiMzYTJhMjIiIHN0cm9rZS13aWR0aD0iNCIvPjxwYXRoIGQ9Ik0xMTggODZsMzAgMzBoLTMweiIgZmlsbD0iI2U4ZGNjMCIvPjxwYXRoIGQ9Ik0wIDE1MGM0MC04IDgwIDggMTIwIDBzODAtOCAxMjAgMHYzMEgweiIgZmlsbD0iIzI0Mzk0YSIvPjxjaXJjbGUgY3g9IjMwIiBjeT0iMTEyIiByPSIzLjIiIGZpbGw9IiNmZmQyN2EiLz48Y2lyY2xlIGN4PSIzMCIgY3k9IjExMiIgcj0iMTEiIGZpbGw9IiNmZmQyN2EiIG9wYWNpdHk9Ii4yMiIvPjxjaXJjbGUgY3g9Ijg4IiBjeT0iMTA0IiByPSIzLjIiIGZpbGw9IiNmZmQyN2EiLz48Y2lyY2xlIGN4PSI4OCIgY3k9IjEwNCIgcj0iMTEiIGZpbGw9IiNmZmQyN2EiIG9wYWNpdHk9Ii4yMiIvPjxjaXJjbGUgY3g9IjE1MCIgY3k9IjExMCIgcj0iMy4yIiBmaWxsPSIjZmZkMjdhIi8+PGNpcmNsZSBjeD0iMTUwIiBjeT0iMTEwIiByPSIxMSIgZmlsbD0iI2ZmZDI3YSIgb3BhY2l0eT0iLjIyIi8+PGNpcmNsZSBjeD0iMjA2IiBjeT0iMTAwIiByPSIzLjIiIGZpbGw9IiNmZmQyN2EiLz48Y2lyY2xlIGN4PSIyMDYiIGN5PSIxMDAiIHI9IjExIiBmaWxsPSIjZmZkMjdhIiBvcGFjaXR5PSIuMjIiLz48L3N2Zz4=",
-     "alt": "Chapter 2 · The Ferry That Wasn't Running — 11.1.3"
+     "alt": "Chapter 2 · The Ferry That Wasn't Running — 11.1.3",
+     "mime": "image/svg+xml"
     }
    }
   },
@@ -11727,7 +12786,10 @@
    "entry_id": "rec-ch3",
    "title": "Chapter 3 · Brightglass",
    "page_id": "cp-03",
+   "page": 21,
    "status": "needs_you",
+   "icon": "📖",
+   "target": "chapter:ch3",
    "sections": {
     "11.1": {
      "fields": {
@@ -11811,11 +12873,8 @@
       "11.2.4": {
        "value": "",
        "status": "empty",
-       "source": "new:11.2.4",
-       "edit": {
-        "route": "#/p/PID/main/write/rec-ch3",
-        "field": "11.2.4"
-       }
+       "source": "new:time_since_previous",
+       "new": true
       }
      }
     },
@@ -11842,15 +12901,81 @@
      }
     },
     "11.4": {
-     "fields": {},
+     "fields": {
+      "11.4.1": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:11.4",
+       "repeat": true,
+       "rows": 0
+      },
+      "11.4.2": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:11.4",
+       "repeat": true,
+       "rows": 0
+      },
+      "11.4.3": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:11.4",
+       "repeat": true,
+       "rows": 0
+      },
+      "11.4.4": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:11.4",
+       "repeat": true,
+       "rows": 0
+      },
+      "11.4.5": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:11.4",
+       "repeat": true,
+       "rows": 0
+      },
+      "11.4.6": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:11.4",
+       "repeat": true,
+       "rows": 0
+      }
+     },
      "rows": []
     },
     "11.5": {
-     "fields": {},
+     "fields": {
+      "11.5.1": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:11.5",
+       "repeat": true,
+       "rows": 0
+      }
+     },
      "rows": []
     },
     "11.6": {
-     "fields": {},
+     "fields": {
+      "11.6.1": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:11.6",
+       "repeat": true,
+       "rows": 0
+      },
+      "11.6.2": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:11.6",
+       "repeat": true,
+       "rows": 0
+      }
+     },
      "rows": []
     },
     "11.7": {
@@ -11858,11 +12983,8 @@
       "11.7.1": {
        "value": "",
        "status": "empty",
-       "source": "forge:11.7.1",
-       "edit": {
-        "route": "#/p/PID/main/write/rec-ch3",
-        "field": "11.7.1"
-       }
+       "source": "none",
+       "unavailable": "Akọwe stores no set-up / pay-off links between chapters yet"
       },
       "11.7.2": {
        "value": "",
@@ -11907,10 +13029,34 @@
    "entry_id": null,
    "title": "Rules & facts",
    "page_id": "rules",
+   "page": 22,
    "status": "draft",
+   "icon": "🔒",
    "sections": {
     "12.1": {
-     "fields": {},
+     "fields": {
+      "12.1.1": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:12.1",
+       "repeat": true,
+       "rows": 3
+      },
+      "12.1.2": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:12.1",
+       "repeat": true,
+       "rows": 3
+      },
+      "12.1.3": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:12.1",
+       "repeat": true,
+       "rows": 3
+      }
+     },
      "rows": [
       {
        "12.1.1": {
@@ -11990,7 +13136,36 @@
      }
     },
     "12.3": {
-     "fields": {},
+     "fields": {
+      "12.3.1": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:12.3",
+       "repeat": true,
+       "rows": 3
+      },
+      "12.3.2": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:12.3",
+       "repeat": true,
+       "rows": 3
+      },
+      "12.3.3": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:12.3",
+       "repeat": true,
+       "rows": 3
+      },
+      "12.3.4": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:12.3",
+       "repeat": true,
+       "rows": 3
+      }
+     },
      "rows": [
       {
        "12.3.1": {
@@ -12061,7 +13236,36 @@
      ]
     },
     "12.4": {
-     "fields": {},
+     "fields": {
+      "12.4.1": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:12.4",
+       "repeat": true,
+       "rows": 3
+      },
+      "12.4.2": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:12.4",
+       "repeat": true,
+       "rows": 3
+      },
+      "12.4.3": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:12.4",
+       "repeat": true,
+       "rows": 3
+      },
+      "12.4.4": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:12.4",
+       "repeat": true,
+       "rows": 3
+      }
+     },
      "rows": [
       {
        "12.4.1": {
@@ -12132,7 +13336,22 @@
      ]
     },
     "12.5": {
-     "fields": {},
+     "fields": {
+      "12.5.1": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:12.5",
+       "repeat": true,
+       "rows": 2
+      },
+      "12.5.2": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:12.5",
+       "repeat": true,
+       "rows": 2
+      }
+     },
      "rows": [
       {
        "12.5.1": {
@@ -12200,7 +13419,22 @@
      }
     },
     "12.7": {
-     "fields": {},
+     "fields": {
+      "12.7.1": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:12.7",
+       "repeat": true,
+       "rows": 2
+      },
+      "12.7.2": {
+       "value": "",
+       "status": "auto",
+       "source": "rows:12.7",
+       "repeat": true,
+       "rows": 2
+      }
+     },
      "rows": [
       {
        "12.7.1": {
@@ -12237,102 +13471,392 @@
    "template": "1",
    "title": "Cover",
    "count": 1,
-   "page": 1
+   "page": 1,
+   "page_id": "cover",
+   "icon": "📕"
   },
   {
    "template": "2",
    "title": "Contents",
    "count": 1,
-   "page": 2
+   "page": 2,
+   "page_id": "contents",
+   "icon": "📑"
   },
   {
    "template": "3",
    "title": "At a glance",
    "count": 1,
-   "page": 3
+   "page": 3,
+   "page_id": "glance",
+   "icon": "🔭"
   },
   {
    "template": "4",
    "title": "Cast list",
    "count": 1,
-   "page": 4
+   "page": 4,
+   "page_id": "cast",
+   "icon": "👥"
   },
   {
    "template": "5",
    "title": "Character page",
    "count": 5,
-   "page": 5
+   "page": 5,
+   "page_id": "ch-odile",
+   "icon": "🧑"
   },
   {
    "template": "6",
    "title": "Relationship map",
    "count": 1,
-   "page": 10
+   "page": 10,
+   "page_id": "relmap",
+   "icon": "🕸"
   },
   {
    "template": "7",
    "title": "Place page",
    "count": 3,
-   "page": 11
+   "page": 11,
+   "page_id": "pl-vessmoor",
+   "icon": "🏙"
   },
   {
    "template": "8A",
    "title": "Magic system",
    "count": 1,
-   "page": 14
+   "page": 14,
+   "page_id": "mg-wickcraft",
+   "icon": "✴"
   },
   {
    "template": "8B",
    "title": "Item",
    "count": 1,
-   "page": 15
+   "page": 15,
+   "page_id": "ar-ember",
+   "icon": "🗡"
   },
   {
    "template": "8C",
    "title": "Other world entry",
    "count": 1,
-   "page": 16
+   "page": 16,
+   "page_id": "wd-guild",
+   "icon": "🌍"
   },
   {
    "template": "9",
    "title": "Map page",
    "count": 1,
-   "page": 17
+   "page": 17,
+   "page_id": "map",
+   "icon": "🗺"
   },
   {
    "template": "10",
    "title": "Story plan",
    "count": 1,
-   "page": 18
+   "page": 18,
+   "page_id": "plan",
+   "icon": "📈"
   },
   {
    "template": "11",
    "title": "Chapter page",
    "count": 3,
-   "page": 19
+   "page": 19,
+   "page_id": "cp-01",
+   "icon": "📖"
   },
   {
    "template": "12",
    "title": "Rules & facts",
    "count": 1,
-   "page": 22
+   "page": 22,
+   "page_id": "rules",
+   "icon": "🔒"
   }
  ],
  "todo": [
   {
-   "what": "✎ Height, build and handedness proposed for Odile Marsh",
+   "what": "Odile Marsh: 6 proposals to approve",
    "page_id": "ch-odile",
-   "action": "approve"
+   "action": "approve",
+   "page": 5,
+   "kind": "proposals"
   },
   {
    "what": "🎨 Maren Vey has no portrait yet",
    "page_id": "ch-maren",
-   "action": "picture"
+   "action": "picture",
+   "page": 9,
+   "kind": "picture"
   },
   {
    "what": "⚠ Ferry crossing time disagrees (Ch 2 vs Rules & facts)",
    "page_id": "rules",
-   "action": "fix"
+   "action": "fix",
+   "page": 22,
+   "kind": "check"
   }
- ]
+ ],
+ "counts": {
+  "pages": 22,
+  "approved": 5,
+  "missing_pictures": 7,
+  "new_fields": {
+   "values": 31,
+   "proposed": 24
+  }
+ },
+ "fields_info": {
+  "book": {
+   "series": {
+    "type": "text",
+    "max": 200,
+    "label": "Series name",
+    "hint": "the series this book belongs to (optional)",
+    "new": true
+   },
+   "series_number": {
+    "type": "int",
+    "min": 1,
+    "max": 999,
+    "label": "Book number in the series",
+    "hint": "1 for the first book",
+    "new": true
+   },
+   "subgenre": {
+    "type": "text",
+    "max": 120,
+    "label": "Sub-genre",
+    "hint": "e.g. cosy mystery, space opera",
+    "new": true
+   },
+   "content_limits": {
+    "type": "text",
+    "max": 1000,
+    "label": "Content limits",
+    "hint": "what the book will not show",
+    "new": true
+   },
+   "themes": {
+    "type": "list",
+    "max_items": 3,
+    "max": 120,
+    "label": "Themes",
+    "hint": "up to three",
+    "new": true
+   },
+   "central_question": {
+    "type": "text",
+    "max": 300,
+    "label": "Central question",
+    "hint": "the question the whole book asks",
+    "new": true
+   }
+  },
+  "character": {
+   "age": {
+    "type": "text",
+    "max": 60,
+    "label": "Age",
+    "hint": "",
+    "new": false
+   },
+   "birth": {
+    "type": "text",
+    "max": 80,
+    "label": "Birth date / year",
+    "hint": "",
+    "new": false
+   },
+   "pronouns": {
+    "type": "text",
+    "max": 40,
+    "label": "Pronouns",
+    "hint": "",
+    "new": false
+   },
+   "species": {
+    "type": "text",
+    "max": 80,
+    "label": "Species / people",
+    "hint": "",
+    "new": false
+   },
+   "height": {
+    "type": "text",
+    "max": 60,
+    "label": "Height",
+    "hint": "metric and imperial, e.g. 1.68 m (5 ft 6 in)",
+    "new": true
+   },
+   "weight": {
+    "type": "text",
+    "max": 60,
+    "label": "Weight",
+    "hint": "e.g. 61 kg (134 lb)",
+    "new": true
+   },
+   "build": {
+    "type": "text",
+    "max": 120,
+    "label": "Build / body type",
+    "hint": "",
+    "new": true
+   },
+   "eyes": {
+    "type": "text",
+    "max": 120,
+    "label": "Eye colour",
+    "hint": "",
+    "new": false
+   },
+   "hair": {
+    "type": "text",
+    "max": 120,
+    "label": "Hair (colour / style)",
+    "hint": "",
+    "new": false
+   },
+   "skin": {
+    "type": "text",
+    "max": 120,
+    "label": "Skin / colouring",
+    "hint": "",
+    "new": false
+   },
+   "marks": {
+    "type": "text",
+    "max": 300,
+    "label": "Distinguishing marks",
+    "hint": "",
+    "new": false
+   },
+   "occupation": {
+    "type": "text",
+    "max": 120,
+    "label": "Occupation / job",
+    "hint": "",
+    "new": false
+   },
+   "home": {
+    "type": "text",
+    "max": 120,
+    "label": "Home",
+    "hint": "",
+    "new": false
+   },
+   "family_status": {
+    "type": "text",
+    "max": 200,
+    "label": "Family status",
+    "hint": "single, married, widowed, two children…",
+    "new": true
+   },
+   "era": {
+    "type": "text",
+    "max": 120,
+    "label": "Era / when they live",
+    "hint": "",
+    "new": false
+   },
+   "handedness": {
+    "type": "text",
+    "max": 40,
+    "label": "Handedness",
+    "hint": "right, left or both",
+    "new": true
+   },
+   "stat_strength": {
+    "type": "int",
+    "min": 1,
+    "max": 10,
+    "label": "Strength",
+    "hint": "1-10",
+    "new": true
+   },
+   "stat_speed": {
+    "type": "int",
+    "min": 1,
+    "max": 10,
+    "label": "Speed",
+    "hint": "1-10",
+    "new": true
+   },
+   "stat_agility": {
+    "type": "int",
+    "min": 1,
+    "max": 10,
+    "label": "Agility",
+    "hint": "1-10",
+    "new": true
+   },
+   "stat_stamina": {
+    "type": "int",
+    "min": 1,
+    "max": 10,
+    "label": "Stamina",
+    "hint": "1-10",
+    "new": true
+   },
+   "stat_durability": {
+    "type": "int",
+    "min": 1,
+    "max": 10,
+    "label": "Durability",
+    "hint": "1-10",
+    "new": true
+   }
+  },
+  "relationship": {
+   "type": {
+    "type": "choice",
+    "choices": [
+     "family",
+     "love",
+     "ally",
+     "rival",
+     "enemy",
+     "mentor",
+     "other"
+    ],
+    "label": "Relationship type",
+    "new": true,
+    "hint": "family, love, ally, rival, enemy, mentor, other"
+   }
+  },
+  "place": {
+   "danger_level": {
+    "type": "int",
+    "min": 1,
+    "max": 5,
+    "label": "Danger level",
+    "hint": "1 (safe) to 5 (deadly)",
+    "new": true
+   }
+  },
+  "group": {
+   "symbol_colours": {
+    "type": "text",
+    "max": 300,
+    "label": "Symbol / colours",
+    "hint": "the emblem and the colours members wear",
+    "new": true
+   }
+  },
+  "chapter": {
+   "time_since_previous": {
+    "type": "text",
+    "max": 120,
+    "label": "Time since the previous chapter",
+    "hint": "e.g. two days later",
+    "new": true
+   }
+  }
+ }
 }

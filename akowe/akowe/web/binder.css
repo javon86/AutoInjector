@@ -365,6 +365,31 @@ a.bnd-chip { text-decoration: underline; text-decoration-thickness: 1px; text-un
 .bnd-pics > .bnd-pic:first-child[data-shape="wide"]:not(.bnd-pics-3 > *) .bnd-pic-ph { aspect-ratio: 3 / 1; }
 .bnd-pics > .bnd-pic:first-child[data-shape="wide"]:not(.bnd-pics-3 > *) img { aspect-ratio: 21 / 9; }
 
+.bnd-pic-more { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.bnd-pic-th { width: 54px; height: 54px; border-radius: 6px; overflow: hidden; background: var(--bnd-card-2); border: 1px solid var(--bnd-line); }
+.bnd-pic-th img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.bnd-play { margin-top: 6px; font: inherit; font-size: 13px; font-weight: 600; border-radius: 8px; border: 1px solid var(--bnd-line); background: var(--bnd-card); color: var(--bnd-link); padding: 6px 12px; cursor: pointer; }
+.bnd-video { display: block; width: 100%; margin-top: 6px; border-radius: 9px; }
+/* 🆕 fields: the inline editor */
+.bnd-fedit { font: inherit; font-size: 11px; line-height: 1; border: 1px solid var(--bnd-line); background: var(--bnd-card); color: var(--bnd-link); border-radius: 6px; padding: 3px 6px; cursor: pointer; min-height: 0; }
+.bnd-fedit:hover { background: var(--bnd-card-2); }
+.bnd-linkbtn { font: inherit; font-style: normal; font-weight: 600; color: var(--bnd-link); background: none; border: 0; border-bottom: 1px dotted currentColor; padding: 0; cursor: pointer; min-height: 0; }
+.bnd-editor { grid-column: 1 / -1; margin-top: 8px; padding: 12px 14px; border: 2px solid var(--bnd-accent); border-radius: 10px; background: var(--bnd-card); color: var(--bnd-ink); font-style: normal; text-align: left; text-transform: none; letter-spacing: normal; font-family: var(--font, system-ui, sans-serif); }
+.bnd-ed-row { display: grid; gap: 4px; margin-bottom: 10px; }
+.bnd-ed-row label { font-weight: 700; font-size: 12px; }
+.bnd-ed-row input, .bnd-ed-row textarea { font: inherit; font-size: 14px; padding: 7px 9px; border: 1px solid var(--bnd-line); border-radius: 7px; background: #fff; color: #1b1d22; width: 100%; box-sizing: border-box; }
+.bnd-ed-row small { color: var(--bnd-muted); font-size: 11.5px; }
+.bnd-ed-btns { display: flex; flex-wrap: wrap; gap: 6px; }
+.bnd-ed-btns button { font: inherit; font-size: 13px; font-weight: 600; border-radius: 8px; border: 1px solid #c9cdc4; background: #fff; color: #22463d; padding: 6px 12px; cursor: pointer; }
+.bnd-ed-btns button.primary { background: #173c38; border-color: #173c38; color: #fff; }
+.bnd-ed-msg:empty { display: none; }
+.bnd-ed-msg, .bnd-err-inline { color: var(--bnd-needs); background: var(--bnd-needs-bg); border-radius: 6px; padding: 5px 9px; font-size: 13px; margin: 0 0 8px; }
+.bnd-unavail { font-style: normal; opacity: .85; }
+.bnd-pagetools { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-start; margin: 6px 0 0; }
+.bnd-pagetools button { font: inherit; font-size: 12.5px; font-weight: 600; border-radius: 8px; border: 1px solid var(--bnd-line); background: var(--bnd-card); color: var(--bnd-link); padding: 6px 11px; cursor: pointer; }
+.bnd-pagetools button:hover { background: var(--bnd-card-2); }
+.bnd-progress-line { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; background: #fff; color: #1b1d22; border-radius: 10px; padding: 10px 14px; margin: 0 0 12px; border-left: 4px solid #5b3cb4; }
+.bnd-progress-line progress { flex: 1 1 160px; }
 /* header band (portrait + name + facts) */
 .bnd-sec-band { padding-top: 22px; }
 .bnd-sec-band > .bnd-sec-h { margin-bottom: 18px; }
@@ -752,3 +777,6 @@ a.bnd-pin:hover .bnd-pin-n, a.bnd-pin:focus-visible .bnd-pin-n { background: var
   .bnd[data-look="horror"] .bnd-title, .bnd[data-look="horror"] .bnd-name { text-shadow: none; }
   .bnd[data-look="playful"] .bnd-sec, .bnd[data-look="playful"] .bnd-plaque { box-shadow: none !important; }
 }
+/* the cover's artwork box is a plain block in every look (no card frame around the picture) */
+.bnd .bnd-sec.bnd-sec-plain { background: none; border: 0; box-shadow: none; padding: 0; }
+.bnd[data-look="playful"] .bnd-sec.bnd-sec-plain > .bnd-sec-h { border-bottom: 0; }
