@@ -115,6 +115,8 @@ def build(app, pid: str, branch: str = "main") -> dict:
             e = sheets.get(h["record_id"]) or {}
             item["sheet"] = copy.deepcopy(e.get("sheet")) if e.get("sheet") else None
             item["voice"] = copy.deepcopy(e.get("voice")) if e.get("voice") else None
+            if e.get("story_role"):  # ★ the character's story role (by="author" when the bible is reused)
+                item["story_role"] = e["story_role"]
             characters.append(item)
         else:
             try:
@@ -181,6 +183,9 @@ def _canon_item(raw, idx: int, *, character: bool) -> dict:
     if character:
         out["sheet"] = chars_mod.clean_sheet(raw["sheet"]) if isinstance(raw.get("sheet"), dict) else None
         out["voice"] = chars_mod.clean_voice(raw["voice"]) if isinstance(raw.get("voice"), dict) else None
+        if isinstance(raw.get("story_role"), str) and raw["story_role"].strip():
+            from . import story_roles  # noqa: PLC0415
+            out["story_role"] = story_roles.normalize(raw["story_role"])
     else:
         out["kind"] = str(raw.get("kind") or op)[:80]
     return out

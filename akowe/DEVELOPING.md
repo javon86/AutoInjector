@@ -43,6 +43,16 @@ akowe/
     characters.py          🎭 P7/P17 character sheets + voice cards: fields, cleaning, companion storage (settings
                            characters:<pid>:<branch>, keyed by A01 record), AI generation, bounded voice brief,
                            voice words for the pattern checker
+    story_roles.py         ★ story roles: every character has a title (protagonist, deuteragonist, antagonist, mentor,
+                           henchman, extra… — label, meaning, icon, group); the tag lives in the character's companion
+                           entry (story_role/_by/_at, keyed by A01 record ID); cast() = everyone's role with exactly one
+                           protagonist (author > one tag > idea-named > main mark > most POV > first created);
+                           enforce() stores it; back compat old main/side; set_role() moves the ★
+    names.py               the ONE shared name matcher (normalize: casefold, accents incl. Yoruba marks, possessives,
+                           titles; score/match: exact > initials > part > close spelling, clear winner only, never a
+                           place) used wherever the pipeline links a name to a character
+    protagonist.py         the main character guard: missing() (idea / main mark / refused POV), check() + in_outline()
+                           (approved canon, in the outline as POV or named), make_for_book()
     scenes.py              🎬 P8 scene cards: fields, lint, light AI check, ScenePlanner (make/check/revise/save/approve),
                            companion storage (settings scene_cards:<pid>:<branch>, keyed <outline rid>:<chapter id>)
     chapter_brief.py       the C02 writing brief: POV name + planned backstory, voice cards of the characters present,

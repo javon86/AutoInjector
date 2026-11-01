@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import threading
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -79,6 +80,9 @@ EXPORT_FOR = {"MANUSCRIPT_PDF": ("G11", "PDF", "application/pdf"),
 
 def _now():
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+log = logging.getLogger("akowe.book_path")
 
 
 def _err(code, path, message):
@@ -259,6 +263,25 @@ class BookPath:
         """Unapproved drafts waiting for the author (drafts set aside or out of date are not waiting)."""
         return [r for r in self.heads(op) if r["lifecycle"] in ("DRAFT", "VALIDATED") and not r.get("approved_version")
                 and not r.get("stale")]
+
+    def _roles_brief(self) -> dict:
+        """★ The guided path's role chips: every character's story role, who the main character is, and whether one
+        is set (a stored tag) — a ⚠️ when not. Never raises."""
+        try:
+            from . import story_roles  # noqa: PLC0415
+            k = story_roles.cast(self.store, self.pid, self.branch)
+            if not k["characters"]:
+                return {}
+            tagged = story_roles.tagged_protagonist(self.store, self.pid, self.branch)
+            prot = next((c for c in k["characters"] if c["record_id"] == k["protagonist"]), None)
+            return {"cast": [{x: c[x] for x in ("record_id", "name", "story_role", "label", "icon", "title",
+                                                "proposed", "approved")} for c in k["characters"]][:24],
+                    "protagonist": {"record_id": prot["record_id"], "name": prot["name"], "reason": k["reason"],
+                                    "set": tagged == prot["record_id"]} if prot else None,
+                    "no_protagonist": tagged is None}
+        except Exception:  # noqa: BLE001 - chips must never break the checklist
+            log.exception("could not list the story roles")
+            return {}
 
     def set_aside(self, rec, reason: str):
         """Take an unapproved draft out of the approval queue (marked out of date, kept in its history), e.g. an AI
@@ -468,7 +491,7 @@ class BookPath:
              "and world you want to use too. More canon can come any time.",
              "done" if a01 else ("needs_you" if d01 else ("ai_can" if ai else "needs_you")),
              op="A01", action="make" if ai else "new", approve=[item(r) for r in d01][:12],
-             count=len(a01), sheets=sheets)
+             count=len(a01), sheets=sheets, **self._roles_brief())
         # planning
         prev_ok = True
         for sid, op, title, about, need in (
@@ -626,7 +649,7 @@ class BookPath:
     def act(self, action: str, body: dict) -> dict:
         fn = {"create": self.a_create, "write_chapter": self.a_write_chapter, "approve": self.a_approve,
               "setup_format": self.a_setup_format, "assemble": self.a_assemble, "export": self.a_export,
-              "check": self.a_check}.get(action)
+              "check": self.a_check, "set_role": self.a_set_role}.get(action)
         if fn is None:
             raise _err("NOT_FOUND", "/action", "unknown step action")
         try:
@@ -635,6 +658,20 @@ class BookPath:
             out = {"ok": False, "message": exc.message, "problems": exc.problems, "code": exc.code}
         out["book"] = BookPath(self.engine, self.principal, self.pid, self.branch).status()
         return out
+
+    def a_set_role(self, body: dict) -> dict:
+        """★ "Make this the main character" (or any story role) on the guided path's role chips."""
+        from . import characters as chars_mod, story_roles  # noqa: PLC0415
+        rid, role = body.get("record_id"), body.get("story_role") or story_roles.PROTAGONIST
+        if role not in story_roles.KEYS:
+            raise _err("INVALID_INPUT", "/story_role", "story_role: one of " + ", ".join(story_roles.KEYS))
+        head = self.rec(rid) if isinstance(rid, str) else None
+        if head is None or head["module_id"] != "A01":
+            raise _err("NOT_FOUND", "/record_id", "this character does not exist in this book")
+        name, subject = chars_mod._name_and_subject(head)  # noqa: SLF001
+        out = story_roles.set_role(self.store, self.pid, self.branch, rid, role, by="author", name=name,
+                                   subject_id=subject)
+        return {"ok": True, "story_role": out["story_role"], "message": f"“{name}” is now: {story_roles.title(role)}."}
 
     def _manual(self, op, payload, why):
         return {"ok": False, "needs_manual": True, "op": op, "payload": payload, "message": why}

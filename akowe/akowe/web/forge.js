@@ -161,6 +161,7 @@ export async function viewForgeList(main, x, seg = 'characters') {
       h('div', { class: 'forge-tile-body' },
         h('div', { class: 'forge-code' }, `${c.code} · REV ${c.revision || 0} · `, h('span', { class: `forge-ready ${c.readiness}` }, c.readiness === 'ready' ? 'READY' : 'DRAFT')),
         h('div', { class: 'forge-tile-name' }, c.name),
+        c.story_role ? h('div', { class: `forge-tile-role role-${c.story_role.story_role}`, 'data-testid': 'forge-role', title: c.story_role.meaning || '' }, `${c.story_role.icon} ${c.story_role.label}${c.story_role.proposed ? ' (proposed)' : ''}`) : null,
         c.tagline ? h('div', { class: 'forge-tile-tag' }, c.tagline) : null,
         h('div', { class: 'forge-meter', role: 'img', 'aria-label': `${c.filled} of ${c.total} fields filled` }, h('span', { style: `width:${pct}%` })),
         h('div', { class: 'forge-tile-stats' }, `${c.filled}/${c.total} fields`, c.proposed ? ` · ${c.proposed} proposed` : '', ` · ${c.views_done}/10 views`, c.has_portrait ? ' · portrait' : '', c.has_clip ? ' · 🎬 clip' : ''))));
@@ -407,6 +408,8 @@ export async function viewForge(main, rid, x, seg = 'characters') {
     const cover = h('div', { class: 'forge-cover' },
       h('div', { class: 'forge-code', 'data-testid': 'forge-code' }, `${d.code} · REV ${d.revision} · `, h('span', { class: `forge-ready ${d.readiness}`, 'data-testid': 'forge-readiness' }, ready ? 'READY' : 'DRAFT')),
       h('h1', { class: 'forge-name' }, d.name),
+      isChar && d.story_role ? h('p', { class: `forge-role role-${d.story_role.story_role}`, 'data-testid': 'forge-role', title: d.story_role.meaning || '' },
+        `${d.story_role.icon} ${d.story_role.label}${d.story_role.proposed ? ' (proposed — confirm it on the character page)' : ''}`) : null,
       h('p', { class: 'forge-tagline' }, sub),
       !isChar && (d.aliases || []).length ? h('p', { class: 'forge-aliases' }, 'Also: ', d.aliases.join(' · ')) : null,
       (d.summary || []).length ? h('ul', { class: 'forge-summary' }, d.summary.map(s => h('li', null, s))) : h('p', { class: 'forge-summary muted' }, 'No cover lines yet — ✨ Invent the rest writes them, or ✎ edit the cover.'),

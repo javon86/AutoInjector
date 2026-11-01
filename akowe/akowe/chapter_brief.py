@@ -140,6 +140,9 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str) -
             chars_mod.canon_characters(store, pid, branch)
         pov_id = fv.get("plan.pov_id")
         pov = next((c for c in cs if pov_id and pov_id in (c["subject_id"], c["record_id"])), None)
+        if pov is None and isinstance(pov_id, str) and pov_id:
+            from . import story_roles  # noqa: PLC0415
+            pov = story_roles.find(cs, pov_id)  # a misspelt / name-like POV ("odille-marsh", "O. Marsh")
         entry = scenes_mod.get_entry(store, pid, branch, outline["record_id"], chapter_id)
         cards = scenes_mod.brief_cards(entry) if scenes_mod.usable(entry, outline) and flags["scenes"] else []
         names = [n for c in cards for n in (c.get("characters") or [])] + \

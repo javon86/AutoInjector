@@ -122,9 +122,13 @@ def voice_for(name):
     return copy.deepcopy(v)
 
 
-def sheet_for(name, others=()):
+# ★ the story role the fake gives each character (anyone else: supporting); Mara Vell is the protagonist
+STORY_ROLES = {"Mara Vell": "protagonist", "Tom Reed": "mentor", "Nessa Crane": "ally", "Ilse Marrow": "antagonist"}
+
+
+def sheet_for(name, others=(), story_role=None):
     side = name not in ("Mara Vell",)
-    return {"role": "side" if side else "main", "wants": f"{name} wants the light kept on their own terms",
+    out = {"role": "side" if side else "main", "wants": f"{name} wants the light kept on their own terms",
             "needs": f"{name} needs to admit what happened", "fear": f"{name} fears the harbour board",
             "secret": f"{name} kept the stranger's letter", "false_belief": f"{name} believes the sea forgives",
             "stress": "lies, then bargains", "never_say": "I was afraid", "private_memory": "a burned logbook page",
@@ -133,6 +137,11 @@ def sheet_for(name, others=()):
             "change_limits": "can learn to ask for help; will never leave the coast",
             "own_wish": f"{name} wants a boat of their own" if side else "",
             "must_show": [] if side else ["Her master taught her to read the tide-tables by candlelight"]}
+    if story_role is False:  # False: an AI that gives no role at all (neither story_role nor main/side)
+        out.pop("role")
+    else:
+        out["story_role"] = story_role or STORY_ROLES.get(name, "supporting")
+    return out
 
 
 class BookFakeAI:
@@ -172,6 +181,9 @@ class BookFakeAI:
         # home place no pinned A04 declares (VALIDATE refuses it); "schema": a fact missing its fields (the proposal
         # does not fit the form)).
         self.canon_breaks: dict[str, list] = {}
+        self.no_roles = False                    # ★ an AI that gives no story_role anywhere (sketch, sheets)
+        self.role_override: dict[str, str] = {}  # ★ name -> the story_role the fake gives instead (e.g. 2 protagonists)
+        self.pov_name = None                     # ★ B11: write this (e.g. a misspelt name) as every chapter's POV
 
     def fail_next(self, *excs):
         self.failures.extend(excs)
@@ -307,7 +319,7 @@ class BookFakeAI:
         if "character_sheet" in props and "concept" not in props:  # P7/P17 for an existing character
             name = (ctx.get("character") or {}).get("name") or "Someone"
             others = [o.get("name") for o in ctx.get("other_characters") or []]
-            return "sheet", {"character_sheet": sheet_for(name, others), "voice_card": voice_for(name)}
+            return "sheet", {"character_sheet": sheet_for(name, others, self._role(name)), "voice_card": voice_for(name)}
         if "verdict" in props:
             with self.lock:
                 v = self.verdicts.pop(0) if self.verdicts else self.default_verdict
@@ -332,8 +344,12 @@ class BookFakeAI:
                     names = NAMES.get(sec) or [f"{sec} item"]
                     name = names[i % len(names)] + ("" if i < len(names) else f" {i}")
                     links = [NAMES["A04"][0]] if sec == "A01" and "A04" in ctx.get("requested", {}) else []
-                    items.append({"section": sec, "name": name, "role": f"An important {sec} entry: {name}.",
-                                  "links": links})
+                    item = {"section": sec, "name": name, "role": f"An important {sec} entry: {name}.",
+                            "links": links}
+                    if not self.no_roles:
+                        item["story_role"] = (self._role(name) or STORY_ROLES.get(name, "supporting")) \
+                            if sec == "A01" else ""
+                    items.append(item)
             return "sketch", {"world_summary": "A fog-bound coast of lighthouses and fishing towns.", "items": items}
         if "concept" in props:  # Set A proposal (Bible Builder item)
             this = ctx.get("this_item") or {}
@@ -347,7 +363,7 @@ class BookFakeAI:
                 out["facts"] = [fact(sid, "entity.name", name)]
             if "character_sheet" in props and self.companion:
                 others = [i.get("name") for i in ctx.get("builder_items") or [] if i.get("section") == "A01"]
-                out["character_sheet"] = sheet_for(name, others)
+                out["character_sheet"] = sheet_for(name, others, self._role(name, this.get("story_role")))
                 out["voice_card"] = voice_for(name)
             with self.lock:
                 breaks = self.canon_breaks.get(name)
@@ -368,6 +384,8 @@ class BookFakeAI:
             n = ((req.get("target_length") or {}).get("value")) or 3
             n = max(1, min(int(n), self.max_chapters))
             pov, loc = self._canon_ids(ctx)
+            if self.pov_name:
+                pov = self.pov_name
             return "B11", {"chapters": [plan_item(f"ch{i + 1}", i, OBJECTIVES[i % 3], pov, loc) for i in range(n)],
                            "unresolved_threads": []}
         if "objective_assessments" in props:
@@ -626,6 +644,12 @@ class BookFakeAI:
             out.append({"id": it["id"], "on_page": bool(hit), "quote": (hit or "")[:200]})
         return {"items": out}
 
+    def _role(self, name, given=None):
+        """The story role this fake AI answers for a character (False = none at all)."""
+        if self.no_roles:
+            return False
+        return self.role_override.get(name) or given or None
+
     def _canon_ids(self, ctx):
         pov, loc = "mara-vell", "gullhaven-harbor"
         for rec in (ctx.get("resolved_inputs") or {}).values():
@@ -635,6 +659,9 @@ class BookFakeAI:
                         pov = f["subject_id"]
                     if rec.get("module_id") == "A04":
                         loc = f["subject_id"]
+        mc = ctx.get("main_character") or {}
+        if mc.get("pov_id"):  # ★ the outline follows the book's main character (as a real AI is told to)
+            pov = mc["pov_id"]
         return pov, loc
 
     @staticmethod

@@ -195,10 +195,13 @@ def _slug_tokens(v) -> list[str]:
 def resolve_entity_ids(data, canon: list[dict], governed: dict) -> list[str]:
     """Web AIs sometimes write a name-like ID ("odile-marsh") instead of the canon ID they were given. Map such a
     value to the ONE pinned canon record of the governing module whose name or declared ID matches it (same words,
-    or the value's words are a part of the name, e.g. "odile" -> "Odile Marsh"); leave it alone when nothing or more
-    than one record matches, so the canon check still refuses it. Changes ``data`` in place; returns notes."""
+    or the value's words are a part of the name, e.g. "odile" -> "Odile Marsh"; for a character also a misspelt or
+    accented name, a title or initials: "odille-marsh", "Captain Odíle Marsh", "O. Marsh" — ``names.match``); leave it
+    alone when nothing or more than one record matches, so the canon check still refuses it. Changes ``data`` in place; returns notes."""
+    from . import names  # noqa: PLC0415
     notes = []
     by_module: dict = {}
+    people: dict = {}  # module -> [(subject, [name and IDs as words])] for the shared name matcher
     for r in canon:
         try:
             name = next((f["value"] for _, f in iter_facts(r.get("data"))
@@ -210,6 +213,7 @@ def resolve_entity_ids(data, canon: list[dict], governed: dict) -> list[str]:
                         if f.get("predicate") == "entity.name"), None) or r["record_id"]
         keys = [_slug_tokens(name)] + [_slug_tokens(i) for i in ids]
         by_module.setdefault(r["module_id"], []).append((subject, ids, [k for k in keys if k]))
+        people.setdefault(r["module_id"], []).append((subject, [name] + [" ".join(_slug_tokens(i)) for i in ids]))
     for ptr, f in iter_facts(data):
         modules = governed.get(f.get("predicate"))
         if not modules:
@@ -224,6 +228,12 @@ def resolve_entity_ids(data, canon: list[dict], governed: dict) -> list[str]:
             if not vt:
                 return v
             hits = {c[0] for c in cands for k in c[2] if vt == k or (set(vt) <= set(k) and len(vt) < len(k))}
+            if len(hits) != 1 and "A01" in modules:
+                # a person: the shared name matcher (spelling, accents, titles, initials), the ONE clear match only;
+                # never a name of a place or group of the canon
+                others = [n for m, rows in people.items() if m != "A01" for _s, ns in rows for n in ns[:1]]
+                key = names.match(v, people.get("A01", []), exclude=others)
+                hits = {key} if key else hits
             if len(hits) == 1:
                 new = hits.pop()
                 notes.append(f"{ptr}: {f['predicate']} '{v}' -> '{new}'")

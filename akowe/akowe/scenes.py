@@ -198,9 +198,10 @@ def lint(cards: list[dict], known_names: list[str] | None = None) -> list[dict]:
     known = [n.lower() for n in known_names or []]
 
     def is_known(name):
+        from .names import same_person  # noqa: PLC0415 - spelling, accents, titles, initials
         low = name.lower()
         return not known or any(low == k or low in k.split() or k in low or any(
-            p == low for p in k.split()) for k in known)
+            p == low for p in k.split()) or same_person(name, k) for k in known)
     out = []
     for i, c in enumerate(cards):
         n = i + 1
@@ -432,6 +433,9 @@ class ScenePlanner:
         cs = chars_mod.canon_characters(self.store, pid, branch)
         entries = chars_mod.all_entries(self.store, pid, branch)
         pov = next((c for c in cs if plan["pov_id"] in (c["subject_id"], c["record_id"])), None)
+        if pov is None and isinstance(plan.get("pov_id"), str):
+            from . import story_roles  # noqa: PLC0415
+            pov = story_roles.find(cs, plan["pov_id"])  # a misspelt / name-like POV
         words = sum(len(str(x or "").split()) for x in (plan["objective"], plan["summary"]))
         chapter = {k: plan[k] for k in ("chapter_id", "number", "of", "objective", "summary", "previous", "next")}
         chapter.update(pov=pov["name"] if pov else None, place_id=plan["location_id"],

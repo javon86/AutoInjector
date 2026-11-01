@@ -246,7 +246,8 @@ def test_every_template_renders_with_its_section_headings(make_context, bd):
     assert seen == set(sch)
     # the designed parts of the studio are there
     odile = page.locator('.bnd-page[data-page-id="ch-odile"]')
-    assert odile.locator(".bnd-facts .bnd-fact").count() == 16                  # 📋 quick stats fact sheet
+    assert odile.locator(".bnd-facts .bnd-fact[data-fid]").count() == 16        # 📋 quick stats fact sheet
+    assert odile.locator(".bnd-facts .bnd-fact-role").count() == 1             # + the story role row
     assert odile.locator(".bnd-bar").count() == 5                               # stat bars 1–10
     assert odile.locator('.bnd-bar[data-fid="5.9.9"] .bnd-bar-track i.on').count() == 9
     assert odile.locator(".bnd-rel").count() == 4                               # relationship rows
@@ -589,3 +590,185 @@ def test_fill_from_the_book_then_approve_the_proposals(make_context, bd):
     page.wait_for_function("() => document.querySelector('[data-testid=binder-fill]') && !document.querySelector('[data-testid=binder-fill]').disabled && document.querySelector('[data-testid=binder-msg] .bnd-ok-msg')")
     assert len(page.bf_calls.fills) == 2 and page.bf_calls.fills[-1] == {}
     assert_clean(page, "fill")
+
+
+# ------------------------------------------------------------------------------------------------ ★ the main character
+def test_the_main_character_is_marked_everywhere(make_context, bd):
+    page = open_binder(make_context, bd, page_id="cast")
+    cast = page.locator('.bnd-page[data-page-id="cast"]')
+    cards = cast.locator(".bnd-card")
+    assert cast.locator("[data-testid=protagonist-badge]").count() == 1                  # one protagonist only
+    first = cards.first
+    assert first.get_attribute("data-name") == "Odile Marsh" and "is-protagonist" in first.get_attribute("class")
+    assert "★" in first.locator("[data-testid=protagonist-badge]").inner_text() and "Main character" in first.inner_text()
+    silas = cast.locator('.bnd-card[data-name="Silas Crane"]')                           # the villain: no ★ badge
+    assert silas.locator("[data-testid=protagonist-badge]").count() == 0
+    w = lambda sel: page.evaluate("s => document.querySelector(s).getBoundingClientRect().width", sel)  # noqa: E731
+    assert w('.bnd-card[data-name="Odile Marsh"]') > w('.bnd-card[data-name="Silas Crane"]') * 1.3        # first, larger card
+    heads = [cast.locator(".bnd-group-h").nth(i).inner_text() for i in range(cast.locator(".bnd-group-h").count())]
+    assert [h.split(" (")[0].replace("4.1.1", "").strip() for h in heads] == ["★ Main character", "Villains", "Supporting", "Minor & extras"]
+    assert silas.locator(".bnd-role").text_content().strip() == "🗡️ Villain"                 # role title + icon
+    assert cast.locator('.bnd-card[data-name="Tobiah Reed"] .bnd-role').text_content().strip() == "🦉 Mentor"
+    shot(page, "binder-cast-protagonist")
+    # the character page: header band + 📋 Quick stats "Story role"
+    goto_page(page, "ch-odile")
+    odile = page.locator('.bnd-page[data-page-id="ch-odile"]')
+    assert odile.locator(".bnd-band [data-testid=protagonist-badge]").count() == 1
+    assert odile.locator("[data-testid=story-role] dt").inner_text().strip() == "Story role"
+    assert odile.locator("[data-testid=story-role] dd").inner_text().strip() == "★ Main character — protagonist"
+    for pid_, want in (("ch-silas", "🗡️ Villain"), ("ch-tobiah", "🦉 Mentor"), ("ch-wren", "🏠 Family"), ("ch-maren", "• Minor character")):
+        goto_page(page, pid_)
+        art = page.locator(f'.bnd-page[data-page-id="{pid_}"]')
+        assert art.locator("[data-testid=story-role] dd").inner_text().strip() == want, pid_
+        assert art.locator("[data-testid=protagonist-badge]").count() == 0
+    # At a glance (main-cast strip) and the Contents quick-jump tile
+    goto_page(page, "glance")
+    strip = page.locator('.bnd-page[data-page-id="glance"] .bnd-cast-strip')
+    assert strip.locator(".bnd-mini-card").first.locator("[data-testid=protagonist-badge]").count() == 1
+    assert strip.locator("[data-testid=protagonist-badge]").count() == 1 and "Odile Marsh" in strip.locator(".bnd-mini-card").first.inner_text()
+    goto_page(page, "contents")
+    tile = page.locator('.bnd-page[data-page-id="contents"] .bnd-tile.is-protagonist')
+    assert tile.count() == 1 and "Odile Marsh" in tile.inner_text() and tile.locator("[data-testid=protagonist-badge]").count() == 1
+    assert_clean(page, "protagonist")
+    # older data without book.protagonist: the relationship map's centre is the main character
+    doc = fixture_doc(bd.pid)
+    doc["book"].pop("protagonist")
+    for p in doc["pages"]:
+        for k in ("story_role", "is_protagonist", "role_label", "role_icon"):
+            p.pop(k, None)
+    p2 = open_binder(make_context, bd, page_id="ch-odile", doc=doc)
+    assert p2.locator('.bnd-page[data-page-id="ch-odile"] [data-testid=story-role] dd').inner_text().strip() == "★ Main character — protagonist"
+    assert_clean(p2, "protagonist fallback")
+
+
+def test_the_main_character_badge_in_every_look_and_print(make_context, bd):
+    page = open_binder(make_context, bd, page_id="ch-odile")
+    for look in LOOKS:
+        page.select_option("[data-testid=binder-look]", look)
+        page.wait_for_function(f"() => document.querySelector('[data-testid=binder]').dataset.look === '{look}'")
+        for media in ("screen", "print"):
+            page.emulate_media(media=media)
+            b = page.locator(".bnd-band [data-testid=protagonist-badge]")
+            assert b.is_visible(), f"{look} {media}"
+            ratio = page.evaluate(CONTRAST_JS.replace("const pairs = [", "const pairs = [['--bnd-accent-ink', '--bnd-accent'], "))["out"][0][1]
+            assert ratio >= 4.5, f"{look} {media}: badge contrast {ratio}"
+        page.emulate_media(media="screen")
+    assert_clean(page, "badge looks")
+
+
+# ------------------------------------------------------------------------------------------------ At a glance: progress
+def test_at_a_glance_has_the_progress_strip(make_context, bd):
+    page = open_binder(make_context, bd, page_id="glance")
+    bar = page.locator('.bnd-page[data-page-id="glance"] [data-testid=glance-progress]')
+    assert bar.count() == 1
+    text = bar.inner_text()
+    assert "62% approved" in text and "9 draft pages waiting" in text and "7 pictures missing" in text
+    assert bar.locator("[role=progressbar]").get_attribute("aria-valuenow") == "62"
+    assert page.evaluate("""() => { const b = document.querySelector('[data-testid=glance-progress]');
+        const s = document.querySelector('.bnd-page[data-page-id="glance"] .bnd-sec'); return b.getBoundingClientRect().top < s.getBoundingClientRect().top; }""")
+    width = page.evaluate("() => document.querySelector('[data-testid=glance-progress] [role=progressbar] > div').style.width")
+    assert width == "62%"
+    shot_dir("").mkdir(parents=True, exist_ok=True)
+    page.locator('.bnd-page[data-page-id="glance"]').screenshot(path=str(shot_dir("") / "binder-glance-progress.png"))
+    goto_page(page, "cover")                                                             # the cover keeps its own bar
+    assert page.locator('.bnd-page[data-page-id="cover"] .bnd-progress[role=progressbar]').get_attribute("aria-valuenow") == "62"
+    assert_clean(page, "glance progress")
+
+
+# ------------------------------------------------------------------------------------------------ 12.3 timeline strip
+@pytest.mark.parametrize("width", [390, 1280, 1920])
+def test_rules_timeline_is_a_horizontal_strip(make_context, bd, width):
+    doc = fixture_doc(bd.pid)
+    rows = next(p for p in doc["pages"] if p["page_id"] == "rules")["sections"]["12.3"]["rows"]
+    page = open_binder(make_context, bd, width=width, page_id="rules")
+    strip = page.locator('.bnd-page[data-page-id="rules"] [data-testid=timeline-strip]')
+    dots = strip.locator(".bnd-tls-dot")
+    assert dots.count() == len(rows) == 9
+    clashes = strip.locator(".bnd-tls-ev.is-clash")
+    assert clashes.count() == sum(1 for r in rows if r["12.3.4"]["value"]) == 2
+    rgb = page.evaluate("() => getComputedStyle(document.querySelector('.bnd-tls-ev.is-clash .bnd-tls-dot')).backgroundColor")
+    r, g, b = [int(x) for x in re.findall(r"\d+", rgb)[:3]]
+    assert r > g + 60 and r > b + 60, f"clash dot is red: {rgb}"
+    ok_rgb = page.evaluate("() => getComputedStyle(document.querySelector('.bnd-tls-ev:not(.is-clash) .bnd-tls-dot')).backgroundColor")
+    assert ok_rgb != rgb
+    assert "40 minutes" in clashes.first.locator(".bnd-tls-note").inner_text()            # the clash note
+    assert overflow(page) <= 0, f"rules at {width}px scrolls sideways by {overflow(page)}px"
+    # every dot sits on one line (per row): same centre y for the events of a row
+    ys = page.evaluate("() => [...document.querySelectorAll('.bnd-tls-dot')].map(d => { const r = d.getBoundingClientRect(); return Math.round(r.top + r.height / 2); })")
+    sw = page.evaluate("() => { const s = document.querySelector('[data-testid=timeline-strip]'); return [s.scrollWidth, s.clientWidth]; }")
+    if width == 390:
+        assert sw[0] <= sw[1] + 1, "wraps into rows on a phone"
+        assert len(set(ys)) == (len(rows) + 1) // 2                                         # 2 per row
+    else:
+        assert len(set(ys)) == 1, ys
+        if width == 1280:
+            assert sw[0] > sw[1], "a long timeline scrolls inside its own box"
+            assert page.evaluate("() => getComputedStyle(document.querySelector('[data-testid=timeline-strip]')).overflowX") == "auto"
+    # the same events stay readable as a list / table (screen readers, find in page)
+    assert strip.locator("ol > li").count() == len(rows)
+    lst = page.locator('.bnd-page[data-page-id="rules"] details.bnd-tls-list')
+    lst.locator("summary").click()
+    assert lst.locator("tbody tr").count() == len(rows)
+    page.emulate_media(media="print")                                                      # print: rows, not a scroller
+    sw = page.evaluate("() => { const s = document.querySelector('[data-testid=timeline-strip]'); return [s.scrollWidth, s.clientWidth]; }")
+    assert sw[0] <= sw[1] + 1 and not lst.is_visible()
+    page.emulate_media(media="screen")
+    shot(page, f"binder-rules-timeline-{width}")
+    shot_dir("").mkdir(parents=True, exist_ok=True)
+    page.locator('.bnd-page[data-page-id="rules"] .bnd-sec[data-sec="12.3"]').screenshot(path=str(shot_dir("") / f"binder-timeline-strip-{width}.png"))
+    assert_clean(page, f"timeline {width}")
+
+
+# ------------------------------------------------------------------------------------------------ the 7 looks differ
+LOOK_KEYS_JS = """() => {
+  const root = document.querySelector('[data-testid=binder]'); const page = document.querySelector('.bnd-page');
+  const cs = getComputedStyle(page); const rs = getComputedStyle(root);
+  const sec = getComputedStyle(document.querySelector('.bnd-page .bnd-sec:not(.bnd-sec-plain)'));
+  const h = getComputedStyle(document.querySelector('.bnd-page h2'));
+  return { paper: cs.backgroundColor, accent: rs.getPropertyValue('--bnd-accent').trim(), head: rs.getPropertyValue('--bnd-head').trim(),
+    desk: rs.getPropertyValue('--bnd-desk').trim(), card: sec.backgroundColor, radius: sec.borderTopLeftRadius,
+    font: h.fontFamily.split(',')[0].replace(/["']/g, '').trim(), body: cs.fontFamily.split(',')[0].replace(/["']/g, '').trim() };
+}"""
+
+
+def test_the_seven_looks_are_clearly_different(make_context, bd):
+    page = open_binder(make_context, bd, page_id="ch-odile")
+    got = {}
+    for look in LOOKS:
+        page.select_option("[data-testid=binder-look]", look)
+        page.wait_for_function(f"() => document.querySelector('[data-testid=binder]').dataset.look === '{look}'")
+        got[look] = page.evaluate(LOOK_KEYS_JS)
+    for i, a in enumerate(LOOKS):
+        for b in LOOKS[i + 1:]:
+            x, y = got[a], got[b]
+            assert x["paper"] != y["paper"], f"{a} and {b} share the page colour {x['paper']}"
+            assert x["accent"] != y["accent"], f"{a} and {b} share the accent {x['accent']}"
+            assert x["card"] != y["card"] or x["paper"] != y["paper"]
+            # each pair differs in at least 4 of: paper, accent, heading colour, desk, section radius, heading font, body font
+            diff = sum(x[k] != y[k] for k in ("paper", "accent", "head", "desk", "radius", "font", "body"))
+            assert diff >= 4, f"{a} vs {b} differ only in {diff}: {x} / {y}"
+    assert_clean(page, "looks differ")
+
+
+def test_looks_gallery(make_context, bd):
+    """Cover, character, cast, relationship map and rules in every look at 1280 (the screenshots go to $BF_UI_SHOTS/looks)."""
+    page = open_binder(make_context, bd, page_id="cover")
+    for look in LOOKS:
+        page.select_option("[data-testid=binder-look]", look)
+        page.wait_for_function(f"() => document.querySelector('[data-testid=binder]').dataset.look === '{look}'")
+        for pid_ in ("cover", "ch-odile", "cast", "relmap", "rules"):
+            page.evaluate("h => { location.hash = h; }", f"#/p/{bd.pid}/main/bible/{pid_}")
+            page.wait_for_selector(f'.bnd-page[data-page-id="{pid_}"]', timeout=10000)
+            images_ready(page)
+            el = page.locator(f'.bnd-page[data-page-id="{pid_}"]')
+            box = el.bounding_box()
+            (SHOTS_DIR := shot_dir("looks")).mkdir(parents=True, exist_ok=True)
+            page.screenshot(path=str(SHOTS_DIR / f"{look}-{pid_}.png"), full_page=True,
+                            clip={"x": box["x"], "y": box["y"], "width": box["width"], "height": min(box["height"], 1500)})
+            assert overflow(page) <= 0
+    assert_clean(page, "gallery")
+
+
+def shot_dir(name):
+    from .ui_helpers import SHOTS
+    return SHOTS / name

@@ -2,10 +2,12 @@
 
 ``build(app, pid, branch)`` collects, read-only, from the book and returns the contract of the binder lane's PLAN.md:
 
-    {schema_version, book: {title, author, genre, look, look_default, look_stored, looks}, generated_at, updated_at,
+    {schema_version, book: {title, author, genre, look, look_default, look_stored, looks,
+                            protagonist: {record_id, name, page_id, why} | null}, generated_at, updated_at,
+     progress: {approved_percent, approved, pages, drafts_waiting, missing_pictures},
      pages: [{template, entry_id, title, page_id, page, status: approved|draft|needs_you, target?,
               sections: {<code>: {fields: {<id>: field}, rows?: [{<id>: field, _meta?}]}}, pics: {<id>: pic},
-              graph? (6) | map? (9)}],
+              graph? (6) | map? (9), story_role? (story_roles key) + role_label, role_icon, is_protagonist (5)}],
      contents: [{template, title, count, page, page_id}], todo: [{what, page_id, action}], counts}
 
 A field is ``{value, status: approved|proposed|supplied|empty|auto, source, edit?, draft?, new?}``; a picture
@@ -45,6 +47,7 @@ from pathlib import Path
 
 from . import binder_fields as bf
 from . import characters as chars_mod
+from . import story_roles as story_roles_mod
 from .errors import AkoweError
 
 log = logging.getLogger("akowe.binder")
@@ -774,15 +777,17 @@ class Book:
     def char_by_id(self, ident) -> dict | None:
         if not ident:
             return None
-        ident = str(ident).lower()
-        return next((c for c in self.chars if ident in (c["record_id"].lower(), c["subject_id"].lower(),
-                                                        c["name"].lower())), None)
+        low = str(ident).lower()
+        return next((c for c in self.chars if low in (c["record_id"].lower(), c["subject_id"].lower(),
+                                                      c["name"].lower())), None) or \
+            story_roles_mod.find(self.chars, ident)  # a misspelt / name-like POV ID ("odille-marsh")
 
     def char_by_name(self, name: str) -> dict | None:
         n = (name or "").split("/")[0].strip().lower()
         if not n:
             return None
         return next((c for c in self.chars if c["name"].lower() == n), None) or \
+            story_roles_mod.find(self.chars, n) or \
             next((c for c in self.chars if n in c["name"].lower() or c["name"].lower() in n), None)
 
     def place_by_id(self, ident) -> dict | None:
@@ -801,20 +806,52 @@ class Book:
                 out[c["record_id"]] = out.get(c["record_id"], 0) + 1
         return out
 
+    @cached_property
+    def cast(self) -> dict:
+        """★ Everyone's story role, exactly one protagonist (story_roles.cast: the stored tags by record ID)."""
+        k = story_roles_mod.cast(self.store, self.pid, self.branch, chars=self.chars, entries=self.sheets)
+        return dict(k, by_id={c["record_id"]: c for c in k["characters"]})
+
+    def story_role(self, c: dict) -> str:
+        """The character's story role key (protagonist, antagonist, mentor, extra… — story_roles.KEYS)."""
+        r = self.cast["by_id"].get((c or {}).get("record_id"))
+        return r["story_role"] if r else story_roles_mod.DEFAULT
+
+    def role_group(self, c: dict) -> str:
+        """main | leads | villains | supporting | minor (story_roles.GROUPS)."""
+        return story_roles_mod.group_of(self.story_role(c))
+
     def role_of(self, c: dict) -> str:
-        """main | side | minor (the character sheet's role; a POV character is main)."""
-        r = ((self.sheets.get(c["record_id"]) or {}).get("sheet") or {}).get("role")
-        if r in ("main", "side"):
-            return r
-        return "main" if self.pov_counts.get(c["record_id"]) else "minor"
+        """main | side | minor, from the story role: the protagonist and the leads are main, minor characters and
+        extras are minor, everyone else is side."""
+        g = self.role_group(c)
+        return "main" if g in ("main", "leads") else "minor" if g == "minor" else "side"
 
     @cached_property
     def protagonist(self) -> dict | None:
+        """★ The book's main character: the stored tag (record ID) first, so a renamed character stays the centre."""
         if not self.chars:
             return None
-        ranked = sorted(self.chars, key=lambda c: (-self.pov_counts.get(c["record_id"], 0),
-                                                   {"main": 0, "side": 1, "minor": 2}[self.role_of(c)]))
-        return ranked[0]
+        rid = self.cast.get("protagonist")
+        return next((c for c in self.chars if c["record_id"] == rid), None) or self.chars[0]
+
+    def is_protagonist(self, c: dict | None) -> bool:
+        return bool(c and self.protagonist and c["record_id"] == self.protagonist["record_id"])
+
+    def role_fields(self, c: dict) -> dict:
+        """The per-character role fields every view renders from: {role_label, role_icon, is_protagonist}, from the
+        stored story role (story_roles)."""
+        k = self.story_role(c)
+        prot = self.is_protagonist(c)
+        return {"role_label": "Main character — protagonist" if prot else story_roles_mod.label(k),
+                "role_icon": story_roles_mod.icon(k), "is_protagonist": prot}
+
+    def protagonist_info(self) -> dict | None:
+        c = self.protagonist
+        if not c:
+            return None
+        return {"record_id": c["record_id"], "name": c["name"], "page_id": f"character-{slug(c['record_id'])}",
+                "why": self.cast.get("reason") or ""}
 
 
 # ====================================================================== pages
@@ -1068,8 +1105,10 @@ def a_name_aliases(page: Page):
 
 
 def a_sheet_role(page: Page):
-    r = page.book.role_of(page.subject["char"]) if page.subject.get("char") else ""
-    return {"main": "Main character", "side": "Supporting character", "minor": "Minor character"}.get(r, "")
+    c = page.subject.get("char")
+    if not c:
+        return ""
+    return "Main character — protagonist" if page.book.is_protagonist(c) else story_roles_mod.label(page.book.story_role(c))
 
 
 def a_tagline(page: Page):
@@ -1346,9 +1385,8 @@ def a_key_places(page: Page):
 
 def a_cast_groups(page: Page):
     b = page.book
-    groups = [("main", "Main"), ("side", "Supporting"), ("minor", "Minor")]
-    return " · ".join(f"{label} ({sum(1 for c in b.chars if b.role_of(c) == k)})" for k, label in groups
-                      if any(b.role_of(c) == k for c in b.chars))
+    return " · ".join(f"{label} ({sum(1 for c in b.chars if b.role_group(c) == k)})"
+                      for k, label in story_roles_mod.GROUPS if any(b.role_group(c) == k for c in b.chars))
 
 
 def a_cast_count(page: Page):
@@ -1369,7 +1407,7 @@ def _graph(b: Book) -> dict:
         d = b.dossiers.get(c["record_id"]) or {}
         pt = ((d.get("art") or {}).get("portrait") or {})
         nodes.append({"id": c["record_id"], "name": c["name"], "page_id": f"character-{slug(c['record_id'])}",
-                      "portrait": pt.get("url"), "role": b.role_of(c)})
+                      "portrait": pt.get("url"), "role": b.role_of(c), **b.role_fields(c)})
         for row in _rel_rows_of(b, c):
             other = b.char_by_name(row["name"])
             if not other or other["record_id"] == c["record_id"]:
@@ -1840,7 +1878,9 @@ def contents_rows(page: Page) -> list[dict]:
 
 def jump_rows(page: Page) -> list[dict]:
     b = page.book
-    chars = [(c["name"], _portrait_of(b, c["record_id"]), f"character-{slug(c['record_id'])}") for c in b.chars]
+    chars = [(c["name"], _portrait_of(b, c["record_id"]), f"character-{slug(c['record_id'])}")
+             for c in sorted(b.chars, key=lambda c: not b.is_protagonist(c))]
+    prot_page = (b.protagonist_info() or {}).get("page_id")
     places = [(p["name"], {"url": ((p.get("dossier") or {}).get("art") or {}).get("establishing", {}).get("url")}
                if ((p.get("dossier") or {}).get("art") or {}).get("establishing") else None, f"place-{slug(p['id'])}")
               for p in b.places]
@@ -1860,6 +1900,9 @@ def jump_rows(page: Page) -> list[dict]:
             if x[1] and x[1].get("url"):
                 page.pics[f"{fid}#{i + 1}"] = {"url": x[1]["url"], "alt": x[0]}
             row[key] = {"value": x[0], "status": "auto", "source": f"row:{key}", "link": x[2]}
+            if key == "character" and x[2] == prot_page:
+                row[key]["protagonist"] = True
+                row["_meta"]["protagonist"] = "2.2.1"
         rows.append(row)
     return rows
 
@@ -1875,9 +1918,9 @@ def todo_rows(page: Page) -> list[dict]:
 
 
 def _main_cast(b: Book) -> list[dict]:
-    mains = [c for c in b.chars if b.role_of(c) == "main"]
-    rest = [c for c in b.chars if b.role_of(c) == "side"]
-    return (mains + rest)[:5]
+    order = [k for k, _l in story_roles_mod.GROUPS]
+    ranked = sorted((c for c in b.chars if b.role_group(c) != "minor"), key=lambda c: order.index(b.role_group(c)))
+    return ranked[:5]
 
 
 def _one_line(b: Book, c: dict) -> dict | None:
@@ -1893,7 +1936,23 @@ def _one_line(b: Book, c: dict) -> dict | None:
 
 
 def _role_text(b: Book, c: dict) -> str:
-    return {"main": "Main character", "side": "Supporting character", "minor": "Minor character"}[b.role_of(c)]
+    return story_roles_mod.label(b.story_role(c))
+
+
+GROUP_SHORT = {"main": "Main", "leads": "Lead", "villains": "Villain", "supporting": "Supporting", "minor": "Minor"}
+
+
+def story_role(rec: dict, book: "Book | None" = None) -> str:
+    """The story role key of a character dict (a Book's chars row): the book's cast when given, else the row's own
+    ``story_role``; unknown -> supporting."""
+    if book is not None:
+        return book.story_role(rec)
+    return story_roles_mod.normalize((rec or {}).get("story_role"))
+
+
+def protagonist_of(book: "Book") -> dict | None:
+    """★ The book's main character (a chars row) — by the stored tag, never re-derived from the text."""
+    return book.protagonist
 
 
 def main_cast_rows(page: Page) -> list[dict]:
@@ -1902,15 +1961,16 @@ def main_cast_rows(page: Page) -> list[dict]:
     for i, c in enumerate(_main_cast(b)):
         rows.append({"portrait": _row_pic(page, i, "3.6.1", _portrait_of(b, c["record_id"])), "name": c["name"],
                      "role": _role_text(b, c), "one_line": _one_line(b, c) or "",
-                     "_meta": {"entry_id": c["record_id"], "page_id": f"character-{slug(c['record_id'])}"}})
+                     "_meta": {"entry_id": c["record_id"], "page_id": f"character-{slug(c['record_id'])}",
+                               **b.role_fields(c)}})
     return rows
 
 
 def cast_rows(page: Page) -> list[dict]:
     b = page.book
-    order = {"main": 0, "side": 1, "minor": 2}
+    order = {k: i for i, (k, _l) in enumerate(story_roles_mod.GROUPS)}
     rows = []
-    chars = sorted(b.chars, key=lambda c: (order[b.role_of(c)], (b.dossiers.get(c["record_id"]) or {}).get("code")
+    chars = sorted(b.chars, key=lambda c: (order[b.role_group(c)], not b.is_protagonist(c), (b.dossiers.get(c["record_id"]) or {}).get("code")
                                            or ""))
     for i, c in enumerate(chars):
         d = b.dossiers.get(c["record_id"]) or {}
@@ -1925,8 +1985,10 @@ def cast_rows(page: Page) -> list[dict]:
                      "status": "Approved" if c.get("approved") and d.get("readiness") == "ready" else
                      "Approved (dossier draft)" if c.get("approved") else "Draft",
                      "_meta": {"entry_id": c["record_id"], "page_id": f"character-{slug(c['record_id'])}",
-                               "group": {"main": "Main", "side": "Supporting", "minor": "Minor"}[b.role_of(c)],
-                               "has_portrait": bool(_portrait_of(b, c["record_id"]))}})
+                               "group": GROUP_SHORT[b.role_group(c)],
+                               "group_label": story_roles_mod.GROUP_LABEL[b.role_group(c)],
+                               "story_role": b.story_role(c), "story_role_icon": story_roles_mod.icon(b.story_role(c)),
+                               "has_portrait": bool(_portrait_of(b, c["record_id"])), **b.role_fields(c)}})
     return rows
 
 
@@ -2158,18 +2220,19 @@ def protected_rows(page: Page) -> list[dict]:
 def timeline_rows(page: Page) -> list[dict]:
     b = page.book
     nums = {c["chapter_id"]: c["number"] for c in b.chapters}
-    clashes = set()
+    clashes: dict = {}  # chapter id -> the first clash note
     for f in b.timeline.get("findings") or []:
         if f.get("check") in ("year_arithmetic", "time_backwards"):
             for p in f.get("passages") or []:
-                clashes.add(p.get("chapter"))
+                clashes.setdefault(p.get("chapter"), _clip(f.get("detail") or "", 160))
     rows = []
     for y in b.timeline.get("years") or []:
         if not isinstance(y, dict):
             continue
         rows.append({"date": str(y.get("year") or y.get("value") or ""), "event": _clip(y.get("excerpt"), 200),
                      "chapter": f"Ch {nums.get(y.get('chapter'), '?')}",
-                     "clash": "⚠ clash" if y.get("chapter") in clashes else ""})
+                     "clash": (f"⚠ {clashes[y.get('chapter')]}" if clashes[y.get("chapter")] else "⚠ clash")
+                     if y.get("chapter") in clashes else ""})
     for c in b.chars:  # the characters' dated backstory (titles like "2157-2166 / foundations")
         d = b.dossiers.get(c["record_id"]) or {}
         for s in d.get("sections") or []:
@@ -2285,6 +2348,9 @@ def fill(page: Page) -> dict:
            "pics": page.pics, "icon": TEMPLATE_ICONS[page.template]}
     if page.target:
         out["target"] = page.target
+    if page.template == "5" and page.subject.get("char"):
+        out["story_role"] = page.book.story_role(page.subject["char"])
+        out.update(page.book.role_fields(page.subject["char"]))
     for k in ("graph", "map"):
         if page.extra.get(k):
             out[k] = page.extra[k]
@@ -2414,9 +2480,12 @@ def build(app, pid: str, branch: str = "main", *, look: str | None = None) -> di
     if not cover_art:
         missing += 1
     b.__dict__["_todo"] = todo
+    waiting = sum(1 for f in filled.values() if f["status"] != "approved")
+    progress = {"approved_percent": round(100 * (approved + 2) / total), "approved": approved + 2, "pages": total,
+                "drafts_waiting": waiting, "missing_pictures": missing}
     b.__dict__["_late"] = {
-        "approved_percent": f"{round(100 * (approved + 2) / total)}%",
-        "drafts_waiting": _plural(sum(1 for f in filled.values() if f["status"] != "approved"), "page") + " waiting",
+        "approved_percent": f"{progress['approved_percent']}%",
+        "drafts_waiting": _plural(waiting, "page") + " waiting",
         "missing_pictures": _plural(missing, "picture") + " missing" if missing else "None missing",
         "last_updated": _last_updated(b), "book_revision": _book_revision(b)}
     # --- the contents rows (counts and first pages)
@@ -2458,8 +2527,8 @@ def build(app, pid: str, branch: str = "main", *, look: str | None = None) -> di
     return {"schema_version": SCHEMA_VERSION, "generated_at": now_iso(), "updated_at": _last_updated(b),
             "book": {"title": b.title, "author": b.prof.get("author") or "", "genre": b.prof.get("genre") or "",
                      "look": chosen, "look_default": default, "look_stored": stored or None,
-                     "looks": [{"id": k, **v} for k, v in LOOKS.items()]},
-            "pages": out_pages, "contents": contents,
+                     "looks": [{"id": k, **v} for k, v in LOOKS.items()], "protagonist": b.protagonist_info()},
+            "pages": out_pages, "contents": contents, "progress": progress,
             "todo": [{k: t[k] for k in ("what", "page_id", "action", "page", "kind")} for t in todo],
             "counts": {"pages": len(out_pages), "approved": approved + 2, "missing_pictures": missing,
                        "new_fields": bf.counts(b.extras)},

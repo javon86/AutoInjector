@@ -45,6 +45,7 @@ from . import CONTRACT_VERSION, __version__
 from . import plan_rules as pr
 from . import characters as chars_mod
 from . import providers as providers_mod
+from . import story_roles
 from .canonical import json_pointer
 from .errors import AkoweError
 from .jobs import RetryPolicy, slot_word, wait_and_retry
@@ -1221,6 +1222,8 @@ class BibleSession:
         self._lock = threading.RLock()
         self._worker: threading.Thread | None = None
         self.taken_subjects: set = set()
+        self.roles: dict | None = None  # the last story-role settlement (story_roles.enforce) of a create
+        self.role_notes: list[str] = []  # plain notes: who stays the one protagonist when the AI gave several
 
     # ------------------------------------------------------------------ state
     def busy(self) -> bool:
@@ -1436,9 +1439,20 @@ class BibleSession:
 
     # ------------------------------------------------------------------ sketch
     def _known_items(self) -> list[dict]:
-        return [{"key": k, "section": self.items[k]["op"], "name": self.items[k]["name"],
-                 "subject_id": self.items[k]["subject_id"], "role": self.items[k]["role"][:200],
-                 "status": self.items[k]["status"]} for k in self.order]
+        return [dict({"key": k, "section": self.items[k]["op"], "name": self.items[k]["name"],
+                      "subject_id": self.items[k]["subject_id"], "role": self.items[k]["role"][:200],
+                      "status": self.items[k]["status"]},
+                     **({"story_role": self.items[k]["story_role"]} if self.items[k].get("story_role") else {}))
+                for k in self.order]
+
+    def _cast(self) -> list[dict]:
+        """The book's characters with their story roles (the AI keeps exactly one protagonist)."""
+        try:
+            k = story_roles.cast(self.svc.store, self.project_id, self.branch_id)
+            return [{"name": c["name"], "story_role": c["story_role"], "decided": not c["proposed"]}
+                    for c in k["characters"]][:20]
+        except Exception:  # noqa: BLE001 - context is best effort
+            return []
 
     def _sketch(self, job: Job, counts: dict, guidance: str | None = None) -> list[dict]:
         svc = self.svc
@@ -1449,6 +1463,8 @@ class BibleSession:
                                      "type": "object", "additionalProperties": False,
                                      "properties": {"section": {"enum": sorted(counts)}, "name": {"type": "string"},
                                                     "role": {"type": "string"},
+                                                    # characters only ("" for other sections); asked in the task
+                                                    "story_role": {"enum": list(story_roles.KEYS) + [""]},
                                                     "links": {"type": "array", "items": {"type": "string"}}},
                                      "required": ["section", "name", "role", "links"]}}},
                   "required": ["world_summary", "items"]}
@@ -1460,11 +1476,17 @@ class BibleSession:
                 "context.existing_items / context.canon) it is tied to - e.g. a character's home location, a faction's "
                 "members, a relationship's two characters. Fit the world summary and existing entries; never reuse an "
                 "existing name for a different thing. world_summary: two or three sentences describing the world. "
-                "Return only the JSON object."
+                + ("Every character (section A01) also gets story_role, its title in the story, exactly one of: "
+                   + story_roles.prompt_list() + ". Exactly ONE character of the whole book is the protagonist (the "
+                   "main character the book idea names or centres on); if context.cast already has a protagonist, "
+                   "give no one else that role. Items of other sections get story_role \"\". " if "A01" in counts
+                   else "")
+                + "Return only the JSON object."
                 + (" Follow context.author_guidance for this run (for example cover the listed roles or types, one "
                    "item per listed role where the counts allow)." if guidance else ""))
         context = {"book_idea": self.idea, "requested": counts, "sections": sections,
                    "world_summary_so_far": self.world_summary, "existing_items": self._known_items(),
+                   "cast": self._cast(),
                    "canon": {"approved_records": [{k: a[k] for k in ("module_id", "kind", "record_id", "names",
                                                                         "concept", "subject_ids")} for a in approved],
                              "draft_records": drafts}}
@@ -1507,6 +1529,8 @@ class BibleSession:
                     key = self._new_item(op_id, name, row.get("role"), run_no, label=label,
                                          raw_links=list(row.get("links") or []))
                     item = self.items[key]
+                    if op_id == "A01" and isinstance(row.get("story_role"), str) and row["story_role"].strip():
+                        item["story_role"] = story_roles.normalize(row["story_role"])
                     if dup:
                         item["duplicate_of"] = dup
                         item["message"] = f"“{dup}” is already in the book: the AI makes a different one"
@@ -1531,7 +1555,8 @@ class BibleSession:
                 "role": str(role or "").strip()[:600], "raw_links": list(raw_links or []),
                 "links": [], "status": "pending", "message": "Waiting", "proposal": None, "findings": [],
                 "removed_refs": [], "error": None, "slot": None, "model": None, "elapsed_ms": None,
-                "created_ref": None, "create_error": None, "run": run_no, "summary": None, "valid": None}
+                "created_ref": None, "create_error": None, "run": run_no, "summary": None, "valid": None,
+                "story_role": ""}
         if not self.taken_subjects:
             approved, drafts, _ = canon_context(self.svc.engine, self.project_id, self.branch_id)
             for r in approved + drafts:
@@ -1541,12 +1566,16 @@ class BibleSession:
         self.order.append(key)
         return key
 
-    def add_named(self, op_id: str, name: str, role: str = "") -> str:
+    def add_named(self, op_id: str, name: str, role: str = "", story_role: str = "") -> str:
         """One entry with a name that is already decided (the book's main character named in the idea, or an entry
-        Akọwe's checks refused that the AI makes again): no world sketch, the name is kept exactly."""
+        Akọwe's checks refused that the AI makes again): no world sketch, the name is kept exactly. ``story_role``:
+        the character's decided story role (e.g. protagonist for the main character), kept when it is saved."""
         with self._lock:
             key = self._new_item(op_id, str(name).strip()[:120], role, len(self.runs) + 1)
             self.items[key].pop("raw_links", None)
+            if op_id == "A01" and story_role:
+                self.items[key]["story_role"] = story_roles.normalize(story_role)
+                self.items[key]["story_role_fixed"] = True
             return key
 
     @staticmethod
@@ -1574,13 +1603,17 @@ class BibleSession:
                 x["summary"] = summarize_payload(src["op"], src["proposal"])
         extra = {"book_idea": self.idea, "world_summary": self.world_summary,
                  "this_item": {"key": it["key"], "section": it["op"], "name": it["name"], "subject_id": it["subject_id"],
-                               "role": it["role"],
+                               "role": it["role"], "story_role": it.get("story_role") or "",
                                "linked_items": [{"key": x["key"], "section": x["op"], "name": x["name"],
                                                  "subject_id": x["subject_id"], "role": x["role"][:200]} for x in linked]},
                  "builder_items": others}
+        if it["op"] == "A01":
+            extra["cast"] = self._cast()
         prompt = (f"Create the {svc.contracts.operation(it['op'])['name']} entry "
                   + (f"“{it['name']}”" if not it.get("placeholder") else "(invent a fitting name)")
                   + (f": {it['role']}" if it["role"] else "")
+                  + (f". Story role: {it['story_role']} ({story_roles.label(it['story_role'])}) — give exactly this "
+                     "story_role in character_sheet" if it["op"] == "A01" and it.get("story_role") else "")
                   + f". Use subject_id '{it['subject_id']}' for this entity and the subject_ids in context.builder_items "
                   "when a fact refers to another entry (e.g. entity.location_id of a character's home place). "
                   "The book idea and world summary are in the context." + (f" Author's note: {note}" if note else ""))
@@ -1639,6 +1672,7 @@ class BibleSession:
 
         for k in sorted(selected, key=lambda x: (SECTION_ORDER.index(self.items[x]["op"]), x)):
             visit(k)
+        self._settle_roles([k for k in order if k in self.items and not self.items[k].get("created_ref")])
         t0 = time.time()
         for k in order:
             it = self.items[k]
@@ -1652,6 +1686,8 @@ class BibleSession:
             payload = copy.deepcopy(payload)
             if k in edits:
                 it["proposal"] = copy.deepcopy(payload)
+            if it["op"] == "A01":
+                self._role_into_attributes(it, payload)
             payload, removed = svc.strip_refs(self.project_id, self.branch_id, it["op"], payload)
             links_made, links_dropped = [], []
             refs = payload.get("linked_refs") if isinstance(payload.get("linked_refs"), list) else []
@@ -1682,11 +1718,21 @@ class BibleSession:
                 comp = it.get("companion") if it["op"] == "A01" else None
                 if isinstance(comp, dict) and comp.get("character_sheet") is not None:
                     try:  # the AI's character sheet and voice card belong to the character just made (P7/P17)
+                        sheet = dict(comp["character_sheet"])
+                        if it.get("story_role"):  # the settled story role of this session (one protagonist)
+                            sheet["story_role"] = it["story_role"]
                         chars_mod.save_entry(svc.store, self.project_id, self.branch_id, ref["record_id"],
-                                             sheet=comp["character_sheet"], voice=comp.get("voice_card"), by="ai",
+                                             sheet=sheet, voice=comp.get("voice_card"), by="ai",
                                              slot=it.get("slot"), name=it.get("name"), subject_id=it.get("subject_id"))
                     except Exception:  # noqa: BLE001 - the character is saved; its sheet can be made again later
                         log.exception("could not save the character sheet of %s", ref["record_id"])
+                elif it["op"] == "A01" and it.get("story_role"):
+                    try:  # no sheet yet: the story role is kept on its own (the sheet comes later)
+                        story_roles.set_role(svc.store, self.project_id, self.branch_id, ref["record_id"],
+                                             it["story_role"], by="ai", name=it.get("name"),
+                                             subject_id=it.get("subject_id"), move=False)
+                    except Exception:  # noqa: BLE001
+                        log.exception("could not save the story role of %s", ref["record_id"])
                 created.append({"key": k, "op": it["op"], "name": it["name"], "ref": ref, "status": resp["status"],
                                 "findings": len(resp.get("findings") or []), "links_made": links_made,
                                 "links_dropped": links_dropped, "removed_refs": removed})
@@ -1696,6 +1742,12 @@ class BibleSession:
                                          path=e.get("path") or ""))
                 it["create_error"] = err
                 errors.append(err)
+        self.roles = None
+        if any(c["op"] == "A01" for c in created):
+            try:  # exactly one protagonist in the book (deterministic; the author's own choice is never changed)
+                self.roles = story_roles.enforce(svc.store, self.project_id, self.branch_id)
+            except Exception:  # noqa: BLE001 - roles never stop the drafts
+                log.exception("could not settle the story roles")
         entry = {"at": _iso(), "selected": selected, "created": [c["key"] for c in created],
                  "errors": [{"key": e["key"], "code": e["code"], "message": e["message"]} for e in errors],
                  "elapsed_ms": int((time.time() - t0) * 1000)}
@@ -1710,6 +1762,63 @@ class BibleSession:
                 "next_steps": ["Open each new draft and press Validate, then Accept, to make it canon.",
                                "Then start planning: B01 Premise/Concept Builder (it can use these records as "
                                "canon_refs)."]}
+
+    def _item_role(self, it: dict) -> str:
+        comp = it.get("companion") if isinstance(it.get("companion"), dict) else {}
+        sr = (comp.get("character_sheet") or {}).get("story_role") if isinstance(comp.get("character_sheet"),
+                                                                                 dict) else None
+        if it.get("story_role_fixed"):
+            return it["story_role"]
+        return sr or it.get("story_role") or ""
+
+    def _settle_roles(self, keys: list[str]):
+        """Before the drafts are saved: every character of this session gets its story role (the item's sheet, else
+        the sketch's), and the book keeps exactly ONE protagonist — a protagonist already tagged in the book stays;
+        of several claimants in this session the one named in the book idea wins, else the first. Deterministic."""
+        a01 = [self.items[k] for k in keys if self.items[k]["op"] == "A01"]
+        if not a01:
+            return
+        for it in a01:
+            r = self._item_role(it)
+            it["story_role"] = story_roles.normalize(r) if r else ""
+        try:
+            existing = story_roles.tagged_protagonist(self.svc.store, self.project_id, self.branch_id)
+        except Exception:  # noqa: BLE001
+            existing = None
+        claim = [it for it in a01 if it["story_role"] == story_roles.PROTAGONIST]
+        if existing or len(claim) > 1:
+            from .protagonist import names_in_idea  # noqa: PLC0415
+            from . import names as names_mod  # noqa: PLC0415
+            named = names_in_idea(self.idea or "")
+            fixed = [it for it in claim if it.get("story_role_fixed")]
+
+            def rank(it):
+                hit = next((i for i, n in enumerate(named) if names_mod.same_person(n, it["name"])), 99)
+                return (0 if it.get("story_role_fixed") else 1, hit, a01.index(it))
+            keep = None if existing and not fixed else min(claim, key=rank) if claim else None
+            demoted = [it for it in claim if it is not keep]
+            for it in demoted:
+                it["story_role"] = "deuteragonist"
+                it["story_role_settled"] = "a book has exactly one main character"
+            if demoted:
+                why = ("the book already has its main character" if keep is None else
+                       f"“{keep['name']}” stays the main character (" + ("named in the book idea" if rank(keep)[1] < 99
+                                                                        else "proposed first") + ")")
+                self.role_notes.append(f"★ The AI proposed {len(claim)} main characters; {why}: "
+                                       + ", ".join(f"“{it['name']}”" for it in demoted)[:200]
+                                       + " became second lead(s) (a book has exactly one main character)")
+
+    @staticmethod
+    def _role_into_attributes(it: dict, payload: dict):
+        """The A01 record also says the title in words (attributes.role), e.g. "Story role: Villain. …"."""
+        sr = it.get("story_role")
+        attrs = payload.get("attributes")
+        if not sr or not isinstance(attrs, dict):
+            return
+        lab = story_roles.label(sr)
+        old = str(attrs.get("role") or "").strip()
+        if lab and not old.lower().startswith("story role:"):
+            attrs["role"] = (f"Story role: {lab}. " + old).strip()[:2000]
 
     # ------------------------------------------------------------------ report
     def build_report(self) -> dict:

@@ -59,8 +59,13 @@ def test_pictures_page_illustrate_pick_map_and_batch(make_context, pb):
     assert "0 of 3 chapter(s) have a picture" in page.inner_text("[data-testid=pics-all-left]")
     # the art style
     page.fill("#pics-style", "ink wash")
+    # 💾 Save style saves, then reloads the page's list: wait until that reload has replaced the chapter cards (the
+    # typed value alone is already there before the save) — else a 👁 Prompt clicked meanwhile is wiped by the reload
+    page.evaluate("() => document.querySelectorAll('[data-testid=pics-chapter]').forEach(e => { e.dataset.beforeSave = '1'; })")
     page.click("[data-testid=pics-style-save]")
-    page.wait_for_function("() => document.querySelector('#pics-style').value === 'ink wash'", timeout=10000)
+    page.wait_for_function("() => document.querySelectorAll('[data-testid=pics-chapter]').length === 3 && "
+                           "!document.querySelector('[data-testid=pics-chapter][data-before-save]')", timeout=10000)
+    assert page.input_value("#pics-style") == "ink wash"
     # 👁 the prompt of chapter 1, then 🖼 Illustrate with two candidates
     ch1 = page.locator("[data-testid=pics-chapter]").first
     ch1.locator("[data-testid=pics-prompt]").click()

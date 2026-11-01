@@ -173,7 +173,7 @@ export async function viewBinder(main, x, rest = []) {
     return;
   }
   let pages = []; let book = {}; let byId = new Map(); let byName = new Map(); let firstNames = new Map(); let characters = [];
-  let lastUpdated = ''; let fieldsInfo = {};
+  let lastUpdated = ''; let fieldsInfo = {}; let protId = null;
   /** (re)index a binder document: page numbers, name lookups (the first load and every reload after an edit) */
   function setData(d) {
     data = d || {};
@@ -199,6 +199,16 @@ export async function viewBinder(main, x, rest = []) {
       if (f) firstNames.set(f, firstNames.has(f) ? null : p);
     }
     characters = pages.filter(p => p.template === '5');
+    // THE main character (book.protagonist, the same one the relationship map centres on); older data: the map's centre
+    protId = null;
+    const bp = book.protagonist;
+    if (bp && bp.page_id && byId.has(bp.page_id)) protId = bp.page_id;
+    if (!protId) {
+      const g = (pages.find(q => q.template === '6') || {}).graph;
+      const n = g && Array.isArray(g.nodes) ? g.nodes.find(x => x && x.id === g.centre) : null;
+      if (n && n.page_id && byId.has(n.page_id)) protId = n.page_id;
+    }
+    if (!protId) { const c = characters.find(q => q.is_protagonist) || characters.find(q => /protag/i.test(txt(fld(q, '5.1.5')))); if (c) protId = c.page_id; }
     const dt = data.updated_at || data.generated_at ? new Date(data.updated_at || data.generated_at) : null;
     lastUpdated = dt && !isNaN(dt) ? dt.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : '';
   }
@@ -214,6 +224,37 @@ export async function viewBinder(main, x, rest = []) {
     return byName.get(fold(name).trim()) || byName.get(k) || byName.get('the ' + k) || firstNames.get(k) || null;
   }
   const pageTitle = p => (p.template === '1' ? 'Cover' : p.title) || (SCHEMA[p.template] || [''])[0];
+  const isProt = t => !!(t && protId && t.page_id === protId);
+  const ROLE_WORDS = { protagonist: 'Main character — protagonist', main: 'Main character', side: 'Supporting', minor: 'Minor' };
+  /** the role label + icon of a character page: the data's per-character role_label / role_icon (is_protagonist marks THE
+      main character), else derived from the story role key */
+  function roleInfo(p) {
+    const k = storyRole(p);
+    if (typeof p.role_label === 'string' && p.role_label.trim()) {   // the stored story role (story_roles: title + icon)
+      const key = k === 'protagonist' ? k : (typeof p.story_role === 'string' && p.story_role) || k;
+      return { key, label: p.role_label.trim(), icon: typeof p.role_icon === 'string' ? p.role_icon : (k === 'protagonist' ? '★' : '') };
+    }
+    return { key: k, label: ROLE_WORDS[k], icon: k === 'protagonist' ? '★' : '' };
+  }
+  /** a row's story-role icon (🦉 Mentor, 🗡️ Villain…), from the data's role_icon / story_role_icon */
+  const roleIcon = r => { const m = rowMeta(r); const i = typeof m.role_icon === 'string' ? m.role_icon : (typeof m.story_role_icon === 'string' ? m.story_role_icon : '');
+    return i ? h('span', { class: 'bnd-role-i', 'aria-hidden': 'true' }, `${i} `) : null; };
+  /** the story role of a character page: protagonist (only one) | main | side | minor */
+  function storyRole(p) {
+    if (isProt(p)) return 'protagonist';
+    const sr = typeof p.story_role === 'string' ? p.story_role : (p.story_role && p.story_role.key);
+    if (sr && sr !== 'protagonist') return sr;
+    const cast = pages.find(q => q.template === '4');
+    const r = cast ? ((cast.sections || {})['4.2'] || {}).rows || [] : [];
+    const row = r.find(x => x && x._meta && x._meta.page_id === p.page_id);
+    const g = fold((row && row._meta.group) || '') + ' ' + fold(txt(fld(p, '5.1.5')));
+    if (/main|protag|antag|lead|hero|villain/.test(g)) return 'main';
+    if (/minor|cameo|extra/.test(g)) return 'minor';
+    return 'side';
+  }
+  /** the ★ Main character badge (the protagonist only) */
+  const protBadge = (cls = '') => h('span', { class: `bnd-prot ${cls}`.trim(), 'data-testid': 'protagonist-badge', title: 'The main character of the book (the protagonist)' },
+    h('span', { 'aria-hidden': 'true' }, '★'), ' Main character');
 
   // ------------------------------------------------------------------ state
   const lsKey = `bf:binder:${S.pid}:${S.branch}`;
@@ -431,8 +472,8 @@ export async function viewBinder(main, x, rest = []) {
   }
   const grid = (p, ids, cls = '') => h('div', { class: `bnd-grid ${cls}` }, ids.map(id => field(p, id, { cls: /\.(1|2)$/.test(id) && cls.includes('lead') ? 'bnd-wide' : '' })));
   /** the boxed fact sheet (Quick stats / Quick facts) */
-  function facts(p, ids, special = {}) {
-    return h('dl', { class: 'bnd-facts' }, ids.map(id => {
+  function facts(p, ids, special = {}, lead = null) {
+    return h('dl', { class: 'bnd-facts' }, lead, ids.map(id => {
       const f = fld(p, id); const m = META[id];
       return h('div', { class: `bnd-fact${empty(f) ? ' is-empty' : ''}${f.status === 'proposed' ? ' is-proposed' : ''}`, 'data-fid': id, 'data-st': f.status || 'empty' },
         h('dt', null, fidTag(id), h('span', { title: m.label }, m.short), proposedMark(f), editBtn(p, id, f)),
@@ -641,11 +682,13 @@ export async function viewBinder(main, x, rest = []) {
     // quick-jump tiles: characters, places and world entries with their pictures
     const tiles = [];
     for (const r of rowsOf(p, '2.2')) for (const id of ['2.2.1', '2.2.2', '2.2.3']) if (!empty(rf(r, id)) && !asPic(rf(r, id))) tiles.push([txt(rf(r, id)), rowPic(p, id, r), rf(r, id).link]);
+    tiles.sort((a, b) => (isProt((b[2] && byId.get(b[2])) || findPage(b[0])) ? 1 : 0) - (isProt((a[2] && byId.get(a[2])) || findPage(a[0])) ? 1 : 0));
     const tileNames = tiles.length ? tiles : pages.filter(q => ['5', '7', '8A', '8B', '8C'].includes(q.template)).map(q => [pageTitle(q), null, q.page_id]);
     const grid2 = tileNames.length ? h('div', { class: 'bnd-tiles' }, tileNames.map(([n, pc, link]) => {
       const t = (link && byId.get(link)) || findPage(n);
-      const inner = [bubble(n, 's', pc), h('span', null, h('b', null, n), h('small', null, t ? `${TPL[t.template][2]} · p. ${t._n}` : ''))];
-      return t ? pageLink(t, inner, 'bnd-tile') : h('span', { class: 'bnd-tile' }, inner);
+      const prot = isProt(t);
+      const inner = [bubble(n, 's', pc), h('span', null, prot ? protBadge('bnd-prot-s') : null, h('b', null, n), h('small', null, t ? `${TPL[t.template][2]} · p. ${t._n}` : ''))];
+      return t ? pageLink(t, inner, `bnd-tile${prot ? ' is-protagonist' : ''}`) : h('span', { class: 'bnd-tile' }, inner);
     })) : rowsEmpty(p, '2.2', 'entries');
     const todoRows = rowsOf(p, '2.3');
     const todo = todoRows.length ? todoRows.map(r => ({ what: txt(rf(r, '2.3.1')), where: txt(rf(r, '2.3.2')), action: txt(rf(r, '2.3.3')) }))
@@ -662,6 +705,7 @@ export async function viewBinder(main, x, rest = []) {
   const actionWord = a => ({ approve: '✔ Approve', picture: '🎨 Make picture', fix: '✏ Fix', fill: '✨ Fill' }[String(a).toLowerCase()] || String(a));
   // 3 · At a glance
   T[3] = p => [
+    glanceProgress(),
     sec(p, '3.1', h('div', null, quote(p, '3.1.1', 'bnd-quote-s'), h('p', { class: 'bnd-meta-line' }, field(p, '3.1.2', { cls: 'bnd-inline' })))),
     sec(p, '3.2', quote(p, '3.2.1', 'bnd-quote-big'), { cls: 'bnd-sec-hl' }),
     sec(p, '3.3', field(p, '3.3.1', { cls: 'bnd-prose' })),
@@ -673,13 +717,31 @@ export async function viewBinder(main, x, rest = []) {
       h('div', { class: 'bnd-themes' }, ['3.7.2', '3.7.3', '3.7.4'].map(id => field(p, id, { cls: 'bnd-theme' }))),
       quote(p, '3.7.5', 'bnd-quote-q'))),
   ];
+  /** At a glance: the approved-vs-draft bar (the cover's 1.4.1–1.4.3, from the same numbers) */
+  function glanceProgress() {
+    const cover = pages.find(q => q.template === '1');
+    const pr = (data.progress && typeof data.progress === 'object') ? data.progress : {};
+    const pick = (k, id) => (Number.isFinite(pr[k]) ? pr[k] : cover ? (num(txt(fld(cover, id))) || 0) : 0);
+    const pct = Math.max(0, Math.min(100, Math.round(pick('approved_percent', '1.4.1'))));
+    const drafts = pick('drafts_waiting', '1.4.2'); const missing = pick('missing_pictures', '1.4.3');
+    const n = (v, w) => `${v} ${w}${v === 1 ? '' : 's'}`;
+    return h('div', { class: 'bnd-glance-progress', 'data-testid': 'glance-progress' },
+      h('div', { class: 'bnd-gp-row' },
+        h('b', { class: 'bnd-gp-pct' }, `${pct}% approved`),
+        h('span', { class: `bnd-gp-k${drafts ? ' is-waiting' : ''}`, 'data-k': 'drafts' }, drafts ? `✎ ${n(drafts, 'draft page')} waiting` : '✔ No drafts waiting'),
+        h('span', { class: `bnd-gp-k${missing ? ' is-waiting' : ''}`, 'data-k': 'pictures' }, missing ? `🖼 ${n(missing, 'picture')} missing` : '✔ No pictures missing'),
+        cover ? pageLink(cover, 'Cover →', 'bnd-gp-link no-print') : null),
+      h('div', { class: 'bnd-progress bnd-gp-bar', role: 'progressbar', 'aria-label': 'Pages approved', 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': String(pct), 'aria-valuetext': `${pct}% approved` },
+        h('div', { style: `width:${pct}%` })));
+  }
   function castStrip(p) {
-    const rs = rowsOf(p, '3.6');
+    const stripProt = r => isProt(rowPage(r) || findPage(txt(rf(r, '3.6.2')))) || (!protId && rowMeta(r).is_protagonist === true);
+    const rs = rowsOf(p, '3.6').slice().sort((a, b) => (stripProt(b) ? 1 : 0) - (stripProt(a) ? 1 : 0));
     if (!rs.length) return rowsEmpty(p, '3.6', 'main characters');
     return h('div', { class: 'bnd-cast-strip' }, rs.map(r => {
-      const name = txt(rf(r, '3.6.2')); const t = rowPage(r) || findPage(name);
-      return h('div', { class: 'bnd-mini-card' }, bubble(name, 'l', rowPic(p, '3.6.1', r)),
-        h('div', null, h('b', null, t ? pageLink(t, name) : name || '—'), h('small', { class: 'bnd-role' }, txt(rf(r, '3.6.3'))),
+      const name = txt(rf(r, '3.6.2')); const t = rowPage(r) || findPage(name); const prot = stripProt(r);
+      return h('div', { class: `bnd-mini-card${prot ? ' is-protagonist' : ''}` }, bubble(name, 'l', rowPic(p, '3.6.1', r)),
+        h('div', null, prot ? protBadge('bnd-prot-s') : null, h('b', null, t ? pageLink(t, name) : name || '—'), prot && /^main character$/i.test(txt(rf(r, '3.6.3')).trim()) ? null : h('small', { class: 'bnd-role' }, prot ? null : roleIcon(r), txt(rf(r, '3.6.3'))),
           h('p', null, empty(rf(r, '3.6.4')) ? placeholder(p, '3.6.4', rf(r, '3.6.4')) : txt(rf(r, '3.6.4')))));
     }));
   }
@@ -701,8 +763,10 @@ export async function viewBinder(main, x, rest = []) {
   }
   // 4 · Cast list
   T[4] = p => {
-    const rs = rowsOf(p, '4.2');
+    const castProt = r => isProt(rowPage(r) || findPage(txt(rf(r, '4.2.2')))) || (!protId && rowMeta(r).is_protagonist === true);
+    const rs = rowsOf(p, '4.2').slice().sort((a, b) => (castProt(b) ? 1 : 0) - (castProt(a) ? 1 : 0));
     const groupOf = r => {
+      if (castProt(r)) return 'Main';
       if (rowMeta(r).group) return String(rowMeta(r).group);
       const g = txt(rf(r, '4.1.1')).trim(); if (g && !/·/.test(g)) return g;
       const role = fold(txt(rf(r, '4.2.4')));
@@ -710,9 +774,12 @@ export async function viewBinder(main, x, rest = []) {
       if (/minor|cameo|extra/.test(role)) return 'Minor';
       return 'Supporting';
     };
-    const groups = [];
-    for (const r of rs) { const g = groupOf(r); let e = groups.find(x => x[0] === g); if (!e) groups.push(e = [g, []]); e[1].push(r); }
-    const roleSel = h('select', { id: `bnd-cast-role-${p.page_id}`, class: 'bnd-filter' }, h('option', { value: '' }, 'Every role'), groups.map(([g]) => h('option', { value: g }, g)));
+    const groups = []; const groupLabel = {};
+    for (const r of rs) {
+      const g = groupOf(r); let e = groups.find(x => x[0] === g); if (!e) groups.push(e = [g, []]); e[1].push(r);
+      if (!groupLabel[g]) groupLabel[g] = (typeof rowMeta(r).group_label === 'string' && rowMeta(r).group_label) || `${g} characters`;
+    }
+    const roleSel = h('select', { id: `bnd-cast-role-${p.page_id}`, class: 'bnd-filter' }, h('option', { value: '' }, 'Every role'), groups.map(([g]) => h('option', { value: g }, groupLabel[g])));
     const statSel = h('select', { id: `bnd-cast-st-${p.page_id}`, class: 'bnd-filter' }, h('option', { value: '' }, 'Every status'),
       [['approved', '✔ Approved'], ['draft', '✎ Draft'], ['needs_you', '⚠ Needs you']].map(([v, l]) => h('option', { value: v }, l)));
     const noPic = h('input', { type: 'checkbox', id: `bnd-cast-np-${p.page_id}` });
@@ -730,8 +797,8 @@ export async function viewBinder(main, x, rest = []) {
           return true;
         });
         if (!shown.length) continue;
-        body.appendChild(h('div', { class: 'bnd-group-h', 'data-fid': '4.1.1' }, h('span', { class: 'bnd-fid' }, '4.1.1'), `${g} characters `, h('small', { 'data-fid': '4.1.2' }, `(${shown.length})`)));
-        body.appendChild(h('div', { class: 'bnd-cards' }, shown.map(r => castCard(p, r))));
+        body.appendChild(h('div', { class: 'bnd-group-h', 'data-fid': '4.1.1' }, h('span', { class: 'bnd-fid' }, '4.1.1'), `${groupLabel[g]} `, h('small', { 'data-fid': '4.1.2' }, `(${shown.length})`)));
+        body.appendChild(h('div', { class: 'bnd-cards' }, shown.map(r => castCard(p, r, castProt(r)))));
       }
       if (!body.querySelector('.bnd-card')) body.appendChild(h('p', { class: 'bnd-empty' }, 'No character matches these filters.'));
     };
@@ -739,32 +806,34 @@ export async function viewBinder(main, x, rest = []) {
     for (const el of [roleSel, statSel, noPic]) el.addEventListener('change', draw);
     draw();
     return [
-      sec(p, '4.1', h('div', { class: 'bnd-groups' }, groups.length ? groups.map(([g, l]) => h('span', { class: 'bnd-chip bnd-chip-count' }, h('b', null, g), ` ${l.length}`)) : val(p, '4.1.1'))),
+      sec(p, '4.1', h('div', { class: 'bnd-groups' }, groups.length ? groups.map(([g, l]) => h('span', { class: 'bnd-chip bnd-chip-count' }, h('b', null, groupLabel[g]), ` ${l.length}`)) : val(p, '4.1.1'))),
       sec(p, '4.2', body),
       sec(p, '4.3', h('div', { class: 'bnd-filters' },
         h('label', { for: roleSel.id }, 'Role '), roleSel, h('label', { for: statSel.id }, 'Status '), statSel,
         h('label', { class: 'bnd-check' }, noPic, ' No portrait yet')), { cls: 'no-print' }),
     ];
   };
-  function castCard(p, r) {
+  function castCard(p, r, prot = false) {
     const name = txt(rf(r, '4.2.2')); const t = rowPage(r) || findPage(name);
     const s = txt(rf(r, '4.2.8')) || (t && t.status) || 'draft';
     const pc = rowPic(p, '4.2.1', r) || (t ? picOf(t, '5.1.1') : null);
     const ph = h('div', { class: 'bnd-card-pic' }, h('span', { class: 'bnd-empty bnd-empty-pic' }, 'No portrait yet', h('span', { class: 'bnd-act' }, ' — ',
       t && safeRoute(pageEdit(t)) ? h('a', { href: pageEdit(t) }, '🎨 Make one') : '🎨 Make one')));
     if (pc) loadImg(pc.url).then(u => { if (u) clear(ph).appendChild(h('img', { src: u, alt: `Portrait of ${name}` })); });
-    return h('article', { class: 'bnd-card', 'data-name': name },
+    return h('article', { class: `bnd-card${prot ? ' is-protagonist' : ''}`, 'data-name': name },
       ph, h('div', { class: 'bnd-card-b' },
+        prot ? protBadge() : null,
         h('div', { class: 'bnd-code' }, [txt(rf(r, '4.2.3')), empty(rf(r, '4.2.6')) ? null : `age ${txt(rf(r, '4.2.6'))}`].filter(Boolean).join(' · ')),
         h('h4', null, t ? pageLink(t, name) : name),
-        h('div', { class: 'bnd-role' }, txt(rf(r, '4.2.4'))),
+        prot && /^main character$/i.test(txt(rf(r, '4.2.4')).trim()) ? null : h('div', { class: 'bnd-role', 'data-role': rowMeta(r).story_role || null }, prot ? null : roleIcon(r), txt(rf(r, '4.2.4'))),
         h('p', null, empty(rf(r, '4.2.5')) ? placeholder(p, '4.2.5', rf(r, '4.2.5')) : txt(rf(r, '4.2.5'))),
         h('div', { class: 'bnd-card-foot' }, empty(rf(r, '4.2.7')) ? null : h('small', null, `First seen ${txt(rf(r, '4.2.7'))}`), badge(s, true))));
   }
   // 5 · Character page
   T[5] = p => [
-    band(p, '5.1.1', '5.1.2', ['5.1.3', '5.1.4', '5.1.5', '5.1.6'], { eyebrow: `${txt(fld(p, '5.1.4')).split('·')[0].trim() || 'Character'} · story reference` }),
-    sec(p, '5.2', facts(p, ['5.2.1', '5.2.2', '5.2.3', '5.2.4', '5.2.5', '5.2.6', '5.2.7', '5.2.8', '5.2.9', '5.2.10', '5.2.11', '5.2.12', '5.2.13', '5.2.14', '5.2.15', '5.2.16']), { cls: 'bnd-sec-facts' }),
+    band(p, '5.1.1', '5.1.2', ['5.1.3', '5.1.4', '5.1.5', '5.1.6'], { eyebrow: `${txt(fld(p, '5.1.4')).split('·')[0].trim() || 'Character'} · story reference`,
+      cls: isProt(p) ? 'is-protagonist' : '', lead: roleLead(p) }),
+    sec(p, '5.2', facts(p, ['5.2.1', '5.2.2', '5.2.3', '5.2.4', '5.2.5', '5.2.6', '5.2.7', '5.2.8', '5.2.9', '5.2.10', '5.2.11', '5.2.12', '5.2.13', '5.2.14', '5.2.15', '5.2.16'], {}, roleFact(p)), { cls: 'bnd-sec-facts' }),
     sec(p, '5.3', h('div', { class: 'bnd-pics' }, ['5.3.1', '5.3.2', '5.3.3', '5.3.4', '5.3.5', '5.3.6'].map(id => pic(p, id, { shape: id === '5.3.1' ? 'wide' : 'portrait', icon: id === '5.3.6' ? '▶' : '🖼' })))),
     sec(p, '5.4', h('div', null, field(p, '5.4.1', { cls: 'bnd-wide', chips: true }), grid(p, ['5.4.2', '5.4.3', '5.4.4', '5.4.5', '5.4.6', '5.4.7', '5.4.8', '5.4.9', '5.4.10', '5.4.11', '5.4.12']))),
     sec(p, '5.5', h('div', { class: 'bnd-quad' }, ['5.5.1', '5.5.2', '5.5.3', '5.5.4'].map(id => field(p, id, { cls: 'bnd-box' })))),
@@ -781,6 +850,20 @@ export async function viewBinder(main, x, rest = []) {
       mustReach(p, ['5.14.3', '5.14.4', '5.14.5', '5.14.6', '5.14.7']),
       grid(p, ['5.14.8', '5.14.9', '5.14.10', '5.14.11', '5.14.12']), field(p, '5.14.13', { cls: 'bnd-wide', chips: true }))),
   ];
+  /** the story role under the name in the header band: ★ Main character — protagonist, or a quiet role chip */
+  function roleLead(p) {
+    const ri = roleInfo(p);
+    return h('div', { class: 'bnd-role-lead', 'data-role': ri.key }, ri.key === 'protagonist'
+      ? [protBadge('bnd-prot-l'), h('span', { class: 'bnd-role-why' }, (book.protagonist && book.protagonist.why) ? `the protagonist — ${book.protagonist.why}` : 'the protagonist')]
+      : h('span', { class: 'bnd-role-chip' }, ri.icon ? `${ri.icon} ${ri.label}` : ri.label));
+  }
+  /** 📋 Quick stats: the "Story role" row (first) */
+  function roleFact(p) {
+    const ri = roleInfo(p);
+    return h('div', { class: `bnd-fact bnd-fact-role${ri.key === 'protagonist' ? ' is-protagonist' : ''}`, 'data-testid': 'story-role', 'data-role': ri.key },
+      h('dt', null, h('span', null, 'Story role')),
+      h('dd', null, ri.icon ? [h('span', { class: 'bnd-prot-star', 'aria-hidden': 'true' }, `${ri.icon} `), ri.label] : ri.label));
+  }
   function relType(t) { const s = fold(t); if (s === 'other') return 'other'; for (const [k, , re] of REL_TYPES) if (re.test(s)) return k; return 'other'; }
   function relRows(p) {
     const rs = rowsOf(p, '5.8');
@@ -875,12 +958,14 @@ export async function viewBinder(main, x, rest = []) {
     const gp = graphOf(p);
     const es = gp ? gp.edges : edges();
     const names = []; const add = n => { if (n && !names.includes(n)) names.push(n); };
-    if (gp && gp.centre) add(gp.centre);
+    const protName = protId ? pageTitle(byId.get(protId)) : null;
+    if (gp && gp.centre) add(gp.centre); else if (protName) add(protName);
     (gp ? gp.names : characters.map(pageTitle)).forEach(add); es.forEach(e => { add(e.a); add(e.b); });
     const nodePage = n => (gp && gp.pages.has(n) && byId.get(gp.pages.get(n))) || findPage(n);
     if (!names.length) return h('p', { class: 'bnd-empty' }, 'Not filled yet — add characters and their relationships first.');
     const centreName = (() => {
       if (gp && gp.centre) return gp.centre;
+      if (protName && names.includes(protName)) return protName;
       const want = txt(fld(p, '6.1.3')); const t = want ? findPage(want) : null;
       if (t) return pageTitle(t);
       const prot = characters.find(c => /protag|main|hero/i.test(txt(fld(c, '5.1.5'))));
@@ -1176,10 +1261,7 @@ export async function viewBinder(main, x, rest = []) {
         h('small', { 'data-fid': '12.1.2' }, 'About: ', empty(rf(r, '12.1.2')) ? '—' : linkify('12.1.2', txt(rf(r, '12.1.2')))),
         h('p', { 'data-fid': '12.1.3' }, txt(rf(r, '12.1.3'))))))) : rowsEmpty(p, '12.1', 'protected facts'); })(), { cls: 'bnd-sec-hl' }),
     sec(p, '12.2', h('div', null, field(p, '12.2.1', { cls: 'bnd-rulebox' }), grid(p, ['12.2.2', '12.2.3', '12.2.4']))),
-    sec(p, '12.3', rowTable(p, '12.3', ['12.3.1', '12.3.2', '12.3.3', '12.3.4'], 'timeline events', {
-      '12.3.3': f => empty(f) ? h('span', { class: 'bnd-dash' }, '—') : `Ch ${txt(f).replace(/^ch\s*/i, '')}`,
-      '12.3.4': f => empty(f) ? h('span', { class: 'bnd-ok' }, '✔ no clash') : h('span', { class: 'bnd-clash' }, txt(f)),
-    })),
+    sec(p, '12.3', timelineStrip(p)),
     sec(p, '12.4', rowTable(p, '12.4', ['12.4.1', '12.4.2', '12.4.3', '12.4.4'], 'names or terms')),
     sec(p, '12.5', rowTable(p, '12.5', ['12.5.1', '12.5.2'], 'world details')),
     sec(p, '12.6', facts(p, ['12.6.1', '12.6.2', '12.6.3', '12.6.4', '12.6.5', '12.6.6', '12.6.7']), { cls: 'bnd-sec-facts' }),
@@ -1188,6 +1270,34 @@ export async function viewBinder(main, x, rest = []) {
       return h('span', { class: `bnd-chip${prot ? ' bnd-chip-lock' : ' bnd-chip-warn'}`, title: txt(rf(r, '12.7.2')) }, prot ? '🔒 ' : '🔁 ', `“${txt(rf(r, '12.7.1'))}”`, h('small', null, ` ${txt(rf(r, '12.7.2'))}`));
     })) : rowsEmpty(p, '12.7', 'repeats'); })()),
   ];
+
+  const chapterWord = f => (empty(f) ? '' : /^\d+$/.test(txt(f).replace(/^ch(apter)?\.?\s*/i, '')) ? `Ch ${txt(f).replace(/^ch(apter)?\.?\s*/i, '')}` : txt(f));
+  /** 12.3 Rules & facts timeline: a horizontal strip (dots on a line in story order; ⚠ clashes red), scrolling inside its own
+      box on screen, wrapping into rows on a phone and in print; the same events as a table in a <details> below */
+  function timelineStrip(p) {
+    const rs = rowsOf(p, '12.3');
+    if (!rs.length) return rowsEmpty(p, '12.3', 'timeline events');
+    const clashes = rs.filter(r => !empty(rf(r, '12.3.4'))).length;
+    const strip = h('div', { class: 'bnd-tls', role: 'region', tabindex: '0', 'data-testid': 'timeline-strip',
+      'aria-label': `Timeline: ${rs.length} events in story order${clashes ? `, ${clashes} with a clash` : ''}` },
+    h('ol', { class: 'bnd-tls-line' }, rs.map(r => {
+      const clash = rf(r, '12.3.4'); const isClash = !empty(clash); const ch = chapterWord(rf(r, '12.3.3'));
+      const t = /^Ch \d+$/.test(ch) ? pages.filter(q => q.template === '11')[Number(ch.slice(3)) - 1] : null;
+      return h('li', { class: `bnd-tls-ev${isClash ? ' is-clash' : ''}`, 'data-fid': '12.3.2' },
+        h('div', { class: 'bnd-tls-top' },
+          h('b', { class: 'bnd-tls-what', title: txt(rf(r, '12.3.2')) }, txt(rf(r, '12.3.2')) || '—'),
+          h('small', { class: 'bnd-tls-date', 'data-fid': '12.3.1' }, txt(rf(r, '12.3.1')) || '—')),
+        h('span', { class: 'bnd-tls-mid', 'aria-hidden': 'true' }, h('i', { class: 'bnd-tls-dot', title: isClash ? txt(clash) : null }, isClash ? '!' : '')),
+        h('div', { class: 'bnd-tls-bot' },
+          ch ? (t ? pageLink(t, ch, 'bnd-tls-ch') : h('span', { class: 'bnd-tls-ch' }, ch)) : null,
+          isClash ? h('span', { class: 'bnd-tls-note', 'data-fid': '12.3.4' }, h('span', { class: 'bnd-sr' }, 'Clash: '), txt(clash)) : null));
+    })));
+    const table = rowTable(p, '12.3', ['12.3.1', '12.3.2', '12.3.3', '12.3.4'], 'timeline events', {
+      '12.3.3': f => empty(f) ? h('span', { class: 'bnd-dash' }, '—') : chapterWord(f),
+      '12.3.4': f => empty(f) ? h('span', { class: 'bnd-ok' }, '✔ no clash') : h('span', { class: 'bnd-clash' }, txt(f)),
+    });
+    return h('div', null, strip, h('details', { class: 'bnd-tls-list no-print' }, h('summary', null, '☰ The same events as a list'), table));
+  }
 
   /* ================================================================== page frame */
   function renderPage(p) {

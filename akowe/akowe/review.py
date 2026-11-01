@@ -923,9 +923,12 @@ class ReviewService:
             return None
         from . import characters as chars_mod  # noqa: PLC0415
         e = chars_mod.get_entry(self.store, pid, branch, rec["record_id"])
-        if not e:
+        if not e or (not e.get("sheet") and not e.get("voice")):  # no sheet yet (maybe only a story role)
             return None
-        return {"character_sheet": e.get("sheet"), "voice_card": e.get("voice")}
+        out = {"character_sheet": e.get("sheet"), "voice_card": e.get("voice")}
+        if e.get("story_role"):
+            out["story_role"] = e["story_role"]
+        return out
 
     # ------------------------------------------------------------------ 🎭 characters: sheets and voice cards (P7/P17)
     def _a01(self, pid, branch, rid):
@@ -946,7 +949,40 @@ class ReviewService:
         self._a01(pid, branch, rid)
         e = chars_mod.get_entry(self.store, pid, branch, rid) or {}
         return {"record_id": rid, "entry": e or None, "missing": chars_mod.missing(e), "complete": chars_mod.complete(e),
-                "fields": chars_mod.field_info()}
+                "fields": chars_mod.field_info(), "story_role": self._role_view(pid, branch, rid)}
+
+    def _role_view(self, pid, branch, rid) -> dict | None:
+        """★ This character's story role as the book decides it, and who the main character is."""
+        from . import story_roles  # noqa: PLC0415
+        k = story_roles.cast(self.store, pid, branch)
+        me = next((c for c in k["characters"] if c["record_id"] == rid), None)
+        prot = next((c for c in k["characters"] if c["record_id"] == k["protagonist"]), None)
+        return dict(me, protagonist={"record_id": prot["record_id"], "name": prot["name"], "reason": k["reason"]}
+                    if prot else None) if me else None
+
+    def set_character_role(self, principal, pid, branch, rid, body) -> dict:
+        """PUT …/review/characters/{rid}/role {story_role}: the author gives a character its story role. Choosing
+        protagonist moves the ★ from the previous main character (who becomes a second lead)."""
+        from . import story_roles  # noqa: PLC0415
+        self._access(principal, pid, branch)
+        head = self._a01(pid, branch, rid)
+        body = body if isinstance(body, dict) else {}
+        role = body.get("story_role")
+        if role not in story_roles.KEYS:
+            raise AkoweError("INVALID_INPUT", "/story_role", "story_role: one of " + ", ".join(story_roles.KEYS),
+                             status="REJECTED")
+        from . import characters as chars_mod  # noqa: PLC0415
+        name, subject = chars_mod._name_and_subject(head)
+        before = story_roles.protagonist_of(self.store, pid, branch)
+        out = story_roles.set_role(self.store, pid, branch, rid, role, by="author", name=name, subject_id=subject)
+        self._changed()
+        prev = before if before and before["record_id"] != rid and role == story_roles.PROTAGONIST else None
+        msg = f"“{name}” is now: {story_roles.title(role)}."
+        if prev:
+            msg += f" “{prev['name']}” was the main character and is now a second lead."
+        return {"ok": True, "record_id": rid, "story_role": out["story_role"],
+                "previous_protagonist": {"record_id": prev["record_id"], "name": prev["name"]} if prev else None,
+                "role": self._role_view(pid, branch, rid), "message": msg}
 
     def save_character(self, principal, pid, branch, rid, body) -> dict:
         """The author saves a character's sheet and/or voice card (version check: never overwrite a newer one)."""

@@ -592,6 +592,25 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
   place word like Harbour/Ferry/Street, not an existing place or group); a one-word name ("Odile …") is only caught
   through the Bible Builder's "main" mark or the outline's POV.
 
+- **★ Story roles + "who is the main character" (2026-11-01, branch story-roles).** Every character now has a story
+  role (`story_roles.py`: protagonist ★ Main character, deuteragonist, love interest, antagonist, henchman, rival,
+  mentor, sidekick, ally, family, supporting, minor, extra — label, one-line meaning, icon). The tag is stored on the
+  character's companion entry by A01 record ID (plus the sheet; a new Bible Builder entry also says "Story role: …"
+  in `attributes.role`), so a spelling correction or a rename never loses the main character. Every AI step that
+  makes or edits characters asks for `story_role` (world sketch, Bible Builder item, sheet-and-voice call, protagonist
+  re-make, Make a book) and exactly one protagonist; Akọwe resolves none/several deterministically (author's choice >
+  one tag > named in the idea > Bible Builder main mark > most POV chapters > first created) with a plain event
+  (`PROTAGONIST_SET`). B01/B03/B11 get `main_character` (+ `cast`); the outline must use the protagonist's canon ID as
+  POV (an AI outline without them is refused and redone; still missing → `PROTAGONIST_MISSING`). The guard runs before
+  the outline, before the chapters and before the whole-book review. Names are matched by one helper (`names.py`:
+  accents/Yoruba marks, case, titles, possessives, initials, close spelling with a clear-winner rule, never a place) in
+  the idea check, canon resolution of a POV, scene cards, chapter POV, the guard and the Book Bible. UI: role chips and
+  a ⚠️ "no main character set" with ★ Make this the main character on the guided path, a role picker on the character
+  page (moving the ★ asks first), titles on the A01 list and the Character Forge. Limits: the A01 `attributes.role`
+  text is written once when the entry is made (the companion tag is the truth after an author change); an inferred
+  role is a proposal until the AI or the author confirms it; names inside long prose are not fuzzy-matched (only
+  name-sized strings of up to 6 words).
+
 - **P27 scene grid limits:** (a) scenes on the page are told apart only by scene-break lines (`***`); a chapter written
   in one AI answer usually has none (the whole-chapter prompt does not ask for them), so its row shows the plan only and
   "ⓘ written without scene breaks" — only scene-by-scene chapters (long ones) get words/readability per scene. Asking the

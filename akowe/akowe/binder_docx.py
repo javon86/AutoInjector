@@ -121,10 +121,24 @@ def build_docx(data: dict, *, pic_bytes=None) -> bytes:
         tpl = schema()[p["template"]]
         brk = "" if first else "<w:pageBreakBefore/>"
         first = False
-        body.append(_p(_run(f"{p.get('icon') or ''} {p['title']}".strip(), bold=True, color=accent, size=40), "Heading1",
-                       brk))
+        star = " ★" if p["template"] == "5" and p.get("is_protagonist") else ""
+        body.append(_p(_run(f"{p.get('icon') or ''} {p['title']}{star}".strip(), bold=True, color=accent, size=40),
+                       "Heading1", brk))
         body.append(_p(_run(f"{STATUS_WORDS.get(p['status'], p['status'])} · page {p['page']} · "
                             f"{data['book']['title']}", italic=True, color="777777", size=16)))
+        if p["template"] == "5" and p.get("role_label"):
+            icon = p.get("role_icon") or ""
+            body.append(_p(_run("Story role: ", bold=True, size=20)
+                           + _run(f"{icon + ' ' if icon else ''}{p['role_label']}", bold=bool(star), color=accent
+                                  if star else None, size=20)))
+        if p["template"] == "3" and isinstance(data.get("progress"), dict):
+            g = data["progress"]
+            pct = max(0, min(100, int(g.get("approved_percent") or 0)))
+            dw, mp = int(g.get("drafts_waiting") or 0), int(g.get("missing_pictures") or 0)
+            bar = "█" * round(pct / 5) + "░" * (20 - round(pct / 5))
+            body.append(_p(_run(f"{pct}% approved  ", bold=True, color=accent, size=22) + _run(bar + "  ", color=accent2)
+                           + _run(f"{dw} draft page{'' if dw == 1 else 's'} waiting · {mp} picture"
+                                  f"{'' if mp == 1 else 's'} missing", size=18)))
         for sec in tpl["sections"]:
             code = sec["code"]
             s = p["sections"].get(code) or {"fields": {}}
@@ -141,7 +155,12 @@ def build_docx(data: dict, *, pic_bytes=None) -> bytes:
                     cells = []
                     for fd in sec["fields"]:
                         pic = p["pics"].get(f"{fd['id']}#{i + 1}")
-                        inner = _pic_paras(media, pic, 25) + _p(_field_runs(r.get(fd["id"]) or {}, accent))
+                        f = r.get(fd["id"]) or {}
+                        meta = r.get("_meta") or {}
+                        if (fd["id"] in ("4.2.2", "3.6.2") and meta.get("is_protagonist")) or \
+                                (fd["id"] == "2.2.1" and f.get("protagonist")):
+                            f = dict(f, value=f"★ {_value(f)}")
+                        inner = _pic_paras(media, pic, 25) + _p(_field_runs(f, accent))
                         cells.append(_cell(inner, w))
                     rows.append(cells)
                 body.append(_table(rows, [w] * n, rule))

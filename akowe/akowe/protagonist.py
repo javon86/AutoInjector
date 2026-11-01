@@ -42,9 +42,10 @@ def slug(name: str) -> str:
 
 
 def same_person(a: str, b: str) -> bool:
-    """"Odile Marsh" and "Odile" are the same person; "Odile Marsh" and "Tamsin Reed" are not."""
-    ta, tb = set(_tokens(a)), set(_tokens(b))
-    return bool(ta and tb) and (ta <= tb or tb <= ta)
+    """"Odile Marsh", "Odile", "Odille Marsh", "Captain Odíle Marsh" and "O. Marsh" are the same person; "Odile
+    Marsh" and "Tamsin Reed" (or the place "Marsh Harbour") are not. The shared name rules: ``names.py``."""
+    from . import names  # noqa: PLC0415
+    return names.same_person(a, b)
 
 
 def names_in_idea(idea: str, limit: int = MAX_NAMES) -> list[str]:
@@ -126,7 +127,8 @@ def _missing(bp, main_names, store) -> list[dict]:
         ok_ids = {r["record_id"] for r in approved}
         live = {r["record_id"] for r in a01_heads if r["lifecycle"] not in ("REJECTED", "SUPERSEDED")}
         for rid, e in chars_mod.all_entries(store, bp.pid, bp.branch).items():
-            if rid in live and rid not in ok_ids and (e.get("role") or (e.get("sheet") or {}).get("role")) == "main" \
+            from . import story_roles  # noqa: PLC0415
+            if rid in live and rid not in ok_ids and story_roles.stored(e)[0] in (story_roles.PROTAGONIST, "main") \
                     and e.get("name"):
                 cands.append((str(e["name"]), MAIN_WHY))
     for sid in _pov_needs(bp):
@@ -156,9 +158,97 @@ def _missing(bp, main_names, store) -> list[dict]:
     return out[:MAX_NAMES + 1]
 
 
-def main_note(name: str, why: str) -> str:
-    return (f"This is the book's main character, “{name}” ({why}): keep exactly this name; in character_sheet the role "
-            "is main.")
+def role_for_missing(bp, name: str, why: str) -> str:
+    """The story role a missing main character is made with: protagonist when the book has no tagged protagonist yet
+    (or the tagged one is this very person); else the AI decides (the book keeps its one ★)."""
+    from . import characters as chars_mod, story_roles  # noqa: PLC0415
+    if why not in (IDEA_WHY, MAIN_WHY):
+        return ""
+    rid = story_roles.tagged_protagonist(bp.store, bp.pid, bp.branch)
+    if rid is None:
+        return story_roles.PROTAGONIST
+    e = chars_mod.get_entry(bp.store, bp.pid, bp.branch, rid) or {}
+    live = {r["record_id"] for r in bp.heads("A01") if r["lifecycle"] not in ("REJECTED", "SUPERSEDED")
+            and not r.get("stale")}
+    if rid not in live or same_person(name, e.get("name") or ""):
+        return story_roles.PROTAGONIST
+    return ""
+
+
+def main_note(name: str, why: str, story_role: str = "protagonist") -> str:
+    if story_role == "protagonist":
+        return (f"This is the book's main character, “{name}” ({why}): keep exactly this name; in character_sheet "
+                "the story_role is protagonist (the book's one main character).")
+    return (f"This is one of the book's main characters, “{name}” ({why}): keep exactly this name; the book already "
+            "has its protagonist, so in character_sheet give the story_role that fits (e.g. deuteragonist).")
+
+
+# ====================================================================== the guard: the protagonist is in the book
+def _outline_chapters(rec: dict | None) -> list[dict]:
+    return [ch for ch in ((rec or {}).get("data") or {}).get("chapters") or [] if isinstance(ch, dict)]
+
+
+def in_outline(rec: dict | None, prot: dict, chars: list[dict], *, alias_map: dict | None = None) -> list[int]:
+    """Indexes of the outline chapters that have the protagonist as POV (ID or a name that means them), or name them
+    in the chapter's summary / objective (the chapter's cast)."""
+    from . import names, story_roles  # noqa: PLC0415
+    al = (alias_map or {}).get(prot["record_id"]) or []
+    pnames = story_roles.names_of(prot, al)
+    out = []
+    for i, ch in enumerate(_outline_chapters(rec)):
+        facts = [f for f in ch.get("facts") or [] if isinstance(f, dict)]
+        pov = next((f.get("value") for f in facts if f.get("predicate") == "plan.pov_id"), None)
+        hit = story_roles.find(chars, pov, alias_map=alias_map) if pov else None
+        if hit is not None and hit["record_id"] == prot["record_id"]:
+            out.append(i)
+            continue
+        blob = " ".join([str(ch.get("summary") or "")] + [str(f.get("value")) for f in facts
+                                                          if f.get("predicate") in ("plan.objective", "plan.cast_ids",
+                                                                                    "plan.character_ids")])
+        words = names.tokens(blob, keep_titles=True)
+        for n in pnames:
+            nt = names.tokens(n)
+            if nt and any(names.same_person(" ".join(words[j:j + w]), n) for w in range(1, len(nt) + 1)
+                          for j in range(len(words)) if len(words[j]) >= 3):
+                out.append(i)
+                break
+    return out
+
+
+def check(bp, *, outline: bool = True) -> dict:
+    """Is the book's main character in the book? {ok, protagonist: {record_id, name, ...} | None, in_canon,
+    in_outline (None when there is no outline yet / not asked), problem (plain words) | None}. Deterministic, never
+    raises. The protagonist is the tagged one (by record ID), else the one the cast resolves."""
+    try:
+        return _check(bp, outline)
+    except Exception:  # noqa: BLE001
+        import logging  # noqa: PLC0415
+        logging.getLogger("akowe.protagonist").exception("could not check the protagonist")
+        return {"ok": True, "protagonist": None, "in_canon": None, "in_outline": None, "problem": None}
+
+
+def _check(bp, want_outline: bool) -> dict:
+    from . import characters as chars_mod, story_roles  # noqa: PLC0415
+    store, pid, branch = bp.store, bp.pid, bp.branch
+    chars = chars_mod.canon_characters(store, pid, branch)
+    prot = story_roles.protagonist_of(store, pid, branch)
+    out = {"ok": True, "protagonist": prot, "in_canon": None, "in_outline": None, "problem": None}
+    if prot is None:
+        out.update(ok=False, in_canon=False, problem="the book has no main character yet")
+        return out
+    out["in_canon"] = bool(prot.get("approved"))
+    if not out["in_canon"]:
+        out.update(ok=False, problem=f"the main character “{prot['name']}” is not an approved character")
+        return out
+    if want_outline:
+        rec = bp.outline() if hasattr(bp, "outline") else None
+        if rec:
+            hits = in_outline(rec, prot, chars, alias_map=story_roles.aliases(store, pid, branch))
+            out["in_outline"] = bool(hits)
+            if not hits:
+                out.update(ok=False, problem=f"the chapter outline gives the main character “{prot['name']}” no "
+                                             "chapter (no chapter has them as viewpoint or names them)")
+    return out
 
 
 def make_for_book(assist, bp, name, *, max_fixes: int = 2) -> dict:
@@ -186,9 +276,10 @@ def make_for_book(assist, bp, name, *, max_fixes: int = 2) -> dict:
     prof = book_profile_brief(bp.store, bp.pid)
     slot = bp.ai_slot if bp.ai_slot in ("AI-1", "AI-2", "AI-3") else None
     sess = BibleSession(assist, bp.principal, bp.pid, bp.branch, prof.get("idea") or prof.get("title") or name, slot)
-    key = sess.add_named("A01", name)
+    srole = role_for_missing(bp, name, gap["why"])
+    key = sess.add_named("A01", name, story_role=srole)
     it = sess.items[key]
-    base = main_note(name, gap["why"])
+    base = main_note(name, gap["why"], srole or "")
     if gap.get("refused"):
         base += " Akọwe's checks refused the earlier entry: " + "; ".join(gap["refused"][:6]) + ". Fix exactly these."
     note, probs = base, []
