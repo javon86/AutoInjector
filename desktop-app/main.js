@@ -9009,6 +9009,9 @@ process.on("exit", () => { try { mcpManager.killAll(); } catch (_) {} });
 const alfred = require("./alfred-main").installAlfred({
   ipcMain, shell, state, siteIds: SITE_IDS, userDataDir, logEvent, broadcast, broadcastListeners,
   akoweApi, akoweServerBase, akoweShowInTab, akoweLoadView,
+  // 📖 which book is open: the Akọwe tab's address, else the book Akọwe last pushed in its status (never logged)
+  akoweViewUrl: () => { try { return akoweView && !akoweView.webContents.isDestroyed() ? akoweView.webContents.getURL() : ""; } catch (_) { return ""; } },
+  akowePushedBook: () => (akoweCarry.akowe && akoweCarry.akowe.project) || null,
   sendTextTo, withEnvelope, selfRepair, selfRepairStatus, buildExtract,
   outputManager, dbService, imageProvider, videoProvider, interpreterProvider, ollamaManager,
   mcp: mcpManager, // 🧰 tool servers (mcp_tools / mcp_call)
