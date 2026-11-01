@@ -26,6 +26,7 @@
     .ak-dot[data-tone="busy"] { background:#e0b84a; animation:akpulse 1.2s ease-in-out infinite; }
     .ak-dot[data-tone="error"] { background:#e05a5a; }
     .ak-dot[data-tone="warn"] { background:#e0b84a; }
+    .ak-dot[data-tone="standby"] { background:transparent; box-shadow:inset 0 0 0 2px #57c07a; }
     @keyframes akpulse { 50% { opacity:.35; } }
     @media (prefers-reduced-motion: reduce) { .ak-dot { animation:none !important; } }
     body[data-app-tab="akowe"] #wrap { display:none; }
@@ -1731,7 +1732,7 @@
           <div id="vd-error-msg" class="sd-err-title"></div>
           <div id="vd-error-fix" class="sd-err-fix"></div>
           <div id="vd-error-actions" class="sd-err-actions"></div>
-          <details id="vd-error-details"><summary>details (what ComfyUI said)</summary><pre id="vd-error-raw"></pre></details>
+          <details id="vd-error-details"><summary id="vd-error-summary">Technical details (what ComfyUI said)</summary><pre id="vd-error-raw"></pre></details>
         </div>
       </div>
       <div class="sd-card">
@@ -1832,8 +1833,12 @@
           <button class="sd-fixed" id="btn-vd-fp-test" title="Makes a 2-second clip from a built-in test picture">🧪 Test (2-second clip from a test picture)</button>
           <button class="sd-fixed" id="btn-vd-fp-choose" title="Point AutoInjector at your FramePack folder (Stability Matrix: Data\Packages\FramePack)">📂 Choose FramePack folder</button>
           <button class="sd-fixed" id="btn-vd-fp-unload" title="Frees the graphics memory FramePack uses">⏏ Unload</button>
+          <button class="sd-fixed" id="btn-vd-fp-stop" hidden title="Stops FramePack while it loads (it stops the whole FramePack process)">⏹ Stop</button>
+          <button class="sd-fixed primary" id="btn-vd-fp-retry" hidden title="Start loading FramePack again">↻ Try again</button>
         </div>
         <div id="vd-fp-msg" role="status" aria-live="polite" style="font-size:12px;white-space:pre-line;min-height:18px;"></div>
+        <div id="vd-fp-stuck" role="alert" hidden style="font-size:12px;white-space:pre-line;margin-top:4px;padding:7px 10px;border:1px solid #7a6127;background:#211b0f;border-radius:6px;color:#ffd98a;"></div>
+        <details id="vd-fp-details" hidden style="margin-top:4px;font-size:11.5px;"><summary>Technical details (what FramePack printed last)</summary><pre id="vd-fp-raw" style="white-space:pre-wrap;word-break:break-word;max-height:220px;overflow:auto;margin:4px 0 0;padding:6px;background:#11141a;border-radius:4px;font-size:11px;"></pre></details>
       </div>
       <div class="sd-card" style="max-width:760px;margin-top:10px;">
         <h3>Settings</h3>

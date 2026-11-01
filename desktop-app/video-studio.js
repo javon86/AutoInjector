@@ -300,7 +300,8 @@ function createVideoStudio(deps = {}) {
     return { available: true, found: !!s.found, ready: fpReady(s), dir: s.dir || '', source: s.source || '', python: s.python || '', pythonOk: !!s.pythonOk, hfHome: s.hfHome || '', hfSource: s.hfSource || '',
       models: { ok: !!(s.models && s.models.ok), missing: (s.models && s.models.missing) || [], repos: (s.models && s.models.repos) || [] }, chosenDir: s.chosenDir || '', chosenMissing: !!s.chosenMissing,
       running: !!s.running, loaded: !!s.loaded, loading: s.loading || null, busy: !!s.busy, vramGB: s.vramGB == null ? null : s.vramGB, highVram: s.highVram == null ? null : s.highVram,
-      gpu: s.gpu || null, vramHint: s.vramHint || '', lastError: s.lastError || null, message: s.message || '' };
+      gpu: s.gpu || null, vramHint: s.vramHint || '', lastError: s.lastError || null, message: s.message || '',
+      stopping: !!s.stopping, stderrTail: Array.isArray(s.stderrTail) ? s.stderrTail.slice(-50) : [], precheck: s.precheck || null };
   }
   // engine "auto": ComfyUI + Wan when it is ready; FramePack when it is found and Wan isn't installed;
   // the other video server; FramePack also when ComfyUI answers but can't make Wan video.
@@ -725,7 +726,13 @@ function createVideoStudio(deps = {}) {
     if (!j) return { ok: true, busy: false, last };
     const out = { ok: true, busy: true, mode: j.mode, model: j.model, phase: j.phase, seconds: Math.round((Date.now() - j.startedAt) / 1000), step: j.step || 0, steps: j.steps || 0, from: j.from };
     out.pct = out.steps ? Math.min(1, out.step / out.steps) : 0;
-    if (j.engine === 'framepack') { out.engine = 'framepack'; out.section = j.section || 0; out.sections = j.sections || 0; out.stage = j.stage || ''; if (j.pct != null) out.pct = Math.min(1, Number(j.pct) || 0); }
+    if (j.engine === 'framepack') {
+      out.engine = 'framepack'; out.section = j.section || 0; out.sections = j.sections || 0; out.stage = j.stage || ''; if (j.pct != null) out.pct = Math.min(1, Number(j.pct) || 0);
+      // while FramePack loads: the stage in words, how long it has been in it, and "seems stuck" (+ what to try)
+      const fs0 = fpState(false);
+      if (fs0 && fs0.loading) { out.phase = 'loading'; out.loading = fs0.loading; out.stage = fs0.loading.text || out.stage; }
+      if (fs0 && fs0.stopping) out.stopping = true;
+    }
     if (j.base && j.promptId) {
       try { const p = await sdBackends.comfyProgress(j.base, j); if (p && p.ok) { out.queue = p.job; if (p.steps) { out.step = p.step; out.steps = p.steps; out.pct = p.progress; } if (/queued/.test(p.job || '')) out.phase = 'queued'; } } catch (_) {}
     }
@@ -733,7 +740,16 @@ function createVideoStudio(deps = {}) {
   }
   async function cancel() {
     const j = current;
-    if (!j) return { ok: true, cancelled: false, message: 'No video is being made.' };
+    if (!j) {
+      // ⏹ Stop on the FramePack card while it loads (▶ Load): stop the loading (the whole process tree)
+      const f = fpOf(); const fs0 = fpState(false);
+      if (f && fs0 && (fs0.loading || fs0.busy)) {
+        let r = null; try { r = f.cancel(); } catch (_) { r = null; }
+        log('video-cancel', { framepack: 'loading', stage: fs0.loading ? fs0.loading.stage : '' });
+        return { ok: true, cancelled: !!(r && r.cancelled), stopping: true, message: 'Stopping FramePack…' };
+      }
+      return { ok: true, cancelled: false, message: 'No video is being made.' };
+    }
     j.cancelled = true;
     if (j.engine === 'framepack') { const f = fpOf(); if (f) { try { f.cancel(); } catch (_) {} } }
     // Only this job's prompt: before it is queued there is nothing to stop (runGraph sees `cancelled` and queues nothing),

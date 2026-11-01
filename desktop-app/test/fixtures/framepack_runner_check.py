@@ -68,7 +68,7 @@ class FakeEngine(object):
     def status(self):
         return {'loaded': self.loaded, 'high_vram': False, 'vram_gb': 7.5}
 
-    def load(self, emit):
+    def load(self, emit, should_stop=None):
         emit({'event': 'loading', 'stage': 'fake', 'step': 1, 'steps': 1})
         self.loaded = True
         emit({'event': 'loaded', 'vram_gb': 7.5, 'high_vram': False})
@@ -174,4 +174,49 @@ srv = R.Server(FakeEngine(), out)
 srv.serve(io.BytesIO(b'\xef\xbb\xbf{"cmd": "ping", "id": "bom"}\r\n{"cmd": "ping", "id": "crlf"}\r\n'))
 ev = events(out)
 check(any(e['event'] == 'pong' and e['id'] == 'bom' for e in ev) and any(e['event'] == 'pong' and e['id'] == 'crlf' for e in ev), 'stdin as bytes: a UTF-8 BOM and Windows \\r\\n line ends are fine')
+
+
+# ---- heartbeat: where a busy thread is (e.g. inside "import torch"), every few seconds
+def stuck_in_import_here(ev):
+    ev.wait(5)
+
+
+gate = threading.Event()
+th = threading.Thread(target=stuck_in_import_here, args=(gate,))
+th.start()
+time.sleep(0.05)
+check('stuck_in_import_here' in R.where_is(th) and 'framepack_runner_check.py' in R.where_is(th), 'where_is names the file:line and function a thread is in (%s)' % R.where_is(th))
+beats = []
+os.environ['AUTOINJECTOR_FRAMEPACK_HEARTBEAT_S'] = '0.05'
+R.start_heartbeat(beats.append, th, 'load', 'l9')
+time.sleep(0.3)
+gate.set()
+th.join()
+time.sleep(0.15)
+n = len(beats)
+time.sleep(0.15)
+check(n >= 2 and all(b['event'] == 'heartbeat' and b['job'] == 'load' and 'stuck_in_import_here' in b['where'] for b in beats) and len(beats) == n, 'heartbeat: every few seconds while the job runs (where it is), and none after it ends (%d beats)' % n)
+
+
+# ---- a load that is told to stop between its stages (the real Engine checks should_stop between models)
+class SlowLoadEngine(FakeEngine):
+    def load(self, emit, should_stop=None):
+        for i in range(100):
+            if should_stop is not None and should_stop():
+                raise R.Cancelled()
+            emit({'event': 'loading', 'stage': 'part %d' % i, 'step': i, 'steps': 100})
+            time.sleep(0.02)
+        self.loaded = True
+        emit({'event': 'loaded'})
+
+
+out = io.StringIO()
+srv = R.Server(SlowLoadEngine(), out)
+srv.handle({'cmd': 'load', 'id': 'l2'})
+time.sleep(0.1)
+srv.handle({'cmd': 'cancel'})
+wait(srv)
+ev = events(out)
+check(any(e['event'] == 'cancelled' and e['id'] == 'l2' for e in ev) and not any(e['event'] == 'loaded' for e in ev), 'cancel during a load -> it stops at the next stage (cancelled, not loaded)')
+del os.environ['AUTOINJECTOR_FRAMEPACK_HEARTBEAT_S']
 print(json.dumps({'done': True}))

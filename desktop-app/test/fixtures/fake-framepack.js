@@ -57,6 +57,9 @@ function runnerEnv(o = {}) {
   if (o.mode) env.FAKE_FP_MODE = o.mode;
   if (o.log) env.FAKE_FP_LOG = o.log;
   if (o.stepMs != null) env.FAKE_FP_STEP_MS = String(o.stepMs);
+  if (o.loadMs != null) env.FAKE_FP_LOAD_MS = String(o.loadMs);
+  if (o.precheck) env.FAKE_FP_PRECHECK = o.precheck;
+  if (o.control) env.FAKE_FP_CONTROL = o.control;
   return env;
 }
 

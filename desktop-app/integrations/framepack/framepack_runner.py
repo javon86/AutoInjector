@@ -26,9 +26,19 @@ It is a long-lived process that speaks JSON lines:
         -> {"event": "result", "id", "ok": true, "path", "frames", "fps": 30, "seconds", "width", "height", "sections", "seed"}
     {"cmd": "cancel"}                                 -> {"event": "cancelling"} ... then {"event": "cancelled", "id"}
     {"cmd": "quit"}
+  While a job runs:                                   -> {"event": "heartbeat", "job", "seconds", "where"} every 15 s
+                                                         ("where" = the file:line the job is in, e.g. torch/__init__.py)
   stdout  only these JSON lines (everything FramePack / torch prints goes to stderr).
   Errors: {"event": "error", "id", "code", "message", "fix"} with code one of
     FRAMEPACK_MODEL_MISSING (+ "missing": [...]), FRAMEPACK_OOM, FRAMEPACK_FAILED, FRAMEPACK_BUSY, BAD_REQUEST.
+
+`--precheck` only imports torch (in the main thread) and asks CUDA, then prints one JSON line
+{"event": "precheck", "ok", "torch", "cuda", "cuda_build", "device", "error", "seconds", ...} and exits.
+
+Windows: commands are read from a PRIVATE copy of stdin, and the process's standard input is pointed at NUL.
+Otherwise every DLL with its own C runtime that `import torch` loads (torch_cpu, CUDA, cuDNN, OpenMP ...) asks
+GetFileType(stdin) while the main thread waits in ReadFile on that same synchronous pipe - Windows makes the
+second call wait for the first, so the load sat at "starting PyTorch" for ever (until the next command arrived).
 
 torch / diffusers / transformers are imported INSIDE the functions that need them, so this file can be
 checked (and its JSON handling tested) by any Python 3 without them.
@@ -317,7 +327,11 @@ class Engine(object):
     def status(self):
         return {'loaded': self.loaded, 'high_vram': self.high_vram, 'vram_gb': self.vram_gb}
 
-    def load(self, emit):
+    def load(self, emit, should_stop=None):
+        def stop_check():
+            if should_stop is not None and should_stop():
+                raise Cancelled()
+
         if self.loaded:
             emit({'event': 'loaded', 'vram_gb': self.vram_gb, 'high_vram': self.high_vram, 'already': True})
             return
@@ -328,7 +342,11 @@ class Engine(object):
                                   'Put FramePack\'s "hub" folder into "stuff and thing"/models/video/framepack/hf. Nothing is downloaded by AutoInjector.', missing=missing)
         steps = 7
         emit({'event': 'loading', 'stage': 'starting PyTorch', 'step': 0, 'steps': steps})
+        t0 = time.time()
         import torch
+        print('PyTorch %s imported in %.1f s' % (getattr(torch, '__version__', '?'), time.time() - t0), file=sys.stderr)
+        stop_check()
+        emit({'event': 'loading', 'stage': 'checking the graphics card (CUDA)', 'step': 0, 'steps': steps})
         if not torch.cuda.is_available():
             raise RunnerError('FRAMEPACK_FAILED', 'FramePack needs an NVIDIA graphics card (CUDA), and PyTorch in FramePack\'s folder does not see one.',
                               'Check the graphics card driver is installed, then try again. FramePack does not run on the processor.', cause='NO_GPU')
@@ -342,20 +360,26 @@ class Engine(object):
         high_vram = free_mem_gb > 60
         print('Free VRAM %s GB, high-VRAM mode: %s' % (free_mem_gb, high_vram), file=sys.stderr)
         hv = 'hunyuanvideo-community/HunyuanVideo'
+        stop_check()
         emit({'event': 'loading', 'stage': 'the text encoder (Llama)', 'step': 1, 'steps': steps})
         text_encoder = LlamaModel.from_pretrained(hv, subfolder='text_encoder', torch_dtype=torch.float16).cpu()
+        stop_check()
         emit({'event': 'loading', 'stage': 'the text encoder (CLIP)', 'step': 2, 'steps': steps})
         text_encoder_2 = CLIPTextModel.from_pretrained(hv, subfolder='text_encoder_2', torch_dtype=torch.float16).cpu()
         tokenizer = LlamaTokenizerFast.from_pretrained(hv, subfolder='tokenizer')
         tokenizer_2 = CLIPTokenizer.from_pretrained(hv, subfolder='tokenizer_2')
+        stop_check()
         emit({'event': 'loading', 'stage': 'the VAE', 'step': 3, 'steps': steps})
         vae = AutoencoderKLHunyuanVideo.from_pretrained(hv, subfolder='vae', torch_dtype=torch.float16).cpu()
+        stop_check()
         emit({'event': 'loading', 'stage': 'the picture encoder', 'step': 4, 'steps': steps})
         feature_extractor = SiglipImageProcessor.from_pretrained('lllyasviel/flux_redux_bfl', subfolder='feature_extractor')
         image_encoder = SiglipVisionModel.from_pretrained('lllyasviel/flux_redux_bfl', subfolder='image_encoder', torch_dtype=torch.float16).cpu()
+        stop_check()
         emit({'event': 'loading', 'stage': 'the FramePack video model', 'step': 5, 'steps': steps})
         transformer = HunyuanVideoTransformer3DModelPacked.from_pretrained('lllyasviel/FramePackI2V_HY', torch_dtype=torch.bfloat16).cpu()
 
+        stop_check()
         emit({'event': 'loading', 'stage': 'preparing the graphics card', 'step': 6, 'steps': steps})
         vae.eval()
         text_encoder.eval()
@@ -624,6 +648,105 @@ class Engine(object):
                 'sections': total_latent_sections, 'seed': p['seed'], 'poster': p.get('poster')}
 
 
+# --------------------------------------------------------------------------- heartbeat + where a thread is
+def where_is(thread, depth=3):
+    """The innermost Python frames of a running thread, e.g. 'torch/__init__.py:128 _load_dll_libraries < ...'.
+    A thread blocked inside native code (a DLL load, a CUDA call) shows the Python line that called it."""
+    try:
+        frame = sys._current_frames().get(thread.ident)
+    except Exception:
+        frame = None
+    bits = []
+    while frame is not None and len(bits) < depth:
+        fn = frame.f_code.co_filename.replace('\\', '/')
+        if fn.startswith('<frozen') or fn.endswith('/threading.py'):  # the import machinery / a wait: show who called it
+            frame = frame.f_back
+            continue
+        parts = fn.split('/')
+        short = '/'.join(parts[-2:]) if len(parts) > 1 else fn
+        bits.append('%s:%d %s' % (short, frame.f_lineno, frame.f_code.co_name))
+        frame = frame.f_back
+    return ' < '.join(bits)
+
+
+def heartbeat_seconds():
+    try:
+        return max(0.05, float(os.environ.get('AUTOINJECTOR_FRAMEPACK_HEARTBEAT_S') or 15))
+    except ValueError:
+        return 15.0
+
+
+def start_heartbeat(emit, thread, kind, jid=None):
+    """While `thread` runs: {"event": "heartbeat", "job", "seconds", "where"} every 15 s, so AutoInjector (and its
+    log) can tell "still importing torch, in torch/__init__.py" from "the runner is gone"."""
+    every = heartbeat_seconds()
+    started = time.time()
+
+    def beat():
+        while True:
+            thread.join(every)
+            if not thread.is_alive():
+                return
+            emit({'event': 'heartbeat', 'job': kind, 'id': jid, 'seconds': round(time.time() - started, 1), 'where': where_is(thread)})
+
+    hb = threading.Thread(target=beat, name='framepack-heartbeat')
+    hb.daemon = True
+    hb.start()
+    return hb
+
+
+def precheck(proto):
+    """`--precheck`: import torch in the MAIN thread (nothing reads stdin) and ask CUDA; one JSON line of facts.
+    AutoInjector turns them into plain words (no CUDA, CPU-only PyTorch, a DLL that would not load, ...)."""
+    t0 = time.time()
+
+    def emit(obj):
+        try:
+            proto.write(json.dumps(obj, default=str) + '\n')
+            proto.flush()
+        except Exception:
+            pass
+
+    emit({'event': 'precheck-start', 'python': sys.version.split()[0], 'executable': sys.executable, 'pid': os.getpid(), 'cwd': os.getcwd()})
+    out = {'event': 'precheck', 'python': sys.version.split()[0], 'executable': sys.executable, 'cwd': os.getcwd()}
+    main_thread = threading.current_thread()
+    done = threading.Event()
+
+    def beat():
+        every = heartbeat_seconds()
+        while not done.wait(every):
+            emit({'event': 'heartbeat', 'job': 'precheck', 'seconds': round(time.time() - t0, 1), 'where': where_is(main_thread)})
+
+    hb = threading.Thread(target=beat, name='framepack-heartbeat')
+    hb.daemon = True
+    hb.start()
+    try:
+        import torch
+        out['import_seconds'] = round(time.time() - t0, 1)
+        out['torch'] = str(getattr(torch, '__version__', '?'))
+        out['cuda_build'] = getattr(getattr(torch, 'version', None), 'cuda', None)
+        t1 = time.time()
+        out['cuda'] = bool(torch.cuda.is_available())
+        out['cuda_seconds'] = round(time.time() - t1, 1)
+        if out['cuda']:
+            try:
+                out['device'] = torch.cuda.get_device_name(0)
+                free, total = torch.cuda.mem_get_info()
+                out['free_gb'] = round(free / float(1024 ** 3), 1)
+                out['total_gb'] = round(total / float(1024 ** 3), 1)
+            except Exception as e:  # noqa: B902
+                out['device_error'] = first_line('%s: %s' % (type(e).__name__, e))[:400]
+    except BaseException as e:  # noqa: B902 - ImportError, OSError (DLL load failed), anything
+        traceback.print_exc()
+        out['error_type'] = type(e).__name__
+        out['error'] = first_line('%s: %s' % (type(e).__name__, e))[:800]
+    done.set()
+    out['ok'] = bool(out.get('cuda')) and not out.get('error') and not out.get('device_error')
+    out['seconds'] = round(time.time() - t0, 1)
+    emit(out)
+    return 0 if out['ok'] else 1
+
+
 # --------------------------------------------------------------------------- the JSON-lines server
 class Server(object):
     def __init__(self, engine, out):
@@ -673,8 +796,9 @@ class Server(object):
 
         t = threading.Thread(target=target, name='framepack-' + kind)
         t.daemon = True
-        self.job = {'id': jid, 'kind': kind, 'cancel': cancel, 'thread': t}
+        self.job = {'id': jid, 'kind': kind, 'cancel': cancel, 'thread': t, 'started': time.time()}
         t.start()
+        start_heartbeat(self.emit, t, kind, jid)
 
     def handle(self, msg):
         """One command. Returns False to stop the server."""
@@ -703,7 +827,7 @@ class Server(object):
                            'fix': 'Wait for it, or press Stop.'})
                 return True
             if cmd == 'load':
-                self._run('load', jid, lambda cancel: self.engine.load(self.emit))
+                self._run('load', jid, lambda cancel: self.engine.load(self.emit, cancel.is_set))
             else:
                 try:
                     p = normalize_request(msg)
@@ -714,7 +838,7 @@ class Server(object):
 
                 def work(cancel, p=p):
                     if not getattr(self.engine, 'loaded', False):
-                        self.engine.load(self.emit)
+                        self.engine.load(self.emit, cancel.is_set)
                     if cancel.is_set():
                         raise Cancelled()
                     res = self.engine.generate(p, self.emit, cancel.is_set)
@@ -752,6 +876,7 @@ def parse_args(argv=None):
     ap.add_argument('--framepack-dir', default=os.environ.get('AUTOINJECTOR_FRAMEPACK_DIR', ''), help='The FramePack folder (with diffusers_helper/)')
     ap.add_argument('--hf-home', default=os.environ.get('HF_HOME', ''), help='The Hugging Face cache folder (it has hub/)')
     ap.add_argument('--check', action='store_true', help='Only check the folders and models, print one JSON line, exit')
+    ap.add_argument('--precheck', action='store_true', help='Only import torch and ask CUDA (in the main thread), print one JSON line, exit')
     return ap.parse_args(argv)
 
 
@@ -807,6 +932,32 @@ def stdin_lines():
     return getattr(sys.stdin, 'buffer', sys.stdin)
 
 
+def private_stdin():
+    """Our commands come from a PRIVATE copy of stdin; the process's standard input becomes NUL (fd 0 and, on
+    Windows, STD_INPUT_HANDLE). Why: on Windows a synchronous pipe lets only one call in at a time. The main thread
+    waits in ReadFile on stdin for the next command, and every DLL with its own C runtime that `import torch`
+    loads calls GetFileType(stdin) when it starts - that call waited for the ReadFile, i.e. for ever. FramePack
+    started by Stability Matrix never hits this (nothing reads its stdin). Returns a binary stream of lines."""
+    try:
+        fd = os.dup(sys.stdin.fileno())
+    except Exception:
+        return stdin_lines()  # no real file descriptor (tests, embedded)
+    try:
+        nul = os.open(os.devnull, os.O_RDONLY)
+        os.dup2(nul, 0)
+        os.close(nul)
+        if os.name == 'nt':
+            import ctypes
+            import msvcrt
+            k32 = ctypes.WinDLL('kernel32', use_last_error=True)
+            k32.SetStdHandle.argtypes = [ctypes.c_uint32, ctypes.c_void_p]
+            k32.SetStdHandle(0xFFFFFFF6, ctypes.c_void_p(msvcrt.get_osfhandle(0)))  # STD_INPUT_HANDLE = (DWORD)-10
+        sys.stdin = io.open(os.devnull, 'r')
+    except Exception:
+        traceback.print_exc()
+    return io.open(fd, 'rb')
+
+
 def main(argv=None):
     args = parse_args(argv)
     proto = protocol_stream()
@@ -816,13 +967,15 @@ def main(argv=None):
         return 2
     setup_env(args.framepack_dir, args.hf_home)
     hf_home = os.environ.get('HF_HOME') or ''
+    if args.precheck:
+        return precheck(proto)
     if args.check:
         missing = check_models(hf_home) if hf_home else []
         proto.write(json.dumps({'event': 'check', 'ok': not missing, 'missing': missing, 'hf_home': hf_home, 'python': sys.version.split()[0]}) + '\n')
         proto.flush()
         return 0
     server = Server(Engine(hf_home or None), proto)
-    server.serve(stdin_lines())
+    server.serve(private_stdin())
     # quit / stdin closed: the job was told to stop; give it a moment to free the graphics card, then leave
     # without waiting on CUDA's shutdown in a still-running thread (AutoInjector kills us after 3 s anyway).
     j = server.job
