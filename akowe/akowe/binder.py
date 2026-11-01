@@ -2422,8 +2422,23 @@ def known_targets(app, pid: str, branch: str) -> set:
     return out
 
 
-def build(app, pid: str, branch: str = "main", *, look: str | None = None) -> dict:
-    """The binder contract (see the module docstring)."""
+def build(app, pid: str, branch: str = "main", *, look: str | None = None, as_of: int | None = None) -> dict:
+    """The binder contract (see the module docstring). ``as_of``: 📚 the whole binder as of that book of the series
+    (series.build_as_of); without it the binder of this book, with the small ``series`` block (and, for a book in a
+    series, each character page's "Through the series" strip)."""
+    from . import series as series_mod  # noqa: PLC0415
+    if as_of is not None:
+        return series_mod.build_as_of(app, pid, branch, look, as_of)
+    data = _build(app, pid, branch, look=look)
+    try:
+        series_mod.binder_block(app, data, pid, branch)
+    except Exception:  # noqa: BLE001 - the binder never fails over the series
+        log.exception("binder: the series block")
+        data["series"] = {"in_series": False, "number": 1, "books": [], "problem": "The series could not be read."}
+    return data
+
+
+def _build(app, pid: str, branch: str = "main", *, look: str | None = None) -> dict:
     from .jobs import now_iso  # noqa: PLC0415
     b = Book(app, pid, branch)
     pages = _plan_pages(b)
@@ -2649,33 +2664,40 @@ def save_look(store, pid: str, body) -> dict:
     return {"ok": True, "look": look or default, "look_stored": look or None, "look_default": default}
 
 
-def export_docx(app, pid: str, branch: str, look: str | None = None) -> tuple[bytes, str]:
+def export_docx(app, pid: str, branch: str, look: str | None = None, as_of: int | None = None) -> tuple[bytes, str]:
     from . import binder_docx  # noqa: PLC0415
-    data = build(app, pid, branch, look=look)
+    data = build(app, pid, branch, look=look, as_of=as_of)
     return binder_docx.build_docx(data, pic_bytes=lambda url: picture_bytes(app, pid, branch, url)), \
-        f"{_file_stem(data)} - Book Bible.docx"
+        f"{_file_stem(data)} - Book Bible{_as_of_suffix(data)}.docx"
+
+
+def _as_of_suffix(data: dict) -> str:
+    v = (data.get("series") or {}).get("viewing")
+    return f" (as of book {v['number']})" if v else ""
 
 
 RENDER_NOT_WIRED_WORDS = "Open AutoInjector to make the PDF, or use 🖨 Print → Save as PDF"
 
 
-def export_html(app, pid: str, branch: str, look: str | None = None, page_size: str = "A4") -> tuple[str, dict]:
+def export_html(app, pid: str, branch: str, look: str | None = None, page_size: str = "A4",
+                as_of: int | None = None) -> tuple[str, dict]:
     from . import binder_html  # noqa: PLC0415
-    data = build(app, pid, branch, look=look)
+    data = build(app, pid, branch, look=look, as_of=as_of)
     return binder_html.render(data, pic_bytes=lambda url: picture_bytes(app, pid, branch, url),
                               page_size=page_size), data
 
 
-def export_pdf(app, pid: str, branch: str, look: str | None = None, page_size: str = "A4") -> tuple[bytes, str]:
+def export_pdf(app, pid: str, branch: str, look: str | None = None, page_size: str = "A4",
+               as_of: int | None = None) -> tuple[bytes, str]:
     """The binder PDF through AutoInjector's ``POST /render/pdf``. Raises AkoweError RENDER_NOT_WIRED (plain words)
     when no AutoInjector can make it."""
     from . import forge, render  # noqa: PLC0415
-    html, data = export_html(app, pid, branch, look, page_size)
+    html, data = export_html(app, pid, branch, look, page_size, as_of)
     try:
         pdf = render.render_pdf(app, html, title=f"{data['book']['title']} — Book Bible", page_size=page_size)
     except forge.ArtProblem as exc:
         raise not_wired(exc) from None
-    return pdf, f"{_file_stem(data)} - Book Bible.pdf"
+    return pdf, f"{_file_stem(data)} - Book Bible{_as_of_suffix(data)}.pdf"
 
 
 def not_wired(exc) -> AkoweError:
@@ -2703,8 +2725,13 @@ def picture_bytes(app, pid: str, branch: str, url: str | None) -> bytes | None:
     """The bytes of a binder picture URL (only this book's assets; anything else is None)."""
     from . import forge  # noqa: PLC0415
     m = _ASSET_URL.match(url or "")
-    if not m or m.group(1) != pid or m.group(2) != branch:
+    if not m:
         return None
+    if m.group(1) != pid or m.group(2) != branch:
+        from . import series as series_mod  # noqa: PLC0415 - 📚 a portrait of another book of the same series
+        if not series_mod.same_series(app.store, pid, m.group(1)):
+            return None
+        pid, branch = m.group(1), m.group(2)
     return forge.picture_bytes(app.store, pid, branch, {"asset_id": m.group(3), "version": int(m.group(4))})
 
 
@@ -2713,8 +2740,17 @@ def route(app, method: str, rest: list, query: dict, body, principal: str, pid: 
     look = (query.get("look") or [None])[0]
     if look not in (None, "") and look not in LOOKS:
         raise AkoweError("INVALID_INPUT", "/look", "look: one of " + ", ".join(LOOKS), **_REJ)
+    as_of_raw = (query.get("as_of") or [None])[0]
+    as_of = None
+    if as_of_raw not in (None, ""):
+        try:
+            as_of = int(as_of_raw)
+        except (TypeError, ValueError):
+            raise AkoweError("INVALID_INPUT", "/as_of", "as_of: a book number (1, 2, 3…)", **_REJ) from None
     if rest == [] and method == "GET":
-        return 200, build(app, pid, branch, look=look or None)
+        return 200, build(app, pid, branch, look=look or None, as_of=as_of)
+    if rest and rest[0] == "series":  # 📚 series progression (series.py)
+        return series_route(app, method, rest[1:], body, principal, pid, branch)
     if rest == ["look"] and method == "PUT":
         return 200, save_look(app.store, pid, body)
     if rest == ["schema"] and method == "GET":
@@ -2745,18 +2781,41 @@ def route(app, method: str, rest: list, query: dict, body, principal: str, pid: 
             raise AkoweError("INVALID_INPUT", "/page_size", "page_size: A4 or Letter", **_REJ)
         disposition = "inline" if (query.get("download") or ["1"])[0] == "0" else "attachment"
         if fmt == "docx":
-            data, name = export_docx(app, pid, branch, look or None)
+            data, name = export_docx(app, pid, branch, look or None, as_of)
             return 200, ("__binary__", "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                          data, name, disposition)
         if fmt == "pdf":
-            data, name = export_pdf(app, pid, branch, look or None, size)
+            data, name = export_pdf(app, pid, branch, look or None, size, as_of)
             return 200, ("__binary__", "application/pdf", data, name, disposition)
         if fmt == "html":
-            html, data = export_html(app, pid, branch, look or None, size)
+            html, data = export_html(app, pid, branch, look or None, size, as_of)
             return 200, ("__binary__", "text/html; charset=utf-8", html.encode("utf-8"),
-                         f"{_file_stem(data)} - Book Bible.html", disposition)
+                         f"{_file_stem(data)} - Book Bible{_as_of_suffix(data)}.html", disposition)
         raise AkoweError("INVALID_INPUT", "/format", "format: docx, pdf or html", **_REJ)
     raise AkoweError("NOT_FOUND", "/binder", "no such Book Bible endpoint", **_REJ)
+
+
+def series_route(app, method: str, rest: list, body, principal: str, pid: str, branch: str):
+    """/binder/series/… — 📚 the series panel: GET (books, characters, their strip), changes (✨ find, ✔ approve,
+    ✕ dismiss, ✏ edit), 🖼 the per-book portraits, 📚 start a sequel, the series name."""
+    from . import series as series_mod  # noqa: PLC0415
+    if rest == [] and method == "GET":
+        return 200, series_mod.view(app, pid, branch)
+    if rest == ["find"] and method == "POST":
+        return 202, series_mod.start_find(app, principal, pid, branch)
+    if rest == ["approve"] and method == "POST":
+        return 200, series_mod.approve(app.store, pid, branch, body)
+    if rest == ["dismiss"] and method == "POST":
+        return 200, series_mod.dismiss(app.store, pid, branch, body)
+    if rest == ["changes"] and method == "PUT":
+        return 200, series_mod.edit(app.store, pid, branch, body)
+    if rest == ["name"] and method == "PUT":
+        return 200, series_mod.rename(app.store, pid, branch, body)
+    if rest == ["portraits"] and method == "POST":
+        return 202, series_mod.start_portraits(app, principal, pid, branch, body)
+    if rest == ["sequel"] and method == "POST":
+        return 202, series_mod.start_sequel(app, principal, pid, branch, body)
+    raise AkoweError("NOT_FOUND", "/binder/series", "no such series endpoint", **_REJ)
 
 
 # ====================================================================== the book save (Book Bible/)

@@ -184,6 +184,7 @@ class BookFakeAI:
         self.no_roles = False                    # ★ an AI that gives no story_role anywhere (sketch, sheets)
         self.role_override: dict[str, str] = {}  # ★ name -> the story_role the fake gives instead (e.g. 2 protagonists)
         self.pov_name = None                     # ★ B11: write this (e.g. a misspelt name) as every chapter's POV
+        self.series_script: list = []            # 📚 scripted "what changed in this book" answers
 
     def fail_next(self, *excs):
         self.failures.extend(excs)
@@ -222,6 +223,27 @@ class BookFakeAI:
 
     # ------------------------------------------------------------------ answers
     def _answer(self, ctx, props, schema):
+        if "character_changes" in props:  # 📚 series: what changed for each character in this book
+            with self.lock:
+                scripted = self.series_script.pop(0) if getattr(self, "series_script", None) else None
+            if scripted is not None:
+                return "series_changes", scripted(ctx) if callable(scripted) else copy.deepcopy(scripted)
+            people = ctx.get("characters") or []
+            first = ((ctx.get("chapters") or [{}])[-1]).get("chapter_id") or ""
+            out = []
+            for i, c in enumerate(people[:2]):
+                empty = {k: [] for k in ("appearance", "items_gained", "items_lost", "abilities_gained",
+                                         "abilities_lost", "relationships", "status")}
+                if i == 0:
+                    empty.update(appearance=[{"text": "a pale scar across the left cheek", "chapter": first}],
+                                 items_gained=[{"text": "the keeper's brass key", "chapter": first}],
+                                 status=[{"text": "keeper of the Old Light", "chapter": first}],
+                                 personality=[{"text": "now cruel", "chapter": first}])  # never kept (fixed layer)
+                out.append(dict(empty, name=c.get("name")))
+            out.append(dict({k: [] for k in ("appearance", "items_gained", "items_lost", "abilities_gained",
+                                             "abilities_lost", "relationships", "status")}, name="Nobody Here",
+                            items_gained=[{"text": "a ghost", "chapter": first}]))
+            return "series_changes", {"character_changes": out}
         if "reactions" in props:  # 📖 P23 (Section 7c): beta reader
             with self.lock:
                 scripted = self.beta_script.pop(0) if getattr(self, "beta_script", None) else None

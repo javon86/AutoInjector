@@ -148,7 +148,13 @@ def build(app, pid: str, branch: str = "main") -> dict:
     tex = texture_mod.get_entry(store, pid, branch) or {}
     terms = terms_mod.get_entry(store, pid, branch) or {}  # P31 trade facts (with the author's decisions)
     labels = repetition_mod.get_labels(store, pid, branch).get("labels") or {}  # P30 the author's repeat labels
-    return {
+    try:  # 📚 the series: names, numbers and each character's changes per book (series.py)
+        from . import series as series_mod  # noqa: PLC0415
+        series = series_mod.bible_block(store, pid, branch)
+    except Exception:  # noqa: BLE001 - the bible never fails over the series
+        log.exception("book bible: the series")
+        series = None
+    out = {
         "schema_version": SCHEMA_VERSION, "kind": KIND, "app": "Akọwe", "app_version": __version__,
         "saved_at": _now(),
         "source": {"project_id": pid, "branch_id": branch, "name": proj["name"] if proj else None},
@@ -161,6 +167,9 @@ def build(app, pid: str, branch: str = "main") -> dict:
         "trade_terms": {"story_year": terms.get("story_year"), "items": copy.deepcopy(terms.get("items") or [])},
         "repeat_labels": dict(labels),
     }
+    if series:
+        out["series"] = series
+    return out
 
 
 # ====================================================================== read one from a file (P21)
@@ -423,5 +432,8 @@ def render_markdown(b: dict) -> str:
     if b.get("repeat_labels"):
         out += ["", f"## Repeat labels ({len(b['repeat_labels'])})", ""]
         out += [f"- “{k}”: {v}" for k, v in b["repeat_labels"].items()]
+    if b.get("series"):
+        from . import series as series_mod  # noqa: PLC0415
+        out += [""] + series_mod.bible_markdown(b["series"])
     out.append("")
     return "\n".join(out)

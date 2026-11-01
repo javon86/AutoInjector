@@ -251,6 +251,18 @@ def _page(p: dict, data: dict, pics: _Pics) -> str:
             icon = p.get("role_icon") or ""
             body.append(f'<div class="{"prot" if prot else "role"}">Story role: {escape((icon + " ") if icon else "")}'
                         f'{escape(p["role_label"])}</div>')
+    sr = p.get("series") if p["template"] == "5" else None
+    if sr and (len(sr.get("strip") or []) > 1 or any(b.get("changes") for b in sr.get("strip") or [])):
+        cells = []
+        for b in sr["strip"]:
+            uri = pics.uri((b.get("portrait") or {}).get("url"))
+            img = f'<img class="pic" src="{uri}" alt="book {int(b["number"])}">' if uri else ""
+            cells.append(f'<td>{img}<b>Book {int(b["number"])}</b>{escape(b.get("title") or "")}<br>'
+                         f'{escape(b.get("words") or "No changes recorded")}</td>')
+        state = "; ".join(f"{k}: {v}" for k, v in (sr.get("state") or {}).items())
+        body.append(f'<div class="box series" data-id="series"><h3>📚 Through the series</h3>'
+                    f'<table class="rows"><tr>{"".join(cells)}</tr></table>'
+                    + (f'<p>As of the end of book {sr.get("as_of")}: {escape(state)}</p>' if state else "") + '</div>')
     if p["template"] == "3" and isinstance(data.get("progress"), dict):
         g = data["progress"]
         pct = max(0, min(100, int(g.get("approved_percent") or 0)))
@@ -306,6 +318,10 @@ def render(data: dict, *, pic_bytes=None, page_size: str = "A4") -> str:
     pics = _Pics(pic_bytes)
     look = data["book"]["look"]
     pages = "".join(_page(p, data, pics) for p in data["pages"])
+    v = (data.get("series") or {}).get("viewing")
+    if v:  # 📚 the binder as of another book of the series
+        pages = (f'<p class="asof">📖 As of book {int(v.get("number") or 0)}: {escape(v.get("title") or "")}</p>'
+                 + pages)
     return ("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
             f"<title>{escape(data['book']['title'])} — Book Bible</title>"
             f"<style>{css(look, page_size)}</style></head>"

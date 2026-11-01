@@ -173,13 +173,14 @@ export async function viewBinder(main, x, rest = []) {
     return;
   }
   let pages = []; let book = {}; let byId = new Map(); let byName = new Map(); let firstNames = new Map(); let characters = [];
-  let lastUpdated = ''; let fieldsInfo = {}; let protId = null;
+  let lastUpdated = ''; let fieldsInfo = {}; let protId = null; let series = null;
   /** (re)index a binder document: page numbers, name lookups (the first load and every reload after an edit) */
   function setData(d) {
     data = d || {};
     pages = Array.isArray(data.pages) ? data.pages.filter(p => p && SCHEMA[String(p.template)]) : [];
     book = Object.assign({ title: S.project.name, author: '', genre: '', look: '' }, data.book || {});
     fieldsInfo = data.fields_info || {};
+    series = data.series && typeof data.series === 'object' ? data.series : null;
     pages.forEach((p, i) => {
       p.template = String(p.template); p._n = i + 1; p.page_id = p.page_id || `page-${i + 1}`;
       for (const sec of Object.values(p.sections || {})) (sec && Array.isArray(sec.rows) ? sec.rows : []).forEach((r, j) => { if (r && typeof r === 'object') r._i = j; });
@@ -267,7 +268,9 @@ export async function viewBinder(main, x, rest = []) {
     fids: !!saved.fids,
     idx: Math.max(0, pages.findIndex(p => p.page_id === rest[0])),
     keep: saved,
+    asOf: null,      // 📖 As of book N (null: this book)
   };
+  const binderUrl = () => bpath('/binder' + (st.asOf ? `?as_of=${encodeURIComponent(st.asOf)}` : ''));
   if (rest[0] && !byId.has(rest[0])) st.idx = 0;
 
   /* ================================================================== field rendering */
@@ -834,6 +837,7 @@ export async function viewBinder(main, x, rest = []) {
   T[5] = p => [
     band(p, '5.1.1', '5.1.2', ['5.1.3', '5.1.4', '5.1.5', '5.1.6'], { eyebrow: `${txt(fld(p, '5.1.4')).split('·')[0].trim() || 'Character'} · story reference`,
       cls: isProt(p) ? 'is-protagonist' : '', lead: roleLead(p) }),
+    seriesStrip(p),
     sec(p, '5.2', facts(p, ['5.2.1', '5.2.2', '5.2.3', '5.2.4', '5.2.5', '5.2.6', '5.2.7', '5.2.8', '5.2.9', '5.2.10', '5.2.11', '5.2.12', '5.2.13', '5.2.14', '5.2.15', '5.2.16'], {}, roleFact(p)), { cls: 'bnd-sec-facts' }),
     sec(p, '5.3', h('div', { class: 'bnd-pics' }, ['5.3.1', '5.3.2', '5.3.3', '5.3.4', '5.3.5', '5.3.6'].map(id => pic(p, id, { shape: id === '5.3.1' ? 'wide' : 'portrait', icon: id === '5.3.6' ? '▶' : '🖼' })))),
     sec(p, '5.4', h('div', null, field(p, '5.4.1', { cls: 'bnd-wide', chips: true }), grid(p, ['5.4.2', '5.4.3', '5.4.4', '5.4.5', '5.4.6', '5.4.7', '5.4.8', '5.4.9', '5.4.10', '5.4.11', '5.4.12']))),
@@ -1328,6 +1332,7 @@ export async function viewBinder(main, x, rest = []) {
   const msg = h('div', { class: 'bnd-msg', 'aria-live': 'polite', 'data-testid': 'binder-msg' });
   /** on screen, under the header strip: ✨ Fill this page from the book · ✔ Approve the proposals of its 🆕 fields */
   function pageTools(p) {
+    if (data && data.read_only) return null;   // 📖 another book of the series: read only here
     const targets = new Set();
     for (const sec of Object.values(p.sections || {})) {
       for (const [id, f] of Object.entries((sec && sec.fields) || {})) { const sp = editSpec(p, id, f, null); if (sp) targets.add(sp.target); }
@@ -1439,12 +1444,142 @@ export async function viewBinder(main, x, rest = []) {
   async function reloadData() {
     const keep = (pages[st.idx] || {}).page_id;
     let d;
-    try { d = await api('GET', bpath('/binder')); } catch (e) { showMsg('bnd-err', 'The Book Bible could not be reloaded: ', plainError(e)); return; }
+    try { d = await api('GET', binderUrl()); } catch (e) { showMsg('bnd-err', 'The Book Bible could not be reloaded: ', plainError(e)); return; }
     const y = window.scrollY;
-    setData(d); buildIndex();
+    setData(d); buildIndex(); drawAsOf();
     st.idx = Math.max(0, pages.findIndex(q => q.page_id === keep));
     drawContents(); drawPager(); drawStage();
     window.scrollTo(0, y);
+  }
+  /* ------------------------------------------------------------------ 📚 the series */
+  /** "Through the series" on a character page: book 1 → book 2 → …, each with that book's portrait and what changed */
+  function seriesStrip(p) {
+    const sr = p.series;
+    if (!sr || !Array.isArray(sr.strip) || !sr.strip.length) return null;
+    if (sr.strip.length < 2 && !sr.strip.some(b => b.changes || b.proposal)) return null;
+    return h('section', { class: 'bnd-sec bnd-series', 'data-testid': 'binder-series-strip' },
+      h('h3', { class: 'bnd-sec-h' }, '📚 Through the series'),
+      h('ol', { class: 'bnd-series-strip' }, sr.strip.map((b, i) => h('li', { class: `bnd-series-book${b.number === sr.as_of ? ' is-here' : ''}`, 'data-book': String(b.number) },
+        i ? h('span', { class: 'bnd-series-arrow', 'aria-hidden': 'true' }, '→') : null,
+        b.portrait && b.portrait.url ? h('img', { class: 'bnd-series-pic', src: b.portrait.url, alt: b.portrait.alt || `${p.title} in book ${b.number}`, loading: 'lazy' })
+          : h('span', { class: 'bnd-series-pic bnd-empty-pic' }, b.portrait_waiting ? '🖼 waiting' : '🖼'),
+        h('b', null, `Book ${b.number}`), h('small', null, b.title || ''),
+        h('p', { class: 'bnd-series-words' }, b.words ? b.words : (i ? 'No changes recorded' : 'How they start')),
+        b.proposal ? h('p', { class: 'bnd-series-prop' }, '✎ Proposed (not approved yet): ', b.proposal_words) : null,
+        b.exists === false ? h('small', { class: 'bnd-series-gone' }, 'This book is not in this Akọwe any more (its changes are kept).') : null))),
+      sr.state && Object.keys(sr.state).length ? h('dl', { class: 'bnd-series-state' }, h('dt', null, `As of the end of book ${sr.as_of}`),
+        ...[['looks', 'Looks'], ['carries', 'Carries'], ['can', 'Can'], ['lost', 'Lost'], ['status', 'Status'], ['relationships', 'Relationships']]
+          .filter(([k]) => sr.state[k]).map(([k, w]) => h('dd', null, h('b', null, `${w}: `), sr.state[k]))) : null);
+  }
+  /** 📖 As of book N: the whole binder as it stood at the end of that book */
+  const asOfSel = h('select', { id: 'bnd-asof', 'data-testid': 'binder-as-of' });
+  const asOfPick = h('label', { class: 'bnd-lookpick bnd-asof', for: 'bnd-asof', title: 'Show the whole Book Bible as it was at the end of another book of this series (pictures, looks, belongings). Other books are shown read only.' },
+    h('span', null, '📖 As of'), asOfSel);
+  const asOfNote = h('div', { class: 'bnd-asof-note', 'data-testid': 'binder-as-of-note', 'aria-live': 'polite' });
+  asOfSel.addEventListener('change', async () => {
+    st.asOf = asOfSel.value ? Number(asOfSel.value) : null;
+    await reloadData();
+  });
+  function drawAsOf() {
+    const sr = series || {};
+    const bl = Array.isArray(sr.books) ? sr.books : [];
+    clear(asOfSel);
+    const here = sr.number || 1;
+    asOfSel.appendChild(h('option', { value: '' }, `This book (book ${here})`));
+    for (const b of bl) if (!b.current) asOfSel.appendChild(h('option', { value: String(b.number), selected: st.asOf === b.number }, `Book ${b.number}: ${b.title || ''}${b.exists === false ? ' (not here any more)' : ''}`));
+    if (st.asOf && st.asOf !== here && ![...asOfSel.options].some(o => o.selected)) asOfSel.value = String(st.asOf);
+    asOfPick.hidden = bl.length < 2;
+    clear(asOfNote);
+    if (sr.problem) asOfNote.appendChild(h('p', { class: 'bnd-err' }, '📚 ', sr.problem));
+    if (sr.note) asOfNote.appendChild(h('p', { class: 'bnd-asof-banner' }, '📖 ', sr.note, ' ', h('button', { type: 'button', class: 'bnd-inline-btn', onclick: async () => { st.asOf = null; await reloadData(); } }, 'Back to this book')));
+  }
+  /** the 📚 Series panel: the books, ✨ find what changed, the proposals to approve, 🖼 the book portraits, 📚 start a sequel */
+  const seriesBox = h('div', { class: 'bnd-series-box no-print', 'data-testid': 'binder-series-box', hidden: true });
+  async function toggleSeries(btn) {
+    const open = seriesBox.hidden;
+    seriesBox.hidden = !open;
+    btn.setAttribute('aria-expanded', String(open));
+    if (open) await drawSeries();
+  }
+  async function drawSeries() {
+    clear(seriesBox).appendChild(x.loadingState('Reading the series…'));
+    let v;
+    try { v = await api('GET', bpath('/binder/series')); }
+    catch (e) { clear(seriesBox).appendChild(h('p', { class: 'bnd-err' }, '📚 The series could not be read: ', plainError(e))); return; }
+    const n = v.number || 1;
+    const props = (v.characters || []).filter(c => (c.strip || []).some(b => b.number === n && b.proposal));
+    const changed = (v.characters || []).filter(c => (c.strip || []).some(b => b.number === n && b.changes));
+    const busy = h('div', { class: 'bnd-series-msg', 'aria-live': 'polite', 'data-testid': 'binder-series-msg' });
+    clear(seriesBox).append(
+      h('div', { class: 'bnd-series-head' },
+        h('h3', null, v.in_series ? `📚 ${v.name || 'This series'} — this is book ${n}` : '📚 This book is not part of a series yet'),
+        h('p', { class: 'bnd-series-help' }, 'In a series, each character keeps the same personality, way of talking, name and origin in every book. What can change from book to book: how they look, what they carry, what they can do, who their friends and enemies are, and their status. Each book keeps only what changed in it.'),
+        (v.books || []).length ? h('ol', { class: 'bnd-series-books' }, v.books.map(b => h('li', { class: b.current ? 'is-here' : null }, `Book ${b.number}: ${b.title || ''}`, b.current ? ' (this book)' : '', b.exists === false ? ' — not in this Akọwe any more' : ''))) : null),
+      h('div', { class: 'bnd-series-actions' },
+        h('button', { type: 'button', 'data-testid': 'binder-series-find', title: 'The AI reads this book and proposes what changed for each character. Nothing is used until you approve it, and nothing you wrote is replaced.',
+          onclick: ev => runSeriesJob('/binder/series/find', ev.currentTarget, busy, '✨ Reading the book for changes') }, '✨ Find what changed in this book'),
+        v.portraits_waiting ? h('button', { type: 'button', 'data-testid': 'binder-series-portraits', title: 'A new portrait for each character whose look changed, made with the same 🔒 character lock so the face stays the same. Earlier portraits are kept.',
+          onclick: ev => runSeriesJob('/binder/series/portraits', ev.currentTarget, busy, '🖼 Making the new portraits') }, `🖼 Make ${v.portraits_waiting} new portrait${v.portraits_waiting > 1 ? 's' : ''}`) : null,
+        v.next_book ? h('span', { class: 'bnd-series-next' }, `Book ${v.next_book.number} exists already: “${v.next_book.title}”.`)
+          : h('button', { type: 'button', class: 'primary', 'data-testid': 'binder-series-sequel', onclick: ev => startSequel(ev.currentTarget, v, busy) }, '📚 Start a sequel from this book')),
+      busy,
+      props.length ? h('div', { class: 'bnd-series-props', 'data-testid': 'binder-series-proposals' },
+        h('h4', null, `✎ What changed in this book — ${props.length} proposal${props.length > 1 ? 's' : ''} to read`),
+        props.map(c => { const b = c.strip.find(x => x.number === n); return h('div', { class: 'bnd-series-prop-card', 'data-key': c.key },
+          h('b', null, c.name), h('p', null, b.proposal_words),
+          h('button', { type: 'button', 'data-testid': 'binder-series-approve', onclick: ev => decide('approve', c, ev.currentTarget, busy) }, '✔ Approve'),
+          h('button', { type: 'button', 'data-testid': 'binder-series-dismiss', onclick: ev => decide('dismiss', c, ev.currentTarget, busy) }, '✕ Dismiss')); })) : null,
+      changed.length ? h('div', { class: 'bnd-series-done' }, h('h4', null, '✔ Approved changes in this book'),
+        h('ul', null, changed.map(c => h('li', null, h('b', null, `${c.name}: `), (c.strip.find(x => x.number === n) || {}).words)))) : null);
+  }
+  async function decide(what, c, btn, busy) {
+    btn.disabled = true;
+    try {
+      const r = await api('POST', bpath(`/binder/series/${what}`), { body: { key: c.key } });
+      x.toast(what === 'approve' ? `Approved: ${c.name}` : 'Dismissed');
+      await reloadData(); await drawSeries();
+      if (what === 'approve' && r && r.portrait_needed) {
+        const b = seriesBox.querySelector('[data-testid="binder-series-portraits"]');
+        if (b) runSeriesJob('/binder/series/portraits', b, seriesBox.querySelector('[data-testid="binder-series-msg"]'), '🖼 Making the new portrait');
+      }
+    } catch (e) { btn.disabled = false; clear(busy).appendChild(h('p', { class: 'bnd-err' }, what === 'approve' ? '✔ Approve did not work: ' : '✕ Dismiss did not work: ', plainError(e))); }
+  }
+  async function runSeriesJob(path, btn, busy, word) {
+    btn.disabled = true;
+    let job;
+    try { job = await api('POST', bpath(path), { body: {} }); }
+    catch (e) { btn.disabled = false; clear(busy).appendChild(h('p', { class: 'bnd-err' }, `${word} did not start: `, plainError(e))); return; }
+    const line = h('span', null, `${word}…`);
+    clear(busy).appendChild(h('div', { class: 'bnd-progress-line', 'data-testid': 'binder-series-progress' }, line));
+    while (!['done', 'error', 'cancelled'].includes(job.status)) {
+      await new Promise(r => setTimeout(r, 900));
+      if (!document.body.contains(root)) return;
+      try { job = await api('GET', bpath(`/review/ai/${encodeURIComponent(job.job_id)}`)); } catch { continue; }
+      line.textContent = `${word} — ${job.phase || ''}`;
+    }
+    btn.disabled = false;
+    if (job.status === 'error') { clear(busy).appendChild(h('p', { class: 'bnd-err' }, `${word} did not work: `, plainError({ body: { errors: [job.error || {}] } }))); return; }
+    const last = (job.results || []).slice(-1)[0] || {};
+    await reloadData(); await drawSeries();
+    const box = seriesBox.querySelector('[data-testid="binder-series-msg"]');
+    if (box) clear(box).appendChild(h('p', { class: last.ok === false ? 'bnd-err' : 'bnd-ok-msg' }, last.message || 'Done.'));
+  }
+  async function startSequel(btn, v, busy) {
+    const ok = await x.choiceDialog('📚 Start a sequel from this book?', h('div', null,
+      h('p', null, `A NEW book (book ${(v.number || 1) + 1} of the series) is made with ⚡ Make a book. This book is not changed.`),
+      h('ul', null,
+        h('li', null, 'Every character keeps the same personality, way of talking, name and origin — the new book cannot change them.'),
+        h('li', null, 'Their looks, belongings, abilities, relationships and status start as this book left them (the changes you approved).'),
+        h('li', null, 'The sequel hook of this book is the starting idea; the AI writes a new premise, plot and chapters.')),
+      v.proposals_here ? h('p', { class: 'bnd-err' }, `There ${v.proposals_here === 1 ? 'is 1 proposed change' : `are ${v.proposals_here} proposed changes`} you have not approved yet: the sequel only uses approved changes.`) : null,
+      h('p', { class: 'small' }, 'Pressing Start is your consent for the new book\'s run (like ⚡ Make a book for me).')), [{ id: 'yes', label: '📚 Start the sequel' }]);
+    if (ok !== 'yes') return;
+    btn.disabled = true;
+    try {
+      const r = await api('POST', bpath('/binder/series/sequel'), { body: { author_confirms: true } });
+      clear(busy).appendChild(h('p', { class: 'bnd-ok-msg', 'data-testid': 'binder-series-started' }, r.message || '📚 The sequel has started.'));
+      if (x.openMakeBook && r.run && r.run.id) x.openMakeBook(btn, { runId: r.run.id });
+    } catch (e) { btn.disabled = false; clear(busy).appendChild(h('p', { class: 'bnd-err' }, '📚 The sequel did not start: ', plainError(e))); }
   }
   const lookSel = h('select', { id: 'bnd-look', 'data-testid': 'binder-look' },
     Object.entries(LOOKS).map(([k, [w, ic]]) => h('option', { value: k, selected: k === st.look }, `${ic} ${w}${k === autoLook ? ' (auto)' : ''}`)));
@@ -1462,6 +1597,9 @@ export async function viewBinder(main, x, rest = []) {
       onclick: ev => runFill(null, ev.currentTarget) }, '✨ Fill from the book'),
     h('button', { type: 'button', 'data-testid': 'binder-pictures', title: 'Makes every missing character picture with Stable Diffusion in AutoInjector: portraits, the front, side and back views and character sheets, and the pictures waiting from the book run. Pictures you already have are kept.',
       onclick: ev => runPictures(ev.currentTarget) }, '🖼 Make the rest of the pictures'),
+    asOfPick,
+    h('button', { type: 'button', 'data-testid': 'binder-series', 'aria-expanded': 'false', title: 'The books of this series, what changed for each character in each book, and 📚 Start a sequel from this book.',
+      onclick: ev => toggleSeries(ev.currentTarget) }, '📚 Series'),
     h('button', { type: 'button', 'data-testid': 'binder-print', onclick: () => printBinder() }, '🖨 Print'),
     h('button', { type: 'button', 'data-testid': 'binder-pdf', onclick: ev => exportAs('pdf', ev.currentTarget) }, '⬇ PDF'),
     h('button', { type: 'button', 'data-testid': 'binder-docx', onclick: ev => exportAs('docx', ev.currentTarget) }, '⬇ Word'));
@@ -1477,8 +1615,9 @@ export async function viewBinder(main, x, rest = []) {
     h('div', { class: 'bnd-searchbox' }, h('label', { for: 'bnd-search', class: 'bnd-sr' }, 'Search the Book Bible'), search), results, tocDetails);
   const pager = h('div', { class: 'bnd-pager no-print' });
   const stage = h('div', { class: 'bnd-stage' });
-  const layout = h('div', { class: 'bnd-layout' }, rail, h('div', { class: 'bnd-main' }, toolbar, msg, pager, stage, h('div', { class: 'bnd-pager bnd-pager-bottom no-print' })));
+  const layout = h('div', { class: 'bnd-layout' }, rail, h('div', { class: 'bnd-main' }, toolbar, msg, asOfNote, seriesBox, pager, stage, h('div', { class: 'bnd-pager bnd-pager-bottom no-print' })));
   clear(root).appendChild(layout);
+  drawAsOf();
   if (window.matchMedia && window.matchMedia('(max-width: 800px)').matches) tocDetails.open = false;
 
   function drawContents() {
@@ -1574,7 +1713,7 @@ export async function viewBinder(main, x, rest = []) {
     btn.disabled = true;
     const word = fmt === 'pdf' ? 'PDF' : 'Word';
     try {
-      const blob = await api('GET', bpath(`/binder/export?format=${fmt}`), { blob: true });
+      const blob = await api('GET', bpath(`/binder/export?format=${fmt}${st.asOf ? `&as_of=${encodeURIComponent(st.asOf)}` : ''}`), { blob: true });
       const url = URL.createObjectURL(blob); S.blobUrls.push(url);
       const a = h('a', { href: url, download: `${String(book.title || 'Book').replace(/[^\p{L}\p{N} _'-]+/gu, '').trim().slice(0, 60) || 'Book'} - Book Bible.${fmt}` });
       document.body.appendChild(a); a.click(); a.remove();
