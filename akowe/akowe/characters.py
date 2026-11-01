@@ -322,6 +322,8 @@ def save_entry(store, pid: str, branch: str, rid: str, *, sheet=None, voice=None
                                      "in the form", status="REJECTED")
             new_sheet = clean_sheet(sheet) if sheet is not None else old.get("sheet") or clean_sheet({})
             new_voice = clean_voice(voice) if voice is not None else old.get("voice") or clean_voice({})
+            if by == "ai" and old.get("series_fixed") and not is_empty(None, old.get("voice")):
+                new_voice = old["voice"]  # 📚 a series character's speaking voice is fixed: an AI never rewrites it
             hist = list(old.get("history") or [])
             if old.get("version"):
                 hist.append({"version": old["version"], "at": old.get("updated_at"), "made_by": old.get("made_by"),
@@ -335,6 +337,8 @@ def save_entry(store, pid: str, branch: str, rid: str, *, sheet=None, voice=None
                      "sheet": new_sheet, "voice": new_voice, "version": int(old.get("version") or 0) + 1,
                      "made_by": {"kind": by if by in ("ai", "author") else "author", "slot": slot, "at": _now()},
                      "updated_at": _now(), "history": hist[-HISTORY_KEEP:]}
+            if old.get("series_fixed"):
+                entry["series_fixed"] = True
             cur[rid] = entry
             store.set_setting(_key(pid, branch), cur)
             tx.insert_outbox(pid, branch, "characters.sheet_saved", {
@@ -343,6 +347,21 @@ def save_entry(store, pid: str, branch: str, rid: str, *, sheet=None, voice=None
                 "voice_fields": sum(1 for k in VOICE_KEYS if new_voice.get(k)),
                 "relationships": len(new_sheet.get("relationships") or [])})
     return copy.deepcopy(entry)
+
+
+def mark_series_fixed(store, pid: str, branch: str, rids) -> int:
+    """📚 These characters come from an earlier book of a series: their voice card is fixed (an AI save keeps it)."""
+    n = 0
+    with _LOCK:
+        with store.transaction():
+            cur = all_entries(store, pid, branch)
+            for rid in rids or ():
+                if isinstance(cur.get(rid), dict) and not cur[rid].get("series_fixed"):
+                    cur[rid]["series_fixed"] = True
+                    n += 1
+            if n:
+                store.set_setting(_key(pid, branch), cur)
+    return n
 
 
 def _role_tag(old: dict, new_sheet: dict | None, by: str) -> tuple[str | None, str | None, str | None]:

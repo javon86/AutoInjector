@@ -925,3 +925,33 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
   bridge), `test_ui_binder.py::test_pictures_waiting_and_make_the_rest`, `desktop-app/test/sd-studio.test.js`.
   *Not done:* other characters only get a portrait in the run (their views / sheets come from the button); places and
   items get no pictures; the pictures add minutes per character before the chapters are written.
+- **📚 Series progression (2026-11-01).** A book bible could be reused for a sequel, but a character's looks,
+  belongings and abilities could not change from book to book, and nothing stopped a sequel from rewriting their
+  personality or voice. *Built:* `akowe/akowe/series.py`. Two layers per character: **fixed** for the series (name /
+  identity, traits = personality, background / origin, the voice card) and **changeable** per book (appearance,
+  items gained / lost, abilities gained / lost, relationships, status). A series (`series:<id>`, never keyed by a
+  project ID, so deleting one book keeps the others' history) lists its books in order and stores, per book, only each
+  character's changes (with the chapter); `state_as_of(series, key, n, "start"|"end")` applies them in order. A single
+  book is a series of one (nothing stored until the author acts). **✨ Find what changed in this book** (Book Bible →
+  📚 Series, and automatically at the end of a ⚡ run of a book that is in a series): the AI proposes each character's
+  changes; nothing is used before ✔ approve; approving merges and never removes; the form has no fixed-layer fields;
+  the author can write the changes themselves (`PUT …/binder/series/changes`). **📚 Start a sequel from this book**:
+  the book bible at the END of this book (fixed layers copied from the series, appearance / relationships at their end
+  state, no plan), the sequel hook as the idea, started as a ⚡ run (`sequel` in the run body) that registers the new
+  book as number N+1 and links its characters; their voice cards are marked fixed (`characters.save_entry` keeps them
+  on an AI save) and an AI fix of a carried-over character gets the fixed attributes put back word for word
+  (`series.protect_fixed` in `review._run_fix`). The writer's chapter brief gets `series_state` (each present
+  character as at the start of this book). **Per-book portraits**: approving a new look puts a "book N portrait" on the
+  to-make list; it is made with the same 🔒 lock name (prompt = fixed look + this book's changes), earlier portraits
+  are kept (`portraits_old`); picture maker down → it waits, and 🖼 Make the rest of the pictures makes it too.
+  **Book Bible**: each character page has "📚 Through the series" (book 1 → book 2 …, portrait + what changed + the
+  state), and **📖 As of book N** shows the whole binder of that book (its own pages, read only when it is another book,
+  each character at the end of that book; cast portraits too); PDF / Word / HTML exports follow the choice
+  (`?as_of=N`). The book bible JSON / Markdown carries a `series` block. Routes: `GET/… …/binder/series`,
+  `POST …/series/find|approve|dismiss|portraits|sequel`, `PUT …/series/changes|name`. Tests: `tests/test_series.py`,
+  `test_ui_binder.py::test_series_strip_as_of_book_and_sequel` / `test_single_book_has_no_series_strip_or_picker`.
+  *Not done:* places, items and groups have no per-book layer of their own (an item a character gains lives in that
+  character's changes; the "as of book N" view shows book N's own place/item pages); the series is not inside a
+  `book.akowe` package (only in the book bible), so a book opened on another computer arrives without its series;
+  the sequel needs an AI (it is a ⚡ run); the book page (📘 Make my book) has no sequel button — it is in the Book
+  Bible's 📚 Series panel; not tried with a real AI or Stable Diffusion.

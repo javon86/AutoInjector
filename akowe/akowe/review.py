@@ -1450,6 +1450,8 @@ class ReviewService:
         if not isinstance(raw, dict):
             raise AkoweError("INTERNAL_ERROR", "", "the AI did not return a revised record; nothing was changed")
         payload = keep_refs(rec.get("data") or {}, raw)
+        from . import series as series_mod  # noqa: PLC0415 - 📚 a later book never rewrites the fixed layer
+        kept = series_mod.protect_fixed(self.store, pid, branch, rec, payload)
         job.phase = "Saving the revised draft"
         bp = self.bp(job.principal, pid, branch)
         resp = bp.dispatch(rec["module_id"], "UPDATE", base_ref=rec["ref"], payload=payload)
@@ -1467,7 +1469,9 @@ class ReviewService:
                                                            "label": "Revised draft made by the AI at the author's "
                                                                     "request; it waits for the author's approval"})
         job.results.append({"record_id": rid, "ok": True, "from_version": rec["version"], "version": new["version"],
-                            "message": f"The AI made version {new['version']}. Read it and approve it, or edit it."})
+                            "message": f"The AI made version {new['version']}. Read it and approve it, or edit it."
+                            + (" 📚 " + "; ".join(kept)[:300] + "." if kept else ""),
+                            **({"series_fixed": kept} if kept else {})})
         job.done = 1
 
 

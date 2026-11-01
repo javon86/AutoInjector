@@ -369,10 +369,22 @@ def rest_plan(store, pid, branch) -> list[tuple[str, str, list]]:
     return out
 
 
+def series_waiting(store, pid, branch) -> int:
+    """📚 per-book portraits of the series still to make (series.py) — on the same to-make list."""
+    from . import series as series_mod  # noqa: PLC0415
+    try:
+        s = series_mod.of_book(store, pid, branch)
+        return 0 if s.get("virtual") else len(series_mod.portrait_plan(store, s))
+    except Exception:  # noqa: BLE001
+        log.exception("series portraits waiting")
+        return 0
+
+
 def summary(store, pid, branch) -> dict:
     plan = rest_plan(store, pid, branch)
     s = state(store, pid, branch)
     return {"missing": sum(len(x[2]) for x in plan), "characters": len(plan),
+            "series_portraits": series_waiting(store, pid, branch),
             "waiting": waiting_by_record(store, pid, branch), "locks": s["locks"], "settings": settings(store)}
 
 
@@ -391,7 +403,7 @@ def start_rest(app, principal: str, pid: str, branch: str, body=None) -> dict:
             out["total"] = self.total
             return out
     job = PicturesJob("book_pictures", principal, pid, branch, [r for r, _n, _s in plan], None)
-    job.total = max(1, sum(len(s) for _r, _n, s in plan))
+    job.total = max(1, sum(len(s) for _r, _n, s in plan) + series_waiting(app.store, pid, branch))
     return app.review._start(job, lambda j: run_rest(app, j, pid, branch))  # noqa: SLF001
 
 
@@ -399,9 +411,17 @@ def run_rest(app, job, pid, branch) -> None:
     store = app.store
     engine = settings(store)["engine"]
     plan = rest_plan(store, pid, branch)
-    job.total = max(1, sum(len(s) for _r, _n, s in plan))
-    if not plan:
+    extra = series_waiting(store, pid, branch)
+    job.total = max(1, sum(len(s) for _r, _n, s in plan) + extra)
+    if not plan and not extra:
         job.results.append({"ok": True, "message": "Every character already has all their pictures."})
+        return
+    if not plan:
+        job.phase = "Making the series portraits…"
+        sp = _series_portraits(app, job, pid, branch)
+        job.done = job.total
+        job.results.append({"ok": not sp["failed"], "made": sp["made"], "failed": sp["failed"],
+                            "message": _series_words(sp) or "Done."})
         return
     job.phase = "Checking the picture maker…"
     ok, code, why = probe(app, engine)
@@ -439,8 +459,29 @@ def run_rest(app, job, pid, branch) -> None:
                 note_waiting(store, pid, branch, rid2, name2, left2, res["code"], res["message"])
                 failed += len(left2)
             break
+    # 📚 the series portraits on the same list (make_portraits checks the picture maker itself; down -> they wait)
+    sp = _series_portraits(app, job, pid, branch) if extra else {"made": 0, "failed": 0}
     job.done = job.total
     msg = f"{made} picture(s) made." if made else "No pictures were made."
     if failed:
         msg += f" {failed} still waiting ({last}) — they stay on the to-make list; press the button again later."
-    job.results.append({"ok": not failed, "made": made, "failed": failed, "message": msg})
+    if extra:
+        msg += " " + _series_words(sp)
+    job.results.append({"ok": not failed and not sp["failed"], "made": made + sp["made"],
+                        "failed": failed + sp["failed"], "message": msg.strip()})
+
+
+def _series_portraits(app, job, pid, branch) -> dict:
+    from . import series as series_mod  # noqa: PLC0415
+    try:
+        return series_mod.make_portraits(app, job.principal, pid, branch, check=job.check,
+                                         on_phase=lambda p: setattr(job, "phase", p))
+    except AkoweError as exc:
+        return {"made": 0, "failed": 1, "message": exc.errors[0].get("message") if exc.errors else exc.code}
+
+
+def _series_words(sp: dict) -> str:
+    out = f"📚 {sp['made']} series portrait(s) made." if sp.get("made") else ""
+    if sp.get("failed"):
+        out += f" 📚 {sp['failed']} series portrait(s) still waiting ({sp.get('message') or sp.get('code') or ''})."
+    return out.strip()

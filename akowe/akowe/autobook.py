@@ -634,6 +634,12 @@ class AutoBookService(_Runner):
                                  "consent for this run; it must be sent as author_confirms: true", status="REJECTED")
         settings = self._clean_settings(body)
         bible = self._bible_settings(principal, body, settings)   # P21 🔁 rerun from a saved book bible
+        if body.get("sequel") not in (None, ""):  # 📚 a sequel: the next book of a series (series.start_sequel)
+            if bible is None:
+                raise AkoweError("INVALID_INPUT", "/sequel", "a sequel starts from the book bible of the book before "
+                                     "it (from_bible)", status="REJECTED")
+            from . import series as series_mod  # noqa: PLC0415
+            settings["sequel"] = series_mod.clean_sequel_setting(self.store, body["sequel"])
         self._continue_settings(principal, body, settings)        # P21 ▶ continue an (opened) unfinished book
         if not self._ai_configured():
             raise AkoweError("CAPABILITY_UNAVAILABLE", "/slot_id", "no AI is connected — Make a book for me needs "
@@ -724,6 +730,13 @@ class AutoBookService(_Runner):
                                       "review passes, for this book and this run only.")
             self.event(run, "project", f"Continuing “{c['title']}” from where it stopped: the steps already done are "
                        "kept and skipped", step="backup")
+        if settings.get("sequel"):
+            q = settings["sequel"]
+            self.event(run, "note", f"📚 Book {q['number']} of the series: it starts from the end of “"
+                       f"{q.get('previous_title') or 'the book before'}” — every character's personality, voice, name "
+                       "and origin are kept exactly (fixed for the series); their looks, belongings, abilities, "
+                       "relationships and status start as that book left them. New premise, plot and chapters.",
+                       step="backup", code="SERIES_SEQUEL")
         if settings.get("bible"):
             b = settings["bible"]
             self.event(run, "note", f"🔁 A new book from the book bible of {b['source']}: the same profile, choices, "
@@ -1065,6 +1078,7 @@ class AutoBookService(_Runner):
                            " AI review(s) were made by the AI that wrote the draft (only one AI worked then)",
                            code="REVIEW_NOT_INDEPENDENT")
             self._length_warning(run)
+            self._series_changes(run)
             self.save(run)
         except RunPaused:
             st = self._step(run, run.get("current") or "backup")
@@ -1878,9 +1892,15 @@ class AutoBookService(_Runner):
                 save_profile(self.store, pid, bp_)
                 with self.store.transaction() as tx:
                     tx.execute("UPDATE projects SET name=? WHERE project_id=? AND name=?",
-                               (f"{bp_['title']} (rerun)"[:200], pid, NEW_BOOK_NAME))
+                               (bp_['title'][:200] if s.get("sequel") else f"{bp_['title']} (rerun)"[:200], pid,
+                                NEW_BOOK_NAME))
             self.event(run, "project", f"🔁 The book profile of “{bp_['title']}” was taken from the saved book bible "
                        "(a new, separate book)")
+        if s.get("sequel") and not run.get("sequel_registered"):
+            from . import series as series_mod  # noqa: PLC0415
+            series_mod.register_sequel(self.store, s["sequel"], pid, run["branch_id"])
+            run["sequel_registered"] = True
+            self.save(run)
         prof = book_profile_brief(self.store, pid)
         if prof.get("title") and prof.get("idea"):
             self._name_book(pid, prof["title"])  # a stop between saving the profile and naming the book
@@ -1917,6 +1937,33 @@ class AutoBookService(_Runner):
         st["message"] = f"“{prof['title']}” by {prof['author']} ({prof['genre'] or 'any genre'})"
         self.event(run, "ai", f"The AI invented the book “{prof['title']}”", slot=job.slot)
 
+    def _series_changes(self, run):
+        """📚 A finished book of a series: the AI proposes what changed for each character in it (proposals only —
+        the author approves them in the Book Bible). Never stops or fails the finished run."""
+        from . import series as series_mod  # noqa: PLC0415
+        pid, branch = run.get("project_id"), run.get("branch_id") or "main"
+        if not pid or series_mod.member(self.store, pid) is None or run.get("series_changes_done"):
+            return
+        run["series_changes_done"] = True
+        try:
+            job = self._sub_job(run, "series_changes", pid, run["settings"].get("slot_id"))
+            out = series_mod.find_changes(self.app, job, pid, branch, assist=self._assist)
+        except (RunPaused, RunCancelled, Cancelled):
+            return
+        except AkoweError as exc:
+            e = exc.errors[0] if exc.errors else {}
+            self.event(run, "note", f"📚 What changed for the characters in this book could not be found now "
+                       f"({e.get('message') or exc.code}); press ✨ Find what changed in this book in the 📖 Book "
+                       "Bible later", code="SERIES_CHANGES_LATER")
+            return
+        except Exception:  # noqa: BLE001 - the book is made; this is an extra
+            log.exception("make-a-book run %s: series changes", run.get("id"))
+            return
+        if out["proposed"]:
+            self.event(run, "note", f"📚 The AI proposed what changed for {out['proposed']} character(s) in this book. "
+                       "Open the 📖 Book Bible → 📚 Series to read and ✔ approve them (nothing is used before you do)",
+                       code="SERIES_CHANGES_PROPOSED")
+
     def _name_book(self, pid: str, title: str):
         with self.store.transaction() as tx:
             tx.execute("UPDATE projects SET name=? WHERE project_id=? AND name=?", (title, pid, NEW_BOOK_NAME))
@@ -1924,6 +1971,14 @@ class AutoBookService(_Runner):
     def _s_canon(self, run, st):
         if run["settings"].get("bible") and not run.get("bible_seeded"):
             self._seed_canon(run, st)  # P21 🔁: the saved characters, places and world, as drafts of this book
+        if run["settings"].get("sequel") and run.get("bible_seeded") and not run.get("sequel_linked"):
+            from . import series as series_mod  # noqa: PLC0415 - 📚 the sequel's characters = the series' people
+            n = series_mod.link_sequel(self.store, run["settings"]["sequel"], run["project_id"], run["branch_id"],
+                                       run.get("bible_map") or {})
+            run["sequel_linked"] = True
+            self.event(run, "note", f"📚 {n} character(s) carried over from the book before: their personality, "
+                       "voice, name and origin are protected in this book", step="canon", code="SERIES_SEQUEL")
+            self.save(run)
         canon_ops = ("A01", "A04", "A03") + tuple(op for op in run.get("bible_ops") or () if op not in
                                                   ("A01", "A04", "A03"))
         counts = CANON_COUNTS[run["settings"]["length"]]

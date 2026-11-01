@@ -100,6 +100,35 @@ class FakeBinderApi:
             f.update(value=" · ".join(v) if isinstance(v, list) else str(v), status=status)
             f["edit"] = {"route": "#/p/x/main/binder", "field": k, "target": target, "api": "PUT …/binder/fields"}
 
+    def series_api(self, req, path, body, ok):
+        """📚 GET …/binder/series, POST …/series/find (a job), …/approve, …/dismiss, …/sequel."""
+        sv = self.series_view
+        self.series_calls = getattr(self, "series_calls", []) + [(req.method, path, body)]
+        if req.method == "GET" and path == "/series":
+            return ok(sv)
+        if req.method == "POST" and path == "/series/find":
+            for c in sv["characters"]:
+                if c["key"] == "c1":
+                    c["strip"][-1]["proposal"] = {"appearance": [{"text": "a burn scar on her right hand"}]}
+                    c["strip"][-1]["proposal_words"] = "Appearance: a burn scar on her right hand"
+            sv["proposals_here"] = sv["proposals"] = 1
+            self.jobs["job-series-1"] = {"job_id": "job-series-1", "kind": "series_changes", "status": "done", "phase": "Finished",
+                                         "done": 1, "total": 1, "results": [{"ok": True, "proposed": 1, "message": "The AI proposed changes for 1 character(s). Read them and ✔ approve the ones that are right (nothing is used before you approve)."}]}
+            return ok(dict(self.jobs["job-series-1"], status="running", done=0), 202)
+        if req.method == "POST" and path in ("/series/approve", "/series/dismiss"):
+            for c in sv["characters"]:
+                if c["key"] == body.get("key"):
+                    b = c["strip"][-1]
+                    if path.endswith("approve"):
+                        b["changes"], b["words"] = b["proposal"], b["proposal_words"]
+                    b["proposal"], b["proposal_words"] = None, ""
+            sv["proposals_here"] = sv["proposals"] = 0
+            return ok({"ok": True, "key": body.get("key"), "portrait_needed": False})
+        if req.method == "POST" and path == "/series/sequel":
+            return ok({"run": {"id": "run-seq1"}, "sequel": {"number": 3},
+                       "message": "📚 Book 3 has started: “The Ferry Books: Book 3”. Its characters start as they were at the end of “The Lamplighter's Last Ferry”."}, 202)
+        return ok({"errors": [{"code": "NOT_FOUND", "path": "/", "message": "not found"}]}, 404)
+
     def values(self, target):
         out = {}
         for k, f in stored_fields(self.doc, target):
@@ -157,6 +186,11 @@ class FakeBinderApi:
             self.jobs[jid] = {"job_id": jid, "kind": "book_pictures", "status": "done", "phase": "Finished", "done": 5, "total": 5,
                               "results": [{"ok": True, "made": 5, "failed": 0, "message": "5 picture(s) made."}]}
             return ok(dict(self.jobs[jid], status="running", done=0, phase="Making the portrait of “Maren Vey”"), 202)
+        if path.startswith("/series"):  # 📚 series progression
+            return self.series_api(req, path, body, ok)
+        if path.startswith("?as_of=") and getattr(self, "as_of_docs", None):
+            self.as_of_calls = getattr(self, "as_of_calls", []) + [path]
+            return ok(self.as_of_docs[path.split("=", 1)[1].split("&")[0]])
         if self.status != 200:
             return ok({"errors": [{"code": "NOT_FOUND", "path": "/", "message": "not found"}]}, self.status)
         return ok(self.doc)
@@ -807,3 +841,105 @@ def test_pictures_waiting_and_make_the_rest(make_context, bd):
     assert page.bf_calls.pictures == 1
     page.wait_for_function("() => !document.querySelector('[data-testid=binder-pic-waiting]')")
     assert_clean(page, "pictures")
+
+
+# ------------------------------------------------------------------------------------------------ 📚 series
+def _series_docs(pid):
+    """Book 2 of a series: Maren's page has the "Through the series" strip; ?as_of=1 is book 1, read only."""
+    doc = fixture_doc(pid)
+    pic = next(p for p in doc["pages"] if p["page_id"] == "ch-odile")["pics"]["5.1.1"]["url"]
+    books = [{"number": 1, "title": "The Lamplighter's First Night", "exists": True, "current": False},
+             {"number": 2, "title": "The Lamplighter's Last Ferry", "exists": True, "current": True}]
+    doc["series"] = {"in_series": True, "name": "The Ferry Books", "number": 2, "as_of": 2, "books": books, "problem": None}
+    strip = [{"number": 1, "title": books[0]["title"], "exists": True, "in_book": True, "portrait": {"url": pic, "alt": "Maren in book 1"},
+              "changes": {"appearance": [{"text": "lost her left eye"}]}, "words": "Appearance: lost her left eye · Gained: the Resonance Key",
+              "proposal": None, "proposal_words": "", "portrait_waiting": False},
+             {"number": 2, "title": books[1]["title"], "exists": True, "in_book": True, "portrait": None, "changes": None, "words": "",
+              "proposal": None, "proposal_words": "", "portrait_waiting": True}]
+    for p in doc["pages"]:
+        if p["page_id"] == "ch-maren":
+            p["series"] = {"key": "c1", "as_of": 2, "strip": strip, "changed": True,
+                           "state": {"looks": "Small and wiry. Now: lost her left eye.", "carries": "the Resonance Key"}}
+    old = json.loads(json.dumps(doc))
+    old["series"].update(as_of=1, viewing={"number": 1, "title": books[0]["title"], "read_only": True},
+                         note="You are looking at book 1 (“The Lamplighter's First Night”) — read only here; open that book to change it.")
+    old["read_only"] = True
+    for p in old["pages"]:
+        for sec in p["sections"].values():
+            for f in sec["fields"].values():
+                f.pop("edit", None)
+        if p["page_id"] == "ch-maren":
+            p["sections"]["5.6"]["fields"]["5.6.1"].update(value="Small and wiry. Now: lost her left eye.", status="auto", source="series:as_of_book_1")
+    view = {"in_series": True, "series_id": "ser-1", "name": "The Ferry Books", "number": 2,
+            "books": [dict(b, project_id=f"p{b['number']}") for b in books], "proposals": 0, "proposals_here": 0,
+            "portraits_waiting": 0, "next_book": None, "problem": None,
+            "characters": [{"key": "c1", "name": "Maren Vey", "record_id": "rec-maren", "first_book": 1, "fixed": {}, "has_voice": True,
+                            "start": {}, "end": {}, "strip": json.loads(json.dumps(strip))}]}
+    return doc, old, view
+
+
+def test_series_strip_as_of_book_and_sequel(make_context, bd):
+    """📚 A character page of book 2 shows "Through the series" (book 1 → book 2 with what changed); 📖 As of book 1
+    loads that book read only (banner, no edit or fill buttons); the 📚 Series panel finds the changes of this book,
+    shows the proposal, ✔ approves it, and 📚 Start a sequel asks for consent and starts the new book's run."""
+    doc, old, view = _series_docs(bd.pid)
+    ctx_page = None
+    page = open_binder(make_context, bd, page_id="ch-maren", doc=doc)
+    ctx_page = page
+    api = page.bf_calls
+    api.as_of_docs, api.series_view = {"1": old}, view
+    art = page.locator('.bnd-page[data-page-id="ch-maren"]')
+    strip = art.locator("[data-testid=binder-series-strip]")
+    assert strip.count() == 1
+    assert strip.locator(".bnd-series-book").count() == 2
+    assert "lost her left eye" in strip.inner_text() and "Book 1" in strip.inner_text()
+    assert strip.locator(".bnd-series-book.is-here").get_attribute("data-book") == "2"
+    assert "🖼 waiting" in strip.locator('.bnd-series-book[data-book="2"]').inner_text()
+    assert "As of the end of book 2" in strip.inner_text() and "Resonance Key" in strip.inner_text()
+    shot(page, "binder-series-strip")
+    # 📖 As of book 1: that book, read only
+    sel = page.locator("[data-testid=binder-as-of]")
+    assert sel.is_visible()
+    assert [o.strip() for o in sel.locator("option").all_inner_texts()] == ["This book (book 2)", "Book 1: The Lamplighter's First Night"]
+    sel.select_option("1")
+    page.wait_for_selector("[data-testid=binder-as-of-note] .bnd-asof-banner")
+    assert "read only" in page.inner_text("[data-testid=binder-as-of-note]")
+    assert api.as_of_calls == ["?as_of=1"]
+    art = page.locator('.bnd-page[data-page-id="ch-maren"]')
+    assert "lost her left eye" in art.inner_text()
+    assert art.locator(".bnd-pagetools").count() == 0
+    shot(page, "binder-series-as-of-book-1")
+    page.click("[data-testid=binder-as-of-note] button")
+    page.wait_for_function("() => !document.querySelector('[data-testid=binder-as-of-note] .bnd-asof-banner')")
+    # 📚 the series panel: find what changed, approve
+    page.click("[data-testid=binder-series]")
+    page.wait_for_selector("[data-testid=binder-series-find]")
+    assert "this is book 2" in page.inner_text("[data-testid=binder-series-box]")
+    page.click("[data-testid=binder-series-find]")
+    page.wait_for_selector("[data-testid=binder-series-proposals]")
+    assert "a burn scar on her right hand" in page.inner_text("[data-testid=binder-series-proposals]")
+    assert "nothing is used before you approve" in page.inner_text("[data-testid=binder-series-msg]")
+    shot(page, "binder-series-panel")
+    page.click("[data-testid=binder-series-approve]")
+    page.wait_for_selector("[data-testid=binder-series-box] .bnd-series-done")
+    assert page.locator("[data-testid=binder-series-proposals]").count() == 0
+    assert ("POST", "/series/approve", {"key": "c1"}) in api.series_calls
+    assert "a burn scar" in page.inner_text("[data-testid=binder-series-box]")
+    # 📚 start a sequel: consent first, Cancel starts nothing
+    page.route(re.compile(r"/api/autobook/run-seq1$"), lambda r: r.fulfill(status=200, content_type="application/json", body="null"))
+    page.click("[data-testid=binder-series-sequel]")
+    page.wait_for_selector("dialog[open] >> text=Start a sequel from this book?")
+    page.click("dialog[open] >> text=📚 Start the sequel")
+    page.wait_for_selector("[data-testid=binder-series-started]")
+    assert "Book 3 has started" in page.inner_text("[data-testid=binder-series-started]")
+    assert ("POST", "/series/sequel", {"author_confirms": True}) in api.series_calls
+    assert not overflow(ctx_page)
+    assert_clean(page, "series")
+
+
+def test_single_book_has_no_series_strip_or_picker(make_context, bd):
+    page = open_binder(make_context, bd, page_id="ch-maren")
+    assert page.locator("[data-testid=binder-series-strip]").count() == 0
+    assert not page.locator("[data-testid=binder-as-of]").is_visible()
+    assert page.locator("[data-testid=binder-series]").is_visible()
+    assert_clean(page, "single book")
