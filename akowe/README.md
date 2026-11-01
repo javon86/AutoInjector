@@ -183,7 +183,7 @@ anyone”). The editor gets these counts; you see them under **🔎 Pattern chec
   normal / strict (when scores and notes count as *revise*: normal = any major note or any score below 6).
 
 The editor's scores and notes are advice stored for exactly that version; the journal shows the verdicts and counts,
-never your text. What the editor checks is written in one plain file, `akowe/editor_rubric.py`.
+never your text. What the editor checks is written in one plain file, `akowe/akowe/editor_rubric.py`.
 
 ## 🎭 Characters who are their own people, 🎬 scenes planned before writing
 
