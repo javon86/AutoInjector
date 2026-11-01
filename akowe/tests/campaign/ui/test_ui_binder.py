@@ -601,11 +601,14 @@ def test_the_main_character_is_marked_everywhere(make_context, bd):
     first = cards.first
     assert first.get_attribute("data-name") == "Odile Marsh" and "is-protagonist" in first.get_attribute("class")
     assert "★" in first.locator("[data-testid=protagonist-badge]").inner_text() and "Main character" in first.inner_text()
-    silas = cast.locator('.bnd-card[data-name="Silas Crane"]')                           # another "main": no ★ badge
+    silas = cast.locator('.bnd-card[data-name="Silas Crane"]')                           # the villain: no ★ badge
     assert silas.locator("[data-testid=protagonist-badge]").count() == 0
     w = lambda sel: page.evaluate("s => document.querySelector(s).getBoundingClientRect().width", sel)  # noqa: E731
     assert w('.bnd-card[data-name="Odile Marsh"]') > w('.bnd-card[data-name="Silas Crane"]') * 1.3        # first, larger card
-    assert "Main characters" in cast.locator(".bnd-group-h").first.inner_text()
+    heads = [cast.locator(".bnd-group-h").nth(i).inner_text() for i in range(cast.locator(".bnd-group-h").count())]
+    assert [h.split(" (")[0].replace("4.1.1", "").strip() for h in heads] == ["★ Main character", "Villains", "Supporting", "Minor & extras"]
+    assert silas.locator(".bnd-role").text_content().strip() == "🗡️ Villain"                 # role title + icon
+    assert cast.locator('.bnd-card[data-name="Tobiah Reed"] .bnd-role').text_content().strip() == "🦉 Mentor"
     shot(page, "binder-cast-protagonist")
     # the character page: header band + 📋 Quick stats "Story role"
     goto_page(page, "ch-odile")
@@ -613,7 +616,7 @@ def test_the_main_character_is_marked_everywhere(make_context, bd):
     assert odile.locator(".bnd-band [data-testid=protagonist-badge]").count() == 1
     assert odile.locator("[data-testid=story-role] dt").inner_text().strip() == "Story role"
     assert odile.locator("[data-testid=story-role] dd").inner_text().strip() == "★ Main character — protagonist"
-    for pid_, want in (("ch-silas", "Main character"), ("ch-tobiah", "Supporting"), ("ch-maren", "Minor")):
+    for pid_, want in (("ch-silas", "🗡️ Villain"), ("ch-tobiah", "🦉 Mentor"), ("ch-wren", "🏠 Family"), ("ch-maren", "• Minor character")):
         goto_page(page, pid_)
         art = page.locator(f'.bnd-page[data-page-id="{pid_}"]')
         assert art.locator("[data-testid=story-role] dd").inner_text().strip() == want, pid_
@@ -631,8 +634,8 @@ def test_the_main_character_is_marked_everywhere(make_context, bd):
     doc = fixture_doc(bd.pid)
     doc["book"].pop("protagonist")
     for p in doc["pages"]:
-        p.pop("story_role", None)
-        p.pop("is_protagonist", None)
+        for k in ("story_role", "is_protagonist", "role_label", "role_icon"):
+            p.pop(k, None)
     p2 = open_binder(make_context, bd, page_id="ch-odile", doc=doc)
     assert p2.locator('.bnd-page[data-page-id="ch-odile"] [data-testid=story-role] dd').inner_text().strip() == "★ Main character — protagonist"
     assert_clean(p2, "protagonist fallback")

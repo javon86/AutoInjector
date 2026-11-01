@@ -230,16 +230,20 @@ export async function viewBinder(main, x, rest = []) {
       main character), else derived from the story role key */
   function roleInfo(p) {
     const k = storyRole(p);
-    if (typeof p.role_label === 'string' && p.role_label.trim() && (k === 'protagonist') === !!p.is_protagonist) {
-      return { key: k, label: p.role_label.trim(), icon: typeof p.role_icon === 'string' ? p.role_icon : (k === 'protagonist' ? '★' : '') };
+    if (typeof p.role_label === 'string' && p.role_label.trim()) {   // the stored story role (story_roles: title + icon)
+      const key = k === 'protagonist' ? k : (typeof p.story_role === 'string' && p.story_role) || k;
+      return { key, label: p.role_label.trim(), icon: typeof p.role_icon === 'string' ? p.role_icon : (k === 'protagonist' ? '★' : '') };
     }
     return { key: k, label: ROLE_WORDS[k], icon: k === 'protagonist' ? '★' : '' };
   }
+  /** a row's story-role icon (🦉 Mentor, 🗡️ Villain…), from the data's role_icon / story_role_icon */
+  const roleIcon = r => { const m = rowMeta(r); const i = typeof m.role_icon === 'string' ? m.role_icon : (typeof m.story_role_icon === 'string' ? m.story_role_icon : '');
+    return i ? h('span', { class: 'bnd-role-i', 'aria-hidden': 'true' }, `${i} `) : null; };
   /** the story role of a character page: protagonist (only one) | main | side | minor */
   function storyRole(p) {
     if (isProt(p)) return 'protagonist';
-    const sr = p.story_role && p.story_role.key;
-    if (sr && sr !== 'protagonist' && ROLE_WORDS[sr]) return sr;
+    const sr = typeof p.story_role === 'string' ? p.story_role : (p.story_role && p.story_role.key);
+    if (sr && sr !== 'protagonist') return sr;
     const cast = pages.find(q => q.template === '4');
     const r = cast ? ((cast.sections || {})['4.2'] || {}).rows || [] : [];
     const row = r.find(x => x && x._meta && x._meta.page_id === p.page_id);
@@ -737,7 +741,7 @@ export async function viewBinder(main, x, rest = []) {
     return h('div', { class: 'bnd-cast-strip' }, rs.map(r => {
       const name = txt(rf(r, '3.6.2')); const t = rowPage(r) || findPage(name); const prot = stripProt(r);
       return h('div', { class: `bnd-mini-card${prot ? ' is-protagonist' : ''}` }, bubble(name, 'l', rowPic(p, '3.6.1', r)),
-        h('div', null, prot ? protBadge('bnd-prot-s') : null, h('b', null, t ? pageLink(t, name) : name || '—'), h('small', { class: 'bnd-role' }, txt(rf(r, '3.6.3'))),
+        h('div', null, prot ? protBadge('bnd-prot-s') : null, h('b', null, t ? pageLink(t, name) : name || '—'), prot && /^main character$/i.test(txt(rf(r, '3.6.3')).trim()) ? null : h('small', { class: 'bnd-role' }, prot ? null : roleIcon(r), txt(rf(r, '3.6.3'))),
           h('p', null, empty(rf(r, '3.6.4')) ? placeholder(p, '3.6.4', rf(r, '3.6.4')) : txt(rf(r, '3.6.4')))));
     }));
   }
@@ -770,9 +774,12 @@ export async function viewBinder(main, x, rest = []) {
       if (/minor|cameo|extra/.test(role)) return 'Minor';
       return 'Supporting';
     };
-    const groups = [];
-    for (const r of rs) { const g = groupOf(r); let e = groups.find(x => x[0] === g); if (!e) groups.push(e = [g, []]); e[1].push(r); }
-    const roleSel = h('select', { id: `bnd-cast-role-${p.page_id}`, class: 'bnd-filter' }, h('option', { value: '' }, 'Every role'), groups.map(([g]) => h('option', { value: g }, g)));
+    const groups = []; const groupLabel = {};
+    for (const r of rs) {
+      const g = groupOf(r); let e = groups.find(x => x[0] === g); if (!e) groups.push(e = [g, []]); e[1].push(r);
+      if (!groupLabel[g]) groupLabel[g] = (typeof rowMeta(r).group_label === 'string' && rowMeta(r).group_label) || `${g} characters`;
+    }
+    const roleSel = h('select', { id: `bnd-cast-role-${p.page_id}`, class: 'bnd-filter' }, h('option', { value: '' }, 'Every role'), groups.map(([g]) => h('option', { value: g }, groupLabel[g])));
     const statSel = h('select', { id: `bnd-cast-st-${p.page_id}`, class: 'bnd-filter' }, h('option', { value: '' }, 'Every status'),
       [['approved', '✔ Approved'], ['draft', '✎ Draft'], ['needs_you', '⚠ Needs you']].map(([v, l]) => h('option', { value: v }, l)));
     const noPic = h('input', { type: 'checkbox', id: `bnd-cast-np-${p.page_id}` });
@@ -790,7 +797,7 @@ export async function viewBinder(main, x, rest = []) {
           return true;
         });
         if (!shown.length) continue;
-        body.appendChild(h('div', { class: 'bnd-group-h', 'data-fid': '4.1.1' }, h('span', { class: 'bnd-fid' }, '4.1.1'), `${g} characters `, h('small', { 'data-fid': '4.1.2' }, `(${shown.length})`)));
+        body.appendChild(h('div', { class: 'bnd-group-h', 'data-fid': '4.1.1' }, h('span', { class: 'bnd-fid' }, '4.1.1'), `${groupLabel[g]} `, h('small', { 'data-fid': '4.1.2' }, `(${shown.length})`)));
         body.appendChild(h('div', { class: 'bnd-cards' }, shown.map(r => castCard(p, r, castProt(r)))));
       }
       if (!body.querySelector('.bnd-card')) body.appendChild(h('p', { class: 'bnd-empty' }, 'No character matches these filters.'));
@@ -799,7 +806,7 @@ export async function viewBinder(main, x, rest = []) {
     for (const el of [roleSel, statSel, noPic]) el.addEventListener('change', draw);
     draw();
     return [
-      sec(p, '4.1', h('div', { class: 'bnd-groups' }, groups.length ? groups.map(([g, l]) => h('span', { class: 'bnd-chip bnd-chip-count' }, h('b', null, g), ` ${l.length}`)) : val(p, '4.1.1'))),
+      sec(p, '4.1', h('div', { class: 'bnd-groups' }, groups.length ? groups.map(([g, l]) => h('span', { class: 'bnd-chip bnd-chip-count' }, h('b', null, groupLabel[g]), ` ${l.length}`)) : val(p, '4.1.1'))),
       sec(p, '4.2', body),
       sec(p, '4.3', h('div', { class: 'bnd-filters' },
         h('label', { for: roleSel.id }, 'Role '), roleSel, h('label', { for: statSel.id }, 'Status '), statSel,
@@ -818,7 +825,7 @@ export async function viewBinder(main, x, rest = []) {
         prot ? protBadge() : null,
         h('div', { class: 'bnd-code' }, [txt(rf(r, '4.2.3')), empty(rf(r, '4.2.6')) ? null : `age ${txt(rf(r, '4.2.6'))}`].filter(Boolean).join(' · ')),
         h('h4', null, t ? pageLink(t, name) : name),
-        h('div', { class: 'bnd-role' }, txt(rf(r, '4.2.4'))),
+        prot && /^main character$/i.test(txt(rf(r, '4.2.4')).trim()) ? null : h('div', { class: 'bnd-role', 'data-role': rowMeta(r).story_role || null }, prot ? null : roleIcon(r), txt(rf(r, '4.2.4'))),
         h('p', null, empty(rf(r, '4.2.5')) ? placeholder(p, '4.2.5', rf(r, '4.2.5')) : txt(rf(r, '4.2.5'))),
         h('div', { class: 'bnd-card-foot' }, empty(rf(r, '4.2.7')) ? null : h('small', null, `First seen ${txt(rf(r, '4.2.7'))}`), badge(s, true))));
   }

@@ -233,25 +233,34 @@ def test_auto_fields(demo):
 
 
 def test_protagonist_single_and_the_relationship_map_centre(demo):
+    from akowe import story_roles
     app, pid, d = demo
     prot = d["book"]["protagonist"]
     mara = char_rid(app, pid, "Mara Vell")
+    cast = story_roles.cast(app.store, pid, BR)
+    assert cast["protagonist"] == mara                                                  # the stored tag
     assert prot == {"record_id": mara, "name": "Mara Vell", "page_id": f"character-{binder.slug(mara)}",
-                    "why": "marked as the main character"}
+                    "why": cast["reason"]}
     rel = page_of(d, template="6")
     assert rel["graph"]["centre"] == prot["record_id"]
     assert [n["id"] for n in rel["graph"]["nodes"] if n["is_protagonist"]] == [prot["record_id"]]
     chars = [p for p in d["pages"] if p["template"] == "5"]
     assert [p["page_id"] for p in chars if p["is_protagonist"]] == [prot["page_id"]]     # exactly one
-    assert page_of(d, "Mara Vell")["story_role"] == {"key": "protagonist", "label": "Main character — protagonist",
-                                                    "icon": "★", "protagonist": True}
-    assert {k: page_of(d, "Mara Vell")[k] for k in ("role_label", "role_icon", "is_protagonist")} == {
-        "role_label": "Main character — protagonist", "role_icon": "★", "is_protagonist": True}
-    assert page_of(d, "Tom Reed")["role_label"] == "Supporting" and page_of(d, "Tom Reed")["role_icon"] == ""
-    assert page_of(d, "Tom Reed")["story_role"]["key"] == "side" and page_of(d, "Moki Vey")["story_role"]["key"] == "minor"
-    cast = page_of(d, template="4")["sections"]["4.2"]["rows"]
-    assert cast[0]["_meta"]["is_protagonist"] and cast[0]["4.2.2"]["value"] == "Mara Vell"
-    assert sum(1 for r in cast if r["_meta"]["is_protagonist"]) == 1
+    assert {k: page_of(d, "Mara Vell")[k] for k in ("story_role", "role_label", "role_icon", "is_protagonist")} == {
+        "story_role": "protagonist", "role_label": "Main character — protagonist", "role_icon": "★", "is_protagonist": True}
+    roles = {c["name"]: c["story_role"] for c in cast["characters"]}
+    for name in ("Tom Reed", "Moki Vey"):                                               # everyone else: their own title
+        pg = page_of(d, name)
+        assert pg["story_role"] == roles[name] != "protagonist" and not pg["is_protagonist"]
+        assert pg["role_label"] == story_roles.label(roles[name]) and pg["role_icon"] == story_roles.icon(roles[name])
+    rows = page_of(d, template="4")["sections"]["4.2"]["rows"]
+    assert rows[0]["_meta"]["is_protagonist"] and rows[0]["4.2.2"]["value"] == "Mara Vell"
+    assert sum(1 for r in rows if r["_meta"]["is_protagonist"]) == 1
+    assert rows[0]["_meta"]["group"] == "Main" and rows[0]["_meta"]["group_label"] == "★ Main character"
+    for r in rows:
+        k = roles[r["4.2.2"]["value"]]
+        assert r["_meta"]["story_role"] == k and r["_meta"]["story_role_icon"] == story_roles.icon(k)
+        assert r["_meta"]["group_label"] == story_roles.GROUP_LABEL[story_roles.group_of(k)]
     glance = page_of(d, template="3")["sections"]["3.6"]["rows"]
     assert glance[0]["_meta"]["is_protagonist"] and sum(1 for r in glance if r["_meta"]["is_protagonist"]) == 1
     jump = page_of(d, template="2")["sections"]["2.2"]["rows"]
@@ -263,39 +272,53 @@ def test_protagonist_single_and_the_relationship_map_centre(demo):
     assert set(d["progress"]) == {"approved_percent", "approved", "pages", "drafts_waiting", "missing_pictures"}
 
 
-def _fake_book(chars, *, sheets=None, povs=(), idea=""):
-    """A binder Book with only what the protagonist pick reads (no store)."""
+class _NoStore:
+    def get_setting(self, key):
+        return {}
+
+
+def _fake_book(chars, *, entries=None, povs=(), idea=""):
+    """A binder Book whose cast is story_roles.cast over these characters (no real store)."""
+    from akowe import story_roles
     b = binder.Book.__new__(binder.Book)
     cs = [{"record_id": f"A01-{n.split()[0].lower()}", "subject_id": n.split()[0].lower(), "name": n} for n in chars]
-    b.__dict__.update(chars=cs, sheets={f"A01-{k}": {"sheet": {"role": v}} for k, v in (sheets or {}).items()},
-                      chapters=[{"chapter_id": f"ch-{i}", "number": i + 1, "plan": {"pov_id": pov}}
-                                for i, pov in enumerate(povs)], prof={"idea": idea}, dossiers={})
-    return b
+    ents = {f"A01-{k}": v for k, v in (entries or {}).items()}
+    k = story_roles.cast(_NoStore(), "p", BR, chars=cs, entries=ents, idea=idea, povs=list(povs))
+    b.__dict__.update(chars=cs, sheets=ents, chapters=[], prof={"idea": idea}, dossiers={},
+                      cast=dict(k, by_id={c["record_id"]: c for c in k["characters"]}))
+    return b, k
 
 
-def test_protagonist_pick_and_fallbacks():
-    # nothing marked, no viewpoint chapters, no name in the idea: the first character of the cast
-    b = _fake_book(["Ada Quill", "Bram Stoke", "Cy Rune"])
-    assert b.protagonist["name"] == "Ada Quill" and b.protagonist_info()["why"] == "the first character of the cast"
-    assert b.role_of(b.chars[0]) == "main" and b.story_role(b.chars[1])["key"] == "minor"
+def test_protagonist_follows_story_roles_and_its_fallbacks():
+    # nothing tagged, no viewpoint chapters, no name in the idea: the first character made
+    b, k = _fake_book(["Ada Quill", "Bram Stoke", "Cy Rune"])
+    assert k["protagonist"] == "A01-ada" and b.protagonist["name"] == "Ada Quill"
+    assert b.protagonist_info()["why"] == k["reason"] == "the first character made"
+    assert b.role_of(b.chars[0]) == "main" and b.role_fields(b.chars[0])["role_label"] == "Main character — protagonist"
     # the most viewpoint chapters
-    b = _fake_book(["Ada Quill", "Bram Stoke", "Cy Rune"], povs=["cy", "bram", "cy"])
-    assert b.protagonist["name"] == "Cy Rune" and b.protagonist_info()["why"] == "the most viewpoint chapters"
-    assert b.story_role(b.chars[1]) == {"key": "main", "label": "Main character", "icon": "", "protagonist": False}
+    b, k = _fake_book(["Ada Quill", "Bram Stoke", "Cy Rune"], povs=["cy", "bram", "cy"])
+    assert b.protagonist["name"] == "Cy Rune" and k["reason"].startswith("the viewpoint of 2")
     # the book idea names them (beats viewpoint chapters)
-    b = _fake_book(["Ada Quill", "Bram Stoke", "Cy Rune"], povs=["cy", "cy"], idea="When Bram Stoke wakes, nothing is his.")
+    b, k = _fake_book(["Ada Quill", "Bram Stoke", "Cy Rune"], povs=["cy", "cy"], idea="When Bram Stoke wakes, nothing is his.")
     assert b.protagonist["name"] == "Bram Stoke" and b.protagonist_info()["why"] == "named in the book idea"
-    # the Bible Builder's "main" mark wins over all of it
-    b = _fake_book(["Ada Quill", "Bram Stoke", "Cy Rune"], sheets={"ada": "main", "bram": "side"}, povs=["cy", "cy"],
-                   idea="When Bram Stoke wakes, nothing is his.")
-    assert b.protagonist["name"] == "Ada Quill" and b.protagonist_info()["why"] == "marked as the main character"
-    # several marked main: one protagonist only, the others stay "Main character"
-    b = _fake_book(["Ada Quill", "Bram Stoke", "Cy Rune"], sheets={"ada": "main", "cy": "main"}, povs=["cy"])
-    assert b.protagonist["name"] == "Cy Rune"
-    roles = [b.story_role(c)["key"] for c in b.chars]
-    assert roles == ["main", "minor", "protagonist"] and roles.count("protagonist") == 1
-    assert binder._graph(b)["centre"] == "A01-cy"                                     # the map centres on them too
-    assert _fake_book([]).protagonist is None and _fake_book([]).protagonist_info() is None
+    # a stored protagonist tag wins; the other titles are the stored ones
+    b, k = _fake_book(["Ada Quill", "Bram Stoke", "Cy Rune"], povs=["cy", "cy"], idea="When Bram Stoke wakes, nothing is his.",
+                      entries={"ada": {"story_role": "protagonist", "story_role_by": "author"}, "bram": {"story_role": "antagonist"},
+                               "cy": {"story_role": "mentor"}})
+    assert b.protagonist["name"] == "Ada Quill" and b.protagonist_info()["why"] == "chosen by you"
+    assert [b.role_fields(c) for c in b.chars] == [
+        {"role_label": "Main character — protagonist", "role_icon": "★", "is_protagonist": True},
+        {"role_label": "Villain", "role_icon": "🗡️", "is_protagonist": False},
+        {"role_label": "Mentor", "role_icon": "🦉", "is_protagonist": False}]
+    assert [b.role_group(c) for c in b.chars] == ["main", "villains", "supporting"]
+    # two tagged ★: still exactly one protagonist, the other a second lead; the map centres on the one
+    b, k = _fake_book(["Ada Quill", "Bram Stoke", "Cy Rune"], povs=["cy"],
+                      entries={"ada": {"story_role": "protagonist"}, "cy": {"story_role": "protagonist"}})
+    keys = [b.story_role(c) for c in b.chars]
+    assert keys.count("protagonist") == 1 and "deuteragonist" in keys
+    assert binder._graph(b)["centre"] == k["protagonist"] == b.protagonist["record_id"]
+    empty, _ = _fake_book([])
+    assert empty.protagonist is None and empty.protagonist_info() is None
 
 
 # ====================================================================== 🆕 fields
@@ -496,7 +519,9 @@ def test_exports_mark_the_protagonist_and_the_progress(demo):
     h1 = [p.text for p in doc.paragraphs if p.style.name == "Heading 1"]
     assert [x for x in h1 if "★" in x] == [next(x for x in h1 if "Mara Vell" in x)]          # one ★, on the protagonist
     texts = [p.text for p in doc.paragraphs]
-    assert "Story role: ★ Main character — protagonist" in texts and "Story role: Supporting" in texts
+    from akowe import story_roles
+    tom = next(c for c in story_roles.cast(app.store, pid, BR)["characters"] if c["name"] == "Tom Reed")
+    assert "Story role: ★ Main character — protagonist" in texts and f"Story role: {tom['icon']} {tom['label']}" in texts
     pct = d["progress"]["approved_percent"]
     assert any(t.startswith(f"{pct}% approved") and "waiting" in t and "missing" in t for t in texts)
     cells = [c.text for t in doc.tables for r in t.rows for c in r.cells]

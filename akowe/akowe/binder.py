@@ -7,7 +7,7 @@
      progress: {approved_percent, approved, pages, drafts_waiting, missing_pictures},
      pages: [{template, entry_id, title, page_id, page, status: approved|draft|needs_you, target?,
               sections: {<code>: {fields: {<id>: field}, rows?: [{<id>: field, _meta?}]}}, pics: {<id>: pic},
-              graph? (6) | map? (9), story_role?: {key, label, icon} + role_label, role_icon, is_protagonist (5)}],
+              graph? (6) | map? (9), story_role? (story_roles key) + role_label, role_icon, is_protagonist (5)}],
      contents: [{template, title, count, page, page_id}], todo: [{what, page_id, action}], counts}
 
 A field is ``{value, status: approved|proposed|supplied|empty|auto, source, edit?, draft?, new?}``; a picture
