@@ -342,6 +342,14 @@ function createServiceBridge(deps) {
       if (sdStudio && method === 'GET' && path === '/image/locks') {
         return reply(res, 200, Object.assign({ ok: true }, safeCall(sdStudio.locks) || { locks: [] }));
       }
+      if (sdStudio && sdStudio.addLock && method === 'POST' && path === '/image/locks') {
+        // Akọwe: a character's first portrait → its character lock (an existing lock with that name is kept)
+        const body = await readJsonBody(req);
+        if (body === undefined) return reply(res, 400, { ok: false, error: 'BAD_JSON' });
+        const r = safeCall(() => sdStudio.addLock(body || {})) || { ok: false, error: 'INTERNAL' };
+        if (r.ok) emit('image', { type: 'lock', character: (r.lock && r.lock.character) || null, created: !!r.created });
+        return reply(res, r.ok ? 200 : r.error === 'NEED_PROMPT' ? 400 : 502, Object.assign({ ok: false }, r));
+      }
       if (sdStudio && method === 'POST' && path === '/image/request') {
         const body = await readJsonBody(req);
         if (body === undefined) return reply(res, 400, { ok: false, error: 'BAD_JSON' });

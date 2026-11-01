@@ -696,8 +696,24 @@ function createSdStudio(deps) {
     return Object.assign({ ok: true }, sd, { engines: { sd, chatgpt: cgOut } });
   }
   function locks() { return lib ? lib.listLocks() : { ok: true, locks: [] }; }
+  // Akọwe's ⚡ Make a book: the first portrait of a character becomes its character lock (its looks + the seed), so
+  // later pictures keep the same face. Never replaces a lock the user made: one with that name is kept as it is.
+  function addLock(body) {
+    if (!lib) return { ok: false, error: 'IMAGE_NOT_WIRED', message: 'This AutoInjector has no picture library.' };
+    const b = body || {};
+    const character = String(b.character || '').trim().slice(0, 120);
+    if (!character) return { ok: false, error: 'NEED_PROMPT', message: 'Send the character\'s name.' };
+    const have = lib.getLock(character);
+    if (have) return { ok: true, created: false, lock: Object.assign({}, have) };
+    const seed = Number.isFinite(Number(b.seed)) ? Math.round(Number(b.seed)) : -1;
+    const r = lib.saveLock({ character, book: b.book || '', prompt: b.prompt || '', negative: b.negative || '', seed,
+      notes: String(b.notes || `Made by ${String(b.from || 'Akọwe').slice(0, 40)} from the character's first portrait.`) });
+    if (!r || !r.ok) return Object.assign({ ok: false }, r || {});
+    log('character-lock-added', { from: String(b.from || 'akowe').slice(0, 40), seed: seed >= 0 });
+    return { ok: true, created: true, lock: r.lock };
+  }
 
-  return { detect, connect, lists, settings, buildRequest, generate, fixAndRetry, gallery, record, libList, libScan, request, requestFrom, chatgptStatus, chatgptSettings, chatgptCancel, backendInfo, locks,
+  return { detect, connect, lists, settings, buildRequest, generate, fixAndRetry, gallery, record, libList, libScan, request, requestFrom, chatgptStatus, chatgptSettings, chatgptCancel, backendInfo, locks, addLock,
     img2img, inpaint, upscale, optionsGet, optionsSet, optionsSchema, upscalers, controlnetModels, controlnetModules, adetailerModels, styles, scripts, embeddings, extraFields,
     interrupt, skip, refresh, memory, objectInfo, queue, uploadImage, free, workflowsList, workflowGet, workflowSave, workflowDelete, runWorkflow, extras, features,
     progress: () => ip.progress(), cancel: () => ip.cancel(), status: () => Object.assign({ ok: true }, ip.status()),

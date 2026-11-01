@@ -77,6 +77,9 @@ async function main() {
   const gw = reg("gemini").webContents;
   const ask = async (site, requestId, pageText) => {
     const w = reg(site).webContents;
+    // Wait for the app's first check of the page: a prompt to a page that "hasn't been checked yet" is
+    // (rightly) refused with SITE_NOT_READY, which is not what this test is about.
+    await waitUntil(async () => { const h = await request("GET", "/v1/health", token); return h.status === 200 && h.json.sites[site] && h.json.sites[site].ready === true; }, 15000);
     const before = w.sentLog.length;
     const p = request("POST", "/v1/complete", token, { site, prompt: `Review the chapter as JSON (${requestId}).`, request_id: requestId, timeout_ms: 20000 });
     await waitUntil(() => w.sentLog.length > before);

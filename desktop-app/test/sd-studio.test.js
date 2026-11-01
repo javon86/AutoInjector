@@ -103,12 +103,19 @@ async function main() {
 
   console.log('\n== the bridge routes Akọwe will use ==');
   const TOKEN = 'tok-123';
-  const bridge = createServiceBridge({ version: '1', sdStudio: { request: (b) => studio.request(b), locks: () => studio.locks(), backend: () => studio.backendInfo() } });
+  const bridge = createServiceBridge({ version: '1', sdStudio: { request: (b) => studio.request(b), locks: () => studio.locks(), addLock: (b) => studio.addLock(b), backend: () => studio.backendInfo() } });
   const st = await bridge.start({ port: 0, host: '127.0.0.1', token: TOKEN });
   let r = await req(st.port, 'GET', '/image/backend', null, TOKEN);
   assert(r.status === 200 && r.json.connected && r.json.backend === 'a1111', 'GET /image/backend → connected A1111');
   r = await req(st.port, 'GET', '/image/locks', null, TOKEN);
   assert(r.status === 200 && r.json.locks.length === 1 && r.json.locks[0].character === 'Odile', 'GET /image/locks lists the character locks');
+  r = await req(st.port, 'POST', '/image/locks', { character: 'odile', prompt: 'something else', seed: 1, from: 'akowe' }, TOKEN);
+  assert(r.status === 200 && r.json.ok && r.json.created === false && r.json.lock.seed === 4242 && lib.listLocks().locks.length === 1, 'POST /image/locks never replaces a lock the user made (same name, any case)');
+  r = await req(st.port, 'POST', '/image/locks', { character: 'Mara Vell', book: 'Ferry', prompt: 'Mara Vell, red coat, scar on the chin', seed: 777, from: 'akowe' }, TOKEN);
+  assert(r.status === 200 && r.json.created === true && r.json.lock.character === 'Mara Vell' && r.json.lock.seed === 777 && /first portrait/.test(r.json.lock.notes), 'POST /image/locks makes a new lock from a portrait (looks + seed)');
+  r = await req(st.port, 'POST', '/image/locks', { prompt: 'no name' }, TOKEN);
+  assert(r.status === 400 && r.json.error === 'NEED_PROMPT', 'a lock without a name is refused');
+  lib.deleteLock(lib.getLock('Mara Vell').id);
   r = await req(st.port, 'POST', '/image/request', { purpose: 'portrait', characterLock: 'odile', prompt: 'reading a letter', book: 'Ferry', from: 'akowe', returnImage: true }, TOKEN);
   assert(r.status === 200 && r.json.ok && r.json.images.length === 1 && fs.existsSync(r.json.images[0].path) && r.json.images[0].imageBase64 && r.json.seed === 4242, 'POST /image/request with a character lock → saved file path, seed and (asked for) the base64');
   const rrec = JSON.parse(fs.readFileSync(r.json.images[0].path.replace(/\.png$/, '.json'), 'utf8'));
