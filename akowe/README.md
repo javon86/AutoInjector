@@ -3,6 +3,23 @@
 **Akọwe — your book's scribe.** (Yoruba *akọwe*: scribe, secretary — from *kọ*, write, and *ìwé*, book.)
 Formerly BookForge — renamed to Akọwe on 2026-10-25; see [Renamed from BookForge](#renamed-from-bookforge).
 
+## What's new (October 2026)
+
+- **📖 Book Bible binder** — every character, place, world entry and chapter on its own page, in 12 page
+  templates and 7 looks chosen by genre; ✨ Fill from the book; ⬇ PDF and ⬇ Word, also saved in the book folder.
+  See [📖 The Book Bible binder](#-the-book-bible-binder).
+- **★ Story roles** — every character has a title (★ Main character, Villain, Mentor, Extra…); each book has
+  exactly one main character. See [★ Story roles](#-story-roles-and-the-main-character).
+- **🎞 Trailer page** — plan a book trailer from your book and have AutoInjector make it.
+  See [🎨 Cover, 🖼 Pictures and 🎞 Trailer](#-cover--pictures-and--trailer).
+- **⬇ Ebook cover (JPG)** for Amazon KDP and other stores, and the **map in the Word file**.
+- **🎬 Motion clips** for items, places and magic systems, not only characters; **＋ New character** makes a
+  character from scratch in the Character Forge.
+- **💾 Saving:** a quiet save every 10 minutes, *update or copy* when you open a book you already have, big books
+  opened straight from their folder, and **⚠ Saved, except …** when one file could not be written.
+  See [💾 Your books folder](#-your-books-folder-save-open-again-make-again).
+- **One app, one launcher:** start AutoInjector and Akọwe starts with it, already connected.
+
 Akọwe is a local book-production workspace built from the **Akọwe Final Build Plan**
 (contract `BF-IRB-1.0.0`, closure revision `BF-CLOSURE-1.1`). It covers the whole path from
 story bible to a release-checked book: universe canon, planning, prose, art, story state,
@@ -166,7 +183,7 @@ anyone”). The editor gets these counts; you see them under **🔎 Pattern chec
   normal / strict (when scores and notes count as *revise*: normal = any major note or any score below 6).
 
 The editor's scores and notes are advice stored for exactly that version; the journal shows the verdicts and counts,
-never your text. What the editor checks is written in one plain file, `akowe/editor_rubric.py`.
+never your text. What the editor checks is written in one plain file, `akowe/akowe/editor_rubric.py`.
 
 ## 🎭 Characters who are their own people, 🎬 scenes planned before writing
 
@@ -219,7 +236,95 @@ plate** (front, 3/4 front, side, 3/4 back, back, idle, tool reach, empty-hand at
   seed, or one turnaround sheet), or ⬆ upload your own. Settings → 🎨 Pictures has AutoInjector's address and key.
 - **⬇ Dossier PDF**: cover with the portrait, the landscape ten-view plate, then every section as cards — saved with
   the book in `Character Forge/` too.
-- **🧪 Load the Moki Vey example** to see a finished dossier straight away. Details: `docs/CHARACTER_FORGE.md`.
+- **🧪 Load the Moki Vey example** to see a finished dossier straight away. Details:
+  [`docs/CHARACTER_FORGE.md`](../docs/CHARACTER_FORGE.md).
+- **Items, places and magic systems** get dossiers too, with the same proposals, approvals, PDF look and pictures.
+- **🎬 Motion clips**: a short looping clip made from the portrait through AutoInjector's 🎬 Video (or ⬆ upload
+  your own). Characters get an idle-motion clip; items a slow turntable, places a slow establishing pan, magic
+  systems the effect in use. The first frame goes into the PDF as a MOTION STUDY still, and the clip into the book
+  save.
+- **＋ New character** (in the Character Forge, or 🎩 Alfred's **🧑 Make a character**): type a name and,
+  if you like, a role. Akọwe makes a draft character (approve it on the 🎭 Characters page like any other) and its
+  dossier from your words. Nothing is invented until you press ✨ Invent the rest.
+
+## ★ Story roles and the main character
+
+Every character has a **story role** — a title in the story:
+
+| Role | Meaning |
+|---|---|
+| ★ Main character | the one the book is about — exactly one per book |
+| ☆ Second lead | the second most important character, with a story of their own |
+| ♥ Love interest | the person the main character (or a lead) is drawn to |
+| 🗡️ Villain | the main opponent |
+| 👊 Henchman | works for the villain |
+| ⚡ Rival | competes with the main character without being the villain |
+| 🦉 Mentor · 🤝 Sidekick · 🛡️ Ally · 🏠 Family | help, guide or are related to the main character |
+| 👤 Supporting character | matters to the story; none of the roles above fits |
+| • Minor character · 👥 Extra | a small part, or a walk-on |
+
+- **Where you see them:** a chip next to each character on the guided path, on the character list, on the
+  character page and in the Character Forge and 📖 Book Bible.
+- **Change a role** on the character's page (*Change the story role*). On the guided path, **★ Make this the main
+  character** sets the ★.
+- **Only one ★.** Choosing a new main character asks first; the old one becomes a second lead.
+- **⚠️ No main character is set yet** shows when none is set, with Akọwe's proposal and why.
+- **The guard:** the outline must follow the main character, and Akọwe checks this again before the chapters and
+  before the whole-book review. The AI is told the main character every time it makes or edits characters.
+- Akọwe keeps the ★ by the character's record, so a corrected spelling or a new name never loses it.
+
+## 📖 The Book Bible binder
+
+The Book Bible binder is your whole book's reference, one page per thing, in a look that fits your genre.
+
+**Open it:** **📖 Open the Book Bible** on the book page (the *💾 Saved copy and book bible* card), or
+**More ▾ → 📖 Book Bible**.
+
+**12 page templates:** 1 Cover · 2 Contents · 3 At a glance (with progress) · 4 Cast list (grouped by role, ★ first)
+· 5 Character page · 6 Relationship map · 7 Place page · 8 Magic system / Item / Other world entry · 9 Map page ·
+10 Story plan · 11 Chapter page · 12 Rules & facts (with a timeline strip).
+
+**7 looks**, picked from the book's genre:
+
+| Look | Genres |
+|---|---|
+| Classic | literary, historical (and anything unknown) |
+| Fantasy | fantasy, adventure |
+| Science fiction | science fiction |
+| Noir case file | mystery, thriller |
+| Romance | romance |
+| Horror | horror |
+| Playful | comedy, children's picture book |
+
+- **🎨 Look** opens the look picker; your choice is kept for this book.
+- **Search** (*Search names, places, facts…*) and the contents list on the side jump to any page.
+- **✨ Fill from the book** (whole binder) or **✨ Fill this page from the book**: the AI reads the book and
+  proposes the small facts that are missing (heights, relationship types, danger levels…). Nothing you wrote is
+  replaced. **✔ Approve** each proposal, or approve them all at once.
+- Missing pictures: **🎨 Make picture** on a page (through AutoInjector).
+- **⬇ PDF** and **⬇ Word** download it; **🖨 Print** prints it. The PDF is made by AutoInjector, so AutoInjector
+  must be running.
+- **Saved with the book:** every save writes `Book Bible/Book Bible.docx` and `Book Bible/Book Bible.pdf` in the
+  book's folder (next to `book-bible.md` and `book-bible.json`).
+
+## 🎨 Cover, 🖼 Pictures and 🎞 Trailer
+
+All three are in **More ▾** while a book is open. Pictures and clips are made by AutoInjector (🎨 Images,
+🎬 Video), so it must be running.
+
+- **🎨 Cover** — seven templates, colours, title fitting, AI art or your own picture, an ebook cover and a print
+  wrap with spine and back cover. **⬇ Ebook cover (JPG)** draws the flat JPG that Amazon KDP and most stores want
+  (1600 × 2560 by default; also 2560 × 4096, 1000 × 1600, 625 × 1000). Once it exists, EPUB files use it as the
+  cover. Details: [`docs/COVERS.md`](../docs/COVERS.md).
+- **🖼 Pictures** — a book-wide art style, 🖼 Illustrate per chapter or scene, captions and placement, and the map.
+  Word needs a picture copy of the map: AutoInjector draws it when the map is made, or press **🖨 Make the Word
+  copy**. Details: [`docs/PICTURES.md`](../docs/PICTURES.md).
+- **🎞 Trailer** — **🎬 Plan a trailer** builds 5–8 shots from the book (title and logline cards, the main place,
+  key chapters but never the ending, the characters' approved looks, chosen chapter pictures brought to life).
+  Change anything, add optional music, then **🎞 Make the trailer**. AutoInjector makes the shots one by one (a
+  few minutes each) and joins them. If you stop, the shots already made are kept and making it again continues
+  where it stopped. The trailer is saved with the book (`Trailer/`). Details:
+  [`docs/VIDEO_API.md`](../docs/VIDEO_API.md) §7.
 
 ## 🌍 Story rules, world texture, the plan on the page, ending and style
 
@@ -298,22 +403,35 @@ called “*Book title* (abc123)” and keeps that name even when you rename the 
 |---|---|
 | `Book/` | the finished book: PDF, EPUB and Word (once it is exported) |
 | `Chapters/` | every chapter as a text file (`01 - Title.md` …); a chapter not approved yet says **DRAFT** at the top |
-| `Book Bible/` | everything the book is built on: profile, ending and style choices, characters with their sheets and voice cards, places and world, premise, plot, outline, scene cards, story rules, world texture — `book-bible.md` to read, `book-bible.json` for Akọwe |
+| `Book Bible/` | everything the book is built on: profile, ending and style choices, characters with their sheets and voice cards, places and world, premise, plot, outline, scene cards, story rules, world texture — `Book Bible.pdf` and `Book Bible.docx` (the 📖 binder), `book-bible.md` to read, `book-bible.json` for Akọwe |
 | `Reports/` | the book report (Markdown and PDF), the editor's and the planned-to-page summaries |
 | `Log/` | the book journal and `run-events.json` (every step of the run, which AI did what, times, problems — never keys or prompts) |
 | `Progress/` | `progress.json`: what is done and what comes next |
+| `Cover/`, `Pictures/`, `Character Forge/`, `Trailer/` | the cover files, the chapter pictures and map, the dossiers (PDFs, pictures, motion clips) and the trailer — when the book has them |
 | `book.akowe` | the **whole book in one file** (every version and file, with checksums) — to open it again, also on another computer |
 
 **Saving.** Press **💾 Save** on the book page, in the top bar (while a book is open), on a book of 📚 My finished
 books or in the ⚡ run window; it says **Saved to …** with the folder (or ⚠️ with what to do, for example when the disk
-is full or the folder cannot be written). With **auto-save** (on unless you switch it off in Settings) Akọwe saves
-by itself while a book is made — after each step and chapter, at most every 2 minutes — and at once when it is
-finished, paused or stopped. Akọwe only ever replaces the files it wrote itself; your own files in the folder stay.
+is full or the folder cannot be written). Akọwe only ever replaces the files it wrote itself; your own files in the
+folder stay.
+
+- **Auto-save** (on unless you switch it off in Settings): while a book is made, after each step, chapter and
+  approval (at most every 2 minutes), and at once when a run finishes, pauses or stops.
+- **Quiet 10-minute save:** every 10 minutes, each book that changed since its last save is saved — work you did
+  by hand too. A book that did not change is not touched.
+- **⚠ Saved, except …** — when one file could not be written (for example `Book/Title.pdf` is open in another
+  program), everything else is saved and the message names that file and what to do (close it and save again).
+  The file saved before is kept.
 
 **📂 Open a saved book** (top bar or Your books): pick a book from your books folder, or upload its `book.akowe`.
-It always opens as a **new** book (“… (opened)” when you already have one with that title) — nothing is overwritten.
-An unfinished book shows **▶ Continue making this book** (the AI does the steps that are left; what is done is kept),
-and **▶ Resume the saved run** when its run was stopped half-way.
+
+- **A book you already have** (the same book, on this computer): Akọwe asks **⟳ Update the one I have** (keeps
+  the book, its folder and its saves; not while a run is working) or **📄 Open as a copy** (a new book, “… (opened)”
+  when the title exists).
+- **Big books** (bigger than the 64 MB upload limit) open straight from their folder: **From a folder on this
+  computer** — type the folder's path or press **📁 Choose the folder (AutoInjector)**.
+- An unfinished book shows **▶ Continue making this book** (the AI does the steps that are left; what is done is
+  kept), and **▶ Resume the saved run** when its run was stopped half-way.
 
 **🔁 Rerun from the book bible** (book page, 📚 My finished books, or 🔁 in the 📂 folder list): a **new** book with
 the same profile, choices, characters (with sheets and voice cards), places, story rules and world texture — and, if
@@ -426,6 +544,9 @@ writes `reports/workflow-test-<stamp>.md` and `.json` (no keys or prompts; at mo
 answer); **📄 Open report** shows it. Test books are listed apart from your books on the home page.
 
 ## Connect AutoInjector with one button
+
+Usually you don't need this: when AutoInjector starts Akọwe it connects by itself. The button is for an Akọwe you
+started on its own (`run-akowe.bat`).
 
 In the AutoInjector desktop app press **Connect** next to Akọwe: your browser opens Akọwe, which says
 *Connecting to AutoInjector…*, connects AI-1 = Claude, AI-2 = ChatGPT and AI-3 = Gemini, checks each one and then
