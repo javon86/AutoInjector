@@ -1,11 +1,50 @@
 # AutoInjector Desktop
 
-> 🚧 **Under construction — being updated.** Some sections reference the removed
-> book/ATELIER machinery and predate the System AI / butler, tools, memory,
-> voice, and image-generation capabilities. See
+> 📄 **Updated 1 November 2026.** The sections in the contents below are current. A few long
+> technical sections further down are older; the parked ATELIER engine is marked as such. See
 > [`../UNDER_CONSTRUCTION.md`](../UNDER_CONSTRUCTION.md) for what's parked and
-> [`FEATURES.md`](FEATURES.md) / [`MERGE_ROADMAP.md`](MERGE_ROADMAP.md) for the
-> current inventory. Nothing here affects how the app runs.
+> [`FEATURES.md`](FEATURES.md) for the built inventory. The short overview of the whole
+> program is the front page, [`../README.md`](../README.md).
+
+## What's new (October 2026)
+
+- **🎬 Video tab** with two engines: **Wan** on ComfyUI (text → video and picture → video) and **FramePack**
+  (the FramePack already on your PC, no downloads). **🎞 Trailer** joins shots and title cards into one trailer.
+  See [🎬 Video](#-video--wan-and-framepack-clips-and-trailers).
+- **📦 Your models:** one model folder per kind in "stuff and thing", named like Stability Matrix's, and a
+  **🧩 Let ComfyUI use these models** button. See [📦 Your models](#-your-models-the-model-folder-set).
+- **🧰 Tool servers (MCP)** for Alfred. See [🧰 Tool servers](#-tool-servers-mcp).
+- **🎩 Alfred** has one home: a docked side panel (Ctrl/Cmd+Shift+A) with 8 big buttons; setup is in the
+  🎩 Butler section. The old floating Alfred window, the old Image / Video Generation panels and the setup
+  wizard's image / video forms are gone.
+- **Claude's new page layout** (29 October) is read row by row, never the sidebar. The 🎯 card has
+  **↺ Forget what I taught** and **📋 Copy page structure**. See
+  [🎯 Fixing it yourself](#-fixing-it-yourself-point-at-it).
+- **After a check-in, ask the AI to carry on** (on by default). See
+  [AIs that repair themselves](#ais-that-repair-themselves-check-ins-self-repair--picker--number-teach).
+- **Service bridge:** `POST /render/image` and `POST /render/pdf` for Akọwe's ebook cover, Word map and
+  📖 Book Bible PDF. See [🔌 The service bridge](#-the-service-bridge-for-other-programs).
+
+## Contents
+
+- [Requirements](#requirements) · [Quick start](#quick-start-recommended--no-typing-commands) ·
+  [Run it manually](#run-it-manually-if-you-prefer-the-terminal)
+- [Using it](#using-it) · [Roundtable v2](#roundtable-v2-the-always-on-baseline) · [House Rules](#house-rules)
+- [🎩 Alfred](#-alfred--your-assistant-for-the-whole-app-off-by-default)
+- [🎨 Images](#-images--stable-diffusion-checkpoints-loras-character-locks)
+- [🎬 Video](#-video--wan-and-framepack-clips-and-trailers)
+- [📦 Your models](#-your-models-the-model-folder-set)
+- [🧰 Tool servers (MCP)](#-tool-servers-mcp)
+- [🔌 The service bridge](#-the-service-bridge-for-other-programs)
+- [Akọwe inside AutoInjector](#akọwe-inside-autoinjector-one-app-one-launcher) ·
+  [The Akọwe panel and bridge](#the-akọwe-panel-and-bridge) ·
+  [AIs that repair themselves](#ais-that-repair-themselves-check-ins-self-repair--picker--number-teach)
+- [Picking up where you left off](#picking-up-where-you-left-off) · [Troubleshooting](#troubleshooting)
+- For developers: [How it's built](#how-its-built) · [Running the test suite](#running-the-test-suite) ·
+  [Live checks](#live-checks-outside-sites-changing-under-us) ·
+  [Building a real installer](#building-a-real-installer-exe--dmg--appimage)
+- Older sections: [Book Governance (ATELIER), parked](#book-governance-atelier--optional-off-by-default) ·
+  [Manager / Orchestrator](#manager--orchestrator-phase-1--backend-only-no-ui-panel-yet)
 
 One program, one window: ChatGPT, Claude and Gemini as three real Chromium panes
 side by side, with a control panel that lets you route messages between them —
@@ -426,6 +465,10 @@ is left exactly as it was — only that one message is swallowed.
 
 ## Book Governance (ATELIER) — optional, off by default
 
+> 🅿️ **Parked.** The ATELIER engine is not wired into the app today (see
+> [`../UNDER_CONSTRUCTION.md`](../UNDER_CONSTRUCTION.md)). Books are made in **📖 Akọwe** instead.
+> This section is kept for reference.
+
 If you're using the three panes to *build a structured book project*, you can
 turn on **ATELIER governance**: each pane's reply is checked against
 write-authority rules before it's routed anywhere, so an AI can't silently write
@@ -547,7 +590,16 @@ read the latest reply, health, check-in) and the output folders / logs. Full gui
 local model on Windows: **[docs/ALFRED.md](../docs/ALFRED.md)**.
 
 - **Switch:** **🎩 Alfred: Off / On** in the title bar. Off = the app behaves exactly as without him (no
-  calls, no panel). On = a panel on the right, on every tab (also over 📖 Akọwe and 🎨 Images).
+  calls, no panel). On = a panel docked on the right, on every tab (🤖 AutoInjector, 📖 Akọwe, 🎨 Images,
+  🎬 Video); the app moves over to make room. **Ctrl+Shift+A** (Cmd+Shift+A on a Mac) or **▸ Panel** hides /
+  shows it. There is no separate Alfred window any more (the old floating window is gone).
+- **Two places:** talk to him in his **side panel**; set him up in the **🎩 Butler section** of the main tab.
+- **8 big buttons** in his panel: 🧑 Make a character, 🎨 Make a picture, 🎬 Make a video, 🖼 Design a cover,
+  📖 My book, ✍ Continue / make my book, 🩺 Check everything, ❓ Everything I can do (a searchable list).
+- **One-button AI setup** (🎩 Butler section): **▶ Start Alfred** uses what is already downloaded (finds and
+  starts Ollama, picks your best model); **⚡ Set up (first time)** installs Ollama and a model that fits your PC
+  when needed; **🩺 Check everything** has one-click Fix buttons; **🔎 Find & download more models** rates
+  models for your PC (★★★ / ★★ / ★ / ✖).
 - **His AI:** a local model via Ollama (`http://127.0.0.1:11434/v1`, recommended `ollama pull qwen2.5:7b`),
   or the connected AI (the butler/manager's API), or a web AI pane — ⚙ in his panel. If it can't be
   reached he says so in plain words; everything else keeps working.
@@ -607,11 +659,112 @@ ComfyUI install, or a standalone Forge/A1111/ComfyUI): **[docs/STABLE_DIFFUSION_
   views (front, ¾ front, side, ¾ back, back, idle, draw, attack, dash, defend), all ten as one
   series (one SD seed / one ChatGPT chat) or one turnaround sheet — what Akọwe's Character Forge
   asks for over `POST /image/request` (`engine`, `purpose:"view"` + `view`, `purpose:"sheet"`).
+- **Your model folders and workflows:** the 📚 Library also scans the "stuff and thing" model folders, and
+  ComfyUI workflow `.json` files in `stuff and thing/workflows/` are listed (with *Open folder*). See
+  [📦 Your models](#-your-models-the-model-folder-set).
 - Code: `sd-backends.js`, `image-provider.js`, `sd-library.js`, `sd-images.js`, `sd-studio.js`, `chatgpt-image.js`, `image-views.js`,
   `sd-runner.js`, `sd-installer.js`, `sd-api.js` (module API for Alfred), `images-studio.js`; design
   and limits in [STABLE_DIFFUSION_PLAN.md](STABLE_DIFFUSION_PLAN.md). Tests: `test/sd-*.test.js`,
   `test/images-tab.test.js`, `test/chatgpt-image.test.js`, `test/e2e/sd-images.e2e.js`,
   `test/e2e/chatgpt-image.e2e.js` (fake servers and a fake ChatGPT page, nothing real downloaded).
+
+## 🎬 Video — Wan and FramePack (clips and trailers)
+
+The **🎬 Video** tab (title bar, or the **🎬 Video** button in the User Panel's action bar) makes short videos on
+your own PC. It has three views: **🎬 Make video**, **🎞 Trailer** and **⚙ Setup & models**. Full details:
+**[docs/VIDEO_API.md](../docs/VIDEO_API.md)** (§7 trailers, §8 FramePack).
+
+**Two engines** (the **Video engine** picker on 🎬 Make video: Auto / ComfyUI + Wan / FramePack):
+
+- **Wan on ComfyUI** — the same ComfyUI that 🎨 Images installs, starts and connects. Wan 2.2 TI2V 5B does text
+  → video and picture → video (about 12 GB of graphics memory); Wan 2.1 T2V 1.3B does text → video (about 8 GB).
+  The models download inside the app (resumable, size-checked; into Stability Matrix's shared folders when that
+  is your ComfyUI). Making a video starts ComfyUI by itself when nothing answers.
+- **FramePack** — lllyasviel's FramePack that you **already have** (Stability Matrix's `Packages\FramePack`, or a
+  folder you choose). Nothing is ever downloaded: it runs offline with FramePack's own Python and keeps its models
+  loaded between videos. Its models come from `stuff and thing/models/video/framepack/hf`, else FramePack's own
+  `hf_download`. **Auto** picks FramePack when it is found and Wan isn't installed.
+
+**⚙ Setup & models** shows what is missing in plain words: ComfyUI found / running / too old, each Wan model's
+files (**⬇ Download** per model, or **⬇ Install ComfyUI + video model** on a PC without ComfyUI, **▶ Start
+ComfyUI**), and a **FramePack card**: found or not, its folder, its Python, each model ✔ / ✖, a graphics-memory
+hint, **▶ Load FramePack**, **🧪 Test** (a 2-second clip from a test picture), **📂 Choose FramePack folder** and
+**⏏ Unload**. Its *Advanced: other video server* fold keeps what the old Video Generation panel had (that panel is
+gone).
+
+**🎬 Make video:**
+
+- **✍ Text → video** — describe what happens. With FramePack, a picture is made first with 🎨 Images (Stable
+  Diffusion, else ChatGPT) and then brought to life; the result says so.
+- **🖼 Picture → video** — drop a picture, choose a file, or pick one from the 🎨 gallery.
+- Prompt, negative prompt, a **character lock** (adds their looks), purpose (Free / Character clip 4 s / Trailer
+  shot 5 s). Wan has its own settings (model, size, seconds, steps…); FramePack has Seconds, Steps, GPU memory to
+  keep free and Faster (TeaCache).
+- Progress (for FramePack “part i of n · step s of S”), **Stop**, a player, the gallery and **♻ Remake**. Clips
+  are saved in `stuff and thing/videos/` with a poster picture and a `.json` of the settings.
+
+**🎞 Trailer** joins **shots** (a prompt or a picture, 1–5 s each) and **title cards** (text on black) into one
+trailer, with fades and optional music. Shots are made one by one; finished shots are kept, so after a Stop or a
+problem **🎞 Make trailer** continues where it stopped. The join needs no extra program: AutoInjector records the
+timeline in a hidden window as **WebM**, and adds an **MP4** when it finds ffmpeg. Saved in
+`stuff and thing/videos/trailers/<book>/` (`trailer.webm`, `trailer.mp4`, `trailer.json`, `shots/`). Akọwe's
+**🎞 Trailer** page plans and orders trailers through the bridge.
+
+- 🎩 Alfred can make videos and trailers (🎬 Make a video, `generate_video`, `make_trailer`); 🩺 Check everything
+  shows a FramePack row once it is set up.
+- Not yet confirmed on a real graphics card: tested with a fake ComfyUI and a fake FramePack runner.
+- Code: `video-studio.js`, `video-installer.js`, `video-api.js`, `videos-studio.js`, `video-trailer.js`,
+  `videos-trailer.js`, `framepack.js`, `integrations/framepack/framepack_runner.py`.
+
+## 📦 Your models: the model folder set
+
+Everything AutoInjector makes or downloads lives in **one folder, `stuff and thing`**, inside the AutoInjector
+folder: `images/`, `videos/`, `books/`, `uploads/`, `ai-work/`, `logs/`, `workflows/` and `models/`.
+
+**`models/`** has one folder per kind of model, named to match **Stability Matrix's `Data\Models`** so you can
+move your models over: `image/` (checkpoints), `loras/` (with `loras/lycoris/`), `vae/` (with `vae/approx/`),
+`embeddings/`, `controlnet/`, `upscale/`, `text_encoders/`, `diffusion_models/`, `clip_vision/`, `ipadapter/`,
+`detectors/` (YOLO boxes / outlines, SAM), `faces/`, `video/` (with `video/framepack/hf/` for FramePack), `llm/`
+(Ollama), `voice/` and `assets/`. Each folder has a `README.txt` that names the matching Stability Matrix folder.
+
+- **Forge / A1111 / SD.Next** started by AutoInjector get these folders on their command line — only the folders
+  that have files, and only the options that program understands. Your own launch options always win.
+- **🧩 Let ComfyUI use these models** adds an `autoinjector_stuff:` section to ComfyUI's
+  `extra_model_paths.yaml` (AutoInjector's own ComfyUI and the one in Stability Matrix). Your other sections are
+  kept, and a backup is made. It is also done when AutoInjector installs or starts ComfyUI.
+- **📦 Your models** shows how many files each folder holds: 🎩 Butler section → **⚙ More settings → 📁 Downloads
+  & creations ("stuff and thing")**. **📁 Where everything is** (same place) lists every folder the app uses.
+- ComfyUI workflow `.json` files go in `stuff and thing/workflows/`; the 🎨 Images tab lists them.
+- Code: `output-manager.js`, `folders.js`, `sd-runner.js`, `sd-installer.js`.
+
+## 🧰 Tool servers (MCP)
+
+AutoInjector can use outside **tool servers** that speak MCP (the Model Context Protocol) — the same kind Claude
+Desktop uses: one for your files, one for a database, one for a web service. Nothing runs until you add one.
+Full guide: **[docs/ALFRED.md → Tool servers (MCP)](../docs/ALFRED.md#tool-servers-mcp)**.
+
+- **Add one:** 🎩 Butler section → ⚙ More settings → **🧰 Tools** → **➕ Add a tool server**: a name, a command
+  line (for example `npx -y @modelcontextprotocol/server-filesystem C:\Users\me\Documents\Books`) or a web
+  address, and optional keys. Press **➕ Add and start**.
+- Each server shows its state in plain words (**connected · 12 tools**, or what went wrong), its tools, and
+  **▶ Start / ■ Stop / ✖ Remove**. A server you started starts again next time.
+- **🎩 Alfred** sees the tools and uses one only after an **"I will"** card that names the server, the tool and
+  the arguments. A tool call can **never** be "always allowed". The butler sees them too (always with approval).
+- **Safety:** a command-line server is a program on your computer with your permissions — add only ones you
+  trust. Keys are stored encrypted and never shown, logged or sent to the AI. Time limits: 90 s to start, 60 s
+  per call.
+- Code: `mcp-manager.js`, `mcp-client.js`; tests `test/mcp-client.test.js`, `test/e2e/mcp.e2e.js`.
+
+## 🔌 The service bridge (for other programs)
+
+While AutoInjector runs, a small local server (`127.0.0.1:8765`) lets other programs on this computer — mainly
+Akọwe — use the AIs, pictures and video. Every route is in **[SERVICE_BRIDGE.md](SERVICE_BRIDGE.md)**. The two
+newest:
+
+- **`POST /render/image`** — draws an SVG (or a small HTML page) as a JPEG or PNG, offline. Akọwe uses it for
+  the ebook cover JPG and the Word copy of the map.
+- **`POST /render/pdf`** — prints one self-contained HTML page into a PDF, offline. Akọwe uses it for the
+  📖 Book Bible PDF.
 
 ## Akọwe inside AutoInjector (one app, one launcher)
 
@@ -662,7 +815,10 @@ AutoInjector** in the 📖 Akọwe tab, on by default):
 
 `akowe/run-akowe.bat` / `run-akowe.sh` still work for running Akọwe alone (optional).
 
-## Akọwe (experimental, bridge off by default)
+## The Akọwe panel and bridge
+
+> Today the bridge is turned on and paired **by itself** when AutoInjector starts Akọwe (see the section above).
+> The switch, 🔗 Connect Akọwe and the details below still apply.
 
 Lets Akọwe (the book-writing tool in this repo) use the ChatGPT, Claude and
 Gemini panes as its AI slots, with no API keys. **Caution:** automating these
@@ -784,7 +940,8 @@ you left off in our conversation.”* (plus any message it still owed an answer 
 its [MSG #], and the usual [TO:] / [FROM:] rule). Its reply is shown and passed on like any other
 reply. An AI that was doing nothing gets no extra message; nothing is sent after **Stop AIs
 Talking**, when its House Rule / sequence was stopped meanwhile, or while a new check-in runs. The
-activity feed says *“Asked Claude to carry on where it left off”*.
+activity feed says *“↪ Asked Claude to carry on where it left off”*. Switch it off with the *After a check-in, ask
+the AI to carry on* box.
 
 When a check-in fails, the AI's card says **🔧 Repairing…** and AutoInjector works out why
 (can't type / message not sent / can't find replies / reply taken as old / stuck writing /
@@ -1099,6 +1256,19 @@ number** starts the number teach (above). A reply pick is generalised the same w
 the self-repair learns (it matches every reply, never one message). The old round-trip test is the
 small **🧪 Test** button in the same card. A pick's preview text is shown only in the card, never
 logged.
+
+Two more buttons at the bottom of the card:
+
+- **↺ Forget what I taught** — clears every part you saved with 🎯 / 🔢 **and** everything the self-repair
+  learned for that AI. AutoInjector goes back to its built-in way of reading the page and runs a check-in. Use it
+  when a saved pick has gone wrong (the Activity log then says *Press 🎯 → "↺ Forget what I taught" to clear it.*).
+- **📋 Copy page structure** — copies a report of how that AI's page is built (tags and counts only, never what
+  anyone wrote) to paste into a bug report. `tools/page-structure.js` makes the same report.
+
+**Claude's new page (29 October 2026).** Claude now puts every message — yours and its own — in identical rows.
+AutoInjector works out who wrote each row and reads Claude's latest row after your latest one. It never reads
+the sidebar's list of recent chats as "the reply", and a saved selector that finds no proper reply is passed
+over (logged once). The self-repair and the 🎯 / 🔢 teach follow the same rules.
 
 This replaces needing to open DevTools yourself for the common case (a site
 renamed a class or restructured its composer). If picking doesn't land on
