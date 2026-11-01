@@ -25,6 +25,8 @@ scene cards / voice cards / story rules and texture / must-show details here, ev
 * Section 7 (continuity.py): ``physical_state`` (P32), ``character_state`` (P35) at the end of the earlier chapters
   (approved tracked state only), ``two_readings`` of the protected mysteries (P33) and ``version_changes`` of a rerun /
   variant (P34); bounded to about 3 500 characters, one rule each. Off when the pipeline's scenes switch is off.
+* ``series_state`` (📚 series.py): in book 2+ of a series, each present character as the book before left them (looks,
+  belongings, abilities, relationships, status), ≤ 2 400 characters.
 
 Prompt budget of the brief (characters of JSON): voice cards ≤ 7 000, scene cards ≤ 6 × ~1 500, story rules ≤ 2 500,
 world texture ≤ 1 200, must-show ≤ 5 × 160, story choices ≤ 1 600, length ≤ 400 — about 22 000 at most, typically
@@ -208,6 +210,15 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str) -
             brief["trade_terms"] = trade
             rules.append(TERMS_RULE)
         rules += extra.get("choice_rules") or []
+        try:  # 📚 a later book of a series: each character as the previous book left them
+            from . import series as series_mod  # noqa: PLC0415
+            sstate, _n = series_mod.writer_brief(store, pid, branch, [c["record_id"] for c in present])
+        except Exception:  # noqa: BLE001
+            log.exception("series state of chapter %s", chapter_id)
+            sstate = []
+        if sstate:
+            brief["series_state"] = sstate
+            rules.append(series_mod.BRIEF_RULE)
         # Section 7 (P32-P35): continuity tracked from the earlier chapters (continuity.py; never raises)
         if flags["scenes"]:
             from . import continuity  # noqa: PLC0415
@@ -229,7 +240,8 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str) -
         if not (cards or vb["cards"] or vb["others"] or pov or planned or extra.get("story_rules")
                 or extra.get("world_texture") or extra.get("story_choices") or length or style
                 or brief.get("character_details")
-                or any(k in brief for k in ("physical_state", "character_state", "two_readings", "version_changes"))):
+                or any(k in brief for k in ("physical_state", "character_state", "two_readings", "version_changes",
+                                            "series_state"))):
             return None, meta
         meta.update(characters=[c["record_id"] for c in present], voice_cards=len(vb["cards"]),
                     other_voices=len(vb["others"]), summarized=vb["summarized"],
@@ -241,7 +253,7 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str) -
                     pipeline=None if all(flags.values()) else {k: v for k, v in flags.items()},
                     continuity=[k for k in ("physical_state", "character_state", "two_readings", "version_changes")
                                 if k in brief] or None,
-                    narrator_style=bool(style),
+                    narrator_style=bool(style), series_state=len(brief.get("series_state") or []) or None,
                     chars=len(json.dumps(brief, ensure_ascii=False)))
         return brief, meta
     except Exception:  # noqa: BLE001 - a brief is help for the writer, never a reason to fail the chapter

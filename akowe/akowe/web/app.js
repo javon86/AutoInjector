@@ -6071,7 +6071,7 @@ const TIP_SHEET = () => [
 
 /** What the 🗂 Character Forge pages (forge.js) need from this file. */
 function forgeUI() {
-  return { h, clear, api, bpath, plink, S, crumbs, problemBox, toProblem, runAiJob, choiceDialog, toast, infoTip, route, loadingState, stateBox };
+  return { h, clear, api, bpath, plink, S, crumbs, problemBox, toProblem, runAiJob, choiceDialog, toast, infoTip, route, loadingState, stateBox, openMakeBook };
 }
 
 function characterCard(cur) {

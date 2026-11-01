@@ -131,6 +131,16 @@ def build_docx(data: dict, *, pic_bytes=None) -> bytes:
             body.append(_p(_run("Story role: ", bold=True, size=20)
                            + _run(f"{icon + ' ' if icon else ''}{p['role_label']}", bold=bool(star), color=accent
                                   if star else None, size=20)))
+        sr = p.get("series") if p["template"] == "5" else None
+        if sr and (len(sr.get("strip") or []) > 1 or any(b.get("changes") for b in sr.get("strip") or [])):
+            body.append(_p(_run("📚 Through the series", bold=True, color=accent, size=26), "Heading2"))
+            for b in sr["strip"]:
+                body.append(_pic_paras(media, b.get("portrait"), 30)
+                            + _p(_run(f"Book {b['number']}: {b.get('title') or ''} — ", bold=True, size=20)
+                                 + _run(b.get("words") or "No changes recorded", size=20)))
+            if sr.get("state"):
+                body.append(_p(_run(f"As of the end of book {sr.get('as_of')}: ", bold=True, size=20)
+                               + _run("; ".join(f"{k}: {v}" for k, v in sr["state"].items()), size=20)))
         if p["template"] == "3" and isinstance(data.get("progress"), dict):
             g = data["progress"]
             pct = max(0, min(100, int(g.get("approved_percent") or 0)))
