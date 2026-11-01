@@ -13,6 +13,9 @@ ROOT = Path(__file__).resolve().parent.parent
 # (tests/test_section6.py does, with its own books folder per test).
 os.environ.setdefault("AKOWE_BOOKS_DIR", str(Path(tempfile.gettempdir()) / f"akowe-test-books-{os.getpid()}"))
 os.environ.setdefault("AKOWE_AUTOSAVE", "0")
+# 🖼 The suite never asks a real AutoInjector on this computer for pictures (⚡ runs make character pictures by
+# default): the default picture bridge is a closed local port; tests that want pictures run a fake bridge.
+os.environ.setdefault("AKOWE_IMAGE_BRIDGE", "http://127.0.0.1:9")
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 

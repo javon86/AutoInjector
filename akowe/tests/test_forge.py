@@ -8,6 +8,7 @@ from __future__ import annotations
 import base64
 import io
 import json
+import os
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -419,7 +420,7 @@ def test_art_without_a_lock_unreachable_and_paths_only(ib, tmp_path):
 def test_image_bridge_settings_are_local_only(fx):
     app, _f, pid = fx
     info = forge.bridge_info(app)
-    assert info["url"] == "" and info["default_url"] == forge.DEFAULT_IMAGE_BRIDGE and not info["has_token"]
+    assert info["url"] == "" and info["default_url"] == (os.environ.get("AKOWE_IMAGE_BRIDGE") or forge.DEFAULT_IMAGE_BRIDGE) and not info["has_token"]
     with pytest.raises(AkoweError):
         forge.save_bridge_settings(app, {"url": "http://example.com:8765"})
     out = forge.save_bridge_settings(app, {"url": "http://localhost:9999", "token": "abc"})

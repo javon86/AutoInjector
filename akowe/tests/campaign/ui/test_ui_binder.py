@@ -149,6 +149,14 @@ class FakeBinderApi:
             self.jobs[jid] = {"job_id": jid, "kind": "binder_fill", "status": "done", "phase": "Reading Maren Vey", "done": 1, "total": 1,
                               "results": [{"ok": True, "proposed": 2, "message": "2 value(s) proposed from the book. Read them, then ✔ approve or ✎ edit each one."}]}
             return ok(dict(self.jobs[jid], status="running", done=0), 202)
+        if req.method == "POST" and path == "/pictures":  # 🖼 Make the rest of the pictures
+            self.pictures = getattr(self, "pictures", 0) + 1
+            for p in self.doc["pages"]:
+                p.pop("pictures_waiting", None)
+            jid = f"job-pics-{self.pictures}"
+            self.jobs[jid] = {"job_id": jid, "kind": "book_pictures", "status": "done", "phase": "Finished", "done": 5, "total": 5,
+                              "results": [{"ok": True, "made": 5, "failed": 0, "message": "5 picture(s) made."}]}
+            return ok(dict(self.jobs[jid], status="running", done=0, phase="Making the portrait of “Maren Vey”"), 202)
         if self.status != 200:
             return ok({"errors": [{"code": "NOT_FOUND", "path": "/", "message": "not found"}]}, self.status)
         return ok(self.doc)
@@ -772,3 +780,30 @@ def test_looks_gallery(make_context, bd):
 def shot_dir(name):
     from .ui_helpers import SHOTS
     return SHOTS / name
+
+
+# ------------------------------------------------------------------------------------------------ 🖼 pictures waiting
+def test_pictures_waiting_and_make_the_rest(make_context, bd):
+    """A character the ⚡ run could not draw shows "🖼 Picture waiting" (page and cast card), and the toolbar's
+    🖼 Make the rest of the pictures runs the job, shows its result and redraws the pages without the placeholders."""
+    doc = fixture_doc(bd.pid)
+    for p in doc["pages"]:
+        if p["page_id"] == "ch-maren":
+            p["pictures_waiting"] = ["portrait", "front", "side", "back", "sheet"]
+    page = open_binder(make_context, bd, page_id="ch-maren", doc=doc)
+    art = page.locator('.bnd-page[data-page-id="ch-maren"]')
+    assert art.locator("[data-testid=binder-pic-waiting]").count() == 5    # portrait, sheet and the three views
+    assert art.locator("[data-testid=binder-pic-waiting]").first.inner_text().startswith("🖼 Picture waiting")
+    shot(page, "binder-pictures-waiting")
+    goto_page(page, "cast")
+    card = page.locator('.bnd-card[data-name="Maren Vey"]')
+    assert card.locator("[data-testid=binder-pic-waiting]").count() == 1
+    goto_page(page, "ch-maren")
+    btn = page.locator("[data-testid=binder-pictures]")
+    assert btn.inner_text() == "🖼 Make the rest of the pictures"
+    btn.click()
+    page.wait_for_selector("[data-testid=binder-msg] .bnd-ok-msg")
+    assert "5 picture(s) made." in page.inner_text("[data-testid=binder-msg]")
+    assert page.bf_calls.pictures == 1
+    page.wait_for_function("() => !document.querySelector('[data-testid=binder-pic-waiting]')")
+    assert_clean(page, "pictures")

@@ -7289,7 +7289,7 @@ async function withAiCheck(body, what) {
   return body;
 }
 
-const STEP_ICON = { pending: '○', running: '⏳', waiting: '⏳', done: '✔', failed: '⚠️', paused: '⏸', cancelled: '✖', skipped: '–' };
+const STEP_ICON = { pending: '○', running: '⏳', waiting: '⏳', later: '🕓', done: '✔', failed: '⚠️', paused: '⏸', cancelled: '✖', skipped: '–' };
 function initMakeBook() {
   const btn = $('#mab-btn');
   if (btn) btn.addEventListener('click', ev => openMakeBook(ev.currentTarget));
@@ -7523,6 +7523,7 @@ function renderRun() {
         (s.items || []).length ? h('ul', { class: 'mb-items' }, s.items.map(i => h('li', { class: `st-${i.state}` },
           h('span', { 'aria-hidden': 'true' }, STEP_ICON[i.state] || '○'), ' ', i.label, i.words ? h('span', { class: 'muted' }, ` · ${i.words} words`) : null,
           i.phase ? h('span', { class: 'small muted', 'data-testid': 'mb-item-phase' }, ` · ${i.phase}…`) : null,
+          i.note && s.id === 'pictures' ? h('span', { class: 'small muted', 'data-testid': 'mb-item-pictures' }, ` · 🖼 ${i.note}`) : null,
           i.note && s.id === 'characters' ? h('span', { class: 'small muted' }, ` · ${i.note === 'made now' || i.note === 'made with the character' ? `sheet and voice ${i.note}` : `⚠️ ${i.note}`}`) : null,
           i.scenes ? h('span', { class: `small mb-sc${i.scenes.flagged || i.scenes.failed ? ' flagged' : ''}`, 'data-testid': 'mb-item-scenes' },
             i.scenes.failed ? ` · ⚠️ scenes not planned (${i.scenes.failed})` : ` · 🎬 ${i.scenes.scenes} scene${i.scenes.scenes === 1 ? '' : 's'}`
@@ -8358,9 +8359,14 @@ function pictureBridgeCard() {
     const url = h('input', { type: 'text', id: 'pb-url', value: cur.url || '', placeholder: cur.default_url, spellcheck: 'false', autocomplete: 'off' });
     const tok = h('input', { type: 'password', id: 'pb-token', value: '', placeholder: cur.has_token ? '•••••• (saved)' : 'bridge token (optional)', autocomplete: 'off' });
     const out = h('div', { 'aria-live': 'polite' });
+    const rp = cur.run_pictures || { run: true, engine: 'sd' };
+    const runPics = h('input', { type: 'checkbox', id: 'pb-run', 'data-testid': 'pb-run-pictures', checked: rp.run !== false });
+    const runEng = h('select', { id: 'pb-engine', 'data-testid': 'pb-run-engine' },
+      h('option', { value: 'sd', selected: rp.engine !== 'auto' }, 'Stable Diffusion (Forge) only — the most consistent look'),
+      h('option', { value: 'auto', selected: rp.engine === 'auto' }, 'Stable Diffusion, else ChatGPT'));
     const save = async () => {
       clear(out);
-      const body = { url: url.value.trim() };
+      const body = { url: url.value.trim(), run_pictures: { run: runPics.checked, engine: runEng.value } };
       if (tok.value.trim()) body.token = tok.value.trim();
       try { await api('PUT', '/settings/image-bridge', { body }); toast('Saved'); load(); }
       catch (e) { out.appendChild(problemBox(toProblem(e, { step: 'Settings › Pictures' }))); }
@@ -8368,6 +8374,9 @@ function pictureBridgeCard() {
     put(clear(box),
       h('div', { class: 'field' }, h('label', { for: 'pb-url' }, 'AutoInjector bridge address'), url, h('span', { class: 'hint' }, `Only this computer (127.0.0.1 / localhost). Akọwe asks: ${(cur.uses || []).join(', ') || cur.default_url}`)),
       h('div', { class: 'field' }, h('label', { for: 'pb-token' }, 'Bridge token'), tok),
+      h('div', { class: 'field' }, h('label', { class: 'check', for: 'pb-run' }, runPics, ' 🖼 Make character pictures during ⚡ Make a book for me'),
+        h('span', { class: 'hint' }, 'A portrait of every character, and the full set (views and sheet) for the main character. If the picture maker is not running, the book goes on and the pictures wait for 🖼 Make the rest of the pictures in the 📖 Book Bible.')),
+      h('div', { class: 'field' }, h('label', { for: 'pb-engine' }, 'Picture maker for the book’s pictures'), runEng),
       h('div', { class: 'row' }, h('button', { type: 'button', class: 'small primary', 'data-testid': 'pb-save', onclick: save }, 'Save'),
         cur.has_token ? h('button', { type: 'button', class: 'small', onclick: async () => { try { await api('PUT', '/settings/image-bridge', { body: { token: null } }); toast('Token removed'); load(); } catch (e) { out.appendChild(problemBox(toProblem(e))); } } }, 'Remove the token') : null),
       out);

@@ -84,6 +84,10 @@ STEPS = [
      "each one is reviewed and approved under your consent."),
     ("characters", "A", "A01", "Character sheets and voices", "What each character wants, needs, fears and hides, "
      "and how each one talks (a voice card each); the writer gets them in every chapter."),
+    ("pictures", "A", None, "Character pictures", "A portrait of every character from its description, and the "
+     "full set (portrait, front, side and back views, character sheet) for the main character — made with Stable "
+     "Diffusion in AutoInjector; each portrait becomes that character's 🔒 lock so later pictures keep the face. "
+     "(Never holds up the book: what cannot be made now waits on the Book Bible's to-make list.)"),
     ("world", "A", "A03", "Story rules and world texture", "What is law in this world, what is only seen, believed "
      "or must stay a mystery — and concrete details of work, weather, institutions and people that can get in the "
      "way."),
@@ -850,6 +854,11 @@ class AutoBookService(_Runner):
     def _clean_settings(self, body) -> dict:
         out = {"genre": "", "length": "short_story", "slot_id": None, "idea": "", "choices": {},
                "pipeline": pipeline_mod.clean(None)}
+        pics = body.get("pictures")  # 🖼 the run's character pictures: None = Settings → Pictures (default on)
+        if pics is not None:
+            if not isinstance(pics, bool):
+                raise AkoweError("INVALID_INPUT", "/pictures", "pictures must be true or false", status="REJECTED")
+            out["pictures"] = pics
         for k in ("beta_reader", "my_style"):  # P23 / P25 (Section 7c): optional, off unless asked for
             v = body.get(k, False)
             if not isinstance(v, bool):
@@ -1999,6 +2008,20 @@ class AutoBookService(_Runner):
         ok = sum(1 for i in st["items"] if i["state"] == "done")
         st["message"] = f"{ok} of {len(people)} character(s) have a sheet and a voice card" + (
             f" ({made} made now)" if made else "") + (f" · ⚠️ {failed} could not be made" if failed else "")
+
+    def _s_pictures(self, run, st):
+        """🖼 A portrait for every character, the full set for the ★ protagonist (book_pictures.py). Never blocks
+        the book: what cannot be made now goes on the book's to-make list (only pause / cancel stop it)."""
+        from . import book_pictures  # noqa: PLC0415
+        try:
+            book_pictures.run_step(self, run, st)
+        except (RunPaused, RunCancelled, Cancelled):
+            raise
+        except Exception as exc:  # noqa: BLE001 - pictures never stop the book
+            log.exception("make-a-book run %s: character pictures", run["id"])
+            st["message"] = f"⚠️ The pictures could not be made now ({type(exc).__name__}); make them later with 🖼 " \
+                            "Make the rest of the pictures in the Book Bible"
+            self.event(run, "note", st["message"], step="pictures", code="PICTURES_WAITING")
 
     def _scene_cards(self, run, st, cid: str, item: dict):
         """P8: before a chapter is written, the writer AI plans its scenes and an independent AI checks them (goal,

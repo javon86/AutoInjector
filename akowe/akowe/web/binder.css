@@ -486,6 +486,7 @@ a.bnd-tile:hover { background: var(--bnd-card-2); }
 .bnd-card-pic img { width: 92px; height: 116px; object-fit: cover; }
 .bnd-card-pic:has(img) { padding: 0; border-style: solid; border-color: var(--bnd-line); }
 .bnd-card-pic .bnd-empty { font-size: 11px; }
+.bnd-pic-waiting { font-style: normal; font-weight: 600; color: var(--bnd-ink, inherit); background: var(--bnd-card); border: 1px dashed currentColor; border-radius: 6px; padding: 3px 8px; }
 .bnd-card-b { min-width: 0; flex: 1; }
 .bnd-card h4 { font: 19px/1.2 var(--bnd-f-head); margin: 2px 0 4px; color: var(--bnd-head); }
 .bnd-card p { font-size: 12.5px; margin: 6px 0; color: var(--bnd-ink); }

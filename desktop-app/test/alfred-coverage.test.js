@@ -147,7 +147,7 @@ const SERVICE_BRIDGE_ROUTES = {
   'GET /tools/list': 'app_info:tools.list', 'POST /tools/run': 'EXCLUDE: free code (see tools:run)',
   'GET /voice/status': 'app_info:voice.status', 'POST /voice/settings': 'app_control:voice.configure', 'POST /voice/speak': 'app_control:voice.speak', 'POST /voice/listen': 'app_control:voice.listen',
   'GET /image/status': 'image_generator_status', 'POST /image/settings': 'app_control:image.configure', 'POST /image/generate': 'generate_image',
-  'GET /image/backend': 'image_generator_status', 'GET /image/locks': 'character_locks', 'POST /image/request': 'generate_image',
+  'GET /image/backend': 'image_generator_status', 'GET /image/locks': 'character_locks', 'POST /image/locks': 'EXCLUDE: Akọwe saves a character\'s first portrait as its character lock (never replaces one the user made) — the user makes locks in 🎨 Images → Character locks', 'POST /image/request': 'generate_image',
   'GET /video/backend': 'video_call:video.status', 'POST /video/request': 'video_call:video.generate',
   'POST /render/image': 'EXCLUDE: draws an SVG into a JPEG/PNG for Akọwe (the ebook cover JPG, the Word map) — a file converter, not a user control',
   'POST /render/pdf': 'EXCLUDE: prints Akọwe\'s 📖 Book Bible binder (a self-contained HTML page) into a PDF — a file converter for Akọwe, not a user control',
