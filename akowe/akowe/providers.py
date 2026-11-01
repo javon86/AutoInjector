@@ -754,6 +754,22 @@ class AutoInjectorAdapter:
                                       "typed twice).")
             return AkoweError("TIMEOUT", "", "the web site did not answer before the timeout; it may still be "
                                   "answering" + detail)
+        if code == 503 and body.get("error") == "SITE_ERROR":
+            # The site showed its OWN error notice ("Sorry, something went wrong…", "Claude will return soon", a
+            # usage limit) instead of an answer: a temporary problem, never a bad answer. UPSTREAM_UNAVAILABLE so the
+            # call moves to another working AI, or waits and asks again (jobs.wait_and_retry) - 30 s, 60 s, 120 s.
+            name = SITE_NAMES.get(site, site)
+            limit = body.get("site_error") == "rate-limit"
+            err = AkoweError("UPSTREAM_UNAVAILABLE", "", f"{name} showed "
+                                 + ("a usage-limit message" if limit else "an error message")
+                                 + " instead of an answer (a short problem on the site); Akọwe waits and tries again, "
+                                 "or uses another AI")
+            err.site_state = None
+            err.site_problem = "SITE_RATE_LIMITED" if limit else "SITE_ERROR"
+            ra = body.get("retry_after_s")
+            err.retry_after_s = float(ra) if isinstance(ra, (int, float)) and not isinstance(ra, bool) and 0 < ra <= 900 \
+                else (60.0 if limit else 30.0)
+            return err
         if code == 503 and body.get("error") == "SITE_NOT_READY":
             # v1.2: the bridge says why (state + problem code); v1.1 says only "not ready".
             state = body.get("state") if body.get("state") in SITE_STATES else None

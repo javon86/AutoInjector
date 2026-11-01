@@ -59,6 +59,7 @@ const logTags = require("./log-tags");
 const terminalProvider = require("./terminal-provider");
 const aiLockers = require("./ai-lockers");
 const featureTest = require("./feature-test");
+const siteErrors = require("./site-errors"); // a site's own short error notice ("Sorry, something went wrong…") is never an Akọwe answer
 const logExtract = require("./log-extract"); // P16: scoped Extract (this Akọwe book / a time range / everything) + redaction
 const akoweLinkTest = require("./akowe-link-test"); // 🧪 Test Akọwe link (real round trips through the bridge's own HTTP API)
 const selfRepairLib = require("./self-repair"); // P18: check-ins, failure classifier, automatic fixes, teach step (docs/AKOWE_IMPROVEMENT_PLAN.md Section 1)
@@ -104,7 +105,14 @@ const CAPTURE_SETTLE_MS = Number(process.env.AUTOINJECTOR_CAPTURE_SETTLE_MS) || 
 // (same text apart from spacing / citation chips) within this window.
 const REPLY_REVISION_MS = Number(process.env.AUTOINJECTOR_REPLY_REVISION_MS) || 60000;
 const MAX_NOTAG_REPROMPTS = Number(process.env.AUTOINJECTOR_MAX_NOTAG_REPROMPTS) || 2;
-const MAX_LOG = 300;
+// The in-memory activity log (state.log). A time-range Extract ("Last 24 hours")
+// can only include what is still in it: at 300 a 24-hour extract covered ~30
+// minutes of a busy run. 5000 entries (a few MB at most) cover hours of Akọwe
+// work; the oldest drop off first. The Activity window gets only the newest
+// MAX_LOG_UI on (re)load, so a reload never draws thousands of lines.
+const MAX_LOG = Math.max(300, Number(process.env.AUTOINJECTOR_MAX_LOG) || 5000);
+const MAX_LOG_UI = 300;
+const MAX_MANAGER_LOG = 300;
 const MAX_TRANSCRIPT = 1000; // oldest-first eviction, same idea as MAX_LOG for the debug log -- a long-running relay must not grow this without bound
 const MAX_LEDGER = 1000; // oldest-first eviction, same idea as MAX_TRANSCRIPT
 const DUPLICATE_WINDOW_MS = 5000; // a second identical (target, text) send within this window gets flagged duplicate:true in the ledger
@@ -120,7 +128,7 @@ const NEEDS_EXACTLY_THREE = new Set(["devil-angel", "chargeback", "rotation", "b
 // #window-titlebar (38px + 1px border), which holds the expand button. The OS
 // frame (native title bar + borders, DPI-dependent on Windows) is added at runtime.
 const COLLAPSED_HEIGHT = 39;
-const MAX_DEBUG_LOG_LINES = 2000;
+const MAX_DEBUG_LOG_LINES = Math.max(2000, MAX_LOG + 1000); // the on-disk log keeps at least as much as the in-memory one
 const SAVE_DEBOUNCE_MS = Number(process.env.AUTOINJECTOR_SAVE_DEBOUNCE_MS) || 500;
 const FILE_ATTACH_PROTOCOL_VERSION = "1.3";
 const IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp"]);
@@ -661,7 +669,7 @@ function logManagerEvent({ category, severity, action, target, summary, details,
 
   if (visibleInManagerLog) {
     state.managerLog.push(entry);
-    if (state.managerLog.length > MAX_LOG) state.managerLog.shift();
+    if (state.managerLog.length > MAX_MANAGER_LOG) state.managerLog.shift();
     broadcast("manager-log", entry);
   }
   if (visibleInGlobalLog) {
@@ -948,6 +956,10 @@ const generatingSince = {}; // P18: when the current "writing" phase began (0 = 
 const lastRead = {};        // P18: the last read per pane { text, textLen, generating, composerEmpty, inputFound, at } (memory only)
 const lastActivityAt = {};  // P18: last send/capture per pane (check-ins wait for a quiet AI)
 const convoActivityAt = {}; // last REAL conversation send/capture per pane (not check-ins, teach messages or carry-on follow-ups)
+// Last AI-to-AI / user conversation per pane — like convoActivityAt, but never an
+// Akọwe prompt or an Akọwe-owned reply (a finished Akọwe request is no reason to
+// "carry on": the 12×NONE log, where idle AIs got the carry-on after Akọwe work).
+const relayConvoAt = {};
 const sentTexts = new Map(); // [MSG #] -> { site, text, auto, bridge } of recent sends (a carry-on follow-up re-sends an owed one)
 const SENT_TEXTS_MAX = 300;
 const lastUserInputAt = {}; // P18: last real keyboard/mouse input the user gave a pane (Electron before-input-event)
@@ -1924,6 +1936,7 @@ async function sendTextTo(target, text, fromSite, opts = {}) {
     lastActivityAt[target] = Date.now();
     if (!opts.probe && !opts.carryOn) {
       convoActivityAt[target] = Date.now();
+      if (!opts.bridge) relayConvoAt[target] = Date.now();
       sentTexts.set(seq, { site: target, text: framed, auto: !!opts.automatic, bridge: !!opts.bridge });
       if (sentTexts.size > SENT_TEXTS_MAX) sentTexts.delete(sentTexts.keys().next().value);
     }
@@ -4025,6 +4038,7 @@ async function pollSite(site) {
   if (!view || view.webContents.isDestroyed()) return;
   state.busy[site] = true;
   let forcedAccept = false; // TR-30: an untagged finished reply accepted because a send must type over it
+  let akoweSiteErr = null; // the site's own error notice shown instead of the answer an Akọwe prompt waits for
   try {
     const res = await view.webContents.executeJavaScript(buildReadScript(site, effectiveOverrides(site)));
     // Gemini's citation chips ("PDF", "+ 1") can land AFTER the [FROM:] tag and
@@ -4126,6 +4140,12 @@ async function pollSite(site) {
       // something a bare-mode/stage run already handled.
       const already = state.captured[site];
       if (already && (already.text === text || already.rawText === text)) return;
+      // An Akọwe prompt waits for this AI's answer, and the page shows the site's
+      // OWN short error notice instead ("Sorry, something went wrong. Please try
+      // your request again.", "Claude will return soon", …). Never accepted as
+      // the answer (BF-16 below) and never nagged about its tag: once quiet it goes
+      // to the site-error handling further down, which tells the bridge.
+      akoweSiteErr = akoweAwaitingReply(site) ? siteErrors.siteErrorOf(text) : null;
       // TR-31: only the START of a reply ("[TO:" — seen live on Gemini) means
       // the reader can't see the rest of it. That's a reading problem, not the
       // AI forgetting its tag: never nag the AI about it; log it once.
@@ -4157,7 +4177,7 @@ async function pollSite(site) {
       // has no [FROM:] tag. Typing now would bury it for good, so accept it as
       // finished (it has held still and the page isn't writing) and relay it;
       // the sender's message tells the AI about the missing tag.
-      else if (forceAcceptUntagged.has(site) && !pend.reprompted && Date.now() - pend.sinceTs >= CAPTURE_SETTLE_MS && !looksLikeRateLimit(text) && !isNoneSkip(text)) {
+      else if (forceAcceptUntagged.has(site) && !pend.reprompted && Date.now() - pend.sinceTs >= CAPTURE_SETTLE_MS && !looksLikeRateLimit(text) && !akoweSiteErr && !isNoneSkip(text)) {
         acceptedUntaggedRaw[site] = text;
         text = `${text}\n[FROM: ${String(site).toUpperCase()}]`;
         forcedAccept = true;
@@ -4167,7 +4187,7 @@ async function pollSite(site) {
       // already typed. Akọwe asks for bare JSON and never gets tag reminders,
       // so once its reply has gone quiet it is taken as finished (the Relay
       // Trace still decides whether it answers Akọwe's prompt).
-      else if (!pend.reprompted && akoweAwaitingReply(site) && !looksLikeRateLimit(text) && !isNoneSkip(text)) {
+      else if (!pend.reprompted && akoweAwaitingReply(site) && !looksLikeRateLimit(text) && !akoweSiteErr && !isNoneSkip(text)) {
         acceptedUntaggedRaw[site] = text;
         text = `${text}\n[FROM: ${String(site).toUpperCase()}]`;
         forcedAccept = true;
@@ -4179,7 +4199,7 @@ async function pollSite(site) {
       // futilely re-prompting a capped pane. Anything else is a real message the
       // AI forgot to close: treat it as lost and re-send the protocol asking for
       // a full resend — never capture an untagged (possibly partial) reply.
-      if (!forcedAccept && !looksLikeRateLimit(text)) {
+      if (!forcedAccept && !looksLikeRateLimit(text) && !akoweSiteErr) {
         if (!pend.reprompted) {
           state.pending[site].reprompted = true;
           missingEndTagReprompt(site, text);
@@ -4238,19 +4258,38 @@ async function pollSite(site) {
     // downstream of this point runs for it. A House Rule additionally
     // auto-pauses itself, same as before; outside one, routing/mesh state is
     // left alone — there's nothing structured to pause.
-    if (looksLikeRateLimit(text)) {
-      const turn = { id: state.nextTurnId++, site, label: SITES[site].label, text, ts: Date.now(), pinned: false, isRateLimited: true };
+    // The same goes for the site's own error notice shown instead of the answer an
+    // Akọwe prompt waits for (akoweSiteErr, set above): captured and shown, never
+    // relayed — and the Akọwe bridge is told "temporary site error" (503
+    // SITE_ERROR), so Akọwe waits and asks again (or uses another AI) instead of
+    // taking the notice as a bad answer and spending its retries on it.
+    const rateLimited = looksLikeRateLimit(text);
+    const siteErrKind = rateLimited ? "rate-limit" : (akoweSiteErr ? akoweSiteErr.kind : null);
+    if (siteErrKind) {
+      const turn = { id: state.nextTurnId++, site, label: SITES[site].label, text, ts: Date.now(), pinned: false };
+      if (rateLimited) turn.isRateLimited = true; else turn.siteError = siteErrKind;
       state.captured[site] = turn;
       markCaptured(site);
       pushTranscriptTurn(turn);
       broadcast("capture", turn);
-      logEvent("rate-limit-detected", { site, chars: text.length, houseRuleActive: state.hr.active });
+      if (rateLimited) logEvent("rate-limit-detected", { site, chars: text.length, houseRuleActive: state.hr.active });
+      else logEvent("site-error-detected", { site, chars: text.length, kind: siteErrKind, severity: "warn", note: siteErrors.describeSiteError(siteLabel(site), siteErrKind) });
       if (state.waiting[site]) {
         state.waiting[site] = false;
         state.waitingSince[site] = null;
         broadcast("waiting-changed", { site, waiting: false });
       }
-      if (state.hr.active) {
+      if (akoweBridge && akoweAwaitingReply(site)) {
+        let answers = null;
+        try { answers = relayTrace.answersOf(turn.id); } catch (_) {}
+        let owned = false;
+        try { owned = akoweBridge.onCaptured({ ...turn, answers, siteError: siteErrKind }); } catch (e) { logEvent("akowe-error", { site, error: String(e) }); }
+        if (owned) {
+          try { relayTrace.noteHeld(turn.id, "akowe"); } catch (_) {}
+          logEvent("akowe-site-error", { site, kind: siteErrKind, chars: text.length, severity: "warn", note: siteErrors.describeSiteError(siteLabel(site), siteErrKind) });
+        }
+      }
+      if (rateLimited && state.hr.active) {
         state.hr.active = false;
         state.hr.pauseReason = "rate-limit";
         state.hr.pausedRouting = routingSnapshot();
@@ -4430,6 +4469,7 @@ async function pollSite(site) {
         return;
       }
     }
+    relayConvoAt[site] = Date.now(); // a conversation reply (not Akọwe's) — see carryOnContext()
 
     // Mesh routing (Auto/Auto-Both/manual routing:set) and either tag-based
     // Roundtable relay OR an active House Rules stage can both independently
@@ -5236,7 +5276,7 @@ ipcMain.handle("state:get", () => ({
   // capture broadcast — no [TO:]/[FROM:] tags leak into the UI after a reload.
   captured: Object.fromEntries(SITE_IDS.map((s) => [s, state.captured[s] ? { ...state.captured[s], text: stripEnvelope(state.captured[s].text) } : null])),
   transcript: state.transcript,
-  log: state.log,
+  log: state.log.length > MAX_LOG_UI ? state.log.slice(-MAX_LOG_UI) : state.log, // the newest MAX_LOG_UI only (a renderer gets a copy either way)
   ledger: state.ledger,
   logins: sanitizedLoginsAllSites(),
   prompts: state.prompts,
@@ -7797,8 +7837,12 @@ function carryOnContext(site) {
   const reasons = [];
   let owed = [];
   try {
+    // An Akọwe prompt is never "owed" here: while its request is still pending the
+    // "akowe" reason below covers it, and once the bridge has answered Akọwe
+    // (reply, timeout, late window over) it is finished — no carry-on for it.
     owed = relayTrace.openMessages(site)
       .filter((m) => now - m.at < CARRY_ON_RECENT_MS && !selfRepair.isProbeSeq(site, m.seq) && !selfRepair.isContinueSeq(site, m.seq))
+      .filter((m) => { const rec = sentTexts.get(String(m.seq)); return !(rec && rec.bridge); })
       .map((m) => m.seq);
   } catch (_) { owed = []; }
   if (owed.length) reasons.push("owed");
@@ -7812,8 +7856,12 @@ function carryOnContext(site) {
   if (hr) reasons.push("house-rule");
   if (sequence) reasons.push("sequence");
   if (manager) reasons.push("manager");
-  const recent = now - (convoActivityAt[site] || 0) < CARRY_ON_RECENT_MS;
-  if (recent) reasons.push(meshInvolves(site) ? "auto-forward" : "recent");
+  // A real unfinished job only: a message still owed, a pending Akọwe request, a
+  // send under way, a House Rule / sequence / manager run, or an AI-to-AI
+  // conversation that auto-forward keeps going. Recent activity alone (the AI
+  // talked a while ago, a finished Akọwe request) is NOT a job — the 12×NONE log:
+  // "recent" sent the carry-on to idle AIs, which each answered NONE.
+  if (meshInvolves(site) && now - (relayConvoAt[site] || 0) < CARRY_ON_RECENT_MS) reasons.push("auto-forward");
   if (!reasons.length) return null;
   return { at: now, reasons, owed, hr, sequence, relayOn: state.relayEnabled !== false };
 }
