@@ -251,7 +251,7 @@ def _page(p: dict, data: dict, pics: _Pics) -> str:
             icon = p.get("role_icon") or ""
             body.append(f'<div class="{"prot" if prot else "role"}">Story role: {escape((icon + " ") if icon else "")}'
                         f'{escape(p["role_label"])}</div>')
-    sr = p.get("series") if p["template"] == "5" else None
+    sr = p.get("series") if p["template"] in ("5", "7", "8B", "8C") else None  # 📚 people + world
     if sr and (len(sr.get("strip") or []) > 1 or any(b.get("changes") for b in sr.get("strip") or [])):
         cells = []
         for b in sr["strip"]:

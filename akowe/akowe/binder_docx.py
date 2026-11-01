@@ -131,7 +131,7 @@ def build_docx(data: dict, *, pic_bytes=None) -> bytes:
             body.append(_p(_run("Story role: ", bold=True, size=20)
                            + _run(f"{icon + ' ' if icon else ''}{p['role_label']}", bold=bool(star), color=accent
                                   if star else None, size=20)))
-        sr = p.get("series") if p["template"] == "5" else None
+        sr = p.get("series") if p["template"] in ("5", "7", "8B", "8C") else None  # 📚 people + world
         if sr and (len(sr.get("strip") or []) > 1 or any(b.get("changes") for b in sr.get("strip") or [])):
             body.append(_p(_run("📚 Through the series", bold=True, color=accent, size=26), "Heading2"))
             for b in sr["strip"]:

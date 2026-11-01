@@ -950,8 +950,47 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
   (`?as_of=N`). The book bible JSON / Markdown carries a `series` block. Routes: `GET/… …/binder/series`,
   `POST …/series/find|approve|dismiss|portraits|sequel`, `PUT …/series/changes|name`. Tests: `tests/test_series.py`,
   `test_ui_binder.py::test_series_strip_as_of_book_and_sequel` / `test_single_book_has_no_series_strip_or_picker`.
-  *Not done:* places, items and groups have no per-book layer of their own (an item a character gains lives in that
-  character's changes; the "as of book N" view shows book N's own place/item pages); the series is not inside a
-  `book.akowe` package (only in the book bible), so a book opened on another computer arrives without its series;
-  the sequel needs an AI (it is a ⚡ run); the book page (📘 Make my book) has no sequel button — it is in the Book
-  Bible's 📚 Series panel; not tried with a real AI or Stable Diffusion.
+  *Not done (at the time):* places, items and groups had no per-book layer; the series was not in `book.akowe`; the
+  book page had no sequel button. All three are done in the follow-up below.
+- **📚 Series follow-ups (2026-11-01): the world changes too, the sequel button on the book page, the series in the
+  book file.**
+  - *Places, items and groups* (`akowe/akowe/series_world.py`). The same two layers: **fixed** (name / identity, core
+    description, origin; a group's symbol) and **changeable per book** (place: how it looks, state / condition, ruler
+    or owner, danger level, who lives there, damaged / rebuilt; item: owner / holder, condition, powers gained /
+    lost, where it is; group (every 🌍 8C world page): leader, members, allies, enemies, status). Stored in the series
+    record as `things` / `thing_changes` / `thing_proposals` / `thing_pictures` / `thing_picture_waiting` (per-book
+    deltas). `state_as_of` works per category mode ("latest" = the last change, "list" = gathered, "gain/lose" =
+    an item's powers). ✨ Find what changed in this book asks the AI for `thing_changes` in the same call (proposals
+    only; ✔ approve / ✕ dismiss / ✏ edit use the same routes with the thing's key; fixed-layer keys are refused in
+    plain words). Approving a character's "gained / lost an item" that has its own page adds the holder change to
+    the item in that book (`linked_items`). A place whose look changed (or was damaged / rebuilt) gets an
+    establishing picture for that book (`purpose: "scene"`, through AutoInjector; picture maker down → it waits on
+    the same to-make list; earlier ones kept). Binder: place / item / group pages (7 / 8B / 8C) get the "📚 Through
+    the series" strip and, with 📖 As of book N, the fields that hold the state show it read only (e.g. 7.2.6 ruler,
+    7.2.7 danger, 8B.2.4 holder, 8B.8.6 location, 8C.3.3 leaders, 8C.5.x members / allies / enemies; list categories
+    are appended, never replace); the place picture of that book goes into 7.1.1. HTML / PDF / Word exports and the
+    book bible JSON / Markdown carry them. A sequel links its places / items / groups to the same series keys, so
+    they start at the end state; the writer's chapter brief of book 2+ gets `series_world`. (Also fixed: a sequel
+    or rerun whose bible had a group / item crashed the canon step — `autobook` sorted the review list with
+    `list.index`.)
+  - *📚 Start a sequel from the 📘 book page* (`web/app.js` `sequelBox` / `confirmSequel`) and on the ⚡ run's
+    "🎉 Your book is made" screen: the same consent dialog and the same route as the Book Bible's
+    (`POST …/binder/series/sequel`); `GET …/binder/series/sequel` says whether it can be pressed — the button is
+    disabled with the reason in plain words when no AI is connected or book N+1 exists. The Book Bible's 📚 Series
+    panel uses the same status (`view.sequel`) and dialog, and lists place / item / group proposals with the
+    characters'.
+  - *The series in the book file* (`akowe/akowe/series_package.py`, `book_package.py`): a book in a series saves
+    `series.json` (the whole series record: every book's order, title, approved changes, proposals, per-book picture
+    references) into `book.akowe`. Opening restores it when the series id is new here, else **merges by series id**
+    (books by number, people / things by key — a key that names someone else gets a new key —, approved changes:
+    the newer one is the base, the other's entries are added where they do not conflict; a one-value category that
+    differs is reported in plain words and the newer one kept). The same book opened twice as a copy is not added
+    as a second book N (it opens on its own; the changes are merged). The open message says what happened. Old
+    files without `series.json` open as before; a damaged one never stops the book from opening. The "update the
+    one I have" check copy never touches the series.
+  - Tests: `tests/test_series_world.py` (14), `test_ui_binder.py::test_series_place_strip_world_proposals_and_sequel_reason`,
+    `::test_book_page_sequel_button_disabled_with_a_reason`, `::test_book_page_sequel_button_asks_consent_and_starts`.
+  - *Not done:* the place picture is only made for a place's look (not for items or groups); a picture stored in
+    another book of the series travels as a reference only (its bytes are in that book's file); an item's base
+    powers are not known (only the changes are shown); the sequel still needs an AI; not tried with a real AI or
+    Stable Diffusion.

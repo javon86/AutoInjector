@@ -1959,8 +1959,11 @@ class AutoBookService(_Runner):
         except Exception:  # noqa: BLE001 - the book is made; this is an extra
             log.exception("make-a-book run %s: series changes", run.get("id"))
             return
-        if out["proposed"]:
-            self.event(run, "note", f"📚 The AI proposed what changed for {out['proposed']} character(s) in this book. "
+        if out["proposed"] or out.get("things_proposed"):
+            who = " and ".join(([f"{out['proposed']} character(s)"] if out["proposed"] else []) +
+                               ([f"{out['things_proposed']} place(s), item(s) or group(s)"]
+                                if out.get("things_proposed") else []))
+            self.event(run, "note", f"📚 The AI proposed what changed for {who} in this book. "
                        "Open the 📖 Book Bible → 📚 Series to read and ✔ approve them (nothing is used before you do)",
                        code="SERIES_CHANGES_PROPOSED")
 
@@ -2017,7 +2020,7 @@ class AutoBookService(_Runner):
                                   "Press 🔁 Try again (the AI makes new characters).")
             todo = [r for r in have if r["lifecycle"] in REVIEWABLE and r.get("approved_version") != r["version"]
                     and not r.get("stale")]
-            todo.sort(key=lambda r: (["A03", "A04", "A01"].index(r["module_id"]), r.get("created_at") or ""))
+            todo.sort(key=lambda r: ({"A03": 0, "A04": 1, "A01": 2}.get(r["module_id"], 3), r.get("created_at") or ""))
             redo = None
             for i, r in enumerate(todo):
                 name = safe_title(self.app.engine.contracts, r)

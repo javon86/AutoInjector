@@ -219,6 +219,15 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str) -
         if sstate:
             brief["series_state"] = sstate
             rules.append(series_mod.BRIEF_RULE)
+        try:  # 📚 …and each place, item and group as the previous book left them (series_world.py)
+            from . import series as series_mod  # noqa: PLC0415
+            sworld = series_mod.world_brief(store, pid, branch)
+        except Exception:  # noqa: BLE001
+            log.exception("series world of chapter %s", chapter_id)
+            sworld = []
+        if sworld:
+            brief["series_world"] = sworld
+            rules.append(series_mod.WORLD_RULE)
         # Section 7 (P32-P35): continuity tracked from the earlier chapters (continuity.py; never raises)
         if flags["scenes"]:
             from . import continuity  # noqa: PLC0415
@@ -241,7 +250,7 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str) -
                 or extra.get("world_texture") or extra.get("story_choices") or length or style
                 or brief.get("character_details")
                 or any(k in brief for k in ("physical_state", "character_state", "two_readings", "version_changes",
-                                            "series_state"))):
+                                            "series_state", "series_world"))):
             return None, meta
         meta.update(characters=[c["record_id"] for c in present], voice_cards=len(vb["cards"]),
                     other_voices=len(vb["others"]), summarized=vb["summarized"],
