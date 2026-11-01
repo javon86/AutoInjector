@@ -155,7 +155,7 @@ const BF_STATUS_STALE_MS = 90 * 1000;
 // outcome -> the HTTP status Akọwe saw (or would see) for it.
 const OUTCOME_HTTP = {
   OK: 200, CACHED: 200, LATE_REPLY_STORED: 200, TIMEOUT: 504, LATE_EXPIRED: 504,
-  SITE_NOT_READY: 503, SEND_FAILED: 502, TOO_LARGE: 413, SITE_BUSY: 409,
+  SITE_NOT_READY: 503, SEND_FAILED: 502, TOO_LARGE: 413, SITE_BUSY: 409, SITE_ERROR: 503,
   BAD_REQUEST: 400, UNKNOWN_SITE: 404, NOT_FOUND: 404, UNAUTHORIZED: 401,
   PAIRED: 200, PAIRING_CODE_INVALID: 401, PAIRING_CODE_EXPIRED: 410, TOO_MANY_ATTEMPTS: 429, NOT_READY: 503
 };
@@ -363,7 +363,7 @@ function createBridge(opts) {
     if (outcome === 'OK' || outcome === 'LATE_REPLY_STORED') counters.answered++;
     else if (outcome === 'TIMEOUT') counters.timeouts++;
     else if (outcome === 'SEND_FAILED' || outcome === 'SITE_NOT_READY') counters.failed++;
-    else if (outcome === 'SITE_BUSY') counters.busy++;
+    else if (outcome === 'SITE_BUSY' || outcome === 'SITE_ERROR') counters.busy++;
     else if (outcome === 'BAD_REQUEST' || outcome === 'TOO_LARGE' || outcome === 'UNKNOWN_SITE' || outcome === 'NOT_FOUND') counters.rejected++;
   }
   // Called for every authenticated request.
@@ -564,7 +564,7 @@ function createBridge(opts) {
     if (!Array.isArray(turn.answers) || !turn.answers.length) return;
     const t = now();
     const list = (declined.get(turn.site) || []).filter((x) => t - x.at < RECENT_DECLINED_MS);
-    list.push({ answers: turn.answers.map(String), text: String(turn.text == null ? '' : turn.text), at: t });
+    list.push({ answers: turn.answers.map(String), text: String(turn.text == null ? '' : turn.text), at: t, siteError: turn.siteError || null });
     while (list.length > 5) list.shift();
     declined.set(turn.site, list);
   }
@@ -581,6 +581,22 @@ function createBridge(opts) {
   function ownTurn(entry, turn) {
     const text = stripEnvelope(turn.text);
     const elapsed = now() - entry.startedAt;
+    // The site showed its OWN error notice ("Sorry, something went wrong…",
+    // "Claude will return soon", a usage limit) instead of an answer — main.js
+    // marks it turn.siteError ('error' | 'rate-limit'). It answers the prompt (the
+    // site is free again) but is never handed to Akọwe as the answer: 503
+    // SITE_ERROR is a temporary problem, so Akọwe waits and asks again (or uses
+    // another AI) instead of spending a "bad answer" retry on it.
+    if (turn.siteError) {
+      const kind = turn.siteError === 'rate-limit' ? 'rate-limit' : 'error';
+      const retryAfter = kind === 'rate-limit' ? 60 : 30;
+      log('outcome', { site: entry.site, request_id: entry.requestId, outcome: 'SITE_ERROR', error: kind, chars: text.length, elapsed_ms: elapsed });
+      finish(entry, { status: 503, body: Object.assign(errBody('SITE_ERROR', kind === 'rate-limit'
+        ? `${entry.site} showed a usage-limit message instead of an answer to [MSG #${entry.seq}]; wait and try again later, or use another AI`
+        : `${entry.site} showed an error message instead of an answer to [MSG #${entry.seq}] (a short outage on the site); wait and try again`, false),
+        { site_error: kind, retry_after_s: retryAfter, seq: entry.seq }) });
+      return;
+    }
     const body = { ok: true, site: entry.site, request_id: entry.requestId, text, seq: entry.seq, reply_to: entry.seq, elapsed_ms: elapsed };
     log('outcome', { site: entry.site, request_id: entry.requestId, outcome: entry.phase === 'late' ? 'LATE_REPLY_STORED' : 'OK', chars: text.length, elapsed_ms: elapsed });
     finish(entry, { status: 200, body });
@@ -1062,6 +1078,9 @@ function describeEvent(ev, label) {
     case 'SITE_NOT_READY': return { say: `${L}'s window isn't loaded, so the request was turned away`, tone: 'error' };
     case 'SEND_FAILED': return { say: `Couldn't type the prompt into ${L}'s window`, tone: 'error' };
     case 'SITE_BUSY': return { say: `${L} was still busy with another request — ${who} was told to wait`, tone: 'warn' };
+    case 'SITE_ERROR': return e.error === 'rate-limit'
+      ? { say: `${L} showed a usage-limit message instead of an answer — ${who} waits and tries again (or uses another AI)`, tone: 'warn' }
+      : { say: `${L} showed an error message instead of an answer — ${who} waits and tries again`, tone: 'warn' };
     case 'TOO_LARGE': return { say: 'Refused a request that was too big (over 1 MB)', tone: 'warn' };
     default: return { say: `Refused a request this app couldn't use (${e.outcome || 'error'})`, tone: 'warn' };
   }

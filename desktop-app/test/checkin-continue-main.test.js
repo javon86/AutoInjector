@@ -9,6 +9,9 @@
 //   * Claude still owed an answer to a message (it stalled): that message is sent
 //     again in the follow-up, with its [MSG #];
 //   * an idle AI: no follow-up;
+//   * an AI whose Akọwe request is FINISHED (answered): no follow-up — a finished
+//     request is no unfinished job (the log where idle AIs got the carry-on, reason
+//     "recent", and answered NONE twelve times);
 //   * Stop AIs Talking pressed while the check-in ran: no follow-up;
 //   * the setting off: no follow-up.
 // Run with: node test/checkin-continue-main.test.js
@@ -26,9 +29,12 @@ process.env.AUTOINJECTOR_PROBE_EARLY_MS = "500";
 process.env.AUTOINJECTOR_CHECKIN_OWED_DEMAND_MS = "300"; // a stalled message stops blocking a check-in after this (3 min in the app)
 process.env.AUTOINJECTOR_CARRY_ON_RECENT_MS = "60000";
 process.env.AUTOINJECTOR_AKOWE_DIR = require("path").join(require("os").tmpdir(), "no-akowe-here-" + process.pid);
+process.env.AUTOINJECTOR_AKOWE_PORT = String(20000 + Math.floor(Math.random() * 20000));
+process.env.AUTOINJECTOR_AKOWE_APP_URL = `http://127.0.0.1:${Number(process.env.AUTOINJECTOR_AKOWE_PORT) + 1}/api/ping`;
 
 const path = require("path");
 const fs = require("fs");
+const http = require("http");
 const Module = require("module");
 const mockElectronPath = path.join(__dirname, "mock-electron.js");
 const originalLoad = Module._load;
@@ -57,6 +63,22 @@ const call = (ch, p) => mockElectron.__ipcHandlers[ch]({}, p);
 const reg = (s) => mockElectron.__registry[s];
 const CHECKIN_RE = /Reply with only this word: ([a-z]+)/;
 const isCarryOn = (t) => String(t || "").includes(SR.CARRY_ON_TEXT);
+function request(method, urlPath, token, body) {
+  return new Promise((resolve, reject) => {
+    const data = body ? Buffer.from(JSON.stringify(body)) : null;
+    const headers = {};
+    if (token) headers.Authorization = `Bearer ${token}`;
+    if (data) { headers["Content-Type"] = "application/json"; headers["Content-Length"] = data.length; }
+    const req = http.request({ host: "127.0.0.1", port: Number(process.env.AUTOINJECTOR_AKOWE_PORT), method, path: urlPath, headers, agent: false }, (res) => {
+      const chunks = [];
+      res.on("data", (c) => chunks.push(c));
+      res.on("end", () => { let json = null; try { json = JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch (_) {} resolve({ status: res.statusCode, json }); });
+    });
+    req.on("error", reject);
+    if (data) req.write(data);
+    req.end();
+  });
+}
 
 async function main() {
   require(path.join(__dirname, "..", "main.js"));
@@ -102,6 +124,25 @@ async function main() {
   await sleep(700);
   assert(gw.sentLog.length === 1 && CHECKIN_RE.test(gw.sentLog[0].text), `only the check-in was typed into Gemini (${gw.sentLog.length} messages)`);
   assert(continueLines("gemini").length === 0, "no carry-on was even considered (Gemini was doing nothing)");
+
+  // ---------------------------------------------------------------------------------
+  console.log("\n== a FINISHED Akọwe request is not an unfinished job: NO follow-up ==");
+  const en = await call("akowe:set-enabled", { enabled: true });
+  assert(en.enabled && en.listening, "(the Akọwe bridge is on)");
+  const akToken = (await call("akowe:reveal-token")).token;
+  gw.sentLog = [];
+  const pr0 = request("POST", "/v1/complete", akToken, { site: "gemini", prompt: "Review it as JSON. AKOWE-DONE-1", request_id: "bf-editor-done-1-gemini-c0-a0", timeout_ms: 20000 });
+  await waitUntil(() => gw.sentLog.some((x) => /AKOWE-DONE-1/.test(x.text)));
+  await sleep(100);
+  gw.currentText = '[TO: USER]\n{"verdict": "good"}\n[FROM: GEMINI]';
+  const done = await pr0;
+  assert(done.status === 200 && /good/.test(done.json.text), "Akọwe's request to Gemini was answered (finished, outcome delivered)");
+  ok = await checkInAndSettle("gemini");
+  assert(ok && ok.state === "ok", "Gemini answered a check-in a moment later");
+  await sleep(700);
+  assert(!gw.sentLog.some((x) => isCarryOn(x.text)), `no carry-on was sent to Gemini (${gw.sentLog.filter((x) => isCarryOn(x.text)).length})`);
+  assert(continueLines("gemini").length === 0, "…none was even considered: a finished Akọwe request does not count as recent activity");
+  await call("akowe:set-enabled", { enabled: false });
 
   // ---------------------------------------------------------------------------------
   console.log("\n== mid-conversation (auto-forward on): ONE follow-up, the conversation goes on ==");

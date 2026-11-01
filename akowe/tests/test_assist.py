@@ -469,3 +469,81 @@ def test_endpoints_need_auth_and_work_over_http(server, caplog):
     # prompts, ideas and replies never reach the logs
     assert "ZZPROMPT" not in caplog.text and SECRET_REPLY not in caplog.text and "ZZIDEA" not in caplog.text
     assert "assist job=" in caplog.text
+
+
+# ---------------------------------------------------------------------- Bible Builder subject IDs (canon mentions)
+def _veyrhaven(h, *extra_facts):
+    """An approved place whose facts speak about people who have no character entry yet."""
+    return h.create_approved("A04", {"concept": "Veyrhaven"}, manual_candidate={
+        "concept": "Veyrhaven", "attributes": {}, "linked_refs": [], "protected_fact_flags": [],
+        "facts": [fact("veyrhaven", "entity.name", "Veyrhaven"),
+                  fact("silas-rook", "entity.location_id", "veyrhaven"), *extra_facts]})
+
+
+def _session(svc, h):
+    from akowe.assist import BibleSession
+    return BibleSession(svc, h.principal, h.project_id, "main", "a harbour city", None)
+
+
+def test_bible_reuses_subject_id_the_canon_only_mentions(h, svc):
+    _veyrhaven(h, fact("mara", "entity.location_id", "veyrhaven"))
+    sess = _session(svc, h)
+    silas = sess.items[sess.add_named("A01", "Silas Rook")]
+    assert silas["subject_id"] == "silas-rook"  # not "silas-rook-2": no entry owns that ID yet
+    mara = sess.items[sess.add_named("A01", "Mara Venn")]
+    assert mara["subject_id"] == "mara"  # the one mentioned-only ID that names the same person
+    # a second entry with the same name in this session is a real clash
+    assert sess.items[sess.add_named("A01", "Silas Rook")]["subject_id"] == "silas-rook-2"
+    # the place itself is owned by its entry
+    assert sess.items[sess.add_named("A04", "Veyrhaven")]["subject_id"] == "veyrhaven-2"
+
+
+def test_bible_subject_id_owned_by_another_entry_still_gets_a_number(h, svc):
+    _veyrhaven(h)
+    h.create_approved("A01", {"concept": "Silas Rook"}, manual_candidate={
+        "concept": "Silas Rook", "attributes": {}, "linked_refs": [], "protected_fact_flags": [],
+        "facts": [fact("silas-rook", "entity.name", "Silas Rook")]})
+    sess = _session(svc, h)
+    assert sess.items[sess.add_named("A01", "Silas Rook")]["subject_id"] == "silas-rook-2"
+
+
+def test_realign_subject_puts_in_the_canon_id_the_reviewer_asks_for(h):
+    from akowe.assist import realign_subject
+    _veyrhaven(h)
+    r = h.create("A01", {"concept": "Silas Rook"}, manual_candidate={
+        "concept": "Silas Rook", "attributes": {}, "linked_refs": [], "protected_fact_flags": [],
+        "facts": [fact("silas-rook-2", "entity.name", "Silas Rook"),
+                  fact("silas-rook-2", "entity.location_id", "veyrhaven")]})
+    rec = h.record(r["output_refs"][0])
+    why = ["the entry uses the character ID 'silas-rook-2', but the approved Veyrhaven record already places "
+           "Silas Rook in the city under the ID 'silas-rook'"]
+    data = realign_subject(h.store, h.project_id, "main", rec, why)
+    assert data and {f["subject_id"] for f in data["facts"]} == {"silas-rook"}
+    assert realign_subject(h.store, h.project_id, "main", rec, ["the backstory is thin"]) is None  # not about the ID
+    h.create_approved("A01", {"concept": "Silas Rook"}, manual_candidate={  # a real owner of the plain ID
+        "concept": "Silas Rook", "attributes": {}, "linked_refs": [], "protected_fact_flags": [],
+        "facts": [fact("silas-rook", "entity.name", "Silas Rook")]})
+    assert realign_subject(h.store, h.project_id, "main", rec, why) is None
+
+
+def test_run_review_loop_saves_the_canon_id_itself(h):
+    """The make-a-book review loop: Akọwe saves the canon's ID as a new draft version (no AI fix spent on it)."""
+    from types import SimpleNamespace
+    from akowe.autobook import AutoBookService
+    from akowe.book_path import BookPath
+    _veyrhaven(h)
+    r = h.create("A01", {"concept": "Silas Rook"}, manual_candidate={
+        "concept": "Silas Rook", "attributes": {}, "linked_refs": [], "protected_fact_flags": [],
+        "facts": [fact("silas-rook-2", "entity.name", "Silas Rook")]})
+    head = h.record(r["output_refs"][0])
+    events = []
+    me = SimpleNamespace(_engine=h.engine, event=lambda run, kind, msg, **kw: events.append((kind, msg)),
+                         save=lambda run: None)
+    run = {"project_id": h.project_id, "branch_id": "main", "principal": h.principal}
+    bp = BookPath(h.engine, h.principal, h.project_id, "main")
+    assert AutoBookService._realign_subject(me, run, bp, head, "character", ["uses 'silas-rook-2', not 'silas-rook'"])
+    new = bp.rec(head["record_id"])
+    assert new["version"] == head["version"] + 1 and new["lifecycle"] == "DRAFT"
+    assert [f["subject_id"] for f in new["data"]["facts"]] == ["silas-rook"]
+    assert events and "“silas-rook-2” to “silas-rook”" in events[0][1]
+    assert not AutoBookService._realign_subject(me, run, bp, new, "character", ["uses 'silas-rook'"])  # nothing left to do

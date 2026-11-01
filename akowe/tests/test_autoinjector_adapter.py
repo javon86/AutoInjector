@@ -251,7 +251,8 @@ def test_connection_refused_maps_to_upstream_unavailable(h):
 
 
 @pytest.mark.parametrize("status,code,expected", [
-    (503, "SITE_NOT_READY", "UPSTREAM_UNAVAILABLE"), (502, "SEND_FAILED", "UPSTREAM_UNAVAILABLE"),
+    (503, "SITE_NOT_READY", "UPSTREAM_UNAVAILABLE"), (503, "SITE_ERROR", "UPSTREAM_UNAVAILABLE"),
+    (502, "SEND_FAILED", "UPSTREAM_UNAVAILABLE"),
     (400, "BAD_REQUEST", "INVALID_INPUT"), (413, "TOO_LARGE", "INVALID_INPUT")])
 def test_status_mapping(h, bridge, status, code, expected):
     connect(h, bridge.url)
@@ -259,6 +260,22 @@ def test_status_mapping(h, bridge, status, code, expected):
     r = b01(h)
     assert errors_of(r)[0][0] == expected, r
     assert h.store.query_one("SELECT COUNT(*) c FROM records")["c"] == 0
+
+
+def test_site_error_notice_is_a_temporary_problem_with_a_wait_hint():
+    """The bridge's 503 SITE_ERROR: the site showed its own error notice ("Sorry, something went wrong...") instead
+    of an answer. A busy code (wait and retry / another AI), never a bad answer, with the bridge's wait hint."""
+    from akowe.jobs import is_busy_error
+    err = prov.AutoInjectorAdapter._classify_http(
+        503, "", {"error": "SITE_ERROR", "site_error": "error", "retry_after_s": 30}, "gemini")
+    assert err.code == "UPSTREAM_UNAVAILABLE" and is_busy_error(err)
+    assert err.retry_after_s == 30 and err.site_problem == "SITE_ERROR"
+    assert "Gemini showed an error message instead of an answer" in err.errors[0]["message"]
+    lim = prov.AutoInjectorAdapter._classify_http(503, "", {"error": "SITE_ERROR", "site_error": "rate-limit"}, "claude")
+    assert lim.code == "UPSTREAM_UNAVAILABLE" and lim.retry_after_s == 60 and lim.site_problem == "SITE_RATE_LIMITED"
+    assert "usage-limit message" in lim.errors[0]["message"]
+    bad = prov.AutoInjectorAdapter._classify_http(503, "", {"error": "SITE_ERROR", "retry_after_s": True}, "gemini")
+    assert bad.retry_after_s == 30  # a nonsense hint falls back to the default
 
 
 def test_timeout_needs_user_decision_and_retry_reuses_the_reply(h, bridge):

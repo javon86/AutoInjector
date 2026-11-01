@@ -18,6 +18,8 @@
  * output folder, log extract, Open Interpreter). That keeps the registry testable with fakes.
  */
 
+const akoweRun = require('./akowe-run');
+
 const SITES = ['chatgpt', 'claude', 'gemini'];
 const SITE_LABEL = { chatgpt: 'ChatGPT', claude: 'Claude', gemini: 'Gemini' };
 const LENGTHS = ['short_story', 'novelette', 'novella', 'novel'];
@@ -45,21 +47,82 @@ function akoweError(r) {
 const okStatus = (r) => r && r.status >= 200 && r.status < 300;
 const enc = encodeURIComponent;
 
-/** The book to act on: the one named, else the current run's book, else the only / newest book. */
-async function resolveBook(ctx, a) {
-  if (a && a.project_id) return { ok: true, pid: String(a.project_id) };
-  const runs = await ctx.akowe('GET', '/api/autobook');
-  if (okStatus(runs) && runs.json) {
-    const act = (runs.json.active || [])[0];
-    if (act && act.project_id) return { ok: true, pid: act.project_id };
-  }
+// ---- which book is "the current one" ------------------------------------------------------------------------
+// On a real PC Alfred said the book "we're working on" was an OLD book (and explained that book's old outline
+// problem) while Akọwe's run for the new book sat paused on a reviewer's REVISE: he guessed "the newest book" by
+// fields Akọwe never sent (so he got the first, oldest book), the paused run was never used to pick the book, and
+// books were listed by project name ("The Winter the Ocean…") not the title the run used ("The Last Soundkeep").
+// Now ONE place decides, in this order: the book you named · the book open in the 📖 Akọwe tab · the book whose
+// run is writing · the book whose run waits for you (newest) · the book Akọwe says was opened last · the newest
+// run's book · the only / newest book. Every answer says which book it is about and why.
+const RUN_LIVE = new Set(['running', 'queued', 'waiting', 'pausing']);
+const RUN_NEEDS_YOU = new Set(['paused', 'interrupted', 'error']);
+const runReplaced = (r) => !r || !!r.replaced_by || r.state === 'replaced';
+const runIsLive = (r) => !runReplaced(r) && (RUN_LIVE.has(String(r.status)) || ['working', 'waiting', 'pausing'].includes(String(r.state || '')));
+const runNeedsYou = (r) => !runReplaced(r) && !runIsLive(r) && (r.needs_you === true || RUN_NEEDS_YOU.has(String(r.status)) || ['needs_decision', 'problem', 'interrupted', 'paused'].includes(String(r.state || '')));
+const runStamp = (r) => String((r && (r.updated_at || r.finished_at || r.started_at || r.created_at)) || '');
+const newestFirst = (list) => list.slice().sort((x, y) => runStamp(y).localeCompare(runStamp(x)));
+/** A book's name as the author knows it: the profile's title (it can differ from the project's name). */
+function bookTitle(b) {
+  if (!b) return '';
+  return clip((b.profile && b.profile.title) || b.title || b.name || b.project_id || '', 120);
+}
+const WHY_WORDS = {
+  named: 'the book you asked about', open_tab: 'the book open in the 📖 Akọwe tab', live_run: 'its book run is writing now',
+  needs_you: 'its book run is paused and waiting for you', last_opened: 'the book last opened in Akọwe', newest_run: 'the book of the newest book run',
+  only: 'the only book', newest: 'the newest book (a guess)',
+};
+/** GET /api/projects + /api/autobook once (cache: an object filled for the caller). */
+async function readBooksAndRuns(ctx, cache) {
+  if (cache && cache.books) return cache;
   const list = await ctx.akowe('GET', '/api/projects');
-  if (!okStatus(list)) return akoweError(list);
-  const books = Array.isArray(list.json) ? list.json : [];
+  if (!okStatus(list)) return { error: akoweError(list) };
+  const runsR = await ctx.akowe('GET', '/api/autobook');
+  const j = okStatus(runsR) && runsR.json && typeof runsR.json === 'object' ? runsR.json : {};
+  const all = [].concat(Array.isArray(j.active) ? j.active : [], j.current && typeof j.current === 'object' ? [j.current] : [], Array.isArray(j.runs) ? j.runs : []).filter((r) => r && typeof r === 'object' && r.id);
+  const seen = new Set();
+  const runs = all.filter((r) => (seen.has(r.id) ? false : (seen.add(r.id), true)));
+  const out = { books: Array.isArray(list.json) ? list.json.filter((b) => b && b.project_id) : [], runs, autobook: j };
+  if (cache) Object.assign(cache, out);
+  return out;
+}
+/** The run of one book: a live one, else its newest run that was not replaced. */
+function runOfBook(runs, pid, onlyBook) {
+  const mine = (runs || []).filter((r) => !runReplaced(r) && (r.project_id === pid || (!r.project_id && onlyBook)));
+  return mine.find(runIsLive) || newestFirst(mine)[0] || null;
+}
+async function currentBook(ctx, a, cache) {
+  const d = await readBooksAndRuns(ctx, cache);
+  if (d.error) return d.error;
+  const { books, runs } = d;
+  const known = (pid) => !!pid && books.some((b) => b.project_id === pid);
+  const pick = (pid, why) => {
+    const b = books.find((x) => x.project_id === pid) || null;
+    return { ok: true, pid, why, why_words: WHY_WORDS[why], title: b ? bookTitle(b) : '', book: b, guessed: why === 'newest' };
+  };
+  if (a && a.project_id) return pick(String(a.project_id), 'named');
   if (!books.length) return { ok: false, error: 'NO_BOOK', message: 'There are no books in Akọwe yet. Ask me to make one ("make a book for me about …").' };
-  if (books.length === 1) return { ok: true, pid: books[0].project_id };
-  const newest = books.slice().sort((x, y) => String(y.last_opened_at || y.updated_at || y.created_at || '').localeCompare(String(x.last_opened_at || x.updated_at || x.created_at || '')))[0];
-  return { ok: true, pid: newest.project_id, guessed: true };
+  let open = null;
+  if (typeof ctx.openBook === 'function') { try { open = await ctx.openBook(); } catch (_) { open = null; } }
+  if (open && known(open.project_id)) return pick(open.project_id, 'open_tab');
+  const live = runs.find((r) => runIsLive(r) && known(r.project_id));
+  if (live) return pick(live.project_id, 'live_run');
+  const waiting = newestFirst(runs.filter((r) => runNeedsYou(r) && known(r.project_id)))[0];
+  if (waiting) return pick(waiting.project_id, 'needs_you');
+  const opened = books.filter((b) => b.open === true || b.last_opened_at).sort((x, y) => String(y.last_opened_at || '').localeCompare(String(x.last_opened_at || '')))[0];
+  if (opened) return pick(opened.project_id, 'last_opened');
+  const cur = d.autobook && d.autobook.current;
+  if (cur && !runReplaced(cur) && known(cur.project_id)) return pick(cur.project_id, 'newest_run');
+  const anyRun = newestFirst(runs.filter((r) => !runReplaced(r) && known(r.project_id)))[0];
+  if (anyRun) return pick(anyRun.project_id, 'newest_run');
+  if (books.length === 1) return pick(books[0].project_id, 'only');
+  const newest = books.slice().sort((x, y) => String(y.updated_at || y.created_at || '').localeCompare(String(x.updated_at || x.created_at || '')))[0];
+  return pick(newest.project_id, 'newest');
+}
+/** The book to act on (tools that change a book): the same choice as book_status. */
+async function resolveBook(ctx, a) {
+  const b = await currentBook(ctx, a);
+  return b.ok ? { ok: true, pid: b.pid, title: b.title, why: b.why, guessed: b.guessed } : b;
 }
 async function resolveRun(ctx, a) {
   const runs = await ctx.akowe('GET', '/api/autobook');
@@ -68,20 +131,89 @@ async function resolveRun(ctx, a) {
   const j = runs.json || {};
   // a newer Akọwe names the run that matters (`current`); runs a newer one replaced are never acted on
   const live = (r) => r && !r.replaced_by && r.state !== 'replaced' && ['paused', 'interrupted', 'running', 'waiting', 'pausing', 'queued', 'error'].includes(r.status);
-  const act = (j.active || [])[0] || (live(j.current) ? j.current : null) || (j.runs || []).find(live);
+  let act = (j.active || [])[0];
+  if (!act) {
+    // the current book's run (the open one) before another book's paused run
+    const cache = {};
+    let mine = null;
+    try { const b = await currentBook(ctx, {}, cache); if (b && b.ok) mine = runOfBook(cache.runs, b.pid, (cache.books || []).length <= 1); } catch (_) { mine = null; }
+    act = (live(mine) ? mine : null) || (live(j.current) ? j.current : null) || (j.runs || []).find(live);
+  }
   if (!act) return { ok: false, error: 'NO_RUN', message: 'No “Make a book for me” run is going right now.' };
   return { ok: true, runId: act.id, run: act };
 }
+/** The buttons Akọwe shows for a paused run, in the words on them (so he can say "press ✔ Approve anyway"). */
+function choiceWords(problem) {
+  const opts = Array.isArray(problem && problem.options) ? problem.options : [];
+  const out = [];
+  if (opts.includes('retry')) out.push(problem.code === 'REVIEW_NOT_PASSED' ? '🔁 Try again (the AI gets two more fixes)' : '🔁 Try again');
+  if (opts.includes('approve_anyway')) out.push('✔ Approve anyway (your own approval: the draft is kept as it is)');
+  if (opts.includes('edit')) out.push('✏️ Edit it myself (opens the draft; change it and save)', '▶ I edited it — continue (after you saved your change)');
+  return out;
+}
+function problemBrief(p, run) {
+  if (!p || typeof p !== 'object') return null;
+  const where = p.where && typeof p.where === 'object' ? p.where : {};
+  const s = run ? akoweRun.stepsOf(run) : {};
+  const text = (x) => (typeof x === 'string' ? x : (x && (x.message || x.reason || x.text)) || '');
+  const reasons = [].concat(Array.isArray(p.reasons) ? p.reasons : [], Array.isArray(p.details) ? p.details : []).map(text).filter(Boolean).slice(0, 6).map((x) => clip(x, 300));
+  return {
+    what: clip(p.message, 400), code: p.code || null,
+    step: clip(where.step || s.stepTitle || '', 80) || undefined, chapter: where.chapter || p.chapter_id || undefined,
+    reviewer_verdict: p.verdict || undefined, reasons: reasons.length ? reasons : undefined,
+    how_to_fix: p.fix ? clip(p.fix, 300) : undefined,
+    choices: choiceWords(p), options: p.options || null, message: clip(p.message, 300),
+  };
+}
 function runBrief(r) {
   if (!r) return null;
+  const s = akoweRun.stepsOf(r);
+  const sum = akoweRun.summarizeRun(r) || {};
   return {
     run_id: r.id, status: r.status, state: r.state || undefined, state_words: r.state_words ? clip(r.state_words, 200) : undefined,
-    steps_done: r.steps_done != null ? r.steps_done : undefined, steps_total: r.steps_total != null ? r.steps_total : undefined, phase: clip(r.phase, 160), title: clip(r.title || '', 160), project_id: r.project_id || null,
-    steps: (r.steps || []).map((s) => ({ title: clip(s.title, 80), state: s.state })),
+    now: clip(sum.text || '', 240) || undefined,
+    steps_done: r.steps_done != null ? r.steps_done : undefined, steps_total: r.steps_total != null ? r.steps_total : undefined,
+    on_step: s.at && s.total ? `step ${s.at} of ${s.total}${s.stepTitle ? ` (${s.stepTitle})` : ''}` : undefined,
+    phase: clip(r.phase, 160), title: clip(r.title || '', 160), project_id: r.project_id || null,
+    steps: (r.steps || []).map((x) => ({ title: clip(x.title, 80), state: x.state })),
     recent_events: (r.events || []).slice(-8).map((e) => clip(e.message, 200)),
-    problem: r.problem ? { code: r.problem.code || null, message: clip(r.problem.message, 300), options: r.problem.options || null } : null,
+    problem: problemBrief(r.problem, r),
     needs_decision: typeof r.needs_decision === 'boolean' ? r.needs_decision : r.status === 'paused' && !!(r.problem && r.problem.record_id),
   };
+}
+/** One plain sentence: which book, why it is the current one, where its run stands, what it waits for. */
+function nowSentence(title, why, run) {
+  const name = title ? `“${title}”` : 'your book';
+  const head = `The book we are working on now is ${name} (${WHY_WORDS[why] || why}).`;
+  if (!run) return `${head} It has no ⚡ Make a book for me run.`;
+  const where = run.on_step ? ` at ${run.on_step}` : '';
+  const st = String(run.state || run.status || '');
+  const state = run.needs_decision ? 'is paused and needs your decision' : RUN_LIVE.has(String(run.status)) ? 'is working' : st === 'done' || run.status === 'done' ? 'is finished' : st === 'interrupted' ? 'stopped when Akọwe closed' : st === 'problem' || run.status === 'error' ? 'stopped on a problem' : st === 'paused' || run.status === 'paused' ? 'is paused' : st === 'cancelled' ? 'was cancelled' : `is ${st.replace(/_/g, ' ') || 'in an unknown state'}`;
+  let tail = '';
+  if (run.problem && run.problem.what) {
+    tail = ` The problem now: ${run.problem.what}`;
+    if (run.problem.reasons && run.problem.reasons.length) tail += ` The reviewer's reasons: ${run.problem.reasons.join(' / ')}`;
+    if (run.problem.choices && run.problem.choices.length) tail += ` Your choices in Akọwe: ${run.problem.choices.join(' · ')}.`;
+  }
+  return `${head} Its book run ${state}${where}.${tail}`;
+}
+/**
+ * The live "where are we" line Alfred's AI gets with every request (alfred.js puts it in the system message):
+ * the current book, its run and its problem now, plus other books whose runs wait for the user. Two cheap reads
+ * (GET /api/projects, GET /api/autobook) — never a book's text. { ok, text, pid, title } | { ok: false }.
+ */
+async function bookNow(ctx) {
+  const cache = {};
+  const b = await currentBook(ctx, {}, cache);
+  if (!b.ok) return b.error === 'NO_BOOK' ? { ok: true, text: 'There are no books in Akọwe yet.', pid: null, title: '' } : { ok: false, error: b.error };
+  const run = runOfBook(cache.runs, b.pid, (cache.books || []).length <= 1);
+  const title = b.title || (run && clip(run.title, 120)) || b.pid;
+  let text = nowSentence(title, b.why, runBrief(run));
+  const others = (cache.books || []).filter((x) => x.project_id !== b.pid).map((x) => ({ x, r: runOfBook(cache.runs, x.project_id, false) })).filter((o) => o.r && runNeedsYou(o.r));
+  if (others.length) text += ` Other books whose runs also wait for you: ${others.slice(0, 3).map((o) => `“${bookTitle(o.x) || clip(o.r.title, 80)}” (${clip((akoweRun.summarizeRun(o.r) || {}).text || o.r.status, 120)})`).join('; ')}.`;
+  const rest = (cache.books || []).filter((x) => x.project_id !== b.pid).length;
+  if (rest) text += ` (${rest} other book${rest === 1 ? '' : 's'} in Akọwe — not the current one.)`;
+  return { ok: true, text: clip(text, 1600), pid: b.pid, title };
 }
 
 // ----------------------------------------------------------------------------- the registry
@@ -91,38 +223,71 @@ function def(t) { TOOLS.push(Object.freeze(Object.assign({ changes: false, allow
 // ---- 📖 Akọwe / books -------------------------------------------------------------------------
 def({
   name: 'book_status', title: 'Book status', group: 'books',
-  description: 'Status of the books in Akọwe and the current "Make a book for me" run: checklist steps, recent events, the AIs\' health and any problems. Read-only.',
-  args: { type: 'object', properties: { project_id: { type: 'string', maxLength: 80, description: 'Which book (optional; default: the current one)' } }, additionalProperties: false },
+  description: 'What is happening with the book we are working on NOW (the one open in Akọwe / whose run is going or waiting): which book it is, where its "Make a book for me" run stands (step, what it waits for), the exact problem with the reviewer\'s reasons and the buttons the user can press, the checklist, the AIs\' health, and other books that wait for the user. Use it for any question about "the book", "the run", "the error" or "the problem". Read-only.',
+  args: { type: 'object', properties: { project_id: { type: 'string', maxLength: 80, description: 'Which book (optional; leave it out for the current one)' } }, additionalProperties: false },
   async run(a, ctx) {
-    const out = { books: [], run: null, checklist: null, ais: null, problems: [] };
-    const list = await ctx.akowe('GET', '/api/projects');
-    if (!okStatus(list)) return akoweError(list);
-    out.books = (Array.isArray(list.json) ? list.json : []).slice(0, 12).map((b) => ({ project_id: b.project_id, title: clip(b.name || b.title || b.project_id, 120) }));
-    const runs = await ctx.akowe('GET', '/api/autobook');
-    if (okStatus(runs) && runs.json) out.run = runBrief((runs.json.active || [])[0] || runs.json.current || (runs.json.runs || []).find((r) => !r.replaced_by && r.state !== 'replaced'));
+    const out = { now: '', current_book: null, run: null, checklist: null, ais: null, earlier_journal_notes: [], other_books: [], other_runs_waiting_for_you: [] };
+    const cache = {};
+    const d = await readBooksAndRuns(ctx, cache);
+    if (d.error) return d.error;
     const slots = await ctx.akowe('GET', '/api/slots/states');
     if (okStatus(slots) && slots.json) out.ais = (slots.json.slots || []).map((s) => ({ slot: s.slot_id, name: clip(s.name, 40), state: s.state, word: clip(s.word, 60) }));
-    if (!out.books.length) { out.note = 'No books yet.'; return { ok: true, data: out }; }
-    const b = await resolveBook(ctx, a);
-    if (b.ok) {
-      const st = await ctx.akowe('GET', `/api/projects/${enc(b.pid)}/branches/main/book`);
-      if (okStatus(st) && st.json) {
-        out.checklist = { project_id: b.pid, steps: (st.json.steps || []).map((s) => ({ title: clip(s.title, 80), state: s.state, chapters: Array.isArray(s.chapters) ? s.chapters.map((c) => ({ chapter_id: c.chapter_id, state: c.state })) : undefined })) };
-      }
-      const j = await ctx.akowe('GET', `/api/projects/${enc(b.pid)}/branches/main/journal?problems=1`);
-      if (okStatus(j) && j.json) out.problems = (j.json.entries || []).slice(-6).map((e) => clip(e.what || (e.problem && e.problem.message), 200));
+    if (!d.books.length) {
+      // (a run that is just starting has no book yet)
+      out.run = runBrief(d.runs.find(runIsLive) || null);
+      out.now = out.run ? `There are no books in Akọwe yet; a ⚡ Make a book for me run is starting (${out.run.now || out.run.status}).` : 'There are no books in Akọwe yet.';
+      out.books = []; out.note = 'No books yet.'; delete out.current_book;
+      return { ok: true, data: out };
     }
-    return { ok: true, data: out };
+    // a book id the AI remembered from an older answer that is not a book any more: use the current one
+    const named = a && a.project_id && d.books.some((b) => b.project_id === String(a.project_id)) ? a : {};
+    const b = await currentBook(ctx, named, cache);
+    if (!b.ok) return b;
+    const auto = await currentBook(ctx, {}, cache); // which one he would pick unasked (to say so when the AI named another)
+    const run = runOfBook(d.runs, b.pid, d.books.length <= 1);
+    out.run = runBrief(run);
+    const title = b.title || (run && clip(run.title, 120)) || b.pid;
+    out.current_book = { project_id: b.pid, title, why: b.why_words };
+    // every book by its title; the one being worked on now is marked and comes first
+    const nowPid = auto.ok ? auto.pid : b.pid;
+    out.books = d.books.slice().sort((x, y) => (y.project_id === nowPid) - (x.project_id === nowPid)).slice(0, 12)
+      .map((x) => Object.assign({ project_id: x.project_id, title: bookTitle(x) }, x.project_id === nowPid ? { current: true } : {}));
+    if (b.book && b.book.name && clip(b.book.name, 120) !== title) out.current_book.saved_as = clip(b.book.name, 120);
+    if (run && run.title && clip(run.title, 120) !== title) out.current_book.run_title = clip(run.title, 120);
+    out.now = nowSentence(title, b.why, out.run);
+    if (b.why === 'named' && auto.ok && auto.pid !== b.pid) out.note = `You asked about “${title}”. The book open / being worked on now is “${auto.title || auto.pid}” (${auto.why_words}).`;
+    if (a && a.project_id && named !== a) out.note = `There is no book with the id ${clip(a.project_id, 80)} any more; this is about the current book.`;
+    if (out.note) out.now = `${out.note} ${out.now}`;
+    for (const x of d.books) {
+      if (x.project_id === b.pid) continue;
+      const r = runOfBook(d.runs, x.project_id, false);
+      const sum = r ? akoweRun.summarizeRun(r) : null;
+      if (out.other_books.length < 12) out.other_books.push({ project_id: x.project_id, title: bookTitle(x), run: sum ? clip(sum.text, 160) : 'no book run' });
+      if (r && runNeedsYou(r)) out.other_runs_waiting_for_you.push({ book: bookTitle(x) || clip(r.title, 120), now: sum ? clip(sum.text, 200) : '', problem: r.problem ? clip(r.problem.message, 200) : undefined });
+    }
+    if (!out.other_runs_waiting_for_you.length) delete out.other_runs_waiting_for_you;
+    // (ctx.akowe adds ?peek=1 to these reads: Alfred only looks, Akọwe must not take it for the author opening the book)
+    const st = await ctx.akowe('GET', `/api/projects/${enc(b.pid)}/branches/main/book`);
+    if (okStatus(st) && st.json) {
+      out.checklist = { book: title, steps: (st.json.steps || []).map((s) => ({ title: clip(s.title, 80), state: s.state, chapters: Array.isArray(s.chapters) ? s.chapters.map((c) => ({ chapter_id: c.chapter_id, state: c.state })) : undefined })) };
+    }
+    const j = await ctx.akowe('GET', `/api/projects/${enc(b.pid)}/branches/main/journal?problems=1`);
+    if (okStatus(j) && j.json) out.earlier_journal_notes = (j.json.entries || []).slice(-4).map((e) => `${e.at ? `${clip(e.at, 20)}: ` : ''}${clip(e.what || (e.problem && e.problem.message), 200)}`);
+    if (out.earlier_journal_notes.length) out.earlier_journal_notes_are = `older notes from the journal of “${title}”: they may already be fixed. What is wrong NOW is only the run's problem${out.run && out.run.problem ? '' : ' (there is none right now)'}.`;
+    else delete out.earlier_journal_notes;
+    return { ok: true, data: out, project_id: b.pid };
   },
 });
 def({
   name: 'list_books', title: 'List books', group: 'books',
-  description: 'List the books in Akọwe (id and title). Read-only.',
+  description: 'List the books in Akọwe (id and title; the current one is marked). Read-only.',
   args: { type: 'object', properties: {}, additionalProperties: false },
   async run(_a, ctx) {
-    const r = await ctx.akowe('GET', '/api/projects');
-    if (!okStatus(r)) return akoweError(r);
-    return { ok: true, data: (Array.isArray(r.json) ? r.json : []).map((b) => ({ project_id: b.project_id, title: clip(b.name || b.project_id, 120) })) };
+    const cache = {};
+    const d = await readBooksAndRuns(ctx, cache);
+    if (d.error) return d.error;
+    const b = d.books.length ? await currentBook(ctx, {}, cache) : null;
+    return { ok: true, data: d.books.map((x) => Object.assign({ project_id: x.project_id, title: bookTitle(x) }, b && b.ok && b.pid === x.project_id ? { current: true, why: b.why_words } : {})) };
   },
 });
 def({
@@ -1470,4 +1635,4 @@ function describe(tool, args) {
   try { return typeof tool.describe === 'function' ? tool.describe(args || {}) : tool.title; } catch (_) { return tool.title; }
 }
 
-module.exports = { TOOLS, SITES, SITE_LABEL, get, list, openAiTools, publicList, validate, describe, usage, directToolFor, akoweError, allowableKey, allowKeyOf, canAllowAlways, checkPassthrough, mcpSchema, _resolveBook: resolveBook };
+module.exports = { TOOLS, SITES, SITE_LABEL, get, list, openAiTools, publicList, validate, describe, usage, directToolFor, akoweError, allowableKey, allowKeyOf, canAllowAlways, checkPassthrough, mcpSchema, bookNow, currentBook, runBrief, _resolveBook: resolveBook };

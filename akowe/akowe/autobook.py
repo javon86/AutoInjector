@@ -42,6 +42,7 @@ import uuid
 from datetime import datetime, timezone
 
 from . import ai_check
+from . import assist as assist_mod
 from . import characters as chars_mod
 from . import costs as costs_mod
 from . import h_checks as hc
@@ -1257,6 +1258,8 @@ class AutoBookService(_Runner):
                         why += " · ⚠️ planned details not all on the page"
                 self._approve(run, head["ref"], why=why, verdict="APPROVE", slot=rj.slot)
                 return bp.rec(rid)
+            if self._realign_subject(run, bp, head, label, res["review"].get("reasons") or []):
+                continue  # reviewed again with the canon's ID; no AI fix used up
             n = int(counts.get(rid, 0))
             if n >= MAX_FIXES:
                 reasons = res["review"].get("reasons") or []
@@ -1286,6 +1289,29 @@ class AutoBookService(_Runner):
                 self.event(run, "fix_failed", f"The AI's fix of the {label} did not pass Akọwe's checks; "
                                               "nothing was saved", code=exc.code, record_id=rid)
             self.save(run)
+
+    def _realign_subject(self, run, bp, head, label: str, reasons) -> bool:
+        """The reviewer asks a Set A entry to use the ID the canon already gives this person ("silas-rook", not
+        "silas-rook-2"). The AI fix cannot change that ID (Akọwe gave it), so Akọwe puts the canon's ID in itself
+        (a new draft version) and the entry is reviewed again. False when that is not the case or the save failed."""
+        if not head["module_id"].startswith("A"):
+            return False
+        try:
+            data = assist_mod.realign_subject(self._engine.store, run["project_id"], run["branch_id"], head, reasons)
+        except Exception:  # noqa: BLE001 - best effort; the normal AI fix still runs
+            log.exception("could not check the subject ID of %s", head.get("record_id"))
+            return False
+        if data is None:
+            return False
+        old = chars_mod._name_and_subject(head)[1]  # noqa: SLF001
+        new = chars_mod._name_and_subject(dict(head, data=data))[1]  # noqa: SLF001
+        resp = bp.dispatch(head["module_id"], "UPDATE", base_ref=head["ref"], payload=data)
+        if resp["status"] != "DRAFT" or not resp.get("output_refs"):
+            return False
+        self.event(run, "fix_done", f"Akọwe changed the ID of the {label} from “{old}” to “{new}”, the ID the book "
+                                    "already uses for it; the AI reviews it again", record_id=head["record_id"])
+        self.save(run)
+        return True
 
     # ------------------------------------------------------------------ 🖋 the editor inside a run (P4 / P5)
     def _editor_snapshot(self) -> dict:

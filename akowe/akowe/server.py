@@ -460,7 +460,7 @@ class App:
             if (query.get("archived") or ["0"])[0] in ("1", "true", "yes"):
                 return 200, [dict(self.project_summary(principal, r["project_id"]), archived=True)
                              for r in self.archived_projects(principal)]
-            return 200, [self.project_summary(principal, r["project_id"]) for r in self.store.projects_for(principal)]
+            return 200, self.project_list(principal)
         if parts == ["projects"] and method == "POST":
             return 201, self.create_project(principal, need_object({} if body is None else body))
         if parts == ["dispatch"] and method == "POST":
@@ -488,7 +488,11 @@ class App:
                 branch = parts[3]
                 self._require_access(principal, pid, branch)
                 rest = parts[4:]
-                if rest not in (["save"], ["journal", "note"]):  # the shelf asks every book's save state / Alfred notes an action: not "opening" the book
+                # the shelf asks every book's save state / Alfred notes an action / AutoInjector's Alfred only looks
+                # (?peek=1): none of that is "opening" the book (Alfred reading an old book must never make it the
+                # "open" one he then reports as current)
+                peek = (query.get("peek") or ["0"])[0] in ("1", "true", "yes")
+                if rest not in (["save"], ["journal", "note"]) and not peek:
                     self.touch_project(pid, branch)
                 if rest and rest[0] == "review":
                     return self.route_review(method, rest[1:], query, body, principal, pid, branch)
@@ -1129,6 +1133,23 @@ class App:
         return {"create_payload": defs["CREATE"]["properties"]["payload"], "output": defs["OUTPUT"],
                 "bindings": c.bindings(op_id), "output_bindings": output_bindings,
                 "dependencies": c.dependencies(op_id, "CREATE")}
+
+    def project_list(self, principal: str) -> list[dict]:
+        """GET /api/projects: every book (oldest first), each with its ``title`` (the profile's title, else the project
+        name: they differ once the author renames the book) and, for the book the author opened last, ``open: true``
+        and ``last_opened_at`` - so AutoInjector's Alfred talks about the open book, not the first or oldest one."""
+        last = self.last_project() or {}
+        stored = self.store.get_setting("last_project") or {}
+        out = []
+        for r in self.store.projects_for(principal):
+            s = self.project_summary(principal, r["project_id"])
+            s["title"] = str((s.get("profile") or {}).get("title") or s.get("name") or s["project_id"])
+            if last.get("project_id") == s["project_id"]:
+                s["open"] = True
+                s["last_opened_at"] = (stored.get("at") if stored.get("project_id") == s["project_id"] else None) \
+                    or utcnow()
+            out.append(s)
+        return out
 
     def project_summary(self, principal: str, pid: str, branch: str = "main") -> dict:
         p = self.store.project(pid)
