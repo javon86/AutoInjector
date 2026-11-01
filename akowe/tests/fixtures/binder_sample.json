@@ -45,7 +45,13 @@
     "label": "Playful",
     "feel": "bright cheerful colours, rounded shapes, big friendly type"
    }
-  ]
+  ],
+  "protagonist": {
+   "record_id": "rec-odile",
+   "name": "Odile Marsh",
+   "page_id": "ch-odile",
+   "why": "marked as the main character"
+  }
  },
  "pages": [
   {
@@ -831,7 +837,8 @@
         }
        },
        "_meta": {
-        "page_id": "ch-odile"
+        "page_id": "ch-odile",
+        "is_protagonist": true
        }
       },
       {
@@ -868,7 +875,8 @@
         }
        },
        "_meta": {
-        "page_id": "ch-tobiah"
+        "page_id": "ch-tobiah",
+        "is_protagonist": false
        }
       },
       {
@@ -905,7 +913,8 @@
         }
        },
        "_meta": {
-        "page_id": "ch-silas"
+        "page_id": "ch-silas",
+        "is_protagonist": false
        }
       },
       {
@@ -942,7 +951,8 @@
         }
        },
        "_meta": {
-        "page_id": "ch-wren"
+        "page_id": "ch-wren",
+        "is_protagonist": false
        }
       }
      ]
@@ -1141,7 +1151,11 @@
        "_meta": {
         "page_id": "ch-odile",
         "group": "Main",
-        "has_portrait": true
+        "has_portrait": true,
+        "is_protagonist": true,
+        "story_role": "protagonist",
+        "role_label": "Main character — protagonist",
+        "role_icon": "★"
        }
       },
       {
@@ -1188,7 +1202,11 @@
        "_meta": {
         "page_id": "ch-silas",
         "group": "Main",
-        "has_portrait": true
+        "has_portrait": true,
+        "is_protagonist": false,
+        "story_role": "main",
+        "role_label": "Main character",
+        "role_icon": ""
        }
       },
       {
@@ -1235,7 +1253,11 @@
        "_meta": {
         "page_id": "ch-tobiah",
         "group": "Supporting",
-        "has_portrait": true
+        "has_portrait": true,
+        "is_protagonist": false,
+        "story_role": "side",
+        "role_label": "Supporting",
+        "role_icon": ""
        }
       },
       {
@@ -1282,7 +1304,11 @@
        "_meta": {
         "page_id": "ch-wren",
         "group": "Supporting",
-        "has_portrait": true
+        "has_portrait": true,
+        "is_protagonist": false,
+        "story_role": "side",
+        "role_label": "Supporting",
+        "role_icon": ""
        }
       },
       {
@@ -1329,7 +1355,11 @@
        "_meta": {
         "page_id": "ch-maren",
         "group": "Minor",
-        "has_portrait": false
+        "has_portrait": false,
+        "is_protagonist": false,
+        "story_role": "minor",
+        "role_label": "Minor",
+        "role_icon": ""
        }
       }
      ]
@@ -2862,7 +2892,16 @@
      "alt": "Odile Marsh — 5.8.1 row 3",
      "mime": "image/svg+xml"
     }
-   }
+   },
+   "story_role": {
+    "key": "protagonist",
+    "label": "Main character — protagonist",
+    "protagonist": true,
+    "icon": "★"
+   },
+   "is_protagonist": true,
+   "role_label": "Main character — protagonist",
+   "role_icon": "★"
   },
   {
    "template": "5",
@@ -4132,7 +4171,16 @@
      "alt": "Tobiah Reed — 5.8.1 row 2",
      "mime": "image/svg+xml"
     }
-   }
+   },
+   "story_role": {
+    "key": "side",
+    "label": "Supporting",
+    "protagonist": false,
+    "icon": ""
+   },
+   "is_protagonist": false,
+   "role_label": "Supporting",
+   "role_icon": ""
   },
   {
    "template": "5",
@@ -5344,7 +5392,16 @@
      "alt": "Wren Marsh — 5.8.1 row 1",
      "mime": "image/svg+xml"
     }
-   }
+   },
+   "story_role": {
+    "key": "side",
+    "label": "Supporting",
+    "protagonist": false,
+    "icon": ""
+   },
+   "is_protagonist": false,
+   "role_label": "Supporting",
+   "role_icon": ""
   },
   {
    "template": "5",
@@ -6557,7 +6614,16 @@
      "alt": "Silas Crane — 5.8.1 row 2",
      "mime": "image/svg+xml"
     }
-   }
+   },
+   "story_role": {
+    "key": "main",
+    "label": "Main character",
+    "protagonist": false,
+    "icon": ""
+   },
+   "is_protagonist": false,
+   "role_label": "Main character",
+   "role_icon": ""
   },
   {
    "template": "5",
@@ -7666,7 +7732,16 @@
      "alt": "Maren Vey — 5.8.1 row 1",
      "mime": "image/svg+xml"
     }
-   }
+   },
+   "story_role": {
+    "key": "minor",
+    "label": "Minor",
+    "protagonist": false,
+    "icon": ""
+   },
+   "is_protagonist": false,
+   "role_label": "Minor",
+   "role_icon": ""
   },
   {
    "template": "6",
@@ -7685,7 +7760,8 @@
       "page_id": "ch-odile",
       "portrait": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAgMTUwIj4gPGRlZnM+PHJhZGlhbEdyYWRpZW50IGlkPSJnIiBjeD0iLjUiIGN5PSIuMzUiIHI9Ii44Ij48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiNmZmY2ZDgiIHN0b3Atb3BhY2l0eT0iLjkiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiNjOWEzNmEiLz48L3JhZGlhbEdyYWRpZW50PjwvZGVmcz4gPHJlY3Qgd2lkdGg9IjEyMCIgaGVpZ2h0PSIxNTAiIGZpbGw9InVybCgjZykiLz4gPHBhdGggZD0iTTE0IDE1MGM0LTM0IDIyLTQ4IDQ2LTQ4czQyIDE0IDQ2IDQ4eiIgZmlsbD0iIzJmNGE0NCIvPiA8cGF0aCBkPSJNNTAgOTZoMjB2MTRjLTYgNS0xNCA1LTIwIDB6IiBmaWxsPSIjYzY4YTVmIi8+IDxlbGxpcHNlIGN4PSI2MCIgY3k9IjcwIiByeD0iMjIiIHJ5PSIyNyIgZmlsbD0iI2M2OGE1ZiIvPiA8cGF0aCBkPSJNMzYgNzBjLTItMjYgMTItMzggMjYtMzhzMjcgMTAgMjQgMzhjLTQtMTItMTAtMjAtMjQtMjEtMTIgMC0yMCA4LTI2IDIxeiIgZmlsbD0iIzNhMjQxOCIvPiA8Y2lyY2xlIGN4PSI1MSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz48Y2lyY2xlIGN4PSI2OSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz4gPHBhdGggZD0iTTUzIDg2cTcgNCAxNCAwIiBzdHJva2U9IiM3YTNkMzIiIHN0cm9rZS13aWR0aD0iMiIgZmlsbD0ibm9uZSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+PHBhdGggZD0iTTMwIDE1MGwxMC0yNiAyMCA2IDIwLTYgMTAgMjZ6IiBmaWxsPSIjYzQ4ZDNjIiBvcGFjaXR5PSIuNyIvPjwvc3ZnPg==",
       "role": "main",
-      "ring": 0
+      "ring": 0,
+      "is_protagonist": true
      },
      {
       "id": "rec-tobiah",
@@ -7693,7 +7769,8 @@
       "page_id": "ch-tobiah",
       "portrait": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAgMTUwIj4gPGRlZnM+PHJhZGlhbEdyYWRpZW50IGlkPSJnIiBjeD0iLjUiIGN5PSIuMzUiIHI9Ii44Ij48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiNmZmY2ZDgiIHN0b3Atb3BhY2l0eT0iLjkiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiM4YWExYTgiLz48L3JhZGlhbEdyYWRpZW50PjwvZGVmcz4gPHJlY3Qgd2lkdGg9IjEyMCIgaGVpZ2h0PSIxNTAiIGZpbGw9InVybCgjZykiLz4gPHBhdGggZD0iTTE0IDE1MGM0LTM0IDIyLTQ4IDQ2LTQ4czQyIDE0IDQ2IDQ4eiIgZmlsbD0iIzJhMzQ0NiIvPiA8cGF0aCBkPSJNNTAgOTZoMjB2MTRjLTYgNS0xNCA1LTIwIDB6IiBmaWxsPSIjZDlhOTgyIi8+IDxlbGxpcHNlIGN4PSI2MCIgY3k9IjcwIiByeD0iMjIiIHJ5PSIyNyIgZmlsbD0iI2Q5YTk4MiIvPiA8cGF0aCBkPSJNMzYgNzBjLTItMjYgMTItMzggMjYtMzhzMjcgMTAgMjQgMzhjLTQtMTItMTAtMjAtMjQtMjEtMTIgMC0yMCA4LTI2IDIxeiIgZmlsbD0iI2Q4ZDRjYyIvPiA8Y2lyY2xlIGN4PSI1MSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz48Y2lyY2xlIGN4PSI2OSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz4gPHBhdGggZD0iTTUzIDg2cTcgNCAxNCAwIiBzdHJva2U9IiM3YTNkMzIiIHN0cm9rZS13aWR0aD0iMiIgZmlsbD0ibm9uZSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+PHBhdGggZD0iTTQyIDg0cTE4IDIyIDM2IDB2MTBxLTE4IDIwLTM2IDB6IiBmaWxsPSIjZTdlM2RhIi8+PC9zdmc+",
       "role": "side",
-      "ring": 1
+      "ring": 1,
+      "is_protagonist": false
      },
      {
       "id": "rec-wren",
@@ -7701,7 +7778,8 @@
       "page_id": "ch-wren",
       "portrait": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAgMTUwIj4gPGRlZnM+PHJhZGlhbEdyYWRpZW50IGlkPSJnIiBjeD0iLjUiIGN5PSIuMzUiIHI9Ii44Ij48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiNmZmY2ZDgiIHN0b3Atb3BhY2l0eT0iLjkiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiNkN2I5OGEiLz48L3JhZGlhbEdyYWRpZW50PjwvZGVmcz4gPHJlY3Qgd2lkdGg9IjEyMCIgaGVpZ2h0PSIxNTAiIGZpbGw9InVybCgjZykiLz4gPHBhdGggZD0iTTE0IDE1MGM0LTM0IDIyLTQ4IDQ2LTQ4czQyIDE0IDQ2IDQ4eiIgZmlsbD0iIzdiNGIyYSIvPiA8cGF0aCBkPSJNNTAgOTZoMjB2MTRjLTYgNS0xNCA1LTIwIDB6IiBmaWxsPSIjYzY4YTVmIi8+IDxlbGxpcHNlIGN4PSI2MCIgY3k9IjcwIiByeD0iMjIiIHJ5PSIyNyIgZmlsbD0iI2M2OGE1ZiIvPiA8cGF0aCBkPSJNMzYgNzBjLTItMjYgMTItMzggMjYtMzhzMjcgMTAgMjQgMzhjLTQtMTItMTAtMjAtMjQtMjEtMTIgMC0yMCA4LTI2IDIxeiIgZmlsbD0iIzVhM2EyMiIvPiA8Y2lyY2xlIGN4PSI1MSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz48Y2lyY2xlIGN4PSI2OSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz4gPHBhdGggZD0iTTUzIDg2cTcgNCAxNCAwIiBzdHJva2U9IiM3YTNkMzIiIHN0cm9rZS13aWR0aD0iMiIgZmlsbD0ibm9uZSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+PC9zdmc+",
       "role": "side",
-      "ring": 1
+      "ring": 1,
+      "is_protagonist": false
      },
      {
       "id": "rec-silas",
@@ -7709,7 +7787,8 @@
       "page_id": "ch-silas",
       "portrait": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAgMTUwIj4gPGRlZnM+PHJhZGlhbEdyYWRpZW50IGlkPSJnIiBjeD0iLjUiIGN5PSIuMzUiIHI9Ii44Ij48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiNmZmY2ZDgiIHN0b3Atb3BhY2l0eT0iLjkiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiM5YWEwYWEiLz48L3JhZGlhbEdyYWRpZW50PjwvZGVmcz4gPHJlY3Qgd2lkdGg9IjEyMCIgaGVpZ2h0PSIxNTAiIGZpbGw9InVybCgjZykiLz4gPHBhdGggZD0iTTE0IDE1MGM0LTM0IDIyLTQ4IDQ2LTQ4czQyIDE0IDQ2IDQ4eiIgZmlsbD0iIzE1MTcxYyIvPiA8cGF0aCBkPSJNNTAgOTZoMjB2MTRjLTYgNS0xNCA1LTIwIDB6IiBmaWxsPSIjZWFjN2E4Ii8+IDxlbGxpcHNlIGN4PSI2MCIgY3k9IjcwIiByeD0iMjIiIHJ5PSIyNyIgZmlsbD0iI2VhYzdhOCIvPiA8cGF0aCBkPSJNMzYgNzBjLTItMjYgMTItMzggMjYtMzhzMjcgMTAgMjQgMzhjLTQtMTItMTAtMjAtMjQtMjEtMTIgMC0yMCA4LTI2IDIxeiIgZmlsbD0iIzFiMWIxZiIvPiA8Y2lyY2xlIGN4PSI1MSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz48Y2lyY2xlIGN4PSI2OSIgY3k9IjcyIiByPSIyLjQiIGZpbGw9IiMyYjI0MjAiLz4gPHBhdGggZD0iTTUzIDg2cTcgNCAxNCAwIiBzdHJva2U9IiM3YTNkMzIiIHN0cm9rZS13aWR0aD0iMiIgZmlsbD0ibm9uZSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+PHBhdGggZD0iTTM4IDUwaDQ0di04SDM4eiIgZmlsbD0iIzE1MTcxYyIvPjwvc3ZnPg==",
       "role": "side",
-      "ring": 1
+      "ring": 1,
+      "is_protagonist": false
      },
      {
       "id": "rec-maren",
@@ -7717,7 +7796,8 @@
       "page_id": "ch-maren",
       "portrait": null,
       "role": "side",
-      "ring": 2
+      "ring": 2,
+      "is_protagonist": false
      }
     ],
     "edges": [
@@ -13232,6 +13312,138 @@
         "status": "auto",
         "source": "auto"
        }
+      },
+      {
+       "12.3.1": {
+        "value": "22 Nov, 2 am",
+        "status": "approved",
+        "source": "forge:12.3.1"
+       },
+       "12.3.2": {
+        "value": "The ferry leaves Copper Landing with the lantern lit",
+        "status": "approved",
+        "source": "forge:12.3.2"
+       },
+       "12.3.3": {
+        "value": "2",
+        "status": "auto",
+        "source": "auto"
+       },
+       "12.3.4": {
+        "value": "",
+        "status": "empty",
+        "source": "auto"
+       }
+      },
+      {
+       "12.3.1": {
+        "value": "22 Nov, 2:40 am",
+        "status": "approved",
+        "source": "forge:12.3.1"
+       },
+       "12.3.2": {
+        "value": "Fog closes over the Hollow River; Wren hears the lamp voices",
+        "status": "approved",
+        "source": "forge:12.3.2"
+       },
+       "12.3.3": {
+        "value": "2",
+        "status": "auto",
+        "source": "auto"
+       },
+       "12.3.4": {
+        "value": "",
+        "status": "empty",
+        "source": "auto"
+       }
+      },
+      {
+       "12.3.1": {
+        "value": "22 Nov, 3 am",
+        "status": "approved",
+        "source": "forge:12.3.1"
+       },
+       "12.3.2": {
+        "value": "Odile reaches Lantern Isle and finds the keeper's clock stopped at nine",
+        "status": "approved",
+        "source": "forge:12.3.2"
+       },
+       "12.3.3": {
+        "value": "3",
+        "status": "auto",
+        "source": "auto"
+       },
+       "12.3.4": {
+        "value": "",
+        "status": "empty",
+        "source": "auto"
+       }
+      },
+      {
+       "12.3.1": {
+        "value": "22 Nov, 2:50 am",
+        "status": "approved",
+        "source": "forge:12.3.1"
+       },
+       "12.3.2": {
+        "value": "Maren Vey winds the clock back an hour",
+        "status": "approved",
+        "source": "forge:12.3.2"
+       },
+       "12.3.3": {
+        "value": "3",
+        "status": "auto",
+        "source": "auto"
+       },
+       "12.3.4": {
+        "value": "⚠ Time runs backwards: Ch 3 starts at 3 am, this happens at 2:50 am",
+        "status": "auto",
+        "source": "auto"
+       }
+      },
+      {
+       "12.3.1": {
+        "value": "22 Nov, 4 am",
+        "status": "approved",
+        "source": "forge:12.3.1"
+       },
+       "12.3.2": {
+        "value": "Silas reaches the island by the Company launch",
+        "status": "approved",
+        "source": "forge:12.3.2"
+       },
+       "12.3.3": {
+        "value": "3",
+        "status": "auto",
+        "source": "auto"
+       },
+       "12.3.4": {
+        "value": "",
+        "status": "empty",
+        "source": "auto"
+       }
+      },
+      {
+       "12.3.1": {
+        "value": "22 Nov, dawn",
+        "status": "approved",
+        "source": "forge:12.3.1"
+       },
+       "12.3.2": {
+        "value": "The last lamp goes out — or does it?",
+        "status": "approved",
+        "source": "forge:12.3.2"
+       },
+       "12.3.3": {
+        "value": "3",
+        "status": "auto",
+        "source": "auto"
+       },
+       "12.3.4": {
+        "value": "",
+        "status": "empty",
+        "source": "auto"
+       }
       }
      ]
     },
@@ -13858,5 +14070,12 @@
     "new": true
    }
   }
+ },
+ "progress": {
+  "approved_percent": 62,
+  "approved": 5,
+  "pages": 22,
+  "drafts_waiting": 9,
+  "missing_pictures": 7
  }
 }
