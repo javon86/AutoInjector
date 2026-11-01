@@ -25,6 +25,21 @@ const catalogLib = require('./alfred-catalog');
 const SAFE_OPEN = new Set(['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg', 'mp4', 'webm', 'mp3', 'wav', 'ogg', 'txt', 'md', 'pdf', 'json', 'html', 'docx', 'epub', 'csv']);
 function canOpenOutput(p) { const m = /\.([a-z0-9]+)$/i.exec(path.basename(String(p || ''))); return !!m && SAFE_OPEN.has(m[1].toLowerCase()); }
 
+// 📖 Alfred only LOOKS at a book: his GET reads of one book's pages carry ?peek=1, so Akọwe does not take them for
+// the author opening that book (it remembers the last opened book and tells AutoInjector / Alfred which one is open).
+function peekPath(method, p) {
+  const s = String(p || '');
+  if (String(method || '').toUpperCase() !== 'GET' || !/^\/api\/projects\/[^/?]+\/branches\//.test(s) || /[?&]peek=/.test(s)) return s;
+  return `${s}${s.includes('?') ? '&' : '?'}peek=1`;
+}
+// The book open in the 📖 Akọwe tab, from the tab's own address (#/p/<book id>/<branch>/…); null on the shelf / start page.
+function openBookFromUrl(url) {
+  try {
+    const m = /^#\/p\/([^/?&#]+)/.exec(new URL(String(url || '')).hash || '');
+    return m ? { project_id: decodeURIComponent(m[1]), from: 'tab' } : null;
+  } catch (_) { return null; }
+}
+
 // ---- IPC capture: Alfred's app controls call the SAME handlers the buttons call ----------------------------
 // main.js calls captureIpc(ipcMain) right after requiring Electron, before any handler is registered.
 const ipcHandlers = new Map();
@@ -273,7 +288,16 @@ function installAlfred(h) {
     // 🧰 tool servers (MCP, mcp-manager.js) — the user's own list; null-safe in a build without it
     mcpTools: async (server) => (h.mcp ? h.mcp.tools(server) : { ok: true, servers: [], tools: [] }),
     mcpCall: async (server, tool, args, opts) => (h.mcp ? h.mcp.call(server, tool, args, opts) : { ok: false, error: 'NO_TOOL_SERVERS', message: 'Tool servers are not available in this build.' }),
-    akowe: (method, p, body) => h.akoweApi(method, p, body, 20000),
+    akowe: (method, p, body) => h.akoweApi(method, peekPath(method, p), body, 20000),
+    // the book open in the 📖 Akọwe tab (else the one Akọwe last reported as open) — book_status / the live line use it first
+    openBook: async () => {
+      try {
+        const fromTab = openBookFromUrl(typeof h.akoweViewUrl === 'function' ? h.akoweViewUrl() : '');
+        if (fromTab) return fromTab;
+        const pushed = typeof h.akowePushedBook === 'function' ? h.akowePushedBook() : null;
+        return pushed && pushed.id ? { project_id: String(pushed.id), title: String(pushed.title || '').slice(0, 120), from: 'akowe' } : null;
+      } catch (_) { return null; }
+    },
     openAkowePage,
     generateImage: (o) => image.generate(o),
     // Stable Diffusion module (sd-api.js) — the 🎨 Images tab's own API
@@ -404,4 +428,4 @@ function installAlfred(h) {
   return alfred;
 }
 
-module.exports = { canOpenOutput, SAFE_OPEN, installAlfred, captureIpc, ipcHandlers, invokeChannel, sdMethodsOf, SD_META, GENERATE_SCHEMA, isToggleShortcut, SHORTCUT_LABEL };
+module.exports = { canOpenOutput, SAFE_OPEN, peekPath, openBookFromUrl, installAlfred, captureIpc, ipcHandlers, invokeChannel, sdMethodsOf, SD_META, GENERATE_SCHEMA, isToggleShortcut, SHORTCUT_LABEL };

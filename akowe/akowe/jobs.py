@@ -13,6 +13,8 @@ RetryPolicy / wait_and_retry: when an AI call answers UPSTREAM_UNAVAILABLE, RATE
 does not fail at once; it waits (default 15 s, 30 s, 60 s, 120 s, 120 s ... up to about 10 minutes in total,
 configurable in the ``ai_retry`` setting) and tries again, showing "waiting for Claude (busy) - retrying in 30 s".
 TIMEOUT is never retried automatically: an ambiguous generation is the author's decision (contract rule).
+When a web site showed its own error notice instead of an answer (AutoInjector 503 SITE_ERROR, which carries
+retry_after_s), the wait starts at that hint and doubles: 30 s, 60 s, 120 s ... (RetryPolicy.delay_for).
 """
 from __future__ import annotations
 
@@ -84,6 +86,17 @@ class RetryPolicy:
             return 0.0
         return self.delays_s[min(attempt - 1, len(self.delays_s) - 1)]
 
+    def delay_for(self, attempt: int, exc=None) -> float:
+        """Delay before retry ``attempt`` for this error. A site that showed its own error notice says how long to
+        wait (``retry_after_s``, from the AutoInjector bridge's 503 SITE_ERROR); that wait doubles on each retry
+        (30 s, 60 s, 120 s ...), never past the policy's longest delay, and never shorter than the policy's own."""
+        base = self.delay(attempt)
+        hint = getattr(exc, "retry_after_s", None)
+        if not isinstance(hint, (int, float)) or isinstance(hint, bool) or hint <= 0 or not self.delays_s:
+            return base
+        grown = float(hint) * (2 ** max(0, attempt - 1))
+        return max(base, min(grown, max(max(self.delays_s), float(hint))))
+
 
 def clean_retry_settings(body) -> dict:
     if not isinstance(body, dict):
@@ -132,7 +145,7 @@ def wait_and_retry(fn, *, policy: RetryPolicy, check=None, on_wait=None, who: st
             if not policy.enabled or not is_busy_error(exc):
                 raise
             attempt += 1
-            delay = policy.delay(attempt)
+            delay = policy.delay_for(attempt, exc)
             if waited + delay > policy.max_total_s:
                 raise AkoweError(exc.code, exc.errors[0].get("path") or "",
                                      f"{who() if callable(who) else who} stayed busy or unreachable for {int(waited)} s, so Akọwe stopped "

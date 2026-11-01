@@ -90,6 +90,7 @@ Behavior:
 | 413 | TOO_LARGE | body over 1 MiB | false |
 | 502 | SEND_FAILED | the prompt could not be delivered to the pane | false |
 | 503 | SITE_NOT_READY | pane missing/destroyed/not loaded | false |
+| 503 | SITE_ERROR | the site showed its OWN short error notice instead of an answer ("Sorry, something went wrong…", "Claude will return soon", a usage limit); `site_error` is `error` or `rate-limit`, `retry_after_s` a wait hint (30 / 60). Temporary: the site is free again; Akọwe waits (30 s, 60 s, 120 s…) or uses another AI. Only short replies with no JSON and no `[FROM:]` tag are ever taken for one | false |
 | 504 | TIMEOUT | no captured answer before timeout_ms; `typed` says whether the prompt was typed | **true** if typed |
 
 Every 504 says `"typed": true|false`.

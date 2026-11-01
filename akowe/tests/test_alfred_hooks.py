@@ -62,3 +62,33 @@ def test_journal_build_shows_note(h):
     j = journal.build(type("A", (), {"store": h.store, "engine": h.engine, "jobstore": type("J", (), {"list": staticmethod(lambda **k: [])})()})(),
                       h.project_id, "main")
     assert any(e["kind"] == "assistant" and e["what"] == "Alfred: Save the book" for e in j["entries"])
+
+
+def test_project_list_names_the_open_book_and_peeks_do_not_open(server):  # noqa: F811
+    """Alfred named an OLD book as "the book we're working on": the list came oldest first with no hint of the open
+    book, and his own reads of a book made it the "last opened" one. Now the list marks the open book (with the
+    profile title, which can differ from the project name) and ?peek=1 reads never change it."""
+    app, port = server
+    st, old, _ = call(port, "POST", "/api/projects", {"name": "Lamplighter", "profile": {"title": "The Lamplighter's Last Ferry"}})
+    assert st == 201
+    st, new, _ = call(port, "POST", "/api/projects", {"name": "The Winter the Ocean Turned to Glass",
+                                                      "profile": {"title": "The Last Soundkeep"}})
+    assert st == 201
+    old_id, new_id = old["project_id"], new["project_id"]
+    # the author opens the new book (any page of it)
+    assert call(port, "GET", f"/api/projects/{new_id}/branches/main/book")[0] == 200
+    st, books, _ = call(port, "GET", "/api/projects")
+    assert st == 200
+    by = {b["project_id"]: b for b in books}
+    assert by[new_id]["title"] == "The Last Soundkeep" and by[new_id]["name"] == "The Winter the Ocean Turned to Glass"
+    assert by[new_id].get("open") is True and by[new_id].get("last_opened_at")
+    assert not by[old_id].get("open") and by[old_id]["title"] == "The Lamplighter's Last Ferry"
+    # Alfred only LOOKS at the old book: it does not become the open one
+    assert call(port, "GET", f"/api/projects/{old_id}/branches/main/book?peek=1")[0] == 200
+    assert call(port, "GET", f"/api/projects/{old_id}/branches/main/journal?problems=1&peek=1")[0] == 200
+    assert app.last_project()["project_id"] == new_id
+    by = {b["project_id"]: b for b in call(port, "GET", "/api/projects")[1]}
+    assert by[new_id].get("open") is True and not by[old_id].get("open")
+    # really opening the old book does move it
+    assert call(port, "GET", f"/api/projects/{old_id}/branches/main/book")[0] == 200
+    assert app.last_project()["project_id"] == old_id

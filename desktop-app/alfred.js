@@ -194,6 +194,24 @@ function createAlfred(deps = {}) {
   const noticeLog = [];        // [{key, at}]
   let pollTimer = null;
   const runSeen = new Map();   // run id -> last status (book watcher)
+  // 📖 the live "current book" line for his AI (read from Akọwe at each request). On a real PC he named an OLD book
+  // and its old outline problem as "the book we're working on" while the open book's run sat paused on a REVISE:
+  // nothing live told his AI which book is current, and older answers in the chat were all it had.
+  let bookNow = null;          // { text, at } | null
+  async function refreshBookNow() {
+    if (deps.akoweReady && !deps.akoweReady()) { bookNow = null; return; }
+    if (!deps.ctx || typeof deps.ctx.akowe !== 'function' || typeof registry.bookNow !== 'function') return;
+    let timer = null;
+    const late = new Promise((res) => { timer = setTimeout(() => res(null), deps.bookNowTimeoutMs || 3000); if (timer.unref) timer.unref(); });
+    try {
+      const r = await Promise.race([registry.bookNow(deps.ctx).catch(() => null), late]);
+      bookNow = r && r.ok && r.text ? { text: String(r.text).slice(0, 1600), at: now() } : null;
+    } catch (_) { bookNow = null; } finally { clearTimeout(timer); }
+  }
+  function bookNowPrompt() {
+    if (!bookNow) return '';
+    return ` LIVE BOOK STATUS (read from Akọwe just now — this is what is true NOW): ${bookNow.text} Anything said about books earlier in this chat may be out of date or about another book: never present an older book's problem as the current one. When the user asks about "the book", "the run", "the error" or "the problem", answer about this current book (say its title) and call book_status (without a book id) for the details: the reviewer's reasons and the buttons they can press.`;
+  }
 
   // ------------------------------------------------------------------ settings
   function load() {
@@ -483,7 +501,9 @@ function createAlfred(deps = {}) {
     trimHistory();
     log('alfred-ask', { req: req.id, chars: t.length });
     emitState();
-    return loop(req);
+    const mine = req;
+    await refreshBookNow(); // the current book / run / problem, live (2 small reads, bounded wait)
+    return loop(mine); // (a Stop pressed meanwhile is handled there)
   }
 
   async function loop(r) {
@@ -506,7 +526,7 @@ function createAlfred(deps = {}) {
       r.steps += 1;
       r.doing = 'thinking'; r.toolTitle = null;
       if (r.steps > 1) emitState();
-      const messages = [{ role: 'system', content: systemPromptFor(settings) }].concat(history.map((m) => { const c = Object.assign({}, m); delete c._toolResult; delete c._tool; return c; }));
+      const messages = [{ role: 'system', content: systemPromptFor(settings) + bookNowPrompt() }].concat(history.map((m) => { const c = Object.assign({}, m); delete c._toolResult; delete c._tool; return c; }));
       let res;
       try { res = await brainLib.next(cfg, messages, tools(), { paneAsk: deps.paneAsk }, { signal: r.controller.signal }); }
       catch (_) { res = { ok: false, kind: 'network' }; }
@@ -734,7 +754,16 @@ function createAlfred(deps = {}) {
     let r;
     try { r = await deps.ctx.akowe('GET', '/api/autobook'); } catch (_) { return; }
     if (!r || r.status !== 200 || !r.json) return;
-    for (const run of (r.json.runs || []).slice(0, 5)) onRun(run);
+    // On first sight only the newest run that waits for a decision is announced: an old paused run of another,
+    // older book is not news (it would read as the current problem). Akọwe lists the newest runs first.
+    const list = (r.json.runs || []).slice(0, 5).filter((x) => x && x.id);
+    const stamp = (x) => String(x.updated_at || x.finished_at || x.started_at || x.created_at || '');
+    const fresh = list.filter((x) => !runSeen.has(x.id) && (akoweRun.summarizeRun(x) || {}).needsDecision);
+    const newest = fresh.slice().sort((x, y) => stamp(y).localeCompare(stamp(x)))[0];
+    for (const run of list) {
+      if (fresh.includes(run) && run !== newest) { runSeen.set(run.id, run.status); continue; }
+      onRun(run);
+    }
   }
   function startWatch() {
     stopWatch();

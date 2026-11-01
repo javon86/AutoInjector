@@ -161,6 +161,21 @@ async function main() {
   const nob = await call("logs:extract-preview", { scope: "book", bookId: "nope" });
   assert(nob.ok === false && nob.error === "NO_BOOK", "an unknown book is refused (NO_BOOK), never widened to everything");
 
+  console.log("\n== a time-range extract holds EVERY event of the range, not just the last 300 ==");
+  // The user's log: "Last 24 hours" held only the newest 300 activity events (~30 minutes).
+  const before = (await call("logs:extract-options")).totals.events;
+  for (let i = 0; i < 1200; i++) await call("trace:report", { reset: true }); // 1200 quick, harmless log events
+  const opt2 = await call("logs:extract-options");
+  assert(opt2.totals.events >= before + 1200 && opt2.totals.events > 300, `the app keeps more than 300 activity events (${opt2.totals.events})`);
+  const day = await call("logs:extract-preview", { scope: "time", preset: "day" });
+  assert(day.ok && day.counts.events >= 1200 && day.counts.events >= opt2.totals.events - 2, `“Last 24 hours” includes all ${opt2.totals.events} events of the range (${day.counts && day.counts.events})`);
+  const hour = await call("logs:extract-all", { scope: "time", preset: "hour" });
+  const hbody = fs.readFileSync(hour.file, "utf8");
+  fs.unlinkSync(hour.file);
+  assert(hour.logEntries >= 1200 && (hbody.match(/relay-trace-reset/g) || []).length >= 1200, `the saved “Last hour” file has every one of them (${hour.logEntries} log entries)`);
+  const stNow = await call("state:get");
+  assert(stNow.log.length <= 300, `the Activity window still gets only the newest 300 on reload (${stNow.log.length})`);
+
   await call("akowe:set-enabled", { enabled: false });
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

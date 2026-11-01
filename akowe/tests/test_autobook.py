@@ -377,6 +377,28 @@ def test_wait_and_retry_policy_backoff_and_timeout():
     assert exc.value.code == "RATE_LIMITED" and "stopped waiting" in exc.value.errors[0]["message"]
 
 
+def test_site_error_notice_waits_30_60_120_s():
+    """A site that showed its own error notice (AutoInjector 503 SITE_ERROR, retry_after_s 30) is asked again after
+    30 s, 60 s, 120 s, 120 s - not counted as a bad answer and not retried within a minute."""
+    slept = []
+    policy = RetryPolicy([15, 30, 60, 120], 600, sleep=slept.append)
+    calls = {"n": 0}
+    infos = []
+
+    def gemini_outage():
+        calls["n"] += 1
+        if calls["n"] <= 4:
+            err = AkoweError("UPSTREAM_UNAVAILABLE", "", "Gemini showed an error message instead of an answer")
+            err.retry_after_s = 30.0
+            raise err
+        return "answer"
+    assert wait_and_retry(gemini_outage, policy=policy, on_wait=infos.append, who="Gemini") == "answer"
+    assert [i["retry_in_s"] for i in infos if i] == [30, 60, 120, 120]
+    assert abs(sum(slept) - 330) < 0.01
+    # without a hint the policy's own delays are kept
+    assert [policy.delay_for(n, AkoweError("UPSTREAM_UNAVAILABLE", "", "x")) for n in (1, 2, 3)] == [15, 30, 60]
+
+
 def test_timeout_pauses_the_step_not_the_run(tmp_path):
     fake = BookFakeAI()
     app = make_app(tmp_path, fake=fake)
