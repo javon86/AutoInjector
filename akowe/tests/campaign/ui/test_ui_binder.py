@@ -102,8 +102,11 @@ class FakeBinderApi:
 
     def series_api(self, req, path, body, ok):
         """📚 GET …/binder/series, POST …/series/find (a job), …/approve, …/dismiss, …/sequel."""
-        sv = self.series_view
+        sv = getattr(self, "series_view", None) or {"characters": [], "things": []}
         self.series_calls = getattr(self, "series_calls", []) + [(req.method, path, body)]
+        if req.method == "GET" and path == "/series/sequel":  # 📚 the 📘 book page's sequel button
+            return ok(sv.get("sequel") or {"possible": True, "why": None, "number": 1, "next_number": 2,
+                                          "next_book": None, "proposals_here": 0})
         if req.method == "GET" and path == "/series":
             return ok(sv)
         if req.method == "POST" and path == "/series/find":
@@ -116,7 +119,7 @@ class FakeBinderApi:
                                          "done": 1, "total": 1, "results": [{"ok": True, "proposed": 1, "message": "The AI proposed changes for 1 character(s). Read them and ✔ approve the ones that are right (nothing is used before you approve)."}]}
             return ok(dict(self.jobs["job-series-1"], status="running", done=0), 202)
         if req.method == "POST" and path in ("/series/approve", "/series/dismiss"):
-            for c in sv["characters"]:
+            for c in sv["characters"] + sv.get("things", []):
                 if c["key"] == body.get("key"):
                     b = c["strip"][-1]
                     if path.endswith("approve"):
@@ -943,3 +946,112 @@ def test_single_book_has_no_series_strip_or_picker(make_context, bd):
     assert not page.locator("[data-testid=binder-as-of]").is_visible()
     assert page.locator("[data-testid=binder-series]").is_visible()
     assert_clean(page, "single book")
+
+
+def test_series_place_strip_world_proposals_and_sequel_reason(make_context, bd):
+    """📚 A place page of book 2 shows "Through the series" with its state (ruler, damage) by plain labels; the 📚 Series
+    panel lists a place's proposal next to the characters' and ✔ approves it with the same route; when no AI is
+    connected the sequel button is disabled with the reason in plain words."""
+    doc, old, view = _series_docs(bd.pid)
+    pstrip = [{"number": 1, "title": "The Lamplighter's First Night", "exists": True, "in_book": True, "portrait": None,
+               "changes": {"ruler": [{"text": "the Salt Guild"}]},
+               "words": "Ruler or owner: the Salt Guild · Damaged or rebuilt: the north wall burned",
+               "proposal": None, "proposal_words": "", "portrait_waiting": False},
+              {"number": 2, "title": "The Lamplighter's Last Ferry", "exists": True, "in_book": True, "portrait": None,
+               "changes": None, "words": "", "proposal": None, "proposal_words": "", "portrait_waiting": True}]
+    for p in doc["pages"]:
+        if p["page_id"] == "pl-vessmoor":
+            p["series"] = {"key": "p1", "kind": "place", "as_of": 2, "strip": pstrip, "changed": True,
+                           "state": {"Ruler or owner": "the Salt Guild", "Damaged or rebuilt": "the north wall burned"}}
+    thing = {"key": "p1", "kind": "place", "kind_label": "Place", "icon": "🏙", "name": "Vessmoor", "first_book": 1,
+             "fixed": {}, "start": {}, "end": {}, "strip": json.loads(json.dumps(pstrip))}
+    thing["strip"][-1].update(proposal={"danger": [{"text": "deadly at night"}]}, proposal_words="Danger level: deadly at night")
+    view.update(things=[thing], proposals=1, proposals_here=1,
+                sequel={"possible": False, "why": "No AI is connected. A sequel is written by ⚡ Make a book, which needs "
+                        "an AI: connect one in Settings, then press 📚 Start a sequel again.",
+                        "number": 2, "next_number": 3, "next_book": None, "proposals_here": 1})
+    page = open_binder(make_context, bd, page_id="pl-vessmoor", doc=doc)
+    api = page.bf_calls
+    api.as_of_docs, api.series_view = {"1": old}, view
+    art = page.locator('.bnd-page[data-page-id="pl-vessmoor"]')
+    strip = art.locator("[data-testid=binder-series-strip]")
+    assert strip.count() == 1 and strip.locator(".bnd-series-book").count() == 2
+    txt = strip.inner_text()
+    assert "Ruler or owner: the Salt Guild" in txt and "As of the end of book 2" in txt and "north wall burned" in txt
+    shot(page, "binder-series-place-strip")
+    page.click("[data-testid=binder-series]")
+    page.wait_for_selector("[data-testid=binder-series-proposals]")
+    props = page.inner_text("[data-testid=binder-series-proposals]")
+    assert "Vessmoor (place)" in props and "Danger level: deadly at night" in props
+    assert page.locator("[data-testid=binder-series-sequel]").is_disabled()
+    assert "No AI is connected" in page.inner_text("[data-testid=binder-series-sequel-why]")
+    shot(page, "binder-series-panel-world")
+    page.click('.bnd-series-prop-card[data-key="p1"] [data-testid=binder-series-approve]')
+    page.wait_for_function("() => !document.querySelector('[data-testid=binder-series-proposals]')")
+    assert ("POST", "/series/approve", {"key": "p1"}) in api.series_calls
+    assert "Danger level: deadly at night" in page.inner_text("[data-testid=binder-series-box] .bnd-series-done")
+    assert not overflow(page)
+    assert_clean(page, "series world")
+
+
+def _open_book_page(make_context, bd, status):
+    """📘 Make my book with GET/POST …/binder/series/sequel answered by ``status`` (the run start is recorded)."""
+    ctx = make_context(width=1280, height=900)
+    page = watch(ctx.new_page())
+    calls = []
+
+    def handle(route):
+        req = route.request
+        body = json.loads(req.post_data or "{}") if req.method == "POST" else None
+        calls.append((req.method, body))
+        if req.method == "GET":
+            return route.fulfill(status=200, content_type="application/json", body=json.dumps(status))
+        return route.fulfill(status=202, content_type="application/json", body=json.dumps(
+            {"run": {"id": "run-seq9"}, "sequel": {"number": 2},
+             "message": "📚 Book 2 has started: “The Ferry Books: Book 2”. Its characters start as they were at the end of “The Lamplighter's Last Ferry”."}))
+    page.route(re.compile(r"/api/projects/[^/]+/branches/[^/]+/binder/series/sequel$"), handle)
+    page.route(re.compile(r"/api/autobook/run-seq9$"), lambda r: r.fulfill(status=200, content_type="application/json", body="null"))
+    page.goto(bd.url)
+    page.wait_for_selector("#main h1", timeout=15000)
+    settle(page)
+    page.evaluate("h => { location.hash = h; }", f"#/p/{bd.pid}/main/book")
+    page.wait_for_selector("[data-testid=bk-sequel]", timeout=15000)
+    return page, calls
+
+
+def test_book_page_sequel_button_disabled_with_a_reason(make_context, bd):
+    """📚 On the 📘 book page the sequel button says in plain words why it cannot be pressed (book 2 exists already)."""
+    why = "Book 2 of this series already exists (“The Ferry Books: Book 2”). Open that book to continue the series, or start the sequel from the last book."
+    page, calls = _open_book_page(make_context, bd, {"possible": False, "why": why, "number": 1, "next_number": 2,
+                                                      "next_book": {"number": 2, "title": "The Ferry Books: Book 2"}, "proposals_here": 0})
+    page.wait_for_function("() => document.querySelector('[data-testid=bk-sequel-why]').textContent.length > 0")
+    assert page.locator("[data-testid=bk-sequel]").is_disabled()
+    assert "Book 2 of this series already exists" in page.inner_text("[data-testid=bk-sequel-why]")
+    shot(page, "book-page-sequel-disabled")
+    assert ("POST", {"author_confirms": True}) not in calls
+    assert not overflow(page)
+    assert_clean(page, "book page sequel disabled")
+
+
+def test_book_page_sequel_button_asks_consent_and_starts(make_context, bd):
+    """📚 The 📘 book page's button: the same consent dialog as the Book Bible's (Cancel starts nothing), then the same
+    route (POST …/binder/series/sequel with author_confirms) and the started message."""
+    page, calls = _open_book_page(make_context, bd, {"possible": True, "why": None, "number": 1, "next_number": 2,
+                                                      "next_book": None, "proposals_here": 2})
+    btn = page.locator("[data-testid=bk-sequel]")
+    page.wait_for_function("() => !document.querySelector('[data-testid=bk-sequel]').disabled")
+    btn.click()
+    page.wait_for_selector("dialog[open] >> text=Start a sequel from this book?")
+    dlg = page.inner_text("dialog[open]")
+    assert "Places, items and groups start as this book left them" in dlg and "2 proposed changes" in dlg
+    shot(page, "book-page-sequel-consent")
+    page.keyboard.press("Escape")
+    page.wait_for_function("() => !document.querySelector('dialog[open]')")
+    assert not any(c[0] == "POST" for c in calls)
+    btn.click()
+    page.wait_for_selector("dialog[open] >> text=Start a sequel from this book?")
+    page.click("dialog[open] >> text=📚 Start the sequel")
+    page.wait_for_selector("[data-testid=bk-sequel-started]")
+    assert "Book 2 has started" in page.inner_text("[data-testid=bk-sequel-started]")
+    assert ("POST", {"author_confirms": True}) in calls
+    assert_clean(page, "book page sequel")

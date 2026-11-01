@@ -46,6 +46,7 @@ import re
 import threading
 import uuid
 
+from . import series_world as world
 from .errors import AkoweError
 from .jobs import now_iso
 
@@ -180,7 +181,7 @@ def get(store, sid: str | None) -> dict | None:
         if not isinstance(s.get(k), dict):
             s[k] = {}
     s.setdefault("portraits_old", [])
-    return s
+    return world.defaults(s)
 
 
 def _save(store, s: dict) -> dict:
@@ -206,11 +207,12 @@ def _virtual(store, pid: str, branch: str, problem: str | None = None) -> dict:
     from .book_path import get_profile  # noqa: PLC0415
     prof = get_profile(store, pid) or {}
     n = prof.get("series_number") if isinstance(prof.get("series_number"), int) else 1
-    return {"id": None, "virtual": True, "problem": problem,
-            "name": str(prof.get("series") or prof.get("title") or "")[:200],
-            "books": [{"number": n, "project_id": pid, "branch_id": branch, "title": _book_title(store, pid)}],
-            "characters": {}, "changes": {}, "proposals": {}, "portraits": {}, "portrait_waiting": {},
-            "portraits_old": []}
+    return world.defaults({"id": None, "virtual": True, "problem": problem,
+                           "name": str(prof.get("series") or prof.get("title") or "")[:200],
+                           "books": [{"number": n, "project_id": pid, "branch_id": branch,
+                                      "title": _book_title(store, pid)}],
+                           "characters": {}, "changes": {}, "proposals": {}, "portraits": {}, "portrait_waiting": {},
+                           "portraits_old": []})
 
 
 def of_book(store, pid: str, branch: str = "main") -> dict:
@@ -257,6 +259,7 @@ def ensure(store, pid: str, branch: str = "main") -> dict:
             s = {"id": sid, "name": str(prof.get("series") or prof.get("title") or "My series")[:200],
                  "created_at": now_iso(), "books": [], "characters": {}, "changes": {}, "proposals": {},
                  "portraits": {}, "portrait_waiting": {}, "portraits_old": []}
+            world.defaults(s)
         s["books"] = [b for b in s["books"] if b.get("number") != n or not _exists(store, b.get("project_id"))]
         s["books"].append({"number": n, "project_id": pid, "branch_id": branch, "title": _book_title(store, pid)})
         _link_book(store, s, pid, branch, n)
@@ -342,6 +345,10 @@ def _link_book(store, s: dict, pid: str, branch: str, number: int, chars: list[d
             ch["name"] = c["name"]
         elif norm(c["name"]) != norm(ch.get("name")) and c["name"] not in ch.get("aliases", []):
             ch.setdefault("aliases", []).append(c["name"][:120])
+    try:  # 📚 the places, items and groups of the book too (series_world.py)
+        world.link_things(store, s, pid, branch, number)
+    except Exception:  # noqa: BLE001 - the characters never fail over the world
+        log.exception("series: linking the places / items / groups of %s", pid)
 
 
 def linked(store, s: dict) -> dict:
@@ -507,14 +514,14 @@ CHANGE_TASK = (
     "happens in when you know it. context.characters[].at_start says how they were when this book began: do not "
     "repeat it. Personality, the way they talk, their name and their origin NEVER change in a series: never put them "
     "in any category. A character with no change gets empty lists. Use the names exactly as context.characters gives "
-    "them.")
+    "them." + world.TASK)
 _ENTRY = {"type": "object", "additionalProperties": False, "required": ["text", "chapter"],
           "properties": {"text": {"type": "string"}, "chapter": {"type": "string"}}}
 _REL = {"type": "object", "additionalProperties": False, "required": ["with", "text", "chapter"],
         "properties": {"with": {"type": "string"}, "text": {"type": "string"}, "chapter": {"type": "string"}}}
 CHANGE_SCHEMA = {
-    "type": "object", "additionalProperties": False, "required": ["character_changes"],
-    "properties": {"character_changes": {"type": "array", "maxItems": 40, "items": {
+    "type": "object", "additionalProperties": False, "required": ["character_changes", "thing_changes"],
+    "properties": {"thing_changes": world.SCHEMA, "character_changes": {"type": "array", "maxItems": 40, "items": {
         "type": "object", "additionalProperties": False, "required": ["name"] + list(CAT_KEYS),
         "properties": dict({"name": {"type": "string"}},
                            **{k: {"type": "array", "maxItems": PER_CAT, "items": _REL if k == "relationships" else _ENTRY}
@@ -556,10 +563,11 @@ def change_context(app, pid: str, branch: str) -> tuple[dict, dict]:
         people.append({"name": ch["name"], "fixed_never_changes": {x: _clip(ch.get("fixed", {}).get(x), 300)
                                                                    for x in FIXED_ATTRS},
                        "at_start": state_words(st)})
-    if not people:
-        raise _err("MISSING_INPUT", "/characters", "this book has no characters yet")
+    things = world.context_things(s, pid, n)
+    if not people and not things:
+        raise _err("MISSING_INPUT", "/characters", "this book has no characters, places, items or groups yet")
     return {"book": {"title": _book_title(store, pid), "number_in_series": n, "series": s.get("name")},
-            "characters": people[:40], "chapters": chapters}, s
+            "characters": people[:40], "things": things, "chapters": chapters}, s
 
 
 def save_proposals(store, pid: str, branch: str, raw, *, by: str = "ai", slot: str | None = None) -> dict:
@@ -594,8 +602,11 @@ def save_proposals(store, pid: str, branch: str, raw, *, by: str = "ai", slot: s
                 continue
             props[key] = {"delta": d, "by": by, "slot": slot, "at": now_iso()}
             made.append(key)
+        tw = world.save_proposals(s, pid, int(n), (raw or {}).get("thing_changes") if isinstance(raw, dict) else None,
+                                  by=by, slot=slot)
         _save(store, s)
-    return {"proposed": len(made), "keys": made, "unknown": unknown[:10], "unchanged": same}
+    return {"proposed": len(made), "keys": made, "unknown": unknown[:10], "unchanged": same,
+            "things_proposed": tw["proposed"], "thing_keys": tw["keys"], "things_unknown": tw["unknown"]}
 
 
 def find_changes(app, job, pid: str, branch: str, assist=None) -> dict:
@@ -613,11 +624,14 @@ def start_find(app, principal: str, pid: str, branch: str) -> dict:
 
     def fn(job):
         out = find_changes(app, job, pid, branch)
-        msg = (f"The AI proposed changes for {out['proposed']} character(s). Read them and ✔ approve the ones that "
-               "are right (nothing is used before you approve)." if out["proposed"] else
-               "The AI found no new changes for the characters in this book.")
-        if out["unknown"]:
-            msg += " Not in this book, so not kept: " + ", ".join(out["unknown"]) + "."
+        parts = ([f"{out['proposed']} character(s)"] if out["proposed"] else []) + \
+            ([f"{out['things_proposed']} place(s), item(s) or group(s)"] if out.get("things_proposed") else [])
+        msg = (f"The AI proposed changes for {' and '.join(parts)}. Read them and ✔ approve the ones that are right "
+               "(nothing is used before you approve)." if parts else
+               "The AI found no new changes for the characters, places, items or groups in this book.")
+        gone = list(out["unknown"]) + list(out.get("things_unknown") or [])
+        if gone:
+            msg += " Not in this book, so not kept: " + ", ".join(gone) + "."
         job.done = 1
         job.results.append({"ok": True, "message": msg, **out})
     job = ReviewJob("series_changes", principal, pid, branch, [pid], None)
@@ -640,12 +654,24 @@ def _key_arg(s: dict, body: dict) -> str:
     return k
 
 
+def _is_thing(s: dict, body: dict) -> bool:
+    k = body.get("key")
+    return isinstance(k, str) and k in (s.get("things") or {}) and k not in s["characters"]
+
+
 def approve(store, pid: str, branch: str, body) -> dict:
     """✔ Approve the AI's proposal for one character (merged into what is approved; nothing is removed)."""
     body = body if isinstance(body, dict) else {}
     with _LOCK:
         s = ensure(store, pid, branch)
         n = _book_number_arg(s, pid, body)
+        if _is_thing(s, body):  # 📚 a place, an item or a group (series_world.py)
+            out = world.approve(s, n, body["key"])
+            if not out:
+                raise _err("NOT_FOUND", "/key", "there is no proposal for this place, item or group any more (it was "
+                                                "approved or dismissed already)")
+            _save(store, s)
+            return out
         k = _key_arg(s, body)
         p = (s["proposals"].get(str(n)) or {}).get(k)
         if not p:
@@ -659,9 +685,24 @@ def approve(store, pid: str, branch: str, body) -> dict:
         new_look = len(merged["appearance"]) > len(before["appearance"])
         if new_look:
             _mark_portrait(s, n, k, "NEW_LOOK", "the look changed in this book")
+        items = _link_items(s, n, k, before, merged)
         _save(store, s)
-    return {"ok": True, "key": k, "book": n, "delta": merged, "portrait_needed": new_look,
-            "message": f"Approved: {delta_words(merged)}"}
+    msg = f"Approved: {delta_words(merged)}"
+    if items:
+        msg += " · The holder of " + ", ".join(f"“{x}”" for x in items) + " changed in this book too."
+    return {"ok": True, "key": k, "book": n, "delta": merged, "portrait_needed": new_look, "linked_items": items,
+            "message": msg}
+
+
+def _link_items(s: dict, n: int, k: str, before: dict, after: dict) -> list[str]:
+    """A character's NEW items gained / lost: the item's own page gets the holder change (series_world.link_items)."""
+    added = {c: [e for e in after.get(c) or [] if e not in (before.get(c) or [])] for c in ("items_gained",
+                                                                                          "items_lost")}
+    try:
+        return world.link_items(s, n, k, added)
+    except Exception:  # noqa: BLE001 - the character's change is kept whatever happens to the item
+        log.exception("series: linking the items of %s", k)
+        return []
 
 
 def dismiss(store, pid: str, branch: str, body) -> dict:
@@ -669,6 +710,10 @@ def dismiss(store, pid: str, branch: str, body) -> dict:
     with _LOCK:
         s = ensure(store, pid, branch)
         n = _book_number_arg(s, pid, body)
+        if _is_thing(s, body):
+            out = world.dismiss(s, n, body["key"])
+            _save(store, s)
+            return out
         k = _key_arg(s, body)
         gone = (s["proposals"].get(str(n)) or {}).pop(k, None)
         _save(store, s)
@@ -680,6 +725,19 @@ def edit(store, pid: str, branch: str, body) -> dict:
     body = body if isinstance(body, dict) else {}
     if not isinstance(body.get("delta"), dict):
         raise _err("INVALID_INPUT", "/delta", "delta: the changes, e.g. {appearance: [{text: 'lost his left eye'}]}")
+    with _LOCK:
+        s = ensure(store, pid, branch)
+        if _is_thing(s, body):  # 📚 a place, an item or a group
+            th = s["things"][body["key"]]
+            bad = world.bad_edit_keys(th["kind"], body["delta"])
+            if bad:
+                raise _err("INVALID_INPUT", f"/delta/{bad[0]}", f"“{bad[0]}” cannot change in a series — only "
+                           + ", ".join(world.cat_keys(th["kind"])) + " (the name, core description, origin and a "
+                           "group's symbol are fixed for the whole series)")
+            n = _book_number_arg(s, pid, body)
+            out = world.edit(s, n, body["key"], body["delta"])
+            _save(store, s)
+            return out
     for k in body["delta"]:
         if k not in CAT_KEYS:
             raise _err("INVALID_INPUT", f"/delta/{k}", f"“{k}” cannot change in a series — only "
@@ -696,8 +754,9 @@ def edit(store, pid: str, branch: str, body) -> dict:
             bool(d["appearance"])
         if new_look:
             _mark_portrait(s, n, k, "NEW_LOOK", "the look changed in this book")
+        items = _link_items(s, n, k, before, d)
         _save(store, s)
-    return {"ok": True, "key": k, "book": n, "delta": d, "portrait_needed": new_look}
+    return {"ok": True, "key": k, "book": n, "delta": d, "portrait_needed": new_look, "linked_items": items}
 
 
 def rename(store, pid: str, branch: str, body) -> dict:
@@ -815,6 +874,41 @@ def start_sequel(app, principal: str, pid: str, branch: str, body=None) -> dict:
                        f"at the end of “{sequel['previous_title']}”."}
 
 
+def sequel_status(app, pid: str, branch: str, s: dict | None = None) -> dict:
+    """Can 📚 Start a sequel from this book be pressed now? -> {possible, why (plain words when not), number,
+    next_number, next_book, proposals_here, series_name}. Never raises (a problem reads as "not possible")."""
+    store = app.store
+    try:
+        if not _exists(store, pid):
+            return {"possible": False, "why": "This book does not exist any more.", "number": 1, "next_number": 2,
+                    "next_book": None, "proposals_here": 0, "series_name": ""}
+        s = s if s is not None else of_book(store, pid, branch)
+        n = number_of(s, pid)
+        taken = next((b for b in books(s) if b["number"] == n + 1 and _exists(store, b.get("project_id"))), None)
+        try:
+            ai = bool(app.autobook._ai_configured())  # noqa: SLF001
+        except Exception:  # noqa: BLE001
+            ai = True  # cannot tell: let the press try (the run says it in plain words)
+        why = None
+        if taken:
+            why = (f"Book {n + 1} of this series already exists (“{taken.get('title') or ''}”). Open that book to "
+                   "continue the series, or start the sequel from the last book.")
+        elif not ai:
+            why = ("No AI is connected. A sequel is written by ⚡ Make a book, which needs an AI: connect one in "
+                   "Settings, then press 📚 Start a sequel again.")
+        props = len((s.get("proposals") or {}).get(str(n)) or {}) + len((s.get("thing_proposals") or {}).get(str(n))
+                                                                         or {})
+        return {"possible": why is None, "why": why, "number": n, "next_number": n + 1,
+                "next_book": {"number": taken["number"], "title": taken.get("title"),
+                              "project_id": taken.get("project_id")} if taken else None,
+                "proposals_here": props, "series_name": s.get("name") or "", "in_series": not s.get("virtual")}
+    except Exception:  # noqa: BLE001
+        log.exception("series: sequel status of %s", pid)
+        return {"possible": False, "why": "The series of this book could not be read, so a sequel cannot be started "
+                                          "right now. Try again in a moment.", "number": 1, "next_number": 2,
+                "next_book": None, "proposals_here": 0, "series_name": ""}
+
+
 def clean_sequel_setting(store, raw) -> dict | None:
     """The ``sequel`` of a run body (made by start_sequel) checked against the store."""
     if raw in (None, ""):
@@ -863,6 +957,10 @@ def link_sequel(store, sequel: dict, pid: str, branch: str, bible_map: dict) -> 
                 s["characters"][k].setdefault("records", {})[pid] = new
                 rids.append(new)
                 n += 1
+        try:  # 📚 the places, items and groups: the same series keys (they start at the end of the book before)
+            world.link_things(store, s, pid, branch, int(sequel.get("number") or 2))
+        except Exception:  # noqa: BLE001
+            log.exception("series: linking the sequel's places / items / groups")
         _save(store, s)
     if rids:
         chars_mod.mark_series_fixed(store, pid, branch, rids)
@@ -899,6 +997,17 @@ def writer_brief(store, pid: str, branch: str, present_ids=()) -> tuple[list, in
     return out, n
 
 
+def world_brief(store, pid: str, branch: str) -> list[dict]:
+    """📚 The places / items / groups of a later book of a series as the previous book left them (series_world)."""
+    m = member(store, pid)
+    s = get(store, m["series_id"]) if m else None
+    if s is None:
+        return []
+    n = number_of(s, pid)
+    return world.writer_brief(s, pid, n) if n > 1 else []
+
+
+WORLD_RULE = world.BRIEF_RULE
 BRIEF_RULE = ("Series (context.writing_brief.series_state): this is a later book of a series. Each character starts "
               "this book exactly as the previous book left them — keep their looks (scars, missing parts, age, "
               "clothes), what they carry, what they can and cannot do, their relationships and their status. Their "
@@ -907,6 +1016,9 @@ BRIEF_RULE = ("Series (context.writing_brief.series_state): this is a later book
 
 # ====================================================================== 🖼 a portrait per book
 def _mark_portrait(s: dict, n: int, key: str, code: str, why: str):
+    if key in (s.get("things") or {}) and key not in (s.get("characters") or {}):  # 📚 a place's picture
+        world.mark_picture(s, n, key, code, why)
+        return
     s["portrait_waiting"].setdefault(str(n), {})[key] = {"code": code, "why": why[:300], "at": now_iso()}
 
 
@@ -943,7 +1055,7 @@ def portrait_plan(store, s: dict, number: int | None = None) -> list[tuple[int, 
         for k in ws:
             if k in s["characters"]:
                 out.append((int(n), k, s["characters"][k].get("name") or k))
-    return out
+    return out + world.picture_plan(s, number)  # 📚 a place whose look changed: its picture for that book
 
 
 def _source_record(store, s: dict, key: str, number: int) -> tuple[str, str, str] | None:
@@ -1030,6 +1142,24 @@ def make_one_portrait(app, principal: str, s: dict, number: int, key: str, engin
     return asset
 
 
+def _make_thing_picture(app, principal: str, s: dict, number: int, key: str, engine: str) -> dict:
+    """📚 A place's establishing picture for one book (series_world.make_one_picture); stored in the series."""
+    store = app.store
+
+    def save(k, n, asset):
+        with _LOCK:
+            cur = get(store, s["id"]) or s
+            old = (cur["thing_pictures"].get(str(n)) or {}).get(k)
+            if old:
+                cur["portraits_old"] = ((cur.get("portraits_old") or []) + [dict(old, key=k, replaced_at=now_iso())])[-100:]
+            cur["thing_pictures"].setdefault(str(n), {})[k] = asset
+            (cur["thing_picture_waiting"].get(str(n)) or {}).pop(k, None)
+            _save(store, cur)
+            s.update(cur)
+    return world.make_one_picture(app, principal, s, number, key, engine, books=books(s),
+                                  exists=lambda p: _exists(store, p), save=save)
+
+
 def make_portraits(app, principal: str, pid: str, branch: str, *, number: int | None = None, check=None,
                    on_phase=None) -> dict:
     """Every per-book portrait waiting (of one book, or all). Picture maker down -> they stay waiting.
@@ -1056,10 +1186,14 @@ def make_portraits(app, principal: str, pid: str, branch: str, *, number: int | 
     for n, k, name in plan:
         if check:
             check()
+        thing = k in (s.get("things") or {}) and k not in s["characters"]
         if on_phase:
-            on_phase(f"Making the book {n} portrait of “{name}”")
+            on_phase(f"Making the book {n} {'picture' if thing else 'portrait'} of “{name}”")
         try:
-            make_one_portrait(app, principal, s, n, k, engine)
+            if thing:
+                _make_thing_picture(app, principal, s, n, k, engine)
+            else:
+                make_one_portrait(app, principal, s, n, k, engine)
             out["made"] += 1
         except forge.ArtProblem as exc:
             out["failed"] += 1
@@ -1096,8 +1230,8 @@ def start_portraits(app, principal: str, pid: str, branch: str, body=None) -> di
         res = make_portraits(app, principal, pid, branch, number=n, check=job.check,
                              on_phase=lambda p: setattr(job, "phase", p))
         job.done = len(job.record_ids)
-        msg = f"{res['made']} new portrait(s) made with the same 🔒 character lock." if res["made"] else \
-            "No portraits were made."
+        msg = f"{res['made']} new picture(s) made (portraits with the same 🔒 character lock)." if res["made"] else \
+            "No pictures were made."
         if res["failed"]:
             msg += f" {res['failed']} still waiting ({res['message'] or res['code']}): they stay on the to-make list; " \
                    "start Stable Diffusion in AutoInjector and press the button again."
@@ -1152,11 +1286,21 @@ def view(app, pid: str, branch: str) -> dict:
                       "start": state_words(state_as_of(s, k, n, "start")),
                       "end": state_words(state_as_of(s, k, n, "end")),
                       "strip": strip(store, s, k)})
-    props = sum(len(v) for v in (s.get("proposals") or {}).values())
+    props = sum(len(v) for v in (s.get("proposals") or {}).values()) + \
+        sum(len(v) for v in (s.get("thing_proposals") or {}).values())
     nxt = next((b for b in bl if b["number"] == n + 1 and b["exists"]), None)
+    try:
+        things = world.view_things(store, s, pid, n, lambda p: _exists(store, p))
+    except Exception:  # noqa: BLE001 - the panel never fails over the world
+        log.exception("series: the places / items / groups of the panel")
+        things = []
     return {"in_series": not s.get("virtual"), "series_id": s.get("id"), "name": s.get("name") or "",
-            "number": n, "books": bl, "characters": chars, "proposals": props,
-            "proposals_here": len((s.get("proposals") or {}).get(str(n)) or {}),
+            "number": n, "books": bl, "characters": chars, "things": things, "proposals": props,
+            "proposals_here": len((s.get("proposals") or {}).get(str(n)) or {}) +
+            len((s.get("thing_proposals") or {}).get(str(n)) or {}),
+            "sequel": sequel_status(app, pid, branch, s),
+            "thing_categories": {k: [{"key": c, "label": lab, "help": hlp} for c, lab, hlp, _m in v["cats"]]
+                                 for k, v in world.KINDS.items()},
             "portraits_waiting": len(portrait_plan(store, s)) if not s.get("virtual") else 0,
             "next_book": nxt, "problem": raw.get("problem"),
             "categories": [{"key": k, "label": label, "help": hlp} for k, label, hlp in CATS],
@@ -1227,6 +1371,11 @@ def binder_block(app, data: dict, pid: str, branch: str, as_of: int | None = Non
     s = linked(store, raw)
     for p in data.get("pages") or []:
         _overlay_page(store, s, p, pid, as_of or n, overlay=as_of is not None)
+        if p.get("template") in world.TEMPLATE_KIND:  # 📚 a place, an item or a group (series_world.py)
+            try:
+                world.overlay_page(store, s, p, pid, as_of or n, lambda x: _exists(store, x), overlay=as_of is not None)
+            except Exception:  # noqa: BLE001 - the binder never fails over the series
+                log.exception("series: the binder page %s", p.get("page_id"))
     # the cast list's portraits as of that book
     for p in data.get("pages") or []:
         if p.get("template") != "4":
@@ -1304,7 +1453,8 @@ def bible_block(store, pid: str, branch: str) -> dict | None:
                                       "fixed": {x: (ch.get("fixed") or {}).get(x) for x in ("name",) + FIXED_ATTRS},
                                       "first_look": (ch.get("base") or {}).get("appearance"), "changes": changes}
     return {"name": s.get("name"), "number": number_of(s, pid),
-            "books": [{"number": b["number"], "title": b.get("title")} for b in books(s)], "characters": chars}
+            "books": [{"number": b["number"], "title": b.get("title")} for b in books(s)], "characters": chars,
+            "things": world.bible_block(s, books(s))}
 
 
 def bible_markdown(block: dict | None) -> list[str]:
@@ -1320,4 +1470,4 @@ def bible_markdown(block: dict | None) -> list[str]:
         for n, d in sorted(c["changes"].items(), key=lambda x: int(x[0])):
             out.append(f"- **Book {n}:** {delta_words(d)}")
         out.append("")
-    return out
+    return out + world.bible_markdown(block.get("things"))

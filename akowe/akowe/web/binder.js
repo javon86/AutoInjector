@@ -1050,6 +1050,7 @@ export async function viewBinder(main, x, rest = []) {
   // 7 · Place page
   T[7] = p => [
     band(p, '7.1.1', '7.1.2', ['7.1.3', '7.1.4', '7.1.5', '7.1.6'], { shape: 'wide', cls: 'bnd-band-wide', eyebrow: `${txt(fld(p, '7.1.3')) || 'Place'} · story reference`, icon: '🏙' }),
+    seriesStrip(p),
     sec(p, '7.2', facts(p, ['7.2.1', '7.2.2', '7.2.3', '7.2.4', '7.2.5', '7.2.6', '7.2.7', '7.2.8'], { '7.2.7': f => empty(f) ? placeholder(p, '7.2.7', f) : pips(f) }), { cls: 'bnd-sec-facts' }),
     sec(p, '7.3', h('div', { class: 'bnd-pics bnd-pics-3' }, ['7.3.1', '7.3.2', '7.3.3'].map(id => pic(p, id, { shape: 'wide' })))),
     sec(p, '7.4', h('div', null, grid(p, ['7.4.1', '7.4.2', '7.4.3', '7.4.4', '7.4.5', '7.4.6', '7.4.7', '7.4.8']), field(p, '7.4.9', { cls: 'bnd-callout' }))),
@@ -1087,6 +1088,7 @@ export async function viewBinder(main, x, rest = []) {
   // 8B · Item
   T['8B'] = p => [
     band(p, '8B.1.1', '8B.1.2', ['8B.1.3', '8B.1.4', '8B.1.5'], { shape: 'square', icon: '🗝', eyebrow: `${txt(fld(p, '8B.1.3')) || 'Item'} · item dossier` }),
+    seriesStrip(p),
     sec(p, '8B.2', facts(p, ['8B.2.1', '8B.2.2', '8B.2.3', '8B.2.4', '8B.2.5', '8B.2.6']), { cls: 'bnd-sec-facts' }),
     sec(p, '8B.3', h('div', { class: 'bnd-pics bnd-pics-4' }, ['8B.3.1', '8B.3.2', '8B.3.3', '8B.3.4'].map(id => pic(p, id, { shape: 'square' })))),
     sec(p, '8B.4', grid(p, ['8B.4.1', '8B.4.2', '8B.4.3', '8B.4.4', '8B.4.5', '8B.4.6', '8B.4.7']), { cls: 'bnd-sec-rules' }),
@@ -1100,6 +1102,7 @@ export async function viewBinder(main, x, rest = []) {
   // 8C · Other world entry
   T['8C'] = p => [
     band(p, '8C.1.1', '8C.1.2', ['8C.1.3', '8C.1.4'], { shape: 'square', icon: '🏛', eyebrow: `${txt(fld(p, '8C.1.3')) || 'World'} · world entry` }),
+    seriesStrip(p),
     sec(p, '8C.2', field(p, '8C.2.1', { cls: 'bnd-prose' })),
     sec(p, '8C.3', facts(p, ['8C.3.1', '8C.3.2', '8C.3.3', '8C.3.4', '8C.3.5'], { '8C.3.5': f => empty(f) ? placeholder(p, '8C.3.5', f) : swatches(txt(f)) }), { cls: 'bnd-sec-facts' }),
     sec(p, '8C.4', grid(p, ['8C.4.1', '8C.4.2', '8C.4.3']), { cls: 'bnd-sec-rules' }),
@@ -1452,7 +1455,9 @@ export async function viewBinder(main, x, rest = []) {
     window.scrollTo(0, y);
   }
   /* ------------------------------------------------------------------ 📚 the series */
-  /** "Through the series" on a character page: book 1 → book 2 → …, each with that book's portrait and what changed */
+  /** "Through the series" on a character, place, item or group page: book 1 → book 2 → …, each with that book's
+   *  picture and what changed (a place / item / group: sr.kind, its state keyed by plain labels) */
+  const CHAR_STATE = [['looks', 'Looks'], ['carries', 'Carries'], ['can', 'Can'], ['lost', 'Lost'], ['status', 'Status'], ['relationships', 'Relationships']];
   function seriesStrip(p) {
     const sr = p.series;
     if (!sr || !Array.isArray(sr.strip) || !sr.strip.length) return null;
@@ -1464,11 +1469,11 @@ export async function viewBinder(main, x, rest = []) {
         b.portrait && b.portrait.url ? h('img', { class: 'bnd-series-pic', src: b.portrait.url, alt: b.portrait.alt || `${p.title} in book ${b.number}`, loading: 'lazy' })
           : h('span', { class: 'bnd-series-pic bnd-empty-pic' }, b.portrait_waiting ? '🖼 waiting' : '🖼'),
         h('b', null, `Book ${b.number}`), h('small', null, b.title || ''),
-        h('p', { class: 'bnd-series-words' }, b.words ? b.words : (i ? 'No changes recorded' : 'How they start')),
+        h('p', { class: 'bnd-series-words' }, b.words ? b.words : (i ? 'No changes recorded' : (sr.kind ? 'How it starts' : 'How they start'))),
         b.proposal ? h('p', { class: 'bnd-series-prop' }, '✎ Proposed (not approved yet): ', b.proposal_words) : null,
         b.exists === false ? h('small', { class: 'bnd-series-gone' }, 'This book is not in this Akọwe any more (its changes are kept).') : null))),
       sr.state && Object.keys(sr.state).length ? h('dl', { class: 'bnd-series-state' }, h('dt', null, `As of the end of book ${sr.as_of}`),
-        ...[['looks', 'Looks'], ['carries', 'Carries'], ['can', 'Can'], ['lost', 'Lost'], ['status', 'Status'], ['relationships', 'Relationships']]
+        ...(sr.kind ? Object.keys(sr.state).map(k => [k, k]) : CHAR_STATE)
           .filter(([k]) => sr.state[k]).map(([k, w]) => h('dd', null, h('b', null, `${w}: `), sr.state[k]))) : null);
   }
   /** 📖 As of book N: the whole binder as it stood at the end of that book */
@@ -1507,21 +1512,25 @@ export async function viewBinder(main, x, rest = []) {
     try { v = await api('GET', bpath('/binder/series')); }
     catch (e) { clear(seriesBox).appendChild(h('p', { class: 'bnd-err' }, '📚 The series could not be read: ', plainError(e))); return; }
     const n = v.number || 1;
-    const props = (v.characters || []).filter(c => (c.strip || []).some(b => b.number === n && b.proposal));
-    const changed = (v.characters || []).filter(c => (c.strip || []).some(b => b.number === n && b.changes));
+    // the characters, then the places / items / groups (📚 series_world): the same cards, the same buttons
+    const all = (v.characters || []).concat((v.things || []).map(t => Object.assign({}, t, { name: `${t.icon || ''} ${t.name} (${(t.kind_label || t.kind || '').toLowerCase()})`.trim() })));
+    const props = all.filter(c => (c.strip || []).some(b => b.number === n && b.proposal));
+    const changed = all.filter(c => (c.strip || []).some(b => b.number === n && b.changes));
+    const seq = v.sequel || null;
     const busy = h('div', { class: 'bnd-series-msg', 'aria-live': 'polite', 'data-testid': 'binder-series-msg' });
     clear(seriesBox).append(
       h('div', { class: 'bnd-series-head' },
         h('h3', null, v.in_series ? `📚 ${v.name || 'This series'} — this is book ${n}` : '📚 This book is not part of a series yet'),
-        h('p', { class: 'bnd-series-help' }, 'In a series, each character keeps the same personality, way of talking, name and origin in every book. What can change from book to book: how they look, what they carry, what they can do, who their friends and enemies are, and their status. Each book keeps only what changed in it.'),
+        h('p', { class: 'bnd-series-help' }, 'In a series, each character keeps the same personality, way of talking, name and origin in every book. What can change from book to book: how they look, what they carry, what they can do, who their friends and enemies are, and their status. Places, items and groups change too (who rules or holds them, their condition, danger, members, allies and enemies) while their name, core description and origin stay the same. Each book keeps only what changed in it.'),
         (v.books || []).length ? h('ol', { class: 'bnd-series-books' }, v.books.map(b => h('li', { class: b.current ? 'is-here' : null }, `Book ${b.number}: ${b.title || ''}`, b.current ? ' (this book)' : '', b.exists === false ? ' — not in this Akọwe any more' : ''))) : null),
       h('div', { class: 'bnd-series-actions' },
         h('button', { type: 'button', 'data-testid': 'binder-series-find', title: 'The AI reads this book and proposes what changed for each character. Nothing is used until you approve it, and nothing you wrote is replaced.',
           onclick: ev => runSeriesJob('/binder/series/find', ev.currentTarget, busy, '✨ Reading the book for changes') }, '✨ Find what changed in this book'),
         v.portraits_waiting ? h('button', { type: 'button', 'data-testid': 'binder-series-portraits', title: 'A new portrait for each character whose look changed, made with the same 🔒 character lock so the face stays the same. Earlier portraits are kept.',
-          onclick: ev => runSeriesJob('/binder/series/portraits', ev.currentTarget, busy, '🖼 Making the new portraits') }, `🖼 Make ${v.portraits_waiting} new portrait${v.portraits_waiting > 1 ? 's' : ''}`) : null,
+          onclick: ev => runSeriesJob('/binder/series/portraits', ev.currentTarget, busy, '🖼 Making the new portraits') }, `🖼 Make ${v.portraits_waiting} new picture${v.portraits_waiting > 1 ? 's' : ''}`) : null,
         v.next_book ? h('span', { class: 'bnd-series-next' }, `Book ${v.next_book.number} exists already: “${v.next_book.title}”.`)
-          : h('button', { type: 'button', class: 'primary', 'data-testid': 'binder-series-sequel', onclick: ev => startSequel(ev.currentTarget, v, busy) }, '📚 Start a sequel from this book')),
+          : h('button', { type: 'button', class: 'primary', 'data-testid': 'binder-series-sequel', disabled: seq && seq.possible === false ? true : null, title: seq && seq.possible === false ? seq.why : null, onclick: ev => startSequel(ev.currentTarget, v, busy) }, '📚 Start a sequel from this book'),
+        !v.next_book && seq && seq.possible === false && seq.why ? h('span', { class: 'bnd-series-next', 'data-testid': 'binder-series-sequel-why' }, seq.why) : null),
       busy,
       props.length ? h('div', { class: 'bnd-series-props', 'data-testid': 'binder-series-proposals' },
         h('h4', null, `✎ What changed in this book — ${props.length} proposal${props.length > 1 ? 's' : ''} to read`),
@@ -1565,7 +1574,7 @@ export async function viewBinder(main, x, rest = []) {
     if (box) clear(box).appendChild(h('p', { class: last.ok === false ? 'bnd-err' : 'bnd-ok-msg' }, last.message || 'Done.'));
   }
   async function startSequel(btn, v, busy) {
-    const ok = await x.choiceDialog('📚 Start a sequel from this book?', h('div', null,
+    const ok = x.confirmSequel ? (await x.confirmSequel({ number: v.number, proposals_here: v.proposals_here }) ? 'yes' : null) : await x.choiceDialog('📚 Start a sequel from this book?', h('div', null,
       h('p', null, `A NEW book (book ${(v.number || 1) + 1} of the series) is made with ⚡ Make a book. This book is not changed.`),
       h('ul', null,
         h('li', null, 'Every character keeps the same personality, way of talking, name and origin — the new book cannot change them.'),

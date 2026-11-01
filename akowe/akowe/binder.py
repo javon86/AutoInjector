@@ -2813,6 +2813,8 @@ def series_route(app, method: str, rest: list, body, principal: str, pid: str, b
         return 200, series_mod.rename(app.store, pid, branch, body)
     if rest == ["portraits"] and method == "POST":
         return 202, series_mod.start_portraits(app, principal, pid, branch, body)
+    if rest == ["sequel"] and method == "GET":  # 📚 can a sequel be started now (the 📘 book page's button)
+        return 200, series_mod.sequel_status(app, pid, branch)
     if rest == ["sequel"] and method == "POST":
         return 202, series_mod.start_sequel(app, principal, pid, branch, body)
     raise AkoweError("NOT_FOUND", "/binder/series", "no such series endpoint", **_REJ)
