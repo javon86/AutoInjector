@@ -1650,3 +1650,7 @@ label.btn:has(> input:focus-visible) { outline: 3px solid var(--focus); outline-
 .cast-roles .cast-list li { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; }
 .forge-role, .forge-tile-role { margin: 0 0 .5rem; font-size: .95rem; }
 .forge-tile-role { margin: 0; font-size: .85rem; opacity: .9; }
+
+/* 📚 Start a sequel (book page, finished screen) */
+.sequel-box { margin-top: .6rem; }
+.sequel-box .row { align-items: center; gap: .5rem; flex-wrap: wrap; }

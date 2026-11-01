@@ -59,6 +59,12 @@ FIX = {
 }
 
 
+def _with_series(message: str, res: dict) -> str:
+    """📚 The opened book's series in plain words after the message (restored, merged, conflicts) — when it has one."""
+    extra = ((res or {}).get("series") or {}).get("message")
+    return f"{message} {extra}" if extra else message
+
+
 def _err(code: str, message: str, *, kernel: str = "INVALID_INPUT", path: str = "") -> AkoweError:
     exc = problem_error(code, message, kernel=kernel, path=path)
     exc.errors[0]["fix"] = FIX.get(code) or exc.errors[0].get("fix")
@@ -251,7 +257,9 @@ class OpenService:
         return dict(self.opened(res["project_id"], res["branch_id"]), kind="package", project_id=res["project_id"],
                     branch_id=res["branch_id"], name=res["name"], title=res["title"],
                     saved_at=res["manifest"].get("saved_at"), mode="copy" if existing else "new",
-                    message=f"“{res['name']}” is open as a new book (the saved book was not changed).")
+                    series=res.get("series") or {"action": "none"},
+                    message=_with_series(f"“{res['name']}” is open as a new book (the saved book was not changed).",
+                                         res))
 
     def _update(self, principal: str, data: bytes, pkg: dict, existing: dict, source: str) -> dict:
         """⟳ Update the one I have: the book is replaced by the saved one and keeps its id (so its folder, links and
@@ -276,7 +284,8 @@ class OpenService:
 
     def _replace(self, principal: str, data: bytes, pkg: dict, existing: dict, source: str) -> dict:
         pid = existing["project_id"]
-        trial = book_package.import_package(self.app, data, principal, pkg=pkg, name=f"{existing['name']} (checking)")
+        trial = book_package.import_package(self.app, data, principal, pkg=pkg, name=f"{existing['name']} (checking)",
+                                            series=False)  # 📚 a check copy never touches the series
         keep = [r for r in self.store.query("SELECT key, value FROM settings WHERE key LIKE 'book_folder:%' OR key "
                                             "LIKE 'book_save:%'") if pid in r["key"]]
         try:
@@ -305,7 +314,9 @@ class OpenService:
         log.info("updated book %s from a saved book (%s)", pid, source)
         return dict(self.opened(pid, res["branch_id"]), kind="package", project_id=pid, branch_id=res["branch_id"],
                     name=res["name"], title=res["title"], saved_at=res["manifest"].get("saved_at"), mode="update",
-                    message=f"“{res['name']}” is updated to the saved book (the same book, now as it was saved).")
+                    series=res.get("series") or {"action": "none"},
+                    message=_with_series(f"“{res['name']}” is updated to the saved book (the same book, now as it was "
+                                         "saved).", res))
 
     def opened(self, pid: str, branch: str = "main") -> dict:
         """For an opened book: is it finished, and is there an imported run that can be resumed?"""

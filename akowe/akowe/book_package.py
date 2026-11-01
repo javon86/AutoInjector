@@ -13,6 +13,9 @@ Format (a ZIP file, ``schema_version`` 1):
                            runs (``job:<id>``)
     assets/<sha256>.bin    the bytes of every stored file the book uses (exports, imports), content-addressed
     book-bible.json        the book bible (for people and for 🔁 Rerun; not needed to open the package)
+    series.json            📚 only for a book in a series: the whole series record (series_package.py) — every book's
+                           order, title and approved changes; opening merges it by series id, never duplicates it.
+                           A package without it (an older one) opens as before.
 
 Every file is listed in the manifest with its SHA-256; opening checks each one, every record's content hash and every
 asset's hash before anything is written, and refuses a newer ``schema_version`` (``OPEN_NEWER_VERSION``).
@@ -55,6 +58,7 @@ LIVE = ("queued", "running", "waiting", "pausing", "paused", "interrupted")
 OPENED_PHASE = ("Opened from a saved book — press ▶ Resume to go on where it stopped (or ▶ Continue making this book "
                 "on the book page).")
 HASH_RE = re.compile(r"[0-9a-f]{64}")
+SERIES_FILE = "series.json"
 ID_RE = re.compile(r"[A-Za-z]+-[0-9a-f]{8,40}")
 
 
@@ -172,6 +176,15 @@ def build(app, pid: str, *, bible: dict | None = None, on_progress=None) -> byte
     if bible is not None:
         entries.append(("book-bible.json", guard(json.dumps(bible, ensure_ascii=False, indent=2), secrets)
                         .encode("utf-8"), zipfile.ZIP_DEFLATED))
+    try:  # 📚 the series record travels with the book (series_package.py)
+        from . import series_package  # noqa: PLC0415
+        srec = series_package.export_record(store, pid)
+    except Exception:  # noqa: BLE001 - a save never fails over the series; the book is complete without it
+        log.exception("book package: the series of %s", pid)
+        srec = None
+    if srec is not None:
+        entries.append((SERIES_FILE, guard(json.dumps(srec, ensure_ascii=False, indent=2), secrets).encode("utf-8"),
+                        zipfile.ZIP_DEFLATED))
     title = None
     for s in rows["settings"]:
         if s["key"] == f"book_profile:{pid}" and isinstance(s["value"], dict):
@@ -280,7 +293,14 @@ def read(data: bytes) -> dict:
             bible = json.loads(blobs["book-bible.json"].decode("utf-8"))
         except (ValueError, UnicodeDecodeError):
             bible = None
-    return {"manifest": manifest, "tables": tables, "settings": settings, "assets": assets, "bible": bible}
+    series = None  # 📚 checked by series_package.restore when the book is opened (a bad one never stops the book)
+    if SERIES_FILE in blobs:
+        try:
+            series = json.loads(blobs[SERIES_FILE].decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            series = {"unreadable": True}
+    return {"manifest": manifest, "tables": tables, "settings": settings, "assets": assets, "bible": bible,
+            "series": series}
 
 
 # ====================================================================== open as a NEW book
@@ -417,9 +437,10 @@ def transplant(pkg: dict, new_pid: str, principal: str, *, name: str | None = No
 
 
 def import_package(app, data: bytes, principal: str, *, pkg: dict | None = None, as_pid: str | None = None,
-                   name: str | None = None) -> dict:
+                   name: str | None = None, series: bool = True) -> dict:
     """Open a package as a NEW book (or, with ``as_pid``, under that project id: book_open's "Update the one I have",
-    which removes the old book first). Returns {project_id, branch_id, name, title, jobs, manifest}."""
+    which removes the old book first). Returns {project_id, branch_id, name, title, jobs, manifest, series}.
+    ``series``: 📚 restore / merge the book's series (series_package.restore); False for a throw-away check copy."""
     pkg = pkg if pkg is not None else read(data)
     store = app.store
     old = pkg["tables"]["projects"][0]
@@ -449,8 +470,17 @@ def import_package(app, data: bytes, principal: str, *, pkg: dict | None = None,
             log.exception("could not remove the half-opened book %s", new_pid)
         raise PackageProblem("OPEN_FAILED", "the opened book did not check out: " + "; ".join(problems[:3]))
     branches = [r["branch_id"] for r in tables.get("branches") or []]
-    return {"project_id": new_pid, "branch_id": "main" if "main" in branches else (branches[0] if branches else "main"),
-            "name": name, "title": title or name, "jobs": info["jobs"], "manifest": pkg["manifest"]}
+    branch = "main" if "main" in branches else (branches[0] if branches else "main")
+    sres = {"action": "none", "message": ""}
+    if series and pkg.get("series") is not None:
+        try:
+            from . import series_package  # noqa: PLC0415
+            sres = series_package.restore(store, pkg["series"], pkg["manifest"]["project_id"], new_pid, branch)
+        except Exception:  # noqa: BLE001 - the book is open; the series is an extra
+            log.exception("could not restore the series of the opened book %s", new_pid)
+            sres = {"action": "failed", "message": "📚 The book opened, but its series could not be restored."}
+    return {"project_id": new_pid, "branch_id": branch, "name": name, "title": title or name, "jobs": info["jobs"],
+            "manifest": pkg["manifest"], "series": sres}
 
 
 def verify(store, pid: str) -> list[str]:

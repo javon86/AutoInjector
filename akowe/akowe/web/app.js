@@ -5230,7 +5230,8 @@ function renderBook(holder, book, redraw) {
         : 'No AI connected (or you chose to write it yourself): creative steps open a ready-made form for you. ', book.ai_ready ? null : h('a', { href: '#/settings' }, 'Connect an AI in Settings'))),
     nextStep ? h('button', { type: 'button', class: 'primary big', onclick: () => doStep(nextStep) }, `▶ Do the next step: ${nextStep.title}`)
       : h('span', { class: 'badge b-ok' }, '🎉 Your book is made')),
-    h('progress', { max: '100', value: String(pct), 'aria-label': `${pct}% done` }), wordsLine(book.words), msg));
+    h('progress', { max: '100', value: String(pct), 'aria-label': `${pct}% done` }), wordsLine(book.words), msg,
+    sequelBox(S.pid, S.branch)));
   holder.appendChild(stepRail(book.steps.map(s => ({ id: s.id, title: s.title, state: BOOK_ERR[`${S.pid}:${s.id}`] ? 'problem' : s.state, word: RAIL_WORD[s.state] })),
     { label: 'Make my book: all steps', current: book.next }));
   const ol = h('ol', { class: 'book-steps' });
@@ -6071,7 +6072,54 @@ const TIP_SHEET = () => [
 
 /** What the 🗂 Character Forge pages (forge.js) need from this file. */
 function forgeUI() {
-  return { h, clear, api, bpath, plink, S, crumbs, problemBox, toProblem, runAiJob, choiceDialog, toast, infoTip, route, loadingState, stateBox, openMakeBook };
+  return { h, clear, api, bpath, plink, S, crumbs, problemBox, toProblem, runAiJob, choiceDialog, toast, infoTip, route, loadingState, stateBox, openMakeBook, confirmSequel };
+}
+
+/* ======================================================================= 📚 start a sequel (book page, finished screen) */
+const sequelPath = (pid, branch) => `/projects/${encodeURIComponent(pid)}/branches/${encodeURIComponent(branch || 'main')}/binder/series/sequel`;
+/** The consent dialog of 📚 Start a sequel — the same words on the 📘 book page, the finished screen and the Book Bible. */
+async function confirmSequel(st) {
+  const n = (st && st.number) || 1;
+  const props = (st && st.proposals_here) || 0;
+  const ok = await choiceDialog('📚 Start a sequel from this book?', h('div', null,
+    h('p', null, `A NEW book (book ${n + 1} of the series) is made with ⚡ Make a book. This book is not changed.`),
+    h('ul', null,
+      h('li', null, 'Every character keeps the same personality, way of talking, name and origin — the new book cannot change them.'),
+      h('li', null, 'Their looks, belongings, abilities, relationships and status start as this book left them (the changes you approved).'),
+      h('li', null, 'Places, items and groups start as this book left them too: who rules or holds them, their condition, their allies and enemies.'),
+      h('li', null, 'The sequel hook of this book is the starting idea; the AI writes a new premise, plot and chapters.')),
+    props ? h('p', { class: 'words-warn', role: 'note' }, `⚠️ There ${props === 1 ? 'is 1 proposed change' : `are ${props} proposed changes`} you have not approved yet (📖 Book Bible → 📚 Series): the sequel only uses approved changes.`) : null,
+    h('p', { class: 'small' }, 'Pressing Start is your consent for the new book\'s run (like ⚡ Make a book for me).')), [{ id: 'yes', label: '📚 Start the sequel' }]);
+  return ok === 'yes';
+}
+/** 📚 Start a sequel from this book: the button (disabled, with the reason in plain words, when it cannot be pressed:
+ *  no AI connected, the next book exists already…), the same consent dialog and the same route as the Book Bible's. */
+function sequelBox(pid, branch, { testid = 'bk-sequel' } = {}) {
+  const btn = h('button', { type: 'button', 'data-testid': testid, disabled: true, title: 'Checking whether a sequel can be started…' }, '📚 Start a sequel from this book');
+  const why = h('span', { class: 'small muted', 'data-testid': `${testid}-why` });
+  const msg = h('div', { 'aria-live': 'polite', 'data-testid': `${testid}-msg` });
+  let st = null;
+  (async () => {
+    try { st = await api('GET', sequelPath(pid, branch)); }
+    catch { why.textContent = 'Akọwe could not check whether a sequel can be started right now. Open the page again in a moment.'; return; }
+    btn.disabled = !st.possible;
+    btn.title = st.possible ? `Makes book ${st.next_number} of the series with ⚡ Make a book. This book is not changed.` : (st.why || '');
+    why.textContent = st.possible ? '' : (st.why || '');
+  })();
+  btn.addEventListener('click', async () => {
+    if (!st || !st.possible || !(await confirmSequel(st))) return;
+    btn.disabled = true;
+    clear(msg).appendChild(loadingState('Starting the sequel…'));
+    try {
+      const r = await api('POST', sequelPath(pid, branch), { body: { author_confirms: true } });
+      clear(msg).appendChild(h('div', { 'data-testid': `${testid}-started` }, stateBox('ok', r.message || '📚 The sequel has started.')));
+      if (r.run && r.run.id) openMakeBook(btn, { runId: r.run.id });
+    } catch (e) {
+      btn.disabled = false;
+      clear(msg).appendChild(problemBox(toProblem(e, { book: S.project ? S.project.name : '', step: '📚 Start a sequel' }), {}, 'The sequel did not start'));
+    }
+  });
+  return h('div', { class: 'sequel-box', 'data-testid': `${testid}-box` }, h('div', { class: 'row' }, btn, why), msg);
 }
 
 function characterCard(cur) {
@@ -7573,6 +7621,7 @@ function renderRun() {
       h('div', { class: 'row' }, h('a', { class: 'btn', href: link('p', r.project_id, r.branch_id || 'main', 'book'), onclick: () => closeMakeBook() }, '📘 Open the book'),
         h('a', { class: 'btn', href: link('p', r.project_id, r.branch_id || 'main', 'journal'), onclick: () => closeMakeBook() }, '📜 Book journal'),
         h('a', { class: 'btn', href: '#/shelf', onclick: () => closeMakeBook() }, '📚 My finished books')),
+      r.project_id ? sequelBox(r.project_id, r.branch_id || 'main', { testid: 'mb-sequel' }) : null,
       runReportBox(r));
   }
   const rs = r.review_summary || {};
