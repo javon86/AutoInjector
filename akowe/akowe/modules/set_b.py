@@ -668,7 +668,11 @@ class PlanHandler(OperationHandler):
             "plan.parent_id (string or null) and plan.objective (observable outcome). Use only predicates from "
             "predicate_conventions, assertion_type PLAN, integer story-time ticks or null with effective_to > "
             "effective_from, source_refs [] and links [] unless citing a provided pin. Reuse known_ids exactly; "
-            + ("never invent an ID. plan.pov_id must be one of allowed.pov_ids; plan.location_id must be one of "
+            + ("never invent an ID. plan.pov_id must be one of allowed.pov_ids; when context.main_character is given, "
+               "it is the book's ONE main character (story role protagonist): use main_character.pov_id as the "
+               "plan.pov_id of the first chapter and of most chapters, and never leave them out of the book; "
+               "context.cast gives every character's story role (villain, mentor, extra…) to plan with. "
+               "plan.location_id must be one of "
                "allowed.location_ids, or null only when allowed.location_ids is empty; give exactly "
                "allowed.chapter_count chapters when it is set, each with a unique plan.item_id and plan.order. If "
                "previous_attempt_problems is given, an earlier outline was refused for those reasons: avoid them. "
@@ -743,6 +747,31 @@ class PlanHandler(OperationHandler):
                         out.append(msg)
         return out[:12]
 
+    @staticmethod
+    def _story_roles(ctx: Context, canon: list) -> tuple[dict | None, list]:
+        """★ The book's main character (by the stored tag: record ID, so a renamed or re-spelled protagonist is still
+        the one) as the canon ID the outline must use, and every pinned character's story role. Never raises."""
+        try:
+            from .. import story_roles  # noqa: PLC0415
+            k = story_roles.cast(ctx.store, ctx.project_id, ctx.branch_id)
+            pinned = {r["record_id"]: r for r in canon if r["module_id"] == "A01"}
+            cast, mc = [], None
+            for c in k["characters"]:
+                rec = pinned.get(c["record_id"])
+                if rec is None:
+                    continue
+                ids = pr.declared_ids(rec)
+                cid = c["subject_id"] if c["subject_id"] in ids else (sorted(ids)[0] if ids else None)
+                if cid is None:
+                    continue
+                cast.append({"id": cid, "name": c["name"], "story_role": c["story_role"]})
+                if c["record_id"] == k["protagonist"]:
+                    mc = {"pov_id": cid, "name": c["name"], "story_role": "protagonist"}
+            return mc, cast[:20]
+        except Exception:  # noqa: BLE001 - guidance is best effort
+            log.exception("could not read the story roles")
+            return None, []
+
     def ai_context(self, ctx: Context) -> dict:
         base = super().ai_context(ctx)
         src = Sources(ctx, list(ctx.resolved.values()))
@@ -765,6 +794,12 @@ class PlanHandler(OperationHandler):
             problems = self._earlier_refusals(ctx)
             if problems:
                 base["previous_attempt_problems"] = problems
+        if self.op_id in ("B01", "B03", "B11"):
+            mc, cast = self._story_roles(ctx, canon)
+            if mc:
+                base["main_character"] = mc
+            if cast:
+                base["cast"] = cast
         if self.op_id in ("B01", "B03", "B11"):
             from .. import story_choices  # noqa: PLC0415
             choices, rules = self._guidance(ctx)

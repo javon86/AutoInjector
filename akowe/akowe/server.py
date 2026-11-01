@@ -968,6 +968,8 @@ class App:
                 return 200, rv.character_info(principal, pid, branch, rest[1])
             if len(rest) == 2 and rest[0] == "characters" and method == "PUT":
                 return 200, rv.save_character(principal, pid, branch, rest[1], body)
+            if len(rest) == 3 and rest[0] == "characters" and rest[2] == "role" and method == "PUT":
+                return 200, rv.set_character_role(principal, pid, branch, rest[1], body)
             if len(rest) == 3 and rest[0] == "characters" and rest[2] == "ai" and method == "POST":
                 return 202, rv.start_character_ai(principal, pid, branch, rest[1], body)
             # 🎬 scene cards (P8)

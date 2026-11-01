@@ -1112,7 +1112,9 @@ async function viewOperation(main, opId) {
         h('p', null, 'Fill in the form below (the fields marked Required) and press Create.',
           tech(`No ${op.id} records on branch ${S.branch}. Minimum first input: `, (op.create_requires || []).join(', ') || 'none', '.'))));
     } else {
-      recCard.appendChild(recordList(recs));
+      const list = recordList(recs);
+      recCard.appendChild(list);
+      if (opId === 'A01') addRoleChips(list);
     }
   };
   renderRecs();
@@ -1127,10 +1129,28 @@ async function viewOperation(main, opId) {
   main.appendChild(await createSection(op, schema));
 }
 
+/* ★ story roles (story_roles.py): every character has a title; exactly one is the main character */
+function roleChip(r) {
+  if (!r || !r.story_role) return null;
+  return h('span', { class: `badge role-chip role-${r.story_role}${r.proposed ? ' role-proposed' : ''}`, 'data-testid': 'role-chip', 'data-role': r.story_role,
+    title: `${r.meaning || r.label || ''}${r.proposed ? ' — a proposal: Akọwe guessed it; open the character to confirm it' : ''}` },
+  `${r.icon || ''} ${r.label || ''}${r.proposed ? ' (proposed)' : ''}`.trim());
+}
+async function addRoleChips(list) {
+  let info;
+  try { info = await api('GET', bpath('/review/characters')); } catch { return; }   // chips are a help: no chips on failure
+  const by = Object.fromEntries((info.characters || []).map(c => [c.record_id, c]));
+  const roles = Object.fromEntries(((info.fields || {}).story_roles || []).map(x => [x.key, x]));
+  for (const li of list.querySelectorAll('li[data-rid]')) {
+    const c = by[li.dataset.rid]; const slot = li.querySelector('.r-badges');
+    if (!c || !c.story_role || !slot || slot.querySelector('.role-chip')) continue;
+    slot.prepend(roleChip(Object.assign({}, roles[c.story_role] || {}, { story_role: c.story_role, proposed: c.story_role_proposed })));
+  }
+}
 function recordList(recs) {
   const ul = h('ul', { class: 'record-list' });
   for (const r of recs) {
-    ul.appendChild(h('li', { class: 'record-item' },
+    ul.appendChild(h('li', { class: 'record-item', 'data-rid': r.record_id },
       h('div', { class: 'r-main' },
         h('a', { class: 'r-title', href: plink('rec', r.record_id) }, recordTitle(r)),
         h('div', { class: 'r-meta' }, `${r.record_id} · v${r.version}`,
@@ -5238,6 +5258,22 @@ function renderBook(holder, book, redraw) {
               : h('button', { type: 'button', class: 'small', onclick: () => goNew('A01') }, '✍️ Write it myself'),
           (m.refused || []).length ? h('ul', { class: 'small' }, m.refused.map(checkItem)) : null)))));
     }
+    if (s.id === 'canon' && (s.cast || []).length) {
+      // ★ every character's story role; exactly one main character (a ⚠️ while none is set)
+      const makeMain = async c => {
+        if (s.protagonist && !s.no_protagonist && s.protagonist.record_id !== c.record_id) {
+          const ok = await choiceDialog('Make this the main character?', h('p', null, `A book has exactly one main character. “${s.protagonist.name}” is the main character now and becomes a second lead.`), [{ id: 'yes', label: `★ Make “${c.name}” the main character` }]);
+          if (ok !== 'yes') return;
+        }
+        run(() => post('set_role', { record_id: c.record_id, story_role: 'protagonist' }), `Making “${c.name}” the main character…`, 'canon');
+      };
+      li.appendChild(h('div', { class: 'cast-roles', 'data-testid': 'cast-roles' },
+        s.no_protagonist ? h('p', { class: 'small notice', 'data-testid': 'no-protagonist' }, '⚠️ No main character is set yet',
+          s.protagonist ? ` — Akọwe proposes “${s.protagonist.name}” (${s.protagonist.reason}).` : '.', ' Press ★ on the one the book is about.') : null,
+        h('ul', { class: 'chips cast-list' }, s.cast.map(c => h('li', { 'data-character': c.name, 'data-role': c.story_role },
+          h('a', { href: plink('rec', c.record_id) }, c.name), ' ', roleChip(c),
+          c.story_role !== 'protagonist' || s.no_protagonist ? [' ', h('button', { type: 'button', class: 'small link', 'data-testid': 'make-main', onclick: () => makeMain(c) }, '★ Make this the main character')] : null)))));
+    }
     if (s.approve && s.approve.length) {
       li.appendChild(h('ul', { class: 'book-items' }, s.approve.map(i => h('li', null, h('a', { href: simpleHref(i) }, nameEl(i)), ' ', lifecycleBadge(i.lifecycle),
         (i.problems || []).length ? [badge('⚠️', 'The checks found problems', 'b-bad'), ' ', redoBox([i])] : null,
@@ -6043,16 +6079,46 @@ function characterCard(cur) {
   const body = h('div', null, loadingState('Loading the character sheet…'));
   const msg = h('div', { 'aria-live': 'polite' });
   const prog = h('div', { 'aria-live': 'polite' });
+  const roleBox = h('div', { class: 'role-box', 'data-testid': 'role-box' });
   const card = h('section', { class: 'card char-card', 'aria-labelledby': 'cc-h', 'data-testid': 'character-card' },
     h('div', { class: 'row space' }, h('h2', { id: 'cc-h' }, '🎭 Who they are and how they talk'),
       h('div', { class: 'row' }, h('a', { class: 'btn small forge-entry', href: plink('forge', rid), 'data-testid': 'open-forge', title: 'The full Character Forge dossier: 14 sections, letters, portrait and ten reference views' }, '🗂 Character Forge'),
         infoTip('Character sheet and voice card', ...TIP_SHEET()))),
-    msg, prog, body);
+    roleBox, msg, prog, body);
   let info = null;
   const load = async () => {
     try { info = await api('GET', bpath(`/review/characters/${encodeURIComponent(rid)}`)); }
     catch (e) { clear(body).appendChild(problemBox(toProblem(e, { book: S.project.name, step: 'Character sheet' }), { retry: load })); return; }
+    renderRole();
     reader();
+  };
+  // ★ the story role: a title for every character; choosing "Main character" moves the ★ (confirm first)
+  const renderRole = () => {
+    clear(roleBox);
+    const r = info.story_role; const roles = (info.fields || {}).story_roles || [];
+    if (!roles.length) return;
+    const sel = h('select', { id: 'cc-story-role', 'data-testid': 'role-picker' },
+      roles.map(x => h('option', { value: x.key, selected: !!(r && r.story_role === x.key) }, `${x.icon} ${x.label} — ${x.meaning}`)));
+    sel.addEventListener('change', async () => {
+      const want = sel.value; const prot = r && r.protagonist;
+      if (want === 'protagonist' && prot && prot.record_id !== rid) {
+        const ok = await choiceDialog('Make this the main character?', h('p', null, `A book has exactly one main character. “${prot.name}” is the main character now and becomes a second lead.`), [{ id: 'yes', label: '★ Yes, make this the main character' }]);
+        if (ok !== 'yes') { sel.value = r ? r.story_role : ''; return; }
+      }
+      sel.disabled = true; clear(msg);
+      try {
+        const out = await api('PUT', bpath(`/review/characters/${encodeURIComponent(rid)}/role`), { body: { story_role: want } });
+        info.story_role = out.role; toast(out.message || 'Saved'); renderRole();
+      } catch (e) {
+        sel.disabled = false; sel.value = r ? r.story_role : '';
+        msg.appendChild(problemBox(toProblem(e, { book: S.project.name, step: 'Story role' }), {}, 'The story role was not changed'));
+      }
+    });
+    put(roleBox,
+      h('p', { class: 'role-head', 'data-testid': 'role-head' }, h('strong', null, 'Story role: '), roleChip(r) || h('span', { class: 'muted' }, '—'),
+        r && r.proposed ? h('span', { class: 'small muted' }, ' — Akọwe guessed it; choose a role to confirm it.') : null),
+      r && r.story_role !== 'protagonist' && r.protagonist ? h('p', { class: 'small muted' }, `★ The book's main character: ${r.protagonist.name}`) : null,
+      h('div', { class: 'field' }, tipLabel('cc-story-role', 'Change the story role', 'Every character has a title in the story (main character, villain, mentor, extra…). Exactly one is the ★ main character: choosing it here moves the ★ from the previous one. Akọwe keeps the main character by this tag, even if their name is spelled differently later.'), sel));
   };
   const val = v => (v && String(v).trim()) ? v : h('span', { class: 'muted' }, '—');
   const askAI = async () => {
@@ -6073,7 +6139,7 @@ function characterCard(cur) {
         h('p', null, hazard({ code: 'CHARACTER_SHEET_MISSING' }), ' Without them the writer cannot give this character their own way of talking.')));
     } else {
       const sheet = e.sheet || {}; const voice = e.voice || {};
-      const sDl = h('dl', { class: 'kv char-dl' }, h('dt', null, 'Main or side character'), h('dd', null, sheet.role === 'side' ? 'Side character' : sheet.role === 'main' ? 'Main character' : val('')));
+      const sDl = h('dl', { class: 'kv char-dl' });
       for (const f of F.sheet) {
         if (f.key === 'own_wish' && sheet.role !== 'side' && !sheet.own_wish) continue;
         sDl.append(h('dt', null, f.label), h('dd', null, val(sheet[f.key])));
@@ -6104,11 +6170,9 @@ function characterCard(cur) {
     const e = info.entry || {}; const sheet = e.sheet || {}; const voice = e.voice || {};
     const F = info.fields;
     const form = h('form', { novalidate: true, class: 'char-form' });
-    const role = h('select', { id: 'cc-role' }, h('option', { value: '' }, '— Not decided —'),
-      h('option', { value: 'main', selected: sheet.role === 'main' }, 'Main character'), h('option', { value: 'side', selected: sheet.role === 'side' }, 'Side character'));
     const ins = {};
     const fs1 = h('fieldset', { class: 'field' }, h('legend', null, 'Character sheet'),
-      h('div', { class: 'field' }, tipLabel('cc-role', 'Main or side character', 'A side character gets a wish of their own that is not about the main character.'), role));
+      h('p', { class: 'small muted' }, 'The story role (main character, villain, mentor…) is chosen above the sheet.'));
     for (const f of F.sheet) {
       const t = h('textarea', { id: `cc-s-${f.key}`, rows: '2', 'data-key': f.key }); t.value = sheet[f.key] || '';
       ins[`s:${f.key}`] = t;
@@ -6146,7 +6210,7 @@ function characterCard(cur) {
     form.append(fs1, fs2, err, h('div', { class: 'form-actions' }, save, h('button', { type: 'button', onclick: reader }, 'Cancel')));
     form.addEventListener('submit', async ev => {
       ev.preventDefault(); clear(err);
-      const s = { role: role.value };
+      const s = {};
       for (const f of F.sheet) s[f.key] = ins[`s:${f.key}`].value.trim();
       if (mustShow) s.must_show = linesOf(mustShow.value).slice(0, F.must_show.max);
       s.relationships = [...relBox.querySelectorAll('.rel-row')].map(row => Object.fromEntries([...row.querySelectorAll('input')].map(i => [i.dataset.k, i.value.trim()]))).filter(r => r.with);
@@ -6165,7 +6229,7 @@ function characterCard(cur) {
       }
     });
     body.appendChild(form);
-    role.focus();
+    const first = form.querySelector('textarea'); if (first) first.focus();
   };
   load();
   return card;

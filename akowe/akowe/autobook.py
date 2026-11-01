@@ -51,6 +51,7 @@ from . import planned as planned_mod
 from . import protagonist
 from . import scenes as scenes_mod
 from . import story_choices
+from . import story_roles
 from . import story_rules
 from . import texture as texture_mod
 from .assist import AssistService, BibleSession, Cancelled, Job, book_profile_brief
@@ -1185,7 +1186,7 @@ class AutoBookService(_Runner):
                              version=ref.get("version"), module_id=ref["module_id"], details=digest(probs),
                              chapter_id=chapter_id, options=["retry"] if stale else ["edit", "retry"])
 
-    def _review_until_approved(self, run, st, rid: str, label: str, chapter_id: str | None = None):
+    def _review_until_approved(self, run, st, rid: str, label: str, chapter_id: str | None = None, precheck=None):
         """Akọwe's checks, then AI review -> approve under consent, or fix (max 2) -> review again; else pause
         for the author. A draft the checks refuse is not sent to the AI reviewer (ChecksRefused)."""
         bp = self.bp(run)
@@ -1203,6 +1204,11 @@ class AutoBookService(_Runner):
                 self.event(run, "problem", f"Akọwe's checks refused the {label}", record_id=rid,
                            code="CHECKS_REFUSED")
                 raise self._refused(head["ref"], label, problems(v), chapter_id)
+            probs = precheck(rid) if precheck else []
+            if probs:  # e.g. ★ an outline without the main character: refused like Akọwe's own checks
+                self.event(run, "problem", f"Akọwe's checks refused the {label}: " + "; ".join(probs)[:300],
+                           record_id=rid, code="PROTAGONIST_MISSING")
+                raise self._refused(head["ref"], label, probs, chapter_id)
             st["message"] = f"AI is reviewing the {label}"
             run["phase"] = st["message"]
             self.save(run)
@@ -1936,13 +1942,17 @@ class AutoBookService(_Runner):
                     self._redo_refused(run, st, r["record_id"], f"redo:canon:{r['module_id']}", f"entry “{name}”",
                                        exc)
                     redo = r["module_id"]
+                    old_role = story_roles.stored(chars_mod.get_entry(self.store, run["project_id"],
+                                                                      run["branch_id"], r["record_id"]))[0]
                     redo_named.append({"op": redo, "name": (protagonist.record_names(r) or [name])[0][:120],
-                                       "details": exc.problem.get("details") or []})
+                                       "details": exc.problem.get("details") or [],
+                                       "story_role": old_role if old_role in story_roles.KEYS else ""})
                     break
             if redo is None:
                 break
             self.save(run)
         self._ensure_main(run, st)  # (b) the main character named in the idea / proposed as main is approved canon
+        self._settle_cast(run)  # every character a story role, exactly one ★ protagonist
         n = len(self.bp(run).approved("A01"))
         st["items"] = [dict(x, state="done") for x in st.get("items") or []]
         st["message"] = f"{n} character(s) and {len(self.bp(run).approved('A04'))} place(s) approved"
@@ -2104,7 +2114,7 @@ class AutoBookService(_Runner):
         notes = {}
         for n in named or []:
             self.check(run)
-            key = sess.add_named(n["op"], n["name"], n.get("role") or "")
+            key = sess.add_named(n["op"], n["name"], n.get("role") or "", story_role=n.get("story_role") or "")
             notes[key] = self._named_note(n)
             sess._generate_item(sess.items[key], slot, notes[key])
         sess.current = None
@@ -2137,6 +2147,12 @@ class AutoBookService(_Runner):
         out = self._fix_create_errors(run, sess, slot, notes, out)
         for c in out["created"]:
             self._made(run, c["ref"])
+        for note in sess.role_notes:  # ★ the AI gave several protagonists: who stays the one, and why
+            self.event(run, "note", note, code="PROTAGONIST_SET")
+        sess.role_notes = []
+        txt = story_roles.event_text(sess.roles or {})
+        if txt:
+            self.event(run, "note", txt, record_id=(sess.roles or {}).get("protagonist"), code="PROTAGONIST_SET")
         if out["created"]:
             self.event(run, "ai", f"The AI drafted {len(out['created'])} character/place entries (Bible Builder)",
                        slot=sess.runs[-1].get("slot") if sess.runs else None)
@@ -2158,7 +2174,8 @@ class AutoBookService(_Runner):
 
     @staticmethod
     def _named_note(n: dict) -> str:
-        note = (protagonist.main_note(n["name"], n.get("why") or protagonist.IDEA_WHY) if n.get("main") else
+        note = (protagonist.main_note(n["name"], n.get("why") or protagonist.IDEA_WHY,
+                                      n.get("story_role", "protagonist")) if n.get("main") else
                 f"Make the entry “{n['name']}” again: keep exactly this name and its role in the story.")
         if n.get("details"):
             note += (" Akọwe's checks refused the earlier entry: " + "; ".join(n["details"][:6])
@@ -2236,10 +2253,76 @@ class AutoBookService(_Runner):
         for k in sess.order:
             it = sess.items[k]
             sheet = ((it.get("companion") or {}).get("character_sheet") or {})
-            if it["op"] == "A01" and sheet.get("role") == "main" and not it.get("placeholder") \
-                    and it["name"] not in mains:
+            main = sheet.get("story_role") == story_roles.PROTAGONIST or it.get("story_role") == \
+                story_roles.PROTAGONIST or (not sheet.get("story_role") and sheet.get("role") == "main")
+            if it["op"] == "A01" and main and not it.get("placeholder") and it["name"] not in mains:
                 mains.append(it["name"][:120])
         del mains[8:]
+
+    # ------------------------------------------------------------------ ★ story roles: exactly one protagonist
+    def _settle_cast(self, run) -> dict | None:
+        """Every character gets a story role and the book exactly one protagonist (stored by record ID, so a later
+        spelling correction or rename keeps it). Deterministic; a plain event says who and why when it decided."""
+        try:
+            res = story_roles.enforce(self.store, run["project_id"], run["branch_id"])
+        except Exception:  # noqa: BLE001 - roles never stop the book
+            log.exception("make-a-book run %s: could not settle the story roles", run["id"])
+            return None
+        text = story_roles.event_text(res)
+        if text:
+            self.event(run, "note", text, record_id=res["protagonist"], code="PROTAGONIST_SET")
+        run["protagonist"] = {"record_id": res["protagonist"], "name": res["name"]} if res["protagonist"] else None
+        return res
+
+    def _guard_main(self, run, st, where: str):
+        """★ The guard (before the outline, before writing chapters, before the whole-book review): the main
+        character is approved canon and has a chapter in the outline. Missing from the canon -> made now (the
+        protagonist re-make path); missing from the outline -> PROTAGONIST_MISSING (the outline step redoes an AI
+        outline before it gets here)."""
+        self._settle_cast(run)
+        chk = protagonist.check(self.bp(run))
+        if chk["ok"]:
+            return chk
+        prot = chk.get("protagonist")
+        if not chk.get("in_canon"):
+            if prot is None:
+                self._ensure_main(run, st)
+            else:
+                draft = next((r for r in self.bp(run).heads("A01") if r["record_id"] == prot["record_id"]
+                              and r["lifecycle"] in ("DRAFT", "VALIDATED") and not r.get("stale")), None)
+                self._make_main(run, st, {"name": prot["name"], "why": protagonist.MAIN_WHY, "refused": [],
+                                          "draft": draft["ref"] if draft else None})
+            self._settle_cast(run)
+            chk = protagonist.check(self.bp(run))
+            if chk["ok"]:
+                return chk
+            prot = chk.get("protagonist")
+        if prot is None:
+            raise StepProblem("PROTAGONIST_MISSING", f"The book has no main character {where}.",
+                              "Open the book, make a character (Characters and places) and mark it ★ the main "
+                              "character, then press ▶ Resume.", options=["retry"])
+        name = prot["name"]
+        self.event(run, "problem", f"⚠️ {chk['problem'][0].upper()}{chk['problem'][1:]} {where}",
+                   record_id=prot["record_id"], code="PROTAGONIST_MISSING")
+        raise StepProblem("PROTAGONIST_MISSING",
+                          f"The main character “{name}” is missing {where}: {chk['problem']}.",
+                          f"Open the chapter outline and give “{name}” chapters (as viewpoint), or mark another "
+                          "character ★ the main character on its page; then press 🔁 Try again.",
+                          character=name, options=["retry"])
+
+    def _outline_has_main(self, run, rid: str) -> list[str]:
+        """Problems of an outline draft that leaves the main character out (empty when they are in it)."""
+        bp = self.bp(run)
+        rec = bp.rec(rid)
+        prot = story_roles.protagonist_of(self.store, run["project_id"], run["branch_id"])
+        if rec is None or prot is None:
+            return []
+        chars = chars_mod.canon_characters(self.store, run["project_id"], run["branch_id"])
+        if protagonist.in_outline(rec, prot, chars, alias_map=story_roles.aliases(self.store, run["project_id"],
+                                                                                    run["branch_id"])):
+            return []
+        return [f"PROTAGONIST_NOT_IN_OUTLINE: no chapter has the main character “{prot['name']}” (canon ID "
+                f"'{prot.get('subject_id')}') as plan.pov_id or names them; give them the viewpoint of most chapters"]
 
     # ------------------------------------------------------------------ (b) the main character is approved canon
     def _ensure_main(self, run, st):
@@ -2262,8 +2345,9 @@ class AutoBookService(_Runner):
         while True:
             self.check(run)
             if rid is None:
+                srole = protagonist.role_for_missing(self.bp(run), name, why)
                 res = self._bible(run, st, {}, named=[{"op": "A01", "name": name, "why": why, "main": True,
-                                                        "details": reasons}], strict=False)
+                                                        "story_role": srole, "details": reasons}], strict=False)
                 made = [c for c in res["created"] if c["op"] == "A01"]
                 if not made:
                     reasons = [d for x in res["dropped"].values() for d in x["details"]] or reasons
@@ -2351,7 +2435,7 @@ class AutoBookService(_Runner):
                    record_id=rid)
         self.save(run)
 
-    def _planning(self, run, st, op, label):
+    def _planning(self, run, st, op, label, precheck=None):
         while True:
             bp = self.bp(run)
             if bp.approved(op):
@@ -2372,7 +2456,7 @@ class AutoBookService(_Runner):
                 self._made(run, ref)
                 self.event(run, "ai", f"The AI wrote the {label}", record_id=rid, module_id=op)
             try:
-                self._review_until_approved(run, st, rid, label)
+                self._review_until_approved(run, st, rid, label, precheck=precheck)
             except ChecksRefused as exc:
                 self._redo_refused(run, st, rid, f"redo:{op}", label, exc)
                 continue
@@ -2430,6 +2514,12 @@ class AutoBookService(_Runner):
                                              name=it.get("name"))
                     except Exception:  # noqa: BLE001 - the character is there; its sheet can be made again
                         log.exception("could not copy the character sheet of %s", it.get("name"))
+                if op == "A01" and it.get("story_role") in story_roles.KEYS:  # ★ the saved story role, kept
+                    try:
+                        story_roles.set_role(self.store, run["project_id"], run["branch_id"], ref["record_id"],
+                                             it["story_role"], by="author", name=it.get("name"), move=False)
+                    except Exception:  # noqa: BLE001
+                        log.exception("could not copy the story role of %s", it.get("name"))
             else:
                 refused.append(f"{it.get('name')}: {'; '.join(problems(r)[:2]) or r.get('status')}")
             run["bible_ops"] = sorted(ops)
@@ -2540,7 +2630,8 @@ class AutoBookService(_Runner):
     def _s_outline(self, run, st):
         if not self.bp(run).approved("B11"):
             self._ensure_main(run, st)  # never plan the chapters without the book's main character in the canon
-        self._planning(run, st, "B11", "chapter outline")
+            self._guard_main(run, st, "before the chapter outline")
+        self._planning(run, st, "B11", "chapter outline", precheck=lambda rid: self._outline_has_main(run, rid))
         self._update_rules(run, st)
         n = len(self.bp(run).outline_chapters(self.bp(run).outline()))
         st["message"] = f"{n} chapter(s) planned and approved"
@@ -2550,6 +2641,8 @@ class AutoBookService(_Runner):
         outline = bp.outline()
         if not outline:
             raise StepProblem("NOT_FOUND", "There is no approved chapter outline.", "Press 🔁 Try again.")
+        self._guard_main(run, st, "before the chapters are written")
+        bp = self.bp(run)
         chapters = bp.outline_chapters(outline)
         if not chapters:
             raise StepProblem("INVALID_INPUT", "The chapter outline has no chapters Akọwe can write.",
@@ -2732,6 +2825,13 @@ class AutoBookService(_Runner):
         """P13: the book report of the finished book, with the whole-book review by every working AI that did not
         write most of it (independent). Never blocks the book: a failure is a ⚠️ note (REPORT_FAILED); a reviewer that
         fails is listed in the report."""
+        self._settle_cast(run)
+        chk = protagonist.check(self.bp(run))  # ★ the guard before the whole-book review
+        if not chk["ok"] and not chk.get("in_canon"):
+            self._guard_main(run, st, "before the whole-book review")  # makes the entry, or stops naming them
+        elif not chk["ok"]:  # the chapters are written: a ⚠️ for the author (the review reads the book as it is)
+            self.event(run, "note", f"⚠️ {chk['problem'][0].upper()}{chk['problem'][1:]} (before the whole-book "
+                       "review)", step="report", code="PROTAGONIST_MISSING")
         rp = getattr(self.app, "reports", None)
         if rp is None:
             st["message"] = "Not available"

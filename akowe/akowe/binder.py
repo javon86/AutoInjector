@@ -45,6 +45,7 @@ from pathlib import Path
 
 from . import binder_fields as bf
 from . import characters as chars_mod
+from . import story_roles as story_roles_mod
 from .errors import AkoweError
 
 log = logging.getLogger("akowe.binder")
@@ -774,15 +775,17 @@ class Book:
     def char_by_id(self, ident) -> dict | None:
         if not ident:
             return None
-        ident = str(ident).lower()
-        return next((c for c in self.chars if ident in (c["record_id"].lower(), c["subject_id"].lower(),
-                                                        c["name"].lower())), None)
+        low = str(ident).lower()
+        return next((c for c in self.chars if low in (c["record_id"].lower(), c["subject_id"].lower(),
+                                                      c["name"].lower())), None) or \
+            story_roles_mod.find(self.chars, ident)  # a misspelt / name-like POV ID ("odille-marsh")
 
     def char_by_name(self, name: str) -> dict | None:
         n = (name or "").split("/")[0].strip().lower()
         if not n:
             return None
         return next((c for c in self.chars if c["name"].lower() == n), None) or \
+            story_roles_mod.find(self.chars, n) or \
             next((c for c in self.chars if n in c["name"].lower() or c["name"].lower() in n), None)
 
     def place_by_id(self, ident) -> dict | None:
@@ -801,20 +804,34 @@ class Book:
                 out[c["record_id"]] = out.get(c["record_id"], 0) + 1
         return out
 
+    @cached_property
+    def cast(self) -> dict:
+        """★ Everyone's story role, exactly one protagonist (story_roles.cast: the stored tags by record ID)."""
+        k = story_roles_mod.cast(self.store, self.pid, self.branch, chars=self.chars, entries=self.sheets)
+        return dict(k, by_id={c["record_id"]: c for c in k["characters"]})
+
+    def story_role(self, c: dict) -> str:
+        """The character's story role key (protagonist, antagonist, mentor, extra… — story_roles.KEYS)."""
+        r = self.cast["by_id"].get((c or {}).get("record_id"))
+        return r["story_role"] if r else story_roles_mod.DEFAULT
+
+    def role_group(self, c: dict) -> str:
+        """main | leads | villains | supporting | minor (story_roles.GROUPS)."""
+        return story_roles_mod.group_of(self.story_role(c))
+
     def role_of(self, c: dict) -> str:
-        """main | side | minor (the character sheet's role; a POV character is main)."""
-        r = ((self.sheets.get(c["record_id"]) or {}).get("sheet") or {}).get("role")
-        if r in ("main", "side"):
-            return r
-        return "main" if self.pov_counts.get(c["record_id"]) else "minor"
+        """main | side | minor, from the story role: the protagonist and the leads are main, minor characters and
+        extras are minor, everyone else is side."""
+        g = self.role_group(c)
+        return "main" if g in ("main", "leads") else "minor" if g == "minor" else "side"
 
     @cached_property
     def protagonist(self) -> dict | None:
+        """★ The book's main character: the stored tag (record ID) first, so a renamed character stays the centre."""
         if not self.chars:
             return None
-        ranked = sorted(self.chars, key=lambda c: (-self.pov_counts.get(c["record_id"], 0),
-                                                   {"main": 0, "side": 1, "minor": 2}[self.role_of(c)]))
-        return ranked[0]
+        rid = self.cast.get("protagonist")
+        return next((c for c in self.chars if c["record_id"] == rid), None) or self.chars[0]
 
 
 # ====================================================================== pages
@@ -1068,8 +1085,7 @@ def a_name_aliases(page: Page):
 
 
 def a_sheet_role(page: Page):
-    r = page.book.role_of(page.subject["char"]) if page.subject.get("char") else ""
-    return {"main": "Main character", "side": "Supporting character", "minor": "Minor character"}.get(r, "")
+    return story_roles_mod.label(page.book.story_role(page.subject["char"])) if page.subject.get("char") else ""
 
 
 def a_tagline(page: Page):
@@ -1346,9 +1362,8 @@ def a_key_places(page: Page):
 
 def a_cast_groups(page: Page):
     b = page.book
-    groups = [("main", "Main"), ("side", "Supporting"), ("minor", "Minor")]
-    return " · ".join(f"{label} ({sum(1 for c in b.chars if b.role_of(c) == k)})" for k, label in groups
-                      if any(b.role_of(c) == k for c in b.chars))
+    return " · ".join(f"{label} ({sum(1 for c in b.chars if b.role_group(c) == k)})"
+                      for k, label in story_roles_mod.GROUPS if any(b.role_group(c) == k for c in b.chars))
 
 
 def a_cast_count(page: Page):
@@ -1875,9 +1890,9 @@ def todo_rows(page: Page) -> list[dict]:
 
 
 def _main_cast(b: Book) -> list[dict]:
-    mains = [c for c in b.chars if b.role_of(c) == "main"]
-    rest = [c for c in b.chars if b.role_of(c) == "side"]
-    return (mains + rest)[:5]
+    order = [k for k, _l in story_roles_mod.GROUPS]
+    ranked = sorted((c for c in b.chars if b.role_group(c) != "minor"), key=lambda c: order.index(b.role_group(c)))
+    return ranked[:5]
 
 
 def _one_line(b: Book, c: dict) -> dict | None:
@@ -1893,7 +1908,23 @@ def _one_line(b: Book, c: dict) -> dict | None:
 
 
 def _role_text(b: Book, c: dict) -> str:
-    return {"main": "Main character", "side": "Supporting character", "minor": "Minor character"}[b.role_of(c)]
+    return story_roles_mod.label(b.story_role(c))
+
+
+GROUP_SHORT = {"main": "Main", "leads": "Lead", "villains": "Villain", "supporting": "Supporting", "minor": "Minor"}
+
+
+def story_role(rec: dict, book: "Book | None" = None) -> str:
+    """The story role key of a character dict (a Book's chars row): the book's cast when given, else the row's own
+    ``story_role``; unknown -> supporting."""
+    if book is not None:
+        return book.story_role(rec)
+    return story_roles_mod.normalize((rec or {}).get("story_role"))
+
+
+def protagonist_of(book: "Book") -> dict | None:
+    """★ The book's main character (a chars row) — by the stored tag, never re-derived from the text."""
+    return book.protagonist
 
 
 def main_cast_rows(page: Page) -> list[dict]:
@@ -1908,9 +1939,9 @@ def main_cast_rows(page: Page) -> list[dict]:
 
 def cast_rows(page: Page) -> list[dict]:
     b = page.book
-    order = {"main": 0, "side": 1, "minor": 2}
+    order = {k: i for i, (k, _l) in enumerate(story_roles_mod.GROUPS)}
     rows = []
-    chars = sorted(b.chars, key=lambda c: (order[b.role_of(c)], (b.dossiers.get(c["record_id"]) or {}).get("code")
+    chars = sorted(b.chars, key=lambda c: (order[b.role_group(c)], (b.dossiers.get(c["record_id"]) or {}).get("code")
                                            or ""))
     for i, c in enumerate(chars):
         d = b.dossiers.get(c["record_id"]) or {}
@@ -1925,7 +1956,9 @@ def cast_rows(page: Page) -> list[dict]:
                      "status": "Approved" if c.get("approved") and d.get("readiness") == "ready" else
                      "Approved (dossier draft)" if c.get("approved") else "Draft",
                      "_meta": {"entry_id": c["record_id"], "page_id": f"character-{slug(c['record_id'])}",
-                               "group": {"main": "Main", "side": "Supporting", "minor": "Minor"}[b.role_of(c)],
+                               "group": GROUP_SHORT[b.role_group(c)],
+                               "group_label": story_roles_mod.GROUP_LABEL[b.role_group(c)],
+                               "story_role": b.story_role(c), "story_role_icon": story_roles_mod.icon(b.story_role(c)),
                                "has_portrait": bool(_portrait_of(b, c["record_id"]))}})
     return rows
 

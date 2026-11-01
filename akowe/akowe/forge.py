@@ -583,14 +583,23 @@ def public(store, pid: str, branch: str, rid: str, *, kind: str = "character") -
                        "protected": sum(1 for d in fields.values() if d["protected"]),
                        "views_done": sum(1 for v in views.values() if v)},
             "approved_character": bool(canon.get("approved")),
+            "story_role": _role_brief(store, pid, branch).get(rid),
             "history": [{k: h.get(k) for k in ("revision", "at", "what", "by", "fields")}
                         for h in (entry.get("history") or [])][-HISTORY_KEEP:],
             "updated_at": entry.get("updated_at")}
 
 
+def _role_brief(store, pid: str, branch: str) -> dict:
+    """{record_id: {story_role, label, icon, title, proposed}} — ★ the story roles for the dossier headers."""
+    from . import story_roles  # noqa: PLC0415
+    return {c["record_id"]: {k: c[k] for k in ("story_role", "label", "icon", "title", "meaning", "proposed")}
+            for c in story_roles.cast(store, pid, branch)["characters"]}
+
+
 def list_dossiers(store, pid: str, branch: str, kind: str = "character") -> list[dict]:
     doc = _doc(store, pid, branch)
     chars = chars_mod.canon_characters(store, pid, branch)
+    roles = _role_brief(store, pid, branch) if kind == "character" else {}
     codes = provisional_codes(doc, kind, [c["record_id"] for c in chars])
     out = []
     for c in chars:
@@ -604,7 +613,7 @@ def list_dossiers(store, pid: str, branch: str, kind: str = "character") -> list
                     "has_clip": bool(d["art"]["clip"]),
                     "filled": d["counts"]["filled"], "proposed": d["counts"]["proposed"],
                     "total": d["counts"]["fields"], "tagline": d["tagline"],
-                    "portrait": d["art"]["portrait"]})
+                    "portrait": d["art"]["portrait"], "story_role": roles.get(c["record_id"])})
     return out
 
 

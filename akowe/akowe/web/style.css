@@ -1638,3 +1638,15 @@ label.btn:has(> input:focus-visible) { outline: 3px solid var(--focus); outline-
     position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
   }
 }
+
+/* ★ story roles (story_roles.py): a title on every character; the one main character stands out */
+.role-chip { white-space: nowrap; }
+.role-chip.role-protagonist { background: var(--accent-soft); border-color: var(--accent, currentColor); font-weight: 600; }
+.role-chip.role-proposed { border-style: dashed; opacity: .85; }
+.role-box { margin: 0 0 .75rem; }
+.role-box .role-head { margin: 0 0 .25rem; }
+.role-box select { max-width: 100%; }
+.cast-roles .cast-list { list-style: none; padding: 0; margin: .25rem 0; }
+.cast-roles .cast-list li { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.forge-role, .forge-tile-role { margin: 0 0 .5rem; font-size: .95rem; }
+.forge-tile-role { margin: 0; font-size: .85rem; opacity: .9; }
