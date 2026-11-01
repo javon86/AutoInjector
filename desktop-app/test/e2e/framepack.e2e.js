@@ -27,13 +27,16 @@ async function main() {
   const fpDir = FF.makeFramePackDir(path.join(tmp, 'StabilityMatrix', 'Data', 'Packages', 'FramePack'));
   FF.makeHfCache(path.join(fpDir, 'hf_download'));
   const runLog = path.join(tmp, 'runner.log');
+  const control = path.join(tmp, 'control.json'); // the fake runner reads { mode, precheck } from here at each start
+  const setFake = (o) => fs.writeFileSync(control, JSON.stringify(o));
+  setFake({ mode: 'ok', precheck: 'ok' });
   const userData = path.join(tmp, 'userdata');
   const made = [];
   const t0 = Date.now() - 1000;
   const app = await electron.launch({
     args: ['.', '--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu', `--user-data-dir=${userData}`],
     cwd: APP_DIR,
-    env: Object.assign({}, process.env, FF.runnerEnv({ log: runLog, stepMs: 60 }), {
+    env: Object.assign({}, process.env, FF.runnerEnv({ log: runLog, stepMs: 60, control }), { AUTOINJECTOR_FRAMEPACK_STAGE_LIMIT_MS: '2500',
       AUTOINJECTOR_FRAMEPACK: fpDir, AUTOINJECTOR_AKOWE_SERVER: '0', AUTOINJECTOR_SD_HOME: path.join(tmp, 'sdhome'), AUTOINJECTOR_SD_AUTOSTART: '0',
       AUTOINJECTOR_VIDEO_AUTOSTART: '0', AUTOINJECTOR_SD_GPU_CHECK: '0', AUTOINJECTOR_CONTENT_SCAN: '0',
     }),
@@ -59,11 +62,15 @@ async function main() {
     assert(/NVIDIA|graphics/.test(await c.textContent('#vd-fp-vram')), 'a graphics-memory hint');
     assert(!(await c.$eval('#btn-vd-fp-load', (b) => b.disabled)) && !(await c.$eval('#btn-vd-fp-test', (b) => b.disabled)) && await c.isVisible('#btn-vd-fp-choose'), '▶ Load, 🧪 Test and 📂 Choose FramePack folder are there');
     assert(/FramePack only/.test(await c.textContent('#vd-backend')), 'Settings: the engine list has "FramePack only"');
+    assert(await c.getAttribute('#vd-dot', 'data-tone') === 'standby', `before ▶ Load the light is a green ring (ready, not loaded): ${await c.getAttribute('#vd-dot', 'data-tone')}`);
     await c.click('#btn-vd-fp-load');
     await c.waitForFunction(() => /FramePack is loaded/.test(document.getElementById('vd-fp-msg').textContent), null, { timeout: 20000 }).catch(() => {});
     assert(/✔ FramePack is loaded/.test(await c.textContent('#vd-fp-msg')), `▶ Load FramePack: "${await c.textContent('#vd-fp-msg')}"`);
     await c.waitForFunction(() => /Loaded and ready/.test(document.getElementById('vd-fp-state').textContent), null, { timeout: 10000 }).catch(() => {});
     assert(/Loaded and ready/.test(await c.textContent('#vd-fp-state')), 'the card says it is loaded');
+    await c.waitForFunction(() => document.getElementById('vd-dot').dataset.tone === 'ok', null, { timeout: 8000 }).catch(() => {});
+    assert(await c.getAttribute('#vd-dot', 'data-tone') === 'ok', 'loaded → the light is green');
+    assert(/✔ PyTorch 2\.6\.0\+cu126 sees NVIDIA GeForce RTX 3060/.test(await c.textContent('#vd-fp-state')), 'the card shows what the PyTorch check found (version, the card)');
     await shot(c, 'fp01-framepack-setup');
 
     // picture → video with FramePack
@@ -113,6 +120,60 @@ async function main() {
     assert(/✔ FramePack test video saved: test-.*\.mp4 \(2\.43 s/.test(await c.textContent('#vd-msg')), `🧪 Test: "${(await c.textContent('#vd-msg')).split('\n')[0]}"`);
     made.push(decodeURIComponent(new URL(await c.getAttribute('#vd-player', 'src')).pathname).replace(/^\/([A-Za-z]:)/, '$1'));
     await shot(c, 'fp04-framepack-test');
+
+    // ---- the PC report: stuck at step 0 "starting PyTorch", the light stayed green, Stop was slow
+    await c.click('#vd-sub-setup');
+    await c.click('#btn-vd-fp-unload');
+    await c.waitForFunction(() => !document.getElementById('btn-vd-fp-load').disabled, null, { timeout: 10000 }).catch(() => {});
+    setFake({ mode: 'stuck', precheck: 'ok' });
+    await c.click('#btn-vd-fp-load');
+    await c.waitForFunction(() => /starting PyTorch — 0:0[1-9]/.test(document.getElementById('vd-fp-msg').textContent), null, { timeout: 15000 }).catch(() => {});
+    assert(/starting PyTorch — 0:0[1-9]/.test(await c.textContent('#vd-fp-msg')), `while it loads the card counts the seconds in the stage: "${await c.textContent('#vd-fp-msg')}"`);
+    await c.waitForFunction(() => document.getElementById('vd-dot').dataset.tone === 'busy', null, { timeout: 8000 }).catch(() => {});
+    assert(await c.getAttribute('#vd-dot', 'data-tone') === 'busy' && /Loading FramePack… starting PyTorch/.test(await c.textContent('#vd-status-text')), `the light is amber “Loading…” while it loads, not green: ${await c.getAttribute('#vd-dot', 'data-tone')} — "${await c.textContent('#vd-status-text')}"`);
+    assert(await c.isVisible('#btn-vd-fp-stop') && await c.$eval('#btn-vd-fp-load', (b) => b.disabled), '⏹ Stop is there while it loads (▶ Load is not)');
+    await c.waitForSelector('#vd-fp-stuck:not([hidden])', { timeout: 15000 }).catch(() => {});
+    const stuckText = await c.textContent('#vd-fp-stuck');
+    assert(/PyTorch has been starting for 0:0\d/.test(stuckText) && /seems stuck/.test(stuckText) && /What to try:.*Stop.*Try again/s.test(stuckText), `after the limit it says it seems stuck, with what to try: "${stuckText.split('\n')[0].slice(0, 120)}…"`);
+    assert(await c.isVisible('#btn-vd-fp-retry') && await c.isVisible('#btn-vd-fp-stop'), '⏹ Stop and ↻ Try again are offered');
+    await c.waitForFunction(() => !document.getElementById('vd-fp-details').hidden, null, { timeout: 8000 }).catch(() => {});
+    assert(!(await c.$eval('#vd-fp-details', (d) => d.hidden)) && /Where FramePack is: torch\/__init__\.py/.test(await c.$eval('#vd-fp-raw', (e) => e.textContent)), 'Technical details: where FramePack is (from its heartbeat)');
+    await c.waitForFunction(() => document.getElementById('vd-dot').dataset.tone === 'warn', null, { timeout: 8000 }).catch(() => {});
+    assert(await c.getAttribute('#vd-dot', 'data-tone') === 'warn' && /seems stuck/.test(await c.textContent('#vd-status-text')), 'the light says it seems stuck too');
+    await shot(c, 'fp05-framepack-stuck');
+    const runs = fs.readFileSync(runLog, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
+    const runnerPid = (runs.filter((x) => x.start && !x.precheck && x.mode === 'stuck').pop() || {}).pid;
+    const kidPid = (runs.filter((x) => x.grandchild).pop() || {}).grandchild;
+    const alive = (pid) => { if (!pid) return false; try { process.kill(pid, 0); return true; } catch (_) { return false; } };
+    assert(alive(runnerPid) && alive(kidPid), `the stuck runner (${runnerPid}) and its child (${kidPid}) run`);
+    const ts = Date.now();
+    await c.click('#btn-vd-fp-stop');
+    assert(/Stopping/.test(await c.textContent('#vd-fp-msg')), `⏹ Stop → at once “${await c.textContent('#vd-fp-msg')}”`);
+    await c.waitForFunction(() => /Stopped/.test(document.getElementById('vd-fp-msg').textContent), null, { timeout: 10000 }).catch(() => {});
+    const took = Date.now() - ts;
+    assert(/⏹ Stopped/.test(await c.textContent('#vd-fp-msg')) && took < 6000, `then “Stopped.” (${took} ms)`);
+    let gone = false; for (let i = 0; i < 40 && !gone; i++) { gone = !alive(runnerPid) && !alive(kidPid); if (!gone) await c.waitForTimeout(100); }
+    assert(gone, 'the stuck runner and its child process are gone');
+    await c.waitForFunction(() => document.getElementById('btn-vd-fp-stop').hidden && document.getElementById('vd-fp-stuck').hidden, null, { timeout: 8000 }).catch(() => {});
+    assert(await c.$eval('#btn-vd-fp-stop', (b) => b.hidden) && await c.$eval('#vd-fp-stuck', (b) => b.hidden) && !(await c.$eval('#btn-vd-fp-load', (b) => b.disabled)), 'afterwards ⏹ Stop and the warning are gone, ▶ Load is back');
+    await c.waitForFunction(() => document.getElementById('vd-dot').dataset.tone === 'standby', null, { timeout: 8000 }).catch(() => {});
+    assert(await c.getAttribute('#vd-dot', 'data-tone') === 'standby', `the light is back to “ready, not loaded” (${await c.getAttribute('#vd-dot', 'data-tone')})`);
+
+    // the PyTorch check fails → the reason in plain words on the card, the light red, ↻ Try again
+    setFake({ mode: 'ok', precheck: 'nocuda' });
+    await c.click('#btn-vd-fp-load');
+    await c.waitForFunction(() => /✖/.test(document.getElementById('vd-fp-msg').textContent), null, { timeout: 15000 }).catch(() => {});
+    const failText = await c.textContent('#vd-fp-msg');
+    assert(/✖ PyTorch 2\.6\.0\+cu126 \(built for CUDA 12\.6\) does not see an NVIDIA graphics card/.test(failText) && /How to fix: .*NVIDIA graphics driver/.test(failText), `pre-check failure in plain words: "${failText.replace(/\n/g, ' / ')}"`);
+    await c.waitForFunction(() => document.getElementById('vd-dot').dataset.tone === 'error', null, { timeout: 8000 }).catch(() => {});
+    assert(await c.getAttribute('#vd-dot', 'data-tone') === 'error' && /✖ FramePack:/.test(await c.textContent('#vd-status-text')), `a failed load → the light is red (${await c.getAttribute('#vd-dot', 'data-tone')}: "${await c.textContent('#vd-status-text')}")`);
+    assert(await c.isVisible('#btn-vd-fp-retry'), '↻ Try again is offered');
+    await shot(c, 'fp06-framepack-precheck-failed');
+    setFake({ mode: 'ok', precheck: 'ok' });
+    await c.click('#btn-vd-fp-retry');
+    await c.waitForFunction(() => /FramePack is loaded/.test(document.getElementById('vd-fp-msg').textContent), null, { timeout: 20000 }).catch(() => {});
+    await c.waitForFunction(() => document.getElementById('vd-dot').dataset.tone === 'ok', null, { timeout: 8000 }).catch(() => {});
+    assert(/✔ FramePack is loaded/.test(await c.textContent('#vd-fp-msg')) && await c.getAttribute('#vd-dot', 'data-tone') === 'ok', '↻ Try again (fixed) → loaded, the light green');
   } finally {
     await app.close().catch(() => {});
     for (const f of made) { const dir = path.dirname(f); try { for (const n of fs.readdirSync(dir)) { const p = path.join(dir, n); if (/^(video|animate|test|clip)-.*\.(mp4|webm|png|json)$/.test(n) && fs.statSync(p).mtimeMs >= t0) fs.unlinkSync(p); } } catch (_) {} }

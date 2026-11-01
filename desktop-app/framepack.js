@@ -15,6 +15,15 @@
  *     .generate(req, onProgress)→ { ok, path, poster, frames, fps: 30, seconds, width, height, sections, seed }
  *                                 | { ok:false, error, code, message, fix } (FRAMEPACK_* codes)
  *     .cancel() · .stop() (unloads, frees the graphics card) · .refresh() (look again)
+ *   buildEnv(f) → the environment FramePack runs in (like Stability Matrix: venv python, venv Scripts + torch\lib first
+ *     on PATH, PYTHONUNBUFFERED / PYTHONNOUSERSITE, no inherited PYTHONPATH / PYTHONHOME)
+ *   explainPrecheck(info) → why PyTorch can't start, in plain words (no CUDA, CPU-only PyTorch, a DLL, torch missing)
+ *
+ * Loading: first a PyTorch pre-check (`framepack_runner.py --precheck`: import torch + ask CUDA in the main thread,
+ * once per python, up to 10 min — the first start on Windows is slow while antivirus scans torch's DLLs), then the
+ * runner. Every stage is timed (status().loading: stage, stageSeconds, and stuck + stuckMessage / stuckFix after a
+ * per-stage limit), logged (framepack-stage / -still-loading / -stuck / -loaded / -load-failed), and ⏹ Stop stops the
+ * whole process tree (Windows: taskkill /T /F) after a short grace. The last 50 stderr lines: status().stderrTail.
  *
  * The runner is integrations/framepack/framepack_runner.py, started with FramePack's OWN python
  * (its venv) in the FramePack folder, with HF_HOME = the model folder and HF_HUB_OFFLINE=1. It speaks
@@ -22,7 +31,7 @@
  * AUTOINJECTOR_FRAMEPACK_RUNNER at a fake runner (test/fixtures/fake-framepack-runner.js).
  *
  * Error codes: FRAMEPACK_NOT_FOUND · FRAMEPACK_PYTHON_MISSING · FRAMEPACK_MODEL_MISSING (+ missing) ·
- * FRAMEPACK_OOM · FRAMEPACK_BUSY · FRAMEPACK_CANCELLED · FRAMEPACK_FAILED — each with a plain message + fix.
+ * FRAMEPACK_TORCH_FAILED (+ cause) · FRAMEPACK_OOM · FRAMEPACK_BUSY · FRAMEPACK_CANCELLED · FRAMEPACK_FAILED — each with a plain message + fix.
  */
 const fs = require('fs');
 const os = require('os');
@@ -195,19 +204,149 @@ function fromRunner(ev) {
   return out;
 }
 
+// ------------------------------------------------------------------ the environment FramePack runs in
+// Like Stability Matrix starts FramePack: its venv's python, the FramePack folder as the working folder, the venv's
+// Scripts (bin) and torch\lib first on PATH, unbuffered, no user site-packages, and NOTHING inherited that could
+// make that python load another Python's files (PYTHONPATH, PYTHONHOME, PYTHONSTARTUP, a different VIRTUAL_ENV …).
+const DROP_ENV = ['PYTHONPATH', 'PYTHONHOME', 'PYTHONSTARTUP', 'PYTHONUSERBASE', 'PYTHONEXECUTABLE', 'PYTHONSAFEPATH', 'PYTHONINSPECT', 'PYTHONBREAKPOINT', 'VIRTUAL_ENV', 'CONDA_PREFIX', 'CONDA_DEFAULT_ENV', 'CONDA_SHLVL', 'CONDA_PYTHON_EXE', '__PYVENV_LAUNCHER__'];
+function venvRootOf(python) {
+  if (!python) return '';
+  const bin = path.dirname(python);
+  return /^(Scripts|bin)$/i.test(path.basename(bin)) ? path.dirname(bin) : bin;
+}
+/** f: what findFramePack found → { env, path: [the folders put first on PATH], venv, dropped: [names removed] } */
+function buildEnv(f, o = {}) {
+  const win = (o.platform || process.platform) === 'win32';
+  const env = {}; const dropped = [];
+  const src = Object.assign({}, o.base || process.env, o.extra || {});
+  let oldPath = '';
+  for (const [k, v] of Object.entries(src)) {
+    if (v == null) continue;
+    const K = k.toUpperCase();
+    if (K === 'PATH') { if (!oldPath) oldPath = String(v); continue; } // Windows has "Path": one PATH only
+    if (DROP_ENV.includes(K)) { dropped.push(k); continue; }
+    env[k] = String(v);
+  }
+  const root = venvRootOf(f.python);
+  const isVenv = !!(root && (isFile(path.join(root, 'pyvenv.cfg')) || /^(Scripts|bin)$/i.test(path.basename(path.dirname(f.python || '')))));
+  const first = [];
+  if (f.python) first.push(path.dirname(f.python));
+  if (root && win) {
+    for (const d of [path.join(root, 'Lib', 'site-packages', 'torch', 'lib'), path.join(root, 'Library', 'bin')]) if (isDir(d)) first.push(d);
+  }
+  const sep = win ? ';' : ':';
+  const seen = new Set(); const parts = [];
+  for (const d of [...first, ...String(oldPath).split(sep)]) { if (!d) continue; const key = win ? d.toLowerCase() : d; if (seen.has(key)) continue; seen.add(key); parts.push(d); }
+  env.PATH = parts.join(sep);
+  if (isVenv && root && isFile(path.join(root, 'pyvenv.cfg'))) env.VIRTUAL_ENV = root;
+  Object.assign(env, {
+    HF_HOME: f.hfHome || '', HF_HUB_OFFLINE: '1', TRANSFORMERS_OFFLINE: '1', HF_DATASETS_OFFLINE: '1', HF_HUB_DISABLE_TELEMETRY: '1',
+    PYTHONUNBUFFERED: '1', PYTHONIOENCODING: 'utf-8', PYTHONNOUSERSITE: '1', PYTHONDONTWRITEBYTECODE: '1', AUTOINJECTOR_FRAMEPACK_DIR: f.dir || '',
+  });
+  if (!env.HF_HOME) delete env.HF_HOME;
+  return { env, path: first, venv: isVenv ? root : '', dropped };
+}
+
+// ------------------------------------------------------------------ the PyTorch pre-check in plain words
+/** The runner's --precheck facts → null (fine) | a FRAMEPACK_TORCH_FAILED failure with the reason in plain words. */
+function explainPrecheck(info, o = {}) {
+  const tail = o.tail || [];
+  const extra = (cause) => ({ engine: 'framepack', cause, serverError: lastLines(tail), precheck: info || null });
+  if (o.cancelled) return fail('FRAMEPACK_CANCELLED', 'Stopped.', '', { engine: 'framepack' });
+  if (o.timedOut) return fail('FRAMEPACK_TORCH_FAILED', `PyTorch (in FramePack's Python) did not start within ${clock(o.seconds || 0)}.`,
+    'Restart the PC (an old FramePack can still hold the graphics card), add the FramePack folder to your antivirus exclusions (it scans every PyTorch file on the first start), check FramePack starts in Stability Matrix, then press ↻ Try again.', extra('TORCH_TIMEOUT'));
+  if (!info) {
+    const t = tail.join('\n');
+    if (/No module named '?torch'?/i.test(t)) return fail('FRAMEPACK_TORCH_FAILED', 'PyTorch is not installed in FramePack\'s Python.', 'Repair or reinstall the FramePack package in Stability Matrix (it installs PyTorch), then try again.', extra('TORCH_MISSING'));
+    return fail('FRAMEPACK_TORCH_FAILED', `FramePack's Python stopped before it could check PyTorch${o.exitCode != null ? ` (exit code ${o.exitCode})` : ''}.`, 'Start FramePack once from Stability Matrix to see that it works, then try again. The details show what Python printed.', extra('PYTHON_FAILED'));
+  }
+  if (info.ok) return null;
+  const err = String(info.error || '');
+  if (err) {
+    if (/No module named '?torch'?/i.test(err)) return fail('FRAMEPACK_TORCH_FAILED', 'PyTorch is not installed in FramePack\'s Python.', 'Repair or reinstall the FramePack package in Stability Matrix (it installs PyTorch), then try again.', extra('TORCH_MISSING'));
+    if (/DLL load failed|WinError 126|WinError 127|WinError 1114|\.dll|cannot open shared object|OSError/i.test(err)) {
+      const dll = (err.match(/"([^"]+\.dll)"|'([^']+\.dll)'|([\w.-]+\.dll)/i) || []).slice(1).find(Boolean);
+      return fail('FRAMEPACK_TORCH_FAILED', `PyTorch could not load one of its files${dll ? ` (${dll})` : ''}: ${err.slice(0, 300)}`,
+        'Install the latest "Microsoft Visual C++ Redistributable (x64)" and the NVIDIA graphics driver, restart the PC, then try again. If it still fails, repair the FramePack package in Stability Matrix.', extra('TORCH_DLL'));
+    }
+    if (/No module named/i.test(err)) { const m = err.match(/No module named '?([\w.]+)'?/i); return fail('FRAMEPACK_TORCH_FAILED', `FramePack's Python is missing a part (${m ? m[1] : 'a module'}) that PyTorch needs.`, 'Repair or update the FramePack package in Stability Matrix, then try again.', extra('TORCH_BROKEN')); }
+    return fail('FRAMEPACK_TORCH_FAILED', `PyTorch did not start in FramePack's Python: ${err.slice(0, 300)}`, 'Repair the FramePack package in Stability Matrix, restart the PC, then try again.', extra('TORCH_BROKEN'));
+  }
+  if (info.cuda === false) {
+    if (!info.cuda_build || /\+cpu/i.test(String(info.torch || ''))) return fail('FRAMEPACK_TORCH_FAILED', `FramePack's PyTorch (${info.torch || '?'}) is the processor-only version — it cannot use the graphics card.`, 'Reinstall the FramePack package in Stability Matrix with the NVIDIA (CUDA) option.', extra('TORCH_CPU_ONLY'));
+    return fail('FRAMEPACK_TORCH_FAILED', `PyTorch ${info.torch || ''} (built for CUDA ${info.cuda_build}) does not see an NVIDIA graphics card.`, 'Install or update the NVIDIA graphics driver and restart the PC. FramePack needs an NVIDIA card; it does not run on the processor.', extra('NO_GPU'));
+  }
+  if (info.device_error) return fail('FRAMEPACK_TORCH_FAILED', `PyTorch sees the graphics card but could not use it: ${String(info.device_error).slice(0, 300)}`, 'Close other programs that use the graphics card (or an old FramePack still running), update the NVIDIA driver, restart the PC, then try again.', extra('GPU_BUSY'));
+  return fail('FRAMEPACK_TORCH_FAILED', 'PyTorch did not say it can use the graphics card.', 'Try again; the details show what it printed.', extra('TORCH_UNKNOWN'));
+}
+function clock(secs) { const s = Math.max(0, Math.round(secs)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; }
+
+// How long a loading stage may take before AutoInjector says it seems stuck (it does not stop it by itself).
+const STAGE_LIMITS = { precheck: 5 * 60000, start: 2 * 60000, torch: 5 * 60000, cuda: 3 * 60000, model: 15 * 60000, gpu: 10 * 60000 };
+function stageKind(stage, phase) {
+  if (phase === 'precheck') return 'precheck';
+  if (phase === 'starting') return 'start';
+  if (/PyTorch/i.test(stage || '')) return 'torch';
+  if (/CUDA/i.test(stage || '')) return 'cuda';
+  if (/preparing the graphics card/i.test(stage || '')) return 'gpu';
+  return 'model';
+}
+function stuckWords(kind, stage, secs, where) {
+  const t = clock(secs);
+  const at = where ? ` (it is in ${where.split(' < ')[0]})` : '';
+  if (kind === 'precheck' || kind === 'torch') return { message: `PyTorch has been starting for ${t}${at}. The first start on Windows can take several minutes while antivirus scans its files, but this is longer than usual — it seems stuck.`,
+    fix: 'Wait a little longer, or press ⏹ Stop and then ↻ Try again. If it happens every time: add the FramePack folder to your antivirus exclusions, restart the PC (an old FramePack can still hold the graphics card), and check FramePack starts in Stability Matrix.' };
+  if (kind === 'start') return { message: `FramePack's Python has not answered for ${t} — it seems stuck.`, fix: 'Press ⏹ Stop and ↻ Try again. If it keeps happening, restart the PC and check FramePack starts in Stability Matrix.' };
+  if (kind === 'cuda') return { message: `Checking the graphics card has taken ${t}${at} — it seems stuck.`, fix: 'Press ⏹ Stop, close other programs that use the graphics card, update the NVIDIA driver, restart the PC, then ↻ Try again.' };
+  if (kind === 'gpu') return { message: `Preparing the graphics card has taken ${t}${at} — it seems stuck.`, fix: 'Press ⏹ Stop and ↻ Try again. Close other programs that use the graphics card; raise "GPU memory to keep free" if the card is small.' };
+  return { message: `Loading ${stage || 'the models'} has taken ${t}${at} — longer than usual, it may be stuck.`, fix: 'Model files on a slow, external or network drive load slowly. Wait a little longer, or press ⏹ Stop and ↻ Try again. The models folder is best on a local SSD.' };
+}
+
+// Stop a process and everything it started (Windows: a venv's python.exe is a launcher with the real python under it).
+function killTree(child) {
+  if (!child) return;
+  const pid = child.pid;
+  if (process.platform === 'win32' && pid) {
+    let k = null;
+    try { k = nodeSpawn('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' }); } catch (_) { k = null; }
+    if (k) { k.on('error', () => { try { child.kill(); } catch (_) {} }); k.on('exit', () => { try { child.kill(); } catch (_) {} }); } else { try { child.kill(); } catch (_) {} }
+    return;
+  }
+  if (pid && child._fpGroup) { try { process.kill(-pid, 'SIGKILL'); return; } catch (_) {} }
+  try { child.kill('SIGKILL'); } catch (_) {}
+}
+
 // ------------------------------------------------------------------ the runner process
 function createFramePack(deps = {}) {
   const log = deps.log || (() => {});
   const onEvent = deps.onEvent || (() => {});
   const spawn = deps.spawn || nodeSpawn;
+  const kill = deps.killTree || killTree;
   const readyTimeoutMs = deps.readyTimeoutMs || 120000;
-  const cancelKillMs = deps.cancelKillMs || 30000;
+  const cancelKillMs = deps.cancelKillMs || 15000; // a video that does not answer ⏹ Stop between steps
+  const cancelGraceMs = deps.cancelGraceMs != null ? deps.cancelGraceMs : 1500; // loading can't stop inside an import
+  const precheckTimeoutMs = deps.precheckTimeoutMs || 10 * 60000;
+  const precheckOn = deps.precheck !== false;
+  const limits = Object.assign({}, STAGE_LIMITS, deps.stageLimitsMs || {});
+  const envLimit = Number(process.env.AUTOINJECTOR_FRAMEPACK_STAGE_LIMIT_MS || 0); // tests (the e2e): every stage's limit
+  if (envLimit > 0) for (const k of Object.keys(limits)) limits[k] = envLimit;
+  const watchMs = deps.watchMs || 1000;
+  const stillLogMs = deps.stillLogMs || 60000;
+  const group = process.platform !== 'win32'; // posix: own process group, so Stop takes its children too
   let cache = null; // { at, info }
   let proc = null; // { child, dir, hfHome, ready: Promise, buf, tail: [] }
-  let loaded = false; let loading = null; // loading: { stage, step, steps, startedAt }
+  let loaded = false;
+  // loading: { phase: precheck|starting|loading, stage, step, steps, startedAt, stageStartedAt, stuck, where, heartbeatAt, stages: [] }
+  let loading = null;
   let loadWait = null; // Promise of the running load
+  let loadCancel = null; // { at } while a Stop of the load is going on
+  let pre = null; // { ok, python, info, at } — the last PyTorch pre-check
+  let preProc = null; // the pre-check process while it runs
   let job = null; // { id, resolve, onProgress, cancelled, killTimer }
   let vramGB = null; let highVram = null; let lastError = null; let gpu = null;
+  let stopping = null; // { at } between ⏹ Stop and the runner being gone
+  let lastTail = []; // what the last runner / pre-check printed (stderr), kept after it is gone
+  let watch = null;
   const waiters = new Map(); // id -> resolve (load / status)
 
   function find(fresh) {
@@ -222,6 +361,7 @@ function createFramePack(deps = {}) {
     const f = find(true);
     // a different folder or model place than the running runner: stop it (the next job starts the right one)
     if (proc && (proc.dir !== f.dir || proc.hfHome !== f.hfHome)) stop();
+    if (pre && pre.python !== f.python) pre = null;
     return status();
   }
   async function refreshGpu() {
@@ -239,12 +379,79 @@ function createFramePack(deps = {}) {
     return `Your graphics card: ${g.name}${gb ? ` (${gb} GB)` : ''}. FramePack works from ${MIN_VRAM_GB} GB; with less than 60 GB free it swaps the models in and out (slower, but fine).`;
   }
 
+  // ---- loading stages: elapsed time, timings in the log, "seems stuck"
+  function loadingPublic() {
+    if (!loading) return null;
+    const now = Date.now();
+    const kind = stageKind(loading.stage, loading.phase);
+    const words = loading.stuck ? stuckWords(kind, loading.stage, (now - loading.stageStartedAt) / 1000, loading.where) : null;
+    return { phase: loading.phase, stage: loading.stage, step: loading.step, steps: loading.steps, startedAt: loading.startedAt, stageStartedAt: loading.stageStartedAt,
+      seconds: Math.round((now - loading.startedAt) / 1000), stageSeconds: Math.round((now - loading.stageStartedAt) / 1000), limitSeconds: Math.round((limits[kind] || 0) / 1000),
+      stuck: !!loading.stuck, stuckMessage: words ? words.message : '', stuckFix: words ? words.fix : '', where: loading.where || '', stopping: !!loadCancel,
+      text: stageText(loading) };
+  }
+  function stageText(l) {
+    if (!l) return '';
+    if (l.phase === 'precheck') return 'PyTorch is starting (the first time on Windows can take several minutes — antivirus scans its files)';
+    if (l.phase === 'starting') return 'starting FramePack\'s Python';
+    if (/^starting PyTorch$/i.test(l.stage)) return 'starting PyTorch';
+    return `loading ${l.stage}`;
+  }
+  function beginLoading(phase, stage) {
+    const now = Date.now();
+    if (!loading) loading = { phase, stage, step: 0, steps: 0, startedAt: now, stageStartedAt: now, stuck: false, where: '', stages: [], lastStillLog: now };
+    else setStage(stage, 0, loading.steps, phase);
+    if (!watch) { watch = setInterval(tickWatch, watchMs); if (watch.unref) watch.unref(); }
+    onEvent({ type: 'loading', phase, stage, step: 0, steps: loading.steps, text: stageText(loading) });
+  }
+  function setStage(stage, step, steps, phase) {
+    const now = Date.now();
+    if (!loading) { beginLoading(phase || 'loading', stage); loading.step = step || 0; loading.steps = steps || 0; return; }
+    const prev = { stage: loading.stage, phase: loading.phase, seconds: Math.round((now - loading.stageStartedAt) / 100) / 10 };
+    if (loading.stage !== stage || loading.phase !== (phase || loading.phase)) {
+      loading.stages.push(prev);
+      log('framepack-stage', { stage, step: step || 0, steps: steps || 0, after: prev.stage, afterSeconds: prev.seconds, totalSeconds: Math.round((now - loading.startedAt) / 100) / 10 });
+      loading.stageStartedAt = now; loading.stuck = false; loading.where = ''; loading.lastStillLog = now;
+    }
+    loading.stage = stage; loading.step = step || 0; if (steps) loading.steps = steps; loading.phase = phase || loading.phase;
+  }
+  function endLoading(how, extra) {
+    const l = loading; if (!l) return;
+    loading = null;
+    if (watch) { clearInterval(watch); watch = null; }
+    if (how !== 'loaded') pre = null; // stuck / stopped / failed: the next try checks PyTorch again (fresh words for what is wrong)
+    const secs = Math.round((Date.now() - l.startedAt) / 100) / 10;
+    const stages = [...l.stages, { stage: l.stage, phase: l.phase, seconds: Math.round((Date.now() - l.stageStartedAt) / 100) / 10 }];
+    log(how === 'loaded' ? 'framepack-loaded' : how === 'cancelled' ? 'framepack-load-stopped' : 'framepack-load-failed',
+      Object.assign({ seconds: secs, stage: l.stage, stages, severity: how === 'failed' ? 'error' : undefined }, extra || {}));
+  }
+  function tickWatch() {
+    if (!loading) { if (watch) { clearInterval(watch); watch = null; } return; }
+    const now = Date.now();
+    const kind = stageKind(loading.stage, loading.phase);
+    const secs = (now - loading.stageStartedAt) / 1000;
+    if (!loading.stuck && limits[kind] && now - loading.stageStartedAt >= limits[kind]) {
+      loading.stuck = true;
+      const w = stuckWords(kind, loading.stage, secs, loading.where);
+      log('framepack-stuck', { stage: loading.stage, phase: loading.phase, seconds: Math.round(secs), where: loading.where || '', message: w.message, stderr: tailNow().slice(-50), severity: 'warn' });
+      onEvent({ type: 'stuck', stage: loading.stage, seconds: Math.round(secs), message: w.message, fix: w.fix });
+    }
+    if (now - loading.lastStillLog >= stillLogMs) {
+      loading.lastStillLog = now;
+      const t = tailNow();
+      log('framepack-still-loading', { stage: loading.stage, phase: loading.phase, stageSeconds: Math.round(secs), totalSeconds: Math.round((now - loading.startedAt) / 1000), where: loading.where || '', lastOutput: t.length ? t[t.length - 1] : '' });
+      onEvent({ type: 'tick', stage: loading.stage, seconds: Math.round(secs) });
+    }
+  }
+  function tailNow() { return (proc && proc.tail.length ? proc.tail : preProc && preProc._fpTail ? preProc._fpTail : lastTail).slice(-50); }
+
   function status(o = {}) {
     const f = find(!!o.fresh);
     return Object.assign({}, f, {
-      models: f.models, running: !!proc, loaded, loading: loading ? Object.assign({}, loading) : null, busy: !!job || !!loadWait,
+      models: f.models, running: !!proc, loaded, loading: loadingPublic(), busy: !!job || !!loadWait,
       job: job ? { id: job.id, phase: job.phase || 'starting' } : null, vramGB, highVram, gpu: gpu ? { name: gpu.name || '', vramMB: gpu.vramMB || null, vendor: gpu.vendor || '' } : null,
-      vramHint: vramHint(), lastError, minVramGB: MIN_VRAM_GB, fps: FPS,
+      vramHint: vramHint(), lastError, minVramGB: MIN_VRAM_GB, fps: FPS, stopping: !!stopping || !!loadCancel,
+      stderrTail: tailNow(), precheck: pre ? Object.assign({ ok: pre.ok, at: pre.at }, pick(pre.info || {}, ['torch', 'cuda', 'cuda_build', 'device', 'free_gb', 'total_gb', 'seconds', 'import_seconds', 'error'])) : null,
     });
   }
 
@@ -252,28 +459,55 @@ function createFramePack(deps = {}) {
     if (!proc || !proc.child || !proc.child.stdin || proc.child.stdin.destroyed || proc.child.stdin.writableEnded) return false;
     try { proc.child.stdin.write(`${JSON.stringify(obj)}\n`); return true; } catch (_) { return false; }
   }
+  function withTail(r, tail) {
+    if (!r || r.ok) return r;
+    const t = lastLines(tail || tailNow());
+    if (t && !(r.serverError || '').includes(t)) r.serverError = r.serverError ? `${r.serverError}\n\n— what FramePack printed last —\n${t}` : t;
+    return r;
+  }
 
   function handle(ev) {
     if (!ev || typeof ev !== 'object') return;
     const p = proc;
     if (ev.event === 'ready') { if (p && p.onReady) p.onReady(ev); return; }
-    if (ev.event === 'loading') { loading = { stage: ev.stage || '', step: ev.step || 0, steps: ev.steps || 0, startedAt: (loading && loading.startedAt) || Date.now() }; if (job) { job.phase = 'loading'; try { job.onProgress && job.onProgress({ phase: 'loading', stage: ev.stage, step: ev.step, steps: ev.steps }); } catch (_) {} } onEvent({ type: 'loading', stage: ev.stage, step: ev.step, steps: ev.steps }); return; }
-    if (ev.event === 'loaded') { loaded = true; loading = null; if (ev.vram_gb != null) vramGB = ev.vram_gb; if (ev.high_vram != null) highVram = !!ev.high_vram; onEvent({ type: 'loaded', vramGB, highVram }); const w = waiters.get('load'); if (w) { waiters.delete('load'); w({ ok: true, loaded: true, vramGB, highVram, already: !!ev.already }); } return; }
+    if (ev.event === 'heartbeat') { if (loading) { loading.where = ev.where || loading.where; loading.heartbeatAt = Date.now(); } if (p) p.heartbeatAt = Date.now(); return; }
+    if (ev.event === 'loading') {
+      setStage(ev.stage || '', ev.step || 0, ev.steps || 0, 'loading');
+      if (job) { job.phase = 'loading'; try { job.onProgress && job.onProgress({ phase: 'loading', stage: ev.stage, step: ev.step, steps: ev.steps }); } catch (_) {} }
+      onEvent({ type: 'loading', phase: 'loading', stage: ev.stage, step: ev.step, steps: ev.steps, text: stageText(loading) });
+      return;
+    }
+    if (ev.event === 'loaded') {
+      loaded = true; if (ev.vram_gb != null) vramGB = ev.vram_gb; if (ev.high_vram != null) highVram = !!ev.high_vram;
+      endLoading('loaded', { vramGB, highVram, already: !!ev.already });
+      lastError = null;
+      onEvent({ type: 'loaded', vramGB, highVram });
+      const w = waiters.get('load'); if (w) { waiters.delete('load'); w({ ok: true, loaded: true, vramGB, highVram, already: !!ev.already }); }
+      return;
+    }
     if (ev.event === 'status' || ev.event === 'pong') { const w = waiters.get(ev.event); if (w) { waiters.delete(ev.event); w(ev); } return; }
     if (job && ev.id === job.id) {
       if (ev.event === 'accepted') { job.sections = ev.sections; job.frames = ev.frames; return; }
-      if (ev.event === 'progress') { job.phase = ev.phase || 'sampling'; try { job.onProgress && job.onProgress(ev); } catch (_) {} return; }
+      if (ev.event === 'progress') { if (loading) endLoading('loaded'); job.phase = ev.phase || 'sampling'; try { job.onProgress && job.onProgress(ev); } catch (_) {} return; }
       if (ev.event === 'result') return finish(Object.assign({ ok: true, engine: 'framepack' }, pick(ev, ['path', 'poster', 'frames', 'fps', 'seconds', 'width', 'height', 'sections', 'seed'])));
-      if (ev.event === 'cancelled') return finish(fail('FRAMEPACK_CANCELLED', 'Stopped.', '', { engine: 'framepack' }));
-      if (ev.event === 'error') { const r = fromRunner(ev); lastError = { code: r.code, message: r.message, at: Date.now() }; if (r.code === 'FRAMEPACK_OOM') loaded = false; return finish(r); }
+      if (ev.event === 'cancelled') { if (loading) endLoading('cancelled'); return finish(fail('FRAMEPACK_CANCELLED', 'Stopped.', '', { engine: 'framepack' })); }
+      if (ev.event === 'error') {
+        const r = withTail(fromRunner(ev)); lastError = { code: r.code, message: r.message, fix: r.fix, at: Date.now(), detail: r.serverError || '' };
+        if (loading) endLoading('failed', { code: r.code, message: r.message, stderr: tailNow() });
+        if (r.code === 'FRAMEPACK_OOM') loaded = false;
+        return finish(r);
+      }
+    }
+    if (ev.event === 'cancelled' && waiters.get('load')) {
+      const w = waiters.get('load'); waiters.delete('load'); endLoading('cancelled'); w(fail('FRAMEPACK_CANCELLED', 'Stopped.', '', { engine: 'framepack' })); return;
     }
     if (ev.event === 'error') {
       const w = waiters.get('load');
-      const r = fromRunner(ev);
-      lastError = { code: r.code, message: r.message, at: Date.now() };
-      loading = null;
+      const r = withTail(fromRunner(ev));
+      lastError = { code: r.code, message: r.message, fix: r.fix, at: Date.now(), detail: r.serverError || '' };
+      if (loading) endLoading('failed', { code: r.code, message: r.message, stderr: tailNow() });
       if (w) { waiters.delete('load'); w(r); }
-      onEvent({ type: 'error', code: r.code, message: r.message });
+      onEvent({ type: 'error', code: r.code, message: r.message, fix: r.fix });
     }
   }
   function pick(o, keys) { const out = {}; for (const k of keys) if (o[k] !== undefined) out[k] = o[k]; return out; }
@@ -282,6 +516,62 @@ function createFramePack(deps = {}) {
     job = null;
     if (j.killTimer) clearTimeout(j.killTimer);
     j.resolve(r);
+  }
+  function lineSplitter(onLine) {
+    let buf = '';
+    return (d) => {
+      buf += d.toString('utf8');
+      const parts = buf.split(/\r\n|\n|\r/);
+      buf = parts.pop();
+      if (buf.length > 8000) { onLine(buf.slice(0, 8000)); buf = ''; }
+      for (const l of parts) onLine(l);
+    };
+  }
+
+  // ---- the PyTorch pre-check: FramePack's python imports torch and asks CUDA (once per python), before the runner
+  function runPrecheck(f) {
+    const runnerIsJs = /\.m?js$/i.test(f.runner);
+    const args = [...(runnerIsJs ? [] : ['-u']), f.runner, '--precheck', '--framepack-dir', f.dir, '--hf-home', f.hfHome];
+    const be = buildEnv(f, { extra: deps.env });
+    beginLoading('precheck', 'checking PyTorch');
+    log('framepack-precheck-start', { python: f.python, cwd: f.dir, venv: be.venv, pathFirst: be.path, removed: be.dropped });
+    return new Promise((resolve) => {
+      const t0 = Date.now();
+      let child;
+      try { child = spawn(f.python, args, { cwd: f.dir, env: be.env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, detached: group }); }
+      catch (e) { resolve(fail('FRAMEPACK_PYTHON_MISSING', `FramePack's Python could not be started (${e.code || e.message}).`, 'Start FramePack once from Stability Matrix, or reinstall it there.', { engine: 'framepack' })); return; }
+      child._fpGroup = group; child._fpTail = [];
+      preProc = child;
+      let info = null; let done = false; let timedOut = false;
+      const end = (r) => {
+        if (done) return; done = true; clearTimeout(timer);
+        if (preProc === child) preProc = null;
+        lastTail = child._fpTail.slice(-50);
+        resolve(r);
+      };
+      const timer = setTimeout(() => { timedOut = true; log('framepack-precheck-timeout', { seconds: Math.round((Date.now() - t0) / 1000), where: loading && loading.where, stderr: child._fpTail.slice(-50), severity: 'error' }); kill(child); }, precheckTimeoutMs);
+      child.stdout.on('data', lineSplitter((line) => {
+        const s = line.trim(); if (!s) return;
+        let ev = null; try { ev = JSON.parse(s); } catch (_) { ev = null; }
+        if (!ev || typeof ev !== 'object') { child._fpTail.push(s.slice(0, 2000)); if (child._fpTail.length > 80) child._fpTail.shift(); return; }
+        if (ev.event === 'precheck-start') { if (loading) setStage('importing PyTorch', 0, 0, 'precheck'); log('framepack-precheck-python', { python: ev.python, executable: ev.executable, cwd: ev.cwd, pid: ev.pid, seconds: Math.round((Date.now() - t0) / 100) / 10 }); }
+        else if (ev.event === 'heartbeat') { if (loading) { loading.where = ev.where || ''; loading.heartbeatAt = Date.now(); } }
+        else if (ev.event === 'precheck') info = ev;
+      }));
+      child.stderr.on('data', lineSplitter((line) => { if (line.trim()) { child._fpTail.push(line.slice(0, 2000)); if (child._fpTail.length > 80) child._fpTail.shift(); } }));
+      child.on('error', (e) => end(e && e.code === 'ENOENT' ? fail('FRAMEPACK_PYTHON_MISSING', `FramePack's Python was not found (${f.python}).`, 'Start FramePack once from Stability Matrix (it makes its venv), or reinstall it there.', { engine: 'framepack' })
+        : fail('FRAMEPACK_FAILED', `FramePack's Python could not be started (${(e && (e.code || e.message)) || 'error'}).`, '', { engine: 'framepack' })));
+      child.on('close', (code) => {
+        const secs = Math.round((Date.now() - t0) / 100) / 10;
+        const r = explainPrecheck(info, { tail: child._fpTail, timedOut, seconds: secs, exitCode: code, cancelled: !!loadCancel && !timedOut });
+        pre = { ok: !r, python: f.python, info: info || null, at: Date.now() };
+        if (loadCancel && !proc && stopping) { log('framepack-stopped', { seconds: Math.round((Date.now() - stopping.at) / 100) / 10, while: 'PyTorch check' }); stopping = null; onEvent({ type: 'stopped' }); }
+        log('framepack-precheck', Object.assign({ ok: !r, seconds: secs, code: r ? r.code : undefined, cause: r ? r.cause : undefined, message: r ? r.message : undefined },
+          info ? { torch: info.torch, cuda: info.cuda, cudaBuild: info.cuda_build, device: info.device, freeGB: info.free_gb, importSeconds: info.import_seconds, error: info.error } : { exitCode: code },
+          r && r.code !== 'FRAMEPACK_CANCELLED' ? { stderr: child._fpTail.slice(-50), severity: 'error' } : {}));
+        end(r);
+      });
+    });
   }
 
   // Start the runner (once). → null | a FRAMEPACK_* failure
@@ -292,34 +582,29 @@ function createFramePack(deps = {}) {
     if (nr) return Promise.resolve(nr);
     const runnerIsJs = /\.m?js$/i.test(f.runner);
     const args = [...(runnerIsJs ? [] : ['-u']), f.runner, '--framepack-dir', f.dir, '--hf-home', f.hfHome];
-    const env = Object.assign({}, process.env, deps.env || {}, {
-      HF_HOME: f.hfHome, HF_HUB_OFFLINE: '1', TRANSFORMERS_OFFLINE: '1', HF_DATASETS_OFFLINE: '1', HF_HUB_DISABLE_TELEMETRY: '1',
-      PYTHONUNBUFFERED: '1', PYTHONIOENCODING: 'utf-8', PYTHONNOUSERSITE: '1', AUTOINJECTOR_FRAMEPACK_DIR: f.dir,
-    });
+    const be = buildEnv(f, { extra: deps.env });
     let child;
-    try { child = spawn(f.python, args, { cwd: f.dir, env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true }); }
+    try { child = spawn(f.python, args, { cwd: f.dir, env: be.env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, detached: group }); }
     catch (e) { return Promise.resolve(fail('FRAMEPACK_PYTHON_MISSING', `FramePack's Python could not be started (${e.code || e.message}).`, 'Start FramePack once from Stability Matrix, or reinstall it there.', { engine: 'framepack' })); }
-    const p = { child, dir: f.dir, hfHome: f.hfHome, buf: '', tail: [], started: Date.now() };
+    child._fpGroup = group;
+    const p = { child, dir: f.dir, hfHome: f.hfHome, tail: [], started: Date.now() };
     if (child.stdin) child.stdin.on('error', () => {}); // the runner went away (EPIPE): its exit says why
     proc = p;
-    log('framepack-start', { dir: f.dir, hf: f.hfSource, pid: child.pid });
+    if (loading && loading.phase !== 'loading') setStage('starting FramePack\'s Python', 0, 0, 'starting');
+    log('framepack-start', { dir: f.dir, hf: f.hfSource, hfHome: f.hfHome, pid: child.pid, python: f.python, venv: be.venv, pathFirst: be.path, removed: be.dropped });
     p.ready = new Promise((resolve) => {
       let done = false;
-      const t = setTimeout(() => { if (done) return; done = true; resolve(Object.assign(explainExit(p.tail, null, null), { message: 'FramePack did not start in time.' })); stop(); }, readyTimeoutMs);
-      p.onReady = () => { if (done) return; done = true; clearTimeout(t); resolve(null); };
+      const t = setTimeout(() => { if (done) return; done = true; resolve(withTail(Object.assign(explainExit(p.tail, null, null), { message: 'FramePack did not start in time.' }), p.tail)); stop(); }, readyTimeoutMs);
+      p.onReady = (ev) => { if (done) return; done = true; clearTimeout(t); log('framepack-ready', { seconds: Math.round((Date.now() - p.started) / 100) / 10, python: ev && ev.python }); resolve(null); };
       p.onFail = (r) => { if (done) return; done = true; clearTimeout(t); resolve(r); };
     });
-    child.stdout.on('data', (d) => {
-      p.buf += d.toString('utf8');
-      let i;
-      while ((i = p.buf.indexOf('\n')) >= 0) {
-        const line = p.buf.slice(0, i).trim(); p.buf = p.buf.slice(i + 1);
-        if (!line) continue;
-        let ev = null; try { ev = JSON.parse(line); } catch (_) { ev = null; }
-        if (ev) handle(ev); else pushTail(p, line);
-      }
-    });
-    child.stderr.on('data', (d) => { for (const line of d.toString('utf8').split(/\r?\n/)) if (line.trim()) pushTail(p, line); });
+    // Both pipes are always read to the end (a full stderr pipe would stop the runner mid-print).
+    child.stdout.on('data', lineSplitter((line) => {
+      const s = line.trim(); if (!s) return;
+      let ev = null; try { ev = JSON.parse(s); } catch (_) { ev = null; }
+      if (ev && typeof ev === 'object') handle(ev); else pushTail(p, s);
+    }));
+    child.stderr.on('data', lineSplitter((line) => { if (line.trim()) pushTail(p, line); }));
     child.on('error', (e) => {
       const r = e && e.code === 'ENOENT' ? fail('FRAMEPACK_PYTHON_MISSING', `FramePack's Python was not found (${f.python}).`, 'Start FramePack once from Stability Matrix (it makes its venv), or reinstall it there.', { engine: 'framepack' })
         : fail('FRAMEPACK_FAILED', `FramePack could not be started (${(e && (e.code || e.message)) || 'error'}).`, '', { engine: 'framepack' });
@@ -329,30 +614,60 @@ function createFramePack(deps = {}) {
     return p.ready;
   }
   function pushTail(p, line) { p.tail.push(String(line).slice(0, 2000)); if (p.tail.length > 80) p.tail.shift(); }
-  function gone(p, r) {
+  function gone(p, r0) {
     if (proc !== p) return;
-    proc = null; loaded = false; loading = null;
+    proc = null; loaded = false;
+    lastTail = p.tail.slice(-50);
     const wasStopping = !!p.stopping;
-    log('framepack-exit', { code: r.code, stopping: wasStopping });
+    const cancelledLoad = !!loadCancel;
+    const r = wasStopping || cancelledLoad ? fail('FRAMEPACK_CANCELLED', 'Stopped.', '', { engine: 'framepack' }) : r0;
+    if (loading) endLoading(cancelledLoad || wasStopping ? 'cancelled' : 'failed', cancelledLoad || wasStopping ? {} : { code: r.code, message: r.message, stderr: lastTail });
+    log('framepack-exit', { code: r0.code, stopping: wasStopping, cancelledLoad, seconds: Math.round((Date.now() - p.started) / 1000), stopSeconds: p.stopAt ? Math.round((Date.now() - p.stopAt) / 100) / 10 : undefined });
     if (p.onFail) p.onFail(r);
     const w = waiters.get('load'); if (w) { waiters.delete('load'); w(r); }
     for (const k of ['status', 'pong']) { const x = waiters.get(k); if (x) { waiters.delete(k); x(null); } }
-    if (job) { const cancelled = job.cancelled; if (!cancelled && !wasStopping) lastError = { code: r.code, message: r.message, at: Date.now() }; finish(cancelled ? fail('FRAMEPACK_CANCELLED', 'Stopped.', '', { engine: 'framepack' }) : r); }
+    if (job) { const cancelled = job.cancelled; if (!cancelled && !wasStopping) lastError = { code: r.code, message: r.message, fix: r.fix, at: Date.now(), detail: r.serverError || '' }; finish(cancelled ? fail('FRAMEPACK_CANCELLED', 'Stopped.', '', { engine: 'framepack' }) : r); }
+    if (!wasStopping && !cancelledLoad && !job && r.code !== 'FRAMEPACK_CANCELLED') lastError = lastError || { code: r.code, message: r.message, fix: r.fix, at: Date.now(), detail: r.serverError || '' };
+    if (wasStopping || cancelledLoad || stopping) { const why = (stopping && stopping.why) || (cancelledLoad ? 'loading' : 'stop'); stopping = null; onEvent({ type: 'stopped', while: why }); log('framepack-stopped', { while: why, seconds: p.stopAt ? Math.round((Date.now() - p.stopAt) / 100) / 10 : null }); }
     onEvent({ type: 'exit', code: r.code });
+  }
+
+  // The pre-check (once per python, unless it failed) and then the runner.
+  async function prepare() {
+    const f = find(true);
+    const nr = notReady(f);
+    if (nr) return nr;
+    if (!proc && precheckOn && !(pre && pre.ok && pre.python === f.python)) {
+      const r = await runPrecheck(f);
+      if (r) return r;
+      if (loadCancel) return fail('FRAMEPACK_CANCELLED', 'Stopped.', '', { engine: 'framepack' });
+    }
+    if (!proc && !loading) beginLoading('starting', 'starting FramePack\'s Python');
+    else if (!proc && loading) setStage('starting FramePack\'s Python', 0, 0, 'starting');
+    return ensure();
   }
 
   function load() {
     if (loaded && proc) return Promise.resolve({ ok: true, loaded: true, already: true, vramGB, highVram });
     if (loadWait) return loadWait;
+    loadCancel = null;
+    log('framepack-load-start', {});
     loadWait = (async () => {
-      const bad = await ensure();
-      if (bad) { lastError = { code: bad.code, message: bad.message, at: Date.now() }; return bad; }
-      if (loaded) return { ok: true, loaded: true, already: true, vramGB, highVram };
-      loading = { stage: 'starting', step: 0, steps: 0, startedAt: Date.now() };
+      if (!loading) beginLoading(precheckOn && !(pre && pre.ok) && !proc ? 'precheck' : 'starting', precheckOn && !(pre && pre.ok) && !proc ? 'checking PyTorch' : 'starting FramePack\'s Python');
+      const bad = await prepare();
+      if (bad) {
+        if (bad.code !== 'FRAMEPACK_CANCELLED') lastError = { code: bad.code, message: bad.message, fix: bad.fix, at: Date.now(), detail: bad.serverError || '' };
+        if (loading) endLoading(bad.code === 'FRAMEPACK_CANCELLED' ? 'cancelled' : 'failed', { code: bad.code, message: bad.message, stderr: bad.code === 'FRAMEPACK_CANCELLED' ? undefined : tailNow() });
+        if (bad.code !== 'FRAMEPACK_CANCELLED') onEvent({ type: 'error', code: bad.code, message: bad.message, fix: bad.fix });
+        return withTail(bad);
+      }
+      if (loadCancel) { if (loading) endLoading('cancelled'); return fail('FRAMEPACK_CANCELLED', 'Stopped.', '', { engine: 'framepack' }); }
+      if (loaded) { if (loading) endLoading('loaded'); return { ok: true, loaded: true, already: true, vramGB, highVram }; }
       const r = await new Promise((resolve) => { waiters.set('load', resolve); if (!send({ cmd: 'load', id: `load-${Date.now()}` })) { waiters.delete('load'); resolve(fail('FRAMEPACK_FAILED', 'FramePack is not running.', '')); } });
+      if (loading && !(r && r.ok)) endLoading(r && r.code === 'FRAMEPACK_CANCELLED' ? 'cancelled' : 'failed', { code: r && r.code });
       log('framepack-load', { ok: !!(r && r.ok), code: r && r.code, vramGB });
       return r;
-    })().finally(() => { loadWait = null; });
+    })().finally(() => { loadWait = null; loadCancel = null; });
     return loadWait;
   }
 
@@ -363,13 +678,26 @@ function createFramePack(deps = {}) {
     const j = { id, resolve: null, onProgress, cancelled: false, phase: 'starting' };
     job = j; // claimed before anything async: a second generate is BUSY
     const promise = new Promise((resolve) => { j.resolve = resolve; });
+    const cancelled = () => fail('FRAMEPACK_CANCELLED', 'Stopped.', '', { engine: 'framepack' });
     (async () => {
       if (loadWait) { onProgress && onProgress({ phase: 'loading', stage: (loading && loading.stage) || '' }); await loadWait; }
-      if (j.cancelled) return finish(fail('FRAMEPACK_CANCELLED', 'Stopped.', '', { engine: 'framepack' }));
-      const bad = await ensure();
-      if (bad) { lastError = { code: bad.code, message: bad.message, at: Date.now() }; return finish(bad); }
-      if (j.cancelled) return finish(fail('FRAMEPACK_CANCELLED', 'Stopped.', '', { engine: 'framepack' }));
-      if (!loaded) j.phase = 'loading';
+      if (j.cancelled) return finish(cancelled());
+      if (!loaded || !proc) {
+        j.phase = 'loading';
+        loadCancel = null;
+        if (!loading) beginLoading(precheckOn && !(pre && pre.ok) && !proc ? 'precheck' : 'starting', precheckOn && !(pre && pre.ok) && !proc ? 'checking PyTorch' : 'starting FramePack\'s Python');
+        try { onProgress && onProgress({ phase: 'loading', stage: loading ? stageText(loading) : '' }); } catch (_) {}
+      }
+      const bad = await prepare();
+      if (bad) {
+        if (bad.code !== 'FRAMEPACK_CANCELLED' && !j.cancelled) lastError = { code: bad.code, message: bad.message, fix: bad.fix, at: Date.now(), detail: bad.serverError || '' };
+        if (loading) endLoading(j.cancelled || bad.code === 'FRAMEPACK_CANCELLED' ? 'cancelled' : 'failed', { code: bad.code, message: bad.message });
+        loadCancel = null;
+        return finish(j.cancelled ? cancelled() : withTail(bad));
+      }
+      loadCancel = null;
+      if (j.cancelled) { if (loading) endLoading('cancelled'); return finish(cancelled()); }
+      if (loaded && loading) endLoading('loaded');
       if (!send(Object.assign({}, req, { cmd: 'generate', id }))) finish(fail('FRAMEPACK_FAILED', 'FramePack is not running.', 'Try again.', { engine: 'framepack' }));
     })().catch((e) => finish(fail('FRAMEPACK_FAILED', `Something went wrong: ${(e && e.message) || e}`, '', { engine: 'framepack' })));
     let timer = null;
@@ -381,29 +709,52 @@ function createFramePack(deps = {}) {
     return r;
   }
 
+  // ⏹ Stop. While loading (pre-check, start, models): the runner can't stop inside an import, so after a short grace
+  // the whole process tree is stopped. While a video renders: FramePack stops between steps; if it doesn't answer,
+  // the process tree is stopped too (that frees the graphics card).
   function cancel() {
     const j = job;
-    if (!j) return { ok: true, cancelled: false };
-    j.cancelled = true;
+    const isLoading = !!loading || !!preProc || (!!loadWait && !loaded);
+    if (!j && !isLoading) return { ok: true, cancelled: false };
+    const now = Date.now();
+    if (j) j.cancelled = true;
+    if (isLoading) {
+      if (!loadCancel) loadCancel = { at: now };
+      stopping = stopping || { at: now };
+      log('framepack-stop-requested', { while: 'loading', stage: loading && loading.stage, stageSeconds: loading ? Math.round((now - loading.stageStartedAt) / 1000) : null });
+      onEvent({ type: 'stopping', while: 'loading' });
+      if (preProc) { log('framepack-kill', { reason: 'Stop while PyTorch was starting', pid: preProc.pid }); kill(preProc); }
+      const p = proc;
+      if (p) {
+        p.stopAt = p.stopAt || now;
+        send({ cmd: 'cancel', id: j ? j.id : undefined });
+        const t = setTimeout(() => { if (proc === p) { log('framepack-kill', { reason: 'Stop while loading', pid: p.child.pid, stage: loading && loading.stage }); p.stopping = true; kill(p.child); } }, cancelGraceMs);
+        if (t.unref) t.unref();
+      }
+      return { ok: true, cancelled: true, stopping: true };
+    }
     send({ cmd: 'cancel', id: j.id });
-    // FramePack checks for Stop between sampling steps; if it doesn't answer, the process is stopped (it frees the card).
-    j.killTimer = setTimeout(() => { if (job === j && proc) { log('framepack-kill', { reason: 'cancel not answered' }); kill(); } }, cancelKillMs);
+    log('framepack-stop-requested', { while: 'making a video', phase: j.phase });
+    onEvent({ type: 'stopping', while: 'video' });
+    j.killTimer = setTimeout(() => { if (job === j && proc) { log('framepack-kill', { reason: 'Stop not answered', pid: proc.child.pid }); stopping = { at: Date.now() }; proc.stopping = true; proc.stopAt = Date.now(); kill(proc.child); } }, cancelKillMs);
     if (j.killTimer.unref) j.killTimer.unref();
     return { ok: true, cancelled: true };
   }
-  function kill() { const p = proc; if (!p) return; p.stopping = true; try { p.child.kill(); } catch (_) {} }
   function stop() {
+    if (preProc) { loadCancel = loadCancel || { at: Date.now() }; kill(preProc); }
     const p = proc; if (!p) return { ok: true, stopped: false };
     if (p.stopping) return { ok: true, stopped: true };
-    p.stopping = true;
+    p.stopping = true; p.stopAt = Date.now();
+    stopping = { at: Date.now(), why: 'unload' };
+    onEvent({ type: 'stopping', while: 'unload' });
     send({ cmd: 'quit' });
     try { p.child.stdin.end(); } catch (_) {}
-    const t = setTimeout(() => { try { p.child.kill(); } catch (_) {} }, 3000); if (t.unref) t.unref();
+    const t = setTimeout(() => { if (proc === p) { log('framepack-kill', { reason: 'did not quit', pid: p.child.pid }); kill(p.child); } }, 3000); if (t.unref) t.unref();
     loaded = false;
     return { ok: true, stopped: true };
   }
 
-  return { status, load, generate, cancel, stop, refresh, refreshGpu, find, busy: () => !!job || !!loadWait, isLoaded: () => loaded };
+  return { status, load, generate, cancel, stop, refresh, refreshGpu, find, busy: () => !!job || !!loadWait, isLoaded: () => loaded, isLoading: () => !!loading || !!preProc };
 }
 
-module.exports = { createFramePack, findFramePack, checkModels, isFramePackDir, venvPython, testPicture, notReady, explainExit, hasAnyModel, NEEDED, FPS, MIN_VRAM_GB, RUNNER };
+module.exports = { createFramePack, findFramePack, checkModels, isFramePackDir, venvPython, testPicture, notReady, explainExit, explainPrecheck, buildEnv, killTree, stuckWords, stageKind, hasAnyModel, NEEDED, FPS, MIN_VRAM_GB, RUNNER, STAGE_LIMITS };

@@ -59,13 +59,33 @@
   $('vd-sub-setup').onclick = () => subTab('setup');
 
   // ------------------------------------------------------------ status
+  function clock(secs) { const s = Math.max(0, Math.round(Number(secs) || 0)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; }
+  // The "Ready" light with FramePack: amber while it loads (or stops), green (filled) only when it is loaded,
+  // red when loading failed, a green ring when it is ready but not loaded yet (it loads with the first video).
+  function fpLight(s) {
+    const fp = (s && s.framepack) || {};
+    const uses = s && (s.backend === 'framepack' || (s.settings && s.settings.backend === 'framepack'));
+    if (!uses && !fp.loading && !fp.loaded) return null;
+    if (fp.stopping) return { tone: 'busy', text: '⏹ Stopping FramePack…' };
+    if (fp.loading) {
+      const l = fp.loading; const secs = (l.stageSeconds || 0) + (st.fpAt ? (Date.now() - st.fpAt) / 1000 : 0);
+      return { tone: l.stuck ? 'warn' : 'busy', text: `⏳ Loading FramePack… ${l.text || l.stage || ''} · ${clock(secs)}${l.stuck ? ' — it seems stuck (⚙ Setup & models → FramePack)' : ''}` };
+    }
+    if (fp.loaded) return { tone: 'ok', text: null };
+    if (fp.lastError && fp.lastError.message && fp.ready) return { tone: 'error', text: `✖ FramePack: ${fp.lastError.message}` };
+    if (s.ready) return { tone: 'standby', text: null };
+    return null;
+  }
   function renderStatus(s) {
     if (!s || !s.ok) return;
     st.status = s;
-    const tone = s.ready ? 'ok' : (s.comfy && s.comfy.connected) || (s.comfy && s.comfy.installed) ? 'busy' : 'off';
+    if (s.framepack && s.framepack.loading) st.fpAt = Date.now();
+    let tone = s.ready ? 'ok' : (s.comfy && s.comfy.connected) || (s.comfy && s.comfy.installed) ? 'busy' : 'off';
+    const light = fpLight(s);
+    if (light) tone = light.tone;
     $('vd-dot').dataset.tone = tone; if ($('vd-tab-dot')) $('vd-tab-dot').dataset.tone = tone;
     // The message is also used outside this tab; here "in 🎬 Video" is where the person already is.
-    const text = String(s.message || (s.ready ? '✔ Ready' : 'Video is not set up')).replace(/ in 🎬 Video(?= \(| —|,|\.)/g, '');
+    const text = (light && light.text) || String(s.message || (s.ready ? '✔ Ready' : 'Video is not set up')).replace(/ in 🎬 Video(?= \(| —|,|\.)/g, '');
     setText('vd-status-text', text);
     $('vd-status').title = text;
     if (!s.ready && !st.generating) hint(`${text}\nOpen ⚙ Setup & models to finish (one click).`, 'warn'); else if (s.ready && !st.generating) hint('', '');
@@ -240,7 +260,13 @@
     }
     acts.hidden = !acts.children.length;
     const raw = (r && r.serverError) || '';
-    setText('vd-error-raw', raw.slice(0, 600)); $('vd-error-details').hidden = !raw; $('vd-error-details').open = false;
+    const isFp = !!(r && (r.engine === 'framepack' || /^FRAMEPACK_/.test(r.error || r.code || '')));
+    setText('vd-error-summary', isFp ? 'Technical details (what FramePack printed last)' : 'Technical details (what ComfyUI said)');
+    setText('vd-error-raw', raw.slice(-4000)); $('vd-error-details').hidden = !raw; $('vd-error-details').open = false;
+    if (r && /^FRAMEPACK_TORCH_FAILED$/.test(r.error || '')) {
+      const b = document.createElement('button'); b.className = 'primary'; b.textContent = '↻ Try again';
+      b.onclick = () => { hideError(); generate(); }; acts.appendChild(b); acts.hidden = false;
+    }
     $('vd-error').hidden = false;
     try { $('vd-error').scrollIntoView({ block: 'nearest', behavior: 'smooth' }); } catch (_) {}
   }
@@ -257,6 +283,17 @@
         const p = await call('progress');
         const secs = Math.round((Date.now() - st.startedAt) / 1000);
         const bits = [`${secs} s`];
+        let extra = '';
+        if (p && p.busy && p.engine === 'framepack' && (p.loading || p.stopping)) {
+          // FramePack is loading: the stage in words + the time in it; after the stage's limit: "seems stuck" + what to try
+          const l = p.loading || {};
+          if (p.stopping) bits.push('⏹ stopping FramePack…');
+          else bits.push(`${l.text || `loading FramePack${l.stage ? ` (${l.stage})` : ''}`} · ${clock(l.stageSeconds)} in this step`);
+          if (l.stuck && !p.stopping) extra = `\n⚠ ${l.stuckMessage}\nWhat to try: ${l.stuckFix}`;
+          if (st.generating) msg(`🎬 Making your video… ${bits.join(' · ')}${extra || '\nThe first video loads FramePack, which takes a while.'}`);
+          if (!st.lightAt || Date.now() - st.lightAt > 4000) { st.lightAt = Date.now(); refreshStatus(); }
+          return;
+        }
         if (p && p.busy) {
           if (p.phase) bits.push({ queued: 'waiting in ComfyUI\'s queue', uploading: 'sending the picture', sampling: 'making the frames', decoding: 'decoding the frames', saving: 'saving', starting: 'loading the model', rendering: 'rendering',
             picture: 'making the picture first (🎨 Images)', loading: `loading FramePack${p.stage ? ` (${p.stage})` : ''} — the first time takes a few minutes`, preparing: 'reading the picture and the description' }[p.phase] || p.phase);
@@ -534,7 +571,7 @@
   function fpMsg(t) { setText('vd-fp-msg', t || ''); }
   function renderFramePack(f) {
     if (!f || f.ok === false && !f.available) return;
-    st.fp = f;
+    st.fp = f; st.fpRendered = Date.now();
     const lines = [];
     if (f.available === false) lines.push('FramePack is not part of this build.');
     else if (!f.found) lines.push(`✖ ${f.message || 'FramePack was not found.'}`);
@@ -543,8 +580,9 @@
       lines.push(f.pythonOk ? `✔ Its own Python: ${f.python}` : '✖ Its own Python (venv) is missing — open FramePack once in Stability Matrix so it makes it.');
       lines.push(f.models && f.models.ok ? `✔ All its models are there (${f.hfSource}: ${f.hfHome}).` : `✖ Some models are missing (looked in ${f.hfSource || 'the models folder'}${f.hfHome ? `: ${f.hfHome}` : ''}).`);
       if (f.loaded) lines.push(`✔ Loaded and ready${f.vramGB != null ? ` (${f.vramGB} GB of graphics memory free when it loaded)` : ''}.`);
-      else if (f.loading) lines.push(`⏳ Loading ${f.loading.stage || ''}…`);
-      if (f.lastError && f.lastError.message) lines.push(`Last problem: ${f.lastError.message}`);
+      else if (f.loading) lines.push(`⏳ Loading: ${f.loading.text || f.loading.stage || ''}${f.loading.steps ? ` (step ${f.loading.step} of ${f.loading.steps})` : ''}…`);
+      if (f.precheck && f.precheck.ok) lines.push(`✔ PyTorch ${f.precheck.torch || ''} sees ${f.precheck.device || 'the graphics card'}${f.precheck.cuda_build ? ` (CUDA ${f.precheck.cuda_build})` : ''}.`);
+      if (f.lastError && f.lastError.message && !f.loading) lines.push(`Last problem: ${f.lastError.message}`);
     }
     setText('vd-fp-state', lines.join('\n'));
     const ul = $('vd-fp-models'); ul.textContent = '';
@@ -556,9 +594,35 @@
     setText('vd-fp-vram', f.found ? (f.vramHint || '') : '');
     const ready = !!f.ready;
     $('btn-vd-fp-load').disabled = !ready || !!f.loaded || !!f.busy;
-    $('btn-vd-fp-load').textContent = f.loaded ? '✔ FramePack loaded' : '▶ Load FramePack';
-    $('btn-vd-fp-test').disabled = !ready || st.generating;
+    $('btn-vd-fp-load').textContent = f.loaded ? '✔ FramePack loaded' : f.loading ? '⏳ Loading…' : '▶ Load FramePack';
+    $('btn-vd-fp-test').disabled = !ready || st.generating || !!f.loading;
     $('btn-vd-fp-unload').disabled = !f.running || !!f.busy;
+    // while it loads: ⏹ Stop; when it seems stuck or failed: ↻ Try again; and what FramePack printed last
+    if ($('btn-vd-fp-stop')) { $('btn-vd-fp-stop').hidden = !(f.loading || f.stopping); $('btn-vd-fp-stop').disabled = !!f.stopping; $('btn-vd-fp-stop').textContent = f.stopping ? '⏹ Stopping…' : '⏹ Stop'; }
+    const failed = !f.loaded && !f.loading && !!(f.lastError && f.lastError.message);
+    if ($('btn-vd-fp-retry')) $('btn-vd-fp-retry').hidden = !(ready && ((f.loading && f.loading.stuck) || failed));
+    const stuck = $('vd-fp-stuck');
+    if (stuck) { const on = !!(f.loading && f.loading.stuck && !f.stopping); stuck.hidden = !on; stuck.textContent = on ? `⚠ ${f.loading.stuckMessage}\nWhat to try: ${f.loading.stuckFix}` : ''; }
+    const raw = [];
+    if (f.loading && f.loading.where) raw.push(`Where FramePack is: ${f.loading.where}`);
+    if (failed && f.lastError.detail) raw.push(f.lastError.detail);
+    else if ((f.stderrTail || []).length) raw.push(f.stderrTail.join('\n'));
+    const det = $('vd-fp-details');
+    if (det) { const show = !!raw.length && !!((f.loading && f.loading.stuck) || failed); det.hidden = !show; setText('vd-fp-raw', raw.join('\n\n').slice(-6000)); }
+    fpTicker(!!(f.loading || f.stopping));
+  }
+  // While FramePack loads: the elapsed time in the stage, every second; a fresh look every 4 s (and on every event).
+  function fpTicker(on) {
+    if (!on) { if (st.fpTick) { clearInterval(st.fpTick); st.fpTick = null; } return; }
+    if (st.fpTick) return;
+    let n = 0;
+    st.fpTick = setInterval(() => {
+      n++;
+      const f = st.fp;
+      if (!f || !(f.loading || f.stopping)) { fpTicker(false); return; }
+      if (f.loading && !f.stopping) fpMsg(`⏳ ${f.loading.text || f.loading.stage} — ${clock((f.loading.stageSeconds || 0) + (Date.now() - (st.fpRendered || Date.now())) / 1000)}${f.loading.steps ? ` (step ${f.loading.step} of ${f.loading.steps})` : ''}`);
+      if (n % 4 === 0) { refreshFramePack(false); refreshStatus(); }
+    }, 1000);
   }
   async function refreshFramePack(gpu) {
     if (!api || typeof api.framepackStatus !== 'function') return null;
@@ -566,10 +630,29 @@
     renderFramePack(f);
     return f;
   }
-  if ($('btn-vd-fp-load')) $('btn-vd-fp-load').onclick = async () => {
-    $('btn-vd-fp-load').disabled = true; fpMsg('⏳ Loading FramePack… the first time takes a few minutes (it reads about 40 GB of model files).');
-    const r = await call('framepackLoad');
-    fpMsg(r && r.ok ? (r.message || '✔ FramePack is loaded.') : `✖ ${(r && r.message) || 'FramePack could not be loaded.'}${r && r.fix ? `\nHow to fix: ${r.fix}` : ''}`);
+  async function loadFramePack() {
+    $('btn-vd-fp-load').disabled = true; if ($('btn-vd-fp-retry')) $('btn-vd-fp-retry').hidden = true;
+    fpMsg('⏳ Loading FramePack… PyTorch starts first (the first time on Windows can take several minutes — antivirus scans its files), then about 40 GB of model files are read.');
+    const p = call('framepackLoad');
+    setTimeout(() => { refreshFramePack(false); refreshStatus(); }, 300); // the light turns amber, ⏹ Stop appears
+    const r = await p;
+    await refreshFramePack(false); // first: it stops the elapsed-time ticker, so the answer below stays
+    if (r && r.code === 'FRAMEPACK_CANCELLED') fpMsg('⏹ Stopped.');
+    else fpMsg(r && r.ok ? (r.message || '✔ FramePack is loaded.') : `✖ ${(r && r.message) || 'FramePack could not be loaded.'}${r && r.fix ? `\nHow to fix: ${r.fix}` : ''}`);
+    if (r && !r.ok && r.serverError && $('vd-fp-details')) { $('vd-fp-details').hidden = false; setText('vd-fp-raw', String(r.serverError).slice(-6000)); }
+    refreshStatus();
+  }
+  if ($('btn-vd-fp-load')) $('btn-vd-fp-load').onclick = loadFramePack;
+  if ($('btn-vd-fp-retry')) $('btn-vd-fp-retry').onclick = async () => {
+    const f = st.fp || {};
+    if (f.loading || f.busy) { fpMsg('⏹ Stopping, then trying again…'); await call('cancel'); for (let i = 0; i < 40; i++) { const g = await refreshFramePack(false); if (!g || !(g.loading || g.busy || g.stopping)) break; await new Promise((r) => setTimeout(r, 250)); } }
+    loadFramePack();
+  };
+  if ($('btn-vd-fp-stop')) $('btn-vd-fp-stop').onclick = async () => {
+    $('btn-vd-fp-stop').disabled = true; $('btn-vd-fp-stop').textContent = '⏹ Stopping…';
+    fpMsg('⏹ Stopping FramePack…');
+    if ($('vd-fp-stuck')) $('vd-fp-stuck').hidden = true;
+    await call('cancel');
     refreshFramePack(false); refreshStatus();
   };
   if ($('btn-vd-fp-test')) $('btn-vd-fp-test').onclick = async () => {
@@ -595,8 +678,11 @@
   };
   if (api && typeof api.onFramePack === 'function') api.onFramePack((ev) => {
     if (!ev) return;
-    if (ev.type === 'loading') fpMsg(`⏳ Loading FramePack: ${ev.stage || ''}${ev.steps ? ` (${ev.step} of ${ev.steps})` : ''}…`);
-    else if (ev.type === 'loaded' || ev.type === 'exit') refreshFramePack(false);
+    if (ev.type === 'loading') { fpMsg(`⏳ ${ev.text || `Loading FramePack: ${ev.stage || ''}`}${ev.steps ? ` (step ${ev.step} of ${ev.steps})` : ''}…`); refreshFramePack(false); refreshStatus(); }
+    else if (ev.type === 'stopping') { if (ev.while !== 'unload') fpMsg('⏹ Stopping FramePack…'); refreshFramePack(false); refreshStatus(); }
+    else if (ev.type === 'stopped') { if (ev.while !== 'unload') fpMsg('⏹ Stopped.'); refreshFramePack(false); refreshStatus(); }
+    else if (ev.type === 'stuck' || ev.type === 'error') { refreshFramePack(false); refreshStatus(); }
+    else if (ev.type === 'loaded' || ev.type === 'exit') { refreshFramePack(false); refreshStatus(); }
   });
 
   async function init() {

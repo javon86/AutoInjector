@@ -29,7 +29,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function until(fn, ms) { const end = Date.now() + ms; while (Date.now() < end) { const v = await fn(); if (v) return v; await sleep(20); } return null; }
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'framepack-test-'));
 const ENV0 = Object.assign({}, process.env);
-function setEnv(o) { for (const k of ['AUTOINJECTOR_FRAMEPACK_PYTHON', 'AUTOINJECTOR_FRAMEPACK_RUNNER', 'FAKE_FP_MODE', 'FAKE_FP_LOG', 'FAKE_FP_STEP_MS', 'AUTOINJECTOR_FRAMEPACK']) delete process.env[k]; Object.assign(process.env, o || {}); }
+function setEnv(o) { for (const k of ['AUTOINJECTOR_FRAMEPACK_PYTHON', 'AUTOINJECTOR_FRAMEPACK_RUNNER', 'FAKE_FP_MODE', 'FAKE_FP_LOG', 'FAKE_FP_STEP_MS', 'FAKE_FP_LOAD_MS', 'FAKE_FP_PRECHECK', 'AUTOINJECTOR_FRAMEPACK']) delete process.env[k]; Object.assign(process.env, o || {}); }
 const readLog = (f) => { try { return fs.readFileSync(f, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch (_) { return []; } };
 
 const png = FP.testPicture();
@@ -135,6 +135,153 @@ async function main() {
     const rn = await mgr.load();
     assert(!rn.ok && rn.code === 'FRAMEPACK_FAILED' && /did not start in time/.test(rn.message), 'a runner that never answers → FRAMEPACK_FAILED “did not start in time”');
     mgr.stop();
+  }
+
+  // =====================================================================
+  console.log('\n== 2b. loading that hangs, floods or fails: the PC report (stuck at "starting PyTorch") ==');
+  const alive = (pid) => { if (!pid) return false; try { process.kill(pid, 0); return true; } catch (_) { return false; } };
+  {
+    // the environment, like Stability Matrix: venv Scripts + torch\lib first on PATH, nothing inherited that shadows torch
+    const win = path.join(TMP, 'winfp'); const scripts = path.join(win, 'venv', 'Scripts'); const tlib = path.join(win, 'venv', 'Lib', 'site-packages', 'torch', 'lib');
+    fs.mkdirSync(scripts, { recursive: true }); fs.mkdirSync(tlib, { recursive: true }); fs.writeFileSync(path.join(win, 'venv', 'pyvenv.cfg'), 'home = C:\\SM\\Assets\\Python310\n');
+    const wpy = path.join(scripts, 'python.exe'); fs.writeFileSync(wpy, '');
+    const be = FP.buildEnv({ python: wpy, dir: win, hfHome: 'D:\\stuff and thing\\models\\video\\framepack\\hf' }, { platform: 'win32', base: { Path: 'C:\\Windows;C:\\Other', PYTHONPATH: 'C:\\OtherPython\\Lib', PYTHONHOME: 'C:\\OtherPython', VIRTUAL_ENV: 'C:\\elsewhere', HF_HOME: 'C:\\old', FOO: 'bar' } });
+    const parts = be.env.PATH.split(';');
+    assert(parts[0] === scripts && parts[1] === tlib && parts.includes('C:\\Windows') && !('Path' in be.env), `Windows PATH: the venv's Scripts, then torch\\lib, then the old PATH (one PATH key) — ${parts.slice(0, 3).join(' ; ')}`);
+    assert(!('PYTHONPATH' in be.env) && !('PYTHONHOME' in be.env) && be.dropped.includes('PYTHONPATH') && be.dropped.includes('PYTHONHOME'), 'an inherited PYTHONPATH / PYTHONHOME is removed (it could make FramePack\'s python load another Python\'s torch)');
+    assert(be.env.PYTHONUNBUFFERED === '1' && be.env.PYTHONNOUSERSITE === '1' && be.env.HF_HUB_OFFLINE === '1' && be.env.HF_HOME === 'D:\\stuff and thing\\models\\video\\framepack\\hf' && be.env.VIRTUAL_ENV === path.join(win, 'venv') && be.env.FOO === 'bar', 'PYTHONUNBUFFERED=1, PYTHONNOUSERSITE=1, offline, HF_HOME = the models folder, VIRTUAL_ENV = FramePack\'s venv, the rest kept');
+  }
+  {
+    // the same environment reaches the real processes (the pre-check and the runner)
+    const envLog = path.join(TMP, 'env.log');
+    setEnv(F.runnerEnv({ log: envLog }));
+    process.env.PYTHONPATH = path.join(TMP, 'shadow-python');
+    process.env.PYTHONHOME = path.join(TMP, 'shadow-home');
+    const logs = [];
+    mgr = FP.createFramePack({ find: findOk, log: (k, d) => logs.push({ k, d }) });
+    const l = await mgr.load();
+    const starts = readLog(envLog).filter((x) => x.start);
+    const pc = starts.find((x) => x.precheck); const rn = starts.find((x) => !x.precheck);
+    assert(l.ok && pc && rn, `▶ Load: first the PyTorch pre-check, then the runner (${starts.length} processes)`);
+    assert([pc, rn].every((x) => x && x.PYTHONPATH === undefined && x.PYTHONHOME === undefined && x.PYTHONUNBUFFERED === '1' && x.PYTHONNOUSERSITE === '1' && x.cwd === fpDir && x.PATH.split(path.delimiter)[0] === path.dirname(process.execPath)),
+      'both run with no PYTHONPATH / PYTHONHOME, PYTHONUNBUFFERED=1, PYTHONNOUSERSITE=1, cwd = the FramePack folder, the python\'s own folder first on PATH');
+    const s = mgr.status();
+    assert(s.precheck && s.precheck.ok && s.precheck.device === 'NVIDIA GeForce RTX 3060' && s.precheck.cuda === true, 'the pre-check result is kept (PyTorch version, CUDA, the card)');
+    const kinds = logs.map((x) => x.k);
+    const loadedLog = logs.find((x) => x.k === 'framepack-loaded');
+    assert(kinds.includes('framepack-precheck-start') && logs.some((x) => x.k === 'framepack-precheck' && x.d.ok && x.d.device) && kinds.includes('framepack-start') && kinds.includes('framepack-ready') && kinds.filter((k) => k === 'framepack-stage').length >= 3,
+      `the log tells each step in words with its time (${[...new Set(kinds)].join(', ')})`);
+    assert(loadedLog && loadedLog.d.stages.length >= 4 && loadedLog.d.stages.every((x) => typeof x.seconds === 'number' && x.stage), `framepack-loaded lists every stage with seconds (${loadedLog && loadedLog.d.stages.map((x) => `${x.stage} ${x.seconds}s`).join(' · ')})`);
+    mgr.stop(); await until(() => !mgr.status().running, 3000);
+    await mgr.load();
+    assert(readLog(envLog).filter((x) => x.start && x.precheck).length === 1, 'the pre-check runs once (it passed): the second ▶ Load goes straight to the runner');
+    mgr.stop(); await until(() => !mgr.status().running, 3000);
+    delete process.env.PYTHONPATH; delete process.env.PYTHONHOME;
+  }
+  {
+    // a runner (and a pre-check) that floods stderr — more than a pipe holds: both pipes are drained, no deadlock
+    setEnv(F.runnerEnv({ mode: 'flood', precheck: 'flood' }));
+    mgr = FP.createFramePack({ find: findOk });
+    const t0 = Date.now();
+    const l = await Promise.race([mgr.load(), sleep(30000).then(() => ({ ok: false, code: 'DEADLOCK' }))]);
+    const tail = mgr.status().stderrTail;
+    assert(l.ok && l.loaded, `2 MB of warnings on stderr (pre-check and runner) do not block it: loaded in ${Date.now() - t0} ms (${l.code || 'ok'})`);
+    assert(Array.isArray(tail) && tail.length > 0 && tail.length <= 50 && /TypedStorage/.test(tail[tail.length - 1]), `the last ${tail.length} lines it printed are kept (at most 50) for “Technical details”`);
+    mgr.stop(); await until(() => !mgr.status().running, 3000);
+  }
+  {
+    // stuck at step 0 "starting PyTorch" (what the PC showed): elapsed time, then "seems stuck" + what to try, then ⏹ Stop kills the tree
+    const stuckLog = path.join(TMP, 'stuck.log');
+    setEnv(F.runnerEnv({ mode: 'stuck', log: stuckLog }));
+    const evs = []; const logs = [];
+    mgr = FP.createFramePack({ find: findOk, onEvent: (e) => evs.push(e), log: (k, d) => logs.push({ k, d }), stageLimitsMs: { torch: 500 }, watchMs: 50, cancelGraceMs: 300 });
+    const lp = mgr.load();
+    const at0 = await until(() => { const s = mgr.status(); return s.loading && s.loading.stage === 'starting PyTorch' ? s : null; }, 8000);
+    assert(at0 && at0.busy && at0.loading.step === 0 && at0.loading.steps === 7 && typeof at0.loading.stageSeconds === 'number' && at0.loading.text === 'starting PyTorch' && !at0.loading.stuck, 'status while it loads: the stage in words, step 0 of 7, seconds in this stage (not stuck yet)');
+    await sleep(1100);
+    const later = mgr.status();
+    assert(later.loading && later.loading.stageSeconds >= 1, `the time in the stage keeps counting (${later.loading && later.loading.stageSeconds} s)`);
+    const st1 = await until(() => { const s = mgr.status(); return s.loading && s.loading.stuck ? s : null; }, 3000);
+    assert(st1 && /PyTorch has been starting for 0:0\d/.test(st1.loading.stuckMessage) && /seems stuck/.test(st1.loading.stuckMessage) && /antivirus/.test(st1.loading.stuckMessage), `after the limit it says so: “${st1 && st1.loading.stuckMessage}”`);
+    assert(st1 && /⏹ Stop/.test(st1.loading.stuckFix) && /Try again/.test(st1.loading.stuckFix) && /restart the PC/i.test(st1.loading.stuckFix), 'with what to try (Stop / Try again, antivirus exclusions, restart)');
+    assert(st1 && /torch\/__init__\.py/.test(st1.loading.where) && /torch\/__init__\.py/.test(st1.loading.stuckMessage), `the runner's heartbeat says where it is (${st1 && st1.loading.where})`);
+    assert(evs.some((e) => e.type === 'stuck' && /seems stuck/.test(e.message) && e.fix) && logs.some((x) => x.k === 'framepack-stuck' && x.d.stage === 'starting PyTorch' && Array.isArray(x.d.stderr)), 'a “stuck” event for the screen and a framepack-stuck line in the log (with what it printed)');
+    const ids = readLog(stuckLog); const runnerPid = (ids.find((x) => x.start && !x.precheck) || {}).pid; const kidPid = (ids.find((x) => x.grandchild) || {}).grandchild;
+    assert(alive(runnerPid) && alive(kidPid), `the stuck runner (pid ${runnerPid}) and its own child (pid ${kidPid}) are running`);
+    const t0 = Date.now();
+    const c = mgr.cancel();
+    assert(c.cancelled && c.stopping && mgr.status().stopping && evs.some((e) => e.type === 'stopping'), '⏹ Stop answers at once: “Stopping…”');
+    const r = await lp;
+    const took = Date.now() - t0;
+    const gone = await until(() => !alive(runnerPid) && !alive(kidPid), 4000);
+    assert(!r.ok && r.code === 'FRAMEPACK_CANCELLED' && took < 3000, `the load ends as Stopped in ${took} ms (it ignored “cancel”: the process tree was stopped after the grace)`);
+    assert(gone, 'the runner AND its child process are gone (the whole process tree)');
+    assert(evs.some((e) => e.type === 'stopped') && logs.some((x) => x.k === 'framepack-kill') && logs.some((x) => x.k === 'framepack-stopped') && logs.some((x) => x.k === 'framepack-load-stopped'), '“Stopped” event, and the log says it was stopped (kill, stopped)');
+    const after = mgr.status();
+    assert(!after.running && !after.loading && !after.busy && !after.stopping && !after.lastError, 'afterwards: nothing running, not loading, no “problem” (a Stop is not a failure)');
+    // the same, while a video was asked for (Make / 🧪 Test while FramePack isn't loaded yet)
+    const prog = [];
+    const gp = mgr.generate({ image: path.join(TMP, 'pic.png'), seconds: 1, steps: 2, out: path.join(TMP, 'gen', 'stuck.mp4') }, (e) => prog.push(e));
+    await until(() => { const s = mgr.status(); return s.loading && s.loading.stage === 'starting PyTorch' ? s : null; }, 8000);
+    assert(prog.some((p) => p.phase === 'loading'), 'a video while FramePack loads reports “loading” progress');
+    const t1 = Date.now(); mgr.cancel();
+    const gr = await gp;
+    assert(!gr.ok && gr.code === 'FRAMEPACK_CANCELLED' && Date.now() - t1 < 3000 && !(await until(() => mgr.status().running, 300)), `⏹ Stop during that load → Stopped in ${Date.now() - t1} ms, nothing left running`);
+  }
+  {
+    // the pre-check fails → the exact reason in plain words, and the runner is not even started
+    const cases = [
+      ['nocuda', 'NO_GPU', /does not see an NVIDIA graphics card/, /NVIDIA graphics driver/],
+      ['cpu', 'TORCH_CPU_ONLY', /processor-only/, /NVIDIA \(CUDA\) option/],
+      ['dll', 'TORCH_DLL', /could not load one of its files \(.*cudnn_cnn64_9\.dll\)/, /Visual C\+\+ Redistributable/],
+      ['notorch', 'TORCH_MISSING', /PyTorch is not installed in FramePack's Python/, /Stability Matrix/],
+    ];
+    for (const [mode, cause, re, fixRe] of cases) {
+      setEnv(F.runnerEnv({ precheck: mode }));
+      mgr = FP.createFramePack({ find: findOk });
+      const r = await mgr.load();
+      assert(!r.ok && r.code === 'FRAMEPACK_TORCH_FAILED' && r.cause === cause && re.test(r.message) && fixRe.test(r.fix) && !mgr.status().running && mgr.status().lastError.code === 'FRAMEPACK_TORCH_FAILED',
+        `pre-check “${mode}” → ${cause}: “${r.message}”`);
+      if (mode === 'dll') assert(/WinError 126/.test(r.serverError || ''), 'what Python printed goes to the details');
+    }
+    setEnv(F.runnerEnv({ precheck: 'hang' }));
+    mgr = FP.createFramePack({ find: findOk, precheckTimeoutMs: 600 });
+    const rt = await mgr.load();
+    assert(!rt.ok && rt.cause === 'TORCH_TIMEOUT' && /did not start within/.test(rt.message) && /antivirus/.test(rt.fix) && !mgr.status().loading, `a pre-check that never finishes → stopped at its time limit, in words (“${rt.message}”)`);
+    const evs = [];
+    mgr = FP.createFramePack({ find: findOk, onEvent: (e) => evs.push(e) });
+    const lp = mgr.load();
+    const pc = await until(() => { const s = mgr.status(); return s.loading && s.loading.phase === 'precheck' && s.loading.where ? s : null; }, 5000);
+    assert(pc && /PyTorch is starting \(the first time on Windows can take several minutes — antivirus scans its files\)/.test(pc.loading.text) && typeof pc.loading.stageSeconds === 'number', `while the pre-check runs: “${pc && pc.loading.text}” + the seconds`);
+    const t0 = Date.now(); mgr.cancel();
+    const rc = await lp;
+    assert(!rc.ok && rc.code === 'FRAMEPACK_CANCELLED' && Date.now() - t0 < 2000 && evs.some((e) => e.type === 'stopped') && !mgr.status().stopping, `⏹ Stop during the pre-check → Stopped in ${Date.now() - t0} ms`);
+    // explainPrecheck in words (no process)
+    assert(FP.explainPrecheck({ ok: true, cuda: true, torch: '2.6.0+cu126' }) === null, 'explainPrecheck: a working PyTorch + CUDA → no problem');
+    assert(FP.explainPrecheck({ ok: false, cuda: true, device_error: 'RuntimeError: CUDA error: all CUDA-capable devices are busy or unavailable' }).cause === 'GPU_BUSY', 'explainPrecheck: a card that is busy → GPU_BUSY (close other programs)');
+  }
+  {
+    // through the 🎬 Video module: Make while FramePack is stuck loading, and ⏹ Stop on the FramePack card (▶ Load)
+    setEnv(F.runnerEnv({ mode: 'stuck' }));
+    mgr = FP.createFramePack({ find: findOk, stageLimitsMs: { torch: 400 }, watchMs: 50, cancelGraceMs: 300 });
+    const studio0 = VS.createVideoStudio({ framepack: () => mgr, videosDir: () => path.join(TMP, 'videos-stuck'), persist: () => {}, comfy: async () => null });
+    const pic = path.join(TMP, 'pic.png');
+    const pend = studio0.animate({ image: pic, seconds: 1, steps: 2 }, 'test');
+    const p1 = await until(async () => { const p = await studio0.progress(); return p.busy && p.loading && p.loading.stage === 'starting PyTorch' ? p : null; }, 8000);
+    assert(p1 && p1.phase === 'loading' && p1.stage === 'starting PyTorch' && typeof p1.loading.stageSeconds === 'number', 'Make while FramePack loads: progress says the stage and its seconds');
+    const p2 = await until(async () => { const p = await studio0.progress(); return p.loading && p.loading.stuck ? p : null; }, 3000);
+    assert(p2 && /seems stuck/.test(p2.loading.stuckMessage) && /Stop/.test(p2.loading.stuckFix), `…and after the limit “seems stuck” + what to try (${p2 && p2.loading.stuckMessage.slice(0, 60)}…)`);
+    let t0 = Date.now(); await studio0.cancel();
+    const rc = await pend;
+    assert(!rc.ok && rc.code === 'VIDEO_CANCELLED' && Date.now() - t0 < 3000, `⏹ Stop on Make → Stopped in ${Date.now() - t0} ms`);
+    const lp = studio0.framepack.load();
+    await until(() => { const s = mgr.status(); return s.loading && s.loading.stage === 'starting PyTorch'; }, 8000);
+    const fs1 = await studio0.framepack.status();
+    assert(fs1.loading && fs1.busy && !fs1.loaded, 'the FramePack card status: loading (the light is amber), not loaded');
+    t0 = Date.now();
+    const cc = await studio0.cancel();
+    const rl = await lp;
+    assert(cc.stopping && !rl.ok && rl.code === 'FRAMEPACK_CANCELLED' && Date.now() - t0 < 3000 && !mgr.status().running, `⏹ Stop on the FramePack card (no video yet) stops the loading → Stopped in ${Date.now() - t0} ms`);
   }
 
   // =====================================================================
