@@ -27,7 +27,7 @@ body.bnd-on main { max-width: 1720px; }
   --bnd-warn-line: #d39b3a; --bnd-bad: #a33d3d;
   --bnd-rel-family: #2f6b57; --bnd-rel-love: #a24a68; --bnd-rel-ally: #3a6e8f; --bnd-rel-rival: #9a5b14; --bnd-rel-enemy: #a83232; --bnd-rel-mentor: #7a5c1e; --bnd-rel-other: #66706b; --bnd-on-rel: #ffffff;
   --bnd-cover-1: #dfe7dd; --bnd-cover-2: #a8bdb0; --bnd-plaque: #193e38; --bnd-plaque-ink: #f9f6e8;
-  --bnd-f-title: Georgia, "Times New Roman", serif; --bnd-f-head: Georgia, "Times New Roman", serif;
+  --bnd-f-title: Georgia, "Times New Roman", "Liberation Serif", serif; --bnd-f-head: Georgia, "Times New Roman", "Liberation Serif", serif;
   --bnd-f-body: "Segoe UI", system-ui, -apple-system, Roboto, Arial, sans-serif; --bnd-f-label: "Segoe UI", system-ui, -apple-system, Arial, sans-serif;
   --bnd-title-tt: none; --bnd-title-ls: .008em; --bnd-r: 12px; --bnd-r-page: 6px; --bnd-shadow: 0 18px 60px rgba(25, 47, 40, .11);
   color: var(--bnd-ink); font-family: var(--bnd-f-body);
@@ -44,9 +44,9 @@ body.bnd-on main { max-width: 1720px; }
   --bnd-ok: #2f5f2a; --bnd-ok-bg: #e2ead0; --bnd-draft: #74500f; --bnd-draft-bg: #f1dfb8; --bnd-needs: #8a1f22; --bnd-needs-bg: #f2d6c8;
   --bnd-rel-family: #2e5e3a; --bnd-rel-love: #9b2c4c; --bnd-rel-ally: #2f5577; --bnd-rel-rival: #8a4a0c; --bnd-rel-enemy: #8f1d1d; --bnd-rel-mentor: #6c4f12; --bnd-rel-other: #6a5a4c;
   --bnd-cover-1: #6d1a24; --bnd-cover-2: #2a1a14; --bnd-plaque: #5e1520; --bnd-plaque-ink: #fbecc8;
-  --bnd-f-title: "Palatino Linotype", "Book Antiqua", Palatino, "URW Palladio L", "P052", Georgia, serif;
-  --bnd-f-head: "Palatino Linotype", "Book Antiqua", Palatino, "URW Palladio L", "P052", Georgia, serif;
-  --bnd-f-body: "Palatino Linotype", "Book Antiqua", Palatino, Georgia, serif;
+  --bnd-f-title: "Palatino Linotype", "Book Antiqua", Palatino, "URW Palladio L", "P052", "Bitstream Charter", "Charis SIL", serif;
+  --bnd-f-head: "Palatino Linotype", "Book Antiqua", Palatino, "URW Palladio L", "P052", "Bitstream Charter", "Charis SIL", serif;
+  --bnd-f-body: "Palatino Linotype", "Book Antiqua", Palatino, "Bitstream Charter", "Charis SIL", serif; --bnd-f-label: "Palatino Linotype", "Book Antiqua", Palatino, "Bitstream Charter", serif;
   --bnd-title-ls: .02em; --bnd-r: 6px; --bnd-r-page: 3px; --bnd-shadow: 0 24px 70px rgba(0, 0, 0, .45);
 }
 .bnd[data-look="scifi"] {
@@ -71,7 +71,7 @@ body.bnd-on main { max-width: 1720px; }
   --bnd-desk: #2a2a2c; --bnd-desk-ink: #efeae0;
   --bnd-rail: #161617; --bnd-rail-ink: #efeae0; --bnd-rail-muted: #b9b2a4; --bnd-rail-on: #efeae0; --bnd-rail-on-ink: #161617; --bnd-rail-line: #3a3a3c;
   --bnd-paper: #f3efe4; --bnd-page-edge: #cfc6b2; --bnd-frame: rgba(29, 28, 26, .25);
-  --bnd-card: #fbf8f0; --bnd-card-2: #e9e3d3; --bnd-line: #cfc6b2;
+  --bnd-card: #f6ecd2; --bnd-card-2: #e8dbb8; --bnd-line: #c9b98f;
   --bnd-ink: #1d1c1a; --bnd-muted: #514d45; --bnd-head: #1d1c1a; --bnd-label: #3a3732;
   --bnd-accent: #a3161a; --bnd-accent-ink: #ffffff; --bnd-gold: #a3161a; --bnd-gold-ink: #9b1418; --bnd-link: #8f1215;
   --bnd-chip-bg: #e4dccb; --bnd-chip-ink: #262420; --bnd-chip-line: #c7bda7;
@@ -81,15 +81,15 @@ body.bnd-on main { max-width: 1720px; }
   --bnd-cover-1: #e9e3d3; --bnd-cover-2: #b8ae98; --bnd-plaque: #1d1c1a; --bnd-plaque-ink: #f3efe4;
   --bnd-f-title: "American Typewriter", "Courier New", Courier, "Nimbus Mono PS", "Liberation Mono", monospace;
   --bnd-f-head: "American Typewriter", "Courier New", Courier, "Nimbus Mono PS", "Liberation Mono", monospace;
-  --bnd-f-body: Georgia, "Times New Roman", serif;
-  --bnd-f-label: "Courier New", Courier, "Nimbus Mono PS", "Liberation Mono", monospace;
+  --bnd-f-body: "Times New Roman", "Liberation Serif", Georgia, serif;
+  --bnd-f-label: "Courier New", Courier, "Nimbus Mono PS", "Courier 10 Pitch", "Liberation Mono", monospace;
   --bnd-title-tt: uppercase; --bnd-title-ls: .06em; --bnd-r: 3px; --bnd-r-page: 2px; --bnd-shadow: 0 2px 0 #d8d0bd, 0 4px 0 #cbc2ad, 0 26px 60px rgba(0, 0, 0, .5);
 }
 .bnd[data-look="romance"] {
   --bnd-desk: #f3dfe0; --bnd-desk-ink: #3b2830;
   --bnd-rail: #6e2a42; --bnd-rail-ink: #fff3f3; --bnd-rail-muted: #f1c9d3; --bnd-rail-on: #fde8ec; --bnd-rail-on-ink: #6e2a42; --bnd-rail-line: #8f4a62;
-  --bnd-paper: #fffaf7; --bnd-page-edge: #efd3d3; --bnd-frame: rgba(192, 154, 91, .45);
-  --bnd-card: #ffffff; --bnd-card-2: #fcefee; --bnd-line: #efd6d6;
+  --bnd-paper: #fff1f1; --bnd-page-edge: #efc6cc; --bnd-frame: rgba(192, 154, 91, .55);
+  --bnd-card: #fffbfb; --bnd-card-2: #fde6ea; --bnd-line: #f0cdd5;
   --bnd-ink: #3b2830; --bnd-muted: #6a5059; --bnd-head: #8a3450; --bnd-label: #7a3a52;
   --bnd-accent: #a8496a; --bnd-accent-ink: #ffffff; --bnd-gold: #c09a5b; --bnd-gold-ink: #85632a; --bnd-link: #93385a;
   --bnd-chip-bg: #f9e3e8; --bnd-chip-ink: #6e2a42; --bnd-chip-line: #f0c9d3;
@@ -97,9 +97,9 @@ body.bnd-on main { max-width: 1720px; }
   --bnd-ok: #2f6a4a; --bnd-ok-bg: #e4f1ea; --bnd-draft: #7e5a1d; --bnd-draft-bg: #f7ead2; --bnd-needs: #9a3346; --bnd-needs-bg: #fadbe1;
   --bnd-rel-family: #43705c; --bnd-rel-love: #b03a64; --bnd-rel-ally: #4b6c95; --bnd-rel-rival: #9a5c1a; --bnd-rel-enemy: #9e2b3a; --bnd-rel-mentor: #7c612c; --bnd-rel-other: #7a6870;
   --bnd-cover-1: #f7d6dd; --bnd-cover-2: #d98ea5; --bnd-plaque: #fffaf7; --bnd-plaque-ink: #8a3450;
-  --bnd-f-title: "Segoe Script", "Snell Roundhand", "Apple Chancery", "URW Chancery L", "Z003", "Brush Script MT", cursive;
-  --bnd-f-head: Georgia, "Times New Roman", serif;
-  --bnd-f-body: Georgia, "Times New Roman", serif;
+  --bnd-f-title: "Segoe Script", "Snell Roundhand", "Apple Chancery", "URW Chancery L", "Z003", "Brush Script MT", "FreeSerif", serif;
+  --bnd-f-head: "Iowan Old Style", Cambria, Caladea, "FreeSerif", serif;
+  --bnd-f-body: Cambria, Caladea, Georgia, serif;
   --bnd-r: 18px; --bnd-r-page: 22px; --bnd-shadow: 0 18px 60px rgba(168, 73, 106, .16);
 }
 .bnd[data-look="horror"] {
@@ -115,9 +115,9 @@ body.bnd-on main { max-width: 1720px; }
   --bnd-warn-line: #e0a24a; --bnd-bad: #ff7b70;
   --bnd-rel-family: #8fd0a2; --bnd-rel-love: #ff9ab6; --bnd-rel-ally: #93c0ea; --bnd-rel-rival: #f0b061; --bnd-rel-enemy: #ff6b63; --bnd-rel-mentor: #d8bf8a; --bnd-rel-other: #b7a99a; --bnd-on-rel: #140808;
   --bnd-cover-1: #2a0a0b; --bnd-cover-2: #050404; --bnd-plaque: #0b0707; --bnd-plaque-ink: #ece4d6;
-  --bnd-f-title: "Bodoni MT Condensed", "Iowan Old Style", "Times New Roman", "Liberation Serif", serif;
-  --bnd-f-head: "Iowan Old Style", "Times New Roman", "Liberation Serif", serif;
-  --bnd-f-body: Georgia, "Times New Roman", serif;
+  --bnd-f-title: "Bodoni MT Condensed", "Iowan Old Style", "Didot", "DejaVu Serif", serif;
+  --bnd-f-head: "Bodoni MT", Didot, "DejaVu Serif", serif;
+  --bnd-f-body: Georgia, "DejaVu Serif", serif;
   --bnd-title-tt: uppercase; --bnd-title-ls: .05em; --bnd-r: 3px; --bnd-r-page: 2px; --bnd-shadow: 0 0 0 1px #2e1f1c, 0 30px 90px rgba(0, 0, 0, .8);
 }
 .bnd[data-look="playful"] {
@@ -729,6 +729,114 @@ a.bnd-pin:hover .bnd-pin-n, a.bnd-pin:focus-visible .bnd-pin-n { background: var
   .bnd-runhead { font-size: 10px; letter-spacing: .04em; }
 }
 
+/* ---------------------------------------------------------------- ★ THE main character (the protagonist: only one) */
+.bnd-prot { display: inline-flex; align-items: center; gap: 3px; width: max-content; max-width: 100%; background: var(--bnd-accent); color: var(--bnd-accent-ink);
+  border-radius: 99px; padding: 3px 10px 3px 8px; font: 700 11.5px/1.3 var(--bnd-f-label); letter-spacing: .03em; box-shadow: 0 0 0 2px var(--bnd-gold); margin: 0 0 6px; }
+.bnd-prot > span[aria-hidden] { font-size: 1.15em; line-height: 1; }
+.bnd-prot-s { font-size: 10.5px; padding: 2px 8px 2px 6px; margin: 0 0 3px; display: flex; }
+.bnd-prot-l { font-size: 14px; padding: 5px 14px 5px 11px; margin: 0; }
+.bnd-role-lead { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: -4px 0 12px; }
+.bnd-role-why { font-size: 13px; color: var(--bnd-muted); font-style: italic; }
+.bnd-role-chip { display: inline-block; border: 1px solid var(--bnd-chip-line); background: var(--bnd-chip-bg); color: var(--bnd-chip-ink); border-radius: 99px; padding: 3px 11px; font: 600 12px var(--bnd-f-label); }
+.bnd-band.is-protagonist .bnd-band-pic img, .bnd-band.is-protagonist .bnd-band-pic .bnd-pic-ph { box-shadow: 0 0 0 6px var(--bnd-card-2), 0 0 0 9px var(--bnd-gold); }
+.bnd-facts > .bnd-fact-role { grid-column: 1 / -1; border-right: 0; grid-template-columns: minmax(0, 20%) minmax(0, 1fr); }
+.bnd-facts > .bnd-fact-role ~ .bnd-fact:nth-child(odd) { border-right: 0; }
+.bnd-facts > .bnd-fact-role ~ .bnd-fact:nth-child(even) { border-right: 1px solid var(--bnd-line); }
+.bnd-fact-role.is-protagonist dd { font-weight: 700; color: var(--bnd-head); }
+.bnd-prot-star { color: var(--bnd-gold-ink); }
+@container (max-width: 620px) { .bnd-facts > .bnd-fact-role ~ .bnd-fact:nth-child(even) { border-right: 0; } .bnd-facts > .bnd-fact-role { grid-template-columns: minmax(0, 40%) minmax(0, 1fr); } }
+@media screen and (max-width: 1100px) { .bnd-facts > .bnd-fact-role { grid-template-columns: minmax(0, 40%) minmax(0, 1fr); } }
+.bnd-card.is-protagonist { border: 2px solid var(--bnd-accent); box-shadow: 0 0 0 3px var(--bnd-hl), 0 6px 18px rgba(0, 0, 0, .08); padding: 15px; }
+.bnd-card.is-protagonist .bnd-card-pic, .bnd-card.is-protagonist .bnd-card-pic img { width: 112px; min-width: 112px; height: 140px; }
+.bnd-card.is-protagonist h4 { font-size: 23px; }
+@container (min-width: 600px) { .bnd-card.is-protagonist { grid-column: span 2; } }
+.bnd-mini-card.is-protagonist { border: 2px solid var(--bnd-accent); background: var(--bnd-hl); }
+.bnd-mini-card.is-protagonist .bnd-bubble { box-shadow: 0 0 0 3px var(--bnd-gold); }
+.bnd-tile.is-protagonist { border: 2px solid var(--bnd-accent); background: var(--bnd-hl); }
+
+/* ---------------------------------------------------------------- At a glance: the approved-vs-draft strip */
+.bnd-glance-progress { margin: 4px 0 16px; padding: 10px 16px 8px; border: 1px solid var(--bnd-line); border-radius: var(--bnd-r); background: var(--bnd-card-2); }
+.bnd-gp-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 18px; font-size: 13.5px; color: var(--bnd-ink); }
+.bnd-gp-pct { font: 700 17px var(--bnd-f-head); color: var(--bnd-head); }
+.bnd-gp-k.is-waiting { color: var(--bnd-draft); font-weight: 600; }
+.bnd-gp-link { margin-left: auto; font-size: 12.5px; color: var(--bnd-link); }
+.bnd-gp-bar { height: 7px; margin: 7px 0 2px; }
+
+/* ---------------------------------------------------------------- 12.3 the timeline strip
+   one grid: each event is a column of 3 rows (label + date | dot on the line | chapter chip + clash note) shared through
+   subgrid, so every dot sits on the same line however long a label is; on screen it scrolls inside its own box */
+.bnd-tls { overflow-x: auto; overflow-y: hidden; padding: 2px 2px 12px; scrollbar-width: thin; overscroll-behavior-x: contain; border-radius: 8px; }
+.bnd-tls:focus-visible { outline: 2px solid var(--bnd-accent); outline-offset: 2px; }
+.bnd-tls-line { list-style: none; margin: 0; padding: 0; display: grid; grid-auto-flow: column; grid-template-rows: auto 30px auto; grid-auto-columns: minmax(172px, 1fr);
+  width: max-content; min-width: 100%; }
+.bnd-tls-ev { grid-row: 1 / span 3; display: grid; grid-template-rows: subgrid; text-align: center; min-width: 0; }
+.bnd-tls-top { align-self: end; display: grid; gap: 2px; padding: 0 8px 6px; }
+.bnd-tls-what { font: 600 13.5px/1.25 var(--bnd-f-head); color: var(--bnd-ink); overflow-wrap: anywhere; max-width: 210px; margin: 0 auto; }
+.bnd-tls-date { font: 700 11px var(--bnd-f-label); color: var(--bnd-label); letter-spacing: .03em; }
+.bnd-tls-mid { display: flex; align-items: center; justify-content: center; background: linear-gradient(var(--bnd-gold), var(--bnd-gold)) center / 100% 2px no-repeat; }
+.bnd-tls-ev:first-child .bnd-tls-mid { background-position: right center; background-size: 50% 2px; }
+.bnd-tls-ev:last-child .bnd-tls-mid { background-position: left center; background-size: 50% 2px; }
+.bnd-tls-ev:only-child .bnd-tls-mid { background: none; }
+.bnd-tls-dot { width: 14px; height: 14px; border-radius: 50%; background: var(--bnd-accent); border: 3px solid var(--bnd-card); box-shadow: 0 0 0 1px var(--bnd-accent);
+  display: flex; align-items: center; justify-content: center; font: 900 11px/1 var(--bnd-f-label); font-style: normal; color: #fff; }
+.bnd-tls-ev.is-clash .bnd-tls-dot { background: var(--bnd-bad); box-shadow: 0 0 0 1px var(--bnd-bad), 0 0 0 5px rgba(200, 30, 30, .2); width: 18px; height: 18px; }
+.bnd-tls-bot { display: grid; justify-items: center; align-content: start; gap: 4px; padding: 6px 8px 0; }
+.bnd-tls-ch { display: inline-block; background: var(--bnd-chip-bg); color: var(--bnd-chip-ink); border: 1px solid var(--bnd-chip-line); border-radius: 99px; padding: 2px 9px; font: 600 11.5px var(--bnd-f-label); text-decoration: none; }
+a.bnd-tls-ch:hover { text-decoration: underline; }
+.bnd-tls-note { font-size: 12px; line-height: 1.3; color: var(--bnd-needs); background: var(--bnd-needs-bg); border-radius: 6px; padding: 3px 7px; max-width: 200px; overflow-wrap: anywhere; }
+.bnd-tls-list { margin-top: 10px; }
+.bnd-tls-list > summary { cursor: pointer; font-size: 13px; color: var(--bnd-link); font-weight: 600; }
+.bnd-tls-list[open] > summary { margin-bottom: 8px; }
+/* phone width (the section box) and print: the strip wraps into rows instead of scrolling */
+@container (max-width: 560px) {
+  .bnd-tls { overflow: visible; }
+  .bnd-tls-line { grid-auto-flow: row; grid-template-rows: none; grid-template-columns: repeat(2, minmax(0, 1fr)); width: auto; min-width: 0; row-gap: 0; }
+  .bnd-tls-bot { padding-bottom: 14px; }
+  .bnd-tls-ev { grid-row: span 3; }
+  .bnd-tls-ev:first-child .bnd-tls-mid, .bnd-tls-ev:last-child .bnd-tls-mid { background-position: center; background-size: 100% 2px; }
+}
+
+/* ---------------------------------------------------------------- each look's own card shapes and ornaments
+   (so no two looks read alike: fantasy = framed parchment panels, romance = soft rounded keepsake cards with oval
+   portraits, noir = manila case folders with tabs and pinned mugshots, classic = the studio's plain ruled boxes) */
+.bnd[data-look="fantasy"] .bnd-page { background-image: radial-gradient(ellipse at 50% 40%, transparent 55%, rgba(110, 70, 20, .16) 100%); }
+.bnd[data-look="fantasy"] .bnd-page::before { border: 3px double var(--bnd-gold); border-radius: 0; inset: 20px; }
+.bnd[data-look="fantasy"] .bnd-sec:not(.bnd-sec-plain) { border-radius: 2px; border-color: var(--bnd-hl-line); box-shadow: inset 0 0 0 4px var(--bnd-card), inset 0 0 0 5px var(--bnd-line); }
+.bnd[data-look="fantasy"] .bnd-sec-h { border-bottom: 0; background: linear-gradient(90deg, var(--bnd-gold), transparent) bottom / 100% 1px no-repeat; }
+.bnd[data-look="fantasy"] .bnd-sec-h h3 { font-variant: small-caps; letter-spacing: .04em; font-size: 22px; }
+.bnd[data-look="fantasy"] .bnd-sec-h h3::before { content: "❦ "; color: var(--bnd-gold-ink); }
+.bnd[data-look="fantasy"] .bnd-card, .bnd[data-look="fantasy"] .bnd-mini-card, .bnd[data-look="fantasy"] .bnd-rel, .bnd[data-look="fantasy"] .bnd-tile, .bnd[data-look="fantasy"] .bnd-lock {
+  border: 3px double var(--bnd-hl-line); border-radius: 2px; }
+.bnd[data-look="fantasy"] .bnd-card-pic, .bnd[data-look="fantasy"] .bnd-card-pic img { border-radius: 46px 46px 2px 2px; }   /* arched like a window */
+.bnd[data-look="fantasy"] .bnd-card.is-protagonist, .bnd[data-look="fantasy"] .bnd-mini-card.is-protagonist, .bnd[data-look="fantasy"] .bnd-tile.is-protagonist { border: 3px double var(--bnd-accent); }
+
+.bnd[data-look="romance"] .bnd-page::before { border-radius: 18px; border-style: dashed; }
+.bnd[data-look="romance"] .bnd-sec:not(.bnd-sec-plain) { border: 0; border-radius: 24px; background: linear-gradient(90deg, #e9a3b6, #ecd3a4) top / 100% 5px no-repeat, var(--bnd-card);
+  box-shadow: 0 10px 28px rgba(168, 73, 106, .12); }
+.bnd[data-look="romance"] .bnd-sec-h { border-bottom: 1px dotted var(--bnd-hl-line); }
+.bnd[data-look="romance"] .bnd-sec-h h3 { font-family: var(--bnd-f-title); font-size: 25px; color: var(--bnd-head); }
+.bnd[data-look="romance"] .bnd-sec-h h3::after { content: " ♡"; font-style: normal; font-size: .7em; color: var(--bnd-accent); }
+.bnd[data-look="romance"] .bnd-card, .bnd[data-look="romance"] .bnd-mini-card, .bnd[data-look="romance"] .bnd-rel, .bnd[data-look="romance"] .bnd-tile, .bnd[data-look="romance"] .bnd-lock {
+  border-radius: 26px; border-color: var(--bnd-chip-line); background: var(--bnd-card); box-shadow: 0 4px 14px rgba(168, 73, 106, .08); }
+.bnd[data-look="romance"] .bnd-card-pic, .bnd[data-look="romance"] .bnd-card-pic img { border-radius: 50% / 42%; }        /* oval keepsake portraits */
+.bnd[data-look="romance"] .bnd-band-pic img, .bnd[data-look="romance"] .bnd-band-pic .bnd-pic-ph { border-radius: 48% / 40%; }
+.bnd[data-look="romance"] .bnd-facts { border-radius: 18px; }
+.bnd[data-look="romance"] .bnd-prot, .bnd[data-look="romance"] .bnd-chip, .bnd[data-look="romance"] .bnd-badge { border-radius: 99px; }
+
+.bnd[data-look="noir"] .bnd-page { background-image: repeating-linear-gradient(transparent 0 27px, rgba(29, 28, 26, .055) 27px 28px); }
+.bnd[data-look="noir"] .bnd-page::before { border-radius: 0; }
+.bnd[data-look="noir"] .bnd-sec:not(.bnd-sec-plain) { position: relative; margin-top: 34px; border-radius: 0 4px 2px 2px; }
+.bnd[data-look="noir"] .bnd-sec:not(.bnd-sec-plain)::before { content: ""; position: absolute; top: -15px; left: -1px; width: min(170px, 40%); height: 14px;
+  background: var(--bnd-card); border: 1px solid var(--bnd-line); border-bottom: 0; border-radius: 6px 10px 0 0; }   /* the folder tab */
+.bnd[data-look="noir"] .bnd-sec-h { border-bottom: 2px solid var(--bnd-accent); }
+.bnd[data-look="noir"] .bnd-card, .bnd[data-look="noir"] .bnd-mini-card, .bnd[data-look="noir"] .bnd-rel, .bnd[data-look="noir"] .bnd-tile, .bnd[data-look="noir"] .bnd-lock {
+  border-radius: 0; background: #fffdf6; border-color: #b9ad8c; border-top: 3px solid var(--bnd-accent); }               /* index cards */
+.bnd[data-look="noir"] .bnd-card-pic { transform: rotate(-2.5deg); border: 4px solid #fff; border-bottom-width: 14px; border-radius: 0; box-shadow: 2px 3px 0 rgba(0, 0, 0, .22); }
+.bnd[data-look="noir"] .bnd-card-pic img { border-radius: 0; }
+.bnd[data-look="noir"] .bnd-prot { border-radius: 2px; box-shadow: 0 0 0 2px var(--bnd-ink); text-transform: uppercase; letter-spacing: .08em; transform: rotate(-2deg); }
+.bnd[data-look="noir"] .bnd-tls-dot { border-radius: 2px; }
+.bnd[data-look="classic"] .bnd-sec-h h3::before { content: "§ "; color: var(--bnd-gold-ink); font-size: .8em; }
+
 /* ---------------------------------------------------------------- print: clean pages on light paper, no app chrome */
 @media print {
   body.bnd-on .topbar, body.bnd-on .sidenav, body.bnd-on .skip-link, body.bnd-on .ai-dock, body.bnd-on .wf-drawer, body.bnd-on .toast,
@@ -752,6 +860,14 @@ a.bnd-pin:hover .bnd-pin-n, a.bnd-pin:focus-visible .bnd-pin-n { background: var
   .bnd-sec-h { break-after: avoid; }
   .bnd-rel, .bnd-card, .bnd-scene, .bnd-lock, .bnd-power, .bnd-fact, .bnd-arc li, .bnd-beats li, .bnd-timeline li, .bnd-table tr { break-inside: avoid; }
   .bnd-relmap { max-height: 150mm; }
+  .bnd-tls { overflow: visible; padding-bottom: 0; }
+  .bnd-tls-line { grid-auto-flow: row; grid-template-rows: none; grid-template-columns: repeat(4, minmax(0, 1fr)); width: auto; min-width: 0; row-gap: 0; }
+  .bnd-tls-bot { padding-bottom: 10px; }
+  .bnd-tls-ev { grid-row: span 3; break-inside: avoid; }
+  .bnd-tls-ev:first-child .bnd-tls-mid, .bnd-tls-ev:last-child .bnd-tls-mid { background-position: center; background-size: 100% 2px; }
+  .bnd-card.is-protagonist, .bnd-mini-card.is-protagonist { box-shadow: none; }
+  .bnd[data-look="romance"] .bnd-sec:not(.bnd-sec-plain) { box-shadow: none !important; border: 1px solid var(--bnd-line); }
+  .bnd[data-look="noir"] .bnd-card-pic { transform: none; }
   .bnd-foot { break-before: avoid; }
   /* every look prints on light paper: the dark ones swap to their light twins, accents kept */
   .bnd, .bnd[data-look] { --bnd-desk: #fff; --bnd-shadow: none; }
@@ -780,3 +896,4 @@ a.bnd-pin:hover .bnd-pin-n, a.bnd-pin:focus-visible .bnd-pin-n { background: var
 /* the cover's artwork box is a plain block in every look (no card frame around the picture) */
 .bnd .bnd-sec.bnd-sec-plain { background: none; border: 0; box-shadow: none; padding: 0; }
 .bnd[data-look="playful"] .bnd-sec.bnd-sec-plain > .bnd-sec-h { border-bottom: 0; }
+.bnd[data-look="romance"] .bnd-title, .bnd[data-look="romance"] .bnd-name, .bnd[data-look="romance"] .bnd-plaque-title, .bnd[data-look="romance"] .bnd-rail-brand b { font-style: italic; }

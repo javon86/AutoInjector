@@ -2,10 +2,12 @@
 
 ``build(app, pid, branch)`` collects, read-only, from the book and returns the contract of the binder lane's PLAN.md:
 
-    {schema_version, book: {title, author, genre, look, look_default, look_stored, looks}, generated_at, updated_at,
+    {schema_version, book: {title, author, genre, look, look_default, look_stored, looks,
+                            protagonist: {record_id, name, page_id, why} | null}, generated_at, updated_at,
+     progress: {approved_percent, approved, pages, drafts_waiting, missing_pictures},
      pages: [{template, entry_id, title, page_id, page, status: approved|draft|needs_you, target?,
               sections: {<code>: {fields: {<id>: field}, rows?: [{<id>: field, _meta?}]}}, pics: {<id>: pic},
-              graph? (6) | map? (9)}],
+              graph? (6) | map? (9), story_role?: {key, label, icon} + role_label, role_icon, is_protagonist (5)}],
      contents: [{template, title, count, page, page_id}], todo: [{what, page_id, action}], counts}
 
 A field is ``{value, status: approved|proposed|supplied|empty|auto, source, edit?, draft?, new?}``; a picture
@@ -833,6 +835,24 @@ class Book:
         rid = self.cast.get("protagonist")
         return next((c for c in self.chars if c["record_id"] == rid), None) or self.chars[0]
 
+    def is_protagonist(self, c: dict | None) -> bool:
+        return bool(c and self.protagonist and c["record_id"] == self.protagonist["record_id"])
+
+    def role_fields(self, c: dict) -> dict:
+        """The per-character role fields every view renders from: {role_label, role_icon, is_protagonist}, from the
+        stored story role (story_roles)."""
+        k = self.story_role(c)
+        prot = self.is_protagonist(c)
+        return {"role_label": "Main character — protagonist" if prot else story_roles_mod.label(k),
+                "role_icon": story_roles_mod.icon(k), "is_protagonist": prot}
+
+    def protagonist_info(self) -> dict | None:
+        c = self.protagonist
+        if not c:
+            return None
+        return {"record_id": c["record_id"], "name": c["name"], "page_id": f"character-{slug(c['record_id'])}",
+                "why": self.cast.get("reason") or ""}
+
 
 # ====================================================================== pages
 class Page:
@@ -1085,7 +1105,10 @@ def a_name_aliases(page: Page):
 
 
 def a_sheet_role(page: Page):
-    return story_roles_mod.label(page.book.story_role(page.subject["char"])) if page.subject.get("char") else ""
+    c = page.subject.get("char")
+    if not c:
+        return ""
+    return "Main character — protagonist" if page.book.is_protagonist(c) else story_roles_mod.label(page.book.story_role(c))
 
 
 def a_tagline(page: Page):
@@ -1384,7 +1407,7 @@ def _graph(b: Book) -> dict:
         d = b.dossiers.get(c["record_id"]) or {}
         pt = ((d.get("art") or {}).get("portrait") or {})
         nodes.append({"id": c["record_id"], "name": c["name"], "page_id": f"character-{slug(c['record_id'])}",
-                      "portrait": pt.get("url"), "role": b.role_of(c)})
+                      "portrait": pt.get("url"), "role": b.role_of(c), **b.role_fields(c)})
         for row in _rel_rows_of(b, c):
             other = b.char_by_name(row["name"])
             if not other or other["record_id"] == c["record_id"]:
@@ -1855,7 +1878,9 @@ def contents_rows(page: Page) -> list[dict]:
 
 def jump_rows(page: Page) -> list[dict]:
     b = page.book
-    chars = [(c["name"], _portrait_of(b, c["record_id"]), f"character-{slug(c['record_id'])}") for c in b.chars]
+    chars = [(c["name"], _portrait_of(b, c["record_id"]), f"character-{slug(c['record_id'])}")
+             for c in sorted(b.chars, key=lambda c: not b.is_protagonist(c))]
+    prot_page = (b.protagonist_info() or {}).get("page_id")
     places = [(p["name"], {"url": ((p.get("dossier") or {}).get("art") or {}).get("establishing", {}).get("url")}
                if ((p.get("dossier") or {}).get("art") or {}).get("establishing") else None, f"place-{slug(p['id'])}")
               for p in b.places]
@@ -1875,6 +1900,9 @@ def jump_rows(page: Page) -> list[dict]:
             if x[1] and x[1].get("url"):
                 page.pics[f"{fid}#{i + 1}"] = {"url": x[1]["url"], "alt": x[0]}
             row[key] = {"value": x[0], "status": "auto", "source": f"row:{key}", "link": x[2]}
+            if key == "character" and x[2] == prot_page:
+                row[key]["protagonist"] = True
+                row["_meta"]["protagonist"] = "2.2.1"
         rows.append(row)
     return rows
 
@@ -1933,7 +1961,8 @@ def main_cast_rows(page: Page) -> list[dict]:
     for i, c in enumerate(_main_cast(b)):
         rows.append({"portrait": _row_pic(page, i, "3.6.1", _portrait_of(b, c["record_id"])), "name": c["name"],
                      "role": _role_text(b, c), "one_line": _one_line(b, c) or "",
-                     "_meta": {"entry_id": c["record_id"], "page_id": f"character-{slug(c['record_id'])}"}})
+                     "_meta": {"entry_id": c["record_id"], "page_id": f"character-{slug(c['record_id'])}",
+                               **b.role_fields(c)}})
     return rows
 
 
@@ -1941,7 +1970,7 @@ def cast_rows(page: Page) -> list[dict]:
     b = page.book
     order = {k: i for i, (k, _l) in enumerate(story_roles_mod.GROUPS)}
     rows = []
-    chars = sorted(b.chars, key=lambda c: (order[b.role_group(c)], (b.dossiers.get(c["record_id"]) or {}).get("code")
+    chars = sorted(b.chars, key=lambda c: (order[b.role_group(c)], not b.is_protagonist(c), (b.dossiers.get(c["record_id"]) or {}).get("code")
                                            or ""))
     for i, c in enumerate(chars):
         d = b.dossiers.get(c["record_id"]) or {}
@@ -1959,7 +1988,7 @@ def cast_rows(page: Page) -> list[dict]:
                                "group": GROUP_SHORT[b.role_group(c)],
                                "group_label": story_roles_mod.GROUP_LABEL[b.role_group(c)],
                                "story_role": b.story_role(c), "story_role_icon": story_roles_mod.icon(b.story_role(c)),
-                               "has_portrait": bool(_portrait_of(b, c["record_id"]))}})
+                               "has_portrait": bool(_portrait_of(b, c["record_id"])), **b.role_fields(c)}})
     return rows
 
 
@@ -2191,18 +2220,19 @@ def protected_rows(page: Page) -> list[dict]:
 def timeline_rows(page: Page) -> list[dict]:
     b = page.book
     nums = {c["chapter_id"]: c["number"] for c in b.chapters}
-    clashes = set()
+    clashes: dict = {}  # chapter id -> the first clash note
     for f in b.timeline.get("findings") or []:
         if f.get("check") in ("year_arithmetic", "time_backwards"):
             for p in f.get("passages") or []:
-                clashes.add(p.get("chapter"))
+                clashes.setdefault(p.get("chapter"), _clip(f.get("detail") or "", 160))
     rows = []
     for y in b.timeline.get("years") or []:
         if not isinstance(y, dict):
             continue
         rows.append({"date": str(y.get("year") or y.get("value") or ""), "event": _clip(y.get("excerpt"), 200),
                      "chapter": f"Ch {nums.get(y.get('chapter'), '?')}",
-                     "clash": "⚠ clash" if y.get("chapter") in clashes else ""})
+                     "clash": (f"⚠ {clashes[y.get('chapter')]}" if clashes[y.get("chapter")] else "⚠ clash")
+                     if y.get("chapter") in clashes else ""})
     for c in b.chars:  # the characters' dated backstory (titles like "2157-2166 / foundations")
         d = b.dossiers.get(c["record_id"]) or {}
         for s in d.get("sections") or []:
@@ -2318,6 +2348,9 @@ def fill(page: Page) -> dict:
            "pics": page.pics, "icon": TEMPLATE_ICONS[page.template]}
     if page.target:
         out["target"] = page.target
+    if page.template == "5" and page.subject.get("char"):
+        out["story_role"] = page.book.story_role(page.subject["char"])
+        out.update(page.book.role_fields(page.subject["char"]))
     for k in ("graph", "map"):
         if page.extra.get(k):
             out[k] = page.extra[k]
@@ -2447,9 +2480,12 @@ def build(app, pid: str, branch: str = "main", *, look: str | None = None) -> di
     if not cover_art:
         missing += 1
     b.__dict__["_todo"] = todo
+    waiting = sum(1 for f in filled.values() if f["status"] != "approved")
+    progress = {"approved_percent": round(100 * (approved + 2) / total), "approved": approved + 2, "pages": total,
+                "drafts_waiting": waiting, "missing_pictures": missing}
     b.__dict__["_late"] = {
-        "approved_percent": f"{round(100 * (approved + 2) / total)}%",
-        "drafts_waiting": _plural(sum(1 for f in filled.values() if f["status"] != "approved"), "page") + " waiting",
+        "approved_percent": f"{progress['approved_percent']}%",
+        "drafts_waiting": _plural(waiting, "page") + " waiting",
         "missing_pictures": _plural(missing, "picture") + " missing" if missing else "None missing",
         "last_updated": _last_updated(b), "book_revision": _book_revision(b)}
     # --- the contents rows (counts and first pages)
@@ -2491,8 +2527,8 @@ def build(app, pid: str, branch: str = "main", *, look: str | None = None) -> di
     return {"schema_version": SCHEMA_VERSION, "generated_at": now_iso(), "updated_at": _last_updated(b),
             "book": {"title": b.title, "author": b.prof.get("author") or "", "genre": b.prof.get("genre") or "",
                      "look": chosen, "look_default": default, "look_stored": stored or None,
-                     "looks": [{"id": k, **v} for k, v in LOOKS.items()]},
-            "pages": out_pages, "contents": contents,
+                     "looks": [{"id": k, **v} for k, v in LOOKS.items()], "protagonist": b.protagonist_info()},
+            "pages": out_pages, "contents": contents, "progress": progress,
             "todo": [{k: t[k] for k in ("what", "page_id", "action", "page", "kind")} for t in todo],
             "counts": {"pages": len(out_pages), "approved": approved + 2, "missing_pictures": missing,
                        "new_fields": bf.counts(b.extras)},

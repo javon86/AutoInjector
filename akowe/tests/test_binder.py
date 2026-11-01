@@ -232,6 +232,72 @@ def test_auto_fields(demo):
     assert fld(rel, "6.1.3")["value"] == "Mara Vell"
 
 
+def test_protagonist_single_and_the_relationship_map_centre(demo):
+    app, pid, d = demo
+    prot = d["book"]["protagonist"]
+    mara = char_rid(app, pid, "Mara Vell")
+    assert prot == {"record_id": mara, "name": "Mara Vell", "page_id": f"character-{binder.slug(mara)}",
+                    "why": "marked as the main character"}
+    rel = page_of(d, template="6")
+    assert rel["graph"]["centre"] == prot["record_id"]
+    assert [n["id"] for n in rel["graph"]["nodes"] if n["is_protagonist"]] == [prot["record_id"]]
+    chars = [p for p in d["pages"] if p["template"] == "5"]
+    assert [p["page_id"] for p in chars if p["is_protagonist"]] == [prot["page_id"]]     # exactly one
+    assert page_of(d, "Mara Vell")["story_role"] == {"key": "protagonist", "label": "Main character — protagonist",
+                                                    "icon": "★", "protagonist": True}
+    assert {k: page_of(d, "Mara Vell")[k] for k in ("role_label", "role_icon", "is_protagonist")} == {
+        "role_label": "Main character — protagonist", "role_icon": "★", "is_protagonist": True}
+    assert page_of(d, "Tom Reed")["role_label"] == "Supporting" and page_of(d, "Tom Reed")["role_icon"] == ""
+    assert page_of(d, "Tom Reed")["story_role"]["key"] == "side" and page_of(d, "Moki Vey")["story_role"]["key"] == "minor"
+    cast = page_of(d, template="4")["sections"]["4.2"]["rows"]
+    assert cast[0]["_meta"]["is_protagonist"] and cast[0]["4.2.2"]["value"] == "Mara Vell"
+    assert sum(1 for r in cast if r["_meta"]["is_protagonist"]) == 1
+    glance = page_of(d, template="3")["sections"]["3.6"]["rows"]
+    assert glance[0]["_meta"]["is_protagonist"] and sum(1 for r in glance if r["_meta"]["is_protagonist"]) == 1
+    jump = page_of(d, template="2")["sections"]["2.2"]["rows"]
+    assert jump[0]["2.2.1"]["value"] == "Mara Vell" and jump[0]["2.2.1"]["protagonist"] is True
+    # the At-a-glance progress strip reads the same numbers as the cover's 1.4.1–1.4.3
+    cover = page_of(d, template="1")
+    assert f"{d['progress']['approved_percent']}%" == fld(cover, "1.4.1")["value"]
+    assert fld(cover, "1.4.2")["value"].startswith(str(d["progress"]["drafts_waiting"]))
+    assert set(d["progress"]) == {"approved_percent", "approved", "pages", "drafts_waiting", "missing_pictures"}
+
+
+def _fake_book(chars, *, sheets=None, povs=(), idea=""):
+    """A binder Book with only what the protagonist pick reads (no store)."""
+    b = binder.Book.__new__(binder.Book)
+    cs = [{"record_id": f"A01-{n.split()[0].lower()}", "subject_id": n.split()[0].lower(), "name": n} for n in chars]
+    b.__dict__.update(chars=cs, sheets={f"A01-{k}": {"sheet": {"role": v}} for k, v in (sheets or {}).items()},
+                      chapters=[{"chapter_id": f"ch-{i}", "number": i + 1, "plan": {"pov_id": pov}}
+                                for i, pov in enumerate(povs)], prof={"idea": idea}, dossiers={})
+    return b
+
+
+def test_protagonist_pick_and_fallbacks():
+    # nothing marked, no viewpoint chapters, no name in the idea: the first character of the cast
+    b = _fake_book(["Ada Quill", "Bram Stoke", "Cy Rune"])
+    assert b.protagonist["name"] == "Ada Quill" and b.protagonist_info()["why"] == "the first character of the cast"
+    assert b.role_of(b.chars[0]) == "main" and b.story_role(b.chars[1])["key"] == "minor"
+    # the most viewpoint chapters
+    b = _fake_book(["Ada Quill", "Bram Stoke", "Cy Rune"], povs=["cy", "bram", "cy"])
+    assert b.protagonist["name"] == "Cy Rune" and b.protagonist_info()["why"] == "the most viewpoint chapters"
+    assert b.story_role(b.chars[1]) == {"key": "main", "label": "Main character", "icon": "", "protagonist": False}
+    # the book idea names them (beats viewpoint chapters)
+    b = _fake_book(["Ada Quill", "Bram Stoke", "Cy Rune"], povs=["cy", "cy"], idea="When Bram Stoke wakes, nothing is his.")
+    assert b.protagonist["name"] == "Bram Stoke" and b.protagonist_info()["why"] == "named in the book idea"
+    # the Bible Builder's "main" mark wins over all of it
+    b = _fake_book(["Ada Quill", "Bram Stoke", "Cy Rune"], sheets={"ada": "main", "bram": "side"}, povs=["cy", "cy"],
+                   idea="When Bram Stoke wakes, nothing is his.")
+    assert b.protagonist["name"] == "Ada Quill" and b.protagonist_info()["why"] == "marked as the main character"
+    # several marked main: one protagonist only, the others stay "Main character"
+    b = _fake_book(["Ada Quill", "Bram Stoke", "Cy Rune"], sheets={"ada": "main", "cy": "main"}, povs=["cy"])
+    assert b.protagonist["name"] == "Cy Rune"
+    roles = [b.story_role(c)["key"] for c in b.chars]
+    assert roles == ["main", "minor", "protagonist"] and roles.count("protagonist") == 1
+    assert binder._graph(b)["centre"] == "A01-cy"                                     # the map centres on them too
+    assert _fake_book([]).protagonist is None and _fake_book([]).protagonist_info() is None
+
+
 # ====================================================================== 🆕 fields
 def test_new_fields_storage_validation_and_journal(book):
     app, pid = book
@@ -420,6 +486,40 @@ def test_docx_export_opens_with_sections_pictures_and_look_colour(demo):
     assert accent in xml
     other, _ = binder.export_docx(app, pid, BR, look="fantasy")
     assert binder_html.LOOK_VARS["fantasy"][2].lstrip("#").upper().encode() in other
+
+
+def test_exports_mark_the_protagonist_and_the_progress(demo):
+    import docx as python_docx
+    app, pid, d = demo
+    data, _ = binder.export_docx(app, pid, BR)
+    doc = python_docx.Document(io.BytesIO(data))
+    h1 = [p.text for p in doc.paragraphs if p.style.name == "Heading 1"]
+    assert [x for x in h1 if "★" in x] == [next(x for x in h1 if "Mara Vell" in x)]          # one ★, on the protagonist
+    texts = [p.text for p in doc.paragraphs]
+    assert "Story role: ★ Main character — protagonist" in texts and "Story role: Supporting" in texts
+    pct = d["progress"]["approved_percent"]
+    assert any(t.startswith(f"{pct}% approved") and "waiting" in t and "missing" in t for t in texts)
+    cells = [c.text for t in doc.tables for r in t.rows for c in r.cells]
+    assert "★ Mara Vell" in cells and "★ Tom Reed" not in cells
+    html, _ = binder.export_html(app, pid, BR)
+    assert html.count('class="prot"') == 1 and "Story role: ★ Main character — protagonist" in html
+    assert 'data-id="progress"' in html and f"{pct}% approved" in html
+    assert "★ Mara Vell" in html
+
+
+def test_html_renderer_draws_the_timeline_strip():
+    row = lambda date, ev, ch, clash="": {"12.3.1": {"value": date}, "12.3.2": {"value": ev}, "12.3.3": {"value": ch},  # noqa: E731
+                                          "12.3.4": {"value": clash}}
+    sections = {sec["code"]: {"fields": {}} for sec in binder.schema()["12"]["sections"]}
+    sections["12.3"]["rows"] = [row("1889", "The lamps go out", "1"), row("1888", "Back in time", "2", "⚠ the year goes backwards"),
+                                row("", "Backstory", "backstory")]
+    data = {"book": {"title": "T", "look": "classic"}, "generated_at": "x",
+            "pages": [{"template": "12", "title": "Rules & facts", "page_id": "rules", "page": 1, "status": "draft",
+                       "sections": sections, "pics": {}}]}
+    html = binder_html.render(data)
+    strip = html[html.index('<ol class="tls"'):html.index("</ol>", html.index('<ol class="tls"'))]
+    assert strip.count("<li") == 3 and strip.count('class="clash"') == 1 and "the year goes backwards" in strip
+    assert "Ch 1" in strip and "backstory" in strip and ".tls li.clash .m i{background:#b3261e" in html
 
 
 def test_pdf_without_autoinjector_and_with_a_fake_bridge(demo):

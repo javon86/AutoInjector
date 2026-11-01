@@ -89,6 +89,21 @@ font-family:var(--label);font-size:7pt;color:var(--muted);padding-top:2px}}
 .toc td{{border-bottom:1px dotted var(--rule)}}
 .toc td.n{{text-align:right;width:12%}}
 svg.graph{{width:100%;height:auto;max-height:120mm}}
+.prot{{display:inline-block;background:var(--accent);color:#fff;border-radius:99px;padding:1px 9px;font-family:var(--label);
+font-size:8.5pt;font-weight:bold;margin:0 0 6px}}
+.role{{font-family:var(--label);color:var(--muted);font-size:9pt;margin:0 0 6px}}
+.gp{{border:1px solid var(--rule);border-radius:var(--radius);padding:4px 8px;margin:0 0 8px;font-size:9pt}}
+.gp b{{color:var(--accent)}}
+.tls{{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));row-gap:6px}}
+.tls li{{display:flex;flex-direction:column;align-items:center;text-align:center;break-inside:avoid}}
+.tls .t{{flex:1;display:flex;flex-direction:column;justify-content:flex-end;padding:0 4px 3px;font-size:8.5pt}}
+.tls .t small{{color:var(--muted);font-family:var(--label);font-size:7pt}}
+.tls .m{{align-self:stretch;height:14px;background:linear-gradient(var(--accent2),var(--accent2)) center/100% 2px no-repeat;
+display:flex;justify-content:center;align-items:center}}
+.tls .m i{{width:10px;height:10px;border-radius:50%;background:var(--accent);display:block}}
+.tls li.clash .m i{{background:#b3261e;width:12px;height:12px}}
+.tls .ch{{font-family:var(--label);font-size:7pt;border:1px solid var(--rule);border-radius:99px;padding:0 6px;margin-top:3px}}
+.tls .note{{color:#9b1c14;font-size:7.5pt;margin-top:2px}}
 """
 
 
@@ -189,6 +204,30 @@ def _graph_svg(g: dict) -> str:
     return "".join(out)
 
 
+def _starred(r: dict, fid: str) -> dict:
+    """A row's name field with a ★ when the row is the protagonist (cast list, main cast, quick-jump)."""
+    f = r.get(fid) or {}
+    meta = r.get("_meta") or {}
+    if (fid in ("4.2.2", "3.6.2") and meta.get("is_protagonist")) or (fid == "2.2.1" and f.get("protagonist")):
+        return dict(f, value=f"★ {_value(f)}")
+    return f
+
+
+def _timeline_strip(rows: list) -> str:
+    """12.3 as a strip: events as dots on a line in story order (label + date above, chapter chip below, ⚠ clashes
+    red with their note), wrapping into rows of four on the printed page."""
+    out = []
+    for r in rows:
+        clash = _value(r.get("12.3.4") or {})
+        ch = _value(r.get("12.3.3") or {})
+        ch = f"Ch {ch}" if ch.isdigit() else ch
+        out.append(f'<li class="{"clash" if clash else ""}"><span class="t"><b>{escape(_value(r.get("12.3.2") or {}))}</b>'
+                   f'<small>{escape(_value(r.get("12.3.1") or {}))}</small></span><span class="m"><i></i></span>'
+                   + (f'<span class="ch">{escape(ch)}</span>' if ch else "")
+                   + (f'<span class="note">{escape(clash)}</span>' if clash else "") + "</li>")
+    return f'<ol class="tls" data-id="12.3">{"".join(out)}</ol>'
+
+
 def _page(p: dict, data: dict, pics: _Pics) -> str:
     tpl = schema()[p["template"]]
     book = data["book"]
@@ -206,7 +245,19 @@ def _page(p: dict, data: dict, pics: _Pics) -> str:
                        f'<div class="stamp">{TEMPLATE_ICONS["1"]} BOOK BIBLE</div>')
                     + "</div>")
     else:
-        body.append(f'<h1>{escape(p["title"])}</h1>')
+        prot = p["template"] == "5" and p.get("is_protagonist")
+        body.append(f'<h1>{escape(p["title"])}{" ★" if prot else ""}</h1>')
+        if p["template"] == "5" and p.get("role_label"):
+            icon = p.get("role_icon") or ""
+            body.append(f'<div class="{"prot" if prot else "role"}">Story role: {escape((icon + " ") if icon else "")}'
+                        f'{escape(p["role_label"])}</div>')
+    if p["template"] == "3" and isinstance(data.get("progress"), dict):
+        g = data["progress"]
+        pct = max(0, min(100, int(g.get("approved_percent") or 0)))
+        dw, mp = int(g.get("drafts_waiting") or 0), int(g.get("missing_pictures") or 0)
+        body.append(f'<div class="gp" data-id="progress"><b>{pct}% approved</b> · {dw} draft page{"" if dw == 1 else "s"} '
+                    f'waiting · {mp} picture{"" if mp == 1 else "s"} missing'
+                    f'<div class="bar"><i style="width:{pct}%"></i></div></div>')
     if p["template"] == "6" and p.get("graph"):
         body.append(f'<div class="box">{_graph_svg(p["graph"])}</div>')
     for sec in tpl["sections"]:
@@ -220,11 +271,14 @@ def _page(p: dict, data: dict, pics: _Pics) -> str:
                            f'<td class="n">{escape(_value(r["2.1.3"]))}</td></tr>' for r in s.get("rows") or [])
             body.append(f'<div class="box">{head}<table class="toc">{rows}</table></div>')
             continue
+        if code == "12.3" and s.get("rows"):
+            body.append(f'<div class="box">{head}{_timeline_strip(s["rows"])}</div>')
+            continue
         if "rows" in s:
             labels = "".join(f"<th>{escape(clean_label(fd['label']))}</th>" for fd in sec["fields"])
             trs = []
             for i, r in enumerate(s["rows"]):
-                tds = "".join(_cell(r.get(fd["id"]) or {}, p["pics"].get(f"{fd['id']}#{i + 1}"), pics, fd["id"])
+                tds = "".join(_cell(_starred(r, fd["id"]), p["pics"].get(f"{fd['id']}#{i + 1}"), pics, fd["id"])
                               for fd in sec["fields"])
                 trs.append(f"<tr>{tds}</tr>")
             inner = f'<table class="rows"><thead><tr>{labels}</tr></thead><tbody>{"".join(trs)}</tbody></table>' \
