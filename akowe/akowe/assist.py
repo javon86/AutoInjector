@@ -289,6 +289,68 @@ def canon_context(engine, pid: str, branch: str, *, max_approved: int = 80, max_
     return approved, drafts, protected
 
 
+def canon_subjects(store, pid: str, branch: str, *, skip: str | None = None) -> tuple[dict, dict]:
+    """Subject IDs of the Set A canon (approved revisions and live drafts, as ``canon_context`` counts them):
+    ``owned`` {subject_id: record_id} - the record's OWN subject (its first entity.name fact, else its first fact;
+    the one name rule of the book, ``characters._name_and_subject``) - and ``mentioned`` {subject_id: {record_id}}
+    - every subject any fact of a record speaks about. A subject that is only mentioned (a place record's fact about
+    a person who has no entry yet) belongs to no entry: the entry made for that person takes exactly that ID.
+    ``skip``: a record ID left out (the entry itself)."""
+    owned: dict = {}
+    mentioned: dict = {}
+    for r in store.list_records(pid, branch):
+        if not r["module_id"].startswith("A") or r["record_kind"] != "OUTPUT" or r["record_id"] == skip:
+            continue
+        rec = r
+        if r.get("approved_version") and r["approved_version"] != r["version"]:
+            rec = store.get_record(pid, branch, r["record_id"], r["approved_version"]) or r
+        if not (rec["lifecycle"] in ("APPROVED", "LOCKED") or r.get("approved_version")) and \
+                (r.get("stale") or rec["lifecycle"] in ("REJECTED", "SUPERSEDED")):
+            continue
+        facts = [f for f in (rec.get("data") or {}).get("facts") or [] if isinstance(f, dict) and f.get("subject_id")]
+        if not facts:
+            continue  # a record without facts declares no subject ID
+        owned.setdefault(chars_mod._name_and_subject(rec)[1], rec["record_id"])  # noqa: SLF001 - the one name rule
+        for f in facts:
+            mentioned.setdefault(str(f["subject_id"]), set()).add(rec["record_id"])
+    return owned, mentioned
+
+
+def realign_subject(store, pid: str, branch: str, rec: dict, reasons) -> dict | None:
+    """A Bible Builder entry whose own subject ID got a number ("silas-rook-2") while the canon already speaks about
+    that person under the plain ID ("silas-rook") that no other entry owns: a reviewer rightly asks for the canon ID,
+    which the AI fix cannot change (Akọwe gave it). Returns the entry's data with the plain ID put in (every fact
+    subject and every fact value that was the old ID), or None when this is not that case: the reviewer's reasons do
+    not name the ID, the plain ID is owned by another entry (a real clash), is not in the canon, does not fit the
+    entry's name, or the entry already has facts about the plain ID."""
+    from . import names  # noqa: PLC0415
+    data = (rec or {}).get("data") or {}
+    name, own = chars_mod._name_and_subject(rec)  # noqa: SLF001
+    m = re.fullmatch(r"(.+)-\d+", own or "")
+    if not m or own not in " ".join(str(x) for x in reasons or []):
+        return None
+    base = m.group(1)
+    facts = [f for f in data.get("facts") or [] if isinstance(f, dict)]
+    if any(f.get("subject_id") == base for f in facts):
+        return None
+    owned, mentioned = canon_subjects(store, pid, branch, skip=rec.get("record_id"))
+    if base in owned or base not in mentioned:
+        return None
+    if slugify(name, set()) != base and not names.same_person(name, names.id_names(base)[0]):
+        return None
+    out = copy.deepcopy(data)
+    for f in out.get("facts") or []:
+        if not isinstance(f, dict):
+            continue
+        if f.get("subject_id") == own:
+            f["subject_id"] = base
+        if f.get("value") == own:
+            f["value"] = base
+        elif isinstance(f.get("value"), list):
+            f["value"] = [base if v == own else v for v in f["value"]]
+    return out
+
+
 def summarize_payload(op_id: str, payload: dict) -> dict:
     """Short readable summary of a proposal (names, a line of description, key facts)."""
     payload = payload or {}
@@ -1222,6 +1284,7 @@ class BibleSession:
         self._lock = threading.RLock()
         self._worker: threading.Thread | None = None
         self.taken_subjects: set = set()
+        self.mentioned_subjects: set = set()  # subject IDs the canon only mentions (no entry owns them yet)
         self.roles: dict | None = None  # the last story-role settlement (story_roles.enforce) of a create
         self.role_notes: list[str] = []  # plain notes: who stays the one protagonist when the AI gave several
 
@@ -1505,9 +1568,7 @@ class BibleSession:
     def _add_items(self, sketch: list[dict], counts: dict, run_no: int) -> list[str]:
         with self._lock:
             approved, drafts, _ = canon_context(self.svc.engine, self.project_id, self.branch_id)
-            if not self.taken_subjects:
-                for r in approved + drafts:
-                    self.taken_subjects.update(r.get("subject_ids") or [])
+            self._load_subjects()
             # Names already used (saved canon, this session's entries, earlier rows of this sketch): an AI that
             # suggests the same character twice gets a placeholder instead, so it invents a different one.
             taken_names = {str(n).strip().lower() for r in approved + drafts
@@ -1557,14 +1618,35 @@ class BibleSession:
                 "removed_refs": [], "error": None, "slot": None, "model": None, "elapsed_ms": None,
                 "created_ref": None, "create_error": None, "run": run_no, "summary": None, "valid": None,
                 "story_role": ""}
-        if not self.taken_subjects:
-            approved, drafts, _ = canon_context(self.svc.engine, self.project_id, self.branch_id)
-            for r in approved + drafts:
-                self.taken_subjects.update(r.get("subject_ids") or [])
-        item["subject_id"] = slugify(item["name"], self.taken_subjects)
+        self._load_subjects()
+        item["subject_id"] = self._subject_for(op_id, item["name"], item["placeholder"])
         self.items[key] = item
         self.order.append(key)
         return key
+
+    def _load_subjects(self):
+        """Once per session: the subject IDs entries of the canon OWN are taken (a new entry with the same slug gets
+        a number). An ID the canon only mentions in facts of other records (a place's fact about a person without an
+        entry yet) stays free, so the entry made for that person reuses it instead of "silas-rook-2"."""
+        if self.taken_subjects:
+            return
+        owned, mentioned = canon_subjects(self.svc.store, self.project_id, self.branch_id)
+        self.taken_subjects.update(owned)
+        self.mentioned_subjects = {s for s in mentioned if s not in owned}
+
+    def _subject_for(self, op_id: str, name: str, placeholder: bool) -> str:
+        """The new entry's subject ID: its name's slug (reused as is when the canon only mentions it); for a named
+        character whose slug is not in the canon, the ONE mentioned-only ID that names the same person (``names``,
+        e.g. "mara" for "Mara Venn"); a number only when another entry already owns the ID."""
+        base = slugify(name, set())
+        free = [s for s in getattr(self, "mentioned_subjects", ()) if s not in self.taken_subjects]
+        if op_id == "A01" and not placeholder and base not in free and base not in self.taken_subjects and free:
+            from . import names  # noqa: PLC0415
+            hit = names.match(name, [(s, names.id_names(s)) for s in sorted(free)])
+            if hit:
+                self.taken_subjects.add(hit)
+                return hit
+        return slugify(name, self.taken_subjects)
 
     def add_named(self, op_id: str, name: str, role: str = "", story_role: str = "") -> str:
         """One entry with a name that is already decided (the book's main character named in the idea, or an entry
