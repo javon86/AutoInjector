@@ -2442,6 +2442,17 @@ def build(app, pid: str, branch: str = "main", *, look: str | None = None) -> di
                 for i, n in enumerate(g.get("nodes") or [])], "edges": [{"from": e.get("from"), "to": e.get("to")}
                                                                        for e in g.get("edges") or []]}
         filled[p.page_id] = fill(p)
+    # --- 🖼 the pictures still waiting (the run's to-make list): a "picture waiting" placeholder on those pages
+    try:
+        from . import book_pictures  # noqa: PLC0415
+        pics_waiting = book_pictures.waiting_by_record(b.store, pid, branch)
+        pics_rest = sum(len(x[2]) for x in book_pictures.rest_plan(b.store, pid, branch))
+    except Exception:  # noqa: BLE001 - the binder never fails over the pictures list
+        log.exception("binder: the pictures to-make list")
+        pics_waiting, pics_rest = {}, 0
+    for p in pages:
+        if p.template == "5" and p.entry_id in pics_waiting and filled.get(p.page_id):
+            filled[p.page_id]["pictures_waiting"] = pics_waiting[p.entry_id]
     # --- the still-to-do list and the status numbers
     todo = []
     missing = 0
@@ -2463,6 +2474,10 @@ def build(app, pid: str, branch: str = "main", *, look: str | None = None) -> di
         f = filled.get(p.page_id)
         if f and p.template in main_pic and not f["pics"].get(main_pic[p.template]):
             missing += 1
+            if "portrait" in (f.get("pictures_waiting") or []):
+                todo.append({"what": f"🖼 The portrait of {p.title} is waiting (on the to-make list)",
+                             "page_id": p.page_id, "page": p.number, "action": "make_picture", "kind": "picture"})
+                continue
             todo.append({"what": f"No {'portrait' if p.template in ('5', '8B') else 'picture'} for {p.title}",
                          "page_id": p.page_id, "page": p.number, "action": "make_picture", "kind": "picture"})
         if f and p.template == "11" and not f["pics"].get("11.1.3") and p.subject.get("written"):
@@ -2532,6 +2547,8 @@ def build(app, pid: str, branch: str = "main", *, look: str | None = None) -> di
             "todo": [{k: t[k] for k in ("what", "page_id", "action", "page", "kind")} for t in todo],
             "counts": {"pages": len(out_pages), "approved": approved + 2, "missing_pictures": missing,
                        "new_fields": bf.counts(b.extras)},
+            "pictures": {"waiting": pics_waiting, "waiting_count": sum(len(v) for v in pics_waiting.values()),
+                         "rest": pics_rest},
             "fields_info": bf.info()}
 
 
@@ -2716,6 +2733,11 @@ def route(app, method: str, rest: list, query: dict, body, principal: str, pid: 
         return 200, bf.dismiss(app.store, pid, branch, body)
     if rest == ["fill"] and method == "POST":
         return 202, bf.start_fill(app, principal, pid, branch, body)
+    if rest == ["pictures"] and method in ("GET", "POST"):  # 🖼 Make the rest of the pictures
+        from . import book_pictures  # noqa: PLC0415
+        if method == "GET":
+            return 200, book_pictures.summary(app.store, pid, branch)
+        return 202, book_pictures.start_rest(app, principal, pid, branch, body)
     if rest == ["export"] and method == "GET":
         fmt = (query.get("format") or ["docx"])[0]
         size = (query.get("page_size") or ["A4"])[0]

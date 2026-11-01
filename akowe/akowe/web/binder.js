@@ -323,6 +323,7 @@ export async function viewBinder(main, x, rest = []) {
       return h('span', { class: 'bnd-empty bnd-unavail', title: typeof f.unavailable === 'string' ? f.unavailable : (f.reason || '') }, 'Not stored yet');
     }
     if (kind === 'pic') {
+      if (picWaiting(p, id)) return waitingPic();
       const what = /portrait|character/i.test(m.label || '') || (m.sec || '').startsWith('5.') ? 'No portrait yet' : 'No picture yet';
       return h('span', { class: 'bnd-empty bnd-empty-pic' }, what, h('span', { class: 'bnd-act' }, ' — ',
         route ? h('a', { href: route, 'data-field': id }, '🎨 Make one') : '🎨 Make one'));
@@ -817,7 +818,7 @@ export async function viewBinder(main, x, rest = []) {
     const name = txt(rf(r, '4.2.2')); const t = rowPage(r) || findPage(name);
     const s = txt(rf(r, '4.2.8')) || (t && t.status) || 'draft';
     const pc = rowPic(p, '4.2.1', r) || (t ? picOf(t, '5.1.1') : null);
-    const ph = h('div', { class: 'bnd-card-pic' }, h('span', { class: 'bnd-empty bnd-empty-pic' }, 'No portrait yet', h('span', { class: 'bnd-act' }, ' — ',
+    const ph = h('div', { class: 'bnd-card-pic' }, t && picWaiting(t, '5.1.1') ? waitingPic() : h('span', { class: 'bnd-empty bnd-empty-pic' }, 'No portrait yet', h('span', { class: 'bnd-act' }, ' — ',
       t && safeRoute(pageEdit(t)) ? h('a', { href: pageEdit(t) }, '🎨 Make one') : '🎨 Make one')));
     if (pc) loadImg(pc.url).then(u => { if (u) clear(ph).appendChild(h('img', { src: u, alt: `Portrait of ${name}` })); });
     return h('article', { class: `bnd-card${prot ? ' is-protagonist' : ''}`, 'data-name': name },
@@ -1362,6 +1363,47 @@ export async function viewBinder(main, x, rest = []) {
   function showMsg(cls, lead, text, ...more) {
     clear(msg).appendChild(h('div', { class: cls, role: cls === 'bnd-err' ? 'alert' : null }, h('p', null, h('b', null, lead), text), ...more));
   }
+  /** 🖼 a character picture the ⚡ run could not make yet (it is on the book's to-make list) */
+  const PIC_SLOT = { '5.1.1': 'portrait', '5.3.1': 'sheet', '5.3.2': 'front', '5.3.3': 'side', '5.3.4': 'back' };
+  function picWaiting(p, id) { return !!(p && PIC_SLOT[id] && (p.pictures_waiting || []).includes(PIC_SLOT[id])); }
+  function waitingPic() {
+    return h('span', { class: 'bnd-empty bnd-empty-pic bnd-pic-waiting', 'data-testid': 'binder-pic-waiting',
+      title: 'The book run could not make this picture yet (the picture maker was not running). It waits on the to-make list.' },
+    '🖼 Picture waiting', h('span', { class: 'bnd-act' }, ' — ', h('button', { type: 'button', class: 'bnd-linkbtn', onclick: ev => runPictures(ev.currentTarget) }, 'make the rest')));
+  }
+  /** 🖼 Make the rest of the pictures: POST …/binder/pictures (a job: every missing portrait, view and sheet plus the
+   *  to-make list), its progress and a Stop button here, then the pages again with the pictures */
+  let picturing = false;
+  async function runPictures(btn) {
+    if (picturing) return;
+    picturing = true;
+    if (btn) btn.disabled = true;
+    let job;
+    try { job = await api('POST', bpath('/binder/pictures'), { body: {} }); }
+    catch (e) { picturing = false; if (btn) btn.disabled = false; showMsg('bnd-err', '🖼 Making the pictures did not start: ', plainError(e)); return; }
+    const line = h('span', null, '🖼 Making the pictures…');
+    const bar = h('progress', { max: String(job.total || 1), value: '0', 'aria-label': 'Pictures progress' });
+    const stop = h('button', { type: 'button', class: 'bnd-inline-btn', 'data-testid': 'binder-pictures-stop', onclick: async () => {
+      stop.disabled = true;
+      try { await api('POST', bpath(`/review/ai/${encodeURIComponent(job.job_id)}/cancel`)); } catch { /* it ends anyway */ }
+    } }, 'Stop');
+    clear(msg).appendChild(h('div', { class: 'bnd-progress-line', 'data-testid': 'binder-pictures-progress' }, line, bar, stop));
+    const show = j => { line.textContent = `🖼 ${j.phase || 'Making the pictures'} — ${j.done || 0} of ${j.total || 1}`; bar.max = j.total || 1; bar.value = j.done || 0; };
+    show(job);
+    while (!['done', 'error', 'cancelled'].includes(job.status)) {
+      await new Promise(r => setTimeout(r, 1200));
+      if (!document.body.contains(root)) { picturing = false; return; }   // the page changed; the job keeps going
+      try { job = await api('GET', bpath(`/review/ai/${encodeURIComponent(job.job_id)}`)); } catch { continue; }
+      show(job);
+    }
+    picturing = false;
+    if (btn) btn.disabled = false;
+    if (job.status === 'error') { showMsg('bnd-err', '🖼 The pictures could not be made: ', plainError({ body: { errors: [job.error || {}] } })); return; }
+    const last = (job.results || []).slice(-1)[0] || {};
+    await reloadData();
+    showMsg(last.ok === false ? 'bnd-err' : 'bnd-ok-msg', job.status === 'cancelled' ? 'Stopped. ' : (last.ok === false ? '🖼 ' : '✔ '),
+      last.message || 'Done.', job.status === 'cancelled' ? ' The pictures made so far are kept; press the button again to make the rest.' : '');
+  }
   /** ✨ Fill from the book: POST …/binder/fill (a job), its progress here, then the page again with the proposals */
   let filling = false;
   async function runFill(targets, btn) {
@@ -1418,6 +1460,8 @@ export async function viewBinder(main, x, rest = []) {
     h('span', { class: 'bnd-tb-gap' }),
     h('button', { type: 'button', 'data-testid': 'binder-fill', title: 'The AI reads the book and proposes the 🆕 quick facts (heights, stat bars, relationship types, danger levels…). Nothing you wrote is replaced; you approve each proposal.',
       onclick: ev => runFill(null, ev.currentTarget) }, '✨ Fill from the book'),
+    h('button', { type: 'button', 'data-testid': 'binder-pictures', title: 'Makes every missing character picture with Stable Diffusion in AutoInjector: portraits, the front, side and back views and character sheets, and the pictures waiting from the book run. Pictures you already have are kept.',
+      onclick: ev => runPictures(ev.currentTarget) }, '🖼 Make the rest of the pictures'),
     h('button', { type: 'button', 'data-testid': 'binder-print', onclick: () => printBinder() }, '🖨 Print'),
     h('button', { type: 'button', 'data-testid': 'binder-pdf', onclick: ev => exportAs('pdf', ev.currentTarget) }, '⬇ PDF'),
     h('button', { type: 'button', 'data-testid': 'binder-docx', onclick: ev => exportAs('docx', ev.currentTarget) }, '⬇ Word'));

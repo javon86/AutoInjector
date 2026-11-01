@@ -909,3 +909,19 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
   (`tests/campaign/bridge`, needs `desktop-app/node_modules`), EPUBCheck and LibreOffice checks (skipped there).
   Earlier, `desktop-app-tests.yml` only ran for `desktop-app/**`, so Akọwe-only PRs (Sections 3–5) were merged
   on the full local suite.
+- **🖼 Character pictures in the ⚡ run + "Make the rest of the pictures" (2026-11-01).** The Book Bible only
+  showed Forge portraits and the run never made any, so every character box was empty. *Built:* a new run step
+  "Character pictures" right after "Character sheets and voices" (`akowe/akowe/book_pictures.py`, `_s_pictures` in
+  `autobook.py`): every approved character gets a portrait, the ★ protagonist the full set (portrait, front / side /
+  back views, character sheet), made through the Character Forge's own path (`forge.run_art`, same prompts and
+  `/image/request`), Stable Diffusion (`engine: "sd"`) by default. Each first portrait becomes the character's 🔒 lock
+  in AutoInjector (new bridge route `POST /image/locks`, never replaces the author's own lock). Picture maker down or
+  a picture failing → the run goes on, the missing pictures go on the book's to-make list (`book_pictures:<pid>:<branch>`)
+  with a plain `PICTURES_WAITING` event; resume only makes what is still missing. The Book Bible shows "🖼 Picture
+  waiting" in those boxes and has a **🖼 Make the rest of the pictures** button (job with progress and Stop: every
+  character's missing full set plus the list; `GET/POST …/binder/pictures`). Settings → Pictures: "Make character
+  pictures during ⚡ Make a book" (default on) and the picture maker (Stable Diffusion only, or Stable Diffusion else
+  ChatGPT); a run body may also send `pictures: true|false`. Tests: `tests/test_book_pictures.py` (fake picture
+  bridge), `test_ui_binder.py::test_pictures_waiting_and_make_the_rest`, `desktop-app/test/sd-studio.test.js`.
+  *Not done:* other characters only get a portrait in the run (their views / sheets come from the button); places and
+  items get no pictures; the pictures add minutes per character before the chapters are written.

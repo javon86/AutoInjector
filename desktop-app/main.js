@@ -7373,6 +7373,7 @@ const serviceBridge = createServiceBridge({
   sdStudio: {
     request: (body) => sdStudio().request(body),
     locks: () => sdStudio().locks(),
+    addLock: (body) => sdStudio().addLock(body),
     backend: () => sdStudio().backendInfo(),
   },
   // The minimal phone companion: the bridge serves this static shell at /m and

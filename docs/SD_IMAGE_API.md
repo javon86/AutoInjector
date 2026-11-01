@@ -46,6 +46,14 @@ The character locks the user made in 🎨 Images → 🔒 Character locks.
   "negative": "smiling", "checkpoint": "", "seed": 1234, "width": null, "height": null, "notes": "" } ] }
 ```
 
+## `POST /image/locks`
+
+Akọwe's ⚡ Make a book saves a character's first portrait as its character lock, so later pictures keep the same
+face. Body: `{ "character", "book"?, "prompt"? (the looks), "seed"?, "negative"?, "from"? }`. A lock with that name
+(any case) is **never replaced**: the answer is `{ ok: true, created: false, lock }`. A new one: `{ ok: true,
+created: true, lock }`. No name → 400 `NEED_PROMPT`. An AutoInjector without this route answers 404 (Akọwe then only
+notes that no lock was saved).
+
 ## `POST /image/request`
 
 Make one or more pictures and save them in AutoInjector's `images/` folder.

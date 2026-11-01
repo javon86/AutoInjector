@@ -1280,6 +1280,9 @@ def save_bridge_settings(app, body) -> dict:
         if tok is not None and (not isinstance(tok, str) or len(tok) > 512):
             raise AkoweError("INVALID_INPUT", "/token", "token: the bridge token text", status="REJECTED")
         app.engine.providers._store_api_key("image_bridge", (tok or "").strip() or None)
+    if "run_pictures" in body:  # 🖼 the ⚡ run's character pictures: {run: bool, engine: sd|auto}
+        from . import book_pictures  # noqa: PLC0415
+        book_pictures.save_settings(app.store, body["run_pictures"])
     app.store.set_setting("image_bridge", s)
     return bridge_info(app)
 
@@ -1289,7 +1292,12 @@ def bridge_info(app) -> dict:
     return {"url": s.get("url") or "", "default_url": os.environ.get("AKOWE_IMAGE_BRIDGE") or DEFAULT_IMAGE_BRIDGE,
             "has_token": bool(app.engine.providers._api_key("image_bridge")
                               or os.environ.get("AUTOINJECTOR_BRIDGE_TOKEN")),
-            "uses": [u for u, _t in bridge_targets(app)]}
+            "uses": [u for u, _t in bridge_targets(app)], "run_pictures": _run_pictures(app)}
+
+
+def _run_pictures(app) -> dict:
+    from . import book_pictures  # noqa: PLC0415
+    return book_pictures.settings(app.store)
 
 
 def _post(url: str, token: str | None, body: dict, timeout_s: float, *, route: str = "/image/request",

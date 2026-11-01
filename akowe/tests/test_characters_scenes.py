@@ -398,7 +398,8 @@ def test_make_a_book_end_to_end_with_sheets_voices_and_scene_cards(tmp_path):
     assert run["status"] == "done", (run["phase"], run.get("problem"))
     pid = run["project_id"]
     st = steps(run)
-    assert [s["id"] for s in run["steps"]][:6] == ["backup", "profile", "canon", "characters", "world", "premise"]
+    assert [s["id"] for s in run["steps"]][:7] == ["backup", "profile", "canon", "characters", "pictures", "world",
+                                                  "premise"]
     items = {i["id"]: i for i in st["chapters"]["items"]}
     assert all(i["scenes"]["status"] == "approved" and i["scenes"]["approved_how"] == "run_consent"
                for i in items.values())
