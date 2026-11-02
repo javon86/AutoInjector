@@ -101,6 +101,7 @@ function friendlyError(err, what) {
 
 // ------------------------------------------------------------------------------------------------ factory
 function createLlmSetup(deps = {}) {
+  const WARM_WAIT_MS = Math.max(50, Number(process.env.AUTOINJECTOR_LLM_WARM_WAIT_MS) || 45000);
   const d = {
     fetch: deps.fetch || ((...a) => fetch(...a)),
     spawn: deps.spawn || child_process.spawn,
@@ -1143,11 +1144,18 @@ function createLlmSetup(deps = {}) {
         if (!u.ok) return done({ ok: false, code: 'USE_FAILED', error: u.error || 'I couldn\'t save the model choice.' });
       }
       tell(`Loading ${name} into memory (the first time can take a minute)…`);
-      const warm = await http(`${base}/api/generate`, { method: 'POST', body: { model: name, prompt: '', keep_alive: '30m' }, timeoutMs: 240000 });
+      // Loading into memory can take minutes for a big model on a slow disk, and a stuck request must never keep
+      // the button busy: wait up to WARM_WAIT_MS, then say he is ready and let the load finish in the background
+      // (the request keeps running; his first answer simply waits for it). CI saw this request hang for 150 s+.
+      const warmReq = http(`${base}/api/generate`, { method: 'POST', body: { model: name, prompt: '', keep_alive: '30m' }, timeoutMs: 240000 });
+      let warmTimer = null;
+      const warm = await Promise.race([warmReq, new Promise((r) => { warmTimer = setTimeout(() => r({ ok: false, pending: true }), WARM_WAIT_MS); })]);
+      clearTimeout(warmTimer);
+      if (warm.pending) warmReq.then((w) => log('llm-warm-late', { model: name, ok: !!(w && w.ok) })).catch(() => {});
       const where = whereText({ base, which: pick.sv.which });
       const pp = paramsFromName(name);
       const fit = (pick.m.fit && pick.m.fit.rating === 'slow' ? ' It is big for this PC, so answers will be slow.' : '') + (pp != null && pp < 3 ? ' It is a very small model, so he may pick the wrong tool — ⚡ Set up gets a better one.' : '');
-      return done({ ok: true, model: name, base, which: pick.sv.which, warmed: !!warm.ok, message: `✓ Alfred is ready with ${name} (${where}).${fit}${warm.ok ? '' : ' (It will load when you first ask him something.)'}` });
+      return done({ ok: true, model: name, base, which: pick.sv.which, warmed: !!warm.ok, message: `✓ Alfred is ready with ${name} (${where}).${fit}${warm.ok ? '' : warm.pending ? ' (He is still loading into memory in the background — his first answer may take a moment.)' : ' (It will load when you first ask him something.)'}` });
     } catch (e) { return done({ ok: false, code: 'ERROR', error: friendlyError(e, 'start Alfred') }); }
   }
 

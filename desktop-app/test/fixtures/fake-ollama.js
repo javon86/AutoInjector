@@ -50,6 +50,7 @@ function fakeOllama(port) {
         return res.end();
       }
       // loading a model into memory (an empty prompt): answers at once, like a real Ollama with the model loaded
+      if (req.url === '/api/generate' && req.method === 'POST' && st.generateHang) { st.warmed = (st.warmed || 0) + 1; return; } // never answers (a stuck load)
       if (req.url === '/api/generate' && req.method === 'POST') { st.warmed = (st.warmed || 0) + 1; return send(200, { model: 'x', response: '', done: true, done_reason: 'load' }); }
       if (req.url === '/v1/chat/completions' && req.method === 'POST') {
         st.chats.push(j);
