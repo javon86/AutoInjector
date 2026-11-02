@@ -45,7 +45,7 @@ def tokens(s, *, keep_titles: bool = False) -> list[str]:
     """The words of a name, normalised (see the module doc). "Captain Odíle Marsh's" -> ["odile", "marsh"]."""
     t = strip_accents(s).casefold().replace("’", "'")
     t = re.sub(r"'s\b", "", t)
-    words = [w for w in re.split(r"[^0-9a-z]+", t) if w]
+    words = [w for w in re.split(r"[\W_]+", t) if w]  # letters of any script ("Ольга", "Νίκος"), not only a-z
     if not keep_titles:
         kept = [w for w in words if w not in TITLES]
         words = kept or words  # a name that is only a title ("the Captain") keeps it

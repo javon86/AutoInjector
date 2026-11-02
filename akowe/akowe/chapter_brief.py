@@ -59,6 +59,9 @@ RULES = {
     "pov": ("The point-of-view character is context.writing_brief.pov: use their name on the page (in dialogue or "
             "narration) and let at least one planned detail of their backstory (pov.backstory) show in this chapter "
             "when it fits — through action or memory, not a summary."),
+    "main": ("The book's ONE main character (the protagonist) is context.writing_brief.main_character: write their "
+             "name exactly as given (never a different spelling or a new name), keep them the centre of the book, and "
+             "when main_character.in_this_chapter is true they are in this chapter on the page."),
     "planned": ("Planned details in context.writing_brief.planned_details belong in this chapter: make them reach "
                 "the page."),
     "story_rules": ("Story rules (context.writing_brief.story_rules): never break a hard rule and keep every rule "
@@ -127,6 +130,25 @@ def _pov_view(c: dict) -> dict:
             "backstory": backstory[:8]}
 
 
+def _main_character(store, pid, branch, cs: list, present: list, pov) -> tuple[dict, str] | None:
+    """★ ({name, id, story_role, in_this_chapter, is_pov}, record_id) of the book's ONE main character (the stored
+    protagonist tag, story_roles), or None when the book has none yet. Never raises."""
+    try:
+        from . import story_roles  # noqa: PLC0415
+        prot = story_roles.protagonist_of(store, pid, branch)
+        if prot is None:
+            return None
+        c = next((x for x in cs if x["record_id"] == prot["record_id"]), None)
+        rid = prot["record_id"]
+        return ({"name": prot["name"], "id": prot.get("subject_id"), "story_role": story_roles.PROTAGONIST,
+                 "in_this_chapter": any(x["record_id"] == rid for x in present),
+                 "is_pov": bool(pov and pov["record_id"] == rid),
+                 **({"role": _clip((c.get("attributes") or {}).get("role"), 200)} if c else {})}, rid)
+    except Exception:  # noqa: BLE001
+        log.exception("could not find the main character for the chapter brief")
+        return None
+
+
 def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str) -> tuple[dict | None, dict]:
     """(brief or None, meta) for one outline chapter. meta = numbers and IDs only (stored with the chapter)."""
     meta = {"characters": [], "voice_cards": 0, "summarized": False, "scene_cards": None, "pov": None, "chars": 0}
@@ -172,6 +194,10 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str) -
                 break
         brief = {"pov": _pov_view(pov) if pov else None, "voice_cards": vb["cards"], "other_voices": vb["others"],
                  "scene_cards": cards, "planned_details": planned}
+        main = _main_character(store, pid, branch, cs, present, pov)  # ★ every chapter knows who the book is about
+        if main:
+            brief["main_character"] = main[0]
+            meta["protagonist"] = main[1]
         details = _forge_details(store, pid, branch, outline, chapter_id, present, cs, texts, flags["scenes"]) \
             if flags["voices"] else []
         if details:  # 🗂 B5: approved dossier fields with only the letters this chapter needs (≤ 2 500 chars)
@@ -193,6 +219,8 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str) -
             rules.append(RULES["voices"])
         if pov:
             rules.append(RULES["pov"])
+        if main:
+            rules.append(RULES["main"])
         if planned:
             rules.append(RULES["planned"])
         if brief.get("story_rules"):
@@ -248,7 +276,7 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str) -
         brief["rules"] = rules
         if not (cards or vb["cards"] or vb["others"] or pov or planned or extra.get("story_rules")
                 or extra.get("world_texture") or extra.get("story_choices") or length or style
-                or brief.get("character_details")
+                or brief.get("character_details") or main
                 or any(k in brief for k in ("physical_state", "character_state", "two_readings", "version_changes",
                                             "series_state", "series_world"))):
             return None, meta

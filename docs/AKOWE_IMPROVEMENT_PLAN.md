@@ -611,6 +611,46 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
   role is a proposal until the AI or the author confirms it; names inside long prose are not fuzzy-matched (only
   name-sized strings of up to 6 words).
 
+- **★ Main character: root-cause hunt + guarantee (2026-11-02, FIXED).** "It doesn't put in the main character for
+  some stories." Every way a book could end without its main character as an approved A01 entry tagged protagonist,
+  each reproduced with the fake AI first (`akowe/tests/test_main_character_paths.py`), then fixed at the root:
+  1. **Mentioned, not made:** a place's or a friend's fact about her ("the harbour's keeper Mara Vell") counted as
+     "already in the canon" / "a place of the canon", so no entry was ever made, and the cast picked someone else.
+     Now only an entry's OWN names count (`protagonist.own_names`: its own subject's name/aliases + concept), in the
+     guard, the cast's name matching (`story_roles.names_of`) and the Bible Builder (`assist.owned_names`).
+  2. **Bible Builder placeholder:** the same mentioned names made the world sketch's main character a placeholder
+     (an invented stranger). Fixed with (1); a real duplicate ("Mara" for an existing "Mara Vell" — close spelling or
+     part of the name; "Mara Holt" is someone else) is a placeholder WITHOUT the ★ claim.
+  3. **Count limit:** a sketch that listed more characters than asked cut the protagonist off when she came last; now
+     the AI's protagonist and the people the idea names are kept first.
+  4. **A guess beat the idea:** when no one claimed the ★, Akọwe's fallback ("the first character made", e.g. the
+     mentor) was stored as `resolved`; the idea's main character, made by the guard afterwards, was demoted to second
+     lead. The fallback is now marked (`story_role_fallback`, kept by sheet saves) and yields to the person the idea
+     names (cast, `role_for_missing`, Bible Builder settle). A tag resolved for a real reason is never re-derived.
+  5. **The villain by default:** with no claims and no names, the first-made antagonist became the main character;
+     villains, henchmen, rivals, minor characters and extras are now last in the fallback order.
+  6. **Other scripts / accents:** the name matcher kept only a–z, so Cyrillic/Greek names never matched (an approved
+     "Ольга Петрова" was "missing" for ever); `slugify("Ọlá Adé")` gave "l-ad". Names now match in any script;
+     subject IDs strip accents ("ola-ade"; a non-Latin name gets a stable `n-xxxxxxxx` ID).
+  7. **POV not declared:** an outline whose viewpoint character the canon does not have (`plan.pov_id 'x' is not
+     declared`) was rewritten until the run paused. Now the viewpoint character is made (guided path, approved) and
+     the main plot is planned again so it pins them (`_repin_plan`, `PLAN_REPINNED` — the outline sees the canon
+     only through the plot's pins; the same was true for a main character the outline step made).
+  8. **Book bible / sequel:** a ★ main character the new book's checks refused to take was lost silently; now she is
+     remembered by name and made by the guard.
+  9. **Chapter brief:** every chapter brief now has `main_character` {name, id, in_this_chapter, is_pov} with a rule to
+     keep the exact name and keep them the centre.
+  10. **Guarantee step** (`AutoBookService._guarantee_main`): before the chapters are written and again before the
+     book is marked done — exactly one stored ★, an approved A01 entry, chapters in the outline, named in every
+     chapter brief. Repaired automatically (made via the guided make-the-main-character path, ★ re-tagged by the
+     cast); only what cannot be repaired pauses with a plain-words `PROTAGONIST_MISSING` decision; a plain
+     `PROTAGONIST_OK` event either way. (Before: a main character thrown away after the chapters still gave a
+     "done" book.)
+  Limits: names in an idea are still found only when capitalised (CJK names have no capitals, so an idea in Chinese
+  or Japanese names no one and the Bible Builder decides); an AI's own explicit ★ claim on someone the idea does not
+  name is kept (the AI was told who the idea names); an outline the author approved themselves without the main
+  character pauses before the chapters (never rewritten for them).
+
 - **P27 scene grid limits:** (a) scenes on the page are told apart only by scene-break lines (`***`); a chapter written
   in one AI answer usually has none (the whole-chapter prompt does not ask for them), so its row shows the plan only and
   "ⓘ written without scene breaks" — only scene-by-scene chapters (long ones) get words/readability per scene. Asking the

@@ -38,7 +38,9 @@ def _tokens(name: str) -> list[str]:
 
 
 def slug(name: str) -> str:
-    return "-".join(_tokens(name))
+    """The name as a subject-ID-like slug, accents stripped as ``assist.slugify`` does ("Ọlá Adé" -> "ola-ade")."""
+    from . import names  # noqa: PLC0415
+    return "-".join(names.tokens(name, keep_titles=True)) or "-".join(_tokens(name))
 
 
 def same_person(a: str, b: str) -> bool:
@@ -86,8 +88,37 @@ def record_names(rec: dict) -> list[str]:
     return names
 
 
+def own_names(rec: dict) -> list[str]:
+    """The names of the record's OWN entity (its own subject: ``characters._name_and_subject``): its entity.name and
+    alias / nickname facts about that subject, and its concept. Never the people or places its facts only mention
+    (a harbour's fact about its keeper, a friend's relationship fact): those are not entries of their own."""
+    from . import characters as chars_mod  # noqa: PLC0415
+    if not rec:
+        return []
+    data = rec.get("data") or {}
+    name, own = chars_mod._name_and_subject(rec)  # noqa: SLF001 - the one name rule of the book
+    out = [name] if name and name != rec.get("record_id") else []
+    for f in data.get("facts") or []:
+        if not isinstance(f, dict) or f.get("subject_id") != own:
+            continue
+        p = str(f.get("predicate") or "")
+        if p == "entity.name" or "alias" in p or "nickname" in p:
+            vals = f.get("value") if isinstance(f.get("value"), list) else [f.get("value")]
+            out += [str(v).strip() for v in vals if isinstance(v, str) and v.strip()]
+    if isinstance(data.get("concept"), str) and data["concept"].strip() and len(data["concept"].split()) <= 6:
+        out.append(data["concept"].strip())
+    return list(dict.fromkeys(out))
+
+
+def own_subject(rec: dict) -> str | None:
+    from . import characters as chars_mod  # noqa: PLC0415
+    return chars_mod._name_and_subject(rec)[1] if rec else None  # noqa: SLF001
+
+
 def _subjects(rec: dict) -> set:
-    return {f.get("subject_id") for f in ((rec or {}).get("data") or {}).get("facts") or [] if isinstance(f, dict)}
+    """The record's own subject ID (a set, for the callers' ``in``)."""
+    s = own_subject(rec)
+    return {s} if s else set()
 
 
 def _pov_needs(bp) -> list[str]:
@@ -116,10 +147,11 @@ def missing(bp, *, main_names=(), store=None) -> list[dict]:
 
 def _missing(bp, main_names, store) -> list[dict]:
     approved = bp.approved("A01")
-    known = [(record_names(r), _subjects(r)) for r in approved]
+    # Only the records' OWN names count: a person a place or a friend merely mentions has no entry of their own.
+    known = [(own_names(r), _subjects(r)) for r in approved]
     a01_heads = bp.heads("A01")
     others = [n for r in bp.records() if r["module_id"].startswith("A") and r["module_id"] != "A01"
-              and r.get("record_kind", "OUTPUT") == "OUTPUT" for n in record_names(r)]
+              and r.get("record_kind", "OUTPUT") == "OUTPUT" for n in own_names(r)]
     cands: list[tuple[str, str]] = [(n, IDEA_WHY) for n in names_in_idea((bp.profile or {}).get("idea") or "")]
     cands += [(str(n), MAIN_WHY) for n in main_names or () if str(n or "").strip()]
     if store is not None:  # the Bible Builder's own mark: a character sheet with role "main" on a character not approved
@@ -144,7 +176,7 @@ def _missing(bp, main_names, store) -> list[dict]:
             continue  # a place, group or thing of the canon, not a person
         draft = refused = None
         for r in sorted(a01_heads, key=lambda x: x.get("created_at") or "", reverse=True):
-            if not any(same_person(name, n) for n in record_names(r)) and sl not in _subjects(r):
+            if not any(same_person(name, n) for n in own_names(r)) and sl not in _subjects(r):
                 continue
             if r.get("stale") or r["lifecycle"] in ("REJECTED", "SUPERSEDED"):
                 refused = refused or [f"{f.get('rule_id')}: {f.get('message')}" for f in r.get("findings") or []
@@ -152,7 +184,7 @@ def _missing(bp, main_names, store) -> list[dict]:
             elif draft is None and r["lifecycle"] in ("DRAFT", "VALIDATED"):
                 draft = r
         out.append({"name": name[:120], "why": why, "draft": draft["ref"] if draft else None,
-                    "draft_title": (record_names(draft) or [name])[0] if draft else None,
+                    "draft_title": (own_names(draft) or [name])[0] if draft else None,
                     "draft_lifecycle": draft["lifecycle"] if draft else None,
                     "refused": refused or []})
     return out[:MAX_NAMES + 1]
@@ -167,11 +199,17 @@ def role_for_missing(bp, name: str, why: str) -> str:
     rid = story_roles.tagged_protagonist(bp.store, bp.pid, bp.branch)
     if rid is None:
         return story_roles.PROTAGONIST
-    e = chars_mod.get_entry(bp.store, bp.pid, bp.branch, rid) or {}
-    live = {r["record_id"] for r in bp.heads("A01") if r["lifecycle"] not in ("REJECTED", "SUPERSEDED")
+    e = dict(chars_mod.get_entry(bp.store, bp.pid, bp.branch, rid) or {})
+    if not e.get("name"):
+        e["name"] = next((c["name"] for c in chars_mod.canon_characters(bp.store, bp.pid, bp.branch)
+                          if c["record_id"] == rid), "")
+    live ={r["record_id"] for r in bp.heads("A01") if r["lifecycle"] not in ("REJECTED", "SUPERSEDED")
             and not r.get("stale")}
     if rid not in live or same_person(name, e.get("name") or ""):
         return story_roles.PROTAGONIST
+    if why == IDEA_WHY and story_roles.stored(e)[1] == "resolved" and e.get("story_role_fallback") and \
+            not any(same_person(n, e.get("name") or "") for n in names_in_idea((bp.profile or {}).get("idea") or "")):
+        return story_roles.PROTAGONIST  # only Akọwe's own guess holds the ★: the idea's main character takes it
     return ""
 
 
