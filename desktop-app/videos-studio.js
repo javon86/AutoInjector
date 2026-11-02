@@ -62,6 +62,9 @@
   function clock(secs) { const s = Math.max(0, Math.round(Number(secs) || 0)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; }
   // The "Ready" light with FramePack: amber while it loads (or stops), green (filled) only when it is loaded,
   // red when loading failed, a green ring when it is ready but not loaded yet (it loads with the first video).
+  // the last video's error, unless the person dismissed it (✕ on the red box) — a new error shows again
+  function fpDismissed(e) { return !!(e && st.fpDismissedAt && Number(e.at || 0) <= st.fpDismissedAt); }
+  function fpJobError(fp) { const e = fp && fp.lastError; return e && e.message && !e.load && !fpDismissed(e) ? e : null; }
   function fpLight(s) {
     const fp = (s && s.framepack) || {};
     const uses = s && (s.backend === 'framepack' || (s.settings && s.settings.backend === 'framepack'));
@@ -71,10 +74,13 @@
       const l = fp.loading; const secs = (l.stageSeconds || 0) + (st.fpAt ? (Date.now() - st.fpAt) / 1000 : 0);
       return { tone: l.stuck ? 'warn' : 'busy', text: `⏳ Loading FramePack… ${l.text || l.stage || ''} · ${clock(secs)}${l.stuck ? ' — it seems stuck (⚙ Setup & models → FramePack)' : ''}` };
     }
+    // loaded, but the last video (or 🧪 test) failed: both stay visible — amber, until a video works or the error is dismissed
+    const jobErr = fpJobError(fp);
+    if (fp.loaded && jobErr) return { tone: 'warn', text: `✔ FramePack is loaded — ⚠ the last ${jobErr.test ? 'test clip' : 'video'} failed (see below)`, title: `FramePack is loaded, but the last ${jobErr.test ? 'test clip' : 'video'} failed: ${jobErr.message}` };
     if (fp.loaded) return { tone: 'ok', text: null };
     // loading failed (▶ Load, 🧪 Test or a video): red, and where to look — the reason is on the FramePack card
     if (fp.lastError && fp.lastError.message && fp.ready && fp.lastError.load) return { tone: 'error', text: '✖ FramePack couldn\'t load — see the details (⚙ Setup & models → FramePack)', title: `FramePack couldn't load: ${fp.lastError.message}` };
-    if (fp.lastError && fp.lastError.message && fp.ready) return { tone: 'error', text: `✖ FramePack: ${fp.lastError.message}` };
+    if (fp.lastError && fp.lastError.message && fp.ready && !fpDismissed(fp.lastError)) return { tone: 'error', text: `✖ FramePack: ${fp.lastError.message}` };
     if (s.ready) return { tone: 'standby', text: null };
     return null;
   }
@@ -100,7 +106,7 @@
     let tone = s.ready ? 'ok' : (s.comfy && s.comfy.connected) || (s.comfy && s.comfy.installed) ? 'busy' : 'off';
     const light = fpLight(s);
     if (light) tone = light.tone;
-    $('vd-dot').dataset.tone = tone; if ($('vd-tab-dot')) $('vd-tab-dot').dataset.tone = tone;
+    $('vd-dot').dataset.tone = tone; if ($('vd-tab-dot')) $('vd-tab-dot').dataset.tone = tone; $('vd-status').dataset.tone = tone;
     // The message is also used outside this tab; here "in 🎬 Video" is where the person already is.
     const text = (light && light.text) || String(s.message || (s.ready ? '✔ Ready' : 'Video is not set up')).replace(/ in 🎬 Video(?= \(| —|,|\.)/g, '');
     setText('vd-status-text', text);
@@ -260,6 +266,14 @@
 
   // ---- errors: the same red box as 🎨 Images
   function hideError() { $('vd-error').hidden = true; }
+  // ✕ Dismiss: the red box goes, and the header stops saying the last video failed (until the next problem)
+  if ($('btn-vd-error-dismiss')) $('btn-vd-error-dismiss').onclick = () => {
+    hideError();
+    const e = st.status && st.status.framepack && st.status.framepack.lastError;
+    if (e && e.at) st.fpDismissedAt = Math.max(st.fpDismissedAt || 0, Number(e.at));
+    if (st.status) renderStatus(st.status);
+    if (st.fp) renderFramePack(st.fp);
+  };
   function showError(r) {
     setText('vd-error-msg', `✖ ${(r && r.message) || (r && r.error) || 'Failed.'}`);
     const fix = (r && (r.fix || r.hint)) || '';
@@ -345,7 +359,8 @@
     msg('🎬 Starting…');
     const r = st.mode === 'i2v' ? await call('animate', req) : await call('generate', req);
     busy(false);
-    if (!r || !r.ok) { msg(''); showError(r); refreshStatus(); return; }
+    if (!r || !r.ok) { msg(''); showError(r); refreshFramePack(false); refreshStatus(); return; }
+    refreshFramePack(false); refreshStatus(); // a video that worked: the header goes back to green
     st.lastSeed = r.seed;
     const warn = (r.warnings || []).map((w) => `⚠ ${w.message}`).join('\n');
     msg(`✔ Video saved: ${String(r.path || '').split(/[\\/]/).pop()} (${r.seconds} s, ${r.width}×${r.height}, ${r.model})${warn ? `\n${warn}` : ''}`);
@@ -596,7 +611,24 @@
   if (sdApi && sdApi.onInstall) sdApi.onInstall((i) => { if (i && i.busy) renderDownload(Object.assign({}, i, { message: `ComfyUI: ${i.message || ''}` })); });
 
   // ------------------------------------------------------------ 🎞 FramePack (Setup)
-  function fpMsg(t) { setText('vd-fp-msg', t || ''); }
+  function fpMsg(t) { st.fpMsgText = t || ''; setText('vd-fp-msg', t || ''); }
+  // The footer line under the card: a "⏳ loading … (step 6 of 7)" or "⏹ Stopping…" line is only true while that goes on.
+  // When FramePack is loaded, the job ended, failed or was stopped, the line says what is true now (never a stale step).
+  function fpSettledMsg(f) {
+    if (!f) return '';
+    const jobErr = fpJobError(f);
+    if (f.loaded && jobErr) return `✔ FramePack is loaded — ⚠ the last ${jobErr.test ? 'test clip' : 'video'} failed: ${jobErr.message}`;
+    if (f.loaded) return `✔ FramePack is loaded${f.vramGB != null ? ` (${f.vramGB} GB of graphics memory free)` : ''}.`;
+    if (f.lastError && f.lastError.message && !fpDismissed(f.lastError)) return `✖ ${f.lastError.message}${f.lastError.fix ? `\nHow to fix: ${f.lastError.fix}` : ''}`;
+    return '';
+  }
+  function fpFooter(f) {
+    if (!f || f.loading || f.stopping) return;
+    const cur = st.fpMsgText || '';
+    if (/^⏳/.test(cur)) fpMsg(fpSettledMsg(f));
+    else if (/^⏹ Stopping/.test(cur)) fpMsg('⏹ Stopped.');
+    else if (/^✔ FramePack is loaded/.test(cur)) fpMsg(fpSettledMsg(f)); // a clip failed since, worked since, or it was dismissed
+  }
   function when(at) { try { return new Date(at).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); } catch (_) { return ''; } }
   // The last REAL load (▶ Load, 🧪 Test or a video), saved in the settings: loaded and tested ✔ / loaded, not yet tested /
   // not yet tested / failed to load ✖ (the reason, and what to try — from the error itself).
@@ -607,7 +639,11 @@
     if (!f || !f.found || f.available === false) { el.hidden = true; return; }
     el.hidden = false;
     if (f.loading) { state = 'loading'; text = '⏳ Loading now…'; }
-    else if (ll && ll.ok && ll.tested) { state = 'tested'; text = `✔ Loaded and tested — it made a video (${when(ll.testedAt || ll.at)}).`; }
+    else if (ll && ll.ok && ll.jobFailed && !(ll.testedAt && ll.testedAt > ll.jobFailed.at)) {
+      const jf = ll.jobFailed;
+      state = 'jobfailed';
+      text = `⚠ Loaded — the ${jf.test ? 'test clip' : 'last video'} failed (${when(jf.at)}): ${jf.reason || 'FramePack could not make the video.'}${jf.fix ? `\nWhat to try: ${jf.fix}` : ''}`;
+    } else if (ll && ll.ok && ll.tested) { state = 'tested'; text = `✔ Loaded and tested — it made a video (${when(ll.testedAt || ll.at)}).`; }
     else if (ll && ll.ok) { state = 'loaded'; text = `✔ Loaded (${when(ll.at)}) — not yet tested with a clip: press 🧪 Test.`; }
     else if (ll && !ll.ok) {
       state = 'failed';
@@ -634,6 +670,7 @@
     }
     setText('vd-fp-state', lines.join('\n'));
     renderLastLoad(f);
+    fpFooter(f);
     const ul = $('vd-fp-models'); ul.textContent = '';
     if (f.found) for (const m of (f.models && f.models.repos) || []) {
       const li = document.createElement('li'); li.dataset.ok = String(!!m.ok);
@@ -709,6 +746,7 @@
     const r = await call('framepackTest');
     busy(false);
     if (!r || !r.ok) { msg(''); showError(r); refreshFramePack(false); refreshStatus(); return; }
+    refreshFramePack(false); refreshStatus();
     msg(`✔ FramePack test video saved: ${String(r.path || '').split(/[\\/]/).pop()} (${r.seconds} s, ${r.width}×${r.height})`);
     play({ path: r.path, url: r.url, posterUrl: r.posterUrl, record: Object.assign({}, r, { engine: 'framepack' }) });
     loadGallery();
@@ -731,7 +769,8 @@
     else if (ev.type === 'stopping') { if (ev.while !== 'unload') fpMsg('⏹ Stopping FramePack…'); refreshFramePack(false); refreshStatus(); }
     else if (ev.type === 'stopped') { if (ev.while !== 'unload') fpMsg('⏹ Stopped.'); refreshFramePack(false); refreshStatus(); }
     else if (ev.type === 'stuck' || ev.type === 'error') { refreshFramePack(false); refreshStatus(); }
-    else if (ev.type === 'loaded' || ev.type === 'exit') { refreshFramePack(false); refreshStatus(); }
+    else if (ev.type === 'loaded') { if (/^⏳/.test(st.fpMsgText || '')) fpMsg(`✔ FramePack is loaded${ev.vramGB != null ? ` (${ev.vramGB} GB of graphics memory free)` : ''}.`); refreshFramePack(false); refreshStatus(); }
+    else if (ev.type === 'exit') { refreshFramePack(false); refreshStatus(); }
   });
 
   async function init() {

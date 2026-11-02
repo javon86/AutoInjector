@@ -1268,6 +1268,8 @@
     #vd-fp-settings[hidden], #vd-wan-settings[hidden] { display:none; }
     #vd-fp-models li[data-ok="false"] { color:#ff9c9c; }
     #vd-fp-lastload[data-state="failed"] { color:#ff9c9c; }
+    #vd-fp-lastload[data-state="jobfailed"] { color:#ffcf7a; }
+    #vd-status[data-tone="warn"] #vd-status-text { color:#ffcf7a; }
     #vd-fp-lastload[data-state="untested"] { opacity:.8; }
     #vd-ep-clip > div { flex:1 1 64px; min-width:56px; }
     #vd-ep-clip input { width:100% !important; }
@@ -1735,6 +1737,7 @@
           <div id="vd-error-fix" class="sd-err-fix"></div>
           <div id="vd-error-actions" class="sd-err-actions"></div>
           <details id="vd-error-details"><summary id="vd-error-summary">Technical details (what ComfyUI said)</summary><pre id="vd-error-raw"></pre></details>
+          <div class="sd-err-actions"><button id="btn-vd-error-dismiss" title="Hide this error (the header stops saying the last video failed)">✕ Dismiss</button></div>
         </div>
       </div>
       <div class="sd-card">
