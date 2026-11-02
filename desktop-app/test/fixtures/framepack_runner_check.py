@@ -54,6 +54,22 @@ c, m, fx = R.classify_error(ValueError('something odd'))
 check(c == 'FRAMEPACK_FAILED' and 'something odd' in m, 'anything else -> FRAMEPACK_FAILED with the first line')
 
 # ---- the model check (pure files)
+c, m, fx = R.classify_error(Exception("OfflineModeIsEnabled: Cannot reach https://huggingface.co/api/models/lllyasviel/FramePackI2V_HY: offline mode is enabled."))
+check(c == 'FRAMEPACK_OFFLINE_LOOKUP' and 'website' in m and 'probably fine' in fx, 'the PC error (OfflineModeIsEnabled on huggingface.co/api) -> its own plain words, not "check all three models"')
+# local_repo: models load from the snapshot FOLDER (a repo id makes diffusers call model_info even offline)
+snap = R.local_repo(hf_ok, 'lllyasviel/FramePackI2V_HY')
+check(bool(snap) and os.path.isdir(snap) and os.sep + 'snapshots' + os.sep in snap, 'local_repo: the FramePack model resolves to its local snapshot folder (%s)' % snap)
+check(R.local_repo(hf_partial, 'lllyasviel/FramePackI2V_HY') is None and R.local_repo('', 'x/y') is None, 'local_repo: None when the model is not in the cache / no cache')
+# missing_shards: an index naming a shard that is not there
+import json as _json
+shard_dir = os.path.join(tmp, 'sharded')
+os.makedirs(shard_dir, exist_ok=True)
+with open(os.path.join(shard_dir, 'diffusion_pytorch_model.safetensors.index.json'), 'w') as f:
+    _json.dump({'weight_map': {'a': 'm-00001-of-00002.safetensors', 'b': 'm-00002-of-00002.safetensors'}}, f)
+open(os.path.join(shard_dir, 'm-00001-of-00002.safetensors'), 'wb').close()
+check(R.missing_shards(shard_dir) == ['m-00002-of-00002.safetensors'], 'missing_shards: names the shard the index lists but the folder lacks')
+open(os.path.join(shard_dir, 'm-00002-of-00002.safetensors'), 'wb').close()
+check(R.missing_shards(shard_dir) == [], 'missing_shards: complete -> nothing missing')
 check(R.check_models(hf_ok) == [], 'check_models: a complete cache -> nothing missing')
 miss = R.check_models(hf_partial)
 check('hunyuanvideo-community/HunyuanVideo/vae' in miss and 'lllyasviel/FramePackI2V_HY' in miss and len(miss) == 2, 'check_models: names what is missing (%s)' % ', '.join(miss))
@@ -219,4 +235,56 @@ wait(srv)
 ev = events(out)
 check(any(e['event'] == 'cancelled' and e['id'] == 'l2' for e in ev) and not any(e['event'] == 'loaded' for e in ev), 'cancel during a load -> it stops at the next stage (cancelled, not loaded)')
 del os.environ['AUTOINJECTOR_FRAMEPACK_HEARTBEAT_S']
+
+# ---- Engine.load loads every model from its local snapshot FOLDER with local_files_only=True
+# (the PC: a repo id made diffusers call huggingface.co/api model_info -> OfflineModeIsEnabled)
+import types as _types
+_calls = []
+class _Stop(Exception):
+    pass
+def _fake_cls(name, stop=False):
+    class C(object):
+        @classmethod
+        def from_pretrained(cls, path, **kw):
+            _calls.append((name, path, kw))
+            if stop:
+                raise _Stop()
+            o = C(); o.cpu = lambda: o
+            return o
+    C.__name__ = name
+    return C
+_saved = {k: sys.modules.get(k) for k in ('torch', 'diffusers', 'transformers', 'diffusers_helper', 'diffusers_helper.models', 'diffusers_helper.models.hunyuan_video_packed', 'diffusers_helper.memory')}
+try:
+    _t = _types.ModuleType('torch'); _t.__version__ = 'fake'; _t.float16 = 'f16'; _t.bfloat16 = 'bf16'
+    _t.cuda = _types.SimpleNamespace(is_available=lambda: True)
+    sys.modules['torch'] = _t
+    _d = _types.ModuleType('diffusers'); _d.AutoencoderKLHunyuanVideo = _fake_cls('VAE'); sys.modules['diffusers'] = _d
+    _tr = _types.ModuleType('transformers')
+    for _n in ('LlamaModel', 'CLIPTextModel', 'LlamaTokenizerFast', 'CLIPTokenizer', 'SiglipImageProcessor', 'SiglipVisionModel'):
+        setattr(_tr, _n, _fake_cls(_n))
+    sys.modules['transformers'] = _tr
+    sys.modules['diffusers_helper'] = _types.ModuleType('diffusers_helper')
+    sys.modules['diffusers_helper.models'] = _types.ModuleType('diffusers_helper.models')
+    _hv = _types.ModuleType('diffusers_helper.models.hunyuan_video_packed'); _hv.HunyuanVideoTransformer3DModelPacked = _fake_cls('Transformer', stop=True)
+    sys.modules['diffusers_helper.models.hunyuan_video_packed'] = _hv
+    _mem = _types.ModuleType('diffusers_helper.memory'); _mem.gpu = 'cuda:0'; _mem.get_cuda_free_memory_gb = lambda g: 16.0; _mem.DynamicSwapInstaller = object
+    sys.modules['diffusers_helper.memory'] = _mem
+    eng = R.Engine(hf_home=hf_ok)
+    try:
+        eng.load(lambda ev: None)
+    except _Stop:
+        pass
+    names = [c[0] for c in _calls]
+    check('Transformer' in names and len(_calls) == 8, 'Engine.load reached the FramePack video model through all 8 loads (%s)' % ', '.join(names))
+    check(all(c[2].get('local_files_only') is True for c in _calls), 'every model is loaded with local_files_only=True')
+    check(all(os.path.isdir(c[1]) and (os.sep + 'snapshots' + os.sep) in c[1] for c in _calls), 'every model is loaded from its local snapshot folder, never by repo id')
+    tp = [c for c in _calls if c[0] == 'Transformer'][0][1]
+    check('models--lllyasviel--FramePackI2V_HY' in tp, 'the FramePack video model comes from its own folder (%s)' % tp)
+finally:
+    for _k, _v in _saved.items():
+        if _v is None:
+            sys.modules.pop(_k, None)
+        else:
+            sys.modules[_k] = _v
+
 print(json.dumps({'done': True}))
