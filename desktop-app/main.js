@@ -5387,7 +5387,9 @@ function buildExtract(opts) {
     scope, preset, from: o.from, to: o.to, book, include,
     transcript: state.transcript, log: state.log,
     relayReport: (f) => { const rep = relayTrace.report(f); return { text: relayTraceLib.formatReport(rep, { label: siteLabel }), messages: rep.messages }; },
-    siteLabel, buildLine: buildLine(), now: Date.now(), redaction: extractRedaction()
+    siteLabel, buildLine: buildLine(), now: Date.now(), redaction: extractRedaction(),
+    // 🩺 the latest pictures & video self-test, in short (so one 📋 Extract carries its answers too)
+    appendix: (() => { try { const x = mediaSelfTestAppendix(); return x ? [x] : []; } catch (_) { return []; } })(),
   });
   return Object.assign({ ok: true }, r);
 }
@@ -6916,6 +6918,149 @@ videoApiMod.register(videoApiMod.createVideoApi({
   studio: new Proxy({}, { get: (_t, k) => { const s = videoStudio(); const v = s[k]; return typeof v === "function" ? v.bind(s) : v; }, has: (_t, k) => k in videoStudio() }),
   trailer: new Proxy({}, { get: (_t, k) => { const s = videoTrailer(); const v = s[k]; return typeof v === "function" ? v.bind(s) : v; }, has: (_t, k) => k in videoTrailer() }),
 }));
+
+// ==== 🩺 TEST PICTURES & VIDEO (media-selftest.js) — one press checks pictures, FramePack video, the trailer
+// join, Alfred's picture/video tools and Akọwe's picture routes, and writes ONE report (Markdown + JSON) into
+// "stuff and thing"/logs. Quick = reachability only (~10 s); Full = one tiny picture + one tiny clip + a tiny
+// trailer. Each step has a time limit; ⏹ Stop works mid-step; nothing is downloaded; private paths are hidden.
+const mediaSelfTestMod = require("./media-selftest");
+const mediaProbeMod = require("./media-probe");
+let _mediaProbe = null;
+let _mediaSelfTest = null;
+let _mediaSelfTestGpu = "";
+function mediaTrailerRecorder() {
+  if (!_trailerRecorder) _trailerRecorder = trailerRecorderMod.createTrailerRecorder({ electron: require("electron"), dir: __dirname, log: (t, d) => logEvent(t, d) });
+  return _trailerRecorder;
+}
+// A small request to the service bridge Akọwe uses (127.0.0.1, with its token). Never throws; 5 s limit.
+function mediaBridgeHttp(method, p, body) {
+  return new Promise((resolve) => {
+    if (!bridgeRuntime || !bridgeRuntime.port) return resolve({ status: 0, error: "the bridge is not running" });
+    const data = body === undefined ? null : Buffer.from(JSON.stringify(body));
+    const headers = { Accept: "application/json" };
+    if (bridgeRuntime.token) headers.Authorization = `Bearer ${bridgeRuntime.token}`;
+    if (data) { headers["Content-Type"] = "application/json"; headers["Content-Length"] = data.length; }
+    let req;
+    try {
+      req = require("http").request({ host: "127.0.0.1", port: bridgeRuntime.port, path: p, method, headers, timeout: 5000 }, (res) => {
+        let buf = ""; res.setEncoding("utf8");
+        res.on("data", (c) => { if (buf.length < 200000) buf += c; });
+        res.on("end", () => { let json = null; try { json = JSON.parse(buf); } catch (_) {} resolve({ status: res.statusCode, json }); });
+      });
+      req.on("timeout", () => { try { req.destroy(new Error("timed out")); } catch (_) {} });
+      req.on("error", (e) => resolve({ status: 0, error: String((e && e.code) || (e && e.message) || e) }));
+      if (data) req.write(data);
+      req.end();
+    } catch (e) { resolve({ status: 0, error: String((e && e.message) || e) }); }
+  });
+}
+// Alfred's picture and video tools, checked the way he calls them — nothing is rendered.
+async function mediaAlfredToolsDry() {
+  const reg = require("./alfred-tools");
+  const out = {};
+  try {
+    const gi = reg.get("generate_image");
+    const v = gi ? reg.validate(gi, { prompt: mediaSelfTestMod.TEST_PROMPT, width: 512, height: 512, engine: "sd" }) : { ok: false, error: "the generate_image tool is missing" };
+    const c = v.ok && gi.check ? await gi.check(v.args, {}) : v;
+    const api = sdApiMod.get();
+    out.picture = !c || !c.ok ? { ok: false, error: (c && c.error) || "refused" } : !(api && api.images && typeof api.images.generate === "function") ? { ok: false, error: "the 🎨 Images module is not wired" } : { ok: true };
+  } catch (e) { out.picture = { ok: false, error: String((e && e.message) || e) }; }
+  try {
+    const vc = reg.get("video_call");
+    const ctx = { videoMethods: async () => require("./alfred-main").sdMethodsOf(videoApiMod.get()) };
+    const v = vc ? reg.validate(vc, { method: "video.animate", args: { image: "test-picture.png", prompt: "the clouds drift", seconds: 1 } }) : { ok: false, error: "the video_call tool is missing" };
+    const c = v.ok && vc.check ? await vc.check(v.args, ctx) : v;
+    out.video = c && c.ok ? { ok: true } : { ok: false, error: (c && c.error) || "refused" };
+  } catch (e) { out.video = { ok: false, error: String((e && e.message) || e) }; }
+  return out;
+}
+function mediaSelfTestRedact(text) { try { return logExtract.redact(text, extractRedaction()).text; } catch (_) { return String(text); } }
+function mediaSelfTest() {
+  if (_mediaSelfTest) return _mediaSelfTest;
+  if (!_mediaProbe) _mediaProbe = mediaProbeMod.createMediaProbe({ electron: require("electron"), dir: __dirname });
+  const VT = require("./video-trailer");
+  _mediaSelfTest = mediaSelfTestMod.createMediaSelfTest({
+    sd: {
+      status: () => sdStudio().status(), lists: () => sdStudio().lists(), modelCheck: () => sdStudio().modelCheck(),
+      generate: (req) => sdStudio().generate(req, "media-selftest"), cancel: () => sdStudio().cancel(),
+      locks: () => sdLibrary().listLocks(), chatgptStatus: () => sdStudio().chatgptStatus(),
+      chatgptPicture: (req) => sdStudio().request(req), chatgptCancel: () => sdStudio().chatgptCancel(),
+    },
+    imagesDir: () => outputManager.imagesDir(),
+    video: {
+      status: () => videoStatusFull(), fpStatus: () => videoStudio().framepack.status({ gpu: false }),
+      fpLoad: () => videoStudio().framepack.load(), fpUnload: () => videoStudio().framepack.unload(),
+      animate: (req) => videoRun("animate", req, "media-selftest"), cancel: () => videoStudio().cancel(),
+    },
+    testPicture: () => framepackMod.testPicture(320, 256),
+    tmpDir: () => require("os").tmpdir(),
+    probeMedia: (p) => _mediaProbe(p),
+    gpu: { read: () => gpuMonitor.read() },
+    trailer: {
+      record: (timeline, out) => mediaTrailerRecorder().record(timeline, out, { loadMs: 60000 }),
+      dir: () => path.join(outputManager.videosDir(), "trailers", "media-selftest"),
+      ffmpeg: () => { try { const roots = []; for (const t of sdTargets()) { if (t.dir) roots.push(t.dir); } return VT.findFfmpeg({ roots }); } catch (_) { return VT.findFfmpeg({ roots: [] }); } },
+      runFfmpeg: (bin, args, ms) => new Promise((resolve) => { require("child_process").execFile(bin, args, { timeout: ms || 60000, windowsHide: true, maxBuffer: 4 * 1024 * 1024 }, (err, _o, se) => resolve(err ? { ok: false, error: err.killed ? "TIMEOUT" : (err.code || "FAILED"), detail: String(se || err.message || "").slice(0, 600) } : { ok: true })); }),
+      mp4Args: (webm, mp4, audio) => VT.mp4Args(webm, mp4, audio),
+      fileUrl: (p) => pathToFileURL(p).href,
+    },
+    alfred: {
+      testAi: () => require("./alfred-main").invokeChannel("alfred:test-ai"),
+      check: () => require("./alfred-main").invokeChannel("llm:check", {}),
+      toolsDry: () => mediaAlfredToolsDry(),
+    },
+    bridge: { info: () => (process.env.AUTOINJECTOR_BRIDGE === "0" ? null : bridgeRuntime && bridgeRuntime.token ? { port: bridgeRuntime.port } : null), http: (m, p, b) => mediaBridgeHttp(m, p, b) },
+    systemInfo: () => { let v = ""; try { v = buildInfo().version || ""; } catch (_) {} return { app: v ? `v${v}` : "", platform: `${process.platform} ${require("os").release()}`, gpu: _mediaSelfTestGpu }; },
+    saveReport: (stamp, md, json) => {
+      const dir = outputManager.logsDir();
+      const mdPath = outputManager.saveBuffer(dir, `media-selftest-${stamp}.md`, md);
+      const jsonPath = outputManager.saveBuffer(dir, `media-selftest-${stamp}.json`, json);
+      return { md: mdPath, json: jsonPath };
+    },
+    redact: mediaSelfTestRedact,
+    log: (k, d) => logEvent(k, d),
+    onProgress: (st) => broadcast("media-selftest", st),
+    timeouts: process.env.AUTOINJECTOR_MEDIATEST_TIMEOUTS ? (() => { try { return JSON.parse(process.env.AUTOINJECTOR_MEDIATEST_TIMEOUTS); } catch (_) { return {}; } })() : undefined,
+  });
+  return _mediaSelfTest;
+}
+// The latest report (this session, else the newest file in the logs folder) — for 📋 Extract and Alfred.
+function mediaSelfTestLatest() {
+  const l = _mediaSelfTest && _mediaSelfTest.last();
+  if (l) return l;
+  try {
+    const dir = outputManager.logsDir();
+    const names = fs.readdirSync(dir).filter((n) => /^media-selftest-\d{8}-\d{6}\.json$/.test(n)).sort();
+    if (!names.length) return null;
+    const rep = JSON.parse(fs.readFileSync(path.join(dir, names[names.length - 1]), "utf8"));
+    let md = ""; try { md = fs.readFileSync(path.join(dir, names[names.length - 1].replace(/\.json$/, ".md")), "utf8"); } catch (_) {}
+    return Object.assign({}, rep, { markdown: md, summary: mediaSelfTestMod.summaryOf(rep), files: { json: path.join(dir, names[names.length - 1]), md: md ? path.join(dir, names[names.length - 1].replace(/\.json$/, ".md")) : null } });
+  } catch (_) { return null; }
+}
+function mediaSelfTestAppendix() {
+  const rep = mediaSelfTestLatest();
+  if (!rep) return null;
+  const lines = [rep.summary || mediaSelfTestMod.summaryOf(rep)];
+  for (const s of rep.steps || []) if (s.status === "fail" || s.status === "warn") lines.push(`  ${s.icon || ""} ${s.name}: ${s.detail}${s.error ? ` [${s.error}]` : ""}${s.fix ? ` → ${s.fix}` : ""}`);
+  if (rep.files && rep.files.md) lines.push(`  Full report: ${rep.files.md}`);
+  return { title: "LATEST 🩺 PICTURES & VIDEO SELF-TEST", text: lines.join("\n") };
+}
+ipcMain.handle("mediatest:run", async (_e, opts) => {
+  try {
+    const o = opts && typeof opts === "object" ? opts : {};
+    try { const g = await gpuMonitor.read(); _mediaSelfTestGpu = g && g.available && g.gpus && g.gpus[0] ? `${g.gpus[0].name} (${Math.round((g.gpus[0].memTotal || 0) / 1024)} GB)` : ""; } catch (_) {}
+    const r = await mediaSelfTest().run({ mode: o.mode === "full" ? "full" : "quick", chatgptPicture: !!o.chatgptPicture, unload: o.unload !== false });
+    return r;
+  } catch (e) { logEvent("media-selftest-error", { error: String((e && e.message) || e) }); return { ok: false, error: "SELFTEST_FAILED", message: `Something went wrong: ${(e && e.message) || e}` }; }
+});
+ipcMain.handle("mediatest:stop", () => { try { return mediaSelfTest().cancel(); } catch (e) { return { ok: false, error: String(e) }; } });
+ipcMain.handle("mediatest:status", () => { try { const s = mediaSelfTest().status(); const l = mediaSelfTestLatest(); return Object.assign({ ok: true }, s, { last: l ? { summary: l.summary, counts: l.counts, mode: l.mode, finishedAt: l.finishedAt, stopped: l.stopped, files: l.files || null, steps: l.steps, markdown: l.markdown } : null }); } catch (e) { return { ok: false, error: String(e) }; } });
+ipcMain.handle("mediatest:copy", () => {
+  try { const l = mediaSelfTestLatest(); if (!l || !l.markdown) return { ok: false, error: "NO_REPORT", message: "There is no self-test report yet — run the test first." }; clipboard.writeText(l.markdown); return { ok: true, chars: l.markdown.length }; } catch (e) { return { ok: false, error: "CLIPBOARD", message: String(e) }; }
+});
+ipcMain.handle("mediatest:open-report", async () => {
+  try { const l = mediaSelfTestLatest(); const f = l && l.files && l.files.md; if (!f) return { ok: false, error: "NO_REPORT", message: "There is no saved report yet." }; const err = await shell.openPath(f); return err ? { ok: false, error: err } : { ok: true }; } catch (e) { return { ok: false, error: String(e) }; }
+});
 
 // Endpoint help: so the user never has to guess the SD/video URL. Presets is a
 // curated dropdown; detect probes localhost for a running backend; test pings one.

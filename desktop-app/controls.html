@@ -1187,6 +1187,13 @@
     .bf-health-list { list-style:none; margin:0 0 6px; padding:0; }
     .bf-health-list li { display:flex; gap:6px; align-items:baseline; }
 
+    /* 🩺 Test pictures & video (media-selftest-ui.js) */
+    #mt-steps { margin:6px 0; padding-left:22px; font-size:12.5px; }
+    .mt-step { margin:3px 0; }
+    .mt-step[data-status="fail"] { color:#ff9a9a; }
+    .mt-step[data-status="warn"] { color:#ffd27a; }
+    .mt-step .mt-detail, .mt-step .mt-error, .mt-step .mt-fix { font-size:11.5px; opacity:.9; margin-left:4px; }
+    .mt-step .mt-error { font-family:monospace; word-break:break-word; }
     /* 🎬 Video tab (videos-studio.js): Wan text→video / picture→video on ComfyUI. Reuses the 🎨 .sd-* cards. */
     body[data-app-tab="video"] #wrap { display:none; }
     body.window-collapsed #video-tab { display:none; }
@@ -1326,6 +1333,7 @@
         <button class="sd-subtab sd-fixed" id="sd-sub-library" role="tab" aria-selected="false" aria-controls="sd-view-library">📚 Library</button>
         <button class="sd-subtab sd-fixed" id="sd-sub-locks" role="tab" aria-selected="false" aria-controls="sd-view-locks">🔒 Character locks</button>
         <button class="sd-subtab sd-fixed" id="sd-sub-setup" role="tab" aria-selected="false" aria-controls="sd-view-setup">⚙ Start &amp; install</button>
+        <button class="sd-fixed" id="btn-sd-mediatest" type="button" title="One press checks pictures AND video (and Alfred, Akọwe's link) and writes one report — opens 🎬 Video → 🩺 Test">🩺 Test pictures &amp; video</button>
       </div>
     </div>
     <div id="sd-conn" role="group" aria-label="Connect to Stable Diffusion">
@@ -1661,6 +1669,7 @@
         <button class="sd-subtab sd-fixed" id="vd-sub-make" role="tab" aria-selected="true" aria-controls="vd-view-make">🎬 Make video</button>
         <button class="sd-subtab sd-fixed" id="vd-sub-trailer" role="tab" aria-selected="false" aria-controls="vd-view-trailer" title="Join several shots and title cards into one book trailer">🎞 Trailer</button>
         <button class="sd-subtab sd-fixed" id="vd-sub-setup" role="tab" aria-selected="false" aria-controls="vd-view-setup">⚙ Setup &amp; models</button>
+        <button class="sd-subtab sd-fixed" id="vd-sub-selftest" role="tab" aria-selected="false" aria-controls="vd-view-selftest" title="One press checks pictures, video, the trailer, Alfred and Akọwe's link — and writes one report">🩺 Test pictures &amp; video</button>
       </div>
     </div>
     <div id="vd-hint" role="note" hidden></div>
@@ -1802,6 +1811,31 @@
         <div class="sd-actions"><button id="btn-vd-tr-showfile" class="sd-fixed" disabled>📂 Show file</button></div>
         <h3 class="sd-h-gap">Saved trailers</h3>
         <div id="vd-tr-list" aria-label="Saved trailers"></div>
+      </div>
+    </div>
+
+    <!-- 🩺 Test pictures & video: media-selftest-ui.js (engine: media-selftest.js in main) -->
+    <div id="vd-view-selftest" class="sd-view" role="tabpanel" aria-labelledby="vd-sub-selftest" hidden>
+      <div class="sd-card">
+        <h3>🩺 Test pictures &amp; video</h3>
+        <div class="sd-note">One press checks Forge, the picture models, FramePack, a tiny trailer, 🎩 Alfred's picture and video tools and Akọwe's picture routes — and writes one report into “stuff and thing/logs”. Nothing is downloaded.</div>
+        <div class="sd-row" id="mt-buttons" style="flex-wrap:wrap;gap:6px;margin:8px 0;">
+          <button id="btn-mt-quick" title="Only checks what is reachable and set up — nothing is drawn">▶ Quick (about 10 s, nothing is made)</button>
+          <button id="btn-mt-full" class="primary" title="Also makes ONE tiny picture, ONE 1-second clip and a 2-second trailer, then unloads FramePack">▶ Full (a tiny picture, clip and trailer — a few minutes)</button>
+          <button id="btn-mt-stop" disabled title="Stop the test now (the step that is running is stopped too)">⏹ Stop</button>
+        </div>
+        <div class="sd-row" style="flex-wrap:wrap;gap:12px;font-size:12px;">
+          <label><input type="checkbox" id="mt-unload" checked> Unload FramePack afterwards (frees the graphics card)</label>
+          <label><input type="checkbox" id="mt-chatgpt"> Also make one ChatGPT picture (Full only)</label>
+        </div>
+        <div id="mt-progress" role="status" aria-live="polite" class="sd-note"></div>
+        <ol id="mt-steps" aria-label="Self-test steps"></ol>
+        <div id="mt-summary" class="sd-note" style="font-weight:600;"></div>
+        <div class="sd-row" style="gap:6px;margin-top:6px;">
+          <button id="btn-mt-copy" disabled title="Copy the whole report (Markdown) to paste it anywhere">📋 Copy report</button>
+          <button id="btn-mt-open" disabled title="Open the saved report">📄 Open report</button>
+        </div>
+        <div id="mt-msg" class="sd-note" role="status" aria-live="polite"></div>
       </div>
     </div>
 
@@ -2557,6 +2591,7 @@
   <script src="images-studio.js"></script>
   <script src="videos-studio.js"></script>
   <script src="videos-trailer.js"></script><!-- 🎞 book trailers in the 🎬 Video tab -->
+  <script src="media-selftest-ui.js"></script><!-- 🩺 Test pictures & video (🎬 Video → 🩺 Test) -->
   <script src="alfred-format.js"></script><!-- 🎩 his replies as simple, safe formatting (used by alfred-panel.js) -->
     <script src="alfred-panel.js"></script><!-- 🎩 Alfred panel (off by default) -->
   <script src="llm-setup-ui.js"></script><!-- B6 🎩 Alfred's AI: one-button setup + check (#llm-setup) -->

@@ -80,6 +80,8 @@ if (precheck) {
       }
     }
     loaded = true;
+    // like the real runner: which attention it uses on this card (xFormers / flash-attn / SageAttention turned off when they can't run)
+    emit({ event: 'attention', using: process.env.FAKE_FP_ATTENTION || 'pytorch-sdpa', disabled: ['xformers'], reasons: ['no kernels for this graphics card (capability 12.0)'] });
     emit({ event: 'loaded', vram_gb: 11.5, high_vram: false });
     return true;
   }
@@ -114,7 +116,8 @@ if (precheck) {
       emit({ event: 'progress', id, phase: 'decoding', section: s, sections, step: steps, steps, percent: s / sections });
     }
     fs.mkdirSync(path.dirname(m.out), { recursive: true });
-    fs.writeFileSync(m.out, MP4);
+    // FAKE_FP_VIDEO: a real, playable clip to hand back (the 🩺 media self-test loads it in a <video>); else the tiny stub
+    if (process.env.FAKE_FP_VIDEO && fs.existsSync(process.env.FAKE_FP_VIDEO)) fs.copyFileSync(process.env.FAKE_FP_VIDEO, m.out); else fs.writeFileSync(m.out, MP4);
     emit({ event: 'result', id, ok: true, path: m.out, frames, fps: 30, seconds: Math.round(frames / 30 * 100) / 100, width: 640, height: 480, sections, seed: m.seed, poster: m.poster || null });
   }
 
