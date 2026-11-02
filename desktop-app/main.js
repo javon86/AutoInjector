@@ -6747,6 +6747,9 @@ function framepack() {
     }),
     log: (k, d) => logEvent(k, d),
     onEvent: (ev) => broadcast("video-framepack", ev),
+    // the last real load / test (ok, tested, or failed + why, with the time) — kept in the 🎬 Video settings
+    lastLoad: (state.videoStudio && state.videoStudio.framepackLastLoad) || null,
+    onLastLoad: (rec) => { try { videoStudio().noteFramePackLoad(rec); } catch (_) {} },
     gpu: async () => {
       if (_framepackGpu) return _framepackGpu;
       try { const g = sdInstallerInst().gpu(); if (g && g.name) return (_framepackGpu = g); } catch (_) {}

@@ -1267,6 +1267,8 @@
     #vd-ep-clip { gap:6px 8px; }
     #vd-fp-settings[hidden], #vd-wan-settings[hidden] { display:none; }
     #vd-fp-models li[data-ok="false"] { color:#ff9c9c; }
+    #vd-fp-lastload[data-state="failed"] { color:#ff9c9c; }
+    #vd-fp-lastload[data-state="untested"] { opacity:.8; }
     #vd-ep-clip > div { flex:1 1 64px; min-width:56px; }
     #vd-ep-clip input { width:100% !important; }
 
@@ -1827,6 +1829,7 @@
         <h3>🎞 FramePack (already on this PC — nothing to download)</h3>
         <div id="vd-fp-state" style="font-size:12.5px;line-height:1.5;white-space:pre-line;">Looking for FramePack…</div>
         <ul id="vd-fp-models" style="font-size:12px;margin:4px 0;padding-left:18px;"></ul>
+        <div id="vd-fp-lastload" data-state="untested" style="font-size:12.5px;line-height:1.5;white-space:pre-line;margin:2px 0 4px;"></div>
         <div id="vd-fp-vram" class="sd-note" style="font-size:11.5px;opacity:.8;"></div>
         <div class="sd-row" style="margin-top:6px;">
           <button class="sd-fixed primary" id="btn-vd-fp-load" title="Starts FramePack and loads its models now, so your next video starts straight away">▶ Load FramePack</button>

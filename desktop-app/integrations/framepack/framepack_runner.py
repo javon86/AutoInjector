@@ -188,6 +188,9 @@ def classify_error(exc):
     if any(w in low for w in OOM_WORDS):
         return ('FRAMEPACK_OOM', 'Your graphics card ran out of memory making this video.',
                 'Raise "GPU memory to keep free" (e.g. to 8 or 10 GB), make a shorter clip, and close other programs that use the graphics card.')
+    if 'offlinemodeisenabled' in low or ('offline mode is enabled' in low and 'huggingface.co/api' in low):
+        return ('FRAMEPACK_OFFLINE_LOOKUP', 'FramePack tried to ask the Hugging Face website about a model instead of using the files on this PC (%s).' % first_line(text)[:200],
+                'The model files are probably fine. Update AutoInjector (it loads every model from its folder now) and try again. Nothing is downloaded by AutoInjector.')
     if any(w in low for w in MISSING_WORDS):
         return ('FRAMEPACK_MODEL_MISSING', 'FramePack could not open one of its model files (%s).' % first_line(text)[:200],
                 'Check the FramePack models folder ("stuff and thing"/models/video/framepack/hf/hub) has all three models. Nothing is downloaded by AutoInjector.')
@@ -286,6 +289,40 @@ def _snapshot_dir(repo_dir):
     return os.path.join(snaps, names[0])
 
 
+def local_repo(hf_home, repo):
+    """The local snapshot folder of ``repo`` in the HF cache under ``hf_home`` (None if it isn't there).
+
+    Models are loaded from this FOLDER, never by repo id: with a repo id, diffusers asks the Hugging Face
+    website about a sharded model (model_info) even with HF_HUB_OFFLINE=1, and fails with
+    OfflineModeIsEnabled although every file is on disk (seen on the user's PC with FramePackI2V_HY)."""
+    if not hf_home:
+        return None
+    rd = os.path.join(hf_home, 'hub', 'models--' + repo.replace('/', '--'))
+    return _snapshot_dir(rd) if os.path.isdir(rd) else None
+
+
+def missing_shards(folder):
+    """Shard files an ``*.index.json`` in ``folder`` names that are not on disk ([] = complete)."""
+    out = []
+    try:
+        names = os.listdir(folder)
+    except OSError:
+        return out
+    for n in names:
+        if not n.endswith('.index.json'):
+            continue
+        try:
+            with open(os.path.join(folder, n)) as f:
+                wm = (json.load(f) or {}).get('weight_map') or {}
+        except (IOError, OSError, ValueError):
+            out.append(n + ' (unreadable)')
+            continue
+        for shard in sorted(set(wm.values())):
+            if not os.path.isfile(os.path.join(folder, shard)):
+                out.append(shard)
+    return out
+
+
 def _has_weights(folder):
     try:
         names = os.listdir(folder)
@@ -309,6 +346,9 @@ def check_models(hf_home):
             folder = os.path.join(snap, sub) if sub else snap
             if not _has_weights(folder):
                 missing.append(label)
+                continue
+            for shard in missing_shards(folder):
+                missing.append('%s (%s)' % (label, shard))
     return missing
 
 
@@ -359,25 +399,32 @@ class Engine(object):
         free_mem_gb = get_cuda_free_memory_gb(gpu)
         high_vram = free_mem_gb > 60
         print('Free VRAM %s GB, high-VRAM mode: %s' % (free_mem_gb, high_vram), file=sys.stderr)
-        hv = 'hunyuanvideo-community/HunyuanVideo'
+        def src(repo):
+            # The local snapshot folder when we know the cache (no website lookups), else the repo id.
+            return local_repo(self.hf_home, repo) or repo
+        local = {'local_files_only': True}
+        hv = src('hunyuanvideo-community/HunyuanVideo')
+        redux = src('lllyasviel/flux_redux_bfl')
+        fp = src('lllyasviel/FramePackI2V_HY')
+        print('Model folders: %s | %s | %s' % (hv, redux, fp), file=sys.stderr)
         stop_check()
         emit({'event': 'loading', 'stage': 'the text encoder (Llama)', 'step': 1, 'steps': steps})
-        text_encoder = LlamaModel.from_pretrained(hv, subfolder='text_encoder', torch_dtype=torch.float16).cpu()
+        text_encoder = LlamaModel.from_pretrained(hv, subfolder='text_encoder', torch_dtype=torch.float16, **local).cpu()
         stop_check()
         emit({'event': 'loading', 'stage': 'the text encoder (CLIP)', 'step': 2, 'steps': steps})
-        text_encoder_2 = CLIPTextModel.from_pretrained(hv, subfolder='text_encoder_2', torch_dtype=torch.float16).cpu()
-        tokenizer = LlamaTokenizerFast.from_pretrained(hv, subfolder='tokenizer')
-        tokenizer_2 = CLIPTokenizer.from_pretrained(hv, subfolder='tokenizer_2')
+        text_encoder_2 = CLIPTextModel.from_pretrained(hv, subfolder='text_encoder_2', torch_dtype=torch.float16, **local).cpu()
+        tokenizer = LlamaTokenizerFast.from_pretrained(hv, subfolder='tokenizer', **local)
+        tokenizer_2 = CLIPTokenizer.from_pretrained(hv, subfolder='tokenizer_2', **local)
         stop_check()
         emit({'event': 'loading', 'stage': 'the VAE', 'step': 3, 'steps': steps})
-        vae = AutoencoderKLHunyuanVideo.from_pretrained(hv, subfolder='vae', torch_dtype=torch.float16).cpu()
+        vae = AutoencoderKLHunyuanVideo.from_pretrained(hv, subfolder='vae', torch_dtype=torch.float16, **local).cpu()
         stop_check()
         emit({'event': 'loading', 'stage': 'the picture encoder', 'step': 4, 'steps': steps})
-        feature_extractor = SiglipImageProcessor.from_pretrained('lllyasviel/flux_redux_bfl', subfolder='feature_extractor')
-        image_encoder = SiglipVisionModel.from_pretrained('lllyasviel/flux_redux_bfl', subfolder='image_encoder', torch_dtype=torch.float16).cpu()
+        feature_extractor = SiglipImageProcessor.from_pretrained(redux, subfolder='feature_extractor', **local)
+        image_encoder = SiglipVisionModel.from_pretrained(redux, subfolder='image_encoder', torch_dtype=torch.float16, **local).cpu()
         stop_check()
         emit({'event': 'loading', 'stage': 'the FramePack video model', 'step': 5, 'steps': steps})
-        transformer = HunyuanVideoTransformer3DModelPacked.from_pretrained('lllyasviel/FramePackI2V_HY', torch_dtype=torch.bfloat16).cpu()
+        transformer = HunyuanVideoTransformer3DModelPacked.from_pretrained(fp, torch_dtype=torch.bfloat16, **local).cpu()
 
         stop_check()
         emit({'event': 'loading', 'stage': 'preparing the graphics card', 'step': 6, 'steps': steps})

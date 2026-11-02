@@ -630,6 +630,89 @@ async function main() {
     assert(/Saved — the other video server is on/.test($('vd-ep-msg').textContent), 'and says so in plain words');
     dom.window.close();
   }
+  console.log('\n== FramePack: the header after a failed / stopped job, and the card\'s last load result ==');
+  {
+    // the PC rerun: 🧪 Test failed at "the FramePack video model", the job ended, but the header still said
+    // "Loading FramePack… loading the FramePack video model · 0:00" (yellow). Now: red, the clock stops; a Stop → idle.
+    const { JSDOM } = require('jsdom');
+    const html = fs.readFileSync(path.join(__dirname, '..', 'controls.html'), 'utf8');
+    const dom = new JSDOM(html, { runScripts: 'outside-only', url: 'http://localhost/controls.html' });
+    const fpBase = { ok: true, available: true, found: true, ready: true, dir: '/fp', source: 'Stability Matrix', python: '/fp/venv/bin/python', pythonOk: true, hfHome: '/fp/hf_download', hfSource: 'FramePack\'s hf_download',
+      models: { ok: true, missing: [], repos: [{ repo: 'a/b', label: 'x', ok: true, missing: [] }] }, running: true, loaded: false, loading: null, busy: false, lastError: null, lastLoad: null, stderrTail: [] };
+    let fp = Object.assign({}, fpBase);
+    const loadingNow = () => ({ phase: 'loading', stage: 'the FramePack video model', step: 3, steps: 3, stageSeconds: 3, text: 'loading the FramePack video model', stuck: false });
+
+    let releaseTest = null; let fpCb = null;
+    const video = {
+      status: async () => { return { ok: true, ready: true, backend: 'framepack', message: '✔ Ready: FramePack (picture → video)', settings: { backend: 'auto', model: 'wan22-ti2v-5b' }, framepack: Object.assign({}, fp), models: [] }; },
+      models: async () => ({ ok: true, anyComfy: false, roots: [], models: [] }),
+      framepackStatus: async () => Object.assign({}, fp),
+      framepackTest: () => new Promise((r) => { releaseTest = r; }),
+      progress: async () => ({ ok: true, busy: !!fp.loading, engine: 'framepack', phase: 'loading', loading: fp.loading }),
+      cancel: async () => ({ ok: true, cancelled: true }),
+      onFramePack: (fn) => { fpCb = fn; },
+    };
+    dom.window.api = new Proxy({ video, akoweTab: async () => ({}) }, { get(t, k) { if (k in t) return t[k]; if (typeof k === 'string' && /^on[A-Z]/.test(k)) return () => {}; return async () => ({ ok: true }); } });
+    const $ = (id) => dom.window.document.getElementById(id);
+    const click = (el) => el.dispatchEvent(new dom.window.Event('click', { bubbles: true }));
+    dom.window.eval(fs.readFileSync(path.join(__dirname, '..', 'videos-studio.js'), 'utf8'));
+    click($('tab-app-video')); await sleep(80);
+    click($('vd-sub-setup')); await sleep(80);
+    assert(/✔ Model files found — all three/.test($('vd-fp-state').textContent) && /checks the files are there, not that they load/.test($('vd-fp-state').textContent) && !/All its models are there/.test($('vd-fp-state').textContent), `the file check says what it is: “${$('vd-fp-state').textContent.split('\n')[2]}”`);
+    assert($('vd-fp-lastload').dataset.state === 'untested' && /Not yet tested/.test($('vd-fp-lastload').textContent), `never loaded → “${$('vd-fp-lastload').textContent}”`);
+    // 🧪 Test: FramePack loads (the header counts the seconds, amber)…
+    click($('btn-vd-fp-test'));
+    fp = Object.assign({}, fpBase, { loading: loadingNow(), busy: true });
+    if (fpCb) fpCb({ type: 'loading', phase: 'loading', stage: 'the FramePack video model', step: 3, steps: 3, text: 'loading the FramePack video model' });
+    await sleep(120);
+    const h1 = $('vd-status-text').textContent;
+    assert($('vd-dot').dataset.tone === 'busy' && /Loading FramePack… loading the FramePack video model · 0:03/.test(h1), `while it loads: amber, “${h1}”`);
+    await sleep(1150);
+    const h2 = $('vd-status-text').textContent;
+    assert(/· 0:0[4-5]/.test(h2), `the header's clock counts by itself (“${h2}”) — it is never stuck at one number`);
+    // …then loading fails at the video model: the job ends
+    const failMsg = 'FramePack tried to ask Hugging Face (online) about one of its model files while it runs offline, and did not find what it asked for in the local copy.';
+    const failFix = 'The model files are on this PC — this is not a missing-model problem.';
+    fp = Object.assign({}, fpBase, { running: false, loading: null, busy: false, lastError: { code: 'FRAMEPACK_MODEL_MISSING', message: failMsg, fix: failFix, load: true, stage: 'the FramePack video model', detail: 'LocalEntryNotFoundError' },
+      lastLoad: { ok: false, at: Date.now(), code: 'FRAMEPACK_MODEL_MISSING', reason: failMsg, fix: failFix, cause: 'hf-offline', stage: 'the FramePack video model' } });
+    releaseTest({ ok: false, error: 'VIDEO_FAILED', code: 'FRAMEPACK_MODEL_MISSING', engine: 'framepack', message: failMsg, fix: failFix });
+    await sleep(150);
+    const h3 = $('vd-status-text').textContent;
+    assert(!$('vd-error').hidden && !$('btn-vd-generate').disabled && $('btn-vd-stop').disabled, 'the red error box; Make video ready again, Stop off');
+    assert($('vd-dot').dataset.tone === 'error' && /✖ FramePack couldn't load — see the details/.test(h3) && !/Loading/.test(h3), `the header goes red at once: “${h3}”`);
+    assert(/Hugging Face/.test($('vd-status').title), 'its tooltip has the reason');
+    await sleep(1200);
+    assert($('vd-status-text').textContent === h3 && !/\d:\d\d/.test($('vd-status-text').textContent), 'the clock has stopped (no “0:00” left behind)');
+    click($('vd-sub-setup')); await sleep(80);
+    const ll = $('vd-fp-lastload');
+    assert(ll.dataset.state === 'failed' && /✖ Failed to load \(.*while loading the FramePack video model\): FramePack tried to ask Hugging Face/.test(ll.textContent) && /What to try: The model files are on this PC — this is not a missing-model problem/.test(ll.textContent),
+      `the card: the last load failed, when, at which stage, why, what to try (“${ll.textContent.split('\n')[0].slice(0, 110)}…”)`);
+    assert(!/all three models/.test(ll.textContent), 'the troubleshooting text comes from the error, not “check all three models are there”');
+    assert(!$('btn-vd-fp-retry').hidden, '↻ Try again is offered');
+    // a job that is stopped: back to idle (green ring), not red, no clock
+    fp = Object.assign({}, fpBase, { lastLoad: fp.lastLoad });
+    click($('btn-vd-fp-test'));
+    fp = Object.assign({}, fpBase, { loading: loadingNow(), busy: true, lastLoad: fp.lastLoad });
+    if (fpCb) fpCb({ type: 'loading', stage: 'the VAE' });
+    await sleep(200);
+    assert($('vd-dot').dataset.tone === 'busy', 'a new 🧪 Test loads again: amber');
+    click($('btn-vd-stop')); await sleep(20);
+    fp = Object.assign({}, fpBase, { lastLoad: fp.lastLoad });
+    releaseTest({ ok: false, error: 'VIDEO_CANCELLED', code: 'VIDEO_CANCELLED', engine: 'framepack', message: 'Stopped.' });
+    await sleep(150);
+    const h4 = $('vd-status-text').textContent;
+    assert($('vd-dot').dataset.tone === 'standby' && !/Loading|couldn't load/.test(h4) && /Ready/.test(h4), `⏹ Stop → back to idle (“${h4}”, ${$('vd-dot').dataset.tone})`);
+    await sleep(1100);
+    assert($('vd-status-text').textContent === h4, 'and nothing keeps counting');
+    // a later good load + test → the card says so
+    fp = Object.assign({}, fpBase, { loaded: true, lastLoad: { ok: true, at: Date.now(), tested: false } });
+    click($('vd-sub-setup')); await sleep(80);
+    assert($('vd-fp-lastload').dataset.state === 'loaded' && /✔ Loaded .* not yet tested with a clip/.test($('vd-fp-lastload').textContent), `loaded, no clip yet → “${$('vd-fp-lastload').textContent}”`);
+    fp = Object.assign({}, fpBase, { loaded: true, lastLoad: { ok: true, at: Date.now(), tested: true, testedAt: Date.now() } });
+    click($('vd-sub-make')); click($('vd-sub-setup')); await sleep(80);
+    assert($('vd-fp-lastload').dataset.state === 'tested' && /✔ Loaded and tested/.test($('vd-fp-lastload').textContent), `a clip was made → “${$('vd-fp-lastload').textContent}”`);
+    dom.window.close();
+  }
   console.log('\n== an oversized bridge body is refused and its connection closed ==');
   {
     const b = createServiceBridge({ video: { backend: () => ({}), request: async () => ({ ok: true }) } });

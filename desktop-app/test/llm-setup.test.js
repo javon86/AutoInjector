@@ -538,6 +538,21 @@ async function testStartAlfred() {
   r = await s.startAlfred();
   assert(r.ok && r.model === 'mistral-nemo:12b', 'pressing it again is harmless');
 
+  // a load into memory that never answers must not keep ▶ Start Alfred busy (CI saw it hang 150 s+)
+  {
+    const prevWait = process.env.AUTOINJECTOR_LLM_WARM_WAIT_MS;
+    process.env.AUTOINJECTOR_LLM_WARM_WAIT_MS = '300';
+    const sh = lib.createLlmSetup(w.deps({ systemBase: SYS_CLOSED, managedHost: `127.0.0.1:${OLL.port}` }));
+    OLL.st.generateHang = true;
+    const t0 = Date.now();
+    const rh = await sh.startAlfred();
+    const took = Date.now() - t0;
+    OLL.st.generateHang = false;
+    if (prevWait === undefined) delete process.env.AUTOINJECTOR_LLM_WARM_WAIT_MS; else process.env.AUTOINJECTOR_LLM_WARM_WAIT_MS = prevWait;
+    assert(rh.ok && /Alfred is ready with/.test(rh.message) && /still loading into memory in the background/.test(rh.message) && rh.warmed === false, `a stuck load into memory: ready anyway, says it is still loading (${rh.message || rh.error})`);
+    assert(took < 10000, `…without waiting for the stuck request (${took} ms)`);
+  }
+
   // Alfred's own choice wins over a bigger one
   OLL.st.models.push({ name: 'qwen3:14b', size: 9 * GB });
   w.alfred.local.model = 'mistral-nemo:12b';
