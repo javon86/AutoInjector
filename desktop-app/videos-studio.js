@@ -72,9 +72,26 @@
       return { tone: l.stuck ? 'warn' : 'busy', text: `⏳ Loading FramePack… ${l.text || l.stage || ''} · ${clock(secs)}${l.stuck ? ' — it seems stuck (⚙ Setup & models → FramePack)' : ''}` };
     }
     if (fp.loaded) return { tone: 'ok', text: null };
+    // loading failed (▶ Load, 🧪 Test or a video): red, and where to look — the reason is on the FramePack card
+    if (fp.lastError && fp.lastError.message && fp.ready && fp.lastError.load) return { tone: 'error', text: '✖ FramePack couldn\'t load — see the details (⚙ Setup & models → FramePack)', title: `FramePack couldn't load: ${fp.lastError.message}` };
     if (fp.lastError && fp.lastError.message && fp.ready) return { tone: 'error', text: `✖ FramePack: ${fp.lastError.message}` };
     if (s.ready) return { tone: 'standby', text: null };
     return null;
+  }
+  // While FramePack loads, the header's clock counts every second; every 3 s it looks again, so when the load ends
+  // (loaded, failed, stopped — by any button) the header and the light change and the clock stops. It never sticks.
+  function headerTicker(on) {
+    if (!on) { if (st.hdrTick) { clearInterval(st.hdrTick); st.hdrTick = null; } return; }
+    if (st.hdrTick) return;
+    let n = 0;
+    st.hdrTick = setInterval(() => {
+      n++;
+      const s = st.status; const fp = (s && s.framepack) || {};
+      if (!(fp.loading || fp.stopping)) { headerTicker(false); return; }
+      const light = fpLight(s);
+      if (light && light.text) { setText('vd-status-text', light.text); $('vd-status').title = light.title || light.text; }
+      if (n % 3 === 0) refreshStatus();
+    }, 1000);
   }
   function renderStatus(s) {
     if (!s || !s.ok) return;
@@ -87,7 +104,8 @@
     // The message is also used outside this tab; here "in 🎬 Video" is where the person already is.
     const text = (light && light.text) || String(s.message || (s.ready ? '✔ Ready' : 'Video is not set up')).replace(/ in 🎬 Video(?= \(| —|,|\.)/g, '');
     setText('vd-status-text', text);
-    $('vd-status').title = text;
+    $('vd-status').title = (light && light.title) || text;
+    headerTicker(!!(s.framepack && (s.framepack.loading || s.framepack.stopping)));
     if (!s.ready && !st.generating) hint(`${text}\nOpen ⚙ Setup & models to finish (one click).`, 'warn'); else if (s.ready && !st.generating) hint('', '');
     // FramePack's model files in "stuff and thing" while FramePack itself isn't ready yet (the Setup card says what is missing).
     const lm = $('vd-local-models');
@@ -119,7 +137,13 @@
     }
     if (s.endpoint) { $('vd-ep-enabled').checked = !!s.endpoint.enabled; if (!$('vd-ep-url').value) $('vd-ep-url').value = s.endpoint.endpoint || ''; }
   }
-  async function refreshStatus(fresh) { const s = await call('status', !!fresh); renderStatus(s); return s; }
+  // (an older answer that arrives after a newer one is not shown — it would put back a state that is over, e.g. "Loading…")
+  async function refreshStatus(fresh) {
+    const seq = (st.statusSeq = (st.statusSeq || 0) + 1);
+    const s = await call('status', !!fresh);
+    if (seq < (st.statusShown || 0)) return s;
+    st.statusShown = seq; renderStatus(s); return s;
+  }
 
   // ------------------------------------------------------------ the form
   const SLIDERS = ['vd-seconds', 'vd-fps', 'vd-width', 'vd-height', 'vd-steps', 'vd-cfg', 'vd-shift', 'vd-fp-seconds', 'vd-fp-steps', 'vd-fp-gpu'];
@@ -305,7 +329,11 @@
       };
       st.timer = setInterval(tick, 1000);
       setTimeout(tick, 150);
-    } else $('vd-progress-bar').style.width = '0%';
+    } else {
+      $('vd-progress-bar').style.width = '0%';
+      // the job ended (saved, failed or stopped): the header, the light and the FramePack card show what is true now
+      refreshStatus(); refreshFramePack(false);
+    }
   }
   async function generate() {
     if (st.generating) return;
@@ -569,6 +597,25 @@
 
   // ------------------------------------------------------------ 🎞 FramePack (Setup)
   function fpMsg(t) { setText('vd-fp-msg', t || ''); }
+  function when(at) { try { return new Date(at).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); } catch (_) { return ''; } }
+  // The last REAL load (▶ Load, 🧪 Test or a video), saved in the settings: loaded and tested ✔ / loaded, not yet tested /
+  // not yet tested / failed to load ✖ (the reason, and what to try — from the error itself).
+  function renderLastLoad(f) {
+    const el = $('vd-fp-lastload'); if (!el) return;
+    const ll = f && f.found ? f.lastLoad : null;
+    let state = 'untested'; let text = '';
+    if (!f || !f.found || f.available === false) { el.hidden = true; return; }
+    el.hidden = false;
+    if (f.loading) { state = 'loading'; text = '⏳ Loading now…'; }
+    else if (ll && ll.ok && ll.tested) { state = 'tested'; text = `✔ Loaded and tested — it made a video (${when(ll.testedAt || ll.at)}).`; }
+    else if (ll && ll.ok) { state = 'loaded'; text = `✔ Loaded (${when(ll.at)}) — not yet tested with a clip: press 🧪 Test.`; }
+    else if (ll && !ll.ok) {
+      state = 'failed';
+      text = `✖ Failed to load (${when(ll.at)}${ll.stage ? `, while loading ${ll.stage}` : ''}): ${ll.reason || 'FramePack could not be loaded.'}${ll.fix ? `\nWhat to try: ${ll.fix}` : ''}`;
+    } else text = 'Not yet tested: the files are there, but FramePack hasn\'t been loaded yet. ▶ Load or 🧪 Test checks that it really loads.';
+    el.dataset.state = state;
+    el.textContent = text;
+  }
   function renderFramePack(f) {
     if (!f || f.ok === false && !f.available) return;
     st.fp = f; st.fpRendered = Date.now();
@@ -578,13 +625,15 @@
     else {
       lines.push(`✔ FramePack found (${f.source || 'found'}): ${f.dir}`);
       lines.push(f.pythonOk ? `✔ Its own Python: ${f.python}` : '✖ Its own Python (venv) is missing — open FramePack once in Stability Matrix so it makes it.');
-      lines.push(f.models && f.models.ok ? `✔ All its models are there (${f.hfSource}: ${f.hfHome}).` : `✖ Some models are missing (looked in ${f.hfSource || 'the models folder'}${f.hfHome ? `: ${f.hfHome}` : ''}).`);
+      // a file check only — whether FramePack really loads them is the "last load" line below
+      lines.push(f.models && f.models.ok ? `✔ Model files found — all three (${f.hfSource}: ${f.hfHome}). This checks the files are there, not that they load.` : `✖ Some model files are missing (looked in ${f.hfSource || 'the models folder'}${f.hfHome ? `: ${f.hfHome}` : ''}).`);
       if (f.loaded) lines.push(`✔ Loaded and ready${f.vramGB != null ? ` (${f.vramGB} GB of graphics memory free when it loaded)` : ''}.`);
       else if (f.loading) lines.push(`⏳ Loading: ${f.loading.text || f.loading.stage || ''}${f.loading.steps ? ` (step ${f.loading.step} of ${f.loading.steps})` : ''}…`);
       if (f.precheck && f.precheck.ok) lines.push(`✔ PyTorch ${f.precheck.torch || ''} sees ${f.precheck.device || 'the graphics card'}${f.precheck.cuda_build ? ` (CUDA ${f.precheck.cuda_build})` : ''}.`);
-      if (f.lastError && f.lastError.message && !f.loading) lines.push(`Last problem: ${f.lastError.message}`);
+      if (f.lastError && f.lastError.message && !f.loading && !f.lastError.load) lines.push(`Last problem: ${f.lastError.message}`);
     }
     setText('vd-fp-state', lines.join('\n'));
+    renderLastLoad(f);
     const ul = $('vd-fp-models'); ul.textContent = '';
     if (f.found) for (const m of (f.models && f.models.repos) || []) {
       const li = document.createElement('li'); li.dataset.ok = String(!!m.ok);
@@ -659,7 +708,7 @@
     subTab('make'); hideError(); busy(true); msg('🧪 Making a 2-second FramePack test clip from a test picture…');
     const r = await call('framepackTest');
     busy(false);
-    if (!r || !r.ok) { msg(''); showError(r); refreshFramePack(false); return; }
+    if (!r || !r.ok) { msg(''); showError(r); refreshFramePack(false); refreshStatus(); return; }
     msg(`✔ FramePack test video saved: ${String(r.path || '').split(/[\\/]/).pop()} (${r.seconds} s, ${r.width}×${r.height})`);
     play({ path: r.path, url: r.url, posterUrl: r.posterUrl, record: Object.assign({}, r, { engine: 'framepack' }) });
     loadGallery();

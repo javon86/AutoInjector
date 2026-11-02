@@ -7,6 +7,8 @@
 //   FAKE_FP_MODE   ok (default) | oom (CUDA out of memory in sampling) | crash (exits mid-way) | noready (never says ready)
 //                  | stuck (load sits at "starting PyTorch" for ever, ignores cancel, and has a child process of its own)
 //                  | flood (writes ~2 MB to stderr while loading — more than any pipe holds)
+//                  | failmodel (loading fails at "the FramePack video model" (the transformer) with Hugging Face's offline /
+//                    metadata error, worded like the real runner: FRAMEPACK_MODEL_MISSING + "check … all three models")
 //   FAKE_FP_PRECHECK  ok (default) | nocuda | cpu | dll | notorch | hang (never finishes) | flood (2 MB stderr, then ok)
 //   FAKE_FP_STEP_MS  ms per sampling step (default 15) · FAKE_FP_LOAD_MS ms per loading stage (default 10)
 //   FAKE_FP_LOG    a file: every command received (+ argv, cwd, HF env, PYTHON* env, PATH, pid) is appended as a JSON line
@@ -50,7 +52,7 @@ if (precheck) {
 } else {
   let loaded = false; let job = null; let cancel = false;
 
-  async function load() {
+  async function load(id) {
     if (MODE === 'stuck') {
       // what the PC showed: step 0 "starting PyTorch", then nothing. It has a child of its own (like a venv launcher's python).
       const kid = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
@@ -64,9 +66,18 @@ if (precheck) {
       emit({ event: 'loading', stage: stages[i], step: i + 1, steps: stages.length });
       if (MODE === 'flood' && i === 0) flood();
       await sleep(LOAD_MS);
+      if (MODE === 'failmodel' && i === stages.length - 1) {
+        const err = "OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files. Check your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.";
+        process.stderr.write(`Traceback (most recent call last):\n  File "framepack_runner.py", line 300, in load_models\nhuggingface_hub.errors.LocalEntryNotFoundError: Cannot find the requested files in the disk cache and outgoing traffic has been disabled.\n${err}\n`);
+        emit({ event: 'error', id, code: 'FRAMEPACK_MODEL_MISSING', message: `FramePack could not open one of its model files (${err.slice(0, 200)}).`,
+          fix: 'Check the FramePack models folder ("stuff and thing"/models/video/framepack/hf/hub) has all three models. Nothing is downloaded by AutoInjector.',
+          detail: `Traceback (most recent call last):\nhuggingface_hub.errors.LocalEntryNotFoundError: Cannot find the requested files in the disk cache and outgoing traffic has been disabled.\n${err}` });
+        return false;
+      }
     }
     loaded = true;
     emit({ event: 'loaded', vram_gb: 11.5, high_vram: false });
+    return true;
   }
 
   async function generate(m) {
@@ -77,7 +88,7 @@ if (precheck) {
     const frames = (sections * 9 + 1) * 4 - 3;
     const steps = Math.max(1, Math.round(Number(m.steps) || 25));
     emit({ event: 'accepted', id, sections, frames, seconds: Math.round(frames / 30 * 100) / 100, seed: m.seed });
-    if (!loaded) await load();
+    if (!loaded && !(await load(id))) return;
     for (const ph of ['text', 'picture', 'vae-encode', 'vision']) emit({ event: 'progress', id, phase: ph, section: 0, sections, step: 0, steps, percent: 0 });
     if (m.poster) { try { fs.copyFileSync(m.image, m.poster); } catch (_) {} }
     for (let s = 1; s <= sections; s++) {
@@ -109,7 +120,7 @@ if (precheck) {
       else if (m.cmd === 'status') emit({ event: 'status', id: m.id, busy: !!job, loaded });
       else if (m.cmd === 'quit') { if (MODE !== 'stuck') process.exit(0); }
       else if (m.cmd === 'cancel') { if (MODE === 'stuck') continue; if (job) { cancel = true; emit({ event: 'cancelling', id: m.id }); } else emit({ event: 'cancelled', id: m.id, idle: true }); }
-      else if (m.cmd === 'load') { if (job) { emit({ event: 'error', id: m.id, code: 'FRAMEPACK_BUSY', message: 'busy' }); continue; } job = load().finally(() => { job = null; }); }
+      else if (m.cmd === 'load') { if (job) { emit({ event: 'error', id: m.id, code: 'FRAMEPACK_BUSY', message: 'busy' }); continue; } job = load(m.id).finally(() => { job = null; }); }
       else if (m.cmd === 'generate') { if (job) { emit({ event: 'error', id: m.id, code: 'FRAMEPACK_BUSY', message: 'FramePack is already busy.' }); continue; } job = generate(m).finally(() => { job = null; }); }
     }
   });

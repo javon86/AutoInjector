@@ -191,15 +191,42 @@ function explainExit(tail, code, signal) {
   const t = tail.join('\n');
   if (OOM_RE.test(t)) return fail('FRAMEPACK_OOM', 'Your graphics card ran out of memory and FramePack stopped.', 'Raise “GPU memory to keep free” (e.g. 8–10 GB), make a shorter clip, and close other programs that use the graphics card.', { engine: 'framepack', serverError: lastLines(tail) });
   if (/No module named/i.test(t)) { const m = t.match(/No module named '?([\w.]+)'?/i); return fail('FRAMEPACK_FAILED', `FramePack's Python is missing a part (${m ? m[1] : 'a module'}), so it could not start.`, 'Update or repair the FramePack package in Stability Matrix, then try again.', { engine: 'framepack', serverError: lastLines(tail) }); }
+  const why = explainLoadError(t);
+  if (why) return fail('FRAMEPACK_FAILED', why.message, why.fix, { engine: 'framepack', cause: why.cause, serverError: lastLines(tail) });
   return fail('FRAMEPACK_FAILED', `FramePack stopped unexpectedly${code != null ? ` (exit code ${code})` : signal ? ` (${signal})` : ''}.`, 'Try again. If it keeps happening, look at the details (what FramePack printed).', { engine: 'framepack', serverError: lastLines(tail) });
 }
 function lastLines(tail) { return tail.slice(-25).join('\n').slice(-3000); }
+// Why loading failed, from the error text itself — so the words (and what to try) match what really happened, not a
+// generic "check the models are there" (the file check can say "all found" and loading can still fail).
+// → { cause, message, fix } | null
+const HF_OFFLINE_RE = /offline mode|OfflineModeIsEnabled|outgoing traffic has been disabled|HF_HUB_OFFLINE|LocalEntryNotFoundError|couldn'?t connect to ['"]?https?:\/\/huggingface\.co|cannot find the requested files in the (?:local|disk) cache|get_hf_file_metadata|huggingface_hub[\w.]*errors/i;
+function explainLoadError(text) {
+  const t = String(text || '');
+  if (!t.trim() || OOM_RE.test(t)) return null; // out of memory has its own words already
+  if (HF_OFFLINE_RE.test(t)) {
+    return { cause: 'hf-offline', message: 'FramePack tried to ask Hugging Face (online) about one of its model files while it runs offline, and did not find what it asked for in the local copy.',
+      fix: 'The model files are on this PC — this is not a missing-model problem. Loading asked Hugging Face for a file\'s details (its metadata); AutoInjector runs FramePack offline and downloads nothing. Update AutoInjector and ↻ Try again; if it keeps happening, open FramePack once in Stability Matrix (online) so its own cache is complete, then try again. The exact error is in the details.' };
+  }
+  const m = t.match(/does not appear to have a file named ([^\s,]+)/i) || t.match(/No such file or directory:? '([^']+)'/i) || t.match(/Error while deserializing header|SafetensorError|incomplete metadata/i);
+  if (m) {
+    const name = m[1] ? String(m[1]).replace(/[.'"]+$/, '').split(/[\\/]/).slice(-2).join('/') : '';
+    return { cause: 'file-bad', message: `A model file FramePack needs is missing or damaged${name ? ` (${name})` : ''}.`,
+      fix: 'The file check only looks for the files by name — a half-copied or damaged file fails here. Copy that model again (from FramePack\'s hf_download into "stuff and thing"/models/video/framepack/hf), then ↻ Try again.' };
+  }
+  return null;
+}
 function fromRunner(ev) {
   const code = String(ev.code || 'FRAMEPACK_FAILED');
   const out = fail(code === 'BAD_REQUEST' ? 'FRAMEPACK_FAILED' : code, ev.message || 'FramePack could not make the video.', ev.fix || '', { engine: 'framepack' });
   if (ev.missing) out.missing = ev.missing;
   if (ev.detail) out.serverError = String(ev.detail).slice(0, 3000);
   if (ev.cause) out.cause = ev.cause;
+  const why = code !== 'FRAMEPACK_OOM' && code !== 'BAD_REQUEST' ? explainLoadError(`${ev.message || ''}\n${ev.detail || ''}`) : null;
+  if (why) {
+    // what FramePack said stays (first in the details); the words and the fix fit what really happened
+    if (ev.message && !(out.serverError || '').includes(ev.message)) out.serverError = `${ev.message}${out.serverError ? `\n\n${out.serverError}` : ''}`.slice(0, 3000);
+    out.message = why.message; out.fix = why.fix; out.cause = why.cause;
+  }
   if (code === 'FRAMEPACK_OOM' && !out.fix) out.fix = 'Raise “GPU memory to keep free”, or make a shorter clip.';
   return out;
 }
@@ -291,6 +318,13 @@ function stageKind(stage, phase) {
   if (/preparing the graphics card/i.test(stage || '')) return 'gpu';
   return 'model';
 }
+// A saved last-load record (from the settings file) → the same shape, or null.
+function cleanLastLoad(x) {
+  if (!x || typeof x !== 'object' || !Number.isFinite(Number(x.at))) return null;
+  const s = (v, n) => String(v == null ? '' : v).slice(0, n);
+  if (x.ok) return { ok: true, at: Number(x.at), tested: !!x.tested, testedAt: Number.isFinite(Number(x.testedAt)) && x.testedAt ? Number(x.testedAt) : null };
+  return { ok: false, at: Number(x.at), code: s(x.code, 60) || 'FRAMEPACK_FAILED', reason: s(x.reason, 600), fix: s(x.fix, 1200), cause: s(x.cause, 40), stage: s(x.stage, 120), detail: s(x.detail, 1500) };
+}
 function stuckWords(kind, stage, secs, where) {
   const t = clock(secs);
   const at = where ? ` (it is in ${where.split(' < ')[0]})` : '';
@@ -348,6 +382,24 @@ function createFramePack(deps = {}) {
   let lastTail = []; // what the last runner / pre-check printed (stderr), kept after it is gone
   let watch = null;
   const waiters = new Map(); // id -> resolve (load / status)
+  // The last REAL load of the models (▶ Load, 🧪 Test or a video) — separate from "the model files are found":
+  // { ok, at, tested, testedAt } or { ok: false, at, code, reason, fix, cause, stage, detail }. Saved by the app (deps.onLastLoad).
+  let lastLoad = cleanLastLoad(deps.lastLoad);
+
+  function noteLoad(rec) {
+    const prev = lastLoad; const now = Date.now();
+    const keepTest = !!(prev && prev.ok && prev.tested);
+    lastLoad = rec.ok ? { ok: true, at: now, tested: !!rec.tested || keepTest, testedAt: rec.tested ? now : keepTest ? prev.testedAt || prev.at : null }
+      : { ok: false, at: now, code: rec.code || 'FRAMEPACK_FAILED', reason: rec.reason || 'FramePack could not be loaded.', fix: rec.fix || '', cause: rec.cause || '', stage: rec.stage || '', detail: String(rec.detail || '').slice(-1500) };
+    log('framepack-last-load', Object.assign({}, lastLoad, { detail: undefined }));
+    try { if (deps.onLastLoad) deps.onLastLoad(Object.assign({}, lastLoad)); } catch (_) {}
+  }
+  // A failure: lastError (the screen's "last problem"); while loading it is also the last load's result (with the stage).
+  function setError(r, isLoad, stage) {
+    const st = stage || (loading ? loading.stage : '');
+    lastError = { code: r.code, message: r.message, fix: r.fix, at: Date.now(), detail: r.serverError || '', load: !!isLoad, stage: isLoad ? st : undefined, cause: r.cause || undefined };
+    if (isLoad) noteLoad({ ok: false, code: r.code, reason: r.message, fix: r.fix, cause: r.cause, stage: st, detail: r.serverError || '' });
+  }
 
   function find(fresh) {
     if (!fresh && cache && Date.now() - cache.at < 5000) return cache.info;
@@ -399,7 +451,8 @@ function createFramePack(deps = {}) {
   }
   function beginLoading(phase, stage) {
     const now = Date.now();
-    if (!loading) loading = { phase, stage, step: 0, steps: 0, startedAt: now, stageStartedAt: now, stuck: false, where: '', stages: [], lastStillLog: now };
+    // a new try: the old problem is not "now" any more (a Stop then goes back to idle, not red); the card keeps the last load result
+    if (!loading) { loading = { phase, stage, step: 0, steps: 0, startedAt: now, stageStartedAt: now, stuck: false, where: '', stages: [], lastStillLog: now }; lastError = null; }
     else setStage(stage, 0, loading.steps, phase);
     if (!watch) { watch = setInterval(tickWatch, watchMs); if (watch.unref) watch.unref(); }
     onEvent({ type: 'loading', phase, stage, step: 0, steps: loading.steps, text: stageText(loading) });
@@ -420,6 +473,7 @@ function createFramePack(deps = {}) {
     loading = null;
     if (watch) { clearInterval(watch); watch = null; }
     if (how !== 'loaded') pre = null; // stuck / stopped / failed: the next try checks PyTorch again (fresh words for what is wrong)
+    if (how === 'loaded') noteLoad({ ok: true });
     const secs = Math.round((Date.now() - l.startedAt) / 100) / 10;
     const stages = [...l.stages, { stage: l.stage, phase: l.phase, seconds: Math.round((Date.now() - l.stageStartedAt) / 100) / 10 }];
     log(how === 'loaded' ? 'framepack-loaded' : how === 'cancelled' ? 'framepack-load-stopped' : 'framepack-load-failed',
@@ -450,7 +504,7 @@ function createFramePack(deps = {}) {
     return Object.assign({}, f, {
       models: f.models, running: !!proc, loaded, loading: loadingPublic(), busy: !!job || !!loadWait,
       job: job ? { id: job.id, phase: job.phase || 'starting' } : null, vramGB, highVram, gpu: gpu ? { name: gpu.name || '', vramMB: gpu.vramMB || null, vendor: gpu.vendor || '' } : null,
-      vramHint: vramHint(), lastError, minVramGB: MIN_VRAM_GB, fps: FPS, stopping: !!stopping || !!loadCancel,
+      vramHint: vramHint(), lastError, lastLoad: lastLoad ? Object.assign({}, lastLoad) : null, minVramGB: MIN_VRAM_GB, fps: FPS, stopping: !!stopping || !!loadCancel,
       stderrTail: tailNow(), precheck: pre ? Object.assign({ ok: pre.ok, at: pre.at }, pick(pre.info || {}, ['torch', 'cuda', 'cuda_build', 'device', 'free_gb', 'total_gb', 'seconds', 'import_seconds', 'error'])) : null,
     });
   }
@@ -489,13 +543,17 @@ function createFramePack(deps = {}) {
     if (job && ev.id === job.id) {
       if (ev.event === 'accepted') { job.sections = ev.sections; job.frames = ev.frames; return; }
       if (ev.event === 'progress') { if (loading) endLoading('loaded'); job.phase = ev.phase || 'sampling'; try { job.onProgress && job.onProgress(ev); } catch (_) {} return; }
-      if (ev.event === 'result') return finish(Object.assign({ ok: true, engine: 'framepack' }, pick(ev, ['path', 'poster', 'frames', 'fps', 'seconds', 'width', 'height', 'sections', 'seed'])));
+      if (ev.event === 'result') { noteLoad({ ok: true, tested: true }); return finish(Object.assign({ ok: true, engine: 'framepack' }, pick(ev, ['path', 'poster', 'frames', 'fps', 'seconds', 'width', 'height', 'sections', 'seed']))); }
       if (ev.event === 'cancelled') { if (loading) endLoading('cancelled'); return finish(fail('FRAMEPACK_CANCELLED', 'Stopped.', '', { engine: 'framepack' })); }
       if (ev.event === 'error') {
-        const r = withTail(fromRunner(ev)); lastError = { code: r.code, message: r.message, fix: r.fix, at: Date.now(), detail: r.serverError || '' };
+        // a video (or the 🧪 test) that failed — while loading too: the screen hears about it (light, header, card)
+        const r = withTail(fromRunner(ev)); const wasLoading = !!loading;
+        setError(r, wasLoading);
         if (loading) endLoading('failed', { code: r.code, message: r.message, stderr: tailNow() });
         if (r.code === 'FRAMEPACK_OOM') loaded = false;
-        return finish(r);
+        finish(r);
+        onEvent({ type: 'error', code: r.code, message: r.message, fix: r.fix, load: wasLoading, job: true });
+        return;
       }
     }
     if (ev.event === 'cancelled' && waiters.get('load')) {
@@ -504,7 +562,7 @@ function createFramePack(deps = {}) {
     if (ev.event === 'error') {
       const w = waiters.get('load');
       const r = withTail(fromRunner(ev));
-      lastError = { code: r.code, message: r.message, fix: r.fix, at: Date.now(), detail: r.serverError || '' };
+      setError(r, !!loading || !!w);
       if (loading) endLoading('failed', { code: r.code, message: r.message, stderr: tailNow() });
       if (w) { waiters.delete('load'); w(r); }
       onEvent({ type: 'error', code: r.code, message: r.message, fix: r.fix });
@@ -621,13 +679,14 @@ function createFramePack(deps = {}) {
     const wasStopping = !!p.stopping;
     const cancelledLoad = !!loadCancel;
     const r = wasStopping || cancelledLoad ? fail('FRAMEPACK_CANCELLED', 'Stopped.', '', { engine: 'framepack' }) : r0;
+    const hadLoading = !!loading; const hadStage = loading ? loading.stage : '';
     if (loading) endLoading(cancelledLoad || wasStopping ? 'cancelled' : 'failed', cancelledLoad || wasStopping ? {} : { code: r.code, message: r.message, stderr: lastTail });
     log('framepack-exit', { code: r0.code, stopping: wasStopping, cancelledLoad, seconds: Math.round((Date.now() - p.started) / 1000), stopSeconds: p.stopAt ? Math.round((Date.now() - p.stopAt) / 100) / 10 : undefined });
     if (p.onFail) p.onFail(r);
     const w = waiters.get('load'); if (w) { waiters.delete('load'); w(r); }
     for (const k of ['status', 'pong']) { const x = waiters.get(k); if (x) { waiters.delete(k); x(null); } }
-    if (job) { const cancelled = job.cancelled; if (!cancelled && !wasStopping) lastError = { code: r.code, message: r.message, fix: r.fix, at: Date.now(), detail: r.serverError || '' }; finish(cancelled ? fail('FRAMEPACK_CANCELLED', 'Stopped.', '', { engine: 'framepack' }) : r); }
-    if (!wasStopping && !cancelledLoad && !job && r.code !== 'FRAMEPACK_CANCELLED') lastError = lastError || { code: r.code, message: r.message, fix: r.fix, at: Date.now(), detail: r.serverError || '' };
+    if (job) { const cancelled = job.cancelled; if (!cancelled && !wasStopping) setError(r, hadLoading, hadStage); finish(cancelled ? fail('FRAMEPACK_CANCELLED', 'Stopped.', '', { engine: 'framepack' }) : r); }
+    else if (!wasStopping && !cancelledLoad && r.code !== 'FRAMEPACK_CANCELLED' && (hadLoading || !lastError)) setError(r, hadLoading, hadStage);
     if (wasStopping || cancelledLoad || stopping) { const why = (stopping && stopping.why) || (cancelledLoad ? 'loading' : 'stop'); stopping = null; onEvent({ type: 'stopped', while: why }); log('framepack-stopped', { while: why, seconds: p.stopAt ? Math.round((Date.now() - p.stopAt) / 100) / 10 : null }); }
     onEvent({ type: 'exit', code: r.code });
   }
@@ -656,9 +715,10 @@ function createFramePack(deps = {}) {
       if (!loading) beginLoading(precheckOn && !(pre && pre.ok) && !proc ? 'precheck' : 'starting', precheckOn && !(pre && pre.ok) && !proc ? 'checking PyTorch' : 'starting FramePack\'s Python');
       const bad = await prepare();
       if (bad) {
-        if (bad.code !== 'FRAMEPACK_CANCELLED') lastError = { code: bad.code, message: bad.message, fix: bad.fix, at: Date.now(), detail: bad.serverError || '' };
+        // (not ready = the file check said no: that is not a load that was tried)
+        if (bad.code !== 'FRAMEPACK_CANCELLED') setError(withTail(Object.assign({}, bad)), !notReady(find()));
         if (loading) endLoading(bad.code === 'FRAMEPACK_CANCELLED' ? 'cancelled' : 'failed', { code: bad.code, message: bad.message, stderr: bad.code === 'FRAMEPACK_CANCELLED' ? undefined : tailNow() });
-        if (bad.code !== 'FRAMEPACK_CANCELLED') onEvent({ type: 'error', code: bad.code, message: bad.message, fix: bad.fix });
+        if (bad.code !== 'FRAMEPACK_CANCELLED') onEvent({ type: 'error', code: bad.code, message: bad.message, fix: bad.fix, load: true });
         return withTail(bad);
       }
       if (loadCancel) { if (loading) endLoading('cancelled'); return fail('FRAMEPACK_CANCELLED', 'Stopped.', '', { engine: 'framepack' }); }
@@ -690,10 +750,13 @@ function createFramePack(deps = {}) {
       }
       const bad = await prepare();
       if (bad) {
-        if (bad.code !== 'FRAMEPACK_CANCELLED' && !j.cancelled) lastError = { code: bad.code, message: bad.message, fix: bad.fix, at: Date.now(), detail: bad.serverError || '' };
+        const failedLoad = bad.code !== 'FRAMEPACK_CANCELLED' && !j.cancelled;
+        if (failedLoad) setError(withTail(Object.assign({}, bad)), !notReady(find()));
         if (loading) endLoading(j.cancelled || bad.code === 'FRAMEPACK_CANCELLED' ? 'cancelled' : 'failed', { code: bad.code, message: bad.message });
         loadCancel = null;
-        return finish(j.cancelled ? cancelled() : withTail(bad));
+        finish(j.cancelled ? cancelled() : withTail(bad));
+        if (failedLoad) onEvent({ type: 'error', code: bad.code, message: bad.message, fix: bad.fix, load: true, job: true });
+        return;
       }
       loadCancel = null;
       if (j.cancelled) { if (loading) endLoading('cancelled'); return finish(cancelled()); }
@@ -704,6 +767,8 @@ function createFramePack(deps = {}) {
     if (o.timeoutMs) timer = setTimeout(() => { if (job === j) { cancel(); j.timedOut = true; } }, o.timeoutMs);
     const r = await promise;
     if (timer) clearTimeout(timer);
+    // a ⏹ Stop while this video's load ran: that Stop is over now (else status() would say "Stopping…" for ever)
+    if (!loadWait && !preProc && !(loading && proc)) loadCancel = null;
     if (j.timedOut && !r.ok) return fail('FRAMEPACK_TIMEOUT', 'FramePack did not finish in time.', 'Make a shorter clip, or raise the time limit (🎬 Video → Setup → Settings).', { engine: 'framepack' });
     log('framepack-generate', { ok: !!r.ok, code: r.code, seconds: r.seconds, frames: r.frames });
     return r;
@@ -757,4 +822,4 @@ function createFramePack(deps = {}) {
   return { status, load, generate, cancel, stop, refresh, refreshGpu, find, busy: () => !!job || !!loadWait, isLoaded: () => loaded, isLoading: () => !!loading || !!preProc };
 }
 
-module.exports = { createFramePack, findFramePack, checkModels, isFramePackDir, venvPython, testPicture, notReady, explainExit, explainPrecheck, buildEnv, killTree, stuckWords, stageKind, hasAnyModel, NEEDED, FPS, MIN_VRAM_GB, RUNNER, STAGE_LIMITS };
+module.exports = { createFramePack, findFramePack, checkModels, isFramePackDir, venvPython, testPicture, notReady, explainExit, explainLoadError, explainPrecheck, buildEnv, killTree, stuckWords, stageKind, hasAnyModel, NEEDED, FPS, MIN_VRAM_GB, RUNNER, STAGE_LIMITS };
