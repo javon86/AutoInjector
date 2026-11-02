@@ -301,6 +301,8 @@ function createVideoStudio(deps = {}) {
       models: { ok: !!(s.models && s.models.ok), missing: (s.models && s.models.missing) || [], repos: (s.models && s.models.repos) || [] }, chosenDir: s.chosenDir || '', chosenMissing: !!s.chosenMissing,
       running: !!s.running, loaded: !!s.loaded, loading: s.loading || null, busy: !!s.busy, vramGB: s.vramGB == null ? null : s.vramGB, highVram: s.highVram == null ? null : s.highVram,
       gpu: s.gpu || null, vramHint: s.vramHint || '', lastError: s.lastError || null, message: s.message || '',
+      // the last real load / test (saved in the settings): "model files found" is not the same as "it loads"
+      lastLoad: s.lastLoad || settings.framepackLastLoad || null,
       stopping: !!s.stopping, stderrTail: Array.isArray(s.stderrTail) ? s.stderrTail.slice(-50) : [], precheck: s.precheck || null };
   }
   // engine "auto": ComfyUI + Wan when it is ready; FramePack when it is found and Wan isn't installed;
@@ -802,6 +804,8 @@ function createVideoStudio(deps = {}) {
 
   return {
     framepack, engineFor,
+    // framepack.js tells the app how the last real load went (ok / tested / failed + why, with the time): saved with the settings
+    noteFramePackLoad: (rec) => { if (!rec || typeof rec !== 'object') return; settings = Object.assign({}, settings, { framepackLastLoad: Object.assign({}, rec) }); try { persist(Object.assign({}, settings)); } catch (_) {} },
     status, backendInfo, models: modelsInfo, settings: setSettings, getSettings: () => Object.assign({}, settings),
     generate: (req, from) => make('t2v', req, from),
     animate: (req, from) => make('i2v', req, from),

@@ -57,8 +57,9 @@ async function main() {
     await c.click('#vd-sub-setup');
     await c.waitForFunction(() => /FramePack found/.test(document.getElementById('vd-fp-state').textContent), null, { timeout: 15000 }).catch(() => {});
     const card = await c.textContent('#vd-fp-state');
-    assert(/✔ FramePack found/.test(card) && card.includes(fpDir) && /✔ Its own Python/.test(card) && /✔ All its models are there/.test(card), `the FramePack card: found, its folder, Python, models ✔ (${card.split('\n')[0]})`);
+    assert(/✔ FramePack found/.test(card) && card.includes(fpDir) && /✔ Its own Python/.test(card) && /✔ Model files found — all three/.test(card) && !/All its models are there/.test(card), `the FramePack card: found, its folder, Python, model files found ✔ (${card.split('\n')[0]})`);
     assert((await c.$$('#vd-fp-models li[data-ok="true"]')).length === 3, 'the three models are listed ✔');
+    assert(await c.getAttribute('#vd-fp-lastload', 'data-state') === 'untested' && /Not yet tested/.test(await c.textContent('#vd-fp-lastload')), `files found ≠ loads: never loaded yet → “${await c.textContent('#vd-fp-lastload')}”`);
     assert(/NVIDIA|graphics/.test(await c.textContent('#vd-fp-vram')), 'a graphics-memory hint');
     assert(!(await c.$eval('#btn-vd-fp-load', (b) => b.disabled)) && !(await c.$eval('#btn-vd-fp-test', (b) => b.disabled)) && await c.isVisible('#btn-vd-fp-choose'), '▶ Load, 🧪 Test and 📂 Choose FramePack folder are there');
     assert(/FramePack only/.test(await c.textContent('#vd-backend')), 'Settings: the engine list has "FramePack only"');
@@ -71,6 +72,7 @@ async function main() {
     await c.waitForFunction(() => document.getElementById('vd-dot').dataset.tone === 'ok', null, { timeout: 8000 }).catch(() => {});
     assert(await c.getAttribute('#vd-dot', 'data-tone') === 'ok', 'loaded → the light is green');
     assert(/✔ PyTorch 2\.6\.0\+cu126 sees NVIDIA GeForce RTX 3060/.test(await c.textContent('#vd-fp-state')), 'the card shows what the PyTorch check found (version, the card)');
+    assert(await c.getAttribute('#vd-fp-lastload', 'data-state') === 'loaded' && /not yet tested with a clip/.test(await c.textContent('#vd-fp-lastload')), `the last load: loaded, not yet tested (“${await c.textContent('#vd-fp-lastload')}”)`);
     await shot(c, 'fp01-framepack-setup');
 
     // picture → video with FramePack
@@ -120,6 +122,9 @@ async function main() {
     assert(/✔ FramePack test video saved: test-.*\.mp4 \(2\.43 s/.test(await c.textContent('#vd-msg')), `🧪 Test: "${(await c.textContent('#vd-msg')).split('\n')[0]}"`);
     made.push(decodeURIComponent(new URL(await c.getAttribute('#vd-player', 'src')).pathname).replace(/^\/([A-Za-z]:)/, '$1'));
     await shot(c, 'fp04-framepack-test');
+    await c.click('#vd-sub-setup');
+    await c.waitForFunction(() => document.getElementById('vd-fp-lastload').dataset.state === 'tested', null, { timeout: 8000 }).catch(() => {});
+    assert(/✔ Loaded and tested/.test(await c.textContent('#vd-fp-lastload')), `after a clip: “${await c.textContent('#vd-fp-lastload')}”`);
 
     // ---- the PC report: stuck at step 0 "starting PyTorch", the light stayed green, Stop was slow
     await c.click('#vd-sub-setup');
@@ -166,7 +171,7 @@ async function main() {
     const failText = await c.textContent('#vd-fp-msg');
     assert(/✖ PyTorch 2\.6\.0\+cu126 \(built for CUDA 12\.6\) does not see an NVIDIA graphics card/.test(failText) && /How to fix: .*NVIDIA graphics driver/.test(failText), `pre-check failure in plain words: "${failText.replace(/\n/g, ' / ')}"`);
     await c.waitForFunction(() => document.getElementById('vd-dot').dataset.tone === 'error', null, { timeout: 8000 }).catch(() => {});
-    assert(await c.getAttribute('#vd-dot', 'data-tone') === 'error' && /✖ FramePack:/.test(await c.textContent('#vd-status-text')), `a failed load → the light is red (${await c.getAttribute('#vd-dot', 'data-tone')}: "${await c.textContent('#vd-status-text')}")`);
+    assert(await c.getAttribute('#vd-dot', 'data-tone') === 'error' && /✖ FramePack couldn't load — see the details/.test(await c.textContent('#vd-status-text')), `a failed load → the light is red (${await c.getAttribute('#vd-dot', 'data-tone')}: "${await c.textContent('#vd-status-text')}")`);
     assert(await c.isVisible('#btn-vd-fp-retry'), '↻ Try again is offered');
     await shot(c, 'fp06-framepack-precheck-failed');
     setFake({ mode: 'ok', precheck: 'ok' });
@@ -174,6 +179,52 @@ async function main() {
     await c.waitForFunction(() => /FramePack is loaded/.test(document.getElementById('vd-fp-msg').textContent), null, { timeout: 20000 }).catch(() => {});
     await c.waitForFunction(() => document.getElementById('vd-dot').dataset.tone === 'ok', null, { timeout: 8000 }).catch(() => {});
     assert(/✔ FramePack is loaded/.test(await c.textContent('#vd-fp-msg')) && await c.getAttribute('#vd-dot', 'data-tone') === 'ok', '↻ Try again (fixed) → loaded, the light green');
+
+    // ---- the PC rerun: 🧪 Test fails while loading "the FramePack video model" (Hugging Face offline / metadata error).
+    // Before: the job ended but the header stayed "Loading FramePack… loading the FramePack video model · 0:00" (yellow).
+    await c.click('#btn-vd-fp-unload');
+    await c.waitForFunction(() => !document.getElementById('btn-vd-fp-load').disabled, null, { timeout: 10000 }).catch(() => {});
+    setFake({ mode: 'failmodel', precheck: 'ok' });
+    await c.click('#btn-vd-fp-test');
+    await c.waitForSelector('#vd-error:not([hidden])', { timeout: 20000 }).catch(() => {});
+    const errText = await c.textContent('#vd-error');
+    assert(/Hugging Face/.test(errText) && /not a missing-model problem/.test(errText) && !/all three models/.test(errText), `the red error: the reason from the error itself (“${errText.replace(/\s+/g, ' ').slice(0, 140)}…”)`);
+    assert(!(await c.$eval('#btn-vd-generate', (b) => b.disabled)) && await c.$eval('#btn-vd-stop', (b) => b.disabled), 'the job ended: Make video on, Stop off');
+    await c.waitForFunction(() => document.getElementById('vd-dot').dataset.tone === 'error', null, { timeout: 8000 }).catch(() => {});
+    const hdr = await c.textContent('#vd-status-text');
+    assert(await c.getAttribute('#vd-dot', 'data-tone') === 'error' && /✖ FramePack couldn't load — see the details/.test(hdr) && !/Loading FramePack/.test(hdr), `the header goes red, not “Loading…”: "${hdr}"`);
+    await c.waitForTimeout(2200);
+    const hdr2 = await c.textContent('#vd-status-text');
+    assert(hdr2 === hdr && !/\d:\d\d/.test(hdr2) && await c.getAttribute('#vd-dot', 'data-tone') === 'error', `…and stays that way, the clock stopped (no “0:00”): "${hdr2}"`);
+    await shot(c, 'fp07-framepack-test-failed-header');
+    await c.click('#vd-sub-setup');
+    await c.waitForFunction(() => document.getElementById('vd-fp-lastload').dataset.state === 'failed', null, { timeout: 8000 }).catch(() => {});
+    const lastTxt = await c.textContent('#vd-fp-lastload');
+    assert(/✖ Failed to load \(.*while loading the FramePack video model\): FramePack tried to ask Hugging Face/.test(lastTxt) && /What to try: The model files are on this PC/.test(lastTxt), `the card: failed to load ✖ (when, the stage, the reason, what to try): “${lastTxt.split('\n')[0].slice(0, 120)}…”`);
+    assert(/✔ Model files found/.test(await c.textContent('#vd-fp-state')), 'the file check still says the files are found (true) — the load result is a separate line');
+    await shot(c, 'fp08-framepack-card-last-load-failed');
+
+    // the same test again at once (FramePack's runner is still running and fails again, fast): red again, never left "Loading…"
+    await c.click('#btn-vd-fp-test');
+    await c.waitForFunction(() => !document.getElementById('btn-vd-generate').disabled && !document.getElementById('vd-error').hidden, null, { timeout: 20000 }).catch(() => {});
+    await c.waitForTimeout(1500);
+    assert(await c.getAttribute('#vd-dot', 'data-tone') === 'error' && /couldn't load/.test(await c.textContent('#vd-status-text')), `a second failed test → still red: "${await c.textContent('#vd-status-text')}"`);
+
+    // a 🧪 Test stopped while it loads → back to idle (not red, no clock)
+    await c.click('#vd-sub-setup');
+    await c.click('#btn-vd-fp-unload');
+    await c.waitForFunction(() => document.getElementById('btn-vd-fp-unload').disabled, null, { timeout: 10000 }).catch(() => {});
+    setFake({ mode: 'stuck', precheck: 'ok' });
+    await c.click('#btn-vd-fp-test');
+    await c.waitForFunction(() => document.getElementById('vd-dot').dataset.tone === 'busy' && /Loading FramePack/.test(document.getElementById('vd-status-text').textContent), null, { timeout: 15000 }).catch(() => {});
+    assert(/Loading FramePack… .* · 0:0\d/.test(await c.textContent('#vd-status-text')), `a new test loads: "${await c.textContent('#vd-status-text')}"`);
+    await c.click('#btn-vd-stop');
+    await c.waitForFunction(() => !document.getElementById('vd-error').hidden && /Stopped/.test(document.getElementById('vd-error-msg').textContent), null, { timeout: 15000 }).catch(() => {});
+    await c.waitForFunction(() => document.getElementById('vd-dot').dataset.tone === 'standby', null, { timeout: 10000 }).catch(() => {});
+    const idle = await c.textContent('#vd-status-text');
+    assert(await c.getAttribute('#vd-dot', 'data-tone') === 'standby' && !/Loading|couldn't load|\d:\d\d/.test(idle), `⏹ Stop → idle again ("${idle}", ${await c.getAttribute('#vd-dot', 'data-tone')})`);
+    await c.waitForTimeout(1500);
+    assert(await c.textContent('#vd-status-text') === idle, 'and nothing keeps counting');
   } finally {
     await app.close().catch(() => {});
     for (const f of made) { const dir = path.dirname(f); try { for (const n of fs.readdirSync(dir)) { const p = path.join(dir, n); if (/^(video|animate|test|clip)-.*\.(mp4|webm|png|json)$/.test(n) && fs.statSync(p).mtimeMs >= t0) fs.unlinkSync(p); } } catch (_) {} }

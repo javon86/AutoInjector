@@ -227,6 +227,8 @@ async function main() {
     const t1 = Date.now(); mgr.cancel();
     const gr = await gp;
     assert(!gr.ok && gr.code === 'FRAMEPACK_CANCELLED' && Date.now() - t1 < 3000 && !(await until(() => mgr.status().running, 300)), `⏹ Stop during that load → Stopped in ${Date.now() - t1} ms, nothing left running`);
+    const idle = mgr.status();
+    assert(!idle.stopping && !idle.loading && !idle.busy && !idle.lastError, `…and back to idle: not “Stopping…” for ever, no problem (stopping=${idle.stopping})`);
   }
   {
     // the pre-check fails → the exact reason in plain words, and the runner is not even started
@@ -282,6 +284,51 @@ async function main() {
     const cc = await studio0.cancel();
     const rl = await lp;
     assert(cc.stopping && !rl.ok && rl.code === 'FRAMEPACK_CANCELLED' && Date.now() - t0 < 3000 && !mgr.status().running, `⏹ Stop on the FramePack card (no video yet) stops the loading → Stopped in ${Date.now() - t0} ms`);
+    assert(!mgr.status().lastLoad, 'a ⏹ Stop is not a load result: nothing is recorded as "failed to load"');
+  }
+  {
+    // the PC rerun: 🧪 Test fails while loading "the FramePack video model" (Hugging Face's offline / metadata error).
+    // The job ends AND the engine says so (an event, not loading any more, the last load failed with the reason + stage),
+    // the words fit the error (not "check all three models"), and the result is saved with its time.
+    setEnv(F.runnerEnv({ mode: 'failmodel' }));
+    const evs = []; const saved = [];
+    mgr = FP.createFramePack({ find: findOk, onEvent: (e) => evs.push(e), onLastLoad: (r) => saved.push(r) });
+    let studioSettings = null;
+    const studioF = VS.createVideoStudio({ framepack: () => mgr, videosDir: () => path.join(TMP, 'videos-failmodel'), persist: (s) => { studioSettings = s; }, comfy: async () => null });
+    const t0 = Date.now();
+    const r = await studioF.framepack.test();
+    assert(!r.ok && r.engine === 'framepack' && /Hugging Face/.test(r.message) && /offline/.test(r.message), `🧪 Test fails at the video model → the reason in plain words: “${r.message}”`);
+    assert(/not a missing-model problem/.test(r.fix) && !/all three models/.test(r.fix), `…and what to try fits the error, not “check all three models are there”: “${(r.fix || '').slice(0, 90)}…”`);
+    assert(/LocalEntryNotFoundError/.test(r.serverError || '') && /couldn't connect to 'https:\/\/huggingface\.co'/.test(r.serverError || ''), 'what FramePack really said stays in the details');
+    const s1 = mgr.status();
+    assert(!s1.loading && !s1.busy && !s1.loaded, `afterwards FramePack is not “loading” any more (the header's clock stops): loading=${JSON.stringify(s1.loading)}`);
+    assert(s1.lastError && s1.lastError.load === true && s1.lastError.stage === 'the FramePack video model' && /Hugging Face/.test(s1.lastError.message), `lastError says it was loading that failed, at which stage (${s1.lastError && s1.lastError.stage})`);
+    assert(evs.some((e) => e.type === 'error' && e.load && e.job), 'the screen is told (an “error” event for the failed job), so the header and light change at once');
+    assert(s1.lastLoad && s1.lastLoad.ok === false && s1.lastLoad.stage === 'the FramePack video model' && /Hugging Face/.test(s1.lastLoad.reason) && /not a missing-model problem/.test(s1.lastLoad.fix) && s1.lastLoad.at >= t0 && s1.lastLoad.cause === 'hf-offline',
+      'the last load: failed, with the reason, what to try, the stage and the time');
+    assert(saved.length && saved[saved.length - 1].ok === false, 'onLastLoad hands it to the app to save');
+    const fst = await studioF.framepack.status();
+    assert(fst.lastLoad && fst.lastLoad.ok === false && /Hugging Face/.test(fst.lastLoad.reason), 'video.framepack.status shows the last load result (for the card)');
+    studioF.noteFramePackLoad(saved[saved.length - 1]);
+    assert(studioSettings && studioSettings.framepackLastLoad && studioSettings.framepackLastLoad.ok === false && studioSettings.framepackLastLoad.at === saved[saved.length - 1].at, 'saved with the 🎬 Video settings (framepackLastLoad, with its time)');
+    mgr.stop(); await until(() => !mgr.status().running, 3000);
+    // after a restart: the saved result comes back
+    const mgrR = FP.createFramePack({ find: findOk, lastLoad: studioSettings.framepackLastLoad });
+    assert(mgrR.status().lastLoad && mgrR.status().lastLoad.ok === false && mgrR.status().lastLoad.stage === 'the FramePack video model', 'after a restart the card still shows the last load failed (and why)');
+    assert(FP.createFramePack({ find: findOk, lastLoad: { ok: 'x' } }).status().lastLoad === null, 'a broken saved record is ignored');
+    // fixed: ▶ Load → "loaded, not yet tested"; then 🧪 Test → "loaded and tested"
+    setEnv(F.runnerEnv({}));
+    const l2 = await studioF.framepack.load();
+    const s2 = mgr.status();
+    assert(l2.ok && s2.lastLoad.ok && !s2.lastLoad.tested && !s2.lastError, `▶ Load works now → the last load: loaded, not yet tested (${JSON.stringify(s2.lastLoad)})`);
+    const t2 = await studioF.framepack.test();
+    const s3 = mgr.status();
+    assert(t2.ok && s3.lastLoad.ok && s3.lastLoad.tested && s3.lastLoad.testedAt >= s2.lastLoad.at, '🧪 Test makes a clip → loaded and tested ✔');
+    mgr.stop(); await until(() => !mgr.status().running, 3000);
+    // explainLoadError: the words come from the error
+    assert(FP.explainLoadError("huggingface_hub.errors.LocalEntryNotFoundError: Cannot find the requested files in the disk cache and outgoing traffic has been disabled.").cause === 'hf-offline', 'explainLoadError: Hugging Face offline → hf-offline');
+    assert(FP.explainLoadError("OSError: lllyasviel/FramePackI2V_HY does not appear to have a file named diffusion_pytorch_model-00002-of-00003.safetensors.").cause === 'file-bad', 'explainLoadError: a file that is not there → file-bad (named)');
+    assert(FP.explainLoadError('CUDA out of memory. Tried to allocate 2 GiB') === null && FP.explainLoadError('') === null, 'explainLoadError: out of memory / nothing → null (their own words)');
   }
 
   // =====================================================================
