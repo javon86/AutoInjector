@@ -339,6 +339,8 @@ def save_entry(store, pid: str, branch: str, rid: str, *, sheet=None, voice=None
                      "updated_at": _now(), "history": hist[-HISTORY_KEEP:]}
             if old.get("series_fixed"):
                 entry["series_fixed"] = True
+            if old.get("story_role_fallback") and (tag[0], tag[1]) == (old.get("story_role"), old.get("story_role_by")):
+                entry["story_role_fallback"] = True  # ★ the same tag, still only Akọwe's fallback guess
             cur[rid] = entry
             store.set_setting(_key(pid, branch), cur)
             tx.insert_outbox(pid, branch, "characters.sheet_saved", {

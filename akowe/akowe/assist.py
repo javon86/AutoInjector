@@ -155,7 +155,12 @@ def _is_ref_field(s) -> bool:
 
 
 def slugify(name: str, taken: set) -> str:
-    base = re.sub(r"[^a-z0-9]+", "-", (name or "").lower()).strip("-")[:40] or "item"
+    from .names import strip_accents  # noqa: PLC0415 - "Ọlá Adé" -> "ola-ade", never "l-ad"
+    low = strip_accents(name or "").lower()
+    base = re.sub(r"[^a-z0-9]+", "-", low).strip("-")[:40]
+    if not base and re.search(r"[^\W\d_]", low):  # a name in another script ("Ольга"): a stable ASCII ID
+        base = "n-" + hashlib.sha256(low.strip().encode("utf-8")).hexdigest()[:8]
+    base = base or "item"
     slug, n = base, 2
     while slug in taken:
         slug, n = f"{base}-{n}", n + 1
@@ -314,6 +319,25 @@ def canon_subjects(store, pid: str, branch: str, *, skip: str | None = None) -> 
         for f in facts:
             mentioned.setdefault(str(f["subject_id"]), set()).add(rec["record_id"])
     return owned, mentioned
+
+
+def owned_names(store, pid: str, branch: str) -> list[str]:
+    """The OWN names of the Set A canon's entries (approved revisions and live drafts, as ``canon_context`` counts
+    them): each entry's own name, aliases and concept (``protagonist.own_names``) — never a person or place an entry's
+    facts only mention (that one has no entry yet, and the entry made for them must keep their name)."""
+    from .protagonist import own_names  # noqa: PLC0415
+    out: list[str] = []
+    for r in store.list_records(pid, branch):
+        if not r["module_id"].startswith("A") or r["record_kind"] != "OUTPUT":
+            continue
+        rec = r
+        if r.get("approved_version") and r["approved_version"] != r["version"]:
+            rec = store.get_record(pid, branch, r["record_id"], r["approved_version"]) or r
+        if not (rec["lifecycle"] in ("APPROVED", "LOCKED") or r.get("approved_version")) and \
+                (r.get("stale") or rec["lifecycle"] in ("REJECTED", "SUPERSEDED")):
+            continue
+        out += [n for n in own_names(rec) if str(n or "").strip()]
+    return out
 
 
 def realign_subject(store, pid: str, branch: str, rec: dict, reasons) -> dict | None:
@@ -1567,26 +1591,56 @@ class BibleSession:
 
     def _add_items(self, sketch: list[dict], counts: dict, run_no: int) -> list[str]:
         with self._lock:
-            approved, drafts, _ = canon_context(self.svc.engine, self.project_id, self.branch_id)
             self._load_subjects()
             # Names already used (saved canon, this session's entries, earlier rows of this sketch): an AI that
             # suggests the same character twice gets a placeholder instead, so it invents a different one.
-            taken_names = {str(n).strip().lower() for r in approved + drafts
-                           for n in [r.get("concept")] + list(r.get("names") or []) if str(n or "").strip()}
+            # Only the entries' OWN names count (★ a place's fact about its keeper is not an entry for her: the
+            # main character a place only mentions keeps her name; see protagonist.own_names).
+            taken_names = {str(n).strip().lower() for n in owned_names(self.svc.store, self.project_id,
+                                                                       self.branch_id)}
             taken_names |= {str(i.get("name") or "").strip().lower() for i in self.items.values()
                             if not i.get("placeholder")}
+            from . import names as names_mod  # noqa: PLC0415
+            from .protagonist import names_in_idea  # noqa: PLC0415
+            named = names_in_idea(self.idea or "")
+            taken_people = [n for n in taken_names if n]
+
+            def is_dup(op_id: str, name: str) -> bool:
+                if name.lower() in taken_names:
+                    return True
+                # a character the book already has under a close spelling or a part of the name ("Mara" for
+                # "Mara Vell") is the same person, never a second entry (a shared first name with another family
+                # name, "Mara Holt", is someone else)
+                return op_id == "A01" and any(names_mod.score(name, t) >= names_mod.FUZZY for t in taken_people)
+
+            def priority(row) -> int:
+                """★ The world sketch's count limit never cuts the main character off: the protagonist the AI
+                proposes and the people the book idea names come first."""
+                nm = str(row.get("name") or "")
+                if story_roles.normalize(row.get("story_role"), default="") == story_roles.PROTAGONIST:
+                    return 0
+                return 1 if any(names_mod.same_person(nm, n) for n in named) else 2
             new = []
-            per = {op: [i for i in sketch if i.get("section") == op][:n] for op, n in counts.items()}
+            per = {}
+            for op, n in counts.items():
+                rows_ = [i for i in sketch if i.get("section") == op]
+                if op == "A01" and len(rows_) > n:
+                    rows_ = sorted(rows_, key=priority)  # stable: the AI's order otherwise
+                per[op] = rows_[:n]
             for op_id, n in counts.items():
                 label = self.svc.contracts.operation(op_id)["name"]
                 rows = per[op_id] + [{"section": op_id, "name": "", "role": "", "links": []}] * (n - len(per[op_id]))
                 for row in rows:
                     name = str(row.get("name") or "").strip()[:120]
-                    dup = name if name and name.lower() in taken_names else None
+                    dup = name if name and is_dup(op_id, name) else None
                     if dup:
                         name = ""
+                        row = dict(row, story_role="" if story_roles.normalize(row.get("story_role"), default="")
+                                   == story_roles.PROTAGONIST else row.get("story_role"))  # no ★ for a stranger
                     elif name:
                         taken_names.add(name.lower())
+                        if op_id == "A01":
+                            taken_people.append(name.lower())
                     key = self._new_item(op_id, name, row.get("role"), run_no, label=label,
                                          raw_links=list(row.get("links") or []))
                     item = self.items[key]
@@ -1868,10 +1922,22 @@ class BibleSession:
         except Exception:  # noqa: BLE001
             existing = None
         claim = [it for it in a01 if it["story_role"] == story_roles.PROTAGONIST]
+        from .protagonist import names_in_idea  # noqa: PLC0415
+        from . import names as names_mod  # noqa: PLC0415
+        named = names_in_idea(self.idea or "")
+        if existing and any(names_mod.same_person(n, it["name"]) for it in claim for n in named):
+            # the ★ the book holds is only Akọwe's own guess ("resolved"), not anyone named in the idea: the
+            # character the idea names, made now, takes it (story_roles.cast decides the same way)
+            try:
+                e = chars_mod.get_entry(self.svc.store, self.project_id, self.branch_id, existing) or {}
+                ename = e.get("name") or next((c["name"] for c in chars_mod.canon_characters(
+                    self.svc.store, self.project_id, self.branch_id) if c["record_id"] == existing), "")
+                if story_roles.stored(e)[1] == "resolved" and e.get("story_role_fallback") and not any(names_mod.same_person(n, ename)
+                                                                      for n in named):
+                    existing = None
+            except Exception:  # noqa: BLE001
+                log.exception("could not read the tagged main character")
         if existing or len(claim) > 1:
-            from .protagonist import names_in_idea  # noqa: PLC0415
-            from . import names as names_mod  # noqa: PLC0415
-            named = names_in_idea(self.idea or "")
             fixed = [it for it in claim if it.get("story_role_fixed")]
 
             def rank(it):
