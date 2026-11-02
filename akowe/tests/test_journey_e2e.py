@@ -401,7 +401,16 @@ def test_the_whole_journey(journey):
     od1 = binder.build(other, r1["project_id"], BR, as_of=1)  # book 1 is not on this computer: still readable
     opg = next(p for p in od1["pages"] if p["template"] == "5" and p["title"] == prot_name)
     assert "silver burn" in opg["sections"]["5.6"]["fields"]["5.6.1"]["value"]
-    r2 = book_package.import_package(other, data2, "author")
+    # every picture the binder shows on that computer can be loaded there (no broken images)
+    for dd in (od1, binder.build(other, r1["project_id"], BR)):
+        for p in dd["pages"]:
+            for fid, pic in p["pics"].items():
+                assert binder.picture_bytes(other, r1["project_id"], BR, pic["url"]), (p["title"], fid, pic["url"])
+        for p in dd["pages"]:
+            for x in (p.get("series") or {}).get("strip") or []:
+                if (x.get("portrait") or {}).get("url"):
+                    assert binder.picture_bytes(other, r1["project_id"], BR, x["portrait"]["url"]), (p["title"], x)
+    r2 =book_package.import_package(other, data2, "author")
     assert r2["series"]["action"] == "merged", r2["series"]
     keys = [r["key"] for r in other.store.query("SELECT key FROM settings WHERE key LIKE 'series:%'")]
     assert keys == [f"series:{s2['id']}"]
