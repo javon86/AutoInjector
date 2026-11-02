@@ -1512,8 +1512,11 @@ class ProviderRegistry:
                 return adapter.submit(slot, system, user, schema)
             except AkoweError as exc:
                 last = exc
-                if exc.code == "UPSTREAM_UNAVAILABLE" and getattr(exc, "site_state", None):
-                    raise  # the bridge says the site is not ready: move on (another slot, or wait), no quick retry
+                if exc.code == "UPSTREAM_UNAVAILABLE" and (getattr(exc, "site_state", None)
+                                                          or getattr(exc, "retry_after_s", None)):
+                    # the bridge says the site is not ready, or the site showed its own error notice (SITE_ERROR,
+                    # with a wait hint): move on (another slot, or wait the hint), never ask it again within seconds
+                    raise
                 if exc.code == "TIMEOUT" and slot.get("adapter_id") == "autoinjector":
                     raise AkoweError("TIMEOUT", "", f"the {slot.get('site')} web session did not answer in time; "
                                          "it may still be answering. Retrying the same request reuses its reply "

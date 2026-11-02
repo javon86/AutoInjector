@@ -42,6 +42,14 @@ ENGINE_DOWN = frozenset(("IMAGE_BRIDGE_UNREACHABLE", "IMAGE_NOT_WIRED", "IMAGE_B
                          "NO_IMAGE_ENGINE", "CHATGPT_NOT_READY", "IMAGE_LIMIT", "NO_ENDPOINT", "IMAGE_DISABLED"))
 PROBE_TIMEOUT_S = 8.0
 _LOCK = threading.RLock()
+# One maker of a book's pictures at a time (the run's step, 🖼 Make the rest pressed twice or in two tabs): the next
+# one waits, then sees what is already made and makes only what is still missing.
+_MAKING: dict = {}
+
+
+def _making_lock(pid: str, branch: str) -> threading.Lock:
+    with _LOCK:
+        return _MAKING.setdefault((pid, branch), threading.Lock())
 
 
 # ====================================================================== settings and the per-book state
@@ -230,6 +238,17 @@ def make_for(app, principal, pid, branch, rid, want, engine: str, check=None, on
     """Make the character's missing pictures among ``want`` (portrait first, then the views, then the sheet).
     -> {made: [...], failed: [...], code, message, down: bool, lock: dict|None}. Raises only what ``check`` raises
     (pause / cancel)."""
+    lock = _making_lock(pid, branch)
+    while not lock.acquire(timeout=0.5):
+        if check:
+            check()
+    try:
+        return _make_for(app, principal, pid, branch, rid, want, engine, check, on_phase)
+    finally:
+        lock.release()
+
+
+def _make_for(app, principal, pid, branch, rid, want, engine, check, on_phase) -> dict:
     from . import forge  # noqa: PLC0415
     store = app.store
     todo = missing(store, pid, branch, rid, want)

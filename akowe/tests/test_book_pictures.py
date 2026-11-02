@@ -324,3 +324,26 @@ def test_auto_engine_falls_back_only_when_the_setting_allows(world):
     assert b.requests and all(r["engine"] == "auto" for r in b.requests)
     assert all("portrait" in slots_of(app, pid, rid) for rid in people(app, pid))
     assert not book_pictures.state(app.store, pid, BR)["waiting"]
+
+
+def test_make_the_rest_pressed_twice_makes_each_picture_once(world):
+    """Regression: 🖼 Make the rest of the pictures pressed again (a second tab, a double click) while the first job
+    still worked planned the same missing pictures and made each of them twice."""
+    app, _fake, b = world
+    b.sd_on = False
+    run = run_book(app, {"length": "short_story"})
+    pid = run["project_id"]
+    b.sd_on = True
+    b.gate = threading.Event()
+    j1 = book_pictures.start_rest(app, "author", pid, BR)
+    assert b.waiting.wait(30)
+    j2 = book_pictures.start_rest(app, "author", pid, BR)
+    b.gate.set()
+    out1 = forge.wait(app, "author", j1["job_id"], 60)
+    out2 = forge.wait(app, "author", j2["job_id"], 60)
+    assert out1["status"] == "done" and out2["status"] == "done", (out1, out2)
+    made = b.made()
+    assert made and all(n == 1 for n in made.values()), made
+    for rid in people(app, pid):
+        assert slots_of(app, pid, rid) == set(book_pictures.FULL)
+    assert not book_pictures.state(app.store, pid, BR)["waiting"]

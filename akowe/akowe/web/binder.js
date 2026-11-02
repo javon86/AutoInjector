@@ -1518,7 +1518,7 @@ export async function viewBinder(main, x, rest = []) {
     const changed = all.filter(c => (c.strip || []).some(b => b.number === n && b.changes));
     const seq = v.sequel || null;
     const busy = h('div', { class: 'bnd-series-msg', 'aria-live': 'polite', 'data-testid': 'binder-series-msg' });
-    clear(seriesBox).append(
+    clear(seriesBox).append(...[
       h('div', { class: 'bnd-series-head' },
         h('h3', null, v.in_series ? `📚 ${v.name || 'This series'} — this is book ${n}` : '📚 This book is not part of a series yet'),
         h('p', { class: 'bnd-series-help' }, 'In a series, each character keeps the same personality, way of talking, name and origin in every book. What can change from book to book: how they look, what they carry, what they can do, who their friends and enemies are, and their status. Places, items and groups change too (who rules or holds them, their condition, danger, members, allies and enemies) while their name, core description and origin stay the same. Each book keeps only what changed in it.'),
@@ -1539,7 +1539,8 @@ export async function viewBinder(main, x, rest = []) {
           h('button', { type: 'button', 'data-testid': 'binder-series-approve', onclick: ev => decide('approve', c, ev.currentTarget, busy) }, '✔ Approve'),
           h('button', { type: 'button', 'data-testid': 'binder-series-dismiss', onclick: ev => decide('dismiss', c, ev.currentTarget, busy) }, '✕ Dismiss')); })) : null,
       changed.length ? h('div', { class: 'bnd-series-done' }, h('h4', null, '✔ Approved changes in this book'),
-        h('ul', null, changed.map(c => h('li', null, h('b', null, `${c.name}: `), (c.strip.find(x => x.number === n) || {}).words)))) : null);
+        h('ul', null, changed.map(c => h('li', null, h('b', null, `${c.name}: `), (c.strip.find(x => x.number === n) || {}).words)))) : null]
+      .filter(Boolean));  // Element.append() would print a missing part as the word "null"
   }
   async function decide(what, c, btn, busy) {
     btn.disabled = true;

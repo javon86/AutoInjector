@@ -948,6 +948,23 @@ def test_single_book_has_no_series_strip_or_picker(make_context, bd):
     assert_clean(page, "single book")
 
 
+def test_series_panel_with_nothing_proposed_or_approved_shows_no_null(make_context, bd):
+    """Regression: the 📚 Series panel was filled with Element.append(), which prints a missing part (no proposals, no
+    approved changes) as the word "null"."""
+    doc, _old, view = _series_docs(bd.pid)
+    for c in view["characters"]:
+        for b in c["strip"]:
+            b.update(proposal=None, proposal_words="", changes=None, words="")
+    page = open_binder(make_context, bd, page_id="ch-maren", doc=doc)
+    page.bf_calls.series_view = view
+    page.click("[data-testid=binder-series]")
+    page.wait_for_selector("[data-testid=binder-series-find]")
+    box = page.inner_text("[data-testid=binder-series-box]")
+    assert "null" not in box and "undefined" not in box, box
+    assert page.locator("[data-testid=binder-series-proposals]").count() == 0
+    assert_clean(page, "series panel, nothing to show")
+
+
 def test_series_place_strip_world_proposals_and_sequel_reason(make_context, bd):
     """📚 A place page of book 2 shows "Through the series" with its state (ruler, damage) by plain labels; the 📚 Series
     panel lists a place's proposal next to the characters' and ✔ approves it with the same route; when no AI is
