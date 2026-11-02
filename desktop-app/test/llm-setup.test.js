@@ -448,11 +448,11 @@ async function testSetupAll() {
     { id: 'c2', name: 'huihui_ai/qwen3-abliterated', title: 'Qwen 3 abliterated', pullName: 'huihui_ai/qwen3-abliterated', uncensored: true, tools: true, variants: [{ tag: '8b', pullName: 'huihui_ai/qwen3-abliterated:8b', sizeBytes: 5.2 * GB }] },
   ].sort((a, b) => (o.uncensored ? Number(b.uncensored) - Number(a.uncensored) : 0)) };
   const picked = [];
-  const llmHardware = { rateFit: lib.fallbackFit, pickVariant: (vs, hw) => { picked.push(vs.map((v) => v.tag).join(',')); return vs.filter((v) => v.fit.rating === 'great').sort((a, b) => b.sizeBytes - a.sizeBytes)[0] || null; } };
+  const llmHardware = { rateFit: lib.fallbackFit, pickVariant: (vs, hw) => { picked.push(vs.map((v) => v.tag).join(',')); return vs.filter((v) => v.fit.rating === 'excellent').sort((a, b) => b.sizeBytes - a.sizeBytes)[0] || null; } };
   OLL.st.models = [];
   const s4 = lib.createLlmSetup(w.deps({ systemBase: SYS_CLOSED, managedHost: `127.0.0.1:${OLL.port}`, catalog: () => catalog, llmHardware }));
   const r4 = await s4.setupAll();
-  assert(r4.ok && r4.model === 'qwen3:8b' && picked.includes('32b,8b,4b'), `catalog: the biggest variant with a great fit (${r4.model})`);
+  assert(r4.ok && r4.model === 'qwen3:8b' && picked.includes('32b,8b,4b'), `catalog: the biggest variant with an excellent fit (${r4.model})`);
   OLL.st.models = [];
   const r5 = await s4.setupAll({ uncensored: true });
   assert(r5.ok && r5.model === 'huihui_ai/qwen3-abliterated:8b', `catalog + uncensored → ${r5.model}`);
@@ -507,7 +507,22 @@ async function testSafety() {
   assert(lib.parseVersion('Warning: could not connect to a running Ollama instance\nWarning: client version is 0.6.2') === '0.6.2', 'parseVersion reads "client version is …" too');
   assert(lib.paramsFromName('dolphin-mixtral:8x7b') === 47 && lib.paramsFromName('qwen2.5:0.5b') === 0.5 && lib.paramsFromName('hf.co/x/Llama-3.1-8B-GGUF:Q4_K_M') === 8, 'paramsFromName');
   const hw = { bestVramMB: 12288, ramMB: 32768, freeRamMB: 16000 };
-  assert(lib.fallbackFit(4.7 * GB, hw).rating === 'great' && lib.fallbackFit(8 * GB, hw).rating === 'good' && lib.fallbackFit(20 * GB, hw).rating === 'slow' && lib.fallbackFit(60 * GB, hw).rating === 'too-big', 'fallbackFit: great / good / slow / too-big');
+  assert(lib.fallbackFit(4.7 * GB, hw).rating === 'excellent' && lib.fallbackFit(8 * GB, hw).rating === 'good' && lib.fallbackFit(9 * GB, hw).rating === 'ok' && lib.fallbackFit(20 * GB, hw).rating === 'slow' && lib.fallbackFit(60 * GB, hw).rating === 'too-big', 'fallbackFit: excellent / good / ok / slow / too-big');
+  assert(lib.fallbackFit(4.7 * GB, hw).label === '★★★ Excellent fit' && lib.fallbackFit(20 * GB, hw).label === '🐢 Slow — it runs, but slowly', 'fallbackFit: the new labels');
+  assert(lib.fitUsable({ rating: 'excellent' }) && lib.fitUsable({ rating: 'good' }) && !lib.fitUsable({ rating: 'ok' }) && !lib.fitUsable({ rating: 'slow' }), 'fitUsable: only ★★★ Excellent and ★★ Good (what ⚡ Set up picks first)');
+  assert(lib.fitRuns({ rating: 'ok' }) && !lib.fitRuns({ rating: 'slow' }) && !lib.fitRuns({ rating: 'too-big' }), 'fitRuns: ★ OK still runs fully on the card (🩺 fit row ✔)');
+  const F = (rating) => ({ rating });
+  const pk = [
+    { pullName: 'dolphin3:8b', tools: null, uncensored: true, fit: F('excellent') },
+    { pullName: 'llama3.2:1b', tools: true, fit: F('excellent') },
+    { pullName: 'qwen2.5:14b', tools: true, fit: F('ok') },
+    { pullName: 'qwen2.5:7b', tools: true, fit: F('good') },
+    { pullName: 'hermes3:8b', tools: true, uncensored: true, fit: F('good') },
+  ];
+  assert(s.choose(pk).pullName === 'qwen2.5:7b', `choose: a tool-capable ≥3B Excellent/Good model beats an Excellent one without tools or under 3B (${s.choose(pk).pullName})`);
+  assert(s.choose(pk, { uncensored: true }).pullName === 'hermes3:8b', 'choose + 🔓: the uncensored tool-capable one');
+  assert(s.choose([{ pullName: 'a:7b', tools: true, fit: F('slow') }, { pullName: 'b:7b', tools: true, fit: F('ok') }]).pullName === 'b:7b', 'choose: ★ OK before 🐢 slow when nothing is Excellent/Good');
+  assert(s.choose([{ pullName: 'a:70b', fit: F('too-big') }]) === null, 'choose: never a too-big one');
   assert(/internet/.test(lib.friendlyError({ code: 'ENOTFOUND' }, 'x')) && /disk is full/.test(lib.friendlyError({ code: 'ENOSPC' }, 'x')), 'friendlyError');
   assert(lib.isUncensored('huihui_ai/qwen3-abliterated:8b') && lib.isUncensored('dolphin3') && !lib.isUncensored('qwen2.5:7b'), 'isUncensored');
 }

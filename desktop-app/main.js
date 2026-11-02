@@ -4664,6 +4664,16 @@ const llmSetupLib = require("./llm-setup");
 function llmOptional(name) { try { return require(name); } catch (_) { return null; } }
 const llmHardwareLib = llmOptional("./llm-hardware");
 const modelCatalogLib = llmOptional("./model-catalog");
+// Measured answer speed per local model (alfred-ai.js records it from Ollama's replies), kept across restarts.
+const llmSpeedLib = llmOptional("./llm-speed");
+let llmSpeedReady = false;
+function llmSpeeds() {
+  if (!llmSpeedLib) return {};
+  try {
+    if (!llmSpeedReady) { llmSpeedReady = true; llmSpeedLib.configure({ file: path.join(userDataDir(), "llm-speeds.json") }); }
+    return llmSpeedLib.all();
+  } catch (_) { return {}; }
+}
 let llmHfToken = null; let llmHfLoaded = false;
 function llmSecretsFile() { return path.join(userDataDir(), "llm-secrets.json"); }
 function llmLoadHfToken() {
@@ -4717,7 +4727,7 @@ async function llmRateModels(models, hw) {
     return out;
   });
 }
-ipcMain.handle("llm:status", llmSafe(async () => ({ ...(await llmSetup.status()), hfConnected: !!llmLoadHfToken(), finder: !!llmGetCatalog(), hardwareRating: !!llmHardwareLib })));
+ipcMain.handle("llm:status", llmSafe(async () => ({ ...(await llmSetup.status()), hfConnected: !!llmLoadHfToken(), finder: !!llmGetCatalog(), hardwareRating: !!llmHardwareLib, speeds: llmSpeeds() })));
 ipcMain.handle("llm:hardware", llmSafe(async (_e, a) => { const hw = await llmSetup.hardware(!!llmArg(a, "fresh")); return { ok: true, ...hw, line: llmSetup.hwLine(hw) }; }));
 ipcMain.handle("llm:check", llmSafe((_e, opts) => llmSetup.check(opts && typeof opts === "object" ? opts : {})));
 ipcMain.handle("llm:fix", llmSafe((_e, action) => llmSetup.fix(action)));
@@ -4732,21 +4742,23 @@ ipcMain.handle("llm:search", llmSafe(async (_e, q, opts) => {
   const o = { ...((q && typeof q === "object") ? q : {}), ...((opts && typeof opts === "object") ? opts : {}) };
   delete o.query;
   const hw = await llmSetup.hardware();
-  const r = await cat.search(query, { ...o, hardware: hw });
-  return r && typeof r === "object" ? { ...r, models: await llmRateModels(r.models, hw) } : { ok: false, models: [], error: "The search didn't work — try again." };
+  const speeds = llmSpeeds();
+  const r = await cat.search(query, { ...o, hardware: hw, speeds });
+  return r && typeof r === "object" ? { ...r, models: await llmRateModels(r.models, hw), speeds } : { ok: false, models: [], error: "The search didn't work — try again." };
 }));
 ipcMain.handle("llm:curated", llmSafe(async (_e, opts) => {
   const uncensored = !!(opts && opts.uncensored);
   const hw = await llmSetup.hardware();
   const cat = llmGetCatalog();
+  const speeds = llmSpeeds();
   if (cat && typeof cat.curated === "function") {
-    const r = await cat.curated(hw, { uncensored });
+    const r = await cat.curated(hw, { uncensored, speeds });
     const models = Array.isArray(r) ? r : (r && r.models) || [];
-    return { ok: true, models: await llmRateModels(models, hw), hardware: llmSetup.hwLine(hw) };
+    return { ok: true, models: await llmRateModels(models, hw), hardware: llmSetup.hwLine(hw), speeds };
   }
   const picks = await llmSetup.recommendedPicks(hw, { uncensored });
   const models = picks.map((p) => ({ id: p.pullName, source: "curated", name: p.pullName, title: p.title, description: "", pullName: p.pullName, params: llmSetupLib.paramsFromName(p.pullName), sizeBytes: p.sizeBytes, quant: "Q4", uncensored: p.uncensored, tools: p.tools, vision: false, gated: false, variants: [{ tag: String(p.pullName).split(":")[1] || "latest", pullName: p.pullName, sizeBytes: p.sizeBytes, fit: p.fit }], fit: p.fit }));
-  return { ok: true, models, hardware: llmSetup.hwLine(hw), builtIn: true };
+  return { ok: true, models, hardware: llmSetup.hwLine(hw), builtIn: true, speeds };
 }));
 ipcMain.handle("llm:hf-files", llmSafe(async (_e, repo) => {
   const cat = llmGetCatalog();
@@ -4754,7 +4766,7 @@ ipcMain.handle("llm:hf-files", llmSafe(async (_e, repo) => {
   const repoId = String(llmArg(repo, "repoId") || llmArg(repo, "repo") || "").trim();
   if (!/^[A-Za-z0-9][\w.-]*\/[\w.-]+$/.test(repoId)) return { ok: false, variants: [], error: "That doesn't look like a Hugging Face model (owner/name)." };
   const hw = await llmSetup.hardware();
-  const r = await cat.hfFiles(repoId, { hardware: hw });
+  const r = await cat.hfFiles(repoId, { hardware: hw, speeds: llmSpeeds() });
   if (r && Array.isArray(r.variants)) r.variants = r.variants.map((v) => (v && !v.fit ? { ...v, fit: llmSetup.fitFor(v.sizeBytes, hw) } : v));
   return r;
 }));

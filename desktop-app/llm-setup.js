@@ -72,20 +72,25 @@ function estimateSizeBytes(name) {
   const p = paramsFromName(name);
   return p == null ? null : Math.round((p * 0.6 + 0.3) * GB);
 }
-/** Fallback fit rating (used only when llm-hardware.js is not part of this build). Same contract. */
+/** Fallback fit rating (used only when llm-hardware.js is not part of this build). Same contract and tiers. */
 function fallbackFit(sizeBytes, hw, opts = {}) {
-  if (!sizeBytes || !hw) return { rating: 'unknown', stars: 0, label: '? Unknown fit', reason: 'I could not tell how big this model is.', needMB: null, runsOn: 'cpu' };
+  if (!sizeBytes || !hw) return { rating: 'unknown', stars: 0, label: '? Fit unknown', reason: 'I could not tell how big this model is.', needMB: null, runsOn: 'cpu' };
   const ctx = opts.contextTokens || 8192;
   const needMB = Math.round((sizeBytes * 1.15) / MB + ctx * 0.125 + 500);
+  const longMB = needMB + Math.max(0, 16384 - ctx) * 0.125; // Alfred's own chats run ~16k tokens
   const vram = Number(hw.bestVramMB) || 0;
   const freeRam = Number(hw.freeRamMB || hw.ramMB) || 0;
   const mk = (rating, stars, label, reason, runsOn) => ({ rating, stars, label, reason, needMB, runsOn });
-  if (vram && needMB + 1536 <= vram) return mk('great', 3, '★★★ Great fit', `Needs about ${gbText(needMB * MB)}; your graphics card has ${gbText(vram * MB)} — plenty of room.`, 'gpu');
-  if (vram && needMB <= vram) return mk('good', 2, '★★ Good fit', `Needs about ${gbText(needMB * MB)}; it fits in your graphics card's ${gbText(vram * MB)}.`, 'gpu');
-  if (needMB <= vram + freeRam * 0.8) return mk('slow', 1, '★ Runs, slowly', vram ? `Needs about ${gbText(needMB * MB)} — more than the graphics card's ${gbText(vram * MB)}, so part runs on the processor (slower).` : `No usable graphics card found — it runs on the processor (slower).`, vram ? 'gpu+cpu' : 'cpu');
+  if (vram && longMB + 1024 <= vram) return mk('excellent', 3, '★★★ Excellent fit', `Needs about ${gbText(needMB * MB)}; your graphics card has ${gbText(vram * MB)}, plenty of room even for long chats.`, 'gpu');
+  if (vram && needMB + 512 <= vram) return mk('good', 2, '★★ Good fit', `Needs about ${gbText(needMB * MB)}; it fits in your graphics card's ${gbText(vram * MB)} with a little room left.`, 'gpu');
+  if (vram && needMB <= vram) return mk('ok', 1, '★ OK fit', `Needs about ${gbText(needMB * MB)}; it only just fits in your graphics card's ${gbText(vram * MB)}, so long chats may slow down.`, 'gpu');
+  if (needMB <= vram + freeRam * 0.8) return mk('slow', 0, '🐢 Slow — it runs, but slowly', vram ? `Needs about ${gbText(needMB * MB)}, more than the graphics card's ${gbText(vram * MB)}, so part runs on the processor (slower).` : `No usable graphics card found, so it runs on the processor (slower).`, vram ? 'gpu+cpu' : 'cpu');
   return mk('too-big', 0, '✖ Too big for this PC', `Needs about ${gbText(needMB * MB)}, more than this PC has free.`, 'cpu');
 }
-const fitUsable = (fit) => !!fit && (fit.rating === 'great' || fit.rating === 'good');
+/** ★★★ Excellent or ★★ Good: what ⚡ Set up chooses first. */
+const fitUsable = (fit) => !!fit && (fit.rating === 'excellent' || fit.rating === 'good');
+/** ★ OK and better run fully on the graphics card: the 🩺 "fits this PC" row is ✔ for them. */
+const fitRuns = (fit) => fitUsable(fit) || (!!fit && fit.rating === 'ok');
 
 /** Turn low-level errors into one plain sentence. `what` = what we were doing ("download Ollama"). */
 function friendlyError(err, what) {
@@ -826,7 +831,7 @@ function createLlmSetup(deps = {}) {
           if (variants.length) {
             const rated = variants.map((x) => Object.assign({}, x, { fit: x.fit || fitFor(x.sizeBytes, hw) }));
             try { v = lib && typeof lib.pickVariant === 'function' ? lib.pickVariant(rated, hw) : null; } catch (_) { v = null; }
-            if (!v) v = ['great', 'good', 'slow'].map((r) => rated.filter((x) => x.fit && x.fit.rating === r).sort((a, b) => (b.sizeBytes || 0) - (a.sizeBytes || 0))[0]).find(Boolean) || null;
+            if (!v) v = ['excellent', 'good', 'ok', 'slow'].map((r) => rated.filter((x) => x.fit && x.fit.rating === r).sort((a, b) => (b.sizeBytes || 0) - (a.sizeBytes || 0))[0]).find(Boolean) || null;
             if (v && !v.fit) v.fit = fitFor(v.sizeBytes, hw);
           }
           const pullName = (v && (v.pullName || (m.pullName ? `${String(m.pullName).split(':')[0]}:${v.tag}` : null))) || m.pullName;
@@ -844,8 +849,23 @@ function createLlmSetup(deps = {}) {
     if (uncensored) out.sort((a, b) => Number(b.uncensored) - Number(a.uncensored));
     return out;
   }
-  function choose(picks) {
-    for (const r of ['great', 'good', 'slow']) { const p = picks.find((x) => x.fit && x.fit.rating === r); if (p) return p; }
+  /**
+   * The one ⚡ Set up downloads: an Excellent/Good fit that can use tools and is 3B or bigger first (a ✔ good
+   * pick for Alfred), then any Excellent/Good one, then ★ OK, then 🐢 slow. `picks` come best-first already.
+   * With { uncensored } an uncensored model that runs is preferred over any other.
+   */
+  function choose(picks, opts = {}) {
+    const all = (Array.isArray(picks) ? picks : []).filter(Boolean);
+    const capable = (x) => x.tools === true && (paramsFromName(x.pullName) == null || paramsFromName(x.pullName) >= 3);
+    const rated = (rs) => (x) => !!x.fit && rs.includes(x.fit.rating);
+    const tests = [
+      (x) => rated(['excellent'])(x) && capable(x), (x) => rated(['good'])(x) && capable(x),
+      rated(['excellent']), rated(['good']),
+      (x) => rated(['ok'])(x) && capable(x), rated(['ok']), rated(['slow']),
+    ];
+    for (const list of opts.uncensored ? [all.filter((x) => x.uncensored), all] : [all]) {
+      for (const test of tests) { const p = list.find(test); if (p) return p; }
+    }
     return null;
   }
 
@@ -868,7 +888,7 @@ function createLlmSetup(deps = {}) {
       let models = [];
       if (srv.ok) { const l = await listModels({ base: srv.base, hardware: hw }); models = l.ok ? l.models : []; }
       const picks = await recommendedPicks(hw, { uncensored: isUncensored(alfredModel) });
-      const best = choose(picks);
+      const best = choose(picks, { uncensored: isUncensored(alfredModel) });
       const dlFix = best ? { action: 'download-recommended', label: `⬇ Download ${best.pullName}` } : null;
       row('any-model', 'A model downloaded', srv.ok ? models.length > 0 : null, srv.ok ? (models.length ? `${models.length} model${models.length === 1 ? '' : 's'}: ${models.slice(0, 5).map((m) => m.name).join(', ')}${models.length > 5 ? '…' : ''}` : 'No model downloaded yet.') : 'Skipped — Ollama isn\'t running.', srv.ok && !models.length ? dlFix : null);
       const mine = models.find((m) => sameModel(m.name, alfredModel));
@@ -889,7 +909,7 @@ function createLlmSetup(deps = {}) {
       row('gpu', 'Graphics card found', g ? true : null, g ? `${g.name}${g.vramMB ? ` — ${gbText(g.vramMB * MB)}` : ''}` : 'No graphics card found — models run on the processor (slower). Small models still work.', null);
       const sizeOfMine = mine ? mine.sizeBytes : null;
       const fit = mine ? (mine.fit || fitFor(sizeOfMine, hw)) : null;
-      row('fit', 'The model fits this PC', fit ? (fitUsable(fit) ? true : fit.rating === 'slow' || fit.rating === 'unknown' ? null : false) : null, fit ? `${fit.label} — ${fit.reason}` : 'Skipped — no model yet.', fit && fit.rating === 'too-big' ? dlFix : null);
+      row('fit', 'The model fits this PC', fit ? (fitRuns(fit) ? true : fit.rating === 'slow' || fit.rating === 'unknown' ? null : false) : null, fit ? `${fit.label} — ${fit.reason}` : 'Skipped — no model yet.', fit && fit.rating === 'too-big' ? dlFix : null);
       const b = butlerConfig();
       const bSet = !!(b && b.model && b.endpoint);
       const bInstalled = bSet && models.some((m) => sameModel(m.name, b.model));
@@ -922,7 +942,7 @@ function createLlmSetup(deps = {}) {
         case 'download-recommended': {
           const hw = await hardware();
           const s = alfredSettings() || { local: {} };
-          const best = a.model ? { pullName: a.model, sizeBytes: estimateSizeBytes(a.model) } : choose(await recommendedPicks(hw, { uncensored: a.uncensored != null ? !!a.uncensored : isUncensored(s.local && s.local.model) }));
+          const best = a.model ? { pullName: a.model, sizeBytes: estimateSizeBytes(a.model) } : await (() => { const unc = a.uncensored != null ? !!a.uncensored : isUncensored(s.local && s.local.model); return recommendedPicks(hw, { uncensored: unc }).then((p) => choose(p, { uncensored: unc })); })();
           if (!best) return { ok: false, error: 'None of the recommended models fit this PC.' };
           const p = await pullModel(best.pullName, { sizeBytes: best.sizeBytes });
           if (!p.ok) return p;
@@ -936,7 +956,7 @@ function createLlmSetup(deps = {}) {
 
   // ---- what is ALREADY on this PC (never download what is there) ----
   const usableInstalled = (fit) => !fit || fit.rating !== 'too-big'; // a model you already have is used even when slow
-  const FIT_RANK = { great: 3, good: 2, slow: 1, unknown: 0 };
+  const FIT_RANK = { excellent: 4, good: 3, ok: 2, slow: 1, unknown: 0 };
   /** Does an Ollama model folder hold any downloaded model? (it has manifests) */
   function storeHasModels(dir) {
     if (!dir) return false;
@@ -1154,7 +1174,7 @@ function createLlmSetup(deps = {}) {
       if (warm.pending) warmReq.then((w) => log('llm-warm-late', { model: name, ok: !!(w && w.ok) })).catch(() => {});
       const where = whereText({ base, which: pick.sv.which });
       const pp = paramsFromName(name);
-      const fit = (pick.m.fit && pick.m.fit.rating === 'slow' ? ' It is big for this PC, so answers will be slow.' : '') + (pp != null && pp < 3 ? ' It is a very small model, so he may pick the wrong tool — ⚡ Set up gets a better one.' : '');
+      const fit = (pick.m.fit && pick.m.fit.rating === 'slow' ? ' It is big for this PC, so answers will be slow.' : pick.m.fit && pick.m.fit.rating === 'ok' ? ' It only just fits this PC, so long chats may slow down.' : '') + (pp != null && pp < 3 ? ' It is a very small model, so he may pick the wrong tool — ⚡ Set up gets a better one.' : '');
       return done({ ok: true, model: name, base, which: pick.sv.which, warmed: !!warm.ok, message: `✓ Alfred is ready with ${name} (${where}).${fit}${warm.ok ? '' : warm.pending ? ' (He is still loading into memory in the background — his first answer may take a moment.)' : ' (It will load when you first ask him something.)'}` });
     } catch (e) { return done({ ok: false, code: 'ERROR', error: friendlyError(e, 'start Alfred') }); }
   }
@@ -1225,7 +1245,7 @@ function createLlmSetup(deps = {}) {
       let chosen = null;
       if (keep) step('model', 'Choose a model', 'done', `${keep.name} is already downloaded — using it (nothing new to download).`, { model: keep.name });
       else {
-        chosen = choose(picks);
+        chosen = choose(picks, { uncensored });
         if (!chosen) return stop('model', 'Choose a model', 'None of the recommended models fit this PC (it needs more memory). You can still connect Alfred to an online AI in 🎩 settings.');
         step('model', 'Choose a model', 'done', `${chosen.pullName} — ${chosen.fit ? chosen.fit.label : ''}${chosen.sizeBytes ? ` · about ${gbText(chosen.sizeBytes)}` : ''}${chosen.uncensored ? ' · 🔓 uncensored' : ''}`, { model: chosen.pullName });
       }
@@ -1286,9 +1306,9 @@ function createLlmSetup(deps = {}) {
 
   return {
     findOllama, installOllama, startOllama, stopOllama, pullModel, removeModel, listModels, useModel, startAlfred, allServers, bestInstalled, storeHasModels, scanInstalled, useStore, importGguf, findGgufs,
-    check, fix, setupAll, cancel, status, hardware, hwLine, recommendedPicks, fitFor, currentServer, download,
+    check, fix, setupAll, cancel, status, hardware, hwLine, recommendedPicks, fitFor, choose, currentServer, download,
     isBusy: () => busy,
   };
 }
 
-module.exports = { createLlmSetup, friendlyError, fallbackFit, estimateSizeBytes, paramsFromName, parseVersion, isUncensored, gbText, timeText, DOWNLOAD_BASE };
+module.exports = { createLlmSetup, friendlyError, fallbackFit, fitUsable, fitRuns, estimateSizeBytes, paramsFromName, parseVersion, isUncensored, gbText, timeText, DOWNLOAD_BASE };

@@ -2,8 +2,11 @@
 /*
  * llm-models-ui.js — "🔎 Find a model" for Alfred's AI, in the 🤵 Butler section
  * (<div id="llm-models">). Search the Ollama library and Hugging Face, see how
- * each model fits THIS PC (★★★ great / ★★ good / ★ slow / ✖ too big, with a
- * plain-English reason), filter for 🔓 uncensored or 🛠 can-use-tools models, pick
+ * each model fits THIS PC (★★★ Excellent / ★★ Good / ★ OK / 🐢 Slow / ✖ too big, with
+ * a plain-English reason), about how fast it answers here (an estimate, or the speed
+ * Alfred measured), and whether it is a good pick for Alfred (✔ / ◐ / ✖). The list
+ * is ordered: good picks first, then fit, then speed. Filter for 🔓 uncensored or
+ * 🛠 can-use-tools models, pick
  * a size (the best one that fits is chosen for you) and ⬇ Download it — the
  * button is disabled, with the reason, when a model is too big. Optional
  * Hugging Face token for gated models.
@@ -24,6 +27,7 @@
     sources: { ollama: true, hf: true }, uncensored: false, toolsOnly: false,
     pulls: {}, // pullName → { state:'running'|'done'|'error', percent, text }
     choice: {}, // model id → chosen variant tag
+    speeds: {}, // model name → tokens/second Alfred measured on this PC (from main)
   };
 
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
@@ -65,8 +69,11 @@
       '#llm-models .llmm-badge{display:inline-block;font-size:10.5px;border:1px solid #2c4434;border-radius:9px;padding:0 6px;margin-left:4px;}',
       '#llm-models .llmm-desc{opacity:.75;font-size:11px;margin:2px 0;}',
       '#llm-models .llmm-fit{font-weight:600;}',
-      '#llm-models .llmm-fit[data-rating=great]{color:#8ef0b0;}#llm-models .llmm-fit[data-rating=good]{color:#c8f08e;}',
+      '#llm-models .llmm-fit[data-rating=excellent]{color:#8ef0b0;}#llm-models .llmm-fit[data-rating=good]{color:#c8f08e;}#llm-models .llmm-fit[data-rating=ok]{color:#e4f08e;}',
       '#llm-models .llmm-fit[data-rating=slow]{color:#f0d88e;}#llm-models .llmm-fit[data-rating="too-big"]{color:#f09a8e;}',
+      '#llm-models .llmm-speed{font-size:11px;opacity:.9;}#llm-models .llmm-speed[data-measured="1"]{color:#8fd3ff;}',
+      '#llm-models .llmm-verdict{font-size:11.5px;font-weight:600;}',
+      '#llm-models .llmm-verdict[data-verdict=good]{color:#8ef0b0;}#llm-models .llmm-verdict[data-verdict=mixed]{color:#f0d88e;}#llm-models .llmm-verdict[data-verdict=bad]{color:#f09a8e;}',
       '#llm-models .llmm-reason{opacity:.8;font-size:11px;}',
       '#llm-models .llmm-link{color:#8fb3ff;white-space:nowrap;}',
       '#llm-models .llmm-prog{font-size:11px;opacity:.9;}',
@@ -132,6 +139,38 @@
     if (HW && v && v.sizeBytes && st.hw) return HW.rateFit(v.sizeBytes, st.hw);
     return { rating: 'unknown', stars: 0, label: '? Fit unknown', reason: 'We can\'t tell how well this runs here yet.' };
   }
+  function speedKey(name) { const n = String(name || '').trim().toLowerCase(); return !n ? '' : /:[^/]+$/.test(n) ? n : `${n}:latest`; }
+  /** tokens/second Alfred measured for this download, or null. */
+  function measuredFor(pullName) {
+    const want = speedKey(pullName);
+    if (!want) return null;
+    for (const k of Object.keys(st.speeds || {})) {
+      if (speedKey(k) !== want) continue;
+      const v = st.speeds[k]; const t = Number(v && typeof v === 'object' ? v.tokensPerSec : v);
+      return Number.isFinite(t) && t > 0 ? t : null;
+    }
+    return null;
+  }
+  /** About how fast it answers here: the measured speed when Alfred has used it, else the estimate. */
+  function speedOf(m, v) {
+    if (HW && HW.estimateSpeed && v && (st.hw || measuredFor(v.pullName))) return HW.estimateSpeed(v.sizeBytes, st.hw, { fit: fitOf(v), measured: measuredFor(v.pullName) });
+    return (v && v.speed) || (m && m.speed) || null;
+  }
+  /** ✔ Good pick for Alfred / ◐ Works, but … / ✖ Not a good pick: … */
+  function verdictOf(m, v) {
+    const f = fitOf(v);
+    if (HW && HW.verdictFor) return HW.verdictFor(m, f, v);
+    if (m && m.verdict && (!v || v.pullName === m.pullName)) return m.verdict;
+    if (f.rating === 'too-big') return { kind: 'bad', label: '✖ Not a good pick: it is too big for this PC' };
+    return { kind: 'mixed', label: '◐ Works, but we couldn\'t check everything about it here' };
+  }
+  /** Good picks first, then fit, then speed (🔓 order goes on top when it is on). Done once per load — never while you pick a size. */
+  function sortModels() {
+    if (!HW || !HW.compareChoice) return;
+    const info = new Map(st.models.map((m, i) => { const v = chosenVariant(m); return [m, { i, verdict: verdictOf(m, v), fit: fitOf(v), speed: speedOf(m, v) }]; }));
+    const bad = (x) => (x.verdict && x.verdict.kind === 'bad' ? 1 : 0);
+    st.models.sort((a, b) => { const A = info.get(a), B = info.get(b); return (bad(A) - bad(B)) || HW.compareChoice(A, B) || (A.i - B.i); });
+  }
   function chosenVariant(m) {
     const vs = m.variants || [];
     const tag = st.choice[m.id] || m.pick;
@@ -154,7 +193,8 @@
     const f = fitOf(v);
     const name = v.tag && v.tag.includes(':') ? v.tag.split(':').pop() : (v.tag || v.quant || 'default');
     const extra = v.quant && !String(name).toUpperCase().includes(String(v.quant).toUpperCase()) ? ` ${v.quant}` : '';
-    return `${name}${extra} — ${v.sizeBytes ? `${v.estimated ? '~' : ''}${fmtSize(v.sizeBytes)}` : 'size ?'} — ${f.label}`;
+    const sp = speedOf(null, v);
+    return `${name}${extra} — ${v.sizeBytes ? `${v.estimated ? '~' : ''}${fmtSize(v.sizeBytes)}` : 'size ?'} — ${f.label}${sp && sp.tokensPerSec ? ` — ${sp.short}` : ''}`;
   }
   function cardHtml(m, i) {
     const v = chosenVariant(m);
@@ -165,12 +205,16 @@
     const opts = (m.variants || []).map((x) => `<option value="${esc(x.tag)}"${v && x.tag === v.tag ? ' selected' : ''}>${esc(variantLabel(x))}</option>`).join('');
     const stats = [m.downloads != null ? `⬇ ${fmtCount(m.downloads)}` : '', m.likes != null ? `♥ ${fmtCount(m.likes)}` : ''].filter(Boolean).join(' · ');
     const size = v && v.sizeBytes ? `${v.estimated ? 'about ' : ''}${fmtSize(v.sizeBytes)} download` : 'size unknown';
-    return `<div class="llmm-card" data-i="${i}" data-id="${esc(m.id)}" data-rating="${esc(f.rating)}" data-uncensored="${m.uncensored ? 1 : 0}">
+    const sp = speedOf(m, v);
+    const vd = verdictOf(m, v);
+    return `<div class="llmm-card" data-i="${i}" data-id="${esc(m.id)}" data-rating="${esc(f.rating)}" data-verdict="${esc(vd.kind)}" data-uncensored="${m.uncensored ? 1 : 0}">
       <div><span class="llmm-title">${esc(m.title || m.name)}</span>${badges(m)}
         ${m.url ? `<a href="${esc(m.url)}" target="_blank" rel="noopener" class="llmm-link" style="font-size:10.5px;margin-left:6px;">page ↗</a>` : ''}</div>
       ${m.description ? `<div class="llmm-desc" title="${esc(m.description)}">${esc(m.description)}</div>` : ''}
       <div><span class="llmm-fit" data-rating="${esc(f.rating)}">${esc(f.label)}</span> <span class="llmm-size" style="opacity:.75;">· ${esc(size)}${stats ? ` · ${esc(stats)}` : ''}</span></div>
       <div class="llmm-reason" title="${esc(f.reason || '')}">${esc(f.reason || '')}</div>
+      ${sp ? `<div class="llmm-speed" data-measured="${sp.measured ? 1 : 0}" title="${esc(sp.measured ? 'How fast Alfred really answered with this model on this PC.' : 'An estimate from the model\'s size and how fast this PC\'s graphics card and memory are. It can be off by half either way.')}">${esc(sp.text)}</div>` : ''}
+      <div class="llmm-verdict" data-verdict="${esc(vd.kind)}" title="${esc(vd.label)}">${esc(vd.label)}</div>
       <div class="llmm-row">
         ${opts ? `<select class="llmm-variant" aria-label="Size">${opts}</select>` : ''}
         ${m.source === 'hf' && !m.filesLoaded ? '<button class="llmm-files" title="Look up the exact files and sizes on Hugging Face">📂 Exact sizes</button>' : ''}
@@ -184,7 +228,8 @@
   function visibleModels() {
     let list = st.models.slice();
     if (st.toolsOnly) list = list.filter((m) => m.tools === true);
-    if (st.uncensored) list.sort((a, b) => (b.uncensored ? 1 : 0) - (a.uncensored ? 1 : 0)); // stable: keeps rank inside each group
+    // 🔓 on: every uncensored model first (stable: keeps the good-pick / fit / speed order inside each group)
+    if (st.uncensored) list.sort((a, b) => (b.uncensored ? 1 : 0) - (a.uncensored ? 1 : 0));
     return list;
   }
   function render() {
@@ -205,6 +250,8 @@
     st.busy = false;
     if (r && r.error === 'NO_API') { st.models = []; render(); msg(r.message, true); return; }
     st.models = toArray(r);
+    if (r && r.speeds && typeof r.speeds === 'object') st.speeds = r.speeds;
+    sortModels();
     if (!st.models.length && r && r.ok === false) msg(r.message || r.error || 'Couldn\'t load the recommended models.', true);
     else msg(`Recommended for Alfred, rated for this PC${st.uncensored ? ' — 🔓 uncensored first' : ''}.`);
     render();
@@ -222,6 +269,8 @@
     st.busy = false;
     if (r && r.error === 'NO_API') { msg(r.message, true); render(); return; }
     st.models = toArray(r);
+    if (r && r.speeds && typeof r.speeds === 'object') st.speeds = r.speeds;
+    sortModels();
     st.errors = (r && r.errors) || [];
     const errText = st.errors.map((e) => e.message).filter(Boolean).join(' ');
     if (!st.models.length && (r.ok === false || errText)) msg(`${errText || r.message || r.error || 'Search failed.'} You can still use ⭐ Recommended (works offline).`, true);
