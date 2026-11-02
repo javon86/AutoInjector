@@ -462,6 +462,15 @@ function buildExtract(p) {
     L.push(`[${fmtTs(e.ts)}] ${e.kind}${detail ? ' — ' + detail : ''}`);
   }
   L.push('');
+  // extra sections the app adds (e.g. the latest 🩺 pictures & video self-test summary) — redacted like the rest
+  for (const x of Array.isArray(p.appendix) ? p.appendix : []) {
+    if (!x || !x.text) continue;
+    L.push('========================================');
+    L.push(String(x.title || 'MORE'));
+    L.push('========================================');
+    L.push(String(x.text));
+    L.push('');
+  }
   const r = redact(L.join('\n'), p.redaction || {});
   const lines = r.text.split('\n');
   const oldestAt = oldestOf(include.conversation ? sel.turns : [], include.activity ? sel.events : []);

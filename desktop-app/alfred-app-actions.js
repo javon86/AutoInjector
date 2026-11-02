@@ -75,6 +75,11 @@ A('brigade.stop', 'brigade:stop', { t: 'Stop the relay check', c: true, aa: true
 A('featuretest.run', 'featuretest:run', { t: 'Run the Feature Test', c: true });
 A('featuretest.stop', 'featuretest:stop', { t: 'Stop the Feature Test', c: true, aa: true });
 A('featuretest.open_report', 'featuretest:open-report', { t: 'Open the Feature Test report', c: true, aa: true, a: { file: opt(1000) }, r: ['file'], ex: { file: 'feature-test.txt' } });
+A('mediatest.run', 'mediatest:run', { t: '🩺 Test pictures & video: one press checks Forge, FramePack, a trailer, my picture/video tools and Akọwe\'s picture routes, and saves one report (quick = nothing is made, about 10 s; full = one tiny picture, clip and trailer)', c: true, a: { mode: { type: 'string', enum: ['quick', 'full'] }, chatgpt_picture: { type: 'boolean' }, unload: { type: 'boolean' } }, call: (a) => [{ mode: a.mode || 'quick', chatgptPicture: !!a.chatgpt_picture, unload: a.unload !== false }], ex: { mode: 'quick' } });
+A('mediatest.stop', 'mediatest:stop', { t: 'Stop the pictures & video self-test', c: true, aa: true });
+A('mediatest.status', 'mediatest:status', { t: 'The pictures & video self-test: running now, and the last report (every step ✅/⚠️/❌, the error and what to try)', c: false });
+A('mediatest.copy', 'mediatest:copy', { t: 'Copy the last pictures & video self-test report to the clipboard', c: true, aa: true });
+A('mediatest.open_report', 'mediatest:open-report', { t: 'Open the last pictures & video self-test report', c: true, aa: true });
 A('butler.selfcheck', 'butler:selfcheck', { t: 'System Check (what the butler can do)', c: false });
 A('butler.capability_test', 'butler:capability-test', { t: 'Test all capabilities (really runs them)', c: true });
 A('butler.install_missing', 'butler:install-missing', { t: 'Install what is missing', c: true });

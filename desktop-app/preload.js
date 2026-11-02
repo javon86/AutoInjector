@@ -234,6 +234,15 @@ contextBridge.exposeInMainWorld("api", {
     onInstall: (cb) => ipcRenderer.on("video-install", (_e, st) => cb(st)),
     onDone: (cb) => ipcRenderer.on("video-done", (_e, r) => cb(r)),
   },
+  // 🩺 Test pictures & video (media-selftest.js): one press, one report
+  mediaTest: {
+    run: (opts) => ipcRenderer.invoke("mediatest:run", opts || {}),
+    stop: () => ipcRenderer.invoke("mediatest:stop"),
+    status: () => ipcRenderer.invoke("mediatest:status"),
+    copy: () => ipcRenderer.invoke("mediatest:copy"),
+    openReport: () => ipcRenderer.invoke("mediatest:open-report"),
+    onProgress: (cb) => ipcRenderer.on("media-selftest", (_e, st) => cb(st)),
+  },
   gpuInfo: () => ipcRenderer.invoke("gpu:info"),
   butlerSelfCheck: () => ipcRenderer.invoke("butler:selfcheck"),
   phoneInfo: () => ipcRenderer.invoke("phone:info"),
