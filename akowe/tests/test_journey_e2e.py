@@ -420,6 +420,20 @@ def test_the_whole_journey(journey):
         here.get("things") or {})
     assert [x["number"] for x in series.books(o_s)] == [1, 2]
     assert json.dumps(o_s["changes"], sort_keys=True) == json.dumps(here["changes"], sort_keys=True)
+    # book 1 saved again (it knows its series now) and opened there too: one series, both books in it
+    res1 = app.saver.save_now(pid, BR)
+    r3 = book_package.import_package(other, (tmp_path / "books" / res1["folder"] / "book.akowe").read_bytes(), "author")
+    assert r3["series"]["action"] == "merged", r3["series"]
+    keys = [r["key"] for r in other.store.query("SELECT key FROM settings WHERE key LIKE 'series:%'")]
+    assert keys == [f"series:{s2['id']}"]
+    o_s = series.get(other.store, s2["id"])
+    assert {x["number"]: x["project_id"] for x in series.books(o_s)} == {1: r3["project_id"], 2: r1["project_id"]}
+    assert set(o_s["characters"]) == set(here["characters"])
+    ov = series.view(other, r1["project_id"], BR)
+    assert [b_["exists"] for b_ in ov["books"]] == [True, True]
+    o_l = series.linked(other.store, o_s)
+    assert o_l["characters"][mara]["records"].get(r3["project_id"]) and o_l["characters"][mara]["records"].get(
+        r1["project_id"])
 
 
 # ---------------------------------------------------------------------------------------------- 8: pause / resume / cancel
