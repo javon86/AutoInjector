@@ -278,6 +278,18 @@ def test_site_error_notice_is_a_temporary_problem_with_a_wait_hint():
     assert bad.retry_after_s == 30  # a nonsense hint falls back to the default
 
 
+def test_site_error_notice_is_never_asked_again_within_seconds(h, bridge):
+    """Regression: a 503 SITE_ERROR (the site showed its own error notice, wait hint 30 s) went through the adapter's
+    quick retries, so the same site was asked again after ~1 s and ~2 s before Akọwe moved to another AI or waited
+    the hint. It is now handed back at once (one request), like a site that is not ready."""
+    connect(h, bridge.url)
+    bridge.script = [("status", 503, "SITE_ERROR"), ("ok", json.dumps(B01_OUT))]
+    r = b01(h)
+    assert errors_of(r)[0][0] == "UPSTREAM_UNAVAILABLE", r
+    assert len(bridge.requests) == 1, bridge.requests  # never re-asked within seconds
+    assert not bridge.sends
+
+
 def test_timeout_needs_user_decision_and_retry_reuses_the_reply(h, bridge):
     connect(h, bridge.url)
     bridge.script = [("timeout_then_cache", json.dumps(B01_OUT))]

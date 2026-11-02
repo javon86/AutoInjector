@@ -2765,6 +2765,10 @@ class AutoBookService(_Runner):
             bp = self.bp(run)
             _ctx, latest, appr = bp.chapter_prose(outline, cid)
             if appr:
+                from . import continuity  # noqa: PLC0415
+                if not continuity.tracked(self.store, run["project_id"], run["branch_id"], cid):
+                    # approved, but a Pause / Cancel came before its continuity was tracked: track it now
+                    continuity.after_chapter(self, run, cid, appr, item)
                 item.update(state="done", words=len(((appr.get("data") or {}).get("text") or "").split()))
                 continue
             item["state"] = "running"
