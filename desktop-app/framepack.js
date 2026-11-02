@@ -369,6 +369,7 @@ function createFramePack(deps = {}) {
   const group = process.platform !== 'win32'; // posix: own process group, so Stop takes its children too
   let cache = null; // { at, info }
   let proc = null; // { child, dir, hfHome, ready: Promise, buf, tail: [] }
+  let attention = null; // which attention FramePack uses on this card (the runner turns off kernels that can't run)
   let loaded = false;
   // loading: { phase: precheck|starting|loading, stage, step, steps, startedAt, stageStartedAt, stuck, where, heartbeatAt, stages: [] }
   let loading = null;
@@ -503,7 +504,7 @@ function createFramePack(deps = {}) {
     const f = find(!!o.fresh);
     return Object.assign({}, f, {
       models: f.models, running: !!proc, loaded, loading: loadingPublic(), busy: !!job || !!loadWait,
-      job: job ? { id: job.id, phase: job.phase || 'starting' } : null, vramGB, highVram, gpu: gpu ? { name: gpu.name || '', vramMB: gpu.vramMB || null, vendor: gpu.vendor || '' } : null,
+      job: job ? { id: job.id, phase: job.phase || 'starting' } : null, vramGB, highVram, attention, gpu: gpu ? { name: gpu.name || '', vramMB: gpu.vramMB || null, vendor: gpu.vendor || '' } : null,
       vramHint: vramHint(), lastError, lastLoad: lastLoad ? Object.assign({}, lastLoad) : null, minVramGB: MIN_VRAM_GB, fps: FPS, stopping: !!stopping || !!loadCancel,
       stderrTail: tailNow(), precheck: pre ? Object.assign({ ok: pre.ok, at: pre.at }, pick(pre.info || {}, ['torch', 'cuda', 'cuda_build', 'device', 'free_gb', 'total_gb', 'seconds', 'import_seconds', 'error'])) : null,
     });
@@ -525,6 +526,7 @@ function createFramePack(deps = {}) {
     const p = proc;
     if (ev.event === 'ready') { if (p && p.onReady) p.onReady(ev); return; }
     if (ev.event === 'heartbeat') { if (loading) { loading.where = ev.where || loading.where; loading.heartbeatAt = Date.now(); } if (p) p.heartbeatAt = Date.now(); return; }
+    if (ev.event === 'attention') { attention = { using: ev.using || '', disabled: Array.isArray(ev.disabled) ? ev.disabled : [], reasons: Array.isArray(ev.reasons) ? ev.reasons.map((r) => String(r).slice(0, 200)) : [] }; log('framepack-attention', attention); return; }
     if (ev.event === 'loading') {
       setStage(ev.stage || '', ev.step || 0, ev.steps || 0, 'loading');
       if (job) { job.phase = 'loading'; try { job.onProgress && job.onProgress({ phase: 'loading', stage: ev.stage, step: ev.step, steps: ev.steps }); } catch (_) {} }

@@ -287,4 +287,35 @@ finally:
         else:
             sys.modules[_k] = _v
 
+
+# ---- check_attention: a fast-attention kernel that can't run on this card is turned off (RTX 50xx + xFormers)
+class _T(object):
+    shape = (1, 64, 2, 64)
+class _Torch(object):
+    bfloat16 = 'bf16'
+    @staticmethod
+    def randn(*a, **k):
+        return _T()
+def _xf_broken(q, k, v):
+    raise NotImplementedError('No operator found for `memory_efficient_attention_forward` with inputs: ... requires device with capability <= (9, 0) but your GPU has capability (12, 0) (too new)')
+def _flash_ok(q, k, v):
+    return q
+_m = _types.ModuleType('hvp_fake')
+_m.sageattn = None; _m.sageattn_varlen = None
+_m.flash_attn_func = None; _m.flash_attn_varlen_func = None
+_m.xformers_attn_func = _xf_broken
+_logs = []
+att = R.check_attention(_m, _Torch, log=_logs.append)
+check(_m.xformers_attn_func is None and att['using'] == 'PyTorch scaled_dot_product_attention' and att['disabled'][0][0] == 'xformers_attn_func' and 'too new' in att['disabled'][0][1],
+      'check_attention: xFormers with no kernel for the card (capability 12.0) is turned off -> PyTorch built-in attention (%s)' % att)
+check(any('does not run on this graphics card' in l for l in _logs) and any('using PyTorch' in l for l in _logs), 'check_attention says so in the log')
+_m2 = _types.ModuleType('hvp_fake2')
+_m2.sageattn = None; _m2.sageattn_varlen = None
+_m2.flash_attn_func = _flash_ok; _m2.flash_attn_varlen_func = _flash_ok
+_m2.xformers_attn_func = _xf_broken
+att2 = R.check_attention(_m2, _Torch)
+check(_m2.flash_attn_func is _flash_ok and att2['using'] == 'flash_attn_func' and _m2.xformers_attn_func is None, 'a kernel that works is kept (flash-attn used), the broken one still turned off')
+c, m, fx = R.classify_error(NotImplementedError('No operator found for `memory_efficient_attention_forward` with inputs: query : shape=(1, 17974, 24, 128) ... capability (12, 0) (too new)'))
+check(c == 'FRAMEPACK_ATTENTION' and 'xFormers' in m and 'shorter' not in fx and 'built-in attention' in fx, 'the PC error -> FRAMEPACK_ATTENTION in plain words, no "shorter clip" advice')
+
 print(json.dumps({'done': True}))
