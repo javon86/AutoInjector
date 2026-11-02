@@ -330,6 +330,52 @@ async function main() {
     assert(FP.explainLoadError("OSError: lllyasviel/FramePackI2V_HY does not appear to have a file named diffusion_pytorch_model-00002-of-00003.safetensors.").cause === 'file-bad', 'explainLoadError: a file that is not there → file-bad (named)');
     assert(FP.explainLoadError('CUDA out of memory. Tried to allocate 2 GiB') === null && FP.explainLoadError('') === null, 'explainLoadError: out of memory / nothing → null (their own words)');
   }
+  {
+    // the PC test (RTX 5070 Ti): loading works (14 s), then the 🧪 test fails in generation — xFormers has no kernels for
+    // the card ("No operator found for memory_efficient_attention_forward … capability (12, 0) (too new)"). An older runner
+    // says FRAMEPACK_FAILED + "try again, or a shorter clip": the words must fit (attention, not memory), no "shorter clip";
+    // the load stays "ok", the card's line says the test clip failed (when, why); a clip that works clears it.
+    const XF = 'NotImplementedError: No operator found for `memory_efficient_attention_forward` with inputs: … requires device with capability <= (9, 0) but your GPU has capability (12, 0) (too new)';
+    const e1 = FP.explainLoadError(XF);
+    assert(e1 && e1.cause === 'attention' && /speed-up part \(xFormers\) has no version for your new graphics card yet/.test(e1.message) && /PyTorch's built-in attention automatically — update AutoInjector and try again/.test(e1.fix) && !/shorter clip/i.test(e1.fix),
+      `explainLoadError: the xFormers “No operator found … too new” error → attention, plain words (“${e1 && e1.message}”)`);
+    assert(FP.explainLoadError('', 'FRAMEPACK_ATTENTION').cause === 'attention', 'explainLoadError: the runner\'s own FRAMEPACK_ATTENTION code → the same words');
+    assert(FP.explainLoadError('flash_attn: your GPU has capability (12, 0) (too new)').cause === 'attention', 'explainLoadError: flash-attn “capability … too new” → attention');
+    assert(FP.explainLoadError('No operator found for `memory_efficient_attention_forward`').cause === 'attention', 'explainLoadError: “No operator found for memory_efficient_attention” alone → attention');
+    assert(FP.explainExit(['Traceback (most recent call last):', XF], 1, null).cause === 'attention' && !/shorter clip/i.test(FP.explainExit([XF], 1, null).fix), 'explainExit (the runner stopped with it) → the same words');
+
+    setEnv(F.runnerEnv({ mode: 'failgen' }));
+    const evs = []; const saved = [];
+    mgr = FP.createFramePack({ find: findOk, onEvent: (e) => evs.push(e), onLastLoad: (r) => saved.push(r) });
+    const studioX = VS.createVideoStudio({ framepack: () => mgr, videosDir: () => path.join(TMP, 'videos-failgen'), persist: () => {}, comfy: async () => null });
+    const r = await studioX.framepack.test();
+    assert(!r.ok && r.code === 'FRAMEPACK_ATTENTION' && r.error === 'FRAMEPACK_ATTENTION' && r.cause === 'attention' && /xFormers/.test(r.message) && /built-in attention/.test(r.fix), `🧪 Test fails in generation (xFormers) → FRAMEPACK_ATTENTION in plain words: “${r.message}” / “${r.fix}”`);
+    assert(!/shorter clip/i.test(r.fix || '') && !/shorter clip/i.test(r.message || ''), 'no “shorter clip” advice for the attention error');
+    assert(/No operator found for `memory_efficient_attention_forward`/.test(r.serverError || ''), 'what FramePack really said stays in the details');
+    const s1 = mgr.status();
+    assert(s1.loaded && !s1.loading && !s1.busy, `afterwards: loaded, not loading (the footer has no stale “step n of n”): loading=${JSON.stringify(s1.loading)}`);
+    assert(s1.lastError && s1.lastError.load === false && s1.lastError.job === true && s1.lastError.test === true && s1.lastError.code === 'FRAMEPACK_ATTENTION', `lastError: a failed clip (not a failed load), the 🧪 test (${JSON.stringify({ load: s1.lastError && s1.lastError.load, job: s1.lastError && s1.lastError.job, test: s1.lastError && s1.lastError.test })})`);
+    assert(s1.lastLoad && s1.lastLoad.ok === true && s1.lastLoad.jobFailed && s1.lastLoad.jobFailed.test === true && /xFormers/.test(s1.lastLoad.jobFailed.reason) && /built-in attention/.test(s1.lastLoad.jobFailed.fix) && s1.lastLoad.jobFailed.at > 0,
+      'the last load: still ok (it loaded), and the test clip failed — when, why, what to try');
+    assert(saved.length && saved[saved.length - 1].jobFailed && saved[saved.length - 1].ok === true, 'onLastLoad hands that to the app to save');
+    assert(evs.some((e) => e.type === 'error' && e.job && !e.load && e.code === 'FRAMEPACK_ATTENTION'), 'the screen is told (an error event for the job, not a load)');
+    const back = FP.createFramePack({ find: findOk, lastLoad: saved[saved.length - 1] }).status().lastLoad;
+    assert(back && back.ok && back.jobFailed && back.jobFailed.test && /xFormers/.test(back.jobFailed.reason), 'after a restart the card still says the test clip failed');
+    // an older runner's generic fix for a non-memory error: no "shorter clip"; out of memory keeps it
+    const g = FP.fromRunner({ code: 'FRAMEPACK_FAILED', message: 'FramePack could not make the video: ValueError: bad shape', fix: 'Look at the details below; try again, or a shorter clip.' });
+    assert(!/shorter clip/i.test(g.fix) && /details/.test(g.fix), `a non-memory error with the runner's generic fix → no “shorter clip” (“${g.fix}”)`);
+    const o = FP.fromRunner({ code: 'FRAMEPACK_OOM', message: 'Your graphics card ran out of memory making this video.', fix: 'Raise "GPU memory to keep free" (e.g. to 8 or 10 GB), make a shorter clip, and close other programs that use the graphics card.' });
+    assert(/shorter clip/.test(o.fix) && o.code === 'FRAMEPACK_OOM', 'out of memory keeps “a shorter clip”');
+    const a2 = FP.fromRunner({ code: 'FRAMEPACK_ATTENTION', message: 'the attention part has no kernels for this graphics card', fix: '' });
+    assert(a2.code === 'FRAMEPACK_ATTENTION' && /xFormers/.test(a2.message) && /built-in attention/.test(a2.fix), 'the runner\'s FRAMEPACK_ATTENTION code → the plain words');
+    mgr.stop(); await until(() => !mgr.status().running, 3000);
+    // the next clip works → the failure is cleared
+    setEnv(F.runnerEnv({}));
+    const r2 = await studioX.framepack.test();
+    const s2 = mgr.status();
+    assert(r2.ok && !s2.lastError && s2.lastLoad.ok && s2.lastLoad.tested && !s2.lastLoad.jobFailed, `a clip that works → lastError cleared, the card “loaded and tested” (${JSON.stringify(s2.lastLoad)})`);
+    mgr.stop(); await until(() => !mgr.status().running, 3000);
+  }
 
   // =====================================================================
   console.log('\n== 3. video-studio with FramePack ==');

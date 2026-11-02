@@ -200,8 +200,19 @@ function lastLines(tail) { return tail.slice(-25).join('\n').slice(-3000); }
 // generic "check the models are there" (the file check can say "all found" and loading can still fail).
 // → { cause, message, fix } | null
 const HF_OFFLINE_RE = /offline mode|OfflineModeIsEnabled|outgoing traffic has been disabled|HF_HUB_OFFLINE|LocalEntryNotFoundError|couldn'?t connect to ['"]?https?:\/\/huggingface\.co|cannot find the requested files in the (?:local|disk) cache|get_hf_file_metadata|huggingface_hub[\w.]*errors/i;
-function explainLoadError(text) {
+// The attention part (xFormers / flash-attn / SageAttention) has no kernels for this graphics card (a new card, e.g. an
+// RTX 50xx: "No operator found for `memory_efficient_attention_forward` … capability (12, 0) … too new"). Not memory, not length.
+const ATTENTION_RE = /FRAMEPACK_ATTENTION|No operator found for[\s\S]{0,200}memory_efficient_attention|memory_efficient_attention[\s\S]{0,2000}capability[\s\S]{0,200}too new|(?:xformers|flash[-_ ]?attn|sage[-_ ]?attention)[\s\S]{0,2000}capability[\s\S]{0,200}too new|No operator found for[\s\S]{0,2000}capability[\s\S]{0,200}too new/i;
+const ATTENTION_WORDS = {
+  cause: 'attention',
+  message: 'FramePack\'s speed-up part (xFormers) has no version for your new graphics card yet.',
+  fix: 'AutoInjector now switches to PyTorch\'s built-in attention automatically — update AutoInjector and try again. (This is not about memory or the clip\'s length.)',
+};
+// A fix for errors that are not about memory: no "shorter clip" (that only helps when the card ran out of memory).
+const GENERIC_FIX = 'Look at the details (what FramePack printed), then try again. If it keeps happening, update AutoInjector and FramePack.';
+function explainLoadError(text, code) {
   const t = String(text || '');
+  if (code === 'FRAMEPACK_ATTENTION' || ATTENTION_RE.test(t)) return Object.assign({}, ATTENTION_WORDS);
   if (!t.trim() || OOM_RE.test(t)) return null; // out of memory has its own words already
   if (HF_OFFLINE_RE.test(t)) {
     return { cause: 'hf-offline', message: 'FramePack tried to ask Hugging Face (online) about one of its model files while it runs offline, and did not find what it asked for in the local copy.',
@@ -221,13 +232,17 @@ function fromRunner(ev) {
   if (ev.missing) out.missing = ev.missing;
   if (ev.detail) out.serverError = String(ev.detail).slice(0, 3000);
   if (ev.cause) out.cause = ev.cause;
-  const why = code !== 'FRAMEPACK_OOM' && code !== 'BAD_REQUEST' ? explainLoadError(`${ev.message || ''}\n${ev.detail || ''}`) : null;
+  const said = `${ev.message || ''}\n${ev.detail || ''}`;
+  const why = code !== 'FRAMEPACK_OOM' && code !== 'BAD_REQUEST' ? explainLoadError(said, code) : null;
   if (why) {
     // what FramePack said stays (first in the details); the words and the fix fit what really happened
     if (ev.message && !(out.serverError || '').includes(ev.message)) out.serverError = `${ev.message}${out.serverError ? `\n\n${out.serverError}` : ''}`.slice(0, 3000);
     out.message = why.message; out.fix = why.fix; out.cause = why.cause;
+    if (why.cause === 'attention') { out.code = 'FRAMEPACK_ATTENTION'; out.error = 'FRAMEPACK_ATTENTION'; }
   }
   if (code === 'FRAMEPACK_OOM' && !out.fix) out.fix = 'Raise “GPU memory to keep free”, or make a shorter clip.';
+  // "a shorter clip" is advice for out of memory only (an older runner says it for every error)
+  if (out.code !== 'FRAMEPACK_OOM' && /shorter clip/i.test(out.fix || '') && !OOM_RE.test(said)) out.fix = GENERIC_FIX;
   return out;
 }
 
@@ -322,7 +337,12 @@ function stageKind(stage, phase) {
 function cleanLastLoad(x) {
   if (!x || typeof x !== 'object' || !Number.isFinite(Number(x.at))) return null;
   const s = (v, n) => String(v == null ? '' : v).slice(0, n);
-  if (x.ok) return { ok: true, at: Number(x.at), tested: !!x.tested, testedAt: Number.isFinite(Number(x.testedAt)) && x.testedAt ? Number(x.testedAt) : null };
+  if (x.ok) {
+    const out = { ok: true, at: Number(x.at), tested: !!x.tested, testedAt: Number.isFinite(Number(x.testedAt)) && x.testedAt ? Number(x.testedAt) : null };
+    const jf = x.jobFailed;
+    if (jf && typeof jf === 'object' && Number.isFinite(Number(jf.at))) out.jobFailed = { at: Number(jf.at), test: !!jf.test, code: s(jf.code, 60) || 'FRAMEPACK_FAILED', reason: s(jf.reason, 600), fix: s(jf.fix, 1200), cause: s(jf.cause, 40) };
+    return out;
+  }
   return { ok: false, at: Number(x.at), code: s(x.code, 60) || 'FRAMEPACK_FAILED', reason: s(x.reason, 600), fix: s(x.fix, 1200), cause: s(x.cause, 40), stage: s(x.stage, 120), detail: s(x.detail, 1500) };
 }
 function stuckWords(kind, stage, secs, where) {
@@ -369,6 +389,7 @@ function createFramePack(deps = {}) {
   const group = process.platform !== 'win32'; // posix: own process group, so Stop takes its children too
   let cache = null; // { at, info }
   let proc = null; // { child, dir, hfHome, ready: Promise, buf, tail: [] }
+  let attention = null; // which attention FramePack uses on this card (the runner turns off kernels that can't run)
   let loaded = false;
   // loading: { phase: precheck|starting|loading, stage, step, steps, startedAt, stageStartedAt, stuck, where, heartbeatAt, stages: [] }
   let loading = null;
@@ -394,11 +415,20 @@ function createFramePack(deps = {}) {
     log('framepack-last-load', Object.assign({}, lastLoad, { detail: undefined }));
     try { if (deps.onLastLoad) deps.onLastLoad(Object.assign({}, lastLoad)); } catch (_) {}
   }
+  // A video (or the 🧪 test) that failed AFTER the models loaded: the load stays "ok", and the card says the clip failed
+  // (when, why, what to try) — until the next video that works.
+  function noteJobFailed(r, test) {
+    if (!lastLoad || !lastLoad.ok) return;
+    lastLoad = Object.assign({}, lastLoad, { jobFailed: { at: Date.now(), test: !!test, code: r.code || 'FRAMEPACK_FAILED', reason: r.message || 'FramePack could not make the video.', fix: r.fix || '', cause: r.cause || '' } });
+    log('framepack-last-load', Object.assign({}, lastLoad, { detail: undefined }));
+    try { if (deps.onLastLoad) deps.onLastLoad(Object.assign({}, lastLoad)); } catch (_) {}
+  }
   // A failure: lastError (the screen's "last problem"); while loading it is also the last load's result (with the stage).
   function setError(r, isLoad, stage) {
     const st = stage || (loading ? loading.stage : '');
-    lastError = { code: r.code, message: r.message, fix: r.fix, at: Date.now(), detail: r.serverError || '', load: !!isLoad, stage: isLoad ? st : undefined, cause: r.cause || undefined };
+    lastError = { code: r.code, message: r.message, fix: r.fix, at: Date.now(), detail: r.serverError || '', load: !!isLoad, stage: isLoad ? st : undefined, cause: r.cause || undefined, job: !isLoad && !!job, test: !isLoad && !!(job && job.test) };
     if (isLoad) noteLoad({ ok: false, code: r.code, reason: r.message, fix: r.fix, cause: r.cause, stage: st, detail: r.serverError || '' });
+    else if (job) noteJobFailed(r, job.test);
   }
 
   function find(fresh) {
@@ -503,7 +533,7 @@ function createFramePack(deps = {}) {
     const f = find(!!o.fresh);
     return Object.assign({}, f, {
       models: f.models, running: !!proc, loaded, loading: loadingPublic(), busy: !!job || !!loadWait,
-      job: job ? { id: job.id, phase: job.phase || 'starting' } : null, vramGB, highVram, gpu: gpu ? { name: gpu.name || '', vramMB: gpu.vramMB || null, vendor: gpu.vendor || '' } : null,
+      job: job ? { id: job.id, phase: job.phase || 'starting' } : null, vramGB, highVram, attention, gpu: gpu ? { name: gpu.name || '', vramMB: gpu.vramMB || null, vendor: gpu.vendor || '' } : null,
       vramHint: vramHint(), lastError, lastLoad: lastLoad ? Object.assign({}, lastLoad) : null, minVramGB: MIN_VRAM_GB, fps: FPS, stopping: !!stopping || !!loadCancel,
       stderrTail: tailNow(), precheck: pre ? Object.assign({ ok: pre.ok, at: pre.at }, pick(pre.info || {}, ['torch', 'cuda', 'cuda_build', 'device', 'free_gb', 'total_gb', 'seconds', 'import_seconds', 'error'])) : null,
     });
@@ -525,6 +555,7 @@ function createFramePack(deps = {}) {
     const p = proc;
     if (ev.event === 'ready') { if (p && p.onReady) p.onReady(ev); return; }
     if (ev.event === 'heartbeat') { if (loading) { loading.where = ev.where || loading.where; loading.heartbeatAt = Date.now(); } if (p) p.heartbeatAt = Date.now(); return; }
+    if (ev.event === 'attention') { attention = { using: ev.using || '', disabled: Array.isArray(ev.disabled) ? ev.disabled : [], reasons: Array.isArray(ev.reasons) ? ev.reasons.map((r) => String(r).slice(0, 200)) : [] }; log('framepack-attention', attention); return; }
     if (ev.event === 'loading') {
       setStage(ev.stage || '', ev.step || 0, ev.steps || 0, 'loading');
       if (job) { job.phase = 'loading'; try { job.onProgress && job.onProgress({ phase: 'loading', stage: ev.stage, step: ev.step, steps: ev.steps }); } catch (_) {} }
@@ -543,7 +574,7 @@ function createFramePack(deps = {}) {
     if (job && ev.id === job.id) {
       if (ev.event === 'accepted') { job.sections = ev.sections; job.frames = ev.frames; return; }
       if (ev.event === 'progress') { if (loading) endLoading('loaded'); job.phase = ev.phase || 'sampling'; try { job.onProgress && job.onProgress(ev); } catch (_) {} return; }
-      if (ev.event === 'result') { noteLoad({ ok: true, tested: true }); return finish(Object.assign({ ok: true, engine: 'framepack' }, pick(ev, ['path', 'poster', 'frames', 'fps', 'seconds', 'width', 'height', 'sections', 'seed']))); }
+      if (ev.event === 'result') { noteLoad({ ok: true, tested: true }); lastError = null; return finish(Object.assign({ ok: true, engine: 'framepack' }, pick(ev, ['path', 'poster', 'frames', 'fps', 'seconds', 'width', 'height', 'sections', 'seed']))); }
       if (ev.event === 'cancelled') { if (loading) endLoading('cancelled'); return finish(fail('FRAMEPACK_CANCELLED', 'Stopped.', '', { engine: 'framepack' })); }
       if (ev.event === 'error') {
         // a video (or the 🧪 test) that failed — while loading too: the screen hears about it (light, header, card)
@@ -735,7 +766,7 @@ function createFramePack(deps = {}) {
   async function generate(req, onProgress, o = {}) {
     if (job) return fail('FRAMEPACK_BUSY', 'FramePack is already making a video.', 'Wait for it, or press ⏹ Stop.', { engine: 'framepack' });
     const id = String((req && req.id) || crypto.randomUUID());
-    const j = { id, resolve: null, onProgress, cancelled: false, phase: 'starting' };
+    const j = { id, resolve: null, onProgress, cancelled: false, phase: 'starting', test: !!o.test };
     job = j; // claimed before anything async: a second generate is BUSY
     const promise = new Promise((resolve) => { j.resolve = resolve; });
     const cancelled = () => fail('FRAMEPACK_CANCELLED', 'Stopped.', '', { engine: 'framepack' });
@@ -822,4 +853,4 @@ function createFramePack(deps = {}) {
   return { status, load, generate, cancel, stop, refresh, refreshGpu, find, busy: () => !!job || !!loadWait, isLoaded: () => loaded, isLoading: () => !!loading || !!preProc };
 }
 
-module.exports = { createFramePack, findFramePack, checkModels, isFramePackDir, venvPython, testPicture, notReady, explainExit, explainLoadError, explainPrecheck, buildEnv, killTree, stuckWords, stageKind, hasAnyModel, NEEDED, FPS, MIN_VRAM_GB, RUNNER, STAGE_LIMITS };
+module.exports = { createFramePack, findFramePack, checkModels, isFramePackDir, venvPython, testPicture, notReady, explainExit, explainLoadError, fromRunner, explainPrecheck, buildEnv, killTree, stuckWords, stageKind, hasAnyModel, NEEDED, FPS, MIN_VRAM_GB, RUNNER, STAGE_LIMITS };

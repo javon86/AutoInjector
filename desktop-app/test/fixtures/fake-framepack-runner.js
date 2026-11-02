@@ -9,6 +9,10 @@
 //                  | flood (writes ~2 MB to stderr while loading — more than any pipe holds)
 //                  | failmodel (loading fails at "the FramePack video model" (the transformer) with Hugging Face's offline /
 //                    metadata error, worded like the real runner: FRAMEPACK_MODEL_MISSING + "check … all three models")
+//                  | failgen (loads fine, then generation fails with xFormers' "No operator found for
+//                    `memory_efficient_attention_forward` … capability (12, 0) (too new)", worded like an older runner:
+//                    FRAMEPACK_FAILED + "try again, or a shorter clip"). Read from FAKE_FP_CONTROL at EVERY generate,
+//                    so the e2e can switch a loaded runner between failgen and ok.
 //   FAKE_FP_PRECHECK  ok (default) | nocuda | cpu | dll | notorch | hang (never finishes) | flood (2 MB stderr, then ok)
 //   FAKE_FP_STEP_MS  ms per sampling step (default 15) · FAKE_FP_LOAD_MS ms per loading stage (default 10)
 //   FAKE_FP_LOG    a file: every command received (+ argv, cwd, HF env, PYTHON* env, PATH, pid) is appended as a JSON line
@@ -80,8 +84,11 @@ if (precheck) {
     return true;
   }
 
+  const liveMode = () => { try { return (process.env.FAKE_FP_CONTROL && JSON.parse(fs.readFileSync(process.env.FAKE_FP_CONTROL, 'utf8')).mode) || MODE; } catch (_) { return MODE; } };
+  const XFORMERS = 'NotImplementedError: No operator found for `memory_efficient_attention_forward` with inputs:\n     query       : shape=(1, 3200, 24, 128) (torch.bfloat16)\n`fa2F@2.5.7-pt` is not supported because:\n    requires device with capability <= (9, 0) but your GPU has capability (12, 0) (too new)\n`cutlassF-pt` is not supported because:\n    requires device with capability <= (9, 0) but your GPU has capability (12, 0) (too new)';
   async function generate(m) {
     const id = m.id;
+    const gm = liveMode();
     if (!m.image || !fs.existsSync(m.image)) { emit({ event: 'error', id, code: 'BAD_REQUEST', message: `The picture "${m.image}" was not found.` }); return; }
     const seconds = Math.max(1, Math.min(10, Number(m.seconds) || 5));
     const sections = Math.max(1, Math.round((seconds * 30) / 36));
@@ -90,6 +97,11 @@ if (precheck) {
     emit({ event: 'accepted', id, sections, frames, seconds: Math.round(frames / 30 * 100) / 100, seed: m.seed });
     if (!loaded && !(await load(id))) return;
     for (const ph of ['text', 'picture', 'vae-encode', 'vision']) emit({ event: 'progress', id, phase: ph, section: 0, sections, step: 0, steps, percent: 0 });
+    if (gm === 'failgen') {
+      process.stderr.write(`Traceback (most recent call last):\n  File "diffusers_helper/models/hunyuan_video_packed.py", line 120, in attn_varlen_func\n${XFORMERS}\n`);
+      emit({ event: 'error', id, code: 'FRAMEPACK_FAILED', message: `FramePack could not make the video: ${XFORMERS.split('\n')[0].slice(0, 300)}`, fix: 'Look at the details below; try again, or a shorter clip.', detail: XFORMERS });
+      return;
+    }
     if (m.poster) { try { fs.copyFileSync(m.image, m.poster); } catch (_) {} }
     for (let s = 1; s <= sections; s++) {
       for (let k = 1; k <= steps; k++) {

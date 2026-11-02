@@ -536,7 +536,7 @@ function createVideoStudio(deps = {}) {
         if (ev.section) { job.section = ev.section; job.sections = ev.sections || job.sections; }
         if (ev.steps && ev.section) { job.step = (ev.section - 1) * ev.steps + (ev.step || 0); job.steps = (ev.sections || job.sections) * ev.steps; }
         if (ev.percent != null) job.pct = Number(ev.percent) || 0;
-      }, { timeoutMs });
+      }, { timeoutMs, test: p.purpose === 'test' });
       if (!r || !r.ok) {
         if (r && r.code === 'FRAMEPACK_CANCELLED') return fail('VIDEO_CANCELLED', 'Stopped.', '', { engine: 'framepack' });
         return Object.assign({}, r || fail('FRAMEPACK_FAILED', 'FramePack could not make the video.'), { ok: false, engine: 'framepack', model: FRAMEPACK_MODEL });

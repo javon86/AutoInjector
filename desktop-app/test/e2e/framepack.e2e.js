@@ -225,6 +225,54 @@ async function main() {
     assert(await c.getAttribute('#vd-dot', 'data-tone') === 'standby' && !/Loading|couldn't load|\d:\d\d/.test(idle), `⏹ Stop → idle again ("${idle}", ${await c.getAttribute('#vd-dot', 'data-tone')})`);
     await c.waitForTimeout(1500);
     assert(await c.textContent('#vd-status-text') === idle, 'and nothing keeps counting');
+
+    // ---- the PC test (RTX 5070 Ti): loading works, then the 🧪 test fails in generation — xFormers has no kernels for the
+    // card ("No operator found for memory_efficient_attention_forward … capability (12, 0) (too new)"). Before: the Setup
+    // footer kept "⏳ loading … (step n of n)…", the header went green "Ready", and the fix said "or a shorter clip".
+    setFake({ mode: 'failgen', precheck: 'ok' });
+    await c.click('#vd-sub-setup');
+    await c.click('#btn-vd-fp-test');
+    await c.waitForFunction(() => !document.getElementById('vd-error').hidden && /xFormers/.test(document.getElementById('vd-error').textContent), null, { timeout: 20000 }).catch(() => {});
+    const attnErr = await c.textContent('#vd-error');
+    assert(/FramePack's speed-up part \(xFormers\) has no version for your new graphics card yet/.test(attnErr) && /switches to PyTorch's built-in attention automatically — update AutoInjector and try again/.test(attnErr), `the attention error in plain words: “${attnErr.replace(/\s+/g, ' ').slice(0, 160)}…”`);
+    assert(!/shorter clip/i.test(attnErr.replace(/Technical details[\s\S]*$/, '')) && !/shorter clip/i.test(await c.textContent('#vd-error-fix')), 'no “shorter clip” advice for an error that is not about memory');
+    await c.waitForFunction(() => document.getElementById('vd-dot').dataset.tone === 'warn', null, { timeout: 8000 }).catch(() => {});
+    const amber = await c.textContent('#vd-status-text');
+    assert(await c.getAttribute('#vd-dot', 'data-tone') === 'warn' && /✔ FramePack is loaded — ⚠ the last test clip failed \(see below\)/.test(amber) && !/Ready/.test(amber), `loaded but the clip failed → amber, both visible: "${amber}" (${await c.getAttribute('#vd-dot', 'data-tone')})`);
+    await c.waitForTimeout(1200);
+    assert(await c.getAttribute('#vd-dot', 'data-tone') === 'warn', '…and it stays amber (not green “Ready”)');
+    await shot(c, 'fp09-framepack-clip-failed-header');
+    await c.click('#vd-sub-setup');
+    await c.waitForFunction(() => document.getElementById('vd-fp-lastload').dataset.state === 'jobfailed', null, { timeout: 8000 }).catch(() => {});
+    const llTxt = await c.textContent('#vd-fp-lastload');
+    assert(/⚠ Loaded — the test clip failed \(.+\): FramePack's speed-up part \(xFormers\)/.test(llTxt), `the card: “${llTxt.split('\n')[0]}”`);
+    const foot = await c.textContent('#vd-fp-msg');
+    assert(!/⏳|step \d+ of \d+|loading/i.test(foot) && /✔ FramePack is loaded — ⚠ the last test clip failed: FramePack's speed-up part/.test(foot), `the Setup footer is not a stale loading line after the job ended: “${foot}”`);
+    assert(/Loaded and ready/.test(await c.textContent('#vd-fp-state')), 'the card still says it is loaded');
+    await shot(c, 'fp10-framepack-card-clip-failed');
+
+    // the next clip works → green again, the card “loaded and tested”, the footer plain
+    setFake({ mode: 'ok', precheck: 'ok' });
+    await c.click('#btn-vd-fp-test');
+    await c.waitForFunction(() => /FramePack test video saved/.test(document.getElementById('vd-msg').textContent), null, { timeout: 30000 }).catch(() => {});
+    made.push(decodeURIComponent(new URL(await c.getAttribute('#vd-player', 'src')).pathname).replace(/^\/([A-Za-z]:)/, '$1'));
+    await c.waitForFunction(() => document.getElementById('vd-dot').dataset.tone === 'ok', null, { timeout: 8000 }).catch(() => {});
+    assert(await c.getAttribute('#vd-dot', 'data-tone') === 'ok' && !/failed/.test(await c.textContent('#vd-status-text')), `a clip that works → green again: "${await c.textContent('#vd-status-text')}"`);
+    await c.click('#vd-sub-setup');
+    await c.waitForFunction(() => document.getElementById('vd-fp-lastload').dataset.state === 'tested', null, { timeout: 8000 }).catch(() => {});
+    assert(/✔ Loaded and tested/.test(await c.textContent('#vd-fp-lastload')), `the card after a clip that works: “${await c.textContent('#vd-fp-lastload')}”`);
+    assert(!/failed|⏳/.test(await c.textContent('#vd-fp-msg')), `the footer: “${await c.textContent('#vd-fp-msg')}”`);
+
+    // failed again, then ✕ Dismiss → the header is green, the error box gone
+    setFake({ mode: 'failgen', precheck: 'ok' });
+    await c.click('#btn-vd-fp-test');
+    await c.waitForFunction(() => document.getElementById('vd-dot').dataset.tone === 'warn' && !document.getElementById('vd-error').hidden, null, { timeout: 20000 }).catch(() => {});
+    assert(await c.getAttribute('#vd-dot', 'data-tone') === 'warn', 'a failed clip → amber again');
+    await c.click('#btn-vd-error-dismiss');
+    await c.waitForFunction(() => document.getElementById('vd-dot').dataset.tone === 'ok', null, { timeout: 8000 }).catch(() => {});
+    assert(await c.getAttribute('#vd-dot', 'data-tone') === 'ok' && await c.$eval('#vd-error', (e) => e.hidden), '✕ Dismiss → the error box goes and the header is green');
+    await c.waitForTimeout(1200);
+    assert(await c.getAttribute('#vd-dot', 'data-tone') === 'ok', '…and stays green');
   } finally {
     await app.close().catch(() => {});
     for (const f of made) { const dir = path.dirname(f); try { for (const n of fs.readdirSync(dir)) { const p = path.join(dir, n); if (/^(video|animate|test|clip)-.*\.(mp4|webm|png|json)$/.test(n) && fs.statSync(p).mtimeMs >= t0) fs.unlinkSync(p); } } catch (_) {} }

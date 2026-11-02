@@ -188,6 +188,9 @@ def classify_error(exc):
     if any(w in low for w in OOM_WORDS):
         return ('FRAMEPACK_OOM', 'Your graphics card ran out of memory making this video.',
                 'Raise "GPU memory to keep free" (e.g. to 8 or 10 GB), make a shorter clip, and close other programs that use the graphics card.')
+    if 'no operator found for' in low and ('memory_efficient_attention' in low or 'too new' in low):
+        return ('FRAMEPACK_ATTENTION', 'FramePack\'s speed-up part (xFormers) has no version for your graphics card yet, so it could not make the frames (%s).' % first_line(text)[:200],
+                'Update AutoInjector: it now checks this when FramePack loads and uses PyTorch\'s built-in attention instead. Then press ↻ Try again. Nothing needs installing.')
     if 'offlinemodeisenabled' in low or ('offline mode is enabled' in low and 'huggingface.co/api' in low):
         return ('FRAMEPACK_OFFLINE_LOOKUP', 'FramePack tried to ask the Hugging Face website about a model instead of using the files on this PC (%s).' % first_line(text)[:200],
                 'The model files are probably fine. Update AutoInjector (it loads every model from its folder now) and try again. Nothing is downloaded by AutoInjector.')
@@ -195,6 +198,50 @@ def classify_error(exc):
         return ('FRAMEPACK_MODEL_MISSING', 'FramePack could not open one of its model files (%s).' % first_line(text)[:200],
                 'Check the FramePack models folder ("stuff and thing"/models/video/framepack/hf/hub) has all three models. Nothing is downloaded by AutoInjector.')
     return ('FRAMEPACK_FAILED', 'FramePack could not make the video: %s' % first_line(text)[:300], 'Look at the details below; try again, or a shorter clip.')
+
+
+ATTENTION_FUNCS = (
+    # (the name in diffusers_helper.models.hunyuan_video_packed, its varlen partner, how to call it on (B, L, H, C))
+    ('sageattn', 'sageattn_varlen', lambda f, q: f(q, q, q, tensor_layout='NHD')),
+    ('flash_attn_func', 'flash_attn_varlen_func', lambda f, q: f(q, q, q)),
+    ('xformers_attn_func', None, lambda f, q: f(q, q, q)),
+)
+
+
+def check_attention(mod, torch, log=None):
+    """Turn off every fast-attention kernel FramePack imported that cannot run on THIS graphics card.
+
+    FramePack's attention (hunyuan_video_packed.attn_varlen_func) uses SageAttention, then flash-attn, then
+    xFormers, and only then PyTorch's own scaled_dot_product_attention. A package that imports fine can still
+    have no kernel for the card: on an RTX 50xx (compute capability 12.0) xFormers raised
+    "No operator found for memory_efficient_attention_forward ... capability (12, 0) (too new)" in the middle of
+    the first video. Each one is tried once on a tiny tensor here; one that fails is set to None in FramePack's
+    module, so the next in line (finally PyTorch's built-in attention) is used. FramePack's files are not changed.
+    Returns {'disabled': [(name, reason)], 'using': name}."""
+    disabled = []
+    q = None
+    for name, partner, call in ATTENTION_FUNCS:
+        f = getattr(mod, name, None)
+        if f is None:
+            continue
+        try:
+            if q is None:
+                q = torch.randn(1, 64, 2, 64, dtype=torch.bfloat16, device='cuda')
+            out = call(f, q)
+            if getattr(out, 'shape', None) is not None and tuple(out.shape) != tuple(q.shape):
+                raise RuntimeError('wrong output shape %s' % (tuple(out.shape),))
+        except Exception as e:  # noqa: BLE001 - any failure means: don't use it
+            reason = first_line('%s: %s' % (type(e).__name__, e))[:200]
+            setattr(mod, name, None)
+            if partner and getattr(mod, partner, None) is not None:
+                setattr(mod, partner, None)
+            disabled.append((name, reason))
+            if log:
+                log('Attention: %s does not run on this graphics card (%s) - not used.' % (name, reason))
+    using = next((n for n, _p, _c in ATTENTION_FUNCS if getattr(mod, n, None) is not None), 'PyTorch scaled_dot_product_attention')
+    if log:
+        log('Attention: using %s.' % using)
+    return {'disabled': disabled, 'using': using}
 
 
 def first_line(text):
@@ -395,6 +442,13 @@ class Engine(object):
         from transformers import SiglipImageProcessor, SiglipVisionModel
         from diffusers_helper.models.hunyuan_video_packed import HunyuanVideoTransformer3DModelPacked
         from diffusers_helper.memory import gpu, get_cuda_free_memory_gb, DynamicSwapInstaller
+        import diffusers_helper.models.hunyuan_video_packed as _hvp
+        stop_check()
+        emit({'event': 'loading', 'stage': 'checking the attention parts', 'step': 0, 'steps': steps})
+        att = check_attention(_hvp, torch, log=lambda m: print(m, file=sys.stderr))
+        self.attention = att
+        emit({'event': 'attention', 'using': att['using'], 'disabled': [d[0] for d in att['disabled']],
+              'reasons': [d[1] for d in att['disabled']]})
 
         free_mem_gb = get_cuda_free_memory_gb(gpu)
         high_vram = free_mem_gb > 60

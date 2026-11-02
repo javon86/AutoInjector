@@ -713,6 +713,81 @@ async function main() {
     assert($('vd-fp-lastload').dataset.state === 'tested' && /✔ Loaded and tested/.test($('vd-fp-lastload').textContent), `a clip was made → “${$('vd-fp-lastload').textContent}”`);
     dom.window.close();
   }
+  console.log('\n== FramePack: loaded, then the clip failed (xFormers on an RTX 50xx) — footer, header, card ==');
+  {
+    // the PC test (RTX 5070 Ti): the load worked; the 🧪 test then failed in generation. Before: the ⚙ Setup footer still said
+    // "⏳ loading preparing the graphics card (step 6 of 7)…", the header went green "Ready" while the error showed below.
+    const { JSDOM } = require('jsdom');
+    const html = fs.readFileSync(path.join(__dirname, '..', 'controls.html'), 'utf8');
+    const dom = new JSDOM(html, { runScripts: 'outside-only', url: 'http://localhost/controls.html' });
+    const fpBase = { ok: true, available: true, found: true, ready: true, dir: '/fp', source: 'Stability Matrix', python: '/fp/venv/bin/python', pythonOk: true, hfHome: '/fp/hf_download', hfSource: 'FramePack\'s hf_download',
+      models: { ok: true, missing: [], repos: [{ repo: 'a/b', label: 'x', ok: true, missing: [] }] }, running: true, loaded: false, loading: null, busy: false, lastError: null, lastLoad: null, stderrTail: [] };
+    let fp = Object.assign({}, fpBase);
+    let releaseTest = null; let fpCb = null;
+    const video = {
+      status: async () => ({ ok: true, ready: true, backend: 'framepack', message: '✔ Ready: FramePack (picture → video)', settings: { backend: 'auto', model: 'wan22-ti2v-5b' }, framepack: Object.assign({}, fp), models: [] }),
+      models: async () => ({ ok: true, anyComfy: false, roots: [], models: [] }),
+      framepackStatus: async () => Object.assign({}, fp),
+      framepackTest: () => new Promise((r) => { releaseTest = r; }),
+      progress: async () => ({ ok: true, busy: !!fp.loading, engine: 'framepack', phase: fp.loading ? 'loading' : 'sampling', loading: fp.loading }),
+      cancel: async () => ({ ok: true, cancelled: true }),
+      onFramePack: (fn) => { fpCb = fn; },
+    };
+    dom.window.api = new Proxy({ video, akoweTab: async () => ({}) }, { get(t, k) { if (k in t) return t[k]; if (typeof k === 'string' && /^on[A-Z]/.test(k)) return () => {}; return async () => ({ ok: true }); } });
+    const $ = (id) => dom.window.document.getElementById(id);
+    const click = (el) => el.dispatchEvent(new dom.window.Event('click', { bubbles: true }));
+    dom.window.eval(fs.readFileSync(path.join(__dirname, '..', 'videos-studio.js'), 'utf8'));
+    click($('tab-app-video')); await sleep(80);
+    click($('vd-sub-setup')); await sleep(80);
+    click($('btn-vd-fp-test'));
+    fp = Object.assign({}, fpBase, { loading: { phase: 'loading', stage: 'preparing the graphics card', step: 6, steps: 7, stageSeconds: 2, text: 'loading preparing the graphics card', stuck: false }, busy: true });
+    fpCb({ type: 'loading', phase: 'loading', stage: 'preparing the graphics card', step: 6, steps: 7, text: 'loading preparing the graphics card' });
+    await sleep(60);
+    assert(/⏳ loading preparing the graphics card \(step 6 of 7\)/.test($('vd-fp-msg').textContent), `while it loads the footer says the step: “${$('vd-fp-msg').textContent}”`);
+    // loaded (14.4 s) → the footer is not a stale "step 6 of 7"
+    fp = Object.assign({}, fpBase, { loaded: true, busy: true, vramGB: 14.4, lastLoad: { ok: true, at: Date.now(), tested: false } });
+    fpCb({ type: 'loaded', vramGB: 14.4 });
+    await sleep(80);
+    assert(!/⏳|step 6 of 7/.test($('vd-fp-msg').textContent) && /✔ FramePack is loaded/.test($('vd-fp-msg').textContent), `loaded → the footer is cleared: “${$('vd-fp-msg').textContent}”`);
+    // a loading line again, then the job ends without a "loaded" event (e.g. the progress ended the load): still cleared
+    fpCb({ type: 'loading', phase: 'loading', stage: 'preparing the graphics card', step: 6, steps: 7, text: 'loading preparing the graphics card' });
+    await sleep(60);
+    // …the clip fails in generation (xFormers)
+    const why = 'FramePack\'s speed-up part (xFormers) has no version for your new graphics card yet.';
+    const fix = 'AutoInjector now switches to PyTorch\'s built-in attention automatically — update AutoInjector and try again.';
+    const at = Date.now();
+    fp = Object.assign({}, fpBase, { loaded: true, vramGB: 14.4, lastError: { code: 'FRAMEPACK_ATTENTION', message: why, fix, at, load: false, job: true, test: true, detail: 'NotImplementedError: No operator found for `memory_efficient_attention_forward`' },
+      lastLoad: { ok: true, at: at - 20000, tested: false, jobFailed: { at, test: true, code: 'FRAMEPACK_ATTENTION', reason: why, fix } } });
+    fpCb({ type: 'error', code: 'FRAMEPACK_ATTENTION', message: why, fix, job: true });
+    releaseTest({ ok: false, error: 'FRAMEPACK_ATTENTION', code: 'FRAMEPACK_ATTENTION', engine: 'framepack', message: why, fix, serverError: 'NotImplementedError: No operator found for `memory_efficient_attention_forward`' });
+    await sleep(150);
+    const foot = $('vd-fp-msg').textContent;
+    assert(!/⏳|step \d+ of \d+/.test(foot) && /✔ FramePack is loaded — ⚠ the last test clip failed: FramePack's speed-up part/.test(foot), `job ended (failed) → the footer says what is true now: “${foot}”`);
+    const hdr = $('vd-status-text').textContent;
+    assert($('vd-dot').dataset.tone === 'warn' && /✔ FramePack is loaded — ⚠ the last test clip failed \(see below\)/.test(hdr) && !/Ready/.test(hdr), `the header: amber, loaded AND the last clip failed (“${hdr}”, ${$('vd-dot').dataset.tone})`);
+    assert($('vd-status').dataset.tone === 'warn' && /xFormers/.test($('vd-status').title), 'the header text is amber too, its tooltip has the reason');
+    assert(!$('vd-error').hidden && /xFormers/.test($('vd-error-msg').textContent) && !/shorter clip/i.test($('vd-error-fix').textContent), 'the red box below: the attention error, no “shorter clip”');
+    click($('vd-sub-setup')); await sleep(80);
+    const ll = $('vd-fp-lastload');
+    assert(ll.dataset.state === 'jobfailed' && /^⚠ Loaded — the test clip failed \(.+\): FramePack's speed-up part \(xFormers\)/.test(ll.textContent) && /What to try: AutoInjector now switches/.test(ll.textContent), `the card's last-test line: “${ll.textContent.split('\n')[0]}”`);
+    assert(/Loaded and ready/.test($('vd-fp-state').textContent), 'the card still says loaded');
+    // ✕ Dismiss → green; a new failure → amber again
+    click($('btn-vd-error-dismiss')); await sleep(60);
+    assert($('vd-error').hidden && $('vd-dot').dataset.tone === 'ok' && !/failed/.test($('vd-status-text').textContent), `✕ Dismiss → the box goes, the header is green (“${$('vd-status-text').textContent}”)`);
+    // the next video works → green, the card "loaded and tested", the footer plain
+    click($('btn-vd-fp-test')); await sleep(20);
+    fp = Object.assign({}, fpBase, { loaded: true, vramGB: 14.4, lastError: null, lastLoad: { ok: true, at: at - 20000, tested: true, testedAt: Date.now() } });
+    releaseTest({ ok: true, engine: 'framepack', path: '/v/test-1.mp4', url: 'file:///v/test-1.mp4', seconds: 2.43, width: 640, height: 480 });
+    await sleep(150);
+    assert($('vd-dot').dataset.tone === 'ok' && /Ready/.test($('vd-status-text').textContent), `a clip that works → green “${$('vd-status-text').textContent}”`);
+    click($('vd-sub-setup')); await sleep(80);
+    assert($('vd-fp-lastload').dataset.state === 'tested' && !/failed|⏳/.test($('vd-fp-msg').textContent), `the card: tested; the footer: “${$('vd-fp-msg').textContent}”`);
+    // a failed clip that is NOT dismissed, then a newer failure after a dismiss → amber again
+    fp = Object.assign({}, fpBase, { loaded: true, lastError: { code: 'FRAMEPACK_FAILED', message: 'FramePack could not make the video: x', fix: '', at: Date.now() + 10, load: false, job: true, test: false } });
+    fpCb({ type: 'error', job: true }); await sleep(100);
+    assert($('vd-dot').dataset.tone === 'warn' && /the last video failed/.test($('vd-status-text').textContent), `a later failed video (after a dismiss) → amber again: “${$('vd-status-text').textContent}”`);
+    dom.window.close();
+  }
   console.log('\n== an oversized bridge body is refused and its connection closed ==');
   {
     const b = createServiceBridge({ video: { backend: () => ({}), request: async () => ({ ok: true }) } });
