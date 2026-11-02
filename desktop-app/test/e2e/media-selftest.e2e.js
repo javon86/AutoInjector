@@ -154,11 +154,14 @@ async function main() {
     const st3 = await c.evaluate(() => window.api.mediaTest.status());
     reportFiles.push(st3.last.files.md, st3.last.files.json);
     assert(st3.last.stopped && fs.existsSync(st3.last.files.md) && /stopped by you/.test(fs.readFileSync(st3.last.files.md, 'utf8')), 'the report is still saved and says it was stopped');
-    await c.waitForFunction(async () => { const s = await window.api.video.progress(); return !s.busy; }, null, { timeout: 30000, polling: 500 }).catch(() => {});
-    await c.evaluate(() => window.api.video.framepackUnload()).catch(() => {});
-    await shot(c, 'mediatest03-stopped');
+    await capped('wait until video is idle', c.waitForFunction(async () => { const s = await window.api.video.progress(); return !s.busy; }, null, { timeout: 30000, polling: 500 }), 35000);
+    await capped('unload FramePack', c.evaluate(() => window.api.video.framepackUnload()), 15000);
+    await capped('screenshot', shot(c, 'mediatest03-stopped'), 15000);
   } finally {
-    await app.close().catch(() => {});
+    // A CI run hung here for 10 minutes after the last check (PR #105); every teardown step is capped and named,
+    // and the app is force-killed if it won't quit, so a hang fails fast and says where.
+    const ok = await capped('close the app', app.close(), 20000);
+    if (!ok) { try { const pr = app.process && app.process(); if (pr && pr.pid) process.kill(pr.pid, 'SIGKILL'); } catch (_) {} }
     try { forge.close && forge.close(); } catch (_) {}
     // what the test made in "stuff and thing": its reports, the picture, the clips and the self-test trailer
     for (const f of reportFiles) { try { if (f && fs.statSync(f).mtimeMs >= t0) fs.unlinkSync(f); } catch (_) {} }
@@ -172,4 +175,13 @@ async function main() {
   console.log(`\n${state.passed} passed, ${state.failed} failed`);
   process.exit(state.failed ? 1 : 0);
 }
+async function capped(what, p, ms) {
+  let t = null;
+  const r = await Promise.race([Promise.resolve(p).then(() => true, () => true), new Promise((res) => { t = setTimeout(() => res(false), ms); })]);
+  clearTimeout(t);
+  if (!r) console.log(`  (teardown: "${what}" did not finish in ${Math.round(ms / 1000)} s — carried on)`);
+  return r;
+}
+// whole-test watchdog: never eat the CI job's time limit silently
+setTimeout(() => { console.error('media-selftest e2e: still running after 6 minutes — exiting'); process.exit(1); }, 6 * 60000).unref();
 main().catch((e) => { console.error(e); process.exit(1); });
