@@ -31,6 +31,10 @@ scene cards / voice cards / story rules and texture / must-show details here, ev
 * Section 7 (continuity.py): ``physical_state`` (P32), ``character_state`` (P35) at the end of the earlier chapters
   (approved tracked state only), ``two_readings`` of the protected mysteries (P33) and ``version_changes`` of a rerun /
   variant (P34); bounded to about 3 500 characters, one rule each. Off when the pipeline's scenes switch is off.
+  📒 story_ledger.py adds ``previous_chapter_end`` (the last ~1 500 characters of the chapter before),
+  ``story_so_far`` (a few lines per chapter, older ones compressed) and ``story_ledger`` (injuries, items, who is
+  alive, where everyone is, names, time, travel, who knows what, relationships, numbers — the people in THIS chapter
+  first), each with its own budget.
 * ``series_state`` (📚 series.py): in book 2+ of a series, each present character as the book before left them (looks,
   belongings, abilities, relationships, status), ≤ 2 400 characters.
 
@@ -316,6 +320,7 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str) -
                 or extra.get("world_texture") or extra.get("story_choices") or length or style
                 or brief.get("character_details") or main or world or fixed
                 or any(k in brief for k in ("physical_state", "character_state", "two_readings", "version_changes",
+                                            "previous_chapter_end", "story_so_far", "story_ledger",
                                             "series_state", "series_world"))):
             return None, meta
         meta.update(characters=[c["record_id"] for c in present], voice_cards=len(vb["cards"]),
@@ -326,7 +331,8 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str) -
                     must_show=len(brief.get("must_show") or []), choices=bool(brief.get("story_choices")),
                     length={k: length[k] for k in ("target_words", "scenes", "scene_by_scene")} if length else None,
                     pipeline=None if all(flags.values()) else {k: v for k, v in flags.items()},
-                    continuity=[k for k in ("physical_state", "character_state", "two_readings", "version_changes")
+                    continuity=[k for k in ("physical_state", "character_state", "two_readings", "version_changes",
+                                            "previous_chapter_end", "story_so_far", "story_ledger")
                                 if k in brief] or None,
                     narrator_style=bool(style), series_state=len(brief.get("series_state") or []) or None,
                     detail_refs=refs or None, character_mode=cmode,

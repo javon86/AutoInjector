@@ -209,6 +209,12 @@ class BookFakeAI:
         self.series_script: list = []            # 📚 scripted "what changed in this book" answers
         self.objectives = None                   # B11: the chapters' objectives (default OBJECTIVES, cycled)
         self.details: dict[str, str] = {}        # ⏱ story details: field -> the text the fake decides
+        # 📒 story ledger / 🧭 checkpoints (story_ledger.py, checkpoints.py)
+        self.story_ledger = False                # the continuity tracker also returns the chapter's story part
+        self.confirm_flags = False               # a checkpoint confirms Akọwe's ledger flags (with a fix when it can)
+        self.checkpoint_script: list = []        # scripted checkpoint answers (dicts or callables(ctx)), one per call
+        self.checkpoint_extra: list = []         # extra problems a checkpoint reports: {chapter, quote, problem,
+        #                                          original, replacement} (only for chapters in that call)
 
     def fail_next(self, *excs):
         self.failures.extend(excs)
@@ -449,7 +455,41 @@ class BookFakeAI:
                            "objective_assessments": [{"item_id": cid, "decision": "PASS", "message": "reached"}]}
         if "events" in props:
             return "events", {"events": []}
+        if "tracked_scenes" in props and self.story_ledger:  # 📒 the chapter's story part (keyword reading)
+            from akowe import story_ledger  # noqa: PLC0415
+            story = story_ledger.extract(ctx.get("chapter_text") or "", ctx.get("characters") or [])
+            return "track", {"tracked_scenes": [], "story": story}
+        if "problems" in props and "checkpoint" in ctx:  # 🧭 a continuity checkpoint
+            with self.lock:
+                scripted = self.checkpoint_script.pop(0) if self.checkpoint_script else None
+            if scripted is not None:
+                return "checkpoint", scripted(ctx) if callable(scripted) else copy.deepcopy(scripted)
+            return "checkpoint", self._checkpoint(ctx)
         return "generic", self._from_schema(schema)
+
+    FIX_WORDS = [(r"\bran\b", "limped"), (r"\bdrew her knife\b", "reached for the knife she had lost, and found only "
+                                                                 "the empty sheath")]
+
+    def _checkpoint(self, ctx):
+        """Confirms Akọwe's ledger flags (``confirm_flags``) with a small fix when one of FIX_WORDS fits the quote,
+        plus ``checkpoint_extra`` problems of the chapters in this call."""
+        import re  # noqa: PLC0415
+        nums = {c.get("number") for c in ctx.get("chapters") or []}
+        probs = []
+        if self.confirm_flags:
+            for f in ctx.get("akowe_flags") or []:
+                q = f.get("quote") or ""
+                rep = q
+                for pat, new in self.FIX_WORDS:
+                    rep = re.sub(pat, new, rep)
+                probs.append({"chapter": f.get("number"), "quote": q, "problem": f.get("message") or "",
+                              "original": q if rep != q else "", "replacement": rep if rep != q else ""})
+        for x in self.checkpoint_extra:
+            if x.get("chapter") in nums:
+                probs.append(dict({"quote": "", "original": "", "replacement": ""}, **x))
+        first = sorted(n for n in nums if isinstance(n, int))
+        return {"problems": probs, "summary": f"Chapters {first[0]}–{first[-1]}: Mara keeps searching." if first
+                else ""}
 
     def _details(self, ctx):
         out = {}

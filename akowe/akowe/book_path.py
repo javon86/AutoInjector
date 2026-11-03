@@ -99,6 +99,15 @@ def clean_profile(body) -> dict:
             from .story_choices import clean as clean_choices  # noqa: PLC0415
             out[k] = clean_choices(v)
             continue
+        if k == "checkpoint_every":  # 🧭 "Check the whole story every N chapters" (checkpoints.py; 0 = off)
+            from .checkpoints import MAX_EVERY, clean_every  # noqa: PLC0415
+            cv = clean_every(v)
+            if cv is False:
+                raise _err("INVALID_INPUT", "/checkpoint_every", f"check the whole story every: a whole number "
+                           f"of chapters from 0 (off) to {MAX_EVERY}")
+            if cv is not None:
+                out[k] = cv
+            continue
         if k in ("themes", "series_number", "binder_look"):  # 📖 Book Bible binder (binder_fields.py)
             out[k] = _clean_binder_value(k, v)
             continue

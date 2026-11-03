@@ -22,7 +22,7 @@ import re
 TEXT_MAX = 160
 NAME_MAX = 60
 MAX_SCENES = 8
-MAX_HAZARDS = 8
+MAX_HAZARDS = 16         # H1: the brief trims the oldest first when space is short
 MAX_COUNTS = 10
 HAZARD_STATUSES = ("open", "resolved")
 

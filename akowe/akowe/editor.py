@@ -785,6 +785,11 @@ class EditorService:
                                                    "keep_nearby")} for f in findings],
                "keep": craft.get("keep") or [], "voices": self._voices(pid, branch),
                "canon": {"approved_records": approved}, "protected_facts": protected[:40]}
+        try:  # H20: the rewrite sees the tracked continuity (state, story ledger, end of the chapter before)
+            from . import continuity  # noqa: PLC0415
+            ctx.update(continuity.review_extra(self.store, pid, branch, rec))
+        except Exception:  # noqa: BLE001
+            log.exception("could not add the continuity to the rewrite")
         try:  # P25 (Section 7c): the reworked passages keep the author's own narrating style
             from .style_card import brief_for  # noqa: PLC0415
             if rec["module_id"] == "C02" and brief_for(self.store, pid):

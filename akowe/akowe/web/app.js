@@ -5044,7 +5044,9 @@ const PROFILE_HELP = {
   genre: 'What kind of story it is — it guides the AI’s choices.', audience: 'Who will read it; the AI matches the words and themes to them.',
   length: 'How long the book should be; it sets how many chapters are planned.', tone: 'How it should feel to read.',
   idea: 'Your story in a few sentences: who, where, and what goes wrong. Everything is built to fit this.',
+  checkpoint_every: 'While the book is written, an AI re-reads the newest chapters in full every so many chapters (and the whole book at the end), finds anything that disagrees — an injury forgotten, a lost item back, a wrong name or day — and fixes the small things itself. It stops for you only when a fix needs you.',
 };
+const CHECKPOINT_CHOICES = [['', 'Every 5 chapters (default)'], ['3', 'Every 3 chapters'], ['5', 'Every 5 chapters'], ['8', 'Every 8 chapters'], ['10', 'Every 10 chapters'], ['0', 'Only at the end of the book']];
 
 /** The profile fields as a form; returns {el, get()} */
 function profileFields(prof, prefix) {
@@ -5067,6 +5069,8 @@ function profileFields(prof, prefix) {
     field('audience', 'Who is it for?', aud),
     field('length', 'Length', lengthSel, infoTip('Length', ...LENGTH_TIP())),
     field('tone', 'Tone', h('input', { type: 'text', value: prof.tone || '', list: `${prefix}-tones`, maxlength: '200' }), dl(`${prefix}-tones`, TONES)),
+    field('checkpoint_every', 'Check the whole story every N chapters', h('select', { 'data-testid': 'profile-checkpoint-every' },
+      CHECKPOINT_CHOICES.map(([v, l]) => h('option', { value: v, selected: String(prof.checkpoint_every == null ? '' : prof.checkpoint_every) === v }, l)))),
     field('idea', 'Your idea in a paragraph', h('textarea', { rows: '4', maxlength: '4000' }, prof.idea || '')));
   f.idea.value = prof.idea || '';
   return { el, get: () => Object.fromEntries(Object.entries(f).map(([k, c]) => [k, c.value.trim()])), f };
@@ -7803,7 +7807,7 @@ function whoRead(u, who, at) {
 }
 function renderRun() {
   const r = MB.run; if (!r || !MB.dialog) return;
-  const sig = JSON.stringify([r.status, r.phase, r.current, r.problem && r.problem.code, (r.waiting || {}).retry_at, r.steps.map(s => [s.state, s.message, s.review_note, s.editor_note, (s.items || []).map(i => [i.state, i.editor, i.scenes, i.phase, i.note, i.planned, i.length]), s.planned_note]), (r.files || []).length, r.ais, r.ai_alerts, r.review_summary, r.editor_summary, r.planned_summary, r.eta, r.report, r.save, r.costs && [r.costs.calls, r.costs.ais]]);
+  const sig = JSON.stringify([r.status, r.phase, r.current, r.problem && r.problem.code, (r.waiting || {}).retry_at, r.steps.map(s => [s.state, s.message, s.review_note, s.editor_note, (s.items || []).map(i => [i.state, i.editor, i.scenes, i.phase, i.note, i.planned, i.length, i.continuity]), s.planned_note, s.checkpoints]), (r.files || []).length, r.ais, r.ai_alerts, r.review_summary, r.editor_summary, r.planned_summary, r.eta, r.report, r.save, r.costs && [r.costs.calls, r.costs.ais]]);
   if (sig === MB.sig && MB.dialog.querySelector('.mb-steps')) { updateRunClocks(); return; }
   MB.sig = sig;
   const w = r.state === 'replaced' ? ['↪', 'Replaced by a newer run', 'b-muted'] : r.state === 'interrupted' ? RUN_WORD.interrupted
@@ -7827,12 +7831,15 @@ function renderRun() {
       h('div', { class: 'mb-main' },
         h('div', { class: 'row mb-title-row' }, h('strong', null, s.title), setChip(s.set, s.op),
           h('span', { class: 'small muted mb-time' }, s.started_at ? fmtElapsed(sinceMs(s.started_at, s.finished_at || runEnd(r))) : ''),
-          s.problem ? hazard(Object.assign({}, s.problem), { retry: () => runAction('resume', {}, 'Trying again'), retryLabel: '🔁 Try again', extra: runDecision(s.problem),
+          s.problem ? hazard(Object.assign({}, s.problem), { retry: () => runAction('resume', {}, 'Trying again'), retryLabel: s.problem.code === 'CHECKPOINT_WAITING' ? '▶ Continue' : '🔁 Try again', extra: runDecision(s.problem),
             settings: ['CAPABILITY_UNAVAILABLE', 'UPSTREAM_UNAVAILABLE'].includes(s.problem.code) }) : null),
         h('p', { class: 'small mb-msg-line' }, s.message || s.about),
         s.review_note ? h('p', { class: `small mb-review-note${s.review_independent === false ? ' not-independent' : ''}`, 'data-testid': 'mb-review-note' }, '🧐 ', s.review_note) : null,
         s.editor_note ? h('p', { class: `small mb-review-note${/⚠️/.test(s.editor_note) ? ' not-independent' : ''}`, 'data-testid': 'mb-editor-note' }, '🖋 ', s.editor_note) : null,
         s.planned_note ? h('p', { class: `small mb-review-note${/⚠️/.test(s.planned_note) ? ' not-independent' : ''}`, 'data-testid': 'mb-planned-note' }, '✅ ', s.planned_note) : null,
+        (s.checkpoints || []).length ? h('ul', { class: 'small plain-list mb-checkpoints', 'data-testid': 'mb-checkpoints' }, s.checkpoints.map(line =>
+          h('li', { class: /waiting for you|⚠️/.test(line) ? 'not-independent' : '' }, line, ' ',
+            h('a', { href: link('p', r.project_id, r.branch_id || 'main', 'continuity'), onclick: () => closeMakeBook() }, 'report')))) : null,
         (s.items || []).length ? h('ul', { class: 'mb-items' }, s.items.map(i => h('li', { class: `st-${i.state}` },
           h('span', { 'aria-hidden': 'true' }, STEP_ICON[i.state] || '○'), ' ', i.label, i.words ? h('span', { class: 'muted' }, ` · ${i.words} words`) : null,
           i.phase ? h('span', { class: 'small muted', 'data-testid': 'mb-item-phase' }, ` · ${i.phase}…`) : null,
@@ -7850,6 +7857,9 @@ function renderRun() {
           i.length ? h('span', { class: 'small muted', 'data-testid': 'mb-item-length' }, i.length.mode === 'scene_by_scene' ? ` · 📏 written scene by scene (${i.length.scenes})` : '',
             i.length.target ? ` · target ~${Number(i.length.target).toLocaleString()}` : '', i.length.expanded ? ` · continued +${i.length.expanded} words` : '',
             i.length.target && i.words && i.words < i.length.target * 0.6 ? [' ', hazard({ code: 'CHAPTER_UNDER_TARGET', message: `${i.words} of about ${i.length.target} words` }, {}, { small: true })] : null) : null,
+          i.continuity && (i.continuity.weak || i.continuity.flags) ? h('span', { class: 'small mb-pl flagged', 'data-testid': 'mb-item-continuity' },
+            i.continuity.weak ? ' · 🧭 ⚠️ continuity read weakly (no AI was free) — read again later' : '',
+            i.continuity.flags ? ` · 🧭 ⚠️ ${i.continuity.flags} continuity question(s)` : '') : null,
           i.planned ? h('span', { class: `small mb-pl${i.planned.flagged ? ' flagged' : ''}`, 'data-testid': 'mb-item-planned' },
             i.planned.flagged ? ` · ⚠️ ${i.planned.missing} planned item(s) not on the page` : ' · ✅ plan on the page',
             i.planned.fixed ? ` (${i.planned.fixed} fix kept)` : '') : null))) : null));
@@ -7857,7 +7867,7 @@ function renderRun() {
   }
   const msg = h('div', { class: 'mb-msg', 'aria-live': 'polite' });
   if (r.problem && r.status === 'paused') {
-    msg.appendChild(problemBox(r.problem, { retry: () => runAction('resume', {}, 'Trying again'), retryLabel: r.problem.code === 'REVIEW_NOT_PASSED' ? '🔁 Try again (2 more AI fixes)' : '🔁 Try again',
+    msg.appendChild(problemBox(r.problem, { retry: () => runAction('resume', {}, 'Trying again'), retryLabel: r.problem.code === 'REVIEW_NOT_PASSED' ? '🔁 Try again (2 more AI fixes)' : r.problem.code === 'CHECKPOINT_WAITING' ? '▶ Continue' : '🔁 Try again',
       extra: runDecision(r.problem), settings: ['CAPABILITY_UNAVAILABLE', 'UPSTREAM_UNAVAILABLE'].includes(r.problem.code) },
     `${r.problem.where ? r.problem.where.step : 'A step'} needs you`));
     if (r.problem.code === 'REVIEW_NOT_PASSED' && r.problem.reasons && r.problem.reasons.length) {

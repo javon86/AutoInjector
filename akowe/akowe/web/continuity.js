@@ -20,6 +20,8 @@ export async function viewContinuity(main, x) {
     h('p', null, '🫀 Character state: for every character in a scene how strongly duty, guilt, fear of exposure, desire for contact (or your own list) pull on them, what they can see, what they wrongly assume, and one thing they do for their OWN goal.'),
     h('p', null, '🪞 Two readings: each protected mystery must keep two possible explanations; the test shows which one the book quietly leans away from.'),
     h('p', null, '🧾 Version ledger (reruns and variants): what was kept, replaced or removed against the earlier book, so nobody “fixes” a deliberate change back.'),
+    h('p', null, '📒 Story so far: after every chapter, what really happened, who is hurt, what they carry or lost, who is alive, where everyone is, the names, the day and season, travel times, who knows which secret, and money and distances. The next chapter’s writer and reviewer get the end of the last chapter and these lines.'),
+    h('p', null, '🧭 Checkpoints: every few chapters an AI re-reads the newest chapters in full and fixes small slips; it stops for you only when a fix needs you.'),
     h('p', null, 'Only approved state reaches the writer of the next chapter. Make a book for me tracks and approves it by itself (your run consent).')))));
   const msg = h('div', { 'aria-live': 'polite' });
   const prog = h('div', { 'aria-live': 'polite' });
@@ -154,6 +156,38 @@ export async function viewContinuity(main, x) {
     } else box.appendChild(h('p', { class: 'small muted' }, 'Nothing changed against the earlier version.'));
     return box;
   }
+  /** 🧭 The checkpoints of a long book: one plain report per checkpoint (checkpoints.py). */
+  function checkpointsCard() {
+    const cp = info.checkpoints || { items: [] };
+    const box = h('section', { class: 'card', 'data-testid': 'cont-checkpoints' }, h('h2', null, '🧭 Checkpoints'),
+      h('p', { class: 'small muted' }, cp.every ? `While the book is written, an AI re-reads the newest chapters in full every ${cp.every} chapters (and the whole book at the end), compares them with what happened before and fixes small slips itself. Change how often in 📝 Book profile.`
+        : 'While the book is written, an AI re-reads the whole book at the end and fixes small slips itself. Change how often in 📝 Book profile.'));
+    if (!cp.items.length) { box.appendChild(h('p', { class: 'small muted' }, 'No checkpoint has run yet.')); return box; }
+    const WORDS = { fixed: '✔ fixed', waiting: '⏸ waiting for you', possible: '? possible — not checked by an AI yet', new: 'found', applied: 'fix made, being reviewed' };
+    for (const c of cp.items) {
+      box.appendChild(h('h3', null, c.line));
+      if (c.summary) box.appendChild(h('p', { class: 'small' }, c.summary));
+      if (c.problems.length) box.appendChild(h('ul', { class: 'small' }, c.problems.map(p => h('li', { class: p.status === 'waiting' ? 'words-warn' : '' },
+        h('strong', null, `Chapter ${p.number}: `), p.problem, ' — ', WORDS[p.status] || p.status, p.why && p.status !== 'fixed' ? h('span', { class: 'muted' }, ` (${p.why})`) : null,
+        p.quote ? h('div', { class: 'muted' }, `“${p.quote}”`) : null,
+        p.status === 'fixed' && p.original ? h('div', null, `changed “${p.original}” → “${p.replacement}”`) : null))));
+    }
+    return box;
+  }
+  /** 📒 The story ledger: what really happened, who is where, names, time and the questions Akọwe found. */
+  function storyCard() {
+    const s = info.story_ledger || { chapters: [] };
+    if (!s.chapters.length) return null;
+    const box = h('section', { class: 'card', 'data-testid': 'cont-story' }, h('h2', null, '📒 Story so far'),
+      (s.weak_busy || []).length ? h('p', { class: 'small words-warn' }, `⚠️ Chapter(s) ${s.weak_busy.join(', ')} were read while no AI was free: Akọwe’s quick reading is used until an AI reads them again (that happens by itself).`) : null,
+      (s.weak || []).length > (s.weak_busy || []).length ? h('p', { class: 'small muted' }, 'Chapters marked “quick reading” were read by Akọwe alone (press 🧭 Track the chapters with AI for a full reading).') : null,
+      h('ul', { class: 'small' }, s.chapters.map(c => h('li', null, h('strong', null, `Chapter ${c.number}: `), c.weak ? h('span', { class: 'muted' }, '(quick reading) ') : null, (c.summary || []).join(' ') || '—'))));
+    if ((s.people || []).length) box.appendChild(h('div', null, h('h3', null, 'Where everyone stands now'), h('ul', { class: 'small' }, s.people.map(p => h('li', null, p)))));
+    if ((s.names || []).length) box.appendChild(h('p', { class: 'small' }, h('strong', null, 'Names in the book: '), s.names.join(', ')));
+    if ((s.travel || []).length) box.appendChild(h('p', { class: 'small' }, h('strong', null, 'Travel times: '), s.travel.join(' · ')));
+    if ((s.flags || []).length) box.appendChild(h('div', null, h('h3', null, '⚠️ Questions'), h('ul', { class: 'small' }, s.flags.map(f => h('li', null, `Chapter ${f.number}: ${f.message}`, f.quote ? h('span', { class: 'muted' }, ` — “${f.quote}”`) : null)))));
+    return box;
+  }
   function render() {
     clear(body);
     const rows = info.chapters || [];
@@ -163,6 +197,9 @@ export async function viewContinuity(main, x) {
       !rows.length ? h('span', { class: 'muted' }, 'No chapter is written yet: the state is tracked from the written chapters.') : null));
     const led = ledgerCard();
     if (led) body.appendChild(led);
+    body.appendChild(checkpointsCard());
+    const story = storyCard();
+    if (story) body.appendChild(story);
     body.appendChild(checksCard());
     for (const r of rows) body.appendChild(chapterCard(r));
     body.appendChild(variablesCard());

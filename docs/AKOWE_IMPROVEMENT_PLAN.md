@@ -528,6 +528,45 @@ and a per-book setting for how strictly the story follows the characters. Done:
 - *Not done:* ✍ Write all chapters (outside a ⚡ run) does not run the just-in-time step yet; contradiction checks
   cover colours, weapons and the weapon hand only (no AI reading); places get no automatic establishing picture.
 
+## Story ledger + continuity checkpoints for long books (2026-11, holes H1 H2 H4 H8 H9 H19 H20 H21)
+
+From `docs/HOLES_2026-11.md` and the wish for 25–50 chapter books. Done (fake AI tests: `tests/test_story_ledger.py`;
+the browser: `tests/campaign/ui/test_ui_continuity.py`):
+
+- [x] **📒 Story ledger** (`akowe/story_ledger.py`, setting `story_ledger:<pid>:<branch>`): the continuity tracking
+  call (one AI call per approved chapter, as before) also returns the chapter's `story` part — a 2–4 line summary,
+  per character injuries (new / healing / healed), `items_gained` / `items_lost` / `carrying` (series.py `CATS`
+  names), alive or dead, where they are at the end, lingering magic after-effects; new proper names; story day, date,
+  season and time since the last chapter; trips (the travel-time table); who learns / is surprised by a secret;
+  one line per relationship; money, prices, distances and counts. Akọwe keeps the last ~1 500 characters of the
+  approved text too.
+- [x] **H1 handoff:** the next chapter's writer AND its reviewer (and the AI fix) get `previous_chapter_end`,
+  `story_so_far` (a few lines per chapter; older chapters one line; a 🧭 checkpoint's summary replaces the chapters it
+  covers) and `story_ledger` (the people IN this chapter first). The tracker and the brief choose people by who is in
+  the chapter (scene cards, then the text) — the fixed caps (16 names, 8 people, 8 hazards, "cut to 3") are gone;
+  when space is short the people not in the chapter go first, then details, then the oldest hazards.
+- [x] **H2 / H4 / H8 / H9 / H19 checks** (`story_ledger.check`, after every tracked chapter): limping → running with
+  no time to heal, a lost item drawn again, the dead speaking, a near-miss spelling of a known name (forge_check's
+  rule) or "Salt Mere" for "Saltmere", a three-day ride arriving next morning, snow then blossom a week later, a day
+  number going backwards, someone surprised by a secret they already know, a distance or price that changed. Shown as
+  ⚠️ run notes, on the 🧭 Continuity page and in Reports/Continuity.md; fed to the checkpoints.
+- [x] **H20:** the editor's rewrites get the same continuity (`editor.propose` → `continuity.review_extra`).
+- [x] **H21:** a chapter read while no AI was free keeps Akọwe's keyword reading marked **weak** (a ⚠️ run note, the
+  chapter row, the continuity page) and is read again by an AI before the next chapter is tracked and at every
+  checkpoint.
+- [x] **🧭 Checkpoints** (`akowe/checkpoints.py`, setting `checkpoints:<pid>:<branch>`): every N approved chapters
+  (book profile "Check the whole story every N chapters", `checkpoint_every`, default 5, 0 = only at the end), at the
+  end of each act when the outline marks acts (`plan.act` / `plan.parent_id`), and a final one that reads the whole
+  book. Each reads only its new chapters IN FULL (in parts of ≤ 60 000 characters, a long chapter split at paragraph
+  breaks) plus the compact ledger, locked details, earlier summaries and Akọwe's flags; lists every inconsistency with
+  a quote and a minimal fix; applies the fix word for word as a new draft of that chapter through the run's normal
+  review loop (review, editor, planned check, approval under consent), then tracks it again. Never touches the
+  author's own text. Pauses once per checkpoint only for problems it cannot fix safely (▶ Continue goes on). Step
+  list: "🧭 Checkpoint after chapter 10: 2 problems fixed, 1 waiting for you" with a link to the report (🧭 Continuity
+  page → Checkpoints; GET `/review/continuity/checkpoints`). Pause / resume safe: finished parts are stored at once.
+- *Not done:* "Bram" → "Brannock" style renames (not a near-miss spelling) are left to the checkpoint AI;
+  ✍ Write all chapters (outside a ⚡ run) does not run checkpoints; the keyword reading is English only.
+
 ## Prevention pass (2026-10-27, "solve problems before they become problems")
 
 - [x] **Alfred's local AI connection:**

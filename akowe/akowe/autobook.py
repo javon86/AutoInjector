@@ -2895,6 +2895,7 @@ class AutoBookService(_Runner):
         for idx, ch in enumerate(chapters):
             cid = ch["chapter_id"]
             item = st["items"][idx]
+            self._checkpoints(run, st, outline, chapters, idx)  # 🧭 a checkpoint due after the chapters before this one
             bp = self.bp(run)
             _ctx, latest, appr = bp.chapter_prose(outline, cid)
             if appr:
@@ -2974,11 +2975,28 @@ class AutoBookService(_Runner):
                                   "flagged": bool(ed.get("flagged")), "avg": ed.get("avg_score"),
                                   "min": ed.get("min_score"), "reviewer": ed.get("reviewer")}
             self.save(run)
+        self._checkpoints(run, st, outline, chapters, len(chapters))  # 🧭 the final check of the whole book
         words = sum(i.get("words") or 0 for i in st["items"])
         target = lengths_mod.of_book(self.store, run["project_id"], len(chapters))
         st["message"] = f"{len(chapters)} chapter(s) written and approved · {words:,} words (target about " \
                         f"{target['book_words']:,})"
         run["eta"] = None
+
+    def _checkpoints(self, run, st, outline, chapters, upto: int):
+        """🧭 checkpoints.py: the continuity checkpoints due once ``upto`` chapters are approved. A problem the
+        checkpoint cannot fix safely pauses the run once (StepProblem); anything unexpected never holds up the book."""
+        from . import checkpoints  # noqa: PLC0415
+        try:
+            checkpoints.run_due(self, run, st, outline, chapters, upto)
+        except (StepProblem, RunPaused, RunCancelled, Cancelled):
+            raise
+        except Exception as exc:  # noqa: BLE001
+            if getattr(exc, "control", False):
+                raise
+            log.exception("make-a-book run %s: checkpoint failed", run["id"])
+            self.event(run, "note", f"⚠️ A continuity checkpoint could not be finished "
+                                    f"({getattr(exc, 'code', type(exc).__name__)}); the book goes on",
+                       step="chapters", code="CHECKPOINT_FAILED")
 
     @staticmethod
     def _eta_words(run) -> str:
