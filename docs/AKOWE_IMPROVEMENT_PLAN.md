@@ -537,6 +537,19 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
 
 ## Problems to come back to
 
+- **Video on the user's PC (RTX 5070 Ti 16 GB) — status 2026-11-03:** four real-PC rounds so far.
+  1. Stuck at "starting PyTorch": a Windows stdin lock-up in the runner. **Fixed** (#101); PyTorch now starts in about 3 s.
+  2. `OfflineModeIsEnabled` on the FramePack model: diffusers asked the Hub about a sharded model. **Fixed** (#103); models load from their local folders, and loading takes 14 s.
+  3. xFormers has no kernel for compute capability 12.0. **Fixed** (#104): kernels that can't run are turned off, so PyTorch's own attention is used.
+  4. **Open:** confirm on the PC that the first clip, picture → video, text → video, saving and the trailer work. Use the one-press 🩺 Test pictures & video (Full) and `docs/PC_MEDIA_TEST_PROMPT.md` (#105).
+- **Main character guarantee (#105):** ten ways a book could lose its main character are fixed, and a guarantee step runs before the chapters and before "done". Known limits:
+  - names in an idea written in Chinese or Japanese are not detected (the Bible Builder decides);
+  - an outline the author approved without the main character pauses rather than being rewritten;
+  - any POV id the AI invents becomes a real, reviewed character.
+- **Alfred model ratings (#105):** ★★★ Excellent / ★★ Good / ★ OK / 🐢 Slow / ✖ Too big, with estimated or measured speed and a verdict. Mixture-of-experts models are estimated too slow.
+- **Still to do:** the 360° and 1080 sweep of the whole program on the merged build, with fixes.
+
+
 - **Refinement from the user's 2026-10-25 evening log (FIXED, 2026-10-26)**, one update:
   1. **🎩 Alfred:** "Test my AI" said OK while the model wasn't installed, so every question failed with HTTP 404. It now checks the model, lists the installed ones with **Use …** buttons, and warns about tiny models. Small-model argument slips are forgiven.
   2. **🎨 Images:** after a broken VAE was picked, every Generate failed with a bare HTTP 500 (about 15 clicks).
