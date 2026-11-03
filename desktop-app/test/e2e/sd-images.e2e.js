@@ -128,7 +128,9 @@ async function main() {
 
     await c.click('#sd-sub-library');
     await c.click('#btn-sd-lib-scan');
-    await c.waitForFunction(() => document.querySelectorAll('.sd-libcard').length >= 3, null, { timeout: 15000 }).catch(() => {});
+    // Wait for the cards this check looks for, not just "3 cards": the scan fills the list in steps, and reading it
+    // after the first 3 arrived missed one of them on a busy CI runner (7 of 8 listed, PR #105).
+    await c.waitForFunction(() => { const t = [...document.querySelectorAll('.sd-libcard .sd-nm')].map((e) => e.textContent).join('\n'); return /odile_face/.test(t) && /xl_inkwash/.test(t) && /dreamshaper_8/.test(t); }, null, { timeout: 15000 }).catch(() => {});
     const names = await c.$$eval('.sd-libcard .sd-nm', (els) => els.map((e) => e.textContent));
     assert(names.some((n) => /odile_face/.test(n)) && names.some((n) => /xl_inkwash/.test(n)) && names.some((n) => /dreamshaper_8/.test(n)), `the library lists the synthetic models (${names.length})`);
     const xlCard = await c.$('.sd-libcard[data-compat="hard"]');

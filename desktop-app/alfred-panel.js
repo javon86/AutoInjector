@@ -378,7 +378,26 @@
     if (hs && Array.isArray(hs.info)) for (const row of hs.info.slice(0, 4)) if (row && row.text && !(hs.problems || []).some((p) => p.check === row.check)) lines.push(`  ${row.text}`);
     const c = last && last.connected;
     if (c) lines.push(`🧰 Connected: 📖 Akọwe ${c.akowe ? '✔' : '✖'} · 🎨 pictures ${c.images ? '✔' : '✖'} · 🎬 video ${c.video ? '✔' : 'not yet'} · 💬 AIs ${c.panes || 0}/3`);
+    // 🩺 Test pictures & video: the last report in one line (+ its ❌ steps), and a button to run it
+    const mt = api.mediaTest;
+    if (mt && typeof mt.status === 'function') {
+      let ms = null; try { ms = await mt.status(); } catch (_) { ms = null; }
+      if (ms && ms.last && ms.last.summary) {
+        lines.push(ms.last.summary);
+        for (const s of (ms.last.steps || []).filter((x) => x.status === 'fail').slice(0, 5)) lines.push(`  ✖ ${s.name}: ${s.detail}`);
+      } else if (ms && ms.ok !== false) lines.push('🩺 Pictures & video: not tested yet — press “🩺 Test pictures & video”.');
+    }
     box.textContent = lines.join('\n');
+    if (mt && typeof mt.run === 'function') {
+      const b = h('button', { class: 'al-fix', type: 'button', id: 'alfred-check-media', title: 'Quick: checks pictures, video, the trailer maker, my tools and Akọwe\'s link — nothing is made. The Full test is in 🎬 Video → 🩺 Test.' }, '🩺 Test pictures & video (quick)');
+      b.addEventListener('click', async () => {
+        b.disabled = true; b.textContent = '🩺 Testing pictures & video…';
+        let x = null; try { x = await mt.run({ mode: 'quick' }); } catch (_) { x = null; }
+        b.disabled = false;
+        b.textContent = x && x.ok ? (x.summary || '✔ Done') : `✖ ${(x && (x.message || x.error)) || 'did not run'}`.slice(0, 160);
+      });
+      box.append('\n', b);
+    }
     for (const p of fixes) {
       const b = h('button', { class: 'al-fix', type: 'button', 'data-code': p.code }, p.fix.label || 'Fix it');
       b.addEventListener('click', async () => {

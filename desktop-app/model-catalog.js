@@ -199,7 +199,12 @@ function hfModel(m) {
   const params = parseParams(id.split('/').pop());
   const sizeBytes = estimateQ4Bytes(params);
   const toolTag = tags.some((t) => /tool|function[-_ ]?call/i.test(t));
+  const pipe = String(m.pipeline_tag || '');
+  // Only chat/text models can talk to you: an embedding, speech or image model can't (when HF says so).
+  const embedding = /feature-extraction|sentence-similarity/i.test(pipe) || tags.some((t) => /^sentence-transformers$|^embeddings?$/i.test(t));
+  const chat = !pipe || /text-generation|text2text|conversational|image-text-to-text/i.test(pipe) ? true : false;
   return {
+    embedding, chat,
     id: `hf:${id}`, repo: id, source: 'hf', name: id, title: id.split('/').pop() || id,
     description: m.pipeline_tag ? String(m.pipeline_tag).replace(/-/g, ' ') : '',
     pullName: `hf.co/${id}:Q4_K_M`, params, sizeBytes, quant: 'Q4_K_M',
@@ -215,29 +220,60 @@ function hfModel(m) {
   };
 }
 
-/** Rate every variant, auto-pick the best that fits, and set model.fit / pullName / size from it. */
+/** Model name as Ollama reports it: lower case, ":latest" when there is no tag. */
+function speedKey(name) {
+  const n = String(name || '').trim().toLowerCase();
+  if (!n) return '';
+  return /:[^/]+$/.test(n) ? n : `${n}:latest`;
+}
+/** tokens/second Alfred measured for this model (opts.speeds: { name: tokensPerSec | {tokensPerSec} }), or null. */
+function measuredSpeed(speeds, name) {
+  if (!speeds || !name) return null;
+  const want = speedKey(name);
+  for (const k of Object.keys(speeds)) {
+    if (speedKey(k) !== want) continue;
+    const v = speeds[k];
+    const t = Number(v && typeof v === 'object' ? v.tokensPerSec : v);
+    return Number.isFinite(t) && t > 0 ? t : null;
+  }
+  return null;
+}
+
+/** Rate every variant, auto-pick the best that fits, and set model.fit / pullName / size from it — plus its speed and verdict. */
 function rateModel(model, hardware, opts) {
-  const variants = (model.variants || []).map((v) => Object.assign({}, v, { fit: hw.rateFit(v.sizeBytes, hardware, opts) }));
-  const pick = hw.pickVariant(variants, hardware, opts);
+  const o = opts || {};
+  const variants = (model.variants || []).map((v) => {
+    const fit = hw.rateFit(v.sizeBytes, hardware, o);
+    return Object.assign({}, v, { fit, speed: hw.estimateSpeed(v.sizeBytes, hardware, { fit, measured: measuredSpeed(o.speeds, v.pullName) }) });
+  });
+  const pick = hw.pickVariant(variants, hardware, o);
   let chosen = pick ? variants.find((v) => v.pullName === pick.pullName) : null;
   if (!chosen) chosen = variants.filter((v) => v.sizeBytes).sort((a, b) => a.sizeBytes - b.sizeBytes)[0] || variants[0] || null;
   const out = Object.assign({}, model, { variants });
   if (chosen) {
-    out.fit = chosen.fit; out.pick = chosen.tag; out.pullName = chosen.pullName;
+    out.fit = chosen.fit; out.pick = chosen.tag; out.pullName = chosen.pullName; out.speed = chosen.speed;
     out.sizeBytes = chosen.sizeBytes; out.quant = chosen.quant || out.quant; out.params = chosen.params != null ? chosen.params : out.params;
-  } else out.fit = hw.rateFit(null, hardware);
+  } else { out.fit = hw.rateFit(null, hardware); out.speed = hw.estimateSpeed(null, hardware); }
+  out.verdict = hw.verdictFor(out, out.fit, chosen);
   return out;
 }
 
-const RATING_SCORE = { great: 4, good: 3, slow: 1.5, unknown: 1, 'too-big': -3 };
-function rankScore(m, o) {
-  let s = RATING_SCORE[(m.fit && m.fit.rating) || 'unknown'] * 3;
-  s += Math.log10((m.downloads || 0) + 1) * 0.6;
-  if (o.uncensored && m.uncensored) s += 20;
+/** Popularity tie-break inside the same verdict / fit / speed step. */
+function rankScore(m) {
+  let s = Math.log10((m.downloads || 0) + 1) * 0.6;
   if (m.tools === true) s += 1;
-  if (m.embedding) s -= 30;
-  if (m.fit && m.fit.rating === 'too-big') s -= 100; // can't run here: always last
   return s;
+}
+const isBad = (m) => (m.verdict ? m.verdict.kind === 'bad' : !!(m.embedding || (m.fit && m.fit.rating === 'too-big'))) ? 1 : 0;
+/**
+ * The order of every model list: ✖ not-a-good-pick last; with 🔓 on, uncensored ones first; then
+ * ✔ good pick → ◐ works-but, then fit (Excellent → Good → OK → Slow), then speed in steps; ties keep `then`.
+ */
+function compareModels(a, b, o, then) {
+  return (isBad(a) - isBad(b))
+    || (o && o.uncensored && !!a.uncensored !== !!b.uncensored ? (a.uncensored ? -1 : 1) : 0)
+    || hw.compareChoice(a, b)
+    || (then ? then(a, b) : 0);
 }
 
 // ------------------------------------------------------------------ curated (offline)
@@ -370,7 +406,12 @@ function createCatalog(options) {
     const tags = Array.isArray(d.tags) ? d.tags : [];
     const card = d.cardData || {};
     variants = variants.map((v) => Object.assign(v, { params }));
-    if (so.hardware) variants = variants.map((v) => Object.assign(v, { fit: hw.rateFit(v.sizeBytes, so.hardware, so) }));
+    if (so.hardware) {
+      variants = variants.map((v) => {
+        const fit = hw.rateFit(v.sizeBytes, so.hardware, so);
+        return Object.assign(v, { fit, speed: hw.estimateSpeed(v.sizeBytes, so.hardware, { fit, measured: measuredSpeed(so.speeds, v.pullName) }) });
+      });
+    }
     const pick = so.hardware ? hw.pickVariant(variants, so.hardware, so) : null;
     const out = {
       ok: true, repo, variants, gated: !!(d.gated && d.gated !== 'false'), tools, params,
@@ -410,7 +451,7 @@ function createCatalog(options) {
     let models = [...seen.values()].filter((m) => !m.embedding || so.includeEmbedding);
     if (so.toolsOnly) models = models.filter((m) => m.tools === true);
     models = models.map((m) => rateModel(m, so.hardware, so));
-    models.sort((a, b) => rankScore(b, so) - rankScore(a, so));
+    models.sort((a, b) => compareModels(a, b, so, (x, y) => rankScore(y) - rankScore(x)));
     return { ok: okSources.size > 0, models, errors: errs };
   }
 
@@ -419,13 +460,7 @@ function createCatalog(options) {
     let models = curatedModels();
     if (co.toolsOnly) models = models.filter((m) => m.tools === true);
     models = models.map((m) => rateModel(m, hardware, co));
-    const tier = (m) => RATING_SCORE[(m.fit && m.fit.rating) || 'unknown'];
-    const big = (m) => (m.fit && m.fit.rating === 'too-big' ? 1 : 0);
-    models.sort((a, b) => {
-      if (big(a) !== big(b)) return big(a) - big(b);
-      if (co.uncensored && a.uncensored !== b.uncensored) return a.uncensored ? -1 : 1;
-      return (tier(b) - tier(a)) || (a.order - b.order);
-    });
+    models.sort((a, b) => compareModels(a, b, co, (x, y) => x.order - y.order));
     return models;
   }
 
@@ -434,5 +469,5 @@ function createCatalog(options) {
 
 module.exports = {
   createCatalog, isUncensored, toolsLikely, parseParams, parseQuant, quantBits, groupGgufFiles,
-  parseOllamaSearchHtml, parseCount, estimateQ4Bytes, rateModel, CURATED,
+  parseOllamaSearchHtml, parseCount, estimateQ4Bytes, rateModel, compareModels, measuredSpeed, speedKey, CURATED,
 };

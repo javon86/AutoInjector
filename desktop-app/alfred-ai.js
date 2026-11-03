@@ -17,6 +17,7 @@
  */
 const client = require('./openai-client');
 const smartJson = require('./smart-json'); // “curly” quotes in a model's tool arguments (PC test 2026-10-28)
+const llmSpeed = require('./llm-speed'); // measured answer speed per local model (🔎 Find a model shows it)
 
 const DEFAULT_LOCAL_BASE = 'http://127.0.0.1:11434/v1';
 
@@ -178,7 +179,9 @@ async function ollamaChat({ endpoint, model, messages, tools, timeoutMs, signal,
     }
     let j; try { j = await res.json(); } catch (_) { return { ok: false, kind: 'bad-body' }; }
     if (!j || !j.message) return { ok: false, kind: 'bad-body', notOllama: true };
-    return { ok: true, message: normalizeMessage(j.message), numCtx: body.options.num_ctx };
+    // How fast it really wrote (Ollama's eval_count / eval_duration) — the model finder shows it as "measured".
+    let speed = null; try { speed = llmSpeed.recordOllama(model, j); } catch (_) { speed = null; }
+    return { ok: true, message: normalizeMessage(j.message), numCtx: body.options.num_ctx, tokensPerSec: speed ? speed.tokensPerSec : null };
   } finally {
     clearTimeout(timer);
     if (signal) signal.removeEventListener('abort', onAbort);

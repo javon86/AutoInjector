@@ -153,9 +153,19 @@ def test_dangling_pov_and_location_ids_are_refused(tmp_path):
         return out
     app = fk.make_app(tmp_path, fake=fk.TraceAI(overrides={"B11": ghost}))
     run = fk.run_book(app)
-    assert_paused_on(run, "outline")
-    assert "CANON_UNRESOLVED" in json.dumps(run["problem"]) and "ghost-of-nobody" in json.dumps(run["problem"])
-    assert not fk.bp_of(app, run["project_id"]).approved("B11")
+    # ★ (2026-11-02) a viewpoint the canon does not have is no longer approved dangling NOR a dead end: the outline is
+    # refused (CANON_UNRESOLVED), the viewpoint character is made as a real, reviewed and approved A01 entry, and
+    # the main plot is planned again so the next outline pins them (test_main_character_paths.py)
+    full = app.autobook.get(run["id"])
+    assert any(e.get("code") == "CHECKS_REFUSED" and "chapter outline" in e["message"] for e in full["events"])
+    assert any(e.get("code") == "PLAN_REPINNED" and "Ghost Of Nobody" in e["message"] for e in full["events"])
+    bp = fk.bp_of(app, run["project_id"])
+    ghost_rec = [r for r in bp.approved("A01") if "ghost-of-nobody" in json.dumps(r["data"])]
+    assert ghost_rec, "the viewpoint character was made and approved"
+    outline = bp.approved("B11")
+    assert run["status"] == "done" and outline
+    plot = bp.approved("B03")[0]
+    assert ghost_rec[0]["record_id"] in {r.get("record_id") for r in plot.get("source_refs") or []}
 
 
 def test_duplicate_outline_chapter_ids_are_refused(tmp_path):

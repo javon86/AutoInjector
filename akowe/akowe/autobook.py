@@ -1053,6 +1053,10 @@ class AutoBookService(_Runner):
                 self.save(run)
                 if sid != STEP_IDS[-1]:  # the last step is followed by the run's own save (below)
                     self._autosave(run, reason=f"step {sid}")
+            # ★ the guarantee: never a finished book without its main character (repaired, else a plain pause)
+            run["current"] = "check"
+            self._guarantee_main(run, self._step(run, "check"), "before the book is marked done")
+            self.save(run)
             run.update(status="done", finished_at=now_iso(), current=None, waiting=None, pause_reason=None,
                        phase="Your book is made — download it below")
             if (run.get("problem") or {}).get("severity") != "warning":
@@ -2417,6 +2421,66 @@ class AutoBookService(_Runner):
                           "character ★ the main character on its page; then press 🔁 Try again.",
                           character=name, options=["retry"])
 
+    def _guarantee_main(self, run, st, where: str) -> dict:
+        """★ The guarantee (before the chapters are written, and again before the book is marked done): exactly one
+        protagonist, an approved A01 entry, given chapters by the outline and named in every chapter brief. What is
+        wrong is repaired here (the main character the idea names / the Bible Builder proposed is made with the
+        guided make-the-main-character path; the ★ tag is put back by the deterministic cast); only what cannot be
+        repaired pauses the run with a plain-words decision (PROTAGONIST_MISSING). A plain event says the result
+        either way (PROTAGONIST_OK)."""
+        before = (run.get("protagonist") or {}).get("record_id")
+        self._ensure_main(run, st)  # the idea's / proposed main character is approved canon (made now if not)
+        chk = self._guard_main(run, st, where)  # one ★, approved, in the outline — else made / paused
+        pid, branch = run["project_id"], run["branch_id"]
+        prot = chk.get("protagonist") or {}
+        tagged = story_roles.tagged_protagonist(self.store, pid, branch)
+        claims = self._protagonist_claims(run)
+        repaired = []
+        if tagged != prot.get("record_id") or claims > 1:
+            self._settle_cast(run)  # exactly one stored ★, on the cast's protagonist
+            repaired.append("the ★ main-character tag was put back")
+            tagged = story_roles.tagged_protagonist(self.store, pid, branch)
+        if tagged != prot.get("record_id"):
+            self._no_star(prot, where)
+        bp = self.bp(run)
+        outline = bp.outline()
+        chapters = bp.outline_chapters(outline) if outline else []
+        from . import chapter_brief  # noqa: PLC0415
+        no_brief = [c["chapter_id"] for c in chapters
+                    if chapter_brief.build(self.store, pid, branch, outline, c["chapter_id"])[1].get("protagonist")
+                    != prot.get("record_id")]
+        if no_brief:
+            self._no_star(prot, where, f"the writing brief of chapter(s) {', '.join(no_brief[:6])} does not name them")
+        hits = protagonist.in_outline(outline, prot, chars_mod.canon_characters(self.store, pid, branch),
+                                      alias_map=story_roles.aliases(self.store, pid, branch)) if outline else []
+        if before and before != prot.get("record_id"):
+            repaired.append("the main character's entry was made again")
+        self.event(run, "note", f"★ Main character check {where}: “{prot.get('name')}” is the book's one main "
+                   f"character — an approved character, in {len(hits)} of {len(chapters)} chapter(s) of the outline "
+                   "and named in every chapter brief" + (f" ({'; '.join(repaired)})" if repaired else ""),
+                   record_id=prot.get("record_id"), code="PROTAGONIST_OK")
+        return chk
+
+    def _protagonist_claims(self, run) -> int:
+        """How many live characters carry a stored (non-proposed) ★ protagonist tag."""
+        live = {c["record_id"] for c in chars_mod.canon_characters(self.store, run["project_id"], run["branch_id"])}
+        n = 0
+        for rid, e in chars_mod.all_entries(self.store, run["project_id"], run["branch_id"]).items():
+            role, by, _at = story_roles.stored(e)
+            if rid in live and role == story_roles.PROTAGONIST and by not in story_roles.PROPOSED_BY:
+                n += 1
+        return n
+
+    @staticmethod
+    def _no_star(prot: dict, where: str, why: str | None = None):
+        name = prot.get("name") or "the main character"
+        raise StepProblem("PROTAGONIST_MISSING",
+                          f"The main character “{name}” could not be confirmed {where}: "
+                          + (why or "the ★ main-character tag could not be stored on their entry") + ".",
+                          f"Open the book, open “{name}” in Characters and places and mark them ★ the main "
+                          "character (or mark another character), then press 🔁 Try again.",
+                          character=name, options=["retry"])
+
     def _outline_has_main(self, run, rid: str) -> list[str]:
         """Problems of an outline draft that leaves the main character out (empty when they are in it)."""
         bp = self.bp(run)
@@ -2441,10 +2505,14 @@ class AutoBookService(_Runner):
         for m in protagonist.missing(bp, main_names=run.get("main_names") or (), store=self.store):
             self._make_main(run, st, m)
 
+    @staticmethod
+    def _who_word(why: str) -> str:
+        return "viewpoint character" if why == protagonist.POV_WHY else "main character"
+
     def _make_main(self, run, st, m: dict):
         name, why = m["name"], m["why"]
         label = f"entry “{name}”"
-        self.event(run, "note", f"⚠️ The main character “{name}” ({why}) is not in the approved characters: "
+        self.event(run, "note", f"⚠️ The {self._who_word(why)} “{name}” ({why}) is not in the approved characters: "
                    "Akọwe makes the entry now", code="PROTAGONIST_MISSING")
         reasons = list(m.get("refused") or [])
         rid = (m.get("draft") or {}).get("record_id")
@@ -2477,7 +2545,7 @@ class AutoBookService(_Runner):
                            code="CANON_ENTRY_REFUSED")
                 rid = None
                 continue
-            self.event(run, "note", f"✔ The main character “{name}” is an approved character now", record_id=rid)
+            self.event(run, "note", f"✔ The {self._who_word(why)} “{name}” is an approved character now", record_id=rid)
             return
 
     @staticmethod
@@ -2542,7 +2610,7 @@ class AutoBookService(_Runner):
                    record_id=rid)
         self.save(run)
 
-    def _planning(self, run, st, op, label, precheck=None):
+    def _planning(self, run, st, op, label, precheck=None, on_refused=None):
         while True:
             bp = self.bp(run)
             if bp.approved(op):
@@ -2566,6 +2634,8 @@ class AutoBookService(_Runner):
                 self._review_until_approved(run, st, rid, label, precheck=precheck)
             except ChecksRefused as exc:
                 self._redo_refused(run, st, rid, f"redo:{op}", label, exc)
+                if on_refused:
+                    on_refused()
                 continue
             st["message"] = "Written, reviewed and approved"
             return
@@ -2629,6 +2699,7 @@ class AutoBookService(_Runner):
                         log.exception("could not copy the story role of %s", it.get("name"))
             else:
                 refused.append(f"{it.get('name')}: {'; '.join(problems(r)[:2]) or r.get('status')}")
+                self._note_refused_main(run, it)
             run["bible_ops"] = sorted(ops)
             self.save(run)
         run["bible_seeded"] = True
@@ -2638,6 +2709,16 @@ class AutoBookService(_Runner):
             self.event(run, "note", "⚠️ Not taken from the book bible (Akọwe's checks refused them; the AI makes "
                        "what is missing): " + " · ".join(refused)[:300], step="canon", code="BIBLE_ENTRY_REFUSED")
         self.save(run)
+
+    @staticmethod
+    def _note_refused_main(run, it: dict):
+        """★ A book bible's (or the series' earlier book's) main character that Akọwe's checks refused to put into
+        the new book is remembered by name: the canon step makes her again (``_ensure_main``), never lost."""
+        if it.get("module_id") == "A01" and it.get("story_role") == story_roles.PROTAGONIST and \
+                str(it.get("name") or "").strip():
+            mains = run.setdefault("main_names", [])
+            if it["name"] not in mains:
+                mains.insert(0, str(it["name"]).strip()[:120])
 
     def _seed_world(self, run):
         b = self._bible_of(run) or {}
@@ -2738,17 +2819,53 @@ class AutoBookService(_Runner):
         if not self.bp(run).approved("B11"):
             self._ensure_main(run, st)  # never plan the chapters without the book's main character in the canon
             self._guard_main(run, st, "before the chapter outline")
-        self._planning(run, st, "B11", "chapter outline", precheck=lambda rid: self._outline_has_main(run, rid))
+            self._repin_plan(run, st)
+
+        def made_missing():
+            # ★ an outline refused for a viewpoint character the canon does not have ("plan.pov_id 'x' is not
+            # declared"): that character is made and approved, and the main plot is planned again so the next
+            # outline pins it (the outline sees the canon through the plot's pins)
+            self._ensure_main(run, st)
+            self._repin_plan(run, st)
+        self._planning(run, st, "B11", "chapter outline", precheck=lambda rid: self._outline_has_main(run, rid),
+                       on_refused=made_missing)
         self._update_rules(run, st)
         n = len(self.bp(run).outline_chapters(self.bp(run).outline()))
         st["message"] = f"{n} chapter(s) planned and approved"
+
+    def _repin_plan(self, run, st):
+        """An approved character the approved main plot does not pin (made after the plot: the main character the
+        guard made, a viewpoint character the outline needed) is invisible to the chapter outline's canon check. The
+        plot is then set aside as out of date and planned again with the whole canon pinned (once per character)."""
+        bp = self.bp(run)
+        plot = bp.approved("B03")
+        if not plot:
+            return
+        pinned = set()
+        for ref in plot[0].get("source_refs") or []:
+            pinned.add(ref.get("record_id"))
+            if str(ref.get("module_id") or "").startswith("B"):
+                up = bp.rec(ref["record_id"], ref.get("version"))
+                pinned |= {r.get("record_id") for r in (up or {}).get("source_refs") or []}
+        done = run.setdefault("repinned", [])
+        new = [r for r in bp.approved("A01") if r["record_id"] not in pinned and r["record_id"] not in done]
+        if not new:
+            return
+        names_ = ", ".join(f"“{chars_mod._name_and_subject(r)[0]}”" for r in new)[:200]  # noqa: SLF001
+        done += [r["record_id"] for r in new]
+        bp.set_aside(plot[0], f"out of date: the canon has new character(s) {names_} the plan must pin")
+        self.event(run, "note", f"📌 The main plot is planned again so that it includes {names_} (made after the "
+                   "plot; the chapter outline can only use characters the plot pins)", code="PLAN_REPINNED",
+                   module_id="B03")
+        self.save(run)
+        self._planning(run, st, "B03", "main plot")
 
     def _s_chapters(self, run, st):
         bp = self.bp(run)
         outline = bp.outline()
         if not outline:
             raise StepProblem("NOT_FOUND", "There is no approved chapter outline.", "Press 🔁 Try again.")
-        self._guard_main(run, st, "before the chapters are written")
+        self._guarantee_main(run, st, "before the chapters are written")
         bp = self.bp(run)
         chapters = bp.outline_chapters(outline)
         if not chapters:
@@ -2765,6 +2882,10 @@ class AutoBookService(_Runner):
             bp = self.bp(run)
             _ctx, latest, appr = bp.chapter_prose(outline, cid)
             if appr:
+                from . import continuity  # noqa: PLC0415
+                if not continuity.tracked(self.store, run["project_id"], run["branch_id"], cid):
+                    # approved, but a Pause / Cancel came before its continuity was tracked: track it now
+                    continuity.after_chapter(self, run, cid, appr, item)
                 item.update(state="done", words=len(((appr.get("data") or {}).get("text") or "").split()))
                 continue
             item["state"] = "running"

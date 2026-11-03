@@ -393,3 +393,24 @@ def test_series_routes(book1):
         binder.route(app, "GET", [], {"as_of": ["one"]}, None, "author", pid, BR)
     st, out = binder.route(app, "GET", ["export"], {"format": ["docx"], "as_of": ["1"]}, None, "author", pid, BR)
     assert out[0] == "__binary__" and "(as of book 1)" in out[3]
+
+
+def test_new_portrait_made_once_when_two_makers_start_together(book1):
+    """Regression: ✔ Approve of a new look starts 🖼 Make the new portraits by itself; pressing the button too (or
+    🖼 Make the rest of the pictures, which also makes them) planned the same waiting portrait twice and made it
+    twice."""
+    import threading
+    app, _fake, b, pid = book1
+    k = key_of(app, pid, "Mara Vell")
+    series.save_proposals(app.store, pid, BR, {"character_changes": [
+        {"name": "Mara Vell", "appearance": [{"text": "lost her left eye"}]}]})
+    series.approve(app.store, pid, BR, {"key": k})
+    b.gate = threading.Event()
+    j1 = series.start_portraits(app, "author", pid, BR, {})
+    assert b.waiting.wait(30)
+    j2 = series.start_portraits(app, "author", pid, BR, {})
+    b.gate.set()
+    assert wait_job(app, j1)["status"] == "done" and wait_job(app, j2)["status"] == "done"
+    assert sum(1 for r in b.ok if r.get("purpose") == "portrait") == 1, b.ok
+    s = series.of_book(app.store, pid, BR)
+    assert s["portraits"]["1"][k] and not s["portrait_waiting"]["1"] and not s.get("portraits_old")

@@ -454,6 +454,11 @@ def before_chapter(svc, run: dict, chapter_id: str) -> None:
         log.exception("version ledger in the run failed")
 
 
+def tracked(store, pid: str, branch: str, cid: str) -> bool:
+    """Has this chapter's continuity been tracked and approved (either kind)?"""
+    return any((get_chapter(store, pid, branch, k, cid) or {}).get("status") == "approved" for k in KINDS)
+
+
 def after_chapter(svc, run: dict, chapter_id: str, rec: dict | None = None, item: dict | None = None) -> None:
     """After a chapter is approved in a run: track its continuity (one AI call, deterministic fallback) and approve
     the tracked state under the run consent. Never raises except when the run is cancelled."""
@@ -484,6 +489,8 @@ def after_chapter(svc, run: dict, chapter_id: str, rec: dict | None = None, item
     except Cancelled:
         raise
     except Exception as exc:  # noqa: BLE001 - never holds up the book
+        if getattr(exc, "control", False):
+            raise  # the author pressed Pause / Cancel: the run stops here (tracked again when it goes on)
         log.exception("continuity tracking in the run failed")
         try:
             svc.event(run, "note", f"⚠️ The continuity of chapter {chapter_id} could not be tracked "

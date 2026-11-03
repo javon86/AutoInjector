@@ -55,6 +55,8 @@ PROTAGONIST = "protagonist"
 DEFAULT = "supporting"
 BY = ("ai", "author", "resolved", "inferred", "legacy")
 PROPOSED_BY = ("inferred",)
+# Roles the book's main character is never guessed from (only an explicit claim makes one of them the protagonist).
+UNLIKELY_LEADS = frozenset({"antagonist", "henchman", "rival", "minor", "extra"})
 
 SYNONYMS = {
     "protagonist": "protagonist", "main": "protagonist", "main character": "protagonist", "hero": "protagonist",
@@ -212,7 +214,10 @@ def aliases(store, pid: str, branch: str) -> dict:
 def names_of(c: dict, extra=()) -> list[str]:
     """Every way to name a character: display name, subject ID and record ID as words, alias facts, dossier aliases."""
     out = [c.get("name") or ""] + names_mod.id_names(c.get("subject_id"))
+    own = c.get("subject_id")
     for f in c.get("facts") or []:
+        if own and f.get("subject_id") not in (None, own):
+            continue  # a fact about someone the character's entry only mentions (a friend, a relative)
         p = str(f.get("predicate") or "")
         if ("alias" in p or "nickname" in p or p == "entity.name") and isinstance(f.get("value"), (str, list)):
             vals = f["value"] if isinstance(f["value"], list) else [f["value"]]
@@ -270,12 +275,12 @@ def outline_povs(store, pid: str, branch: str) -> list[str]:
 
 def _place_names(store, pid, branch) -> list[str]:
     try:
-        from .protagonist import record_names  # noqa: PLC0415
+        from .protagonist import own_names  # noqa: PLC0415
         out = []
         for r in store.list_records(pid, branch):
             if str(r.get("module_id") or "").startswith("A") and r["module_id"] != "A01" \
                     and r.get("record_kind", "OUTPUT") == "OUTPUT":
-                out += record_names(r)
+                out += own_names(r)  # a place's own name, never the people its facts mention
         return out
     except Exception:  # noqa: BLE001
         return []
@@ -307,7 +312,9 @@ def _cast(store, pid, branch, chars, entries, idea, povs, approved_only) -> dict
     for i, c in enumerate(chars):
         role, by, at = stored(entries.get(c["record_id"]))
         guess = infer((c.get("attributes") or {}).get("role")) if role is None else None
-        rows.append({"c": c, "i": i, "role": role, "by": by, "at": at or "", "guess": guess})
+        e = entries.get(c["record_id"]) if isinstance(entries.get(c["record_id"]), dict) else {}
+        rows.append({"c": c, "i": i, "role": role, "by": by, "at": at or "", "guess": guess,
+                     "fallback": by == "resolved" and bool(e.get("story_role_fallback"))})
     # who is named in the idea (index of the name in the idea: the first named is the most likely lead)
     from .protagonist import names_in_idea  # noqa: PLC0415
     idea_rank: dict = {}
@@ -324,7 +331,9 @@ def _cast(store, pid, branch, chars, entries, idea, povs, approved_only) -> dict
     def rank(r):
         rid = r["c"]["record_id"]
         marked = r["role"] in (PROTAGONIST, "main") or r["guess"] == PROTAGONIST
-        return (idea_rank.get(rid, 99), 0 if marked else 1, -pov_n.get(rid, 0), r["i"])
+        # never the villain, a henchman, a rival or an extra by default: the book is not about them
+        unlikely = (r["role"] or r["guess"]) in UNLIKELY_LEADS
+        return (idea_rank.get(rid, 99), 0 if marked else 1, -pov_n.get(rid, 0), 1 if unlikely else 0, r["i"])
 
     def why(r) -> str:
         rid = r["c"]["record_id"]
@@ -337,6 +346,12 @@ def _cast(store, pid, branch, chars, entries, idea, povs, approved_only) -> dict
         return "the first character made"
     authored = [r for r in rows if r["role"] == PROTAGONIST and r["by"] == "author"]
     claimed = [r for r in rows if r["role"] == PROTAGONIST and r["by"] not in PROPOSED_BY]
+    # Akọwe's own fallback guess (``story_role_fallback``: "the first character made", stored before the character
+    # the idea names had an entry) is no claim against the person the book idea names: the idea decides again. A tag
+    # resolved for a real reason (the idea, a main mark, the viewpoints) is kept, even after a rename.
+    if not authored and idea_rank and claimed and all(r["fallback"] for r in claimed) and \
+            not any(r["c"]["record_id"] in idea_rank for r in claimed):
+        claimed = []
     if authored:
         chosen = max(authored, key=lambda r: (r["at"], -r["i"]))
         reason = "chosen by you"
@@ -441,6 +456,7 @@ def set_role(store, pid: str, branch: str, rid: str, role, *, by: str = "author"
 
 def _tag(e: dict, role: str, by: str):
     e["story_role"], e["story_role_by"], e["story_role_at"] = role, by, _now()
+    e.pop("story_role_fallback", None)
     if isinstance(e.get("sheet"), dict):
         e["sheet"]["story_role"] = role
         e["sheet"]["role"] = legacy_of(role)
@@ -475,6 +491,8 @@ def enforce(store, pid: str, branch: str, *, approved_only: bool = False, chars:
                 new_by = "resolved" if c["story_role"] == PROTAGONIST or role in (PROTAGONIST, "main") else \
                     ("inferred" if c["proposed"] else (by or "inferred"))
                 _tag(e, c["story_role"], new_by)
+                if c["record_id"] == k["protagonist"] and k["reason"].startswith("the first character made"):
+                    e["story_role_fallback"] = True  # only a guess: the character the idea names takes it later
                 cur[c["record_id"]] = e
                 changed.append(c["record_id"])
             if changed:

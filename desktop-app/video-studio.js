@@ -303,7 +303,7 @@ function createVideoStudio(deps = {}) {
       gpu: s.gpu || null, vramHint: s.vramHint || '', lastError: s.lastError || null, message: s.message || '',
       // the last real load / test (saved in the settings): "model files found" is not the same as "it loads"
       lastLoad: s.lastLoad || settings.framepackLastLoad || null,
-      stopping: !!s.stopping, stderrTail: Array.isArray(s.stderrTail) ? s.stderrTail.slice(-50) : [], precheck: s.precheck || null };
+      stopping: !!s.stopping, attention: s.attention || null, loadTimes: s.loadTimes || null, pid: s.pid || null, stderrTail: Array.isArray(s.stderrTail) ? s.stderrTail.slice(-50) : [], precheck: s.precheck || null };
   }
   // engine "auto": ComfyUI + Wan when it is ready; FramePack when it is found and Wan isn't installed;
   // the other video server; FramePack also when ComfyUI answers but can't make Wan video.

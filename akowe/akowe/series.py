@@ -1170,6 +1170,21 @@ def make_portraits(app, principal: str, pid: str, branch: str, *, number: int | 
     out = {"made": 0, "failed": 0, "code": "", "message": "", "down": False}
     if s.get("virtual"):
         return out
+    # one maker of a series' pictures at a time (✔ Approve starts it, the button, 🖼 Make the rest): the next one
+    # waits, then plans again and makes only what is still waiting
+    lock = book_pictures._making_lock("series", s["id"])  # noqa: SLF001
+    while not lock.acquire(timeout=0.5):
+        if check:
+            check()
+    try:
+        s = of_book(store, pid, branch)
+        return _make_portraits(app, principal, store, s, number, check, on_phase, out)
+    finally:
+        lock.release()
+
+
+def _make_portraits(app, principal, store, s, number, check, on_phase, out) -> dict:
+    from . import book_pictures, forge  # noqa: PLC0415
     plan = portrait_plan(store, s, number)
     if not plan:
         return out

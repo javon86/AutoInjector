@@ -134,11 +134,18 @@ async function main() {
     const cards = () => controls.$$eval('#llmm-results .llmm-card', (cs) => cs.map((c) => ({
       id: c.dataset.id, rating: c.dataset.rating, unc: c.dataset.uncensored === '1', fit: c.querySelector('.llmm-fit').textContent,
       reason: c.querySelector('.llmm-reason').textContent, dl: c.querySelector('.llmm-dl').disabled, dlTitle: c.querySelector('.llmm-dl').title,
+      speed: (c.querySelector('.llmm-speed') || {}).textContent || '', verdict: (c.querySelector('.llmm-verdict') || {}).textContent || '', vkind: c.dataset.verdict,
       why: (c.querySelector('.llmm-why') || {}).textContent || '', badge: !!c.querySelector('[data-badge="uncensored"]'),
     })));
     let list = await cards();
-    assert(list.every((c) => /★|✖|\?/.test(c.fit) && /fit|slow|big|unknown/i.test(c.fit)), `every card has a fit rating with stars + words (${[...new Set(list.map((c) => c.fit))].join(' | ')})`);
-    assert(list.some((c) => c.rating === 'great') && list.every((c) => c.reason.trim().length > 10), 'great fits exist and every card says why');
+    assert(list.every((c) => /★|🐢|✖|\?/.test(c.fit) && /fit|slow|big|unknown/i.test(c.fit)), `every card has a fit rating with stars + words (${[...new Set(list.map((c) => c.fit))].join(' | ')})`);
+    assert(list.some((c) => c.rating === 'excellent' && /★★★ Excellent fit/.test(c.fit)) && list.every((c) => c.reason.trim().length > 10), 'excellent fits exist and every card says why');
+    assert(list.some((c) => c.rating === 'slow' && /🐢 Slow — it runs, but slowly/.test(c.fit)), 'models that spill onto the processor say 🐢 Slow');
+    const est = list.find((c) => c.rating === 'excellent');
+    assert(!!est && /words\/s/.test(est.speed) && /~300 words/.test(est.speed) && /estimate/.test(est.speed), `cards show an estimated speed ("${est && est.speed}")`);
+    assert(list.every((c) => /^(✔ Good pick for Alfred|◐ Works, but |✖ Not a good pick: )/.test(c.verdict)), `every card says if it is a good pick (${[...new Set(list.map((c) => c.verdict.slice(0, 18)))].join(' | ')})`);
+    const VR = { good: 2, mixed: 1, bad: 0 };
+    assert(list.every((c, i) => i === 0 || VR[list[i - 1].vkind] >= VR[c.vkind]), `ordered: good picks first, then "works, but", then not-good (${list.map((c) => c.vkind[0]).join('')})`);
     const big = list.find((c) => c.rating === 'too-big');
     assert(!!big, `a too-big model is listed (${big && big.id})`);
     if (big) {
@@ -173,7 +180,9 @@ async function main() {
     const card = controls.locator('#llmm-results .llmm-card[data-id="curated:qwen2.5"]');
     await card.locator('select.llmm-variant').selectOption('qwen2.5:1.5b');
     const vfit = await card.getAttribute('data-rating');
-    assert(vfit === 'great' || vfit === 'good', `qwen2.5:1.5b fits this PC (${vfit})`);
+    assert(vfit === 'excellent' || vfit === 'good', `qwen2.5:1.5b fits this PC (${vfit})`);
+    const v15 = await card.locator('.llmm-verdict').textContent();
+    assert(/◐ Works, but/.test(v15) && /very small/.test(v15), `…but a 1.5B model is "◐ Works, but … very small" ("${v15}")`);
     const pulls0 = oll.st.pulls.length;
     await card.locator('.llmm-dl').click();
     const prog = await until(async () => { const t = await card.locator('.llmm-prog').textContent().catch(() => ''); return /\d+%/.test(t) ? t : null; }, 15000, 100);

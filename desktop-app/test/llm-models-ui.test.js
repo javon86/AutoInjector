@@ -75,7 +75,7 @@ async function main() {
   assert(calls.some((c) => c[0] === 'curated'), 'loads the recommended list on start');
   assert(cards(w).length >= 10, `${cards(w).length} recommended cards`);
   const q25 = cardBy(w, 'curated:qwen2.5');
-  assert(q25 && /★★★ Great fit/.test(q25.querySelector('.llmm-fit').textContent), 'qwen2.5 shows ★★★ Great fit');
+  assert(q25 && /★★★ Excellent fit/.test(q25.querySelector('.llmm-fit').textContent), 'qwen2.5 shows ★★★ Excellent fit');
   assert(/graphics card has 12 GB/.test(q25.querySelector('.llmm-reason').textContent), 'with a plain-English reason');
   assert(q25.querySelector('.llmm-variant').value === 'qwen2.5:7b', 'the variant picker auto-picks the best that fits (7b)');
   assert(q25.querySelector('[data-badge="tools"]'), '🛠 badge on a tool-capable model');
@@ -84,6 +84,28 @@ async function main() {
   assert(big.dataset.rating === 'too-big' && bigBtn.disabled, 'too-big model: ⬇ Download is DISABLED');
   assert(/Can't download/.test(bigBtn.title) && /Too big for this PC/.test(big.textContent), 'and says why');
   assert(d.getElementById('llmm-src-ollama').getAttribute('aria-pressed') === 'true' && d.getElementById('llmm-src-hf').getAttribute('aria-pressed') === 'true', 'both sources on by default');
+
+  console.log('\n== every card: estimated speed + good pick or not; ordered good picks → fit → speed ==');
+  const sp = q25.querySelector('.llmm-speed');
+  assert(sp && /words\/s/.test(sp.textContent) && /~300 words/.test(sp.textContent) && /takes about \d+ s/.test(sp.textContent) && /estimate/.test(sp.textContent) && sp.dataset.measured === '0', `qwen2.5 shows its estimated speed ("${sp && sp.textContent}")`);
+  const vd = q25.querySelector('.llmm-verdict');
+  assert(vd && vd.dataset.verdict === 'good' && vd.textContent === '✔ Good pick for Alfred' && q25.dataset.verdict === 'good', 'qwen2.5:7b → ✔ Good pick for Alfred');
+  assert(/◐ Works, but/.test(cardBy(w, 'curated:dolphin3').querySelector('.llmm-verdict').textContent) && /tools/.test(cardBy(w, 'curated:dolphin3').querySelector('.llmm-verdict').textContent), 'dolphin3 → ◐ Works, but … tools');
+  assert(/✖ Not a good pick: .*too big/.test(big.querySelector('.llmm-verdict').textContent) && /can't run/.test(big.querySelector('.llmm-speed').textContent), 'too big → ✖ Not a good pick, and no speed');
+  const kinds = cards(w).map((c) => c.dataset.verdict);
+  const VR = { good: 2, mixed: 1, bad: 0 };
+  assert(kinds.every((k, i) => i === 0 || VR[kinds[i - 1]] >= VR[k]), `cards ordered ✔ → ◐ → ✖ (${kinds.map((k) => k[0]).join('')})`);
+  assert(cards(w).every((c) => c.querySelector('.llmm-speed') && c.querySelector('.llmm-verdict')), 'every card has a speed line and a verdict line');
+  assert([...q25.querySelectorAll('.llmm-variant option')].some((o) => /words\/s/.test(o.textContent)), 'the size picker shows each size\'s speed too');
+  const posBefore = cards(w).findIndex((c) => c.dataset.id === 'curated:qwen2.5');
+  const q25sel = q25.querySelector('.llmm-variant');
+  q25sel.value = 'qwen2.5:1.5b'; q25sel.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await tick();
+  const q15 = cardBy(w, 'curated:qwen2.5');
+  assert(/very small/.test(q15.querySelector('.llmm-verdict').textContent) && Number(/≈ (\d+)/.exec(q15.querySelector('.llmm-speed').textContent)[1]) > Number(/≈ (\d+)/.exec(sp.textContent)[1]), 'picking 1.5b: ◐ very small, and it is faster than the 7b');
+  assert(cards(w).findIndex((c) => c.dataset.id === 'curated:qwen2.5') === posBefore, 'changing a size never reorders the list under you');
+  q15.querySelector('.llmm-variant').value = 'qwen2.5:7b'; q15.querySelector('.llmm-variant').dispatchEvent(new w.Event('change', { bubbles: true }));
+  await tick();
 
   console.log('\n== 🔓 Uncensored: first-class, ranked first, never hidden ==');
   assert(cards(w).some((c) => c.dataset.uncensored === '1'), 'uncensored models are listed even with the filter off');
@@ -114,7 +136,7 @@ async function main() {
   await tick();
   q3 = cardBy(w, 'curated:qwen3');
   assert(q3.querySelector('.llmm-variant').value === 'qwen3:32b', 'the choice sticks');
-  assert(/Runs, slowly|Too big/.test(q3.querySelector('.llmm-fit').textContent), `the fit updates for 32b (${q3.querySelector('.llmm-fit').textContent})`);
+  assert(/🐢 Slow — it runs, but slowly|Too big/.test(q3.querySelector('.llmm-fit').textContent), `the fit updates for 32b (${q3.querySelector('.llmm-fit').textContent})`);
 
   console.log('\n== search both sources ==');
   d.getElementById('llmm-q').value = 'qwen';
@@ -192,6 +214,15 @@ async function main() {
   await tick(60);
   const m = w.document.getElementById('llmm-msg').textContent;
   assert(/internet/.test(m) && /Recommended/.test(m), `plain offline message pointing at Recommended: "${m}"`);
+
+  console.log('\n== a speed Alfred measured replaces the estimate ==');
+  ({ api, calls } = makeApi());
+  const origCurated = api.llmCurated;
+  api.llmCurated = async (o) => ({ ok: true, models: await origCurated(o), speeds: { 'qwen2.5:7b': { tokensPerSec: 21, samples: 3 } } });
+  w = await boot(api);
+  const msp = cardBy(w, 'curated:qwen2.5').querySelector('.llmm-speed');
+  assert(msp.dataset.measured === '1' && /measured on this PC/.test(msp.textContent) && /21 tokens\/s/.test(msp.textContent) && !/estimate/.test(msp.textContent), `measured speed shown ("${msp.textContent}")`);
+  assert(cardBy(w, 'curated:qwen3').querySelector('.llmm-speed').dataset.measured === '0', 'models Alfred has not used keep the estimate');
 
   console.log('\n== degrades when the API is missing ==');
   w = await boot({});

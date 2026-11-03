@@ -15,7 +15,7 @@ const SRC = fs.readFileSync(path.join(__dirname, '..', 'llm-setup-ui.js'), 'utf8
 function makeApi(over = {}) {
   const calls = [];
   let listener = null;
-  let status = { ok: true, ollama: { installed: true, version: '0.5.7' }, server: { running: true, base: 'http://127.0.0.1:11435', which: 'app' }, models: [{ name: 'qwen2.5:7b', sizeBytes: 4.7 * 1024 ** 3, sizeText: '4.7 GB', params: '7.6B', fit: { rating: 'great', label: '★★★ Great fit', reason: 'plenty of room' } }, { name: 'dolphin3:8b', sizeBytes: 4.9 * 1024 ** 3, sizeText: '4.9 GB', uncensored: true, fit: { rating: 'good', label: '★★ Good fit', reason: 'fits' } }], alfred: { model: 'qwen2.5:7b' }, hardware: 'Your PC: RTX 3060 12 GB · 32 GB RAM', busy: null };
+  let status = { ok: true, ollama: { installed: true, version: '0.5.7' }, server: { running: true, base: 'http://127.0.0.1:11435', which: 'app' }, models: [{ name: 'qwen2.5:7b', sizeBytes: 4.7 * 1024 ** 3, sizeText: '4.7 GB', params: '7.6B', fit: { rating: 'excellent', label: '★★★ Excellent fit', reason: 'plenty of room' } }, { name: 'dolphin3:8b', sizeBytes: 4.9 * 1024 ** 3, sizeText: '4.9 GB', uncensored: true, fit: { rating: 'good', label: '★★ Good fit', reason: 'fits' } }], alfred: { model: 'qwen2.5:7b' }, hardware: 'Your PC: RTX 3060 12 GB · 32 GB RAM', busy: null };
   const checkResult = { ok: false, summary: '1 thing needs attention: it can use alfred\'s tools.', hardware: 'Your PC: RTX 3060 12 GB · 32 GB RAM', rows: [
     { id: 'installed', label: 'Ollama installed', ok: true, detail: 'Ollama 0.5.7', fix: null },
     { id: 'tools', label: 'It can use Alfred\'s tools', ok: false, detail: 'It did not call the test tool.', fix: { action: 'download-recommended', label: '⬇ Download qwen2.5:7b' } },
@@ -91,7 +91,7 @@ function load(api, opts = {}) {
   assert($('llm-btn-start').hidden && !$('llm-btn-stop').hidden, 'running → shows Stop, hides Start');
   assert(/RTX 3060/.test($('llm-hw').textContent), 'the hardware line');
   const rows = w.document.querySelectorAll('#llm-installed .llm-model');
-  assert(rows.length === 2 && /★★★ Great fit/.test(rows[0].textContent) && /4\.7 GB/.test(rows[0].textContent), 'installed models with size + fit');
+  assert(rows.length === 2 && /★★★ Excellent fit/.test(rows[0].textContent) && /4\.7 GB/.test(rows[0].textContent), 'installed models with size + fit');
   assert(/in use/.test(rows[0].textContent) && !rows[0].querySelector('.llm-use') && rows[1].querySelector('.llm-use') && /🔓/.test(rows[1].textContent), 'the current one says "in use"; others have Use; uncensored ones a 🔓');
 
   console.log('\n== ▶ Start Alfred: what is already downloaded, no download ==');
