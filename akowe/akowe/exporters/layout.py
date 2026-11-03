@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from . import unifont
 from .fontmetrics import WIDTHS
 
 MM_PER_PT = 25.4 / 72.0
@@ -69,11 +70,12 @@ def unencodable(text: str) -> list[str]:
 
 def winansi(text: str) -> str:
     """Text the PDF fonts can print: book text mapping, then characters outside WinAnsi as their plain-letter form
-    (é stays, ō -> o) or '?'. Used for picture captions and map labels, which never block an export."""
+    (é stays, ō -> o) or '?'. Used for picture captions and map labels, which never block an export. 🔤 H18: a letter
+    the bundled Unicode font prints (ọ, ł, Greek) stays as it is."""
     import unicodedata  # noqa: PLC0415
     out = []
     for ch in pdf_text(text):
-        if not unencodable(ch):
+        if not unencodable(ch) or unifont.covered(ch):
             out.append(ch)
             continue
         base = "".join(c for c in unicodedata.normalize("NFKD", ch) if not unicodedata.combining(c))
@@ -86,9 +88,15 @@ def encode(text: str) -> bytes:
 
 
 def text_width(text: str, font: str, size: float) -> float:
+    """Advance width in pt. 🔤 H18: letters WinAnsi lacks are measured in the Unicode font the PDF sets them in
+    (``unifont.segments``), so line breaking and justification match what is printed."""
+    if font == unifont.NAME:
+        return unifont.width(text) * size / 1000.0
+    if unifont.needs(text):
+        return sum(text_width(t, f, size) for t, f in unifont.segments(text, font))
     table = WIDTHS[font]
     total = 0
-    for byte in encode(text):
+    for byte in text.encode("cp1252", "replace"):
         total += table[byte - 32] if byte >= 32 else 0
     return total * size / 1000.0
 

@@ -47,9 +47,14 @@ VIEW_LABELS = (("front", "FRONT"), ("three_quarter_front", "3/4 FRONT"), ("side"
 
 
 def safe(text) -> str:
-    """Text the base-14 fonts can print (WinAnsi): other letters lose their accents, the rest becomes '?'."""
+    """Text the PDF can print: WinAnsi in the base-14 fonts and (🔤 H18) every letter of the bundled Unicode font
+    (ọ, ł, Greek stay as they are); only a letter no font has loses its accent or becomes '?'."""
+    from .exporters import unifont  # noqa: PLC0415
     out = []
     for ch in unicodedata.normalize("NFC", str(text or "")):
+        if ch not in "\n" and ord(ch) >= 32 and not unifont.winansi_ok(ch) and unifont.covered(ch):
+            out.append(ch)
+            continue
         if unicodedata.combining(ch):
             continue  # a lone accent the fonts cannot place
         if ch == "\n":

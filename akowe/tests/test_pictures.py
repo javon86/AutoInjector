@@ -173,12 +173,45 @@ def test_prompt_uses_the_scene_card_approved_looks_and_never_proposals(bk):
     out = pictures.prompt_for(app, "author", pid, BR, c2["chapter_id"], 2)
     p = out["prompt"]
     assert out["lock"] == "Mara Vell" and out["characters"][0] == "Mara Vell"
-    assert p.startswith("Art style: ink wash. Book illustration for chapter 2, scene 2:")
-    assert c2["cards"][1]["place"] in p and c2["cards"][1]["time"] in p and c2["cards"][1]["moment"] in p
+    assert p.startswith("Art style: ink wash. Book illustration for chapter 2, scene 2 (this moment, as written in the book):")
+    assert c2["cards"][1]["place"] in p and c2["cards"][1]["time"] in p
+    # 🖼 H22: the chapter is written, so the moment is what the text of scene 2 says (not the plan's line)
+    assert out["context"]["from_text"] and "(this moment, as written in the book)" in p
+    assert out["context"]["moment"][:60] in p
     assert "Fixed" not in p and "silver scar over the left brow" in p and "PROPOSED" not in p
     assert len(p) <= pictures.PROMPT_MAX
     with pytest.raises(AkoweError):
         pictures.prompt_for(app, "author", pid, BR, c2["chapter_id"], 6)  # no 6th scene card
+
+
+def test_h22_a_chapter_picture_is_made_from_the_written_text_and_goes_out_of_date_when_it_changes(bk):
+    app, pid, _b = bk
+    c1 = chs(app, pid)[0]
+    bp = BookPath(app.engine, "author", pid, BR)
+    _c, _latest, appr = bp.chapter_prose(bp.outline(), c1["chapter_id"])
+    written = appr["data"]["text"]
+    out = pictures.prompt_for(app, "author", pid, BR, c1["chapter_id"], None)
+    moment = out["context"]["moment"]
+    assert out["context"]["from_text"] and moment and moment[:40] in " ".join(written.split())
+    assert out["text_fp"] == pictures.text_fp(written)
+    j, _ = illustrate(app, pid, {"chapter_id": c1["chapter_id"], "engine": "sd"})
+    assert j["status"] == "done"
+    page = pictures.info(app, "author", pid, BR)
+    p1 = page["chapters"][0]["pictures"][0]
+    assert p1["text_old"] is False and page["text_old"] == 0
+    # the chapter is rewritten (a new approved version): the picture says it is out of date
+    r = bp.dispatch("C02", "UPDATE", base_ref=appr["ref"], payload=dict(appr["data"], text=written + "\n\nThe "
+                                                                         "storm tore the lighthouse lamp away."))
+    assert bp.approve_ref(r["output_refs"][0])["ok"]
+    page = pictures.info(app, "author", pid, BR)
+    p1 = page["chapters"][0]["pictures"][0]
+    assert p1["text_old"] is True and page["text_old"] == 1
+    assert "changed since this picture was made" in p1["text_old_words"]
+    j, _ = illustrate(app, pid, {"chapter_id": c1["chapter_id"], "engine": "sd", "replace": True})  # 🖼 Remake
+    assert j["status"] == "done"
+    p1 = pictures.info(app, "author", pid, BR)["chapters"][0]["pictures"][0]
+    assert p1["text_old"] is False and p1["chosen"] == 1  # the remade picture took the old one's place
+    assert pictures.written_moment("", None) == ""  # an unwritten chapter keeps using the plan
 
 
 # ====================================================================== the illustrate job
@@ -395,7 +428,7 @@ def test_pdf_epub_docx_place_pictures_with_captions_and_the_vector_map():
     assert not inspect_pdf(pdf)["errors"]
     r = pypdf.PdfReader(io.BytesIO(pdf))
     txt = [p.extract_text() for p in r.pages]
-    assert "Ashport" in txt[0] and "Obridge" in txt[0] and "The coast" in txt[0] and "One" not in txt[0]
+    assert "Ashport" in txt[0] and "Ōbridge" in txt[0] and "The coast" in txt[0] and "One" not in txt[0]
     assert not r.pages[0]["/Resources"].get("/XObject")  # the map is vector, not a picture
     assert b" c\n" in r.pages[0].get_contents().get_data() or b" c " in r.pages[0].get_contents().get_data()
     assert "One" in txt[1] and "Mara on the stair" in txt[1] and r.pages[1]["/Resources"]["/XObject"]

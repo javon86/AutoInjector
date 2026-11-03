@@ -127,6 +127,38 @@ def test_h7_the_sequel_carries_status_items_dossier_locks_and_the_story_so_far(b
     assert vals["handedness"]["value"] == "left" and vals["handedness"]["protected"] is True
 
 
+# ====================================================================== H18 letters and the book's language
+def test_h18_the_book_language_comes_from_the_profile_and_a_chapter_warns_at_approval(book1):
+    from akowe.book_path import BookPath, clean_profile, get_profile, save_profile
+    app, pid = book1
+    with pytest.raises(AkoweError) as e:
+        clean_profile({"language": "Yoruba please"})
+    assert e.value.errors[0]["path"] == "/language"
+    bp = BookPath(app.engine, "author", pid, BR)
+    assert bp.language_tag() == "en"  # nothing set: English, as before
+    save_profile(app.store, pid, {"language": "yo"})
+    bp = BookPath(app.engine, "author", pid, BR)
+    assert bp.language_tag() == "yo" and get_profile(app.store, pid)["language"] == "yo"
+    bp.a_setup_format({})
+    fmt = bp.mem["format"]
+    assert fmt["language"] == "yo"
+    font = bp.rec(fmt["font"]["record_id"])["data"]
+    aux = font.get("auxiliary_record", {}).get("data") or font
+    assert aux["language_tag"] == "yo"
+    pdfp = bp.rec(fmt["pdf_profile"]["record_id"])["data"]
+    assert (pdfp.get("auxiliary_record", {}).get("data") or pdfp)["language_tag"] == "yo"
+    # a chapter with letters no PDF font has: the approval says so at once (not the PDF at the very end)
+    outline = bp.outline()
+    _c, _latest, appr = bp.chapter_prose(outline, "ch1")
+    r = bp.dispatch("C02", "UPDATE", base_ref=appr["ref"],
+                    payload=dict(appr["data"], text=appr["data"]["text"] + " Adẹ́ wrote 中 on the wall."))
+    out = bp.approve_ref(r["output_refs"][0])
+    assert out["ok"] and "letters the PDF cannot print: 中" in out["warnings"][0]
+    r = bp.dispatch("C02", "UPDATE", base_ref=out["ref"],
+                    payload=dict(appr["data"], text=appr["data"]["text"] + " Adẹ́ — Łódź — Ἀθῆναι."))
+    assert "warnings" not in bp.approve_ref(r["output_refs"][0])  # accents, ł and Greek print fine now
+
+
 # ====================================================================== H17 the whole-book report of a long book
 def test_h17_book_parts_cover_every_word_and_merge_takes_the_median():
     from akowe import book_report as br

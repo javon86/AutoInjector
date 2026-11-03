@@ -220,8 +220,43 @@ def chapters(app, principal, pid, branch) -> list[dict]:
                                "characters": [_clip(n, 60) for n in c.get("characters") or []][:6],
                                "moment": _clip(c.get("change") or c.get("beat"), 160)} for k, c in enumerate(cards)],
                     "state": "approved" if appr else "draft" if rec else "unwritten",
-                    "section_id": appr["record_id"] if appr else None})
+                    "section_id": appr["record_id"] if appr else None, "text_fp": text_fp(text)})
     return out
+
+
+def text_fp(text: str) -> str | None:
+    """🖼 H22: a fingerprint of a chapter's written text (None when nothing is written yet)."""
+    t = str(text or "").strip()
+    return hashlib.sha256(t.encode("utf-8")).hexdigest()[:16] if t else None
+
+
+SCENE_BREAK = re.compile(r"^\s*(\*\s*\*\s*\*|#)\s*$")
+
+
+def written_moment(text: str, scene: int | None, n: int = 420) -> str:
+    """🖼 H22: what the picture shows, taken from the WRITTEN chapter (not the plan): the scene's (or the chapter's)
+    paragraph a little past its middle — where the scene has turned — and the next ones, at most ``n`` characters.
+    Headings and scene-break lines are left out. "" when nothing is written."""
+    lines = str(text or "").splitlines()
+    scenes, cur = [], []
+    for ln in lines:
+        if SCENE_BREAK.match(ln):
+            scenes.append(cur)
+            cur = []
+        elif not ln.lstrip().startswith("#"):
+            cur.append(ln)
+    scenes.append(cur)
+    part = scenes[scene - 1] if scene and 0 < scene <= len(scenes) else [x for sc in scenes for x in sc]
+    paras = [" ".join(p.split()) for p in "\n".join(part).split("\n\n") if p.strip()]
+    if not paras:
+        return ""
+    start = min(len(paras) - 1, (len(paras) * 3) // 5)
+    out = ""
+    for p in paras[start:]:
+        out = f"{out} {p}".strip()
+        if len(out) >= n:
+            break
+    return _fit(out, n)
 
 
 def _places(store, pid, branch) -> list[dict]:
@@ -300,10 +335,23 @@ def scene_context(app, principal, pid, branch, chapter_id: str, scene: int | Non
         moment = card.get("change") or card.get("beat") or plan.get("objective")
     else:
         moment = plan.get("objective") or plan.get("summary") or card.get("change")
+    # 🖼 H22: a written chapter is illustrated from what was WRITTEN (the plan can differ): the passage, and the
+    # characters it names come first (their locked looks go into the prompt)
+    try:
+        _c, latest, appr = bp.chapter_prose(outline, chapter_id)
+    except Exception:  # noqa: BLE001 - unwritten: the plan
+        latest = appr = None
+    written = str((((appr or latest) or {}).get("data") or {}).get("text") or "")
+    passage = written_moment(written, scene) if written else ""
+    if passage:
+        moment = passage
+        seen = chars_mod.present_in(cs, passage)  # who the written moment names: first, then the planned others
+        present = [c for c in present if c in seen] + [c for c in seen if c not in present] + \
+            [c for c in present if c not in seen]
     return {"number": plan["number"], "scene": scene, "place": place, "time": _clip(card.get("time"), 80),
-            "moment": _clip(moment, 400), "obstacle": _clip(card.get("obstacle"), 200),
+            "moment": _clip(moment, 420), "obstacle": _clip(card.get("obstacle"), 200),
             "characters": [{"record_id": c["record_id"], "name": c["name"]} for c in present][:4],
-            "pov": pov["name"] if pov else None}
+            "pov": pov["name"] if pov else None, "from_text": bool(passage), "text_fp": text_fp(written)}
 
 
 def build_prompt(ctx: dict, looks: dict, style: str, lock: str | None = None) -> str:
@@ -311,8 +359,9 @@ def build_prompt(ctx: dict, looks: dict, style: str, lock: str | None = None) ->
     look and the character lock. ``looks`` = {name: look text}."""
     style = _clip(style, STYLE_MAX) or "detailed book illustration"
     where = f"chapter {ctx['number']}" + (f", scene {ctx['scene']}" if ctx.get("scene") else "")
-    head = f"Art style: {style}. Book illustration for {where}"
-    moment = _fit(ctx.get("moment") or "", 320)
+    head = f"Art style: {style}. Book illustration for {where}" + (
+        " (this moment, as written in the book)" if ctx.get("from_text") else "")
+    moment = _fit(ctx.get("moment") or "", 420 if ctx.get("from_text") else 320)
     setting = ", ".join(x for x in (_fit(ctx.get("place") or "", 140), _fit(ctx.get("time") or "", 70)) if x)
     tail = "Keep every character's look exactly as described. No text, letters, captions or watermark in the picture."
     lock_txt = f"Character lock: {lock}." if lock else ""
@@ -340,7 +389,7 @@ def prompt_for(app, principal, pid, branch, chapter_id: str, scene: int | None) 
         (ctx["characters"][0]["name"] if ctx["characters"] else None)
     style = doc(app.store, pid, branch).get("style") or ""
     return {"prompt": build_prompt(ctx, looks, style, lock), "lock": lock,
-            "characters": [c["name"] for c in ctx["characters"]], "context": ctx}
+            "characters": [c["name"] for c in ctx["characters"]], "context": ctx, "text_fp": ctx.get("text_fp")}
 
 
 def map_prompt(app, pid, branch) -> str:
@@ -535,6 +584,7 @@ def start_illustrate(app, principal, pid, branch, body) -> dict:
     engine = _engine(body)
     scene = _scene(body.get("scene"))
     count = body.get("count", 1)
+    replace = body.get("replace") is True  # 🖼 H22 Remake: the new picture takes the place of the out-of-date one
     if isinstance(count, bool) or not isinstance(count, int) or not 1 <= count <= MAX_COUNT:
         raise _bad("/count", f"count: how many pictures to choose from, 1-{MAX_COUNT}")
     chs = chapters(app, principal, pid, branch)
@@ -556,7 +606,9 @@ def start_illustrate(app, principal, pid, branch, body) -> dict:
                 j.check()
                 j.phase = f"Making picture {i + 1} of {count} for {what} — a ChatGPT picture can take 1-3 minutes"
                 cand = _candidate(app, j, pid, branch, dict(base), f"Picture for {what}", engine)
-                add_candidate(app.store, pid, branch, pic_id, cand, choose=None if count == 1 else False,
+                cand["text_fp"] = info.get("text_fp")  # 🖼 H22: the chapter text it was made from
+                add_candidate(app.store, pid, branch, pic_id, cand,
+                              choose=(True if replace else None) if count == 1 else False,
                               prompt=info["prompt"])
                 j.done = i + 1
                 j.results.append({"ok": True, "pic_id": pic_id, "engine": cand.get("engine"),
@@ -600,6 +652,7 @@ def start_illustrate_all(app, principal, pid, branch, body) -> dict:
                          "returnImage": True}
                 cand = _candidate(app, j, pid, branch, {k_: v for k_, v in body_.items() if v is not None},
                                   f"Picture for chapter {ch['number']}", engine)
+                cand["text_fp"] = info.get("text_fp")  # 🖼 H22
                 add_candidate(app.store, pid, branch, pic_id, cand, choose=True, prompt=info["prompt"])
                 made += 1
                 j.done = k + 1
@@ -848,15 +901,29 @@ def info(app, principal, pid, branch) -> dict:
     for p in pics:
         if p["kind"] == "chapter":
             by_ch.setdefault(p["chapter_id"], []).append(p)
+    raw = d["pictures"]
+    old = 0
     for c in chs:
         c["pictures"] = sorted(by_ch.get(c["chapter_id"], []), key=lambda p: (p["scene"] or 0, p["id"]))
         c.pop("section_id", None)
+        for p in c["pictures"]:  # 🖼 H22: made from an older text of the chapter -> out of date
+            src = raw.get(p["id"]) or {}
+            ch_ = src.get("chosen")
+            cand = (src.get("candidates") or [])[ch_] if isinstance(ch_, int) and ch_ < len(src.get("candidates")
+                                                                                            or []) else None
+            made_from = (cand or {}).get("text_fp")
+            p["text_old"] = bool(made_from and c.get("text_fp") and made_from != c["text_fp"])
+            if p["text_old"]:
+                p["text_old_words"] = (f"🖼 Chapter {c['number']} changed since this picture was made from it — "
+                                       "remake it so it shows what the chapter says now.")
+                old += 1
+    text_old = old
     return {"style": d.get("style") or "", "styles": list(STYLES), "revision": d.get("revision") or 0,
             "chapters": chs, "map": next((p for p in pics if p["kind"] == "map"), None),
             "places": len(_places(app.store, pid, branch)),
             "counts": {"pictures": len(pics), "chosen": sum(1 for p in pics if p["picture"]),
                        "chapters_with_picture": sum(1 for c in chs if has_chosen(d, c["chapter_id"]))},
-            "where": list(WHERE), "max_count": MAX_COUNT, "out_of_date": None,
+            "where": list(WHERE), "max_count": MAX_COUNT, "out_of_date": None, "text_old": text_old,
             "image_bridge": {"uses": [u for u, _t in forge.bridge_targets(app)]}}
 
 

@@ -41,7 +41,8 @@ from ..exporters.docx import build_docx, inspect_docx
 from ..exporters.epub import build_epub, inspect_epub
 from ..exporters.images import ImageInfo, UnsupportedImage, load_image, sniff_mime
 from ..exporters.layout import (Geometry, LayoutError, Typography, make_geometry, mm_to_pt, paginate,
-                                resolve_family, unencodable)
+                                resolve_family)
+from ..exporters.unifont import uncovered  # 🔤 H18: what NO font of the PDF can print (WinAnsi + DejaVu Serif)
 from ..exporters.pdf import inspect_pdf, render_cover_pdf, render_pdf
 from . import register
 from .base import Context, OperationHandler, Result
@@ -681,7 +682,7 @@ class TypographyHandler(GHandler):
         g01_rec = ctx.field_record("manuscript_ref")
         asm = assemble(ctx, g01_rec, "/payload/manuscript_ref")
         typo = typography_from(fp, "/payload/font_profile_ref/fallback_names")
-        bad = unencodable(bookmod.all_text(asm.book))
+        bad = uncovered(bookmod.all_text(asm.book))
         if bad:
             raise _blocked("CAPABILITY_UNAVAILABLE", "/payload/manuscript_ref",
                            f"characters not covered by the base-14 WinAnsi fonts: {''.join(bad[:20])!r}",
@@ -718,7 +719,7 @@ class ChapterTitlePages(GHandler):
         typo_rec = ctx.field_record("typography_ref")
         g05, _ = load_artifact(ctx, typo_rec, ("G05",), "/payload/typography_ref")
         typography_from(g05, "/payload/typography_ref")
-        bad = unencodable(rules["pattern"])
+        bad = uncovered(rules["pattern"])
         if bad:
             raise _blocked("CAPABILITY_UNAVAILABLE", "/payload/chapter_title_rules_ref",
                            f"title pattern uses characters the fonts cannot render: {''.join(bad)!r}")
@@ -780,7 +781,7 @@ class _Matter(GHandler):
                                f"generation omitted items {missing}")
             transform = "AI"
         items = [self.logic_item(i, md) if i in self.logic_items else generated[i] for i in wanted]
-        bad = unencodable("\n".join(i["title"] + "\n" + i["text"] for i in items))
+        bad = uncovered("\n".join(i["title"] + "\n" + i["text"] for i in items))
         findings = []
         if bad:
             findings.append(ctx.finding("GLYPHS", f"characters outside WinAnsi: {''.join(bad[:20])!r} (PDF export will "
@@ -839,7 +840,7 @@ class PageLayout(GHandler):
         margins = ctx.payload["margins_pt"]
         geom = make_geometry(page, margins)
         asm = assemble(ctx, g01_rec, "/payload/manuscript_ref")
-        bad = unencodable(bookmod.all_text(asm.book))
+        bad = uncovered(bookmod.all_text(asm.book))
         if bad:
             raise _blocked("CAPABILITY_UNAVAILABLE", "/payload/manuscript_ref",
                            f"characters not covered by the fonts: {''.join(bad[:20])!r}")
@@ -1159,7 +1160,7 @@ class PdfExport(_Export):
             geom = make_geometry(page, {"top": 0, "bottom": 0, "left": 0, "right": 0})
             typo, style = typography_from(fp, "/payload/pdf_profile_ref/font_profile_ref"), None
         self._approvals(ctx, asm, appr)
-        bad = unencodable(bookmod.all_text(asm.book))
+        bad = uncovered(bookmod.all_text(asm.book))
         if bad:
             raise _blocked("CAPABILITY_UNAVAILABLE", "/payload/final_book_ref",
                            f"characters not covered by the base-14 fonts: {''.join(bad[:20])!r}")

@@ -47,7 +47,8 @@ PLAN_OPS = {"B01": "premise", "B03": "main_plot", "B11": "outline"}
 PLAN_LABELS = {"premise": "Premise", "main_plot": "Main plot", "outline": "Chapter outline"}
 PROFILE_KEYS = ("title", "author", "genre", "audience", "tone", "idea", "length", "chapters",
                 # 📖 the binder's book values (binder_fields.py)
-                "series", "series_number", "subgenre", "content_limits", "themes", "central_question")
+                "series", "series_number", "subgenre", "content_limits", "themes", "central_question",
+                "language")  # 🔤 H18
 
 
 class BibleProblem(Exception):

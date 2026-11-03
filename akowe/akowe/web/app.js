@@ -5042,7 +5042,7 @@ const LENGTH_TIP = () => [h('p', null, 'The length sets how many chapters the ou
 const PROFILE_HELP = {
   title: 'The working title. You can change it any time.', author: 'Your name or pen name, printed on the title page.',
   genre: 'What kind of story it is — it guides the AI’s choices.', audience: 'Who will read it; the AI matches the words and themes to them.',
-  length: 'How long the book should be; it sets how many chapters are planned.', tone: 'How it should feel to read.',
+  length: 'How long the book should be; it sets how many chapters are planned.', tone: 'How it should feel to read.', language: 'The language the book is written in, as a short code: en (English), yo (Yorùbá), pl (Polish), el (Greek)… Empty = English. The PDF, EPUB and Word files say it.',
   idea: 'Your story in a few sentences: who, where, and what goes wrong. Everything is built to fit this.',
 };
 
@@ -5067,6 +5067,7 @@ function profileFields(prof, prefix) {
     field('audience', 'Who is it for?', aud),
     field('length', 'Length', lengthSel, infoTip('Length', ...LENGTH_TIP())),
     field('tone', 'Tone', h('input', { type: 'text', value: prof.tone || '', list: `${prefix}-tones`, maxlength: '200' }), dl(`${prefix}-tones`, TONES)),
+    field('language', 'Language of the book', h('input', { type: 'text', value: prof.language || '', placeholder: 'en', maxlength: '35', autocomplete: 'off' })),
     field('idea', 'Your idea in a paragraph', h('textarea', { rows: '4', maxlength: '4000' }, prof.idea || '')));
   f.idea.value = prof.idea || '';
   return { el, get: () => Object.fromEntries(Object.entries(f).map(([k, c]) => [k, c.value.trim()])), f };
