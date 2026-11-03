@@ -8,7 +8,8 @@
      pages: [{template, entry_id, title, page_id, page, status: approved|draft|needs_you, target?,
               sections: {<code>: {fields: {<id>: field}, rows?: [{<id>: field, _meta?}]}}, pics: {<id>: pic},
               graph? (6) | map? (9), story_role? (story_roles key) + role_label, role_icon, is_protagonist (5)}],
-     contents: [{template, title, count, page, page_id}], todo: [{what, page_id, action}], counts}
+     contents: [{template, title, count, page, page_id}], todo: [{what, page_id, action}], counts,
+     glance: {…} (📖 At a glance, the screen-only status page: see ``glance``; never printed or exported)}
 
 A field is ``{value, status: approved|proposed|supplied|empty|auto, source, edit?, draft?, new?}``; a picture
 ``{url, alt, mime?, items?: [{url, alt}], video?, png_url?}``. Every field id of ``binder_schema.json`` (the user's
@@ -2361,7 +2362,7 @@ def fill(page: Page) -> dict:
 def _plan_pages(b: Book) -> list[Page]:
     """Every page, in binder order (the page numbers are their positions)."""
     pages = [Page(b, "1", "cover", b.title), Page(b, "2", "contents", "Contents"),
-             Page(b, "3", "glance", "At a glance"), Page(b, "4", "cast", "Cast list")]
+             Page(b, "3", "glance", "Book facts"), Page(b, "4", "cast", "Cast list")]
     for c in b.chars:
         d = b.dossiers.get(c["record_id"]) or {}
         p = Page(b, "5", f"character-{slug(c['record_id'])}", c["name"], entry_id=c["record_id"],
@@ -2406,7 +2407,7 @@ def _plan_pages(b: Book) -> list[Page]:
     return pages
 
 
-CONTENT_GROUPS = (("3", "At a glance", "🔭"), ("4", "Cast", "👥"), ("6", "Relationships", "🕸"),
+CONTENT_GROUPS = (("3", "Book facts", "🔭"), ("4", "Cast", "👥"), ("6", "Relationships", "🕸"),
                   ("7", "Places", "🏙"), ("8", "World", "🌍"), ("9", "Map", "🗺"), ("10", "Story plan", "📈"),
                   ("11", "Chapters", "📖"), ("12", "Rules & facts", "🔒"))
 
@@ -2428,13 +2429,22 @@ def build(app, pid: str, branch: str = "main", *, look: str | None = None, as_of
     series, each character page's "Through the series" strip)."""
     from . import series as series_mod  # noqa: PLC0415
     if as_of is not None:
-        return series_mod.build_as_of(app, pid, branch, look, as_of)
+        data = series_mod.build_as_of(app, pid, branch, look, as_of)
+        try:
+            data["glance"] = glance(data)
+        except Exception:  # noqa: BLE001
+            log.exception("binder: the At a glance block (as of)")
+        return data
     data = _build(app, pid, branch, look=look)
     try:
         series_mod.binder_block(app, data, pid, branch)
     except Exception:  # noqa: BLE001 - the binder never fails over the series
         log.exception("binder: the series block")
         data["series"] = {"in_series": False, "number": 1, "books": [], "problem": "The series could not be read."}
+    try:
+        data["glance"] = glance(data, sequel=series_mod.sequel_status(app, pid, branch))
+    except Exception:  # noqa: BLE001 - the binder never fails over its status page
+        log.exception("binder: the At a glance block")
     return data
 
 
@@ -2543,7 +2553,7 @@ def _build(app, pid: str, branch: str = "main", *, look: str | None = None) -> d
             filled[p.page_id] = fill(p)
     out_pages = [filled[p.page_id] for p in pages]
     contents = []
-    groups = (("1", "Cover"), ("2", "Contents"), ("3", "At a glance"), ("4", "Cast list"), ("5", "Characters"),
+    groups = (("1", "Cover"), ("2", "Contents"), ("3", "Book facts"), ("4", "Cast list"), ("5", "Characters"),
               ("6", "Relationship map"), ("7", "Places"), ("8A", "Magic systems"), ("8B", "Items"),
               ("8C", "World"), ("9", "Map"), ("10", "Story plan"), ("11", "Chapters"), ("12", "Rules & facts"))
     for tpl, title in groups:
@@ -2565,6 +2575,136 @@ def _build(app, pid: str, branch: str = "main", *, look: str | None = None) -> d
             "pictures": {"waiting": pics_waiting, "waiting_count": sum(len(v) for v in pics_waiting.values()),
                          "rest": pics_rest},
             "fields_info": bf.info()}
+
+
+# ====================================================================== 📖 At a glance (the screen-only status page)
+# The parts of the binder, in binder order: (key, plain name, icon, templates). "Book facts" is template 3 (whose
+# schema title is "At a glance"; the screen calls it Book facts so it is not mixed up with this status page).
+GLANCE_PARTS = (("cover", "Cover", "📕", ("1",)), ("contents", "Contents", "☰", ("2",)),
+                ("facts", "Book facts", "👁", ("3",)), ("cast", "Cast", "👥", ("4",)),
+                ("characters", "Characters", "👤", ("5",)), ("relationships", "Relationships", "🕸", ("6",)),
+                ("places", "Places", "🏙", ("7",)), ("world", "World", "✨", ("8A", "8B", "8C")),
+                ("map", "Map", "🗺", ("9",)), ("plan", "Story plan", "📈", ("10",)),
+                ("chapters", "Chapters", "📄", ("11",)), ("rules", "Rules & facts", "⚖", ("12",)))
+GLANCE_EMPTY_BELOW = 0.25   # a page with less than a quarter of its boxes filled counts as "empty"
+GLANCE_WHAT = ("Your Book Bible is the reference binder for everything in your book — who, where, what happened. "
+               "The AI keeps it up to date; you approve.")
+
+
+def _has_value(v) -> bool:
+    if isinstance(v, str):
+        return bool(v.strip())
+    return v not in (None, [], {})
+
+
+def page_fill(p: dict) -> tuple[int, int, int]:
+    """(boxes filled, boxes, proposals) of one binder page: every field that can hold something (not the ones Akọwe
+    cannot store yet, nor the ones it works out itself), a repeating section counting as one box (filled when it
+    has a row)."""
+    filled = total = proposed = 0
+    for sec in (p.get("sections") or {}).values():
+        if not isinstance(sec, dict):
+            continue
+        rows = sec.get("rows")
+        for r in rows or []:
+            proposed += sum(1 for k, f in (r or {}).items() if not k.startswith("_") and isinstance(f, dict)
+                            and f.get("status") == "proposed")
+        if rows is not None or any(isinstance(f, dict) and f.get("repeat") for f in (sec.get("fields") or {}).values()):
+            total += 1
+            filled += bool(rows)
+            continue
+        for f in (sec.get("fields") or {}).values():
+            if not isinstance(f, dict) or f.get("unavailable") or f.get("status") == "auto":
+                continue   # worked out by Akọwe (codes, counts, page numbers): not something to fill
+            total += 1
+            if f.get("status") != "empty" and _has_value(f.get("value")):
+                filled += 1
+            if f.get("status") == "proposed":
+                proposed += 1
+    return filled, total, proposed
+
+
+def page_state(p: dict) -> str:
+    """empty | draft (the AI's draft, or proposals waiting) | approved — one dot on At a glance."""
+    filled, total, _n = page_fill(p)
+    if not total or filled < GLANCE_EMPTY_BELOW * total:
+        return "empty"
+    return "approved" if p.get("status") == "approved" else "draft"
+
+
+def glance(data: dict, *, engine: dict | None = None, sequel: dict | None = None) -> dict:
+    """📖 At a glance: how full the binder is, in plain numbers, from the binder contract itself (``data``: what
+    ``build`` returns). ``engine``: the picture maker's state ({ready, code, why}; None = not checked here, the
+    ``GET …/binder/glance`` route checks it); ``sequel``: ``series.sequel_status`` (None = not known).
+
+    -> {what, pages_filled, pages_total, parts: [{key, title, icon, pages, page_id, percent, states, dots:
+    [{page_id, title, state}]}], pictures: {waiting, missing, engine}, facts: {waiting, page_id, values},
+    series: {in_series, name, number, books, sequel}, main: {name, page_id, portrait} | null, look}"""
+    pages = [p for p in data.get("pages") or [] if isinstance(p, dict)]
+    parts = []
+    filled_pages = proposed = 0
+    first_props = None
+    for key, title, icon, tpls in GLANCE_PARTS:
+        ps = [p for p in pages if str(p.get("template")) in tpls]
+        f_sum = t_sum = 0
+        dots = []
+        for p in ps:
+            f, t, n = page_fill(p)
+            f_sum, t_sum = f_sum + f, t_sum + t
+            proposed += n
+            if n and first_props is None:
+                first_props = p.get("page_id")
+            stt = page_state(p)
+            filled_pages += stt != "empty"
+            dots.append({"page_id": p.get("page_id"), "title": title if tpls[0] in ("1", "2", "3") else
+                         (p.get("title") or title), "state": stt})
+        states = {k: sum(1 for d in dots if d["state"] == k) for k in ("empty", "draft", "approved")}
+        parts.append({"key": key, "title": title, "icon": icon, "templates": list(tpls), "pages": len(ps),
+                      "page_id": ps[0].get("page_id") if ps else None,
+                      "percent": round(100 * f_sum / t_sum) if t_sum else 0, "states": states, "dots": dots})
+    pics = data.get("pictures") if isinstance(data.get("pictures"), dict) else {}
+    prog = data.get("progress") if isinstance(data.get("progress"), dict) else {}
+    nf = ((data.get("counts") or {}).get("new_fields") or {}) if isinstance(data.get("counts"), dict) else {}
+    sr = data.get("series") if isinstance(data.get("series"), dict) else {}
+    books = [b for b in sr.get("books") or [] if isinstance(b, dict)]
+    book = data.get("book") if isinstance(data.get("book"), dict) else {}
+    prot = book.get("protagonist") if isinstance(book.get("protagonist"), dict) else None
+    main = None
+    if prot and prot.get("name"):
+        pg = next((p for p in pages if p.get("page_id") == prot.get("page_id")), None)
+        pic = ((pg or {}).get("pics") or {}).get("5.1.1") if pg else None
+        main = {"name": prot["name"], "page_id": prot.get("page_id") if pg else None,
+                "portrait": {"url": pic["url"], "alt": pic.get("alt") or f"Portrait of {prot['name']}"}
+                if isinstance(pic, dict) and pic.get("url") else None}
+    seq = None
+    if isinstance(sequel, dict):
+        seq = {"possible": bool(sequel.get("possible")), "why": sequel.get("why") or None,
+               "next_number": sequel.get("next_number"), "next_book": sequel.get("next_book")}
+    return {"what": GLANCE_WHAT, "pages_filled": filled_pages, "pages_total": len(pages), "parts": parts,
+            "pictures": {"waiting": max(int(pics.get("rest") or 0), sum(len(p.get("pictures_waiting") or [])
+                                                                          for p in pages)),
+                         "missing": int(prog.get("missing_pictures") or 0),
+                         "engine": engine},
+            "facts": {"waiting": proposed, "page_id": first_props, "values": int(nf.get("values") or 0)},
+            "series": {"in_series": bool(sr.get("in_series")), "name": sr.get("name") or "",
+                       "number": int(sr.get("number") or 1), "books": max(len(books), int(sr.get("number") or 1)),
+                       "sequel": seq},
+            "main": main, "look": book.get("look") or "classic"}
+
+
+def glance_live(app, pid: str, branch: str) -> dict:
+    """GET …/binder/glance: At a glance with the picture maker checked now (one quick GET /image/backend)."""
+    from . import book_pictures  # noqa: PLC0415
+    data = build(app, pid, branch)
+    try:
+        ok, code, why = book_pictures.probe(app, book_pictures.settings(app.store)["engine"])
+        engine = {"ready": bool(ok), "code": code or None, "why": why or None}
+    except Exception:  # noqa: BLE001 - cannot tell: the button stays (the job says it in plain words)
+        log.exception("binder: the picture maker check")
+        engine = None
+    g = data.get("glance") or glance(data)
+    g["pictures"]["engine"] = engine
+    return g
 
 
 def _last_updated(b: Book) -> str:
@@ -2751,6 +2891,8 @@ def route(app, method: str, rest: list, query: dict, body, principal: str, pid: 
         return 200, build(app, pid, branch, look=look or None, as_of=as_of)
     if rest and rest[0] == "series":  # 📚 series progression (series.py)
         return series_route(app, method, rest[1:], body, principal, pid, branch)
+    if rest == ["glance"] and method == "GET":  # 📖 At a glance, the picture maker checked now
+        return 200, glance_live(app, pid, branch)
     if rest == ["look"] and method == "PUT":
         return 200, save_look(app.store, pid, body)
     if rest == ["schema"] and method == "GET":

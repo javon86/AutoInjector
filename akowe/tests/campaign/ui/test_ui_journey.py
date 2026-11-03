@@ -185,6 +185,7 @@ def test_book_bible_every_look_and_the_series_panel(make_context, jw, width, hei
         check_screen(page, f"bible-{look}")
     # a character page with the "Through the series" strip, and 📖 As of book 1
     page.select_option("[data-testid=binder-look]", "fantasy")
+    page.click("[data-testid=binder-view] > summary")   # ⋯ View options holds 📖 As of book N
     sel = page.locator("[data-testid=binder-as-of]")
     assert sel.is_visible()
     sel.select_option("1")

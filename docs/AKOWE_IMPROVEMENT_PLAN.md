@@ -1047,3 +1047,24 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
     another book of the series travels as a reference only (its bytes are in that book's file); an item's base
     powers are not known (only the changes are shown); the sequel still needs an AI; not tried with a real AI or
     Stable Diffusion.
+- **📖 Book Bible: "At a glance" first page + a simpler toolbar (2026-11-03, user: "the Book Bible needs to make
+  more sense").** *Built:* the binder now opens on **📖 At a glance** (Cover is the next page; a deep link or ⋯ View
+  options → All pages skips it): one line saying what the Book Bible is ("…The AI keeps it up to date; you
+  approve."), "N of M pages filled" + a bar and dots (○ empty · ✎ AI draft · ✔ approved) for each of the 12 parts
+  (Cover, Contents, Book facts, Cast, Characters, Relationships, Places, World, Map, Story plan, Chapters, Rules &
+  facts) — each row opens that part; 🖼 pictures waiting + "Make the rest of the pictures", or "Picture maker is off —
+  open Settings"; ✎ facts waiting for your OK + ✨ Fill from the book + "Show me →"; ⬇ PDF · ⬇ Word · 🖨 Print; 📚
+  "Book N of M" + 📚 Start a sequel (disabled with the reason); ★ the main character with portrait; 🎨 the look +
+  Change look. The numbers are server-side: `binder.glance(data)` over the existing contract (added as `glance` to
+  `GET …/binder`, nothing else changed; auto-computed and not-stored fields are not counted; a page under 25 % filled
+  is "empty"); `GET …/binder/glance` adds the picture-maker check (`book_pictures.probe`) and the sequel status. The
+  page is screen-only: it is not a binder page, so ⬇ PDF / ⬇ Word / the saved Book Bible never contain it and 🖨 Print
+  from it prints the whole binder. Template 3 ("At a glance" in the schema) is now shown as **Book facts** (page
+  title, contents) so the two are not mixed up. *Toolbar:* only 🎨 Look · 🔍 Search · ⬇ Export (PDF / Word / Print) ·
+  📚 Series, plus **⋯ View options** (One page / All pages, 📖 As of book N, Show field numbers); element ids kept.
+  Every binder page has **ⓘ What is this page?** (one line per template). Files: `akowe/akowe/binder.py`,
+  `web/binder.js`, `web/binder.css`. Tests: `tests/test_binder_glance.py` (11),
+  `test_ui_binder.py::test_opens_on_at_a_glance_and_its_rows_jump_to_the_pages`, `::test_at_a_glance_actions`,
+  `::test_at_a_glance_picture_maker_off_and_a_series_of_two`, `::test_toolbar_four_tools_and_view_options_at_1280x720`,
+  `::test_at_a_glance_in_every_look` (7), `::test_what_is_this_page_on_every_template`. *Not done:* the
+  picture-maker check runs once per opening (it is not re-checked while the page stays open).
