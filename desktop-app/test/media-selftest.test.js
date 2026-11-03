@@ -230,6 +230,31 @@ async function main() {
     assert(r4.ok && r4.counts.fail === 0 && r4.steps.every((s) => s.status === 'skip'), 'no services wired: every step is skipped, nothing breaks');
   }
 
+  console.log('\n== the view: a progress message that arrives after the answer, and a run started by Alfred (sweep 2026-11) ==');
+  {
+    const { JSDOM } = require('jsdom');
+    const dom = new JSDOM(fs.readFileSync(path.join(__dirname, '..', 'controls.html'), 'utf8'), { runScripts: 'outside-only', url: 'http://localhost/controls.html' });
+    const w = dom.window; const $ = (id) => w.document.getElementById(id);
+    let onProg = null; let release = null;
+    const started = 1793676000000;
+    const report = { ok: true, mode: 'quick', startedAt: new Date(started).toISOString(), summary: '🩺 Pictures & video self-test (Quick): 12 ✅', counts: { pass: 12 }, steps: [{ id: 'forge', name: 'Forge', status: 'pass' }], markdown: '#', files: { md: '/x.md' } };
+    w.api = { mediaTest: { run: () => new Promise((r) => { release = r; }), status: async () => ({ running: false }), stop: async () => ({ ok: true }), copy: async () => ({ ok: true }), openReport: async () => ({ ok: true }), onProgress: (fn) => { onProg = fn; } } };
+    w.eval(fs.readFileSync(path.join(__dirname, '..', 'media-selftest-ui.js'), 'utf8'));
+    $('btn-mt-quick').click(); await sleep(10);
+    onProg({ running: true, mode: 'quick', startedAt: started, index: 11, total: 12, current: { id: 'x', name: 'Last step' }, steps: [] });
+    release(report); await sleep(20);
+    // the last "12 of 12 done" message overtakes nothing — it lands after the answer
+    onProg({ running: true, mode: 'quick', startedAt: started, index: 12, total: 12, current: null, steps: [{ id: 'forge', name: 'Forge', status: 'pass' }] });
+    await sleep(10);
+    assert(!$('btn-mt-quick').disabled && $('btn-mt-stop').disabled && !/Running/.test($('mt-progress').textContent) && /12 ✅/.test($('mt-summary').textContent), `a late progress message after the answer leaves ▶ usable (progress “${$('mt-progress').textContent}”)`);
+    // 🎩 Alfred runs it (mediatest.run): the view follows, and frees ▶ when it ends
+    onProg({ running: true, mode: 'full', startedAt: started + 60000, index: 3, total: 18, current: { id: 'clip', name: 'The tiny clip' }, steps: [] });
+    assert($('btn-mt-quick').disabled && !$('btn-mt-stop').disabled && /Step 4 of 18/.test($('mt-progress').textContent), 'a run started by Alfred shows here while it runs');
+    onProg({ running: false, last: '🩺 Pictures & video self-test (Full): 15 ✅ · 1 ❌' });
+    assert(!$('btn-mt-quick').disabled && $('btn-mt-stop').disabled && $('mt-progress').textContent === '' && /Full\): 15 ✅/.test($('mt-summary').textContent), 'when that run ends: ▶ works again and its summary shows (it stayed “Running…” for ever before)');
+    w.close();
+  }
+
   console.log(`\n${passed} passed, ${failed} failed`);
   try { fs.rmSync(TMP, { recursive: true, force: true }); } catch (_) {}
   process.exit(failed ? 1 : 0);

@@ -1496,7 +1496,10 @@ async function testDeepCapabilityCheck() {
   await new Promise((r) => setTimeout(r, 30));
   assert(api.calls.some((c) => c.fn === "voiceRedownload"), "clicking it runs the re-download");
   assert(/Downloaded a fresh copy of the voice/.test(log.textContent) && /Done/.test(fixBtn.textContent), "and reports the result");
-  click(dom, "btn-cap-modal-close");
+  // sweep 2026-11: the keyboard closes it too (Esc), and Close has the focus when it opens
+  assert(modal.classList.contains("on") && doc.activeElement === doc.getElementById("btn-cap-modal-close"), "the pop-up opens with Close focused");
+  doc.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  assert(!modal.classList.contains("on"), "Esc closes the results pop-up");
   api.butlerCapabilityTest = realCap;
 
   // The User Panel button and the System-Check deep toggle run the same test.

@@ -285,7 +285,8 @@
     #term-input.answering { border-color:#e0a24a; }
     .term-tools button, .term-tools select { font-size:11px; padding:1px 6px; }
     .zone-tabs { flex-wrap:nowrap; white-space:nowrap; flex:0 0 auto; }
-    .term-tools { flex-wrap:nowrap; white-space:nowrap; overflow:hidden; gap:3px; }
+    /* wraps instead of cutting off 📤 when the column is narrow (1280-wide window with 🎩 Alfred's side panel open) */
+    .term-tools { flex-wrap:wrap; white-space:nowrap; gap:3px; }
     .term-tools select { width:74px; }
     .zone-tab { padding:1px 8px; white-space:nowrap; }
     .term-auto { white-space:nowrap; }

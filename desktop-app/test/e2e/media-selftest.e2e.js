@@ -67,6 +67,8 @@ async function main() {
     await c.click('#btn-sd-mediatest');
     await c.waitForSelector('#vd-view-selftest:not([hidden])', { timeout: 10000 }).catch(() => {});
     assert(await c.evaluate(() => !document.getElementById('video-tab').hidden && !document.getElementById('vd-view-selftest').hidden), '…it opens 🎬 Video → 🩺 Test pictures & video');
+    await c.click('#vd-sub-make'); await c.click('#vd-sub-selftest');
+    assert(await c.evaluate(() => !document.getElementById('vd-view-selftest').hidden && document.getElementById('vd-view-make').hidden), 'the 🩺 Test pictures & video tab button in 🎬 Video opens it too (sweep 2026-11: it did nothing)');
 
     // ---- 1. Quick
     console.log('\n== 1. ▶ Quick ==');
@@ -91,6 +93,9 @@ async function main() {
     const qJson = JSON.parse(fs.readFileSync(st1.last.files.json, 'utf8'));
     assert(qJson.kind === 'media-selftest' && qJson.mode === 'quick' && Array.isArray(qJson.steps) && qJson.steps.length === qSteps.length, 'the JSON report has every step');
     assert(!fs.readFileSync(st1.last.files.md, 'utf8').includes(os.homedir() + path.sep) || os.homedir() === '/', 'no private home paths in the report');
+    await new Promise((r) => setTimeout(r, 800));
+    const after = await c.evaluate(() => ({ quick: document.getElementById('btn-mt-quick').disabled, stop: document.getElementById('btn-mt-stop').disabled, prog: document.getElementById('mt-progress').textContent }));
+    assert(!after.quick && after.stop && !/Running|Step \d/.test(after.prog), `after Quick: ▶ usable again, ⏹ off, no stale "Running…" (sweep 2026-11: “${after.prog}”)`);
     await shot(c, 'mediatest01-quick');
 
     // ---- 2. Full, with Forge failing
