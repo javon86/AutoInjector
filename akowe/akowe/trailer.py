@@ -255,7 +255,7 @@ def plan_from_book(app, principal, pid, branch) -> dict:
     """The trailer plan built from the book (no AI call): {items, made_from, notes}."""
     chs = pictures.chapters(app, principal, pid, branch)
     if not chs:
-        raise _bad("/plan", "plan the chapters first (📘 Make my book → chapter outline): the trailer's shots come "
+        raise _bad("/plan", "plan the chapters first (🏠 Book home → chapter outline): the trailer's shots come "
                    "from the chapters' scenes", "MISSING_INPUT")
     prof = _profile(app, pid)
     title = _clip(prof.get("title") or "", TEXT_MAX) or "Untitled"

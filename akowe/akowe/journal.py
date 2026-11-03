@@ -279,7 +279,7 @@ def build(app, pid: str, branch: str, *, step: str | None = None, problems_only:
         if j.get("branch_id") not in (None, branch):
             continue
         label = {"autobook": "Make a book for me", "write_all": "Write all chapters", "assist": "Fill with AI",
-                 "review_review": "AI review", "review_fix": "AI fix", "bible": "Bible Builder"}.get(j.get("kind"),
+                 "review_review": "AI review", "review_fix": "AI fix", "bible": "Character & place maker"}.get(j.get("kind"),
                                                                                                  j.get("kind"))
         clock = _Monotonic()
         if j.get("kind") in ("autobook", "write_all"):

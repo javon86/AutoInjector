@@ -85,23 +85,33 @@ Akọwe was called BookForge until 2026-10-25. An existing install keeps everyth
 - **Environment variables**: `AKOWE_*` (`AKOWE_PORT`, `AKOWE_DATA`, `AKOWE_BOOKS_DIR`, `AKOWE_AUTOSAVE`,
   `AKOWE_SECRETS`, `AKOWE_EPUBCHECK`, …); the old `BOOKFORGE_*` names are still read when the new one is not set.
 
-## Getting started: Start a new book and Make my book
+## The top bar, the side bar and Simple / Advanced view
 
-The first time you open Akọwe (and any time from **🚀 New book** in the top bar) a short
-**Start a new book** wizard asks, in plain words: 1) your **book profile** — title, author or pen
+**Top bar** (always icon + words, also at 1280 px): **Akọwe · 📚 My books · the book's name ▾** (switch to another book) **· 💾 Save · ⚙️ Settings · ❓ Help · ⋯ More**. Outside a book there is **➕ New book** instead of the book's name. While the AI writes a whole book, ONE status chip shows **⚡ AI working 3/10**; it turns into **⚡ AI needs you** only when the run is paused (click it to watch, pause, resume or cancel). **⋯ More** is grouped: *This book* (📖 Book Bible, Journal, Scene grid, Time and AI use, Activity, Open folder), *Files* (Open a saved book, My finished books), *Your style* (My writing style) and *Help*.
+
+**Side bar inside a book:** **▶ Next step** (one button to the next thing the book needs) · **📝 Waiting for your OK (n)** · **🏠 Book home** · **🧑 Characters & places** · **🗺 Plan** · **✍ Write** · **📖 Book Bible** (highlighted, always there) · **🖼 Pictures & cover** · **🎬 Trailer** · **🧭 Fix mistakes** · **📤 Export**. Parts with several pages open a small page with big buttons, one line each (for example Characters & places → Character & place maker, Character Forge, Story rules and world).
+
+**📖 Book Bible** is one click away: the side bar, the big button on 🏠 Book home next to ▶ Next step, the button on every book in 📚 My books, and the link in the 💾 Saved card.
+
+**Simple / Advanced view** (🛠 switch at the bottom of the side bar and in ⚙️ Settings; remembered in this browser; Simple is the default). Advanced view adds — nothing is removed in Simple view — the 11 step sets A–K in the side bar (names; the codes on hover), Branch, **🔍 Jump**, **🧩 Sets**, **❤️ Health**, **🧪 Test workflow**, 🧪 Test everything, the Character & place maker and Book features in ⋯ More, record and book IDs, and the old overview's set tiles, book details and branch form at the bottom of 🏠 Book home. In Simple view ⚙️ Settings shows the health as **AI connection: ✔ OK**. **Ctrl+K** jumps in both views. Old addresses keep working: the old book overview (`#/p/<book>/<branch>`) opens 🏠 Book home.
+
+## Getting started: New book and Book home
+
+The first time you open Akọwe (and any time from **➕ New book**) you choose **✍ Write it with me** or **⚡ AI writes the whole book**. Write it with me is a short
+**New book** wizard that asks, in plain words: 1) your **book profile** — title, author or pen
 name, genre, who it is for, length (short story / novelette / novella / novel), tone and your idea in a
 paragraph; 2) which **AI** to use (each slot with its current status, Automatic, or *Manual — I'll
 write it myself*); 3) **what to make** (characters, places, the world, premise, plot and outline);
 4) review and **Create my book**. With an AI it starts drafting the characters and places right away.
 
-Step 1 also has the optional **🎚️ Ending and style** choices (see below). The **book profile** is shown (and editable) on the Overview. The AI reads it every time it helps,
+Step 1 also has the optional **🎚️ Ending and style** choices (see below). The **book profile** is editable from 🏠 Book home (📝 Book profile). The AI reads it every time it helps,
 and the title and author go on the title page and into the exported files. It is stored with the
 project (API: `GET/PUT /api/projects/{id}/profile`).
 
-**📘 Make my book** is one checklist for the whole book, in order: book profile → characters and
+**🏠 Book home** (formerly “Make my book”) is one checklist for the whole book, in order: book profile → characters and
 places → premise → main plot → chapter outline → write each chapter → book format → put the book
 together → export (PDF, EPUB, DOCX for the release profiles you chose) → a content check. Each step
-says **Done**, **Needs you**, **AI can do it**, **Ready** or **Waiting**, and the big **▶ Do the
+says **Done**, **Your turn**, **AI can do it**, **Ready** or **Waiting**, and the big **▶ Do the
 next step** button does the next one. Creative steps are written by your AI (or, with no AI, open a
 ready-made form for you to write); Akọwe never approves anything for you (the only exception is a ⚡ Make a book for me run you start, see below) — every approval asks
 *"Approve as the author?"*, and when a step needs an explicit approval record (for example a chapter
@@ -111,7 +121,7 @@ API: `GET /api/projects/{id}/branches/{b}/book`, `POST .../book/{create|write_ch
 
 ## ⚡ Make a book for me
 
-The yellow **⚡ Make a book** button (top bar, Your books, the Overview and Make my book) lets your AI make a
+**⚡ AI writes the whole book** (on 📚 My books and under ➕ New book; never on a book's own page) lets your AI make a
 whole **new** book in one go. Quick settings are optional — genre, length (default **short story**), which AI
 (or Automatic) and an idea — or press **⚡ Start — let the AI choose everything**. Akọwe first saves a backup,
 creates a separate new book (your other books are never touched), and then walks every step of Make my book: the
@@ -217,7 +227,7 @@ never your text. What the editor checks is written in one plain file, `akowe/ako
 
 ## 🗂 Character Forge: a full dossier for every character
 
-Every character gets a **dossier** (🗂 Character Forge on the character's card, or More ▾ → 🗂 Character Forge): 14
+Every character gets a **dossier** (🗂 Character Forge on the character's card, or 🧑 Characters & places → 🗂 Character Forge): 14
 numbered sections — record, inner life, relationships and page essentials, voice card, detailed appearance, fighting
 style, weapons and possessions, powers and their rules, skills, physical limits, knowledge, a backstory timeline, the
 storyline and a continuity reference — in a dark, gold-and-teal look with the portrait and a **ten-view reference
@@ -278,7 +288,7 @@ Every character has a **story role** — a title in the story:
 The Book Bible binder is your whole book's reference, one page per thing, in a look that fits your genre.
 
 **Open it:** **📖 Open the Book Bible** on the book page (the *💾 Saved copy and book bible* card), or
-**More ▾ → 📖 Book Bible**.
+the highlighted **📖 Book Bible** in the side bar (also on 🏠 Book home and on every book in 📚 My books).
 
 **12 page templates:** 1 Cover · 2 Contents · 3 At a glance (with progress) · 4 Cast list (grouped by role, ★ first)
 · 5 Character page · 6 Relationship map · 7 Place page · 8 Magic system / Item / Other world entry · 9 Map page ·
@@ -309,7 +319,7 @@ The Book Bible binder is your whole book's reference, one page per thing, in a l
 
 ## 🎨 Cover, 🖼 Pictures and 🎞 Trailer
 
-All three are in **More ▾** while a book is open. Pictures and clips are made by AutoInjector (🎨 Images,
+They are in the side bar while a book is open (🖼 Pictures & cover, 🎬 Trailer). Pictures and clips are made by AutoInjector (🎨 Images,
 🎬 Video), so it must be running.
 
 - **🎨 Cover** — seven templates, colours, title fitting, AI art or your own picture, an ebook cover and a print
@@ -339,7 +349,7 @@ All three are in **More ▾** while a book is open. Pictures and clips are made 
   plot and outline prompts, the scene plans (peril shapes the obstacles), every chapter prompt (the ending table only in
   the last chapter) and the editor (what it expects of the ending and the mysteries, and how strict it is about them)
   follow your choices.
-- **📏 Story rules** (More ▾ → 🌍 Story rules and world, or the book page): what is **law** in this world (a hard rule),
+- **📏 Story rules** (🧑 Characters & places → 🌍 Story rules and world): what is **law** in this world (a hard rule),
   what people have only **seen happen**, what characters **believe**, and which **mysteries must stay unexplained** —
   each with its **limits** (where, when, how often, at what cost), where it comes from and who states it. Your AI drafts
   them from your characters, places and plan; when those change, **✨ Suggest updates** lists changes you accept or
@@ -433,7 +443,7 @@ folder stay.
 - An unfinished book shows **▶ Continue making this book** (the AI does the steps that are left; what is done is
   kept), and **▶ Resume the saved run** when its run was stopped half-way.
 
-**🔁 Rerun from the book bible** (book page, 📚 My finished books, or 🔁 in the 📂 folder list): a **new** book with
+**🔁 Make a new book from this one’s plan** (formerly “Rerun from the book bible”; book page, 📚 My finished books, or 🔁 in the 📂 folder list): a **new** book with
 the same profile, choices, characters (with sheets and voice cards), places, story rules and world texture — and, if
 you keep the tick, the same premise, plot, outline and scene cards — with **new chapters**. You can also upload just a
 `book-bible.json` (for example one you edited by hand) to make a new book from it. Pressing 🔁 Start is your consent
@@ -470,7 +480,7 @@ tokens, prompts, AI replies, book titles or book text. **⬇ Download diagnostic
 
 ## 📜 Book journal
 
-**📜 Book journal** (More menu, Overview, Make my book) is a readable timeline of everything that happened to a
+**📜 Book journal** (⋯ More, 🏠 Book home, ✍ Write) is a readable timeline of everything that happened to a
 book: who did what, which AI and model, every approval and its kind (*by you*, *auto-approve*, *Make-a-book
 consent*), AI reviews and fixes, waits and retries, pauses, problems, backups and exports. Filter by set and show
 *⚠️ Problems only*; **⬇ Download (.md)** saves it. It never contains keys, prompts or your text.
@@ -485,9 +495,9 @@ it), and refuses while a run is working. Keys are never part of a backup.
 
 ## 📝 Word count and 📚 My finished books
 
-Make my book, the Overview and the Current task card show how many words the book has (approved and in drafts)
+🏠 Book home and the ▶ Next step card show how many words the book has (approved and in drafts)
 against a target from its length (short story ~4,000, novelette ~12,000, novella ~30,000, novel ~75,000), with a progress bar; each
-chapter shows its own count. **📚 My finished books** (More menu, Your books, Overview) lists every exported book
+chapter shows its own count. **📚 My finished books** (⋯ More, 📚 My books) lists every exported book
 across your projects, newest first, with its formats and download buttons; each file is checked against its
 fingerprint first (a damaged one shows a ⚠️ with *Export again*).
 
@@ -499,15 +509,14 @@ everywhere: **green = done**, **amber = needs you**, **purple = AI can do it**, 
 breadcrumbs and step chips. The page you are on is highlighted (“👉 You are here”), and the New book wizard and
 Make my book show a step rail of the whole flow. It works on phones (390 px) and desktops without sideways scrolling.
 
-## ▶ Current task and 📝 Needs your approval
+## ▶ Next step and 📝 Waiting for your OK
 
 The left side bar always starts with two things:
 
-* **▶ Current task** — one big button that takes you to exactly the thing your book needs next: the review
+* **▶ Next step** — one big button that takes you to exactly the thing your book needs next: the review
   queue at the first draft waiting for you, the chapter to write, the book format to set up, and so on. Under it
-  a one-line explanation and where it lives (for example *Set B · B03*). The same card is on the Overview (and on
-  phones, where the side bar is behind **Menu**).
-* **📝 Needs your approval (N)** — opens the review queue. The number updates after everything you do, and every
+  a one-line explanation and where it lives (for example *Set B · B03*). On phones the side bar is behind **Menu**.
+* **📝 Waiting for your OK (N)** — opens the review queue. The number updates after everything you do, and every
   10 seconds while the page is visible.
 
 **The review queue** lists every draft waiting for your approval, in book order (characters and places → planning →
@@ -560,7 +569,7 @@ and link back.
 
 ## How to get around
 
-* **🧩 Sets** (top bar) opens a launcher of the 11 module sets; the Overview shows the same sets as
+* In 🛠 Advanced view, **🧩 Sets** (top bar) opens a launcher of the 11 step sets; 🏠 Book home shows the same sets as
   big tiles. Each tile shows its records and how many steps have an approved record.
 * Click a set to open its **panel**: what the set is for in plain words, where it fits in the build
   order and which sets it needs or feeds, **quick actions** written from the set's specification
@@ -571,12 +580,13 @@ and link back.
   anything it should know). Every proposal shows which AI made it; you **Use it in the form**,
   **📋 Copy** it, or (for universe entries) save the ticked ones as drafts. Nothing is saved or
   approved on its own.
-* **Breadcrumbs** at the top of every page (Your books › Book › Set › Step › Record) are clickable.
+* **Breadcrumbs** at the top of every page (My books › Book › Set › Step › Record) are clickable.
   Step pages have **◀ Previous / Next ▶** buttons in the set's working order (crossing into the next
   set at the end) and a **👉 What's next** hint along the main path A → B → C → E → F → G → H.
-* **🔍 Jump** (or **Ctrl+K**, or **/**) finds any step by ID or name (`A01`, `premise`), a set, a page
+* **🔍 Jump** (Advanced view; **Ctrl+K** or **/** work in both views) finds any step by ID or name (`A01`, `premise`), a set, a page
   or a record; ↑ ↓ and Enter to go. The browser's Back and Forward buttons work everywhere.
-* **More ▾** holds Progress, Activity, Book features, the 📖 Bible Builder and 🧪 Test everything.
+* **⋯ More** holds the book's journal, scene grid, time and AI use, activity, files and help; in Advanced view also
+  Progress, Book features, the 🧑 Character & place maker and 🧪 Test everything.
 
 **Copy and paste.** On a record: **📋 Copy text** (a readable summary), **📋 Copy JSON** (its data),
 **📋 Copy ID** and **⧉ Duplicate as new draft** (opens the New form filled with this record; you
@@ -587,7 +597,7 @@ box opens instead (press Ctrl+V there).
 
 ## Test everything
 
-Press **🧪 Test everything** (top bar → **More**) (or run `python -m akowe selftest`) to check that
+Press **🧪 Test everything** (🛠 Advanced view → **⋯ More**) (or run `python -m akowe selftest`) to check that
 the whole program really works on this computer. It is a real test, not a simulation:
 
 1. It creates a new, separate project named **"Self-test <date time>"** (your projects are not
@@ -688,9 +698,9 @@ API: `POST /api/assist {project_id, branch_id, target_operation, prompt, slot_id
 current_values?, keep_values?}` -> `{job_id}`; `GET /api/assist/{job_id}` -> status, slot, model,
 elapsed_ms, proposal, findings, removed_refs, error {code, message, fix}; `POST /api/assist/{job_id}/cancel`.
 
-## Bible Builder
+## Character & place maker (formerly “Bible Builder”)
 
-**📖 Bible Builder** (top bar, and on the Universe workspace) drafts the story bible from your book
+**🧑 Character & place maker** (🧑 Characters & places, 🏠 Book home's characters step, and ⋯ More in Advanced view) drafts your characters and world from your book
 idea. Every section (characters, species, worlds, locations, governments, factions, cultures,
 religions, magic - only when the magic feature is on - technology, weapons, items, history, timeline,
 languages, economy, laws, relationships) has a checkbox, a "how many" number (0 = skip) and its own

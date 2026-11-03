@@ -269,7 +269,7 @@ class App:
         if any(not j.finished for j in list(self.review._jobs.values())):
             return "the AI review / fix"
         if any(s.busy() for s in list(self.assist._sessions.values())):
-            return "the Bible Builder"
+            return "the Character & place maker"
         with self._gate:
             if self._writers:
                 return "the change that is being saved right now"

@@ -269,7 +269,7 @@ def scene_context(app, principal, pid, branch, chapter_id: str, scene: int | Non
     bp = _bp(app, principal, pid, branch)
     outline = bp.outline()
     if not outline:
-        raise _bad("/chapter_id", "plan the chapters first (Make my book → chapter outline): a picture is made from "
+        raise _bad("/chapter_id", "plan the chapters first (Book home → chapter outline): a picture is made from "
                    "a chapter of the outline", "MISSING_INPUT")
     plan = scenes_mod.chapter_plan(bp, outline, chapter_id)
     entry = scenes_mod.get_entry(app.store, pid, branch, outline["record_id"], chapter_id)
@@ -372,7 +372,7 @@ def map_graph(app, principal, pid, branch) -> dict:
     story order (the order the chapters first visit the places; places never visited follow in canon order)."""
     places = _places(app.store, pid, branch)
     if not places:
-        raise _bad("/kind", "the book has no places yet: make the places first (Make my book → characters and "
+        raise _bad("/kind", "the book has no places yet: make the places first (Book home → characters and "
                    "places, or the 🌍 world page), or upload your own map", "MISSING_INPUT")
     merged = {"data": {"facts": [f for p in places for f in ((p["rec"].get("data") or {}).get("facts") or [])
                                  if isinstance(f, dict)]}, "ref": places[0]["rec"]["ref"]}

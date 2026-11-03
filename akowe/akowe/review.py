@@ -252,7 +252,7 @@ def current_task(status: dict, queue_items: list, pid: str, branch: str, contrac
     base = {"step": None, "action": "book", "record_id": None, "chapter_id": None, "count": len(queue_items)}
     if nxt is None:
         return dict(base, set="G", op="G11", title="Your book is made",
-                    state="done", message="Every step is done. Download your book from Make my book.",
+                    state="done", message="Every step is done. Download your book from Book home.",
                     hash=_hash(pid, branch, "book"))
     approve = [i for i in (nxt.get("approve") or []) if i and i.get("record_id") in queued]
     if approve:
@@ -397,7 +397,7 @@ class ReviewService:
             writers = self.store.get_setting(f"ai_writers:{pid}:{branch}") or {}
         w = writers.get(_rkey(rec["record_id"], rec["version"]))
         if w and w.get("slot"):  # a Bible Builder proposal saved as it came from the AI
-            return {"kind": "ai", "label": f"{self.slot_label(w['slot'])} (Bible Builder)", "slot": w["slot"]}
+            return {"kind": "ai", "label": f"{self.slot_label(w['slot'])} (Character & place maker)", "slot": w["slot"]}
         if not row or row["transform"] == "MANUAL":
             return {"kind": "you", "label": "You", "slot": None}
         return {"kind": "auto", "label": "Akọwe (automatic)", "slot": None}

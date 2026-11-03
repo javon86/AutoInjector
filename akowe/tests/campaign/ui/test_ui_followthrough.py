@@ -106,7 +106,7 @@ def test_wizard_to_downloaded_book(make_context, ai_server, tmp_path):
 
     # the wizard asked the AI for 1 character + 1 place: save them from the Bible Builder
     wait_bb_idle(ai_server, pid)
-    page.get_by_role("button", name="📖 Bible Builder").click()
+    page.get_by_role("button", name="🧑 Character & place maker").click()
     dlg = page.locator("#bible-dialog")
     dlg.get_by_role("button", name="Create selected as drafts").wait_for(timeout=15000)
     page.wait_for_function("() => !document.querySelector('#bible-dialog button.primary[disabled]')", timeout=15000)

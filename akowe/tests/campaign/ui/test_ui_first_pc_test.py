@@ -1,5 +1,5 @@
 """First real PC test (2026-10-28) in the browser: 💾 Save shows a confirmation that stays on screen, the book's page
-has a way to the 🔎 Timeline card (at the bottom of 📘 Make my book), and the book report shows no doubled quote marks
+has a way to the 🔎 Timeline card (🧭 Fix mistakes → the bottom of 🏠 Book home), and the book report shows no doubled quote marks
 and no "The editor did not read these chapter versions" for a book the editor read."""
 from __future__ import annotations
 
@@ -9,8 +9,8 @@ from .ui_helpers import assert_clean, open_app, settle, shot
 
 def test_save_confirmation_timeline_link_and_report(make_context, ai_server):
     pid = autobook(ai_server)
-    page = open_app(make_context(), ai_server, f"#/p/{pid}/main")
-    # the book's page -> 🔎 Timeline, trade facts and repeats: opens Make my book and scrolls down to the card
+    page = open_app(make_context(), ai_server, f"#/p/{pid}/main/fix")
+    # 🧭 Fix mistakes -> 🔎 Timeline, trade facts and repeats: opens Book home and scrolls down to the card
     page.locator("[data-testid=ov-timeline-link]").click()
     card = page.locator("[data-testid=book-facts]")
     card.wait_for(timeout=20000)

@@ -4,7 +4,7 @@ run window show AI answers and minutes per AI; the Make-a-book setup shows an es
 from __future__ import annotations
 
 from .test_ui_followthrough import autobook
-from .ui_helpers import assert_clean, goto, open_app, overflow, shot
+from .ui_helpers import assert_clean, goto, open_app, open_make_book, overflow, shot
 
 
 def test_scene_grid_costs_and_estimate(make_context, ai_server):
@@ -46,7 +46,7 @@ def test_scene_grid_costs_and_estimate(make_context, ai_server):
     assert_clean(page, "costs page")
 
     # a new run's setup shows the estimate, which follows the length; the run window shows answers and minutes per AI
-    page.click("#mab-btn")
+    open_make_book(page)
     dlg = page.locator("#mab-dialog")
     est = dlg.locator("[data-testid=mb-estimate]")
     est.filter(has_text="AI answers").wait_for(timeout=10000)

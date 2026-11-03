@@ -4,7 +4,7 @@ book on) plus the two extras in the ⚡ Make-a-book form."""
 from __future__ import annotations
 
 from .test_ui_followthrough import autobook
-from .ui_helpers import assert_clean, goto, open_app, shot
+from .ui_helpers import assert_clean, goto, open_app, open_make_book, shot
 
 SAMPLE = ("I burned the toast again this morning. Of course I did. The kitchen smelled of smoke and of the rain that "
           "had come in under the door; my mother would have said something about it, and I was glad she couldn't. "
@@ -44,7 +44,7 @@ def test_beta_reader_card_and_style_page(make_context, ai_server):
     shot(page, "p25_style_page")
     assert_clean(page, "style page")
 
-    page.locator("#mab-btn").click()
+    open_make_book(page)
     d = page.locator("#mab-dialog")
     d.locator("[data-testid=mb-beta]").wait_for(timeout=15000)
     assert d.locator("[data-testid=mb-style]").is_enabled() and d.locator("[data-testid=mb-style]").is_checked()

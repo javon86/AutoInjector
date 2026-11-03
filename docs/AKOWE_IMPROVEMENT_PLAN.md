@@ -457,6 +457,34 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
 - Series support: reuse characters and world across books.
 - GitHub checks for Akọwe (see Problems).
 
+## Simple top bar and side bar (2026-11, "the toolbar doesn't make any sense to me")
+
+The writer found the top bar a mix of places, actions and developer tools, and asked for a Book Bible button that
+makes sense. Done (Group 1, items 1–4 and 6, plus the Book Bible buttons of item 5; the binder's own "At a glance"
+page and toolbar are a separate change):
+
+- [x] **Top bar:** `Akọwe · 📚 My books · [book name ▾] · 💾 Save · ⚙️ Settings · ❓ Help · ⋯ More`; outside a book
+  `➕ New book` (one entry: ✍ Write it with me = the old wizard, or ⚡ AI writes the whole book = Make a book for me).
+  One run chip `#mab-btn`: "⚡ AI working 3/10", "⚡ AI needs you" only when paused, hidden otherwise. ⋯ More grouped
+  (This book / Files / Your style / Help). New ❓ Help page (`#/help`).
+- [x] **Side bar (simple):** ▶ Next step · 📝 Waiting for your OK (n) · 🏠 Book home · 🧑 Characters & places · 🗺 Plan
+  · ✍ Write · 📖 Book Bible (highlighted) · 🖼 Pictures & cover · 🎬 Trailer · 🧭 Fix mistakes · 📤 Export. New small
+  section pages `…/people`, `…/plan`, `…/write`, `…/art`, `…/fix`, `…/export` list the existing pages as big buttons.
+- [x] **Simple / Advanced view** (`bf:mode` in localStorage, default simple; switch in the side bar and Settings;
+  everything with class `adv-only` is hidden in simple view by CSS): A–K sets (names, codes on hover), Branch, Jump,
+  Sets, Health, Test workflow, Test everything, Book features, IDs, the old overview's tiles/details/branch form.
+  Settings shows "AI connection: ✔ OK". Ctrl+K works in both.
+- [x] **Plain names:** Bible Builder → Character & place maker; set A "story bible" → "characters and world";
+  Overview removed (`#/p/<pid>/<branch>` opens Book home); Make my book → 🏠 Book home; Rerun from the book bible →
+  Make a new book from this one's plan; book-bible.json/.md under ⬇ Download…; Your projects → My books;
+  Needs your approval → Waiting for your OK; the book step state "Needs you" → "Your turn"; no "Make a book for me"
+  on a book page.
+- [x] **📖 Book Bible buttons:** side bar, Book home header (next to ▶ Next step), every book card in My books, and
+  the Saved card link.
+- [x] **No icon-only buttons** at 1280×720 (the label-hiding CSS is gone; the bar wraps in Advanced view instead).
+- Tests: `tests/campaign/ui/test_ui_nav_simple.py`; older UI tests updated (`open_make_book` / `set_mode` helpers).
+- *Open:* `binder.js` (owned by the Book Bible change) still says "📘 Make my book" on its not-ready page.
+
 ## Prevention pass (2026-10-27, "solve problems before they become problems")
 
 - [x] **Alfred's local AI connection:**
@@ -1047,3 +1075,24 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
     another book of the series travels as a reference only (its bytes are in that book's file); an item's base
     powers are not known (only the changes are shown); the sequel still needs an AI; not tried with a real AI or
     Stable Diffusion.
+- **📖 Book Bible: "At a glance" first page + a simpler toolbar (2026-11-03, user: "the Book Bible needs to make
+  more sense").** *Built:* the binder now opens on **📖 At a glance** (Cover is the next page; a deep link or ⋯ View
+  options → All pages skips it): one line saying what the Book Bible is ("…The AI keeps it up to date; you
+  approve."), "N of M pages filled" + a bar and dots (○ empty · ✎ AI draft · ✔ approved) for each of the 12 parts
+  (Cover, Contents, Book facts, Cast, Characters, Relationships, Places, World, Map, Story plan, Chapters, Rules &
+  facts) — each row opens that part; 🖼 pictures waiting + "Make the rest of the pictures", or "Picture maker is off —
+  open Settings"; ✎ facts waiting for your OK + ✨ Fill from the book + "Show me →"; ⬇ PDF · ⬇ Word · 🖨 Print; 📚
+  "Book N of M" + 📚 Start a sequel (disabled with the reason); ★ the main character with portrait; 🎨 the look +
+  Change look. The numbers are server-side: `binder.glance(data)` over the existing contract (added as `glance` to
+  `GET …/binder`, nothing else changed; auto-computed and not-stored fields are not counted; a page under 25 % filled
+  is "empty"); `GET …/binder/glance` adds the picture-maker check (`book_pictures.probe`) and the sequel status. The
+  page is screen-only: it is not a binder page, so ⬇ PDF / ⬇ Word / the saved Book Bible never contain it and 🖨 Print
+  from it prints the whole binder. Template 3 ("At a glance" in the schema) is now shown as **Book facts** (page
+  title, contents) so the two are not mixed up. *Toolbar:* only 🎨 Look · 🔍 Search · ⬇ Export (PDF / Word / Print) ·
+  📚 Series, plus **⋯ View options** (One page / All pages, 📖 As of book N, Show field numbers); element ids kept.
+  Every binder page has **ⓘ What is this page?** (one line per template). Files: `akowe/akowe/binder.py`,
+  `web/binder.js`, `web/binder.css`. Tests: `tests/test_binder_glance.py` (11),
+  `test_ui_binder.py::test_opens_on_at_a_glance_and_its_rows_jump_to_the_pages`, `::test_at_a_glance_actions`,
+  `::test_at_a_glance_picture_maker_off_and_a_series_of_two`, `::test_toolbar_four_tools_and_view_options_at_1280x720`,
+  `::test_at_a_glance_in_every_look` (7), `::test_what_is_this_page_on_every_template`. *Not done:* the
+  picture-maker check runs once per opening (it is not re-checked while the page stays open).

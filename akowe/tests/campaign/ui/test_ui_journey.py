@@ -15,7 +15,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from .ui_helpers import assert_clean, bad_text, goto, overflow, settle, shot, watch
+from .ui_helpers import assert_clean, bad_text, goto, open_make_book, overflow, settle, shot, watch
 
 from test_autobook import make_app, run_book
 from test_journey_e2e import BR, LOOKS, JourneyBridge, _fact, name_of
@@ -160,7 +160,7 @@ def test_book_page_make_a_book_forge_and_pictures(make_context, jw, width, heigh
     goto(page, f"#/p/{jw.pid}/main/book")
     check_screen(page, "book-page", root="body")  # the top bar and the side bar too
     # ⚡ Make a book: the finished run's window
-    page.click("#mab-btn")
+    open_make_book(page)
     page.locator("#mab-dialog").wait_for(timeout=10000)
     check_screen(page, "make-a-book", root="#mab-dialog")
     page.keyboard.press("Escape")
@@ -185,6 +185,7 @@ def test_book_bible_every_look_and_the_series_panel(make_context, jw, width, hei
         check_screen(page, f"bible-{look}")
     # a character page with the "Through the series" strip, and 📖 As of book 1
     page.select_option("[data-testid=binder-look]", "fantasy")
+    page.click("[data-testid=binder-view] > summary")   # ⋯ View options holds 📖 As of book N
     sel = page.locator("[data-testid=binder-as-of]")
     assert sel.is_visible()
     sel.select_option("1")

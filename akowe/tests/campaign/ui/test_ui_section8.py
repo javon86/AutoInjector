@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from .ui_helpers import assert_clean, goto, settle, shot, watch
+from .ui_helpers import assert_clean, goto, open_make_book, settle, shot, watch
 
 from test_failover_review import SlotFake, make_app, no_provider_sleep  # noqa: F401
 from test_server import TOKEN
@@ -51,7 +51,7 @@ def test_ai_check_notice_cancel_and_start_without_it(make_context, s8):
     s8.fake.states["AI-2"], s8.fake.problems["AI-2"] = "needs_user", "LOGGED_OUT"
     s8.fake.after_probe = {"AI-2": "needs_user"}
     page = open_page(make_context, s8)
-    page.click("#mab-btn")
+    open_make_book(page)
     dlg = page.locator("#mab-dialog")
     dlg.get_by_role("button", name="⚡ Start — let the AI choose everything").click()
     notice = page.locator("[data-testid=ai-check-dialog]")

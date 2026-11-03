@@ -371,3 +371,21 @@ def assert_clean(page, what=""):
     probs = list(page.bf_problems)
     page.bf_problems.clear()
     assert not probs, f"{what}: browser problems:\n" + "\n".join(probs)
+
+
+def set_mode(page, mode="advanced"):
+    """Switch the app to 🛠 Advanced (or Simple) view, as the switch at the bottom of the side bar does (remembered in localStorage)."""
+    page.evaluate("m => window.akoweSetMode(m, true)", mode)
+    page.wait_for_function("m => document.documentElement.dataset.mode === m", arg=mode, timeout=5000)
+
+
+def open_make_book(page):
+    """Open the ⚡ AI-writes-the-whole-book window: the run chip in the top bar when a run is working or paused, otherwise
+    ➕ New book → ⚡ AI writes the whole book (the only ways in since the top bar was simplified)."""
+    chip = page.locator("#mab-btn")
+    if chip.is_visible():
+        chip.click()
+    else:
+        goto(page, "#/start")
+        page.click("[data-testid=start-ai]")
+    page.wait_for_selector("#mab-dialog[open]", timeout=10000)

@@ -55,6 +55,19 @@ def fixture_doc(pid, **book):
     return doc
 
 
+def with_glance(doc, engine=None):
+    """The 📖 At a glance block the data side adds (binder.glance over the same contract)."""
+    from akowe import binder
+    doc["glance"] = binder.glance(doc, engine=engine)
+    return doc
+
+
+def open_menu(page, which):
+    """Open a toolbar menu (⬇ Export: "export", ⋯ View options: "view") if it is closed."""
+    if not page.evaluate("w => document.querySelector(`[data-testid=binder-${w}]`).open", which):
+        page.click(f"[data-testid=binder-{which}] > summary")
+
+
 BOOK_SOURCES = {"auto:series_line": ["series", "series_number"], "auto:themes": ["themes"], "auto:theme_1": ["themes"],
                 "auto:theme_2": ["themes"], "auto:theme_3": ["themes"]}
 
@@ -191,11 +204,19 @@ class FakeBinderApi:
             return ok(dict(self.jobs[jid], status="running", done=0, phase="Making the portrait of “Maren Vey”"), 202)
         if path.startswith("/series"):  # 📚 series progression
             return self.series_api(req, path, body, ok)
+        if req.method == "GET" and path == "/glance":  # 📖 At a glance with the picture maker checked
+            self.glance_calls = getattr(self, "glance_calls", 0) + 1
+            from akowe import binder
+            g = binder.glance(self.doc, engine=getattr(self, "engine", {"ready": True, "code": None, "why": None}),
+                              sequel=getattr(self, "sequel", None))
+            return ok(g)
         if path.startswith("?as_of=") and getattr(self, "as_of_docs", None):
             self.as_of_calls = getattr(self, "as_of_calls", []) + [path]
-            return ok(self.as_of_docs[path.split("=", 1)[1].split("&")[0]])
+            return ok(with_glance(self.as_of_docs[path.split("=", 1)[1].split("&")[0]]))
         if self.status != 200:
             return ok({"errors": [{"code": "NOT_FOUND", "path": "/", "message": "not found"}]}, self.status)
+        if getattr(self, "glance_auto", True):
+            with_glance(self.doc)
         return ok(self.doc)
 
 
@@ -342,6 +363,7 @@ def test_empty_fields_show_placeholders_and_edit_links(make_context, bd):
     # field numbers are hidden until the author asks for them
     fid = odile.locator('.bnd-fact[data-fid="5.2.5"] .bnd-fid').first
     assert not fid.is_visible()
+    open_menu(page, "view")
     page.check("[data-testid=binder-fids]")
     assert fid.is_visible() and fid.inner_text() == "5.2.5"
     shot(page, "binder-fields-numbers")
@@ -429,8 +451,10 @@ def test_print_stylesheet_hides_the_chrome(make_context, bd):
     shot(page, "binder-print-horror")
     page.emulate_media(media="screen")
     # 🖨 Print in one-page mode asks: this page or the whole binder
+    open_menu(page, "view")
     page.click("[data-testid=binder-one]")
     page.evaluate("() => { window.__printed = 0; window.print = () => { window.__printed = document.querySelectorAll('.bnd-page').length; }; }")
+    open_menu(page, "export")
     page.click("[data-testid=binder-print]")
     page.click("dialog[open] button:has-text('The whole binder')")
     page.wait_for_function("() => window.__printed > 0")
@@ -441,11 +465,13 @@ def test_print_stylesheet_hides_the_chrome(make_context, bd):
 
 def test_pdf_and_word_buttons_show_the_plain_error(make_context, bd):
     page = open_binder(make_context, bd, page_id="cover")
+    open_menu(page, "export")
     page.click("[data-testid=binder-pdf]")
     page.wait_for_selector("[data-testid=binder-msg] .bnd-err")
     msg = page.inner_text("[data-testid=binder-msg]")
     assert "⬇ PDF did not work" in msg and "AutoInjector's page renderer, which is not connected" in msg
     assert "🖨 Print" in msg and "Save as PDF" in msg
+    open_menu(page, "export")
     page.click("[data-testid=binder-docx]")
     page.wait_for_function("() => document.querySelector('[data-testid=binder-msg]').innerText.includes('Word did not work')")
     assert [u.split("?")[1] for u in page.bf_calls.exports] == ["format=pdf", "format=docx"]
@@ -458,7 +484,7 @@ def test_pdf_and_word_buttons_show_the_plain_error(make_context, bd):
 def test_binder_not_ready_when_the_api_is_missing(make_context, bd):
     page = open_binder(make_context, bd, status=404)
     assert "The Book Bible binder is not ready" in page.inner_text("#main")
-    assert page.locator("#main a", has_text="📘 Make my book").count() == 1
+    assert page.locator("#main a", has_text="🏠 Book home").count() == 1
     page.bf_problems[:] = [p for p in page.bf_problems if "/binder" not in p and "404" not in p]
     assert_clean(page, "not ready")
 
@@ -522,8 +548,10 @@ def test_contents_pager_modes_and_keys(make_context, bd):
     page.wait_for_selector('.bnd-page[data-page-id="map"]')
     page.locator(".bnd-pin", has_text="Lantern Isle").click()
     page.wait_for_selector('.bnd-page[data-page-id="pl-isle"]')
+    open_menu(page, "view")
     page.click("[data-testid=binder-all]")
     page.wait_for_function("() => document.querySelectorAll('.bnd-page').length === 22")
+    open_menu(page, "view")                                   # picking a mode closes the menu
     page.click("[data-testid=binder-one]")
     page.wait_for_function("() => document.querySelectorAll('.bnd-page').length === 1")
     # 4.3 filters on the cast list
@@ -552,7 +580,7 @@ def test_entry_points_book_page_and_more_menu(make_context, bd):
 @pytest.mark.parametrize("width", [390, 1280, 1920])
 def test_no_horizontal_scroll(make_context, bd, width):
     page = open_binder(make_context, bd, width=width, page_id="cover")
-    for pid_ in ("cover", "contents", "glance", "cast", "ch-odile", "relmap", "pl-vessmoor", "mg-wickcraft", "ar-ember", "wd-guild",
+    for pid_ in ("at-a-glance", "cover", "contents", "glance", "cast", "ch-odile", "relmap", "pl-vessmoor", "mg-wickcraft", "ar-ember", "wd-guild",
                  "map", "plan", "cp-01", "rules"):
         if pid_ != "cover":
             page.evaluate("h => { location.hash = h; }", f"#/p/{bd.pid}/main/bible/{pid_}")
@@ -630,7 +658,8 @@ def test_fill_from_the_book_then_approve_the_proposals(make_context, bd):
     assert sorted(page.bf_calls.approves, key=lambda b: b["target"]) == [
         {"target": "character:rec-maren", "fields": ["height", "handedness"]}, {"target": "relationship:rec-maren:odile marsh", "fields": ["type"]}]
     assert page.locator('.bnd-fact.is-proposed[data-fid="5.2.5"]').count() == 0
-    # the toolbar button fills the whole book
+    # 📖 At a glance's button fills the whole book
+    goto_page(page, "at-a-glance")
     page.click("[data-testid=binder-fill]")
     page.wait_for_function("() => document.querySelector('[data-testid=binder-fill]') && !document.querySelector('[data-testid=binder-fill]').disabled && document.querySelector('[data-testid=binder-msg] .bnd-ok-msg')")
     assert len(page.bf_calls.fills) == 2 and page.bf_calls.fills[-1] == {}
@@ -835,13 +864,15 @@ def test_pictures_waiting_and_make_the_rest(make_context, bd):
     goto_page(page, "cast")
     card = page.locator('.bnd-card[data-name="Maren Vey"]')
     assert card.locator("[data-testid=binder-pic-waiting]").count() == 1
-    goto_page(page, "ch-maren")
+    goto_page(page, "at-a-glance")                                    # 📖 At a glance: 5 waiting, the button
+    assert "5 pictures waiting" in page.inner_text("[data-testid=glance-pictures]")
     btn = page.locator("[data-testid=binder-pictures]")
     assert btn.inner_text() == "🖼 Make the rest of the pictures"
     btn.click()
     page.wait_for_selector("[data-testid=binder-msg] .bnd-ok-msg")
     assert "5 picture(s) made." in page.inner_text("[data-testid=binder-msg]")
     assert page.bf_calls.pictures == 1
+    goto_page(page, "ch-maren")
     page.wait_for_function("() => !document.querySelector('[data-testid=binder-pic-waiting]')")
     assert_clean(page, "pictures")
 
@@ -901,6 +932,7 @@ def test_series_strip_as_of_book_and_sequel(make_context, bd):
     assert "As of the end of book 2" in strip.inner_text() and "Resonance Key" in strip.inner_text()
     shot(page, "binder-series-strip")
     # 📖 As of book 1: that book, read only
+    open_menu(page, "view")
     sel = page.locator("[data-testid=binder-as-of]")
     assert sel.is_visible()
     assert [o.strip() for o in sel.locator("option").all_inner_texts()] == ["This book (book 2)", "Book 1: The Lamplighter's First Night"]
@@ -1072,3 +1104,239 @@ def test_book_page_sequel_button_asks_consent_and_starts(make_context, bd):
     assert "Book 2 has started" in page.inner_text("[data-testid=bk-sequel-started]")
     assert ("POST", {"author_confirms": True}) in calls
     assert_clean(page, "book page sequel")
+
+
+# ------------------------------------------------------------------------------------------------ 📖 At a glance (the first page)
+GLANCE = '.bnd-page[data-page-id="at-a-glance"]'
+
+
+def test_opens_on_at_a_glance_and_its_rows_jump_to_the_pages(make_context, bd):
+    from akowe import binder
+    want = binder.glance(fixture_doc(bd.pid))
+    page = open_binder(make_context, bd, width=1280, height=720)
+    art = page.locator(GLANCE)
+    assert art.count() == 1 and page.locator(".bnd-page").count() == 1
+    assert page.evaluate("location.hash").endswith("/bible")
+    txt = art.inner_text()
+    assert "Your Book Bible is the reference binder for everything in your book — who, where, what happened. The AI keeps it up to date; you approve." in txt
+    assert f"{want['pages_filled']} of 22 pages filled" in page.inner_text("[data-testid=glance-filled]")
+    assert page.get_attribute("[data-testid=glance-filled] [role=progressbar]", "aria-valuenow") == str(want["pages_filled"])
+    rows = art.locator("[data-testid=glance-part]")
+    assert rows.count() == 12
+    assert [rows.nth(i).get_attribute("data-part") for i in range(12)] == [p["key"] for p in want["parts"]]
+    chars = art.locator('[data-testid=glance-part][data-part="characters"]')
+    assert "Characters" in chars.inner_text() and "5 pages" in chars.inner_text()
+    assert chars.locator(".bnd-gl-dot").count() == 5
+    assert chars.locator(".bnd-gl-dot.is-empty").count() == next(p for p in want["parts"] if p["key"] == "characters")["states"]["empty"]
+    assert "Book facts" in art.locator('[data-testid=glance-part][data-part="facts"]').inner_text()
+    # the rail starts with 📖 At a glance (current); the Cover comes next
+    first = page.locator(".bnd-contents > ol > li").first
+    assert "At a glance" in first.inner_text() and first.locator("a[aria-current=page]").count() == 1
+    assert "At a glance" in page.inner_text(".bnd-pager >> nth=0")
+    shot(page, "glance-1280x720")
+    page.click("[data-testid=binder-next] >> nth=0")
+    page.wait_for_selector('.bnd-page[data-page-id="cover"]')
+    page.click("[data-testid=binder-prev] >> nth=0")
+    page.wait_for_selector(GLANCE)
+    page.locator("body").press("ArrowRight")
+    page.wait_for_selector('.bnd-page[data-page-id="cover"]')
+    page.locator("body").press("ArrowLeft")
+    page.wait_for_selector(GLANCE)
+    # every row with pages opens its first page
+    for p in want["parts"]:
+        page.click(f'{GLANCE} [data-testid=glance-part][data-part="{p["key"]}"] a.bnd-gl-row')
+        page.wait_for_selector(f'.bnd-page[data-page-id="{p["page_id"]}"]')
+        assert page.evaluate("location.hash").endswith(f"/bible/{p['page_id']}")
+        goto_page(page, "at-a-glance")
+    assert page.evaluate("location.hash").endswith("/bible/at-a-glance")
+    assert not overflow(page)
+    assert_clean(page, "at a glance")
+
+
+def test_a_page_asked_for_or_all_pages_skip_at_a_glance(make_context, bd):
+    page = open_binder(make_context, bd, page_id="ch-odile")
+    assert page.locator(GLANCE).count() == 0
+    page.close()
+    page = open_binder(make_context, bd, mode="all")
+    assert page.locator(GLANCE).count() == 0 and page.locator(".bnd-page").count() == 22
+    goto_page(page, "at-a-glance")                     # from All pages: one page, At a glance
+    assert page.get_attribute("[data-testid=binder]", "data-mode") == "one" and page.locator(".bnd-page").count() == 1
+    assert_clean(page, "skip glance")
+
+
+def test_at_a_glance_actions(make_context, bd):
+    doc = fixture_doc(bd.pid)
+    for p in doc["pages"]:
+        if p["page_id"] == "ch-maren":
+            p["pictures_waiting"] = ["portrait", "front", "side", "back", "sheet"]
+    page = open_binder(make_context, bd, doc=doc, width=1280, height=720)
+    api = page.bf_calls
+    page.wait_for_function("() => document.querySelector('[data-testid=binder-pictures]')")
+    assert api.glance_calls == 1
+    # 🖼 pictures waiting + Make the rest
+    pics = page.locator("[data-testid=glance-pictures]")
+    assert "🖼 5 pictures waiting" in pics.inner_text()
+    pics.locator("[data-testid=binder-pictures]").click()
+    page.wait_for_selector("[data-testid=binder-msg] .bnd-ok-msg")
+    assert api.pictures == 1 and "5 picture(s) made." in page.inner_text("[data-testid=binder-msg]")
+    page.wait_for_function("() => document.querySelector('[data-testid=glance-pictures]').innerText.includes('No pictures waiting')")
+    # ✨ Fill from the book (the facts waiting for your OK)
+    facts = page.locator("[data-testid=glance-facts]")
+    assert re.search(r"✎ \d+ facts waiting", facts.inner_text())
+    facts.locator("[data-testid=binder-fill]").click()
+    page.wait_for_function("() => document.querySelector('[data-testid=binder-msg] .bnd-ok-msg') && document.querySelector('[data-testid=binder-msg]').innerText.includes('proposed')")
+    assert api.fills == [{}]
+    page.locator("[data-testid=glance-facts] a.bnd-gl-link").click()                   # Show me → the first page with proposals
+    page.wait_for_selector('.bnd-page[data-page-id="cover"]')
+    goto_page(page, "at-a-glance")
+    # ⬇ export: the same routes as the toolbar; 🖨 Print prints the whole binder without the glance page
+    page.click("[data-testid=glance-pdf]")
+    page.wait_for_selector("[data-testid=binder-msg] .bnd-err")
+    page.click("[data-testid=glance-docx]")
+    page.wait_for_function("() => document.querySelector('[data-testid=binder-msg]').innerText.includes('Word did not work')")
+    assert [u.split("?")[1] for u in api.exports] == ["format=pdf", "format=docx"]
+    page.evaluate("""() => { window.__printed = null; window.print = () => { window.__printed = [...document.querySelectorAll('.bnd-page')].map(e => e.dataset.pageId); }; }""")
+    page.click("[data-testid=glance-print]")
+    page.wait_for_function("() => window.__printed")
+    printed = page.evaluate("window.__printed")
+    assert len(printed) == 22 and "at-a-glance" not in printed            # no question asked: the whole binder
+    page.wait_for_selector(GLANCE)                                         # back on At a glance
+    # ★ the main character and 🎨 the look
+    main = page.locator("[data-testid=glance-main]")
+    assert "★ Odile Marsh" in main.inner_text()
+    page.wait_for_function("() => document.querySelector('[data-testid=glance-main] .bnd-bubble img')")
+    look = page.locator("[data-testid=glance-look]")
+    assert "Fantasy" in look.inner_text()
+    look.locator("[data-testid=glance-change-look]").click()
+    assert page.evaluate("document.activeElement.id") == "bnd-look"
+    main.locator("a.bnd-gl-link").click()
+    page.wait_for_selector('.bnd-page[data-page-id="ch-odile"]')
+    probs = [p for p in page.bf_problems if "/binder/export" not in p and "status of 503" not in p]
+    page.bf_problems[:] = probs
+    assert_clean(page, "glance actions")
+
+
+def test_at_a_glance_picture_maker_off_and_a_series_of_two(make_context, bd):
+    doc, _old, view = _series_docs(bd.pid)
+    doc["series"]["number"] = 1
+    doc["series"]["books"][0]["current"], doc["series"]["books"][1]["current"] = True, False
+    for p in doc["pages"]:
+        if p["page_id"] == "ch-maren":
+            p["pictures_waiting"] = ["portrait"]
+    ctx = make_context(width=1280, height=720)
+    page = watch(ctx.new_page())
+    fake = serve_binder(page, bd.pid, doc)
+    fake.engine = {"ready": False, "code": "IMAGE_BRIDGE_UNREACHABLE", "why": "AutoInjector is not reachable"}
+    fake.sequel = {"possible": False, "why": "No AI is connected. Connect one in Settings, then press 📚 Start a sequel again.", "next_number": 2}
+    fake.series_view = view
+    doc["glance"] = None
+    fake.glance_auto = False
+    from akowe import binder
+    doc["glance"] = binder.glance(doc, sequel=fake.sequel)
+    page.goto(bd.url)
+    page.wait_for_selector("#main h1", timeout=15000)
+    page.evaluate("h => { location.hash = h; }", f"#/p/{bd.pid}/main/bible")
+    page.wait_for_selector(GLANCE, timeout=15000)
+    page.wait_for_selector("[data-testid=glance-engine-off]")
+    pics = page.locator("[data-testid=glance-pictures]")
+    assert "🖼 1 picture waiting" in pics.inner_text() and "Picture maker is off — open Settings" in pics.inner_text()
+    assert pics.locator("a[href='#/settings']").count() == 1 and pics.locator("[data-testid=binder-pictures]").count() == 0
+    ser = page.locator("[data-testid=glance-series]")
+    assert "Book 1 of 2" in ser.inner_text() and "The Ferry Books" in ser.inner_text()
+    assert ser.locator("[data-testid=glance-sequel]").is_disabled()
+    assert "No AI is connected" in ser.locator("[data-testid=glance-sequel-why]").inner_text()
+    shot(page, "glance-engine-off-series")
+    assert_clean(page, "engine off")
+    # the sequel possible: the same consent and route as the 📚 Series panel
+    fake.sequel = {"possible": True, "why": None, "next_number": 2}
+    doc["glance"] = binder.glance(doc, sequel=fake.sequel)
+    page.route(re.compile(r"/api/autobook/run-seq1$"), lambda r: r.fulfill(status=200, content_type="application/json", body="null"))
+    page.reload()
+    page.wait_for_selector(GLANCE, timeout=15000)
+    page.click("[data-testid=glance-sequel]")
+    page.wait_for_selector("dialog[open] >> text=Start a sequel from this book?")
+    page.click("dialog[open] >> text=📚 Start the sequel")
+    page.wait_for_selector("[data-testid=glance-series] [data-testid=binder-series-started]")
+    assert ("POST", "/series/sequel", {"author_confirms": True}) in fake.series_calls
+    assert_clean(page, "glance sequel")
+
+
+def test_toolbar_four_tools_and_view_options_at_1280x720(make_context, bd):
+    page = open_binder(make_context, bd, width=1280, height=720)
+    tools = page.evaluate("""() => [...document.querySelectorAll('.bnd-toolbar > *')].filter(e => e.offsetParent && !e.classList.contains('bnd-tb-gap'))
+        .map(e => (e.matches('details') ? e.querySelector('summary') : e).innerText.trim())""")
+    assert len(tools) == 5, tools
+    assert tools[0].startswith("🎨 Look") and tools[1] == "🔍 Search" and tools[2] == "⬇ Export" and tools[3] == "📚 Series"
+    assert tools[4] == "⋯ View options"
+    for sel in ("binder-one", "binder-all", "binder-fids", "binder-pdf", "binder-docx", "binder-print", "binder-fill"):
+        assert not page.locator(f".bnd-toolbar [data-testid={sel}]").is_visible(), sel
+    # every control has its icon and its words (nothing icon-only), and nothing scrolls sideways
+    words = page.evaluate("""() => [...document.querySelectorAll('.bnd-toolbar button, .bnd-toolbar summary, .bnd-toolbar label')]
+        .filter(e => e.checkVisibility()).map(e => e.innerText.trim())""")
+    assert all(re.search(r"[A-Za-z]{3,}", w) for w in words), words
+    open_menu(page, "export")
+    items = [page.locator(f"[data-testid={t}]").inner_text() for t in ("binder-pdf", "binder-docx", "binder-print")]
+    assert items == ["⬇ PDF", "⬇ Word", "🖨 Print"]
+    assert "not this At a glance page" in page.inner_text("[data-testid=binder-export]")
+    shot(page, "glance-toolbar-export-menu")
+    page.keyboard.press("Escape")
+    assert not page.evaluate("document.querySelector('[data-testid=binder-export]').open")
+    open_menu(page, "view")
+    assert page.locator("[data-testid=binder-one]").is_visible() and page.locator("[data-testid=binder-all]").is_visible()
+    assert page.locator("[data-testid=binder-fids]").is_visible()
+    assert not page.evaluate("document.querySelector('[data-testid=binder-export]').open")   # one menu at a time
+    assert not overflow(page)
+    shot(page, "glance-toolbar-view-menu")
+    page.click(GLANCE + " h2")                                          # a click outside closes it
+    assert not page.evaluate("document.querySelector('[data-testid=binder-view]').open")
+    page.click("[data-testid=binder-search-btn]")
+    assert page.evaluate("document.activeElement.id") == "bnd-search"
+    assert not unnamed_controls(page)
+    assert_clean(page, "toolbar")
+
+
+@pytest.mark.parametrize("look", LOOKS)
+def test_at_a_glance_in_every_look(make_context, bd, look):
+    page = open_binder(make_context, bd, look=look, width=1280, height=720)
+    assert page.get_attribute("[data-testid=binder]", "data-look") == look
+    art = page.locator(GLANCE)
+    assert art.locator(".bnd-corner").count() == 4
+    assert art.locator("[data-testid=glance-part]").count() == 12 and art.locator(".bnd-gl-card").count() == 6
+    res = page.evaluate(CONTRAST_JS)
+    low = [(k, r) for k, r in res["out"] if r < 4.5]
+    assert not low, low
+    # the dots' words-colours keep AA on their own backgrounds
+    assert not overflow(page)
+    assert not bad_text(page, "#main")
+    page.screenshot(path=str(shot_dir("") / f"glance-look-{look}.png"), full_page=True)
+    page.emulate_media(media="print")
+    assert not page.is_visible(GLANCE)                                 # a screen page: never printed
+    page.emulate_media(media="screen")
+    assert_clean(page, f"glance {look}")
+
+
+def test_what_is_this_page_on_every_template(make_context, bd):
+    sch = schema()
+    page = open_binder(make_context, bd, mode="all")
+    seen = set()
+    for i in range(page.locator(".bnd-page").count()):
+        art = page.locator(".bnd-page").nth(i)
+        tid = art.get_attribute("data-template")
+        about = art.locator("[data-testid=binder-about]")
+        assert about.count() == 1, tid
+        if tid in seen:
+            continue
+        seen.add(tid)
+        assert about.locator("summary").inner_text().strip() == "ⓘ What is this page?"
+        assert not about.locator("p").is_visible()
+        about.locator("summary").click()
+        line = about.locator("p").inner_text()
+        assert about.locator("p").is_visible() and 20 < len(line) < 140 and "\n" not in line, (tid, line)
+    assert seen == set(sch)
+    page.emulate_media(media="print")
+    assert not page.locator("[data-testid=binder-about]").first.is_visible()
+    page.emulate_media(media="screen")
+    goto_page(page, "at-a-glance")
+    page.locator(GLANCE + " [data-testid=binder-about] summary").click()
+    assert "How full your Book Bible is" in page.inner_text(GLANCE + " [data-testid=binder-about] p")
+    assert_clean(page, "about")
