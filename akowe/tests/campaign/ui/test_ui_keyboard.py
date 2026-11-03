@@ -6,7 +6,7 @@ import time
 
 import pytest
 
-from .ui_helpers import assert_clean, goto, open_app, settle, shot
+from .ui_helpers import assert_clean, goto, open_app, set_mode, settle, shot
 
 
 @pytest.fixture(scope="module")
@@ -44,7 +44,7 @@ def test_skip_link_and_tab_order(make_context, ai_server, book):
         stops.append(info)
         page.keyboard.press("Tab")
     top = [s for s in stops if s["inTop"]]
-    assert len(top) >= 8, stops
+    assert len(top) >= 6, stops   # Akọwe, My books, the book, Save, Settings, Help, More
     assert all(s["vis"] and s["name"] for s in top), [s for s in top if not (s["vis"] and s["name"])]
     xs = [s["x"] for s in top]
     assert xs == sorted(xs), f"tab order jumps around the top bar: {[(s['name'], s['x']) for s in top]}"
@@ -84,8 +84,9 @@ def test_jump_dialog_keyboard(make_context, ai_server, book):
 
 
 def test_escape_closes_dialogs_and_returns_focus(make_context, ai_server, book):
-    page = open_app(make_context(), ai_server, f"#/p/{book['pid']}/main/book")
-    for opener, dlg in (("#mab-btn", "#mab-dialog"), ("#health-btn", "#health-dialog")):
+    page = open_app(make_context(), ai_server, "#/start")
+    set_mode(page, "advanced")   # ❤️ Health and 🧩 Sets are in the top bar in Advanced view
+    for opener, dlg in (("[data-testid=start-ai]", "#mab-dialog"), ("#health-btn", "#health-dialog")):
         page.focus(opener)
         page.keyboard.press("Enter")
         page.wait_for_selector(f"{dlg}[open]", timeout=5000)
@@ -93,7 +94,11 @@ def test_escape_closes_dialogs_and_returns_focus(make_context, ai_server, book):
         page.keyboard.press("Escape")
         page.wait_for_timeout(200)
         assert not page.locator(f"{dlg}[open]").count(), f"{dlg} did not close on Escape"
-        assert focused(page).startswith(opener), f"focus after closing {dlg}: {focused(page)}"
+        want = "#health-btn" if opener == "#health-btn" else "button"
+        assert focused(page).startswith(want), f"focus after closing {dlg}: {focused(page)}"
+        if opener != "#health-btn":
+            assert "AI writes the whole book" in focused(page), focused(page)
+    goto(page, f"#/p/{book['pid']}/main/book")
     btn = page.get_by_role("button", name="📝 Book profile")
     btn.focus()
     page.keyboard.press("Enter")
@@ -118,7 +123,7 @@ def test_escape_closes_dialogs_and_returns_focus(make_context, ai_server, book):
 def test_back_and_forward_between_routes(make_context, ai_server, book):
     pid = book["pid"]
     page = open_app(make_context(), ai_server)
-    trail = [f"#/p/{pid}/main", f"#/p/{pid}/main/set/A", f"#/p/{pid}/main/op/A01", f"#/p/{pid}/main/book", "#/settings"]
+    trail = [f"#/p/{pid}/main/journal", f"#/p/{pid}/main/set/A", f"#/p/{pid}/main/op/A01", f"#/p/{pid}/main/book", "#/settings"]
     heads = []
     for r in trail:
         page.evaluate("h => { location.hash = h; }", r)

@@ -9,7 +9,7 @@ import time
 import pytest
 from playwright.sync_api import TimeoutError as PWTimeout
 
-from .ui_helpers import assert_clean, goto, open_app, settle, shot
+from .ui_helpers import assert_clean, goto, open_app, open_make_book, settle, shot
 
 
 def run_steps_done(page):
@@ -44,7 +44,7 @@ def slow_ai(bridge):
 def test_make_a_book_live_pause_reload_resume_cancel(make_context, ai_server, slow_ai):
     ctx = make_context()
     page = open_app(ctx, ai_server)
-    page.click("#mab-btn")
+    open_make_book(page)
     dlg = page.locator("#mab-dialog")
     dlg.get_by_role("button", name="⚡ Start — let the AI choose everything").click()
     dlg.locator(".mb-steps").wait_for(timeout=10000)
@@ -57,8 +57,8 @@ def test_make_a_book_live_pause_reload_resume_cancel(make_context, ai_server, sl
         page.wait_for_timeout(300)
     assert len(set(seen)) >= 3, f"progress did not move in the open window: {seen}"
     assert seen == sorted(seen), f"progress went backwards: {seen}"
-    chip = page.inner_text("#mab-btn")
-    assert "Making" in chip, chip
+    chip = page.inner_text("#mab-btn")   # ONE status chip in the top bar while the AI works
+    assert re.search(r"AI working \d+/\d+", chip), chip
 
     # Pause: the run stops after the current answer; the window and the API agree
     run_id = api_run(ai_server)["id"]
@@ -69,10 +69,10 @@ def test_make_a_book_live_pause_reload_resume_cancel(make_context, ai_server, sl
     time.sleep(1.0)
     assert ai_server.api("GET", f"/autobook/{run_id}")["status"] == "paused", "a paused run kept working"
 
-    # reload while paused: the top bar says Paused and ⚡ opens the same run at the same step
+    # reload while paused: the top bar chip says "AI needs you" and opens the same run at the same step
     page.reload()
     page.wait_for_selector("#main h1", timeout=15000)
-    page.wait_for_function("() => /Paused/.test(document.querySelector('#mab-btn').textContent)", timeout=10000)
+    page.wait_for_function("() => /AI needs you/.test(document.querySelector('#mab-btn').textContent) && !document.querySelector('#mab-btn').hidden", timeout=10000)
     page.click("#mab-btn")
     dlg.locator(".mb-steps").wait_for(timeout=10000)
     assert run_steps_done(page)[0] == sum(1 for s in r["steps"] if s["state"] == "done")
@@ -113,10 +113,10 @@ def test_make_a_book_live_pause_reload_resume_cancel(make_context, ai_server, sl
     calls = slow_ai.completes
     time.sleep(1.5)
     assert slow_ai.completes == calls, "the AI was still being called after Cancel"
-    assert "Making" not in page.inner_text("#mab-btn")
+    assert page.locator("#mab-btn").is_hidden(), "the run chip still shows after Cancel"
 
     # a new run can start after the cancelled one
-    page.click("#mab-btn")
+    open_make_book(page)
     dlg.locator("button", has_text="Make another book").or_(dlg.get_by_role("button", name="⚡ Start — let the AI choose everything")).first.wait_for(timeout=5000)
     another = dlg.locator("button", has_text="Make another book")
     if another.count():

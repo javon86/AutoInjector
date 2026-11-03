@@ -54,12 +54,16 @@ def test_manual_path_forms(make_context, server):
     settle(page)
     pid = page.url.split("#/p/")[1].split("/")[0]
     assert book_top(page) == (1, "Characters and places")
-    # BF-14: the ⚡ on the yellow button sits in a dark disc (a yellow emoji on yellow was invisible)
+    # a book page never offers to make a DIFFERENT new book; its big 📖 Book Bible button sits beside ▶ Next step
+    assert page.locator("#main .mab-cta").count() == 0 and page.get_by_role("button", name="Make a book for me").count() == 0
+    assert page.locator("#main [data-testid=home-bible]").inner_text() == "📖 Book Bible"
+    # BF-14 (on My books): the ⚡ on the yellow button sits in a dark disc (a yellow emoji on yellow was invisible)
+    goto(page, "#/")
     bolt = page.locator("#main .mab-cta .mab-cta-bolt").first
     assert bolt.inner_text() == "⚡"
     assert bolt.evaluate("e => getComputedStyle(e).backgroundColor") == "rgb(29, 22, 0)"
-    assert page.locator("#main .mab-cta").first.get_attribute("class") and \
-        page.get_by_role("button", name="Make a book for me").count() >= 1
+    assert page.get_by_role("button", name="Make a book for me").count() >= 1
+    goto(page, f"#/p/{pid}/main/book")
 
     # Do the next step -> the A01 form
     page.locator("#main .book-top button", has_text="Do the next step").click()

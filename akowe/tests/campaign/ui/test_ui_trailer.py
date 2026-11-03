@@ -77,7 +77,7 @@ def open_page(make_context, tb, **kw):
 def test_trailer_page_plan_edit_make_and_play(make_context, tb):
     page = open_page(make_context, tb)
     assert page.locator("[data-testid=trailer-none]").count() == 1 and page.locator("[data-testid=trailer-empty]").count() == 1
-    assert page.locator("#more-links a", has_text="🎞 Trailer").count() == 1
+    assert page.locator("#sidenav .side-link", has_text="Trailer").count() == 1   # 🎬 Trailer is a part of the book in the side bar
     # 🎬 Plan a trailer: built from the book
     page.click("[data-testid=trailer-plan-book]")
     page.wait_for_function("() => document.querySelectorAll('[data-testid=trailer-item]').length >= 7", timeout=15000)

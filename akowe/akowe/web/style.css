@@ -117,13 +117,13 @@ main:focus { outline: none; }
 /* ---------------------------------------------------------------- layout */
 .topbar {
   position: sticky; top: 0; z-index: 20;
-  display: flex; align-items: center; gap: 8px; flex-wrap: nowrap;
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
   padding: 8px var(--gutter); background: var(--surface); border-bottom: 1px solid var(--border);
 }
 .brand { font-weight: 700; font-size: 1.1rem; color: var(--text); text-decoration: none; letter-spacing: .01em; }
-.topbar-context { display: flex; gap: 6px; align-items: center; flex-wrap: nowrap; flex: 1 1 auto; min-width: 0; }
+.topbar-context { display: flex; gap: 6px; align-items: center; flex-wrap: nowrap; flex: 0 1 auto; min-width: 0; }
 .topbar-context label { font-size: .85rem; color: var(--text-muted); }
-.topbar-context select { max-width: 13rem; min-width: 8.5rem; }
+.topbar-context select { max-width: 16rem; min-width: 8.5rem; }
 .topbar-links { display: flex; gap: 2px; flex-wrap: nowrap; white-space: nowrap; }
 .topbar-links a { padding: 6px 8px; border-radius: var(--radius); text-decoration: none; color: var(--text); }
 .topbar-links a[aria-current="page"] { background: var(--accent-soft); font-weight: 600; }
@@ -132,7 +132,7 @@ main:focus { outline: none; }
 
 .shell { display: grid; grid-template-columns: 300px minmax(0, 1fr); min-height: calc(100vh - 56px); }
 .sidenav { border-right: 1px solid var(--border); background: var(--surface); padding: 12px 8px 32px;
-  overflow-y: auto; position: sticky; top: 56px; height: calc(100vh - 56px); }
+  overflow-y: auto; position: sticky; top: var(--top-h, 56px); height: calc(100vh - var(--top-h, 56px)); }
 main { padding: 20px var(--gutter) 64px; min-width: 0; max-width: 1100px; width: 100%; }
 
 @media (max-width: 800px) {
@@ -641,7 +641,6 @@ body.ai-docked .shell { padding-right: calc(var(--dock-w) + 20px); }
   .topbar { flex-wrap: wrap; position: static; }
   .topbar-context { order: 10; flex-basis: 100%; }
   .topbar-links { order: 11; flex-basis: 100%; flex-wrap: wrap; white-space: normal; }
-  .jump-btn .tb-label { display: none; }
   .sets-pop { position: fixed; left: 8px; right: 8px; top: 56px; transform: none; width: auto; max-height: 80vh; overflow: auto; }
   .more-pop { position: fixed; right: 8px; top: 56px; }
 }
@@ -702,8 +701,7 @@ body.ai-docked .shell { padding-right: calc(var(--dock-w) + 20px); }
 .wf-row-head .wf-title { flex: 1 1 12rem; min-width: 0; overflow-wrap: anywhere; }
 .wf-more summary { cursor: pointer; font-size: .85rem; color: var(--accent); }
 .wf-detail, .wf-fix { overflow-wrap: anywhere; margin: 4px 0 0; }
-@media (max-width: 1400px) { .wf-btn .tb-label { display: none; } }
-@media (max-width: 800px) { .wf-btn .tb-label { display: none; } .rv-big .big { flex-basis: 100%; } }
+@media (max-width: 800px) { .rv-big .big { flex-basis: 100%; } }
 
 
 /* ================================================================ redesign (R4-R6): regions, states, sets, hazards */
@@ -926,23 +924,6 @@ button.mab-cta:hover, .mab-cta:hover { background: #ffe066; filter: none; }
 .bk-keep label { font-weight: 600; }
 .mab-btn > span[aria-hidden="true"], .mab-cta-bolt { display: inline-grid; place-items: center; width: 1.45em; height: 1.45em; border-radius: 50%;
   background: #1d1600; color: #ffd426; font-size: .85em; line-height: 1; }
-
-/* top bar stays on one line at 1280px: shorter selects, icon-only Jump/Settings, no duplicate "Books" inside a book */
-.topbar-context #project-select { max-width: 10rem; min-width: 6rem; }
-.topbar-context #branch-select { max-width: 5.5rem; min-width: 4.5rem; }
-.tb-settings .tb-set-ico { display: none; }
-@media (max-width: 1599px) {
-  .topbar-context label { position: absolute !important; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-  .jump-btn .tb-label, .jump-btn .tb-kbd { display: none; }
-  .tb-books.in-project { display: none; }
-  .tb-settings .tb-set-ico { display: inline; }
-  .tb-settings .tb-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-}
-@media (max-width: 800px) {
-  .tb-books.in-project { display: inline; }
-  .topbar-context #project-select, .topbar-context #branch-select { max-width: none; }
-  .mab-btn .tb-label { display: inline; }
-}
 
 /* ---------------------------------------------------------------- Make my book: warnings, refused drafts */
 .words-warn { margin: 6px 0 0; padding: 6px 10px; border-left: 4px solid var(--warn, #b45309); background: var(--surface-2); }
@@ -1550,12 +1531,6 @@ main { max-width: 1360px; margin: 0 auto; }
 .topbar-links a { white-space: nowrap; }
 .topbar-links .tb-btn { min-height: 34px; }
 .topbar .tb-btn, .topbar .nav-toggle { min-height: 36px; }
-.more-links .more-new { display: none; }
-@media (min-width: 801px) and (max-width: 1599px) {
-  /* inside a book: "🚀 New book" lives in the More menu so the bar keeps one line */
-  .topbar-links .tb-new.in-project { display: none; }
-  .more-links .more-new { display: block; }
-}
 
 /* phone: the page links become one row that scrolls sideways instead of two wrapped rows */
 @media (max-width: 800px) {
@@ -1602,11 +1577,6 @@ th { overflow-wrap: break-word; }
 .row:has(> input:not([type=checkbox]):not([type=radio]), > select) > :is(button, .btn) { min-height: 38px; }
 /* a label styled as a button around a hidden file input shows the keyboard focus of that input */
 label.btn:has(> input:focus-visible) { outline: 3px solid var(--focus); outline-offset: 2px; }
-/* the icon-only ⚙️ Settings link looks like the other icon buttons next to it */
-@media (min-width: 801px) and (max-width: 1599px) {
-  .topbar-links a.tb-settings { display: inline-flex; align-items: center; min-height: 34px; padding: 4px 9px; margin: 0 2px;
-    border: 1px solid rgba(255, 255, 255, .38); background: rgba(255, 255, 255, .08); }
-}
 /* inside AutoInjector (Electron shows real scrollbars) the side bar keeps room for its set names */
 .sidenav { scrollbar-width: thin; padding-left: 6px; padding-right: 6px; }
 .set-toggle { padding: 7px 6px; }
@@ -1624,9 +1594,8 @@ label.btn:has(> input:focus-visible) { outline: 3px solid var(--focus); outline-
 /* a save that partly worked: the files that were not written, in plain words */
 .save-warn { display: block; margin-top: 4px; padding: 4px 8px; border-left: 4px solid var(--warn-line); background: var(--warn-soft); color: var(--warn); font-weight: 600; overflow-wrap: anywhere; }
 
-/* small laptop window (e.g. AutoInjector at 1024px) inside a book: Save / Open / Make a book show their icons only
-   (their names stay in the tooltip and for screen readers) so the book and branch pickers keep their room instead of
-   being drawn under the 🔍 and Sets buttons; if it still does not fit, the bar wraps to a second line. */
+/* small laptop window (e.g. AutoInjector at 1024px): tighter spacing; when it still does not fit the bar wraps to a
+   second line. Every button keeps its words (no icon-only buttons). */
 @media (min-width: 801px) and (max-width: 1279px) {
   .topbar { flex-wrap: wrap; row-gap: 6px; gap: 4px; padding-left: 12px; padding-right: 12px; }
   .topbar-context { flex: 0 0 auto; min-width: 10rem; gap: 4px; }
@@ -1634,9 +1603,6 @@ label.btn:has(> input:focus-visible) { outline: 3px solid var(--focus); outline-
   .topbar-context #branch-select { flex: 0 0 4.25rem; min-width: 4.25rem; }
   .topbar-links a { padding: 6px 5px; }
   .topbar .tb-btn { padding-left: 7px; padding-right: 7px; }
-  .topbar .tb-save .tb-label, .topbar .tb-open .tb-label, .topbar .mab-btn .tb-label {
-    position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
-  }
 }
 
 /* ★ story roles (story_roles.py): a title on every character; the one main character stands out */
@@ -1654,3 +1620,72 @@ label.btn:has(> input:focus-visible) { outline: 3px solid var(--focus); outline-
 /* 📚 Start a sequel (book page, finished screen) */
 .sequel-box { margin-top: .6rem; }
 .sequel-box .row { align-items: center; gap: .5rem; flex-wrap: wrap; }
+
+/* ======================================================================= simple top bar, side bar and Simple / Advanced view
+   (2026-11). Simple view hides everything marked "adv-only"; Advanced view shows it. Nothing is removed, only moved. */
+html[data-mode="simple"] .adv-only { display: none !important; }
+/* a real problem with the AI connection shows in Simple view too (❤️ Health with its word) */
+html[data-mode="simple"] .topbar .health-btn.adv-only[data-state="problem"] { display: inline-flex !important; }
+.topbar { flex-wrap: wrap; row-gap: 6px; }
+.topbar .tb-link { display: inline-flex; align-items: center; gap: 4px; padding: 6px 9px; border-radius: var(--radius); text-decoration: none;
+  color: var(--top-text); white-space: nowrap; flex: 0 0 auto; }
+.topbar .tb-link:hover { background: rgba(255, 255, 255, .12); }
+.topbar .tb-link[aria-current="page"] { background: rgba(255, 255, 255, .16); color: #fff; box-shadow: inset 0 -3px 0 var(--hazard); }
+.topbar .tb-new { font-weight: 650; border: 1px solid rgba(255, 255, 255, .45); }
+.topbar-context { flex: 0 1 auto; }
+.topbar-context #project-select { flex: 1 1 14rem; min-width: 8rem; max-width: 18rem; font-weight: 600; }
+.topbar-context #branch-select { flex: 0 1 6rem; min-width: 4.5rem; }
+.tb-branch { display: inline-flex; align-items: center; gap: 4px; }
+.topbar-links { margin-left: auto; }
+.topbar .mab-btn .tb-label { display: inline; }
+.health-btn { font-size: 1rem; }
+.more-pop { width: 270px; max-height: calc(100vh - 80px); overflow-y: auto; }
+.more-group { display: flex; flex-direction: column; padding: 4px 0; border-top: 1px solid var(--border); }
+.more-links > .more-group:first-child, .more-links > .adv-only:first-child .more-group { border-top: 0; }
+.more-h, .more-pop .more-h { margin: 4px 8px 2px; font-size: .75rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+.more-pop .more-group a, .more-pop .more-item { display: block; padding: 7px 8px; border-radius: var(--radius); color: var(--text); text-decoration: none;
+  background: none; border: 0; text-align: left; font: inherit; width: 100%; cursor: pointer; min-height: 0; }
+.more-pop .more-group a:hover, .more-pop .more-item:hover, .more-pop .more-group a[aria-current="page"] { background: var(--surface-2); }
+.more-pop .more-bible { font-weight: 700; }
+.more-adv { border-top: 1px solid var(--border); padding-top: 4px; display: flex; flex-direction: column; gap: 6px; }
+/* side bar: the parts of the book, big and plain; 📖 Book Bible always stands out */
+.side-links { list-style: none; margin: 4px 0 8px; padding: 0; }
+.side-link { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: var(--radius); color: var(--text);
+  text-decoration: none; font-size: 1rem; font-weight: 550; }
+.side-link:hover { background: var(--surface-2); }
+.side-link[aria-current="page"] { background: var(--accent-soft); font-weight: 700; box-shadow: inset 4px 0 0 var(--accent); }
+.side-link .sl-ico { width: 1.5em; text-align: center; flex: 0 0 auto; }
+.side-link.side-bible { margin: 6px 0; background: #ffd426; color: #1d1600; border: 2px solid #c9a400; font-weight: 750; }
+.side-link.side-bible:hover { filter: brightness(1.05); background: #ffd426; }
+.side-link.side-bible[aria-current="page"] { box-shadow: inset 5px 0 0 #1d1600; }
+.side-adv { margin-top: 10px; padding-top: 8px; border-top: 2px dashed var(--border); }
+.side-foot { margin-top: 14px; padding: 10px 6px 0; border-top: 1px solid var(--border); }
+.mode-switch { display: inline-flex; align-items: center; gap: 4px; }
+.mode-switch[aria-checked="true"] { background: var(--accent-soft); border-color: var(--accent); font-weight: 650; }
+.mode-switch.small { font-size: .9rem; padding: 5px 9px; }
+.set-toggle .set-letter:empty { width: .9em; height: .9em; border-radius: 50%; padding: 0; }
+/* the big 📖 Book Bible buttons (Book home, My books, section pages) */
+.bible-cta, a.btn.bible-cta { background: #ffd426; color: #1d1600; border-color: #c9a400; font-weight: 700; }
+.bible-cta:hover { filter: brightness(1.05); }
+.bh-title { margin: 2px 0 0; }
+.bh-actions { flex-wrap: wrap; gap: 8px; }
+.book-cards .r-badges { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+/* section pages: big buttons with one line each */
+.landing-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 10px; margin: 12px 0 16px; }
+.landing-btn { display: flex; gap: 12px; align-items: flex-start; text-align: left; padding: 14px 16px; min-height: 84px; width: 100%;
+  white-space: normal; justify-content: flex-start; text-decoration: none; }
+.landing-btn .lb-ico { font-size: 1.6rem; line-height: 1; flex: 0 0 auto; }
+.landing-btn .lb-text { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.landing-btn .lb-label { font-weight: 700; font-size: 1.05rem; }
+.landing-btn .lb-line { font-size: .9rem; font-weight: 400; opacity: .9; overflow-wrap: break-word; }
+.new-choice { margin: 12px 0 20px; }
+.wz-h2 { margin-top: 8px; }
+.dl-more > summary { cursor: pointer; }
+.dl-more[open] > summary { margin-bottom: 6px; }
+.help-list li { margin: 6px 0; }
+.settings-top .row { align-items: center; gap: 10px; margin: 6px 0; }
+@media (max-width: 800px) {
+  .topbar-links { margin-left: 0; }
+  .topbar-context #project-select { max-width: none; }
+}
+@media (min-width: 801px) { .topbar .sets-pop { left: auto; right: 0; transform: none; } }  /* Sets sits at the right of the bar now */

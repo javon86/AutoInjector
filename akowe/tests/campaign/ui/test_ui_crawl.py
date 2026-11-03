@@ -7,7 +7,7 @@ import time
 
 import pytest
 
-from .ui_helpers import assert_clean, bad_text, goto, open_app, overflow, settle, shot, unnamed_controls
+from .ui_helpers import assert_clean, bad_text, goto, open_app, open_make_book, overflow, set_mode, settle, shot, unnamed_controls
 
 SETS = "ABCDEFGHIJK"
 
@@ -113,7 +113,7 @@ def test_record_and_edit_pages_clean(pages, made_book):
     assert not problems, "\n".join(problems)
 
 
-DIALOG_OPENERS = [("#jump-btn", "#jump-dialog"), ("#mab-btn", "#mab-dialog"), ("#health-btn", "#health-dialog"),
+DIALOG_OPENERS = [("#jump-btn", "#jump-dialog"), ("#health-btn", "#health-dialog"),
                   ("#more-btn >> nth=0", "#more-pop"), ("#sets-btn", "#sets-pop"), ("#wf-btn", "#wf-drawer")]
 
 
@@ -121,7 +121,14 @@ DIALOG_OPENERS = [("#jump-btn", "#jump-dialog"), ("#mab-btn", "#mab-dialog"), ("
 def test_topbar_popups_clean(pages, made_book, width):
     page = pages[width]
     goto(page, f"#/p/{made_book['pid']}/main")
+    set_mode(page, "advanced")   # Jump, Health, Sets, Test workflow, Test everything: Advanced view
     problems = []
+    open_make_book(page)   # ⚡ AI writes the whole book (➕ New book; the run chip only shows while a run works)
+    settle(page, 300)
+    check_page(page, "popup #mab-dialog", width, problems)
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(200)
+    goto(page, f"#/p/{made_book['pid']}/main")
     for btn, target in DIALOG_OPENERS:
         if width == 390 and not page.locator(btn).is_visible():
             problems.append(f"[{width}] {btn} is not reachable at phone width")
@@ -145,4 +152,5 @@ def test_topbar_popups_clean(pages, made_book, width):
         page.keyboard.press("Escape")
         page.wait_for_timeout(200)
         assert not page.locator(dlg).is_visible(), f"{dlg} did not close on Escape"
+    set_mode(page, "simple")
     assert not problems, "\n".join(problems)

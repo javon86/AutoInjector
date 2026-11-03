@@ -14,7 +14,7 @@ import { viewBinder } from './binder.js';  // 📖 Book Bible binder (the author
 /* ======================================================================= constants */
 // Fallback names; the full guide (purpose, build order, featured actions) comes from GET /api/sets.
 const SETS = {
-  A: ['Universe & Characters', 'Your story bible: characters, places, worlds, cultures and the rules of your world.', '🌍'],
+  A: ['Universe & Characters', 'Your characters and world: characters, places, worlds, cultures and the rules of your world.', '🌍'],
   B: ['Story Planning', 'Premise, genre and tone, main plot, character arcs, structure and the chapter outline.', '🗺️'],
   C: ['Writing', 'Turns the outline into chapter and scene prose — written by your AI or by you.', '✍️'],
   D: ['Art & Maps', 'Visual style, character references, illustrations, cover art and maps.', '🎨'],
@@ -79,7 +79,7 @@ const S = {
   pendingFocus: null,      // 'new': focus the New form after the next route
   task: null,              // GET .../review/summary: current task + approvals count for the open project
   pairing: null,           // {code, bridge} read once from #/pair?… (never kept in the address)
-  pendingBookStep: null,   // a "Make my book" step to run when the book page opens (Current task)
+  pendingBookStep: null,   // a "Book home" step to run when the book page opens (Current task)
 };
 
 /* ======================================================================= small utils */
@@ -169,7 +169,7 @@ const FIELD_HINT = {
   outline_ref: 'Pick the chapter outline.',
   premise_ref: 'Pick the premise.',
   job_id: 'A short name for this job, e.g. job-1.',
-  character_id: 'Which character (as named in your story bible).',
+  character_id: 'Which character (as named in your characters list).',
   chapter_id: 'Which chapter, e.g. ch-1.',
   scene_id: 'Which scene, e.g. s-1.',
   chapter_position: 'Where this chapter sits in the book.',
@@ -615,7 +615,7 @@ async function route() {
     if (seq !== routeSeq || S.authFailed) return;
     renderTop(parts); renderNav();
     clear(main).appendChild(failedState('Could not load this page', e,
-      h('p', null, h('a', { href: '#/' }, 'Back to projects'))));
+      h('p', null, h('a', { href: '#/' }, 'Back to My books'))));
   }
   if (seq === routeSeq && !S.authFailed) {
     // ✨ Fill with AI panels belong to their operation's form: on any other page they fold to their header
@@ -640,12 +640,20 @@ async function pickView(parts) {
   if (parts[0] === 'settings') return viewSettings;
   if (parts[0] === 'start') return viewStart;
   if (parts[0] === 'pair') return viewPair;
+  if (parts[0] === 'help') return viewHelp;
   if (parts[0] === 'shelf') return viewShelf;
   if (parts[0] === 'style') return m => S7C.viewStyle(m, s7c());  // ✒️ P25
   if ((parts[0] || '').split('?')[0] === 'compare') return m => viewCompare(m, parts[1] ? parts[1].split('?')[0] : null);
   if (parts[0] === 'p') {
     const rest = parts.slice(3);
-    if (!rest.length) return viewOverview;
+    // the old book overview opens 🏠 Book home (old links and bookmarks keep working)
+    if (!rest.length) { try { history.replaceState(history.state, '', plink('book')); } catch { /* the address stays */ } return viewBook; }
+    if (rest[0] === 'people') return m => viewLanding(m, 'people');
+    if (rest[0] === 'plan') return m => viewLanding(m, 'plan');
+    if (rest[0] === 'write' && !rest[1]) return m => viewLanding(m, 'write');
+    if (rest[0] === 'art') return m => viewLanding(m, 'art');
+    if (rest[0] === 'fix') return m => viewLanding(m, 'fix');
+    if (rest[0] === 'export') return m => viewLanding(m, 'export');
     if (rest[0] === 'set' && SETS[rest[1]]) return m => viewSet(m, rest[1]);
     if (rest[0] === 'op' && S.opsById[rest[1]]) return m => viewOperation(m, rest[1]);
     if (rest[0] === 'rec' && rest[1]) return m => viewRecord(m, rest[1], rest[2] ? parseInt(rest[2], 10) : null);
@@ -669,121 +677,191 @@ async function pickView(parts) {
     if (rest[0] === 'costs') return m => viewCosts(m, gridUI());     // ⏱ P28
     if (rest[0] === 'review') return m => viewReview(m, rest[1] === 'step', rest[2] || null);
   }
-  return m => { m.appendChild(h('h1', null, 'Page not found')); m.appendChild(h('p', null, h('a', { href: '#/' }, 'Go to projects'))); };
+  return m => { m.appendChild(h('h1', null, 'Page not found')); m.appendChild(h('p', null, h('a', { href: '#/' }, 'Go to My books'))); };
 }
 
 /* ======================================================================= chrome */
-function renderTop(parts) {
-  const bar = clear($('#context-bar'));
-  const inProject = parts[0] === 'p' && S.project;
-  if (S.projects.length || inProject) {
-    const pSel = h('select', { id: 'project-select', onchange: e => {
-      const pid = e.target.value; if (!pid) { go('#/'); return; }
-      go(link('p', pid, 'main'));
-    } }, h('option', { value: '' }, '— Projects —'));
-    const list = S.projects.length ? S.projects : [S.project];
-    for (const p of list) pSel.appendChild(h('option', { value: p.project_id, selected: inProject && p.project_id === S.pid }, p.name));
-    bar.appendChild(h('label', { for: 'project-select' }, 'Project'));
-    bar.appendChild(pSel);
+/* Simple / Advanced view (default Simple). Advanced only ADDS things (the A–K step sets, Branch, Jump, Health,
+ * Test workflow, Test everything, Book features, record ids…): everything with class "adv-only" is hidden in Simple
+ * view by CSS, so switching is instant and nothing is ever removed. Ctrl+K jumps in both views. */
+function getMode() { const m = loadJSON('bf:mode', 'simple'); return m === 'advanced' ? 'advanced' : 'simple'; }
+function applyMode(mode) {
+  document.documentElement.dataset.mode = mode;
+  for (const b of document.querySelectorAll('.mode-switch')) {
+    b.setAttribute('aria-checked', String(mode === 'advanced'));
+    const st = b.querySelector('.ms-state'); if (st) st.textContent = mode === 'advanced' ? 'On' : 'Off';
   }
+}
+function setMode(mode, quiet) {
+  mode = mode === 'advanced' ? 'advanced' : 'simple';
+  saveJSON('bf:mode', mode);
+  applyMode(mode);
+  if (!quiet) announce(mode === 'advanced' ? 'Advanced view is on: the step sets and expert tools are shown.' : 'Simple view is on.');
+}
+window.akoweSetMode = setMode;   // tests and the Settings page
+/** The 🛠 Advanced view switch (sidebar bottom and Settings). */
+function modeSwitch(id, big) {
+  const on = getMode() === 'advanced';
+  return h('button', { type: 'button', id, class: `mode-switch${big ? ' big' : ' small'}`, role: 'switch', 'aria-checked': String(on),
+    title: 'Advanced view shows the A–K step sets, Branch, Jump, Health, Test workflow and other expert tools. Nothing is lost in Simple view.',
+    onclick: () => setMode(getMode() === 'advanced' ? 'simple' : 'advanced') },
+  h('span', { 'aria-hidden': 'true' }, '🛠 '), 'Advanced view: ', h('span', { class: 'ms-state' }, on ? 'On' : 'Off'));
+}
+/** Keep the sticky side bar below the top bar, also when the top bar wraps onto two lines. */
+function watchTopHeight() {
+  const top = document.querySelector('.topbar'); if (!top) return;
+  const set = () => document.documentElement.style.setProperty('--top-h', `${Math.ceil(top.getBoundingClientRect().height)}px`);
+  set();
+  try { new ResizeObserver(set).observe(top); } catch { window.addEventListener('resize', set); }
+}
+function moreGroup(title, ...items) {
+  const id = uid('more-h');
+  return h('div', { class: 'more-group', role: 'group', 'aria-labelledby': id }, h('p', { class: 'more-h', id }, title), ...items);
+}
+function renderTop(parts) {
+  const inProject = !!(parts[0] === 'p' && S.project);
+  document.documentElement.classList.toggle('in-book', inProject);
+  const here = location.hash || '#/';
+  const cur = (el, on) => { if (on) el.setAttribute('aria-current', 'page'); else el.removeAttribute('aria-current'); };
+  cur($('#tb-books'), here === '#/' || here === '#');
+  const nb = $('#new-btn'); nb.hidden = inProject; cur(nb, here === '#/start');
+  const bar = clear($('#context-bar'));
   if (inProject) {
+    // the book switcher: the open book's title; choosing another book opens it
+    const pSel = h('select', { id: 'project-select', 'aria-label': 'Book: switch to another book', title: 'Switch to another book', onchange: e => {
+      const pid = e.target.value; if (!pid) { go('#/'); return; }
+      go(link('p', pid, 'main', 'book'));
+    } });
+    const list = S.projects.length ? S.projects.filter(p => !p.test_book || p.project_id === S.pid) : [S.project];
+    if (!list.some(p => p.project_id === S.pid)) list.unshift(S.project);
+    for (const p of list) pSel.appendChild(h('option', { value: p.project_id, selected: p.project_id === S.pid }, `📖 ${p.name}`));
+    bar.appendChild(pSel);
     const bSel = h('select', { id: 'branch-select', onchange: e => {
       const rest = parseRoute().slice(3);
       const keep = rest[0] === 'op' || rest[0] === 'set' || ['manifest', 'activity', 'progress'].includes(rest[0]) ? rest : [];
       go(link('p', S.pid, e.target.value, ...keep));
     } });
     for (const b of S.project.branches) bSel.appendChild(h('option', { value: b, selected: b === S.branch }, b));
-    bar.appendChild(h('label', { for: 'branch-select' }, 'Branch'));
-    bar.appendChild(bSel);
+    bar.appendChild(h('span', { class: 'adv-only tb-branch' }, h('label', { for: 'branch-select' }, 'Branch'), bSel));
   }
   const links = clear($('#top-links'));
-  const here = location.hash || '#/';
-  const add = (el, href, text) => el.appendChild(h('a', { href, 'aria-current': here === href ? 'page' : null }, text));
-  links.appendChild(h('a', { href: '#/start', class: inProject ? 'tb-new in-project' : 'tb-new', 'aria-current': here === '#/start' ? 'page' : null, title: 'Start a new book (step by step)' }, '🚀 New book'));
-  links.appendChild(h('a', { href: '#/', class: inProject ? 'tb-books in-project' : 'tb-books', 'aria-current': here === '#/' ? 'page' : null }, 'Books'));
   if (inProject) {
-    add(links, link('p', S.pid, S.branch), 'Overview');
-    links.appendChild(h('a', { href: link('p', S.pid, S.branch, 'book'), 'aria-current': here === link('p', S.pid, S.branch, 'book') ? 'page' : null }, '📘 Make my book'));
     links.appendChild(h('button', { type: 'button', class: 'tb-btn tb-save', 'data-testid': 'tb-save', title: '💾 Save this book into its folder in your books folder', 'aria-label': 'Save this book', onclick: ev => quickSave(ev.currentTarget) },
       h('span', { 'aria-hidden': 'true' }, '💾'), h('span', { class: 'tb-label' }, ' Save')));
   }
-  links.appendChild(h('button', { type: 'button', class: 'tb-btn tb-open', 'data-testid': 'tb-open', title: '📂 Open a saved book (from your books folder or a file)', 'aria-label': 'Open a saved book', onclick: ev => openSavedBookDialog(ev.currentTarget) },
-    h('span', { 'aria-hidden': 'true' }, '📂'), h('span', { class: 'tb-label' }, ' Open')));
-  links.appendChild(h('a', { href: '#/settings', class: 'tb-settings', title: 'Settings', 'aria-current': here === '#/settings' ? 'page' : null },
-    h('span', { class: 'tb-set-ico', 'aria-hidden': 'true' }, '⚙️ '), h('span', { class: 'tb-label' }, 'Settings')));
-  // Less frequent pages live in the "More" menu so the bar stays on one line.
+  links.appendChild(h('a', { href: '#/settings', class: 'tb-settings', 'aria-current': here === '#/settings' ? 'page' : null },
+    h('span', { 'aria-hidden': 'true' }, '⚙️ '), h('span', { class: 'tb-label' }, 'Settings')));
+  links.appendChild(h('a', { href: '#/help', class: 'tb-help', 'aria-current': here === '#/help' ? 'page' : null },
+    h('span', { 'aria-hidden': 'true' }, '❓ '), h('span', { class: 'tb-label' }, 'Help')));
+  // ⋯ More: the less frequent pages, grouped under plain headings
   const more = clear($('#more-links'));
-  // inside a book the bar is full at laptop width: "🚀 New book" moves into this menu there (CSS shows one or the other)
-  if (inProject) more.appendChild(h('a', { href: '#/start', class: 'more-new', 'aria-current': here === '#/start' ? 'page' : null }, '🚀 Start a new book'));
-  add(more, '#/shelf', '📚 My finished books');
-  add(more, '#/style', '✒️ My writing style');  // P25 (Section 7c)
+  const a = (href, text, extra) => h('a', Object.assign({ href, 'aria-current': here === href ? 'page' : null }, extra || {}), text);
   if (inProject) {
-    add(more, link('p', S.pid, S.branch, 'journal'), '📜 Book journal');
-    add(more, link('p', S.pid, S.branch, 'grid'), '🗂 Scene grid');
-    add(more, link('p', S.pid, S.branch, 'costs'), '⏱ Time and AI use');
-    add(more, link('p', S.pid, S.branch, 'bible'), '📖 Book Bible');
-    add(more, link('p', S.pid, S.branch, 'world'), '🌍 Story rules and world');
-    add(more, link('p', S.pid, S.branch, 'continuity'), '🧭 Continuity');
-    add(more, link('p', S.pid, S.branch, 'forge'), '🗂 Character Forge');
-    add(more, link('p', S.pid, S.branch, 'pictures'), '🖼 Pictures');
-    add(more, link('p', S.pid, S.branch, 'cover'), '🎨 Cover');
-    add(more, link('p', S.pid, S.branch, 'trailer'), '🎞 Trailer');
-    add(more, link('p', S.pid, S.branch, 'progress'), '📊 Progress');
-    add(more, link('p', S.pid, S.branch, 'activity'), '🕘 Activity');
-    add(more, link('p', S.pid, S.branch, 'manifest'), '🎛️ Book features');
-  } else {
-    more.appendChild(h('p', { class: 'small muted more-note' }, 'Open a project for Progress, Activity and the feature manifest.'));
+    more.appendChild(moreGroup('This book',
+      a(plink('bible'), '📖 Book Bible', { class: 'more-bible' }),
+      a(plink('journal'), '📜 Journal'),
+      a(plink('grid'), '🗂 Scene grid'),
+      a(plink('costs'), '⏱ Time and AI use'),
+      a(plink('activity'), '🕘 Activity'),
+      h('button', { type: 'button', class: 'more-item', 'data-testid': 'more-folder', onclick: async () => {
+        try { const r = await api('POST', '/books-folder/show', { body: { project_id: S.pid, branch_id: S.branch } }); toast(`Opened ${r.path}`); }
+        catch (e) { const p = toProblem(e, { step: '📂 Open the book’s folder' }); toast(`${p.title}: ${p.message}`); }
+      } }, '📂 Open folder')));
+  }
+  more.appendChild(moreGroup('Files',
+    h('button', { type: 'button', class: 'more-item tb-open', 'data-testid': 'tb-open', onclick: ev => openSavedBookDialog(visibleOpener(ev.currentTarget)) }, '📂 Open a saved book'),
+    a('#/shelf', '📚 My finished books'),
+    inProject ? a('#/start', '➕ New book', { class: 'more-new' }) : null));
+  more.appendChild(moreGroup('Your style', a('#/style', '✒️ My writing style')));
+  more.appendChild(moreGroup('Help', a('#/help', '❓ Help'), a('#/settings', '⚙️ Settings and AI connection')));
+  if (inProject) {
+    more.appendChild(h('div', { class: 'adv-only' }, moreGroup('Advanced: this book',
+      a(plink('progress'), '📊 Progress'),
+      a(plink('manifest'), '🎛️ Book features'),
+      a(plink('world'), '🌍 Story rules and world'))));
   }
 }
 
+/* The side bar inside a book: the sections of making a book, in the order you need them. */
+const SIDE_ITEMS = [
+  { id: 'home', icon: '🏠', label: 'Book home', path: ['book'], tip: 'Where your book stands and the next thing to do' },
+  { id: 'people', icon: '🧑', label: 'Characters & places', path: ['people'], tip: 'Your characters, places and world' },
+  { id: 'plan', icon: '🗺', label: 'Plan', path: ['plan'], tip: 'Premise, main plot and chapter outline' },
+  { id: 'write', icon: '✍', label: 'Write', path: ['write'], tip: 'The chapters' },
+  { id: 'bible', icon: '📖', label: 'Book Bible', path: ['bible'], tip: 'Everything about your book in one place: characters, places, world, plot and chapters' },
+  { id: 'art', icon: '🖼', label: 'Pictures & cover', path: ['art'], tip: 'Character pictures and the cover' },
+  { id: 'trailer', icon: '🎬', label: 'Trailer', path: ['trailer'], tip: 'A short video trailer for your book' },
+  { id: 'fix', icon: '🧭', label: 'Fix mistakes', path: ['fix'], tip: 'Continuity and facts that disagree' },
+  { id: 'export', icon: '📤', label: 'Export', path: ['export'], tip: 'PDF, EPUB and Word files of your book' },
+];
+const SIDE_OF = { '': 'home', book: 'home', people: 'people', forge: 'people', world: 'people', plan: 'plan', write: 'write', scenes: 'write',
+  bible: 'bible', binder: 'bible', art: 'art', pictures: 'art', cover: 'art', trailer: 'trailer', fix: 'fix', continuity: 'fix', report: 'fix', export: 'export' };
 function renderNav() {
   const nav = clear($('#sidenav'));
-  if (!S.project || parseRoute()[0] !== 'p') {
-    nav.appendChild(h('h2', null, 'Operation sets'));
-    nav.appendChild(h('p', { class: 'muted small', style: 'padding: 0 8px' },
-      'Open or create a project to work in the 11 operation sets.'));
-    for (const [letter, [name]] of Object.entries(SETS)) {
-      nav.appendChild(h('div', { class: `set-toggle set-${letter}`, 'aria-disabled': 'true' },
-        h('span', { class: `set-letter set-${letter}` }, letter), h('span', { class: 'set-name' }, name)));
+  const parts = parseRoute();
+  if (!S.project || parts[0] !== 'p') {
+    const here = location.hash || '#/';
+    nav.appendChild(h('h2', null, 'Start here'));
+    const ul = h('ul', { class: 'side-links' });
+    for (const [href, icon, text] of [['#/', '📚', 'My books'], ['#/start', '➕', 'New book'], ['#/shelf', '📚', 'My finished books'], ['#/style', '✒️', 'My writing style'], ['#/settings', '⚙️', 'Settings'], ['#/help', '❓', 'Help']]) {
+      ul.appendChild(h('li', null, h('a', { href, class: 'side-link', 'aria-current': here === href ? 'page' : null }, h('span', { class: 'sl-ico', 'aria-hidden': 'true' }, icon), h('span', { class: 'sl-lab' }, text))));
     }
+    nav.appendChild(ul);
+    const adv = h('div', { class: 'adv-only side-adv' }, h('h2', null, 'Step sets'),
+      h('p', { class: 'muted small', style: 'padding: 0 8px' }, 'Open or create a book to work in the 11 step sets.'));
+    for (const [letter, [name]] of Object.entries(SETS)) {
+      adv.appendChild(h('div', { class: `set-toggle set-${letter}`, 'aria-disabled': 'true', title: `Set ${letter}` },
+        h('span', { class: `set-letter set-${letter}`, 'aria-hidden': 'true' }), h('span', { class: 'set-name' }, name)));
+    }
+    nav.appendChild(adv);
+    nav.appendChild(h('div', { class: 'side-foot' }, modeSwitch('mode-toggle')));
     return;
   }
-  const parts = parseRoute();
   nav.appendChild(h('div', { id: 'nav-task', class: 'nav-task' }, taskCard('nav'), approvalsButton()));
+  const rest = parts.slice(3);
+  const curSide = rest[0] === 'review' ? null : SIDE_OF[rest[0] || ''] || null;
+  const ul = h('ul', { class: 'side-links', 'aria-label': 'Parts of your book' });
+  for (const it of SIDE_ITEMS) {
+    ul.appendChild(h('li', null, h('a', { href: plink(...it.path), class: `side-link side-${it.id}`, 'data-side': it.id, title: it.tip, 'aria-current': curSide === it.id ? 'page' : null },
+      h('span', { class: 'sl-ico', 'aria-hidden': 'true' }, it.icon), h('span', { class: 'sl-lab' }, it.label))));
+  }
+  nav.appendChild(ul);
   const curOp = parts[3] === 'op' ? parts[4] : (parts[3] === 'rec' || parts[3] === 'edit') ? (recordById(parts[4]) || {}).module_id : null;
   const curSet = parts[3] === 'set' ? parts[4] : curOp ? curOp[0] : null;
-  nav.appendChild(h('h2', { id: 'nav-h' }, 'Operation sets'));
+  const adv = h('div', { class: 'adv-only side-adv' }, h('h2', { id: 'nav-h' }, 'All steps, by set'));
   for (const [letter, [name]] of Object.entries(SETS)) {
     const ops = S.ops.filter(o => o.set === letter);
     const listId = `nav-set-${letter}`;
     const open = S.navOpen[letter] ?? (letter === curSet);
     const total = S.records.filter(r => r.module_id[0] === letter).length;
-    const ul = h('ul', { class: 'set-links', id: listId, hidden: !open });
-    ul.appendChild(h('li', null, h('a', { href: link('p', S.pid, S.branch, 'set', letter), class: 'set-overview-link',
-      'aria-current': parts[3] === 'set' && parts[4] === letter ? 'page' : null }, `${name} workspace`)));
+    const sl = h('ul', { class: 'set-links', id: listId, hidden: !open });
+    sl.appendChild(h('li', null, h('a', { href: link('p', S.pid, S.branch, 'set', letter), class: 'set-overview-link', title: `Set ${letter}`,
+      'aria-current': parts[3] === 'set' && parts[4] === letter ? 'page' : null }, `${name}: all of it`)));
     let staleSet = 0;
     for (const o of ops) {
       const st = opStats(o.id);
       staleSet += st.staleUsed;
-      ul.appendChild(h('li', { class: st.staleUsed ? 'has-hazard' : null }, h('a', { href: link('p', S.pid, S.branch, 'op', o.id),
+      sl.appendChild(h('li', { class: st.staleUsed ? 'has-hazard' : null }, h('a', { href: link('p', S.pid, S.branch, 'op', o.id), title: o.id,
         'aria-current': curOp === o.id ? 'page' : null },
-      h('span', { class: 'op-id' }, o.id), h('span', { class: 'op-name' }, o.name),
+      h('span', { class: 'op-name' }, o.name),
       h('span', { class: 'op-meta' }, opStateText(o.id))),
       st.staleUsed ? hazard({ code: 'STALE', message: `${st.staleUsed} approved part(s) of this step were made from something that changed since.`, where: { book: profileOf().title || S.project.name, set: letter, step: o.name, op: o.id } },
         { open: link('p', S.pid, S.branch, 'op', o.id), openLabel: 'Open the step' }, { small: true }) : null));
     }
-    const btn = h('button', { type: 'button', class: 'set-toggle', 'aria-expanded': String(!!open), 'aria-controls': listId,
+    const btn = h('button', { type: 'button', class: 'set-toggle', 'aria-expanded': String(!!open), 'aria-controls': listId, title: `Set ${letter}`,
       onclick: () => {
         const now = btn.getAttribute('aria-expanded') !== 'true';
-        btn.setAttribute('aria-expanded', String(now)); ul.hidden = !now;
+        btn.setAttribute('aria-expanded', String(now)); sl.hidden = !now;
         S.navOpen[letter] = now; saveJSON('bf:navOpen', S.navOpen);
       } },
     h('span', { class: 'chev', 'aria-hidden': 'true' }, '▸'),
-    h('span', { class: `set-letter set-${letter}` }, letter), h('span', { class: 'set-name' }, name),
-    staleSet ? h('span', { class: 'set-warn', title: `${staleSet} approved part(s) here were made from something that changed since (for example a chapter you edited). 📘 Make my book shows what to redo.`, 'aria-label': `${staleSet} out of date` }, '⚠️') : null,
+    h('span', { class: `set-letter set-${letter}`, 'aria-hidden': 'true' }), h('span', { class: 'set-name' }, name),
+    staleSet ? h('span', { class: 'set-warn', title: `${staleSet} approved part(s) here were made from something that changed since (for example a chapter you edited). 🏠 Book home shows what to redo.`, 'aria-label': `${staleSet} out of date` }, '⚠️') : null,
     h('span', { class: 'set-count', title: `${total} saved record(s) in this set` }, String(total), h('span', { class: 'visually-hidden' }, ' records')));
-    nav.appendChild(h('div', { class: `set-group set-${letter}${letter === curSet ? ' here' : ''}` }, btn, ul));
+    adv.appendChild(h('div', { class: `set-group set-${letter}${letter === curSet ? ' here' : ''}` }, btn, sl));
   }
+  nav.appendChild(adv);
+  nav.appendChild(h('div', { class: 'side-foot' }, modeSwitch('mode-toggle')));
 }
 function closeNav() {
   const nav = $('#sidenav'); nav.classList.remove('open');
@@ -819,22 +897,27 @@ async function viewHome(main) {
   await loadProjects();
   renderTop([]);
   if (!S.projects.length) { await viewStart(main); return; }
-  main.appendChild(h('div', { class: 'page-head' }, h('h1', null, 'Your books'),
-    h('div', { class: 'row' }, h('button', { type: 'button', class: 'primary big mab-cta', onclick: ev => openMakeBook(ev.currentTarget) }, boltLabel('Make a book for me')),
-      h('a', { class: 'btn big', href: '#/start' }, '🚀 Start a new book'), h('a', { class: 'btn big', href: '#/shelf' }, '📚 My finished books'),
+  main.appendChild(h('div', { class: 'page-head' }, h('h1', null, '📚 My books'),
+    h('div', { class: 'row' }, h('a', { class: 'btn primary big', href: '#/start', 'data-testid': 'home-new' }, '➕ New book'),
+      h('button', { type: 'button', class: 'big mab-cta', 'aria-label': 'AI writes the whole book (Make a book for me)', onclick: ev => openMakeBook(ev.currentTarget) }, boltLabel('AI writes the whole book')),
+      h('a', { class: 'btn big', href: '#/shelf' }, '📚 My finished books'),
       h('button', { type: 'button', class: 'big', 'data-testid': 'home-open', onclick: ev => openSavedBookDialog(ev.currentTarget) }, '📂 Open a saved book'))));
-  const listCard = h('section', { class: 'card', 'aria-labelledby': 'proj-list-h' }, h('h2', { id: 'proj-list-h' }, 'Your projects'));
+  const listCard = h('section', { class: 'card', 'aria-labelledby': 'proj-list-h' }, h('h2', { id: 'proj-list-h' }, 'Books you are working on'));
   if (!S.projects.length) {
-    listCard.appendChild(stateBox('empty', 'No projects yet',
-      h('p', null, 'Create your first project below. The only required input is a project name; features and release profiles can be changed later in the feature manifest.')));
+    listCard.appendChild(stateBox('empty', 'No books yet',
+      h('p', null, 'Press ➕ New book to start your first book.')));
   } else {
-    const ul = h('ul', { class: 'record-list' });
+    const ul = h('ul', { class: 'record-list book-cards' });
     for (const p of S.projects.filter(x => !x.test_book)) {
       const n = Object.values(p.record_counts || {}).reduce((a, b) => a + b, 0);
-      ul.appendChild(h('li', { class: 'record-item' },
-        h('div', { class: 'r-main' }, h('a', { class: 'r-title', href: link('p', p.project_id, 'main') }, p.name),
-          h('div', { class: 'r-meta' }, `${p.project_id} · created ${fmtTime(p.created_at)} · branches: ${p.branches.join(', ')}`)),
-        h('div', { class: 'r-badges' }, badge('▤', `${n} records on main`, 'b-muted'), bookActions(p))));
+      ul.appendChild(h('li', { class: 'record-item book-card', 'data-pid': p.project_id },
+        h('div', { class: 'r-main' }, h('a', { class: 'r-title', href: link('p', p.project_id, 'main', 'book') }, p.name),
+          h('div', { class: 'r-meta' }, `started ${fmtTime(p.created_at)}`,
+            h('span', { class: 'adv-only' }, ` · book ID ${p.project_id} · branches: ${p.branches.join(', ')} · ${n} records on main`))),
+        h('div', { class: 'r-badges' },
+          h('a', { class: 'btn primary small', href: link('p', p.project_id, 'main', 'book'), 'data-testid': 'card-home' }, '🏠 Open'),
+          h('a', { class: 'btn small bible-cta', href: link('p', p.project_id, 'main', 'bible'), 'data-testid': 'card-bible', 'aria-label': `📖 Book Bible of ${p.name}` }, '📖 Book Bible'),
+          bookActions(p))));
     }
     listCard.appendChild(ul);
     const tests = S.projects.filter(x => x.test_book);
@@ -847,7 +930,7 @@ async function viewHome(main) {
   }
   listCard.appendChild(archivedBooks());
   main.appendChild(listCard);
-  main.appendChild(h('details', { class: 'card' }, h('summary', null, 'Advanced: create an empty project with chosen features'), projectCreateForm()));
+  main.appendChild(h('details', { class: 'card adv-only' }, h('summary', null, 'Advanced: create an empty book with chosen features'), projectCreateForm()));
 }
 
 /* BF-19: archive (hide, kept and backed up) or permanently delete a book from the book list. */
@@ -909,26 +992,26 @@ function projectCreateForm() {
   const profs = PROFILES.map(([k, label]) => ({ k, el: h('input', { type: 'checkbox', id: `np-p-${k}`, checked: k === 'MANUSCRIPT_PDF' }), label }));
   const unit = h('input', { id: 'np-unit', type: 'text', value: 'seconds', 'aria-describedby': 'np-unit-h' });
   const cur = h('input', { id: 'np-cur', type: 'text', value: 'USD', maxlength: '3', 'aria-describedby': 'np-cur-h' });
-  const submit = h('button', { type: 'submit', class: 'primary' }, 'Create project');
+  const submit = h('button', { type: 'submit', class: 'primary' }, 'Create book');
   const form = h('form', { class: 'card', 'aria-labelledby': 'np-h', novalidate: true, onsubmit: async ev => {
     ev.preventDefault(); clear(errBox);
     const body = { name: name.value.trim(), features: {}, release_profiles: profs.filter(p => p.el.checked).map(p => p.k),
       story_time_unit: unit.value.trim() || 'seconds', currency: (cur.value.trim() || 'USD').toUpperCase() };
     for (const f of feats) body.features[f.k] = f.el.checked;
-    if (!body.name) { errBox.appendChild(stateBox('failed', 'Project name is required')); name.setAttribute('aria-invalid', 'true'); name.focus(); return; }
+    if (!body.name) { errBox.appendChild(stateBox('failed', 'Book name is required')); name.setAttribute('aria-invalid', 'true'); name.focus(); return; }
     if (!body.release_profiles.length) { errBox.appendChild(stateBox('failed', 'Choose at least one release profile')); return; }
     submit.disabled = true;
     try {
       const p = await api('POST', '/projects', { body });
-      toast(`Project "${p.name}" created`);
+      toast(`Book "${p.name}" created`);
       await loadProjects();
       go(link('p', p.project_id, 'main'));
-    } catch (e) { errBox.appendChild(failedState('Project was not created', e)); submit.disabled = false; }
+    } catch (e) { errBox.appendChild(failedState('The book was not created', e)); submit.disabled = false; }
   } },
-  h('h2', { id: 'np-h' }, 'Create a project'),
+  h('h2', { id: 'np-h' }, 'Create an empty book'),
   errBox,
-  h('div', { class: 'field' }, h('label', { for: 'np-name' }, 'Project name', h('span', { class: 'req-tag required' }, 'Required')), name,
-    h('span', { class: 'hint', id: 'np-name-hint' }, 'Working title or any name you will recognise. Projects are private to this computer.')),
+  h('div', { class: 'field' }, h('label', { for: 'np-name' }, 'Book name', h('span', { class: 'req-tag required' }, 'Required')), name,
+    h('span', { class: 'hint', id: 'np-name-hint' }, 'Working title or any name you will recognise. Books are private to this computer.')),
   h('fieldset', { class: 'field' }, h('legend', null, 'Features'),
     h('div', { class: 'check-grid' }, feats.map(f => h('div', { class: 'check-row' }, f.el,
       h('label', { for: f.id }, f.label, h('span', { class: 'hint', id: f.id + '-h' }, f.hint)))))),
@@ -943,58 +1026,32 @@ function projectCreateForm() {
   return form;
 }
 
-/* ======================================================================= views: project overview */
-async function viewOverview(main) {
+/* ======================================================================= the old book overview, merged into 🏠 Book home
+ * …/p/<pid>/<branch> (old links and bookmarks) opens Book home. What only the overview had lives here, in Advanced
+ * view: the book profile summary, the step sets, the book's technical details and the branch form. */
+function bookAdvancedCard() {
   const p = S.project;
-  const totals = S.records.length;
-  main.appendChild(h('div', { class: 'page-head' },
-    h('div', null, crumbs(['Your books', '#/'], p.name), h('h1', null, p.name)),
-    h('div', { class: 'row' }, h('button', { type: 'button', class: 'primary', 'aria-haspopup': 'dialog', onclick: ev => openJump(ev.currentTarget) }, '🔍 Jump to…'),
-      h('a', { class: 'btn', href: plink('manifest'), title: 'The feature manifest: which parts of Akọwe this book uses' }, '🎛️ Book features'),
-      h('a', { class: 'btn', href: plink('progress') }, 'Progress'))));
-  main.appendChild(h('div', { class: 'task-slot', 'data-where': 'page' }, taskCard('page')));
-  const next = h('div');
-  const drawNext = () => clear(next).appendChild(whatsNextCard(null));
-  drawNext();
-  S.onGuideChanged = drawNext;
-  S.leaveHooks.push(() => { S.onGuideChanged = null; });
-  main.appendChild(next);
-  const t0 = myTask();
-  main.appendChild(h('section', { class: 'card book-cta' },
-    h('div', { class: 'bc-text' }, h('h2', null, '📘 Make my book'), h('p', { class: 'small' }, 'One guided checklist from characters to a downloadable PDF, EPUB and Word file. It shows what is done, what needs you and what your AI can do.'),
-      h('div', { class: 'ov-words' }, t0 && t0.book ? wordsLine(t0.book.words) : null)),
-    h('div', { class: 'row' }, h('a', { class: 'btn primary big', href: plink('book') }, '▶ Open Make my book'),
-      h('a', { class: 'btn', href: plink('journal') }, '📜 Book journal'), h('a', { class: 'btn', href: '#/shelf' }, '📚 Finished books'),
-      // the 🔎 Timeline card lives at the bottom of Make my book: this opens that page and scrolls down to it
-      h('a', { class: 'btn', href: plink('book'), 'data-testid': 'ov-timeline-link', title: 'At the bottom of 📘 Make my book (after the characters and places are done)',
-        onclick: () => { S.scrollToFacts = true; } }, '🔎 Timeline, trade facts and repeats'))));
-  main.appendChild(h('section', { class: 'card mab-card' },
-    h('div', null, h('h2', null, '⚡ Make a book for me'), h('p', { class: 'small' }, 'Let your AI make a whole NEW book in one go — you watch every step, can pause or cancel, and get PDF, EPUB and Word at the end. This book is not touched.')),
-    h('button', { type: 'button', class: 'primary big mab-cta', onclick: ev => openMakeBook(ev.currentTarget) }, boltLabel('Make a book for me'))));
-  main.appendChild(profileCard());
-  if (!totals) {
-    main.appendChild(stateBox('empty', 'This branch has no records yet',
-      h('p', null, 'Start with Set A: open “Universe & Characters” below and press “Make up characters for me”, or ',
-        h('button', { type: 'button', class: 'link', onclick: ev => openBible(ev.currentTarget) }, 'build a starter story bible'),
-        '. You can also write a premise yourself in ', h('a', { href: plink('op', 'B01') }, 'B01 Premise/Concept Builder'), '.')));
-  }
-  main.appendChild(h('section', { class: 'launcher', 'aria-labelledby': 'sets-h' },
-    h('div', { class: 'launcher-head' }, h('h2', { id: 'sets-h' }, '🧩 Module sets'),
-      h('p', { class: 'small muted' }, 'Each set is one part of making the book. Open a set for what it does, its steps and quick actions. Main path: A → B → C → E → F → G → H.')),
-    setTiles('tile')));
-  main.appendChild(h('details', { class: 'card', 'aria-labelledby': 'ov-h' }, h('summary', { id: 'ov-h' }, 'Project details'),
-    h('dl', { class: 'kv' },
-      h('dt', null, 'Project ID'), h('dd', null, h('code', null, p.project_id)),
-      h('dt', null, 'Branch'), h('dd', null, S.branch),
-      h('dt', null, 'Created'), h('dd', null, fmtTime(p.created_at)),
-      h('dt', null, 'Story time unit'), h('dd', null, p.story_time_unit),
-      h('dt', null, 'Currency'), h('dd', null, p.currency),
-      h('dt', null, 'Phase'), h('dd', null, S.manifest ? S.manifest.phase : 'unknown'),
-      h('dt', null, 'Features'), h('dd', null, S.manifest ? FEATURES.map(([k, l]) =>
-        `${l}: ${S.manifest.features[k] ? 'on' : 'off'}`).join(' · ') : 'no manifest'),
-      h('dt', null, 'Release profiles'), h('dd', null, S.manifest ? S.manifest.release_profiles.join(', ') : '—'),
-      h('dt', null, 'Required operations'), h('dd', null, S.manifest ? String(S.manifest.required_operations.length) : '—'))));
-  main.appendChild(branchForm());
+  return h('section', { class: 'card adv-only book-adv', 'aria-labelledby': 'ov-h', 'data-testid': 'book-adv' },
+    h('h2', { id: 'ov-h' }, '🛠 Advanced: step sets and book details'),
+    profileCard(),
+    h('section', { class: 'launcher', 'aria-labelledby': 'sets-h' },
+      h('div', { class: 'launcher-head' }, h('h3', { id: 'sets-h' }, '🧩 Step sets'),
+        h('p', { class: 'small muted' }, 'Each set is one part of making the book. Open a set for what it does, its steps and quick actions. Main path: A → B → C → E → F → G → H.')),
+      setTiles('tile')),
+    h('details', { class: 'card' }, h('summary', null, 'Book details'),
+      h('dl', { class: 'kv' },
+        h('dt', null, 'Book ID'), h('dd', null, h('code', null, p.project_id)),
+        h('dt', null, 'Branch'), h('dd', null, S.branch),
+        h('dt', null, 'Created'), h('dd', null, fmtTime(p.created_at)),
+        h('dt', null, 'Story time unit'), h('dd', null, p.story_time_unit),
+        h('dt', null, 'Currency'), h('dd', null, p.currency),
+        h('dt', null, 'Phase'), h('dd', null, S.manifest ? S.manifest.phase : 'unknown'),
+        h('dt', null, 'Features'), h('dd', null, S.manifest ? FEATURES.map(([k, l]) =>
+          `${l}: ${S.manifest.features[k] ? 'on' : 'off'}`).join(' · ') : 'no manifest'),
+        h('dt', null, 'Release profiles'), h('dd', null, S.manifest ? S.manifest.release_profiles.join(', ') : '—'),
+        h('dt', null, 'Required operations'), h('dd', null, S.manifest ? String(S.manifest.required_operations.length) : '—')),
+      h('div', { class: 'row' }, h('a', { class: 'btn', href: plink('manifest') }, '🎛️ Book features'), h('a', { class: 'btn', href: plink('progress') }, '📊 Progress'))),
+    branchForm());
 }
 
 function branchForm() {
@@ -1023,12 +1080,137 @@ function branchForm() {
   out, h('div', { class: 'form-actions' }, h('button', { type: 'submit', class: 'primary' }, 'Create branch')));
 }
 
+/* ======================================================================= side-bar sections with several pages
+ * 🧑 Characters & places, 🗺 Plan, ✍ Write, 🖼 Pictures & cover, 🧭 Fix mistakes and 📤 Export each lead to a small
+ * page that lists the existing pages of that part as big buttons, each with one line about what it is for. */
+const LANDING = {
+  people: { icon: '🧑', title: 'Characters & places', lead: 'Who is in your book and where it happens. Start with the Character & place maker, then look after everyone in the Character Forge.', set: 'A' },
+  plan: { icon: '🗺', title: 'Plan', lead: 'What the book is about, how the story goes and what happens in each chapter.', set: 'B' },
+  write: { icon: '✍', title: 'Write', lead: 'The chapters of your book. Write them yourself or let your AI write them, one at a time.', set: 'C' },
+  art: { icon: '🖼', title: 'Pictures & cover', lead: 'Pictures of your characters and places, and the cover of your book.', set: 'D' },
+  fix: { icon: '🧭', title: 'Fix mistakes', lead: 'Find and fix things that do not fit together: who knows what, where everyone is, facts that disagree.', set: 'J' },
+  export: { icon: '📤', title: 'Export', lead: 'Put the book together and get PDF, EPUB and Word files of it.', set: 'G' },
+};
+/** A big button to an existing page (or an action), with a one-line explanation. */
+function landingBtn({ icon, label, line, href, onclick, testid, state, primary }) {
+  const kids = [h('span', { class: 'lb-ico', 'aria-hidden': 'true' }, icon),
+    h('span', { class: 'lb-text' }, h('span', { class: 'lb-label' }, label, state ? [' ', state] : null), h('span', { class: 'lb-line' }, line))];
+  const cls = `landing-btn${primary ? ' primary' : ''}`;
+  return href ? h('a', { class: `btn ${cls}`, href, 'data-testid': testid || null, onclick: onclick || null }, ...kids)
+    : h('button', { type: 'button', class: cls, 'data-testid': testid || null, onclick }, ...kids);
+}
+function stepBadge(book, id) {
+  const st = book && (book.steps || []).find(x => x.id === id);
+  if (!st) return null;
+  const b = BOOK_STATE[st.state] || BOOK_STATE.blocked;
+  return badge(b[0], b[1], b[2]);
+}
+/** Open 🏠 Book home at one of its steps. */
+function toStep(id) { return () => { S.scrollToStep = id; }; }
+async function viewLanding(main, kind) {
+  const L = LANDING[kind];
+  main.appendChild(h('div', { class: 'page-head' }, h('div', null,
+    crumbs(['My books', '#/'], [S.project.name, plink('book')], L.title), h('h1', null, `${L.icon} ${L.title}`)),
+  h('div', { class: 'row' }, h('a', { class: 'btn', href: plink('book') }, '🏠 Book home'), h('a', { class: 'btn bible-cta', href: plink('bible') }, '📖 Book Bible'))));
+  main.appendChild(h('p', { class: 'lead' }, L.lead));
+  let book = null;
+  try { book = await api('GET', bpath('/book')); } catch { book = null; }   // the step badges are a bonus
+  const grid = h('div', { class: 'landing-grid', 'data-testid': `landing-${kind}` });
+  const add = o => grid.appendChild(landingBtn(o));
+  if (kind === 'people') {
+    add({ icon: '🧑', label: 'Character & place maker', line: 'Let your AI draft characters, places and the world from your book idea. You keep the ones you like.', onclick: ev => openBible(ev.currentTarget), testid: 'land-maker', primary: true });
+    add({ icon: '🗂', label: 'Character Forge', line: 'Every character and place on its own card, with pictures, views and a character sheet.', href: plink('forge') });
+    add({ icon: '✅', label: 'Approve characters and places', line: 'On Book home: choose the main character and approve the places the book needs.', href: plink('book'), onclick: toStep('canon'), state: stepBadge(book, 'canon') });
+    add({ icon: '🌍', label: 'Story rules and world', line: 'The rules of your world: magic, technology, customs and what is true.', href: plink('world') });
+  } else if (kind === 'plan') {
+    add({ icon: '📝', label: 'Book profile', line: 'Title, author, genre, length and your idea in a few words.', onclick: () => openProfileDialog(() => route()), state: stepBadge(book, 'profile') });
+    add({ icon: '💡', label: 'Premise', line: 'What the book is about, in one or two sentences.', href: plink('book'), onclick: toStep('premise'), state: stepBadge(book, 'premise') });
+    add({ icon: '🧵', label: 'Main plot', line: 'How the story goes from beginning to end.', href: plink('book'), onclick: toStep('plot'), state: stepBadge(book, 'plot') });
+    add({ icon: '📋', label: 'Chapter outline', line: 'What happens in each chapter, before the chapters are written.', href: plink('book'), onclick: toStep('outline'), state: stepBadge(book, 'outline') });
+  } else if (kind === 'write') {
+    add({ icon: '✍', label: 'Write the chapters', line: 'On Book home: write each chapter yourself or let your AI write it, then approve it.', href: plink('book'), onclick: toStep('chapters'), state: stepBadge(book, 'chapters'), primary: true });
+    add({ icon: '🗂', label: 'Scene grid', line: 'Every scene of the book on one page: who is in it, where, and what it is for.', href: plink('grid') });
+    add({ icon: '📜', label: 'Journal', line: 'What happened to your book and when: every step, approval and AI answer.', href: plink('journal') });
+  } else if (kind === 'art') {
+    add({ icon: '🖼', label: 'Pictures', line: 'Pictures of your characters and places, made by your AI.', href: plink('pictures'), primary: true });
+    add({ icon: '🎨', label: 'Cover', line: 'Design the ebook and print covers of your book.', href: plink('cover') });
+  } else if (kind === 'fix') {
+    add({ icon: '🧭', label: 'Continuity', line: 'Who knows what, who is where, injuries and objects: checked chapter by chapter.', href: plink('continuity'), primary: true });
+    add({ icon: '⚖️', label: 'Facts that disagree', line: 'Finds facts that contradict each other and fixes them with the smallest change.', href: plink('set', 'J') });
+    add({ icon: '🔎', label: 'Timeline, trade facts and repeats', line: 'On Book home: dates that do not fit, terms to check and words used too often.', href: plink('book'), testid: 'ov-timeline-link', onclick: () => { S.scrollToFacts = true; } });
+    add({ icon: '📋', label: 'Book report', line: 'A report on the whole book: length, pacing, characters and what to improve.', href: plink('report') });
+  } else if (kind === 'export') {
+    add({ icon: '⚙️', label: 'Book format', line: 'Page size, font and the PDF, EPUB and Word settings.', href: plink('book'), onclick: toStep('format'), state: stepBadge(book, 'format') });
+    add({ icon: '🧩', label: 'Put the book together', line: 'Chapter order, one manuscript and the page layout.', href: plink('book'), onclick: toStep('assemble'), state: stepBadge(book, 'assemble') });
+    add({ icon: '📦', label: 'Export my book', line: 'Makes the PDF, EPUB and Word files you can download.', href: plink('book'), onclick: toStep('export'), state: stepBadge(book, 'export'), primary: true });
+    add({ icon: '🔎', label: 'Check the book', line: 'Checks that every chapter is there once and in order.', href: plink('book'), onclick: toStep('check'), state: stepBadge(book, 'check') });
+    add({ icon: '📚', label: 'My finished books', line: 'All your exported books, ready to download.', href: '#/shelf' });
+    add({ icon: '💾', label: 'Save the book', line: 'Saves this book into its folder in your books folder.', onclick: ev => quickSave(ev.currentTarget) });
+  }
+  main.appendChild(grid);
+  if (kind === 'write' && book) {
+    const st = (book.steps || []).find(x => x.id === 'chapters');
+    const chs = (st && st.chapters) || [];
+    if (chs.length) {
+      main.appendChild(h('section', { class: 'card', 'aria-labelledby': 'lw-h' }, h('h2', { id: 'lw-h' }, 'Your chapters'),
+        h('ul', { class: 'book-items' }, chs.map(c => {
+          const cb = BOOK_STATE[c.state] || BOOK_STATE.blocked;
+          const r = c.approved || c.prose;
+          return h('li', null, h('strong', null, c.name), c.objective || c.summary ? ` — ${c.objective || c.summary} ` : ' ', badge(cb[0], cb[1], cb[2]), ' ',
+            r ? h('a', { class: 'btn small', href: plink('write', r.record_id) }, '📖 Read') : null,
+            h('a', { class: 'btn small', href: plink('scenes', c.chapter_id) }, '🎬 Scenes'));
+        }))));
+    }
+  }
+  if (kind === 'export') {
+    const title = profileOf().title || S.project.name;
+    main.appendChild(h('details', { class: 'card dl-more' }, h('summary', null, '⬇ Download the Book Bible…'),
+      h('p', { class: 'small' }, 'Everything about your book as a file, for a backup or another program.'),
+      h('div', { class: 'row' }, h('button', { type: 'button', class: 'small', onclick: () => downloadBible(S.pid, S.branch, 'json', title) }, '⬇ book-bible.json'),
+        h('button', { type: 'button', class: 'small', onclick: () => downloadBible(S.pid, S.branch, 'md', title) }, '⬇ book-bible.md'))));
+  }
+  main.appendChild(h('p', { class: 'small muted adv-only' }, '🛠 Advanced: ', h('a', { href: plink('set', L.set) }, `all the steps of ${SETS[L.set][0]}`),
+    kind === 'export' ? [' · ', h('a', { href: plink('set', 'H') }, `all the steps of ${SETS.H[0]}`)] : null));
+}
+
+/* ======================================================================= ❓ Help */
+async function viewHelp(main) {
+  main.appendChild(h('div', { class: 'page-head' }, h('div', null, crumbs(['My books', '#/'], 'Help'), h('h1', null, '❓ Help'))));
+  const row = (icon, name, what) => h('li', null, h('span', { 'aria-hidden': 'true' }, `${icon} `), h('strong', null, name), ` — ${what}`);
+  main.appendChild(h('section', { class: 'card', 'aria-labelledby': 'hl-top' }, h('h2', { id: 'hl-top' }, 'The bar at the top'),
+    h('ul', { class: 'help-list' },
+      row('📚', 'My books', 'all your books. Open one, or see its 📖 Book Bible.'),
+      row('📖', 'The book’s name ▾', 'inside a book: switch to another book.'),
+      row('➕', 'New book', 'start a book: write it with the AI step by step, or let the AI write the whole book.'),
+      row('⚡', 'AI working / AI needs you', 'shows up while the AI writes a whole book. Click it to watch, pause or cancel. “AI needs you” means the run is paused and waits for you.'),
+      row('💾', 'Save', 'saves the open book into its folder.'),
+      row('⚙️', 'Settings', 'connect your AI and choose how Akọwe works.'),
+      row('⋯', 'More', 'the book’s journal, scene grid, time and AI use, opening a saved book, your writing style.'))));
+  main.appendChild(h('section', { class: 'card', 'aria-labelledby': 'hl-side' }, h('h2', { id: 'hl-side' }, 'The list on the left (inside a book)'),
+    h('ul', { class: 'help-list' },
+      row('▶', 'Next step', 'one button to exactly the next thing your book needs.'),
+      row('📝', 'Waiting for your OK', 'things the AI made that wait for you to approve them.'),
+      row('🏠', 'Book home', 'where your book stands, step by step, from characters to the finished files.'),
+      row('🧑', 'Characters & places', 'the Character & place maker and the Character Forge.'),
+      row('🗺', 'Plan', 'premise, main plot and chapter outline.'),
+      row('✍', 'Write', 'the chapters.'),
+      row('📖', 'Book Bible', 'everything about your book in one place: characters, places, world, plot and chapters.'),
+      row('🖼', 'Pictures & cover', 'pictures of characters and places, and the cover.'),
+      row('🎬', 'Trailer', 'a short video trailer for your book.'),
+      row('🧭', 'Fix mistakes', 'continuity and facts that disagree.'),
+      row('📤', 'Export', 'PDF, EPUB and Word files of your book.'))));
+  main.appendChild(h('section', { class: 'card', 'aria-labelledby': 'hl-adv' }, h('h2', { id: 'hl-adv' }, 'Simple and Advanced view'),
+    h('p', null, 'Akọwe starts in Simple view. Advanced view adds the expert tools: all the steps by set (A–K), branches, Jump (Ctrl K), the health panel, Test workflow, Test everything and the book’s features. Nothing is lost in Simple view, and Ctrl K jumps to any page in both.'),
+    h('div', { class: 'row' }, modeSwitch('mode-toggle-help', true))));
+  main.appendChild(helpCard());
+}
+
 /* ======================================================================= views: set workspace */
 function viewSet(main, letter) {
   const info = setInfo(letter);
   const g = info.guide;
   main.appendChild(h('div', { class: 'page-head' }, h('div', null,
-    crumbs(['Your books', '#/'], [S.project.name, plink()], `${letter} · ${info.name}`),
+    crumbs(['My books', '#/'], [S.project.name, plink('book')], `${letter} · ${info.name}`),
     h('h1', null, h('span', { 'aria-hidden': 'true' }, `${info.icon} `), `${letter} · ${info.name}`), h('p', { class: 'muted' }, info.purpose)),
   h('div', { class: 'row' }, h('button', { type: 'button', class: 'primary', 'aria-haspopup': 'dialog', onclick: ev => openSetPanel(letter, ev.currentTarget) }, '🧩 Open the set panel'))));
   if (g) {
@@ -1049,10 +1231,10 @@ function viewSet(main, letter) {
   }
   if (letter === 'A') {
     main.appendChild(h('section', { class: 'card bible-cta', 'aria-labelledby': 'bb-cta-h' },
-      h('h2', { id: 'bb-cta-h' }, h('span', { 'aria-hidden': 'true' }, '📖 '), 'Start your story bible with AI'),
-      h('p', null, 'The Bible Builder drafts the starter set you need to begin the book — characters, places, the world, a culture, a government or faction and a magic or technology system — from your book idea. You pick which sections and how many, run them one by one or all together, then keep the ones you like as drafts.'),
-      h('div', { class: 'row' }, h('button', { type: 'button', class: 'primary', 'aria-haspopup': 'dialog', onclick: ev => openBible(ev.currentTarget) }, '📖 Open the Bible Builder'),
-        infoTip('What is the Bible Builder?', ...TIP_BIBLE()))));
+      h('h2', { id: 'bb-cta-h' }, h('span', { 'aria-hidden': 'true' }, '📖 '), 'Start your characters and world with AI'),
+      h('p', null, 'The Character & place maker drafts the starter set you need to begin the book — characters, places, the world, a culture, a government or faction and a magic or technology system — from your book idea. You pick which sections and how many, run them one by one or all together, then keep the ones you like as drafts.'),
+      h('div', { class: 'row' }, h('button', { type: 'button', class: 'primary', 'aria-haspopup': 'dialog', onclick: ev => openBible(ev.currentTarget) }, '🧑 Open the Character & place maker'),
+        infoTip('What is the Character & place maker?', ...TIP_BIBLE()))));
   }
   main.appendChild(h('section', { 'aria-label': `${info.name} operations` }, h('h2', null, 'Steps in this set'), cards));
 }
@@ -1065,7 +1247,7 @@ async function viewOperation(main, opId) {
   const schema = await getSchema(opId);
   const sInfo = setInfo(op.set);
   main.appendChild(h('div', { class: 'page-head' }, h('div', null,
-    crumbs(['Your books', '#/'], [S.project.name, plink()], [`${op.set} · ${sInfo.name}`, plink('set', op.set)], `${op.id} ${op.name}`),
+    crumbs(['My books', '#/'], [S.project.name, plink('book')], [`${op.set} · ${sInfo.name}`, plink('set', op.set)], `${op.id} ${op.name}`),
     h('h1', null, `${op.id} ${op.name}`)),
   h('div', { class: 'row' }, h('span', { class: 'op-state-slot' }, opStateBadge(opId)), badge(isCreative(op) ? '✦' : '⚙︎', plainExecution(op.execution), 'b-muted'),
     tech(badge('▦', op.ui_type, 'b-muted')), techToggle())));
@@ -1190,9 +1372,9 @@ async function createSection(op, schema) {
   card.appendChild(h('p', { class: 'muted small' }, 'Fill in the fields marked Required; leave the others empty if you like. ', techToggle(),
     tech('Optional fields left empty are not sent (absent means “not supplied”).')));
   if (draft && draft.from_book) {
-    card.appendChild(stateBox('draft', 'Prepared by “Make my book” — write it, then press Create',
+    card.appendChild(stateBox('draft', 'Prepared by “Book home” — write it, then press Create',
       h('p', null, draft.from_book.message || '', ' The links to earlier steps are already filled in. ',
-        h('a', { href: plink('book') }, 'Back to Make my book'))));
+        h('a', { href: plink('book') }, 'Back to Book home'))));
   } else if (draft && (draft.from_copy || draft.from_paste)) {
     const c = draft.from_copy; const pz = draft.from_paste || {};
     const skipped = (c ? c.skipped : pz.skipped) || [];
@@ -2192,7 +2374,7 @@ async function viewRecord(main, rid, ver) {
   const op = S.opsById[cur.module_id] || { id: cur.module_id, name: '', set: cur.module_id[0], execution: '' };
   const setName = SETS[op.set] ? setInfo(op.set).name : '';
   main.appendChild(h('div', { class: 'page-head' }, h('div', null,
-    crumbs(['Your books', '#/'], [S.project.name, plink()], [`${op.set} · ${setName}`, plink('set', op.set)],
+    crumbs(['My books', '#/'], [S.project.name, plink('book')], [`${op.set} · ${setName}`, plink('set', op.set)],
       [`${op.id} ${op.name}`, plink('op', op.id)], `${rid} v${cur.version}`),
     h('h1', { class: 'wrap-anywhere' }, recordTitle(cur))),
   h('div', { class: 'row' }, lifecycleBadge(cur.lifecycle), cur.stale ? staleBadge(cur.stale_reason) : null, badge('#', `v${cur.version} of ${latest.version}`, 'b-muted'))));
@@ -2419,7 +2601,7 @@ async function viewEdit(main, rid) {
   const op = S.opsById[latest.module_id];
   const schema = await getSchema(op.id);
   main.appendChild(h('div', { class: 'page-head' }, h('div', null,
-    crumbs(['Your books', '#/'], [S.project.name, plink()], [`${op.set} · ${setInfo(op.set).name}`, plink('set', op.set)],
+    crumbs(['My books', '#/'], [S.project.name, plink('book')], [`${op.set} · ${setInfo(op.set).name}`, plink('set', op.set)],
       [`${op.id} ${op.name}`, plink('op', op.id)], [rid, plink('rec', rid)], 'Edit'),
     h('h1', { class: 'wrap-anywhere' }, `Edit ${recordTitle(latest)}`)),
   h('div', { class: 'row' }, lifecycleBadge(latest.lifecycle), badge('#', `based on v${latest.version}`, 'b-muted'))));
@@ -2560,7 +2742,7 @@ async function viewWrite(main, rid, mode) {
   const waiting = ['DRAFT', 'VALIDATED'].includes(latest.lifecycle);
   const title = h('h1', { class: 'wrap-anywhere' }, isChapter ? `📖 ${label}` : '📖 Chapter outline');
   main.appendChild(h('div', { class: 'page-head' }, h('div', null,
-    crumbs(['Your books', '#/'], [S.project.name, plink()], ['Make my book', plink('book')], label), title),
+    crumbs(['My books', '#/'], [S.project.name, plink('book')], label), title),
   h('div', { class: 'row' }, waiting ? badge('✎', approvedV ? 'New version, waiting for your approval' : 'Draft, waiting for your approval', 'b-warn')
     : latest.lifecycle === 'APPROVED' || latest.lifecycle === 'LOCKED' ? badge('✔', 'Approved', 'b-ok') : lifecycleBadge(latest.lifecycle),
   techToggle(), h('a', { class: 'btn small tech', href: plink('rec', rid) }, '🔧 Developer view (versions, checks, sources)'))));
@@ -2579,7 +2761,7 @@ async function viewWrite(main, rid, mode) {
   main.appendChild(edSlot);
   // 🎬 the scene cards this chapter was (or will be) written from (P8)
   if (chapterRow) main.appendChild(scenesMini(chapterRow.chapter_id, chapterRow.scenes));
-  const back = () => h('a', { class: 'btn', href: plink('book') }, '◀ Back to Make my book');
+  const back = () => h('a', { class: 'btn', href: plink('book') }, '◀ Back to Book home');
   const approveBtn = () => waiting ? h('button', { type: 'button', class: 'primary', onclick: () => approveThis() }, '✔ Approve this version') : null;
 
   const approveThis = async () => {
@@ -2741,7 +2923,7 @@ async function viewWrite(main, rid, mode) {
 async function viewManifest(main) {
   const m = await api('GET', bpath('/manifest'));
   main.appendChild(h('div', { class: 'page-head' }, h('div', null,
-    crumbs(['Your books', '#/'], [S.project.name, plink()], 'Feature manifest'),
+    crumbs(['My books', '#/'], [S.project.name, plink('book')], 'Feature manifest'),
     h('h1', null, `Book features (feature manifest) — ${S.branch}`))));
   if (!m) { main.appendChild(stateBox('empty', 'This branch has no feature manifest yet', h('p', null, 'Fill the form below to create one.'))); }
   const cur = m || { phase: 'PLANNING', features: { artwork: false, magic: false, mystery: false, foreshadowing: false, character_arcs: true },
@@ -2807,7 +2989,7 @@ async function viewManifest(main) {
 async function viewProgress(main) {
   const pr = await api('GET', bpath('/progress'));
   main.appendChild(h('div', { class: 'page-head' }, h('div', null,
-    crumbs(['Your books', '#/'], [S.project.name, plink()], 'Progress'),
+    crumbs(['My books', '#/'], [S.project.name, plink('book')], 'Progress'),
     h('h1', null, `Progress — ${S.branch}`))));
   main.appendChild(h('p', { class: 'notice' }, 'These are record counts, not approval evidence. Approval is decided per record revision; open a record to see its exact approved revision.'));
   const blockers = [];
@@ -2825,7 +3007,7 @@ async function viewProgress(main) {
       h('dt', null, 'Release profiles'), h('dd', null, (pr.release_profiles || []).join(', ')))));
   const tools = h('section', { class: 'card', 'aria-labelledby': 'pg-tools' }, h('h2', { id: 'pg-tools' }, 'Export and backup'));
   const out = h('div', { 'aria-live': 'polite' });
-  const exp = h('button', { type: 'button' }, 'Export project JSON');
+  const exp = h('button', { type: 'button' }, 'Export the book as JSON');
   exp.addEventListener('click', async () => {
     clear(out); exp.disabled = true;
     try {
@@ -2873,7 +3055,7 @@ async function viewProgress(main) {
 async function viewActivity(main) {
   const act = await api('GET', bpath('/activity'));
   main.appendChild(h('div', { class: 'page-head' }, h('div', null,
-    crumbs(['Your books', '#/'], [S.project.name, plink()], 'Activity'),
+    crumbs(['My books', '#/'], [S.project.name, plink('book')], 'Activity'),
     h('h1', null, `Activity — ${S.branch}`)),
   h('button', { type: 'button', onclick: () => route() }, 'Refresh')));
   const audit = h('section', { class: 'card', 'aria-labelledby': 'ac-a' }, h('h2', { id: 'ac-a' }, `Audit log (${act.audit.length})`));
@@ -2914,7 +3096,8 @@ const TOS_CAUTION = 'Experimental: automating the ChatGPT, Claude and Gemini web
 
 async function viewSettings(main) {
   const slots = await api('GET', '/slots');
-  main.appendChild(h('div', { class: 'page-head' }, h('h1', null, 'Settings: AI slots')));
+  main.appendChild(h('div', { class: 'page-head' }, h('h1', null, '⚙️ Settings')));
+  main.appendChild(settingsTopCard());
   // the background notes are folded away, so the page opens on what you can do (connect AutoInjector, the three slots)
   main.appendChild(h('details', { class: 'card settings-about' }, h('summary', { id: 'priv-h' }, 'ⓘ How AI slots are used (and what stays on this computer)'),
     h('ul', null,
@@ -2924,7 +3107,7 @@ async function viewSettings(main) {
       h('li', null, 'Deterministic (LOGIC) operations never use an AI slot.'),
       h('li', null, 'Roles route work: when a connected slot lists an operation ID (C02) or set letter (B) in its roles, that work goes only to such slots.'),
       h('li', null, 'API keys and AutoInjector connection keys are stored in the local secrets file on this computer, never in project data, exports, reports or logs. Key fields are write-only: a saved key is never shown again.'),
-      h('li', null, 'Not sure everything works? Open “More ▾” at the top and press “🧪 Test everything”: it builds a small test book in a separate project and writes a report.'))));
+      h('li', null, 'Not sure everything works? Switch on 🛠 Advanced view, open “⋯ More” at the top and press “🧪 Test everything”: it builds a small test book (a separate book) and writes a report.'))));
   main.appendChild(autoInjectorCard(main));
   for (const s of slots) main.appendChild(slotForm(s));
   main.appendChild(retryCard());
@@ -2937,6 +3120,22 @@ async function viewSettings(main) {
   main.appendChild(helpCard());
 }
 
+/** Settings, first card: 🛠 Simple / Advanced view and, in plain words, whether the AI connection works (❤️ Health). */
+function settingsTopCard() {
+  const line = h('span', { 'data-testid': 'ai-conn-line', 'aria-live': 'polite' });
+  const draw = () => {
+    const o = HL.last ? HL.last.overall : null;
+    const n = HL.last ? (HL.last.checks || []).filter(c => ['warn', 'problem'].includes(c.status)).length : 0;
+    clear(line).appendChild(h('strong', null, 'AI connection: '));
+    line.appendChild(document.createTextNode(o === 'ok' ? '✔ OK' : o === 'warn' ? `⚠️ ${n} thing(s) to look at` : o === 'problem' ? `⚠️ ${n} problem(s)` : '… checking'));
+  };
+  draw();
+  if (!HL.last) refreshHealth(false).then(() => { if (document.contains(line)) draw(); });
+  return h('section', { class: 'card settings-top', 'aria-labelledby': 'st-top-h' }, h('h2', { id: 'st-top-h' }, 'How Akọwe looks and works'),
+    h('div', { class: 'row' }, line, h('button', { type: 'button', class: 'small', 'data-testid': 'ai-conn-open', onclick: ev => openHealth(ev.currentTarget) }, '❤️ Check it now')),
+    h('div', { class: 'row' }, modeSwitch('mode-toggle-settings', true)),
+    h('p', { class: 'small muted' }, 'Simple view shows what a writer needs. Advanced view adds the expert tools: all the steps by set (A–K), branches, Jump, the health panel, Test workflow, Test everything and the book’s features. Nothing is lost in Simple view.'));
+}
 function autoInjectorCard(main) {
   const p = 'ai-bridge';
   const out = h('div', { 'aria-live': 'polite' });
@@ -3171,7 +3370,7 @@ function renderSelfTestIntro(st) {
   const d = stShell('Test everything',
     h('p', null, 'Akọwe will make a small two-chapter book from start to finish, exactly the way you would: create a character and a place, plan the story, write two chapters, track what happens, fix a typo through an edit pass, lay out the book, export a PDF, EPUB and Word file, re-read those files, run the quality checks and approve the release.'),
     h('ul', null,
-      h('li', null, h('strong', null, 'Your projects are not touched. '), 'Everything goes into a new, separate project called “Self-test <date time>”. You can open it afterwards and look at every record it made, or ignore it.'),
+      h('li', null, h('strong', null, 'Your books are not touched. '), 'Everything goes into a new, separate project called “Self-test <date time>”. You can open it afterwards and look at every record it made, or ignore it.'),
       h('li', null, h('strong', null, 'It takes about 5 seconds '), 'without AI. Each step is shown as it finishes, with ✔ Passed, ✕ Failed or – Skipped and what to do if something fails.'),
       h('li', null, h('strong', null, 'You get a written report '), '(Markdown and JSON) saved in the “reports” folder next to your Akọwe data. It never contains keys, passwords or AI conversations.')),
     h('div', { class: 'check-row st-ai' }, aiBox,
@@ -3715,7 +3914,7 @@ function takePrefill(key) {
   return d;
 }
 
-/* ======================================================================= Bible Builder */
+/* ======================================================================= Character & place maker */
 const BB = { dialog: null, opener: null, session: null, poll: null, keep: {}, edits: {}, editing: null, sig: '', rows: {}, sectionsInfo: null, created: null, idea: null, picker: null, view: null };
 
 function initBibleButton() {
@@ -3731,11 +3930,11 @@ async function openBible(opener) {
   if (!d.open) { if (d.showModal) d.showModal(); else d.setAttribute('open', ''); }
   clear(d);
   if (!S.pid || parseRoute()[0] !== 'p') {
-    bbShell(h('p', null, 'Open a project first: the Bible Builder adds drafts to the project and branch you are working in.'),
-      h('div', { class: 'form-actions' }, h('a', { class: 'btn primary', href: '#/', onclick: closeBible }, 'Go to projects')));
+    bbShell(h('p', null, 'Open a project first: the Character & place maker adds drafts to the project and branch you are working in.'),
+      h('div', { class: 'form-actions' }, h('a', { class: 'btn primary', href: '#/', onclick: closeBible }, 'Go to My books')));
     return;
   }
-  bbShell(loadingState('Loading the Bible Builder…'));
+  bbShell(loadingState('Loading the Character & place maker…'));
   try {
     const r = await api('GET', `/bible-builder?project_id=${encodeURIComponent(S.pid)}&branch_id=${encodeURIComponent(S.branch)}`);
     BB.sectionsInfo = r.sections;
@@ -3744,9 +3943,9 @@ async function openBible(opener) {
     } else if (r.session && r.session.session_id === BB.session.session_id) BB.session = r.session;
     renderBible();
     if (BB.session && BB.session.busy) bbPoll();
-  } catch (e) { bbShell(failedState('The Bible Builder could not open', e)); }
+  } catch (e) { bbShell(failedState('The Character & place maker could not open', e)); }
 }
-/** A dialog that saves drafts (📖 Bible Builder, ✨ Make up characters) closed: the page behind it and the sidebar
+/** A dialog that saves drafts (🧑 Character & place maker, ✨ Make up characters) closed: the page behind it and the sidebar
  * show what changed now, not after a reload (the book page redraws; other pages refresh their record lists). */
 async function afterWorkDialog() {
   try { await refreshRecords(); } catch { /* best effort */ }
@@ -3764,8 +3963,8 @@ function closeBible() {
 function bbShell(...body) {
   const d = clear(BB.dialog);
   d.appendChild(h('div', { class: 'st-head' },
-    h('h2', { id: 'bible-title' }, h('span', { 'aria-hidden': 'true' }, '📖 '), 'Bible Builder', h('span', { class: 'small muted' }, S.project ? ` · ${S.project.name}${S.branch !== 'main' ? ' / ' + S.branch : ''}` : '')),
-    h('button', { type: 'button', class: 'small', 'aria-label': 'Close the Bible Builder (running work continues)', onclick: closeBible }, '✕ Close')));
+    h('h2', { id: 'bible-title' }, h('span', { 'aria-hidden': 'true' }, '🧑 '), 'Character & place maker', h('span', { class: 'small muted' }, S.project ? ` · ${S.project.name}${S.branch !== 'main' ? ' / ' + S.branch : ''}` : '')),
+    h('button', { type: 'button', class: 'small', 'aria-label': 'Close the Character & place maker (running work continues)', onclick: closeBible }, '✕ Close')));
   append(d, body);
   return d;
 }
@@ -3824,7 +4023,7 @@ function renderBible() {
   BB.results = h('div', { class: 'bb-results' });
   BB.report = h('div', { class: 'bb-report' });
   bbShell(
-    h('p', null, 'Have your AI draft the story bible: tick the sections you want and how many of each, then generate them one section at a time or all together. Later sections use the earlier ones (for example, characters made after places can live in them). You choose which entries to keep; they are saved as ', h('strong', null, 'drafts'), ' only when you press “Create selected as drafts”.'),
+    h('p', null, 'Have your AI draft your characters and world: tick the sections you want and how many of each, then generate them one section at a time or all together. Later sections use the earlier ones (for example, characters made after places can live in them). You choose which entries to keep; they are saved as ', h('strong', null, 'drafts'), ' only when you press “Create selected as drafts”.'),
     h('div', { class: 'field' }, h('span', { class: 'label-row' }, h('label', { for: ideaId }, 'Your book idea'), infoTip('Why the idea?', ...TIP_BIBLE())), idea,
       h('span', { class: 'hint', id: `${ideaId}-h` }, 'A few sentences: who, where, what goes wrong. Every section is built to fit it.')),
     BB.picker.field,
@@ -3890,7 +4089,7 @@ async function bbPoll() {
   const wasBusy = BB.wasBusy; BB.wasBusy = BB.session.busy;
   bbUpdate();
   if (BB.session.busy) BB.poll = setTimeout(bbPoll, 1000);
-  else if (wasBusy) announce('Bible Builder: generation finished. Review the entries and choose which to create.');
+  else if (wasBusy) announce('Character & place maker: generation finished. Review the entries and choose which to create.');
 }
 
 function bbUpdate() {
@@ -3904,7 +4103,7 @@ function bbUpdate() {
       h('p', { class: 'row' }, h('span', { class: 'spinner', 'aria-hidden': 'true' }), h('strong', null, `${s.current.phase || 'Working'}…`),
         h('span', { class: 'mono' }, fmtClock(s.current.elapsed_ms || 0)),
         s.current.slot_label ? h('span', { class: 'small muted' }, `(${s.current.slot} · ${s.current.slot_label})`) : null),
-      h('p', { class: 'small' }, 'Web AIs can take a few minutes per entry. You can close this window — the work continues; open the Bible Builder again to see it.'),
+      h('p', { class: 'small' }, 'Web AIs can take a few minutes per entry. You can close this window — the work continues; open the Character & place maker again to see it.'),
       s.queued_runs.length ? h('p', { class: 'small muted' }, `${s.queued_runs.length} more run(s) waiting.`) : null));
   }
   const sig = bbSig(s);
@@ -4046,7 +4245,7 @@ function bbRenderReport() {
       clear(out).appendChild(loadingState('Loading the report…'));
       try {
         const blob = await api('GET', `/bible-builder/${encodeURIComponent(s.session_id)}/report?format=md`, { blob: true });
-        clear(out).appendChild(h('pre', { class: 'st-report', tabindex: '0', 'aria-label': 'Bible Builder report' }, await blob.text()));
+        clear(out).appendChild(h('pre', { class: 'st-report', tabindex: '0', 'aria-label': 'Character & place maker report' }, await blob.text()));
         out.querySelector('pre').focus();
       } catch (e) { clear(out).appendChild(failedState('The report could not be loaded', e)); }
     } }, 'View report'),
@@ -4069,7 +4268,7 @@ const TIP_PICKER = () => [
   h('p', null, 'Auto picks the cheapest ready AI slot. Or pick one: AI-1, AI-2 and AI-3 are set up in Settings (for example Claude, ChatGPT and Gemini through AutoInjector, or the Anthropic API).'),
   h('p', null, 'The word after each slot says where it’s at right now — Ready, Busy, Not set up or Error.')];
 const TIP_BIBLE = () => [
-  h('p', null, 'The Bible Builder drafts your story bible from a book idea: first a short “world sketch” with names and roles, then each entry in full, so names stay consistent and entries link to each other.'),
+  h('p', null, 'The Character & place maker drafts your characters and world from a book idea: first a short “world sketch” with names and roles, then each entry in full, so names stay consistent and entries link to each other.'),
   h('p', null, 'Run one section or many, as often as you like; later runs build on earlier ones. You keep only what you tick, and it is saved as drafts for you to validate and accept.'),
   h('p', null, 'A report of every run (which AI, what was made, what was kept) is saved in your Akọwe reports folder.')];
 
@@ -4116,14 +4315,14 @@ function whatsNextCard(currentOp) {
     // The book is made (the Current task says so): the main-path guide must not contradict it with leftovers such as
     // chapter context drafts, which the book path never needs approved.
     return h('section', { class: 'card next-card done', 'aria-label': 'What’s next' },
-      h('p', null, h('strong', null, '🎉 Your book is made. '), 'Download it from ', h('a', { href: plink('book') }, 'Make my book'),
+      h('p', null, h('strong', null, '🎉 Your book is made. '), 'Download it from ', h('a', { href: plink('book') }, 'Book home'),
         '. Everything else in the sets is optional; ', h('a', { href: plink('progress') }, 'Progress'), ' shows what more you can add.'));
   }
   if (!n) {
     return h('section', { class: 'card next-card done', 'aria-label': 'What’s next' },
       h('p', null, h('strong', null, '🎉 Every step of the main path has an approved record. '),
         'See ', h('a', { href: plink('progress') }, 'Progress'), ' for the remaining required steps, or ',
-        h('a', { href: plink('book') }, 'Make my book'), ' to export it.'));
+        h('a', { href: plink('book') }, 'Book home'), ' to export it.'));
   }
   const op = S.opsById[n.op_id] || { assist: false, name: n.title };
   const here = currentOp === n.op_id;
@@ -4136,7 +4335,7 @@ function whatsNextCard(currentOp) {
         here ? null : h('a', { class: 'btn small', href: plink('op', n.op_id) }, 'Open'),
         h('button', { type: 'button', class: 'small', onclick: () => goNew(n.op_id) }, 'New'),
         op.assist ? h('button', { type: 'button', class: 'small ai-btn', onclick: ev => openMakeDialog(n.op_id, null, ev.currentTarget) }, '✨ Make some for me') : null,
-        h('a', { class: 'btn small', href: plink('book') }, '📘 Make my book'))));
+        h('a', { class: 'btn small', href: plink('book') }, '🏠 Book home'))));
 }
 
 function goNew(opId) {
@@ -4217,13 +4416,13 @@ document.addEventListener('click', ev => { if (!ev.target.closest('.tb-menu')) c
 function renderSetsPop() {
   const pop = clear($('#sets-pop'));
   if (!S.project || parseRoute()[0] !== 'p') {
-    pop.appendChild(h('p', { class: 'small' }, 'Open or create a book first, then each module set opens here.'));
-    pop.appendChild(h('div', { class: 'row' }, h('a', { class: 'btn small', href: '#/' }, 'Your books'), h('a', { class: 'btn small primary', href: '#/start' }, '🚀 Start a new book')));
+    pop.appendChild(h('p', { class: 'small' }, 'Open or create a book first, then each step set opens here.'));
+    pop.appendChild(h('div', { class: 'row' }, h('a', { class: 'btn small', href: '#/' }, '📚 My books'), h('a', { class: 'btn small primary', href: '#/start' }, '➕ New book')));
     return;
   }
-  pop.appendChild(h('p', { class: 'small muted pop-title' }, 'Module sets — open one for its options'));
+  pop.appendChild(h('p', { class: 'small muted pop-title' }, 'Step sets — open one for its options'));
   pop.appendChild(setTiles('mini'));
-  pop.appendChild(h('div', { class: 'row pop-foot' }, h('a', { class: 'btn small', href: plink() }, 'Overview'), h('a', { class: 'btn small', href: plink('book') }, '📘 Make my book')));
+  pop.appendChild(h('div', { class: 'row pop-foot' }, h('a', { class: 'btn small', href: plink('book') }, '🏠 Book home'), h('a', { class: 'btn small', href: plink('bible') }, '📖 Book Bible')));
 }
 
 /* ======================================================================= set panel */
@@ -4399,7 +4598,7 @@ function renderMake(st) {
       h('span', { class: 'hint' }, st.mode === 'assist' ? `For example: “${PLACEHOLDER[st.op] || 'a short description of what you want'}”.` : 'For example: “one of them secretly works for the villain”.')),
     err,
     h('div', { class: 'form-actions' }, genBtn, cancelBtn,
-      st.mode === 'bible' ? h('button', { type: 'button', class: 'link', onclick: ev => { closeMake(); openBible(ev.currentTarget); } }, 'Open the full Bible Builder') : null));
+      st.mode === 'bible' ? h('button', { type: 'button', class: 'link', onclick: ev => { closeMake(); openBible(ev.currentTarget); } }, 'Open the full Character & place maker') : null));
   d.appendChild(form);
   st.cancelBtn = cancelBtn;
   st.resultsEl = h('div', { class: 'mk-results', 'aria-live': 'polite' });
@@ -4610,12 +4809,14 @@ const JP = { opener: null, items: [], shown: [], idx: 0 };
 function jumpEntries() {
   const out = [];
   const inP = !!(S.project && parseRoute()[0] === 'p');
-  out.push({ label: 'Your books', sub: 'Projects', href: '#/', kind: 'page' });
-  out.push({ label: '🚀 Start a new book', sub: 'Step-by-step', href: '#/start', kind: 'page' });
+  out.push({ label: '📚 My books', sub: 'All your books', href: '#/', kind: 'page' });
+  out.push({ label: '➕ New book', sub: 'Write it with me, or let the AI write it', href: '#/start', kind: 'page' });
   out.push({ label: 'Settings', sub: 'AI slots', href: '#/settings', kind: 'page' });
+  out.push({ label: '❓ Help', sub: 'What everything is', href: '#/help', kind: 'page' });
   if (!inP) return out;
-  out.push({ label: 'Overview', sub: S.project.name, href: plink(), kind: 'page' });
-  out.push({ label: '📘 Make my book', sub: 'Guided path', href: plink('book'), kind: 'page' });
+  out.push({ label: '🏠 Book home', sub: S.project.name, href: plink('book'), kind: 'page' });
+  out.push({ label: '📖 Book Bible', sub: S.project.name, href: plink('bible'), kind: 'page' });
+  for (const it of SIDE_ITEMS) if (!['home', 'bible'].includes(it.id)) out.push({ label: `${it.icon} ${it.label}`, sub: it.tip, href: plink(...it.path), kind: 'page' });
   out.push({ label: 'Progress', sub: 'Page', href: plink('progress'), kind: 'page' });
   out.push({ label: 'Activity', sub: 'Page', href: plink('activity'), kind: 'page' });
   out.push({ label: 'Book features', sub: 'Feature manifest', href: plink('manifest'), kind: 'page' });
@@ -4932,7 +5133,16 @@ function wizardState() {
 async function viewStart(main) {
   const w = wizardState();
   const save = () => saveJSON(WZ_KEY, w);
-  main.appendChild(h('div', { class: 'page-head' }, h('div', null, crumbs(['Your books', '#/'], 'Start a new book'), h('h1', null, '🚀 Start a new book'))));
+  main.appendChild(h('div', { class: 'page-head' }, h('div', null, crumbs(['My books', '#/'], 'New book'), h('h1', null, '➕ New book'))));
+  // one entry for a new book: how do you want to make it?
+  main.appendChild(h('section', { class: 'new-choice', 'aria-labelledby': 'nc-h', 'data-testid': 'new-choice' },
+    h('h2', { id: 'nc-h' }, 'How do you want to make it?'),
+    h('div', { class: 'landing-grid' },
+      landingBtn({ icon: '✍', label: 'Write it with me', line: 'You decide each step and the AI helps when you ask. Fill in the steps below.', testid: 'start-me', primary: true,
+        onclick: () => { const c = document.querySelector('.wz-card'); if (c) { c.scrollIntoView({ block: 'start' }); const f = c.querySelector('input, select, textarea, button'); if (f) f.focus({ preventScroll: true }); } } }),
+      landingBtn({ icon: '⚡', label: 'AI writes the whole book', line: 'The AI makes the whole book in one go while you watch; you can pause or cancel and get PDF, EPUB and Word at the end.', testid: 'start-ai',
+        onclick: ev => openMakeBook(ev.currentTarget) }))));
+  main.appendChild(h('h2', { class: 'wz-h2' }, '✍ Write it with me'));
   const steps = ['Your book', 'Your AI', 'What to make', 'Review and go'];
   main.appendChild(h('ol', { class: 'wz-steps step-rail', 'aria-label': 'Steps' }, steps.map((s, i) => h('li', { class: i + 1 === w.step ? 'cur here rail-needs_you' : i + 1 < w.step ? 'done rail-done' : 'rail-blocked', 'aria-current': i + 1 === w.step ? 'step' : null },
     h('span', { class: 'rail-in' }, h('span', { class: 'wz-n rail-dot' }, i + 1 < w.step ? '✔' : String(i + 1)), h('span', { class: 'rail-lab' }, s))))));
@@ -4986,7 +5196,7 @@ async function viewStart(main) {
         list.appendChild(h('p', { class: 'notice small' }, 'No AI is ready right now, so “Manual” is selected: you write each part yourself, and you can connect an AI later (Settings). Choose “Automatic” only if you will connect an AI before you start.'));
       }
     } catch (e) { list.lastChild.replaceWith(h('p', { class: 'small' }, 'Could not check the AI slots (they can be set up later).')); }
-    list.appendChild(opt('manual', 'Manual — I’ll write it myself', 'No AI is used; “📘 Make my book” opens an empty form for each step for you to fill in.'));
+    list.appendChild(opt('manual', 'Manual — I’ll write it myself', 'No AI is used; “🏠 Book home” opens an empty form for each step for you to fill in.'));
   } else if (w.step === 3) {
     const ai = w.ai !== 'manual';
     const num = (key, label, max, hint) => {
@@ -5003,7 +5213,7 @@ async function viewStart(main) {
       // BF-14: manual mode makes nothing up front, so don't ask for counts it would ignore; say what happens instead
       card.append(h('h2', { id: 'wz-h' }, '3. What happens next'),
         h('p', null, 'You chose to write it yourself, so nothing is made for you now.'),
-        h('p', null, '“📘 Make my book” walks you through the book one step at a time: your characters and places, the premise, the plot, the chapter outline, then each chapter. Press “Do the next step” and it opens an empty form for that step; you write it, save it and approve it.'),
+        h('p', null, '“🏠 Book home” walks you through the book one step at a time: your characters and places, the premise, the plot, the chapter outline, then each chapter. Press “Do the next step” and it opens an empty form for that step; you write it, save it and approve it.'),
         h('p', { class: 'small muted' }, 'You can connect an AI at any time in Settings and let it help with the remaining steps.'), err,
         nav(() => goStep(2), () => goStep(4)));
       return;
@@ -5015,12 +5225,12 @@ async function viewStart(main) {
       num('A03', 'World', 1, 'The world or setting as a whole (0 or 1).'),
       tick('premise', 'Premise', 'What the book is about, from your idea.'),
       tick('outline', 'Plot and chapter outline', 'The main plot and a chapter-by-chapter plan.'),
-      h('p', { class: 'small muted' }, 'Chapters are written one at a time in “📘 Make my book”, after you approve the outline.'), err,
+      h('p', { class: 'small muted' }, 'Chapters are written one at a time in “🏠 Book home”, after you approve the outline.'), err,
       nav(() => goStep(2), () => goStep(4)));
   } else {
     const p = w.profile;
     const aiLabel = w.ai === 'manual' ? 'I write it myself (no AI)' : w.ai || 'Automatic';
-    const makeList = w.ai === 'manual' ? ['nothing now: you write each step yourself in “📘 Make my book”']
+    const makeList = w.ai === 'manual' ? ['nothing now: you write each step yourself in “🏠 Book home”']
       : [w.make.A01 ? `${w.make.A01} character(s)` : null, w.make.A04 ? `${w.make.A04} place(s)` : null, w.make.A03 ? 'the world' : null,
         w.make.premise ? 'a premise' : null, w.make.outline ? 'the plot and chapter outline' : null].filter(Boolean);
     const go4 = h('button', { type: 'button', class: 'primary big' }, '🚀 Create my book');
@@ -5031,7 +5241,7 @@ async function viewStart(main) {
         h('dt', null, 'Idea'), h('dd', null, p.idea || '—'), h('dt', null, 'AI'), h('dd', null, aiLabel),
         h('dt', null, 'Ending and style'), h('dd', { 'data-testid': 'wz-choices' }, choicesSummary(p.choices).join(' · ') || 'Let the AI choose'),
         h('dt', null, 'To make'), h('dd', null, makeList.join(', ') || 'nothing yet')),
-      h('p', { class: 'small muted' }, 'This creates the book with PDF, EPUB and Word (DOCX) output, then opens “📘 Make my book”, which walks you through every step.'),
+      h('p', { class: 'small muted' }, 'This creates the book with PDF, EPUB and Word (DOCX) output, then opens “🏠 Book home”, which walks you through every step.'),
       err, h('div', { class: 'form-actions' }, h('button', { type: 'button', onclick: () => goStep(3) }, '◀ Back'), go4));
     go4.addEventListener('click', async () => {
       clear(err); go4.disabled = true;
@@ -5059,19 +5269,25 @@ async function viewStart(main) {
   }
 }
 
-/* ======================================================================= Make my book */
+/* ======================================================================= Book home */
 const BOOK_STATE = {
-  done: ['✔', 'Done', 'b-ok'], needs_you: ['👋', 'Needs you', 'b-warn'], ai_can: ['✨', 'AI can do it', 'b-info'],
+  done: ['✔', 'Done', 'b-ok'], needs_you: ['👋', 'Your turn', 'b-warn'], ai_can: ['✨', 'AI can do it', 'b-info'],
   ready: ['▶', 'Ready', 'b-info'], blocked: ['⏳', 'Waiting', 'b-muted'],
 };
 const STEP_WAIT = { B01: 'the premise', B03: 'the main plot', B11: 'the chapter outline', profile: 'the book profile', chapters: 'all chapters approved', format: 'the book format', assemble: 'the assembled book' };
 async function viewBook(main) {
+  const nextBtn = h('button', { type: 'button', class: 'primary big', 'data-testid': 'home-next', onclick: ev => {
+    const t = myTask(); const ct = t && t.current_task;
+    if (ct) runTask(ct, ev.currentTarget);
+    else { const st = document.querySelector('#main .book-step.current'); if (st) { st.scrollIntoView({ block: 'center' }); st.focus({ preventScroll: true }); } }
+  } }, '▶ Next step');
   main.appendChild(h('div', { class: 'page-head' }, h('div', null,
-    crumbs(['Your books', '#/'], [S.project.name, plink()], 'Make my book'), h('h1', null, '📘 Make my book')),
-  h('div', { class: 'row' }, h('button', { type: 'button', onclick: () => openProfileDialog(() => drawBook()) }, '📝 Book profile'),
+    crumbs(['My books', '#/'], S.project.name), h('h1', null, '🏠 Book home')),
+  h('div', { class: 'row bh-actions' }, nextBtn,
+    h('a', { class: 'btn big bible-cta', href: plink('bible'), 'data-testid': 'home-bible', title: 'Everything about your book in one place: characters, places, world, plot and chapters' }, '📖 Book Bible'),
+    h('button', { type: 'button', onclick: () => openProfileDialog(() => drawBook()) }, '📝 Book profile'),
     h('a', { class: 'btn', href: plink('journal') }, '📜 Journal'),
-    h('a', { class: 'btn', href: plink('grid'), 'data-testid': 'bk-grid' }, '🗂 Scene grid'),
-    h('button', { type: 'button', class: 'mab-cta', onclick: ev => openMakeBook(ev.currentTarget), title: 'Let the AI make a whole new book (this one is not touched)' }, boltLabel('Make a book for me')))));
+    h('a', { class: 'btn', href: plink('grid'), 'data-testid': 'bk-grid' }, '🗂 Scene grid'))));
   main.appendChild(bookSaveCard());
   const holder = h('div', null, loadingState('Checking where your book is…'));
   main.appendChild(holder);
@@ -5083,15 +5299,16 @@ async function viewBook(main) {
     renderBook(holder, book, drawBook);
     refreshTask();   // the sidebar's Current task follows the page right away (not on its next 10 s tick)
   };
-  // Dialogs that save drafts (Bible Builder, ✨ Make up characters) redraw this page when they close.
+  // Dialogs that save drafts (Character & place maker, ✨ Make up characters) redraw this page when they close.
   S.bookRedraw = drawBook;
   S.leaveHooks.push(() => { if (S.bookRedraw === drawBook) S.bookRedraw = null; });
   await drawBook();
   S.onRecordsChanged = null;
+  if (document.contains(holder)) main.appendChild(bookAdvancedCard());   // 🛠 Advanced view only: sets, book details, branches
 }
 
 const BOOK_ERR = {};   // step id -> the problem of the last attempt on this page (shown as ⚠️ on that step)
-const RAIL_WORD = { done: 'done', needs_you: 'needs you', ai_can: 'AI can do it', ready: 'ready', blocked: 'waiting', problem: 'problem' };
+const RAIL_WORD = { done: 'done', needs_you: 'your turn', ai_can: 'AI can do it', ready: 'ready', blocked: 'waiting', problem: 'problem' };
 /** The newest revision of an approved chapter when it is a draft waiting for approval (the author or the AI changed it). */
 function waitingRevision(c) {
   const p = c.prose; const a = c.approved;
@@ -5156,7 +5373,7 @@ function renderBook(holder, book, redraw) {
       const nm = holder.querySelector('.book-msg'); if (nm && note) { clear(nm).appendChild(note); announce(spokenText(note)); }
     } catch (e) {
       const st = book.steps.find(x => x.id === curStep);
-      const p = toProblem(e, { book: profileOf().title || S.project.name, step: st ? st.title : 'Make my book', set: st && st.op ? st.op[0] : null, op: st ? st.op : null });
+      const p = toProblem(e, { book: profileOf().title || S.project.name, step: st ? st.title : 'Book home', set: st && st.op ? st.op[0] : null, op: st ? st.op : null });
       if (curStep) BOOK_ERR[`${S.pid}:${curStep}`] = p;
       clear(msg).appendChild(problemBox(p, { retry: st ? () => doStep(st) : null }, 'That step did not work'));
       const li = holder.querySelector(`[data-book-step="${curStep}"] .bs-head`);
@@ -5177,7 +5394,7 @@ function renderBook(holder, book, redraw) {
     const versions = Object.fromEntries(items.filter(i => Number.isInteger(i.version)).map(i => [i.record_id, i.version]));
     await run(() => post('approve', { record_ids: items.map(i => i.record_id), versions, author_confirms: true }), 'Approving…', (stepOfRecord(items[0].record_id) || {}).id);
   };
-  let bbPending = null; let bbFirst = null;   // the wizard's Bible Builder entries not saved yet (canon step), when there are any
+  let bbPending = null; let bbFirst = null;   // the wizard's Character & place maker entries not saved yet (canon step), when there are any
   const redoBox = (items) => {
     // A draft Akọwe's checks refuse cannot be approved by pressing approve again: offer to redo or edit it.
     const box = h('div', { class: 'refused-box' });
@@ -5235,7 +5452,7 @@ function renderBook(holder, book, redraw) {
     h('progress', { max: '100', value: String(pct), 'aria-label': `${pct}% done` }), wordsLine(book.words), msg,
     sequelBox(S.pid, S.branch)));
   holder.appendChild(stepRail(book.steps.map(s => ({ id: s.id, title: s.title, state: BOOK_ERR[`${S.pid}:${s.id}`] ? 'problem' : s.state, word: RAIL_WORD[s.state] })),
-    { label: 'Make my book: all steps', current: book.next }));
+    { label: 'Book home: all steps', current: book.next }));
   const ol = h('ol', { class: 'book-steps' });
   const wordsBy = {};
   for (const c of ((book.words || {}).chapters || [])) wordsBy[c.chapter_id] = c;
@@ -5290,7 +5507,7 @@ function renderBook(holder, book, redraw) {
         ' ', infoTip('Character sheets and voice cards', ...TIP_SHEET())));
       acts.appendChild(h('button', { type: 'button', class: 'small ai-btn', disabled: !book.ai_ready, onclick: ev => openMakeDialog('A01', null, ev.currentTarget) }, '✨ Make up characters'));
       acts.appendChild(h('button', { type: 'button', class: 'small', onclick: () => goNew('A01') }, '✍️ Write one myself'));
-      acts.appendChild(h('button', { type: 'button', class: 'small', onclick: ev => openBible(ev.currentTarget) }, '📖 Bible Builder'));
+      acts.appendChild(h('button', { type: 'button', class: 'small', onclick: ev => openBible(ev.currentTarget) }, '🧑 Character & place maker'));
       if (s.state !== 'done') {
         const note = h('div', { class: 'bb-wizard', 'aria-live': 'polite' });
         li.appendChild(note);
@@ -5360,7 +5577,12 @@ function renderBook(holder, book, redraw) {
   holder.appendChild(ol);
   if (book.steps.some(x => x.id === 'canon' && x.state === 'done')) holder.appendChild(bookSection4Card());
   if (book.steps.some(x => x.id === 'canon' && x.state === 'done')) holder.appendChild(bookFactsCard()); // 🔎 P26/P30/P31
-  if (S.scrollToFacts) {  // the book's overview page → 🔎 Timeline, trade facts and repeats
+  if (S.scrollToStep) {  // a side-bar section page (Plan, Write, Export…) → that step of Book home
+    const want = S.scrollToStep; S.scrollToStep = null;
+    const el = holder.querySelector(`#step-${want}`);
+    if (el) setTimeout(() => { el.scrollIntoView({ block: 'start' }); el.focus({ preventScroll: true }); }, 0);
+  }
+  if (S.scrollToFacts) {  // 🧭 Fix mistakes → 🔎 Timeline, trade facts and repeats
     S.scrollToFacts = false;
     const fc = holder.querySelector('[data-testid="book-facts"]');
     if (fc) setTimeout(() => fc.scrollIntoView({ block: 'start' }), 0);
@@ -5381,7 +5603,7 @@ function renderBook(holder, book, redraw) {
   }
 }
 
-/** The 🚀 wizard asks the AI for characters/places in a Bible Builder session: show them here until they are saved,
+/** The 🚀 wizard asks the AI for characters/places in a Character & place maker session: show them here until they are saved,
  * and keep watching while the AI is still busy (the note changes to "made these" by itself). onChange gets each state;
  * the returned promise is the first one. */
 function wizardCanon(note, onChange, redraw) {
@@ -5436,11 +5658,11 @@ function myTask() { return S.task && S.task.project_id === S.pid && S.task.branc
 function taskCard(where) {
   const t = myTask();
   const box = h('section', { class: `task-card task-${where}`, 'aria-labelledby': `task-h-${where}` },
-    h('h2', { id: `task-h-${where}` }, '▶ Current task'));
+    h('h2', { id: `task-h-${where}` }, '▶ Next step'));
   if (!t) { box.appendChild(h('p', { class: 'small muted' }, h('span', { class: 'spinner', 'aria-hidden': 'true' }), ' Checking what is next…')); return box; }
   const ct = t.current_task || {};
   box.appendChild(h('button', { type: 'button', class: `primary big task-btn ts-${ct.state}`, 'data-action': ct.action || '',
-    onclick: ev => runTask(ct, ev.currentTarget) }, h('span', { 'aria-hidden': 'true' }, `${TASK_ICON[ct.state] || '▶'} `), plainText(ct.title) || 'Open Make my book'));
+    onclick: ev => runTask(ct, ev.currentTarget) }, h('span', { 'aria-hidden': 'true' }, `${TASK_ICON[ct.state] || '▶'} `), plainText(ct.title) || 'Open Book home'));
   if (ct.message) box.appendChild(h('p', { class: 'small task-msg' }, plainText(ct.message)));
   if (t.working_on) box.appendChild(h('p', { class: 'small task-working' }, h('span', { class: 'spinner', 'aria-hidden': 'true' }), ` ${plainText(t.working_on.title)}…`));
   if (t.book && t.book.words && t.book.words.words) {
@@ -5456,7 +5678,7 @@ function approvalsButton() {
   const n = t ? t.count : null;
   const here = parseRoute()[3] === 'review';
   return h('a', { class: `btn approvals-btn${n ? ' has-items' : ''}`, href: plink('review'), 'aria-current': here ? 'page' : null },
-    h('span', { 'aria-hidden': 'true' }, '📝 '), 'Needs your approval ', h('span', { class: 'count-badge', 'aria-label': n == null ? 'counting' : `${n} waiting` }, n == null ? '(…)' : `(${n})`));
+    h('span', { 'aria-hidden': 'true' }, '📝 '), 'Waiting for your OK ', h('span', { class: 'count-badge', 'aria-label': n == null ? 'counting' : `${n} waiting` }, n == null ? '(…)' : `(${n})`));
 }
 function updateTaskUI() {
   const nav = document.getElementById('nav-task');
@@ -5630,10 +5852,10 @@ async function viewReview(main, step, startId) {
   const mySeq = RV.seq;
   S.leaveHooks.push(() => { if (RV.seq === mySeq) RV.seq++; });
   main.appendChild(h('div', { class: 'page-head' }, h('div', null,
-    crumbs(['Your books', '#/'], [S.project.name, plink()], step ? ['Needs your approval', plink('review')] : 'Needs your approval', ...(step ? ['One by one'] : [])),
-    h('h1', null, step ? '📝 Approve one by one' : '📝 Needs your approval')),
+    crumbs(['My books', '#/'], [S.project.name, plink('book')], step ? ['Waiting for your OK', plink('review')] : 'Waiting for your OK', ...(step ? ['One by one'] : [])),
+    h('h1', null, step ? '📝 Approve one by one' : '📝 Waiting for your OK')),
   h('div', { class: 'row' }, step ? h('a', { class: 'btn', href: plink('review') }, '☰ Back to the list') : null,
-    h('a', { class: 'btn', href: plink('book') }, '📘 Make my book'))));
+    h('a', { class: 'btn', href: plink('book') }, '🏠 Book home'))));
   const holder = h('div', null, loadingState('Loading the drafts waiting for you…'));
   main.appendChild(holder);
   const load = async () => { const q = await api('GET', bpath('/review')); reviewFromQueue(q); return q; };
@@ -5857,7 +6079,7 @@ function recordReviewCard(cur) {
         const job = await runReviewJob(() => api('POST', bpath('/review/ai'), { body: { record_ids: [cur.record_id] } }), prog, { label: 'AI review' });
         if (job) { clear(msg).appendChild(jobSummary(job)); S.details[cur.record_id] = null; if ((job.results || []).some(r => r.auto_approved)) route(); else draw(); }
       } }, rv ? '🔁 Review again with AI' : '🤖 Ask AI to review'),
-      info.in_queue ? h('a', { class: 'btn', href: plink('review', 'step', cur.record_id) }, '📝 Open in “Needs your approval”') : null));
+      info.in_queue ? h('a', { class: 'btn', href: plink('review', 'step', cur.record_id) }, '📝 Open in “Waiting for your OK”') : null));
   };
   draw();
   return box;
@@ -6326,7 +6548,7 @@ async function viewScenes(main, cid) {
   const ch = info.chapter || {};
   const label = `Chapter ${ch.number || cid}`;
   main.appendChild(h('div', { class: 'page-head' }, h('div', null,
-    crumbs(['Your books', '#/'], [S.project.name, plink()], ['Make my book', plink('book')], `${label}: scene cards`),
+    crumbs(['My books', '#/'], [S.project.name, plink('book')], `${label}: scene cards`),
     h('h1', null, `🎬 Scene cards — ${label}`)),
   h('div', { class: 'row' }, h('a', { class: 'btn small', href: plink('pictures'), 'data-testid': 'scenes-illustrate', title: 'Make a picture of this chapter or one of its scenes (🖼 Pictures)' }, '🖼 Illustrate'), infoTip('Scene cards', h('p', null, 'Before a chapter is written, its scenes are planned: for each scene the place and time, who is there, what each one wants (and hides), an obstacle from the book’s world, what changes and what stays unsaid.'),
     h('p', null, 'The chapter outline stays the plan of the whole chapter; scene cards refine it. The writer follows them and the editor checks the chapter against them.')))));
@@ -6386,7 +6608,7 @@ async function viewScenes(main, cid) {
       h('button', { type: 'button', class: 'ai-btn', 'data-testid': 'scenes-ai', onclick: () => plan(false) }, e ? '✨ Plan again with AI' : '✨ Plan the scenes with AI'),
       rvNow && rvNow.verdict === 'REVISE' ? h('button', { type: 'button', class: 'ai-btn', onclick: () => plan(true) }, '✨ Rework with the checker’s notes') : null,
       e ? h('button', { type: 'button', 'data-testid': 'scenes-check', onclick: check }, '🔎 Check with AI') : null,
-      h('a', { class: 'btn', href: plink('book') }, '◀ Back to Make my book')));
+      h('a', { class: 'btn', href: plink('book') }, '◀ Back to Book home')));
   };
   const editor = () => {
     clear(body); clear(msg);
@@ -6553,7 +6775,7 @@ const KIND_ICON = { work: '🛠️', weather: '🌊', institution: '🏛️', pe
 const CAUSE_WORD = { obstacle: 'gets in the way', skill: 'shows skill', cost: 'costs something' };
 async function viewWorld(main) {
   main.appendChild(h('div', { class: 'page-head' }, h('div', null,
-    crumbs(['Your books', '#/'], [S.project.name, plink()], ['Make my book', plink('book')], 'Story rules and world'),
+    crumbs(['My books', '#/'], [S.project.name, plink('book')], 'Story rules and world'),
     h('h1', null, '🌍 Story rules and world')),
   h('div', { class: 'row' }, infoTip('Story rules and world',
     h('p', null, 'The story rules say what is law in this book’s world (a hard rule), what people have only seen happen, what characters believe, and which mysteries must stay unexplained — each with its limits.'),
@@ -7365,16 +7587,20 @@ async function refreshRunChip() {
   MB.latest = live || pend || null;
   const btn = $('#mab-btn'); if (!btn) return;
   const lab = btn.querySelector('.tb-label');
+  // ONE status chip for runs: "⚡ AI working 3/10" while a run works, "⚡ AI needs you" when it is paused; hidden otherwise
   btn.classList.toggle('running', !!live);
   btn.classList.toggle('needs-you', !live && !!pend);
+  btn.hidden = !live && !pend;
   if (live) {
     const done = live.steps.filter(s => s.state === 'done').length;
-    lab.textContent = live.status === 'waiting' ? `Waiting… ${done}/${live.steps.length}` : `Making… ${done}/${live.steps.length}`;
-    btn.setAttribute('aria-label', `Make a book for me: working, ${done} of ${live.steps.length} steps done. Open the progress window`);
+    lab.textContent = `AI working ${done}/${live.steps.length}`;
+    btn.setAttribute('aria-label', `AI working on “${live.title || 'a new book'}”: ${done} of ${live.steps.length} steps done${live.status === 'waiting' ? ', waiting for an AI' : ''}. Open the progress window`);
+    btn.title = 'The AI is making a book. Click to watch, pause or cancel.';
   } else if (pend) {
-    lab.textContent = pend.state === 'needs_decision' ? 'Needs you' : (pend.state === 'interrupted' || pend.status === 'interrupted') ? 'Interrupted' : 'Paused';
-    btn.setAttribute('aria-label', `Make a book for me${pend.title ? ` (“${pend.title}”)` : ''}: ${pend.state_words || 'paused, needs you.'} Open the progress window`);
-  } else { lab.textContent = 'Make a book'; btn.setAttribute('aria-label', 'Make a book for me'); }
+    lab.textContent = 'AI needs you';
+    btn.setAttribute('aria-label', `AI needs you${pend.title ? ` (“${pend.title}”)` : ''}: ${pend.state_words || 'the run is paused.'} Open the progress window`);
+    btn.title = pend.state === 'needs_decision' ? 'The AI run needs a decision from you' : (pend.state === 'interrupted' || pend.status === 'interrupted') ? 'The AI run was interrupted: open it to continue' : 'The AI run is paused: open it to resume or cancel';
+  } else { lab.textContent = 'AI working'; btn.setAttribute('aria-label', 'AI working'); }
 }
 async function openMakeBook(opener, { runId = null, fresh = false } = {}) {
   MB.opener = opener || null;
@@ -7392,7 +7618,7 @@ function closeMakeBook() {
   stopRunPolling();
   const d = MB.dialog || $('#mab-dialog');
   try { if (d.open) d.close(); } catch { /* ignore */ }
-  const o = MB.opener && document.contains(MB.opener) ? visibleOpener(MB.opener) : $('#mab-btn');
+  const o = MB.opener && document.contains(MB.opener) ? visibleOpener(MB.opener) : (!$('#mab-btn').hidden ? $('#mab-btn') : $('#main'));
   if (o && o.focus) { try { o.focus(); } catch { /* ignore */ } }
   refreshRunChip();
 }
@@ -7437,7 +7663,7 @@ async function renderMakeSetup() {
     return Object.assign({ length: l ? l.value : 'short_story' }, pl ? { pipeline: pl } : {});
   });
   form.insertBefore(est.el, err); form.addEventListener('change', () => est.refresh()); est.refresh();
-  mbShell('⚡ Make a book for me', form);
+  mbShell('⚡ AI writes the whole book', form);
   startAll.addEventListener('click', () => go(true));
   try {
     for (const { s, health } of await loadSlotChoices(false)) {
@@ -7615,7 +7841,7 @@ function renderRun() {
   if (['paused', 'interrupted'].includes(r.status) || (r.status === 'pausing' && !r.alive)) ctl.appendChild(h('button', { type: 'button', class: 'primary big', 'data-testid': 'mb-resume', onclick: () => runAction('resume', {}, 'Resumed') }, '▶ Resume'));
   if (!['done', 'cancelled'].includes(r.status)) {
     ctl.appendChild(h('button', { type: 'button', class: 'danger', 'data-testid': 'mb-cancel', onclick: async () => {
-      const ok = await choiceDialog('Cancel this run?', 'The book made so far stays in Your books (you can finish it by hand in Make my book). This cannot be resumed.', [{ id: 'yes', label: '✖ Yes, cancel it' }]);
+      const ok = await choiceDialog('Cancel this run?', 'The book made so far stays in My books (you can finish it by hand in Book home). This cannot be resumed.', [{ id: 'yes', label: '✖ Yes, cancel it' }]);
       if (ok === 'yes') runAction('cancel', {}, 'Cancelled');
     } }, '✖ Cancel'));
   }
@@ -7652,7 +7878,7 @@ function renderRun() {
   const fcBox = factsRunSummary(r); // 🔎 P26/P30/P31
   if (doneBox && fcBox) doneBox.appendChild(fcBox);
   const consent = h('p', { class: 'small muted mb-consent' }, `Approvals in this run are made by the AI reviewer under your consent (run ${r.id}, ${fmtTime(r.consent && r.consent.at)}). Every one is in the book journal.`);
-  mbShell('⚡ Make a book for me', head, runBibleLine(r), phase, ais, alerts, indep, doneBox, doneBox ? null : edBox, runSaveLine(r), msg, ol, ctl, consent,
+  mbShell('⚡ AI writes the whole book', head, runBibleLine(r), phase, ais, alerts, indep, doneBox, doneBox ? null : edBox, runSaveLine(r), msg, ol, ctl, consent,
     r.project_id && r.status !== 'done' ? h('p', { class: 'small' }, h('a', { href: link('p', r.project_id, r.branch_id || 'main', 'book'), onclick: () => closeMakeBook() }, 'Open the book being made')) : null);
   updateRunClocks();
 }
@@ -7853,7 +8079,7 @@ function renderHealth() {
     h('p', { class: 'small muted' }, 'Diagnostics never contain your keys, prompts or book text — safe to send when asking for help.'),
     jobsBox);
 }
-const JOB_KIND = { autobook: '⚡ Make a book for me', write_all: '✍ Write all chapters', assist: '✨ Fill with AI', review_review: '🧐 AI review', review_fix: '🛠 AI fix', bible: '📖 Bible Builder',
+const JOB_KIND = { autobook: '⚡ Make a book for me', write_all: '✍ Write all chapters', assist: '✨ Fill with AI', review_review: '🧐 AI review', review_fix: '🛠 AI fix', bible: '🧑 Character & place maker',
   book_review: '📊 Book report', compare: '⚖️ Compare versions' };
 async function loadJobs() {
   const box = document.getElementById('jobs-box') || h('div', { id: 'jobs-box' });
@@ -7883,8 +8109,8 @@ const JR_ICON = { ai: '🤖', ai_review: '🧐', ai_fix: '🛠', editor: '🖋',
 const APPROVAL_LABEL = { author: 'by you', standing_auto_approve: 'auto-approve (your setting)', run_consent: 'Make-a-book consent', workflow_test: 'workflow test' };
 async function viewJournal(main) {
   const q = new URLSearchParams((location.hash.split('?')[1]) || '');
-  main.appendChild(h('div', { class: 'page-head' }, h('div', null, crumbs(['Your books', '#/'], [S.project.name, plink()], 'Book journal'), h('h1', null, '📜 Book journal')),
-    h('div', { class: 'row' }, h('a', { class: 'btn', href: plink('book') }, '📘 Make my book'))));
+  main.appendChild(h('div', { class: 'page-head' }, h('div', null, crumbs(['My books', '#/'], [S.project.name, plink('book')], 'Book journal'), h('h1', null, '📜 Book journal')),
+    h('div', { class: 'row' }, h('a', { class: 'btn', href: plink('book') }, '🏠 Book home'))));
   main.appendChild(h('p', { class: 'muted' }, 'Everything that happened to this book, in order: who did what, which AI, approvals and their kind, retries, pauses, problems and exports. It never shows keys, prompts or your text.'));
   const step = h('select', { id: 'jr-step' }, h('option', { value: '' }, 'All steps'), Object.keys(SETS).map(l => h('option', { value: l }, `Set ${l} · ${setInfo(l).name}`)));
   const probs = h('input', { type: 'checkbox', id: 'jr-probs' });
@@ -7933,8 +8159,8 @@ function gridUI() {
 
 /* ======================================================================= 📚 my finished books (S22) */
 async function viewShelf(main) {
-  main.appendChild(h('div', { class: 'page-head' }, h('div', null, crumbs(['Your books', '#/'], 'My finished books'), h('h1', null, '📚 My finished books')),
-    h('button', { type: 'button', class: 'primary', onclick: ev => openMakeBook(ev.currentTarget) }, '⚡ Make a book for me')));
+  main.appendChild(h('div', { class: 'page-head' }, h('div', null, crumbs(['My books', '#/'], 'My finished books'), h('h1', null, '📚 My finished books')),
+    h('button', { type: 'button', class: 'primary', onclick: ev => openMakeBook(ev.currentTarget) }, '⚡ AI writes the whole book')));
   main.appendChild(h('p', { class: 'muted' }, 'Every book you exported, newest first. Each file is checked against its fingerprint before you download it. 📊 Each book has a quality report; ⚖️ compare two books blind (for example a book and its 🧪 variant).'));
   const holder = h('div', null, loadingState('Checking your finished books…'));
   main.appendChild(holder);
@@ -7943,7 +8169,7 @@ async function viewShelf(main) {
   clear(holder);
   const archived = out.archived || [];
   if (!out.books.length && !archived.length) {
-    holder.appendChild(stateBox('empty', 'No finished book yet', h('p', null, 'Export a book from 📘 Make my book, or press ⚡ Make a book for me and let the AI make one.')));
+    holder.appendChild(stateBox('empty', 'No finished book yet', h('p', null, 'Export a book from 🏠 Book home, or press ⚡ AI writes the whole book (under ➕ New book).')));
     return;
   }
   if (out.books.length) holder.appendChild(h('ul', { class: 'shelf' }, out.books.map(shelfBook)));
@@ -7966,7 +8192,7 @@ function shelfBook(b) {
           h('a', { class: 'btn small', href: link('p', b.project_id, b.branch_id, 'report') }, b.report ? '📊 Open the report' : '📊 Make the report'), ' ',
           h('a', { class: 'btn small', href: `#/compare?a=${encodeURIComponent(b.project_id)}` }, '⚖️ Compare'), ' ',
           h('button', { type: 'button', class: 'small', onclick: ev => openVariantDialog(b.project_id, b.title, ev.currentTarget) }, '🧪 Variant'), ' ',
-          h('button', { type: 'button', class: 'small', 'data-testid': 'sb-rerun', onclick: ev => openRerunDialog({ project_id: b.project_id, branch_id: b.branch_id }, b.title, ev.currentTarget) }, '🔁 Rerun')),
+          h('button', { type: 'button', class: 'small', 'data-testid': 'sb-rerun', onclick: ev => openRerunDialog({ project_id: b.project_id, branch_id: b.branch_id }, b.title, ev.currentTarget) }, '🔁 New book from this plan')),
         h('p', { class: 'small sb-save' }, saveBox(b.project_id, b.branch_id, { testid: 'sb-save' })),
         h('div', { class: 'downloads' }, b.files.map(f => f.verified
           ? h('button', { type: 'button', class: 'primary small', 'data-format': f.format, onclick: () => downloadFile(b.project_id, b.branch_id, f, b.title) }, `⬇ ${f.format}`, h('span', { class: 'sr-ok', title: 'Fingerprint checked' }, ' ✔'))
@@ -8006,7 +8232,7 @@ function s7c() {
 async function viewReport(main) {
   const title = profileOf().title || S.project.name;
   main.appendChild(h('div', { class: 'page-head' }, h('div', null,
-    crumbs(['Your books', '#/'], [S.project.name, plink()], ['Make my book', plink('book')], 'Book report'),
+    crumbs(['My books', '#/'], [S.project.name, plink('book')], 'Book report'),
     h('h1', null, '📊 Book report')), h('div', { class: 'row' }, infoTip('Book report', ...TIP_REPORT()))));
   const holder = h('div', { 'aria-live': 'polite' }, loadingState('Loading the report…'));
   main.appendChild(holder);
@@ -8057,7 +8283,7 @@ async function viewReport(main) {
     holder.appendChild(actions);
     holder.appendChild(h('div', { class: 'rp-progress' }));
     if (ov.job) { const prog = holder.querySelector('.rp-progress'); pollQualityJob(bpath(`/report/job/${encodeURIComponent(ov.job.id)}`), prog).then(load).catch(() => {}); }
-    if (!ov.written) { holder.appendChild(stateBox('empty', 'No chapter is written yet', h('p', null, 'Write the chapters first (📘 Make my book), then make the report.'))); return; }
+    if (!ov.written) { holder.appendChild(stateBox('empty', 'No chapter is written yet', h('p', null, 'Write the chapters first (🏠 Book home), then make the report.'))); return; }
     if (!rep) { holder.appendChild(stateBox('empty', 'No report yet', h('p', null, 'Press 📊 Make the report: Akọwe counts and checks the book and asks the AIs that did not write it to read it.'))); holder.appendChild(askBox(null)); return; }
     if (ov.stale) holder.appendChild(h('p', { class: 'words-warn', role: 'note', 'data-testid': 'rp-stale' }, hazard({ code: 'REPORT_STALE' }, { retry: () => run({ ai: true }), retryLabel: '📊 Make a new report' }, { small: true }), ' This report is for an earlier version of the book: a chapter changed since.'));
     for (const w of rep.warnings || []) holder.appendChild(h('p', { class: /⚠️/.test(w) ? 'words-warn' : 'small muted', role: 'note' }, w));
@@ -8175,7 +8401,7 @@ async function openVariantDialog(pid, title, opener) {
 
 const CMP = { books: null };
 async function viewCompare(main, cid) {
-  main.appendChild(h('div', { class: 'page-head' }, h('div', null, crumbs(['Your books', '#/'], ['My finished books', '#/shelf'], cid ? ['Compare versions', '#/compare'] : 'Compare versions', ...(cid ? ['Result'] : [])),
+  main.appendChild(h('div', { class: 'page-head' }, h('div', null, crumbs(['My books', '#/'], ['My finished books', '#/shelf'], cid ? ['Compare versions', '#/compare'] : 'Compare versions', ...(cid ? ['Result'] : [])),
     h('h1', null, '⚖️ Compare versions')), h('div', { class: 'row' }, infoTip('Compare versions',
     h('p', null, 'Two books (for example a book and its 🧪 variant made with another pipeline) or two versions of a chapter are read by your AIs “blind”: each AI sees them as Version 1 and Version 2 in a random order and never learns which is which. Each scores both on the dimensions and picks the one it prefers.'),
     h('p', null, 'Afterwards Akọwe reveals which version was which and shows the median scores and the winner per dimension. An AI that wrote one of the versions is marked ⚠️ not independent.')))));
@@ -8282,10 +8508,10 @@ function bookSection5Card(book) {
 
 /* ======================================================================= 💾 P20 save the book, 📂 P21 open a saved book / 🔁 rerun */
 const TIP_SAVE = () => [h('p', null, 'Akọwe keeps every book inside itself. 💾 Save also writes a copy into your books folder: one folder per book with the finished book (PDF, EPUB, Word), every chapter as a text file, the book bible, the reports and the book’s log.'),
-  h('p', null, 'The file book.akowe in that folder is the whole book in one file: 📂 Open a saved book brings it back as a new book (also on another computer), and 🔁 Rerun makes a new book from its book bible.'),
+  h('p', null, 'The file book.akowe in that folder is the whole book in one file: 📂 Open a saved book brings it back as a new book (also on another computer), and 🔁 New book from this plan makes a new book from its Book Bible.'),
   h('p', null, 'With auto-save on, Akọwe saves by itself while a book is being made (at most every 2 minutes, and after each step) and when it is finished, paused or stopped.')];
 const TIP_RERUN = () => [h('p', null, 'The book bible is everything a book is built on: the book profile, the ending and style choices, the characters with their character sheets and voice cards, the places and world, the story rules and world texture, and the premise, main plot, chapter outline and scene cards.'),
-  h('p', null, '🔁 Rerun makes a NEW book from it: the same characters, world and (if you keep it) plan, with new chapters written by the AI. The book it came from is never changed.')];
+  h('p', null, '🔁 Make a new book from this one’s plan makes a NEW book from it: the same characters, world and (if you keep it) plan, with new chapters written by the AI. The book it came from is never changed.')];
 const BIBLE_PATH = (pid, branch) => `/projects/${encodeURIComponent(pid)}/branches/${encodeURIComponent(branch || 'main')}`;
 /** A save that partly worked (newer servers): `warning` (plain words) and/or `skipped` (file names that were not written).
  *  Returns "⚠ Saved, except Book/Title.pdf (open in another program — close it and save again)" or '' when all went well. */
@@ -8449,13 +8675,14 @@ function bookSaveCard(redraw) {
   const title = profileOf().title || S.project.name;
   const opened = h('div', { 'data-testid': 'opened-box' });
   const card = h('section', { class: 'card save-card', 'aria-labelledby': 'sv-h', 'data-testid': 'book-save' },
-    h('h2', { id: 'sv-h' }, '💾 Saved copy and book bible ', infoTip('Saving books', ...TIP_SAVE())),
+    h('h2', { id: 'sv-h' }, '💾 Saved copy and Book Bible ', infoTip('Saving books', ...TIP_SAVE())),
     h('div', { class: 'row' }, saveBox(pid, branch, { primary: true, testid: 'book-save-btn' })),
     h('div', { class: 'row' },
-      h('button', { type: 'button', class: 'small', 'data-testid': 'rerun-btn', onclick: ev => openRerunDialog({ project_id: pid, branch_id: branch }, title, ev.currentTarget) }, '🔁 Rerun from the book bible'), infoTip('Rerun from the book bible', ...TIP_RERUN()),
       h('a', { class: 'btn small primary', href: link('p', pid, branch, 'bible'), 'data-testid': 'open-binder', title: 'The Book Bible binder: every character, place, world entry and chapter on its own page, in your book’s look' }, '📖 Open the Book Bible'),
-      h('button', { type: 'button', class: 'small', onclick: () => downloadBible(pid, branch, 'json', title) }, '⬇ book-bible.json'),
-      h('button', { type: 'button', class: 'small', onclick: () => downloadBible(pid, branch, 'md', title) }, '⬇ book-bible.md')),
+      h('button', { type: 'button', class: 'small', 'data-testid': 'rerun-btn', onclick: ev => openRerunDialog({ project_id: pid, branch_id: branch }, title, ev.currentTarget) }, '🔁 Make a new book from this one’s plan'), infoTip('Make a new book from this one’s plan', ...TIP_RERUN()),
+      h('details', { class: 'dl-more' }, h('summary', { class: 'small' }, '⬇ Download…'),
+        h('div', { class: 'row' }, h('button', { type: 'button', class: 'small', onclick: () => downloadBible(pid, branch, 'json', title) }, '⬇ book-bible.json'),
+          h('button', { type: 'button', class: 'small', onclick: () => downloadBible(pid, branch, 'md', title) }, '⬇ book-bible.md')))),
     opened);
   (async () => {
     let st;
@@ -8497,15 +8724,15 @@ async function continueBook(pid, title, opener) {
     openMakeBook(opener, { runId: r.id });
   } catch (e) { modal('▶ Continue making this book', () => problemBox(toProblem(e, { book: title, step: 'Continue making this book' }))); }
 }
-/** 🔁 Rerun from the book bible: what is reused, keep the plan?, consent, start. spec: {project_id}|{folder}|{bible_id}. */
+/** 🔁 Make a new book from this one’s plan (rerun from the book bible): what is reused, keep the plan?, consent, start. spec: {project_id}|{folder}|{bible_id}. */
 function openRerunDialog(spec, title, opener, summary = null) {
-  modal('🔁 Make a new book from the book bible', close => {
+  modal('🔁 Make a new book from this one’s plan', close => {
     const body = h('div', { 'data-testid': 'rerun-dialog' }, loadingState('Reading the book bible…'));
     const keep = h('input', { type: 'checkbox', id: 'rr-keep', checked: true });
     const msg = h('div', { 'aria-live': 'polite' });
     const draw = sm => {
       put(clear(body),
-        h('p', null, `A NEW book is made from the book bible of “${sm.title || title || 'your book'}”. The book it comes from is not changed.`, ' ', infoTip('Rerun from the book bible', ...TIP_RERUN())),
+        h('p', null, `A NEW book is made from the book bible of “${sm.title || title || 'your book'}”. The book it comes from is not changed.`, ' ', infoTip('Make a new book from this one’s plan', ...TIP_RERUN())),
         h('ul', { class: 'small rr-what' },
           h('li', null, `🎭 ${sm.characters.length} character(s)${sm.characters.length ? `: ${sm.characters.join(', ')}` : ''} — with ${sm.sheets} character sheet(s) and voice card(s)`),
           h('li', null, `🌍 ${sm.canon} place(s) and world entr${sm.canon === 1 ? 'y' : 'ies'}, ${sm.story_rules} story rule(s), ${sm.world_texture} world detail(s)`),
@@ -8522,7 +8749,7 @@ function openRerunDialog(spec, title, opener, summary = null) {
             if (!rb) { btn.disabled = false; return; }
             const r = await api('POST', '/autobook', { body: rb });
             close(); openMakeBook(opener, { runId: r.id });
-          } catch (e) { msg.appendChild(problemBox(toProblem(e, { step: '🔁 Rerun from the book bible' }))); btn.disabled = false; }
+          } catch (e) { msg.appendChild(problemBox(toProblem(e, { step: '🔁 Make a new book from this one’s plan' }))); btn.disabled = false; }
         } }, '🔁 Start'), h('button', { type: 'button', onclick: close }, 'Cancel')));
     };
     (async () => {
@@ -8532,7 +8759,7 @@ function openRerunDialog(spec, title, opener, summary = null) {
           : spec.folder ? await api('GET', `/books-folder/bible?folder=${encodeURIComponent(spec.folder)}`)
             : await api('GET', `/books/bible/${encodeURIComponent(spec.bible_id)}`);
         draw(r.summary);
-      } catch (e) { put(clear(body), problemBox(toProblem(e, { step: '🔁 Rerun from the book bible' }))); }
+      } catch (e) { put(clear(body), problemBox(toProblem(e, { step: '🔁 Make a new book from this one’s plan' }))); }
     })();
     return body;
   });
@@ -8546,7 +8773,7 @@ function openSavedBookDialog(opener) {
     const afterOpen = async (r, again) => {
       if (r && r.needs_choice && again) {
         const ex = r.existing || {}; const sv = r.saved || {};
-        const pick = await choiceDialog('This book is already in Your books', h('div', { 'data-testid': 'open-choice' },
+        const pick = await choiceDialog('This book is already in My books', h('div', { 'data-testid': 'open-choice' },
           h('p', null, `“${ex.name}” is already on this computer. Update it to the saved book, or open the saved book as a copy next to it?`),
           h('ul', { class: 'small' },
             h('li', null, `The saved book: ${sv.saved_at ? `saved ${fmtTime(sv.saved_at)}` : 'saved'}`),
@@ -8574,7 +8801,7 @@ function openSavedBookDialog(opener) {
       put(clear(list), h('p', { class: 'small' }, 'Books folder: ', h('code', null, out.path), ' ', h('button', { type: 'button', class: 'small', onclick: load }, '🔄 Refresh')),
         rows.length ? h('ul', { class: 'record-list open-list' }, rows.map(f => h('li', { class: 'record-item', 'data-folder': f.name },
           h('div', { class: 'r-main' }, h('span', { class: 'r-title' }, f.title),
-            h('div', { class: 'r-meta' }, `${f.saved_at ? `saved ${fmtTime(f.saved_at)}` : 'saved'} · ${f.finished ? '✔ finished' : '⏳ not finished'}${f.chapters ? ` · ${f.chapters} chapter(s)` : ''}${f.in_library ? ' · this book is also in Your books' : ''}`)),
+            h('div', { class: 'r-meta' }, `${f.saved_at ? `saved ${fmtTime(f.saved_at)}` : 'saved'} · ${f.finished ? '✔ finished' : '⏳ not finished'}${f.chapters ? ` · ${f.chapters} chapter(s)` : ''}${f.in_library ? ' · this book is also in My books' : ''}`)),
           h('div', { class: 'r-badges' },
             f.has_package ? h('button', { type: 'button', class: 'small primary', 'data-testid': 'open-folder-btn', onclick: async ev => {
               const b = ev.currentTarget; b.disabled = true; clear(msg);
@@ -8582,7 +8809,7 @@ function openSavedBookDialog(opener) {
               try { await afterOpen(await openIt(), openIt); }
               catch (e) { msg.appendChild(problemBox(toProblem(e, { book: f.title, step: '📂 Open a saved book' }))); b.disabled = false; }
             } }, '📂 Open') : null,
-            f.has_bible ? h('button', { type: 'button', class: 'small', 'data-testid': 'rerun-folder-btn', onclick: () => { close(); openRerunDialog({ folder: f.name }, f.title, opener); } }, '🔁 Rerun') : null))))
+            f.has_bible ? h('button', { type: 'button', class: 'small', 'data-testid': 'rerun-folder-btn', onclick: () => { close(); openRerunDialog({ folder: f.name }, f.title, opener); } }, '🔁 New book from this plan') : null))))
           : stateBox('empty', 'No saved book in this folder yet', h('p', null, '💾 Save a book first, or upload a book.akowe file below.')));
     };
     const file = h('input', { type: 'file', id: 'open-file', accept: '.akowe,.bookforge,.json,application/zip,application/json', 'data-testid': 'open-file' });
@@ -8616,7 +8843,7 @@ function openSavedBookDialog(opener) {
     } }, '📁 Choose the folder (AutoInjector)');
     load();
     return h('div', { 'data-testid': 'open-dialog' },
-      h('p', null, 'A saved book opens as a new book. When the same book is already in Your books, Akọwe asks: update the one you have, or open a copy. An unfinished book can be continued. ', infoTip('Opening saved books', ...TIP_SAVE())),
+      h('p', null, 'A saved book opens as a new book. When the same book is already in My books, Akọwe asks: update the one you have, or open a copy. An unfinished book can be continued. ', infoTip('Opening saved books', ...TIP_SAVE())),
       h('h3', null, 'From your books folder'), list,
       h('h3', null, 'From a file'),
       h('div', { class: 'field' }, h('label', { for: 'open-file' }, 'A book.akowe file (the whole book) or a book-bible.json (to make a new book from it)'), file),
@@ -8714,7 +8941,7 @@ function restoreBackup(b, reload) {
       go2.disabled = true; out.appendChild(loadingState('Restoring… (a safety backup is made first)'));
       try {
         const r = await api('POST', `/backups/${encodeURIComponent(b.name)}/restore`, { body: { author_confirms: true, confirm: word.value.trim() } });
-        close(); toast(`Your books were restored from the backup of ${fmtWhen(b.created_at)} (${b.label || 'Backup'}). A safety backup of how things were just before is listed under Backups.`); S.project = null; await loadProjects(); reload(); route();
+        close(); toast(`My books were restored from the backup of ${fmtWhen(b.created_at)} (${b.label || 'Backup'}). A safety backup of how things were just before is listed under Backups.`); S.project = null; await loadProjects(); reload(); route();
       } catch (e) { clear(out).appendChild(problemBox(toProblem(e, { step: 'Restore a backup' }))); go2.disabled = false; }
     } },
     h('div', { class: 'state blocked' }, h('h3', null, '⚠️ This replaces ALL your books'), h('p', null, `Every book goes back to how it was on ${fmtTime(b.created_at)}. Work done after that is replaced. Akọwe first saves a safety backup of how things are now, so you can undo this by restoring that safety backup.`)),
@@ -8856,6 +9083,8 @@ function initNavigation() {
 }
 
 function boot() {
+  applyMode(getMode());
+  watchTopHeight();
   consumePairFragment();
   initToken();
   initSelfTestButton();

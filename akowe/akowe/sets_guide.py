@@ -42,7 +42,7 @@ def _num(letter: str, n: int) -> list[str]:
 SET_GUIDE: dict[str, dict] = {
     "A": {
         "name": "Universe & Characters", "short": "Universe", "icon": "🌍",
-        "purpose": "Your story bible: characters, places, worlds, cultures and the rules of your world.",
+        "purpose": "Your characters and world: characters, places, worlds, cultures and the rules of your world.",
         "about": ("Set A holds the canon of your world. Every entry starts from a short concept; links to other "
                   "entries are optional for a first draft. Precise details go in facts (who, what, value, from "
                   "when). Protected facts such as a character's appearance can only change with an approval. "
@@ -58,8 +58,8 @@ SET_GUIDE: dict[str, dict] = {
             {"id": "make-places", "type": "make", "op": "A04", "icon": "🏞️", "count": 2,
              "label": "Invent places for me", "hints": PLACE_KINDS,
              "description": "Towns, rooms, wilds and landmarks that fit your world, for you to review."},
-            {"id": "bible", "type": "bible", "op": None, "icon": "📖", "label": "Build a starter story bible",
-             "description": "The Bible Builder drafts characters, places, a world, a culture, a government and a "
+            {"id": "bible", "type": "bible", "op": None, "icon": "📖", "label": "Start my characters and world",
+             "description": "The Character & place maker drafts characters, places, a world, a culture, a government and a "
                             "magic or technology system together, so names and links stay consistent."},
         ],
     },

@@ -81,7 +81,7 @@ SET_NAMES = {"A": "Universe & Characters", "B": "Story Planning", "C": "Writing"
 STEPS = [
     ("backup", None, None, "Safety backup", "A backup of all your books, before anything starts."),
     ("profile", None, None, "Invent the book", "The AI invents the title, genre, readers, tone and the idea."),
-    ("canon", "A", "A01", "Characters and places", "The AI drafts the main characters and places (Bible Builder); "
+    ("canon", "A", "A01", "Characters and places", "The AI drafts the main characters and places (Character & place maker); "
      "each one is reviewed and approved under your consent."),
     ("characters", "A", "A01", "Character sheets and voices", "What each character wants, needs, fears and hides, "
      "and how each one talks (a voice card each); the writer gets them in every chapter."),
@@ -2269,7 +2269,7 @@ class AutoBookService(_Runner):
         if txt:
             self.event(run, "note", txt, record_id=(sess.roles or {}).get("protagonist"), code="PROTAGONIST_SET")
         if out["created"]:
-            self.event(run, "ai", f"The AI drafted {len(out['created'])} character/place entries (Bible Builder)",
+            self.event(run, "ai", f"The AI drafted {len(out['created'])} character/place entries (Character & place maker)",
                        slot=sess.runs[-1].get("slot") if sess.runs else None)
         made = {c["key"] for c in out["created"]}
         dropped = {}

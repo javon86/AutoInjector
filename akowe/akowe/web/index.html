@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-mode="simple">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -18,43 +18,48 @@
     <span aria-hidden="true">&#9776;</span> Menu
   </button>
   <a class="brand" href="#/">Akọwe</a>
-  <div class="topbar-context" id="context-bar" aria-label="Current project"></div>
-  <button type="button" id="jump-btn" class="tb-btn jump-btn" aria-haspopup="dialog" aria-keyshortcuts="Control+K /" title="Jump to any module, set or page (Ctrl+K or /)">
+  <a class="tb-link tb-books" id="tb-books" href="#/"><span aria-hidden="true">&#128218;</span> My books</a>
+  <div class="topbar-context" id="context-bar" aria-label="Current book"></div>
+  <a class="tb-link tb-new" id="new-btn" href="#/start" title="Start a new book: write it with the AI step by step, or let the AI write the whole book"><span aria-hidden="true">&#10133;</span> New book</a>
+  <button type="button" id="mab-btn" class="tb-btn mab-btn" aria-haspopup="dialog" aria-label="AI working" hidden>
+    <span aria-hidden="true">&#9889;</span> <span class="tb-label">AI working</span>
+  </button>
+  <nav class="topbar-links" aria-label="Book pages" id="top-links"></nav>
+  <button type="button" id="jump-btn" class="tb-btn jump-btn adv-only" aria-haspopup="dialog" aria-keyshortcuts="Control+K /" title="Jump to any step, set or page (Ctrl+K or /)">
     <span aria-hidden="true">&#128269;</span> <span class="tb-label">Jump</span><kbd class="tb-kbd">Ctrl K</kbd>
   </button>
-  <div class="tb-menu" id="sets-menu">
+  <div class="tb-menu adv-only" id="sets-menu">
     <button type="button" id="sets-btn" class="tb-btn sets-btn" aria-haspopup="true" aria-expanded="false" aria-controls="sets-pop">
       <span aria-hidden="true">&#129513;</span> Sets
     </button>
     <div id="sets-pop" class="tb-pop sets-pop" hidden></div>
   </div>
-  <nav class="topbar-links" aria-label="Workspace pages" id="top-links"></nav>
-  <button type="button" id="mab-btn" class="tb-btn mab-btn" aria-haspopup="dialog" aria-label="Make a book for me" title="⚡ Make a book for me: the AI makes a whole new book while you watch">
-    <span aria-hidden="true">&#9889;</span> <span class="tb-label">Make a book</span>
+  <button type="button" id="health-btn" class="tb-btn health-btn adv-only" aria-haspopup="dialog" aria-label="Health" data-state="unknown" title="Health checks">
+    <span class="hb-ico" aria-hidden="true">&#129293;</span> <span class="tb-label">Health</span>
   </button>
-  <button type="button" id="health-btn" class="tb-btn health-btn" aria-haspopup="dialog" aria-label="Health" data-state="unknown" title="Health checks">
-    <span class="hb-ico" aria-hidden="true">&#129293;</span>
-  </button>
-  <button type="button" id="wf-btn" class="tb-btn wf-btn" aria-controls="wf-drawer" aria-expanded="false" aria-label="Test workflow" title="Test each part of the book process with your real AI (in a separate test book)">
+  <button type="button" id="wf-btn" class="tb-btn wf-btn adv-only" aria-controls="wf-drawer" aria-expanded="false" aria-label="Test workflow" title="Test each part of the book process with your real AI (in a separate test book)">
     <span aria-hidden="true">&#129514;</span> <span class="tb-label">Test workflow</span>
   </button>
   <div class="tb-menu" id="more-menu">
     <button type="button" id="more-btn" class="tb-btn" aria-haspopup="true" aria-expanded="false" aria-controls="more-pop">
-      More <span aria-hidden="true">&#9662;</span><span id="more-dot" class="more-dot" hidden></span>
+      <span aria-hidden="true">&#8943;</span> More<span id="more-dot" class="more-dot" hidden></span>
     </button>
     <div id="more-pop" class="tb-pop more-pop" hidden>
       <div id="more-links" class="more-links"></div>
-      <button type="button" id="bible-btn" class="bible-btn" aria-haspopup="dialog">
-        <span aria-hidden="true">&#128214;</span> Bible Builder
-      </button>
-      <button type="button" id="selftest-btn" class="selftest-btn" aria-haspopup="dialog">
-        <span aria-hidden="true">&#129514;</span> Test everything<span id="selftest-btn-state" class="selftest-btn-state"></span>
-      </button>
+      <div class="more-adv adv-only" role="group" aria-labelledby="more-adv-h">
+        <p class="more-h" id="more-adv-h">Advanced</p>
+        <button type="button" id="bible-btn" class="bible-btn" aria-haspopup="dialog">
+          <span aria-hidden="true">&#129489;</span> Character &amp; place maker
+        </button>
+        <button type="button" id="selftest-btn" class="selftest-btn" aria-haspopup="dialog">
+          <span aria-hidden="true">&#129514;</span> Test everything<span id="selftest-btn-state" class="selftest-btn-state"></span>
+        </button>
+      </div>
     </div>
   </div>
 </header>
 <div class="shell">
-  <nav id="sidenav" class="sidenav" aria-label="Operation sets"></nav>
+  <nav id="sidenav" class="sidenav" aria-label="Book sections"></nav>
   <main id="main" tabindex="-1">
     <noscript><p class="notice">Akọwe needs JavaScript enabled in this browser.</p></noscript>
     <p class="state-loading">Loading workspace&hellip;</p>

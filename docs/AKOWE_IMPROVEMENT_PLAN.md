@@ -457,6 +457,34 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
 - Series support: reuse characters and world across books.
 - GitHub checks for Akọwe (see Problems).
 
+## Simple top bar and side bar (2026-11, "the toolbar doesn't make any sense to me")
+
+The writer found the top bar a mix of places, actions and developer tools, and asked for a Book Bible button that
+makes sense. Done (Group 1, items 1–4 and 6, plus the Book Bible buttons of item 5; the binder's own "At a glance"
+page and toolbar are a separate change):
+
+- [x] **Top bar:** `Akọwe · 📚 My books · [book name ▾] · 💾 Save · ⚙️ Settings · ❓ Help · ⋯ More`; outside a book
+  `➕ New book` (one entry: ✍ Write it with me = the old wizard, or ⚡ AI writes the whole book = Make a book for me).
+  One run chip `#mab-btn`: "⚡ AI working 3/10", "⚡ AI needs you" only when paused, hidden otherwise. ⋯ More grouped
+  (This book / Files / Your style / Help). New ❓ Help page (`#/help`).
+- [x] **Side bar (simple):** ▶ Next step · 📝 Waiting for your OK (n) · 🏠 Book home · 🧑 Characters & places · 🗺 Plan
+  · ✍ Write · 📖 Book Bible (highlighted) · 🖼 Pictures & cover · 🎬 Trailer · 🧭 Fix mistakes · 📤 Export. New small
+  section pages `…/people`, `…/plan`, `…/write`, `…/art`, `…/fix`, `…/export` list the existing pages as big buttons.
+- [x] **Simple / Advanced view** (`bf:mode` in localStorage, default simple; switch in the side bar and Settings;
+  everything with class `adv-only` is hidden in simple view by CSS): A–K sets (names, codes on hover), Branch, Jump,
+  Sets, Health, Test workflow, Test everything, Book features, IDs, the old overview's tiles/details/branch form.
+  Settings shows "AI connection: ✔ OK". Ctrl+K works in both.
+- [x] **Plain names:** Bible Builder → Character & place maker; set A "story bible" → "characters and world";
+  Overview removed (`#/p/<pid>/<branch>` opens Book home); Make my book → 🏠 Book home; Rerun from the book bible →
+  Make a new book from this one's plan; book-bible.json/.md under ⬇ Download…; Your projects → My books;
+  Needs your approval → Waiting for your OK; the book step state "Needs you" → "Your turn"; no "Make a book for me"
+  on a book page.
+- [x] **📖 Book Bible buttons:** side bar, Book home header (next to ▶ Next step), every book card in My books, and
+  the Saved card link.
+- [x] **No icon-only buttons** at 1280×720 (the label-hiding CSS is gone; the bar wraps in Advanced view instead).
+- Tests: `tests/campaign/ui/test_ui_nav_simple.py`; older UI tests updated (`open_make_book` / `set_mode` helpers).
+- *Open:* `binder.js` (owned by the Book Bible change) still says "📘 Make my book" on its not-ready page.
+
 ## Prevention pass (2026-10-27, "solve problems before they become problems")
 
 - [x] **Alfred's local AI connection:**

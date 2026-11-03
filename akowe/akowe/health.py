@@ -264,7 +264,7 @@ class HealthService:
             b, f = bad[0]
             return {"id": "exports", "title": "Exported books", "status": "problem", "code": "HASH_MISMATCH",
                     "detail": f"The {f['format']} file of “{b['title']}” is missing or damaged.",
-                    "fix": "Open the book's Make my book page and press 📦 Export my book again.",
+                    "fix": "Open the book's Book home page and press 📦 Export my book again.",
                     "action": "book", "project_id": b["project_id"]}
         n = sum(len(b["files"]) for b in books)
         return {"id": "exports", "title": "Exported books", "status": "ok",
