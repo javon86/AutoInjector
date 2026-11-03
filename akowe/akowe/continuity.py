@@ -539,7 +539,7 @@ def start_track(review, principal, pid, branch, body) -> dict:
             res["message"] = f"Chapter {res['number']} tracked" + (f" — {res['note']}" if res.get("note") else "")
             j.results.append(res)
             j.done += 1
-    return review._start(job, run)  # noqa: SLF001
+    return review._start(job, run, same=())  # noqa: SLF001 - a second press gets the running job
 
 
 def start_readings(review, principal, pid, branch, body) -> dict:
@@ -570,7 +570,7 @@ def start_readings(review, principal, pid, branch, body) -> dict:
                               "message": f"The AI wrote two readings for {len(items)} mystery(ies). Read and change "
                                          "them, then run the test."})
         j.done = 1
-    return review._start(job, run)  # noqa: SLF001
+    return review._start(job, run, same=())  # noqa: SLF001 - a second press gets the running job
 
 
 def start_test(review, principal, pid, branch, body) -> dict:
@@ -610,7 +610,7 @@ def start_test(review, principal, pid, branch, body) -> dict:
                           "message": "Both readings hold for every protected mystery." if not weak else
                           f"{len(weak)} mystery(ies) lean to one reading — see the weaker reading."})
         j.done = 1
-    return review._start(job, run)  # noqa: SLF001
+    return review._start(job, run, same=())  # noqa: SLF001 - a second press gets the running job
 
 
 # ====================================================================== routes (/review/continuity/…)

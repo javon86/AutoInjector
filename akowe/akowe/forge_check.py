@@ -717,7 +717,7 @@ def start_check(svc, principal, pid, branch, kind, rid, body) -> dict:
     def fn(j):
         j.current = rid
         run_check(svc.app, j, pid, branch, kind, rid, use_ai)
-    return svc.app.review._start(job, fn)
+    return svc.app.review._start(job, fn, same=(kind, use_ai))
 
 
 # ====================================================================== verdicts ("Change dossier" = a proposal)

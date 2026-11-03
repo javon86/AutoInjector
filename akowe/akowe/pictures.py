@@ -567,7 +567,7 @@ def start_illustrate(app, principal, pid, branch, body) -> dict:
         j.results.append({"ok": True, "pic_id": pic_id, "message": (
             f"{count} pictures made for {what}: pick the one you want." if count > 1 else
             f"The picture for {what} is made and stored with the book.")})
-    return app.review._start(job, fn)  # noqa: SLF001 - the jobs of forge.py run the same way
+    return app.review._start(job, fn, same=(pic_id, engine, count))  # noqa: SLF001 - as the jobs of forge.py
 
 
 def start_illustrate_all(app, principal, pid, branch, body) -> dict:
@@ -612,7 +612,7 @@ def start_illustrate_all(app, principal, pid, branch, body) -> dict:
         j.results.append({"ok": True, "made": made, "message": f"{made} chapter picture(s) made"
                           + (f"; {left + skipped} chapter(s) already had a picture and were left as they are"
                              if left + skipped else "") + "."})
-    return app.review._start(job, fn)  # noqa: SLF001
+    return app.review._start(job, fn, same=())  # noqa: SLF001 - one "every chapter" job per book at a time
 
 
 MAP_PNG_WIDTH = 2000
@@ -729,7 +729,7 @@ def start_map_illustrated(app, principal, pid, branch, body) -> dict:
         add_candidate(app.store, pid, branch, pic_id, cand, choose=True, prompt=prompt)
         j.done = 1
         j.results.append({"ok": True, "pic_id": pic_id, "message": "The illustrated map is made and chosen."})
-    return app.review._start(job, fn)  # noqa: SLF001
+    return app.review._start(job, fn, same=())  # noqa: SLF001
 
 
 def upload(app, principal, pid, branch, query: dict, body) -> dict:

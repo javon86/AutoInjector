@@ -636,7 +636,7 @@ def start_make(app, principal, pid, branch, body) -> dict:
             run_make(app, j, pid, branch, plan, title, folder)
         except TrailerProblem as exc:
             j.status, j.phase, j.error = "error", "Failed", exc.as_error()
-    return app.review._start(job, fn)  # noqa: SLF001
+    return app.review._start(job, fn, same=())  # noqa: SLF001 - one trailer job per book at a time
 
 
 def _request_items(app, pid, branch, plan, tmpdir, warnings) -> list[dict]:

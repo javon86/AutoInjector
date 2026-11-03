@@ -423,7 +423,7 @@ def start_rest(app, principal: str, pid: str, branch: str, body=None) -> dict:
             return out
     job = PicturesJob("book_pictures", principal, pid, branch, [r for r, _n, _s in plan], None)
     job.total = max(1, sum(len(s) for _r, _n, s in plan) + series_waiting(app.store, pid, branch))
-    return app.review._start(job, lambda j: run_rest(app, j, pid, branch))  # noqa: SLF001
+    return app.review._start(job, lambda j: run_rest(app, j, pid, branch), same=())  # noqa: SLF001
 
 
 def run_rest(app, job, pid, branch) -> None:
