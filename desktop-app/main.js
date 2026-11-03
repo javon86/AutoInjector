@@ -5385,6 +5385,29 @@ function extractOptions() {
   };
 }
 // opts: { scope, bookId, preset, from, to, include } — missing scope = the safe default.
+// The activity list (state.log) starts empty at every app start, so "Last 24 hours" after a restart held only the
+// minutes since then (the user's 2026-11-02 log: 26 events, all from the last 12 s). A time-range or book extract
+// also reads the older events from the on-disk debug log (same entries, written by appendDebugLog), older than the
+// first in-memory one so nothing is counted twice. Best-effort: a missing or damaged file just adds nothing.
+const EXTRACT_DISK_MAX_BYTES = 32 * 1024 * 1024;
+function logForExtract() {
+  const firstTs = state.log.length ? state.log[0].ts : Infinity;
+  let older = [];
+  try {
+    const f = debugLogPath();
+    const st = fs.statSync(f);
+    if (st.size > 0 && st.size <= EXTRACT_DISK_MAX_BYTES) {
+      for (const line of fs.readFileSync(f, "utf8").split("\n")) {
+        if (!line) continue;
+        let e = null; try { e = JSON.parse(line); } catch (_) { continue; }
+        if (e && typeof e.ts === "number" && e.ts < firstTs && typeof e.kind === "string") older.push(e);
+      }
+    }
+  } catch (_) { older = []; }
+  if (!older.length) return state.log;
+  older.sort((a, b) => a.ts - b.ts);
+  return older.concat(state.log);
+}
 function buildExtract(opts) {
   const o = opts && typeof opts === "object" ? opts : {};
   let scope = o.scope;
@@ -5405,7 +5428,7 @@ function buildExtract(opts) {
   for (const k of Object.keys(include)) include[k] = include[k] !== false;
   const r = logExtract.buildExtract({
     scope, preset, from: o.from, to: o.to, book, include,
-    transcript: state.transcript, log: state.log,
+    transcript: state.transcript, log: scope === "everything" ? state.log : logForExtract(),
     relayReport: (f) => { const rep = relayTrace.report(f); return { text: relayTraceLib.formatReport(rep, { label: siteLabel }), messages: rep.messages }; },
     siteLabel, buildLine: buildLine(), now: Date.now(), redaction: extractRedaction(),
     // 🩺 the latest pictures & video self-test, in short (so one 📋 Extract carries its answers too)
