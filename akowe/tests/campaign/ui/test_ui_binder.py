@@ -484,7 +484,7 @@ def test_pdf_and_word_buttons_show_the_plain_error(make_context, bd):
 def test_binder_not_ready_when_the_api_is_missing(make_context, bd):
     page = open_binder(make_context, bd, status=404)
     assert "The Book Bible binder is not ready" in page.inner_text("#main")
-    assert page.locator("#main a", has_text="📘 Make my book").count() == 1
+    assert page.locator("#main a", has_text="🏠 Book home").count() == 1
     page.bf_problems[:] = [p for p in page.bf_problems if "/binder" not in p and "404" not in p]
     assert_clean(page, "not ready")
 

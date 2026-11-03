@@ -189,7 +189,7 @@ export async function viewBinder(main, x, rest = []) {
     if (e && e.status === 404) {
       root.appendChild(x.stateBox('empty', 'The Book Bible binder is not ready in this Akọwe yet',
         h('p', null, 'This version of Akọwe cannot build the binder pages yet. Your book bible is still saved with the book: ',
-          h('a', { href: plink('book') }, '📘 Make my book'), ' has ⬇ book-bible.md and ⬇ book-bible.json.')));
+          h('a', { href: plink('book') }, '🏠 Book home'), ' has ⬇ book-bible.md and ⬇ book-bible.json.')));
     } else root.appendChild(x.problemBox(x.toProblem(e, where), { retry: () => x.route() }, 'Could not open the Book Bible'));
     return;
   }
