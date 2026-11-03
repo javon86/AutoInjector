@@ -85,6 +85,28 @@ VOICES = {
                     "under_pressure": "laughs too loud, names a price", "talks_around": "what she saw that night",
                     "samples": ["Mind yourself. Talk costs a herring, love."]},
 }
+# ⏱ story details the fake decides (story_details.py)
+DETAILS = {
+    "physique": "1.68 m (5 ft 6 in), 61 kg (134 lb); lean and wiry, long arms", "face": "a narrow, weathered face",
+    "eyes": "storm-grey eyes", "hair": "black hair cut short at the jaw", "skin": "wind-burned olive skin",
+    "markings": "a rope scar across the left palm", "clothing": "an oilskin coat over a wool jumper",
+    "posture": "stands square, weight on the back foot", "presence": "watchful; smiles late",
+    "speech_fear": "Fear: short questions, one at a time", "speech_anger": "Anger: very quiet, very precise",
+    "speech_grief": "Grief: talks about work instead", "public_private": "Public: brisk. Private: unsure of herself",
+    "height": "1.68 m (5 ft 6 in)", "weight": "61 kg (134 lb)", "build": "lean", "handedness": "left",
+    "primary_style": "{name} fights close and dirty, using the footing of the rocks",
+    "primary_weapon": "a short curved sabre carried on the left hip",
+    "power_source": "{name}: a tide-gift from the drowned keepers", "power_effects": "calls fog for a minute",
+    "power_costs": "leaves the hands numb for an hour", "power_limits": "only within sight of the sea",
+    "practical_skills": "{name} can pick a ship's lock and splice rope", "signature_possessions": "a bone locket",
+    "place_type": "a working place", "one_line": "{name}, cold and salt-worn", "first_impression": "wind and gulls",
+    "sights": "lamplight on wet stone", "mood": "watchful", "signature_detail": "the smell of lamp oil",
+    "layout": "{name}: one long room with a ladder to a loft", "sounds": "the sea against the walls",
+    "smells": "tar and fish", "light": "grey by day, lamp-yellow at night", "population": "two keepers and a boy",
+    "item_type": "a key", "overall_look": "a heavy brass key, green at the teeth", "condition": "worn but whole",
+    "current_holder": "Mara Vell", "abilities": "opens the lamp room door and wakes the great lamp",
+    "limits": "works only in the Old Light's door", "costs": "the lamp burns a night's oil at once",
+}
 SCENE_PLACES = ["the lamp room of the old light", "the net sheds on the harbour wall", "the reef at low tide"]
 
 # Section 4 (P9/P10): the fake's story rules and world texture
@@ -185,6 +207,8 @@ class BookFakeAI:
         self.role_override: dict[str, str] = {}  # ★ name -> the story_role the fake gives instead (e.g. 2 protagonists)
         self.pov_name = None                     # ★ B11: write this (e.g. a misspelt name) as every chapter's POV
         self.series_script: list = []            # 📚 scripted "what changed in this book" answers
+        self.objectives = None                   # B11: the chapters' objectives (default OBJECTIVES, cycled)
+        self.details: dict[str, str] = {}        # ⏱ story details: field -> the text the fake decides
 
     def fail_next(self, *excs):
         self.failures.extend(excs)
@@ -223,6 +247,8 @@ class BookFakeAI:
 
     # ------------------------------------------------------------------ answers
     def _answer(self, ctx, props, schema):
+        if ctx.get("akowe_task") == "story_details":  # ⏱ story details (essentials / just in time)
+            return "details", self._details(ctx)
         if "character_changes" in props:  # 📚 series: what changed for each character in this book
             with self.lock:
                 scripted = self.series_script.pop(0) if getattr(self, "series_script", None) else None
@@ -408,7 +434,8 @@ class BookFakeAI:
             pov, loc = self._canon_ids(ctx)
             if self.pov_name:
                 pov = self.pov_name
-            return "B11", {"chapters": [plan_item(f"ch{i + 1}", i, OBJECTIVES[i % 3], pov, loc) for i in range(n)],
+            objs = self.objectives or OBJECTIVES
+            return "B11", {"chapters": [plan_item(f"ch{i + 1}", i, objs[i % len(objs)], pov, loc) for i in range(n)],
                            "unresolved_threads": []}
         if "objective_assessments" in props:
             req = ctx.get("request_payload") or {}
@@ -423,6 +450,15 @@ class BookFakeAI:
         if "events" in props:
             return "events", {"events": []}
         return "generic", self._from_schema(schema)
+
+    def _details(self, ctx):
+        out = {}
+        for s in ctx.get("subjects") or []:
+            for k in list(s.get("fields") or {}) + list(s.get("optional") or {}):
+                field = k.split("__", 1)[1]
+                text = self.details.get(field) or DETAILS.get(field) or f"{s.get('name')}: {field.replace('_', ' ')}"
+                out[k] = text.replace("{name}", str(s.get("name") or ""))
+        return out
 
     @staticmethod
     def _break_canon(out, sid, kind):

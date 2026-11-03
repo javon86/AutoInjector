@@ -304,7 +304,9 @@ def checks(store, pid: str, branch: str, chs: list[dict], order: list[str]) -> d
                      if c["chapter_id"] not in {e["chapter_id"] for e in phys}]
     seq = sorted(phys + written_after, key=lambda x: x.get("number") or 0)
     people = _ordered(store, pid, branch, "characters", order, approved_only=False)
-    return {"physical": ps_mod.lint(seq), "characters": cs_mod.lint(people, mains(store, pid, branch))}
+    from . import story_details  # noqa: PLC0415 - ⏱ 🔒 locked story details the text contradicts
+    return {"physical": ps_mod.lint(seq), "characters": cs_mod.lint(people, mains(store, pid, branch)),
+            "dossier": story_details.contradictions(store, pid, branch, chs)}
 
 
 def _public(e: dict | None, ch: dict | None) -> dict | None:

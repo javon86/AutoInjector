@@ -618,7 +618,7 @@ def list_dossiers(store, pid: str, branch: str, kind: str = "character") -> list
 
 
 # ====================================================================== changes (one lock, then write-through)
-def _write_through(store, pid, branch, rid, canon, fields: dict, changed: set) -> None:
+def _write_through(store, pid, branch, rid, canon, fields: dict, changed: set, by: str = "author") -> None:
     """Accepted text of mirrored fields -> the character sheet / voice card (one save; proposals never go out)."""
     mirrored = {k for k in changed if k in SHEET_SCALAR or k in VOICE_SCALAR or k in VOICE_LIST or k in PRESSURE
                 or k in REL_KEYS or k in MUST_KEYS}
@@ -656,7 +656,13 @@ def _write_through(store, pid, branch, rid, canon, fields: dict, changed: set) -
             if t and d["title"]:
                 rels.append(_rel_parse(d["title"], t))
         sheet["relationships"] = rels[:8]
-    chars_mod.save_entry(store, pid, branch, rid, sheet=sheet, voice=voice, by="author",
+    # a Make-a-book run's approval (by "run:<id>") is AI work under the run consent, not the author's: the sheet keeps
+    # its AI maker (and the story role is not turned into an author's choice)
+    run = str(by).startswith("run:")
+    sheet_changed = bool(mirrored & (set(SHEET_SCALAR) | set(MUST_KEYS) | set(REL_KEYS)))
+    chars_mod.save_entry(store, pid, branch, rid, sheet=sheet if sheet_changed or not run else None, voice=voice,
+                         by="ai" if run else "author",
+                         slot=((cent.get("made_by") or {}).get("slot") if run else None),
                          name=canon["name"], subject_id=canon["subject_id"])
     # remember what was written (so a later edit on the character page is recognised)
     cent = chars_mod.get_entry(store, pid, branch, rid) or {}
@@ -721,7 +727,7 @@ def mutate(store, pid, branch, rid, fn, *, what: str, by: str = "author", kind: 
         if not changed and not created and what not in ("art", "example"):
             return public(store, pid, branch, rid, kind=kind)
         if write:
-            _write_through(store, pid, branch, rid, canon, fields, {k for k in changed if k in FIELDS})
+            _write_through(store, pid, branch, rid, canon, fields, {k for k in changed if k in FIELDS}, by=by)
         _store_fields(entry, fields)
         if bump and not created and changed:
             entry["revision"] = int(entry.get("revision") or 1) + 1
@@ -847,7 +853,7 @@ def edit(store, pid, branch, rid, body) -> dict:
     return mutate(store, pid, branch, rid, fn, what="edit")
 
 
-def approve(store, pid, branch, rid, body) -> dict:
+def approve(store, pid, branch, rid, body, *, by: str = "author") -> dict:
     """POST …/approve — {fields: [keys]} | {all: true}: proposals become approved (and reach the sheet/voice card)."""
     body = body if isinstance(body, dict) else {}
     keys = body.get("fields")
@@ -871,7 +877,7 @@ def approve(store, pid, branch, rid, body) -> dict:
                 d["was"] = None
                 done.append(k)
         return set(done), {}
-    out = mutate(store, pid, branch, rid, fn, what="approve")
+    out = mutate(store, pid, branch, rid, fn, what="approve", by=by)
     n = len(done)
     msg = (f"Approved {n} proposal{'s' if n != 1 else ''}. " if n else "Nothing was waiting for approval. ") + \
         ("The dossier is ready." if out["readiness"] == "ready" else
@@ -912,6 +918,23 @@ def apply_proposals(store, pid, branch, rid, answer: dict, *, slot: str | None, 
     # proposals never reach the sheet / voice card (write=False) and do not bump the revision (approve/edit do)
     mutate(store, pid, branch, rid, fn, what="forge", by=f"ai:{slot or '?'}", bump=False, write=False)
     return filled
+
+
+def protect(store, pid, branch, rid, keys, *, by: str = "run") -> list:
+    """🔒 Mark accepted fields protected (a written chapter relied on them: later chapters must match, the AI never
+    changes them). Proposals and empty fields are left alone. Returns the keys newly protected."""
+    done: list[str] = []
+
+    def fn(entry, fields, canon):
+        for k in keys:
+            d = fields.get(k)
+            if not d or d.get("readonly") or d["protected"] or not d["text"] or d["status"] == "proposed":
+                continue
+            d["protected"] = True
+            done.append(k)
+        return {k + ":protected" for k in done}, {}
+    mutate(store, pid, branch, rid, fn, what="lock", by=by, write=False)
+    return done
 
 
 def set_art(store, pid, branch, rid, slot: str, asset: dict) -> dict:
@@ -1938,14 +1961,22 @@ def letters_for(texts: list[str], first_appearance: bool) -> list[str]:
         out.append("F")
     if MAGIC_RE.search(blob):
         out.append("M")
+    try:  # ⏱ a skill or a possession the chapter uses (story_details.py: just-in-time needs)
+        from .story_details import needs_letters  # noqa: PLC0415
+        out += [x for x in needs_letters(blob) if x not in out]
+    except Exception:  # noqa: BLE001 - letters are best effort
+        log.exception("forge letters")
     return out
 
 
-def chapter_brief(store, pid, branch, present: list[dict], letters_by_rid: dict, budget: int = BRIEF_MAX) -> list:
+def chapter_brief(store, pid, branch, present: list[dict], letters_by_rid: dict, budget: int = BRIEF_MAX,
+                  used: dict | None = None) -> list:
     """[{name, code, details: {label: text}}] — only ACCEPTED dossier fields (supplied / approved, never proposals)
     whose letters the chapter needs; mirrored fields (sheet / voice card) are left out because the brief already
     carries them. Bounded by ``budget`` characters of JSON. Never raises."""
     out = []
+    keys_of: dict[tuple, str] = {}  # (record id, label) -> field key (``used``: what the chapter relied on)
+    rids: list[str] = []
     try:
         doc = _doc(store, pid, branch)
         for c in present:
@@ -1966,15 +1997,21 @@ def chapter_brief(store, pid, branch, present: list[dict], letters_by_rid: dict,
                     continue
                 if not want & set(clean_letters(d.get("letters"), f["letters"])):
                     continue
-                details[clip(d.get("title"), TITLE_MAX) or f["label"]] = t
+                label = clip(d.get("title"), TITLE_MAX) or f["label"]
+                details[label] = t
+                keys_of[(c["record_id"], label)] = key
             if details:
                 out.append({"name": c["name"], "code": entry.get("code"), "letters": sorted(want), "details": details})
+                rids.append(c["record_id"])
         while out and len(json.dumps(out, ensure_ascii=False)) > budget:
             last = out[-1]
             if len(last["details"]) > 1:
                 last["details"].pop(list(last["details"])[-1])
             else:
                 out.pop()
+        if used is not None:
+            for o, rid in zip(out, rids):
+                used[rid] = [keys_of[(rid, label)] for label in o["details"] if (rid, label) in keys_of]
     except Exception:  # noqa: BLE001 - a brief is best effort
         log.exception("forge chapter brief failed")
         return []

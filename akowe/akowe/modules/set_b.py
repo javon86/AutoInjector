@@ -702,6 +702,8 @@ class PlanHandler(OperationHandler):
         from .. import story_choices  # noqa: PLC0415
         choices, rules = self._guidance(ctx)
         out = " ".join(story_choices.rules(choices or {}, ending=self.op_id != "B01"))
+        from .. import character_mode  # noqa: PLC0415 - 🧑 ⚖ 🗺 how the story treats the characters
+        out += " " + character_mode.planner_rule(character_mode.of_choices(choices), self.op_id)
         if rules and self.op_id in ("B03", "B11"):
             out += (" Follow the story rules (context.story_rules): never break a hard rule; keep beliefs as beliefs "
                     "and protected mysteries unexplained; every exception, special object or power the plan uses must "
@@ -806,6 +808,8 @@ class PlanHandler(OperationHandler):
             sc = story_choices.brief(choices or {}, ending=self.op_id != "B01")
             if sc:
                 base["story_choices"] = sc
+            from .. import character_mode  # noqa: PLC0415
+            base["character_mode"] = character_mode.brief(character_mode.of_choices(choices))
             if rules and self.op_id in ("B03", "B11"):
                 base["story_rules"] = rules
         base["predicate_conventions"] = pr.registry_brief(ctx.contracts.predicate_registry)

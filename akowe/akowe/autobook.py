@@ -7,6 +7,8 @@ so a page reload shows it and an Akọwe restart shows it as "interrupted — Re
     safety backup -> book profile (the AI invents title, genre, audience, tone, idea, pen name)
     -> characters and places (A01/A04/A03 through the Bible Builder: world sketch + proposals, created as drafts)
     -> character sheets and voice cards (P7/P17: made with the characters, or made now for any without)
+    -> character looks and voice details (story_details.py: essentials only; the rest is decided just in time,
+    before the chapter that needs it, and locked once a chapter used it)
     -> story rules and world texture (P9/P10: drafted from the canon and the profile)
     -> premise B01 -> main plot B03 -> chapter outline B11 (then the story rules are updated for the plan: the AI's
     suggestions are accepted under the run consent) -> every chapter (scene cards planned by the writer and
@@ -85,6 +87,11 @@ STEPS = [
      "each one is reviewed and approved under your consent."),
     ("characters", "A", "A01", "Character sheets and voices", "What each character wants, needs, fears and hides, "
      "and how each one talks (a voice card each); the writer gets them in every chapter."),
+    ("looks", "A", "A01", "Character looks and voice details", "Only the essentials before chapter one: how each "
+     "character looks (height, build, face, eyes, hair, clothes, posture) and how they talk when afraid, angry or "
+     "grieving; a short look for the places and items the outline names. Everything else (fighting style, powers, "
+     "skills, a place's rooms, an item's powers…) is decided just in time, before the chapter that needs it, and "
+     "fixed once a chapter used it."),
     ("pictures", "A", None, "Character pictures", "A portrait of every character from its description, and the "
      "full set (portrait, front, side and back views, character sheet) for the main character — made with Stable "
      "Diffusion in AutoInjector; each portrait becomes that character's 🔒 lock so later pictures keep the face. "
@@ -113,7 +120,7 @@ STEPS = [
 ]
 STEP_IDS = [s[0] for s in STEPS]
 # P14: steps that belong to a pipeline switch (switched off -> the step is skipped)
-STEP_FLAGS = {"characters": "voices", "world": "rules", "planned": "planned"}
+STEP_FLAGS = {"characters": "voices", "looks": "voices", "world": "rules", "planned": "planned"}
 # P23 (Section 7c): steps that run only when the run's settings ask for them (step -> setting)
 STEP_OPTIONAL = {"beta": "beta_reader"}
 
@@ -2101,6 +2108,11 @@ class AutoBookService(_Runner):
         st["message"] = f"{ok} of {len(people)} character(s) have a sheet and a voice card" + (
             f" ({made} made now)" if made else "") + (f" · ⚠️ {failed} could not be made" if failed else "")
 
+    def _s_looks(self, run, st):
+        """⏱ Essentials only, before chapter one (story_details.py). Never blocks the book."""
+        from . import story_details  # noqa: PLC0415
+        story_details.essentials_step(self, run, st)
+
     def _s_pictures(self, run, st):
         """🖼 A portrait for every character, the full set for the ★ protagonist (book_pictures.py). Never blocks
         the book: what cannot be made now goes on the book's to-make list (only pause / cancel stop it)."""
@@ -2890,6 +2902,9 @@ class AutoBookService(_Runner):
                 if not continuity.tracked(self.store, run["project_id"], run["branch_id"], cid):
                     # approved, but a Pause / Cancel came before its continuity was tracked: track it now
                     continuity.after_chapter(self, run, cid, appr, item)
+                if self._on(run, "voices"):  # ⏱ lock what it relied on (idempotent)
+                    from . import story_details  # noqa: PLC0415
+                    story_details.after_chapter(self, run, cid, idx + 1)
                 item.update(state="done", words=len(((appr.get("data") or {}).get("text") or "").split()))
                 continue
             item["state"] = "running"
@@ -2913,6 +2928,9 @@ class AutoBookService(_Runner):
                     self.save(run)
                     from . import continuity  # noqa: PLC0415 - Section 7 (P34): the version ledger, once per run
                     continuity.before_chapter(self, run, cid)
+                    if self._on(run, "voices"):  # ⏱ decide just the details this chapter needs (≤ 1 AI call)
+                        from . import story_details  # noqa: PLC0415
+                        story_details.before_chapter(self, run, st, cid, idx + 1, item)
                     payload = bp.prepare_chapter(cid)
                     ref = self.ai_create(run, self.bp(run), "C02", payload, f"chapter {cid}")
                     rid = ref["record_id"]
@@ -2932,6 +2950,9 @@ class AutoBookService(_Runner):
                     raise
             from . import continuity  # noqa: PLC0415 - Section 7 (P32/P35): track + approve under the run consent
             continuity.after_chapter(self, run, cid, rec, item)
+            if self._on(run, "voices"):  # ⏱ 🔒 what this chapter relied on is fixed; contradictions are flagged
+                from . import story_details  # noqa: PLC0415
+                story_details.after_chapter(self, run, cid, idx + 1)
             item.update(state="done", words=len((((rec or {}).get("data") or {}).get("text") or "").split()),
                         seconds=round(time.monotonic() - t_chapter, 1))
             tm = run.setdefault("timing", {"calls": 0, "call_s": 0.0})

@@ -15,7 +15,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
-from akowe import binder, binder_fields as bf, binder_html, forge, forge_example, journal
+from akowe import binder, binder_fields as bf, binder_html, forge, forge_example, forge_kinds, journal
 from akowe import providers as prov_mod
 from akowe.book_path import BookPath, get_profile, save_profile
 from akowe.errors import AkoweError
@@ -185,11 +185,14 @@ def test_mapping_from_the_demo_book(demo):
     assert fld(mara, "5.4.3")["value"].startswith("Mara Vell wants")  # the character sheet, through the dossier
     assert fld(mara, "5.7.11")["value"] == "Who signed the log?"      # voice card sample line 1
     nacre = page_of(d, "Nacre")
-    assert fld(nacre, "7.1.3")["value"] == "PL-001" and "7.1.1" in nacre["pics"]
+    codes = {d_["name"]: d_["code"] for k in ("place", "item", "magic")
+             for d_ in forge_kinds.list_dossiers(app.store, pid, BR, k)}  # (⏱ the run made dossiers too)
+    assert fld(nacre, "7.1.3")["value"] == codes["Nacre"] and "7.1.1" in nacre["pics"]
     harbor = page_of(d, "Gullhaven Harbor")  # an A04 record without a dossier: the canon attributes
-    assert fld(harbor, "7.2.1")["source"] == "canon:A04.geography" and fld(harbor, "7.2.1")["status"] == "approved"
-    assert fld(page_of(d, template="8A"), "8A.1.3")["value"] == "MG-001"
-    assert fld(page_of(d, template="8B"), "8B.1.3")["value"] == "AR-001"
+    # (⏱ the run made a place dossier for it, seeded from the A04 record: the canon text, through the dossier)
+    assert fld(harbor, "7.2.1")["source"] in ("canon:A04.geography", "place:location") and fld(harbor, "7.2.1")["value"]
+    mg, ar = page_of(d, template="8A"), page_of(d, template="8B")
+    assert fld(mg, "8A.1.3")["value"] == codes[mg["title"]] and fld(ar, "8B.1.3")["value"] == codes[ar["title"]]
     board = page_of(d, "The Harbour Board")
     assert fld(board, "8C.5.1")["value"] == "Twelve captains and the harbourmaster"
     assert fld(board, "8C.5.3")["value"] == "The lighthouse keepers" and board["status"] == "draft"

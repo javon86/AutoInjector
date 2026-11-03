@@ -1359,7 +1359,13 @@ class ReviewService:
         tok = self.work.begin(pid, rec["module_id"], f"AI is reviewing {title}")
         try:
             ctx, protected = self._context(pid, branch, rec, self._companion_extra(pid, branch, rec))
-            raw = self.assist._call_ai(job, op_for_roles=rec["module_id"], task=REVIEW_TASK, schema=REVIEW_SCHEMA,
+            task = REVIEW_TASK
+            if rec["module_id"] in ("B01", "B03", "B11", "C02"):  # 🧑 ⚖ 🗺 how the story treats the characters
+                from . import character_mode  # noqa: PLC0415
+                cmode = character_mode.of_store(self.store, pid)
+                ctx["character_mode"] = character_mode.brief(cmode)
+                task = REVIEW_TASK + character_mode.reviewer_rule(cmode)
+            raw = self.assist._call_ai(job, op_for_roles=rec["module_id"], task=task, schema=REVIEW_SCHEMA,
                                        context=ctx, protected=protected)
         finally:
             self.work.end(tok)

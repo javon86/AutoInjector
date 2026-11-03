@@ -200,7 +200,8 @@ def test_make_a_book_end_to_end_with_rules_texture_planned_and_choices(tmp_path)
     pid = run["project_id"]
     st = steps(run)
     ids = [s["id"] for s in run["steps"]]
-    assert ids.index("pictures") == ids.index("characters") + 1 and ids.index("world") == ids.index("characters") + 2
+    assert ids.index("looks") == ids.index("characters") + 1 and ids.index("pictures") == ids.index("characters") + 2
+    assert ids.index("world") == ids.index("characters") + 3
     assert ids.index("planned") == ids.index("chapters") + 1
     assert st["world"]["state"] == "done" and "Story rules" in st["world"]["message"]
     assert st["planned"]["state"] == "done"

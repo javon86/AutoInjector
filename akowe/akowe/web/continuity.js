@@ -87,7 +87,7 @@ export async function viewContinuity(main, x) {
     return card;
   }
   function checksCard() {
-    const all = [...(info.checks.physical || []), ...(info.checks.characters || [])];
+    const all = [...(info.checks.dossier || []), ...(info.checks.physical || []), ...(info.checks.characters || [])];
     return h('section', { class: 'card', 'data-testid': 'cont-checks' }, h('h2', null, '🔎 Questions from Akọwe’s checks'),
       all.length ? h('ul', { class: 'small' }, all.map(p => h('li', null, p.severity === 'major' ? '⚠️ ' : '• ', p.number ? `Chapter ${p.number}${p.scene ? `, scene ${p.scene}` : ''}: ` : '', p.message)))
         : h('p', { class: 'small muted' }, 'No questions: counts go one way, the clock does not run backwards, every hazard matters later and every main character acts for their own goal.'));
