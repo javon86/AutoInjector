@@ -604,12 +604,16 @@ class AutoBookService(_Runner):
         out["needs_decision"] = out["state"] == "needs_decision"
         out["steps_done"] = sum(1 for s in run.get("steps") or [] if s.get("state") in ("done", "skipped"))
         out["steps_total"] = len(run.get("steps") or [])
-        out["elapsed_ms"] = _elapsed(run.get("started_at"), run.get("finished_at")) if run.get("started_at") else 0
+        # A run that stopped (paused, waiting for a decision, interrupted) is not working: its clock stops at its last
+        # save, so a step paused hours ago does not read "8 h 12 min" as if it were still busy.
+        stopped_at = run.get("updated_at") if not out["alive"] and not run.get("finished_at") else None
+        end = run.get("finished_at") or stopped_at
+        out["elapsed_ms"] = _elapsed(run.get("started_at"), end) if run.get("started_at") else 0
         steps = []
         for s in run.get("steps") or []:
             s = dict(s)
             if s.get("started_at"):
-                s["elapsed_ms"] = _elapsed(s["started_at"], s.get("finished_at"))
+                s["elapsed_ms"] = _elapsed(s["started_at"], s.get("finished_at") or stopped_at)
             steps.append(s)
         out["steps"] = steps
         out["events"] = (run.get("events") or [])[-60:]
@@ -3154,6 +3158,12 @@ class WriteAllService(_Runner):
     KIND = "write_all"
 
     def start(self, principal: str, pid: str, branch: str) -> dict:
+        # The check and the launch are one step: two presses at once (a double click, two tabs) start ONE writer —
+        # two would write every chapter twice.
+        with self._lock:
+            return self._start_locked(principal, pid, branch)
+
+    def _start_locked(self, principal: str, pid: str, branch: str) -> dict:
         for r in self.active():
             if r.get("project_id") == pid and r.get("branch_id") == branch:
                 return self.public(r)

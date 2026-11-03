@@ -150,6 +150,10 @@ async function partB() {
   r = await e.generate({ text: 'Create an image: x' });
   assert(r.ok && /estuary\/content/.test(sessionUrl || '') && r.settings.fetchedVia === 'session', 'the page\'s own fetch blocked → the session fetch gets the bytes');
   pane = fakeChatGptPane({ mode: 'fetchfail', delayMs: 100 });
+  ({ e } = engine(pane, { fetchViaSession: () => new Promise(() => {}), options: Object.assign({}, FAST, { fetchTimeoutMs: 300 }) }));
+  { const t0 = Date.now(); r = await e.generate({ text: 'Create an image: x' });
+    assert(!r.ok && r.error === 'IMAGE_FETCH_FAILED' && /SESSION_FETCH_TIMEOUT/.test(r.message) && Date.now() - t0 < 5000, `sweep 2026-11: a session fetch that never answers gives up (${r.error}: ${String(r.message).slice(0, 80)}) instead of holding the job for ever`); }
+  pane = fakeChatGptPane({ mode: 'fetchfail', delayMs: 100 });
   ({ e } = engine(pane));
   r = await e.generate({ text: 'Create an image: x' });
   assert(!r.ok && r.error === 'IMAGE_FETCH_FAILED' && /HTTP_403/.test(r.message), 'no way to get the bytes → IMAGE_FETCH_FAILED, plain words');

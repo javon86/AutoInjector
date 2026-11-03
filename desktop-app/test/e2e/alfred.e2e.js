@@ -135,6 +135,13 @@ async function main() {
     const big = await controls.$$eval('#alfred-actions button', (els) => els.map((e) => e.textContent));
     assert(big.join('|') === '🧑Make a character|🎨Make a picture|🎬Make a video|🖼Design a cover|📖My book|✍Continue / make my book|🩺Check everything|❓Everything I can do', `the 8 big buttons are there (${big.join(' · ')})`);
     await controls.evaluate(() => { document.getElementById('alfred-did').open = false; });
+    // sweep 2026-11: 🩺 Check everything's note listed long folder paths / addresses that made the note scroll sideways
+    const sideways = await controls.evaluate(() => { const q = document.getElementById('alfred-quick-msg'); q.textContent = '✔ Ollama installed — /tmp/a-very-long-folder-name-without-any-spaces-at-all/StabilityMatrix/Data/Packages/FramePack/hf_download/models--x'; const r = q.scrollWidth > q.clientWidth + 1; q.textContent = ''; return r; });
+    assert(!sideways, 'a long path in his note wraps — the note never scrolls sideways');
+    await controls.setViewportSize({ width: 1280, height: 720 }).catch(() => {}); await sleep(300);
+    const cut = await controls.evaluate(() => { const t = document.getElementById('term-tools').getBoundingClientRect(); return [...document.querySelectorAll('#term-tools > *')].filter((e) => e.offsetParent && e.getBoundingClientRect().right > t.right + 1).map((e) => e.id || e.textContent.trim()); });
+    assert(cut.length === 0, `1280×720 with his panel open: no terminal button is cut off (${cut.join(', ') || 'none'})`);
+    await controls.setViewportSize({ width: 1500, height: 950 }).catch(() => {}); await sleep(300);
     await sleep(400);
     await shot(controls, '02-side-panel-buttons');
     keep('02-side-panel-buttons', 'alfred-side-panel.png');

@@ -84,8 +84,13 @@ const sentText = (script) => { const i = script.indexOf("const CFG = "); try { r
 async function main() {
   require(path.join(__dirname, "..", "main.js"));
   await waitUntil(() => reg("chatgpt") && reg("claude") && reg("gemini") && reg("controls-ui"));
+  // sweep 2026-11: the control panel and the AI Feed keep choices in localStorage — only a "persist:" partition keeps them after a restart
+  assert(/^persist:/.test(reg("controls-ui").partition), `the control panel's storage survives a restart (partition ${reg("controls-ui").partition})`);
   const userData = mockElectron.app.getPath("userData");
   const logNow = () => fs.readFileSync(path.join(userData, "autoinjector-debug.log"), "utf8");
+  // sweep 2026-11: a promise nobody caught in main goes into the log (it vanished into stderr before)
+  process.emit("unhandledRejection", new Error("sweep-probe nobody caught this"), Promise.resolve());
+  assert(await waitUntil(() => /"kind":"main-unhandled-rejection"[^\n]*sweep-probe nobody caught this/.test(logNow()), 2000), "an unhandled promise rejection in main is written to the activity / debug log");
   const st = await call("akowe:set-enabled", { enabled: true });
   assert(st.listening === true, "bridge on");
   const token = (await call("akowe:reveal-token")).token;

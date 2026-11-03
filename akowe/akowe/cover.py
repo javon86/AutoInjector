@@ -626,7 +626,7 @@ class CoverService:
                 run_art(self.app, j, pid, branch, engine, upscale)
             except forge.ArtProblem as exc:
                 j.status, j.phase, j.error = "error", "Failed", exc.as_error()
-        return self.app.review._start(job, fn)
+        return self.app.review._start(job, fn, same=())
 
     def upload(self, principal, pid, branch, body) -> dict:
         from . import forge  # noqa: PLC0415

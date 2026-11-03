@@ -781,16 +781,16 @@ class ReportService:
         bp = BookPath(self.app.engine, principal, pid, branch)
         if not book_chapters(bp):
             raise AkoweError("INVALID_INPUT", "/book", "this book has no written chapters yet", status="REJECTED")
-        for j in self._jobs.values():
-            if j["project_id"] == pid and j["status"] in ("queued", "running"):
-                raise AkoweError("VERSION_CONFLICT", "/report", "a report for this book is being made; wait for "
-                                     "it to finish", status="REJECTED")
         job = {"id": f"brev-{uuid.uuid4().hex[:12]}", "kind": "book_review", "status": "queued", "phase": "Starting",
                "principal": principal, "project_id": pid, "branch_id": branch, "created_at": now_iso(),
                "done": 0, "total": len(slots) if slots else None, "report_id": None, "error": None,
                "resume": {"project_id": pid, "branch_id": branch, "slots": slots, "ai": ai, "report_id": add_to},
                "cancel": False}
-        with self._lock:
+        with self._lock:  # the check and the registration are one step: two presses at once make ONE report
+            for j in self._jobs.values():
+                if j["project_id"] == pid and j["status"] in ("queued", "running"):
+                    raise AkoweError("VERSION_CONFLICT", "/report", "a report for this book is being made; wait for "
+                                         "it to finish", status="REJECTED")
             self._jobs[job["id"]] = job
         self._persist(job)
         threading.Thread(target=self._thread, args=(job, slots, ai, add_to), name="akowe-report",

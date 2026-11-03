@@ -635,7 +635,7 @@ def start_find(app, principal: str, pid: str, branch: str) -> dict:
         job.done = 1
         job.results.append({"ok": True, "message": msg, **out})
     job = ReviewJob("series_changes", principal, pid, branch, [pid], None)
-    return app.review._start(job, fn)  # noqa: SLF001
+    return app.review._start(job, fn, same=())  # noqa: SLF001
 
 
 def _book_number_arg(s: dict, pid: str, body: dict) -> int:
@@ -783,6 +783,10 @@ def _sequel_hook(app, pid: str, branch: str) -> str:
         return ""
 
 
+NO_CHAPTERS_FOR_SEQUEL = ("This book has no written chapters yet. A sequel starts where this book ends, so finish this "
+                          "book first (▶ Continue making this book), then press 📚 Start a sequel.")
+
+
 def sequel_bible(app, pid: str, branch: str, body=None) -> tuple[dict, dict]:
     """(the new book's bible, the sequel settings): this book's bible at the END of this book — fixed layers from the
     series, appearance and relationships at their end state, no plan (the sequel gets a new premise, plot and outline)."""
@@ -802,6 +806,8 @@ def sequel_bible(app, pid: str, branch: str, body=None) -> tuple[dict, dict]:
         raise _err("VERSION_CONFLICT", "/book", f"book {nxt} of this series already exists (“{taken.get('title')}”). "
                                                 f"Open that book to continue the series, or start the sequel from the "
                                                 f"last book")
+    if not _chapters(app, pid, branch):
+        raise _err("MISSING_INPUT", "/chapters", NO_CHAPTERS_FOR_SEQUEL)
     try:
         raw = book_bible.build(app, pid, branch)
         import json  # noqa: PLC0415
@@ -893,6 +899,8 @@ def sequel_status(app, pid: str, branch: str, s: dict | None = None) -> dict:
         if taken:
             why = (f"Book {n + 1} of this series already exists (“{taken.get('title') or ''}”). Open that book to "
                    "continue the series, or start the sequel from the last book.")
+        elif not _chapters(app, pid, branch):
+            why = NO_CHAPTERS_FOR_SEQUEL
         elif not ai:
             why = ("No AI is connected. A sequel is written by ⚡ Make a book, which needs an AI: connect one in "
                    "Settings, then press 📚 Start a sequel again.")
@@ -1252,7 +1260,7 @@ def start_portraits(app, principal: str, pid: str, branch: str, body=None) -> di
                    "start Stable Diffusion in AutoInjector and press the button again."
         job.results.append({"ok": not res["failed"], "message": msg, **res})
     job = ReviewJob("series_portraits", principal, pid, branch, [k for _n, k, _x in plan] or [pid], None)
-    return app.review._start(job, fn)  # noqa: SLF001
+    return app.review._start(job, fn, same=(n,))  # noqa: SLF001
 
 
 # ====================================================================== the view (the Book Bible's 📚 panel, the strip)

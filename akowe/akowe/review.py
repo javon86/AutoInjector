@@ -701,7 +701,7 @@ class ReviewService:
         body = body if isinstance(body, dict) else {}
         ids = self._ids(body)
         slot = self.assist._check_slot(body.get("slot_id"))
-        return self._start(ReviewJob("review", principal, pid, branch, ids, slot), self._run_review)
+        return self._start(ReviewJob("review", principal, pid, branch, ids, slot), self._run_review, same=())
 
     def start_fix(self, principal, pid, branch, body) -> dict:
         self._access(principal, pid, branch)
@@ -715,7 +715,7 @@ class ReviewService:
             raise AkoweError("INVALID_INPUT", "/note", "note: up to 1000 characters", status="REJECTED")
         job = ReviewJob("fix", principal, pid, branch, [rid], slot)
         job.note = note.strip() if isinstance(note, str) and note.strip() else None
-        return self._start(job, self._run_fix)
+        return self._start(job, self._run_fix, same=(job.note,))
 
     # ------------------------------------------------------------------ 🖋 the AI editor (editor.py, P4/P5)
     def start_editor(self, principal, pid, branch, body) -> dict:
@@ -732,7 +732,7 @@ class ReviewService:
             raise AkoweError("INVALID_INPUT", "/record_id", "the editor reads chapters and the premise, main plot "
                                  "and chapter outline", status="REJECTED")
         slot = self.assist._check_slot(body.get("slot_id"))
-        return self._start(ReviewJob("editor", principal, pid, branch, [rid], slot), self._run_editor)
+        return self._start(ReviewJob("editor", principal, pid, branch, [rid], slot), self._run_editor, same=())
 
     def start_editor_fix(self, principal, pid, branch, body) -> dict:
         """✍ Get the editor's fixes: the writer AI proposes replacements for the flagged passages -> 202 job. Nothing
@@ -758,7 +758,7 @@ class ReviewService:
         slot = self.assist._check_slot(body.get("slot_id"))
         job = ReviewJob("editor_fix", principal, pid, branch, [rid], slot)
         job.finding_ids = fids
-        return self._start(job, self._run_editor_fix)
+        return self._start(job, self._run_editor_fix, same=tuple(job.finding_ids or ()))
 
     def apply_editor_fix(self, principal, pid, branch, body) -> dict:
         """Apply the fixes the author accepted (exact text replacement) -> a new DRAFT version of the chapter."""
@@ -817,9 +817,20 @@ class ReviewService:
                             resume={"kind": job.kind, "project_id": job.project_id, "branch_id": job.branch_id,
                                     "record_ids": left, "slot_id": job.slot_pref} if left else None)
 
-    def _start(self, job: ReviewJob, fn) -> dict:
+    def _start(self, job: ReviewJob, fn, same=None) -> dict:
+        """Start ``job`` in the background. ``same`` (hashable; () when the kind and the records say it all) makes the
+        start idempotent: while a job of the same kind, book, records and ``same`` is still queued or running, the
+        press (a double click, a second tab) gets THAT job back instead of a second one doing the same AI work and
+        making the same pictures twice."""
         self._purge()
         with self._lock:
+            if same is not None:
+                key = (job.kind, job.principal, job.project_id, job.branch_id, tuple(job.record_ids), same)
+                for other in self._jobs.values():
+                    if getattr(other, "same_key", None) == key and other.status in ("queued", "running") \
+                            and not other.cancelled:  # a job being stopped is not "the running one"
+                        return other.public()
+                job.same_key = key
             self._jobs[job.id] = job
         self._persist(job)
         threading.Thread(target=self._thread, args=(job, fn), name=f"akowe-{job.kind}", daemon=True).start()
@@ -1015,7 +1026,7 @@ class ReviewService:
             raise AkoweError("INVALID_INPUT", "/note", "note: up to 1000 characters", status="REJECTED")
         job = ReviewJob("characters", principal, pid, branch, [rid], self.assist._check_slot(body.get("slot_id")))
         job.note = note
-        return self._start(job, self._run_character)
+        return self._start(job, self._run_character, same=(job.note,))
 
     def _run_character(self, job: ReviewJob):
         from . import characters as chars_mod  # noqa: PLC0415
@@ -1066,7 +1077,7 @@ class ReviewService:
         self.scenes.info(principal, pid, branch, chapter_id)  # the chapter exists in the approved outline
         job = ReviewJob("scenes", principal, pid, branch, [chapter_id], self.assist._check_slot(body.get("slot_id")))
         job.revise, job.check_after = body.get("revise") is True, body.get("check", True) is not False
-        return self._start(job, self._run_scenes)
+        return self._start(job, self._run_scenes, same=(job.revise, job.check_after))
 
     def start_scenes_check(self, principal, pid, branch, chapter_id, body) -> dict:
         self._access(principal, pid, branch)
@@ -1077,7 +1088,7 @@ class ReviewService:
                                  status="REJECTED")
         job = ReviewJob("scenes_check", principal, pid, branch, [chapter_id],
                         self.assist._check_slot(body.get("slot_id")))
-        return self._start(job, self._run_scenes_check)
+        return self._start(job, self._run_scenes_check, same=())
 
     def _run_scenes(self, job: ReviewJob):
         cid = job.record_ids[0]
@@ -1209,7 +1220,7 @@ class ReviewService:
             raise AkoweError("INVALID_INPUT", "/note", "note: up to 1000 characters", status="REJECTED")
         job = ReviewJob(f"world_{what}", principal, pid, branch, [what], self.assist._check_slot(body.get("slot_id")))
         job.update, job.note = body.get("update"), note
-        return self._start(job, self._run_world)
+        return self._start(job, self._run_world, same=(job.update, job.note))
 
     def _run_world(self, job: ReviewJob):
         from . import story_rules  # noqa: PLC0415
@@ -1249,7 +1260,7 @@ class ReviewService:
         self.planned.quick(principal, pid, branch, rid)  # a chapter of the approved outline
         job = ReviewJob("planned_fix" if fix else "planned_check", principal, pid, branch, [rid],
                         self.assist._check_slot(body.get("slot_id")))
-        return self._start(job, self._run_planned_fix if fix else self._run_planned_check)
+        return self._start(job, self._run_planned_fix if fix else self._run_planned_check, same=())
 
     def _run_planned_check(self, job: ReviewJob):
         rid = job.record_ids[0]
@@ -1295,7 +1306,7 @@ class ReviewService:
             raise AkoweError("INVALID_INPUT", "/ids", "ids: a list of term ids", status="REJECTED")
         job = ReviewJob(kind, principal, pid, branch, [rid or "terms"], self.assist._check_slot(body.get("slot_id")))
         job.term_ids = ids
-        return self._start(job, self._run_facts)
+        return self._start(job, self._run_facts, same=tuple(ids or ()))
 
     def _run_facts(self, job: ReviewJob):
         rid = job.record_ids[0]

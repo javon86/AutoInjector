@@ -4671,6 +4671,8 @@ function openJump(opener) {
     if (ev.key === 'ArrowDown') { ev.preventDefault(); JP.idx = Math.min(JP.idx + 1, JP.shown.length - 1); mark(); }
     else if (ev.key === 'ArrowUp') { ev.preventDefault(); JP.idx = Math.max(JP.idx - 1, 0); mark(); }
     else if (ev.key === 'Enter') { ev.preventDefault(); const it = JP.shown[JP.idx]; if (it) jumpTo(it); }
+    // A search box with text eats the first Esc (it only clears the text): the help line promises Esc closes
+    else if (ev.key === 'Escape') { ev.preventDefault(); closeJump(true); }
   });
   d.appendChild(h('div', { class: 'jump-head' }, h('h2', { id: 'jump-title', class: 'visually-hidden' }, 'Jump to'),
     h('label', { for: 'jump-input', class: 'visually-hidden' }, 'Jump to'), input,
@@ -5975,7 +5977,7 @@ function editorCard(cur, { onSaved } = {}) {
         : 'The editor reads chapters, the premise, the main plot and the chapter outline.'));
       if (older) body.appendChild(h('p', { class: 'small muted' }, `The editor read version ${older}; this is version ${latest}.`));
     }
-    body.appendChild(patternBox(info.pattern));
+    put(body, patternBox(info.pattern));  // null for the premise / plot / outline (the pattern check reads chapters)
     const prop = info.proposal;
     if (prop && c) body.appendChild(fixesBox(prop, info, msg, () => draw(), onSaved));
     if (info.editable) {
@@ -7260,6 +7262,13 @@ function fmtElapsed(ms) {
   const m = Math.floor(s / 60);
   return m < 60 ? `${m} min ${s % 60} s` : `${Math.floor(m / 60)} h ${m % 60} min`;
 }
+/** When a Make-a-book run's clock stops: its end, or — paused, waiting for a decision, interrupted — its last save
+ * (a step paused an hour ago must not keep counting as if it were still working). null = still working. */
+function runEnd(r) {
+  if (!r) return null;
+  if (r.finished_at) return r.finished_at;
+  return r.alive || ['running', 'waiting', 'queued', 'pausing'].includes(r.status) ? null : (r.updated_at || null);
+}
 function sinceMs(iso, endIso) {
   if (!iso) return 0;
   const a = Date.parse(iso); const b = endIso ? Date.parse(endIso) : Date.now();
@@ -7482,10 +7491,10 @@ function stopRunPolling() { clearTimeout(MB.poll); MB.poll = null; clearInterval
 function updateRunClocks() {
   const r = MB.run; if (!r || !MB.dialog) return;
   const el = MB.dialog.querySelector('.mb-elapsed');
-  if (el) el.textContent = fmtElapsed(sinceMs(r.started_at, r.finished_at));
+  if (el) el.textContent = fmtElapsed(sinceMs(r.started_at, runEnd(r)));
   for (const s of r.steps) {
     const t = MB.dialog.querySelector(`[data-step="${s.id}"] .mb-time`);
-    if (t && s.started_at) t.textContent = fmtElapsed(sinceMs(s.started_at, s.finished_at));
+    if (t && s.started_at) t.textContent = fmtElapsed(sinceMs(s.started_at, s.finished_at || runEnd(r)));
   }
   const w = MB.dialog.querySelector('.mb-wait-in');
   if (w && r.waiting && r.waiting.retry_at) {
@@ -7546,7 +7555,7 @@ function renderRun() {
   const done = r.steps.filter(s => s.state === 'done').length;
   const head = h('div', { class: 'mb-head' },
     h('div', null, h('p', { class: 'mb-book' }, r.title ? `“${r.title}”` : 'A new book', r.settings && r.settings.length ? h('span', { class: 'muted small' }, ` · ${(LENGTH_INFO[r.settings.length] || [''])[0]}`) : null),
-      h('div', { class: 'row' }, badge(w[0], w[1], w[2]), h('span', { class: 'small' }, `${done} of ${r.steps.length} steps`), h('span', { class: 'small muted' }, '⏱ ', h('span', { class: 'mb-elapsed' }, fmtElapsed(sinceMs(r.started_at, r.finished_at)))),
+      h('div', { class: 'row' }, badge(w[0], w[1], w[2]), h('span', { class: 'small' }, `${done} of ${r.steps.length} steps`), h('span', { class: 'small muted' }, '⏱ ', h('span', { class: 'mb-elapsed' }, fmtElapsed(sinceMs(r.started_at, runEnd(r))))),
         r.eta && ['running', 'waiting', 'queued', 'pausing'].includes(r.status) ? h('span', { class: 'small mb-eta', 'data-testid': 'mb-eta', title: `Estimated from this run's measured times: ${r.eta.per_chapter_s} s per chapter, ${r.eta.calls} AI answers so far (${r.eta.avg_call_s} s each on average)` },
           `⏳ ${etaWords(r.eta.seconds_left)} left · ${r.eta.chapters_left} chapter(s) to go`) : null),
       runVariantLine(r), runCostLine(gridUI(), r)),
@@ -7561,7 +7570,7 @@ function renderRun() {
       h('span', { class: 'mb-ico', 'aria-hidden': 'true' }, s.state === 'running' && r.status === 'running' ? h('span', { class: 'spinner' }) : icon),
       h('div', { class: 'mb-main' },
         h('div', { class: 'row mb-title-row' }, h('strong', null, s.title), setChip(s.set, s.op),
-          h('span', { class: 'small muted mb-time' }, s.started_at ? fmtElapsed(sinceMs(s.started_at, s.finished_at)) : ''),
+          h('span', { class: 'small muted mb-time' }, s.started_at ? fmtElapsed(sinceMs(s.started_at, s.finished_at || runEnd(r))) : ''),
           s.problem ? hazard(Object.assign({}, s.problem), { retry: () => runAction('resume', {}, 'Trying again'), retryLabel: '🔁 Try again', extra: runDecision(s.problem),
             settings: ['CAPABILITY_UNAVAILABLE', 'UPSTREAM_UNAVAILABLE'].includes(s.problem.code) }) : null),
         h('p', { class: 'small mb-msg-line' }, s.message || s.about),
@@ -8214,9 +8223,10 @@ async function viewCompare(main, cid) {
       if (rest.length || !(e instanceof ApiError)) err.appendChild(problemBox(toProblem(e, { step: 'Compare versions' })));
     } finally { go.disabled = false; }
   } }, '⚖️ Compare blind');
+  if (books.length < 2) go.disabled = true;   // nothing to compare yet: the hint below says how to get two versions
   const go2 = hash => { location.hash = hash; };
   const form = h('section', { class: 'card', 'data-testid': 'cmp-form' }, h('h2', null, 'Compare two versions'),
-    books.length < 2 && !books.length ? h('p', { class: 'small muted' }, 'You need finished books to compare. Make one with ⚡, then a 🧪 variant of it.') : null,
+    books.length < 2 ? h('p', { class: 'small muted', 'data-testid': 'cmp-need-two' }, books.length ? 'You need two finished books to compare. Make a 🧪 variant of your book (📊 its report → 🧪 Make a variant), or another book with ⚡.' : 'You need finished books to compare. Make one with ⚡, then a 🧪 variant of it.') : null,
     h('div', { class: 'grid-2' }, h('div', { class: 'field' }, h('label', { for: 'cmp-a' }, 'Version A'), selA), h('div', { class: 'field' }, h('label', { for: 'cmp-b' }, 'Version B'), selB)),
     h('div', { class: 'field' }, h('label', { for: 'cmp-scope' }, 'What to compare'), scope), chRow,
     h('p', { class: 'small muted' }, 'The AIs that did not write either version are asked first (up to three). They only see “Version 1” and “Version 2”.'),

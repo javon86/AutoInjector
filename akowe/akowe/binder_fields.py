@@ -637,7 +637,8 @@ def start_fill(app, principal: str, pid: str, branch: str, body) -> dict:
     if slot is None:
         job.prefer_slots = ["AI-1"]
     job.retry_busy = True
-    return app.review._start(job, lambda j: run_fill(app, j, pid, branch, only, use_ai))  # noqa: SLF001
+    return app.review._start(job, lambda j: run_fill(app, j, pid, branch, only, use_ai),  # noqa: SLF001
+                             same=(tuple(only) if only is not None else None, use_ai))
 
 
 def info() -> dict:

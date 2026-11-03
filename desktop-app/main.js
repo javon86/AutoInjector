@@ -601,6 +601,11 @@ function logEvent(kind, detail) {
   broadcast("log", entry);
   appendDebugLog(entry);
 }
+// A promise nobody caught (a helper that threw after its caller moved on) used to vanish into stderr, where nobody
+// sees it: it goes into the activity/debug log instead, so 📋 Extract carries it. Logging only — nothing else changes.
+process.on("unhandledRejection", (reason) => {
+  try { logEvent("main-unhandled-rejection", { error: String((reason && (reason.stack || reason.message)) || reason).slice(0, 1500), severity: "error" }); } catch (_) {}
+});
 
 // The message delivery ledger: the program's own record of what was
 // actually sent where, independent of what any AI's own reasoning
@@ -1157,7 +1162,10 @@ function createWindow() {
 
   controlsView = new WebContentsView({
     webPreferences: {
-      partition: "controls-ui",
+      // persist: — the panel's small choices kept in localStorage (🎨 engine, 🔔 sound, log filters, Alfred's panel
+      // open/closed, the last ⤓ Extract choice, which tab was open …) must survive a restart; a partition
+      // without "persist:" is an in-memory session that forgets them every time the app closes.
+      partition: "persist:controls-ui",
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
       nodeIntegration: false
@@ -1361,7 +1369,7 @@ function openFeedWindow() {
   feedWin = new BaseWindow({ width: 560, height: 760, resizable: true, title: "AutoInjector — AI Conversation" });
   feedView = new WebContentsView({
     webPreferences: {
-      partition: "feed-ui",
+      partition: "persist:feed-ui", // its saved presets live in localStorage
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
       nodeIntegration: false
@@ -6811,8 +6819,12 @@ function videoStudio() {
 }
 async function videoStatusFull(o) { const s = await videoStudio().status(o || {}); _videoLastStatus = s; return s; }
 // A fast, synchronous view for the quick System Check: the Wan engine counts as "on" with ComfyUI's address.
+let _videoPrimed = false;
 function videoQuickStatus() {
   const s = _videoLastStatus;
+  // Nobody asked for the full status yet (the 🎬 Video tab was never opened): ask once in the background, so the
+  // next look (🎩 Alfred's "🎬 video ✓ / not yet", the System Check) sees FramePack / Wan, not only the old endpoint.
+  if (!s && !_videoPrimed) { _videoPrimed = true; videoStatusFull().catch(() => {}); }
   if (s && s.backend === "comfy-wan" && s.comfy && s.comfy.base) return { enabled: true, configured: true, endpoint: s.comfy.base };
   if (s && s.backend === "framepack") return { enabled: true, configured: true, endpoint: `FramePack (${(s.framepack && s.framepack.dir) || "found"})`, engine: "framepack" };
   return videoProvider.status();
@@ -9175,6 +9187,7 @@ const alfred = require("./alfred-main").installAlfred({
   akowePushedBook: () => (akoweCarry.akowe && akoweCarry.akowe.project) || null,
   sendTextTo, withEnvelope, selfRepair, selfRepairStatus, buildExtract,
   outputManager, dbService, imageProvider, videoProvider, interpreterProvider, ollamaManager,
+  videoStatus: () => videoQuickStatus(), // 🎬 FramePack / Wan count as "video ✓", not only the old endpoint
   mcp: mcpManager, // 🧰 tool servers (mcp_tools / mcp_call)
   // his side panel is docked in the control panel; main hooks Ctrl/Cmd+Shift+A on every page of the app
   app, mainWindow: () => win,

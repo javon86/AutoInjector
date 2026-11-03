@@ -1676,7 +1676,7 @@ class ForgeService:
         def fn(j):
             j.current = rid
             run_forge(self.app.assist, j, self.store, pid, branch, rid)
-        return self.app.review._start(job, fn)
+        return self.app.review._start(job, fn, same=())
 
     def start_art(self, principal, pid, branch, rid, body) -> dict:
         body = body if isinstance(body, dict) else {}
@@ -1709,7 +1709,7 @@ class ForgeService:
                 j.status, j.phase, j.error = "error", "Failed", exc.as_error()
                 if j.done:
                     j.error["message"] = f"{j.error['message']} — the {j.done} picture(s) made before are kept"
-        return self.app.review._start(job, fn)
+        return self.app.review._start(job, fn, same=(what, engine, tuple(views or ())))
 
     def start_clip(self, principal, pid, branch, rid, body) -> dict:
         """POST …/art {what: "clip", engine: "auto"} -> 202 job (the motion clip from the portrait / front view)."""
@@ -1730,7 +1730,7 @@ class ForgeService:
                 run_clip(self.app, j, pid, branch, rid)
             except ArtProblem as exc:
                 j.status, j.phase, j.error = "error", "Failed", exc.as_error()
-        return self.app.review._start(job, fn)
+        return self.app.review._start(job, fn, same=())
 
     def upload_clip(self, principal, pid, branch, rid, slot, body) -> dict:
         """PUT …/art/clip (MP4/WebM bytes) or …/art/clip_poster (PNG/JPEG: the first frame, for the PDF)."""

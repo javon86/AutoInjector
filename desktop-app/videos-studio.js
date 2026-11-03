@@ -57,6 +57,8 @@
   $('vd-sub-make').onclick = () => subTab('make');
   if ($('vd-sub-trailer')) $('vd-sub-trailer').onclick = () => subTab('trailer');
   $('vd-sub-setup').onclick = () => subTab('setup');
+  // 🩺 Test pictures & video: its own tab button (it was only reachable from 🎨 Images' button before)
+  if ($('vd-sub-selftest')) $('vd-sub-selftest').onclick = () => subTab('selftest');
 
   // ------------------------------------------------------------ status
   function clock(secs) { const s = Math.max(0, Math.round(Number(secs) || 0)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; }

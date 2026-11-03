@@ -338,7 +338,7 @@ function installAlfred(h) {
     listModels: (endpoint) => h.ollamaManager.listInstalled(String(endpoint || 'http://127.0.0.1:11434/v1').replace(/\/v1\/?$/, '').replace(/\/+$/, ''), 3000),
     akoweReady: () => !!h.akoweServerBase(),
     connected: () => {
-      const im = h.imageProvider.status(); const vi = h.videoProvider.status(); const oi = h.interpreterProvider.status();
+      const im = h.imageProvider.status(); const vi = (h.videoStatus ? h.videoStatus() : null) || h.videoProvider.status(); const oi = h.interpreterProvider.status();
       return { akowe: !!h.akoweServerBase(), images: !!(im.enabled && im.configured && !im.noModels), video: !!(vi.enabled && vi.configured), panes: SITE_IDS.filter((s) => h.state.enabled[s]).length, interpreter: !!(oi.enabled && oi.configured) };
     },
   });

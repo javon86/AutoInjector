@@ -1247,7 +1247,7 @@ class KindJobs:
         def fn(j):
             j.current = rid
             run_forge(self.app.assist, j, self.store, pid, branch, kind, rid)
-        return self.app.review._start(job, fn)
+        return self.app.review._start(job, fn, same=(kind,))
 
     def start_kind_art(self, principal, pid, branch, kind, rid, body) -> dict:
         body = body if isinstance(body, dict) else {}
@@ -1270,7 +1270,7 @@ class KindJobs:
                 j.status, j.phase, j.error = "error", "Failed", exc.as_error()
                 if j.done:
                     j.error["message"] = f"{j.error['message']} — the {j.done} picture(s) made before are kept"
-        return self.app.review._start(job, fn)
+        return self.app.review._start(job, fn, same=(kind, repr(plan), engine))
 
     def start_kind_clip(self, principal, pid, branch, kind, rid, body) -> dict:
         """POST …/art {what: "clip", engine: "auto"} -> 202 job (🎬 the motion clip of an item / place / magic)."""
@@ -1293,7 +1293,7 @@ class KindJobs:
                 run_clip(self.app, j, pid, branch, kind, rid)
             except ArtProblem as exc:
                 j.status, j.phase, j.error = "error", "Failed", exc.as_error()
-        return self.app.review._start(job, fn)
+        return self.app.review._start(job, fn, same=(kind,))
 
     def upload_kind(self, principal, pid, branch, kind, rid, slot, body) -> dict:
         sp = spec(kind)

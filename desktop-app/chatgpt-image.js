@@ -42,6 +42,7 @@ const DEFAULTS = {
   minPx: 200,              // smaller pictures are icons / avatars / previews
   minBytes: 500,
   maxBytes: 40 * 1024 * 1024,
+  fetchTimeoutMs: 120000, // the session fetch (when the page's own fetch is blocked) gives up after this long
   freshChatPerSeries: false,
   newChatWaitMs: 30000,
 };
@@ -354,7 +355,9 @@ function createChatGptImage(deps) {
     if (r && r.ok && r.b64) { try { buf = Buffer.from(r.b64, 'base64'); } catch (_) { buf = null; } }
     if (!buf && typeof d.fetchViaSession === 'function' && /^https?:/i.test(src)) {
       try {
-        const s = await d.fetchViaSession(src);
+        // never wait for ever: a server that accepts the request and never answers would hold the whole job (and the queue)
+        let timer = null;
+        const s = await Promise.race([Promise.resolve(d.fetchViaSession(src)), new Promise((res) => { timer = setTimeout(() => res({ ok: false, error: 'SESSION_FETCH_TIMEOUT' }), opts.fetchTimeoutMs); })]).finally(() => clearTimeout(timer));
         if (s && s.ok && s.buffer) { buf = Buffer.from(s.buffer); how = 'session'; } else why = (s && (s.error || s.detail)) || why;
       } catch (e) { why = String((e && e.message) || e); }
     }
