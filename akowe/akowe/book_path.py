@@ -197,6 +197,8 @@ def save_profile(store, pid: str, body) -> dict:
         store.set_setting(f"book_profile:{pid}", prof)
         if clean.get("title") and old.get("title") and clean["title"] != old["title"]:
             tx.execute("UPDATE projects SET name=? WHERE project_id=?", (clean["title"], pid))
+            from .cover import follow_rename  # noqa: PLC0415 - 🎨 H23: the cover follows the renamed book
+            follow_rename(store, pid, old["title"], clean["title"])
     return prof
 
 

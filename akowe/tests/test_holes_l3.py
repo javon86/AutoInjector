@@ -159,6 +159,36 @@ def test_h18_the_book_language_comes_from_the_profile_and_a_chapter_warns_at_app
     assert "warnings" not in bp.approve_ref(r["output_refs"][0])  # accents, ł and Greek print fine now
 
 
+# ====================================================================== H23 the blurb and the cover vs the book
+def test_h23_the_blurb_is_compared_with_the_book_the_cover_follows_a_rename_and_names_its_files(book1):
+    from akowe import cover
+    from akowe.book_path import get_profile, save_profile
+    app, pid = book1
+    title = get_profile(app.store, pid)["title"]
+    save_profile(app.store, pid, {"blurb": "When Mara Vell finds the brass key, the smuggler Brannock Hale comes back "
+                                           "after 1823 nights. Lighthouses fail. Can she keep the light?"})
+    cover.save(app, pid, BR, {"texts": {"title": title, "tagline": "Gullhaven never forgets Quillon."}})
+    pub = cover.public(app, pid, BR)
+    found = {(c["kind"], c["text"]) for c in pub["checks"]}
+    assert ("name", "Brannock Hale") in found and ("number", "1823") in found and ("name", "Quillon") in found
+    assert not any(t in ("Mara Vell", "Lighthouses", "When", "Can") for _k, t in found)  # in the book, or a first word
+    assert any("Brannock Hale" in w and "Book Bible" in w for w in pub["warnings"])  # shown on the cover page
+    # the book is renamed: the cover (whose title was the old book title) follows it
+    save_profile(app.store, pid, {"title": "The Salt Keeper"})
+    assert cover.resolved_texts(app.store, pid, cover.get_design(app.store, pid, BR))["title"] == "The Salt Keeper"
+    assert not any(c["kind"] == "title" for c in cover.public(app, pid, BR)["checks"])
+    # a cover title made different on purpose stays, and the check says so
+    cover.save(app, pid, BR, {"texts": {"title": "Salt"}})
+    save_profile(app.store, pid, {"title": "The Salt Keeper II"})
+    assert cover.resolved_texts(app.store, pid, cover.get_design(app.store, pid, BR))["title"] == "Salt"
+    assert any(c["kind"] == "title" for c in cover.public(app, pid, BR)["checks"])
+    # a title with only non-Latin letters gets a real file name (not "Book")
+    cover.save(app, pid, BR, {"texts": {"title": "Ἀθῆναι"}})
+    _data, _mime, name = cover.ebook(app, pid, BR, fmt="svg")
+    assert name == "Ἀθῆναι - ebook cover.svg"
+    assert cover.file_stem("Ọ̀run Adẹ́") == "Orun Ade" and cover.file_stem("Łódź") == "Lodz"
+
+
 # ====================================================================== H17 the whole-book report of a long book
 def test_h17_book_parts_cover_every_word_and_merge_takes_the_median():
     from akowe import book_report as br

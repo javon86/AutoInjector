@@ -472,3 +472,28 @@ def test_http_api_contract(bk):
     finally:
         httpd.shutdown()
         httpd.server_close()
+
+
+# ====================================================================== 🎞 H24 (last: it changes the module's book)
+def test_h24_the_trailer_is_out_of_date_when_the_book_or_a_look_changes(bk):
+    from akowe.book_path import BookPath
+    app, pid, _b = bk
+    j, _ = make(app, pid)
+    assert j["status"] == "done", j
+    d = trailer.info(app, pid, BR)
+    assert d["out_of_date"] is False and d["out_of_date_why"] == []
+    # a character's look changes (the trailer's shots show the old one)
+    rid = forge.list_dossiers(app.store, pid, BR)[0]["record_id"]
+    sec = forge.FIELDS["eyes"]["section"]
+    forge.edit(app.store, pid, BR, rid, {"sections": {sec: {"eyes": {"text": "one eye now milky white"}}}})
+    d = trailer.info(app, pid, BR)
+    assert d["out_of_date"] is True and d["out_of_date_why"] == ["a character's look changed since this trailer "
+                                                                 "was made"]
+    # a chapter is rewritten and approved
+    bp = BookPath(app.engine, "author", pid, BR)
+    _c, _l, appr = bp.chapter_prose(bp.outline(), bp.outline_chapters(bp.outline())[0]["chapter_id"])
+    r = bp.dispatch("C02", "UPDATE", base_ref=appr["ref"], payload=dict(appr["data"], text=appr["data"]["text"]
+                                                                         + "\n\nA new ending to the chapter."))
+    assert bp.approve_ref(r["output_refs"][0])["ok"]
+    why = trailer.info(app, pid, BR)["out_of_date_why"]
+    assert "the book's chapters changed since this trailer was made" in why and len(why) == 2

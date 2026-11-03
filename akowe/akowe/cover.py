@@ -82,6 +82,42 @@ def get_design(store, pid: str, branch: str) -> dict:
     return base
 
 
+def file_stem(title: str, cap: int = 60) -> str:
+    """🎨 H23: the file name of a cover: the title with its accents folded to plain letters ("Ọ̀run Adẹ́" -> "Orun
+    Ade"); a title with no Latin letters at all (Greek, Cyrillic…) keeps its own letters ("Ἀθῆναι") instead of
+    becoming "Book". Characters no system allows in a file name are removed."""
+    import unicodedata  # noqa: PLC0415
+    from .book_save import safe_name  # noqa: PLC0415
+    t = str(title or "")
+    folded = "".join(c for c in unicodedata.normalize("NFKD", t) if not unicodedata.combining(c))
+    folded = folded.replace("ł", "l").replace("Ł", "L").replace("ø", "o").replace("Ø", "O").replace("đ", "d")
+    plain = " ".join(re.sub(r"[^A-Za-z0-9 _-]+", "", folded).split())[:cap].strip()
+    if re.search(r"[A-Za-z]", plain):
+        return plain
+    return safe_name(unicodedata.normalize("NFC", t), cap, "Book")
+
+
+def follow_rename(store, pid: str, old_title: str, new_title: str) -> int:
+    """🎨 H23: the book was renamed: a cover whose title is the OLD book title follows the book (its own title is
+    cleared, so the cover prints the profile's title). A cover title the author made different on purpose stays.
+    Returns how many covers follow. Never raises."""
+    n = 0
+    try:
+        rows = store.query("SELECT key FROM settings WHERE key LIKE ?", (f"cover:{pid}:%",))
+        for r in rows:
+            d = store.get_setting(r["key"])
+            tx = (d or {}).get("texts") if isinstance(d, dict) else None
+            if isinstance(tx, dict) and (tx.get("title") or "").strip() == (old_title or "").strip() and old_title:
+                tx["title"] = ""
+                d["revision"] = int(d.get("revision") or 0) + 1
+                d["updated_at"] = _now()
+                store.set_setting(r["key"], d)
+                n += 1
+    except Exception:  # noqa: BLE001 - the rename itself never fails over a cover
+        log.exception("cover: following the rename of %s", pid)
+    return n
+
+
 def _profile(store, pid) -> dict:
     from .book_path import get_profile  # noqa: PLC0415
     return get_profile(store, pid) or {}
@@ -332,7 +368,13 @@ def public(app, pid: str, branch: str) -> dict:
     except Exception:  # noqa: BLE001
         chars = []
     prof = _profile(store, pid)
-    return {"design": dict(d, art=_art_public(pid, branch, d.get("art"))), "texts": texts,
+    try:  # 🎨 H23: the blurb and the cover texts compared with the book and the Book Bible
+        checks = compare_with_book(app, pid, branch, texts)
+    except Exception:  # noqa: BLE001 - a hint; never break the cover page
+        log.exception("cover: comparing the cover with the book")
+        checks = []
+    warnings += [c["message"] for c in checks]
+    return {"design": dict(d, art=_art_public(pid, branch, d.get("art"))), "texts": texts, "checks": checks,
             "templates": cx.template_list(),
             "trims": [{"id": k, "w_in": v[0], "h_in": v[1]} for k, v in cx.TRIMS.items()],
             "papers": [{"id": k, "label": cx.PAPER_LABELS[k], "inches_per_page": v} for k, v in cx.PAPERS.items()],
@@ -344,6 +386,91 @@ def public(app, pid: str, branch: str) -> dict:
             "image_bridge": {"uses": [u for u, _t in forge.bridge_targets(app)]},
             "rules": {"bleed_in": cx.BLEED_IN, "safe_in": cx.SAFE_IN, "spine_text_min_pages": cx.SPINE_TEXT_MIN_PAGES,
                       "barcode_in": list(cx.BARCODE_IN), "min_pages": cx.MIN_PAGES, "max_pages": cx.MAX_PAGES}}
+
+
+# ====================================================================== 🎨 H23 the cover vs the book
+CHECKED = ("blurb", "tagline", "subtitle", "series")
+COMMON = {w.lower() for w in (
+    "A An The And But Or Nor For So Yet If When While Where What Who Whom Whose Which Why How This That These Those "
+    "Every Each All Some Any No None One Two Three Four Five Six Seven Eight Nine Ten Now Then Here There Only Even "
+    "After Before Until Since Because Although Though As At By In On Of To From With Without Into Over Under Book "
+    "Novel Story Chapter Part Volume Series I He She It We They You His Her Its Our Their My Your Me Him "
+    "Them Us Mr Mrs Ms Dr Sir Lady Lord King Queen Prince Princess God Gods Not Never Ever Always Soon Once Twice "
+    "Can Could Will Would Shall Should May Might Must Do Does Did Has Have Had Is Are Was Were Be Been Being Let "
+    "Yes Nothing Everything Something Someone Everyone Nobody Somebody Love Death Life Time Night Day Morning").split()}
+_NAME = re.compile(r"[A-ZÀ-ÖØ-ÞĀ-ſ][\w'’-]+(?:\s+(?:of|the|de|van|von|da|la|le)?\s*[A-ZÀ-ÖØ-ÞĀ-ſ][\w'’-]+)*")
+_NUM = re.compile(r"\b\d{1,4}(?:[.,]\d+)?\b")
+
+
+def _book_words(app, pid, branch) -> tuple[str, set]:
+    """(the whole book text, lower case; the names the Book Bible knows: every Set A entry and alias, lower case)."""
+    from .book_path import BookPath  # noqa: PLC0415
+    from .book_report import book_chapters  # noqa: PLC0415
+    from . import characters as chars_mod  # noqa: PLC0415
+    text = "\n".join(c["text"] for c in book_chapters(BookPath(app.engine, app.principal_id, pid, branch)))
+    names: set = set()
+    for r in app.store.list_records(pid, branch):
+        if not str(r.get("module_id") or "").startswith("A") or r.get("record_kind") != "OUTPUT" or \
+                r.get("lifecycle") in ("REJECTED", "SUPERSEDED"):
+            continue
+        try:
+            name = chars_mod._name_and_subject(r)[0]  # noqa: SLF001 - the one name rule of the book
+        except Exception:  # noqa: BLE001
+            continue
+        if name:
+            names.add(" ".join(str(name).lower().split()))
+        for a in ((r.get("data") or {}).get("attributes") or {}).get("aliases") or []:
+            if isinstance(a, str) and a.strip():
+                names.add(" ".join(a.lower().split()))
+    return " ".join(text.lower().split()), names
+
+
+def compare_with_book(app, pid: str, branch: str, texts: dict) -> list[dict]:
+    """🎨 H23: what the blurb / tagline / subtitle / series line say that the book and its Book Bible do not: a name
+    (a capitalised word inside a sentence) found nowhere in the book or the Bible, a number (a year, an age, "3
+    days") the book never uses; and a cover title or author that is not the book's. [{where, kind, text, message}].
+    Nothing to compare (no chapter written yet): []."""
+    prof = _profile(app.store, pid)
+    book, names = _book_words(app, pid, branch)
+    out: list[dict] = []
+    if book.strip():
+        seen = set()
+        for where in CHECKED:
+            t = str(texts.get(where) or "")
+            for m in _NAME.finditer(t):
+                name = m.group(0).strip(" -'’")
+                before = t[:m.start()].rstrip()
+                start = not before or before[-1] in ".!?:;\"“”—–(\n"
+                words = [w for w in re.split(r"[\s'’-]+", name) if len(w) >= 3 and w.lower() not in COMMON]
+                if not words or (start and len(name.split()) == 1):
+                    continue  # a sentence's first word is not a name (unless it is two words: "Mara Vell")
+                low = " ".join(name.lower().split())
+                known = " ".join(names)
+                if low in seen or low in names or any(re.search(rf"\b{re.escape(w.lower())}\b", f"{book} {known}")
+                                                       for w in words):
+                    continue
+                seen.add(low)
+                out.append({"where": where, "kind": "name", "text": name,
+                            "message": f"The {where.replace('_', ' ')} names “{name}”, but nobody or nothing of "
+                                       "that name is in the book or the Book Bible. Is it right?"})
+            for m in _NUM.finditer(t):
+                n = m.group(0)
+                if n in seen or re.search(rf"(?<![\d.,]){re.escape(n)}(?![\d])", book):
+                    continue
+                seen.add(n)
+                out.append({"where": where, "kind": "number", "text": n,
+                            "message": f"The {where} says “{n}”, but the book never does (a year, an age or a "
+                                       "count that does not match?)."})
+    book_title, cover_title = str(prof.get("title") or "").strip(), str(texts.get("title") or "").strip()
+    if book_title and cover_title and cover_title != book_title:
+        out.append({"where": "title", "kind": "title", "text": cover_title,
+                    "message": f"The cover says “{cover_title}”, but the book is called “{book_title}”. Clear the "
+                               "cover title to use the book's own."})
+    book_author, cover_author = str(prof.get("author") or "").strip(), str(texts.get("author") or "").strip()
+    if book_author and cover_author and cover_author != book_author:
+        out.append({"where": "author", "kind": "author", "text": cover_author,
+                    "message": f"The cover's author is “{cover_author}”, but the book's is “{book_author}”."})
+    return out[:12]
 
 
 # ====================================================================== rendering
@@ -360,7 +487,7 @@ def ebook(app, pid, branch, *, fmt: str = "pdf", design: dict | None = None,
     lay = _layout_design(app, pid, branch, d, extra)
     ai = art_image(app, pid, branch, d)
     title = lay["texts"]["title"] or "Book"
-    stem = re.sub(r"[^A-Za-z0-9 _-]+", "", title).strip()[:60] or "Book"
+    stem = file_stem(title, 60)
     if fmt == "art":
         if ai is None:
             raise _err("MISSING_INPUT", "/format", "this cover has no picture: make or upload one first")
@@ -374,7 +501,8 @@ def ebook(app, pid, branch, *, fmt: str = "pdf", design: dict | None = None,
     if fmt != "pdf":
         raise _err("INVALID_INPUT", "/format", "format: pdf, svg, jpg or art")
     pdf = cx.render_pdf([{"width": W, "height": H, "ops": ops}], images={"art": ai[1]} if ai else {},
-                        meta={"title": f"{title} - cover", "author": lay["texts"]["author"], "language": "en"},
+                        meta={"title": f"{title} - cover", "author": lay["texts"]["author"],
+                              "language": _profile(app.store, pid).get("language") or "en"},
                         extra_info={"Keywords": "Akowe ebook cover"})
     return pdf, "application/pdf", f"{stem} - ebook cover.pdf"
 
@@ -462,7 +590,7 @@ def print_cover(app, pid, branch, *, trim=None, paper=None, pages=None, fmt: str
     ops, info = cx.layout_wrap(lay, g, art=ai[1] if ai else None, guides=guides)
     p = g["pt"]
     title = lay["texts"]["title"] or "Book"
-    stem = re.sub(r"[^A-Za-z0-9 _-]+", "", title).strip()[:50] or "Book"
+    stem = file_stem(title, 50)
     geo = {k: v for k, v in g.items() if k != "pt"}
     geo.update(warnings=notes + info["warnings"], page_count_source=pc["source"])
     name = f"{stem} - print cover {g['trim']} {g['paper']} {n}p"
@@ -476,7 +604,8 @@ def print_cover(app, pid, branch, *, trim=None, paper=None, pages=None, fmt: str
     pdf = cx.render_pdf([{"width": p["width"], "height": p["height"], "ops": ops,
                           "trim": (b, b, p["width"] - 2 * b, p["height"] - 2 * b)}],
                         images={"art": ai[1]} if ai else {},
-                        meta={"title": f"{title} - print cover", "author": lay["texts"]["author"], "language": "en"},
+                        meta={"title": f"{title} - print cover", "author": lay["texts"]["author"],
+                              "language": _profile(app.store, pid).get("language") or "en"},
                         extra_info={"AkoweSpine": f"x={cx.num(p['spine_x'])}pt width={cx.num(p['spine'])}pt "
                                                   f"pages={n} paper={g['paper']}",
                                     "Keywords": f"Akowe print cover {g['trim']} spine {g['spine_in']}in"})
@@ -499,7 +628,7 @@ def book_with_cover(app, pid, branch, fmt: str) -> tuple[bytes, str, str]:
     lay = _layout_design(app, pid, branch, d)
     ai = art_image(app, pid, branch, d)
     title = lay["texts"]["title"] or "Book"
-    stem = re.sub(r"[^A-Za-z0-9 _-]+", "", f.get("title") or title).strip()[:50] or "Book"
+    stem = file_stem(f.get("title") or title, 50)
     try:
         if fmt == "PDF":
             def ops_for(w, h, trim):
