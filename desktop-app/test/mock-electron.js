@@ -164,6 +164,7 @@ class WebContentsView {
     const partition = opts && opts.webPreferences && opts.webPreferences.partition;
     const label = partition ? partition.replace("persist:", "") : "controls";
     this.webContents = new FakeWebContents(label);
+    this.partition = partition || "";
     registry[label] = this;
   }
   setBounds(b) { this._bounds = { ...b }; }

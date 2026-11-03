@@ -8,6 +8,10 @@
   if (!api || !$('vd-view-selftest')) return;
   const ICON = { pass: '✅', warn: '⚠️', fail: '❌', skip: '⏭' };
   let busy = false;
+  let ownRun = false; // this window pressed ▶ and is waiting for the answer
+  // Runs that are over (by their start time): a progress message can arrive AFTER the run's answer (they travel on
+  // different IPC paths) — it must not put the view back to "Running (12 of 12 done)…" with ▶ greyed for ever.
+  const finished = new Set();
 
   function setBusy(on) {
     busy = on;
@@ -51,7 +55,10 @@
     $('mt-summary').textContent = ''; $('mt-msg').textContent = ''; $('mt-steps').textContent = '';
     $('mt-progress').textContent = mode === 'full' ? 'Starting the Full test (a tiny picture, a tiny clip and a tiny trailer)…' : 'Starting the Quick test…';
     let r = null;
+    ownRun = true;
     try { r = await api.run({ mode, chatgptPicture: !!$('mt-chatgpt').checked, unload: !!$('mt-unload').checked }); } catch (e) { r = { ok: false, message: String(e) }; }
+    ownRun = false;
+    if (r && r.startedAt) finished.add(Date.parse(r.startedAt));
     setBusy(false);
     if (!r || r.ok === false) { $('mt-progress').textContent = ''; $('mt-msg').textContent = `✖ ${(r && (r.message || r.error)) || 'The test did not run.'}`; return; }
     showReport(r);
@@ -64,7 +71,12 @@
     $('mt-msg').textContent = r && r.ok ? '📋 Copied — paste it into your message.' : `✖ ${(r && (r.message || r.error)) || 'Could not copy.'}`;
   });
   $('btn-mt-open').addEventListener('click', async () => { try { const r = await api.openReport(); if (r && r.ok === false) $('mt-msg').textContent = `✖ ${r.message || r.error}`; } catch (_) {} });
-  if (typeof api.onProgress === 'function') api.onProgress((st) => { if (st && st.running) { if (!busy) setBusy(true); paint(st); } });
+  if (typeof api.onProgress === 'function') api.onProgress((st) => {
+    if (!st) return;
+    if (st.running) { if (finished.has(Number(st.startedAt))) return; if (!busy) setBusy(true); paint(st); return; }
+    // a run started elsewhere (🎩 Alfred's mediatest.run) ended: ▶ works again and the summary shows
+    if (busy && !ownRun) { setBusy(false); $('mt-progress').textContent = ''; if (st.last) $('mt-summary').textContent = st.last; }
+  });
   // 🎨 Images has the same button: it opens this view.
   if ($('btn-sd-mediatest')) $('btn-sd-mediatest').addEventListener('click', () => { try { $('tab-app-video').click(); } catch (_) {} if (window.vdSubTab) window.vdSubTab('selftest'); });
   // Opening the view shows the last report (this session, or the newest saved one).

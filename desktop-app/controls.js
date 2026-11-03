@@ -1925,8 +1925,11 @@ function openCapModal(r) {
   el("cap-modal-sub").textContent = `${r.okCount}/${r.total} capabilities actually worked${r.failCount ? `, ${r.failCount} not working` : ""}. ⚪ = not set up yet.`;
   if (el("cap-modal-title")) el("cap-modal-title").textContent = "🧪 Capability test results";
   modal.classList.add("on");
+  try { el("btn-cap-modal-close").focus(); } catch (_) {} // keyboard: Enter / Esc close it straight away
 }
 function closeCapModal() { const m = el("cap-modal"); if (m) m.classList.remove("on"); }
+// Esc closes the results pop-up (like ⤓ Extract) — it was mouse-only before
+document.addEventListener("keydown", (e) => { const m = el("cap-modal"); if (e.key === "Escape" && m && m.classList.contains("on")) { e.preventDefault(); closeCapModal(); } });
 if (el("btn-cap-modal-close")) el("btn-cap-modal-close").onclick = closeCapModal;
 if (el("cap-modal")) el("cap-modal").addEventListener("click", (e) => { if (e.target === el("cap-modal")) closeCapModal(); });
 

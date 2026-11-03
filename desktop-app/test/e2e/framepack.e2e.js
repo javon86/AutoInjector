@@ -52,6 +52,9 @@ async function main() {
     assert(await c.evaluate(() => !document.getElementById('vd-view-make').hidden), 'ready → it opens on 🎬 Make video');
     assert(await c.evaluate(() => !document.getElementById('vd-fp-settings').hidden && document.getElementById('vd-wan-settings').hidden), 'the Make tab shows FramePack\'s settings, not Wan\'s');
     assert(/Auto \(FramePack\)/.test(await c.evaluate(() => document.querySelector('#vd-engine option[value="auto"]').textContent)), 'the engine picker says Auto = FramePack');
+    // sweep 2026-11: 🎩 Alfred's "🎬 video ✓ / not yet" only looked at the old endpoint, so it said "not yet" beside "✔ Ready: FramePack"
+    const alc = await c.evaluate(() => window.api.alfredStatus()).then((s) => s && s.connected).catch(() => null);
+    assert(alc && alc.video === true, `🎩 Alfred counts FramePack as his video tool (connected.video = ${alc && alc.video})`);
 
     // ⚙ Setup: the FramePack card
     await c.click('#vd-sub-setup');

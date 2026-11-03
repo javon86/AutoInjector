@@ -630,6 +630,24 @@ async function main() {
     assert(/Saved — the other video server is on/.test($('vd-ep-msg').textContent), 'and says so in plain words');
     dom.window.close();
   }
+  console.log('\n== every 🎬 Video sub-tab button opens its view (sweep 2026-11: 🩺 Test pictures & video did nothing) ==');
+  {
+    const { JSDOM } = require('jsdom');
+    const html = fs.readFileSync(path.join(__dirname, '..', 'controls.html'), 'utf8');
+    const dom = new JSDOM(html, { runScripts: 'outside-only', url: 'http://localhost/controls.html' });
+    const video = { status: async () => ({ ok: true, ready: true, comfy: { connected: true }, settings: {} }), models: async () => ({ ok: true, models: [] }) };
+    dom.window.api = new Proxy({ video, akoweTab: async () => ({}) }, { get(t, k) { if (k in t) return t[k]; if (typeof k === 'string' && /^on[A-Z]/.test(k)) return () => {}; return async () => ({ ok: true }); } });
+    const $ = (id) => dom.window.document.getElementById(id);
+    const click = (el) => el.dispatchEvent(new dom.window.Event('click', { bubbles: true }));
+    dom.window.eval(fs.readFileSync(path.join(__dirname, '..', 'videos-studio.js'), 'utf8'));
+    click($('tab-app-video')); await sleep(80);
+    for (const w of ['selftest', 'trailer', 'setup', 'make']) {
+      click($(`vd-sub-${w}`)); await sleep(20);
+      const shown = ['make', 'trailer', 'setup', 'selftest'].filter((x) => !$(`vd-view-${x}`).hidden);
+      assert(shown.length === 1 && shown[0] === w && $(`vd-sub-${w}`).getAttribute('aria-selected') === 'true', `the ${w} tab button shows only its view (${shown.join(', ')})`);
+    }
+    dom.window.close();
+  }
   console.log('\n== FramePack: the header after a failed / stopped job, and the card\'s last load result ==');
   {
     // the PC rerun: 🧪 Test failed at "the FramePack video model", the job ended, but the header still said

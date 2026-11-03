@@ -48,7 +48,7 @@
     s.id = 'alfred-style';
     s.textContent = `
       body.alfred-open #wrap, body.alfred-open #akowe-tab, body.alfred-open #images-tab, body.alfred-open #video-tab { margin-right:${W}; }
-      .al-root { display:flex; flex-direction:column; background:#0d0f14; color:#e8ecf5; font-size:13px; }
+      .al-root { display:flex; flex-direction:column; background:#0d0f14; color:#e8ecf5; font-size:13px; color-scheme:dark; } /* dark scrollbars, not white ones */
       #alfred-drawer { position:fixed; top:38px; right:0; bottom:0; width:${W}; z-index:50; border-left:1px solid #2b3550; }
       .al-root[hidden] { display:none; }
       .al-root header { display:flex; align-items:center; gap:6px; padding:8px 10px; border-bottom:1px solid #222a3d; background:#121726; }
@@ -76,7 +76,7 @@
       #alfred-form .al-row { display:flex; gap:6px; }
       #alfred-form .al-note { font-size:11px; color:#8792ad; }
       #alfred-quick { position:relative; flex:0 0 auto; }
-      #alfred-quick-msg { padding:6px 34px 6px 10px; font-size:11.5px; color:#cdd6ee; white-space:pre-wrap; border-bottom:1px solid #1b2236; max-height:30vh; overflow:auto; line-height:1.45; }
+      #alfred-quick-msg { padding:6px 34px 6px 10px; font-size:11.5px; color:#cdd6ee; white-space:pre-wrap; overflow-wrap:anywhere; border-bottom:1px solid #1b2236; max-height:30vh; overflow-y:auto; overflow-x:hidden; line-height:1.45; }
       #alfred-quick-msg:empty, #alfred-quick-msg:empty + #alfred-quick-close { display:none; }
       #alfred-quick-close { position:absolute; top:4px; right:16px; padding:0 6px; font-size:12px; line-height:18px; min-width:0; }
       #alfred-quick-msg .al-fix { margin:3px 0 0 14px; font-size:11px; padding:1px 8px; }
