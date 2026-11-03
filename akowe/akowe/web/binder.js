@@ -32,7 +32,7 @@ export function lookForGenre(genre) {
 const TPL = {
   1: ['📕', 'Cover', 'A writing and worldbuilding reference', 'Book Bible'],
   2: ['☰', 'Contents', 'Akọwe · the novel reference', 'A clickable guide to the complete story world'],
-  3: ['👁', 'At a glance', 'Akọwe · the novel reference', 'The whole novel, understood on one page'],
+  3: ['👁', 'Book facts', 'Akọwe · the novel reference', 'The whole novel, understood on one page'],
   4: ['👥', 'Cast list', 'Akọwe · the novel reference', 'Portraits, roles and profiles at a glance'],
   5: ['👤', 'Characters', 'Character', 'One consistent identity across every chapter'],
   6: ['🕸', 'Relationship map', 'Akọwe · the novel reference', 'Family, love, rivalry, alliances and conflicts'],
@@ -46,6 +46,27 @@ const TPL = {
   12: ['⚖', 'Rules & facts', 'Akọwe · the novel reference', 'The locked facts, rules and style of your book'],
 };
 const ENTITY = new Set(['5', '7', '8A', '8B', '8C', '11']);
+// 📖 At a glance: the screen-only status page in front of the Cover (never printed or exported; not a binder page)
+const GLANCE_ID = 'at-a-glance';
+// ⓘ What is this page? — one plain line per template
+const ABOUT = {
+  1: 'The front of your binder: the book’s title, author, cover picture and how complete the binder is.',
+  2: 'A clickable list of every page in this binder, and what still needs your OK.',
+  3: 'The whole book on one page: the idea, genre, length, main cast, key places and themes.',
+  4: 'Everyone in your book, each with a picture and a one-line role.',
+  5: 'Everything about one character — looks, personality, voice and history — so they stay the same in every chapter.',
+  6: 'Who is connected to whom: family, love, friends, rivals and enemies, drawn as a map.',
+  7: 'One place in your story: what it looks, sounds and feels like, and what happens there.',
+  '8A': 'One kind of magic or power: how it works, what it costs, and its rules.',
+  '8B': 'One important object: what it looks like, who has it, and what it can do.',
+  '8C': 'One group, belief or part of your world: who is in it, what they want, and their rules.',
+  9: 'Where your places are, with a key and the distances between them.',
+  10: 'The shape of your story: the idea, the big turning points, the conflict and the ending.',
+  11: 'A plan for one chapter: what happens, who is in it, where, and its scenes.',
+  12: 'Locked facts and writing rules — the timeline, names, spelling and style — to keep the book consistent.',
+  glance: 'How full your Book Bible is, what is waiting for you, and the main things you can do with it.',
+};
+const GLANCE_STATE = { empty: ['○', 'Empty'], draft: ['✎', 'AI draft'], approved: ['✔', 'Approved'] };
 const REL_TYPES = [['family', 'Family', /famil|brother|sister|mother|father|parent|sibling|son|daughter|cousin|aunt|uncle|grand/],
   ['love', 'Love', /love|roman|partner|crush|spouse|wife|husband|lover/], ['ally', 'Allies', /all(y|ies)|friend|companion/],
   ['rival', 'Rivals', /rival/], ['enemy', 'Enemies', /enem|foe|nemesis|antagon/], ['mentor', 'Mentor / student', /mentor|student|teacher|apprentice|master|pupil/]];
@@ -168,7 +189,7 @@ export async function viewBinder(main, x, rest = []) {
     if (e && e.status === 404) {
       root.appendChild(x.stateBox('empty', 'The Book Bible binder is not ready in this Akọwe yet',
         h('p', null, 'This version of Akọwe cannot build the binder pages yet. Your book bible is still saved with the book: ',
-          h('a', { href: plink('book') }, '📘 Make my book'), ' has ⬇ book-bible.md and ⬇ book-bible.json.')));
+          h('a', { href: plink('book') }, '🏠 Book home'), ' has ⬇ book-bible.md and ⬇ book-bible.json.')));
     } else root.appendChild(x.problemBox(x.toProblem(e, where), { retry: () => x.route() }, 'Could not open the Book Bible'));
     return;
   }
@@ -224,7 +245,7 @@ export async function viewBinder(main, x, rest = []) {
     if (!k) return null;
     return byName.get(fold(name).trim()) || byName.get(k) || byName.get('the ' + k) || firstNames.get(k) || null;
   }
-  const pageTitle = p => (p.template === '1' ? 'Cover' : p.title) || (SCHEMA[p.template] || [''])[0];
+  const pageTitle = p => (p.template === '1' ? 'Cover' : p.template === '3' ? 'Book facts' : p.title) || (SCHEMA[p.template] || [''])[0];
   const isProt = t => !!(t && protId && t.page_id === protId);
   const ROLE_WORDS = { protagonist: 'Main character — protagonist', main: 'Main character', side: 'Supporting', minor: 'Minor' };
   /** the role label + icon of a character page: the data's per-character role_label / role_icon (is_protagonist marks THE
@@ -272,6 +293,9 @@ export async function viewBinder(main, x, rest = []) {
   };
   const binderUrl = () => bpath('/binder' + (st.asOf ? `?as_of=${encodeURIComponent(st.asOf)}` : ''));
   if (rest[0] && !byId.has(rest[0])) st.idx = 0;
+  // 📖 At a glance is the first page shown (unless a page was asked for, or All pages is on)
+  st.home = rest[0] === GLANCE_ID || ((!rest[0] || !byId.has(rest[0])) && st.mode === 'one');
+  if (rest[0] === GLANCE_ID) st.mode = 'one';
 
   /* ================================================================== field rendering */
   function fld(p, id) {
@@ -673,7 +697,7 @@ export async function viewBinder(main, x, rest = []) {
   T[2] = p => {
     const rows = rowsOf(p, '2.1');
     const toc = (Array.isArray(data.contents) && data.contents.length ? data.contents.map(c => ({
-      icon: c.icon || (TPL[c.template] || ['•'])[0], name: c.title || (TPL[c.template] || ['', c.template])[1], count: c.count, page: c.page, page_id: c.page_id,
+      icon: c.icon || (TPL[c.template] || ['•'])[0], name: String(c.template) === '3' ? 'Book facts' : c.title || (TPL[c.template] || ['', c.template])[1], count: c.count, page: c.page, page_id: c.page_id,
     })) : rows.map(r => ({ icon: '', name: txt(rf(r, '2.1.1')), countText: txt(rf(r, '2.1.2')), page: num(txt(rf(r, '2.1.3'))) })));
     const entriesWord = (c) => c.countText || (c.count > 1 ? `${c.count} pages` : c.count === 1 ? '1 page' : '');
     const tocEl = toc.length ? h('ol', { class: 'bnd-toc' }, toc.map((c, i) => {
@@ -1325,10 +1349,156 @@ export async function viewBinder(main, x, rest = []) {
       corners,
       st.look === 'noir' ? orn(ORN.stamp, 'bnd-stamp') : null,
       h('div', { class: 'bnd-runhead' }, h('span', null, book.title), h('span', { 'aria-hidden': 'true' }, ` ${icon} `), h('span', null, pageTitle(p)), badge(p.status)),
+      aboutBox(tid),
       pageTools(p),
       head,
       h('div', { class: 'bnd-body' }, content),
       h('footer', { class: 'bnd-foot' }, h('span', null, book.title), h('span', null, `Book Bible${lastUpdated ? ' · updated ' + lastUpdated : ''}`), h('span', { class: 'bnd-pno' }, `Page ${p._n} of ${pages.length}`)));
+  }
+
+  /** ⓘ What is this page? — one plain line about the template (screen only) */
+  function aboutBox(tid) {
+    const words = ABOUT[tid];
+    if (!words) return null;
+    return h('details', { class: 'bnd-about no-print', 'data-testid': 'binder-about' },
+      h('summary', null, h('span', { 'aria-hidden': 'true' }, 'ⓘ '), 'What is this page?'), h('p', null, words));
+  }
+
+  /* ================================================================== 📖 At a glance (screen only) */
+  // the picture maker's state and the sequel status, checked once by GET …/binder/glance (the numbers come with the binder)
+  let live = null; let liveAsked = false;
+  function askLive() {
+    if (liveAsked || (data && data.read_only)) return;
+    liveAsked = true;
+    api('GET', bpath('/binder/glance')).then(g => {
+      if (!g || typeof g !== 'object' || !g.pictures) return;
+      live = g;
+      const old = stage.querySelector('[data-testid=glance-pictures]');
+      if (old) old.replaceWith(glancePictures());
+      const oldS = stage.querySelector('[data-testid=glance-series]');
+      if (oldS) oldS.replaceWith(glanceSeries());
+    }).catch(() => { /* an older Akọwe: the numbers of the binder itself are shown */ });
+  }
+  const glanceData = () => (data && data.glance && typeof data.glance === 'object' && Array.isArray(data.glance.parts)) ? data.glance : null;
+  const plural = (n, w, ws) => `${n} ${n === 1 ? w : (ws || w + 's')}`;
+  const card = (testid, title, ...body) => h('section', { class: 'bnd-gl-card', 'data-testid': testid, 'aria-label': title.replace(/^[^\p{L}]+/u, '') },
+    h('h3', { class: 'bnd-gl-card-h' }, title), ...body);
+  function glancePictures() {
+    const g = glanceData() || {};
+    const pc = g.pictures || {};
+    const eng = (live && live.pictures && live.pictures.engine) || pc.engine || null;
+    const waiting = Number(pc.waiting) || 0; const missing = Number(pc.missing) || 0;
+    const off = !!(eng && eng.ready === false);
+    return card('glance-pictures', '🖼 Pictures',
+      h('p', { class: 'bnd-gl-big' }, waiting ? `🖼 ${plural(waiting, 'picture')} waiting` : '✔ No pictures waiting'),
+      off ? h('p', { class: 'bnd-gl-warn', 'data-testid': 'glance-engine-off' }, 'Picture maker is off — ', h('a', { href: '#/settings' }, 'open Settings'),
+        eng.why ? h('small', null, ` (${eng.why})`) : null)
+        : waiting && !data.read_only ? h('button', { type: 'button', class: 'bnd-gl-btn', 'data-testid': 'binder-pictures', title: 'Makes every missing character picture with Stable Diffusion in AutoInjector: portraits, the front, side and back views and character sheets, and the pictures waiting from the book run. Pictures you already have are kept.',
+          onclick: ev => runPictures(ev.currentTarget) }, '🖼 Make the rest of the pictures') : null,
+      !waiting && missing ? h('p', { class: 'bnd-gl-small' }, `${plural(missing, 'page')} still ${missing === 1 ? 'has' : 'have'} no picture — open ${missing === 1 ? 'it' : 'one'} and press 🎨 Make one.`) : null);
+  }
+  function glanceSeries() {
+    const g = glanceData() || {};
+    const sr = g.series || {};
+    const seq = sr.sequel || (live && live.series && live.series.sequel) || null;
+    const n = Number(sr.number) || 1; const of = Math.max(Number(sr.books) || 1, n);
+    const busy = h('div', { class: 'bnd-gl-small', 'aria-live': 'polite', 'data-testid': 'glance-series-msg' });
+    const nb = seq && seq.next_book;
+    const blocked = !!(seq && seq.possible === false);
+    const btn = h('button', { type: 'button', class: 'bnd-gl-btn', 'data-testid': 'glance-sequel', disabled: blocked || data.read_only ? true : null,
+      'aria-describedby': blocked && seq.why ? 'bnd-gl-seq-why' : null,
+      onclick: async ev => {
+        const b = ev.currentTarget; b.disabled = true;
+        let v;
+        try { v = await api('GET', bpath('/binder/series')); }
+        catch (e) { b.disabled = false; clear(busy).appendChild(h('p', { class: 'bnd-err' }, '📚 The series could not be read: ', plainError(e))); return; }
+        b.disabled = false;
+        await startSequel(b, v, busy);
+      } }, '📚 Start a sequel');
+    return card('glance-series', '📚 Series',
+      h('p', { class: 'bnd-gl-big' }, sr.in_series ? `Book ${n} of ${of}` : 'Book 1 · not in a series yet', sr.in_series && sr.name ? h('small', null, ` · ${sr.name}`) : null),
+      nb ? h('p', { class: 'bnd-gl-small' }, `Book ${nb.number} exists already${nb.title ? `: “${nb.title}”` : ''}.`) : btn,
+      !nb && blocked && seq.why ? h('p', { class: 'bnd-gl-small', id: 'bnd-gl-seq-why', 'data-testid': 'glance-sequel-why' }, seq.why) : null,
+      busy);
+  }
+  function renderGlance() {
+    const g = glanceData();
+    askLive();
+    const corners = ['tl', 'tr', 'bl', 'br'].map(c => orn(ORN.corner[st.look] || ORN.corner.classic, `bnd-corner bnd-corner-${c}`));
+    const body = [];
+    if (!g) {
+      body.push(h('p', { class: 'bnd-gl-what' }, 'Your Book Bible is the reference binder for everything in your book — who, where, what happened. The AI keeps it up to date; you approve.'),
+        h('p', { class: 'bnd-empty' }, 'The numbers of this page are not ready in this Akọwe yet. Open the pages from the list on the left, or press Next ›.'));
+    } else {
+      const filled = Number(g.pages_filled) || 0; const total = Number(g.pages_total) || pages.length;
+      const pct = total ? Math.round(100 * filled / total) : 0;
+      const dot = (state, title) => h('span', { class: `bnd-gl-dot is-${state}`, title: `${title}: ${GLANCE_STATE[state][1]}` }, h('span', { 'aria-hidden': 'true' }, GLANCE_STATE[state][0]));
+      const rows = g.parts.map(pt => {
+        const n = Number(pt.pages) || 0; const sts = pt.states || {};
+        const pc = Math.max(0, Math.min(100, Number(pt.percent) || 0));
+        const dots = (pt.dots || []).slice(0, 10).map(d => dot(GLANCE_STATE[d.state] ? d.state : 'empty', d.title || pt.title));
+        const more = (pt.dots || []).length > 10 ? h('span', { class: 'bnd-gl-more' }, `+${pt.dots.length - 10}`) : null;
+        const said = n ? [sts.approved ? `${sts.approved} approved` : '', sts.draft ? `${sts.draft} AI draft` : '', sts.empty ? `${sts.empty} empty` : ''].filter(Boolean).join(', ') : 'nothing yet';
+        const inner = [
+          h('span', { class: 'bnd-gl-ico', 'aria-hidden': 'true' }, pt.icon || '•'),
+          h('span', { class: 'bnd-gl-name' }, h('b', null, pt.title), h('small', null, n ? plural(n, 'page') : 'Nothing yet')),
+          h('span', { class: 'bnd-gl-bar' },
+            h('span', { class: 'bnd-progress', 'aria-hidden': 'true' }, h('span', { style: `width:${pc}%` })),
+            h('small', null, n ? `${pc}% filled` : '—')),
+          h('span', { class: 'bnd-gl-dots', 'aria-hidden': 'true' }, dots, more),
+          h('span', { class: 'bnd-sr' }, ` (${said})`)];
+        const target = pt.page_id && byId.get(pt.page_id);
+        return h('li', { 'data-testid': 'glance-part', 'data-part': pt.key },
+          target ? pageLink(target, inner, 'bnd-gl-row') : h('span', { class: 'bnd-gl-row is-none' }, inner));
+      });
+      const facts = g.facts || {};
+      const factsTarget = facts.page_id && byId.get(facts.page_id);
+      const lk = LOOKS[st.look] || LOOKS.classic;
+      const main = g.main;
+      const mainPage = main && main.page_id && byId.get(main.page_id);
+      const thumbEl = h('span', { class: 'bnd-bubble bnd-bubble-m', 'aria-hidden': 'true' }, h('span', null, main ? String(main.name).split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase() : '?'));
+      if (main && main.portrait && main.portrait.url) loadImg(main.portrait.url).then(u => { if (u) clear(thumbEl).appendChild(h('img', { src: u, alt: '' })); });
+      body.push(
+        h('p', { class: 'bnd-gl-what' }, g.what || ''),
+        h('div', { class: 'bnd-gl-head', 'data-testid': 'glance-filled' },
+          h('p', { class: 'bnd-gl-count' }, h('b', null, `${filled} of ${total}`), ` ${total === 1 ? 'page' : 'pages'} filled`),
+          h('div', { class: 'bnd-progress', role: 'progressbar', 'aria-label': 'Pages filled', 'aria-valuemin': '0', 'aria-valuemax': String(total), 'aria-valuenow': String(filled), 'aria-valuetext': `${filled} of ${total} pages filled` },
+            h('div', { style: `width:${pct}%` })),
+          h('p', { class: 'bnd-gl-legend' }, ['empty', 'draft', 'approved'].map(k => h('span', null, dot(k, 'Dot'), ' ', GLANCE_STATE[k][1])))),
+        h('section', { class: 'bnd-gl-parts-box', 'aria-labelledby': 'bnd-gl-parts-h' },
+          h('h3', { id: 'bnd-gl-parts-h', class: 'bnd-gl-card-h' }, 'What is in your Book Bible'),
+          h('p', { class: 'bnd-gl-small' }, 'Press a line to open that part.'),
+          h('ul', { class: 'bnd-gl-parts' }, rows)),
+        h('div', { class: 'bnd-gl-cards' },
+          glancePictures(),
+          card('glance-facts', '✎ Facts waiting for your OK',
+            h('p', { class: 'bnd-gl-big' }, facts.waiting ? `✎ ${plural(facts.waiting, 'fact')} waiting` : '✔ Nothing waiting'),
+            h('p', { class: 'bnd-gl-small' }, 'The AI reads your book and proposes quick facts (heights, ages, danger levels…). Nothing you wrote is replaced; you approve each one.'),
+            h('div', { class: 'bnd-gl-acts' },
+              data.read_only ? null : h('button', { type: 'button', class: 'bnd-gl-btn', 'data-testid': 'binder-fill', title: 'The AI reads the book and proposes the 🆕 quick facts. Nothing you wrote is replaced; you approve each proposal.', onclick: ev => runFill(null, ev.currentTarget) }, '✨ Fill from the book'),
+              factsTarget ? pageLink(factsTarget, `Show me → ${pageTitle(factsTarget)}`, 'bnd-gl-link') : null)),
+          card('glance-export', '⬇ Export',
+            h('p', { class: 'bnd-gl-small' }, 'Every binder page, ready to share or print (this At a glance page is left out).'),
+            h('div', { class: 'bnd-gl-acts' }, pdfBtn('bnd-gl-btn', 'glance-pdf'), docxBtn('bnd-gl-btn', 'glance-docx'), printBtn('bnd-gl-btn', 'glance-print'))),
+          glanceSeries(),
+          card('glance-main', '★ Main character',
+            main ? h('p', { class: 'bnd-gl-main' }, thumbEl, mainPage ? pageLink(mainPage, [h('span', { 'aria-hidden': 'true' }, '★ '), main.name], 'bnd-gl-link bnd-gl-mainname') : h('b', null, '★ ', main.name))
+              : h('p', { class: 'bnd-gl-small' }, 'No main character chosen yet. Mark one as ★ Main character on its character page.')),
+          card('glance-look', '🎨 The book’s look',
+            h('p', { class: 'bnd-gl-big' }, `${lk[1]} ${lk[0]}`),
+            h('p', { class: 'bnd-gl-small' }, `${lk[2]}.${st.look === autoLook && book.genre ? ` Picked for ${book.genre}.` : ''}`),
+            h('button', { type: 'button', class: 'bnd-gl-btn', 'data-testid': 'glance-change-look', onclick: () => { lookSel.scrollIntoView({ block: 'nearest' }); lookSel.focus(); } }, '🎨 Change look'))));
+    }
+    return h('article', { class: 'bnd-page bnd-glance no-print', 'data-template': 'glance', 'data-page-id': GLANCE_ID, id: `bbp-${GLANCE_ID}`, 'aria-label': 'At a glance: how full your Book Bible is' },
+      corners,
+      st.look === 'noir' ? orn(ORN.stamp, 'bnd-stamp') : null,
+      h('div', { class: 'bnd-runhead' }, h('span', null, book.title), h('span', { 'aria-hidden': 'true' }, ' 📖 '), h('span', null, 'At a glance')),
+      aboutBox('glance'),
+      h('div', { class: 'bnd-pagehead' },
+        h('div', { class: 'bnd-eyebrow' }, 'Your Book Bible'),
+        h('h2', { class: 'bnd-title' }, h('span', { class: 'bnd-gl-h-ico', 'aria-hidden': 'true' }, '📖'), 'At a glance'),
+        orn(ORN.rule[st.look] || ORN.rule.classic, 'bnd-rule')),
+      h('div', { class: 'bnd-body' }, body));
   }
 
   /* ================================================================== chrome: toolbar, rail, pager */
@@ -1482,6 +1652,7 @@ export async function viewBinder(main, x, rest = []) {
     h('span', null, '📖 As of'), asOfSel);
   const asOfNote = h('div', { class: 'bnd-asof-note', 'data-testid': 'binder-as-of-note', 'aria-live': 'polite' });
   asOfSel.addEventListener('change', async () => {
+    closeMenus();
     st.asOf = asOfSel.value ? Number(asOfSel.value) : null;
     await reloadData();
   });
@@ -1594,25 +1765,47 @@ export async function viewBinder(main, x, rest = []) {
   const lookSel = h('select', { id: 'bnd-look', 'data-testid': 'binder-look' },
     Object.entries(LOOKS).map(([k, [w, ic]]) => h('option', { value: k, selected: k === st.look }, `${ic} ${w}${k === autoLook ? ' (auto)' : ''}`)));
   lookSel.addEventListener('change', () => setLook(lookSel.value));
-  const btnOne = h('button', { type: 'button', class: 'bnd-seg', 'aria-pressed': 'false', 'data-testid': 'binder-one', onclick: () => setMode('one') }, '📄 One page');
-  const btnAll = h('button', { type: 'button', class: 'bnd-seg', 'aria-pressed': 'false', 'data-testid': 'binder-all', onclick: () => setMode('all') }, '📚 All pages');
+  const btnOne = h('button', { type: 'button', class: 'bnd-seg', 'aria-pressed': 'false', 'data-testid': 'binder-one', onclick: () => { closeMenus(); setMode('one'); } }, '📄 One page');
+  const btnAll = h('button', { type: 'button', class: 'bnd-seg', 'aria-pressed': 'false', 'data-testid': 'binder-all', onclick: () => { closeMenus(); setMode('all'); } }, '📚 All pages');
   const fidBox = h('input', { type: 'checkbox', id: 'bnd-fids', 'data-testid': 'binder-fids', checked: st.fids });
   fidBox.addEventListener('change', () => { st.fids = fidBox.checked; st.keep.fids = st.fids; persist(); root.setAttribute('data-fids', st.fids ? 'on' : 'off'); });
+  /** a small drop-down of the toolbar (a <details>: keyboard and screen readers know it; Escape or a click outside closes it) */
+  function menu(label, testid, title, ...items) {
+    const d = h('details', { class: 'bnd-menu', 'data-testid': testid },
+      h('summary', { class: 'bnd-menu-btn', title }, label),
+      h('div', { class: 'bnd-menu-pop', role: 'group', 'aria-label': title }, ...items));
+    d.addEventListener('toggle', () => { if (d.open) for (const o of root.querySelectorAll('details.bnd-menu[open]')) if (o !== d) o.open = false; });
+    d.addEventListener('keydown', ev => { if (ev.key === 'Escape' && d.open) { d.open = false; d.querySelector('summary').focus(); } });
+    return d;
+  }
+  const closeMenus = () => { for (const o of root.querySelectorAll('details.bnd-menu[open]')) o.open = false; };
+  const onDocClick = ev => { if (!ev.target.closest || !ev.target.closest('details.bnd-menu')) closeMenus(); };
+  document.addEventListener('click', onDocClick);
+  cleanup.push(() => document.removeEventListener('click', onDocClick));
+  const printBtn = (cls, testid) => h('button', { type: 'button', class: cls, 'data-testid': testid, onclick: () => { closeMenus(); printBinder(); } }, '🖨 Print');
+  const pdfBtn = (cls, testid) => h('button', { type: 'button', class: cls, 'data-testid': testid, onclick: ev => { closeMenus(); exportAs('pdf', ev.currentTarget); } }, '⬇ PDF');
+  const docxBtn = (cls, testid) => h('button', { type: 'button', class: cls, 'data-testid': testid, onclick: ev => { closeMenus(); exportAs('docx', ev.currentTarget); } }, '⬇ Word');
+  /** 🔍 Search: the search box of the side column */
+  function focusSearch() {
+    if (!tocDetails.open && window.matchMedia && window.matchMedia('(max-width: 800px)').matches) tocDetails.open = true;
+    search.scrollIntoView({ block: 'nearest' });
+    search.focus();
+  }
+  // the toolbar: four everyday tools, the rest under ⋯ View options
   const toolbar = h('div', { class: 'bnd-toolbar no-print', role: 'toolbar', 'aria-label': 'Book Bible tools' },
-    h('label', { class: 'bnd-lookpick', for: 'bnd-look' }, h('span', null, '🎨 Look'), lookSel),
-    h('span', { class: 'bnd-segs', role: 'group', 'aria-label': 'How many pages to show' }, btnOne, btnAll),
-    h('label', { class: 'bnd-check', for: 'bnd-fids' }, fidBox, ' Show field numbers'),
-    h('span', { class: 'bnd-tb-gap' }),
-    h('button', { type: 'button', 'data-testid': 'binder-fill', title: 'The AI reads the book and proposes the 🆕 quick facts (heights, stat bars, relationship types, danger levels…). Nothing you wrote is replaced; you approve each proposal.',
-      onclick: ev => runFill(null, ev.currentTarget) }, '✨ Fill from the book'),
-    h('button', { type: 'button', 'data-testid': 'binder-pictures', title: 'Makes every missing character picture with Stable Diffusion in AutoInjector: portraits, the front, side and back views and character sheets, and the pictures waiting from the book run. Pictures you already have are kept.',
-      onclick: ev => runPictures(ev.currentTarget) }, '🖼 Make the rest of the pictures'),
-    asOfPick,
-    h('button', { type: 'button', 'data-testid': 'binder-series', 'aria-expanded': 'false', title: 'The books of this series, what changed for each character in each book, and 📚 Start a sequel from this book.',
+    h('label', { class: 'bnd-lookpick', for: 'bnd-look', title: 'The style of the binder pages (colours, ornaments, fonts). It does not change your book.' }, h('span', null, '🎨 Look'), lookSel),
+    h('button', { type: 'button', class: 'bnd-tb-btn', 'data-testid': 'binder-search-btn', title: 'Search names, places and facts in every page', onclick: () => focusSearch() }, '🔍 Search'),
+    menu('⬇ Export', 'binder-export', 'Download or print the Book Bible',
+      pdfBtn('bnd-menu-item', 'binder-pdf'), docxBtn('bnd-menu-item', 'binder-docx'), printBtn('bnd-menu-item', 'binder-print'),
+      h('p', { class: 'bnd-menu-note' }, 'The ⬇ PDF and ⬇ Word files have every binder page (not this At a glance page).')),
+    h('button', { type: 'button', class: 'bnd-tb-btn', 'data-testid': 'binder-series', 'aria-expanded': 'false', title: 'The books of this series, what changed for each character in each book, and 📚 Start a sequel from this book.',
       onclick: ev => toggleSeries(ev.currentTarget) }, '📚 Series'),
-    h('button', { type: 'button', 'data-testid': 'binder-print', onclick: () => printBinder() }, '🖨 Print'),
-    h('button', { type: 'button', 'data-testid': 'binder-pdf', onclick: ev => exportAs('pdf', ev.currentTarget) }, '⬇ PDF'),
-    h('button', { type: 'button', 'data-testid': 'binder-docx', onclick: ev => exportAs('docx', ev.currentTarget) }, '⬇ Word'));
+    h('span', { class: 'bnd-tb-gap' }),
+    menu('⋯ View options', 'binder-view', 'How the pages are shown',
+      h('span', { class: 'bnd-segs', role: 'group', 'aria-label': 'How many pages to show' }, btnOne, btnAll),
+      asOfPick,
+      h('label', { class: 'bnd-check', for: 'bnd-fids' }, fidBox, ' Show field numbers')));
+
 
   // rail: search + contents
   const search = h('input', { type: 'search', id: 'bnd-search', placeholder: 'Search names, places, facts…', autocomplete: 'off', 'data-testid': 'binder-search' });
@@ -1634,15 +1827,17 @@ export async function viewBinder(main, x, rest = []) {
     clear(contentsNav);
     const groups = [];
     pages.forEach(p => { const g = groups[groups.length - 1]; if (g && g.tid === p.template) g.pages.push(p); else groups.push({ tid: p.template, pages: [p] }); });
-    contentsNav.appendChild(h('ol', null, groups.map(g => {
+    const gl = pageLink({ page_id: GLANCE_ID }, [h('span', { class: 'bnd-ci', 'aria-hidden': 'true' }, '📖'), h('span', { class: 'bnd-cn' }, 'At a glance')], 'bnd-c-link bnd-c-glance');
+    if (st.home && st.mode === 'one') gl.setAttribute('aria-current', 'page');
+    contentsNav.appendChild(h('ol', null, h('li', { class: st.home && st.mode === 'one' ? 'is-here' : null }, gl), groups.map(g => {
       const [icon, name] = TPL[g.tid];
-      const cur = g.pages.includes(pages[st.idx]);
+      const cur = !(st.home && st.mode === 'one') && g.pages.includes(pages[st.idx]);
       const head = pageLink(g.pages[0], [h('span', { class: 'bnd-ci', 'aria-hidden': 'true' }, icon), h('span', { class: 'bnd-cn' }, g.pages.length > 1 || ENTITY.has(g.tid) ? name : pageTitle(g.pages[0])),
         h('span', { class: 'bnd-cc', title: `${g.pages.length} page(s)` }, String(g.pages.length))], 'bnd-c-link');
       if (cur && g.pages.length === 1 && !ENTITY.has(g.tid) && st.mode === 'one') head.setAttribute('aria-current', 'page');
       return h('li', { class: cur ? 'is-here' : null }, head, g.pages.length > 1 || ENTITY.has(g.tid) ? h('ol', { class: 'bnd-c-sub' }, g.pages.map(p => {
         const a = pageLink(p, [h('span', null, pageTitle(p)), h('span', { class: `bnd-dot bnd-dot-${statusWord(p.status)[2]}`, title: statusWord(p.status)[1] })], 'bnd-c-link');
-        if (p === pages[st.idx] && st.mode === 'one') a.setAttribute('aria-current', 'page');
+        if (p === pages[st.idx] && st.mode === 'one' && !st.home) a.setAttribute('aria-current', 'page');
         return h('li', null, a);
       })) : null);
     })));
@@ -1650,14 +1845,18 @@ export async function viewBinder(main, x, rest = []) {
   function drawPager() {
     for (const el of root.querySelectorAll('.bnd-pager')) {
       clear(el);
-      const p = pages[st.idx]; const prev = pages[st.idx - 1]; const next = pages[st.idx + 1];
+      const home = st.home && st.mode === 'one';
+      const p = pages[st.idx];
+      const prev = home ? null : st.idx === 0 && st.mode === 'one' ? { page_id: GLANCE_ID } : pages[st.idx - 1];
+      const next = home ? pages[0] : pages[st.idx + 1];
       el.appendChild(h('button', { type: 'button', class: 'bnd-prev', disabled: !prev, 'data-testid': 'binder-prev', onclick: () => prev && goto(prev.page_id) }, '‹ Previous'));
-      el.appendChild(h('span', { class: 'bnd-where' }, st.mode === 'all' ? `All ${pages.length} pages` : `Page ${p._n} of ${pages.length} · ${pageTitle(p)}`));
+      el.appendChild(h('span', { class: 'bnd-where' }, st.mode === 'all' ? `All ${pages.length} pages` : home ? `📖 At a glance · then ${pages.length} pages` : `Page ${p._n} of ${pages.length} · ${pageTitle(p)}`));
       el.appendChild(h('button', { type: 'button', class: 'bnd-next', disabled: !next, 'data-testid': 'binder-next', onclick: () => next && goto(next.page_id) }, 'Next ›'));
     }
   }
   function drawStage() {
     clear(stage);
+    if (st.mode === 'one' && st.home) { stage.appendChild(renderGlance()); return; }
     const list_ = st.mode === 'all' ? pages : [pages[st.idx]];
     for (const p of list_) stage.appendChild(renderPage(p));
   }
@@ -1671,8 +1870,16 @@ export async function viewBinder(main, x, rest = []) {
     drawContents(); drawPager(); drawStage();
   }
   function goto(pid, fid) {
+    if (pid === GLANCE_ID) {   // 📖 At a glance: a one-page view of its own
+      st.home = true;
+      try { history.replaceState(null, '', plink('bible', GLANCE_ID)); } catch { /* ignore */ }
+      if (st.mode !== 'one') { st.mode = 'one'; st.keep.mode = 'one'; persist(); draw(); } else { drawContents(); drawPager(); drawStage(); }
+      window.scrollTo(0, 0);
+      return;
+    }
     const i = pages.findIndex(p => p.page_id === pid);
     if (i < 0) return;
+    st.home = false;
     st.idx = i;
     try { history.replaceState(null, '', plink('bible', pid)); } catch { /* ignore */ }
     if (st.mode === 'one') { drawContents(); drawPager(); drawStage(); window.scrollTo(0, 0); }
@@ -1703,7 +1910,7 @@ export async function viewBinder(main, x, rest = []) {
   }
   async function printBinder() {
     let what = 'all';
-    if (st.mode === 'one') {
+    if (st.mode === 'one' && !st.home) {   // on 📖 At a glance (a screen page): the whole binder
       what = await x.choiceDialog('🖨 Print the Book Bible', h('p', null, 'Print just this page, or the whole binder (every page starts on a new sheet)? Your browser’s print window can also save it as a PDF.'),
         [{ id: 'one', label: '📄 This page' }, { id: 'all', label: '📚 The whole binder' }]);
       if (!what) return;
@@ -1790,8 +1997,9 @@ export async function viewBinder(main, x, rest = []) {
     if (!document.body.contains(root) || ev.altKey || ev.ctrlKey || ev.metaKey) return;
     const tag = (ev.target && ev.target.tagName) || '';
     if (/INPUT|TEXTAREA|SELECT/.test(tag) || (ev.target && ev.target.isContentEditable) || st.mode !== 'one') return;
+    if (st.home) { if (ev.key === 'ArrowRight') goto(pages[0].page_id); return; }
     if (ev.key === 'ArrowRight' && pages[st.idx + 1]) goto(pages[st.idx + 1].page_id);
-    if (ev.key === 'ArrowLeft' && pages[st.idx - 1]) goto(pages[st.idx - 1].page_id);
+    if (ev.key === 'ArrowLeft') goto(st.idx > 0 ? pages[st.idx - 1].page_id : GLANCE_ID);
   };
   document.addEventListener('keydown', onKey);
   cleanup.push(() => document.removeEventListener('keydown', onKey));
