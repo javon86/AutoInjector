@@ -562,6 +562,15 @@ def run_fill(app, job, pid: str, branch: str, only: list[str] | None, use_ai: bo
     """The job: for every subject, Akọwe's own reading, then one AI call (when ``use_ai``) for what is still empty.
     Everything is a proposal; proposals are saved after each subject (a later failure keeps them)."""
     subjects = fill_targets(app, pid, branch, only)
+    # ⏱ 🔒 parts a written chapter already relied on are never proposed again: where the book's text says something
+    # else, the author is asked which is right (story_details.py)
+    from . import story_details  # noqa: PLC0415
+    for c in story_details.book_checks(app, pid, branch, getattr(job, "principal", None) or "author"):
+        job.results.append({"ok": True, "check": {k: c.get(k) for k in ("chapter_id", "number", "name", "part",
+                                                                        "sheet", "book")},
+                            "message": f"{c['name']} — {c['part'].lower()}: the book says “{c['book']}” (chapter "
+                                       f"{c.get('number') or c.get('chapter_id')}), the sheet says "
+                                       f"“{c['sheet'][:120]}” — which is right?"})
     job.total = len(subjects)
     if not subjects:
         job.results.append({"ok": True, "proposed": 0, "message": "Every quick fact already has a value (or is "

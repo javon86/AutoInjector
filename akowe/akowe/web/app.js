@@ -5118,6 +5118,7 @@ function profileCard() {
       row('Length', prof.length ? `${LENGTH_INFO[prof.length][0]} (${LENGTH_INFO[prof.length][1]})` : ''),
       row('Tone', prof.tone), row('Idea', prof.idea),
       row('AI', prof.ai_slot === 'manual' ? 'I write it myself (no AI)' : prof.ai_slot ? prof.ai_slot : 'Automatic — the best ready AI'),
+      row('Characters', h('span', { 'data-testid': 'profile-character-mode' }, characterModeWord((prof.choices || {}).characters), ' ', characterModeTip())),
       row('Ending and style', choicesSummary(prof.choices).length ? h('ul', { class: 'small plain-list', 'data-testid': 'profile-choices' }, choicesSummary(prof.choices).map(x => h('li', null, x))) : 'Let the AI choose')),
     Object.keys(effectiveMatrix(prof.choices || {})).length ? h('details', { class: 'small more-ending' }, h('summary', null, 'More ending options'),
       h('dl', { class: 'kv' }, Object.entries(effectiveMatrix(prof.choices)).map(([r, v]) => [h('dt', null, r.replace(/_/g, ' ')), h('dd', null, v)])),
@@ -6709,12 +6710,37 @@ function effectiveMatrix(ch) {
   Object.assign(out, ch.matrix || {});
   return out;
 }
+/** 🧑 ⚖ 🗺 "How the story treats the characters" (character_mode.py): a per-book setting, default Balanced. */
+function characterModeInfo() { return (CH.info && CH.info.character_mode) || null; }
+function characterModeWord(v) {
+  const info = characterModeInfo();
+  const o = info && (info.options.find(x => x.value === v) || info.options.find(x => x.value === info.default));
+  return o ? `${o.icon} ${o.label}` : '⚖ Balanced';
+}
+function characterModeTip() {
+  const info = characterModeInfo();
+  if (!info) return null;
+  return infoTip(info.label, h('p', null, info.help), h('ul', null, info.options.map(o => h('li', null, h('b', null, `${o.icon} ${o.label}`), ` — ${o.about}`))));
+}
+function characterModeField(cur, prefix) {
+  const info = characterModeInfo();
+  if (!info) return { el: null, get: () => cur };
+  const id = `${prefix}-ch-characters`;
+  const s = h('select', { id, 'data-choice': 'characters', 'data-testid': `${prefix}-character-mode` },
+    info.options.map(o => h('option', { value: o.value, selected: (cur || info.default) === o.value }, `${o.icon} ${o.label}${o.value === info.default ? ' (default)' : ''}`)));
+  const about = h('p', { class: 'small muted' });
+  const show = () => { const o = info.options.find(x => x.value === s.value); about.textContent = o ? o.about : ''; };
+  s.addEventListener('change', show);
+  show();
+  return { el: h('div', { class: 'field' }, tipLabel(id, info.label, `${info.help} ${info.options.map(o => `${o.label}: ${o.about}`).join(' ')}`), s, about), get: () => s.value };
+}
 function choicesSummary(ch) {
   ch = ch || {};
   const info = CH.info;
   const out = [];
   for (const c of (info && info.choices) || []) if (ch[c.key]) out.push(`${c.label}: ${choiceWord(c.key, ch[c.key])}`);
   if (!info) for (const [k, v] of Object.entries(ch)) if (typeof v === 'string') out.push(`${k}: ${v}`);
+  if (ch.characters) out.push(`${(characterModeInfo() || {}).label || 'How the story treats the characters'}: ${characterModeWord(ch.characters)}`);
   if (ch.matrix && Object.keys(ch.matrix).length) out.push(`Ending options changed: ${Object.entries(ch.matrix).map(([r, v]) => `${r.replace(/_/g, ' ')} ${v}`).join(', ')}`);
   return out;
 }
@@ -6732,6 +6758,7 @@ function choicesFields(cur, prefix) {
     sel[c.key] = s;
     return h('div', { class: 'field' }, tipLabel(id, c.label, `${c.help} ${c.options.map(o => `${o.label}: ${o.about}.`).join(' ')}`), s);
   };
+  const cm = characterModeField(cur.characters, prefix);
   const main = info.choices.slice(0, 3).map(field);
   const style = info.choices.slice(3).map(field);
   const mx = {};
@@ -6749,6 +6776,8 @@ function choicesFields(cur, prefix) {
     const m = {};
     for (const [k, s] of Object.entries(mx)) if (s.value) m[k] = s.value;
     if (Object.keys(m).length) out.matrix = m;
+    const c = cm.get();
+    if (c && (c !== (characterModeInfo() || {}).default || cur.characters)) out.characters = c;
     return out;
   };
   const showPreview = () => {
@@ -6758,6 +6787,7 @@ function choicesFields(cur, prefix) {
   };
   const el = h('fieldset', { class: 'field choices-box', 'data-testid': `${prefix}-choices` },
     h('legend', null, '🎚️ Ending and style (optional)'),
+    cm.el,
     h('p', { class: 'small muted' }, 'All optional — “Let the AI choose” leaves it to the story. The AI follows what you choose when it plans and writes, and the editor checks the ending against it.'),
     h('div', { class: 'grid-3' }, main),
     h('details', { class: 'style-knobs' }, h('summary', null, 'Style: dialogue, pace, humor'), h('div', { class: 'grid-3' }, style)),

@@ -419,7 +419,7 @@ def edit(store, pid, branch, kind, rid, body) -> dict:
     return mutate(store, pid, branch, kind, rid, fn, what="edit")
 
 
-def approve(store, pid, branch, kind, rid, body) -> dict:
+def approve(store, pid, branch, kind, rid, body, *, by: str = "author") -> dict:
     """POST …/approve — {fields: [keys]} | {all: true}: proposals become approved."""
     sp = spec(kind)
     body = body if isinstance(body, dict) else {}
@@ -442,7 +442,7 @@ def approve(store, pid, branch, kind, rid, body) -> dict:
                 d.update(status="approved", at=_now(), was=None)
                 done.append(k)
         return set(done), {}
-    out = mutate(store, pid, branch, kind, rid, fn, what="approve")
+    out = mutate(store, pid, branch, kind, rid, fn, what="approve", by=by)
     n = len(done)
     msg = (f"Approved {n} proposal{'s' if n != 1 else ''}. " if n else "Nothing was waiting for approval. ") + \
         ("The dossier is ready." if out["readiness"] == "ready" else
@@ -450,6 +450,22 @@ def approve(store, pid, branch, kind, rid, body) -> dict:
          "Fill some fields to make the dossier ready.")
     return {"ok": True, "approved": done, "message": msg, "readiness": out["readiness"], "revision": out["revision"],
             "dossier": out}
+
+
+def protect(store, pid, branch, kind, rid, keys, *, by: str = "run") -> list:
+    """🔒 Mark accepted fields protected (a written chapter relied on them). Returns the keys newly protected."""
+    done: list[str] = []
+
+    def fn(entry, fields):
+        for k in keys:
+            d = fields.get(k)
+            if not d or d["protected"] or not d["text"] or d["status"] == "proposed":
+                continue
+            d["protected"] = True
+            done.append(k)
+        return {k + ":protected" for k in done}, {}
+    mutate(store, pid, branch, kind, rid, fn, what="lock", by=by)
+    return done
 
 
 def apply_proposals(store, pid, branch, kind, rid, answer: dict, *, slot, tagline=None, summary=None) -> list:

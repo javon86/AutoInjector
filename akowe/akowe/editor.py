@@ -547,6 +547,12 @@ class EditorService:
                                      story_rules=bool(guide["rules"]))
         from . import story_choices  # noqa: PLC0415
         notes, relax = story_choices.editor_notes(guide["choices"]), story_choices.relax(guide["choices"])
+        from . import character_mode  # noqa: PLC0415 - 🧑 ⚖ 🗺 how strict on character agency / voices
+        cmode = character_mode.of_choices(guide["choices"])
+        for dim, note in character_mode.editor_notes(cmode).items():
+            notes[dim] = f"{notes[dim]} {note}" if notes.get(dim) else note
+        for dim, d in character_mode.relax(cmode).items():
+            relax[dim] = relax.get(dim, 0) + d
         report = self.pattern(pid, branch, rec, st["strictness"])
         writer = rv.writer_of(pid, branch, rec)
         rv.plan_reviewer(job, writer)  # the editor is never the writer when another AI works (P3.1)

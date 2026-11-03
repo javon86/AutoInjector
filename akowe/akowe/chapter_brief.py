@@ -19,6 +19,12 @@
   a character's first appearance; F / M when the plan reads like a fight / powers), ≤ 2 500 characters
   (``forge.chapter_brief``).
 
+* ``character_mode`` (character_mode.py): how the story treats the characters (character-led / balanced / plot-led),
+  always, with one rule.
+* ``world_details`` / ``fixed_details`` (⏱ story_details.py): the accepted details of the places, items and magic this
+  chapter names, and the 🔒 details earlier chapters already used (they must match). ``meta.detail_refs`` lists every
+  dossier part the brief carried (locked once the chapter is approved).
+
 P14: a book made with parts of the pipeline switched off (pipeline.py: scenes / voices / rules / planned) gets no
 scene cards / voice cards / story rules and texture / must-show details here, even when such data exists.
 * ``rules``: how to use all of this, in plain sentences.
@@ -91,7 +97,8 @@ def _chapter_item(outline: dict, chapter_id: str) -> dict | None:
     return None
 
 
-def _forge_details(store, pid, branch, outline, chapter_id, present, cs, texts, scenes_on: bool = True) -> list:
+def _forge_details(store, pid, branch, outline, chapter_id, present, cs, texts, scenes_on: bool = True,
+                   used: dict | None = None) -> list:
     """🗂 B5: the Character Forge letters each present character needs here — E always, A on their first appearance
     (no earlier outline chapter or its scene cards mention them), F / M when the chapter's plan reads like a fight /
     powers. Only accepted dossier fields; the voice card and sheet parts (V, P) are already in voice_cards. Never
@@ -113,7 +120,17 @@ def _forge_details(store, pid, branch, outline, chapter_id, present, cs, texts, 
                 [g.get("character") for c in cards for g in (c.get("goals") or [])]
             seen |= {c["record_id"] for c in chars_mod.present_in(cs, *t, *[n for n in names if n], ids=ids)}
         letters = {c["record_id"]: forge.letters_for(texts, c["record_id"] not in seen) for c in present}
-        return forge.chapter_brief(store, pid, branch, present, letters)
+        out = forge.chapter_brief(store, pid, branch, present, letters)
+        if used is not None:  # ⏱ which dossier fields the chapter relies on (locked once it is approved)
+            by_label = {}
+            for k, f in forge.FIELDS.items():
+                by_label.setdefault(f["label"], k)
+            rid_of = {c["name"]: c["record_id"] for c in present}
+            for o in out:
+                rid = rid_of.get(o.get("name"))
+                if rid:
+                    used[rid] = [by_label[lab] for lab in o.get("details") or {} if lab in by_label]
+        return out
     except Exception:  # noqa: BLE001 - a brief is best effort
         log.exception("character details for the brief failed")
         return []
@@ -198,10 +215,26 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str) -
         if main:
             brief["main_character"] = main[0]
             meta["protagonist"] = main[1]
-        details = _forge_details(store, pid, branch, outline, chapter_id, present, cs, texts, flags["scenes"]) \
-            if flags["voices"] else []
+        used: dict = {}
+        details = _forge_details(store, pid, branch, outline, chapter_id, present, cs, texts, flags["scenes"],
+                                 used=used) if flags["voices"] else []
         if details:  # 🗂 B5: approved dossier fields with only the letters this chapter needs (≤ 2 500 chars)
             brief["character_details"] = details
+        refs = {f"character:{rid}": keys for rid, keys in used.items() if keys}
+        from . import character_mode  # noqa: PLC0415 - 🧑 ⚖ 🗺 how the story treats the characters
+        cmode = character_mode.of_store(store, pid)
+        brief["character_mode"] = character_mode.brief(cmode)
+        world, fixed = [], []
+        if flags["voices"]:  # ⏱ story_details.py: places / items / magic of this chapter, and the 🔒 fixed parts
+            from . import story_details  # noqa: PLC0415
+            wused: dict = {}
+            world = story_details.world_brief(store, pid, branch, outline, chapter_id, used=wused)
+            refs.update({k: v for k, v in wused.items() if v})
+            fixed = story_details.fixed_details(store, pid, branch, [c["record_id"] for c in present])
+            if world:
+                brief["world_details"] = world
+            if fixed:
+                brief["fixed_details"] = fixed
         extra = _section4(store, pid, branch, outline, chapter_id, cards, texts)
         if not flags["rules"]:
             extra.pop("story_rules", None)
@@ -232,6 +265,11 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str) -
             rules.append(RULES["must_show"])
         if brief.get("character_details"):
             rules.append(RULES["character_details"])
+        if world:
+            rules.append(story_details.WORLD_RULE)
+        if fixed:
+            rules.append(story_details.FIXED_RULE)
+        rules.append(character_mode.writer_rule(cmode))
         trade = _trade_terms(store, pid, branch, texts + [json.dumps(cards, ensure_ascii=False)])  # P31
         if trade:
             from .terms import RULE as TERMS_RULE  # noqa: PLC0415
@@ -276,7 +314,7 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str) -
         brief["rules"] = rules
         if not (cards or vb["cards"] or vb["others"] or pov or planned or extra.get("story_rules")
                 or extra.get("world_texture") or extra.get("story_choices") or length or style
-                or brief.get("character_details") or main
+                or brief.get("character_details") or main or world or fixed
                 or any(k in brief for k in ("physical_state", "character_state", "two_readings", "version_changes",
                                             "series_state", "series_world"))):
             return None, meta
@@ -291,6 +329,7 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str) -
                     continuity=[k for k in ("physical_state", "character_state", "two_readings", "version_changes")
                                 if k in brief] or None,
                     narrator_style=bool(style), series_state=len(brief.get("series_state") or []) or None,
+                    detail_refs=refs or None, character_mode=cmode,
                     chars=len(json.dumps(brief, ensure_ascii=False)))
         return brief, meta
     except Exception:  # noqa: BLE001 - a brief is help for the writer, never a reason to fail the chapter

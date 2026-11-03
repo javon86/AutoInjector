@@ -485,6 +485,49 @@ page and toolbar are a separate change):
 - Tests: `tests/campaign/ui/test_ui_nav_simple.py`; older UI tests updated (`open_make_book` / `set_mode` helpers).
 - *Open:* `binder.js` (owned by the Book Bible change) still says "📘 Make my book" on its not-ready page.
 
+## Story details just in time + "How the story treats the characters" (2026-11)
+
+The writer chose "just in time" (save time and AI messages) over filling ~80 dossier fields per character up front,
+and a per-book setting for how strictly the story follows the characters. Done:
+
+- [x] **Before chapter one — essentials only** (⚡ run step "Character looks and voice details", after "Character
+  sheets and voices", before "Character pictures"; `akowe/story_details.py`): every approved character gets detailed
+  looks (physique with height / weight / build, face, eyes, hair, skin, markings, everyday clothing, posture,
+  presence) and speech under fear / anger / grief; main and supporting characters (every story role except minor /
+  extra) also "public and private selves" and the Book Bible's 🆕 height, weight, build, handedness (height / weight
+  read from the physique so they match); minor characters and extras a short looks set. Places the outline uses get a
+  short look and feel and what the place is; items the outline names ("the brass key") their type and one line; magic
+  keeps only the core rules the "Story rules and world texture" step sets. Four subjects per AI call. Forge proposals
+  (only empty, unprotected fields — never the author's text) approved at once under the run consent; a plain event per
+  subject. Character pictures use the detailed looks (forge.art_prompt).
+- [x] **During writing — just in time** (before each chapter, where its scene cards and brief are built): a cheap
+  deterministic pass over the outline chapter and its scene cards decides what this chapter needs — a fight → the
+  fighters' fighting style and primary weapon; magic → the users' power source / effects / costs / limits and ONLY the
+  named ability on the book's magic dossier (e.g. "Fog-spell: …"); a skill (lockpicking, sailing, medicine…) →
+  practical skills; a keepsake → signature possessions; a place visited for the first time (the chapter's location or
+  a scene's place; a new room gets a place dossier of its own) → layout, sounds, smells, light, who is there; an item
+  seen / used for the first time → look, condition, holder (+ powers, limits, costs when used). Unclear words
+  ("struggle", "power", "glow") become optional fields the AI leaves empty when the chapter does not need them. ONE AI
+  call per chapter at most (characters + places + items + magic), never decided twice (ledger
+  `story_details:<pid>:<branch>`), logged plainly ("Decided Mara Vell's fighting style and weapon for chapter 2").
+  Details the story never needs stay empty (✨ Fill from the book can fill them later).
+- [x] **Locked once used:** after a chapter is approved, every dossier part its brief carried (character details,
+  `world_details` of places / items / magic, the handedness in a fight) becomes a 🔒 protected field, recorded with the
+  chapter; later briefs carry them as `fixed_details` ("must match"). A deterministic check flags chapter text that
+  contradicts them (eye / hair colour, the weapon, the weapon hand, an item's metal or colour): a ⚠️ run note, the 🧭
+  continuity page's questions, and ✨ Fill from the book asks "the book says X, the sheet says Y — which is right?".
+- [x] **AI down / busy / bad answer** → a plain event, the chapter is written anyway, the parts are asked again with
+  the next chapter. Pause / cancel / resume safe (no duplicate fills).
+- [x] **"How the story treats the characters"** (`akowe/character_mode.py`, stored in the profile's `choices` as
+  `characters`): 🧑 Character-led / ⚖ Balanced (default) / 🗺 Plot-led, with plain words and ⓘ on ⚡ Make a book, the
+  🚀 wizard and the profile dialog (and a "Characters" row on the profile card). Reaches the premise / plot / outline
+  prompts (set_b), the chapter brief (`character_mode` + one rule), the AI reviewer (strict / normal / only big breaks)
+  and the AI editor (notes and ±1 minimum score on `character_agency` / `voice_distinction`). Per book; variants,
+  reruns from a book bible and 📚 sequels start with the previous book's setting.
+- Tests: `tests/test_story_details.py` (fake AI, end to end), `tests/campaign/ui/test_ui_character_mode.py`.
+- *Not done:* ✍ Write all chapters (outside a ⚡ run) does not run the just-in-time step yet; contradiction checks
+  cover colours, weapons and the weapon hand only (no AI reading); places get no automatic establishing picture.
+
 ## Prevention pass (2026-10-27, "solve problems before they become problems")
 
 - [x] **Alfred's local AI connection:**

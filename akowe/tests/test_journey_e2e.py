@@ -185,7 +185,7 @@ def test_the_whole_journey(journey):
     app, fake, b, slept, tmp_path = journey
 
     # ---- 1 + 2 + 3: Make a book (fantasy, from an idea); a site error mid-run; SD goes away after 3 pictures
-    fake.site_errors = [(6, {"AI-1"}), (12, {"AI-1", "AI-2"})]
+    fake.site_errors = [(6, {"AI-1"}), (13, {"AI-1", "AI-2"})]  # (call 9 is the ⏱ essentials call)
     b.down_after = 3
     run = run_book(app, {"genre": "Fantasy", "length": "short_story",
                          "idea": "A lamplighter's apprentice finds that the harbour light keeps a drowned city "
