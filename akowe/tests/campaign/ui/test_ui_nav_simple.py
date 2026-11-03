@@ -156,6 +156,9 @@ def test_book_bible_is_one_click_away(make_context, ai_server, nb):
     page.click("#sidenav .side-bible")
     page.wait_for_function("() => location.hash.endsWith('/bible')", timeout=5000)
     page.wait_for_selector("#main h1", timeout=15000)
+    # the side bar is drawn again after the page changes; "#main h1" can still be the old page's heading for a
+    # moment (CI raced here), so wait for the highlight itself
+    page.wait_for_function("() => document.querySelector('#sidenav .side-bible')?.getAttribute('aria-current') === 'page'", timeout=10000)
     assert page.get_attribute("#sidenav .side-bible", "aria-current") == "page"
     # from My books: every book card has one
     goto(page, "#/")
