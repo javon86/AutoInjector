@@ -117,6 +117,9 @@ def build(app, pid: str, branch: str = "main") -> dict:
             item["voice"] = copy.deepcopy(e.get("voice")) if e.get("voice") else None
             if e.get("story_role"):  # ★ the character's story role (by="author" when the bible is reused)
                 item["story_role"] = e["story_role"]
+            carry = forge_carry(store, pid, branch, h["record_id"])  # 🧬 the Character Forge dossier (H7)
+            if carry:
+                item["forge"] = carry
             characters.append(item)
         else:
             try:
@@ -197,7 +200,149 @@ def _canon_item(raw, idx: int, *, character: bool) -> dict:
             out["story_role"] = story_roles.normalize(raw["story_role"])
     else:
         out["kind"] = str(raw.get("kind") or op)[:80]
+    if character and isinstance(raw.get("forge"), dict):
+        carry = clean_forge(raw["forge"])
+        if carry:
+            out["forge"] = carry
     return out
+
+
+def protected_list(characters: list, canon: list) -> list[dict]:
+    """The 🔒 protected facts, worked out again from the entries themselves (never trusted from the file): the
+    protected fact flags of each entry, plus the protected Character Forge fields (details a chapter relied on)."""
+    out = []
+    for item in list(characters or []) + list(canon or []):
+        flags = [f for f in ((item.get("data") or {}).get("protected_fact_flags") or []) if isinstance(f, str)]
+        carry = item.get("forge") or {}
+        locked = sorted(k for k, f in (carry.get("fields") or {}).items() if f.get("protected"))
+        locked += sorted(f"binder:{k}" for k, f in (carry.get("binder") or {}).items() if f.get("protected"))
+        if flags or locked:
+            out.append({"record_id": item.get("record_id"), "name": item.get("name"),
+                        "module_id": item.get("module_id"), "flags": flags + locked})
+    return out
+
+
+# ====================================================================== 🧬 the Character Forge dossier travels (H7)
+FORGE_TEXT_MAX = 2000
+
+
+def forge_carry(store, pid: str, branch: str, rid: str) -> dict | None:
+    """A character's accepted Character Forge text (the author's and the approved ones, incl. the details decided just
+    in time and 🔒 locked once a chapter used them) and its binder values (height, weight, build, handedness).
+    Proposals are never carried. None when there is nothing. Never raises."""
+    try:
+        from . import forge  # noqa: PLC0415
+        entry = forge.raw_entry(store, pid, branch, rid)
+    except Exception:  # noqa: BLE001 - the bible never fails over a dossier
+        log.exception("book bible: the dossier of %s", rid)
+        entry = {}
+    fields = {}
+    for k, f in ((entry or {}).get("fields") or {}).items():
+        if isinstance(f, dict) and f.get("text") and f.get("status") in ("supplied", "approved"):
+            fields[k] = {"text": str(f["text"])[:FORGE_TEXT_MAX], "protected": bool(f.get("protected"))}
+            if f.get("title"):
+                fields[k]["title"] = str(f["title"])[:200]
+    binder_vals = {}
+    try:
+        from . import binder_fields  # noqa: PLC0415
+        for k, v in binder_fields.values(store, pid, branch, f"character:{rid}").items():
+            if v.get("value") not in (None, "", []) and v.get("status") in ("supplied", "approved"):
+                binder_vals[k] = {"value": v["value"], "protected": bool(v.get("protected"))}
+    except Exception:  # noqa: BLE001
+        log.exception("book bible: the binder values of %s", rid)
+    out = {}
+    if fields:
+        out["fields"] = fields
+    if binder_vals:
+        out["binder"] = binder_vals
+    if (entry or {}).get("tagline"):
+        out["tagline"] = str(entry["tagline"])[:300]
+    if (entry or {}).get("summary"):
+        out["summary"] = [str(x)[:300] for x in entry["summary"] if x][:6]
+    return out or None
+
+
+def clean_forge(raw) -> dict | None:
+    """A dossier read from a file: only known fields, plain text, clipped (nothing in it is trusted)."""
+    from . import binder_fields  # noqa: PLC0415
+    from . import forge  # noqa: PLC0415
+    if not isinstance(raw, dict):
+        return None
+    fields = {}
+    for k, f in (raw.get("fields") if isinstance(raw.get("fields"), dict) else {}).items():
+        if k in forge.FIELDS and isinstance(f, dict) and isinstance(f.get("text"), str) and f["text"].strip():
+            fields[k] = {"text": f["text"][:FORGE_TEXT_MAX], "protected": f.get("protected") is True}
+            if isinstance(f.get("title"), str) and f["title"].strip():
+                fields[k]["title"] = f["title"][:200]
+    binder_vals = {}
+    for k, f in (raw.get("binder") if isinstance(raw.get("binder"), dict) else {}).items():
+        if not isinstance(f, dict):
+            continue
+        try:
+            v = binder_fields.clean_value("character", k, f.get("value"))
+        except Exception:  # noqa: BLE001 - an unknown field or a value out of range: left out
+            continue
+        if v not in (None, "", []):
+            binder_vals[k] = {"value": v, "protected": f.get("protected") is True}
+    out = {}
+    if fields:
+        out["fields"] = fields
+    if binder_vals:
+        out["binder"] = binder_vals
+    if isinstance(raw.get("tagline"), str) and raw["tagline"].strip():
+        out["tagline"] = raw["tagline"][:300]
+    if isinstance(raw.get("summary"), list):
+        summ = [x[:300] for x in raw["summary"] if isinstance(x, str) and x.strip()][:6]
+        if summ:
+            out["summary"] = summ
+    return out or None
+
+
+def seed_forge(store, pid: str, branch: str, rid: str, carry: dict | None, *, by: str = "author") -> int:
+    """Put a carried dossier into a character of the new book: the text as the author's (supplied), the 🔒 locks kept.
+    Only empty fields are filled (never over text the new book already has). Returns the number of fields put in."""
+    if not carry:
+        return 0
+    from . import forge  # noqa: PLC0415
+    done: list[str] = []
+
+    def fn(entry, fields, canon):
+        for k, f in (carry.get("fields") or {}).items():
+            d = fields.get(k)
+            if d is None or d.get("readonly") or d["text"]:
+                continue
+            d.update(text=forge.clip(f["text"]), status="supplied", protected=bool(f.get("protected")))
+            if f.get("title") and forge.TITLED.match(k):
+                d["title"] = f["title"]
+            done.append(k)
+        if carry.get("tagline") and not entry.get("tagline"):
+            entry["tagline"] = carry["tagline"]
+            done.append("tagline")
+        if carry.get("summary") and not entry.get("summary"):
+            entry["summary"] = list(carry["summary"])
+            done.append("summary")
+        return set(done), {}
+    try:
+        forge.mutate(store, pid, branch, rid, fn, what="from the book before", by=by)
+    except Exception:  # noqa: BLE001 - the character is there; its dossier can be filled again
+        log.exception("could not carry the dossier of %s", rid)
+        return 0
+    bvals = carry.get("binder") or {}
+    if bvals:
+        try:
+            from . import binder_fields  # noqa: PLC0415
+            have = binder_fields.values(store, pid, branch, f"character:{rid}")
+            todo = {k: v["value"] for k, v in bvals.items() if (have.get(k) or {}).get("value") in (None, "", [])}
+            if todo:
+                body = {"target": f"character:{rid}", "fields": todo}
+                prot = {k: True for k in todo if bvals[k].get("protected")}
+                if prot:
+                    body["protected"] = prot
+                binder_fields.edit(store, pid, branch, body, by=by)
+                done += list(todo)
+        except Exception:  # noqa: BLE001
+            log.exception("could not carry the binder values of %s", rid)
+    return len(done)
 
 
 def clean(raw) -> dict:
@@ -269,7 +414,8 @@ def clean(raw) -> dict:
                        if k in ("project_id", "branch_id", "name") and isinstance(v, str)}
             if isinstance(raw.get("source"), dict) else {},
             "profile": profile, "choices": choices, "pipeline": pipe, "length": None,
-            "characters": characters, "canon": canon, "protected_facts": [], "plan": plan,
+            "characters": characters, "canon": canon, "protected_facts": protected_list(characters, canon),
+            "plan": plan,
             "scene_cards": scene_cards, "story_rules": rules, "world_texture": tex,
             "trade_terms": {"story_year": year, "items": terms_mod.clean_items(tt.get("items") or [])},
             "repeat_labels": dict(list(labels.items())[:repetition_mod.MAX_LABELS])}

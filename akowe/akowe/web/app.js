@@ -6335,15 +6335,29 @@ function sequelBox(pid, branch, { testid = 'bk-sequel' } = {}) {
     if (!st || !st.possible || !(await confirmSequel(st))) return;
     btn.disabled = true;
     clear(msg).appendChild(loadingState('Starting the sequel…'));
+    await postSequel(false);
+  });
+  /** H7: the first press looks for what changed in this book (nothing starts yet); changes waiting for the author
+   *  stop the start with the reason and a plain "Start without them" (an explicit skip, never silent). */
+  async function postSequel(skip) {
     try {
-      const r = await api('POST', sequelPath(pid, branch), { body: { author_confirms: true } });
+      const r = await api('POST', sequelPath(pid, branch), { body: skip ? { author_confirms: true, skip_changes: true } : { author_confirms: true } });
+      if (!r.run) {
+        btn.disabled = false;
+        clear(msg).appendChild(h('div', { 'data-testid': `${testid}-finding` }, stateBox('ask', r.message || 'First, the AI reads this book for what changed.')));
+        return;
+      }
       clear(msg).appendChild(h('div', { 'data-testid': `${testid}-started` }, stateBox('ok', r.message || '📚 The sequel has started.')));
       if (r.run && r.run.id) openMakeBook(btn, { runId: r.run.id });
     } catch (e) {
       btn.disabled = false;
+      const err = ((e && e.body && e.body.errors) || [])[0] || {};
       clear(msg).appendChild(problemBox(toProblem(e, { book: S.project ? S.project.name : '', step: '📚 Start a sequel' }), {}, 'The sequel did not start'));
+      if (err.path === '/skip_changes') {
+        msg.appendChild(h('button', { type: 'button', 'data-testid': `${testid}-skip`, onclick: () => { clear(msg).appendChild(loadingState('Starting the sequel…')); postSequel(true); } }, 'Start without them (some changes may be missing)'));
+      }
     }
-  });
+  }
   return h('div', { class: 'sequel-box', 'data-testid': `${testid}-box` }, h('div', { class: 'row' }, btn, why), msg);
 }
 
@@ -8316,12 +8330,17 @@ async function viewReport(main) {
     if (!ov.written) { holder.appendChild(stateBox('empty', 'No chapter is written yet', h('p', null, 'Write the chapters first (🏠 Book home), then make the report.'))); return; }
     if (!rep) { holder.appendChild(stateBox('empty', 'No report yet', h('p', null, 'Press 📊 Make the report: Akọwe counts and checks the book and asks the AIs that did not write it to read it.'))); holder.appendChild(askBox(null)); return; }
     if (ov.stale) holder.appendChild(h('p', { class: 'words-warn', role: 'note', 'data-testid': 'rp-stale' }, hazard({ code: 'REPORT_STALE' }, { retry: () => run({ ai: true }), retryLabel: '📊 Make a new report' }, { small: true }), ' This report is for an earlier version of the book: a chapter changed since.'));
-    for (const w of rep.warnings || []) holder.appendChild(h('p', { class: /⚠️/.test(w) ? 'words-warn' : 'small muted', role: 'note' }, w));
+    for (const w of rep.warnings || []) holder.appendChild(h('p', { class: /⚠️|📖 Sampled/.test(w) ? 'words-warn' : 'small muted', role: 'note', 'data-testid': /^📖 Sampled/.test(w) ? 'rp-sampled' : null }, w));
+    if (rep.book_mode === 'digest' && ov.written) {  // H17: a long book was only sampled: offer the full read in parts
+      const slots = (rep.reviews || []).filter(r => r.slot).map(r => r.slot).slice(0, 3);
+      holder.appendChild(h('div', { class: 'row' }, h('button', { type: 'button', 'data-testid': 'rp-full', title: 'Each reviewer reads every part of the book in full (one AI message per part), then Akọwe merges what they found. This takes longer and uses more AI messages.',
+        onclick: ev => run(slots.length ? { slots, full: true } : { ai: true, full: true }, ev.currentTarget) }, '📖 Read the whole book')));
+    }
     const agg = rep.aggregate || {};
     const wd = rep.words || {};
     const reviews = (rep.reviews || []).filter(r => r.status === 'done');
     holder.appendChild(h('section', { class: 'card rp-summary', 'data-testid': 'rp-summary' }, h('h2', null, `“${rep.title}”`),
-      h('p', { class: 'small muted' }, `Made ${fmtTime(rep.at)} · ${rep.version.chapters.length} chapter(s) · ${rep.book_mode === 'digest' ? 'sent to the AIs as a per-chapter digest' : 'sent to the AIs whole'}${rep.run_id ? ` · Make-a-book run ${rep.run_id}` : ''}`),
+      h('p', { class: 'small muted' }, `Made ${fmtTime(rep.at)} · ${rep.version.chapters.length} chapter(s) · ${rep.book_mode === 'digest' ? 'sent to the AIs as a per-chapter digest (sampled)' : rep.book_mode === 'parts' ? 'read by the AIs in full, in parts' : 'sent to the AIs whole'}${rep.run_id ? ` · Make-a-book run ${rep.run_id}` : ''}`),
       h('div', { class: 'rp-kpis' },
         h('div', { class: 'kpi' }, h('strong', null, agg.overall != null ? `${agg.overall}/10` : '–'), h('span', { class: 'small' }, 'overall (median of each dimension, averaged)')),
         h('div', { class: 'kpi' }, h('strong', null, `${agg.reviewers || 0}`), h('span', { class: 'small' }, `AI reviewer(s), ${agg.independent || 0} independent`)),

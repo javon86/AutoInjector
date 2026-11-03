@@ -2704,6 +2704,13 @@ def glance_live(app, pid: str, branch: str) -> dict:
         engine = None
     g = data.get("glance") or glance(data)
     g["pictures"]["engine"] = engine
+    try:  # 🖼 H15: pictures (and locks) older than the description they were made from
+        old = book_pictures.outdated(app.store, pid, branch)
+        g["pictures"]["outdated"] = {"items": old, "count": sum(len(x["slots"]) for x in old),
+                                       "locks": sum(1 for x in old if x["lock"]),
+                                       "words": book_pictures.outdated_words(old)}
+    except Exception:  # noqa: BLE001
+        log.exception("binder: pictures out of date")
     return g
 
 
@@ -2916,6 +2923,15 @@ def route(app, method: str, rest: list, query: dict, body, principal: str, pid: 
         if method == "GET":
             return 200, book_pictures.summary(app.store, pid, branch)
         return 202, book_pictures.start_rest(app, principal, pid, branch, body)
+    if rest == ["pictures", "remake"] and method == "POST":  # 🖼 H15: remake the out-of-date pictures
+        from . import book_pictures  # noqa: PLC0415
+        return 202, book_pictures.start_remake(app, principal, pid, branch, body)
+    if rest == ["pictures", "lock"] and method == "POST":  # 🔒 H15: replace a lock — only when the author says so
+        from . import book_pictures  # noqa: PLC0415
+        rid = (body or {}).get("record_id") if isinstance(body, dict) else None
+        if not isinstance(rid, str) or not rid:
+            raise AkoweError("MISSING_INPUT", "/record_id", "record_id: the character whose lock to replace", **_REJ)
+        return 200, book_pictures.replace_lock(app, pid, branch, rid, body)
     if rest == ["export"] and method == "GET":
         fmt = (query.get("format") or ["docx"])[0]
         size = (query.get("page_size") or ["A4"])[0]

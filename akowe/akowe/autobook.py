@@ -2713,6 +2713,9 @@ class AutoBookService(_Runner):
                                              it["story_role"], by="author", name=it.get("name"), move=False)
                     except Exception:  # noqa: BLE001
                         log.exception("could not copy the story role of %s", it.get("name"))
+                if op == "A01" and it.get("forge"):  # 🧬 H7: the Character Forge dossier and its 🔒 locks travel
+                    from .book_bible import seed_forge  # noqa: PLC0415
+                    seed_forge(self.store, run["project_id"], run["branch_id"], ref["record_id"], it["forge"])
             else:
                 refused.append(f"{it.get('name')}: {'; '.join(problems(r)[:2]) or r.get('status')}")
                 self._note_refused_main(run, it)

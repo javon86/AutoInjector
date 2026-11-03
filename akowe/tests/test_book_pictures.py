@@ -72,6 +72,10 @@ class PictureBridge:
                 if self.path == "/image/locks":
                     bridge.lock_posts.append(body)
                     k = body["character"].lower()
+                    if k in bridge.locks and body.get("replace") is True:  # H15: only when asked to
+                        bridge.locks[k] = dict(body, id=bridge.locks[k]["id"])
+                        return self._send(200, {"ok": True, "created": False, "replaced": True,
+                                                "lock": bridge.locks[k]})
                     if k in bridge.locks:
                         return self._send(200, {"ok": True, "created": False, "lock": bridge.locks[k]})
                     bridge.locks[k] = dict(body, id=f"lock-{len(bridge.locks) + 1}")

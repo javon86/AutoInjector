@@ -604,6 +604,8 @@ def save_proposals(store, pid: str, branch: str, raw, *, by: str = "ai", slot: s
             made.append(key)
         tw = world.save_proposals(s, pid, int(n), (raw or {}).get("thing_changes") if isinstance(raw, dict) else None,
                                   by=by, slot=slot)
+        s.setdefault("found", {})[n] = {"at": now_iso(), "by": by}  # 📚 H7: what changed in book n was looked for
+        (s.get("skipped") or {}).pop(n, None)
         _save(store, s)
     return {"proposed": len(made), "keys": made, "unknown": unknown[:10], "unchanged": same,
             "things_proposed": tw["proposed"], "thing_keys": tw["keys"], "things_unknown": tw["unknown"]}
@@ -830,7 +832,18 @@ def sequel_bible(app, pid: str, branch: str, body=None) -> tuple[dict, dict]:
         look = appearance_text(st)
         if look:
             attrs["appearance"] = look
+        # 📚 H7: alive / dead / injured, what they carry, can do and lost — at the END of this book. The canon entry
+        # only has its fixed fields, so it is said in "constraints" (what limits them now), which the writer reads.
+        words = state_words(st)
+        now = "; ".join(f"{lab}: {words[w]}" for w, lab in (("status", "Status"), ("carries", "Carries"),
+                                                            ("can", "Can"), ("lost", "Lost"))
+                        if words.get(w))
+        if now:
+            mark = f"At the end of book {n} —"
+            old = str(attrs.get("constraints") or "").split(" At the end of book ")[0].strip()
+            attrs["constraints"] = (f"{old} " if old else "") + f"{mark} {now}"[:1200]
         data["attributes"] = attrs
+        c["end_state"] = {k: v for k, v in words.items() if k != "looks"}
         if (ch.get("fixed") or {}).get("voice"):
             c["voice"] = copy.deepcopy(ch["fixed"]["voice"])
         if c.get("sheet") and st["relationships"]:
@@ -847,18 +860,70 @@ def sequel_bible(app, pid: str, branch: str, body=None) -> tuple[dict, dict]:
     prof = dict(bible.get("profile") or {})
     old_title = prof.get("title") or _book_title(store, pid)
     title = _clip(body.get("title"), 200) or f"{s.get('name') or old_title}: Book {nxt}"[:200]
-    hook = _clip(body.get("idea"), 4000) or _sequel_hook(app, pid, branch)
+    hook = _clip(body.get("idea"), 1500) or _sequel_hook(app, pid, branch)
+    state = changes_state(s, n)
+    so_far = story_so_far(bible.get("plan") or {}, _chapters(app, pid, branch))
     idea = (hook + " " if hook else "") + f"This is book {nxt} of the series “{s.get('name') or old_title}”: it " \
-        f"continues the story of “{old_title}”. The characters start exactly as they were at the end of that book."
+        f"continues the story of “{old_title}”. " + start_words(state) + \
+        (f" What happened in book {n}: {so_far}" if so_far else "")
     prof.update(title=title, idea=idea[:4000], series=str(s.get("name") or old_title)[:200], series_number=nxt)
     bible["profile"] = prof
-    bible["plan"] = {}
+    bible["plan"] = {}  # the sequel gets a new premise, plot and outline (book 1's is kept as the story so far)
     bible["scene_cards"] = []
+    bible["story_so_far"] = {"book": n, "title": old_title[:200], "text": so_far}
     bible["source"] = dict(bible.get("source") or {}, name=f"{old_title} (end of book {n})"[:200])
     sequel = {"series_id": s["id"], "number": nxt, "previous": pid, "previous_branch": branch,
               "previous_number": n, "previous_title": old_title[:200], "title": title, "keys": keys,
-              "hook": bool(hook)}
+              "hook": bool(hook), "story_so_far": so_far, "changes": state["state"]}
     return bible, sequel
+
+
+SO_FAR_MAX = 1800
+
+
+def story_so_far(plan: dict, chapters: list[dict] | None = None) -> str:
+    """📚 H7: a short plain summary of what happened in a book (its premise and each chapter's summary — the written
+    chapters' own summaries first, else the outline's), for the sequel's idea. "" when there is nothing."""
+    parts = []
+    prem = ((plan.get("premise") or {}).get("data") or {})
+    p = prem.get("premise") or prem.get("logline") or prem.get("summary") or ""
+    if isinstance(p, str) and p.strip():
+        parts.append(p.strip().rstrip(".") + ".")
+    sums = [(c.get("number"), str(c.get("summary") or "").strip()) for c in chapters or [] if c.get("summary")]
+    if not sums:
+        outline = ((plan.get("outline") or {}).get("data") or {}).get("chapters") or []
+        sums = [(i + 1, str((ch or {}).get("summary") or "").strip()) for i, ch in enumerate(outline)
+                if isinstance(ch, dict)]
+    for num, t in sums:
+        if t:
+            parts.append(f"Ch {num}: {t.rstrip('.')}.")
+    text = " ".join(parts)
+    if len(text) > SO_FAR_MAX:  # keep the beginning and the END (the end is where the sequel starts)
+        text = text[:SO_FAR_MAX // 3].rstrip() + " … " + text[-(SO_FAR_MAX * 2 // 3):].lstrip()
+    return text
+
+
+def changes_state(s: dict, n: int) -> dict:
+    """📚 H7: has "what changed in book n" been looked for and reviewed? -> {state, waiting}. ``state``: ``not_found``
+    (never looked for), ``waiting`` (proposals not approved or dismissed yet), ``reviewed``, ``skipped`` (the author
+    chose to start the sequel without them)."""
+    key = str(n)
+    waiting = len((s.get("proposals") or {}).get(key) or {}) + len((s.get("thing_proposals") or {}).get(key) or {})
+    if waiting:
+        return {"state": "waiting", "waiting": waiting}
+    if key in (s.get("skipped") or {}):
+        return {"state": "skipped", "waiting": 0}
+    found = key in (s.get("found") or {}) or bool((s.get("changes") or {}).get(key)) or \
+        bool((s.get("thing_changes") or {}).get(key))
+    return {"state": "reviewed" if found else "not_found", "waiting": 0}
+
+
+def start_words(state: dict) -> str:
+    """The plain sentence about where the characters start — only says "exactly" when it is true."""
+    if state.get("state") == "reviewed":
+        return "The characters start exactly as they were at the end of that book."
+    return ("The characters start as the approved changes of that book leave them; what changed in that book was not "
+            "reviewed, so some changes (an injury, a lost item, a death) may be missing.")
 
 
 def start_sequel(app, principal: str, pid: str, branch: str, body=None) -> dict:
@@ -867,6 +932,32 @@ def start_sequel(app, principal: str, pid: str, branch: str, body=None) -> dict:
     if body.get("author_confirms") is not True:
         raise _err("APPROVAL_REQUIRED", "/author_confirms", "pressing 📚 Start a sequel is your consent for the new "
                                                             "book's run; send author_confirms: true")
+    # 📚 H7: what changed in this book (an injury, a lost item, a death) is found and reviewed BEFORE the sequel
+    # starts — also for a book on its own (book 1), whose run never looked for it
+    if _exists(app.store, pid):
+        s0 = of_book(app.store, pid, branch)
+        n0 = number_of(s0, pid)
+        st = changes_state(s0, n0)
+        skip = body.get("skip_changes") is True
+        if skip and st["state"] in ("not_found", "waiting"):
+            with _LOCK:
+                s1 = ensure(app.store, pid, branch)
+                s1.setdefault("skipped", {})[str(n0)] = {"at": now_iso(), "waiting": st["waiting"]}
+                _save(app.store, s1)
+        elif st["state"] == "not_found":
+            if not _chapters(app, pid, branch):
+                raise _err("MISSING_INPUT", "/chapters", NO_CHAPTERS_FOR_SEQUEL)
+            job = start_find(app, principal, pid, branch)
+            return {"run": None, "finding": job, "changes": "finding",
+                    "message": f"📚 First, the AI reads this book for what changed for each character (an injury, a "
+                               f"lost item, who died) so book {n0 + 1} starts exactly where this one ends. When it is "
+                               "done, ✔ approve or dismiss the changes in 📖 Book Bible → 📚 Series, then press 📚 "
+                               "Start a sequel again (or start without them)."}
+        elif st["state"] == "waiting":
+            raise _err("APPROVAL_REQUIRED", "/skip_changes",
+                       f"{st['waiting']} change(s) found in this book are waiting for you (📖 Book Bible → 📚 Series). "
+                       f"✔ Approve or dismiss them first, so book {n0 + 1} starts where this one ends — or start "
+                       "the sequel without them (skip_changes: true).")
     bible, sequel = sequel_bible(app, pid, branch, body)
     bid = app.opener.stash(bible)
     run_body = {"author_confirms": True, "from_bible": {"bible_id": bid}, "reuse_plan": False, "sequel": sequel}
@@ -876,8 +967,12 @@ def start_sequel(app, principal: str, pid: str, branch: str, body=None) -> dict:
     run = app.autobook.start(principal, run_body)
     return {"run": run, "sequel": {k: sequel[k] for k in ("series_id", "number", "previous", "title",
                                                           "previous_title", "hook")},
-            "message": f"📚 Book {sequel['number']} has started: “{sequel['title']}”. Its characters start as they were "
-                       f"at the end of “{sequel['previous_title']}”."}
+            "changes": sequel.get("changes"),
+            "message": f"📚 Book {sequel['number']} has started: “{sequel['title']}”. " + (
+                f"Its characters start as they were at the end of “{sequel['previous_title']}”."
+                if sequel.get("changes") == "reviewed" else
+                f"Its characters start as the approved changes of “{sequel['previous_title']}” leave them (you "
+                "started without reviewing what changed in it, so some changes may be missing).")}
 
 
 def sequel_status(app, pid: str, branch: str, s: dict | None = None) -> dict:
@@ -909,7 +1004,8 @@ def sequel_status(app, pid: str, branch: str, s: dict | None = None) -> dict:
         return {"possible": why is None, "why": why, "number": n, "next_number": n + 1,
                 "next_book": {"number": taken["number"], "title": taken.get("title"),
                               "project_id": taken.get("project_id")} if taken else None,
-                "proposals_here": props, "series_name": s.get("name") or "", "in_series": not s.get("virtual")}
+                "proposals_here": props, "series_name": s.get("name") or "", "in_series": not s.get("virtual"),
+                "changes": changes_state(s, n)}
     except Exception:  # noqa: BLE001
         log.exception("series: sequel status of %s", pid)
         return {"possible": False, "why": "The series of this book could not be read, so a sequel cannot be started "
@@ -930,7 +1026,10 @@ def clean_sequel_setting(store, raw) -> dict | None:
     return {"series_id": raw["series_id"], "number": n, "previous": str(raw.get("previous") or "")[:80],
             "previous_number": raw.get("previous_number") if isinstance(raw.get("previous_number"), int) else n - 1,
             "previous_title": _clip(raw.get("previous_title"), 200), "title": _clip(raw.get("title"), 200),
-            "keys": {str(k)[:120]: str(v)[:40] for k, v in list(keys.items())[:200]}, "hook": bool(raw.get("hook"))}
+            "keys": {str(k)[:120]: str(v)[:40] for k, v in list(keys.items())[:200]}, "hook": bool(raw.get("hook")),
+            "story_so_far": _clip(raw.get("story_so_far"), SO_FAR_MAX + 10),
+            "changes": raw.get("changes") if raw.get("changes") in ("reviewed", "skipped", "waiting", "not_found")
+            else None}
 
 
 def register_sequel(store, sequel: dict, pid: str, branch: str = "main") -> None:
