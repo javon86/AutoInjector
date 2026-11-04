@@ -7,6 +7,7 @@
    ornaments; system fonts only. Print gives clean pages (light paper for every look). Everything is drawn with DOM APIs
    (no innerHTML with book data); the ornaments are constant SVG strings of this file. Styles are scoped under .bnd. */
 import { SCHEMA } from './binder-schema.js';
+import { CODE_MAP } from './code-map.js';
 import { problemFor } from './problems.js';
 
 /* ======================================================================= constants */
@@ -23,6 +24,14 @@ const GENRE_LOOK = [
   [/fantasy|adventure|myth|fairy/, 'fantasy'], [/sci|space|cyber|dystop/, 'scifi'], [/myster|thriller|crime|detective|noir|suspense/, 'noir'],
   [/romanc|love/, 'romance'], [/horror|gothic|ghost/, 'horror'], [/comed|humou?r|child|picture|kid/, 'playful'], [/literary|historical/, 'classic'],
 ];
+/** 🔢 the Book Bible codes (code_map.py): binder field id -> code, binder section -> its code section(s) */
+const CODE_OF_FID = CODE_MAP.fid;
+const CODES_OF_SEC = (() => {
+  const out = {};
+  for (const [code, [, , bsecs]] of Object.entries(CODE_MAP.sections)) for (const b of bsecs) (out[b] = out[b] || []).push(code);
+  return out;
+})();
+export function codeOf(fid) { return CODE_OF_FID[fid] || null; }
 export function lookForGenre(genre) {
   const g = String(genre || '').toLowerCase().replace(/[’']/g, '');
   for (const [re, look] of GENRE_LOOK) if (re.test(g)) return look;
@@ -169,7 +178,7 @@ export async function viewBinder(main, x, rest = []) {
   document.body.classList.add('bnd-on');
   main.appendChild(h('div', { class: 'page-head bnd-apphead no-print' }, h('div', null,
     x.crumbs(['Your books', '#/'], [S.project.name, plink()], 'Book Bible'), h('h1', null, '📖 Book Bible'))));
-  const root = h('div', { class: 'bnd', 'data-testid': 'binder', 'data-look': 'classic', 'data-fids': 'off', 'data-mode': 'one' });
+  const root = h('div', { class: 'bnd', 'data-testid': 'binder', 'data-look': 'classic', 'data-fids': 'off', 'data-codes': 'off', 'data-mode': 'one' });
   main.appendChild(root);
   root.appendChild(x.loadingState('Opening the Book Bible…'));
   const printStyle = h('style', { id: 'bnd-print-style' });
@@ -287,6 +296,7 @@ export async function viewBinder(main, x, rest = []) {
     look: LOOKS[book.look_stored] ? book.look_stored : LOOKS[saved.look] ? saved.look : LOOKS[book.look] ? book.look : autoLook,
     mode: saved.mode === 'all' ? 'all' : 'one',
     fids: !!saved.fids,
+    codes: !!saved.codes,   // 🔢 Show codes (C1c = a character's eyes)
     idx: Math.max(0, pages.findIndex(p => p.page_id === rest[0])),
     keep: saved,
     asOf: null,      // 📖 As of book N (null: this book)
@@ -482,9 +492,21 @@ export async function viewBinder(main, x, rest = []) {
     const words = problemFor(err.problem || err.code, e && e.status);
     return [err.message || words.what, err.fix || words.fix].filter(Boolean).join(' — ');
   }
+  function codeTag(id) {
+    const c = CODE_OF_FID[id];
+    return c ? h('span', { class: 'bnd-code', title: `Code ${c}: ${(CODE_MAP.fields[c] || [''])[0]}` }, c) : null;
+  }
+  /** 🔢 every [data-fid] box drawn by hand (not through fidTag) gets its code too */
+  function decorateCodes(el) {
+    for (const f of el.querySelectorAll('[data-fid]')) {
+      if (f.querySelector('.bnd-code')) continue;
+      const tagEl = codeTag(f.getAttribute('data-fid'));
+      if (tagEl) f.insertBefore(tagEl, f.firstChild);
+    }
+  }
   function fidTag(id) {
     const m = META[id] || {};
-    return [h('span', { class: 'bnd-fid' }, id), m.nw ? h('span', { class: 'bnd-tag bnd-fid' }, 'NEW') : null, m.auto ? h('span', { class: 'bnd-tag bnd-fid' }, 'AUTO') : null];
+    return [codeTag(id), h('span', { class: 'bnd-fid' }, id), m.nw ? h('span', { class: 'bnd-tag bnd-fid' }, 'NEW') : null, m.auto ? h('span', { class: 'bnd-tag bnd-fid' }, 'AUTO') : null];
   }
   function proposedMark(f) {
     return f && (f.status === 'proposed' || f.draft === true) ? h('span', { class: 'bnd-prop', title: 'Proposed — waiting for your approval' }, '✎', h('span', { class: 'bnd-sr' }, ' proposed')) : null;
@@ -623,6 +645,7 @@ export async function viewBinder(main, x, rest = []) {
     const route = safeRoute(secEdit(p, code));
     return h('section', { class: `bnd-sec ${opts.cls || ''}`, 'data-sec': code, id: `bbs-${p.page_id}-${code}`, 'aria-labelledby': `bbh-${p.page_id}-${code}` },
       h('header', { class: 'bnd-sec-h' },
+        (CODES_OF_SEC[code] || []).length ? h('span', { class: 'bnd-code bnd-sec-code', title: `Codes of this section: ${CODES_OF_SEC[code].map(c => `${c} ${CODE_MAP.sections[c][0]}`).join(' · ')}` }, CODES_OF_SEC[code].join(' · ')) : null,
         h('span', { class: 'bnd-sid bnd-fid' }, code),
         h('h3', { id: `bbh-${p.page_id}-${code}` }, opts.title || s.name),
         h('span', { class: 'bnd-sec-tools' }, badge(secStatus(p, code), true),
@@ -1498,6 +1521,11 @@ export async function viewBinder(main, x, rest = []) {
             h('div', { class: 'bnd-gl-acts' },
               data.read_only ? null : h('button', { type: 'button', class: 'bnd-gl-btn', 'data-testid': 'binder-fill', title: 'The AI reads the book and proposes the 🆕 quick facts. Nothing you wrote is replaced; you approve each proposal.', onclick: ev => runFill(null, ev.currentTarget) }, '✨ Fill from the book'),
               factsTarget ? pageLink(factsTarget, `Show me → ${pageTitle(factsTarget)}`, 'bnd-gl-link') : null)),
+          card('glance-fill-all', '📖 Fill in the whole Book Bible',
+            h('p', { class: 'bnd-gl-small' }, 'The AI fills every empty section of every page — characters, places, items, magic, groups, the world and the story plan — from your plan and what is written so far. Nothing you wrote is replaced; every new detail waits for your OK.'),
+            fillAllNote,
+            h('div', { class: 'bnd-gl-acts' },
+              data.read_only ? null : h('button', { type: 'button', class: 'bnd-gl-btn', 'data-testid': 'binder-fill-all', onclick: ev => runFillAll(ev.currentTarget) }, '📖 Fill in the whole Book Bible'))),
           card('glance-export', '⬇ Export',
             h('p', { class: 'bnd-gl-small' }, 'Every binder page, ready to share or print (this At a glance page is left out).'),
             h('div', { class: 'bnd-gl-acts' }, pdfBtn('bnd-gl-btn', 'glance-pdf'), docxBtn('bnd-gl-btn', 'glance-docx'), printBtn('bnd-gl-btn', 'glance-print'))),
@@ -1633,6 +1661,43 @@ export async function viewBinder(main, x, rest = []) {
     const last = (job.results || []).slice(-1)[0] || {};
     await reloadData();
     showMsg('bnd-ok-msg', job.status === 'cancelled' ? 'Stopped. ' : '✔ ', last.message || 'Done. The proposals are marked ✎ — ✔ approve them or ✏ edit them.');
+  }
+  /** 📖 Fill in the whole Book Bible: POST …/binder/fill_all (a job: progress, Stop), then "N sections filled, M still empty (why)" */
+  const fillAllNote = h('div', { class: 'bnd-gl-small', 'aria-live': 'polite', 'data-testid': 'binder-fill-all-note' });
+  let fillingAll = false;
+  async function runFillAll(btn) {
+    if (fillingAll) return;
+    fillingAll = true;
+    if (btn) btn.disabled = true;
+    let job;
+    try { job = await api('POST', bpath('/binder/fill_all'), { body: {} }); }
+    catch (e) { fillingAll = false; if (btn) btn.disabled = false; showMsg('bnd-err', '📖 Filling the whole Book Bible did not start: ', plainError(e)); return; }
+    const line = h('span', null, '📖 Reading the book…');
+    const bar = h('progress', { max: String(job.total || 1), value: '0', 'aria-label': 'Fill the whole Book Bible progress' });
+    const stop = h('button', { type: 'button', class: 'bnd-inline-btn', 'data-testid': 'binder-fill-all-stop', onclick: async () => {
+      stop.disabled = true;
+      try { await api('POST', bpath(`/review/ai/${encodeURIComponent(job.job_id)}/cancel`)); } catch { /* it ends anyway */ }
+    } }, 'Stop');
+    clear(msg).appendChild(h('div', { class: 'bnd-progress-line', 'data-testid': 'binder-fill-all-progress' }, line, bar, stop));
+    const show = j => { line.textContent = `📖 ${j.phase || 'Filling the Book Bible'} — ${j.done || 0} of ${j.total || 1}`; bar.max = j.total || 1; bar.value = j.done || 0; };
+    show(job);
+    while (!['done', 'error', 'cancelled'].includes(job.status)) {
+      await new Promise(r => setTimeout(r, 900));
+      if (!document.body.contains(root)) { fillingAll = false; return; }   // the page changed; the job keeps going
+      try { job = await api('GET', bpath(`/review/ai/${encodeURIComponent(job.job_id)}`)); } catch { continue; }
+      show(job);
+    }
+    fillingAll = false;
+    if (btn) btn.disabled = false;
+    if (job.status === 'error' && !(job.results || []).length) { showMsg('bnd-err', '📖 Filling the whole Book Bible did not work: ', plainError({ body: { errors: [job.error || {}] } })); return; }
+    const last = (job.results || []).slice(-1)[0] || {};
+    const sm = last.summary || job.summary || null;
+    await reloadData();
+    showMsg(job.status === 'error' ? 'bnd-err' : 'bnd-ok-msg', job.status === 'cancelled' ? '' : '✔ ', last.message || 'Done. The new details are marked ✎ — ✔ approve them or ✏ edit them.');
+    const note = document.querySelector('[data-testid="binder-fill-all-note"]') || fillAllNote;
+    if (sm) clear(note).append(h('b', null, `${sm.filled_sections} section${sm.filled_sections === 1 ? '' : 's'} filled, ${sm.empty_sections} still empty`),
+      (sm.reasons || []).length ? h('ul', null, sm.reasons.map(r => h('li', null, `${r.sections}: ${r.why}`))) : null,
+      h('small', null, sm.derived ? `Not AI fields: ${sm.derived}.` : ''));
   }
   /** after an edit, an approval or a fill: the binder again, on the same page */
   async function reloadData() {
@@ -1806,6 +1871,8 @@ export async function viewBinder(main, x, rest = []) {
   const btnAll = h('button', { type: 'button', class: 'bnd-seg', 'aria-pressed': 'false', 'data-testid': 'binder-all', onclick: () => { closeMenus(); setMode('all'); } }, '📚 All pages');
   const fidBox = h('input', { type: 'checkbox', id: 'bnd-fids', 'data-testid': 'binder-fids', checked: st.fids });
   fidBox.addEventListener('change', () => { st.fids = fidBox.checked; st.keep.fids = st.fids; persist(); root.setAttribute('data-fids', st.fids ? 'on' : 'off'); });
+  const codeBox = h('input', { type: 'checkbox', id: 'bnd-codes', 'data-testid': 'binder-codes', checked: st.codes });
+  codeBox.addEventListener('change', () => { st.codes = codeBox.checked; st.keep.codes = st.codes; persist(); root.setAttribute('data-codes', st.codes ? 'on' : 'off'); });
   /** a small drop-down of the toolbar (a <details>: keyboard and screen readers know it; Escape or a click outside closes it) */
   function menu(label, testid, title, ...items) {
     const d = h('details', { class: 'bnd-menu', 'data-testid': testid },
@@ -1841,7 +1908,9 @@ export async function viewBinder(main, x, rest = []) {
     menu('⋯ View options', 'binder-view', 'How the pages are shown',
       h('span', { class: 'bnd-segs', role: 'group', 'aria-label': 'How many pages to show' }, btnOne, btnAll),
       asOfPick,
-      h('label', { class: 'bnd-check', for: 'bnd-fids' }, fidBox, ' Show field numbers')));
+      h('label', { class: 'bnd-check', for: 'bnd-fids' }, fidBox, ' Show field numbers'),
+      h('label', { class: 'bnd-check', for: 'bnd-codes', title: 'Short codes for every detail: C1c is a character\u2019s eyes, C11 all of their Looks. ❓ Help → 🔢 Code map lists them all.' }, codeBox, ' Show codes'),
+      h('a', { class: 'bnd-menu-item', href: '#/help/codes', 'data-testid': 'binder-codemap-link' }, '🔢 Code map')));
 
 
   // rail: search + contents
@@ -1896,11 +1965,13 @@ export async function viewBinder(main, x, rest = []) {
     if (st.mode === 'one' && st.home) { stage.appendChild(renderGlance()); return; }
     const list_ = st.mode === 'all' ? pages : [pages[st.idx]];
     for (const p of list_) stage.appendChild(renderPage(p));
+    decorateCodes(stage);
   }
   function draw() {
     root.setAttribute('data-look', st.look);
     root.setAttribute('data-mode', st.mode);
     root.setAttribute('data-fids', st.fids ? 'on' : 'off');
+    root.setAttribute('data-codes', st.codes ? 'on' : 'off');
     btnOne.setAttribute('aria-pressed', String(st.mode === 'one'));
     btnAll.setAttribute('aria-pressed', String(st.mode === 'all'));
     printStyle.textContent = pageCss();

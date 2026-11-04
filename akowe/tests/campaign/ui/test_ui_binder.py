@@ -1393,7 +1393,7 @@ def test_at_a_glance_in_every_look(make_context, bd, look):
     assert page.get_attribute("[data-testid=binder]", "data-look") == look
     art = page.locator(GLANCE)
     assert art.locator(".bnd-corner").count() == 4
-    assert art.locator("[data-testid=glance-part]").count() == 12 and art.locator(".bnd-gl-card").count() == 6
+    assert art.locator("[data-testid=glance-part]").count() == 12 and art.locator(".bnd-gl-card").count() == 7  # + 📖 Fill in the whole Book Bible
     res = page.evaluate(CONTRAST_JS)
     low = [(k, r) for k, r in res["out"] if r < 4.5]
     assert not low, low

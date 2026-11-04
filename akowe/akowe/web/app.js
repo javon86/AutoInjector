@@ -10,6 +10,7 @@ import { viewPictures } from './pictures.js';  // 🖼 B3 chapter/scene pictures
 import { viewTrailer } from './trailer.js';  // 🎞 B2 the book trailer (AutoInjector 🎬 Video)
 import { viewCover } from './cover.js';  // 🎨 B3 book covers
 import { viewBinder } from './binder.js';  // 📖 Book Bible binder (the author's template studio design)
+import { CODE_MAP, CODE_MAP_MD } from './code-map.js';  // 🔢 the Book Bible code map (code_map.py)
 
 /* ======================================================================= constants */
 // Fallback names; the full guide (purpose, build order, featured actions) comes from GET /api/sets.
@@ -640,6 +641,7 @@ async function pickView(parts) {
   if (parts[0] === 'settings') return viewSettings;
   if (parts[0] === 'start') return viewStart;
   if (parts[0] === 'pair') return viewPair;
+  if (parts[0] === 'help' && (parts[1] || '').split('?')[0] === 'codes') return viewCodeMap;
   if (parts[0] === 'help') return viewHelp;
   if (parts[0] === 'shelf') return viewShelf;
   if (parts[0] === 'style') return m => S7C.viewStyle(m, s7c());  // ✒️ P25
@@ -1202,7 +1204,74 @@ async function viewHelp(main) {
   main.appendChild(h('section', { class: 'card', 'aria-labelledby': 'hl-adv' }, h('h2', { id: 'hl-adv' }, 'Simple and Advanced view'),
     h('p', null, 'Akọwe starts in Simple view. Advanced view adds the expert tools: all the steps by set (A–K), branches, Jump (Ctrl K), the health panel, Test workflow, Test everything and the book’s features. Nothing is lost in Simple view, and Ctrl K jumps to any page in both.'),
     h('div', { class: 'row' }, modeSwitch('mode-toggle-help', true))));
+  main.appendChild(h('section', { class: 'card', 'aria-labelledby': 'hl-codes' }, h('h2', { id: 'hl-codes' }, '🔢 Book Bible codes'),
+    h('p', null, 'Every detail of the Book Bible has a short code: a kind letter, a section number and a field letter. C1c is a character’s eyes; C11 (the number twice) is all of their Looks. Checks and corrections use the codes to say exactly which detail they mean.'),
+    h('div', { class: 'row' }, h('a', { class: 'btn primary', href: '#/help/codes', 'data-testid': 'help-codemap-link' }, '🔢 Open the code map'))));
   main.appendChild(helpCard());
+}
+
+/* ======================================================================= ❓ Help → 🔢 Code map (code_map.py) */
+function viewCodeMap(main) {
+  const M = CODE_MAP;
+  main.appendChild(h('div', { class: 'page-head' }, h('div', null, crumbs(['My books', '#/'], ['Help', '#/help'], 'Code map'), h('h1', null, '🔢 Code map'),
+    h('p', { class: 'muted' }, 'A short code for every detail of the Book Bible.'))));
+  main.appendChild(h('section', { class: 'card', 'aria-labelledby': 'cm-how' }, h('h2', { id: 'cm-how' }, 'How the codes work'),
+    h('ul', { class: 'help-list' },
+      h('li', null, h('strong', null, 'Kind letter + section number + field letter'), ' = one exact detail: ', h('code', null, 'C1c'), ' is a character’s eyes.'),
+      h('li', null, h('strong', null, 'Kind letter + the section number twice'), ' = a whole section: ', h('code', null, 'C11'), ' is all of a character’s Looks, ', h('code', null, 'C33'), ' all of their Voice.'),
+      h('li', null, 'Sections are numbered 0–9, so a doubled number is never a two-digit section.'),
+      h('li', null, 'Kinds: ', Object.entries(M.kinds).map(([k, n], i) => [i ? ' · ' : '', h('strong', null, k), ` ${n.toLowerCase()}`])),
+      h('li', null, 'The old Forge letters still work: ', Object.entries(M.letters).map(([k, [n, sec]], i) => [i ? ' · ' : '', h('strong', null, k), ` ${n} → ${sec}`])),
+      h('li', null, 'In the 📖 Book Bible, ⋯ View options → Show codes puts the code next to every detail.'))));
+  const q = h('input', { type: 'search', id: 'cm-q', placeholder: 'Search: eyes, C1c, 5.2.8, voice…', autocomplete: 'off', 'data-testid': 'codemap-search' });
+  const kind = h('select', { id: 'cm-kind', 'data-testid': 'codemap-kind' }, h('option', { value: 'all' }, 'Every kind'),
+    Object.entries(M.kinds).map(([k, n]) => h('option', { value: k }, `${k} · ${n}`)));
+  const count = h('p', { class: 'muted small', 'aria-live': 'polite', 'data-testid': 'codemap-count' });
+  const download = () => {
+    const url = URL.createObjectURL(new Blob([CODE_MAP_MD], { type: 'text/markdown' }));
+    const a = h('a', { href: url, download: 'Book Bible code map.md' });
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 30000);
+    toast('Code map downloaded');
+  };
+  main.appendChild(h('div', { class: 'card row no-print' },
+    h('label', { for: 'cm-q' }, 'Find'), q, h('label', { for: 'cm-kind' }, 'Kind'), kind,
+    h('button', { type: 'button', 'data-testid': 'codemap-download', onclick: download }, '⬇ Download (.md)'),
+    h('button', { type: 'button', 'data-testid': 'codemap-print', onclick: () => window.print() }, '🖨 Print')));
+  main.appendChild(count);
+  const tbody = h('tbody');
+  main.appendChild(h('div', { class: 'card table-wrap' }, h('table', { class: 'codemap-table', 'data-testid': 'codemap-table' },
+    h('caption', { class: 'visually-hidden' }, 'Every Book Bible code'),
+    h('thead', null, h('tr', null, ['Code', 'Detail', 'Section', 'Binder no.', 'Stored as'].map(t => h('th', { scope: 'col' }, t)))), tbody)));
+  const fold = t => String(t || '').toLowerCase();
+  const all = [];
+  for (const [sec, [slabel, codes]] of Object.entries(M.sections)) {
+    all.push({ isSec: true, code: sec, label: slabel, kind: sec[0], hay: fold(`${sec} ${slabel} ${M.kinds[sec[0]]}`) });
+    for (const c of codes) {
+      const [label, binder, keys, ledger] = M.fields[c];
+      all.push({ code: c, label, sec, slabel, binder, keys: [...keys, ...ledger.map(l => `ledger ${l}`)], kind: c[0],
+        hay: fold(`${c} ${label} ${sec} ${slabel} ${binder.join(' ')} ${keys.join(' ')} ${ledger.join(' ')} ${M.kinds[c[0]]}`) });
+    }
+  }
+  function draw() {
+    const words = fold(q.value).split(/\s+/).filter(Boolean);
+    const k = kind.value === 'all' ? '' : kind.value;
+    clear(tbody);
+    let n = 0;
+    for (const r of all) {
+      if (k && r.kind !== k) continue;
+      if (words.length && !words.every(w => r.hay.includes(w))) continue;
+      if (r.isSec) { tbody.appendChild(h('tr', { class: 'codemap-sec', 'data-code': r.code }, h('th', { scope: 'row' }, h('code', null, r.code)), h('th', { colspan: '4', scope: 'colgroup' }, `${M.kinds[r.kind]} · ${r.label} (the whole section)`))); continue; }
+      n++;
+      tbody.appendChild(h('tr', { 'data-code': r.code }, h('td', null, h('code', null, r.code)), h('td', null, r.label),
+        h('td', null, `${r.sec} ${r.slabel}`), h('td', null, r.binder.join(', ') || '—'), h('td', { class: 'small' }, r.keys.join(', ') || '—')));
+    }
+    count.textContent = n ? `${n} detail${n === 1 ? '' : 's'} shown` : 'Nothing matches — try another word, a code like C1c or a field number like 5.2.8.';
+  }
+  q.addEventListener('input', draw);
+  kind.addEventListener('change', draw);
+  const pre = (location.hash.split('?')[1] || '').match(/(?:^|&)q=([^&]*)/);
+  if (pre) q.value = decodeURIComponent(pre[1]);
+  draw();
 }
 
 /* ======================================================================= views: set workspace */
@@ -7685,6 +7754,17 @@ function mbShell(title, ...body) {
   put(clear(d), h('div', { class: 'st-head' }, h('h2', { id: 'mab-title' }, title),
     h('button', { type: 'button', class: 'small', onclick: closeMakeBook, 'aria-label': 'Close (the run keeps going in the background)' }, '✕ Close')), ...body);
 }
+/** 📖 "Fill the whole Book Bible before writing" (run setting fill_bible): off = the just-in-time way (default) */
+function fillBibleSwitch(prefix) {
+  const id = `${prefix}-fill-bible`;
+  const box = h('input', { type: 'checkbox', role: 'switch', id, 'data-testid': id, 'aria-describedby': `${id}-hint` });
+  const state = h('span', { class: 'fb-state', 'aria-hidden': 'true' }, 'Off');
+  box.addEventListener('change', () => { state.textContent = box.checked ? 'On' : 'Off'; });
+  const el = h('fieldset', { class: 'field fb-switch' }, h('legend', null, '📖 Book Bible'),
+    h('div', { class: 'check-row' }, box, h('label', { for: id }, h('strong', null, 'Fill the whole Book Bible before writing'), ' ', state)),
+    h('p', { class: 'hint', id: `${id}-hint` }, 'Off (recommended): only the essentials are decided before chapter one, and the rest just in time, when a chapter needs it — fewer AI answers. On: before chapter one the AI fills every empty section of every page — characters, places, items, magic, groups, the world and the story plan — in a few batched answers, approved under your consent. Your own text is never replaced.'));
+  return { el, box, apply(body) { if (box.checked) body.fill_bible = true; } };
+}
 async function renderMakeSetup() {
   const fields = {};
   const err = h('div', { 'aria-live': 'polite' });
@@ -7702,6 +7782,7 @@ async function renderMakeSetup() {
   await loadChoicesInfo();
   const cf = choicesFields({}, 'mb');
   const s7 = await S7C.makeSetupExtras(s7c());  // P23 / P25 (Section 7c)
+  const fb = fillBibleSwitch('mb');  // 📖 Fill the whole Book Bible before writing (whole_bible.py), off by default
   fields.length = lengthBox.querySelector('input');
   const startAll = h('button', { type: 'button', class: 'primary big mab-go', 'data-testid': 'mb-start-auto' }, '⚡ Start — let the AI choose everything');
   const startSet = h('button', { type: 'submit', class: 'big', 'data-testid': 'mb-start' }, '⚡ Start with these settings');
@@ -7714,7 +7795,7 @@ async function renderMakeSetup() {
         h('div', { class: 'field' }, h('label', { for: 'mb-genre' }, 'Genre'), genre, h('datalist', { id: 'mb-genres' }, GENRES.map(g => h('option', { value: g }))), h('span', { class: 'hint' }, 'Empty = the AI chooses.')),
         h('div', { class: 'field' }, h('label', { for: 'mb-slot' }, 'Which AI'), slot, h('span', { class: 'hint' }, 'Automatic uses whichever AI is ready.'))),
       lengthBox,
-      h('div', { class: 'field' }, h('label', { for: 'mb-idea' }, 'Your idea (optional)'), idea), cf.el, pipe.el, s7.el),
+      h('div', { class: 'field' }, h('label', { for: 'mb-idea' }, 'Your idea (optional)'), idea), cf.el, pipe.el, s7.el, fb.el),
     err, h('div', { class: 'form-actions' }, startAll, startSet));
   const est = estimateBox(gridUI(), () => {  // ⏱ P28: AI answers and minutes before the run starts
     const l = form.querySelector('input[name="mb-len"]:checked'); const pl = pipe.get();
@@ -7740,6 +7821,7 @@ async function renderMakeSetup() {
       const pl = pipe.get(); if (pl) body.pipeline = pl;
     }
     s7.apply(body);  // P23 / P25 (Section 7c): beta reader and "write in my style"
+    fb.apply(body);  // 📖 the whole Book Bible before chapter one (only when switched on)
     startAll.disabled = startSet.disabled = true;
     err.appendChild(loadingState('Checking your AIs…'));
     if (!(await withAiCheck(body, 'the book'))) { clear(err); startAll.disabled = startSet.disabled = false; return; }

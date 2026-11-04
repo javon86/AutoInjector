@@ -609,9 +609,17 @@ def _words(s: str) -> set[str]:
                                                                      "there", "their", "about", "what", "when")}
 
 
+# 🔢 the running-notes code (code_map.py "N…") of the note each flag is about
+FLAG_FIELDS = {"INJURY_IGNORED": "N1a", "LOST_ITEM_BACK": "N2c", "DEAD_ACTS": "N3a", "NAME_SPELLING": "N8a",
+               "TRAVEL_TOO_FAST": "N6e", "SEASON_JUMP": "N6c", "DAY_BACKWARDS": "N6a", "ALREADY_KNEW": "N4a",
+               "NUMBER_CHANGED": "N77"}
+
+
 def _flag(code: str, e: dict, name: str, message: str, quote: str = "", fix: tuple | None = None) -> dict:
+    fc = FLAG_FIELDS.get(code)
     out = {"code": code, "chapter_id": e.get("chapter_id"), "number": e.get("number"), "name": name,
-           "message": message, "quote": _clip(quote, 300), "severity": "major" if code in (
+           "message": f"{message} ({fc})" if fc else message, "field_code": fc,
+           "quote": _clip(quote, 300), "severity": "major" if code in (
                "INJURY_IGNORED", "LOST_ITEM_BACK", "DEAD_ACTS", "ALREADY_KNEW", "TRAVEL_TOO_FAST") else "minor"}
     if fix:
         out["original"], out["replacement"] = fix

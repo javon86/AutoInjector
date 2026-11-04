@@ -49,6 +49,7 @@ import logging
 import re
 import threading
 
+from . import code_map
 from .errors import AkoweError
 from .jobs import now_iso
 
@@ -996,11 +997,14 @@ def contradictions(store, pid, branch, chapters: list[dict]) -> list[dict]:
             num = ch.get("number")
             where = f"Chapter {num}" if num else f"Chapter {ch.get('chapter_id')}"
 
-            def flag(ref, name, part, sheet, book):
+            def flag(ref, name, part, sheet, book, field=None):
+                # 🔢 the Book Bible code of the detail (code_map.py), next to the plain words: "Mara C1c (eyes)"
+                fc = code_map.code_of_field(*field) if field else None
+                said = f"{name} {fc} ({part.lower()}) doesn't match" if fc else f"{name}'s {part.lower()}"
                 out.append({"chapter_id": ch.get("chapter_id"), "number": num, "ref": ref, "name": name,
-                            "part": part, "sheet": sheet[:160], "book": book, "severity": "major",
+                            "part": part, "field_code": fc, "sheet": sheet[:160], "book": book, "severity": "major",
                             "code": "DETAIL_CONTRADICTION",
-                            "message": f"{where}: {name}'s {part.lower()} — the sheet says “{sheet[:120]}”, the "
+                            "message": f"{where}: {said} — the sheet says “{sheet[:120]}”, the "
                                        f"book says “{book}”. Which is right?"})
             for ref, lk in led["locked"].items():
                 kind, _, rid = ref.partition(":")
@@ -1017,7 +1021,8 @@ def contradictions(store, pid, branch, chapters: list[dict]) -> list[dict]:
                         for s in mine:
                             got = _colours(_near(s, noun))
                             if want and got and not (got & want):
-                                flag(ref, name, FIELDS[key]["label"], lk[key]["text"], " ".join(sorted(got)) + f" {noun}")
+                                flag(ref, name, FIELDS[key]["label"], lk[key]["text"], " ".join(sorted(got)) + f" {noun}",
+                                     ("character", key))
                                 break
                     if "primary_weapon" in lk:
                         want = {w.lower().rstrip("s") for w in _WEAPON_RE.findall(lk["primary_weapon"]["text"])}
@@ -1026,7 +1031,8 @@ def contradictions(store, pid, branch, chapters: list[dict]) -> list[dict]:
                             got = {("sabre" if w.lower() == "saber" else w.lower()) for w in _WEAPON_RE.findall(s)}
                             if want and got and not (got & want) and re.search(r"\b(her|his|their|%s's)\b"
                                                                                % re.escape(first), s, re.I):
-                                flag(ref, name, "Primary weapon", lk["primary_weapon"]["text"], ", ".join(sorted(got)))
+                                flag(ref, name, "Primary weapon", lk["primary_weapon"]["text"], ", ".join(sorted(got)),
+                                     ("character", "primary_weapon"))
                                 break
                     hand = (led["locked"].get(f"binder:{rid}") or {}).get("handedness")
                     if hand:
@@ -1035,7 +1041,8 @@ def contradictions(store, pid, branch, chapters: list[dict]) -> list[dict]:
                             side = (m.group(1) or m.group(2)).lower() if m else None
                             if side and hand["text"] in ("left", "right") and side != hand["text"] \
                                     and _WEAPON_RE.search(s):
-                                flag(ref, name, "Weapon hand", f"{hand['text']}-handed", f"{side} hand")
+                                flag(ref, name, "Weapon hand", f"{hand['text']}-handed", f"{side} hand",
+                                     ("character", "handedness"))
                                 break
                 elif kind == "item":
                     look = " ".join(v.get("text") or "" for k, v in lk.items() if k in ("overall_look", "one_line",
@@ -1050,7 +1057,7 @@ def contradictions(store, pid, branch, chapters: list[dict]) -> list[dict]:
                             continue
                         got = _colours(_near(s, noun, 2))
                         if got and not (got & want):
-                            flag(ref, name, "Look", look, " ".join(sorted(got)) + f" {noun}")
+                            flag(ref, name, "Look", look, " ".join(sorted(got)) + f" {noun}", ("item", "overall_look"))
                             break
     except Exception:  # noqa: BLE001 - a check is help, never a reason to fail
         log.exception("detail contradictions")
