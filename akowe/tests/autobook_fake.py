@@ -553,8 +553,14 @@ class BookFakeAI:
             if x.get("chapter") in nums:
                 probs.append(dict({"quote": "", "original": "", "replacement": ""}, **x))
         first = sorted(n for n in nums if isinstance(n, int))
-        return {"problems": probs, "summary": f"Chapters {first[0]}–{first[-1]}: Mara keeps searching." if first
-                else ""}
+        out = {"problems": probs, "summary": f"Chapters {first[0]}–{first[-1]}: Mara keeps searching." if first
+               else ""}
+        if ctx.get("stretch"):  # 📖 PR #117: the review of the stretch of chapters
+            out["stretch_review"] = {"pacing": "It moves.", "arc": "Mara gets closer to the truth.", "drift": "None.",
+                                     "working": ["The harbour feels real"],
+                                     "not_working": [f"Chapter {first[-1] if first else 1}: the harbour talk drags"],
+                                     "scores": {"pacing": 7, "arc_progress": 7, "continuity": 8, "characters": 7}}
+        return out
 
     def _details(self, ctx):
         out = {}

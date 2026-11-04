@@ -49,6 +49,8 @@ from . import approval_trust
 from . import assist as assist_mod
 from . import characters as chars_mod
 from . import costs as costs_mod
+from . import check_now as check_now_mod
+from . import cross_check
 from . import h_checks as hc
 from . import lengths as lengths_mod
 from . import pipeline as pipeline_mod
@@ -282,6 +284,11 @@ class _Runner:
         return bool(t and t.is_alive())
 
     def check(self, run: dict):
+        if check_now_mod._ANNOUNCE:  # noqa: SLF001 - 🔎 a "Check consistency now" queued: say so in the journal
+            try:
+                check_now_mod.notice(self, run)
+            except Exception:  # noqa: BLE001
+                log.exception("could not announce the queued consistency check")
         ctl = self._ctl.get(run["id"]) or {}
         if ctl.get("cancel"):
             raise RunCancelled()
@@ -937,6 +944,12 @@ class AutoBookService(_Runner):
             if not isinstance(v, bool):
                 raise AkoweError("INVALID_INPUT", f"/{k}", f"{k} must be true or false", status="REJECTED")
             out[k] = v
+        ck = cross_check.clean(body.get("checkers"))  # 🔎 PR #117: how many AIs check for mistakes
+        if ck is False:
+            raise AkoweError("INVALID_INPUT", "/checkers", "how many AIs check for mistakes: all, two or one",
+                             status="REJECTED")
+        if ck:
+            out["checkers"] = ck
         n = body.get("beta_readers", 1)  # 👥 idea #14: how many beta readers (1 = one AI; 2-3 = a panel)
         if isinstance(n, bool) or not isinstance(n, int) or not 1 <= n <= 3:
             raise AkoweError("INVALID_INPUT", "/beta_readers", "beta_readers: 1, 2 or 3", status="REJECTED")
@@ -1323,9 +1336,13 @@ class AutoBookService(_Runner):
             editor_next = head["module_id"] == "C02" and self._editor_settings(run).get("enabled") and \
                 self._on(run, "editor")
             what = the(ai_activity.nice(label))
+            # 🔎 PR #117: a chapter is reviewed by both AIs that did not write it (cross_check.py)
+            two = head["module_id"] == "C02" and cross_check.setting_of(run) != "one"
             try:
                 with ai_activity.doing(f"Reviewing {what}", done=f"Reviewed {what}"):
-                    res = self._review.review_one(rj, rid, auto=not editor_next)
+                    res = self._review.review_one(rj, rid, auto=not editor_next and not two)
+                if two:
+                    res = cross_check.second_review(self, run, rj, rid, res, label, auto=not editor_next)
             except AkoweError as exc:
                 self._ai_problem(exc, f"reviewing the {label}", record_id=rid, chapter_id=chapter_id)
             verdict = res["review"]["verdict"]
@@ -1523,6 +1540,7 @@ class AutoBookService(_Runner):
                 return self._editor_flag(run, st, ed, None, head, "the editor could not read it", "EDITOR_FAILED")
             if craft["verdict"] == "PASS":
                 ed.update(verdict="PASS", flagged=False, done_version=head["version"], notes=[])
+                self._must_fix_left(ed, head)
                 st["editor_note"] = self._editor_line(ed)
                 self._editor_summary(run)
                 self.save(run)
@@ -1595,6 +1613,8 @@ class AutoBookService(_Runner):
         if craft.get("independent") is False:
             self.event(run, "note", f"⚠️ {NOT_INDEPENDENT} (the editor of the {label} is the AI that wrote it)",
                        code="REVIEW_NOT_INDEPENDENT")
+        if craft.get("must_fix") and not (ed.get("must_fix") or {}).get("targets_list"):
+            ed["must_fix"] = {"targets_list": craft["must_fix"], "targets": len(craft["must_fix"]), "remained": None}
         cal = craft.get("calibration") or {}
         ed["calibration"] = {"flagged": bool(cal.get("flagged")), "reasked": cal.get("reasked", 0),
                              "two": bool(cal.get("two_reviewers"))}
@@ -1683,12 +1703,26 @@ class AutoBookService(_Runner):
             notes.append({"id": f["id"], "label": f.get("label"), "severity": f.get("severity"),
                           "why": clip_words(f.get("why"), 200), "passage": clip_words(f.get("passage"), 80)})
         ed.update(flagged=True, done_version=head["version"], notes=notes[:6], flag_reason=why, code=code)
+        self._must_fix_left(ed, head)
         self.event(run, "note", f"⚠️ Editor still had notes on the {ed.get('label')} ({why}); it is approved under "
                    "your run consent — see the run summary", code="EDITOR_NOTES", record_id=head["record_id"])
         st["editor_note"] = self._editor_line(ed)
         self._editor_summary(run)
         self.save(run)
         return head
+
+    @staticmethod
+    def _must_fix_left(ed: dict, head: dict | None) -> None:
+        """🔁 PR #117 (F): how many of the must-fix habits (2+ checks flagged them) are still in the chapter."""
+        mf = ed.get("must_fix") or {}
+        if not mf.get("targets_list") or not head:
+            return
+        from . import habits  # noqa: PLC0415
+        try:
+            res = habits.remaining(str((head.get("data") or {}).get("text") or ""), mf["targets_list"])
+            mf.update(targets=res["targets"], remained=res["remained"], items=res["items"])
+        except Exception:  # noqa: BLE001
+            log.exception("could not count the must-fix habits left")
 
     @staticmethod
     def _editor_line(ed: dict) -> str:
@@ -1699,6 +1733,9 @@ class AutoBookService(_Runner):
             bits.append(f"{ed['rounds']} rewrite round(s)")
         if ed.get("reviewer"):
             bits.append(f"by {ed['reviewer']}")
+        mf = ed.get("must_fix") or {}
+        if mf.get("targets"):
+            bits.append(f"{mf['targets']} must-fix habit(s), {mf.get('remained', 0)} still there")
         cal = ed.get("calibration") or {}
         if cal.get("flagged"):
             bits.append("⚠️ review too clean to trust (capped)")
@@ -1713,6 +1750,8 @@ class AutoBookService(_Runner):
                                                                                "PASS" and not e.get("flagged")),
             "rounds": sum(int(e.get("rounds") or 0) for e in eds), "kept": sum(int(e.get("kept") or 0) for e in eds),
             "rejected": sum(int(e.get("rejected") or 0) for e in eds),
+            "must_fix": sum(int((e.get("must_fix") or {}).get("targets") or 0) for e in eds),
+            "must_fix_left": sum(int((e.get("must_fix") or {}).get("remained") or 0) for e in eds),
             "flagged": [{"chapter_id": e.get("chapter_id"), "label": e.get("label"), "reason": e.get("flag_reason"),
                          "notes": e.get("notes") or []} for e in eds if e.get("flagged")],
             "settings": run.get("editor_settings")}
@@ -3194,6 +3233,10 @@ class AutoBookService(_Runner):
                 if rec:
                     continuity.note_written(self.store, run["project_id"], run["branch_id"], cid, rec, idx + 1)
                     continuity.recheck_done(self.store, run["project_id"], run["branch_id"], cid)
+                    # 🔎 PR #117: all the AIs check this chapter before the next one is written (checkpoints.py)
+                    due = run.setdefault("chapter_checks_due", [])
+                    if cid not in due:
+                        due.append(cid)
                 if self._on(run, "voices"):  # ⏱ 🔒 what this chapter relied on is fixed; contradictions are flagged
                     from . import story_details  # noqa: PLC0415
                     story_details.after_chapter(self, run, cid, idx + 1)
@@ -3261,8 +3304,17 @@ class AutoBookService(_Runner):
             st["message"] = "Checking that the ending keeps the book's promises"
             run["phase"] = st["message"]
             self.save(run)
+            # 🔎 PR #117: every working AI checks the ending (run setting "How many AIs check for mistakes")
+            writer = None
+            try:
+                last = chapters[-1]
+                _c, _l, appr_last = self.bp(run).chapter_prose(outline, last["chapter_id"])
+                writer = self._review.writer_of(pid, branch, appr_last).get("slot") if appr_last else None
+            except Exception:  # noqa: BLE001
+                writer = None
+            ck = cross_check.checker_slots(self, run, writer=writer or run["settings"].get("slot_id"))
             with ai_activity.doing("Checking that the ending keeps the book's promises", done="Checked the ending"):
-                return ending_check.check(self._review, self._sub_job(run, "ending_check", "book"))
+                return ending_check.check(self._review, self._sub_job(run, "ending_check", "book"), checkers=ck or None)
 
         def finish_draft(rid, cid, number):
             rec = self._review_until_approved(run, st, rid, f"chapter {cid}", chapter_id=cid)

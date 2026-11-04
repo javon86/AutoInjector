@@ -137,8 +137,9 @@ bridge to your home Wi-Fi, behind its key.
 - **Out of date (stale):** if something a record was built from changes, Akọwe marks that record out of date.
 - **AI slots:** AI-1, AI-2 and AI-3. By default they are Claude, ChatGPT and Gemini, through the bridge.
 - **⚡ AI activity:** while any AI works for Akọwe, a slim strip under the top bar shows, on every page, one row per
-  AI: which AI, what it is doing in plain words ("Writing chapter 7", "Reviewing chapter 7", "Writers' room: pitching
-  a twist"), for which book, where it is (waiting for the AI, answering, checking the answer, or waiting after a busy
+  AI: which AI, what it is doing in plain words ("Writing chapter 7", "Reviewing chapter 7", "Second review of chapter 7",
+  "Checking chapter 7 for consistency (all AIs)", "Chapters 6–10 review", "Check consistency now: chapters 3–7",
+  "Writers' room: pitching a twist"), for which book, where it is (waiting for the AI, answering, checking the answer, or waiting after a busy
   site with the seconds left), how long so far, and in a ⚡ run "chapter 7 of 20" with a small bar. When it finishes
   the row says ✔ Done (or ✖ / ⏳ / ⚠) for a few seconds and goes; with nothing at work the strip is gone. Click a row
   to open the run or the book. Code: `akowe/akowe/ai_activity.py` (every AI call passes one place that reports to it).
@@ -248,9 +249,12 @@ to a minute), so the run knows which AIs work.
      story so far, and your promises to the reader: content limits, themes, the central question, the point of
      view and tense. If the instructions are too long, the least important parts are cut first, and the run shows
      ⚠️ with exactly what was cut.
-   - **Akọwe's own checks**, then an **independent reviewer** (a different AI). If it asks for changes, the writer
-     fixes the draft, at most twice. A chapter that breaks your content limits, or switches person or tense, is
-     always sent back.
+   - **Akọwe's own checks**, then **two independent reviewers**: both AIs that did not write the chapter read it, each
+     on its own. If either asks for changes, the writer fixes the draft, at most twice; it is approved only when
+     neither objects. (With only one other AI working, one reviews it, as before.) A chapter that breaks your content
+     limits, or switches person or tense, is always sent back. A physical change inside the chapter must last: a
+     character who cracks a knee early in a chapter cannot run down the stairs later in it with no sign of it (Akọwe's
+     own check flags it for the reviewers, and they treat it as a major problem).
    - **The editor** reads it for craft and asks for rewrites of exact passages, at most two rounds. A rewrite is
      kept only if nothing got worse.
    - **Planned-to-page check:** did the plan really reach the page? At most one targeted fix. With a story shape,
@@ -258,12 +262,32 @@ to a minute), so the run knows which AIs work.
      deliver …", and the checkpoints and the ending check list any beat that did not land (one targeted fix).
    - **Approved** under your run consent. Then the **running notes (ledgers)** are updated: injuries, belongings,
      who is where, the day and season, who knows which secret, names, money.
+   - **🔎 All-AI check of the chapter:** every working AI — the writer too — reads the chapter in full against its
+     plan, the Book Bible, the running notes, the locked details and the chapters before, looking for mistakes, drift
+     and straying off the plan. What 2 or more AIs agree on is fixed (one fix pass, reviewed again); a problem only
+     one AI found is used only when its quote is really in the chapter, and fixed only when it is major — otherwise
+     it is listed for you. It never stops the book. The setting **How many AIs check for mistakes** (Make-a-book
+     screen) chooses All working AIs (default), Two, or One (the old way, no extra checks).
    - **Every 5 chapters** (you can change this), at each act's end, and after the last chapter: a **continuity
-     checkpoint** reads those chapters in full and fixes small mistakes. It also looks for side characters who
-     vanished and story threads that should have moved by now.
-   - **The ending check**, after the last chapter: does every setup pay off, does every named character get an
-     ending, does the main character change, does the ending answer the book's question? What is still open is
-     fixed in the last chapter(s) (one round), checked again, and anything left is listed for you.
+     checkpoint**. Every working AI reads those chapters in full, on its own, and looks for mistakes and drift
+     (characters' traits, voice and goals, world rules, tone, the timeline, injuries and belongings, names) and
+     chapters that stray from their plan; the agreement rules above decide what is fixed. It also looks for side
+     characters who vanished and story threads that should have moved by now. Every 5 chapters each AI also writes a
+     **review of those chapters** (pacing, how the story and the main character move, drift, what works and what does
+     not, scores); the run's notes and the report show "Chapters 6–10 review" with each AI's view and where they
+     agree.
+   - **The ending check**, after the last chapter, by every working AI: does every setup pay off, does every named
+     character get an ending, does the main character change, does the ending answer the book's question? What 2 or
+     more AIs find open is fixed in the last chapter(s) (one round), checked again; what only one AI found, and
+     anything left, is listed for you.
+   - An AI that is busy, missing or too slow is skipped with a note; the others' checks count. The book never waits.
+   - **🔎 Check consistency now** (a button on the ⚡ run window, 🏠 Book home and the 🧭 Continuity page — any time):
+     the same all-AI review as a checkpoint, on the chapters you choose — the last 5 (default), chapters X to Y, or the
+     whole book so far — with each AI's review of those chapters ("Chapters 3–7 review") and where they agree. During a
+     run it is queued (the run's journal says so) and runs after the chapter being written; its fixes go through the
+     run's fix pass under your run consent. Outside a run it works on its own and changes nothing approved: each fix
+     is offered, and **✔ Use these fixes** saves them as a new draft for you to approve. Only one at a time per book
+     (the button says why it is off). Code: `akowe/akowe/check_now.py`, `akowe/akowe/web/check-now.js`.
 10. **Planned details on the page:** a whole-book report.
 11. **Book format**, **put the book together**, **export PDF, EPUB and Word**. Each file is re-read by Akọwe's
     export check to make sure nothing was lost.
@@ -282,8 +306,11 @@ to a minute), so the run knows which AIs work.
     who gives up on slow starts. You can rewrite who they are on the 📊 report page. Each says whether they would
     finish and recommend the book, their favourite character, the best and worst chapter, and a score out of 10.
     Akọwe then shows where 2 or more readers agree (a **strong signal**), where they disagree, a chapter-by-chapter
-    map of where readers got lost or bored, and the top 5 things to fix. An AI that is not working is skipped with a
-    note. If the run is paused, the panel carries on with the readers still to read.
+    map of where readers got lost or bored, and the top 5 things to fix. Readers are AIs that did not write the book
+    first; when the writer must read too, it is named "(wrote most of the book)" and counts half when readers agree.
+    Every quote is checked against the book again; one not found word for word is marked and never used as evidence.
+    An AI that is not working is skipped with a note. If the run is paused, the panel carries on with the readers
+    still to read.
 
 **Where it stops for you:**
 
@@ -305,21 +332,23 @@ to a minute), so the run knows which AIs work.
 | Check | What it catches | When it runs |
 |---|---|---|
 | Akọwe's own checks | missing parts, wrong IDs, an outline without the main character | every draft |
-| Independent reviewer | a draft that does not fit the plan or the canon | every draft |
+| Independent reviewers | a draft that does not fit the plan or the canon; a chapter that forgets an injury from earlier in the same chapter | every draft (a chapter: both AIs that did not write it) |
+| 🔎 All-AI chapter check | mistakes, drift and straying off the plan, read by every working AI (the writer too); 2+ agree = fixed | every chapter (setting All) |
+| 🔎 Check consistency now | the same all-AI review as a checkpoint, on the chapters you choose | whenever you press it (queued between chapters during a run) |
 | No self-approval | an AI approving its own writing, or approving with no reason | every approval |
 | Your promises (content limits, themes, question) | a chapter showing what you ruled out | writer, reviewer and editor, every chapter |
 | Point of view and tense | a chapter that slips into another person or tense | every chapter |
 | Editor rubric | told-not-shown feelings, flat side characters, same-sounding voices, no stakes | every chapter |
 | Timeline arithmetic (no AI) | ages and years that don't add up ("twelve, twenty years ago… now forty") | the whole-book fact check, near the end |
 | Readability (no AI) | prose too hard or too simple for the book's readers | the book report and the scene grid |
-| Pattern check (no AI) | repeated habits ("went very still"), lists of three, same-length sentences | before the editor |
+| Pattern check (no AI) | repeated habits ("went very still"), lists of three, same-length sentences; a habit 2+ checks flag (pattern, originality, editor) is a must-fix for the editor, and the run says how many are left | before the editor |
 | ✨ Originality check (no AI, optional AI pass) | clichés and AI-sounding phrases ("a testament to", "a breath she didn't know she was holding", "It wasn't X. It was Y."), long dashes everywhere, too much hedging; per chapter, with quotes and reasons. Dialogue is left out unless you ask. An optional second AI (not the writer) rates passages 1–5 for "sounds machine-written"; its quotes are checked against the book | before the editor (so its rewrites target them; a rewrite that adds such phrases is not kept), in the book report, and on the 📊 report page (✨ button). Never blocks the book |
 | Voice cards | characters who all talk alike | writing and editing |
 | Locked details | eyes, hair, weapon or weapon hand changing | after each chapter |
 | Running notes (ledgers) | a healed limp, a lost knife drawn again, the dead speaking, misspelled names, wrong travel times | after each chapter |
 | Hand-edit follow-through | later chapters still built on what you edited away | when a changed chapter is approved again |
-| Continuity checkpoints | anything the notes missed, read in full | every N chapters and at the end |
-| Ending check | setups that never pay off, vanished side characters, an ending that misses the question | at checkpoints (light) and after the last chapter |
+| Continuity checkpoints | anything the notes missed and drift, read in full by every working AI; a review of each stretch of chapters | every N chapters and at the end |
+| Ending check | setups that never pay off, vanished side characters, an ending that misses the question (every working AI at the end) | at checkpoints (light) and after the last chapter |
 | Protagonist guarantee | a book that loses its main character | before the outline, the chapters and "done" |
 | Cut instructions ⚠️ | the writer silently missing facts, rules or voice cards | every chapter |
 | Needs list 🧠 | a listed detail that does not match the page (named by its code, e.g. "Mara C1c (eyes)"); things used but not planned | reviewer and checkpoints, every chapter |
@@ -341,7 +370,18 @@ A few of these need more words:
   section on the page. When the chapter used something its list did not plan, the run says so ("🧠 Chapter 7 also
   used Tom Reed (not planned)") and the next plans learn from it. ⏱ Time and AI use shows how much smaller the
   writer's instructions were ("Smart memory saved ~N% of instruction size").
-- **Book report.** For a long book the report says when it only read a sample. **📖 Read the whole book** reads
+- **Who checks what (setting "How many AIs check for mistakes").** All working AIs (default): each chapter is
+  reviewed by the two AIs that did not write it and then checked by all of them; the checkpoints, the stretch reviews
+  and the ending check are read by all of them. Two: two AIs. One: the old way, one AI. What 2 or more AIs report is
+  confirmed and fixed; a problem one AI found needs a quote Akọwe finds in the chapter (else it is dropped, with a
+  note) and is fixed only when it is major, otherwise listed for you. One combined fix pass, not one per AI. With
+  three AIs this costs about 3 to 5 more AI answers per chapter and three times the answers per checkpoint.
+- **Book report.** It shows who checked the book and how far they agreed, and each stretch review. Its PDF keeps
+  accented letters and other alphabets (ọ, ẹ, ł, Greek); a symbol it cannot print becomes a word or "•". "Written by"
+  names the AI that wrote the chapter ("Claude + editor" when the editor's changes are in it). Advice with nothing
+  concrete to do is left out of "What to try next". An AI whose high scores keep needing to be lowered is named
+  ("Gemini's whole-book scores were lowered 3 times in recent books"). For a long book the report says when it only
+  read a sample. **📖 Read the whole book** reads
   every part.
 
 **🚀 Launch kit** (📤 Export → 🚀 Launch kit). Everything to put the book in a store such as Amazon KDP: the

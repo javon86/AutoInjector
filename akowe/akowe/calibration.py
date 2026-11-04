@@ -331,6 +331,41 @@ def record(store, family: str | None, name: str, *, vs_other: float | None = Non
         log.exception("could not record the reviewer leniency")
 
 
+def note_unbacked(store, family: str | None, name: str) -> int:
+    """PR #117 (E): one more whole-book review whose high scores had no quotes to back them and were lowered (the
+    existing cap). Counted per AI across books (``unbacked``). Returns the new count; never raises."""
+    if not family:
+        return 0
+    try:
+        with _lock:
+            cur = store.get_setting(KEY) or {}
+            cur = cur if isinstance(cur, dict) else {}
+            e = _entry(cur, family, name)
+            e["unbacked"] = int(e.get("unbacked") or 0) + 1
+            e["updated_at"] = _now()
+            store.set_setting(KEY, cur)
+            return e["unbacked"]
+    except Exception:  # noqa: BLE001
+        log.exception("could not count the unbacked scores")
+        return 0
+
+
+def unbacked_of(store, family: str | None) -> int:
+    try:
+        cur = store.get_setting(KEY) or {}
+        return int(((cur.get(family) or {}) if isinstance(cur, dict) else {}).get("unbacked") or 0)
+    except Exception:  # noqa: BLE001
+        return 0
+
+
+def unbacked_line(name: str, n: int) -> str:
+    """"Gemini's scores were lowered 3 times in recent books" (only from the second time on)."""
+    if n < 2:
+        return ""
+    return (f"{name}'s whole-book scores were lowered {n} times in recent books (high scores with no quote to back "
+            "them).")
+
+
 def words(lv: float | None, n: int) -> str:
     if lv is None or n < MIN_OBS:
         return "not enough reviews yet to tell"

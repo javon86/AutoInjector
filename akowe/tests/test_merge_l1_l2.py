@@ -62,7 +62,7 @@ def test_a_hand_edit_sets_the_ledger_aside_from_that_chapter_on_and_marks_later_
     assert continuity._checkpoint_hook in continuity.INVALIDATE_HOOKS
     fake = ledger_book()
     app = make_app(tmp_path, fake=fake)
-    run = done(run_book(app, {"length": "short_story", "pictures": False}))
+    run = done(run_book(app, {"checkers": "one", "length": "short_story", "pictures": False}))
     pid, store = run["project_id"], app.store
     cps = {c["id"]: c for c in checkpoints.items(store, pid, BR)}
     assert set(cps) == {"after-1", "after-2", "final"} and all(c["status"] == "done" for c in cps.values())
@@ -115,7 +115,7 @@ def test_checkpoints_check_setups_so_far_and_the_final_ending_check_runs_once(tm
                 "arc": {"kept": True, "note": "", "fix": ""}, "question": {"kept": True, "note": "", "fix": ""}}
     fake.ending_script = [None, dropped]
     app = make_app(tmp_path, fake=fake)
-    run = done(run_book(app, {"length": "short_story", "pictures": False}))
+    run = done(run_book(app, {"checkers": "one", "length": "short_story", "pictures": False}))
     pid, store = run["project_id"], app.store
     calls = [task for task, _ctx in fake.prompts["ending"]]
     assert len(calls) == 3, calls  # after chapter 1, after chapter 2, and the ONE final ending check
@@ -136,7 +136,7 @@ def test_a_plan_without_setups_makes_no_extra_ai_call_at_checkpoints(tmp_path, m
     monkeypatch.setattr(checkpoints, "DEFAULT_EVERY", 1)
     fake = ledger_book()
     app = make_app(tmp_path, fake=fake)
-    run = done(run_book(app, {"length": "short_story", "pictures": False}))
+    run = done(run_book(app, {"checkers": "one", "length": "short_story", "pictures": False}))
     assert [ctx["upto"] for _t, ctx in fake.prompts["ending"]] == [None]  # only the final ending check
     cps = {c["id"]: c for c in checkpoints.items(app.store, run["project_id"], BR)}
     assert cps["after-1"]["ending"]["skipped"]

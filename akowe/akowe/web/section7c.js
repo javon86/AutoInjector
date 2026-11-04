@@ -163,7 +163,7 @@ export function betaCard(c) {
         h('td', { class: 'num' }, v.best ? String(v.best) : '–'), h('td', { class: 'num' }, v.worst ? String(v.worst) : '–')))))));
     const strong = (cmp.agree || []).filter(g => !g.positive);
     const loved = (cmp.agree || []).filter(g => g.positive);
-    const sample = g => { const q = (g.quotes || []).find(x => x.quote); return q ? [' — ', h('q', null, q.quote), h('span', { class: 'muted' }, ` (${q.reader})`)] : null; };
+    const sample = g => { const q = (g.quotes || []).find(x => x.quote && x.verified !== false) || (g.quotes || []).find(x => x.quote); return q ? [' — ', h('q', null, q.quote), h('span', { class: 'muted' }, ` (${q.reader})${q.verified === false ? ' (not found word for word)' : ''}`)] : null; };
     wrap.appendChild(h('h3', null, 'Where the readers agree'));
     wrap.appendChild(strong.length || loved.length
       ? h('ul', { class: 'small', 'data-testid': 'beta-agree' },
@@ -191,7 +191,7 @@ export function betaCard(c) {
     }
     wrap.appendChild(h('h3', null, 'What to fix first'));
     wrap.appendChild((cmp.fixes || []).length
-      ? h('ol', { class: 'small', 'data-testid': 'beta-fixes' }, cmp.fixes.map(f => h('li', null, f.strong ? h('strong', null, '💪 ') : '', f.text, f.quote ? [' — ', h('q', null, f.quote)] : null)))
+      ? h('ol', { class: 'small', 'data-testid': 'beta-fixes' }, cmp.fixes.map(f => h('li', null, f.strong ? h('strong', null, '💪 ') : '', f.text, f.quote ? [' — ', h('q', null, f.quote), f.quote_verified === false ? h('span', { class: 'small muted' }, ' (not found word for word)') : null] : null)))
       : h('p', { class: 'small', 'data-testid': 'beta-fixes' }, '✔ Nothing the readers would fix.'));
     (r.readers || []).filter(x => x.status === 'done').forEach(x => {
       const d = h('details', { 'data-testid': `beta-reader-read-${x.n}` }, h('summary', null, `Reader ${x.n}: ${(x.reader || {}).name || 'An AI'} as ${(x.persona || {}).a_label || 'a reader'}`));

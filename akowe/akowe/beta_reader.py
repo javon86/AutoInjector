@@ -295,8 +295,9 @@ def findings(read: dict, n_chapters: int) -> list[dict]:
         fs.append({"id": "guessed", "severity": "major" if any(g["revealed_in_chapter"] - g["guessed_in_chapter"] >= 2
                                                                for g in early) else "minor",
                    "label": "Twists the reader saw coming", "chapters": sorted({g["guessed_in_chapter"] for g in early}),
-                   "detail": " ".join(f"“{g['guess']}” — guessed in chapter {g['guessed_in_chapter']}, revealed in "
-                                      f"chapter {g['revealed_in_chapter']}." for g in early[:4]),
+                   # PR #117 (C): the reader's guess is its own words, never shown as if it were a quote of the book
+                   "detail": " ".join(f"Guessed: {g['guess']} (in chapter {g['guessed_in_chapter']}, revealed in "
+                                      f"chapter {g['revealed_in_chapter']})." for g in early[:4]),
                    "advice": "Soften the line that gave it away, or add a believable second explanation."})
     stop = read["stop"]
     if not stop["would_finish"]:
@@ -402,6 +403,16 @@ def _same_moment(a: str, b: str) -> bool:
     return any(tuple(wb[i:i + 5]) in grams for i in range(len(wb) - 4))
 
 
+NOT_FOUND = "(not found word for word)"
+
+
+def verify_in(quote: str, book_norm: str | None) -> bool:
+    """PR #117 (C): the same quote check as everywhere (book_report.verify_quote); True when no book text is given."""
+    if book_norm is None or not quote:
+        return True
+    return br.verify_quote(quote, book_norm)
+
+
 def _sagged(read: dict) -> dict[int, str]:
     """Chapters where a reader's interest sagged: a verified bored mark, would not turn the page, or interest ≤ 4
     (chapter -> an example quote or '')."""
@@ -436,10 +447,17 @@ def _marks(read: dict) -> list[dict]:
     return out
 
 
+WRITER_WEIGHT = 0.5   # PR #117 (D): the AI that wrote most of the book counts half in the panel's agreement
+WROTE = " (wrote most of the book)"
+
+
 def _who(read: dict) -> dict:
     rd = read.get("reader") or {}
     p = read.get("persona") or {}
-    return {"n": read.get("n"), "name": rd.get("name") or "An AI", "slot": rd.get("slot"),
+    writer = rd.get("independent") is False
+    name = (rd.get("name") or "An AI") + (WROTE if writer and WROTE not in (rd.get("name") or "") else "")
+    return {"n": read.get("n"), "name": name, "slot": rd.get("slot"), "writer": writer,
+            "weight": WRITER_WEIGHT if writer else 1.0,
             "label": p.get("label") or "reader", "a_label": p.get("a_label") or _a(p.get("label") or "reader")}
 
 
@@ -448,9 +466,11 @@ def _most(values) -> tuple | None:
     return c.most_common(1)[0] if c else None
 
 
-def compare(reads: list[dict], n_chapters: int) -> dict:
+def compare(reads: list[dict], n_chapters: int, book_norm: str | None = None) -> dict:
     """👥 The panel's comparison (no AI): agreement ("strong signal" = 2-3 readers flag the same chapter for the same
-    thing), disagreement, the per-chapter heat map, each reader's verdict and the consensus top-5 fixes."""
+    thing), disagreement, the per-chapter heat map, each reader's verdict and the consensus top-5 fixes.
+    PR #117: every quote is checked against the book again (``book_norm``; C) — one not found word for word is marked
+    and never used as evidence; the reader that wrote most of the book counts half (``WRITER_WEIGHT``; D)."""
     done = [r for r in reads if r.get("status") == "done"]
     N = len(done)
     who = [_who(r) for r in done]
@@ -484,11 +504,13 @@ def compare(reads: list[dict], n_chapters: int) -> dict:
                 g["readers"].append(i)
                 g["names"].append(who[i]["name"])
             if m["quote"]:
-                g["quotes"].append({"reader": who[i]["name"], "quote": m["quote"]})
+                ok = verify_in(m["quote"], book_norm)
+                g["quotes"].append({"reader": who[i]["name"], "quote": m["quote"], "verified": ok})
             elif m["note"] and m["kind"] in ("guessed", "stop") and not any(q.get("note") for q in g["quotes"]):
                 g["quotes"].append({"reader": who[i]["name"], "quote": "", "note": m["note"]})
     for g in groups.values():
-        qs = [(q["reader"], q["quote"]) for q in g["quotes"] if q.get("quote")]
+        g["weight"] = round(sum(who[i]["weight"] for i in g["readers"]), 2)
+        qs = [(q["reader"], q["quote"]) for q in g["quotes"] if q.get("quote") and q.get("verified", True)]
         g["same_moment"] = any(qs[a][0] != qs[b][0] and _same_moment(qs[a][1], qs[b][1])
                                for a in range(len(qs)) for b in range(a + 1, len(qs)))
         g["count"] = len(g["readers"])
@@ -499,8 +521,11 @@ def compare(reads: list[dict], n_chapters: int) -> dict:
         g.pop("readers")
 
     def rank(g):
-        return (-g["count"], -WEIGHT.get(g["kind"], 0), -int(g["same_moment"]), g["chapter"] or 99)
-    agree = sorted((g for g in groups.values() if g["count"] >= 2 and N >= 2), key=rank)
+        return (-g["weight"], -g["count"], -WEIGHT.get(g["kind"], 0), -int(g["same_moment"]), g["chapter"] or 99)
+
+    def strong_(g):
+        return g["count"] >= 2 and N >= 2 and g["weight"] >= 1.5
+    agree = sorted((g for g in groups.values() if strong_(g)), key=rank)
     # ---- disagreement
     disagree = []
     by_reader = []
@@ -549,18 +574,22 @@ def compare(reads: list[dict], n_chapters: int) -> dict:
     fixes = []
     for g in sorted((g for g in groups.values() if not g["positive"]), key=rank)[:TOP_FIXES]:
         where = f"Chapter {g['chapter']}" if g["chapter"] else "The book"
-        q = next((x for x in g["quotes"] if x.get("quote")), None)
+        q = next((x for x in g["quotes"] if x.get("quote") and x.get("verified", True)), None) or \
+            next((x for x in g["quotes"] if x.get("quote")), None)
         fixes.append({"kind": g["kind"], "chapter": g["chapter"], "count": g["count"], "of": N,
-                      "strong": g["count"] >= 2 and N >= 2, "names": g["names"],
+                      "strong": strong_(g), "names": g["names"], "weight": g["weight"],
                       "text": f"{where}: {FIX[g['kind']]} ({g['count']} of {N} reader{'s' if N != 1 else ''} "
-                              f"{SIGNAL[g['kind']]}).", "quote": q["quote"] if q else ""})
+                              f"{SIGNAL[g['kind']]}).", "quote": q["quote"] if q else "",
+                      "quote_verified": bool(q.get("verified", True)) if q else True})
     strong = [g for g in agree if not g["positive"]]
+    writers = [w["name"] for w in who if w.get("writer")]
     head = (f"{N} reader{'s' if N != 1 else ''}: {totals['finish']} of {N} would finish it"
             + (f", {totals['recommend']} of {totals['recommend_known']} would recommend it"
                if totals["recommend_known"] else "")
             + (f", average score {totals['average_score']:g}/10" if totals["average_score"] is not None else "")
             + (f". {len(strong)} strong signal{'s' if len(strong) != 1 else ''} (2 or more readers agree)."
-               if N >= 2 else "."))
+               if N >= 2 else ".")
+            + (f" {', '.join(writers)} counts half in the agreement." if writers and N >= 2 else ""))
     return {"readers": who, "verdicts": verdicts, "totals": totals, "agree": agree, "disagree": disagree,
             "heat": heat, "fixes": fixes, "headline": head}
 
@@ -588,13 +617,18 @@ def report_markdown(read: dict, current_key: str | None = None) -> list[str]:
         strong = [g for g in cmp_.get("agree") or [] if not g.get("positive")]
         if strong:
             L += ["", "**Strong signals (readers agree):**", ""]
-            L += [f"- {g['text']}" for g in strong[:8]]
+            L += [f"- {g['text']}" + "".join(f" — {br.quoted(q['quote'])}" + ("" if q.get("verified", True) else
+                                                                             f" {NOT_FOUND}")
+                                              for q in (g.get("quotes") or [])[:1] if q.get("quote"))
+                  for g in strong[:8]]
         if cmp_.get("disagree"):
             L += ["", "**Where they disagree:**", ""]
             L += [f"- {d['text']}" for d in cmp_["disagree"][:6]]
         if cmp_.get("fixes"):
             L += ["", "**Top fixes:**", ""]
-            L += [f"{i}. {f['text']}" + (f" — {br.quoted(f['quote'])}" if f.get("quote") else "")
+            L += [f"{i}. {f['text']}" + (f" — {br.quoted(f['quote'])}" + ("" if f.get("quote_verified", True)
+                                                                           else f" {NOT_FOUND}")
+                                          if f.get("quote") else "")
                   for i, f in enumerate(cmp_["fixes"], 1)]
     else:
         rd = read.get("reader") or {}
@@ -828,7 +862,7 @@ class BetaReaderService:
             rec.update(error=next((r.get("error") for r in rec["readers"] if r.get("error")), "CAPABILITY_UNAVAILABLE"),
                        message="No beta reader could read the book: "
                                + ("; ".join(s["why"] for s in rec["skipped"]) or "no AI is working") + ".")
-        rec["comparison"] = compare(rec["readers"], len(chapters))
+        rec["comparison"] = compare(rec["readers"], len(chapters), br._norm("\n".join(c["text"] for c in chapters)))
         sc = [r["average_interest"] for r in ok if r.get("average_interest") is not None]
         rec["average_interest"] = round(sum(sc) / len(sc), 1) if sc else None
         rec["finished_at"] = _now()

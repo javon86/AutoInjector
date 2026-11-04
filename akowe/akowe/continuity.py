@@ -995,6 +995,11 @@ def route(app, method: str, rest: list, body, principal: str, pid: str, branch: 
     review._access(principal, pid, branch)  # noqa: SLF001
     if rest == [] and method == "GET":
         return 200, info(review, principal, pid, branch, app=app)
+    if rest and rest[0] == "check-now":  # 🔎 PR #117: "Check consistency now" (check_now.py)
+        from . import check_now  # noqa: PLC0415
+        out = check_now.route(app, method, rest, body, principal, pid, branch)
+        if out is not None:
+            return out
     if rest == ["checkpoints"] and method == "GET":  # 🧭 the plain checkpoint report (and the story ledger)
         from . import checkpoints as cp_mod  # noqa: PLC0415
         rep = cp_mod.report(store, pid, branch)

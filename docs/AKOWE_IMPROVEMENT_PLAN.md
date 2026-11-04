@@ -834,6 +834,56 @@ the browser: `tests/campaign/ui/test_ui_continuity.py`):
 - *Not done:* the pictures and clips need AutoInjector running (SVG only without it); the store ad rules are as of
   2026-11 (check the stores' current rules before you pay for an ad).
 
+## 🔎 All three AIs check for mistakes and drift + report fixes A–G (2026-11, PR #117) — done
+
+The author read a real report ("The Lamplighter's Debt", 3 chapters, Claude wrote most) and asked: how many AIs check
+for consistency, creep and drifting? Get all three to do it — and fix A through G.
+
+**Who checks now** (run setting **How many AIs check for mistakes** on the ⚡ Make-a-book screen: All working AIs —
+the default —, Two, or One = the old way; code `akowe/akowe/cross_check.py`):
+
+- **Each chapter, review:** both AIs that did not write it review it, each on its own. "Changes needed" from either
+  sends it back through the usual fix loop (same number of rounds); it is approved only when neither objects. With one
+  AI besides the writer working: one reviewer, as before (said once in the run).
+- **Each chapter, all-AI check:** after it is approved, every working AI — the writer too — reads it in full against its
+  plan, the Book Bible, the running notes, the locked details and the chapters before (consistency, drift, straying
+  off the plan). Merged, one fix pass, never pauses the run (setting All only, two or more AIs working).
+- **Checkpoints (every N chapters, each act's end, the end):** every AI reads the chapters in full with the same brief,
+  which now asks about drift by name (traits, voice, goals, rules, tone, timeline, injuries and belongings — also
+  inside one chapter —, names) and about straying from each chapter's plan. Every N chapters each AI also writes a
+  review of the stretch (pacing, arc progress, drift, what works / does not, scores): "Chapters 6–10 review", each AI's
+  view and where they agree, in the run's notes, the continuity report and the book report.
+- **Ending check:** every AI answers; a promise is open (and fixed) when 2 or more say so; one AI only → listed.
+- **Merging (no AI):** 2+ AIs report it (same chapter, overlapping quote or problem words) = confirmed → fixed. One AI
+  only: its quote must be in the chapter word for word, else dropped with a note; a verified one is fixed only when
+  marked major or blocker, else listed for the author. The report says who found what and how many agreed.
+- **🔎 Check consistency now:** a button on the ⚡ run window, 🏠 Book home and the 🧭 Continuity page runs the same
+  all-AI review on demand — the last 5 chapters (default), chapters X to Y, or the whole book so far — with the
+  combined review of those chapters. During a run it is queued and runs at the next safe point between chapters (the
+  run waits; fixes under the run consent); outside a run it is its own background job and its fixes are proposals
+  (✔ Use these fixes = new drafts the author approves). One at a time per book; the button says why it is off
+  (`check_now.py`, `web/check-now.js`).
+- **Never stalls:** a busy, missing or slow AI is skipped with a note; the others' reading counts.
+- **Cost:** with three AIs, about 3 to 5 more AI answers per chapter (one more review per review round + three checks;
+  more when a fix is reviewed again), and ×3 answers per checkpoint part and for the ending check. One = as before.
+
+**Report fixes:**
+
+- A. The report PDF keeps ọ, ẹ, ł, Greek… (the book PDF's DejaVu font, `exporters/unifont.py`); a symbol with no glyph
+  becomes a word or "•", never "?".
+- B. Injuries inside one chapter: Akọwe's own check (`story_ledger.in_chapter`, no AI) and the reviewer / editor briefs:
+  a physical change inside the chapter must persist; a contradiction is major.
+- C. Beta-panel quotes are checked again (strong signals and top fixes); one not found word for word is marked
+  "(not found word for word)" and not used as evidence; a reader's guess is no longer shown as a quote.
+- D. The beta panel takes AIs that did not write the book first; the writer, when needed, is named "(wrote most of the
+  book)" and counts half in the agreement.
+- E. Each AI's "unbacked high scores" are counted across books: "Gemini's whole-book scores were lowered 3 times in
+  recent books".
+- F. A habit 2+ checks flag (pattern check, originality check, editor) is a must-fix for the editor (`habits.py`); the
+  editor's line says how many are still there.
+- G. No stray "·" in table rows; "Written by" shows the writer AI "+ editor"; vague advice ("Maintain the same level
+  of …") is left out of "What to try next".
+
 ## Back burner (maybe never)
 
 The author's call on the rest of the 20-idea list: "way back burner, maybe never". Don't start these until asked:
@@ -880,7 +930,8 @@ The author's call on the rest of the 20-idea list: "way back burner, maybe never
 
 - **What the author sees:** a slim "AI activity" strip just under the top bar, on every page. One row per AI at work:
   its name and colour dot, what it is doing in plain words ("Writing chapter 7", "Reviewing chapter 7", "Editing
-  chapter 7 (round 1 of 2)", "Planning scenes for chapter 8", "Checking chapters 1–5 (checkpoint)", "Writers' room:
+  chapter 7 (round 1 of 2)", "Planning scenes for chapter 8", "Chapters 1–5 review" (🔎 #117 checkpoint), "Second review of chapter 7",
+  "Checking chapter 7 for consistency (all AIs)", "Check consistency now: chapters 3–7", "Writers' room:
   pitching a twist", "Beta reader (typical reader): reading chapters 1–6"), the book's title, the stage (Waiting for
   the AI · AI is answering · Checking the answer · Waiting after a busy site, with the seconds left), a time that
   ticks every second, and for a ⚡ run "chapter 7 of 20" (else "step 13 of 19") with a small bar. When it ends the row

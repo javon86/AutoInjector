@@ -178,6 +178,13 @@ def task_text(module_id: str, dims: list[str], notes: dict | None = None) -> str
             "JSON object.")
 
 
+# 🦵 PR #117 (B): continuity inside one chapter is a craft problem too (and a major one)
+IN_CHAPTER_WORDS = (
+    "Physical state changes inside this chapter must persist: a character hurt, soaked, exhausted or disarmed early in "
+    "the chapter is still so later in it (a cracked knee limps on the stairs and hurts to kneel on) unless the page "
+    "shows the change. A within-chapter physical contradiction is a MAJOR finding (dimension cause_effect), quoting the "
+    "later line. context.akowe_in_chapter, when given, lists possible ones Akọwe's own reading found.")
+
 REWRITE_TASK = (
     "Task: you wrote this chapter (context.chapter_text). An editor flagged some passages (context.findings: id, "
     "passage, why, suggestion). Rewrite ONLY those passages so each finding is fixed. For every finding return "

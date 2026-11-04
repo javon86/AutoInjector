@@ -323,7 +323,7 @@ def test_h11_h12_the_ending_is_checked_and_sent_back_for_a_fix(tmp_path):
                 "question": {"kept": True, "note": "The light is back.", "fix": ""}}
     fake.ending_script = [first]  # the second check (after the fix) passes
     app = make_app(tmp_path, fake=fake)
-    run = run_book(app, {"length": "short_story", "pictures": False})
+    run = run_book(app, {"checkers": "one", "length": "short_story", "pictures": False})
     assert run["status"] == "done", run.get("problem")
     pid = run["project_id"]
     ctx = seen["ctx"]

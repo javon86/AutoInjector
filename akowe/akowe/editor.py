@@ -146,6 +146,27 @@ def _find_passage(text: str, passage: str) -> tuple[int, int] | None:
     return (m.start(), m.end()) if m else None
 
 
+_STATE_WORDS = re.compile(r"\b(injur\w*|hurt|wound\w*|limp\w*|knee|ankle|leg|arm|wrist|bleed\w*|broken|cracked|"
+                          r"lost|dropped|forgot\w*|no sign|as if nothing)\b", re.I)
+_CONTRA_WORDS = re.compile(r"\b(contradict\w*|forgot\w*|ignor\w*|no (?:sign|mention|trace)|as if|inconsisten\w*|"
+                           r"still|earlier in (?:the|this) chapter|vanish\w*)\b", re.I)
+
+
+def _in_chapter_major(findings: list, flags: list) -> list:
+    """🦵 PR #117 (B): a finding about a physical change inside the chapter that the chapter forgets (an injury, a lost
+    item) is MAJOR, whatever severity the editor gave it."""
+    quotes = [str(f.get("quote") or "") for f in flags or [] if f.get("quote")]
+    out = []
+    for f in findings:
+        text = " ".join(str(f.get(k) or "") for k in ("why", "suggestion"))
+        hit = (_STATE_WORDS.search(text) and _CONTRA_WORDS.search(text)) or any(
+            f.get("passage") and (f["passage"] in q or q in f["passage"]) for q in quotes)
+        if hit and f.get("severity") != "major":
+            f = dict(f, severity="major", severity_raised="a physical change inside the chapter is forgotten")
+        out.append(f)
+    return out
+
+
 # ====================================================================== pure helpers (unit-tested)
 def decide(scores: dict, findings: list, strictness: str, relax: dict | None = None) -> tuple[str, list[str]]:
     """Akọwe's own PASS / REVISE from the editor's scores and findings (Settings › Editor › strictness).
@@ -542,6 +563,17 @@ class EditorService:
                 ai_sounding = None
             if ai_sounding:
                 ctx["ai_sounding"] = ai_sounding
+            try:  # 🔁 PR #117 (F): habits 2+ checks flag are required targets; 🦵 (B) physical state inside the chapter
+                from . import habits, story_ledger  # noqa: PLC0415
+                from .checkpoints import cast_names  # noqa: PLC0415
+                must = habits.must_fix(ctx["chapter_text"], report)
+                if must:
+                    ctx["must_fix"] = must
+                flags = story_ledger.in_chapter(ctx["chapter_text"], cast_names(self.store, pid, branch))
+                if flags:
+                    ctx["akowe_in_chapter"] = [{k: f.get(k) for k in ("name", "message", "quote")} for f in flags[:6]]
+            except Exception:  # noqa: BLE001 - hints, never a reason to fail the review
+                log.exception("must-fix / in-chapter hints failed for the editor")
         else:
             ctx["draft_json"] = json.dumps(data, ensure_ascii=False)[:60000]
             ctx["operation"] = (self.contracts.operation(rec["module_id"]) or {}).get("name")
@@ -594,6 +626,9 @@ class EditorService:
             ctx, protected = self._context(pid, branch, rec, report, info, brief, guide)
             ctx.update(fact_checks_context(self.engine, job.principal, pid, branch, rec))  # P26/P30/P31 (never raises)
             task = rubric.task_text(rec["module_id"], dims, notes)
+            if rec["module_id"] == "C02":
+                from . import habits  # noqa: PLC0415
+                task = f"{task} {rubric.IN_CHAPTER_WORDS}" + (f" {habits.ASK}" if ctx.get("must_fix") else "")
             if ctx.get("narrator_style"):  # P25 (Section 7c)
                 from .style_card import EDITOR_NOTE  # noqa: PLC0415
                 task = f"{task} {EDITOR_NOTE}"
@@ -625,8 +660,20 @@ class EditorService:
         if flagged and not findings and rec["module_id"] == "C02":
             added = calibration.audit_findings(report, text, dims)
             findings = added
+        must = list(ctx.get("must_fix") or []) if rec["module_id"] == "C02" else []
+        if rec["module_id"] == "C02":
+            findings = _in_chapter_major(findings, ctx.get("akowe_in_chapter") or [])
+            if must:  # 🔁 PR #117 (F): a must-fix habit the editor did not target becomes a major finding
+                from . import habits  # noqa: PLC0415
+                findings = (findings + habits.findings_for(must, findings, dims))[:MAX_FINDINGS + len(must)]
         distrust = "; ".join(f"{r['name']}: {'; '.join(r['reasons'])}" for r in flagged) or None
         craft = summarise(merged["scores"], findings, merged["keep"], dims, text, st["strictness"], relax, distrust)
+        if must:
+            craft["must_fix"] = [{k: m.get(k) for k in ("habit", "label", "count", "flagged_by")} for m in must]
+            if craft["verdict"] == "PASS":
+                craft["verdict"] = "REVISE"
+                craft["verdict_why"] = list(craft.get("verdict_why") or []) + [
+                    f"{len(must)} habit(s) two or more checks flagged must be fixed"]
         craft["ai_verdict"] = first["craft"].get("ai_verdict")
         if relax:
             craft["relaxed"] = relax

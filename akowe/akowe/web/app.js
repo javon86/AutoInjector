@@ -15,7 +15,8 @@ import { viewMarketing } from './marketing.js';  // 📣 #17 mockups, ads and te
 import { viewCover } from './cover.js';  // 🎨 B3 book covers
 import { viewBinder } from './binder.js';  // 📖 Book Bible binder (the author's template studio design)
 import { CODE_MAP, CODE_MAP_MD } from './code-map.js';  // 🔢 the Book Bible code map (code_map.py)
-import { needsBox } from './needs-list.js';  // 🧠 a chapter's needs list (needs_list.py)
+import { needsBox } from './needs-list.js';
+import { checkNowBox } from './check-now.js';  // 🔎 PR #117: Check consistency now (check_now.py)  // 🧠 a chapter's needs list (needs_list.py)
 
 /* ======================================================================= constants */
 // Fallback names; the full guide (purpose, build order, featured actions) comes from GET /api/sets.
@@ -5502,6 +5503,7 @@ async function viewBook(main) {
     h('a', { class: 'btn', href: plink('grid'), 'data-testid': 'bk-grid' }, '🗂 Scene grid'),
     WR.roomButton(wrc()))));  // 🗳 the three-AI writers' room: a twist, a chapter, a character or your own question
   main.appendChild(bookSaveCard());
+  main.appendChild(checkNowBox(s7c(), S.pid, S.branch, { testid: 'home-check-now' }));  // 🔎 PR #117
   const holder = h('div', null, loadingState('Checking where your book is…'));
   main.appendChild(holder);
   let book = null;
@@ -8079,6 +8081,16 @@ function fillBibleSwitch(prefix) {
     h('p', { class: 'hint', id: `${id}-hint` }, 'Off (recommended): only the essentials are decided before chapter one, and the rest just in time, when a chapter needs it — fewer AI answers. On: before chapter one the AI fills every empty section of every page — characters, places, items, magic, groups, the world and the story plan — in a few batched answers, approved under your consent. Your own text is never replaced.'));
   return { el, box, apply(body) { if (box.checked) body.fill_bible = true; } };
 }
+/** 🔎 PR #117 "How many AIs check for mistakes" (run setting checkers): all (default) / two / one (the old way) */
+function checkersField(prefix) {
+  const id = `${prefix}-checkers`;
+  const sel = h('select', { id, 'data-testid': id, 'aria-describedby': `${id}-hint` },
+    [['all', 'All working AIs (recommended)'], ['two', 'Two AIs'], ['one', 'One AI (the old way)']].map(([v, l]) => h('option', { value: v, selected: v === 'all' }, l)));
+  const el = h('fieldset', { class: 'field ck-field' }, h('legend', null, '🔎 Checking for mistakes'),
+    h('div', { class: 'field' }, h('label', { for: id }, 'How many AIs check for mistakes'), sel),
+    h('p', { class: 'hint', id: `${id}-hint` }, 'The AIs look for mistakes and drift — a healed injury coming back, a character acting out of character, a wrong name or day, a chapter straying from the plan. With all of them, each chapter is reviewed by both AIs that did not write it and then checked by every AI; every 5 chapters (the checkpoint) every AI reads those chapters in full and reviews them. A problem two AIs agree on is fixed. More AIs catch more but take more AI time: about 3 to 5 more AI answers per chapter with three AIs. One AI = the old way.'));
+  return { el, sel, apply(body) { if (sel.value && sel.value !== 'all') body.checkers = sel.value; } };
+}
 async function renderMakeSetup() {
   const fields = {};
   const err = h('div', { 'aria-live': 'polite' });
@@ -8098,6 +8110,8 @@ async function renderMakeSetup() {
   const s7 = await S7C.makeSetupExtras(s7c());  // P23 / P25 (Section 7c)
   const fb = fillBibleSwitch('mb');  // 📖 Fill the whole Book Bible before writing (whole_bible.py), off by default
   const wr = WR.makeSetupSwitch(s7c());  // 🗳 Use the writers' room for the big twists (writers_room.py), off by default
+  const ck = checkersField('mb');  // 🔎 PR #117: how many AIs check for mistakes (all by default)
+  fields.checkers = ck.sel;
   fields.length = lengthBox.querySelector('input');
   const startAll = h('button', { type: 'button', class: 'primary big mab-go', 'data-testid': 'mb-start-auto' }, '⚡ Start — let the AI choose everything');
   const startSet = h('button', { type: 'submit', class: 'big', 'data-testid': 'mb-start' }, '⚡ Start with these settings');
@@ -8110,7 +8124,7 @@ async function renderMakeSetup() {
         h('div', { class: 'field' }, h('label', { for: 'mb-genre' }, 'Genre'), genre, h('datalist', { id: 'mb-genres' }, GENRES.map(g => h('option', { value: g }))), h('span', { class: 'hint' }, 'Empty = the AI chooses.')),
         h('div', { class: 'field' }, h('label', { for: 'mb-slot' }, 'Which AI'), slot, h('span', { class: 'hint' }, 'Automatic uses whichever AI is ready.'))),
       lengthBox,
-      h('div', { class: 'field' }, h('label', { for: 'mb-idea' }, 'Your idea (optional)'), idea), cf.el, pipe.el, s7.el, fb.el, wr.el),
+      h('div', { class: 'field' }, h('label', { for: 'mb-idea' }, 'Your idea (optional)'), idea), cf.el, pipe.el, s7.el, fb.el, wr.el, ck.el),
     err, h('div', { class: 'form-actions' }, startAll, startSet));
   const est = estimateBox(gridUI(), () => {  // ⏱ P28: AI answers and minutes before the run starts
     const l = form.querySelector('input[name="mb-len"]:checked'); const pl = pipe.get();
@@ -8138,6 +8152,7 @@ async function renderMakeSetup() {
     s7.apply(body);  // P23 / P25 (Section 7c): beta reader and "write in my style"
     fb.apply(body);  // 📖 the whole Book Bible before chapter one (only when switched on)
     wr.apply(body);  // 🗳 the writers' room for the big twists (only when switched on)
+    ck.apply(body);  // 🔎 how many AIs check for mistakes (sent only when not the default)
     startAll.disabled = startSet.disabled = true;
     err.appendChild(loadingState('Checking your AIs…'));
     if (!(await withAiCheck(body, 'the book'))) { clear(err); startAll.disabled = startSet.disabled = false; return; }
@@ -8351,7 +8366,10 @@ function renderRun() {
   const fcBox = factsRunSummary(r); // 🔎 P26/P30/P31
   if (doneBox && fcBox) doneBox.appendChild(fcBox);
   const consent = h('p', { class: 'small muted mb-consent' }, `Approvals in this run are made by the AI reviewer under your consent (run ${r.id}, ${fmtTime(r.consent && r.consent.at)}). Every one is in the book journal.`);
-  mbShell('⚡ AI writes the whole book', head, runBibleLine(r), phase, ais, alerts, indep, doneBox, doneBox ? null : edBox, runSaveLine(r), msg, ol, ctl, consent,
+  const cnBox = r.project_id && !['cancelled', 'replaced'].includes(r.status) && r.state !== 'replaced'
+    ? h('details', { class: 'mb-check-now', 'data-testid': 'mb-check-now-wrap', open: !!MB.cnOpen, ontoggle: ev => { MB.cnOpen = ev.currentTarget.open; } }, h('summary', null, '🔎 Check consistency now'),
+      checkNowBox(s7c(), r.project_id, r.branch_id || 'main', { testid: 'mb-check-now', compact: true })) : null;
+  mbShell('⚡ AI writes the whole book', head, runBibleLine(r), phase, ais, alerts, indep, doneBox, doneBox ? null : edBox, runSaveLine(r), msg, ol, ctl, cnBox, consent,
     r.project_id && r.status !== 'done' ? h('p', { class: 'small' }, h('a', { href: link('p', r.project_id, r.branch_id || 'main', 'book'), onclick: () => closeMakeBook() }, 'Open the book being made')) : null);
   updateRunClocks();
 }
