@@ -484,6 +484,13 @@ class ScenePlanner:
                 out["story_beats"] = beats
         except Exception:  # noqa: BLE001
             log.exception("could not add the story beats to the scene context")
+        try:  # 🗳 the writers' room's decision for this chapter (a ⚡ run's pick; writers_room.py)
+            from . import writers_room  # noqa: PLC0415
+            room = writers_room.chapter_decision(self.store, pid, branch, chapter_id)
+            if room:
+                out["writers_room"] = room
+        except Exception:  # noqa: BLE001
+            log.exception("could not add the writers' room decision to the scene context")
         return out
 
     @staticmethod
@@ -499,6 +506,9 @@ class ScenePlanner:
         if ctx.get("story_beats"):
             from .story_shape import SCENE_RULE  # noqa: PLC0415
             extra.append(SCENE_RULE)
+        if ctx.get("writers_room"):
+            from .writers_room import PLAN_RULE  # noqa: PLC0415
+            extra.append(PLAN_RULE)
         return base + (" " + " ".join(extra) if extra else "")
 
     # ------------------------------------------------------------------ make / revise (the writer)

@@ -907,7 +907,7 @@ class AutoBookService(_Runner):
             if not isinstance(pics, bool):
                 raise AkoweError("INVALID_INPUT", "/pictures", "pictures must be true or false", status="REJECTED")
             out["pictures"] = pics
-        for k in ("beta_reader", "my_style", "fill_bible"):  # P23 / P25 / 📖: optional, off unless asked for
+        for k in ("beta_reader", "my_style", "fill_bible", "writers_room"):  # P23 / P25 / 📖 / 🗳: off unless asked
             v = body.get(k, False)
             if not isinstance(v, bool):
                 raise AkoweError("INVALID_INPUT", f"/{k}", f"{k} must be true or false", status="REJECTED")
@@ -2743,7 +2743,11 @@ class AutoBookService(_Runner):
             else:
                 st["message"] = f"The AI is writing the {label}"
                 self.save(run)
-                ref = self.ai_create(run, bp, op, bp.payload_for(op), label)
+                payload = bp.payload_for(op)
+                if op == "B03" and run.get("room_plot"):  # 🗳 the writers' room's twist (writers_room.py)
+                    from . import writers_room  # noqa: PLC0415
+                    payload["constraints"] = list(payload.get("constraints") or []) + writers_room.plot_constraints(run)
+                ref = self.ai_create(run, bp, op, payload, label)
                 rid = ref["record_id"]
                 self._made(run, ref)
                 self.event(run, "ai", f"The AI wrote the {label}", record_id=rid, module_id=op)
@@ -2933,6 +2937,8 @@ class AutoBookService(_Runner):
         self._planning(run, st, "B01", "premise")
 
     def _s_plot(self, run, st):
+        from . import writers_room  # noqa: PLC0415 - 🗳 optional (run setting writers_room): a room on the twist
+        writers_room.run_plot(self, run, st, control=(RunPaused, RunCancelled))
         self._planning(run, st, "B03", "main plot")
 
     def _s_outline(self, run, st):
@@ -3066,6 +3072,9 @@ class AutoBookService(_Runner):
                 if latest and latest["lifecycle"] in REVIEWABLE and not latest.get("stale"):
                     rid = latest["record_id"]
                 else:
+                    from . import writers_room  # noqa: PLC0415 - 🗳 optional: a room at the midpoint and the climax
+                    writers_room.before_chapter(self, run, st, outline, cid, idx + 1, len(chapters),
+                                                control=(RunPaused, RunCancelled))
                     try:
                         if self._on(run, "scenes"):
                             self._scene_cards(run, st, cid, item)
