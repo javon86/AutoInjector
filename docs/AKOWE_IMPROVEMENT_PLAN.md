@@ -657,8 +657,8 @@ the browser: `tests/campaign/ui/test_ui_continuity.py`):
   (`format_out_of_date`); a new theme/font asks to put the book together again (`assembly_out_of_date`). A book
   without a profile (raw engine use, old tests) keeps the plain manuscript layout.
 - **EPUB:** `h1.chapter-head` (number + title spans), `p.opening::first-letter` drop cap, `::first-line` small caps,
-  `div.scene-break::before` ornament (generated content). **Word (best effort):** theme fonts, number line + title in
-  Heading 1, a real Word drop cap (framePr), small-caps runs, the ornament glyph, a section per chapter (odd page when
+  `div.scene-break::before` ornament (generated content). **Word (best effort):** theme fonts, the heading as written in
+  the theme's look, a real Word drop cap (framePr), small-caps runs, the ornament glyph, a section per chapter (odd page when
   the theme says so) with no header/number on its first page (title / author headers, PAGE field), mirrored margins.
 - **Preview** (`book_design.py`, `GET/PUT …/interior`; 🎨 box in Book home → Book format): chapter-opener spread +
   normal spread. Pictures of the real PDF pages when pypdfium2 is installed, else SVG drawn from the same layout

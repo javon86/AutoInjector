@@ -190,10 +190,10 @@ def build_docx(book: dict, *, created: str, family: str = "times", size_pt: floa
                page: dict | None = None, theme: dict | None = None) -> bytes:
     """images: key -> (bytes, ImageInfo); page: PAGE_PROFILE (mm) for section size/margins or None.
 
-    🎨 theme (an interior theme spec, best effort in Word): the theme's fonts, chapter headings with the number line
-    ("Chapter Seven") above the title, a real Word drop cap and small capitals on each chapter's first words, the
-    scene-break ornament, and - with a page size - mirrored margins, a section per chapter (starting on a right-hand
-    page when the theme says so) with running headers (author / title) and page numbers, none on chapter openers."""
+    🎨 theme (an interior theme spec, best effort in Word): the theme's fonts, chapter headings as written in the
+    theme's look (spaced capitals, italic, size), a real Word drop cap and small capitals on each chapter's first
+    words, the scene-break ornament, and - with a page size - mirrored margins, a section per chapter (starting on a
+    right-hand page when the theme says so) with running headers (author / title) and page numbers, none on openers."""
     from . import interior as interior_mod  # noqa: PLC0415
     meta = book["meta"]
     if theme and theme.get("body"):
@@ -299,20 +299,13 @@ def build_docx(book: dict, *, created: str, family: str = "times", size_pt: floa
             if body:  # the section before this chapter ends here (its own section properties)
                 body.append(f"<w:p><w:pPr><w:pStyle w:val=\"Normal\"/>{sect_pr(prev_kind)}</w:pPr></w:p>")
             prev_kind = "chapter"
-        label = interior_mod.number_label(s.get("number"), theme) if theme and s["kind"] == "chapter" else ""
-        if not plate and theme and s["kind"] == "chapter" and (label or s.get("title")):
-            head = ""
-            if label:
-                head += ("<w:r><w:rPr><w:spacing w:val=\"40\"/>" + ("<w:caps/>" if theme.get("number_case") == "upper"
-                         else "") + f"<w:sz w:val=\"{int(size_pt * 2 * 1.1 * max(1.0, theme.get('number_size', 1) * 0.8))}\"/>"
-                         f"</w:rPr><w:t xml:space=\"preserve\">{escape(label)}</w:t></w:r>")
-            if label and s.get("title"):
-                head += "<w:r><w:br/></w:r>"
-            if s.get("title"):
-                head += ("<w:r><w:rPr>" + ("<w:caps/><w:spacing w:val=\"30\"/>" if theme.get("title_case") == "upper" else "")
-                         + ("<w:i/>" if theme.get("title_style") == "italic" else "")
-                         + ("<w:b/>" if theme.get("title_style") == "bold" else "")
-                         + f"</w:rPr><w:t xml:space=\"preserve\">{escape(s['title'])}</w:t></w:r>")
+        if not plate and theme and s["kind"] == "chapter":
+            # Word keeps the heading as written ("Chapter 2: The Brass Key": the navigation pane and the contents
+            # read it); the theme gives it its look: spaced capitals, italic or bold, the heading font (styles.xml)
+            caps = theme.get("number_case") == "upper" or theme.get("title_case") == "upper"
+            rpr = (("<w:caps/><w:spacing w:val=\"30\"/>" if caps else "")
+                   + ("<w:i/>" if theme.get("title_style") == "italic" or theme.get("head_style") == "italic" else ""))
+            head = f"<w:r><w:rPr>{rpr}</w:rPr><w:t xml:space=\"preserve\">{escape(s['heading'])}</w:t></w:r>"
             body.append(_p("Heading1", bookmark(s["id"], head),
                            "<w:pageBreakBefore w:val=\"0\"/>" if themed_pages else ""))
         elif not plate:

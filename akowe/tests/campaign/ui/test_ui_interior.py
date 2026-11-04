@@ -44,6 +44,12 @@ def open_format(make_context, bk, **kw):
     return page
 
 
+def saved(page):
+    """The saved choice is shown again (Book home redraws itself after a save, so the box can be rebuilt)."""
+    page.wait_for_function("() => { const b = document.querySelector('[data-testid=interior-save]');"
+                           " return b && /This is your design/.test(b.textContent); }", timeout=15000)
+
+
 def test_interior_theme_picker_preview_and_save(make_context, bk):
     from akowe.book_path import get_profile
     page = open_format(make_context, bk)
@@ -65,12 +71,12 @@ def test_interior_theme_picker_preview_and_save(make_context, bk):
     # pick Noir at 5 x 8: the preview is drawn again for that choice, then saved into the book profile
     page.click(".interior-theme[data-theme=noir]")
     page.select_option("[data-testid=interior-trim]", "5x8")
-    page.wait_for_function("() => !document.querySelector('[data-testid=interior-status]').textContent", timeout=20000)
+    page.wait_for_function("() => { const s = document.querySelector('[data-testid=interior-status]');"
+                           " return s && !s.textContent; }", timeout=20000)
     assert page.get_attribute(".interior-theme[data-theme=noir]", "aria-checked") == "true"
     assert "5 × 8" in page.inner_text("[data-testid=interior-preview]")
     page.click("[data-testid=interior-save]")
-    page.wait_for_function("() => /This is your design/.test(document.querySelector('[data-testid=interior-save]')"
-                           ".textContent)", timeout=15000)
+    saved(page)
     prof = get_profile(bk.app.store, bk.pid)
     assert prof["interior_theme"] == "noir" and prof["trim_size"] == "5x8"
     settle(page, 300)
@@ -78,8 +84,7 @@ def test_interior_theme_picker_preview_and_save(make_context, bk):
     # back to the genre's design: stored as "" (follows the genre)
     page.click("text=↺ Back to my genre’s design")
     page.click("[data-testid=interior-save]")
-    page.wait_for_function("() => /This is your design/.test(document.querySelector('[data-testid=interior-save]')"
-                           ".textContent)", timeout=15000)
+    saved(page)
     assert get_profile(bk.app.store, bk.pid)["interior_theme"] == ""
     assert not bad_text(page) and not unnamed_controls(page)
     assert_clean(page, "interior design")

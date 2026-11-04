@@ -24,18 +24,19 @@ Text fidelity: the PDF prints "CHAPTER SEVEN" / small capitals / UPPER-CASE titl
 as ``/ActualText`` (what a PDF reader copies and searches), so the export check reads the text exactly as written. The
 ornaments are shapes, not text, so they are never "extra text".
 
-``paginate_themed`` composes the pages (``layout.paginate(..., interior=spec)`` calls it); ``epub_css`` /
-``docx_theme`` give the EPUB and Word writers their part; ``preview`` draws a chapter-opener spread and a normal
+``paginate_themed`` composes the pages (``layout.paginate(..., interior=spec)`` calls it); ``epub_css`` gives the
+EPUB writer its part (the Word writer reads the spec itself); ``preview`` draws a chapter-opener spread and a normal
 spread from the real page layout (``preview_svg``) for the Book format page.
 """
 from __future__ import annotations
 
 import math
+import threading
 
 from . import unifont
 from .fontmetrics import DESCRIPTORS
 from .layout import (FAMILIES, Geometry, Layout, LayoutError, Page, Typography, _Composer, check_geometry,
-                     mm_to_pt, pdf_text, styled_words, text_width, wrap)
+                     mm_to_pt, pdf_text, styled_words, text_width)
 
 DEFAULT_TRIM = "6x9"
 TRIMS = {  # id -> (width mm, height mm, plain label)
@@ -549,31 +550,44 @@ class ThemedComposer(_Composer):
             if tw > size * 1.5:
                 tw = 0.0
         baseline = self.y - size
-        runs = []  # [font, size, text, actual|None]
-        for wi, w in enumerate(words):
-            for pi, (t, f, s, a) in enumerate(w):
-                if wi and not pi:
-                    if runs:
+        # The leading words read as one text as written: the drop cap with its first word, and the words in small
+        # capitals ("The night was", not "T" + "HE NIGHT WAS"): one /ActualText group, ending with a space.
+        g = 0
+        while g < len(words) and any(p[3] is not None for p in words[g]):
+            g += 1
+        if cap is not None and g == 0 and words:
+            g = 1
+
+        def runs_of(ws, trailing: bool):
+            runs = []  # [font, size, text]
+            for wi, w in enumerate(ws):
+                for pi, (t, f, s, _a) in enumerate(w):
+                    if wi and not pi and runs:
                         runs[-1][2] += " "
-                        if runs[-1][3] is not None:
-                            runs[-1][3] += " "
-                if runs and runs[-1][0] == f and runs[-1][1] == s and (runs[-1][3] is None) == (a is None):
-                    runs[-1][2] += t
-                    if a is not None:
-                        runs[-1][3] += a
-                else:
-                    runs.append([f, s, t, a])
-        for ri, (f, s, t, a) in enumerate(runs):
-            if ri == 0 and cap is not None:
-                self.page.ops.append(("mc", cap[5] + (a if a is not None else t)))
-                self.page.ops.append(cap)
+                    if runs and runs[-1][0] == f and runs[-1][1] == s:
+                        runs[-1][2] += t
+                    else:
+                        runs.append([f, s, t])
+            if trailing and runs:
+                runs[-1][2] += " "
+            return runs
+
+        def emit(runs):
+            nonlocal x
+            for f, s, t in runs:
                 self.page.ops.append(("text", f, s, x, baseline, t, tw, None, 0.0, None))
-                self.page.ops.append(("/mc",))
-            else:
-                self.page.ops.append(("text", f, s, x, baseline, t, tw, None, 0.0, a))
-            x += text_width(t, f, s) + tw * t.count(" ")
-        if cap is not None and not runs:
+                x += text_width(t, f, s) + tw * t.count(" ")
+
+        if g:
+            written = " ".join("".join(a if a is not None else t for t, _f, _s, a in w) for w in words[:g])
+            self.page.ops.append(("mc", (cap[5] if cap is not None else "") + written + " "))
+            if cap is not None:
+                self.page.ops.append(cap)
+            emit(runs_of(words[:g], g < len(words)))
+            self.page.ops.append(("/mc",))
+        elif cap is not None:
             self.page.ops.append(cap)
+        emit(runs_of(words[g:], False))
         self.y -= self.t.leading
 
     def scene_break(self):
@@ -809,16 +823,6 @@ def epub_css(th: dict) -> str:
     return "\n".join(x for x in out if x) + "\n"
 
 
-def docx_theme(th: dict) -> dict:
-    """What the Word writer needs: fonts, the chapter-number words, drop-cap lines, small-caps words, the ornament."""
-    return {"head": th.get("head", "times"), "body": th.get("body", "times"), "head_style": th.get("head_style"),
-            "number_case": th.get("number_case"), "title_case": th.get("title_case"),
-            "title_style": th.get("title_style"), "drop_cap": th.get("drop_cap", 0), "small_caps": th.get("small_caps", 0),
-            "ornament": ORNAMENT_TEXT.get(th.get("scene"), "•  •  •"),
-            "rule": ORNAMENT_TEXT.get(th.get("rule")) if th.get("rule") in ORNAMENT_TEXT else None,
-            "header": th.get("header"), "folio": th.get("folio"), "recto_start": th.get("recto_start")}
-
-
 # ---------------------------------------------------------------------------------------------- preview
 SAMPLE = ("# The Lantern Road\n"
           "The night the river froze, Ada Okonkwọ climbed the bell tower with a lantern and a letter she had not "
@@ -944,6 +948,9 @@ def _blank_svg(width: float, height: float, note: str = "") -> str:
                f'font-family="sans-serif">{_esc(note)}</text>' if note else "") + "</svg>")
 
 
+_PDFIUM_LOCK = threading.Lock()
+
+
 def _pdfium_pngs(layout: Layout, geom: Geometry, meta: dict, wanted: list[int]) -> dict | None:
     """The real PDF pages as PNG pictures (only when pypdfium2 is installed; it is optional)."""
     try:
@@ -956,14 +963,18 @@ def _pdfium_pngs(layout: Layout, geom: Geometry, meta: dict, wanted: list[int]) 
     from .pdf import render_pdf  # noqa: PLC0415
     try:
         data = render_pdf(layout, page_width=geom.width, page_height=geom.height, meta=meta)
-        doc = pdfium.PdfDocument(data)
         out = {}
-        for n in wanted:
-            if 1 <= n <= len(doc):
-                img = doc[n - 1].render(scale=1.6).to_pil()
-                buf = io.BytesIO()
-                img.save(buf, "PNG")
-                out[n] = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+        with _PDFIUM_LOCK:  # pdfium is not thread-safe: one preview at a time (the server answers in threads)
+            doc = pdfium.PdfDocument(data)
+            try:
+                for n in wanted:
+                    if 1 <= n <= len(doc):
+                        img = doc[n - 1].render(scale=1.6).to_pil()
+                        buf = io.BytesIO()
+                        img.save(buf, "PNG")
+                        out[n] = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+            finally:
+                doc.close()
         return out
     except Exception:  # noqa: BLE001 - a preview never breaks the page
         return None
