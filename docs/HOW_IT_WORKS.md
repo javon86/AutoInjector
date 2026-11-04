@@ -2,7 +2,8 @@
 
 This page explains how the whole program fits together and what happens behind the buttons. It is not a
 button-by-button manual. For that, see [`README.md`](../README.md), [`akowe/README.md`](../akowe/README.md) and
-[`docs/ALFRED.md`](ALFRED.md).
+[`docs/ALFRED.md`](ALFRED.md). For what changed and when (and how to undo a change), see
+[`PROJECT_HISTORY.md`](PROJECT_HISTORY.md).
 
 ## 1. The big picture
 
@@ -10,54 +11,73 @@ AutoInjector is one window on your PC. Inside it, ChatGPT, Claude and Gemini eac
 the real websites, signed in with your own subscriptions, so there are no API bills. AutoInjector types into those
 panes and reads the replies, just as you would. Next to them sits **Akọwe**, the book writer. Akọwe is a small
 program on your PC, shown in the 📖 Akọwe tab. When Akọwe needs an AI, it asks AutoInjector through a private
-connection called **the bridge**. AutoInjector also drives **Stable Diffusion** (Forge or ComfyUI) for pictures and
-**FramePack** or **Wan** for video, all on your own graphics card. **🎩 Alfred** is an assistant that can press the
-app's buttons for you. He thinks with a local AI (Ollama). Pictures, videos, models and logs go into one folder,
-**"stuff and thing"**. Books go into your books folder.
+connection called **the bridge**. AutoInjector also drives a picture program (Forge, A1111, SD.Next or ComfyUI,
+or ChatGPT's own image maker) and **FramePack** or **Wan** for video, on your own graphics card. **🎩 Alfred** is an
+assistant that can press the app's buttons for you. He thinks with a local AI (Ollama), an AI you connect with a
+key, or one of the web panes. Pictures, videos, models and logs go into **"stuff and thing"**. Books, Akọwe's own
+data and the app's settings each have their own place (see section 6).
 
 ```mermaid
 flowchart LR
-    You["You"] --> App["AutoInjector desktop app - the window"]
-    App --> Panes["Three AI panes: ChatGPT, Claude, Gemini - your own subscriptions"]
-    App --> AIBridge["The AI bridge - port 17891"]
+    You["You"] --> App["AutoInjector - the window"]
+    App --> Panes["ChatGPT, Claude, Gemini panes - sending, reading, relay, check-ins, repair"]
+    App --> Alfred["Alfred - brain: Ollama, a connected AI, or a web pane - acts through app tools, MCP servers, interpreter"]
+    App --> Images["Pictures - Forge, A1111, SD.Next, ComfyUI or ChatGPT images"]
+    App --> Video["Video - FramePack or Wan on ComfyUI, plus trailers"]
+    App --> Extras["Voice, terminal, AI lockers, memory, diagnostics"]
+    Akowe["Akowe book writer - own Python server, port 8780 by default"] -->|"asks an AI"| AIBridge["AI bridge - port 17891"]
     AIBridge --> Panes
-    Akowe["Akowe book writer - local server, port 8780, shown in the Akowe tab"] --> AIBridge
-    Akowe --> SvcBridge["Service bridge - port 8765 - pictures, video, PDFs"]
+    Akowe -->|"pictures, clips, PDFs, tools, voice"| SvcBridge["Service bridge - port 8765"]
     SvcBridge --> App
-    App --> Forge["Stable Diffusion - Forge or ComfyUI - pictures"]
-    App --> FramePack["FramePack or Wan - video"]
-    App --> Alfred["Alfred - assistant on a local Ollama AI"]
-    Alfred --> App
-    Forge --> Stuff[("stuff and thing folder")]
-    FramePack --> Stuff
-    App --> Stuff
-    Akowe --> Books[("Akowe Books folder - one folder per book")]
+    Phone["Your phone - only if phone access is on"] -.-> SvcBridge
+    Images --> Stuff[("stuff and thing folder")]
+    Video --> Stuff
+    Akowe --> Books[("Akowe Books - one folder per book")]
+    Akowe --> AkoweData[("Akowe working data and backups")]
+    App --> Settings[("App settings and logins")]
 ```
 
 The same picture in plain text:
 
 ```
-                 +-------------------------------------------+
-   You  ------>  |  AutoInjector (the window)                |
-                 |   [ChatGPT pane] [Claude pane] [Gemini]   |
-                 |        ^  types in, reads replies         |
-                 |   AI bridge (17891)   service bridge(8765)|
-                 +-----^-------------------------^-----------+
-                       |                         |
-            Akowe asks an AI          Akowe asks for pictures, clips, PDFs
-                       |                         |
-                 +-----+-------------------------+-----+
-                 |  Akowe book writer (8780, 📖 tab)    |---> Akowe Books\<one folder per book>
-                 +-------------------------------------+
+YOU
+ |
+ v
+AUTOINJECTOR (the window)
+ |
+ +-- ChatGPT / Claude / Gemini panes
+ |     sending, reading, relay between AIs, queues, House Rules,
+ |     prompt sequences, attachments, transcripts, check-ins and repair
+ |
+ +-- 📖 Akọwe tab --> Akọwe's own Python server (port 8780 by default; 8781-8799 if busy)
+ |
+ +-- 🎩 Alfred
+ |     brain: Ollama, OR an AI you connect with a key, OR a web pane
+ |     acts through: the app's own tools, MCP tool servers, the code interpreter
+ |
+ +-- 🎨 Pictures: Forge / A1111 / SD.Next / ComfyUI, OR ChatGPT's image maker
+ |
+ +-- 🎬 Video: FramePack, OR Wan on ComfyUI  + trailer assembly
+ |
+ +-- Voice, terminal, AI lockers, memory, diagnostics
+ |
+ +-- AI bridge (17891)       <--> Akọwe's AI requests and answers
+ |
+ +-- Service bridge (8765)   <--> pictures, video, trailers, PDFs, tools, voice,
+                                  messages, events, and the phone page
 
-   AutoInjector also drives:  Stable Diffusion (Forge / ComfyUI)  -> pictures
-                              FramePack / Wan                     -> video
-                              Alfred + Ollama (local AI)          -> presses buttons for you
-   Everything it makes or downloads  -> "stuff and thing" folder
+AKỌWE (the book writer)
+ |
+ +-- Idea, characters, world, plot, outline, chapters
+ +-- Book Bible, dossiers, continuity and quality checks
+ +-- Reviews, rewrites, approvals, reports, backups
+ +-- PDF / EPUB / Word exports and the book.akowe file
 ```
 
-"Port" just means a numbered door on your own PC. All of these doors open only to your own computer
-(`127.0.0.1`), never to the internet.
+"Port" just means a numbered door on your own PC. The numbers above are the usual ones, not fixed: if a door
+is taken, Akọwe tries the next few (8781–8799), and each door can be set to another number. The doors open only to
+your own computer (`127.0.0.1`), never to the internet, unless you turn on **phone access**. That opens the service
+bridge to your home Wi-Fi, behind its key.
 
 ## 2. The parts
 
@@ -72,7 +92,8 @@ The same picture in plain text:
 - **Relay:** a reply marked `[TO: CLAUDE]` is passed on to Claude, and so on. This lets the AIs talk to each other.
   After 30 hand-offs in a row it pauses until you step in.
 - **Check-ins and self-repair:** about every 20 minutes, AutoInjector sends each idle AI a tiny test ("Reply with
-  only this word: marigold"). You never see these. If the AI fails, AutoInjector works out why and tries to fix it:
+  only this word: marigold"). They stay out of the app's conversation and are never passed to the other AIs,
+  though you may spot them in that AI's own pane. If the AI fails, AutoInjector works out why and tries to fix it:
   other ways to find the box or the reply, a page reload, pressing Stop on a stuck AI. If an AI was busy with
   something, it is then asked to carry on where it left off.
 - **🎯 Point at it and learned selectors:** websites change their layout. A "selector" is the address of a thing on
@@ -96,13 +117,14 @@ The same picture in plain text:
      more times.
 - **When it can't answer:**
   - **Busy:** one request per AI at a time. A second one hears "busy", and Akọwe waits and retries.
-  - **Site error:** the site showed its own notice ("Something went wrong", a usage limit). Akọwe waits (30 s,
-    60 s, 120 s…) or uses another AI.
+  - **Site error:** the site showed its own notice ("Something went wrong", a usage limit). Akọwe waits (30 s, or
+    60 s after a usage limit, then longer, up to 2 minutes each and about 10 minutes in all) or uses another AI.
   - **Not working:** an AI that is being repaired, logged out or broken is skipped. Its work goes to another AI.
   - **Timeout:** no answer in time (4 minutes by default). Akọwe never retries this by itself, because the answer
     may still come. The step pauses and you press 🔁 Try again.
-- A second door, the **service bridge** (port 8765), lets Akọwe ask for pictures, video clips, the ebook cover JPG
-  and the Book Bible PDF.
+- A second door, the **service bridge** (port 8765), does more than the AI bridge. Akọwe uses it for pictures,
+  video clips, trailers, the ebook cover JPG and the Book Bible PDF. It also carries the app's tools, voice (speak
+  and listen), messages to the AIs, live events, and the phone page.
 
 ### 📖 Akọwe (the book writer)
 
@@ -119,7 +141,8 @@ The same picture in plain text:
 
 - **What it is:** the 🎨 Images tab. It drives a picture program on your PC: Forge, A1111, SD.Next or ComfyUI.
   AutoInjector can find, start or install one.
-- **Engines:** Stable Diffusion, ChatGPT (it draws inside its own pane), or Auto.
+- **Engines:** Stable Diffusion (Forge, A1111, SD.Next or ComfyUI), ChatGPT (it draws inside its own pane), or
+  Auto.
 - **Checkpoint models and LoRAs:** a checkpoint model is the main picture model. A LoRA is a small add-on that
   teaches it one look or style.
 - **🔒 Character locks:** a saved recipe (a LoRA, trigger words, fixed looks, or a portrait) that keeps one
@@ -133,7 +156,7 @@ The same picture in plain text:
   - **FramePack**, the copy you already have (for example in Stability Matrix). Nothing is downloaded.
   - **Wan** on ComfyUI. Its models download inside the app.
 - **Trailers:** shots and title cards joined into one trailer (WebM, plus MP4 when ffmpeg is found). Akọwe's
-  🎞 Trailer page plans the shots from the book.
+  🎬 Trailer page plans the shots from the book.
 - **Not yet confirmed on your PC:** on your RTX 5070 Ti, four test rounds fixed start-up and loading problems.
   A first finished clip, picture → video, text → video and a trailer still need to be confirmed. Use
   🩺 Test pictures & video (Full).
@@ -141,12 +164,14 @@ The same picture in plain text:
 ### 🎩 Alfred
 
 - **What it is:** an assistant in a side panel (Ctrl+Shift+A). He is off until you turn him on.
-- **His AI:** by default a local model through Ollama, so nothing leaves your PC. He can also use a connected AI
-  or one of the web panes.
+- **His AI (his "brain"), three choices:** a local model through Ollama (the default; nothing leaves your PC),
+  an AI you connect with a key (any OpenAI-compatible service), or one of the ChatGPT / Claude / Gemini panes.
 - **Tools:** a fixed list of the app's own controls: books, pictures, video, the panes, files and logs. He cannot
   run any code you have not allowed.
 - **"I will…" cards:** before he changes anything, he shows a card saying what he will do. Nothing happens until
-  you press ✔ Do it. He never approves your book's drafts.
+  you press ✔ Do it, unless you ticked "always allow" for a harmless tool. Running code and outside tool servers
+  never get "always allow". He never approves your chapter drafts. He can approve a Character Forge proposal,
+  but only through an "I will" card.
 - **Tool servers (MCP):** you can add outside tools (files, a database, a web service). He uses them only through
   an "I will" card, every time.
 
@@ -169,7 +194,8 @@ to a minute), so the run knows which AIs work.
 
 1. **Safety backup** of all your books.
 2. **Invent the book:** title, pen name, genre, readers, tone and the idea. The point of view (first or third
-   person) and the tense (past or present) are fixed here too, from your choice or from the genre.
+   person) and the tense (past or present) are fixed here too, from your choice, else the AI's pick for this
+   story, else the genre's usual.
 3. **Characters and places:** drafted, reviewed, approved. The main character (★) is guaranteed to exist.
 4. **Character sheets and voices:** what each character wants, needs, fears and hides, and a **voice card** for
    how each one talks.
@@ -178,6 +204,8 @@ to a minute), so the run knows which AIs work.
    This never holds up the book.
 7. **Story rules and world texture:** what is law in this world, what is only believed, and real-world obstacles.
 8. **Premise**, then **main plot**, then **chapter outline**.
+   - **Optional: fill the whole Book Bible** from the plan before chapter one. It is off unless you turn it on
+     (on the start screen, or 📖 Book Bible → At a glance). It never holds up the book.
 9. **Every chapter.** For each one:
    - **Just-in-time details:** if the chapter has a fight, the fighters' style and weapon are decided now. A new
      place gets its rooms, sounds and smells. Once a chapter uses a detail, it is **locked**.
@@ -206,7 +234,8 @@ to a minute), so the run knows which AIs work.
      ending, does the main character change, does the ending answer the book's question? What is still open is
      fixed in the last chapter(s) (one round), checked again, and anything left is listed for you.
 10. **Planned details on the page:** a whole-book report.
-11. **Book format**, **put the book together**, **export PDF, EPUB and Word** (each file is re-read to check it).
+11. **Book format**, **put the book together**, **export PDF, EPUB and Word**. Each file is re-read by Akọwe's
+    export check to make sure nothing was lost.
 12. **Content check** (every chapter once, in order) and the **book report**. An optional **beta reader** step
     reads the book as its target reader.
 
@@ -235,6 +264,8 @@ to a minute), so the run knows which AIs work.
 | Your promises (content limits, themes, question) | a chapter showing what you ruled out | writer, reviewer and editor, every chapter |
 | Point of view and tense | a chapter that slips into another person or tense | every chapter |
 | Editor rubric | told-not-shown feelings, flat side characters, same-sounding voices, no stakes | every chapter |
+| Timeline arithmetic (no AI) | ages and years that don't add up ("twelve, twenty years ago… now forty") | the whole-book fact check, near the end |
+| Readability (no AI) | prose too hard or too simple for the book's readers | the book report and the scene grid |
 | Pattern check (no AI) | repeated habits ("went very still"), lists of three, same-length sentences | before the editor |
 | Voice cards | characters who all talk alike | writing and editing |
 | Locked details | eyes, hair, weapon or weapon hand changing | after each chapter |
@@ -245,7 +276,7 @@ to a minute), so the run knows which AIs work.
 | Protagonist guarantee | a book that loses its main character | before the outline, the chapters and "done" |
 | Cut instructions ⚠️ | the writer silently missing facts, rules or voice cards | every chapter |
 | Needs list 🧠 | a listed detail that does not match the page (named by its code, e.g. "Mara C1c (eyes)"); things used but not planned | reviewer and checkpoints, every chapter |
-| Final checks | chapters missing or doubled; scores and weaknesses; broken files | at the end |
+| Final checks and export check | chapters missing or doubled; scores and weaknesses; a PDF, EPUB or Word file that lost text or is broken | at the end |
 
 A few of these need more words:
 
@@ -281,7 +312,7 @@ one. Alfred acts on the run of the book that is open. Replies that look cut off 
   subtle one.
 - A rename like "Bram" → "Brannock" (not a near-miss spelling) is left to the checkpoint AI. Akọwe's own keyword
   reading is English only.
-- Locked-detail checks cover colours, weapons and the weapon hand only.
+- Locked-detail checks cover colours, an item's metal, weapons and the weapon hand only. The AI checks the rest.
 - Everything here has been tested with stand-in AIs. Real books with the real websites are the real test.
 - Video is not yet confirmed on your RTX 5070 Ti (see 🎬 Video above).
 
@@ -305,7 +336,7 @@ You can download it as **⬇ PDF** or **⬇ Word**. Each save also puts it in th
 - **Changes per book:** looks, belongings, powers, relationships, status (alive, injured…), a place's ruler or
   condition.
 
-Before a sequel, **✨ Find what changed** reads book 1. It proposes those changes for you to approve. The sequel
+Before a sequel, **✨ Find what changed in this book** reads book 1. It proposes those changes for you to approve. The sequel
 then carries the locked facts, belongings, status and a summary of book 1.
 
 ## 6. Where everything is saved
@@ -377,4 +408,4 @@ quietly every 10 minutes when a book has changed.
 | Character lock | a saved recipe that keeps a character's face the same |
 | Book Bible | the binder of the whole book, one page per thing |
 | MCP tool server | an outside tool Alfred can use, always after an "I will" card |
-| "stuff and thing" | the one folder for everything the app makes or downloads |
+| "stuff and thing" | the app's folder for pictures, videos, models, installed programs and logs (books and settings live elsewhere) |
