@@ -229,6 +229,7 @@ class BookFakeAI:
         self.ending_script: list = []            # 🎯 H11/H12: scripted ending checks (dicts or callables(ctx))
         self.ending_fix = True                   # 🎯 the writer adds an ending finding's suggestion after the passage
         self.plot_obligations: list = []         # 🎯 the main plot's setups (B03 plot_obligations) the ending must keep
+        self.needs = None                        # 🧠 a needs list returned with every scene plan (dict or callable(ctx))
 
     def fail_next(self, *excs):
         self.failures.extend(excs)
@@ -390,9 +391,11 @@ class BookFakeAI:
         if "scenes" in props:  # 🎬 the writer plans a chapter's scenes (P8)
             with self.lock:
                 scripted = self.scene_script.pop(0) if self.scene_script else None
-            if scripted is not None:
-                return "scenes", scripted(ctx) if callable(scripted) else copy.deepcopy(scripted)
-            return "scenes", self._scenes(ctx)
+            out = (scripted(ctx) if callable(scripted) else copy.deepcopy(scripted)) if scripted is not None \
+                else self._scenes(ctx)
+            if self.needs is not None and isinstance(out, dict) and "needs" not in out:  # 🧠 the chapter's needs list
+                out["needs"] = self.needs(ctx) if callable(self.needs) else copy.deepcopy(self.needs)
+            return "scenes", out
         if "character_sheet" in props and "concept" not in props:  # P7/P17 for an existing character
             name = (ctx.get("character") or {}).get("name") or "Someone"
             others = [o.get("name") for o in ctx.get("other_characters") or []]

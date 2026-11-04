@@ -3058,6 +3058,12 @@ class AutoBookService(_Runner):
                     cuts = brief_cuts.after_write(self.store, run["project_id"], run["branch_id"], cid, idx + 1, rid,
                                                   payload.get("context_ref"))
                     item.pop("cut", None)
+                    from . import needs_list  # noqa: PLC0415 - 🧠 smart memory: this chapter's instruction size
+                    sm = needs_list.metric_of_record(self.store, run["project_id"], run["branch_id"], rid)
+                    item.pop("memory", None)
+                    if sm:
+                        item["memory"] = sm
+                        needs_list.record_metric(self.store, run["project_id"], run["branch_id"], cid, idx + 1, sm)
                     if cuts:
                         item["cut"] = cuts["cut"]
                         self.event(run, "note", cuts["line"], code="INSTRUCTIONS_CUT", record_id=rid,

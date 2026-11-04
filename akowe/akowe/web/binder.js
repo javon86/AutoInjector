@@ -8,6 +8,7 @@
    (no innerHTML with book data); the ornaments are constant SVG strings of this file. Styles are scoped under .bnd. */
 import { SCHEMA } from './binder-schema.js';
 import { CODE_MAP } from './code-map.js';
+import { needsBox } from './needs-list.js';  // 🧠 a chapter's needs list (needs_list.py)
 import { problemFor } from './problems.js';
 
 /* ======================================================================= constants */
@@ -1284,6 +1285,8 @@ export async function viewBinder(main, x, rest = []) {
         '11.2.2': f => empty(f) ? placeholder(p, '11.2.2', f) : h('span', { class: 'bnd-who' }, bubble(txt(f), 's'), linkify('11.2.2', txt(f))),
       }), { cls: 'bnd-sec-facts' }),
       sec(p, '11.3', h('div', null, field(p, '11.3.1', { cls: 'bnd-prose' }), field(p, '11.3.2', { cls: 'bnd-callout' }))),
+      // 🧠 smart memory: the needs list the planner wrote with the scene cards (codes hoverable, list expandable)
+      p.needs_list ? h('div', { class: 'bnd-needs' }, needsBox(h, p.needs_list, { number: p.needs_list.number, testid: 'bnd-needs-list' })) : null,
       sec(p, '11.4', sceneCards(p)),
       sec(p, '11.5', (() => { const rs = rowsOf(p, '11.5'); return rs.length ? h('div', { class: 'bnd-who-row' }, rs.map(r => { const n = txt(rf(r, '11.5.1')); const t = (typeof rf(r, '11.5.1').link === 'string' && byId.get(rf(r, '11.5.1').link)) || rowPage(r) || findPage(n); return h('span', { class: 'bnd-who-card' }, bubble(n, 'm', rowPic(p, '11.5.1', r)), t ? pageLink(t, n) : n); })) : rowsEmpty(p, '11.5', 'characters'); })()),
       sec(p, '11.6', (() => { const rs = rowsOf(p, '11.6'); return rs.length ? h('ul', { class: 'bnd-checklist' }, rs.map(r => {

@@ -341,9 +341,13 @@ class PlannedChecker:
         stored = self.stored(pid, branch).get(f"{rid}:{rec['version']}")
         from . import brief_cuts  # noqa: PLC0415 - H13: what was cut from this chapter's instructions
         cut = brief_cuts.of_chapter(self.review.store, pid, branch, cid)
+        from . import needs_list  # noqa: PLC0415 - 🧠 the chapter's needs list (smart memory)
+        order = [c["chapter_id"] for c in bp.outline_chapters(outline)]
+        needs = needs_list.page_info(self.review.store, pid, branch, outline, cid,
+                                     order.index(cid) + 1 if cid in order else None)
         return {"record_id": rid, "version": rec["version"], "chapter_id": cid, "items": items,
                 "counts": counts(items), "stored": stored, "kind_words": KIND_WORDS,
-                "instructions_cut": cut}
+                "instructions_cut": cut, "needs_list": needs}
 
     def check(self, job, rid: str, *, ai: bool = True, round_no: int | None = None) -> dict:
         """Deterministic check, then (when something required is unclear/missing and ``ai``) one independent AI

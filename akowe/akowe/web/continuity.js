@@ -167,6 +167,8 @@ export async function viewContinuity(main, x) {
     for (const c of cp.items) {
       box.appendChild(h('h3', null, c.line));
       if (c.summary) box.appendChild(h('p', { class: 'small' }, c.summary));
+      // 🧠 what the chapters used that their needs lists did not plan (the next plans learn from it)
+      if ((c.unplanned || []).length) box.appendChild(h('ul', { class: 'small muted', 'data-testid': 'cp-unplanned' }, c.unplanned.map(x => h('li', null, '🧠 ', x))));
       if (c.problems.length) box.appendChild(h('ul', { class: 'small' }, c.problems.map(p => h('li', { class: p.status === 'waiting' ? 'words-warn' : '' },
         h('strong', null, `Chapter ${p.number}: `), p.problem, ' — ', WORDS[p.status] || p.status, p.why && p.status !== 'fixed' ? h('span', { class: 'muted' }, ` (${p.why})`) : null,
         p.quote ? h('div', { class: 'muted' }, `“${p.quote}”`) : null,

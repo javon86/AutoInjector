@@ -324,7 +324,8 @@ def _texts(svc, run) -> dict:
     return {c["chapter_id"]: c for c in continuity.chapters_of(svc.bp(run))}
 
 
-def _context(svc, run, cp: dict, part: dict, texts: dict, order: list[str], flags: list[dict]) -> dict:
+def _context(svc, run, cp: dict, part: dict, texts: dict, order: list[str], flags: list[dict],
+             needs: list | None = None) -> dict:
     store, pid, branch = svc.store, run["project_id"], run.get("branch_id") or "main"
     chs = []
     for pc in part["pieces"]:
@@ -355,6 +356,8 @@ def _context(svc, run, cp: dict, part: dict, texts: dict, order: list[str], flag
     locked = _locked(store, pid, branch)
     if locked:
         ctx["locked_details"] = locked
+    if needs:  # 🧠 what each chapter's plan said it needs (needs_list.py), its mismatches and unplanned uses
+        ctx["needs_lists"] = needs
     return ctx
 
 
@@ -418,6 +421,17 @@ def _run_one(svc, run: dict, st: dict, cp: dict, chapters: list[dict]) -> None:
                                    "text": (texts.get(c) or {}).get("text") or ""} for c in span])
         _put(store, pid, branch, cp)
     flags = _flags_now(store, pid, branch, order, span, texts)
+    # 🧠 the chapters' needs lists: each listed section checked (Akọwe's single-field mismatches join the flags) and
+    # what the chapters used without planning it (listed in the report)
+    from . import needs_list  # noqa: PLC0415
+    try:
+        outline = svc.bp(run).outline()
+    except Exception:  # noqa: BLE001
+        outline = None
+    needs_rows, needs_flags = needs_list.checkpoint_part(store, pid, branch, outline, span, order, texts)
+    flags += needs_flags
+    cp["unplanned"] = [f"Chapter {u.get('number') or u['chapter_id']} also used {it}"
+                       for u in needs_list.unplanned_of(store, pid, branch, span) for it in u.get("items") or []][:24]
     # 2. read every part not read yet (a finished part is never read again)
     k = len(cp["parts"])
     for j, part in enumerate(cp["parts"]):
@@ -431,13 +445,15 @@ def _run_one(svc, run: dict, st: dict, cp: dict, chapters: list[dict]) -> None:
         rid = (texts.get(part["chapter_ids"][0]) or {}).get("record_id") or part["chapter_ids"][0]
         job = svc._sub_job(run, "checkpoint", rid, (run.get("settings") or {}).get("slot_id"))  # noqa: SLF001
         job.retry_busy = False  # a busy AI never holds the book up: the part is read at the next checkpoint
-        ctx = _context(svc, run, cp, part, texts, order, flags)
+        nums_here = {order.index(c) + 1 for c in part["chapter_ids"] if c in order}
+        rows_here = [r for r in needs_rows if r.get("chapter") in nums_here]
+        ctx = _context(svc, run, cp, part, texts, order, flags, rows_here)
         review = getattr(svc, "_review", None) or svc.app.review
         tok = review.work.begin(pid, "C02", f"Checkpoint after chapter {cp['after']}")
         try:
             raw = review.assist._call_ai(  # noqa: SLF001
-                job, op_for_roles="C02", task=CHECK_TASK.format(part=j + 1, parts=k, after=cp["after"]),
-                schema=CHECK_SCHEMA, context=ctx, protected=[])
+                job, op_for_roles="C02", task=CHECK_TASK.format(part=j + 1, parts=k, after=cp["after"])
+                + (needs_list.CHECK_NOTE if rows_here else ""), schema=CHECK_SCHEMA, context=ctx, protected=[])
         except Cancelled:
             raise
         except AkoweError as exc:
@@ -658,7 +674,8 @@ def report(store, pid: str, branch: str) -> list[dict]:
                                                         "source", "original", "replacement")}
                                  for p in c.get("problems") or []],
                     "finished_at": c.get("finished_at"), "redo_because": c.get("redo_because"),
-                    "setups": (c.get("ending") or {}).get("open") or []})
+                    "setups": (c.get("ending") or {}).get("open") or [],
+                    "unplanned": list(c.get("unplanned") or [])})
     return out
 
 
@@ -679,6 +696,8 @@ def markdown(rep: list[dict]) -> list[str]:
             out += [c["summary"], ""]
         for x in c.get("setups") or []:
             out.append(f"- 🎯 {x}")
+        for x in c.get("unplanned") or []:
+            out.append(f"- 🧠 {x}")
         for p in c["problems"]:
             out.append(f"- Chapter {p.get('number')}: {p.get('problem')} — {STATUS_WORDS.get(p.get('status'), '')}"
                        + (f" ({p['why']})" if p.get("why") and p.get("status") != "fixed" else "")

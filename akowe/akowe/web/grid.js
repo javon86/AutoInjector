@@ -180,6 +180,19 @@ export async function viewCosts(main, ui) {
     h('div', { class: 'kpi' }, h('strong', null, minutes(t.ai_minutes)), h('span', { class: 'small' }, 'the AIs spent answering')),
     h('div', { class: 'kpi' }, h('strong', null, minutes(t.minutes)), h('span', { class: 'small' }, 'from start to end of the runs (pauses included)')),
     t.cost_minor ? h('div', { class: 'kpi' }, h('strong', null, `${(t.cost_minor / 100).toFixed(2)} ${c.currency || ''}`), h('span', { class: 'small' }, `for ${num(t.tokens)} tokens (API prices)`)) : null)));
+  // 🧠 smart memory (needs_list.py): the chapters' needs lists against the old keyword guessing
+  const sm = c.smart_memory;
+  if (sm) {
+    holder.appendChild(h('section', { class: 'card', 'data-testid': 'ct-smart-memory' }, h('h2', null, sm.line),
+      h('p', { class: 'small' }, `${sm.chapters} chapter(s) were written with a needs list: the writer got ${num(sm.chars)} characters of instructions instead of ${num(sm.old_chars)} the old way.`),
+      infoTip('Smart memory', h('p', null, 'When the planner makes a chapter’s scene cards it also writes a needs list: exactly which Book Bible sections (for example C11 = a character’s looks) the chapter needs. The writer then gets just those — nothing missing, nothing extra.'),
+        h('p', null, 'Chapters planned before this keep the old way (Akọwe guesses from the plan’s words).')),
+      (sm.per_chapter || []).length ? h('div', { class: 'table-wrap' }, h('table', { class: 'rp-table ct-table' },
+        h('thead', null, h('tr', null, ['Chapter', 'With the needs list', 'The old way', 'Saved'].map(l => h('th', { scope: 'col' }, l)))),
+        h('tbody', null, sm.per_chapter.map(r => h('tr', null, h('th', { scope: 'row' }, `Chapter ${r.number}`),
+          h('td', { class: 'num', 'data-label': 'With the needs list' }, num(r.chars)), h('td', { class: 'num', 'data-label': 'The old way' }, num(r.old_chars)),
+          h('td', { class: 'num', 'data-label': 'Saved' }, `${r.saved_pct}%`)))))) : null));
+  }
   const aiTable = (rows, cols) => h('div', { class: 'table-wrap' }, h('table', { class: 'rp-table ct-table' },
     h('thead', null, h('tr', null, cols.map(([l]) => h('th', { scope: 'col' }, l)))),
     h('tbody', null, rows.map(r => h('tr', null, cols.map(([l, f], i) => i === 0 ? h('th', { scope: 'row' }, f(r)) : h('td', { class: 'num', 'data-label': l }, f(r))))))));

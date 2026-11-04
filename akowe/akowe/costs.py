@@ -243,8 +243,19 @@ def book_costs(app, pid: str, branch: str = "main") -> dict:
                        "tokens": sum(t["input_tokens"] + t["output_tokens"] for t in tokens)},
             "by_ai": sorted(merged.values(), key=lambda m: -m["seconds"]), "runs": runs, "other_jobs": other,
             "journal": _journal_counts(app, pid, branch, label), "tokens": tokens,
+            "smart_memory": _smart_memory(app, pid, branch),
             "about": "Measured: every AI call of a ⚡ Make-a-book run is timed. Counted: AI work outside runs comes "
                      "from the book journal (not timed). Money only for AIs with per-token prices (web AIs cost 0)."}
+
+
+def _smart_memory(app, pid: str, branch: str) -> dict | None:
+    """🧠 needs_list.py: how much smaller the writer's instructions were with the chapters' needs lists."""
+    try:
+        from . import needs_list  # noqa: PLC0415
+        return needs_list.book_metric(app.store, pid, branch)
+    except Exception:  # noqa: BLE001
+        log.exception("smart memory numbers")
+        return None
 
 
 def _labeler(app):
@@ -359,8 +370,12 @@ def render_markdown(c: dict) -> str:
     out = [f"# ⏱ Time and AI use — {c.get('title')}", "",
            f"- Runs: {t.get('runs', 0)} · AI calls (timed): {t.get('calls', 0)} · AI minutes: {t.get('ai_minutes', 0)}"
            f" · run minutes: {t.get('minutes', 0)}",
-           "- Numbers only: this page never contains prompts, AI replies or your book's text.", "",
-           "## Per AI (measured in runs)", "", "| AI | Calls | Minutes | Failed |", "|---|---|---|---|"]
+           "- Numbers only: this page never contains prompts, AI replies or your book's text."]
+    sm = c.get("smart_memory")
+    if sm:
+        out.append(f"- {sm['line']} ({sm['chapters']} chapter(s) written with a needs list: "
+                   f"{sm['chars']:,} characters of instructions instead of {sm['old_chars']:,})")
+    out += ["", "## Per AI (measured in runs)", "", "| AI | Calls | Minutes | Failed |", "|---|---|---|---|"]
     for a in c.get("by_ai") or []:
         out.append(f"| {a['name']} | {a['calls']} | {a['minutes']} | {a['failed']} |")
     out += ["", "## Runs", "", "| Started (UTC) | Status | Calls | AI minutes | Minutes |", "|---|---|---|---|---|"]

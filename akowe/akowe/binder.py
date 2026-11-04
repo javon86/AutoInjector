@@ -2355,6 +2355,16 @@ def fill(page: Page) -> dict:
     for k in ("graph", "map"):
         if page.extra.get(k):
             out[k] = page.extra[k]
+    if page.template == "11" and page.subject.get("chapter_id"):  # 🧠 the chapter's needs list (needs_list.py)
+        try:
+            from . import needs_list  # noqa: PLC0415
+            b = page.book
+            nl = needs_list.page_info(b.store, b.pid, b.branch, b.outline, page.subject["chapter_id"],
+                                      page.subject.get("number"))
+            if nl:
+                out["needs_list"] = nl
+        except Exception:  # noqa: BLE001
+            log.exception("binder: needs list of %s", page.page_id)
     return out
 
 
