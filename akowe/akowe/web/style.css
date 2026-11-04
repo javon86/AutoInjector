@@ -211,6 +211,10 @@ input[type="checkbox"], input[type="radio"] { min-height: 0; width: 18px; height
 textarea { width: 100%; min-height: 6rem; resize: vertical; line-height: 1.5; }
 textarea.prose { font-family: var(--font-prose); font-size: 1.02rem; min-height: 10rem; }
 input[type="text"], input[type="number"], input[type="password"], input:not([type]), select { width: 100%; }
+/* a choice inside a row of controls keeps its own width (at 100% it took a line to itself, the label above it and the
+   button below it: "Check [Last 5 chapters ▾] 🔎 Check consistency now" is one line again) */
+.row > select { width: auto; min-width: 0; }
+.row > input[type="number"] { width: 6.5rem; }
 input[aria-invalid="true"], textarea[aria-invalid="true"], select[aria-invalid="true"] { border-color: var(--bad);
   border-width: 2px; }
 
@@ -927,6 +931,9 @@ button.mab-cta:hover, .mab-cta:hover { background: #ffe066; filter: none; }
 
 /* ---------------------------------------------------------------- Make my book: warnings, refused drafts */
 .words-warn { margin: 6px 0 0; padding: 6px 10px; border-left: 4px solid var(--warn, #b45309); background: var(--surface-2); }
+/* inside a line (a word, a table cell, a ⚠️ next to a name) the note box broke the line with a bar: just warn-coloured text */
+:is(span, strong, em, b, td, th).words-warn { margin: 0; padding: 0; border: 0; background: none; color: var(--warn); font-weight: 600; }
+.interior-theme .badge { margin-left: 6px; }
 .refused-box { display: flex; flex-direction: column; gap: 4px; margin: 6px 0; }
 .bb-wizard:empty { display: none; }
 
@@ -1781,9 +1788,16 @@ html[data-mode="simple"] .topbar .health-btn.adv-only[data-state="problem"] { di
 .interior-spread-wrap { margin: 10px 0; }
 .interior-spread { display: flex; justify-content: center; background: #8b8478; padding: 12px; border-radius: 6px;
   overflow-x: auto; }
-.interior-page { margin: 0; flex: 0 1 300px; max-width: 300px; box-shadow: 0 1px 4px rgba(0, 0, 0, .35); background: #fffdf8; }
+.interior-spreads { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr)); gap: 0 12px; }
+.interior-page { margin: 0; flex: 0 1 240px; max-width: 240px; box-shadow: 0 1px 4px rgba(0, 0, 0, .35); background: #fffdf8; }
 .interior-page svg, .interior-page img { display: block; width: 100%; height: auto; }
 .interior-page figcaption { background: #fffdf8; color: #6b6455; text-align: center; padding: 2px 0; }
+/* a phone: the 8 designs two by two (one long column of cards was a screen and a half) */
+@media (max-width: 600px) {
+  .interior-themes { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+  .interior-theme { padding: 6px 8px; font-size: .8rem; }
+  .interior-spread { padding: 6px; }
+}
 
 /* ---------------------------------------------------------------- ⚡ AI activity strip (#116)
    Under the top bar (inside it, so it stays with it): one row per AI at work. Hidden — no space — when nothing works. */
@@ -1824,3 +1838,19 @@ html[data-mode="simple"] .topbar .health-btn.adv-only[data-state="problem"] { di
   .aia-stage, .aia-time, .aia-where { order: 3; }
 }
 @media (prefers-reduced-motion: reduce) { .aia-item, .aia-fill { transition: none; } .aia-dot { animation: none !important; } }
+
+/* side bar: the pages inside the part you are in (layout pass 2026-11) */
+.side-subs { list-style: none; margin: 2px 0 6px 30px; padding: 0 0 0 10px; border-left: 2px solid var(--border); display: grid; gap: 1px; }
+.side-sublink { display: block; padding: 4px 8px; border-radius: 6px; color: var(--text); text-decoration: none; font-size: .9rem; }
+.side-sublink:hover { background: var(--surface-2); }
+.side-sublink[aria-current=page] { font-weight: 700; background: var(--accent-soft); }
+.mkt-animate { flex-wrap: nowrap; align-items: flex-start; }
+.mkt-animate > input[type="checkbox"] { margin-top: 2px; }
+.s7-verdicts thead th { white-space: normal; }
+.cn-review { margin: 6px 0; }
+.cn-review > summary { font-weight: 600; cursor: pointer; }
+.s7-who { margin: 4px 0; }
+.s7-who > summary { cursor: pointer; font-weight: 600; font-size: .92rem; }
+/* the chapter-by-chapter heat map: the chapter columns next to the labels (at full width they were pushed to the far right) */
+table.s7-heat { width: auto; }
+.s7-heat td.num, .s7-heat thead th.num { min-width: 3rem; text-align: center; }

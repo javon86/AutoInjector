@@ -15,7 +15,7 @@ export async function viewContinuity(main, x) {
   try { await load(); }
   catch (e) { main.appendChild(x.problemBox(x.toProblem(e, where), { retry: () => x.route() }, 'Could not open the continuity page')); return; }
   main.appendChild(h('div', { class: 'page-head' }, h('div', null,
-    x.crumbs(['Your books', '#/'], [S.project.name, plink()], ['Make my book', plink('book')], 'Continuity'),
+    x.crumbs(['My books', '#/'], [S.project.name, plink('book')], ['Fix mistakes', plink('fix')], 'Continuity'),
     h('h1', null, '🧭 Continuity')),
   h('div', { class: 'row' }, x.infoTip('Continuity',
     h('p', null, '🌊 Physical state: for every scene the time, light, tide, weather, footing, hazards and running counts (a lamp count, the clock, a gauge) — so the next chapter starts where the last one ended and early hazards still matter later.'),
@@ -93,7 +93,7 @@ export async function viewContinuity(main, x) {
   function checksCard() {
     const all = [...(info.checks.dossier || []), ...(info.checks.physical || []), ...(info.checks.characters || [])];
     return h('section', { class: 'card', 'data-testid': 'cont-checks' }, h('h2', null, '🔎 Questions from Akọwe’s checks'),
-      all.length ? h('ul', { class: 'small' }, all.map(p => h('li', null, p.severity === 'major' ? '⚠️ ' : '• ', p.number ? `Chapter ${p.number}${p.scene ? `, scene ${p.scene}` : ''}: ` : '', p.message)))
+      all.length ? h('ul', { class: 'small' }, all.map(p => h('li', null, p.severity === 'major' ? '⚠️ ' : '', p.number ? `Chapter ${p.number}${p.scene ? `, scene ${p.scene}` : ''}: ` : '', p.message)))
         : h('p', { class: 'small muted' }, 'No questions: counts go one way, the clock does not run backwards, every hazard matters later and every main character acts for their own goal.'));
   }
   function variablesCard() {

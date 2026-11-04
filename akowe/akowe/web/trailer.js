@@ -35,7 +35,7 @@ export async function viewTrailer(main, x) {
     return t ? Object.assign({}, p, { title: t[0], what: t[1], action: ['IMAGE_BRIDGE_UNREACHABLE', 'IMAGE_BRIDGE_KEY'].includes(p.code) ? 'settings' : 'retry' }) : p;
   };
   main.appendChild(h('div', { class: 'page-head' }, h('div', null,
-    x.crumbs(['Your books', '#/'], [S.project.name, plink()], 'Trailer'),
+    x.crumbs(['My books', '#/'], [S.project.name, plink('book')], 'Trailer'),
     h('h1', null, '🎞 Book trailer')),
   h('div', { class: 'row' }, x.infoTip('Book trailer',
     h('p', null, 'A short trailer of your book: video shots of its world, its key scenes and its main character, joined with title cards (the title, the one-line idea, “Coming soon”).'),

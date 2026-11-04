@@ -178,7 +178,7 @@ export async function viewBinder(main, x, rest = []) {
   const where = { book: S.project.name, step: '📖 Book Bible' };
   document.body.classList.add('bnd-on');
   main.appendChild(h('div', { class: 'page-head bnd-apphead no-print' }, h('div', null,
-    x.crumbs(['Your books', '#/'], [S.project.name, plink()], 'Book Bible'), h('h1', null, '📖 Book Bible'))));
+    x.crumbs(['My books', '#/'], [S.project.name, plink('book')], 'Book Bible'), h('h1', null, '📖 Book Bible'))));
   const root = h('div', { class: 'bnd', 'data-testid': 'binder', 'data-look': 'classic', 'data-fids': 'off', 'data-codes': 'off', 'data-mode': 'one' });
   main.appendChild(root);
   root.appendChild(x.loadingState('Opening the Book Bible…'));

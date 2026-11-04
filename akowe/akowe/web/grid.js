@@ -42,7 +42,7 @@ export async function viewSceneGrid(main, ui) {
     } catch (e) { ui.showGlobalProblem(toProblem(e, { step: 'Scene grid' })); }
   } }, '⬇ Spreadsheet (.csv)');
   main.appendChild(h('div', { class: 'page-head' }, h('div', null,
-    crumbs(['Your books', '#/'], [project.name, plink()], ['Make my book', plink('book')], 'Scene grid'), h('h1', null, '🗂 Scene grid')),
+    crumbs(['My books', '#/'], [project.name, plink('book')], ['Write', plink('write')], 'Scene grid'), h('h1', null, '🗂 Scene grid')),
   h('div', { class: 'row no-print' }, infoTip('Scene grid',
     h('p', null, 'Every scene of the book on one page, in story order: who tells it, where and when it happens, what each character wants, what gets in the way and what changes — from the scene cards — beside how many words the scene has on the page and how it reads (reading level, dialogue, pace).'),
     h('p', null, 'Problems Akọwe already knows are listed in each row: scene cards without a goal, obstacle or anything unsaid, the scene checker’s notes, very short scenes, chapters far under their length, the editor’s and the planned-to-page check’s open notes.'),
@@ -107,7 +107,7 @@ export async function viewSceneGrid(main, ui) {
   }
   function draw() {
     clear(holder);
-    if (!g.outline) { holder.appendChild(stateBox('empty', 'No chapter outline yet', h('p', null, 'The grid shows the chapters of the approved outline. Plan the book first (📘 Make my book).'))); return; }
+    if (!g.outline) { holder.appendChild(stateBox('empty', 'No chapter outline yet', h('p', null, 'The grid shows the chapters of the approved outline. Plan the book first (🏠 Book home).'))); return; }
     const t = g.totals;
     holder.appendChild(h('section', { class: 'card sg-summary', 'data-testid': 'sg-summary' },
       h('h2', { class: 'print-only' }, `“${g.title}” — scene grid`),
@@ -163,7 +163,7 @@ export async function viewCosts(main, ui) {
     } catch (e) { ui.showGlobalProblem(toProblem(e, { step: 'Time and AI use' })); }
   } }, '⬇ Download (.md)');
   main.appendChild(h('div', { class: 'page-head' }, h('div', null,
-    crumbs(['Your books', '#/'], [project.name, plink()], ['Make my book', plink('book')], 'Time and AI use'), h('h1', null, '⏱ Time and AI use')),
+    crumbs(['My books', '#/'], [project.name, plink('book')], ['Write', plink('write')], 'Time and AI use'), h('h1', null, '⏱ Time and AI use')),
   h('div', { class: 'row no-print' }, infoTip('Time and AI use',
     h('p', null, 'Measured: every AI answer of a ⚡ Make-a-book run is timed — how many answers each AI gave and how many minutes it worked on them, per run and per step.'),
     h('p', null, 'Counted: AI work outside runs (✨ Fill with AI, 🧐 reviews, ✍ Write all chapters, reports) is not timed, but the book journal names the AI of every piece of it.'),

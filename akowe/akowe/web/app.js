@@ -797,6 +797,9 @@ function renderTop(parts) {
       a(plink('journal'), '📜 Journal'),
       a(plink('grid'), '🗂 Scene grid'),
       a(plink('costs'), '⏱ Time and AI use'),
+      a(plink('report'), '📊 Book report'),
+      a(plink('launch'), '🚀 Launch kit'),
+      a(plink('marketing'), '📣 Mockups & ads'),
       a(plink('activity'), '🕘 Activity'),
       h('button', { type: 'button', class: 'more-item', 'data-testid': 'more-folder', onclick: async () => {
         try { const r = await api('POST', '/books-folder/show', { body: { project_id: S.pid, branch_id: S.branch } }); toast(`Opened ${r.path}`); }
@@ -829,8 +832,16 @@ const SIDE_ITEMS = [
   { id: 'fix', icon: '🧭', label: 'Fix mistakes', path: ['fix'], tip: 'Continuity and facts that disagree' },
   { id: 'export', icon: '📤', label: 'Export', path: ['export'], tip: 'PDF, EPUB and Word files of your book' },
 ];
+/* The pages inside a part, shown under it in the side bar while you are in that part (the newer pages such as 🚀 Launch
+ * kit or 📣 Mockups & ads were only reachable through the part's own page). */
+const SIDE_SUB = {
+  write: [['grid', '🗂', 'Scene grid']],
+  art: [['pictures', '🖼', 'Pictures'], ['cover', '🎨', 'Cover'], ['marketing', '📣', 'Mockups & ads']],
+  fix: [['continuity', '🧭', 'Continuity'], ['report', '📊', 'Book report']],
+  export: [['launch', '🚀', 'Launch kit']],
+};
 const SIDE_OF = { '': 'home', book: 'home', people: 'people', forge: 'people', world: 'people', plan: 'plan', write: 'write', scenes: 'write',
-  bible: 'bible', binder: 'bible', art: 'art', pictures: 'art', cover: 'art', marketing: 'art', trailer: 'trailer', launch: 'export', fix: 'fix', continuity: 'fix', report: 'fix', export: 'export' };
+  bible: 'bible', binder: 'bible', art: 'art', pictures: 'art', cover: 'art', marketing: 'art', trailer: 'trailer', launch: 'export', fix: 'fix', continuity: 'fix', report: 'fix', export: 'export', grid: 'write' };
 function renderNav() {
   const nav = clear($('#sidenav'));
   const parts = parseRoute();
@@ -857,8 +868,12 @@ function renderNav() {
   const curSide = rest[0] === 'review' ? null : SIDE_OF[rest[0] || ''] || null;
   const ul = h('ul', { class: 'side-links', 'aria-label': 'Parts of your book' });
   for (const it of SIDE_ITEMS) {
+    const subs = curSide === it.id ? SIDE_SUB[it.id] : null;
     ul.appendChild(h('li', null, h('a', { href: plink(...it.path), class: `side-link side-${it.id}`, 'data-side': it.id, title: it.tip, 'aria-current': curSide === it.id ? 'page' : null },
-      h('span', { class: 'sl-ico', 'aria-hidden': 'true' }, it.icon), h('span', { class: 'sl-lab' }, it.label))));
+      h('span', { class: 'sl-ico', 'aria-hidden': 'true' }, it.icon), h('span', { class: 'sl-lab' }, it.label)),
+    subs ? h('ul', { class: 'side-subs', 'aria-label': `Pages of ${it.label}` }, subs.map(([path, icon, label]) => h('li', null,
+      h('a', { href: plink(path), class: 'side-sublink', 'data-sub': path, 'aria-current': rest[0] === path ? 'page' : null },
+        h('span', { 'aria-hidden': 'true' }, `${icon} `), label)))) : null));
   }
   nav.appendChild(ul);
   const curOp = parts[3] === 'op' ? parts[4] : (parts[3] === 'rec' || parts[3] === 'edit') ? (recordById(parts[4]) || {}).module_id : null;
@@ -1175,6 +1190,7 @@ async function viewLanding(main, kind) {
     add({ icon: '⚖️', label: 'Facts that disagree', line: 'Finds facts that contradict each other and fixes them with the smallest change.', href: plink('set', 'J') });
     add({ icon: '🔎', label: 'Timeline, trade facts and repeats', line: 'On Book home: dates that do not fit, terms to check and words used too often.', href: plink('book'), testid: 'ov-timeline-link', onclick: () => { S.scrollToFacts = true; } });
     add({ icon: '📋', label: 'Book report', line: 'A report on the whole book: length, pacing, characters and what to improve.', href: plink('report') });
+    add({ icon: '🔎', label: 'Check consistency now', line: 'Every working AI reads the chapters you choose and looks for mistakes and drift. On the Continuity page.', href: plink('continuity'), testid: 'land-check-now' });
   } else if (kind === 'export') {
     add({ icon: '⚙️', label: 'Book format', line: 'Page size, font and the PDF, EPUB and Word settings.', href: plink('book'), onclick: toStep('format'), state: stepBadge(book, 'format') });
     add({ icon: '🧩', label: 'Put the book together', line: 'Chapter order, one manuscript and the page layout.', href: plink('book'), onclick: toStep('assemble'), state: stepBadge(book, 'assemble') });
@@ -1190,10 +1206,10 @@ async function viewLanding(main, kind) {
     const chs = (st && st.chapters) || [];
     if (chs.length) {
       main.appendChild(h('section', { class: 'card', 'aria-labelledby': 'lw-h' }, h('h2', { id: 'lw-h' }, 'Your chapters'),
-        h('ul', { class: 'book-items' }, chs.map(c => {
+        h('ul', { class: 'book-items' }, chs.map((c, i) => {
           const cb = BOOK_STATE[c.state] || BOOK_STATE.blocked;
           const r = c.approved || c.prose;
-          return h('li', null, h('strong', null, c.name), c.objective || c.summary ? ` — ${c.objective || c.summary} ` : ' ', badge(cb[0], cb[1], cb[2]), ' ',
+          return h('li', null, h('strong', null, c.name || chapterName(c, i)), c.objective || c.summary ? ` — ${c.objective || c.summary} ` : ' ', badge(cb[0], cb[1], cb[2]), ' ',
             r ? h('a', { class: 'btn small', href: plink('write', r.record_id) }, '📖 Read') : null,
             h('a', { class: 'btn small', href: plink('scenes', c.chapter_id) }, '🎬 Scenes'));
         }))));
@@ -1222,7 +1238,8 @@ async function viewHelp(main) {
       row('⚡', 'AI working / AI needs you', 'shows up while the AI writes a whole book. Click it to watch, pause or cancel. “AI needs you” means the run is paused and waits for you.'),
       row('💾', 'Save', 'saves the open book into its folder.'),
       row('⚙️', 'Settings', 'connect your AI and choose how Akọwe works.'),
-      row('⋯', 'More', 'the book’s journal, scene grid, time and AI use, opening a saved book, your writing style.'))));
+      row('⋯', 'More', 'the book’s journal, scene grid, time and AI use, book report, launch kit, mockups & ads, opening a saved book, your writing style.'),
+      row('🟪', 'AI activity', 'a strip under the bar while an AI works for you: which AI, what it is doing, for how long. Click a row to open that work.'))));
   main.appendChild(h('section', { class: 'card', 'aria-labelledby': 'hl-side' }, h('h2', { id: 'hl-side' }, 'The list on the left (inside a book)'),
     h('ul', { class: 'help-list' },
       row('▶', 'Next step', 'one button to exactly the next thing your book needs.'),
@@ -1235,7 +1252,8 @@ async function viewHelp(main) {
       row('🖼', 'Pictures & cover', 'pictures of characters and places, and the cover.'),
       row('🎬', 'Trailer', 'a short video trailer for your book.'),
       row('🧭', 'Fix mistakes', 'continuity and facts that disagree.'),
-      row('📤', 'Export', 'PDF, EPUB and Word files of your book.'))));
+      row('📤', 'Export', 'PDF, EPUB and Word files of your book, and the 🚀 launch kit for a store.'),
+      row('↳', 'The pages of a part', 'when you are in a part, its pages show just under it: for example 🖼 Pictures & cover → Pictures, Cover, 📣 Mockups & ads; 🧭 Fix mistakes → Continuity, 📊 Book report.'))));
   main.appendChild(h('section', { class: 'card', 'aria-labelledby': 'hl-adv' }, h('h2', { id: 'hl-adv' }, 'Simple and Advanced view'),
     h('p', null, 'Akọwe starts in Simple view. Advanced view adds the expert tools: all the steps by set (A–K), branches, Jump (Ctrl K), the health panel, Test workflow, Test everything and the book’s features. Nothing is lost in Simple view, and Ctrl K jumps to any page in both.'),
     h('div', { class: 'row' }, modeSwitch('mode-toggle-help', true))));
@@ -5503,7 +5521,6 @@ async function viewBook(main) {
     h('a', { class: 'btn', href: plink('grid'), 'data-testid': 'bk-grid' }, '🗂 Scene grid'),
     WR.roomButton(wrc()))));  // 🗳 the three-AI writers' room: a twist, a chapter, a character or your own question
   main.appendChild(bookSaveCard());
-  main.appendChild(checkNowBox(s7c(), S.pid, S.branch, { testid: 'home-check-now' }));  // 🔎 PR #117
   const holder = h('div', null, loadingState('Checking where your book is…'));
   main.appendChild(holder);
   let book = null;
@@ -5799,6 +5816,8 @@ function renderBook(holder, book, redraw) {
     ol.appendChild(li);
   }
   holder.appendChild(ol);
+  // 🔎 PR #117 Check consistency now: just below the steps (layout pass: at the top of the page it pushed the steps a screen down)
+  holder.appendChild(checkNowBox(s7c(), S.pid, S.branch, { testid: 'home-check-now' }));
   if (book.steps.some(x => x.id === 'canon' && x.state === 'done')) holder.appendChild(bookSection4Card());
   if (book.steps.some(x => x.id === 'canon' && x.state === 'done')) holder.appendChild(bookFactsCard()); // 🔎 P26/P30/P31
   if (S.scrollToStep) {  // a side-bar section page (Plan, Write, Export…) → that step of Book home
@@ -6430,7 +6449,7 @@ function editorCard(cur, { onSaved } = {}) {
       body.appendChild(h('div', { class: 'row' },
         h('button', { type: 'button', class: c ? '' : 'primary', 'data-testid': 'ed-review', onclick: startReview }, c ? '🔁 Editor review again' : '🖋 Editor review'),
         info.fixable && c && (c.findings || []).length && !prop ? h('button', { type: 'button', class: 'primary', 'data-testid': 'ed-fix', onclick: getFixes }, '✍ Apply editor’s fixes') : null,
-        info.fixable && c && prop ? h('button', { type: 'button', class: 'small', onclick: getFixes }, '🔁 Ask the writer again') : null));
+        info.fixable && c && prop ? h('button', { type: 'button', onclick: getFixes }, '🔁 Ask the writer again') : null));
     }
   };
   draw();
@@ -8504,6 +8523,8 @@ function interiorBox(redraw) {
       p.kind === 'pdf_image' ? '🖨 Print preview: pictures of the real PDF pages. ' : '🖨 Print preview: drawn from the real page layout. ',
       h('span', { class: 'muted' }, p.honest, p.source ? ` Text: ${p.source}.` : '')));
     pv.appendChild(h('p', { class: 'small muted' }, `Page ${p.page_size_in[0]} × ${p.page_size_in[1]} in · margins: inside ${p.margins_in.inside} in (the binding side, wider for thicker books), outside ${p.margins_in.outside} in, top ${p.margins_in.top} in, bottom ${p.margins_in.bottom} in.`));
+    const spreads = h('div', { class: 'interior-spreads' });   // the two spreads side by side on a wide screen
+    pv.appendChild(spreads);
     for (const sp of p.spreads) {
       const row = h('div', { class: 'interior-spread', 'data-spread': sp.name, 'aria-label': sp.name });
       for (const pg of sp.pages) {
@@ -8517,7 +8538,7 @@ function interiorBox(redraw) {
         cell.appendChild(h('figcaption', { class: 'small muted' }, pg.role === 'blank' ? 'left page (blank)' : pg.role === 'opener' ? `page ${pg.page} — chapter opening` : `page ${pg.page}`));
         row.appendChild(cell);
       }
-      pv.appendChild(h('div', { class: 'interior-spread-wrap' }, h('strong', { class: 'small' }, sp.name), row));
+      spreads.appendChild(h('div', { class: 'interior-spread-wrap' }, h('strong', { class: 'small' }, sp.name), row));
     }
   };
   async function load() {

@@ -23,7 +23,7 @@ const words = t => (String(t || '').match(/[\p{L}\p{N}'’-]+/gu) || []).length;
 export async function viewLaunch(main, x) {
   const { h, clear, api, bpath, plink, S } = x;
   main.appendChild(h('div', { class: 'page-head' }, h('div', null,
-    x.crumbs(['My books', '#/'], [S.project.name, plink('book')], 'Launch kit'),
+    x.crumbs(['My books', '#/'], [S.project.name, plink('book')], ['Export', plink('export')], 'Launch kit'),
     h('h1', null, '🚀 Launch kit')),
   h('div', { class: 'row' }, x.infoTip('Launch kit',
     h('p', null, 'Everything you need to put your book in a store such as Amazon KDP: the back-cover blurb, the store description, a one-line hook, your author bio, 7 keywords, 3 categories, books like yours, the age range and an A+ content plan.'),

@@ -96,7 +96,7 @@ export async function viewForgeList(main, x, seg = 'characters') {
   const where = { book: S.project.name, step: 'Character Forge' };
   const wrap = h('div', { class: 'forge forge-list-page', 'data-testid': 'forge-list', 'data-seg': seg });
   main.appendChild(h('div', { class: 'page-head' }, h('div', null,
-    x.crumbs(['Your books', '#/'], [S.project.name, plink()], 'Character Forge'),
+    x.crumbs(['My books', '#/'], [S.project.name, plink('book')], 'Character Forge'),
     h('h1', null, '🗂 Character Forge')),
   h('div', { class: 'row' }, x.infoTip('Character Forge',
     h('p', null, 'A deep dossier for every character, item, place and magic system. A character has 14 numbered sections: record, inner life, relationships, voice, detailed appearance, fighting, weapons, powers, skills, physical limits, knowledge, backstory, storyline and continuity.'),
@@ -146,9 +146,9 @@ export async function viewForgeList(main, x, seg = 'characters') {
     body.append(h('section', { class: 'forge-empty' },
       h('div', { class: 'forge-empty-glyph', 'aria-hidden': 'true' }, '🗂'),
       h('h2', null, 'No characters yet'),
-      h('p', null, 'Make your characters (Make my book → characters, or the Bible Builder) — or add one below. Every character then gets a dossier here.'),
+      h('p', null, 'Make your characters (🏠 Book home → Characters and places, or the 🧑 Character & place maker) — or add one below. Every character then gets a dossier here.'),
       h('p', null, 'Want to see what a finished dossier looks like? Load the example: a complete dossier with a portrait and ten reference views, plus a linked item, place and magic system.'),
-      h('div', { class: 'forge-actions' }, exampleBtn, h('a', { class: 'forge-btn ghost', href: plink('book') }, '📘 Make my book'))), newRow);
+      h('div', { class: 'forge-actions' }, exampleBtn, h('a', { class: 'forge-btn ghost', href: plink('book') }, '🏠 Book home'))), newRow);
     return;
   }
   const grid = h('div', { class: 'forge-grid', role: 'list' });
@@ -244,7 +244,7 @@ export async function viewForge(main, rid, x, seg = 'characters') {
   const load = async () => { d = await api('GET', bpath(path)); };
   try { await load(); }
   catch (e) { main.appendChild(x.problemBox(x.toProblem(e, where), { retry: () => x.route() }, 'Could not open this dossier')); return; }
-  main.appendChild(x.crumbs(['Your books', '#/'], [S.project.name, plink()], ['Character Forge', plink('forge')], ...(isChar ? [] : [[K.plural, listLink(x, seg)]]), d.name));
+  main.appendChild(x.crumbs(['My books', '#/'], [S.project.name, plink('book')], ['Character Forge', plink('forge')], ...(isChar ? [] : [[K.plural, listLink(x, seg)]]), d.name));
   const page = h('div', { class: `forge forge-page${isChar ? '' : ` forge-kind-${K.kind}`}`, 'data-testid': 'forge-page', 'data-kind': K.kind });
   main.appendChild(page);
   const msg = h('div', { class: 'forge-msg', 'aria-live': 'polite' });
