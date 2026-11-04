@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import sys
 import tempfile
+import weakref
 from pathlib import Path
 
 import pytest
@@ -19,12 +20,47 @@ os.environ.setdefault("AKOWE_IMAGE_BRIDGE", "http://127.0.0.1:9")
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from akowe import book_save  # noqa: E402
 from akowe.contracts import get_package  # noqa: E402
 from akowe.engine import Engine  # noqa: E402
 from akowe.requests import build_request, candidate_payload  # noqa: E402
 from akowe.store import Store  # noqa: E402
 
 PRINCIPAL = "author-1"
+
+# 💾 Every App starts its saver's "every 10 minutes" ticker thread (server.App -> SaveService.start_periodic). Nothing
+# ever stops it, so without this every App the suite made keeps ticking for the rest of the session. While auto-save
+# is off (AKOWE_AUTOSAVE=0, the suite default) a tick does nothing — but tests that turn auto-save on through the
+# environment (test_section6.py) turn it on for EVERY old App: their 10-minute ticks that land in that window save
+# their whole books (dozens of background saves at once, fighting the test's own run and save for the CPU and the GIL),
+# so a ⚡ run that takes 2 s alone took minutes and wait_for / wait_idle timed out. Each test now stops the background
+# savers of the Apps it made (ticker, debounce timers, queue) and lets a save it started finish.
+_SAVERS: "weakref.WeakSet[book_save.SaveService]" = weakref.WeakSet()
+_start_periodic = book_save.SaveService.start_periodic
+
+
+def _tracked_start_periodic(self):
+    _SAVERS.add(self)
+    return _start_periodic(self)
+
+
+book_save.SaveService.start_periodic = _tracked_start_periodic
+
+
+@pytest.fixture(autouse=True)
+def _stop_background_savers():
+    before = set(_SAVERS)  # Apps of wider-scoped fixtures (made before this test) keep theirs
+    yield
+    for sv in [s for s in list(_SAVERS) if s not in before]:
+        try:
+            sv.stop_periodic()
+            sv.stop_timers()
+            with sv._lock:  # noqa: SLF001
+                sv._queue.clear()  # noqa: SLF001
+            sv.wait_idle(30)
+        except Exception:  # noqa: BLE001 - cleanup only
+            pass
+        _SAVERS.discard(sv)
 
 
 class Harness:

@@ -992,6 +992,10 @@ class SaveService:
                 again = self._again.pop(key, None)
                 if self._threads.get(key) is threading.current_thread():
                     self._threads.pop(key, None)
+                if again:  # the save asked for while this one ran starts in the same step (under the lock), so
+                    # wait_idle never sees "nothing running, nothing waiting" between this save and that one
+                    self.auto(pid, branch, reason=again.get("reason") or "", force=again.get("force"),
+                              kind=again.get("kind") or "auto", _check=False)
             try:
                 self.store.close()
             except Exception:  # noqa: BLE001
@@ -1000,9 +1004,6 @@ class SaveService:
                 self.app.changed()
             except Exception:  # noqa: BLE001
                 pass
-            if again:
-                self.auto(pid, branch, reason=again.get("reason") or "", force=again.get("force"),
-                          kind=again.get("kind") or "auto", _check=False)
             self._next_queued()
 
     def _record(self, pid, branch, rec: dict):
