@@ -149,6 +149,10 @@ bridge to your home Wi-Fi, behind its key.
   Using a pitch saves it as a new draft marked "From the writers' room"; the approved text stays until you approve
   it. With only one working AI, you can ask it for three ideas instead. (This is not the desktop app's Council, where
   the panes chat with each other.)
+- **📣 Mockups & ads:** made from your 🎨 cover: your book as a 3D paperback, hardcover, stack or series, and on a
+  phone, tablet or e-reader; ads at the exact sizes Instagram, Facebook, X and Amazon ask for (with your hook and
+  "Available now", words kept clear of the apps' buttons); and 13-second teaser clips, tall and square. AutoInjector
+  draws the pictures and joins the clips. When the cover or the hook changes, the old files are marked out of date.
 
 ### 🎨 Images
 
@@ -389,7 +393,7 @@ then carries the locked facts, belongings, status and a summary of book 1.
 | AutoInjector settings, transcript, connection key | `%APPDATA%\autoinjector-desktop\` |
 
 **Inside one book's folder:** `Book/` (PDF, EPUB, Word), `Chapters/`, `Book Bible/`, `Reports/`, `Log/` (the
-journal), `Progress/`, `Cover/`, `Pictures/`, `Character Forge/`, `Trailer/`, `Launch kit/` (the store listing: launch-kit.md and one .txt per part), and **`book.akowe`**. That last file
+journal), `Progress/`, `Cover/`, `Pictures/`, `Character Forge/`, `Trailer/`, `Launch kit/` (the store listing: launch-kit.md and one .txt per part), `Marketing/` (the 📣 mockups, ads and teaser clips), and **`book.akowe`**. That last file
 is the whole book in one file, for opening it again, even on another PC. Akọwe saves after every run step, and
 quietly every 10 minutes when a book has changed.
 

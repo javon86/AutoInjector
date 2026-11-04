@@ -806,6 +806,45 @@ the browser: `tests/campaign/ui/test_ui_continuity.py`):
 - *Not done:* the AI pass is a button only (not a ⚡ run step); the lists are English; "triplet adjectives" use the
   pattern checker's general lists of three (no part-of-speech tagging).
 
+## 📣 Mockups & ads (2026-11, idea #17) — done
+
+- **Where:** the 📣 Mockups & ads page (`#/p/<pid>/<b>/marketing`, `web/marketing.js`), reached from 🎨 Cover and the
+  book home; everything is made from the book's 🎨 cover (the print wrap too when the page count is known, so the
+  spine and back are the real ones).
+- **3D mockups** (`akowe/marketing.py`, pure-Python SVG): paperback, hardcover, a stack and a series shelf, posed in
+  3D through a pin-hole camera; each textured face is cut into small affine cells refined until they are within
+  `MAX_CELL_ERROR_PX` of true perspective, with light, a gloss band, page edges and a floor shadow. **Flat mockups:**
+  phone, tablet and e-reader (greyscale). Each comes see-through (PNG) and on a background (JPG in the cover's colours).
+- **Ads at the stores' exact sizes** (`ADS`): Instagram / Facebook post 1080 × 1080, Story / Reel 1080 × 1920,
+  Facebook / X link post 1200 × 628 and the Amazon Ads custom image 1200 × 1200 (no added words, Amazon's rule). The
+  hook comes from the 🚀 launch kit, else the cover's tagline, else the one-line idea (or the author types one), plus a
+  call to action; text is measured with the cover's font metrics and kept inside each format's text-safe area.
+- **Teaser clips** (`CLIPS`, 13 s, tall 1080 × 1920 and square 1080 × 1080): four frames (mockup, hook, cover, end
+  card) joined by AutoInjector's trailer maker (`POST /video/trailer` with `still` items: slow zoom / pan; WebM, plus
+  MP4 when ffmpeg is found). Optionally the cover is brought to life by 🎬 Video as one shot; when that cannot be done
+  the clip uses the still cover and says so. Desktop side: `render-image.js`, `video-trailer.js`,
+  `trailer-recorder-page.js` (still items).
+- **Pixels** are drawn by AutoInjector (`POST /render/image`); without it every piece still downloads as SVG.
+- **Out of date:** each file keeps fingerprints of the cover, the words and `LAYOUT_VERSION`; a changed cover or hook
+  marks it out of date with the reason, and 🖼 Make the pictures again makes it new.
+- Stored in `marketing:<pid>:<branch>`; the book save writes `Marketing/` (the files and `marketing.json`). API under
+  `…/marketing` (GET/PUT settings, `svg/<piece>`, `file/<piece>`, `zip`, POST `make`, POST `clips`, `jobs/<id>`).
+- Tests: `tests/test_marketing.py`, `tests/campaign/ui/test_ui_marketing.py`, desktop
+  `test/video-trailer.test.js` and `test/service-bridge.test.js`.
+- *Not done:* the pictures and clips need AutoInjector running (SVG only without it); the store ad rules are as of
+  2026-11 (check the stores' current rules before you pay for an ad).
+
+## Back burner (maybe never)
+
+The author's call on the rest of the 20-idea list: "way back burner, maybe never". Don't start these until asked:
+
+- **8** Talk to your characters
+- **10** Writing goals / sprints
+- **12** Screenplay / comic version
+- **15** Audiobook with voices
+- **18** Illustrated editions
+- **19** Series wiki
+
 ## Prevention pass (2026-10-27, "solve problems before they become problems")
 
 - [x] **Alfred's local AI connection:**
