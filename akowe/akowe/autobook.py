@@ -44,6 +44,7 @@ import uuid
 from datetime import datetime, timezone
 
 from . import ai_check
+from . import approval_trust
 from . import assist as assist_mod
 from . import characters as chars_mod
 from . import costs as costs_mod
@@ -128,15 +129,18 @@ PROFILE_SCHEMA = {
     "type": "object", "additionalProperties": False,
     "required": ["title", "author", "genre", "audience", "tone", "idea"],
     "properties": {"title": {"type": "string"}, "author": {"type": "string"}, "genre": {"type": "string"},
-                   "audience": {"type": "string"}, "tone": {"type": "string"}, "idea": {"type": "string"}},
+                   "audience": {"type": "string"}, "tone": {"type": "string"}, "idea": {"type": "string"},
+                   # H10: optional — when the AI leaves them out, Akọwe chooses from the genre (book_promises.decide)
+                   "point_of_view": {"type": "string", "enum": ["first", "third"]},
+                   "tense": {"type": "string", "enum": ["past", "present"]}},
 }
 PROFILE_TASK = (
     "Task: invent an ORIGINAL book for the author to make with Akọwe. Use the author's wishes in "
     "context.wishes when given (genre, length, an idea) and choose everything else yourself. Return: title (a short, "
     "evocative working title), author (an invented pen name), genre, audience (who it is for, e.g. Adult, Young adult "
     "(12-18), Middle grade (8-12)), tone (a few words), idea (one paragraph of 3-5 sentences: who the main character "
-    "is, where it happens, what goes wrong and what is at stake). No real people, no existing franchises. Return only "
-    "the JSON object.")
+    "is, where it happens, what goes wrong and what is at stake), point_of_view (first or third person) and tense "
+    "(past or present) that suit the genre. No real people, no existing franchises. Return only the JSON object.")
 
 TIMEOUT_FIX = ("The AI did not answer in time, so Akọwe paused here instead of guessing (the answer may still "
                "arrive). Check the AI's window (AutoInjector: is the site logged in and idle?), then press 🔁 Try again.")
@@ -843,6 +847,20 @@ class AutoBookService(_Runner):
                                      status="REJECTED")
             self.event(run, "approve", "You approved it anyway (your own approval)", approval="author",
                        record_id=rid)
+            # H14: the editor and the plan check this draft skipped still run (as notes) when the run goes on
+            label = (f"chapter {prob['chapter_id']}" if prob.get("chapter_id") else
+                     safe_title(self.app.engine.contracts, self.bp(run).rec(rid) or {"module_id": prob.get("module_id")}))
+            head = self.bp(run).rec(rid) or {"record_id": rid, "version": prob.get("version"),
+                                             "module_id": prob.get("module_id")}
+            approval_trust.note(self.store, run["project_id"], run["branch_id"], head, how="approve_anyway",
+                                label=label, chapter_id=prob.get("chapter_id"), by=principal)
+            run.setdefault("notes_due", {})[rid] = {"label": label, "chapter_id": prob.get("chapter_id")}
+            if prob.get("no_second_check") and body.get("for_rest_of_run") is True:
+                # H6: the author chose to trust the one working AI for the rest of this run (said in every approval)
+                run["self_review_ok"] = True
+                self.event(run, "note", "You chose to approve the rest yourself through the one working AI: its own "
+                           "APPROVE approves the next drafts of this run (each is listed as approved without a "
+                           "second AI)", code="SELF_REVIEW_ALLOWED")
         elif action == "retry" and rid:
             counts = run.setdefault("fix_counts", {})
             counts[rid] = 0
@@ -1056,6 +1074,7 @@ class AutoBookService(_Runner):
                 run["phase"] = f"{st['title']}…"
                 self.refresh_ais(run)
                 self.save(run)
+                self._flush_notes_due(run, st)  # H14: the checks an "approve anyway" skipped, as notes
                 getattr(self, f"_s_{sid}")(run, st)
                 st.update(state="done", finished_at=now_iso())
                 if not st.get("message") or st["message"] == "Working…":
@@ -1170,7 +1189,8 @@ class AutoBookService(_Runner):
         problem = dict(problem, where=where, step=sid, at=now_iso())
         if problem.get("code") == "TIMEOUT":
             problem.setdefault("options", ["retry"])
-        st.update(state="failed" if problem.get("code") not in ("TIMEOUT", "REVIEW_NOT_PASSED", "CHECKS_REFUSED")
+        st.update(state="failed" if problem.get("code") not in ("TIMEOUT", "REVIEW_NOT_PASSED", "CHECKS_REFUSED",
+                                                                "NO_SECOND_AI", "NO_REASON", "LOW_CONFIDENCE")
                   else "paused",
                   problem=problem, message=problem["message"])
         run.update(status="paused", pause_reason="problem", problem=problem, waiting=None,
@@ -1236,6 +1256,9 @@ class AutoBookService(_Runner):
             if head is None:
                 raise StepProblem("NOT_FOUND", f"The draft of the {label} disappeared.", "Press 🔁 Try again.")
             if head["lifecycle"] in ("APPROVED", "LOCKED") or head.get("approved_version") == head["version"]:
+                if rid in (run.get("notes_due") or {}):  # H14: approved anyway -> the skipped checks run as notes
+                    self._notes_after_approval(run, st, rid, label, chapter_id)
+                    return bp.rec(rid)
                 return head
             v = bp.dispatch(head["module_id"], "VALIDATE", base_ref=head["ref"],
                             payload=candidate_payload(head["ref"], None))
@@ -1270,10 +1293,26 @@ class AutoBookService(_Runner):
             if res.get("auto_approved"):
                 self.event(run, "approve", f"{label}: approved by your standing auto-approve setting",
                            approval="standing_auto_approve", record_id=rid)
+                head = bp.rec(rid)
+                # H14: the editor and the plan check were skipped: they still run, as notes
+                approval_trust.note(self.store, run["project_id"], run["branch_id"], head, how="auto_approve",
+                                    label=label, chapter_id=chapter_id, by=run["principal"])
+                self._notes_after_approval(run, st, rid, label, chapter_id)
                 return bp.rec(rid)
             head = bp.rec(rid)
+            trust = approval_trust.problem(res["review"], label, res["review"].get("writer_ai")) \
+                if verdict == "APPROVE" else None
+            if trust and not (trust["code"] == "NO_SECOND_AI" and run.get("self_review_ok")):
+                # H6: no self-approval, no approval without a reason or with low confidence: the author decides
+                self.event(run, "problem", trust["message"], record_id=rid, code=trust["code"])
+                raise StepProblem(trust["code"], trust["message"], trust["fix"], record_id=rid,
+                                  version=head["version"], module_id=head["module_id"], verdict=verdict,
+                                  reasons=(res["review"].get("reasons") or [])[:4], chapter_id=chapter_id,
+                                  options=["approve_anyway", "retry"], no_second_check=True)
             if verdict == "APPROVE":
                 why = f"AI review: APPROVE ({label})"
+                if trust:
+                    why += " · ⚠️ only the AI that wrote it checked it (you allowed this for the run)"
                 if editor_next:
                     head = self._editor_pass(run, st, rid, label, chapter_id)
                     ed = (run.get("editor") or {}).get(rid) or {}
@@ -1286,6 +1325,11 @@ class AutoBookService(_Runner):
                     if pl.get("flagged"):
                         why += " · ⚠️ planned details not all on the page"
                 self._approve(run, head["ref"], why=why, verdict="APPROVE", slot=rj.slot)
+                if trust:
+                    approval_trust.note(self.store, run["project_id"], run["branch_id"], head, how="self_review",
+                                        label=label, chapter_id=chapter_id, by=run["principal"])
+                else:
+                    approval_trust.forget(self.store, run["project_id"], run["branch_id"], rid)
                 return bp.rec(rid)
             if self._realign_subject(run, bp, head, label, res["review"].get("reasons") or []):
                 continue  # reviewed again with the canon's ID; no AI fix used up
@@ -1362,6 +1406,51 @@ class AutoBookService(_Runner):
         for k in ("started", "status", "retry_busy", "check", "on_wait"):
             setattr(rj, k, getattr(job, k))
         return rj
+
+    # ------------------------------------------------------------------ H14: approved without checks -> notes
+    def _flush_notes_due(self, run, st):
+        for rid, d in list((run.get("notes_due") or {}).items()):
+            self._notes_after_approval(run, st, rid, d.get("label") or "draft", d.get("chapter_id"))
+
+    def _notes_after_approval(self, run, st, rid: str, label: str, chapter_id: str | None):
+        """A draft approved anyway / by the standing auto-approve skipped the editor and the plan check: they still
+        run now, as notes only (nothing is rewritten — it is already approved). The outcome is stored with the
+        "approved without checks" entry (book report, Book home) and said in the run. Never blocks the book."""
+        run.setdefault("notes_due", {}).pop(rid, None)
+        bp = self.bp(run)
+        head = bp.rec(rid)
+        if head is None:
+            return
+        notes = {}
+        es = self._editor_settings(run)
+        if head["module_id"] in ("C02", "B01", "B03", "B11") and es.get("enabled") and self._on(run, "editor"):
+            st["message"] = f"The editor reads the {label} (as notes: it is already approved)"
+            run["phase"] = st["message"]
+            self.save(run)
+            try:
+                craft = self._review.editor.craft_one(self._sub_job(run, "editor", rid), rid)
+                notes["editor"] = (f"{craft['verdict']} · {craft['counts']['major']} major / "
+                                   f"{craft['counts']['minor']} minor note(s)")
+            except AkoweError as exc:
+                if getattr(exc, "control", False):
+                    raise
+                notes["editor"] = f"could not read it ({exc.code})"
+        if head["module_id"] == "C02" and self._on(run, "planned"):
+            try:
+                res = self._review.planned.check(self._sub_job(run, "planned_check", rid), rid, round_no=0)
+                missing = [i for i in res["items"] if i.get("required") and i["status"] != "on_page"]
+                notes["planned"] = ("every planned detail is on the page" if not missing else
+                                    "missing: " + "; ".join(clip_words(i["label"], 60) for i in missing[:3])
+                                    + (" …" if len(missing) > 3 else ""))
+            except AkoweError as exc:
+                if getattr(exc, "control", False):
+                    raise
+                notes["planned"] = f"could not check it ({exc.code})"
+        approval_trust.add_notes(self.store, run["project_id"], run["branch_id"], rid, notes)
+        self.event(run, "note", f"⚠️ The {label} was approved without checks; checked afterwards as notes — "
+                   + ("; ".join(f"{k}: {v}" for k, v in notes.items()) or "nothing to check"),
+                   code="APPROVED_WITHOUT_CHECKS", record_id=rid)
+        self.save(run)
 
     def _editor_pass(self, run, st, rid: str, label: str, chapter_id: str | None) -> dict:
         """The editor reads the chapter (its consistency review passed); REVISE -> the writer rewrites only the
@@ -1945,11 +2034,18 @@ class AutoBookService(_Runner):
         prof["idea"] = (prof["idea"] or s.get("idea") or prof["title"])[:4000]
         for k, n in (("genre", 120), ("audience", 120), ("tone", 200)):
             prof[k] = prof[k][:n]
+        # H10: point of view and tense are decided now (the AI's choice, else the genre's default), never left open
+        from . import book_promises  # noqa: PLC0415
+        old = get_profile(self.store, pid)
+        dec = book_promises.decide({"genre": prof["genre"], "pov": old.get("pov") or raw.get("point_of_view"),
+                                    "tense": old.get("tense") or raw.get("tense")})
+        prof["pov"], prof["tense"] = dec["pov"], dec["tense"]
         with self.store.transaction():  # the profile and the book's name are saved together
             save_profile(self.store, pid, prof)
             self._name_book(pid, prof["title"])
         run["title"] = prof["title"]
-        st["message"] = f"“{prof['title']}” by {prof['author']} ({prof['genre'] or 'any genre'})"
+        st["message"] = f"“{prof['title']}” by {prof['author']} ({prof['genre'] or 'any genre'}; told in the " \
+                        f"{book_promises.POV_WORDS[dec['pov']]}, {dec['tense']} tense)"
         self.event(run, "ai", f"The AI invented the book “{prof['title']}”", slot=job.slot)
 
     def _series_changes(self, run):
@@ -2895,6 +2991,7 @@ class AutoBookService(_Runner):
         items = {i["id"]: i for i in st.get("items") or []}
         st["items"] = [items.get(c["chapter_id"]) or {"id": c["chapter_id"], "label": f"Chapter {c['chapter_id']}",
                                                        "state": "pending", "words": 0} for c in chapters]
+        self._chapter_edits(run, outline, chapters)  # H5: a chapter changed by hand since the book went on from it
         for idx, ch in enumerate(chapters):
             cid = ch["chapter_id"]
             item = st["items"][idx]
@@ -2903,9 +3000,11 @@ class AutoBookService(_Runner):
             _ctx, latest, appr = bp.chapter_prose(outline, cid)
             if appr:
                 from . import continuity  # noqa: PLC0415
-                if not continuity.tracked(self.store, run["project_id"], run["branch_id"], cid):
-                    # approved, but a Pause / Cancel came before its continuity was tracked: track it now
+                if not continuity.tracked(self.store, run["project_id"], run["branch_id"], cid, appr):
+                    # approved, but a Pause / Cancel came before its continuity was tracked, or the author changed
+                    # the chapter since it was tracked (H5): track it (again) now
                     continuity.after_chapter(self, run, cid, appr, item)
+                continuity.note_written(self.store, run["project_id"], run["branch_id"], cid, appr, idx + 1)
                 if self._on(run, "voices"):  # ⏱ lock what it relied on (idempotent)
                     from . import story_details  # noqa: PLC0415
                     story_details.after_chapter(self, run, cid, idx + 1)
@@ -2918,6 +3017,16 @@ class AutoBookService(_Runner):
             while True:
                 bp = self.bp(run)
                 _ctx, latest, _appr = bp.chapter_prose(outline, cid)
+                if latest and latest["lifecycle"] in REVIEWABLE and not latest.get("stale"):
+                    from . import continuity  # noqa: PLC0415
+                    flag = continuity.recheck_open(self.store, run["project_id"], run["branch_id"], cid)
+                    if flag:  # H5: this draft was written before an earlier chapter changed: write it again
+                        bp.set_aside(latest, f"written before chapter {flag['because_number']} was changed")
+                        continuity.recheck_done(self.store, run["project_id"], run["branch_id"], cid)
+                        self.event(run, "note", f"Chapter {idx + 1}'s draft was written before chapter "
+                                   f"{flag['because_number']} changed: it is set aside and written again",
+                                   code="DRAFT_BEFORE_EDIT", record_id=latest["record_id"])
+                        continue
                 if latest and latest["lifecycle"] in REVIEWABLE and not latest.get("stale"):
                     rid = latest["record_id"]
                 else:
@@ -2940,6 +3049,14 @@ class AutoBookService(_Runner):
                     rid = ref["record_id"]
                     self._made(run, ref)
                     self.event(run, "ai", f"The AI wrote chapter {cid}", record_id=rid, module_id="C02")
+                    from . import brief_cuts  # noqa: PLC0415 - H13: say exactly what did not fit
+                    cuts = brief_cuts.after_write(self.store, run["project_id"], run["branch_id"], cid, idx + 1, rid,
+                                                  payload.get("context_ref"))
+                    item.pop("cut", None)
+                    if cuts:
+                        item["cut"] = cuts["cut"]
+                        self.event(run, "note", cuts["line"], code="INSTRUCTIONS_CUT", record_id=rid,
+                                   chapter_id=cid)
                 try:
                     rec = self._review_until_approved(run, st, rid, f"chapter {cid}", chapter_id=cid)
                     break
@@ -2954,6 +3071,9 @@ class AutoBookService(_Runner):
                     raise
             from . import continuity  # noqa: PLC0415 - Section 7 (P32/P35): track + approve under the run consent
             continuity.after_chapter(self, run, cid, rec, item)
+            if rec:
+                continuity.note_written(self.store, run["project_id"], run["branch_id"], cid, rec, idx + 1)
+                continuity.recheck_done(self.store, run["project_id"], run["branch_id"], cid)
             if self._on(run, "voices"):  # ⏱ 🔒 what this chapter relied on is fixed; contradictions are flagged
                 from . import story_details  # noqa: PLC0415
                 story_details.after_chapter(self, run, cid, idx + 1)
@@ -2979,6 +3099,9 @@ class AutoBookService(_Runner):
                                   "min": ed.get("min_score"), "reviewer": ed.get("reviewer")}
             self.save(run)
         self._checkpoints(run, st, outline, chapters, len(chapters))  # 🧭 the final check of the whole book
+        # H11 / H12: the ending keeps the book's promises — the ONE final ending check (the final 🧭 checkpoint does
+        # not run its own; the checkpoints before it run the light setups-so-far check, ending_check upto=N)
+        self._ending_pass(run, st, outline, chapters)
         words = sum(i.get("words") or 0 for i in st["items"])
         target = lengths_mod.of_book(self.store, run["project_id"], len(chapters))
         st["message"] = f"{len(chapters)} chapter(s) written and approved · {words:,} words (target about " \
@@ -3000,6 +3123,112 @@ class AutoBookService(_Runner):
             self.event(run, "note", f"⚠️ A continuity checkpoint could not be finished "
                                     f"({getattr(exc, 'code', type(exc).__name__)}); the book goes on",
                        step="chapters", code="CHECKPOINT_FAILED")
+
+    def _ending_pass(self, run, st, outline, chapters):
+        """H11 / H12: after the last chapter — each setup, thread and named character, the main character's change
+        and the book's question against the page (ending_check.py, one AI call). What is open and has a fix goes to
+        the last chapter(s) through the rewrite machinery (a new draft, reviewed and approved under the run consent),
+        at most ending_check.FIX_ROUNDS round, then one more check; what stays open is listed for the author. Never
+        blocks the book (an AI problem is a note); pause / resume safe (``run["ending"]``)."""
+        from . import continuity, ending_check  # noqa: PLC0415
+        mem = run.setdefault("ending", {})
+        if mem.get("done"):
+            return
+        pid, branch = run["project_id"], run["branch_id"]
+        bp = self.bp(run)
+
+        def checked():
+            st["message"] = "Checking that the ending keeps the book's promises"
+            run["phase"] = st["message"]
+            self.save(run)
+            return ending_check.check(self._review, self._sub_job(run, "ending_check", "book"))
+
+        def finish_draft(rid, cid, number):
+            rec = self._review_until_approved(run, st, rid, f"chapter {cid}", chapter_id=cid)
+            if rec:
+                continuity.after_chapter(self, run, cid, rec, None)  # track the new ending again
+                continuity.note_written(self.store, pid, branch, cid, rec, number)
+        try:
+            if mem.get("fixing"):  # resumed while a fixed ending waited for its review
+                f = mem["fixing"]
+                finish_draft(f["record_id"], f["chapter_id"], f["number"])
+                mem.pop("fixing", None)
+                self.save(run)
+            res = checked()
+            while int(mem.get("rounds") or 0) < ending_check.FIX_ROUNDS and any(o.get("fix") for o in res["open"]):
+                mem["rounds"] = int(mem.get("rounds") or 0) + 1
+                changed = 0
+                for number in sorted({o["fix_chapter"] for o in res["open"] if o.get("fix") and o.get("fix_chapter")}):
+                    cid = chapters[number - 1]["chapter_id"]
+                    _ctx, _latest, appr = self.bp(run).chapter_prose(outline, cid)
+                    if not appr:
+                        continue
+                    head = self.bp(run).rec(appr["record_id"])
+                    fs = ending_check.fix_findings(res, number, str((head.get("data") or {}).get("text") or ""))
+                    if not fs:
+                        continue
+                    st["message"] = f"The writer works the open promises into chapter {number}"
+                    run["phase"] = st["message"]
+                    self.save(run)
+                    prop = self._review.editor.propose(
+                        self._sub_job(run, "ending_fix", head["record_id"], run["settings"].get("slot_id")),
+                        head["record_id"], craft={"findings": fs, "keep": [], "slot": None,
+                                                  "version": head["version"], "ending": True})
+                    if not prop.get("applied"):
+                        self.event(run, "note", f"⚠️ The writer's changes for the ending of chapter {number} did not "
+                                   "match the text word for word; nothing was guessed", code="ENDING_UNRESOLVED")
+                        continue
+                    self._review.editor.apply(run["principal"], pid, branch, head["record_id"], head["version"], None,
+                                              proposal=prop, how="run")
+                    mem["fixing"] = {"record_id": head["record_id"], "chapter_id": cid, "number": number}
+                    self.save(run)
+                    self.event(run, "fix", f"Chapter {number} sent back to keep {len(fs)} promise(s) of the book",
+                               code="ENDING_FIX", record_id=head["record_id"])
+                    finish_draft(head["record_id"], cid, number)
+                    mem.pop("fixing", None)
+                    changed += 1
+                    self.save(run)
+                if not changed:
+                    break
+                res = checked()
+        except StepProblem:
+            raise
+        except AkoweError as exc:
+            if getattr(exc, "control", False):
+                raise
+            mem.update(done=True, error=exc.code)
+            self.event(run, "note", f"⚠️ The ending check did not work ({exc.code}); the book goes on — press 🎯 "
+                       "Check the ending later", code="ENDING_CHECK_FAILED")
+            self.save(run)
+            return
+        mem.update(done=True, open=len(res["open"]), line=ending_check.summary_line(res))
+        self.event(run, "note", f"🎯 Ending check: {mem['line']}"
+                   + (" — ⚠️ still open: " + "; ".join(o["line"] for o in res["open"][:4]) if res["open"] else ""),
+                   code="ENDING_OPEN" if res["open"] else "ENDING_KEPT")
+        self.save(run)
+
+    def _chapter_edits(self, run, outline, chapters):
+        """H5: before the chapters go on — an approved chapter the author changed since the book continued from it:
+        its tracked state is set aside (tracked again below) and the later written chapters are flagged."""
+        from . import continuity  # noqa: PLC0415
+        try:
+            bp = self.bp(run)
+            written = []
+            for i, c in enumerate(chapters):
+                _ctx, latest, appr = bp.chapter_prose(outline, c["chapter_id"])
+                r = appr or latest
+                if r:
+                    written.append({"chapter_id": c["chapter_id"], "number": i + 1, "record_id": r["record_id"],
+                                    "version": r["version"]})
+            for f in continuity.check_edits(self.store, run["project_id"], run["branch_id"], later=written):
+                self.event(run, "note", f"✏️ Chapter {f['number']} was changed by hand: what was tracked from it is "
+                           "set aside until it is tracked again"
+                           + ("; " + "; ".join(continuity.message(f["number"], next(
+                               (w["number"] for w in written if w["chapter_id"] == x), "?")) for x in f["flagged"])
+                              if f["flagged"] else ""), step="chapters", code="CHAPTER_CHANGED",
+                           chapter_id=f["chapter_id"])
+        except Exception:  # noqa: BLE001 - never holds up the book
+            log.exception("could not check for changed chapters")
 
     @staticmethod
     def _eta_words(run) -> str:

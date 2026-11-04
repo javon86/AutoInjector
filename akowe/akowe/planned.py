@@ -185,7 +185,21 @@ def planned_items(bp, outline, chapter_id: str) -> list[dict]:
             add("detail", d.split(": ", 1)[-1], required=False, label=f"{KIND_WORDS['detail']}: {d}")
     except Exception:  # noqa: BLE001 - optional
         log.exception("could not read the planned details")
-    return items[:MAX_ITEMS]
+    return most_important(items, MAX_ITEMS)
+
+
+# H13: when there are more items than can be checked, the least important go first (never a must-show before a
+# scene goal or a planned detail); the kept items stay in their order.
+PRIORITY = {"beat": 0, "must_show": 1, "name": 2, "scene_change": 3, "scene_obstacle": 4, "scene_goal": 5, "detail": 6}
+
+
+def most_important(items: list[dict], n: int) -> list[dict]:
+    if len(items) <= n:
+        return list(items)
+    ranked = sorted(range(len(items)), key=lambda i: (not items[i].get("required"),
+                                                      PRIORITY.get(items[i].get("kind"), 9), i))
+    keep = set(ranked[:n])
+    return [it for i, it in enumerate(items) if i in keep]
 
 
 # ====================================================================== the deterministic check
@@ -325,8 +339,11 @@ class PlannedChecker:
         text = str((rec.get("data") or {}).get("text") or "")
         items = check_text(text, planned_items(bp, outline, cid))
         stored = self.stored(pid, branch).get(f"{rid}:{rec['version']}")
+        from . import brief_cuts  # noqa: PLC0415 - H13: what was cut from this chapter's instructions
+        cut = brief_cuts.of_chapter(self.review.store, pid, branch, cid)
         return {"record_id": rid, "version": rec["version"], "chapter_id": cid, "items": items,
-                "counts": counts(items), "stored": stored, "kind_words": KIND_WORDS}
+                "counts": counts(items), "stored": stored, "kind_words": KIND_WORDS,
+                "instructions_cut": cut}
 
     def check(self, job, rid: str, *, ai: bool = True, round_no: int | None = None) -> dict:
         """Deterministic check, then (when something required is unclear/missing and ``ai``) one independent AI
@@ -336,7 +353,7 @@ class PlannedChecker:
         text = str((rec.get("data") or {}).get("text") or "")
         items = check_text(text, planned_items(bp, outline, cid))
         ai_info = None
-        open_ = [i for i in items if i["status"] != "on_page"][:AI_MAX_ITEMS]
+        open_ = most_important([i for i in items if i["status"] != "on_page"], AI_MAX_ITEMS)  # H13: must-shows first
         if ai and any(i.get("required") for i in open_):
             rv = self.review
             writer = rv.writer_of(pid, branch, rec)

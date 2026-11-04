@@ -172,6 +172,35 @@ def summaries(store, pid: str, branch: str) -> list[dict]:
             and c.get("status") in ("done", "incomplete")]
 
 
+def invalidate_from(store, pid: str, branch: str, chapter_id: str, number: int | None) -> list[str]:
+    """H5 hook (continuity.INVALIDATE_HOOKS): chapter ``chapter_id`` (number ``number``) changed by hand. Every
+    checkpoint after it (``after`` >= the chapter's number, or one that read the chapter) read the old text: it is
+    marked for redo — its summary leaves the story so far, and the next run reads it again (run_due). What it found
+    stays in ``redo_of`` for the report. Returns the checkpoint ids marked. Never raises."""
+    out: list[str] = []
+    try:
+        with _LOCK:
+            with store.transaction():
+                cur = get_all(store, pid, branch)
+                for cp in cur["items"].values():
+                    after = cp.get("after")
+                    hit = chapter_id in (cp.get("chapter_ids") or []) or (
+                        isinstance(number, int) and isinstance(after, int) and after >= number)
+                    if not hit or cp.get("status") == "new":
+                        continue
+                    cp["redo_of"] = {k: cp.get(k) for k in ("status", "summary", "counts", "finished_at")}
+                    cp["redo_because"] = {"chapter_id": chapter_id, "number": number, "at": _now()}
+                    cp.update(status="new", parts=None, problems=[], fixes={}, summary="", paused_once=False,
+                              retried=False, counts={}, ending=None)
+                    out.append(cp["id"])
+                if out:
+                    cur["version"] = int(cur.get("version") or 0) + 1
+                    store.set_setting(_key(pid, branch), cur)
+    except Exception:  # noqa: BLE001
+        log.exception("could not mark the checkpoints for redo")
+    return out
+
+
 # ====================================================================== parts
 def _pieces(text: str, budget: int) -> list[str]:
     text = str(text or "")
@@ -269,6 +298,8 @@ def line(cp: dict) -> str:
     """The step-list line of one checkpoint, in plain words."""
     c = cp.get("counts") or {}
     head = f"🧭 {'Final check of the whole book' if cp.get('final') else 'Checkpoint'} after chapter {cp['after']}"
+    if cp.get("status") == "new" and cp.get("redo_because"):
+        return head + f": to be read again (chapter {cp['redo_because'].get('number')} was changed by hand)"
     if cp.get("status") not in ("done", "incomplete", "waiting"):
         return head + ": reading…"
     bits = []
@@ -369,6 +400,7 @@ def _run_one(svc, run: dict, st: dict, cp: dict, chapters: list[dict]) -> None:
     label = f"chapters {min(nums)}–{max(nums)}" if len(nums) > 1 else f"chapter {nums[0]}" if nums else "no chapter"
     title = ("🧭 Final check of the whole book" if cp.get("final") else "🧭 Checkpoint") + f" after chapter {cp['after']}"
     if cp.get("status") == "waiting" and cp.get("paused_once"):
+        _setups_so_far(svc, run, cp)
         cp["status"] = "done"  # the author pressed ▶ Continue: the problems stay in the report
         cp["finished_at"] = _now()
         _put(store, pid, branch, cp)
@@ -468,12 +500,48 @@ def _run_one(svc, run: dict, st: dict, cp: dict, chapters: list[dict]) -> None:
                           details=[f"Chapter {p.get('number')}: {p.get('problem')}" + (f" — “{_clip(p.get('quote'), 160)}”"
                                                                                      if p.get("quote") else "")
                                    for p in cp["problems"] if p["status"] == "waiting"][:6])
+    _setups_so_far(svc, run, cp)
     cp["status"] = "incomplete" if incomplete else "done"
     cp["finished_at"] = _now()
     _put(store, pid, branch, cp)
     _note(svc, run, st, cp)
     svc.event(run, "note", line(cp), step="chapters", code="CHECKPOINT")
     svc.save(run)
+
+
+def _setups_so_far(svc, run: dict, cp: dict) -> None:
+    """🎯 A light setups / payoffs look at a checkpoint (ending_check.check upto=N, final=False: one AI call that
+    reads the book so far and marks a setup or thread the page already dropped). Only for a checkpoint BEFORE the last
+    chapter — the final one leaves it to the one final ending check (autobook ``_ending_pass``) — only when the plan
+    has setups or threads, and only once per checkpoint (``cp["ending"]``). Never holds up the book."""
+    if cp.get("final") or cp.get("ending"):
+        return
+    from . import ending_check  # noqa: PLC0415
+    from .assist import Cancelled  # noqa: PLC0415
+    pid, branch = run["project_id"], run.get("branch_id") or "main"
+    try:
+        _premise, plot, outline = ending_check._plan(svc.bp(run))  # noqa: SLF001
+        if not (plot.get("plot_obligations") or outline.get("unresolved_threads")):
+            cp["ending"] = {"skipped": "no setups or threads in the plan"}
+            return
+        review = getattr(svc, "_review", None) or svc.app.review
+        job = svc._sub_job(run, "ending_check", "book", (run.get("settings") or {}).get("slot_id"))  # noqa: SLF001
+        job.retry_busy = False
+        res = ending_check.check(review, job, upto=cp["after"], final=False)
+        dropped = [o for o in res.get("open") or [] if o.get("kind") in ("setup", "thread")]
+        cp["ending"] = {"line": ending_check.summary_line(res), "open": [o["line"] for o in dropped][:6],
+                        "at": _now()}
+        if dropped:
+            svc.event(run, "note", f"🎯 Checkpoint after chapter {cp['after']}: setups and threads — "
+                      + "; ".join(o["line"] for o in dropped[:4]), step="chapters", code="CHECKPOINT_SETUPS")
+    except Cancelled:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        if getattr(exc, "control", False):
+            raise
+        log.info("checkpoint setups check skipped: %s", getattr(exc, "code", type(exc).__name__))
+        cp["ending"] = {"error": getattr(exc, "code", type(exc).__name__), "at": _now()}
+    _put(svc.store, pid, branch, cp)
 
 
 def _clean_problems(raw, part: dict, texts: dict, order: list[str]) -> list[dict]:
@@ -572,6 +640,8 @@ def _fix(svc, run: dict, st: dict, cp: dict, title: str) -> None:
         fx["status"] = "approved"
         cp["fixes"][cid] = fx
         _put(store, pid, branch, cp)
+        if appr:  # the run's own fix, not a hand edit: the book goes on from this text (continuity.check_edits)
+            continuity.note_written(store, pid, branch, cid, appr, num)
         continuity.after_chapter(svc, run, cid, appr, None)  # its continuity, tracked again from the fixed text
 
 
@@ -587,7 +657,8 @@ def report(store, pid: str, branch: str) -> list[dict]:
                     "problems": [{k: p.get(k) for k in ("number", "chapter_id", "problem", "quote", "status", "why",
                                                         "source", "original", "replacement")}
                                  for p in c.get("problems") or []],
-                    "finished_at": c.get("finished_at")})
+                    "finished_at": c.get("finished_at"), "redo_because": c.get("redo_because"),
+                    "setups": (c.get("ending") or {}).get("open") or []})
     return out
 
 
@@ -601,8 +672,13 @@ def markdown(rep: list[dict]) -> list[str]:
     out = ["## 🧭 Checkpoints", ""]
     for c in rep:
         out += [f"### {c['line']}", ""]
+        if c.get("redo_because") and c.get("status") == "new":
+            out += [f"⚠️ To be read again: chapter {c['redo_because'].get('number')} was changed by hand after this "
+                    "checkpoint read it.", ""]
         if c.get("summary"):
             out += [c["summary"], ""]
+        for x in c.get("setups") or []:
+            out.append(f"- 🎯 {x}")
         for p in c["problems"]:
             out.append(f"- Chapter {p.get('number')}: {p.get('problem')} — {STATUS_WORDS.get(p.get('status'), '')}"
                        + (f" ({p['why']})" if p.get("why") and p.get("status") != "fixed" else "")

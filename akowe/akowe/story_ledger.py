@@ -462,19 +462,53 @@ def _tail(text: str, n: int) -> str:
     return cut[sp + 1:] if 0 <= sp < 80 else cut
 
 
-def ordered(store, pid: str, branch: str, order: list[str]) -> list[dict]:
+def ordered(store, pid: str, branch: str, order: list[str], *, set_aside: bool = False) -> list[dict]:
+    """The ledger entries in book order. An entry set aside by a hand edit (``invalidate_from``) is left out unless
+    ``set_aside``: what was read from an old text never reaches a writer, reviewer or checkpoint."""
     allc = get_all(store, pid, branch)["chapters"]
     out = []
     for i, cid in enumerate(order):
         e = allc.get(cid)
-        if isinstance(e, dict):
+        if isinstance(e, dict) and (set_aside or not e.get("set_aside")):
             out.append(dict(e, number=e.get("number") or i + 1))
     return out
 
 
-def weak_chapters(store, pid: str, branch: str, order: list[str], *, why=("busy",)) -> list[str]:
-    return [e["chapter_id"] for e in ordered(store, pid, branch, order) if e.get("weak")
+def weak_chapters(store, pid: str, branch: str, order: list[str], *, why=("busy", "changed")) -> list[str]:
+    """Chapters to read again: a weak reading (no AI was free) or an entry set aside by a hand edit ("changed")."""
+    return [e["chapter_id"] for e in ordered(store, pid, branch, order, set_aside=True) if e.get("weak")
             and (why is None or e.get("weak_why") in why)]
+
+
+def invalidate_from(store, pid: str, branch: str, chapter_id: str, number: int | None) -> list[str]:
+    """H5 hook (continuity.INVALIDATE_HOOKS): chapter ``chapter_id`` (number ``number``) changed by hand. Its ledger
+    entry and those of every later chapter (they were read on top of the old text) are set aside — out of the story
+    so far, the ledger brief and the checks — and marked to be read again (``weak_why`` "changed": retrack_weak, before
+    the next chapter is tracked and at every 🧭 checkpoint). A new reading replaces the entry. Returns the chapter
+    ids set aside. Never raises."""
+    out: list[str] = []
+    try:
+        with _LOCK:
+            with store.transaction():
+                cur = get_all(store, pid, branch)
+                me = cur["chapters"].get(chapter_id) or {}
+                n = number if isinstance(number, int) else me.get("number")
+                for cid, e in cur["chapters"].items():
+                    if not isinstance(e, dict) or e.get("set_aside"):
+                        continue
+                    if cid != chapter_id and not (isinstance(n, int) and isinstance(e.get("number"), int)
+                                                  and e["number"] > n):
+                        continue
+                    e["set_aside"] = {"because": chapter_id, "because_number": n, "at": _now(),
+                                      "was_weak": e.get("weak_why") if e.get("weak") else None}
+                    e["weak"], e["weak_why"] = True, "changed"
+                    out.append(cid)
+                if out:
+                    cur["version"] = int(cur.get("version") or 0) + 1
+                    store.set_setting(_key(pid, branch), cur)
+    except Exception:  # noqa: BLE001
+        log.exception("could not set the story ledger aside")
+    return out
 
 
 # ====================================================================== the state before a chapter
@@ -741,6 +775,11 @@ def check(before: list[dict], entry: dict, text: str) -> list[dict]:
 
 
 # ====================================================================== the brief (writer, reviewer, editor)
+LEDGER_WORDS = {"people": "characters' state", "names": "names", "travel": "travel times",
+                "who_knows": "who knows what", "relationships": "relationships", "numbers": "money, prices and "
+                "distances"}
+
+
 def _person_line(p: dict, n_next: int | None) -> str:
     bits = []
     if p.get("status") == "dead":
@@ -759,8 +798,9 @@ def _person_line(p: dict, n_next: int | None) -> str:
 
 
 def story_so_far(entries: list[dict], checkpoint_summaries: list[dict] | None = None,
-                 budget: int = SO_FAR_BUDGET) -> list[str]:
-    """A few lines per chapter; older chapters compressed (a checkpoint summary replaces the lines it covers)."""
+                 budget: int = SO_FAR_BUDGET, cut: list | None = None) -> list[str]:
+    """A few lines per chapter; older chapters compressed (a checkpoint summary replaces the lines it covers).
+    ``cut``: gets a plain line when the oldest lines had to be shortened further for space (H13)."""
     if not entries:
         return []
     recent = entries[-FULL_RECENT:]
@@ -782,6 +822,8 @@ def story_so_far(entries: list[dict], checkpoint_summaries: list[dict] | None = 
         s = e.get("summary") or []
         if s:
             lines.append(f"Chapter {e.get('number')}: " + " ".join(_clip(x, 200) for x in s))
+    if cut is not None and lines and len(json.dumps(lines, ensure_ascii=False)) > budget:
+        cut.append("story so far: the oldest chapters' lines shortened to fit")
     while lines and len(json.dumps(lines, ensure_ascii=False)) > budget:
         if len(lines) > 2:  # merge the two oldest lines into one short line
             a, b = lines[0], lines[1]
@@ -795,8 +837,9 @@ def story_so_far(entries: list[dict], checkpoint_summaries: list[dict] | None = 
 
 
 def brief(store, pid: str, branch: str, order: list[str], chapter_id: str, present: list[str] | None = None,
-          checkpoint_summaries: list[dict] | None = None) -> dict:
-    """The ledger part of one chapter's brief (writer, reviewer, editor). Never raises."""
+          checkpoint_summaries: list[dict] | None = None, cut: list | None = None) -> dict:
+    """The ledger part of one chapter's brief (writer, reviewer, editor). Never raises. ``cut``: a list that gets
+    what was left out for space, in plain words (H13, brief_cuts.py)."""
     out: dict = {}
     try:
         idx = order.index(chapter_id) if chapter_id in order else len(order)
@@ -806,7 +849,7 @@ def brief(store, pid: str, branch: str, order: list[str], chapter_id: str, prese
         prev = entries[-1]
         if prev.get("end") and order[idx - 1:idx] == [prev.get("chapter_id")]:
             out["previous_chapter_end"] = prev["end"]
-        so_far = story_so_far(entries, checkpoint_summaries)
+        so_far = story_so_far(entries, checkpoint_summaries, cut=cut)
         if so_far:
             out["story_so_far"] = so_far
         st = state_before(entries)
@@ -844,23 +887,26 @@ def brief(store, pid: str, branch: str, order: list[str], chapter_id: str, prese
             led["numbers"] = [f"{v['what']}: {v['value']} (chapter {v['chapter']})" for v in st["numbers"].values()]
         # keep it bounded: cut the least relevant first (people not in this chapter, then old lists from the end)
         n_present = len(lines_present)
-        cut = []
+        dropped: dict = {}
         for key in ("numbers", "relationships", "who_knows", "travel", "names", "people"):
             while led.get(key) and len(json.dumps(led, ensure_ascii=False)) > LEDGER_BUDGET:
                 if key == "people" and len(led["people"]) <= max(1, n_present):
                     break
-                led[key].pop()
-                cut.append(key)
+                dropped.setdefault(key, []).append(led[key].pop())
                 if not led[key]:
                     led.pop(key)
         while led.get("people") and len(json.dumps(led, ensure_ascii=False)) > LEDGER_BUDGET:
-            led["people"].pop()
-            cut.append("people")
+            dropped.setdefault("people", []).append(led["people"].pop())
             if not led["people"]:
                 led.pop("people")
+        n_cut = sum(len(v) for v in dropped.values())
+        if cut is not None and dropped:
+            from . import brief_cuts  # noqa: PLC0415
+            for key in ("people", "names", "travel", "who_knows", "relationships", "numbers"):
+                brief_cuts.note(cut, f"story ledger — {LEDGER_WORDS[key]}", list(reversed(dropped.get(key) or [])))
         if led:
-            if cut:
-                led["left_out"] = f"{len(cut)} older or less relevant line(s) left out for space"
+            if n_cut:
+                led["left_out"] = f"{n_cut} older or less relevant line(s) left out for space"
             out["story_ledger"] = led
         weak = [e.get("number") for e in entries if e.get("weak")]
         if weak:
@@ -874,12 +920,14 @@ def brief(store, pid: str, branch: str, order: list[str], chapter_id: str, prese
 
 # ====================================================================== the page and the book folder
 def page_info(store, pid: str, branch: str, order: list[str]) -> dict:
-    entries = ordered(store, pid, branch, order)
+    shown = ordered(store, pid, branch, order, set_aside=True)
+    entries = [e for e in shown if not e.get("set_aside")]
     flags = [dict(f, chapter_id=e["chapter_id"]) for e in entries for f in e.get("flags") or []]
     st = state_before(entries)
     return {"chapters": [{k: e.get(k) for k in ("chapter_id", "number", "summary", "people", "names", "time", "trips",
                                                 "knowledge", "relationships", "numbers", "weak", "weak_why", "made_by",
-                                                "flags", "version")} for e in entries],
+                                                "flags", "version", "set_aside")} for e in shown],
+            "set_aside": [e.get("number") for e in shown if e.get("set_aside")],
             "flags": flags, "weak": [e.get("number") for e in entries if e.get("weak")],
             "weak_busy": [e.get("number") for e in entries if e.get("weak") and e.get("weak_why") == "busy"],
             "people": [_person_line(p, None) for p in st["people"].values()],
@@ -894,7 +942,10 @@ def markdown(info: dict) -> list[str]:
     for c in info["chapters"]:
         out.append(f"### Chapter {c['number']}" + ((" (⚠️ quick reading by Akọwe: no AI was free; it is read again "
                                                      "later)" if c.get("weak_why") == "busy" else
-                                                     " (quick reading by Akọwe)") if c.get("weak") else ""))
+                                                     " (⚠️ set aside: chapter "
+                                                     f"{(c.get('set_aside') or {}).get('because_number')} was changed "
+                                                     "by hand; it is read again later)" if c.get("weak_why") == "changed"
+                                                     else " (quick reading by Akọwe)") if c.get("weak") else ""))
         for s in c.get("summary") or []:
             out.append(f"- {s}")
         t = c.get("time") or {}

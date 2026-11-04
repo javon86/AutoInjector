@@ -208,6 +208,11 @@ DEFAULT_SLOT = {
 }
 
 
+# H13: what a web AI realistically takes in one message (tokens, prompt + answer) when the author set no limit.
+# The API default above (200 000) is the Anthropic API's; web chats cut or refuse far shorter pastes.
+WEB_CONTEXT_TOKENS = {"chatgpt": 32000, "gemini": 32000, "claude": 100000}
+
+
 def role_matches(roles, operation: str | None) -> bool:
     """True when a slot's roles name this operation exactly or its set letter."""
     if not operation or not roles:
@@ -1016,6 +1021,10 @@ class ProviderRegistry:
             slot["connected"] = slot["adapter_id"] != "none"
             slot["roles"] = list(slot.get("roles") or [])
             if slot["adapter_id"] == "autoinjector":
+                # H13: a web chat does not take the API's 200 000 tokens in one message: unless the author set a
+                # limit for this slot, use what the site realistically accepts (instructions are cut to fit, visibly)
+                if "context_limit_tokens" not in (stored.get(sid) or {}) and slot.get("site") in WEB_CONTEXT_TOKENS:
+                    slot["context_limit_tokens"] = WEB_CONTEXT_TOKENS[slot["site"]]
                 # Web sessions: no per-use bill, and the bridge runs one request per site at a time.
                 slot["input_cost_minor_per_mtok"] = 0
                 slot["output_cost_minor_per_mtok"] = 0

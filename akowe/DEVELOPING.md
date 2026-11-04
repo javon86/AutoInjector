@@ -66,6 +66,14 @@ akowe/
                            draft, scene/chapter briefs, deterministic usage counts (lemma match)
     planned.py             ✅ P11 planned-to-page check: planned items per chapter, word check, independent AI check,
                            findings for the P5 rewrite (fix), book-level list (settings planned_checks:<pid>:<branch>)
+    book_promises.py       📜 H3/H10 content limits, themes, central question, point of view and tense: profile values,
+                           briefs, the chapter instruction, the reviewer rule (a breach is REVISE), the POV/tense check
+    approval_trust.py      ✔ H6/H14 when an AI's APPROVE may approve alone (another AI, a reason, confidence ≥ 0.6) and
+                           the list of drafts approved without checks (settings approved_unchecked:<pid>:<branch>)
+    ending_check.py        🎯 H11/H12 setups, threads, vanished characters, the main character's change and the book's
+                           question vs. the ending (one AI call; the run sends open items back as a fix); checkpoints
+    brief_cuts.py          ✂️ H13 what was cut from a chapter's instructions (settings brief_cuts:<pid>:<branch>)
+    attention.py           ⚠️ 🏠 Book home's "Needs a look" list (status.attention): H5 / H11 / H13 / H14
     timeline_check.py      🕰️ P26 timeline checker: ages, birth/story years, "N years ago" arithmetic (no AI)
     terms.py               🔧 P31 trade facts (settings trade_terms:<pid>:<branch>) + the P26 terminology check
     repetition.py          🔁 P30 repetition sorter: voice / motif / filler / accident, trim plan, author labels

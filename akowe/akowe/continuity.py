@@ -209,6 +209,10 @@ def _ordered(store, pid, branch, kind, order: list[str], *, approved_only: bool)
     for i, cid in enumerate(order):
         e = allc.get(cid)
         if isinstance(e, dict) and (not approved_only or e.get("status") == "approved"):
+            if approved_only:  # H5: a state read from an earlier text of the chapter (edited since) is set aside
+                now = _approved_version(store, pid, branch, e.get("record_id"))
+                if now is not None and e.get("text_version") is not None and now != e.get("text_version"):
+                    continue
             out.append(dict(e, number=e.get("number") or i + 1))
     return out
 
@@ -373,6 +377,8 @@ def info(review, principal, pid: str, branch: str, *, app=None) -> dict:
     outline = bp.outline()
     chs = chapters_of(bp)
     order = [c["chapter_id"] for c in bp.outline_chapters(outline)] if outline else [c["chapter_id"] for c in chs]
+    check_edits(store, pid, branch, later=[{"chapter_id": c["chapter_id"], "number": c["number"],
+                                            "record_id": c["record_id"], "version": c["version"]} for c in chs])
     phys_all = get_all(store, pid, branch, "physical")["chapters"]
     people_all = get_all(store, pid, branch, "characters")["chapters"]
     rows = []
@@ -397,7 +403,7 @@ def info(review, principal, pid: str, branch: str, *, app=None) -> dict:
             "end_state": ps_mod.end_state(_ordered(store, pid, branch, "physical", order, approved_only=True)),
             "ambiguity": {"mysteries": myst, "entry": a_entry, "summary": amb.summary(a_entry, myst)},
             "ledger": ledger, "story_ledger": sl_mod.page_info(store, pid, branch, order),
-            "checkpoints": _checkpoint_report(store, pid, branch)}
+            "checkpoints": _checkpoint_report(store, pid, branch), "rechecks": rechecks(store, pid, branch)}
 
 
 def _checkpoint_report(store, pid, branch) -> dict:
@@ -406,8 +412,16 @@ def _checkpoint_report(store, pid, branch) -> dict:
 
 
 # ====================================================================== the writer's brief and the consistency review
-def section(store, pid: str, branch: str, order: list[str], chapter_id: str, present: list[str] | None = None) -> dict:
-    """The continuity part of one chapter's writing brief (bounded); never raises."""
+def _cut_label(x) -> str:
+    if isinstance(x, dict):
+        return str(x.get("what") or x.get("name") or x.get("field") or x.get("change") or next(iter(x.values()), ""))
+    return str(x)
+
+
+def section(store, pid: str, branch: str, order: list[str], chapter_id: str, present: list[str] | None = None,
+            cut: list | None = None) -> dict:
+    """The continuity part of one chapter's writing brief (bounded); never raises. ``cut``: a list that gets what
+    was left out for space, in plain words (H13, brief_cuts.py)."""
     out: dict = {}
     try:
         idx = order.index(chapter_id) if chapter_id in order else len(order)
@@ -427,36 +441,54 @@ def section(store, pid: str, branch: str, order: list[str], chapter_id: str, pre
             out["version_changes"] = ch
         # keep the whole part bounded: drop the least relevant detail first (H1: never a fixed number of people —
         # the characters NOT in this chapter go first, then the details of the rest, then the oldest hazards)
+        # H13: every cut is said in plain words (``cut``, brief_cuts.py: the run's ⚠️ and the chapter page list it)
+        from . import brief_cuts  # noqa: PLC0415
+        mine: list = []
+
         def over() -> bool:
             return len(json.dumps(out, ensure_ascii=False)) > BRIEF_BUDGET
         if over() and "version_changes" in out:
+            short = []
             for g in ("unresolved", "deliberate", "restore"):
                 if g in out["version_changes"]:
+                    short += [_cut_label(x) for x in out["version_changes"][g][4:]]
                     out["version_changes"][g] = out["version_changes"][g][:4]
+            brief_cuts.note(mine, "continuity — version changes beyond the first 4 of each kind", short)
         people_ = out.get("character_state") or []
         here = [p for p in people_ if present and any(cs_mod._same(p["name"], n) for n in present)]  # noqa: SLF001
+        gone = []
         while over() and len(people_) > len(here):
-            people_.pop()  # the absent ones are sorted last by cs_mod.brief
+            gone.append(people_.pop()["name"])  # the absent ones are sorted last by cs_mod.brief
+        brief_cuts.note(mine, "continuity — tracked state of characters not in this chapter", gone)
+        thinned = []
         for p in reversed(people_):
             if not over():
                 break
-            p.pop("observes", None)
-            p.pop("assumes", None)
+            dropped = [p.pop(k, None) for k in ("observes", "assumes")]
+            if any(d is not None for d in dropped):
+                thinned.append(p["name"])
+        brief_cuts.note(mine, "continuity — what these characters observe and assume", thinned)
         if over() and "physical_state" in out:
-            for hz in out["physical_state"].get("open_hazards") or []:
-                hz.pop("effect", None)
+            had = [hz.get("what") for hz in out["physical_state"].get("open_hazards") or [] if hz.pop("effect", None)]
+            brief_cuts.note(mine, "continuity — the effects of open hazards", had)
+        old_hz = []
         while over() and len((out.get("physical_state") or {}).get("open_hazards") or []) > 1:
-            out["physical_state"]["open_hazards"].pop(0)  # the oldest open hazard first
-        if over():
-            out.pop("version_changes", None)
+            old_hz.append(out["physical_state"]["open_hazards"].pop(0).get("what"))  # the oldest open hazard first
+        brief_cuts.note(mine, "continuity — the oldest open hazards", old_hz)
+        if over() and out.pop("version_changes", None):
+            mine.append("continuity — the deliberate version changes (all of them)")
+        gone = []
         while over() and len(people_) > 1:
-            people_.pop()
+            gone.append(people_.pop()["name"])
+        brief_cuts.note(mine, "continuity — tracked state of characters in this chapter", gone)
         if "character_state" in out and not people_:
             out.pop("character_state")
         # 📒 H1/H2/H4/H8/H9/H19: the end of the previous chapter, the story so far and the story ledger (own budgets)
         from . import checkpoints as cp_mod  # noqa: PLC0415
         out.update(sl_mod.brief(store, pid, branch, order, chapter_id, present,
-                                cp_mod.summaries(store, pid, branch)))
+                                cp_mod.summaries(store, pid, branch), cut=mine))
+        if cut is not None:
+            cut += mine
     except Exception:  # noqa: BLE001 - guidance, never a reason to fail the chapter
         log.exception("could not add the continuity to the brief")
         return {}
@@ -534,9 +566,201 @@ def before_chapter(svc, run: dict, chapter_id: str) -> None:
         log.exception("version ledger in the run failed")
 
 
-def tracked(store, pid: str, branch: str, cid: str) -> bool:
-    """Has this chapter's continuity been tracked and approved (either kind)?"""
-    return any((get_chapter(store, pid, branch, k, cid) or {}).get("status") == "approved" for k in KINDS)
+def tracked(store, pid: str, branch: str, cid: str, rec: dict | None = None) -> bool:
+    """Has this chapter's continuity been tracked and approved (either kind)? With ``rec`` (the chapter's approved
+    revision): tracked from exactly that text — a state read from an earlier text (a hand edit since) is not done
+    (H5)."""
+    for k in KINDS:
+        e = get_chapter(store, pid, branch, k, cid) or {}
+        if e.get("status") != "approved":
+            continue
+        if rec is not None and (e.get("record_id") != rec.get("record_id") or e.get("text_version") != rec.get("version")):
+            continue
+        return True
+    return False
+
+
+# ====================================================================== H5: a chapter changed after later ones
+RECHECK_KEY = "continuity_rechecks"
+# Other trackers (chapter memory, ledgers) register fn(store, pid, branch, chapter_id, number) here: they are called
+# by invalidate_after_chapter, the ONE place that says "chapter N changed: what was read from it is out of date".
+INVALIDATE_HOOKS: list = []
+
+
+def _ledger_hook(store, pid: str, branch: str, chapter_id: str, number) -> None:
+    """📒 the story ledger and the story so far from chapter N on are set aside (story_ledger.invalidate_from)."""
+    sl_mod.invalidate_from(store, pid, branch, chapter_id, number)
+
+
+def _checkpoint_hook(store, pid: str, branch: str, chapter_id: str, number) -> None:
+    """🧭 every checkpoint after chapter N read the old text: it is marked for redo (checkpoints.invalidate_from)."""
+    from . import checkpoints as cp_mod  # noqa: PLC0415
+    cp_mod.invalidate_from(store, pid, branch, chapter_id, number)
+
+
+INVALIDATE_HOOKS += [_ledger_hook, _checkpoint_hook]
+
+
+def _recheck_all(store, pid: str, branch: str) -> dict:
+    try:
+        cur = store.get_setting(f"{RECHECK_KEY}:{pid}:{branch}")
+    except Exception:  # noqa: BLE001
+        cur = None
+    cur = copy.deepcopy(cur) if isinstance(cur, dict) else {}
+    cur.setdefault("flags", {})
+    cur.setdefault("seen", {})
+    return cur
+
+
+def _recheck_save(store, pid: str, branch: str, cur: dict) -> None:
+    store.set_setting(f"{RECHECK_KEY}:{pid}:{branch}", cur)
+
+
+def _approved_version(store, pid: str, branch: str, rid: str | None):
+    if not rid:
+        return None
+    try:
+        rows = store.query("SELECT approved_version FROM heads WHERE project_id=? AND branch_id=? AND "
+                           "record_id=?", (pid, branch, rid))
+    except Exception:  # noqa: BLE001
+        return None
+    return rows[0]["approved_version"] if rows else None
+
+
+def note_written(store, pid: str, branch: str, chapter_id: str, rec: dict, number: int | None) -> None:
+    """Remember which approved text of a chapter the book was continued from (record id, version, number)."""
+    try:
+        with _LOCK:
+            cur = _recheck_all(store, pid, branch)
+            cur["seen"][chapter_id] = {"record_id": rec.get("record_id"), "version": rec.get("version"),
+                                       "number": number}
+            _recheck_save(store, pid, branch, cur)
+    except Exception:  # noqa: BLE001
+        log.exception("could not note the chapter text")
+
+
+def message(changed_number, later_number) -> str:
+    return (f"⚠ Chapter {changed_number} changed after chapter {later_number} was written — check chapter "
+            f"{later_number}")
+
+
+def invalidate_after_chapter(store, pid: str, branch: str, chapter_id: str, *, number: int | None = None,
+                             reason: str = "the chapter was changed", later: list | None = None) -> dict:
+    """Chapter ``chapter_id`` (number ``number``) changed. The ONE function for it:
+
+    1. its tracked state (physical and character) is set aside — status ``out_of_date``, never given to a writer or
+       reviewer — until it is tracked again from the new text;
+    2. every later chapter already written (``later``: [{chapter_id, number, record_id, version}], else the ones
+       Akọwe tracked or saw written) is flagged "⚠ Chapter 5 changed after chapter 6 was written — check chapter 6";
+    3. the registered INVALIDATE_HOOKS run (other trackers drop what they read from the old text).
+
+    Returns {set_aside: [kinds], flagged: [chapter ids]}. Never raises."""
+    out = {"set_aside": [], "flagged": []}
+    try:
+        for kind in KINDS:
+            if get_chapter(store, pid, branch, kind, chapter_id) is None:
+                continue
+
+            def change(cur, kind=kind):
+                e = cur["chapters"].get(chapter_id)
+                if e.get("status") != "out_of_date":
+                    e["set_aside"] = {"from_status": e.get("status"), "why": reason[:200], "at": _now()}
+                e["status"] = "out_of_date"
+                return e
+            _update(store, pid, branch, kind, change, (f"continuity.{kind}_set_aside",
+                                                       lambda e: {"chapter_id": chapter_id, "version": e["version"]}))
+            out["set_aside"].append(kind)
+        with _LOCK:
+            cur = _recheck_all(store, pid, branch)
+            if number is None:
+                number = (cur["seen"].get(chapter_id) or {}).get("number")
+                for kind in KINDS:
+                    number = number or (get_chapter(store, pid, branch, kind, chapter_id) or {}).get("number")
+            cands = {}
+            for c in later if later is not None else []:
+                cands[c["chapter_id"]] = c
+            if later is None:  # what Akọwe knows was written: tracked entries and chapters seen in a run
+                for cid, s in cur["seen"].items():
+                    cands[cid] = {"chapter_id": cid, "number": s.get("number"), "record_id": s.get("record_id"),
+                                  "version": s.get("version")}
+                for kind in KINDS:
+                    for cid, e in get_all(store, pid, branch, kind)["chapters"].items():
+                        cands.setdefault(cid, {"chapter_id": cid, "number": e.get("number"),
+                                               "record_id": e.get("record_id"), "version": e.get("text_version")})
+            for cid, c in cands.items():
+                if cid == chapter_id or not isinstance(number, int) or not isinstance(c.get("number"), int) \
+                        or c["number"] <= number:
+                    continue
+                cur["flags"][cid] = {"chapter_id": cid, "number": c["number"], "because": chapter_id,
+                                     "because_number": number, "record_id": c.get("record_id"),
+                                     "version": c.get("version"), "at": _now(),
+                                     "message": message(number, c["number"])}
+                out["flagged"].append(cid)
+            cur["seen"].pop(chapter_id, None)
+            _recheck_save(store, pid, branch, cur)
+    except Exception:  # noqa: BLE001 - never a reason to fail the caller
+        log.exception("could not set the chapter's state aside")
+    for fn in list(INVALIDATE_HOOKS):
+        try:
+            fn(store, pid, branch, chapter_id, number)
+        except Exception:  # noqa: BLE001
+            log.exception("an invalidate hook failed")
+    return out
+
+
+def check_edits(store, pid: str, branch: str, later: list | None = None) -> list[dict]:
+    """Find approved chapters whose text changed since the book was continued from them (a hand edit, approved
+    again): compares what was tracked / seen (record id + version) with the chapter's approved version now, and
+    calls invalidate_after_chapter for each. ``later``: the written chapters (as for invalidate_after_chapter).
+    Returns [{chapter_id, number, flagged}]. Never raises."""
+    found = []
+    try:
+        used: dict = {}
+        cur = _recheck_all(store, pid, branch)
+        for cid, s in cur["seen"].items():
+            used[cid] = (s.get("record_id"), s.get("version"), s.get("number"))
+        for kind in KINDS:
+            for cid, e in get_all(store, pid, branch, kind)["chapters"].items():
+                if e.get("status") in ("approved", "draft"):
+                    used.setdefault(cid, (e.get("record_id"), e.get("text_version"), e.get("number")))
+        for cid, (rid, ver, num) in used.items():
+            now = _approved_version(store, pid, branch, rid)
+            if now is None or ver is None or now == ver:
+                continue
+            res = invalidate_after_chapter(store, pid, branch, cid, number=num, later=later,
+                                           reason=f"the chapter's text changed (version {ver} -> {now})")
+            found.append({"chapter_id": cid, "number": num, "flagged": res["flagged"]})
+    except Exception:  # noqa: BLE001
+        log.exception("could not check for changed chapters")
+    return found
+
+
+def rechecks(store, pid: str, branch: str) -> list[dict]:
+    """The open "check chapter N" flags. A flag is resolved when that chapter's approved text changed since it was
+    flagged (rewritten / edited) or the author marked it checked."""
+    cur = _recheck_all(store, pid, branch)
+    out = []
+    for cid, f in cur["flags"].items():
+        now = _approved_version(store, pid, branch, f.get("record_id"))
+        if f.get("record_id") and now is not None and f.get("version") is not None and now != f.get("version"):
+            continue
+        out.append(dict(f))
+    return sorted(out, key=lambda f: f.get("number") or 0)
+
+
+def recheck_open(store, pid: str, branch: str, chapter_id: str) -> dict | None:
+    return next((f for f in rechecks(store, pid, branch) if f["chapter_id"] == chapter_id), None)
+
+
+def recheck_done(store, pid: str, branch: str, chapter_id: str) -> bool:
+    """The author checked the chapter (or it is being written again): the flag goes."""
+    with _LOCK:
+        cur = _recheck_all(store, pid, branch)
+        if chapter_id not in cur["flags"]:
+            return False
+        cur["flags"].pop(chapter_id)
+        _recheck_save(store, pid, branch, cur)
+    return True
 
 
 def after_chapter(svc, run: dict, chapter_id: str, rec: dict | None = None, item: dict | None = None) -> None:
@@ -614,6 +838,7 @@ def retrack_weak(svc, run: dict, before: str | None = None, chapter_ids: list[st
         upto = order.index(before) if before in order else len(order)
         weak = [c for c in sl_mod.weak_chapters(store, pid, branch, order[:upto])
                 if chapter_ids is None or c in chapter_ids]
+        changed = set(sl_mod.weak_chapters(store, pid, branch, order[:upto], why=("changed",)))
         for cid in weak[:limit]:
             job = svc._sub_job(run, "continuity_track", cid, (run.get("settings") or {}).get("slot_id"))  # noqa: SLF001
             job.retry_busy = False
@@ -623,9 +848,10 @@ def retrack_weak(svc, run: dict, before: str | None = None, chapter_ids: list[st
             if (res.get("story") or {}).get("weak"):
                 break  # still no AI free: try again later
             done.append(cid)
-            svc.event(run, "note", f"🧭 Chapter {res.get('number')}: continuity read again by an AI now that one is "
-                                   "free (it was a weak reading)", step="chapters", chapter_id=cid,
-                      code="CONTINUITY_RETRACKED")
+            svc.event(run, "note", f"🧭 Chapter {res.get('number')}: continuity read again by an AI "
+                                   + ("(an earlier chapter was changed by hand)" if cid in changed else
+                                      "now that one is free (it was a weak reading)"), step="chapters",
+                      chapter_id=cid, code="CONTINUITY_RETRACKED")
     except Cancelled:
         raise
     except Exception as exc:  # noqa: BLE001
@@ -775,6 +1001,26 @@ def route(app, method: str, rest: list, body, principal: str, pid: str, branch: 
         return 200, {"checkpoints": rep, "every": cp_mod.every_of(store, pid),
                      "markdown": "\n".join(["# Continuity checkpoints", ""] + (cp_mod.markdown(rep) or [
                          "No checkpoint has run yet."]))}
+    if rest == ["ending"] and method == "GET":  # 🎯 H11 / H12: the last ending check (and the last checkpoint)
+        from . import ending_check  # noqa: PLC0415
+        return 200, {"final": ending_check.get(store, pid, branch), "checkpoint": ending_check.get(store, pid, branch,
+                                                                                                    "checkpoint")}
+    if rest == ["ending", "check"] and method == "POST":  # 🎯 check now (body: upto = a checkpoint after chapter N)
+        from . import ending_check  # noqa: PLC0415
+        upto = _int_or_none(body, "upto")
+        job = _job(review, "ending_check", principal, pid, branch, ["book"], body.get("slot_id"))
+
+        def run(j):
+            res = ending_check.check(review, j, upto=upto, final=upto is None)
+            j.results.append({"record_id": "book", "ok": True, "check": res,
+                              "message": "🎯 " + ending_check.summary_line(res)})
+            j.done = 1
+        return 202, review._start(job, run, same=())  # noqa: SLF001
+    if len(rest) == 3 and rest[0] == "recheck" and rest[2] == "done" and method == "POST":  # H5: "I checked it"
+        ok = recheck_done(store, pid, branch, rest[1])
+        review._changed()  # noqa: SLF001
+        return 200, {"ok": ok, "rechecks": rechecks(store, pid, branch),
+                     "message": "Marked as checked." if ok else "There was nothing to check for this chapter."}
     if rest == ["track"] and method == "POST":
         _bool(body, "ai")
         out = start_track(review, principal, pid, branch, body)

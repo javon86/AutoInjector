@@ -166,6 +166,17 @@ def sheet_for(name, others=(), story_role=None):
     return out
 
 
+def trust_one_ai(app, run_id, timeout=120):
+    """H6: with only one AI the run pauses at its first draft (nobody else checked it). Answer like an author who
+    trusts that AI: ✔ approve it yourself, and the rest of this run too. Returns the stored run."""
+    run = app.autobook.get(run_id)
+    if run.get("status") == "paused" and (run.get("problem") or {}).get("code") == "NO_SECOND_AI":
+        app.autobook.decide("author", run_id, {"action": "approve_anyway", "author_confirms": True,
+                                               "for_rest_of_run": True})
+        app.autobook.wait_for(run_id, timeout)
+    return app.autobook.get(run_id)
+
+
 class BookFakeAI:
     def __init__(self, verdicts=None, default_verdict="APPROVE"):
         self.calls: list[dict] = []
@@ -215,6 +226,9 @@ class BookFakeAI:
         self.checkpoint_script: list = []        # scripted checkpoint answers (dicts or callables(ctx)), one per call
         self.checkpoint_extra: list = []         # extra problems a checkpoint reports: {chapter, quote, problem,
         #                                          original, replacement} (only for chapters in that call)
+        self.ending_script: list = []            # 🎯 H11/H12: scripted ending checks (dicts or callables(ctx))
+        self.ending_fix = True                   # 🎯 the writer adds an ending finding's suggestion after the passage
+        self.plot_obligations: list = []         # 🎯 the main plot's setups (B03 plot_obligations) the ending must keep
 
     def fail_next(self, *excs):
         self.failures.extend(excs)
@@ -255,6 +269,15 @@ class BookFakeAI:
     def _answer(self, ctx, props, schema):
         if ctx.get("akowe_task") == "story_details":  # ⏱ story details (essentials / just in time)
             return "details", self._details(ctx)
+        if "arc" in props and "question" in props:  # 🎯 H11 / H12: does the ending keep the book's promises?
+            with self.lock:
+                scripted = self.ending_script.pop(0) if self.ending_script else None
+            if scripted is not None:
+                return "ending", scripted(ctx) if callable(scripted) else copy.deepcopy(scripted)
+            return "ending", {"items": [{"id": p["id"], "kept": True, "where": "", "note": "Paid off.", "fix": ""}
+                                        for p in ctx.get("promises") or []],
+                              "arc": {"kept": True, "note": "She asks for help at last.", "fix": ""},
+                              "question": {"kept": True, "note": "The light is back.", "fix": ""}}
         if "character_changes" in props:  # 📚 series: what changed for each character in this book
             with self.lock:
                 scripted = self.series_script.pop(0) if getattr(self, "series_script", None) else None
@@ -377,6 +400,11 @@ class BookFakeAI:
         if "verdict" in props:
             with self.lock:
                 v = self.verdicts.pop(0) if self.verdicts else self.default_verdict
+            if callable(v):  # a scripted answer that looks at what the reviewer was sent
+                v = v(ctx)
+            if isinstance(v, dict):  # a whole scripted review (H6: no reasons, low confidence, H3: limits …)
+                return "review", dict({"verdict": "APPROVE", "reasons": [], "suggested_changes": [],
+                                       "confidence": 0.8}, **v)
             return "review", {"verdict": v, "reasons": ["It fits the book profile and the plan." if v == "APPROVE"
                                                         else "The opening could name the place sooner."],
                               "suggested_changes": [] if v == "APPROVE" else ["Name the harbor in the first line."],
@@ -432,7 +460,7 @@ class BookFakeAI:
         if "main_plot" in props:
             return "B03", {"main_plot": {"summary": "Mara follows the keeper's trail from the dark lighthouse through "
                                                     "the harbor to the reef.", "facts": [], "links": []},
-                           "objectives": [], "plot_obligations": []}
+                           "objectives": [], "plot_obligations": list(self.plot_obligations)}
         if "chapters" in props:
             req = ctx.get("request_payload") or {}
             n = ((req.get("target_length") or {}).get("value")) or 3
@@ -675,6 +703,11 @@ class BookFakeAI:
         out = []
         for f in ctx.get("findings") or []:
             p = f.get("passage") or ""
+            if f.get("dimension") == "ending_promises":  # 🎯 the open promise is added after the last paragraph
+                if self.ending_fix:
+                    out.append({"finding_id": f["id"], "original": p,
+                                "replacement": p + " " + str(f.get("suggestion") or "").strip()})
+                continue
             if f.get("dimension") == "planned_to_page":
                 if self.planned_fix:
                     sug = str(f.get("suggestion") or "")

@@ -144,7 +144,7 @@ def test_essentials_never_overwrite_the_authors_text_and_resume_does_not_refill(
 def test_ai_down_skips_with_an_event_and_fills_later(tmp_path):
     fake = BookFakeAI()
     fake.fail_kind("details", *[AkoweError("UPSTREAM_UNAVAILABLE", "/ai", "the AI is down") for _ in range(4)])
-    app = make_app(tmp_path, fake=fake)
+    app = make_app(tmp_path, fake=fake, second_ai=False)  # one AI that is down (a second one would answer)
     run = done(run_book(app, {"length": "short_story"}))
     assert events(app, run, code="DETAILS_LATER")
     pid = run["project_id"]
