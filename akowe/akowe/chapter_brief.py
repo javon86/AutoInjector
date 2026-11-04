@@ -47,6 +47,7 @@ import json
 import logging
 
 from . import characters as chars_mod
+from . import brief_cuts
 from . import scenes as scenes_mod
 
 log = logging.getLogger("akowe.chapter_brief")
@@ -201,14 +202,16 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str) -
         vb = chars_mod.voice_brief(store, pid, branch, present, first=pov["record_id"] if pov else None) \
             if flags["voices"] else {"cards": [], "others": [], "summarized": False}
         char_ids = {c["subject_id"] for c in cs} | {c["record_id"] for c in cs}
-        planned = []
+        planned, cut = [], []  # cut: H13 — what did not fit, said in plain words (brief_cuts.py)
         for f in facts:
             if f.get("subject_id") == chapter_id and str(f.get("predicate") or "").startswith("plan."):
                 continue
             if f.get("subject_id") in char_ids or str(f.get("predicate") or "").startswith("entity."):
                 planned.append(f"{f.get('subject_id')} {f.get('predicate')}: {_clip(f.get('value'), 200)}")
-            if len(planned) >= MAX_PLANNED:
-                break
+        brief_cuts.note(cut, "planned details", planned[MAX_PLANNED:])
+        planned = planned[:MAX_PLANNED]
+        if vb.get("summarized"):
+            cut.append("voice cards: shortened to their essentials (too many characters for full cards)")
         brief = {"pov": _pov_view(pov) if pov else None, "voice_cards": vb["cards"], "other_voices": vb["others"],
                  "scene_cards": cards, "planned_details": planned}
         main = _main_character(store, pid, branch, cs, present, pov)  # ★ every chapter knows who the book is about
@@ -236,6 +239,10 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str) -
             if fixed:
                 brief["fixed_details"] = fixed
         extra = _section4(store, pid, branch, outline, chapter_id, cards, texts)
+        cut += [c for c in extra.pop("_cut", []) if (flags["rules"] or not c.startswith("story rules"))
+                and (flags["planned"] or not c.startswith("must-show"))]  # switched off is not "cut"
+        if cut:
+            meta["cut"] = cut
         if not flags["rules"]:
             extra.pop("story_rules", None)
             extra.pop("world_texture", None)
@@ -388,6 +395,10 @@ def _section4(store, pid: str, branch: str, outline: dict, chapter_id: str, card
         card_text = " ".join(json.dumps(c, ensure_ascii=False) for c in cards or [])
         out["story_rules"] = story_rules.chapter_rules(story_rules.get_entry(store, pid, branch), *texts, card_text,
                                                        mystery_mode=story_choices.mystery_mode(choices), last=last)
+        given = {r.get("rule") for r in out["story_rules"]}  # H13: say which rules did not fit
+        brief_cuts.note(out.setdefault("_cut", []), "story rules",
+                        [r["text"] for r in story_rules.active(story_rules.get_entry(store, pid, branch))
+                         if r["text"] not in given])
         out["world_texture"] = texture_mod.chapter_brief(texture_mod.get_entry(store, pid, branch), cards, *texts)
         out["story_choices"] = story_choices.brief(choices, ending=last)
         out["choice_rules"] = story_choices.rules(choices, ending=last)
@@ -397,7 +408,9 @@ def _section4(store, pid: str, branch: str, outline: dict, chapter_id: str, card
         from . import planned as planned_mod  # noqa: PLC0415
         shim = planned_mod.shim(store, pid, branch)
         assigned = planned_mod._must_show_assignment(store, pid, branch, planned_mod.chapters_info(shim, outline))
-        out["must_show"] = [f"{who}: {it}" for who, it in assigned.get(chapter_id, [])][:planned_mod.MUST_SHOW_BRIEF]
+        every = [f"{who}: {it}" for who, it in assigned.get(chapter_id, [])]
+        out["must_show"] = every[:planned_mod.MUST_SHOW_BRIEF]
+        brief_cuts.note(out.setdefault("_cut", []), "must-show details", every[planned_mod.MUST_SHOW_BRIEF:])
     except Exception:  # noqa: BLE001
         log.exception("could not add the must-show details to the brief")
     return out

@@ -164,6 +164,9 @@ def decide(scores: dict, findings: list, strictness: str, relax: dict | None = N
         why.append(f"{major} major finding(s)")
     if minor > thr["max_minor"]:
         why.append(f"{minor} minor finding(s)")
+    crossed = [f for f in findings if f.get("dimension") in rubric.ALWAYS_REVISE]
+    if crossed:  # H3: the author's content limits are never a matter of strictness
+        why.append(f"{len(crossed)} passage(s) cross the author's content limits")
     return ("REVISE" if why else "PASS"), why
 
 
@@ -543,8 +546,11 @@ class EditorService:
         info = chapter or (self.chapter_info(pid, branch, rec, job.principal) if rec["module_id"] == "C02" else {})
         brief = self.brief(pid, branch, info, job.principal) if rec["module_id"] == "C02" else None
         guide = self.guidance(pid, branch, rec["module_id"], info)
+        from .book_path import get_profile  # noqa: PLC0415 - H3: the author's content limits are a dimension
         dims = rubric.dimensions_for(rec["module_id"], bool(info.get("last")), bool((brief or {}).get("scene_cards")),
-                                     story_rules=bool(guide["rules"]))
+                                     story_rules=bool(guide["rules"]),
+                                     content_limits=bool(str(get_profile(self.store, pid).get("content_limits")
+                                                             or "").strip()))
         from . import story_choices  # noqa: PLC0415
         notes, relax = story_choices.editor_notes(guide["choices"]), story_choices.relax(guide["choices"])
         from . import character_mode  # noqa: PLC0415 - 🧑 ⚖ 🗺 how strict on character agency / voices

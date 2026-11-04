@@ -5452,6 +5452,13 @@ function renderBook(holder, book, redraw) {
       : h('span', { class: 'badge b-ok' }, '🎉 Your book is made')),
     h('progress', { max: '100', value: String(pct), 'aria-label': `${pct}% done` }), wordsLine(book.words), msg,
     sequelBox(S.pid, S.branch)));
+  // ⚠️ what needs a look: approved without checks (H14), chapters to re-check after a hand edit (H5), instructions
+  // that were cut (H13), promises the ending did not keep (H11 / H12)
+  const att = (book.attention || {}).lines || [];
+  if (att.length) holder.appendChild(h('section', { class: 'card attention-card', 'data-testid': 'book-attention', 'aria-label': 'Needs a look' },
+    h('h2', null, '⚠️ Needs a look'),
+    h('ul', { class: 'small' }, att.slice(0, 12).map(l => h('li', null, l))),
+    att.length > 12 ? h('p', { class: 'small muted' }, `…and ${att.length - 12} more.`) : null));
   holder.appendChild(stepRail(book.steps.map(s => ({ id: s.id, title: s.title, state: BOOK_ERR[`${S.pid}:${s.id}`] ? 'problem' : s.state, word: RAIL_WORD[s.state] })),
     { label: 'Book home: all steps', current: book.next }));
   const ol = h('ol', { class: 'book-steps' });
@@ -7024,6 +7031,8 @@ function plannedCard(rid, { onSaved } = {}) {
       : `✔ Everything required is on the page (${c.on_page} of ${c.items} item(s) found).`,
     info.stored && info.stored.ai ? h('span', { class: 'muted' }, ` Checked by ${info.stored.ai.reviewer || 'an AI'}.`) : h('span', { class: 'muted' }, ' Akọwe’s word check (no AI yet).'),
     info.stored && info.stored.ai && info.stored.ai.independent === false ? h('span', { class: 'words-warn' }, ` ⚠️ ${info.stored.ai.warning}`) : null));
+    // H13: what did not fit in this chapter's instructions (said, never cut silently)
+    if (info.instructions_cut && info.instructions_cut.line) body.appendChild(h('p', { class: 'small words-warn', 'data-testid': 'instructions-cut' }, info.instructions_cut.line));
     body.appendChild(h('ul', { class: 'planned-list' }, items.map(i => h('li', { class: `pl-${i.status}${i.required ? '' : ' optional'}`, 'data-status': i.status },
       h('span', { 'aria-hidden': 'true' }, PLANNED_ICON[i.status] || '•'), ' ', i.label,
       i.required ? null : h('span', { class: 'small muted' }, ' (nice to have)'),
@@ -7769,7 +7778,16 @@ function runDecision(prob) {
   const r = MB.run;
   const extra = [];
   const opts = prob.options || [];
-  if (opts.includes('approve_anyway')) {
+  if (opts.includes('approve_anyway') && prob.no_second_check) {
+    // H6: the AI's own APPROVE was not enough (only one AI / no reason / unsure): the author decides
+    extra.push({ label: '✔ Approve it myself', cls: 'primary', fn: async () => {
+      const ok = await choiceDialog('Approve it yourself?', h('div', null,
+        h('p', null, prob.message || 'Nobody else checked this draft.'),
+        h('p', null, 'Read it first. Approving is YOUR approval (it is logged as yours); the editor and the plan check still run afterwards as notes.')),
+        [{ id: 'yes', label: '✔ Approve this one' }, { id: 'rest', label: '✔ Approve this and trust this AI for the rest of the run' }]);
+      if (ok === 'yes' || ok === 'rest') await runAction('decide', { action: 'approve_anyway', author_confirms: true, for_rest_of_run: ok === 'rest' }, 'Approved; continuing');
+    } });
+  } else if (opts.includes('approve_anyway')) {
     extra.push({ label: '✔ Approve anyway', cls: 'primary', fn: async () => {
       const ok = await choiceDialog('Approve as the author?', h('div', null,
         h('p', null, 'The AI reviewer did not pass this draft. Approving it anyway is YOUR approval (it is logged as yours), and the run continues.'),

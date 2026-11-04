@@ -670,6 +670,9 @@ class ReportService:
                     r["trust_notes"] = reviewer_notes(r)  # 🎯 P36: what the report page shows under the reviewer
         base["aggregate"] = aggregate(base["reviews"])
         base["try_next"] = self.try_next(base)
+        from . import approval_trust  # noqa: PLC0415 - H14: chapters approved without (all) checks
+        base["unchecked"] = [{k: e.get(k) for k in ("label", "chapter_id", "how", "why", "notes", "line", "at")}
+                             for e in approval_trust.entries(self.store, pid, branch)]
         base["warnings"] = notes + self._warnings(base)
         base["updated_at"] = _now()
         self._save(pid, branch, base)
@@ -729,6 +732,8 @@ class ReportService:
             out.append("⚠️ " + "; ".join(f"{r['name']} could not review ({r.get('error')})" for r in failed))
         if not rep["version"].get("approved"):
             out.append("Some chapters are not approved yet: the report reads their newest drafts.")
+        for e in rep.get("unchecked") or []:  # H14: approved anyway / auto-approved / only one AI checked it
+            out.append("⚠️ " + str(e.get("line") or e.get("label")))
         return out
 
     @staticmethod

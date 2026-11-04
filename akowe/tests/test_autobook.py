@@ -18,6 +18,7 @@ from akowe.jobs import JobStore, RetryPolicy, wait_and_retry
 from akowe.server import App, make_handler
 
 from autobook_fake import CHAPTER_TEXT, BookFakeAI, fact, plan_item
+from autobook_fake import trust_one_ai as trust_one_ai_
 from test_server import TOKEN, call  # noqa: F401
 
 FAKE_KEY = "sk-ant-FAKEKEY-0123456789abcdefghij-SECRET"
@@ -30,12 +31,18 @@ def no_provider_sleep(monkeypatch):
                                                                 time=time.time))
 
 
-def make_app(tmp_path, name="data", fake=None):
+def make_app(tmp_path, name="data", fake=None, second_ai=True):
+    """``second_ai``: a second, different AI (a "manual" slot answered by the fake, dearer so AI-1 writes) reviews the
+    drafts — H6: one AI may not approve its own writing, so a run with one AI pauses for the author."""
     app = App(tmp_path / name, token=TOKEN)
     app.engine.providers.secret_path = tmp_path / "secrets.json"
     if fake is not None:
         app.engine.providers.test_adapter = fake
         app.engine.providers.configure_slot("AI-1", {"adapter_id": "anthropic"})
+        if second_ai:
+            app.engine.providers.configure_slot("AI-2", {"adapter_id": "manual",
+                                                         "input_cost_minor_per_mtok": 9000,
+                                                         "output_cost_minor_per_mtok": 40000})
     fast = RetryPolicy([0.01, 0.02], 5)
     app.autobook.retry_policy = fast
     app.write_all.retry_policy = fast
@@ -43,9 +50,13 @@ def make_app(tmp_path, name="data", fake=None):
     return app
 
 
-def run_book(app, body=None, timeout=120):
+def run_book(app, body=None, timeout=120, trust_one_ai=True):
+    """``trust_one_ai``: when only one AI works the run pauses at its first draft (H6: nobody else checked it); the
+    test then answers like an author would — ✔ approve it yourself, and the rest of this run too."""
     r = app.autobook.start("author", dict({"author_confirms": True}, **(body or {})))
     app.autobook.wait_for(r["id"], timeout)
+    if trust_one_ai:
+        trust_one_ai_(app, r["id"], timeout)
     return app.autobook.public(app.autobook.get(r["id"]))
 
 
@@ -516,7 +527,8 @@ def test_fresh_install_health_is_calm(tmp_path):
 def test_diagnostics_contain_no_secrets_or_book_text(tmp_path):
     fake = BookFakeAI()
     app = make_app(tmp_path, fake=fake)
-    app.engine.providers.configure_slot("AI-2", {"adapter_id": "anthropic", "api_key": FAKE_KEY})
+    app.engine.providers.configure_slot("AI-3", {"adapter_id": "anthropic", "api_key": FAKE_KEY,
+                                                 "input_cost_minor_per_mtok": 9999})
     run = run_book(app)
     assert run["status"] == "done"
     chapter = CHAPTER_TEXT[1][0]
@@ -530,7 +542,7 @@ def test_diagnostics_contain_no_secrets_or_book_text(tmp_path):
     assert "The Keeper of Gullhaven" not in raw  # no book titles
     assert "Rowan Ashby" not in raw and "fog-bound harbor" not in raw
     assert rep["app"]["version"] and rep["system"]["python"] and rep["health"]["checks"]
-    assert any(s["slot_id"] == "AI-2" and s["key_saved"] for s in rep["ai_slots"])
+    assert any(s["slot_id"] == "AI-3" and s["key_saved"] for s in rep["ai_slots"])
     assert any(j["kind"] == "autobook" for j in rep["jobs"])
     assert rep["recent_errors"][-1]["code"] == "INVALID_INPUT"
 

@@ -25,7 +25,7 @@ from akowe.errors import AkoweError
 from akowe.jobs import RetryPolicy
 from akowe.server import App
 
-from autobook_fake import BookFakeAI
+from autobook_fake import BookFakeAI, trust_one_ai
 from test_autoinjector_adapter import B01_OUT, BRIDGE_TOKEN, FakeBridge
 from test_server import TOKEN, call, server  # noqa: F401
 
@@ -120,6 +120,7 @@ def make_app(tmp_path, fake, slots=("AI-1", "AI-2", "AI-3"), name="data", famili
 def run_book(app, body=None, timeout=180):
     r = app.autobook.start("author", dict({"author_confirms": True}, **(body or {})))
     app.autobook.wait_for(r["id"], timeout)
+    trust_one_ai(app, r["id"], timeout)  # H6: one AI only -> the author approves it herself
     out = app.autobook.public(app.autobook.get(r["id"]))
     out["events"] = app.autobook.get(r["id"])["events"]  # all of them (the public view keeps the last 60)
     return out
@@ -373,7 +374,7 @@ def test_pinned_run_still_gets_an_independent_reviewer(tmp_path):
     app = make_app(tmp_path, fake, slots=("AI-1", "AI-2"))
     run = run_book(app, {"slot_id": "AI-2"})
     assert run["status"] == "done", (run["phase"], run.get("problem"))
-    writes = {s for s, k in fake.per_slot if k not in ("review", "fail", "craft", "scene_review", "planned",
+    writes = {s for s, k in fake.per_slot if k not in ("review", "fail", "craft", "scene_review", "planned", "ending",
                                                        "book_review")}  # P13: the whole-book read is a review
     reviews = {s for s, k in fake.per_slot if k == "review"}
     crafts = {s for s, k in fake.per_slot if k == "craft"}

@@ -38,7 +38,9 @@ PROFILE_FIELDS = {"title": 200, "author": 200, "genre": 120, "audience": 120, "l
                   "idea": 4000, "ai_slot": 20, "chapters": 3,
                   "blurb": 3000, "author_bio": 1500,  # 🎨 B3: the back-cover blurb and author bio
                   # 📖 Book Bible binder (binder_fields.py): series, sub-genre, content limits, central question
-                  "series": 200, "subgenre": 120, "content_limits": 1000, "central_question": 300}
+                  "series": 200, "subgenre": 120, "content_limits": 1000, "central_question": 300,
+                  # H10: point of view (first / third) and tense (past / present); empty = from the genre
+                  "pov": 20, "tense": 20}
 # 📖 Book Bible binder: profile values that are not plain text (cleaned in clean_profile)
 THEMES_MAX, THEME_MAX, SERIES_NUMBER_MAX = 3, 120, 999
 # P15: (label, default chapters, most chapters) per length preset (lengths.py holds the word targets).
@@ -124,6 +126,9 @@ def clean_profile(body) -> dict:
             raise _err("INVALID_INPUT", "/length", f"length: {LENGTH_CHOICES}")
         if k == "ai_slot" and v not in AI_SLOT_CHOICES:
             raise _err("INVALID_INPUT", "/ai_slot", "AI choice: empty (automatic), AI-1, AI-2, AI-3 or manual")
+        if k in ("pov", "tense"):
+            from .book_promises import clean as clean_promise  # noqa: PLC0415
+            v = clean_promise(k, v)
         out[k] = v
     return out
 
@@ -637,9 +642,11 @@ class BookPath:
             words = self.word_stats(chapters)
         except Exception:  # noqa: BLE001 - a progress number must never break the checklist
             words = None
+        from . import attention  # noqa: PLC0415 - ⚠️ what needs a look (H5 / H13 / H14 / H11)
         return {"project_id": self.pid, "branch_id": self.branch, "ai_ready": ai, "profile": prof,
                 "steps": steps, "next": nxt["id"] if nxt else None, "words": words,
-                "done_count": sum(1 for s in steps if s["state"] == "done"), "total": len(steps)}
+                "done_count": sum(1 for s in steps if s["state"] == "done"), "total": len(steps),
+                "attention": attention.of_book(self.store, self.pid, self.branch)}
 
     def release_profiles(self):
         m = self.store.feature_manifest(self.pid, self.branch) or {}
@@ -775,10 +782,14 @@ class BookPath:
         prof = self.profile
         from .lengths import chapter_plan  # noqa: PLC0415
         lp = chapter_plan(prof, len(chapters), self.store)
-        instruction = (f"Write chapter {cid}: {chapters[cid]['objective']}".strip()
-                       + (f". Tone: {prof['tone']}" if prof.get("tone") else "")
-                       + (f". Audience: {prof['audience']}" if prof.get("audience") else "")
-                       + f". Length: about {lp['target_words']:,} words")[:2000]
+        from .book_promises import instruction as promises  # noqa: PLC0415 - H3 / H10
+        head = (f"Write chapter {cid}: {chapters[cid]['objective']}".strip()
+                + (f". Tone: {prof['tone']}" if prof.get("tone") else "")
+                + (f". Audience: {prof['audience']}" if prof.get("audience") else "")
+                + f". Length: about {lp['target_words']:,} words")
+        # the promises go first after the objective's line, so the 2 000-character cut never takes them
+        tail = ". " + promises(prof)
+        instruction = (head[:max(200, 2000 - len(tail))] + tail)[:2000]
         return {"chapter_id": cid, "outline_ref": outline["ref"], "context_ref": ctx["ref"], "instruction": instruction}
 
     def a_write_chapter(self, body):
@@ -796,6 +807,16 @@ class BookPath:
                     self.set_aside(latest, f"replaced: the author asked the AI to write chapter {cid} again")
             payload = self.prepare_chapter(cid)
             out = self._ai_or_manual("C02", payload, f"chapter “{cid}”", manual=manual)
+            made = out.get("created") if isinstance(out.get("created"), dict) else None
+            if made and made.get("module_id") == "C02":  # H13: what did not fit in this chapter's instructions
+                from . import brief_cuts  # noqa: PLC0415
+                order = [c["chapter_id"] for c in self.outline_chapters(outline)] if outline else []
+                cuts = brief_cuts.after_write(self.store, self.pid, self.branch, cid,
+                                              order.index(cid) + 1 if cid in order else None, made["record_id"],
+                                              payload.get("context_ref"))
+                if cuts:
+                    out["instructions_cut"] = cuts
+                    out["message"] = (str(out.get("message") or "") + " " + cuts["line"]).strip()
         if out.get("needs_manual"):
             out["manual_on"] = True
         return out
