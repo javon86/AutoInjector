@@ -2918,6 +2918,16 @@ def route(app, method: str, rest: list, query: dict, body, principal: str, pid: 
         return 200, bf.dismiss(app.store, pid, branch, body)
     if rest == ["fill"] and method == "POST":
         return 202, bf.start_fill(app, principal, pid, branch, body)
+    if rest == ["fill_all"] and method == "POST":  # 📖 Fill in the whole Book Bible (whole_bible.py)
+        from . import whole_bible  # noqa: PLC0415
+        return 202, whole_bible.start(app, principal, pid, branch, body)
+    if rest == ["codes"] and method == "GET":  # 🔢 the code map (code_map.py)
+        from . import code_map  # noqa: PLC0415
+        fmt = (query.get("format") or ["json"])[0]
+        if fmt == "md":
+            return 200, ("__binary__", "text/markdown; charset=utf-8", code_map.markdown().encode("utf-8"),
+                         "Book Bible code map.md", "attachment")
+        return 200, code_map.web_data()
     if rest == ["pictures"] and method in ("GET", "POST"):  # 🖼 Make the rest of the pictures
         from . import book_pictures  # noqa: PLC0415
         if method == "GET":

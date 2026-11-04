@@ -584,6 +584,28 @@ the browser: `tests/campaign/ui/test_ui_continuity.py`):
     of characters not in this chapter: …", "story ledger — travel times: …"); it joins the chapter brief's `cut`
     list, so the run's ⚠️ "the instructions were too long" and the chapter page list it.
 
+## 🔢 Book Bible code map + 📖 "Fill the whole Book Bible" (2026-11, the author's design) — done
+
+- **Code map** (`akowe/code_map.py`, the one source of truth): code = KIND letter + SECTION digit (0–9) + FIELD letter
+  (`C1c` = a character's eyes); a whole section is its digit doubled (`C11` = all of Looks). Kinds B C P M I G S H W N
+  (N = running notes, mapped onto `story_ledger`'s real categories). 79 sections, 558 field codes; every one of the
+  480 binder field ids, every Forge field (characters + items / places / magic) and every Book Bible 🆕 value maps to
+  exactly one code (`audit()`, tested). `resolve` / `codes_for` / `expand` / `parse` / `format_code` translate binder
+  numbers (`5.2.8`), Forge keys (`character:eyes`), ledger categories and the old Forge letters (C P V A F M K R S E).
+  Generated: `docs/CODE_MAP.md` and `akowe/web/code-map.js` (`python -m akowe.code_map --write`; a test keeps them in
+  sync). Visible: Book Bible ⋯ View options → **Show codes** (each detail and section head), ❓ Help → **🔢 Code map**
+  (searchable table, ⬇ Markdown, 🖨 Print), `GET …/binder/codes[?format=md]`. Checks now name the code next to the
+  plain words: locked-detail contradictions ("Chapter 9: Mara Vell C1c (eyes) doesn't match — …"), Fill-from-the-book
+  questions, story-ledger flags (`(N3a)` …). Not done: the code map as an appendix of the Book Bible PDF (optional).
+- **Fill the whole Book Bible** (`akowe/whole_bible.py`, reuses the Forge proposals, `binder_fields` and the
+  story-details ledger — no new storage): ⚡ Make a book switch "Fill the whole Book Bible before writing" (run setting
+  `fill_bible`, off by default = just in time; step `bible` after the outline, before chapter one; answers approved
+  under the run consent; pause/cancel between calls; a resume never re-asks) and the 📖 At a glance button "📖 Fill in
+  the whole Book Bible" (`POST …/binder/fill_all`, a job with progress and Stop; answers are proposals that wait for
+  the author's ✔; says "N sections filled, M still empty (why)"). Batched by code-map section: ≤ 24 fields of a record
+  and ≤ 36 fields per AI call; a second round fills what the first made possible (new relationship rows). Never
+  touches text, 🔒 protected fields, read-only mirrors or the author's record fields (supplied canon, record controls …).
+
 ## Prevention pass (2026-10-27, "solve problems before they become problems")
 
 - [x] **Alfred's local AI connection:**

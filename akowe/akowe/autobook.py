@@ -103,6 +103,11 @@ STEPS = [
     ("premise", "B", "B01", "Premise", "What the book is about in one or two sentences."),
     ("plot", "B", "B03", "Main plot", "The main storyline built from the premise and the characters."),
     ("outline", "B", "B11", "Chapter outline", "The chapter-by-chapter plan."),
+    # 📖 optional (run setting fill_bible, off by default = the just-in-time way): whole_bible.py
+    ("bible", "A", None, "Fill the whole Book Bible", "Every empty section of every Book Bible page — characters, "
+     "places, items, magic, groups, the world and the story plan — filled from the plan before chapter one, in a few "
+     "batched AI calls and approved under your consent. Never replaces your own text. (Optional; never holds up the "
+     "book.)"),
     ("chapters", "C", "C02", "Write every chapter", "Context (C01) and prose (C02) for each chapter, reviewed and "
      "approved one by one."),
     ("planned", "C", "C02", "Planned details on the page", "Every chapter is checked: did the outline beats, the "
@@ -123,7 +128,7 @@ STEP_IDS = [s[0] for s in STEPS]
 # P14: steps that belong to a pipeline switch (switched off -> the step is skipped)
 STEP_FLAGS = {"characters": "voices", "looks": "voices", "world": "rules", "planned": "planned"}
 # P23 (Section 7c): steps that run only when the run's settings ask for them (step -> setting)
-STEP_OPTIONAL = {"beta": "beta_reader"}
+STEP_OPTIONAL = {"beta": "beta_reader", "bible": "fill_bible"}
 
 PROFILE_SCHEMA = {
     "type": "object", "additionalProperties": False,
@@ -902,7 +907,7 @@ class AutoBookService(_Runner):
             if not isinstance(pics, bool):
                 raise AkoweError("INVALID_INPUT", "/pictures", "pictures must be true or false", status="REJECTED")
             out["pictures"] = pics
-        for k in ("beta_reader", "my_style"):  # P23 / P25 (Section 7c): optional, off unless asked for
+        for k in ("beta_reader", "my_style", "fill_bible"):  # P23 / P25 / 📖: optional, off unless asked for
             v = body.get(k, False)
             if not isinstance(v, bool):
                 raise AkoweError("INVALID_INPUT", f"/{k}", f"{k} must be true or false", status="REJECTED")
@@ -3374,6 +3379,11 @@ class AutoBookService(_Runner):
         self.event(run, "report", f"Book report {rep['id']}: {st['message']}", step="report")
 
     # ------------------------------------------------------------------ Section 7c (P23 beta reader, P25 style)
+    def _s_bible(self, run, st):
+        """📖 Fill the whole Book Bible before chapter one (whole_bible.py) — only when the run asked for it."""
+        from . import whole_bible  # noqa: PLC0415
+        whole_bible.run_step(self, run, st)
+
     def _s_beta(self, run, st):
         from . import beta_reader  # noqa: PLC0415
         beta_reader.run_step(self, run, st, control=(RunPaused, RunCancelled))
