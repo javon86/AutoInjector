@@ -41,7 +41,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from . import CONTRACT_VERSION, __version__
+from . import CONTRACT_VERSION, __version__, ai_activity
 from . import plan_rules as pr
 from . import characters as chars_mod
 from . import providers as providers_mod
@@ -643,11 +643,21 @@ class AssistService:
                 raise AkoweError("RATE_LIMITED", "", "the AI stayed busy with other jobs for 10 minutes")
             job.status = "queued"
             job.phase = f"Waiting for {job.slot_pref or 'a free AI slot'} to finish another job"
+            ai_activity.note_queued(job.slot_pref)
             time.sleep(0.5)
 
     def _call_ai(self, job: Job, *, op_for_roles: str, task: str, schema: dict, context: dict,
                  protected: list) -> dict:
-        """One AI answer for a job; busy/unreachable answers wait and retry (S10) when retry is on."""
+        """One AI answer for a job; busy/unreachable answers wait and retry (S10) when retry is on. The ⚡ AI activity
+        strip shows it under what the caller said it is doing, else under the job's plain words (#116)."""
+        with ai_activity.doing_if_unsaid(ai_activity.job_words(job.kind, op_for_roles if job.kind == "assist"
+                                                               else job.op_id),
+                                         book_id=job.project_id, branch_id=job.branch_id):
+            return self._call_ai_retrying(job, op_for_roles=op_for_roles, task=task, schema=schema, context=context,
+                                          protected=protected)
+
+    def _call_ai_retrying(self, job: Job, *, op_for_roles: str, task: str, schema: dict, context: dict,
+                          protected: list) -> dict:
         def once():
             return self._call_ai_once(job, op_for_roles=op_for_roles, task=task, schema=schema, context=context,
                                       protected=protected)
@@ -1392,7 +1402,7 @@ class BibleSession:
 
     def _start(self):
         if self._worker is None or not self._worker.is_alive():
-            self._worker = threading.Thread(target=self._work, daemon=True, name=f"bible-{self.id}")
+            self._worker = threading.Thread(target=ai_activity.carry(self._work), daemon=True, name=f"bible-{self.id}")
             self._worker.start()
 
     def persist(self, status: str):

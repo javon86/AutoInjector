@@ -43,6 +43,7 @@ A plain-words record of every big change, newest first, so that if something bre
 
 | Date | PR | What changed |
 |---|---|---|
+| 2026-11-04 | #116 | ⚡ AI activity strip under the top bar: one row per AI at work — what it is doing in plain words ("Writing chapter 7"), its stage, a ticking time and "chapter 7 of 20"; ✔ Done for a few seconds, then it disappears |
 | 2026-11-04 | #114 | Story shapes: pick Three acts, Save the Cat, Hero's Journey or Seven-point; each beat is placed on a chapter, written, checked and fixed once if it did not land |
 | 2026-11-04 | #114 | ✍ Write alongside me: highlight a passage in a chapter and the AI continues, rewrites, describes more, expands or tightens it; you see a suggestion (with ⚠️ quick checks) and choose to use it as a new version |
 | 2026-11-04 | #114 | 🗳 Three-AI writers' room: each AI pitches a twist, they vote blind, you choose (also optional in ⚡ Make a book) |

@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from . import legacy
+from . import ai_activity, legacy
 from .errors import AkoweError
 from .store import Store, new_id, utcnow, write_private
 
@@ -1425,25 +1425,43 @@ class ProviderRegistry:
         reservations = self._reserve_cost(ctx, slot, needed, call)
         with self._lock:
             self._active[slot["slot_id"]] += 1
+        self._activity_start(ctx, slot)  # ⚡ #116: the AI activity strip (what each AI is doing right now)
         try:
             data, usage = self._with_retries(adapter, slot, system, user, schema, ctx.request.get("deadline"),
                                              request_id=ctx.request.get("request_id"), call=call)
         except AkoweError as exc:
+            ai_activity.call_ended(exc)
             # A timed-out paid call may still have run: keep the reservation until it reconciles (spec K).
             self._settle_cost(ctx, reservations, None, ambiguous=bool(exc.unresolved) and exc.code == "TIMEOUT")
             raise
-        except BaseException:
+        except BaseException as exc:
+            ai_activity.call_ended(exc)
             self._settle_cost(ctx, reservations, None)
             raise
         finally:
             with self._lock:
                 self._active[slot["slot_id"]] -= 1
+        ai_activity.call_ended(None)
         self._settle_cost(ctx, reservations, usage, slot=slot)
         resource = {"resource_kind": "AI", "ai_slot": slot["slot_id"], "adapter_id": slot["adapter_id"],
                     "model": usage.get("model", slot["model"]), "input_tokens": usage.get("input_tokens", 0),
                     "output_tokens": usage.get("output_tokens", 0), "context_tokens_estimate": needed,
                     "provider_request_id": usage.get("provider_request_id"), "at": utcnow()}
         return data, resource
+
+    def _activity_start(self, ctx, slot: dict):
+        """⚡ #116: tell the AI activity registry which AI now answers, for which book (titles only)."""
+        try:
+            pid = getattr(ctx, "project_id", None)
+            title = None
+            if pid and not ai_activity.current().get("book_title"):
+                p = self.store.project(pid)
+                title = p["name"] if p is not None else None
+            ai_activity.call_started(slot["slot_id"], slot_name(slot),
+                                     fallback=ai_activity.job_words(None, getattr(ctx, "op_id", None)),
+                                     book_id=pid, branch_id=getattr(ctx, "branch_id", None), book_title=title)
+        except Exception:  # noqa: BLE001 - a display hint never breaks a call
+            log.exception("AI activity")
 
     # ------------------------------------------------------------------ cost cap (K12 ledger)
     @staticmethod

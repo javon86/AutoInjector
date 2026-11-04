@@ -7883,6 +7883,141 @@ function initMakeBook() {
   refreshRunChip();
   setInterval(() => { if (document.visibilityState === 'visible' && !S.authFailed) refreshRunChip(); }, 5000);
 }
+/* ======================================================================= ⚡ AI activity strip (#116)
+ * Just under the top bar, on every page: one row per AI at work — which AI, what it does in plain words, its stage,
+ * a time that ticks every second and, for a ⚡ run, "chapter 7 of 20" with a small bar. A finished piece of work
+ * shows ✔ "Done: …" for a few seconds and fades. Nothing at work: the strip takes no space. The ⚡ chip in the top bar
+ * still says how far the whole run is (steps); the strip says what each AI is doing inside it. */
+const AIA = { rows: [], offset: 0, timer: null, tick: null, seen: new Map(), els: new Map(), busy: 0 };
+const AIA_STAGE_ICON = { queued: '⏳', answering: '✍', checking: '🔎', busy_wait: '⏸' };
+function aiaSlotNo(slot) { const m = /AI-(\d)/.exec(slot || ''); return m ? m[1] : '0'; }
+function aiaClock(s) {
+  s = Math.max(0, Math.floor(s));
+  const m = Math.floor(s / 60), r = s % 60;
+  return m >= 60 ? `${Math.floor(m / 60)} h ${m % 60} min` : m ? `${m} min ${String(r).padStart(2, '0')} s` : `${r} s`;
+}
+function aiaElapsed(r) {
+  if (r.state === 'done') return r.elapsed_s || 0;
+  const t = Date.parse(r.started_at);
+  return Number.isNaN(t) ? (r.elapsed_s || 0) : (Date.now() + AIA.offset - t) / 1000;
+}
+function aiaStage(r) {
+  if (r.state === 'done') return r.outcome_words || 'Done';
+  if (r.stage === 'busy_wait') {
+    const left = r.retry_at_ms ? Math.max(0, Math.ceil((r.retry_at_ms - Date.now()) / 1000)) : r.retry_in_s;
+    return `${r.stage_words} (${left == null ? 'asking again soon' : `${left} s left`})`;
+  }
+  if (r.stage === 'queued' && !r.slot) return 'Waiting for a free AI';
+  return r.stage_words || '';
+}
+function aiaWhere(r) {
+  if (r.chapter && r.chapters) return [`chapter ${r.chapter} of ${r.chapters}`, r.chapter, r.chapters];
+  if (r.step && r.steps) return [`step ${r.step} of ${r.steps}`, r.step, r.steps];
+  return null;
+}
+function aiaOpen(r, btn) {
+  if (r.run_id && r.kind === 'autobook') { openMakeBook(btn, { runId: r.run_id }); return; }
+  if (r.book_id) {
+    const rest = (r.link || 'book').split('/').filter(Boolean);
+    go(link('p', r.book_id, r.branch_id || 'main', ...rest));
+  }
+}
+function aiaRowEl(r) {
+  const li = h('li', { class: 'aia-item' });
+  const btn = h('button', { type: 'button', class: 'aia-row', 'data-testid': 'aia-row' });
+  btn.addEventListener('click', () => aiaOpen(AIA.rows.find(x => x.id === li.dataset.id) || r, btn));
+  btn.append(
+    h('span', { class: 'aia-who' }, h('span', { class: 'aia-dot', 'aria-hidden': 'true' }), h('span', { class: 'aia-ai' })),
+    h('span', { class: 'aia-task' }),
+    h('span', { class: 'aia-stage' }),
+    h('span', { class: 'aia-time', 'data-testid': 'aia-time' }),
+    h('span', { class: 'aia-where' }, h('span', { class: 'aia-where-t' }), h('span', { class: 'aia-bar', 'aria-hidden': 'true' }, h('span', { class: 'aia-fill' }))));
+  li.appendChild(btn);
+  return li;
+}
+function aiaFill(li, r) {
+  const btn = li.firstChild;
+  li.dataset.id = r.id;
+  li.dataset.state = r.state;
+  li.dataset.slot = aiaSlotNo(r.slot);
+  if (r.state === 'done') li.dataset.outcome = r.outcome || 'done'; else delete li.dataset.outcome;
+  li.classList.toggle('fading', r.state === 'done' && r.gone_ms != null && r.gone_ms - Date.now() < 1500);
+  const ai = r.ai || (r.slot ? r.slot : 'An AI');
+  btn.querySelector('.aia-ai').textContent = ai;
+  const task = r.state === 'done' ? `${r.icon || '✔'} ${r.done_text || r.task}` : r.task;
+  btn.querySelector('.aia-task').textContent = task + (r.book_title ? ` · “${r.book_title}”` : '');
+  const stage = btn.querySelector('.aia-stage');
+  stage.textContent = r.state === 'done' ? '' : `${AIA_STAGE_ICON[r.stage] || ''} ${aiaStage(r)}`.trim();
+  stage.hidden = r.state === 'done';
+  btn.querySelector('.aia-time').textContent = r.state === 'done' ? `took ${aiaClock(aiaElapsed(r))}` : aiaClock(aiaElapsed(r));
+  const where = aiaWhere(r);
+  const w = btn.querySelector('.aia-where');
+  w.hidden = !where;
+  if (where) {
+    w.querySelector('.aia-where-t').textContent = where[0];
+    w.querySelector('.aia-fill').style.width = `${Math.round(100 * Math.min(1, where[1] / where[2]))}%`;
+  }
+  const open = r.run_id && r.kind === 'autobook' ? 'open the book run window' : r.book_id ? 'open the book' : '';
+  // the name changes with the stage, never with the ticking seconds (a screen reader would read it every second)
+  const name = `${ai}: ${task}${r.book_title ? ` (book “${r.book_title}”)` : ''}${r.state === 'done' ? '' : ` — ${aiaStage(r).replace(/ \(\d+ s left\)$/, '')}`}${where ? `, ${where[0]}` : ''}${open ? `. Press to ${open}` : ''}`;
+  if (btn.getAttribute('aria-label') !== name) btn.setAttribute('aria-label', name);
+  if (open) btn.removeAttribute('aria-disabled'); else btn.setAttribute('aria-disabled', 'true');
+}
+function aiaRender() {
+  const box = $('#ai-activity'), ul = $('#aia-rows');
+  if (!box || !ul) return;
+  const keep = new Set(AIA.rows.map(r => r.id));
+  for (const [id, el] of AIA.els) if (!keep.has(id)) { el.remove(); AIA.els.delete(id); }
+  AIA.rows.forEach((r, i) => {
+    let el = AIA.els.get(r.id);
+    if (!el) { el = aiaRowEl(r); AIA.els.set(r.id, el); }
+    aiaFill(el, r);
+    // the server's order (live rows first, oldest first); a row is moved only when it must (keeps keyboard focus)
+    if (ul.children[i] !== el) ul.insertBefore(el, ul.children[i] || null);
+  });
+  box.hidden = !AIA.rows.length;
+  document.documentElement.classList.toggle('ai-busy', AIA.busy > 0);
+}
+function aiaAnnounce(rows) {
+  // start and finish only (never each stage or second): polite, in its own live region
+  const msgs = [];
+  for (const r of rows) {
+    const was = AIA.seen.get(r.id);
+    if (!was && r.state === 'live') msgs.push(`${r.ai || 'An AI'} started: ${r.task}`);
+    if (was === 'live' && r.state === 'done') msgs.push(`${r.ai || 'An AI'}: ${r.done_text || r.task}`);
+    AIA.seen.set(r.id, r.state);
+  }
+  const ids = new Set(rows.map(r => r.id));
+  for (const id of [...AIA.seen.keys()]) if (!ids.has(id)) AIA.seen.delete(id);
+  if (msgs.length) { const live = $('#aia-live'); if (live) { live.textContent = ''; setTimeout(() => { live.textContent = msgs.join('. '); }, 30); } }
+}
+async function pollActivity() {
+  clearTimeout(AIA.timer);
+  let wait = 4000;
+  if (S.token && !S.authFailed && document.visibilityState !== 'hidden') {
+    try {
+      const out = await api('GET', '/activity');
+      const now = Date.parse(out.now);
+      if (!Number.isNaN(now)) AIA.offset = now - Date.now();
+      const rows = (out.rows || []).map(r => Object.assign({}, r, {
+        retry_at_ms: r.retry_in_s != null ? Date.now() + r.retry_in_s * 1000 : null,
+        gone_ms: r.gone_in_s != null ? Date.now() + r.gone_in_s * 1000 : null }));
+      aiaAnnounce(rows);
+      const hadRun = AIA.rows.some(r => r.kind === 'autobook'), hasRun = rows.some(r => r.kind === 'autobook');
+      AIA.rows = rows; AIA.busy = out.busy || 0;
+      aiaRender();
+      if (hadRun !== hasRun) refreshRunChip();  // the ⚡ chip and the strip start and stop together
+      if (rows.length) wait = 1500;
+    } catch { /* the strip is a display: try again later */ }
+  }
+  AIA.timer = setTimeout(pollActivity, wait);
+}
+function initActivity() {
+  pollActivity();
+  // the time on each row ticks every second between two polls (no request)
+  AIA.tick = setInterval(() => { if (AIA.rows.length) for (const r of AIA.rows) { const el = AIA.els.get(r.id); if (el) aiaFill(el, r); } }, 1000);
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') pollActivity(); });
+}
 async function refreshRunChip() {
   if (!S.token || S.authFailed) return;
   let out;
@@ -7901,7 +8036,7 @@ async function refreshRunChip() {
     const done = live.steps.filter(s => s.state === 'done').length;
     lab.textContent = `AI working ${done}/${live.steps.length}`;
     btn.setAttribute('aria-label', `AI working on “${live.title || 'a new book'}”: ${done} of ${live.steps.length} steps done${live.status === 'waiting' ? ', waiting for an AI' : ''}. Open the progress window`);
-    btn.title = 'The AI is making a book. Click to watch, pause or cancel.';
+    btn.title = 'The AI is making a book. What each AI is doing right now shows just below the top bar. Click to watch, pause or cancel.';
   } else if (pend) {
     lab.textContent = 'AI needs you';
     btn.setAttribute('aria-label', `AI needs you${pend.title ? ` (“${pend.title}”)` : ''}: ${pend.state_words || 'the run is paused.'} Open the progress window`);
@@ -9551,6 +9686,7 @@ function boot() {
   initBibleButton();
   initNavigation();
   initMakeBook();
+  initActivity();
   initHealth();
   const toggle = $('#nav-toggle');
   toggle.addEventListener('click', () => {

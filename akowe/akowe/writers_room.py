@@ -45,11 +45,13 @@ from __future__ import annotations
 import json
 import logging
 import random
+import re
 import threading
 import time
 import uuid
 from datetime import datetime, timezone
 
+from . import ai_activity
 from .assist import Cancelled, Job, book_profile_brief
 from .book_path import BookPath, problems
 from .errors import AkoweError
@@ -415,6 +417,19 @@ def working_ais(app) -> list[dict]:
 
 
 # ====================================================================== asking the AIs
+def topic_words(target: dict) -> str:
+    """⚡ #116: 'a twist' / 'how chapter 7 ends' / 'a secret for Mara' / 'your question', for the AI activity strip."""
+    topic = (target or {}).get("topic")
+    if topic == "plot":
+        return "a twist"
+    if topic == "chapter":
+        m = re.search(r"\d+", str(target.get("label") or target.get("ask") or ""))
+        return f"how chapter {m.group(0)} ends" if m else "how a chapter ends"
+    if topic == "character":
+        return "a character's secret"
+    return "your question"
+
+
 def _failure(exc) -> dict:
     if isinstance(exc, AkoweError):
         e = exc.errors[0] if exc.errors else {}
@@ -439,8 +454,10 @@ def _ask_all(assist, principal, pid, branch, asks: list[dict], check, control: t
         if check is not None:
             job.check = check  # type: ignore[method-assign]
         try:
-            raw = assist._call_ai(job, op_for_roles="B03", task=a["task"], schema=a["schema"], context=a["context"],
-                                  protected=[])
+            with ai_activity.doing(a.get("label") or "Writers' room", book_id=pid,
+                                   branch_id=branch):  # ⚡ #116 the AI activity strip
+                raw = assist._call_ai(job, op_for_roles="B03", task=a["task"], schema=a["schema"],
+                                      context=a["context"], protected=[])
             results[i] = {"slot": a["slot"], "raw": raw, "model": job.model}
         except BaseException as exc:  # noqa: BLE001 - a failed answer is a row; control flow is raised later
             if isinstance(exc, (Cancelled, *control)) or getattr(exc, "control", False):
@@ -455,7 +472,8 @@ def _ask_all(assist, principal, pid, branch, asks: list[dict], check, control: t
                 assist.store.close()  # this thread's database connection
             except Exception:  # noqa: BLE001
                 pass
-    threads = [threading.Thread(target=one, args=(i, a), name=f"akowe-room-{a['slot']}", daemon=True)
+    threads = [threading.Thread(target=ai_activity.carry(one), args=(i, a), name=f"akowe-room-{a['slot']}",
+                                daemon=True)
                for i, a in enumerate(asks)]
     for t in threads:
         t.start()
@@ -542,6 +560,7 @@ class WritersRoomService:
             phase(f"{names.get(pick, pick)} is brainstorming")
             res = _ask_all(assist, principal, pid, branch, [{
                 "slot": pick, "task": SOLO_TASK.format(ask=target["ask"]), "schema": SOLO_SCHEMA,
+                "label": f"Brainstorm: three ideas for {topic_words(target)}",
                 "context": {"brief": ctx_brief, "already_pitched": room["already_pitched"]}}], check, control)[0]
             if res.get("status") == "failed":
                 room["pitches"] = [dict(res, name=names.get(pick, pick))]
@@ -565,7 +584,8 @@ class WritersRoomService:
         phase("Each AI is pitching an idea: " + ", ".join(a["name"] for a in working))
         pctx = {"brief": ctx_brief, "already_pitched": room["already_pitched"]}
         res = _ask_all(assist, principal, pid, branch, [{"slot": a["slot_id"], "task": PITCH_TASK.format(
-            ask=target["ask"]), "schema": PITCH_SCHEMA, "context": pctx} for a in working], check, control)
+            ask=target["ask"]), "schema": PITCH_SCHEMA, "context": pctx,
+            "label": f"Writers' room: pitching {topic_words(target)}"} for a in working], check, control)
         for a, r in zip(working, res):
             p = clean_pitch(r.get("raw")) if r.get("status") != "failed" else None
             if p:
@@ -595,7 +615,8 @@ class WritersRoomService:
             bal = ballot(lettered, v["slot"])
             asks.append({"slot": v["slot"], "task": VOTE_TASK.format(ask=target["ask"]),
                          "schema": vote_schema([b["letter"] for b in bal]),
-                         "context": {"brief": ctx_brief, "pitches": bal}})
+                         "context": {"brief": ctx_brief, "pitches": bal},
+                         "label": "Writers' room: ranking the other pitches (blind vote)"})
         res = _ask_all(assist, principal, pid, branch, asks, check, control)
         for v, a, r in zip(voters, asks, res):
             allowed = [b["letter"] for b in a["context"]["pitches"]]

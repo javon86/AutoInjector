@@ -35,6 +35,7 @@ import re
 import threading
 from datetime import datetime, timezone
 
+from . import ai_activity
 from . import story_ledger as sl_mod
 
 log = logging.getLogger("akowe.checkpoints")
@@ -452,10 +453,13 @@ def _run_one(svc, run: dict, st: dict, cp: dict, chapters: list[dict]) -> None:
         ctx = _context(svc, run, cp, part, texts, order, flags, rows_here)
         review = getattr(svc, "_review", None) or svc.app.review
         tok = review.work.begin(pid, "C02", f"Checkpoint after chapter {cp['after']}")
+        what = f"Checking {label} ({'final check' if cp.get('final') else 'checkpoint'}" + (
+            f", part {j + 1} of {k})" if k > 1 else ")")
         try:
-            raw = review.assist._call_ai(  # noqa: SLF001
-                job, op_for_roles="C02", task=CHECK_TASK.format(part=j + 1, parts=k, after=cp["after"])
-                + (needs_list.CHECK_NOTE if rows_here else ""), schema=CHECK_SCHEMA, context=ctx, protected=[])
+            with ai_activity.doing(what, done=what.replace("Checking", "Checked", 1)):  # ⚡ #116 the AI activity strip
+                raw = review.assist._call_ai(  # noqa: SLF001
+                    job, op_for_roles="C02", task=CHECK_TASK.format(part=j + 1, parts=k, after=cp["after"])
+                    + (needs_list.CHECK_NOTE if rows_here else ""), schema=CHECK_SCHEMA, context=ctx, protected=[])
         except Cancelled:
             raise
         except AkoweError as exc:
