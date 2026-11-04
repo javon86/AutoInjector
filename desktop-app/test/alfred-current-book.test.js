@@ -155,6 +155,35 @@ async function main() {
     await llm.close(); await llm2.close();
   }
 
+  console.log('\n== H25: pause / resume / cancel act on the open book\'s run, and ask when several books have one ==');
+  {
+    const two = (openPid, active) => {
+      const w = world({ openBook: openPid ? { project_id: openPid } : undefined });
+      const posted = [];
+      const base = w.ctx.akowe;
+      w.oldRun.status = 'running';  // the OLD book's run is the one Akọwe lists as active
+      w.ctx.akowe = async (m, p, body) => {
+        if (m === 'GET' && p === '/api/autobook') return { status: 200, json: { runs: [w.oldRun, w.newRun], active: active || [w.oldRun], current: w.oldRun } };
+        const mm = /^\/api\/autobook\/([^/]+)\/(pause|resume|cancel)$/.exec(p);
+        if (m === 'POST' && mm) { posted.push(`${mm[2]} ${mm[1]}`); return { status: 200, json: Object.assign({}, mm[1] === 'ab-new' ? w.newRun : w.oldRun, { status: mm[2] === 'pause' ? 'paused' : 'running' }) }; }
+        return base(m, p, body);
+      };
+      return { w, posted };
+    };
+    let t = two(NEW);
+    let r = await registry.get('resume_run').run({}, t.w.ctx);
+    assert(r.ok && t.posted.join() === 'resume ab-new', `the book open in Akọwe ("The Last Soundkeep") is resumed, not the other book's active run (posted: ${t.posted.join() || 'nothing'})`);
+    t = two(undefined);
+    r = await registry.get('pause_run').run({}, t.w.ctx);
+    assert(!r.ok && r.error === 'WHICH_RUN' && !t.posted.length && r.choices.length === 2 && /Which one do you mean/.test(r.message), `no open book and two runs: Alfred asks which (“${r.message}”), nothing is paused`);
+    r = await registry.get('pause_run').run({ project_id: OLD }, t.w.ctx);
+    assert(r.ok && t.posted.join() === 'pause ab-old', 'naming the book picks its run');
+    t = two(OLD, []);
+    t.w.oldRun.status = 'done';
+    r = await registry.get('cancel_run').run({}, t.w.ctx);
+    assert(!r.ok && r.error === 'NO_RUN' && !t.posted.length && /has no “Make a book for me” run going/.test(r.message), 'the open book has no run: nothing of another book is cancelled');
+  }
+
   console.log('\n== notices: an old paused run of an older book is not announced as news ==');
   {
     const w = world({ noCurrent: true });

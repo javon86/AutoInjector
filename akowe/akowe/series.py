@@ -954,10 +954,13 @@ def start_sequel(app, principal: str, pid: str, branch: str, body=None) -> dict:
                                "done, ✔ approve or dismiss the changes in 📖 Book Bible → 📚 Series, then press 📚 "
                                "Start a sequel again (or start without them)."}
         elif st["state"] == "waiting":
-            raise _err("APPROVAL_REQUIRED", "/skip_changes",
+            exc = _err("APPROVAL_REQUIRED", "/skip_changes",
                        f"{st['waiting']} change(s) found in this book are waiting for you (📖 Book Bible → 📚 Series). "
                        f"✔ Approve or dismiss them first, so book {n0 + 1} starts where this one ends — or start "
                        "the sequel without them (skip_changes: true).")
+            exc.errors[0]["fix"] = ("Open 📖 Book Bible → 📚 Series and ✔ approve or ✕ dismiss each change, then press "
+                                    "📚 Start a sequel again — or press “Start without them”.")
+            raise exc
     bible, sequel = sequel_bible(app, pid, branch, body)
     bid = app.opener.stash(bible)
     run_body = {"author_confirms": True, "from_bible": {"bible_id": bid}, "reuse_plan": False, "sequel": sequel}
