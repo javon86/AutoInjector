@@ -612,6 +612,11 @@ async function route() {
   if (S.authFailed) return;
   // Leaving the previous view: flush drafts, release blob URLs.
   for (const fn of S.leaveHooks.splice(0)) { try { fn(); } catch { /* keep going */ } }
+  // Stop pictures / clips of the page being left from still loading a blob URL that is about to be released
+  // (otherwise the browser logs ERR_FILE_NOT_FOUND for an image nobody will see).
+  for (const m of document.querySelectorAll('img[src^="blob:"], video[src^="blob:"], source[src^="blob:"]')) {
+    if (S.blobUrls.includes(m.getAttribute('src'))) m.removeAttribute('src');
+  }
   for (const u of S.blobUrls.splice(0)) URL.revokeObjectURL(u);
   closeNav();
   closePops();
@@ -5797,12 +5802,12 @@ function renderBook(holder, book, redraw) {
   if (S.scrollToStep) {  // a side-bar section page (Plan, Write, Export…) → that step of Book home
     const want = S.scrollToStep; S.scrollToStep = null;
     const el = holder.querySelector(`#step-${want}`);
-    if (el) setTimeout(() => { el.scrollIntoView({ block: 'start' }); el.focus({ preventScroll: true }); }, 0);
+    if (el) setTimeout(() => { scrollAndHold(el, holder); el.focus({ preventScroll: true }); }, 0);
   }
   if (S.scrollToFacts) {  // 🧭 Fix mistakes → 🔎 Timeline, trade facts and repeats
     S.scrollToFacts = false;
     const fc = holder.querySelector('[data-testid="book-facts"]');
-    if (fc) setTimeout(() => fc.scrollIntoView({ block: 'start' }), 0);
+    if (fc) setTimeout(() => scrollAndHold(fc, holder), 0);
     else toast('🔎 Timeline, trade facts and repeats appears at the bottom of this page once the characters and places are done.', 6000);
   }
   holder.appendChild(bookSection5Card(book));
@@ -8393,6 +8398,19 @@ function interiorBox(redraw) {
     } catch { box.appendChild(h('p', { class: 'small muted' }, 'The interior design choices could not be loaded.')); }
   })();
   return box;
+}
+
+// Scroll to a card and keep it in view while parts above it finish loading (e.g. the 🎨 interior preview on Book home
+// arrives a moment later and would otherwise push the card down). Stops after 4 s or as soon as the author scrolls.
+function scrollAndHold(el, holder) {
+  el.scrollIntoView({ block: 'start' });
+  if (typeof ResizeObserver === 'undefined' || !holder) return;
+  let done = false;
+  const stop = () => { if (done) return; done = true; ro.disconnect(); for (const ev of ['wheel', 'touchstart', 'keydown', 'mousedown']) window.removeEventListener(ev, stop, true); };
+  const ro = new ResizeObserver(() => { if (!done && el.isConnected) el.scrollIntoView({ block: 'start' }); });
+  ro.observe(holder);
+  for (const ev of ['wheel', 'touchstart', 'keydown', 'mousedown']) window.addEventListener(ev, stop, true);
+  setTimeout(stop, 4000);
 }
 
 function writeAllBox(book, redraw) {
