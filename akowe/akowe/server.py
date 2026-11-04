@@ -532,6 +532,9 @@ class App:
                 if rest and rest[0] == "cover":  # 🎨 B3 book covers (cover.py)
                     from . import cover  # noqa: PLC0415
                     return cover.route(self, method, rest[1:], query, body, principal, pid, branch, headers)
+                if rest and rest[0] == "launch":  # 🚀 launch kit: the store listing, checked against the canon
+                    from . import launch_kit  # noqa: PLC0415
+                    return launch_kit.route(self, method, rest[1:], query, body, principal, pid, branch)
                 if rest and rest[0] == "beta":  # 📖 P23 (Section 7c) beta reader
                     from . import beta_reader  # noqa: PLC0415
                     return beta_reader.route(self, method, rest, body, principal, pid, branch)

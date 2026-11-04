@@ -8,6 +8,7 @@ import * as S7C from './section7c.js';  // P23 beta reader + P25 your writing st
 import { forgeRoute } from './forge.js';  // 🗂 B5 Character Forge dossiers (characters, items, places, magic)
 import { viewPictures } from './pictures.js';  // 🖼 B3 chapter/scene pictures and the map
 import { viewTrailer } from './trailer.js';  // 🎞 B2 the book trailer (AutoInjector 🎬 Video)
+import { viewLaunch } from './launch.js';  // 🚀 the launch kit (store listing, checked against the canon)
 import { viewCover } from './cover.js';  // 🎨 B3 book covers
 import { viewBinder } from './binder.js';  // 📖 Book Bible binder (the author's template studio design)
 import { CODE_MAP, CODE_MAP_MD } from './code-map.js';  // 🔢 the Book Bible code map (code_map.py)
@@ -670,6 +671,7 @@ async function pickView(parts) {
     if (rest[0] === 'pictures') return m => viewPictures(m, forgeUI());  // 🖼 B3
     if (rest[0] === 'trailer') return m => viewTrailer(m, Object.assign(forgeUI(), { fmtClock }));  // 🎞 B2
     if (rest[0] === 'cover') return m => viewCover(m, forgeUI());  // 🎨 B3 cover designer
+    if (rest[0] === 'launch') return m => viewLaunch(m, Object.assign(forgeUI(), { badge, quickSave }));  // 🚀 launch kit
     if (rest[0] === 'bible' || rest[0] === 'binder') return m => viewBinder(m, forgeUI(), rest.slice(1));  // 📖 Book Bible binder (…/binder: the 🆕 fields' edit route)
     if (rest[0] === 'manifest') return viewManifest;
     if (rest[0] === 'activity') return viewActivity;
@@ -798,7 +800,7 @@ const SIDE_ITEMS = [
   { id: 'export', icon: '📤', label: 'Export', path: ['export'], tip: 'PDF, EPUB and Word files of your book' },
 ];
 const SIDE_OF = { '': 'home', book: 'home', people: 'people', forge: 'people', world: 'people', plan: 'plan', write: 'write', scenes: 'write',
-  bible: 'bible', binder: 'bible', art: 'art', pictures: 'art', cover: 'art', trailer: 'trailer', fix: 'fix', continuity: 'fix', report: 'fix', export: 'export' };
+  bible: 'bible', binder: 'bible', art: 'art', pictures: 'art', cover: 'art', trailer: 'trailer', launch: 'export', fix: 'fix', continuity: 'fix', report: 'fix', export: 'export' };
 function renderNav() {
   const nav = clear($('#sidenav'));
   const parts = parseRoute();
@@ -1147,6 +1149,7 @@ async function viewLanding(main, kind) {
     add({ icon: '🧩', label: 'Put the book together', line: 'Chapter order, one manuscript and the page layout.', href: plink('book'), onclick: toStep('assemble'), state: stepBadge(book, 'assemble') });
     add({ icon: '📦', label: 'Export my book', line: 'Makes the PDF, EPUB and Word files you can download.', href: plink('book'), onclick: toStep('export'), state: stepBadge(book, 'export'), primary: true });
     add({ icon: '🔎', label: 'Check the book', line: 'Checks that every chapter is there once and in order.', href: plink('book'), onclick: toStep('check'), state: stepBadge(book, 'check') });
+    add({ icon: '🚀', label: 'Launch kit', line: 'Blurbs, keywords, categories and more to put your book in a store, checked against your book.', href: plink('launch'), testid: 'land-launch' });
     add({ icon: '📚', label: 'My finished books', line: 'All your exported books, ready to download.', href: '#/shelf' });
     add({ icon: '💾', label: 'Save the book', line: 'Saves this book into its folder in your books folder.', onclick: ev => quickSave(ev.currentTarget) });
   }
