@@ -136,6 +136,12 @@ bridge to your home Wi-Fi, behind its key.
 - **Canon:** the approved records together are the book's **canon**, the official truth everything else must match.
 - **Out of date (stale):** if something a record was built from changes, Akọwe marks that record out of date.
 - **AI slots:** AI-1, AI-2 and AI-3. By default they are Claude, ChatGPT and Gemini, through the bridge.
+- **⚡ AI activity:** while any AI works for Akọwe, a slim strip under the top bar shows, on every page, one row per
+  AI: which AI, what it is doing in plain words ("Writing chapter 7", "Reviewing chapter 7", "Writers' room: pitching
+  a twist"), for which book, where it is (waiting for the AI, answering, checking the answer, or waiting after a busy
+  site with the seconds left), how long so far, and in a ⚡ run "chapter 7 of 20" with a small bar. When it finishes
+  the row says ✔ Done (or ✖ / ⏳ / ⚠) for a few seconds and goes; with nothing at work the strip is gone. Click a row
+  to open the run or the book. Code: `akowe/akowe/ai_activity.py` (every AI call passes one place that reports to it).
 - **✍ Write alongside me:** on a chapter's page, highlight a passage (or put the cursor) and press ✍ Continue from
   here, 🔁 Rewrite (with an optional note, such as "more tense"), 🎨 Describe more, ➕ Expand or ✂ Tighten. The AI
   (by default the one that wrote the chapter) gets the text around the passage, the chapter's plan and needs list, the

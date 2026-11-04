@@ -51,6 +51,7 @@ import uuid
 from collections import Counter
 from datetime import datetime, timezone
 
+from . import ai_activity
 from . import ai_check, calibration
 from . import lengths as lengths_mod
 from . import prose_audit
@@ -654,8 +655,10 @@ class ReportService:
         t0 = time.monotonic()
         task = REVIEW_TASK.format(rubric=rubric)
         try:
-            raw = assist._call_ai(job, op_for_roles="C02", task=task,
-                                  schema=review_schema(DIM_KEYS), context=ctx, protected=[])
+            with ai_activity.doing("Book report: reading the whole book", done="Book report: read the book",
+                                   link="report"):  # ⚡ #116 the AI activity strip
+                raw = assist._call_ai(job, op_for_roles="C02", task=task,
+                                      schema=review_schema(DIM_KEYS), context=ctx, protected=[])
         except Cancelled:
             raise
         except AkoweError as exc:

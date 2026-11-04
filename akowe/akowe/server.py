@@ -25,6 +25,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
 from . import CLOSURE_REVISION, CONTRACT_VERSION, __version__
+from . import ai_activity as ai_activity_mod
 from . import ai_check, calibration, diagnostics, journal, legacy
 from .assist import AssistService, supports as assist_supports
 from .autobook import AutoBookService, WriteAllService
@@ -177,6 +178,24 @@ class App:
         if self.interrupted:  # runs that were working when Akọwe stopped: save how far they got
             threading.Thread(target=self.saver.after_start, name="akowe-save-interrupted", daemon=True).start()
         self.saver.start_periodic()  # 💾 every 10 minutes: save the books that changed (quietly; auto-save setting)
+
+    # ------------------------------------------------------------------ ⚡ #116 what the AIs are doing right now
+    def ai_activity(self, principal: str) -> dict:
+        """The AI activity strip: one row per AI at work (and each finished row for a few seconds). Rows of books this
+        author cannot open are left out; no prompt or answer text is ever in it."""
+        snap = ai_activity_mod.snapshot()
+        rows = []
+        for r in snap["rows"]:
+            pid = r.get("book_id")
+            if pid:
+                try:
+                    if self.store.project(pid) is None or not self.store.has_project_access(principal, pid):
+                        continue
+                except Exception:  # noqa: BLE001 - a display: a row we cannot check is left out
+                    continue
+            rows.append(r)
+        return {"rows": rows, "busy": sum(1 for r in rows if r["state"] == "live"), "now": snap["now"],
+                "keep_s": snap["keep_s"]}
 
     # ------------------------------------------------------------------ 💾/📂 which computer asks
     def set_client(self, host: str | None):
@@ -401,6 +420,8 @@ class App:
             # Which AIs work right now (bridge v1.2 state, cached 15 s): {slots: [{slot_id, name, state, word, ...}]}
             prov = self.engine.providers
             return 200, {"slots": [prov.slot_status(s) for s in prov.ai_slots()]}
+        if parts == ["activity"] and method == "GET":
+            return 200, self.ai_activity(principal)
         if parts == ["ai-check"] and method in ("GET", "POST"):
             # P37.5 before a run: which AIs work, and for each one that does not: what is wrong and how to fix it.
             # POST {probe: true} first asks AutoInjector to check in with each AI ("🔁 I fixed it — check again").

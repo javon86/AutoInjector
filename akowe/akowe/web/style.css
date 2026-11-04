@@ -1784,3 +1784,43 @@ html[data-mode="simple"] .topbar .health-btn.adv-only[data-state="problem"] { di
 .interior-page { margin: 0; flex: 0 1 300px; max-width: 300px; box-shadow: 0 1px 4px rgba(0, 0, 0, .35); background: #fffdf8; }
 .interior-page svg, .interior-page img { display: block; width: 100%; height: auto; }
 .interior-page figcaption { background: #fffdf8; color: #6b6455; text-align: center; padding: 2px 0; }
+
+/* ---------------------------------------------------------------- ⚡ AI activity strip (#116)
+   Under the top bar (inside it, so it stays with it): one row per AI at work. Hidden — no space — when nothing works. */
+.ai-activity { flex: 1 0 100%; order: 99; margin: 4px calc(-1 * var(--gutter)) -8px; padding: 4px var(--gutter) 6px;
+  border-top: 1px solid var(--border); background: var(--ai-soft); min-width: 0; }
+.aia-h { font-size: .78rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--ai);
+  margin: 0 0 2px; }
+.aia-sub { text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--text-muted); }
+.aia-rows { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; }
+.aia-item { min-width: 0; transition: opacity 1.2s ease; }
+.aia-item.fading { opacity: .35; }
+.aia-row { width: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 2px 12px; text-align: left;
+  padding: 4px 8px; min-height: 0; border: 1px solid transparent; border-radius: var(--radius); background: var(--surface);
+  color: var(--text); font: inherit; font-size: .9rem; cursor: pointer; }
+.aia-row:hover { border-color: var(--ai); }
+.aia-row[aria-disabled="true"] { cursor: default; }
+.aia-who { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; white-space: nowrap; }
+.aia-dot { width: .7em; height: .7em; border-radius: 50%; background: var(--ai); flex: none; }
+.aia-item[data-slot="1"] .aia-dot { background: var(--set-F); }
+.aia-item[data-slot="2"] .aia-dot { background: var(--set-G); }
+.aia-item[data-slot="3"] .aia-dot { background: var(--set-C); }
+.ai-busy .aia-item[data-state="live"] .aia-dot { animation: bf-pulse 1.6s ease-in-out infinite; }
+.aia-task { flex: 1 1 16rem; min-width: 0; overflow-wrap: anywhere; }
+.aia-stage { color: var(--text-muted); white-space: nowrap; }
+.aia-time { font-variant-numeric: tabular-nums; color: var(--text-muted); white-space: nowrap; }
+.aia-where { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; font-size: .85rem; }
+.aia-bar { display: inline-block; width: 70px; height: 6px; border-radius: 3px; background: var(--border); overflow: hidden; }
+.aia-fill { display: block; height: 100%; width: 0; background: var(--ai); transition: width .4s ease; }
+.aia-item[data-state="done"] .aia-row { background: transparent; }
+.aia-item[data-outcome="done"] .aia-task { color: var(--ok); font-weight: 600; }
+.aia-item[data-outcome="failed"] .aia-task { color: var(--bad); font-weight: 600; }
+.aia-item[data-outcome="timeout"] .aia-task, .aia-item[data-outcome="needs_you"] .aia-task { color: var(--warn); font-weight: 600; }
+@media (max-width: 800px) {
+  .ai-activity { margin-bottom: -8px; }
+  .aia-sub { display: none; }
+  .aia-row { gap: 2px 8px; font-size: .85rem; }
+  .aia-task { flex-basis: 100%; order: 2; }
+  .aia-stage, .aia-time, .aia-where { order: 3; }
+}
+@media (prefers-reduced-motion: reduce) { .aia-item, .aia-fill { transition: none; } .aia-dot { animation: none !important; } }
