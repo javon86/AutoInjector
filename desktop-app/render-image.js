@@ -1,7 +1,8 @@
 'use strict';
 // render-image.js — POST /render/image on the service bridge: turn an SVG (or a small self-contained HTML page)
 // into a JPEG or PNG with Chromium, for programs that have no image library of their own (Akọwe makes its ebook
-// cover JPG and the Word copy of its map this way — it has no Pillow at runtime).
+// cover JPG, the Word copy of its map and its 📣 book mockups and ads this way — it has no Pillow at runtime).
+// A PNG of an SVG with no "background" keeps its see-through parts (transparent window + no default background).
 //
 // How: a hidden, OFFSCREEN BrowserWindow in an in-memory session of its own, JavaScript off, sandboxed; the page is
 // written to a private temp file and EVERY request except that file and data: URIs is cancelled (no network, no
@@ -86,9 +87,11 @@ function createRenderer(deps) {
     let timer = null;
     const t0 = Date.now();
     let gaveUp = false;
+    // a PNG without a background colour keeps its see-through parts (📣 Akọwe's book mockups); a JPEG cannot
+    const transparent = fmt === 'png' && !body.html && (!body.background || /^#(?:[0-9a-f]{3}0|[0-9a-f]{6}00)$/i.test(body.background));
     try {
       const work = (async () => {
-        const w = await makeWindow({ width: body.width, height: body.height, allow });
+        const w = await makeWindow({ width: body.width, height: body.height, allow, transparent });
         // A window that only arrives after the time ran out: `finally` below has already run with win === null,
         // so it would never be destroyed — destroy it here. (A late rejection of `work` is handled: Promise.race
         // subscribes to it.)
@@ -128,7 +131,7 @@ function createRenderer(deps) {
 
 /** The real window for main.js: hidden, offscreen, sandboxed, JS off, private in-memory session, no network. */
 function electronWindowFactory(electron) {
-  return async function makeWindow({ width, height, allow }) {
+  return async function makeWindow({ width, height, allow, transparent }) {
     const { BrowserWindow, session } = electron;
     // one in-memory session for every render (renders run one at a time; the filter is replaced each time)
     const ses = session.fromPartition('render-image', { cache: false });
@@ -136,7 +139,7 @@ function electronWindowFactory(electron) {
     try { ses.setPermissionRequestHandler((_wc, _p, cb) => cb(false)); } catch (_) {}
     const win = new BrowserWindow({
       show: false, width, height, useContentSize: true, frame: false, resizable: false, enableLargerThanScreen: true,
-      paintWhenInitiallyHidden: true,
+      paintWhenInitiallyHidden: true, transparent: !!transparent, backgroundColor: transparent ? '#00000000' : '#ffffff',
       webPreferences: { offscreen: true, session: ses, javascript: false, sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true, images: true, spellcheck: false },
     });
     win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
@@ -150,6 +153,8 @@ function electronWindowFactory(electron) {
         await win.loadURL('about:blank');
         dbg.attach('1.3');
         await dbg.sendCommand('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+        // see-through PNG: no white page behind the picture (its own transparent background shows through)
+        if (transparent) await dbg.sendCommand('Emulation.setDefaultBackgroundColorOverride', { color: { r: 0, g: 0, b: 0, a: 0 } });
         await win.loadURL(url);
         // let layout + image decoding (data: URIs decode asynchronously) settle
         await new Promise((r) => setTimeout(r, 150));

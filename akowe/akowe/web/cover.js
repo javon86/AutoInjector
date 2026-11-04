@@ -28,7 +28,7 @@ export async function viewCover(main, x) {
   const wrap = h('div', { class: 'cover', 'data-testid': 'cover-page' });
   main.appendChild(h('div', { class: 'page-head' }, h('div', null,
     x.crumbs(['Your books', '#/'], [S.project.name, plink()], 'Cover'), h('h1', null, '🎨 Cover')),
-  h('div', { class: 'row' }, x.infoTip('Cover designer',
+  h('div', { class: 'row' }, h('a', { class: 'btn', href: plink('marketing'), 'data-testid': 'cover-marketing-link' }, '📣 Mockups & ads'), x.infoTip('Cover designer',
     h('p', null, 'Pick a template, type the texts, add a picture (made by Stable Diffusion or ChatGPT through AutoInjector, or your own) — or none for a typographic cover.'),
     h('p', null, 'The ebook cover is the front alone. The print cover is the full wrap for a paperback: back, spine and front with 0.125 in bleed. The spine width comes from the page count and the paper (white 0.002252 in per page, cream 0.0025 in per page, as Amazon KDP measures it).'),
     h('p', null, 'Text stays 0.375 in inside every edge and fold. Spine text needs at least 100 pages. The back cover keeps a blank white 2 × 1.2 in box at the bottom right for the barcode.')))));
