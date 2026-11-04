@@ -125,7 +125,7 @@ The same picture in plain text:
 - **🔒 Character locks:** a saved recipe (a LoRA, trigger words, fixed looks, or a portrait) that keeps one
   character's face the same in every picture. In a ⚡ run, each character's portrait becomes its lock.
 - Pictures are saved in `stuff and thing/images/`, each with a `.json` file of the settings that made it.
-- **Tested for real:** pictures have been used on your PC.
+- **Tested for real:** pictures have been made with Forge on your PC.
 
 ### 🎬 Video
 
@@ -168,7 +168,8 @@ touched. It works in the background, so you can close the window. First, AutoInj
 to a minute), so the run knows which AIs work.
 
 1. **Safety backup** of all your books.
-2. **Invent the book:** title, pen name, genre, readers, tone and the idea.
+2. **Invent the book:** title, pen name, genre, readers, tone and the idea. The point of view (first or third
+   person) and the tense (past or present) are fixed here too, from your choice or from the genre.
 3. **Characters and places:** drafted, reviewed, approved. The main character (★) is guaranteed to exist.
 4. **Character sheets and voices:** what each character wants, needs, fears and hides, and a **voice card** for
    how each one talks.
@@ -181,17 +182,24 @@ to a minute), so the run knows which AIs work.
    - **Just-in-time details:** if the chapter has a fight, the fighters' style and weapon are decided now. A new
      place gets its rooms, sounds and smells. Once a chapter uses a detail, it is **locked**.
    - **Scene cards:** the writer plans the scenes. A different AI checks them.
-   - **Writing:** the writer gets the plan, the voice cards, the locked details, the end of the last chapter and
-     the story so far.
+   - **Writing:** the writer gets the plan, the voice cards, the locked details, the end of the last chapter, the
+     story so far, and your promises to the reader: content limits, themes, the central question, the point of
+     view and tense. If the instructions are too long, the least important parts are cut first, and the run shows
+     ⚠️ with exactly what was cut.
    - **Akọwe's own checks**, then an **independent reviewer** (a different AI). If it asks for changes, the writer
-     fixes the draft, at most twice.
+     fixes the draft, at most twice. A chapter that breaks your content limits, or switches person or tense, is
+     always sent back.
    - **The editor** reads it for craft and asks for rewrites of exact passages, at most two rounds. A rewrite is
      kept only if nothing got worse.
    - **Planned-to-page check:** did the plan really reach the page? At most one targeted fix.
    - **Approved** under your run consent. Then the **running notes (ledgers)** are updated: injuries, belongings,
      who is where, the day and season, who knows which secret, names, money.
    - **Every 5 chapters** (you can change this), at each act's end, and after the last chapter: a **continuity
-     checkpoint** reads those chapters in full and fixes small mistakes.
+     checkpoint** reads those chapters in full and fixes small mistakes. It also looks for side characters who
+     vanished and story threads that should have moved by now.
+   - **The ending check**, after the last chapter: does every setup pay off, does every named character get an
+     ending, does the main character change, does the ending answer the book's question? What is still open is
+     fixed in the last chapter(s) (one round), checked again, and anything left is listed for you.
 10. **Planned details on the page:** a whole-book report.
 11. **Book format**, **put the book together**, **export PDF, EPUB and Word** (each file is re-read to check it).
 12. **Content check** (every chapter once, in order) and the **book report**. An optional **beta reader** step
@@ -203,6 +211,8 @@ to a minute), so the run knows which AIs work.
   - **✔ Approve anyway:** your own approval.
   - **✏️ Edit it myself**, then Continue.
   - **🔁 Try again:** two more AI fixes.
+- Only one AI is working, so nobody else could check a draft. You choose: **✔ Approve it yourself** (read it
+  first), or **🔁 Try again** once another AI is connected.
 - An AI did not answer in time.
 - A checkpoint found a problem it could not fix safely (once per checkpoint).
 - Akọwe was closed mid-run. The run shows **Interrupted** and **▶ Resume** carries on.
@@ -216,25 +226,54 @@ to a minute), so the run knows which AIs work.
 |---|---|---|
 | Akọwe's own checks | missing parts, wrong IDs, an outline without the main character | every draft |
 | Independent reviewer | a draft that does not fit the plan or the canon | every draft |
+| No self-approval | an AI approving its own writing, or approving with no reason | every approval |
+| Your promises (content limits, themes, question) | a chapter showing what you ruled out | writer, reviewer and editor, every chapter |
+| Point of view and tense | a chapter that slips into another person or tense | every chapter |
 | Editor rubric | told-not-shown feelings, flat side characters, same-sounding voices, no stakes | every chapter |
 | Pattern check (no AI) | repeated habits ("went very still"), lists of three, same-length sentences | before the editor |
 | Voice cards | characters who all talk alike | writing and editing |
 | Locked details | eyes, hair, weapon or weapon hand changing | after each chapter |
 | Running notes (ledgers) | a healed limp, a lost knife drawn again, the dead speaking, misspelled names, wrong travel times | after each chapter |
+| Hand-edit follow-through | later chapters still built on what you edited away | when a changed chapter is approved again |
 | Continuity checkpoints | anything the notes missed, read in full | every N chapters and at the end |
+| Ending check | setups that never pay off, vanished side characters, an ending that misses the question | at checkpoints (light) and after the last chapter |
 | Protagonist guarantee | a book that loses its main character | before the outline, the chapters and "done" |
+| Cut instructions ⚠️ | the writer silently missing facts, rules or voice cards | every chapter |
 | Final checks | chapters missing or doubled; scores and weaknesses; broken files | at the end |
 
-**Honest limits (from [`HOLES_2026-11.md`](HOLES_2026-11.md), checked against the code):**
+A few of these need more words:
 
-- **Content limits** ("no graphic violence") are stored in the Book Bible. They do **not** reach the writer yet.
-- **Self-approval:** Akọwe never approves anything outside a run you started, or the auto-approve setting you
-  turned on. But when only **one** AI works, that AI reviews its own writing. The run marks this with ⚠️ *"Reviews
-  are not independent"* and still goes on.
-- **Approve anyway** skips the remaining editor and plan checks for that draft.
-- A hand edit to a chapter is not yet passed on to later chapters.
-- Viewpoint and tense are not fixed unless you set a style.
-- **✍ Write all chapters**, used outside a ⚡ run, does not yet run the just-in-time details or the checkpoints.
+- **No self-approval.** An AI's "approve" only approves a draft when a *different* AI reviewed it, gave at least
+  one reason, and was at least 60% sure. Otherwise the draft waits for you. Two panes on the same website count
+  as the same AI.
+- **Approved without checks.** "Approve anyway", "approve it yourself" and the standing auto-approve skip some
+  checks. Each such approval is written down. The editor and the plan check still run as notes. The book report
+  and a ⚠️ *Needs a look* card on 🏠 Book home list these chapters.
+- **Hand edits.** When you change a chapter, what Akọwe read from the old text is set aside: its running notes,
+  the notes of every later chapter (they were built on top of it), its lines in the story so far, and any
+  checkpoint that read it. They are read again from the new text, and
+  each later chapter gets a flag: *"Chapter 5 changed after chapter 6 was written — check chapter 6."*
+- **Book report.** For a long book the report says when it only read a sample. **📖 Read the whole book** reads
+  every part.
+
+**Other things that are kept in step:** a sequel first finds what changed in book 1. Pictures and face locks
+are marked out of date when the description they came from changes, and so is the trailer when the book or the
+looks change. The blurb and cover are compared with the book, and the cover follows a new title. Accented letters
+(ọ, ẹ, Greek…) are checked when a chapter is approved and get a font that has them; the files use the book's
+language. If one file fails to save, the old one is renamed "(older version)" so it is never mistaken for the new
+one. Alfred acts on the run of the book that is open. Replies that look cut off are not taken as finished.
+
+**Honest limits (checked against the code):**
+
+- **✍ Write all chapters**, used outside a ⚡ run, still skips the just-in-time details, the checkpoints and the
+  ending check. It also plans missing scene cards without the second AI's check.
+- The point-of-view and tense check counts pronouns and verbs outside dialogue. It catches a clear switch, not a
+  subtle one.
+- A rename like "Bram" → "Brannock" (not a near-miss spelling) is left to the checkpoint AI. Akọwe's own keyword
+  reading is English only.
+- Locked-detail checks cover colours, weapons and the weapon hand only.
+- Everything here has been tested with stand-in AIs. Real books with the real websites are the real test.
+- Video is not yet confirmed on your RTX 5070 Ti (see 🎬 Video above).
 
 ## 5. The Book Bible and series
 

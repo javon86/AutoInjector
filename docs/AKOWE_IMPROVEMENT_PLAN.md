@@ -694,8 +694,8 @@ the browser: `tests/campaign/ui/test_ui_continuity.py`):
   6. **Voice:** a damaged voice file is detected, with a one-click re-download. Partial downloads are no longer kept.
   7. **Log export:** "Everything" needs a second confirmation that says what it includes, and Alfred can never "always allow" it.
 
-- **Stable Diffusion (B1) — not yet tried on a real GPU:** everything was tested against fake Forge/ComfyUI
-  servers, fake processes and a fake download server. First real run on the user's PC: Stability Matrix package
+- **Stable Diffusion (B1) — used on the user's PC (Forge; see the 2026-10-25 evening log above), the rest not yet tried for real:** at first everything was tested against fake Forge/ComfyUI
+  servers, fake processes and a fake download server. Still to try on the PC: Stability Matrix package
   start (venv + launch options + `--api`), ComfyUI portable install/extract (needs 7-Zip or a .7z-capable Windows
   `tar`), Flux/SD3 UNet-only models (not supported by the built-in ComfyUI graph). See
   `desktop-app/STABLE_DIFFUSION_PLAN.md` → "Problems / limits".
