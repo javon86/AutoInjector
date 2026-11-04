@@ -26,8 +26,8 @@ export function checkNowBox(c, pid, branch = 'main', { testid = 'check-now', com
   const out = h('div', { 'data-testid': `${testid}-result`, 'aria-live': 'polite' });
   const el = h('section', { class: compact ? 'cn-box' : 'card cn-box', 'data-testid': `${testid}-box` },
     compact ? null : h('h2', null, '🔎 Check consistency now'),
-    h('p', { class: 'small muted' }, 'Every working AI reads the chapters in full, looks for mistakes and drift (injuries, belongings, names, days, characters acting out of character, chapters straying from the plan) and reviews them; what two agree on is fixed. During a ⚡ run it waits for the chapter being written. Outside a run nothing approved is changed: the fixes are offered for you to use.'),
-    h('div', { class: 'row' }, h('label', { for: `${id}-what` }, 'Check'), what, span, btn), why, out);
+    h('p', { class: 'small muted' }, 'Every working AI reads the chapters and looks for mistakes and drift: injuries, belongings, names, days, characters acting out of character, chapters straying from the plan. What two AIs agree on is fixed. Nothing approved changes outside a ⚡ run: you get the fixes to use or not.'),
+    h('div', { class: 'row cn-row' }, h('label', { for: `${id}-what` }, 'Check'), what, span, btn), why, out);
   let timer = null;
   let st = null;
   const show = s => {
@@ -44,13 +44,15 @@ export function checkNowBox(c, pid, branch = 'main', { testid = 'check-now', com
       out.appendChild(h('p', { class: 'small' }, h('strong', null, l.line)));
       const sr = l.stretch;
       if (sr) {
-        out.appendChild(h('h3', null, `📖 ${sr.title}`));
-        out.appendChild(h('ul', { class: 'small' }, (sr.scores || []).map(x => h('li', null, `${x.label}: ${x.average}/10 (`,
+        // the review of those chapters: folded under one line (the page stays short; one click shows it all)
+        const rev = h('details', { class: 'cn-review', 'data-testid': `${testid}-review` }, h('summary', null, `📖 ${sr.title}: what each AI thought`));
+        rev.appendChild(h('ul', { class: 'small' }, (sr.scores || []).map(x => h('li', null, `${x.label}: ${x.average}/10 (`,
           Object.entries(x.by || {}).map(([n, v]) => `${n} ${v}`).join(', '), x.agree ? ')' : ' — they disagree)'))));
-        if ((sr.agree || []).length) out.appendChild(h('ul', { class: 'small' }, sr.agree.map(a => h('li', null,
+        if ((sr.agree || []).length) rev.appendChild(h('ul', { class: 'small' }, sr.agree.map(a => h('li', null,
           `${a.names.join(' and ')} agree ${a.kind === 'not_working' ? 'this is not working' : 'this works'}: ${a.point}`))));
-        out.appendChild(h('ul', { class: 'small muted' }, (sr.views || []).map(v => h('li', null, h('strong', null, `${v.name}: `),
+        rev.appendChild(h('ul', { class: 'small muted' }, (sr.views || []).map(v => h('li', null, h('strong', null, `${v.name}: `),
           [v.pacing, v.arc, v.drift].filter(Boolean).join(' ')))));
+        out.appendChild(rev);
       }
       const probs = l.problems || [];
       if (probs.length) out.appendChild(h('ul', { class: 'small' }, probs.map(p => h('li', null, h('strong', null, `Chapter ${p.number}: `), p.problem,

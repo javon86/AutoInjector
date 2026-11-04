@@ -37,7 +37,7 @@ export async function viewMarketing(main, x) {
     return t ? Object.assign({}, p, { title: t[0], what: t[1], action: ['IMAGE_BRIDGE_UNREACHABLE', 'IMAGE_BRIDGE_KEY'].includes(p.code) ? 'settings' : 'retry' }) : p;
   };
   main.appendChild(h('div', { class: 'page-head' }, h('div', null,
-    x.crumbs(['Your books', '#/'], [S.project.name, plink()], 'Mockups & ads'),
+    x.crumbs(['My books', '#/'], [S.project.name, plink('book')], ['Pictures & cover', plink('art')], 'Mockups & ads'),
     h('h1', null, '📣 Mockups & ads')),
   h('div', { class: 'row' }, h('a', { class: 'btn', href: plink('cover'), 'data-testid': 'mk-cover-link' }, '🎨 Cover'),
     x.infoTip('Mockups & ads',
@@ -130,7 +130,7 @@ export async function viewMarketing(main, x) {
       h('h2', { id: 'mk-act-h' }, '🖨 Make them'),
       h('p', { class: 'small muted' }, 'AutoInjector draws the pictures (a few seconds each) and joins the clips (about a minute each). You can keep working meanwhile.'),
       h('div', { class: 'row mkt-actions' }, make, clips, zip),
-      h('p', { class: 'small row' }, animate, h('label', { for: 'mk-animate' }, 'Bring the cover picture to life in the clips (needs 🎬 Video set up in AutoInjector; a few minutes more)')),
+      h('p', { class: 'small check-row mkt-animate' }, animate, h('label', { for: 'mk-animate' }, 'Bring the cover picture to life in the clips (needs 🎬 Video set up in AutoInjector; a few minutes more)')),
       d.has_art ? null : h('p', { class: 'small muted' }, 'Your cover has no picture, so the clips use the still cover.'),
       prog);
   };

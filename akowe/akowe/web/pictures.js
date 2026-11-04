@@ -28,12 +28,12 @@ export async function viewPictures(main, x) {
   const { h, clear, api, bpath, plink, S } = x;
   const where = { book: S.project.name, step: 'Pictures' };
   main.appendChild(h('div', { class: 'page-head' }, h('div', null,
-    x.crumbs(['Your books', '#/'], [S.project.name, plink()], 'Pictures'),
+    x.crumbs(['My books', '#/'], [S.project.name, plink('book')], ['Pictures & cover', plink('art')], 'Pictures'),
     h('h1', null, '🖼 Pictures')),
   h('div', { class: 'row' }, x.infoTip('Pictures',
     h('p', null, 'Pictures for your chapters and scenes, and a map of your world, placed in the PDF, EPUB and Word files of the book.'),
     h('p', null, '🖼 Illustrate makes a picture from the scene card (where, when, who is there and what happens) with each character’s approved look from the Character Forge (Fixed visual anchors and appearance) and the character lock of the main character, in the art style you set for the book.'),
-    h('p', null, 'Make 2 or 3 candidates and pick the one you like. Only a picked picture goes into the book. After a change here, put the book together again (📘 Make my book) so the files show it.'),
+    h('p', null, 'Make 2 or 3 candidates and pick the one you like. Only a picked picture goes into the book. After a change here, put the book together again (🏠 Book home) so the files show it.'),
     h('p', null, 'The map drawn from your places is a vector drawing: it is in the PDF and the EPUB; Word files show a PNG copy that AutoInjector draws (without AutoInjector they say where to find the map). An illustrated or uploaded map is in all three.')))));
   const wrap = h('div', { class: 'pics', 'data-testid': 'pictures-page' });
   main.appendChild(wrap);
@@ -119,7 +119,7 @@ export async function viewPictures(main, x) {
     clear(body);
     if (d.out_of_date) {
       body.appendChild(h('div', { class: 'notice warn', role: 'status', 'data-testid': 'pics-stale' }, d.out_of_date, ' ',
-        h('a', { href: plink('book') }, '📘 Make my book')));
+        h('a', { href: plink('book') }, '🏠 Book home')));
     }
     // the art style
     const styleIn = h('input', { id: 'pics-style', type: 'text', maxlength: 120, value: d.style || '', list: 'pics-styles', placeholder: 'for example ink wash, painterly, manga' });
@@ -141,7 +141,7 @@ export async function viewPictures(main, x) {
     const left = d.chapters.length - (c.chapters_with_picture || 0);
     body.appendChild(h('section', { class: 'card pics-card', 'aria-labelledby': 'pics-all-h', 'data-testid': 'pics-batch' },
       h('h2', { id: 'pics-all-h' }, '🖼 Illustrate every chapter'),
-      h('p', { class: 'small muted', 'data-testid': 'pics-all-left' }, d.chapters.length ? `${c.chapters_with_picture || 0} of ${d.chapters.length} chapter(s) have a picture. One picture is made for each of the other ${left}; you can stop at any time and keep what is made.` : 'Plan the chapters first (📘 Make my book).'),
+      h('p', { class: 'small muted', 'data-testid': 'pics-all-left' }, d.chapters.length ? `${c.chapters_with_picture || 0} of ${d.chapters.length} chapter(s) have a picture. One picture is made for each of the other ${left}; you can stop at any time and keep what is made.` : 'Plan the chapters first (🏠 Book home).'),
       h('div', { class: 'row' }, h('label', { for: 'pics-all-engine' }, 'Make with'), allEngine,
         h('button', { type: 'button', class: 'primary', 'data-testid': 'pics-all', disabled: !d.chapters.length || !left,
           onclick: () => runJob('/pictures/illustrate-all', { engine: allEngine.value }, allProg, 'Illustrating every chapter') }, '🖼 Illustrate every chapter')),
@@ -181,7 +181,7 @@ export async function viewPictures(main, x) {
     body.appendChild(mapCard);
     // the chapters
     if (!d.chapters.length) {
-      body.appendChild(x.stateBox('empty', 'No chapters yet', h('p', null, 'Plan the chapters first (📘 Make my book → chapter outline); every chapter then gets its place here.')));
+      body.appendChild(x.stateBox('empty', 'No chapters yet', h('p', null, 'Plan the chapters first (🏠 Book home → Chapter outline); every chapter then gets its place here.')));
       return;
     }
     const list = h('div', { class: 'pics-chapters' });

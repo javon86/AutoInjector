@@ -884,6 +884,36 @@ the default —, Two, or One = the old way; code `akowe/akowe/cross_check.py`):
 - G. No stray "·" in table rows; "Written by" shows the writer AI "+ editor"; vague advice ("Maintain the same level
   of …") is left out of "What to try next".
 
+## Layout pass (2026-11-04, PR #118) — done
+
+The author asked to look over the layout again after the November features. Every page was screenshotted with a
+finished fake-AI book (beta panel, writers' room, check-now, story shape, interior design all filled) at 1280×800,
+1920×1080 and 390×844, then fixed with small, safe changes (no feature removed, every `data-testid` kept):
+
+- **🏠 Book home:** 🔎 Check consistency now moved from the top (it pushed the steps a screen down) to below the steps;
+  its review of the chapters folds under one line ("📖 Chapters 1–3 review: what each AI thought"); its text is shorter.
+- **Choices in a row keep their own width** (`.row > select`): "Check [Last 5 chapters ▾] 🔎 Check consistency now",
+  "How many readers [3 readers ▾] 👥 Ask the panel", the launch kit's spoiler point… were a full-width box on a line
+  of their own with the button below.
+- **🎨 Interior design:** the two print-preview spreads sit side by side on a wide screen (smaller pages); on a phone
+  the 8 designs are two by two (one long column was a screen and a half).
+- **👥 Beta readers:** "Who the readers are" folds away once a read exists; the verdict table's headings wrap (the last
+  column was cut off); "💪 Strong signal", "⚠️ (wrote most of the book)" and low interest scores are warn-coloured
+  words, not the note box with a bar that broke the line (`:is(span, strong, td, th).words-warn`); the chapter-by-chapter
+  map keeps its chapter columns next to the labels.
+- **Side bar:** the part you are in lists its pages under it (🖼 Pictures & cover → Pictures, Cover, 📣 Mockups & ads;
+  🧭 Fix mistakes → Continuity, 📊 Book report; 📤 Export → 🚀 Launch kit; ✍ Write → Scene grid). ⋯ More → This book
+  also has 📊 Book report, 🚀 Launch kit and 📣 Mockups & ads. 🧭 Fix mistakes has a 🔎 Check consistency now button.
+- **Plain, consistent names:** breadcrumbs say "My books" everywhere (some said "Your books" or the old "Make my book");
+  Continuity, Cover, Pictures, Mockups & ads and Launch kit show their part ("Fix mistakes", "Pictures & cover",
+  "Export"); "📘 Make my book" links say "🏠 Book home".
+- **Small fixes:** ✍ Write → Your chapters lost the chapter names ("— Mara climbs…"); Continuity's questions had a double
+  bullet; 📣 Mockups' "Bring the cover picture to life" tick box sat alone on its own line; the chapter page's "🔁 Ask the
+  writer again" was smaller than the button next to it; ❓ Help explains the AI activity strip and the pages under a part.
+- **Looked at, kept:** the ⚡ AI working chip and the AI activity strip are not duplicates — the chip is the whole run
+  (steps, and "AI needs you" when it is paused), the strip is what each AI is doing right now. The desktop app's 📖 Akọwe
+  tab only frames the page and needed no change.
+
 ## Back burner (maybe never)
 
 The author's call on the rest of the 20-idea list: "way back burner, maybe never". Don't start these until asked:

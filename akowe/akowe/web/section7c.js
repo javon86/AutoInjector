@@ -82,8 +82,10 @@ export function betaCard(c) {
     size.addEventListener('change', show);
     const form = h('div', { class: 's7-panel-setup', 'data-testid': 'beta-setup' },
       h('div', { class: 'row' }, h('label', { for: 'beta-size' }, 'How many readers: '), size, btn),
-      h('p', { class: 'small muted' }, 'Each reader is a different AI playing a different kind of reader. You can change who they are. An AI that is not working is skipped with a note.'),
-      rows.map(x => x.row));
+      // who the readers are: open until a read exists, then folded (the panel's answers are what you came for)
+      h('details', { class: 's7-who', open: !r, 'data-testid': 'beta-who-edit' }, h('summary', null, '✏️ Who the readers are (change them)'),
+        h('p', { class: 'small muted' }, 'Each reader is a different AI playing a different kind of reader. You can change who they are. An AI that is not working is skipped with a note.'),
+        rows.map(x => x.row)));
     show();
     return form;
   }
@@ -208,7 +210,7 @@ function fmt(c, iso) { try { return c.fmtTime(iso); } catch { return iso || ''; 
 /* ======================================================================= ✒️ P25 your writing style (#/style) */
 export async function viewStyle(main, c) {
   const { h, clear } = c;
-  main.appendChild(h('div', { class: 'page-head' }, h('div', null, c.crumbs(['Your books', '#/'], 'My writing style'), h('h1', null, '✒️ My writing style'))));
+  main.appendChild(h('div', { class: 'page-head' }, h('div', null, c.crumbs(['My books', '#/'], 'My writing style'), h('h1', null, '✒️ My writing style'))));
   const holder = h('div', { 'aria-live': 'polite' }, c.loadingState('Loading your style card…'));
   main.appendChild(holder);
   let st;

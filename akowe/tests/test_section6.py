@@ -214,6 +214,30 @@ def test_progress_saves_are_debounced_and_forced_on_pause(tmp_path):
     fake.gate = None
 
 
+def test_wait_idle_covers_the_save_asked_for_while_one_ran(tmp_path, monkeypatch):
+    """A save asked for while one runs (a run's final save during its progress save, 💾 Save pressed) starts when the
+    running one ends. wait_idle must not answer "idle" in between: the finished save already left the list and the
+    next one had not started yet, so a test went on while that save ran and overwrote ``last``."""
+    import threading
+    app, fake = new_app(tmp_path)
+    run = run_book(app)
+    pid, sv = run["project_id"], app.saver
+    key = (pid, "main")
+    real_changed = app.changed
+
+    def slow_changed():  # the step between "this save is done" and "start the next" is slow (a loaded machine)
+        if threading.current_thread().name.startswith("akowe-save-"):
+            time.sleep(0.5)
+        real_changed()
+    monkeypatch.setattr(app, "changed", slow_changed)
+    for _ in range(3):
+        n0 = sv.count[key]
+        sv.start(pid, "main", kind="manual")
+        sv.auto(pid, "main", reason="run done", force=True)  # asked for while the first runs: waits for it
+        assert sv.wait_idle(60)
+        assert sv.count[key] == n0 + 2 and not sv.busy(key)  # both saves are done, none is still to come
+
+
 def test_writes_are_atomic_and_a_full_disk_is_a_plain_problem(tmp_path, monkeypatch):
     app, fake = new_app(tmp_path)
     run = run_book(app)
