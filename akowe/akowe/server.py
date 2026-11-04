@@ -666,6 +666,8 @@ class App:
                 return 200, rep
             disposition = "attachment" if (query.get("download") or ["0"])[0] == "1" else "inline"
             name = br.file_name(rep.get("title"), rep.get("at"), fmt)
+            from . import beta_reader  # noqa: PLC0415 - 👥 the beta readers' summary in the downloads
+            rep = beta_reader.with_beta(self, pid, branch, rep)
             if fmt == "md":
                 return 200, ("__binary__", "text/markdown; charset=utf-8", br.render_markdown(rep).encode("utf-8"),
                              name, disposition)

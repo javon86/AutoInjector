@@ -912,6 +912,11 @@ class AutoBookService(_Runner):
             if not isinstance(v, bool):
                 raise AkoweError("INVALID_INPUT", f"/{k}", f"{k} must be true or false", status="REJECTED")
             out[k] = v
+        n = body.get("beta_readers", 1)  # 👥 idea #14: how many beta readers (1 = one AI; 2-3 = a panel)
+        if isinstance(n, bool) or not isinstance(n, int) or not 1 <= n <= 3:
+            raise AkoweError("INVALID_INPUT", "/beta_readers", "beta_readers: 1, 2 or 3", status="REJECTED")
+        if n != 1:
+            out["beta_readers"] = n
         # P12: ending and style choices (all optional; empty = let the AI choose)
         out["choices"] = story_choices.clean(body.get("choices"))
         g = body.get("genre")

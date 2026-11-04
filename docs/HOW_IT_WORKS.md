@@ -237,7 +237,13 @@ to a minute), so the run knows which AIs work.
 11. **Book format**, **put the book together**, **export PDF, EPUB and Word**. Each file is re-read by Akọwe's
     export check to make sure nothing was lost.
 12. **Content check** (every chapter once, in order) and the **book report**. An optional **beta reader** step
-    reads the book as its target reader.
+    reads the book as its target reader. You can ask for **1, 2 or 3 readers**. With 2 or 3, each reader is a
+    different AI playing a different kind of reader: a typical fan, a picky reader of the genre, and a casual reader
+    who gives up on slow starts. You can rewrite who they are on the 📊 report page. Each says whether they would
+    finish and recommend the book, their favourite character, the best and worst chapter, and a score out of 10.
+    Akọwe then shows where 2 or more readers agree (a **strong signal**), where they disagree, a chapter-by-chapter
+    map of where readers got lost or bored, and the top 5 things to fix. An AI that is not working is skipped with a
+    note. If the run is paused, the panel carries on with the readers still to read.
 
 **Where it stops for you:**
 

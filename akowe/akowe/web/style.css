@@ -1155,6 +1155,14 @@ ul.samples q { font-style: italic; }
 .s7-dl dd { margin: 0; }
 .s7-books { list-style: none; padding: 0; }
 .s7-make .check-row { margin: 4px 0; }
+/* 👥 idea #14 panel of beta readers */
+.s7-panel-setup { display: grid; gap: 6px; margin: 6px 0 10px; }
+.s7-reader { border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; }
+.s7-reader textarea { width: 100%; box-sizing: border-box; }
+.s7-heat td, .s7-heat th { padding: 3px 6px; }
+.s7-heat-1 { background: var(--warn-soft); }
+.s7-heat-2 { background: var(--bad-soft); }
+.s7-heat-3 { background: var(--bad); color: var(--bad-soft); font-weight: 600; }
 
 /* ======================================================================= 🗂 B5 Character Forge (forge.js)
    The dossier's own dark look (the author's Moki Vey sample: near-black, gold names, teal letters). Everything is
