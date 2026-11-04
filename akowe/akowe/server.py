@@ -535,6 +535,9 @@ class App:
                 if rest and rest[0] == "beta":  # 📖 P23 (Section 7c) beta reader
                     from . import beta_reader  # noqa: PLC0415
                     return beta_reader.route(self, method, rest, body, principal, pid, branch)
+                if rest and rest[0] == "originality":  # ✨ #20 originality and "sounds like AI" check
+                    from . import originality  # noqa: PLC0415
+                    return originality.route(self, method, rest, query, body, principal, pid, branch)
                 if rest == ["style"]:  # ✒️ P25 (Section 7c) this book's use of the author's style
                     from . import style_card  # noqa: PLC0415
                     return style_card.route_book(self, method, body, principal, pid)

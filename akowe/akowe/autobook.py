@@ -1622,7 +1622,7 @@ class AutoBookService(_Runner):
         new_text = str((self.bp(run).rec(rid).get("data") or {}).get("text") or "")
         lost = lost_keeps(old_text, new_text, keep_quotes_of(old_craft, old_text))
         ok, code, why = judge_rewrite(old_craft, new_craft, consistency=cons, checks_ok=checks_ok, keep_lost=lost,
-                                      applied=applied, new_text=new_text)
+                                      applied=applied, new_text=new_text, old_text=old_text)  # ✨ #20
         return ok, code, why, new_craft
 
     def _editor_flag(self, run, st, ed, craft, head, why: str, code: str) -> dict:
@@ -3383,6 +3383,10 @@ class AutoBookService(_Runner):
                             "on the report page later)"
             self.event(run, "note", st["message"], step="report", code="REPORT_NOT_INDEPENDENT")
         self.event(run, "report", f"Book report {rep['id']}: {st['message']}", step="report")
+        og = (rep.get("originality") or {}).get("line")  # ✨ #20: one line, never blocks the book
+        if og:
+            run["report"]["originality"] = og
+            self.event(run, "report", og + " (see ✨ Originality check on the 📊 report page)", step="report")
 
     # ------------------------------------------------------------------ Section 7c (P23 beta reader, P25 style)
     def _s_bible(self, run, st):

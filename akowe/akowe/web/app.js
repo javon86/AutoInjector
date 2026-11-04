@@ -5,6 +5,7 @@ import { AI_STATE, plainCheck, problemFor, siteProblemWords, slugName } from './
 import { viewContinuity } from './continuity.js';   // 🧭 Section 7 (P32–P35)
 import { estimateBox, runCostLine, viewCosts, viewSceneGrid } from './grid.js';  // 🗂 P27 · ⏱ P28
 import * as S7C from './section7c.js';  // P23 beta reader + P25 your writing style (Section 7c)
+import { originalityCard } from './originality.js';  // ✨ #20 originality and "sounds like AI" check
 import { forgeRoute } from './forge.js';  // 🗂 B5 Character Forge dossiers (characters, items, places, magic)
 import { viewPictures } from './pictures.js';  // 🖼 B3 chapter/scene pictures and the map
 import { viewTrailer } from './trailer.js';  // 🎞 B2 the book trailer (AutoInjector 🎬 Video)
@@ -8445,7 +8446,7 @@ async function viewReport(main) {
     holder.appendChild(h('div', { class: 'rp-progress' }));
     if (ov.job) { const prog = holder.querySelector('.rp-progress'); pollQualityJob(bpath(`/report/job/${encodeURIComponent(ov.job.id)}`), prog).then(load).catch(() => {}); }
     if (!ov.written) { holder.appendChild(stateBox('empty', 'No chapter is written yet', h('p', null, 'Write the chapters first (🏠 Book home), then make the report.'))); return; }
-    if (!rep) { holder.appendChild(stateBox('empty', 'No report yet', h('p', null, 'Press 📊 Make the report: Akọwe counts and checks the book and asks the AIs that did not write it to read it.'))); holder.appendChild(askBox(null)); return; }
+    if (!rep) { holder.appendChild(stateBox('empty', 'No report yet', h('p', null, 'Press 📊 Make the report: Akọwe counts and checks the book and asks the AIs that did not write it to read it.'))); holder.appendChild(askBox(null)); holder.appendChild(originalityCard(s7c())); return; }
     if (ov.stale) holder.appendChild(h('p', { class: 'words-warn', role: 'note', 'data-testid': 'rp-stale' }, hazard({ code: 'REPORT_STALE' }, { retry: () => run({ ai: true }), retryLabel: '📊 Make a new report' }, { small: true }), ' This report is for an earlier version of the book: a chapter changed since.'));
     for (const w of rep.warnings || []) holder.appendChild(h('p', { class: /⚠️|📖 Sampled/.test(w) ? 'words-warn' : 'small muted', role: 'note', 'data-testid': /^📖 Sampled/.test(w) ? 'rp-sampled' : null }, w));
     if (rep.book_mode === 'digest' && ov.written) {  // H17: a long book was only sampled: offer the full read in parts
@@ -8461,7 +8462,8 @@ async function viewReport(main) {
       h('div', { class: 'rp-kpis' },
         h('div', { class: 'kpi' }, h('strong', null, agg.overall != null ? `${agg.overall}/10` : '–'), h('span', { class: 'small' }, 'overall (median of each dimension, averaged)')),
         h('div', { class: 'kpi' }, h('strong', null, `${agg.reviewers || 0}`), h('span', { class: 'small' }, `AI reviewer(s), ${agg.independent || 0} independent`)),
-        h('div', { class: 'kpi' }, h('strong', null, `${(wd.total || 0).toLocaleString()}`), h('span', { class: 'small' }, `words of about ${(wd.target || 0).toLocaleString()} (${wd.length || ''})`)))));
+        h('div', { class: 'kpi' }, h('strong', null, `${(wd.total || 0).toLocaleString()}`), h('span', { class: 'small' }, `words of about ${(wd.target || 0).toLocaleString()} (${wd.length || ''})`))),
+      (rep.originality || {}).line ? h('p', { class: 'small', 'data-testid': 'rp-originality' }, rep.originality.line, h('span', { class: 'muted' }, ' (details: ✨ Originality check below)')) : null));
     if ((agg.dimensions || []).some(d => d.n)) {
       const t = h('table', { class: 'rp-table', 'data-testid': 'rp-scores' }, h('caption', { class: 'small' }, 'Scores from 1 to 10. Median = the middle score of the reviewers. ⚠️ = they are 3 or more points apart.'),
         h('thead', null, h('tr', null, h('th', null, 'Dimension'), h('th', null, 'Median'), h('th', null, 'Range'), reviews.map(r => h('th', null, r.name, r.independent && !(r.calibration || {}).flagged ? '' : ' ⚠️')))),
@@ -8521,6 +8523,7 @@ async function viewReport(main) {
     if (len) holder.appendChild(len);
     holder.appendChild(askBox(rep));
     holder.appendChild(S7C.betaCard(s7c()));  // 📖 P23 beta reader (Section 7c)
+    holder.appendChild(originalityCard(s7c()));  // ✨ #20 originality and "sounds like AI" check
     if ((ov.reports || []).length > 1) holder.appendChild(h('details', { class: 'card' }, h('summary', null, `Earlier reports (${ov.reports.length - 1})`),
       h('ul', { class: 'small' }, ov.reports.slice(1).map(r => h('li', null, `${fmtTime(r.at)} · overall ${r.overall ?? '–'} · ${r.reviewers || 0} reviewer(s)`)))));
   }

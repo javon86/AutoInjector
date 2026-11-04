@@ -301,9 +301,10 @@ def lost_keeps(old_text: str, new_text: str, keep: list[str]) -> list[str]:
 
 
 def judge_rewrite(old: dict, new: dict | None, *, consistency: str | None, checks_ok: bool, keep_lost: list,
-                  applied: list, new_text: str) -> tuple[bool, str, str]:
+                  applied: list, new_text: str, old_text: str | None = None) -> tuple[bool, str, str]:
     """Keep a rewrite only if nothing got worse: (keep?, code, plain reason). Scores may move by AI noise: the
-    average must not drop and no single dimension may drop by more than 1 point."""
+    average must not drop and no single dimension may drop by more than 1 point. With ``old_text`` (✨ #20) the
+    rewrite must also not add AI-sounding phrases or clichés (originality.counts)."""
     if not checks_ok:
         return False, "CHECKS_REFUSED", "Akọwe's checks refused the rewritten chapter"
     if consistency != "APPROVE":
@@ -321,6 +322,16 @@ def judge_rewrite(old: dict, new: dict | None, *, consistency: str | None, check
         return False, "NOT_RESOLVED", "a flagged passage is still there after the rewrite"
     if new["counts"]["major"] > old["counts"]["major"]:
         return False, "NEW_PROBLEMS", "the rewrite has more major findings than before"
+    if old_text is not None:
+        try:
+            from . import originality  # noqa: PLC0415
+            before, after = originality.counts(old_text), originality.counts(new_text)
+        except Exception:  # noqa: BLE001 - the check is a guard, never a crash
+            log.exception("originality count failed while judging a rewrite")
+            before = after = 0
+        if after > before:
+            return False, "MORE_AI_SOUNDING", (f"the rewrite sounds more machine-written ({after} AI-sounding phrase(s) "
+                                               f"or cliché(s), before {before})")
     return True, "KEPT", "the rewrite fixed the flagged passages and nothing got worse"
 
 
@@ -523,6 +534,14 @@ class EditorService:
             ctx["outline"] = {k: info.get(k) for k in ("chapter_id", "number", "of", "last", "objective", "previous",
                                                        "next")}
             ctx["pattern_report"] = prose_audit.brief(report) if report else None
+            try:  # ✨ #20: the passages that sound machine-written or clichéd, so the rewrites go after them
+                from . import originality  # noqa: PLC0415
+                ai_sounding = originality.editor_brief(ctx["chapter_text"])
+            except Exception:  # noqa: BLE001 - a hint, never a reason to fail the review
+                log.exception("originality check failed for the editor")
+                ai_sounding = None
+            if ai_sounding:
+                ctx["ai_sounding"] = ai_sounding
         else:
             ctx["draft_json"] = json.dumps(data, ensure_ascii=False)[:60000]
             ctx["operation"] = (self.contracts.operation(rec["module_id"]) or {}).get("name")

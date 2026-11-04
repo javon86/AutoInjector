@@ -36,7 +36,9 @@ DIMENSIONS = [
     ("prose_variety", "Varied prose, no tics",
      "Are sentences, gestures and paragraph endings varied? Look at the pattern report (context.pattern_report): "
      "repeated gestures (\"went very still\", looking, waiting), negative parallelism (\"Not to X. Not to Y.\"), "
-     "aphoristic paragraph endings, observation → interpretation → moral."),
+     "aphoristic paragraph endings, observation → interpretation → moral. When Akọwe found passages that sound "
+     "machine-written or clichéd (context.ai_sounding: exact quotes with the reason), flag the worst of them, quoting "
+     "the passage word for word, and suggest a plainer line only this book could have."),
     ("tension_stakes", "Real stakes",
      "Is something real at risk, and does it stay at risk? Reassurance that removes the danger (\"It won't hurt anyone "
      "at all\") or problems solved by a convenient helper lower this score."),
