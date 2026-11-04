@@ -42,6 +42,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+from . import characters as chars_mod
 from . import forge
 from . import pictures
 from .errors import AkoweError
@@ -441,6 +442,25 @@ def save_plan(app, pid, branch, body, made_from: str = "author") -> dict:
     return info(app, pid, branch)
 
 
+# ====================================================================== 🎞 H24 what the trailer was made from
+def made_from(app, pid: str, branch: str) -> dict:
+    """{book_fp, looks_fp}: a fingerprint of the book's chapters (each chapter's approved — else newest — version)
+    and of every character's look (the description the pictures are made from, forge.looks_fingerprint)."""
+    from .book_path import BookPath  # noqa: PLC0415
+    from .book_report import book_chapters  # noqa: PLC0415
+    chs = book_chapters(BookPath(app.engine, app.principal_id, pid, branch))
+    book = "|".join(f"{c['record_id']}:{c['version']}" for c in chs)
+    looks = []
+    for c in sorted(chars_mod.canon_characters(app.store, pid, branch), key=lambda c: c["record_id"]):
+        try:
+            d = forge.public(app.store, pid, branch, c["record_id"])
+            looks.append(f"{c['record_id']}:{forge.looks_fingerprint(d)}")
+        except AkoweError:
+            continue
+    h = lambda x: hashlib.sha256(x.encode("utf-8")).hexdigest()[:16]  # noqa: E731
+    return {"book_fp": h(book), "looks_fp": h("|".join(looks))}
+
+
 # ====================================================================== the public page data
 def _asset_public(pid, branch, a):
     if not isinstance(a, dict) or not a.get("asset_id"):
@@ -464,8 +484,19 @@ def info(app, pid, branch) -> dict:
                                                 "planned", "plan_revision") if t.get(k) is not None}
         out["trailer"]["webm"] = _asset_public(pid, branch, t.get("webm"))
         out["trailer"]["mp4"] = _asset_public(pid, branch, t.get("mp4"))
-        out["out_of_date"] = bool(plan and t.get("plan_at") and plan.get("updated_at") and
-                                  plan["updated_at"] > t["plan_at"])
+        why = []
+        if plan and t.get("plan_at") and plan.get("updated_at") and plan["updated_at"] > t["plan_at"]:
+            why.append("the plan changed since this trailer was made")
+        try:  # 🎞 H24: the book's text or a character's look changed since the trailer was made
+            now = made_from(app, pid, branch)
+            if t.get("book_fp") and t["book_fp"] != now["book_fp"]:
+                why.append("the book's chapters changed since this trailer was made")
+            if t.get("looks_fp") and t["looks_fp"] != now["looks_fp"]:
+                why.append("a character's look changed since this trailer was made")
+        except Exception:  # noqa: BLE001 - a hint
+            log.exception("trailer: is it out of date?")
+        out["out_of_date"] = bool(why)
+        out["out_of_date_why"] = why
     try:
         out["bridge"] = forge.bridge_info(app)
     except Exception:  # noqa: BLE001
@@ -794,6 +825,10 @@ def _store(app, job, pid, branch, plan, res, warnings) -> None:
            "width": num(res.get("width")), "height": num(res.get("height")), "at": _now(),
            "shots": len(res.get("shots") or []), "cards": len(res.get("cards") or []),
            "warnings": warnings[:10] or None, "plan_at": plan.get("updated_at")}
+    try:
+        rec.update(made_from(app, pid, branch))  # 🎞 H24: what the book and the looks were when it was made
+    except Exception:  # noqa: BLE001
+        log.exception("trailer: the fingerprints of the book")
 
     def fn(d):
         d["trailer"] = {k: v for k, v in rec.items() if v is not None}

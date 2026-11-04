@@ -17,6 +17,7 @@ from __future__ import annotations
 import hashlib
 import re
 
+from . import unifont
 from .fontmetrics import DESCRIPTORS, WIDTHS
 from .images import ImageInfo
 from .layout import Layout, Typography
@@ -145,8 +146,14 @@ def render_pdf(layout: Layout, *, page_width: float, page_height: float, bleed: 
     catalog = w.reserve()
     pages_obj = w.reserve()
     info_obj = w.reserve()
-    fonts_used = sorted({op[1] for p in layout.pages for op in p.ops if op[0] == "text"})
+    fonts_used = sorted({op[1] for p in layout.pages for op in p.ops if op[0] == "text"} - {unifont.NAME})
     font_objs = {}
+    # 🔤 H18: the letters WinAnsi cannot print are set in the bundled Unicode font (embedded as a subset)
+    uni_chars = {ch for p in layout.pages for op in p.ops if op[0] == "text" and (op[1] == unifont.NAME or
+                                                                                  unifont.needs(op[5]))
+                 for t, f in unifont.segments(op[5], op[1]) if f == unifont.NAME for ch in t}
+    if uni_chars:
+        font_objs[unifont.NAME] = ("FU", unifont.pdf_objects(w, uni_chars))
     for i, f in enumerate(fonts_used, start=1):
         # Base-14 font, NOT embedded (no FontFile): full AFM /Widths and a descriptor are written so
         # checkers can compute exact text extents (PDF 1.5+ recommends them for standard fonts too).
@@ -178,9 +185,15 @@ def render_pdf(layout: Layout, *, page_width: float, page_height: float, bleed: 
             if op[0] == "text":
                 _, font, size, x, y, text, tw = op[:7]
                 color = op[7] if len(op) > 7 else None
-                content += (f"BT /{font_objs[font][0]} {num(size)} Tf {num(tw)} Tw "
+                segs = unifont.segments(text, font) if font == unifont.NAME or unifont.needs(text) else \
+                    [(text, font)]
+                content += (f"BT /{font_objs[segs[0][1]][0]} {num(size)} Tf {num(tw)} Tw "
                             + (f"{_rgb(color, 'rg')} " if color else "") + f"{num(x)} {num(y)} Td ").encode("ascii")
-                content += pdf_string(text) + b" Tj ET\n"
+                for k, (seg, sf) in enumerate(segs):  # one line, the font switched mid-line (no new position)
+                    if k:
+                        content += f"/{font_objs[sf][0]} {num(size)} Tf ".encode("ascii")
+                    content += (unifont.encode(seg) if sf == unifont.NAME else pdf_string(seg)) + b" Tj "
+                content += b"ET\n"
             elif op[0] == "rect":
                 _, x, y, rw, rh, fill, stroke, lw = op
                 if not fill and not stroke:
@@ -214,7 +227,8 @@ def render_pdf(layout: Layout, *, page_width: float, page_height: float, bleed: 
                 m = image_matrix(images[key].orientation, x, y, dw, dh)
                 content += (" ".join(num(v) for v in m) + f" cm /{img_objs[key][0]} Do\nQ\n").encode("ascii")
         content_obj = w.add(PdfWriter.stream("", bytes(content)))
-        used_fonts = sorted({op[1] for op in page.ops if op[0] == "text"})
+        used_fonts = sorted({sf for op in page.ops if op[0] == "text" for sf in
+                             ({f for _t, f in unifont.segments(op[5], op[1])} if unifont.needs(op[5]) else {op[1]})})
         used_imgs = sorted({op[1] for op in page.ops if op[0] == "img"})
         res = "<< /ProcSet [/PDF /Text /ImageB /ImageC /ImageI]"
         if used_fonts:
@@ -553,6 +567,10 @@ def inspect_pdf(data: bytes) -> dict:
                     font = get(fref)
                     base = (font.get("BaseFont") or "/")[1:]
                     desc = get(font.get("FontDescriptor")) if font.get("FontDescriptor") else None
+                    if desc is None and font.get("Subtype") == "/Type0":  # 🔤 H18: the descendant has it
+                        kids_ = get(font.get("DescendantFonts")) or []
+                        d0 = get(kids_[0]) if kids_ else None
+                        desc = get(d0.get("FontDescriptor")) if isinstance(d0, dict) else None
                     if desc and any(k in desc for k in ("FontFile", "FontFile2", "FontFile3")):
                         report["embedded_fonts"].append(base)
                     elif base not in BASE14:

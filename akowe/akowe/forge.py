@@ -49,6 +49,7 @@ from __future__ import annotations
 import base64
 import copy
 import json
+import hashlib
 import logging
 import os
 import re
@@ -1446,9 +1447,17 @@ def art_prompt(dossier: dict, what: str) -> str:
     return p[:1800]
 
 
+def looks_fingerprint(dossier: dict) -> str:
+    """🖼 H15: a short fingerprint of the description a picture is made from (the name, the fixed visual anchors and
+    every look field — the same text the picture prompt uses). A picture whose fingerprint differs from the dossier's
+    now is older than its description."""
+    return hashlib.sha256(art_prompt(dossier, "lock").encode("utf-8")).hexdigest()[:16]
+
+
 def run_art(app, job, pid, branch, rid, what: str, engine: str, views: list[str]) -> None:
     store = app.store
     dossier = public(store, pid, branch, rid)
+    looks_fp = looks_fingerprint(dossier)
     try:
         from .book_path import get_profile  # noqa: PLC0415
         title = (get_profile(store, pid) or {}).get("title") or ""
@@ -1489,7 +1498,7 @@ def run_art(app, job, pid, branch, rid, what: str, engine: str, views: list[str]
                               f"{dossier['name']} — {word}")
         asset.update(source=str(resp.get("engine") or engine), engine=resp.get("engine"),
                      seed=s if s is not None else resp.get("seed"),
-                     warnings=[str(w)[:200] for w in resp.get("warnings") or []][:5] or None)
+                     warnings=[str(w)[:200] for w in resp.get("warnings") or []][:5] or None, looks_fp=looks_fp)
         if lock_missing:
             asset["warnings"] = (asset.get("warnings") or []) + [f"no character lock named {dossier['name']}"]
         set_art(store, pid, branch, rid, slot, {k: v for k, v in asset.items() if v is not None})

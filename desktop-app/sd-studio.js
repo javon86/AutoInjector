@@ -704,8 +704,17 @@ function createSdStudio(deps) {
     const character = String(b.character || '').trim().slice(0, 120);
     if (!character) return { ok: false, error: 'NEED_PROMPT', message: 'Send the character\'s name.' };
     const have = lib.getLock(character);
-    if (have) return { ok: true, created: false, lock: Object.assign({}, have) };
     const seed = Number.isFinite(Number(b.seed)) ? Math.round(Number(b.seed)) : -1;
+    if (have && b.replace === true) {
+      // Akọwe H15: the author pressed "🔒 Replace the lock" (the description changed) — never done without that
+      const r = lib.saveLock(Object.assign({}, have, { character, book: b.book || have.book || '', prompt: b.prompt || have.prompt || '',
+        negative: b.negative || have.negative || '', seed: seed >= 0 ? seed : (Number.isFinite(have.seed) ? have.seed : -1),
+        notes: `Replaced by ${String(b.from || 'Akọwe').slice(0, 40)}: the character's description changed.` }));
+      if (!r || !r.ok) return Object.assign({ ok: false }, r || {});
+      log('character-lock-replaced', { from: String(b.from || 'akowe').slice(0, 40), seed: seed >= 0 });
+      return { ok: true, created: false, replaced: true, lock: r.lock };
+    }
+    if (have) return { ok: true, created: false, lock: Object.assign({}, have) };
     const r = lib.saveLock({ character, book: b.book || '', prompt: b.prompt || '', negative: b.negative || '', seed,
       notes: String(b.notes || `Made by ${String(b.from || 'Akọwe').slice(0, 40)} from the character's first portrait.`) });
     if (!r || !r.ok) return Object.assign({ ok: false }, r || {});

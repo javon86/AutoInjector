@@ -507,7 +507,8 @@ def test_pdf_with_no_art_and_very_long_cards_never_overflows(fx):
     data = pdf_of(app, pid, rid)
     r = pypdf.PdfReader(io.BytesIO(data))
     text = "\n".join(p.extract_text() for p in r.pages)
-    assert "OLÁ ENÍ LIGHTHOUSE" in text.upper() and "word119" in text and "Line 29" in text and "?" not in text
+    assert "ỌLÁ Ẹ̀NÍ LIGHTHOUSE" in text.upper()  # 🔤 H18: the letters are kept
+    assert "word119" in text and "Line 29" in text and "?" not in text
     assert "Not filled in yet." in text
     # every text op stays inside the page and above the footer
     d = forge.public(app.store, pid, BR, rid)

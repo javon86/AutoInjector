@@ -166,6 +166,17 @@ def sheet_for(name, others=(), story_role=None):
     return out
 
 
+def trust_one_ai(app, run_id, timeout=120):
+    """H6: with only one AI the run pauses at its first draft (nobody else checked it). Answer like an author who
+    trusts that AI: ✔ approve it yourself, and the rest of this run too. Returns the stored run."""
+    run = app.autobook.get(run_id)
+    if run.get("status") == "paused" and (run.get("problem") or {}).get("code") == "NO_SECOND_AI":
+        app.autobook.decide("author", run_id, {"action": "approve_anyway", "author_confirms": True,
+                                               "for_rest_of_run": True})
+        app.autobook.wait_for(run_id, timeout)
+    return app.autobook.get(run_id)
+
+
 class BookFakeAI:
     def __init__(self, verdicts=None, default_verdict="APPROVE"):
         self.calls: list[dict] = []
@@ -209,6 +220,15 @@ class BookFakeAI:
         self.series_script: list = []            # 📚 scripted "what changed in this book" answers
         self.objectives = None                   # B11: the chapters' objectives (default OBJECTIVES, cycled)
         self.details: dict[str, str] = {}        # ⏱ story details: field -> the text the fake decides
+        # 📒 story ledger / 🧭 checkpoints (story_ledger.py, checkpoints.py)
+        self.story_ledger = False                # the continuity tracker also returns the chapter's story part
+        self.confirm_flags = False               # a checkpoint confirms Akọwe's ledger flags (with a fix when it can)
+        self.checkpoint_script: list = []        # scripted checkpoint answers (dicts or callables(ctx)), one per call
+        self.checkpoint_extra: list = []         # extra problems a checkpoint reports: {chapter, quote, problem,
+        #                                          original, replacement} (only for chapters in that call)
+        self.ending_script: list = []            # 🎯 H11/H12: scripted ending checks (dicts or callables(ctx))
+        self.ending_fix = True                   # 🎯 the writer adds an ending finding's suggestion after the passage
+        self.plot_obligations: list = []         # 🎯 the main plot's setups (B03 plot_obligations) the ending must keep
 
     def fail_next(self, *excs):
         self.failures.extend(excs)
@@ -249,6 +269,15 @@ class BookFakeAI:
     def _answer(self, ctx, props, schema):
         if ctx.get("akowe_task") == "story_details":  # ⏱ story details (essentials / just in time)
             return "details", self._details(ctx)
+        if "arc" in props and "question" in props:  # 🎯 H11 / H12: does the ending keep the book's promises?
+            with self.lock:
+                scripted = self.ending_script.pop(0) if self.ending_script else None
+            if scripted is not None:
+                return "ending", scripted(ctx) if callable(scripted) else copy.deepcopy(scripted)
+            return "ending", {"items": [{"id": p["id"], "kept": True, "where": "", "note": "Paid off.", "fix": ""}
+                                        for p in ctx.get("promises") or []],
+                              "arc": {"kept": True, "note": "She asks for help at last.", "fix": ""},
+                              "question": {"kept": True, "note": "The light is back.", "fix": ""}}
         if "character_changes" in props:  # 📚 series: what changed for each character in this book
             with self.lock:
                 scripted = self.series_script.pop(0) if getattr(self, "series_script", None) else None
@@ -371,6 +400,11 @@ class BookFakeAI:
         if "verdict" in props:
             with self.lock:
                 v = self.verdicts.pop(0) if self.verdicts else self.default_verdict
+            if callable(v):  # a scripted answer that looks at what the reviewer was sent
+                v = v(ctx)
+            if isinstance(v, dict):  # a whole scripted review (H6: no reasons, low confidence, H3: limits …)
+                return "review", dict({"verdict": "APPROVE", "reasons": [], "suggested_changes": [],
+                                       "confidence": 0.8}, **v)
             return "review", {"verdict": v, "reasons": ["It fits the book profile and the plan." if v == "APPROVE"
                                                         else "The opening could name the place sooner."],
                               "suggested_changes": [] if v == "APPROVE" else ["Name the harbor in the first line."],
@@ -426,7 +460,7 @@ class BookFakeAI:
         if "main_plot" in props:
             return "B03", {"main_plot": {"summary": "Mara follows the keeper's trail from the dark lighthouse through "
                                                     "the harbor to the reef.", "facts": [], "links": []},
-                           "objectives": [], "plot_obligations": []}
+                           "objectives": [], "plot_obligations": list(self.plot_obligations)}
         if "chapters" in props:
             req = ctx.get("request_payload") or {}
             n = ((req.get("target_length") or {}).get("value")) or 3
@@ -449,7 +483,41 @@ class BookFakeAI:
                            "objective_assessments": [{"item_id": cid, "decision": "PASS", "message": "reached"}]}
         if "events" in props:
             return "events", {"events": []}
+        if "tracked_scenes" in props and self.story_ledger:  # 📒 the chapter's story part (keyword reading)
+            from akowe import story_ledger  # noqa: PLC0415
+            story = story_ledger.extract(ctx.get("chapter_text") or "", ctx.get("characters") or [])
+            return "track", {"tracked_scenes": [], "story": story}
+        if "problems" in props and "checkpoint" in ctx:  # 🧭 a continuity checkpoint
+            with self.lock:
+                scripted = self.checkpoint_script.pop(0) if self.checkpoint_script else None
+            if scripted is not None:
+                return "checkpoint", scripted(ctx) if callable(scripted) else copy.deepcopy(scripted)
+            return "checkpoint", self._checkpoint(ctx)
         return "generic", self._from_schema(schema)
+
+    FIX_WORDS = [(r"\bran\b", "limped"), (r"\bdrew her knife\b", "reached for the knife she had lost, and found only "
+                                                                 "the empty sheath")]
+
+    def _checkpoint(self, ctx):
+        """Confirms Akọwe's ledger flags (``confirm_flags``) with a small fix when one of FIX_WORDS fits the quote,
+        plus ``checkpoint_extra`` problems of the chapters in this call."""
+        import re  # noqa: PLC0415
+        nums = {c.get("number") for c in ctx.get("chapters") or []}
+        probs = []
+        if self.confirm_flags:
+            for f in ctx.get("akowe_flags") or []:
+                q = f.get("quote") or ""
+                rep = q
+                for pat, new in self.FIX_WORDS:
+                    rep = re.sub(pat, new, rep)
+                probs.append({"chapter": f.get("number"), "quote": q, "problem": f.get("message") or "",
+                              "original": q if rep != q else "", "replacement": rep if rep != q else ""})
+        for x in self.checkpoint_extra:
+            if x.get("chapter") in nums:
+                probs.append(dict({"quote": "", "original": "", "replacement": ""}, **x))
+        first = sorted(n for n in nums if isinstance(n, int))
+        return {"problems": probs, "summary": f"Chapters {first[0]}–{first[-1]}: Mara keeps searching." if first
+                else ""}
 
     def _details(self, ctx):
         out = {}
@@ -635,6 +703,11 @@ class BookFakeAI:
         out = []
         for f in ctx.get("findings") or []:
             p = f.get("passage") or ""
+            if f.get("dimension") == "ending_promises":  # 🎯 the open promise is added after the last paragraph
+                if self.ending_fix:
+                    out.append({"finding_id": f["id"], "original": p,
+                                "replacement": p + " " + str(f.get("suggestion") or "").strip()})
+                continue
             if f.get("dimension") == "planned_to_page":
                 if self.planned_fix:
                     sug = str(f.get("suggestion") or "")

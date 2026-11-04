@@ -13,7 +13,8 @@
  *                   ultralytics/segm, sams) faces/ video/ (framepack/hf) voice/ assets/
  *     workflows/    ComfyUI workflow .json files
  *     downloads/    installers and unfinished downloads (safe to empty when nothing is downloading)
- *     images/ videos/ books/ uploads/ ai-work/ logs/   what you make
+ *     images/ videos/ books/ uploads/ ai-work/ logs/   what you make (books/ is only for files the app itself
+ *                   makes; Akọwe saves your books in its own books folder, Documents\Akowe Books by default)
  *
  * Settings stay where the system keeps program settings (they survive a reinstall); Ollama's own app and
  * Stability Matrix keep their own folders. map() lists every place, so nothing is a mystery.
@@ -92,11 +93,11 @@ function map(places, { fs = nodeFs, sizes = true } = {}) {
   if (c.home) add('🧩 ComfyUI (pictures + video) and its models', c.home, c.where === 'stuff' || c.where === 'setting' && c.home.startsWith(L.stuff),
     c.where === 'legacy' ? 'Installed before the tidy-up, outside "stuff and thing" — press "Move into stuff and thing".' : c.where === 'legacy-long-path' ? 'Kept in the short system folder: this PC\'s path to "stuff and thing" is too long for ComfyUI on Windows.' : '');
   add('⬇ Installers and unfinished downloads', L.downloads, true, 'Safe to empty when nothing is downloading.');
-  for (const [k, label] of [['images', '🖼 Your pictures'], ['videos', '🎬 Your videos'], ['books', '📚 Your books'], ['logs', '🧾 Logs and reports']]) add(label, path.join(L.stuff, k), true);
+  for (const [k, label] of [['images', '🖼 Your pictures'], ['videos', '🎬 Your videos'], ['books', '📚 Book files made by AutoInjector (Akọwe saves your books in its own books folder)'], ['logs', '🧾 Logs and reports']]) add(label, path.join(L.stuff, k), true);
   add('🧩 ComfyUI workflows (.json)', L.workflows, true, 'Listed in 🎨 Images → ComfyUI workflow.');
   add('⚙ Settings (the system\'s place for program settings — survives reinstalling)', places.userData, false);
   if (places.ollamaStore && exists(places.ollamaStore)) add('🤖 Models downloaded with Ollama\'s own app', places.ollamaStore, false, 'Ollama\'s own folder — AutoInjector can use these too (🔍 Find what\'s installed).');
-  if (places.akoweData && exists(places.akoweData)) add('📖 Akọwe\'s book database', places.akoweData, false, 'Akọwe\'s working data; saved books go into "stuff and thing/books".');
+  if (places.akoweData && exists(places.akoweData)) add('📖 Akọwe\'s book database', places.akoweData, false, 'Akọwe\'s working data. Your saved books go into Akọwe\'s books folder (Documents\\Akowe Books by default; Akọwe → Settings → 📁 Where books are saved).');
   if (places.stabilityMatrix && exists(places.stabilityMatrix)) add('🎨 Stability Matrix (Forge etc.)', places.stabilityMatrix, false, 'Stability Matrix\'s own folder — its programs stay there.');
   return rows;
 }

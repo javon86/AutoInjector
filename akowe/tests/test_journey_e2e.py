@@ -170,7 +170,7 @@ def name_of(app, pid, rid):
 def journey(tmp_path, no_provider_sleep):  # noqa: F811
     fake = SiteErrorAI()
     app = make_app(tmp_path, fake=fake)
-    app.engine.providers.configure_slot("AI-2", {"adapter_id": "anthropic"})
+    # a second, different AI is already connected by make_app (H6: one AI never approves its own writing)
     slept: list = []
     app.autobook.retry_policy = RetryPolicy([15, 30, 60, 120], 600, sleep=slept.append)
     b = JourneyBridge()

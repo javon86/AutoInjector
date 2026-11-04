@@ -270,7 +270,10 @@ class ChapterContextLoader(OperationHandler):
         while kept and count(mandatory + kept) > budget:
             kept.pop()
         omitted = len(optional) - len(kept)
-        findings.append(ctx.finding("OPTIONAL_OMITTED", f"{omitted} optional fact(s) omitted to fit {budget} tokens",
+        # H13: say exactly what was cut (the run and the chapter page show it with ⚠️)
+        cut = [f"{f.get('subject_id')} {f.get('predicate')}" for f in optional[len(kept):] if isinstance(f, dict)]
+        findings.append(ctx.finding("OPTIONAL_OMITTED", f"{omitted} optional fact(s) omitted to fit {budget} tokens: "
+                                    + "; ".join(cut[:12]) + (" …" if len(cut) > 12 else ""),
                                     severity="INFO", decision="PASS"))
         return mandatory + kept, count(mandatory + kept)
 
@@ -546,6 +549,13 @@ class ChapterWriter(ProseWriter):
         brief = getattr(ctx, "writing_brief", None)
         if brief:
             out["writing_brief"] = brief
+        try:  # H3 / H10: the book profile with the content limits, themes, question, point of view and tense
+            from ..assist import book_profile_brief  # noqa: PLC0415
+            prof = book_profile_brief(ctx.store, ctx.project_id)
+            if prof:
+                out["book_profile"] = prof
+        except Exception:  # noqa: BLE001 - context is best effort
+            pass
         return out
 
     def ai_task(self, ctx: Context) -> str:

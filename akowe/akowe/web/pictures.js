@@ -214,7 +214,12 @@ export async function viewPictures(main, x) {
             } catch (e) { fail(e, 'Could not show the prompt'); }
           } }, '👁 Prompt')),
         prog, preview);
-      for (const p of ch.pictures) card.appendChild(pictureBlock(p, ch.scenes, p.scene ? `Scene ${p.scene}` : 'Chapter picture'));
+      for (const p of ch.pictures) {
+        // H22: made from an older text of this chapter: say so, with the same Illustrate (a new candidate)
+        if (p.text_old) card.appendChild(h('p', { class: 'words-warn', role: 'note', 'data-testid': 'pics-text-old' }, p.text_old_words || '🖼 This chapter changed since the picture was made — remake it.',
+          ' ', h('button', { type: 'button', class: 'small', 'data-testid': 'pics-remake', onclick: () => runJob('/pictures/illustrate', Object.assign({ chapter_id: ch.chapter_id, engine: eng.value, count: 1, replace: true }, p.scene ? { scene: p.scene } : {}), prog, `Remaking the picture of chapter ${ch.number}`) }, '🖼 Remake')));
+        card.appendChild(pictureBlock(p, ch.scenes, p.scene ? `Scene ${p.scene}` : 'Chapter picture'));
+      }
       list.appendChild(card);
     }
     body.appendChild(list);

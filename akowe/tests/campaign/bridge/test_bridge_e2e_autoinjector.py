@@ -47,7 +47,16 @@ def e2e(tmp_path_factory):
     out = tmp_path_factory.mktemp("bf-e2e") / "run.json"
     env = dict(os.environ, SEED="1", QUIRKS="default", FAULTS="steal,timeout", OUT=str(out), AKOWE_ROOT=str(ROOT))
     env.pop("BF_BRIDGE_IMPL", None)
-    proc = subprocess.run(["node", str(E2E)], cwd=str(APP), env=env, capture_output=True, text=True, timeout=420)
+    # ~2.5 min alone, but it drives a real Electron app: on a loaded machine (the full suite plus other test runs
+    # at the same time) it took over 7 min and the old fixed 420 s limit raised TimeoutExpired, which turned all 32
+    # checks into bare errors. Allow more (BF_E2E_TIMEOUT to change it) and fail with the run's own output instead.
+    limit = int(os.environ.get("BF_E2E_TIMEOUT") or 1200)
+    try:
+        proc = subprocess.run(["node", str(E2E)], cwd=str(APP), env=env, capture_output=True, text=True, timeout=limit)
+    except subprocess.TimeoutExpired as e:
+        tail = lambda b: (b.decode("utf-8", "replace") if isinstance(b, bytes) else (b or ""))[-3000:]  # noqa: E731
+        pytest.fail(f"the e2e run did not finish within {limit} s (a busy machine? set BF_E2E_TIMEOUT):\n"
+                    f"{tail(e.stdout)}\n{tail(e.stderr)}")
     if not out.exists():
         pytest.fail(f"the e2e run produced no result (exit {proc.returncode}):\n{proc.stdout[-3000:]}\n{proc.stderr[-2000:]}")
     data = json.loads(out.read_text())

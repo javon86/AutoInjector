@@ -5042,9 +5042,11 @@ const LENGTH_TIP = () => [h('p', null, 'The length sets how many chapters the ou
 const PROFILE_HELP = {
   title: 'The working title. You can change it any time.', author: 'Your name or pen name, printed on the title page.',
   genre: 'What kind of story it is — it guides the AI’s choices.', audience: 'Who will read it; the AI matches the words and themes to them.',
-  length: 'How long the book should be; it sets how many chapters are planned.', tone: 'How it should feel to read.',
+  length: 'How long the book should be; it sets how many chapters are planned.', tone: 'How it should feel to read.', language: 'The language the book is written in, as a short code: en (English), yo (Yorùbá), pl (Polish), el (Greek)… Empty = English. The PDF, EPUB and Word files say it.',
   idea: 'Your story in a few sentences: who, where, and what goes wrong. Everything is built to fit this.',
+  checkpoint_every: 'While the book is written, an AI re-reads the newest chapters in full every so many chapters (and the whole book at the end), finds anything that disagrees — an injury forgotten, a lost item back, a wrong name or day — and fixes the small things itself. It stops for you only when a fix needs you.',
 };
+const CHECKPOINT_CHOICES = [['', 'Every 5 chapters (default)'], ['3', 'Every 3 chapters'], ['5', 'Every 5 chapters'], ['8', 'Every 8 chapters'], ['10', 'Every 10 chapters'], ['0', 'Only at the end of the book']];
 
 /** The profile fields as a form; returns {el, get()} */
 function profileFields(prof, prefix) {
@@ -5067,6 +5069,9 @@ function profileFields(prof, prefix) {
     field('audience', 'Who is it for?', aud),
     field('length', 'Length', lengthSel, infoTip('Length', ...LENGTH_TIP())),
     field('tone', 'Tone', h('input', { type: 'text', value: prof.tone || '', list: `${prefix}-tones`, maxlength: '200' }), dl(`${prefix}-tones`, TONES)),
+    field('checkpoint_every', 'Check the whole story every N chapters', h('select', { 'data-testid': 'profile-checkpoint-every' },
+      CHECKPOINT_CHOICES.map(([v, l]) => h('option', { value: v, selected: String(prof.checkpoint_every == null ? '' : prof.checkpoint_every) === v }, l)))),
+    field('language', 'Language of the book', h('input', { type: 'text', value: prof.language || '', placeholder: 'en', maxlength: '35', autocomplete: 'off' })),
     field('idea', 'Your idea in a paragraph', h('textarea', { rows: '4', maxlength: '4000' }, prof.idea || '')));
   f.idea.value = prof.idea || '';
   return { el, get: () => Object.fromEntries(Object.entries(f).map(([k, c]) => [k, c.value.trim()])), f };
@@ -5452,6 +5457,13 @@ function renderBook(holder, book, redraw) {
       : h('span', { class: 'badge b-ok' }, '🎉 Your book is made')),
     h('progress', { max: '100', value: String(pct), 'aria-label': `${pct}% done` }), wordsLine(book.words), msg,
     sequelBox(S.pid, S.branch)));
+  // ⚠️ what needs a look: approved without checks (H14), chapters to re-check after a hand edit (H5), instructions
+  // that were cut (H13), promises the ending did not keep (H11 / H12)
+  const att = (book.attention || {}).lines || [];
+  if (att.length) holder.appendChild(h('section', { class: 'card attention-card', 'data-testid': 'book-attention', 'aria-label': 'Needs a look' },
+    h('h2', null, '⚠️ Needs a look'),
+    h('ul', { class: 'small' }, att.slice(0, 12).map(l => h('li', null, l))),
+    att.length > 12 ? h('p', { class: 'small muted' }, `…and ${att.length - 12} more.`) : null));
   holder.appendChild(stepRail(book.steps.map(s => ({ id: s.id, title: s.title, state: BOOK_ERR[`${S.pid}:${s.id}`] ? 'problem' : s.state, word: RAIL_WORD[s.state] })),
     { label: 'Book home: all steps', current: book.next }));
   const ol = h('ol', { class: 'book-steps' });
@@ -6335,15 +6347,29 @@ function sequelBox(pid, branch, { testid = 'bk-sequel' } = {}) {
     if (!st || !st.possible || !(await confirmSequel(st))) return;
     btn.disabled = true;
     clear(msg).appendChild(loadingState('Starting the sequel…'));
+    await postSequel(false);
+  });
+  /** H7: the first press looks for what changed in this book (nothing starts yet); changes waiting for the author
+   *  stop the start with the reason and a plain "Start without them" (an explicit skip, never silent). */
+  async function postSequel(skip) {
     try {
-      const r = await api('POST', sequelPath(pid, branch), { body: { author_confirms: true } });
+      const r = await api('POST', sequelPath(pid, branch), { body: skip ? { author_confirms: true, skip_changes: true } : { author_confirms: true } });
+      if (!r.run) {
+        btn.disabled = false;
+        clear(msg).appendChild(h('div', { 'data-testid': `${testid}-finding` }, stateBox('ask', r.message || 'First, the AI reads this book for what changed.')));
+        return;
+      }
       clear(msg).appendChild(h('div', { 'data-testid': `${testid}-started` }, stateBox('ok', r.message || '📚 The sequel has started.')));
       if (r.run && r.run.id) openMakeBook(btn, { runId: r.run.id });
     } catch (e) {
       btn.disabled = false;
+      const err = ((e && e.body && e.body.errors) || [])[0] || {};
       clear(msg).appendChild(problemBox(toProblem(e, { book: S.project ? S.project.name : '', step: '📚 Start a sequel' }), {}, 'The sequel did not start'));
+      if (err.path === '/skip_changes') {
+        msg.appendChild(h('button', { type: 'button', 'data-testid': `${testid}-skip`, onclick: () => { clear(msg).appendChild(loadingState('Starting the sequel…')); postSequel(true); } }, 'Start without them (some changes may be missing)'));
+      }
     }
-  });
+  }
   return h('div', { class: 'sequel-box', 'data-testid': `${testid}-box` }, h('div', { class: 'row' }, btn, why), msg);
 }
 
@@ -7024,6 +7050,8 @@ function plannedCard(rid, { onSaved } = {}) {
       : `✔ Everything required is on the page (${c.on_page} of ${c.items} item(s) found).`,
     info.stored && info.stored.ai ? h('span', { class: 'muted' }, ` Checked by ${info.stored.ai.reviewer || 'an AI'}.`) : h('span', { class: 'muted' }, ' Akọwe’s word check (no AI yet).'),
     info.stored && info.stored.ai && info.stored.ai.independent === false ? h('span', { class: 'words-warn' }, ` ⚠️ ${info.stored.ai.warning}`) : null));
+    // H13: what did not fit in this chapter's instructions (said, never cut silently)
+    if (info.instructions_cut && info.instructions_cut.line) body.appendChild(h('p', { class: 'small words-warn', 'data-testid': 'instructions-cut' }, info.instructions_cut.line));
     body.appendChild(h('ul', { class: 'planned-list' }, items.map(i => h('li', { class: `pl-${i.status}${i.required ? '' : ' optional'}`, 'data-status': i.status },
       h('span', { 'aria-hidden': 'true' }, PLANNED_ICON[i.status] || '•'), ' ', i.label,
       i.required ? null : h('span', { class: 'small muted' }, ' (nice to have)'),
@@ -7769,7 +7797,16 @@ function runDecision(prob) {
   const r = MB.run;
   const extra = [];
   const opts = prob.options || [];
-  if (opts.includes('approve_anyway')) {
+  if (opts.includes('approve_anyway') && prob.no_second_check) {
+    // H6: the AI's own APPROVE was not enough (only one AI / no reason / unsure): the author decides
+    extra.push({ label: '✔ Approve it myself', cls: 'primary', fn: async () => {
+      const ok = await choiceDialog('Approve it yourself?', h('div', null,
+        h('p', null, prob.message || 'Nobody else checked this draft.'),
+        h('p', null, 'Read it first. Approving is YOUR approval (it is logged as yours); the editor and the plan check still run afterwards as notes.')),
+        [{ id: 'yes', label: '✔ Approve this one' }, { id: 'rest', label: '✔ Approve this and trust this AI for the rest of the run' }]);
+      if (ok === 'yes' || ok === 'rest') await runAction('decide', { action: 'approve_anyway', author_confirms: true, for_rest_of_run: ok === 'rest' }, 'Approved; continuing');
+    } });
+  } else if (opts.includes('approve_anyway')) {
     extra.push({ label: '✔ Approve anyway', cls: 'primary', fn: async () => {
       const ok = await choiceDialog('Approve as the author?', h('div', null,
         h('p', null, 'The AI reviewer did not pass this draft. Approving it anyway is YOUR approval (it is logged as yours), and the run continues.'),
@@ -7803,7 +7840,7 @@ function whoRead(u, who, at) {
 }
 function renderRun() {
   const r = MB.run; if (!r || !MB.dialog) return;
-  const sig = JSON.stringify([r.status, r.phase, r.current, r.problem && r.problem.code, (r.waiting || {}).retry_at, r.steps.map(s => [s.state, s.message, s.review_note, s.editor_note, (s.items || []).map(i => [i.state, i.editor, i.scenes, i.phase, i.note, i.planned, i.length]), s.planned_note]), (r.files || []).length, r.ais, r.ai_alerts, r.review_summary, r.editor_summary, r.planned_summary, r.eta, r.report, r.save, r.costs && [r.costs.calls, r.costs.ais]]);
+  const sig = JSON.stringify([r.status, r.phase, r.current, r.problem && r.problem.code, (r.waiting || {}).retry_at, r.steps.map(s => [s.state, s.message, s.review_note, s.editor_note, (s.items || []).map(i => [i.state, i.editor, i.scenes, i.phase, i.note, i.planned, i.length, i.continuity]), s.planned_note, s.checkpoints]), (r.files || []).length, r.ais, r.ai_alerts, r.review_summary, r.editor_summary, r.planned_summary, r.eta, r.report, r.save, r.costs && [r.costs.calls, r.costs.ais]]);
   if (sig === MB.sig && MB.dialog.querySelector('.mb-steps')) { updateRunClocks(); return; }
   MB.sig = sig;
   const w = r.state === 'replaced' ? ['↪', 'Replaced by a newer run', 'b-muted'] : r.state === 'interrupted' ? RUN_WORD.interrupted
@@ -7827,12 +7864,15 @@ function renderRun() {
       h('div', { class: 'mb-main' },
         h('div', { class: 'row mb-title-row' }, h('strong', null, s.title), setChip(s.set, s.op),
           h('span', { class: 'small muted mb-time' }, s.started_at ? fmtElapsed(sinceMs(s.started_at, s.finished_at || runEnd(r))) : ''),
-          s.problem ? hazard(Object.assign({}, s.problem), { retry: () => runAction('resume', {}, 'Trying again'), retryLabel: '🔁 Try again', extra: runDecision(s.problem),
+          s.problem ? hazard(Object.assign({}, s.problem), { retry: () => runAction('resume', {}, 'Trying again'), retryLabel: s.problem.code === 'CHECKPOINT_WAITING' ? '▶ Continue' : '🔁 Try again', extra: runDecision(s.problem),
             settings: ['CAPABILITY_UNAVAILABLE', 'UPSTREAM_UNAVAILABLE'].includes(s.problem.code) }) : null),
         h('p', { class: 'small mb-msg-line' }, s.message || s.about),
         s.review_note ? h('p', { class: `small mb-review-note${s.review_independent === false ? ' not-independent' : ''}`, 'data-testid': 'mb-review-note' }, '🧐 ', s.review_note) : null,
         s.editor_note ? h('p', { class: `small mb-review-note${/⚠️/.test(s.editor_note) ? ' not-independent' : ''}`, 'data-testid': 'mb-editor-note' }, '🖋 ', s.editor_note) : null,
         s.planned_note ? h('p', { class: `small mb-review-note${/⚠️/.test(s.planned_note) ? ' not-independent' : ''}`, 'data-testid': 'mb-planned-note' }, '✅ ', s.planned_note) : null,
+        (s.checkpoints || []).length ? h('ul', { class: 'small plain-list mb-checkpoints', 'data-testid': 'mb-checkpoints' }, s.checkpoints.map(line =>
+          h('li', { class: /waiting for you|⚠️/.test(line) ? 'not-independent' : '' }, line, ' ',
+            h('a', { href: link('p', r.project_id, r.branch_id || 'main', 'continuity'), onclick: () => closeMakeBook() }, 'report')))) : null,
         (s.items || []).length ? h('ul', { class: 'mb-items' }, s.items.map(i => h('li', { class: `st-${i.state}` },
           h('span', { 'aria-hidden': 'true' }, STEP_ICON[i.state] || '○'), ' ', i.label, i.words ? h('span', { class: 'muted' }, ` · ${i.words} words`) : null,
           i.phase ? h('span', { class: 'small muted', 'data-testid': 'mb-item-phase' }, ` · ${i.phase}…`) : null,
@@ -7850,6 +7890,9 @@ function renderRun() {
           i.length ? h('span', { class: 'small muted', 'data-testid': 'mb-item-length' }, i.length.mode === 'scene_by_scene' ? ` · 📏 written scene by scene (${i.length.scenes})` : '',
             i.length.target ? ` · target ~${Number(i.length.target).toLocaleString()}` : '', i.length.expanded ? ` · continued +${i.length.expanded} words` : '',
             i.length.target && i.words && i.words < i.length.target * 0.6 ? [' ', hazard({ code: 'CHAPTER_UNDER_TARGET', message: `${i.words} of about ${i.length.target} words` }, {}, { small: true })] : null) : null,
+          i.continuity && (i.continuity.weak || i.continuity.flags) ? h('span', { class: 'small mb-pl flagged', 'data-testid': 'mb-item-continuity' },
+            i.continuity.weak ? ' · 🧭 ⚠️ continuity read weakly (no AI was free) — read again later' : '',
+            i.continuity.flags ? ` · 🧭 ⚠️ ${i.continuity.flags} continuity question(s)` : '') : null,
           i.planned ? h('span', { class: `small mb-pl${i.planned.flagged ? ' flagged' : ''}`, 'data-testid': 'mb-item-planned' },
             i.planned.flagged ? ` · ⚠️ ${i.planned.missing} planned item(s) not on the page` : ' · ✅ plan on the page',
             i.planned.fixed ? ` (${i.planned.fixed} fix kept)` : '') : null))) : null));
@@ -7857,7 +7900,7 @@ function renderRun() {
   }
   const msg = h('div', { class: 'mb-msg', 'aria-live': 'polite' });
   if (r.problem && r.status === 'paused') {
-    msg.appendChild(problemBox(r.problem, { retry: () => runAction('resume', {}, 'Trying again'), retryLabel: r.problem.code === 'REVIEW_NOT_PASSED' ? '🔁 Try again (2 more AI fixes)' : '🔁 Try again',
+    msg.appendChild(problemBox(r.problem, { retry: () => runAction('resume', {}, 'Trying again'), retryLabel: r.problem.code === 'REVIEW_NOT_PASSED' ? '🔁 Try again (2 more AI fixes)' : r.problem.code === 'CHECKPOINT_WAITING' ? '▶ Continue' : '🔁 Try again',
       extra: runDecision(r.problem), settings: ['CAPABILITY_UNAVAILABLE', 'UPSTREAM_UNAVAILABLE'].includes(r.problem.code) },
     `${r.problem.where ? r.problem.where.step : 'A step'} needs you`));
     if (r.problem.code === 'REVIEW_NOT_PASSED' && r.problem.reasons && r.problem.reasons.length) {
@@ -8316,12 +8359,17 @@ async function viewReport(main) {
     if (!ov.written) { holder.appendChild(stateBox('empty', 'No chapter is written yet', h('p', null, 'Write the chapters first (🏠 Book home), then make the report.'))); return; }
     if (!rep) { holder.appendChild(stateBox('empty', 'No report yet', h('p', null, 'Press 📊 Make the report: Akọwe counts and checks the book and asks the AIs that did not write it to read it.'))); holder.appendChild(askBox(null)); return; }
     if (ov.stale) holder.appendChild(h('p', { class: 'words-warn', role: 'note', 'data-testid': 'rp-stale' }, hazard({ code: 'REPORT_STALE' }, { retry: () => run({ ai: true }), retryLabel: '📊 Make a new report' }, { small: true }), ' This report is for an earlier version of the book: a chapter changed since.'));
-    for (const w of rep.warnings || []) holder.appendChild(h('p', { class: /⚠️/.test(w) ? 'words-warn' : 'small muted', role: 'note' }, w));
+    for (const w of rep.warnings || []) holder.appendChild(h('p', { class: /⚠️|📖 Sampled/.test(w) ? 'words-warn' : 'small muted', role: 'note', 'data-testid': /^📖 Sampled/.test(w) ? 'rp-sampled' : null }, w));
+    if (rep.book_mode === 'digest' && ov.written) {  // H17: a long book was only sampled: offer the full read in parts
+      const slots = (rep.reviews || []).filter(r => r.slot).map(r => r.slot).slice(0, 3);
+      holder.appendChild(h('div', { class: 'row' }, h('button', { type: 'button', 'data-testid': 'rp-full', title: 'Each reviewer reads every part of the book in full (one AI message per part), then Akọwe merges what they found. This takes longer and uses more AI messages.',
+        onclick: ev => run(slots.length ? { slots, full: true } : { ai: true, full: true }, ev.currentTarget) }, '📖 Read the whole book')));
+    }
     const agg = rep.aggregate || {};
     const wd = rep.words || {};
     const reviews = (rep.reviews || []).filter(r => r.status === 'done');
     holder.appendChild(h('section', { class: 'card rp-summary', 'data-testid': 'rp-summary' }, h('h2', null, `“${rep.title}”`),
-      h('p', { class: 'small muted' }, `Made ${fmtTime(rep.at)} · ${rep.version.chapters.length} chapter(s) · ${rep.book_mode === 'digest' ? 'sent to the AIs as a per-chapter digest' : 'sent to the AIs whole'}${rep.run_id ? ` · Make-a-book run ${rep.run_id}` : ''}`),
+      h('p', { class: 'small muted' }, `Made ${fmtTime(rep.at)} · ${rep.version.chapters.length} chapter(s) · ${rep.book_mode === 'digest' ? 'sent to the AIs as a per-chapter digest (sampled)' : rep.book_mode === 'parts' ? 'read by the AIs in full, in parts' : 'sent to the AIs whole'}${rep.run_id ? ` · Make-a-book run ${rep.run_id}` : ''}`),
       h('div', { class: 'rp-kpis' },
         h('div', { class: 'kpi' }, h('strong', null, agg.overall != null ? `${agg.overall}/10` : '–'), h('span', { class: 'small' }, 'overall (median of each dimension, averaged)')),
         h('div', { class: 'kpi' }, h('strong', null, `${agg.reviewers || 0}`), h('span', { class: 'small' }, `AI reviewer(s), ${agg.independent || 0} independent`)),

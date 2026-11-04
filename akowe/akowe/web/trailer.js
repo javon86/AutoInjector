@@ -122,7 +122,7 @@ export async function viewTrailer(main, x) {
     x.api('GET', src.url.replace(/^\/api/, ''), { blob: true }).then(b => { const u = URL.createObjectURL(b); x.S.blobUrls.push(u); vid.src = u; }).catch(() => card.classList.add('no-play'));
     const when = t.at ? new Date(t.at).toLocaleString() : '';
     card.append(vid, h('p', { class: 'small muted', 'data-testid': 'trailer-meta' }, [t.seconds ? `${t.seconds} s` : null, t.width ? `${t.width}×${t.height}` : null, t.shots != null ? `${t.shots} shots` : null, t.mp4 ? 'MP4 + WebM' : 'WebM', when ? `made ${when}` : null].filter(Boolean).join(' · ')));
-    if (d.out_of_date) card.appendChild(h('div', { class: 'notice warn', role: 'status', 'data-testid': 'trailer-stale' }, 'The plan changed since this trailer was made: press 🎞 Make the trailer to make it again (unchanged shots are kept).'));
+    if (d.out_of_date) card.appendChild(h('div', { class: 'notice warn', role: 'status', 'data-testid': 'trailer-stale' }, (d.out_of_date_why && d.out_of_date_why.length ? `Out of date: ${d.out_of_date_why.join('; ')}.` : 'The plan changed since this trailer was made.') + ' Press 🎞 Make the trailer to make it again (unchanged shots are kept; after a change in the book, press 🎬 Plan it again from the book first).'));
     for (const w of t.warnings || []) card.appendChild(h('p', { class: 'small muted' }, `⚠ ${w}`));
     card.appendChild(h('p', { class: 'small muted' }, '💾 Save puts it in the book’s folder (Trailer/).'));
     return card;

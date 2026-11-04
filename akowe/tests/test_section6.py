@@ -147,7 +147,7 @@ def test_folder_layout_and_contents_after_a_finished_run(tmp_path):
 def test_no_keys_tokens_or_prompts_in_any_saved_file(tmp_path):
     app, fake = new_app(tmp_path)
     secret = "sk-ant-api03-TOPSECRET-0123456789abcdef"
-    app.engine.providers.configure_slot("AI-2", {"adapter_id": "anthropic", "api_key": secret})
+    app.engine.providers.configure_slot("AI-3", {"adapter_id": "anthropic", "api_key": secret, "input_cost_minor_per_mtok": 9999})
     run = run_book(app)
     assert run["status"] == "done", run.get("problem")
     folder = Path(app.saver.last(run["project_id"])["path"])

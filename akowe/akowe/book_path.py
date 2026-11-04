@@ -27,6 +27,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 import threading
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -38,7 +39,11 @@ PROFILE_FIELDS = {"title": 200, "author": 200, "genre": 120, "audience": 120, "l
                   "idea": 4000, "ai_slot": 20, "chapters": 3,
                   "blurb": 3000, "author_bio": 1500,  # 🎨 B3: the back-cover blurb and author bio
                   # 📖 Book Bible binder (binder_fields.py): series, sub-genre, content limits, central question
-                  "series": 200, "subgenre": 120, "content_limits": 1000, "central_question": 300}
+                  "series": 200, "subgenre": 120, "content_limits": 1000, "central_question": 300,
+                  "language": 35,  # 🔤 H18: the book's language (BCP 47, e.g. "en", "yo", "pl", "el")
+                  # H10: point of view (first / third) and tense (past / present); empty = from the genre
+                  "pov": 20, "tense": 20}
+LANGUAGE_RE = re.compile(r"^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8}){0,3}$")
 # 📖 Book Bible binder: profile values that are not plain text (cleaned in clean_profile)
 THEMES_MAX, THEME_MAX, SERIES_NUMBER_MAX = 3, 120, 999
 # P15: (label, default chapters, most chapters) per length preset (lengths.py holds the word targets).
@@ -90,6 +95,18 @@ def _err(code, path, message):
 
 
 # ---------------------------------------------------------------------------------- profile
+def letters_warning(text) -> str | None:
+    """🔤 H18: letters of a chapter that NO font of the PDF can print (neither the base-14 fonts nor the bundled
+    Unicode font). Accents, ọ / ẹ, ł, Greek and Cyrillic are fine; e.g. Chinese or emoji are not. None when fine."""
+    from .exporters.unifont import uncovered  # noqa: PLC0415
+    bad = uncovered(str(text or ""))
+    if not bad:
+        return None
+    shown = " ".join(bad[:12]) + (" …" if len(bad) > 12 else "")
+    return (f"⚠️ This chapter has letters the PDF cannot print: {shown}. The EPUB and Word files are fine, but the "
+            "PDF will refuse the book until they are replaced (or written another way).")
+
+
 def clean_profile(body) -> dict:
     if not isinstance(body, dict):
         raise _err("INVALID_INPUT", "", "the book profile must be a JSON object")
@@ -98,6 +115,15 @@ def clean_profile(body) -> dict:
         if k == "choices":  # P12 ending and style choices (story_choices.py); {} clears them
             from .story_choices import clean as clean_choices  # noqa: PLC0415
             out[k] = clean_choices(v)
+            continue
+        if k == "checkpoint_every":  # 🧭 "Check the whole story every N chapters" (checkpoints.py; 0 = off)
+            from .checkpoints import MAX_EVERY, clean_every  # noqa: PLC0415
+            cv = clean_every(v)
+            if cv is False:
+                raise _err("INVALID_INPUT", "/checkpoint_every", f"check the whole story every: a whole number "
+                           f"of chapters from 0 (off) to {MAX_EVERY}")
+            if cv is not None:
+                out[k] = cv
             continue
         if k in ("themes", "series_number", "binder_look"):  # 📖 Book Bible binder (binder_fields.py)
             out[k] = _clean_binder_value(k, v)
@@ -122,8 +148,13 @@ def clean_profile(body) -> dict:
             raise _err("INVALID_INPUT", f"/{k}", f"{k} is limited to {PROFILE_FIELDS[k]} characters")
         if k == "length" and v and v not in LENGTHS:
             raise _err("INVALID_INPUT", "/length", f"length: {LENGTH_CHOICES}")
+        if k == "language" and v and not LANGUAGE_RE.match(v):
+            raise _err("INVALID_INPUT", "/language", "language: a language tag such as en, en-GB, yo, pl or el")
         if k == "ai_slot" and v not in AI_SLOT_CHOICES:
             raise _err("INVALID_INPUT", "/ai_slot", "AI choice: empty (automatic), AI-1, AI-2, AI-3 or manual")
+        if k in ("pov", "tense"):
+            from .book_promises import clean as clean_promise  # noqa: PLC0415
+            v = clean_promise(k, v)
         out[k] = v
     return out
 
@@ -180,6 +211,8 @@ def save_profile(store, pid: str, body) -> dict:
         store.set_setting(f"book_profile:{pid}", prof)
         if clean.get("title") and old.get("title") and clean["title"] != old["title"]:
             tx.execute("UPDATE projects SET name=? WHERE project_id=?", (clean["title"], pid))
+            from .cover import follow_rename  # noqa: PLC0415 - 🎨 H23: the cover follows the renamed book
+            follow_rename(store, pid, old["title"], clean["title"])
     return prof
 
 
@@ -342,8 +375,14 @@ class BookPath:
             k09 = self.k09_for([ref])
             a = self.dispatch(ref["module_id"], "ACCEPT", base_ref=ref, payload=candidate_payload(ref, k09))
         ok = a["status"] == "APPROVED"
-        return {"record_id": ref["record_id"], "module_id": ref["module_id"], "ok": ok, "status": a["status"],
-                "problems": [] if ok else problems(a), "ref": (a.get("output_refs") or [ref])[0]}
+        out = {"record_id": ref["record_id"], "module_id": ref["module_id"], "ok": ok, "status": a["status"],
+               "problems": [] if ok else problems(a), "ref": (a.get("output_refs") or [ref])[0]}
+        if ok and ref["module_id"] == "C02":  # 🔤 H18: say it NOW, not when the PDF is made at the very end
+            warn = letters_warning(((self.rec(ref["record_id"], ref.get("version")) or {}).get("data") or {})
+                                   .get("text"))
+            if warn:
+                out["warnings"] = [warn]
+        return out
 
     def import_profile(self, kind, data, label):
         payload = {"owner_operation": "I01", "source_ref": None, "approval_ref": None, "fact_type": "AUXILIARY",
@@ -377,6 +416,11 @@ class BookPath:
     def title_author(self) -> tuple[str, str]:
         title = self.profile.get("title") or (self.store.project(self.pid) or {"name": "Untitled book"})["name"]
         return title, self.profile.get("author") or "Unknown author"
+
+    def language_tag(self) -> str:
+        """🔤 H18: the book's language from its profile (``language``), else English."""
+        v = str((self.profile or {}).get("language") or "").strip()
+        return v if v and LANGUAGE_RE.match(v) else "en"
 
     def metadata(self) -> dict:
         if not self.mem.get("identifier"):
@@ -637,9 +681,11 @@ class BookPath:
             words = self.word_stats(chapters)
         except Exception:  # noqa: BLE001 - a progress number must never break the checklist
             words = None
+        from . import attention  # noqa: PLC0415 - ⚠️ what needs a look (H5 / H13 / H14 / H11)
         return {"project_id": self.pid, "branch_id": self.branch, "ai_ready": ai, "profile": prof,
                 "steps": steps, "next": nxt["id"] if nxt else None, "words": words,
-                "done_count": sum(1 for s in steps if s["state"] == "done"), "total": len(steps)}
+                "done_count": sum(1 for s in steps if s["state"] == "done"), "total": len(steps),
+                "attention": attention.of_book(self.store, self.pid, self.branch)}
 
     def release_profiles(self):
         m = self.store.feature_manifest(self.pid, self.branch) or {}
@@ -775,10 +821,14 @@ class BookPath:
         prof = self.profile
         from .lengths import chapter_plan  # noqa: PLC0415
         lp = chapter_plan(prof, len(chapters), self.store)
-        instruction = (f"Write chapter {cid}: {chapters[cid]['objective']}".strip()
-                       + (f". Tone: {prof['tone']}" if prof.get("tone") else "")
-                       + (f". Audience: {prof['audience']}" if prof.get("audience") else "")
-                       + f". Length: about {lp['target_words']:,} words")[:2000]
+        from .book_promises import instruction as promises  # noqa: PLC0415 - H3 / H10
+        head = (f"Write chapter {cid}: {chapters[cid]['objective']}".strip()
+                + (f". Tone: {prof['tone']}" if prof.get("tone") else "")
+                + (f". Audience: {prof['audience']}" if prof.get("audience") else "")
+                + f". Length: about {lp['target_words']:,} words")
+        # the promises go first after the objective's line, so the 2 000-character cut never takes them
+        tail = ". " + promises(prof)
+        instruction = (head[:max(200, 2000 - len(tail))] + tail)[:2000]
         return {"chapter_id": cid, "outline_ref": outline["ref"], "context_ref": ctx["ref"], "instruction": instruction}
 
     def a_write_chapter(self, body):
@@ -796,6 +846,16 @@ class BookPath:
                     self.set_aside(latest, f"replaced: the author asked the AI to write chapter {cid} again")
             payload = self.prepare_chapter(cid)
             out = self._ai_or_manual("C02", payload, f"chapter “{cid}”", manual=manual)
+            made = out.get("created") if isinstance(out.get("created"), dict) else None
+            if made and made.get("module_id") == "C02":  # H13: what did not fit in this chapter's instructions
+                from . import brief_cuts  # noqa: PLC0415
+                order = [c["chapter_id"] for c in self.outline_chapters(outline)] if outline else []
+                cuts = brief_cuts.after_write(self.store, self.pid, self.branch, cid,
+                                              order.index(cid) + 1 if cid in order else None, made["record_id"],
+                                              payload.get("context_ref"))
+                if cuts:
+                    out["instructions_cut"] = cuts
+                    out["message"] = (str(out.get("message") or "") + " " + cuts["line"]).strip()
         if out.get("needs_manual"):
             out["manual_on"] = True
         return out
@@ -885,8 +945,10 @@ class BookPath:
             results.append(res)
         ok = all(x["ok"] for x in results)
         n = sum(1 for x in results if x["ok"])
-        return {"ok": ok, "results": results,
-                "message": f"Approved {n} of {len(results)}." + ("" if ok else " Some need fixing — see below.")}
+        warns = [w for x in results for w in x.get("warnings") or []]
+        return {"ok": ok, "results": results, "warnings": warns,
+                "message": f"Approved {n} of {len(results)}." + ("" if ok else " Some need fixing — see below.")
+                + (" " + " ".join(warns[:2]) if warns else "")}
 
     def _chapter_of(self, rid: str) -> str | None:
         outline = self.outline()
@@ -905,8 +967,10 @@ class BookPath:
         # book was laid out with; only the records that carry the title/author are made again.
         keep = {k: old[k] for k in ("font_file", "font", "page", "toc_style")
                 if self.ref_ok(old.get(k), approved=False)}
-        refresh = len(keep) == 4
+        lang = self.language_tag()
+        refresh = len(keep) == 4 and old.get("language", "en") == lang  # a new language: a new font profile
         fmt = dict(keep) if refresh else {}
+        fmt["language"] = lang
         if not refresh:
             fmt["font_file"] = self.import_profile("ASSET_MANIFEST", {"assets": [],
                                                                       "placement_ids": ["font:times-roman"]},
@@ -914,18 +978,18 @@ class BookPath:
             fmt["font"] = self.import_profile("FONT_PROFILE", {"font_refs": [fmt["font_file"]],
                                                                "embedding_permitted": True,
                                                                "fallback_names": ["Times-Roman"], "font_size_pt": 11,
-                                                               "line_height_pt": 14, "language_tag": "en"}, "Font")
+                                                               "line_height_pt": 14, "language_tag": lang}, "Font")
             fmt["page"] = self.import_profile("PAGE_PROFILE", {"width_mm": 152.4, "height_mm": 228.6, "bleed_mm": 0,
                                                                "safe_margin_mm": 15}, "Page size 6 x 9 in")
         fmt["pdf_profile"] = self.import_profile("OUTPUT_PROFILE", {
             "profile_id": "manuscript-pdf", "profile_type": "MANUSCRIPT_PDF",
             "required_checks": ["H05", "H09"], "required_export_operations": ["G11"],
-            "artwork_selected": False, "language_tag": "en", "metadata": dict(md), "printer_profile_ref": None,
+            "artwork_selected": False, "language_tag": lang, "metadata": dict(md), "printer_profile_ref": None,
             "page_profile_ref": fmt["page"], "font_profile_ref": fmt["font"]}, "PDF settings")
         for ptype, key, page in (("EPUB_REFLOWABLE", "epub_profile", None), ("EDITABLE_DOCX", "docx_profile", fmt["page"])):
             fmt[key] = self.import_profile("OUTPUT_PROFILE", {
                 "profile_id": ptype.lower(), "profile_type": ptype, "required_checks": ["H09"],
-                "required_export_operations": [], "artwork_selected": False, "language_tag": "en",
+                "required_export_operations": [], "artwork_selected": False, "language_tag": lang,
                 "metadata": dict(md), "printer_profile_ref": None, "page_profile_ref": page,
                 "font_profile_ref": fmt["font"]}, f"{ptype.split('_')[0]} settings")
         fmt["metadata"] = self.import_profile("PUBLICATION_METADATA", dict(md), "Title and author")
@@ -966,7 +1030,8 @@ class BookPath:
         compile_payload = {"ordered_manifest_ref": asm["G02"], "approved_chapter_refs": refs,
                            "section_id_policy": "STABLE_ID"}
         asm["G01_plain"], _ = self.create("G01", compile_payload)
-        asm["G05_plain"], _ = self.create("G05", {"font_profile_ref": self._appr(fmt["font"]), "language_tag": "en",
+        lang = fmt.get("language") or "en"  # 🔤 H18: the language the format was made with (its font profile's)
+        asm["G05_plain"], _ = self.create("G05", {"font_profile_ref": self._appr(fmt["font"]), "language_tag": lang,
                                                   "manuscript_ref": asm["G01_plain"]})
         # Title page (title and author from the book profile) and chapter headings, compiled into the manuscript.
         asm["G06"], _ = self.create("G06", {"typography_ref": asm["G05_plain"],
@@ -974,7 +1039,7 @@ class BookPath:
         asm["G08"], _ = self.create("G08", {"book_ref": asm["G01_plain"], "front_matter_items": ["title_page"],
                                             "publication_profile_ref": self._appr(fmt["pdf_profile"])})
         asm["G01"], _ = self.create("G01", compile_payload, input_refs=[asm["G06"], asm["G08"]])
-        asm["G05"], _ = self.create("G05", {"font_profile_ref": self._appr(fmt["font"]), "language_tag": "en",
+        asm["G05"], _ = self.create("G05", {"font_profile_ref": self._appr(fmt["font"]), "language_tag": lang,
                                             "manuscript_ref": asm["G01"]})
         asm["G04"], _ = self.create("G04", {"manuscript_ref": asm["G01"], "page_profile_ref": self._appr(fmt["page"]),
                                             "typography_ref": asm["G05"],

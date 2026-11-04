@@ -239,6 +239,11 @@ def book_profile_brief(store, pid: str) -> dict:
     except Exception:  # noqa: BLE001 - context is best effort
         return {}
     out = {k: prof[k] for k in ("title", "genre", "audience", "length", "tone", "idea") if prof.get(k)}
+    try:  # H3 / H10: content limits, themes, the central question, point of view and tense reach every AI
+        from . import book_promises  # noqa: PLC0415
+        out.update(book_promises.brief(prof))
+    except Exception:  # noqa: BLE001 - context is best effort
+        pass
     try:  # P12: the author's ending and style choices (only the ones made; "let the AI choose" says nothing)
         from . import story_choices  # noqa: PLC0415
         sc = story_choices.brief(story_choices.of_profile(prof))

@@ -528,6 +528,62 @@ and a per-book setting for how strictly the story follows the characters. Done:
 - *Not done:* ✍ Write all chapters (outside a ⚡ run) does not run the just-in-time step yet; contradiction checks
   cover colours, weapons and the weapon hand only (no AI reading); places get no automatic establishing picture.
 
+## Story ledger + continuity checkpoints for long books (2026-11, holes H1 H2 H4 H8 H9 H19 H20 H21)
+
+From `docs/HOLES_2026-11.md` and the wish for 25–50 chapter books. Done (fake AI tests: `tests/test_story_ledger.py`;
+the browser: `tests/campaign/ui/test_ui_continuity.py`):
+
+- [x] **📒 Story ledger** (`akowe/story_ledger.py`, setting `story_ledger:<pid>:<branch>`): the continuity tracking
+  call (one AI call per approved chapter, as before) also returns the chapter's `story` part — a 2–4 line summary,
+  per character injuries (new / healing / healed), `items_gained` / `items_lost` / `carrying` (series.py `CATS`
+  names), alive or dead, where they are at the end, lingering magic after-effects; new proper names; story day, date,
+  season and time since the last chapter; trips (the travel-time table); who learns / is surprised by a secret;
+  one line per relationship; money, prices, distances and counts. Akọwe keeps the last ~1 500 characters of the
+  approved text too.
+- [x] **H1 handoff:** the next chapter's writer AND its reviewer (and the AI fix) get `previous_chapter_end`,
+  `story_so_far` (a few lines per chapter; older chapters one line; a 🧭 checkpoint's summary replaces the chapters it
+  covers) and `story_ledger` (the people IN this chapter first). The tracker and the brief choose people by who is in
+  the chapter (scene cards, then the text) — the fixed caps (16 names, 8 people, 8 hazards, "cut to 3") are gone;
+  when space is short the people not in the chapter go first, then details, then the oldest hazards.
+- [x] **H2 / H4 / H8 / H9 / H19 checks** (`story_ledger.check`, after every tracked chapter): limping → running with
+  no time to heal, a lost item drawn again, the dead speaking, a near-miss spelling of a known name (forge_check's
+  rule) or "Salt Mere" for "Saltmere", a three-day ride arriving next morning, snow then blossom a week later, a day
+  number going backwards, someone surprised by a secret they already know, a distance or price that changed. Shown as
+  ⚠️ run notes, on the 🧭 Continuity page and in Reports/Continuity.md; fed to the checkpoints.
+- [x] **H20:** the editor's rewrites get the same continuity (`editor.propose` → `continuity.review_extra`).
+- [x] **H21:** a chapter read while no AI was free keeps Akọwe's keyword reading marked **weak** (a ⚠️ run note, the
+  chapter row, the continuity page) and is read again by an AI before the next chapter is tracked and at every
+  checkpoint.
+- [x] **🧭 Checkpoints** (`akowe/checkpoints.py`, setting `checkpoints:<pid>:<branch>`): every N approved chapters
+  (book profile "Check the whole story every N chapters", `checkpoint_every`, default 5, 0 = only at the end), at the
+  end of each act when the outline marks acts (`plan.act` / `plan.parent_id`), and a final one that reads the whole
+  book. Each reads only its new chapters IN FULL (in parts of ≤ 60 000 characters, a long chapter split at paragraph
+  breaks) plus the compact ledger, locked details, earlier summaries and Akọwe's flags; lists every inconsistency with
+  a quote and a minimal fix; applies the fix word for word as a new draft of that chapter through the run's normal
+  review loop (review, editor, planned check, approval under consent), then tracks it again. Never touches the
+  author's own text. Pauses once per checkpoint only for problems it cannot fix safely (▶ Continue goes on). Step
+  list: "🧭 Checkpoint after chapter 10: 2 problems fixed, 1 waiting for you" with a link to the report (🧭 Continuity
+  page → Checkpoints; GET `/review/continuity/checkpoints`). Pause / resume safe: finished parts are stored at once.
+- *Not done:* "Bram" → "Brannock" style renames (not a near-miss spelling) are left to the checkpoint AI;
+  ✍ Write all chapters (outside a ⚡ run) does not run checkpoints; the keyword reading is English only.
+- [x] **Working with job L2 (checks & approvals), merged 2026-11-04** (`tests/test_merge_l1_l2.py`, 4 tests):
+  - *A hand edit (H5):* `continuity.INVALIDATE_HOOKS` now holds `_ledger_hook` and `_checkpoint_hook`. When
+    `invalidate_after_chapter` says chapter N changed, the 📒 story ledger entries of chapter N and every later chapter
+    are set aside (`story_ledger.invalidate_from`: out of the story so far, the ledger brief and the checks; marked
+    `weak_why: "changed"` so `retrack_weak` reads them again; a new reading replaces the entry), and every 🧭 checkpoint
+    after N is marked for redo (`checkpoints.invalidate_from`: status `new`, its summary leaves the story so far, the
+    old result kept in `redo_of`; the step line says "to be read again (chapter N was changed by hand)"). A
+    checkpoint's own fix is noted as the text the book goes on from (`note_written`), so it is never taken for a hand
+    edit.
+  - *Setups and payoffs at checkpoints (H11):* a checkpoint before the last chapter runs L2's light check
+    (`ending_check.check(upto=N, final=False)`, one AI call) when the plan has setups or threads; a setup or thread
+    the page already dropped is a 🎯 run note (`CHECKPOINT_SETUPS`) and a line in the checkpoint report. The final
+    checkpoint does not: the ONE final ending check is autobook `_ending_pass`.
+  - *What was cut (H13):* the continuity part of the brief (`continuity.section`) and the story ledger brief
+    (`story_ledger.brief`, `story_so_far`) say what they trimmed through `brief_cuts.note` ("continuity — tracked state
+    of characters not in this chapter: …", "story ledger — travel times: …"); it joins the chapter brief's `cut`
+    list, so the run's ⚠️ "the instructions were too long" and the chapter page list it.
+
 ## Prevention pass (2026-10-27, "solve problems before they become problems")
 
 - [x] **Alfred's local AI connection:**
@@ -638,8 +694,8 @@ and a per-book setting for how strictly the story follows the characters. Done:
   6. **Voice:** a damaged voice file is detected, with a one-click re-download. Partial downloads are no longer kept.
   7. **Log export:** "Everything" needs a second confirmation that says what it includes, and Alfred can never "always allow" it.
 
-- **Stable Diffusion (B1) — not yet tried on a real GPU:** everything was tested against fake Forge/ComfyUI
-  servers, fake processes and a fake download server. First real run on the user's PC: Stability Matrix package
+- **Stable Diffusion (B1) — used on the user's PC (Forge; see the 2026-10-25 evening log above), the rest not yet tried for real:** at first everything was tested against fake Forge/ComfyUI
+  servers, fake processes and a fake download server. Still to try on the PC: Stability Matrix package
   start (venv + launch options + `--api`), ComfyUI portable install/extract (needs 7-Zip or a .7z-capable Windows
   `tar`), Flux/SD3 UNet-only models (not supported by the built-in ComfyUI graph). See
   `desktop-app/STABLE_DIFFUSION_PLAN.md` → "Problems / limits".
@@ -1139,3 +1195,108 @@ and a per-book setting for how strictly the story follows the characters. Done:
   `::test_at_a_glance_picture_maker_off_and_a_series_of_two`, `::test_toolbar_four_tools_and_view_options_at_1280x720`,
   `::test_at_a_glance_in_every_look` (7), `::test_what_is_this_page_on_every_template`. *Not done:* the
   picture-maker check runs once per opening (it is not re-checked while the page stays open).
+- **🕳 Holes H7, H15-H18, H22-H26 fixed (2026-11-03, docs/HOLES_2026-11.md, job "L3").** Each one was reproduced with a
+  test first.
+  - *H7 Sequels:* 📚 Start a sequel now first runs ✨ Find what changed (also for a book on its own, whose run never
+    looked); while changes wait for the author it refuses in plain words with "Start without them" (`skip_changes`, an
+    explicit skip that is remembered). The new book gets the 🔒 protected facts (worked out again from the entries, not
+    wiped), every Character Forge dossier with its locks and the just-in-time details (`book_bible.forge_carry` /
+    `seed_forge`, plus the binder's height / weight / handedness), the status, items, abilities and losses at the END of
+    the book (in the character's "constraints", the only free canon field), and "What happened in book N" (premise + the
+    chapter summaries, `series.story_so_far`). "Exactly as they were at the end" is only said when the changes were
+    reviewed. Files: `series.py`, `book_bible.py`, one call in `autobook._seed_canon`, `web/app.js`, `web/binder.js`.
+  - *H15 Pictures and 🔒 locks:* every portrait / view / sheet keeps a fingerprint of the description it was made from
+    (`forge.looks_fingerprint`); `book_pictures.outdated` lists what is older; At a glance says "🖼 2 pictures are older
+    than their description — remake" with 🖼 Remake them (`POST …/binder/pictures/remake`) and 🔒 Replace the lock
+    (asks first; `POST …/binder/pictures/lock` with `author_confirms`; AutoInjector's `/image/locks` takes
+    `replace: true`, never without it).
+  - *H16 Saving:* a part that fails is named ("Not updated: Book Bible.docx (why)") and its file saved before is
+    renamed "… (older version)"; a later good save removes it (`book_save.part_failed`, `_mark_older`).
+  - *H17 Long books:* the report says "📖 Sampled: the reviewers read about N% …" and 📖 Read the whole book reads it
+    in parts (each part whole, ≤ 60 000 characters) and merges each reviewer's findings (median scores,
+    `book_report.book_parts` / `merge_part_rows`, `full: true`).
+  - *H18 Letters:* DejaVu Serif (free licence, `exporters/fonts/`, 380 kB) is embedded as a subset (pure Python,
+    `exporters/unifont.py`) for every run of letters WinAnsi lacks — the book PDF, the dossier PDF, map labels,
+    captions and the cover; G05 blocks only letters no font has; a chapter's approval warns at once about those;
+    the book profile has a `language` (BCP 47) used by the format profiles and G05 instead of "en".
+  - *H22 Chapter pictures* are made from the written chapter (the passage past the scene's middle, the characters it
+    names first) and say "Chapter N changed since this picture was made" with 🖼 Remake (`replace: true`).
+  - *H23* The cover page compares the blurb / tagline / subtitle / series with the book and the Book Bible (names and
+    numbers found nowhere, a cover title or author that is not the book's); a renamed book takes its cover with it
+    (`cover.follow_rename`); a Greek / Cyrillic-only title gets its own file name (`cover.file_stem`).
+  - *H24* The trailer remembers the book's chapters and the looks it was made from and says which changed.
+  - *H25* Alfred's pause / resume / cancel act on the open (or named) book's run, and ask which when several books
+    have one (`WHICH_RUN`).
+  - *H26* An untagged Akọwe reply whose JSON is still open waits (up to 36 s) instead of being handed over as finished
+    (`smart-json.replyLooksCut`); the send script checks the WHOLE pasted text (start, end, length), not its first
+    60 characters (`automation.composerHoldsText`).
+  - Tests: `akowe/tests/test_holes_l3.py` (8), `test_set_g.py::test_h18_…`, `test_cover.py::test_h18_…`,
+    `test_pictures.py::test_h22_…`, `test_trailer.py::test_h24_…`, `test_1080_fixes.py` and `test_binder.py` (H16),
+    UI `test_ui_binder.py::test_h7_…` and `::test_h15_…`; desktop `test/sd-studio.test.js`,
+    `test/alfred-current-book.test.js`, `test/smart-json.test.js`.
+  - *Not done:* a run's own chapter approvals (autobook, another job's area) do not log the letters warning (the book
+    page's approve does); the Unicode font has no bold / italic (those runs print in the regular face); a cut-off reply
+    is still accepted after 36 s (Akọwe then repairs it or asks again); items / places / magic dossiers are not carried
+    into a sequel's Forge (only characters; the series already carries places, items and groups); not tried with a real
+    AI, Stable Diffusion or a real PC.
+- **🕳 Holes H3 · H5 · H6 · H10 · H11 · H12 · H13 · H14 of `docs/HOLES_2026-11.md` (2026-11-03, job L2 "story
+  promises & approvals").** Each hole was first reproduced with the fake AI (`tests/test_holes_l2.py`, 20 tests: 18
+  fail on the code before this change, the other 2 test the new modules alone), then fixed at the root:
+  - *H3 content limits, themes, central question* (`akowe/akowe/book_promises.py`): they reach every AI that gets the
+    book profile (`assist.book_profile_brief`), the chapter writer's context (`set_c` ChapterWriter `book_profile`)
+    and the chapter instruction itself (`book_path.prepare_chapter`: "Content limits (never show this): …",
+    "Themes: …", "The book's central question: …" — placed so the 2 000-character cut never takes them). The AI
+    reviewer is told the rule and has an optional `content_limits_breach`; a breach (or a reason starting "Content
+    limits:") turns any verdict into REVISE (`review.promises_kept`) — never approved, never auto-approved. The
+    editor's rubric has the dimension **content_limits** ("Respects the author's content limits", only when limits are
+    set); any finding there is a REVISE whatever the strictness (`editor_rubric.ALWAYS_REVISE`).
+  - *H10 point of view and tense*: decided when the book is invented (the AI's `point_of_view` / `tense`, else the
+    genre's default: first person for young adult / romance / memoir, third person otherwise; past tense) and saved
+    in the profile (`pov`, `tense`; editable, validated). In every brief and instruction ("Point of view: third
+    person, past tense (keep it in every chapter)"). Every chapter review counts pronouns and verbs outside dialogue
+    (`book_promises.pov_tense_problem`, the style-card count); a clear switch is a REVISE with the reason in plain
+    words.
+  - *H6 no self-approval* (`akowe/akowe/approval_trust.py`): an AI's APPROVE approves on its own (run consent or
+    standing auto-approve) only when the reviewer is a different AI from the writer, gives at least one reason and
+    has confidence ≥ 0.6. Otherwise the run pauses with one plain decision — "Only Claude is working, so nobody else
+    checked this chapter — approve it yourself, or wait for another AI" (codes NO_SECOND_AI / NO_REASON /
+    LOW_CONFIDENCE; options ✔ Approve it myself · 🔁 Try again). The ⚡ dialog offers "✔ Approve this one" and "✔
+    Approve this and trust this AI for the rest of the run" (`for_rest_of_run`; each such approval is listed). The
+    standing auto-approve is withheld the same way (`review.auto_approve_withheld`). The test harness now runs with a
+    second, different AI by default (`test_autobook.make_app(second_ai=True)`; one-AI tests answer the pause with
+    `autobook_fake.trust_one_ai`). The other harnesses got the same second AI: `tests/campaign/flow/flowkit.make_app`,
+    `tests/campaign/fault/test_fault_concurrency.make_app` and `fault_server.py`; the "AI is down" story-details test
+    keeps one AI (`second_ai=False`). Full non-UI suite: 2 700 passed, 114 skipped, 2 xfailed.
+  - *H14 approved without checks*: "Approve anyway", the standing auto-approve and "approve it yourself" are written
+    down (`approved_unchecked:<pid>:<branch>`); the editor (craft review only — nothing is rewritten) and the
+    planned-to-page check still run afterwards as notes (`autobook._notes_after_approval`, also after a resume), and
+    the result is stored with the entry. Listed in the book report (`unchecked` + a ⚠️ warning) and on 🏠 Book home
+    (`status.attention`, the new "⚠️ Needs a look" card).
+  - *H5 a hand edit to an approved chapter* (`continuity.py`): ONE function, `invalidate_after_chapter(store, pid,
+    branch, chapter_id, number=…)` — the chapter's tracked state is set aside (status `out_of_date`, never given to a
+    writer or reviewer; `section` also skips a state read from another text), every later chapter already written is
+    flagged "⚠ Chapter 5 changed after chapter 6 was written — check chapter 6", and `INVALIDATE_HOOKS` run (for the
+    L1 ledgers). `check_edits` finds such edits (tracked / seen version vs the approved version now) from the run,
+    the continuity page and Book home; `tracked(…, rec)` is no longer "done" for an out-of-date state, so the run
+    tracks it again; on resume a draft of a later chapter written before the edit is set aside and written again
+    (`DRAFT_BEFORE_EDIT`). POST `…/review/continuity/recheck/<chapter>/done` = "I checked it".
+  - *H11 / H12 the ending keeps the promises* (`akowe/akowe/ending_check.py`): after the last chapter one AI call
+    (another AI than the writer when one works) checks each plot obligation / outline thread, each named character
+    of some importance who vanished (not seen in the last third), the main character's change (sheet: wants, needs,
+    change limits) and the book's question (premise + central question) against the page. Open items with a fix go
+    to the last chapter(s) through the editor's rewrite machinery and are reviewed and approved again under the run
+    consent (one round, then a second check); what stays open is said in the run and listed on Book home.
+    `ending_check.check(review, job, upto=N, final=False)` is the checkpoint L1 can call (stored separately); routes
+    GET `…/review/continuity/ending` and POST `…/review/continuity/ending/check` ({upto}).
+  - *H13 instruction cuts*: least important first — a full story-rules ledger drops retired rules before new ones
+    (`story_rules.decide_proposals`), the planned-to-page items keep the beat and must-shows before scene goals and
+    details (`planned.most_important`, also for the AI check). Web AIs get realistic context limits unless the author
+    set one (`providers.WEB_CONTEXT_TOKENS`: ChatGPT 32 000, Gemini 32 000, Claude web 100 000 tokens; the API keeps
+    200 000). What was cut is said exactly: the chapter brief's meta `cut` (story rules, must-shows, planned details,
+    shortened voice cards) and the C01 `OPTIONAL_OMITTED` finding (now lists the facts) → `brief_cuts.py` → a ⚠️
+    event in the run ("⚠️ Chapter 3: the instructions were too long, so Akọwe left out — …"), the chapter page
+    (planned card) and Book home.
+  - *Not done:* (the continuity part of the brief now reports its cuts too — see "Working with job L2" under the
+    story ledger section); the POV/tense check is a word count (it cannot see a deliberate second narrator); the ending fix
+    adds to the last paragraph(s) only (it does not restructure a chapter); H11's setups come from the plan's
+    obligations and threads (a setup that only exists on the page is found only if the AI notices it).

@@ -22,7 +22,11 @@ from akowe.errors import AkoweError
 from akowe.server import content_disposition
 
 from autobook_fake import BookFakeAI
-from test_autobook import make_app as make_one_ai_app
+from test_autobook import make_app as _autobook_app
+
+
+def make_one_ai_app(tmp_path, **kw):
+    return _autobook_app(tmp_path, second_ai=False, **kw)
 from test_failover_review import SlotFake, make_app, run_book
 from test_server import TOKEN, call, server  # noqa: F401
 

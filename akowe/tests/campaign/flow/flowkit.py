@@ -128,12 +128,18 @@ class TextBridgeAI(AutoInjectorAdapter):
         return {"ok": True, "text": text, "seq": seq, "reply_to": seq}
 
 
-def make_app(tmp_path, name="data", fake=None):
+def make_app(tmp_path, name="data", fake=None, second_ai=True):
+    """``second_ai``: a second, different AI (a "manual" slot answered by the fake, dearer so AI-1 writes) reviews the
+    drafts — H6: one AI may not approve its own writing, so a run with one AI pauses for the author."""
     app = App(tmp_path / name, token=TOKEN)
     app.engine.providers.secret_path = tmp_path / "secrets.json"
     if fake is not None:
         app.engine.providers.test_adapter = fake
         app.engine.providers.configure_slot("AI-1", {"adapter_id": "anthropic", "api_key": "sk-fake-flow-key"})
+        if second_ai:
+            app.engine.providers.configure_slot("AI-2", {"adapter_id": "manual",
+                                                         "input_cost_minor_per_mtok": 9000,
+                                                         "output_cost_minor_per_mtok": 40000})
     fast = RetryPolicy([0.01, 0.02], 1)
     app.autobook.retry_policy = fast
     app.write_all.retry_policy = fast

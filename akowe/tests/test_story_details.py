@@ -144,7 +144,7 @@ def test_essentials_never_overwrite_the_authors_text_and_resume_does_not_refill(
 def test_ai_down_skips_with_an_event_and_fills_later(tmp_path):
     fake = BookFakeAI()
     fake.fail_kind("details", *[AkoweError("UPSTREAM_UNAVAILABLE", "/ai", "the AI is down") for _ in range(4)])
-    app = make_app(tmp_path, fake=fake)
+    app = make_app(tmp_path, fake=fake, second_ai=False)  # one AI that is down (a second one would answer)
     run = done(run_book(app, {"length": "short_story"}))
     assert events(app, run, code="DETAILS_LATER")
     pid = run["project_id"]
@@ -304,7 +304,7 @@ def test_default_is_balanced_and_a_sequel_inherits_the_setting(tmp_path):
     # a book made plot-led; its sequel starts plot-led too (the setting is per book)
     run2 = done(run_book(app, {"length": "short_story", "choices": {"characters": "plot_led"}}))
     from akowe import series
-    out = series.start_sequel(app, "author", run2["project_id"], "main", {"author_confirms": True})
+    out = series.start_sequel(app, "author", run2["project_id"], "main", {"author_confirms": True, "skip_changes": True})
     app.autobook.wait_for(out["run"]["id"], 120)
     seq = done(app.autobook.public(app.autobook.get(out["run"]["id"])))
     assert character_mode.of_store(app.store, seq["project_id"]) == "plot_led"

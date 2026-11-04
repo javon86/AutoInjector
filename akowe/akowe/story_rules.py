@@ -477,6 +477,10 @@ def decide_proposals(store, pid, branch, *, accept=None, reject=None, version=No
             new = dict(it["rule"], id=f"r{n}", status="active")
             rules.append(new)
             by_id[new["id"]] = new
+    if len(rules) > MAX_RULES:  # H13: the ledger is full — drop retired rules first, never the newest active ones
+        live = [r for r in rules if r.get("status") != "retired"]
+        keep = {id(r) for r in live + [r for r in rules if r.get("status") == "retired"][:max(0, MAX_RULES - len(live))]}
+        rules = [r for r in rules if id(r) in keep]  # the order is kept
     e = save(store, pid, branch, rules[:MAX_RULES], by=by if by in ("author", "ai") else "author",
              slot=props.get("slot") if by != "author" else None, base_version=entry["version"],
              basis=props.get("basis"), how=f"proposals ({len(take)} of {len(props['items'])})")

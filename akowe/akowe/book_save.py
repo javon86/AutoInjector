@@ -266,6 +266,36 @@ def inside(folder: Path, rel: str) -> bool:
     return target != root and root in target.parents
 
 
+OLDER = " (older version)"
+
+
+def _why(exc: BaseException) -> str:
+    """A short plain reason for a part that failed (the code and message of Akọwe's own errors)."""
+    if isinstance(exc, AkoweError):
+        e = exc.errors[0] if exc.errors else {}
+        return str(e.get("message") or exc.code)[:160]
+    return (str(exc) or type(exc).__name__)[:160]
+
+
+def part_failed(info: dict, rel: str, why: str) -> None:
+    """💾 H16: a part of the save could not be made this time: the file saved before is not current any more. It is
+    remembered (``keep``: not deleted) and named with the reason (``skipped_parts``); ``save_now`` then renames the
+    old file "… (older version)" so it is never mistaken for the current one."""
+    info.setdefault("keep", set()).add(rel)
+    sk = info.setdefault("skipped_parts", [])
+    if not any(x.get("file") == rel for x in sk):
+        sk.append({"file": rel, "why": why})
+
+
+def older_name(rel: str) -> str:
+    """"Book Bible/Book Bible.docx" -> "Book Bible/Book Bible (older version).docx" (once)."""
+    head, _sep, name = rel.rpartition("/")
+    stem, dot, ext = name.rpartition(".") if "." in name.lstrip(".") else (name, "", "")
+    if stem.endswith(OLDER):
+        return rel
+    return (f"{head}/" if head else "") + f"{stem}{OLDER}" + (f".{ext}" if dot else "")
+
+
 def check_folder(path: Path) -> SaveProblem | None:
     """Can Akọwe write into this books folder (made when missing)? Also: is the path short enough?"""
     if not path.is_absolute():
@@ -538,9 +568,10 @@ class SaveService:
         try:
             from . import binder  # noqa: PLC0415
             binder.save_files(app, pid, branch, files, keep, info)
-        except Exception:  # noqa: BLE001 - the rest of the save still happens
+        except Exception as exc:  # noqa: BLE001 - the rest of the save still happens
             log.exception("binder files for the save failed")
-            keep.update({"Book Bible/Book Bible.docx", "Book Bible/Book Bible.pdf"})
+            for rel in ("Book Bible/Book Bible.docx", "Book Bible/Book Bible.pdf"):
+                part_failed(info, rel, f"the Book Bible could not be made ({_why(exc)})")
         # Reports/
         phase("Writing the reports")
         rep = None
@@ -553,9 +584,9 @@ class SaveService:
             text("Reports/Book report.md", br.render_markdown(rep))
             try:
                 files["Reports/Book report.pdf"] = br.render_pdf(rep)
-            except Exception:  # noqa: BLE001 - the Markdown is there
+            except Exception as exc:  # noqa: BLE001 - the Markdown is there
                 log.exception("book report PDF for the save failed")
-                keep.add("Reports/Book report.pdf")
+                part_failed(info, "Reports/Book report.pdf", f"the report PDF could not be made ({_why(exc)})")
             info["report"] = True
         ed = self._editor_summary(pid, branch, chapters)
         if ed:
@@ -570,38 +601,38 @@ class SaveService:
         # Character Forge/ (B5): the dossiers the author has worked on, their PDFs and pictures
         try:
             self._forge_files(pid, branch, files, text)
-        except Exception:  # noqa: BLE001 - the rest of the save still happens
+        except Exception as exc:  # noqa: BLE001 - the rest of the save still happens
             log.exception("character forge files for the save failed")
-            keep.add("Character Forge/")
+            part_failed(info, "Character Forge/", f"the character dossiers could not be written ({_why(exc)})")
         # Pictures/ (B3): the chosen chapter / scene pictures and the map, with pictures.json
         try:
             from . import pictures  # noqa: PLC0415
             pictures.save_files(app, pid, branch, files, text)
-        except Exception:  # noqa: BLE001 - the rest of the save still happens
+        except Exception as exc:  # noqa: BLE001 - the rest of the save still happens
             log.exception("picture files for the save failed")
-            keep.add("Pictures/")
+            part_failed(info, "Pictures/", f"the pictures could not be written ({_why(exc)})")
         # Trailer/ (B2): the book trailer (trailer.webm, trailer.mp4 when there is one) and its plan
         try:
             from . import trailer as trailer_mod  # noqa: PLC0415
             trailer_mod.save_files(app, pid, branch, files, text, keep)
-        except Exception:  # noqa: BLE001 - the rest of the save still happens
+        except Exception as exc:  # noqa: BLE001 - the rest of the save still happens
             log.exception("trailer files for the save failed")
-            keep.add("Trailer/")
+            part_failed(info, "Trailer/", f"the trailer could not be written ({_why(exc)})")
         # Cover/ (B3): the cover design, the ebook and print covers, the art, the book files with the cover
         try:
             from . import cover as cover_mod  # noqa: PLC0415
             cover_mod.save_files(app, pid, branch, files, stem)
-        except Exception:  # noqa: BLE001 - the rest of the save still happens
+        except Exception as exc:  # noqa: BLE001 - the rest of the save still happens
             log.exception("cover files for the save failed")
-            keep.add("Cover/")
+            part_failed(info, "Cover/", f"the cover could not be written ({_why(exc)})")
         # Log/
         phase("Writing the log")
         try:
             j = journal_mod.build(app, pid, branch)
             text("Log/Book journal.md", journal_mod.render_markdown(j))
-        except Exception:  # noqa: BLE001 - the rest of the save still happens
+        except Exception as exc:  # noqa: BLE001 - the rest of the save still happens
             log.exception("journal for the save failed")
-            keep.add("Log/Book journal.md")
+            part_failed(info, "Log/Book journal.md", f"the journal could not be written ({_why(exc)})")
         runs = self._runs(pid, branch)
         text("Log/run-events.json", json.dumps({"schema_version": 1, "book": title, "saved_at": now_iso(),
                                                 "note": "Steps, states, which AI did what, times and problems of the "
@@ -779,6 +810,7 @@ class SaveService:
                     if not in_use(exc):
                         raise
                     stays.append(rel)  # open in another program: removed by a later save
+            not_updated = self._mark_older(folder, files, stays, info.get("skipped_parts") or [])
             marker = {"app": "Akọwe", "schema_version": FOLDER_SCHEMA, "project_id": pid, "branch_id": branch,
                       "title": info["title"], "saved_at": now_iso(), "kind": kind, "finished": info.get("finished"),
                       "chapters": info["chapters"], "exports": info["exports"], "files": sorted(set(files) | set(stays))}
@@ -790,6 +822,16 @@ class SaveService:
         except OSError as exc:
             raise classify(exc) from None
         warnings = []
+        if not_updated:
+            def label(rel):
+                return f"the {rel.rstrip('/')} folder" if rel.endswith("/") else rel.rsplit("/", 1)[-1]
+            warnings.append("Not updated: " + "; ".join(
+                f"{label(x['file'])} ({x['why']})" + (
+                    (" — its old files are now named “… (older version)”" if x["file"].endswith("/") else
+                     f" — the old one is now “{x['older'].rsplit('/', 1)[-1]}”") if x.get("older") else
+                    " — the old one is open in another program, so it is not current")
+                for x in not_updated[:4]) + (f" and {len(not_updated) - 4} more" if len(not_updated) > 4 else "") +
+                ". Save again when it can be made.")
         if locked:
             names = ", ".join(locked[:3]) + (f" and {len(locked) - 3} more" if len(locked) > 3 else "")
             warnings.append(f"Saved, except {names} (open in another program — close it and save again).")
@@ -805,7 +847,45 @@ class SaveService:
                 "bytes": sum(len(d) for d in files.values()), "finished": info.get("finished"),
                 "chapters": info["chapters"], "drafts": info["drafts"], "exports": info["exports"],
                 "report": info["report"], "skipped": locked, "not_made": info.get("skipped_parts") or [],
-                "warning": " ".join(warnings) or None}
+                "not_updated": not_updated, "warning": " ".join(warnings) or None}
+
+    @staticmethod
+    def _mark_older(folder: Path, files: dict, stays: list, parts: list) -> list[dict]:
+        """💾 H16: every part that failed this time -> its file saved before is renamed "… (older version)" (so it is
+        never mistaken for the current one); ``stays`` gets the new names (the marker lists them, a later good save
+        removes them). Returns [{file, why, older}] (``older`` None when there was no old file, or it is open in
+        another program and could not be renamed)."""
+        out = []
+        for p in parts:
+            rel = str(p.get("file") or "")
+            if not rel:
+                continue
+            olds = [r for r in list(stays) if r == rel or (rel.endswith("/") and r.startswith(rel))]
+            if not rel.endswith("/") and rel not in olds and (folder / rel).is_file():
+                olds.append(rel)  # an old file the marker did not list (saved by hand, or before the marker)
+            olds = [r for r in olds if (folder / r).is_file()]
+            if not olds:
+                continue  # nothing saved before: nothing is out of date (the part is in "not_made")
+            renamed = []
+            for r in olds:
+                if r in files or not inside(folder, r) or r.rsplit("/", 1)[-1].rpartition(".")[0].endswith(OLDER):
+                    continue
+                new = older_name(r)
+                try:
+                    replace_file(folder / r, folder / new)
+                except FileNotFoundError:
+                    continue
+                except OSError:
+                    log.warning("could not rename %s to its older-version name", r)
+                    continue
+                if r in stays:
+                    stays.remove(r)
+                stays.append(new)
+                renamed.append(new)
+            out.append({"file": rel, "why": str(p.get("why") or "it could not be made"),
+                        "older": renamed[0] if len(renamed) == 1 else (f"{rel.rstrip('/')}/… (older version)"
+                                                                      if renamed else None)})
+        return out
 
     # ------------------------------------------------------------------ background saves
     def _status_key(self, pid, branch):

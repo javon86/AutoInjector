@@ -1395,7 +1395,28 @@ export async function viewBinder(main, x, rest = []) {
         eng.why ? h('small', null, ` (${eng.why})`) : null)
         : waiting && !data.read_only ? h('button', { type: 'button', class: 'bnd-gl-btn', 'data-testid': 'binder-pictures', title: 'Makes every missing character picture with Stable Diffusion in AutoInjector: portraits, the front, side and back views and character sheets, and the pictures waiting from the book run. Pictures you already have are kept.',
           onclick: ev => runPictures(ev.currentTarget) }, '🖼 Make the rest of the pictures') : null,
-      !waiting && missing ? h('p', { class: 'bnd-gl-small' }, `${plural(missing, 'page')} still ${missing === 1 ? 'has' : 'have'} no picture — open ${missing === 1 ? 'it' : 'one'} and press 🎨 Make one.`) : null);
+      !waiting && missing ? h('p', { class: 'bnd-gl-small' }, `${plural(missing, 'page')} still ${missing === 1 ? 'has' : 'have'} no picture — open ${missing === 1 ? 'it' : 'one'} and press 🎨 Make one.`) : null,
+      glanceOutdated());
+  }
+  /** 🖼 H15: pictures made from an older description: a plain line, 🖼 Remake, and 🔒 Replace the lock (asks first) */
+  function glanceOutdated() {
+    const od = live && live.pictures && live.pictures.outdated;
+    if (!od || (!od.count && !od.locks)) return null;
+    const box = h('div', { class: 'bnd-gl-small', 'data-testid': 'glance-outdated', 'aria-live': 'polite' });
+    box.appendChild(h('p', { class: 'bnd-gl-warn', 'data-testid': 'glance-outdated-words' }, od.words || ''));
+    if (data.read_only) return box;
+    if (od.count) box.appendChild(h('button', { type: 'button', class: 'bnd-gl-btn', 'data-testid': 'glance-remake', title: 'Makes these pictures again from the description the character has now. The pictures you uploaded are never touched.', onclick: ev => runPictures(ev.currentTarget, '/binder/pictures/remake') }, '🖼 Remake them'));
+    for (const it of (od.items || []).filter(i => i.lock)) {
+      box.appendChild(h('button', { type: 'button', class: 'bnd-inline-btn', 'data-testid': 'glance-replace-lock', onclick: async ev => {
+        const b = ev.currentTarget;
+        const ok = await x.choiceDialog(`🔒 Replace the lock of “${it.name}”?`, h('p', null, 'The character lock in AutoInjector keeps a face the same in every picture. Replacing it gives every LATER picture of this character the look the description has now. Pictures already made are not changed.'), [{ id: 'yes', label: '🔒 Replace the lock' }]);
+        if (ok !== 'yes') return;
+        b.disabled = true;
+        try { const r = await api('POST', bpath('/binder/pictures/lock'), { body: { record_id: it.record_id, author_confirms: true } }); b.replaceWith(h('span', { class: 'bnd-ok-msg' }, r.message || '🔒 Replaced.')); }
+        catch (e) { b.disabled = false; box.appendChild(h('p', { class: 'bnd-err' }, '🔒 The lock was not replaced: ', plainError(e))); }
+      } }, `🔒 Replace the lock of ${it.name}`));
+    }
+    return box;
   }
   function glanceSeries() {
     const g = glanceData() || {};
@@ -1552,12 +1573,12 @@ export async function viewBinder(main, x, rest = []) {
   /** 🖼 Make the rest of the pictures: POST …/binder/pictures (a job: every missing portrait, view and sheet plus the
    *  to-make list), its progress and a Stop button here, then the pages again with the pictures */
   let picturing = false;
-  async function runPictures(btn) {
+  async function runPictures(btn, route = '/binder/pictures') {
     if (picturing) return;
     picturing = true;
     if (btn) btn.disabled = true;
     let job;
-    try { job = await api('POST', bpath('/binder/pictures'), { body: {} }); }
+    try { job = await api('POST', bpath(route), { body: {} }); }
     catch (e) { picturing = false; if (btn) btn.disabled = false; showMsg('bnd-err', '🖼 Making the pictures did not start: ', plainError(e)); return; }
     const line = h('span', null, '🖼 Making the pictures…');
     const bar = h('progress', { max: String(job.total || 1), value: '0', 'aria-label': 'Pictures progress' });
@@ -1756,11 +1777,27 @@ export async function viewBinder(main, x, rest = []) {
       h('p', { class: 'small' }, 'Pressing Start is your consent for the new book\'s run (like ⚡ Make a book for me).')), [{ id: 'yes', label: '📚 Start the sequel' }]);
     if (ok !== 'yes') return;
     btn.disabled = true;
+    await postSequel(btn, busy, false);
+  }
+  /** H7: the first press looks for what changed (nothing starts yet); waiting changes stop it with an explicit skip. */
+  async function postSequel(btn, busy, skip) {
     try {
-      const r = await api('POST', bpath('/binder/series/sequel'), { body: { author_confirms: true } });
+      const r = await api('POST', bpath('/binder/series/sequel'), { body: skip ? { author_confirms: true, skip_changes: true } : { author_confirms: true } });
+      if (!r.run) {
+        btn.disabled = false;
+        clear(busy).appendChild(h('p', { class: 'bnd-ok-msg', 'data-testid': 'binder-series-finding' }, r.message || 'First, the AI reads this book for what changed.'));
+        return;
+      }
       clear(busy).appendChild(h('p', { class: 'bnd-ok-msg', 'data-testid': 'binder-series-started' }, r.message || '📚 The sequel has started.'));
       if (x.openMakeBook && r.run && r.run.id) x.openMakeBook(btn, { runId: r.run.id });
-    } catch (e) { btn.disabled = false; clear(busy).appendChild(h('p', { class: 'bnd-err' }, '📚 The sequel did not start: ', plainError(e))); }
+    } catch (e) {
+      btn.disabled = false;
+      const err = (e && e.body && Array.isArray(e.body.errors) && e.body.errors[0]) || {};
+      clear(busy).appendChild(h('p', { class: 'bnd-err' }, '📚 The sequel did not start: ', plainError(e)));
+      if (err.path === '/skip_changes') {
+        busy.appendChild(h('button', { type: 'button', 'data-testid': 'binder-series-skip', onclick: () => postSequel(btn, busy, true) }, 'Start without them (some changes may be missing)'));
+      }
+    }
   }
   const lookSel = h('select', { id: 'bnd-look', 'data-testid': 'binder-look' },
     Object.entries(LOOKS).map(([k, [w, ic]]) => h('option', { value: k, selected: k === st.look }, `${ic} ${w}${k === autoLook ? ' (auto)' : ''}`)));

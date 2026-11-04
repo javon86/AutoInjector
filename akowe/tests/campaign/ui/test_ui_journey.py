@@ -121,7 +121,8 @@ def jw(tmp_path_factory):
     mara = next(k for k, c in s["characters"].items() if c["name"] == name_of(app, pid, prot))
     series.approve(app.store, pid, BR, {"key": mara})
     series.make_portraits(app, "author", pid, BR)
-    sq = series.start_sequel(app, "author", pid, BR, {"author_confirms": True, "pictures": False})
+    sq = series.start_sequel(app, "author", pid, BR, {"author_confirms": True, "pictures": False,
+                                                    "skip_changes": True})
     app.autobook.wait_for(sq["run"]["id"], 240)
     run2 = app.autobook.get(sq["run"]["id"])
     assert run2["status"] == "done", run2.get("problem")

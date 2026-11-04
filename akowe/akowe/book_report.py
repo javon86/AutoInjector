@@ -259,8 +259,100 @@ def book_view(chapters: list[dict], whole_max: int = WHOLE_MAX_CHARS, digest_max
     for c in chapters:
         out.append(dict({"number": c["number"], "title": c["title"], "words": c["words"],
                          "objective": c.get("objective") or ""}, **_excerpts(c["text"], per)))
+    shown = sum(len(x["opening"]) + len(x["middle"]) + len(x["closing"]) for x in out)
     return {"mode": "digest", "words": words_, "chapters": out,
+            "read_percent": max(1, min(99, round(100 * shown / max(1, total)))),
             "note": "A long book: each chapter is shown by its opening, a middle passage and its ending."}
+
+
+def book_parts(chapters: list[dict], part_max: int = WHOLE_MAX_CHARS) -> list[dict]:
+    """📖 H17 "Read the whole book": the full text cut into parts of at most ``part_max`` characters (whole chapters
+    where they fit; a longer chapter is cut at paragraph breaks). Each part is a view the reviewer reads in full."""
+    pieces = []
+    for c in chapters:
+        text = c["text"]
+        if len(text) <= part_max:
+            pieces.append((c, text, None))
+            continue
+        paras, cur, k = text.split("\n\n"), "", 1
+        for p in paras:
+            while len(p) > part_max:  # one huge paragraph: cut it hard
+                if cur:
+                    pieces.append((c, cur, k))
+                    cur, k = "", k + 1
+                pieces.append((c, p[:part_max], k))
+                p, k = p[part_max:], k + 1
+            if cur and len(cur) + 2 + len(p) > part_max:
+                pieces.append((c, cur, k))
+                cur, k = "", k + 1
+            cur = f"{cur}\n\n{p}" if cur else p
+        if cur:
+            pieces.append((c, cur, k))
+    parts, cur, size = [], [], 0
+    for c, text, k in pieces:
+        if cur and size + len(text) > part_max:
+            parts.append(cur)
+            cur, size = [], 0
+        cur.append({"number": c["number"], "title": c["title"], "words": lengths_mod.words(text), "text": text,
+                    **({"piece": k} if k else {})})
+        size += len(text)
+    if cur:
+        parts.append(cur)
+    words_ = sum(c["words"] for c in chapters)
+    return [{"mode": "part", "part": i + 1, "of": len(parts), "words": words_, "chapters": p,
+             "note": f"Part {i + 1} of {len(parts)} of the book, in full. The other parts are read separately and the "
+                     "findings are merged: judge what you read here, and say what you cannot judge from this part."}
+            for i, p in enumerate(parts)]
+
+
+def merge_part_rows(rows: list[dict]) -> dict:
+    """📖 H17: one reviewer's reviews of every part -> one review of the whole book: the median score per dimension
+    of the parts that scored it, the strengths / weaknesses / ideas of every part (each once), the summaries in
+    order. The trust check (P36) of each part is kept: one flagged part flags the merged review."""
+    done = [r for r in rows if r.get("status") == "done"]
+    if not done:
+        out = dict(rows[-1]) if rows else {"status": "failed", "error": "INTERNAL_ERROR"}
+        out["parts"] = {"read": 0, "of": len(rows)}
+        return out
+    out = {k: done[0].get(k) for k in ("slot", "name", "independent", "model", "at")}
+    out.update(status="done", mode="parts")
+    scores, raw = {}, {}
+    for d in DIM_KEYS:
+        vals = [r["scores"][d] for r in done if d in (r.get("scores") or {})]
+        if vals:
+            scores[d] = int(round(statistics.median(vals)))
+        rvals = [(r.get("scores_raw") or r.get("scores") or {}).get(d) for r in done]
+        rvals = [v for v in rvals if isinstance(v, (int, float))]
+        if rvals:
+            raw[d] = int(round(statistics.median(rvals)))
+
+    def union(key, n):
+        seen, acc = set(), []
+        for r in done:
+            for p in r.get(key) or []:
+                t = (p.get("point") if isinstance(p, dict) else str(p)).strip().lower()
+                if t and t not in seen and len(acc) < n:
+                    seen.add(t)
+                    acc.append(p)
+        return acc
+    cals = [r.get("calibration") or {} for r in done]
+    capped = {}
+    for c in cals:
+        capped.update(c.get("capped") or {})
+    out.update(scores=scores, scores_raw=raw, strengths=union("strengths", 8), weaknesses=union("weaknesses", 10),
+               try_next=union("try_next", 6),
+               summary=_clip(" ".join(f"Part {i + 1}: {r.get('summary')}" for i, r in enumerate(done)
+                                      if r.get("summary")), 1600),
+               seconds=round(sum(float(r.get("seconds") or 0) for r in done), 1),
+               calibration={"trusted": all(c.get("trusted", True) for c in cals),
+                            "flagged": any(c.get("flagged") for c in cals),
+                            "reasked": any(c.get("reasked") for c in cals),
+                            "reasons": sorted({x for c in cals for x in c.get("reasons") or []}), "capped": capped},
+               parts={"read": len(done), "of": len(rows)})
+    failed = [r for r in rows if r.get("status") != "done"]
+    if failed:
+        out["message"] = f"{len(failed)} of {len(rows)} part(s) could not be read ({failed[0].get('error')})"
+    return out
 
 
 def verify_quote(quote: str, text_norm: str) -> bool:
@@ -623,7 +715,7 @@ class ReportService:
     # ------------------------------------------------------------------ make a report
     def make(self, principal, pid, branch, *, assist=None, review=None, ai: bool = True, slots: list | None = None,
              made_by: str = "author", run_id: str | None = None, add_to: str | None = None, check=None,
-             on_progress=None) -> dict:
+             on_progress=None, full: bool = False) -> dict:
         """Build (or extend) the report of the book's current version. ``ai``: ask reviewer AIs (``slots`` or the
         independent working ones). ``add_to``: a report id of the same version to add the new reviews to."""
         review = review or self.app.review
@@ -648,7 +740,10 @@ class ReportService:
                         "approved": all(c["approved"] for c in chapters)},
                     "made_by": made_by, "run_id": run_id, "reviews": [], **det}
         view = book_view(chapters)
-        base["book_mode"] = view["mode"]
+        parts = book_parts(chapters) if full and view["mode"] == "digest" and ai else None  # 📖 H17
+        base["book_mode"] = "parts" if parts else view["mode"]
+        base["read"] = {"mode": base["book_mode"], "percent": 100 if view["mode"] == "whole" or parts
+                        else view.get("read_percent"), "parts": len(parts) if parts else None}
         notes = []
         if ai:
             picks = self.pick(base["usage"], slots)
@@ -661,7 +756,17 @@ class ReportService:
             for i, s in enumerate(picks):
                 if on_progress:
                     on_progress(i, len(picks), s)
-                row = self.review_with(assist, principal, pid, branch, s, view, prof_brief, base, text_norm, check)
+                if parts:  # 📖 H17: every part read in full, then one merged review per AI
+                    rows = []
+                    for k, pv in enumerate(parts):
+                        if on_progress:
+                            on_progress(i, len(picks), s, k, len(parts))
+                        rows.append(self.review_with(assist, principal, pid, branch, s, pv, prof_brief, base,
+                                                     text_norm, check))
+                    row = merge_part_rows(rows)
+                else:
+                    row = self.review_with(assist, principal, pid, branch, s, view, prof_brief, base, text_norm,
+                                           check)
                 base["reviews"] = [r for r in base["reviews"] if r.get("slot") != row["slot"]] + [row]
                 new.add(row["slot"])
             self._calibrate(base["reviews"], new, (base.get("patterns") or {}).get("ceilings"))
@@ -670,6 +775,9 @@ class ReportService:
                     r["trust_notes"] = reviewer_notes(r)  # 🎯 P36: what the report page shows under the reviewer
         base["aggregate"] = aggregate(base["reviews"])
         base["try_next"] = self.try_next(base)
+        from . import approval_trust  # noqa: PLC0415 - H14: chapters approved without (all) checks
+        base["unchecked"] = [{k: e.get(k) for k in ("label", "chapter_id", "how", "why", "notes", "line", "at")}
+                             for e in approval_trust.entries(self.store, pid, branch)]
         base["warnings"] = notes + self._warnings(base)
         base["updated_at"] = _now()
         self._save(pid, branch, base)
@@ -716,6 +824,14 @@ class ReportService:
     @staticmethod
     def _warnings(rep: dict) -> list[str]:
         out = []
+        rd = rep.get("read") or {}
+        if rep.get("book_mode") == "digest" and rep.get("reviews"):  # 📖 H17: never pass a sample off as a read
+            out.append(f"📖 Sampled: this book is long, so the reviewers read about {rd.get('percent') or '?'}% of it "
+                       "(each chapter's opening, a middle passage and its ending). Press 📖 Read the whole book for a "
+                       "full read in parts (more AI messages).")
+        elif rep.get("book_mode") == "parts":
+            out.append(f"📖 Read in full: the reviewers read the whole book in {rd.get('parts')} parts and Akọwe merged "
+                       "what they found.")
         done = [r for r in rep["reviews"] if r.get("status") == "done"]
         if done and not any(r.get("independent") for r in done):
             out.append("⚠️ Not independent: every AI that reviewed the whole book also wrote most of it.")
@@ -729,6 +845,8 @@ class ReportService:
             out.append("⚠️ " + "; ".join(f"{r['name']} could not review ({r.get('error')})" for r in failed))
         if not rep["version"].get("approved"):
             out.append("Some chapters are not approved yet: the report reads their newest drafts.")
+        for e in rep.get("unchecked") or []:  # H14: approved anyway / auto-approved / only one AI checked it
+            out.append("⚠️ " + str(e.get("line") or e.get("label")))
         return out
 
     @staticmethod
@@ -781,11 +899,15 @@ class ReportService:
         bp = BookPath(self.app.engine, principal, pid, branch)
         if not book_chapters(bp):
             raise AkoweError("INVALID_INPUT", "/book", "this book has no written chapters yet", status="REJECTED")
+        full = body.get("full", False)
+        if not isinstance(full, bool):
+            raise AkoweError("INVALID_INPUT", "/full", "full must be true or false", status="REJECTED")
         job = {"id": f"brev-{uuid.uuid4().hex[:12]}", "kind": "book_review", "status": "queued", "phase": "Starting",
                "principal": principal, "project_id": pid, "branch_id": branch, "created_at": now_iso(),
                "done": 0, "total": len(slots) if slots else None, "report_id": None, "error": None,
-               "resume": {"project_id": pid, "branch_id": branch, "slots": slots, "ai": ai, "report_id": add_to},
-               "cancel": False}
+               "resume": {"project_id": pid, "branch_id": branch, "slots": slots, "ai": ai, "report_id": add_to,
+                          "full": full},
+               "cancel": False, "full": full}
         with self._lock:  # the check and the registration are one step: two presses at once make ONE report
             for j in self._jobs.values():
                 if j["project_id"] == pid and j["status"] in ("queued", "running"):
@@ -793,7 +915,7 @@ class ReportService:
                                          "it to finish", status="REJECTED")
             self._jobs[job["id"]] = job
         self._persist(job)
-        threading.Thread(target=self._thread, args=(job, slots, ai, add_to), name="akowe-report",
+        threading.Thread(target=self._thread, args=(job, slots, ai, add_to, full), name="akowe-report",
                          daemon=True).start()
         return self.public(job)
 
@@ -814,7 +936,7 @@ class ReportService:
             raise AkoweError("NOT_FOUND", "/job_id", "this report job is not known", status="REJECTED")
         return self.public(j)
 
-    def _thread(self, job, slots, ai, add_to):
+    def _thread(self, job, slots, ai, add_to, full=False):
         job["status"], job["phase"] = "running", "Reading the book"
         self._persist(job)
 
@@ -822,12 +944,13 @@ class ReportService:
             if job.get("cancel"):
                 raise Cancelled()
 
-        def progress(i, n, s):
-            job.update(done=i, total=n, phase=f"{s['name']} is reading the whole book ({i + 1} of {n})")
+        def progress(i, n, s, k=None, parts=None):
+            what = f"part {k + 1} of {parts} of the book" if parts else "the whole book"
+            job.update(done=i, total=n, phase=f"{s['name']} is reading {what} ({i + 1} of {n})")
             self._persist(job)
         try:
             rep = self.make(job["principal"], job["project_id"], job["branch_id"], ai=ai, slots=slots, add_to=add_to,
-                            check=check, on_progress=progress)
+                            check=check, on_progress=progress, full=full)
             job.update(status="done", phase="The report is ready", report_id=rep["id"],
                        done=job.get("total") or 0, finished_at=now_iso())
         except Cancelled:
@@ -883,6 +1006,9 @@ class ReportService:
 
 
 # ====================================================================== downloads
+SENT = {"whole": "whole", "digest": "as a per-chapter digest (sampled)", "parts": "whole, in parts (read in full)"}
+
+
 def render_markdown(rep: dict) -> str:
     L = [f"# {rep.get('title')} — Akọwe report", ""]
     L.append(f"*Made {rep.get('at', '')[:16].replace('T', ' ')} UTC · book version {rep['version']['key']} · "
@@ -898,7 +1024,7 @@ def render_markdown(rep: dict) -> str:
     L += ["## Summary", "", f"- Words: **{w.get('total', 0):,}** of about {w.get('target', 0):,} ({w.get('length')}; "
           f"{w.get('percent')}%)", f"- Whole-book reviewers: {agg.get('reviewers', 0)} ({agg.get('independent', 0)} "
           "independent)" + (f" · overall median average **{agg['overall']}**/10" if agg.get("overall") is not None
-                            else ""), f"- The book was sent to the reviewers {'whole' if rep.get('book_mode') == 'whole' else 'as a per-chapter digest'}", ""]
+                            else ""), f"- The book was sent to the reviewers {SENT.get(rep.get('book_mode'), SENT['digest'])}", ""]
     reviews = [r for r in rep.get("reviews") or [] if r.get("status") == "done"]
     if any(d.get("n") for d in agg.get("dimensions") or []):
         L += ["## Scores (whole book)", "", "| Dimension | Median | Range | " + " | ".join(r["name"] for r in reviews)

@@ -60,6 +60,7 @@ const terminalProvider = require("./terminal-provider");
 const aiLockers = require("./ai-lockers");
 const featureTest = require("./feature-test");
 const siteErrors = require("./site-errors"); // a site's own short error notice ("Sorry, something went wrong…") is never an Akọwe answer
+const { replyLooksCut } = require("./smart-json"); // H26: an untagged JSON reply whose brackets are still open is not finished
 const logExtract = require("./log-extract"); // P16: scoped Extract (this Akọwe book / a time range / everything) + redaction
 const akoweLinkTest = require("./akowe-link-test"); // 🧪 Test Akọwe link (real round trips through the bridge's own HTTP API)
 const selfRepairLib = require("./self-repair"); // P18: check-ins, failure classifier, automatic fixes, teach step (docs/AKOWE_IMPROVEMENT_PLAN.md Section 1)
@@ -97,6 +98,9 @@ const STABLE_MS = Number(process.env.AUTOINJECTOR_STABLE_MS) || 1800;
 // treated as lost and the messaging protocol is re-sent asking for a full resend.
 // It's deliberately longer than STABLE_MS so a mid-reply pause never trips it.
 const NOTAG_QUIET_MS = Number(process.env.AUTOINJECTOR_NOTAG_QUIET_MS) || 12000;
+// H26: how long an untagged reply that looks cut off (open JSON brackets) may stay unchanged before it is taken anyway
+const CUT_WAIT_MS = Number(process.env.AUTOINJECTOR_CUT_WAIT_MS) || NOTAG_QUIET_MS * 3;
+const cutWarned = {}; // site -> the cut-looking text already logged (logged once)
 // TR-17: a reply carrying its [FROM:] tag must also hold still this long before
 // it's captured, so a page that re-draws the finished reply (Gemini) is read
 // once, in its final form.
@@ -4195,6 +4199,16 @@ async function pollSite(site) {
       // already typed. Akọwe asks for bare JSON and never gets tag reminders,
       // so once its reply has gone quiet it is taken as finished (the Relay
       // Trace still decides whether it answers Akọwe's prompt).
+      // H26: a reply that should be JSON but whose brackets are still open (or that stops inside a string) is not
+      // finished — the AI paused mid-way or the page has not drawn the rest. It is not handed to Akọwe yet (that wasted
+      // a whole retry on half an answer); after CUT_WAIT_MS of no change it goes anyway (Akọwe repairs or asks again).
+      else if (!pend.reprompted && akoweAwaitingReply(site) && replyLooksCut(text) && Date.now() - pend.sinceTs < CUT_WAIT_MS) {
+        if (cutWarned[site] !== text) {
+          cutWarned[site] = text;
+          logEvent("reply-looks-cut", { site, chars: text.length, note: "the reply looks cut off (open brackets) — waiting for the rest before handing it to Akọwe" });
+        }
+        return;
+      }
       else if (!pend.reprompted && akoweAwaitingReply(site) && !looksLikeRateLimit(text) && !akoweSiteErr && !isNoneSkip(text)) {
         acceptedUntaggedRaw[site] = text;
         text = `${text}\n[FROM: ${String(site).toUpperCase()}]`;

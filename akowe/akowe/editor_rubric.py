@@ -77,8 +77,18 @@ DIMENSIONS = [
      "present push for their own goal, does the obstacle from the world actually get in the way and cost something, "
      "does the planned change happen, and does the 'unsaid' stay unsaid? Quote the passage where a scene's goal or "
      "obstacle should be but is missing, is solved too easily, or where the unsaid thing is said out loud."),
+    # H3: the author's content limits (only scored when the book profile has them; any finding there = REVISE)
+    ("content_limits", "Respects the author's content limits",
+     "(Only when context.book_profile.content_limits is given.) Does the draft stay inside the author's content "
+     "limits (what the book will not show — e.g. no graphic violence, no swearing)? Quote every passage that crosses "
+     "one and name the limit in why; any such passage is a major finding. Also note when the themes "
+     "(context.book_profile.themes) or the central question (context.book_profile.central_question) are lost."),
 ]
 LABELS = {k: label for k, label, _q in DIMENSIONS}
+# H3: a finding in these dimensions makes the verdict REVISE whatever the strictness
+ALWAYS_REVISE = ("content_limits",)
+# H11 / H12: notes of the ending check (not scored; they use the same rewrite machinery)
+LABELS["ending_promises"] = "A promise the ending must keep"
 # Notes that are not scored by the editor but use the same rewrite machinery (P11: planned but not on the page)
 LABELS["planned_to_page"] = "Planned but not on the page"
 QUESTIONS = {k: q for k, _label, q in DIMENSIONS}
@@ -134,15 +144,17 @@ STRICTNESS = {
 
 
 def dimensions_for(module_id: str, last_chapter: bool = False, scene_cards: bool = False,
-                   story_rules: bool = False) -> list[str]:
+                   story_rules: bool = False, content_limits: bool = False) -> list[str]:
     """The dimensions scored for a draft: the full chapter rubric (the ending only for the last chapter, the scene plan
-    only when the chapter has scene cards, the story rules only when the book has a rules ledger), or the lighter
-    planning rubric (plot and outline: "are the rules bounded?" when there is a ledger)."""
+    only when the chapter has scene cards, the story rules only when the book has a rules ledger, the content limits
+    only when the author set some), or the lighter planning rubric (plot and outline: "are the rules bounded?" when
+    there is a ledger)."""
+    limits = ["content_limits"] if content_limits else []
     if module_id == "C02":
         return [d for d in CHAPTER if d != "ending_openness" or last_chapter] + (["scene_plan"] if scene_cards else []) \
-            + (["story_rules"] if story_rules else [])
+            + (["story_rules"] if story_rules else []) + limits
     return list(PLANNING.get(module_id, PLANNING["B01"])) + (["rules_bounded"] if story_rules and module_id in
-                                                             ("B03", "B11") else [])
+                                                             ("B03", "B11") else []) + limits
 
 
 def task_text(module_id: str, dims: list[str], notes: dict | None = None) -> str:

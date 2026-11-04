@@ -21,7 +21,7 @@ import re
 TEXT_MAX = 200
 NAME_MAX = 80
 MAX_SCENES = 8
-MAX_PEOPLE = 8
+MAX_PEOPLE = 24          # H1: room for a big cast (the brief is trimmed by size, absent people first)
 MAX_VARIABLES = 8
 JUMP = 5            # a change of this much between two scenes in a row needs a visible cause
 SERVES = ("own_goal", "theme", "")
@@ -194,13 +194,17 @@ def latest(chapters: list[dict]) -> dict:
 
 
 def brief(state: dict, present: list[str] | None = None, limit: int = 6) -> list[dict]:
-    """The bounded character-state brief: the characters present first (by name match), at most ``limit``."""
+    """The character-state brief: EVERY character present in the chapter (by name match; H1 — chosen by who is in
+    it, never cut to a fixed number here: the caller trims by size, absent ones first), then others up to ``limit``
+    in all."""
     people = list(state.values())
     if present:
         pres = [p for p in people if any(_same(p["name"], n) for n in present)]
-        people = pres + [p for p in people if p not in pres]
+        people = pres + [p for p in people if p not in pres][:max(0, limit - len(pres))]
+    else:
+        people = people[:limit]
     out = []
-    for p in people[:limit]:
+    for p in people:
         item = {"name": p["name"], "values": {label(k): v for k, v in (p.get("values") or {}).items()}}
         for k in ("observes", "assumes"):
             if p.get(k):

@@ -228,13 +228,19 @@ def ensure_lock(app, pid, branch, rid) -> dict | None:
     lk = out.get("lock") if isinstance(out.get("lock"), dict) else {}
 
     def fn(s):
+        had = s["locks"].get(rid) or {}
+        if not out.get("created") and had:  # the lock was there already (kept as it is): what we knew of it stays
+            s["locks"][rid] = dict(had, at=now_iso())
+            return
         s["locks"][rid] = {"name": d["name"], "seed": lk.get("seed", seed), "created": bool(out.get("created")),
-                           "lock_id": lk.get("id"), "at": now_iso()}
+                           "lock_id": lk.get("id"), "at": now_iso(),
+                           # H15: the look the lock was made from (only a lock Akọwe made: the author's own is theirs)
+                           "looks_fp": forge.looks_fingerprint(d) if out.get("created") else None}
     _update(store, pid, branch, fn)
     return out
 
 
-def make_for(app, principal, pid, branch, rid, want, engine: str, check=None, on_phase=None) -> dict:
+def make_for(app, principal, pid, branch, rid, want, engine: str, check=None, on_phase=None, redo=()) -> dict:
     """Make the character's missing pictures among ``want`` (portrait first, then the views, then the sheet).
     -> {made: [...], failed: [...], code, message, down: bool, lock: dict|None}. Raises only what ``check`` raises
     (pause / cancel)."""
@@ -243,15 +249,16 @@ def make_for(app, principal, pid, branch, rid, want, engine: str, check=None, on
         if check:
             check()
     try:
-        return _make_for(app, principal, pid, branch, rid, want, engine, check, on_phase)
+        return _make_for(app, principal, pid, branch, rid, want, engine, check, on_phase, redo)
     finally:
         lock.release()
 
 
-def _make_for(app, principal, pid, branch, rid, want, engine, check, on_phase) -> dict:
+def _make_for(app, principal, pid, branch, rid, want, engine, check, on_phase, redo=()) -> dict:
     from . import forge  # noqa: PLC0415
     store = app.store
     todo = missing(store, pid, branch, rid, want)
+    todo += [x for x in FULL if x in set(redo) and x not in todo]  # 🖼 H15: remade (older than their description)
     out = {"made": [], "failed": [], "code": "", "message": "", "down": False, "lock": None}
     groups = []
     if "portrait" in todo:
@@ -264,7 +271,7 @@ def _make_for(app, principal, pid, branch, rid, want, engine, check, on_phase) -
     for what, slots in groups:
         if check:
             check()
-        before = have(store, pid, branch, rid)
+        before = have(store, pid, branch, rid) - set(redo)
         job = _shim(principal, check, on_phase)
         try:
             forge.run_art(app, job, pid, branch, rid, what, engine, views if what == "views" else [])
@@ -402,7 +409,10 @@ def series_waiting(store, pid, branch) -> int:
 def summary(store, pid, branch) -> dict:
     plan = rest_plan(store, pid, branch)
     s = state(store, pid, branch)
+    old = outdated(store, pid, branch)
     return {"missing": sum(len(x[2]) for x in plan), "characters": len(plan),
+            "outdated": old, "outdated_count": sum(len(x["slots"]) for x in old),
+            "outdated_locks": sum(1 for x in old if x["lock"]), "outdated_words": outdated_words(old),
             "series_portraits": series_waiting(store, pid, branch),
             "waiting": waiting_by_record(store, pid, branch), "locks": s["locks"], "settings": settings(store)}
 
@@ -504,3 +514,139 @@ def _series_words(sp: dict) -> str:
     if sp.get("failed"):
         out += f" 📚 {sp['failed']} series portrait(s) still waiting ({sp.get('message') or sp.get('code') or ''})."
     return out.strip()
+
+
+# ====================================================================== 🖼 H15: pictures older than their description
+def outdated(store, pid, branch) -> list[dict]:
+    """[{record_id, name, slots, lock}] — the characters whose pictures (or the 🔒 lock Akọwe made) were made from an
+    older description than the dossier holds now. A picture without a fingerprint (an upload, an older Akọwe) is never
+    flagged: nobody knows what it was made from. Never raises."""
+    from . import characters as chars_mod  # noqa: PLC0415
+    from . import forge  # noqa: PLC0415
+    out = []
+    try:
+        chars = chars_mod.canon_characters(store, pid, branch)
+        locks = state(store, pid, branch)["locks"]
+    except Exception:  # noqa: BLE001
+        log.exception("pictures out of date")
+        return out
+    for c in chars:
+        rid = c["record_id"]
+        try:
+            art = (forge.raw_entry(store, pid, branch, rid) or {}).get("art") or {}
+            arts = {s: art.get(s) for s in ("portrait", "sheet")}
+            arts.update({v: (art.get("views") or {}).get(v) for v in VIEW_SLOTS})
+            prints = {s: a.get("looks_fp") for s, a in arts.items() if isinstance(a, dict) and a.get("asset_id")
+                      and a.get("looks_fp")}
+            lk = locks.get(rid) or {}
+            if not prints and not lk.get("looks_fp"):
+                continue
+            now = forge.looks_fingerprint(forge.public(store, pid, branch, rid))
+        except Exception:  # noqa: BLE001 - one character never hides the others
+            log.exception("pictures out of date: %s", rid)
+            continue
+        slots = [s for s in FULL if s in prints and prints[s] != now]
+        lock_old = bool(lk.get("looks_fp")) and lk["looks_fp"] != now
+        if slots or lock_old:
+            out.append({"record_id": rid, "name": c["name"], "slots": slots, "lock": lock_old})
+    return out
+
+
+def outdated_words(items: list[dict]) -> str:
+    """"🖼 2 pictures are older than their description — remake" (plain words; "" when none)."""
+    n = sum(len(x["slots"]) for x in items)
+    locks = sum(1 for x in items if x["lock"])
+    parts = []
+    if n:
+        parts.append(f"🖼 {n} picture{'s are' if n != 1 else ' is'} older than {'their' if n != 1 else 'its'} "
+                     "description — remake")
+    if locks:
+        parts.append(f"🔒 {locks} character lock{'s' if locks != 1 else ''} still "
+                     f"{'have' if locks != 1 else 'has'} the old look — replace {'them' if locks != 1 else 'it'}?")
+    return " · ".join(parts)
+
+
+def start_remake(app, principal: str, pid: str, branch: str, body=None) -> dict:
+    """POST …/binder/pictures/remake -> 202 job: makes the out-of-date pictures again from the description now.
+    The 🔒 lock is never replaced here (``replace_lock`` asks first)."""
+    from .review import ReviewJob  # noqa: PLC0415
+    if not app.store.has_scope(principal, pid, branch, "I01:create"):
+        raise AkoweError("PERMISSION_DENIED", "", "missing scope I01:create", status="REJECTED")
+    body = body if isinstance(body, dict) else {}
+    only = body.get("record_id")
+    items = [x for x in outdated(app.store, pid, branch) if x["slots"] and (not only or x["record_id"] == only)]
+    if not items:
+        raise AkoweError("NOT_FOUND", "/record_id", "no picture is older than its description now",
+                         status="REJECTED")
+
+    def fn(job):
+        engine = settings(app.store)["engine"]
+        job.phase = "Checking the picture maker…"
+        ok, code, why = probe(app, engine)
+        if not ok:
+            job.results.append({"ok": False, "code": code, "message": f"No pictures could be remade: {why}. Start "
+                                "Stable Diffusion (Forge) in AutoInjector → 🎨 Images, then press 🖼 Remake again."})
+            return
+        made = failed = 0
+        for x in items:
+            job.check()
+            res = make_for(app, job.principal, pid, branch, x["record_id"], x["slots"], engine, check=job.check,
+                           on_phase=lambda p, _n=x["name"]: setattr(job, "phase", f"{_n}: {p}"), redo=x["slots"])
+            made += len(res["made"])
+            failed += len(res["failed"])
+            job.done = made + failed
+            if res["down"]:
+                break
+        locks = sum(1 for x in outdated(app.store, pid, branch) if x["lock"])
+        msg = f"{made} picture(s) remade from the description now." + (
+            f" {failed} could not be remade now." if failed else "") + (
+            f" 🔒 {locks} character lock(s) still have the old look: press 🔒 Replace the lock to change it (later "
+            "pictures follow the lock)." if locks else "")
+        job.results.append({"ok": not failed, "made": made, "failed": failed, "locks_old": locks, "message": msg})
+    job = ReviewJob("book_pictures_remake", principal, pid, branch, [x["record_id"] for x in items], None)
+    job.total = max(1, sum(len(x["slots"]) for x in items))
+    return app.review._start(job, fn, same=())  # noqa: SLF001
+
+
+def replace_lock(app, pid: str, branch: str, rid: str, body=None) -> dict:
+    """🔒 Replace a character's lock with the look the dossier holds now — only when the author says so
+    (``author_confirms: true``); never done on its own."""
+    from . import forge  # noqa: PLC0415
+    from .book_path import get_profile  # noqa: PLC0415
+    body = body if isinstance(body, dict) else {}
+    if body.get("author_confirms") is not True:
+        raise AkoweError("APPROVAL_REQUIRED", "/author_confirms", "replacing a character lock changes every later "
+                         "picture of this character; send author_confirms: true to replace it", status="REJECTED")
+    store = app.store
+    d = forge.public(store, pid, branch, rid)
+    pt = (forge.raw_entry(store, pid, branch, rid).get("art") or {}).get("portrait") or {}
+    req = {"character": d["name"], "book": (get_profile(store, pid) or {}).get("title") or "",
+           "prompt": forge.art_prompt(d, "lock"), "from": "akowe", "replace": True}
+    if isinstance(pt.get("seed"), int) and pt.get("source") != "chatgpt" and \
+            pt.get("looks_fp") == forge.looks_fingerprint(d):
+        req["seed"] = pt["seed"]  # the portrait made from this description: its face
+    out = None
+    problem = "AutoInjector is not reachable"
+    for url, token in forge.bridge_targets(app):
+        try:
+            out = forge._post(url, token, req, PROBE_TIMEOUT_S, route="/image/locks")  # noqa: SLF001
+            break
+        except forge.ArtProblem as exc:
+            problem = exc.message
+            if exc.code == "IMAGE_BRIDGE_UNREACHABLE":
+                continue
+            break
+    if not out or not (out.get("replaced") or out.get("created")):
+        why = problem if not out else "this AutoInjector cannot replace a lock yet — update it"
+        raise AkoweError("IMAGE_BRIDGE_UNREACHABLE" if not out else "LOCK_NOT_REPLACED", "/lock",
+                         f"the lock of “{d['name']}” was not replaced ({why}); the old lock is kept",
+                         status="REJECTED")
+    lk = out.get("lock") if isinstance(out.get("lock"), dict) else {}
+
+    def fn(s):
+        s["locks"][rid] = {"name": d["name"], "seed": lk.get("seed", req.get("seed")), "created": True,
+                           "lock_id": lk.get("id"), "at": now_iso(), "looks_fp": forge.looks_fingerprint(d),
+                           "replaced": True}
+    _update(store, pid, branch, fn)
+    return {"ok": True, "record_id": rid, "message": f"🔒 “{d['name']}”'s lock now has the look of the description: "
+                                                     "later pictures follow it."}

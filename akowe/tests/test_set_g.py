@@ -605,6 +605,28 @@ def test_g08_creative_items_need_ai_or_manual(h):
     assert r["status"] == "BLOCKED" and errors_of(r)[0][0] == "CAPABILITY_UNAVAILABLE"
 
 
+def test_h18_accented_and_greek_letters_print_in_the_pdf_with_an_embedded_font(h):
+    """🔤 H18: ọ, ẹ, ł, ő and Greek used to block the PDF at the very end (G05); now they are set in the bundled
+    Unicode font (DejaVu Serif, embedded as a subset) and read back exactly."""
+    import io
+
+    import pypdf
+    from akowe.exporters.pdf import inspect_pdf
+    words = "Ọlọ́run sọ fún Adẹ́ — Łódź, Ődön and Ἀθῆναι."
+    b = Book(h, texts=(f"# Chapter One\n{words} The rest is plain English text for the line.",))
+    g01 = b.g01(b.g02())
+    b.g05(g01)
+    r = b.export("G11", g01)
+    assert r["status"] == "DRAFT", r
+    pdf, _, _ = b.binary(r["output_refs"][0])
+    rep = inspect_pdf(pdf)
+    assert rep["errors"] == [] and any(f.endswith("+DejaVuSerif") for f in rep["embedded_fonts"])
+    text = "".join(p.extract_text() for p in pypdf.PdfReader(io.BytesIO(pdf)).pages)
+    for w in ("Ọlọ́run", "Adẹ́", "Łódź", "Ődön", "Ἀθῆναι"):
+        assert w in text, (w, text[:300])
+    assert len(pdf) < 200_000  # a subset, not the whole 380 kB font
+
+
 def test_unencodable_glyphs_block_pdf_path(h):
     b = Book(h, texts=("# Title\nA line with a snowman ☃ in it.",))
     g01 = b.g01(b.g02())

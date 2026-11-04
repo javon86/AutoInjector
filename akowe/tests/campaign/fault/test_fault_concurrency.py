@@ -36,6 +36,9 @@ def make_app(path, fake=True):
     if fake:
         app.engine.providers.test_adapter = BookFakeAI()
         app.engine.providers.configure_slot("AI-1", {"adapter_id": "anthropic"})
+        # H6: a second, different AI reviews (one AI may not approve its own writing)
+        app.engine.providers.configure_slot("AI-2", {"adapter_id": "manual", "input_cost_minor_per_mtok": 9000,
+                                                     "output_cost_minor_per_mtok": 40000})
     fast = RetryPolicy([0.01, 0.02], 5)
     app.autobook.retry_policy = app.write_all.retry_policy = app.assist.retry_policy = fast
     return app

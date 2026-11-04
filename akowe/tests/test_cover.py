@@ -184,6 +184,19 @@ def test_rendered_front_cover_has_the_art_and_dark_scrim():
     assert sum(low) < 200  # the scrim darkens the art behind the author
 
 
+def test_h18_a_cover_keeps_accented_and_greek_letters():
+    """🔤 H18: the cover used to drop accents ("Lodz") or print "?" for ọ / ẹ / Greek; now they print as written."""
+    texts = dict(TEXTS, title="Ọ̀run Adẹ́", author="Łucja Ődön", tagline="Ἀθῆναι by night.")
+    pdf, ops, _ = render_front({"template": "thriller", "texts": texts})
+    assert any("ŁUCJA ŐDÖN" in o[1].upper() for o in ops if o[0] == "text")  # nothing stripped in the layout
+    rep = inspect_pdf(pdf)
+    assert rep["errors"] == [] and any(f.endswith("+DejaVuSerif") for f in rep["embedded_fonts"])
+    text = pypdf.PdfReader(io.BytesIO(pdf)).pages[0].extract_text()
+    for w in ("ŁUCJA", "ŐDÖN", "ADẸ́", "Ἀθῆναι"):
+        assert w in text, (w, text)
+    assert "?" not in text
+
+
 def test_svg_matches_the_layout_and_pins_widths():
     art = load_image(png(400, 600))
     W, H = cx.EBOOK_PT
