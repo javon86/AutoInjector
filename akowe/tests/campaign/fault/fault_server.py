@@ -46,6 +46,9 @@ def main():
     app.engine.providers.secret_path = Path(a.data_dir) / "secrets-test.json"
     app.engine.providers.test_adapter = BookFakeAI()
     app.engine.providers.configure_slot("AI-1", {"adapter_id": "anthropic"})
+    # H6: a second, different AI reviews (one AI may not approve its own writing)
+    app.engine.providers.configure_slot("AI-2", {"adapter_id": "manual", "input_cost_minor_per_mtok": 9000,
+                                                 "output_cost_minor_per_mtok": 40000})
     fast = RetryPolicy([0.01, 0.02], 5)
     app.autobook.retry_policy = fast
     app.write_all.retry_policy = fast

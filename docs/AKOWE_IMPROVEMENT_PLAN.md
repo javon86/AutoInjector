@@ -1164,7 +1164,9 @@ and a per-book setting for how strictly the story follows the characters. Done:
     Approve this and trust this AI for the rest of the run" (`for_rest_of_run`; each such approval is listed). The
     standing auto-approve is withheld the same way (`review.auto_approve_withheld`). The test harness now runs with a
     second, different AI by default (`test_autobook.make_app(second_ai=True)`; one-AI tests answer the pause with
-    `autobook_fake.trust_one_ai`).
+    `autobook_fake.trust_one_ai`). The other harnesses got the same second AI: `tests/campaign/flow/flowkit.make_app`,
+    `tests/campaign/fault/test_fault_concurrency.make_app` and `fault_server.py`; the "AI is down" story-details test
+    keeps one AI (`second_ai=False`). Full non-UI suite: 2 700 passed, 114 skipped, 2 xfailed.
   - *H14 approved without checks*: "Approve anyway", the standing auto-approve and "approve it yourself" are written
     down (`approved_unchecked:<pid>:<branch>`); the editor (craft review only — nothing is rewritten) and the
     planned-to-page check still run afterwards as notes (`autobook._notes_after_approval`, also after a resume), and
