@@ -636,6 +636,34 @@ the browser: `tests/campaign/ui/test_ui_continuity.py`):
   the always-on parts; the mismatch check covers eye and hair colour only (the AI checks the rest); the passage search
   is word overlap (English).
 
+## 🗳 Three-AI writers' room (2026-11, idea #13) — done
+
+- **Where:** a 🗳 Writers' room button on 🏠 Book home (choose: a twist in the main plot, how a chapter ends or what
+  goes wrong, a character's secret or arc turn, or your own question), on a chapter's 🎬 Scene cards page (that
+  chapter) and on the record page of the premise / main plot / outline / a character (`web/writers-room.js`).
+- **Brief** (`writers_room.brief`): the book profile with content limits, themes, question, POV/tense and style choices
+  (`book_profile_brief`), the character mode, the story rules (`story_rules.plan_brief`), premise, main plot, chapter
+  list and cast with sheets; for a chapter its plan, neighbours, scene cards and parts of `chapter_brief.build`; for a
+  character the whole entry and sheet. Bounded (~14 000 characters).
+- **Round 1:** each working AI pitches once, all at the same time (one request per AI): title, 2–4 sentence idea, why
+  it fits, what it changes later. Busy answers wait and retry; a timeout or failure is shown per AI and the room goes
+  on with what came back. **Round 2:** pitches are shuffled and labelled A/B/C; each AI ranks only the OTHER pitches
+  with a one-line reason (its own is left off its ballot). **Tally:** most first places; tie → sum of ranks (unranked =
+  last, averaged when a vote is missing); still tied → the author chooses. Results show every pitch, who wrote it,
+  every rank and reason, and the winner: ✔ Use the winner / ✔ Use this one / 🔁 Another round (new ideas only).
+- **Using a pitch** writes it into the record as a NEW DRAFT version marked "From the writers' room" (plot summary,
+  premise concept, that chapter's outline summary, the character's background); the approved version stays until the
+  author approves the new one. A free question is noted only, or written into the main plot when ticked.
+- **Fewer than two working AIs:** said plainly, with 💡 Brainstorm with one AI (three ideas, no vote).
+- **⚡ Make a book** setting "Use the writers' room for the big twists" (`writers_room`, off by default): a room before
+  the main plot (the winner goes into the plot's request as a constraint) and before the midpoint and climax chapters
+  (the winner reaches the scene planner and the writer's brief, `chapter_decision`). The run's consent picks the winner
+  (a tie: the earliest letter), each room is a journal line (`WRITERS_ROOM`); a failed room never holds up the book.
+- Stored in `writers_room:<pid>:<branch>` (last 20 rooms). Tests: `tests/test_writers_room.py`,
+  `tests/campaign/ui/test_ui_writers_room.py`.
+- *Not done:* using a pitch appends it to the record's text; it does not rewrite the plot around it (approve, then ask
+  the AI to revise if wanted). Two panes of the same website count as two AIs in the room.
+
 ## Prevention pass (2026-10-27, "solve problems before they become problems")
 
 - [x] **Alfred's local AI connection:**

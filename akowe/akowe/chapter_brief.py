@@ -363,8 +363,17 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str, *
             from .style_card import RULE as STYLE_RULE  # noqa: PLC0415
             brief["narrator_style"] = style
             rules.append(STYLE_RULE)
+        try:  # 🗳 the writers' room's decision for this chapter (a ⚡ run's pick; writers_room.py)
+            from . import writers_room  # noqa: PLC0415
+            room = writers_room.chapter_decision(store, pid, branch, chapter_id)
+        except Exception:  # noqa: BLE001
+            log.exception("writers' room decision of chapter %s", chapter_id)
+            room = None
+        if room:
+            brief["writers_room"] = room
+            rules.append(writers_room.BRIEF_RULE)
         brief["rules"] = rules
-        if not (cards or vb["cards"] or vb["others"] or pov or planned or extra.get("story_rules")
+        if not (cards or vb["cards"] or vb["others"] or pov or planned or room or extra.get("story_rules")
                 or extra.get("world_texture") or extra.get("story_choices") or length or style
                 or brief.get("character_details") or main or world or fixed or brief.get("needed_details")
                 or brief.get("earlier_moments")

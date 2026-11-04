@@ -5,6 +5,7 @@ import { AI_STATE, plainCheck, problemFor, siteProblemWords, slugName } from './
 import { viewContinuity } from './continuity.js';   // 🧭 Section 7 (P32–P35)
 import { estimateBox, runCostLine, viewCosts, viewSceneGrid } from './grid.js';  // 🗂 P27 · ⏱ P28
 import * as S7C from './section7c.js';  // P23 beta reader + P25 your writing style (Section 7c)
+import * as WR from './writers-room.js';  // 🗳 the three-AI writers' room (writers_room.py)
 import { forgeRoute } from './forge.js';  // 🗂 B5 Character Forge dossiers (characters, items, places, magic)
 import { viewPictures } from './pictures.js';  // 🖼 B3 chapter/scene pictures and the map
 import { viewTrailer } from './trailer.js';  // 🎞 B2 the book trailer (AutoInjector 🎬 Video)
@@ -2493,6 +2494,8 @@ async function viewRecord(main, rid, ver) {
     vBtn.addEventListener('click', () => doAction('VALIDATE', { candidate_ref: cur.ref }, vBtn));
     row.appendChild(vBtn);
     if (cur.record_kind === 'OUTPUT') row.appendChild(h('a', { class: 'btn', href: plink('edit', rid) }, '✎ Edit (new revision)'));
+    const room = { B01: { topic: 'plot' }, B03: { topic: 'plot' }, B11: { topic: 'chapter' }, A01: { topic: 'character', record_id: rid } }[op.id];
+    if (room && cur.record_kind === 'OUTPUT') row.appendChild(WR.roomButton(wrc(), room));  // 🗳 the writers' room on this decision
   }
   if (S.opsById[op.id]) {
     const rBtn = h('button', { type: 'button' }, 'Read (audited)');
@@ -5363,7 +5366,8 @@ async function viewBook(main) {
     h('a', { class: 'btn big bible-cta', href: plink('bible'), 'data-testid': 'home-bible', title: 'Everything about your book in one place: characters, places, world, plot and chapters' }, '📖 Book Bible'),
     h('button', { type: 'button', onclick: () => openProfileDialog(() => drawBook()) }, '📝 Book profile'),
     h('a', { class: 'btn', href: plink('journal') }, '📜 Journal'),
-    h('a', { class: 'btn', href: plink('grid'), 'data-testid': 'bk-grid' }, '🗂 Scene grid'))));
+    h('a', { class: 'btn', href: plink('grid'), 'data-testid': 'bk-grid' }, '🗂 Scene grid'),
+    WR.roomButton(wrc()))));  // 🗳 the three-AI writers' room: a twist, a chapter, a character or your own question
   main.appendChild(bookSaveCard());
   const holder = h('div', null, loadingState('Checking where your book is…'));
   main.appendChild(holder);
@@ -6647,7 +6651,7 @@ async function viewScenes(main, cid) {
   main.appendChild(h('div', { class: 'page-head' }, h('div', null,
     crumbs(['My books', '#/'], [S.project.name, plink('book')], `${label}: scene cards`),
     h('h1', null, `🎬 Scene cards — ${label}`)),
-  h('div', { class: 'row' }, h('a', { class: 'btn small', href: plink('pictures'), 'data-testid': 'scenes-illustrate', title: 'Make a picture of this chapter or one of its scenes (🖼 Pictures)' }, '🖼 Illustrate'), infoTip('Scene cards', h('p', null, 'Before a chapter is written, its scenes are planned: for each scene the place and time, who is there, what each one wants (and hides), an obstacle from the book’s world, what changes and what stays unsaid.'),
+  h('div', { class: 'row' }, WR.roomButton(wrc(), { topic: 'chapter', chapter_id: cid }, { small: true }), h('a', { class: 'btn small', href: plink('pictures'), 'data-testid': 'scenes-illustrate', title: 'Make a picture of this chapter or one of its scenes (🖼 Pictures)' }, '🖼 Illustrate'), infoTip('Scene cards', h('p', null, 'Before a chapter is written, its scenes are planned: for each scene the place and time, who is there, what each one wants (and hides), an obstacle from the book’s world, what changes and what stays unsaid.'),
     h('p', null, 'The chapter outline stays the plan of the whole chapter; scene cards refine it. The writer follows them and the editor checks the chapter against them.')))));
   main.appendChild(h('p', { class: 'notice small' }, h('strong', null, 'The outline says: '), plainText(ch.objective || ch.summary || '')));
   const msg = h('div', { 'aria-live': 'polite' });
@@ -7787,6 +7791,7 @@ async function renderMakeSetup() {
   const cf = choicesFields({}, 'mb');
   const s7 = await S7C.makeSetupExtras(s7c());  // P23 / P25 (Section 7c)
   const fb = fillBibleSwitch('mb');  // 📖 Fill the whole Book Bible before writing (whole_bible.py), off by default
+  const wr = WR.makeSetupSwitch(s7c());  // 🗳 Use the writers' room for the big twists (writers_room.py), off by default
   fields.length = lengthBox.querySelector('input');
   const startAll = h('button', { type: 'button', class: 'primary big mab-go', 'data-testid': 'mb-start-auto' }, '⚡ Start — let the AI choose everything');
   const startSet = h('button', { type: 'submit', class: 'big', 'data-testid': 'mb-start' }, '⚡ Start with these settings');
@@ -7799,7 +7804,7 @@ async function renderMakeSetup() {
         h('div', { class: 'field' }, h('label', { for: 'mb-genre' }, 'Genre'), genre, h('datalist', { id: 'mb-genres' }, GENRES.map(g => h('option', { value: g }))), h('span', { class: 'hint' }, 'Empty = the AI chooses.')),
         h('div', { class: 'field' }, h('label', { for: 'mb-slot' }, 'Which AI'), slot, h('span', { class: 'hint' }, 'Automatic uses whichever AI is ready.'))),
       lengthBox,
-      h('div', { class: 'field' }, h('label', { for: 'mb-idea' }, 'Your idea (optional)'), idea), cf.el, pipe.el, s7.el, fb.el),
+      h('div', { class: 'field' }, h('label', { for: 'mb-idea' }, 'Your idea (optional)'), idea), cf.el, pipe.el, s7.el, fb.el, wr.el),
     err, h('div', { class: 'form-actions' }, startAll, startSet));
   const est = estimateBox(gridUI(), () => {  // ⏱ P28: AI answers and minutes before the run starts
     const l = form.querySelector('input[name="mb-len"]:checked'); const pl = pipe.get();
@@ -7826,6 +7831,7 @@ async function renderMakeSetup() {
     }
     s7.apply(body);  // P23 / P25 (Section 7c): beta reader and "write in my style"
     fb.apply(body);  // 📖 the whole Book Bible before chapter one (only when switched on)
+    wr.apply(body);  // 🗳 the writers' room for the big twists (only when switched on)
     startAll.disabled = startSet.disabled = true;
     err.appendChild(loadingState('Checking your AIs…'));
     if (!(await withAiCheck(body, 'the book'))) { clear(err); startAll.disabled = startSet.disabled = false; return; }
@@ -8389,6 +8395,10 @@ function scoreCell(v, cls = '') { return h('td', { class: `num ${cls}` }, v == n
 function s7c() {
   return { h, api, bpath, plink, link, clear, crumbs, toast, announce, problemBox, toProblem, stateBox, loadingState,
     fmtTime, pollQualityJob, infoTip, hazard, S };
+}
+/** The helpers writers-room.js (🗳 the writers' room) uses; a used pitch redraws Book home when it is open. */
+function wrc() {
+  return Object.assign(s7c(), { modal, onChanged: () => { S.details = {}; if (S.bookRedraw) S.bookRedraw(); } });
 }
 async function viewReport(main) {
   const title = profileOf().title || S.project.name;

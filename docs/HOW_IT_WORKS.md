@@ -136,6 +136,12 @@ bridge to your home Wi-Fi, behind its key.
 - **Canon:** the approved records together are the book's **canon**, the official truth everything else must match.
 - **Out of date (stale):** if something a record was built from changes, Akọwe marks that record out of date.
 - **AI slots:** AI-1, AI-2 and AI-3. By default they are Claude, ChatGPT and Gemini, through the bridge.
+- **🗳 Writers' room:** for a big decision (a plot twist, how a chapter ends, a character's secret, or your own
+  question), each working AI pitches one idea. The pitches are shuffled and labelled A, B, C, and each AI ranks the
+  others' pitches (never its own) with a reason. Most first places wins; a tie goes to the sum of ranks, then to you.
+  Using a pitch saves it as a new draft marked "From the writers' room"; the approved text stays until you approve
+  it. With only one working AI, you can ask it for three ideas instead. (This is not the desktop app's Council, where
+  the panes chat with each other.)
 
 ### 🎨 Images
 
@@ -204,6 +210,9 @@ to a minute), so the run knows which AIs work.
    This never holds up the book.
 7. **Story rules and world texture:** what is law in this world, what is only believed, and real-world obstacles.
 8. **Premise**, then **main plot**, then **chapter outline**.
+   - **Optional: the writers' room for the big twists** (off unless you turn it on at the start). Before the main
+     plot, and before the middle chapter and the climax, each working AI pitches an idea and they vote blind. The
+     winner is used under your run consent and written in the journal. It never holds up the book.
    - **Optional: fill the whole Book Bible** from the plan before chapter one. It is off unless you turn it on
      (on the start screen, or 📖 Book Bible → At a glance). It never holds up the book.
 9. **Every chapter.** For each one:

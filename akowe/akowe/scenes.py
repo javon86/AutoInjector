@@ -477,6 +477,13 @@ class ScenePlanner:
                 out["peril_and_pace"] = sr
         except Exception:  # noqa: BLE001
             log.exception("could not add the world texture to the scene context")
+        try:  # 🗳 the writers' room's decision for this chapter (a ⚡ run's pick; writers_room.py)
+            from . import writers_room  # noqa: PLC0415
+            room = writers_room.chapter_decision(self.store, pid, branch, chapter_id)
+            if room:
+                out["writers_room"] = room
+        except Exception:  # noqa: BLE001
+            log.exception("could not add the writers' room decision to the scene context")
         return out
 
     @staticmethod
@@ -489,6 +496,9 @@ class ScenePlanner:
         if ctx.get("world_texture"):
             extra.append(TEXTURE_PLAN)
         extra += ctx.get("peril_and_pace") or []
+        if ctx.get("writers_room"):
+            from .writers_room import PLAN_RULE  # noqa: PLC0415
+            extra.append(PLAN_RULE)
         return base + (" " + " ".join(extra) if extra else "")
 
     # ------------------------------------------------------------------ make / revise (the writer)
