@@ -567,8 +567,10 @@ def run_fill(app, job, pid: str, branch: str, only: list[str] | None, use_ai: bo
     from . import story_details  # noqa: PLC0415
     for c in story_details.book_checks(app, pid, branch, getattr(job, "principal", None) or "author"):
         job.results.append({"ok": True, "check": {k: c.get(k) for k in ("chapter_id", "number", "name", "part",
-                                                                        "sheet", "book")},
-                            "message": f"{c['name']} — {c['part'].lower()}: the book says “{c['book']}” (chapter "
+                                                                        "sheet", "book", "field_code")},
+                            "message": f"{c['name']} — {c['part'].lower()}"
+                                       f"{' (' + c['field_code'] + ')' if c.get('field_code') else ''}: the book says "
+                                       f"“{c['book']}” (chapter "
                                        f"{c.get('number') or c.get('chapter_id')}), the sheet says "
                                        f"“{c['sheet'][:120]}” — which is right?"})
     job.total = len(subjects)

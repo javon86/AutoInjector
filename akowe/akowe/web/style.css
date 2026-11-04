@@ -1689,3 +1689,10 @@ html[data-mode="simple"] .topbar .health-btn.adv-only[data-state="problem"] { di
   .topbar-context #project-select { max-width: none; }
 }
 @media (min-width: 801px) { .topbar .sets-pop { left: auto; right: 0; transform: none; } }  /* Sets sits at the right of the bar now */
+
+/* 🔢 ❓ Help → Code map (code_map.py) */
+.codemap-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.codemap-table th, .codemap-table td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--line, #ddd); vertical-align: top; }
+.codemap-table tr.codemap-sec th { background: var(--soft, #f3f1ea); font-weight: 700; padding-top: 10px; }
+.codemap-table code { font-weight: 700; }
+@media print { .codemap-table { font-size: 10.5px; } }

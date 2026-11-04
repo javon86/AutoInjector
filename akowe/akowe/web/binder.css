@@ -260,6 +260,10 @@ body.bnd-on main { max-width: 1720px; }
 .bnd-fid { font: 10px Georgia, serif; color: var(--bnd-gold-ink); }
 .bnd-tag { border: 1px solid var(--bnd-line); border-radius: 4px; padding: 0 4px; font: 9px var(--bnd-f-label); letter-spacing: .04em; }
 .bnd[data-fids="off"] .bnd-fid { display: none !important; }
+/* 🔢 Show codes (code_map.py): C1c = a character's eyes, C11 = their whole Looks section */
+.bnd-code { font: 700 10px ui-monospace, Menlo, Consolas, monospace; color: var(--bnd-accent, #1f4d3a); border: 1px solid var(--bnd-line); border-radius: 4px; padding: 0 4px; letter-spacing: .02em; text-transform: none !important; }
+.bnd-sec-code { font-size: 10.5px; margin-right: 4px; }
+.bnd[data-codes="off"] .bnd-code { display: none !important; }
 .bnd-prop { color: var(--bnd-draft); font-size: 12px; }
 .bnd-f.is-proposed > .bnd-v, .bnd-fact.is-proposed > dd { border-left: 3px dotted var(--bnd-warn-line); padding-left: 7px; }
 .bnd-empty { color: var(--bnd-muted); font-style: italic; font-size: 13px; }
