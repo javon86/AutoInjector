@@ -181,7 +181,12 @@ to a minute), so the run knows which AIs work.
 9. **Every chapter.** For each one:
    - **Just-in-time details:** if the chapter has a fight, the fighters' style and weapon are decided now. A new
      place gets its rooms, sounds and smells. Once a chapter uses a detail, it is **locked**.
-   - **Scene cards:** the writer plans the scenes. A different AI checks them.
+   - **Scene cards:** the writer plans the scenes. A different AI checks them. With the scene cards the planner
+     also writes the chapter's **needs list** 🧠: exactly which Book Bible sections it needs, by code
+     (`Chapter 7 needs: Mara C11, C44 · Brass key I22 · Notes N11(Mara) · Earlier: chapter 3 (…)`). Akọwe checks the
+     codes, and gives the writer just those sections, a short quote of each earlier moment, and only the running
+     notes asked for — nothing missing, nothing extra. An empty section on the list is filled just in time first.
+     Older plans without a list keep the old way (Akọwe guesses from the plan's words).
    - **Writing:** the writer gets the plan, the voice cards, the locked details, the end of the last chapter, the
      story so far, and your promises to the reader: content limits, themes, the central question, the point of
      view and tense. If the instructions are too long, the least important parts are cut first, and the run shows
@@ -239,6 +244,7 @@ to a minute), so the run knows which AIs work.
 | Ending check | setups that never pay off, vanished side characters, an ending that misses the question | at checkpoints (light) and after the last chapter |
 | Protagonist guarantee | a book that loses its main character | before the outline, the chapters and "done" |
 | Cut instructions ⚠️ | the writer silently missing facts, rules or voice cards | every chapter |
+| Needs list 🧠 | a listed detail that does not match the page (named by its code, e.g. "Mara C1c (eyes)"); things used but not planned | reviewer and checkpoints, every chapter |
 | Final checks | chapters missing or doubled; scores and weaknesses; broken files | at the end |
 
 A few of these need more words:
@@ -253,6 +259,10 @@ A few of these need more words:
   the notes of every later chapter (they were built on top of it), its lines in the story so far, and any
   checkpoint that read it. They are read again from the new text, and
   each later chapter gets a flag: *"Chapter 5 changed after chapter 6 was written — check chapter 6."*
+- **Needs lists.** The chapter reviewer and the checkpoints get each chapter's needs list and check every listed
+  section on the page. When the chapter used something its list did not plan, the run says so ("🧠 Chapter 7 also
+  used Tom Reed (not planned)") and the next plans learn from it. ⏱ Time and AI use shows how much smaller the
+  writer's instructions were ("Smart memory saved ~N% of instruction size").
 - **Book report.** For a long book the report says when it only read a sample. **📖 Read the whole book** reads
   every part.
 

@@ -539,7 +539,7 @@ class ChapterWriter(ProseWriter):
             # POV character's name and planned backstory. Read once here; only IDs and numbers go into the meta.
             from ..chapter_brief import build as build_brief  # noqa: PLC0415
             brief, info = build_brief(ctx.store, ctx.project_id, ctx.branch_id, ctx.field_record("outline_ref"),
-                                      ctx.payload["chapter_id"])
+                                      ctx.payload["chapter_id"], measure=True)  # 🧠 + the smart-memory sizes
             ctx.writing_brief = brief
             meta["brief"] = info
         return meta
