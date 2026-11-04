@@ -273,8 +273,8 @@ to a minute), so the run knows which AIs work.
      (characters' traits, voice and goals, world rules, tone, the timeline, injuries and belongings, names) and
      chapters that stray from their plan; the agreement rules above decide what is fixed. It also looks for side
      characters who vanished and story threads that should have moved by now. Every 5 chapters each AI also writes a
-     **review of those chapters** (pacing, how the story and the main character move, drift, what works and what does
-     not, scores); the run's notes and the report show "Chapters 6–10 review" with each AI's view and where they
+     **review of those chapters** (pacing, how the story and the main character move, whether it is heading the right way toward the
+     planned ending, whether it makes sense, drift, what works and what does not, scores); the run's notes and the report show "Chapters 6–10 review" with each AI's view and where they
      agree.
    - **The ending check**, after the last chapter, by every working AI: does every setup pay off, does every named
      character get an ending, does the main character change, does the ending answer the book's question? What 2 or

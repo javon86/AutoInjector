@@ -64,7 +64,7 @@ CHECK_SCHEMA = {
         # 📖 PR #117: at a checkpoint every N chapters, each AI's own review of the stretch it read (optional)
         "stretch_review": {"type": "object", "additionalProperties": False,
                            "required": ["pacing", "arc", "drift", "working", "not_working", "scores"],
-                           "properties": {"pacing": _S, "arc": _S, "drift": _S,
+                           "properties": {"pacing": _S, "arc": _S, "drift": _S, "direction": _S, "sense": _S,
                                           "working": {"type": "array", "maxItems": 5, "items": _S},
                                           "not_working": {"type": "array", "maxItems": 5, "items": _S},
                                           "scores": {"type": "object", "additionalProperties": False,
@@ -73,15 +73,20 @@ CHECK_SCHEMA = {
                                                      "properties": {k: {"type": "integer", "minimum": 1,
                                                                         "maximum": 10}
                                                                     for k in ("pacing", "arc_progress", "continuity",
-                                                                              "characters")}}}}}}
+                                                                              "characters", "direction",
+                                                                              "makes_sense")}}}}}}
 STRETCH_SCORES = {"pacing": "Pacing", "arc_progress": "Story and arc progress", "continuity": "Continuity",
-                  "characters": "Characters stay themselves"}
+                  "characters": "Characters stay themselves", "direction": "Heading the right way",
+                  "makes_sense": "Makes sense"}
 STRETCH_TASK = (
     " ALSO review this stretch of chapters as a whole (context.stretch) in stretch_review: pacing (one or two plain "
     "sentences: does it move, drag or rush?), arc (do the story and the main character's arc move forward as planned?), "
-    "drift (do characters, rules or tone drift from the Book Bible and the running notes?), working (up to 5 things that "
+    "drift (do characters, rules or tone drift from the Book Bible and the running notes?), direction (is the story "
+    "heading the right way: toward the planned ending, the premise and the book's central question, or wandering off? "
+    "name the chapter where it turns), sense (does it make sense: are events, motives and cause-and-effect believable "
+    "and clear to a reader? name what does not add up), working (up to 5 things that "
     "work, concrete), not_working (up to 5 concrete things that do not, each naming the chapter), scores 1-10 for "
-    "pacing, arc_progress, continuity and characters (most good drafts score 6-8).")
+    "pacing, arc_progress, continuity, characters, direction and makes_sense (most good drafts score 6-8).")
 PLAN_RULE = (
     " Check each chapter against its plan too (context.plan: what the chapter must do): a chapter that strays off its "
     "plan or the story's path, or drops what the plan needs, is a problem (severity major) — quote where it strays.")
@@ -824,8 +829,10 @@ def clean_stretch(raw) -> dict | None:
     def lst(v):
         return [_clip(x, 240) for x in v if isinstance(x, str) and x.strip()][:5] if isinstance(v, list) else []
     out = {"pacing": _clip(r.get("pacing"), 400), "arc": _clip(r.get("arc"), 400), "drift": _clip(r.get("drift"), 400),
+           "direction": _clip(r.get("direction"), 400), "sense": _clip(r.get("sense"), 400),
            "working": lst(r.get("working")), "not_working": lst(r.get("not_working")), "scores": sc}
-    return out if any(out[k] for k in ("pacing", "arc", "drift", "working", "not_working", "scores")) else None
+    return out if any(out[k] for k in ("pacing", "arc", "drift", "direction", "sense", "working", "not_working",
+                                         "scores")) else None
 
 
 def combine_stretch(views: list[dict], label: str) -> dict:
@@ -879,7 +886,8 @@ def _stretch(svc, run: dict, cp: dict) -> None:
     for p in cp.get("parts") or []:
         for v in p.get("reviews") or []:
             cur = views.setdefault(v["name"], {"name": v["name"], "slot": v.get("slot"), "pacing": v.get("pacing"),
-                                               "arc": v.get("arc"), "drift": v.get("drift"), "working": [],
+                                               "arc": v.get("arc"), "drift": v.get("drift"),
+                                               "direction": v.get("direction"), "sense": v.get("sense"), "working": [],
                                                "not_working": [], "scores": {}, "_n": {}})
             cur["working"] = (cur["working"] + list(v.get("working") or []))[:5]
             cur["not_working"] = (cur["not_working"] + list(v.get("not_working") or []))[:5]
@@ -1167,7 +1175,8 @@ def stretch_markdown(sr: dict, level: str = "####") -> list[str]:
         out.append(f"- {' and '.join(a['names'])} agree "
                    + ("this is not working" if a["kind"] == "not_working" else "this works") + f": {a['point']}")
     for v in sr.get("views") or []:
-        out.append(f"- **{v['name']}**: " + " ".join(x for x in (v.get("pacing"), v.get("arc"), v.get("drift")) if x)
+        out.append(f"- **{v['name']}**: " + " ".join(x for x in (v.get("pacing"), v.get("arc"), v.get("direction"),
+                                                                 v.get("sense"), v.get("drift")) if x)
                    + (f" Works: {'; '.join(v['working'][:3])}." if v.get("working") else "")
                    + (f" Not working: {'; '.join(v['not_working'][:3])}." if v.get("not_working") else ""))
     out.append("")
