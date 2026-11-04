@@ -1702,3 +1702,20 @@ html[data-mode="simple"] .topbar .health-btn.adv-only[data-state="problem"] { di
 .needs-box .nl-code { font-family: ui-monospace, monospace; font-weight: 600; cursor: help; text-decoration: underline dotted; }
 .needs-box .nl-code:focus { outline: 2px solid var(--focus, #2a6df4); outline-offset: 1px; }
 .needs-box details ul ul { margin: 2px 0 6px 1.2em; }
+
+/* 🎨 Interior design + print preview (Book format step) */
+.interior-box { margin: 10px 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius); }
+.interior-box h4 { margin: 0 0 6px; }
+.interior-themes { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px; margin: 8px 0; }
+.interior-theme { display: flex; flex-direction: column; gap: 4px; text-align: left; padding: 8px 10px;
+  border: 1px solid var(--border); border-left: 5px solid var(--accent, #555); border-radius: var(--radius);
+  background: var(--surface); color: var(--text); cursor: pointer; }
+.interior-theme.on { outline: 3px solid var(--accent, #555); outline-offset: 1px; }
+.interior-pickers { gap: 16px; flex-wrap: wrap; margin: 6px 0; }
+.interior-preview { margin-top: 8px; }
+.interior-spread-wrap { margin: 10px 0; }
+.interior-spread { display: flex; justify-content: center; background: #8b8478; padding: 12px; border-radius: 6px;
+  overflow-x: auto; }
+.interior-page { margin: 0; flex: 0 1 300px; max-width: 300px; box-shadow: 0 1px 4px rgba(0, 0, 0, .35); background: #fffdf8; }
+.interior-page svg, .interior-page img { display: block; width: 100%; height: auto; }
+.interior-page figcaption { background: #fffdf8; color: #6b6455; text-align: center; padding: 2px 0; }

@@ -5584,6 +5584,7 @@ function renderBook(holder, book, redraw) {
     }
     const acts = h('div', { class: 'row' });
     if (s.id === 'profile') acts.appendChild(h('button', { type: 'button', class: 'small', onclick: () => openProfileDialog(() => redraw()) }, s.state === 'done' ? 'Edit' : 'Fill in'));
+    if (s.id === 'format') li.appendChild(interiorBox(redraw)); // 🎨 interior design + print preview
     if (s.id === 'canon') {
       if (s.sheets && s.sheets.total) li.appendChild(h('p', { class: 'small', 'data-testid': 'canon-sheets' }, `🎭 ${s.sheets.complete} of ${s.sheets.total} approved character${s.sheets.total === 1 ? '' : 's'} have a character sheet and a voice card`,
         s.sheets.complete < s.sheets.total ? [' ', hazard({ code: 'CHARACTER_SHEET_MISSING' }, {}, { small: true }), ' ', h('a', { href: plink('op', 'A01') }, 'Open the characters')] : null,
@@ -8127,6 +8128,102 @@ function editorRunSummary(r) {
 
 /* ======================================================================= ✍ Write all chapters (S2) */
 const WA = { job: null, poll: null };
+/** 🎨 Interior design (Book format step): a theme for the printed pages (tied to the Book Bible looks), the page
+ * size, the body font, and a print preview of a chapter-opener spread and a normal spread. The preview comes from
+ * the real page layout (pictures of the real PDF pages when the server can draw them); the note says which. */
+function interiorBox(redraw) {
+  const box = h('div', { class: 'interior-box', 'data-testid': 'interior-design' });
+  let data = null, pick = null, seq = 0;
+  const pv = h('div', { class: 'interior-preview', 'data-testid': 'interior-preview', 'aria-live': 'polite' });
+  const status = h('p', { class: 'small muted', 'data-testid': 'interior-status' });
+  const draw = () => {
+    clear(box);
+    const c = data.chosen, o = data.options;
+    const themeName = id => (o.themes.find(t => t.id === id) || {}).label || id;
+    box.appendChild(h('h4', null, '🎨 Interior design — how the printed pages look'));
+    box.appendChild(h('p', { class: 'small' }, 'Pick a design for the inside of your book. It sets the chapter openings (number, title, a big first letter), the little ornament between scenes, the page headers and the page numbers. ',
+      h('strong', null, `Your genre’s design is “${themeName(c.theme_default)}”.`)));
+    const grid = h('div', { class: 'interior-themes', role: 'radiogroup', 'aria-label': 'Interior design' });
+    for (const t of o.themes) {
+      const on = pick.theme === t.id;
+      grid.appendChild(h('button', { type: 'button', role: 'radio', 'aria-checked': on ? 'true' : 'false', class: `interior-theme${on ? ' on' : ''}`,
+        'data-theme': t.id, style: `--accent:${t.accent}`, onclick: () => { pick.theme = t.id; pick.font = ''; draw(); load(); } },
+        h('strong', null, t.label, t.id === c.theme_default ? h('span', { class: 'badge b-muted' }, ' your genre') : null,
+          t.id === c.theme && c.theme_stored ? h('span', { class: 'badge b-ok' }, ' chosen') : null),
+        h('span', { class: 'small' }, t.feel)));
+    }
+    box.appendChild(grid);
+    const trimSel = h('select', { 'data-testid': 'interior-trim', onchange: e => { pick.trim = e.target.value; load(); } },
+      o.trims.map(t => h('option', { value: t.id, selected: t.id === pick.trim }, t.label)));
+    const fontSel = h('select', { 'data-testid': 'interior-font', onchange: e => { pick.font = e.target.value; load(); } },
+      h('option', { value: '', selected: !pick.font }, 'The design’s own font'),
+      o.fonts.map(f => h('option', { value: f.id, selected: f.id === pick.font }, f.label)));
+    box.appendChild(h('div', { class: 'row interior-pickers' },
+      h('label', null, 'Page size (trim) ', trimSel), h('label', null, 'Body font ', fontSel)));
+    const changed = pick.theme !== c.theme || pick.trim !== c.trim || (pick.font || '') !== (c.font_stored || '');
+    box.appendChild(h('div', { class: 'row' },
+      h('button', { type: 'button', class: 'small primary', 'data-testid': 'interior-save', disabled: !changed, onclick: save },
+        changed ? `✔ Use “${themeName(pick.theme)}” at this size` : '✔ This is your design'),
+      pick.theme !== c.theme_default ? h('button', { type: 'button', class: 'small link', onclick: () => { pick.theme = c.theme_default; pick.font = ''; draw(); load(); } }, '↺ Back to my genre’s design') : null));
+    box.appendChild(status);
+    box.appendChild(pv);
+  };
+  const showPreview = p => {
+    clear(pv);
+    if (!p || !(p.spreads || []).length) { pv.appendChild(h('p', { class: 'small muted' }, (p && p.honest) || 'No preview.')); return; }
+    pv.appendChild(h('p', { class: 'small', 'data-testid': 'interior-kind', 'data-kind': p.kind },
+      p.kind === 'pdf_image' ? '🖨 Print preview: pictures of the real PDF pages. ' : '🖨 Print preview: drawn from the real page layout. ',
+      h('span', { class: 'muted' }, p.honest, p.source ? ` Text: ${p.source}.` : '')));
+    pv.appendChild(h('p', { class: 'small muted' }, `Page ${p.page_size_in[0]} × ${p.page_size_in[1]} in · margins: inside ${p.margins_in.inside} in (the binding side, wider for thicker books), outside ${p.margins_in.outside} in, top ${p.margins_in.top} in, bottom ${p.margins_in.bottom} in.`));
+    for (const sp of p.spreads) {
+      const row = h('div', { class: 'interior-spread', 'data-spread': sp.name, 'aria-label': sp.name });
+      for (const pg of sp.pages) {
+        const cell = h('figure', { class: `interior-page role-${pg.role}`, 'data-page': String(pg.page), 'data-role': pg.role });
+        if (pg.png) cell.appendChild(h('img', { src: pg.png, alt: `Page ${pg.page}` }));
+        else if (pg.svg) {
+          const doc = new DOMParser().parseFromString(pg.svg, 'image/svg+xml');
+          const el = doc.documentElement;
+          if (el && el.nodeName.toLowerCase() === 'svg') cell.appendChild(document.importNode(el, true));
+        }
+        cell.appendChild(h('figcaption', { class: 'small muted' }, pg.role === 'blank' ? 'left page (blank)' : pg.role === 'opener' ? `page ${pg.page} — chapter opening` : `page ${pg.page}`));
+        row.appendChild(cell);
+      }
+      pv.appendChild(h('div', { class: 'interior-spread-wrap' }, h('strong', { class: 'small' }, sp.name), row));
+    }
+  };
+  async function load() {
+    const my = ++seq;
+    status.textContent = 'Drawing the preview…';
+    const q = new URLSearchParams({ theme: pick.theme, trim: pick.trim });
+    if (pick.font) q.set('font', pick.font);
+    try {
+      const d = await api('GET', bpath(`/interior?${q}`));
+      if (my !== seq) return;
+      if (!data) { data = d; pick = { theme: d.chosen.theme, trim: d.chosen.trim, font: d.chosen.font_stored || '' }; draw(); }
+      status.textContent = '';
+      showPreview(d.preview);
+    } catch (e) { if (my === seq) status.textContent = 'The preview could not be drawn just now.'; }
+  }
+  async function save() {
+    try {
+      const r = await api('PUT', bpath('/interior'), { body: { interior_theme: pick.theme === data.chosen.theme_default ? '' : pick.theme, trim_size: pick.trim === data.options.default_trim ? '' : pick.trim, interior_font: pick.font || '' } });
+      data.chosen = r.chosen;
+      toast(r.message, 6000);
+      draw(); load();
+      if (redraw) redraw();
+    } catch (e) { status.textContent = 'Could not save the design: ' + ((e.body && e.body.errors && e.body.errors[0] && e.body.errors[0].message) || 'try again'); }
+  }
+  // first load: the saved choice (no query) so the picker starts on it
+  (async () => {
+    try {
+      data = await api('GET', bpath('/interior'));
+      pick = { theme: data.chosen.theme, trim: data.chosen.trim, font: data.chosen.font_stored || '' };
+      draw(); showPreview(data.preview);
+    } catch { box.appendChild(h('p', { class: 'small muted' }, 'The interior design choices could not be loaded.')); }
+  })();
+  return box;
+}
+
 function writeAllBox(book, redraw) {
   const box = h('div', { class: 'wa-box', 'aria-live': 'polite' });
   const draw = () => {
