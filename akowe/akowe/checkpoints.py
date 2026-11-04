@@ -35,6 +35,7 @@ import re
 import threading
 from datetime import datetime, timezone
 
+from . import ai_activity
 from . import story_ledger as sl_mod
 
 log = logging.getLogger("akowe.checkpoints")
@@ -605,15 +606,17 @@ def _run_one(svc, run: dict, st: dict, cp: dict, chapters: list[dict]) -> None:
             ctx["stretch"] = {"chapters": label, "after_chapter": cp["after"]}
             task += STRETCH_TASK
         if len(checkers) >= 2:
-            _read_part_by_all(svc, run, cp, part, j, rid, ctx, task, checkers, texts, order, title, label)
+            _read_part_by_all(svc, run, cp, part, j, rid, ctx, task, checkers, texts, order, title, label, k)
             continue
         job = svc._sub_job(run, "checkpoint", rid, (run.get("settings") or {}).get("slot_id"))  # noqa: SLF001
         job.retry_busy = False  # a busy AI never holds the book up: the part is read at the next checkpoint
         review = getattr(svc, "_review", None) or svc.app.review
         tok = review.work.begin(pid, "C02", f"Checkpoint after chapter {cp['after']}")
+        what, what_done = activity_words(cp, label, j, k)
         try:
-            raw = review.assist._call_ai(  # noqa: SLF001
-                job, op_for_roles="C02", task=task, schema=CHECK_SCHEMA, context=ctx, protected=[])
+            with ai_activity.doing(what, done=what_done):  # ⚡ #116 the AI activity strip
+                raw = review.assist._call_ai(  # noqa: SLF001
+                    job, op_for_roles="C02", task=task, schema=CHECK_SCHEMA, context=ctx, protected=[])
         except Cancelled:
             raise
         except AkoweError as exc:
@@ -708,7 +711,8 @@ def _run_one(svc, run: dict, st: dict, cp: dict, chapters: list[dict]) -> None:
 
 
 def _read_part_by_all(svc, run: dict, cp: dict, part: dict, j: int, rid: str, ctx: dict, task: str,
-                      checkers: list[str], texts: dict, order: list[str], title: str, label: str) -> None:
+                      checkers: list[str], texts: dict, order: list[str], title: str, label: str,
+                      parts: int = 1) -> None:
     """🔎 PR #117: each checking AI reads this part independently (same brief), one after another; each answer is
     saved at once (a resumed checkpoint never asks that AI again). A busy, missing or too slow AI is skipped with a
     note — the book never waits for it. Then Akọwe merges what they found (cross_check.merge)."""
@@ -720,6 +724,7 @@ def _read_part_by_all(svc, run: dict, cp: dict, part: dict, j: int, rid: str, ct
     review = getattr(svc, "_review", None) or svc.app.review
     prov = svc.app.engine.providers
     by = part.setdefault("by_ai", {})
+    what, what_done = activity_words(cp, label, j, parts)
     for slot in checkers:
         if (by.get(slot) or {}).get("done"):
             continue
@@ -729,8 +734,9 @@ def _read_part_by_all(svc, run: dict, cp: dict, part: dict, j: int, rid: str, ct
         job.retry_busy, job.cross_pin = False, True
         tok = review.work.begin(pid, "C02", f"Checkpoint after chapter {cp['after']} ({name})")
         try:
-            raw = review.assist._call_ai(  # noqa: SLF001
-                job, op_for_roles="C02", task=task, schema=CHECK_SCHEMA, context=ctx, protected=[])
+            with ai_activity.doing(what, done=what_done):  # ⚡ #116 the AI activity strip (one row per AI)
+                raw = review.assist._call_ai(  # noqa: SLF001
+                    job, op_for_roles="C02", task=task, schema=CHECK_SCHEMA, context=ctx, protected=[])
             job.check()
         except Cancelled:
             raise
@@ -763,6 +769,22 @@ def _read_part_by_all(svc, run: dict, cp: dict, part: dict, j: int, rid: str, ct
                 skipped=[by[s]["name"] for s in checkers if by.get(s) and not by[s].get("done")], at=_now(),
                 reviews=[dict(d["review"], name=d["name"], slot=s) for s, d in done if d.get("review")])
     _put(store, pid, branch, cp)
+
+
+def activity_words(cp: dict, label: str, j: int = 0, k: int = 1) -> tuple[str, str]:
+    """⚡ #116 + 🔎 #117: the plain words the AI activity strip shows while this check reads a part, and when done:
+    "Checking chapter 7 for consistency (all AIs)", "Check consistency now: chapters 3–7", "Chapters 6–10 review",
+    "Checking chapters 1–12 (final check)"."""
+    part = f" (part {j + 1} of {k})" if k > 1 else ""
+    if cp.get("kind") == "chapter":
+        return (f"Checking chapter {cp['after']} for consistency (all AIs){part}",
+                f"Checked chapter {cp['after']} for consistency (all AIs){part}")
+    if cp.get("kind") == "now":
+        return f"Check consistency now: {label}{part}", f"Checked consistency: {label}{part}"
+    if cp.get("final"):
+        return f"Checking {label} (final check){part}", f"Checked {label} (final check){part}"
+    words = f"{label[:1].upper()}{label[1:]} review{part}"
+    return words, f"{words}: done"
 
 
 def _beats(svc, run: dict, st: dict, cp: dict, chapters: list[dict], outline: dict | None) -> None:

@@ -26,11 +26,18 @@ import difflib
 import logging
 import re
 
+from . import ai_activity
 from .assist import book_profile_brief, canon_context
 from .errors import AkoweError
 
 log = logging.getLogger("akowe.alongside")
 
+# ⚡ #116: what the AI activity strip says while the AI works on the passage
+ALONGSIDE_WORDS = {"continue": "Write alongside me: continuing your chapter",
+                   "rewrite": "Write alongside me: rewriting a passage",
+                   "describe": "Write alongside me: describing more",
+                   "expand": "Write alongside me: expanding a passage",
+                   "tighten": "Write alongside me: tightening a passage"}
 ACTIONS = {
     "continue": {"label": "✍ Continue from here", "needs_selection": False,
                  "task": "Continue the chapter from exactly the point marked by context.cursor: write the next part "
@@ -383,8 +390,10 @@ def run(review, job) -> None:
         raise AkoweError("NOT_FOUND", "/record_id", "this chapter no longer exists", status="REJECTED")
     job.phase = "Reading the chapter around your passage"
     ctx, protected, extra = brief(review, job.principal, pid, branch, rec, req)
-    raw = review.assist._call_ai(job, op_for_roles="C02", task=task(req["action"], req["note"]),  # noqa: SLF001
-                                 schema=SCHEMA, context=ctx, protected=protected)
+    with ai_activity.doing(ALONGSIDE_WORDS.get(req["action"], "Write alongside me"),  # ⚡ #116 activity strip
+                           link=f"rec/{rec['record_id']}"):
+        raw = review.assist._call_ai(job, op_for_roles="C02", task=task(req["action"], req["note"]),  # noqa: SLF001
+                                     schema=SCHEMA, context=ctx, protected=protected)
     job.check()
     new = clean_answer(raw, req)
     notes = checks(review.store, pid, branch, new, req, extra)

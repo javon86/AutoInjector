@@ -51,6 +51,7 @@ import uuid
 from collections import Counter
 from datetime import datetime, timezone
 
+from . import ai_activity
 from . import book_report as br
 from . import readability
 from .assist import Cancelled, Job
@@ -754,9 +755,15 @@ class BetaReaderService:
         ctx = {"book": view, "reader": dict({k: prof.get(k) for k in ("audience", "genre", "tone") if prof.get(k)},
                                             who=who.get("kind") or "typical"), "chapters": len(chapters)}
         t0 = time.monotonic()
+        n = len(chapters)
+        kind = str(who.get("kind") or "").replace("_", " ")
+        what = (f"Beta reader{f' ({kind} reader)' if kind else ''}: reading "
+                + (f"chapters 1–{n}" if n > 1 else "the book"))
         try:
-            raw = assist._call_ai(job, op_for_roles="C02", task=TASK.format(persona=who["text"]), schema=SCHEMA,
-                                  context=ctx, protected=[])
+            with ai_activity.doing(what, done=what.replace(": reading", ": read", 1), book_id=pid, branch_id=branch,
+                                   link="report"):  # ⚡ #116 the AI activity strip
+                raw = assist._call_ai(job, op_for_roles="C02", task=TASK.format(persona=who["text"]), schema=SCHEMA,
+                                      context=ctx, protected=[])
         except Cancelled:
             raise
         except AkoweError as exc:

@@ -38,6 +38,7 @@ import re
 import threading
 from datetime import datetime, timezone
 
+from . import ai_activity
 from .errors import AkoweError
 
 log = logging.getLogger("akowe.binder_fields")
@@ -599,8 +600,9 @@ def run_fill(app, job, pid: str, branch: str, only: list[str] | None, use_ai: bo
                                               **{k: f"relationship type with {name}: one of {', '.join(REL_TYPES)}"
                                                  for k, _t, name in s["rels"]})}
                 try:
-                    raw = app.assist._call_ai(job, op_for_roles="A01", task=FILL_TASK, schema=_schema(ask),  # noqa: SLF001
-                                              context=ctx, protected=[])
+                    with ai_activity.doing("Book Bible: filling from the book", link="bible"):  # ⚡ #116
+                        raw = app.assist._call_ai(job, op_for_roles="A01", task=FILL_TASK, schema=_schema(ask),  # noqa: SLF001
+                                                  context=ctx, protected=[])
                 except AkoweError as exc:
                     if total + n:
                         exc.errors[0]["message"] = (f"{exc.errors[0].get('message') or exc.code} — the {total + n} "

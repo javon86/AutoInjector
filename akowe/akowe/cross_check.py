@@ -313,7 +313,10 @@ def second_review(svc, run: dict, rj, rid: str, res: dict, label: str, *, auto: 
         setattr(job, k, getattr(rj, k))
     job.retry_busy, job.cross_pin = False, True
     try:
-        res2 = review.review_one(job, rid, auto=False)
+        from . import ai_activity  # noqa: PLC0415 - ⚡ #116 the AI activity strip
+        what = ai_activity.nice(label)
+        with ai_activity.doing(f"Second review of {what}", done=f"Second review of {what}: done"):
+            res2 = review.review_one(job, rid, auto=False)
     except AkoweError as exc:
         if getattr(exc, "control", False):
             raise

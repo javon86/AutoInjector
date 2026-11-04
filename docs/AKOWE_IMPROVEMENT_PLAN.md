@@ -926,6 +926,34 @@ The author's call on the rest of the 20-idea list: "way back burner, maybe never
   browser-drawn letters can differ slightly from the PDF; books put together before this change keep their old
   plain layout until they are put together again.
 
+## ⚡ AI activity strip (2026-11, "a way to see what the three AIs are up to") — done
+
+- **What the author sees:** a slim "AI activity" strip just under the top bar, on every page. One row per AI at work:
+  its name and colour dot, what it is doing in plain words ("Writing chapter 7", "Reviewing chapter 7", "Editing
+  chapter 7 (round 1 of 2)", "Planning scenes for chapter 8", "Chapters 1–5 review" (🔎 #117 checkpoint), "Second review of chapter 7",
+  "Checking chapter 7 for consistency (all AIs)", "Check consistency now: chapters 3–7", "Writers' room:
+  pitching a twist", "Beta reader (typical reader): reading chapters 1–6"), the book's title, the stage (Waiting for
+  the AI · AI is answering · Checking the answer · Waiting after a busy site, with the seconds left), a time that
+  ticks every second, and for a ⚡ run "chapter 7 of 20" (else "step 13 of 19") with a small bar. When it ends the row
+  says ✔ "Done: Wrote chapter 7" (✖ failed, ⏳ timed out, ⚠ paused – needs you, ■ stopped) for about 6 s and fades;
+  sooner when that AI starts something new. Nothing at work: the strip takes no space. A click (or Enter) opens the
+  ⚡ run window, or the book page the work belongs to. Starts and ends are announced politely (screen readers); the
+  ⚡ chip keeps saying how far the whole run is ("AI working 3/10").
+- **How:** `akowe/ai_activity.py` — a thread-safe, in-memory registry (nothing saved, never prompt or answer text).
+  The ONE place every AI call passes, `ProviderRegistry._generate_on`, tells it when a call starts and ends (which
+  slot, which book). The plain words come from the code that asks, through `ai_activity.doing("…")` (a context
+  variable, so nothing extra is passed through the engine): the ⚡ run (each step, each chapter and each piece of
+  work in it), Write all chapters, checkpoints, writers' room (its threads keep the run's details with
+  `ai_activity.carry`), beta readers, launch kit, write alongside, originality, fill from the book and the book
+  report. Anything else gets plain words from its job kind (`assist._call_ai`). `wait_and_retry` reports a busy
+  site's wait; `_choose_slot` reports waiting for a free AI. `GET /api/activity` lists the rows (books this author
+  can open); the page polls every 1.5 s while something is shown, 4 s otherwise (there is no event stream).
+- **Tests:** `akowe/tests/test_ai_activity.py` (lifecycle, outcomes, expiry, one row per AI, thread safety, a fake
+  ⚡ run's plain words, the API) and `akowe/tests/campaign/ui/test_ui_ai_activity.py` (rows appear, tick, are
+  keyboard-reachable, fit a phone, and vanish after the work is done).
+- *Not done:* Alfred and the desktop app's own panes do not show here (only Akọwe's AI calls); "waiting for the AI"
+  covers a busy slot inside Akọwe, not a site that is slow to start answering (the bridge does not say).
+
 ## Prevention pass (2026-10-27, "solve problems before they become problems")
 
 - [x] **Alfred's local AI connection:**

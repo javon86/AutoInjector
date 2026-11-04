@@ -49,6 +49,7 @@ import re
 import threading
 from datetime import datetime, timezone
 
+from . import ai_activity
 from .errors import AkoweError
 
 log = logging.getLogger("akowe.launch_kit")
@@ -1152,8 +1153,10 @@ def start_generate(app, principal, pid, branch, body) -> dict:
                         note="made from the book profile")
         ctx = gen_context(app, pid, branch, fields, d, canon, fix=fix)
         j.phase = "Writing the launch kit"
-        raw = app.assist._call_ai(j, op_for_roles="B01", task=GEN_TASK, schema=gen_schema(fields),  # noqa: SLF001
-                                  context=ctx, protected=[])
+        with ai_activity.doing("Launch kit: writing the store listing",  # ⚡ #116 the AI activity strip
+                               done="Launch kit: wrote the store listing", link="launch"):
+            raw = app.assist._call_ai(j, op_for_roles="B01", task=GEN_TASK, schema=gen_schema(fields),  # noqa: SLF001
+                                      context=ctx, protected=[])
         raw = raw if isinstance(raw, dict) else {}
         made = []
         for f in fields:
@@ -1218,8 +1221,10 @@ def start_check(app, principal, pid, branch, body) -> dict:
                           "main_plot": canon.get("main_plot") if cut < len(canon["chapters"]) else "",
                           "protected_mysteries": canon.get("mysteries") or []}}
         j.phase = "The AI is checking the launch kit"
-        raw = app.assist._call_ai(j, op_for_roles="C02", task=CHECK_TASK, schema=CHECK_SCHEMA,  # noqa: SLF001
-                                  context=ctx, protected=[])
+        with ai_activity.doing("Launch kit: checking the store listing",
+                               done="Launch kit: checked the store listing", link="launch"):
+            raw = app.assist._call_ai(j, op_for_roles="C02", task=CHECK_TASK, schema=CHECK_SCHEMA,  # noqa: SLF001
+                                      context=ctx, protected=[])
         issues = clean_ai_issues(raw, vals)
         rec = {"at": _now(), "slot": j.slot, "slot_label": j.slot_label, "key": texts_key(vals, d.get("spoiler_point")),
                "independent": j.slot not in writers, "issues": issues}

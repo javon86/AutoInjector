@@ -24,6 +24,7 @@ import threading
 import time
 from datetime import datetime, timezone
 
+from . import ai_activity
 from .errors import AkoweError
 
 log = logging.getLogger("akowe.jobs")
@@ -156,6 +157,7 @@ def wait_and_retry(fn, *, policy: RetryPolicy, check=None, on_wait=None, who: st
                     "retry_at": datetime.fromtimestamp(time.time() + delay, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
                     "message": f"Waiting for {name} ({word}) — retrying in {int(delay)} s"}
             log.info("AI busy (%s), retry %s in %.0fs", exc.code, attempt, delay)
+            ai_activity.note_wait(info)  # ⚡ #116: the AI activity strip shows the wait and its seconds left
             if on_wait:
                 on_wait(info)
             remaining = delay
@@ -168,6 +170,7 @@ def wait_and_retry(fn, *, policy: RetryPolicy, check=None, on_wait=None, who: st
             if check:
                 check()
             waited += delay
+            ai_activity.note_wait(None)
             if on_wait:
                 on_wait(None)
 

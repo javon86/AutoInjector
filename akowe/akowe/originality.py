@@ -49,6 +49,7 @@ from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
 
+from . import ai_activity
 from . import prose_audit
 from .prose_audit import _QUOTE, _SENT, _WORD, paragraphs
 
@@ -680,7 +681,8 @@ class OriginalityService:
         ctx = {"passages": [{k: p[k] for k in ("id", "chapter", "text")} for p in passages], "flags": flags}
         t0 = time.monotonic()
         try:
-            raw = assist._call_ai(job, op_for_roles="C02", task=AI_TASK, schema=AI_SCHEMA, context=ctx, protected=[])
+            with ai_activity.doing(f"Originality check: rating {len(passages)} passage(s)", link="report"):  # ⚡ #116
+                raw = assist._call_ai(job, op_for_roles="C02", task=AI_TASK, schema=AI_SCHEMA, context=ctx, protected=[])
         except Cancelled:
             raise
         except AkoweError as exc:

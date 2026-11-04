@@ -211,7 +211,9 @@ def _solo(app, principal, pid, branch, req_id):
         cp = _new_cp(svc, run, req, chapters, propose=True)
         req["cp_id"] = cp["id"]
         _put(app.store, pid, branch, req)
-        checkpoints._run_one(svc, run, {}, cp, chapters)  # noqa: SLF001
+        from . import ai_activity  # noqa: PLC0415 - ⚡ #116: the strip says which book this check is for
+        with ai_activity.doing(None, book_id=pid, branch_id=branch, kind="check_now"):
+            checkpoints._run_one(svc, run, {}, cp, chapters)  # noqa: SLF001
         req = get(app.store, pid, branch)
         req.update(status="done", finished_at=_now(), notes=svc.notes[-8:])
     except Exception as exc:  # noqa: BLE001 - a failed check is reported, never raised

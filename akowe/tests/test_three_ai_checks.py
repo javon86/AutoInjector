@@ -277,9 +277,21 @@ def test_three_ai_run_all_check_reviews_by_two_and_stretch_review(tmp_path, monk
     monkeypatch.setattr(checkpoints, "DEFAULT_EVERY", 2)  # a checkpoint after chapter 2 of 3 (and the final one)
     fake = SlotFake()
     fake.story_ledger = True
+    from akowe import ai_activity
+    tasks = []
+    started = ai_activity.call_started
+
+    def watching(*a, **kw):  # ⚡ #116: the plain words the AI activity strip shows for each AI call
+        tasks.append(ai_activity.current().get("task"))
+        return started(*a, **kw)
+    monkeypatch.setattr(ai_activity, "call_started", watching)
     app = make_app(tmp_path, fake)
     run = run_book(app, {"length": "short_story"})
     assert run["status"] == "done", (run["phase"], run.get("problem"))
+    for want in ("Second review of chapter 1", "Checking chapter 1 for consistency (all AIs)",
+                 "Chapters 1–2 review", "Checking chapters 1–3 (final check)"):
+        assert want in tasks, (want, sorted({t for t in tasks if t}))
+    assert not [t for t in tasks if t and "chapter ch" in t], "Akọwe's chapter ids leaked into the plain words"
     pid = run["project_id"]
     n = len(BookPath(app.engine, "author", pid, "main").outline_chapters(
         BookPath(app.engine, "author", pid, "main").outline()))
@@ -374,6 +386,17 @@ def _wait_now(app, pid, timeout=60):
     raise AssertionError("the consistency check did not finish")
 
 
+def test_activity_strip_words_for_the_checks():
+    assert checkpoints.activity_words({"kind": "chapter", "after": 7}, "chapter 7") == (
+        "Checking chapter 7 for consistency (all AIs)", "Checked chapter 7 for consistency (all AIs)")
+    assert checkpoints.activity_words({"kind": "now", "after": 7}, "chapters 3–7")[0] == \
+        "Check consistency now: chapters 3–7"
+    assert checkpoints.activity_words({"after": 10}, "chapters 6–10")[0] == "Chapters 6–10 review"
+    assert checkpoints.activity_words({"after": 10}, "chapters 6–10", 1, 2)[0] == "Chapters 6–10 review (part 2 of 2)"
+    assert checkpoints.activity_words({"final": True, "after": 12}, "chapters 1–12")[0] == \
+        "Checking chapters 1–12 (final check)"
+
+
 def test_check_now_ranges_are_chosen_in_plain_words():
     from akowe import check_now
     from akowe.errors import AkoweError
@@ -389,10 +412,18 @@ def test_check_now_ranges_are_chosen_in_plain_words():
         check_now.pick_range(0, {})
 
 
-def test_check_now_outside_a_run_all_ais_proposals_then_a_draft(tmp_path):
-    from akowe import check_now
+def test_check_now_outside_a_run_all_ais_proposals_then_a_draft(tmp_path, monkeypatch):
+    from akowe import ai_activity, check_now
     from akowe.errors import AkoweError
     app, fake, pid = _finished_book(tmp_path)
+    seen = []
+    started = ai_activity.call_started
+
+    def watching(*a, **kw):  # ⚡ #116: what the AI activity strip says for the check's AI calls
+        cur = ai_activity.current()
+        seen.append((cur.get("task"), cur.get("book_id")))
+        return started(*a, **kw)
+    monkeypatch.setattr(ai_activity, "call_started", watching)
     fake.checkpoint_extra = [{"chapter": 2, "quote": "every captain looked away", "severity": "major",
                               "problem": "Nessa says the keeper went out alone, but chapter 1 shows a stranger.",
                               "original": "every captain looked away", "replacement": "every captain looked down"}]
@@ -410,6 +441,7 @@ def test_check_now_outside_a_run_all_ais_proposals_then_a_draft(tmp_path):
     assert st["state"] == "done", st
     cp = st["latest"]
     assert cp["kind"] == "now" and len(cp["checked_by"]) == 3
+    assert ("Check consistency now: chapters 1–3", pid) in seen, seen
     assert cp["stretch"]["title"] == "Chapters 1–3 review" and len(cp["stretch"]["views"]) == 3
     prop = [p for p in cp["problems"] if p["status"] == "proposed"]
     assert prop and prop[0]["agreement"] == "confirmed", cp["problems"]
