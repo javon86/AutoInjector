@@ -74,6 +74,9 @@ akowe/
                            question vs. the ending (one AI call; the run sends open items back as a fix); checkpoints
     brief_cuts.py          ✂️ H13 what was cut from a chapter's instructions (settings brief_cuts:<pid>:<branch>)
     attention.py           ⚠️ 🏠 Book home's "Needs a look" list (status.attention): H5 / H11 / H13 / H14
+    alongside.py           ✍ Write alongside me: continue / rewrite / describe / expand / tighten a highlighted passage
+                           (focused brief from chapter_brief, review job, ⚠️ quick checks); POST …/review/alongside
+                           (202 job) and …/review/alongside/use (a new DRAFT, like a hand edit); web: alongsideCard
     timeline_check.py      🕰️ P26 timeline checker: ages, birth/story years, "N years ago" arithmetic (no AI)
     terms.py               🔧 P31 trade facts (settings trade_terms:<pid>:<branch>) + the P26 terminology check
     repetition.py          🔁 P30 repetition sorter: voice / motif / filler / accident, trim plan, author labels

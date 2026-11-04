@@ -230,6 +230,7 @@ class BookFakeAI:
         self.ending_fix = True                   # 🎯 the writer adds an ending finding's suggestion after the passage
         self.plot_obligations: list = []         # 🎯 the main plot's setups (B03 plot_obligations) the ending must keep
         self.needs = None                        # 🧠 a needs list returned with every scene plan (dict or callable(ctx))
+        self.alongside_script: list = []         # ✍ Write alongside me: scripted answers (dicts or callables(ctx))
 
     def fail_next(self, *excs):
         self.failures.extend(excs)
@@ -270,6 +271,12 @@ class BookFakeAI:
     def _answer(self, ctx, props, schema):
         if ctx.get("akowe_task") == "story_details":  # ⏱ story details (essentials / just in time)
             return "details", self._details(ctx)
+        if ctx.get("akowe_task") == "write_alongside":  # ✍ Write alongside me: one passage
+            with self.lock:
+                scripted = self.alongside_script.pop(0) if self.alongside_script else None
+            if scripted is not None:
+                return "alongside", scripted(ctx) if callable(scripted) else scripted
+            return "alongside", self._alongside(ctx)
         if "arc" in props and "question" in props:  # 🎯 H11 / H12: does the ending keep the book's promises?
             with self.lock:
                 scripted = self.ending_script.pop(0) if self.ending_script else None
@@ -797,6 +804,25 @@ class BookFakeAI:
         if mc.get("pov_id"):  # ★ the outline follows the book's main character (as a real AI is told to)
             pov = mc["pov_id"]
         return pov, loc
+
+    @staticmethod
+    def _alongside(ctx):
+        """✍ A deterministic suggestion per action (third person, past tense, like the fake chapters)."""
+        p = str(ctx.get("passage") or "").strip()
+        act = ctx.get("action")
+        if act == "continue":
+            t = "Mara stepped onto the wet boards of the jetty. The lamp behind her hissed, and the fog closed in."
+        elif act == "tighten":
+            t = (p.split(". ")[0].rstrip(".") + ".") if ". " in p else " ".join(p.split()[:max(3, len(p.split()) // 2)])
+        elif act == "describe":
+            t = p + " Salt stung her lips, the planks were cold and slick under her hands, and a gull cried somewhere."
+        elif act == "expand":
+            t = p + " She waited, counting her breaths, while the tide pulled at the pilings below."
+        else:
+            note = str(ctx.get("author_note") or "")
+            t = ("Her heart hammered. " if "tense" in note else "") + p.replace(" and ", ", and then ", 1) + \
+                ("" if "tense" in note else " (said again)")
+        return {"text": t, "why": f"fake {act}"}
 
     @staticmethod
     def _revise(data):

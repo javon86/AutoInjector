@@ -1702,3 +1702,14 @@ html[data-mode="simple"] .topbar .health-btn.adv-only[data-state="problem"] { di
 .needs-box .nl-code { font-family: ui-monospace, monospace; font-weight: 600; cursor: help; text-decoration: underline dotted; }
 .needs-box .nl-code:focus { outline: 2px solid var(--focus, #2a6df4); outline-offset: 1px; }
 .needs-box details ul ul { margin: 2px 0 6px 1.2em; }
+
+/* ✍ Write alongside me (app.js alongsideCard) */
+.wa-card { margin-top: 14px; }
+.wa-actions { flex-wrap: wrap; gap: 6px; }
+.wa-suggest { margin-top: 12px; padding: 10px 12px; border: 1px solid var(--border, #d0d5dd); border-radius: 8px; background: var(--surface-2); }
+.wa-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; margin: 8px 0; }
+.wa-col h4 { margin: 0 0 4px; font-size: .9em; color: var(--text-muted); }
+.wa-text { font-family: var(--font-prose); white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; }
+.wa-text ins { background: var(--ok-soft); text-decoration: none; }
+.wa-text del { background: var(--bad-soft); text-decoration-color: var(--bad); }
+@media (max-width: 700px) { .wa-cols { grid-template-columns: minmax(0, 1fr); } }
