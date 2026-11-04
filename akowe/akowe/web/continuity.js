@@ -5,6 +5,8 @@
 const STATUS_WORDS = { holds: '✔ holds', contradicted: '✕ contradicted on the page', unsupported: '⚠️ no support on the page' };
 const DECISION_WORDS = { unresolved: 'Not decided', deliberate: 'Keep the new version (deliberate)', restore: 'Bring the old version back' };
 
+import { checkNowBox } from './check-now.js';  // 🔎 PR #117
+
 export async function viewContinuity(main, x) {
   const { h, clear, api, bpath, plink, S } = x;
   const where = { book: S.project.name, step: 'Continuity' };
@@ -26,7 +28,7 @@ export async function viewContinuity(main, x) {
   const msg = h('div', { 'aria-live': 'polite' });
   const prog = h('div', { 'aria-live': 'polite' });
   const body = h('div', { 'data-testid': 'continuity' });
-  main.append(msg, prog, body);
+  main.append(msg, prog, checkNowBox(x, S.pid, S.branch, { testid: 'cont-check-now' }), body);
   const fail = (e, title) => clear(msg).appendChild(x.problemBox(x.toProblem(e, where), {}, title));
   const reload = async () => { try { await load(); } catch (e) { fail(e, 'Could not reload'); } render(); };
   const job = async (path, bodyArgs, label) => {

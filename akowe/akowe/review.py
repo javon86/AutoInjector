@@ -94,6 +94,14 @@ FIX_TASK = (
 FIX_NOTE_TASK = (" The author also left a note for this revision (context.author_note): follow it as well, as long as it "
                  "fits the book's approved canon.")
 
+# 🦵 PR #117 (B): continuity INSIDE the chapter is the reviewer's job too
+IN_CHAPTER_RULE = (
+    " Physical state changes inside this chapter must persist: a character hurt, tired, soaked or disarmed early in the "
+    "chapter is still so later in the same chapter (an injured knee limps, kneels with pain, takes the stairs slowly; a "
+    "dropped knife is not drawn again) unless the page shows the change. A within-chapter physical contradiction is a "
+    "MAJOR problem: verdict REVISE, and say which line contradicts which. context.akowe_in_chapter (when given) lists "
+    "possible ones Akọwe's own reading found: confirm them only when the text really contradicts itself.")
+
 NOT_INDEPENDENT = "Reviews are not independent — the same AI wrote and reviewed this"
 REVIEWER_CHOICES = (None, "AI-1", "AI-2", "AI-3")
 
@@ -369,7 +377,7 @@ class ReviewService:
         hist = self.store.history(pid, branch, rid)
         return hist[-1] if hist else None
 
-    def made_by(self, pid, branch, rec, fixes: dict, writers: dict | None = None) -> dict:
+    def made_by(self, pid, branch, rec, fixes: dict, writers: dict | None = None, _depth: int = 0) -> dict:
         """Who wrote exactly this revision: {kind: ai|ai_fix|you|auto, label, slot}. ``slot`` is the AI slot when
         an AI wrote it (from the AI-fix note, the provenance of the AI call, or the Bible Builder writer note)."""
         fix = fixes.get(_rkey(rec["record_id"], rec["version"]))
@@ -380,8 +388,15 @@ class ReviewService:
             return {"kind": "ai_fix", "label": f"Written alongside you by {self.slot_label(fix.get('slot')) or 'AI'}"
                     " (you chose to use it)", "slot": fix.get("slot")}
         if fix and fix.get("editor"):
-            return {"kind": "ai_fix", "label": f"Editor's fixes, written by {self.slot_label(fix.get('slot')) or 'AI'}",
-                    "slot": fix.get("slot")}
+            # PR #117 (G): name the AI that wrote the chapter and mark the editor's changes ("Claude + editor")
+            who = self.slot_label(fix.get("slot")) if fix.get("slot") else None
+            if not who and isinstance(fix.get("from_version"), int) and _depth < 8:
+                base = self.store.get_record(pid, branch, rec["record_id"], fix["from_version"])
+                if base:
+                    b = self.made_by(pid, branch, base, fixes, writers, _depth + 1)
+                    who = b["label"] if b.get("kind") in ("ai", "ai_fix") else None
+            who = (who or "AI").replace(" + editor", "")
+            return {"kind": "ai_fix", "label": f"{who} + editor", "slot": fix.get("slot"), "editor": True}
         if fix:
             return {"kind": "ai_fix", "label": f"AI fix by {self.slot_label(fix.get('slot')) or 'AI'} (you asked for it)",
                     "slot": fix.get("slot")}
@@ -445,7 +460,8 @@ class ReviewService:
     def writer_of(self, pid, branch, rec) -> dict:
         mb = self.made_by(pid, branch, rec, self.fixes(pid, branch))
         slot = mb.get("slot") if mb.get("kind") in ("ai", "ai_fix") else None
-        return {"kind": mb.get("kind"), "slot": slot, "label": self.slot_label(slot) if slot else mb.get("label")}
+        return {"kind": mb.get("kind"), "slot": slot, "label": self.slot_label(slot) if slot else mb.get("label"),
+                **({"editor": True} if mb.get("editor") else {})}
 
     def plan_reviewer(self, job: ReviewJob, writer: dict) -> None:
         """Automatic reviewer choice (no slot picked for this review): a working AI other than the writer, a
@@ -1399,6 +1415,14 @@ class ReviewService:
                 cmode = character_mode.of_store(self.store, pid)
                 ctx["character_mode"] = character_mode.brief(cmode)
                 task = REVIEW_TASK + character_mode.reviewer_rule(cmode)
+            if rec["module_id"] == "C02":  # 🦵 PR #117 (B): physical state inside this chapter must persist
+                from . import story_ledger  # noqa: PLC0415
+                from .checkpoints import cast_names  # noqa: PLC0415
+                flags = story_ledger.in_chapter(str((rec.get("data") or {}).get("text") or ""),
+                                                cast_names(self.store, pid, branch))
+                if flags:
+                    ctx["akowe_in_chapter"] = [{k: f.get(k) for k in ("name", "message", "quote")} for f in flags[:8]]
+                task = task + IN_CHAPTER_RULE
             raw = self.assist._call_ai(job, op_for_roles=rec["module_id"], task=task, schema=REVIEW_SCHEMA,
                                        context=ctx, protected=protected)
         finally:

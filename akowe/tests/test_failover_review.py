@@ -375,7 +375,8 @@ def test_pinned_run_still_gets_an_independent_reviewer(tmp_path):
     run = run_book(app, {"slot_id": "AI-2"})
     assert run["status"] == "done", (run["phase"], run.get("problem"))
     writes = {s for s, k in fake.per_slot if k not in ("review", "fail", "craft", "scene_review", "planned", "ending",
-                                                       "book_review")}  # P13: the whole-book read is a review
+                                                       "book_review", "checkpoint")}  # P13: the whole-book read is a review; PR #117: every AI checks
+    #                                                                          (a checkpoint read is a check)
     reviews = {s for s, k in fake.per_slot if k == "review"}
     crafts = {s for s, k in fake.per_slot if k == "craft"}
     assert writes == {"AI-2"} and reviews == {"AI-1"}

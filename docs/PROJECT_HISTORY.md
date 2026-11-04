@@ -43,6 +43,7 @@ A plain-words record of every big change, newest first, so that if something bre
 
 | Date | PR | What changed |
 |---|---|---|
+| 2026-11-04 | #117 | 🔎 All the AIs check for mistakes and drift: each chapter is reviewed by both AIs that did not write it, then checked by every AI; the checkpoints (with a review of each stretch of chapters) and the ending check are read by every AI; what 2 or more agree on is fixed. New setting "How many AIs check for mistakes", and a 🔎 Check consistency now button (any time; queued between chapters during a run). Report fixes: accented letters and symbols in the report PDF, injuries inside one chapter, beta-reader quotes checked, the writer counts half on the beta panel, "scores lowered N times" per AI, must-fix habits for the editor, tidier report |
 | 2026-11-04 | #114 | Story shapes: pick Three acts, Save the Cat, Hero's Journey or Seven-point; each beat is placed on a chapter, written, checked and fixed once if it did not land |
 | 2026-11-04 | #114 | ✍ Write alongside me: highlight a passage in a chapter and the AI continues, rewrites, describes more, expands or tightens it; you see a suggestion (with ⚠️ quick checks) and choose to use it as a new version |
 | 2026-11-04 | #114 | 🗳 Three-AI writers' room: each AI pitches a twist, they vote blind, you choose (also optional in ⚡ Make a book) |

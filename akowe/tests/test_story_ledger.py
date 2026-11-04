@@ -265,7 +265,7 @@ def checkpoint_reads(fake):
 def test_twelve_chapter_book_checkpoint_every_five_catches_and_fixes_planted_contradictions(tmp_path):
     fake = planted_book()
     app = make_app(tmp_path, fake=fake)
-    run = done(run_book(app, {"length": "novella"}))
+    run = done(run_book(app, {"checkers": "one", "length": "novella"}))
     pid = run["project_id"]
     cps = {c["id"]: c for c in checkpoints.items(app.store, pid, BR)}
     assert set(cps) == {"after-5", "after-10", "final"}
@@ -311,7 +311,7 @@ def test_a_problem_that_cannot_be_fixed_safely_pauses_once_and_continue_goes_on(
     fake.checkpoint_extra = [{"chapter": 2, "quote": "every captain looked away",
                               "problem": "Nessa says the keeper went out, but chapter 1 shows him in the lamp room."}]
     app = make_app(tmp_path, fake=fake)
-    run = run_book(app, {"length": "short_story"})
+    run = run_book(app, {"checkers": "one", "length": "short_story"})
     assert run["status"] == "paused" and run["problem"]["code"] == "CHECKPOINT_WAITING", run.get("problem")
     assert "chapter 2" in run["problem"]["message"] and run["problem"]["options"] == ["edit"]
     assert "🧭 Final check of the whole book after chapter 3: 1 waiting for you" in steps(run)["chapters"][
@@ -342,7 +342,7 @@ def test_resume_mid_checkpoint_does_not_read_finished_parts_again(tmp_path, monk
                 app.autobook.pause("author", state["run"])
         return orig(slot, system, user, schema)
     fake.submit = submit
-    r = app.autobook.start("author", {"author_confirms": True, "length": "short_story"})
+    r = app.autobook.start("author", {"author_confirms": True, "length": "short_story", "checkers": "one"})
     state["run"] = r["id"]
     app.autobook.wait_for(r["id"], 120)
     run = app.autobook.get(r["id"])

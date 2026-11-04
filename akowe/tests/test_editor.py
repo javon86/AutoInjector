@@ -223,7 +223,7 @@ def test_manual_fixes_accept_and_reject_per_passage(tmp_path):
     assert {u["reason"] for u in out["unresolved"]} == {"REJECTED_BY_AUTHOR"}
     new = app.review._head(pid, "main", rid)
     assert BETTER in new["data"]["text"] and "only in a whisper" in new["data"]["text"] and new["lifecycle"] == "DRAFT"
-    assert app.review.made_by(pid, "main", new, app.review.fixes(pid, "main"))["label"].startswith("Editor's fixes")
+    assert app.review.made_by(pid, "main", new, app.review.fixes(pid, "main"))["label"].endswith("+ editor")  # PR #117 (G): "Claude + editor"
     rw = outbox(app, pid, "editor.rewrite")[-1]
     assert rw["applied"] == 1 and rw["unresolved"] == 1 and rw["how"] == "author" and BETTER not in json.dumps(rw)
     # the old fixes no longer fit the new version: refused, nothing changed

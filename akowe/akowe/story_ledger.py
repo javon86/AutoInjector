@@ -100,6 +100,7 @@ RULE = ("Story so far (context.writing_brief.previous_chapter_end, story_so_far,
 
 FLAG_WORDS = {
     "INJURY_IGNORED": "runs, but was hurt and no time to heal has passed",
+    "IN_CHAPTER_STATE": "is hurt earlier in this same chapter, then acts as if nothing happened",
     "LOST_ITEM_BACK": "uses an item they lost, and the page never shows it found again",
     "DEAD_ACTS": "speaks or acts, but died earlier",
     "NAME_SPELLING": "looks like a misspelling of a name the book already uses",
@@ -610,7 +611,7 @@ def _words(s: str) -> set[str]:
 
 
 # 🔢 the running-notes code (code_map.py "N…") of the note each flag is about
-FLAG_FIELDS = {"INJURY_IGNORED": "N1a", "LOST_ITEM_BACK": "N2c", "DEAD_ACTS": "N3a", "NAME_SPELLING": "N8a",
+FLAG_FIELDS = {"INJURY_IGNORED": "N1a", "IN_CHAPTER_STATE": "N1a", "LOST_ITEM_BACK": "N2c", "DEAD_ACTS": "N3a", "NAME_SPELLING": "N8a",
                "TRAVEL_TOO_FAST": "N6e", "SEASON_JUMP": "N6c", "DAY_BACKWARDS": "N6a", "ALREADY_KNEW": "N4a",
                "NUMBER_CHANGED": "N77"}
 
@@ -634,6 +635,84 @@ def _dist1(a: str, b: str) -> bool:
     if len(a) > len(b):
         a, b = b, a
     return any(b[:i] + b[i + 1:] == a for i in range(len(b)))
+
+
+# ====================================================================== 🦵 PR #117 (B): physical state INSIDE one chapter
+_PART = r"(?:ankle|leg|knee|kneecap|foot|feet|hip|thigh|shin|arm|wrist|hand|shoulder|ribs?|elbow)"
+_LEGS = {"ankle", "leg", "knee", "kneecap", "foot", "feet", "hip", "thigh", "shin"}
+HURT_IN_RE = re.compile(
+    r"\b(?:crack\w*|bang\w*|bash\w*|smash\w*|bruis\w*|twist\w*|wrench\w*|sprain\w*|broke|broken|hurt|injur\w*|"
+    r"wound\w*|gash\w*|cut|split|slash\w*|scrap\w*|tore|torn|burn\w*|stabb\w*|dislocat\w*|jarr\w*|struck|hit)\s+"
+    r"(?:his|her|their|my|your|an?|the)\s+(?:left\s+|right\s+|bad\s+)?(" + _PART + r")\b"
+    r"|\b(?:his|her|their|my)\s+(?:left\s+|right\s+)?(" + _PART + r")\s+(?:cracked|buckled|gave way|gave out|twisted|"
+    r"snapped|broke|was broken|was bleeding|bled|split open|was cut|swelled)", re.I)
+LEG_ACT_RE = re.compile(
+    r"\b(ran|run|runs|running|sprint\w*|raced|dash\w*|leap\w*|leapt|jump\w*|climb\w*|clamber\w*|descend\w*|"
+    r"kn(?:elt|eel\w*)|crouch\w*|squat\w*|kick\w*|bounded|vault\w*|stairs two at a time|"
+    r"(?:went|came|hurried|walked|stepped|took|jogged|started)\s+(?:back\s+)?(?:down|up)\s+(?:the\s+)?(?:stairs|steps|"
+    r"ladder|stair)|took the (?:stairs|steps))\b", re.I)
+ARM_ACT_RE = re.compile(r"\b(climb\w*|haul\w*|lift\w*|heav\w*|hoist\w*|swung|swing\w*|punch\w*|threw|throw\w*|"
+                        r"carried|carry\w*|gripp\w*|wrench\w* open|pulled (?:herself|himself|themselves) up)\b", re.I)
+ACK_RE = re.compile(r"\b(limp\w*|winc\w*|hobbl\w*|favou?r\w*|pain\w*|ache\w*|aching|throb\w*|sore|hurt\w*|stiff\w*|"
+                    r"gingerly|bandag\w*|injur\w*|wound\w*|bruis\w*|swollen|sting\w*|lame|careful of|bad " + _PART +
+                    r"|" + _PART + r")\b", re.I)
+_STARTERS = {"Later", "Then", "Soon", "Afterwards", "Afterward", "Meanwhile", "Outside", "Downstairs", "Upstairs",
+             "Below", "Above", "Again", "Finally", "Slowly", "Quickly", "Carefully", "Somewhere", "Tonight", "Today",
+             "Yesterday", "Tomorrow", "Morning", "Evening", "When", "While", "Because", "Though", "Although", "If",
+             "Without", "With", "Into", "Onto", "From", "Back", "Instead", "Still", "Yet", "And", "But", "So"}
+_PRONOUN = re.compile(r"\b(he|she|they|I)\b")
+
+
+def in_chapter(text: str, names=(), chapter_id: str | None = None, number: int | None = None) -> list[dict]:
+    """Akọwe's own reading (no AI) of ONE chapter: a character hurt early in the chapter (a cracked knee, a cut hand)
+    who later in the SAME chapter runs, climbs, takes the stairs or kneels — or hauls and lifts with the hurt arm —
+    with no sign of it (no limp, wince, pain, or the body part named again in between). Each is a major flag
+    (``IN_CHAPTER_STATE``) for the reviewers and the checkpoints: a physical change inside a chapter must persist.
+    English only; it catches the clear case, not every one."""
+    out: list[dict] = []
+    try:
+        sents = sentences(text)
+        known = [n for n in (names or []) if isinstance(n, str) and n.strip()]
+        last_named = None
+        hurt: dict[str, dict] = {}
+        for i, s in enumerate(sents):
+            here = [n for n in known if mentions(s, n)]
+            if not here and not known:  # no cast given: a capitalised word that is not a common one
+                here = [m.group(0) for m in re.finditer(r"\b[A-Z][a-z]{2,}\b", s) if m.group(0) not in STOP
+                        and m.group(0) not in _STARTERS][:1]
+            pron = bool(_PRONOUN.search(s))
+            who = here[0] if here else (last_named if pron else None)
+            m = HURT_IN_RE.search(s)
+            if m and who and who not in hurt:
+                part = (m.group(1) or m.group(2) or "").lower()
+                hurt[who] = {"part": part, "legs": part in _LEGS, "quote": s, "acked": False, "at": i}
+            else:
+                for name, h in list(hurt.items()):
+                    if h.get("done"):
+                        continue
+                    about = (who == name) or any(_same_name(name, x) for x in here)
+                    if not about:
+                        continue
+                    if HEALED_RE.search(s):
+                        h["done"] = True
+                        continue
+                    act = (LEG_ACT_RE if h["legs"] else ARM_ACT_RE).search(s)
+                    if ACK_RE.search(s):
+                        h["acked"] = True
+                        continue
+                    if act and not h["acked"]:
+                        h["done"] = True
+                        out.append({"code": "IN_CHAPTER_STATE", "chapter_id": chapter_id, "number": number,
+                                    "name": name, "field_code": FLAG_FIELDS["IN_CHAPTER_STATE"], "severity": "major",
+                                    "quote": _clip(s, 300),
+                                    "message": f"{name} {FLAG_WORDS['IN_CHAPTER_STATE']}: hurt their {h['part']} "
+                                               f"(“{_clip(h['quote'], 120)}”), then “{act.group(0)}” with no sign of "
+                                               "it"})
+            if here:
+                last_named = here[-1]
+    except Exception:  # noqa: BLE001 - a hint, never a reason to fail a check
+        return out
+    return out
 
 
 def check(before: list[dict], entry: dict, text: str) -> list[dict]:

@@ -355,6 +355,28 @@ def merge_part_rows(rows: list[dict]) -> dict:
     return out
 
 
+_VAGUE_START = re.compile(r"^\s*(?:maintain|keep (?:up|the|it|this)|continue (?:to|the|with)|preserve|sustain|"
+                          r"stay (?:true|consistent)|ensure (?:that )?(?:the )?(?:same|consistent)|consider (?:keeping|"
+                          r"maintaining)|carry on)\b", re.I)
+_ACTION = re.compile(r"\b(add|cut|trim|remove|delete|rewrite|replace|move|swap|show|give|change|shorten|lengthen|"
+                     r"expand|split|merge|open|end|start|introduce|reveal|plant|foreshadow|drop|name|let|make|raise|"
+                     r"lower|slow|speed|tighten|vary|reduce|break|turn|seed|set up|pay off|clarify|explain|describe)\b",
+                     re.I)
+
+
+def actionable(text: str) -> bool:
+    """PR #117 (G): does an advice line name a concrete change or a target? "Maintain the same level of tension" does
+    not; "Cut the second harbour scene in chapter 4" does (a verb of change, a chapter, a quote or a name)."""
+    t = str(text or "").strip()
+    if len(t) < 12:
+        return False
+    target = bool(re.search(r"\bchapters?\s+\d+|\d|[“\"]", t)) or bool(re.search(r"(?<!^)(?<![.!?]\s)\b[A-Z][a-z]{2,}",
+                                                                              t[1:]))
+    if _VAGUE_START.match(t):
+        return target and bool(_ACTION.search(t[12:]))
+    return bool(_ACTION.search(t)) or target
+
+
 def verify_quote(quote: str, text_norm: str) -> bool:
     q = _norm(quote).strip(' ."…')
     if len(q) < 8:
@@ -604,7 +626,10 @@ class ReportService:
             v, v_at = latest_read(verdicts, c["record_id"], c["version"])
             cr, cr_at = latest_read(crafts, c["record_id"], c["version"])
             v, cr = v or {}, cr or {}
-            rows.append({"number": c["number"], "writer": w.get("label"), "writer_slot": w.get("slot"),
+            wl = w.get("label") or ""
+            if w.get("editor") and "+ editor" not in wl:  # PR #117 (G): "Claude + editor"
+                wl = f"{wl} + editor"
+            rows.append({"number": c["number"], "writer": wl, "writer_slot": w.get("slot"),
                          "reviewer": v.get("reviewer"), "review_independent": v.get("independent"),
                          "reviewed_version": v_at, "editor": cr.get("reviewer"),
                          "editor_independent": cr.get("independent"), "editor_version": cr_at,
@@ -782,6 +807,14 @@ class ReportService:
             for r in base["reviews"]:
                 if r.get("slot") in new:
                     r["trust_notes"] = reviewer_notes(r)  # 🎯 P36: what the report page shows under the reviewer
+        try:  # 🔎 PR #117: who checked the book for mistakes and drift, and the reviews of each stretch of chapters
+            from . import checkpoints  # noqa: PLC0415
+            base["checks"] = {"chapter_checks": checkpoints.chapter_checks(self.store, pid, branch),
+                              "stretch": checkpoints.stretch_reviews(self.store, pid, branch),
+                              "checkpoints": [c["line"] for c in checkpoints.report(self.store, pid, branch)
+                                              if c.get("kind") != "chapter"][-12:]}
+        except Exception:  # noqa: BLE001 - never break the report
+            log.exception("could not add the checks to the report")
         base["aggregate"] = aggregate(base["reviews"])
         base["try_next"] = self.try_next(base)
         from . import approval_trust  # noqa: PLC0415 - H14: chapters approved without (all) checks
@@ -818,6 +851,10 @@ class ReportService:
                     r["scores"] = calibration.discounted(r["scores"], disc)
                     r["discount"] = disc
                 cal = r.get("calibration") or {}
+                if cal.get("flagged") and cal.get("capped"):  # PR #117 (E): counted per AI across books
+                    word = (ai_check.ai_word(sd) if sd else None) or r.get("name") or r["slot"]
+                    r["unbacked_line"] = calibration.unbacked_line(word, calibration.note_unbacked(
+                        self.store, fam, word))
                 calibration.record(self.store, fam, ai_check.ai_word(sd) if sd else r["slot"], vs_other=gap,
                                    vs_audit=vs_audit, flagged=bool(cal.get("flagged")),
                                    reasked=bool(cal.get("reasked")), where="book_report")
@@ -847,6 +884,8 @@ class ReportService:
         for r in done:
             if (r.get("calibration") or {}).get("flagged"):
                 out.append("⚠️ " + flag_line(r))
+            if r.get("unbacked_line"):
+                out.append("⚠️ " + r["unbacked_line"])
         if rep["aggregate"].get("disagreements"):
             out.append("⚠️ The reviewers disagree (3+ points) on: " + ", ".join(rep["aggregate"]["disagreements"]))
         failed = [r for r in rep["reviews"] if r.get("status") == "failed"]
@@ -887,6 +926,8 @@ class ReportService:
         seen = {o["text"].lower() for o in out}
         for r in rep.get("reviews") or []:
             for t in r.get("try_next") or []:
+                if not actionable(t):  # PR #117 (G): "Maintain the same level of …" tells the author nothing to do
+                    continue
                 if t.lower() not in seen and len(out) < 12:
                     seen.add(t.lower())
                     out.append({"from": r.get("name"), "text": t})
@@ -1119,6 +1160,21 @@ def render_markdown(rep: dict) -> str:
         if not rd.get("findings"):
             L.append("Reading level and pacing fit the audience.")
         L.append("")
+    ck = rep.get("checks") or {}
+    cc = ck.get("chapter_checks") or {}
+    if cc.get("chapters") or ck.get("stretch") or ck.get("checkpoints"):
+        L += ["## Checks for mistakes and drift (by the AIs)", ""]
+        if cc.get("chapters"):
+            L.append(f"- Every chapter checked by all the AIs ({', '.join(cc.get('checked_by') or []) or 'the AIs'}): "
+                     f"{cc['chapters']} chapter(s), {cc['found']} problem(s) found, {cc['confirmed']} confirmed by 2 or "
+                     f"more AIs, {cc['fixed']} fixed, {cc['listed']} listed for you"
+                     + (f", {cc['dropped']} not used (quote not in the book)" if cc.get("dropped") else "") + ".")
+        for line in ck.get("checkpoints") or []:
+            L.append(f"- {line}")
+        L.append("")
+        from .checkpoints import stretch_markdown  # noqa: PLC0415
+        for sr in ck.get("stretch") or []:
+            L += stretch_markdown(sr, "###")
     L += ["## Words per chapter", "", "| Chapter | Title | Words | |", "|---|---|---|---|"]
     for c in w.get("chapters") or []:
         L.append(f"| {c['number']} | {c.get('title') or ''} | {c['words']:,} | {'⚠️ far under target' if c.get('under') else ''} |")
@@ -1156,17 +1212,41 @@ def _who_read(row: dict, who: str, at: str) -> str:
     return f"{name} (read version {v})" if v and cur and v != cur else str(name)
 
 
-_PDF_MAP = {"⚠️": "(!)", "⚠": "(!)", "✔": "OK", "✅": "OK", "✖": "x", "📨": "", "📊": "", "🖋": "", "✨": "",
-            "🎭": "", "🎬": "", "🌍": "", "📏": "", "🎚️": "", "⚖️": "", "–": "-", "→": "->", "≥": ">=", "≤": "<=",
-            "ọ": "o", "Ọ": "O"}  # the PDF fonts are cp1252: "Akọwe" prints as "Akowe"
+# PR #117 (A): the report PDF prints accented letters and other alphabets with the book PDF's Unicode font
+# (exporters/unifont.py, DejaVu Serif — "Akọwe", ẹ, ł, Greek stay as they are). A symbol no font of the PDF has
+# becomes a plain word or a bullet, never "?".
+_PDF_WORDS = {"⚠️": "(!)", "⚠": "(!)", "✔️": "OK", "✔": "OK", "✅": "OK", "✖": "x", "❌": "x", "→": "->",
+              "💪": "Strong:", "⏸": "Waiting:", "⏱": "Time:", "🎯": "*", "📖": "*", "👥": "*", "🧭": "*", "🔎": "*",
+              "🔁": "*", "🦵": "*", "🧠": "*", "📐": "*", "📨": "", "📊": "", "🖋": "", "✨": "", "🎭": "", "🎬": "",
+              "🌍": "", "📏": "", "🎚️": "", "⚖️": ""}
 
 
 def _pdf_safe(text: str) -> str:
-    from .exporters.layout import pdf_text  # noqa: PLC0415
-    for a, b in _PDF_MAP.items():
-        text = text.replace(a, b)
-    text = pdf_text(text).replace("‍", "").replace("️", "")
-    return text.encode("cp1252", "replace").decode("cp1252")
+    import unicodedata  # noqa: PLC0415
+    from .exporters import unifont  # noqa: PLC0415
+    from .exporters.layout import pdf_text, unencodable  # noqa: PLC0415
+    for a, b in _PDF_WORDS.items():
+        if a in text and (unencodable(a.replace("\ufe0f", "")) and not all(unifont.covered(c) for c in
+                                                                           a.replace("\ufe0f", ""))):
+            text = text.replace(a, b)
+    text = pdf_text(text).replace("\u200d", "").replace("\ufe0f", "")
+    out = []
+    for ch in text:
+        if not unencodable(ch) or unifont.covered(ch):
+            out.append(ch)
+            continue
+        base = "".join(c for c in unicodedata.normalize("NFKD", ch) if not unicodedata.combining(c))
+        if base and not unencodable(base):
+            out.append(base)
+        elif unicodedata.category(ch) in ("So", "Sk", "Sm", "Cs"):
+            out.append("•")  # a symbol or emoji with no glyph: a plain marker
+        # anything else (a joiner, a control character) is left out
+    return re.sub(r"(•\s*){2,}", "• ", "".join(out))
+
+
+def pdf_row(line: str) -> str:
+    """A Markdown table row as one PDF line. PR #117 (G): empty cells are left out (no stray "·" at the end)."""
+    return "  ·  ".join(x.strip() for x in line.strip().strip("|").split("|") if x.strip())
 
 
 def render_pdf(rep: dict) -> bytes:
@@ -1191,7 +1271,7 @@ def render_pdf(rep: dict) -> bytes:
         elif line.strip():
             t = line.strip()
             if t.startswith("|"):
-                t = "  ·  ".join(x.strip() for x in t.strip("|").split("|"))
+                t = pdf_row(t)
             t = t.replace("**", "").replace("*", "").lstrip("> ")
             cur["blocks"].append({"t": "p", "text": _pdf_safe(t), "first": True})
     geom = make_geometry({"width_mm": 215.9, "height_mm": 279.4, "safe_margin_mm": 12.7},
