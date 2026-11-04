@@ -113,6 +113,10 @@ async function main() {
   assert(r.status === 200 && r.json.ok && r.json.created === false && r.json.lock.seed === 4242 && lib.listLocks().locks.length === 1, 'POST /image/locks never replaces a lock the user made (same name, any case)');
   r = await req(st.port, 'POST', '/image/locks', { character: 'Mara Vell', book: 'Ferry', prompt: 'Mara Vell, red coat, scar on the chin', seed: 777, from: 'akowe' }, TOKEN);
   assert(r.status === 200 && r.json.created === true && r.json.lock.character === 'Mara Vell' && r.json.lock.seed === 777 && /first portrait/.test(r.json.lock.notes), 'POST /image/locks makes a new lock from a portrait (looks + seed)');
+  r = await req(st.port, 'POST', '/image/locks', { character: 'Mara Vell', prompt: 'Mara Vell, red coat, one eye milky white', from: 'akowe', replace: true }, TOKEN);
+  assert(r.status === 200 && r.json.ok && r.json.replaced === true && r.json.lock.prompt.includes('milky white') && r.json.lock.seed === 777 && lib.getLock('Mara Vell').prompt.includes('milky white'), 'H15: POST /image/locks with replace: true (the author pressed Replace the lock) changes the look, keeps the seed');
+  r = await req(st.port, 'POST', '/image/locks', { character: 'Mara Vell', prompt: 'something else again', from: 'akowe' }, TOKEN);
+  assert(r.status === 200 && r.json.created === false && !r.json.replaced && lib.getLock('Mara Vell').prompt.includes('milky white'), 'H15: without replace: true a lock is never replaced');
   r = await req(st.port, 'POST', '/image/locks', { prompt: 'no name' }, TOKEN);
   assert(r.status === 400 && r.json.error === 'NEED_PROMPT', 'a lock without a name is refused');
   lib.deleteLock(lib.getLock('Mara Vell').id);

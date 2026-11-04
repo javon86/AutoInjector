@@ -1178,3 +1178,47 @@ the browser: `tests/campaign/ui/test_ui_continuity.py`):
   `::test_at_a_glance_picture_maker_off_and_a_series_of_two`, `::test_toolbar_four_tools_and_view_options_at_1280x720`,
   `::test_at_a_glance_in_every_look` (7), `::test_what_is_this_page_on_every_template`. *Not done:* the
   picture-maker check runs once per opening (it is not re-checked while the page stays open).
+- **🕳 Holes H7, H15-H18, H22-H26 fixed (2026-11-03, docs/HOLES_2026-11.md, job "L3").** Each one was reproduced with a
+  test first.
+  - *H7 Sequels:* 📚 Start a sequel now first runs ✨ Find what changed (also for a book on its own, whose run never
+    looked); while changes wait for the author it refuses in plain words with "Start without them" (`skip_changes`, an
+    explicit skip that is remembered). The new book gets the 🔒 protected facts (worked out again from the entries, not
+    wiped), every Character Forge dossier with its locks and the just-in-time details (`book_bible.forge_carry` /
+    `seed_forge`, plus the binder's height / weight / handedness), the status, items, abilities and losses at the END of
+    the book (in the character's "constraints", the only free canon field), and "What happened in book N" (premise + the
+    chapter summaries, `series.story_so_far`). "Exactly as they were at the end" is only said when the changes were
+    reviewed. Files: `series.py`, `book_bible.py`, one call in `autobook._seed_canon`, `web/app.js`, `web/binder.js`.
+  - *H15 Pictures and 🔒 locks:* every portrait / view / sheet keeps a fingerprint of the description it was made from
+    (`forge.looks_fingerprint`); `book_pictures.outdated` lists what is older; At a glance says "🖼 2 pictures are older
+    than their description — remake" with 🖼 Remake them (`POST …/binder/pictures/remake`) and 🔒 Replace the lock
+    (asks first; `POST …/binder/pictures/lock` with `author_confirms`; AutoInjector's `/image/locks` takes
+    `replace: true`, never without it).
+  - *H16 Saving:* a part that fails is named ("Not updated: Book Bible.docx (why)") and its file saved before is
+    renamed "… (older version)"; a later good save removes it (`book_save.part_failed`, `_mark_older`).
+  - *H17 Long books:* the report says "📖 Sampled: the reviewers read about N% …" and 📖 Read the whole book reads it
+    in parts (each part whole, ≤ 60 000 characters) and merges each reviewer's findings (median scores,
+    `book_report.book_parts` / `merge_part_rows`, `full: true`).
+  - *H18 Letters:* DejaVu Serif (free licence, `exporters/fonts/`, 380 kB) is embedded as a subset (pure Python,
+    `exporters/unifont.py`) for every run of letters WinAnsi lacks — the book PDF, the dossier PDF, map labels,
+    captions and the cover; G05 blocks only letters no font has; a chapter's approval warns at once about those;
+    the book profile has a `language` (BCP 47) used by the format profiles and G05 instead of "en".
+  - *H22 Chapter pictures* are made from the written chapter (the passage past the scene's middle, the characters it
+    names first) and say "Chapter N changed since this picture was made" with 🖼 Remake (`replace: true`).
+  - *H23* The cover page compares the blurb / tagline / subtitle / series with the book and the Book Bible (names and
+    numbers found nowhere, a cover title or author that is not the book's); a renamed book takes its cover with it
+    (`cover.follow_rename`); a Greek / Cyrillic-only title gets its own file name (`cover.file_stem`).
+  - *H24* The trailer remembers the book's chapters and the looks it was made from and says which changed.
+  - *H25* Alfred's pause / resume / cancel act on the open (or named) book's run, and ask which when several books
+    have one (`WHICH_RUN`).
+  - *H26* An untagged Akọwe reply whose JSON is still open waits (up to 36 s) instead of being handed over as finished
+    (`smart-json.replyLooksCut`); the send script checks the WHOLE pasted text (start, end, length), not its first
+    60 characters (`automation.composerHoldsText`).
+  - Tests: `akowe/tests/test_holes_l3.py` (8), `test_set_g.py::test_h18_…`, `test_cover.py::test_h18_…`,
+    `test_pictures.py::test_h22_…`, `test_trailer.py::test_h24_…`, `test_1080_fixes.py` and `test_binder.py` (H16),
+    UI `test_ui_binder.py::test_h7_…` and `::test_h15_…`; desktop `test/sd-studio.test.js`,
+    `test/alfred-current-book.test.js`, `test/smart-json.test.js`.
+  - *Not done:* a run's own chapter approvals (autobook, another job's area) do not log the letters warning (the book
+    page's approve does); the Unicode font has no bold / italic (those runs print in the regular face); a cut-off reply
+    is still accepted after 36 s (Akọwe then repairs it or asks again); items / places / magic dossiers are not carried
+    into a sequel's Forge (only characters; the series already carries places, items and groups); not tried with a real
+    AI, Stable Diffusion or a real PC.

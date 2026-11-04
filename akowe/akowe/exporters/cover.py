@@ -36,6 +36,7 @@ import re
 from xml.sax.saxutils import escape as _xml_escape
 from xml.sax.saxutils import quoteattr as _xml_quoteattr
 
+from . import unifont
 from .fontmetrics import DESCRIPTORS, WIDTHS
 from .images import ImageInfo
 from .pdf import PdfWriter, _xobject, image_matrix, num, parse_pdf_objects, pdf_string, pdf_text_string
@@ -190,6 +191,10 @@ def cap(font: str) -> float:
 
 def measure(text: str, font: str, size: float, track: float = 0.0) -> float:
     """Advance width in pt; ``track`` (pt) is added between glyphs (PDF Tc), not after the last one."""
+    if unifont.needs(text):  # 🔤 H18: letters WinAnsi lacks are set (and measured) in the Unicode font
+        total = sum(unifont.width(t) if f == unifont.NAME else measure(t, f, 1000.0) for t, f in
+                    unifont.segments(text, font))
+        return total * size / 1000.0 + track * max(0, len(text) - 1)
     table = WIDTHS[font]
     total = 0
     n = 0
@@ -781,8 +786,11 @@ class _Res:
         self.imgs: dict = {}
         self.gs: dict = {}
         self.n = 0
+        self.uni_obj = None
 
     def font(self, f: str) -> str:
+        if f == unifont.NAME and f not in self.fonts:  # 🔤 H18: the one Unicode font object of the document
+            self.fonts[f] = ("CFU", self.uni_obj)
         if f not in self.fonts:
             d = DESCRIPTORS[f]
             desc_ = self.w.add((f"<< /Type /FontDescriptor /FontName /{f} /Flags {d['flags']} /FontBBox "
@@ -884,10 +892,15 @@ def _content(ops: list, res: _Res) -> bytes:
             out += (" ".join(num(v) for v in mtx) + f" cm /{name} Do\nQ\n").encode("ascii")
         elif k == "text":
             _, s, font, size, x, y, col, track, rot, _w, _role = op
-            fname = res.font(font)
+            segs = unifont.segments(s, font) if unifont.needs(s) and res.uni_obj else [(s, font)]
+            fname = res.font(segs[0][1])
             tm = f"1 0 0 1 {num(x)} {num(y)}" if not rot else f"0 -1 1 0 {num(x)} {num(y)}"
             out += (f"BT /{fname} {num(size)} Tf {num(track)} Tc {_rgb(col, 'rg')} {tm} Tm ").encode("ascii")
-            out += pdf_string(s) + b" Tj ET\n"
+            for k_, (seg, sf) in enumerate(segs):
+                if k_:
+                    out += f"/{res.font(sf)} {num(size)} Tf ".encode("ascii")
+                out += (unifont.encode(seg) if sf == unifont.NAME else pdf_string(seg)) + b" Tj "
+            out += b"ET\n"
     return bytes(out)
 
 
@@ -909,8 +922,12 @@ def render_pdf(pages: list[dict], *, images: dict | None = None, meta: dict | No
     w = PdfWriter()
     catalog, pages_obj, info = w.reserve(), w.reserve(), w.reserve()
     kids = []
+    uni = {ch for pg in pages for op in pg["ops"] if op[0] == "text" and unifont.needs(op[1])
+           for t, f in unifont.segments(op[1], op[2]) if f == unifont.NAME for ch in t}
+    uni_obj = unifont.pdf_objects(w, uni) if uni else None  # 🔤 H18: one embedded subset for the whole cover
     for pg in pages:
         res = _Res(w, images or {})  # every page its own resource dictionary
+        res.uni_obj = uni_obj
         kids.append(_page_obj(w, res, pages_obj, pg))
     w.set(pages_obj, f"<< /Type /Pages /Kids [{' '.join(f'{k} 0 R' for k in kids)}] /Count {len(kids)} >>"
           .encode("ascii"))
@@ -977,6 +994,9 @@ def add_cover_pdf(book_pdf: bytes, ops_for, *, images: dict | None = None) -> by
         trim = (float(tb[0]), float(tb[1]), float(tb[2]) - float(tb[0]), float(tb[3]) - float(tb[1]))
     ops = ops_for(width, height, trim)
     res = _Res(w, images or {})
+    uni = {ch for op in ops if op[0] == "text" and unifont.needs(op[1])
+           for t, f in unifont.segments(op[1], op[2]) if f == unifont.NAME for ch in t}
+    res.uni_obj = unifont.pdf_objects(w, uni) if uni else None  # 🔤 H18
     page_n = _page_obj(w, res, pages_n, {"width": width, "height": height, "ops": ops, "trim": trim})
     kid_refs = " ".join(f"{k[0]} 0 R" for k in kids)
     w.set(pages_n, f"<< /Type /Pages /Kids [{page_n} 0 R {kid_refs}] /Count {len(kids) + 1} >>".encode("ascii"))

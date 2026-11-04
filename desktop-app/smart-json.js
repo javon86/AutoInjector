@@ -118,4 +118,35 @@ function replyExcerpt(text, max = 160) {
   return `${s.slice(0, Math.max(1, max - 1))}…`;
 }
 
-module.exports = { parseJsonLenient, tryParseJson, repairJsonText, swapSmartQuotes, normalizeSmartPunctuation, hasSmartPunctuation, replyExcerpt, DOUBLE_QUOTES, SINGLE_QUOTES };
+/** H26: does an untagged reply that should be JSON look CUT OFF (still being written, or stopped mid-way by the
+ *  site)? A reply that starts like JSON ({ or [, maybe in a ```json fence) and whose brackets are not closed, or that
+ *  ends inside a string, is cut. Complete JSON, JSON that only needs a repair (smart quotes, a trailing comma) and
+ *  prose are not: they are taken as they are. */
+function replyLooksCut(text) {
+  let t = String(text || '').replace(/\[FROM:[^\]]*\]\s*$/i, '').trim();
+  const fence = /^```[a-zA-Z]*\s*\n?/.exec(t);
+  if (fence) {
+    t = t.slice(fence[0].length);
+    if (!/```\s*$/.test(t)) {
+      // an open fence: the reply stopped before its closing ``` (or the page has not drawn it yet)
+      if (!parseJsonLenient(t).ok) return true;
+    }
+    t = t.replace(/```\s*$/, '').trim();
+  }
+  if (!t || (t[0] !== '{' && t[0] !== '[')) return false;
+  if (parseJsonLenient(t).ok) return false;
+  let depth = 0, inStr = false, esc = false;
+  for (const c of t) {
+    if (inStr) {
+      if (esc) esc = false;
+      else if (c === '\\') esc = true;
+      else if (c === '"' || DOUBLE_QUOTES.has(c)) inStr = false;
+      continue;
+    }
+    if (c === '"' || DOUBLE_QUOTES.has(c)) inStr = true;
+    else if (c === '{' || c === '[') depth++;
+    else if (c === '}' || c === ']') depth--;
+  }
+  return inStr || depth > 0;
+}
+module.exports = { replyLooksCut, parseJsonLenient, tryParseJson, repairJsonText, swapSmartQuotes, normalizeSmartPunctuation, hasSmartPunctuation, replyExcerpt, DOUBLE_QUOTES, SINGLE_QUOTES };

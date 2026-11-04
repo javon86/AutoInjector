@@ -209,7 +209,17 @@ class FakeBinderApi:
             from akowe import binder
             g = binder.glance(self.doc, engine=getattr(self, "engine", {"ready": True, "code": None, "why": None}),
                               sequel=getattr(self, "sequel", None))
+            if getattr(self, "outdated", None):  # 🖼 H15: pictures older than their description
+                g["pictures"]["outdated"] = self.outdated
             return ok(g)
+        if req.method == "POST" and path in ("/pictures/remake", "/pictures/lock"):  # 🖼 / 🔒 H15
+            self.remakes = getattr(self, "remakes", []) + [(path, body)]
+            if path == "/pictures/lock":
+                return ok({"ok": True, "message": "🔒 “Maren Vey”'s lock now has the look of the description."})
+            self.jobs["job-remake"] = {"job_id": "job-remake", "kind": "book_pictures_remake", "status": "done",
+                                       "phase": "Finished", "done": 2, "total": 2,
+                                       "results": [{"ok": True, "made": 2, "message": "2 picture(s) remade from the description now."}]}
+            return ok(dict(self.jobs["job-remake"], status="running", done=0), 202)
         if path.startswith("?as_of=") and getattr(self, "as_of_docs", None):
             self.as_of_calls = getattr(self, "as_of_calls", []) + [path]
             return ok(with_glance(self.as_of_docs[path.split("=", 1)[1].split("&")[0]]))
@@ -1068,6 +1078,58 @@ def _open_book_page(make_context, bd, status):
     return page, calls
 
 
+def test_h7_book_page_sequel_finds_the_changes_first_then_asks_before_skipping_them(make_context, bd):
+    """📚 H7: the first press looks for what changed in this book (nothing starts: a plain message); changes waiting
+    for the author stop the start with the reason and an explicit "Start without them"; that press starts it."""
+    page, calls = _open_book_page(make_context, bd, {"possible": True, "why": None, "number": 1, "next_number": 2,
+                                                      "next_book": None, "proposals_here": 0})
+    answers = [
+        (202, {"run": None, "changes": "finding", "finding": {"job_id": "job-x"},
+               "message": "📚 First, the AI reads this book for what changed for each character (an injury, a lost "
+                          "item, who died) so book 2 starts exactly where this one ends."}),
+        (409, {"errors": [{"code": "APPROVAL_REQUIRED", "path": "/skip_changes", "message": "3 change(s) found in this "
+                           "book are waiting for you (📖 Book Bible → 📚 Series). ✔ Approve or dismiss them first.",
+                           "fix": "Open 📖 Book Bible → 📚 Series and ✔ approve or ✕ dismiss each change."}]}),
+        (202, {"run": {"id": "run-seq9"}, "changes": "skipped",
+               "message": "📚 Book 2 has started. Its characters start as the approved changes leave them (you started "
+                          "without reviewing what changed in it, so some changes may be missing)."}),
+    ]
+    posts = []
+
+    def handle(route):
+        req = route.request
+        if req.method == "GET":
+            return route.fulfill(status=200, content_type="application/json", body=json.dumps(
+                {"possible": True, "why": None, "number": 1, "next_number": 2, "next_book": None, "proposals_here": 0}))
+        posts.append(json.loads(req.post_data or "{}"))
+        st, body = answers[len(posts) - 1]
+        return route.fulfill(status=st, content_type="application/json", body=json.dumps(body))
+    page.unroute(re.compile(r"/api/projects/[^/]+/branches/[^/]+/binder/series/sequel$"))
+    page.route(re.compile(r"/api/projects/[^/]+/branches/[^/]+/binder/series/sequel$"), handle)
+    btn = page.locator("[data-testid=bk-sequel]")
+    page.wait_for_function("() => !document.querySelector('[data-testid=bk-sequel]').disabled")
+    for _ in range(2):
+        btn.click()
+        page.wait_for_selector("dialog[open] >> text=Start a sequel from this book?")
+        page.click("dialog[open] >> text=📚 Start the sequel")
+        page.wait_for_function("() => !document.querySelector('dialog[open]')")
+        if len(posts) == 1:
+            page.wait_for_selector("[data-testid=bk-sequel-finding]")
+            assert "First, the AI reads this book" in page.inner_text("[data-testid=bk-sequel-finding]")
+            assert not page.locator("[data-testid=bk-sequel-started]").count()
+    page.wait_for_selector("[data-testid=bk-sequel-skip]")
+    msg = page.inner_text("[data-testid=bk-sequel-msg]")
+    assert "waiting for you" in msg and "approve or ✕ dismiss each change" in msg and "press Accept" not in msg
+    shot(page, "book-page-sequel-changes-waiting")
+    page.click("[data-testid=bk-sequel-skip]")
+    page.wait_for_selector("[data-testid=bk-sequel-started]")
+    assert "some changes may be missing" in page.inner_text("[data-testid=bk-sequel-started]")
+    assert posts == [{"author_confirms": True}, {"author_confirms": True},
+                     {"author_confirms": True, "skip_changes": True}]
+    page.bf_problems[:] = [p for p in page.bf_problems if "409" not in p and "Conflict" not in p]
+    assert_clean(page, "book page sequel: changes first")
+
+
 def test_book_page_sequel_button_disabled_with_a_reason(make_context, bd):
     """📚 On the 📘 book page the sequel button says in plain words why it cannot be pressed (book 2 exists already)."""
     why = "Book 2 of this series already exists (“The Ferry Books: Book 2”). Open that book to continue the series, or start the sequel from the last book."
@@ -1214,6 +1276,36 @@ def test_at_a_glance_actions(make_context, bd):
     probs = [p for p in page.bf_problems if "/binder/export" not in p and "status of 503" not in p]
     page.bf_problems[:] = probs
     assert_clean(page, "glance actions")
+
+
+def test_h15_at_a_glance_says_which_pictures_are_older_than_their_description(make_context, bd):
+    """🖼 H15: "2 pictures are older than their description — remake", 🖼 Remake them (a job), and 🔒 Replace the lock
+    only after the author says yes in a dialog (Cancel replaces nothing)."""
+    doc = fixture_doc(bd.pid)
+    ctx = make_context(width=1280, height=900)
+    page = watch(ctx.new_page())
+    fake = serve_binder(page, bd.pid, doc)
+    fake.outdated = {"count": 2, "locks": 1, "items": [{"record_id": "rec-maren", "name": "Maren Vey", "slots": ["portrait", "front"], "lock": True}],
+                     "words": "🖼 2 pictures are older than their description — remake · 🔒 1 character lock still has the old look — replace it?"}
+    page.goto(bd.url)
+    page.wait_for_selector("#main h1", timeout=15000)
+    page.evaluate("h => { location.hash = h; }", f"#/p/{bd.pid}/main/bible")
+    page.wait_for_selector("[data-testid=glance-outdated]", timeout=15000)
+    assert "🖼 2 pictures are older than their description — remake" in page.inner_text("[data-testid=glance-outdated-words]")
+    shot(page, "glance-pictures-outdated")
+    page.click("[data-testid=glance-replace-lock]")
+    page.wait_for_selector("dialog[open] >> text=Replace the lock of “Maren Vey”?")
+    page.keyboard.press("Escape")
+    page.wait_for_function("() => !document.querySelector('dialog[open]')")
+    assert not getattr(fake, "remakes", [])  # Cancel: nothing replaced
+    page.click("[data-testid=glance-replace-lock]")
+    page.click("dialog[open] button:has-text(\"🔒 Replace the lock\")")
+    page.wait_for_selector("text=lock now has the look of the description")
+    assert fake.remakes[-1] == ("/pictures/lock", {"record_id": "rec-maren", "author_confirms": True})
+    page.click("[data-testid=glance-remake]")
+    page.wait_for_function("() => document.body.innerText.includes('2 picture(s) remade')", timeout=15000)
+    assert fake.remakes[-1][0] == "/pictures/remake"
+    assert_clean(page, "glance outdated pictures")
 
 
 def test_at_a_glance_picture_maker_off_and_a_series_of_two(make_context, bd):

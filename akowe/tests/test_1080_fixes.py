@@ -153,11 +153,28 @@ def test_a_failed_section_keeps_the_files_saved_before(sv, monkeypatch):
         raise RuntimeError("broken")
     monkeypatch.setattr(trailer, "save_files", boom)
     monkeypatch.setattr(cover, "save_files", boom)
-    assert app.saver.save_now(pid, BR)["ok"]
-    assert (folder / "Trailer" / "trailer.webm").read_bytes() == WEBM
-    assert (folder / "Cover" / "cover-design.json").is_file()
-    assert "Trailer/trailer.webm" in marker_files(folder)  # still Akọwe's: a later good save may replace it
+    out = app.saver.save_now(pid, BR)
+    assert out["ok"]
+    # 💾 H16: the files saved before are kept but renamed "(older version)", and the result says what was not updated
+    assert not (folder / "Trailer" / "trailer.webm").exists()
+    assert (folder / "Trailer" / "trailer (older version).webm").read_bytes() == WEBM
+    assert (folder / "Cover" / "cover-design (older version).json").is_file()
+    assert "Trailer/trailer (older version).webm" in marker_files(folder)  # a later good save removes it
+    nu = {x["file"]: x for x in out["not_updated"]}
+    assert set(nu) == {"Trailer/", "Cover/"} and "broken" in nu["Trailer/"]["why"]
+    assert "Not updated:" in out["warning"] and "(older version)" in out["warning"]
+    # the Word Book Bible cannot be made: "not updated: Book Bible.docx (why)" and the old one is renamed
+    from akowe import binder
+    assert (folder / "Book Bible" / "Book Bible.docx").is_file()
+    monkeypatch.setattr(binder, "export_docx", boom)
+    out = app.saver.save_now(pid, BR)
+    assert (folder / "Book Bible" / "Book Bible (older version).docx").is_file()
+    assert not (folder / "Book Bible" / "Book Bible.docx").exists()
+    assert "Not updated: Book Bible.docx (the Word Book Bible could not be made)" in out["warning"]
     monkeypatch.undo()
+    res = app.saver.save_now(pid, BR)  # a good save again: the current files, the older versions gone
+    assert (folder / "Trailer" / "trailer.webm").read_bytes() == WEBM and not res["not_updated"]
+    assert not (folder / "Trailer" / "trailer (older version).webm").exists()
     # the trailer asset cannot be read (picture_bytes None): its file stays too
     real = forge.picture_bytes
     monkeypatch.setattr(forge, "picture_bytes", lambda s, p, b, a: None if (a or {}).get("mime", "").startswith(

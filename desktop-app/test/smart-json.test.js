@@ -47,5 +47,29 @@ const long = 'x'.repeat(500);
 assert(S.replyExcerpt(long, 50).length === 50 && S.replyExcerpt(long, 50).endsWith('\u2026'), 'replyExcerpt: cut with …');
 assert(S.replyExcerpt('a\u0007b') === 'ab', 'replyExcerpt: control characters removed');
 
+console.log('\n== H26: a cut-off JSON reply is not taken as finished ==');
+{
+  const cut = ['{"chapter": "The storm came at night and', '{"items": [{"a": 1}, {"b": 2}', '```json\n{"ok": true, "list": [1, 2', '[{"x": "y"}, {"x": "z"'];
+  for (const t of cut) assert(S.replyLooksCut(t), `cut: ${JSON.stringify(t.slice(0, 40))}`);
+  const fine = ['{"ok": true}', '```json\n{"ok": true}\n```', '{"a": [1, 2, 3]}\n[FROM: CLAUDE]', 'Here is my answer in words.', '{“ok”: true}', '{"a": 1,}', ''];
+  for (const t of fine) assert(!S.replyLooksCut(t), `finished (or not JSON): ${JSON.stringify(t.slice(0, 40))}`);
+  const main = require('fs').readFileSync(require('path').join(__dirname, '..', 'main.js'), 'utf8');
+  const bf16 = main.indexOf('akoweAwaitingReply(site) && !looksLikeRateLimit(text) && !akoweSiteErr && !isNoneSkip(text)) {');
+  const gate = main.indexOf('akoweAwaitingReply(site) && replyLooksCut(text) && Date.now() - pend.sinceTs < CUT_WAIT_MS');
+  assert(gate > 0 && bf16 > gate, 'main.js: an untagged Akọwe reply that looks cut off waits (CUT_WAIT_MS) before the BF-16 "quiet = finished" accept');
+}
+
+console.log('\n== H26: a paste the editor cut short is not taken as typed ==');
+{
+  const A = require('../automation');
+  const long = 'Task: write chapter 3. ' + 'The harbour at night. '.repeat(40) + 'Return only the JSON object.';
+  assert(A.composerHoldsText(long.replace(/ /g, '\n'), long), 'the whole text (line breaks changed by the editor) is held');
+  assert(!A.composerHoldsText(long.slice(0, 300), long), 'the first 300 characters only: not held (the old check took the first 60)');
+  assert(!A.composerHoldsText(long.slice(0, 60) + long.slice(-60), long), 'start and end but the middle missing: not held');
+  assert(!A.composerHoldsText('anything', ''), 'nothing to hold: false');
+  const script = A.buildSendScript('claude', long, {});
+  assert(/const composerHoldsText = function composerHoldsText/.test(script) && /return composerHoldsText\(composerText\(input\), text\)/.test(script), 'the send script checks the editor with the same rule');
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

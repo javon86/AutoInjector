@@ -67,6 +67,18 @@ const USER_TURNS = {
   gemini: ['user-query'],
   generic: ['[data-message-author-role="user"]', '[data-testid="user-message"]', 'user-query']
 };
+/** H26: does the composer's text ``have`` hold ALL of ``text`` (whitespace ignored)? Its first and last 60
+ *  characters, and at least 97 % of its length — so a paste the editor cut short is never taken as typed. Also used
+ *  inside the injected send script (its source is copied there). */
+function composerHoldsText(have, text) {
+  const sq = (s) => String(s || "").replace(/\s+/g, "");
+  const want = sq(text);
+  const got = sq(have);
+  if (!want) return false;
+  const head = want.slice(0, 60);
+  const tail = want.slice(-60);
+  return got.indexOf(head) !== -1 && got.indexOf(tail) !== -1 && got.length >= Math.floor(want.length * 0.97);
+}
 function buildSendScript(site, text, overrides, sendOpts) {
   const cfg = siteConfig(site);
   const ov = overrides || {};
@@ -198,11 +210,13 @@ function buildSendScript(site, text, overrides, sendOpts) {
       return String((input.tagName === "TEXTAREA" ? input.value : (input.innerText || input.textContent)) || "");
     }
     const squash = (s) => String(s || "").replace(/\s+/g, "");
-    // Does the composer now hold (the start of) our text? Whitespace-insensitive,
-    // because editors turn line breaks into paragraphs.
+    // Does the composer now hold ALL of our text? Whitespace-insensitive, because
+    // editors turn line breaks into paragraphs. H26: not just its first 60
+    // characters — a paste an editor cut short used to pass and the AI answered half
+    // a prompt (a cut-off reply, a wasted retry). The start, the END and the length.
+    const composerHoldsText = ${composerHoldsText.toString()};
     function holdsText(input, text) {
-      const want = squash(text).slice(0, 60);
-      return !!want && squash(composerText(input)).indexOf(want) !== -1;
+      return composerHoldsText(composerText(input), text);
     }
 
     // Rich editors (ProseMirror, Lexical, Quill…) keep their OWN copy of what's
@@ -1102,4 +1116,4 @@ function buildProbeScript(site, overrides) {
 }
 
 module.exports = {
-  USER_TURNS, SURVEY_PHRASES, MESSAGE_CONTAINERS, buildSendScript, buildReadScript, buildFileInputFinderExpression, buildPickScript, buildLoginFillScript, buildProbeScript, isBareTagSelector, usableOverride };
+  USER_TURNS, SURVEY_PHRASES, MESSAGE_CONTAINERS, composerHoldsText, buildSendScript, buildReadScript, buildFileInputFinderExpression, buildPickScript, buildLoginFillScript, buildProbeScript, isBareTagSelector, usableOverride };

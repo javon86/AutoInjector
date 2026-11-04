@@ -608,12 +608,16 @@ def test_book_save_writes_the_binder_files(book, tmp_path):
         assert sum(1 for c in br.calls if c[0] == "/render/pdf") == n
     finally:
         br.close()
-    # AutoInjector gone again: the PDF saved before stays, the DOCX is still written
+    # AutoInjector gone again and the binder changed: 💾 H16 the PDF saved before is kept but renamed "(older
+    # version)" (never mistaken for the current one), the result says so; the DOCX is still written
     forge.save_bridge_settings(app, {"url": "http://127.0.0.1:9"})
     bf.edit(app.store, pid, BR, {"target": "book", "fields": {"subgenre": "Harbour noir"}}, app=app)
     res = app.saver.save_now(pid, BR)
-    assert (folder / "Book Bible" / "Book Bible.pdf").read_bytes() == PDF
+    assert not (folder / "Book Bible" / "Book Bible.pdf").exists()
+    assert (folder / "Book Bible" / "Book Bible (older version).pdf").read_bytes() == PDF
     assert res["not_made"] and (folder / "Book Bible" / "Book Bible.docx").exists()
+    assert res["not_updated"][0]["file"] == "Book Bible/Book Bible.pdf"
+    assert "Not updated: Book Bible.pdf (Open AutoInjector" in res["warning"]
 
 
 # ====================================================================== HTTP

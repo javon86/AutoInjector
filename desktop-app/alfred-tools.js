@@ -131,16 +131,27 @@ async function resolveRun(ctx, a) {
   const j = runs.json || {};
   // a newer Akọwe names the run that matters (`current`); runs a newer one replaced are never acted on
   const live = (r) => r && !r.replaced_by && r.state !== 'replaced' && ['paused', 'interrupted', 'running', 'waiting', 'pausing', 'queued', 'error'].includes(r.status);
-  let act = (j.active || [])[0];
-  if (!act) {
-    // the current book's run (the open one) before another book's paused run
-    const cache = {};
-    let mine = null;
-    try { const b = await currentBook(ctx, {}, cache); if (b && b.ok) mine = runOfBook(cache.runs, b.pid, (cache.books || []).length <= 1); } catch (_) { mine = null; }
-    act = (live(mine) ? mine : null) || (live(j.current) ? j.current : null) || (j.runs || []).find(live);
+  // H25: every live run, once (active first): with two books each having a run, never take the first one blindly
+  const seen = new Set();
+  const lives = [].concat(Array.isArray(j.active) ? j.active : [], j.current ? [j.current] : [], Array.isArray(j.runs) ? j.runs : [])
+    .filter((r) => r && r.id && live(r) && (seen.has(r.id) ? false : (seen.add(r.id), true)));
+  if (!lives.length) return { ok: false, error: 'NO_RUN', message: 'No “Make a book for me” run is going right now.' };
+  // the open / current book's run first (the book the author is looking at, or names)
+  const cache = {};
+  let book = null;
+  try { book = await currentBook(ctx, { project_id: a && a.project_id }, cache); } catch (_) { book = null; }
+  const sure = book && book.ok && ['named', 'open_tab'].includes(book.why);
+  // only a book the author is really on decides (asked by name, open in the tab, last opened) — a guess from "the
+  // first live run" is exactly what acted on another book's run before
+  if (book && book.ok && (sure || book.why === 'last_opened' || lives.length === 1)) {
+    const mine = lives.filter((r) => r.project_id === book.pid || (!r.project_id && (cache.books || []).length <= 1));
+    if (mine.length) return { ok: true, runId: mine[0].id, run: mine[0] };
+    if (sure) return { ok: false, error: 'NO_RUN', message: `“${book.title || book.pid}” has no “Make a book for me” run going right now${lives.length ? ` (${lives.length === 1 ? 'another book has one' : `${lives.length} other books have one`}: name it to act on it)` : ''}.`, choices: lives.map((r) => ({ run_id: r.id, project_id: r.project_id || null, title: clip(r.title || '', 120) })) };
   }
-  if (!act) return { ok: false, error: 'NO_RUN', message: 'No “Make a book for me” run is going right now.' };
-  return { ok: true, runId: act.id, run: act };
+  if (lives.length === 1) return { ok: true, runId: lives[0].id, run: lives[0] };
+  // several books have a run and none of them is the open one: ask which (never act on another book's run)
+  const names = lives.map((r) => `“${clip(r.title || r.project_id || r.id, 80)}” (${r.status})`);
+  return { ok: false, error: 'WHICH_RUN', message: `${lives.length} books have a “Make a book for me” run: ${names.join(', ')}. Which one do you mean? Open that book in Akọwe or say its name.`, choices: lives.map((r) => ({ run_id: r.id, project_id: r.project_id || null, title: clip(r.title || '', 120), status: r.status })) };
 }
 /** The buttons Akọwe shows for a paused run, in the words on them (so he can say "press ✔ Approve anyway"). */
 function choiceWords(problem) {
@@ -312,7 +323,7 @@ for (const [verb, label] of [['pause', 'Pause'], ['resume', 'Resume'], ['cancel'
   def({
     name: `${verb}_run`, title: `${label} the book run`, group: 'books', changes: true, book: true,
     description: `${label} the current "Make a book for me" run${verb === 'resume' ? ' (it never approves anything you have to decide; a paused decision stays yours)' : ''}.`,
-    args: { type: 'object', properties: { run_id: { type: 'string', maxLength: 80 } }, additionalProperties: false },
+    args: { type: 'object', properties: { run_id: { type: 'string', maxLength: 80 }, project_id: { type: 'string', maxLength: 80, description: 'The book whose run (when several books have one)' } }, additionalProperties: false },
     describe: (a) => `${label} the Make-a-book run${a.run_id ? ` ${a.run_id}` : ' that is going now'}.`,
     async run(a, ctx) {
       const rr = await resolveRun(ctx, a);
