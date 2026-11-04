@@ -324,6 +324,15 @@ A few of these need more words:
 - **Book report.** For a long book the report says when it only read a sample. **📖 Read the whole book** reads
   every part.
 
+**🚀 Launch kit** (📤 Export → 🚀 Launch kit). Everything to put the book in a store such as Amazon KDP: the
+back-cover blurb and the longer store description, a one-line hook, your author bio, 7 keywords, 3 categories,
+"for readers of…" books (suggestions you must check), the age range and an A+ content plan with simple pictures
+made from your cover, portraits and map. The AI writes it from the Book Bible but never sees the chapters after
+your spoiler point (the midpoint, unless you choose otherwise). Akọwe then checks every part with no AI: names not
+in the book, spoilers, claims like "bestseller", KDP's keyword rules and the lengths; 🔎 Check with AI adds a second
+reading. Each ⚠️ says how to fix it, 🔁 Fix with AI rewrites that part, and you ✔ approve each part yourself.
+Categories come from Akọwe's own list, not Amazon's live one.
+
 **Other things that are kept in step:** a sequel first finds what changed in book 1. Pictures and face locks
 are marked out of date when the description they came from changes, and so is the trailer when the book or the
 looks change. The blurb and cover are compared with the book, and the cover follows a new title. Accented letters
@@ -379,7 +388,7 @@ then carries the locked facts, belongings, status and a summary of book 1.
 | AutoInjector settings, transcript, connection key | `%APPDATA%\autoinjector-desktop\` |
 
 **Inside one book's folder:** `Book/` (PDF, EPUB, Word), `Chapters/`, `Book Bible/`, `Reports/`, `Log/` (the
-journal), `Progress/`, `Cover/`, `Pictures/`, `Character Forge/`, `Trailer/`, and **`book.akowe`**. That last file
+journal), `Progress/`, `Cover/`, `Pictures/`, `Character Forge/`, `Trailer/`, `Launch kit/` (the store listing: launch-kit.md and one .txt per part), and **`book.akowe`**. That last file
 is the whole book in one file, for opening it again, even on another PC. Akọwe saves after every run step, and
 quietly every 10 minutes when a book has changed.
 

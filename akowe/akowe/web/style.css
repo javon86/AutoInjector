@@ -1728,3 +1728,25 @@ html[data-mode="simple"] .topbar .health-btn.adv-only[data-state="problem"] { di
 .wa-text ins { background: var(--ok-soft); text-decoration: none; }
 .wa-text del { background: var(--bad-soft); text-decoration-color: var(--bad); }
 @media (max-width: 700px) { .wa-cols { grid-template-columns: minmax(0, 1fr); } }
+/* ======================================================================= 🚀 launch kit (web/launch.js) */
+.lk { display: grid; gap: 16px; max-width: 1000px; }
+.lk h2 { font-size: 1.15rem; margin: 0 0 6px; }
+.lk-field, .lk-top { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.lk-field .row.space { flex-wrap: wrap; gap: 6px; }
+.lk textarea, .lk input[type=text], .lk select { width: 100%; max-width: 100%; box-sizing: border-box; }
+.lk-ed { display: flex; flex-direction: column; gap: 4px; }
+.lk-kw, .lk-cats { margin: 0; padding-left: 1.6em; display: grid; gap: 6px; }
+.lk-kw li { display: flex; gap: 6px; align-items: center; }
+.lk-kw li input { flex: 1 1 auto; min-width: 0; }
+.lk-comp { flex-wrap: wrap; gap: 6px; }
+.lk-comp input { flex: 1 1 180px; width: auto; min-width: 0; }
+.lk-comps, .lk-aplus { display: grid; gap: 8px; }
+.lk-mod { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; margin: 0; }
+.lk-mod-img { display: block; width: 100%; max-width: 485px; height: auto; border-radius: var(--radius); }
+.lk-issues { margin: 4px 0; padding-left: 1.2em; display: grid; gap: 4px; }
+.lk-issue { overflow-wrap: anywhere; }
+.lk-issue.problem { color: var(--warn); }
+.lk-ok { color: var(--ok); }
+.lk-off { color: var(--warn); font-weight: 600; }
+.lk-actions { gap: 8px; flex-wrap: wrap; }
+.lk-sum { margin: 4px 0; }

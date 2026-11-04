@@ -751,6 +751,37 @@ the browser: `tests/campaign/ui/test_ui_continuity.py`):
 - *Not done:* readers do not run in parallel; the "same moment" check is word overlap (English); the panel shares the
   single reader's one-call budget per reader (no per-part reading of very long books).
 
+## 🚀 Launch kit (2026-11, idea #16) — done
+
+- **What it is:** a 🚀 Launch kit page per book (`#/p/<pid>/<b>/launch`; 📤 Export → 🚀 Launch kit) with everything
+  to list the book on Amazon KDP or another store: back-cover blurb (~150 words) and store description (~300), a
+  one-line hook, the author bio (from the pen name; the AI leaves `[brackets]` for facts only the author knows), 7 KDP
+  keyword phrases, 3 categories, comparable titles ("for readers of…", always labelled *suggestions to verify*), the
+  age range and content notes (from the profile's audience and content limits, no AI) and an A+ content plan (3–5
+  modules: headline, text, and which of the book's own pictures to use — the cover, a portrait, the map or a chosen
+  chapter picture). Code: `akowe/launch_kit.py`, `web/launch.js`.
+- **Versions and approval:** every AI answer and every edit is a new version (a draft) per field
+  (`launch_kit:<pid>:<branch>`); only the author approves (✔), ↩ un-approves, or brings back an older version.
+- **Cross-check, no AI first** (every page load): names in the blurbs, hook and A+ texts must be in the canon or the
+  book ("Captain Varrow" is flagged even though "captain" is a word in the book); numbers the book never uses; claims
+  ("bestselling", "award-winning", "#1"); spoilers past the chosen point (default the midpoint; or first act, none):
+  a canon name first met after it, a sentence built from the secret chapters' plan / prose or a protected mystery,
+  twist words beside a canon name; KDP keyword rules (7 boxes, ≤ 50 characters, no "bestseller"/"free"/"new"/
+  "Kindle Unlimited", other authors incl. the comps' authors, trademarks, repeats, the title/pen name); text lengths;
+  categories for the right readers (FICTION / YOUNG ADULT FICTION / JUVENILE FICTION). Each ⚠️ has a plain fix.
+  **🔎 Check with AI** then reads the listing against the canon and the plan, with the part after the spoiler point
+  marked secret (quotes checked against the field; out of date once the kit changes). **🔁 Fix with AI** regenerates a
+  field with its problems in the request. The generator never sees the plan after the spoiler point.
+- **Export:** the 💾 book save writes `Launch kit/` (launch-kit.md, one .txt per field, A+ module SVGs); ⬇
+  launch-kit.md on the page; 📋 Copy per field; 📕 Use on the back cover puts a blurb / the bio into the profile
+  (the 🎨 Cover page's back cover).
+- *Honest limits:* categories are Akọwe's own small BISAC-style list per genre, not Amazon's live list; comparable
+  titles cannot be looked up (the author must check them); the A+ module pictures are simple compositions (the
+  picture + the text on a dark panel, SVG made by Akọwe; JPG only when AutoInjector is running to draw it) — a
+  starting point, not finished designs; the spoiler check is word-based (English) — the AI check is the deeper one.
+- Tests: `tests/test_launch_kit.py` (rules, lengths, canon, spoilers, fake-AI generation, fix, AI check, export),
+  `tests/campaign/ui/test_ui_launch_kit.py`, stand-in AI `tests/launch_fake.py`.
+
 ## Prevention pass (2026-10-27, "solve problems before they become problems")
 
 - [x] **Alfred's local AI connection:**
