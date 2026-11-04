@@ -45,7 +45,7 @@ NOT_INDEPENDENT = "Reviews are not independent — the same AI wrote and reviewe
 
 KIND_WORDS = {"beat": "Outline beat", "scene_obstacle": "Scene obstacle", "scene_change": "Scene change",
               "scene_goal": "Scene goal", "name": "Name on the page", "must_show": "Must show",
-              "detail": "Planned detail"}
+              "detail": "Planned detail", "story_beat": "Story beat"}
 
 _S = {"type": "string"}
 AI_SCHEMA = {"type": "object", "additionalProperties": False, "required": ["items"],
@@ -152,13 +152,20 @@ def planned_items(bp, outline, chapter_id: str) -> list[dict]:
                              status="REJECTED")
     items = []
 
-    def add(kind, text, *, name=None, required=True, label=None):
+    def add(kind, text, *, name=None, required=True, label=None, **extra):
         text = _clip(text, 300)
         if not text or any(i["text"] == text and i["kind"] == kind for i in items):
             return
-        items.append({"id": f"i{len(items) + 1}", "kind": kind, "label": _clip(label or text), "text": text,
-                      "words": [] if name else keywords(text), "name": name, "required": required})
+        items.append(dict({"id": f"i{len(items) + 1}", "kind": kind, "label": _clip(label or text), "text": text,
+                           "words": [] if name else keywords(text), "name": name, "required": required}, **extra))
     add("beat", me["objective"], label=f"{KIND_WORDS['beat']}: {me['objective']}")
+    try:  # 📐 the story beat(s) of the author's story shape this chapter must deliver
+        from . import story_shape  # noqa: PLC0415
+        for b in story_shape.chapter_beats(store, pid, branch, outline, chapter_id):
+            add("story_beat", story_shape.planned_text(b), label=f"{KIND_WORDS['story_beat']}: {b['name']} — "
+                f"{b.get('how') or b['what']}", beat=b["id"])
+    except Exception:  # noqa: BLE001 - optional
+        log.exception("could not read the story beats")
     cs = chars_mod.canon_characters(store, pid, branch)
     pov = next((c for c in cs if me["pov_id"] and me["pov_id"] in (c["subject_id"], c["record_id"])), None)
     if pov:
@@ -190,7 +197,7 @@ def planned_items(bp, outline, chapter_id: str) -> list[dict]:
 
 # H13: when there are more items than can be checked, the least important go first (never a must-show before a
 # scene goal or a planned detail); the kept items stay in their order.
-PRIORITY = {"beat": 0, "must_show": 1, "name": 2, "scene_change": 3, "scene_obstacle": 4, "scene_goal": 5, "detail": 6}
+PRIORITY = {"beat": 0, "story_beat": 0, "must_show": 1, "name": 2, "scene_change": 3, "scene_obstacle": 4, "scene_goal": 5, "detail": 6}
 
 
 def most_important(items: list[dict], n: int) -> list[dict]:

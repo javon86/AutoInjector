@@ -12,6 +12,8 @@
   then beliefs / things seen to happen its plan mentions), bounded by ``story_rules.chapter_rules``.
 * ``world_texture`` (P10): a few world details (the ones its scene cards use first), each with what it can cause.
 * ``must_show`` (P11): "must reach the page" details of the character sheets assigned to this chapter.
+* ``story_beats`` (📐 story_shape.py): "this chapter must deliver the story beat …" when the author chose a story
+  shape and a beat falls in this chapter.
 * ``story_choices`` (P12): the author's style choices (and the ending-state matrix in the last chapter).
 * ``length`` (P15): the chapter's word target, scenes and words per scene, and whether it is written scene by scene.
 * ``narrator_style`` (P25): the author's own style card (style_card.py) when the book writes in the author's style.
@@ -286,6 +288,14 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str, *
         if needs and not needs_list.world_wanted(needs, "world_texture"):
             extra.pop("world_texture", None)  # 🧠 world details (W55) only when the needs list asks for them
         brief.update({k: v for k, v in extra.items() if v})
+        try:  # 📐 the story beat(s) of the author's story shape this chapter must deliver
+            from . import story_shape  # noqa: PLC0415
+            beats = story_shape.writer_brief(store, pid, branch, outline, chapter_id)
+        except Exception:  # noqa: BLE001
+            log.exception("could not add the story beats to the brief")
+            beats = []
+        if beats:
+            brief["story_beats"] = beats
         length = _length(store, pid, outline)
         if length:
             brief["length"] = length
@@ -307,6 +317,8 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str, *
             rules.append(TEXTURE_RULE)
         if brief.get("must_show"):
             rules.append(RULES["must_show"])
+        if brief.get("story_beats"):
+            rules.append(story_shape.WRITER_RULE)
         if brief.get("character_details"):
             rules.append(RULES["character_details"])
         if brief.get("needed_details"):
@@ -363,11 +375,20 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str, *
             from .style_card import RULE as STYLE_RULE  # noqa: PLC0415
             brief["narrator_style"] = style
             rules.append(STYLE_RULE)
+        try:  # 🗳 the writers' room's decision for this chapter (a ⚡ run's pick; writers_room.py)
+            from . import writers_room  # noqa: PLC0415
+            room = writers_room.chapter_decision(store, pid, branch, chapter_id)
+        except Exception:  # noqa: BLE001
+            log.exception("writers' room decision of chapter %s", chapter_id)
+            room = None
+        if room:
+            brief["writers_room"] = room
+            rules.append(writers_room.BRIEF_RULE)
         brief["rules"] = rules
-        if not (cards or vb["cards"] or vb["others"] or pov or planned or extra.get("story_rules")
+        if not (cards or vb["cards"] or vb["others"] or pov or planned or room or extra.get("story_rules")
                 or extra.get("world_texture") or extra.get("story_choices") or length or style
                 or brief.get("character_details") or main or world or fixed or brief.get("needed_details")
-                or brief.get("earlier_moments")
+                or brief.get("earlier_moments") or brief.get("story_beats")
                 or any(k in brief for k in ("physical_state", "character_state", "two_readings", "version_changes",
                                             "previous_chapter_end", "story_so_far", "story_ledger",
                                             "series_state", "series_world"))):
@@ -377,7 +398,7 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str, *
                     scene_cards={"version": entry["version"], "status": entry.get("status"), "scenes": len(cards)}
                     if cards else None, pov=pov["record_id"] if pov else None,
                     story_rules=len(brief.get("story_rules") or []), texture=len(brief.get("world_texture") or []),
-                    must_show=len(brief.get("must_show") or []), choices=bool(brief.get("story_choices")),
+                    must_show=len(brief.get("must_show") or []), story_beats=len(beats) or None, choices=bool(brief.get("story_choices")),
                     length={k: length[k] for k in ("target_words", "scenes", "scene_by_scene")} if length else None,
                     pipeline=None if all(flags.values()) else {k: v for k, v in flags.items()},
                     continuity=[k for k in ("physical_state", "character_state", "two_readings", "version_changes",

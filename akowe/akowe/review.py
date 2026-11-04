@@ -376,6 +376,9 @@ class ReviewService:
         if fix and fix.get("restored_from"):
             return {"kind": "ai", "label": f"{self.slot_label(fix.get('slot')) or 'AI'} (version {fix['restored_from']} "
                     "again — the editor's rewrite was not kept)", "slot": fix.get("slot")}
+        if fix and fix.get("alongside"):
+            return {"kind": "ai_fix", "label": f"Written alongside you by {self.slot_label(fix.get('slot')) or 'AI'}"
+                    " (you chose to use it)", "slot": fix.get("slot")}
         if fix and fix.get("editor"):
             return {"kind": "ai_fix", "label": f"Editor's fixes, written by {self.slot_label(fix.get('slot')) or 'AI'}",
                     "slot": fix.get("slot")}
@@ -818,7 +821,8 @@ class ReviewService:
         left = [r for r in job.record_ids if r not in done]
         self.assist.persist(job, kind=f"review_{job.kind}", done=job.done, total=len(job.record_ids),
                             resume={"kind": job.kind, "project_id": job.project_id, "branch_id": job.branch_id,
-                                    "record_ids": left, "slot_id": job.slot_pref} if left else None)
+                                    "record_ids": left, "slot_id": job.slot_pref}
+                            if left and job.kind != "alongside" else None)  # ✍ a suggestion is asked again, not resumed
 
     def _start(self, job: ReviewJob, fn, same=None) -> dict:
         """Start ``job`` in the background. ``same`` (hashable; () when the kind and the records say it all) makes the
@@ -929,6 +933,8 @@ class ReviewService:
             ctx.update(continuity.review_extra(self.store, pid, branch, rec))
             from . import needs_list  # noqa: PLC0415 - 🧠 the chapter's needs list: each listed section checked
             ctx.update(needs_list.review_extra(self.store, pid, branch, rec))
+            from . import story_shape  # noqa: PLC0415 - 📐 the story beat(s) this chapter must deliver
+            ctx.update(story_shape.review_extra(self.store, pid, branch, rec))
         if extra:
             ctx.update(extra)
         return ctx, protected

@@ -37,6 +37,9 @@ akowe/
     prose_audit.py         P6 pattern checker (no AI): repeated gestures, "Not X. Not Y.", triads, moral paragraph
                            endings, named emotions, said-bookisms, sentence-length uniformity, same openings, overused
                            words, dialogue share, reassurance; audit()/audit_book(), thresholds per 1 000 words
+    originality.py         ✨ #20 originality / "sounds like AI" check: clichés + AI-tell phrases from ai_tells.json,
+                           long dashes, "It wasn't X. It was Y.", hedging (no AI, dialogue left out); editor_brief()
+                           for the editor; optional independent AI pass with verified quotes; /originality API
     editor_rubric.py       the AI editor's rubric (dimensions, questions, strictness) - the ONE editable place
     editor.py              🖋 AI editor: craft review (P4), rewrite proposals + exact apply (P5), restore; settings
                            editor_settings, advice keys craft_reviews / editor_proposals / editor_rewrites
@@ -74,6 +77,9 @@ akowe/
                            question vs. the ending (one AI call; the run sends open items back as a fix); checkpoints
     brief_cuts.py          ✂️ H13 what was cut from a chapter's instructions (settings brief_cuts:<pid>:<branch>)
     attention.py           ⚠️ 🏠 Book home's "Needs a look" list (status.attention): H5 / H11 / H13 / H14
+    alongside.py           ✍ Write alongside me: continue / rewrite / describe / expand / tighten a highlighted passage
+                           (focused brief from chapter_brief, review job, ⚠️ quick checks); POST …/review/alongside
+                           (202 job) and …/review/alongside/use (a new DRAFT, like a hand edit); web: alongsideCard
     timeline_check.py      🕰️ P26 timeline checker: ages, birth/story years, "N years ago" arithmetic (no AI)
     terms.py               🔧 P31 trade facts (settings trade_terms:<pid>:<branch>) + the P26 terminology check
     repetition.py          🔁 P30 repetition sorter: voice / motif / filler / accident, trim plan, author labels

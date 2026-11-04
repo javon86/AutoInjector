@@ -136,6 +136,23 @@ bridge to your home Wi-Fi, behind its key.
 - **Canon:** the approved records together are the book's **canon**, the official truth everything else must match.
 - **Out of date (stale):** if something a record was built from changes, Akọwe marks that record out of date.
 - **AI slots:** AI-1, AI-2 and AI-3. By default they are Claude, ChatGPT and Gemini, through the bridge.
+- **✍ Write alongside me:** on a chapter's page, highlight a passage (or put the cursor) and press ✍ Continue from
+  here, 🔁 Rewrite (with an optional note, such as "more tense"), 🎨 Describe more, ➕ Expand or ✂ Tighten. The AI
+  (by default the one that wrote the chapter) gets the text around the passage, the chapter's plan and needs list, the
+  voices of the characters there, the locked details, the running notes, the story rules, the point of view and tense,
+  and your content limits. You see its suggestion next to your text, with ⚠️ notes when it slips into another person
+  or tense or changes a locked detail. Nothing changes until you press ✔ Use this: that saves a new version for you
+  to approve, exactly like your own edit.
+- **🗳 Writers' room:** for a big decision (a plot twist, how a chapter ends, a character's secret, or your own
+  question), each working AI pitches one idea. The pitches are shuffled and labelled A, B, C, and each AI ranks the
+  others' pitches (never its own) with a reason. Most first places wins; a tie goes to the sum of ranks, then to you.
+  Using a pitch saves it as a new draft marked "From the writers' room"; the approved text stays until you approve
+  it. With only one working AI, you can ask it for three ideas instead. (This is not the desktop app's Council, where
+  the panes chat with each other.)
+- **📣 Mockups & ads:** made from your 🎨 cover: your book as a 3D paperback, hardcover, stack or series, and on a
+  phone, tablet or e-reader; ads at the exact sizes Instagram, Facebook, X and Amazon ask for (with your hook and
+  "Available now", words kept clear of the apps' buttons); and 13-second teaser clips, tall and square. AutoInjector
+  draws the pictures and joins the clips. When the cover or the hook changes, the old files are marked out of date.
 
 ### 🎨 Images
 
@@ -203,7 +220,13 @@ to a minute), so the run knows which AIs work.
 6. **Character pictures:** a portrait each, made with Stable Diffusion; each becomes that character's 🔒 lock.
    This never holds up the book.
 7. **Story rules and world texture:** what is law in this world, what is only believed, and real-world obstacles.
-8. **Premise**, then **main plot**, then **chapter outline**.
+8. **Premise**, then **main plot**, then **chapter outline**. If you picked a **story shape** (Three acts, Save the
+   Cat, Hero's Journey or Seven-point), the outline is planned on it and each of its beats is placed on a chapter
+   (shown as "Ch 22 · Dark night of the soul" on the plan page and in the Book Bible); a beat the AI leaves out or
+   misplaces goes where it usually falls in a book.
+   - **Optional: the writers' room for the big twists** (off unless you turn it on at the start). Before the main
+     plot, and before the middle chapter and the climax, each working AI pitches an idea and they vote blind. The
+     winner is used under your run consent and written in the journal. It never holds up the book.
    - **Optional: fill the whole Book Bible** from the plan before chapter one. It is off unless you turn it on
      (on the start screen, or 📖 Book Bible → At a glance). It never holds up the book.
 9. **Every chapter.** For each one:
@@ -224,7 +247,9 @@ to a minute), so the run knows which AIs work.
      always sent back.
    - **The editor** reads it for craft and asks for rewrites of exact passages, at most two rounds. A rewrite is
      kept only if nothing got worse.
-   - **Planned-to-page check:** did the plan really reach the page? At most one targeted fix.
+   - **Planned-to-page check:** did the plan really reach the page? At most one targeted fix. With a story shape,
+     the chapter's beat is part of the plan: the scene cards, the writer and the reviewer are told "this chapter must
+     deliver …", and the checkpoints and the ending check list any beat that did not land (one targeted fix).
    - **Approved** under your run consent. Then the **running notes (ledgers)** are updated: injuries, belongings,
      who is where, the day and season, who knows which secret, names, money.
    - **Every 5 chapters** (you can change this), at each act's end, and after the last chapter: a **continuity
@@ -237,7 +262,13 @@ to a minute), so the run knows which AIs work.
 11. **Book format**, **put the book together**, **export PDF, EPUB and Word**. Each file is re-read by Akọwe's
     export check to make sure nothing was lost.
 12. **Content check** (every chapter once, in order) and the **book report**. An optional **beta reader** step
-    reads the book as its target reader.
+    reads the book as its target reader. You can ask for **1, 2 or 3 readers**. With 2 or 3, each reader is a
+    different AI playing a different kind of reader: a typical fan, a picky reader of the genre, and a casual reader
+    who gives up on slow starts. You can rewrite who they are on the 📊 report page. Each says whether they would
+    finish and recommend the book, their favourite character, the best and worst chapter, and a score out of 10.
+    Akọwe then shows where 2 or more readers agree (a **strong signal**), where they disagree, a chapter-by-chapter
+    map of where readers got lost or bored, and the top 5 things to fix. An AI that is not working is skipped with a
+    note. If the run is paused, the panel carries on with the readers still to read.
 
 **Where it stops for you:**
 
@@ -267,6 +298,7 @@ to a minute), so the run knows which AIs work.
 | Timeline arithmetic (no AI) | ages and years that don't add up ("twelve, twenty years ago… now forty") | the whole-book fact check, near the end |
 | Readability (no AI) | prose too hard or too simple for the book's readers | the book report and the scene grid |
 | Pattern check (no AI) | repeated habits ("went very still"), lists of three, same-length sentences | before the editor |
+| ✨ Originality check (no AI, optional AI pass) | clichés and AI-sounding phrases ("a testament to", "a breath she didn't know she was holding", "It wasn't X. It was Y."), long dashes everywhere, too much hedging; per chapter, with quotes and reasons. Dialogue is left out unless you ask. An optional second AI (not the writer) rates passages 1–5 for "sounds machine-written"; its quotes are checked against the book | before the editor (so its rewrites target them; a rewrite that adds such phrases is not kept), in the book report, and on the 📊 report page (✨ button). Never blocks the book |
 | Voice cards | characters who all talk alike | writing and editing |
 | Locked details | eyes, hair, weapon or weapon hand changing | after each chapter |
 | Running notes (ledgers) | a healed limp, a lost knife drawn again, the dead speaking, misspelled names, wrong travel times | after each chapter |
@@ -296,6 +328,15 @@ A few of these need more words:
   writer's instructions were ("Smart memory saved ~N% of instruction size").
 - **Book report.** For a long book the report says when it only read a sample. **📖 Read the whole book** reads
   every part.
+
+**🚀 Launch kit** (📤 Export → 🚀 Launch kit). Everything to put the book in a store such as Amazon KDP: the
+back-cover blurb and the longer store description, a one-line hook, your author bio, 7 keywords, 3 categories,
+"for readers of…" books (suggestions you must check), the age range and an A+ content plan with simple pictures
+made from your cover, portraits and map. The AI writes it from the Book Bible but never sees the chapters after
+your spoiler point (the midpoint, unless you choose otherwise). Akọwe then checks every part with no AI: names not
+in the book, spoilers, claims like "bestseller", KDP's keyword rules and the lengths; 🔎 Check with AI adds a second
+reading. Each ⚠️ says how to fix it, 🔁 Fix with AI rewrites that part, and you ✔ approve each part yourself.
+Categories come from Akọwe's own list, not Amazon's live one.
 
 **Other things that are kept in step:** a sequel first finds what changed in book 1. Pictures and face locks
 are marked out of date when the description they came from changes, and so is the trailer when the book or the
@@ -352,7 +393,7 @@ then carries the locked facts, belongings, status and a summary of book 1.
 | AutoInjector settings, transcript, connection key | `%APPDATA%\autoinjector-desktop\` |
 
 **Inside one book's folder:** `Book/` (PDF, EPUB, Word), `Chapters/`, `Book Bible/`, `Reports/`, `Log/` (the
-journal), `Progress/`, `Cover/`, `Pictures/`, `Character Forge/`, `Trailer/`, and **`book.akowe`**. That last file
+journal), `Progress/`, `Cover/`, `Pictures/`, `Character Forge/`, `Trailer/`, `Launch kit/` (the store listing: launch-kit.md and one .txt per part), `Marketing/` (the 📣 mockups, ads and teaser clips), and **`book.akowe`**. That last file
 is the whole book in one file, for opening it again, even on another PC. Akọwe saves after every run step, and
 quietly every 10 minutes when a book has changed.
 

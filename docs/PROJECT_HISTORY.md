@@ -43,6 +43,13 @@ A plain-words record of every big change, newest first, so that if something bre
 
 | Date | PR | What changed |
 |---|---|---|
+| 2026-11-04 | #114 | Story shapes: pick Three acts, Save the Cat, Hero's Journey or Seven-point; each beat is placed on a chapter, written, checked and fixed once if it did not land |
+| 2026-11-04 | #114 | ✍ Write alongside me: highlight a passage in a chapter and the AI continues, rewrites, describes more, expands or tightens it; you see a suggestion (with ⚠️ quick checks) and choose to use it as a new version |
+| 2026-11-04 | #114 | 🗳 Three-AI writers' room: each AI pitches a twist, they vote blind, you choose (also optional in ⚡ Make a book) |
+| 2026-11-04 | #114 | Panel of beta readers: up to 3 AIs read the book as different readers; Akọwe shows where they agree, a chapter heat map and the top 5 fixes |
+| 2026-11-04 | #114 | 🚀 Launch kit: blurbs, hook, bio, keywords, categories, comparable titles, age range and A+ plan for the store, checked against the Book Bible (no invented names, no spoilers, KDP keyword rules) |
+| 2026-11-04 | #114 | 📣 Mockups & ads: your cover as 3D and phone / e-reader mockups, ads at the stores' exact sizes and 13-second teaser clips, marked out of date when the cover or hook changes |
+| 2026-11-04 | #114 | ✨ Originality check: clichés and AI-sounding passages flagged per chapter (no AI), an optional AI "sounds machine-written" rating, and the editor's rewrites aimed at them |
 | 2026-11-03 | #112 | Smart memory: per-chapter needs lists, so the writer gets exactly what the chapter needs |
 | 2026-11-03 | #111 | Book Bible code map, plus the "Fill the whole Book Bible" switch and button |
 | 2026-11-03 | #110 | All 26 continuity and process holes fixed, continuity checkpoints for long books, and HOW_IT_WORKS.md |

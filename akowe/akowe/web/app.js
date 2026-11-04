@@ -5,9 +5,13 @@ import { AI_STATE, plainCheck, problemFor, siteProblemWords, slugName } from './
 import { viewContinuity } from './continuity.js';   // 🧭 Section 7 (P32–P35)
 import { estimateBox, runCostLine, viewCosts, viewSceneGrid } from './grid.js';  // 🗂 P27 · ⏱ P28
 import * as S7C from './section7c.js';  // P23 beta reader + P25 your writing style (Section 7c)
+import * as WR from './writers-room.js';  // 🗳 the three-AI writers' room (writers_room.py)
+import { originalityCard } from './originality.js';  // ✨ #20 originality and "sounds like AI" check
 import { forgeRoute } from './forge.js';  // 🗂 B5 Character Forge dossiers (characters, items, places, magic)
 import { viewPictures } from './pictures.js';  // 🖼 B3 chapter/scene pictures and the map
 import { viewTrailer } from './trailer.js';  // 🎞 B2 the book trailer (AutoInjector 🎬 Video)
+import { viewLaunch } from './launch.js';  // 🚀 the launch kit (store listing, checked against the canon)
+import { viewMarketing } from './marketing.js';  // 📣 #17 mockups, ads and teaser clips
 import { viewCover } from './cover.js';  // 🎨 B3 book covers
 import { viewBinder } from './binder.js';  // 📖 Book Bible binder (the author's template studio design)
 import { CODE_MAP, CODE_MAP_MD } from './code-map.js';  // 🔢 the Book Bible code map (code_map.py)
@@ -237,6 +241,26 @@ async function loadItemName(i) {
     if (kind) ITEM_NAMES[i.record_id] = `Book format: ${kind}`;
   } catch { /* the generic name stays */ }
   return itemName(i);
+}
+/** 📐 The plan page's story-shape box: which shape, its beats on the chapters, and (until a chapter is written)
+ * a picker to change it. */
+function shapeBox(sh, post, run) {
+  const box = h('div', { class: 'shape-box', 'data-testid': 'plan-story-shape' },
+    h('p', { class: 'small' }, h('strong', null, '📐 Story shape: '), h('span', { 'data-testid': 'plan-story-shape-name' }, sh.label || storyShapeWord(sh.value)),
+      sh.value && sh.by === 'position' ? h('span', { class: 'muted' }, ' — each beat is placed where it usually falls in a book') : null,
+      sh.value && sh.by === 'ai' ? h('span', { class: 'muted' }, ' — the AI placed each beat on a chapter') : null),
+    storyShapeStrip(sh, 'plan-story-shape-strip'),
+    sh.value && !(sh.beats || []).some(b => b.number) ? h('p', { class: 'small muted' }, 'The beats are placed on the chapters once the chapter outline is approved.') : null);
+  const info = storyShapeInfo();
+  if (sh.can_change && info) {
+    const id = 'plan-shape-pick';
+    const sel = h('select', { id, 'data-testid': 'plan-story-shape-pick' }, info.options.map(o => h('option', { value: o.value, selected: (sh.value || '') === o.value }, o.label)));
+    box.appendChild(h('div', { class: 'row' }, h('label', { for: id, class: 'small' }, 'Change the story shape '), sel,
+      h('button', { type: 'button', class: 'small', 'data-testid': 'plan-story-shape-save', onclick: () => run(() => post('set_story_shape', { shape: sel.value }), 'Changing the story shape…', 'outline') }, 'Use this shape')));
+  } else if (sh.can_change === false && sh.value) {
+    box.appendChild(h('p', { class: 'small muted' }, 'The chapters are being written, so the story shape stays as it is.'));
+  }
+  return box;
 }
 /** "Chapter 1" for an outline chapter: its position in the outline (chapter ids like "ch1" are internal). */
 function chapterName(c, idx) { return `Chapter ${idx + 1}`; }
@@ -670,6 +694,8 @@ async function pickView(parts) {
     if (rest[0] === 'pictures') return m => viewPictures(m, forgeUI());  // 🖼 B3
     if (rest[0] === 'trailer') return m => viewTrailer(m, Object.assign(forgeUI(), { fmtClock }));  // 🎞 B2
     if (rest[0] === 'cover') return m => viewCover(m, forgeUI());  // 🎨 B3 cover designer
+    if (rest[0] === 'launch') return m => viewLaunch(m, Object.assign(forgeUI(), { badge, quickSave }));  // 🚀 launch kit
+    if (rest[0] === 'marketing') return m => viewMarketing(m, forgeUI());  // 📣 #17 mockups & ads
     if (rest[0] === 'bible' || rest[0] === 'binder') return m => viewBinder(m, forgeUI(), rest.slice(1));  // 📖 Book Bible binder (…/binder: the 🆕 fields' edit route)
     if (rest[0] === 'manifest') return viewManifest;
     if (rest[0] === 'activity') return viewActivity;
@@ -798,7 +824,7 @@ const SIDE_ITEMS = [
   { id: 'export', icon: '📤', label: 'Export', path: ['export'], tip: 'PDF, EPUB and Word files of your book' },
 ];
 const SIDE_OF = { '': 'home', book: 'home', people: 'people', forge: 'people', world: 'people', plan: 'plan', write: 'write', scenes: 'write',
-  bible: 'bible', binder: 'bible', art: 'art', pictures: 'art', cover: 'art', trailer: 'trailer', fix: 'fix', continuity: 'fix', report: 'fix', export: 'export' };
+  bible: 'bible', binder: 'bible', art: 'art', pictures: 'art', cover: 'art', marketing: 'art', trailer: 'trailer', launch: 'export', fix: 'fix', continuity: 'fix', report: 'fix', export: 'export' };
 function renderNav() {
   const nav = clear($('#sidenav'));
   const parts = parseRoute();
@@ -1137,6 +1163,7 @@ async function viewLanding(main, kind) {
   } else if (kind === 'art') {
     add({ icon: '🖼', label: 'Pictures', line: 'Pictures of your characters and places, made by your AI.', href: plink('pictures'), primary: true });
     add({ icon: '🎨', label: 'Cover', line: 'Design the ebook and print covers of your book.', href: plink('cover') });
+    add({ icon: '📣', label: 'Mockups & ads', line: 'Your book on a table, a phone and an e-reader, ads in the right sizes and short teaser clips, made from your cover.', href: plink('marketing'), testid: 'land-marketing' });
   } else if (kind === 'fix') {
     add({ icon: '🧭', label: 'Continuity', line: 'Who knows what, who is where, injuries and objects: checked chapter by chapter.', href: plink('continuity'), primary: true });
     add({ icon: '⚖️', label: 'Facts that disagree', line: 'Finds facts that contradict each other and fixes them with the smallest change.', href: plink('set', 'J') });
@@ -1147,6 +1174,7 @@ async function viewLanding(main, kind) {
     add({ icon: '🧩', label: 'Put the book together', line: 'Chapter order, one manuscript and the page layout.', href: plink('book'), onclick: toStep('assemble'), state: stepBadge(book, 'assemble') });
     add({ icon: '📦', label: 'Export my book', line: 'Makes the PDF, EPUB and Word files you can download.', href: plink('book'), onclick: toStep('export'), state: stepBadge(book, 'export'), primary: true });
     add({ icon: '🔎', label: 'Check the book', line: 'Checks that every chapter is there once and in order.', href: plink('book'), onclick: toStep('check'), state: stepBadge(book, 'check') });
+    add({ icon: '🚀', label: 'Launch kit', line: 'Blurbs, keywords, categories and more to put your book in a store, checked against your book.', href: plink('launch'), testid: 'land-launch' });
     add({ icon: '📚', label: 'My finished books', line: 'All your exported books, ready to download.', href: '#/shelf' });
     add({ icon: '💾', label: 'Save the book', line: 'Saves this book into its folder in your books folder.', onclick: ev => quickSave(ev.currentTarget) });
   }
@@ -2493,6 +2521,8 @@ async function viewRecord(main, rid, ver) {
     vBtn.addEventListener('click', () => doAction('VALIDATE', { candidate_ref: cur.ref }, vBtn));
     row.appendChild(vBtn);
     if (cur.record_kind === 'OUTPUT') row.appendChild(h('a', { class: 'btn', href: plink('edit', rid) }, '✎ Edit (new revision)'));
+    const room = { B01: { topic: 'plot' }, B03: { topic: 'plot' }, B11: { topic: 'chapter' }, A01: { topic: 'character', record_id: rid } }[op.id];
+    if (room && cur.record_kind === 'OUTPUT') row.appendChild(WR.roomButton(wrc(), room));  // 🗳 the writers' room on this decision
   }
   if (S.opsById[op.id]) {
     const rBtn = h('button', { type: 'button' }, 'Read (audited)');
@@ -2790,6 +2820,104 @@ function choiceSelect(id, choices, current, noneLabel, what) {
   return sel;
 }
 
+/* ======================================================================= ✍ Write alongside me (alongside.py)
+ * In the chapter editor: highlight a passage (or put the cursor) and ask the AI to continue, rewrite, describe more,
+ * expand or tighten it. The answer is a suggestion (before / after, with quick ⚠️ checks); nothing changes until the
+ * author presses ✔ Use this, which saves the chapter (as it is in the boxes, with the suggestion) as a new version. */
+const WA_ACTIONS = [
+  { id: 'continue', label: '✍ Continue from here', tip: 'Writes the next part of the story from the cursor (or after the highlighted words).' },
+  { id: 'rewrite', label: '🔁 Rewrite', tip: 'Says the highlighted passage again, better. Add a note to steer it, e.g. “more tense”.' },
+  { id: 'describe', label: '🎨 Describe more', tip: 'Adds what can be seen, heard, smelled and felt to the highlighted passage.' },
+  { id: 'expand', label: '➕ Expand', tip: 'Makes the highlighted passage longer: more of the moment, no new events.' },
+  { id: 'tighten', label: '✂ Tighten', tip: 'Makes the highlighted passage shorter and sharper.' },
+];
+function alongsideCard({ rid, tIn, bIn, draftKey }) {
+  const note = h('input', { type: 'text', id: 'wa-note', maxlength: '300', placeholder: 'e.g. more tense', 'aria-describedby': 'wa-note-h' });
+  const ai = aiPicker('wa-ai', null);
+  const prog = h('div', { 'aria-live': 'polite' });
+  const out = h('div', { 'aria-live': 'polite', 'data-testid': 'wa-out' });
+  const where = h('p', { class: 'small muted', 'data-testid': 'wa-where' }, 'Highlight a passage in the chapter text above, or put the cursor where the new text should go.');
+  // The chapter as it is saved ("# Title\n\nText"), and the highlighted part as positions in it.
+  const current = () => {
+    const t = tIn.value.trim(); const body = bIn.value.replace(/\s+$/, '');
+    const pre = t ? `# ${t}\n\n`.length : 0;
+    const clamp = n => Math.min(Math.max(0, n), body.length);
+    return { text: joinChapter(tIn.value, bIn.value), start: pre + clamp(bIn.selectionStart), end: pre + clamp(bIn.selectionEnd) };
+  };
+  const showWhere = () => {
+    const n = Math.abs(bIn.selectionEnd - bIn.selectionStart);
+    where.textContent = n ? `Highlighted: ${bIn.value.slice(bIn.selectionStart, bIn.selectionEnd).trim().split(/\s+/).filter(Boolean).length} word(s).`
+      : 'No words highlighted: only ✍ Continue from here works with just the cursor. Highlight a passage for the others.';
+  };
+  ['select', 'keyup', 'mouseup'].forEach(ev => bIn.addEventListener(ev, showWhere));
+  let last = null;
+  const ask = async (action, again) => {
+    clear(out);
+    const req = again && last ? last.req : Object.assign({ record_id: rid, action, note: note.value.trim() || undefined, slot_id: ai.value() || undefined }, current());
+    const def = WA_ACTIONS.find(a => a.id === req.action);
+    if (req.action !== 'continue' && !req.text.slice(req.start, req.end).trim()) {
+      out.appendChild(stateBox('fix', 'Highlight the passage first', h('p', null, `${def.label} works on the words you highlight in the chapter text. Select them with the mouse (or Shift + arrow keys), then press it again. Only ✍ Continue from here works with just the cursor.`)));
+      bIn.focus(); return;
+    }
+    const btns = card.querySelectorAll('.wa-actions button'); btns.forEach(b => { b.disabled = true; });
+    const job = await runAiJob('/review/alongside', req, prog, `${def.label}: the AI is writing`);
+    btns.forEach(b => { b.disabled = false; });
+    if (!job) return;
+    const res = (job.results || [])[0];
+    if (!res) return;
+    last = { req, res, job };
+    out.appendChild(suggestionView(res, job));
+  };
+  const suggestionView = (res, job) => {
+    const msg = h('div', { 'aria-live': 'polite' });
+    const after = h('div', { class: 'wa-text', 'data-testid': 'wa-after' }, (res.diff || []).map(d => d.op === 'add' ? h('ins', null, d.text) : d.op === 'del' ? h('del', null, d.text) : d.text));
+    const isCont = res.action === 'continue';
+    const use = h('button', { type: 'button', class: 'primary', 'data-testid': 'wa-use' }, '✔ Use this');
+    const sec = h('section', { class: 'wa-suggest', 'data-testid': 'wa-suggestion', 'aria-label': 'The AI’s suggestion' },
+      h('h3', null, `${res.action_label} — a suggestion by ${res.slot_label || job.slot_label || 'the AI'}`),
+      h('p', { class: 'small muted' }, 'Nothing in your chapter has changed yet. ✔ Use this saves the chapter as it is in the boxes above, with this suggestion in it, as a new version for you to approve.'),
+      (res.notes || []).length ? h('div', { class: 'words-warn', role: 'note', 'data-testid': 'wa-notes' },
+        h('strong', null, 'Akọwe’s quick checks:'), h('ul', { class: 'small' }, res.notes.map(n => h('li', null, '⚠️ ', n.message)))) : null,
+      h('div', { class: 'wa-cols' },
+        h('div', { class: 'wa-col' }, h('h4', null, isCont ? 'It goes after' : 'Your text'),
+          h('div', { class: 'wa-text', 'data-testid': 'wa-before' }, isCont ? `…${clipWords(String(res.anchor || '').trim(), 60)}` : res.passage)),
+        h('div', { class: 'wa-col' }, h('h4', null, isCont ? 'New text' : 'Suggestion (changes marked)'), after)),
+      res.why ? h('p', { class: 'small muted' }, `The AI says: ${res.why}`) : null,
+      h('div', { class: 'row' }, use,
+        h('button', { type: 'button', 'data-testid': 'wa-again', onclick: () => ask(res.action, true) }, '🔁 Try again'),
+        h('button', { type: 'button', 'data-testid': 'wa-discard', onclick: () => { clear(out); last = null; bIn.focus(); } }, '✖ Discard')),
+      msg);
+    use.addEventListener('click', async () => {
+      use.disabled = true; clear(msg).appendChild(loadingState('Saving the new version…'));
+      const c = current();
+      try {
+        const r = await api('POST', bpath('/review/alongside/use'), { body: { record_id: rid, version: res.version, action: res.action,
+          suggestion: res.suggestion, start: res.start, end: res.end, passage: res.passage, anchor: res.anchor, text: c.text, job_id: job.job_id } });
+        removeKey(draftKey);
+        S.details[rid] = null;
+        try { await refreshRecords(); } catch { /* best effort */ }
+        toast(r.message || `Saved as version ${r.version}`, 6000);
+        go(plink('write', rid, 'edit'));
+      } catch (e) {
+        clear(msg).appendChild(problemBox(toProblem(e, { book: S.project.name, step: 'Write alongside me' }), {}));
+        use.disabled = false;
+      }
+    });
+    return sec;
+  };
+  const card = h('section', { class: 'card wa-card', 'aria-labelledby': 'wa-h', 'data-testid': 'alongside' },
+    h('h2', { id: 'wa-h' }, '✍ Write alongside me'),
+    h('p', { class: 'small' }, 'Highlight a passage in the chapter text (or put the cursor where new text should go), then pick what the AI should do. It sees the text around it, the chapter’s plan, the characters’ voices, the details already fixed in the book and your rules. You get a suggestion to use or throw away.'),
+    where,
+    h('div', { class: 'row wa-actions' }, WA_ACTIONS.map(a => h('button', { type: 'button', 'data-wa': a.id, title: a.tip, onclick: () => ask(a.id, false) }, a.label))),
+    h('div', { class: 'grid-2' },
+      h('div', { class: 'field' }, h('label', { for: note.id }, 'A note for the AI (optional)'), note,
+        h('span', { class: 'hint', id: 'wa-note-h' }, 'For example: more tense, quieter, funnier, shorter sentences.')),
+      h('div', null, ai.field, h('p', { class: 'hint' }, 'Auto asks the AI that wrote this chapter first.'))),
+    prog, out);
+  return card;
+}
+
 async function viewWrite(main, rid, mode) {
   const d = await recordDetail(rid, true);
   const latest = d.versions[d.versions.length - 1];
@@ -2866,7 +2994,9 @@ async function viewWrite(main, rid, mode) {
       card.appendChild(ol);
     }
     card.appendChild(h('div', { class: 'form-actions' }, approveBtn(),
-      h('button', { type: 'button', onclick: () => editor() }, '✏️ Change it'), back()));
+      h('button', { type: 'button', onclick: () => editor() }, '✏️ Change it'),
+      isChapter ? h('button', { type: 'button', 'data-testid': 'wa-open', title: 'Opens the chapter text: highlight a passage and the AI continues, rewrites, describes, expands or tightens it.', onclick: () => editor() }, '✍ Write alongside me') : null,
+      back()));
   };
 
   const draftKey = `bf:simple:${S.pid}:${S.branch}:${rid}`;
@@ -2899,6 +3029,7 @@ async function viewWrite(main, rid, mode) {
         h('div', { class: 'field' }, h('label', { for: bIn.id }, 'The chapter text'), bIn, h('span', { class: 'hint', id: 'sd-text-h' }, 'Leave an empty line between paragraphs.')));
       collect = () => ({ v: { title: tIn.value, body: bIn.value }, data: Object.assign({}, latest.data, { text: joinChapter(tIn.value, bIn.value) }),
         empty: !bIn.value.trim() ? bIn : null });
+      card.appendChild(alongsideCard({ rid, tIn, bIn, draftKey }));  // ✍ Write alongside me
       bIn.focus();
     } else {
       const rows = [];
@@ -5363,7 +5494,8 @@ async function viewBook(main) {
     h('a', { class: 'btn big bible-cta', href: plink('bible'), 'data-testid': 'home-bible', title: 'Everything about your book in one place: characters, places, world, plot and chapters' }, '📖 Book Bible'),
     h('button', { type: 'button', onclick: () => openProfileDialog(() => drawBook()) }, '📝 Book profile'),
     h('a', { class: 'btn', href: plink('journal') }, '📜 Journal'),
-    h('a', { class: 'btn', href: plink('grid'), 'data-testid': 'bk-grid' }, '🗂 Scene grid'))));
+    h('a', { class: 'btn', href: plink('grid'), 'data-testid': 'bk-grid' }, '🗂 Scene grid'),
+    WR.roomButton(wrc()))));  // 🗳 the three-AI writers' room: a twist, a chapter, a character or your own question
   main.appendChild(bookSaveCard());
   const holder = h('div', null, loadingState('Checking where your book is…'));
   main.appendChild(holder);
@@ -5602,6 +5734,7 @@ function renderBook(holder, book, redraw) {
       acts.appendChild(h('button', { type: 'button', class: 'small', onclick: () => run(() => post('create', { op: s.op, manual: true }), 'Preparing the form…', s.id) }, '✍️ Write it myself'));
       acts.appendChild(h('a', { class: 'btn small tech', href: plink('op', s.op) }, `Open ${s.op} (all fields)`));
     }
+    if (s.id === 'outline' && s.story_shape) li.appendChild(shapeBox(s.story_shape, post, run));
     if (s.id === 'outline' && s.state === 'done') {
       const o = S.records.find(r => r.module_id === 'B11' && r.approved_version);
       if (o) acts.appendChild(h('a', { class: 'btn small', href: plink('write', o.record_id) }, '📖 Read or change the outline'));
@@ -6647,7 +6780,7 @@ async function viewScenes(main, cid) {
   main.appendChild(h('div', { class: 'page-head' }, h('div', null,
     crumbs(['My books', '#/'], [S.project.name, plink('book')], `${label}: scene cards`),
     h('h1', null, `🎬 Scene cards — ${label}`)),
-  h('div', { class: 'row' }, h('a', { class: 'btn small', href: plink('pictures'), 'data-testid': 'scenes-illustrate', title: 'Make a picture of this chapter or one of its scenes (🖼 Pictures)' }, '🖼 Illustrate'), infoTip('Scene cards', h('p', null, 'Before a chapter is written, its scenes are planned: for each scene the place and time, who is there, what each one wants (and hides), an obstacle from the book’s world, what changes and what stays unsaid.'),
+  h('div', { class: 'row' }, WR.roomButton(wrc(), { topic: 'chapter', chapter_id: cid }, { small: true }), h('a', { class: 'btn small', href: plink('pictures'), 'data-testid': 'scenes-illustrate', title: 'Make a picture of this chapter or one of its scenes (🖼 Pictures)' }, '🖼 Illustrate'), infoTip('Scene cards', h('p', null, 'Before a chapter is written, its scenes are planned: for each scene the place and time, who is there, what each one wants (and hides), an obstacle from the book’s world, what changes and what stays unsaid.'),
     h('p', null, 'The chapter outline stays the plan of the whole chapter; scene cards refine it. The writer follows them and the editor checks the chapter against them.')))));
   main.appendChild(h('p', { class: 'notice small' }, h('strong', null, 'The outline says: '), plainText(ch.objective || ch.summary || '')));
   const msg = h('div', { 'aria-live': 'polite' });
@@ -6830,6 +6963,37 @@ function characterModeField(cur, prefix) {
   show();
   return { el: h('div', { class: 'field' }, tipLabel(id, info.label, `${info.help} ${info.options.map(o => `${o.label}: ${o.about}`).join(' ')}`), s, about), get: () => s.value };
 }
+/** 📐 Story shape (story_shape.py): the shape of the story — None (the AI decides, default), Three acts, Save the Cat,
+ * Hero's Journey, Seven-point. Stored with the ending and style choices (choices.shape). */
+function storyShapeInfo() { return (CH.info && CH.info.story_shape) || null; }
+function storyShapeWord(v) {
+  const info = storyShapeInfo();
+  const o = info && info.options.find(x => x.value === (v || ''));
+  return o ? o.label : (v || 'None — let the AI decide');
+}
+function storyShapeField(cur, prefix) {
+  const info = storyShapeInfo();
+  if (!info) return { el: null, get: () => cur || '' };
+  const id = `${prefix}-ch-shape`;
+  const s = h('select', { id, 'data-choice': 'shape', 'data-testid': `${prefix}-story-shape` },
+    info.options.map(o => h('option', { value: o.value, selected: (cur || '') === o.value }, o.label)));
+  const about = h('p', { class: 'small muted', 'data-testid': `${prefix}-story-shape-about` });
+  const show = () => {
+    const o = info.options.find(x => x.value === s.value);
+    about.textContent = o ? `${o.about}${o.beats && o.beats.length ? ` The beats: ${o.beats.map(b => b.name).join(' → ')}.` : ''}` : '';
+  };
+  s.addEventListener('change', show);
+  show();
+  return { el: h('div', { class: 'field' }, tipLabel(id, info.label, info.help), s, about), get: () => s.value };
+}
+/** The beats of the story shape on the chapters, as a strip ("Ch 22 · Dark night of the soul"). */
+function storyShapeStrip(sh, testid) {
+  if (!sh || !(sh.beats || []).length) return null;
+  return h('ol', { class: 'shape-strip', 'data-testid': testid || 'story-shape-strip', 'aria-label': `Story shape: ${sh.label}` },
+    sh.beats.map(b => h('li', { class: b.landed === true ? 'is-ok' : b.landed === false ? 'is-miss' : null, 'data-beat': b.id, title: `${b.what}${b.how ? ` In this book: ${b.how}` : ''}` },
+      h('b', null, b.number ? `Ch ${b.number}` : 'Ch ?'), ' · ', b.name,
+      b.landed === true ? h('span', { class: 'shape-ok', 'aria-label': 'on the page' }, ' ✔') : b.landed === false ? h('span', { class: 'shape-miss', 'aria-label': 'not on the page yet' }, ' ⚠') : null)));
+}
 function choicesSummary(ch) {
   ch = ch || {};
   const info = CH.info;
@@ -6837,6 +7001,7 @@ function choicesSummary(ch) {
   for (const c of (info && info.choices) || []) if (ch[c.key]) out.push(`${c.label}: ${choiceWord(c.key, ch[c.key])}`);
   if (!info) for (const [k, v] of Object.entries(ch)) if (typeof v === 'string') out.push(`${k}: ${v}`);
   if (ch.characters) out.push(`${(characterModeInfo() || {}).label || 'How the story treats the characters'}: ${characterModeWord(ch.characters)}`);
+  if (ch.shape) out.push(`Story shape: ${storyShapeWord(ch.shape)}`);
   if (ch.matrix && Object.keys(ch.matrix).length) out.push(`Ending options changed: ${Object.entries(ch.matrix).map(([r, v]) => `${r.replace(/_/g, ' ')} ${v}`).join(', ')}`);
   return out;
 }
@@ -6855,6 +7020,7 @@ function choicesFields(cur, prefix) {
     return h('div', { class: 'field' }, tipLabel(id, c.label, `${c.help} ${c.options.map(o => `${o.label}: ${o.about}.`).join(' ')}`), s);
   };
   const cm = characterModeField(cur.characters, prefix);
+  const shp = storyShapeField(cur.shape, prefix);
   const main = info.choices.slice(0, 3).map(field);
   const style = info.choices.slice(3).map(field);
   const mx = {};
@@ -6874,6 +7040,8 @@ function choicesFields(cur, prefix) {
     if (Object.keys(m).length) out.matrix = m;
     const c = cm.get();
     if (c && (c !== (characterModeInfo() || {}).default || cur.characters)) out.characters = c;
+    const sv = shp.get();
+    if (sv) out.shape = sv;
     return out;
   };
   const showPreview = () => {
@@ -6884,6 +7052,7 @@ function choicesFields(cur, prefix) {
   const el = h('fieldset', { class: 'field choices-box', 'data-testid': `${prefix}-choices` },
     h('legend', null, '🎚️ Ending and style (optional)'),
     cm.el,
+    shp.el,
     h('p', { class: 'small muted' }, 'All optional — “Let the AI choose” leaves it to the story. The AI follows what you choose when it plans and writes, and the editor checks the ending against it.'),
     h('div', { class: 'grid-3' }, main),
     h('details', { class: 'style-knobs' }, h('summary', null, 'Style: dialogue, pace, humor'), h('div', { class: 'grid-3' }, style)),
@@ -7787,6 +7956,7 @@ async function renderMakeSetup() {
   const cf = choicesFields({}, 'mb');
   const s7 = await S7C.makeSetupExtras(s7c());  // P23 / P25 (Section 7c)
   const fb = fillBibleSwitch('mb');  // 📖 Fill the whole Book Bible before writing (whole_bible.py), off by default
+  const wr = WR.makeSetupSwitch(s7c());  // 🗳 Use the writers' room for the big twists (writers_room.py), off by default
   fields.length = lengthBox.querySelector('input');
   const startAll = h('button', { type: 'button', class: 'primary big mab-go', 'data-testid': 'mb-start-auto' }, '⚡ Start — let the AI choose everything');
   const startSet = h('button', { type: 'submit', class: 'big', 'data-testid': 'mb-start' }, '⚡ Start with these settings');
@@ -7799,7 +7969,7 @@ async function renderMakeSetup() {
         h('div', { class: 'field' }, h('label', { for: 'mb-genre' }, 'Genre'), genre, h('datalist', { id: 'mb-genres' }, GENRES.map(g => h('option', { value: g }))), h('span', { class: 'hint' }, 'Empty = the AI chooses.')),
         h('div', { class: 'field' }, h('label', { for: 'mb-slot' }, 'Which AI'), slot, h('span', { class: 'hint' }, 'Automatic uses whichever AI is ready.'))),
       lengthBox,
-      h('div', { class: 'field' }, h('label', { for: 'mb-idea' }, 'Your idea (optional)'), idea), cf.el, pipe.el, s7.el, fb.el),
+      h('div', { class: 'field' }, h('label', { for: 'mb-idea' }, 'Your idea (optional)'), idea), cf.el, pipe.el, s7.el, fb.el, wr.el),
     err, h('div', { class: 'form-actions' }, startAll, startSet));
   const est = estimateBox(gridUI(), () => {  // ⏱ P28: AI answers and minutes before the run starts
     const l = form.querySelector('input[name="mb-len"]:checked'); const pl = pipe.get();
@@ -7826,6 +7996,7 @@ async function renderMakeSetup() {
     }
     s7.apply(body);  // P23 / P25 (Section 7c): beta reader and "write in my style"
     fb.apply(body);  // 📖 the whole Book Bible before chapter one (only when switched on)
+    wr.apply(body);  // 🗳 the writers' room for the big twists (only when switched on)
     startAll.disabled = startSet.disabled = true;
     err.appendChild(loadingState('Checking your AIs…'));
     if (!(await withAiCheck(body, 'the book'))) { clear(err); startAll.disabled = startSet.disabled = false; return; }
@@ -8390,6 +8561,10 @@ function s7c() {
   return { h, api, bpath, plink, link, clear, crumbs, toast, announce, problemBox, toProblem, stateBox, loadingState,
     fmtTime, pollQualityJob, infoTip, hazard, S };
 }
+/** The helpers writers-room.js (🗳 the writers' room) uses; a used pitch redraws Book home when it is open. */
+function wrc() {
+  return Object.assign(s7c(), { modal, onChanged: () => { S.details = {}; if (S.bookRedraw) S.bookRedraw(); } });
+}
 async function viewReport(main) {
   const title = profileOf().title || S.project.name;
   main.appendChild(h('div', { class: 'page-head' }, h('div', null,
@@ -8445,7 +8620,7 @@ async function viewReport(main) {
     holder.appendChild(h('div', { class: 'rp-progress' }));
     if (ov.job) { const prog = holder.querySelector('.rp-progress'); pollQualityJob(bpath(`/report/job/${encodeURIComponent(ov.job.id)}`), prog).then(load).catch(() => {}); }
     if (!ov.written) { holder.appendChild(stateBox('empty', 'No chapter is written yet', h('p', null, 'Write the chapters first (🏠 Book home), then make the report.'))); return; }
-    if (!rep) { holder.appendChild(stateBox('empty', 'No report yet', h('p', null, 'Press 📊 Make the report: Akọwe counts and checks the book and asks the AIs that did not write it to read it.'))); holder.appendChild(askBox(null)); return; }
+    if (!rep) { holder.appendChild(stateBox('empty', 'No report yet', h('p', null, 'Press 📊 Make the report: Akọwe counts and checks the book and asks the AIs that did not write it to read it.'))); holder.appendChild(askBox(null)); holder.appendChild(originalityCard(s7c())); return; }
     if (ov.stale) holder.appendChild(h('p', { class: 'words-warn', role: 'note', 'data-testid': 'rp-stale' }, hazard({ code: 'REPORT_STALE' }, { retry: () => run({ ai: true }), retryLabel: '📊 Make a new report' }, { small: true }), ' This report is for an earlier version of the book: a chapter changed since.'));
     for (const w of rep.warnings || []) holder.appendChild(h('p', { class: /⚠️|📖 Sampled/.test(w) ? 'words-warn' : 'small muted', role: 'note', 'data-testid': /^📖 Sampled/.test(w) ? 'rp-sampled' : null }, w));
     if (rep.book_mode === 'digest' && ov.written) {  // H17: a long book was only sampled: offer the full read in parts
@@ -8461,7 +8636,8 @@ async function viewReport(main) {
       h('div', { class: 'rp-kpis' },
         h('div', { class: 'kpi' }, h('strong', null, agg.overall != null ? `${agg.overall}/10` : '–'), h('span', { class: 'small' }, 'overall (median of each dimension, averaged)')),
         h('div', { class: 'kpi' }, h('strong', null, `${agg.reviewers || 0}`), h('span', { class: 'small' }, `AI reviewer(s), ${agg.independent || 0} independent`)),
-        h('div', { class: 'kpi' }, h('strong', null, `${(wd.total || 0).toLocaleString()}`), h('span', { class: 'small' }, `words of about ${(wd.target || 0).toLocaleString()} (${wd.length || ''})`)))));
+        h('div', { class: 'kpi' }, h('strong', null, `${(wd.total || 0).toLocaleString()}`), h('span', { class: 'small' }, `words of about ${(wd.target || 0).toLocaleString()} (${wd.length || ''})`))),
+      (rep.originality || {}).line ? h('p', { class: 'small', 'data-testid': 'rp-originality' }, rep.originality.line, h('span', { class: 'muted' }, ' (details: ✨ Originality check below)')) : null));
     if ((agg.dimensions || []).some(d => d.n)) {
       const t = h('table', { class: 'rp-table', 'data-testid': 'rp-scores' }, h('caption', { class: 'small' }, 'Scores from 1 to 10. Median = the middle score of the reviewers. ⚠️ = they are 3 or more points apart.'),
         h('thead', null, h('tr', null, h('th', null, 'Dimension'), h('th', null, 'Median'), h('th', null, 'Range'), reviews.map(r => h('th', null, r.name, r.independent && !(r.calibration || {}).flagged ? '' : ' ⚠️')))),
@@ -8521,6 +8697,7 @@ async function viewReport(main) {
     if (len) holder.appendChild(len);
     holder.appendChild(askBox(rep));
     holder.appendChild(S7C.betaCard(s7c()));  // 📖 P23 beta reader (Section 7c)
+    holder.appendChild(originalityCard(s7c()));  // ✨ #20 originality and "sounds like AI" check
     if ((ov.reports || []).length > 1) holder.appendChild(h('details', { class: 'card' }, h('summary', null, `Earlier reports (${ov.reports.length - 1})`),
       h('ul', { class: 'small' }, ov.reports.slice(1).map(r => h('li', null, `${fmtTime(r.at)} · overall ${r.overall ?? '–'} · ${r.reviewers || 0} reviewer(s)`)))));
   }

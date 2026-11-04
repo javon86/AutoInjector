@@ -231,6 +231,12 @@ def check(review, job, *, upto: int | None = None, final: bool = True, ai: bool 
     res = {"items": items, "arc": arc, "question": question, "main": pr["main"], "question_text": pr["question"],
            "people": pr["people"], "final": final, "upto": None if final else n, "chapters": n, "ai": used_ai,
            "versions": {c["chapter_id"]: c["version"] for c in chapters}, "at": _now()}
+    try:  # 📐 the beats of the author's story shape: did each one land on the page? (no AI: the planned checks)
+        from . import story_shape  # noqa: PLC0415
+        res["beats"] = [{k: b.get(k) for k in ("id", "name", "number", "chapter_id", "status", "how_checked")}
+                        for b in story_shape.status(bp, upto=None if final else n) if b.get("written")]
+    except Exception:  # noqa: BLE001
+        log.exception("story beats in the ending check")
     res["open"] = open_list(res)
     save(review.store, pid, branch, res)
     return res
@@ -251,6 +257,10 @@ def open_list(res: dict) -> list[dict]:
         if p and p["status"] == "open":
             out.append({"id": key, "kind": key, "fix": p.get("fix"), "fix_chapter": p.get("fix_chapter"),
                         "line": f"{what} is not kept by the ending" + (f" — {p['note']}" if p.get("note") else "")})
+    for b in res.get("beats") or []:  # 📐 a story beat that did not land (fixed by story_shape.fix_beats, not here)
+        if b.get("status") != "on_page":
+            out.append({"id": f"beat:{b['id']}", "kind": "beat", "fix": "", "fix_chapter": b.get("number"),
+                        "line": f"A story beat that did not land: Ch {b.get('number')} · {b.get('name')}"})
     return out
 
 
@@ -303,6 +313,10 @@ def summary_line(res: dict) -> str:
         p = res.get(key)
         if p:
             bits.append(f"{what}: {'kept' if p['status'] == 'kept' else p['status']}")
+    beats = res.get("beats") or []
+    if beats:
+        bits.append(f"story beats on the page: {sum(1 for b in beats if b.get('status') == 'on_page')} of "
+                    f"{len(beats)}")
     return "; ".join(bits)
 
 

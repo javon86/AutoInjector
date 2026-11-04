@@ -907,11 +907,16 @@ class AutoBookService(_Runner):
             if not isinstance(pics, bool):
                 raise AkoweError("INVALID_INPUT", "/pictures", "pictures must be true or false", status="REJECTED")
             out["pictures"] = pics
-        for k in ("beta_reader", "my_style", "fill_bible"):  # P23 / P25 / 📖: optional, off unless asked for
+        for k in ("beta_reader", "my_style", "fill_bible", "writers_room"):  # P23 / P25 / 📖 / 🗳: off unless asked
             v = body.get(k, False)
             if not isinstance(v, bool):
                 raise AkoweError("INVALID_INPUT", f"/{k}", f"{k} must be true or false", status="REJECTED")
             out[k] = v
+        n = body.get("beta_readers", 1)  # 👥 idea #14: how many beta readers (1 = one AI; 2-3 = a panel)
+        if isinstance(n, bool) or not isinstance(n, int) or not 1 <= n <= 3:
+            raise AkoweError("INVALID_INPUT", "/beta_readers", "beta_readers: 1, 2 or 3", status="REJECTED")
+        if n != 1:
+            out["beta_readers"] = n
         # P12: ending and style choices (all optional; empty = let the AI choose)
         out["choices"] = story_choices.clean(body.get("choices"))
         g = body.get("genre")
@@ -1622,7 +1627,7 @@ class AutoBookService(_Runner):
         new_text = str((self.bp(run).rec(rid).get("data") or {}).get("text") or "")
         lost = lost_keeps(old_text, new_text, keep_quotes_of(old_craft, old_text))
         ok, code, why = judge_rewrite(old_craft, new_craft, consistency=cons, checks_ok=checks_ok, keep_lost=lost,
-                                      applied=applied, new_text=new_text)
+                                      applied=applied, new_text=new_text, old_text=old_text)  # ✨ #20
         return ok, code, why, new_craft
 
     def _editor_flag(self, run, st, ed, craft, head, why: str, code: str) -> dict:
@@ -2743,7 +2748,11 @@ class AutoBookService(_Runner):
             else:
                 st["message"] = f"The AI is writing the {label}"
                 self.save(run)
-                ref = self.ai_create(run, bp, op, bp.payload_for(op), label)
+                payload = bp.payload_for(op)
+                if op == "B03" and run.get("room_plot"):  # 🗳 the writers' room's twist (writers_room.py)
+                    from . import writers_room  # noqa: PLC0415
+                    payload["constraints"] = list(payload.get("constraints") or []) + writers_room.plot_constraints(run)
+                ref = self.ai_create(run, bp, op, payload, label)
                 rid = ref["record_id"]
                 self._made(run, ref)
                 self.event(run, "ai", f"The AI wrote the {label}", record_id=rid, module_id=op)
@@ -2933,6 +2942,8 @@ class AutoBookService(_Runner):
         self._planning(run, st, "B01", "premise")
 
     def _s_plot(self, run, st):
+        from . import writers_room  # noqa: PLC0415 - 🗳 optional (run setting writers_room): a room on the twist
+        writers_room.run_plot(self, run, st, control=(RunPaused, RunCancelled))
         self._planning(run, st, "B03", "main plot")
 
     def _s_outline(self, run, st):
@@ -2952,6 +2963,37 @@ class AutoBookService(_Runner):
         self._update_rules(run, st)
         n = len(self.bp(run).outline_chapters(self.bp(run).outline()))
         st["message"] = f"{n} chapter(s) planned and approved"
+        self._place_beats(run, st)
+
+    def _place_beats(self, run, st):
+        """📐 story_shape.py: the planner places each beat of the author's story shape on a chapter of the approved
+        outline (one AI call, checked by Akọwe; a beat it leaves out or misplaces is placed by its position). Once per
+        outline revision; never holds up the book."""
+        from . import story_shape  # noqa: PLC0415
+        bp = self.bp(run)
+        outline = bp.outline()
+        if not outline or not story_shape.of_store(self.store, run["project_id"]):
+            return
+        done = run.setdefault("beats_placed", {})
+        key = f"{outline['record_id']}:{outline['version']}"
+        if done.get(key):
+            return
+        try:
+            m = story_shape.place(self._review, self._sub_job(run, "story_shape", outline["record_id"],
+                                                              run["settings"].get("slot_id")), bp, outline)
+        except AkoweError as exc:
+            if getattr(exc, "control", False):
+                raise
+            self.event(run, "note", f"⚠️ The story shape could not be placed on the chapters ({exc.code}); each beat "
+                       "is placed by its position", step="outline", code="SHAPE_FAILED")
+            m = story_shape.mapping(self.store, run["project_id"], run["branch_id"], outline)
+        done[key] = True
+        if m:
+            st["shape"] = [story_shape.strip_label(b) for b in m["beats"]][:20]
+            self.event(run, "note", f"📐 {m['label']}: " + "; ".join(story_shape.strip_label(b) for b in m["beats"])
+                       + (f" (⚠️ {len(m['problems'])} placed by their position)" if m.get("problems") else ""),
+                       step="outline", code="SHAPE_PLACED")
+        self.save(run)
 
     def _repin_plan(self, run, st):
         """An approved character the approved main plot does not pin (made after the plot: the main character the
@@ -3035,6 +3077,9 @@ class AutoBookService(_Runner):
                 if latest and latest["lifecycle"] in REVIEWABLE and not latest.get("stale"):
                     rid = latest["record_id"]
                 else:
+                    from . import writers_room  # noqa: PLC0415 - 🗳 optional: a room at the midpoint and the climax
+                    writers_room.before_chapter(self, run, st, outline, cid, idx + 1, len(chapters),
+                                                control=(RunPaused, RunCancelled))
                     try:
                         if self._on(run, "scenes"):
                             self._scene_cards(run, st, cid, item)
@@ -3160,6 +3205,8 @@ class AutoBookService(_Runner):
                 continuity.after_chapter(self, run, cid, rec, None)  # track the new ending again
                 continuity.note_written(self.store, pid, branch, cid, rec, number)
         try:
+            from . import story_shape  # noqa: PLC0415 - 📐 a story beat that did not land: one targeted fix
+            story_shape.fix_beats(self, run, st, outline, chapters, where="ending")
             if mem.get("fixing"):  # resumed while a fixed ending waited for its review
                 f = mem["fixing"]
                 finish_draft(f["record_id"], f["chapter_id"], f["number"])
@@ -3383,6 +3430,10 @@ class AutoBookService(_Runner):
                             "on the report page later)"
             self.event(run, "note", st["message"], step="report", code="REPORT_NOT_INDEPENDENT")
         self.event(run, "report", f"Book report {rep['id']}: {st['message']}", step="report")
+        og = (rep.get("originality") or {}).get("line")  # ✨ #20: one line, never blocks the book
+        if og:
+            run["report"]["originality"] = og
+            self.event(run, "report", og + " (see ✨ Originality check on the 📊 report page)", step="report")
 
     # ------------------------------------------------------------------ Section 7c (P23 beta reader, P25 style)
     def _s_bible(self, run, st):

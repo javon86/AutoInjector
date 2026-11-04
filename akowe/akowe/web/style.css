@@ -1155,6 +1155,14 @@ ul.samples q { font-style: italic; }
 .s7-dl dd { margin: 0; }
 .s7-books { list-style: none; padding: 0; }
 .s7-make .check-row { margin: 4px 0; }
+/* 👥 idea #14 panel of beta readers */
+.s7-panel-setup { display: grid; gap: 6px; margin: 6px 0 10px; }
+.s7-reader { border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; }
+.s7-reader textarea { width: 100%; box-sizing: border-box; }
+.s7-heat td, .s7-heat th { padding: 3px 6px; }
+.s7-heat-1 { background: var(--warn-soft); }
+.s7-heat-2 { background: var(--bad-soft); }
+.s7-heat-3 { background: var(--bad); color: var(--bad-soft); font-weight: 600; }
 
 /* ======================================================================= 🗂 B5 Character Forge (forge.js)
    The dossier's own dark look (the author's Moki Vey sample: near-black, gold names, teal letters). Everything is
@@ -1702,3 +1710,61 @@ html[data-mode="simple"] .topbar .health-btn.adv-only[data-state="problem"] { di
 .needs-box .nl-code { font-family: ui-monospace, monospace; font-weight: 600; cursor: help; text-decoration: underline dotted; }
 .needs-box .nl-code:focus { outline: 2px solid var(--focus, #2a6df4); outline-offset: 1px; }
 .needs-box details ul ul { margin: 2px 0 6px 1.2em; }
+
+/* 📐 Story shape: the beats of the chosen shape on the chapters (plan page) */
+.shape-box { margin: .5rem 0; padding: .5rem .75rem; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+.shape-strip { list-style: none; margin: .4rem 0; padding: 0; display: flex; flex-wrap: wrap; gap: .35rem; }
+.shape-strip li { padding: .15rem .55rem; border-radius: 999px; background: var(--info-soft); color: var(--text); font-size: .85rem; overflow-wrap: anywhere; }
+.shape-strip li.is-ok { background: var(--ok-soft); }
+.shape-strip li.is-miss { background: var(--bad-soft); }
+.shape-box .row select { max-width: 100%; }
+/* ✍ Write alongside me (app.js alongsideCard) */
+.wa-card { margin-top: 14px; }
+.wa-actions { flex-wrap: wrap; gap: 6px; }
+.wa-suggest { margin-top: 12px; padding: 10px 12px; border: 1px solid var(--border, #d0d5dd); border-radius: 8px; background: var(--surface-2); }
+.wa-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; margin: 8px 0; }
+.wa-col h4 { margin: 0 0 4px; font-size: .9em; color: var(--text-muted); }
+.wa-text { font-family: var(--font-prose); white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; }
+.wa-text ins { background: var(--ok-soft); text-decoration: none; }
+.wa-text del { background: var(--bad-soft); text-decoration-color: var(--bad); }
+@media (max-width: 700px) { .wa-cols { grid-template-columns: minmax(0, 1fr); } }
+/* ======================================================================= 🚀 launch kit (web/launch.js) */
+.lk { display: grid; gap: 16px; max-width: 1000px; }
+.lk h2 { font-size: 1.15rem; margin: 0 0 6px; }
+.lk-field, .lk-top { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.lk-field .row.space { flex-wrap: wrap; gap: 6px; }
+.lk textarea, .lk input[type=text], .lk select { width: 100%; max-width: 100%; box-sizing: border-box; }
+.lk-ed { display: flex; flex-direction: column; gap: 4px; }
+.lk-kw, .lk-cats { margin: 0; padding-left: 1.6em; display: grid; gap: 6px; }
+.lk-kw li { display: flex; gap: 6px; align-items: center; }
+.lk-kw li input { flex: 1 1 auto; min-width: 0; }
+.lk-comp { flex-wrap: wrap; gap: 6px; }
+.lk-comp input { flex: 1 1 180px; width: auto; min-width: 0; }
+.lk-comps, .lk-aplus { display: grid; gap: 8px; }
+.lk-mod { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; margin: 0; }
+.lk-mod-img { display: block; width: 100%; max-width: 485px; height: auto; border-radius: var(--radius); }
+.lk-issues { margin: 4px 0; padding-left: 1.2em; display: grid; gap: 4px; }
+.lk-issue { overflow-wrap: anywhere; }
+.lk-issue.problem { color: var(--warn); }
+.lk-ok { color: var(--ok); }
+.lk-off { color: var(--warn); font-weight: 600; }
+.lk-actions { gap: 8px; flex-wrap: wrap; }
+.lk-sum { margin: 4px 0; }
+/* 📣 Mockups & ads (marketing.js) */
+.mkt { display: grid; gap: 16px; max-width: 1100px; }
+.mkt-top { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); }
+.mkt-card h2, .mkt-group h2 { font-size: 1.15rem; margin: 0 0 6px; }
+.mkt-card input[type=text] { width: 100%; box-sizing: border-box; }
+.mkt-actions { flex-wrap: wrap; gap: 8px; }
+.mkt-bar { width: 100%; }
+.mkt-grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 230px), 1fr)); }
+.mkt-piece { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.mkt-piece h3 { font-size: 1rem; margin: 6px 0 0; }
+.mkt-piece p { margin: 2px 0; overflow-wrap: anywhere; }
+.mkt-fig { width: 100%; max-height: 340px; display: flex; align-items: center; justify-content: center; overflow: hidden; border-radius: var(--radius); background: var(--soft, #f3f1ec); }
+.mkt-fig.checker { background-color: #fff; background-image: linear-gradient(45deg, #e6e6e6 25%, transparent 25%), linear-gradient(-45deg, #e6e6e6 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #e6e6e6 75%), linear-gradient(-45deg, transparent 75%, #e6e6e6 75%); background-size: 16px 16px; background-position: 0 0, 0 8px, 8px -8px, -8px 0; }
+.mkt-fig img, .mkt-fig video { max-width: 100%; max-height: 340px; object-fit: contain; display: block; }
+.mkt-video { background: #000; }
+.mkt-empty { padding: 24px; text-align: center; }
+.mkt-btns { flex-wrap: wrap; gap: 6px; margin-top: auto; }
+.mkt-note { font-size: .82rem; }

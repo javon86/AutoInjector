@@ -209,6 +209,7 @@ class BookFakeAI:
         self.compare_script: list = []           # P14: scripted blind comparisons (dicts or callables(ctx))
         self.terms_script: list = []             # P31: scripted "which trade facts to check" answers
         self.beta_script: list = []              # P23: scripted beta reads (dicts or callables(ctx))
+        self.originality_script: list = []       # ✨ #20: scripted "sounds machine-written" ratings
         # Character entries that break an Akọwe check: name -> kinds, one consumed per proposal of that name
         # ("interval": a fact whose effective_to is not after effective_from (the save is refused); "authority": a
         # home place no pinned A04 declares (VALIDATE refuses it); "schema": a fact missing its fields (the proposal
@@ -230,6 +231,8 @@ class BookFakeAI:
         self.ending_fix = True                   # 🎯 the writer adds an ending finding's suggestion after the passage
         self.plot_obligations: list = []         # 🎯 the main plot's setups (B03 plot_obligations) the ending must keep
         self.needs = None                        # 🧠 a needs list returned with every scene plan (dict or callable(ctx))
+        self.shape_script: list = []             # 📐 scripted beat placements (dicts or callables(ctx)), one per call
+        self.alongside_script: list = []         # ✍ Write alongside me: scripted answers (dicts or callables(ctx))
 
     def fail_next(self, *excs):
         self.failures.extend(excs)
@@ -270,6 +273,24 @@ class BookFakeAI:
     def _answer(self, ctx, props, schema):
         if ctx.get("akowe_task") == "story_details":  # ⏱ story details (essentials / just in time)
             return "details", self._details(ctx)
+        if "placements" in props and "story_shape" in ctx:  # 📐 place the story shape's beats on the chapters
+            with self.lock:
+                scripted = self.shape_script.pop(0) if self.shape_script else None
+            if scripted is not None:
+                return "shape", scripted(ctx) if callable(scripted) else copy.deepcopy(scripted)
+            chs = ctx.get("chapters") or []
+            out = []
+            for b in (ctx["story_shape"] or {}).get("beats") or []:
+                n = int(b.get("around_chapter") or 1)
+                obj = next((c.get("objective") for c in chs if c.get("chapter") == n), "") or ""
+                out.append({"beat": b["beat"], "chapter": n, "how": f"{obj} ({b['name']})"})
+            return "shape", {"placements": out}
+        if ctx.get("akowe_task") == "write_alongside":  # ✍ Write alongside me: one passage
+            with self.lock:
+                scripted = self.alongside_script.pop(0) if self.alongside_script else None
+            if scripted is not None:
+                return "alongside", scripted(ctx) if callable(scripted) else scripted
+            return "alongside", self._alongside(ctx)
         if "arc" in props and "question" in props:  # 🎯 H11 / H12: does the ending keep the book's promises?
             with self.lock:
                 scripted = self.ending_script.pop(0) if self.ending_script else None
@@ -306,6 +327,19 @@ class BookFakeAI:
             if scripted is not None:
                 return "beta", scripted(ctx) if callable(scripted) else copy.deepcopy(scripted)
             return "beta", self._beta(ctx)
+        if "machine_ratings" in props:  # ✨ #20: does it sound machine-written? (a real quote, then an invented one)
+            with self.lock:
+                scripted = self.originality_script.pop(0) if getattr(self, "originality_script", None) else None
+            if scripted is not None:
+                return "originality", scripted(ctx) if callable(scripted) else copy.deepcopy(scripted)
+            out = []
+            for i, p in enumerate(ctx.get("passages") or []):
+                q = next((s for s in self.sentences(str(p.get("text") or "")) if len(s) > 12), "")[:160]
+                out.append({"passage_id": p["id"], "machine_score": 4 if i == 0 else 2,
+                            "reasons": ["stock phrases" if i == 0 else "specific details"],
+                            "quote": q if i == 0 else ("A line that is not in the book at all." if i == 1 else ""),
+                            "rewrite": "Mara counted the boats." if i == 0 else ""})
+            return "originality", {"machine_ratings": out, "summary": "Mostly human, a few stock phrases."}
         if "voice_summary" in props:  # ✒️ P25 (Section 7c): the author's style card
             return "style", self._style(ctx)
         if "scene_text" in props:  # 📏 P15: one scene of a long chapter
@@ -573,16 +607,36 @@ class BookFakeAI:
         n = max(1, len(chs))
         first = str(chs[0].get("text") or chs[0].get("opening") or "") if chs else ""
         q1 = next((s for s in self.sentences(first.split("\n", 1)[-1]) if len(s) > 20), "")[:160]
-        return {"reactions": [{"chapter": 1, "kind": "confused", "quote": q1, "note": "Who wrote the last line?"},
-                              {"chapter": 1, "kind": "hooked", "quote": q1, "note": "I want to know."},
-                              {"chapter": n, "kind": "bored", "quote": "A sentence that is not in the book at all.",
-                               "note": "Dragged."}],
-                "interest": [{"chapter": i + 1, "score": 8 if i == 0 else 5, "would_keep_reading": True}
-                             for i in range(n)],
-                "guesses": [{"guess": "The key opens the lighthouse", "guessed_in_chapter": 1, "quote": q1,
-                             "revealed_in_chapter": n, "came_true": "yes"}],
-                "stop": {"would_finish": True, "chapter": 0, "why": ""},
-                "summary": "A cosy read; I guessed the key early."}
+        who = (ctx.get("reader") or {}).get("who") or "typical"
+        out = {"reactions": [{"chapter": 1, "kind": "confused", "quote": q1, "note": "Who wrote the last line?"},
+                             {"chapter": 1, "kind": "hooked", "quote": q1, "note": "I want to know."},
+                             {"chapter": n, "kind": "bored", "quote": "A sentence that is not in the book at all.",
+                              "note": "Dragged."}],
+               "interest": [{"chapter": i + 1, "score": 8 if i == 0 else 5, "would_keep_reading": True}
+                            for i in range(n)],
+               "guesses": [{"guess": "The key opens the lighthouse", "guessed_in_chapter": 1, "quote": q1,
+                            "revealed_in_chapter": n, "came_true": "yes"}],
+               "stop": {"would_finish": True, "chapter": 0, "why": ""},
+               "overall": {"would_recommend": True, "favourite_character": "Mara", "best_chapter": 1,
+                           "worst_chapter": n, "score": 7, "why": "Cosy and atmospheric."},
+               "summary": "A cosy read; I guessed the key early."}
+        # 👥 idea #14: the panel's other readers — the picky one agrees on chapter 1 (lost, twist guessed) and finds
+        # chapter 2 slow; the casual one gets lost in chapter 1 too, is bored in chapter 2 and would stop there
+        if who == "picky":
+            out["reactions"] = out["reactions"][:1] + [{"chapter": min(2, n), "kind": "bored", "quote": "",
+                                                        "note": "Seen this before."}]
+            out["interest"] = [dict(i, score=3 if i["chapter"] == 2 else 6) for i in out["interest"]]
+            out["overall"] = dict(out["overall"], would_recommend=False, score=4, best_chapter=n, worst_chapter=min(2, n))
+            out["summary"] = "Competent but familiar; I saw the key coming."
+        elif who == "casual":
+            out["reactions"] = out["reactions"][:1]
+            out["guesses"] = []
+            out["interest"] = [dict(i, score=2 if i["chapter"] == 2 else 7,
+                                    would_keep_reading=i["chapter"] != 2) for i in out["interest"]]
+            out["stop"] = {"would_finish": False, "chapter": min(2, n), "why": "Too slow in the middle."}
+            out["overall"] = dict(out["overall"], score=6, worst_chapter=min(2, n))
+            out["summary"] = "Good start, then it slowed down."
+        return out
 
     def _style(self, ctx):
         samples = ctx.get("samples") or []
@@ -797,6 +851,25 @@ class BookFakeAI:
         if mc.get("pov_id"):  # ★ the outline follows the book's main character (as a real AI is told to)
             pov = mc["pov_id"]
         return pov, loc
+
+    @staticmethod
+    def _alongside(ctx):
+        """✍ A deterministic suggestion per action (third person, past tense, like the fake chapters)."""
+        p = str(ctx.get("passage") or "").strip()
+        act = ctx.get("action")
+        if act == "continue":
+            t = "Mara stepped onto the wet boards of the jetty. The lamp behind her hissed, and the fog closed in."
+        elif act == "tighten":
+            t = (p.split(". ")[0].rstrip(".") + ".") if ". " in p else " ".join(p.split()[:max(3, len(p.split()) // 2)])
+        elif act == "describe":
+            t = p + " Salt stung her lips, the planks were cold and slick under her hands, and a gull cried somewhere."
+        elif act == "expand":
+            t = p + " She waited, counting her breaths, while the tide pulled at the pilings below."
+        else:
+            note = str(ctx.get("author_note") or "")
+            t = ("Her heart hammered. " if "tense" in note else "") + p.replace(" and ", ", and then ", 1) + \
+                ("" if "tense" in note else " (said again)")
+        return {"text": t, "why": f"fake {act}"}
 
     @staticmethod
     def _revise(data):

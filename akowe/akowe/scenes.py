@@ -477,6 +477,20 @@ class ScenePlanner:
                 out["peril_and_pace"] = sr
         except Exception:  # noqa: BLE001
             log.exception("could not add the world texture to the scene context")
+        try:  # 📐 the story beat(s) of the author's story shape this chapter must deliver
+            from . import story_shape  # noqa: PLC0415
+            beats = story_shape.scene_note(self.store, pid, branch, outline, chapter_id)
+            if beats:
+                out["story_beats"] = beats
+        except Exception:  # noqa: BLE001
+            log.exception("could not add the story beats to the scene context")
+        try:  # 🗳 the writers' room's decision for this chapter (a ⚡ run's pick; writers_room.py)
+            from . import writers_room  # noqa: PLC0415
+            room = writers_room.chapter_decision(self.store, pid, branch, chapter_id)
+            if room:
+                out["writers_room"] = room
+        except Exception:  # noqa: BLE001
+            log.exception("could not add the writers' room decision to the scene context")
         return out
 
     @staticmethod
@@ -489,6 +503,12 @@ class ScenePlanner:
         if ctx.get("world_texture"):
             extra.append(TEXTURE_PLAN)
         extra += ctx.get("peril_and_pace") or []
+        if ctx.get("story_beats"):
+            from .story_shape import SCENE_RULE  # noqa: PLC0415
+            extra.append(SCENE_RULE)
+        if ctx.get("writers_room"):
+            from .writers_room import PLAN_RULE  # noqa: PLC0415
+            extra.append(PLAN_RULE)
         return base + (" " + " ".join(extra) if extra else "")
 
     # ------------------------------------------------------------------ make / revise (the writer)
@@ -576,9 +596,11 @@ class ScenePlanner:
         job.phase = f"An AI is checking the scene plan of chapter {ctx['chapter']['number']}"
         tok = rv.work.begin(pid, "C02", f"Checking the scenes of chapter {ctx['chapter']['number']}")
         try:
-            raw = self.assist._call_ai(job, op_for_roles="C02", task=self._task(REVIEW_TASK, ctx) if
-                                       ctx.get("peril_and_pace") else REVIEW_TASK, schema=REVIEW_SCHEMA, context=ctx,
-                                       protected=[])
+            raw = self.assist._call_ai(job, op_for_roles="C02", task=(self._task(REVIEW_TASK, ctx) if
+                                       ctx.get("peril_and_pace") else REVIEW_TASK) + (
+                                           " When context.story_beats is given, a scene must deliver each listed "
+                                           "story beat: say so in notes when none does." if ctx.get("story_beats")
+                                           else ""), schema=REVIEW_SCHEMA, context=ctx, protected=[])
         finally:
             rv.work.end(tok)
         job.check()

@@ -37,6 +37,8 @@ Legend: `[ ]` to do · `[~]` in progress · `[x]` done · `[!]` problem (see "Pr
   wizard's duplicate forms are gone (one place each: 🎨 Images, 🎬 Video). Also: ebook cover JPG, map PNG in Word,
   style-card delete fix, motion clips for items/places/magic, new characters from scratch, auto-save + update-or-copy +
   big books opened from a folder, MCP tool servers, book trailers (B2).
+- **✍ Write alongside me (done 2026-11):** highlight a passage in a chapter and the AI continues, rewrites, describes,
+  expands or tightens it; a suggestion with ⚠️ quick checks, used as a new draft version. See "✍ Write alongside me".
 - **Back burner (later, by the user's call):** a first real GPU run of video/trailers; the audiobook export (P29).
 - **Still to try for real:** everything above has only been tested with stand-in AIs — the first real
   run on the user's PC is the real test (see "Problems to come back to").
@@ -635,6 +637,213 @@ the browser: `tests/campaign/ui/test_ui_continuity.py`):
 - *Not done:* group (G), world (W, except W55) and book (B/S/H) sections are accepted and shown but add nothing beyond
   the always-on parts; the mismatch check covers eye and hair colour only (the AI checks the rest); the passage search
   is word overlap (English).
+
+## 📐 Story structure templates ("story shape", 2026-11) — done
+
+- **The choice** (`akowe/story_shape.py`): None — let the AI decide (default), Three acts, Save the Cat (15 beats),
+  Hero's Journey (12 stages), Seven-point. Each template is data: beat id, plain name, plain description, where it
+  usually falls (% of the book). Stored with the ending and style choices (`choices.shape`), so it is picked on ⚡ Make
+  a book, the 🚀 wizard and the profile; changed on the plan page (outline step, `set_story_shape`) until a chapter is
+  written.
+- **Outline:** the B11 planner gets `story_shape` (each beat with its `around_chapter`) and a rule; in a ⚡ run, once
+  the outline is approved, one AI call places each beat on a chapter with one sentence of how (`place`). `validate`
+  places a beat left out, placed twice, on an unknown chapter, before an earlier beat or far from where it belongs by
+  its position instead. Stored per outline revision (`story_shape:<pid>:<branch>`); without a stored placement (outline
+  made outside a run, shape changed) the beats are placed by position.
+- **Shown** as a strip ("Ch 22 · Dark night of the soul", ✔ / ⚠ once written) on the plan page and the Book Bible's
+  story-plan page (S2 Plot line).
+- **Checked with the existing machinery:** scene planner + scene checker and the writer brief (`story_beats`, "this
+  chapter must deliver the story beat …"), the chapter reviewer (`story_beats` + note), the planned-to-page check
+  (kind `story_beat`, required, top priority → its one targeted fix), the checkpoints and the final ending check
+  (report + ONE targeted fix via `fix_beats` when the planned-to-page check had not already tried one; the author's own
+  text is never changed). ✍ Write all chapters gets the beats in the scene cards and the writer brief (placed by
+  position). Books without a shape: unchanged.
+- *Not done:* the AI placement runs only inside a ⚡ run (outside, beats are placed by position); a beat's
+  "landed" check is the planned-to-page check (word reading + the independent AI), not a structural analysis.
+
+## ✍ Write alongside me (2026-11, the author's request) — done
+
+- **What the author does** (chapter page → ✏️ Change it, or ✍ Write alongside me): highlight a passage in the chapter
+  text (or put the cursor) and press ✍ Continue from here · 🔁 Rewrite (with an optional note, e.g. "more tense") ·
+  🎨 Describe more · ➕ Expand · ✂ Tighten. "Which AI": Auto asks the chapter's writer first (a soft preference; another
+  working AI answers when it is not working), or a chosen AI-1/2/3. Without a highlighted passage only ✍ Continue works;
+  the others say in plain words "Highlight the passage first".
+- **The focused brief** (`akowe/alongside.py brief`): the passage, ≤ 3 000 characters before and ≤ 1 500 after it, the
+  chapter's place in the plan (`editor.chapter_info`), and the passage-relevant parts of `chapter_brief.build` (scene
+  cards, the 🧠 needs list and its `needed_details` / `earlier_moments`, voice cards of the characters named around the
+  passage plus the narrator, 🔒 `fixed_details`, running notes / tracked state, story rules, the author's choices and
+  style), the book profile with the promises (point of view, tense, content limits; `book_promises.instruction`) and
+  the protected facts. Whole-chapter parts (length, story so far, must-show, the scene-by-scene rule) are left out.
+- **The AI call** is a review job (`ReviewService._start` → `AssistService._call_ai`): busy is waited for, a site error
+  moves to another working AI, a timeout stops with a plain error and 🔁 Try again (never retried by itself).
+  Routes: POST `…/review/alongside` {record_id, action, text?, start, end, note?, slot_id?} → 202 job (poll
+  `…/review/ai/<job>`); the answer `{text, why}` is cleaned (fences, quotes, repeated text) and is only a suggestion.
+- **The suggestion** shows the author's text next to the new one (word-level changes marked, `alongside.diff`) with
+  ✔ Use this / 🔁 Try again / ✖ Discard, plus Akọwe's quick checks ⚠️ (`alongside.checks`, no AI): a slip into the
+  first person or the present tense (or out of the book's first person / present tense), and a locked detail said
+  otherwise (`story_details.contradictions`, `needs_list.mismatches`: "Mara: the suggestion says “blue eyes”…").
+- **✔ Use this** (POST `…/review/alongside/use`): the chapter as it is in the editor, with the suggestion in place (the
+  passage is found again if the author typed elsewhere meanwhile; the words before the cursor for ✍ Continue), saved
+  as a NEW DRAFT through the normal UPDATE path — the same as a hand edit: an approved chapter stays in the book until
+  the new version is approved, and approving it runs the H5 hand-edit follow-through (`continuity.check_edits`: later
+  chapters flagged "check chapter N", running notes read again). Noted in `ai_fixes` (made by "Written alongside you
+  by …"); activity event `alongside.used` (numbers only). A suggestion for an older version is refused (VERSION_CONFLICT).
+- **Tests:** `tests/test_alongside.py` (13: request checks, brief, joining / diff, job + use + H5 flags, busy, site
+  error, timeout, refusals, ⚠️ checks) and `tests/campaign/ui/test_ui_alongside.py` (2: the whole flow in the browser,
+  and a phone-width screen). The fake AI answers `akowe_task: write_alongside` (`autobook_fake._alongside`,
+  `alongside_script`).
+- *Not done:* only in the chapter editor (the reading view's ✍ button opens it); the quick checks cover point of view,
+  tense and the colour / weapon / hand locked details only (content limits are left to the reviewer when the new
+  version is reviewed); the suggestion is not streamed (it arrives whole).
+
+## 🗳 Three-AI writers' room (2026-11, idea #13) — done
+
+- **Where:** a 🗳 Writers' room button on 🏠 Book home (choose: a twist in the main plot, how a chapter ends or what
+  goes wrong, a character's secret or arc turn, or your own question), on a chapter's 🎬 Scene cards page (that
+  chapter) and on the record page of the premise / main plot / outline / a character (`web/writers-room.js`).
+- **Brief** (`writers_room.brief`): the book profile with content limits, themes, question, POV/tense and style choices
+  (`book_profile_brief`), the character mode, the story rules (`story_rules.plan_brief`), premise, main plot, chapter
+  list and cast with sheets; for a chapter its plan, neighbours, scene cards and parts of `chapter_brief.build`; for a
+  character the whole entry and sheet. Bounded (~14 000 characters).
+- **Round 1:** each working AI pitches once, all at the same time (one request per AI): title, 2–4 sentence idea, why
+  it fits, what it changes later. Busy answers wait and retry; a timeout or failure is shown per AI and the room goes
+  on with what came back. **Round 2:** pitches are shuffled and labelled A/B/C; each AI ranks only the OTHER pitches
+  with a one-line reason (its own is left off its ballot). **Tally:** most first places; tie → sum of ranks (unranked =
+  last, averaged when a vote is missing); still tied → the author chooses. Results show every pitch, who wrote it,
+  every rank and reason, and the winner: ✔ Use the winner / ✔ Use this one / 🔁 Another round (new ideas only).
+- **Using a pitch** writes it into the record as a NEW DRAFT version marked "From the writers' room" (plot summary,
+  premise concept, that chapter's outline summary, the character's background); the approved version stays until the
+  author approves the new one. A free question is noted only, or written into the main plot when ticked.
+- **Fewer than two working AIs:** said plainly, with 💡 Brainstorm with one AI (three ideas, no vote).
+- **⚡ Make a book** setting "Use the writers' room for the big twists" (`writers_room`, off by default): a room before
+  the main plot (the winner goes into the plot's request as a constraint) and before the midpoint and climax chapters
+  (the winner reaches the scene planner and the writer's brief, `chapter_decision`). The run's consent picks the winner
+  (a tie: the earliest letter), each room is a journal line (`WRITERS_ROOM`); a failed room never holds up the book.
+- Stored in `writers_room:<pid>:<branch>` (last 20 rooms). Tests: `tests/test_writers_room.py`,
+  `tests/campaign/ui/test_ui_writers_room.py`.
+- *Not done:* using a pitch appends it to the record's text; it does not rewrite the plot around it (approve, then ask
+  the AI to revise if wanted). Two panes of the same website count as two AIs in the room.
+
+## 👥 Idea #14 Panel of beta readers (2026-11) — done
+
+- **Up to three readers** (`akowe/beta_reader.py`, extends 📖 P23): 1 reader = the single read, stored exactly as before
+  (plus the new verdict). 2–3 readers = a panel record (`kind: "panel"`) in the same `beta_reads:<pid>:<branch>` key.
+  Default readers from the book profile (`personas`): a typical fan of the genre and age group (= the old persona), a
+  picky experienced reader of the genre, a casual reader who gives up on slow starts. The author can rewrite each
+  description and pick the AI per reader on the 📊 report page (kept per book in `beta_panel:<pid>`).
+- **Each reader a different AI** (`assign`): the author's picks, then working independent AIs, then the writer's AI
+  (⚠️ not independent). An AI that is not working, or that fails (site error / timeout / busy too long — assist's usual
+  handling, pinned to that AI), is skipped with a note (`skipped`, run event `BETA_SKIPPED`); the others still read.
+- **Same marks, plus a verdict:** every reader returns the P23 marks (quotes checked against the book and the
+  chapter) and `overall`: would recommend, favourite character (checked against the book), best / worst chapter, a
+  1–10 score; "would finish" comes from `stop`. An older read without a verdict still shows.
+- **Comparison without AI** (`compare`): strong signals (2–3 readers flag the same chapter for the same thing — lost,
+  bored, twist guessed, didn't believe, would stop, worst chapter; "at the same moment" when their quotes overlap),
+  disagreements (one liked a chapter another disliked; scores 3+ apart; recommend / finish split), a per-chapter heat
+  map of lost / bored readers with each reader's interest, every reader's verdict and the consensus top-5 fixes.
+- **Where:** the 📖 Beta readers card on the 📊 report page (how many readers, AI and description per reader, the
+  panel page: headline, verdict table, agree / disagree, heat map, what to fix first, each reader's own read); the book
+  report's Markdown / PDF and the saved book get a "Beta readers" section (`with_beta` / `report_markdown`).
+  ⚡ Make a book: "How many" next to 📖 Beta reader (run setting `beta_readers`, 1 by default = as before).
+- **Long books and resuming:** the same bounded book view as before (whole, or the per-chapter digest); readers read
+  one after another; the panel is saved after each reader (`incomplete`) and continues with the readers still to read
+  (a paused run continues its own panel; the report page shows ▶ Continue the panel).
+- *Not done:* readers do not run in parallel; the "same moment" check is word overlap (English); the panel shares the
+  single reader's one-call budget per reader (no per-part reading of very long books).
+
+## 🚀 Launch kit (2026-11, idea #16) — done
+
+- **What it is:** a 🚀 Launch kit page per book (`#/p/<pid>/<b>/launch`; 📤 Export → 🚀 Launch kit) with everything
+  to list the book on Amazon KDP or another store: back-cover blurb (~150 words) and store description (~300), a
+  one-line hook, the author bio (from the pen name; the AI leaves `[brackets]` for facts only the author knows), 7 KDP
+  keyword phrases, 3 categories, comparable titles ("for readers of…", always labelled *suggestions to verify*), the
+  age range and content notes (from the profile's audience and content limits, no AI) and an A+ content plan (3–5
+  modules: headline, text, and which of the book's own pictures to use — the cover, a portrait, the map or a chosen
+  chapter picture). Code: `akowe/launch_kit.py`, `web/launch.js`.
+- **Versions and approval:** every AI answer and every edit is a new version (a draft) per field
+  (`launch_kit:<pid>:<branch>`); only the author approves (✔), ↩ un-approves, or brings back an older version.
+- **Cross-check, no AI first** (every page load): names in the blurbs, hook and A+ texts must be in the canon or the
+  book ("Captain Varrow" is flagged even though "captain" is a word in the book); numbers the book never uses; claims
+  ("bestselling", "award-winning", "#1"); spoilers past the chosen point (default the midpoint; or first act, none):
+  a canon name first met after it, a sentence built from the secret chapters' plan / prose or a protected mystery,
+  twist words beside a canon name; KDP keyword rules (7 boxes, ≤ 50 characters, no "bestseller"/"free"/"new"/
+  "Kindle Unlimited", other authors incl. the comps' authors, trademarks, repeats, the title/pen name); text lengths;
+  categories for the right readers (FICTION / YOUNG ADULT FICTION / JUVENILE FICTION). Each ⚠️ has a plain fix.
+  **🔎 Check with AI** then reads the listing against the canon and the plan, with the part after the spoiler point
+  marked secret (quotes checked against the field; out of date once the kit changes). **🔁 Fix with AI** regenerates a
+  field with its problems in the request. The generator never sees the plan after the spoiler point.
+- **Export:** the 💾 book save writes `Launch kit/` (launch-kit.md, one .txt per field, A+ module SVGs); ⬇
+  launch-kit.md on the page; 📋 Copy per field; 📕 Use on the back cover puts a blurb / the bio into the profile
+  (the 🎨 Cover page's back cover).
+- *Honest limits:* categories are Akọwe's own small BISAC-style list per genre, not Amazon's live list; comparable
+  titles cannot be looked up (the author must check them); the A+ module pictures are simple compositions (the
+  picture + the text on a dark panel, SVG made by Akọwe; JPG only when AutoInjector is running to draw it) — a
+  starting point, not finished designs; the spoiler check is word-based (English) — the AI check is the deeper one.
+- Tests: `tests/test_launch_kit.py` (rules, lengths, canon, spoilers, fake-AI generation, fix, AI check, export),
+  `tests/campaign/ui/test_ui_launch_kit.py`, stand-in AI `tests/launch_fake.py`.
+
+## ✨ #20 Originality and "sounds like AI" check (2026-11) — done
+
+- **Akọwe's own check, no AI** (`akowe/originality.py` + the editable list `akowe/ai_tells.json`): extends the P6
+  pattern checker (reuses its paragraph / sentence / dialogue helpers; borrows its lists-of-three, abstract
+  paragraph-ending and "Not X. Not Y." counts instead of counting them twice) with ~120 AI-tell phrases ("a testament
+  to", "tapestry", "delve", "the weight of her …", "couldn't help but", "a symphony of", "little did they know", "a
+  breath she didn't know she was holding" …), ~100 clichés, long dashes (—), "It wasn't X. It was Y.", hedging
+  (perhaps, somehow, as if …) and paragraphs that open with the narrator's question. Rates per 1 000 words of
+  narration against thresholds in the JSON; dialogue is left out unless asked ("Count dialogue too"). Each finding:
+  chapter, paragraph, an exact quote, a plain reason and advice; each chapter a 0–100 score and a plain rating.
+  Deterministic, ~20 ms per 5 000 words plus the pattern check's own time.
+- **Optional AI pass:** an AI that did not write those chapters rates the flagged paragraphs plus one sample per
+  chapter 1–5 for "sounds machine-written", with reasons, the machine-sounding words and a suggested rewrite. Every
+  quote is checked against the book and its chapter (beta_reader.py's way); unverified ones are shown but not counted.
+  Stored as advice in `originality:<pid>:<branch>` (newest 5). API: `GET/POST …/originality`, `GET …/originality/job/<id>`.
+- **Wired in:** the editor gets the chapter's AI-sounding passages (`context.ai_sounding`, prose_variety question), so
+  its findings and the writer's targeted rewrites go after them; a rewrite is kept only if nothing got worse — and now
+  also only if it does not add AI-sounding phrases or clichés (`judge_rewrite`, code `MORE_AI_SOUNDING`). The 📊 book
+  report has a one-line summary (and a Markdown section); the report page has the ✨ Originality check card
+  (`web/originality.js`): per-chapter scores, the findings, the counts and the AI pass. A ⚡ run notes the line after
+  the report. Never blocks the book.
+- *Not done:* the AI pass is a button only (not a ⚡ run step); the lists are English; "triplet adjectives" use the
+  pattern checker's general lists of three (no part-of-speech tagging).
+
+## 📣 Mockups & ads (2026-11, idea #17) — done
+
+- **Where:** the 📣 Mockups & ads page (`#/p/<pid>/<b>/marketing`, `web/marketing.js`), reached from 🎨 Cover and the
+  book home; everything is made from the book's 🎨 cover (the print wrap too when the page count is known, so the
+  spine and back are the real ones).
+- **3D mockups** (`akowe/marketing.py`, pure-Python SVG): paperback, hardcover, a stack and a series shelf, posed in
+  3D through a pin-hole camera; each textured face is cut into small affine cells refined until they are within
+  `MAX_CELL_ERROR_PX` of true perspective, with light, a gloss band, page edges and a floor shadow. **Flat mockups:**
+  phone, tablet and e-reader (greyscale). Each comes see-through (PNG) and on a background (JPG in the cover's colours).
+- **Ads at the stores' exact sizes** (`ADS`): Instagram / Facebook post 1080 × 1080, Story / Reel 1080 × 1920,
+  Facebook / X link post 1200 × 628 and the Amazon Ads custom image 1200 × 1200 (no added words, Amazon's rule). The
+  hook comes from the 🚀 launch kit, else the cover's tagline, else the one-line idea (or the author types one), plus a
+  call to action; text is measured with the cover's font metrics and kept inside each format's text-safe area.
+- **Teaser clips** (`CLIPS`, 13 s, tall 1080 × 1920 and square 1080 × 1080): four frames (mockup, hook, cover, end
+  card) joined by AutoInjector's trailer maker (`POST /video/trailer` with `still` items: slow zoom / pan; WebM, plus
+  MP4 when ffmpeg is found). Optionally the cover is brought to life by 🎬 Video as one shot; when that cannot be done
+  the clip uses the still cover and says so. Desktop side: `render-image.js`, `video-trailer.js`,
+  `trailer-recorder-page.js` (still items).
+- **Pixels** are drawn by AutoInjector (`POST /render/image`); without it every piece still downloads as SVG.
+- **Out of date:** each file keeps fingerprints of the cover, the words and `LAYOUT_VERSION`; a changed cover or hook
+  marks it out of date with the reason, and 🖼 Make the pictures again makes it new.
+- Stored in `marketing:<pid>:<branch>`; the book save writes `Marketing/` (the files and `marketing.json`). API under
+  `…/marketing` (GET/PUT settings, `svg/<piece>`, `file/<piece>`, `zip`, POST `make`, POST `clips`, `jobs/<id>`).
+- Tests: `tests/test_marketing.py`, `tests/campaign/ui/test_ui_marketing.py`, desktop
+  `test/video-trailer.test.js` and `test/service-bridge.test.js`.
+- *Not done:* the pictures and clips need AutoInjector running (SVG only without it); the store ad rules are as of
+  2026-11 (check the stores' current rules before you pay for an ad).
+
+## Back burner (maybe never)
+
+The author's call on the rest of the 20-idea list: "way back burner, maybe never". Don't start these until asked:
+
+- **8** Talk to your characters
+- **10** Writing goals / sprints
+- **12** Screenplay / comic version
+- **15** Audiobook with voices
+- **18** Illustrated editions
+- **19** Series wiki
 
 ## Prevention pass (2026-10-27, "solve problems before they become problems")
 

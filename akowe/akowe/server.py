@@ -529,12 +529,24 @@ class App:
                 if rest and rest[0] == "trailer":  # 🎞 B2 book trailers (trailer.py; AutoInjector POST /video/trailer)
                     from . import trailer  # noqa: PLC0415
                     return trailer.route(self, method, rest[1:], query, body, principal, pid, branch, headers)
+                if rest and rest[0] == "marketing":  # 📣 #17 mockups, ads and teaser clips (marketing.py)
+                    from . import marketing  # noqa: PLC0415
+                    return marketing.route(self, method, rest[1:], query, body, principal, pid, branch, headers)
                 if rest and rest[0] == "cover":  # 🎨 B3 book covers (cover.py)
                     from . import cover  # noqa: PLC0415
                     return cover.route(self, method, rest[1:], query, body, principal, pid, branch, headers)
+                if rest and rest[0] == "launch":  # 🚀 launch kit: the store listing, checked against the canon
+                    from . import launch_kit  # noqa: PLC0415
+                    return launch_kit.route(self, method, rest[1:], query, body, principal, pid, branch)
                 if rest and rest[0] == "beta":  # 📖 P23 (Section 7c) beta reader
                     from . import beta_reader  # noqa: PLC0415
                     return beta_reader.route(self, method, rest, body, principal, pid, branch)
+                if rest and rest[0] == "room":  # 🗳 the three-AI writers' room (writers_room.py)
+                    from . import writers_room  # noqa: PLC0415
+                    return writers_room.route(self, method, rest, body, principal, pid, branch)
+                if rest and rest[0] == "originality":  # ✨ #20 originality and "sounds like AI" check
+                    from . import originality  # noqa: PLC0415
+                    return originality.route(self, method, rest, query, body, principal, pid, branch)
                 if rest == ["style"]:  # ✒️ P25 (Section 7c) this book's use of the author's style
                     from . import style_card  # noqa: PLC0415
                     return style_card.route_book(self, method, body, principal, pid)
@@ -666,6 +678,8 @@ class App:
                 return 200, rep
             disposition = "attachment" if (query.get("download") or ["0"])[0] == "1" else "inline"
             name = br.file_name(rep.get("title"), rep.get("at"), fmt)
+            from . import beta_reader  # noqa: PLC0415 - 👥 the beta readers' summary in the downloads
+            rep = beta_reader.with_beta(self, pid, branch, rep)
             if fmt == "md":
                 return 200, ("__binary__", "text/markdown; charset=utf-8", br.render_markdown(rep).encode("utf-8"),
                              name, disposition)
@@ -957,6 +971,14 @@ class App:
                 return 202, rv.start_editor_fix(principal, pid, branch, body)
             if rest == ["editor", "apply"] and method == "POST":
                 return 200, rv.apply_editor_fix(principal, pid, branch, body)
+            if rest == ["alongside"] and method == "POST":  # ✍ Write alongside me: a suggestion for a passage
+                from . import alongside  # noqa: PLC0415
+                return 202, alongside.start(rv, principal, pid, branch, body)
+            if rest == ["alongside", "use"] and method == "POST":  # ✔ Use this -> a new draft version
+                from . import alongside  # noqa: PLC0415
+                out = alongside.use(rv, principal, pid, branch, body)
+                self.saver.auto(pid, branch, reason="write alongside")
+                return 200, out
             if len(rest) == 2 and rest[0] == "editor" and method == "GET":
                 return 200, rv.editor_info(principal, pid, branch, rest[1])
             if len(rest) == 2 and rest[0] == "ai" and method == "GET":

@@ -1,0 +1,664 @@
+{
+ "about": "Curated lists for the ✨ Originality check (originality.py). Phrases are matched as whole words, case-insensitive, with straight or curly apostrophes. In a phrase, {pron} matches he/she/they/I/we/you, {poss} his/her/their/my/our/your, {obj} him/her/them/me/us/you, {be} was/were/is/are/am, and a word ending in * matches any ending (delv* = delve, delves, delved, delving). Each item is a phrase, or [phrase, reason]; without a reason the group's reason is used. Edit this file to add your own.",
+ "ai_phrases": {
+  "label": "Phrase that sounds machine-written",
+  "why": "This phrase turns up again and again in AI-written fiction; readers who have seen it before stop trusting the page.",
+  "advice": "Say the plain thing, or show the one concrete detail this phrase stands in for.",
+  "items": [
+   [
+    "a testament to",
+    "“A testament to” is a stock AI phrase: it tells the reader what something proves instead of letting them see it."
+   ],
+   [
+    "tapestry",
+    "“Tapestry” as a metaphor (a tapestry of sounds, lives, cultures) is one of the best-known AI tells."
+   ],
+   [
+    "delv*",
+    "“Delve” is a word AI writers use far more often than people do."
+   ],
+   [
+    "the weight of {poss}",
+    "“The weight of …” (her words, his gaze, the silence) is a stock AI way to make a feeling sound heavy without showing it."
+   ],
+   [
+    "the weight of the",
+    "“The weight of the …” is a stock AI way to make a feeling sound heavy without showing it."
+   ],
+   [
+    "the weight of it all",
+    "“The weight of it all” names a feeling instead of showing it."
+   ],
+   [
+    "couldn't help but",
+    "“Couldn't help but …” is filler that AI uses to soften an action; just say what they did."
+   ],
+   [
+    "could not help but",
+    "“Could not help but …” is filler that AI uses to soften an action; just say what they did."
+   ],
+   [
+    "a symphony of",
+    "“A symphony of …” (smells, sounds, colours) is a stock AI flourish."
+   ],
+   [
+    "a cacophony of",
+    "“A cacophony of …” is a stock AI flourish for noise."
+   ],
+   [
+    "a kaleidoscope of",
+    "“A kaleidoscope of …” is a stock AI flourish for colour."
+   ],
+   [
+    "a dance of",
+    "“A dance of …” (light, shadows, flames) is a stock AI image."
+   ],
+   [
+    "little did {pron} know",
+    "“Little did they know” is an old cliché that AI loves; it gives away the surprise."
+   ],
+   [
+    "a breath {pron} didn't know {pron} {be} holding",
+    "“A breath she didn't know she was holding” is the most famous AI and fan-fiction cliché."
+   ],
+   [
+    "a breath {pron} hadn't known {pron} {be} holding",
+    "“A breath he hadn't known he was holding” is the most famous AI and fan-fiction cliché."
+   ],
+   [
+    "breath {pron} didn't realize {pron} {be} holding",
+    "“A breath they didn't realize they were holding” is a famous cliché."
+   ],
+   [
+    "sent shivers down {poss} spine",
+    "“Sent shivers down her spine” is a stock reaction; show what the body really did."
+   ],
+   [
+    "sent a shiver down {poss} spine",
+    "“Sent a shiver down his spine” is a stock reaction; show what the body really did."
+   ],
+   [
+    "a shiver ran down {poss} spine",
+    "“A shiver ran down her spine” is a stock reaction; show what the body really did."
+   ],
+   [
+    "in the grand scheme of things",
+    "“In the grand scheme of things” is filler that AI uses to sound wise."
+   ],
+   [
+    "it's important to note",
+    "“It's important to note” is essay language, not story language; it sounds like a chatbot."
+   ],
+   [
+    "it is important to note",
+    "“It is important to note” is essay language, not story language; it sounds like a chatbot."
+   ],
+   [
+    "it's worth noting",
+    "“It's worth noting” is essay language that sounds like a chatbot."
+   ],
+   [
+    "navigate the complexities",
+    "“Navigate the complexities” is corporate AI language."
+   ],
+   [
+    "the complexities of",
+    "“The complexities of …” is vague AI language; name the actual problem."
+   ],
+   [
+    "an intricate dance",
+    "“An intricate dance” is a stock AI image."
+   ],
+   [
+    "intricate",
+    "“Intricate” is one of the words AI writers overuse; is there a more exact word?"
+   ],
+   [
+    "palpable",
+    "“Palpable” (the tension was palpable) is a stock AI word that tells instead of shows."
+   ],
+   [
+    "the air was thick with",
+    "“The air was thick with …” is a stock AI opening for atmosphere."
+   ],
+   [
+    "the air thick with",
+    "“The air thick with …” is a stock AI opening for atmosphere."
+   ],
+   [
+    "hung heavy in the air",
+    "“Hung heavy in the air” is a stock AI phrase."
+   ],
+   [
+    "hung in the air",
+    "“Hung in the air” (words, silence, a question) is a stock AI phrase."
+   ],
+   [
+    "a mix of",
+    "“A mix of fear and hope” (two feelings at once) is a habit of AI prose that names feelings instead of showing them."
+   ],
+   [
+    "a mixture of",
+    "“A mixture of …” feelings names them instead of showing them, a habit of AI prose."
+   ],
+   [
+    "a sense of",
+    "“A sense of …” (dread, purpose, wonder) is a vague AI way to name a feeling."
+   ],
+   [
+    "a flicker of",
+    "“A flicker of …” (hope, doubt, recognition) is a stock AI way to name a feeling."
+   ],
+   [
+    "a pang of",
+    "“A pang of …” is a stock way to name a feeling."
+   ],
+   [
+    "a wave of",
+    "“A wave of …” (relief, nausea, emotion) is a stock way to name a feeling."
+   ],
+   [
+    "washed over {obj}",
+    "“… washed over her” is a stock AI phrase for a feeling."
+   ],
+   [
+    "a beacon of",
+    "“A beacon of hope” is a stock AI phrase."
+   ],
+   [
+    "beacon of hope",
+    "“Beacon of hope” is a stock AI phrase."
+   ],
+   [
+    "unspoken understanding",
+    "“An unspoken understanding” is a stock AI phrase; show the look or the gesture."
+   ],
+   [
+    "a silent understanding",
+    "“A silent understanding” is a stock AI phrase; show the look or the gesture."
+   ],
+   [
+    "the silence was deafening",
+    "“The silence was deafening” is a cliché."
+   ],
+   [
+    "deafening silence",
+    "“Deafening silence” is a cliché."
+   ],
+   [
+    "an eternity",
+    "“An eternity” (for a pause) is a stock exaggeration."
+   ],
+   [
+    "what felt like an eternity",
+    "“What felt like an eternity” is a stock AI phrase for a pause."
+   ],
+   [
+    "time seemed to stand still",
+    "“Time seemed to stand still” is a cliché."
+   ],
+   [
+    "time stood still",
+    "“Time stood still” is a cliché."
+   ],
+   [
+    "in that moment",
+    "“In that moment” is a filler phrase AI uses to sound dramatic."
+   ],
+   [
+    "something deep within",
+    "“Something deep within” is vague AI language; say what the character felt or did."
+   ],
+   [
+    "deep down",
+    "“Deep down” is vague; show the feeling instead."
+   ],
+   [
+    "the ghost of a smile",
+    "“The ghost of a smile” is a stock AI phrase."
+   ],
+   [
+    "a smile tugged at",
+    "“A smile tugged at the corner of her mouth” is a stock AI phrase."
+   ],
+   [
+    "tugged at the corners of {poss} mouth",
+    "“Tugged at the corners of his mouth” is a stock AI phrase."
+   ],
+   [
+    "eyes sparkling with",
+    "“Eyes sparkling with …” is a stock AI phrase."
+   ],
+   [
+    "eyes that held",
+    "“Eyes that held …” (a thousand stories, a secret) is a stock AI phrase."
+   ],
+   [
+    "a thousand stories",
+    "“A thousand stories” is a stock AI phrase."
+   ],
+   [
+    "whispered promises",
+    "“Whispered promises” is a stock AI phrase."
+   ],
+   [
+    "a reminder that",
+    "“A reminder that …” tells the reader the lesson; let the scene make the point."
+   ],
+   [
+    "a stark reminder",
+    "“A stark reminder” tells the reader the lesson; let the scene make the point."
+   ],
+   [
+    "a poignant reminder",
+    "“A poignant reminder” tells the reader the lesson; let the scene make the point."
+   ],
+   [
+    "poignant",
+    "“Poignant” tells the reader how to feel; AI uses it a lot."
+   ],
+   [
+    "bittersweet",
+    "“Bittersweet” names a mixed feeling instead of showing it; AI uses it a lot."
+   ],
+   [
+    "profound",
+    "“Profound” tells the reader something matters; AI uses it a lot."
+   ],
+   [
+    "resilience",
+    "“Resilience” is an abstract word AI uses to sum up a character; show what they endured."
+   ],
+   [
+    "indomitable",
+    "“Indomitable” is an AI favourite for summing up a character."
+   ],
+   [
+    "unwavering",
+    "“Unwavering” (resolve, gaze, loyalty) is an AI favourite."
+   ],
+   [
+    "steely resolve",
+    "“Steely resolve” is a stock phrase."
+   ],
+   [
+    "newfound",
+    "“Newfound” (courage, confidence) is an AI favourite; it announces growth instead of showing it."
+   ],
+   [
+    "embark* on a journey",
+    "“Embark on a journey” is stock AI language."
+   ],
+   [
+    "a journey of self-discovery",
+    "“A journey of self-discovery” is stock AI language."
+   ],
+   [
+    "uncharted territory",
+    "“Uncharted territory” is a stock AI phrase."
+   ],
+   [
+    "the fabric of",
+    "“The fabric of …” (reality, society) is a stock AI metaphor."
+   ],
+   [
+    "the very fabric",
+    "“The very fabric” is a stock AI metaphor."
+   ],
+   [
+    "echoed through the",
+    "“… echoed through the halls/room/night” is a stock AI image."
+   ],
+   [
+    "a stark contrast",
+    "“A stark contrast” is essay language that AI drops into stories."
+   ],
+   [
+    "in stark contrast",
+    "“In stark contrast” is essay language that AI drops into stories."
+   ],
+   [
+    "nestled",
+    "“Nestled” (a village nestled in the hills) is a word AI uses far too often."
+   ],
+   [
+    "bustling",
+    "“Bustling” (a bustling market) is a word AI uses far too often."
+   ],
+   [
+    "vibrant",
+    "“Vibrant” is a word AI uses far too often; name the colour or the noise."
+   ],
+   [
+    "ethereal",
+    "“Ethereal” is an AI favourite; what does it actually look like?"
+   ],
+   [
+    "otherworldly",
+    "“Otherworldly” is an AI favourite; what does it actually look like?"
+   ],
+   [
+    "testament",
+    "“Testament” (a testament to her skill) is one of the best-known AI words."
+   ],
+   [
+    "whirlwind of",
+    "“A whirlwind of …” is a stock AI phrase."
+   ],
+   [
+    "a maelstrom of",
+    "“A maelstrom of …” (emotions) is a stock AI phrase."
+   ],
+   [
+    "a torrent of",
+    "“A torrent of …” (emotions, words) is a stock AI phrase."
+   ],
+   [
+    "a storm of emotions",
+    "“A storm of emotions” names feelings instead of showing them."
+   ],
+   [
+    "every fiber of {poss} being",
+    "“Every fibre of her being” is a stock AI exaggeration."
+   ],
+   [
+    "every fibre of {poss} being",
+    "“Every fibre of his being” is a stock AI exaggeration."
+   ],
+   [
+    "{poss} heart pounded in {poss} chest",
+    "“Her heart pounded in her chest” is a stock AI reaction."
+   ],
+   [
+    "{poss} heart hammered",
+    "“His heart hammered” is a stock AI reaction."
+   ],
+   [
+    "a mischievous glint",
+    "“A mischievous glint” is a stock AI phrase."
+   ],
+   [
+    "a glint in {poss} eye",
+    "“A glint in her eye” is a stock AI phrase."
+   ],
+   [
+    "the promise of",
+    "“The promise of …” (rain, adventure) is a stock AI phrase."
+   ],
+   [
+    "whispers of",
+    "“Whispers of …” (the past, the wind) is a stock AI phrase."
+   ],
+   [
+    "the dance of",
+    "“The dance of …” (light, shadows) is a stock AI image."
+   ],
+   [
+    "danced across",
+    "“… danced across her face/the walls” is a stock AI image."
+   ],
+   [
+    "dappled",
+    "“Dappled” light is an AI favourite."
+   ],
+   [
+    "a lifetime ago",
+    "“A lifetime ago” is a stock phrase."
+   ],
+   [
+    "a world away",
+    "“A world away” is a stock phrase."
+   ],
+   [
+    "the world seemed to",
+    "“The world seemed to …” (hold its breath, fall away) is a stock AI phrase."
+   ],
+   [
+    "the world held its breath",
+    "“The world held its breath” is a stock AI phrase."
+   ],
+   [
+    "held its breath",
+    "“… held its breath” (the room, the city) is a stock AI image."
+   ],
+   [
+    "as if the universe",
+    "“As if the universe …” is a stock AI flourish."
+   ],
+   [
+    "somewhere deep inside",
+    "“Somewhere deep inside” is vague; show the feeling."
+   ],
+   [
+    "a quiet strength",
+    "“A quiet strength” is an AI favourite for summing up a character."
+   ],
+   [
+    "quiet determination",
+    "“Quiet determination” is an AI favourite for summing up a character."
+   ],
+   [
+    "fierce determination",
+    "“Fierce determination” is a stock phrase."
+   ],
+   [
+    "ever-changing",
+    "“Ever-changing” is a stock AI word."
+   ],
+   [
+    "ever-present",
+    "“Ever-present” is a stock AI word."
+   ],
+   [
+    "a reminder of",
+    "“A reminder of …” tells the reader what to think; let the detail do it."
+   ],
+   [
+    "more than just",
+    "“More than just a …” is a stock AI way to make something sound important."
+   ],
+   [
+    "only time would tell",
+    "“Only time would tell” is a cliché."
+   ],
+   [
+    "the journey ahead",
+    "“The journey ahead” is stock AI language for an ending."
+   ],
+   [
+    "whatever the future held",
+    "“Whatever the future held” is stock AI language for an ending."
+   ],
+   [
+    "whatever came next",
+    "“Whatever came next” is stock AI language for an ending."
+   ],
+   [
+    "for the first time in a long time",
+    "“For the first time in a long time” is a stock AI line for an ending."
+   ],
+   [
+    "for the first time in years",
+    "“For the first time in years” is a stock AI line for an ending."
+   ]
+  ]
+ },
+ "cliches": {
+  "label": "Cliché",
+  "why": "A worn-out phrase: readers have seen it so often that it no longer makes a picture.",
+  "advice": "Replace it with something only this character, in this place, would see or say.",
+  "items": [
+   "at the end of the day",
+   "all hell broke loose",
+   "avoid it like the plague",
+   "beat around the bush",
+   "better late than never",
+   "bite the bullet",
+   "blood ran cold",
+   "blood boiled",
+   "calm before the storm",
+   "cold as ice",
+   "crystal clear",
+   "dead as a doornail",
+   "every cloud has a silver lining",
+   "few and far between",
+   "frozen in fear",
+   "frozen in place",
+   "frozen to the spot",
+   "glued to the spot",
+   "in the nick of time",
+   "it was a dark and stormy night",
+   "last but not least",
+   "like a deer in headlights",
+   "like a moth to a flame",
+   "only time will tell",
+   "out of the blue",
+   "piece of cake",
+   "plenty of fish in the sea",
+   "quiet as a mouse",
+   "rooted to the spot",
+   "scared to death",
+   "sick and tired",
+   "sigh of relief",
+   "a sigh of relief",
+   "silent as the grave",
+   "since the dawn of time",
+   "the tip of the iceberg",
+   "think outside the box",
+   "time heals all wounds",
+   "time flew by",
+   "tears streamed down",
+   "tears welled up",
+   "the dead of night",
+   "the light at the end of the tunnel",
+   "the eye of the storm",
+   "the moment of truth",
+   "the last straw",
+   "the writing on the wall",
+   "white as a sheet",
+   "pale as a ghost",
+   "eyes like saucers",
+   "heart of gold",
+   "heart skipped a beat",
+   "{poss} heart skipped a beat",
+   "butterflies in {poss} stomach",
+   "a knot in {poss} stomach",
+   "knot formed in {poss} stomach",
+   "lump in {poss} throat",
+   "a chill ran down",
+   "jaw dropped",
+   "{poss} jaw dropped",
+   "all of a sudden",
+   "in the blink of an eye",
+   "a matter of time",
+   "against all odds",
+   "a race against time",
+   "against the clock",
+   "a perfect storm",
+   "a fate worse than death",
+   "dead to the world",
+   "fit as a fiddle",
+   "head over heels",
+   "hit the ground running",
+   "like a ton of bricks",
+   "like clockwork",
+   "like there was no tomorrow",
+   "never in a million years",
+   "nerves of steel",
+   "on cloud nine",
+   "out of thin air",
+   "read between the lines",
+   "safe and sound",
+   "slept like a log",
+   "slowly but surely",
+   "stopped dead in {poss} tracks",
+   "dead in {poss} tracks",
+   "the elephant in the room",
+   "the end of an era",
+   "the world was {poss} oyster",
+   "to make a long story short",
+   "twinkle in {poss} eye",
+   "without a moment's hesitation",
+   "worth its weight in gold",
+   "a far cry from",
+   "a force to be reckoned with",
+   "larger than life",
+   "lost in thought",
+   "deep in thought",
+   "with bated breath",
+   "bated breath",
+   "eerily quiet",
+   "an uneasy silence",
+   "a deafening roar",
+   "silence stretched between them",
+   "a pregnant pause",
+   "pregnant pause"
+  ]
+ },
+ "hedges": {
+  "label": "Too much hedging",
+  "why": "The narration keeps softening itself (perhaps, somehow, seemed, as if); AI prose hedges like this to avoid committing to anything.",
+  "advice": "Commit: say what happened. Keep a hedge only where the character truly cannot know.",
+  "items": [
+   "perhaps",
+   "somehow",
+   "seemed to",
+   "seemed almost",
+   "almost as if",
+   "as though",
+   "as if",
+   "in a way",
+   "in some way",
+   "in some ways",
+   "something like",
+   "a kind of",
+   "a sort of",
+   "sort of",
+   "kind of",
+   "a little",
+   "a bit",
+   "somewhat",
+   "slightly",
+   "maybe",
+   "it seemed",
+   "it was as if",
+   "might have been",
+   "could have been",
+   "for some reason",
+   "in a sense"
+  ]
+ },
+ "thresholds": {
+  "about": "per 1 000 words of narration (dialogue is not counted unless asked): minor at or above 'minor', major at or above 'major'; 'min' hits before anything is said",
+  "ai_phrase": {
+   "min": 1,
+   "minor": 1.0,
+   "major": 3.0
+  },
+  "cliche": {
+   "min": 1,
+   "minor": 0.8,
+   "major": 2.0
+  },
+  "em_dash": {
+   "min": 6,
+   "minor": 6.0,
+   "major": 12.0
+  },
+  "not_this_but_that": {
+   "min": 2,
+   "minor": 0.8,
+   "major": 2.0
+  },
+  "hedge": {
+   "min": 5,
+   "minor": 7.0,
+   "major": 12.0
+  },
+  "rhetorical_question": {
+   "min": 2,
+   "minor": 1.0,
+   "major": 2.5
+  }
+ }
+}

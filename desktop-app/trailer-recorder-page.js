@@ -1,11 +1,12 @@
 'use strict';
 /*
  * trailer-recorder-page.js — runs in the hidden 🎞 trailer-recorder window (trailer-recorder.js). It plays the
- * trailer's timeline onto a <canvas> in real time — each shot (a video clip, cover-cropped to the frame) and each
- * title card (text drawn on black), with short fades through black between them — and records the canvas (plus
+ * trailer's timeline onto a <canvas> in real time — each shot (a video clip, cover-cropped to the frame), each
+ * title card (text drawn on black) and each still (a picture with a slow zoom or pan, "Ken Burns"), with short
+ * fades through black between them — and records the canvas (plus
  * the optional music, mixed in with WebAudio and faded out at the end) with MediaRecorder as WebM (VP9, else VP8).
  * The recording goes back to main in chunks (window.trailerHost, trailer-recorder-preload.js).
- * The plan: { width, height, fps, fade, total, items:[{ kind:'clip'|'card', start, seconds, src | text, subtitle }],
+ * The plan: { width, height, fps, fade, total, items:[{ kind:'clip'|'card'|'still', start, seconds, src | text, subtitle, motion }],
  *             music:{ src, volume, fadeOut } | null, videoBitsPerSecond }
  */
 (function () {
@@ -70,6 +71,39 @@
     try { ctx.drawImage(v, (W - dw) / 2, (H - dh) / 2, dw, dh); } catch (_) { /* a frame that isn't ready yet stays black */ }
   }
 
+  // A still: the picture cover-fitted to the frame, zoomed / panned smoothly over its time (p = 0 → 1).
+  const ease = (p) => p * p * (3 - 2 * p);
+  function drawStill(img, it, p, W, H) {
+    ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+    if (!img) return;
+    const iw = img.naturalWidth || W; const ih = img.naturalHeight || H;
+    const e = ease(Math.max(0, Math.min(1, p)));
+    const m = it.motion || 'zoom-in';
+    const Z = 0.12; // how far a zoom goes (12 %); a pan moves over the same extra room
+    let z = 1 + Z * 0.5; let dx = 0; let dy = 0;
+    if (m === 'zoom-in') z = 1 + Z * e;
+    else if (m === 'zoom-out') z = 1 + Z * (1 - e);
+    else if (m === 'none') z = 1;
+    const k = Math.max(W / iw, H / ih) * z;
+    const dw = iw * k; const dh = ih * k;
+    const roomX = (dw - W) / 2; const roomY = (dh - H) / 2;
+    if (m === 'pan-left') dx = roomX * (1 - 2 * e);
+    else if (m === 'pan-right') dx = -roomX * (1 - 2 * e);
+    else if (m === 'pan-up') dy = roomY * (1 - 2 * e);
+    else if (m === 'pan-down') dy = -roomY * (1 - 2 * e);
+    try { ctx.drawImage(img, (W - dw) / 2 + dx, (H - dh) / 2 + dy, dw, dh); } catch (_) { /* not decoded: black */ }
+  }
+  function loadImage(src, what, ms) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      let done = false;
+      img.onload = () => { if (!done) { done = true; (img.decode ? img.decode().catch(() => {}) : Promise.resolve()).then(() => resolve(img)); } };
+      img.onerror = () => { if (!done) { done = true; reject(new Error(`${what} could not be read (not a picture this computer can show)`)); } };
+      setTimeout(() => { if (!done) { done = true; reject(new Error(`${what} took too long to load`)); } }, ms);
+      img.src = src;
+    });
+  }
+
   async function run(plan) {
     const W = Math.max(64, Math.round(plan.width || 1280)); const H = Math.max(64, Math.round(plan.height || 720));
     canvas.width = W; canvas.height = H;
@@ -80,8 +114,13 @@
     ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
     // load every clip (and the music) before the clock starts
     const vids = [];
+    const pics = [];
     for (let i = 0; i < items.length; i++) {
       const it = items[i];
+      if (it.kind === 'still') {
+        try { pics[i] = await loadImage(it.src, `Picture ${i + 1}`, 30000); } catch (e) { fail('CLIP_UNREADABLE', `${e.message}.`); return; }
+        vids.push(null); continue;
+      }
       if (it.kind !== 'clip') { vids.push(null); continue; }
       const v = document.createElement('video');
       v.muted = true; v.playsInline = true; v.preload = 'auto'; v.src = it.src;
@@ -130,7 +169,9 @@
       if (i < 0) i = items.length - 1;
       if (i !== cur) startAt(i);
       const it = items[i];
-      if (it.kind === 'clip') drawClip(vids[i], W, H); else drawCard(it, W, H);
+      if (it.kind === 'clip') drawClip(vids[i], W, H);
+      else if (it.kind === 'still') drawStill(pics[i], it, it.seconds > 0 ? (t - it.start) / it.seconds : 0, W, H);
+      else drawCard(it, W, H);
       if (fade > 0) { // fade through black at both ends of every shot / card
         const local = t - it.start;
         const a = Math.min(1, local / fade, (it.seconds - local) / fade);

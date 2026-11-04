@@ -307,6 +307,8 @@ def line(cp: dict) -> str:
         bits.append(f"{c['fixed']} problem{'s' if c['fixed'] != 1 else ''} fixed")
     if c.get("waiting"):
         bits.append(f"{c['waiting']} waiting for you")
+    if cp.get("beats"):
+        bits.append(f"{len(cp['beats'])} story beat{'s' if len(cp['beats']) != 1 else ''} not on the page")
     if not bits:
         bits.append("no problems found" if not c.get("possible") else "nothing the AI confirmed")
     if cp.get("status") == "incomplete":
@@ -492,6 +494,7 @@ def _run_one(svc, run: dict, st: dict, cp: dict, chapters: list[dict]) -> None:
     _put(store, pid, branch, cp)
     # 4. fix what can be fixed safely, chapter by chapter, through the run's review loop
     _fix(svc, run, st, cp, title)
+    _beats(svc, run, st, cp, chapters, outline)  # 📐 story beats that did not land: reported, one targeted fix
     # 5. done (or waiting for the author once)
     c = {"found": len([p for p in cp["problems"] if p["status"] != "possible"]),
          "fixed": len([p for p in cp["problems"] if p["status"] == "fixed"]),
@@ -523,6 +526,25 @@ def _run_one(svc, run: dict, st: dict, cp: dict, chapters: list[dict]) -> None:
     _note(svc, run, st, cp)
     svc.event(run, "note", line(cp), step="chapters", code="CHECKPOINT")
     svc.save(run)
+
+
+def _beats(svc, run: dict, st: dict, cp: dict, chapters: list[dict], outline: dict | None) -> None:
+    """📐 The beats of the author's story shape in the chapters read so far: a beat that did not land is checked,
+    sent back once for a targeted fix (story_shape.fix_beats) and, when it is still not on the page, listed in the
+    checkpoint's report. Never holds up the book (a pause / cancel and a review the author must decide still stop)."""
+    from . import story_shape  # noqa: PLC0415
+    from .assist import Cancelled  # noqa: PLC0415
+    try:
+        cp["beats"] = story_shape.fix_beats(svc, run, st, outline, chapters, upto=cp["after"],
+                                            where="ending" if cp.get("final") else "checkpoint")
+    except Cancelled:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        if getattr(exc, "control", False) or type(exc).__name__ == "StepProblem":
+            raise
+        log.exception("checkpoint story beats")
+        cp["beats"] = []
+    _put(svc.store, run["project_id"], run.get("branch_id") or "main", cp)
 
 
 def _setups_so_far(svc, run: dict, cp: dict) -> None:
@@ -675,6 +697,7 @@ def report(store, pid: str, branch: str) -> list[dict]:
                                  for p in c.get("problems") or []],
                     "finished_at": c.get("finished_at"), "redo_because": c.get("redo_because"),
                     "setups": (c.get("ending") or {}).get("open") or [],
+                    "beats": list(c.get("beats") or []),
                     "unplanned": list(c.get("unplanned") or [])})
     return out
 
@@ -698,6 +721,8 @@ def markdown(rep: list[dict]) -> list[str]:
             out.append(f"- 🎯 {x}")
         for x in c.get("unplanned") or []:
             out.append(f"- 🧠 {x}")
+        for x in c.get("beats") or []:
+            out.append(f"- 📐 {x}")
         for p in c["problems"]:
             out.append(f"- Chapter {p.get('number')}: {p.get('problem')} — {STATUS_WORDS.get(p.get('status'), '')}"
                        + (f" ({p['why']})" if p.get("why") and p.get("status") != "fixed" else "")

@@ -1,8 +1,9 @@
 'use strict';
 /*
  * video-trailer.js — 🎞 book trailers (plan item B2), Electron-free so it is testable.
- * A trailer = shots ({ prompt | image, seconds }) and title cards ({ text, subtitle, seconds }) in order, plus
- * optional music. make():
+ * A trailer = shots ({ prompt | image, seconds }), title cards ({ text, subtitle, seconds }) and stills ({ image,
+ * seconds, motion }: a finished picture shown with a slow zoom or pan — no video engine needed; 📣 Akọwe's teaser
+ * clips are made of them) in order, plus optional music. make():
  *   1. renders each shot with the 🎬 video engine (video-studio.js: text→video, or picture→video with `image`),
  *      one after the other, with progress and Stop. Finished shots are kept in the trailer's folder (shots/) and
  *      reused next time (resume) when the same shot is asked for again;
@@ -23,11 +24,15 @@ const path = require('path');
 const crypto = require('crypto');
 const childProcess = require('child_process');
 
-const LIMITS = { items: 24, shots: 16, shotSeconds: [1, 5], cardSeconds: [1, 10], text: 120, subtitle: 160, prompt: 4000, width: [320, 1920], height: [240, 1080], fps: [12, 30], fade: [0, 1] };
-const DEFAULTS = { shotSeconds: 4, cardSeconds: 3, width: 1280, height: 720, fps: 24, fade: 0.4, musicVolume: 0.8 };
+const LIMITS = { items: 24, shots: 16, shotSeconds: [1, 5], cardSeconds: [1, 10], stillSeconds: [1, 10], text: 120, subtitle: 160, prompt: 4000, width: [320, 1920], height: [240, 1920], fps: [12, 30], fade: [0, 1] };
+const DEFAULTS = { shotSeconds: 4, cardSeconds: 3, stillSeconds: 3, width: 1280, height: 720, fps: 24, fade: 0.4, musicVolume: 0.8 };
+// how a still moves while it is shown (a slow "Ken Burns" zoom or pan; none = it stays still)
+const MOTIONS = ['zoom-in', 'zoom-out', 'pan-left', 'pan-right', 'pan-up', 'pan-down', 'none'];
+const STILL_EXT = /\.(png|jpe?g|webp)$/i;
 const MUSIC_EXT = /\.(mp3|ogg|oga|opus|wav|m4a|aac|flac|webm)$/i;
 const SHOT_KEYS = ['type', 'prompt', 'image', 'seconds', 'characterLock', 'negativePrompt', 'seed', 'model'];
 const CARD_KEYS = ['type', 'text', 'subtitle', 'seconds', 'at'];
+const STILL_KEYS = ['type', 'image', 'seconds', 'motion'];
 const TOP_KEYS = ['book', 'title', 'items', 'shots', 'cards', 'music', 'musicVolume', 'width', 'height', 'fps', 'fade', 'model', 'engine', 'resume', 'mp4', 'from', 'wait'];
 const ENGINES = { auto: 'auto', wan: 'comfy-wan', comfy: 'comfy-wan', 'comfy-wan': 'comfy-wan', framepack: 'framepack', endpoint: 'endpoint' };
 const ERRORS = {
@@ -78,8 +83,8 @@ function normalizeTrailer(req) {
     const x = raw[i] || {};
     const n = i + 1;
     const type = x.type || (x.text != null && x.prompt == null && x.image == null ? 'card' : 'shot');
-    if (type !== 'shot' && type !== 'card') return { error: bad(`items[${i}].type`, `Item ${n}: type is "shot" or "card" (got “${x.type}”).`) };
-    const keys = type === 'shot' ? SHOT_KEYS : CARD_KEYS;
+    if (type !== 'shot' && type !== 'card' && type !== 'still') return { error: bad(`items[${i}].type`, `Item ${n}: type is "shot", "card" or "still" (got “${x.type}”).`) };
+    const keys = type === 'shot' ? SHOT_KEYS : type === 'still' ? STILL_KEYS : CARD_KEYS;
     const unknown = Object.keys(x).find((k) => !keys.includes(k) && x[k] !== undefined && !(type === 'card' && k === 'at'));
     if (unknown) return { error: bad(`items[${i}].${unknown}`, `Item ${n} (${type}) has no setting “${unknown}”.`, `A ${type} has: ${keys.filter((k) => k !== 'type').join(', ')}.`) };
     if (x.seconds != null && x.seconds !== '' && !isNum(x.seconds)) return { error: bad(`items[${i}].seconds`, `Item ${n}: seconds must be a number (got “${String(x.seconds).slice(0, 30)}”).`) };
@@ -92,6 +97,22 @@ function normalizeTrailer(req) {
       const seconds = Math.round(clamp(want, lo, hi) * 10) / 10;
       if (seconds !== want) warnings.push({ level: 'soft', field: `items[${i}].seconds`, message: `Title card ${n}: ${want} s → ${seconds} s (cards are ${lo}–${hi} s).` });
       items.push({ type: 'card', text: text.slice(0, LIMITS.text), subtitle: x.subtitle ? String(x.subtitle).trim().slice(0, LIMITS.subtitle) : '', seconds });
+      continue;
+    }
+    if (type === 'still') { // a finished picture on this computer, shown with a slow zoom / pan (no video engine)
+      let p = typeof x.image === 'string' ? x.image.trim() : '';
+      if (/^file:\/\//i.test(p)) { try { p = require('url').fileURLToPath(p); } catch (_) {} }
+      if (!p) return { error: bad(`items[${i}].image`, `Still ${n} needs its picture (the path of a .png or .jpg file).`) };
+      if (!STILL_EXT.test(p)) return { error: bad(`items[${i}].image`, `Still ${n}: “${path.basename(p)}” is not a picture AutoInjector can show (.png, .jpg or .webp).`) };
+      let st = null; try { st = fs.statSync(p); } catch (_) { st = null; }
+      if (!st || !st.isFile()) return { error: bad(`items[${i}].image`, `Still ${n}: the picture “${p}” was not found.`) };
+      const motion = x.motion == null || x.motion === '' ? 'zoom-in' : String(x.motion);
+      if (!MOTIONS.includes(motion)) return { error: bad(`items[${i}].motion`, `Still ${n}: “${motion}” is not a movement.`, `motion is one of: ${MOTIONS.join(', ')}.`) };
+      const [lo, hi] = LIMITS.stillSeconds;
+      const want = isNum(x.seconds) ? Number(x.seconds) : DEFAULTS.stillSeconds;
+      const seconds = Math.round(clamp(want, lo, hi) * 10) / 10;
+      if (seconds !== want) warnings.push({ level: 'soft', field: `items[${i}].seconds`, message: `Still ${n}: ${want} s → ${seconds} s (a still is ${lo}–${hi} s).` });
+      items.push({ type: 'still', image: p, seconds, motion });
       continue;
     }
     const prompt = typeof x.prompt === 'string' ? x.prompt.trim().slice(0, LIMITS.prompt) : '';
@@ -155,13 +176,14 @@ function shotKey(shot, model, engine) {
   return crypto.createHash('sha1').update(k).digest('hex').slice(0, 16);
 }
 
-/** The recorder's timeline: { width, height, fps, fade, total, items:[{ kind:'clip', src, start, seconds } | { kind:'card', text, subtitle, start, seconds }], music }. */
+/** The recorder's timeline: { width, height, fps, fade, total, items:[{ kind:'clip', src, start, seconds } | { kind:'card', text, subtitle, start, seconds } | { kind:'still', src, motion, start, seconds }], music }. */
 function joinPlan(plan, rendered, fileUrl) {
   const url = fileUrl || ((p) => require('url').pathToFileURL(p).href);
   let t = 0; let shotNo = 0;
   const items = plan.items.map((it, i) => {
     const start = Math.round(t * 1000) / 1000; t += it.seconds;
     if (it.type === 'card') return { kind: 'card', start, seconds: it.seconds, text: it.text, subtitle: it.subtitle || '' };
+    if (it.type === 'still') return { kind: 'still', start, seconds: it.seconds, src: url(it.image), motion: it.motion || 'zoom-in' };
     shotNo++;
     const r = rendered[i];
     if (!r || !r.path) throw new Error(`shot ${shotNo} has no clip`);
@@ -366,6 +388,7 @@ function createTrailerMaker(deps = {}) {
       seconds: rr.seconds, planned: plan.total, width: plan.width, height: plan.height, fps: plan.fps, mime: rr.mime, bytes: rr.bytes, music: plan.music || null,
       shots: j.items.filter((x) => x.type === 'shot').map((x) => ({ path: x.path, poster: x.poster, seconds: x.seconds, reused: x.status === 'reused', label: x.label })),
       cards: plan.items.filter((x) => x.type === 'card').map((x) => ({ text: x.text, subtitle: x.subtitle, seconds: x.seconds })),
+      stills: plan.items.filter((x) => x.type === 'still').map((x) => ({ image: x.image, motion: x.motion, seconds: x.seconds })),
       reused: j.items.filter((x) => x.status === 'reused').length, warnings, json: path.join(j.dir, 'trailer.json'),
     };
     return out;
@@ -374,18 +397,19 @@ function createTrailerMaker(deps = {}) {
   // Start a trailer. Returns at once ({ ok, started, id, status }) unless o.wait: then the final result.
   async function make(req) {
     if (job && !job.finished) return fail('BUSY', `${ERRORS.BUSY} (${publicJob(job).phase}, ${Math.round((Date.now() - job.startedAt) / 1000)} s so far)`, 'Wait for it (trailer.status) or stop it (trailer.cancel).');
-    if (!studio) return fail('NOT_WIRED', 'Video is not available in this build.');
     const nz = normalizeTrailer(req);
     if (nz.error) return nz.error;
     const plan = nz.plan;
+    // stills and title cards need no video engine; only shots do
+    if (!studio && plan.items.some((x) => x.type === 'shot')) return fail('NOT_WIRED', 'Video is not available in this build.');
     let dir;
     try { dir = path.join(trailersDir(), plan.folder); fs.mkdirSync(path.join(dir, 'shots'), { recursive: true }); } catch (e) { return fail('VIDEO_FAILED', `The trailer folder could not be made (${e.code || e.message}).`, 'Check the output folder is writable.'); }
     let shotNo = 0;
     const j = {
       id: crypto.randomUUID(), plan, dir, startedAt: Date.now(), phase: 'starting', cancelled: false, finished: false, warnings: nz.warnings, state: readState(dir),
-      items: plan.items.map((x) => ({ type: x.type, status: 'waiting', seconds: x.seconds, label: x.type === 'card' ? `Card: ${x.text}` : `Shot ${++shotNo}: ${(x.prompt || (x.image ? `picture ${path.basename(x.image.length < 300 ? x.image : 'picture')}` : x.characterLock || '')).slice(0, 80)}` })),
+      items: plan.items.map((x) => ({ type: x.type, status: 'waiting', seconds: x.seconds, label: x.type === 'card' ? `Card: ${x.text}` : x.type === 'still' ? `Still: ${path.basename(x.image)} (${x.motion})` : `Shot ${++shotNo}: ${(x.prompt || (x.image ? `picture ${path.basename(x.image.length < 300 ? x.image : 'picture')}` : x.characterLock || '')).slice(0, 80)}` })),
     };
-    for (const it of j.items) if (it.type === 'card') it.status = 'ready';
+    for (const it of j.items) if (it.type === 'card' || it.type === 'still') it.status = 'ready';
     job = j;
     log('trailer-start', { id: j.id, shots: shotNo, cards: plan.items.length - shotNo, seconds: plan.total, music: !!plan.music, from: plan.from || 'video-tab' });
     const p = (async () => {
@@ -457,4 +481,4 @@ function createTrailerMaker(deps = {}) {
   return { make, status, cancel, list, plan, busy: () => !!(job && !job.finished) };
 }
 
-module.exports = { createTrailerMaker, normalizeTrailer, joinPlan, shotKey, findFfmpeg, ffmpegCandidates, mp4Args, safeName, LIMITS, DEFAULTS };
+module.exports = { createTrailerMaker, normalizeTrailer, joinPlan, shotKey, findFfmpeg, ffmpegCandidates, mp4Args, safeName, LIMITS, DEFAULTS, MOTIONS };
