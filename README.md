@@ -4,6 +4,8 @@ AutoInjector is one desktop program that puts **ChatGPT, Claude and Gemini side 
 together. It uses the websites you are already signed in to — no API keys. Around those three AIs it adds a
 book writer (**📖 Akọwe**), an assistant (**🎩 Alfred**), pictures (**🎨 Images**) and video (**🎬 Video**).
 
+> 🧭 New here? **[How AutoInjector works](docs/HOW_IT_WORKS.md)** explains how all the parts fit together, in plain words.
+
 > Automating these sites' web pages may be against their terms of service. AutoInjector only drives sessions
 > where *you* are signed in, on *your* computer. Use it at your own discretion and risk.
 
