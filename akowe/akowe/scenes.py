@@ -31,6 +31,7 @@ import threading
 from datetime import datetime, timezone
 
 from . import characters as chars_mod
+from . import needs_list
 from . import providers as providers_mod
 from .errors import AkoweError
 
@@ -76,7 +77,9 @@ CARD_SCHEMA = {
 }
 PLAN_SCHEMA = {"type": "object", "additionalProperties": False, "required": ["scenes"],
                "properties": {"scenes": {"type": "array", "minItems": 1, "maxItems": MAX_SCENES,
-                                         "items": CARD_SCHEMA}}}
+                                         "items": CARD_SCHEMA},
+                              # 🧠 the chapter's needs list (needs_list.py): optional; Akọwe validates it
+                              "needs": needs_list.SCHEMA}}
 REVIEW_SCHEMA = {
     "type": "object", "additionalProperties": False, "required": ["verdict", "scenes", "notes"],
     "properties": {"verdict": {"type": "string", "enum": ["PASS", "REVISE"]},
@@ -292,8 +295,11 @@ def _update(store, pid: str, branch: str, key: str, change, event: tuple | None 
 
 
 def save_cards(store, pid: str, branch: str, outline: dict, chapter_id: str, cards: list[dict], *, by: str,
-               slot: str | None = None, base_version: int | None = None, how: str = "made") -> dict:
-    """Store a new version of a chapter's scene cards (status draft: it waits for a check and an approval)."""
+               slot: str | None = None, base_version: int | None = None, how: str = "made",
+               needs: dict | None = None) -> dict:
+    """Store a new version of a chapter's scene cards (status draft: it waits for a check and an approval).
+    🧠 ``needs``: the chapter's validated needs list (needs_list.py); None keeps the one these cards had (an edit by
+    the author, a revision without a new list) when it was made for the same outline revision."""
     if not cards:
         raise AkoweError("INVALID_INPUT", "/cards", "a scene plan needs at least one scene with something in it",
                              status="REJECTED")
@@ -308,14 +314,18 @@ def save_cards(store, pid: str, branch: str, outline: dict, chapter_id: str, car
         hist = list(old.get("history") or [])
         if old.get("version"):
             hist.append({k: old.get(k) for k in ("version", "cards", "made_by", "updated_at", "status")})
+        keep = needs if needs is not None else (
+            old.get("needs") if old.get("outline_version") == outline["version"]
+            and old.get("outline_record_id") == outline["record_id"] else None)
         return {"outline_record_id": outline["record_id"], "outline_version": outline["version"],
                 "chapter_id": chapter_id, "version": int(old.get("version") or 0) + 1, "cards": cards,
                 "status": "draft", "made_by": {"kind": by, "slot": slot, "at": _now()}, "review": None,
-                "approved": None, "flagged": False, "updated_at": _now(), "history": hist[-HISTORY_KEEP:]}
+                "approved": None, "flagged": False, "updated_at": _now(), "history": hist[-HISTORY_KEEP:],
+                **({"needs": keep} if keep else {})}
     return _update(store, pid, branch, key, change, (
         "scenes.saved", lambda e: {"chapter_id": chapter_id, "outline_record_id": outline["record_id"],
                                    "version": e["version"], "scenes": len(e["cards"]), "by": by, "ai_slot": slot,
-                                   "how": how}))
+                                   "how": how, "needs": bool(e.get("needs"))}))
 
 
 def usable(entry: dict | None, outline: dict | None) -> bool:
@@ -500,11 +510,12 @@ class ScenePlanner:
             if prev and not job.slot_pref:  # the writer revises; the reviewer is avoided while another AI works
                 job.prefer_slots = [prev]
                 job.avoid_slots = [rv["slot"]] if rv.get("slot") and rv.get("slot") != prev else []
+        self._needs_context(pid, branch, ctx)  # 🧠 what the needs list may name (needs_list.py)
         job.phase = f"The AI is planning the scenes of chapter {ctx['chapter']['number']}"
         tok = self.review.work.begin(pid, "C02", f"Planning the scenes of chapter {ctx['chapter']['number']}")
         try:
-            raw = self.assist._call_ai(job, op_for_roles="C02", task=self._task(PLAN_TASK, ctx), schema=PLAN_SCHEMA,
-                                       context=ctx, protected=[])
+            raw = self.assist._call_ai(job, op_for_roles="C02", task=self._task(PLAN_TASK, ctx) + " "
+                                       + needs_list.PLAN_TASK, schema=PLAN_SCHEMA, context=ctx, protected=[])
         finally:
             self.review.work.end(tok)
         job.check()
@@ -512,8 +523,37 @@ class ScenePlanner:
         if not cards:
             raise AkoweError("INTERNAL_ERROR", "/scenes", "the AI's scene plan had no usable scene; nothing was "
                                  "saved")
+        needs = needs_list.clean(raw.get("needs") if isinstance(raw, dict) else None, self.store, pid, branch)
         return save_cards(self.store, pid, branch, outline, chapter_id, cards, by="ai", slot=job.slot,
-                          how="revised" if revise else "made")
+                          how="revised" if revise else "made", needs=needs)
+
+    def _needs_context(self, pid, branch, ctx: dict) -> None:
+        """🧠 The codes and records a needs list may name, the earlier chapters it may point back to and what earlier
+        chapters used without planning it (bounded; never raises)."""
+        try:
+            ctx["code_sections"] = needs_list.sections_brief()
+            from . import forge_kinds  # noqa: PLC0415
+            recs = {}
+            for kind in ("place", "item", "magic"):
+                names = [d["name"] for d in forge_kinds.list_dossiers(self.store, pid, branch, kind)][:16]
+                if names:
+                    recs[kind] = names
+            if recs:
+                ctx["bible_records"] = recs
+            n = int((ctx.get("chapter") or {}).get("number") or 0)
+            from . import story_ledger as sl  # noqa: PLC0415
+            earlier = []
+            for e in sorted((sl.get_all(self.store, pid, branch).get("chapters") or {}).values(),
+                            key=lambda e: e.get("number") or 0):
+                if isinstance(e, dict) and isinstance(e.get("number"), int) and e["number"] < n and e.get("summary"):
+                    earlier.append({"chapter": e["number"], "what_happened": _clip(" ".join(e["summary"]), 240)})
+            if earlier:
+                ctx["earlier_chapters"] = earlier[-8:]
+            learned = needs_list.learned(self.store, pid, branch, n or None)
+            if learned:
+                ctx["needs_learned"] = learned
+        except Exception:  # noqa: BLE001 - a hint only
+            log.exception("could not add the needs-list context")
 
     # ------------------------------------------------------------------ light review (an independent AI)
     def check(self, job, chapter_id: str) -> dict:

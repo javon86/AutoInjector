@@ -25,6 +25,13 @@
   chapter names, and the 🔒 details earlier chapters already used (they must match). ``meta.detail_refs`` lists every
   dossier part the brief carried (locked once the chapter is approved).
 
+* 🧠 ``needed_details`` / ``earlier_moments`` / ``needs_list`` (needs_list.py, smart memory): when the chapter's scene
+  cards carry a needs list, the writer gets exactly the listed Book Bible sections of the listed records (accepted
+  values, each with its code), short passages of the earlier chapters it names, and only the ledger sections it asks
+  for — instead of ``character_details`` / ``world_details`` / ``fixed_details`` and the whole ledger. The always-on
+  parts stay. Without a needs list: everything as before (keyword guessing). ``meta["smart_memory"]`` (when built with
+  ``measure``): the brief's size against the old way's.
+
 P14: a book made with parts of the pipeline switched off (pipeline.py: scenes / voices / rules / planned) gets no
 scene cards / voice cards / story rules and texture / must-show details here, even when such data exists.
 * ``rules``: how to use all of this, in plain sentences.
@@ -52,6 +59,7 @@ import logging
 
 from . import characters as chars_mod
 from . import brief_cuts
+from . import needs_list
 from . import scenes as scenes_mod
 
 log = logging.getLogger("akowe.chapter_brief")
@@ -171,8 +179,11 @@ def _main_character(store, pid, branch, cs: list, present: list, pov) -> tuple[d
         return None
 
 
-def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str) -> tuple[dict | None, dict]:
-    """(brief or None, meta) for one outline chapter. meta = numbers and IDs only (stored with the chapter)."""
+def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str, *, use_needs: bool = True,
+          measure: bool = False) -> tuple[dict | None, dict]:
+    """(brief or None, meta) for one outline chapter. meta = numbers and IDs only (stored with the chapter).
+    🧠 ``use_needs``: follow the chapter's needs list when it has one (needs_list.py); ``measure``: also build the
+    old way and put both sizes in ``meta["smart_memory"]``."""
     meta = {"characters": [], "voice_cards": 0, "summarized": False, "scene_cards": None, "pov": None, "chars": 0}
     try:
         if not outline or not isinstance(outline.get("data"), dict):
@@ -223,16 +234,36 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str) -
             brief["main_character"] = main[0]
             meta["protagonist"] = main[1]
         used: dict = {}
-        details = _forge_details(store, pid, branch, outline, chapter_id, present, cs, texts, flags["scenes"],
-                                 used=used) if flags["voices"] else []
-        if details:  # 🗂 B5: approved dossier fields with only the letters this chapter needs (≤ 2 500 chars)
-            brief["character_details"] = details
-        refs = {f"character:{rid}": keys for rid, keys in used.items() if keys}
+        # 🧠 smart memory: the chapter's needs list (made with its scene cards) says exactly which Book Bible
+        # sections the writer gets; without one (older books / plans) the keyword guessing below, as before
+        needs = None
+        if use_needs and flags["voices"]:
+            needs = needs_list.of_chapter(store, pid, branch, outline, chapter_id)
+        if needs:
+            from .book_path import BookPath  # noqa: PLC0415
+            order_ = [c["chapter_id"] for c in BookPath.outline_chapters(None, outline)]
+            number = order_.index(chapter_id) + 1 if chapter_id in order_ else None
+            nb = needs_list.brief_parts(store, pid, branch, needs, number=number, cut=cut)
+            details = []
+            if nb["details"]:
+                brief["needed_details"] = nb["details"]
+            if nb["earlier"]:
+                brief["earlier_moments"] = nb["earlier"]
+            brief["needs_list"] = nb["line"]
+            meta["needs"] = {"line": nb["line"], "empty": nb["empty"][:12], "earlier": len(nb["earlier"]),
+                             "records": len(nb["details"])}
+            refs = dict(nb["refs"])
+        else:
+            details = _forge_details(store, pid, branch, outline, chapter_id, present, cs, texts, flags["scenes"],
+                                     used=used) if flags["voices"] else []
+            if details:  # 🗂 B5: approved dossier fields with only the letters this chapter needs (≤ 2 500 chars)
+                brief["character_details"] = details
+            refs = {f"character:{rid}": keys for rid, keys in used.items() if keys}
         from . import character_mode  # noqa: PLC0415 - 🧑 ⚖ 🗺 how the story treats the characters
         cmode = character_mode.of_store(store, pid)
         brief["character_mode"] = character_mode.brief(cmode)
         world, fixed = [], []
-        if flags["voices"]:  # ⏱ story_details.py: places / items / magic of this chapter, and the 🔒 fixed parts
+        if flags["voices"] and not needs:  # ⏱ story_details.py: places / items / magic, and the 🔒 fixed parts
             from . import story_details  # noqa: PLC0415
             wused: dict = {}
             world = story_details.world_brief(store, pid, branch, outline, chapter_id, used=wused)
@@ -252,6 +283,8 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str) -
             extra.pop("world_texture", None)
         if not flags["planned"]:
             extra.pop("must_show", None)
+        if needs and not needs_list.world_wanted(needs, "world_texture"):
+            extra.pop("world_texture", None)  # 🧠 world details (W55) only when the needs list asks for them
         brief.update({k: v for k, v in extra.items() if v})
         length = _length(store, pid, outline)
         if length:
@@ -276,6 +309,10 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str) -
             rules.append(RULES["must_show"])
         if brief.get("character_details"):
             rules.append(RULES["character_details"])
+        if brief.get("needed_details"):
+            rules.append(needs_list.RULE)
+        if brief.get("earlier_moments"):
+            rules.append(needs_list.EARLIER_RULE)
         if world:
             rules.append(story_details.WORLD_RULE)
         if fixed:
@@ -313,6 +350,8 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str) -
                 None, outline)], chapter_id, [c["name"] for c in present], cut=cut)
             rules += cont.pop("continuity_rules", [])
             brief.update(cont)
+            if needs:  # 🧠 only the running-notes sections the needs list asked for (the story so far stays)
+                needs_list.filter_ledger(brief, needs)
             if cut:  # H13: the continuity part's own cuts join the ⚠️ "what was cut" list (brief_cuts.py)
                 meta["cut"] = cut
         if length:
@@ -327,7 +366,8 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str) -
         brief["rules"] = rules
         if not (cards or vb["cards"] or vb["others"] or pov or planned or extra.get("story_rules")
                 or extra.get("world_texture") or extra.get("story_choices") or length or style
-                or brief.get("character_details") or main or world or fixed
+                or brief.get("character_details") or main or world or fixed or brief.get("needed_details")
+                or brief.get("earlier_moments")
                 or any(k in brief for k in ("physical_state", "character_state", "two_readings", "version_changes",
                                             "previous_chapter_end", "story_so_far", "story_ledger",
                                             "series_state", "series_world"))):
@@ -346,6 +386,11 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str) -
                     narrator_style=bool(style), series_state=len(brief.get("series_state") or []) or None,
                     detail_refs=refs or None, character_mode=cmode,
                     chars=len(json.dumps(brief, ensure_ascii=False)))
+        if needs and measure:  # 🧠 how big the old way (keyword guessing) would have been, for the size metric
+            old, _m = build(store, pid, branch, outline, chapter_id, use_needs=False)
+            old_n = len(json.dumps(old, ensure_ascii=False)) if old else 0
+            meta["smart_memory"] = {"chars": meta["chars"], "old_chars": old_n,
+                                    "saved_pct": round(100 * (old_n - meta["chars"]) / old_n) if old_n else 0}
         return brief, meta
     except Exception:  # noqa: BLE001 - a brief is help for the writer, never a reason to fail the chapter
         log.exception("could not build the writing brief of chapter %s", chapter_id)

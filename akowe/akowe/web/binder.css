@@ -1013,3 +1013,5 @@ a.bnd-gl-row:focus-visible { outline: 3px solid var(--bnd-link); outline-offset:
   .bnd-menu-pop { position: fixed; left: 16px !important; right: 16px !important; top: auto; max-width: none; }
 }
 @media print { .bnd-glance, .bnd-about, .bnd-menu { display: none !important; } }
+.bnd-needs { margin: 0 0 12px; }
+@media print { .bnd-needs details { display: none; } }

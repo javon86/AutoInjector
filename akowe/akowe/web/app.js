@@ -11,6 +11,7 @@ import { viewTrailer } from './trailer.js';  // 🎞 B2 the book trailer (AutoIn
 import { viewCover } from './cover.js';  // 🎨 B3 book covers
 import { viewBinder } from './binder.js';  // 📖 Book Bible binder (the author's template studio design)
 import { CODE_MAP, CODE_MAP_MD } from './code-map.js';  // 🔢 the Book Bible code map (code_map.py)
+import { needsBox } from './needs-list.js';  // 🧠 a chapter's needs list (needs_list.py)
 
 /* ======================================================================= constants */
 // Fallback names; the full guide (purpose, build order, featured actions) comes from GET /api/sets.
@@ -7121,6 +7122,9 @@ function plannedCard(rid, { onSaved } = {}) {
     info.stored && info.stored.ai && info.stored.ai.independent === false ? h('span', { class: 'words-warn' }, ` ⚠️ ${info.stored.ai.warning}`) : null));
     // H13: what did not fit in this chapter's instructions (said, never cut silently)
     if (info.instructions_cut && info.instructions_cut.line) body.appendChild(h('p', { class: 'small words-warn', 'data-testid': 'instructions-cut' }, info.instructions_cut.line));
+    // 🧠 smart memory: the chapter's needs list (codes hoverable, the list expandable) and the size it saved
+    const nb = needsBox(h, info.needs_list, { number: info.needs_list ? info.needs_list.number : null });
+    if (nb) body.appendChild(nb);
     body.appendChild(h('ul', { class: 'planned-list' }, items.map(i => h('li', { class: `pl-${i.status}${i.required ? '' : ' optional'}`, 'data-status': i.status },
       h('span', { 'aria-hidden': 'true' }, PLANNED_ICON[i.status] || '•'), ' ', i.label,
       i.required ? null : h('span', { class: 'small muted' }, ' (nice to have)'),
@@ -7922,7 +7926,7 @@ function whoRead(u, who, at) {
 }
 function renderRun() {
   const r = MB.run; if (!r || !MB.dialog) return;
-  const sig = JSON.stringify([r.status, r.phase, r.current, r.problem && r.problem.code, (r.waiting || {}).retry_at, r.steps.map(s => [s.state, s.message, s.review_note, s.editor_note, (s.items || []).map(i => [i.state, i.editor, i.scenes, i.phase, i.note, i.planned, i.length, i.continuity]), s.planned_note, s.checkpoints]), (r.files || []).length, r.ais, r.ai_alerts, r.review_summary, r.editor_summary, r.planned_summary, r.eta, r.report, r.save, r.costs && [r.costs.calls, r.costs.ais]]);
+  const sig = JSON.stringify([r.status, r.phase, r.current, r.problem && r.problem.code, (r.waiting || {}).retry_at, r.steps.map(s => [s.state, s.message, s.review_note, s.editor_note, (s.items || []).map(i => [i.state, i.editor, i.scenes, i.phase, i.note, i.planned, i.length, i.continuity, i.memory]), s.planned_note, s.checkpoints]), (r.files || []).length, r.ais, r.ai_alerts, r.review_summary, r.editor_summary, r.planned_summary, r.eta, r.report, r.save, r.costs && [r.costs.calls, r.costs.ais]]);
   if (sig === MB.sig && MB.dialog.querySelector('.mb-steps')) { updateRunClocks(); return; }
   MB.sig = sig;
   const w = r.state === 'replaced' ? ['↪', 'Replaced by a newer run', 'b-muted'] : r.state === 'interrupted' ? RUN_WORD.interrupted
@@ -7975,6 +7979,8 @@ function renderRun() {
           i.continuity && (i.continuity.weak || i.continuity.flags) ? h('span', { class: 'small mb-pl flagged', 'data-testid': 'mb-item-continuity' },
             i.continuity.weak ? ' · 🧭 ⚠️ continuity read weakly (no AI was free) — read again later' : '',
             i.continuity.flags ? ` · 🧭 ⚠️ ${i.continuity.flags} continuity question(s)` : '') : null,
+          i.memory && i.memory.old_chars ? h('span', { class: 'small muted', 'data-testid': 'mb-item-memory', title: `Instructions with the needs list: ${Number(i.memory.chars).toLocaleString()} characters; the old way: ${Number(i.memory.old_chars).toLocaleString()}` },
+            i.memory.saved_pct > 0 ? ` · 🧠 needs list: ${i.memory.saved_pct}% smaller instructions` : ' · 🧠 needs list used') : null,
           i.planned ? h('span', { class: `small mb-pl${i.planned.flagged ? ' flagged' : ''}`, 'data-testid': 'mb-item-planned' },
             i.planned.flagged ? ` · ⚠️ ${i.planned.missing} planned item(s) not on the page` : ' · ✅ plan on the page',
             i.planned.fixed ? ` (${i.planned.fixed} fix kept)` : '') : null))) : null));

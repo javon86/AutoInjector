@@ -1696,3 +1696,9 @@ html[data-mode="simple"] .topbar .health-btn.adv-only[data-state="problem"] { di
 .codemap-table tr.codemap-sec th { background: var(--soft, #f3f1ea); font-weight: 700; padding-top: 10px; }
 .codemap-table code { font-weight: 700; }
 @media print { .codemap-table { font-size: 10.5px; } }
+/* 🧠 smart memory: a chapter's needs list (needs-list.js) */
+.needs-box { margin: 8px 0; padding: 6px 10px; border-left: 3px solid var(--accent, #7a5c2e); background: var(--soft, #f3f1ea); border-radius: 4px; }
+.needs-box .nl-line { margin: 0 0 4px; overflow-wrap: anywhere; }
+.needs-box .nl-code { font-family: ui-monospace, monospace; font-weight: 600; cursor: help; text-decoration: underline dotted; }
+.needs-box .nl-code:focus { outline: 2px solid var(--focus, #2a6df4); outline-offset: 1px; }
+.needs-box details ul ul { margin: 2px 0 6px 1.2em; }

@@ -927,6 +927,8 @@ class ReviewService:
         if rec["module_id"] == "C02":  # Section 7: the state before this chapter and deliberate version changes
             from . import continuity  # noqa: PLC0415
             ctx.update(continuity.review_extra(self.store, pid, branch, rec))
+            from . import needs_list  # noqa: PLC0415 - 🧠 the chapter's needs list: each listed section checked
+            ctx.update(needs_list.review_extra(self.store, pid, branch, rec))
         if extra:
             ctx.update(extra)
         return ctx, protected

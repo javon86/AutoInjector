@@ -606,6 +606,36 @@ the browser: `tests/campaign/ui/test_ui_continuity.py`):
   and ≤ 36 fields per AI call; a second round fills what the first made possible (new relationship rows). Never
   touches text, 🔒 protected fields, read-only mirrors or the author's record fields (supplied canon, record controls …).
 
+## 🧠 Smart memory with chapter needs lists (2026-11, the author's design) — done
+
+- **The planner writes it** (`akowe/needs_list.py`, `scenes.py make`): the scene-plan answer also carries `needs` —
+  per named thing {thing, kind, sections: whole-section codes like `C11`, `C55(Tom)`, note}, `earlier` [{chapter,
+  moment}] and `notes` (ledger codes `N11(Mara)` …). The planner is given the code sections, the book's place / item /
+  magic names, the earlier chapters' summaries and what earlier chapters used without planning it. `clean` validates:
+  single-field codes are upgraded to their section, unknown / wrong-kind codes and characters the book lacks are
+  dropped — each with a plain note. Stored in the scene-card entry (`entry["needs"]`, kept across the author's edits for
+  the same outline revision). Shown as a line with hoverable / expandable codes on the chapter page (✅ Planned to page)
+  and the Book Bible chapter page (`web/needs-list.js`).
+- **The writer gets exactly that** (`chapter_brief.build`): `needed_details` (accepted values of every field of each
+  listed section, each labelled with its code; 🔒 used codes marked `fixed`), `earlier_moments` (the best-matching
+  sentences of the named earlier chapters, ≤ 420 chars each), only the asked ledger parts — instead of the guessed
+  `character_details` / `world_details` / `fixed_details`, the whole ledger and the world texture (only with `W55`).
+  Always on: voice cards, scene cards, POV, story so far + previous chapter end, story rules, book profile, length.
+  An empty listed section is filled just in time, exactly that section, once (`jit_subjects` → story_details).
+  Without a needs list (older books / plans): the keyword guessing, unchanged.
+- **Learning and checks:** after each chapter the text is compared with its list ("🧠 Chapter 1 also used Tom Reed (not
+  planned)", event `NEEDS_UNPLANNED`, kept per chapter, fed to the next scene plans, listed by the checkpoint report).
+  The chapter reviewer (`needs_list` + `needs_note`) and the checkpoints (`needs_lists`, `CHECK_NOTE`) get the lists;
+  Akọwe's own check names the single-field code on a mismatch ("Mara Vell C1c (eyes) doesn't match …").
+- **Measured:** every chapter's brief is also built the old way (`measure=True`), stored in c_meta → run chapter row
+  ("🧠 needs list: N% smaller instructions"), `needs_list:<pid>:<branch>` and ⏱ Time and AI use ("🧠 Smart memory saved
+  ~N% of instruction size", per chapter). Fake-AI sample (novelette, 6 chapters): ~10% smaller with the just-in-time
+  Bible (66 178 vs 73 705 characters), ~20% with the whole Book Bible filled (68 649 vs 85 507) — the always-on
+  parts (rules, voice cards, scene cards) are most of a brief.
+- *Not done:* group (G), world (W, except W55) and book (B/S/H) sections are accepted and shown but add nothing beyond
+  the always-on parts; the mismatch check covers eye and hair colour only (the AI checks the rest); the passage search
+  is word overlap (English).
+
 ## Prevention pass (2026-10-27, "solve problems before they become problems")
 
 - [x] **Alfred's local AI connection:**

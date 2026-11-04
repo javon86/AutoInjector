@@ -728,7 +728,10 @@ def before_chapter(svc, run, st, cid: str, number: int, item: dict | None = None
         outline = bp.outline()
         if not outline:
             return
-        subjects = chapter_needs(store, pid, branch, outline, cid)
+        from . import needs_list  # noqa: PLC0415 - 🧠 a needs list: exactly its still-empty sections
+        nl = needs_list.of_chapter(store, pid, branch, outline, cid)
+        subjects = needs_list.jit_subjects(store, pid, branch, nl) if nl else \
+            chapter_needs(store, pid, branch, outline, cid)
     except Exception as exc:  # noqa: BLE001
         if getattr(exc, "control", False):
             raise
@@ -890,6 +893,8 @@ def after_chapter(svc, run, cid: str, number: int | None = None) -> None:
         found = contradictions(store, pid, branch, [{"chapter_id": cid, "number": number, "text": text}])
         for f in found:
             svc.event(run, "note", f"⚠️ {f['message']}", step="chapters", chapter_id=cid, code="DETAIL_CONTRADICTION")
+        from . import needs_list  # noqa: PLC0415 - 🧠 what the page used that its needs list did not plan
+        needs_list.after_chapter(svc, run, outline, cid, number, text)
 
         def fn(d):
             c = dict(d["chapters"].get(cid) or {})
