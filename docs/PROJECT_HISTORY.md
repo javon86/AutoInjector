@@ -43,6 +43,7 @@ A plain-words record of every big change, newest first, so that if something bre
 
 | Date | PR | What changed |
 |---|---|---|
+| 2026-11-04 | #? | ✨ Originality check: clichés and AI-sounding passages flagged per chapter (no AI), an optional AI "sounds machine-written" rating, and the editor's rewrites aimed at them |
 | 2026-11-03 | #112 | Smart memory: per-chapter needs lists, so the writer gets exactly what the chapter needs |
 | 2026-11-03 | #111 | Book Bible code map, plus the "Fill the whole Book Bible" switch and button |
 | 2026-11-03 | #110 | All 26 continuity and process holes fixed, continuity checkpoints for long books, and HOW_IT_WORKS.md |

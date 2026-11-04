@@ -636,6 +636,30 @@ the browser: `tests/campaign/ui/test_ui_continuity.py`):
   the always-on parts; the mismatch check covers eye and hair colour only (the AI checks the rest); the passage search
   is word overlap (English).
 
+## ✨ #20 Originality and "sounds like AI" check (2026-11) — done
+
+- **Akọwe's own check, no AI** (`akowe/originality.py` + the editable list `akowe/ai_tells.json`): extends the P6
+  pattern checker (reuses its paragraph / sentence / dialogue helpers; borrows its lists-of-three, abstract
+  paragraph-ending and "Not X. Not Y." counts instead of counting them twice) with ~120 AI-tell phrases ("a testament
+  to", "tapestry", "delve", "the weight of her …", "couldn't help but", "a symphony of", "little did they know", "a
+  breath she didn't know she was holding" …), ~100 clichés, long dashes (—), "It wasn't X. It was Y.", hedging
+  (perhaps, somehow, as if …) and paragraphs that open with the narrator's question. Rates per 1 000 words of
+  narration against thresholds in the JSON; dialogue is left out unless asked ("Count dialogue too"). Each finding:
+  chapter, paragraph, an exact quote, a plain reason and advice; each chapter a 0–100 score and a plain rating.
+  Deterministic, ~20 ms per 5 000 words plus the pattern check's own time.
+- **Optional AI pass:** an AI that did not write those chapters rates the flagged paragraphs plus one sample per
+  chapter 1–5 for "sounds machine-written", with reasons, the machine-sounding words and a suggested rewrite. Every
+  quote is checked against the book and its chapter (beta_reader.py's way); unverified ones are shown but not counted.
+  Stored as advice in `originality:<pid>:<branch>` (newest 5). API: `GET/POST …/originality`, `GET …/originality/job/<id>`.
+- **Wired in:** the editor gets the chapter's AI-sounding passages (`context.ai_sounding`, prose_variety question), so
+  its findings and the writer's targeted rewrites go after them; a rewrite is kept only if nothing got worse — and now
+  also only if it does not add AI-sounding phrases or clichés (`judge_rewrite`, code `MORE_AI_SOUNDING`). The 📊 book
+  report has a one-line summary (and a Markdown section); the report page has the ✨ Originality check card
+  (`web/originality.js`): per-chapter scores, the findings, the counts and the AI pass. A ⚡ run notes the line after
+  the report. Never blocks the book.
+- *Not done:* the AI pass is a button only (not a ⚡ run step); the lists are English; "triplet adjectives" use the
+  pattern checker's general lists of three (no part-of-speech tagging).
+
 ## Prevention pass (2026-10-27, "solve problems before they become problems")
 
 - [x] **Alfred's local AI connection:**

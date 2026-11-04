@@ -248,9 +248,10 @@ def _chapters_in(chapters) -> list[dict]:
 
 
 # ====================================================================== the no-AI check
-def check(chapters, *, include_dialogue: bool = False, overrides: dict | None = None) -> dict:
+def check(chapters, *, include_dialogue: bool = False, overrides: dict | None = None, borrowed: bool = True) -> dict:
     """The originality report of a book: ``chapters`` is [{chapter_id, number, title, text}] or [(chapter_id, text)].
-    Deterministic, no AI, nothing stored (see the module docstring for the output)."""
+    Deterministic, no AI, nothing stored (see the module docstring for the output). ``borrowed=False`` skips the
+    counts borrowed from the pattern checker (for callers that already have them, e.g. the editor)."""
     L = _lists()
     thr = {k: dict(v, **((overrides or {}).get(k) or {})) for k, v in L["thresholds"].items()}
     findings: list[dict] = []
@@ -258,7 +259,7 @@ def check(chapters, *, include_dialogue: bool = False, overrides: dict | None = 
     totals = {k: 0 for k in LABELS}
     words_all = narr_all = 0
     for ch in _chapters_in(chapters):
-        res = _check_chapter(ch, L, thr, include_dialogue)
+        res = _check_chapter(ch, L, thr, include_dialogue, borrowed)
         rows.append(res["row"])
         findings.extend(res["findings"])
         for k, v in res["counts"].items():
@@ -297,7 +298,7 @@ def _rating(rate: float) -> str:
     return next(label for top, label in RATINGS if rate < top)
 
 
-def _check_chapter(ch: dict, L: dict, thr: dict, include_dialogue: bool) -> dict:
+def _check_chapter(ch: dict, L: dict, thr: dict, include_dialogue: bool, borrowed: bool = True) -> dict:
     pars = paragraphs(ch["text"])
     counts = {k: 0 for k in LABELS}
     found: list[dict] = []
@@ -356,7 +357,7 @@ def _check_chapter(ch: dict, L: dict, thr: dict, include_dialogue: bool) -> dict
             add("em_dash", pi, par, max(at, 0), max(at, 0) + 1, REASONS["em_dash"].format(n=nd))
     # -- borrowed from the P6 pattern checker (counted there, not twice)
     try:
-        pa = prose_audit.audit(ch["text"], chapter=ch["chapter_id"])
+        pa = prose_audit.audit(ch["text"], chapter=ch["chapter_id"]) if borrowed else {"findings": []}
     except Exception:  # noqa: BLE001 - the borrowed counts are a bonus
         log.exception("pattern check failed inside the originality check")
         pa = {"findings": []}
@@ -398,7 +399,7 @@ def editor_brief(text: str, limit: int = EDITOR_LIMIT) -> dict | None:
     """The chapter's AI-sounding passages for the editor (``context.ai_sounding``): exact quotes with a reason, the
     worst first. Only Akọwe's own originality checks (the borrowed pattern counts already reach the editor through
     the pattern report). None when there is nothing to say."""
-    rep = check([(None, text or "")])
+    rep = check([(None, text or "")], borrowed=False)
     fs = [f for f in rep["findings"] if f.get("source") != "pattern_check"]
     if not fs:
         return None
@@ -421,7 +422,7 @@ def editor_brief(text: str, limit: int = EDITOR_LIMIT) -> dict | None:
 def counts(text: str) -> int:
     """How many AI-sounding phrases, clichés and "It wasn't X. It was Y." lines a text has (for "nothing got
     worse")."""
-    rep = check([(None, text or "")])
+    rep = check([(None, text or "")], borrowed=False)
     c = {x["check"]: x["count"] for x in rep["checks"]}
     return c.get("ai_phrase", 0) + c.get("cliche", 0) + c.get("not_this_but_that", 0)
 
