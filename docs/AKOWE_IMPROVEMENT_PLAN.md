@@ -37,6 +37,8 @@ Legend: `[ ]` to do · `[~]` in progress · `[x]` done · `[!]` problem (see "Pr
   wizard's duplicate forms are gone (one place each: 🎨 Images, 🎬 Video). Also: ebook cover JPG, map PNG in Word,
   style-card delete fix, motion clips for items/places/magic, new characters from scratch, auto-save + update-or-copy +
   big books opened from a folder, MCP tool servers, book trailers (B2).
+- **✍ Write alongside me (done 2026-11):** highlight a passage in a chapter and the AI continues, rewrites, describes,
+  expands or tightens it; a suggestion with ⚠️ quick checks, used as a new draft version. See "✍ Write alongside me".
 - **Back burner (later, by the user's call):** a first real GPU run of video/trailers; the audiobook export (P29).
 - **Still to try for real:** everything above has only been tested with stand-in AIs — the first real
   run on the user's PC is the real test (see "Problems to come back to").
@@ -658,6 +660,41 @@ the browser: `tests/campaign/ui/test_ui_continuity.py`):
   position). Books without a shape: unchanged.
 - *Not done:* the AI placement runs only inside a ⚡ run (outside, beats are placed by position); a beat's
   "landed" check is the planned-to-page check (word reading + the independent AI), not a structural analysis.
+
+## ✍ Write alongside me (2026-11, the author's request) — done
+
+- **What the author does** (chapter page → ✏️ Change it, or ✍ Write alongside me): highlight a passage in the chapter
+  text (or put the cursor) and press ✍ Continue from here · 🔁 Rewrite (with an optional note, e.g. "more tense") ·
+  🎨 Describe more · ➕ Expand · ✂ Tighten. "Which AI": Auto asks the chapter's writer first (a soft preference; another
+  working AI answers when it is not working), or a chosen AI-1/2/3. Without a highlighted passage only ✍ Continue works;
+  the others say in plain words "Highlight the passage first".
+- **The focused brief** (`akowe/alongside.py brief`): the passage, ≤ 3 000 characters before and ≤ 1 500 after it, the
+  chapter's place in the plan (`editor.chapter_info`), and the passage-relevant parts of `chapter_brief.build` (scene
+  cards, the 🧠 needs list and its `needed_details` / `earlier_moments`, voice cards of the characters named around the
+  passage plus the narrator, 🔒 `fixed_details`, running notes / tracked state, story rules, the author's choices and
+  style), the book profile with the promises (point of view, tense, content limits; `book_promises.instruction`) and
+  the protected facts. Whole-chapter parts (length, story so far, must-show, the scene-by-scene rule) are left out.
+- **The AI call** is a review job (`ReviewService._start` → `AssistService._call_ai`): busy is waited for, a site error
+  moves to another working AI, a timeout stops with a plain error and 🔁 Try again (never retried by itself).
+  Routes: POST `…/review/alongside` {record_id, action, text?, start, end, note?, slot_id?} → 202 job (poll
+  `…/review/ai/<job>`); the answer `{text, why}` is cleaned (fences, quotes, repeated text) and is only a suggestion.
+- **The suggestion** shows the author's text next to the new one (word-level changes marked, `alongside.diff`) with
+  ✔ Use this / 🔁 Try again / ✖ Discard, plus Akọwe's quick checks ⚠️ (`alongside.checks`, no AI): a slip into the
+  first person or the present tense (or out of the book's first person / present tense), and a locked detail said
+  otherwise (`story_details.contradictions`, `needs_list.mismatches`: "Mara: the suggestion says “blue eyes”…").
+- **✔ Use this** (POST `…/review/alongside/use`): the chapter as it is in the editor, with the suggestion in place (the
+  passage is found again if the author typed elsewhere meanwhile; the words before the cursor for ✍ Continue), saved
+  as a NEW DRAFT through the normal UPDATE path — the same as a hand edit: an approved chapter stays in the book until
+  the new version is approved, and approving it runs the H5 hand-edit follow-through (`continuity.check_edits`: later
+  chapters flagged "check chapter N", running notes read again). Noted in `ai_fixes` (made by "Written alongside you
+  by …"); activity event `alongside.used` (numbers only). A suggestion for an older version is refused (VERSION_CONFLICT).
+- **Tests:** `tests/test_alongside.py` (13: request checks, brief, joining / diff, job + use + H5 flags, busy, site
+  error, timeout, refusals, ⚠️ checks) and `tests/campaign/ui/test_ui_alongside.py` (2: the whole flow in the browser,
+  and a phone-width screen). The fake AI answers `akowe_task: write_alongside` (`autobook_fake._alongside`,
+  `alongside_script`).
+- *Not done:* only in the chapter editor (the reading view's ✍ button opens it); the quick checks cover point of view,
+  tense and the colour / weapon / hand locked details only (content limits are left to the reviewer when the new
+  version is reviewed); the suggestion is not streamed (it arrives whole).
 
 ## Prevention pass (2026-10-27, "solve problems before they become problems")
 

@@ -136,6 +136,13 @@ bridge to your home Wi-Fi, behind its key.
 - **Canon:** the approved records together are the book's **canon**, the official truth everything else must match.
 - **Out of date (stale):** if something a record was built from changes, Akọwe marks that record out of date.
 - **AI slots:** AI-1, AI-2 and AI-3. By default they are Claude, ChatGPT and Gemini, through the bridge.
+- **✍ Write alongside me:** on a chapter's page, highlight a passage (or put the cursor) and press ✍ Continue from
+  here, 🔁 Rewrite (with an optional note, such as "more tense"), 🎨 Describe more, ➕ Expand or ✂ Tighten. The AI
+  (by default the one that wrote the chapter) gets the text around the passage, the chapter's plan and needs list, the
+  voices of the characters there, the locked details, the running notes, the story rules, the point of view and tense,
+  and your content limits. You see its suggestion next to your text, with ⚠️ notes when it slips into another person
+  or tense or changes a locked detail. Nothing changes until you press ✔ Use this: that saves a new version for you
+  to approve, exactly like your own edit.
 
 ### 🎨 Images
 

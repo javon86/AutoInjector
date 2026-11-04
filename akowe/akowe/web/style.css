@@ -1710,3 +1710,13 @@ html[data-mode="simple"] .topbar .health-btn.adv-only[data-state="problem"] { di
 .shape-strip li.is-ok { background: var(--ok-soft); }
 .shape-strip li.is-miss { background: var(--bad-soft); }
 .shape-box .row select { max-width: 100%; }
+/* ✍ Write alongside me (app.js alongsideCard) */
+.wa-card { margin-top: 14px; }
+.wa-actions { flex-wrap: wrap; gap: 6px; }
+.wa-suggest { margin-top: 12px; padding: 10px 12px; border: 1px solid var(--border, #d0d5dd); border-radius: 8px; background: var(--surface-2); }
+.wa-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; margin: 8px 0; }
+.wa-col h4 { margin: 0 0 4px; font-size: .9em; color: var(--text-muted); }
+.wa-text { font-family: var(--font-prose); white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; }
+.wa-text ins { background: var(--ok-soft); text-decoration: none; }
+.wa-text del { background: var(--bad-soft); text-decoration-color: var(--bad); }
+@media (max-width: 700px) { .wa-cols { grid-template-columns: minmax(0, 1fr); } }

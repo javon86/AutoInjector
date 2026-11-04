@@ -2810,6 +2810,104 @@ function choiceSelect(id, choices, current, noneLabel, what) {
   return sel;
 }
 
+/* ======================================================================= ✍ Write alongside me (alongside.py)
+ * In the chapter editor: highlight a passage (or put the cursor) and ask the AI to continue, rewrite, describe more,
+ * expand or tighten it. The answer is a suggestion (before / after, with quick ⚠️ checks); nothing changes until the
+ * author presses ✔ Use this, which saves the chapter (as it is in the boxes, with the suggestion) as a new version. */
+const WA_ACTIONS = [
+  { id: 'continue', label: '✍ Continue from here', tip: 'Writes the next part of the story from the cursor (or after the highlighted words).' },
+  { id: 'rewrite', label: '🔁 Rewrite', tip: 'Says the highlighted passage again, better. Add a note to steer it, e.g. “more tense”.' },
+  { id: 'describe', label: '🎨 Describe more', tip: 'Adds what can be seen, heard, smelled and felt to the highlighted passage.' },
+  { id: 'expand', label: '➕ Expand', tip: 'Makes the highlighted passage longer: more of the moment, no new events.' },
+  { id: 'tighten', label: '✂ Tighten', tip: 'Makes the highlighted passage shorter and sharper.' },
+];
+function alongsideCard({ rid, tIn, bIn, draftKey }) {
+  const note = h('input', { type: 'text', id: 'wa-note', maxlength: '300', placeholder: 'e.g. more tense', 'aria-describedby': 'wa-note-h' });
+  const ai = aiPicker('wa-ai', null);
+  const prog = h('div', { 'aria-live': 'polite' });
+  const out = h('div', { 'aria-live': 'polite', 'data-testid': 'wa-out' });
+  const where = h('p', { class: 'small muted', 'data-testid': 'wa-where' }, 'Highlight a passage in the chapter text above, or put the cursor where the new text should go.');
+  // The chapter as it is saved ("# Title\n\nText"), and the highlighted part as positions in it.
+  const current = () => {
+    const t = tIn.value.trim(); const body = bIn.value.replace(/\s+$/, '');
+    const pre = t ? `# ${t}\n\n`.length : 0;
+    const clamp = n => Math.min(Math.max(0, n), body.length);
+    return { text: joinChapter(tIn.value, bIn.value), start: pre + clamp(bIn.selectionStart), end: pre + clamp(bIn.selectionEnd) };
+  };
+  const showWhere = () => {
+    const n = Math.abs(bIn.selectionEnd - bIn.selectionStart);
+    where.textContent = n ? `Highlighted: ${bIn.value.slice(bIn.selectionStart, bIn.selectionEnd).trim().split(/\s+/).filter(Boolean).length} word(s).`
+      : 'No words highlighted: only ✍ Continue from here works with just the cursor. Highlight a passage for the others.';
+  };
+  ['select', 'keyup', 'mouseup'].forEach(ev => bIn.addEventListener(ev, showWhere));
+  let last = null;
+  const ask = async (action, again) => {
+    clear(out);
+    const req = again && last ? last.req : Object.assign({ record_id: rid, action, note: note.value.trim() || undefined, slot_id: ai.value() || undefined }, current());
+    const def = WA_ACTIONS.find(a => a.id === req.action);
+    if (req.action !== 'continue' && !req.text.slice(req.start, req.end).trim()) {
+      out.appendChild(stateBox('fix', 'Highlight the passage first', h('p', null, `${def.label} works on the words you highlight in the chapter text. Select them with the mouse (or Shift + arrow keys), then press it again. Only ✍ Continue from here works with just the cursor.`)));
+      bIn.focus(); return;
+    }
+    const btns = card.querySelectorAll('.wa-actions button'); btns.forEach(b => { b.disabled = true; });
+    const job = await runAiJob('/review/alongside', req, prog, `${def.label}: the AI is writing`);
+    btns.forEach(b => { b.disabled = false; });
+    if (!job) return;
+    const res = (job.results || [])[0];
+    if (!res) return;
+    last = { req, res, job };
+    out.appendChild(suggestionView(res, job));
+  };
+  const suggestionView = (res, job) => {
+    const msg = h('div', { 'aria-live': 'polite' });
+    const after = h('div', { class: 'wa-text', 'data-testid': 'wa-after' }, (res.diff || []).map(d => d.op === 'add' ? h('ins', null, d.text) : d.op === 'del' ? h('del', null, d.text) : d.text));
+    const isCont = res.action === 'continue';
+    const use = h('button', { type: 'button', class: 'primary', 'data-testid': 'wa-use' }, '✔ Use this');
+    const sec = h('section', { class: 'wa-suggest', 'data-testid': 'wa-suggestion', 'aria-label': 'The AI’s suggestion' },
+      h('h3', null, `${res.action_label} — a suggestion by ${res.slot_label || job.slot_label || 'the AI'}`),
+      h('p', { class: 'small muted' }, 'Nothing in your chapter has changed yet. ✔ Use this saves the chapter as it is in the boxes above, with this suggestion in it, as a new version for you to approve.'),
+      (res.notes || []).length ? h('div', { class: 'words-warn', role: 'note', 'data-testid': 'wa-notes' },
+        h('strong', null, 'Akọwe’s quick checks:'), h('ul', { class: 'small' }, res.notes.map(n => h('li', null, '⚠️ ', n.message)))) : null,
+      h('div', { class: 'wa-cols' },
+        h('div', { class: 'wa-col' }, h('h4', null, isCont ? 'It goes after' : 'Your text'),
+          h('div', { class: 'wa-text', 'data-testid': 'wa-before' }, isCont ? `…${clipWords(String(res.anchor || '').trim(), 60)}` : res.passage)),
+        h('div', { class: 'wa-col' }, h('h4', null, isCont ? 'New text' : 'Suggestion (changes marked)'), after)),
+      res.why ? h('p', { class: 'small muted' }, `The AI says: ${res.why}`) : null,
+      h('div', { class: 'row' }, use,
+        h('button', { type: 'button', 'data-testid': 'wa-again', onclick: () => ask(res.action, true) }, '🔁 Try again'),
+        h('button', { type: 'button', 'data-testid': 'wa-discard', onclick: () => { clear(out); last = null; bIn.focus(); } }, '✖ Discard')),
+      msg);
+    use.addEventListener('click', async () => {
+      use.disabled = true; clear(msg).appendChild(loadingState('Saving the new version…'));
+      const c = current();
+      try {
+        const r = await api('POST', bpath('/review/alongside/use'), { body: { record_id: rid, version: res.version, action: res.action,
+          suggestion: res.suggestion, start: res.start, end: res.end, passage: res.passage, anchor: res.anchor, text: c.text, job_id: job.job_id } });
+        removeKey(draftKey);
+        S.details[rid] = null;
+        try { await refreshRecords(); } catch { /* best effort */ }
+        toast(r.message || `Saved as version ${r.version}`, 6000);
+        go(plink('write', rid, 'edit'));
+      } catch (e) {
+        clear(msg).appendChild(problemBox(toProblem(e, { book: S.project.name, step: 'Write alongside me' }), {}));
+        use.disabled = false;
+      }
+    });
+    return sec;
+  };
+  const card = h('section', { class: 'card wa-card', 'aria-labelledby': 'wa-h', 'data-testid': 'alongside' },
+    h('h2', { id: 'wa-h' }, '✍ Write alongside me'),
+    h('p', { class: 'small' }, 'Highlight a passage in the chapter text (or put the cursor where new text should go), then pick what the AI should do. It sees the text around it, the chapter’s plan, the characters’ voices, the details already fixed in the book and your rules. You get a suggestion to use or throw away.'),
+    where,
+    h('div', { class: 'row wa-actions' }, WA_ACTIONS.map(a => h('button', { type: 'button', 'data-wa': a.id, title: a.tip, onclick: () => ask(a.id, false) }, a.label))),
+    h('div', { class: 'grid-2' },
+      h('div', { class: 'field' }, h('label', { for: note.id }, 'A note for the AI (optional)'), note,
+        h('span', { class: 'hint', id: 'wa-note-h' }, 'For example: more tense, quieter, funnier, shorter sentences.')),
+      h('div', null, ai.field, h('p', { class: 'hint' }, 'Auto asks the AI that wrote this chapter first.'))),
+    prog, out);
+  return card;
+}
+
 async function viewWrite(main, rid, mode) {
   const d = await recordDetail(rid, true);
   const latest = d.versions[d.versions.length - 1];
@@ -2886,7 +2984,9 @@ async function viewWrite(main, rid, mode) {
       card.appendChild(ol);
     }
     card.appendChild(h('div', { class: 'form-actions' }, approveBtn(),
-      h('button', { type: 'button', onclick: () => editor() }, '✏️ Change it'), back()));
+      h('button', { type: 'button', onclick: () => editor() }, '✏️ Change it'),
+      isChapter ? h('button', { type: 'button', 'data-testid': 'wa-open', title: 'Opens the chapter text: highlight a passage and the AI continues, rewrites, describes, expands or tightens it.', onclick: () => editor() }, '✍ Write alongside me') : null,
+      back()));
   };
 
   const draftKey = `bf:simple:${S.pid}:${S.branch}:${rid}`;
@@ -2919,6 +3019,7 @@ async function viewWrite(main, rid, mode) {
         h('div', { class: 'field' }, h('label', { for: bIn.id }, 'The chapter text'), bIn, h('span', { class: 'hint', id: 'sd-text-h' }, 'Leave an empty line between paragraphs.')));
       collect = () => ({ v: { title: tIn.value, body: bIn.value }, data: Object.assign({}, latest.data, { text: joinChapter(tIn.value, bIn.value) }),
         empty: !bIn.value.trim() ? bIn : null });
+      card.appendChild(alongsideCard({ rid, tIn, bIn, draftKey }));  // ✍ Write alongside me
       bIn.focus();
     } else {
       const rows = [];

@@ -957,6 +957,14 @@ class App:
                 return 202, rv.start_editor_fix(principal, pid, branch, body)
             if rest == ["editor", "apply"] and method == "POST":
                 return 200, rv.apply_editor_fix(principal, pid, branch, body)
+            if rest == ["alongside"] and method == "POST":  # ✍ Write alongside me: a suggestion for a passage
+                from . import alongside  # noqa: PLC0415
+                return 202, alongside.start(rv, principal, pid, branch, body)
+            if rest == ["alongside", "use"] and method == "POST":  # ✔ Use this -> a new draft version
+                from . import alongside  # noqa: PLC0415
+                out = alongside.use(rv, principal, pid, branch, body)
+                self.saver.auto(pid, branch, reason="write alongside")
+                return 200, out
             if len(rest) == 2 and rest[0] == "editor" and method == "GET":
                 return 200, rv.editor_info(principal, pid, branch, rest[1])
             if len(rest) == 2 and rest[0] == "ai" and method == "GET":
