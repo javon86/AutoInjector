@@ -2355,6 +2355,15 @@ def fill(page: Page) -> dict:
     for k in ("graph", "map"):
         if page.extra.get(k):
             out[k] = page.extra[k]
+    if page.template == "10":  # 📐 the story shape's beats on the chapters (story_shape.py)
+        try:
+            from . import story_shape  # noqa: PLC0415
+            b = page.book
+            sh = story_shape.page_info(b.store, b.pid, b.branch, b.outline, bp=getattr(b, "bp", None))
+            if sh:
+                out["story_shape"] = sh
+        except Exception:  # noqa: BLE001
+            log.exception("binder: story shape of %s", page.page_id)
     if page.template == "11" and page.subject.get("chapter_id"):  # 🧠 the chapter's needs list (needs_list.py)
         try:
             from . import needs_list  # noqa: PLC0415

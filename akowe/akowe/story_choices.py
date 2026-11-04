@@ -103,7 +103,12 @@ def field_info() -> dict:
                         for k, label, hlp, opts in CHOICES],
             "matrix": [{"key": r, "label": label, "help": hlp, "values": list(vals)} for r, label, hlp, vals in MATRIX],
             "presets": PRESETS, "explain_to_mystery": EXPLAIN_TO_MYSTERY,
-            "character_mode": character_mode.info()}
+            "character_mode": character_mode.info(), "story_shape": _shape_info()}
+
+
+def _shape_info() -> dict:
+    from . import story_shape  # noqa: PLC0415 - 📐 the story shape (story structure template)
+    return story_shape.info()
 
 
 def clean(raw) -> dict:
@@ -125,6 +130,10 @@ def clean(raw) -> dict:
     cm = character_mode.clean(raw.get(character_mode.KEY))  # 🧑 ⚖ 🗺 how the story treats the characters
     if cm:
         out[character_mode.KEY] = cm
+    from . import story_shape  # noqa: PLC0415 - 📐 the story shape ("" = let the AI decide)
+    sh = story_shape.clean(raw.get(story_shape.KEY))
+    if sh:
+        out[story_shape.KEY] = sh
     m = raw.get("matrix")
     if m not in (None, {}):
         if not isinstance(m, dict):
@@ -290,6 +299,9 @@ def summary(choices: dict) -> list[str]:
     out = [f"{labels[k]}: {vl[k][choices[k]]}" for k in KEYS if choices.get(k)]
     if choices.get(character_mode.KEY):
         out.append(character_mode.summary_line(choices[character_mode.KEY]))
+    if choices.get("shape"):
+        from . import story_shape  # noqa: PLC0415
+        out.append(f"Story shape: {story_shape.label_of(choices['shape'])}")
     if choices.get("matrix"):
         out.append("Ending options changed: " + ", ".join(f"{r.replace('_', ' ')} {v}"
                                                           for r, v in choices["matrix"].items()))

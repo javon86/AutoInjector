@@ -636,6 +636,29 @@ the browser: `tests/campaign/ui/test_ui_continuity.py`):
   the always-on parts; the mismatch check covers eye and hair colour only (the AI checks the rest); the passage search
   is word overlap (English).
 
+## 📐 Story structure templates ("story shape", 2026-11) — done
+
+- **The choice** (`akowe/story_shape.py`): None — let the AI decide (default), Three acts, Save the Cat (15 beats),
+  Hero's Journey (12 stages), Seven-point. Each template is data: beat id, plain name, plain description, where it
+  usually falls (% of the book). Stored with the ending and style choices (`choices.shape`), so it is picked on ⚡ Make
+  a book, the 🚀 wizard and the profile; changed on the plan page (outline step, `set_story_shape`) until a chapter is
+  written.
+- **Outline:** the B11 planner gets `story_shape` (each beat with its `around_chapter`) and a rule; in a ⚡ run, once
+  the outline is approved, one AI call places each beat on a chapter with one sentence of how (`place`). `validate`
+  places a beat left out, placed twice, on an unknown chapter, before an earlier beat or far from where it belongs by
+  its position instead. Stored per outline revision (`story_shape:<pid>:<branch>`); without a stored placement (outline
+  made outside a run, shape changed) the beats are placed by position.
+- **Shown** as a strip ("Ch 22 · Dark night of the soul", ✔ / ⚠ once written) on the plan page and the Book Bible's
+  story-plan page (S2 Plot line).
+- **Checked with the existing machinery:** scene planner + scene checker and the writer brief (`story_beats`, "this
+  chapter must deliver the story beat …"), the chapter reviewer (`story_beats` + note), the planned-to-page check
+  (kind `story_beat`, required, top priority → its one targeted fix), the checkpoints and the final ending check
+  (report + ONE targeted fix via `fix_beats` when the planned-to-page check had not already tried one; the author's own
+  text is never changed). ✍ Write all chapters gets the beats in the scene cards and the writer brief (placed by
+  position). Books without a shape: unchanged.
+- *Not done:* the AI placement runs only inside a ⚡ run (outside, beats are placed by position); a beat's
+  "landed" check is the planned-to-page check (word reading + the independent AI), not a structural analysis.
+
 ## Prevention pass (2026-10-27, "solve problems before they become problems")
 
 - [x] **Alfred's local AI connection:**

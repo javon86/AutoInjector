@@ -712,7 +712,21 @@ class PlanHandler(OperationHandler):
             lr = self._length_rule(ctx)
             if lr:
                 out += " " + lr
+            if self._story_shape(ctx):  # 📐 the author's story shape: every beat gets its chapter
+                from .. import story_shape  # noqa: PLC0415
+                out += " " + story_shape.OUTLINE_RULE
         return (out.strip() + " ") if out.strip() else ""
+
+    @staticmethod
+    def _story_shape(ctx: Context) -> dict | None:
+        """📐 The story shape the author chose, with the chapter each beat usually falls in (never raises)."""
+        try:
+            from .. import story_shape  # noqa: PLC0415
+            target = ctx.payload.get("target_length") if isinstance(ctx.payload, dict) else None
+            n = target.get("value") if isinstance(target, dict) and target.get("unit") == "chapters" else None
+            return story_shape.outline_brief(ctx.store, ctx.project_id, n)
+        except Exception:  # noqa: BLE001 - guidance is best effort
+            return None
 
     @staticmethod
     def _length_rule(ctx: Context) -> str:
@@ -796,6 +810,9 @@ class PlanHandler(OperationHandler):
             problems = self._earlier_refusals(ctx)
             if problems:
                 base["previous_attempt_problems"] = problems
+            shape = self._story_shape(ctx)
+            if shape:
+                base["story_shape"] = shape
         if self.op_id in ("B01", "B03", "B11"):
             mc, cast = self._story_roles(ctx, canon)
             if mc:

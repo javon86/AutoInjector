@@ -230,6 +230,7 @@ class BookFakeAI:
         self.ending_fix = True                   # 🎯 the writer adds an ending finding's suggestion after the passage
         self.plot_obligations: list = []         # 🎯 the main plot's setups (B03 plot_obligations) the ending must keep
         self.needs = None                        # 🧠 a needs list returned with every scene plan (dict or callable(ctx))
+        self.shape_script: list = []             # 📐 scripted beat placements (dicts or callables(ctx)), one per call
 
     def fail_next(self, *excs):
         self.failures.extend(excs)
@@ -270,6 +271,18 @@ class BookFakeAI:
     def _answer(self, ctx, props, schema):
         if ctx.get("akowe_task") == "story_details":  # ⏱ story details (essentials / just in time)
             return "details", self._details(ctx)
+        if "placements" in props and "story_shape" in ctx:  # 📐 place the story shape's beats on the chapters
+            with self.lock:
+                scripted = self.shape_script.pop(0) if self.shape_script else None
+            if scripted is not None:
+                return "shape", scripted(ctx) if callable(scripted) else copy.deepcopy(scripted)
+            chs = ctx.get("chapters") or []
+            out = []
+            for b in (ctx["story_shape"] or {}).get("beats") or []:
+                n = int(b.get("around_chapter") or 1)
+                obj = next((c.get("objective") for c in chs if c.get("chapter") == n), "") or ""
+                out.append({"beat": b["beat"], "chapter": n, "how": f"{obj} ({b['name']})"})
+            return "shape", {"placements": out}
         if "arc" in props and "question" in props:  # 🎯 H11 / H12: does the ending keep the book's promises?
             with self.lock:
                 scripted = self.ending_script.pop(0) if self.ending_script else None

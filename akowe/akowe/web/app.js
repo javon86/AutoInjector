@@ -238,6 +238,26 @@ async function loadItemName(i) {
   } catch { /* the generic name stays */ }
   return itemName(i);
 }
+/** 📐 The plan page's story-shape box: which shape, its beats on the chapters, and (until a chapter is written)
+ * a picker to change it. */
+function shapeBox(sh, post, run) {
+  const box = h('div', { class: 'shape-box', 'data-testid': 'plan-story-shape' },
+    h('p', { class: 'small' }, h('strong', null, '📐 Story shape: '), h('span', { 'data-testid': 'plan-story-shape-name' }, sh.label || storyShapeWord(sh.value)),
+      sh.value && sh.by === 'position' ? h('span', { class: 'muted' }, ' — each beat is placed where it usually falls in a book') : null,
+      sh.value && sh.by === 'ai' ? h('span', { class: 'muted' }, ' — the AI placed each beat on a chapter') : null),
+    storyShapeStrip(sh, 'plan-story-shape-strip'),
+    sh.value && !(sh.beats || []).some(b => b.number) ? h('p', { class: 'small muted' }, 'The beats are placed on the chapters once the chapter outline is approved.') : null);
+  const info = storyShapeInfo();
+  if (sh.can_change && info) {
+    const id = 'plan-shape-pick';
+    const sel = h('select', { id, 'data-testid': 'plan-story-shape-pick' }, info.options.map(o => h('option', { value: o.value, selected: (sh.value || '') === o.value }, o.label)));
+    box.appendChild(h('div', { class: 'row' }, h('label', { for: id, class: 'small' }, 'Change the story shape '), sel,
+      h('button', { type: 'button', class: 'small', 'data-testid': 'plan-story-shape-save', onclick: () => run(() => post('set_story_shape', { shape: sel.value }), 'Changing the story shape…', 'outline') }, 'Use this shape')));
+  } else if (sh.can_change === false && sh.value) {
+    box.appendChild(h('p', { class: 'small muted' }, 'The chapters are being written, so the story shape stays as it is.'));
+  }
+  return box;
+}
 /** "Chapter 1" for an outline chapter: its position in the outline (chapter ids like "ch1" are internal). */
 function chapterName(c, idx) { return `Chapter ${idx + 1}`; }
 /** Server-made titles and messages in the author's words ("Chapter ch1" -> "Chapter 1"). */
@@ -5602,6 +5622,7 @@ function renderBook(holder, book, redraw) {
       acts.appendChild(h('button', { type: 'button', class: 'small', onclick: () => run(() => post('create', { op: s.op, manual: true }), 'Preparing the form…', s.id) }, '✍️ Write it myself'));
       acts.appendChild(h('a', { class: 'btn small tech', href: plink('op', s.op) }, `Open ${s.op} (all fields)`));
     }
+    if (s.id === 'outline' && s.story_shape) li.appendChild(shapeBox(s.story_shape, post, run));
     if (s.id === 'outline' && s.state === 'done') {
       const o = S.records.find(r => r.module_id === 'B11' && r.approved_version);
       if (o) acts.appendChild(h('a', { class: 'btn small', href: plink('write', o.record_id) }, '📖 Read or change the outline'));
@@ -6830,6 +6851,37 @@ function characterModeField(cur, prefix) {
   show();
   return { el: h('div', { class: 'field' }, tipLabel(id, info.label, `${info.help} ${info.options.map(o => `${o.label}: ${o.about}`).join(' ')}`), s, about), get: () => s.value };
 }
+/** 📐 Story shape (story_shape.py): the shape of the story — None (the AI decides, default), Three acts, Save the Cat,
+ * Hero's Journey, Seven-point. Stored with the ending and style choices (choices.shape). */
+function storyShapeInfo() { return (CH.info && CH.info.story_shape) || null; }
+function storyShapeWord(v) {
+  const info = storyShapeInfo();
+  const o = info && info.options.find(x => x.value === (v || ''));
+  return o ? o.label : (v || 'None — let the AI decide');
+}
+function storyShapeField(cur, prefix) {
+  const info = storyShapeInfo();
+  if (!info) return { el: null, get: () => cur || '' };
+  const id = `${prefix}-ch-shape`;
+  const s = h('select', { id, 'data-choice': 'shape', 'data-testid': `${prefix}-story-shape` },
+    info.options.map(o => h('option', { value: o.value, selected: (cur || '') === o.value }, o.label)));
+  const about = h('p', { class: 'small muted', 'data-testid': `${prefix}-story-shape-about` });
+  const show = () => {
+    const o = info.options.find(x => x.value === s.value);
+    about.textContent = o ? `${o.about}${o.beats && o.beats.length ? ` The beats: ${o.beats.map(b => b.name).join(' → ')}.` : ''}` : '';
+  };
+  s.addEventListener('change', show);
+  show();
+  return { el: h('div', { class: 'field' }, tipLabel(id, info.label, info.help), s, about), get: () => s.value };
+}
+/** The beats of the story shape on the chapters, as a strip ("Ch 22 · Dark night of the soul"). */
+function storyShapeStrip(sh, testid) {
+  if (!sh || !(sh.beats || []).length) return null;
+  return h('ol', { class: 'shape-strip', 'data-testid': testid || 'story-shape-strip', 'aria-label': `Story shape: ${sh.label}` },
+    sh.beats.map(b => h('li', { class: b.landed === true ? 'is-ok' : b.landed === false ? 'is-miss' : null, 'data-beat': b.id, title: `${b.what}${b.how ? ` In this book: ${b.how}` : ''}` },
+      h('b', null, b.number ? `Ch ${b.number}` : 'Ch ?'), ' · ', b.name,
+      b.landed === true ? h('span', { class: 'shape-ok', 'aria-label': 'on the page' }, ' ✔') : b.landed === false ? h('span', { class: 'shape-miss', 'aria-label': 'not on the page yet' }, ' ⚠') : null)));
+}
 function choicesSummary(ch) {
   ch = ch || {};
   const info = CH.info;
@@ -6837,6 +6889,7 @@ function choicesSummary(ch) {
   for (const c of (info && info.choices) || []) if (ch[c.key]) out.push(`${c.label}: ${choiceWord(c.key, ch[c.key])}`);
   if (!info) for (const [k, v] of Object.entries(ch)) if (typeof v === 'string') out.push(`${k}: ${v}`);
   if (ch.characters) out.push(`${(characterModeInfo() || {}).label || 'How the story treats the characters'}: ${characterModeWord(ch.characters)}`);
+  if (ch.shape) out.push(`Story shape: ${storyShapeWord(ch.shape)}`);
   if (ch.matrix && Object.keys(ch.matrix).length) out.push(`Ending options changed: ${Object.entries(ch.matrix).map(([r, v]) => `${r.replace(/_/g, ' ')} ${v}`).join(', ')}`);
   return out;
 }
@@ -6855,6 +6908,7 @@ function choicesFields(cur, prefix) {
     return h('div', { class: 'field' }, tipLabel(id, c.label, `${c.help} ${c.options.map(o => `${o.label}: ${o.about}.`).join(' ')}`), s);
   };
   const cm = characterModeField(cur.characters, prefix);
+  const shp = storyShapeField(cur.shape, prefix);
   const main = info.choices.slice(0, 3).map(field);
   const style = info.choices.slice(3).map(field);
   const mx = {};
@@ -6874,6 +6928,8 @@ function choicesFields(cur, prefix) {
     if (Object.keys(m).length) out.matrix = m;
     const c = cm.get();
     if (c && (c !== (characterModeInfo() || {}).default || cur.characters)) out.characters = c;
+    const sv = shp.get();
+    if (sv) out.shape = sv;
     return out;
   };
   const showPreview = () => {
@@ -6884,6 +6940,7 @@ function choicesFields(cur, prefix) {
   const el = h('fieldset', { class: 'field choices-box', 'data-testid': `${prefix}-choices` },
     h('legend', null, '🎚️ Ending and style (optional)'),
     cm.el,
+    shp.el,
     h('p', { class: 'small muted' }, 'All optional — “Let the AI choose” leaves it to the story. The AI follows what you choose when it plans and writes, and the editor checks the ending against it.'),
     h('div', { class: 'grid-3' }, main),
     h('details', { class: 'style-knobs' }, h('summary', null, 'Style: dialogue, pace, humor'), h('div', { class: 'grid-3' }, style)),

@@ -2952,6 +2952,37 @@ class AutoBookService(_Runner):
         self._update_rules(run, st)
         n = len(self.bp(run).outline_chapters(self.bp(run).outline()))
         st["message"] = f"{n} chapter(s) planned and approved"
+        self._place_beats(run, st)
+
+    def _place_beats(self, run, st):
+        """📐 story_shape.py: the planner places each beat of the author's story shape on a chapter of the approved
+        outline (one AI call, checked by Akọwe; a beat it leaves out or misplaces is placed by its position). Once per
+        outline revision; never holds up the book."""
+        from . import story_shape  # noqa: PLC0415
+        bp = self.bp(run)
+        outline = bp.outline()
+        if not outline or not story_shape.of_store(self.store, run["project_id"]):
+            return
+        done = run.setdefault("beats_placed", {})
+        key = f"{outline['record_id']}:{outline['version']}"
+        if done.get(key):
+            return
+        try:
+            m = story_shape.place(self._review, self._sub_job(run, "story_shape", outline["record_id"],
+                                                              run["settings"].get("slot_id")), bp, outline)
+        except AkoweError as exc:
+            if getattr(exc, "control", False):
+                raise
+            self.event(run, "note", f"⚠️ The story shape could not be placed on the chapters ({exc.code}); each beat "
+                       "is placed by its position", step="outline", code="SHAPE_FAILED")
+            m = story_shape.mapping(self.store, run["project_id"], run["branch_id"], outline)
+        done[key] = True
+        if m:
+            st["shape"] = [story_shape.strip_label(b) for b in m["beats"]][:20]
+            self.event(run, "note", f"📐 {m['label']}: " + "; ".join(story_shape.strip_label(b) for b in m["beats"])
+                       + (f" (⚠️ {len(m['problems'])} placed by their position)" if m.get("problems") else ""),
+                       step="outline", code="SHAPE_PLACED")
+        self.save(run)
 
     def _repin_plan(self, run, st):
         """An approved character the approved main plot does not pin (made after the plot: the main character the
@@ -3160,6 +3191,8 @@ class AutoBookService(_Runner):
                 continuity.after_chapter(self, run, cid, rec, None)  # track the new ending again
                 continuity.note_written(self.store, pid, branch, cid, rec, number)
         try:
+            from . import story_shape  # noqa: PLC0415 - 📐 a story beat that did not land: one targeted fix
+            story_shape.fix_beats(self, run, st, outline, chapters, where="ending")
             if mem.get("fixing"):  # resumed while a fixed ending waited for its review
                 f = mem["fixing"]
                 finish_draft(f["record_id"], f["chapter_id"], f["number"])

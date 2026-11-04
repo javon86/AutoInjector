@@ -203,7 +203,10 @@ to a minute), so the run knows which AIs work.
 6. **Character pictures:** a portrait each, made with Stable Diffusion; each becomes that character's 🔒 lock.
    This never holds up the book.
 7. **Story rules and world texture:** what is law in this world, what is only believed, and real-world obstacles.
-8. **Premise**, then **main plot**, then **chapter outline**.
+8. **Premise**, then **main plot**, then **chapter outline**. If you picked a **story shape** (Three acts, Save the
+   Cat, Hero's Journey or Seven-point), the outline is planned on it and each of its beats is placed on a chapter
+   (shown as "Ch 22 · Dark night of the soul" on the plan page and in the Book Bible); a beat the AI leaves out or
+   misplaces goes where it usually falls in a book.
    - **Optional: fill the whole Book Bible** from the plan before chapter one. It is off unless you turn it on
      (on the start screen, or 📖 Book Bible → At a glance). It never holds up the book.
 9. **Every chapter.** For each one:
@@ -224,7 +227,9 @@ to a minute), so the run knows which AIs work.
      always sent back.
    - **The editor** reads it for craft and asks for rewrites of exact passages, at most two rounds. A rewrite is
      kept only if nothing got worse.
-   - **Planned-to-page check:** did the plan really reach the page? At most one targeted fix.
+   - **Planned-to-page check:** did the plan really reach the page? At most one targeted fix. With a story shape,
+     the chapter's beat is part of the plan: the scene cards, the writer and the reviewer are told "this chapter must
+     deliver …", and the checkpoints and the ending check list any beat that did not land (one targeted fix).
    - **Approved** under your run consent. Then the **running notes (ledgers)** are updated: injuries, belongings,
      who is where, the day and season, who knows which secret, names, money.
    - **Every 5 chapters** (you can change this), at each act's end, and after the last chapter: a **continuity

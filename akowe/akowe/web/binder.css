@@ -1015,3 +1015,10 @@ a.bnd-gl-row:focus-visible { outline: 3px solid var(--bnd-link); outline-offset:
 @media print { .bnd-glance, .bnd-about, .bnd-menu { display: none !important; } }
 .bnd-needs { margin: 0 0 12px; }
 @media print { .bnd-needs details { display: none; } }
+
+/* 📐 Story shape strip under the plot line */
+.bnd-shape { margin-top: 10px; }
+.bnd-shape-h { margin: 0 0 6px; font: 700 12px var(--bnd-f-label); color: var(--bnd-label); }
+.bnd-shape-strip { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.bnd-shape-strip li { padding: 2px 9px; border-radius: 999px; border: 1px solid var(--bnd-track); font-size: 12px; overflow-wrap: anywhere; }
+.bnd-shape-strip li.is-miss { border-color: #c0392b; }

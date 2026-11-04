@@ -929,6 +929,8 @@ class ReviewService:
             ctx.update(continuity.review_extra(self.store, pid, branch, rec))
             from . import needs_list  # noqa: PLC0415 - 🧠 the chapter's needs list: each listed section checked
             ctx.update(needs_list.review_extra(self.store, pid, branch, rec))
+            from . import story_shape  # noqa: PLC0415 - 📐 the story beat(s) this chapter must deliver
+            ctx.update(story_shape.review_extra(self.store, pid, branch, rec))
         if extra:
             ctx.update(extra)
         return ctx, protected

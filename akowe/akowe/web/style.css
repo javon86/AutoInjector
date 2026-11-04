@@ -1702,3 +1702,11 @@ html[data-mode="simple"] .topbar .health-btn.adv-only[data-state="problem"] { di
 .needs-box .nl-code { font-family: ui-monospace, monospace; font-weight: 600; cursor: help; text-decoration: underline dotted; }
 .needs-box .nl-code:focus { outline: 2px solid var(--focus, #2a6df4); outline-offset: 1px; }
 .needs-box details ul ul { margin: 2px 0 6px 1.2em; }
+
+/* 📐 Story shape: the beats of the chosen shape on the chapters (plan page) */
+.shape-box { margin: .5rem 0; padding: .5rem .75rem; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+.shape-strip { list-style: none; margin: .4rem 0; padding: 0; display: flex; flex-wrap: wrap; gap: .35rem; }
+.shape-strip li { padding: .15rem .55rem; border-radius: 999px; background: var(--info-soft); color: var(--text); font-size: .85rem; overflow-wrap: anywhere; }
+.shape-strip li.is-ok { background: var(--ok-soft); }
+.shape-strip li.is-miss { background: var(--bad-soft); }
+.shape-box .row select { max-width: 100%; }

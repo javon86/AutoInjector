@@ -588,6 +588,14 @@ class BookPath:
                                      prose=item(latest, ch["chapter_id"]) if latest else None,
                                      approved=item(appr) if appr else None, revision_waiting=revision, scenes=sc))
         all_written = bool(chapters) and all(c["state"] == "done" for c in chapters)
+        try:  # 📐 the story shape on the plan: the beats strip, and whether the shape may still change
+            from . import story_shape  # noqa: PLC0415
+            shape = story_shape.page_info(self.store, self.pid, self.branch, outline, bp=self,
+                                          can_change=not any(c.get("prose") or c.get("approved") for c in chapters))
+            if shape is not None:
+                next(s_ for s_ in steps if s_["id"] == "outline")["story_shape"] = shape
+        except Exception:  # noqa: BLE001 - never break the checklist
+            log.exception("story shape of the plan")
         # The book is put together from APPROVED chapter texts only: a waiting revision of an approved chapter keeps
         # the chapters step open (Approve) without stopping the author from re-assembling the approved book.
         all_approved = bool(chapters) and all(c.get("approved") for c in chapters)
@@ -695,7 +703,8 @@ class BookPath:
     def act(self, action: str, body: dict) -> dict:
         fn = {"create": self.a_create, "write_chapter": self.a_write_chapter, "approve": self.a_approve,
               "setup_format": self.a_setup_format, "assemble": self.a_assemble, "export": self.a_export,
-              "check": self.a_check, "set_role": self.a_set_role}.get(action)
+              "check": self.a_check, "set_role": self.a_set_role,
+              "set_story_shape": self.a_set_story_shape}.get(action)
         if fn is None:
             raise _err("NOT_FOUND", "/action", "unknown step action")
         try:
@@ -718,6 +727,31 @@ class BookPath:
         out = story_roles.set_role(self.store, self.pid, self.branch, rid, role, by="author", name=name,
                                    subject_id=subject)
         return {"ok": True, "story_role": out["story_role"], "message": f"“{name}” is now: {story_roles.title(role)}."}
+
+    def a_set_story_shape(self, body: dict) -> dict:
+        """📐 Change the story shape on the plan page — only before a chapter is written. The beats are then placed
+        on the approved outline by their position (a ⚡ run places them with the AI when it plans the outline)."""
+        from . import story_choices, story_shape  # noqa: PLC0415
+        shape = story_shape.clean(body.get("shape"))
+        outline = self.outline()
+        if outline:
+            for ch in self.outline_chapters(outline):
+                _ctx, latest, appr = self.chapter_prose(outline, ch["chapter_id"])
+                if (latest and not latest.get("stale")) or appr:
+                    raise StepError.msg("The story shape can only change before the chapters are written: a chapter "
+                                        "is already written.")
+        choices = dict(story_choices.of_profile(get_profile(self.store, self.pid)))
+        if shape:
+            choices[story_shape.KEY] = shape
+        else:
+            choices.pop(story_shape.KEY, None)
+        save_profile(self.store, self.pid, {"choices": choices})
+        self.profile = get_profile(self.store, self.pid)
+        story_shape.forget(self.store, self.pid, self.branch)
+        return {"ok": True, "story_shape": shape,
+                "message": f"Story shape: {story_shape.label_of(shape)}." + (
+                    " The beats are placed on your chapter outline by where they usually fall." if shape and outline
+                    else "")}
 
     def _manual(self, op, payload, why):
         return {"ok": False, "needs_manual": True, "op": op, "payload": payload, "message": why}
