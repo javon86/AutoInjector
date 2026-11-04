@@ -3327,7 +3327,7 @@ class AutoBookService(_Runner):
         if s["state"] != "needs_you":
             bp.a_setup_format({})
         self._approve_step_items(run, "format", "book format made by Akọwe from the profile (deterministic)")
-        st["message"] = "6 x 9 inch pages, Times 11 pt, PDF/EPUB/DOCX settings — approved"
+        st["message"] = "Page size and interior design (Book format page), PDF/EPUB/DOCX settings — approved"
 
     def _s_assemble(self, run, st):
         bp = self.bp(run)

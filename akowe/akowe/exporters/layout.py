@@ -164,7 +164,8 @@ def check_geometry(g: Geometry, typo: Typography) -> list[str]:
 
 @dataclass
 class Page:
-    # ("text", font, size, x, y, str, tw[, colour]) | ("img", key, x, y, w, h, clip)
+    # ("text", font, size, x, y, str, tw[, colour[, char spacing Tc[, actual text]]]) | ("img", key, x, y, w, h, clip)
+    # | ("poly", [(x, y)...], fill|None, stroke|None, line width) | ("mc", actual text) ... ("/mc",) (one /ActualText)
     # | ("rect", x, y, w, h, fill colour|None, stroke colour|None, line width) | ("line", x0, y0, x1, y1, colour, width)
     # | ("circle", cx, cy, r, fill colour|None, stroke colour|None, line width)
     ops: list = field(default_factory=list)
@@ -173,6 +174,8 @@ class Page:
     section_kind: str = ""
     size: tuple | None = None        # (width, height) pt when this page differs from the document (a landscape plate)
     background: tuple | str | None = None  # a full-page fill colour
+    role: str = ""                   # 🎨 interior themes: "opener" | "blank" | "title" | "" (a normal text page)
+    label: str = ""                  # 🎨 the chapter/section title of this page (a running header)
 
 
 @dataclass
@@ -621,8 +624,15 @@ class _Composer:
 
 
 def paginate(book: dict, geom: Geometry, typo: Typography, *, toc_entries: list[dict] | None = None,
-             toc_style: dict | None = None, images: dict | None = None) -> Layout:
-    """Compose the book. toc_entries (with pages from the previous pass) render the 'toc' section."""
+             toc_style: dict | None = None, images: dict | None = None, interior: dict | None = None) -> Layout:
+    """Compose the book. toc_entries (with pages from the previous pass) render the 'toc' section.
+
+    🎨 interior: an interior theme spec (``interior.spec``): chapter openers, drop caps, ornaments, running headers,
+    mirrored margins and widow/orphan control (``interior.paginate_themed``). None = the plain manuscript layout."""
+    if interior:
+        from .interior import paginate_themed  # noqa: PLC0415
+        return paginate_themed(book, geom, typo, interior, toc_entries=toc_entries, toc_style=toc_style,
+                               images=images)
     errs = check_geometry(geom, typo)
     if errs:
         raise LayoutError("; ".join(errs))

@@ -261,6 +261,15 @@ to a minute), so the run knows which AIs work.
 10. **Planned details on the page:** a whole-book report.
 11. **Book format**, **put the book together**, **export PDF, EPUB and Word**. Each file is re-read by Akọwe's
     export check to make sure nothing was lost.
+    - **🎨 Interior design:** the book format uses an interior theme for the printed pages. There are 8: one for each
+      Book Bible look, plus Plain classic. The default is your genre's. Each theme sets the chapter openings (a
+      number such as "Chapter Seven", "7" or "VII", the title, a rule), a large first letter (drop cap) with the first
+      words in small capitals, an ornament between scenes instead of `* * *`, page headers (author and title) and
+      page numbers. Chapter openings have no header or page number. Lines left alone at the top or bottom of a page
+      are avoided. You choose the theme, the page size (5 × 8, 5.25 × 8, 5.5 × 8.5, 6 × 9 or A5) and the body font
+      on the **Book format** step of Book home, and see a print preview of two page spreads. The inside margin
+      (where the book is bound) gets wider as the book gets longer. The EPUB and Word files follow the same design
+      where they can. Code: `akowe/akowe/exporters/interior.py`, `akowe/akowe/book_design.py`.
 12. **Content check** (every chapter once, in order) and the **book report**. An optional **beta reader** step
     reads the book as its target reader. You can ask for **1, 2 or 3 readers**. With 2 or 3, each reader is a
     different AI playing a different kind of reader: a typical fan, a picky reader of the genre, and a casual reader

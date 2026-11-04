@@ -493,7 +493,10 @@ def test_exports_place_the_chosen_pictures_with_captions(bk):
     # chapter 2's scene picture on a page of chapter 2; nothing for chapter 3
     pdf = files["PDF"]
     r = pypdf.PdfReader(io.BytesIO(pdf))
-    texts = [p.extract_text() for p in r.pages]
+    # the text as a reader copies it (pdfium reads the 🎨 interior theme's /ActualText: "Chapter 1", not "CHAPTER ONE")
+    import pypdfium2 as pdfium  # noqa: PLC0415
+    pdoc = pdfium.PdfDocument(pdf)
+    texts = [pdoc[i].get_textpage().get_text_range().replace("\r\n", "\n") for i in range(len(pdoc))]
     heads = [next(i for i, t in enumerate(texts) if t.startswith(f"Chapter {n}\n")) for n in (1, 2, 3)]
     assert "The coast of Gullhaven" in texts[heads[0] - 1] and "Gullhaven Harbor" in texts[heads[0] - 1]
     assert not (r.pages[heads[0] - 1]["/Resources"].get("/XObject") or {})
