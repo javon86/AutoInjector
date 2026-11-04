@@ -53,12 +53,44 @@ def _runs(block: dict) -> str:
     return "".join(_t(text, style) for text, style in block["runs"])
 
 
+def _sc_runs(runs: list, words: int) -> str:
+    """🎨 Paragraph runs with the first ``words`` words in small capitals (Word keeps the letters as written)."""
+    out, left = [], words
+    for text, style in runs:
+        if left > 0 and text:
+            parts = text.split(" ")
+            head, rest = [], []
+            for i, w in enumerate(parts):
+                if left > 0:
+                    head.append(w)
+                    if w:
+                        left -= 1
+                else:
+                    rest = parts[i:]
+                    break
+            htxt = " ".join(head) + (" " if rest else "")
+            if htxt:
+                rpr = _RPR.get(style, "<w:rPr></w:rPr>").replace("</w:rPr>", "<w:smallCaps/></w:rPr>")
+                out.append(f"<w:r>{rpr}<w:t xml:space=\"preserve\">{escape(htxt)}</w:t></w:r>")
+            if rest:
+                out.append(_t(" ".join(rest), style))
+        elif text:
+            out.append(_t(text, style))
+    return "".join(out)
+
+
 def _p(style: str, inner: str, ppr_extra: str = "") -> str:
     return f"<w:p><w:pPr><w:pStyle w:val=\"{style}\"/>{ppr_extra}</w:pPr>{inner}</w:p>"
 
 
-def _styles(family: str, size_pt: float, leading_pt: float) -> str:
+def _styles(family: str, size_pt: float, leading_pt: float, theme: dict | None = None) -> str:
     font = DOCX_FONTS.get(family, "Times New Roman")
+    head_font = DOCX_FONTS.get((theme or {}).get("head"), font)
+    head_rpr = ""
+    if theme:  # 🎨 the theme's heading font and style
+        head_rpr = (f"<w:rFonts w:ascii={quoteattr(head_font)} w:hAnsi={quoteattr(head_font)} w:cs={quoteattr(head_font)}/>"
+                    + ("<w:b/>" if theme.get("head_style") == "bold" else "")
+                    + ("<w:i/>" if theme.get("head_style") == "italic" else ""))
     hp = int(round(size_pt * 2))
     line = int(round(leading_pt * 20))
 
@@ -83,8 +115,15 @@ def _styles(family: str, size_pt: float, leading_pt: float) -> str:
             + style("Subtitle", "Subtitle", "<w:jc w:val=\"center\"/><w:spacing w:after=\"240\"/>",
                     f"<w:sz w:val=\"{int(hp * 1.2)}\"/>")
             + style("Heading1", "heading 1", "<w:keepNext/><w:pageBreakBefore/><w:jc w:val=\"center\"/>"
-                    "<w:spacing w:before=\"720\" w:after=\"360\" w:line=\"240\" w:lineRule=\"auto\"/><w:outlineLvl w:val=\"0\"/>",
-                    f"<w:b/><w:sz w:val=\"{int(hp * 1.6)}\"/>", nxt="FirstParagraph")
+                    f"<w:spacing w:before=\"{2400 if theme else 720}\" w:after=\"{720 if theme else 360}\" w:line=\"240\" "
+                    "w:lineRule=\"auto\"/><w:outlineLvl w:val=\"0\"/>",
+                    (head_rpr if theme else "<w:b/>") + f"<w:sz w:val=\"{int(hp * 1.6)}\"/>", nxt="FirstParagraph")
+            + (style("DropCap", "Drop Cap", f"<w:framePr w:dropCap=\"drop\" w:lines=\"{max(2, (theme or {}).get('drop_cap') or 3)}\" "
+                     "w:wrap=\"around\" w:vAnchor=\"text\" w:hAnchor=\"text\"/><w:spacing w:line=\"240\" "
+                     "w:lineRule=\"auto\"/><w:textAlignment w:val=\"baseline\"/>",
+                     f"<w:rFonts w:ascii={quoteattr(head_font)} w:hAnsi={quoteattr(head_font)}/>"
+                     + ("<w:b/>" if (theme or {}).get("drop_style") == "bold" else "")
+                     + ("<w:i/>" if (theme or {}).get("drop_style") == "italic" else "")) if theme else "")
             + style("Heading2", "heading 2", "<w:keepNext/><w:spacing w:before=\"240\" w:after=\"120\" w:line=\"240\" "
                     "w:lineRule=\"auto\"/><w:outlineLvl w:val=\"1\"/>", f"<w:b/><w:sz w:val=\"{int(hp * 1.2)}\"/>",
                     nxt="FirstParagraph")
@@ -130,11 +169,35 @@ def _drawing(rid: str, n: int, cx: int, cy: int, name: str, orientation: int = 1
             "</a:graphicData></a:graphic></wp:inline></w:drawing></w:r>")
 
 
+def _hf(kind: str, text: str = "", *, page_field: bool = False, align: str = "center", caps: bool = False,
+        italic: bool = False) -> str:
+    """A header (``hdr``) or footer (``ftr``) part: one centred/left/right line, or the PAGE number field."""
+    tag = "w:hdr" if kind == "hdr" else "w:ftr"
+    rpr = "<w:rPr>" + ("<w:caps/><w:spacing w:val=\"30\"/>" if caps else "") + ("<w:i/>" if italic else "") + \
+        "<w:sz w:val=\"17\"/></w:rPr>"
+    if page_field:
+        inner = (f"<w:r>{rpr}<w:fldChar w:fldCharType=\"begin\"/></w:r><w:r>{rpr}<w:instrText xml:space=\"preserve\">"
+                 f" PAGE </w:instrText></w:r><w:r>{rpr}<w:fldChar w:fldCharType=\"separate\"/></w:r><w:r>{rpr}<w:t>1</w:t>"
+                 f"</w:r><w:r>{rpr}<w:fldChar w:fldCharType=\"end\"/></w:r>")
+    else:
+        inner = f"<w:r>{rpr}<w:t xml:space=\"preserve\">{escape(text)}</w:t></w:r>" if text else ""
+    return (f"<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<{tag} xmlns:w=\"{W}\" xmlns:r=\"{R}\">"
+            f"<w:p><w:pPr><w:jc w:val=\"{align}\"/></w:pPr>{inner}</w:p></{tag}>\n")
+
+
 def build_docx(book: dict, *, created: str, family: str = "times", size_pt: float = 11.0, leading_pt: float = 14.0,
                toc_entries: list[dict] | None = None, images: dict | None = None,
-               page: dict | None = None) -> bytes:
-    """images: key -> (bytes, ImageInfo); page: PAGE_PROFILE (mm) for section size/margins or None."""
+               page: dict | None = None, theme: dict | None = None) -> bytes:
+    """images: key -> (bytes, ImageInfo); page: PAGE_PROFILE (mm) for section size/margins or None.
+
+    🎨 theme (an interior theme spec, best effort in Word): the theme's fonts, chapter headings as written in the
+    theme's look (spaced capitals, italic, size), a real Word drop cap and small capitals on each chapter's first
+    words, the scene-break ornament, and - with a page size - mirrored margins, a section per chapter (starting on a
+    right-hand page when the theme says so) with running headers (author / title) and page numbers, none on openers."""
+    from . import interior as interior_mod  # noqa: PLC0415
     meta = book["meta"]
+    if theme and theme.get("body"):
+        family = theme["body"]
     images = images or {}
     rels: list[tuple[str, str, str]] = [
         ("rId1", "http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles", "styles.xml"),
@@ -162,6 +225,50 @@ def build_docx(book: dict, *, created: str, family: str = "times", size_pt: floa
 
     body: list[str] = []
     drawing_n = 0
+    themed_pages = bool(theme and page)
+    prev_kind = "front"
+    hf_rid: dict[str, str] = {}
+    hf_parts: list[tuple[str, str, str]] = []  # (part name, kind, xml)
+    if themed_pages:
+        title, author = meta.get("title", ""), meta.get("author", "")
+        upper = theme.get("header_case") == "upper"
+        italic = theme.get("header_case") == "italic"
+        outer = theme.get("folio") == "outer"
+        for name, kind, xml in (
+                ("header1.xml", "hdr", _hf("hdr", title, caps=upper, italic=italic)),
+                ("header2.xml", "hdr", _hf("hdr", author or title, caps=upper, italic=italic)),
+                ("header3.xml", "hdr", _hf("hdr")),
+                ("footer1.xml", "ftr", _hf("ftr", page_field=True, align="right" if outer else "center")),
+                ("footer2.xml", "ftr", _hf("ftr", page_field=True, align="left" if outer else "center")),
+                ("footer3.xml", "ftr", _hf("ftr"))):
+            rid = f"rId{len(rels) + 1}"
+            rels.append((rid, "http://schemas.openxmlformats.org/officeDocument/2006/relationships/"
+                         + ("header" if kind == "hdr" else "footer"), name))
+            hf_rid[name] = rid
+            hf_parts.append((name, kind, xml))
+        tw_ = lambda pt: int(round(pt * 20))  # noqa: E731 - twentieths of a point
+        mg = interior_mod.margins_for(page, 250, size_pt)
+
+    def sect_pr(kind: str) -> str:
+        """Section properties: a chapter starts on a new (right-hand) page, no header/number on its first page."""
+        if kind == "front":
+            refs = "".join(f"<w:{t}Reference w:type=\"{ty}\" r:id=\"{hf_rid[n]}\"/>" for t, ty, n in (
+                ("header", "default", "header3.xml"), ("header", "even", "header3.xml"),
+                ("header", "first", "header3.xml"), ("footer", "default", "footer3.xml"),
+                ("footer", "even", "footer3.xml"), ("footer", "first", "footer3.xml")))
+            start = "nextPage"
+        else:
+            refs = "".join(f"<w:{t}Reference w:type=\"{ty}\" r:id=\"{hf_rid[n]}\"/>" for t, ty, n in (
+                ("header", "default", "header1.xml"), ("header", "even", "header2.xml"),
+                ("header", "first", "header3.xml"), ("footer", "default", "footer1.xml"),
+                ("footer", "even", "footer2.xml"), ("footer", "first", "footer3.xml")))
+            start = "oddPage" if theme.get("recto_start") else "nextPage"
+        mm = lambda v: int(round(v * 1440 / 25.4))  # noqa: E731
+        return (f"<w:sectPr>{refs}<w:type w:val=\"{start}\"/><w:pgSz w:w=\"{mm(page['width_mm'])}\" "
+                f"w:h=\"{mm(page['height_mm'])}\"/><w:pgMar w:top=\"{tw_(mg['top'])}\" w:right=\"{tw_(mg['right'])}\" "
+                f"w:bottom=\"{tw_(mg['bottom'])}\" w:left=\"{tw_(mg['left'])}\" "
+                f"w:header=\"{mm(page['safe_margin_mm'])}\" w:footer=\"{mm(page['safe_margin_mm'])}\" w:gutter=\"0\"/>"
+                "<w:titlePg/></w:sectPr>")
     for s in book["sections"]:
         if s["kind"] == "toc" and toc_entries is None:
             continue
@@ -188,21 +295,51 @@ def build_docx(book: dict, *, created: str, family: str = "times", size_pt: floa
                 body.append(_p(f"TOC{min(e.get('level', 1), 2)}", runs))
             continue
         plate = s["kind"] == "plate"  # 🖼 B3: a picture on a page of its own (no heading)
-        if not plate:
+        if themed_pages and s["kind"] == "chapter":
+            if body:  # the section before this chapter ends here (its own section properties)
+                body.append(f"<w:p><w:pPr><w:pStyle w:val=\"Normal\"/>{sect_pr(prev_kind)}</w:pPr></w:p>")
+            prev_kind = "chapter"
+        if not plate and theme and s["kind"] == "chapter":
+            # Word keeps the heading as written ("Chapter 2: The Brass Key": the navigation pane and the contents
+            # read it); the theme gives it its look: spaced capitals, italic or bold, the heading font (styles.xml)
+            caps = theme.get("number_case") == "upper" or theme.get("title_case") == "upper"
+            rpr = (("<w:caps/><w:spacing w:val=\"30\"/>" if caps else "")
+                   + ("<w:i/>" if theme.get("title_style") == "italic" or theme.get("head_style") == "italic" else ""))
+            head = f"<w:r><w:rPr>{rpr}</w:rPr><w:t xml:space=\"preserve\">{escape(s['heading'])}</w:t></w:r>"
+            body.append(_p("Heading1", bookmark(s["id"], head),
+                           "<w:pageBreakBefore w:val=\"0\"/>" if themed_pages else ""))
+        elif not plate:
             body.append(_p("Heading1", bookmark(s["id"], _t(s["heading"]))))
+        opened, after_break = s["kind"] != "chapter" or not theme, False
         for b in s["blocks"]:
             t = b["t"]
             if t == "vmap" and b.get("png_key") in images:  # 🖨 a drawn map with its PNG copy: placed as a picture
                 b = dict(b, t="img", key=b["png_key"])
                 t = "img"
-            if t == "p":
+            if t == "p" and theme and (not opened or (after_break and theme.get("small_caps"))):
+                runs = list(b.get("runs") or [(b["text"], "")])
+                if not opened and theme.get("drop_cap") and runs and runs[0][0]:
+                    first_text = runs[0][0]
+                    k = 0
+                    while k < len(first_text) and not first_text[k].isalnum():
+                        k += 1
+                    if k < len(first_text) and k < 3:
+                        body.append(_p("DropCap", _t(first_text[:k + 1], runs[0][1])))
+                        runs[0] = (first_text[k + 1:], runs[0][1])
+                body.append(_p("FirstParagraph", _sc_runs(runs, theme.get("small_caps") or 0)))
+                opened, after_break = True, False
+            elif t == "p":
                 body.append(_p("FirstParagraph" if b.get("first") else "BodyText", _runs(b)))
+                opened, after_break = True, False
             elif t == "meta":
                 body.append(_p("MetaLine", _t(b["text"])))
             elif t == "h2":
+                opened = True
                 body.append(_p("Heading2", bookmark(b["id"], _t(b["text"]))))
             elif t == "break":
-                body.append(_p("SceneBreak", _t("* * *")))
+                body.append(_p("SceneBreak", _t(interior_mod.ORNAMENT_TEXT.get(theme.get("scene"), "* * *")
+                                                if theme else "* * *")))
+                opened, after_break = True, True
             elif t == "img" and b["key"] in images:
                 data, info = images[b["key"]]
                 if b["key"] not in img_rid:
@@ -233,7 +370,9 @@ def build_docx(book: dict, *, created: str, family: str = "times", size_pt: floa
                                               + "the map is in the PDF and EPUB editions of this book."),
                                "<w:pageBreakBefore/>" if plate else ""))
     sect = ""
-    if page:
+    if themed_pages:
+        sect = sect_pr(prev_kind)
+    elif page:
         tw = lambda mm: int(round(mm * 1440 / 25.4))  # noqa: E731 - twentieths of a point
         m = tw(page["safe_margin_mm"])
         sect = (f"<w:sectPr><w:pgSz w:w=\"{tw(page['width_mm'])}\" w:h=\"{tw(page['height_mm'])}\"/>"
@@ -247,7 +386,9 @@ def build_docx(book: dict, *, created: str, family: str = "times", size_pt: floa
                 "<w:body>" + "".join(body) + sect + "</w:body></w:document>\n")
     lang = meta.get("language") or "und"
     settings = ("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n"
-                f"<w:settings xmlns:w=\"{W}\"><w:updateFields w:val=\"{'true' if toc_entries else 'false'}\"/>"
+                f"<w:settings xmlns:w=\"{W}\">"
+                + ("<w:mirrorMargins/><w:evenAndOddHeaders/>" if themed_pages else "")
+                + "<w:updateFields w:val=\"{'true' if toc_entries else 'false'}\"/>"
                 f"<w:themeFontLang w:val={quoteattr(lang)}/></w:settings>\n")
     doc_rels = ("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n"
                 f"<Relationships xmlns=\"{PKG_REL}\">"
@@ -287,16 +428,19 @@ def build_docx(book: dict, *, created: str, family: str = "times", size_pt: floa
               "wordprocessingml.styles+xml\"/>"
               "<Override PartName=\"/word/settings.xml\" ContentType=\"application/vnd.openxmlformats-officedocument."
               "wordprocessingml.settings+xml\"/>"
-              "<Override PartName=\"/docProps/core.xml\" ContentType=\"application/vnd.openxmlformats-package."
+              + "".join(f"<Override PartName=\"/word/{n}\" ContentType=\"application/vnd.openxmlformats-officedocument."
+                        f"wordprocessingml.{'header' if k == 'hdr' else 'footer'}+xml\"/>" for n, k, _x in hf_parts)
+              + "<Override PartName=\"/docProps/core.xml\" ContentType=\"application/vnd.openxmlformats-package."
               "core-properties+xml\"/>"
               "<Override PartName=\"/docProps/app.xml\" ContentType=\"application/vnd.openxmlformats-officedocument."
               "extended-properties+xml\"/></Types>\n")
     entries = [("[Content_Types].xml", ctypes.encode("utf-8")), ("_rels/.rels", pkg_rels.encode("utf-8")),
                ("docProps/core.xml", core.encode("utf-8")), ("docProps/app.xml", app.encode("utf-8")),
                ("word/document.xml", document.encode("utf-8")),
-               ("word/styles.xml", _styles(family, size_pt, leading_pt).encode("utf-8")),
+               ("word/styles.xml", _styles(family, size_pt, leading_pt, theme).encode("utf-8")),
                ("word/settings.xml", settings.encode("utf-8")),
-               ("word/_rels/document.xml.rels", doc_rels.encode("utf-8"))] + media
+               ("word/_rels/document.xml.rels", doc_rels.encode("utf-8"))] + media \
+        + [(f"word/{n}", xml.encode("utf-8")) for n, _k, xml in hf_parts]
     return build_zip(entries)
 
 

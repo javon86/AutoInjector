@@ -185,15 +185,36 @@ def render_pdf(layout: Layout, *, page_width: float, page_height: float, bleed: 
             if op[0] == "text":
                 _, font, size, x, y, text, tw = op[:7]
                 color = op[7] if len(op) > 7 else None
+                tc = op[8] if len(op) > 8 else 0.0  # 🎨 letter spacing (spaced capitals)
+                actual = op[9] if len(op) > 9 else None  # 🎨 the words as written (small capitals, UPPER titles)
                 segs = unifont.segments(text, font) if font == unifont.NAME or unifont.needs(text) else \
                     [(text, font)]
+                if actual is not None:
+                    content += b"/Span << /ActualText " + pdf_text_string(actual) + b" >> BDC\n"
                 content += (f"BT /{font_objs[segs[0][1]][0]} {num(size)} Tf {num(tw)} Tw "
+                            + (f"{num(tc)} Tc " if tc else "")
                             + (f"{_rgb(color, 'rg')} " if color else "") + f"{num(x)} {num(y)} Td ").encode("ascii")
                 for k, (seg, sf) in enumerate(segs):  # one line, the font switched mid-line (no new position)
                     if k:
                         content += f"/{font_objs[sf][0]} {num(size)} Tf ".encode("ascii")
                     content += (unifont.encode(seg) if sf == unifont.NAME else pdf_string(seg)) + b" Tj "
                 content += b"ET\n"
+                if tc:
+                    content += b"0 Tc\n"  # the letter spacing is text state: it would carry on to the next line
+                if actual is not None:
+                    content += b"EMC\n"
+            elif op[0] == "mc":  # 🎨 a group of text objects read as one text (a chapter heading as written)
+                content += b"/Span << /ActualText " + pdf_text_string(op[1]) + b" >> BDC\n"
+            elif op[0] == "/mc":
+                content += b"EMC\n"
+            elif op[0] == "poly":  # 🎨 an ornament shape (a diamond, a heart)
+                _, pts, fill, stroke, lw = op
+                if not pts or (not fill and not stroke):
+                    continue
+                path = f"{num(pts[0][0])} {num(pts[0][1])} m " + " ".join(f"{num(px)} {num(py)} l" for px, py in pts[1:])
+                paint = "b" if fill and stroke else "f" if fill else "s"
+                content += ("q " + (f"{_rgb(fill, 'rg')} " if fill else "") + (f"{_rgb(stroke, 'RG')} " if stroke else "")
+                            + (f"{num(lw)} w " if stroke else "") + f"{path} h {paint} Q\n").encode("ascii")
             elif op[0] == "rect":
                 _, x, y, rw, rh, fill, stroke, lw = op
                 if not fill and not stroke:

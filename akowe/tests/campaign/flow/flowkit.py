@@ -218,9 +218,13 @@ def export_files(app, pid, run_files=None):
 
 
 def pdf_info(data: bytes) -> dict:
+    """The PDF's text as a reader copies it: pdfium honours /ActualText (🎨 the interior themes print small capitals,
+    "CHAPTER SEVEN" and UPPER titles but carry the words as written), pypdf gives the metadata."""
+    import pypdfium2 as pdfium  # noqa: PLC0415
     from pypdf import PdfReader  # noqa: PLC0415
     r = PdfReader(io.BytesIO(data))
-    pages = [p.extract_text() or "" for p in r.pages]
+    doc = pdfium.PdfDocument(data)
+    pages = [doc[i].get_textpage().get_text_range().replace("\r\n", "\n") for i in range(len(doc))]
     return {"pages": pages, "text": norm(" ".join(pages)), "meta": dict(r.metadata or {})}
 
 
@@ -243,7 +247,9 @@ def epub_info(data: bytes) -> dict:
                 h = sec.find("x:h1", ns)
                 ps = [norm("".join(p.itertext())) for p in sec.iter("{http://www.w3.org/1999/xhtml}p",
                                                                       "{http://www.w3.org/1999/xhtml}h2")]
-                chapters.append({"href": href, "heading": norm("".join(h.itertext())) if h is not None else None,
+                # 🎨 a themed heading ("CHAPTER SEVEN" + title) names the heading as written in aria-label
+                head = (h.get("aria-label") or norm("".join(h.itertext()))) if h is not None else None
+                chapters.append({"href": href, "heading": norm(head) if head is not None else None,
                                  "paras": ps})
                 paras += ps
     nav_href = next(i.get("href") for i in opf.findall(".//opf:manifest/opf:item", ns)
@@ -260,7 +266,15 @@ def epub_info(data: bytes) -> dict:
 def docx_info(data: bytes) -> dict:
     import docx  # noqa: PLC0415
     d = docx.Document(io.BytesIO(data))
-    paras = [(p.style.name if p.style is not None else "", norm(p.text)) for p in d.paragraphs]
+    paras, cap = [], ""
+    for p in d.paragraphs:
+        style = p.style.name if p.style is not None else ""
+        if style == "Drop Cap":  # 🎨 a Word drop cap is its own paragraph: read it with the paragraph it starts
+            cap = p.text
+            continue
+        paras.append((style, norm(cap + p.text)))
+        cap = ""
+    paras = [(s_, t) for s_, t in paras if not (s_ == "Normal" and not t)]  # a chapter's section break
     return {"paras": paras, "texts": [t for _s, t in paras if t],
             "headings": [t for s, t in paras if s.lower().startswith("heading") and t],
             "meta": {"title": d.core_properties.title, "author": d.core_properties.author}}

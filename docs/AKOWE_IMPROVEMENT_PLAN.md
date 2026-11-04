@@ -844,6 +844,37 @@ The author's call on the rest of the 20-idea list: "way back burner, maybe never
 - **15** Audiobook with voices
 - **18** Illustrated editions
 - **19** Series wiki
+## 🎨 Interior themes and print preview (2026-11, "as polished as Vellum or Atticus") — done
+
+- **Themes** (`akowe/exporters/interior.py`): 8 — one per Book Bible look (classic, fantasy, scifi, noir, romance,
+  horror, playful) + `plain`. Book profile `interior_theme` ("" = the genre's look via `binder.look_for_genre`),
+  `trim_size` (5x8, 5.25x8, 5.5x8.5, 6x9 default, a5) and `interior_font` (times / helvetica; "" = the theme's).
+  Each theme: body + heading font (base-14; letters they lack still go to the bundled DejaVu Serif), chapter number
+  style (words / digits / roman / padded / in a circle), title case and size, a rule or ornament, a 2–4 line drop
+  cap, small capitals on the first words (also after scene breaks), a scene-break ornament, running headers
+  (author/title or title/chapter), page number centre or outer, chapters on a right-hand page (classic, fantasy).
+- **PDF** (`paginate(..., interior=spec)` → `paginate_themed`): openers lower on the page, no header or page number
+  on openers / blank pages / the title page, mirrored margins (inner = the print-on-demand gutter for the page count
+  + 0.25 in; G04 re-paginates until the gutter class is stable), widow/orphan control (never one line alone at a page
+  foot or head when the paragraph can move). Ornaments are vector shapes (`poly`/`circle`/`line` ops), never text.
+  Spaced capitals use `Tc`; small capitals, UPPER titles and the "CHAPTER SEVEN" heading carry the words as written
+  in `/ActualText` (pdfium reads "Chapter 7: Title" and "The night…" exactly), so the text checks see nothing lost or
+  extra.
+- **Where it is stored:** G04 reads the book profile and keeps the whole spec + margins in its `G04.layout` state, so
+  G07 and G11–G13 reproduce the same pages (no contract change). A new trim size makes the book format again
+  (`format_out_of_date`); a new theme/font asks to put the book together again (`assembly_out_of_date`). A book
+  without a profile (raw engine use, old tests) keeps the plain manuscript layout.
+- **EPUB:** `h1.chapter-head` (number + title spans), `p.opening::first-letter` drop cap, `::first-line` small caps,
+  `div.scene-break::before` ornament (generated content). **Word (best effort):** theme fonts, the heading as written in
+  the theme's look, a real Word drop cap (framePr), small-caps runs, the ornament glyph, a section per chapter (odd page when
+  the theme says so) with no header/number on its first page (title / author headers, PAGE field), mirrored margins.
+- **Preview** (`book_design.py`, `GET/PUT …/interior`; 🎨 box in Book home → Book format): chapter-opener spread +
+  normal spread. Pictures of the real PDF pages when pypdfium2 is installed, else SVG drawn from the same layout
+  ops — the note says which. Uses the book's first chapter when it has one, else a sample.
+- *Not done:* hyphenation and kerning; true small-caps fonts (scaled capitals instead); Word widow control is Word's
+  own; ornaments in the EPUB/Word files are glyphs (◆ ♥ ⁂ …) that depend on the reader's fonts; the preview's
+  browser-drawn letters can differ slightly from the PDF; books put together before this change keep their old
+  plain layout until they are put together again.
 
 ## Prevention pass (2026-10-27, "solve problems before they become problems")
 

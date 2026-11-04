@@ -42,6 +42,7 @@ from ..exporters.epub import build_epub, inspect_epub
 from ..exporters.images import ImageInfo, UnsupportedImage, load_image, sniff_mime
 from ..exporters.layout import (Geometry, LayoutError, Typography, make_geometry, mm_to_pt, paginate,
                                 resolve_family)
+from ..exporters import interior as interior_mod
 from ..exporters.unifont import uncovered  # 🔤 H18: what NO font of the PDF can print (WinAnsi + DejaVu Serif)
 from ..exporters.pdf import inspect_pdf, render_cover_pdf, render_pdf
 from . import register
@@ -364,7 +365,8 @@ def g04_context(ctx: Context, g04_rec: dict, path: str, *, meta: dict | None = N
     entries = toc_state["entries"] if toc_state else None
     style = toc_state["style"] if toc_state else None
     try:
-        layout = paginate(asm.book, geom, typo, toc_entries=entries, toc_style=style, images=asm.image_dims())
+        layout = paginate(asm.book, geom, typo, toc_entries=entries, toc_style=style, images=asm.image_dims(),
+                          interior=params.get("interior"))
     except LayoutError as exc:
         raise _rej("INVALID_INPUT", path, str(exc)) from exc
     if layout.page_count != g04["page_count"] or layout.heading_pages != g04["heading_pages"]:
@@ -844,14 +846,31 @@ class PageLayout(GHandler):
         if bad:
             raise _blocked("CAPABILITY_UNAVAILABLE", "/payload/manuscript_ref",
                            f"characters not covered by the fonts: {''.join(bad[:20])!r}")
+        # 🎨 the book's interior theme (book profile interior_theme / trim_size, else its genre's look): kept with the
+        # layout parameters so every later pass (G07, G11-G13) lays the pages out exactly the same way. Its margins
+        # are mirrored, with an inner margin (gutter) that grows with the page count.
+        from ..book_path import get_profile  # noqa: PLC0415
+        interior = interior_mod.for_profile(get_profile(ctx.store, ctx.project_id))
         try:
-            layout = paginate(asm.book, geom, typo, images=asm.image_dims())
+            if interior:
+                pages_guess = 200
+                for _ in range(3):
+                    margins = interior_mod.margins_for(page, pages_guess, typo.size)
+                    geom = make_geometry(page, margins)
+                    layout = paginate(asm.book, geom, typo, images=asm.image_dims(), interior=interior)
+                    if interior_mod.gutter_in(layout.page_count) == interior_mod.gutter_in(pages_guess):
+                        break
+                    pages_guess = layout.page_count
+            else:
+                layout = paginate(asm.book, geom, typo, images=asm.image_dims())
         except LayoutError as exc:
             raise _rej("INVALID_INPUT", "/payload/margins_pt", str(exc)) from exc
         artifact = {"page_count": layout.page_count, "heading_pages": layout.heading_pages,
                     "source_ref": g01_rec["ref"], "profile_ref": page_rec["ref"], "typography_ref": typo_rec["ref"]}
         params = {"margins_pt": dict(margins), "effective_margins_pt": {
             "top": geom.top, "bottom": geom.bottom, "left": geom.left, "right": geom.right}}
+        if interior:
+            params["interior"] = interior
 
         def keep(bin_ref):
             ctx.on_commit(lambda tx: tx.put_state(ctx.project_id, ctx.branch_id, "G04.layout",
@@ -889,7 +908,7 @@ class TableOfContents(GHandler):
         while passes < max_passes:
             entries = toc_entries(pg.asm.book, dict(prev[0]), style)
             layout = paginate(pg.asm.book, pg.geom, pg.typo, toc_entries=entries, toc_style=style,
-                              images=pg.asm.image_dims())
+                              images=pg.asm.image_dims(), interior=pg.params.get("interior"))
             passes += 1
             cur = (layout.page_map(), layout.page_count)
             if cur == prev:
@@ -1165,7 +1184,8 @@ class PdfExport(_Export):
             raise _blocked("CAPABILITY_UNAVAILABLE", "/payload/final_book_ref",
                            f"characters not covered by the base-14 fonts: {''.join(bad[:20])!r}")
         try:
-            layout = paginate(asm.book, geom, typo, toc_entries=entries, toc_style=style, images=asm.image_dims())
+            layout = paginate(asm.book, geom, typo, toc_entries=entries, toc_style=style, images=asm.image_dims(),
+                              interior=pg.params.get("interior") if pg is not None else None)
         except LayoutError as exc:
             raise _rej("INVALID_INPUT", "/payload/pdf_profile_ref", str(exc)) from exc
         if entries is not None:
@@ -1187,7 +1207,9 @@ class PdfExport(_Export):
                            "bleed beyond tolerance")
         pdf = render_pdf(layout, page_width=geom.width, page_height=geom.height, bleed=bleed, meta=meta,
                          images=asm.pdf_images())
-        findings.append(ctx.finding("FONT_EMBEDDING", f"fonts {sorted({typo.regular, typo.bold})} are PDF base-14 "
+        used = sorted({op[1] for p in layout.pages for op in p.ops if op[0] == "text"} - {"DejaVuSerif"}) or \
+            sorted({typo.regular, typo.bold})
+        findings.append(ctx.finding("FONT_EMBEDDING", f"fonts {used} are PDF base-14 "
                                     "standard fonts referenced without embedding; pinned font_refs files are not used",
                                     severity="MAJOR", decision="UNKNOWN", source_refs=list(fp["font_refs"])))
         srcs = [ctx.field_record("final_book_ref")["ref"]] + asm.pins() + [prof_rec["ref"], page_rec["ref"],
@@ -1249,7 +1271,8 @@ class EpubExport(_Export):
         toc = [dict(e, page=None) for e in entries] if entries is not None else None
         final = ctx.field_record("final_book_ref")
         data = build_epub(asm.book, modified=_iso_seconds(final["created_at"]), toc_entries=toc,
-                          images={**images, **asm.pictures}, cover=cover)
+                          images={**images, **asm.pictures}, cover=cover,
+                          theme=pg.params.get("interior") if pg is not None else None)
         findings.append(ctx.finding("EPUBCHECK", "EPUBCheck is not bundled; structural OCF/OPF/XHTML/nav checks "
                                     "passed but conformance remains UNKNOWN until EPUBCheck runs (H09)",
                                     severity="MAJOR", decision="UNKNOWN"))
@@ -1291,7 +1314,8 @@ class DocxExport(_Export):
         toc = [dict(e, page=None) for e in entries] if entries is not None else None
         data = build_docx(asm.book, created=_iso_seconds(final["created_at"]), family=fam,
                           size_pt=float(fp["font_size_pt"]), leading_pt=float(fp["line_height_pt"]),
-                          toc_entries=toc, images={**images, **asm.pictures}, page=page)
+                          toc_entries=toc, images={**images, **asm.pictures}, page=page,
+                          theme=pg.params.get("interior") if pg is not None else None)
         findings.append(ctx.finding("FONT_REFERENCE", f"document styles name the system font for family '{fam}'; "
                                     "pinned font files are not embedded in the DOCX", severity="MINOR",
                                     decision="UNKNOWN", source_refs=list(fp["font_refs"])))

@@ -128,6 +128,13 @@ def clean_profile(body) -> dict:
         if k in ("themes", "series_number", "binder_look"):  # 📖 Book Bible binder (binder_fields.py)
             out[k] = _clean_binder_value(k, v)
             continue
+        if k in ("interior_theme", "trim_size", "interior_font"):  # 🎨 interior design (exporters/interior.py)
+            from .exporters.interior import clean_choice  # noqa: PLC0415
+            try:
+                out[k] = clean_choice(k, v)
+            except ValueError as exc:
+                raise _err("INVALID_INPUT", f"/{k}", str(exc)) from exc
+            continue
         if k not in PROFILE_FIELDS:
             continue  # unknown fields are ignored, not stored
         if k == "chapters":
@@ -440,9 +447,29 @@ class BookPath:
         return md.get("title"), md.get("author")
 
     def format_out_of_date(self, fmt_recs: dict) -> bool:
-        """True when the title/author in the book format (and so in the files) differ from the book profile."""
+        """True when the title/author in the book format (and so in the files) differ from the book profile, or the
+        chosen trim size (🎨 Book format page) differs from the format's page size."""
         ta = self.format_title_author(fmt_recs.get("metadata"))
-        return ta is not None and ta != self.title_author()
+        if ta is not None and ta != self.title_author():
+            return True
+        from .exporters.interior import chosen  # noqa: PLC0415
+        have = self.page_trim(fmt_recs.get("page"))
+        return have is not None and have != chosen(self.profile)["trim"]
+
+    @staticmethod
+    def page_trim(page_rec) -> str | None:
+        """The trim size id of the format's PAGE_PROFILE record (None when unknown or not one of the trim sizes)."""
+        from .exporters.interior import trim_of  # noqa: PLC0415
+        data = (page_rec or {}).get("data") or {}
+        aux = data.get("auxiliary_record") if isinstance(data.get("auxiliary_record"), dict) else None
+        page = (aux or {}).get("data") if aux else None
+        return trim_of(page) if isinstance(page, dict) else None
+
+    def interior_now(self) -> dict:
+        """🎨 The interior design the book would be put together with now: {theme, font} (see exporters/interior)."""
+        from .exporters.interior import chosen  # noqa: PLC0415
+        c = chosen(self.profile)
+        return {"theme": c["theme"], "font": c["font"]}
 
     def assembly_out_of_date(self, asm: dict, fmt_recs: dict) -> str | None:
         """Why an existing assembly no longer matches the book (plain words), or None. The title page (G08) and the
@@ -458,6 +485,9 @@ class BookPath:
         if asm.get("format_changed") or (made_with and cur and tuple(made_with) != tuple(cur)):
             return ("The book format changed since the book was put together (for example a new title or author): "
                     "put it together again so the title page shows it.")
+        if asm.get("interior") and asm["interior"] != self.interior_now():
+            return ("You chose another interior design (or body font) since the book was put together: put it "
+                    "together again so the pages use it.")
         from . import pictures  # noqa: PLC0415 - 🖼 B3: the placed pictures are part of the assembly
         return pictures.out_of_date(self.store, self.pid, self.branch, asm)
 
@@ -617,9 +647,9 @@ class BookPath:
         fmt_have = fmt_have and not fmt_old
         fmt_done = fmt_have and all(self.ref_ok(fmt.get(k)) for k in FORMAT_KEYS)
         step("format", "Book format", "Page size, font, contents style and the PDF/EPUB/DOCX settings, made from "
-             "your book profile (automatic)." + (" The title or author changed in the book profile since the format "
-                                                 "was made: make it again so the files carry the new ones."
-                                                 if fmt_old else ""),
+             "your book profile (automatic). Choose the interior design and the page size below." +
+             (" The title, author or page size changed since the format was made: make it again so the files "
+              "carry the new ones." if fmt_old else ""),
              "done" if fmt_done else "needs_you" if fmt_have else ("ready" if prof.get("title") else "blocked"),
              action=None if fmt_done else "setup_format" if not fmt_have else None,
              waiting_for=None if prof.get("title") else "profile", out_of_date=fmt_old,
@@ -1001,6 +1031,10 @@ class BookPath:
         # book was laid out with; only the records that carry the title/author are made again.
         keep = {k: old[k] for k in ("font_file", "font", "page", "toc_style")
                 if self.ref_ok(old.get(k), approved=False)}
+        from .exporters.interior import TRIMS, chosen, trim_page  # noqa: PLC0415 - 🎨 the chosen trim size
+        trim = chosen(self.profile)["trim"]
+        if "page" in keep and self.page_trim(self.ref_ok(old.get("page"), approved=False)) != trim:
+            keep.pop("page")  # a new page size: the whole format is made again
         lang = self.language_tag()
         refresh = len(keep) == 4 and old.get("language", "en") == lang  # a new language: a new font profile
         fmt = dict(keep) if refresh else {}
@@ -1013,8 +1047,7 @@ class BookPath:
                                                                "embedding_permitted": True,
                                                                "fallback_names": ["Times-Roman"], "font_size_pt": 11,
                                                                "line_height_pt": 14, "language_tag": lang}, "Font")
-            fmt["page"] = self.import_profile("PAGE_PROFILE", {"width_mm": 152.4, "height_mm": 228.6, "bleed_mm": 0,
-                                                               "safe_margin_mm": 15}, "Page size 6 x 9 in")
+            fmt["page"] = self.import_profile("PAGE_PROFILE", trim_page(trim), f"Page size {TRIMS[trim][2]}")
         fmt["pdf_profile"] = self.import_profile("OUTPUT_PROFILE", {
             "profile_id": "manuscript-pdf", "profile_type": "MANUSCRIPT_PDF",
             "required_checks": ["H05", "H09"], "required_export_operations": ["G11"],
@@ -1043,8 +1076,8 @@ class BookPath:
         if refresh:
             return {"ok": True, "message": f"The book format now carries “{md['title']}” by {md['author']}. Approve "
                     "it, then put the book together again (the title page shows the new title) and export it again."}
-        return {"ok": True, "message": "Book format settings made from your profile (6 x 9 inch pages, Times 11 pt). "
-                "Approve them to continue."}
+        return {"ok": True, "message": f"Book format settings made from your profile ({TRIMS[trim][2]} pages, 11 pt "
+                "type). Approve them to continue."}
 
     def a_assemble(self, body):
         st = self.status()
@@ -1081,6 +1114,7 @@ class BookPath:
         asm["G07"], _ = self.create("G07", {"paginated_book_ref": asm["G04"],
                                             "toc_style_ref": self._appr(fmt["toc_style"]), "max_passes": 6})
         asm["chapters"] = [f"{c['record_id']}:{c['version']}" for c in chapters]
+        asm["interior"] = self.interior_now()  # 🎨 the design the pages were laid out with
         # the title page was made with this title/author (from the approved book format)
         asm["title_page"] = list(self.format_title_author(self.rec(fmt["metadata"]["record_id"])) or
                                  self.title_author())

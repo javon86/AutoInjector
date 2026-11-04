@@ -121,7 +121,11 @@ def test_make_my_book_manual_end_to_end(h):
     assert set(files) == {"PDF", "EPUB", "DOCX"} and st["export"]["state"] == "done"
     pdf = h.store.get_record(h.project_id, "main", files["PDF"]["record_id"], files["PDF"]["version"])
     data = h.store.read_binary(pdf)
-    assert data.startswith(b"%PDF") and b"brass key" in data
+    assert data.startswith(b"%PDF")
+    # 🎨 the interior theme sets the first words in small capitals; the PDF's text (what a reader copies) is as written
+    import pypdfium2 as pdfium  # noqa: PLC0415
+    doc = pdfium.PdfDocument(data)
+    assert "brass key" in " ".join(" ".join(doc[i].get_textpage().get_text_range().split()) for i in range(len(doc)))
     out = bp().act("check", {})
     assert out["ok"], out
     assert steps(bp())["check"]["state"] == "done"

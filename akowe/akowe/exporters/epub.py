@@ -73,9 +73,13 @@ def _xhtml(title: str, lang: str, body: str) -> bytes:
 
 
 def build_epub(book: dict, *, modified: str, toc_entries: list[dict] | None = None, images: dict | None = None,
-               cover: tuple | None = None) -> bytes:
+               cover: tuple | None = None, theme: dict | None = None) -> bytes:
     """images: key -> (bytes, ImageInfo); cover: (bytes, ImageInfo) or None.
-    modified: RFC3339 UTC 'YYYY-MM-DDThh:mm:ssZ' (caller supplies a deterministic value)."""
+    modified: RFC3339 UTC 'YYYY-MM-DDThh:mm:ssZ' (caller supplies a deterministic value).
+    🎨 theme: an interior theme spec (``interior.spec``): chapter headings with the number and the title, a drop cap
+    (::first-letter) and small capitals on the chapter's first paragraph, a scene-break ornament drawn by the
+    stylesheet (generated content: never part of the text)."""
+    from . import interior as interior_mod  # noqa: PLC0415
     meta = book["meta"]
     lang = meta.get("language") or "und"
     images = images or {}
@@ -117,8 +121,15 @@ def build_epub(book: dict, *, modified: str, toc_entries: list[dict] | None = No
         else:
             kind = {"title_page": "titlepage", "front": "frontmatter", "toc": "toc", "chapter": "chapter",
                     "back": "backmatter"}[s["kind"]]
-            parts = [f"<section epub:type=\"{kind}\" class=\"{cls}\" aria-labelledby={quoteattr(s['id'])}>\n",
-                     f"<h1 id={quoteattr(s['id'])}>{escape(s['heading'])}</h1>\n"]
+            parts = [f"<section epub:type=\"{kind}\" class=\"{cls}\" aria-labelledby={quoteattr(s['id'])}>\n"]
+            label = interior_mod.number_label(s.get("number"), theme) if theme and s["kind"] == "chapter" else ""
+            if theme and s["kind"] == "chapter" and (label or s.get("title")):
+                parts.append(f"<h1 id={quoteattr(s['id'])} class=\"chapter-head\" aria-label={quoteattr(s['heading'])}>"
+                             + (f"<span class=\"ch-num\">{escape(label)}</span>" if label else "")
+                             + (f"<span class=\"ch-title\">{escape(s['title'])}</span>" if s.get("title") else "")
+                             + "</h1>\n")
+            else:
+                parts.append(f"<h1 id={quoteattr(s['id'])}>{escape(s['heading'])}</h1>\n")
         if s["kind"] == "toc":
             parts.append("<ol>\n")
             for e in toc_entries or []:
@@ -126,15 +137,23 @@ def build_epub(book: dict, *, modified: str, toc_entries: list[dict] | None = No
                 parts.append(f"<li class=\"level{e.get('level', 1)}\"><a href={quoteattr(href + '#' + e['heading_id'])}>"
                              f"{escape(e['title'])}</a></li>\n")
             parts.append("</ol>\n")
+        opened, after_break = s["kind"] != "chapter", False
         for b in s["blocks"]:
             t = b["t"]
             if t == "p":
-                cls_attr = " class=\"first\"" if b.get("first") else ""
+                classes = (["first"] if b.get("first") else []) + (
+                    ["opening"] if theme and not opened else ["after-break"] if theme and after_break else [])
+                opened, after_break = True, False
+                cls_attr = f" class=\"{' '.join(classes)}\"" if classes else ""
                 parts.append(f"<p id={quoteattr(b['id'])}{cls_attr}>{inline_xhtml(b)}</p>\n")
             elif t == "meta":
                 parts.append(f"<p class=\"meta\">{escape(b['text'])}</p>\n")
             elif t == "h2":
+                opened = True
                 parts.append(f"<h2 id={quoteattr(b['id'])}>{escape(b['text'])}</h2>\n")
+            elif t == "break" and theme:  # 🎨 the ornament comes from the stylesheet (never part of the text)
+                parts.append("<div class=\"scene-break\" role=\"separator\" aria-label=\"Scene break\"></div>\n")
+                opened, after_break = True, True
             elif t == "break":
                 parts.append("<p class=\"scene-break\" role=\"separator\">* * *</p>\n")
             elif t == "img":
@@ -204,7 +223,7 @@ def build_epub(book: dict, *, modified: str, toc_entries: list[dict] | None = No
     nav_doc = _xhtml("Contents", lang, "".join(nav)).replace(b"href=\"../style.css\"", b"href=\"style.css\"")
     files.append(("OEBPS/nav.xhtml", nav_doc))
     manifest.append(("nav", "nav.xhtml", "application/xhtml+xml", "nav"))
-    files.append(("OEBPS/style.css", CSS.encode("utf-8")))
+    files.append(("OEBPS/style.css", (CSS + (interior_mod.epub_css(theme) if theme else "")).encode("utf-8")))
     manifest.append(("css", "style.css", "text/css", ""))
 
     opf = ["<?xml version=\"1.0\" encoding=\"utf-8\"?>\n",
