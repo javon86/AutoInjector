@@ -580,7 +580,9 @@ class SaveService:
         except Exception:  # noqa: BLE001
             rep = None
         if rep:
+            from . import beta_reader  # noqa: PLC0415 - 👥 the beta readers' summary in the report
             from . import book_report as br  # noqa: PLC0415
+            rep = beta_reader.with_beta(app, pid, branch, rep)
             text("Reports/Book report.md", br.render_markdown(rep))
             try:
                 files["Reports/Book report.pdf"] = br.render_pdf(rep)

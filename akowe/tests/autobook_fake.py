@@ -593,16 +593,36 @@ class BookFakeAI:
         n = max(1, len(chs))
         first = str(chs[0].get("text") or chs[0].get("opening") or "") if chs else ""
         q1 = next((s for s in self.sentences(first.split("\n", 1)[-1]) if len(s) > 20), "")[:160]
-        return {"reactions": [{"chapter": 1, "kind": "confused", "quote": q1, "note": "Who wrote the last line?"},
-                              {"chapter": 1, "kind": "hooked", "quote": q1, "note": "I want to know."},
-                              {"chapter": n, "kind": "bored", "quote": "A sentence that is not in the book at all.",
-                               "note": "Dragged."}],
-                "interest": [{"chapter": i + 1, "score": 8 if i == 0 else 5, "would_keep_reading": True}
-                             for i in range(n)],
-                "guesses": [{"guess": "The key opens the lighthouse", "guessed_in_chapter": 1, "quote": q1,
-                             "revealed_in_chapter": n, "came_true": "yes"}],
-                "stop": {"would_finish": True, "chapter": 0, "why": ""},
-                "summary": "A cosy read; I guessed the key early."}
+        who = (ctx.get("reader") or {}).get("who") or "typical"
+        out = {"reactions": [{"chapter": 1, "kind": "confused", "quote": q1, "note": "Who wrote the last line?"},
+                             {"chapter": 1, "kind": "hooked", "quote": q1, "note": "I want to know."},
+                             {"chapter": n, "kind": "bored", "quote": "A sentence that is not in the book at all.",
+                              "note": "Dragged."}],
+               "interest": [{"chapter": i + 1, "score": 8 if i == 0 else 5, "would_keep_reading": True}
+                            for i in range(n)],
+               "guesses": [{"guess": "The key opens the lighthouse", "guessed_in_chapter": 1, "quote": q1,
+                            "revealed_in_chapter": n, "came_true": "yes"}],
+               "stop": {"would_finish": True, "chapter": 0, "why": ""},
+               "overall": {"would_recommend": True, "favourite_character": "Mara", "best_chapter": 1,
+                           "worst_chapter": n, "score": 7, "why": "Cosy and atmospheric."},
+               "summary": "A cosy read; I guessed the key early."}
+        # 👥 idea #14: the panel's other readers — the picky one agrees on chapter 1 (lost, twist guessed) and finds
+        # chapter 2 slow; the casual one gets lost in chapter 1 too, is bored in chapter 2 and would stop there
+        if who == "picky":
+            out["reactions"] = out["reactions"][:1] + [{"chapter": min(2, n), "kind": "bored", "quote": "",
+                                                        "note": "Seen this before."}]
+            out["interest"] = [dict(i, score=3 if i["chapter"] == 2 else 6) for i in out["interest"]]
+            out["overall"] = dict(out["overall"], would_recommend=False, score=4, best_chapter=n, worst_chapter=min(2, n))
+            out["summary"] = "Competent but familiar; I saw the key coming."
+        elif who == "casual":
+            out["reactions"] = out["reactions"][:1]
+            out["guesses"] = []
+            out["interest"] = [dict(i, score=2 if i["chapter"] == 2 else 7,
+                                    would_keep_reading=i["chapter"] != 2) for i in out["interest"]]
+            out["stop"] = {"would_finish": False, "chapter": min(2, n), "why": "Too slow in the middle."}
+            out["overall"] = dict(out["overall"], score=6, worst_chapter=min(2, n))
+            out["summary"] = "Good start, then it slowed down."
+        return out
 
     def _style(self, ctx):
         samples = ctx.get("samples") or []

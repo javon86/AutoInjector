@@ -12,14 +12,21 @@ export async function makeSetupExtras(c) {
   try { card = (await c.api('GET', '/style-card')).card; } catch { card = null; }
   const hasCard = !!(card && card.stats && card.stats.words);
   const beta = h('input', { type: 'checkbox', id: 'mb-beta', 'data-testid': 'mb-beta' });
+  // 👥 idea #14: one reader (as before) or a panel of 2-3 readers, each a different AI
+  const count = h('select', { id: 'mb-beta-n', 'data-testid': 'mb-beta-n', 'aria-label': 'How many beta readers', onchange: () => { if (count.value !== '1') beta.checked = true; } },
+    h('option', { value: '1' }, '1 reader'), h('option', { value: '2' }, '2 readers (a panel)'), h('option', { value: '3' }, '3 readers (a panel)'));
   const style = h('input', { type: 'checkbox', id: 'mb-style', 'data-testid': 'mb-style', disabled: !hasCard, checked: hasCard });
   const el = h('fieldset', { class: 'field s7-make' }, h('legend', null, 'Extras (optional)'),
     h('div', { class: 'check-row' }, beta, h('label', { for: 'mb-beta' }, h('strong', null, '📖 Beta reader at the end'),
-      h('span', { class: 'hint' }, ' — one more AI reads the finished book as its target reader and marks where it got confused, bored or guessed a twist (one extra AI answer).'))),
+      h('span', { class: 'hint' }, ' — another AI reads the finished book as its target reader and marks where it got confused, bored or guessed a twist (one extra AI answer per reader). With 2 or 3 readers, each is a different AI playing a different kind of reader, and Akọwe shows where they agree.')),
+      h('label', { class: 'small', for: 'mb-beta-n' }, ' How many: '), count),
     h('div', { class: 'check-row' }, style, h('label', { for: 'mb-style' }, h('strong', null, '✒️ Write in my style'),
       h('span', { class: 'hint' }, hasCard ? ' — the narration follows your style card (✒️ My writing style).' : ' — make your style card first: ',
         hasCard ? null : h('a', { href: '#/style' }, '✒️ My writing style')))));
-  return { el, apply(body) { if (beta.checked) body.beta_reader = true; if (style.checked && !style.disabled) body.my_style = true; } };
+  return { el, apply(body) {
+    if (beta.checked) { body.beta_reader = true; if (count.value !== '1') body.beta_readers = Number(count.value); }
+    if (style.checked && !style.disabled) body.my_style = true;
+  } };
 }
 
 /* ======================================================================= 📖 P23 beta reader card (report page) */
@@ -27,64 +34,170 @@ export function betaCard(c) {
   const { h, clear } = c;
   const body = h('div', { 'aria-live': 'polite' }, c.loadingState('Loading the beta reader…'));
   const sec = h('section', { class: 'card s7-beta', 'data-testid': 'beta-card', 'aria-labelledby': 'beta-h' },
-    h('h2', { id: 'beta-h' }, '📖 Beta reader'), body);
+    h('h2', { id: 'beta-h' }, '📖 Beta readers'), body);
   const load = async () => {
     let ov;
     try { ov = await c.api('GET', c.bpath('/beta')); } catch (e) { clear(body).appendChild(c.problemBox(c.toProblem(e, { step: 'Beta reader' }), { retry: load })); return; }
     draw(ov);
   };
-  const ask = async (slot, btn, prog) => {
+  const ask = async (req, btn, prog) => {
     btn.disabled = true;
     try {
-      const j = await c.api('POST', c.bpath('/beta'), { body: slot ? { slot_id: slot } : {} });
+      const j = await c.api('POST', c.bpath('/beta'), { body: req });
       const end = await c.pollQualityJob(c.bpath(`/beta/job/${encodeURIComponent(j.id)}`), prog);
-      if (end.status !== 'done') { clear(prog).appendChild(c.problemBox({ code: (end.error || {}).code || 'BETA_FAILED', message: (end.error || {}).message || end.phase, where: { step: 'Beta reader' } }, { retry: () => ask(slot, btn, prog) })); btn.disabled = false; return; }
-      c.toast('The beta reader has finished'); c.announce('The beta reader has finished');
+      if (end.status !== 'done') { clear(prog).appendChild(c.problemBox({ code: (end.error || {}).code || 'BETA_FAILED', message: (end.error || {}).message || end.phase, where: { step: 'Beta reader' } }, { retry: () => ask(req, btn, prog) })); btn.disabled = false; return; }
+      const msg = (j.size || 1) > 1 ? 'The beta readers have finished' : 'The beta reader has finished';
+      c.toast(msg); c.announce(msg);
       await load();
     } catch (e) { clear(prog).appendChild(c.problemBox(c.toProblem(e, { step: 'Beta reader' }))); btn.disabled = false; }
   };
+  function setupForm(ov, r, prog) {
+    // 👥 idea #14: how many readers (1-3), and per reader the AI and who it plays (editable, with a default)
+    const panel = ov.panel || { size: 1, max: 3, readers: [] };
+    const readers = (ov.readers || []).filter(o => o.working);
+    const size = h('select', { id: 'beta-size', 'data-testid': 'beta-size', 'aria-label': 'How many beta readers' },
+      [1, 2, 3].map(n => h('option', { value: String(n), selected: n === panel.size }, n === 1 ? '1 reader' : `${n} readers (a panel)`)));
+    const rows = (panel.readers || []).map((p, i) => {
+      const sel = h('select', { id: i === 0 ? 'beta-slot' : `beta-slot-${i + 1}`, 'data-testid': `beta-slot-${i + 1}`, 'aria-label': `Which AI is reader ${i + 1}` },
+        h('option', { value: '' }, 'Automatic — an AI that did not write the book'),
+        readers.map(o => h('option', { value: o.slot_id, selected: o.slot_id === p.slot_id }, `${o.name}${o.wrote_most ? ' (wrote most of it ⚠️)' : ''}`)));
+      const txt = h('textarea', { rows: '2', maxlength: '600', 'data-testid': `beta-persona-${i + 1}`, 'aria-label': `Who reader ${i + 1} is` });
+      txt.value = p.persona || p.default || '';
+      const reset = h('button', { type: 'button', class: 'small', onclick: () => { txt.value = p.default || ''; } }, '↺ Default');
+      const row = h('div', { class: 's7-reader', 'data-testid': `beta-reader-${i + 1}` },
+        h('div', { class: 'row' }, h('strong', null, `Reader ${i + 1}`), h('span', { class: 'small muted' }, ` — ${p.persona ? 'your description' : `by default ${p.label}`}`), sel, reset), txt);
+      return { row, sel, txt, p };
+    });
+    const show = () => { const n = Number(size.value); rows.forEach((x, i) => { x.row.hidden = i >= n; }); btn.textContent = label(); };
+    const label = () => {
+      const n = Number(size.value);
+      if (n === 1) return r ? '📖 Ask the beta reader again' : '📖 Ask a beta reader';
+      return `👥 Ask the panel of ${n} readers`;
+    };
+    const req = () => {
+      const n = Number(size.value);
+      return { size: n, readers: rows.slice(0, n).map(x => ({ slot_id: x.sel.value || null, persona: x.txt.value.trim() && x.txt.value.trim() !== (x.p.default || '').trim() ? x.txt.value.trim() : null })) };
+    };
+    const btn = h('button', { type: 'button', class: r ? '' : 'primary', 'data-testid': 'beta-ask', disabled: !ov.written, onclick: () => ask(req(), btn, prog) }, '');
+    size.addEventListener('change', show);
+    const form = h('div', { class: 's7-panel-setup', 'data-testid': 'beta-setup' },
+      h('div', { class: 'row' }, h('label', { for: 'beta-size' }, 'How many readers: '), size, btn),
+      h('p', { class: 'small muted' }, 'Each reader is a different AI playing a different kind of reader. You can change who they are. An AI that is not working is skipped with a note.'),
+      rows.map(x => x.row));
+    show();
+    return form;
+  }
   function draw(ov) {
     clear(body);
     const r = ov.latest;
-    body.appendChild(h('p', { class: 'small' }, `An AI reads the whole book as ${ov.persona ? (ov.persona.a_label || `a ${ov.persona.label}`) : 'its target reader'} — for pleasure, not as an editor — and marks where it got confused, bored or guessed a twist. Every quote is checked against the book. It never sees your outline or story rules.`));
-    const readers = (ov.readers || []).filter(o => o.working);
-    const sel = h('select', { id: 'beta-slot', 'aria-label': 'Which AI reads' }, h('option', { value: '' }, 'Automatic — an AI that did not write the book'),
-      readers.map(o => h('option', { value: o.slot_id }, `${o.name}${o.wrote_most ? ' (wrote most of it ⚠️)' : ''}`)));
+    body.appendChild(h('p', { class: 'small' }, `An AI reads the whole book as ${ov.persona ? (ov.persona.a_label || `a ${ov.persona.label}`) : 'its target reader'} — for pleasure, not as an editor — and marks where it got confused, bored or guessed a twist. Ask up to three readers to see where they agree. Every quote is checked against the book. They never see your outline or story rules.`));
     const prog = h('div', { class: 'rp-progress' });
-    const btn = h('button', { type: 'button', class: r ? '' : 'primary', 'data-testid': 'beta-ask', disabled: !ov.written, onclick: () => ask(sel.value || null, btn, prog) }, r ? '📖 Ask the beta reader again' : '📖 Ask a beta reader');
-    body.appendChild(h('div', { class: 'row' }, sel, btn));
+    body.appendChild(setupForm(ov, r, prog));
+    if (ov.can_resume && r) {
+      const go = h('button', { type: 'button', 'data-testid': 'beta-resume', onclick: () => ask({ resume: r.id }, go, prog) }, '▶ Continue the panel');
+      body.appendChild(h('p', { class: 'small words-warn', role: 'note' }, `⚠️ The last panel stopped after ${(r.readers || []).length} of ${(r.plan || []).length} readers. `, go));
+    }
     body.appendChild(prog);
     if (ov.job) c.pollQualityJob(c.bpath(`/beta/job/${encodeURIComponent(ov.job.id)}`), prog).then(load).catch(() => {});
     if (!r) { body.appendChild(h('p', { class: 'small muted' }, 'No beta read yet.')); return; }
     if (ov.stale) body.appendChild(h('p', { class: 'words-warn small', role: 'note' }, '⚠️ This read is for an earlier version of the book: a chapter changed since.'));
+    if (r.kind === 'panel') { drawPanel(r); return; }
     if (r.status !== 'done') {
       body.appendChild(c.problemBox({ code: r.error || 'BETA_FAILED', message: r.message || 'The beta reader could not read the book.', where: { step: 'Beta reader' } }));
       return;
     }
+    drawRead(r, body, true);
+  }
+  function drawRead(r, into, withWho) {
     const rd = r.reader || {};
-    body.appendChild(h('p', { class: 'small', 'data-testid': 'beta-who' }, h('strong', null, rd.name || 'An AI'), ` read it as ${r.persona.a_label || `a ${r.persona.label}`} ·${fmt(c, r.at)}`,
-      rd.independent ? '' : h('span', { class: 'words-warn' }, ' ⚠️ not independent (it wrote most of the book)'),
-      r.average_interest != null ? ` · interest ${r.average_interest}/10 on average` : '',
-      r.stop && !r.stop.would_finish ? h('span', { class: 'words-warn' }, ` · ⚠️ would stop${r.stop.chapter ? ` in chapter ${r.stop.chapter}` : ''}`) : ' · would finish the book'));
-    if (r.summary) body.appendChild(h('blockquote', { class: 's7-say' }, r.summary));
-    body.appendChild((r.findings || []).length
+    if (withWho) {
+      into.appendChild(h('p', { class: 'small', 'data-testid': 'beta-who' }, h('strong', null, rd.name || 'An AI'), ` read it as ${r.persona.a_label || `a ${r.persona.label}`} ·${fmt(c, r.at)}`,
+        rd.independent ? '' : h('span', { class: 'words-warn' }, ' ⚠️ not independent (it wrote most of the book)'),
+        r.average_interest != null ? ` · interest ${r.average_interest}/10 on average` : '',
+        r.overall && r.overall.score ? ` · score ${r.overall.score}/10` : '',
+        r.stop && !r.stop.would_finish ? h('span', { class: 'words-warn' }, ` · ⚠️ would stop${r.stop.chapter ? ` in chapter ${r.stop.chapter}` : ''}`) : ' · would finish the book'));
+    }
+    if (r.summary) into.appendChild(h('blockquote', { class: 's7-say' }, r.summary));
+    into.appendChild((r.findings || []).length
       ? h('ul', { class: 'small', 'data-testid': 'beta-findings' }, r.findings.map(f => h('li', null, `${SEV[f.severity] || ''}${f.label}: ${f.detail} `, h('span', { class: 'muted' }, f.advice))))
       : h('p', { class: 'small' }, '✔ The reader did not get lost, bored or ahead of the story.'));
     const interest = r.interest || [];
     if (interest.length) {
-      body.appendChild(h('div', { class: 's7-meter', role: 'img', 'aria-label': `Interest per chapter: ${interest.map(i => `chapter ${i.chapter} ${i.score}`).join(', ')}` },
+      into.appendChild(h('div', { class: 's7-meter', role: 'img', 'aria-label': `Interest per chapter: ${interest.map(i => `chapter ${i.chapter} ${i.score}`).join(', ')}` },
         interest.map(i => h('span', { class: `s7-bar${i.score <= 5 ? ' low' : ''}`, title: `Chapter ${i.chapter}: ${i.score}/10${i.would_keep_reading ? '' : ' — would not turn the page'}`, style: `height:${8 + i.score * 4}px` }, String(i.chapter)))));
     }
-    const quote = x => x.quote ? [' — ', h('q', null, x.quote), x.verified ? (x.in_chapter ? null : h('span', { class: 'small muted' }, ' (found in another chapter)')) : [' ', c.hazard({ code: 'QUOTE_NOT_FOUND' }, {}, { small: true })]] : null;
     if ((r.reactions || []).length) {
-      body.appendChild(h('details', { 'data-testid': 'beta-reactions' }, h('summary', null, `What the reader felt, chapter by chapter (${r.reactions.length})`),
+      into.appendChild(h('details', { 'data-testid': 'beta-reactions' }, h('summary', null, `What the reader felt, chapter by chapter (${r.reactions.length})`),
         h('ul', { class: 'small' }, r.reactions.slice().sort((a, b) => a.chapter - b.chapter).map(x => h('li', null, h('strong', null, `Chapter ${x.chapter} · ${KIND_WORD[x.kind] || x.kind}`), ': ', x.note, quote(x))))));
     }
     if ((r.guesses || []).length) {
-      body.appendChild(h('details', null, h('summary', null, `What the reader guessed (${r.guesses.length})`),
+      into.appendChild(h('details', null, h('summary', null, `What the reader guessed (${r.guesses.length})`),
         h('ul', { class: 'small' }, r.guesses.map(g => h('li', null, `🔮 “${g.guess}” — guessed in chapter ${g.guessed_in_chapter}`,
           g.revealed_in_chapter ? `, revealed in chapter ${g.revealed_in_chapter}` : ', never revealed', ` · came true: ${g.came_true}`, quote(g))))));
     }
+  }
+  const quote = x => x.quote ? [' — ', h('q', null, x.quote), x.verified ? (x.in_chapter ? null : h('span', { class: 'small muted' }, ' (found in another chapter)')) : [' ', c.hazard({ code: 'QUOTE_NOT_FOUND' }, {}, { small: true })]] : null;
+  const yes = v => v == null ? '–' : v ? '✔ yes' : '✖ no';
+  function drawPanel(r) {
+    const cmp = r.comparison || {};
+    const wrap = h('div', { 'data-testid': 'beta-panel' });
+    body.appendChild(wrap);
+    if (r.status === 'incomplete') wrap.appendChild(h('p', { class: 'small muted' }, `Reading… ${(r.readers || []).length} of ${(r.plan || []).length} readers have finished.`));
+    if ((r.skipped || []).length) {
+      wrap.appendChild(h('ul', { class: 'small', 'data-testid': 'beta-skipped' }, r.skipped.map(s => h('li', { class: 'words-warn' },
+        `⚠️ Reader ${s.n} (${(s.persona || {}).label || 'reader'}) was skipped: ${s.why}`))));
+    }
+    if (r.status === 'failed') {
+      wrap.appendChild(c.problemBox({ code: r.error || 'BETA_FAILED', message: r.message || 'No beta reader could read the book.', where: { step: 'Beta reader' } }));
+      return;
+    }
+    if (r.status !== 'done') return;
+    wrap.appendChild(h('p', { 'data-testid': 'beta-headline' }, h('strong', null, '👥 ' + (cmp.headline || '')), h('span', { class: 'small muted' }, ` ·${fmt(c, r.at)}`)));
+    const vs = cmp.verdicts || [];
+    wrap.appendChild(h('div', { class: 'table-wrap' }, h('table', { class: 'small s7-verdicts', 'data-testid': 'beta-verdicts' },
+      h('caption', { class: 'visually-hidden' }, 'What each reader thought'),
+      h('thead', null, h('tr', null, ['Reader', 'Read it as', 'Score', 'Would finish', 'Would recommend', 'Favourite character', 'Best chapter', 'Worst chapter'].map(t => h('th', { scope: 'col' }, t)))),
+      h('tbody', null, vs.map(v => h('tr', null, h('th', { scope: 'row' }, v.name, v.independent === false ? h('span', { class: 'words-warn', title: 'It wrote most of the book' }, ' ⚠️') : ''),
+        h('td', null, v.label), h('td', { class: 'num' }, v.score ? `${v.score}/10` : '–'), h('td', null, yes(v.would_finish)), h('td', null, yes(v.would_recommend)),
+        h('td', null, v.favourite || '–', v.favourite && v.favourite_in_book === false ? h('span', { class: 'small muted' }, ' (not a name in the book)') : ''),
+        h('td', { class: 'num' }, v.best ? String(v.best) : '–'), h('td', { class: 'num' }, v.worst ? String(v.worst) : '–')))))));
+    const strong = (cmp.agree || []).filter(g => !g.positive);
+    const loved = (cmp.agree || []).filter(g => g.positive);
+    const sample = g => { const q = (g.quotes || []).find(x => x.quote); return q ? [' — ', h('q', null, q.quote), h('span', { class: 'muted' }, ` (${q.reader})`)] : null; };
+    wrap.appendChild(h('h3', null, 'Where the readers agree'));
+    wrap.appendChild(strong.length || loved.length
+      ? h('ul', { class: 'small', 'data-testid': 'beta-agree' },
+        strong.map(g => h('li', null, h('strong', { class: 'words-warn' }, '💪 Strong signal: '), g.text, ` (${g.names.join(', ')})`, sample(g))),
+        loved.map(g => h('li', null, '💚 ', g.text, ` (${g.names.join(', ')})`, sample(g))))
+      : h('p', { class: 'small', 'data-testid': 'beta-agree' }, 'The readers did not flag the same chapter for the same thing.'));
+    wrap.appendChild(h('h3', null, 'Where they disagree'));
+    wrap.appendChild((cmp.disagree || []).length
+      ? h('ul', { class: 'small', 'data-testid': 'beta-disagree' }, cmp.disagree.map(d => h('li', null, d.text)))
+      : h('p', { class: 'small', 'data-testid': 'beta-disagree' }, 'No real disagreement.'));
+    const heat = cmp.heat || [];
+    if (heat.length) {
+      const n = vs.length || 1;
+      const cell = (k, label) => h('td', { class: `num s7-heat-${Math.min(3, Math.round(3 * k / n))}`, title: `${k} of ${n} readers ${label}` }, k ? `${k}/${n}` : '');
+      wrap.appendChild(h('h3', null, 'Chapter by chapter'));
+      wrap.appendChild(h('p', { class: 'small muted' }, 'How many readers got lost or bored in each chapter (darker = more readers), and each reader’s interest out of 10.'));
+      wrap.appendChild(h('div', { class: 'table-wrap' }, h('table', { class: 'small s7-heat', 'data-testid': 'beta-heat' },
+        h('caption', { class: 'visually-hidden' }, 'Lost and bored readers per chapter'),
+        h('thead', null, h('tr', null, h('th', { scope: 'col' }, 'Chapter'), heat.map(x => h('th', { scope: 'col', class: 'num' }, String(x.chapter))))),
+        h('tbody', null,
+          h('tr', null, h('th', { scope: 'row' }, '😕 Got lost'), heat.map(x => cell(x.confused, 'got lost'))),
+          h('tr', null, h('th', { scope: 'row' }, '🥱 Bored or slow'), heat.map(x => cell(x.bored, 'lost interest'))),
+          vs.map((v, i) => h('tr', null, h('th', { scope: 'row', class: 'muted' }, `${v.name}: interest`),
+            heat.map(x => { const s = (x.cells[i] || {}).interest; return h('td', { class: `num${s != null && s <= 5 ? ' words-warn' : ''}` }, s == null ? '–' : String(s)); })))))));
+    }
+    wrap.appendChild(h('h3', null, 'What to fix first'));
+    wrap.appendChild((cmp.fixes || []).length
+      ? h('ol', { class: 'small', 'data-testid': 'beta-fixes' }, cmp.fixes.map(f => h('li', null, f.strong ? h('strong', null, '💪 ') : '', f.text, f.quote ? [' — ', h('q', null, f.quote)] : null)))
+      : h('p', { class: 'small', 'data-testid': 'beta-fixes' }, '✔ Nothing the readers would fix.'));
+    (r.readers || []).filter(x => x.status === 'done').forEach(x => {
+      const d = h('details', { 'data-testid': `beta-reader-read-${x.n}` }, h('summary', null, `Reader ${x.n}: ${(x.reader || {}).name || 'An AI'} as ${(x.persona || {}).a_label || 'a reader'}`));
+      drawRead(x, d, false);
+      wrap.appendChild(d);
+    });
   }
   load();
   return sec;

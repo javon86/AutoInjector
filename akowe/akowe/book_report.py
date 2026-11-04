@@ -1120,6 +1120,9 @@ def render_markdown(rep: dict) -> str:
                  + (f" ({r.get('error')})" if r.get("status") == "failed" else "")
                  + ("" if r.get("independent") else " ⚠️ not independent"))
     L.append("")
+    if rep.get("beta"):  # 👥 idea #14: the newest beta read or panel (beta_reader.with_beta adds it for downloads)
+        from . import beta_reader  # noqa: PLC0415
+        L += beta_reader.report_markdown(rep["beta"], (rep.get("version") or {}).get("key"))
     L += ["## What to try next", ""]
     for t in rep.get("try_next") or []:
         L.append(f"- {t['text']} *({t['from']})*")

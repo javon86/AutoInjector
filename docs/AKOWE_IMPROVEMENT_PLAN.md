@@ -724,6 +724,33 @@ the browser: `tests/campaign/ui/test_ui_continuity.py`):
 - *Not done:* using a pitch appends it to the record's text; it does not rewrite the plot around it (approve, then ask
   the AI to revise if wanted). Two panes of the same website count as two AIs in the room.
 
+## 👥 Idea #14 Panel of beta readers (2026-11) — done
+
+- **Up to three readers** (`akowe/beta_reader.py`, extends 📖 P23): 1 reader = the single read, stored exactly as before
+  (plus the new verdict). 2–3 readers = a panel record (`kind: "panel"`) in the same `beta_reads:<pid>:<branch>` key.
+  Default readers from the book profile (`personas`): a typical fan of the genre and age group (= the old persona), a
+  picky experienced reader of the genre, a casual reader who gives up on slow starts. The author can rewrite each
+  description and pick the AI per reader on the 📊 report page (kept per book in `beta_panel:<pid>`).
+- **Each reader a different AI** (`assign`): the author's picks, then working independent AIs, then the writer's AI
+  (⚠️ not independent). An AI that is not working, or that fails (site error / timeout / busy too long — assist's usual
+  handling, pinned to that AI), is skipped with a note (`skipped`, run event `BETA_SKIPPED`); the others still read.
+- **Same marks, plus a verdict:** every reader returns the P23 marks (quotes checked against the book and the
+  chapter) and `overall`: would recommend, favourite character (checked against the book), best / worst chapter, a
+  1–10 score; "would finish" comes from `stop`. An older read without a verdict still shows.
+- **Comparison without AI** (`compare`): strong signals (2–3 readers flag the same chapter for the same thing — lost,
+  bored, twist guessed, didn't believe, would stop, worst chapter; "at the same moment" when their quotes overlap),
+  disagreements (one liked a chapter another disliked; scores 3+ apart; recommend / finish split), a per-chapter heat
+  map of lost / bored readers with each reader's interest, every reader's verdict and the consensus top-5 fixes.
+- **Where:** the 📖 Beta readers card on the 📊 report page (how many readers, AI and description per reader, the
+  panel page: headline, verdict table, agree / disagree, heat map, what to fix first, each reader's own read); the book
+  report's Markdown / PDF and the saved book get a "Beta readers" section (`with_beta` / `report_markdown`).
+  ⚡ Make a book: "How many" next to 📖 Beta reader (run setting `beta_readers`, 1 by default = as before).
+- **Long books and resuming:** the same bounded book view as before (whole, or the per-chapter digest); readers read
+  one after another; the panel is saved after each reader (`incomplete`) and continues with the readers still to read
+  (a paused run continues its own panel; the report page shows ▶ Continue the panel).
+- *Not done:* readers do not run in parallel; the "same moment" check is word overlap (English); the panel shares the
+  single reader's one-call budget per reader (no per-part reading of very long books).
+
 ## Prevention pass (2026-10-27, "solve problems before they become problems")
 
 - [x] **Alfred's local AI connection:**
