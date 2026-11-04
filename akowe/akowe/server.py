@@ -529,6 +529,9 @@ class App:
                 if rest and rest[0] == "trailer":  # 🎞 B2 book trailers (trailer.py; AutoInjector POST /video/trailer)
                     from . import trailer  # noqa: PLC0415
                     return trailer.route(self, method, rest[1:], query, body, principal, pid, branch, headers)
+                if rest and rest[0] == "marketing":  # 📣 #17 mockups, ads and teaser clips (marketing.py)
+                    from . import marketing  # noqa: PLC0415
+                    return marketing.route(self, method, rest[1:], query, body, principal, pid, branch, headers)
                 if rest and rest[0] == "cover":  # 🎨 B3 book covers (cover.py)
                     from . import cover  # noqa: PLC0415
                     return cover.route(self, method, rest[1:], query, body, principal, pid, branch, headers)

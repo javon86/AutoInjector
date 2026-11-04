@@ -66,8 +66,8 @@ const bridge = createServiceBridge({
   },
   // 🖨 POST /render/image with the real renderer and a FAKE window (the real Chromium one: test/e2e/render-image.e2e.js)
   renderer: renderImage.createRenderer({
-    makeWindow: async ({ width, height, allow }) => {
-      calls.render = Object.assign(calls.render || {}, { width, height, allow, destroyed: false });
+    makeWindow: async ({ width, height, allow, transparent }) => {
+      calls.render = Object.assign(calls.render || {}, { width, height, allow, transparent, destroyed: false });
       return {
         load: async (url) => { calls.render.url = url; calls.render.page = require('fs').readFileSync(require('url').fileURLToPath(url), 'utf8'); if (calls.render.hang) await new Promise((r) => setTimeout(r, 5000)); },
         capture: async () => {
@@ -322,6 +322,11 @@ async function main() {
     calls.render.capSize = null;
     const p = await req('POST', '/render/image', { token: TOKEN, body: { svg: SVG, width: 400, height: 300, format: 'png' } });
     assert(p.status === 200 && p.json.mime === 'image/png' && Buffer.from(p.json.imageBase64, 'base64')[1] === 0x50, 'format png gives a PNG');
+    assert(calls.render.transparent === true && /background:transparent/.test(calls.render.page), 'a PNG with no background is drawn see-through (transparent window, transparent page)');
+    await req('POST', '/render/image', { token: TOKEN, body: { svg: SVG, width: 400, height: 300, format: 'png', background: '#ffeedd' } });
+    assert(calls.render.transparent === false, 'a PNG with a background colour is not see-through');
+    await req('POST', '/render/image', { token: TOKEN, body: { svg: SVG, width: 400, height: 300, format: 'jpeg' } });
+    assert(calls.render.transparent === false, 'a JPEG is never see-through');
     calls.render = { capSize: { width: 1280, height: 1024 } };
     for (const [body, why] of [[{ width: 100, height: 100 }, 'neither svg nor html'], [{ svg: SVG, html: '<p>x</p>', width: 100, height: 100 }, 'both svg and html'],
       [{ svg: 'hello', width: 100, height: 100 }, 'svg text without <svg>'], [{ svg: SVG, width: 5000, height: 100 }, 'a side over 4096'], [{ svg: SVG, width: 10, height: 100 }, 'a side under 16'],

@@ -15,6 +15,7 @@ uses both). Each book gets ONE folder, named once as ``<Book title> (<short id>)
     Pictures/      pictures.json + the chosen chapter / scene pictures (chNN … .png/.jpg) and map.svg/.png (B3)
     Trailer/       trailer.webm (+ trailer.mp4) and trailer.json, the book trailer and its plan (B2, trailer.py)
     Launch kit/    launch-kit.md + one .txt per store-listing field + the A+ module pictures (launch_kit.py)
+    Marketing/     the 📣 mockups, ads and teaser clips made, marketing.json (#17, marketing.py)
     Log/           Book journal.md (journal.py) + run-events.json (runs: steps, states, AI per step, times, problems)
     Progress/      progress.json (book steps, next step, the run's state)
     book.akowe the complete re-importable package (book_package.py)
@@ -113,6 +114,8 @@ Trailer/       The book trailer (🎞 Trailer): trailer.webm, trailer.mp4 when A
 Launch kit/    Everything to list the book in a store (🚀 Launch kit): the blurbs, the hook,
                the author bio, keywords, categories, comparable titles, age range and the
                A+ content plan. launch-kit.md has it all; each .txt file is one field to copy.
+Marketing/     The mockups, ads and teaser clips (📣 Mockups & ads) and marketing.json
+               (what each file is for, and which ones are out of date).
 Log/           The book's journal (what happened, step by step, which AI did what) and
                run-events.json (every step of the Make-a-book run). No keys, no prompts.
 Progress/      progress.json: what is done and what comes next (for an unfinished book).
@@ -638,6 +641,13 @@ class SaveService:
         except Exception as exc:  # noqa: BLE001 - the rest of the save still happens
             log.exception("launch kit files for the save failed")
             part_failed(info, "Launch kit/", f"the launch kit could not be written ({_why(exc)})")
+        # Marketing/ (#17): the mockups, ads and teaser clips made on 📣 Mockups & ads
+        try:
+            from . import marketing  # noqa: PLC0415
+            marketing.save_files(app, pid, branch, files, text)
+        except Exception as exc:  # noqa: BLE001 - the rest of the save still happens
+            log.exception("marketing files for the save failed")
+            part_failed(info, "Marketing/", f"the mockups and ads could not be written ({_why(exc)})")
         # Log/
         phase("Writing the log")
         try:

@@ -332,6 +332,34 @@ async function main() {
     assert(r.status === 501 && r.json.error === 'VIDEO_NOT_WIRED', 'an AutoInjector without trailers → 501 VIDEO_NOT_WIRED');
     await b2.stop();
   }
+  // =====================================================================
+  console.log('\n== 7. 📣 stills (a picture with a slow zoom / pan — no video engine) and tall frames ==');
+  {
+    const still = path.join(TMP, 'mockup.png'); fs.writeFileSync(still, PNG);
+    let r = VT.normalizeTrailer({ book: 'Teaser', width: 1080, height: 1920, items: [{ type: 'still', image: still, seconds: 3.5, motion: 'zoom-in' }, { type: 'still', image: still }, { type: 'card', text: 'Available now' }] });
+    assert(!r.error && r.plan.width === 1080 && r.plan.height === 1920, 'a vertical 1080 × 1920 frame is accepted (stories and Reels)');
+    assert(r.plan.items[0].type === 'still' && r.plan.items[0].motion === 'zoom-in' && r.plan.items[0].seconds === 3.5 && r.plan.items[1].motion === 'zoom-in' && r.plan.items[1].seconds === 3, 'a still keeps its picture, time and movement (default: 3 s zoom-in)');
+    r = VT.normalizeTrailer({ book: 'T', items: [{ type: 'still', image: still, seconds: 30 }] });
+    assert(r.plan.items[0].seconds === 10 && r.warnings.some((w) => /Still 1: 30 s → 10 s/.test(w.message)), 'a still longer than 10 s is shortened, with a warning');
+    for (const [it, re, why] of [[{ type: 'still' }, /needs its picture/, 'no picture'], [{ type: 'still', image: path.join(TMP, 'nope.png') }, /was not found/, 'a missing file'],
+      [{ type: 'still', image: path.join(TMP, 'x.txt') }, /not a picture/, 'not a picture'], [{ type: 'still', image: still, motion: 'spin' }, /not a movement/, 'an unknown movement'], [{ type: 'still', image: still, prompt: 'x' }, /no setting “prompt”/, 'a shot setting on a still']]) {
+      const e = VT.normalizeTrailer({ book: 'T', items: [it] }).error;
+      assert(e && e.error === 'INVALID_PARAM' && re.test(e.message), `refused in plain words: ${why} (“${e && e.message}”)`);
+    }
+    r = VT.normalizeTrailer({ book: 'T', items: [{ type: 'still', image: still, motion: 'pan-left' }] });
+    const tl = VT.joinPlan(r.plan, [null], (p) => `file://${p}`);
+    assert(tl.items[0].kind === 'still' && tl.items[0].src === `file://${still}` && tl.items[0].motion === 'pan-left', 'the recorder gets the still as a picture with its movement');
+    // the maker: stills need no video engine (no studio at all)
+    const recs = [];
+    const record2 = (plan, out) => { recs.push(plan); const done = (async () => { fs.writeFileSync(out, W.setWebmDuration(fakeWebm(plan.total * 24 + 1, 24, 1000), plan.total * 1000)); return { ok: true, path: out, ms: plan.total * 1000, seconds: plan.total, mime: 'video/webm', bytes: 100, tracks: [{ type: 'video' }] }; })(); return { done, stop: () => {}, abort: () => {} }; };
+    const m2 = VT.createTrailerMaker({ studio: null, record: record2, trailersDir: () => path.join(videos, 'trailers'), fileUrl: (p) => `file://${p}`, ffmpeg: () => null, waitMs: 20 });
+    const res = await m2.make({ book: 'Teaser (vertical)', width: 1080, height: 1920, wait: true, items: [{ type: 'still', image: still, seconds: 2 }, { type: 'still', image: still, seconds: 2, motion: 'zoom-out' }] });
+    assert(res.ok && res.width === 1080 && res.height === 1920 && res.shots.length === 0 && res.stills.length === 2 && res.seconds === 4, `a teaser of stills is made without any video engine (${res.ok ? `${res.seconds} s` : res.message})`);
+    assert(recs[0] && recs[0].items.every((x) => x.kind === 'still') && recs[0].height === 1920, 'the recorder plays the stills at 1080 × 1920');
+    assert(res.warnings.some((w) => w.field === 'mp4'), 'no ffmpeg: only the .webm, with a plain warning');
+    const noVid = await m2.make({ book: 'x', wait: true, items: [{ prompt: 'a ferry' }] });
+    assert(noVid.error === 'NOT_WIRED', 'a real shot still needs the video engine (NOT_WIRED without one)');
+  }
   await comfy.close();
 }
 
