@@ -37,6 +37,9 @@ akowe/
     prose_audit.py         P6 pattern checker (no AI): repeated gestures, "Not X. Not Y.", triads, moral paragraph
                            endings, named emotions, said-bookisms, sentence-length uniformity, same openings, overused
                            words, dialogue share, reassurance; audit()/audit_book(), thresholds per 1 000 words
+    originality.py         ✨ #20 originality / "sounds like AI" check: clichés + AI-tell phrases from ai_tells.json,
+                           long dashes, "It wasn't X. It was Y.", hedging (no AI, dialogue left out); editor_brief()
+                           for the editor; optional independent AI pass with verified quotes; /originality API
     editor_rubric.py       the AI editor's rubric (dimensions, questions, strictness) - the ONE editable place
     editor.py              🖋 AI editor: craft review (P4), rewrite proposals + exact apply (P5), restore; settings
                            editor_settings, advice keys craft_reviews / editor_proposals / editor_rewrites

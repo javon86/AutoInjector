@@ -504,8 +504,17 @@ class ReportService:
         out = {"words": words, "editor": self._editor(review, pid, branch, chapters),
                "planned": self._planned(review, bp), "patterns": self._patterns(chapters),
                "usage": self._usage(review, pid, branch, chapters),
-               "readability": self._readability(chapters, prof)}
+               "readability": self._readability(chapters, prof), "originality": self._originality(chapters)}
         return out
+
+    @staticmethod
+    def _originality(chapters) -> dict:  # ✨ #20: one summary line and the worst spots (no AI)
+        try:
+            from . import originality  # noqa: PLC0415
+            return originality.brief(originality.check(chapters))
+        except Exception:  # noqa: BLE001
+            log.exception("originality check failed in the report")
+            return {"error": True}
 
     @staticmethod
     def _readability(chapters, prof) -> dict:  # P24
@@ -1089,6 +1098,13 @@ def render_markdown(rep: dict) -> str:
     if not pa.get("findings"):
         L.append("No strong repeated habits found.")
     L.append("")
+    og = rep.get("originality") or {}  # ✨ #20 originality and "sounds like AI" (no AI)
+    if og.get("line"):
+        L += ["## Originality (no AI)", "", og["line"] + ".", ""]
+        for e in og.get("examples") or []:
+            L.append(f"- Chapter {e['chapter']}: {e['label']} — {quoted(e['quote'])}")
+        if og.get("examples"):
+            L.append("")
     rd = rep.get("readability") or {}
     rt = rd.get("totals") or {}
     if rt.get("grade") is not None:

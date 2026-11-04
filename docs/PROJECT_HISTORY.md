@@ -48,6 +48,7 @@ A plain-words record of every big change, newest first, so that if something bre
 | 2026-11-04 | #? | 🗳 Three-AI writers' room: each AI pitches a twist, they vote blind, you choose (also optional in ⚡ Make a book) |
 | 2026-11-04 | #? | Panel of beta readers: up to 3 AIs read the book as different readers; Akọwe shows where they agree, a chapter heat map and the top 5 fixes |
 | 2026-11-04 | #? | 🚀 Launch kit: blurbs, hook, bio, keywords, categories, comparable titles, age range and A+ plan for the store, checked against the Book Bible (no invented names, no spoilers, KDP keyword rules) |
+| 2026-11-04 | #? | ✨ Originality check: clichés and AI-sounding passages flagged per chapter (no AI), an optional AI "sounds machine-written" rating, and the editor's rewrites aimed at them |
 | 2026-11-03 | #112 | Smart memory: per-chapter needs lists, so the writer gets exactly what the chapter needs |
 | 2026-11-03 | #111 | Book Bible code map, plus the "Fill the whole Book Bible" switch and button |
 | 2026-11-03 | #110 | All 26 continuity and process holes fixed, continuity checkpoints for long books, and HOW_IT_WORKS.md |

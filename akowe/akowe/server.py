@@ -544,6 +544,9 @@ class App:
                 if rest and rest[0] == "room":  # 🗳 the three-AI writers' room (writers_room.py)
                     from . import writers_room  # noqa: PLC0415
                     return writers_room.route(self, method, rest, body, principal, pid, branch)
+                if rest and rest[0] == "originality":  # ✨ #20 originality and "sounds like AI" check
+                    from . import originality  # noqa: PLC0415
+                    return originality.route(self, method, rest, query, body, principal, pid, branch)
                 if rest == ["style"]:  # ✒️ P25 (Section 7c) this book's use of the author's style
                     from . import style_card  # noqa: PLC0415
                     return style_card.route_book(self, method, body, principal, pid)

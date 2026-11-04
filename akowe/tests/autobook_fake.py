@@ -209,6 +209,7 @@ class BookFakeAI:
         self.compare_script: list = []           # P14: scripted blind comparisons (dicts or callables(ctx))
         self.terms_script: list = []             # P31: scripted "which trade facts to check" answers
         self.beta_script: list = []              # P23: scripted beta reads (dicts or callables(ctx))
+        self.originality_script: list = []       # ✨ #20: scripted "sounds machine-written" ratings
         # Character entries that break an Akọwe check: name -> kinds, one consumed per proposal of that name
         # ("interval": a fact whose effective_to is not after effective_from (the save is refused); "authority": a
         # home place no pinned A04 declares (VALIDATE refuses it); "schema": a fact missing its fields (the proposal
@@ -326,6 +327,19 @@ class BookFakeAI:
             if scripted is not None:
                 return "beta", scripted(ctx) if callable(scripted) else copy.deepcopy(scripted)
             return "beta", self._beta(ctx)
+        if "machine_ratings" in props:  # ✨ #20: does it sound machine-written? (a real quote, then an invented one)
+            with self.lock:
+                scripted = self.originality_script.pop(0) if getattr(self, "originality_script", None) else None
+            if scripted is not None:
+                return "originality", scripted(ctx) if callable(scripted) else copy.deepcopy(scripted)
+            out = []
+            for i, p in enumerate(ctx.get("passages") or []):
+                q = next((s for s in self.sentences(str(p.get("text") or "")) if len(s) > 12), "")[:160]
+                out.append({"passage_id": p["id"], "machine_score": 4 if i == 0 else 2,
+                            "reasons": ["stock phrases" if i == 0 else "specific details"],
+                            "quote": q if i == 0 else ("A line that is not in the book at all." if i == 1 else ""),
+                            "rewrite": "Mara counted the boats." if i == 0 else ""})
+            return "originality", {"machine_ratings": out, "summary": "Mostly human, a few stock phrases."}
         if "voice_summary" in props:  # ✒️ P25 (Section 7c): the author's style card
             return "style", self._style(ctx)
         if "scene_text" in props:  # 📏 P15: one scene of a long chapter
