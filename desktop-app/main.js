@@ -239,6 +239,7 @@ const state = {
   sequence: { active: false, steps: [], index: 0, generation: 0, dispatchGen: {} }, // Prompt Sequence run state, see startSequence()/handleSequenceCapture()
   selectorOverrides: {}, // site -> { input?, send?, assistant? } — user-picked CSS selectors (see selector:pick), tried before the built-in candidates in selectors.js
   learnedSelectors: {}, // site -> { input?|send?|assistant?|stop?|user?: { selector, how: alternative|page-search|teach, learnedAt, version } } — found by the self-repair (P18.3/4/7) and proved by a check-in; persisted (versioned)
+  retiredSelectors: {}, // PR #120: site -> role -> { selector, source: pick|learned, retiredAt, kind, meta?, learned? } — a saved / learned selector that kept failing while the built-in way worked, forgotten by itself; kept so ↺ Undo can bring it back
   pickMeta: {}, // P38: site -> { input?|send?|assistant?|user?: { savedAt, how: pick|number, rev, version } } — when each 🎯 / 🔢 SAVED selector (in selectorOverrides) was locked in; persisted (versioned)
   selfRepair: { intervalMin: 20, startup: true, carryOn: true }, // P18.1 check-ins: every N minutes while an AI is idle (0 = off), and once at start; carryOn: after a check-in / 🔢, ask a busy AI to carry on
   savedLogins: {}, // site -> [{ id, label, username, encryptedPassword }] — encryptedPassword is a safeStorage-encrypted (OS keychain) ciphertext, base64-encoded; the plaintext password is never stored, never sent to the renderer, never logged. See logins:save/logins:fill.
@@ -283,6 +284,7 @@ for (const site of SITE_IDS) {
   state.selectorOverrides[site] = {};
   state.learnedSelectors[site] = {};
   state.pickMeta[site] = {};
+  state.retiredSelectors[site] = {};
 }
 
 // Built-in starter prompt: a one-click sanity check that the whole
@@ -710,6 +712,7 @@ function saveStateDebounced() {
         prompts: state.prompts,
         selectorOverrides: state.selectorOverrides,
         pickMeta: { version: PICK_VERSION, sites: state.pickMeta }, // P38: when each saved pick was locked in (no page text)
+        retiredSelectors: state.retiredSelectors, // PR #120: out-of-date saved selectors that were forgotten (for ↺ Undo)
         learnedSelectors: { version: selfRepairLib.LEARNED_VERSION, sites: state.learnedSelectors }, // P18: selectors the self-repair learned (CSS only — never page text)
         selfRepair: { intervalMin: state.selfRepair.intervalMin, startup: state.selfRepair.startup !== false, carryOn: state.selfRepair.carryOn !== false },
         nextMsgSeq: state.nextMsgSeq, // TR-29: [MSG #] numbers carry on after a restart (the AIs remember the old ones)
@@ -802,6 +805,16 @@ function loadPersistedState() {
   }
   if (snap.learnedSelectors) {
     try { state.learnedSelectors = selfRepairLib.sanitizeLearned(snap.learnedSelectors, SITE_IDS, isBareTagSelector); } catch (_) {}
+  }
+  if (snap.retiredSelectors && typeof snap.retiredSelectors === "object") {
+    for (const site of SITE_IDS) {
+      const m = snap.retiredSelectors[site]; if (!m || typeof m !== "object") continue;
+      for (const role of PICK_ROLES_ALL) {
+        const x = m[role];
+        if (!x || typeof x !== "object" || typeof x.selector !== "string" || !x.selector.trim() || x.selector.length > 300) continue;
+        state.retiredSelectors[site][role] = { selector: x.selector, source: x.source === "learned" ? "learned" : "pick", retiredAt: Number(x.retiredAt) || 0, kind: typeof x.kind === "string" ? x.kind.slice(0, 20) : null, meta: x.meta && typeof x.meta === "object" ? x.meta : null, learned: x.learned && typeof x.learned === "object" ? x.learned : null };
+      }
+    }
   }
   if (snap.pickMeta && typeof snap.pickMeta === "object") {
     const src = snap.pickMeta.sites && typeof snap.pickMeta.sites === "object" ? snap.pickMeta.sites : {};
@@ -956,6 +969,7 @@ const capturedCount = {};
 const tagSeenAt = {}; // when a [FROM:]-tagged reply first appeared on this pane (settle ceiling)
 const fragmentWarned = {}; // TR-23: logged the "override reads only part of the reply" warning
 const overrideIgnoredWarned = {}; // 2026-10-29: logged "the saved reply selector finds no reply — using the built-in reader"
+const lastReadFlags = {}; // PR #120: site -> { ignored, fragment } from the latest read (was the saved reply selector bypassed?)
 const settleKey = (s) => String(s || "").replace(/\s+/g, "");
 // M1: the AI was seen writing since the last capture (the Relay Trace then
 // counts the messages it was answering as started).
@@ -990,6 +1004,11 @@ function closeUncapturedReply(site) {
   logEvent("roundtable-skip-repeat", { site, note: "another NONE (nothing to add) — same text as the last one" });
 }
 function markCaptured(site) {
+  // PR #120: a reply was read — with the saved reply selector, or (it finding nothing /
+  // only part of the reply) with the built-in reader. The latter counts toward
+  // forgetting the out-of-date saved one.
+  const rf = lastReadFlags[site];
+  if (rf) { try { noteSavedSelectorOutcome(site, "assistant", rf.ignored || rf.fragment, rf.fragment ? "fragment" : "ignored"); } catch (_) {} }
   wroteSinceCapture[site] = false;
   genReads[site] = 0;
   try { delete unreadableWarned[site]; } catch (_) {} // TR-31: a later fragment is logged again
@@ -1196,6 +1215,7 @@ function createWindow() {
       if (typeof view.webContents.on === "function") {
         view.webContents.on("did-finish-load", () => {
           delete paneLoadFailed[site];
+          paneLoadedAt[site] = Date.now();
           try { view.webContents.setZoomFactor(paneZoom[site] || DEFAULT_PANE_ZOOM); } catch (_) {}
           setTimeout(() => { probePane(site).catch(() => {}); }, PROBE_DELAY_MS);
           // P18.8: a user-only problem (logged out, captcha, limit) may be gone now.
@@ -1567,6 +1587,117 @@ function noteStaleSavedSend(target, r) {
   const L = siteLabel(target);
   logEvent("send-saved-button-missing", { target, selector: sel, severity: "warn", note: `The Send button saved for ${L} (🎯 / 🔢 / learned) isn't on ${L}'s page any more — AutoInjector used ${L}'s usual Send button or the Enter key instead${r && r.ok === false ? ", and that didn't send either" : ""}. Clear it on ${L}'s 🎯 card (or run 🔢 again) to stop this warning.` });
 }
+// ---- PR #120: out-of-date saved selectors forget themselves ---------------------
+// A saved 🎯 / 🔢 / learned selector that keeps failing while the built-in way works
+// ("send-saved-button-missing", "reply-selector-ignored", "reply-selector-fragment",
+// logged at every start) is forgotten after STALE_RETIRE_AFTER such sends / replies
+// in a row — never one the user saved or taught in the last hour. A backup is kept
+// (state.retiredSelectors) for ↺ Undo on the 🎯 card; logged once, in plain words.
+const STALE_RETIRE_AFTER = Number(process.env.AUTOINJECTOR_STALE_RETIRE_N) || 3;
+const STALE_KEEP_RECENT_MS = 60 * 60000;
+const staleStreak = {}; // site -> role -> { selector, n }
+// The saved selector in effect for this role, and where it came from (null: none).
+function effectiveSource(site, role) {
+  const eff = effectiveOverrides(site)[role];
+  if (!eff) return null;
+  const t = teachOverrides[site];
+  if (t && t[role] === eff) return null; // a 🔢 number teach is using it right now
+  const l = (state.learnedSelectors[site] || {})[role];
+  if (l && l.selector === eff) return { source: "learned", selector: eff, at: Number(l.learnedAt) || 0 };
+  if ((state.selectorOverrides[site] || {})[role] === eff) { const m = (state.pickMeta[site] || {})[role]; return { source: "pick", selector: eff, at: m ? Number(m.savedAt) || 0 : 0 }; }
+  return null;
+}
+// failed: the saved selector failed AND the built-in way worked (a proven send, a
+// captured reply); false: the saved one worked — the count starts over.
+function noteSavedSelectorOutcome(site, role, failed, kind) {
+  const map = staleStreak[site] || (staleStreak[site] = {});
+  const src = effectiveSource(site, role);
+  if (!src || !failed) { delete map[role]; return null; }
+  if (!map[role] || map[role].selector !== src.selector) map[role] = { selector: src.selector, n: 0 };
+  map[role].n++;
+  if (map[role].n < STALE_RETIRE_AFTER) return null;
+  if (src.at && Date.now() - src.at < STALE_KEEP_RECENT_MS) return null; // the user set it in the last hour: left alone
+  delete map[role];
+  return retireSavedSelector(site, role, src, kind);
+}
+const ROLE_WORDS = { send: "Send button", assistant: "reply reader", input: "message box", user: "your-message marker", stop: "Stop button", image: "picture finder" };
+function retireSavedSelector(site, role, src, kind) {
+  const backup = { selector: src.selector, source: src.source, retiredAt: Date.now(), kind: kind || null, meta: null, learned: null };
+  if (src.source === "learned") {
+    backup.learned = { ...(state.learnedSelectors[site] || {})[role] };
+    const n = { ...(state.learnedSelectors[site] || {}) }; delete n[role]; state.learnedSelectors[site] = n;
+  } else {
+    backup.meta = (state.pickMeta[site] || {})[role] ? { ...state.pickMeta[site][role] } : null;
+    const n = { ...(state.selectorOverrides[site] || {}) }; delete n[role]; state.selectorOverrides[site] = n;
+    const m = { ...(state.pickMeta[site] || {}) }; delete m[role]; state.pickMeta[site] = m;
+  }
+  state.retiredSelectors[site] = { ...(state.retiredSelectors[site] || {}), [role]: backup };
+  if (role === "assistant") { overrideIgnoredWarned[site] = false; fragmentWarned[site] = false; }
+  saveStateDebounced();
+  const L = siteLabel(site);
+  logEvent("selector-retired", { site, role, selector: src.selector, source: src.source, after: STALE_RETIRE_AFTER, note: `${L}'s saved ${ROLE_WORDS[role] || role} was out of date and has been forgotten; the built-in one works. (↺ Undo on ${L}'s 🎯 card brings it back.)` });
+  pickerStatus(site).then((st) => broadcast("picker", st)).catch(() => {});
+  return backup;
+}
+// ↺ Undo: bring a retired selector back exactly as it was (and give it a fresh hour).
+function undoRetiredSelector(site, role) {
+  const b = (state.retiredSelectors[site] || {})[role];
+  if (!b) return { ok: false, error: "NOTHING_TO_UNDO" };
+  if (b.source === "learned") state.learnedSelectors[site] = { ...(state.learnedSelectors[site] || {}), [role]: Object.assign({ how: "learned", version: selfRepairLib.LEARNED_VERSION }, b.learned || {}, { selector: b.selector, learnedAt: Date.now() }) };
+  else {
+    state.selectorOverrides[site] = { ...(state.selectorOverrides[site] || {}), [role]: b.selector };
+    state.pickMeta[site] = { ...(state.pickMeta[site] || {}), [role]: Object.assign({ how: "pick", rev: 1, version: PICK_VERSION }, b.meta || {}, { savedAt: Date.now() }) };
+  }
+  const n = { ...(state.retiredSelectors[site] || {}) }; delete n[role]; state.retiredSelectors[site] = n;
+  if (staleStreak[site]) delete staleStreak[site][role];
+  saveStateDebounced();
+  logEvent("selector-retire-undone", { site, role, selector: b.selector, note: `${siteLabel(site)}'s saved ${ROLE_WORDS[role] || role} is back (↺ Undo)` });
+  return { ok: true, role, selector: b.selector };
+}
+// PR #120 (log 2026-11-04, Gemini SEND_NOT_CONFIRMED ×3 at start): the text was in
+// the box, the Send button visible and enabled, yet neither the script's click nor
+// its Enter sent it — events made by a page script are "untrusted" and a page may
+// ignore them (Gemini did until its window was reloaded). When a send could not be
+// confirmed and the text still sits in the box, AutoInjector presses a REAL Enter
+// key in the pane (webContents.sendInputEvent, like the user's own keyboard), then
+// a real click on the Send button, and checks again before it gives up.
+async function trustedSendFallback(view, target, prompt, markerBaseline) {
+  const wc = view && view.webContents;
+  if (!wc || typeof wc.sendInputEvent !== "function") return null;
+  const ov = effectiveOverrides(target);
+  const run = (o) => wc.executeJavaScript(buildSendScript(target, prompt, ov, Object.assign({ markerBaseline, userSel: userTurnSelector(target) }, o)), true);
+  let f = null;
+  try { f = await run({ mode: "focus" }); } catch (_) { return null; }
+  if (!f || !f.ok) return null;
+  if (f.alreadySent) return { ok: true, method: "already-sent", verified: true, proof: "number", markerBaseline };
+  if (!f.holds) return null; // the box no longer holds this message: nothing to press Enter on
+  try { wc.focus(); } catch (_) {}
+  let c = null;
+  try {
+    wc.sendInputEvent({ type: "keyDown", keyCode: "Return" });
+    wc.sendInputEvent({ type: "char", keyCode: "\r" });
+    wc.sendInputEvent({ type: "keyUp", keyCode: "Return" });
+    c = await run({ mode: "confirm", method: "trusted-enter", turnsBefore: f.turnsBefore });
+  } catch (_) { c = null; }
+  if (c && c.ok) return c;
+  // Enter may have added a line and moved the Send button: ask for its place again
+  try { const f2 = await run({ mode: "focus" }); if (f2 && f2.ok) { if (f2.alreadySent) return { ok: true, method: "already-sent", verified: true, proof: "number", markerBaseline }; f = Object.assign({}, f, { button: f2.button }); } } catch (_) {}
+  if (f.button) {
+    let z = 1;
+    try { z = Number(wc.getZoomFactor && wc.getZoomFactor()) || 1; } catch (_) {}
+    const x = Math.round(f.button.x * z), y = Math.round(f.button.y * z);
+    try {
+      wc.sendInputEvent({ type: "mouseDown", x, y, button: "left", clickCount: 1 });
+      wc.sendInputEvent({ type: "mouseUp", x, y, button: "left", clickCount: 1 });
+      c = await run({ mode: "confirm", method: "trusted-click", turnsBefore: f.turnsBefore });
+    } catch (_) { c = null; }
+  }
+  return c;
+}
+// PR #120: a pane whose page JUST finished loading gets a moment to settle before
+// the first thing is typed into it (its editor and Send button wire up a beat later).
+const PANE_SETTLE_MS = process.env.AUTOINJECTOR_PANE_SETTLE_MS != null ? Number(process.env.AUTOINJECTOR_PANE_SETTLE_MS) : 2500;
+const paneLoadedAt = {};
 // TR-25: how long a send waits for an AI that is still writing its last reply.
 const SEND_BUSY_WAIT_MS = Number(process.env.AUTOINJECTOR_SEND_BUSY_WAIT_MS) || 5 * 60 * 1000;
 const SEND_BUSY_POLL_MS = Number(process.env.AUTOINJECTOR_SEND_BUSY_POLL_MS) || 2000;
@@ -1843,10 +1974,22 @@ async function sendTextTo(target, text, fromSite, opts = {}) {
       if (gate === "busy") {
         r = { ok: false, error: "AI_BUSY", markerBaseline }; // still writing — wait below without typing
       } else {
+        // PR #120: a page that only just loaded settles first (bounded)
+        const sinceLoad = Date.now() - (paneLoadedAt[target] || 0);
+        if (PANE_SETTLE_MS > 0 && sinceLoad < PANE_SETTLE_MS) await new Promise((rs) => setTimeout(rs, PANE_SETTLE_MS - sinceLoad));
         if (token) token.typing = true;
         try {
           if (attempt === 1 || markerBaseline == null) { try { relayTrace.noteTyping(seq); } catch (_) {} } // P18.5
           r = await view.webContents.executeJavaScript(buildSendScript(target, prompt, effectiveOverrides(target), { markerBaseline, userSel: userTurnSelector(target) }), true);
+          // PR #120: not confirmed and the text still in the box -> a REAL Enter / click
+          if (r && !r.ok && r.error === "SEND_NOT_CONFIRMED" && r.diag && Number(r.diag.boxChars) > 0) {
+            const base = Number.isInteger(r.markerBaseline) ? r.markerBaseline : markerBaseline;
+            const t = await trustedSendFallback(view, target, prompt, base).catch(() => null);
+            if (t && t.ok) {
+              logEvent("send-trusted-input", { target, seq, attempt, method: t.method, verified: t.verified === true, note: `the page ignored AutoInjector's scripted click / Enter — a real ${t.method === "trusted-click" ? "click on the Send button" : "Enter key"} sent it` });
+              r = Object.assign({}, t, { savedSend: r.savedSend || t.savedSend });
+            }
+          }
         } catch (e) {
           r = { ok: false, error: String(e) };
         } finally {
@@ -1864,7 +2007,12 @@ async function sendTextTo(target, text, fromSite, opts = {}) {
       if (r && r.ok && r.verified === false && (sendVerifiedSeen[target] || r.turnsCountable === true)) r = { ok: false, error: "SEND_UNVERIFIED", savedSend: r.savedSend, markerBaseline: r.markerBaseline };
       if (r && r.savedSend && r.savedSend !== "found") noteStaleSavedSend(target, r);
       if (r && Array.isArray(r.dismissed) && r.dismissed.length) logEvent("popup-dismissed", { target, seq, what: r.dismissed.slice(0, 3), note: `closed a feedback pop-up inside ${siteLabel(target)}'s window (its own Dismiss / Close button) before typing` });
-      if (r && r.ok) { if (r.verified) sendVerifiedSeen[target] = true; break; }
+      if (r && r.ok) {
+        if (r.verified) sendVerifiedSeen[target] = true;
+        // PR #120: proven sent — with the saved Send button, or without it (it was not on the page)
+        if (r.verified && r.method !== "already-sent") { try { noteSavedSelectorOutcome(target, "send", r.savedSend === "missing", "send"); } catch (_) {} }
+        break;
+      }
       // TR-25: the AI is still writing its previous reply — wait for it to
       // finish (it can't take a new message yet) instead of burning retries.
       if (r && r.error === "AI_BUSY") {
@@ -4073,6 +4221,7 @@ async function pollSite(site) {
     // TR-28: the Stop button alone (older read results without the field fall back to `generating`).
     state.stopShown[site] = res && typeof res.stopShown === "boolean" ? res.stopShown : generating;
     readCount[site] = res && Number.isInteger(res.count) ? res.count : null;
+    if (res && res.ok) lastReadFlags[site] = { ignored: !!res.overrideIgnored, fragment: !!res.fragmentFixed };
     if (res && res.overrideIgnored && !overrideIgnoredWarned[site]) {
       overrideIgnoredWarned[site] = true;
       logEvent("reply-selector-ignored", { site, selector: effectiveOverrides(site).assistant || null, severity: "warn", note: `the saved reply selector finds no reply of ${siteLabel(site)}'s (nothing, only your own messages, or the sidebar) — reading with the built-in reader instead. Press 🎯 → "↺ Forget what I taught" to clear it.` });
@@ -4356,8 +4505,19 @@ async function pollSite(site) {
         state.waitingSince[site] = null;
         broadcast("waiting-changed", { site, waiting: false });
       }
+      // PR #120: a reply that answers a check-in without being "owned" (no word, an
+      // earlier check-in's word, late) still proves the AI answers: self-repair credits
+      // it (slow, never broken) — or, when it is the site's own error notice
+      // ("Sorry, something went wrong…"), ends the waiting check-in as a page error.
+      let probeSiteErr = null;
+      if (probeKind !== "owned") {
+        const bare = String(forcedAccept ? acceptedUntaggedRaw[site] : text).replace(/\[\s*(?:TO|FROM)\s*:[^\]\r\n]{0,40}\]/gi, "").trim();
+        probeSiteErr = siteErrors.siteErrorOf(bare);
+      }
+      let credited = false;
       if (probeKind === "owned") { try { selfRepair.onCaptured(site, { text, answers: checkinAnswers }); } catch (_) {} }
-      logEvent("checkin-reply", { site, chars: text.length, how: probeKind === "owned" ? undefined : probeKind });
+      else { try { credited = selfRepair.noteProbeAnswer(site, { answers: checkinAnswers, siteError: !!probeSiteErr }); } catch (_) {} }
+      logEvent("checkin-reply", { site, chars: text.length, how: probeKind === "owned" ? undefined : probeKind, siteError: probeSiteErr ? probeSiteErr.kind : undefined, credited: probeKind !== "owned" ? credited : undefined });
       return;
     }
     let roundtableTag = null;
@@ -5781,7 +5941,8 @@ async function pickerStatus(site) {
   }
   if (items.send) { const w = pickerSendWorks(site); if (w) items.send.works = w; } // how Send really works (PC test 2026-10-28)
   let repair = null; try { repair = selfRepair.state(site); } catch (_) {}
-  return { ok: true, site, label: siteLabel(site), items, picking: pickRunning[site] || null, repair };
+  const retired = Object.fromEntries(Object.entries(state.retiredSelectors[site] || {}).map(([r, b]) => [r, { selector: b.selector, source: b.source, retiredAt: b.retiredAt }]));
+  return { ok: true, site, label: siteLabel(site), items, picking: pickRunning[site] || null, repair, retired };
 }
 // 🔢 sent with Enter (or the usual Send button) and learned no Send button: drop a
 // saved / learned Send button that is not on the page any more, so the 🎯 card
@@ -5864,6 +6025,18 @@ ipcMain.handle("picker:force", async (_evt, payload) => {
   try { res = await view.webContents.executeJavaScript(selfRepairLib.buildPickForceScript(site, SITES), true); }
   catch (e) { res = { ok: false, error: "SCRIPT_FAILED" }; }
   return pickerTakeResult(site, role, res, true);
+});
+// PR #120: ↺ Undo — bring back a saved selector that was forgotten as out of date.
+ipcMain.handle("picker:undo-retire", async (_evt, payload) => {
+  const site = payload && payload.site;
+  if (!SITES[site]) return { ok: false, error: "BAD_SITE" };
+  const roles = payload.role ? [payload.role] : Object.keys(state.retiredSelectors[site] || {});
+  const done = roles.map((r) => undoRetiredSelector(site, r)).filter((x) => x.ok).map((x) => x.role);
+  if (!done.length) return { ok: false, error: "NOTHING_TO_UNDO" };
+  try { selfRepair.userActed(site); } catch (_) {}
+  const st = await pickerStatus(site);
+  broadcast("picker", st);
+  return Object.assign({ undone: done }, st);
 });
 // 2026-10-29: "↺ Forget what I taught": every saved 🎯 / 🔢 part AND every part the
 // self-repair learned for this AI — back to AutoInjector's built-in way of reading it.
@@ -8020,6 +8193,7 @@ function selfRepairSaveLearned(site, role, selector, how) {
   return true;
 }
 const SELF_REPAIR_SAY = {
+  slow: (L) => ({ say: `🐢 ${L} is slow right now — it answered its check-in late, so AutoInjector stopped checking and left it alone (it is not broken)`, tone: "info" }),
   fixed: (L, ev) => ({ say: `✔ Fixed — ${L} is working again${ev && ev.how ? ` (${ev.how === "number" ? "✔ Saved — the number teach learned where things are" : ev.how === "teach" ? "you showed AutoInjector where things are" : ev.how === "page-search" || ev.how === "page_search" ? "it found where replies appear" : ev.how === "alternatives" ? "it used another known way to find things" : ev.how === "reload" || ev.how === "reload_home" ? "after reloading its window" : ev.how === "unfreeze" ? "after pressing Stop" : "a check-in worked"})` : ""}`, tone: "ok" }),
   needs_user: (L, ev) => ({ say: `⚠️ ${L} needs you: ${selfRepairLib.describeProblem(ev && ev.code, L).say}`, tone: "warn" }),
   broken: (L, ev) => (ev && ev.ask ? { say: `⚠️ ${L} isn't working and AutoInjector couldn't fix it by itself (${(ev && ev.code) || "UNKNOWN"}). Please use 🎯 on ${L}'s pane, or 🔢 “Do it for me with a number” — Akọwe uses your other AIs meanwhile. (AutoInjector re-checks after 5, 15, then every 60 minutes.)`, tone: "error" } : { say: `✕ ${L} still isn't working (${(ev && ev.code) || "UNKNOWN"}) — Akọwe uses your other AIs`, tone: "error" }),

@@ -318,7 +318,8 @@ function createSdStudio(deps) {
     try { saved = sdImages.saveGeneration(imagesDir(), r.images, record, { prefix }); }
     catch (e) { return { ok: false, error: 'SAVE_FAILED', message: `The picture was made but couldn't be saved: ${e.message || e}` }; }
     for (const s of saved) { try { recordImage({ path: s.path, prompt: s.record.prompt, seed: s.record.seed, model: s.record.checkpoint || '', from: from || 'images-tab', sha256: s.sha256 }); } catch (_) {} }
-    log('sd-generate', { ok: true, from, count: saved.length, backend: r.backend, lock: b.lock ? b.lock.character : null, corrected, names: fixedNames, retried: retried ? retried.kind : undefined });
+    const skipped = warnings.filter((w) => w && w.kind === 'skipped' && w.field).map((w) => w.field);
+    log('sd-generate', { ok: true, from, count: saved.length, backend: r.backend, lock: b.lock ? b.lock.character : null, corrected, names: fixedNames, retried: retried ? retried.kind : undefined, skipped: skipped.length ? skipped : undefined });
     const out = {
       ok: true, engine: 'sd', backend: r.backend, seed: r.seed, warnings, settings: record,
       images: saved.map((s) => ({ path: s.path, url: fileUrl(s.path), json: s.json, seed: s.record.seed, sha256: s.sha256 })),

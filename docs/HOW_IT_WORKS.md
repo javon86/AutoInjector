@@ -96,10 +96,22 @@ bridge to your home Wi-Fi, behind its key.
   though you may spot them in that AI's own pane. If the AI fails, AutoInjector works out why and tries to fix it:
   other ways to find the box or the reply, a page reload, pressing Stop on a stuck AI. If an AI was busy with
   something, it is then asked to carry on where it left off.
+  - **Slow is not broken:** each AI's wait follows how long its check-ins really take (Gemini usually answers in
+    about 16 seconds but sometimes takes over 2 minutes), and while a reply is still being written the wait goes on,
+    up to 3 minutes. Stop is only pressed when the reply has not changed for a while. An answer that comes in while
+    AutoInjector is still checking or repairing (to that check-in or an earlier one) stops the repair; the AI is
+    marked 🐢 slow, not broken.
+  - If the site answers a check-in with its own error notice ("Sorry, something went wrong…"), AutoInjector
+    reloads the window at once instead of waiting.
+  - If the page ignores AutoInjector's typed click or Enter (seen on Gemini just after start), the message is sent
+    with a real Enter key, then a real click on Send.
 - **🎯 Point at it and learned selectors:** websites change their layout. A "selector" is the address of a thing on
   the page, such as "the reply box". When the built-in ones stop working, you can click 🎯 and point at the message
   box, the Send button or the reply. AutoInjector saves that per site. **🔢 Do it for me with a number** teaches it
-  by watching you type a number. **↺ Forget what I taught** goes back to the built-in ways.
+  by watching you type a number. **↺ Forget what I taught** goes back to the built-in ways. A saved part that
+  failed 3 times in a row while the built-in way worked is forgotten by itself, and the log says so once ("ChatGPT's
+  saved Send button was out of date and has been forgotten; the built-in one works"). **↺ Undo** on the 🎯 card
+  brings it back. A part you saved in the last hour is never forgotten this way.
 - **Logs and 📋 Extract:** the app keeps an activity log and a record of every message's journey (the Relay
   Trace). Extract turns these into one file you can share. Keys and private paths are removed.
 
@@ -117,8 +129,10 @@ bridge to your home Wi-Fi, behind its key.
      more times.
 - **When it can't answer:**
   - **Busy:** one request per AI at a time. A second one hears "busy", and Akọwe waits and retries.
-  - **Site error:** the site showed its own notice ("Something went wrong", a usage limit). Akọwe waits (30 s, or
-    60 s after a usage limit, then longer, up to 2 minutes each and about 10 minutes in all) or uses another AI.
+  - **Site error:** the site showed its own notice ("Something went wrong", a usage limit) or a short canned
+    refusal ("I'm having a hard time fulfilling your request. Can I help you with something else instead?"). Akọwe
+    waits (30 s, or 60 s after a usage limit, then longer, up to 2 minutes each and about 10 minutes in all) or uses
+    another AI. When the refused prompt was very long (30,000 characters or more), the note says so.
   - **Not working:** an AI that is being repaired, logged out or broken is skipped. Its work goes to another AI.
   - **Timeout:** no answer in time (4 minutes by default). Akọwe never retries this by itself, because the answer
     may still come. The step pauses and you press 🔁 Try again.
@@ -171,6 +185,8 @@ bridge to your home Wi-Fi, behind its key.
   teaches it one look or style.
 - **🔒 Character locks:** a saved recipe (a LoRA, trigger words, fixed looks, or a portrait) that keeps one
   character's face the same in every picture. In a ⚡ run, each character's portrait becomes its lock.
+- If you turn on something the picture program doesn't have (ADetailer or ControlNet on a Forge without that
+  extension), the picture is still made without it, and a ⚠ line says what was left out and how to add it.
 - Pictures are saved in `stuff and thing/images/`, each with a `.json` file of the settings that made it.
 - **Tested for real:** pictures have been made with Forge on your PC.
 

@@ -191,6 +191,14 @@ async function pickerForgetAll(site) {
   else pickerSay(site, `Couldn't forget (${(r && r.error) || "error"}).`, "err");
   renderPicker(site);
 }
+// PR #120: a saved part that was out of date was forgotten by itself — ↺ Undo brings it back.
+async function pickerUndoRetire(site) {
+  if (!window.api.pickerUndoRetire) return;
+  const r = await window.api.pickerUndoRetire(site);
+  if (r && r.ok) { pickerState(site).status = r; pickerSay(site, `↺ Brought back what was forgotten for ${SITE_LABELS[site]} (${(r.undone || []).map((x) => PICK_ROLE_NAME[x] || x).join(", ")}).`, "ok"); }
+  else pickerSay(site, `Nothing to bring back (${(r && r.error) || "error"}).`, "err");
+  renderPicker(site);
+}
 async function pickerCopyStructure(site) {
   if (!window.api.pickerPageStructure) return;
   const r = await window.api.pickerPageStructure(site);
@@ -282,6 +290,7 @@ function renderPicker(site, menuEl) {
     const testBtn = mk("pk-roundtrip", "🧪 Test", () => runSelfTest(site), "Round-trip test: send a real test prompt, wait for the reply, and light up green/red");
     testBtn.classList.add("pk-more");
     mk("pk-forget", `↺ Forget what I taught for ${L}`, () => pickerForgetAll(site), `Clear every part you saved with 🎯 / 🔢 and everything AutoInjector learned for ${L} — back to the built-in way of reading it`).classList.add("pk-more");
+    mk("pk-undo-retire", "↺ Undo: bring back the forgotten part", () => pickerUndoRetire(site), `AutoInjector forgot a saved part of ${L}'s that was out of date (the built-in one worked) — bring it back`).hidden = true;
     mk("pk-structure", "📋 Copy page structure", () => pickerCopyStructure(site), `Copy a report of how ${L}'s page is built (tags and counts only — never what anyone wrote) to paste into a bug report`).classList.add("pk-more");
     menu.appendChild(acts);
     const status = document.createElement("div");
@@ -308,6 +317,7 @@ function renderPicker(site, menuEl) {
   const cb = menu.querySelector(".pk-cancel"); if (cb) cb.hidden = !(ps.busy && ps.busy !== "test");
   const nb = menu.querySelector(".pk-number"); if (nb) nb.disabled = busy || teaching;
   const tb = menu.querySelector(".pk-test"); if (tb) tb.disabled = busy || teaching;
+  const ub = menu.querySelector(".pk-undo-retire"); if (ub) { const rr = Object.keys(st.retired || {}); ub.hidden = !rr.length; ub.title = rr.length ? `Forgotten as out of date: ${rr.map((x) => PICK_ROLE_NAME[x] || x).join(", ")} — press to bring it back` : ""; }
   const sEl = menu.querySelector(".pick-status"); if (sEl && sEl.textContent !== ps.msg) { sEl.textContent = ps.msg; if (ps.tone) sEl.dataset.tone = ps.tone; else delete sEl.dataset.tone; }
   const tt = st.repair && st.repair.teach;
   if (tt && tt.result && /^🔢 Type /.test(ps.msg || "")) { ps.msg = ""; if (sEl) sEl.textContent = ""; }

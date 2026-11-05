@@ -54,6 +54,32 @@ const ERROR_RES = [
   /\bunable to (?:load|reach|connect|generate)\b/i
 ];
 
+// The sites' short canned refusals (PR #120, log 2026-11-04: Gemini answered two
+// ~56,000-character Akọwe editor prompts with "I'm having a hard time fulfilling
+// your request. Can I help you with something else instead?" and it was taken as
+// the answer). A refusal is never what Akọwe asked for: it is a site problem —
+// wait, or use another AI. Only for SHORT replies (REFUSAL_MAX_CHARS) so a real
+// answer that merely contains the words is never caught.
+const REFUSAL_MAX_CHARS = 300;
+const REFUSAL_RES = [
+  /\bhaving a hard time fulfilling (?:your|this|that) request\b/i,             // Gemini
+  /\bcan i help you with something else(?: instead)?\s*\?/i,                   // Gemini
+  /\b(?:i'm|i am|i’m) (?:just |only )?a (?:large )?language model,? (?:and|so) (?:i )?(?:can't|can’t|cannot|don't|don’t|am not able|am unable|have no)\b/i, // Gemini
+  /\bas (?:i'm |i am |i’m )?(?:just |only )?a (?:large )?language model,? (?:i'm |i am |i’m |i )?(?:not able|unable|can't|can’t|cannot|don't|don’t)\b/i,
+  /\b(?:not able|unable) to (?:help|assist)(?: you)? with (?:that|this),? (?:as|since|because) (?:i'm|i am|i’m) (?:only |just )?a (?:large )?language model\b/i,
+  /\b(?:i'm|i am|i’m) a text-based ai,? and (?:that|this) is outside (?:of )?my capabilities\b/i, // Gemini
+  /^(?:i'm |i am |i’m )?(?:so )?sorry,? (?:but )?i (?:can't|can’t|cannot|won't|won’t) (?:help|assist)(?: you)? with (?:that|this)(?: request)?[.!]?$/i, // ChatGPT
+  /^(?:i'm |i am |i’m )?(?:not able|unable) to (?:help|assist|comply)(?: you)? with (?:that|this)(?: request)?[.!]?$/i,
+  /^i (?:can't|can’t|cannot) (?:help|assist)(?: you)? with (?:that|this)(?: request)?[.!]?$/i
+];
+// The site turned the message down because it is too long (ChatGPT "The message you
+// submitted was too long…", Claude "Your message will exceed the length limit…").
+const TOO_LONG_RES = [
+  /\bmessage (?:you submitted )?(?:was|is) too long\b/i,
+  /\bexceed(?:s|ed)? the (?:length|context|character) limit\b/i,
+  /\b(?:prompt|input|message) is too long\b/i
+];
+
 // A reply the AI wrote for Akọwe / the relay carries its data or its tag.
 function carriesData(text) {
   if (/\[\s*FROM:\s*[^\]\r\n]{1,40}\]/i.test(text)) return true; // the AI's own reply tag
@@ -62,15 +88,27 @@ function carriesData(text) {
   return false;
 }
 
-// null, or { kind: 'rate-limit' | 'error' } when `text` is the site's own short
-// error notice (never a real answer).
+// null, or { kind: 'rate-limit' | 'error' | 'refused' | 'too-long' } when `text` is
+// the site's own short error notice or canned refusal (never a real answer).
 function siteErrorOf(text) {
   const t = String(text == null ? '' : text).trim();
   if (!t || t.length >= MAX_CHARS) return null;
   if (carriesData(t)) return null;
   if (RATE_LIMIT_RES.some((re) => re.test(t))) return { kind: 'rate-limit' };
+  if (TOO_LONG_RES.some((re) => re.test(t))) return { kind: 'too-long' };
+  // a leading [TO: …] tag (the AI's own envelope) does not count for a refusal
+  const bare = t.replace(/^\s*\[\s*TO\s*:[^\]\r\n]{0,40}\]\s*/i, '').trim();
+  if (bare.length < REFUSAL_MAX_CHARS && REFUSAL_RES.some((re) => re.test(bare))) return { kind: 'refused' };
   if (ERROR_RES.some((re) => re.test(t))) return { kind: 'error' };
   return null;
+}
+// A prompt this long (characters) is named when a site refuses it: very long
+// prompts are a likely reason (Gemini refused 56,000-character editor prompts).
+const LONG_PROMPT_CHARS = 30000;
+function longPromptNote(label, kind, promptChars) {
+  const n = Number(promptChars) || 0;
+  if ((kind !== 'refused' && kind !== 'too-long') || n < LONG_PROMPT_CHARS) return '';
+  return ` — the prompt was very long (${n.toLocaleString('en-US')} characters); ${label || 'the AI'} may refuse prompts that long, so a shorter prompt or another AI may work better`;
 }
 
 // How long Akọwe should wait before asking that site again (seconds, a hint; it
@@ -78,11 +116,13 @@ function siteErrorOf(text) {
 function retryAfterSeconds(kind) { return kind === 'rate-limit' ? 60 : 30; }
 
 // Plain words for the activity feed / log.
-function describeSiteError(label, kind) {
+function describeSiteError(label, kind, promptChars) {
   const L = label || 'The AI';
-  return kind === 'rate-limit'
-    ? `${L} showed a usage-limit message instead of an answer — waiting and trying again (or another AI)`
-    : `${L} showed an error message instead of an answer — waiting and trying again`;
+  const tail = longPromptNote(label, kind, promptChars);
+  if (kind === 'rate-limit') return `${L} showed a usage-limit message instead of an answer — waiting and trying again (or another AI)`;
+  if (kind === 'refused') return `${L} answered with a short refusal ("I can't help with that") instead of an answer — waiting and trying again, or another AI${tail}`;
+  if (kind === 'too-long') return `${L} said the message was too long — another AI, or a shorter prompt${tail}`;
+  return `${L} showed an error message instead of an answer — waiting and trying again`;
 }
 
-module.exports = { siteErrorOf, retryAfterSeconds, describeSiteError, MAX_CHARS };
+module.exports = { siteErrorOf, retryAfterSeconds, describeSiteError, longPromptNote, MAX_CHARS, REFUSAL_MAX_CHARS, LONG_PROMPT_CHARS };

@@ -130,10 +130,19 @@ async function main() {
   await studio.connect(noOa.base);
   r = await api.images.generate({ prompt: 'x', extra: { eta: 0.3 } });
   assert(r.ok && noOa.state.lastTxt2img.eta === 0.3 && r.warnings.some((w) => /without checking/.test(w.message)), 'no /openapi.json → extra fields are still sent, with a warning');
+  // PR #120 (log 2026-11-04: 🎨 Generate on Forge → UNSUPPORTED_ON_BACKEND after "ADetailer opened"):
+  // an extension the WebUI doesn't have is left out with a plain warning — never a dead end
   r = await api.images.generate({ prompt: 'x', controlnet: [{ image: pic, model: 'x' }] });
-  assert(!r.ok && r.code === 'UNSUPPORTED_ON_BACKEND' && /controlnet extension/i.test(r.hint), 'ControlNet on a WebUI without the extension → UNSUPPORTED_ON_BACKEND + how to install');
+  assert(r.ok && !noOa.state.lastTxt2img.alwayson_scripts && r.warnings.some((w) => w.kind === 'skipped' && w.field === 'controlnet' && /ControlNet was left out/.test(w.message) && /controlnet extension/i.test(w.message)), 'ControlNet on a WebUI without the extension → the picture is made without it, a warning says so + how to install');
   r = await api.images.generate({ prompt: 'x', adetailer: [{}] });
-  assert(!r.ok && r.code === 'UNSUPPORTED_ON_BACKEND' && /ADetailer/.test(r.hint), 'ADetailer without the extension → UNSUPPORTED_ON_BACKEND');
+  assert(r.ok && !noOa.state.lastTxt2img.alwayson_scripts && r.warnings.some((w) => w.kind === 'skipped' && w.field === 'adetailer' && /ADetailer \(fix faces \/ hands\) was left out/.test(w.message) && /Extensions → Available → ADetailer/.test(w.message)), `ADetailer without the extension → made without it, with a plain warning (${JSON.stringify(r.warnings && r.warnings.map((w) => w.message))})`);
+  r = await api.images.generate({ prompt: 'x', adetailer: [{}], controlnet: [{ image: pic, model: 'x' }], steps: 7 });
+  assert(r.ok && noOa.state.lastTxt2img.steps === 7 && r.warnings.filter((w) => w.kind === 'skipped').length === 2, 'both left out, everything else is used');
+  // the WebUI lists ADetailer as a script but its model list can't be read: sent anyway (names unchecked)
+  noOa.state.adOnlyScript = true;
+  r = await api.images.generate({ prompt: 'x', adetailer: [{ model: 'face_yolov8n.pt' }] });
+  assert(r.ok && noOa.state.lastTxt2img.alwayson_scripts && noOa.state.lastTxt2img.alwayson_scripts.ADetailer && r.warnings.some((w) => w.kind === 'unchecked' && /sent anyway/.test(w.message)), 'ADetailer listed by /sdapi/v1/scripts but no model list → sent via alwayson_scripts anyway (names unchecked)');
+  noOa.state.adOnlyScript = false;
   r = await api.sd.extraFields();
   assert(!r.ok && r.code === 'NO_SCHEMA', 'extraFields() without /openapi.json says so');
   await studio.connect(forge.base);
