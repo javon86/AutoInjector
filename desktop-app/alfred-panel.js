@@ -110,6 +110,10 @@
       .al-you { align-self:flex-end; background:#1e2a47; }
       .al-alfred { align-self:flex-start; background:#171b26; border:1px solid #262e44; }
       .al-notice { align-self:stretch; background:#1c1a10; border:1px solid #4a4220; color:#f1e3b0; font-size:12px; }
+      #alfred-tip { margin:4px 10px; padding:6px 8px; border:1px solid #6b5a2a; background:#221d10; border-radius:8px; font-size:12px; color:#f0dca0; }
+      #alfred-tip[hidden] { display:none; }
+      #alfred-tip .al-tip-row { display:flex; flex-wrap:wrap; gap:6px; margin-top:5px; align-items:center; }
+      #alfred-tip .al-tip-note { color:#cbb98a; }
       .al-notice .al-fix { margin-top:6px; font-size:12px; padding:2px 10px; } .al-notice .al-fix-note { margin-top:4px; color:#e8a0a0; }
       .al-rich p { margin:0 0 5px; } .al-rich p:last-child { margin-bottom:0; } .al-rich ul, .al-rich ol { margin:2px 0 5px; padding-left:20px; white-space:normal; } .al-rich li { margin:1px 0; white-space:pre-wrap; }
       .al-rich code { background:#0b0e16; border:1px solid #2b3550; border-radius:4px; padding:0 3px; font-size:11.5px; } .al-rich pre { background:#0b0e16; border:1px solid #2b3550; border-radius:6px; padding:5px 7px; margin:3px 0; overflow:auto; white-space:pre; font-size:11.5px; } .al-rich .al-h { margin:2px 0 4px; }
@@ -189,6 +193,7 @@
       settingsBox(),
       h('div', { id: 'alfred-chat', 'aria-live': 'polite' }),
       h('div', { id: 'alfred-card', hidden: true, role: 'dialog', 'aria-label': 'Alfred asks before he does this' }),
+      h('div', { id: 'alfred-tip', hidden: true, role: 'note' }),
       h('div', { id: 'alfred-busy', hidden: true }, h('span', { id: 'alfred-busy-text' }, '🎩 Working on it…'), h('button', { id: 'alfred-stop', type: 'button', onclick: () => api.alfredCancel() }, '■ Stop')),
       h('div', { id: 'alfred-compose' },
         h('textarea', { id: 'alfred-input', placeholder: 'Ask Alfred…  (Enter to send, Shift+Enter for a new line)', 'aria-label': 'Message to Alfred' }),
@@ -600,6 +605,7 @@
     if (atBottom || sending) chat.scrollTop = chat.scrollHeight;
     // card
     renderCard(st.card);
+    renderTip(st.tip);
     // busy: the buttons that send wait; 🩺 and ❓ always work
     $('alfred-busy').hidden = !st.busy;
     busyTicker(st);
@@ -677,6 +683,33 @@
       e.append(h('div', null, b));
     }
     return e;
+  }
+  // PR #126: his local model failed / answered in words only twice in a row → one line with the stronger-brain
+  // choices. Only a click changes anything (✕ hides it until he struggles again).
+  let tipHiddenAt = 0;
+  function renderTip(tip) {
+    const box = $('alfred-tip'); if (!box) return;
+    if (!tip || !tip.count || tip.count <= tipHiddenAt) { box.hidden = true; box.textContent = ''; if (!tip) tipHiddenAt = 0; return; }
+    if (box.dataset.count === String(tip.count) && !box.hidden) return; // the same tip: keep it (and its note) as it is
+    box.dataset.count = String(tip.count);
+    box.textContent = '';
+    box.hidden = false;
+    const row = h('div', { class: 'al-tip-row' });
+    for (const a of tip.actions || []) {
+      const b = h('button', { type: 'button', id: `alfred-tip-${a.id}`, class: a.id === 'use-pane' ? 'primary' : '' }, a.label);
+      b.addEventListener('click', async () => {
+        if (a.id === 'bigger') { showButler(); return; }
+        if (a.settings) {
+          b.disabled = true;
+          try { await api.alfredSettings(a.settings); } catch (_) {}
+          box.hidden = true;
+          quickMsg('✔ Done — I think with Claude in its pane now (it must be logged in). Change it any time in ⚙.');
+        }
+      });
+      row.append(b);
+    }
+    row.append(h('button', { type: 'button', id: 'alfred-tip-close', title: 'Hide this tip', 'aria-label': 'Hide this tip', onclick: () => { tipHiddenAt = tip.count; box.hidden = true; } }, '✕'));
+    box.append(h('span', null, `💡 ${tip.text}`), row);
   }
   function renderCard(card) {
     const box = $('alfred-card');

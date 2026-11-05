@@ -61,6 +61,19 @@ he makes no more calls.
 - **Typed requests for a picture or a video** ("draw me a lighthouse", "make a picture of a cat", "make a short video
   of waves"): if his AI answers in words only, he asks it once more, plainly, to use the tool; if it still doesn't,
   he shows a one-click **🎨 Make it now** (🎬 for a video) card built from what you typed.
+- **Typed requests to fetch something from another AI** (PR #126) — "get a prompt from ChatGPT for a dragon picture and
+  make it more dramatic", "ask Claude to write a poem about the sea", "have Gemini write a story about a fox": the same
+  — one stricter retry, then a one-click **💬 Ask ChatGPT now** card (also when his AI doesn't answer at all, or keeps
+  asking for tools that don't exist). After ✔ he waits for ChatGPT's answer; when you also asked for a change
+  ("make it more dramatic", "shorten it", "rewrite it …") his AI rewrites it and he shows the result. When his AI can't
+  (down, an error, nothing usable) he shows ChatGPT's answer and says plainly that he couldn't change it.
+- **He always answers.** An empty or unusable reply from his AI, or only tool calls that were refused (twice), becomes a
+  plain sentence ("I couldn't do that, because my AI (qwen2.5:7b) sent back an empty answer. Try asking again in other
+  words, or give me a stronger AI …") — never silence, never a bare "Done.". (If his AI fetched an answer with `ask_ai`
+  and then said nothing, that answer is shown.)
+- **A stronger brain, one click away.** When his AI is a local model and two requests in a row failed or got words only,
+  a one-line tip under the chat offers **Use Claude (web pane) as Alfred's brain** (his AI becomes the Claude pane) and
+  **Use a bigger model** (opens the 🎩 Butler section's models). Nothing changes until you click; ✕ hides it.
 - The list in the header switches between saved set-ups, 💾 saves the current one, ⚙ has his AI settings
   and **🛠 Set up his AI** (opens the 🎩 Butler section).
 
@@ -188,8 +201,17 @@ your decision stays yours to decide in Akọwe.
 - It uses either engine of the 🎬 Video tab: FramePack (the copy already on your PC, nothing downloaded) or Wan on ComfyUI; see `docs/VIDEO_API.md`.
 - The Character Forge `make_character_art` with `what:"clip"` makes a dossier's motion study.
 
-**💬 AI panes** — ✋ send a message to ChatGPT / Claude / Gemini / all · 🔍 read the latest reply ·
-🔍 their health · ✋ run the self-repair check-in.
+**💬 AI panes** — ✋ `ask_ai`: ask ChatGPT / Claude / Gemini something **and wait for its answer** (it comes back to
+Alfred, so he can rewrite it, show it or send it on) · ✋ send a message to ChatGPT / Claude / Gemini / all (without
+waiting) · 🔍 read the latest reply · 🔍 their health · ✋ run the self-repair check-in.
+
+`ask_ai` (PR #126) uses the same machinery as an Akọwe bridge request: a check-in on that AI makes way first, the
+message is typed with its `[MSG #]` number (the proven send), and the captured reply that answers **that** number goes to
+Alfred — shown in the conversation, never relayed to the other AIs, taken as finished even without its `[FROM:]` tag
+(no tag reminder while he waits). It waits up to 3 minutes (`wait_seconds`, 20–600); then he says plainly that the AI
+didn't answer and that its answer may still appear (ask him to read its latest reply). An AI that an Akọwe request is
+waiting on is **refused** ("Akọwe is using Claude right now … I didn't type anything into it"), so are a turned-off AI,
+a pane that isn't ready, and a second ask to the same AI. ■ Stop ends the wait. It may be "always allowed".
 
 **📁 Files / logs** — 🔍 list the output folders (images, videos, books, logs, uploads) · ✋ open a file
 from them (never programs or scripts) · ✋ export the logs ("this book only", the last day, or everything;
@@ -288,7 +310,10 @@ A server you started starts again the next time you open AutoInjector, and one y
 - **Records:** every action goes to the Activity log (the tool's name, a fixed title and ok/error code —
   never your words, prompts, book text or keys). Every finished request gets one `alfred-reply` line: the steps, the
   tools used, whether a card was shown, the reply's length, the time, his AI and model, and the outcome
-  (`answered-in-words`, `card`, `fallback-card`, `fallback-status`, `done`, `declined`, `cancelled`, `limit`, `error`).
+  (`answered-in-words`, `card`, `fallback-card`, `fallback-status`, `done`, `declined`, `cancelled`, `limit`, `error`,
+  `empty` — his AI sent back nothing usable; after an `ask_ai` with a change also `rewrite: done|failed`).
+  `alfred-empty` (warning) marks an empty / unusable answer; `alfred-ask-ai` says when `ask_ai` sent (site, `[MSG #]`,
+  length) and how it ended (`answered`, `TIMEOUT`, `AKOWE_USING`, `SEND_FAILED`, `CANCELLED` …).
   A big button that asked for an action and ended in words only is an `alfred-no-action` warning; `alfred-retry` /
   `alfred-fallback` say when he retried or read the status himself. They are text-free, so the Extract's
   "this book only" includes them too (inside the book's run windows) and, for book actions, to the book's journal in Akọwe
@@ -314,6 +339,7 @@ At most one of each every 5 minutes and 6 in 10 minutes.
 | `desktop-app/alfred-image.js` | the ONE image adapter (sd-api `images.generate`; falls back to image-provider) |
 | `desktop-app/alfred-main.js` | wiring into Electron: tool context, IPC `alfred:*`, app events → watcher |
 | IPC (PR #124) | `alfred:quick` `{kind: picture\|video\|cover\|character\|newbook\|book\|continue, fields}` — a big button's form → `quickPlan()` in `alfred.js` → the tool call(s) → the "I will" card at once (book / continue: his AI, with the direct status as fallback) |
+| `ask_ai` (PR #126) | `alfred-tools.js` → `ctx.askAi` (`alfred-main.js`) → `askPane` = `alfredAskPane()` in `main.js` (send + wait for the reply to that `[MSG #]`; `alfredTakeReply()` in the capture path) |
 | `desktop-app/alfred-panel.js` | his side panel (built only when on), docked in `controls.html`: the 8 big buttons and their forms, ❓ the catalog, chat, cards, settings, set-ups. Ctrl/Cmd+Shift+A is caught in main (`alfred-main.js`, `before-input-event` on every page) and sent as `toggle-panel` |
 | `desktop-app/alfred-catalog.js` | "❓ Everything I can do": the grouped list built from `alfred-tools.publicList()` + `alfred-app-actions.ACTIONS` (one plain line + an example request each) |
 | `desktop-app/controls.js` (🎩 Alfred in the User Panel) | → 🎩 Alfred, the status light, 🧠, 🎩 Alfred: On/Off, 🩺 Check Alfred (the old Butler's ids, kept) |
@@ -332,7 +358,7 @@ action and every Images-module method** from a fake model's tool call: against t
 fake panes), a fake Forge and a fake ComfyUI through the real sd-api, and a fake Akọwe API — checking the effect
 and that anything that changes something waits for ✔ Do it — and prints the coverage table.
 
-Tests: `desktop-app/test/alfred.test.js` (fake Ollama/OpenAI server, fake Akọwe API), `desktop-app/test/alfred-quick.test.js` (the big buttons and "draw me …" with a model that never calls a tool, the outcome log lines, the picture tool on a Forge without ADetailer) and
+Tests: `desktop-app/test/alfred.test.js` (fake Ollama/OpenAI server, fake Akọwe API), `desktop-app/test/alfred-quick.test.js` (the big buttons and "draw me …" with a model that never calls a tool, the outcome log lines, the picture tool on a Forge without ADetailer), `desktop-app/test/alfred-ask.test.js` (PR #126: "get a prompt from ChatGPT … and make it more dramatic" with a model that never calls a tool → 💬 card → the real main.js's ChatGPT pane answers → rewritten; the timeout, an AI Akọwe is using, an empty reply, refused calls, the stronger-brain tip) and
 `desktop-app/test/e2e/alfred.e2e.js` (the real app under xvfb with the real Akọwe server, a fake model and
 a fake Forge); Akọwe side: `akowe/tests/test_alfred_hooks.py`.
 

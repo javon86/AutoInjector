@@ -1206,7 +1206,7 @@ async function videoMethod(ctx, name) {
 // ---- 💬 AI panes ---------------------------------------------------------------------------------
 def({
   name: 'send_to_ai', title: 'Send a message to an AI pane', group: 'ais', changes: true,
-  description: 'Type a message into the ChatGPT, Claude or Gemini pane (or all three) and send it.',
+  description: 'Type a message into the ChatGPT, Claude or Gemini pane (or all three) and send it — without waiting for the answer. When you need the answer to go on, use ask_ai instead.',
   args: { type: 'object', required: ['to', 'message'], properties: {
     to: { type: 'string', enum: SITES.concat(['all']) },
     message: { type: 'string', minLength: 1, maxLength: 8000 },
@@ -1217,6 +1217,46 @@ def({
     const res = await ctx.sendToAi(sites, a.message);
     const failed = Object.entries(res || {}).filter(([, r]) => !r || !r.ok).map(([s, r]) => `${SITE_LABEL[s]} (${(r && r.error) || 'failed'})`);
     return failed.length ? { ok: false, error: 'SEND_FAILED', message: `Couldn't send to ${failed.join(', ')}.` } : { ok: true, message: `Sent to ${sites.map((s) => SITE_LABEL[s]).join(', ')}. Ask me to read the reply in a moment.` };
+  },
+});
+// PR #126: "get a prompt from ChatGPT and change it" could not finish — send_to_ai only types the message and the
+// request ended there ("ask me to read the reply when it's done"). ask_ai types it AND waits for that AI's answer
+// to THAT message ([MSG #], the same proven-send + capture path the Akọwe bridge uses), so Alfred can go on in the
+// same request (rewrite it, show it, send it on). It never types into an AI an Akọwe run is waiting on.
+const ASK_AI_WAIT_S = 180;
+const ASK_AI_REPLY_MAX = 6000;
+function askAiError(r, L, waitS) {
+  const code = (r && r.error) || 'FAILED';
+  const say = {
+    AKOWE_USING: `Akọwe is using ${L} right now (a book request is waiting for its answer), so I didn't type anything into it. Try again when that is done, or ask another AI.`,
+    TURNED_OFF: `${L} is turned off in AutoInjector (its Active box), so I didn't send anything. Turn it on, or ask another AI.`,
+    NOT_READY: `${L} isn't ready${r && r.say ? `: ${clip(r.say, 200)}` : ''}. Nothing was sent.`,
+    BUSY: `I'm already waiting for ${L} to answer something else — try again in a moment.`,
+    TIMEOUT: `${L} didn't answer within ${Math.round(waitS / 60) >= 1 ? `${Math.round(waitS / 60)} minute${Math.round(waitS / 60) === 1 ? '' : 's'}` : `${waitS} seconds`}, so I stopped waiting. ${r && r.typed ? `Its answer may still appear in its pane — ask me to read ${L}'s latest reply in a moment.` : 'The message may not have gone in — look at its pane.'}`,
+    CANCELLED: 'Stopped. (I stopped waiting for the answer.)',
+    NO_ASK: 'Asking an AI and waiting for the answer is not available in this build — use "send to" and then "read the latest reply".',
+  }[code];
+  return { ok: false, error: str(code, 40), message: say || `I couldn't get an answer from ${L} (${str((r && (r.code || r.error)) || 'failed', 60)}). Look at its pane: is it logged in and working?` };
+}
+def({
+  name: 'ask_ai', title: 'Ask an AI and wait for its answer', group: 'ais', changes: true, allowAlways: true, timeoutMs: (ASK_AI_WAIT_S + 30) * 1000,
+  description: 'Ask ChatGPT, Claude or Gemini something in its pane and WAIT for its answer, which comes back to you (e.g. "get a prompt from ChatGPT", "ask Claude to write …"). Use this, not send_to_ai, whenever you need the answer to go on (rewrite it, show it, send it somewhere).',
+  args: { type: 'object', required: ['to', 'message'], properties: {
+    to: { type: 'string', enum: SITES },
+    message: { type: 'string', minLength: 1, maxLength: 8000, description: 'what to ask that AI, in full' },
+    wait_seconds: { type: 'integer', minimum: 20, maximum: 600, description: `how long to wait for the answer (default ${ASK_AI_WAIT_S})` },
+  }, additionalProperties: false },
+  describe: (a) => `Ask ${SITE_LABEL[a.to]} ${q(a.message)} and wait for its answer (up to ${Math.round((a.wait_seconds || ASK_AI_WAIT_S) / 60 * 10) / 10} min).`,
+  async run(a, ctx) {
+    const L = SITE_LABEL[a.to];
+    const waitS = a.wait_seconds || ASK_AI_WAIT_S;
+    if (!ctx || typeof ctx.askAi !== 'function') return askAiError({ error: 'NO_ASK' }, L, waitS);
+    let r;
+    try { r = await ctx.askAi(a.to, a.message, { timeoutMs: waitS * 1000, signal: ctx.signal }); } catch (_) { r = { ok: false, error: 'FAILED' }; }
+    if (!r || !r.ok) return askAiError(r, L, waitS);
+    const text = String(r.text || '').trim();
+    if (!text) return { ok: false, error: 'EMPTY_ANSWER', message: `${L} answered with nothing I could read. Look at its pane.` };
+    return { ok: true, message: `${L} answered.`, data: { from: L, reply: clip(text, ASK_AI_REPLY_MAX) }, reply: clip(text, ASK_AI_REPLY_MAX), from: a.to };
   },
 });
 def({
