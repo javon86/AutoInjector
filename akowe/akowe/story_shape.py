@@ -222,11 +222,14 @@ def _too_far(number: int, at: float, n: int) -> bool:
     return abs(centre - float(at) / 100.0) > 0.2 + 0.5 / n
 
 
-def validate(tid: str, placements, n: int) -> tuple[list[dict], list[str]]:
+def validate(tid: str, placements, n: int, *, t: dict | None = None, word: str = "beat"
+             ) -> tuple[list[dict], list[str]]:
     """The planner's placements checked: (beats [{id, name, what, at, number, how, by}], problems in plain words).
     A beat left out, placed twice, on an unknown chapter, before an earlier beat or far from where it belongs is
-    placed by its position (by = "position"); the rest keep the planner's chapter (by = "ai")."""
-    t = template(tid)
+    placed by its position (by = "position"); the rest keep the planner's chapter (by = "ai"). ``t``: another
+    template of the same form ({"beats": [{id, name, what, at}]}) — 📚 story_kind.py places its stages with it; the
+    placements then name the stage's id in ``beat``."""
+    t = t if t is not None else template(tid)
     if not t or n <= 0:
         return [], []
     got: dict[str, dict] = {}
@@ -237,7 +240,7 @@ def validate(tid: str, placements, n: int) -> tuple[list[dict], list[str]]:
         b = p.get("beat")
         if not isinstance(b, str) or b not in {x["id"] for x in t["beats"]}:
             if b:
-                problems.append(f"an unknown beat “{_clip(b, 40)}” was ignored")
+                problems.append(f"an unknown {word} “{_clip(b, 40)}” was ignored")
             continue
         if b in got:
             problems.append(f"“{next(x['name'] for x in t['beats'] if x['id'] == b)}” was placed twice: the first "
@@ -245,7 +248,7 @@ def validate(tid: str, placements, n: int) -> tuple[list[dict], list[str]]:
             continue
         got[b] = p
     out, prev = [], 1
-    for beat, pos in zip(t["beats"], by_position(tid, n)):
+    for beat, pos in zip(t["beats"], [chapter_for(b["at"], n) for b in t["beats"]]):
         p = got.get(beat["id"])
         num = p.get("chapter") if p else None
         if isinstance(num, str) and num.strip().isdigit():
@@ -256,7 +259,7 @@ def validate(tid: str, placements, n: int) -> tuple[list[dict], list[str]]:
         elif not isinstance(num, int) or isinstance(num, bool) or not 1 <= num <= n:
             why = "put on a chapter the outline does not have"
         elif num < prev:
-            why = "put before an earlier beat"
+            why = f"put before an earlier {word}"
         elif _too_far(num, beat["at"], n):
             why = "put far from where it belongs"
         if why:
@@ -419,11 +422,18 @@ def status(bp, outline: dict | None = None, upto: int | None = None) -> list[dic
     """Each beat with whether it landed: [{…beat, written, status on_page|unclear|missing|not_written, how_checked,
     record_id}]. From the stored planned-to-page check of the chapter's text (the AI's answer when there was one),
     else Akọwe's own word reading. ``upto``: only the beats of the first ``upto`` chapters."""
-    from . import planned as planned_mod  # noqa: PLC0415
     outline = outline if outline is not None else bp.outline()
-    m = mapping(bp.store, bp.pid, bp.branch, outline)
+    return rows_status(bp, outline, (mapping(bp.store, bp.pid, bp.branch, outline) or {}).get("beats") or [],
+                       upto, kind="story_beat", key="beat", text=planned_text)
+
+
+def rows_status(bp, outline: dict | None, placed: list[dict], upto: int | None, *, kind: str, key: str, text
+                ) -> list[dict]:
+    """Shared by the story shape's beats and 📚 the story kind's stages (story_kind.py): each placed item with
+    whether it landed in its chapter — the planned-to-page item of ``kind`` whose ``key`` is the item's id."""
+    from . import planned as planned_mod  # noqa: PLC0415
     out = []
-    for b in (m or {}).get("beats") or []:
+    for b in placed:
         if upto is not None and (b.get("number") or 0) > upto:
             continue
         row = dict(b, written=False, status="not_written", how_checked=None, record_id=None)
@@ -434,12 +444,12 @@ def status(bp, outline: dict | None = None, upto: int | None = None) -> list[dic
             if rec:
                 row.update(written=True, record_id=rec["record_id"], version=rec["version"])
                 st = _check_of(bp.store, bp.pid, bp.branch, rec)
-                it = next((i for i in (st or {}).get("items") or [] if i.get("beat") == b["id"]), None)
+                it = next((i for i in (st or {}).get("items") or [] if i.get(key) == b["id"]), None)
                 if it is None:
-                    text = str((rec.get("data") or {}).get("text") or "")
-                    it = planned_mod.check_text(text, [{"id": "b", "kind": "story_beat", "label": b["name"],
-                                                        "text": planned_text(b), "words": planned_mod.keywords(
-                                                            planned_text(b)), "required": True}])[0]
+                    body = str((rec.get("data") or {}).get("text") or "")
+                    it = planned_mod.check_text(body, [{"id": "b", "kind": kind, "label": b["name"],
+                                                        "text": text(b), "words": planned_mod.keywords(text(b)),
+                                                        "required": True}])[0]
                 row.update(status=it.get("status") or "missing", how_checked=it.get("how") or "words",
                            quote=it.get("quote"))
         out.append(row)
@@ -497,19 +507,32 @@ def fix_beats(svc, run: dict, st: dict, outline: dict | None, chapters: list[dic
     consent) — only when the planned-to-page check of that chapter could not already try a fix (it was switched off,
     approved without it, or the author chose notes only). The author's own text is never changed. Returns the report
     lines of the beats still not on the page. Never raises except a pause / cancel / a StepProblem of the review."""
-    if not of_store(svc.store, run["project_id"]) or not outline:
+    return fix_items(svc, run, st, outline, chapters, upto=upto, where=where, src=SHAPE_FIX)
+
+
+# what fix_items needs to know about the placed items (the story shape's beats; 📚 story_kind.py: the stages)
+SHAPE_FIX = {"on": lambda store, pid: bool(of_store(store, pid)), "status": lambda bp, outline, upto:
+             status(bp, outline, upto), "report": lambda rows: report_lines(rows), "kind": "story_beat",
+             "key": "beat", "mem": "beat_fixes", "lines": "beat_lines", "word": "story beat", "icon": "📐",
+             "code": "BEAT"}
+
+
+def fix_items(svc, run: dict, st: dict, outline: dict | None, chapters: list[dict], *, upto: int | None = None,
+              where: str = "checkpoint", src: dict = SHAPE_FIX) -> list[str]:
+    """``fix_beats`` for any placed planned items (``src``: SHAPE_FIX, story_kind.KIND_FIX)."""
+    if not src["on"](svc.store, run["project_id"]) or not outline:
         return []
     from . import planned as planned_mod  # noqa: PLC0415
     from . import continuity  # noqa: PLC0415
     pid, branch = run["project_id"], run.get("branch_id") or "main"
-    mem = run.setdefault("beat_fixes", {})
+    mem = run.setdefault(src["mem"], {})
     review = getattr(svc, "_review", None) or svc.app.review
     checker = review.planned
     order = [c["chapter_id"] for c in chapters]
     try:
-        rows = status(svc.bp(run), outline, upto)
+        rows = src["status"](svc.bp(run), outline, upto)
     except Exception:  # noqa: BLE001
-        log.exception("story beats status at the %s", where)
+        log.exception("%ss status at the %s", src["word"], where)
         return []
     for r in rows:
         if not r.get("written") or r["status"] == "on_page":
@@ -540,7 +563,7 @@ def fix_beats(svc, run: dict, st: dict, outline: dict | None, chapters: list[dic
             res = _check_of(svc.store, pid, branch, head)
             if not res or not res.get("ai"):
                 res = checker.check(job, rid)
-            items = [i for i in res["items"] if i.get("kind") == "story_beat" and i.get("beat") == r["id"]]
+            items = [i for i in res["items"] if i.get("kind") == src["kind"] and i.get(src["key"]) == r["id"]]
             if not items or items[0]["status"] == "on_page":
                 mem[r["id"]] = {"status": "on_page", "chapter_id": cid}
                 continue
@@ -552,24 +575,24 @@ def fix_beats(svc, run: dict, st: dict, outline: dict | None, chapters: list[dic
             if not craft["findings"]:
                 mem[r["id"]]["status"] = "no_place"
                 continue
-            st["message"] = f"The writer works the story beat “{r['name']}” into chapter {num}"
+            st["message"] = f"The writer works the {src['word']} “{r['name']}” into chapter {num}"
             run["phase"] = st["message"]
             svc.save(run)
             prop = review.editor.propose(svc._sub_job(run, "planned_fix", rid,  # noqa: SLF001
                                                       (run.get("settings") or {}).get("slot_id")), rid, craft=craft)
             if not prop.get("applied"):
                 mem[r["id"]]["status"] = "nothing_applied"
-                svc.event(run, "note", f"⚠️ The writer's change for the story beat “{r['name']}” of chapter {num} did "
-                                       "not match the text word for word; nothing was guessed",
-                          code="BEAT_UNRESOLVED", chapter_id=cid)
+                svc.event(run, "note", f"⚠️ The writer's change for the {src['word']} “{r['name']}” of chapter {num} "
+                                       "did not match the text word for word; nothing was guessed",
+                          code=f"{src['code']}_UNRESOLVED", chapter_id=cid)
                 continue
             out = review.editor.apply(run["principal"], pid, branch, rid, head["version"], None, proposal=prop,
                                       how="run")
             svc._made(run, out["ref"])  # noqa: SLF001
             mem[r["id"]] = {"status": "applied", "chapter_id": cid, "record_id": rid}
             svc.save(run)
-            svc.event(run, "fix", f"📐 Chapter {num} sent back once to deliver the story beat “{r['name']}”",
-                      code="BEAT_FIX", record_id=rid, chapter_id=cid)
+            svc.event(run, "fix", f"{src['icon']} Chapter {num} sent back once to deliver the {src['word']} "
+                                  f"“{r['name']}”", code=f"{src['code']}_FIX", record_id=rid, chapter_id=cid)
             appr = svc._review_until_approved(run, st, rid, f"chapter {cid}", chapter_id=cid)  # noqa: SLF001
             mem[r["id"]]["status"] = "done"
             if appr:
@@ -580,17 +603,19 @@ def fix_beats(svc, run: dict, st: dict, outline: dict | None, chapters: list[dic
             if getattr(exc, "control", False):
                 raise
             if exc.code == "TIMEOUT" or exc.code == "CAPABILITY_UNAVAILABLE":
-                svc.event(run, "note", f"⚠️ The story beat “{r['name']}” of chapter {num} could not be checked or "
-                                       f"fixed now ({exc.code}); the book goes on", code="BEAT_CHECK_FAILED")
+                svc.event(run, "note", f"⚠️ The {src['word']} “{r['name']}” of chapter {num} could not be checked "
+                                       f"or fixed now ({exc.code}); the book goes on",
+                          code=f"{src['code']}_CHECK_FAILED")
             mem[r["id"]] = dict(mem.get(r["id"]) or {}, status="failed", code=exc.code, chapter_id=cid)
             svc.save(run)
     try:
-        lines = report_lines(status(svc.bp(run), outline, upto))
+        lines = src["report"](src["status"](svc.bp(run), outline, upto))
     except Exception:  # noqa: BLE001
-        log.exception("story beats report")
+        log.exception("%ss report", src["word"])
         lines = []
-    if lines and lines != run.get("beat_lines"):
-        run["beat_lines"] = lines
-        svc.event(run, "note", f"📐 {'Final check' if where == 'ending' else 'Checkpoint'}: " + "; ".join(lines[:4])
-                  + (" …" if len(lines) > 4 else ""), step="chapters", code="BEAT_MISSING")
+    if lines and lines != run.get(src["lines"]):
+        run[src["lines"]] = lines
+        svc.event(run, "note", f"{src['icon']} {'Final check' if where == 'ending' else 'Checkpoint'}: "
+                  + "; ".join(lines[:4]) + (" …" if len(lines) > 4 else ""), step="chapters",
+                  code=f"{src['code']}_MISSING")
     return lines

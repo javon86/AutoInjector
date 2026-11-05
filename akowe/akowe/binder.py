@@ -2364,6 +2364,14 @@ def fill(page: Page) -> dict:
                 out["story_shape"] = sh
         except Exception:  # noqa: BLE001
             log.exception("binder: story shape of %s", page.page_id)
+        try:  # 📚 the kind of story: its stages on the chapters (story_kind.py)
+            from . import story_kind  # noqa: PLC0415
+            b = page.book
+            kd = story_kind.page_info(b.store, b.pid, b.branch, b.outline, bp=getattr(b, "bp", None))
+            if kd:
+                out["story_kind"] = kd
+        except Exception:  # noqa: BLE001
+            log.exception("binder: story kind of %s", page.page_id)
     if page.template == "11" and page.subject.get("chapter_id"):  # 🧠 the chapter's needs list (needs_list.py)
         try:
             from . import needs_list  # noqa: PLC0415

@@ -232,6 +232,8 @@ class BookFakeAI:
         self.plot_obligations: list = []         # 🎯 the main plot's setups (B03 plot_obligations) the ending must keep
         self.needs = None                        # 🧠 a needs list returned with every scene plan (dict or callable(ctx))
         self.shape_script: list = []             # 📐 scripted beat placements (dicts or callables(ctx)), one per call
+        self.kind_script: list = []              # 📚 scripted stage placements (dicts or callables(ctx)), one per call
+        self.kind_pick = None                    # 📚 the kind of story the invent step picks (when asked), e.g. "quest"
         self.alongside_script: list = []         # ✍ Write alongside me: scripted answers (dicts or callables(ctx))
 
     def fail_next(self, *excs):
@@ -273,6 +275,18 @@ class BookFakeAI:
     def _answer(self, ctx, props, schema):
         if ctx.get("akowe_task") == "story_details":  # ⏱ story details (essentials / just in time)
             return "details", self._details(ctx)
+        if "placements" in props and "story_kind" in ctx:  # 📚 place where each stage of the kind of story begins
+            with self.lock:
+                scripted = self.kind_script.pop(0) if self.kind_script else None
+            if scripted is not None:
+                return "kind", scripted(ctx) if callable(scripted) else copy.deepcopy(scripted)
+            chs = ctx.get("chapters") or []
+            out = []
+            for b in (ctx["story_kind"] or {}).get("stages") or []:
+                n = int(b.get("around_chapter") or 1)
+                obj = next((c.get("objective") for c in chs if c.get("chapter") == n), "") or ""
+                out.append({"beat": b["stage"], "chapter": n, "how": f"{obj} ({b['name']})"})
+            return "kind", {"placements": out}
         if "placements" in props and "story_shape" in ctx:  # 📐 place the story shape's beats on the chapters
             with self.lock:
                 scripted = self.shape_script.pop(0) if self.shape_script else None
@@ -451,11 +465,15 @@ class BookFakeAI:
             return "fix", self._revise(data)
         if {"title", "author", "genre", "audience", "tone", "idea"} <= set(props):
             w = ctx.get("wishes") or {}
-            return "profile", {"title": "The Keeper of Gullhaven", "author": "Rowan Ashby",
-                               "genre": w.get("genre") or "Mystery", "audience": "Adult", "tone": "Cozy and eerie",
-                               "idea": "When the Gullhaven lighthouse goes dark, apprentice keeper Mara Vell searches "
-                                       "the fog-bound harbor for her missing master. Every captain hides something, "
-                                       "and the only clue is a brass key that should not exist."}
+            out = {"title": "The Keeper of Gullhaven", "author": "Rowan Ashby",
+                   "genre": w.get("genre") or "Mystery", "audience": "Adult", "tone": "Cozy and eerie",
+                   "idea": "When the Gullhaven lighthouse goes dark, apprentice keeper Mara Vell searches "
+                           "the fog-bound harbor for her missing master. Every captain hides something, "
+                           "and the only clue is a brass key that should not exist."}
+            if "story_kind" in props and self.kind_pick:  # 📚 "Let the AI decide": the AI picks the kind
+                out.update(story_kind=self.kind_pick, story_kind_why="A search across a strange, dangerous harbor "
+                                                                     "for a lost master.")
+            return "profile", out
         if "world_summary" in props:
             items = []
             for sec, n in (ctx.get("requested") or {}).items():

@@ -818,6 +818,15 @@ class ReportService:
                                               if c.get("kind") != "chapter"][-12:]}
         except Exception:  # noqa: BLE001 - never break the report
             log.exception("could not add the checks to the report")
+        try:  # 📚 the kind of story and whether the ending kept its promise (the final ending check)
+            from . import story_kind  # noqa: PLC0415
+            kd = story_kind.report_info(self.store, pid, branch)
+            if kd:
+                base["story_kind"] = kd
+            else:
+                base.pop("story_kind", None)
+        except Exception:  # noqa: BLE001 - never break the report
+            log.exception("could not add the kind of story to the report")
         base["aggregate"] = aggregate(base["reviews"])
         base["try_next"] = self.try_next(base)
         from . import approval_trust  # noqa: PLC0415 - H14: chapters approved without (all) checks
@@ -1163,6 +1172,9 @@ def render_markdown(rep: dict) -> str:
         if not rd.get("findings"):
             L.append("Reading level and pacing fit the audience.")
         L.append("")
+    if (rep.get("story_kind") or {}).get("line"):  # 📚 the kind of story and its promise
+        L += ["## Kind of story", "", rep["story_kind"]["line"], "", f"The promise: {rep['story_kind']['promise']}",
+              ""]
     ck = rep.get("checks") or {}
     cc = ck.get("chapter_checks") or {}
     if cc.get("chapters") or ck.get("stretch") or ck.get("checkpoints"):

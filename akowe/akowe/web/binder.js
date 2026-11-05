@@ -1219,12 +1219,22 @@ export async function viewBinder(main, x, rest = []) {
   // 10 · Story plan
   T[10] = p => [
     sec(p, '10.1', h('div', null, field(p, '10.1.1', { cls: 'bnd-prose' }), field(p, '10.1.2', { cls: 'bnd-callout' }))),
-    sec(p, '10.2', h('div', null, plotLine(p), shapeStrip(p)), { cls: 'bnd-sec-plot' }),
+    sec(p, '10.2', h('div', null, plotLine(p), kindStrip(p), shapeStrip(p)), { cls: 'bnd-sec-plot' }),
     sec(p, '10.3', arcCards(p)),
     sec(p, '10.4', rowTable(p, '10.4', ['10.4.1', '10.4.2', '10.4.3'], 'subplots')),
     sec(p, '10.5', h('div', null, field(p, '10.5.1', { chips: true, cls: 'bnd-wide' }), grid(p, ['10.5.2', '10.5.3']), quote(p, '10.5.4', 'bnd-quote-q'))),
     sec(p, '10.6', h('div', { class: 'bnd-quad' }, ['10.6.1', '10.6.2', '10.6.3', '10.6.4'].map(id => field(p, id, { cls: 'bnd-box' })))),
   ];
+  /** 📚 The kind of story (the author's choice or the AI's pick): its promise and its stages on the chapters. */
+  function kindStrip(p) {
+    const kd = p.story_kind;
+    if (!kd || !(kd.stages || []).length) return null;
+    return h('div', { class: 'bnd-shape bnd-kind', 'data-testid': 'bnd-story-kind' },
+      h('p', { class: 'bnd-shape-h' }, h('b', null, `📚 Kind of story: ${kd.label}`), kd.by === 'ai' ? ' (picked by the AI)' : ''),
+      kd.promise ? h('p', { class: 'bnd-kind-promise' }, `The ending must deliver: ${kd.promise}`) : null,
+      h('ol', { class: 'bnd-shape-strip' }, kd.stages.map(b => h('li', { 'data-stage': b.id, title: b.what, class: b.landed === false ? 'is-miss' : b.landed === true ? 'is-ok' : null },
+        h('b', null, b.number ? (b.last && b.last !== b.number ? `Ch ${b.number}–${b.last}` : `Ch ${b.number}`) : 'Ch ?'), ` · ${b.name}`))));
+  }
   /** 📐 The story shape the author chose: its beats on the chapters ("Ch 22 · Dark night of the soul"). */
   function shapeStrip(p) {
     const sh = p.story_shape;
