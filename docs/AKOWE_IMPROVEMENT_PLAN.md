@@ -37,7 +37,7 @@ Legend: `[ ]` to do · `[~]` in progress · `[x]` done · `[!]` problem (see "Pr
   wizard's duplicate forms are gone (one place each: 🎨 Images, 🎬 Video). Also: ebook cover JPG, map PNG in Word,
   style-card delete fix, motion clips for items/places/magic, new characters from scratch, auto-save + update-or-copy +
   big books opened from a folder, MCP tool servers, book trailers (B2).
-- **🛡 Hardening for long books (done 2026-11-05, PR #122):** a run keeps going through time-outs, refusals, usage
+- **🛡 Hardening for long books (done 2026-11-05, PR #123):** a run keeps going through time-outs, refusals, usage
   limits and a single working AI; see "🛡 Hardening for long books".
 - **✍ Write alongside me (done 2026-11):** highlight a passage in a chapter and the AI continues, rewrites, describes,
   expands or tightens it; a suggestion with ⚠️ quick checks, used as a new draft version. See "✍ Write alongside me".
@@ -869,7 +869,7 @@ the browser: `tests/campaign/ui/test_ui_continuity.py`):
 - *Not done:* the pictures and clips need AutoInjector running (SVG only without it); the store ad rules are as of
   2026-11 (check the stores' current rules before you pay for an ad).
 
-## 🛡 Hardening for long books (2026-11-05, PR #122) — done (Akọwe side)
+## 🛡 Hardening for long books (2026-11-05, PR #123) — done (Akọwe side)
 
 From a code-grounded pre-mortem of a real 40–50-chapter run (20–50 hours, ~1 000 web-AI messages): what would stop
 the book, fixed at the root in Akọwe. (The desktop half — fresh chats, keeping the PC awake, notifications, pane
