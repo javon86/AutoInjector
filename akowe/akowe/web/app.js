@@ -263,6 +263,26 @@ function shapeBox(sh, post, run) {
   }
   return box;
 }
+/** 📚 The plan page's kind-of-story box: which kind (the author's or the AI's pick), its promise, its stages on the
+ * chapters, and (until a chapter is written) a picker to change it. */
+function kindBox(kd, post, run) {
+  const box = h('div', { class: 'shape-box kind-box', 'data-testid': 'plan-story-kind' },
+    h('p', { class: 'small' }, h('strong', null, '📚 Kind of story: '), h('span', { 'data-testid': 'plan-story-kind-name' }, kd.label || storyKindWord(kd.value)),
+      kd.value && kd.by === 'ai' ? h('span', { class: 'muted', 'data-testid': 'plan-story-kind-by' }, ` — picked by the AI${kd.why ? `: ${kd.why}` : ''}`) : null),
+    kd.promise ? h('p', { class: 'small muted', 'data-testid': 'plan-story-kind-promise' }, `The ending must deliver: ${kd.promise}`) : null,
+    storyKindStrip(kd, 'plan-story-kind-strip'),
+    kd.value && !(kd.stages || []).some(b => b.number) ? h('p', { class: 'small muted' }, 'The stages are placed on the chapters once the chapter outline is approved.') : null);
+  const info = storyKindInfo();
+  if (kd.can_change && info) {
+    const id = 'plan-kind-pick';
+    const sel = h('select', { id, 'data-testid': 'plan-story-kind-pick' }, info.options.map(o => h('option', { value: o.value, selected: (kd.chosen || '') === o.value }, o.label)));
+    box.appendChild(h('div', { class: 'row' }, h('label', { for: id, class: 'small' }, 'Change the kind of story '), sel,
+      h('button', { type: 'button', class: 'small', 'data-testid': 'plan-story-kind-save', onclick: () => run(() => post('set_story_kind', { kind: sel.value }), 'Changing the kind of story…', 'outline') }, 'Use this kind')));
+  } else if (kd.can_change === false && kd.value) {
+    box.appendChild(h('p', { class: 'small muted' }, 'The chapters are being written, so the kind of story stays as it is.'));
+  }
+  return box;
+}
 /** "Chapter 1" for an outline chapter: its position in the outline (chapter ids like "ch1" are internal). */
 function chapterName(c, idx) { return `Chapter ${idx + 1}`; }
 /** Server-made titles and messages in the author's words ("Chapter ch1" -> "Chapter 1"). */
@@ -5760,6 +5780,7 @@ function renderBook(holder, book, redraw) {
       acts.appendChild(h('a', { class: 'btn small tech', href: plink('op', s.op) }, `Open ${s.op} (all fields)`));
     }
     if (s.id === 'outline' && s.story_shape) li.appendChild(shapeBox(s.story_shape, post, run));
+    if (s.id === 'outline' && s.story_kind) li.appendChild(kindBox(s.story_kind, post, run));
     if (s.id === 'outline' && s.state === 'done') {
       const o = S.records.find(r => r.module_id === 'B11' && r.approved_version);
       if (o) acts.appendChild(h('a', { class: 'btn small', href: plink('write', o.record_id) }, '📖 Read or change the outline'));
@@ -7021,6 +7042,37 @@ function storyShapeStrip(sh, testid) {
       h('b', null, b.number ? `Ch ${b.number}` : 'Ch ?'), ' · ', b.name,
       b.landed === true ? h('span', { class: 'shape-ok', 'aria-label': 'on the page' }, ' ✔') : b.landed === false ? h('span', { class: 'shape-miss', 'aria-label': 'not on the page yet' }, ' ⚠') : null)));
 }
+/** 📚 Kind of story (story_kind.py): the seven basic plots — Let the AI decide (default), Overcoming the Monster, Rags
+ * to Riches, The Quest, Voyage and Return, Comedy, Tragedy, Rebirth. Stored with the story choices (choices.kind). */
+function storyKindInfo() { return (CH.info && CH.info.story_kind) || null; }
+function storyKindWord(v) {
+  const info = storyKindInfo();
+  const o = info && info.options.find(x => x.value === (v || ''));
+  return o ? o.label : (v || 'Let the AI decide');
+}
+function storyKindField(cur, prefix) {
+  const info = storyKindInfo();
+  if (!info) return { el: null, get: () => cur || '' };
+  const id = `${prefix}-ch-kind`;
+  const s = h('select', { id, 'data-choice': 'kind', 'data-testid': `${prefix}-story-kind` },
+    info.options.map(o => h('option', { value: o.value, selected: (cur || '') === o.value }, o.label)));
+  const about = h('p', { class: 'small muted', 'data-testid': `${prefix}-story-kind-about` });
+  const show = () => {
+    const o = info.options.find(x => x.value === s.value);
+    about.textContent = o ? `${o.about}${o.stages && o.stages.length ? ` The stages: ${o.stages.map(b => b.name).join(' → ')}.` : ''}${o.promise ? ` The ending must deliver: ${o.promise}` : ''}` : '';
+  };
+  s.addEventListener('change', show);
+  show();
+  return { el: h('div', { class: 'field' }, tipLabel(id, info.label, info.help), s, about), get: () => s.value };
+}
+/** The stages of the kind of story on the chapters, as a strip ("Ch 3–5 · Getting ready"). */
+function storyKindStrip(kd, testid) {
+  if (!kd || !(kd.stages || []).length) return null;
+  return h('ol', { class: 'shape-strip kind-strip', 'data-testid': testid || 'story-kind-strip', 'aria-label': `Kind of story: ${kd.label}` },
+    kd.stages.map(b => h('li', { class: b.landed === true ? 'is-ok' : b.landed === false ? 'is-miss' : null, 'data-stage': b.id, title: `${b.what}${b.how ? ` In this book: ${b.how}` : ''}` },
+      h('b', null, b.number ? (b.last && b.last !== b.number ? `Ch ${b.number}–${b.last}` : `Ch ${b.number}`) : 'Ch ?'), ' · ', b.name,
+      b.landed === true ? h('span', { class: 'shape-ok', 'aria-label': 'on the page' }, ' ✔') : b.landed === false ? h('span', { class: 'shape-miss', 'aria-label': 'not on the page yet' }, ' ⚠') : null)));
+}
 function choicesSummary(ch) {
   ch = ch || {};
   const info = CH.info;
@@ -7029,6 +7081,7 @@ function choicesSummary(ch) {
   if (!info) for (const [k, v] of Object.entries(ch)) if (typeof v === 'string') out.push(`${k}: ${v}`);
   if (ch.characters) out.push(`${(characterModeInfo() || {}).label || 'How the story treats the characters'}: ${characterModeWord(ch.characters)}`);
   if (ch.shape) out.push(`Story shape: ${storyShapeWord(ch.shape)}`);
+  if (ch.kind) out.push(`Kind of story: ${storyKindWord(ch.kind)}`);
   if (ch.matrix && Object.keys(ch.matrix).length) out.push(`Ending options changed: ${Object.entries(ch.matrix).map(([r, v]) => `${r.replace(/_/g, ' ')} ${v}`).join(', ')}`);
   return out;
 }
@@ -7048,6 +7101,7 @@ function choicesFields(cur, prefix) {
   };
   const cm = characterModeField(cur.characters, prefix);
   const shp = storyShapeField(cur.shape, prefix);
+  const knd = storyKindField(cur.kind, prefix);
   const main = info.choices.slice(0, 3).map(field);
   const style = info.choices.slice(3).map(field);
   const mx = {};
@@ -7069,6 +7123,8 @@ function choicesFields(cur, prefix) {
     if (c && (c !== (characterModeInfo() || {}).default || cur.characters)) out.characters = c;
     const sv = shp.get();
     if (sv) out.shape = sv;
+    const kv = knd.get();
+    if (kv) out.kind = kv;
     return out;
   };
   const showPreview = () => {
@@ -7079,6 +7135,7 @@ function choicesFields(cur, prefix) {
   const el = h('fieldset', { class: 'field choices-box', 'data-testid': `${prefix}-choices` },
     h('legend', null, '🎚️ Ending and style (optional)'),
     cm.el,
+    knd.el,
     shp.el,
     h('p', { class: 'small muted' }, 'All optional — “Let the AI choose” leaves it to the story. The AI follows what you choose when it plans and writes, and the editor checks the ending against it.'),
     h('div', { class: 'grid-3' }, main),
@@ -8926,6 +8983,7 @@ async function viewReport(main) {
         h('div', { class: 'kpi' }, h('strong', null, agg.overall != null ? `${agg.overall}/10` : '–'), h('span', { class: 'small' }, 'overall (median of each dimension, averaged)')),
         h('div', { class: 'kpi' }, h('strong', null, `${agg.reviewers || 0}`), h('span', { class: 'small' }, `AI reviewer(s), ${agg.independent || 0} independent`)),
         h('div', { class: 'kpi' }, h('strong', null, `${(wd.total || 0).toLocaleString()}`), h('span', { class: 'small' }, `words of about ${(wd.target || 0).toLocaleString()} (${wd.length || ''})`))),
+      (rep.story_kind || {}).line ? h('p', { class: 'small', 'data-testid': 'rp-story-kind' }, `📚 ${rep.story_kind.line}`) : null,
       (rep.originality || {}).line ? h('p', { class: 'small', 'data-testid': 'rp-originality' }, rep.originality.line, h('span', { class: 'muted' }, ' (details: ✨ Originality check below)')) : null));
     if ((agg.dimensions || []).some(d => d.n)) {
       const t = h('table', { class: 'rp-table', 'data-testid': 'rp-scores' }, h('caption', { class: 'small' }, 'Scores from 1 to 10. Median = the middle score of the reviewers. ⚠️ = they are 3 or more points apart.'),

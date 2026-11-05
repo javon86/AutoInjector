@@ -2120,9 +2120,17 @@ class AutoBookService(_Runner):
         job = self._job(run, "profile", "B01")
         st["message"] = "The AI is inventing your book"
         self.save(run)
+        from . import story_kind  # noqa: PLC0415 - 📚 "Let the AI decide": the AI picks the kind of story too
+        pick = story_kind.pick_wanted(self.store, pid)
+        schema, task = PROFILE_SCHEMA, PROFILE_TASK
+        context = {"wishes": wishes, "lengths": {k: v[0] for k, v in LENGTHS.items()}}
+        if pick:
+            schema = dict(PROFILE_SCHEMA, properties=dict(PROFILE_SCHEMA["properties"], **story_kind.pick_schema()))
+            task = PROFILE_TASK.replace(" Return only the JSON object.", story_kind.PICK_TASK
+                                        + " Return only the JSON object.")
+            context["story_kinds"] = story_kind.pick_options()
         try:
-            raw = self._assist._call_ai(job, op_for_roles="B01", task=PROFILE_TASK, schema=PROFILE_SCHEMA,
-                                        context={"wishes": wishes, "lengths": {k: v[0] for k, v in LENGTHS.items()}},
+            raw = self._assist._call_ai(job, op_for_roles="B01", task=task, schema=schema, context=context,
                                         protected=[])
         except AkoweError as exc:
             self._ai_problem(exc, "inventing the book")
@@ -2148,6 +2156,16 @@ class AutoBookService(_Runner):
         st["message"] = f"“{prof['title']}” by {prof['author']} ({prof['genre'] or 'any genre'}; told in the " \
                         f"{book_promises.POV_WORDS[dec['pov']]}, {dec['tense']} tense)"
         self.event(run, "ai", f"The AI invented the book “{prof['title']}”", slot=job.slot)
+        if pick:
+            try:
+                kid = story_kind.record_pick(self.store, pid, raw)
+            except AkoweError:
+                kid = ""
+            if kid:
+                why = str(raw.get("story_kind_why") or "").strip()
+                st["message"] += f"; kind of story: {story_kind.label_of(kid)} (picked by the AI)"
+                self.event(run, "note", f"📚 Kind of story: {story_kind.label_of(kid)} — picked by the AI"
+                           + (f": {why[:200]}" if why else ""), step="profile", code="KIND_PICKED")
 
     def _series_changes(self, run):
         """📚 A finished book of a series: the AI proposes what changed for each character in it (proposals only —
@@ -3061,6 +3079,36 @@ class AutoBookService(_Runner):
         n = len(self.bp(run).outline_chapters(self.bp(run).outline()))
         st["message"] = f"{n} chapter(s) planned and approved"
         self._place_beats(run, st)
+        self._place_stages(run, st)
+
+    def _place_stages(self, run, st):
+        """📚 story_kind.py: the planner places the chapter where each stage of the book's kind of story begins (one
+        AI call, checked like the story shape's beats). Once per outline revision; never holds up the book."""
+        from . import story_kind  # noqa: PLC0415
+        bp = self.bp(run)
+        outline = bp.outline()
+        if not outline or not story_kind.of_store(self.store, run["project_id"]):
+            return
+        done = run.setdefault("stages_placed", {})
+        key = f"{outline['record_id']}:{outline['version']}"
+        if done.get(key):
+            return
+        try:
+            m = story_kind.place(self._review, self._sub_job(run, "story_kind", outline["record_id"],
+                                                             run["settings"].get("slot_id")), bp, outline)
+        except AkoweError as exc:
+            if getattr(exc, "control", False):
+                raise
+            self.event(run, "note", f"⚠️ The stages of the kind of story could not be placed on the chapters "
+                       f"({exc.code}); each begins where it usually does", step="outline", code="KIND_FAILED")
+            m = story_kind.mapping(self.store, run["project_id"], run["branch_id"], outline)
+        done[key] = True
+        if m:
+            st["kind"] = [story_kind.strip_label(s_) for s_ in m["stages"]][:12]
+            self.event(run, "note", f"📚 {m['label']}: " + "; ".join(story_kind.strip_label(s_) for s_ in m["stages"])
+                       + (f" (⚠️ {len(m['problems'])} placed where they usually begin)" if m.get("problems") else ""),
+                       step="outline", code="KIND_PLACED")
+        self.save(run)
 
     def _place_beats(self, run, st):
         """📐 story_shape.py: the planner places each beat of the author's story shape on a chapter of the approved
@@ -3324,6 +3372,8 @@ class AutoBookService(_Runner):
         try:
             from . import story_shape  # noqa: PLC0415 - 📐 a story beat that did not land: one targeted fix
             story_shape.fix_beats(self, run, st, outline, chapters, where="ending")
+            from . import story_kind  # noqa: PLC0415 - 📚 a story stage that did not land: one targeted fix
+            story_kind.fix_stages(self, run, st, outline, chapters, where="ending")
             if mem.get("fixing"):  # resumed while a fixed ending waited for its review
                 f = mem["fixing"]
                 finish_draft(f["record_id"], f["chapter_id"], f["number"])

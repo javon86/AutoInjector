@@ -248,7 +248,8 @@ to a minute), so the run knows which AIs work.
 1. **Safety backup** of all your books.
 2. **Invent the book:** title, pen name, genre, readers, tone and the idea. The point of view (first or third
    person) and the tense (past or present) are fixed here too, from your choice, else the AI's pick for this
-   story, else the genre's usual.
+   story, else the genre's usual. If you left the **kind of story** to the AI, it picks the one of the seven basic
+   plots that fits the idea best here, and the run's notes and the plan page say which and why.
 3. **Characters and places:** drafted, reviewed, approved. The main character (★) is guaranteed to exist.
 4. **Character sheets and voices:** what each character wants, needs, fears and hides, and a **voice card** for
    how each one talks.
@@ -260,6 +261,10 @@ to a minute), so the run knows which AIs work.
    Cat, Hero's Journey or Seven-point), the outline is planned on it and each of its beats is placed on a chapter
    (shown as "Ch 22 · Dark night of the soul" on the plan page and in the Book Bible); a beat the AI leaves out or
    misplaces goes where it usually falls in a book.
+   If you picked a **kind of story** (the seven basic plots: Overcoming the Monster, Rags to Riches, The Quest,
+   Voyage and Return, Comedy, Tragedy, Rebirth) — or left it to the AI, which then picks one in step 2 and says
+   which — the premise, main plot and outline are planned through its stages, and each stage gets the chapters it
+   covers (shown as "Ch 9–11 · The nightmare" with the kind's promise, such as "the hero defeats the monster").
    - **Optional: the writers' room for the big twists** (off unless you turn it on at the start). Before the main
      plot, and before the middle chapter and the climax, each working AI pitches an idea and they vote blind. The
      winner is used under your run consent and written in the journal. It never holds up the book.
@@ -289,6 +294,10 @@ to a minute), so the run knows which AIs work.
    - **Planned-to-page check:** did the plan really reach the page? At most one targeted fix. With a story shape,
      the chapter's beat is part of the plan: the scene cards, the writer and the reviewer are told "this chapter must
      deliver …", and the checkpoints and the ending check list any beat that did not land (one targeted fix).
+     With a kind of story, the chapter's brief names the stage it serves ("This chapter serves the stage “The
+     nightmare” …") and the kind's promise; the chapter where a stage begins must show it (same check and fix), the
+     5-chapter review asks whether the story is on its way to the promise, and the ending check asks "Does the ending
+     deliver a Tragedy's downfall?" (or the monster's defeat, the happy union …) and fixes the last chapter once if not.
    - **Approved** under your run consent. Then the **running notes (ledgers)** are updated: injuries, belongings,
      who is where, the day and season, who knows which secret, names, money.
    - **🔎 All-AI check of the chapter:** every working AI — the writer too — reads the chapter in full against its

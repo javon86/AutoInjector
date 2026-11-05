@@ -951,6 +951,8 @@ class ReviewService:
             ctx.update(needs_list.review_extra(self.store, pid, branch, rec))
             from . import story_shape  # noqa: PLC0415 - 📐 the story beat(s) this chapter must deliver
             ctx.update(story_shape.review_extra(self.store, pid, branch, rec))
+            from . import story_kind  # noqa: PLC0415 - 📚 the stage of the kind of story this chapter serves
+            ctx.update(story_kind.review_extra(self.store, pid, branch, rec))
         if extra:
             ctx.update(extra)
         return ctx, protected
