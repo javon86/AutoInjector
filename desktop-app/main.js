@@ -5035,6 +5035,58 @@ ipcMain.handle("llm:hf-files", llmSafe(async (_e, repo) => {
   if (r && Array.isArray(r.variants)) r.variants = r.variants.map((v) => (v && !v.fit ? { ...v, fit: llmSetup.fitFor(v.sizeBytes, hw) } : v));
   return r;
 }));
+// 🔓 The uncensored finder: live Ollama library + Hugging Face (merged, only uncensored chat models, exact HF
+// sizes → the quant that fits), each rated for this PC with a tool-use hint; offline → the last result saved
+// on this PC (llm-uncensored-cache.json, small), else the built-in list. `installed` = what Ollama has now.
+const llmUncCache = {
+  read: () => { try { return JSON.parse(fs.readFileSync(path.join(userDataDir(), "llm-uncensored-cache.json"), "utf8")); } catch (_) { return null; } },
+  write: (obj) => { try { fs.writeFileSync(path.join(userDataDir(), "llm-uncensored-cache.json"), JSON.stringify(obj)); } catch (_) {} },
+};
+async function llmInstalledNames() {
+  try { const l = await llmSetup.listModels(); return l && l.ok ? l.models.map((m) => m.name) : []; } catch (_) { return []; }
+}
+ipcMain.handle("llm:uncensored", llmSafe(async (_e, opts) => {
+  const cat = llmGetCatalog();
+  if (!cat || typeof cat.findUncensored !== "function") return { ok: false, models: [], errors: [], error: "The uncensored finder isn't part of this build yet." };
+  const o = opts && typeof opts === "object" ? opts : {};
+  const sources = Array.isArray(o.sources) ? o.sources.filter((x) => x === "ollama" || x === "hf") : undefined;
+  const hw = await llmSetup.hardware();
+  const speeds = llmSpeeds();
+  const [r, installed] = await Promise.all([cat.findUncensored({ sources, hardware: hw, speeds, cache: llmUncCache }), llmInstalledNames()]);
+  logEvent("llm-uncensored", { ok: !!(r && r.ok), models: (r && r.models && r.models.length) || 0, live: !!(r && r.live), cached: !!(r && r.fromCache), offline: !!(r && r.offline) });
+  return r && typeof r === "object" ? { ...r, models: await llmRateModels(r.models, hw), speeds, installed } : { ok: false, models: [], error: "The search didn't work — try again." };
+}));
+// 🧪 "What will it write?" — six short fiction probes on a model on THIS PC (Ollama only, never a web AI).
+// Results are kept per model in llm-write-tests.json; the log gets the scores only, never the text.
+const llmWriteTestLib = llmOptional("./llm-write-test");
+const llmWriteTest = llmWriteTestLib ? llmWriteTestLib.createWriteTest({
+  fetch: (...a) => fetch(...a),
+  getBase: async () => {
+    const cur = await llmSetup.currentServer();
+    if (cur && cur.ok) return cur.base;
+    const st = await llmSetup.startOllama();
+    return st && st.ok ? st.base : { ok: false, error: (st && st.error) || "Ollama isn't running — press ▶ Start Ollama first." };
+  },
+  store: {
+    read: () => { try { return JSON.parse(fs.readFileSync(path.join(userDataDir(), "llm-write-tests.json"), "utf8")); } catch (_) { return null; } },
+    write: (obj) => { try { fs.writeFileSync(path.join(userDataDir(), "llm-write-tests.json"), JSON.stringify(obj)); } catch (_) {} },
+  },
+  log: (kind, detail) => logEvent(kind, detail),
+  emit: (payload) => broadcast("llm", payload),
+}) : null;
+ipcMain.handle("llm:write-test", llmSafe(async (_e, a) => {
+  if (!llmWriteTest) return { ok: false, error: "The writing test isn't part of this build yet." };
+  if (a && typeof a === "object" && a.cancel) return llmWriteTest.cancel();
+  const name = String(llmArg(a, "name") || llmArg(a, "model") || "").trim();
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:\/@+-]{0,200}$/.test(name)) return { ok: false, error: "Pick a model on this PC to test." };
+  return llmWriteTest.run(name);
+}));
+ipcMain.handle("llm:write-tests", llmSafe(async (_e, a) => {
+  if (!llmWriteTest) return { ok: true, results: {} };
+  const name = llmArg(a, "name");
+  if (name) return { ok: true, result: llmWriteTest.cached(String(name)) };
+  return { ok: true, results: llmWriteTest.all(), running: llmWriteTest.isRunning() || null };
+}));
 // llm:pull(pullName, {sizeBytes}) — or one object {pullName|name, sizeBytes}. A size that is rated
 // "too big for this PC" is refused (llm-setup.pullModel checks the fit before downloading).
 ipcMain.handle("llm:pull", llmSafe((_e, a, o) => {

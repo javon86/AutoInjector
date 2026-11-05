@@ -107,7 +107,7 @@ async function main() {
   q15.querySelector('.llmm-variant').value = 'qwen2.5:7b'; q15.querySelector('.llmm-variant').dispatchEvent(new w.Event('change', { bubbles: true }));
   await tick();
 
-  console.log('\n== 🔓 Uncensored: first-class, ranked first, never hidden ==');
+  console.log('\n== 🔓 Uncensored (an older main without llmUncensored): the recommended list, uncensored only ==');
   assert(cards(w).some((c) => c.dataset.uncensored === '1'), 'uncensored models are listed even with the filter off');
   click(w, d.getElementById('llmm-unc'));
   await tick(40);
@@ -115,7 +115,9 @@ async function main() {
   assert(calls.filter((c) => c[0] === 'curated').pop()[1].uncensored === true, 'the recommended list is reloaded with uncensored:true');
   const cs = cards(w);
   assert(cs[0].dataset.uncensored === '1' && cs[0].querySelector('[data-badge="uncensored"]'), 'an uncensored model with the 🔓 badge is first');
-  assert(cs.some((c) => c.dataset.uncensored === '0'), 'the others are still shown');
+  assert(cs.length >= 3 && cs.every((c) => c.dataset.uncensored === '1'), `only uncensored models are listed (${cs.length})`);
+  assert(!d.getElementById('llmm-unc-note').hidden && /not smarter/.test(d.getElementById('llmm-unc-note').textContent) && /responsible for what you publish/.test(d.getElementById('llmm-unc-note').textContent), 'the plain-words note shows (not smarter, quality varies, you are responsible)');
+  assert(cs.every((c) => /^Uncensored: /.test(c.querySelector('.llmm-unc-line').textContent) && /🛠 good for Alfred's tools|⚠ may not use tools well/.test(c.querySelector('.llmm-tool-hint').textContent)), 'every card says what "uncensored" means and gives a tool hint');
   click(w, d.getElementById('llmm-unc'));
   await tick(40);
 

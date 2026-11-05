@@ -254,6 +254,12 @@ bridge to your home Wi-Fi, behind its key.
   He always answers — an empty or unusable reply from his AI becomes a plain "I couldn't do that, because …". After two
   struggles in a row with a local model, his panel offers **Use Claude (web pane) as Alfred's brain** / **Use a bigger
   model** (only a click changes it).
+- **🔓 Uncensored finder and 🧪 writing test (PR #127):** in 🔎 Find a model, **🔓 Uncensored** lists only uncensored
+  models from the Ollama library and Hugging Face, each rated for this PC (★★★ / ★★ / ★ / 🐢 / ✖, with the Hugging Face
+  size that fits the graphics card), with its speed, a "refusals removed — same skill as the base model" line and a
+  🛠 / ⚠ tool hint; offline it shows the last list it found, or a built-in one. **🧪 What will it write?** asks a
+  downloaded model for six short fiction passages on the PC (battle, villain, swearing, grief, romance, a heist) and
+  scores each ✅ wrote / ⚠ softened / ✖ refused, with a verdict. Only the scores are logged.
 - **"I will…" cards:** before he changes anything, he shows a card saying what he will do. Nothing happens until
   you press ✔ Do it, unless you ticked "always allow" for a harmless tool. Running code and outside tool servers
   never get "always allow". He never approves your chapter drafts. He can approve a Character Forge proposal,

@@ -5,8 +5,11 @@
  * each model fits THIS PC (★★★ Excellent / ★★ Good / ★ OK / 🐢 Slow / ✖ too big, with
  * a plain-English reason), about how fast it answers here (an estimate, or the speed
  * Alfred measured), and whether it is a good pick for Alfred (✔ / ◐ / ✖). The list
- * is ordered: good picks first, then fit, then speed. Filter for 🔓 uncensored or
- * 🛠 can-use-tools models, pick
+ * is ordered: good picks first, then fit, then speed. 🔓 Uncensored lists
+ * ONLY uncensored models (live Ollama library + Hugging Face, exact sizes → the
+ * quant that fits; offline → the last list saved on this PC or the built-in one),
+ * each with what "uncensored" means and a 🛠 tool-use hint; models on this PC get a
+ * 🧪 "What will it write?" test (llm-write-test-ui.js). 🛠 = can-use-tools only. Pick
  * a size (the best one that fits is chosen for you) and ⬇ Download it — the
  * button is disabled, with the reason, when a model is too big. Optional
  * Hugging Face token for gated models.
@@ -28,6 +31,8 @@
     pulls: {}, // pullName → { state:'running'|'done'|'error', percent, text }
     choice: {}, // model id → chosen variant tag
     speeds: {}, // model name → tokens/second Alfred measured on this PC (from main)
+    installed: new Set(), // names Ollama has now (lower case, ":latest" added)
+    wt: {}, // pullName → 🧪 test state {state, step, of, result, error}
   };
 
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
@@ -77,6 +82,12 @@
       '#llm-models .llmm-reason{opacity:.8;font-size:11px;}',
       '#llm-models .llmm-link{color:#8fb3ff;white-space:nowrap;}',
       '#llm-models .llmm-prog{font-size:11px;opacity:.9;}',
+      '#llm-models .llmm-spec{font-size:11px;opacity:.85;}',
+      '#llm-models .llmm-unc-line{font-size:11px;color:#d6c3ff;}',
+      '#llm-models .llmm-tool-hint{font-size:11px;}#llm-models .llmm-tool-hint[data-good="1"]{color:#8ef0b0;}#llm-models .llmm-tool-hint[data-good="0"]{color:#f0d88e;}',
+      '#llm-models .llmm-unc-note{border:1px solid #3d3360;background:#120f1c;border-radius:7px;padding:5px 8px;font-size:11.5px;margin:4px 0;}',
+      '#llm-models .llmm-unc-note[hidden]{display:none;}',
+      '#llm-models .llmm-card .llmm-wt{flex:1 1 100%;}',
     ].join('\n');
     (document.head || document.body).appendChild(style);
   }
@@ -92,9 +103,10 @@
     <div class="llmm-row" role="group" aria-label="Where to search and filters">
       <button class="llmm-chip" id="llmm-src-ollama" aria-pressed="true" title="Search the Ollama library">Ollama library</button>
       <button class="llmm-chip" id="llmm-src-hf" aria-pressed="true" title="Search Hugging Face (GGUF models Ollama can download)">Hugging Face</button>
-      <button class="llmm-chip" id="llmm-unc" aria-pressed="false" title="Show uncensored models first (abliterated, Dolphin, Hermes…)">🔓 Uncensored</button>
+      <button class="llmm-chip" id="llmm-unc" aria-pressed="false" title="Only uncensored models (abliterated, Dolphin, Hermes…) from the Ollama library and Hugging Face, rated for this PC">🔓 Uncensored</button>
       <button class="llmm-chip" id="llmm-tools" aria-pressed="false" title="Only models that can use tools (Alfred works best with these)">🛠 Can use tools</button>
     </div>
+    <div class="llmm-unc-note" id="llmm-unc-note" hidden>🔓 <b>Uncensored models</b> won't refuse dark or adult fiction, but they are <b>not smarter</b> than the model they come from — the quality varies from one to another, so try the 🧪 <b>What will it write?</b> test once it's downloaded. Everything runs on this PC. You are responsible for what you publish.</div>
     <div class="llmm-msg" id="llmm-msg" aria-live="polite"></div>
     <div class="llmm-results" id="llmm-results"></div>
     <details class="llmm-hf" id="llmm-hf">
@@ -177,6 +189,35 @@
     return vs.find((v) => v.tag === tag) || vs.find((v) => v.pullName === m.pullName) || vs[0] || null;
   }
 
+  // ------------------------------------------------------------------ on this PC + 🧪
+  function isInstalled(pullName) {
+    const k = speedKey(pullName);
+    return !!k && (st.installed.has(k) || !!(st.pulls[pullName] && st.pulls[pullName].state === 'done'));
+  }
+  function setInstalled(names) {
+    st.installed = new Set((Array.isArray(names) ? names : []).map((n) => speedKey(n && typeof n === 'object' ? n.name : n)).filter(Boolean));
+    render();
+  }
+  const WT = () => window.LlmWriteTestUI || null;
+  async function runWriteTest(pullName) {
+    if (!WT()) { msg('The writing test isn\'t available yet (update or restart AutoInjector).', true); return; }
+    await WT().run(pullName, (state) => { st.wt[pullName] = state; render(); });
+  }
+  function toolHintOf(m) {
+    if (m.toolHint && m.toolHint.label) return m.toolHint;
+    return m.tools === true ? { good: true, label: '🛠 good for Alfred\'s tools' } : { good: false, label: '⚠ may not use tools well' };
+  }
+  function uncLineOf(m) {
+    if (m.uncensoredLine) return m.uncensoredLine;
+    return /abliterat|heretic|obliterat/i.test(`${m.name} ${m.title}`) ? 'Uncensored: refusals removed (abliterated) — knowledge and skill same as the base model' : 'Uncensored: re-trained to follow instructions without refusing — knowledge and skill close to the base model';
+  }
+  function specOf(m, v) {
+    const p = (v && v.params) || m.params;
+    const q = (v && v.quant) || m.quant;
+    const size = v && v.sizeBytes ? `${v.estimated ? '~' : ''}${fmtSize(v.sizeBytes)}` : '';
+    return [p ? `${Math.round(p * 10) / 10}B parameters` : '', q || '', size].filter(Boolean).join(' · ');
+  }
+
   // ------------------------------------------------------------------ rendering
   function badges(m) {
     const b = [];
@@ -207,10 +248,17 @@
     const size = v && v.sizeBytes ? `${v.estimated ? 'about ' : ''}${fmtSize(v.sizeBytes)} download` : 'size unknown';
     const sp = speedOf(m, v);
     const vd = verdictOf(m, v);
-    return `<div class="llmm-card" data-i="${i}" data-id="${esc(m.id)}" data-rating="${esc(f.rating)}" data-verdict="${esc(vd.kind)}" data-uncensored="${m.uncensored ? 1 : 0}">
+    const here = v && isInstalled(v.pullName);
+    const th = toolHintOf(m);
+    const wt = v ? st.wt[v.pullName] : null;
+    const showUnc = m.uncensored && (st.uncensored || m.uncensoredLine);
+    return `<div class="llmm-card" data-i="${i}" data-id="${esc(m.id)}" data-rating="${esc(f.rating)}" data-verdict="${esc(vd.kind)}" data-uncensored="${m.uncensored ? 1 : 0}" data-installed="${here ? 1 : 0}">
       <div><span class="llmm-title">${esc(m.title || m.name)}</span>${badges(m)}
         ${m.url ? `<a href="${esc(m.url)}" target="_blank" rel="noopener" class="llmm-link" style="font-size:10.5px;margin-left:6px;">page ↗</a>` : ''}</div>
       ${m.description ? `<div class="llmm-desc" title="${esc(m.description)}">${esc(m.description)}</div>` : ''}
+      ${specOf(m, v) ? `<div class="llmm-spec">${esc(specOf(m, v))}${here ? ' · <b>✔ on this PC</b>' : ''}</div>` : ''}
+      ${showUnc ? `<div class="llmm-unc-line">${esc(uncLineOf(m))}</div>` : ''}
+      ${showUnc || m.toolHint ? `<div class="llmm-tool-hint" data-good="${th.good ? 1 : 0}">${esc(th.label)}</div>` : ''}
       <div><span class="llmm-fit" data-rating="${esc(f.rating)}">${esc(f.label)}</span> <span class="llmm-size" style="opacity:.75;">· ${esc(size)}${stats ? ` · ${esc(stats)}` : ''}</span></div>
       <div class="llmm-reason" title="${esc(f.reason || '')}">${esc(f.reason || '')}</div>
       ${sp ? `<div class="llmm-speed" data-measured="${sp.measured ? 1 : 0}" title="${esc(sp.measured ? 'How fast Alfred really answered with this model on this PC.' : 'An estimate from the model\'s size and how fast this PC\'s graphics card and memory are. It can be off by half either way.')}">${esc(sp.text)}</div>` : ''}
@@ -220,7 +268,9 @@
         ${m.source === 'hf' && !m.filesLoaded ? '<button class="llmm-files" title="Look up the exact files and sizes on Hugging Face">📂 Exact sizes</button>' : ''}
         <button class="llmm-dl primary"${tooBig || running || !v ? ' disabled' : ''} title="${esc(tooBig ? `Can't download: ${f.reason}` : (v ? `Download ${v.pullName}` : 'Nothing to download'))}">${running ? '⏳ Downloading…' : (pull && pull.state === 'done' ? '✔ Downloaded' : '⬇ Download')}</button>
         ${tooBig ? '<span class="llmm-why" style="font-size:11px;color:#f09a8e;">Too big for this PC — pick a smaller size.</span>' : ''}
+        ${here ? `<button class="llmm-wt" title="Six short fiction requests run on this PC: what it writes, softens or refuses"${wt && wt.state === 'running' ? ' disabled' : ''}>${wt && wt.state === 'running' ? '🧪 Testing…' : (wt && wt.state === 'done' ? '🧪 Test again' : '🧪 What will it write?')}</button>` : ''}
       </div>
+      ${wt && WT() ? WT().html(wt) : ''}
       ${pull ? `<div class="llmm-prog"${pull.state === 'error' ? ' style="color:#f0b08e"' : ''}>${esc(pull.text || '')}</div>` : ''}
       ${m.note ? `<div class="llmm-desc">${esc(m.note)}</div>` : ''}
     </div>`;
@@ -228,15 +278,15 @@
   function visibleModels() {
     let list = st.models.slice();
     if (st.toolsOnly) list = list.filter((m) => m.tools === true);
-    // 🔓 on: every uncensored model first (stable: keeps the good-pick / fit / speed order inside each group)
-    if (st.uncensored) list.sort((a, b) => (b.uncensored ? 1 : 0) - (a.uncensored ? 1 : 0));
+    // 🔓 on: only the uncensored models (in the good-pick / fit / speed order)
+    if (st.uncensored) list = list.filter((m) => m.uncensored);
     return list;
   }
   function render() {
     const list = visibleModels();
     const box = $('#llmm-results');
     if (!list.length) {
-      box.innerHTML = st.busy ? '' : `<div class="llmm-desc">${st.mode === 'search' ? 'No models found. Try another word, or press ⭐ Recommended.' : 'No models to show yet.'}</div>`;
+      box.innerHTML = st.busy ? '' : `<div class="llmm-desc">${st.mode === 'search' ? `No ${st.uncensored ? 'uncensored ' : ''}models found. Try another word, or press ⭐ Recommended.` : 'No models to show yet.'}</div>`;
       return;
     }
     box.innerHTML = list.map((m) => cardHtml(m, st.models.indexOf(m))).join('');
@@ -253,14 +303,34 @@
     if (r && r.speeds && typeof r.speeds === 'object') st.speeds = r.speeds;
     sortModels();
     if (!st.models.length && r && r.ok === false) msg(r.message || r.error || 'Couldn\'t load the recommended models.', true);
-    else msg(`Recommended for Alfred, rated for this PC${st.uncensored ? ' — 🔓 uncensored first' : ''}.`);
+    else msg(`Recommended for Alfred, rated for this PC${st.uncensored ? ' — 🔓 uncensored only' : ''}.`);
+    render();
+  }
+  /** 🔓 the uncensored finder (live sources → saved list → built-in list). */
+  async function loadUncensored() {
+    if (!has('llmUncensored')) { await loadCurated(); return; }
+    const sources = Object.keys(st.sources).filter((k) => st.sources[k]);
+    st.mode = 'uncensored'; st.busy = true;
+    msg(`Looking for uncensored models on ${(sources.length ? sources : ['ollama', 'hf']).map((x) => (x === 'hf' ? 'Hugging Face' : 'the Ollama library')).join(' and ')}…`); render();
+    const r = await call('llmUncensored', { sources: sources.length ? sources : undefined });
+    st.busy = false;
+    if (!st.uncensored) return; // switched off while it looked
+    if (r && r.error === 'NO_API') { msg(r.message, true); render(); return; }
+    st.models = toArray(r).map((m) => Object.assign({}, m, { uncensored: true }));
+    if (r && r.speeds && typeof r.speeds === 'object') st.speeds = r.speeds;
+    if (r && Array.isArray(r.installed)) st.installed = new Set(r.installed.map(speedKey).filter(Boolean));
+    sortModels();
+    const errText = ((r && r.errors) || []).map((e) => e.message).filter(Boolean).join(' ');
+    if (!st.models.length) msg((r && (r.message || r.error)) || errText || 'No uncensored models found right now. Try again later.', true);
+    else if (r && (r.fromCache || r.offline)) msg(r.message || 'Showing a saved list.', true);
+    else msg(`🔓 ${st.models.length} uncensored model${st.models.length === 1 ? '' : 's'}, rated for this PC${errText ? ` — ${errText}` : ''}.`, !!errText);
     render();
   }
   async function doSearch() {
     const q = $('#llmm-q').value.trim();
     const sources = Object.keys(st.sources).filter((k) => st.sources[k]);
     if (!sources.length) { msg('Pick at least one place to search: Ollama library or Hugging Face.', true); return; }
-    if (!q && !st.uncensored) { loadCurated(); return; }
+    if (!q) { if (st.uncensored && has('llmUncensored')) loadUncensored(); else loadCurated(); return; }
     st.mode = 'search'; st.query = q; st.busy = true;
     msg(`Searching ${sources.map((s) => (s === 'hf' ? 'Hugging Face' : 'the Ollama library')).join(' and ')}…`); render();
     $('#llmm-go').disabled = true;
@@ -316,8 +386,9 @@
     render();
     const r = await call('llmPull', v.pullName, { sizeBytes: v.sizeBytes || null });
     const ok = r && r.ok !== false;
+    if (ok) st.installed.add(speedKey(v.pullName));
     st.pulls[v.pullName] = ok
-      ? { state: 'done', percent: 100, text: `✔ Downloaded ${v.pullName}. You can now pick it for Alfred.` }
+      ? { state: 'done', percent: 100, text: `✔ Downloaded ${v.pullName}. You can now pick it for Alfred${m.uncensored ? ', or press 🧪 What will it write?' : ''}.` }
       : { state: 'error', text: `✖ ${r.message || r.error || 'The download failed.'}` };
     msg(st.pulls[v.pullName].text, !ok);
     render();
@@ -354,7 +425,11 @@
   }
   $('#llmm-unc').addEventListener('click', () => {
     st.uncensored = !st.uncensored; toggle($('#llmm-unc'), st.uncensored);
-    if (st.mode === 'curated') loadCurated(); else if (st.uncensored) doSearch(); else render();
+    $('#llmm-unc-note').hidden = !st.uncensored;
+    const q = $('#llmm-q').value.trim();
+    if (st.uncensored) { if (q && st.mode === 'search') doSearch(); else loadUncensored(); }
+    else if (st.mode === 'uncensored' || st.mode === 'curated') loadCurated();
+    else render();
   });
   $('#llmm-tools').addEventListener('click', () => {
     st.toolsOnly = !st.toolsOnly; toggle($('#llmm-tools'), st.toolsOnly);
@@ -367,6 +442,7 @@
     const m = st.models[Number(card.dataset.i)];
     if (!m) return;
     if (t.classList.contains('llmm-dl')) { if (!t.disabled) await download(m); }
+    else if (t.classList.contains('llmm-wt')) { const v = chosenVariant(m); if (v && !t.disabled) await runWriteTest(v.pullName); }
     else if (t.classList.contains('llmm-files')) { t.disabled = true; t.textContent = 'Looking…'; await loadFiles(m); render(); }
   });
   $('#llmm-results').addEventListener('change', (e) => {
@@ -395,9 +471,10 @@
   const ready = (async () => {
     const missing = ['llmSearch', 'llmCurated', 'llmHardware', 'llmPull'].filter((f) => !has(f));
     await loadHardware();
+    try { const s = window.llmSetupUI && window.llmSetupUI.status && window.llmSetupUI.status(); if (s && Array.isArray(s.models)) st.installed = new Set(s.models.map((x) => speedKey(x.name)).filter(Boolean)); } catch (_) {}
     await loadCurated();
     if (missing.length === 4) msg('The model finder isn\'t connected yet (update or restart AutoInjector).', true);
   })();
 
-  window.llmModelsUI = { open: (v) => { fold.open = v !== false; }, state: st, ready, render, search: doSearch, curated: loadCurated, loadHardware };
+  window.llmModelsUI = { open: (v) => { fold.open = v !== false; }, state: st, ready, render, search: doSearch, curated: loadCurated, uncensored: loadUncensored, loadHardware, setInstalled };
 })();

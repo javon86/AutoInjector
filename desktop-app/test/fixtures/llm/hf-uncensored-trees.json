@@ -1,0 +1,144 @@
+{
+ "bartowski/Qwen2.5-14B-Instruct-abliterated-GGUF": {
+  "siblings": [
+   {
+    "rfilename": ".gitattributes",
+    "size": 2000
+   },
+   {
+    "rfilename": "README.md",
+    "size": 8000
+   },
+   {
+    "rfilename": "Qwen2.5-14B-Instruct-abliterated-Q3_K_M.gguf",
+    "size": 7340000000
+   },
+   {
+    "rfilename": "Qwen2.5-14B-Instruct-abliterated-IQ4_XS.gguf",
+    "size": 8119999999
+   },
+   {
+    "rfilename": "Qwen2.5-14B-Instruct-abliterated-Q4_K_M.gguf",
+    "size": 8990000000
+   },
+   {
+    "rfilename": "Qwen2.5-14B-Instruct-abliterated-Q5_K_M.gguf",
+    "size": 10500000000
+   },
+   {
+    "rfilename": "Qwen2.5-14B-Instruct-abliterated-Q6_K.gguf",
+    "size": 12100000000
+   },
+   {
+    "rfilename": "Qwen2.5-14B-Instruct-abliterated-Q8_0.gguf",
+    "size": 15700000000
+   }
+  ],
+  "gguf": {
+   "total": 14770000000,
+   "architecture": "qwen2",
+   "context_length": 32768,
+   "chat_template": "{% if tools %}<tools>{% endif %}"
+  }
+ },
+ "mradermacher/Mistral-Small-24B-Instruct-2501-abliterated-GGUF": {
+  "siblings": [
+   {
+    "rfilename": ".gitattributes",
+    "size": 2000
+   },
+   {
+    "rfilename": "README.md",
+    "size": 8000
+   },
+   {
+    "rfilename": "Mistral-Small-24B-Instruct-2501-abliterated-Q2_K.gguf",
+    "size": 8890000000
+   },
+   {
+    "rfilename": "Mistral-Small-24B-Instruct-2501-abliterated-IQ3_M.gguf",
+    "size": 10700000000
+   },
+   {
+    "rfilename": "Mistral-Small-24B-Instruct-2501-abliterated-Q3_K_M.gguf",
+    "size": 11500000000
+   },
+   {
+    "rfilename": "Mistral-Small-24B-Instruct-2501-abliterated-IQ4_XS.gguf",
+    "size": 12800000000
+   },
+   {
+    "rfilename": "Mistral-Small-24B-Instruct-2501-abliterated-Q4_K_M.gguf",
+    "size": 14300000000
+   },
+   {
+    "rfilename": "Mistral-Small-24B-Instruct-2501-abliterated-Q5_K_M.gguf",
+    "size": 16800000000
+   },
+   {
+    "rfilename": "Mistral-Small-24B-Instruct-2501-abliterated-Q8_0.gguf",
+    "size": 25100000000
+   }
+  ],
+  "gguf": {
+   "total": 23570000000,
+   "architecture": "llama"
+  }
+ },
+ "mlabonne/gemma-3-12b-it-abliterated-GGUF": {
+  "siblings": [
+   {
+    "rfilename": ".gitattributes",
+    "size": 2000
+   },
+   {
+    "rfilename": "README.md",
+    "size": 8000
+   },
+   {
+    "rfilename": "gemma-3-12b-it-abliterated-Q4_K_M.gguf",
+    "size": 7300000000
+   },
+   {
+    "rfilename": "gemma-3-12b-it-abliterated-Q5_K_M.gguf",
+    "size": 8400000000
+   },
+   {
+    "rfilename": "gemma-3-12b-it-abliterated-Q6_K.gguf",
+    "size": 9700000000
+   },
+   {
+    "rfilename": "gemma-3-12b-it-abliterated-Q8_0.gguf",
+    "size": 12500000000
+   }
+  ],
+  "gguf": {
+   "total": 11770000000,
+   "architecture": "gemma3",
+   "chat_template": "{{ bos_token }}{% for message in messages %}{{ message.content }}{% endfor %}"
+  }
+ },
+ "bigco/Huge-70B-abliterated-GGUF": {
+  "siblings": [
+   {
+    "rfilename": ".gitattributes",
+    "size": 2000
+   },
+   {
+    "rfilename": "README.md",
+    "size": 8000
+   },
+   {
+    "rfilename": "Huge-70B-abliterated-Q4_K_M.gguf",
+    "size": 42500000000
+   },
+   {
+    "rfilename": "Huge-70B-abliterated-Q8_0.gguf",
+    "size": 75000000000
+   }
+  ],
+  "gguf": {
+   "total": 70500000000
+  }
+ }
+}
