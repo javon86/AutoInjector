@@ -47,6 +47,7 @@ function createWakeLock(opts = {}) {
   let id = null;
   let lastBusyAt = 0;
   let last = activityOf({});
+  let lastSaid = '';
   function update(activity) {
     const a = activity && typeof activity.busy === 'boolean' ? activity : activityOf(activity);
     last = a;
@@ -54,11 +55,16 @@ function createWakeLock(opts = {}) {
       lastBusyAt = now();
       if (id == null && blocker) {
         try { id = blocker.start('prevent-app-suspension'); } catch (e) { id = null; log('keep-awake', { on: false, error: String(e && e.message || e), severity: 'warn' }); }
-        if (id != null) log('keep-awake', { on: true, why: a.why.join(', '), say: `Keeping the PC awake while ${a.why[0] || 'something works'} (the screen may still turn off)` });
+        if (id != null) { lastSaid = a.why[0] || ''; log('keep-awake', { on: true, why: a.why.join(', '), say: `Keeping the PC awake while ${a.why[0] || 'something works'} (the screen may still turn off)` }); }
+      } else if (id != null && (a.why[0] || '') !== lastSaid) {
+        // still awake, but for a different main reason (e.g. a picture job ended and a book run goes on): say so once
+        lastSaid = a.why[0] || '';
+        log('keep-awake', { on: true, still: true, why: a.why.join(', '), say: `Keeping the PC awake while ${a.why[0] || 'something works'} (the screen may still turn off)` });
       }
     } else if (id != null && now() - lastBusyAt >= idleGraceMs) {
       try { blocker.stop(id); } catch (_) {}
       id = null;
+      lastSaid = '';
       log('keep-awake', { on: false, say: 'Nothing is working any more: the PC may sleep again as usual' });
     }
     return { busy: a.busy, awake: id != null, why: a.why.slice() };
