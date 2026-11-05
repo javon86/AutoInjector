@@ -239,7 +239,7 @@ A('sd.set_autostart', 'sd:set-autostart', { t: 'Start Stable Diffusion with Auto
 A('sd.open_install_folder', 'sd:open-install-folder', { t: 'Open the Stable Diffusion install folder', c: true, aa: true });
 A('sd.start_cpu', 'sd:start-cpu', { t: 'Start ComfyUI on the processor (slow, but works on any PC) — when it crashes on the graphics card', c: true, a: { id: opt(300) }, ex: { id: 'portable:comfyui' } });
 A('sd.use_other_build', 'sd:use-other-build', { t: 'Use the other ComfyUI build (switches to, or downloads, the other portable build for this graphics card, then starts it)', c: true });
-// 🧩 Add-ons (PR #125): Alfred lists them and installs one from the curated list (never a pasted link — that asks the user).
+// 🧩 Add-ons (PR #126): Alfred lists them and installs one from the curated list (never a pasted link — that asks the user).
 A('sd.addons', 'sd:addons', { t: 'Add-ons (extensions) in the SD app: what is installed, and the useful ones (ADetailer, Regional Prompter, …) with their state', c: false });
 A('sd.addons_install', 'sd:addons-install', { t: 'Install an add-on from the curated list into the SD app (files only; restart the app afterwards)', c: true, a: { id: { type: 'string', enum: ['adetailer', 'controlnet', 'regional-prompter', 'dynamic-prompts', 'tiled-diffusion', 'ultimate-upscale', 'comfyui-manager', 'impact-pack', 'controlnet-aux'] } }, r: ['id'], ex: { id: 'adetailer' } });
 A('sd.addons_restart', 'sd:addons-restart', { t: 'Restart the SD app AutoInjector started, so new add-ons load', c: true });

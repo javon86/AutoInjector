@@ -71,7 +71,7 @@
       #alfred-form[hidden] { display:none; }
       #alfred-form h3 { margin:0; font-size:12.5px; color:#cfe0ff; }
       #alfred-form label { font-size:11.5px; color:#aab5cf; display:flex; flex-direction:column; gap:3px; }
-      #alfred-form input, #alfred-form textarea { background:#0b0e16; color:#e8ecf5; border:1px solid #2b3550; border-radius:6px; padding:4px 6px; font:inherit; font-size:12.5px; }
+      #alfred-form input, #alfred-form textarea, #alfred-form select { background:#0b0e16; color:#e8ecf5; border:1px solid #2b3550; border-radius:6px; padding:4px 6px; font:inherit; font-size:12.5px; }
       #alfred-form textarea { resize:vertical; min-height:40px; }
       #alfred-form .al-row { display:flex; gap:6px; }
       #alfred-form .al-note { font-size:11px; color:#8792ad; }
@@ -110,6 +110,10 @@
       .al-you { align-self:flex-end; background:#1e2a47; }
       .al-alfred { align-self:flex-start; background:#171b26; border:1px solid #262e44; }
       .al-notice { align-self:stretch; background:#1c1a10; border:1px solid #4a4220; color:#f1e3b0; font-size:12px; }
+      #alfred-tip { margin:4px 10px; padding:6px 8px; border:1px solid #6b5a2a; background:#221d10; border-radius:8px; font-size:12px; color:#f0dca0; }
+      #alfred-tip[hidden] { display:none; }
+      #alfred-tip .al-tip-row { display:flex; flex-wrap:wrap; gap:6px; margin-top:5px; align-items:center; }
+      #alfred-tip .al-tip-note { color:#cbb98a; }
       .al-notice .al-fix { margin-top:6px; font-size:12px; padding:2px 10px; } .al-notice .al-fix-note { margin-top:4px; color:#e8a0a0; }
       .al-rich p { margin:0 0 5px; } .al-rich p:last-child { margin-bottom:0; } .al-rich ul, .al-rich ol { margin:2px 0 5px; padding-left:20px; white-space:normal; } .al-rich li { margin:1px 0; white-space:pre-wrap; }
       .al-rich code { background:#0b0e16; border:1px solid #2b3550; border-radius:4px; padding:0 3px; font-size:11.5px; } .al-rich pre { background:#0b0e16; border:1px solid #2b3550; border-radius:6px; padding:5px 7px; margin:3px 0; overflow:auto; white-space:pre; font-size:11.5px; } .al-rich .al-h { margin:2px 0 4px; }
@@ -189,6 +193,7 @@
       settingsBox(),
       h('div', { id: 'alfred-chat', 'aria-live': 'polite' }),
       h('div', { id: 'alfred-card', hidden: true, role: 'dialog', 'aria-label': 'Alfred asks before he does this' }),
+      h('div', { id: 'alfred-tip', hidden: true, role: 'note' }),
       h('div', { id: 'alfred-busy', hidden: true }, h('span', { id: 'alfred-busy-text' }, '🎩 Working on it…'), h('button', { id: 'alfred-stop', type: 'button', onclick: () => api.alfredCancel() }, '■ Stop')),
       h('div', { id: 'alfred-compose' },
         h('textarea', { id: 'alfred-input', placeholder: 'Ask Alfred…  (Enter to send, Shift+Enter for a new line)', 'aria-label': 'Message to Alfred' }),
@@ -281,6 +286,22 @@
     quickMsg('');
     send(text);
   }
+  // PR #124: a big button goes straight to his "I will" card — the form's fields ARE the tool call, so it never
+  // depends on his AI choosing a tool (log 2026-11-04: a small local model answered "Make a picture" in words only).
+  // Old builds without alfred:quick: the request in words, as before.
+  async function quickDo(kind, fields, text) {
+    const b = busyNote(); if (b) { quickMsg(b); return; }
+    quickMsg('');
+    if (typeof api.alfredQuick !== 'function') { if (text) send(text); return; }
+    if (sending) return;
+    sending = true;
+    if (catalogShown()) showCatalog(false);
+    $('alfred-busy').hidden = false;
+    try {
+      const r = await api.alfredQuick(kind, fields || {});
+      if (r && r.ok === false && r.message) quickMsg(r.message);
+    } finally { sending = false; if (!(last && last.busy)) { const x = $('alfred-busy'); if (x) x.hidden = true; } }
+  }
   /** Akọwe's books, or a plain sentence why there are none. Old builds without alfred:books: assume ok. */
   async function books() {
     if (typeof api.alfredBooks !== 'function') return { ok: true, akowe: true, books: [{}], unknown: true };
@@ -305,6 +326,7 @@
     f.dataset.kind = kind;
     f.append(h('h3', null, title));
     for (const x of fields) {
+      if (x.options) { f.append(h('label', null, x.label, h('select', { id: `alfred-f-${x.name}`, name: x.name }, x.options.map(([v, t]) => h('option', { value: v }, t))))); continue; }
       const attrs = { id: `alfred-f-${x.name}`, name: x.name, placeholder: x.placeholder || '', maxlength: x.long ? '1500' : '120', required: !!x.required };
       f.append(h('label', null, x.label, x.long ? h('textarea', attrs) : h('input', Object.assign({ type: 'text' }, attrs))));
     }
@@ -323,13 +345,16 @@
     cover: () => { const w = val('what'); return `Design the cover for my book and make the cover art${w ? ` showing ${w}` : ''}.`; },
     newbook: () => { const i = val('idea'); if (!i) return null; const g = val('genre'); return `Make a book for me: ${i}${g ? ` (genre: ${g})` : ''}.`; },
   };
+  // what each form sends to alfred:quick (Alfred builds the tool call from these, see alfred.js quickPlan)
+  const FIELDS = { character: ['name', 'about'], picture: ['what', 'size', 'engine'], video: ['what', 'seconds'], cover: ['what'], newbook: ['idea', 'genre'] };
   function submitForm() {
     const kind = formKind; if (!kind || !REQUEST[kind]) return;
     const text = REQUEST[kind]();
     if (!text) { const f = $('alfred-form').querySelector('[required]'); if (f) { try { f.focus(); } catch (_) {} } quickMsg('Please fill in the first box.'); return; }
     const b = busyNote(); if (b) { quickMsg(b); return; }
+    const fields = {}; for (const n of FIELDS[kind] || []) { const v = val(n); if (v) fields[n] = v; }
     closeForm();
-    quickAsk(text);
+    quickDo(kind, fields, text);
   }
   async function doAction(kind) {
     if (formKind === kind) { closeForm(); return; } // a second press closes its form
@@ -337,17 +362,21 @@
     quickMsg('');
     if (kind === 'catalog') { closeForm(); showCatalog(!catalogShown()); return; }
     if (kind === 'check') { closeForm(); showCatalog(false); checkEverything(); return; }
-    if (kind === 'picture') return openForm('picture', '🎨 What should the picture show?', [{ name: 'what', label: 'The picture', placeholder: 'a lighthouse on a cliff at dusk', long: true, required: true }]);
-    if (kind === 'video') return openForm('video', '🎬 What should the video show?', [{ name: 'what', label: 'The video', placeholder: 'waves crashing against a lighthouse', long: true, required: true }], 'Needs the 🎬 Video tab set up — he tells you plainly if it is not.');
+    if (kind === 'picture') return openForm('picture', '🎨 What should the picture show?', [{ name: 'what', label: 'The picture', placeholder: 'a lighthouse on a cliff at dusk', long: true, required: true },
+      { name: 'size', label: 'Size', options: [['', 'The 🎨 Images tab\'s size'], ['512x512', 'Small square 512×512'], ['768x768', 'Square 768×768'], ['1024x1024', 'Big square 1024×1024'], ['832x1216', 'Portrait 832×1216'], ['1216x832', 'Landscape 1216×832']] },
+      { name: 'engine', label: 'Made by', options: [['auto', 'Stable Diffusion if connected, else ChatGPT'], ['sd', 'Stable Diffusion'], ['chatgpt', 'ChatGPT (in its pane)']] }],
+      'He shows you an “I will” card first — nothing is made before ✔ Do it.');
+    if (kind === 'video') return openForm('video', '🎬 What should the video show?', [{ name: 'what', label: 'The video', placeholder: 'waves crashing against a lighthouse', long: true, required: true },
+      { name: 'seconds', label: 'Length', options: [['', 'The 🎬 Video tab\'s length'], ['2', '2 seconds'], ['4', '4 seconds'], ['6', '6 seconds'], ['10', '10 seconds']] }], 'Needs the 🎬 Video tab set up — he tells you plainly if it is not.');
     closeForm(); showCatalog(false);
     if (kind === 'character') { if (await needBook()) openForm('character', '🧑 A new character for your book', [{ name: 'name', label: 'Their name', placeholder: 'Mara', required: true }, { name: 'about', label: 'A line about them (optional)', placeholder: 'the lighthouse keeper who hates the sea', long: true }], 'He starts the dossier and invents the rest as proposals — you approve them.'); return; }
     if (kind === 'cover') { if (await needBook()) openForm('cover', '🖼 Design the cover', [{ name: 'what', label: 'What the cover picture should show (optional)', placeholder: 'a lighthouse in a storm', long: true }]); return; }
-    if (kind === 'book') { if (await needBook()) quickAsk("What's the status of my book?"); return; }
+    if (kind === 'book') { if (await needBook()) quickDo('book', {}, "What's the status of my book?"); return; }
     if (kind === 'continue') {
       const r = await books();
       if (!r.ok || r.akowe === false) { quickMsg(`📖 ${r.message || 'Akọwe (the book app) is not running yet — open the 📖 Akọwe tab first.'}`); return; }
       if (!r.books.length) { openForm('newbook', '✍ Akọwe has no book yet — what is your book about?', [{ name: 'idea', label: 'Your idea, in a few sentences', placeholder: 'A lighthouse keeper finds a door under the sea…', long: true, required: true }, { name: 'genre', label: 'Genre (optional)', placeholder: 'cosy mystery' }], 'He starts Akọwe\'s “⚡ Make a book for me” run — you say ✔ Do it first.'); return; }
-      quickAsk('Continue my book: resume the “Make a book for me” run if it is paused, or tell me what it is waiting for. If no run is going, tell me the next step.');
+      quickDo('continue', {}, 'Continue my book: resume the “Make a book for me” run if it is paused, or tell me what it is waiting for. If no run is going, tell me the next step.');
     }
   }
 
@@ -576,6 +605,7 @@
     if (atBottom || sending) chat.scrollTop = chat.scrollHeight;
     // card
     renderCard(st.card);
+    renderTip(st.tip);
     // busy: the buttons that send wait; 🩺 and ❓ always work
     $('alfred-busy').hidden = !st.busy;
     busyTicker(st);
@@ -654,6 +684,33 @@
     }
     return e;
   }
+  // PR #126: his local model failed / answered in words only twice in a row → one line with the stronger-brain
+  // choices. Only a click changes anything (✕ hides it until he struggles again).
+  let tipHiddenAt = 0;
+  function renderTip(tip) {
+    const box = $('alfred-tip'); if (!box) return;
+    if (!tip || !tip.count || tip.count <= tipHiddenAt) { box.hidden = true; box.textContent = ''; if (!tip) tipHiddenAt = 0; return; }
+    if (box.dataset.count === String(tip.count) && !box.hidden) return; // the same tip: keep it (and its note) as it is
+    box.dataset.count = String(tip.count);
+    box.textContent = '';
+    box.hidden = false;
+    const row = h('div', { class: 'al-tip-row' });
+    for (const a of tip.actions || []) {
+      const b = h('button', { type: 'button', id: `alfred-tip-${a.id}`, class: a.id === 'use-pane' ? 'primary' : '' }, a.label);
+      b.addEventListener('click', async () => {
+        if (a.id === 'bigger') { showButler(); return; }
+        if (a.settings) {
+          b.disabled = true;
+          try { await api.alfredSettings(a.settings); } catch (_) {}
+          box.hidden = true;
+          quickMsg('✔ Done — I think with Claude in its pane now (it must be logged in). Change it any time in ⚙.');
+        }
+      });
+      row.append(b);
+    }
+    row.append(h('button', { type: 'button', id: 'alfred-tip-close', title: 'Hide this tip', 'aria-label': 'Hide this tip', onclick: () => { tipHiddenAt = tip.count; box.hidden = true; } }, '✕'));
+    box.append(h('span', null, `💡 ${tip.text}`), row);
+  }
   function renderCard(card) {
     const box = $('alfred-card');
     // the same card re-rendered: keep the user's ticks (a state update must not undo them)
@@ -673,7 +730,7 @@
     }
     body.append(ol);
     box.append(body, h('div', { class: 'al-actions' },
-      h('button', { id: 'alfred-do-it', type: 'button', class: 'primary', onclick: () => decide(true) }, '✔ Do it'),
+      h('button', { id: 'alfred-do-it', type: 'button', class: 'primary', onclick: () => decide(true) }, card.doLabel ? String(card.doLabel).slice(0, 40) : '✔ Do it'),
       h('button', { id: 'alfred-no', type: 'button', onclick: () => decide(false) }, '✖ No')));
     if (catalogShown()) showCatalog(false); // the card must be seen
   }

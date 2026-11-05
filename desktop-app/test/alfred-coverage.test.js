@@ -81,7 +81,7 @@ const IPC_INVENTORY = [
   'alfred:ask', 'alfred:cancel', 'alfred:clear', 'alfred:confirm', 'alfred:models', 'alfred:open-path', 'alfred:reject', 'alfred:set-enabled',
   'alfred:settings', 'alfred:status', 'alfred:test-ai',
   'alfred:personality', 'alfred:profiles', 'alfred:profile-save', 'alfred:profile-use', 'alfred:profile-delete',
-  'alfred:panel', 'alfred:panel-toggle', 'alfred:show-butler', 'alfred:catalog', 'alfred:books',
+  'alfred:panel', 'alfred:panel-toggle', 'alfred:show-butler', 'alfred:catalog', 'alfred:books', 'alfred:quick',
   'brigade:run', 'brigade:stop', 'butler:capability-test', 'butler:chat', 'butler:install-missing', 'butler:selfcheck', 'butler:send-intro',
   'db:recent-messages', 'db:status', 'endpoints:detect', 'endpoints:presets', 'endpoints:test', 'external:open',
   'featuretest:open-report', 'featuretest:run', 'featuretest:stop', 'mediatest:run', 'mediatest:stop', 'mediatest:status', 'mediatest:copy', 'mediatest:open-report', 'feed-window:close', 'feed:history', 'feed:open', 'gpu:info',
@@ -570,6 +570,19 @@ async function main() {
   await until(async () => ((await call('state:get')).transcript || []).some((t) => t.site === 'claude' && /keeper finds a bottle/.test(t.text)), 8000);
   d = await drive('read_latest_reply', { from: 'claude' });
   check('read_latest_reply', !d.carded && /keeper finds a bottle/.test(d.text), 'reads Claude\'s captured reply');
+  // 💬 ask_ai (PR #126): card → ✔ → typed into Gemini → Gemini answers → the answer comes back to him (same request)
+  {
+    const wcG = mock.__registry.gemini.webContents;
+    const n0 = wcG.sentLog.length;
+    q.push(toolCall('ask_ai', { to: 'gemini', message: 'Name three lighthouse keepers.' }));
+    const r1 = await call('alfred:ask', { text: 'use ask_ai' });
+    const pend = r1 && r1.type === 'confirm' ? call('alfred:confirm', { id: r1.card.id }) : Promise.resolve(r1);
+    const typed = await until(() => wcG.sentLog.slice(n0).some((x) => /three lighthouse keepers/.test(String(x.text || ''))), 8000);
+    wcG.currentText = 'Mara, Odile and Tomas. [FROM: GEMINI]';
+    const r2 = await pend;
+    const txt = (r2 && (r2.raw || r2.text)) || '';
+    check('ask_ai', r1.type === 'confirm' && !!typed && /^RESULT \{"ok":true/.test(txt) && /Mara, Odile and Tomas/.test(txt), `card → ✔ → typed into the Gemini pane → waits → Gemini's answer comes back to him in the same request (${txt.slice(0, 90)})`);
+  }
   d = await drive('ai_health', {});
   check('ai_health', !d.carded && /chatgpt/.test(d.text) && /gemini/.test(d.text), 'reads each AI\'s self-repair state');
   d = await drive('run_checkin', { sites: ['gemini'] });

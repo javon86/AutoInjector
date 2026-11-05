@@ -257,6 +257,18 @@ function installAlfred(h) {
     return { ok: false, error: 'TIMEOUT' };
   }
 
+  /**
+   * 💬 ask_ai (PR #126): type a message into an AI pane and wait for ITS answer. main.js's askPane does it the way an
+   * Akọwe bridge request does (a check-in makes way, the [MSG #] is proven, the reply that answers it is taken and
+   * kept out of the relay, an AI an Akọwe request waits on is refused). Without it (an older main): send + the next
+   * captured reply, like the web-pane brain.
+   */
+  async function askAi(site, text, { timeoutMs, signal } = {}) {
+    if (!SITE_IDS.includes(site)) return { ok: false, error: 'BAD_SITE' };
+    if (typeof h.askPane === 'function') return h.askPane(site, String(text), { timeoutMs: timeoutMs || 180000, signal });
+    return paneAsk(site, text, { timeoutMs: timeoutMs || 180000, signal });
+  }
+
   const ctx = {
     invoke: (channel, ...args) => invokeChannel(channel, ...args),
     local: async (what, a) => { if (what === 'showTab') { h.broadcast('alfred', { type: 'show-tab', tab: a.tab }); return { ok: true, tab: a.tab }; } return { ok: false, error: 'UNKNOWN' }; },
@@ -316,7 +328,7 @@ function installAlfred(h) {
     listOutputs: async (cat, limit) => listOutputs(cat, limit),
     videoStatus: () => h.videoProvider.status(),
     generateVideo,
-    sendToAi, latestReply, aiHealth, runCheckin,
+    sendToAi, askAi, latestReply, aiHealth, runCheckin,
     openOutput, exportLogs: async (o) => exportLogs(o),
     interpreterRun: (task) => {
       const st = h.interpreterProvider.status();
@@ -387,6 +399,8 @@ function installAlfred(h) {
   ipcMain.handle('alfred:set-enabled', (_e, p) => alfred.setEnabled(!!(p && p.on)));
   ipcMain.handle('alfred:settings', (_e, patch) => alfred.setSettings(patch || {}));
   ipcMain.handle('alfred:ask', async (_e, p) => { try { return await alfred.ask(p && p.text); } catch (e) { return { ok: false, error: 'ERROR', message: 'Something went wrong on my side.' }; } });
+  // the big buttons (🎨 Make a picture …): the form's fields become the tool call — the card shows at once (PR #124)
+  ipcMain.handle('alfred:quick', async (_e, p) => { try { return await alfred.quick(p && p.kind, p && p.fields); } catch (e) { return { ok: false, error: 'ERROR', message: 'Something went wrong on my side.' }; } });
   ipcMain.handle('alfred:confirm', async (_e, p) => { try { return await alfred.confirm(p && p.id, { alwaysAllow: p && p.alwaysAllow }); } catch (e) { return { ok: false, error: 'ERROR' }; } });
   ipcMain.handle('alfred:reject', (_e, p) => alfred.reject(p && p.id));
   ipcMain.handle('alfred:cancel', () => alfred.cancel());
