@@ -212,7 +212,13 @@ bridge to your home Wi-Fi, behind its key.
 - **🔒 Character locks:** a saved recipe (a LoRA, trigger words, fixed looks, or a portrait) that keeps one
   character's face the same in every picture. In a ⚡ run, each character's portrait becomes its lock.
 - If you turn on something the picture program doesn't have (ADetailer or ControlNet on a Forge without that
-  extension), the picture is still made without it, and a ⚠ line says what was left out and how to add it.
+  extension), the picture is still made without it, and a ⚠ line says what was left out and how to add it, with a **🧩 Install it** button.
+- **🧩 Add-ons:** shows the add-ons (extensions) in Forge, A1111 or SD.Next, or the custom nodes in ComfyUI. It
+  lists useful ones (ADetailer, Regional Prompter, Dynamic Prompts, Ultimate SD Upscale and more) with Install,
+  Update and Remove, and can install from a GitHub link after asking. It only copies the add-on's files into the
+  app's folder. Then it offers **🔁 Restart Forge now** (if AutoInjector started Forge), or says to restart it in
+  Stability Matrix. Remove moves the add-on to a `_removed` folder. If it can't find Forge's folder, you pick it
+  once. **Open Forge's own Extensions page** shows Forge's own screen in a window.
 - Pictures are saved in `stuff and thing/images/`, each with a `.json` file of the settings that made it.
 - **Tested for real:** pictures have been made with Forge on your PC.
 

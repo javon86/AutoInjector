@@ -239,6 +239,11 @@ A('sd.set_autostart', 'sd:set-autostart', { t: 'Start Stable Diffusion with Auto
 A('sd.open_install_folder', 'sd:open-install-folder', { t: 'Open the Stable Diffusion install folder', c: true, aa: true });
 A('sd.start_cpu', 'sd:start-cpu', { t: 'Start ComfyUI on the processor (slow, but works on any PC) — when it crashes on the graphics card', c: true, a: { id: opt(300) }, ex: { id: 'portable:comfyui' } });
 A('sd.use_other_build', 'sd:use-other-build', { t: 'Use the other ComfyUI build (switches to, or downloads, the other portable build for this graphics card, then starts it)', c: true });
+// 🧩 Add-ons (PR #126): Alfred lists them and installs one from the curated list (never a pasted link — that asks the user).
+A('sd.addons', 'sd:addons', { t: 'Add-ons (extensions) in the SD app: what is installed, and the useful ones (ADetailer, Regional Prompter, …) with their state', c: false });
+A('sd.addons_install', 'sd:addons-install', { t: 'Install an add-on from the curated list into the SD app (files only; restart the app afterwards)', c: true, a: { id: { type: 'string', enum: ['adetailer', 'controlnet', 'regional-prompter', 'dynamic-prompts', 'tiled-diffusion', 'ultimate-upscale', 'comfyui-manager', 'impact-pack', 'controlnet-aux'] } }, r: ['id'], ex: { id: 'adetailer' } });
+A('sd.addons_restart', 'sd:addons-restart', { t: 'Restart the SD app AutoInjector started, so new add-ons load', c: true });
+A('sd.addons_open_page', 'sd:addons-open-page', { t: 'Open the SD app\'s own Extensions page in a window', c: true, aa: true });
 A('sdlib.update', 'sdlib:update', { t: 'Edit a library entry (tags, ★, notes, base, weight, triggers)', c: true, a: { id: text(300), patch: pass }, r: ['id', 'patch'], ex: { id: 'lora:odile_face', patch: { favorite: true } } });
 A('sdlib.folders', 'sdlib:folders', { t: 'Library model folders', c: false });
 A('sdlib.add_folder', 'sdlib:add-folder', { t: 'Add a models folder to the library', c: true, a: { path: text(1000), kind: { type: 'string', enum: ['checkpoint', 'lora', 'vae', 'embedding', 'auto'] } }, r: ['path'], ex: { path: 'C:/StabilityMatrix/Data/Models' } });
@@ -257,6 +262,10 @@ A('ui.show_tab', null, { t: 'Show a tab (🤖 AutoInjector, 📖 Akọwe, 🎨 I
 /** Channels the AI must not drive — each with the reason. The coverage test checks every channel is
  *  either an ACTIONS entry, a direct Alfred tool (TOOL_CHANNELS), or here. */
 const EXCLUDED = {
+  'sd:addons-update': 'updates an add-on in the user\'s SD app (its code changes) — done by the user in 🎨 Images → 🧩 Add-ons',
+  'sd:addons-remove': 'takes an add-on out of the user\'s SD app — done by the user in 🎨 Images → 🧩 Add-ons',
+  'sd:addons-folder': 'a folder picker the user answers (which SD app folder add-ons go into)',
+  'sd:addons-open-folder': 'opens Explorer on the add-ons folder — a window for the user, not a control',
   'logins:list': 'saved logins (usernames) — secrets stay with the user',
   'logins:save': 'stores a password — secrets stay with the user',
   'llm:hf-token': 'stores the Hugging Face token — secrets stay with the user',

@@ -265,7 +265,7 @@ const state = {
     maximumTurns: 20,
     costLimit: 5
   },
-  sdManaged: { startWithApp: false, targetId: "" }, // 🎨 "Start Stable Diffusion with AutoInjector" (default off) + which package to start
+  sdManaged: { startWithApp: false, targetId: "", addonsDir: "" }, // 🎨 "Start Stable Diffusion with AutoInjector" (default off) + which package to start
   chatImage: { freshChatPerSeries: false }, // 🎨 ChatGPT image engine: a new ChatGPT chat for each reference-view series (default: one chat, keeps the character)
   imageConfig: null, // Stable Diffusion settings mirror (imageProvider owns the live copy); persisted so the endpoint survives a restart
   videoConfig: null, // text-to-video settings mirror (videoProvider owns the live copy); persisted so the endpoint survives a restart
@@ -870,7 +870,7 @@ function loadPersistedState() {
   }
   if (snap.chatImage && typeof snap.chatImage === "object") state.chatImage = { freshChatPerSeries: !!snap.chatImage.freshChatPerSeries };
   if (snap.sdManaged && typeof snap.sdManaged === "object") {
-    state.sdManaged = { startWithApp: !!snap.sdManaged.startWithApp, targetId: String(snap.sdManaged.targetId || "") };
+    state.sdManaged = { startWithApp: !!snap.sdManaged.startWithApp, targetId: String(snap.sdManaged.targetId || ""), addonsDir: String(snap.sdManaged.addonsDir || "") };
   }
   if (snap.imageConfig && typeof snap.imageConfig === "object") {
     imageProvider.setSettings(snap.imageConfig);
@@ -6975,6 +6975,123 @@ ipcMain.handle("sd:install", sdSafe(async (a) => { const r = await sdInstallerIn
 ipcMain.handle("sd:install-model", sdSafe(async (a) => { const r = await sdInstallerInst().downloadModel(a.id); if (r && r.ok) { try { sdLibrary().scan(); } catch (_) {} } return r; }));
 ipcMain.handle("sd:install-cancel", sdSafe(() => sdInstallerInst().cancel()));
 ipcMain.handle("sd:open-install-folder", sdSafe(async () => { const h = sdInstallerInst().home; try { fs.mkdirSync(h, { recursive: true }); } catch (_) {} const err = await shell.openPath(h); return err ? { ok: false, error: err } : { ok: true }; }));
+// ---- 🧩 Add-ons (extensions) for Forge / A1111 / SD.Next, custom nodes for ComfyUI (sd-addons.js) ----------
+// Where they go: the folder the person chose (remembered in state.sdManaged.addonsDir), else the package
+// AutoInjector started, else the Stability Matrix packages the runner finds. Files are only placed (git clone
+// --depth 1, or the repo's zip when there is no git); Forge sets an add-on up itself on its next start.
+const sdAddonsMod = require("./sd-addons");
+const sdControlMod = require("./sd-control");
+function sdAddonsConnection() { try { const s = imageProvider.status(); return s.enabled && s.endpoint ? { base: s.base, backend: s.backend, label: s.label } : {}; } catch (_) { return {}; } }
+function sdAddonsInstall() {
+  let runner = null; try { runner = _sdRunner ? _sdRunner.status() : null; } catch (_) {}
+  return sdAddonsMod.resolveInstall({ chosen: state.sdManaged.addonsDir || "", runner, targets: sdTargets(), connected: sdAddonsConnection(), targetId: state.sdManaged.targetId || "" });
+}
+function sdAddonsGit() {
+  let libs = []; try { libs = sdLibraryMod.findStabilityMatrix(); } catch (_) {}
+  return sdAddonsMod.findGit({ libraries: libs });
+}
+let _sdAddons = null;
+function sdAddons() {
+  if (_sdAddons) return _sdAddons;
+  _sdAddons = sdAddonsMod.createAddonManager({
+    resolve: () => sdAddonsInstall(), connection: () => sdAddonsConnection(), git: () => sdAddonsGit(), getJson: require("./sd-backends").getJson,
+    download: (url, dest, o) => sdInstallerMod.download(url, dest, Object.assign({ maxTries: 3, againText: "Press Install again" }, o || {})),
+    log: (k, d) => logEvent(k, d), onProgress: (p) => broadcast("sd-addons", p),
+  });
+  return _sdAddons;
+}
+async function sdAddonsOverview() {
+  const c = sdAddonsConnection();
+  if (c.base) { try { sdControlMod.clearCache(c.base); } catch (_) {} }
+  const ov = await sdAddons().overview();
+  const rs = _sdRunner ? _sdRunner.status() : null;
+  // "🔁 Restart Forge now" works when AutoInjector started it; else the person restarts it in Stability Matrix.
+  ov.canRestart = !!(rs && rs.owned && rs.phase === "running");
+  ov.git = !!sdAddonsGit();
+  ov.busy = sdAddons().busy();
+  return ov;
+}
+// Restart the SD app so it loads new add-ons. Only what AutoInjector started can be restarted from here.
+async function sdAddonsRestart() {
+  const r = sdRunner();
+  const st = r.status();
+  const label = (sdAddonsConnection().label) || (st.target && st.target.label) || "Forge";
+  if (r.isBusy()) return { ok: false, error: "BUSY", message: `${label} is starting right now — wait until it is running.`, runner: st };
+  if (!(st.owned && st.phase === "running" && st.target)) {
+    return { ok: false, error: "NOT_STARTED_HERE", message: `${label} was started outside AutoInjector (in Stability Matrix or by hand), so restart it there: in Stability Matrix press Stop on ${label}, then Launch. When it is back, press ↻ Check again here.`, runner: st };
+  }
+  logEvent("sd-addons-restart", { target: st.target.kind });
+  await r.stop();
+  const s2 = await sdStart(st.target.id);
+  if (!s2.ok) return Object.assign({ ok: false, error: s2.error || "NOT_RUNNING", message: s2.message || `${label} did not start again.` }, { runner: s2.runner });
+  try { await sdStudio().connect(s2.runner.base); } catch (_) {}
+  try { sdControlMod.clearCache(s2.runner.base); } catch (_) {}
+  const ov = await sdAddonsOverview();
+  return { ok: true, message: `✔ ${label} restarted.${ov.restartNeeded ? " Some add-ons still aren't loaded — open its log (⚙ Start & install → 📄 Open log) to see why." : " The new add-ons are loaded."}`, overview: ov, runner: s2.runner };
+}
+// "Open Forge's own Extensions page": the WebUI in an in-app window, its Extensions tab clicked once it has drawn.
+let _sdAddonsWin = null;
+const SD_EXT_TAB_JS = (word) => `new Promise((resolve) => {
+  const t0 = Date.now();
+  (function look() {
+    const want = ${JSON.stringify(word)};
+    const btns = [...document.querySelectorAll('#tabs .tab-nav button, .tab-nav button, [role=tab], button')];
+    const b = btns.find((x) => (x.textContent || '').trim().toLowerCase() === want.toLowerCase());
+    if (b) { b.click(); return resolve(true); }
+    if (Date.now() - t0 > 45000) return resolve(false);
+    setTimeout(look, 500);
+  })();
+})`;
+async function sdAddonsOpenPage() {
+  const c = sdAddonsConnection();
+  if (!c.base) return { ok: false, error: "NO_ENDPOINT", message: "Connect to your SD app first (🔍 Find my SD app)." };
+  const comfy = c.backend === "comfy";
+  const word = comfy ? "Manager" : "Extensions";
+  const { BrowserWindow } = require("electron");
+  let origin = ""; try { origin = new URL(c.base).origin; } catch (_) {}
+  if (!_sdAddonsWin || _sdAddonsWin.isDestroyed()) {
+    _sdAddonsWin = new BrowserWindow({ width: 1280, height: 900, autoHideMenuBar: true, title: `${c.label || "Stable Diffusion"} — ${comfy ? "Manager" : "Extensions"}`,
+      webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, partition: "sd-webui" } });
+    const wc = _sdAddonsWin.webContents;
+    const outside = (u) => { try { const x = new URL(u); if (x.origin === origin) return false; if (["http:", "https:"].includes(x.protocol)) shell.openExternal(u); } catch (_) {} return true; };
+    wc.setWindowOpenHandler(({ url }) => { if (!outside(url)) return { action: "allow" }; return { action: "deny" }; });
+    wc.on("will-navigate", (e, u) => { if (outside(u)) e.preventDefault(); });
+    _sdAddonsWin.on("closed", () => { _sdAddonsWin = null; });
+  } else _sdAddonsWin.focus();
+  logEvent("sd-addons-open-page", { backend: c.backend || "" });
+  try { await _sdAddonsWin.loadURL(c.base); } catch (e) { return { ok: false, error: "LOAD_FAILED", message: `${c.label || "The SD app"}'s page didn't open (${(e && e.code) || e}). Is it still running?` }; }
+  let clicked = false;
+  try { clicked = !!(await _sdAddonsWin.webContents.executeJavaScript(SD_EXT_TAB_JS(word), true)); } catch (_) {}
+  return { ok: true, clicked, message: clicked ? `Opened ${c.label || "the SD app"}'s ${word} page.` : `Opened ${c.label || "the SD app"} — click its “${word}” tab at the top.${comfy ? " (ComfyUI shows a Manager button only when ComfyUI-Manager is installed.)" : ""}` };
+}
+ipcMain.handle("sd:addons", sdSafe(() => sdAddonsOverview()));
+ipcMain.handle("sd:addons-install", sdSafe(async (a) => { const r = await sdAddons().install({ id: a.id || undefined, url: a.id ? undefined : a.url }); return Object.assign(r, { overview: await sdAddonsOverview() }); }));
+ipcMain.handle("sd:addons-update", sdSafe(async (a) => { const r = await sdAddons().update(String(a.name || "")); return Object.assign(r, { overview: await sdAddonsOverview() }); }));
+ipcMain.handle("sd:addons-remove", sdSafe(async (a) => { const r = await sdAddons().remove(String(a.name || "")); return Object.assign(r, { overview: await sdAddonsOverview() }); }));
+ipcMain.handle("sd:addons-restart", sdSafe(() => sdAddonsRestart()));
+ipcMain.handle("sd:addons-open-page", sdSafe(() => sdAddonsOpenPage()));
+// Point AutoInjector at the app's folder (a folder picker; a.path skips it), remembered. a.forget: back to "find it".
+ipcMain.handle("sd:addons-folder", sdSafe(async (a) => {
+  if (a.forget) { state.sdManaged.addonsDir = ""; saveStateDebounced(); return Object.assign({ ok: true }, { overview: await sdAddonsOverview() }); }
+  let p = a.path;
+  if (!p) {
+    const r = await dialog.showOpenDialog(win || undefined, { title: "Choose your Stable Diffusion app's folder (the one with launch.py — in Stability Matrix: Data\\Packages\\stable-diffusion-webui-forge)", properties: ["openDirectory"] });
+    if (r.canceled || !r.filePaths || !r.filePaths[0]) return { ok: false, error: "CANCELLED" };
+    p = r.filePaths[0];
+  }
+  const x = sdAddonsMod.inspectFolder(p);
+  if (!x.ok) return Object.assign(x, { message: `${x.message}${x.hint ? ` ${x.hint}` : ""}` });
+  state.sdManaged.addonsDir = x.dir; saveStateDebounced();
+  logEvent("sd-addons-folder", { kind: x.kind });
+  return { ok: true, dir: x.dir, kind: x.kind, label: x.label, message: `✔ AutoInjector will put add-ons into ${x.label} at ${x.dir}.`, overview: await sdAddonsOverview() };
+}));
+ipcMain.handle("sd:addons-open-folder", sdSafe(async () => {
+  const i = sdAddonsInstall();
+  if (!i.ok) return i;
+  try { fs.mkdirSync(i.extDir, { recursive: true }); } catch (_) {}
+  const e = await shell.openPath(i.extDir); return e ? { ok: false, error: e } : { ok: true, path: i.extDir };
+}));
+
 // The module API for Alfred and other callers in the main process (docs: STABLE_DIFFUSION_PLAN.md).
 sdApiMod.register(sdApiMod.createImagesApi({
   // The whole studio, created on first use (every method: generate, img2img, inpaint, upscale, options, workflows, …).

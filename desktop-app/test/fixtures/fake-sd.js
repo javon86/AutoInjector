@@ -1,6 +1,7 @@
 'use strict';
 // fake-sd.js — tiny fake Stable Diffusion servers for the tests:
-//   fakeA1111({ flavor, noApi, oom, slow, noOpenapi, noExtensions, badVae, failWith, noModels })
+//   fakeA1111({ flavor, noApi, oom, slow, noOpenapi, noExtensions, badVae, failWith, noModels, extensions, noExtensionsList, tabs })
+//       extensions / state.extensions: what /sdapi/v1/extensions lists (noExtensionsList → 404); tabs: a Gradio tab row on "/"
 //       noModels (or state.noModels): Forge with NO checkpoint — /sd-models is [], options.sd_model_checkpoint
 //       is null and every txt2img/img2img fails with Forge's 500 "Failed to find available model" (PC test).
 //       badVae: a VAE name (also listed by /sd-vae) that fails EVERY txt2img/img2img
@@ -18,7 +19,7 @@
 //       names, test/fixtures/a1111-openapi.js), options get/set, upscalers, latent
 //       modes, prompt-styles, scripts + script-info, extra-single-image, skip,
 //       refresh-*, memory, and the ControlNet + ADetailer extension routes
-//   fakeComfy({ slow, failWith, failNode, nodeErrors, aux })
+//   fakeComfy({ slow, failWith, failNode, nodeErrors, aux, manager }) — manager: ComfyUI-Manager's /customnode/installed (state.customNodes)
 //       nodeErrors: a node_errors object /prompt answers with (400), e.g. a VAELoader
 //       that can't load its file; failNode: node_type of the failWith execution_error.
 //       /system_stats, /object_info (all + per node; unknown → {}), /prompt (refuses
@@ -94,6 +95,8 @@ function parseMultipart(raw, buf, contentType) {
   }
   return out;
 }
+// opts.tabs: a Gradio-like tab row on "/" (the 🧩 "Open Forge's own Extensions page" test clicks its Extensions tab)
+const FAKE_TABS = '<div id="tabs" class="gradio-tabs"><div class="tab-nav"><button>txt2img</button><button>img2img</button><button id="fake-ext-tab" onclick="this.dataset.clicked=\'1\';document.title=\'Extensions open\'"> Extensions </button></div></div>';
 function listen(server, port) { return new Promise((r) => server.listen(port || 0, '127.0.0.1', () => r(server.address().port))); }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -102,13 +105,16 @@ async function fakeA1111(opts = {}) {
   const state = { interrupted: false, running: false, lastTxt2img: null, lastExtras: null, skipped: false, refreshed: [], optionsSet: [],
     options: Object.assign({ sd_model_checkpoint: 'dreamshaper_8.safetensors [879db523c3]', sd_vae: 'Automatic', CLIP_stop_at_last_layers: 1, samples_format: 'png', jpeg_quality: 80, enable_pnginfo: true, eta_noise_seed_delta: 0 }, opts.flavor === 'forge' ? { forge_preset: 'sd', forge_additional_modules: [] } : {}) };
   const ext = opts.noExtensions !== true;
+  state.extensions = opts.extensions || [{ name: 'Lora', remote: null, enabled: true }, ...(opts.flavor === 'forge' ? [{ name: 'sd_forge_controlnet', remote: null, enabled: true }] : []), ...(ext ? [{ name: 'adetailer', remote: 'https://github.com/Bing-su/adetailer.git', branch: 'main', commit_hash: '3a599f5d', version: '3a599f5d', enabled: true }] : [])];
   const server = http.createServer(async (req, res) => {
     const u = new URL(req.url, 'http://x');
     const body = req.method === 'POST' ? await readBody(req) : null;
     seen.push({ method: req.method, path: u.pathname, body, query: u.search });
-    if (u.pathname === '/') return send(res, 200, `<!doctype html><html><head><title>${opts.title || 'Stable Diffusion'}</title><script>window.gradio_config = {"version":"3.41.2"};</script></head><body>gradio</body></html>`);
+    if (u.pathname === '/') return send(res, 200, `<!doctype html><html><head><title>${opts.title || 'Stable Diffusion'}</title><script>window.gradio_config = {"version":"3.41.2"};</script></head><body>gradio${opts.tabs ? FAKE_TABS : ''}</body></html>`);
     if ((u.pathname.startsWith('/sdapi/') || u.pathname === '/openapi.json') && opts.noApi) return send(res, 404, { detail: 'Not Found' });
     if (u.pathname === '/openapi.json') return opts.noOpenapi ? send(res, 404, { detail: 'Not Found' }) : send(res, 200, makeOpenapi({ extensions: ext }));
+    // 🧩 Add-ons: the WebUI's own extensions list (opts.noExtensionsList → 404, like an older WebUI)
+    if (u.pathname === '/sdapi/v1/extensions' && !opts.noApi) return opts.noExtensionsList ? send(res, 404, { detail: 'Not Found' }) : send(res, 200, state.extensions);
     if (u.pathname === '/sdapi/v1/options' && req.method === 'POST') { state.optionsSet.push(body); Object.assign(state.options, body); return send(res, 200, null); }
     if (ext) {
       if (u.pathname === '/controlnet/model_list') return send(res, 200, { model_list: ['control_v11p_sd15_canny [d14c016b]', 'control_v11f1p_sd15_depth [cfd03158]'] });
@@ -230,6 +236,7 @@ async function fakeComfy(opts = {}) {
     const body = req.method === 'POST' ? await readBody(req) : null;
     seen.push({ method: req.method, path: u.pathname, body, query: u.search });
     if (u.pathname === '/') return send(res, 200, '<!doctype html><html><head><title>ComfyUI</title></head><body></body></html>');
+    if (u.pathname === '/customnode/installed' && opts.manager) return send(res, 200, state.customNodes || { 'ComfyUI-Manager': { ver: '3.0', enabled: true } });
     if (u.pathname === '/system_stats') return send(res, 200, { system: { os: 'nt', comfyui_version: '0.3.10', python_version: '3.11', ram_total: 32e9, ram_free: 20e9 }, devices: [{ name: 'cuda:0 NVIDIA GeForce RTX 4070', type: 'cuda', vram_total: 12e9, vram_free: 9e9 }] });
     if (u.pathname === '/object_info') return send(res, 200, NODES);
     if (u.pathname.startsWith('/object_info/')) { const nm = decodeURIComponent(u.pathname.slice('/object_info/'.length)); return send(res, 200, NODES[nm] ? { [nm]: NODES[nm] } : {}); }
