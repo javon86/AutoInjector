@@ -575,6 +575,41 @@ def test_a_hand_edit_redoes_only_the_checkpoints_and_parts_that_read_that_chapte
     assert checkpoints.items(store, pid, BR)[1]["may_be_affected"]["number"] == 3
 
 
+def test_each_checkpoint_is_its_own_settings_row_and_an_old_blob_moves_over(tmp_path):
+    """Final hardening (PR #123): every part used to rewrite ONE blob holding every checkpoint and chapter check
+    (megabytes by chapter 50). Now each item is its own settings row; the index row stays tiny; a blob saved by an
+    older Akọwe is read as it is and moved to rows the first time anything is saved."""
+    from test_autobook import make_app  # noqa: PLC0415
+    app = make_app(tmp_path, fake=BookFakeAI())
+    store = app.store
+    pid = app.engine.bootstrap_project("author", "Book")
+    key = checkpoints._key(pid, BR)  # noqa: SLF001
+    old = {f"ch-{i}": {"id": f"ch-{i}", "kind": "chapter", "after": i, "status": "done", "summary": "x" * 5000}
+           for i in range(1, 21)}
+    store.set_setting(key, {"items": old, "version": 7})
+    assert len(checkpoints.items(store, pid, BR)) == 20  # read as it is
+    checkpoints._put(store, pid, BR, {"id": "after-5", "after": 5, "status": "new"})  # noqa: SLF001
+    idx = store.get_setting(key)
+    assert "items" not in idx and idx["version"] == 8 and len(json.dumps(idx)) < 100
+    rows = store.query("SELECT key FROM settings WHERE substr(key, 1, ?) = ?", (len(key) + 6, key + ":item:"))
+    assert len(rows) == 21
+    its = {c["id"]: c for c in checkpoints.items(store, pid, BR)}
+    assert len(its) == 21 and its["ch-3"]["summary"] == "x" * 5000 and its["after-5"]["status"] == "new"
+    # one more part saves ONE row (not the whole set again)
+    before = {r["key"]: r["updated_at"] for r in store.query("SELECT key, updated_at FROM settings WHERE substr(key, 1, ?) = ?",
+                                                              (len(key) + 6, key + ":item:"))}
+    time.sleep(0.01)
+    checkpoints._put(store, pid, BR, dict(its["after-5"], status="done"))  # noqa: SLF001
+    after = {r["key"]: r["updated_at"] for r in store.query("SELECT key, updated_at FROM settings WHERE substr(key, 1, ?) = ?",
+                                                             (len(key) + 6, key + ":item:"))}
+    changed = [k for k in after if after[k] != before[k]]
+    assert changed in ([key + ":item:after-5"], [])  # timestamps may share a second; never another row
+    assert checkpoints.get_all(store, pid, BR)["items"]["after-5"]["status"] == "done"
+    # deleting the book deletes its checkpoint rows too
+    store.delete_project(pid)
+    assert not store.query("SELECT key FROM settings WHERE instr(key, ?) > 0", (key,))
+
+
 # ====================================================================== 7. backups, log
 def test_backups_hard_link_unchanged_assets_and_pinned_backups_are_capped(tmp_path, monkeypatch):
     from akowe.canonical import sha256_bytes  # noqa: PLC0415

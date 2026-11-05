@@ -532,7 +532,7 @@ then carries the locked facts, belongings, status and a summary of book 1.
 | Installed programs (ComfyUI, Ollama) | `stuff and thing/apps/` |
 | Reports and test results | `stuff and thing/logs/` |
 | Your books | `Documents\Akowe Books\` in your real Documents folder, also when Windows moved it to OneDrive (change it in Akọwe → Settings → 📁 Where books are saved; a folder OneDrive, Dropbox or Google Drive syncs gets a ⚠️ and a button for a folder they do not sync) |
-| Akọwe's working data and backups | `%LOCALAPPDATA%\Akowe` (backups share unchanged pictures and clips instead of copying them again; its own log is `logs\akowe.log`, 10 MB × 5 files) |
+| Akọwe's working data and backups | `%LOCALAPPDATA%\Akowe` (backups share unchanged pictures and clips instead of copying them again; its own log is `logs\akowe.log`, 10 MB × 5 files; each story checkpoint and chapter check is saved on its own, so a long book never rewrites one big record) |
 | AutoInjector settings, transcript, connection key | `%APPDATA%\autoinjector-desktop\` (older messages: `autoinjector-transcript-archive.jsonl`, then `.1`) |
 
 **Inside one book's folder:** `Book/` (PDF, EPUB, Word), `Chapters/`, `Book Bible/`, `Reports/`, `Log/` (the
@@ -553,7 +553,9 @@ quietly every 10 minutes when a book has changed.
   **🎯 Point at it** or **🔢 Do it for me with a number**.
 - **Logged out, "are you human?", usage limit:** the AI's card shows **⚠️ Needs you**. Fix it in the pane.
   AutoInjector notices by itself. Meanwhile, Akọwe sends the work to the other AIs.
-- **A book run pauses with ⚠️:** read the message on that step. It says what to press. If you were away, a Windows
+- **A book run pauses with ⚠️:** read the message on that step. It says what happened and what to do next
+  (for example: "open AutoInjector and look at that AI's window — if it says the chat is too long, press the
+  site's New chat; if it asks you to log in, do that. Then press 🔁 Try again"). If you were away, a Windows
   notification told you (click it to go straight there).
 - **"This chat is too long" in an AI's pane:** nothing to do. AutoInjector opens a fresh chat there before
   Akọwe's next request. You can also press the pane's own **New chat**.

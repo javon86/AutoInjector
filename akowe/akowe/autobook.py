@@ -174,11 +174,13 @@ PROFILE_TASK = (
     "is, where it happens, what goes wrong and what is at stake), point_of_view (first or third person) and tense "
     "(past or present) that suit the genre. No real people, no existing franchises. Return only the JSON object.")
 
-TIMEOUT_FIX = ("The AI did not answer in time — Akọwe already waited for a late answer and asked another AI (or the "
-               "same one again) — so it paused here instead of guessing. Check the AI's window (AutoInjector: is the "
-               "site logged in and idle?), then press 🔁 Try again.")
-BUSY_FIX = ("The AI stayed busy or unreachable for a long time. Check Settings → Test connection (is AutoInjector "
-            "running and the site logged in?), then press 🔁 Try again.")
+TIMEOUT_FIX = ("The AI did not answer in time. Akọwe already waited for a late answer and asked another AI (or the "
+               "same one again), so it stopped here instead of guessing. What to do: open AutoInjector and look at "
+               "that AI's window — if it says the chat is too long, press the site's New chat; if it asks you to log "
+               "in or to confirm you are human, do that. Then press 🔁 Try again.")
+BUSY_FIX = ("The AIs stayed busy or could not be reached for a long time. What to do: make sure AutoInjector (the "
+            "program with the AI windows) is open; look at each AI's window (logged in? a usage-limit message?); "
+            "Settings → 🧪 Test connection shows which AI works. Then press 🔁 Try again.")
 CHECKS_FIX = ("Press 🔁 Try again: the AI writes it again and is told exactly what Akọwe refused. Or ✏️ Edit it "
               "yourself so the checks pass, then press Continue.")
 STALE_FIX = ("It was made from a plan or other inputs that changed since, so it is out of date: editing it cannot fix "

@@ -87,7 +87,14 @@ export async function viewCover(main, x) {
     if (saving) { dirty = true; return; }
     saving = true; dirty = false; saveState.textContent = 'Saving…';
     try {
-      d = await api('PUT', bpath('/cover'), { body: Object.assign(payload(), { revision }) });
+      try { d = await api('PUT', bpath('/cover'), { body: Object.assign(payload(), { revision }) }); }
+      catch (e) {
+        // the design moved on under this page (a save from the page you just left, or another tab): take the
+        // newest revision and save what is on the screen — what you see is what you chose last
+        if (!(e && (e.code === 'VERSION_CONFLICT' || e.status === 409))) throw e;
+        const cur = await api('GET', bpath('/cover'));
+        d = await api('PUT', bpath('/cover'), { body: Object.assign(payload(), { revision: (cur.design || {}).revision || 0 }) });
+      }
       revision = d.design.revision; saveState.textContent = 'Saved'; showInfo();
     } catch (e) {
       saveState.textContent = 'Not saved';
@@ -98,6 +105,8 @@ export async function viewCover(main, x) {
     }
   }
   function changed() { saveState.textContent = 'Changed…'; refreshPreview(); clearTimeout(saveTimer); saveTimer = setTimeout(saveNow, 700); }
+  // leaving the page with a change not saved yet: save it now (not 0.7 s later, under the next page)
+  S.leaveHooks.push(() => { if (saveTimer && saveState.textContent === 'Changed…') { clearTimeout(saveTimer); saveTimer = null; saveNow(); } clearTimeout(previewTimer); });
 
   // ------------------------------------------------------------------ controls
   const msg = h('div', { 'aria-live': 'polite' });

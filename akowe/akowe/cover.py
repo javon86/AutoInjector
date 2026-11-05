@@ -583,7 +583,13 @@ def print_cover(app, pid, branch, *, trim=None, paper=None, pages=None, fmt: str
     try:
         n, notes = cx.check_print(trim or d["print"]["trim"], paper or d["print"]["paper"], pc["pages"])
     except cx.CoverError as exc:
-        raise _err("INVALID_INPUT" if pc["pages"] is not None else "MISSING_INPUT", exc.path, exc.message) from None
+        err = _err("INVALID_INPUT" if pc["pages"] is not None else "MISSING_INPUT", exc.path, exc.message)
+        if exc.path in ("/print/page_count", "/pages", "/page_count") or "page" in exc.message:
+            # (final hardening) the general "look at the field marked ⚠️" pointed at nothing on the cover page
+            err.errors[0]["fix"] = ("Type the page count of your printed book under Print settings on this page (a "
+                                    "paperback needs at least 24 pages), or export the book first so Akọwe can count "
+                                    "its pages. The ebook cover works without it.")
+        raise err from None
     g = cx.wrap_geometry(trim or d["print"]["trim"], paper or d["print"]["paper"], n)
     lay = _layout_design(app, pid, branch, d, extra)
     ai = art_image(app, pid, branch, d)

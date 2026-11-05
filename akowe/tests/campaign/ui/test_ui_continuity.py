@@ -34,6 +34,12 @@ def test_continuity_page_after_a_book(make_context, ai_server):
     assert not bad_text(page, "#main"), bad_text(page, "#main")
     assert overflow(page) <= 1
     assert not unnamed_controls(page), unnamed_controls(page)
+    # final sweep: "Save readings" with nothing written says what to do (it used to send an empty list -> HTTP 400)
+    rd = page.locator("[data-testid=cont-readings]")
+    for t in rd.locator("textarea").all():
+        t.fill("")
+    rd.get_by_role("button", name="Save readings").click()
+    page.wait_for_function("() => /Nothing to save yet/.test(document.body.textContent)", timeout=5000)
     goto(page, f"#/p/{pid}/main/book")
     assert_clean(page, "continuity page")
 

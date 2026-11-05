@@ -213,7 +213,7 @@ textarea.prose { font-family: var(--font-prose); font-size: 1.02rem; min-height:
 input[type="text"], input[type="number"], input[type="password"], input:not([type]), select { width: 100%; }
 /* a choice inside a row of controls keeps its own width (at 100% it took a line to itself, the label above it and the
    button below it: "Check [Last 5 chapters ▾] 🔎 Check consistency now" is one line again) */
-.row > select { width: auto; min-width: 0; }
+.row > select { width: auto; min-width: 0; max-width: 100%; } /* a long option (e.g. "Automatic — an AI that did not write the book") never widens the page on a phone */
 .row > input[type="number"] { width: 6.5rem; }
 input[aria-invalid="true"], textarea[aria-invalid="true"], select[aria-invalid="true"] { border-color: var(--bad);
   border-width: 2px; }
@@ -529,10 +529,12 @@ body.ai-docked .shell { padding-right: calc(var(--dock-w) + 20px); }
 .step-lab { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 22rem; display: inline-block; vertical-align: bottom; }
 .step-pos { text-align: center; }
 @media (max-width: 640px) {
-  .step-nav { grid-template-columns: 1fr 1fr; }
+  .step-nav { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .step-nav .btn { overflow: hidden; }
   .step-pos { grid-column: 1 / -1; order: -1; }
   .step-lab { max-width: 8.5rem; }
 }
+@media (max-width: 420px) { .step-lab { max-width: 6.5rem; } } /* "Next: C03 Scene Writer ▶" fits a 360 px phone */
 .next-card { border-left: 5px solid var(--accent); padding: 10px 14px; }
 .next-card.done { border-left-color: var(--ok); }
 .next-card p { margin: 0; }
@@ -1163,7 +1165,7 @@ ul.samples q { font-style: italic; }
 .s7-books { list-style: none; padding: 0; }
 .s7-make .check-row { margin: 4px 0; }
 /* 👥 idea #14 panel of beta readers */
-.s7-panel-setup { display: grid; gap: 6px; margin: 6px 0 10px; }
+.s7-panel-setup { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; margin: 6px 0 10px; } /* minmax: a long reader option never widens a phone page */
 .s7-reader { border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; }
 .s7-reader textarea { width: 100%; box-sizing: border-box; }
 .s7-heat td, .s7-heat th { padding: 3px 6px; }

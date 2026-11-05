@@ -38,7 +38,8 @@ Legend: `[ ]` to do · `[~]` in progress · `[x]` done · `[!]` problem (see "Pr
   style-card delete fix, motion clips for items/places/magic, new characters from scratch, auto-save + update-or-copy +
   big books opened from a folder, MCP tool servers, book trailers (B2).
 - **🛡 Hardening for long books (done 2026-11-05, PR #123):** a run keeps going through time-outs, refusals, usage
-  limits and a single working AI; see "🛡 Hardening for long books".
+  limits and a single working AI; final hardening pass done too (AutoInjector sends the limit reset time and takes
+  short re-asks into the same chat; both test rounds green); see "🛡 Hardening for long books".
 - **✍ Write alongside me (done 2026-11):** highlight a passage in a chapter and the AI continues, rewrites, describes,
   expands or tightens it; a suggestion with ⚠️ quick checks, used as a new draft version. See "✍ Write alongside me".
 - **Back burner (later, by the user's call):** a first real GPU run of video/trailers; the audiobook export (P29).
@@ -889,7 +890,15 @@ throttling — is a separate change.)
 | 9 | One path over 200 characters failed the whole save | That file's name is shortened (start of the name + a 6-character fingerprint, unique), or only that file is left out with a ⚠️ | `book_save.fit_paths` |
 | 10 | Story so far capped at ~2 200 characters (~50 per chapter by chapter 45) | Budget 2 200 + 120 per chapter (max 8 000), in tiers: last 3 chapters in full, the 7 before them one line each, older ones by checkpoint/act summaries or short lines, merged into stretches of 5 when space is short — every chapter stays in | `story_ledger.story_so_far` |
 
-Tests: `akowe/tests/test_long_book_hardening.py` (22 tests, including a 25-chapter novel with the fake AI that survives
+**Final hardening pass (2026-11-05, same PR) — done:** the two halves joined up — AutoInjector now sends
+`limit_reset_at` (read from the site's limit notice by `desktop-app/site-errors.js` `limitResetAt`, also from a notice
+self-repair finds on the page) and supports `followup` / `followup_of` (same chat only; `409 FOLLOWUP_UNAVAILABLE` →
+Akọwe sends the whole prompt). Also: "📖 Akọwe is using this AI" on each AI card; one settings row per checkpoint
+(`checkpoints._write`, an old blob moves over on the next save); plainer TIMEOUT / busy messages with a next step;
+sweep fixes (phone overflow on 📊 Book report and step arrows, empty "Save readings", cover save conflict after leaving).
+Still only checkable on the real PC: the exact wording of each site's limit notice, and a live short re-ask on each site.
+
+Tests: `akowe/tests/test_long_book_hardening.py` (25 tests, including a 25-chapter novel with the fake AI that survives
 two time-outs, two refusals and two all-AI usage limits and finishes by itself).
 
 ## 🔎 All three AIs check for mistakes and drift + report fixes A–G (2026-11, PR #117) — done

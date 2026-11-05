@@ -1072,8 +1072,9 @@ def route(app, method: str, rest: list, body, principal: str, pid: str, branch: 
         known = {m["id"] for m in amb.mysteries(store, pid, branch)}
         items = amb.clean_items(body.get("items"), known)
         if not items:
-            raise AkoweError("INVALID_INPUT", "/items", "items: [{id (a protected mystery), readings: [two "
-                                 "{label, text}]}]", status="REJECTED")
+            raise AkoweError("INVALID_INPUT", "/items", "nothing to save: write both readings (a few sentences each) "
+                                 "of at least one protected mystery, or press ✨ Suggest readings with AI",
+                                 status="REJECTED")
         e = amb.save_readings(store, pid, branch, items, by="author", base_version=_int_or_none(body, "version"))
         review._changed()  # noqa: SLF001
         return 200, {"ok": True, "entry": e, "message": "Saved. Run the two-readings test to check the book."}

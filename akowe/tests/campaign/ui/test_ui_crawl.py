@@ -64,7 +64,8 @@ def check_page(page, label, width, problems):
 def routes(pid):
     p = f"#/p/{pid}/main"
     return ["#/", "#/start", "#/settings", "#/shelf", "#/pair", p, p + "/book", p + "/review", p + "/journal",
-            p + "/progress", p + "/activity", p + "/manifest", "#/nope/nothing"] + [f"{p}/set/{s}" for s in SETS]
+            p + "/progress", p + "/activity", p + "/manifest", "#/nope/nothing",
+            p + "/report", p + "/op/C02"]  # final sweep: the beta panel and the step arrows widened a phone page + [f"{p}/set/{s}" for s in SETS]
 
 
 @pytest.mark.parametrize("width", [1366, 390])

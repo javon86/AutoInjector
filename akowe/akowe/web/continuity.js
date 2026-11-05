@@ -128,8 +128,12 @@ export async function viewContinuity(main, x) {
             ...(f.st.contradictions || []).map(q => h('li', null, q.found ? '✕ contradicts' : '· (not found word for word)', ` (chapter ${q.chapter || '?'}): “${q.quote}”`, q.why ? ` — ${q.why}` : ''))]) : null))));
     }
     box.appendChild(h('p', { class: 'row' },
-      h('button', { type: 'button', class: 'small', onclick: () => post('PUT', '/review/continuity/readings', { version: e.version || undefined,
-        items: forms.map(f => ({ id: f.id, readings: f.fields.map(z => ({ label: z.lab.value, text: z.txt.value })) })).filter(i => i.readings.every(z => z.text.trim())) }, 'Not saved') }, 'Save readings'),
+      h('button', { type: 'button', class: 'small', onclick: () => {
+        const filled = forms.map(f => ({ id: f.id, readings: f.fields.map(z => ({ label: z.lab.value, text: z.txt.value })) })).filter(i => i.readings.every(z => z.text.trim()));
+        // nothing to save yet: say what to do instead of sending an empty list (the server would refuse it)
+        if (!filled.length) { clear(msg).appendChild(h('p', { class: 'small words-warn', role: 'alert' }, '⚠️ Nothing to save yet: write both readings of a mystery (each a few sentences), or press ✨ Suggest readings with AI.')); return; }
+        post('PUT', '/review/continuity/readings', { version: e.version || undefined, items: filled }, 'Not saved');
+      } }, 'Save readings'),
       h('button', { type: 'button', class: 'small', onclick: () => job('/review/continuity/readings/ai', {}, 'Writing two readings') }, '✨ Suggest readings with AI'),
       items.length ? h('button', { type: 'button', class: 'small primary', onclick: () => job('/review/continuity/readings/test', {}, 'Testing both readings') }, '🔎 Run the two-readings test') : null));
     return box;
