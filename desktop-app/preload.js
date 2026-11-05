@@ -370,6 +370,9 @@ contextBridge.exposeInMainWorld("api", {
   selfRepairReload: (site) => ipcRenderer.invoke("selfrepair:reload", { site }),
   selfRepairForgetLearned: (site) => ipcRenderer.invoke("selfrepair:forget-learned", { site }),
   selfRepairSettings: (patch) => ipcRenderer.invoke("selfrepair:settings", patch || {}),
+  attentionSettings: (patch) => ipcRenderer.invoke("attention:settings", patch || {}), // PR #123: Windows notifications / sound when a book needs you
+  attentionTest: () => ipcRenderer.invoke("attention:test"),
+  freshChatSettings: (patch) => ipcRenderer.invoke("akowe:fresh-chat-settings", patch || {}), // PR #123: fresh chat for Akọwe every N requests
   onSelfRepair: (cb) => ipcRenderer.on("self-repair", (_e, payload) => cb(payload)),
   // ==== 🎩 Alfred (alfred-main.js) — OFF by default; see docs/ALFRED.md ====
   alfredStatus: () => ipcRenderer.invoke("alfred:status"),

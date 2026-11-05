@@ -80,6 +80,23 @@ const TOO_LONG_RES = [
   /\b(?:prompt|input|message) is too long\b/i
 ];
 
+// The site says the CONVERSATION is full (not just this one message): Claude "Your
+// message will exceed the length limit for this chat… start a new chat", ChatGPT
+// "You've reached the maximum length for this conversation… start a new chat",
+// Gemini "This conversation is too long". The fix is a fresh chat (main.js opens one
+// before the next Akọwe prompt to that AI), not a shorter prompt or another AI.
+const CHAT_FULL_RES = [
+  /\blength limit for this (?:chat|conversation|thread)\b/i,
+  /\bmaximum (?:length|context|size) (?:for|of) this (?:chat|conversation|thread)\b/i,
+  /\b(?:chat|conversation|thread) (?:is|has gotten|has become|got|has grown) too long\b/i,
+  /\b(?:reached|hit|exceeded) the (?:maximum |max )?(?:chat|conversation|thread) (?:length|size|limit)\b/i,
+  /\b(?:chat|conversation) (?:length )?limit (?:reached|exceeded)\b/i
+];
+// "…start a new chat" only counts together with a word about the chat being full.
+const NEW_CHAT_RE = /\b(?:start(?:ing)?|open(?:ing)?|begin(?:ning)?|creat(?:e|ing)) a new (?:chat|conversation|thread)\b/i;
+const FULL_WORD_RE = /\b(?:limit|too long|maximum|max length|full|longer than)\b/i;
+function chatFull(t) { return CHAT_FULL_RES.some((re) => re.test(t)); }
+
 // A reply the AI wrote for Akọwe / the relay carries its data or its tag.
 function carriesData(text) {
   if (/\[\s*FROM:\s*[^\]\r\n]{1,40}\]/i.test(text)) return true; // the AI's own reply tag
@@ -88,13 +105,15 @@ function carriesData(text) {
   return false;
 }
 
-// null, or { kind: 'rate-limit' | 'error' | 'refused' | 'too-long' } when `text` is
+// null, or { kind: 'chat-full' | 'rate-limit' | 'error' | 'refused' | 'too-long' } when `text` is
 // the site's own short error notice or canned refusal (never a real answer).
 function siteErrorOf(text) {
   const t = String(text == null ? '' : text).trim();
   if (!t || t.length >= MAX_CHARS) return null;
   if (carriesData(t)) return null;
+  if (chatFull(t)) return { kind: 'chat-full' };
   if (RATE_LIMIT_RES.some((re) => re.test(t))) return { kind: 'rate-limit' };
+  if (NEW_CHAT_RE.test(t) && FULL_WORD_RE.test(t)) return { kind: 'chat-full' };
   if (TOO_LONG_RES.some((re) => re.test(t))) return { kind: 'too-long' };
   // a leading [TO: …] tag (the AI's own envelope) does not count for a refusal
   const bare = t.replace(/^\s*\[\s*TO\s*:[^\]\r\n]{0,40}\]\s*/i, '').trim();
@@ -113,7 +132,8 @@ function longPromptNote(label, kind, promptChars) {
 
 // How long Akọwe should wait before asking that site again (seconds, a hint; it
 // doubles on each retry on Akọwe's side: 30 s, 60 s, 120 s).
-function retryAfterSeconds(kind) { return kind === 'rate-limit' ? 60 : 30; }
+// A full chat is fixed by the fresh chat AutoInjector opens before the next prompt: ask again soon.
+function retryAfterSeconds(kind) { return kind === 'rate-limit' ? 60 : kind === 'chat-full' ? 10 : 30; }
 
 // Plain words for the activity feed / log.
 function describeSiteError(label, kind, promptChars) {
@@ -121,8 +141,9 @@ function describeSiteError(label, kind, promptChars) {
   const tail = longPromptNote(label, kind, promptChars);
   if (kind === 'rate-limit') return `${L} showed a usage-limit message instead of an answer — waiting and trying again (or another AI)`;
   if (kind === 'refused') return `${L} answered with a short refusal ("I can't help with that") instead of an answer — waiting and trying again, or another AI${tail}`;
+  if (kind === 'chat-full') return `${L} said its chat is full ("too long — start a new chat") — AutoInjector starts a fresh ${L} chat before the next request`;
   if (kind === 'too-long') return `${L} said the message was too long — another AI, or a shorter prompt${tail}`;
   return `${L} showed an error message instead of an answer — waiting and trying again`;
 }
 
-module.exports = { siteErrorOf, retryAfterSeconds, describeSiteError, longPromptNote, MAX_CHARS, REFUSAL_MAX_CHARS, LONG_PROMPT_CHARS };
+module.exports = { CHAT_FULL_RES, siteErrorOf, retryAfterSeconds, describeSiteError, longPromptNote, MAX_CHARS, REFUSAL_MAX_CHARS, LONG_PROMPT_CHARS };

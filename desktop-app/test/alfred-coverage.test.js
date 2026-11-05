@@ -102,6 +102,7 @@ const IPC_INVENTORY = [
   'sd:request', 'sd:chatgpt-status', 'sd:chatgpt-cancel', 'sd:chatgpt-settings', 'sd:model-check', 'sd:restart-with-models', 'sd:open-workflows-folder', 'sd:comfy-use-stuff',
   'sdlib:add-folder', 'sdlib:check', 'sdlib:collection', 'sdlib:delete-lock', 'sdlib:folders', 'sdlib:list', 'sdlib:locks', 'sdlib:remove-folder',
   'sdlib:save-lock', 'sdlib:scan', 'sdlib:update', 'selector:clear', 'selector:pick',
+  'attention:settings', 'attention:test', 'akowe:fresh-chat-settings', // PR #123
   'selfrepair:forget-learned', 'selfrepair:probe', 'selfrepair:reload', 'selfrepair:settings', 'selfrepair:status', 'selfrepair:teach-cancel', 'selfrepair:teach-start',
   'selftest:run', 'send:compose', 'send:forward', 'send:regenerate', 'sequence-editor:close', 'sequence:open', 'sequence:run', 'sequence:stop',
   'setup:auto', 'setup:detect', 'setup:install', 'setup:list', 'site:inspect', 'site:list', 'site:reload', 'site:zoom', 'sites:new-chat-all', 'state:get',

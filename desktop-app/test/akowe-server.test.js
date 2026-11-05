@@ -108,6 +108,9 @@ function manager(w, over) {
     env: { AUTOINJECTOR_AKOWE_PYTHON: "python3", HOME: "/home/u" },
     spawn: w.spawn, execFile: w.execFile, ping: w.ping, portFree: w.portFree,
     exists: (f) => w.exists.has(f), readFile: (f) => { if (f in w.files) return w.files[f]; throw new Error("ENOENT"); },
+    // PR #123: folders are recorded, never made — a Windows path (C:\L\Akowe) used to be created as a stray
+    // "C:\L\Akowe" folder inside desktop-app/ on Linux
+    mkdir: (d) => { (w.mkdirs = w.mkdirs || []).push(d); },
     rename: () => { throw new Error("no rename in tests"); },
     logger: (kind, detail) => w.logs.push({ kind, detail }),
     onChange: (st) => w.states.push(st.phase),
@@ -285,6 +288,8 @@ const kinds = (w) => w.logs.map((l) => l.kind);
     const vpy = "C:\\L\\Akowe\\venv\\Scripts\\python.exe";
     assert(w.execCalls.some((c) => c.startsWith("py -3 -c")), "Python found with the py launcher (py -3)");
     assert(w.execCalls.some((c) => c === "py -3 -m venv C:\\L\\Akowe\\venv"), "the venv is made where run-akowe.bat makes it");
+    assert((w.mkdirs || []).includes("C:\\L\\Akowe"), "its folder is made through the manager's mkdir (never a real folder in a test)");
+    assert(!require("fs").existsSync(require("path").join(process.cwd(), "C:\\L")) && !require("fs").existsSync(require("path").join(__dirname, "..", "C:\\L")), "no stray C:\\L folder is left in the app folder");
     assert(w.execCalls.some((c) => c.startsWith(vpy + " -m pip install") && c.includes("requirements.txt")), "requirements.txt is installed into it");
     assert(st.ready && w.children[0].cmd === vpy, `Akọwe runs with the venv's python (${w.children[0] && w.children[0].cmd})`);
     assert(st.python && st.python.venv === true, "status says the private environment is used");

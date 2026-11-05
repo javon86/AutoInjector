@@ -71,7 +71,9 @@ const refusals = [
 ];
 for (const t of refusals) assert((SE.siteErrorOf(t) || {}).kind === 'refused', `refusal: “${t.slice(0, 60)}” -> ${(SE.siteErrorOf(t) || {}).kind}`);
 assert((SE.siteErrorOf('The message you submitted was too long, please reload the conversation and submit something shorter.') || {}).kind === 'too-long', 'ChatGPT "message too long" -> too-long');
-assert((SE.siteErrorOf('Your message will exceed the length limit for this chat.') || {}).kind === 'too-long', 'Claude "exceed the length limit" -> too-long');
+// PR #123: "…for this chat" means the CHAT is full (a fresh chat fixes it), not this one message
+assert((SE.siteErrorOf('Your message will exceed the length limit for this chat.') || {}).kind === 'chat-full', 'Claude "exceed the length limit for this chat" -> chat-full');
+assert((SE.siteErrorOf('Your message will exceed the length limit.') || {}).kind === 'too-long', 'Claude "exceed the length limit" (no chat named) -> too-long');
 const notRefusals = [
   "I can't help with that, but here is what you can do instead: open Settings, choose Display, and turn the scale down to 100 percent.",
   '{"note": "I\'m having a hard time fulfilling your request"}',

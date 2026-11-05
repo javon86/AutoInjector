@@ -18,6 +18,10 @@ const path = require("path");
 // main.js would start Akọwe's real server on app-ready (akowe-server.js); the mock-Electron
 // harnesses test main.js's own logic, so it stays off unless a test turns it on.
 if (process.env.AUTOINJECTOR_AKOWE_SERVER === undefined) process.env.AUTOINJECTOR_AKOWE_SERVER = "0";
+// PR #123: the automatic fresh chat for Akọwe (fresh-chat.js) navigates the pane, which the fake pages here don't
+// model (the old reply stays "on screen"); it stays off unless a test turns it on (test/fresh-chat-main.test.js).
+if (process.env.AUTOINJECTOR_FRESH_CHAT_REQUESTS === undefined) process.env.AUTOINJECTOR_FRESH_CHAT_REQUESTS = "0";
+if (process.env.AUTOINJECTOR_FRESH_CHAT_CHARS === undefined) process.env.AUTOINJECTOR_FRESH_CHAT_CHARS = "0";
 
 const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "autoinjector-test-"));
 
@@ -117,6 +121,12 @@ class FakeWebContents extends EventEmitter {
       if (typeof this.chatImagePage === "function") return this.chatImagePage(script);
       return { ok: false, error: "NO_FAKE_PAGE" };
     }
+    // PR #123 fresh-chat.js page scripts (click "New chat" / is the chat empty?): answered by the test's fake page.
+    if (script.includes("__AUTOINJECTOR_FRESHCHAT__")) {
+      this.freshChatCalls = (this.freshChatCalls || []).concat([script.includes("new-chat") ? "click" : "check"]);
+      if (typeof this.freshChatPage === "function") return this.freshChatPage(script);
+      return { ok: false, error: "NO_FAKE_PAGE" };
+    }
     if (script.includes("__AUTOINJECTOR_PICK__")) {
       const roleMatch = script.match(/const ROLE = "([^"]+)"/);
       this.pickCalls.push({ role: roleMatch ? roleMatch[1] : null });
@@ -165,6 +175,7 @@ class WebContentsView {
     const label = partition ? partition.replace("persist:", "") : "controls";
     this.webContents = new FakeWebContents(label);
     this.partition = partition || "";
+    this.opts = opts || {}; // PR #123: what it was made with (backgroundThrottling…)
     registry[label] = this;
   }
   setBounds(b) { this._bounds = { ...b }; }
@@ -193,9 +204,24 @@ class BaseWindow extends EventEmitter {
   setBounds(b) { this._bounds = { ...this._bounds, ...b }; }
   getMinimumSize() { return this._minSize.slice(); }
   setMinimumSize(w, h) { this._minSize = [w, h]; }
-  focus() {}
+  focus() { this.emit("focus"); }
   isDestroyed() { return this._destroyed; }
-  close() { if (this._destroyed) return; this._destroyed = true; this.emit("closed"); }
+  // PR #123: "close" first (a handler may preventDefault, e.g. "a book is being written — keep it running?")
+  close() {
+    if (this._destroyed) return;
+    let prevented = false;
+    this.emit("close", { preventDefault: () => { prevented = true; } });
+    if (prevented) return;
+    this._destroyed = true; this.emit("closed");
+  }
+  hide() { this._hidden = true; this.emit("hide"); }
+  show() { this._hidden = false; this.emit("show"); }
+  isVisible() { return !this._hidden; }
+  minimize() { this._minimized = true; }
+  isMinimized() { return !!this._minimized; }
+  restore() { this._minimized = false; }
+  flashFrame(on) { (this.flashes = this.flashes || []).push(!!on); }
+  setTitle(t) { this.title = t; }
 }
 
 // A BrowserWindow (no app window uses one any more — 🎩 Alfred's panel is docked): enough of one to check what
@@ -250,14 +276,20 @@ const appListeners = {};
 const app = {
   whenReady: () => Promise.resolve(),
   getPath: () => userDataDir,
-  on(evt, fn) { (appListeners[evt] = appListeners[evt] || []).push(fn); }
+  on(evt, fn) { (appListeners[evt] = appListeners[evt] || []).push(fn); },
+  quitCalls: 0,
+  quit() { this.quitCalls++; } // PR #123: recorded, never really quits the test
 };
 function __emitApp(evt, ...args) { for (const fn of appListeners[evt] || []) { try { fn(...args); } catch (_) {} } }
 
 let dialogResult = { canceled: true, filePaths: [] };
+const messageBoxes = []; // PR #123: every question asked (the window-close "keep it running?" question)
+let messageBoxResponse = 2;
 const dialog = {
-  showOpenDialog: async () => dialogResult
+  showOpenDialog: async () => dialogResult,
+  showMessageBox: async (_win, opts) => { messageBoxes.push(opts); return { response: messageBoxResponse, checkboxChecked: false }; }
 };
+function __setMessageBoxResponse(n) { messageBoxResponse = n; }
 function __setDialogResult(r) { dialogResult = r; }
 
 // A minimal stand-in for the real OS-keychain-backed safeStorage -- doesn't
@@ -274,8 +306,31 @@ const safeStorage = {
 };
 function __setEncryptionAvailable(v) { __encryptionAvailable = v; }
 
+// PR #123: keep-awake lock, desktop notifications and the tray icon — recorded so tests can check them.
+const powerSaveBlocker = {
+  started: [], stopped: [], _next: 1, _on: new Set(),
+  start(type) { const id = this._next++; this.started.push({ id, type }); this._on.add(id); return id; },
+  stop(id) { this.stopped.push(id); this._on.delete(id); },
+  isStarted(id) { return this._on.has(id); }
+};
+const notifications = [];
+class Notification extends EventEmitter {
+  constructor(opts) { super(); this.opts = opts || {}; this.shown = false; notifications.push(this); }
+  static isSupported() { return true; }
+  show() { this.shown = true; }
+  close() { this.emit("close"); }
+}
+const trays = [];
+class Tray extends EventEmitter {
+  constructor(image) { super(); this.image = image; this.tooltip = ""; this.destroyed = false; trays.push(this); }
+  setToolTip(t) { this.tooltip = t; }
+  setContextMenu(m) { this.menu = m; }
+  destroy() { this.destroyed = true; }
+}
+
 module.exports = {
   app, BaseWindow, WebContentsView, ipcMain, dialog, safeStorage, BrowserWindow, screen, __browserWindows: browserWindows, __setDisplays, __emitApp,
+  powerSaveBlocker, Notification, Tray, __notifications: notifications, __trays: trays, __messageBoxes: messageBoxes, __setMessageBoxResponse,
   __ipcHandlers: ipcHandlers, __registry: registry, __windowRegistry: windowRegistry, __userDataDir: userDataDir,
   __setDialogResult, __setEncryptionAvailable
 };

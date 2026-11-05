@@ -1400,24 +1400,57 @@ function renderMessagesFeed() {
   for (const turn of messagesToUser.slice().reverse()) popupBody.appendChild(messageRowEl(turn, false));
 }
 
+// PR #123: a long book run sends 1,000+ replies; the conversation box used to keep every row (and every reply) and
+// never let go of them. It now draws only the newest TRANSCRIPT_ROWS rows, with a "Show older" button at the top for
+// more, and keeps at most TRANSCRIPT_KEEP turns in memory (the same as the app's own list).
+const TRANSCRIPT_ROWS = 300;
+const TRANSCRIPT_KEEP = 2000;
+let transcriptShown = TRANSCRIPT_ROWS;
+function transcriptOlderButton(hidden) {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = "transcript-older";
+  b.textContent = `⬆ Show older messages (${hidden} more)`;
+  b.title = "Only the newest messages are shown, so a long book run doesn't slow the window down";
+  b.onclick = () => { transcriptShown += TRANSCRIPT_ROWS; drawTranscriptRows(false); };
+  return b;
+}
+function drawTranscriptRows(scrollToEnd) {
+  const box = el("transcript");
+  if (!box) return;
+  box.innerHTML = "";
+  const start = Math.max(0, currentTranscript.length - transcriptShown);
+  if (start > 0) box.appendChild(transcriptOlderButton(start));
+  for (const turn of currentTranscript.slice(start)) box.appendChild(turnEl(turn));
+  if (scrollToEnd) box.scrollTop = box.scrollHeight;
+}
 function renderTranscript(transcript) {
-  currentTranscript = transcript || [];
+  currentTranscript = (transcript || []).slice(-TRANSCRIPT_KEEP);
   messagesToUser = currentTranscript.filter((t) => t.roundtableTag === "USER");
   renderMessagesFeed();
-  const box = el("transcript");
-  box.innerHTML = "";
-  for (const turn of currentTranscript) box.appendChild(turnEl(turn));
-  box.scrollTop = box.scrollHeight;
+  transcriptShown = TRANSCRIPT_ROWS;
+  drawTranscriptRows(true);
 }
 
 function appendTranscriptTurn(turn) {
   currentTranscript.push(turn);
+  if (currentTranscript.length > TRANSCRIPT_KEEP) currentTranscript.splice(0, currentTranscript.length - TRANSCRIPT_KEEP);
   if (turn.roundtableTag === "USER") {
     messagesToUser.push(turn);
+    if (messagesToUser.length > TRANSCRIPT_KEEP) messagesToUser.splice(0, messagesToUser.length - TRANSCRIPT_KEEP);
     renderMessagesFeed();
   }
   const box = el("transcript");
+  if (!box) return;
   box.appendChild(turnEl(turn));
+  // keep only the newest rows on screen; the older ones are behind "Show older"
+  const rows = box.querySelectorAll(":scope > .turn");
+  let extra = rows.length - transcriptShown;
+  for (let i = 0; i < extra; i++) rows[i].remove();
+  const hidden = Math.max(0, currentTranscript.length - Math.min(transcriptShown, currentTranscript.length));
+  const old = box.querySelector(":scope > .transcript-older");
+  if (hidden > 0) { const b = transcriptOlderButton(hidden); if (old) old.replaceWith(b); else box.insertBefore(b, box.firstChild); }
+  else if (old) old.remove();
   box.scrollTop = box.scrollHeight;
 }
 
@@ -4191,7 +4224,39 @@ function bfRenderCheckinSetting(s) {
   if (sel.value !== v) sel.value = v;
   const co = el("bf-carryon");
   if (co && document.activeElement !== co) co.checked = s.selfRepair.carryOn !== false;
+  bfRenderAttention(s);
 }
+// PR #123: desktop notifications (and their sound) when a book needs the user, and how often Akọwe gets a fresh chat
+function bfRenderAttention(s) {
+  const at = s && s.attention;
+  const n = el("bf-notify"); const snd = el("bf-notify-sound");
+  if (at && n && document.activeElement !== n) n.checked = at.notify !== false;
+  if (at && snd && document.activeElement !== snd) { snd.checked = at.sound !== false; snd.disabled = at.notify === false; }
+  const fc = s && s.freshChat; const sel = el("bf-fresh-every");
+  if (fc && sel && document.activeElement !== sel) {
+    const v = String(fc.everyRequests);
+    if (!Array.from(sel.options).some((o) => o.value === v)) { const o = document.createElement("option"); o.value = v; o.textContent = `every ${v} requests`; sel.appendChild(o); }
+    if (sel.value !== v) sel.value = v;
+  }
+}
+if (el("bf-notify")) el("bf-notify").onchange = bfSafe(async (e) => {
+  const on = !!e.target.checked;
+  const r = await bfCall("attention-notify", "attentionSettings", [{ notify: on }], { where: "Notifications", anchor: "#bf-checkin-anchor" });
+  if (r && r.ok) bfMsg(on ? "✓ Windows will tell you (and the taskbar button flashes) when a book needs you." : "✓ No desktop notifications — check the Akọwe tab yourself.");
+  akoweRefresh();
+}, "attention-notify");
+if (el("bf-notify-sound")) el("bf-notify-sound").onchange = bfSafe(async (e) => {
+  const on = !!e.target.checked;
+  const r = await bfCall("attention-sound", "attentionSettings", [{ sound: on }], { where: "Notifications", anchor: "#bf-checkin-anchor" });
+  if (r && r.ok) bfMsg(on ? "✓ The notification plays a sound." : "✓ The notification is silent.");
+  akoweRefresh();
+}, "attention-sound");
+if (el("bf-fresh-every")) el("bf-fresh-every").onchange = bfSafe(async (e) => {
+  const v = Number(e.target.value);
+  const r = await bfCall("fresh-chat-every", "freshChatSettings", [{ everyRequests: v }], { where: "Fresh chats", anchor: "#bf-checkin-anchor" });
+  if (r && r.ok) bfMsg(v ? `✓ Akọwe gets a fresh chat in each AI after ${v} requests (or about 300,000 characters).` : "✓ Akọwe keeps one chat per AI (a fresh one only when the site says the chat is full, or it gets very long).");
+  akoweRefresh();
+}, "fresh-chat-every");
 if (el("bf-carryon")) el("bf-carryon").onchange = bfSafe(async (e) => {
   const on = !!e.target.checked;
   const r = await bfCall("checkin-carryon", "selfRepairSettings", [{ carryOn: on }], { where: "Check-ins", anchor: "#bf-checkin-anchor" });

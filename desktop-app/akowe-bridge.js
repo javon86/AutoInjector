@@ -592,8 +592,10 @@ function createBridge(opts) {
       // PR #120: 'refused' (a short canned "I can't help with that" / Gemini's "I'm
       // having a hard time fulfilling your request…") and 'too-long' are site
       // problems too; a very long prompt is named, as the likely reason
-      const kind = ['rate-limit', 'refused', 'too-long'].includes(turn.siteError) ? turn.siteError : 'error';
-      const retryAfter = kind === 'rate-limit' ? 60 : 30;
+      // 'chat-full': the site said this CHAT is too long — AutoInjector opens a fresh chat
+      // before the next prompt to that AI, so Akọwe can ask again soon (10 s)
+      const kind = ['rate-limit', 'refused', 'too-long', 'chat-full'].includes(turn.siteError) ? turn.siteError : 'error';
+      const retryAfter = siteErrors.retryAfterSeconds(kind);
       const longNote = siteErrors.longPromptNote(entry.site, kind, entry.promptChars);
       log('outcome', { site: entry.site, request_id: entry.requestId, outcome: 'SITE_ERROR', error: kind, chars: text.length, prompt_chars: entry.promptChars, elapsed_ms: elapsed, note: longNote ? longNote.replace(/^ — /, '') : undefined });
       const why = kind === 'rate-limit'
@@ -602,6 +604,8 @@ function createBridge(opts) {
           ? `${entry.site} answered [MSG #${entry.seq}] with a short refusal ("I can't help with that") instead of an answer; wait and try again, or use another AI${longNote}`
           : kind === 'too-long'
             ? `${entry.site} said [MSG #${entry.seq}] was too long; use another AI or a shorter prompt${longNote}`
+            : kind === 'chat-full'
+              ? `${entry.site} said its chat is full (too long) at [MSG #${entry.seq}]; a fresh chat is opened before the next request — ask again in a few seconds`
             : `${entry.site} showed an error message instead of an answer to [MSG #${entry.seq}] (a short outage on the site); wait and try again`;
       finish(entry, { status: 503, body: Object.assign(errBody('SITE_ERROR', why, false),
         { site_error: kind, retry_after_s: retryAfter, seq: entry.seq, prompt_chars: entry.promptChars, long_prompt: !!longNote }) });
@@ -1094,6 +1098,8 @@ function describeEvent(ev, label) {
         ? { say: `${L} answered with a short refusal instead of an answer — ${who} waits and tries again (or uses another AI)${siteErrors.longPromptNote(L, 'refused', e.prompt_chars)}`, tone: 'warn' }
         : e.error === 'too-long'
           ? { say: `${L} said the message was too long — ${who} uses another AI${siteErrors.longPromptNote(L, 'too-long', e.prompt_chars)}`, tone: 'warn' }
+          : e.error === 'chat-full'
+            ? { say: `${L} said its chat is full — AutoInjector starts a fresh ${L} chat and ${who} asks again`, tone: 'warn' }
           : { say: `${L} showed an error message instead of an answer — ${who} waits and tries again`, tone: 'warn' };
     case 'TOO_LARGE': return { say: 'Refused a request that was too big (over 1 MB)', tone: 'warn' };
     default: return { say: `Refused a request this app couldn't use (${e.outcome || 'error'})`, tone: 'warn' };
