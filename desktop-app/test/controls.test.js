@@ -1388,7 +1388,33 @@ async function testLinkTestTechnicalDetails() {
   assert(/link test step roundtrip:claude: fail \(HTTP 200\)/.test(tech) && /Claude wrote: Sorry — I can’t do “tests” today\./.test(tech) && /no JSON object found/.test(tech), `Technical details: ${tech}`);
 }
 
+// PR #123: a long book run sends 1,000+ replies; the conversation box draws only the newest 300 rows, with a
+// "Show older" button, and keeps at most 2,000 turns in memory.
+async function testTranscriptTrim() {
+  console.log("\n== PR #123: the conversation box keeps only the newest rows (\"Show older\" for more) ==");
+  const api = makeApi();
+  const big = Array.from({ length: 2500 }, (_, i) => ({ id: i + 1, site: "claude", label: "Claude", text: `reply ${i + 1}`, ts: Date.now(), pinned: false }));
+  api.getState = async () => ({ ok: true, global: { routing: { chatgpt: [], claude: [], gemini: [] }, enabled: { chatgpt: true, claude: true, gemini: true }, waiting: {}, meshActive: false, customRole: {} }, houseRule: { mode: null, active: false, paused: false, topic: "", rounds: 0, roundNum: 0, roles: {}, nextSpeaker: null }, captured: {}, transcript: big, log: [], logins: { chatgpt: [], claude: [], gemini: [] }, prompts: [] });
+  const dom = await loadWindow(api);
+  await new Promise((r) => setTimeout(r, 60));
+  const doc = dom.window.document;
+  const rows = () => doc.querySelectorAll("#transcript > .turn");
+  assert(rows().length === 300, `only the newest 300 rows are drawn (got ${rows().length})`);
+  assert(rows()[299].dataset.turnId === "2500" && rows()[0].dataset.turnId === "2201", "they are the newest ones, in order");
+  const older = doc.querySelector("#transcript > .transcript-older");
+  assert(older && /Show older messages \(1700 more\)/.test(older.textContent), `a "Show older" button says how many more are kept (${older && older.textContent})`);
+  for (let i = 0; i < 20; i++) api.fireCapture({ id: 3000 + i, site: "gemini", label: "Gemini", text: `new ${i}`, ts: Date.now(), pinned: false });
+  await new Promise((r) => setTimeout(r, 20));
+  assert(rows().length === 300 && rows()[299].dataset.turnId === "3019", "new replies are added and the oldest row on screen goes (still 300)");
+  assert(/\(1700 more\)/.test(doc.querySelector("#transcript > .transcript-older").textContent), "the count follows (2,000 kept in memory - 300 shown)");
+  doc.querySelector("#transcript > .transcript-older").click();
+  assert(rows().length === 600, `"Show older" draws 300 more (got ${rows().length})`);
+  const exported = dom.window.eval("buildExportText()");
+  assert(/reply 521\b/.test(exported) && !/reply 520\n/.test(exported) && /new 19/.test(exported), "memory keeps the newest 2,000 turns (the export has them, not older)");
+}
+
 async function main() {
+  await testTranscriptTrim();
   await testPaneCollapseToggle();
   await testUtilityPanelHeadingCollapses();
   await testButlerFoldsInPlace();

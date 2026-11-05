@@ -53,7 +53,7 @@ const LEARNED_VERSION = 1;
 
 // ---- P18.2 failure codes -----------------------------------------------------------
 const CODES = ['TYPE_FAILED', 'SEND_NOT_CONFIRMED', 'NO_REPLY_FOUND', 'FALSE_DUPLICATE', 'STUCK_GENERATING',
-  'LOGGED_OUT', 'CAPTCHA', 'USAGE_LIMIT', 'NETWORK_ERROR', 'PAGE_ERROR', 'UNKNOWN'];
+  'LOGGED_OUT', 'CAPTCHA', 'USAGE_LIMIT', 'CHAT_FULL', 'NETWORK_ERROR', 'PAGE_ERROR', 'UNKNOWN'];
 const USER_ONLY = new Set(['LOGGED_OUT', 'CAPTCHA', 'USAGE_LIMIT']);
 const STATES = ['ok', 'repairing', 'needs_user', 'broken', 'unknown'];
 
@@ -67,6 +67,7 @@ const PROBLEM_TEXT = {
   LOGGED_OUT: { short: 'logged out', say: (L) => `${L} is logged out.`, fix: (L) => [`Open ${L}'s window (its pane in AutoInjector) and log in.`, 'AutoInjector notices by itself when you are back and checks again — nothing else to do.'] },
   CAPTCHA: { short: 'human check', say: (L) => `${L} is showing an "are you a human?" check.`, fix: (L) => [`Open ${L}'s window and complete the check (tick the box / solve the puzzle).`, 'AutoInjector notices by itself when it is gone and checks again.'] },
   USAGE_LIMIT: { short: 'usage limit', say: (L) => `${L} says you've reached its usage limit.`, fix: (L) => [`Wait until the time ${L} shows in its window (or switch to another account / plan).`, 'AutoInjector re-checks every minute and carries on by itself when the limit is gone.', 'Meanwhile Akọwe can use your other AIs.'] },
+  CHAT_FULL: { short: 'chat full', say: (L) => `${L} says this chat is too long ("start a new chat").` },
   NETWORK_ERROR: { short: "didn't load", say: (L) => `${L}'s page didn't load (no internet, or the site is down).` },
   PAGE_ERROR: { short: 'page error', say: (L) => `${L}'s page shows an error ("something went wrong").` },
   UNKNOWN: { short: 'not answering', say: (L) => `${L} didn't answer a check-in and AutoInjector couldn't tell why.` }
@@ -103,6 +104,9 @@ const PAGE_SIGNATURES = [
   // usage limits (shown as a banner / near the message box, or instead of it)
   { id: 'limit-notice', code: 'USAGE_LIMIT', sites: ['*'], where: 'notices', text: ["you've reached your", 'you’ve reached your', 'you have reached your', 'usage limit', 'usage cap', "you've hit your limit", 'you’ve hit your limit', 'out of free messages', 'message limit', 'limit resets', 'limit will reset', 'reached the current usage cap', 'rate limit exceeded', 'too many requests', 'upgrade to continue', 'you are out of'] },
   { id: 'limit-page', code: 'USAGE_LIMIT', sites: ['*'], where: 'page', noInput: true, text: ['usage limit', 'usage cap', 'out of free messages', 'too many requests', 'limit resets'] },
+  // the conversation is too long (auto-fix: open a fresh chat). Claude "…exceed the length limit for this chat",
+  // ChatGPT "You've reached the maximum length for this conversation", Gemini "This conversation is too long"
+  { id: 'chat-full-notice', code: 'CHAT_FULL', sites: ['*'], where: 'notices', text: ['length limit for this chat', 'length limit for this conversation', 'maximum length for this conversation', 'maximum length for this chat', 'conversation is too long', 'chat is too long', 'conversation has reached its maximum', 'reached the maximum conversation length', 'conversation length limit', 'start a new chat to continue', 'please start a new chat', 'start a new conversation to continue'] },
   // page errors (auto-fix: reload)
   { id: 'error-notice', code: 'PAGE_ERROR', sites: ['*'], where: 'notices', text: ['something went wrong', 'network error', 'an error occurred', 'there was an error', 'error generating', 'unable to load', 'connection lost', 'conversation not found', 'failed to fetch', 'temporarily unavailable', 'internal server error', 'gone wrong', 'try reloading'] },
   { id: 'error-page', code: 'PAGE_ERROR', sites: ['*'], where: 'page', noInput: true, text: ["this site can't be reached", 'err_', 'bad gateway', 'service unavailable', '502', '503 service'] }
@@ -975,6 +979,7 @@ function classify(ev) {
   if (e.loadFailed) return 'NETWORK_ERROR';
   if (sig.has('CAPTCHA')) return 'CAPTCHA';
   if (sig.has('LOGGED_OUT')) return 'LOGGED_OUT';
+  if (sig.has('CHAT_FULL')) return 'CHAT_FULL'; // before a usage limit: its fix (a fresh chat) is automatic
   if (sig.has('USAGE_LIMIT')) return 'USAGE_LIMIT';
   if (e.captured) return 'UNKNOWN'; // (a captured check-in is not a failure; callers don't classify it)
   if (send && !send.ok) {
@@ -1003,6 +1008,7 @@ const LADDERS = {
   NO_REPLY_FOUND: ['alternatives', 'page_search', 'reload', 'teach'],
   FALSE_DUPLICATE: ['retry', 'page_search', 'reload', 'teach'],
   STUCK_GENERATING: ['unfreeze', 'reload', 'give_up'],
+  CHAT_FULL: ['reload_home', 'give_up'], // a fresh chat (the site's new-chat page)
   PAGE_ERROR: ['reload', 'reload_home', 'give_up'],
   NETWORK_ERROR: ['reload', 'reload_home', 'give_up'],
   UNKNOWN: ['alternatives', 'page_search', 'reload', 'teach']
