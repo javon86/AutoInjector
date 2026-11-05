@@ -167,6 +167,89 @@ function plainAiError(r, cfg) {
   }
 }
 
+// ---- 🎨 the big buttons ("quick actions"), deterministic (PR #124) ----------------------------------------------
+// Log 2026-11-04 (build a0a220e): "🎨 Make a picture" → "Ask Alfred" sent the words "Make a picture of …" to his local
+// model, which answered in words only — five asks in six minutes, not one alfred-tool / alfred-card / sd-generate.
+// The buttons no longer depend on a small model's tool calling: the form's fields become the tool call directly and
+// the normal "I will" card shows at once (✔ Do it still required, unless "always allow" applies).
+const PICTURE_SIZES = Object.freeze({ '512x512': [512, 512], '768x768': [768, 768], '1024x1024': [1024, 1024], '832x1216': [832, 1216], '1216x832': [1216, 832], '768x1152': [768, 1152], '1152x768': [1152, 768] });
+const QUICK_KINDS = Object.freeze(['picture', 'video', 'cover', 'character', 'newbook', 'book', 'continue']);
+// the buttons that ask him to DO something: answering those in words only is a failure (alfred-no-action)
+const ACTION_KINDS = new Set(['picture', 'video', 'cover', 'character', 'newbook', 'continue']);
+const quickField = (f, k, max) => cleanLine(f && typeof f === 'object' ? f[k] : '', max);
+/**
+ * The form's fields → what to do. → { text (what "you" said, shown in the chat), steps:[{name, args}] } for a
+ * direct card, { text, ai:true } for the two book questions (his AI answers; a direct fallback follows), or
+ * { error, message } when a required field is empty.
+ */
+function quickPlan(kind, fields) {
+  const f = fields && typeof fields === 'object' ? fields : {};
+  const what = quickField(f, 'what', 1000);
+  if (kind === 'picture') {
+    if (what.length < 2) return { error: 'EMPTY', message: 'Say what the picture should show first.' };
+    const args = { prompt: what };
+    const size = PICTURE_SIZES[quickField(f, 'size', 20)];
+    if (size) { args.width = size[0]; args.height = size[1]; }
+    const engine = quickField(f, 'engine', 20);
+    if (engine === 'sd' || engine === 'chatgpt') args.engine = engine;
+    return { text: `Make a picture of ${what}.`, steps: [{ name: 'generate_image', args }] };
+  }
+  if (kind === 'video') {
+    if (what.length < 2) return { error: 'EMPTY', message: 'Say what the video should show first.' };
+    const args = { prompt: what };
+    const sec = Number(quickField(f, 'seconds', 4));
+    if (Number.isFinite(sec) && sec >= 1 && sec <= 10) args.seconds = Math.round(sec);
+    return { text: `Make a short video of ${what}.`, steps: [{ name: 'generate_video', args }] };
+  }
+  if (kind === 'cover') {
+    const args = {};
+    if (what) args.note = what.slice(0, 400);
+    return { text: `Design the cover for my book and make the cover art${what ? ` showing ${what}` : ''}.`, steps: [{ name: 'make_cover_art', args }] };
+  }
+  if (kind === 'character') {
+    const name = quickField(f, 'name', 120);
+    if (!name) return { error: 'EMPTY', message: 'Give the character a name first.' };
+    const about = quickField(f, 'about', 1200);
+    const create = { kind: 'characters', name };
+    if (about) create.about = about;
+    return { text: `Make a character for my book: “${name}”${about ? ` — ${about}` : ''}.`, steps: [{ name: 'create_dossier', args: create }, { name: 'forge_character', args: { kind: 'characters', character: name } }] };
+  }
+  if (kind === 'newbook') {
+    const idea = quickField(f, 'idea', 2000);
+    if (idea.length < 3) return { error: 'EMPTY', message: 'Say in a few words what your book is about first.' };
+    const genre = quickField(f, 'genre', 120);
+    const args = { idea };
+    if (genre) args.genre = genre;
+    return { text: `Make a book for me: ${idea}${genre ? ` (genre: ${genre})` : ''}.`, steps: [{ name: 'start_book', args }] };
+  }
+  if (kind === 'book') return { text: "What's the status of my book?", ai: true };
+  if (kind === 'continue') return { text: 'Continue my book: resume the “Make a book for me” run if it is paused, or tell me what it is waiting for. If no run is going, tell me the next step.', ai: true };
+  return { error: 'BAD_KIND', message: 'That button does nothing here.' };
+}
+
+// ---- free text that clearly asks for a picture / a video (retry once, then a one-click card) ------------------
+const PIC_NOUN = 'picture|image|drawing|illustration|painting|photo|photograph|artwork|wallpaper|sketch|render';
+const VID_NOUN = 'video|clip|animation';
+/** "draw me a lighthouse" → { kind:'picture', tool:'generate_image', subject:'a lighthouse' } | null */
+function actionIntent(text) {
+  const t = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!t || t.length > 600) return null;
+  const low = t.toLowerCase();
+  // questions about how / what, and the book's own pictures (illustrate, the cover, a dossier's art, the trailer) have their own tools
+  if (/\bhow (?:do|can|would|should|to)\b|^(?:what|why|where|when|which|who)\b|\b(?:chapter|book|cover|dossier|trailer|map|gallery|folder)s?\b/.test(low)) return null;
+  let kind = null;
+  if (new RegExp(`\\b(?:make|generate|create|render|produce|animate)\\b[^.?!]{0,40}?\\b(?:${VID_NOUN})s?\\b`).test(low)) kind = 'video';
+  else if (/\b(?:draw|paint|sketch|illustrate)\b\s+\S/.test(low) || new RegExp(`\\b(?:make|generate|create|render|produce|give me|design)\\b[^.?!]{0,40}?\\b(?:${PIC_NOUN})s?\\b`).test(low)) kind = 'picture';
+  if (!kind) return null;
+  let s = t.replace(/^.*?\b(?:draw|paint|sketch|illustrate|make|generate|create|render|produce|animate|give|design)\b\s*(?:me\s+|us\s+|for me\s+)?/i, '');
+  s = s.replace(new RegExp(`^(?:(?:a|an|the|some|one)\\s+)?(?:(?:short|quick|little|small|nice|new)\\s+)?(?:${kind === 'video' ? VID_NOUN : PIC_NOUN})s?\\b\\s*(?:of|showing|with|for|about|:)?\\s*`, 'i'), '');
+  s = s.replace(/\s*(?:,?\s*please)?[\s.!?]*$/i, '').trim();
+  if (s.length < 2) s = t;
+  return { kind, tool: kind === 'video' ? 'generate_video' : 'generate_image', subject: s.slice(0, 1000) };
+}
+const RUN_STATES_LIVE = new Set(['running', 'queued', 'waiting', 'pausing']);
+const safeModel = (m) => String(m == null ? '' : m).replace(/[^A-Za-z0-9_.:/@+-]/g, '').slice(0, 80) || null;
+
 function withTimeout(p, ms, code) {
   let t;
   return Promise.race([p, new Promise((resolve) => { t = setTimeout(() => resolve({ ok: false, error: code || 'TIMEOUT', message: `That took too long (over ${Math.round(ms / 1000)} s), so I stopped waiting.` }), ms); })]).finally(() => clearTimeout(t));
@@ -450,7 +533,7 @@ function createAlfred(deps = {}) {
 
   // ------------------------------------------------------------------ running one tool
   async function execute(tool, args, { auto, readOnly } = {}) {
-    if (req) { req.doing = 'tool'; req.toolTitle = tool.title; emitState(); }
+    if (req) { req.doing = 'tool'; req.toolTitle = tool.title; if (Array.isArray(req.tools)) req.tools.push(tool.name); emitState(); }
     let r;
     try { r = await withTimeout(Promise.resolve().then(() => tool.run(args, deps.ctx || {})), tool.timeoutMs || 60000); }
     catch (e) { r = { ok: false, error: 'TOOL_ERROR', message: `Something went wrong while doing "${tool.title}".` }; }
@@ -462,7 +545,7 @@ function createAlfred(deps = {}) {
     // which settings he passed (names only — never the values, which can hold the user's words)
     const passed = args && typeof args === 'object' ? (args.params && typeof args.params === 'object' && !Array.isArray(args.params) ? args.params : args) : null;
     const argNames = passed ? Object.keys(passed).filter((k) => !['action', 'method', 'params'].includes(k)).slice(0, 24).map(safeName) : undefined;
-    log('alfred-tool', { tool: tool.name, title: tool.title, action: args && (args.action || args.method) ? safeName(args.action || args.method) : undefined, changes: isChange, ok: !!r.ok, error: r.ok ? undefined : safeName(r.error), args: argNames && argNames.length ? argNames : undefined, auto: auto || undefined });
+    log('alfred-tool', { req: req ? req.id : undefined, tool: tool.name, title: tool.title, action: args && (args.action || args.method) ? safeName(args.action || args.method) : undefined, changes: isChange, ok: !!r.ok, error: r.ok ? undefined : safeName(r.error), args: argNames && argNames.length ? argNames : undefined, auto: auto || undefined, quick: req && req.quick ? req.quick : undefined, severity: r.ok ? undefined : 'warn' });
     if (isChange && tool.book && r.ok && deps.journal) {
       const pid = r.project_id || (args && args.project_id) || null;
       if (pid) Promise.resolve(deps.journal(pid, tool.name, tool.title)).catch(() => {});
@@ -488,22 +571,153 @@ function createAlfred(deps = {}) {
   }
 
   // ------------------------------------------------------------------ the loop
-  async function ask(text) {
+  function busyAnswer() {
     if (!settings.enabled) return { ok: false, error: 'OFF', message: 'Alfred is off. Turn him on with the 🎩 switch.' };
-    const t = String(text || '').trim();
-    if (!t) return { ok: false, error: 'EMPTY' };
     if (req) return { ok: false, error: 'BUSY', message: card ? 'Please answer the card first (✔ Do it or ✖ No).' : "I'm still working on the last request — press ■ Stop to cancel it." };
-    if (t.length > 6000) return { ok: false, error: 'TOO_LONG', message: 'That message is too long for me (6000 characters at most).' };
+    return null;
+  }
+  /** A new request: what "you" said goes in the chat and the conversation; the log gets its length only. */
+  function startRequest(t, quickKind) {
     seq += 1;
-    req = { id: `req-${seq}`, steps: 0, cancelled: false, controller: new AbortController(), startedAt: now() };
+    req = { id: `req-${seq}`, steps: 0, cancelled: false, controller: new AbortController(), startedAt: now(), text: t, tools: [], quick: quickKind || null };
     say('you', t);
     history.push({ role: 'user', content: t });
     trimHistory();
-    log('alfred-ask', { req: req.id, chars: t.length });
+    log('alfred-ask', { req: req.id, chars: t.length, quick: quickKind || undefined });
     emitState();
-    const mine = req;
+    return req;
+  }
+  async function ask(text, opts = {}) {
+    if (!settings.enabled) return { ok: false, error: 'OFF', message: 'Alfred is off. Turn him on with the 🎩 switch.' };
+    const t = String(text || '').trim();
+    if (!t) return { ok: false, error: 'EMPTY' };
+    const busy = busyAnswer(); if (busy) return busy;
+    if (t.length > 6000) return { ok: false, error: 'TOO_LONG', message: 'That message is too long for me (6000 characters at most).' };
+    const mine = startRequest(t, opts.quick && QUICK_KINDS.includes(opts.quick) ? opts.quick : null);
     await refreshBookNow(); // the current book / run / problem, live (2 small reads, bounded wait)
     return loop(mine); // (a Stop pressed meanwhile is handled there)
+  }
+
+  // ------------------------------------------------------------------ outcome records (text-free)
+  /**
+   * alfred-reply: how a request ended — steps, tools, card yes/no, the reply's LENGTH, time, which AI and model, and
+   * the outcome. Never the words. A big button that asked for an action ending in words only is alfred-no-action
+   * (warn): that is what the 2026-11-04 log could not show.
+   */
+  function logReply(r, outcome, chars) {
+    if (!r) return;
+    const d = { req: r.id, steps: r.steps, tools_called: [...new Set(r.tools || [])].slice(0, 12).map(safeName), card: !!r.carded, chars: Math.max(0, Number(chars) || 0), ms: Math.max(0, now() - (r.startedAt || now())), brain: r.brain || null, model: safeModel(r.model), outcome };
+    if (r.quick) d.quick = r.quick;
+    if (r.retried) d.retried = true;
+    if (outcome === 'error') d.severity = 'warn';
+    log('alfred-reply', d);
+    if (outcome === 'answered-in-words' && r.quick && ACTION_KINDS.has(r.quick)) log('alfred-no-action', { req: r.id, quick: r.quick, brain: r.brain || null, model: safeModel(r.model), severity: 'warn' });
+  }
+
+  // ------------------------------------------------------------------ 🎨 the big buttons: straight to the card
+  /** IPC alfred:quick {kind, fields}: the form's fields become the tool call(s); the "I will" card shows at once. */
+  async function quick(kind, fields) {
+    const busy = busyAnswer(); if (busy) return busy;
+    const k = String(kind || '');
+    if (!QUICK_KINDS.includes(k)) return { ok: false, error: 'BAD_KIND', message: 'That button does nothing here.' };
+    const plan = quickPlan(k, fields);
+    if (plan.error) return { ok: false, error: plan.error, message: plan.message };
+    if (plan.ai) return ask(plan.text, { quick: k });
+    const r = startRequest(plan.text, k);
+    r.brain = 'direct'; // no AI call: the form is the request
+    return directCard(r, plan.steps, {});
+  }
+  /** Checked tool steps → the "I will" card (or straight to work when every step is "always allowed"). */
+  async function directCard(r, steps, opts) {
+    const pending = [];
+    for (let i = 0; i < steps.length; i++) {
+      const s = steps[i];
+      const tool = registry.get(s.name);
+      let v = tool ? registry.validate(tool, s.args) : { ok: false, error: 'not in this build' };
+      if (v.ok && typeof tool.check === 'function') {
+        let c;
+        try { c = await tool.check(v.args, deps.ctx || {}); } catch (_) { c = { ok: false, error: 'the details could not be checked' }; }
+        v = c && c.ok ? { ok: true, args: c.args || v.args } : { ok: false, error: (c && c.error) || 'not allowed' };
+      }
+      if (!v.ok) {
+        log('alfred-refused', { req: r.id, tool: safeName(s.name), reason: 'BAD_ARGS', quick: r.quick || undefined });
+        return quickReply(r, `I couldn't set that up: ${String(v.error || 'the details are not right').slice(0, 300)}. Change what you typed and press the button again.`, 'error');
+      }
+      pending.push({ call: { id: `quick_${seq}_${i + 1}`, name: tool.name, args: v.args, native: false }, tool, args: v.args, text: registry.describe(tool, v.args) });
+    }
+    if (pending.every((p) => registry.canAllowAlways(p.tool, p.args) && settings.alwaysAllow[registry.allowKeyOf(p.tool, p.args)])) return runQuick(r, pending, { auto: true });
+    const id = `card-${seq}-${r.steps}`;
+    r.carded = true;
+    card = {
+      id, req: r, steps: pending, quick: true,
+      public: { id, intro: opts.intro || '', doLabel: opts.doLabel || undefined, steps: pending.map((p, i) => ({ n: i + 1, tool: p.tool.name, title: p.tool.title, text: p.text, allowAlways: registry.canAllowAlways(p.tool, p.args), allowKey: registry.allowKeyOf(p.tool, p.args), code: null })) },
+    };
+    log('alfred-card', { req: r.id, card: id, tools: pending.map((p) => p.tool.name), quick: r.quick || undefined, fallback: opts.fallback || undefined });
+    logReply(r, opts.fallback ? 'fallback-card' : 'card', 0);
+    emit({ type: 'card', card: card.public });
+    emitState();
+    return { ok: true, type: 'confirm', card: card.public };
+  }
+  /**
+   * 📖 My book / ✍ Continue when his AI failed or answered without looking: read the book's status directly (no AI)
+   * and say it; for ✍ a run that stopped and can go on gets a "Resume" card. null = not a book button (or Akọwe
+   * could not be read either) — the caller answers as before.
+   */
+  async function bookFallback(r, why, aiError) {
+    if (!r || (r.quick !== 'book' && r.quick !== 'continue')) return null;
+    const tool = registry.get('book_status');
+    if (!tool || r.cancelled) return null;
+    const out = await execute(tool, {}, { readOnly: true });
+    if (!out || !out.ok || !out.data) return null;
+    const d = out.data;
+    const head = why === 'error' ? `My AI didn't answer${aiError ? ` (${String(aiError).replace(/ Everything else in the app still works\.$/, '').slice(0, 240)})` : ''}, so here is what Akọwe says. ` : '';
+    const now = String(d.now || (d.books && !d.books.length ? 'There are no books in Akọwe yet.' : '')).slice(0, 900);
+    const run = d.run || null;
+    if (r.quick === 'continue') {
+      const st = run ? String(run.state || run.status || '') : '';
+      if (run && !run.needs_decision && ['paused', 'interrupted', 'error', 'problem'].includes(st)) {
+        log('alfred-fallback', { req: r.id, quick: r.quick, why: safeName(why), to: 'resume_run' });
+        const args = {}; if (run.run_id) args.run_id = String(run.run_id).slice(0, 80);
+        return directCard(r, [{ name: 'resume_run', args }], { fallback: true, intro: `${head}${now}`.slice(0, 600) });
+      }
+      const next = !run ? ' No “Make a book for me” run is going. To start one, press ✍ Continue / make my book on a new book, or start it in the 📖 Akọwe tab.'
+        : run.needs_decision ? ' It waits for YOUR decision: open the 📖 Akọwe tab and choose (approve anyway / edit / try again).'
+          : RUN_STATES_LIVE.has(String(run.status)) ? ' It is already writing — nothing to resume.' : '';
+      log('alfred-fallback', { req: r.id, quick: r.quick, why: safeName(why), to: 'book_status' });
+      return quickReply(r, `${head}📖 ${now}${next}`.trim(), 'fallback-status');
+    }
+    log('alfred-fallback', { req: r.id, quick: r.quick, why: safeName(why), to: 'book_status' });
+    return quickReply(r, `${head}📖 ${now}`.trim(), 'fallback-status');
+  }
+  /** A finished request in plain words, without asking his AI (the quick path). */
+  function quickReply(r, text, outcome, extra) {
+    if (req === r) req = null;
+    if (card && card.req === r) card = null;
+    history.push({ role: 'assistant', content: text });
+    trimHistory();
+    say('alfred', text, extra);
+    logReply(r, outcome, text.length);
+    emitState();
+    return Object.assign({ ok: true, type: 'reply', text }, outcome === 'error' ? { failed: true } : {});
+  }
+  /** Do the quick card's steps in order (a later step needs the earlier one) and say what happened, plainly. */
+  async function runQuick(r, steps, { auto } = {}) {
+    const lines = []; let image = null; let failed = false;
+    for (let i = 0; i < steps.length; i++) {
+      const s = steps[i];
+      if (r.cancelled) { lines.push('Stopped. (Nothing else was done.)'); break; }
+      const out = await execute(s.tool, s.args, { auto });
+      if (out.image) image = out.image;
+      const msg = String(out.message || (out.ok ? 'Done.' : out.error || 'It failed.')).slice(0, 700);
+      if (out.ok) { lines.push(steps.length > 1 ? `✔ ${msg}` : msg); continue; }
+      failed = true;
+      lines.push(`${steps.length > 1 ? '✖ ' : ''}${s.tool.title} didn't work: ${msg}`);
+      if (i < steps.length - 1) lines.push(`So I didn't do the rest (${steps.slice(i + 1).map((x) => x.tool.title).join(', ')}).`);
+      break;
+    }
+    if (!lines.length) lines.push('Done.');
+    // the 🎨 "image is ready" notice already shows the picture when notices are on
+    return quickReply(r, lines.join('\n'), failed ? 'error' : r.cancelled ? 'cancelled' : 'done', image && !settings.notices ? { image } : undefined);
   }
 
   async function loop(r) {
@@ -513,20 +727,28 @@ function createAlfred(deps = {}) {
       emitState();
       return Object.assign({ ok: true }, out);
     };
-    const reply = (textOut, extra) => { say('alfred', textOut, extra); return finish(Object.assign({ type: 'reply', text: textOut }, extra || {})); };
+    const reply = (textOut, extra, outcome) => { say('alfred', textOut, extra); logReply(r, outcome || 'done', String(textOut || '').length); return finish(Object.assign({ type: 'reply', text: textOut }, extra || {})); };
     let cfg;
     try { cfg = await resolveBrain(); } catch (_) { cfg = { kind: 'local', endpoint: brainLib.DEFAULT_LOCAL_BASE, model: settings.local.model }; }
+    if (!Array.isArray(r.tools)) r.tools = [];
+    r.brain = cfg.kind; r.model = cfg.model || cfg.site || null;
     for (;;) {
-      if (r.cancelled) { log('alfred-cancel', { req: r.id, steps: r.steps }); return reply('Stopped. (Nothing else was done.)', { cancelled: true }); }
+      if (r.cancelled) { log('alfred-cancel', { req: r.id, steps: r.steps }); return reply('Stopped. (Nothing else was done.)', { cancelled: true }, 'cancelled'); }
       if (r.steps >= settings.maxSteps) {
         log('alfred-steps-limit', { req: r.id, steps: r.steps });
-        return reply(`I stopped after ${r.steps} steps (my limit for one request) so I don't go round in circles. Tell me what to do next, or ask in smaller pieces.`, { limit: true });
+        return reply(`I stopped after ${r.steps} steps (my limit for one request) so I don't go round in circles. Tell me what to do next, or ask in smaller pieces.`, { limit: true }, 'limit');
       }
-      if (cfg.missing) { lastAi = { kind: cfg.kind, ok: false, at: now(), model: null }; log('alfred-ai-error', { brain: cfg.kind, code: 'NO_AI' }); return reply(plainAiError({ kind: 'config', error: 'NO_AI' }, cfg), { notice: true }); }
+      if (cfg.missing) {
+        lastAi = { kind: cfg.kind, ok: false, at: now(), model: null }; log('alfred-ai-error', { brain: cfg.kind, code: 'NO_AI' });
+        const fb = await bookFallback(r, 'error'); if (fb) return fb;
+        return reply(plainAiError({ kind: 'config', error: 'NO_AI' }, cfg), { notice: true }, 'error');
+      }
       r.steps += 1;
       r.doing = 'thinking'; r.toolTitle = null;
       if (r.steps > 1) emitState();
       const messages = [{ role: 'system', content: systemPromptFor(settings) + bookNowPrompt() }].concat(history.map((m) => { const c = Object.assign({}, m); delete c._toolResult; delete c._tool; return c; }));
+      // the one stricter retry (free text that clearly asked for a picture / video, answered in words): for this call only
+      if (r.nudge) { messages.push({ role: 'user', content: r.nudge }); r.nudge = null; }
       let res;
       try { res = await brainLib.next(cfg, messages, tools(), { paneAsk: deps.paneAsk }, { signal: r.controller.signal }); }
       catch (_) { res = { ok: false, kind: 'network' }; }
@@ -537,16 +759,36 @@ function createAlfred(deps = {}) {
         if (res && res.status === 404 && cfg.kind === 'local') res.installed = await installedModels(cfg.endpoint);
         const lastMsg = history[history.length - 1];
         if (lastMsg && lastMsg.role === 'user' && !lastMsg._toolResult) history.pop(); // keep the conversation clean for next time
-        return reply(plainAiError(res, cfg), { notice: true, unreachable: res && (res.kind === 'network' || res.kind === 'timeout') });
+        const fb = await bookFallback(r, 'error', plainAiError(res, cfg)); if (fb) return fb;
+        return reply(plainAiError(res, cfg), { notice: true, unreachable: res && (res.kind === 'network' || res.kind === 'timeout') }, 'error');
       }
       lastAi = { kind: cfg.kind, ok: true, at: now(), model: cfg.model || cfg.site || null };
       const msg = res.message;
       if (!msg.toolCalls.length) {
+        // Free text that clearly asked for a picture / a video, answered in words only (no tool this request): once
+        // more with a plain instruction to use the tool; still words → a one-click "🎨 Make it now" card from the request.
+        const intent = !r.quick && !r.tools.length && !r.carded ? actionIntent(r.text) : null;
+        if (intent && !r.retried && r.steps < settings.maxSteps) {
+          r.retried = true;
+          log('alfred-retry', { req: r.id, intent: intent.kind, brain: r.brain, model: safeModel(r.model) });
+          r.nudge = `(A note from the app, not from the user.) The user asked you to make ${intent.kind === 'video' ? 'a video' : 'a picture'}. Call the ${intent.tool} tool NOW, with prompt = what they described. Do not answer in words: the app shows the user an "I will" card and nothing happens before they press Do it.`;
+          continue;
+        }
+        if (intent) {
+          log('alfred-no-action', { req: r.id, quick: `free:${intent.kind}`, brain: r.brain, model: safeModel(r.model), severity: 'warn' });
+          return directCard(r, [{ name: intent.tool, args: { prompt: intent.subject } }], {
+            fallback: true, doLabel: intent.kind === 'video' ? '🎬 Make it now' : '🎨 Make it now',
+            intro: `My AI answered only in words, so I've set it up from what you asked. Press ${intent.kind === 'video' ? '🎬' : '🎨'} Make it now, or ✖ No.`,
+          });
+        }
+        // 📖 My book / ✍ Continue answered in words without looking: the direct status (and a resume card) instead
+        const wordsOnly = !r.tools.length;
+        if (r.quick && wordsOnly) { const fb = await bookFallback(r, 'answered-in-words'); if (fb) return fb; }
         // what he says: no tool echoes, raw JSON or computer words (markdown stays: the panel formats it)
         const textOut = replyFormat.cleanReply(msg.content) || 'Done.';
         history.push({ role: 'assistant', content: textOut });
         trimHistory();
-        const out = reply(textOut);
+        const out = reply(textOut, undefined, wordsOnly ? 'answered-in-words' : 'done');
         // the model's own words before cleaning, for callers/tests that look at what the AI saw (never shown)
         const raw = String(msg.content || '').trim();
         if (raw && raw !== textOut) out.raw = raw;
@@ -609,6 +851,8 @@ function createAlfred(deps = {}) {
           public: { id, intro: msg.content ? replyFormat.cleanReply(msg.content).slice(0, 600) : '', steps: pending.map((p, i) => ({ n: i + 1, tool: p.tool.name, title: p.tool.title, text: p.text, allowAlways: registry.canAllowAlways(p.tool, p.args), allowKey: registry.allowKeyOf(p.tool, p.args), code: p.tool.interpreter ? { language: p.args.language, code: p.args.code } : (typeof p.tool.showCode === 'function' ? p.tool.showCode(p.args) : null) })) },
         };
         log('alfred-card', { req: r.id, card: id, tools: pending.map((p) => p.tool.name) });
+        r.carded = true;
+        logReply(r, 'card', card.public.intro.length);
         emit({ type: 'card', card: card.public });
         emitState();
         return { ok: true, type: 'confirm', card: card.public };
@@ -628,6 +872,7 @@ function createAlfred(deps = {}) {
     if (changed) { save(); log('alfred-settings', { alwaysAllow: Object.keys(settings.alwaysAllow) }); }
     log('alfred-confirm', { req: c.req.id, card: c.id, tools: c.steps.map((s) => s.tool.name) });
     emitState();
+    if (c.quick) return runQuick(c.req, c.steps); // the big buttons: done and said plainly, without asking his AI
     for (const s of c.steps) {
       if (c.req.cancelled) { history.push(toolMessage(s.call, { ok: false, error: 'CANCELLED', message: 'The user stopped it before this step; nothing was done.' })); continue; }
       const out = await execute(s.tool, s.args);
@@ -640,9 +885,10 @@ function createAlfred(deps = {}) {
     if (!card || card.id !== cardId) return { ok: false, error: 'NO_CARD' };
     const c = card;
     card = null;
-    for (const s of c.steps) history.push(toolMessage(s.call, { ok: false, error: 'DECLINED', message: 'The user said no. Nothing was done.' }));
+    if (!c.quick) for (const s of c.steps) history.push(toolMessage(s.call, { ok: false, error: 'DECLINED', message: 'The user said no. Nothing was done.' }));
     history.push({ role: 'assistant', content: "All right — I didn't do that." });
     log('alfred-reject', { req: c.req.id, card: c.id, tools: c.steps.map((s) => s.tool.name) });
+    logReply(c.req, 'declined', 0);
     if (req === c.req) req = null;
     say('alfred', "All right — I didn't do that.");
     emitState();
@@ -656,9 +902,10 @@ function createAlfred(deps = {}) {
     try { r.controller.abort(); } catch (_) {}
     if (card && card.req === r) {
       const c = card; card = null;
-      for (const s of c.steps) history.push(toolMessage(s.call, { ok: false, error: 'CANCELLED', message: 'The user stopped it; nothing was done.' }));
+      if (!c.quick) for (const s of c.steps) history.push(toolMessage(s.call, { ok: false, error: 'CANCELLED', message: 'The user stopped it; nothing was done.' }));
       req = null;
       log('alfred-cancel', { req: r.id, steps: r.steps });
+      logReply(r, 'cancelled', 0);
       say('alfred', 'Stopped. (Nothing else was done.)', { cancelled: true });
       emitState();
     }
@@ -805,7 +1052,7 @@ function createAlfred(deps = {}) {
   if (settings.enabled) startWatch();
 
   return {
-    status, getSettings: publicSettings, setSettings, setEnabled, ask, confirm, reject, cancel, clearChat, testAi,
+    status, getSettings: publicSettings, setSettings, setEnabled, ask, quick, confirm, reject, cancel, clearChat, testAi,
     personality, setPersonality, profiles, saveProfile, useProfile, deleteProfile, setPanel,
     onAppEvent, pollBooks, notice, stopWatch,
     isEnabled: () => settings.enabled,
@@ -813,4 +1060,4 @@ function createAlfred(deps = {}) {
   };
 }
 
-module.exports = { createAlfred, DEFAULTS, SYSTEM_PROMPT, plainAiError, NOTICE_MAX, PERSONALITY_PRESETS, personalityPrompt, systemPromptFor, checkPersonality, PROFILE_MAX };
+module.exports = { createAlfred, quickPlan, actionIntent, QUICK_KINDS, ACTION_KINDS, PICTURE_SIZES, DEFAULTS, SYSTEM_PROMPT, plainAiError, NOTICE_MAX, PERSONALITY_PRESETS, personalityPrompt, systemPromptFor, checkPersonality, PROFILE_MAX };
