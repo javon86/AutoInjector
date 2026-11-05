@@ -438,6 +438,8 @@ def line(cp: dict) -> str:
         bits.append(f"{c['listed']} small one{'s' if c['listed'] != 1 else ''} only one AI found (listed for you)")
     if cp.get("beats"):
         bits.append(f"{len(cp['beats'])} story beat{'s' if len(cp['beats']) != 1 else ''} not on the page")
+    if cp.get("stages"):
+        bits.append(f"{len(cp['stages'])} story stage{'s' if len(cp['stages']) != 1 else ''} not on the page")
     if not bits:
         bits.append("no problems found" if not c.get("possible") else "nothing the AI confirmed")
     if cp.get("status") == "incomplete":
@@ -640,6 +642,11 @@ def _run_one(svc, run: dict, st: dict, cp: dict, chapters: list[dict]) -> None:
         if _is_stretch(cp):
             ctx["stretch"] = {"chapters": label, "after_chapter": cp["after"]}
             task += STRETCH_TASK
+            kd = _kind_of_stretch(svc, run, outline, nums_here)
+            if kd:  # 📚 is the story on its way to its kind's promise?
+                from .story_kind import STRETCH_RULE  # noqa: PLC0415
+                ctx["stretch"]["story_kind"] = kd
+                task += STRETCH_RULE
         if len(checkers) >= 2:
             _read_part_by_all(svc, run, cp, part, j, rid, ctx, task, checkers, texts, order, title, label, k)
             continue
@@ -838,7 +845,31 @@ def _beats(svc, run: dict, st: dict, cp: dict, chapters: list[dict], outline: di
             raise
         log.exception("checkpoint story beats")
         cp["beats"] = []
+    try:  # 📚 the stages of the kind of story that did not begin on the page: one targeted fix, then listed
+        from . import story_kind  # noqa: PLC0415
+        cp["stages"] = story_kind.fix_stages(svc, run, st, outline, chapters, upto=cp["after"],
+                                             where="ending" if cp.get("final") else "checkpoint")
+    except Cancelled:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        if getattr(exc, "control", False) or type(exc).__name__ == "StepProblem":
+            raise
+        log.exception("checkpoint story stages")
+        cp["stages"] = []
     _put(svc.store, run["project_id"], run.get("branch_id") or "main", cp)
+
+
+def _kind_of_stretch(svc, run: dict, outline: dict | None, nums: set) -> dict | None:
+    """📚 For the stretch review: the book's kind of story, its promise and the stage(s) these chapters serve."""
+    if not outline or not nums:
+        return None
+    try:
+        from . import story_kind  # noqa: PLC0415
+        return story_kind.stretch_brief(svc.store, run["project_id"], run.get("branch_id") or "main", outline,
+                                        min(nums), max(nums))
+    except Exception:  # noqa: BLE001
+        log.exception("story kind for the stretch review")
+        return None
 
 
 def _is_stretch(cp: dict) -> bool:
@@ -977,14 +1008,16 @@ def _setups_so_far_(svc, run: dict, cp: dict) -> None:
     pid, branch = run["project_id"], run.get("branch_id") or "main"
     try:
         _premise, plot, outline = ending_check._plan(svc.bp(run))  # noqa: SLF001
-        if not (plot.get("plot_obligations") or outline.get("unresolved_threads")):
+        from . import story_kind  # noqa: PLC0415 - 📚 a kind of story: is it still on its way to its promise?
+        if not (plot.get("plot_obligations") or outline.get("unresolved_threads")
+                or story_kind.of_store(svc.store, pid)):
             cp["ending"] = {"skipped": "no setups or threads in the plan"}
             return
         review = getattr(svc, "_review", None) or svc.app.review
         job = svc._sub_job(run, "ending_check", "book", (run.get("settings") or {}).get("slot_id"))  # noqa: SLF001
         job.retry_busy = False
         res = ending_check.check(review, job, upto=cp["after"], final=False)
-        dropped = [o for o in res.get("open") or [] if o.get("kind") in ("setup", "thread")]
+        dropped = [o for o in res.get("open") or [] if o.get("kind") in ("setup", "thread", "story_kind")]
         cp["ending"] = {"line": ending_check.summary_line(res), "open": [o["line"] for o in dropped][:6],
                         "at": _now()}
         if dropped:
@@ -1139,6 +1172,7 @@ def report(store, pid: str, branch: str) -> list[dict]:
                     "finished_at": c.get("finished_at"), "redo_because": c.get("redo_because"),
                     "setups": (c.get("ending") or {}).get("open") or [],
                     "beats": list(c.get("beats") or []),
+                    "stages": list(c.get("stages") or []),
                     "unplanned": list(c.get("unplanned") or [])})
     return out
 
@@ -1177,6 +1211,8 @@ def markdown(rep: list[dict]) -> list[str]:
             out.append(f"- 🧠 {x}")
         for x in c.get("beats") or []:
             out.append(f"- 📐 {x}")
+        for x in c.get("stages") or []:
+            out.append(f"- 📚 {x}")
         for p in c["problems"]:
             out.append(f"- Chapter {p.get('number')}: {p.get('problem')} — {STATUS_WORDS.get(p.get('status'), '')}"
                        + (f" ({p['why']})" if p.get("why") and p.get("status") != "fixed" else "")

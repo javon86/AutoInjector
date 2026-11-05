@@ -96,10 +96,22 @@ bridge to your home Wi-Fi, behind its key.
   though you may spot them in that AI's own pane. If the AI fails, AutoInjector works out why and tries to fix it:
   other ways to find the box or the reply, a page reload, pressing Stop on a stuck AI. If an AI was busy with
   something, it is then asked to carry on where it left off.
+  - **Slow is not broken:** each AI's wait follows how long its check-ins really take (Gemini usually answers in
+    about 16 seconds but sometimes takes over 2 minutes), and while a reply is still being written the wait goes on,
+    up to 3 minutes. Stop is only pressed when the reply has not changed for a while. An answer that comes in while
+    AutoInjector is still checking or repairing (to that check-in or an earlier one) stops the repair; the AI is
+    marked 🐢 slow, not broken.
+  - If the site answers a check-in with its own error notice ("Sorry, something went wrong…"), AutoInjector
+    reloads the window at once instead of waiting.
+  - If the page ignores AutoInjector's typed click or Enter (seen on Gemini just after start), the message is sent
+    with a real Enter key, then a real click on Send.
 - **🎯 Point at it and learned selectors:** websites change their layout. A "selector" is the address of a thing on
   the page, such as "the reply box". When the built-in ones stop working, you can click 🎯 and point at the message
   box, the Send button or the reply. AutoInjector saves that per site. **🔢 Do it for me with a number** teaches it
-  by watching you type a number. **↺ Forget what I taught** goes back to the built-in ways.
+  by watching you type a number. **↺ Forget what I taught** goes back to the built-in ways. A saved part that
+  failed 3 times in a row while the built-in way worked is forgotten by itself, and the log says so once ("ChatGPT's
+  saved Send button was out of date and has been forgotten; the built-in one works"). **↺ Undo** on the 🎯 card
+  brings it back. A part you saved in the last hour is never forgotten this way.
 - **Logs and 📋 Extract:** the app keeps an activity log and a record of every message's journey (the Relay
   Trace). Extract turns these into one file you can share. Keys and private paths are removed.
 
@@ -119,8 +131,13 @@ bridge to your home Wi-Fi, behind its key.
      refused, the work goes to another AI that works before anything stops.
 - **When it can't answer:**
   - **Busy:** one request per AI at a time. A second one hears "busy", and Akọwe waits and retries.
-  - **Site error:** the site showed its own notice ("Something went wrong", a usage limit). Akọwe waits (30 s, or
-    60 s after a usage limit, then longer, up to 2 minutes each and about 10 minutes in all) or uses another AI.
+  - **Site error:** the site showed its own notice ("Something went wrong", a usage limit) or a short canned
+    refusal ("I'm having a hard time fulfilling your request. Can I help you with something else instead?"). Akọwe
+    waits (30 s, or 60 s after a usage limit, then longer, up to 2 minutes each and about 10 minutes in all) or uses
+    another AI. When the refused prompt was very long (30,000 characters or more), the note says so.
+  - **Chat full:** the site says the conversation is too long ("…exceed the length limit for this chat", "start a
+    new chat"). Akọwe hears "site error: chat full" and asks again after 10 seconds; AutoInjector opens a fresh chat
+    in that pane first (see **Fresh chats** below).
   - **Every AI at its usage limit:** Akọwe waits for a limit to reset, by itself: "All AIs hit their usage limits
     — waiting; resumes by itself at about 3:40 PM" shows in the run window and the activity strip. It checks every
     few minutes (or at the reset time the site showed) for up to 6 hours (Settings › ⏳ When the AI is busy), then
@@ -131,6 +148,13 @@ bridge to your home Wi-Fi, behind its key.
     the same request number, so nothing is typed twice). If none comes, the work goes to another AI that works, or,
     with only one AI, that AI is asked once more after a minute. Only then does the step pause for 🔁 Try again. A
     late answer is never used twice.
+- **Fresh chats:** a book run sends about 1,000 messages. Kept in one chat, the chat gets slow and the site stops
+  it ("this chat is too long"). So AutoInjector opens a **new chat** in an AI's pane for Akọwe after **15 Akọwe
+  requests** or about **300,000 characters** in that chat (change it in the 📖 Akọwe panel: 🆕 Fresh chat for
+  Akọwe), and at once when the site says the chat is full. It presses the site's own **New chat** button, or opens
+  the site's new-chat page if that button can't be found. It only happens **between** Akọwe requests (never while
+  an AI is writing), and never in a pane **you** used yourself in the last 10 minutes (unless the site says the chat
+  is full). The activity log says each time, in plain words. Code: `desktop-app/fresh-chat.js`.
 - A second door, the **service bridge** (port 8765), does more than the AI bridge. Akọwe uses it for pictures,
   video clips, trailers, the ebook cover JPG and the Book Bible PDF. It also carries the app's tools, voice (speak
   and listen), messages to the AIs, live events, and the phone page.
@@ -180,6 +204,8 @@ bridge to your home Wi-Fi, behind its key.
   teaches it one look or style.
 - **🔒 Character locks:** a saved recipe (a LoRA, trigger words, fixed looks, or a portrait) that keeps one
   character's face the same in every picture. In a ⚡ run, each character's portrait becomes its lock.
+- If you turn on something the picture program doesn't have (ADetailer or ControlNet on a Forge without that
+  extension), the picture is still made without it, and a ⚠ line says what was left out and how to add it.
 - Pictures are saved in `stuff and thing/images/`, each with a `.json` file of the settings that made it.
 - **Tested for real:** pictures have been made with Forge on your PC.
 
@@ -222,13 +248,17 @@ bridge to your home Wi-Fi, behind its key.
 ## 3. What happens when you press ⚡ Make a book
 
 Pressing Start is your **consent for this run only**. The run makes a brand-new book; your other books are never
-touched. It works in the background, so you can close the window. First, AutoInjector checks in with every AI (up
+touched. It works by itself, so you can leave the PC: AutoInjector keeps the PC from going to sleep while the book
+is being written, and tells you (a Windows notification) if the run needs you (see **"Leaving a long run on its
+own"** below). If you close the AutoInjector window while it works, it asks first; choose **Keep running in the
+background** to carry on. First, AutoInjector checks in with every AI (up
 to a minute), so the run knows which AIs work.
 
 1. **Safety backup** of all your books.
 2. **Invent the book:** title, pen name, genre, readers, tone and the idea. The point of view (first or third
    person) and the tense (past or present) are fixed here too, from your choice, else the AI's pick for this
-   story, else the genre's usual.
+   story, else the genre's usual. If you left the **kind of story** to the AI, it picks the one of the seven basic
+   plots that fits the idea best here, and the run's notes and the plan page say which and why.
 3. **Characters and places:** drafted, reviewed, approved. The main character (★) is guaranteed to exist.
 4. **Character sheets and voices:** what each character wants, needs, fears and hides, and a **voice card** for
    how each one talks.
@@ -240,6 +270,10 @@ to a minute), so the run knows which AIs work.
    Cat, Hero's Journey or Seven-point), the outline is planned on it and each of its beats is placed on a chapter
    (shown as "Ch 22 · Dark night of the soul" on the plan page and in the Book Bible); a beat the AI leaves out or
    misplaces goes where it usually falls in a book.
+   If you picked a **kind of story** (the seven basic plots: Overcoming the Monster, Rags to Riches, The Quest,
+   Voyage and Return, Comedy, Tragedy, Rebirth) — or left it to the AI, which then picks one in step 2 and says
+   which — the premise, main plot and outline are planned through its stages, and each stage gets the chapters it
+   covers (shown as "Ch 9–11 · The nightmare" with the kind's promise, such as "the hero defeats the monster").
    - **Optional: the writers' room for the big twists** (off unless you turn it on at the start). Before the main
      plot, and before the middle chapter and the climax, each working AI pitches an idea and they vote blind. The
      winner is used under your run consent and written in the journal. It never holds up the book.
@@ -269,6 +303,10 @@ to a minute), so the run knows which AIs work.
    - **Planned-to-page check:** did the plan really reach the page? At most one targeted fix. With a story shape,
      the chapter's beat is part of the plan: the scene cards, the writer and the reviewer are told "this chapter must
      deliver …", and the checkpoints and the ending check list any beat that did not land (one targeted fix).
+     With a kind of story, the chapter's brief names the stage it serves ("This chapter serves the stage “The
+     nightmare” …") and the kind's promise; the chapter where a stage begins must show it (same check and fix), the
+     5-chapter review asks whether the story is on its way to the promise, and the ending check asks "Does the ending
+     deliver a Tragedy's downfall?" (or the monster's defeat, the happy union …) and fixes the last chapter once if not.
    - **Approved** under your run consent. Then the **running notes (ledgers)** are updated: injuries, belongings,
      who is where, the day and season, who knows which secret, names, money.
    - **🔎 All-AI check of the chapter:** every working AI — the writer too — reads the chapter in full against its
@@ -339,6 +377,35 @@ to a minute), so the run knows which AIs work.
 
 **⏸ Pause** stops after the current piece of work. **▶ Resume** continues exactly where it stopped.
 **✖ Cancel** ends the run; what is done is kept.
+
+### Leaving a long run on its own
+
+A 40–50 chapter book takes a day or two. AutoInjector looks after it while you are away
+(code: `desktop-app/run-guard.js`):
+
+- **The PC stays awake.** While a book is being written (or a video or picture is being made, or Akọwe is waiting
+  for an AI), Windows is told not to go to sleep. The screen may still turn off; that is fine. Two minutes after
+  everything is idle, the PC may sleep again as usual. A Windows restart (updates) still stops the run: press
+  **▶ Resume** afterwards.
+- **Closing the window.** While something works, closing the AutoInjector window asks: "A book is being written.
+  Keep it running in the background, or stop it?"
+  - **Keep running in the background:** the window hides and the work carries on. A small AutoInjector icon (a blue
+    square with a white book) appears by the clock, bottom right (it may be under the **^** arrow). Click it to open
+    the window again; right-click it for **Stop everything and quit**.
+  - **Stop it and quit:** everything stops now. The run shows **Interrupted**; **▶ Resume** carries on later.
+  - **Cancel:** nothing changes.
+  When nothing is working, the window just closes, as before.
+- **Minimised is fine.** The AI panes keep working at full speed when the window is minimised or hidden.
+- **It tells you when it needs you.** A Windows notification, and the taskbar button flashes until you come back,
+  when: the run is paused or needs your decision; an AI's pane is logged out, shows an "are you human?" check, or
+  stopped working and could not be fixed (only while a book is being made); or every AI has hit its usage limit.
+  Click the notification to open the right place (the 📖 Akọwe tab for the run). Each one is said once, and again
+  after 30 minutes if it is still waiting. Turn it off, or turn its sound off, in the 📖 Akọwe panel
+  (🖥 Tell me on the desktop when a book needs me · with a sound).
+- **Memory stays small.** The conversation list keeps only the first 2,000 characters of each answer Akọwe took
+  ("… (full answer handed to Akọwe)" — Akọwe saves the whole answer in the book), keeps the newest 2,000 messages
+  (older ones go to `autoinjector-transcript-archive.jsonl` in the settings folder), and shows the newest 300 with
+  a **⬆ Show older messages** button. The settings file is saved in the background, at most every few seconds.
 
 ## 4. How quality is kept
 
@@ -459,7 +526,7 @@ then carries the locked facts, belongings, status and a summary of book 1.
 | Reports and test results | `stuff and thing/logs/` |
 | Your books | `Documents\Akowe Books\` in your real Documents folder, also when Windows moved it to OneDrive (change it in Akọwe → Settings → 📁 Where books are saved; a folder OneDrive, Dropbox or Google Drive syncs gets a ⚠️ and a button for a folder they do not sync) |
 | Akọwe's working data and backups | `%LOCALAPPDATA%\Akowe` (backups share unchanged pictures and clips instead of copying them again; its own log is `logs\akowe.log`, 10 MB × 5 files) |
-| AutoInjector settings, transcript, connection key | `%APPDATA%\autoinjector-desktop\` |
+| AutoInjector settings, transcript, connection key | `%APPDATA%\autoinjector-desktop\` (older messages: `autoinjector-transcript-archive.jsonl`, then `.1`) |
 
 **Inside one book's folder:** `Book/` (PDF, EPUB, Word), `Chapters/`, `Book Bible/`, `Reports/`, `Log/` (the
 journal), `Progress/`, `Cover/`, `Pictures/`, `Character Forge/`, `Trailer/`, `Launch kit/` (the store listing: launch-kit.md and one .txt per part), `Marketing/` (the 📣 mockups, ads and teaser clips), and **`book.akowe`**. That last file
@@ -479,7 +546,10 @@ quietly every 10 minutes when a book has changed.
   **🎯 Point at it** or **🔢 Do it for me with a number**.
 - **Logged out, "are you human?", usage limit:** the AI's card shows **⚠️ Needs you**. Fix it in the pane.
   AutoInjector notices by itself. Meanwhile, Akọwe sends the work to the other AIs.
-- **A book run pauses with ⚠️:** read the message on that step. It says what to press.
+- **A book run pauses with ⚠️:** read the message on that step. It says what to press. If you were away, a Windows
+  notification told you (click it to go straight there).
+- **"This chat is too long" in an AI's pane:** nothing to do. AutoInjector opens a fresh chat there before
+  Akọwe's next request. You can also press the pane's own **New chat**.
 - **Pictures or video fail:** run **🩺 Test pictures & video**. Each ❌ says what to try.
 - **Not sure what's wrong:** Alfred's **🩺 Check everything**.
 - **To share a log:** **📋 Extract** → **Last 24 hours**. Never choose **Everything**: it includes all your older,

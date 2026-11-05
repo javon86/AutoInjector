@@ -152,6 +152,18 @@ async function main() {
   assert(r.status === 200 && r.json.ok && a.state.lastTxt2img.enable_hr === true && a.state.lastTxt2img.hr_upscaler === 'Latent' && r.json.warnings.some((w) => /no upscaler called “Magic 8x”/.test(w.message)), 'an upscaler the app doesn\'t have is left out (its default is used) with a plain warning — not a 400 / 500');
   r = await req(st.port, 'POST', '/image/request', { prompt: 'x', hires: { upscaler: 'r-esrgan 4x+' } }, TOKEN);
   assert(r.status === 200 && a.state.lastTxt2img.hr_upscaler === 'R-ESRGAN 4x+', 'an upscaler name in other case / punctuation is sent in the app\'s own spelling');
+  console.log('\n== PR #120: 🎨 Generate on Forge with ADetailer on, but Forge has no ADetailer -> made without it, plain warning ==');
+  const forgeNoAd = await fakeA1111({ flavor: 'forge', noExtensions: true, title: 'Stable Diffusion WebUI Forge' });
+  await studio.connect(forgeNoAd.base);
+  const logs0 = logs.length;
+  g = await studio.generate({ prompt: 'a lighthouse keeper', steps: 20, width: 512, height: 512, cfgScale: 7, adetailer: [{ model: 'face_yolov8n.pt', confidence: 0.3 }] }, 'images-tab');
+  const gl = logs.slice(logs0).filter((x) => x[0] === 'sd-generate').pop();
+  assert(g.ok && g.images.length === 1 && fs.existsSync(g.images[0].path) && !forgeNoAd.state.lastTxt2img.alwayson_scripts, `the picture is made (no UNSUPPORTED_ON_BACKEND dead end), without ADetailer (${g.ok ? 'ok' : g.code})`);
+  const adw = (g.warnings || []).find((w) => w.field === 'adetailer');
+  assert(adw && adw.kind === 'skipped' && /^ADetailer \(fix faces \/ hands\) was left out/.test(adw.message) && /install ADetailer/.test(adw.message), `a plain warning names what was skipped (${adw && adw.message})`);
+  assert(gl && gl[1].ok === true && gl[1].from === 'images-tab' && Array.isArray(gl[1].skipped) && gl[1].skipped[0] === 'adetailer', `the log line says it worked and what was left out (${JSON.stringify(gl && gl[1])})`);
+  await forgeNoAd.close();
+  await studio.connect(a.base);
   await a.close();
   r = await req(st.port, 'POST', '/image/request', { prompt: 'x' }, TOKEN);
   assert(r.status === 502 && /Nothing is answering|closed the connection/.test(r.json.message), 'SD app gone → 502 with a plain message');

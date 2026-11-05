@@ -45,7 +45,7 @@ NOT_INDEPENDENT = "Reviews are not independent — the same AI wrote and reviewe
 
 KIND_WORDS = {"beat": "Outline beat", "scene_obstacle": "Scene obstacle", "scene_change": "Scene change",
               "scene_goal": "Scene goal", "name": "Name on the page", "must_show": "Must show",
-              "detail": "Planned detail", "story_beat": "Story beat"}
+              "detail": "Planned detail", "story_beat": "Story beat", "story_stage": "Story stage"}
 
 _S = {"type": "string"}
 AI_SCHEMA = {"type": "object", "additionalProperties": False, "required": ["items"],
@@ -166,6 +166,13 @@ def planned_items(bp, outline, chapter_id: str) -> list[dict]:
                 f"{b.get('how') or b['what']}", beat=b["id"])
     except Exception:  # noqa: BLE001 - optional
         log.exception("could not read the story beats")
+    try:  # 📚 the stage(s) of the book's kind of story that BEGIN in this chapter
+        from . import story_kind  # noqa: PLC0415
+        for sg in story_kind.chapter_planned(store, pid, branch, outline, chapter_id):
+            add("story_stage", story_kind.planned_text(sg), label=f"{KIND_WORDS['story_stage']}: {sg['name']} — "
+                f"{sg.get('how') or sg['what']}", stage=sg["id"])
+    except Exception:  # noqa: BLE001 - optional
+        log.exception("could not read the story stages")
     cs = chars_mod.canon_characters(store, pid, branch)
     pov = next((c for c in cs if me["pov_id"] and me["pov_id"] in (c["subject_id"], c["record_id"])), None)
     if pov:
@@ -197,7 +204,7 @@ def planned_items(bp, outline, chapter_id: str) -> list[dict]:
 
 # H13: when there are more items than can be checked, the least important go first (never a must-show before a
 # scene goal or a planned detail); the kept items stay in their order.
-PRIORITY = {"beat": 0, "story_beat": 0, "must_show": 1, "name": 2, "scene_change": 3, "scene_obstacle": 4, "scene_goal": 5, "detail": 6}
+PRIORITY = {"beat": 0, "story_beat": 0, "story_stage": 0, "must_show": 1, "name": 2, "scene_change": 3, "scene_obstacle": 4, "scene_goal": 5, "detail": 6}
 
 
 def most_important(items: list[dict], n: int) -> list[dict]:

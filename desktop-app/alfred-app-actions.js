@@ -189,6 +189,9 @@ A('selfrepair.teach_cancel', 'selfrepair:teach-cancel', { t: 'Cancel the number 
 A('selfrepair.reload', 'selfrepair:reload', { t: 'Reload an AI pane and re-check it', c: true, aa: true, a: { site }, r: ['site'], ex: { site: 'gemini' } });
 A('selfrepair.forget_learned', 'selfrepair:forget-learned', { t: 'Forget what self-repair learned about an AI page', c: true, a: { site }, r: ['site'], ex: { site: 'gemini' } });
 A('selfrepair.settings', 'selfrepair:settings', { t: 'Check-in settings (every N minutes, at start, ask the AI to carry on after a check-in)', c: true, aa: true, a: { intervalMin: { type: 'integer', minimum: 0, maximum: 1440 }, startup: { type: 'boolean' }, carryOn: { type: 'boolean' } }, ex: { intervalMin: 30 } });
+A('attention.settings', 'attention:settings', { t: 'Desktop notifications when a book needs you (on/off, with a sound)', c: true, aa: true, a: { notify: { type: 'boolean' }, sound: { type: 'boolean' } }, ex: { sound: false } });
+A('attention.test', 'attention:test', { t: 'Show a test desktop notification', c: true, aa: true });
+A('akowe.fresh_chat_settings', 'akowe:fresh-chat-settings', { t: 'How often Akọwe gets a fresh chat in each AI (every N requests / about N characters; 0 = never by that)', c: true, aa: true, a: { everyRequests: { type: 'integer', minimum: 0, maximum: 500 }, everyChars: { type: 'integer', minimum: 0, maximum: 50000000 } }, ex: { everyRequests: 15 } });
 A('picker.status', 'picker:status', { t: '🎯 picker state for an AI', c: false, a: { site }, r: ['site'], ex: { site: 'claude' } });
 A('picker.start', 'picker:start', { t: '🎯 Start pointing at a part of an AI page (you point)', c: true, a: { site, role: { type: 'string', enum: ['input', 'send', 'assistant'] } }, r: ['site', 'role'], ex: { site: 'claude', role: 'input' } });
 A('picker.cancel', 'picker:cancel', { t: '🎯 Cancel pointing', c: true, aa: true, a: { site }, r: ['site'], ex: { site: 'claude' } });
@@ -197,6 +200,7 @@ A('picker.clear', 'picker:clear', { t: '🎯 Clear a saved part', c: true, a: { 
 A('picker.test', 'picker:test', { t: '🎯 Test the saved parts', c: true, aa: true, a: { site }, r: ['site'], ex: { site: 'claude' } });
 A('picker.force', 'picker:force', { t: '🎯 "Use it anyway": take the reply pick that looked like your own message', c: true, a: { site, role: { type: 'string', enum: ['assistant'] } }, r: ['site'], ex: { site: 'claude', role: 'assistant' } });
 A('picker.forget_all', 'picker:forget-all', { t: '↺ Forget everything taught (🎯 / 🔢) and learned for an AI — back to the built-in reader', c: true, a: { site }, r: ['site'], ex: { site: 'claude' } });
+A('picker.undo_retire', 'picker:undo-retire', { t: '↺ Undo: bring back a saved part AutoInjector forgot as out of date (the built-in one worked)', c: true, a: { site, role: { type: 'string', enum: ['input', 'send', 'assistant', 'user', 'image'] } }, r: ['site'], ex: { site: 'chatgpt', role: 'send' } });
 A('picker.page_structure', 'picker:page-structure', { t: '📋 Copy how an AI page is built (tags and counts only, no message text) to the clipboard', c: true, aa: true, a: { site }, r: ['site'], ex: { site: 'claude' } });
 A('selector.clear', 'selector:clear', { t: 'Clear a hand-picked selector', c: true, a: { site, role: opt(20) }, r: ['site', 'role'], ex: { site: 'claude', role: 'input' } });
 

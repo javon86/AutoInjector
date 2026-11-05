@@ -420,6 +420,43 @@ async function testStaleSavedSendFallsBack() {
     assert(res.ok === true && res.verified === true && res.method === "enter" && res.savedSend === "missing" && posted.length === 2, `then the Enter key sends it — proven, with method "enter" (${JSON.stringify(res)})`);
   }, "?site=chatgpt&quirks=none");
 }
+// PR #120 (log 2026-11-04): Gemini SEND_NOT_CONFIRMED ×3 just after start — the text
+// in the box, Send visible and enabled, the saved Send button reported "missing".
+async function testUntrustedEventsIgnored() {
+  console.log("\n== PR #120: a page that ignores script-made click / Enter — main.js's REAL Enter / click sends it ==");
+  const ov = { send: 'button[aria-label="Send message"]' };
+  await withFixture("fake-chat.html", async (page) => {
+    let res = await page.evaluate(buildSendScript("gemini", "[MSG #0001]\nReply with only this word: walrus", ov));
+    let f = await page.evaluate(() => ({ posted: window.__fake.posted.length, untrusted: window.__fake.untrusted || 0 }));
+    assert(res.ok === false && res.error === "SEND_NOT_CONFIRMED" && res.diag.boxChars > 0 && res.diag.button && res.diag.button.visible && !res.diag.button.disabled && f.posted === 0 && f.untrusted >= 2, `the log's case reproduced: text in the box, Send visible + enabled, script click and Enter ignored (${JSON.stringify({ error: res.error, boxChars: res.diag.boxChars, untrusted: f.untrusted })})`);
+    assert(!res.savedSend && res.diag.savedSend === "found", `the saved Send button (only shown once the box holds text) is NOT called missing (${res.savedSend || res.diag.savedSend})`);
+    const fo = await page.evaluate(buildSendScript("gemini", "[MSG #0001]\nReply with only this word: walrus", ov, { mode: "focus", markerBaseline: res.markerBaseline }));
+    assert(fo.ok && fo.holds === true && fo.button && fo.button.x > 0 && fo.button.y > 0 && !fo.alreadySent, `focus step: the box still holds the message, caret at its end, Send's place given (${JSON.stringify(fo.button)})`);
+    await page.keyboard.press("Enter"); // a REAL key press, like webContents.sendInputEvent
+    const c = await page.evaluate(buildSendScript("gemini", "[MSG #0001]\nReply with only this word: walrus", ov, { mode: "confirm", method: "trusted-enter", markerBaseline: res.markerBaseline, turnsBefore: fo.turnsBefore }));
+    f = await page.evaluate(() => ({ posted: window.__fake.posted.length }));
+    assert(c.ok && c.verified === true && c.method === "trusted-enter" && f.posted === 1, `a real Enter sent it — proven by its [MSG #] (${JSON.stringify({ ok: c.ok, verified: c.verified, method: c.method, proof: c.proof })})`);
+    await waitFake(page);
+    // a page whose Enter does nothing at all: the real click on Send
+    await page.evaluate(() => { document.querySelector(".ql-editor").addEventListener("keydown", (e) => { if (e.key === "Enter") e.stopImmediatePropagation(); }, true); });
+    res = await page.evaluate(buildSendScript("gemini", "[MSG #0002]\nsecond", ov));
+    const fo2 = await page.evaluate(buildSendScript("gemini", "[MSG #0002]\nsecond", ov, { mode: "focus", markerBaseline: res.markerBaseline }));
+    await page.keyboard.press("Enter");
+    let c2 = await page.evaluate(buildSendScript("gemini", "[MSG #0002]\nsecond", ov, { mode: "confirm", method: "trusted-enter", markerBaseline: res.markerBaseline, turnsBefore: fo2.turnsBefore }));
+    assert(c2.ok === false && c2.error === "SEND_NOT_CONFIRMED", "(Enter does nothing on this page)");
+    // (Enter may have added a line to the box and moved Send: ask for its place again)
+    const fo3 = await page.evaluate(buildSendScript("gemini", "[MSG #0002]\nsecond", ov, { mode: "focus", markerBaseline: res.markerBaseline }));
+    await page.mouse.click(fo3.button.x, fo3.button.y);
+    c2 = await page.evaluate(buildSendScript("gemini", "[MSG #0002]\nsecond", ov, { mode: "confirm", method: "trusted-click", markerBaseline: res.markerBaseline, turnsBefore: fo2.turnsBefore }));
+    assert(c2.ok && c2.verified === true && c2.method === "trusted-click" && (await page.evaluate(() => window.__fake.posted.length)) === 2, `a real click on Send sent it (${JSON.stringify({ ok: c2.ok, method: c2.method })})`);
+    const again = await page.evaluate(buildSendScript("gemini", "[MSG #0002]\nsecond", ov, { mode: "focus", markerBaseline: res.markerBaseline }));
+    assert(again.ok && again.alreadySent === true, "a focus step after it went out says so (never sent twice)");
+  }, "?site=gemini&quirks=rich,disabledsend&trusted=1&latesend=1");
+  await withFixture("fake-chat.html", async (page) => {
+    const res = await page.evaluate(buildSendScript("gemini", "[MSG #0001]\nhello", ov));
+    assert(res.ok && res.verified === true && !res.savedSend, `an ordinary page: sent by the script, and a Send button that appears only after typing is not "missing" (${JSON.stringify({ ok: res.ok, savedSend: res.savedSend })})`);
+  }, "?site=gemini&quirks=rich,disabledsend&latesend=1");
+}
 async function testBoxEmptiedNothingSent() {
   console.log("\n== PC test: the box empties but nothing is sent — never 'verified' ==");
   await withFixture("fake-chat.html", async (page) => {
@@ -589,6 +626,7 @@ async function main() {
   await testCurlyQuotesReadWhole();
   await testStaleSavedSendFallsBack();
   await testBoxEmptiedNothingSent();
+  await testUntrustedEventsIgnored();
   await testSurveyDismissed();
   await testClaudeRowsRead();
   await testClaudeRowsTaughtSelectors();

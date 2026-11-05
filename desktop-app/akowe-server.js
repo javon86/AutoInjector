@@ -155,6 +155,9 @@ function createServerManager(opts) {
   const ping = o.ping || httpPing;
   const isPortFree = o.portFree || portFree;
   const exists = o.exists || fs.existsSync;
+  // the folder for Akọwe's private Python environment (tests pass their own, so a Windows path like C:\L\Akowe is
+  // never made as a folder on a Linux test machine)
+  const mkdirp = typeof o.mkdir === 'function' ? o.mkdir : (d) => fs.mkdirSync(d, { recursive: true });
   const readFile = o.readFile || ((f) => fs.readFileSync(f, 'utf8'));
   const rename = o.rename || fs.renameSync;
   const now = o.now || Date.now;
@@ -278,7 +281,7 @@ function createServerManager(opts) {
     set({ phase: 'preparing', message: 'First start: preparing Akọwe’s own Python environment (about a minute)…' });
     logger('venv-create', { python: basePy.version });
     writeLog(`[AutoInjector] making Akọwe's private Python environment in ${P.join(home, 'venv')}`);
-    try { fs.mkdirSync(home, { recursive: true }); } catch (_) {}
+    try { mkdirp(home); } catch (_) {}
     const r = await run(basePy.cmd, [...basePy.args, '-m', 'venv', P.join(home, 'venv')], o.venvTimeoutMs);
     if (r.stderr) writeLog(r.stderr);
     if (r.ok && exists(vpy)) {

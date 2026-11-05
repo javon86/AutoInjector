@@ -53,7 +53,7 @@ const LEARNED_VERSION = 1;
 
 // ---- P18.2 failure codes -----------------------------------------------------------
 const CODES = ['TYPE_FAILED', 'SEND_NOT_CONFIRMED', 'NO_REPLY_FOUND', 'FALSE_DUPLICATE', 'STUCK_GENERATING',
-  'LOGGED_OUT', 'CAPTCHA', 'USAGE_LIMIT', 'NETWORK_ERROR', 'PAGE_ERROR', 'UNKNOWN'];
+  'LOGGED_OUT', 'CAPTCHA', 'USAGE_LIMIT', 'CHAT_FULL', 'NETWORK_ERROR', 'PAGE_ERROR', 'UNKNOWN'];
 const USER_ONLY = new Set(['LOGGED_OUT', 'CAPTCHA', 'USAGE_LIMIT']);
 const STATES = ['ok', 'repairing', 'needs_user', 'broken', 'unknown'];
 
@@ -67,6 +67,7 @@ const PROBLEM_TEXT = {
   LOGGED_OUT: { short: 'logged out', say: (L) => `${L} is logged out.`, fix: (L) => [`Open ${L}'s window (its pane in AutoInjector) and log in.`, 'AutoInjector notices by itself when you are back and checks again — nothing else to do.'] },
   CAPTCHA: { short: 'human check', say: (L) => `${L} is showing an "are you a human?" check.`, fix: (L) => [`Open ${L}'s window and complete the check (tick the box / solve the puzzle).`, 'AutoInjector notices by itself when it is gone and checks again.'] },
   USAGE_LIMIT: { short: 'usage limit', say: (L) => `${L} says you've reached its usage limit.`, fix: (L) => [`Wait until the time ${L} shows in its window (or switch to another account / plan).`, 'AutoInjector re-checks every minute and carries on by itself when the limit is gone.', 'Meanwhile Akọwe can use your other AIs.'] },
+  CHAT_FULL: { short: 'chat full', say: (L) => `${L} says this chat is too long ("start a new chat").` },
   NETWORK_ERROR: { short: "didn't load", say: (L) => `${L}'s page didn't load (no internet, or the site is down).` },
   PAGE_ERROR: { short: 'page error', say: (L) => `${L}'s page shows an error ("something went wrong").` },
   UNKNOWN: { short: 'not answering', say: (L) => `${L} didn't answer a check-in and AutoInjector couldn't tell why.` }
@@ -103,6 +104,9 @@ const PAGE_SIGNATURES = [
   // usage limits (shown as a banner / near the message box, or instead of it)
   { id: 'limit-notice', code: 'USAGE_LIMIT', sites: ['*'], where: 'notices', text: ["you've reached your", 'you’ve reached your', 'you have reached your', 'usage limit', 'usage cap', "you've hit your limit", 'you’ve hit your limit', 'out of free messages', 'message limit', 'limit resets', 'limit will reset', 'reached the current usage cap', 'rate limit exceeded', 'too many requests', 'upgrade to continue', 'you are out of'] },
   { id: 'limit-page', code: 'USAGE_LIMIT', sites: ['*'], where: 'page', noInput: true, text: ['usage limit', 'usage cap', 'out of free messages', 'too many requests', 'limit resets'] },
+  // the conversation is too long (auto-fix: open a fresh chat). Claude "…exceed the length limit for this chat",
+  // ChatGPT "You've reached the maximum length for this conversation", Gemini "This conversation is too long"
+  { id: 'chat-full-notice', code: 'CHAT_FULL', sites: ['*'], where: 'notices', text: ['length limit for this chat', 'length limit for this conversation', 'maximum length for this conversation', 'maximum length for this chat', 'conversation is too long', 'chat is too long', 'conversation has reached its maximum', 'reached the maximum conversation length', 'conversation length limit', 'start a new chat to continue', 'please start a new chat', 'start a new conversation to continue'] },
   // page errors (auto-fix: reload)
   { id: 'error-notice', code: 'PAGE_ERROR', sites: ['*'], where: 'notices', text: ['something went wrong', 'network error', 'an error occurred', 'there was an error', 'error generating', 'unable to load', 'connection lost', 'conversation not found', 'failed to fetch', 'temporarily unavailable', 'internal server error', 'gone wrong', 'try reloading'] },
   { id: 'error-page', code: 'PAGE_ERROR', sites: ['*'], where: 'page', noInput: true, text: ["this site can't be reached", 'err_', 'bad gateway', 'service unavailable', '502', '503 service'] }
@@ -975,6 +979,7 @@ function classify(ev) {
   if (e.loadFailed) return 'NETWORK_ERROR';
   if (sig.has('CAPTCHA')) return 'CAPTCHA';
   if (sig.has('LOGGED_OUT')) return 'LOGGED_OUT';
+  if (sig.has('CHAT_FULL')) return 'CHAT_FULL'; // before a usage limit: its fix (a fresh chat) is automatic
   if (sig.has('USAGE_LIMIT')) return 'USAGE_LIMIT';
   if (e.captured) return 'UNKNOWN'; // (a captured check-in is not a failure; callers don't classify it)
   if (send && !send.ok) {
@@ -1003,6 +1008,7 @@ const LADDERS = {
   NO_REPLY_FOUND: ['alternatives', 'page_search', 'reload', 'teach'],
   FALSE_DUPLICATE: ['retry', 'page_search', 'reload', 'teach'],
   STUCK_GENERATING: ['unfreeze', 'reload', 'give_up'],
+  CHAT_FULL: ['reload_home', 'give_up'], // a fresh chat (the site's new-chat page)
   PAGE_ERROR: ['reload', 'reload_home', 'give_up'],
   NETWORK_ERROR: ['reload', 'reload_home', 'give_up'],
   UNKNOWN: ['alternatives', 'page_search', 'reload', 'teach']
@@ -1105,10 +1111,15 @@ function createSelfRepair(deps) {
     // no repairs, no teach step) after 5, then 15, then every 60 minutes — until the
     // user does something (🎯 Save, 🔢, 🩺, reload) or a normal reply proves it works.
     brokenBackoffMs: [5 * 60000, 15 * 60000, 60 * 60000],
-    probeWordsMs: 60 * 60000 // P37.4: replies holding a check-in / teach word this recent are never nagged
+    probeWordsMs: 60 * 60000, // P37.4: replies holding a check-in / teach word this recent are never nagged
+    // 2026-11-04 (PR #120): a check-in may take longer on a site whose check-ins have
+    // been slow (1.5 × its slowest recent answer), and on as long as a reply is
+    // visibly being written — never past probeMaxWaitMs. "Stalled" = the reply's
+    // text has not changed for stallMs while the site still says it is writing.
+    probeMaxWaitMs: 180000, stallMs: 30000, replyStatsN: 12
   }, d.options || {});
   const S = {};
-  for (const s of sites) S[s] = { state: 'unknown', problem: null, since: null, lastProbeOkAt: null, lastProbeAt: 0, lastCheckReason: null, running: false, step: null, tried: [], teach: null, pending: null, lastSignalCheckAt: 0, startupDone: false, fixedAt: null, yieldReq: false, displacedCount: 0, backoffN: 0, askNotified: false, askedAt: null, nextCheckAt: null, carry: null };
+  for (const s of sites) S[s] = { state: 'unknown', problem: null, since: null, lastProbeOkAt: null, lastProbeAt: 0, lastCheckReason: null, running: false, step: null, tried: [], teach: null, pending: null, lastSignalCheckAt: 0, startupDone: false, fixedAt: null, yieldReq: false, displacedCount: 0, backoffN: 0, askNotified: false, askedAt: null, nextCheckAt: null, carry: null, replyMs: [], slow: null, lateAnswer: null, lastText: null, lastTextChangeAt: 0 };
   const events = [];
   const createdAt = now(); // periodic check-ins count from app start (the start-up one is separate)
   const awaiting = {}; // site -> check-in record { word, resolve, captured, token (token.seq = its [MSG #]), typed, withdrawn, displaced, orphaned }
@@ -1120,6 +1131,40 @@ function createSelfRepair(deps) {
   function rememberProbe(site, word, seq) {
     if (word) { (probeWords[site] = (probeWords[site] || []).filter((r) => r.until > now())).push({ word: String(word), until: now() + opt.probeWordsMs }); }
     if (seq != null) { const set = seenSeqs[site] || (seenSeqs[site] = new Set()); set.add(String(seq)); if (set.size > 200) set.delete(set.values().next().value); }
+  }
+
+  // ---- measured check-in answer times (PR #120) -----------------------------------------
+  function noteReplyMs(site, ms) {
+    const x = S[site];
+    const v = Number(ms);
+    if (!x || !Number.isFinite(v) || v < 0) return false;
+    x.replyMs.push(Math.round(v));
+    while (x.replyMs.length > Math.max(1, Number(opt.replyStatsN) || 12)) x.replyMs.shift();
+    return true;
+  }
+  // How long a check-in may take on this site before it counts as failed: the base
+  // wait, or 1.5 × the slowest recent check-in answer when that is longer (Gemini
+  // answers most in ~16 s but some take 60–150 s) — never over probeMaxWaitMs.
+  function probeWaitMs(site) {
+    const x = S[site];
+    const base = Number(opt.probeTimeoutMs) || 90000;
+    const cap = Math.max(base, Number(opt.probeMaxWaitMs) || base);
+    const list = (x && x.replyMs) || [];
+    const slowest = list.length ? Math.max(...list) : 0;
+    return Math.min(cap, Math.max(base, Math.round(slowest * 1.5)));
+  }
+  // Is the AI visibly writing — the site says it is generating AND the reply's text
+  // changed within stallMs? (Only then is a long wait / not pressing Stop right.)
+  function textKey(rs) { return `${Number((rs && rs.textLen) || 0)}|${String((rs && rs.text) || '').slice(-200)}`; }
+  function watchText(site, rs) {
+    const x = S[site];
+    const k = textKey(rs);
+    if (x.lastText === null) { x.lastText = k; return; }
+    if (x.lastText !== k) { x.lastText = k; x.lastTextChangeAt = now(); }
+  }
+  function stillWriting(site, rs) {
+    const x = S[site];
+    return !!(rs && rs.generating) && !!x.lastTextChangeAt && now() - x.lastTextChangeAt < (Number(opt.stallMs) || 30000);
   }
 
   function event(kind, fields) {
@@ -1136,6 +1181,7 @@ function createSelfRepair(deps) {
     const t = x.teach;
     return {
       state: x.state, problem: x.problem, since: x.since, lastProbeOkAt: x.lastProbeOkAt, lastProbeAt: x.lastProbeAt || null,
+      slow: !!x.slow, slowAt: x.slow ? x.slow.at : null, waitMs: probeWaitMs(site),
       running: x.running, step: x.step, fixedAt: x.fixedAt,
       askUser: x.state === 'broken' && !!x.askedAt, askedAt: x.askedAt, nextCheckAt: x.state === 'broken' ? nextBrokenCheck(site) : null,
       say: x.problem ? describeProblem(x.problem, label(site)).say : null,
@@ -1250,8 +1296,49 @@ function createSelfRepair(deps) {
     const own = ownerOf(site, turn.text, turn.answers);
     if (!own) { noteForeignReply(site, turn.answers); return false; }
     const a = own.a;
+    const cur = awaiting[site];
     if (a && !a.captured) { a.captured = true; try { a.resolve(true); } catch (_) {} }
+    // PR #120: the answer to an EARLIER check-in arrived while a newer one (or a
+    // repair) is under way — the AI is answering, only slowly: credit that too
+    if (a && a !== cur && own.kind === 'checkin') noteProbeAnswer(site, { earlier: true });
     return true;
+  }
+  // PR #120: a reply that answers a check-in but is not "owned" (main.js probeReplyKind
+  // 'answers-checkin' / 'has-word': no word, an earlier check-in's word, a late one).
+  // While a check-in waits or a repair runs, it proves the AI is answering: the
+  // check-in passes (slow), the repair stops. info.siteError: the reply is the site's
+  // own error notice ("Sorry, something went wrong…") — the check-in waiting now ends
+  // at once as PAGE_ERROR (reload), never counted as an answer. -> true when used.
+  function noteProbeAnswer(site, info) {
+    const x = S[site];
+    if (!x) return false;
+    const i = info || {};
+    const a = awaiting[site];
+    if (a && !a.captured && !a.withdrawn && i.earlier && !i.siteError) {
+      // an EARLIER check-in's answer: this check-in's own answer usually follows
+      // right behind — wait for it a little (earlyQuietMs), then pass it as answered
+      if (!a.lateCredit) { a.lateCredit = now(); event('late_answer', { site, outcome: 'ANSWERED', reason: 'earlier-check-in' }); }
+      return true;
+    }
+    if (a && !a.captured && !a.withdrawn && (a.typed || (a.token && a.token.seq != null))) {
+      a.late = true; a.siteError = !!i.siteError; a.captured = true;
+      try { a.resolve(true); } catch (_) {}
+      event('late_answer', { site, outcome: i.siteError ? 'SITE_ERROR' : 'ANSWERED', reason: i.earlier ? 'earlier-check-in' : 'this-check-in' });
+      return true;
+    }
+    if (i.siteError) return false;
+    if (x.running) {
+      x.lateAnswer = { at: now() };
+      event('late_answer', { site, outcome: 'ANSWERED', reason: 'during-repair' });
+      return true;
+    }
+    // after the verdict: a "not working" AI that answers a recent check-in works
+    if (x.state === 'broken' && x.lastProbeAt && now() - x.lastProbeAt < opt.recentWordsMs) {
+      event('late_answer', { site, outcome: 'ANSWERED', reason: 'after-verdict' });
+      markOk(site, 'late-answer', { slow: true });
+      return true;
+    }
+    return false;
   }
   // A reply that is NOT a check-in answer was captured. When the Relay Trace says
   // it also answered a check-in's message (an older message's reply, batched),
@@ -1340,6 +1427,8 @@ function createSelfRepair(deps) {
     awaiting[site] = a;
     (recent[site] = (recent[site] || []).filter((r) => r.until > now())).push({ word, until: now() + opt.recentWordsMs, a });
     event('probe', { site, reason, step: 'check' });
+    x.lastText = null; x.lastTextChangeAt = 0; watchText(site, readState(site)); // the text before the check-in: a baseline, not "writing"
+    const sentAt = now();
     let sendRes;
     try {
       const sendP = Promise.resolve(d.sendProbe(site, probeText(word), token));
@@ -1348,29 +1437,46 @@ function createSelfRepair(deps) {
       if (sendRes && sendRes.timedOut) { token.cancelled = true; sendRes = await sendP.catch(() => ({ ok: false, error: 'CANCELLED' })); }
     } catch (e) { sendRes = { ok: false, error: 'EXCEPTION' }; }
     sendRes = sendRes && typeof sendRes === 'object' ? { ok: !!sendRes.ok, error: sendRes.error || null, verified: sendRes.verified } : { ok: false, error: 'UNKNOWN' };
-    if (sendRes.ok) { a.typed = true; if (x.carry) x.carry.typed = true; }
+    if (sendRes.ok) { a.typed = true; a.typedAt = now(); if (x.carry) x.carry.typed = true; }
     rememberProbe(site, word, token.seq);
     try {
       // withdrawn before it was typed, to make way for an Akọwe request: not a failure
       if (a.withdrawn && !sendRes.ok && !a.captured) return { ok: false, displaced: true, word };
       if (sendRes.ok || a.captured) {
         const t0 = now();
+        const budget = probeWaitMs(site);
+        const maxWait = Math.max(budget, Number(opt.probeMaxWaitMs) || budget);
         let quietSince = 0;
-        while (!a.captured && now() - t0 < opt.probeTimeoutMs) {
+        while (!a.captured) {
+          const el = now() - t0;
+          // time is up — unless a reply is visibly being written (its text keeps
+          // changing): then wait on, up to probeMaxWaitMs (PR #120)
+          if (el >= budget && !(el < maxWait && stillWriting(site, readState(site)))) break;
           const r = await Promise.race([got, sleep(opt.pollStepMs).then(() => false)]);
           if (r === true || a.captured) break;
+          // an earlier check-in's answer came in: its own had a moment to follow — passed
+          if (a.lateCredit && now() - Math.max(a.lateCredit, a.typedAt || 0) >= opt.earlyQuietMs) { a.late = true; a.captured = true; break; }
           // another owner's reply took the check-in's message and a bridge request waits: stop now
           if (a.displaced && x.yieldReq) break;
           // early stop: the reader already shows the answer but nothing took it
           // (not when another owner's reply took the check-in's message: that reply
           // may merely mention the word)
           const rs = readState(site);
+          watchText(site, rs);
           const hasWord = !a.displaced && containsWord(rs.text, word);
           if (hasWord && !rs.generating) { if (!quietSince) quietSince = now(); if (now() - quietSince >= opt.earlyQuietMs) break; }
           else quietSince = 0;
         }
       }
-      if (a.captured) return { ok: true, word };
+      if (!a.captured && a.lateCredit && sendRes.ok) { a.late = true; a.captured = true; }
+      if (a.captured) {
+        const ms = now() - sentAt;
+        // the site's own error notice ("Sorry, something went wrong…") came back
+        // instead of the word: the pane works, the site had a hiccup (PR #120)
+        if (a.siteError) return { ok: false, code: 'PAGE_ERROR', word, siteError: true, send: 'ok' };
+        noteReplyMs(site, ms);
+        return { ok: true, word, ms, late: !!a.late, slow: ms > (Number(opt.probeTimeoutMs) || 90000) };
+      }
       // its message was answered by a reply that belonged to someone else: no verdict
       if (a.displaced) return { ok: false, displaced: true, word };
       const ev = await evidence(site, word, sendRes, false);
@@ -1378,17 +1484,31 @@ function createSelfRepair(deps) {
     } finally { if (awaiting[site] === a) delete awaiting[site]; }
   }
 
-  function markOk(site, how) {
+  // o.slow (PR #120): the AI answered, only late — a repair it was in is not a
+  // "fix" (nothing was broken); the AI is marked slow, never broken.
+  function markOk(site, how, o) {
     const x = S[site];
+    const slow = !!(o && o.slow);
     x.lastProbeOkAt = now();
     x.displacedCount = 0;
     x.backoffN = 0; x.askNotified = false; x.askedAt = null;
-    const wasBad = x.state !== 'ok' && x.state !== 'unknown';
+    x.lateAnswer = null;
+    const wasBad = x.state !== 'ok' && x.state !== 'unknown' && !(slow && x.state === 'repairing' && (x.checkPrev === 'ok' || x.checkPrev === 'unknown'));
     if (wasBad) x.fixedAt = now();
+    x.slow = slow ? { at: now(), how } : null;
     setState(site, 'ok', null);
-    event('result', { site, outcome: wasBad ? 'FIXED' : 'OK', how });
-    emit(site, wasBad ? { kind: 'fixed', how } : { kind: 'ok' });
-    return { ok: true, state: 'ok', fixed: wasBad, how };
+    event('result', { site, outcome: wasBad ? 'FIXED' : 'OK', how, reason: slow ? 'slow' : undefined });
+    emit(site, wasBad ? { kind: 'fixed', how } : slow ? { kind: 'slow', how } : { kind: 'ok' });
+    return { ok: true, state: 'ok', fixed: wasBad, how, slow };
+  }
+  // A check-in answer arrived while a repair (or its next check-in) was under way:
+  // the AI is answering — stop repairing, mark it slow (never broken).
+  // fixedBy: a step that changed how replies are found (alternatives / page search)
+  // ran first — an older answer it made readable is that step's fix, not slowness.
+  function creditLate(site, step, code, fixedBy) {
+    if (fixedBy) { note(site, fixedBy, code, 'FIXED'); return markOk(site, fixedBy); }
+    note(site, step || 'check', code, 'ANSWERED');
+    return markOk(site, 'late-answer', { slow: true });
   }
   function needsUser(site, code) {
     setState(site, 'needs_user', code);
@@ -1452,6 +1572,18 @@ function createSelfRepair(deps) {
       return { applied: true, outcome: 'LEARNED' };
     }
     if (step === 'unfreeze') {
+      // never press Stop on an AI that is still writing (its text keeps changing):
+      // wait, bounded by stallMs, for it to finish, stall or answer (PR #120)
+      const x = S[site];
+      const tEnd = now() + (Number(opt.stallMs) || 30000);
+      for (;;) {
+        if (x.lateAnswer) return { applied: false, outcome: 'ANSWERED' };
+        const rs = readState(site);
+        watchText(site, rs);
+        if (!stillWriting(site, rs)) break;
+        if (now() >= tEnd) return { applied: false, outcome: 'STILL_WRITING' };
+        await sleep(opt.pollStepMs);
+      }
       const r = await page(site, buildUnfreezeScript(site, d.SITES, overrides(site)));
       if (!r || !r.pressed) return { applied: false, outcome: 'NO_STOP_BUTTON' };
       await sleep(opt.unfreezeWaitMs);
@@ -1481,6 +1613,7 @@ function createSelfRepair(deps) {
     const x = S[site];
     x.running = true; x.step = 'check'; x.pending = null; x.yieldReq = false;
     const prev = { state: x.state, problem: x.problem };
+    x.checkPrev = prev.state; // PR #120: a late answer during a repair is "slow", not "fixed", only when the AI was fine before
     emit(site);
     // No verdict: the check-in made way for an Akọwe request, or another owner's
     // reply took its message. The AI's state stays as it was (never "broken" for
@@ -1496,15 +1629,17 @@ function createSelfRepair(deps) {
       return { ok: false, deferred: true, reason: why, state: x.state, again };
     };
     try {
+      x.lateAnswer = null;
       let r = await probeOnce(site, reason);
-      if (r.ok) return markOk(site, 'check-in');
+      if (r.ok) return markOk(site, r.late ? 'answered' : 'check-in', { slow: r.slow });
       if (r.displaced) return deferred(x.yieldReq ? 'akowe' : 'other-reply');
       let code = r.code;
       event('detect', { site, code, reason });
       if (USER_ONLY.has(code)) { note(site, 'signals', code, 'FOUND'); return needsUser(site, code); }
-      if (o && o.repair === false) return broken(site, code);
+      if (o && o.repair === false) return x.lateAnswer ? creditLate(site, 'check', code) : broken(site, code);
       setState(site, 'repairing', code);
       const done = new Set();
+      let fixedBy = null; // PR #120: the last applied step that changed how replies are read
       let ladder = (LADDERS[code] || LADDERS.UNKNOWN).slice();
       while (ladder.length) {
         const step = ladder.shift();
@@ -1512,19 +1647,27 @@ function createSelfRepair(deps) {
         done.add(step);
         if (step === 'give_up') break;
         if (x.yieldReq) return deferred('akowe'); // an Akọwe request waits for this AI: repair later
+        if (x.lateAnswer) return creditLate(site, 'check', code, fixedBy); // PR #120: it answered after all
         if (step === 'teach') return askUser(site, code);
         x.step = step; emit(site);
         const out = await runStep(site, step, code, r);
         note(site, step, code, out.outcome);
+        if (out.applied && (step === 'alternatives' || step === 'page_search')) fixedBy = step;
+        if (x.lateAnswer || out.outcome === 'ANSWERED') return creditLate(site, step, code, fixedBy);
+        // still writing its answer, the text keeps changing: slow, not stuck — left alone
+        if (out.outcome === 'STILL_WRITING') return markOk(site, 'still-writing', { slow: true });
         if (!out.applied) continue;
         x.step = 'check'; emit(site);
         r = await probeOnce(site, `after-${step}`);
+        if (r.ok && (r.late || r.slow)) return creditLate(site, 'check', code, fixedBy);
         if (r.ok) { note(site, step, code, 'FIXED'); return markOk(site, step); }
+        if (x.lateAnswer) return creditLate(site, 'check', code, fixedBy);
         if (r.displaced) return deferred(x.yieldReq ? 'akowe' : 'other-reply');
         note(site, 'check', r.code, 'STILL_FAILING');
         if (USER_ONLY.has(r.code)) return needsUser(site, r.code);
         if (r.code !== code) { code = r.code; setState(site, 'repairing', code); ladder = (LADDERS[code] || LADDERS.UNKNOWN).filter((s) => !done.has(s)); }
       }
+      if (x.lateAnswer) return creditLate(site, 'check', code, fixedBy);
       return broken(site, code);
     } catch (e) {
       event('error', { site, outcome: 'EXCEPTION' });
@@ -1809,7 +1952,7 @@ function createSelfRepair(deps) {
 
   return {
     runCheck, probeMany, requestCheck, startup, tick, onPageChanged, noteWorking,
-    onCaptured, expects, probeReplyKind, noteForeignReply, awaitingReply, teachActive, startTeach, cancelTeach, makeWay, busyWithSite, userActed,
+    onCaptured, noteProbeAnswer, noteReplyMs, probeWaitMs, expects, probeReplyKind, noteForeignReply, awaitingReply, teachActive, startTeach, cancelTeach, makeWay, busyWithSite, userActed,
     noteContinueSeq, isContinueSeq, isProbeSeq,
     state: snap, snapshot: () => Object.fromEntries(sites.map((s) => [s, snap(s)])), health, isUsable,
     events: () => events.map((e) => Object.assign({}, e)), setIntervalMs, options: opt, lastTick: () => lastTick

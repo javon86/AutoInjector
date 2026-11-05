@@ -209,9 +209,10 @@ async function generate(prompt, opts = {}) {
   let warnings = [];
   const r = await _withJob(p.steps, async (myJob, backend, base) => {
     if (backend === 'comfy') return sd.comfyGenerate(base, p, { job: myJob, timeoutMs: settings.timeoutMs, pollMs: opts.pollMs });
-    const chk = await control.a1111Check(base, p, p.initImage ? 'img2img' : 'txt2img');
+    const chk = await control.a1111Check(base, p, p.initImage ? 'img2img' : 'txt2img', { label: settings.label });
     if (!chk.ok) return chk;
     warnings = chk.warnings || [];
+    for (const f of chk.drop || []) delete p[f]; // PR #120: made without what the WebUI doesn't have (warned)
     return sd.a1111Generate(base, p, { endpoint: settings.endpoint, timeoutMs: settings.timeoutMs });
   }, { vae: p.vae, checkpoint: p.checkpoint });
   if (!r.ok) return r;

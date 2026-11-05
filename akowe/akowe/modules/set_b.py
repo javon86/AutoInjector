@@ -708,6 +708,9 @@ class PlanHandler(OperationHandler):
             out += (" Follow the story rules (context.story_rules): never break a hard rule; keep beliefs as beliefs "
                     "and protected mysteries unexplained; every exception, special object or power the plan uses must "
                     "stay inside a stated limit (scope).")
+        if self._story_kind(ctx):  # 📚 the kind of story: its stages in order, its promise kept by the ending
+            from .. import story_kind  # noqa: PLC0415
+            out += " " + (story_kind.OUTLINE_RULE if self.op_id == "B11" else story_kind.PLAN_RULE)
         if self.op_id == "B11":
             lr = self._length_rule(ctx)
             if lr:
@@ -725,6 +728,18 @@ class PlanHandler(OperationHandler):
             target = ctx.payload.get("target_length") if isinstance(ctx.payload, dict) else None
             n = target.get("value") if isinstance(target, dict) and target.get("unit") == "chapters" else None
             return story_shape.outline_brief(ctx.store, ctx.project_id, n)
+        except Exception:  # noqa: BLE001 - guidance is best effort
+            return None
+
+    def _story_kind(self, ctx: Context) -> dict | None:
+        """📚 The kind of story (the author's choice or the AI's pick), its stages and its promise (never raises)."""
+        try:
+            from .. import story_kind  # noqa: PLC0415
+            n = None
+            if self.op_id == "B11":
+                target = ctx.payload.get("target_length") if isinstance(ctx.payload, dict) else None
+                n = target.get("value") if isinstance(target, dict) and target.get("unit") == "chapters" else None
+            return story_kind.plan_brief(ctx.store, ctx.project_id, n)
         except Exception:  # noqa: BLE001 - guidance is best effort
             return None
 
@@ -814,6 +829,9 @@ class PlanHandler(OperationHandler):
             if shape:
                 base["story_shape"] = shape
         if self.op_id in ("B01", "B03", "B11"):
+            kd = self._story_kind(ctx)
+            if kd:
+                base["story_kind"] = kd
             mc, cast = self._story_roles(ctx, canon)
             if mc:
                 base["main_character"] = mc

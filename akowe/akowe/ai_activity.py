@@ -59,6 +59,7 @@ JOB_WORDS = {
     "launch_kit": "Launch kit", "compare": "Blind comparison", "style_card": "Learning your writing style",
     "profile": "Inventing the book", "world_rules": "Story rules", "world_texture": "World texture",
     "series_changes": "Finding what changed in this book", "story_shape": "Placing the story shape's beats",
+    "story_kind": "Placing the stages of the kind of story",
     "terms": "Checking terms", "forge": "Character Forge", "cover_art": "Cover", "trailer": "Trailer",
 }
 OP_WORDS = {

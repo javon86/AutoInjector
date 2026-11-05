@@ -18,13 +18,16 @@
 // reaches the transcript/UI — used for Chargeback's Referee acknowledgments
 // and Rotation's "UPDATED" confirmations, neither of which should ever be
 // shown to the user.
-const { app, BaseWindow, WebContentsView, ipcMain, dialog, safeStorage, Menu, shell, clipboard } = require("electron");
+const { app, BaseWindow, WebContentsView, ipcMain, dialog, safeStorage, Menu, shell, clipboard, powerSaveBlocker, Notification, Tray, nativeImage: electronNativeImage } = require("electron");
 require("./alfred-main").captureIpc(ipcMain); // 🎩 ALFRED HOOK: remembers each IPC handler so Alfred's app controls run the same code as the buttons
 const path = require("path");
 const fs = require("fs");
 const { pathToFileURL } = require("url");
 const SITES = require("./selectors");
 const { cleanReplyText } = require("./reply-clean");
+const freshChatMod = require("./fresh-chat"); // a fresh chat in an AI pane before its conversation gets too long (PR #123)
+const runGuardMod = require("./run-guard"); // keep the PC awake, ask before closing, tell the user when a run needs them (PR #123)
+const transcriptStore = require("./transcript-store"); // short Akọwe replies in the conversation list, archive, background state writes (PR #123)
 const { selftestPrompt, classifySelftestReply } = require("./selftest-verdict");
 const { buildSendScript, buildReadScript, buildFileInputFinderExpression, buildPickScript, buildLoginFillScript, buildProbeScript, isBareTagSelector } = require("./automation");
 const { isChromeSelector } = require("./transcript-rows");
@@ -117,7 +120,10 @@ const MAX_NOTAG_REPROMPTS = Number(process.env.AUTOINJECTOR_MAX_NOTAG_REPROMPTS)
 const MAX_LOG = Math.max(300, Number(process.env.AUTOINJECTOR_MAX_LOG) || 5000);
 const MAX_LOG_UI = 300;
 const MAX_MANAGER_LOG = 300;
-const MAX_TRANSCRIPT = 1000; // oldest-first eviction, same idea as MAX_LOG for the debug log -- a long-running relay must not grow this without bound
+// oldest-first eviction, same idea as MAX_LOG for the debug log -- a long-running relay must not grow this without
+// bound. PR #123: the older turns go to a rotating archive file (transcriptArchive) instead of being dropped, and
+// Akọwe-owned replies are kept short (transcriptStore.trimOwnedText), so 2,000 turns stay a few MB.
+const MAX_TRANSCRIPT = Math.max(100, Number(process.env.AUTOINJECTOR_MAX_TRANSCRIPT) || 2000);
 const MAX_LEDGER = 1000; // oldest-first eviction, same idea as MAX_TRANSCRIPT
 const DUPLICATE_WINDOW_MS = 5000; // a second identical (target, text) send within this window gets flagged duplicate:true in the ledger
 const PANE_SYNC_MS = 700;
@@ -134,6 +140,9 @@ const NEEDS_EXACTLY_THREE = new Set(["devil-angel", "chargeback", "rotation", "b
 const COLLAPSED_HEIGHT = 39;
 const MAX_DEBUG_LOG_LINES = Math.max(2000, MAX_LOG + 1000); // the on-disk log keeps at least as much as the in-memory one
 const SAVE_DEBOUNCE_MS = Number(process.env.AUTOINJECTOR_SAVE_DEBOUNCE_MS) || 500;
+// PR #123: the state file is written at most this often (in the background). Tests that shorten the debounce get the
+// same short gap, so they don't wait seconds for the file.
+const SAVE_MIN_GAP_MS = Number(process.env.AUTOINJECTOR_SAVE_MIN_GAP_MS) || (process.env.AUTOINJECTOR_SAVE_DEBOUNCE_MS ? SAVE_DEBOUNCE_MS : 4000);
 const FILE_ATTACH_PROTOCOL_VERSION = "1.3";
 const IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp"]);
 const TEXT_EXTS = new Set([".txt", ".md", ".csv", ".json"]);
@@ -239,6 +248,7 @@ const state = {
   sequence: { active: false, steps: [], index: 0, generation: 0, dispatchGen: {} }, // Prompt Sequence run state, see startSequence()/handleSequenceCapture()
   selectorOverrides: {}, // site -> { input?, send?, assistant? } — user-picked CSS selectors (see selector:pick), tried before the built-in candidates in selectors.js
   learnedSelectors: {}, // site -> { input?|send?|assistant?|stop?|user?: { selector, how: alternative|page-search|teach, learnedAt, version } } — found by the self-repair (P18.3/4/7) and proved by a check-in; persisted (versioned)
+  retiredSelectors: {}, // PR #120: site -> role -> { selector, source: pick|learned, retiredAt, kind, meta?, learned? } — a saved / learned selector that kept failing while the built-in way worked, forgotten by itself; kept so ↺ Undo can bring it back
   pickMeta: {}, // P38: site -> { input?|send?|assistant?|user?: { savedAt, how: pick|number, rev, version } } — when each 🎯 / 🔢 SAVED selector (in selectorOverrides) was locked in; persisted (versioned)
   selfRepair: { intervalMin: 20, startup: true, carryOn: true }, // P18.1 check-ins: every N minutes while an AI is idle (0 = off), and once at start; carryOn: after a check-in / 🔢, ask a busy AI to carry on
   savedLogins: {}, // site -> [{ id, label, username, encryptedPassword }] — encryptedPassword is a safeStorage-encrypted (OS keychain) ciphertext, base64-encoded; the plaintext password is never stored, never sent to the renderer, never logged. See logins:save/logins:fill.
@@ -266,9 +276,15 @@ const state = {
   // starts Akọwe's server itself (akowe-server.js, ON by default). autoConnect = pair Akọwe with the bridge by
   // itself when that server is up (ON by default; turning the bridge off by hand turns it off).
   akowe: { enabled: false, startWithApp: true, autoConnect: true },
+  // PR #123: tell the user when a book run needs them (a Windows notification + the taskbar flashing; sound optional)
+  attention: { notify: true, sound: true },
+  // PR #123: a fresh chat in each AI pane for Akọwe after this many Akọwe requests / characters (0 = never by that)
+  freshChat: { everyRequests: Number(process.env.AUTOINJECTOR_FRESH_CHAT_REQUESTS) >= 0 && process.env.AUTOINJECTOR_FRESH_CHAT_REQUESTS !== undefined ? Number(process.env.AUTOINJECTOR_FRESH_CHAT_REQUESTS) : 15, everyChars: Number(process.env.AUTOINJECTOR_FRESH_CHAT_CHARS) >= 0 && process.env.AUTOINJECTOR_FRESH_CHAT_CHARS !== undefined ? Number(process.env.AUTOINJECTOR_FRESH_CHAT_CHARS) : 300000 },
   manager: null, // set by resetManagerTask() below — always idle on startup, a restart must never auto-resume a live task
   managerLog: [] // manager-only event stream (mirrors state.log's shape but filtered to source:"manager"), see logManagerEvent()
 };
+// PR #123: counts the Akọwe requests / characters in each pane's current chat and says when a fresh chat is due.
+const freshChat = freshChatMod.createFreshChat({ everyRequests: state.freshChat.everyRequests, everyChars: state.freshChat.everyChars, userQuietMs: Number(process.env.AUTOINJECTOR_FRESH_CHAT_USER_QUIET_MS) || undefined });
 for (const site of SITE_IDS) {
   state.routing[site] = new Set();
   state.captured[site] = null;
@@ -283,6 +299,7 @@ for (const site of SITE_IDS) {
   state.selectorOverrides[site] = {};
   state.learnedSelectors[site] = {};
   state.pickMeta[site] = {};
+  state.retiredSelectors[site] = {};
 }
 
 // Built-in starter prompt: a one-click sanity check that the whole
@@ -583,9 +600,14 @@ function trimDebugLog() {
 // bounded the same way the debug log already is, oldest-first eviction, so
 // a long-running relay session can't grow this (and the state file it gets
 // persisted into) without limit.
+let _transcriptArchive = null;
+function transcriptArchive() {
+  if (!_transcriptArchive) _transcriptArchive = transcriptStore.createArchive({ file: path.join(userDataDir(), "autoinjector-transcript-archive.jsonl"), onError: () => {} });
+  return _transcriptArchive;
+}
 function pushTranscriptTurn(turn) {
   state.transcript.push(turn);
-  if (state.transcript.length > MAX_TRANSCRIPT) state.transcript.splice(0, state.transcript.length - MAX_TRANSCRIPT);
+  transcriptStore.capTurns(state.transcript, MAX_TRANSCRIPT, transcriptArchive()); // the oldest go to the archive file
 }
 
 function logEvent(kind, detail) {
@@ -696,11 +718,9 @@ function logManagerEvent({ category, severity, action, target, summary, details,
 // home URL on startup (see createWindow()), so there's no stale "already
 // captured" reply sitting on screen to accidentally re-trigger the state
 // machine with — resume only reacts once a genuinely new reply appears.
-let saveStateTimer = null;
-function saveStateDebounced() {
-  clearTimeout(saveStateTimer);
-  saveStateTimer = setTimeout(() => {
-    try {
+// PR #123: written in the background (async temp file + rename), at most every SAVE_MIN_GAP_MS, never on the hot
+// path of a captured reply; flushed once more on quit (flushStateNow).
+function buildStateSnapshotText() {
       const hr = state.hr;
       const snapshot = {
         schemaVersion: 1,
@@ -710,6 +730,7 @@ function saveStateDebounced() {
         prompts: state.prompts,
         selectorOverrides: state.selectorOverrides,
         pickMeta: { version: PICK_VERSION, sites: state.pickMeta }, // P38: when each saved pick was locked in (no page text)
+        retiredSelectors: state.retiredSelectors, // PR #120: out-of-date saved selectors that were forgotten (for ↺ Undo)
         learnedSelectors: { version: selfRepairLib.LEARNED_VERSION, sites: state.learnedSelectors }, // P18: selectors the self-repair learned (CSS only — never page text)
         selfRepair: { intervalMin: state.selfRepair.intervalMin, startup: state.selfRepair.startup !== false, carryOn: state.selfRepair.carryOn !== false },
         nextMsgSeq: state.nextMsgSeq, // TR-29: [MSG #] numbers carry on after a restart (the AIs remember the old ones)
@@ -722,6 +743,8 @@ function saveStateDebounced() {
         videoStudio: state.videoStudio || null, // 🎬 Video engine settings — no secret
         voiceConfig: state.voiceConfig || null, // voice address/on-off/speaker voices/devices — no secret (the voice shim has no key), stored as-is
         akowe: { enabled: !!state.akowe.enabled, startWithApp: state.akowe.startWithApp !== false, autoConnect: state.akowe.autoConnect !== false }, // the bridge token itself lives in its own 0600 file, never here
+        attention: { notify: state.attention.notify !== false, sound: state.attention.sound !== false },
+        freshChat: { everyRequests: state.freshChat.everyRequests, everyChars: state.freshChat.everyChars },
         hr: hr && hr.mode ? {
           mode: hr.mode,
           topic: hr.topic,
@@ -733,20 +756,18 @@ function saveStateDebounced() {
           roles: hr.roles
         } : null
       };
-      // Atomic write: a crash/power-loss mid-write to the real path can
-      // leave a truncated, unparseable file behind -- writing to a sibling
-      // temp file first and rename()-ing it over the real path means the
-      // real path only ever points at a complete write (rename is atomic on
-      // the same filesystem, which a sibling file in the same dir always is).
-      const target = stateFilePath();
-      const tmp = `${target}.${process.pid}.${Date.now()}.tmp`;
-      fs.writeFileSync(tmp, JSON.stringify(snapshot));
-      fs.renameSync(tmp, target);
-    } catch (e) {
-      logEvent("persist-error", { error: String(e) });
-    }
-  }, SAVE_DEBOUNCE_MS);
+      return JSON.stringify(snapshot);
 }
+// Atomic write: a crash/power-loss mid-write to the real path can leave a truncated, unparseable file behind --
+// writing to a sibling temp file first and rename()-ing it over the real path means the real path only ever points
+// at a complete write (rename is atomic on the same filesystem, which a sibling file in the same dir always is).
+let _stateWriter = null;
+function stateWriter() {
+  if (!_stateWriter) _stateWriter = transcriptStore.createStateWriter({ file: stateFilePath(), serialize: buildStateSnapshotText, delayMs: SAVE_DEBOUNCE_MS, minGapMs: SAVE_MIN_GAP_MS, onError: (e) => logEvent("persist-error", { error: String(e) }) });
+  return _stateWriter;
+}
+function saveStateDebounced() { try { stateWriter().schedule(); } catch (e) { logEvent("persist-error", { error: String(e) }); } }
+function flushStateNow() { try { if (_stateWriter && _stateWriter.stats().dirty) _stateWriter.flushSync(); } catch (_) {} }
 
 function loadPersistedState() {
   let raw;
@@ -803,6 +824,16 @@ function loadPersistedState() {
   if (snap.learnedSelectors) {
     try { state.learnedSelectors = selfRepairLib.sanitizeLearned(snap.learnedSelectors, SITE_IDS, isBareTagSelector); } catch (_) {}
   }
+  if (snap.retiredSelectors && typeof snap.retiredSelectors === "object") {
+    for (const site of SITE_IDS) {
+      const m = snap.retiredSelectors[site]; if (!m || typeof m !== "object") continue;
+      for (const role of PICK_ROLES_ALL) {
+        const x = m[role];
+        if (!x || typeof x !== "object" || typeof x.selector !== "string" || !x.selector.trim() || x.selector.length > 300) continue;
+        state.retiredSelectors[site][role] = { selector: x.selector, source: x.source === "learned" ? "learned" : "pick", retiredAt: Number(x.retiredAt) || 0, kind: typeof x.kind === "string" ? x.kind.slice(0, 20) : null, meta: x.meta && typeof x.meta === "object" ? x.meta : null, learned: x.learned && typeof x.learned === "object" ? x.learned : null };
+      }
+    }
+  }
   if (snap.pickMeta && typeof snap.pickMeta === "object") {
     const src = snap.pickMeta.sites && typeof snap.pickMeta.sites === "object" ? snap.pickMeta.sites : {};
     for (const site of SITE_IDS) {
@@ -813,6 +844,13 @@ function loadPersistedState() {
         state.pickMeta[site][role] = { savedAt: Number(x.savedAt) || 0, how: x.how === "number" ? "number" : "pick", rev: Math.max(1, Number(x.rev) || 1), version: PICK_VERSION };
       }
     }
+  }
+  if (snap.attention && typeof snap.attention === "object") {
+    state.attention.notify = snap.attention.notify !== false;
+    state.attention.sound = snap.attention.sound !== false;
+  }
+  if (snap.freshChat && typeof snap.freshChat === "object") {
+    for (const k of ["everyRequests", "everyChars"]) { const n = Number(snap.freshChat[k]); if (Number.isFinite(n) && n >= 0) state.freshChat[k] = Math.round(n); }
   }
   if (snap.selfRepair && typeof snap.selfRepair === "object") {
     const n = Number(snap.selfRepair.intervalMin);
@@ -956,6 +994,7 @@ const capturedCount = {};
 const tagSeenAt = {}; // when a [FROM:]-tagged reply first appeared on this pane (settle ceiling)
 const fragmentWarned = {}; // TR-23: logged the "override reads only part of the reply" warning
 const overrideIgnoredWarned = {}; // 2026-10-29: logged "the saved reply selector finds no reply — using the built-in reader"
+const lastReadFlags = {}; // PR #120: site -> { ignored, fragment } from the latest read (was the saved reply selector bypassed?)
 const settleKey = (s) => String(s || "").replace(/\s+/g, "");
 // M1: the AI was seen writing since the last capture (the Relay Trace then
 // counts the messages it was answering as started).
@@ -990,6 +1029,11 @@ function closeUncapturedReply(site) {
   logEvent("roundtable-skip-repeat", { site, note: "another NONE (nothing to add) — same text as the last one" });
 }
 function markCaptured(site) {
+  // PR #120: a reply was read — with the saved reply selector, or (it finding nothing /
+  // only part of the reply) with the built-in reader. The latter counts toward
+  // forgetting the out-of-date saved one.
+  const rf = lastReadFlags[site];
+  if (rf) { try { noteSavedSelectorOutcome(site, "assistant", rf.ignored || rf.fragment, rf.fragment ? "fragment" : "ignored"); } catch (_) {} }
   wroteSinceCapture[site] = false;
   genReads[site] = 0;
   try { delete unreadableWarned[site]; } catch (_) {} // TR-31: a later fragment is logged again
@@ -1184,7 +1228,10 @@ function createWindow() {
   uiViews.push(controlsView);
 
   for (const site of SITE_IDS) {
-    const view = new WebContentsView({ webPreferences: { partition: `persist:${site}` } });
+    // backgroundThrottling: false (PR #123) — Chromium slows the timers of a page it thinks is hidden (window
+    // minimised, hidden to the tray, pane off-screen). The reply reader and the send scripts run on those timers, so
+    // a minimised window used to read replies late -> timeouts. The AI panes always run at full speed.
+    const view = new WebContentsView({ webPreferences: { partition: `persist:${site}`, backgroundThrottling: false } });
     win.contentView.addChildView(view);
     view.webContents.loadURL(siteHome(site));
     siteViews[site] = view;
@@ -1196,6 +1243,7 @@ function createWindow() {
       if (typeof view.webContents.on === "function") {
         view.webContents.on("did-finish-load", () => {
           delete paneLoadFailed[site];
+          paneLoadedAt[site] = Date.now();
           try { view.webContents.setZoomFactor(paneZoom[site] || DEFAULT_PANE_ZOOM); } catch (_) {}
           setTimeout(() => { probePane(site).catch(() => {}); }, PROBE_DELAY_MS);
           // P18.8: a user-only problem (logged out, captcha, limit) may be gone now.
@@ -1240,6 +1288,11 @@ function createWindow() {
   layout();
   win.on("resize", () => { layout(); syncPaneBounds(); });
   win.on("closed", () => { win = null; resetWindowCollapse("automation"); }); // a recreated window starts expanded
+  // PR #123: closing while a book (or a video / picture) is being made asks first — see onMainWindowClose()
+  win.on("close", (e) => onMainWindowClose(e));
+  win.on("focus", () => { try { attentionNotifier.seen(); } catch (_) {} });
+  try { win.on("session-end", () => { runGuardState.quitConfirmed = true; }); } catch (_) {} // Windows is shutting down: never hold it up
+  startRunGuard();
 
   setInterval(() => { for (const site of SITE_IDS) pollSite(site); sequenceWatchdog(); managerWatchdog(); }, POLL_MS);
   setInterval(healthTick, 5000);
@@ -1567,6 +1620,117 @@ function noteStaleSavedSend(target, r) {
   const L = siteLabel(target);
   logEvent("send-saved-button-missing", { target, selector: sel, severity: "warn", note: `The Send button saved for ${L} (🎯 / 🔢 / learned) isn't on ${L}'s page any more — AutoInjector used ${L}'s usual Send button or the Enter key instead${r && r.ok === false ? ", and that didn't send either" : ""}. Clear it on ${L}'s 🎯 card (or run 🔢 again) to stop this warning.` });
 }
+// ---- PR #120: out-of-date saved selectors forget themselves ---------------------
+// A saved 🎯 / 🔢 / learned selector that keeps failing while the built-in way works
+// ("send-saved-button-missing", "reply-selector-ignored", "reply-selector-fragment",
+// logged at every start) is forgotten after STALE_RETIRE_AFTER such sends / replies
+// in a row — never one the user saved or taught in the last hour. A backup is kept
+// (state.retiredSelectors) for ↺ Undo on the 🎯 card; logged once, in plain words.
+const STALE_RETIRE_AFTER = Number(process.env.AUTOINJECTOR_STALE_RETIRE_N) || 3;
+const STALE_KEEP_RECENT_MS = 60 * 60000;
+const staleStreak = {}; // site -> role -> { selector, n }
+// The saved selector in effect for this role, and where it came from (null: none).
+function effectiveSource(site, role) {
+  const eff = effectiveOverrides(site)[role];
+  if (!eff) return null;
+  const t = teachOverrides[site];
+  if (t && t[role] === eff) return null; // a 🔢 number teach is using it right now
+  const l = (state.learnedSelectors[site] || {})[role];
+  if (l && l.selector === eff) return { source: "learned", selector: eff, at: Number(l.learnedAt) || 0 };
+  if ((state.selectorOverrides[site] || {})[role] === eff) { const m = (state.pickMeta[site] || {})[role]; return { source: "pick", selector: eff, at: m ? Number(m.savedAt) || 0 : 0 }; }
+  return null;
+}
+// failed: the saved selector failed AND the built-in way worked (a proven send, a
+// captured reply); false: the saved one worked — the count starts over.
+function noteSavedSelectorOutcome(site, role, failed, kind) {
+  const map = staleStreak[site] || (staleStreak[site] = {});
+  const src = effectiveSource(site, role);
+  if (!src || !failed) { delete map[role]; return null; }
+  if (!map[role] || map[role].selector !== src.selector) map[role] = { selector: src.selector, n: 0 };
+  map[role].n++;
+  if (map[role].n < STALE_RETIRE_AFTER) return null;
+  if (src.at && Date.now() - src.at < STALE_KEEP_RECENT_MS) return null; // the user set it in the last hour: left alone
+  delete map[role];
+  return retireSavedSelector(site, role, src, kind);
+}
+const ROLE_WORDS = { send: "Send button", assistant: "reply reader", input: "message box", user: "your-message marker", stop: "Stop button", image: "picture finder" };
+function retireSavedSelector(site, role, src, kind) {
+  const backup = { selector: src.selector, source: src.source, retiredAt: Date.now(), kind: kind || null, meta: null, learned: null };
+  if (src.source === "learned") {
+    backup.learned = { ...(state.learnedSelectors[site] || {})[role] };
+    const n = { ...(state.learnedSelectors[site] || {}) }; delete n[role]; state.learnedSelectors[site] = n;
+  } else {
+    backup.meta = (state.pickMeta[site] || {})[role] ? { ...state.pickMeta[site][role] } : null;
+    const n = { ...(state.selectorOverrides[site] || {}) }; delete n[role]; state.selectorOverrides[site] = n;
+    const m = { ...(state.pickMeta[site] || {}) }; delete m[role]; state.pickMeta[site] = m;
+  }
+  state.retiredSelectors[site] = { ...(state.retiredSelectors[site] || {}), [role]: backup };
+  if (role === "assistant") { overrideIgnoredWarned[site] = false; fragmentWarned[site] = false; }
+  saveStateDebounced();
+  const L = siteLabel(site);
+  logEvent("selector-retired", { site, role, selector: src.selector, source: src.source, after: STALE_RETIRE_AFTER, note: `${L}'s saved ${ROLE_WORDS[role] || role} was out of date and has been forgotten; the built-in one works. (↺ Undo on ${L}'s 🎯 card brings it back.)` });
+  pickerStatus(site).then((st) => broadcast("picker", st)).catch(() => {});
+  return backup;
+}
+// ↺ Undo: bring a retired selector back exactly as it was (and give it a fresh hour).
+function undoRetiredSelector(site, role) {
+  const b = (state.retiredSelectors[site] || {})[role];
+  if (!b) return { ok: false, error: "NOTHING_TO_UNDO" };
+  if (b.source === "learned") state.learnedSelectors[site] = { ...(state.learnedSelectors[site] || {}), [role]: Object.assign({ how: "learned", version: selfRepairLib.LEARNED_VERSION }, b.learned || {}, { selector: b.selector, learnedAt: Date.now() }) };
+  else {
+    state.selectorOverrides[site] = { ...(state.selectorOverrides[site] || {}), [role]: b.selector };
+    state.pickMeta[site] = { ...(state.pickMeta[site] || {}), [role]: Object.assign({ how: "pick", rev: 1, version: PICK_VERSION }, b.meta || {}, { savedAt: Date.now() }) };
+  }
+  const n = { ...(state.retiredSelectors[site] || {}) }; delete n[role]; state.retiredSelectors[site] = n;
+  if (staleStreak[site]) delete staleStreak[site][role];
+  saveStateDebounced();
+  logEvent("selector-retire-undone", { site, role, selector: b.selector, note: `${siteLabel(site)}'s saved ${ROLE_WORDS[role] || role} is back (↺ Undo)` });
+  return { ok: true, role, selector: b.selector };
+}
+// PR #120 (log 2026-11-04, Gemini SEND_NOT_CONFIRMED ×3 at start): the text was in
+// the box, the Send button visible and enabled, yet neither the script's click nor
+// its Enter sent it — events made by a page script are "untrusted" and a page may
+// ignore them (Gemini did until its window was reloaded). When a send could not be
+// confirmed and the text still sits in the box, AutoInjector presses a REAL Enter
+// key in the pane (webContents.sendInputEvent, like the user's own keyboard), then
+// a real click on the Send button, and checks again before it gives up.
+async function trustedSendFallback(view, target, prompt, markerBaseline) {
+  const wc = view && view.webContents;
+  if (!wc || typeof wc.sendInputEvent !== "function") return null;
+  const ov = effectiveOverrides(target);
+  const run = (o) => wc.executeJavaScript(buildSendScript(target, prompt, ov, Object.assign({ markerBaseline, userSel: userTurnSelector(target) }, o)), true);
+  let f = null;
+  try { f = await run({ mode: "focus" }); } catch (_) { return null; }
+  if (!f || !f.ok) return null;
+  if (f.alreadySent) return { ok: true, method: "already-sent", verified: true, proof: "number", markerBaseline };
+  if (!f.holds) return null; // the box no longer holds this message: nothing to press Enter on
+  try { wc.focus(); } catch (_) {}
+  let c = null;
+  try {
+    wc.sendInputEvent({ type: "keyDown", keyCode: "Return" });
+    wc.sendInputEvent({ type: "char", keyCode: "\r" });
+    wc.sendInputEvent({ type: "keyUp", keyCode: "Return" });
+    c = await run({ mode: "confirm", method: "trusted-enter", turnsBefore: f.turnsBefore });
+  } catch (_) { c = null; }
+  if (c && c.ok) return c;
+  // Enter may have added a line and moved the Send button: ask for its place again
+  try { const f2 = await run({ mode: "focus" }); if (f2 && f2.ok) { if (f2.alreadySent) return { ok: true, method: "already-sent", verified: true, proof: "number", markerBaseline }; f = Object.assign({}, f, { button: f2.button }); } } catch (_) {}
+  if (f.button) {
+    let z = 1;
+    try { z = Number(wc.getZoomFactor && wc.getZoomFactor()) || 1; } catch (_) {}
+    const x = Math.round(f.button.x * z), y = Math.round(f.button.y * z);
+    try {
+      wc.sendInputEvent({ type: "mouseDown", x, y, button: "left", clickCount: 1 });
+      wc.sendInputEvent({ type: "mouseUp", x, y, button: "left", clickCount: 1 });
+      c = await run({ mode: "confirm", method: "trusted-click", turnsBefore: f.turnsBefore });
+    } catch (_) { c = null; }
+  }
+  return c;
+}
+// PR #120: a pane whose page JUST finished loading gets a moment to settle before
+// the first thing is typed into it (its editor and Send button wire up a beat later).
+const PANE_SETTLE_MS = process.env.AUTOINJECTOR_PANE_SETTLE_MS != null ? Number(process.env.AUTOINJECTOR_PANE_SETTLE_MS) : 2500;
+const paneLoadedAt = {};
 // TR-25: how long a send waits for an AI that is still writing its last reply.
 const SEND_BUSY_WAIT_MS = Number(process.env.AUTOINJECTOR_SEND_BUSY_WAIT_MS) || 5 * 60 * 1000;
 const SEND_BUSY_POLL_MS = Number(process.env.AUTOINJECTOR_SEND_BUSY_POLL_MS) || 2000;
@@ -1843,10 +2007,22 @@ async function sendTextTo(target, text, fromSite, opts = {}) {
       if (gate === "busy") {
         r = { ok: false, error: "AI_BUSY", markerBaseline }; // still writing — wait below without typing
       } else {
+        // PR #120: a page that only just loaded settles first (bounded)
+        const sinceLoad = Date.now() - (paneLoadedAt[target] || 0);
+        if (PANE_SETTLE_MS > 0 && sinceLoad < PANE_SETTLE_MS) await new Promise((rs) => setTimeout(rs, PANE_SETTLE_MS - sinceLoad));
         if (token) token.typing = true;
         try {
           if (attempt === 1 || markerBaseline == null) { try { relayTrace.noteTyping(seq); } catch (_) {} } // P18.5
           r = await view.webContents.executeJavaScript(buildSendScript(target, prompt, effectiveOverrides(target), { markerBaseline, userSel: userTurnSelector(target) }), true);
+          // PR #120: not confirmed and the text still in the box -> a REAL Enter / click
+          if (r && !r.ok && r.error === "SEND_NOT_CONFIRMED" && r.diag && Number(r.diag.boxChars) > 0) {
+            const base = Number.isInteger(r.markerBaseline) ? r.markerBaseline : markerBaseline;
+            const t = await trustedSendFallback(view, target, prompt, base).catch(() => null);
+            if (t && t.ok) {
+              logEvent("send-trusted-input", { target, seq, attempt, method: t.method, verified: t.verified === true, note: `the page ignored AutoInjector's scripted click / Enter — a real ${t.method === "trusted-click" ? "click on the Send button" : "Enter key"} sent it` });
+              r = Object.assign({}, t, { savedSend: r.savedSend || t.savedSend });
+            }
+          }
         } catch (e) {
           r = { ok: false, error: String(e) };
         } finally {
@@ -1864,7 +2040,12 @@ async function sendTextTo(target, text, fromSite, opts = {}) {
       if (r && r.ok && r.verified === false && (sendVerifiedSeen[target] || r.turnsCountable === true)) r = { ok: false, error: "SEND_UNVERIFIED", savedSend: r.savedSend, markerBaseline: r.markerBaseline };
       if (r && r.savedSend && r.savedSend !== "found") noteStaleSavedSend(target, r);
       if (r && Array.isArray(r.dismissed) && r.dismissed.length) logEvent("popup-dismissed", { target, seq, what: r.dismissed.slice(0, 3), note: `closed a feedback pop-up inside ${siteLabel(target)}'s window (its own Dismiss / Close button) before typing` });
-      if (r && r.ok) { if (r.verified) sendVerifiedSeen[target] = true; break; }
+      if (r && r.ok) {
+        if (r.verified) sendVerifiedSeen[target] = true;
+        // PR #120: proven sent — with the saved Send button, or without it (it was not on the page)
+        if (r.verified && r.method !== "already-sent") { try { noteSavedSelectorOutcome(target, "send", r.savedSend === "missing", "send"); } catch (_) {} }
+        break;
+      }
       // TR-25: the AI is still writing its previous reply — wait for it to
       // finish (it can't take a new message yet) instead of burning retries.
       if (r && r.error === "AI_BUSY") {
@@ -4073,6 +4254,7 @@ async function pollSite(site) {
     // TR-28: the Stop button alone (older read results without the field fall back to `generating`).
     state.stopShown[site] = res && typeof res.stopShown === "boolean" ? res.stopShown : generating;
     readCount[site] = res && Number.isInteger(res.count) ? res.count : null;
+    if (res && res.ok) lastReadFlags[site] = { ignored: !!res.overrideIgnored, fragment: !!res.fragmentFixed };
     if (res && res.overrideIgnored && !overrideIgnoredWarned[site]) {
       overrideIgnoredWarned[site] = true;
       logEvent("reply-selector-ignored", { site, selector: effectiveOverrides(site).assistant || null, severity: "warn", note: `the saved reply selector finds no reply of ${siteLabel(site)}'s (nothing, only your own messages, or the sidebar) — reading with the built-in reader instead. Press 🎯 → "↺ Forget what I taught" to clear it.` });
@@ -4285,8 +4467,10 @@ async function pollSite(site) {
     // relayed — and the Akọwe bridge is told "temporary site error" (503
     // SITE_ERROR), so Akọwe waits and asks again (or uses another AI) instead of
     // taking the notice as a bad answer and spending its retries on it.
-    const rateLimited = looksLikeRateLimit(text);
-    const siteErrKind = rateLimited ? "rate-limit" : (akoweSiteErr ? akoweSiteErr.kind : null);
+    let rateLimited = looksLikeRateLimit(text);
+    // PR #123: "this chat is too long — start a new chat" wins: its fix is a fresh chat, not waiting for a limit
+    const siteErrKind = akoweSiteErr && akoweSiteErr.kind === "chat-full" ? "chat-full" : rateLimited ? "rate-limit" : (akoweSiteErr ? akoweSiteErr.kind : null);
+    if (siteErrKind === "chat-full") rateLimited = false;
     if (siteErrKind) {
       const turn = { id: state.nextTurnId++, site, label: SITES[site].label, text, ts: Date.now(), pinned: false };
       if (rateLimited) turn.isRateLimited = true; else turn.siteError = siteErrKind;
@@ -4294,6 +4478,7 @@ async function pollSite(site) {
       markCaptured(site);
       pushTranscriptTurn(turn);
       broadcast("capture", turn);
+      if (siteErrKind === "chat-full") { try { freshChat.markFull(site); } catch (_) {} }
       if (rateLimited) logEvent("rate-limit-detected", { site, chars: text.length, houseRuleActive: state.hr.active });
       else logEvent("site-error-detected", { site, chars: text.length, kind: siteErrKind, severity: "warn", note: siteErrors.describeSiteError(siteLabel(site), siteErrKind) });
       if (state.waiting[site]) {
@@ -4356,8 +4541,19 @@ async function pollSite(site) {
         state.waitingSince[site] = null;
         broadcast("waiting-changed", { site, waiting: false });
       }
+      // PR #120: a reply that answers a check-in without being "owned" (no word, an
+      // earlier check-in's word, late) still proves the AI answers: self-repair credits
+      // it (slow, never broken) — or, when it is the site's own error notice
+      // ("Sorry, something went wrong…"), ends the waiting check-in as a page error.
+      let probeSiteErr = null;
+      if (probeKind !== "owned") {
+        const bare = String(forcedAccept ? acceptedUntaggedRaw[site] : text).replace(/\[\s*(?:TO|FROM)\s*:[^\]\r\n]{0,40}\]/gi, "").trim();
+        probeSiteErr = siteErrors.siteErrorOf(bare);
+      }
+      let credited = false;
       if (probeKind === "owned") { try { selfRepair.onCaptured(site, { text, answers: checkinAnswers }); } catch (_) {} }
-      logEvent("checkin-reply", { site, chars: text.length, how: probeKind === "owned" ? undefined : probeKind });
+      else { try { credited = selfRepair.noteProbeAnswer(site, { answers: checkinAnswers, siteError: !!probeSiteErr }); } catch (_) {} }
+      logEvent("checkin-reply", { site, chars: text.length, how: probeKind === "owned" ? undefined : probeKind, siteError: probeSiteErr ? probeSiteErr.kind : undefined, credited: probeKind !== "owned" ? credited : undefined });
       return;
     }
     let roundtableTag = null;
@@ -4456,10 +4652,6 @@ async function pollSite(site) {
     try { const ans = relayTrace.answersOf(turn.id); if (selfRepair && ans && ans.length) selfRepair.noteWorking(site); } catch (_) {}
     state.noTagReprompts[site] = 0; // a valid reply landed — clear any missing-tag nudge streak
     if (roundtableExplicit) state.noToReminders[site] = 0;
-    pushTranscriptTurn(turn);
-    broadcast("capture", turn);
-    logEvent("captured", { site, chars: displayText.length });
-    saveStateDebounced();
 
     if (state.waiting[site]) {
       state.waiting[site] = false;
@@ -4486,11 +4678,25 @@ async function pollSite(site) {
         // belongs to, so "Extract → This Akọwe book only" can pick it out.
         let req = null;
         try { for (const s of (answers || [])) { const r = getBookTracker().requestBySeq(s); if (r && (!req || r.at > req.at)) req = r; } } catch (_) {}
-        if (req) { turn.bf = { requestId: req.requestId, projectId: req.projectId }; saveStateDebounced(); }
+        // PR #123: Akọwe has the full answer; the conversation list keeps a short copy (first 2,000 characters), so
+        // a long run's memory and state file stay small. state.captured keeps the raw page text (the dedup check).
+        const short = transcriptStore.trimOwnedText(turn.text);
+        const shown = Object.assign({}, turn, { text: short.text });
+        if (short.trimmed) shown.fullChars = short.fullChars;
+        if (req) shown.bf = { requestId: req.requestId, projectId: req.projectId };
+        pushTranscriptTurn(shown);
+        broadcast("capture", shown);
+        logEvent("captured", { site, chars: displayText.length });
+        saveStateDebounced();
+        try { freshChat.noteReply(site, text.length); } catch (_) {}
         logEvent("akowe-owned-reply", { site, chars: turn.text.length, request_id: req ? req.requestId : undefined });
         return;
       }
     }
+    pushTranscriptTurn(turn);
+    broadcast("capture", turn);
+    logEvent("captured", { site, chars: displayText.length });
+    saveStateDebounced();
     relayConvoAt[site] = Date.now(); // a conversation reply (not Akọwe's) — see carryOnContext()
 
     // Mesh routing (Auto/Auto-Both/manual routing:set) and either tag-based
@@ -5614,6 +5820,7 @@ ipcMain.handle("sites:new-chat-all", () => {
       state.pending[site] = { text: "", sinceTs: Date.now(), reprompted: false };
       state.captured[site] = null;
       state.noTagReprompts[site] = 0;
+      try { freshChat.reset(site); } catch (_) {}
       results[site] = true;
     } catch (e) { results[site] = false; logEvent("new-chat-error", { site, error: String(e) }); }
   }
@@ -5781,7 +5988,8 @@ async function pickerStatus(site) {
   }
   if (items.send) { const w = pickerSendWorks(site); if (w) items.send.works = w; } // how Send really works (PC test 2026-10-28)
   let repair = null; try { repair = selfRepair.state(site); } catch (_) {}
-  return { ok: true, site, label: siteLabel(site), items, picking: pickRunning[site] || null, repair };
+  const retired = Object.fromEntries(Object.entries(state.retiredSelectors[site] || {}).map(([r, b]) => [r, { selector: b.selector, source: b.source, retiredAt: b.retiredAt }]));
+  return { ok: true, site, label: siteLabel(site), items, picking: pickRunning[site] || null, repair, retired };
 }
 // 🔢 sent with Enter (or the usual Send button) and learned no Send button: drop a
 // saved / learned Send button that is not on the page any more, so the 🎯 card
@@ -5864,6 +6072,18 @@ ipcMain.handle("picker:force", async (_evt, payload) => {
   try { res = await view.webContents.executeJavaScript(selfRepairLib.buildPickForceScript(site, SITES), true); }
   catch (e) { res = { ok: false, error: "SCRIPT_FAILED" }; }
   return pickerTakeResult(site, role, res, true);
+});
+// PR #120: ↺ Undo — bring back a saved selector that was forgotten as out of date.
+ipcMain.handle("picker:undo-retire", async (_evt, payload) => {
+  const site = payload && payload.site;
+  if (!SITES[site]) return { ok: false, error: "BAD_SITE" };
+  const roles = payload.role ? [payload.role] : Object.keys(state.retiredSelectors[site] || {});
+  const done = roles.map((r) => undoRetiredSelector(site, r)).filter((x) => x.ok).map((x) => x.role);
+  if (!done.length) return { ok: false, error: "NOTHING_TO_UNDO" };
+  try { selfRepair.userActed(site); } catch (_) {}
+  const st = await pickerStatus(site);
+  broadcast("picker", st);
+  return Object.assign({ undone: done }, st);
 });
 // 2026-10-29: "↺ Forget what I taught": every saved 🎯 / 🔢 part AND every part the
 // self-repair learned for this AI — back to AutoInjector's built-in way of reading it.
@@ -7957,7 +8177,7 @@ async function selfRepairReload(site, { home = false } = {}) {
     else wc.loadURL(onSite ? url : siteHome(site));
   } catch (_) { return { ok: false }; }
   state.pending[site] = { text: "", sinceTs: Date.now(), reprompted: false };
-  if (home) { state.captured[site] = null; capturedCount[site] = null; }
+  if (home) { state.captured[site] = null; capturedCount[site] = null; try { freshChat.reset(site); } catch (_) {} } // a fresh page is a new chat
   logEvent("reload", { site, by: "self-repair", freshPage: !!home });
   const ok = await loaded;
   return { ok: ok && !paneLoadFailed[site] };
@@ -8020,6 +8240,7 @@ function selfRepairSaveLearned(site, role, selector, how) {
   return true;
 }
 const SELF_REPAIR_SAY = {
+  slow: (L) => ({ say: `🐢 ${L} is slow right now — it answered its check-in late, so AutoInjector stopped checking and left it alone (it is not broken)`, tone: "info" }),
   fixed: (L, ev) => ({ say: `✔ Fixed — ${L} is working again${ev && ev.how ? ` (${ev.how === "number" ? "✔ Saved — the number teach learned where things are" : ev.how === "teach" ? "you showed AutoInjector where things are" : ev.how === "page-search" || ev.how === "page_search" ? "it found where replies appear" : ev.how === "alternatives" ? "it used another known way to find things" : ev.how === "reload" || ev.how === "reload_home" ? "after reloading its window" : ev.how === "unfreeze" ? "after pressing Stop" : "a check-in worked"})` : ""}`, tone: "ok" }),
   needs_user: (L, ev) => ({ say: `⚠️ ${L} needs you: ${selfRepairLib.describeProblem(ev && ev.code, L).say}`, tone: "warn" }),
   broken: (L, ev) => (ev && ev.ask ? { say: `⚠️ ${L} isn't working and AutoInjector couldn't fix it by itself (${(ev && ev.code) || "UNKNOWN"}). Please use 🎯 on ${L}'s pane, or 🔢 “Do it for me with a number” — Akọwe uses your other AIs meanwhile. (AutoInjector re-checks after 5, 15, then every 60 minutes.)`, tone: "error" } : { say: `✕ ${L} still isn't working (${(ev && ev.code) || "UNKNOWN"}) — Akọwe uses your other AIs`, tone: "error" }),
@@ -8239,6 +8460,68 @@ ipcMain.handle("selfrepair:settings", (_evt, payload) => {
   logEvent("self-repair", { step: "settings", outcome: `every:${state.selfRepair.intervalMin}min carry-on:${carryOnEnabled() ? "on" : "off"}` });
   return selfRepairStatus();
 });
+// ==== PR #123: a fresh chat for Akọwe before a pane's conversation gets too long (fresh-chat.js) ====
+// Only BETWEEN Akọwe requests (right before the next prompt is typed — never mid-request), never while the AI is
+// still writing, and never under the user: a pane the user used themselves in the last 10 minutes keeps its chat
+// (unless the site said the chat is full — then it can't be used anyway).
+const FRESH_CHAT_CLICK_SETTLE_MS = Number(process.env.AUTOINJECTOR_FRESH_CHAT_SETTLE_MS) || 2500;
+const freshChatHeldSaid = {}; // site -> the hold already logged (said once per hold)
+function freshChatBusy(site) {
+  return !!(state.generating[site] || state.stopShown[site] || state.waiting[site] || sendQueues[site] || chatImageHolds(site));
+}
+function freshChatUserAt(site) { return Math.max(lastUserInputAt[site] || 0, relayConvoAt[site] || 0); }
+function freshChatForget(site) {
+  state.pending[site] = { text: "", sinceTs: Date.now(), reprompted: false };
+  state.captured[site] = null;
+  capturedCount[site] = null;
+  state.noTagReprompts[site] = 0;
+}
+// Open a new chat in the pane: the site's own "New chat" button first, then (if that didn't give an empty chat with a
+// message box) the site's new-chat address. -> { ok, how: 'button' | 'address' }
+async function startFreshChat(site) {
+  const view = siteViews[site];
+  if (!view || !view.webContents || view.webContents.isDestroyed()) return { ok: false, error: "NO_VIEW" };
+  const sel = SITES[site] || {};
+  const ov = effectiveOverrides(site);
+  const assistant = [ov.assistant].concat(sel.ASSISTANT_CANDIDATES || []).filter(Boolean);
+  const input = [ov.input].concat(sel.INPUT_CANDIDATES || []).filter(Boolean);
+  const click = await selfRepairRunPage(site, freshChatMod.buildNewChatScript(site));
+  if (click && click.ok && click.clicked) {
+    await new Promise((r) => setTimeout(r, FRESH_CHAT_CLICK_SETTLE_MS));
+    const chk = await selfRepairRunPage(site, freshChatMod.buildFreshCheckScript(assistant, input));
+    if (chk && chk.ok && chk.replies === 0 && chk.input) { freshChatForget(site); return { ok: true, how: "button" }; }
+  }
+  const r = await selfRepairReload(site, { home: true });
+  return { ok: !!(r && r.ok), how: "address" };
+}
+async function akoweFreshChatIfDue(site, ct) {
+  try { freshChat.settings(state.freshChat); } catch (_) {}
+  const d = freshChat.due(site, { busy: freshChatBusy(site), userAt: freshChatUserAt(site) });
+  if (!d.due) {
+    if (d.held && freshChatHeldSaid[site] !== d.held) { freshChatHeldSaid[site] = d.held; logEvent("akowe-fresh-chat-held", { site, reason: d.reason, held: d.held, requests: d.requests, chars: d.chars, note: freshChatMod.describeHeld(siteLabel(site), d.held) }); }
+    return { started: false, held: d.held || null };
+  }
+  if (ct && ct.cancelled) return { started: false };
+  delete freshChatHeldSaid[site];
+  const r = await startFreshChat(site);
+  if (r.ok) freshChat.reset(site);
+  logEvent("akowe-fresh-chat", { site, reason: d.reason, requests: d.requests, chars: d.chars, how: r.how, ok: !!r.ok, severity: r.ok ? undefined : "warn",
+    note: r.ok ? freshChatMod.describe(siteLabel(site), d.reason, d) : `Couldn't open a fresh ${siteLabel(site)} chat — Akọwe's prompt goes into the old chat` });
+  return { started: !!r.ok, how: r.how };
+}
+ipcMain.handle("akowe:fresh-chat-settings", (_evt, payload) => {
+  const p = payload && typeof payload === "object" ? payload : {};
+  for (const k of ["everyRequests", "everyChars"]) {
+    if (p[k] === undefined) continue;
+    const n = Number(p[k]);
+    if (!Number.isFinite(n) || n < 0) return { ok: false, error: "BAD_VALUE" };
+    state.freshChat[k] = Math.round(n);
+  }
+  const cfg = freshChat.settings(state.freshChat);
+  saveStateDebounced();
+  return { ok: true, freshChat: { everyRequests: cfg.everyRequests, everyChars: cfg.everyChars }, counts: freshChat.snapshot() };
+});
+// ==== end fresh chat ====
 let akoweStarting = null; // in-flight start, so a double toggle can't race two listeners onto the port
 function startAkoweBridge() {
   if (akoweBridge) return Promise.resolve({ ok: true });
@@ -8266,6 +8549,9 @@ async function startAkoweBridgeNow() {
       const ct = meta && meta.cancelToken ? meta.cancelToken : null;
       await selfRepairMakeWay(site, ct);
       if (ct && ct.cancelled) return { ok: false, error: "CANCELLED", seq: null };
+      // PR #123: between Akọwe requests, a chat that is too long (or full) is swapped for a fresh one first
+      try { await akoweFreshChatIfDue(site, ct); } catch (e) { logEvent("akowe-fresh-chat", { site, ok: false, error: String(e), severity: "warn" }); }
+      if (ct && ct.cancelled) return { ok: false, error: "CANCELLED", seq: null };
       // sendTextTo() stamps state.nextMsgSeq synchronously (before its first
       // await) once the view exists, so reading it first gives this send's
       // exact [MSG #] number without changing sendTextTo's return shape.
@@ -8276,6 +8562,7 @@ async function startAkoweBridgeNow() {
       // bridge: verbatim, no hop-count reset, no tag flags (BF-03/BF-16);
       // cancelToken: the bridge withdraws it if its request times out first (BF-02).
       const res = await sendTextTo(site, text, null, { bridge: true, cancelToken: meta && meta.cancelToken ? meta.cancelToken : null });
+      if (res && res.ok) { try { freshChat.noteSent(site, String(text || "").length); } catch (_) {} }
       // verified: was it PROVEN to show up in the chat? (false = the box emptied but it never
       // showed up — the bridge then says "never arrived" on a timeout, not "hadn't answered")
       return { ok: !!(res && res.ok), error: res && res.error, seq: res && res.ok ? seq : null, verified: res && res.ok ? (res.verified === true ? true : res.verified === false ? false : null) : null };
@@ -8379,12 +8666,181 @@ function akoweStatusSnapshotBase() {
     sites,
     akowe: bfStatus,
     selfRepair: { intervalMin: state.selfRepair.intervalMin, startup: state.selfRepair.startup !== false, carryOn: carryOnEnabled(), automatic: CHECKINS_ENABLED }, // P18.1 check-in settings
+    attention: { notify: state.attention.notify !== false, sound: state.attention.sound !== false }, // PR #123
+    freshChat: { everyRequests: state.freshChat.everyRequests, everyChars: state.freshChat.everyChars }, // PR #123
+    awake: (() => { try { return wakeLock.awake(); } catch (_) { return false; } })(), // PR #123: the PC is kept awake right now
     pairing: st && st.pairing ? { pending: st.pairing.pending, expiresAt: st.pairing.expiresAt, lastPairedAt: st.pairing.lastPairedAt, locked: st.pairing.locked } : null
   };
 }
 // The real state of the "⚡ Make a book for me" run (akowe-run.js) — the checklist alone said "10/10 Done"
 // for a run that had stopped at step 7 of 16.
 const akoweRunWatch = require("./akowe-run").createRunWatch({ api: (m, p) => akoweApi(m, p, null, 8000) });
+
+// ==== PR #123: while a book run (or a video / picture job) works — run-guard.js ====
+// Keeps the PC awake, asks before the window closes, hides to the tray to carry on, and tells the user (a Windows
+// notification + the taskbar flashing, sound optional) when the run needs them. Looked at every RUN_GUARD_MS.
+const RUN_GUARD_MS = Number(process.env.AUTOINJECTOR_RUN_GUARD_MS) || 15000;
+const RUN_WATCH_RECENT_MS = 15 * 60000; // Akọwe used the AIs this recently: pane problems are worth telling the user
+const wakeLock = runGuardMod.createWakeLock({ blocker: powerSaveBlocker || null, idleGraceMs: Number(process.env.AUTOINJECTOR_WAKE_GRACE_MS) >= 0 && process.env.AUTOINJECTOR_WAKE_GRACE_MS !== undefined ? Number(process.env.AUTOINJECTOR_WAKE_GRACE_MS) : undefined, log: (k, d) => logEvent(k, d) });
+const runGuardState = { run: null, lastBridgeBusyAt: 0, timer: null, ticking: false, tray: null, quitConfirmed: false, appQuitting: false, closeAsking: false, toldBackground: false, notes: [] };
+const attentionNotifier = runGuardMod.createNotifier({
+  show: (n) => showAttention(n),
+  flash: (on) => { try { if (win && !win.isDestroyed?.() && typeof win.flashFrame === "function") win.flashFrame(!!on); } catch (_) {} },
+  getSettings: () => ({ on: state.attention.notify !== false, sound: state.attention.sound !== false }),
+  renotifyMs: Number(process.env.AUTOINJECTOR_RENOTIFY_MS) || undefined
+});
+function mediaJobsNow() {
+  const out = [];
+  try { if (imageProvider.status().busy) out.push("a picture is being made"); } catch (_) {}
+  try { if (typeof _videoStudio !== "undefined" && _videoStudio && _videoStudio.busy()) out.push("a video is being made"); } catch (_) {}
+  try { if (typeof _framepack !== "undefined" && _framepack && _framepack.busy()) out.push("a FramePack video is being made"); } catch (_) {}
+  try { if (chatImageHold) out.push("ChatGPT is drawing a picture"); } catch (_) {}
+  return out;
+}
+function bridgeInFlightNow() {
+  try { const st = akoweBridge && akoweBridge.status(); return st && st.active ? Object.values(st.active).filter(Boolean).length : 0; } catch (_) { return 0; }
+}
+function runActivityNow() {
+  return runGuardMod.activityOf({ run: runGuardState.run, inFlight: bridgeInFlightNow(), media: mediaJobsNow() });
+}
+// The book run as Akọwe reports it. Asked of Akọwe's own API only when AutoInjector may talk to it (the bridge is on,
+// the user asked, or it is our own Akọwe server); otherwise only what Akọwe pushed itself.
+async function runGuardReadRun() {
+  try { const st = akoweBridge && akoweBridge.status(); if (st && st.akowe) akoweCarry.akowe = st.akowe; } catch (_) {}
+  const bfb = akoweCarry.akowe || {};
+  const pid = bfb.project && bfb.project.id;
+  let canAsk = false;
+  try { canAsk = !!akoweServerBase() && !!(state.akowe.enabled || bfApp.userAsked || (akoweServer && typeof akoweServer.isOwnedAlive === "function" && akoweServer.isOwnedAlive())); } catch (_) {}
+  if (canAsk) { try { await akoweRunWatch.refresh(pid); } catch (_) {} return akoweRunWatch.peek(pid, bfb.run); }
+  if (!bfb.run) return null;
+  const sum = require("./akowe-run").summarizeRun(bfb.run);
+  // Akọwe stopped reporting (closed / crashed): its last "writing" no longer counts as working
+  if (sum && Date.now() - (Number(bfb.receivedAt) || 0) > akoweBridgeMod.BF_STATUS_STALE_MS) sum.stale = true;
+  return sum;
+}
+async function runGuardTick() {
+  if (runGuardState.ticking) return;
+  runGuardState.ticking = true;
+  try {
+    try { runGuardState.run = await runGuardReadRun(); } catch (_) { runGuardState.run = null; }
+    const act = runActivityNow();
+    if (act.inFlight || act.runLive) runGuardState.lastBridgeBusyAt = Date.now();
+    wakeLock.update(act);
+    const sites = {};
+    for (const s of SITE_IDS) sites[s] = { label: siteLabel(s), active: !!(state.enabled && state.enabled[s]), health: (() => { try { return selfRepair.health(s); } catch (_) { return null; } })() };
+    const watching = act.busy || Date.now() - runGuardState.lastBridgeBusyAt < RUN_WATCH_RECENT_MS;
+    attentionNotifier.update(runGuardMod.conditionsFrom({ run: runGuardState.run, sites, watching }));
+    if (runGuardState.tray) { try { runGuardState.tray.setToolTip(act.busy ? `AutoInjector — still working (${act.why[0] || "busy"})` : "AutoInjector — open the window"); } catch (_) {} }
+  } finally { runGuardState.ticking = false; }
+}
+function startRunGuard() {
+  if (runGuardState.timer) return;
+  runGuardState.timer = setInterval(() => { runGuardTick().catch(() => {}); }, RUN_GUARD_MS);
+  setTimeout(() => { runGuardTick().catch(() => {}); }, Math.min(3000, RUN_GUARD_MS));
+}
+let _appIcon;
+function appIconImage() {
+  if (_appIcon !== undefined) return _appIcon;
+  try { _appIcon = electronNativeImage && typeof electronNativeImage.createFromBuffer === "function" ? electronNativeImage.createFromBuffer(runGuardMod.makeIconPng(32)) : null; } catch (_) { _appIcon = null; }
+  return _appIcon;
+}
+function showAttention(n) {
+  logEvent("attention", { key: n.key, title: n.title, again: !!n.again, sound: !n.silent, note: n.body, severity: "warn" });
+  try {
+    if (!Notification || (typeof Notification.isSupported === "function" && !Notification.isSupported())) return false;
+    const opts = { title: n.title, body: n.body, silent: !!n.silent };
+    const icon = appIconImage(); if (icon) opts.icon = icon;
+    const notif = new Notification(opts);
+    runGuardState.notes.push(notif); // kept until clicked/closed, so the click still reaches us
+    if (runGuardState.notes.length > 20) runGuardState.notes.shift();
+    const drop = () => { const i = runGuardState.notes.indexOf(notif); if (i >= 0) runGuardState.notes.splice(i, 1); };
+    if (typeof notif.on === "function") { notif.on("click", () => { drop(); openAttentionTarget(n); }); notif.on("close", drop); }
+    notif.show();
+    return true;
+  } catch (e) { logEvent("attention-error", { error: String(e), severity: "warn" }); return false; }
+}
+// A click on a notification opens the right place: the window, and the Akọwe tab for a book run.
+function openAttentionTarget(n) {
+  showMainWindow();
+  if (n && n.target === "akowe") {
+    if (akowePopWin && !akowePopWin.isDestroyed?.()) { try { akowePopWin.show?.(); akowePopWin.focus(); } catch (_) {} }
+    else broadcast("akowe-tab-show", {});
+  }
+  if (n && n.site) broadcast("attention-pane", { site: n.site });
+}
+function showMainWindow() {
+  if (!win) createWindow();
+  try { if (typeof win.isMinimized === "function" && win.isMinimized()) win.restore(); } catch (_) {}
+  try { if (typeof win.show === "function") win.show(); win.focus(); } catch (_) {}
+  if (runGuardState.tray) { try { runGuardState.tray.destroy(); } catch (_) {} runGuardState.tray = null; }
+  attentionNotifier.seen();
+}
+function quitConfirmed(reason) {
+  runGuardState.quitConfirmed = true;
+  logEvent("app-quit", { reason });
+  try { app.quit(); } catch (_) {}
+}
+function ensureTray() {
+  if (runGuardState.tray) return runGuardState.tray;
+  if (!Tray) return null;
+  try {
+    const t = new Tray(appIconImage() || (electronNativeImage && electronNativeImage.createEmpty ? electronNativeImage.createEmpty() : undefined));
+    t.setToolTip("AutoInjector — still working");
+    if (Menu && typeof Menu.buildFromTemplate === "function") {
+      t.setContextMenu(Menu.buildFromTemplate([
+        { label: "Open AutoInjector", click: () => showMainWindow() },
+        { type: "separator" },
+        { label: "Stop everything and quit", click: () => quitConfirmed("tray") }
+      ]));
+    }
+    t.on("click", () => showMainWindow());
+    t.on("double-click", () => showMainWindow());
+    runGuardState.tray = t;
+  } catch (e) { logEvent("tray-error", { error: String(e), severity: "warn" }); runGuardState.tray = null; }
+  return runGuardState.tray;
+}
+// "Keep running in the background": the window hides; the icon by the clock opens it again. Without a tray icon (some
+// Linux desktops) the window is minimised instead, so it can always be found again.
+function hideToBackground() {
+  const t = ensureTray();
+  try {
+    if (t && typeof win.hide === "function") win.hide();
+    else if (typeof win.minimize === "function") win.minimize();
+  } catch (_) {}
+  logEvent("window-background", { tray: !!t, note: t ? "The window is hidden and the work carries on. Click the AutoInjector icon by the clock to open it again." : "The window is minimised and the work carries on." });
+  if (!runGuardState.toldBackground) {
+    runGuardState.toldBackground = true;
+    showAttention({ key: "background", title: "AutoInjector is still working", body: t ? "The book carries on in the background. Click the AutoInjector icon by the clock (bottom right) to open the window again." : "The book carries on. The window is minimised on the taskbar.", silent: true, target: "akowe" });
+  }
+}
+function onMainWindowClose(e) {
+  if (runGuardState.quitConfirmed || runGuardState.appQuitting) return;
+  const act = runActivityNow();
+  const q = runGuardMod.closeQuestion(act);
+  if (!q) return; // nothing is working: close (and quit) as always
+  try { e.preventDefault(); } catch (_) {}
+  if (runGuardState.closeAsking) return;
+  runGuardState.closeAsking = true;
+  const ask = dialog && typeof dialog.showMessageBox === "function" ? dialog.showMessageBox(win, q) : Promise.resolve({ response: 2 });
+  Promise.resolve(ask).then((r) => {
+    const choice = runGuardMod.closeChoice(r && r.response);
+    logEvent("window-close-asked", { choice, why: act.why.join(", "), note: choice === "background" ? "Kept running in the background" : choice === "quit" ? "Stopped and quit" : "Cancelled — the window stays open" });
+    if (choice === "background") hideToBackground();
+    else if (choice === "quit") quitConfirmed("window-close");
+  }).catch(() => {}).finally(() => { runGuardState.closeAsking = false; });
+}
+ipcMain.handle("attention:settings", (_evt, payload) => {
+  const p = payload && typeof payload === "object" ? payload : {};
+  if (p.notify !== undefined) state.attention.notify = !!p.notify;
+  if (p.sound !== undefined) state.attention.sound = !!p.sound;
+  if (p.notify !== undefined || p.sound !== undefined) saveStateDebounced();
+  return { ok: true, attention: { notify: state.attention.notify !== false, sound: state.attention.sound !== false }, awake: wakeLock.awake(), working: runActivityNow().why };
+});
+ipcMain.handle("attention:test", () => {
+  const ok = showAttention({ key: "test", title: "AutoInjector can tell you", body: "This is how AutoInjector tells you when a book needs you.", silent: state.attention.sound === false, target: "akowe" });
+  return { ok: true, shown: ok };
+});
+// ==== end run guard ====
 function akoweStatusSnapshot(opts) {
   const snap = akoweStatusSnapshotBase();
   snap.connection = akoweConnection(snap);
@@ -9070,7 +9526,7 @@ function lockAkoweContents(wc) {
 }
 function ensureAkoweView() {
   if (akoweView && !akoweView.webContents.isDestroyed()) return akoweView;
-  akoweView = new WebContentsView({ webPreferences: { partition: "persist:akowe", contextIsolation: true, nodeIntegration: false, sandbox: true } });
+  akoweView = new WebContentsView({ webPreferences: { partition: "persist:akowe", contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false } }); // PR #123: keeps working while minimised
   lockAkoweContents(akoweView.webContents);
   try { akoweView.setVisible(false); } catch (_) {}
   if (win) win.contentView.addChildView(akoweView); // added last: above the AI panes when its tab shows
@@ -9304,6 +9760,8 @@ ipcMain.handle("health:fix", async (_e, p) => { try { return await healthWatch.f
 // ==== end 🩺 HEALTH WATCH ====
 
 app.whenReady().then(() => {
+  // Windows shows a desktop notification only for an app with an id (PR #123: "your book needs you")
+  try { if (process.platform === "win32" && typeof app.setAppUserModelId === "function") app.setAppUserModelId("com.autoinjector.desktop"); } catch (_) {}
   loadPersistedState();
   selfRepairApplySettings(); // P18.1: the saved check-in interval
   try { const s = dbService.init(userDataDir()); logEvent("db-init", { available: s.available, reason: s.reason }); }
@@ -9374,6 +9832,9 @@ app.on("before-quit", (event) => {
 });
 process.on("exit", () => { try { if (akoweServer) akoweServer.killNow(); } catch (_) {} });
 app.on("will-quit", () => { stopAkoweBridge(); });
+// PR #123: the PC may sleep again, the tray icon goes, and the last state change is written before the app ends.
+app.on("before-quit", () => { runGuardState.appQuitting = true; });
+app.on("will-quit", () => { try { wakeLock.release(); } catch (_) {} try { if (runGuardState.tray) runGuardState.tray.destroy(); } catch (_) {} runGuardState.tray = null; flushStateNow(); });
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
 app.on("activate", () => { if (!win) createWindow(); });
 app.on("before-quit", () => { try { if (_framepack) _framepack.stop(); } catch (_) {} try { if (terminal) terminal.stop(); } catch (_) {} try { if (lockers) lockers.stopAll(); } catch (_) {} try { serviceBridge.stop(); } catch (_) {} try { interpreterProvider.stopManaged(); } catch (_) {} try { voiceProvider.stopManaged(); } catch (_) {} try { ollamaManager.stopManaged(); } catch (_) {} });

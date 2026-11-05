@@ -116,6 +116,10 @@ def clean_profile(body) -> dict:
             from .story_choices import clean as clean_choices  # noqa: PLC0415
             out[k] = clean_choices(v)
             continue
+        if k == "kind_ai":  # 📚 the AI's pick of the kind of story (story_kind.py), recorded by the ⚡ invent step
+            from .story_kind import clean_ai  # noqa: PLC0415
+            out[k] = clean_ai(v)
+            continue
         if k == "checkpoint_every":  # 🧭 "Check the whole story every N chapters" (checkpoints.py; 0 = off)
             from .checkpoints import MAX_EVERY, clean_every  # noqa: PLC0415
             cv = clean_every(v)
@@ -635,6 +639,14 @@ class BookPath:
                 next(s_ for s_ in steps if s_["id"] == "outline")["story_shape"] = shape
         except Exception:  # noqa: BLE001 - never break the checklist
             log.exception("story shape of the plan")
+        try:  # 📚 the kind of story on the plan: its stages on the chapters, and whether it may still change
+            from . import story_kind  # noqa: PLC0415
+            kd = story_kind.page_info(self.store, self.pid, self.branch, outline, bp=self,
+                                      can_change=not any(c.get("prose") or c.get("approved") for c in chapters))
+            if kd is not None:
+                next(s_ for s_ in steps if s_["id"] == "outline")["story_kind"] = kd
+        except Exception:  # noqa: BLE001 - never break the checklist
+            log.exception("story kind of the plan")
         # The book is put together from APPROVED chapter texts only: a waiting revision of an approved chapter keeps
         # the chapters step open (Approve) without stopping the author from re-assembling the approved book.
         all_approved = bool(chapters) and all(c.get("approved") for c in chapters)
@@ -743,7 +755,7 @@ class BookPath:
         fn = {"create": self.a_create, "write_chapter": self.a_write_chapter, "approve": self.a_approve,
               "setup_format": self.a_setup_format, "assemble": self.a_assemble, "export": self.a_export,
               "check": self.a_check, "set_role": self.a_set_role,
-              "set_story_shape": self.a_set_story_shape}.get(action)
+              "set_story_shape": self.a_set_story_shape, "set_story_kind": self.a_set_story_kind}.get(action)
         if fn is None:
             raise _err("NOT_FOUND", "/action", "unknown step action")
         try:
@@ -791,6 +803,35 @@ class BookPath:
                 "message": f"Story shape: {story_shape.label_of(shape)}." + (
                     " The beats are placed on your chapter outline by where they usually fall." if shape and outline
                     else "")}
+
+    def a_set_story_kind(self, body: dict) -> dict:
+        """📚 Change the kind of story on the plan page — only before a chapter is written. "" = let the AI decide
+        (an AI pick already made stays in force and is shown as the AI's). The stages are then placed on the approved
+        outline where they usually begin (a ⚡ run places them with the AI when it plans the outline)."""
+        from . import story_choices, story_kind  # noqa: PLC0415
+        kd = story_kind.clean(body.get("kind"))
+        outline = self.outline()
+        if outline:
+            for ch in self.outline_chapters(outline):
+                _ctx, latest, appr = self.chapter_prose(outline, ch["chapter_id"])
+                if (latest and not latest.get("stale")) or appr:
+                    raise StepError.msg("The kind of story can only change before the chapters are written: a "
+                                        "chapter is already written.")
+        choices = dict(story_choices.of_profile(get_profile(self.store, self.pid)))
+        if kd:
+            choices[story_kind.KEY] = kd
+        else:
+            choices.pop(story_kind.KEY, None)
+        save_profile(self.store, self.pid, {"choices": choices})
+        self.profile = get_profile(self.store, self.pid)
+        story_kind.forget(self.store, self.pid, self.branch)
+        now, by, _why = story_kind.of_profile(self.profile)
+        return {"ok": True, "story_kind": kd,
+                "message": (f"Kind of story: {story_kind.label_of(now)}"
+                            + (" (picked by the AI)" if by == "ai" else "") + "." if now
+                            else "Kind of story: let the AI decide.")
+                + (" Its stages are placed on your chapter outline where they usually begin." if now and outline
+                   else "")}
 
     def _manual(self, op, payload, why):
         return {"ok": False, "needs_manual": True, "op": op, "payload": payload, "message": why}

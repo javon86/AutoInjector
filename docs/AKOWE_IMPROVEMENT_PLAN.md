@@ -663,6 +663,39 @@ the browser: `tests/campaign/ui/test_ui_continuity.py`):
 - *Not done:* the AI placement runs only inside a ⚡ run (outside, beats are placed by position); a beat's
   "landed" check is the planned-to-page check (word reading + the independent AI), not a structural analysis.
 
+## 📚 Kind of story — the seven basic plots (2026-11, the author's request) — done
+
+- **The choice** (`akowe/story_kind.py`): Let the AI decide (default), Overcoming the Monster, Rags to Riches, The
+  Quest, Voyage and Return, Comedy, Tragedy, Rebirth (Booker). Each kind is data: plain name, one line, 5 stages (id,
+  plain name, what happens, where it usually begins in % of the book), the promise to the reader (what the ending must
+  deliver: Tragedy → the downfall caused by the hero's flaw; Comedy → confusion cleared, happy union; Rebirth → the
+  dark character redeemed …), the ending check's question and common pitfalls. Stored with the story choices
+  (`choices.kind`), picked on ⚡ Make a book, the 🚀 wizard, the profile and the plan page (`set_story_kind`, locked
+  once a chapter is written). It is "what kind of story"; the story shape stays "when the big moments happen" — both
+  can be chosen and both appear.
+- **Let the AI decide:** the ⚡ invent step asks for `story_kind` + `story_kind_why` (only when the author did not
+  choose) and records the pick in the profile (`kind_ai`); event `KIND_PICKED`; the plan page says "picked by the AI:
+  …". Choosing "Let the AI decide" again on the plan page keeps the AI's pick.
+- **Planning:** B01 premise, B03 main plot and B11 outline get `story_kind` (stages, promise, pitfalls; B11 with each
+  stage's `around_chapter`) and a rule. After the outline is approved, one AI call places the chapter where each stage
+  BEGINS (`place`, checked by `story_shape.validate` — misplaced stages begin where they usually do); each stage runs
+  until the next begins. Stored per outline revision (`story_kind:<pid>:<branch>`), else placed by position.
+- **Used, with the existing machinery:** scene planner and writer brief (`story_stage`: "This chapter serves the stage
+  “The nightmare” of this Overcoming the Monster story (chapters 9–11) …" + the promise), the chapter reviewer
+  (`story_stage` + note), the planned-to-page check (kind `story_stage`, required, in the chapter where the stage
+  begins), the checkpoints and the final check (report + ONE targeted fix through `story_shape.fix_items`, now shared
+  by beats and stages), the 5-chapter stretch review (`stretch.story_kind`: is the story on its way to the promise?),
+  and the ending check: the kind's promise is one of the book's promises ("Does the ending deliver a Tragedy's
+  downfall …?"), kept or open with a fix for the last chapter (the ending check's own fix pass); at a checkpoint it
+  is listed when the story already went off its way.
+- **Shown:** plan page box (kind, who picked it, the promise, stages strip "Ch 3–5 · Getting ready", ✔ / ⚠), the Book
+  Bible's story-plan page (S2), the book report ("Kind of story: Tragedy — the ending keeps its promise"). Books
+  without a kind: unchanged.
+- **Tests:** `tests/test_story_kind.py` (12) and `tests/campaign/ui/test_ui_story_kind.py` (2, one at phone width).
+- *Not done:* the AI pick happens only in a ⚡ run's invent step (a book made by hand with "Let the AI decide" gets no
+  kind until the author picks one); the stage placement by AI runs only inside a ⚡ run; a stage's "landed" check is the
+  planned-to-page check of the chapter where it begins.
+
 ## ✍ Write alongside me (2026-11, the author's request) — done
 
 - **What the author does** (chapter page → ✏️ Change it, or ✍ Write alongside me): highlight a passage in the chapter

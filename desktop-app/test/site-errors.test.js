@@ -55,5 +55,37 @@ assert(SE.retryAfterSeconds('error') === 30 && SE.retryAfterSeconds('rate-limit'
 assert(SE.describeSiteError('Gemini', 'error') === 'Gemini showed an error message instead of an answer — waiting and trying again', 'plain words for the log');
 assert(/usage-limit message/.test(SE.describeSiteError('Claude', 'rate-limit')), 'plain words for a usage limit');
 
+console.log('\n== PR #120: short canned refusals are site problems (kind "refused"), never answers ==');
+const refusals = [
+  "I'm having a hard time fulfilling your request. Can I help you with something else instead?", // the user's log, 91 chars, taken as an Akọwe answer
+  '[TO: USER]\nI’m having a hard time fulfilling your request. Can I help you with something else instead?',
+  'Can I help you with something else instead?',
+  "I'm a text-based AI, and that is outside of my capabilities.",
+  "I'm just a language model, so I can't help you with that.",
+  "I'm not able to help with that, as I'm only a language model.",
+  'As a language model, I’m not able to assist you with that.',
+  "I'm sorry, but I can't assist with that.",
+  "Sorry, I can't help with that.",
+  "I can't help with that request.",
+  "I'm unable to help with that."
+];
+for (const t of refusals) assert((SE.siteErrorOf(t) || {}).kind === 'refused', `refusal: “${t.slice(0, 60)}” -> ${(SE.siteErrorOf(t) || {}).kind}`);
+assert((SE.siteErrorOf('The message you submitted was too long, please reload the conversation and submit something shorter.') || {}).kind === 'too-long', 'ChatGPT "message too long" -> too-long');
+// PR #123: "…for this chat" means the CHAT is full (a fresh chat fixes it), not this one message
+assert((SE.siteErrorOf('Your message will exceed the length limit for this chat.') || {}).kind === 'chat-full', 'Claude "exceed the length limit for this chat" -> chat-full');
+assert((SE.siteErrorOf('Your message will exceed the length limit.') || {}).kind === 'too-long', 'Claude "exceed the length limit" (no chat named) -> too-long');
+const notRefusals = [
+  "I can't help with that, but here is what you can do instead: open Settings, choose Display, and turn the scale down to 100 percent.",
+  '{"note": "I\'m having a hard time fulfilling your request"}',
+  '[TO: USER]\nMara said: "I\'m sorry, but I can\'t help with that." Then she left.\n[FROM: CLAUDE]',
+  'Chapter 9. "' + "I'm having a hard time fulfilling your request," + '" the clerk said, and asked whether he could help with something else instead. ' + 'The rain went on. '.repeat(14)
+];
+for (const t of notRefusals) assert(SE.siteErrorOf(t) === null, `a real answer that holds the words is not a refusal: ${JSON.stringify(t.slice(0, 50))}`);
+assert(SE.REFUSAL_MAX_CHARS === 300, 'refusals are only looked for in replies under 300 characters');
+assert(/short refusal/.test(SE.describeSiteError('Gemini', 'refused')) && !/very long/.test(SE.describeSiteError('Gemini', 'refused', 2000)), 'plain words for a refusal (a normal-length prompt is not mentioned)');
+const longNote = SE.describeSiteError('Gemini', 'refused', 56012);
+assert(/56,012 characters/.test(longNote) && /may refuse prompts that long/.test(longNote), `a refusal of a very long prompt names its length (${longNote})`);
+assert(SE.longPromptNote('Gemini', 'error', 90000) === '', 'an ordinary error notice never blames the prompt length');
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

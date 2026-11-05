@@ -107,7 +107,14 @@ function buildSendScript(site, text, overrides, sendOpts) {
     // first try (main.js passes it back in on retries). Numbers restart when
     // the app restarts, so an old "[MSG #0001]" may already be on the page —
     // only a count ABOVE this baseline proves THIS send landed.
-    markerBaseline: sendOpts && Number.isInteger(sendOpts.markerBaseline) ? sendOpts.markerBaseline : null
+    markerBaseline: sendOpts && Number.isInteger(sendOpts.markerBaseline) ? sendOpts.markerBaseline : null,
+    // PR #120: "focus" = type nothing; put the caret at the end of the message box
+    // (which already holds the text) and say where the Send button is, so main.js
+    // can press a REAL Enter / click (webContents.sendInputEvent — a page may ignore
+    // script-made events); "confirm" = only wait for proof that it went out.
+    mode: sendOpts && (sendOpts.mode === "focus" || sendOpts.mode === "confirm") ? sendOpts.mode : null,
+    method: sendOpts && typeof sendOpts.method === "string" ? sendOpts.method.slice(0, 20) : null,
+    turnsBefore: sendOpts && Number.isInteger(sendOpts.turnsBefore) ? sendOpts.turnsBefore : null
   });
 
   return `
@@ -358,7 +365,7 @@ function buildSendScript(site, text, overrides, sendOpts) {
       if (rowMode) return info.users;
       return -1;
     }
-    const turnsBefore = userTurns();
+    const turnsBefore = CFG.turnsBefore != null ? CFG.turnsBefore : userTurns();
     function turnAdded() { const n = userTurns(); return turnsBefore >= 0 && n > turnsBefore; }
     // Is the saved / learned Send button still on the page (visible)?
     function savedSendState() {
@@ -367,7 +374,10 @@ function buildSendScript(site, text, overrides, sendOpts) {
       try { list = Array.from(document.querySelectorAll(CFG.OVERRIDE_SEND)); } catch { return "bad"; }
       return list.some(isShown) ? "found" : "missing";
     }
-    const savedSend = savedSendState();
+    // Checked again AFTER typing (attemptSend): a site whose Send button only
+    // appears once the box holds text (Gemini shows a microphone while it is
+    // empty) must not have its saved Send button called "missing" (PR #120).
+    let savedSend = savedSendState();
 
     // -> "seen" (marker in the conversation: proof), "empty" (box cleared, no
     // proof yet), or "" (still sitting in the box). With a marker we keep
@@ -420,7 +430,7 @@ function buildSendScript(site, text, overrides, sendOpts) {
     }
     function diag(method) {
       const box = findInput();
-      return { method, input: describe(box), boxChars: composerText(box).trim().length, button: describe(findSendButton()) };
+      return { method, input: describe(box), boxChars: composerText(box).trim().length, button: describe(findSendButton()), savedSend: savedSend || undefined };
     }
 
     async function attemptSend() {
@@ -429,6 +439,7 @@ function buildSendScript(site, text, overrides, sendOpts) {
       // page keeps changing meanwhile, the AI is still writing its last reply
       // (its Stop button just wasn't recognised): don't click the moment it
       // finishes, or that reply is typed over before it's captured (TR-30).
+      if (savedSend === "missing") savedSend = savedSendState(); // the box holds the text now
       let btn = findSendButton();
       const sig0 = pageSig();
       let waited = false;
@@ -506,6 +517,22 @@ function buildSendScript(site, text, overrides, sendOpts) {
       return out;
     }
     let dismissed = [];
+    // PR #120: the two halves of a send made with REAL input events by main.js
+    if (CFG.mode === "focus") {
+      const box = findInput();
+      if (!box) return { ok: false, error: "INPUT_NOT_FOUND", markerBaseline: baseline };
+      focusNode(box);
+      try { const rg = document.createRange(); rg.selectNodeContents(box); rg.collapse(false); const sl = window.getSelection(); sl.removeAllRanges(); sl.addRange(rg); } catch {}
+      const btn = findSendButton();
+      let at = null;
+      if (btn && isShown(btn) && !isOff(btn)) { try { const r = btn.getBoundingClientRect(); at = { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }; } catch {} }
+      return { ok: true, holds: holdsText(box, CFG.text), boxChars: composerText(box).trim().length, button: at, turnsBefore, markerBaseline: baseline, alreadySent: markerShown() };
+    }
+    if (CFG.mode === "confirm") {
+      const how = await confirmSent();
+      if (how) return result(how, CFG.method || "trusted");
+      return { ok: false, error: "SEND_NOT_CONFIRMED", markerBaseline: baseline, diag: diag(CFG.method || "trusted") };
+    }
     try { dismissed = dismissSurveys(); } catch {}
     if (dismissed.length) await new Promise((r) => setTimeout(r, 150));
     // A retry of a send whose first try DID land (just too slowly to confirm)
