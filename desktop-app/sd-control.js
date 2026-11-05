@@ -188,10 +188,41 @@ async function a1111Features(base) {
   return { openapi: !!oa, controlnet, adetailer, extras: oa ? has('/sdapi/v1/extra-single-image') : true, skip: oa ? has('/sdapi/v1/skip') : true, memory: oa ? has('/sdapi/v1/memory') : true, styles: oa ? has('/sdapi/v1/prompt-styles') : true, scripts: oa ? has('/sdapi/v1/scripts') : true };
 }
 
+// Does the WebUI list this extension among its scripts (/sdapi/v1/scripts — ADetailer
+// and ControlNet are "always on" scripts there, by name)? null = can't tell.
+async function scriptListed(base, kind, re) {
+  const s = await scripts(base).catch(() => null);
+  if (!s || !s.ok) return null;
+  const list = (kind === 'img2img' ? s.img2img : s.txt2img) || [];
+  return list.some((n) => re.test(String(n))) || (s.info || []).some((x) => x && x.alwayson && re.test(String(x.name)));
+}
+// PR #120 (log 2026-11-04: 🎨 Generate on Forge → UNSUPPORTED_ON_BACKEND right after
+// "ADetailer (fix faces / hands) opened"): an extension the WebUI doesn't have is
+// never a dead end. The picture is made without it and a plain warning names what
+// was left out (drop: the fields the caller removes before sending). When the
+// extension's own list can't be read but the WebUI lists it as a script, it is
+// sent anyway (names unchecked).
+const EXT_SKIP = {
+  adetailer: { name: 'ADetailer (fix faces / hands)', re: /^adetailer$/i, install: 'To use it, install ADetailer in the WebUI (Extensions → Available → ADetailer) and restart it.' },
+  controlnet: { name: 'ControlNet', re: /^controlnet$/i, install: 'To use it, install the sd-webui-controlnet extension (Forge has ControlNet built in) and restart the WebUI with --api.' }
+};
+async function extMissing(base, field, kind, warnings, drop, label) {
+  const e = EXT_SKIP[field];
+  const listed = await scriptListed(base, kind, e.re);
+  if (listed) {
+    warnings.push({ level: 'soft', kind: 'unchecked', field, message: `${e.name}: the WebUI didn't list its models, so the names weren't checked — sent anyway.` });
+    return false;
+  }
+  drop.push(field);
+  warnings.push({ level: 'hard', kind: 'skipped', field, message: `${e.name} was left out: ${label || 'this WebUI'} doesn't have it, so the picture was made without it. ${e.install}` });
+  return true;
+}
 // Check every name / field of a request against the server BEFORE sending it.
-// → { ok:true, warnings } | { ok:false, code, field, message, hint }
-async function a1111Check(base, p, kind = 'txt2img') {
+// → { ok:true, warnings, drop } | { ok:false, code, field, message, hint }
+// o.label: the app's name ("Forge") for the warnings.
+async function a1111Check(base, p, kind = 'txt2img', o = {}) {
   const warnings = [];
+  const drop = [];
   const ci = (list, v) => list.some((x) => String(x).toLowerCase() === String(v).toLowerCase() || String(x).replace(/\s*\[[0-9a-f]+\]$/i, '').toLowerCase() === String(v).toLowerCase());
   const bad = (field, v, list, what) => err('UNKNOWN_VALUE', `There is no ${what} “${v}” on this server.`, { field, hint: list.length ? `Choose one of: ${list.slice(0, 15).join(', ')}${list.length > 15 ? ', …' : ''}` : '' });
   if (p.extra) {
@@ -217,8 +248,9 @@ async function a1111Check(base, p, kind = 'txt2img') {
   }
   if (p.controlnet) {
     const [m, mo] = await Promise.all([controlnetModels(base), controlnetModules(base)]);
-    if (!m.ok) return m.code === 'UNSUPPORTED_ON_BACKEND' ? Object.assign(m, { field: 'controlnet' }) : m;
-    for (let i = 0; i < p.controlnet.length; i++) {
+    if (!m.ok && m.code !== 'UNSUPPORTED_ON_BACKEND') return m;
+    if (!m.ok) await extMissing(base, 'controlnet', kind, warnings, drop, o.label);
+    else for (let i = 0; i < p.controlnet.length; i++) {
       const u = p.controlnet[i];
       if (u.model && !/^none$/i.test(u.model) && m.models.length && !ci(m.models, u.model)) return bad(`controlnet[${i}].model`, u.model, m.models, 'ControlNet model');
       if (u.module && mo.ok && mo.modules.length && !ci(mo.modules, u.module)) return bad(`controlnet[${i}].module`, u.module, mo.modules, 'ControlNet preprocessor');
@@ -226,10 +258,11 @@ async function a1111Check(base, p, kind = 'txt2img') {
   }
   if (p.adetailer) {
     const m = await adetailerModels(base);
-    if (!m.ok) return m.code === 'UNSUPPORTED_ON_BACKEND' ? Object.assign(m, { field: 'adetailer' }) : m;
-    for (let i = 0; i < p.adetailer.length; i++) if (p.adetailer[i].model && m.models.length && !ci(m.models, p.adetailer[i].model)) return bad(`adetailer[${i}].model`, p.adetailer[i].model, m.models, 'ADetailer model');
+    if (!m.ok && m.code !== 'UNSUPPORTED_ON_BACKEND') return m;
+    if (!m.ok) await extMissing(base, 'adetailer', kind, warnings, drop, o.label);
+    else for (let i = 0; i < p.adetailer.length; i++) if (p.adetailer[i].model && m.models.length && !ci(m.models, p.adetailer[i].model)) return bad(`adetailer[${i}].model`, p.adetailer[i].model, m.models, 'ADetailer model');
   }
-  return { ok: true, warnings };
+  return { ok: true, warnings, drop };
 }
 
 // ================================================================ ComfyUI

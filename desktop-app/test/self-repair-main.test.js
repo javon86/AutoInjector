@@ -438,6 +438,50 @@ async function main() {
   assert(reg("gemini").webContents.sentLog.length === gsent0 && !(await call("state:get")).transcript.some((t) => t.site === "claude" && t.text.trim() === lateWord), "…not relayed (routing claude->gemini is on) and not shown in the conversation");
   await call("routing:set", { source: "claude", target: "gemini", enabled: false });
 
+  // ---------------------------------------------------------------------------------
+  console.log("\n== PR #120 through main: the site's own error notice as a check-in answer -> page error at once (no 90 s wait), reload, fixed ==");
+  cw.sentLog = [];
+  await call("selfrepair:probe", { sites: ["claude"] });
+  await waitUntil(() => cw.sentLog.some((x) => /Reply with only this word/.test(x.text || "")), 4000);
+  const tErr = Date.now();
+  cw.currentText = "Sorry, something went wrong. Please try your request again.";
+  const fixedC = await waitUntil(async () => {
+    const msgs = cw.sentLog.filter((x) => /Reply with only this word: ([a-z]+)/.test(x.text || ""));
+    if (msgs.length >= 2) { const w = /word: ([a-z]+)/.exec(msgs[msgs.length - 1].text)[1]; cw.currentText = `[TO: USER]\n${w}\n[FROM: CLAUDE]`; }
+    const x = (await call("selfrepair:status")).sites.claude;
+    return msgs.length >= 2 && !x.running && x.state !== "repairing" ? x : null;
+  }, 15000);
+  const dbgE = fs.readFileSync(path.join(userData, "autoinjector-debug.log"), "utf8").split("\n").filter((l) => Number((/"ts":(\d+)/.exec(l) || [])[1]) >= tErr - 50).join("\n");
+  assert(/"kind":"checkin-reply"[^\n]*"site":"claude"[^\n]*"siteError":"error"/.test(dbgE), "the check-in answer is logged as the site's own error notice");
+  const detE = /"kind":"detect","at":(\d+),"site":"claude","code":"PAGE_ERROR"/.exec(dbgE);
+  assert(detE && Number(detE[1]) - tErr < 2500, `…and ends the check-in at once as PAGE_ERROR (${detE ? Number(detE[1]) - tErr : "none"} ms, the wait is 3000 ms here)`);
+  assert(fixedC && fixedC.state === "ok" && /"site":"claude","step":"reload"/.test(dbgE), `reloaded, then a real answer -> ok (${fixedC && fixedC.state})`);
+
+  // ---------------------------------------------------------------------------------
+  console.log("\n== PR #120 through main: a page that ignores scripted click / Enter -> a REAL Enter key sends it (no 3 failed tries) ==");
+  const gw2 = reg("gemini").webContents;
+  const inputs = [];
+  let realEnter = false, sendScripts = 0;
+  gw2.sendInputEvent = (e) => { inputs.push(e.type + ":" + (e.keyCode || "")); if (e.type === "keyDown" && e.keyCode === "Return") realEnter = true; };
+  gw2.focus = () => {};
+  gw2.evaluator = async (script) => {
+    if (script.includes("typeByKeyboard")) {
+      const cfg = cfgOf(script) || {};
+      if (cfg.mode === "focus") return { ok: true, holds: true, boxChars: 40, button: { x: 30, y: 200 }, turnsBefore: 2, markerBaseline: 0, alreadySent: false };
+      if (cfg.mode === "confirm") return realEnter ? { ok: true, method: cfg.method, verified: true, proof: "number", markerBaseline: 0 } : { ok: false, error: "SEND_NOT_CONFIRMED", markerBaseline: 0 };
+      sendScripts++;
+      return { ok: false, error: "SEND_NOT_CONFIRMED", markerBaseline: 0, diag: { method: "click+enter", boxChars: 40, input: { visible: true, editable: true }, button: { label: "Send message", visible: true, disabled: false } } };
+    }
+    return { ok: true, text: "", generating: false, sendReady: true, inputFound: true };
+  };
+  const tSend = Date.now();
+  const cr = await call("send:compose", { text: "hello Gemini", targets: ["gemini"] });
+  const dbgT = fs.readFileSync(path.join(userData, "autoinjector-debug.log"), "utf8").split("\n").filter((l) => Number((/"ts":(\d+)/.exec(l) || [])[1]) >= tSend - 50).join("\n");
+  assert(cr.results.gemini.ok === true && cr.results.gemini.method === "trusted-enter" && sendScripts === 1, `sent on the first try with a real Enter (${JSON.stringify({ ok: cr.results.gemini.ok, method: cr.results.gemini.method, tries: sendScripts })})`);
+  assert(inputs.join(",") === "keyDown:Return,char:\r,keyUp:Return", `real key events, nothing else (${inputs.join(",")})`);
+  assert(/"kind":"send-trusted-input"[^\n]*"target":"gemini"[^\n]*"method":"trusted-enter"/.test(dbgT) && /"kind":"sent"[^\n]*"target":"gemini"[^\n]*"attempts":1/.test(dbgT) && !/"kind":"send-retry"[^\n]*"target":"gemini"/.test(dbgT), "logged once in plain words; no send-retry, no send-error");
+  gw2.evaluator = null; delete gw2.sendInputEvent;
+
   await call("akowe:set-enabled", { enabled: false });
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

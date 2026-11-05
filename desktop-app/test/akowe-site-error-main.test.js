@@ -75,13 +75,13 @@ async function main() {
   assert(st.enabled && st.listening, "the Akọwe bridge is on");
   const token = (await call("akowe:reveal-token")).token;
   const gw = reg("gemini").webContents;
-  const ask = async (site, requestId, pageText) => {
+  const ask = async (site, requestId, pageText, prompt) => {
     const w = reg(site).webContents;
     // Wait for the app's first check of the page: a prompt to a page that "hasn't been checked yet" is
     // (rightly) refused with SITE_NOT_READY, which is not what this test is about.
     await waitUntil(async () => { const h = await request("GET", "/v1/health", token); return h.status === 200 && h.json.sites[site] && h.json.sites[site].ready === true; }, 15000);
     const before = w.sentLog.length;
-    const p = request("POST", "/v1/complete", token, { site, prompt: `Review the chapter as JSON (${requestId}).`, request_id: requestId, timeout_ms: 20000 });
+    const p = request("POST", "/v1/complete", token, { site, prompt: prompt || `Review the chapter as JSON (${requestId}).`, request_id: requestId, timeout_ms: 20000 });
     await waitUntil(() => w.sentLog.length > before);
     await sleep(150);
     w.currentText = pageText;
@@ -114,6 +114,16 @@ async function main() {
   console.log("\n== a usage-limit notice -> 503 SITE_ERROR (rate-limit), the site freed at once ==");
   let r = await ask("claude", "bf-rl-1-claude-c0-a0", "You've reached your usage limit. Please try again later.");
   assert(r.status === 503 && r.json.error === "SITE_ERROR" && r.json.site_error === "rate-limit" && r.json.retry_after_s === 60, `usage limit -> 503 SITE_ERROR rate-limit, retry_after_s 60 (${r.status} ${r.json && r.json.site_error})`);
+
+  console.log("\n== PR #120: Gemini's canned refusal of a ~56,000-character editor prompt -> 503 SITE_ERROR (refused), the length named ==");
+  const bigPrompt = `Edit this chapter and answer as JSON (bf-refuse-1). ${"The rain fell on the old town. ".repeat(1870)}`;
+  r = await ask("gemini", "bf-refuse-1-gemini-c0-a0", "I'm having a hard time fulfilling your request. Can I help you with something else instead?", bigPrompt);
+  assert(r.status === 503 && r.json.error === "SITE_ERROR" && r.json.site_error === "refused" && r.json.retry_after_s === 30 && r.json.text === undefined, `the refusal is a site problem, not the answer (${r.status} ${r.json && r.json.site_error})`);
+  assert(r.json.long_prompt === true && r.json.prompt_chars === bigPrompt.length && /short refusal/.test(r.json.message) && /very long \(5\d,\d{3} characters\)/.test(r.json.message), `…and says the prompt was very long (${r.json && r.json.message})`);
+  assert(await waitUntil(() => feed.some((e) => e.outcome === "SITE_ERROR" && /short refusal/.test(e.say) && /very long/.test(e.say)), 3000), "the Akọwe activity feed names the refusal and the long prompt");
+  assert(!kindLines("akowe-outcome").some((l) => l.detail.outcome === "OK" && l.detail.request_id === "bf-refuse-1-gemini-c0-a0"), "never logged as an OK answer");
+  r = await ask("gemini", "bf-refuse-2-gemini-c0-a0", "Can I help you with something else instead?");
+  assert(r.status === 503 && r.json.site_error === "refused" && r.json.long_prompt === false && !/very long/.test(r.json.message), "a refusal of a short prompt does not blame its length");
 
   console.log("\n== real answers are still taken ==");
   r = await ask("gemini", "bf-real-1-gemini-c0-a0", '{"verdict": "good", "scores": {"pace": 4}}');
