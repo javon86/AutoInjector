@@ -234,6 +234,12 @@ bridge to your home Wi-Fi, behind its key.
   an AI you connect with a key (any OpenAI-compatible service), or one of the ChatGPT / Claude / Gemini panes.
 - **Tools:** a fixed list of the app's own controls: books, pictures, video, the panes, files and logs. He cannot
   run any code you have not allowed.
+- **The big buttons don't depend on his AI:** 🎨 Make a picture, 🎬 Make a video, 🖼 Design a cover, 🧑 Make a
+  character and ✍ a new book turn what you typed into the action itself and show the "I will" card at once (his AI is
+  not asked, so a small local model can't answer them with words only). 📖 My book / ✍ Continue ask his AI, and read
+  the book's status directly when it answers without looking or doesn't answer. "Draw me a lighthouse" typed to him
+  and answered in words gets one retry, then a one-click **🎨 Make it now** card. The activity log says how every
+  request ended (`alfred-reply`, `alfred-no-action`), without the words.
 - **"I will…" cards:** before he changes anything, he shows a card saying what he will do. Nothing happens until
   you press ✔ Do it, unless you ticked "always allow" for a harmless tool. Running code and outside tool servers
   never get "always allow". He never approves your chapter drafts. He can approve a Character Forge proposal,

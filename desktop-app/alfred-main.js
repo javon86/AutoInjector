@@ -387,6 +387,8 @@ function installAlfred(h) {
   ipcMain.handle('alfred:set-enabled', (_e, p) => alfred.setEnabled(!!(p && p.on)));
   ipcMain.handle('alfred:settings', (_e, patch) => alfred.setSettings(patch || {}));
   ipcMain.handle('alfred:ask', async (_e, p) => { try { return await alfred.ask(p && p.text); } catch (e) { return { ok: false, error: 'ERROR', message: 'Something went wrong on my side.' }; } });
+  // the big buttons (🎨 Make a picture …): the form's fields become the tool call — the card shows at once (PR #124)
+  ipcMain.handle('alfred:quick', async (_e, p) => { try { return await alfred.quick(p && p.kind, p && p.fields); } catch (e) { return { ok: false, error: 'ERROR', message: 'Something went wrong on my side.' }; } });
   ipcMain.handle('alfred:confirm', async (_e, p) => { try { return await alfred.confirm(p && p.id, { alwaysAllow: p && p.alwaysAllow }); } catch (e) { return { ok: false, error: 'ERROR' }; } });
   ipcMain.handle('alfred:reject', (_e, p) => alfred.reject(p && p.id));
   ipcMain.handle('alfred:cancel', () => alfred.cancel());

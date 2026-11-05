@@ -379,6 +379,7 @@ contextBridge.exposeInMainWorld("api", {
   alfredSetEnabled: (on) => ipcRenderer.invoke("alfred:set-enabled", { on: !!on }),
   alfredSettings: (patch) => ipcRenderer.invoke("alfred:settings", patch || {}),
   alfredAsk: (text) => ipcRenderer.invoke("alfred:ask", { text }),
+  alfredQuick: (kind, fields) => ipcRenderer.invoke("alfred:quick", { kind, fields: fields && typeof fields === "object" ? fields : {} }),
   alfredConfirm: (id, alwaysAllow) => ipcRenderer.invoke("alfred:confirm", { id, alwaysAllow: Array.isArray(alwaysAllow) ? alwaysAllow : [] }),
   alfredReject: (id) => ipcRenderer.invoke("alfred:reject", { id }),
   alfredCancel: () => ipcRenderer.invoke("alfred:cancel"),

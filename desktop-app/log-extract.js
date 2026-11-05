@@ -224,6 +224,10 @@ function inWindows(ts, wins) {
   for (const [a, b] of wins) if (ts >= a - WINDOW_SLACK_MS && ts <= b + WINDOW_SLACK_MS) return true;
   return false;
 }
+// 🎩 Alfred's outcome records are technical and text-free (codes, counts, tool names, the model's name — never what
+// anyone wrote): in the book scope they come along inside the book's run windows, so "why didn't Alfred make the
+// picture?" can be answered from any Extract (PR #124; the 2026-11-04 log had asks and no outcome at all).
+const ALFRED_TROUBLE = new Set(['alfred-ask', 'alfred-reply', 'alfred-no-action', 'alfred-retry', 'alfred-fallback', 'alfred-tool', 'alfred-card', 'alfred-confirm', 'alfred-reject', 'alfred-refused', 'alfred-ai-error', 'alfred-cancel', 'alfred-steps-limit']);
 function detailOf(e) { return e && e.detail && typeof e.detail === 'object' ? e.detail : null; }
 
 // Picks what goes into the file. Returns { turns, events, seqs (Set|null), from, to }.
@@ -245,7 +249,7 @@ function selectEntries({ scope, from, to, book, transcript, log }) {
     const rid = d && typeof d.request_id === 'string' ? d.request_id : null;
     if (rid) return book.requestIds.has(rid);
     if (d && d.seq != null && book.seqs.has(String(d.seq))) return true;
-    return legacy.isAkoweEventKind(e.kind) && Number.isFinite(e.ts) && inWindows(e.ts, wins);
+    return (legacy.isAkoweEventKind(e.kind) || ALFRED_TROUBLE.has(e.kind)) && Number.isFinite(e.ts) && inWindows(e.ts, wins);
   };
   const first = wins.length ? wins[0][0] : null;
   const last = wins.length ? wins[wins.length - 1][1] : null;
@@ -487,4 +491,4 @@ function buildExtract(p) {
   };
 }
 
-module.exports = { createBookTracker, defaultScope, presetRange, selectEntries, redact, buildExtract, everythingSummary, fileName, safeTitle, stamp, RUN_GAP_MS, UNKNOWN_PROJECT, PREVIEW_LINES };
+module.exports = { ALFRED_TROUBLE, createBookTracker, defaultScope, presetRange, selectEntries, redact, buildExtract, everythingSummary, fileName, safeTitle, stamp, RUN_GAP_MS, UNKNOWN_PROJECT, PREVIEW_LINES };

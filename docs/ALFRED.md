@@ -37,7 +37,8 @@ he makes no more calls.
   - **🧑 Make a character** — asks the name and a line about them, then Alfred opens their Character Forge
     dossier and invents the rest as proposals you approve. (Akọwe makes the book's characters itself —
     outline / Characters and places; when the name is not in the book yet, Alfred says so plainly.)
-  - **🎨 Make a picture** / **🎬 Make a video** — asks what it should show, then Alfred makes it.
+  - **🎨 Make a picture** — asks what it should show, the size (or the 🎨 Images tab's) and who makes it
+    (Stable Diffusion if connected, else ChatGPT; or pick one). **🎬 Make a video** — what it should show and how long.
   - **🖼 Design a cover** — what the cover picture should show (optional), then the cover design and art.
   - **📖 My book** — where your book is (checklist, the "Make a book for me" run, problems).
   - **✍ Continue / make my book** — resumes the "Make a book for me" run; with no book yet it asks for your
@@ -49,6 +50,17 @@ he makes no more calls.
     📁 Files & folders, ⚙ App settings & tools), each with one plain line and **▶ Try it**, which puts an
     example request in his box. Typing **"what can you do?"** opens it too.
   The book buttons say plainly when Akọwe has no book yet (or is not running).
+- **The buttons never wait on his AI to pick a tool** (PR #124 — on a real PC a small local model answered
+  "Make a picture" in words only, again and again). 🎨, 🎬, 🖼, 🧑 and ✍ (a new book) turn the form into the action
+  itself and show the **"I will" card at once**, built from exactly what you typed: 🎨 → make the image (your words,
+  size, engine), 🎬 → make the video, 🖼 → the cover art with your note, 🧑 → add the character (or find them) and
+  invent the rest as proposals, ✍ → start "Make a book for me". ✔ Do it is still needed (or "always allow"). The
+  result is said in plain words, and so is a failure, with what to press. 📖 **My book** and ✍ **Continue** (with a
+  book) ask his AI; when it answers without looking at the book, or doesn't answer, he reads the book's status
+  himself and says it — and for ✍ a run that stopped gets a **▶ Resume** card.
+- **Typed requests for a picture or a video** ("draw me a lighthouse", "make a picture of a cat", "make a short video
+  of waves"): if his AI answers in words only, he asks it once more, plainly, to use the tool; if it still doesn't,
+  he shows a one-click **🎨 Make it now** (🎬 for a video) card built from what you typed.
 - The list in the header switches between saved set-ups, 💾 saves the current one, ⚙ has his AI settings
   and **🛠 Set up his AI** (opens the 🎩 Butler section).
 
@@ -273,8 +285,13 @@ A server you started starts again the next time you open AutoInjector, and one y
   (make an image, save the book, make the report, run the check-in, open/export a file, start/stop SD)
   you can tick **Always allow** — undo with ⚙ → **Forget "always allow"**.
 - **Bounded:** at most 8 AI steps per request (⚙ Max steps), timeouts on every call, **■ Stop** at any time.
-- **Records:** every action goes to the Activity log (the tool's name, a fixed title and ok/error —
-  never your words, prompts, book text or keys) and, for book actions, to the book's journal in Akọwe
+- **Records:** every action goes to the Activity log (the tool's name, a fixed title and ok/error code —
+  never your words, prompts, book text or keys). Every finished request gets one `alfred-reply` line: the steps, the
+  tools used, whether a card was shown, the reply's length, the time, his AI and model, and the outcome
+  (`answered-in-words`, `card`, `fallback-card`, `fallback-status`, `done`, `declined`, `cancelled`, `limit`, `error`).
+  A big button that asked for an action and ended in words only is an `alfred-no-action` warning; `alfred-retry` /
+  `alfred-fallback` say when he retried or read the status himself. They are text-free, so the Extract's
+  "this book only" includes them too (inside the book's run windows) and, for book actions, to the book's journal in Akọwe
   (🎩 entries). The panel's **What Alfred did** lists them in full.
 - **Unknown tools** or wrong arguments from his AI are refused before anything runs.
 
@@ -296,6 +313,7 @@ At most one of each every 5 minutes and 6 in 10 minutes.
 | `desktop-app/alfred-ai.js` | his AI: OpenAI-compatible tool calling (Ollama `/v1`, the connected AI), the JSON text protocol (web panes / models without tools) |
 | `desktop-app/alfred-image.js` | the ONE image adapter (sd-api `images.generate`; falls back to image-provider) |
 | `desktop-app/alfred-main.js` | wiring into Electron: tool context, IPC `alfred:*`, app events → watcher |
+| IPC (PR #124) | `alfred:quick` `{kind: picture\|video\|cover\|character\|newbook\|book\|continue, fields}` — a big button's form → `quickPlan()` in `alfred.js` → the tool call(s) → the "I will" card at once (book / continue: his AI, with the direct status as fallback) |
 | `desktop-app/alfred-panel.js` | his side panel (built only when on), docked in `controls.html`: the 8 big buttons and their forms, ❓ the catalog, chat, cards, settings, set-ups. Ctrl/Cmd+Shift+A is caught in main (`alfred-main.js`, `before-input-event` on every page) and sent as `toggle-panel` |
 | `desktop-app/alfred-catalog.js` | "❓ Everything I can do": the grouped list built from `alfred-tools.publicList()` + `alfred-app-actions.ACTIONS` (one plain line + an example request each) |
 | `desktop-app/controls.js` (🎩 Alfred in the User Panel) | → 🎩 Alfred, the status light, 🧠, 🎩 Alfred: On/Off, 🩺 Check Alfred (the old Butler's ids, kept) |
@@ -314,7 +332,7 @@ action and every Images-module method** from a fake model's tool call: against t
 fake panes), a fake Forge and a fake ComfyUI through the real sd-api, and a fake Akọwe API — checking the effect
 and that anything that changes something waits for ✔ Do it — and prints the coverage table.
 
-Tests: `desktop-app/test/alfred.test.js` (fake Ollama/OpenAI server, fake Akọwe API) and
+Tests: `desktop-app/test/alfred.test.js` (fake Ollama/OpenAI server, fake Akọwe API), `desktop-app/test/alfred-quick.test.js` (the big buttons and "draw me …" with a model that never calls a tool, the outcome log lines, the picture tool on a Forge without ADetailer) and
 `desktop-app/test/e2e/alfred.e2e.js` (the real app under xvfb with the real Akọwe server, a fake model and
 a fake Forge); Akọwe side: `akowe/tests/test_alfred_hooks.py`.
 

@@ -154,24 +154,28 @@ async function main() {
     assert(!!toolMsg && /The Lighthouse Keeper/.test(toolMsg.content), 'the book_status tool read the real Akọwe (with the token AutoInjector holds)');
     assert(!(await controls.isVisible('#alfred-card')), 'no card for a read-only question');
 
-    console.log('\n== 🎨 Make a picture -> a tiny form -> I will card -> Do it ==');
+    console.log('\n== 🎨 Make a picture -> a tiny form -> I will card at once (no AI call) -> Do it ==');
     await until(async () => !(await controls.isDisabled('#alfred-a-picture')), 10000, 150);
     await controls.click('#alfred-a-picture');
     await controls.fill('#alfred-f-what', 'a lighthouse');
+    await controls.selectOption('#alfred-f-size', '768x768');
+    const askedBefore = llm.requests.length;
     await controls.click('#alfred-f-go');
     const card = await until(() => controls.isVisible('#alfred-card'), 20000, 200);
     assert(!!card, 'an "I will" card appears');
     const cardText = await controls.textContent('#alfred-card');
-    assert(/I will/.test(cardText) && /a lighthouse on a cliff at dusk/.test(cardText) && /Do it/.test(cardText), 'it says exactly what will happen, with ✔ Do it / ✖ No');
+    assert(/I will/.test(cardText) && /“a lighthouse” at 768×768/.test(cardText) && /Do it/.test(cardText), `it says exactly what will happen, from the form, with ✔ Do it / ✖ No ("${cardText.slice(0, 160)}")`);
+    assert(llm.requests.length === askedBefore, 'PR #124: the button does not depend on his AI choosing a tool — the model was not asked');
     assert(!sd.state.lastTxt2img, 'nothing was generated before ✔ Do it');
     assert(/needs you/.test(await controls.textContent('#btn-butler-status')), 'the User Panel light says Alfred needs you (a card is waiting)');
     assert(await controls.isDisabled('#alfred-a-video') && !(await controls.isDisabled('#alfred-a-catalog')), 'while the card waits, the buttons that ask him wait too (❓ still works)');
     await shot(controls, '03-i-will-card');
     await controls.click('#alfred-do-it');
-    const done = await until(async () => { const t = await controls.$$eval('#alfred-chat .al-alfred', (els) => els.map((e) => e.textContent)); return t.find((x) => /Here is your lighthouse/.test(x)); }, 30000, 300);
-    assert(!!done, `Alfred reports the image: "${done && done.slice(0, 120)}"`);
-    assert(!!sd.state.lastTxt2img && /lighthouse/.test(sd.state.lastTxt2img.prompt), 'the image went through the 🎨 Images module (sd-api) to Stable Diffusion txt2img');
-    const p = done && done.replace(/^.*Here is your lighthouse: /, '').trim();
+    const done = await until(async () => { const t = await controls.$$eval('#alfred-chat .al-alfred', (els) => els.map((e) => e.textContent)); return t.find((x) => /Saved 1 image/.test(x)); }, 30000, 300);
+    assert(!!done, `Alfred reports the image in plain words: "${done && done.slice(0, 120)}"`);
+    assert(!!sd.state.lastTxt2img && sd.state.lastTxt2img.prompt === 'a lighthouse' && sd.state.lastTxt2img.width === 768, 'the image went through the 🎨 Images module (sd-api) to Stable Diffusion txt2img, with the form\'s words and size');
+    const ready = await until(async () => { const t = await controls.$$eval('#alfred-chat .al-notice', (els) => els.map((e) => e.textContent)); return t.find((x) => /The image is ready: /.test(x)); }, 10000, 300);
+    const p = ready && ready.replace(/^.*The image is ready: /, '').trim();
     assert(!!p && fs.existsSync(p) && fs.statSync(p).size > 0, `the PNG was saved (${p})`);
     madeFiles.push(p, String(p).replace(/\.png$/, '.json'));
     const did = await controls.textContent('#alfred-did-list');
@@ -187,14 +191,13 @@ async function main() {
     await controls.fill('#alfred-f-about', 'the keeper who hates the sea');
     await controls.click('#alfred-f-go');
     const ccard = await until(() => controls.isVisible('#alfred-card'), 20000, 200);
-    assert(!!ccard && /Mara/.test(await controls.textContent('#alfred-card')), 'Alfred asks first: the card names Mara\'s dossier');
+    const ctext = ccard ? await controls.textContent('#alfred-card') : '';
+    assert(!!ccard && /Add a new character “Mara”/.test(ctext) && /Mara.*dossier fields as proposals/.test(ctext), `Alfred asks first: one card, add Mara then invent the rest ("${ctext.slice(0, 200)}")`);
     await controls.click('#alfred-do-it');
-    const cans = await until(async () => { const t = await controls.$$eval('#alfred-chat .al-alfred', (els) => els.map((e) => e.textContent)); return t.find((x) => /^🧑/.test(x)); }, 30000, 300);
-    const forgeMsg = llm.requests.map((r) => r.body.messages.find((m) => m.role === 'tool' && m.name === 'forge_character')).find(Boolean);
-    assert(!!forgeMsg && /Mara/.test(forgeMsg.content), `forge_character went to the real Akọwe (${forgeMsg && forgeMsg.content.slice(0, 160)})`);
-    assert(!!cans && /Mara/.test(cans), `and he answers in plain words: "${cans && cans.slice(0, 160)}"`);
-    const umsg = llm.requests.map((r) => lastUser(r.body)).filter(Boolean).map((m) => m.content).find((t) => /Make a character for my book: “Mara” — the keeper who hates the sea/.test(t));
-    assert(!!umsg, 'the request carried the name and the line about them');
+    const cans = await until(async () => { const t = await controls.$$eval('#alfred-chat .al-alfred', (els) => els.map((e) => e.textContent)); return t.find((x) => /Inventing the rest of Mara/.test(x) || /didn't work/.test(x)); }, 30000, 300);
+    assert(!!cans && /✔ .*Mara/.test(cans) && /Inventing the rest of Mara's dossier/.test(cans), `the real Akọwe added Mara and the Forge is inventing the rest — said plainly: "${cans && cans.slice(0, 200)}"`);
+    const chat = await controls.$$eval('#alfred-chat .al-you', (els) => els.map((e) => e.textContent));
+    assert(chat.some((t) => /Make a character for my book: “Mara” — the keeper who hates the sea/.test(t)), 'the request carried the name and the line about them');
 
     console.log('\n== ❓ Everything I can do (searchable) and "what can you do?" ==');
     await controls.click('#alfred-a-catalog');
@@ -226,6 +229,7 @@ async function main() {
     console.log('\n== records: activity log has codes/titles only ==');
     const logs = await controls.evaluate(() => window.api.getState().then((s) => (s.log || []).filter((e) => /^alfred-/.test(e.kind))));
     assert(logs.some((e) => e.kind === 'alfred-tool' && e.detail.tool === 'generate_image' && e.detail.ok) && logs.some((e) => e.kind === 'alfred-tool' && e.detail.tool === 'book_status'), 'the actions are in the activity log');
+    assert(logs.some((e) => e.kind === 'alfred-reply' && e.detail.quick === 'picture' && e.detail.outcome === 'done' && e.detail.tools_called.includes('generate_image')) && logs.some((e) => e.kind === 'alfred-reply' && e.detail.outcome === 'answered-in-words'), 'every finished request has an alfred-reply line (outcome, tools, model — no words)');
     assert(!JSON.stringify(logs).includes('lighthouse') && !JSON.stringify(logs).includes('status of my book') && !JSON.stringify(logs).includes('hates the sea'), 'no prompts or prose in the log');
 
     console.log('\n== Ctrl+Shift+A shows / hides the side panel from anywhere in the app ==');
