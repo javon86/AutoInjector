@@ -126,6 +126,33 @@ def test_invalid_reply_is_re_asked_then_accepted(h, host_factory):
     assert "invalid_sample" in sent[1]["prompt"] or "error" in sent[1]["prompt"].lower()
 
 
+def test_a_re_ask_is_a_short_correction_in_the_same_chat_through_the_real_bridge(h, host_factory):
+    """PR #123: the real bridge says followup: true; Akọwe's re-ask is only the correction, typed into that chat."""
+    host = host_factory("invalid-then-valid", ["--followup"])
+    h.engine.providers.connect_autoinjector(TOKEN, host.url)
+    r = b01(h)
+    assert r["status"] == "DRAFT", r["errors"]
+    sent = host.prompts()
+    assert len(sent) == 2 and "JSON_SCHEMA:" in sent[0]["prompt"]
+    assert sent[1]["prompt"].startswith("Your last answer was not valid JSON") and "JSON_SCHEMA:" not in sent[1]["prompt"]
+    assert len(sent[1]["prompt"]) < len(sent[0]["prompt"]) // 2
+
+
+def test_the_reset_time_of_a_usage_limit_reaches_akowe_through_the_real_bridge(h, host_factory):
+    """PR #123: "Try again in 2 hours" on every AI -> the real bridge sends limit_reset_at -> Akọwe knows when."""
+    import time  # noqa: PLC0415
+    from akowe import usage_limits  # noqa: PLC0415
+    host = host_factory("limit-at")
+    h.engine.providers.connect_autoinjector(TOKEN, host.url)
+    usage_limits.clear()
+    t0 = time.time()
+    r = b01(h)
+    assert r["output_refs"] == []
+    lim = usage_limits.current()
+    assert lim and lim["reset_at"] and 7100 < lim["reset_at"] - t0 < 7300, lim
+    usage_limits.clear()
+
+
 def test_timeout_asks_the_user_and_saves_nothing(h, host_factory):
     host = host_factory("timeout", ["--time-scale", "0.005"])
     h.engine.providers.connect_autoinjector(TOKEN, host.url)

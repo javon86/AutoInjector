@@ -23,6 +23,9 @@
  *     onEvent(event)?                    -> called for every activity event (see below)
  *     siteState(site)?                   -> (v1.2) { state, problem, since, last_probe_ok_at } from
  *                                           the self-repair engine (self-repair.js); default "unknown"
+ *     chatKey(site)?                     -> string|null: the chat the pane shows now (+ messages typed into it);
+ *                                           enables followup (PR #123)
+ *     userActedSince(site, sinceMs)?     -> bool: the user used the pane themselves since then (PR #123)
  *     startProbe(sites|null)?            -> (v1.2) { started: [site], skipped: { site: reason } } —
  *                                           starts check-ins (null = every active AI); results show
  *                                           up later in /v1/health
@@ -108,6 +111,21 @@
  *   setup is taken as its late answer: 503 if not typed yet (withdrawn), else 504
  *   late_expired + released.
  *
+ * Final hardening pass (PR #123, backward compatible):
+ *   limit_reset_at  a usage-limit notice that names a time ("until 3:40 PM", "resets 3pm", "try again in 2 hours";
+ *                   site-errors.limitResetAt) is passed on as limit_reset_at (ISO 8601): in the 503 SITE_ERROR
+ *                   rate-limit answer and in that site's /v1/health entry while the time is still ahead. Sources:
+ *                   turn.limitResetAt on a captured notice, noteLimitReset(site, ms) from the host, and
+ *                   siteState(site).limit_reset_at (self-repair saw the notice on the page).
+ *   followup        with chatKey(site) (host: which chat the pane shows, and how many messages went in), every 200
+ *                   says followup: true, and a request with "followup_of": "<that request_id>" types ONLY its short
+ *                   text into the same chat — when that request was the last one to the site, the pane still shows
+ *                   the same chat (no fresh chat, nothing else typed in between) and the user has not used the pane
+ *                   since (userActedSince(site, ms)). Otherwise 409 FOLLOWUP_UNAVAILABLE (nothing typed): Akọwe then
+ *                   sends the whole prompt. sendToSite gets meta.followup = true and meta.chatKey (the host must
+ *                   not open a fresh chat, and answers error 'FOLLOWUP_STALE' — 409, nothing typed — if the chat
+ *                   changed meanwhile).
+ *
  * timeScale (default 1) multiplies every real wait (request timeout and the
  * post-504 late window). It exists only so tests / the fake host can exercise
  * timeout behaviour quickly; validation of timeout_ms still uses the contract's
@@ -156,7 +174,7 @@ const BF_STATUS_STALE_MS = 90 * 1000;
 // outcome -> the HTTP status Akọwe saw (or would see) for it.
 const OUTCOME_HTTP = {
   OK: 200, CACHED: 200, LATE_REPLY_STORED: 200, TIMEOUT: 504, LATE_EXPIRED: 504,
-  SITE_NOT_READY: 503, SEND_FAILED: 502, TOO_LARGE: 413, SITE_BUSY: 409, SITE_ERROR: 503,
+  SITE_NOT_READY: 503, SEND_FAILED: 502, TOO_LARGE: 413, SITE_BUSY: 409, FOLLOWUP_UNAVAILABLE: 409, SITE_ERROR: 503,
   BAD_REQUEST: 400, UNKNOWN_SITE: 404, NOT_FOUND: 404, UNAUTHORIZED: 401,
   PAIRED: 200, PAIRING_CODE_INVALID: 401, PAIRING_CODE_EXPIRED: 410, TOO_MANY_ATTEMPTS: 429, NOT_READY: 503
 };
@@ -323,13 +341,33 @@ function createBridge(opts) {
   const timeScale = Number(o.timeScale) > 0 ? Number(o.timeScale) : 1;
   const bodyTimeLimitMs = Number(o.bodyTimeLimitMs) > 0 ? Number(o.bodyTimeLimitMs) : BODY_TIME_LIMIT_MS;
   if (typeof sendToSite !== 'function') throw new Error('akowe-bridge: sendToSite is required');
+  const chatKeyOf = (site) => { if (typeof o.chatKey !== 'function') return null; try { const k = o.chatKey(site); return typeof k === 'string' && k ? k : null; } catch (_) { return null; } };
+  const userActedSince = (site, t) => { if (typeof o.userActedSince !== 'function') return false; try { return !!o.userActedSince(site, t); } catch (_) { return true; } };
+  // PR #123: site -> the last request answered OK there ({ requestId, chatKey, at }) — what a follow-up may continue.
+  const lastOk = new Map();
+  // PR #123: site -> epoch ms when its usage limit resets (from the site's own notice).
+  const limitReset = new Map();
+  function noteLimitReset(site, ms) {
+    if (!sites.includes(site)) return;
+    const n = Number(ms);
+    if (Number.isFinite(n) && n > now()) limitReset.set(site, Math.round(n));
+  }
+  function limitResetIso(site, st) {
+    const t = now();
+    const cands = [limitReset.get(site), st && st.limit_reset_at].filter((x) => typeof x === 'number' && x > t);
+    if (!cands.length) { limitReset.delete(site); return null; }
+    return new Date(Math.min(...cands)).toISOString();
+  }
   // v1.2: the self-repair state of a site (always a well-formed object).
   function stateOf(site) {
     let r = null;
     try { r = typeof o.siteState === 'function' ? o.siteState(site) : null; } catch (_) { r = null; }
     const st = r && SITE_STATES.includes(r.state) ? r.state : 'unknown';
     const num = (v) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.round(v) : null);
-    return { state: st, problem: r && typeof r.problem === 'string' && PROBLEM_RE.test(r.problem) ? r.problem : null, since: num(r && r.since), last_probe_ok_at: num(r && r.last_probe_ok_at) };
+    const out = { state: st, problem: r && typeof r.problem === 'string' && PROBLEM_RE.test(r.problem) ? r.problem : null, since: num(r && r.since), last_probe_ok_at: num(r && r.last_probe_ok_at) };
+    const lr = num(r && r.limit_reset_at);
+    if (lr) Object.defineProperty(out, 'limit_reset_at', { value: lr, enumerable: false }); // folded into limit_reset_at (ISO) by siteStatus()
+    return out;
   }
 
   // --- activity: counters, last contact, per-site last result, event ring ----
@@ -365,7 +403,7 @@ function createBridge(opts) {
     else if (outcome === 'TIMEOUT') counters.timeouts++;
     else if (outcome === 'SEND_FAILED' || outcome === 'SITE_NOT_READY') counters.failed++;
     else if (outcome === 'SITE_BUSY' || outcome === 'SITE_ERROR') counters.busy++;
-    else if (outcome === 'BAD_REQUEST' || outcome === 'TOO_LARGE' || outcome === 'UNKNOWN_SITE' || outcome === 'NOT_FOUND') counters.rejected++;
+    else if (outcome === 'BAD_REQUEST' || outcome === 'TOO_LARGE' || outcome === 'UNKNOWN_SITE' || outcome === 'NOT_FOUND' || outcome === 'FOLLOWUP_UNAVAILABLE') counters.rejected++;
   }
   // Called for every authenticated request.
   function noteContact(selftest) {
@@ -455,7 +493,7 @@ function createBridge(opts) {
   // { status, body } once the reply is captured or the send fails/aborts.
   // phase: 'sending' (queued / waiting for the AI, not typed yet) -> 'waiting'
   // (typed as [MSG #seq], answer due) -> 'late' (timed out, answer still due).
-  function begin(site, prompt, requestId) {
+  function begin(site, prompt, requestId, extra) {
     let resolve;
     const outcome = new Promise((r) => { resolve = r; });
     const cancelToken = { cancelled: false, typing: false, seq: null }; // seq: set by the host as soon as the [MSG #] is stamped (P18.5)
@@ -470,9 +508,10 @@ function createBridge(opts) {
     };
     active.set(site, entry);
     inflight.set(requestId, entry);
+    lastOk.delete(site); // something new goes into this chat: an older answer can no longer be followed up
     log('request', { site, request_id: requestId, chars: prompt.length });
     let sendPromise;
-    try { sendPromise = Promise.resolve(sendToSite(site, wrapPrompt(site, prompt), { request_id: requestId, cancelToken })); }
+    try { sendPromise = Promise.resolve(sendToSite(site, wrapPrompt(site, prompt), Object.assign({ request_id: requestId, cancelToken }, extra && extra.followup ? { followup: true, chatKey: extra.chatKey } : {}))); }
     catch (e) { sendPromise = Promise.reject(e); }
     entry.sendSettled = sendPromise.then((r) => {
       if (r && r.ok) {
@@ -492,7 +531,10 @@ function createBridge(opts) {
       if (entry.done) return;
       const code = r && r.error ? String(r.error) : 'unknown';
       if (code === 'CANCELLED') return; // we withdrew it (timeout/stop); that path answers the request
-      if (code === 'NO_VIEW' || code === 'SITE_NOT_READY') {
+      if (code === 'FOLLOWUP_STALE') { // the chat changed while the follow-up waited its turn (a check-in went in): nothing typed
+        log('outcome', { site, request_id: requestId, outcome: 'FOLLOWUP_UNAVAILABLE', elapsed_ms: now() - entry.startedAt });
+        finish(entry, { status: 409, body: errBody('FOLLOWUP_UNAVAILABLE', `something else went into ${site}'s chat just before the correction could be typed; nothing was typed — send the whole prompt instead`, false) });
+      } else if (code === 'NO_VIEW' || code === 'SITE_NOT_READY') {
         log('outcome', { site, request_id: requestId, outcome: 'SITE_NOT_READY', elapsed_ms: now() - entry.startedAt });
         finish(entry, { status: 503, body: errBody('SITE_NOT_READY', `${site} pane is missing or not loaded`, false) });
       } else {
@@ -607,11 +649,17 @@ function createBridge(opts) {
             : kind === 'chat-full'
               ? `${entry.site} said its chat is full (too long) at [MSG #${entry.seq}]; a fresh chat is opened before the next request — ask again in a few seconds`
             : `${entry.site} showed an error message instead of an answer to [MSG #${entry.seq}] (a short outage on the site); wait and try again`;
+      if (kind === 'rate-limit' && turn.limitResetAt != null) noteLimitReset(entry.site, turn.limitResetAt);
+      const resetIso = kind === 'rate-limit' ? limitResetIso(entry.site, null) : null;
       finish(entry, { status: 503, body: Object.assign(errBody('SITE_ERROR', why, false),
-        { site_error: kind, retry_after_s: retryAfter, seq: entry.seq, prompt_chars: entry.promptChars, long_prompt: !!longNote }) });
+        { site_error: kind, retry_after_s: retryAfter, seq: entry.seq, prompt_chars: entry.promptChars, long_prompt: !!longNote },
+        resetIso ? { limit_reset_at: resetIso } : {}) });
       return;
     }
     const body = { ok: true, site: entry.site, request_id: entry.requestId, text, seq: entry.seq, reply_to: entry.seq, elapsed_ms: elapsed };
+    limitReset.delete(entry.site); // it answers again: whatever limit there was is over
+    const key = chatKeyOf(entry.site);
+    if (key) { lastOk.set(entry.site, { requestId: entry.requestId, chatKey: key, at: now() }); body.followup = true; }
     log('outcome', { site: entry.site, request_id: entry.requestId, outcome: entry.phase === 'late' ? 'LATE_REPLY_STORED' : 'OK', chars: text.length, elapsed_ms: elapsed });
     finish(entry, { status: 200, body });
   }
@@ -681,6 +729,8 @@ function createBridge(opts) {
       // v1.2: ready stays as before, but is false whenever the AI is being repaired / needs you / is broken.
       if (NOT_USABLE_STATES.has(st.state)) ready = false;
       out[s] = Object.assign({ ready, busy: active.has(s) }, st);
+      const lr = limitResetIso(s, st);
+      if (lr) out[s].limit_reset_at = lr;
     }
     return out;
   }
@@ -823,7 +873,7 @@ function createBridge(opts) {
       return refuse(res, 400, 'BAD_REQUEST', 'body must be JSON');
     }
     if (!body || typeof body !== 'object' || Array.isArray(body)) return refuse(res, 400, 'BAD_REQUEST', 'body must be a JSON object');
-    const { site, prompt, request_id: requestId } = body;
+    const { site, prompt, request_id: requestId, followup_of: followupOf } = body;
     if (typeof site !== 'string' || !site) return refuse(res, 400, 'BAD_REQUEST', 'site is required', site, requestId);
     if (typeof prompt !== 'string' || !prompt.trim()) return refuse(res, 400, 'BAD_REQUEST', 'prompt must be a non-empty string', site, requestId);
     if (typeof requestId !== 'string' || !REQUEST_ID_RE.test(requestId)) return refuse(res, 400, 'BAD_REQUEST', 'request_id must be 1..128 chars of [A-Za-z0-9._:-]', site);
@@ -835,6 +885,9 @@ function createBridge(opts) {
       timeoutMs = body.timeout_ms;
     }
     if (!sites.includes(site)) return refuse(res, 404, 'UNKNOWN_SITE', `unknown site; expected one of ${sites.join('|')}`, undefined, requestId);
+    if (followupOf !== undefined && followupOf !== null && (typeof followupOf !== 'string' || !REQUEST_ID_RE.test(followupOf) || followupOf === requestId)) {
+      return refuse(res, 400, 'BAD_REQUEST', 'followup_of must be the request_id of an earlier request (1..128 chars of [A-Za-z0-9._:-])', site, requestId);
+    }
 
     pruneCache();
     const cached = cache.get(requestId);
@@ -875,7 +928,18 @@ function createBridge(opts) {
       try { why = siteProblem(site); } catch (_) { why = null; }
       return send(res, 503, errBody('SITE_NOT_READY', why ? `${site} isn't ready: ${String(why).slice(0, 200)}` : `${site} pane is missing or not loaded`, false));
     }
-    const entry = begin(site, prompt, requestId);
+    // PR #123: a short follow-up ("your JSON was broken: …") only makes sense in the chat that holds the prompt.
+    const isFollowup = typeof followupOf === 'string';
+    if (isFollowup) {
+      const lo = lastOk.get(site);
+      const key = chatKeyOf(site);
+      const why = !key ? 'this AutoInjector cannot tell which chat the pane shows'
+        : !lo || lo.requestId !== followupOf ? `request ${followupOf} was not the last one answered by ${site}`
+          : lo.chatKey !== key ? `${site}'s pane no longer shows the chat of request ${followupOf} (a fresh chat was opened, or something else was typed there)`
+            : userActedSince(site, lo.at) ? `you used ${site}'s pane yourself since request ${followupOf}` : null;
+      if (why) return refuse(res, 409, 'FOLLOWUP_UNAVAILABLE', `${why}; nothing was typed — send the whole prompt instead`, site, requestId);
+    }
+    const entry = begin(site, prompt, requestId, { followup: isFollowup, chatKey: isFollowup ? chatKeyOf(site) : null });
     const out = await awaitEntry(entry, timeoutMs);
     return send(res, out.status, out.body);
   }
@@ -1033,7 +1097,7 @@ function createBridge(opts) {
     });
   }
 
-  return { start, stop, onCaptured, awaitingReply, release, status, recordEvent, createPairingCode, akoweStatus, pairingStatus, address: () => (server ? server.address() : null) };
+  return { start, stop, onCaptured, awaitingReply, release, noteLimitReset, status, recordEvent, createPairingCode, akoweStatus, pairingStatus, address: () => (server ? server.address() : null) };
 }
 
 // --- plain-English activity lines (for the desktop panel + link-test report) ---
@@ -1102,6 +1166,7 @@ function describeEvent(ev, label) {
             ? { say: `${L} said its chat is full — AutoInjector starts a fresh ${L} chat and ${who} asks again`, tone: 'warn' }
           : { say: `${L} showed an error message instead of an answer — ${who} waits and tries again`, tone: 'warn' };
     case 'TOO_LARGE': return { say: 'Refused a request that was too big (over 1 MB)', tone: 'warn' };
+    case 'FOLLOWUP_UNAVAILABLE': return { say: `${who} wanted to send a short correction into ${L}'s last chat, but that chat is no longer the current one — ${who} sends the whole request again instead`, tone: 'info' };
     default: return { say: `Refused a request this app couldn't use (${e.outcome || 'error'})`, tone: 'warn' };
   }
 }

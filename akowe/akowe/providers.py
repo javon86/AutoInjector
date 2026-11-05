@@ -945,7 +945,22 @@ class AutoInjectorAdapter:
             if short:
                 body["followup_of"] = prev_id
             started = time.monotonic()
-            reply = self._post_collecting(body, late_key, tmo)
+            try:
+                reply = self._post_collecting(body, late_key, tmo)
+            except AkoweError as exc:
+                # final hardening (PR #123): the bridge could not continue that chat (a fresh chat was opened, the
+                # author typed there, something else went in): nothing was typed -> send the whole prompt instead
+                if not (short and (getattr(exc, "bridge_body", None) or {}).get("error") == "FOLLOWUP_UNAVAILABLE"):
+                    raise
+                _late_drop(late_key)
+                log.info("autoinjector site=%s request_id=%s: the chat can't be continued; sending the whole prompt",
+                         site, bridge_id)
+                followup_ok = False
+                prompt = self.build_prompt(system, user, schema, errors)
+                late_key = _late_key(self.bridge_url, site, prompt)
+                bridge_id = _late_get(late_key) or bridge_request_id(request_id, site, call, reask) + "-full"
+                body = {"site": site, "prompt": prompt, "request_id": bridge_id, "timeout_ms": tmo}
+                reply = self._post_collecting(body, late_key, tmo)
             _late_drop(late_key)
             text = reply.get("text")
             if not reply.get("ok") or not isinstance(text, str):

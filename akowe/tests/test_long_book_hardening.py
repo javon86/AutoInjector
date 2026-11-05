@@ -61,7 +61,8 @@ def _iso(dt):
 class LateBridge:
     """Bridge v1.2 fake. ``plan[site]``: outcomes consumed per NEW request id (not a join):
     ("ok", text[, extra]) | ("late", text) = 504 typed:true, the answer arrives for the same id |
-    ("lost",) = 504 typed:true and the join gets 504 late_expired | ("untyped",) = 504 typed:false."""
+    ("lost",) = 504 typed:true and the join gets 504 late_expired | ("untyped",) = 504 typed:false |
+    ("nofollow",) = 409 FOLLOWUP_UNAVAILABLE (PR #123: the chat of a follow-up is no longer the current one)."""
 
     def __init__(self):
         self.plan: dict[str, list] = {}
@@ -104,6 +105,12 @@ class LateBridge:
                     else ("ok", json.dumps(OUT))
                 if step[0] == "untyped":
                     return self._send(504, {"ok": False, "error": "TIMEOUT", "typed": False, "ambiguous": False})
+                if step[0] == "limit":  # PR #123: the site's usage-limit notice named a time (ISO 8601)
+                    return self._send(503, {"ok": False, "error": "SITE_ERROR", "site_error": "rate-limit",
+                                            "retry_after_s": 60, "limit_reset_at": step[1], "ambiguous": False})
+                if step[0] == "nofollow":  # PR #123: the chat can't be continued; nothing typed (the step is used up)
+                    return self._send(409, {"ok": False, "error": "FOLLOWUP_UNAVAILABLE", "ambiguous": False,
+                                            "message": "a fresh chat was opened; send the whole prompt instead"})
                 bridge.typed.append(body)
                 seq = f"{len(bridge.typed):04d}"
                 if step[0] == "lost":
@@ -279,6 +286,19 @@ def test_a_re_ask_sends_only_the_correction_when_the_bridge_can_continue_the_cha
     assert "Project context package" in bridge.typed[-1]["prompt"] and "followup_of" not in bridge.typed[-1]
 
 
+def test_a_short_re_ask_the_bridge_cannot_continue_becomes_the_whole_prompt(tmp_path, bridge):
+    """Final hardening (PR #123): the bridge answers 409 FOLLOWUP_UNAVAILABLE when the chat changed (a fresh chat, the
+    author typed there): nothing was typed, so Akọwe sends the whole prompt at once, in the same re-ask."""
+    app, pr = reg(tmp_path, bridge.url)
+    bridge.plan["claude"] = [("ok", "{broken", {"followup": True}), ("nofollow",), ("ok", json.dumps(OUT))]
+    assert gen(pr, ctx_for())[0] == OUT
+    first, second = bridge.typed
+    assert [r.get("followup_of") is not None for r in bridge.requests] == [False, True, False]
+    assert "Project context package" in second["prompt"] and "followup_of" not in second
+    assert "rejected because it did not validate" in second["prompt"]  # the errors are still named
+    assert second["request_id"] != first["request_id"] and second["request_id"].endswith("-full")
+
+
 # ====================================================================== 4. usage limits
 def test_wait_and_retry_waits_for_usage_limits_with_a_resume_time_and_goes_on_by_itself():
     slept, infos = [], []
@@ -337,6 +357,23 @@ def test_generate_says_when_every_ai_is_at_its_usage_limit(tmp_path):
     with pytest.raises(AkoweError) as e:
         gen(pr, ctx_for())
     assert not getattr(e.value, "usage_limited", False) and usage_limits.current() is None
+
+
+def test_the_reset_time_autoinjector_read_from_the_limit_notice_is_used(tmp_path, bridge):
+    """Final hardening (PR #123): AutoInjector reads "until 3:40 PM" / "try again in 2 hours" from the site's notice
+    and sends limit_reset_at (ISO 8601) — Akọwe's wait for the usage limits then resumes at that time."""
+    from datetime import datetime, timezone  # noqa: PLC0415
+    reset = time.time() + 7200
+    iso = datetime.fromtimestamp(reset, timezone.utc).isoformat().replace("+00:00", "Z")
+    app, pr = reg(tmp_path, bridge.url)
+    bridge.plan["claude"] = [("limit", iso)] * 6
+    with pytest.raises(AkoweError) as e:
+        gen(pr, ctx_for())
+    assert e.value.code == "UPSTREAM_UNAVAILABLE" and e.value.usage_limited
+    assert abs(e.value.reset_at - reset) < 2
+    assert abs(usage_limits.of_error(e.value)["reset_at"] - reset) < 2
+    assert abs(prov._epoch_s(iso) - reset) < 2 and prov.normalize_site_info({"limit_reset_at": iso})["reset_at"]
+    usage_limits.clear()
 
 
 class LongFake(SlotFake):

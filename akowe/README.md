@@ -138,15 +138,23 @@ approved outside a run you started.
 
 **The progress window** shows every step (waiting, working, done, ⏸ paused, ⚠️ problem) with its set and step
 code, how long it took and a plain message; chapters and characters are listed one by one. **⏸ Pause**,
-**▶ Resume** (continues exactly where it stopped) and **✖ Cancel** are always there. You can close the window — the
-run keeps going, and the ⚡ button shows *Making… 4/11*. When it is done you get the download buttons and links to
-the book, its journal and your finished books. Runs survive reloading the page and even an Akọwe restart (they
-then show *Interrupted — ▶ Resume*).
+**▶ Resume** (continues exactly where it stopped) and **✖ Cancel** are always there. You can close this progress
+window, or go to another Akọwe page or tab — the run keeps going, and the ⚡ button shows *Making… 4/11*. What must
+stay open is **AutoInjector** itself (the program with the AI panes): Akọwe asks the AIs through it. If you close
+the AutoInjector window while a book is being written, it asks first: **Keep running in the background** hides the
+window and the work carries on (a small AutoInjector icon by the clock, bottom right — click it to open the window
+again; right-click it for *Stop everything and quit*); **Stop it and quit** stops the run (it shows *Interrupted —
+▶ Resume*). AutoInjector also keeps the PC from going to sleep while the book is written. When it is done you get
+the download buttons and links to the book, its journal and your finished books. Runs survive reloading the page
+and even an Akọwe restart (they then show *Interrupted — ▶ Resume*).
 
 **When the AI is busy.** If the AI is busy or cannot be reached, Akọwe waits and tries again by itself (15 s,
 30 s, 60 s, 120 s … up to about 10 minutes; change it in Settings → *When the AI is busy*) and shows *“Waiting for
-Claude (busy) — retrying in 30 s”*. A slow answer (time-out) is never retried automatically, because the first
-answer may still arrive: the step pauses with a ⚠️ and **🔁 Try again**.
+Claude (busy) — retrying in 30 s”*, or gives the work to another AI that works. A slow answer (time-out) is first
+collected late (the prompt is never typed twice), then the work goes to another AI; only when no AI can take it
+does the step pause with a ⚠️ and **🔁 Try again**. When **every** AI has hit its usage limit, Akọwe waits for a
+limit to reset (up to 6 hours by default) and carries on by itself — at the reset time the site showed, when it
+showed one (*“All AIs hit their usage limits — waiting; resumes by itself at about 3:40 PM”*).
 
 **When one AI breaks, the others take over.** Before a run starts (and before ✍ Write all chapters and 🧪 Test
 workflow) Akọwe asks AutoInjector to check in with every AI (up to a minute) and the window shows **AIs:**

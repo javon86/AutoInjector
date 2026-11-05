@@ -418,3 +418,32 @@ Nothing changes for a bridge that does not send these; Akọwe behaves as before
   limit, and in a `503 SITE_ERROR` with `site_error: "rate-limit"`: when the limit resets. When every AI is at its
   limit, Akọwe waits until then (else it checks every 5 minutes), for up to 6 hours by default.
 
+### What AutoInjector sends since the final hardening pass (PR #123)
+
+AutoInjector's bridge now implements both optional fields above.
+
+* **`limit_reset_at`.** When a site's usage-limit notice names a time, AutoInjector reads it
+  (`desktop-app/site-errors.js` `limitResetAt`, this PC's local time) and sends it as ISO 8601 (UTC):
+  * in the `503 SITE_ERROR` answer with `site_error: "rate-limit"` (the notice was the reply to Akọwe's prompt);
+  * in that site's `/v1/health` entry, while the time is still ahead (from a notice seen as a reply, or one that
+    self-repair found on the page, state `needs_user` / `USAGE_LIMIT`). A real answer from that AI clears it.
+
+  Wordings it understands: "until 3:40 PM", "resets 3pm", "try again after 10:21 PM", "try again in 2 hours 30
+  minutes", "resets in about 3 hours", "until Nov 6, 1:43 AM", "resets tomorrow at 9:00 AM", "until Monday at
+  8:00 AM", "available again at 17:15". A time that has already passed today means tomorrow. A bare number ("until
+  5"), a time more than 8 days ahead, or a notice with no time gives no field (Akọwe then checks every 5 minutes,
+  as before). Never a guess.
+* **`followup` / `followup_of`.** Every `200` says `followup: true` when AutoInjector can tell which chat the pane
+  shows (the fresh-chat count, the page address and how many messages AutoInjector typed into that pane). A request
+  with `"followup_of": "<request_id>"` is typed into the **same chat**, with no fresh chat first, only when all of
+  these hold:
+  * that request was the last one answered by this site (nothing else went to that AI since);
+  * the pane still shows the same chat (no fresh chat, no reload to the home page, nothing else typed there: no
+    check-in, relay or nudge);
+  * you have not typed or clicked in that pane yourself since its answer.
+
+  Otherwise the bridge answers **`409 FOLLOWUP_UNAVAILABLE`** and types nothing. Akọwe then sends the whole prompt
+  (with the same list of errors) at once, as part of the same re-ask. The same `409` comes back if the chat changed
+  while the follow-up waited its turn (a check-in got in first). A malformed `followup_of` (not a request-id string,
+  or the request's own id) is `400 BAD_REQUEST`.
+
