@@ -51,7 +51,7 @@ export function checkNowBox(c, pid, branch = 'main', { testid = 'check-now', com
         if ((sr.agree || []).length) rev.appendChild(h('ul', { class: 'small' }, sr.agree.map(a => h('li', null,
           `${a.names.join(' and ')} agree ${a.kind === 'not_working' ? 'this is not working' : 'this works'}: ${a.point}`))));
         rev.appendChild(h('ul', { class: 'small muted' }, (sr.views || []).map(v => h('li', null, h('strong', null, `${v.name}: `),
-          [v.pacing, v.arc, v.drift].filter(Boolean).join(' ')))));
+          [v.pacing, v.arc, v.direction, v.sense, v.drift].filter(Boolean).join(' ')))));
         out.appendChild(rev);
       }
       const probs = l.problems || [];

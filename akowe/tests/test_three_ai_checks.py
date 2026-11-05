@@ -315,6 +315,10 @@ def test_three_ai_run_all_check_reviews_by_two_and_stretch_review(tmp_path, monk
     sr = cps["after-2"]["stretch"]
     assert sr["title"] == "Chapters 1–2 review" and len(sr["views"]) == 3 and len(sr["readers"]) == 3
     assert any(a["kind"] == "not_working" and len(a["names"]) >= 2 for a in sr["agree"])
+    # the user's two questions: is it heading the right way, and does it make sense?
+    assert {s["key"] for s in sr["scores"]} >= {"direction", "makes_sense"}
+    assert all(v.get("direction") and v.get("sense") for v in sr["views"])
+    assert "heading the right way" in checkpoints.STRETCH_TASK and "make sense" in checkpoints.STRETCH_TASK
     assert "stretch" not in cps["final"]
     # the ending check: all three
     from akowe import ending_check
