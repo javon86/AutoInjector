@@ -10,6 +10,10 @@
  *   • 📚 Library: the Model & LoRA library (search, filters, previews, base-model
  *     badges + mismatch warnings, your tags / collections / ★ / weight / notes);
  *   • 🔒 Character locks.
+ *   • 🧩 Add-ons (sd-addons.js in main): what is installed in Forge / A1111 / SD.Next / ComfyUI, the useful ones
+ *     with Install / Update / Remove, install from a GitHub link (after "only install add-ons you trust"),
+ *     🔁 Restart Forge now, 📂 choose the app's folder, and its own Extensions page in a window. The #120
+ *     "ADetailer … was left out" warning gets a 🧩 Install it button that opens it on that add-on.
  *   • the Generate form's collapsible "more settings": Hires fix, Refiner,
  *     img2img / Inpaint (with a mask brush), ControlNet units, ADetailer,
  *     Upscale, Advanced (clip skip, restore faces, tiling, styles, scripts,
@@ -64,15 +68,18 @@
   });
 
   function subTab(which) {
-    for (const w of ['generate', 'library', 'locks', 'setup']) {
+    for (const w of ['generate', 'library', 'locks', 'setup', 'addons']) {
+      if (!$(`sd-sub-${w}`) || !$(`sd-view-${w}`)) continue;
       $(`sd-sub-${w}`).setAttribute('aria-selected', String(w === which));
       $(`sd-view-${w}`).hidden = w !== which;
     }
+    if (which === 'addons') addonsRefresh();
     if (which === 'library') refreshLibrary();
     if (which === 'locks') refreshLocks();
     if (which === 'setup') { refreshTargets(); installCheck(); loadOtherServer(); }
   }
   if ($('sd-sub-setup')) $('sd-sub-setup').onclick = () => subTab('setup');
+  if ($('sd-sub-addons')) $('sd-sub-addons').onclick = () => { st.aoFocus = null; subTab('addons'); };
   $('sd-sub-generate').onclick = () => subTab('generate');
   $('sd-sub-library').onclick = () => subTab('library');
   $('sd-sub-locks').onclick = () => subTab('locks');
@@ -262,7 +269,8 @@
     fillSelect('sd-hr-upscaler', x.upscalers.filter((u) => !/^latent$/i.test(u)), null, 'Latent');
     fillSelect('sd-up-upscaler', comfy ? (x.upscaleModels.length ? x.upscaleModels : ['lanczos']).concat(x.upscaleModels.length ? ['lanczos'] : []) : x.upscaleModels.filter((u) => !/^none$/i.test(u)), null, '(default)');
     if (x.adetailer) fillSelect('sd-ad-model', x.adetailer.models, $('sd-ad-model').value || 'face_yolov8n.pt', '(choose)');
-    setText('sd-ad-note', x.adetailer ? '' : 'ADetailer isn\'t installed in this WebUI (Extensions → Available → ADetailer).');
+    setText('sd-ad-note', x.adetailer ? '' : 'ADetailer isn\'t installed in this WebUI yet.');
+    if ($('btn-sd-ad-install')) $('btn-sd-ad-install').hidden = !!x.adetailer || comfy;
     const sty = $('sd-adv-styles'); sty.textContent = ''; for (const n of x.styles) { const o = document.createElement('option'); o.value = n; o.textContent = n; sty.appendChild(o); }
     fillSelect('sd-adv-script', x.scripts ? x.scripts.txt2img : [], null, 'None');
     const dl = $('sd-opt-keys'); dl.textContent = ''; for (const k of x.optionKeys) { const o = document.createElement('option'); o.value = k; dl.appendChild(o); }
@@ -644,6 +652,7 @@
     if (st.generating) return;
     setBusy(true);
     hideError();
+    addonLinks(null);
     $('sd-progress-bar').style.width = '0%';
     msg(startText || (isTest ? '🧪 Making a 512×512 test picture… (the first one after starting can take a minute while the model loads)' : '🎨 Making your picture…'));
     startPolling();
@@ -663,6 +672,7 @@
     const warn = (r.warnings || []).map((w) => `⚠ ${w.message}`).join('\n');
     const by = r.engine === 'chatgpt' ? ` — drawn by ChatGPT${r.settings && r.settings.seconds ? ` in ${r.settings.seconds} s` : ''}` : ` (seed ${r.seed})`;
     msg(`✔ ${r.images.length} picture${r.images.length > 1 ? 's' : ''} saved${isTest ? ' — Stable Diffusion works!' : ''}${r.retried && r.fixed === 'vae-automatic' ? ' — VAE is now Automatic' : ''}${by}${warn ? `\n${warn}` : ''}`);
+    addonLinks(r.warnings);
     if (r.images[0]) showImage({ path: r.images[0].path, url: r.images[0].url, record: Object.assign({}, r.settings, { seed: r.images[0].seed }) });
     refreshGallery();
   }
@@ -1009,6 +1019,158 @@
     if (!$('sd-prompt').value.trim()) $('sd-prompt').value = 'head and shoulders portrait, looking at the viewer, soft light';
     runGenerate(Object.assign(formRequest(), { purpose: 'portrait', width: undefined, height: undefined }));
   };
+
+  // ------------------------------------------------------------ 🧩 Add-ons (sd-addons.js via main)
+  // PR #120: "ADetailer … was left out … install ADetailer" gets a "🧩 Install it" link that opens this panel on it.
+  const ADDON_FOR_FIELD = { adetailer: 'adetailer', controlnet: 'controlnet' };
+  function addonLinks(warnings) {
+    const box = $('sd-msg-addons'); if (!box) return;
+    box.textContent = '';
+    const ids = [...new Set((warnings || []).filter((w) => w && w.kind === 'skipped' && ADDON_FOR_FIELD[w.field]).map((w) => ADDON_FOR_FIELD[w.field]))];
+    for (const id of ids) {
+      const b = document.createElement('button');
+      b.className = 'sd-fixed sd-ao-link'; b.dataset.addon = id;
+      b.textContent = `🧩 Install it (${id === 'adetailer' ? 'ADetailer' : 'ControlNet'})`;
+      b.onclick = () => openAddons(id);
+      box.appendChild(b);
+    }
+    box.hidden = !ids.length;
+  }
+  function openAddons(id) { st.aoFocus = id || null; subTab('addons'); }
+  window.sdOpenAddons = openAddons;
+  if ($('btn-sd-ad-install')) $('btn-sd-ad-install').onclick = () => openAddons('adetailer');
+  function aoMsg(t, tone) { const e = $('sd-ao-msg'); if (!e) return; e.textContent = t || ''; e.dataset.tone = tone || ''; }
+  const AO_STATE = { installed: '✔ installed', on: '✔ on', builtin: '✔ built in', restart: '⏳ restart to turn on', off: 'turned off', missing: 'not installed', 'not-for': 'not for this app' };
+  function aoButton(label, fn, title) { const b = document.createElement('button'); b.className = 'sd-fixed'; b.textContent = label; if (title) b.title = title; b.onclick = fn; return b; }
+  function renderAddons(ov) {
+    if (!ov || !ov.ok) { aoMsg((ov && ov.message) || 'Could not read the add-ons.', 'error'); return; }
+    st.addons = ov;
+    const app = ov.app || 'your SD app';
+    setText('sd-ao-app', app);
+    const comfy = ov.kind === 'comfy';
+    if ($('btn-sd-ao-openpage')) { $('btn-sd-ao-openpage').textContent = comfy ? 'Open ComfyUI (Manager) ↗' : `Open ${app}'s own Extensions page ↗`; $('btn-sd-ao-openpage').disabled = !ov.connected; $('btn-sd-ao-openpage').title = ov.connected ? 'Opens its own page in a window here and switches to its Extensions tab' : 'Connect to your SD app first'; }
+    if ($('btn-sd-ao-restart')) $('btn-sd-ao-restart').textContent = `🔁 Restart ${app} now`;
+    const where = $('sd-ao-where');
+    if (ov.install) {
+      where.textContent = `${ov.install.label}'s add-ons folder: ${ov.install.extDir}\n(${ov.install.chosen ? 'the folder you chose' : `found: ${ov.install.source}`}${ov.install.others && ov.install.others.length ? ` — also on this PC: ${ov.install.others.map((o) => o.label).join(', ')}; press 📂 Choose the folder… to use another` : ''})${ov.git ? '' : '\nGit is not on this PC, so add-ons are downloaded as zip files from GitHub instead (Update gets a fresh copy).'}`;
+    } else where.textContent = '';
+    const np = $('sd-ao-nopath');
+    if (np) { np.hidden = !!ov.install; np.textContent = ov.install ? '' : `⚠ ${(ov.help && ov.help.message) || ''}\n${(ov.help && ov.help.fix) || ''}`.trim(); }
+    if ($('btn-sd-ao-openfolder')) $('btn-sd-ao-openfolder').hidden = !ov.install;
+    if ($('btn-sd-ao-folder')) $('btn-sd-ao-folder').textContent = ov.install ? '📂 Use another folder…' : `📂 Choose ${app}'s folder…`;
+    // the curated list
+    const cat = $('sd-ao-catalog'); cat.textContent = '';
+    for (const c of ov.catalog || []) {
+      const row = document.createElement('div'); row.className = 'sd-ao-item'; row.dataset.id = c.id; row.dataset.state = c.state;
+      if (st.aoFocus === c.id) row.dataset.focus = '1';
+      const main = document.createElement('div'); main.className = 'sd-ao-main';
+      const nm = document.createElement('div'); nm.className = 'sd-ao-name'; nm.textContent = c.name;
+      const badge = document.createElement('span'); badge.className = 'sd-ao-state'; badge.dataset.state = c.state; badge.textContent = c.state === 'restart' ? `⏳ restart ${app} to turn it on` : (AO_STATE[c.state] || c.state); nm.appendChild(badge);
+      const what = document.createElement('div'); what.className = 'sd-ao-what'; what.textContent = c.note ? `${c.what} — ${c.note}` : c.what;
+      main.appendChild(nm); main.appendChild(what); row.appendChild(main);
+      const btns = document.createElement('div'); btns.className = 'sd-ao-btns';
+      if (c.state === 'missing') { const b = aoButton('⬇ Install', () => aoInstall({ id: c.id }, c), `Puts ${c.name} into ${app}'s add-ons folder`); b.dataset.install = c.id; b.disabled = !ov.install || !!ov.busy; btns.appendChild(b); }
+      if ((c.state === 'installed' || c.state === 'restart' || c.state === 'off') && c.folder && c.onDisk) { btns.appendChild(aoButton('↻ Update', () => aoUpdate(c.folder))); btns.appendChild(aoButton('🗑 Remove', () => aoRemove(c.folder, c.name))); }
+      row.appendChild(btns);
+      cat.appendChild(row);
+    }
+    // everything installed
+    const ins = $('sd-ao-installed'); ins.textContent = '';
+    if (!(ov.installed || []).length) { const d = document.createElement('div'); d.className = 'sd-small'; d.textContent = ov.install || ov.connected ? 'No add-ons installed yet.' : 'Connect to your SD app, or choose its folder, to see what is installed.'; ins.appendChild(d); }
+    for (const it of ov.installed || []) {
+      const row = document.createElement('div'); row.className = 'sd-ao-item'; row.dataset.name = it.name; row.dataset.state = it.state;
+      const main = document.createElement('div'); main.className = 'sd-ao-main';
+      const nm = document.createElement('div'); nm.className = 'sd-ao-name'; nm.textContent = it.title === it.name ? it.name : `${it.title} (${it.name})`;
+      const badge = document.createElement('span'); badge.className = 'sd-ao-state'; badge.dataset.state = it.state; badge.textContent = it.state === 'restart' ? `⏳ restart ${app} to turn it on` : (AO_STATE[it.state] || it.state); nm.appendChild(badge);
+      const what = document.createElement('div'); what.className = 'sd-ao-what'; what.textContent = it.url || (it.onDisk ? 'installed by hand' : `listed by ${app}`);
+      main.appendChild(nm); main.appendChild(what); row.appendChild(main);
+      const btns = document.createElement('div'); btns.className = 'sd-ao-btns';
+      if (it.canUpdate) btns.appendChild(aoButton('↻ Update', () => aoUpdate(it.name)));
+      if (it.canRemove) btns.appendChild(aoButton('🗑 Remove', () => aoRemove(it.name, it.title)));
+      row.appendChild(btns);
+      ins.appendChild(row);
+    }
+    aoRestartBox(ov.restartNeeded || st.aoNeedRestart, ov);
+    if (st.aoFocus) {
+      const f = cat.querySelector(`.sd-ao-item[data-id="${st.aoFocus}"]`);
+      if (f) { try { f.scrollIntoView({ block: 'center' }); } catch (_) {} const c = (ov.catalog || []).find((x) => x.id === st.aoFocus); if (c && !st.aoBusy && !$('sd-ao-msg').textContent) aoMsg(c.state === 'missing' ? `${c.name}: press ⬇ Install, then restart ${app}.` : c.state === 'builtin' ? `${c.name}: ${c.note}` : `${c.name}: ${AO_STATE[c.state] || c.state}.`, ''); }
+    }
+  }
+  function aoRestartBox(need, ov) {
+    const box = $('sd-ao-restart'); if (!box) return;
+    box.hidden = !need;
+    const app = (ov && ov.app) || 'Forge';
+    setText('sd-ao-restart-note', ov && ov.canRestart ? `AutoInjector started ${app}, so it can restart it for you.` : `${app} was started outside AutoInjector — restart it in Stability Matrix (Stop, then Launch), then press ↻ Check again.`);
+    if ($('btn-sd-ao-restart')) $('btn-sd-ao-restart').hidden = !(ov && ov.canRestart);
+  }
+  async function addonsRefresh() {
+    if (!st.aoBusy) aoMsg('Looking at what is installed…', '');
+    const ov = await call('addons');
+    if (!st.aoBusy) aoMsg('', '');
+    renderAddons(ov);
+    return ov;
+  }
+  function aoProgress(p) {
+    const bar = $('sd-ao-bar'); const box = $('sd-ao-progress'); if (!bar || !box) return;
+    if (!p || p.phase !== 'working') { box.hidden = true; bar.style.width = '0%'; return; }
+    box.hidden = false;
+    bar.style.width = `${Math.round(Math.max(0.03, Math.min(1, p.pct || 0)) * 100)}%`;
+    aoMsg(`${p.op === 'update' ? 'Updating' : p.op === 'remove' ? 'Removing' : 'Installing'} ${p.title || p.name || ''}… ${p.step || ''}${p.pct ? ` ${Math.round(p.pct * 100)}%` : ''}`, '');
+  }
+  async function aoRun(fn, args, okNote) {
+    if (st.aoBusy) { aoMsg('Still working on the last one — one moment.', 'warn'); return null; }
+    st.aoBusy = true;
+    for (const b of document.querySelectorAll('#sd-view-addons button')) b.disabled = true;
+    let r;
+    try { r = await call(fn, ...args); } finally { st.aoBusy = false; for (const b of document.querySelectorAll('#sd-view-addons button')) b.disabled = false; aoProgress(null); }
+    if (r && r.overview) renderAddons(r.overview); else await addonsRefresh();
+    if (r && r.ok) { if (r.restartNeeded) st.aoNeedRestart = true; aoMsg(r.message || okNote || 'Done.', 'ok'); aoRestartBox(st.aoNeedRestart, st.addons); }
+    else if (r && r.error !== 'CANCELLED') aoMsg(`✖ ${(r && r.message) || 'It didn\'t work.'}${r && r.fix ? `\n${r.fix}` : ''}`, 'error');
+    return r;
+  }
+  async function aoInstall(what, c) {
+    if (c && c.consent && !window.confirm(`${c.name} swaps faces.\n\nOnly use it with pictures of people who agreed — never to fake, embarrass or impersonate anyone.\n\nInstall it?`)) return;
+    return aoRun('addonsInstall', [what]);
+  }
+  async function aoInstallLink() {
+    const url = ($('sd-ao-url').value || '').trim();
+    if (!url) { aoMsg('Paste the add-on\'s GitHub link first (for example https://github.com/Bing-su/adetailer).', 'warn'); return; }
+    const m = url.match(/^https:\/\/(?:www\.)?(github\.com|gitlab\.com)\/([^/\s]+\/[^/\s]+)/i);
+    if (!m) { aoMsg('✖ Only https://github.com/… or https://gitlab.com/… links can be installed here.', 'error'); return; }
+    if (!window.confirm(`Install the add-on ${m[2].replace(/\.git$/, '')} from ${m[1]}?\n\nOnly install add-ons you trust. An add-on runs inside ${(st.addons && st.addons.app) || 'your SD app'} with full access to your PC and files.`)) return;
+    const r = await aoRun('addonsInstall', [{ url }]);
+    if (r && r.ok) $('sd-ao-url').value = '';
+  }
+  async function aoUpdate(name) { return aoRun('addonsUpdate', [name]); }
+  async function aoRemove(name, title) {
+    if (!window.confirm(`Remove ${title || name}?\n\nIt is moved to the _removed folder next to the add-ons folder — nothing is deleted, so it can be put back.`)) return;
+    return aoRun('addonsRemove', [name]);
+  }
+  if ($('btn-sd-ao-refresh')) $('btn-sd-ao-refresh').onclick = () => { st.aoNeedRestart = false; addonsRefresh(); };
+  if ($('btn-sd-ao-url')) $('btn-sd-ao-url').onclick = aoInstallLink;
+  if ($('sd-ao-url')) $('sd-ao-url').addEventListener('keydown', (e) => { if (e.key === 'Enter') aoInstallLink(); });
+  if ($('btn-sd-ao-folder')) $('btn-sd-ao-folder').onclick = async () => {
+    const r = await call('addonsFolder');
+    if (r && r.error === 'CANCELLED') return;
+    if (r && r.overview) renderAddons(r.overview);
+    aoMsg(r && r.ok ? r.message : `✖ ${(r && r.message) || 'That folder can\'t be used.'}`, r && r.ok ? 'ok' : 'error');
+  };
+  if ($('btn-sd-ao-openfolder')) $('btn-sd-ao-openfolder').onclick = async () => { const r = await call('addonsOpenFolder'); if (r && !r.ok && r.message) aoMsg(r.message, 'error'); };
+  if ($('btn-sd-ao-openpage')) $('btn-sd-ao-openpage').onclick = async () => {
+    aoMsg('Opening its own page…', '');
+    const r = await call('addonsOpenPage');
+    aoMsg(r && r.ok ? r.message : `✖ ${(r && r.message) || 'Connect to your SD app first.'}`, r && r.ok ? 'ok' : 'error');
+  };
+  if ($('btn-sd-ao-restart')) $('btn-sd-ao-restart').onclick = async () => {
+    const app = (st.addons && st.addons.app) || 'Forge';
+    $('btn-sd-ao-restart').disabled = true;
+    aoMsg(`🔁 Restarting ${app}… the first start after an install can take a few minutes while it sets the add-on up.`, '');
+    const r = await call('addonsRestart');
+    $('btn-sd-ao-restart').disabled = false;
+    if (r && r.ok) { st.aoNeedRestart = false; if (r.overview) renderAddons(r.overview); aoMsg(r.message, 'ok'); const s = await call('status'); if (s && s.ok) renderStatus(s); await loadLists(); }
+    else aoMsg(`✖ ${(r && r.message) || 'It could not be restarted.'}`, 'error');
+  };
+  if (api && typeof api.onAddons === 'function') api.onAddons((p) => { if (p && p.phase === 'working') aoProgress(p); });
 
   // ------------------------------------------------------------ run + install (sd-runner / sd-installer)
   // Start buttons: "Starting…" and disabled while a start (or the wait for the install) runs.

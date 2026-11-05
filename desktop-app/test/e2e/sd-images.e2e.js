@@ -36,14 +36,21 @@ async function main() {
     fs.mkdirSync(path.join(models, 'VAE'), { recursive: true });
     fs.writeFileSync(path.join(models, 'VAE', 'taesd_decoder.safetensors'), Buffer.concat([len, json, Buffer.from([1, 2, 3, 4])]));
   }
-  const forge = await fakeA1111({ flavor: 'forge', loraFile: path.join(models, 'Lora', 'odile_face.safetensors'), badVae: 'taesd_decoder' });
+  const forge = await fakeA1111({ flavor: 'forge', loraFile: path.join(models, 'Lora', 'odile_face.safetensors'), badVae: 'taesd_decoder', tabs: true });
+  // 🧩 Add-ons: a Forge folder as Stability Matrix lays it out, and a fake git (test/fixtures/fake-git.js)
+  const forgeDir = path.join(tmp, 'StabilityMatrix', 'Data', 'Packages', 'stable-diffusion-webui-forge');
+  for (const d of ['modules', 'modules_forge', 'extensions', path.join('extensions-builtin', 'sd_forge_controlnet')]) fs.mkdirSync(path.join(forgeDir, d), { recursive: true });
+  fs.writeFileSync(path.join(forgeDir, 'launch.py'), '# fake forge');
+  const gitWrapper = path.join(tmp, 'git');
+  fs.writeFileSync(gitWrapper, `#!/bin/sh\nexec "${process.execPath}" "${path.join(__dirname, '..', 'fixtures', 'fake-git.js')}" "$@"\n`);
+  fs.chmodSync(gitWrapper, 0o755);
   const userData = path.join(tmp, 'userdata');
   let file = null; // the picture the test makes (removed afterwards)
   const t0 = Date.now() - 1000;
   const app = await electron.launch({
     args: ['.', '--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu', `--user-data-dir=${userData}`],
     cwd: APP_DIR,
-    env: Object.assign({}, process.env, { AUTOINJECTOR_AKOWE_SERVER: '0', AUTOINJECTOR_SD_MODEL_DIRS: models, AUTOINJECTOR_SD_HOME: path.join(tmp, 'sdhome'), AUTOINJECTOR_SD_AUTOSTART: '0' }),
+    env: Object.assign({}, process.env, { AUTOINJECTOR_AKOWE_SERVER: '0', AUTOINJECTOR_SD_MODEL_DIRS: models, AUTOINJECTOR_SD_HOME: path.join(tmp, 'sdhome'), AUTOINJECTOR_SD_AUTOSTART: '0', AUTOINJECTOR_GIT: gitWrapper, FAKE_GIT_LOG: path.join(tmp, 'git.log') }),
   });
   try {
     const c = await findWindow(app, '#tab-app-images', 40000);
@@ -171,6 +178,37 @@ async function main() {
     await c.waitForFunction(() => /saved/.test(document.getElementById('sd-msg').textContent) && !document.getElementById('btn-sd-generate').disabled, null, { timeout: 20000 }).catch(() => {});
     assert(/VAE is now Automatic/.test(await c.textContent('#sd-msg')) && await c.$eval('#sd-error', (e) => e.hidden) && (await c.inputValue('#sd-vae')) === '', '"Use Automatic VAE and retry" → the picture is made, the box goes away, the form says Automatic');
     assert(forge.state.optionsSet.slice(optsBefore).some((o) => o.sd_vae === 'Automatic') && forge.state.options.sd_vae === 'Automatic', 'Forge\'s own sd_vae setting is Automatic now');
+
+    // ---- 🧩 Add-ons: point it at the Forge folder, install one (fake git), see "restart", the re-check, Remove,
+    //      and Forge's own Extensions page in an in-app window with its Extensions tab clicked
+    const fr = await c.evaluate((d) => window.api.sd.addonsFolder(d), forgeDir);
+    assert(fr && fr.ok && fr.kind === 'forge', `the Forge folder is remembered (${fr && fr.message})`);
+    await c.click('#sd-sub-addons');
+    await c.waitForSelector('#sd-ao-catalog .sd-ao-item[data-id="regional-prompter"]', { timeout: 15000 }).catch(() => {});
+    assert(/built in/.test(await c.textContent('#sd-ao-catalog .sd-ao-item[data-id="controlnet"]').catch(() => '')), 'ControlNet shows as built into Forge');
+    assert(/extensions/.test(await c.textContent('#sd-ao-where')), 'the panel shows Forge\'s add-ons folder');
+    await shot(c, '06a-images-addons');
+    await c.click('#sd-ao-catalog .sd-ao-item[data-id="regional-prompter"] button[data-install]');
+    await c.waitForFunction(() => /is installed/.test(document.getElementById('sd-ao-msg').textContent), null, { timeout: 30000 }).catch(() => {});
+    assert(/✔ Regional Prompter is installed/.test(await c.textContent('#sd-ao-msg')), `Install → "${(await c.textContent('#sd-ao-msg')).split('\n')[0]}"`);
+    const rpDir = path.join(forgeDir, 'extensions', 'sd-webui-regional-prompter');
+    assert(fs.existsSync(path.join(rpDir, '.git', 'config')) && !fs.existsSync(path.join(rpDir, 'RAN_INSTALL_PY')), 'it was cloned into Forge\'s extensions folder (its code not run)');
+    assert(/restart Forge/.test(await c.textContent('#sd-ao-catalog .sd-ao-item[data-id="regional-prompter"]')) && await c.$eval('#sd-ao-restart', (e) => !e.hidden), 'Forge doesn\'t list it yet → "restart Forge to turn it on"');
+    assert(/restart it in Stability Matrix/.test(await c.textContent('#sd-ao-restart-note')), 'Forge wasn\'t started here → restart it in Stability Matrix');
+    await shot(c, '06b-images-addons-installed');
+    forge.state.extensions.push({ name: 'sd-webui-regional-prompter', remote: 'https://github.com/hako-mikan/sd-webui-regional-prompter.git', enabled: true });
+    await c.click('#btn-sd-ao-refresh');
+    await c.waitForFunction(() => /✔ installed/.test(document.querySelector('#sd-ao-catalog .sd-ao-item[data-id="regional-prompter"]').textContent), null, { timeout: 15000 }).catch(() => {});
+    assert(/✔ installed/.test(await c.textContent('#sd-ao-catalog .sd-ao-item[data-id="regional-prompter"]')), 'after the restart, ↻ Check again → ✔ installed');
+    await c.evaluate(() => { window.confirm = () => true; });
+    await c.click('#sd-ao-installed .sd-ao-item[data-name="sd-webui-regional-prompter"] button:has-text("Remove")');
+    await c.waitForFunction(() => /_removed/.test(document.getElementById('sd-ao-msg').textContent), null, { timeout: 15000 }).catch(() => {});
+    assert(!fs.existsSync(rpDir) && fs.readdirSync(path.join(forgeDir, '_removed')).some((n) => /^sd-webui-regional-prompter-/.test(n)), 'Remove → moved to the _removed folder');
+    await c.click('#btn-sd-ao-openpage');
+    const extWin = await findWindow(app, '#fake-ext-tab[data-clicked="1"]', 30000);
+    assert(!!extWin, 'Open Forge\'s own Extensions page → an in-app window with its Extensions tab clicked');
+    if (extWin) { await shot(extWin, '06c-forge-extensions-window'); }
+    await c.waitForFunction(() => /Extensions page/.test(document.getElementById('sd-ao-msg').textContent), null, { timeout: 10000 }).catch(() => {});
 
     await c.click('#sd-sub-setup');
     await c.waitForFunction(() => document.getElementById('sd-install-check').textContent.length > 10, null, { timeout: 15000 }).catch(() => {});

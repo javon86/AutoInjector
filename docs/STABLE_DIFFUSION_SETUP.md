@@ -12,6 +12,7 @@ and 📖 Akọwe):
 | 🖌 **Generate** | prompt, negative prompt, character lock, LoRAs (with weights), checkpoint, VAE, sampler, size, steps, CFG, seed, batch → **Generate**, progress + **Stop**, result + gallery, **♻ Remake** / **🎲 Variation** |
 | 📚 **Library** | all your checkpoints, LoRAs, embeddings and VAEs with preview pictures, base model (SD1.5 / SDXL / Pony / Flux…), trigger words; your own tags, collections, ★, default weight, notes |
 | 🔒 **Character locks** | a LoRA + trigger words + fixed looks for one book character, so the face stays the same |
+| 🧩 **Add-ons** | what is installed in your SD app, a short list of useful add-ons (extensions) with **⬇ Install**, **↻ Update** and **🗑 Remove**, install from a GitHub link, **🔁 Restart Forge now**, and **Open Forge's own Extensions page** |
 | ⚙ **Start & install** | start a Stability Matrix package (or the ComfyUI AutoInjector installed) hidden, with the API on; or **⬇ Install Stable Diffusion**; **Advanced: another server** — a list of common addresses, 🔍 Auto-detect, ✓ Check it answers, and the on/off switch (for an SD app on another computer or an odd port) |
 
 The **🎨 Images** button in the AutoInjector tab's action bar opens this tab (the old Image Generation panel is gone — this is the one place).
@@ -170,6 +171,66 @@ SD app** — AutoInjector checks ports 7860–7865, 8188, 8000 and 8888. Add its
   checkpoint and seed. Pick the lock in 🖌 Generate, or press **🎨 Try a portrait**. Akọwe will
   use these for character portraits and covers (see `docs/SD_IMAGE_API.md`).
 
+## 🧩 Add-ons (extensions)
+
+Add-ons give Forge (or A1111 / SD.Next) new tools. In ComfyUI they are called
+*custom nodes*. Open **🎨 Images → 🧩 Add-ons**.
+
+**What you see**
+
+- **Where they go:** Forge's add-ons folder, for example
+  `…\StabilityMatrix\Data\Packages\stable-diffusion-webui-forge\extensions`. AutoInjector
+  finds it the same way it finds Forge to start it (Stability Matrix's packages).
+- **Useful add-ons**, each with one line saying what it does:
+  - **ADetailer**: fixes faces and hands by itself after each picture.
+  - **ControlNet**: copies a pose, an outline or the depth from a picture. *Forge already has it
+    built in*, so it says "✔ built in" there. On Automatic1111 you can install it.
+  - **Regional Prompter**: different words for different parts of the picture.
+  - **Dynamic Prompts**: random choices in a prompt, like `{red|blue|green} dress`.
+  - **Tiled Diffusion (MultiDiffusion)**: very large pictures in tiles. Forge has its own built in.
+  - **Ultimate SD Upscale**: makes a picture 2× or 4× bigger and adds detail.
+  - **ReActor (face swap)**: only with faces of people who said yes. It asks you first.
+  - For ComfyUI the list is ComfyUI-Manager, Impact Pack (Face Detailer), ControlNet
+    preprocessors, Ultimate SD Upscale, Dynamic Prompts and ReActor.
+- **Installed:** everything in the add-ons folder, and what Forge itself says it has loaded.
+  Each one has **↻ Update** and **🗑 Remove**.
+
+**Installing**
+
+1. Press **⬇ Install** next to the add-on. A bar shows the download.
+2. AutoInjector copies the add-on's files into the folder. It uses `git` (Stability Matrix's
+   own copy, or Git for Windows). With no git on the PC it downloads the add-on as a zip
+   from GitHub instead. It never runs the add-on itself.
+3. The add-on shows **⏳ restart Forge to turn it on**. Then:
+   - If AutoInjector started Forge (▶ Start), press **🔁 Restart Forge now**.
+   - If you started Forge in Stability Matrix, press **Stop** and then **Launch** there.
+   The first start after an install can take a few minutes while Forge sets the add-on up.
+4. Press **↻ Check again**. The add-on now shows **✔ installed**.
+
+**Install from a link:** paste the add-on's GitHub (or GitLab) page, such as
+`https://github.com/Bing-su/adetailer`, and press **⬇ Install from this link**. Only links
+from github.com and gitlab.com are accepted, and it asks you first: **only install add-ons
+you trust**, because an add-on runs inside Forge with full access to your PC.
+
+**Remove** moves the add-on into a `_removed` folder next to the add-ons folder
+(for example `…\stable-diffusion-webui-forge\_removed\adetailer-20261105-093000`).
+Nothing is deleted; move it back to undo. If Windows says its files are in use, stop Forge
+first.
+
+**If AutoInjector can't find Forge's folder** it says so. Press **📂 Choose the folder…**
+and pick the folder that has `launch.py` and `extensions` in it. With Stability Matrix
+that is `Data\Packages\stable-diffusion-webui-forge` (the ⋮ menu on Forge's card in
+Stability Matrix can open it). Picking the whole `Data` folder works too.
+AutoInjector remembers the folder.
+
+**Prefer Forge's own screen?** **Open Forge's own Extensions page ↗** opens Forge in a
+window inside AutoInjector and switches to its **Extensions** tab (Available → Load from →
+Install). Stability Matrix also has its own add-on manager: on the Packages page, the ⋮ menu
+on Forge's card → Extensions.
+
+**From a picture:** when 🖌 Generate leaves ADetailer or ControlNet out because Forge doesn't
+have it, the ⚠ line has a **🧩 Install it** button that opens this page on that add-on.
+
 ## Troubleshooting
 
 | You see | Do this |
@@ -180,6 +241,8 @@ SD app** — AutoInjector checks ports 7860–7865, 8188, 8000 and 8888. Add its
 | "ComfyUI doesn't have “x”" | That model/LoRA isn't in ComfyUI's folders — press 🔍 Find / Connect again to refresh the lists and pick one. |
 | "…Python was not found" when starting a Stability Matrix package | Start it once from Stability Matrix so it finishes installing, then ▶ Start again. |
 | The first picture takes minutes | Normal after a start — the model is loading. The next ones are much faster. |
+| "⏳ restart Forge to turn it on" stays after a restart | Open Forge's log (⚙ Start & install → 📄 Open log, or Stability Matrix's console). Forge prints why an add-on did not load (often a missing download on the first start; restart once more). |
+| "GitHub says that add-on doesn't exist" | Open the link in your browser. The add-on may have moved or been taken down. |
 | Fooocus found | Fooocus has no API AutoInjector can use; add Forge or ComfyUI in Stability Matrix (same models). |
 
 Model licences (SD 1.5, SDXL, Flux, Pony, …) differ — using them is your responsibility.
