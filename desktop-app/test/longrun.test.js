@@ -126,6 +126,9 @@ async function runGuard() {
   assert(blocker.started.length === 1 && blocker.started[0] === 'prevent-app-suspension' && wl.awake(), 'busy -> powerSaveBlocker.start("prevent-app-suspension")');
   wl.update(RG.activityOf({ run: { state: 'writing', live: true } }));
   assert(blocker.started.length === 1, 'started once, not on every look');
+  assert(logs.filter((d) => d.on === true).length === 2 && /a book is being written/.test(logs[logs.length - 1].say), 'the main reason changed (Akọwe request -> book run): said once more, the lock is not started again');
+  wl.update(RG.activityOf({ run: { state: 'writing', live: true } }));
+  assert(logs.filter((d) => d.on === true).length === 2, 'same reason again: not repeated');
   t += 60000; wl.update(RG.activityOf({}));
   assert(wl.awake() && !blocker.stopped.length, 'idle for 1 minute: still held (between two requests)');
   t += 61000; wl.update(RG.activityOf({}));

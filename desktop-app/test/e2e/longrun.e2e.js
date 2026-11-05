@@ -65,7 +65,7 @@ async function main() {
     const token = (await controls.evaluate(() => window.api.akoweRevealToken())).token;
     let r = await post(port, '/v1/status', token, { app: 'akowe', version: 1, project: { id: 'p1', title: 'The Glass Road' }, run: { id: 'run-e2e', title: 'The Glass Road', status: 'running', state: 'working', step: 9, steps_total: 16 } });
     assert(r.status === 200, `status accepted (${r.status})`);
-    const awake = await waitUntil(() => logHas((e) => e.kind === 'keep-awake' && e.detail && e.detail.on === true)[0]);
+    const awake = await waitUntil(() => logHas((e) => e.kind === 'keep-awake' && e.detail && e.detail.on === true && /a book is being written/.test(e.detail.say || ''))[0]);
     assert(awake && /Keeping the PC awake while a book is being written/.test(awake.detail.say), `the real powerSaveBlocker is on ("${awake && awake.detail.say}")`);
 
     console.log('\n== closing the window asks; "Keep running in the background" hides it ==');
