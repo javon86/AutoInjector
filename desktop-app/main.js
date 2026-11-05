@@ -4413,6 +4413,13 @@ async function pollSite(site) {
         forcedAccept = true;
         logEvent("untagged-reply-accepted", { site, chars: acceptedUntaggedRaw[site].length, note: "no [FROM:] tag on a reply while an Akọwe prompt waits for its answer — taken as finished, no reminder sent" });
       }
+      // PR #126: the same for Alfred's ask_ai — he waits for this answer; a tag reminder would only delay it
+      else if (!pend.reprompted && alfredAwaitingReply(site) && !looksLikeRateLimit(text) && !isNoneSkip(text)) {
+        acceptedUntaggedRaw[site] = text;
+        text = `${text}\n[FROM: ${String(site).toUpperCase()}]`;
+        forcedAccept = true;
+        logEvent("untagged-reply-accepted", { site, chars: acceptedUntaggedRaw[site].length, note: "no [FROM:] tag on a reply while Alfred waits for its answer — taken as finished, no reminder sent" });
+      }
       // Quiet, no [FROM:] tag. A provider rate-limit/usage-cap notice never
       // carries our envelope and will never grow one, so let it fall through to
       // the rate-limit handler below (which captures + auto-pauses) instead of
@@ -4711,6 +4718,17 @@ async function pollSite(site) {
         logEvent("akowe-owned-reply", { site, chars: turn.text.length, request_id: req ? req.requestId : undefined });
         return;
       }
+    }
+    // 🎩 Alfred's ask_ai (PR #126): the reply to HIS message ([MSG #]) goes to him — shown in the conversation like
+    // any reply, but never relayed to the other AIs (it answers Alfred, not the conversation).
+    if (alfredTakeReply(site, turn)) {
+      try { relayTrace.noteHeld(turn.id, "alfred"); } catch (_) {}
+      pushTranscriptTurn(turn);
+      broadcast("capture", turn);
+      logEvent("captured", { site, chars: displayText.length });
+      saveStateDebounced();
+      logEvent("alfred-ask-ai", { site, step: "reply", chars: turn.text.length });
+      return;
     }
     pushTranscriptTurn(turn);
     broadcast("capture", turn);
@@ -8153,6 +8171,72 @@ function akoweSiteProblem(site) {
 }
 function akoweSiteReady(site) { return !akoweSiteProblem(site); }
 
+// --- 🎩 Alfred's ask_ai (PR #126): one message to one AI pane, and ITS answer back ----------------------------
+// The same machinery an Akọwe bridge request uses: a check-in on that AI makes way first, the message is typed
+// with its [MSG #] (sendTextTo's proven send), and the captured reply that answers THAT number is handed to Alfred
+// (shown in the conversation, never relayed to the other AIs). A pane an Akọwe request is waiting on is refused
+// (never typed into); one Alfred ask per AI at a time. Only site / seq / chars / outcome are logged — never text.
+const alfredAsks = {}; // site -> { token: { cancelled, seq }, sentAt, typed, reply: { text } | null }
+function alfredAwaitingReply(site) { const a = alfredAsks[site]; return !!(a && a.token && a.token.seq && !a.reply); }
+function akoweUsingPane(site) {
+  let busy = false;
+  try { const st = akoweBridge && akoweBridge.status(); busy = !!(st && st.active && st.active[site]); } catch (_) {}
+  return busy || akoweAwaitingReply(site);
+}
+/** pollSite → a captured turn: does it answer Alfred's ask on this AI? (then he gets it: true) */
+function alfredTakeReply(site, turn) {
+  const a = alfredAsks[site];
+  if (!a || a.reply || !a.token || !a.token.seq || !turn) return false;
+  let answers = null;
+  try { answers = relayTrace.answersOf(turn.id); } catch (_) { answers = null; }
+  const mine = Array.isArray(answers) ? answers.includes(a.token.seq) : (turn.ts || 0) >= a.sentAt;
+  if (!mine) return false;
+  a.reply = { text: String(turn.text || "") };
+  return true;
+}
+async function alfredAskPane(site, text, { timeoutMs = 180000, signal } = {}) {
+  if (!SITES[site]) return { ok: false, error: "BAD_SITE" };
+  if (!state.enabled[site]) return { ok: false, error: "TURNED_OFF" };
+  if (akoweUsingPane(site)) { logEvent("alfred-ask-ai", { site, outcome: "AKOWE_USING" }); return { ok: false, error: "AKOWE_USING" }; }
+  if (alfredAsks[site]) return { ok: false, error: "BUSY" };
+  const problem = akoweSiteProblem(site);
+  if (problem && problem.code !== "CHECKING") { logEvent("alfred-ask-ai", { site, outcome: "NOT_READY", code: problem.code }); return { ok: false, error: "NOT_READY", code: problem.code, say: problem.say }; }
+  const token = { cancelled: false, seq: null };
+  const entry = { token, sentAt: Date.now(), typed: false, reply: null };
+  alfredAsks[site] = entry;
+  const onAbort = () => { token.cancelled = true; };
+  try { if (signal) { if (signal.aborted) token.cancelled = true; else signal.addEventListener("abort", onAbort, { once: true }); } } catch (_) {}
+  const t0 = Date.now();
+  let outcome = "error";
+  try {
+    await selfRepairMakeWay(site, token); // a check-in on this AI settles first (bounded), like an Akọwe prompt
+    if (token.cancelled) { outcome = "CANCELLED"; return { ok: false, error: "CANCELLED", typed: false }; }
+    if (akoweUsingPane(site)) { outcome = "AKOWE_USING"; return { ok: false, error: "AKOWE_USING" }; } // it took the pane meanwhile
+    entry.sentAt = Date.now();
+    const res = await sendTextTo(site, withEnvelope(String(text), site), null, { cancelToken: token });
+    if (!res || !res.ok) {
+      outcome = res && res.error === "CANCELLED" ? "CANCELLED" : "SEND_FAILED";
+      return { ok: false, error: outcome, code: res && res.error ? String(res.error).slice(0, 60) : undefined, typed: false };
+    }
+    entry.typed = true;
+    logEvent("alfred-ask-ai", { site, seq: token.seq, chars: String(text).length, step: "sent", verified: res.verified === true ? true : res.verified === false ? false : undefined });
+    const capMs = Number(process.env.AUTOINJECTOR_ALFRED_ASK_MAX_MS) || 0; // tests: a short wait
+    const end = t0 + Math.max(1000, Math.min(Number(timeoutMs) || 180000, capMs || Infinity));
+    while (Date.now() < end) {
+      if (entry.reply) { outcome = "answered"; return { ok: true, text: entry.reply.text, seq: token.seq }; }
+      if (token.cancelled) { outcome = "CANCELLED"; return { ok: false, error: "CANCELLED", typed: true }; }
+      await new Promise((r) => setTimeout(r, 200));
+    }
+    if (entry.reply) { outcome = "answered"; return { ok: true, text: entry.reply.text, seq: token.seq }; }
+    outcome = "TIMEOUT";
+    return { ok: false, error: "TIMEOUT", typed: true, seq: token.seq };
+  } finally {
+    try { if (signal) signal.removeEventListener("abort", onAbort); } catch (_) {}
+    if (alfredAsks[site] === entry) delete alfredAsks[site];
+    logEvent("alfred-ask-ai", { site, seq: token.seq || undefined, outcome, chars: entry.reply ? entry.reply.text.length : undefined, ms: Date.now() - t0, severity: outcome === "answered" ? undefined : "warn" });
+  }
+}
+
 // --- P18 self-repair: check-ins, failure classifier, automatic fixes, teach step ---
 // The engine lives in self-repair.js (pure, unit-tested); these are its hands on the
 // panes. Nothing here ever logs or broadcasts prompt/reply text — only codes, sites,
@@ -8213,6 +8297,7 @@ function selfRepairBusy(site, level) {
   if (chatImageHolds(site)) return "image"; // 🎨 ChatGPT is drawing a picture for an image job
   try { const st = akoweBridge && akoweBridge.status(); if (st && st.active && st.active[site]) return "akowe"; } catch (_) {}
   if (akoweAwaitingReply(site)) return "akowe"; // a typed Akọwe prompt (incl. its late window) owes its answer
+  if (alfredAsks[site]) return "waiting"; // 🎩 Alfred's ask_ai waits for this AI's answer (PR #126)
   if (forceAcceptUntagged.has(site)) return "sending";
   // A message the app typed into this AI (a relay, the user's, an Akọwe prompt)
   // that still owes its reply: a check-in now would make whose reply is whose
@@ -9707,6 +9792,7 @@ const alfred = require("./alfred-main").installAlfred({
   akoweViewUrl: () => { try { return akoweView && !akoweView.webContents.isDestroyed() ? akoweView.webContents.getURL() : ""; } catch (_) { return ""; } },
   akowePushedBook: () => (akoweCarry.akowe && akoweCarry.akowe.project) || null,
   sendTextTo, withEnvelope, selfRepair, selfRepairStatus, buildExtract,
+  askPane: (site, text, o) => alfredAskPane(site, text, o), // 💬 ask_ai: send + wait for THAT message's answer (PR #126)
   outputManager, dbService, imageProvider, videoProvider, interpreterProvider, ollamaManager,
   videoStatus: () => videoQuickStatus(), // 🎬 FramePack / Wan count as "video ✓", not only the old endpoint
   mcp: mcpManager, // 🧰 tool servers (mcp_tools / mcp_call)

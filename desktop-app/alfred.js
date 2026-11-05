@@ -247,7 +247,54 @@ function actionIntent(text) {
   if (s.length < 2) s = t;
   return { kind, tool: kind === 'video' ? 'generate_video' : 'generate_image', subject: s.slice(0, 1000) };
 }
+// ---- free text that asks one of the three AIs for something, and maybe to change it (PR #126) ------------------
+// "I asked him to get a prompt from one of the AIs and then change it, and he didn't do it": his small local model
+// answered in words, and even a tool call could only SEND (send_to_ai) — nothing waited for the answer. Now such a
+// request gets one stricter retry, then a one-click ask_ai card built from it; the answer comes back to him and, when
+// you asked for a change, his AI rewrites it (or he shows the answer and says plainly that he couldn't change it).
+const AI_NAMES = [['chatgpt', /\b(?:chat\s?gpt|gpt(?:-?\d[\w.]*)?|openai)\b/i], ['claude', /\bclaude\b/i], ['gemini', /\b(?:gemini|bard)\b/i]];
+const AI_NAME_RE = '(?:chat\\s?gpt|gpt(?:-?\\d[\\w.]*)?|openai|claude|gemini|bard)';
+const CHANGE_RE = /(?:,|;|\.|\band\b|\bthen\b)\s*(?:then\s+|and\s+)?(?:(?:can|could|would|will)\s+you\s+)?(?:please\s+)?((?:make|change|rewrite|re-write|improve|edit|tweak|adjust|shorten|lengthen|expand|polish|simplify|translate|turn|punch up|spice up|tone down|fix|modify|refine|enhance|rework)\b(?:\s+(?:it|that|this|them|the (?:prompt|answer|reply|text|result|story|poem|one)))?\b[^?!]*)$/i;
+/**
+ * "get a prompt from ChatGPT for a dragon picture and make it more dramatic" →
+ * { site:'chatgpt', message:'Please write a prompt for a dragon picture.', change:'make it more dramatic' } | null
+ */
+function askAiIntent(text) {
+  const t = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!t || t.length > 2000) return null;
+  const low = t.toLowerCase();
+  if (/^(?:how|why|is|are|does|do|did|was|were|which|where|when)\b/.test(low) || /\bhow (?:do|can|would|should|to)\b/.test(low)) return null;
+  if (/\b(?:latest|last) (?:reply|answer|message)\b|\bwhat did\b/.test(low)) return null; // read_latest_reply
+  const found = AI_NAMES.filter(([, re]) => re.test(t));
+  if (found.length !== 1) return null; // none, or "ask all three" (send_to_ai's job)
+  const site = found[0][0];
+  // the change the user wants afterwards ("… and make it more dramatic")
+  let body = t; let change = '';
+  const cm = CHANGE_RE.exec(body);
+  if (cm && cm.index > 8) { change = cm[1].replace(/[\s.!?]+$/, '').trim(); body = body.slice(0, cm.index).trim(); }
+  let message = null;
+  const strip = (s) => String(s || '').replace(/^(?:please\s+)?/i, '').replace(/[\s.!?]*(?:,?\s*please)?[\s.!?]*$/i, '').trim();
+  let m;
+  // "get / fetch / grab (me) X from ChatGPT (for / about Y)"
+  if ((m = new RegExp(`^(?:(?:can|could|would|will) you\\s+|please\\s+)*(?:go\\s+(?:and\\s+)?)?(?:get|fetch|grab|obtain|request|bring)\\s+(?:me\\s+|us\\s+)?(.+?)\\s+from\\s+(?:the\\s+)?${AI_NAME_RE}\\b\\s*(.*)$`, 'i').exec(body))) {
+    const what = strip(m[1]); const rest = strip(m[2]);
+    if (what.length >= 2) message = `Please write ${what}${rest ? ` ${rest.replace(/^(?:pane\b|window\b)\s*/i, '')}` : ''}.`;
+  // "ask / have / get / tell / let ChatGPT (to) write …", "ask Claude: …", "ask Gemini what …"
+  } else if ((m = new RegExp(`^(?:(?:can|could|would|will) you\\s+|please\\s+)*(?:go\\s+(?:and\\s+)?)?(ask|have|get|tell|let|make)\\s+(?:the\\s+)?${AI_NAME_RE}\\b\\s*(?:pane\\b|window\\b)?\\s*(?:,|:|-)?\\s*(.*)$`, 'i').exec(body))) {
+    let rest = strip(m[2]);
+    if (/^(?:to\s+)/i.test(rest)) rest = rest.replace(/^to\s+/i, '');
+    else if (/^(?:for|about)\s+/i.test(rest) && m[1].toLowerCase() === 'ask') rest = `Please give me ${rest.replace(/^for\s+/i, '')}`;
+    if (rest.length >= 3) message = /^(?:what|who|why|how|when|where|which|is|are|can|could|do|does|should|would|will)\b/i.test(rest) ? `${rest.charAt(0).toUpperCase()}${rest.slice(1)}${/\?$/.test(rest) ? '' : '?'}` : /^please\b/i.test(rest) ? `${rest}.` : `Please ${rest}.`;
+  }
+  if (!message) return null;
+  // "ask ChatGPT to draw a cat" is a picture: generate_image (engine chatgpt) has its own fallback
+  if (!/\bprompts?\b|\bdescriptions?\b|\bideas?\b/i.test(message) && actionIntent(message.replace(/^Please\s+/i, ''))) return null;
+  return { site, message: message.slice(0, 4000), change: change.slice(0, 400) };
+}
 const RUN_STATES_LIVE = new Set(['running', 'queued', 'waiting', 'pausing']);
+// outcomes that mean his AI did not manage the request (two in a row with a local model → the panel's tip)
+const STRUGGLE_OUTCOMES = new Set(['error', 'empty', 'fallback-card', 'fallback-status', 'limit', 'answered-in-words']);
+const REWRITE_PROMPT = 'You rewrite a text for the user. Answer with ONLY the new text: no introduction, no comments, no quotes around it, no JSON, no tool calls.';
 const safeModel = (m) => String(m == null ? '' : m).replace(/[^A-Za-z0-9_.:/@+-]/g, '').slice(0, 80) || null;
 
 function withTimeout(p, ms, code) {
@@ -274,6 +321,9 @@ function createAlfred(deps = {}) {
   let card = null;             // the "I will" card waiting for the user
   let seq = 0;
   let lastAi = { kind: null, ok: null, at: 0, model: null };
+  // PR #126: requests in a row where his LOCAL model failed or answered in words only → the panel's one-line tip
+  // ("Use Claude (web pane) as Alfred's brain" / "Use a bigger model"). Nothing is changed by itself.
+  let struggles = 0; let struggleModel = null;
   const noticeLog = [];        // [{key, at}]
   let pollTimer = null;
   const runSeen = new Map();   // run id -> last status (book watcher)
@@ -362,6 +412,7 @@ function createAlfred(deps = {}) {
     // profiles / activeProfile change only through the profile functions below
     const before = settings;
     settings = sanitize(Object.assign(next, { enabled: before.enabled }));
+    if (settings.brain !== before.brain || settings.local.model !== before.local.model || settings.pane.site !== before.pane.site) struggles = 0;
     save();
     log('alfred-settings', { brain: settings.brain, maxSteps: settings.maxSteps, interpreter: settings.interpreter, notices: settings.notices });
     emitState();
@@ -506,6 +557,20 @@ function createAlfred(deps = {}) {
       ai: lastAi, chat: chat.slice(-60), activity: activity.slice(-ACTIVITY_MAX),
       tools: registry.publicList({ interpreter: settings.interpreter }).map((t) => ({ name: t.name, title: t.title, group: t.group, changes: t.changes, allowAlways: t.allowAlways })),
       connected: connectedTools(),
+      tip: brainTip(),
+    };
+  }
+  /** The one-line "give him a stronger brain" tip, or null (PR #126). The panel only shows it; a button changes it. */
+  function brainTip() {
+    if (struggles < 2 || settings.brain === 'pane' || settings.brain === 'api') return null;
+    const m = struggleModel || settings.local.model;
+    return {
+      count: struggles, model: m,
+      text: `My local model (${m}) has had trouble with your last ${struggles} requests. A stronger AI does much better with the tools:`,
+      actions: [
+        { id: 'use-pane', label: "Use Claude (web pane) as Alfred's brain", settings: { brain: 'pane', pane: { site: 'claude' } } },
+        { id: 'bigger', label: 'Use a bigger model' },
+      ],
     };
   }
   function connectedTools() {
@@ -535,7 +600,10 @@ function createAlfred(deps = {}) {
   async function execute(tool, args, { auto, readOnly } = {}) {
     if (req) { req.doing = 'tool'; req.toolTitle = tool.title; if (Array.isArray(req.tools)) req.tools.push(tool.name); emitState(); }
     let r;
-    try { r = await withTimeout(Promise.resolve().then(() => tool.run(args, deps.ctx || {})), tool.timeoutMs || 60000); }
+    // ask_ai waits minutes for an AI's answer: ■ Stop must reach it (its own ctx view carries the request's signal)
+    let tctx = deps.ctx || {};
+    if (tool.name === 'ask_ai' && req && req.controller) { tctx = Object.create(tctx); tctx.signal = req.controller.signal; }
+    try { r = await withTimeout(Promise.resolve().then(() => tool.run(args, tctx)), tool.timeoutMs || 60000); }
     catch (e) { r = { ok: false, error: 'TOOL_ERROR', message: `Something went wrong while doing "${tool.title}".` }; }
     r = r && typeof r === 'object' ? r : { ok: false, error: 'TOOL_ERROR' };
     const entry = { ts: now(), tool: tool.name, title: tool.title, text: registry.describe(tool, args), ok: !!r.ok, message: String(r.message || (r.ok ? 'Done.' : r.error || 'failed')).slice(0, 400), auto: !!auto, image: r.image || null };
@@ -550,6 +618,7 @@ function createAlfred(deps = {}) {
       const pid = r.project_id || (args && args.project_id) || null;
       if (pid) Promise.resolve(deps.journal(pid, tool.name, tool.title)).catch(() => {});
     }
+    if (tool.name === 'ask_ai' && r.ok && req) req.lastAsk = { site: args && args.to, text: String(r.reply || '') };
     if ((tool.name === 'generate_image' || (tool.name === 'sd_call' && r.image)) && r.ok) notice('image', `image:${r.image}`, `🎨 The image is ready: ${r.image}`, { force: true, image: r.image });
     return r;
   }
@@ -609,8 +678,14 @@ function createAlfred(deps = {}) {
     const d = { req: r.id, steps: r.steps, tools_called: [...new Set(r.tools || [])].slice(0, 12).map(safeName), card: !!r.carded, chars: Math.max(0, Number(chars) || 0), ms: Math.max(0, now() - (r.startedAt || now())), brain: r.brain || null, model: safeModel(r.model), outcome };
     if (r.quick) d.quick = r.quick;
     if (r.retried) d.retried = true;
-    if (outcome === 'error') d.severity = 'warn';
+    if (r.rewrite) d.rewrite = r.rewrite; // ask_ai + a change: 'done' | 'failed'
+    if (outcome === 'error' || outcome === 'empty') d.severity = 'warn';
     log('alfred-reply', d);
+    if (r.brain && r.brain !== 'direct') {
+      if (STRUGGLE_OUTCOMES.has(outcome) || r.rewrite === 'failed') {
+        if (!r.struggled) { r.struggled = true; struggles = r.brain === 'local' ? struggles + 1 : 0; struggleModel = r.model || null; if (struggles >= 2) emitState(); }
+      } else if ((outcome === 'done' || outcome === 'card') && !r.struggled) struggles = 0;
+    }
     if (outcome === 'answered-in-words' && r.quick && ACTION_KINDS.has(r.quick)) log('alfred-no-action', { req: r.id, quick: r.quick, brain: r.brain || null, model: safeModel(r.model), severity: 'warn' });
   }
 
@@ -707,6 +782,7 @@ function createAlfred(deps = {}) {
       const s = steps[i];
       if (r.cancelled) { lines.push('Stopped. (Nothing else was done.)'); break; }
       const out = await execute(s.tool, s.args, { auto });
+      if (s.tool.name === 'ask_ai' && steps.length === 1 && out.ok && !r.cancelled) return askFinish(r, s.args, out);
       if (out.image) image = out.image;
       const msg = String(out.message || (out.ok ? 'Done.' : out.error || 'It failed.')).slice(0, 700);
       if (out.ok) { lines.push(steps.length > 1 ? `✔ ${msg}` : msg); continue; }
@@ -718,6 +794,66 @@ function createAlfred(deps = {}) {
     if (!lines.length) lines.push('Done.');
     // the 🎨 "image is ready" notice already shows the picture when notices are on
     return quickReply(r, lines.join('\n'), failed ? 'error' : r.cancelled ? 'cancelled' : 'done', image && !settings.notices ? { image } : undefined);
+  }
+
+  // ------------------------------------------------------------------ 💬 ask an AI, then (maybe) change its answer
+  /** The one-click ask_ai card for a typed "get a prompt from ChatGPT … and make it …" (PR #126). */
+  function askFallback(r, ask, why, aiError) {
+    const L = registry.SITE_LABEL[ask.site] || ask.site;
+    if (why !== 'error') log('alfred-no-action', { req: r.id, quick: 'free:ask-ai', brain: r.brain, model: safeModel(r.model), severity: 'warn' });
+    r.askChange = ask.change || '';
+    const then = ask.change ? ` When ${L} answers, I'll ${ask.change}.` : ` I'll show you ${L}'s answer.`;
+    const head = why === 'error' ? `My AI didn't answer${aiError ? ` (${String(aiError).replace(/ Everything else in the app still works\.$/, '').slice(0, 200)})` : ''}, so I've set it up from what you asked.`
+      : why === 'refused' ? "My AI couldn't pick the right tool, so I've set it up from what you asked."
+        : "My AI answered only in words, so I've set it up from what you asked.";
+    return directCard(r, [{ name: 'ask_ai', args: { to: ask.site, message: ask.message } }], { fallback: true, doLabel: `💬 Ask ${L} now`, intro: `${head}${then} Press 💬 Ask ${L} now, or ✖ No.`.slice(0, 600) });
+  }
+  /** His AI changes the fetched answer the way the user asked (no tools). → { ok, text } | { ok:false, why } */
+  async function rewriteAnswer(r, L, answer, how) {
+    let cfg;
+    try { cfg = await resolveBrain(); } catch (_) { cfg = null; }
+    if (!cfg || cfg.missing) return { ok: false, why: "I don't have an AI to think with right now." };
+    r.steps += 1; r.doing = 'thinking'; r.toolTitle = null; emitState();
+    const messages = [{ role: 'system', content: REWRITE_PROMPT },
+      { role: 'user', content: `The user asked ${L} for something and wants its answer changed like this: "${cleanLine(how, 400)}".\n\n${L}'s answer:\n<<<${String(answer).slice(0, 6000)}>>>\n\nWrite the changed text now (only the text).` }];
+    let res;
+    try { res = await brainLib.next(cfg, messages, [], { paneAsk: deps.paneAsk }, { signal: r.controller.signal }); } catch (_) { res = { ok: false, kind: 'network' }; }
+    if (r.cancelled || (res && res.kind === 'cancelled')) return { ok: false, why: 'you pressed Stop.' };
+    if (!res || !res.ok) {
+      lastAi = { kind: cfg.kind, ok: false, at: now(), model: cfg.model || cfg.site || null };
+      log('alfred-ai-error', { brain: cfg.kind, code: safeName((res && (res.status ? `HTTP_${res.status}` : res.kind)) || 'error') });
+      return { ok: false, why: `${plainAiError(res, cfg).replace(/ Everything else in the app still works\.$/, '')}` };
+    }
+    lastAi = { kind: cfg.kind, ok: true, at: now(), model: cfg.model || cfg.site || null };
+    const text = replyFormat.cleanReply(res.message && res.message.content).replace(/^<<<|>>>$/g, '').trim();
+    if (!text || text.length < 2) return { ok: false, why: 'my AI sent back nothing I could use.' };
+    return { ok: true, text };
+  }
+  /** The ask_ai card said ✔: show the answer, or change it first when the user asked for that. */
+  async function askFinish(r, args, out) {
+    const L = registry.SITE_LABEL[args.to] || 'The AI';
+    const answer = String(out.reply || (out.data && out.data.reply) || '').trim();
+    if (!r.askChange) return quickReply(r, `**${L} answered:**\n\n${answer}`, 'done');
+    const rw = await rewriteAnswer(r, L, answer, r.askChange);
+    if (r.cancelled) return quickReply(r, `**${L} answered:**\n\n${answer}\n\nStopped before I changed it.`, 'cancelled');
+    if (rw.ok) { r.rewrite = 'done'; return quickReply(r, `**Here it is — ${L}'s answer, changed as you asked (${r.askChange}):**\n\n${rw.text}`, 'done'); }
+    r.rewrite = 'failed';
+    return quickReply(r, `**${L} answered:**\n\n${answer}\n\nI couldn't ${r.askChange} myself: ${rw.why} You can copy it from here, or ask ${L} to change it.`, 'done');
+  }
+  /** His AI sent back nothing usable: never silence (PR #126). */
+  function emptyAnswer(r, why) {
+    const parts = [];
+    if (r.lastAsk && r.lastAsk.text) {
+      const L = registry.SITE_LABEL[r.lastAsk.site] || 'The AI';
+      parts.push(`**${L} answered:**\n\n${r.lastAsk.text.slice(0, 6000)}`, `(My AI didn't say anything after that${r.text && CHANGE_RE.test(r.text) ? ", so I couldn't change it as you asked" : ''}.)`);
+    } else if (Array.isArray(r.results) && r.results.length) {
+      parts.push(r.results.map((x) => (x.ok ? `✔ ${x.message}` : `✖ ${x.title} didn't work: ${x.message}`)).join('\n'));
+    } else {
+      const who = r.brain === 'local' && r.model ? `my AI (${r.model})` : 'my AI';
+      const because = why === 'refused' ? `${who} kept asking for things I can't do${r.refusedWhy ? ` (${r.refusedWhy})` : ''}` : `${who} sent back an empty answer${r.tools && r.tools.length ? ' after looking things up' : ''}`;
+      parts.push(`I couldn't do that, because ${because}. Try asking again in other words${r.brain === 'local' ? ', or give me a stronger AI to think with (⚙ → His AI, or the tip below)' : ''}.`);
+    }
+    return parts.join('\n\n');
   }
 
   async function loop(r) {
@@ -757,6 +893,9 @@ function createAlfred(deps = {}) {
         lastAi = { kind: cfg.kind, ok: false, at: now(), model: cfg.model || cfg.site || null };
         log('alfred-ai-error', { brain: cfg.kind, code: safeName((res && (res.status ? `HTTP_${res.status}` : res.kind)) || 'error') });
         if (res && res.status === 404 && cfg.kind === 'local') res.installed = await installedModels(cfg.endpoint);
+        // "get a prompt from ChatGPT …" with his AI down: the ask_ai card anyway (the other AI can still answer)
+        const askNow = !r.quick && !r.tools.length && !r.carded ? askAiIntent(r.text) : null;
+        if (askNow) return askFallback(r, askNow, 'error', plainAiError(res, cfg));
         const lastMsg = history[history.length - 1];
         if (lastMsg && lastMsg.role === 'user' && !lastMsg._toolResult) history.pop(); // keep the conversation clean for next time
         const fb = await bookFallback(r, 'error', plainAiError(res, cfg)); if (fb) return fb;
@@ -767,7 +906,18 @@ function createAlfred(deps = {}) {
       if (!msg.toolCalls.length) {
         // Free text that clearly asked for a picture / a video, answered in words only (no tool this request): once
         // more with a plain instruction to use the tool; still words → a one-click "🎨 Make it now" card from the request.
-        const intent = !r.quick && !r.tools.length && !r.carded ? actionIntent(r.text) : null;
+        // PR #126: the same for "get a prompt from ChatGPT … (and make it …)": a retry, then a "💬 Ask ChatGPT now" card.
+        const fresh = !r.quick && !r.tools.length && !r.carded;
+        const ask = fresh ? askAiIntent(r.text) : null;
+        const intent = fresh && !ask ? actionIntent(r.text) : null;
+        if (ask && !r.retried && r.steps < settings.maxSteps) {
+          r.retried = true;
+          const L = registry.SITE_LABEL[ask.site];
+          log('alfred-retry', { req: r.id, intent: 'ask-ai', brain: r.brain, model: safeModel(r.model) });
+          r.nudge = `(A note from the app, not from the user.) The user asked you to get an answer from ${L}. Call the ask_ai tool NOW with to = "${ask.site}" and message = what they want ${L} to do. Its answer comes back to you; then ${ask.change ? `change it as the user asked (${ask.change}) and show the result` : 'show it to the user'}. Do not answer in words now: the app shows the user an "I will" card and nothing is sent before they press Do it.`;
+          continue;
+        }
+        if (ask) return askFallback(r, ask, 'words');
         if (intent && !r.retried && r.steps < settings.maxSteps) {
           r.retried = true;
           log('alfred-retry', { req: r.id, intent: intent.kind, brain: r.brain, model: safeModel(r.model) });
@@ -785,10 +935,16 @@ function createAlfred(deps = {}) {
         const wordsOnly = !r.tools.length;
         if (r.quick && wordsOnly) { const fb = await bookFallback(r, 'answered-in-words'); if (fb) return fb; }
         // what he says: no tool echoes, raw JSON or computer words (markdown stays: the panel formats it)
-        const textOut = replyFormat.cleanReply(msg.content) || 'Done.';
+        let textOut = replyFormat.cleanReply(msg.content);
+        // PR #126: an empty / unusable answer is never shown as nothing (or a bare "Done."): he says what happened
+        const empty = !textOut || !/[\p{L}\p{N}]/u.test(textOut);
+        if (empty) {
+          log('alfred-empty', { req: r.id, brain: r.brain, model: safeModel(r.model), steps: r.steps, tools: r.tools.length, severity: 'warn' });
+          textOut = emptyAnswer(r, 'empty');
+        }
         history.push({ role: 'assistant', content: textOut });
         trimHistory();
-        const out = reply(textOut, undefined, wordsOnly ? 'answered-in-words' : 'done');
+        const out = reply(textOut, undefined, empty ? 'empty' : wordsOnly ? 'answered-in-words' : 'done');
         // the model's own words before cleaning, for callers/tests that look at what the AI saw (never shown)
         const raw = String(msg.content || '').trim();
         if (raw && raw !== textOut) out.raw = raw;
@@ -799,9 +955,11 @@ function createAlfred(deps = {}) {
       if (native.length) history.push({ role: 'assistant', content: msg.content || '', tool_calls: native.map((c) => ({ id: c.id, type: 'function', function: { name: c.name, arguments: typeof c.args === 'string' ? c.args : JSON.stringify(c.args || {}) } })) });
       else history.push({ role: 'assistant', content: msg.content || JSON.stringify({ tool: msg.toolCalls[0].name, args: msg.toolCalls[0].args }) });
       const pending = [];
+      let refusedHere = 0; let ranHere = 0;
       for (const call of msg.toolCalls.slice(0, 6)) {
         const tool = registry.get(call.name);
         if (!tool || (tool.interpreter && !settings.interpreter)) {
+          refusedHere++; r.refusedWhy = tool ? 'Open Interpreter is turned off' : 'a tool that does not exist';
           log('alfred-refused', { req: r.id, tool: safeName(call.name), reason: tool ? 'INTERPRETER_OFF' : 'UNKNOWN_TOOL' });
           history.push(toolMessage(call, { ok: false, error: tool ? 'INTERPRETER_OFF' : 'UNKNOWN_TOOL', message: tool ? 'Open Interpreter is turned off in Alfred\'s settings.' : `There is no tool called "${safeName(call.name)}". Use only the listed tools.` }));
           continue;
@@ -816,6 +974,7 @@ function createAlfred(deps = {}) {
           v = c && c.ok ? { ok: true, args: c.args || v.args } : { ok: false, error: `${(c && c.error) || 'not allowed'}${forgiven}` };
         }
         if (!v.ok) {
+          refusedHere++; r.refusedWhy = 'the details it gave were not right';
           log('alfred-refused', { req: r.id, tool: tool.name, reason: 'BAD_ARGS', why: String(v.error || '').replace(/"[^"]*"|'[^']*'|“[^”]*”/g, '…').slice(0, 140) });
           history.push(toolMessage(call, { ok: false, error: 'BAD_ARGS', message: `The arguments for ${tool.name} were not right: ${v.error}. Call it again like this (? = optional): ${typeof registry.usage === 'function' ? registry.usage(tool) : tool.name}` }));
           continue;
@@ -823,6 +982,7 @@ function createAlfred(deps = {}) {
         if (tool.interpreter) {
           const direct = registry.directToolFor(`${v.args.code} ${v.args.why}`);
           if (direct) {
+            refusedHere++; r.refusedWhy = 'code where a direct tool exists';
             log('alfred-refused', { req: r.id, tool: tool.name, reason: 'DIRECT_TOOL_EXISTS' });
             history.push(toolMessage(call, { ok: false, error: 'DIRECT_TOOL_EXISTS', message: `Don't use run_code for this — use ${direct}.` }));
             continue;
@@ -831,12 +991,14 @@ function createAlfred(deps = {}) {
         let changes = !!tool.changes;
         if (typeof tool.dynamicChanges === 'function') { try { changes = !!(await tool.dynamicChanges(v.args, deps.ctx || {})); } catch (_) { changes = true; } }
         if (!changes) {
+          ranHere++;
           const out = await execute(tool, v.args, { readOnly: true });
           history.push(toolMessage(call, resultForAi(out)));
           if (r.cancelled) break;
           continue;
         }
         if (registry.canAllowAlways(tool, v.args) && settings.alwaysAllow[registry.allowKeyOf(tool, v.args)]) {
+          ranHere++;
           const out = await execute(tool, v.args, { auto: true });
           history.push(toolMessage(call, resultForAi(out)));
           if (r.cancelled) break;
@@ -857,6 +1019,25 @@ function createAlfred(deps = {}) {
         emitState();
         return { ok: true, type: 'confirm', card: card.public };
       }
+      // PR #126: only refused tool calls, twice: no more rounds — the one-click card for a clear request, else plain words
+      if (!pending.length && !ranHere && refusedHere && !r.cancelled) {
+        r.refusedSteps = (r.refusedSteps || 0) + 1;
+        if (r.refusedSteps >= 2) {
+          const fresh = !r.quick && !r.carded && !r.tools.length;
+          const ask = fresh ? askAiIntent(r.text) : null;
+          if (ask) return askFallback(r, ask, 'refused');
+          const intent = fresh ? actionIntent(r.text) : null;
+          if (intent) {
+            log('alfred-no-action', { req: r.id, quick: `free:${intent.kind}`, brain: r.brain, model: safeModel(r.model), severity: 'warn' });
+            return directCard(r, [{ name: intent.tool, args: { prompt: intent.subject } }], { fallback: true, doLabel: intent.kind === 'video' ? '🎬 Make it now' : '🎨 Make it now', intro: `My AI couldn't pick the right tool, so I've set it up from what you asked. Press ${intent.kind === 'video' ? '🎬' : '🎨'} Make it now, or ✖ No.` });
+          }
+          log('alfred-empty', { req: r.id, brain: r.brain, model: safeModel(r.model), steps: r.steps, refused: true, severity: 'warn' });
+          const t = emptyAnswer(r, 'refused');
+          history.push({ role: 'assistant', content: t });
+          trimHistory();
+          return reply(t, undefined, 'empty');
+        }
+      }
       // read-only results are in: let the AI continue (bounded by maxSteps)
     }
   }
@@ -876,6 +1057,8 @@ function createAlfred(deps = {}) {
     for (const s of c.steps) {
       if (c.req.cancelled) { history.push(toolMessage(s.call, { ok: false, error: 'CANCELLED', message: 'The user stopped it before this step; nothing was done.' })); continue; }
       const out = await execute(s.tool, s.args);
+      if (!Array.isArray(c.req.results)) c.req.results = [];
+      c.req.results.push({ title: s.tool.title, ok: !!out.ok, message: String(out.message || (out.ok ? 'Done.' : out.error || 'failed')).slice(0, 400) });
       history.push(toolMessage(s.call, resultForAi(out)));
     }
     return loop(c.req);
@@ -1060,4 +1243,4 @@ function createAlfred(deps = {}) {
   };
 }
 
-module.exports = { createAlfred, quickPlan, actionIntent, QUICK_KINDS, ACTION_KINDS, PICTURE_SIZES, DEFAULTS, SYSTEM_PROMPT, plainAiError, NOTICE_MAX, PERSONALITY_PRESETS, personalityPrompt, systemPromptFor, checkPersonality, PROFILE_MAX };
+module.exports = { createAlfred, quickPlan, actionIntent, askAiIntent, QUICK_KINDS, ACTION_KINDS, PICTURE_SIZES, DEFAULTS, SYSTEM_PROMPT, plainAiError, NOTICE_MAX, PERSONALITY_PRESETS, personalityPrompt, systemPromptFor, checkPersonality, PROFILE_MAX };

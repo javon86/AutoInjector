@@ -240,6 +240,14 @@ bridge to your home Wi-Fi, behind its key.
   the book's status directly when it answers without looking or doesn't answer. "Draw me a lighthouse" typed to him
   and answered in words gets one retry, then a one-click **🎨 Make it now** card. The activity log says how every
   request ended (`alfred-reply`, `alfred-no-action`), without the words.
+- **Asking the other AIs for him (PR #126):** `ask_ai` types a message into ChatGPT, Claude or Gemini (after an "I will"
+  card) and **waits for that AI's answer** (up to 3 minutes; the same proven-send + capture path as an Akọwe request),
+  so "get a prompt from ChatGPT for a dragon picture and make it more dramatic" finishes in one go: the answer comes
+  back, his AI rewrites it, he shows it. If his AI only answers in words, he retries once, then offers **💬 Ask ChatGPT
+  now**; if his AI can't rewrite, he shows the answer and says so. An AI an Akọwe request is waiting on is refused.
+  He always answers — an empty or unusable reply from his AI becomes a plain "I couldn't do that, because …". After two
+  struggles in a row with a local model, his panel offers **Use Claude (web pane) as Alfred's brain** / **Use a bigger
+  model** (only a click changes it).
 - **"I will…" cards:** before he changes anything, he shows a card saying what he will do. Nothing happens until
   you press ✔ Do it, unless you ticked "always allow" for a harmless tool. Running code and outside tool servers
   never get "always allow". He never approves your chapter drafts. He can approve a Character Forge proposal,
