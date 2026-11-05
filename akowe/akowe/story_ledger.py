@@ -48,7 +48,11 @@ END_CHARS = 1500
 TEXT_MAX = 200
 LIST_MAX = 24
 SUMMARY_LINES = 4
-SO_FAR_BUDGET = 2200
+SO_FAR_BUDGET = 2200          # the story so far: this many characters …
+SO_FAR_PER_CHAPTER = 120      # … plus this many per chapter written (PR #122) …
+SO_FAR_MAX = 8000             # … at most (the C02 prompt has the room: ~22 000 characters of brief, 32k-token web chats)
+MID_RECENT = 7                # the chapters before the last FULL_RECENT keep their first line in full
+GROUP = 5                     # oldest chapters merged into stretches of this many when space is short
 LEDGER_BUDGET = 2600
 FULL_RECENT = 3          # the last chapters before this one keep all their summary lines
 _LOCK = threading.RLock()
@@ -884,35 +888,99 @@ def _person_line(p: dict, n_next: int | None) -> str:
     return f"{p['name']}: " + ("; ".join(bits) if bits else "no change tracked") + f" (as of chapter {p.get('chapter')})"
 
 
+def so_far_budget(n_chapters: int) -> int:
+    """PR #122: the story so far grows with the book (2 200 characters + 120 per chapter written, at most
+    ``SO_FAR_MAX``): by chapter 45 it used to hold ~50 characters per chapter, and the long book lost its memory."""
+    return min(SO_FAR_MAX, SO_FAR_BUDGET + SO_FAR_PER_CHAPTER * max(0, int(n_chapters or 0)))
+
+
+def _span(nums: list) -> str:
+    nums = [n for n in nums if isinstance(n, int)]
+    if not nums:
+        return "Chapters"
+    return f"Chapters {min(nums)}–{max(nums)}" if min(nums) != max(nums) else f"Chapter {nums[0]}"
+
+
+def _size(lines: list[str]) -> int:
+    return len(json.dumps(lines, ensure_ascii=False))
+
+
 def story_so_far(entries: list[dict], checkpoint_summaries: list[dict] | None = None,
-                 budget: int = SO_FAR_BUDGET, cut: list | None = None) -> list[str]:
-    """A few lines per chapter; older chapters compressed (a checkpoint summary replaces the lines it covers).
-    ``cut``: gets a plain line when the oldest lines had to be shortened further for space (H13)."""
+                 budget: int | None = None, cut: list | None = None) -> list[str]:
+    """The story so far, in tiers (PR #122), within ``budget`` characters (default: grows with the book,
+    ``so_far_budget``):
+
+    * the last ``FULL_RECENT`` chapters: every summary line (detailed);
+    * the ``MID_RECENT`` chapters before them: their first line;
+    * older chapters: a checkpoint's summary replaces the chapters it covers (one line per stretch / act, as the
+      checkpoints run at act ends and every N chapters), the rest a short first line each.
+
+    When it is still too long, the oldest tier is compressed step by step — shorter lines, then stretches of
+    ``GROUP`` chapters merged into one line ("Chapters 6–10: … · … · …") — so EVERY chapter stays in the memory;
+    only as the very last resort are the two oldest lines merged and cut. ``cut``: gets a plain line when the oldest
+    chapters had to be shortened for space (H13)."""
     if not entries:
         return []
+    budget = so_far_budget(len(entries)) if budget is None else budget
     recent = entries[-FULL_RECENT:]
-    older = entries[:-FULL_RECENT]
-    lines: list[str] = []
+    before = entries[:-FULL_RECENT]
     covered: set = set()
+    old_rows: list[dict] = []   # {"nums": [...], "text": str, "stretch": bool}
     for cp in checkpoint_summaries or []:
-        nums = [e.get("number") for e in older if e.get("chapter_id") in set(cp.get("chapter_ids") or [])]
+        ids = set(cp.get("chapter_ids") or [])
+        nums = [e.get("number") for e in before if e.get("chapter_id") in ids]
         if nums and cp.get("summary"):
-            lines.append(f"Chapters {min(nums)}–{max(nums)}: {_clip(cp['summary'], 400)}")
-            covered |= set(cp.get("chapter_ids") or [])
+            old_rows.append({"nums": nums, "text": " ".join(str(cp["summary"]).split()), "stretch": True})
+            covered |= ids
+    rest = [e for e in before if e.get("chapter_id") not in covered]
+    mid = rest[-MID_RECENT:] if MID_RECENT else []
+    older = rest[:len(rest) - len(mid)]
     for e in older:
-        if e.get("chapter_id") in covered:
-            continue
         first = (e.get("summary") or [""])[0]
         if first:
-            lines.append(f"Chapter {e.get('number')}: {_clip(first, 160)}")
-    for e in recent:
-        s = e.get("summary") or []
-        if s:
-            lines.append(f"Chapter {e.get('number')}: " + " ".join(_clip(x, 200) for x in s))
-    if cut is not None and lines and len(json.dumps(lines, ensure_ascii=False)) > budget:
-        cut.append("story so far: the oldest chapters' lines shortened to fit")
-    while lines and len(json.dumps(lines, ensure_ascii=False)) > budget:
-        if len(lines) > 2:  # merge the two oldest lines into one short line
+            old_rows.append({"nums": [e.get("number")], "text": " ".join(str(first).split()), "stretch": False})
+    old_rows.sort(key=lambda r: min([n for n in r["nums"] if isinstance(n, int)] or [0]))
+    mid_lines = [f"Chapter {e.get('number')}: {_clip((e.get('summary') or [''])[0], 200)}"
+                 for e in mid if (e.get("summary") or [""])[0]]
+    recent_lines = [f"Chapter {e.get('number')}: " + " ".join(_clip(x, 200) for x in e.get("summary") or [])
+                    for e in recent if e.get("summary")]
+
+    def render(rows, old_n, stretch_n):
+        return [f"{_span(r['nums'])}: {_clip(r['text'], stretch_n if r['stretch'] else old_n)}" for r in rows]
+
+    def fits(rows, old_n, stretch_n):
+        return _size(render(rows, old_n, stretch_n) + mid_lines + recent_lines) <= budget
+
+    shortened = False
+    rows, old_n, stretch_n = old_rows, 160, 400
+    for o_n, s_n in ((160, 400), (110, 300), (80, 220)):
+        old_n, stretch_n = o_n, s_n
+        if fits(rows, old_n, stretch_n):
+            break
+        shortened = True
+    while not fits(rows, old_n, stretch_n):
+        # merge the oldest run of single chapters into one stretch line ("Chapters 1–5: a · b · c")
+        singles = [i for i, r in enumerate(rows) if not r["stretch"]]
+        if len(singles) < 2:
+            break
+        i = singles[0]
+        j = i
+        while j + 1 < len(rows) and not rows[j + 1]["stretch"] and j + 1 - i < GROUP:
+            j += 1
+        if j == i:
+            rows[i] = dict(rows[i], stretch=True)
+            continue
+        grp = rows[i:j + 1]
+        rows[i:j + 1] = [{"nums": [n for r in grp for n in r["nums"]], "stretch": True,
+                          "text": " · ".join(_clip(r["text"], max(40, 220 // len(grp))) for r in grp)}]
+        shortened = True
+    lines = render(rows, old_n, stretch_n) + mid_lines + recent_lines
+    if _size(lines) > budget:
+        shortened = True
+        mid_lines = [_clip(x, 120) for x in mid_lines]
+        lines = render(rows, old_n, stretch_n) + mid_lines + recent_lines
+    while lines and _size(lines) > budget:  # the last resort (a tiny budget): merge the two oldest lines
+        if len(lines) > 2:
             a, b = lines[0], lines[1]
             lines[0:2] = [_clip(a, 120) + " … " + _clip(b.split(": ", 1)[-1], 100)]
             if len(lines[0]) <= 230 and len(lines) <= 2:
@@ -920,6 +988,8 @@ def story_so_far(entries: list[dict], checkpoint_summaries: list[dict] | None = 
         else:
             lines = [_clip(x, 300) for x in lines]
             break
+    if cut is not None and shortened:
+        cut.append("story so far: the oldest chapters' lines shortened to fit")
     return lines
 
 

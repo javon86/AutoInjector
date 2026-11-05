@@ -728,6 +728,13 @@ class WritersRoomService:
         body = body if isinstance(body, dict) else {}
         from .assist import AssistService  # noqa: PLC0415
         self.app.assist._access(principal, pid, branch)
+        live = self._live_run(pid)
+        if live is not None:
+            # PR #122: the room asks every AI at once; during a ⚡ run of the same book it would take the run's AIs
+            # (the run would wait, then pause) and its pick could land on the chapter being written
+            raise AkoweError("VERSION_CONFLICT", "/room", "A book is being made with ⚡ right now, and the writers' room "
+                             "would take its AIs. The room can meet when the run pauses or finishes (or turn on "
+                             "\"Use the writers' room\" for the next run).", status="REJECTED")
         mode = "solo" if body.get("solo") is True else "room"
         slot = AssistService._check_slot(body.get("slot_id"))
         round_of = body.get("round_of")
@@ -749,6 +756,12 @@ class WritersRoomService:
         threading.Thread(target=self._thread, args=(job, target, mode, slot, round_of), name="akowe-room",
                          daemon=True).start()
         return self.public(job)
+
+    def _live_run(self, pid):
+        try:
+            return next((r for r in self.app.autobook.active() if r.get("project_id") == pid), None)
+        except Exception:  # noqa: BLE001
+            return None
 
     @staticmethod
     def public(job) -> dict:

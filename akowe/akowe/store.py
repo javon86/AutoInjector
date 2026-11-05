@@ -8,6 +8,7 @@ content bytes (section 10), so ACCEPT/LOCK never change a record's content hash.
 from __future__ import annotations
 
 import json
+import re
 import logging
 import os
 import shutil
@@ -291,6 +292,31 @@ class CrashInjected(RuntimeError):
     """Raised by fault-injection hooks in tests to simulate a crash mid-commit."""
 
 
+
+_ASSET_NAME_RE = re.compile(r"^[0-9a-f]{64}\.bin$")
+
+
+def _linkable_assets(prev_dir) -> dict:
+    """{asset file name: path} of an earlier backup's assets that may be hard-linked: the name is a content address
+    (``<sha256>.bin``) and the earlier backup's manifest says its copy hashed to exactly that. Never raises."""
+    if not prev_dir:
+        return {}
+    try:
+        prev = Path(prev_dir)
+        manifest = json.loads((prev / "manifest.json").read_text())
+        assets = manifest.get("assets") if isinstance(manifest, dict) else None
+        if not isinstance(assets, dict):
+            return {}
+        out = {}
+        for name, digest in assets.items():
+            if isinstance(name, str) and _ASSET_NAME_RE.match(name) and digest == name[:-4]:
+                p = prev / "assets" / name
+                if p.is_file():
+                    out[name] = p
+        return out
+    except (OSError, ValueError):
+        return {}
+
 class Store:
     def __init__(self, data_dir: str | os.PathLike):
         self.data_dir = Path(data_dir)
@@ -523,12 +549,18 @@ class Store:
         return {r["key"]: json.loads(r["value"]) for r in rows}
 
     # ------------------------------------------------------------------ backup / restore
-    def backup(self, dest_dir: str | os.PathLike) -> dict:
+    def backup(self, dest_dir: str | os.PathLike, link_from: str | os.PathLike | None = None) -> dict:
         """Transaction-consistent snapshot of DB + asset bytes with a SHA-256 manifest, fsynced to disk.
 
         Credentials live in the secret store (outside the DB) and are excluded. Half-written upload temp files are
         never copied. The manifest records the hash of each COPY; ``verify_backup`` additionally compares every
         asset with the hash its record promises, so a backup of a damaged asset is never called verified.
+
+        PR #122: ``link_from`` (the newest earlier verified backup): an asset that backup already holds with the right
+        bytes (assets are content-addressed: ``<sha256>.bin``, and its copy there must still hash to that name) is
+        HARD-LINKED instead of copied — no second copy on the disk. Where a link is impossible (another volume, a file
+        system without hard links, Windows refusing it) the file is copied as before. Every backup stays a complete
+        folder on its own; removing an older backup never touches a newer one's files.
         """
         dest = Path(dest_dir)
         dest.mkdir(parents=True, exist_ok=True)
@@ -542,10 +574,24 @@ class Store:
         fsync_file(db_copy)
         (dest / "assets").mkdir(exist_ok=True)
         files = {}
+        prev = _linkable_assets(link_from)
+        self.last_backup_links = 0
         for f in sorted(self.asset_dir.iterdir()):
             if TMP_MARK in f.name or not f.is_file():
                 continue
             copy = dest / "assets" / f.name
+            src_prev = prev.get(f.name)
+            if src_prev is not None:
+                try:
+                    os.link(src_prev, copy)
+                    files[f.name] = f.name[:-4]  # verified: its bytes hash to its own (content-addressed) name
+                    self.last_backup_links += 1
+                    continue
+                except OSError:
+                    try:
+                        copy.unlink(missing_ok=True)
+                    except OSError:
+                        pass
             shutil.copy2(f, copy)
             fsync_file(copy)
             files[f.name] = sha256_bytes(copy.read_bytes())
@@ -557,6 +603,8 @@ class Store:
         fsync_dir(dest)
         fsync_dir(dest.parent)
         return manifest
+
+    last_backup_links = 0
 
     @staticmethod
     def schema_problem(src_dir: str | os.PathLike) -> str | None:

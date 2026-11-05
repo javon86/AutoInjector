@@ -7910,7 +7910,7 @@ function initMakeBook() {
  * shows ✔ "Done: …" for a few seconds and fades. Nothing at work: the strip takes no space. The ⚡ chip in the top bar
  * still says how far the whole run is (steps); the strip says what each AI is doing inside it. */
 const AIA = { rows: [], offset: 0, timer: null, tick: null, seen: new Map(), els: new Map(), busy: 0 };
-const AIA_STAGE_ICON = { queued: '⏳', answering: '✍', checking: '🔎', busy_wait: '⏸' };
+const AIA_STAGE_ICON = { queued: '⏳', answering: '✍', checking: '🔎', busy_wait: '⏸', limit_wait: '🕓' };
 function aiaSlotNo(slot) { const m = /AI-(\d)/.exec(slot || ''); return m ? m[1] : '0'; }
 function aiaClock(s) {
   s = Math.max(0, Math.floor(s));
@@ -7924,6 +7924,7 @@ function aiaElapsed(r) {
 }
 function aiaStage(r) {
   if (r.state === 'done') return r.outcome_words || 'Done';
+  if (r.stage === 'limit_wait' && r.wait_message) return r.wait_message;  // ⏳ PR #122: all AIs at their usage limits
   if (r.stage === 'busy_wait') {
     const left = r.retry_at_ms ? Math.max(0, Math.ceil((r.retry_at_ms - Date.now()) / 1000)) : r.retry_in_s;
     return `${r.stage_words} (${left == null ? 'asking again soon' : `${left} s left`})`;
@@ -8110,6 +8111,15 @@ function checkersField(prefix) {
     h('p', { class: 'hint', id: `${id}-hint` }, 'The AIs look for mistakes and drift — a healed injury coming back, a character acting out of character, a wrong name or day, a chapter straying from the plan. With all of them, each chapter is reviewed by both AIs that did not write it and then checked by every AI; every 5 chapters (the checkpoint) every AI reads those chapters in full and reviews them. A problem two AIs agree on is fixed. More AIs catch more but take more AI time: about 3 to 5 more AI answers per chapter with three AIs. One AI = the old way.'));
   return { el, sel, apply(body) { if (sel.value && sel.value !== 'all') body.checkers = sel.value; } };
 }
+/** PR #122 "When only one AI works" (run setting single_ai): continue (default) / wait / ask */
+function singleAiField(prefix) {
+  const id = `${prefix}-single-ai`;
+  const sel = h('select', { id, 'data-testid': id, 'aria-describedby': `${id}-hint` },
+    [['continue', 'Keep going — I check those chapters later (recommended)'], ['wait', 'Wait for a second AI'], ['ask', 'Stop and ask me']].map(([v, l]) => h('option', { value: v, selected: v === 'continue' }, l)));
+  const el = h('div', { class: 'field' }, h('label', { for: id }, 'When only one AI works'), sel,
+    h('p', { class: 'hint', id: `${id}-hint` }, 'Normally a different AI checks every draft. If the others are logged out or at their usage limits, the one AI left can only check its own writing. Keep going (recommended): the book goes on and each such chapter is listed as “needs your check later” on the book’s home page and in the book report — nothing is published without you. Wait: Akọwe waits (up to the usage-limit time in Settings) for a second AI to check it. Stop and ask me: the run pauses at each such draft.'));
+  return { el, sel, apply(body) { if (sel.value && sel.value !== 'continue') body.single_ai = sel.value; } };
+}
 async function renderMakeSetup() {
   const fields = {};
   const err = h('div', { 'aria-live': 'polite' });
@@ -8131,6 +8141,9 @@ async function renderMakeSetup() {
   const wr = WR.makeSetupSwitch(s7c());  // 🗳 Use the writers' room for the big twists (writers_room.py), off by default
   const ck = checkersField('mb');  // 🔎 PR #117: how many AIs check for mistakes (all by default)
   fields.checkers = ck.sel;
+  const one = singleAiField('mb');  // PR #122: when only one AI works (keep going by default)
+  ck.el.appendChild(one.el);
+  fields.single_ai = one.sel;
   fields.length = lengthBox.querySelector('input');
   const startAll = h('button', { type: 'button', class: 'primary big mab-go', 'data-testid': 'mb-start-auto' }, '⚡ Start — let the AI choose everything');
   const startSet = h('button', { type: 'submit', class: 'big', 'data-testid': 'mb-start' }, '⚡ Start with these settings');
@@ -8172,6 +8185,7 @@ async function renderMakeSetup() {
     fb.apply(body);  // 📖 the whole Book Bible before chapter one (only when switched on)
     wr.apply(body);  // 🗳 the writers' room for the big twists (only when switched on)
     ck.apply(body);  // 🔎 how many AIs check for mistakes (sent only when not the default)
+    one.apply(body);  // PR #122: when only one AI works (sent only when not the default)
     startAll.disabled = startSet.disabled = true;
     err.appendChild(loadingState('Checking your AIs…'));
     if (!(await withAiCheck(body, 'the book'))) { clear(err); startAll.disabled = startSet.disabled = false; return; }
@@ -8272,7 +8286,7 @@ function whoRead(u, who, at) {
 }
 function renderRun() {
   const r = MB.run; if (!r || !MB.dialog) return;
-  const sig = JSON.stringify([r.status, r.phase, r.current, r.problem && r.problem.code, (r.waiting || {}).retry_at, r.steps.map(s => [s.state, s.message, s.review_note, s.editor_note, (s.items || []).map(i => [i.state, i.editor, i.scenes, i.phase, i.note, i.planned, i.length, i.continuity, i.memory]), s.planned_note, s.checkpoints]), (r.files || []).length, r.ais, r.ai_alerts, r.review_summary, r.editor_summary, r.planned_summary, r.eta, r.report, r.save, r.costs && [r.costs.calls, r.costs.ais]]);
+  const sig = JSON.stringify([r.status, r.phase, r.current, r.problem && r.problem.code, (r.waiting || {}).retry_at, r.steps.map(s => [s.state, s.message, s.review_note, s.editor_note, (s.items || []).map(i => [i.state, i.editor, i.scenes, i.phase, i.note, i.planned, i.length, i.continuity, i.memory]), s.planned_note, s.checkpoints]), (r.files || []).length, r.ais, r.ai_alerts, r.review_summary, r.editor_summary, r.planned_summary, r.eta, r.report, r.save, r.costs && [r.costs.calls, r.costs.ais], r.check_later, (r.waiting || {}).message]);
   if (sig === MB.sig && MB.dialog.querySelector('.mb-steps')) { updateRunClocks(); return; }
   MB.sig = sig;
   const w = r.state === 'replaced' ? ['↪', 'Replaced by a newer run', 'b-muted'] : r.state === 'interrupted' ? RUN_WORD.interrupted
@@ -8287,7 +8301,8 @@ function renderRun() {
     h('progress', { class: 'mb-bar', max: String(r.steps.length), value: String(done), 'aria-label': `${done} of ${r.steps.length} steps done` }));
   const phase = h('p', { class: `mb-phase ${r.status}`, 'aria-live': 'polite' },
     ['running', 'queued'].includes(r.status) ? h('span', { class: 'spinner', 'aria-hidden': 'true' }) : null, ' ',
-    r.waiting ? [h('strong', null, r.waiting.message.replace(/ — retrying in \d+ s$/, '')), ' — ', h('span', { class: 'mb-wait-in' }, `retrying in ${r.waiting.retry_in_s} s`)] : r.phase);
+    r.waiting ? (r.waiting.kind ? [h('strong', { 'data-testid': 'mb-limit-wait' }, r.waiting.message)]  // ⏳ PR #122: usage limits / a second AI: the plain time it goes on
+      : [h('strong', null, r.waiting.message.replace(/ — retrying in \d+ s$/, '')), ' — ', h('span', { class: 'mb-wait-in' }, `retrying in ${r.waiting.retry_in_s} s`)]) : r.phase);
   const ol = h('ol', { class: 'mb-steps', 'aria-label': 'Steps of this run' });
   for (const s of r.steps) {
     const icon = (s.state === 'running' && r.status === 'waiting') ? '⏳' : (STEP_ICON[s.state] || '○');
@@ -8374,6 +8389,10 @@ function renderRun() {
     ? h('p', { class: 'words-warn mb-indep', role: 'note', 'data-testid': 'mb-not-independent' }, h('span', { 'aria-hidden': 'true' }, '⚠️ '),
       rs.same_ai ? `${NOT_INDEPENDENT} (${rs.same_ai} of ${rs.same_ai + (rs.independent || 0)} reviews so far).` : `Only ${working[0].name} works right now, so it will review its own writing: reviews are not independent (the same AI writes and reviews).`,
       h('span', { class: 'small' }, ' When another AI works again, it reviews instead.')) : null;
+  if (doneBox && (r.check_later || []).length) {  // PR #122: approved by the one working AI alone — the author checks them
+    doneBox.appendChild(h('p', { class: 'words-warn', 'data-testid': 'mb-check-later' }, h('span', { 'aria-hidden': 'true' }, '⚠️ '),
+      `Needs your check later (only one AI was working, so it checked its own writing): ${r.check_later.join(', ')}. They are also listed on the book's home page.`));
+  }
   if (doneBox && (rs.independent || rs.same_ai)) {
     doneBox.appendChild(h('p', { class: rs.same_ai ? 'words-warn' : 'small', 'data-testid': 'mb-review-summary' }, rs.same_ai ? h('span', { 'aria-hidden': 'true' }, '⚠️ ') : '🧐 ',
       `AI reviews: ${rs.independent || 0} by a different AI than the writer` + (rs.same_ai ? `, ${rs.same_ai} by the same AI. ${NOT_INDEPENDENT}.` : '.')));
@@ -9257,6 +9276,8 @@ function booksFolderCard() {
         cur.custom ? h('button', { type: 'button', class: 'small', onclick: () => save({ path: '' }) }, '↩ Use the default folder') : null,
         cur.local ? folderButton(cur.path, true) : h('button', { type: 'button', class: 'small', onclick: () => copyText(cur.path, 'Folder path copied') }, '📋 Copy the folder path')),
       cur.writable ? h('p', { class: 'small', 'data-testid': 'bf-ok' }, '✔ Akọwe can write there.') : h('div', null, problemBox(cur.problem || { code: 'SAVE_FOLDER_NOT_WRITABLE' })),
+      cur.synced ? h('div', { class: 'notice small', role: 'note', 'data-testid': 'bf-synced' }, '⚠️ ', cur.synced.warning, ' ',  // PR #122: OneDrive / Dropbox / Google Drive
+        cur.synced.suggested ? h('button', { type: 'button', class: 'small', 'data-testid': 'bf-use-unsynced', onclick: () => save({ path: cur.synced.suggested }) }, `Use ${cur.synced.suggested}`) : null) : null,
       h('div', { class: 'field row' }, auto, h('label', { for: 'bf-auto' }, ' Save books automatically (on by default): after each finished step, when a book is finished, and every 10 minutes when a book changed'),
         h('button', { type: 'button', class: 'small', onclick: () => save({ auto_save: auto.checked }) }, 'Save')),
       cur.local ? null : h('p', { class: 'small muted' }, '⚠️ You use Akọwe from another device: folders can only be opened on the computer Akọwe runs on.'),
@@ -9585,23 +9606,29 @@ function restoreBackup(b, reload) {
 function retryCard() {
   const box = h('div');
   const card = h('section', { class: 'card', 'aria-labelledby': 'rt-h' }, h('h2', { id: 'rt-h' }, '⏳ When the AI is busy'),
-    h('p', { class: 'small' }, 'If the AI is busy or cannot be reached, Akọwe waits and tries again on its own, and shows “waiting for Claude (busy) — retrying in 30 s”. A slow answer (time-out) is never retried automatically, because the first answer may still arrive; you press 🔁 Try again.'), box);
+    h('p', { class: 'small' }, 'If the AI is busy or cannot be reached, Akọwe waits and tries again on its own, and shows “waiting for Claude (busy) — retrying in 30 s”. A slow answer (time-out) is first collected when it arrives late (never typed twice), then the work moves to another AI that works — or asks the same AI once more after a minute — and only then waits for you. When every AI has hit its usage limit, Akọwe waits for a limit to reset and goes on by itself.'), box);
   (async () => {
     let cur;
     try { cur = await api('GET', '/settings/ai-retry'); } catch (e) { box.appendChild(problemBox(toProblem(e, { step: 'Settings › When the AI is busy' }))); return; }
     const on = h('input', { type: 'checkbox', id: 'rt-on', checked: cur.enabled });
     const delays = h('input', { type: 'text', id: 'rt-delays', value: cur.delays_s.join(', '), 'aria-describedby': 'rt-d-h' });
     const total = h('input', { type: 'number', id: 'rt-total', min: '10', max: '3600', value: String(cur.max_total_s), class: 'wz-num' });
+    // ⏳ PR #122: every AI at its usage limit — wait this many hours for one to reset (0 = pause as before)
+    const limitH = h('input', { type: 'number', id: 'rt-limit', min: '0', max: '48', step: '0.5', value: String(Math.round(((cur.limit_wait_s ?? 21600) / 3600) * 10) / 10), class: 'wz-num', 'aria-describedby': 'rt-limit-h' });
     const save = h('button', { type: 'button', class: 'small primary', onclick: async () => {
       clearFieldProblems(card);
       const ds = delays.value.split(/[,\s]+/).filter(Boolean).map(x => parseInt(x, 10));
       if (ds.some(x => !Number.isFinite(x))) { markFieldProblem(delays, { code: 'INVALID_INPUT', message: 'Whole numbers of seconds, separated by commas.' }, { step: 'Settings › When the AI is busy', field: 'Waiting times' }); return; }
-      try { await api('PUT', '/settings/ai-retry', { body: { enabled: on.checked, delays_s: ds, max_total_s: parseInt(total.value, 10) } }); toast('Saved'); }
-      catch (e) { const rest = showFieldErrors(e, { delays_s: delays, max_total_s: total, enabled: on }, { step: 'Settings › When the AI is busy' }); if (rest.length) box.appendChild(problemBox(e)); }
+      const lh = parseFloat(limitH.value);
+      try { await api('PUT', '/settings/ai-retry', { body: { enabled: on.checked, delays_s: ds, max_total_s: parseInt(total.value, 10), limit_wait_s: Math.round((Number.isFinite(lh) ? lh : 6) * 3600), limit_check_s: cur.limit_check_s || 300 } }); toast('Saved'); }
+      catch (e) { const rest = showFieldErrors(e, { delays_s: delays, max_total_s: total, enabled: on, limit_wait_s: limitH }, { step: 'Settings › When the AI is busy' }); if (rest.length) box.appendChild(problemBox(e)); }
     } }, 'Save');
     put(box, h('div', { class: 'check-row field' }, on, h('label', { for: 'rt-on' }, 'Wait and retry when the AI is busy')),
       h('div', { class: 'grid-2' }, h('div', { class: 'field' }, h('label', { for: 'rt-delays' }, 'Waiting times (seconds)'), delays, h('span', { class: 'hint', id: 'rt-d-h' }, 'For example 15, 30, 60, 120 — the last one repeats.')),
-        h('div', { class: 'field' }, h('label', { for: 'rt-total' }, 'Give up after (seconds)'), total)), h('div', { class: 'row' }, save));
+        h('div', { class: 'field' }, h('label', { for: 'rt-total' }, 'Give up after (seconds)'), total)),
+      h('div', { class: 'field' }, h('label', { for: 'rt-limit' }, 'When every AI hit its usage limit, wait up to (hours)'), limitH,
+        h('span', { class: 'hint', id: 'rt-limit-h' }, 'Default 6. Akọwe checks every few minutes (or at the reset time the AI showed) and goes on by itself as soon as one AI works again. 0 = stop and wait for you after the time above, as before.')),
+      h('div', { class: 'row' }, save));
   })();
   return card;
 }

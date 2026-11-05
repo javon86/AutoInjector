@@ -137,6 +137,18 @@ def chapter_plan(prof: dict, n_chapters: int | None = None, store=None, cfg: dic
             "scene_by_scene": target > per_call, "expand_rounds": int(cfg["expand_rounds"])}
 
 
+def calls_per_chapter(plan: dict) -> int:
+    """PR #122: how many AI calls writing one chapter takes at most (scene by scene: one per scene, at least 2 — as
+    long_chapter.py splits it — plus the continuation rounds). The C02 request's deadline is scaled by it."""
+    plan = plan or {}
+    calls = 1
+    if plan.get("scene_by_scene"):
+        target = int(plan.get("target_words") or 0)
+        per = max(1, int(plan.get("per_call_words") or 2500))
+        calls = max(2, int(plan.get("scenes") or 0), math.ceil(target / per))
+    return calls + max(0, int(plan.get("expand_rounds") or 0))
+
+
 def rule(plan: dict) -> str:
     scenes = f", {plan['scenes']} scenes of about {plan['words_per_scene']} words each" if plan.get("scenes") else ""
     return RULE.format(target=f"{plan['target_words']:,}", label=plan["label"].lower(),

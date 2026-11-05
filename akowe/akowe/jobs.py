@@ -12,7 +12,11 @@ to reports, the journal or diagnostics.
 RetryPolicy / wait_and_retry: when an AI call answers UPSTREAM_UNAVAILABLE, RATE_LIMITED or "site busy", a job
 does not fail at once; it waits (default 15 s, 30 s, 60 s, 120 s, 120 s ... up to about 10 minutes in total,
 configurable in the ``ai_retry`` setting) and tries again, showing "waiting for Claude (busy) - retrying in 30 s".
-TIMEOUT is never retried automatically: an ambiguous generation is the author's decision (contract rule).
+TIMEOUT is never retried here: an ambiguous generation is the author's decision (contract rule). (PR #122: the
+providers already collected a late web answer under its own request id and gave the call to another AI, or asked the
+one AI again when the bridge said that is safe, before a TIMEOUT reaches this point.) When EVERY AI is at its usage
+limit (usage_limits.py) the wait is a separate, much longer one (``limit_wait_s``, default 6 h), and the work goes on by
+itself once a limit resets.
 When a web site showed its own error notice instead of an answer (AutoInjector 503 SITE_ERROR, which carries
 retry_after_s), the wait starts at that hint and doubles: 30 s, 60 s, 120 s ... (RetryPolicy.delay_for).
 """
@@ -24,7 +28,7 @@ import threading
 import time
 from datetime import datetime, timezone
 
-from . import ai_activity
+from . import ai_activity, usage_limits
 from .errors import AkoweError
 
 log = logging.getLogger("akowe.jobs")
@@ -38,7 +42,10 @@ BUSY_CODES = ("UPSTREAM_UNAVAILABLE", "RATE_LIMITED")
 # for at most this long (akowe-bridge.js LATE_WINDOW_MAX_MS); meanwhile other requests to the site get
 # 409 SITE_BUSY (-> RATE_LIMITED here). The default busy-retry budget is twice that, so they still get their turn.
 BRIDGE_LATE_WINDOW_S = 300
-DEFAULT_RETRY = {"enabled": True, "delays_s": [15, 30, 60, 120], "max_total_s": 2 * BRIDGE_LATE_WINDOW_S}
+# ⏳ PR #122: when EVERY AI is at its usage limit the work waits much longer (default 6 h, checking every 5 min or at
+# the reset time the bridge gave) and goes on by itself; 0 = off (pause after max_total_s, as before).
+DEFAULT_RETRY = {"enabled": True, "delays_s": [15, 30, 60, 120], "max_total_s": 2 * BRIDGE_LATE_WINDOW_S,
+                 "limit_wait_s": usage_limits.DEFAULT_WAIT_S, "limit_check_s": usage_limits.DEFAULT_CHECK_S}
 
 
 def now_iso() -> str:
@@ -64,8 +71,12 @@ def busy_code(errors: list) -> str | None:
 
 
 class RetryPolicy:
-    def __init__(self, delays_s=None, max_total_s=None, enabled=True, sleep=None):
+    def __init__(self, delays_s=None, max_total_s=None, enabled=True, sleep=None, limit_wait_s=None,
+                 limit_check_s=None):
         d = list(delays_s if delays_s is not None else DEFAULT_RETRY["delays_s"])
+        self.limit_wait_s = max(0.0, float(limit_wait_s if limit_wait_s is not None else DEFAULT_RETRY["limit_wait_s"]))
+        self.limit_check_s = max(0.01, float(limit_check_s if limit_check_s is not None
+                                             else DEFAULT_RETRY["limit_check_s"]))
         self.delays_s = [max(0.0, float(x)) for x in d if isinstance(x, (int, float)) and not isinstance(x, bool)]
         self.max_total_s = float(max_total_s if max_total_s is not None else DEFAULT_RETRY["max_total_s"])
         self.enabled = bool(enabled) and bool(self.delays_s)
@@ -79,7 +90,8 @@ class RetryPolicy:
             s = {}
         cfg = dict(DEFAULT_RETRY, **{k: v for k, v in s.items() if k in DEFAULT_RETRY}) if isinstance(s, dict) else \
             dict(DEFAULT_RETRY)
-        return cls(cfg.get("delays_s"), cfg.get("max_total_s"), cfg.get("enabled", True))
+        return cls(cfg.get("delays_s"), cfg.get("max_total_s"), cfg.get("enabled", True),
+                   limit_wait_s=cfg.get("limit_wait_s"), limit_check_s=cfg.get("limit_check_s"))
 
     def delay(self, attempt: int) -> float:
         """Delay before retry number ``attempt`` (1-based); the last delay repeats."""
@@ -120,6 +132,18 @@ def clean_retry_settings(body) -> dict:
             raise AkoweError("INVALID_INPUT", "/max_total_s", "the total waiting time is 10 to 3600 seconds",
                                  status="REJECTED")
         out["max_total_s"] = m
+    if "limit_wait_s" in body:
+        m = body["limit_wait_s"]
+        if not isinstance(m, int) or isinstance(m, bool) or not 0 <= m <= 48 * 3600:
+            raise AkoweError("INVALID_INPUT", "/limit_wait_s", "waiting for usage limits to reset: 0 (off) to 48 hours, "
+                             "in seconds", status="REJECTED")
+        out["limit_wait_s"] = m
+    if "limit_check_s" in body:
+        m = body["limit_check_s"]
+        if not isinstance(m, int) or isinstance(m, bool) or not 60 <= m <= 3600:
+            raise AkoweError("INVALID_INPUT", "/limit_check_s", "how often to check the usage limits: 60 to 3600 "
+                             "seconds", status="REJECTED")
+        out["limit_check_s"] = m
     return out
 
 
@@ -138,6 +162,7 @@ def wait_and_retry(fn, *, policy: RetryPolicy, check=None, on_wait=None, who: st
     on_wait(info): called with {"code", "attempt", "retry_in_s", "retry_at", "message"} before each wait and with
     None when the call is tried again."""
     waited = 0.0
+    limit_waited = 0.0
     attempt = 0
     while True:
         try:
@@ -145,6 +170,11 @@ def wait_and_retry(fn, *, policy: RetryPolicy, check=None, on_wait=None, who: st
         except AkoweError as exc:
             if not policy.enabled or not is_busy_error(exc):
                 raise
+            lim = usage_limits.of_error(exc) if policy.limit_wait_s > 0 else None
+            if lim is not None:
+                # ⏳ every AI is at its usage limit: wait (long) for one to reset, then go on by itself
+                limit_waited = _limit_wait(exc, lim, policy, limit_waited, check, on_wait)
+                continue
             attempt += 1
             delay = policy.delay_for(attempt, exc)
             if waited + delay > policy.max_total_s:
@@ -173,6 +203,48 @@ def wait_and_retry(fn, *, policy: RetryPolicy, check=None, on_wait=None, who: st
             ai_activity.note_wait(None)
             if on_wait:
                 on_wait(None)
+
+
+def _limit_wait(exc, lim: dict, policy: RetryPolicy, limit_waited: float, check, on_wait) -> float:
+    """One wait while every AI is at its usage limit. Returns the new total; raises (plain words) once the whole
+    waiting time (``policy.limit_wait_s``) is used up."""
+    now = time.time()
+    left = policy.limit_wait_s - limit_waited
+    reset_at = lim.get("reset_at")
+    reset_known = isinstance(reset_at, (int, float)) and reset_at > now
+    delay = (reset_at - now + 15.0) if reset_known else policy.limit_check_s
+    if left <= 0 or (reset_known and delay > left + policy.limit_check_s):
+        hours = policy.limit_wait_s / 3600.0
+        raise AkoweError(exc.code, exc.errors[0].get("path") or "",
+                         f"All AIs stayed at their usage limits for {hours:.1f} h, so Akọwe stopped waiting. Press "
+                         "🔁 Try again when one of them works again (or raise the waiting time in Settings › When the "
+                         "AI is busy).", status=exc.status) from exc
+    delay = max(0.01, min(delay, left))
+    nxt = now + delay
+    info = {"code": exc.code, "kind": "usage_limit", "attempt": 0, "retry_in_s": int(delay),
+            "retry_at": datetime.fromtimestamp(nxt, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "resume_at": datetime.fromtimestamp(nxt, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "limited": lim.get("names") or [],
+            "message": usage_limits.message(nxt, reset_known=reset_known,
+                                            until=None if reset_known else now + left)}
+    log.info("every AI is at its usage limit; waiting %.0fs (waited %.0fs of %.0fs)", delay, limit_waited,
+             policy.limit_wait_s)
+    ai_activity.note_wait(info)
+    if on_wait:
+        on_wait(info)
+    remaining = delay
+    while remaining > 0:
+        if check:
+            check()
+        chunk = min(0.5, remaining)
+        policy.sleep(chunk)
+        remaining -= chunk
+    if check:
+        check()
+    ai_activity.note_wait(None)
+    if on_wait:
+        on_wait(None)
+    return limit_waited + delay
 
 
 class JobStore:

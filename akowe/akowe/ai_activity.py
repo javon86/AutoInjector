@@ -13,6 +13,8 @@ book, and its stage:
 * ``answering``   – the AI is answering
 * ``checking``    – Akọwe is checking the answer
 * ``busy_wait``   – waiting after a busy site (``retry_at`` says when it asks again)
+* ``limit_wait``  – every AI is at its usage limit: waiting for one to reset (``wait_message`` says until when,
+  in plain words; usage_limits.py)
 
 When the work ends the row says ✔ done / ✖ failed / ⏳ timed out / ⚠ paused – needs you / ■ stopped for
 ``KEEP_S`` seconds, then disappears (sooner when that AI starts something new: one row per AI). Nothing here is saved, and no prompt or answer text is ever kept: titles only.
@@ -33,6 +35,7 @@ STAGE_WORDS = {
     "answering": "AI is answering",
     "checking": "Checking the answer",
     "busy_wait": "Waiting after a busy site",
+    "limit_wait": "All AIs hit their usage limits — waiting",
 }
 OUTCOMES = {  # outcome -> (icon, words)
     "done": ("✔", "Done"),
@@ -192,8 +195,8 @@ class Registry:
         with self._lock:
             e = self._live.get(key)
             if info is None:
-                if e is not None and e["stage"] == "busy_wait":
-                    e.update(stage="queued", stage_since=self.clock(), retry_at=None)
+                if e is not None and e["stage"] in ("busy_wait", "limit_wait"):
+                    e.update(stage="queued", stage_since=self.clock(), retry_at=None, wait_message=None)
                 return
             if not ctx.get("_scope"):
                 return  # unnamed work has no row between its calls (nothing would end that row)
@@ -203,7 +206,9 @@ class Registry:
                 secs = float(info.get("retry_in_s") or 0)
             except (TypeError, ValueError):
                 secs = 0.0
-            e.update(stage="busy_wait", stage_since=self.clock(), retry_at=self.clock() + secs)
+            limit = info.get("kind") == "usage_limit"
+            e.update(stage="limit_wait" if limit else "busy_wait", stage_since=self.clock(),
+                     retry_at=self.clock() + secs, wait_message=str(info.get("message") or "")[:300] if limit else None)
 
     def scope_ended(self, scope: int, exc: BaseException | None) -> None:
         key = threading.get_ident()
@@ -265,6 +270,8 @@ def _public(e: dict, now: float, keep_s: float | None = None) -> dict:
     out["started_at"] = _iso(e["started"])
     out["elapsed_s"] = round(((finished or now) - e["started"]), 1)
     out["retry_in_s"] = max(0, int(round(e["retry_at"] - now))) if e.get("retry_at") and not finished else None
+    if e.get("wait_message") and not finished:
+        out["wait_message"] = e["wait_message"]
     if finished:
         icon, words = OUTCOMES.get(e["outcome"], OUTCOMES["done"])
         out.update(outcome=e["outcome"], icon=icon, outcome_words=words, finished_at=_iso(finished),

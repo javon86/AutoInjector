@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from . import ai_activity, legacy
+from . import ai_activity, legacy, usage_limits
 from .errors import AkoweError
 from .store import Store, new_id, utcnow, write_private
 
@@ -115,6 +115,7 @@ def normalize_site_info(info) -> dict:
     state = st if has_state and st in SITE_STATES else "unknown"
     return {"state": state, "problem": _clean_code(info.get("problem")), "since": info.get("since"),
             "last_probe_ok_at": info.get("last_probe_ok_at"),
+            "reset_at": _epoch_s(info.get("limit_reset_at")),  # PR #122 (optional): when a usage limit resets
             "ready": info.get("ready") if isinstance(info.get("ready"), bool) else None,
             "busy": info.get("busy") if isinstance(info.get("busy"), bool) else None,
             "reports_state": has_state}
@@ -156,10 +157,12 @@ class SlotHealth:
         with self._lock:
             self._bridge.clear()
 
-    def mark_failed(self, slot_id: str, code: str, state: str | None = None, problem: str | None = None):
+    def mark_failed(self, slot_id: str, code: str, state: str | None = None, problem: str | None = None,
+                    reset_at: float | None = None):
         with self._lock:
             self._failed[slot_id] = {"at": time.monotonic(), "wall": time.time(), "code": code,
-                                     "state": state if state in UNAVAILABLE_STATES else None, "problem": problem}
+                                     "state": state if state in UNAVAILABLE_STATES else None, "problem": problem,
+                                     "reset_at": reset_at}
             self._bridge.clear()  # look again at the bridge's view after the hold
 
     def failed(self, slot_id: str) -> dict | None:
@@ -611,6 +614,19 @@ def _outer_object(text: str) -> dict | None:
     return _repaired_object(text[start:]) or _first_object(text[end + 1:] if end is not None else text[start + 1:])
 
 
+# PR #122: a web AI's plain refusal (no JSON at all). Only short replies are ever taken for one.
+_REFUSAL_RE = re.compile(
+    r"^\W*(?:i[’']?m sorry,?\s*(?:but\s*)?)?(?:i\s+(?:can(?:no|[’']?)t|won[’']?t|am\s+not\s+able\s+to|[’']?m\s+not\s+able"
+    r"\s+to|am\s+unable\s+to|[’']?m\s+unable\s+to|must\s+decline|have\s+to\s+decline)|sorry,?\s+(?:but\s+)?i\s+"
+    r"can(?:no|[’']?)t)\b", re.I)
+COLLECT_LATE = True        # a typed prompt whose answer was late: ask once more with the same id (joins it)
+
+
+def looks_like_refusal(text: str) -> bool:
+    t = str(text or "").strip()
+    return bool(t) and len(t) <= 1500 and "{" not in t and bool(_REFUSAL_RE.search(t))
+
+
 def schema_errors(schema: dict, data: Any, limit: int = 20) -> list[str]:
     """Exact validation errors as 'JSON pointer: message' lines (empty when valid)."""
     from .contracts import AkoweValidator  # noqa: PLC0415 - same rules as the engine (blank text refused)
@@ -774,6 +790,7 @@ class AutoInjectorAdapter:
             ra = body.get("retry_after_s")
             err.retry_after_s = float(ra) if isinstance(ra, (int, float)) and not isinstance(ra, bool) and 0 < ra <= 900 \
                 else (60.0 if limit else 30.0)
+            err.reset_at = _epoch_s(body.get("limit_reset_at")) if limit else None  # PR #122 (optional hint)
             return err
         if code == 503 and body.get("error") == "SITE_NOT_READY":
             # v1.2: the bridge says why (state + problem code); v1.1 says only "not ready".
@@ -899,7 +916,15 @@ class AutoInjectorAdapter:
         """One logical attempt (plus up to MAX_REASKS free schema re-asks on the same site).
 
         attempt is the registry retry number (logging only): retries reuse the same bridge
-        request_ids so the bridge joins/returns the cached reply instead of sending twice."""
+        request_ids so the bridge joins/returns the cached reply instead of sending twice.
+
+        PR #122 (long books):
+        * a 504 for a prompt that WAS typed is followed at once by ONE more request with the same bridge request_id:
+          the bridge joins it and hands back the late answer when it arrives (nothing is typed twice);
+        * a re-ask sends only the short correction when the bridge says the chat can be continued (``followup`` in
+          its answer: the prompt is already in that chat); otherwise the whole prompt again, as before;
+        * a refusal, or JSON still broken after the re-asks, is raised with ``try_other_ai`` so the registry gives the
+          call to another working AI before anything pauses."""
         site = slot.get("site")
         if site not in AUTOINJECTOR_SITES:
             raise AkoweError("CAPABILITY_UNAVAILABLE", "", f"{slot.get('slot_id')} has no AutoInjector site "
@@ -908,22 +933,19 @@ class AutoInjectorAdapter:
         errors: list[str] = []
         in_tok = out_tok = 0
         bridge_id = None
+        prev_id = None
+        followup_ok = refused = False
         for reask in range(self.MAX_REASKS + 1):
-            prompt = self.build_prompt(system, user, schema, errors)
+            short = bool(errors) and followup_ok and prev_id is not None
+            prompt = self.correction_prompt(errors) if short else self.build_prompt(system, user, schema, errors)
             late_key = _late_key(self.bridge_url, site, prompt)
             # A "Try again" after a 504 whose prompt WAS typed: collect that answer under its own bridge id.
             bridge_id = _late_get(late_key) or bridge_request_id(request_id, site, call, reask)
+            body = {"site": site, "prompt": prompt, "request_id": bridge_id, "timeout_ms": tmo}
+            if short:
+                body["followup_of"] = prev_id
             started = time.monotonic()
-            try:
-                reply = self._call("POST", "/v1/complete", {"site": site, "prompt": prompt, "request_id": bridge_id,
-                                                             "timeout_ms": tmo}, tmo / 1000.0 + 30.0)
-            except AkoweError as exc:
-                body = getattr(exc, "bridge_body", None) or {}
-                if body.get("typed") is True and not body.get("late_expired"):
-                    _late_put(late_key, bridge_id, float(body.get("late_window_ms") or tmo) / 1000.0)
-                else:
-                    _late_drop(late_key)
-                raise
+            reply = self._post_collecting(body, late_key, tmo)
             _late_drop(late_key)
             text = reply.get("text")
             if not reply.get("ok") or not isinstance(text, str):
@@ -940,9 +962,62 @@ class AutoInjectorAdapter:
                 usage = {"model": f"web:{site}", "input_tokens": in_tok, "output_tokens": out_tok,
                          "provider_request_id": bridge_id}
                 return data, usage
-        raise AkoweError("INTERNAL_ERROR", "", f"the {site} web session did not return JSON matching the output "
-                             f"schema after {self.MAX_REASKS + 1} tries; nothing was saved. Last errors: "
-                             + "; ".join(errors[:5]))
+            refused = data is None and looks_like_refusal(text)
+            prev_id = bridge_id
+            followup_ok = reply.get("followup") is True
+        if refused:
+            err = AkoweError("INTERNAL_ERROR", "", f"{SITE_NAMES.get(site, site)} declined to answer this request "
+                                 f"(a refusal, no JSON) {self.MAX_REASKS + 1} times; nothing was saved")
+            err.refusal = True
+        else:
+            err = AkoweError("INTERNAL_ERROR", "", f"the {site} web session did not return JSON matching the output "
+                                 f"schema after {self.MAX_REASKS + 1} tries; nothing was saved. Last errors: "
+                                 + "; ".join(errors[:5]))
+        err.try_other_ai = True  # PR #122: the registry gives the call to another working AI before it pauses
+        raise err
+
+    @staticmethod
+    def correction_prompt(errors: list[str]) -> str:
+        """PR #122: the short re-ask for a chat that already holds the prompt (never the whole prompt again)."""
+        lines = ["Your last answer was not valid JSON for the JSON_SCHEMA above. Errors (JSON pointer: message):"]
+        lines += [f"- {e}" for e in errors[:10]]
+        lines += ["Reply again with only the complete corrected JSON object, inside one ```json code block: no "
+                  "explanations."]
+        return "\n".join(lines)
+
+    def _post_collecting(self, body: dict, late_key, tmo: int) -> dict:
+        """POST /v1/complete. On a 504 for a prompt the bridge TYPED (the answer may still come), ask once more with
+        the SAME request_id: the bridge joins that request and returns the late answer (never typed twice)."""
+        try:
+            return self._call("POST", "/v1/complete", body, tmo / 1000.0 + 30.0)
+        except AkoweError as exc:
+            bb = getattr(exc, "bridge_body", None) or {}
+            if not (bb.get("typed") is True and not bb.get("late_expired")):
+                _late_drop(late_key)
+                raise
+            window = float(bb.get("late_window_ms") or tmo) / 1000.0
+            _late_put(late_key, body["request_id"], window)
+            if not COLLECT_LATE:
+                raise
+            log.info("autoinjector site=%s request_id=%s: answer late, collecting it (same request id)",
+                     body.get("site"), body.get("request_id"))
+            again = dict(body, timeout_ms=max(10000, min(900000, int(window * 1000))))
+            try:
+                return self._call("POST", "/v1/complete", again, again["timeout_ms"] / 1000.0 + 30.0)
+            except AkoweError as exc2:
+                bb2 = getattr(exc2, "bridge_body", None) or {}
+                if bb2.get("typed") is True and not bb2.get("late_expired"):
+                    _late_put(late_key, body["request_id"], float(bb2.get("late_window_ms") or window * 1000) / 1000.0)
+                else:
+                    _late_drop(late_key)
+                exc2.late_collect_tried = True
+                raise exc2 from None
+
+    def forget_late(self, site: str) -> None:
+        """The call moved to another AI after a time-out: a late answer of this site is never used for it."""
+        with _LATE_LOCK:
+            for k in [k for k in _LATE_TYPED if k[0] == self.bridge_url and k[1] == site]:
+                del _LATE_TYPED[k]
 
 
 def _local_opener():
@@ -1145,7 +1220,8 @@ class ProviderRegistry:
                     info = normalize_site_info({})
                 if not info["reports_state"]:
                     info["state"] = "ok"
-                out.update({k: info[k] for k in ("state", "problem", "since", "last_probe_ok_at")}, source="test")
+                out.update({k: info[k] for k in ("state", "problem", "since", "last_probe_ok_at", "reset_at")},
+                           source="test")
             return out
         if slot.get("adapter_id") != "autoinjector":
             return out
@@ -1162,7 +1238,7 @@ class ProviderRegistry:
         if err or not payload:
             return dict(out, state="unknown", source="bridge_error", error=err or "UPSTREAM_UNAVAILABLE")
         info = normalize_site_info((payload.get("sites") or {}).get(slot["site"]))
-        out.update({k: info[k] for k in ("state", "problem", "since", "last_probe_ok_at")},
+        out.update({k: info[k] for k in ("state", "problem", "since", "last_probe_ok_at", "reset_at")},
                    source="bridge" if info["reports_state"] else "bridge_v1", ready=info["ready"], busy=info["busy"],
                    bridge_version=payload.get("bridge_version"))
         return out
@@ -1179,7 +1255,8 @@ class ProviderRegistry:
                 "adapter_id": slot.get("adapter_id"), "state": state, "problem": problem,
                 "word": STATE_WORDS.get(state, state), "working": state not in UNAVAILABLE_STATES,
                 "recent_failure": ({"code": failed.get("code"), "problem": failed.get("problem")} if failed else None),
-                "source": st.get("source"), "since": st.get("since"), "last_probe_ok_at": st.get("last_probe_ok_at")}
+                "source": st.get("source"), "since": st.get("since"), "last_probe_ok_at": st.get("last_probe_ok_at"),
+                "reset_at": st.get("reset_at") or (failed or {}).get("reset_at")}
 
     def available(self, slot: dict) -> bool:
         return self.site_state(slot)["state"] not in UNAVAILABLE_STATES
@@ -1347,6 +1424,18 @@ class ProviderRegistry:
                  protected_facts: list, slot_id: str | None = None) -> tuple[dict, dict]:
         """Run one generation on the best eligible slot, or on slot_id when the author picked one
         explicitly (an explicit pick ignores role routing but never an ineligible slot)."""
+        try:
+            out = self._generate(ctx, task=task, output_schema=output_schema, context=context, capability=capability,
+                                 protected_facts=protected_facts, slot_id=slot_id)
+        except AkoweError as exc:
+            if not getattr(exc, "usage_limited", False):
+                usage_limits.clear()
+            raise
+        usage_limits.clear()  # an AI answered: whatever limit there was is over
+        return out
+
+    def _generate(self, ctx, *, task: str, output_schema: dict, context: dict, capability: str,
+                  protected_facts: list, slot_id: str | None = None) -> tuple[dict, dict]:
         system = (
             "You are a module worker inside Akọwe, a book production system. "
             f"{task}\nRules: keep every protected fact exactly as given; never invent references, record IDs or "
@@ -1380,34 +1469,124 @@ class ProviderRegistry:
                                      "every connected slot; split the job on scene/pass boundaries")
             down = self.unavailable(ctx.project_id, capability, needed)
             if down:
-                raise self.down_error(down)
+                err = self.down_error(down)
+                self._mark_if_all_limited(err, [], ctx, capability, needed)
+                raise err
             raise AkoweError("CAPABILITY_UNAVAILABLE", "", f"no connected AI slot offers '{capability}'")
         failed: list[dict] = []
         last: AkoweError | None = None
+        moved_on = False
         for i, slot in enumerate(order):
             if i and self._active.get(slot["slot_id"], 0) >= int(slot["max_concurrent"]):
                 continue  # became busy meanwhile: never overfill a slot when moving work
             try:
-                data, resource = self._generate_on(ctx, slot, system, user, output_schema, needed)
+                data, resource = self._generate_timeout_safe(ctx, slot, system, user, output_schema, needed,
+                                                             others=slot_id is None and i + 1 < len(order))
             except AkoweError as exc:
-                if exc.code != "UPSTREAM_UNAVAILABLE":
+                why = self._move_on_why(exc, slot)
+                if why is None:
                     raise
-                self.health.mark_failed(slot["slot_id"], exc.code, getattr(exc, "site_state", None),
-                                        getattr(exc, "site_problem", None))
+                if why in ("busy", "timeout"):
+                    self.health.mark_failed(slot["slot_id"], exc.code, getattr(exc, "site_state", None),
+                                            getattr(exc, "site_problem", None), getattr(exc, "reset_at", None))
+                if why == "timeout":
+                    self._forget_late(slot)  # a late answer of that site is never used for this call
                 last = exc
                 failed.append({"slot_id": slot["slot_id"], "name": slot_name(slot), "code": exc.code,
-                               "state": getattr(exc, "site_state", None), "problem": getattr(exc, "site_problem", None)})
+                               "state": getattr(exc, "site_state", None), "problem": getattr(exc, "site_problem", None),
+                               "why": why, "reset_at": getattr(exc, "reset_at", None)})
                 if slot_id is None and i + 1 < len(order):
-                    log.warning("AI slot %s unavailable (%s); moving this call to the next working slot",
-                                slot["slot_id"], getattr(exc, "site_problem", None) or exc.code)
+                    log.warning("AI slot %s %s (%s); moving this call to the next working slot", slot["slot_id"],
+                                {"busy": "unavailable", "timeout": "did not answer in time",
+                                 "other_ai": "gave no usable answer"}[why],
+                                getattr(exc, "site_problem", None) or exc.code)
+                    moved_on = True
                     continue
-                raise
+                break
             self.health.clear(slot["slot_id"])
             if failed:
                 self.health.notify({"event": "failover", "from": failed, "to": slot["slot_id"],
                                     "to_name": slot_name(slot), "operation": operation})
             return data, resource
-        raise last or AkoweError("CAPABILITY_UNAVAILABLE", "", f"no connected AI slot offers '{capability}'")
+        if last is not None and last.code == "UPSTREAM_UNAVAILABLE":
+            self._mark_if_all_limited(last, failed, ctx, capability, needed)
+        if last is not None:
+            if moved_on and getattr(last, "try_other_ai", False):
+                last.errors[0]["message"] = (last.errors[0]["message"] + " (every working AI was asked)")[:900]
+            raise last
+        raise AkoweError("CAPABILITY_UNAVAILABLE", "", f"no connected AI slot offers '{capability}'")
+
+    # ------------------------------------------------------------------ PR #122: long books keep going
+    TIMEOUT_RETRY_WAIT_S = 60.0   # one AI only: wait this long, then ask it once more before the work pauses
+
+    @staticmethod
+    def _move_on_why(exc: AkoweError, slot: dict) -> str | None:
+        """Why this failed call may go to the next working AI (None: raise it as it is).
+        busy: the site is unavailable; timeout: a web AI did not answer in time (its late answer was already
+        collected or given up); other_ai: a refusal, or JSON still broken after the re-asks."""
+        if exc.code == "UPSTREAM_UNAVAILABLE":
+            return "busy"
+        if exc.code == "TIMEOUT" and slot.get("adapter_id") == "autoinjector":
+            return "timeout"
+        if getattr(exc, "try_other_ai", False):
+            return "other_ai"
+        return None
+
+    def _generate_timeout_safe(self, ctx, slot, system, user, output_schema, needed, *, others: bool):
+        """One generation on this slot. A web AI that timed out (its late answer already collected or given up by
+        the adapter) is asked ONCE more after a short wait when no other AI can take the call; with another AI
+        the caller moves the call there instead."""
+        try:
+            return self._generate_on(ctx, slot, system, user, output_schema, needed)
+        except AkoweError as exc:
+            if exc.code != "TIMEOUT" or slot.get("adapter_id") != "autoinjector" or others:
+                raise
+            body = getattr(exc, "bridge_body", None) or {}
+            if not (body.get("typed") is False or body.get("late_expired") or getattr(exc, "late_collect_tried", False)):
+                raise  # the bridge did not say the prompt is safe to send again (an older bridge): the author decides
+            log.warning("AI slot %s did not answer in time and no other AI can take the call; asking it once more "
+                        "in %.0fs", slot["slot_id"], self.TIMEOUT_RETRY_WAIT_S)
+            check = getattr(ctx, "check", None)
+            left = float(self.TIMEOUT_RETRY_WAIT_S)
+            while left > 0:
+                if callable(check):
+                    check()
+                step = min(0.5, left)
+                time.sleep(step)
+                left -= step
+            return self._generate_on(ctx, slot, system, user, output_schema, needed)
+
+    def _forget_late(self, slot: dict) -> None:
+        if slot.get("adapter_id") != "autoinjector" or self.test_adapter is not None:
+            return
+        try:
+            AutoInjectorAdapter(self._api_key(slot["slot_id"]), slot.get("bridge_url") or DEFAULT_BRIDGE_URL) \
+                .forget_late(slot.get("site"))
+        except AkoweError:
+            pass
+
+    def _mark_if_all_limited(self, exc: AkoweError, failed: list[dict], ctx, capability: str, needed: int) -> None:
+        """⏳ every AI that could take this call is at its usage limit: say so on the error and process-wide
+        (usage_limits.py), so the waiting work waits for the limits to reset instead of pausing after ~10 min."""
+        try:
+            down = self.unavailable(ctx.project_id, capability, needed)
+            rows = [{"name": f["name"], "problem": f.get("problem"), "reset_at": f.get("reset_at")} for f in failed]
+            seen = {f["slot_id"] for f in failed}
+            for s in down:
+                if s["slot_id"] in seen:
+                    continue
+                st = self.slot_status(s)
+                rows.append({"name": st["name"], "problem": st.get("problem"), "reset_at": st.get("reset_at")})
+        except Exception:  # noqa: BLE001 - a hint, never a reason to fail differently
+            log.exception("usage-limit check")
+            return
+        if not rows or not all(usage_limits.is_limit_problem(r.get("problem")) for r in rows):
+            return
+        resets = [r["reset_at"] for r in rows if isinstance(r.get("reset_at"), (int, float))]
+        exc.usage_limited = True
+        exc.limited_names = [r["name"] for r in rows]
+        exc.reset_at = min(resets) if resets and len(resets) == len(rows) else None
+        usage_limits.note(exc.limited_names, exc.reset_at)
 
     def _generate_on(self, ctx, slot: dict, system: str, user: str, output_schema: dict, needed: int):
         """One generation on exactly this slot (cost reservation, busy counter, adapter retries)."""
@@ -1427,7 +1606,7 @@ class ProviderRegistry:
             self._active[slot["slot_id"]] += 1
         self._activity_start(ctx, slot)  # ⚡ #116: the AI activity strip (what each AI is doing right now)
         try:
-            data, usage = self._with_retries(adapter, slot, system, user, schema, ctx.request.get("deadline"),
+            data, usage = self._with_retries(adapter, slot, system, user, schema, self.call_deadline(ctx, slot),
                                              request_id=ctx.request.get("request_id"), call=call)
         except AkoweError as exc:
             ai_activity.call_ended(exc)
@@ -1448,6 +1627,34 @@ class ProviderRegistry:
                     "output_tokens": usage.get("output_tokens", 0), "context_tokens_estimate": needed,
                     "provider_request_id": usage.get("provider_request_id"), "at": utcnow()}
         return data, resource
+
+    # PR #122: every AI call gets its OWN full time, never what an earlier call of the same operation left over (a
+    # chapter written scene by scene makes 2-6 calls under one C02 request: scene 3 used to get 10-60 s and pause).
+    WEB_CALL_MIN_S = 300.0   # a web AI that types a 60 000-character prompt and writes ~2 500 words
+
+    @classmethod
+    def call_deadline(cls, ctx, slot: dict) -> str | None:
+        """The deadline of ONE AI call: the request's deadline, but never less than the operation's own time
+        (``timeout_ms`` of its contract, default 180 s; at least ``WEB_CALL_MIN_S`` for a web AI) from now."""
+        req = getattr(ctx, "request", None) or {}
+        dl = req.get("deadline")
+        op = getattr(ctx, "op", None)
+        per = 180.0
+        if isinstance(op, dict) and isinstance(op.get("timeout_ms"), (int, float)) and op["timeout_ms"] > 0:
+            per = float(op["timeout_ms"]) / 1000.0
+        if slot.get("adapter_id") == "autoinjector":
+            per = max(per, cls.WEB_CALL_MIN_S)
+        from datetime import datetime, timedelta, timezone  # noqa: PLC0415
+        own = datetime.now(timezone.utc) + timedelta(seconds=per)
+        if dl:
+            try:
+                if datetime.fromisoformat(str(dl).replace("Z", "+00:00")) >= own:
+                    return dl
+            except ValueError:
+                pass
+        elif not isinstance(op, dict):
+            return dl  # no deadline and no operation (a bare call): the adapter's own default
+        return own.strftime("%Y-%m-%dT%H:%M:%SZ")
 
     def _activity_start(self, ctx, slot: dict):
         """⚡ #116: tell the AI activity registry which AI now answers, for which book (titles only)."""
@@ -1545,10 +1752,13 @@ class ProviderRegistry:
                     # with a wait hint): move on (another slot, or wait the hint), never ask it again within seconds
                     raise
                 if exc.code == "TIMEOUT" and slot.get("adapter_id") == "autoinjector":
-                    raise AkoweError("TIMEOUT", "", f"the {slot.get('site')} web session did not answer in time; "
+                    err = AkoweError("TIMEOUT", "", f"the {slot.get('site')} web session did not answer in time; "
                                          "it may still be answering. Retrying the same request reuses its reply "
                                          "when it arrives.",
-                                         unresolved=["user_decision:retry_ambiguous_generation"]) from exc
+                                         unresolved=["user_decision:retry_ambiguous_generation"])
+                    err.bridge_body = getattr(exc, "bridge_body", None) or {}
+                    err.late_collect_tried = bool(getattr(exc, "late_collect_tried", False))
+                    raise err from exc
                 if exc.code == "TIMEOUT":
                     # Ambiguous paid generation: the Messages API has no job-status lookup, so the
                     # contract requires a user decision instead of silently paying again.

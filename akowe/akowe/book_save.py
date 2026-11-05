@@ -1,7 +1,8 @@
 """💾 Save the book (P20): one folder per book in the author's books folder.
 
 The books folder (Settings › 📁 Where books are saved, settings key ``books_folder`` = {path, auto_save}) defaults to
-``Documents\\Akowe Books`` on Windows (``%USERPROFILE%\\Documents``) and ``~/Akowe Books`` elsewhere
+``Documents\\Akowe Books`` on Windows (the REAL Documents folder, also when OneDrive moved it — PR #122; an existing
+``%USERPROFILE%\\Documents\\Akowe Books`` stays in use; a synced folder gets a warning) and ``~/Akowe Books`` elsewhere
 (``AKOWE_BOOKS_DIR`` overrides the default; ``AKOWE_AUTOSAVE=0`` makes auto-save default to off — the test suite
 uses both). Each book gets ONE folder, named once as ``<Book title> (<short id>)`` and remembered in the settings key
 ``book_folder:<pid>:<branch>``: later saves (and a new title) keep using it. Inside (see ``README_TEXT``):
@@ -26,7 +27,8 @@ Every file is written atomically (a temp file in the same folder, then renamed o
 did not change is not rewritten. A file Akọwe wrote earlier that is no longer part of the save (a renamed chapter)
 is removed — nothing else in the folder is ever touched. Windows rules: names never hold ``<>:"/\\|?*``, control
 characters, trailing dots/spaces or reserved names (CON, PRN, AUX, NUL, COM1-9, LPT1-9), titles are shortened so every
-full path stays at most ``MAX_PATH`` (200) characters.
+full path stays at most ``MAX_PATH`` (200) characters; a file that would still be longer gets a shortened name (PR #122,
+``fit_paths``), or only that file is left out with a ⚠️ — never the whole save.
 
 Saves never block or fail a run: ``auto()`` returns at once (the save runs in its own thread) and a failure is only a
 ⚠️ on the book page / run window (``book_save:<pid>:<branch>`` = the last save: at, ok, path, problem). Automatic
@@ -174,15 +176,115 @@ def read_marker(folder: Path):
     raise FileNotFoundError(str(folder / MARKER))
 
 
-def default_folder(windows: bool | None = None) -> Path:
+FOLDERID_DOCUMENTS = "{FDD39AD0-238F-46AF-ADB4-6C85480369C7}"
+
+
+def windows_documents() -> Path | None:
+    """PR #122: the REAL Documents folder on Windows. With OneDrive's "Known Folder Move" (the Windows 11 default) it
+    is ``%OneDrive%\\Documents``, not ``%USERPROFILE%\\Documents``. Asks Windows (SHGetKnownFolderPath), then the
+    registry (User Shell Folders › Personal). None anywhere else, or when neither answers."""
+    if os.name != "nt":
+        return None
+    try:  # the shell's own answer
+        import ctypes  # noqa: PLC0415
+        from ctypes import wintypes  # noqa: PLC0415
+
+        class GUID(ctypes.Structure):
+            _fields_ = [("Data1", wintypes.DWORD), ("Data2", wintypes.WORD), ("Data3", wintypes.WORD),
+                        ("Data4", ctypes.c_ubyte * 8)]
+
+        guid = GUID()
+        ctypes.oledll.ole32.CLSIDFromString(ctypes.c_wchar_p(FOLDERID_DOCUMENTS), ctypes.byref(guid))
+        out = ctypes.c_wchar_p()
+        ctypes.windll.shell32.SHGetKnownFolderPath(ctypes.byref(guid), 0, None, ctypes.byref(out))
+        try:
+            if out.value:
+                return Path(out.value)
+        finally:
+            ctypes.windll.ole32.CoTaskMemFree(out)
+    except Exception:  # noqa: BLE001 - fall back to the registry
+        log.debug("SHGetKnownFolderPath failed", exc_info=True)
+    try:
+        import winreg  # noqa: PLC0415
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                            r"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders") as k:
+            v, _t = winreg.QueryValueEx(k, "Personal")
+        if isinstance(v, str) and v.strip():
+            return Path(os.path.expandvars(v.strip()))
+    except Exception:  # noqa: BLE001
+        log.debug("registry Documents lookup failed", exc_info=True)
+    return None
+
+
+def default_folder(windows: bool | None = None, documents=None) -> Path:
+    """The default books folder. On Windows: ``<Documents>\\Akowe Books`` in the REAL Documents folder (PR #122:
+    redirected to OneDrive or another drive — ``windows_documents``). A books folder that already exists under
+    ``%USERPROFILE%\\Documents`` (books saved before this change) keeps being used: books never move by themselves.
+    ``documents``: a stand-in for ``windows_documents`` (tests)."""
     env = legacy.env("BOOKS_DIR")
     if env:
         return Path(env)
     if (os.name == "nt") if windows is None else windows:
         up = os.environ.get("USERPROFILE")
+        old = legacy.default_books_folder(Path(up) / "Documents" / "Akowe Books") if up else None
+        try:
+            if old is not None and old.is_dir():
+                return old  # the folder books were saved into before: keep it
+        except OSError:
+            pass
+        docs = (documents or windows_documents)()
+        try:
+            if docs is not None and docs.is_dir():
+                return legacy.default_books_folder(docs / "Akowe Books")
+        except OSError:
+            pass
         if up and (Path(up) / "Documents").is_dir():
             return legacy.default_books_folder(Path(up) / "Documents" / "Akowe Books")
     return legacy.default_books_folder(Path.home() / "Akowe Books")  # keeps an existing "BookForge Books" folder
+
+
+SYNCED = (("onedrive", "OneDrive"), ("dropbox", "Dropbox"), ("google drive", "Google Drive"),
+          ("googledrive", "Google Drive"), ("my drive", "Google Drive"), ("icloud drive", "iCloud Drive"),
+          ("iclouddrive", "iCloud Drive"))
+
+
+def synced_by(path) -> str | None:
+    """PR #122: the cloud service that syncs this folder (OneDrive, Dropbox, Google Drive, iCloud Drive), or None."""
+    try:
+        p = Path(str(path))
+    except (TypeError, ValueError):
+        return None
+    low = str(p).replace("\\", "/").lower().rstrip("/") + "/"
+    for var in ("OneDrive", "OneDriveConsumer", "OneDriveCommercial"):
+        root = os.environ.get(var)
+        if root and root.strip():
+            r = root.strip().replace("\\", "/").lower().rstrip("/") + "/"
+            if low.startswith(r):
+                return "OneDrive"
+    for part in (x.lower() for x in p.parts):
+        for key, name in SYNCED:
+            if part == key or part.startswith(key + " -") or part.startswith(key + "-") or \
+                    (key == "onedrive" and part.startswith("onedrive")):
+                return name
+    return None
+
+
+def unsynced_folder() -> Path:
+    """A books folder no cloud service syncs: ``<your user folder>\\Akowe Books``."""
+    up = os.environ.get("USERPROFILE")
+    return Path(up or Path.home()) / "Akowe Books"
+
+
+def sync_warning(path) -> dict | None:
+    svc = synced_by(path)
+    if not svc:
+        return None
+    alt = unsynced_folder()
+    return {"service": svc, "suggested": None if synced_by(alt) else str(alt),
+            "warning": f"Your books folder is inside {svc}. {svc} uploads every saved file again — book.akowe can be "
+                       f"hundreds of MB and is saved after each chapter — and can hold files while it syncs, so a "
+                       f"save may fail or be late. Books are safer in a folder {svc} does not sync"
+                       + (f", for example {alt}." if not synced_by(alt) else ".")}
 
 
 def autosave_default() -> bool:
@@ -200,6 +302,43 @@ def safe_name(text, cap: int = 60, fallback: str = "Book") -> str:
     if t.split(".", 1)[0].upper().strip() in RESERVED:
         t = "_" + t
     return t
+
+
+def fit_paths(folder: Path, files: dict, limit: int | None = None) -> tuple[dict, dict, list]:
+    """PR #122: make every saved path fit ``MAX_PATH``. A file whose full path is too long gets a shorter name: the
+    start of its name + a 6-character fingerprint of the original (so two shortened names never collide) + its
+    extension, in the same sub-folder. A file that cannot fit even then (the folder path itself is too long) is left
+    out. Returns (files, {original: shortened}, [left out])."""
+    limit = limit or MAX_PATH
+    out: dict = {}
+    renamed: dict = {}
+    dropped: list = []
+    taken = {r.lower() for r in files if len(str(folder / r)) <= limit}
+    for rel, data in files.items():
+        if len(str(folder / rel)) <= limit:
+            out[rel] = data
+            continue
+        head, _sep, name = rel.rpartition("/")
+        stem, dot, ext = name.rpartition(".") if "." in name.lstrip(".") else (name, "", "")
+        tag = hashlib.sha256(rel.encode("utf-8")).hexdigest()[:6]
+        prefix = len(str(folder)) + 1 + (len(head) + 1 if head else 0)
+        room = limit - prefix - len(tag) - 2 - (len(ext) + 1 if dot else 0)
+        if room < 4 or rel == PACKAGE:
+            dropped.append(rel)
+            continue
+        short = safe_name(stem, room, "file").rstrip(" .") or "file"
+        new = (f"{head}/" if head else "") + f"{short} ~{tag}" + (f".{ext}" if dot else "")
+        n = 2
+        while new.lower() in taken:
+            new = (f"{head}/" if head else "") + f"{short[:max(1, room - 3)]} ~{tag}{n}" + (f".{ext}" if dot else "")
+            n += 1
+        if len(str(folder / new)) > limit:
+            dropped.append(rel)
+            continue
+        taken.add(new.lower())
+        out[new] = data
+        renamed[rel] = new
+    return out, renamed, dropped
 
 
 def short_id(pid: str) -> str:
@@ -363,7 +502,7 @@ class SaveService:
         path = cur.get("path") or str(dflt)
         return {"path": path, "default_path": str(dflt), "custom": bool(cur.get("path")),
                 "auto_save": bool(cur.get("auto_save", autosave_default())), "interval_s": self.interval_s,
-                "periodic_s": self.periodic_s, "max_path": MAX_PATH}
+                "periodic_s": self.periodic_s, "max_path": MAX_PATH, "synced": sync_warning(path)}
 
     def base(self) -> Path:
         return Path(self.settings()["path"])
@@ -793,10 +932,15 @@ class SaveService:
             raise prob
         folder = self.book_folder(pid, branch, create=True)
         files, info = self.collect(pid, branch, on_phase=on_phase)
-        longest = max((len(str(folder / r)) for r in files), default=0)
-        if longest > MAX_PATH:
-            raise SaveProblem("SAVE_PATH_TOO_LONG", f"the longest path in the book's folder would be {longest} "
-                              f"characters (at most {MAX_PATH})")
+        # PR #122: one file whose path is too long no longer fails the whole save: its name is shortened (kept unique
+        # with a short fingerprint), and only a file that still cannot fit is left out, with a ⚠️ for that file
+        files, renamed, too_long = fit_paths(folder, files)
+        for rel in too_long:
+            part_failed(info, rel, f"its path would be longer than {MAX_PATH} characters on this computer — choose a "
+                                   "books folder with a shorter path in Settings")
+        if too_long and not files:
+            raise SaveProblem("SAVE_PATH_TOO_LONG", f"every path in the book's folder would be longer than {MAX_PATH} "
+                              "characters")
         if on_phase:
             on_phase("Writing the files")
         try:
@@ -855,6 +999,9 @@ class SaveService:
                     " — the old one is open in another program, so it is not current")
                 for x in not_updated[:4]) + (f" and {len(not_updated) - 4} more" if len(not_updated) > 4 else "") +
                 ". Save again when it can be made.")
+        if renamed:
+            warnings.append(f"{len(renamed)} file name(s) were shortened to fit this computer's path limit (for "
+                            f"example “{list(renamed.values())[0].rsplit('/', 1)[-1]}”).")
         if locked:
             names = ", ".join(locked[:3]) + (f" and {len(locked) - 3} more" if len(locked) > 3 else "")
             warnings.append(f"Saved, except {names} (open in another program — close it and save again).")
@@ -870,7 +1017,7 @@ class SaveService:
                 "bytes": sum(len(d) for d in files.values()), "finished": info.get("finished"),
                 "chapters": info["chapters"], "drafts": info["drafts"], "exports": info["exports"],
                 "report": info["report"], "skipped": locked, "not_made": info.get("skipped_parts") or [],
-                "not_updated": not_updated, "warning": " ".join(warnings) or None}
+                "not_updated": not_updated, "warning": " ".join(warnings) or None, "shortened": renamed}
 
     @staticmethod
     def _mark_older(folder: Path, files: dict, stays: list, parts: list) -> list[dict]:

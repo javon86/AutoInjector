@@ -401,3 +401,20 @@ request — and when the user turned the Bridge switch off. The contract above i
   code in plain letters): the self-repair codes `TYPE_FAILED`, `SEND_NOT_CONFIRMED`, `NO_REPLY_FOUND`,
   `FALSE_DUPLICATE`, `STUCK_GENERATING`, `LOGGED_OUT`, `CAPTCHA`, `USAGE_LIMIT`, `NETWORK_ERROR`, `PAGE_ERROR`,
   `UNKNOWN`, plus a few older names. Codes must match `[A-Za-z][A-Za-z0-9_.:-]{0,63}`; anything else is ignored.
+
+## Optional fields used by Akọwe since PR #122 (backward compatible)
+
+Nothing changes for a bridge that does not send these; Akọwe behaves as before.
+
+* **Late answers.** After a `504` with `typed: true` (not `late_expired`), Akọwe at once repeats the request with the
+  SAME `request_id` (a join, as in rule 5): the bridge returns the late answer when it arrives, or `504` with
+  `late_expired: true`. Nothing is typed twice. Then Akọwe moves the call to another AI (or, with one AI only, asks
+  again after a minute when the 504 said `typed: false` / `late_expired`).
+* **`followup` (200 reply, optional, boolean).** `true` = the chat this answer came from may be continued: a re-ask
+  of a broken JSON answer is then sent as a short correction only, with `"followup_of": "<the previous request_id>"`
+  in the request body, and the bridge must type it into the SAME chat (never a fresh one). Without `followup: true`
+  Akọwe re-sends the whole prompt, as before.
+* **`limit_reset_at` (optional, epoch ms or ISO 8601)** in a site's `/v1/health` entry while it is at its usage
+  limit, and in a `503 SITE_ERROR` with `site_error: "rate-limit"`: when the limit resets. When every AI is at its
+  limit, Akọwe waits until then (else it checks every 5 minutes), for up to 6 hours by default.
+

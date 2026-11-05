@@ -119,7 +119,9 @@ akowe/
     workflow_test.py       🧪 Test workflow runner (rows, separate "🧪 Workflow test" project, reports/workflow-test-*)
     status_push.py         status summary pushed to the AutoInjector bridge (POST /v1/status; incl. words {total, target})
     jobs.py                JobStore (persisted background work, settings keys job:<id>; mark_interrupted at start-up),
-                           RetryPolicy + wait_and_retry (S10 busy/unreachable backoff; TIMEOUT never retried)
+                           RetryPolicy + wait_and_retry (S10 busy/unreachable backoff; TIMEOUT never retried; a
+                           long "all AIs at their usage limits" wait, PR #122)
+    usage_limits.py        ⏳ PR #122 "every AI is at its usage limit": the process-wide note, plain resume-time words
     autobook.py            ⚡ Make a book for me (AutoBookService, R14/S21) and ✍ Write all chapters (WriteAllService, S2)
     backups.py             BackupManager: automatic/daily backups, rotation (backup_keep), guarded live restore (S9)
     health.py              HealthService: ❤️ checks (db, disk, backups, AI slots, bridge/status push, exports, stuck jobs)

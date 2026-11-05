@@ -114,14 +114,23 @@ bridge to your home Wi-Fi, behind its key.
   3. It waits for the reply that answers that exact number.
   4. It removes the tags and hands the text back to Akọwe. That reply is never relayed to the other AIs.
   5. Akọwe checks the answer. Most answers must be a tidy block of data (JSON). If not, it asks again, up to two
-     more times.
+     more times. When AutoInjector says the chat can be continued, the second ask is only a short correction ("your
+     last answer was not valid JSON: …"), not the whole prompt again. If the answer is still broken, or the AI
+     refused, the work goes to another AI that works before anything stops.
 - **When it can't answer:**
   - **Busy:** one request per AI at a time. A second one hears "busy", and Akọwe waits and retries.
   - **Site error:** the site showed its own notice ("Something went wrong", a usage limit). Akọwe waits (30 s, or
     60 s after a usage limit, then longer, up to 2 minutes each and about 10 minutes in all) or uses another AI.
+  - **Every AI at its usage limit:** Akọwe waits for a limit to reset, by itself: "All AIs hit their usage limits
+    — waiting; resumes by itself at about 3:40 PM" shows in the run window and the activity strip. It checks every
+    few minutes (or at the reset time the site showed) for up to 6 hours (Settings › ⏳ When the AI is busy), then
+    goes on. Only after that whole time does the run pause.
   - **Not working:** an AI that is being repaired, logged out or broken is skipped. Its work goes to another AI.
-  - **Timeout:** no answer in time (4 minutes by default). Akọwe never retries this by itself, because the answer
-    may still come. The step pauses and you press 🔁 Try again.
+  - **Timeout:** no answer in time (every AI call has its own time: at least 5 minutes for a web AI, also for each
+    scene of a long chapter). When the prompt was typed, Akọwe first collects the late answer (it asks again with
+    the same request number, so nothing is typed twice). If none comes, the work goes to another AI that works, or,
+    with only one AI, that AI is asked once more after a minute. Only then does the step pause for 🔁 Try again. A
+    late answer is never used twice.
 - A second door, the **service bridge** (port 8765), does more than the AI bridge. Akọwe uses it for pictures,
   video clips, trailers, the ebook cover JPG and the Book Bible PDF. It also carries the app's tools, voice (speak
   and listen), messages to the AIs, live events, and the phone page.
@@ -318,9 +327,13 @@ to a minute), so the run knows which AIs work.
   - **✔ Approve anyway:** your own approval.
   - **✏️ Edit it myself**, then Continue.
   - **🔁 Try again:** two more AI fixes.
-- Only one AI is working, so nobody else could check a draft. You choose: **✔ Approve it yourself** (read it
-  first), or **🔁 Try again** once another AI is connected.
-- An AI did not answer in time.
+- Only one AI is working, so nobody else could check a draft — **only if you chose "Stop and ask me"** for "When
+  only one AI works" (Make a book › Checking for mistakes). You choose: **✔ Approve it yourself** (read it first),
+  or **🔁 Try again** once another AI is connected. By default ("Keep going") the run goes on: the one AI's own
+  check approves the chapter, and it is listed as **needs your check later** in the run window, on 🏠 Book home and
+  in the book report. "Wait for a second AI" waits up to the usage-limit time for another AI to check it.
+- An AI did not answer in time, even after its late answer was collected and another AI (or the same one, a
+  minute later) was asked.
 - A checkpoint found a problem it could not fix safely (once per checkpoint).
 - Akọwe was closed mid-run. The run shows **Interrupted** and **▶ Resume** carries on.
 
@@ -364,7 +377,8 @@ A few of these need more words:
   and a ⚠️ *Needs a look* card on 🏠 Book home list these chapters.
 - **Hand edits.** When you change a chapter, what Akọwe read from the old text is set aside: its running notes,
   the notes of every later chapter (they were built on top of it), its lines in the story so far, and any
-  checkpoint that read it. They are read again from the new text, and
+  checkpoint that read it — only those: of the final whole-book read, only the part that holds the changed chapter.
+  Later checkpoints that did not read it are only marked "may be affected". They are read again from the new text, and
   each later chapter gets a flag: *"Chapter 5 changed after chapter 6 was written — check chapter 6."*
 - **Needs lists.** The chapter reviewer and the checkpoints get each chapter's needs list and check every listed
   section on the page. When the chapter used something its list did not plan, the run says so ("🧠 Chapter 7 also
@@ -443,8 +457,8 @@ then carries the locked facts, belongings, status and a summary of book 1.
 | Models (checkpoints, LoRAs, FramePack, Ollama…) | `stuff and thing/models/` (one folder per kind) |
 | Installed programs (ComfyUI, Ollama) | `stuff and thing/apps/` |
 | Reports and test results | `stuff and thing/logs/` |
-| Your books | `Documents\Akowe Books\` (change it in Akọwe → Settings → 📁 Where books are saved) |
-| Akọwe's working data and backups | `%LOCALAPPDATA%\Akowe` |
+| Your books | `Documents\Akowe Books\` in your real Documents folder, also when Windows moved it to OneDrive (change it in Akọwe → Settings → 📁 Where books are saved; a folder OneDrive, Dropbox or Google Drive syncs gets a ⚠️ and a button for a folder they do not sync) |
+| Akọwe's working data and backups | `%LOCALAPPDATA%\Akowe` (backups share unchanged pictures and clips instead of copying them again; its own log is `logs\akowe.log`, 10 MB × 5 files) |
 | AutoInjector settings, transcript, connection key | `%APPDATA%\autoinjector-desktop\` |
 
 **Inside one book's folder:** `Book/` (PDF, EPUB, Word), `Chapters/`, `Book Bible/`, `Reports/`, `Log/` (the
