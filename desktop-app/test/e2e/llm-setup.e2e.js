@@ -154,17 +154,20 @@ async function main() {
     }
     assert(list.filter((c) => c.rating !== 'too-big').every((c) => !c.dl), 'models that fit can be downloaded');
 
-    console.log('\n== 🔓 Uncensored filter ==');
+    console.log('\n== 🔓 Uncensored filter (no network here: a plain message + the built-in uncensored list) ==');
     await controls.click('#llmm-unc');
-    const uncOk = await until(async () => /uncensored first/.test(await controls.textContent('#llmm-msg')), 15000);
-    assert(!!uncOk, 'the list reloads with "🔓 uncensored first"');
+    const uncMsg = await until(async () => { const t = await controls.textContent('#llmm-msg'); return /works offline/.test(t) ? t : null; }, 60000, 300);
+    assert(!!uncMsg && /Couldn't reach/.test(uncMsg) && /built-in list of uncensored models/.test(uncMsg) && !/ENOTFOUND|ECONN|TypeError|fetch failed/.test(uncMsg), `offline → a plain message ("${(uncMsg || '').slice(0, 170)}")`);
+    assert(await controls.isVisible('#llmm-unc-note') && /not smarter/.test(await controls.textContent('#llmm-unc-note')) && /responsible for what you publish/.test(await controls.textContent('#llmm-unc-note')), 'the plain-words note shows (not smarter, quality varies, you are responsible)');
     list = await cards();
-    const firstPlain = list.findIndex((c) => !c.unc);
-    assert(list.length && list[0].unc && list[0].badge, `the first model is uncensored with a 🔓 badge (${list[0] && list[0].id})`);
-    assert(firstPlain > 0 && list.slice(firstPlain).every((c) => !c.unc), `uncensored models are ranked first (${firstPlain} of ${list.length}), none hidden or mixed in`);
-    assert(list.some((c) => !c.unc), 'the other models are still offered (not filtered out)');
+    assert(list.length >= 5 && list.every((c) => c.unc && c.badge), `only uncensored models, each with the 🔓 badge (${list.length})`);
+    const extra = await controls.$$eval('#llmm-results .llmm-card', (cs) => cs.map((c) => ({ line: (c.querySelector('.llmm-unc-line') || {}).textContent || '', tool: (c.querySelector('.llmm-tool-hint') || {}).textContent || '', spec: (c.querySelector('.llmm-spec') || {}).textContent || '' })));
+    assert(extra.every((x) => /^Uncensored: /.test(x.line) && /🛠 good for Alfred's tools|⚠ may not use tools well/.test(x.tool) && /B parameters · Q4_K_M · /.test(x.spec)), `each card: what "uncensored" means, a tool hint, size · quant · GB ("${extra[0] && extra[0].spec}" / "${extra[0] && extra[0].tool}")`);
+    assert(extra.some((x) => /refusals removed \(abliterated\)/.test(x.line)) && extra.some((x) => /^🛠/.test(x.tool)) && extra.some((x) => /^⚠/.test(x.tool)), 'abliterated lines, 🛠 and ⚠ hints all appear');
+    await controls.locator('#llm-models').screenshot({ path: path.join(SHOTS, 'uncensored-finder.png') }).catch(() => {});
     await controls.click('#llmm-unc');
-    await until(async () => !/uncensored first/.test(await controls.textContent('#llmm-msg')) && (await controls.$$('#llmm-results .llmm-card')).length >= 5, 15000);
+    await until(async () => /Recommended for Alfred/.test(await controls.textContent('#llmm-msg')) && (await controls.$$('#llmm-results .llmm-card')).length >= 5, 15000);
+    assert(!(await controls.isVisible('#llmm-unc-note')) && (await cards()).some((c) => !c.unc), 'turned off: every model again, the note hidden');
 
     console.log('\n== online search, no network: a plain message, the offline list still works ==');
     await controls.fill('#llmm-q', 'qwen');
@@ -201,6 +204,19 @@ async function main() {
     assert(!!used, '"Use" makes it Alfred\'s model (alfredStatus().settings.local.model)');
     const inUse = await until(async () => /in use/.test(await row.textContent()), 10000);
     assert(!!inUse, 'the list marks it "in use"');
+
+    console.log('\n== 🧪 What will it write? (fake Ollama /api/chat, on this "PC" only) ==');
+    const chats0 = oll.st.apiChats.length;
+    await row.locator('.llm-wt-btn').click();
+    const wtDone = await until(async () => (await controls.$$('#llm-wt .llmwt[data-state="done"] tbody tr')).length === 6, 30000, 200);
+    assert(!!wtDone, 'the 🧪 table shows six probes');
+    const wtRows = await controls.$$eval('#llm-wt tbody tr', (rs) => rs.map((r) => ({ probe: r.dataset.probe, score: r.dataset.score, cells: [...r.children].map((c) => c.textContent.trim()) })));
+    assert(wtRows.every((r) => r.score === 'wrote' && /✅/.test(r.cells[1]) && /^“.+”$/.test(r.cells[2]) && / s$/.test(r.cells[3])), `✅ + a one-line excerpt + the time per probe (${wtRows.map((r) => r.probe).join(', ')})`);
+    assert(/✅ Writes dark fiction freely/.test(await controls.textContent('#llm-wt .llmwt-verdict')), 'verdict: ✅ Writes dark fiction freely');
+    assert(oll.st.apiChats.length - chats0 === 6 && oll.st.apiChats.slice(-6).every((b) => b.model === 'qwen2.5:1.5b' && b.options.num_predict === 150), 'six /api/chat requests to the local Ollama, ~150 tokens each');
+    await controls.locator('#llm-wt').screenshot({ path: path.join(SHOTS, 'write-test.png') }).catch(() => {});
+    const saved0 = await controls.evaluate(() => window.api.llmWriteTests({ name: 'qwen2.5:1.5b' }));
+    assert(saved0 && saved0.result && saved0.result.verdict.kind === 'free', 'the result is saved for this model');
 
     console.log('\n== 🎩 personality + saved set-ups ==');
     await controls.locator('#alfred-persona').scrollIntoViewIfNeeded();

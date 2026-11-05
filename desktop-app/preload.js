@@ -296,6 +296,9 @@ contextBridge.exposeInMainWorld("api", {
   llmSearch: (query, opts) => ipcRenderer.invoke("llm:search", query, opts),
   llmCurated: (opts) => ipcRenderer.invoke("llm:curated", opts),
   llmHfFiles: (repoId) => ipcRenderer.invoke("llm:hf-files", repoId),
+  llmUncensored: (opts) => ipcRenderer.invoke("llm:uncensored", opts), // 🔓 uncensored finder (live + cache + offline list)
+  llmWriteTest: (arg) => ipcRenderer.invoke("llm:write-test", arg), // 🧪 "What will it write?" ({name} or {cancel:true})
+  llmWriteTests: (arg) => ipcRenderer.invoke("llm:write-tests", arg), // saved 🧪 results ({name} → one)
   llmPull: (pullName, opts) => ipcRenderer.invoke("llm:pull", pullName, opts), // (pullName, {sizeBytes}) or ({pullName, sizeBytes})
   llmCancel: () => ipcRenderer.invoke("llm:cancel"),
   llmRemove: (name) => ipcRenderer.invoke("llm:remove", name),

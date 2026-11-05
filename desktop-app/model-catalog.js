@@ -246,7 +246,7 @@ function rateModel(model, hardware, opts) {
     const fit = hw.rateFit(v.sizeBytes, hardware, o);
     return Object.assign({}, v, { fit, speed: hw.estimateSpeed(v.sizeBytes, hardware, { fit, measured: measuredSpeed(o.speeds, v.pullName) }) });
   });
-  const pick = hw.pickVariant(variants, hardware, o);
+  const pick = o.preferQuants || (model.source === 'hf' && model.filesLoaded) ? pickQuant(variants, hardware, o) : hw.pickVariant(variants, hardware, o);
   let chosen = pick ? variants.find((v) => v.pullName === pick.pullName) : null;
   if (!chosen) chosen = variants.filter((v) => v.sizeBytes).sort((a, b) => a.sizeBytes - b.sizeBytes)[0] || variants[0] || null;
   const out = Object.assign({}, model, { variants });
@@ -308,6 +308,66 @@ function curatedModels() {
       url: `${OLLAMA_BASE}/${c.name.includes('/') ? c.name : `library/${c.name}`}`, gated: false, variants, fit: null, order: i,
     };
   });
+}
+
+// ------------------------------------------------------------------ 🔓 uncensored finder helpers
+// The quants we'd rather download (best quality first): good quality for their size, and Ollama runs them well.
+const PREFERRED_QUANTS = ['Q5_K_M', 'Q4_K_M', 'IQ4_XS'];
+function quantPref(v) {
+  const q = String((v && (v.quant || v.tag)) || '').toUpperCase().replace(/^UD-/, '').split(':').pop();
+  const i = PREFERRED_QUANTS.indexOf(q);
+  return i < 0 ? 99 : i;
+}
+/**
+ * pickQuant(variants, hardware) -> the size to download. First a preferred quant (Q5_K_M / Q4_K_M / IQ4_XS)
+ * that runs fully on the graphics card: the best fit tier (★★★ > ★★ > ★), then Q5_K_M > Q4_K_M > IQ4_XS.
+ * Else any other quant that runs on the card: 3–6 bits before the rest (2-bit is poor, 8-bit is twice the
+ * download for little gain), then the best tier, then the biggest. Else 🐢: the smallest (least spill onto the
+ * processor). Nothing runs → null. The returned object is a copy with .fit set.
+ */
+function pickQuant(variants, hardware, opts) {
+  const list = (Array.isArray(variants) ? variants : []).filter((v) => v && Number(v.sizeBytes) > 0)
+    .map((v) => Object.assign({}, v, { fit: hw.rateFit(v.sizeBytes, hardware, opts) }));
+  const TIER = { excellent: 3, good: 2, ok: 1 };
+  const onCard = list.filter((v) => TIER[v.fit.rating]);
+  const pref = onCard.filter((v) => quantPref(v) < 99)
+    .sort((a, b) => TIER[b.fit.rating] - TIER[a.fit.rating] || quantPref(a) - quantPref(b) || b.sizeBytes - a.sizeBytes);
+  if (pref.length) return pref[0];
+  const odd = (v) => { const b = quantBits(v.quant); return b == null ? 0 : (b < 3 || b > 6 ? 1 : 0); };
+  const rest = onCard.sort((a, b) => odd(a) - odd(b) || TIER[b.fit.rating] - TIER[a.fit.rating] || b.sizeBytes - a.sizeBytes);
+  if (rest.length) return rest[0];
+  const slow = list.filter((v) => v.fit.rating === 'slow').sort((a, b) => a.sizeBytes - b.sizeBytes);
+  return slow[0] || null;
+}
+
+// Names / tags that say a model was made for tools, and base families known to call tools well in Ollama.
+const TOOL_WORDS_RE = /(^|[^a-z])(tools?|agentic|agent|hermes|function[-_ ]?call(?:ing)?|fc)([^a-z]|$)/i;
+const TOOL_BASES_RE = /(qwen-?2\.5|qwen-?3|qwq|llama-?3\.[123]|llama3\.[123]|mistral-?small|gpt-?oss|hermes)/i;
+/** 🛠 good for Alfred's tools / ⚠ may not use tools well — from the source's own flag, the name/tags, or the base family. */
+function toolHint(model) {
+  const m = model || {};
+  const text = [m.name, m.repo, m.title, m.pullName, m.description].concat(Array.isArray(m.tags) ? m.tags : []).filter(Boolean).join(' ');
+  const good = m.tools === true || TOOL_WORDS_RE.test(text) || TOOL_BASES_RE.test(text) || toolsLikely(text);
+  return good
+    ? { good: true, label: '🛠 good for Alfred\'s tools' }
+    : { good: false, label: '⚠ may not use tools well' };
+}
+/** One plain line saying what "uncensored" means for this model. */
+function uncensoredLine(model) {
+  const m = model || {};
+  const text = [m.name, m.repo, m.title, m.description].filter(Boolean).join(' ');
+  if (/abliterat|obliterat|heretic|huihui|josiefied|no[-_ ]?refusal/i.test(text)) return 'Uncensored: refusals removed (abliterated) — knowledge and skill same as the base model';
+  return 'Uncensored: re-trained to follow instructions without refusing — knowledge and skill close to the base model';
+}
+const UNC_OLLAMA_QUERIES = ['uncensored', 'abliterated', 'dolphin', 'hermes'];
+const UNC_HF_QUERIES = ['abliterated', 'uncensored', 'heretic'];
+/** What is kept in the small "last result" cache (the ratings are worked out again for this PC when it's read). */
+function cacheable(m) {
+  const keep = ['id', 'source', 'name', 'repo', 'title', 'description', 'params', 'quant', 'uncensored', 'tools', 'vision', 'thinking', 'downloads', 'likes', 'url', 'gated', 'filesLoaded', 'chat', 'embedding'];
+  const o = {};
+  for (const k of keep) if (m[k] !== undefined) o[k] = m[k];
+  o.variants = (m.variants || []).slice(0, 24).map((v) => ({ tag: v.tag, quant: v.quant, params: v.params, sizeBytes: v.sizeBytes, estimated: !!v.estimated, pullName: v.pullName, parts: v.parts }));
+  return o;
 }
 
 // ------------------------------------------------------------------ the catalog
@@ -394,7 +454,7 @@ function createCatalog(options) {
         ? 'Hugging Face says your token can\'t open this model. Accept the model\'s terms on its page, then try again.'
         : 'This model is gated: accept its terms on Hugging Face and connect your Hugging Face token, then try again.';
       if (r.status === 404) error = 'Couldn\'t find that model on Hugging Face (it may be private or renamed).';
-      return { ok: false, variants: [], gated: r.status === 401 || r.status === 403, error };
+      return { ok: false, variants: [], gated: r.status === 401 || r.status === 403, rateLimited: r.status === 429, status: r.status || null, error };
     }
     const d = r.json || {};
     const gguf = d.gguf || {};
@@ -455,6 +515,75 @@ function createCatalog(options) {
     return { ok: okSources.size > 0, models, errors: errs };
   }
 
+  /**
+   * 🔓 The uncensored finder: the Ollama library ("uncensored", "abliterated", "dolphin", "hermes") and
+   * Hugging Face GGUF repos ("abliterated", "uncensored", "heretic"), merged, ONLY uncensored chat models,
+   * the most-downloaded Hugging Face ones with their exact file sizes (so the quant that fits the graphics
+   * card is picked), each rated for this PC with a tool-use hint and a plain "what uncensored means" line.
+   * opts: { sources, hardware, speeds, cache: { read() -> {at, models}, write(obj) }, filesLimit=8, max=40, now }
+   * Offline / rate-limited: the last result from the cache (re-rated), else the built-in list — never throws.
+   */
+  async function findUncensored(opts) {
+    const so = Object.assign({ sources: ['ollama', 'hf'] }, opts || {});
+    const sources = (Array.isArray(so.sources) ? so.sources : [so.sources]).filter((x) => x === 'ollama' || x === 'hf');
+    const useSources = sources.length ? sources : ['ollama', 'hf'];
+    const now = typeof so.now === 'function' ? so.now : () => Date.now();
+    const jobs = [];
+    if (useSources.includes('ollama')) for (const q of UNC_OLLAMA_QUERIES) jobs.push(searchOllama(q, {}).then((r) => ({ src: 'ollama', r })));
+    if (useSources.includes('hf')) for (const q of UNC_HF_QUERIES) jobs.push(searchHf(q, { limit: so.limit || 25 }).then((r) => ({ src: 'hf', r })));
+    const results = await Promise.all(jobs);
+    const seen = new Map(); const errors = [];
+    for (const { src, r } of results) {
+      if (!r.ok) { if (!errors.some((e) => e.source === src)) errors.push({ source: src, message: r.error }); continue; }
+      for (const m of r.models) if (!seen.has(m.id)) seen.set(m.id, m);
+    }
+    const okSources = new Set(results.filter((x) => x.r.ok).map((x) => x.src));
+    const errs = errors.filter((e) => !okSources.has(e.source));
+    const annotate = (m) => Object.assign(m, { uncensored: true, toolHint: toolHint(m), uncensoredLine: uncensoredLine(m) });
+    const finish = (list) => list.map((m) => annotate(rateModel(m, so.hardware, Object.assign({}, so, { preferQuants: true }))))
+      .sort((a, b) => compareModels(a, b, { uncensored: true }, (x, y) => rankScore(y) - rankScore(x)));
+    const errText = errs.map((e) => e.message).filter(Boolean).join(' ');
+
+    if (!okSources.size) {
+      let cached = null;
+      try { cached = so.cache && typeof so.cache.read === 'function' ? so.cache.read() : null; } catch (_) { cached = null; }
+      if (cached && Array.isArray(cached.models) && cached.models.length) {
+        const when = cached.at ? new Date(cached.at).toLocaleDateString() : 'earlier';
+        return { ok: true, models: finish(cached.models.map((m) => Object.assign({}, m))), errors: errs, fromCache: true, cachedAt: cached.at || null,
+          message: `${errText || 'The model sites didn\'t answer.'} Showing the uncensored models found on ${when} (saved on this PC).` };
+      }
+      const offline = curatedModels().filter((m) => m.uncensored);
+      return { ok: true, models: finish(offline), errors: errs, offline: true,
+        message: `${errText || 'The model sites didn\'t answer.'} Showing the built-in list of uncensored models (works offline).` };
+    }
+
+    let models = [...seen.values()].filter((m) => (m.uncensored || isUncensored(m.name, m.description)) && !m.embedding && m.chat !== false);
+    // Exact file sizes for the most-downloaded Hugging Face repos (a few, one after another in small groups: polite to the API).
+    const hfTop = models.filter((m) => m.source === 'hf').sort((a, b) => (b.downloads || 0) - (a.downloads || 0)).slice(0, Math.max(0, so.filesLimit == null ? 8 : so.filesLimit));
+    let limited = false;
+    for (let i = 0; i < hfTop.length && !limited; i += 3) {
+      const group = hfTop.slice(i, i + 3);
+      const got = await Promise.all(group.map((m) => hfFiles(m.repo, {}).catch(() => null)));
+      group.forEach((m, k) => {
+        const r = got[k];
+        if (!r) return;
+        if (r.rateLimited) { limited = true; return; }
+        if (!r.ok || !Array.isArray(r.variants) || !r.variants.length) { if (r.ok === false && /no GGUF/i.test(r.error || '')) m.noGguf = true; return; }
+        m.variants = r.variants.filter((v) => (v.parts || 1) === 1).length ? r.variants.filter((v) => (v.parts || 1) === 1) : r.variants;
+        m.filesLoaded = true;
+        if (r.tools != null && m.tools !== true) m.tools = r.tools;
+        if (r.params) m.params = r.params;
+        if (r.gated) m.gated = true;
+        if (r.vision) m.vision = true;
+      });
+    }
+    models = models.filter((m) => !m.noGguf);
+    models = finish(models).slice(0, Math.max(1, so.max || 40));
+    if (limited) errs.push({ source: 'hf', message: 'Hugging Face is getting too many requests right now, so some sizes are estimates. Wait a minute and try again for exact sizes.' });
+    try { if (so.cache && typeof so.cache.write === 'function' && models.length) so.cache.write({ at: now(), models: models.slice(0, 30).map(cacheable) }); } catch (_) {}
+    return { ok: true, models, errors: errs, live: true };
+  }
+
   function curated(hardware, opts) {
     const co = opts || {};
     let models = curatedModels();
@@ -464,10 +593,11 @@ function createCatalog(options) {
     return models;
   }
 
-  return { searchOllama, searchHf, hfFiles, search, curated };
+  return { searchOllama, searchHf, hfFiles, search, curated, findUncensored };
 }
 
 module.exports = {
   createCatalog, isUncensored, toolsLikely, parseParams, parseQuant, quantBits, groupGgufFiles,
   parseOllamaSearchHtml, parseCount, estimateQ4Bytes, rateModel, compareModels, measuredSpeed, speedKey, CURATED,
+  pickQuant, toolHint, uncensoredLine, PREFERRED_QUANTS, UNC_OLLAMA_QUERIES, UNC_HF_QUERIES,
 };

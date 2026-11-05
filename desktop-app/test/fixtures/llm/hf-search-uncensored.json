@@ -1,0 +1,69 @@
+[
+ {
+  "id": "bartowski/Qwen2.5-14B-Instruct-abliterated-GGUF",
+  "likes": 95,
+  "downloads": 61000,
+  "tags": [
+   "gguf",
+   "abliterated",
+   "uncensored",
+   "text-generation"
+  ],
+  "pipeline_tag": "text-generation",
+  "gated": false
+ },
+ {
+  "id": "mradermacher/Mistral-Small-24B-Instruct-2501-abliterated-GGUF",
+  "likes": 40,
+  "downloads": 23000,
+  "tags": [
+   "gguf",
+   "abliterated"
+  ],
+  "pipeline_tag": "text-generation",
+  "gated": false
+ },
+ {
+  "id": "mlabonne/gemma-3-12b-it-abliterated-GGUF",
+  "likes": 150,
+  "downloads": 52000,
+  "tags": [
+   "gguf",
+   "abliterated",
+   "uncensored"
+  ],
+  "pipeline_tag": "text-generation",
+  "gated": false
+ },
+ {
+  "id": "bigco/Huge-70B-abliterated-GGUF",
+  "likes": 10,
+  "downloads": 3000,
+  "tags": [
+   "gguf"
+  ],
+  "pipeline_tag": "text-generation",
+  "gated": false
+ },
+ {
+  "id": "someone/nomic-embed-uncensored-GGUF",
+  "likes": 1,
+  "downloads": 900,
+  "tags": [
+   "gguf",
+   "sentence-transformers"
+  ],
+  "pipeline_tag": "feature-extraction",
+  "gated": false
+ },
+ {
+  "id": "plainco/Plain-7B-Instruct-GGUF",
+  "likes": 5,
+  "downloads": 800,
+  "tags": [
+   "gguf"
+  ],
+  "pipeline_tag": "text-generation",
+  "gated": false
+ }
+]

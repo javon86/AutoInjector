@@ -55,6 +55,11 @@ function fakeOllama() {
         if (j.tools) return send(200, { choices: [{ message: { content: '', tool_calls: [{ id: '1', type: 'function', function: { name: 'get_time', arguments: '{}' } }] } }] });
         return send(200, { choices: [{ message: { content: 'ready' } }] });
       }
+      if (req.url === '/api/chat') {
+        st.apiChats = (st.apiChats || []).concat([j]);
+        if (!st.models.includes(j.model)) return send(404, { error: `model "${j.model}" not found` });
+        return send(200, { message: { role: 'assistant', content: 'Blood ran from the wound and he screamed. "Fuck you, you bastard." I will make you suffer. Grief for her brother was a dark weight. Her lips met his in a kiss. The corrupt banker deserved it.' }, done: true });
+      }
       if (req.url === '/v1/models') return send(200, { data: st.models.map((m) => ({ id: m })) });
       send(404, {});
     });
@@ -99,7 +104,7 @@ function fakeOllama() {
   if (ui) ui.webContents.on('ipc-send', (channel, payload) => { sent.push([channel, payload]); if (channel === 'llm') events.push(payload); });
 
   console.log('\n== the llm:* channels exist ==');
-  const CH = ['llm:status', 'llm:hardware', 'llm:check', 'llm:fix', 'llm:setup-all', 'llm:install-ollama', 'llm:start', 'llm:stop', 'llm:search', 'llm:curated', 'llm:hf-files', 'llm:pull', 'llm:cancel', 'llm:remove', 'llm:use', 'llm:hf-token'];
+  const CH = ['llm:status', 'llm:hardware', 'llm:check', 'llm:fix', 'llm:setup-all', 'llm:install-ollama', 'llm:start', 'llm:stop', 'llm:search', 'llm:curated', 'llm:uncensored', 'llm:write-test', 'llm:write-tests', 'llm:hf-files', 'llm:pull', 'llm:cancel', 'llm:remove', 'llm:use', 'llm:hf-token'];
   assert(CH.every((c) => typeof H[c] === 'function'), `all ${CH.length} handlers registered`);
 
   console.log('\n== status / hardware / curated / search ==');
@@ -131,6 +136,32 @@ function fakeOllama() {
   assert(Array.isArray(r.rows) && r.rows.find((x) => x.id === 'alfred-model').ok === true && r.rows.find((x) => x.id === 'installed').ok === false, 'check: Alfred\'s model ✔; Ollama not installed on this machine → ✖ (honest)');
   r = await call('llm:remove', 'qwen2.5:7b');
   assert(r.ok && !fake.st.models.length, 'remove');
+
+  console.log('\n== 🔓 uncensored finder + 🧪 What will it write? ==');
+  fake.st.models.push('dolphin3:8b');
+  r = await call('llm:uncensored', {});
+  assert(r && r.ok && r.live && r.models.length > 0 && r.models.every((m) => m.uncensored && m.fit && m.fit.label && m.toolHint && /^Uncensored: /.test(m.uncensoredLine)), `uncensored: live, only uncensored, rated + tool hint (${r && r.models ? r.models.map((m) => m.pullName).join(', ') : JSON.stringify(r).slice(0, 200)})`);
+  assert(Array.isArray(r.installed) && r.installed.includes('dolphin3:8b'), `…with what Ollama has now (${r.installed})`);
+  const uncCache = path.join(mock.__userDataDir, 'llm-uncensored-cache.json');
+  assert(fs.existsSync(uncCache) && JSON.parse(fs.readFileSync(uncCache, 'utf8')).models.length === r.models.length, 'the last result is saved on this PC (small cache)');
+  global.fetch = async (url, opts) => { const u = String(url && url.url ? url.url : url); if (/^https?:\/\/(?!127\.0\.0\.1|localhost)/.test(u)) throw new TypeError('fetch failed (offline)'); return realFetch(url, opts); };
+  r = await call('llm:uncensored', { sources: ['ollama', 'hf'] });
+  assert(r.ok && r.fromCache && r.models.length > 0 && /saved on this PC/.test(r.message), `offline → the saved list ("${r.message}")`);
+  r = await call('llm:write-test', { name: 'dolphin3:8b' });
+  assert(r.ok && r.results.length === 6 && r.verdict && r.verdict.kind === 'free' && (fake.st.apiChats || []).length === 6 && fake.st.apiChats.every((b) => b.think === false && b.options.num_predict === 150), `write-test: six probes on this PC's Ollama → ${r.verdict && r.verdict.label}`);
+  const wtEv = events.filter((e) => e.type === 'write-test');
+  assert(wtEv.some((e) => e.state === 'running' && e.step === 6) && wtEv.some((e) => e.state === 'done') && !JSON.stringify(wtEv).includes('Blood'), 'progress on the "llm" channel, no text');
+  r = await call('llm:write-tests', { name: 'dolphin3:8b' });
+  assert(r.ok && r.result && r.result.results.length === 6 && fs.existsSync(path.join(mock.__userDataDir, 'llm-write-tests.json')), 'the result is saved per model (llm-write-tests.json)');
+  r = await call('llm:write-tests');
+  assert(r.ok && r.results['dolphin3:8b'] && r.running === null, 'all saved results');
+  await sleep(150);
+  let dbgW = ''; try { dbgW = fs.readFileSync(path.join(mock.__userDataDir, 'autoinjector-debug.log'), 'utf8'); } catch (_) {}
+  assert(/llm-write-test/.test(dbgW) && /wrote,wrote/.test(dbgW) && !/Blood|bastard|banker/.test(dbgW), 'the debug log has the scores, never the text');
+  r = await call('llm:write-test', { name: 'not installed:1b' });
+  assert(!r.ok && /Pick a model/.test(r.error), 'a bad name → plain message');
+  r = await call('llm:write-test', { name: 'qwen3:32b' });
+  assert(!r.ok && /isn't downloaded yet/.test(r.error), `a model not on this PC → "${r.error}"`);
 
   console.log('\n== fix / cancel / start / stop / install never throw ==');
   r = await call('llm:fix', { action: 'nope' });

@@ -55,6 +55,7 @@
       h('label', { class: 'llm-unc', title: 'Pick an uncensored model that still follows instructions (🔓)' }, h('input', { type: 'checkbox', id: 'llm-uncensored' }), ' 🔓 Prefer uncensored'),
       h('label', { class: 'llm-unc', title: 'Every time AutoInjector opens, start Alfred with the model you already have (no download, no clicks)' }, h('input', { type: 'checkbox', id: 'llm-autostart' }), ' Start him when the app opens'),
       h('button', { id: 'llm-btn-check', title: 'Confirm Ollama is installed and running, the model is there, answers and can use tools' }, '🩺 Check everything'),
+      h('button', { id: 'llm-btn-wt', title: 'Six short fiction requests (a battle, a villain, swearing, grief, a romance, a heist) run on Alfred\'s model on this PC: what it writes, softens or refuses' }, '🧪 What will it write?'),
       h('button', { id: 'llm-btn-start' }, '▶ Start Ollama'),
       h('button', { id: 'llm-btn-stop' }, '⏹ Stop Ollama'),
       h('button', { id: 'llm-btn-cancel', class: 'danger', hidden: true }, '✖ Cancel')),
@@ -65,6 +66,7 @@
     h('div', { id: 'llm-msg', class: 'llm-msg', role: 'status', 'aria-live': 'polite' }),
     h('div', { id: 'llm-scan', class: 'llm-scan', hidden: true }),
     h('ul', { id: 'llm-check-rows', class: 'llm-rows' }),
+    h('div', { id: 'llm-wt', class: 'llm-wt', hidden: true }),
     h('details', { id: 'llm-installed-wrap', class: 'llm-installed-wrap' },
       h('summary', null, '📦 Models on this PC'),
       h('div', { id: 'llm-installed', class: 'llm-installed' })),
@@ -156,8 +158,10 @@
         m.fit ? h('span', { class: `llm-fit llm-fit-${m.fit.rating}`, title: m.fit.reason || '' }, ` ${m.fit.label}`) : null,
         h('span', { class: 'spacer' }),
         current ? h('span', { class: 'llm-sub' }, ' in use') : h('button', { class: 'llm-use', onclick: () => useModel(m.name) }, 'Use'),
+        /embed/i.test(m.name) ? null : h('button', { class: 'llm-wt-btn', title: `🧪 What will ${m.name} write? Six short fiction requests, run on this PC`, onclick: () => writeTest(m.name) }, '🧪 Test'),
         h('button', { class: 'llm-remove', title: `Delete ${m.name} from this PC`, onclick: () => removeModel(m.name) }, 'Remove')));
     }
+    try { if (window.llmModelsUI && typeof window.llmModelsUI.setInstalled === 'function') window.llmModelsUI.setInstalled(models.map((x) => x.name)); } catch (_) {}
     if (s.busy && !busy) setBusy(true);
     if (!s.busy && busy && !running) setBusy(false);
   }
@@ -212,6 +216,26 @@
     if (!sure) return;
     const r = await task(() => call('llmRemove', name));
     if (r) msg(r.ok ? r.message : r.error, r.ok ? 'good' : 'bad');
+  }
+
+  // 🧪 What will it write? — on this PC only; the table shows under the check rows.
+  let wtRunning = false;
+  async function writeTest(name) {
+    const model = name || (last && last.alfred && last.alfred.model);
+    const box = $('llm-wt');
+    if (!model) { msg('Pick a model for Alfred first (📦 Models on this PC → Use), then test it.', 'warn'); return; }
+    const W = window.LlmWriteTestUI;
+    if (!W) { msg('The writing test isn\'t available in this build.', 'bad'); return; }
+    if (wtRunning) { msg('A writing test is already running — wait for it to finish.', 'warn'); return; }
+    wtRunning = true;
+    box.hidden = false;
+    const btn = $('llm-btn-wt'); if (btn) btn.disabled = true;
+    msg(`🧪 Testing what ${model} will write (six short fiction requests, on this PC)…`);
+    try {
+      const res = await W.run(model, (state) => { box.innerHTML = `<div class="llm-sub"><b>${String(model).replace(/[&<>"]/g, '')}</b></div>${W.html(state)}`; });
+      if (res.state === 'done') msg(`🧪 ${model}: ${res.result.verdict.label}`, res.result.verdict.kind === 'free' ? 'good' : 'warn');
+      else msg(`🧪 ${res.error}`, 'bad');
+    } finally { wtRunning = false; if (btn) btn.disabled = false; }
   }
 
   async function go() {
@@ -274,6 +298,7 @@
   auto.addEventListener('change', () => { if (typeof api.alfredSettings === 'function') Promise.resolve(api.alfredSettings({ autoStart: auto.checked })).catch(() => {}); msg(auto.checked ? '✓ Alfred will start by himself when AutoInjector opens (with the model you already have).' : 'Alfred won\'t start by himself.', 'good'); });
   $('llm-btn-setup').addEventListener('click', setupAll);
   $('llm-btn-check').addEventListener('click', check);
+  $('llm-btn-wt').addEventListener('click', () => writeTest());
   $('llm-btn-start').addEventListener('click', start);
   $('llm-btn-stop').addEventListener('click', stop);
   $('llm-btn-cancel').addEventListener('click', () => { call('llmCancel'); msg('Cancelling…'); });
@@ -350,6 +375,6 @@
   if (fmWrap) fmWrap.addEventListener('toggle', () => { if (fmWrap.open) renderFolders(); });
 
   // Other panels (🎩 "⚙ Set up his AI", the model finder) can ask for a refresh / a check.
-  window.llmSetupUI = { refresh, check, setupAll, start: go, scan, contentOthers: renderContentOthers, folders: renderFolders, status: () => last };
+  window.llmSetupUI = { refresh, check, setupAll, start: go, scan, writeTest, contentOthers: renderContentOthers, folders: renderFolders, status: () => last };
   refresh();
 })();
