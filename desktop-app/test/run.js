@@ -10,6 +10,9 @@
 // local service bridge would try to open a real TCP port on app-ready, which is
 // an unrelated side effect here — disable it (service-bridge.test.js covers it).
 process.env.AUTOINJECTOR_BRIDGE = "0";
+// PR #122 raised the transcript cap to 2,000 (the newest kept, older ones archived to a file); the persistence
+// scenario below seeds 1,051 turns to see the cap work on load, so this harness keeps the cap at 1,000.
+process.env.AUTOINJECTOR_MAX_TRANSCRIPT = process.env.AUTOINJECTOR_MAX_TRANSCRIPT || "1000";
 process.env.AUTOINJECTOR_CHECKIN = process.env.AUTOINJECTOR_CHECKIN || "0"; // P18: no automatic check-ins in this harness (test/self-repair-main.test.js covers them)
 process.env.AUTOINJECTOR_POLL_MS = process.env.AUTOINJECTOR_POLL_MS || "50";
 process.env.AUTOINJECTOR_STABLE_MS = process.env.AUTOINJECTOR_STABLE_MS || "80";
