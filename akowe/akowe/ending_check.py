@@ -155,6 +155,13 @@ def promises(bp, chapters: list[dict], *, final: bool = True) -> dict:
                 "need": _clip(sheet.get("needs") or sheet.get("need"), 300),
                 "change_limits": _clip(sheet.get("change_limits"), 300)}
         main = {k: v for k, v in main.items() if v}
+    try:  # 📚 the kind of story's promise (a Tragedy's downfall, a Comedy's happy union…) is one of the promises
+        from . import story_kind  # noqa: PLC0415
+        kp = story_kind.ending_promise(store, pid, final=final)
+        if kp:
+            items.insert(0, kp)  # first, so it is never cut
+    except Exception:  # noqa: BLE001
+        log.exception("story kind promise in the ending check")
     prof = get_profile(store, pid)
     q = [x for x in (_clip(premise.get("dramatic_question"), 300), _clip(prof.get("central_question"), 300)) if x]
     return {"items": items[:MAX_ITEMS], "people": people, "main": main, "question": " / ".join(dict.fromkeys(q)) or None,
@@ -206,6 +213,10 @@ def check(review, job, *, upto: int | None = None, final: bool = True, ai: bool 
         writer = review.writer_of(pid, branch, bp.rec(last["record_id"]) or {"record_id": last["record_id"],
                                                                              "module_id": "C02"})
         task = TASK + ("" if final else CHECKPOINT_TASK)
+        if any(i.get("kind") == "story_kind" for i in items):  # 📚 the kind of story and its promise
+            from . import story_kind  # noqa: PLC0415
+            ctx["story_kind"] = story_kind.ending_context(review.store, pid) or {}
+            task += story_kind.ENDING_RULE
         answers = _ask_all(review, job, writer, checkers, task, ctx) if checkers and len(checkers) >= 2 else None
         if answers is None:
             review.plan_reviewer(job, writer)
@@ -232,6 +243,13 @@ def check(review, job, *, upto: int | None = None, final: bool = True, ai: bool 
                         for b in story_shape.status(bp, upto=None if final else n) if b.get("written")]
     except Exception:  # noqa: BLE001
         log.exception("story beats in the ending check")
+    try:  # 📚 the stages of the book's kind of story: did each one begin on the page? (no AI: the planned checks)
+        from . import story_kind  # noqa: PLC0415
+        res["stages"] = [{k: b.get(k) for k in ("id", "name", "number", "last", "chapter_id", "status",
+                                                "how_checked")}
+                         for b in story_kind.status(bp, upto=None if final else n) if b.get("written")]
+    except Exception:  # noqa: BLE001
+        log.exception("story stages in the ending check")
     res["open"] = open_list(res)
     save(review.store, pid, branch, res)
     return res
@@ -349,7 +367,8 @@ def open_list(res: dict) -> list[dict]:
     for i in res.get("items") or []:
         if i["status"] in ("open", "unchecked"):
             what = {"setup": "A setup with no payoff", "thread": "A thread left hanging",
-                    "character": "A character who vanishes"}.get(i["kind"], "A promise")
+                    "character": "A character who vanishes",
+                    "story_kind": "Not delivered yet (the kind of story's promise)"}.get(i["kind"], "A promise")
             out.append({"id": i["id"], "kind": i["kind"], "fix": i.get("fix"), "fix_chapter": i.get("fix_chapter"),
                         "line": f"{what}: {i['label']}" + (f" — {i['note']}" if i.get("note") else "")
                         + (" (not checked: no AI could read the book)" if i["status"] == "unchecked" else "")})
@@ -362,6 +381,11 @@ def open_list(res: dict) -> list[dict]:
         if b.get("status") != "on_page":
             out.append({"id": f"beat:{b['id']}", "kind": "beat", "fix": "", "fix_chapter": b.get("number"),
                         "line": f"A story beat that did not land: Ch {b.get('number')} · {b.get('name')}"})
+    for b in res.get("stages") or []:  # 📚 a stage of the kind of story that did not begin on the page
+        if b.get("status") != "on_page":
+            out.append({"id": f"stage:{b['id']}", "kind": "stage", "fix": "", "fix_chapter": b.get("number"),
+                        "line": f"A stage of the kind of story that did not land: Ch {b.get('number')} · "
+                                f"{b.get('name')}"})
     return out
 
 
@@ -421,6 +445,13 @@ def summary_line(res: dict) -> str:
         one = sum(1 for i in items + [p for p in (res.get("arc"), res.get("question")) if p]
                   if i.get("agreement") == "one_ai")
         bits.append(f"checked by {', '.join(who)} ({conf} confirmed by 2 or more, {one} by one AI only)")
+    kp = next((i for i in items if i.get("kind") == "story_kind"), None)
+    if kp and kp.get("status") in ("kept", "open"):
+        bits.append(f"the kind of story's promise: {kp['status']}")
+    stages = res.get("stages") or []
+    if stages:
+        bits.append(f"story stages on the page: {sum(1 for b in stages if b.get('status') == 'on_page')} of "
+                    f"{len(stages)}")
     beats = res.get("beats") or []
     if beats:
         bits.append(f"story beats on the page: {sum(1 for b in beats if b.get('status') == 'on_page')} of "
