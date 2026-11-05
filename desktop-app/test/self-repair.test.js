@@ -1002,6 +1002,110 @@ async function testClaudeRows() {
   assert(read.length && /7284/.test(read[read.length - 1].textContent), "the learned reply selector finds Claude's newest reply");
 }
 
+// ---------------------------------------------------------------------------------
+// PR #120 (log 2026-11-04): Gemini answered its check-in late (94 s, ~157 s) and
+// self-repair pressed Stop, reloaded and called it broken while the answer came in.
+async function testSlowAnswers() {
+  console.log("\n== PR #120: a check-in answer that arrives during the repair -> slow, never broken ==");
+  let sim = makeSite({ answer: false, options: { probeTimeoutMs: 250 } });
+  const seqs = [], words = [];
+  const orig = sim.onSend;
+  sim.onSend = async (text, token) => { const r = await orig(text, token); seqs.push(sim.lastSeq); const m = /word: ([a-z]+)/.exec(text); words.push(m && m[1]); return r; };
+  const p = sim.engine.runCheck("chatgpt", "periodic");
+  await waitUntil(() => seqs.length >= 2, 4000); // the first check-in timed out, the repair reloaded and checked in again
+  // the FIRST check-in's answer arrives now (owned by its word and [MSG #]) — like 8:03:49
+  assert(sim.engine.onCaptured("chatgpt", { text: `[TO: USER]\n${words[0]}\n[FROM: CHATGPT]`, answers: [seqs[0]] }) === true, "the earlier check-in's answer is still owned");
+  let r = await p;
+  let st = sim.engine.state("chatgpt");
+  const res = sim.engine.events().filter((e) => e.kind === "result").pop();
+  assert(r.ok && st.state === "ok" && st.slow === true && !sim.engine.events().some((e) => e.kind === "ask_user" || (e.kind === "state" && e.state === "broken")), `answered during the repair -> ok + slow, never broken (${st.state}, slow ${st.slow})`);
+  assert(res && res.outcome === "OK" && res.how === "late-answer" && res.reason === "slow" && st.tried.some((t) => t.outcome === "ANSWERED"), `the result says OK (late answer, slow), not FIXED (${JSON.stringify(res)})`);
+  assert(sim.changes.some((c) => c.ev && c.ev.kind === "slow") && !sim.changes.some((c) => c.ev && c.ev.kind === "broken"), "the panel gets a 'slow' event, no 'broken' one");
+
+  console.log("\n== PR #120: a reply that answers the check-in's [MSG #] without its word (main.js 'answers-checkin') ends the wait ==");
+  sim = makeSite({ answer: false, options: { probeTimeoutMs: 3000 } });
+  let seq = null;
+  const o2 = sim.onSend;
+  sim.onSend = async (text, token) => { const rr = await o2(text, token); seq = sim.lastSeq; setTimeout(() => sim.engine.noteProbeAnswer("chatgpt", { answers: [seq] }), 40); return rr; };
+  const t0 = Date.now();
+  r = await sim.engine.runCheck("chatgpt", "periodic");
+  st = sim.engine.state("chatgpt");
+  assert(r.ok && st.state === "ok" && Date.now() - t0 < 1500 && !sim.engine.events().some((e) => e.kind === "detect"), `credited at once, no 90 s wait and no repair (${Date.now() - t0} ms)`);
+
+  console.log("\n== PR #120: the site's own error notice as the check-in's answer -> PAGE_ERROR at once -> reload -> fixed ==");
+  sim = makeSite({ answer: false, options: { probeTimeoutMs: 3000 } });
+  let n = 0;
+  const o3 = sim.onSend;
+  sim.onSend = async (text, token) => {
+    const rr = await o3(text, token); n++;
+    const s1 = sim.lastSeq;
+    if (n === 1) setTimeout(() => { sim.block("bot", "Sorry, something went wrong. Please try your request again."); sim.engine.noteProbeAnswer("chatgpt", { answers: [s1], siteError: true }); }, 30);
+    else { const w = /word: ([a-z]+)/.exec(text)[1]; setTimeout(() => sim.engine.onCaptured("chatgpt", { text: w, answers: [s1] }), 30); }
+    return rr;
+  };
+  const t1 = Date.now();
+  r = await sim.engine.runCheck("chatgpt", "periodic");
+  st = sim.engine.state("chatgpt");
+  const det = sim.engine.events().find((e) => e.kind === "detect");
+  assert(det && det.code === "PAGE_ERROR" && sim.reloads === 1 && r.ok && r.fixed && Date.now() - t1 < 2500, `site error -> PAGE_ERROR without the long wait, reloaded, fixed (${det && det.code}, reloads ${sim.reloads}, ${Date.now() - t1} ms)`);
+  assert(sim.engine.noteProbeAnswer("chatgpt", { siteError: true }) === false, "a site error notice with no check-in waiting is never credited");
+
+  console.log("\n== PR #120: a reply visibly being written is waited for (up to probeMaxWaitMs), never stopped ==");
+  sim = makeSite({ answer: false, options: { probeTimeoutMs: 250, probeMaxWaitMs: 4000, stallMs: 400 } });
+  sim.stop = true; sim.build();
+  const o4 = sim.onSend;
+  let stream = null;
+  sim.onSend = async (text, token) => {
+    const rr = await o4(text, token);
+    const s1 = sim.lastSeq; const w = /word: ([a-z]+)/.exec(text)[1];
+    sim.generating = true;
+    sim.block("bot", "thinking");
+    let k = 0;
+    stream = setInterval(() => { const l = sim.doc.querySelectorAll('[data-message-author-role="assistant"] .markdown'); const el = l[l.length - 1]; el.textContent += ` part${k++}`; }, 50);
+    setTimeout(() => { clearInterval(stream); sim.generating = false; sim.block("bot", `[TO: USER]\n${w}\n[FROM: CHATGPT]`); sim.engine.onCaptured("chatgpt", { text: w, answers: [s1] }); }, 900);
+    return rr;
+  };
+  r = await sim.engine.runCheck("chatgpt", "periodic");
+  st = sim.engine.state("chatgpt");
+  assert(r.ok && st.state === "ok" && !sim.engine.events().some((e) => e.kind === "detect") && sim.doc.querySelector('[data-testid="stop-button"]'), `still writing past the usual wait -> waited, answered, Stop never pressed (${st.state})`);
+  assert(r.slow === true && st.slow === true, "an answer slower than the usual wait marks the AI slow");
+  assert(sim.engine.probeWaitMs("chatgpt") >= 1300 && sim.engine.probeWaitMs("chatgpt") <= 4000, `the next check-in waits longer on this site (1.5 × its slowest answer: ${sim.engine.probeWaitMs("chatgpt")} ms)`);
+
+  console.log("\n== PR #120: 'stuck' but its text still changes -> Stop is NOT pressed ==");
+  sim = makeSite({ answer: false, options: { probeTimeoutMs: 200, probeMaxWaitMs: 200, stallMs: 300 } });
+  sim.stop = true; sim.build();
+  const o5 = sim.onSend;
+  sim.onSend = async (text, token) => {
+    const rr = await o5(text, token);
+    sim.generating = true; sim.block("bot", "writing");
+    let k = 0;
+    stream = setInterval(() => { const l = sim.doc.querySelectorAll('[data-message-author-role="assistant"] .markdown'); const el = l[l.length - 1]; if (el) el.textContent += ` w${k++}`; }, 40);
+    return rr;
+  };
+  r = await sim.engine.runCheck("chatgpt", "periodic");
+  clearInterval(stream);
+  st = sim.engine.state("chatgpt");
+  assert(sim.engine.events().some((e) => e.kind === "detect" && e.code === "STUCK_GENERATING") && st.tried.some((t) => t.step === "unfreeze" && t.outcome === "STILL_WRITING") && !st.tried.some((t) => t.outcome === "PRESSED_STOP"), `still writing -> not pressed (${st.tried.map((t) => t.step + ":" + t.outcome).join(", ")})`);
+  assert(sim.doc.querySelector('[data-testid="stop-button"]') && r.ok && st.state === "ok" && st.slow, "the Stop button is still there; the AI is slow, not broken");
+
+  console.log("\n== PR #120: the per-site wait follows measured answer times ==");
+  sim = makeSite({ options: { probeTimeoutMs: 1000, probeMaxWaitMs: 3000 } });
+  assert(sim.engine.probeWaitMs("chatgpt") === 1000, "no history: the base wait");
+  sim.engine.noteReplyMs("chatgpt", 400);
+  assert(sim.engine.probeWaitMs("chatgpt") === 1000, "fast answers keep the base wait");
+  sim.engine.noteReplyMs("chatgpt", 1600);
+  assert(sim.engine.probeWaitMs("chatgpt") === 2400, "a 1.6 s answer -> 2.4 s wait (1.5 ×)");
+  sim.engine.noteReplyMs("chatgpt", 9000);
+  assert(sim.engine.probeWaitMs("chatgpt") === 3000, "never longer than probeMaxWaitMs (3 min in the app)");
+
+  console.log("\n== PR #120: real 'not working' detection still works; a late answer after it fixes it ==");
+  sim = makeSite({ layout: "changed", options: { probeTimeoutMs: 250 } });
+  sim.block = (who, text) => { const l = sim.doc.getElementById("thread"); if (l) append(sim.doc, l, `<p class="flat">${text.replace(/</g, "&lt;")}</p>`); };
+  r = await sim.engine.runCheck("chatgpt", "periodic");
+  assert(r.state === "broken" && sim.engine.state("chatgpt").state === "broken", "no answer at all -> still 'not working'");
+  assert(sim.engine.noteProbeAnswer("chatgpt", { answers: ["0001"] }) === true && sim.engine.state("chatgpt").state === "ok" && sim.engine.events().filter((e) => e.kind === "result").pop().outcome === "FIXED", "a check-in answer that comes in after the verdict -> working again");
+}
+
 (async () => {
   try {
     testClassifier();
@@ -1011,6 +1115,7 @@ async function testClaudeRows() {
     await testTeachLearner();
     await testGeneralise();
     await testEngine();
+    await testSlowAnswers();
     await testTeachFastAndOwned();
     await testCarryOn();
     await testOwnership();

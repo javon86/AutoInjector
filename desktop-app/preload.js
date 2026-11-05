@@ -49,6 +49,7 @@ contextBridge.exposeInMainWorld("api", {
   // 📋 copy the page's structure (no message text) for a bug report
   pickerForce: (site, role) => ipcRenderer.invoke("picker:force", { site, role }),
   pickerForgetAll: (site) => ipcRenderer.invoke("picker:forget-all", { site }),
+  pickerUndoRetire: (site, role) => ipcRenderer.invoke("picker:undo-retire", { site, role }), // PR #120: ↺ Undo a forgotten out-of-date part
   pickerPageStructure: (site) => ipcRenderer.invoke("picker:page-structure", { site }),
   onPicker: (cb) => ipcRenderer.on("picker", (_e, payload) => cb(payload)),
   runSelfTest: (site) => ipcRenderer.invoke("selftest:run", { site }),
