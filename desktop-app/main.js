@@ -8563,7 +8563,7 @@ async function startAkoweBridgeNow() {
     siteState: (s) => selfRepair.health(s),
     // PR #123: short follow-up corrections go into the same chat (never after a fresh chat or the user's own typing)
     chatKey: (s) => akoweChatKey(s),
-    userActedSince: (s, t) => (lastUserInputAt[s] || 0) > t,
+    userActedSince: (s, t) => (lastUserInputAt[s] || 0) >= t, // same millisecond as the answer counts as "since" (never type a correction over the user)
     startProbe: (list) => selfRepair.probeMany(list, "akowe", "demand"),
     sendToSite: async (site, text, meta) => {
       // P18.1: a check-in on this AI never interleaves with an Akọwe prompt — one
