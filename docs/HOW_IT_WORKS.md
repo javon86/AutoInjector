@@ -126,7 +126,11 @@ bridge to your home Wi-Fi, behind its key.
   3. It waits for the reply that answers that exact number.
   4. It removes the tags and hands the text back to Akọwe. That reply is never relayed to the other AIs.
   5. Akọwe checks the answer. Most answers must be a tidy block of data (JSON). If not, it asks again, up to two
-     more times.
+     more times. When AutoInjector says the chat can be continued, the second ask is only a short correction ("your
+     last answer was not valid JSON: …"), not the whole prompt again. AutoInjector types it into the **same chat**,
+     and only when nothing changed there since the answer (no fresh chat, nothing else typed, you did not type in
+     that pane); otherwise it types nothing and Akọwe sends the whole prompt at once. If the answer is still broken, or the AI
+     refused, the work goes to another AI that works before anything stops.
 - **When it can't answer:**
   - **Busy:** one request per AI at a time. A second one hears "busy", and Akọwe waits and retries.
   - **Site error:** the site showed its own notice ("Something went wrong", a usage limit) or a short canned
@@ -136,9 +140,21 @@ bridge to your home Wi-Fi, behind its key.
   - **Chat full:** the site says the conversation is too long ("…exceed the length limit for this chat", "start a
     new chat"). Akọwe hears "site error: chat full" and asks again after 10 seconds; AutoInjector opens a fresh chat
     in that pane first (see **Fresh chats** below).
+  - **Every AI at its usage limit:** Akọwe waits for a limit to reset, by itself: "All AIs hit their usage limits
+    — waiting; resumes by itself at about 3:40 PM" shows in the run window and the activity strip. It checks every
+    few minutes (or at the reset time the site showed: AutoInjector reads "until 3:40 PM", "resets 3pm" or "try
+    again in 2 hours" from the site's limit notice and passes it on) for up to 6 hours (Settings › ⏳ When the AI is busy), then
+    goes on. Only after that whole time does the run pause.
   - **Not working:** an AI that is being repaired, logged out or broken is skipped. Its work goes to another AI.
-  - **Timeout:** no answer in time (4 minutes by default). Akọwe never retries this by itself, because the answer
-    may still come. The step pauses and you press 🔁 Try again.
+  - **Timeout:** no answer in time (every AI call has its own time: at least 5 minutes for a web AI, also for each
+    scene of a long chapter). When the prompt was typed, Akọwe first collects the late answer (it asks again with
+    the same request number, so nothing is typed twice). If none comes, the work goes to another AI that works, or,
+    with only one AI, that AI is asked once more after a minute. Only then does the step pause for 🔁 Try again. A
+    late answer is never used twice.
+- **"Akọwe is using this AI":** while Akọwe waits for an AI's answer, that AI's card in the 🤖 AutoInjector tab
+  shows a yellow note: "📖 Akọwe is using Claude right now… Please don't type in Claude's window until it is done —
+  use another AI meanwhile." It goes when the answer is in. (Typing your own question there would land between
+  Akọwe's prompt and its answer.)
 - **Fresh chats:** a book run sends about 1,000 messages. Kept in one chat, the chat gets slow and the site stops
   it ("this chat is too long"). So AutoInjector opens a **new chat** in an AI's pane for Akọwe after **15 Akọwe
   requests** or about **300,000 characters** in that chat (change it in the 📖 Akọwe panel: 🆕 Fresh chat for
@@ -356,9 +372,13 @@ to a minute), so the run knows which AIs work.
   - **✔ Approve anyway:** your own approval.
   - **✏️ Edit it myself**, then Continue.
   - **🔁 Try again:** two more AI fixes.
-- Only one AI is working, so nobody else could check a draft. You choose: **✔ Approve it yourself** (read it
-  first), or **🔁 Try again** once another AI is connected.
-- An AI did not answer in time.
+- Only one AI is working, so nobody else could check a draft — **only if you chose "Stop and ask me"** for "When
+  only one AI works" (Make a book › Checking for mistakes). You choose: **✔ Approve it yourself** (read it first),
+  or **🔁 Try again** once another AI is connected. By default ("Keep going") the run goes on: the one AI's own
+  check approves the chapter, and it is listed as **needs your check later** in the run window, on 🏠 Book home and
+  in the book report. "Wait for a second AI" waits up to the usage-limit time for another AI to check it.
+- An AI did not answer in time, even after its late answer was collected and another AI (or the same one, a
+  minute later) was asked.
 - A checkpoint found a problem it could not fix safely (once per checkpoint).
 - Akọwe was closed mid-run. The run shows **Interrupted** and **▶ Resume** carries on.
 
@@ -431,7 +451,8 @@ A few of these need more words:
   and a ⚠️ *Needs a look* card on 🏠 Book home list these chapters.
 - **Hand edits.** When you change a chapter, what Akọwe read from the old text is set aside: its running notes,
   the notes of every later chapter (they were built on top of it), its lines in the story so far, and any
-  checkpoint that read it. They are read again from the new text, and
+  checkpoint that read it — only those: of the final whole-book read, only the part that holds the changed chapter.
+  Later checkpoints that did not read it are only marked "may be affected". They are read again from the new text, and
   each later chapter gets a flag: *"Chapter 5 changed after chapter 6 was written — check chapter 6."*
 - **Needs lists.** The chapter reviewer and the checkpoints get each chapter's needs list and check every listed
   section on the page. When the chapter used something its list did not plan, the run says so ("🧠 Chapter 7 also
@@ -510,8 +531,8 @@ then carries the locked facts, belongings, status and a summary of book 1.
 | Models (checkpoints, LoRAs, FramePack, Ollama…) | `stuff and thing/models/` (one folder per kind) |
 | Installed programs (ComfyUI, Ollama) | `stuff and thing/apps/` |
 | Reports and test results | `stuff and thing/logs/` |
-| Your books | `Documents\Akowe Books\` (change it in Akọwe → Settings → 📁 Where books are saved) |
-| Akọwe's working data and backups | `%LOCALAPPDATA%\Akowe` |
+| Your books | `Documents\Akowe Books\` in your real Documents folder, also when Windows moved it to OneDrive (change it in Akọwe → Settings → 📁 Where books are saved; a folder OneDrive, Dropbox or Google Drive syncs gets a ⚠️ and a button for a folder they do not sync) |
+| Akọwe's working data and backups | `%LOCALAPPDATA%\Akowe` (backups share unchanged pictures and clips instead of copying them again; its own log is `logs\akowe.log`, 10 MB × 5 files; each story checkpoint and chapter check is saved on its own, so a long book never rewrites one big record) |
 | AutoInjector settings, transcript, connection key | `%APPDATA%\autoinjector-desktop\` (older messages: `autoinjector-transcript-archive.jsonl`, then `.1`) |
 
 **Inside one book's folder:** `Book/` (PDF, EPUB, Word), `Chapters/`, `Book Bible/`, `Reports/`, `Log/` (the
@@ -532,7 +553,9 @@ quietly every 10 minutes when a book has changed.
   **🎯 Point at it** or **🔢 Do it for me with a number**.
 - **Logged out, "are you human?", usage limit:** the AI's card shows **⚠️ Needs you**. Fix it in the pane.
   AutoInjector notices by itself. Meanwhile, Akọwe sends the work to the other AIs.
-- **A book run pauses with ⚠️:** read the message on that step. It says what to press. If you were away, a Windows
+- **A book run pauses with ⚠️:** read the message on that step. It says what happened and what to do next
+  (for example: "open AutoInjector and look at that AI's window — if it says the chat is too long, press the
+  site's New chat; if it asks you to log in, do that. Then press 🔁 Try again"). If you were away, a Windows
   notification told you (click it to go straight there).
 - **"This chat is too long" in an AI's pane:** nothing to do. AutoInjector opens a fresh chat there before
   Akọwe's next request. You can also press the pane's own **New chat**.

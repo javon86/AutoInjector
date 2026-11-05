@@ -32,7 +32,8 @@ def one_ai_server(tmp_path_factory, bridge):
 
 def test_one_ai_asks_the_author_and_book_home_lists_what_was_not_checked(make_context, one_ai_server):
     s = one_ai_server
-    r = s.api("POST", "/autobook", {"author_confirms": True, "length": "short_story", "pictures": False})
+    r = s.api("POST", "/autobook", {"author_confirms": True, "length": "short_story", "pictures": False,
+                                    "single_ai": "ask"})  # PR #122: the old "ask me" behaviour
     run = wait_status(s, r["id"], ("paused",))
     assert run["problem"]["code"] == "NO_SECOND_AI", run["problem"]
     page = open_app(make_context(), s)

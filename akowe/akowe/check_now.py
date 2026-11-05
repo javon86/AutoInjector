@@ -143,9 +143,29 @@ def start(app, principal, pid, branch, body) -> dict:
     return status(app, principal, pid, branch)
 
 
+def solo_running(app, pid: str) -> str | None:
+    """PR #122: a whole-book "Check consistency now" running on its own for this book (outside a run), in plain
+    words, or None. A ⚡ run of the same book must not start meanwhile: both would fight over the same AIs."""
+    with _LOCK:
+        for (p, branch), t in list(_THREADS.items()):
+            if p != pid or not (t and t.is_alive()):
+                continue
+            req = get(app.store, p, branch)
+            if req.get("status") == "running" and not req.get("in_run"):
+                return (f"A consistency check of {req.get('label') or 'this book'} is running now and uses the AIs. "
+                        "Wait for it to finish (🔎 Check consistency now shows how far it is), then start again.")
+    return None
+
+
 def _kick(app, principal, pid, branch) -> None:
     """A queued request whose run is no longer working runs on its own now; a "running" one whose job died (Akọwe
-    was closed) is marked as stopped."""
+    was closed) is marked as stopped. PR #122: under the lock — two pages polling the status at once (Book home,
+    Continuity, the run window) must never both start the same queued check."""
+    with _LOCK:
+        _kick_locked(app, principal, pid, branch)
+
+
+def _kick_locked(app, principal, pid, branch) -> None:
     req = get(app.store, pid, branch)
     if req.get("status") == "queued" and not _live_run(app, pid):
         req.update(status="running", in_run=False, started_at=_now(), handed_over=True)

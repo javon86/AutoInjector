@@ -353,6 +353,7 @@ def test_page_count_comes_from_the_pdf_export_then_an_estimate(fx, monkeypatch):
     with pytest.raises(AkoweError) as e:
         cover.print_cover(app, pid, BR, pages="12")
     assert "at least 24" in str(e.value)
+    assert "Print settings" in e.value.errors[0]["fix"]  # a plain next step, not "the field marked ⚠️"
 
 
 # ====================================================================== AI art (fake AutoInjector bridge)

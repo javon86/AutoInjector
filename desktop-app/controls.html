@@ -710,6 +710,9 @@
     .ai-col.state-min .card-head > .pane-name { display:block; writing-mode:vertical-rl; transform:rotate(180deg); font-weight:600; font-size:11.5px; letter-spacing:.06em; white-space:nowrap; }
 
     .control-strip { padding:9px 11px; flex:0 0 auto; }
+    /* PR #123: "📖 Akọwe is using this AI" while a bridge request waits for this pane's answer */
+    .akowe-using { margin:0 0 8px; padding:6px 9px; border-radius:7px; background:#2b2414; border:1px solid #6b5520; color:#f3dfa6; font-size:12px; line-height:1.35; overflow-wrap:anywhere; }
+    .ai-col.state-min .akowe-using { display:none; }
     .card-head { display:flex; align-items:center; gap:7px; font-weight:600; margin-bottom:8px; }
     .collapse-btn { background:none; border:1px solid transparent; border-radius:6px; padding:3px 8px; font-size:16px; line-height:1; opacity:.85; cursor:pointer; color:inherit; min-width:28px; min-height:24px; }
     .collapse-btn:hover { opacity:1; background:#2a2a2a; border-color:#3a3a3a; }

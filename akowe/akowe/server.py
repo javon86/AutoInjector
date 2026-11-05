@@ -1455,7 +1455,9 @@ def make_handler(app: App):
         server_version = f"Akowe/{__version__}"
 
         def log_message(self, fmt, *args):  # no request bodies/content in logs
-            log.info("%s %s", self.command, self.path.split("?")[0])
+            # PR #122: the pages poll every 1.5-5 s for days during a long run: reads only at DEBUG
+            (log.debug if self.command in ("GET", "HEAD") else log.info)("%s %s", self.command,
+                                                                           self.path.split("?")[0])
 
         def _send(self, status: int, payload, content_type="application/json; charset=utf-8", extra=None):
             data = payload if isinstance(payload, (bytes, bytearray)) else json.dumps(payload, ensure_ascii=False).encode()
@@ -1645,6 +1647,32 @@ def _safe_console() -> None:
             pass
 
 
+LOG_FILE_BYTES = 10 * 1024 * 1024   # PR #122: Akọwe's own log: 10 MB per file …
+LOG_FILE_COUNT = 5                   # … and 5 older files kept (akowe.log.1 … .5), so a days-long run never fills the disk
+
+
+def add_log_file(data_dir) -> Path | None:
+    """Akọwe's own log file, rotated by size (``<data>/logs/akowe.log``, 10 MB × 5). Never raises."""
+    try:
+        from logging.handlers import RotatingFileHandler  # noqa: PLC0415
+        d = Path(data_dir) / "logs"
+        d.mkdir(parents=True, exist_ok=True)
+        path = d / "akowe.log"
+        root = logging.getLogger()
+        if any(isinstance(h, RotatingFileHandler) and Path(getattr(h, "baseFilename", "")) == path
+               for h in root.handlers):
+            return path
+        h = RotatingFileHandler(path, maxBytes=LOG_FILE_BYTES, backupCount=LOG_FILE_COUNT, encoding="utf-8",
+                                delay=True)
+        h.setLevel(logging.INFO)
+        h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+        root.addHandler(h)
+        return path
+    except Exception:  # noqa: BLE001 - logging to the console still works
+        log.exception("could not open Akọwe's log file")
+        return None
+
+
 def main(argv=None):
     _safe_console()
     ap = argparse.ArgumentParser(prog="akowe", description="Akọwe book production workspace")
@@ -1655,6 +1683,7 @@ def main(argv=None):
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     args.data_dir = resolve_data_dir(args.data_dir)
+    add_log_file(args.data_dir)
     if args.host not in ("127.0.0.1", "localhost", "::1"):
         log.warning("Binding to %s exposes the workspace beyond this computer; keep the token private.", args.host)
     app = App(args.data_dir)

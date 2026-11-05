@@ -87,5 +87,40 @@ const longNote = SE.describeSiteError('Gemini', 'refused', 56012);
 assert(/56,012 characters/.test(longNote) && /may refuse prompts that long/.test(longNote), `a refusal of a very long prompt names its length (${longNote})`);
 assert(SE.longPromptNote('Gemini', 'error', 90000) === '', 'an ordinary error notice never blames the prompt length');
 
+console.log('\n== when a usage limit resets, read from the site\'s notice (limit_reset_at for Akọwe) ==');
+{
+  const NOW = new Date(2026, 10, 5, 13, 0, 0, 0).getTime(); // Thu Nov 5 2026, 1:00 PM local time
+  const at = (y, mo, d, h, mi) => new Date(y, mo, d, h, mi, 0, 0).getTime();
+  const cases = [
+    ['You are out of free messages until 3:40 PM', at(2026, 10, 5, 15, 40)],
+    ['5-hour limit reached ∙ resets 3pm', at(2026, 10, 5, 15, 0)],
+    ["You've reached the current usage cap for GPT-4, please try again after 10:21 PM.", at(2026, 10, 5, 22, 21)],
+    ['You have hit your limit. Try again in 2 hours 30 minutes.', NOW + 150 * 60000],
+    ['Usage limit reached. Please try again in 45 minutes', NOW + 45 * 60000],
+    ['Your limit resets in about 3 hours', NOW + 3 * 3600000],
+    ["You've reached your limit for 2.5 Pro until Nov 6, 1:43 AM", at(2026, 10, 6, 1, 43)],
+    ['Your limit resets tomorrow at 9:00 AM', at(2026, 10, 6, 9, 0)],
+    ['You are out of messages until 11:30 AM', at(2026, 10, 6, 11, 30)],       // 11:30 AM already passed today -> tomorrow
+    ['message limit reached — available again at 17:15', at(2026, 10, 5, 17, 15)],
+    ['you’ve reached your usage limit. your limit will reset at 4:05 pm.', at(2026, 10, 5, 16, 5)], // lower-case (self-repair's notice text)
+    ['Claude usage limit reached. Your limit will reset at 12 AM.', at(2026, 10, 6, 0, 0)],
+    ['Out of free messages until Monday at 8:00 AM', at(2026, 10, 9, 8, 0)]
+  ];
+  for (const [text, want] of cases) {
+    const got = SE.limitResetAt(text, NOW);
+    assert(got === want, `“${text}” -> ${got ? new Date(got).toString().slice(0, 21) : got} (want ${new Date(want).toString().slice(0, 21)})`);
+  }
+  const none = [
+    'You have reached your usage limit. Please try again later.',
+    "You've sent 40 messages in 3 hours.",
+    'Usage limit reached until 5',
+    'Your limit resets at 25:00',
+    'Upgrade to continue',
+    ''
+  ];
+  for (const t of none) assert(SE.limitResetAt(t, NOW) === null, `no time named -> null (never a guess): ${JSON.stringify(t)}`);
+  assert(SE.limitResetAt('Try again in 400 hours', NOW) === null, 'a reset more than 8 days away is not trusted');
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

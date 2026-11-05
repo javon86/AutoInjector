@@ -61,6 +61,8 @@ from . import story_choices
 from . import story_roles
 from . import story_rules
 from . import texture as texture_mod
+from . import providers as providers_mod
+from . import usage_limits
 from .assist import AssistService, BibleSession, Cancelled, Job, book_profile_brief
 from .book_path import EXPORT_FOR, LENGTHS, BookPath, StepError, _step_lock, get_profile, problems, save_profile
 from .requests import candidate_payload
@@ -172,10 +174,13 @@ PROFILE_TASK = (
     "is, where it happens, what goes wrong and what is at stake), point_of_view (first or third person) and tense "
     "(past or present) that suit the genre. No real people, no existing franchises. Return only the JSON object.")
 
-TIMEOUT_FIX = ("The AI did not answer in time, so Akọwe paused here instead of guessing (the answer may still "
-               "arrive). Check the AI's window (AutoInjector: is the site logged in and idle?), then press 🔁 Try again.")
-BUSY_FIX = ("The AI stayed busy or unreachable for a long time. Check Settings → Test connection (is AutoInjector "
-            "running and the site logged in?), then press 🔁 Try again.")
+TIMEOUT_FIX = ("The AI did not answer in time. Akọwe already waited for a late answer and asked another AI (or the "
+               "same one again), so it stopped here instead of guessing. What to do: open AutoInjector and look at "
+               "that AI's window — if it says the chat is too long, press the site's New chat; if it asks you to log "
+               "in or to confirm you are human, do that. Then press 🔁 Try again.")
+BUSY_FIX = ("The AIs stayed busy or could not be reached for a long time. What to do: make sure AutoInjector (the "
+            "program with the AI windows) is open; look at each AI's window (logged in? a usage-limit message?); "
+            "Settings → 🧪 Test connection shows which AI works. Then press 🔁 Try again.")
 CHECKS_FIX = ("Press 🔁 Try again: the AI writes it again and is told exactly what Akọwe refused. Or ✏️ Edit it "
               "yourself so the checks pass, then press Continue.")
 STALE_FIX = ("It was made from a plan or other inputs that changed since, so it is out of date: editing it cannot fix "
@@ -188,6 +193,22 @@ AUTHOR_STALE_FIX = ("Your edited version was made from a plan or other inputs th
 BOOK_GONE_FIX = ("This run cannot continue. Start a new ⚡ Make a book for me, or restore a backup that still has "
                  "this book.")
 NEW_BOOK_NAME = "New book (being made…)"
+
+
+# PR #122: when only ONE AI works, nobody independent can check its drafts (H6). What the run does then (run setting
+# ``single_ai``):
+# * "continue" (default) — keep writing; that AI's APPROVE approves its own draft, and the chapter is listed as
+#   "needs your check later" (book home, book report, the run's journal). Nothing is published without you, and a
+#   night-long run is not lost to one AI being logged out or at its usage limit.
+# * "wait" — wait (up to the usage-limit waiting time, default 6 h) for a second AI, then let it review; if none comes,
+#   the run pauses for you.
+# * "ask" — pause at once and ask you (the old behaviour).
+SINGLE_AI = ("continue", "wait", "ask")
+
+
+def single_ai_mode(run: dict) -> str:
+    v = (run.get("settings") or {}).get("single_ai")
+    return v if v in SINGLE_AI else "continue"
 
 
 class RunPaused(Exception):
@@ -420,7 +441,16 @@ class _Runner:
         if info:
             run["status"] = "waiting"
             run["phase"] = info["message"]
-            self.event(run, "wait", info["message"], code=info["code"])
+            if info.get("kind"):
+                # ⏳ PR #122: a long wait (usage limits, a second AI) checks every few minutes: one journal line per
+                # wait, not one per check
+                key = f"_note_at_{info['kind']}"
+                if time.time() - float(run.get(key) or 0) > 1800:
+                    self.event(run, "wait", info["message"], code="USAGE_LIMIT_WAIT" if info["kind"] == "usage_limit"
+                               else info["code"])
+                run[key] = time.time()
+            else:
+                self.event(run, "wait", info["message"], code=info["code"])
         else:
             run["status"] = "running"
             run["phase"] = "Trying the AI again"
@@ -745,6 +775,13 @@ class AutoBookService(_Runner):
         title = prof.get("title") or self.store.project(pid)["name"]
         settings["continue"] = {"project_id": pid, "title": str(title)[:200]}
 
+    def _refuse_while_checking(self, pid: str | None) -> None:
+        """PR #122: never start (or resume) a ⚡ run on a book while a whole-book consistency check of it runs on its
+        own: both would fight over the AIs and the run would wait, then pause."""
+        why = check_now_mod.solo_running(self.app, pid) if pid else None
+        if why:
+            raise AkoweError("VERSION_CONFLICT", "/run", why, status="REJECTED")
+
     def _bible_of(self, run) -> dict | None:
         key = (run.get("settings") or {}).get("bible", {}).get("key")
         v = self.store.get_setting(key) if key else None
@@ -754,6 +791,7 @@ class AutoBookService(_Runner):
         if self.active():
             raise AkoweError("VERSION_CONFLICT", "/run", "a Make-a-book run is already working; pause or cancel "
                                  "it first (or wait for it to finish)", status="REJECTED")
+        self._refuse_while_checking((settings.get("continue") or {}).get("project_id"))
         run_id = f"run-{uuid.uuid4().hex[:12]}"
         if bible is not None:  # kept with the new book (deleted with it): the run reads it step by step
             key = f"rerun_bible:proj-{run_id.split('-', 1)[-1]}"
@@ -825,6 +863,7 @@ class AutoBookService(_Runner):
             if self.active():
                 raise AkoweError("VERSION_CONFLICT", "/run", "another Make-a-book run is working",
                                      status="REJECTED")
+            self._refuse_while_checking(run.get("project_id"))
             run["status"], run["phase"], run["problem"], run["pause_reason"] = "running", \
                 "Continuing where it stopped", None, None
             for s in run["steps"]:
@@ -944,6 +983,12 @@ class AutoBookService(_Runner):
             if not isinstance(v, bool):
                 raise AkoweError("INVALID_INPUT", f"/{k}", f"{k} must be true or false", status="REJECTED")
             out[k] = v
+        sa = body.get("single_ai")  # PR #122: what happens when only one AI works (see SINGLE_AI)
+        if sa not in (None, ""):
+            if sa not in SINGLE_AI:
+                raise AkoweError("INVALID_INPUT", "/single_ai", "when only one AI works: continue, wait or ask",
+                                 status="REJECTED")
+            out["single_ai"] = sa
         ck = cross_check.clean(body.get("checkers"))  # 🔎 PR #117: how many AIs check for mistakes
         if ck is False:
             raise AkoweError("INVALID_INPUT", "/checkers", "how many AIs check for mistakes: all, two or one",
@@ -1289,6 +1334,50 @@ class AutoBookService(_Runner):
                    approval="run_consent", record_id=ref["record_id"], module_id=ref["module_id"], verdict=verdict)
         return res
 
+    def _second_ai_working(self, writer_slot: str | None) -> bool:
+        """Is an AI of another family than the writer's working right now (it could review independently)?"""
+        prov = self.app.engine.providers
+        slots = {s["slot_id"]: s for s in prov.ai_slots()}
+        fam = providers_mod.slot_family(slots.get(writer_slot)) if writer_slot else None
+        for s in slots.values():
+            if s["slot_id"] == writer_slot or not s.get("healthy", True):
+                continue
+            try:
+                ok = prov.available(s) and not prov.health.failed(s["slot_id"])
+            except Exception:  # noqa: BLE001
+                ok = False
+            if ok and (fam is None or providers_mod.slot_family(s) != fam):
+                return True
+        return False
+
+    def _wait_for_second_ai(self, run: dict, st: dict, label: str, review: dict) -> bool:
+        """single_ai = "wait": wait (checking every few minutes, up to the usage-limit waiting time) until a second AI
+        works. True: one works now (the draft is reviewed again); False: none came (the author decides)."""
+        pol = self.policy()
+        total = max(0.0, float(getattr(pol, "limit_wait_s", 0) or 0))
+        every = max(0.01, float(getattr(pol, "limit_check_s", 300) or 300))
+        writer = review.get("writer_slot")
+        waited = 0.0
+        while waited < total:
+            if self._second_ai_working(writer):
+                return True
+            step = min(every, total - waited)
+            nxt = time.time() + step
+            info = {"code": "NO_SECOND_AI", "kind": "second_ai", "retry_in_s": int(step),
+                    "retry_at": datetime.fromtimestamp(nxt, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    "message": f"Only {review.get('writer_ai') or 'one AI'} is working — waiting for a second AI to "
+                               f"check the {label} (next look at about {usage_limits.clock(nxt)})"}
+            self.on_wait(run, info)
+            left = step
+            while left > 0:
+                self.check(run)
+                chunk = min(0.5, left)
+                pol.sleep(chunk)
+                left -= chunk
+            waited += step
+            self.on_wait(run, None)
+        return self._second_ai_working(writer)
+
     @staticmethod
     def _refused(ref, label: str, probs: list, chapter_id: str | None = None) -> ChecksRefused:
         rules = {str(p).split(":", 1)[0].strip() for p in probs or []}
@@ -1361,7 +1450,17 @@ class AutoBookService(_Runner):
             head = bp.rec(rid)
             trust = approval_trust.problem(res["review"], label, res["review"].get("writer_ai")) \
                 if verdict == "APPROVE" else None
-            if trust and not (trust["code"] == "NO_SECOND_AI" and run.get("self_review_ok")):
+            if trust:
+                trust = dict(trust, ai=res["review"].get("writer_ai"))
+            if trust and trust["code"] == "NO_SECOND_AI" and not run.get("self_review_ok"):
+                # PR #122: only one AI works. The run's setting decides (single_ai): keep going and list the chapter
+                # for the author's check later (default), wait for a second AI, or ask the author now.
+                mode = single_ai_mode(run)
+                if mode == "wait" and self._wait_for_second_ai(run, st, label, res["review"]):
+                    continue  # a second AI works again: it reviews this draft
+                if mode == "continue":
+                    trust = dict(trust, later=True)
+            if trust and not (trust["code"] == "NO_SECOND_AI" and (run.get("self_review_ok") or trust.get("later"))):
                 # H6: no self-approval, no approval without a reason or with low confidence: the author decides
                 self.event(run, "problem", trust["message"], record_id=rid, code=trust["code"])
                 raise StepProblem(trust["code"], trust["message"], trust["fix"], record_id=rid,
@@ -1370,7 +1469,9 @@ class AutoBookService(_Runner):
                                   options=["approve_anyway", "retry"], no_second_check=True)
             if verdict == "APPROVE":
                 why = f"AI review: APPROVE ({label})"
-                if trust:
+                if trust and trust.get("later"):
+                    why += " · ⚠️ only the AI that wrote it checked it (no second AI was working) — needs your check later"
+                elif trust:
                     why += " · ⚠️ only the AI that wrote it checked it (you allowed this for the run)"
                 if editor_next:
                     head = self._editor_pass(run, st, rid, label, chapter_id)
@@ -1385,8 +1486,16 @@ class AutoBookService(_Runner):
                         why += " · ⚠️ planned details not all on the page"
                 self._approve(run, head["ref"], why=why, verdict="APPROVE", slot=rj.slot)
                 if trust:
-                    approval_trust.note(self.store, run["project_id"], run["branch_id"], head, how="self_review",
+                    approval_trust.note(self.store, run["project_id"], run["branch_id"], head,
+                                        how="self_review_later" if trust.get("later") else "self_review",
                                         label=label, chapter_id=chapter_id, by=run["principal"])
+                    if trust.get("later"):
+                        later = run.setdefault("check_later", [])
+                        if label not in later:
+                            later.append(label)
+                        self.event(run, "note", f"⚠️ {label}: only {trust.get('ai') or 'one AI'} is working, so it "
+                                   "approved its own draft — needs your check later (listed on the book's home page "
+                                   "and in the book report)", record_id=rid, code="NEEDS_CHECK_LATER")
                 else:
                     approval_trust.forget(self.store, run["project_id"], run["branch_id"], rid)
                 return bp.rec(rid)

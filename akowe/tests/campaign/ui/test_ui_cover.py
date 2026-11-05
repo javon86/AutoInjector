@@ -149,3 +149,24 @@ def test_cover_page_fits_a_phone(make_context, cv):
     assert overflow(page) <= 1
     shot(page, "cover-designer-phone")
     assert_clean(page, "phone")
+
+
+def test_a_change_made_just_before_leaving_is_saved_without_a_conflict(make_context, cv):
+    """Final sweep: a template picked right before going to another page used to be saved 0.7 s later, under the next
+    page, with an old revision, so coming back and changing again hit "the cover was changed elsewhere" (HTTP 409).
+    Now leaving saves at once, and a conflict takes the newest revision and saves what is on the screen."""
+    from akowe import cover
+    page = open_page(make_context, cv)
+    goto(page, f"#/p/{cv.pid}/main/cover")
+    page.wait_for_selector("[data-testid=cover-page] .cover-tpl", timeout=15000)
+    preview_ready(page)
+    page.click(".cover-tpl[data-tpl=scifi]")
+    goto(page, f"#/p/{cv.pid}/main/book")       # leave at once
+    goto(page, f"#/p/{cv.pid}/main/cover")
+    page.wait_for_selector("[data-testid=cover-page] .cover-tpl", timeout=15000)
+    page.click(".cover-tpl[data-tpl=romance]")
+    saved(page)
+    page.wait_for_timeout(300)
+    assert cover.get_design(cv.app.store, cv.pid, "main")["template"] == "romance"
+    assert not any("409" in p for p in page.bf_problems), page.bf_problems
+    assert not page.locator("#main .hazard, [data-testid=cover-page] .problem").count()

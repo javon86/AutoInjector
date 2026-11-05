@@ -72,7 +72,8 @@ def test_broken_json_pauses_the_step_then_resume_makes_exactly_one(tmp_path):
     app = fk.make_app(tmp_path, fake=fk.TextBridgeAI(brain, render))
     run = fk.run_book(app)
     assert_paused_on(run, "premise")
-    assert "JSON" in run["problem"]["message"] and brain.kinds.count("B01") == 3  # asked, then 2 re-asks
+    # asked, then 2 re-asks — on each of the two AIs (PR #122: broken JSON moves to another AI before it pauses)
+    assert "JSON" in run["problem"]["message"] and brain.kinds.count("B01") == 6
     pid = run["project_id"]
     assert outputs(app, pid, "B01") == []  # nothing half-saved
     broken["on"] = False

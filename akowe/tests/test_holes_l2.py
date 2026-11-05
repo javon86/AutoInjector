@@ -116,9 +116,10 @@ def test_h3_a_content_limit_breach_is_never_auto_approved_and_the_editor_says_re
 
 # ====================================================================== H6: no self-approval
 def test_h6_one_ai_cannot_approve_its_own_writing(tmp_path):
+    """With the run setting "when only one AI works: ask me" (single_ai = ask, the old behaviour)."""
     fake = BookFakeAI()
     app = make_app(tmp_path, fake=fake, second_ai=False)
-    run = run_book(app, {"length": "short_story", "pictures": False}, trust_one_ai=False)
+    run = run_book(app, {"length": "short_story", "pictures": False, "single_ai": "ask"}, trust_one_ai=False)
     assert run["status"] == "paused"
     prob = run["problem"]
     assert prob["code"] == "NO_SECOND_AI"

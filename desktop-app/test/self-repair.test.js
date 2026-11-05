@@ -73,6 +73,7 @@ async function testSignals() {
   assert(codes(r).includes("CAPTCHA"), "Google 'unusual traffic' page -> CAPTCHA");
   r = await sig("chatgpt", CHAT("", '<div role="alert">You\'ve reached your usage limit. Your limit resets at 5:00 PM.</div>'), "https://chatgpt.com/c/1");
   assert(r.inputFound === true && codes(r).includes("USAGE_LIMIT"), "a usage-limit banner while the box is there -> USAGE_LIMIT");
+  assert(typeof r.limitText === "string" && /resets at 5:00 pm/.test(r.limitText), `PR #123: the words around the limit notice come back (for its reset time): "${r.limitText}"`);
   r = await sig("claude", '<main><div id="t"></div><fieldset><p>You are out of free messages until 5 PM</p><div contenteditable="true" class="ProseMirror"></div><button aria-label="Send message">s</button></fieldset></main>', "https://claude.ai/chat/1");
   assert(codes(r).includes("USAGE_LIMIT"), "the limit shown right next to the message box -> USAGE_LIMIT");
   r = await sig("chatgpt", CHAT("", '<div class="toast-root"><div role="status">Something went wrong. Try reloading.</div></div>'), "https://chatgpt.com/");
@@ -282,6 +283,7 @@ function makeSite(opts) {
   sim.build = () => {
     const body = o.page === "login" ? `<div><h1>Welcome back</h1><button data-testid="login-button">Log in</button></div>`
       : o.page === "limit" ? CHAT("", '<div role="alert">You\'ve reached your usage limit.</div>')
+      : o.page === "limit-at" ? CHAT("", '<div role="alert">You\'ve reached your usage limit. Try again in 2 hours.</div>')
       : CHAT("") + (sim.stop ? '<button data-testid="stop-button" aria-label="Stop streaming">■</button>' : "");
     sim.doc = parseHTML(body, { url: o.url });
     const sb = sim.doc.querySelector('[data-testid="stop-button"]');
@@ -405,6 +407,12 @@ async function testEngine() {
   await sim.engine.runCheck("chatgpt", "startup");
   assert(sim.engine.state("chatgpt").problem === "USAGE_LIMIT" && sim.engine.state("chatgpt").state === "needs_user", "usage limit -> needs_user USAGE_LIMIT");
   assert(sim.engine.isUsable("chatgpt") === false, "a needs_user AI is not usable (Akọwe gets 503)");
+  assert(!("limit_reset_at" in sim.engine.health("chatgpt")), "PR #123: a limit notice with no time -> no limit_reset_at");
+  sim = makeSite({ page: "limit-at" });
+  const t0 = Date.now();
+  await sim.engine.runCheck("chatgpt", "startup");
+  const hl = sim.engine.health("chatgpt");
+  assert(hl.problem === "USAGE_LIMIT" && hl.limit_reset_at >= t0 + 2 * 3600000 - 5000 && hl.limit_reset_at <= Date.now() + 2 * 3600000 + 5000, `PR #123: "Try again in 2 hours" -> health limit_reset_at in about 2 h (${hl.limit_reset_at && new Date(hl.limit_reset_at).toISOString()})`);
 
   console.log("\n== P18.6 engine: stuck generating -> press Stop, send once more ==");
   sim = makeSite();

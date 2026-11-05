@@ -87,7 +87,10 @@ def _now() -> str:
 
 SKIPPED_WORDS = {"approve_anyway": "you approved it anyway (the AI reviewer had not approved it)",
                  "auto_approve": "approved by your standing auto-approve (no editor or plan check before)",
-                 "self_review": "only the AI that wrote it checked it (no second AI)"}
+                 "self_review": "only the AI that wrote it checked it (no second AI)",
+                 # PR #122: the run kept going with the one working AI (run setting "when only one AI works")
+                 "self_review_later": "only the AI that wrote it checked it (no second AI was working) — needs your "
+                                      "check later"}
 
 
 def note(store, pid: str, branch: str, rec: dict, *, how: str, label: str | None = None,

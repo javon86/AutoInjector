@@ -37,6 +37,9 @@ Legend: `[ ]` to do · `[~]` in progress · `[x]` done · `[!]` problem (see "Pr
   wizard's duplicate forms are gone (one place each: 🎨 Images, 🎬 Video). Also: ebook cover JPG, map PNG in Word,
   style-card delete fix, motion clips for items/places/magic, new characters from scratch, auto-save + update-or-copy +
   big books opened from a folder, MCP tool servers, book trailers (B2).
+- **🛡 Hardening for long books (done 2026-11-05, PR #123):** a run keeps going through time-outs, refusals, usage
+  limits and a single working AI; final hardening pass done too (AutoInjector sends the limit reset time and takes
+  short re-asks into the same chat; both test rounds green); see "🛡 Hardening for long books".
 - **✍ Write alongside me (done 2026-11):** highlight a passage in a chapter and the AI continues, rewrites, describes,
   expands or tightens it; a suggestion with ⚠️ quick checks, used as a new draft version. See "✍ Write alongside me".
 - **Back burner (later, by the user's call):** a first real GPU run of video/trailers; the audiobook export (P29).
@@ -866,6 +869,37 @@ the browser: `tests/campaign/ui/test_ui_continuity.py`):
   `test/video-trailer.test.js` and `test/service-bridge.test.js`.
 - *Not done:* the pictures and clips need AutoInjector running (SVG only without it); the store ad rules are as of
   2026-11 (check the stores' current rules before you pay for an ad).
+
+## 🛡 Hardening for long books (2026-11-05, PR #123) — done (Akọwe side)
+
+From a code-grounded pre-mortem of a real 40–50-chapter run (20–50 hours, ~1 000 web-AI messages): what would stop
+the book, fixed at the root in Akọwe. (The desktop half — fresh chats, keeping the PC awake, notifications, pane
+throttling — is a separate change.)
+
+| # | Problem | What changed | Code / tests |
+|---|---|---|---|
+| 1 | Scene-by-scene chapters shared ONE 180 s deadline, so scene 3 got 10–60 s → TIMEOUT → paused | Every AI call gets its own full time (`providers.call_deadline`: the operation's `timeout_ms`, at least 300 s for a web AI); the C02 request's deadline is 180 s × the calls the chapter makes (`lengths.calls_per_chapter`) | `providers.py`, `book_path.dispatch`, `lengths.py` |
+| 2 | Any TIMEOUT paused the whole run | The adapter first collects the late answer (same bridge request id: joins it, never typed twice); then the registry moves the call to another working AI (forgetting the late entry, so a late answer is never used twice), or with one AI asks it once more after 60 s when the bridge said that is safe (`typed:false`, `late_expired`, or collected); only then the step pauses. An older bridge's ambiguous 504 is still never re-sent | `AutoInjectorAdapter._post_collecting`, `ProviderRegistry._generate_timeout_safe` |
+| 3 | A refusal / JSON broken after the re-asks paused the run; every re-ask re-sent the whole prompt | After the re-asks, `try_other_ai` → the call goes to another AI first. A re-ask is only the short correction when the bridge answers with `followup: true` (it may continue that chat; Akọwe sends `followup_of`); otherwise the whole prompt, as before | `providers.py` (`correction_prompt`, `looks_like_refusal`) |
+| 4a | All AIs at their usage limits → paused after ~10 min, never resumed | A separate "waiting for usage limits" budget: `ai_retry.limit_wait_s` (default 6 h, 0 = off), checking every `limit_check_s` (5 min) or at the reset time the bridge gives (`limit_reset_at`, optional). Plain words in the run window and the activity strip: "All AIs hit their usage limits — waiting; resumes by itself at about 3:40 PM"; one journal line per wait | `usage_limits.py`, `jobs.wait_and_retry`, `ai_activity` (`limit_wait`) |
+| 4b | One AI left → H6 paused every chapter | Run setting **When only one AI works** (`single_ai`): **Keep going** (default) — the one AI's own APPROVE approves, the chapter is listed as "needs your check later" (run window, 🏠 Book home, book report); **Wait for a second AI** (up to the usage-limit time); **Stop and ask me** (the old way). Default chosen because nothing is published without the author, every such chapter is listed, and a night-long run is not lost to one logged-out AI | `autobook.SINGLE_AI`, `approval_trust` (`self_review_later`) |
+| 5 | Check-now double start; ⚡ start during a whole-book check; writers' room during a run | `check_now._kick` under its lock; `solo_running` refuses a ⚡ start / resume of that book in plain words; the writers' room refuses while a ⚡ run of the same book works | `check_now.py`, `autobook._refuse_while_checking`, `writers_room.start` |
+| 6 | A hand edit to chapter 3 redid every later checkpoint, the final whole-book read too | Only checkpoints that READ the chapter are redone, and of a multi-part read only the parts that hold it (the others keep their reading and problems); later ones get "may be affected" | `checkpoints.invalidate_from` |
+| 7 | Backups copied every asset every time; pinned kinds never removed; log grew without bound | Unchanged assets are hard-linked to the newest verified backup's copy (copied where linking fails); manual / before-restore / before-delete keep their newest 20 / 5 / 10; Akọwe's own log `logs/akowe.log` rotates at 10 MB × 5, and page polls (GET) log at DEBUG | `store.backup`, `backups.py`, `server.add_log_file` |
+| 8 | Default books folder ignored a Documents folder moved to OneDrive | Windows: the real Documents folder (SHGetKnownFolderPath, then the registry); an existing `%USERPROFILE%\Documents\Akowe Books` keeps being used; a books folder OneDrive / Dropbox / Google Drive / iCloud syncs gets a plain ⚠️ in Settings with a "Use <your user folder>\Akowe Books" button | `book_save.windows_documents`, `sync_warning` |
+| 9 | One path over 200 characters failed the whole save | That file's name is shortened (start of the name + a 6-character fingerprint, unique), or only that file is left out with a ⚠️ | `book_save.fit_paths` |
+| 10 | Story so far capped at ~2 200 characters (~50 per chapter by chapter 45) | Budget 2 200 + 120 per chapter (max 8 000), in tiers: last 3 chapters in full, the 7 before them one line each, older ones by checkpoint/act summaries or short lines, merged into stretches of 5 when space is short — every chapter stays in | `story_ledger.story_so_far` |
+
+**Final hardening pass (2026-11-05, same PR) — done:** the two halves joined up — AutoInjector now sends
+`limit_reset_at` (read from the site's limit notice by `desktop-app/site-errors.js` `limitResetAt`, also from a notice
+self-repair finds on the page) and supports `followup` / `followup_of` (same chat only; `409 FOLLOWUP_UNAVAILABLE` →
+Akọwe sends the whole prompt). Also: "📖 Akọwe is using this AI" on each AI card; one settings row per checkpoint
+(`checkpoints._write`, an old blob moves over on the next save); plainer TIMEOUT / busy messages with a next step;
+sweep fixes (phone overflow on 📊 Book report and step arrows, empty "Save readings", cover save conflict after leaving).
+Still only checkable on the real PC: the exact wording of each site's limit notice, and a live short re-ask on each site.
+
+Tests: `akowe/tests/test_long_book_hardening.py` (25 tests, including a 25-chapter novel with the fake AI that survives
+two time-outs, two refusals and two all-AI usage limits and finishes by itself).
 
 ## 🔎 All three AIs check for mistakes and drift + report fixes A–G (2026-11, PR #117) — done
 

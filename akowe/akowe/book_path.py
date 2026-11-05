@@ -350,7 +350,16 @@ class BookPath:
     # ----------------------------------------------------------------- dispatch helpers (as the forms do)
     def dispatch(self, op, action, *, manual_candidate=None, **kw):
         o = self.c.operation(op)
-        kw.setdefault("timeout_ms", (o or {}).get("timeout_ms") or 180000)
+        per = (o or {}).get("timeout_ms") or 180000
+        if op == "C02" and action == "CREATE" and "timeout_ms" not in kw:
+            # PR #122: a chapter written scene by scene makes several AI calls under this one request; each call has
+            # its own full time (providers.call_deadline) and the chapter's deadline grows with the calls
+            from .lengths import calls_per_chapter, of_book  # noqa: PLC0415
+            try:
+                per *= calls_per_chapter(of_book(self.store, self.pid))
+            except Exception:  # noqa: BLE001 - the plain deadline still works
+                log.exception("chapter length plan")
+        kw.setdefault("timeout_ms", per)
         req = build_request(project_id=self.pid, branch_id=self.branch, op_id=op, action=action,
                             principal_id=self.principal, **kw)
         resp = self.engine.dispatch(req, self.principal, manual_candidate=manual_candidate)

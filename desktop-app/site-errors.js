@@ -146,4 +146,64 @@ function describeSiteError(label, kind, promptChars) {
   return `${L} showed an error message instead of an answer — waiting and trying again`;
 }
 
-module.exports = { CHAT_FULL_RES, siteErrorOf, retryAfterSeconds, describeSiteError, longPromptNote, MAX_CHARS, REFUSAL_MAX_CHARS, LONG_PROMPT_CHARS };
+// ---- When does a usage limit reset? (final hardening pass, PR #123) --------------------
+// The sites' limit notices often say when: Claude "5-hour limit reached ∙ resets 3pm" / "You are out of free
+// messages until 3:40 PM", ChatGPT "…try again after 10:21 PM" / "Try again in 2 hours 30 minutes", Gemini "You've
+// reached your limit for 2.5 Pro until Nov 6, 1:43 AM" / "Your limit resets tomorrow at 9:00 AM". limitResetAt()
+// turns that into a time (epoch ms, this PC's local time), so Akọwe waits exactly until then instead of checking
+// every few minutes. Only for text already known to be a limit notice. null when no time is named or the time is
+// not in the next 8 days (never a guess).
+const RESET_TRIGGER = String.raw`(?:until|till|after|resets?|reset(?:s)?\s+(?:at|on)|available(?:\s+again)?|back|again|continue|limit\s+(?:will\s+)?reset(?:s)?)`;
+const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+const DAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+const REL_RE = new RegExp(String.raw`\b(?:try\s+again|again|resets?|reset|available|back|wait|continue|limit\s+(?:will\s+)?resets?)\b[^.\n]{0,30}?\bin\s+(?:about\s+|approximately\s+|around\s+|~\s*)?(\d{1,3})\s*(hours?|hrs?|h|minutes?|mins?|m)\b(?:,?\s*(?:and\s+)?(\d{1,3})\s*(minutes?|mins?|m)\b)?`, 'i');
+const ABS_RE = new RegExp(String.raw`\b${RESET_TRIGGER}\b\s*(?:at|on|by)?\s*` +
+  String.raw`(?:(today|tonight|tomorrow)\s*(?:at\s+)?|(?:(sun|mon|tue|wed|thu|fri|sat)[a-z]*,?\s+(?:at\s+)?)|((?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d{1,2}(?:st|nd|rd|th)?,?\s*(?:\d{4},?\s*)?(?:at\s+)?))?` +
+  String.raw`(\d{1,2})(?::(\d{2}))?\s*(a\.?m\.?|p\.?m\.?)?(?![\d:])` +
+  String.raw`(?:\s*(today|tonight|tomorrow))?`, 'i');
+const MAX_AHEAD_MS = 8 * 24 * 3600 * 1000;
+function limitResetAt(text, nowMs) {
+  const t = String(text == null ? '' : text).replace(/\s+/g, ' ').slice(0, 2000);
+  const now = Number.isFinite(Number(nowMs)) ? Number(nowMs) : Date.now();
+  if (!t) return null;
+  const ok = (ms) => (Number.isFinite(ms) && ms > now && ms - now <= MAX_AHEAD_MS ? ms : null);
+  const rel = REL_RE.exec(t);
+  if (rel) {
+    const n = Number(rel[1]); const unit = rel[2].toLowerCase();
+    let ms = (unit.startsWith('h') ? n * 3600 : n * 60) * 1000;
+    if (rel[3]) ms += Number(rel[3]) * 60 * 1000;
+    const r = ok(now + ms);
+    if (r) return r;
+  }
+  const re = new RegExp(ABS_RE.source, 'gi');
+  let m;
+  while ((m = re.exec(t))) {
+    const [, word, day, monthDay, hS, minS, ampm, wordAfter] = m;
+    let h = Number(hS); const min = minS ? Number(minS) : 0;
+    if (!ampm && minS == null) continue;            // a bare number ("until 5") is not a time
+    if (min > 59) continue;
+    if (ampm) { if (h < 1 || h > 12) continue; const pm = /^p/i.test(ampm); if (h === 12) h = pm ? 12 : 0; else if (pm) h += 12; }
+    else if (h > 23) continue;
+    const base = new Date(now);
+    let d = new Date(base.getFullYear(), base.getMonth(), base.getDate(), h, min, 0, 0);
+    const w = (word || wordAfter || '').toLowerCase();
+    if (w === 'tomorrow') d.setDate(d.getDate() + 1);
+    else if (day) {
+      const want = DAYS.indexOf(day.toLowerCase().slice(0, 3));
+      let add = (want - d.getDay() + 7) % 7;
+      if (add === 0 && d.getTime() <= now) add = 7;
+      d.setDate(d.getDate() + add);
+    } else if (monthDay) {
+      const mm = MONTHS.indexOf(monthDay.toLowerCase().slice(0, 3));
+      const dd = Number((/\d{1,2}/.exec(monthDay.replace(/^[a-z]+\.?\s+/i, '')) || [])[0]);
+      const yy = (/\b(\d{4})\b/.exec(monthDay) || [])[1];
+      d = new Date(yy ? Number(yy) : base.getFullYear(), mm, dd, h, min, 0, 0);
+      if (!yy && d.getTime() < now - 180 * 24 * 3600 * 1000) d.setFullYear(d.getFullYear() + 1); // "Jan 2" seen on Dec 30
+    } else if (d.getTime() <= now) d.setDate(d.getDate() + 1); // "until 3:40 PM" said at 9 PM = tomorrow
+    const r = ok(d.getTime());
+    if (r) return r;
+  }
+  return null;
+}
+
+module.exports = { CHAT_FULL_RES, siteErrorOf, retryAfterSeconds, describeSiteError, longPromptNote, limitResetAt, MAX_CHARS, REFUSAL_MAX_CHARS, LONG_PROMPT_CHARS };

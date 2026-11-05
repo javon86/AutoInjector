@@ -19,6 +19,9 @@
  *                                            answer ({"invalid_sample": true}, required fields missing) and
  *                                            even-numbered ones are valid — i.e. each logical call needs one re-ask
  *                         timeout            prompts are recorded but never answered (-> 504 TIMEOUT)
+ *                         limit-at           (PR #123) every reply is the site's usage-limit notice "You've reached
+ *                                            your usage limit. Try again in 2 hours." -> 503 SITE_ERROR rate-limit
+ *                                            with limit_reset_at (read by site-errors.limitResetAt)
  *                         busy               every site is pre-occupied by a never-answered internal request,
  *                                            so every /v1/complete returns 409 SITE_BUSY
  *     --delay-ms N      reply delay in ms (default 50)
@@ -30,6 +33,9 @@
  *                       Overrides the default responder (mode still controls timeout/busy).
  *     --record-file P   append one JSON line per received prompt: {"site","request_id","prompt"} (the
  *                       prompt as the pane would receive it, i.e. with the envelope instruction)
+ *     --followup        (PR #123) the panes can tell which chat they show (chatKey): every 200 says
+ *                       followup: true and a request with followup_of is typed into the same chat. A short
+ *                       correction (no JSON_SCHEMA) is answered from the schema of that site's last full prompt.
  *     --verbose         print bridge log events (never prompt/reply text) to stderr
  *     --pairing-code-file P   (contract v1.1) make a one-time pairing code with the bridge's
  *                       createPairingCode() and write it (just the code) to file P before READY.
@@ -62,6 +68,7 @@ const fs = require('fs');
 const http = require('http');
 const path = require('path');
 const { createBridge } = require('../../akowe-bridge');
+const siteErrors = require('../../site-errors'); // PR #123: the reset time in a usage-limit notice
 
 const SITES = ['chatgpt', 'claude', 'gemini'];
 const DEFAULT_TOKEN = 'fake-bridge-token-0123456789abcdef';
@@ -194,7 +201,7 @@ function defaultResponder({ prompt, valid }) {
 // --- host ------------------------------------------------------------------------
 async function startFakeHost(options = {}) {
   const mode = options.mode || 'valid';
-  if (!['valid', 'invalid-then-valid', 'timeout', 'busy'].includes(mode)) throw new Error(`unknown --mode ${mode}`);
+  if (!['valid', 'invalid-then-valid', 'timeout', 'busy', 'limit-at'].includes(mode)) throw new Error(`unknown --mode ${mode}`);
   const token = options.token || DEFAULT_TOKEN;
   const delayMs = Number.isFinite(options.delayMs) ? options.delayMs : 50;
   const notReady = new Set(options.notReady || []);
@@ -208,6 +215,7 @@ async function startFakeHost(options = {}) {
   const prompts = []; // { site, request_id, prompt }
   const callCount = { chatgpt: 0, claude: 0, gemini: 0 };
   const internalIds = new Set();
+  const lastSchemaPrompt = {}; // site -> the last prompt with a JSON_SCHEMA (a short follow-up is answered from it)
   let bridge = null;
 
   bridge = createBridge({
@@ -227,6 +235,7 @@ async function startFakeHost(options = {}) {
       return { started, skipped };
     },
     timeScale: options.timeScale || 1,
+    chatKey: options.followup ? (s) => `fake|${s}|${callCount[s] || 0}` : undefined,
     logger: options.verbose ? (kind, detail) => process.stderr.write(`[bridge] ${kind} ${JSON.stringify(detail)}\n`) : undefined,
     sendToSite: async (site, text, meta) => {
       const requestId = meta && meta.request_id;
@@ -239,13 +248,20 @@ async function startFakeHost(options = {}) {
       const callIndex = callCount[site];
       const seq = String(prompts.length).padStart(4, '0');
       if (mode === 'timeout') return { ok: true, seq };
+      if (/JSON_SCHEMA:/.test(text)) lastSchemaPrompt[site] = text;
+      const schemaPrompt = /JSON_SCHEMA:/.test(text) ? text : (lastSchemaPrompt[site] || text);
+      if (mode === 'limit-at') {
+        const notice = "You've reached your usage limit. Try again in 2 hours.";
+        setTimeout(() => bridge.onCaptured({ site, text: notice, siteError: 'rate-limit', limitResetAt: siteErrors.limitResetAt(notice) }), delayMs);
+        return { ok: true, seq };
+      }
       const valid = mode !== 'invalid-then-valid' || callIndex % 2 === 0;
       setTimeout(async () => {
         let body;
         try {
           body = responder
             ? await responder({ site, prompt: text, requestId, callIndex, mode, valid })
-            : defaultResponder({ prompt: text, valid });
+            : defaultResponder({ prompt: schemaPrompt, valid });
         } catch (e) {
           body = `responder error: ${String(e && e.message || e)}`;
         }
@@ -314,6 +330,7 @@ function parseArgs(argv) {
     else if (a === '--responder') out.responderPath = next();
     else if (a === '--record-file') out.recordFile = next();
     else if (a === '--verbose') out.verbose = true;
+    else if (a === '--followup') out.followup = true;
     else if (a === '--pairing-code-file') out.pairingCodeFile = next();
     else if (a === '--status-file') out.statusFile = next();
     else if (a === '--site-state') out.siteStates = parseSiteStates(next());
@@ -341,7 +358,8 @@ async function cli() {
     notReady: args.notReady || [],
     siteStates: args.siteStates || {},
     recordFile: args.recordFile || null,
-    verbose: !!args.verbose
+    verbose: !!args.verbose,
+    followup: !!args.followup
   };
   if (args.responderPath) {
     const mod = require(path.resolve(args.responderPath));

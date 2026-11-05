@@ -11,7 +11,7 @@ that times out while Gemini answers a slow side question (``timeout``).
 Each check of that run is one test below; a known bridge bug would be a strict xfail (KNOWN), so it flips when fixed.
 
 Needs: node, the desktop-app checkout next to this Akọwe (or AUTOINJECTOR_DESKTOP_APP=<path>) with its
-node_modules (playwright) and Chromium. Skipped otherwise, or with BF_E2E=0. ~1.5-2 min.
+node_modules (playwright) and Chromium. Skipped otherwise, or with BF_E2E=0. ~3.5 min (about 75 AI requests).
 """
 from __future__ import annotations
 

@@ -123,14 +123,18 @@ def test_answer_with_matching_seq_is_used():
 
 
 def test_try_again_after_typed_timeout_collects_the_late_answer():
-    b = Scripted([timeout(True, seq="0009", late_window_ms=300000), ok(seq="0009")])
+    # PR #122: the adapter first collects the late answer itself (one more request with the SAME bridge id); when
+    # that join also times out, "Try again" (a new Akọwe request id) still collects it under the timed-out id
+    b = Scripted([timeout(True, seq="0009", late_window_ms=300000), timeout(True, seq="0009", late_window_ms=300000),
+                  ok(seq="0009")])
     try:
         with pytest.raises(AkoweError) as ei:
             submit(b.url, "req-first")
         msg = str(ei.value)
         assert "was typed into claude" in msg and "Try again collects it" in msg
+        assert b.seen[0]["body"]["request_id"] == b.seen[1]["body"]["request_id"]  # the collect: a join, not a send
         data, usage = submit(b.url, "req-second")  # "Try again": a NEW Akọwe request id
-        first, second = (s["body"]["request_id"] for s in b.seen)
+        first, collect, second = (s["body"]["request_id"] for s in b.seen)
         assert second == first, "the retry must use the timed-out bridge request_id (no second typing)"
         assert "req-first" in first and data == {"x": 1}
         assert usage["provider_request_id"] == first
@@ -138,6 +142,15 @@ def test_try_again_after_typed_timeout_collects_the_late_answer():
         b.script.append(ok(seq="0010"))
         submit(b.url, "req-third")
         assert "req-third" in b.seen[-1]["body"]["request_id"]
+    finally:
+        b.close()
+
+
+def test_a_late_answer_is_collected_in_the_same_call():
+    b = Scripted([timeout(True, seq="0009", late_window_ms=300000), ok(seq="0009")])
+    try:
+        data, usage = submit(b.url, "req-first")
+        assert data == {"x": 1} and b.seen[0]["body"]["request_id"] == b.seen[1]["body"]["request_id"]
     finally:
         b.close()
 

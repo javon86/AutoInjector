@@ -115,6 +115,34 @@ async function main() {
   let r = await ask("claude", "bf-rl-1-claude-c0-a0", "You've reached your usage limit. Please try again later.");
   assert(r.status === 503 && r.json.error === "SITE_ERROR" && r.json.site_error === "rate-limit" && r.json.retry_after_s === 60, `usage limit -> 503 SITE_ERROR rate-limit, retry_after_s 60 (${r.status} ${r.json && r.json.site_error})`);
 
+  console.log("\n== PR #123: a usage-limit notice that names a time -> limit_reset_at for Akọwe ==");
+  const t0 = Date.now();
+  r = await ask("claude", "bf-rl-2-claude-c0-a0", "You've reached your usage limit. Try again in 2 hours.");
+  const at = r.json && Date.parse(r.json.limit_reset_at);
+  assert(r.status === 503 && r.json.site_error === "rate-limit" && at >= t0 + 2 * 3600000 - 60000 && at <= Date.now() + 2 * 3600000 + 60000, `"Try again in 2 hours" -> limit_reset_at about 2 h ahead (${r.json && r.json.limit_reset_at})`);
+  const hh = await request("GET", "/v1/health", token);
+  assert(hh.json.sites.claude.limit_reset_at === r.json.limit_reset_at, "…and /v1/health shows it for Claude while it is ahead");
+
+  console.log("\n== PR #123: a short re-ask goes into the same chat (followup / followup_of) ==");
+  r = await ask("chatgpt", "bf-fu-1-chatgpt-c0-a0", "[TO: USER]\n{\"broken\": \n[FROM: CHATGPT]", "The whole long prompt (bf-fu-1).");
+  assert(r.status === 200 && r.json.followup === true, `the 200 says the chat can be continued (followup: ${r.json && r.json.followup})`);
+  const cw = reg("chatgpt").webContents;
+  const before = cw.sentLog.length;
+  r = await ask("chatgpt", "bf-fu-2-chatgpt-c0-a1", "[TO: USER]\n{\"ok\": true}\n[FROM: CHATGPT]", "Your last answer was not valid JSON (bf-fu-2).");
+  assert(r.status === 200 && cw.sentLog.slice(before).some((x) => /Your last answer was not valid JSON \(bf-fu-2\)/.test(x.text || "")), "an ordinary second request works as before");
+  const fresh0 = (await call("akowe:fresh-chat-settings", {})).counts.chatgpt.fresh;
+  const p2 = request("POST", "/v1/complete", token, { site: "chatgpt", prompt: "Fix the JSON (bf-fu-3).", request_id: "bf-fu-3-chatgpt-c0-a2", followup_of: "bf-fu-2-chatgpt-c0-a1", timeout_ms: 20000 });
+  await waitUntil(() => cw.sentLog.slice(before).some((x) => /bf-fu-3/.test(x.text || "")));
+  await sleep(150);
+  cw.currentText = "[TO: USER]\n{\"fixed\": true}\n[FROM: CHATGPT]";
+  r = await p2;
+  assert(r.status === 200 && r.json.text.includes("fixed") && (await call("akowe:fresh-chat-settings", {})).counts.chatgpt.fresh === fresh0, "followup_of the last answer -> typed into the same chat (no fresh chat), answered");
+  cw.emit("before-input-event", {}, { type: "keyDown" }); // the user types in that pane themselves
+  await sleep(5);
+  const n2 = cw.sentLog.length;
+  r = await request("POST", "/v1/complete", token, { site: "chatgpt", prompt: "Fix it again.", request_id: "bf-fu-4-chatgpt-c0-a3", followup_of: "bf-fu-3-chatgpt-c0-a2", timeout_ms: 20000 });
+  assert(r.status === 409 && r.json.error === "FOLLOWUP_UNAVAILABLE" && cw.sentLog.length === n2, `the user used the pane since -> 409 FOLLOWUP_UNAVAILABLE, nothing typed (${r.json && r.json.message})`);
+
   console.log("\n== PR #120: Gemini's canned refusal of a ~56,000-character editor prompt -> 503 SITE_ERROR (refused), the length named ==");
   const bigPrompt = `Edit this chapter and answer as JSON (bf-refuse-1). ${"The rain fell on the old town. ".repeat(1870)}`;
   r = await ask("gemini", "bf-refuse-1-gemini-c0-a0", "I'm having a hard time fulfilling your request. Can I help you with something else instead?", bigPrompt);

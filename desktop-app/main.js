@@ -1892,6 +1892,21 @@ function withSendQueue(target, fn) {
   return run;
 }
 
+// PR #123: how many messages AutoInjector typed into each pane (this session) — part of the pane's "chat key", so a
+// short follow-up correction from Akọwe only goes into a chat nobody else typed into since its answer.
+const paneSendCount = {};
+// Which chat the pane shows now: the fresh-chat count, the page address and the messages typed into it.
+function akoweChatKey(site) {
+  try {
+    const view = siteViews[site];
+    if (!view || !view.webContents || view.webContents.isDestroyed()) return null;
+    let u = String(view.webContents.getURL() || "");
+    if (!u) return null;
+    u = u.split("#")[0].split("?")[0];
+    const fresh = (freshChat.snapshot()[site] || {}).fresh || 0;
+    return `${fresh}|${u}|${paneSendCount[site] || 0}`;
+  } catch (_) { return null; }
+}
 async function sendTextTo(target, text, fromSite, opts = {}) {
   const view = siteViews[target];
   if (!view || view.webContents.isDestroyed()) {
@@ -1958,6 +1973,7 @@ async function sendTextTo(target, text, fromSite, opts = {}) {
   // limit (BF-03).
   if (!fromSite && !opts.automatic && !opts.bridge && !opts.probe) resetAutoHops("program-send");
   const seq = String(state.nextMsgSeq++).padStart(4, "0");
+  paneSendCount[target] = (paneSendCount[target] || 0) + 1; // PR #123: anything typed into the pane changes its chat (bridge follow-ups)
   // P18.5: the sender (Akọwe bridge) learns this message's number at once, so a
   // reply captured while the send is still being confirmed can be matched to it.
   if (opts.cancelToken && typeof opts.cancelToken === "object") { try { opts.cancelToken.seq = seq; } catch (_) {} }
@@ -4479,7 +4495,10 @@ async function pollSite(site) {
       pushTranscriptTurn(turn);
       broadcast("capture", turn);
       if (siteErrKind === "chat-full") { try { freshChat.markFull(site); } catch (_) {} }
-      if (rateLimited) logEvent("rate-limit-detected", { site, chars: text.length, houseRuleActive: state.hr.active });
+      // PR #123: the notice may say when the limit resets ("until 3:40 PM", "try again in 2 hours") -> Akọwe waits until then
+      const limitResetAt = siteErrKind === "rate-limit" ? siteErrors.limitResetAt(text) : null;
+      if (limitResetAt && akoweBridge) { try { akoweBridge.noteLimitReset(site, limitResetAt); } catch (_) {} }
+      if (rateLimited) logEvent("rate-limit-detected", { site, chars: text.length, houseRuleActive: state.hr.active, resetsAt: limitResetAt ? new Date(limitResetAt).toISOString() : undefined });
       else logEvent("site-error-detected", { site, chars: text.length, kind: siteErrKind, severity: "warn", note: siteErrors.describeSiteError(siteLabel(site), siteErrKind) });
       if (state.waiting[site]) {
         state.waiting[site] = false;
@@ -4490,7 +4509,7 @@ async function pollSite(site) {
         let answers = null;
         try { answers = relayTrace.answersOf(turn.id); } catch (_) {}
         let owned = false;
-        try { owned = akoweBridge.onCaptured({ ...turn, answers, siteError: siteErrKind }); } catch (e) { logEvent("akowe-error", { site, error: String(e) }); }
+        try { owned = akoweBridge.onCaptured({ ...turn, answers, siteError: siteErrKind, limitResetAt }); } catch (e) { logEvent("akowe-error", { site, error: String(e) }); }
         if (owned) {
           try { relayTrace.noteHeld(turn.id, "akowe"); } catch (_) {}
           logEvent("akowe-site-error", { site, kind: siteErrKind, chars: text.length, severity: "warn", note: siteErrors.describeSiteError(siteLabel(site), siteErrKind) });
@@ -8542,6 +8561,9 @@ async function startAkoweBridgeNow() {
     wrapPrompt: (site, text) => withEnvelope(text, site),
     // contract v1.2: self-repair state per AI, and on-demand check-ins
     siteState: (s) => selfRepair.health(s),
+    // PR #123: short follow-up corrections go into the same chat (never after a fresh chat or the user's own typing)
+    chatKey: (s) => akoweChatKey(s),
+    userActedSince: (s, t) => (lastUserInputAt[s] || 0) > t,
     startProbe: (list) => selfRepair.probeMany(list, "akowe", "demand"),
     sendToSite: async (site, text, meta) => {
       // P18.1: a check-in on this AI never interleaves with an Akọwe prompt — one
@@ -8549,8 +8571,14 @@ async function startAkoweBridgeNow() {
       const ct = meta && meta.cancelToken ? meta.cancelToken : null;
       await selfRepairMakeWay(site, ct);
       if (ct && ct.cancelled) return { ok: false, error: "CANCELLED", seq: null };
-      // PR #123: between Akọwe requests, a chat that is too long (or full) is swapped for a fresh one first
-      try { await akoweFreshChatIfDue(site, ct); } catch (e) { logEvent("akowe-fresh-chat", { site, ok: false, error: String(e), severity: "warn" }); }
+      if (meta && meta.followup) {
+        // PR #123: a short correction belongs in the chat that holds the prompt: never a fresh chat first, and
+        // nothing typed if the chat changed while it waited (a check-in went in first)
+        if (akoweChatKey(site) !== meta.chatKey) return { ok: false, error: "FOLLOWUP_STALE", seq: null };
+      } else {
+        // PR #123: between Akọwe requests, a chat that is too long (or full) is swapped for a fresh one first
+        try { await akoweFreshChatIfDue(site, ct); } catch (e) { logEvent("akowe-fresh-chat", { site, ok: false, error: String(e), severity: "warn" }); }
+      }
       if (ct && ct.cancelled) return { ok: false, error: "CANCELLED", seq: null };
       // sendTextTo() stamps state.nextMsgSeq synchronously (before its first
       // await) once the view exists, so reading it first gives this send's

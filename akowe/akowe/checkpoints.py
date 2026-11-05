@@ -24,6 +24,12 @@ Cost: a checkpoint reads only its own chapters in full plus the compact ledgers 
 again, except the final one). Pause / resume / cancel safe: every finished part is stored at once (setting
 ``checkpoints:<project>:<branch>``), so a resumed checkpoint never reads a finished part again, and a fix already
 applied goes straight back to its review.
+
+Storage (final hardening, PR #123): one settings row per checkpoint and per chapter check
+(``checkpoints:<project>:<branch>:item:<id>``) plus a tiny index row (``checkpoints:<project>:<branch>``: the version).
+Before, every finished part rewrote ONE blob holding every checkpoint and every chapter's all-AI check — megabytes
+by chapter 50, a deep copy and a full rewrite for each of hundreds of parts. A book saved before keeps working: the old
+blob's items are read as they are and moved to their own rows the first time anything is saved.
 """
 from __future__ import annotations
 
@@ -179,24 +185,62 @@ def _key(pid: str, branch: str) -> str:
     return KEY.format(pid=pid, branch=branch)
 
 
+def _item_prefix(pid: str, branch: str) -> str:
+    return _key(pid, branch) + ":item:"
+
+
 def get_all(store, pid: str, branch: str) -> dict:
+    """{"version", "items": {id: checkpoint}}: the index row plus every item row (and the items of a blob saved
+    before the split, until they are moved)."""
     try:
         cur = store.get_setting(_key(pid, branch))
     except Exception:  # noqa: BLE001
         cur = None
     cur = copy.deepcopy(cur) if isinstance(cur, dict) else {}
-    cur.setdefault("items", {})
+    legacy = cur.get("items") if isinstance(cur.get("items"), dict) else {}
+    items: dict = {}
+    pre = _item_prefix(pid, branch)
+    try:
+        rows = store.query("SELECT key, value FROM settings WHERE substr(key, 1, ?) = ?", (len(pre), pre))
+    except Exception:  # noqa: BLE001
+        rows = []
+    for r in rows:
+        try:
+            v = json.loads(r["value"])
+        except (TypeError, ValueError):
+            continue
+        if isinstance(v, dict) and v.get("id"):
+            items[v["id"]] = v
+    items.update(legacy)  # a blob written in the old form (an older Akọwe) is the newer word on its items
+    cur["items"] = items
     return cur
+
+
+def _write(store, pid: str, branch: str, changed: list[dict]) -> None:
+    """Save these items (each in its own row) and bump the index's version. Inside the caller's transaction."""
+    pre = _item_prefix(pid, branch)
+    try:
+        idx = store.get_setting(_key(pid, branch))
+    except Exception:  # noqa: BLE001
+        idx = None
+    idx = dict(idx) if isinstance(idx, dict) else {}
+    legacy = idx.pop("items", None)
+    ids = {c["id"] for c in changed}
+    if isinstance(legacy, dict):  # a book saved before the split: move its items to their own rows once
+        for iid, it in legacy.items():
+            if iid not in ids and isinstance(it, dict) and it.get("id"):
+                store.set_setting(pre + str(iid), it)
+    for c in changed:
+        store.set_setting(pre + str(c["id"]), c)
+    idx["version"] = int(idx.get("version") or 0) + 1
+    store.set_setting(_key(pid, branch), idx)
 
 
 def _put(store, pid: str, branch: str, cp: dict) -> None:
     with _LOCK:
         with store.transaction():
-            cur = get_all(store, pid, branch)
             cp["updated_at"] = _now()
-            cur["items"][cp["id"]] = cp
-            cur["version"] = int(cur.get("version") or 0) + 1
-            store.set_setting(_key(pid, branch), cur)
+            _write(store, pid, branch, [cp])
 
 
 def items(store, pid: str, branch: str) -> list[dict]:
@@ -210,30 +254,62 @@ def summaries(store, pid: str, branch: str) -> list[dict]:
             and c.get("status") in ("done", "incomplete")]
 
 
+def _reads(cp: dict, chapter_id: str) -> bool:
+    """Did this checkpoint (or one of its parts) read the chapter?"""
+    if chapter_id in (cp.get("chapter_ids") or []):
+        return True
+    return any(chapter_id in (p.get("chapter_ids") or []) for p in cp.get("parts") or [])
+
+
 def invalidate_from(store, pid: str, branch: str, chapter_id: str, number: int | None) -> list[str]:
-    """H5 hook (continuity.INVALIDATE_HOOKS): chapter ``chapter_id`` (number ``number``) changed by hand. Every
-    checkpoint after it (``after`` >= the chapter's number, or one that read the chapter) read the old text: it is
-    marked for redo — its summary leaves the story so far, and the next run reads it again (run_due). What it found
-    stays in ``redo_of`` for the report. Returns the checkpoint ids marked. Never raises."""
+    """H5 hook (continuity.INVALIDATE_HOOKS): chapter ``chapter_id`` (number ``number``) changed by hand.
+
+    PR #122: only a checkpoint that actually READ that chapter is redone — and of a checkpoint read in several parts
+    (the final whole-book read), only the parts that hold the chapter: the other parts keep their reading and their
+    problems. (Before, every checkpoint at or after the chapter was redone in full, the final read too: a typo fixed in
+    chapter 3 of a 50-chapter book cost more than 100 AI answers.) Later checkpoints that did not read it only get a
+    "may be affected" note for the report. A redone checkpoint's summary leaves the story so far until it is read
+    again (run_due); what it found before stays in ``redo_of``. Returns the checkpoint ids marked. Never raises."""
     out: list[str] = []
     try:
         with _LOCK:
             with store.transaction():
                 cur = get_all(store, pid, branch)
+                changed = False
+                touched: list[dict] = []
                 for cp in cur["items"].values():
+                    if cp.get("status") == "new" or cp.get("kind") == "chapter":
+                        continue
                     after = cp.get("after")
-                    hit = chapter_id in (cp.get("chapter_ids") or []) or (
-                        isinstance(number, int) and isinstance(after, int) and after >= number)
-                    if not hit or cp.get("status") == "new" or cp.get("kind") == "chapter":
+                    if not _reads(cp, chapter_id):
+                        if isinstance(number, int) and isinstance(after, int) and after >= number:
+                            cp["may_be_affected"] = {"chapter_id": chapter_id, "number": number, "at": _now()}
+                            touched.append(cp)
+                            changed = True
                         continue
                     cp["redo_of"] = {k: cp.get(k) for k in ("status", "summary", "counts", "finished_at")}
                     cp["redo_because"] = {"chapter_id": chapter_id, "number": number, "at": _now()}
-                    cp.update(status="new", parts=None, problems=[], fixes={}, summary="", paused_once=False,
-                              retried=False, counts={}, ending=None, checkers=None)
+                    parts = cp.get("parts") or []
+                    hit = [j for j, p in enumerate(parts) if chapter_id in (p.get("chapter_ids") or [])]
+                    split = any(x.get("chapter_id") == chapter_id and int(x.get("of") or 1) > 1
+                                for p in parts for x in p.get("pieces") or [])
+                    if parts and hit and len(hit) < len(parts) and not split:
+                        # only the parts that read the changed chapter are read again; the others keep their reading
+                        for j in hit:
+                            parts[j] = {k: parts[j][k] for k in ("pieces", "chapter_ids") if k in parts[j]}
+                        drop = tuple(f"{cp['id']}-{j + 1}-" for j in hit)
+                        cp["problems"] = [p for p in cp.get("problems") or [] if not str(p.get("id")).startswith(drop)
+                                          and p.get("chapter_id") != chapter_id]
+                        cp.update(status="new", parts=parts, summary="", paused_once=False, retried=False, counts={},
+                                  ending=None, redo_parts=[j + 1 for j in hit])
+                    else:
+                        cp.update(status="new", parts=None, problems=[], fixes={}, summary="", paused_once=False,
+                                  retried=False, counts={}, ending=None, checkers=None)
                     out.append(cp["id"])
-                if out:
-                    cur["version"] = int(cur.get("version") or 0) + 1
-                    store.set_setting(_key(pid, branch), cur)
+                    touched.append(cp)
+                    changed = True
+                if changed:
+                    _write(store, pid, branch, touched)
     except Exception:  # noqa: BLE001
         log.exception("could not mark the checkpoints for redo")
     return out

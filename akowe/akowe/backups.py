@@ -6,12 +6,16 @@ after it is written (``Store.verify_backup``: hashes, SQLite integrity_check, ev
 promises). Backups live in ``<data_dir>/backups/<name>`` named ``bk-<sequence>-<UTC stamp>-<reason>``. The sequence
 number, not the wall clock, says which backup is newer, so a clock that jumps back or forward cannot reorder them.
 
+Unchanged asset files are hard-linked to the newest verified backup's copy instead of copied again (PR #122; a copy
+where the disk cannot link), so ten backups of a book with pictures and clips no longer cost ten copies of them.
+
 Rotation (``backup_keep``, default 10) only ever removes AUTOMATIC backups (daily, before a run / assembling /
 exporting a book), and only once that many newer automatic backups VERIFIED: a damaged new backup never pushes a
 good old one out. Unverified automatic backups are capped at ``backup_keep`` as well (oldest removed first), so a
 damaged data folder cannot fill the disk with them. Backups you made with "Back up now", the safety copies made
-before a restore and the safety copy made before a book is deleted are pinned (never rotated), and the backup
-being restored from is never rotated.
+before a restore and the safety copy made before a book is deleted are pinned: never rotated with the automatic ones,
+but each kind keeps only its newest ``PINNED_KEEP`` (20 / 5 / 10), and the backup being restored from is never
+removed.
 
 Restore never writes into a backup or trusts an unverified one: ``Store.restore`` first copies the verified
 snapshot into a NEW folder (it refuses on any hash problem or a newer schema version), a fresh safety backup of the
@@ -48,7 +52,10 @@ REASONS = {"daily": "Daily backup (first start of the day)", "manual": "You pres
            "before-export": "Before exporting a book", "before-restore": "Safety copy before a restore",
            "before-delete": "Before a book was deleted"}
 AUTOMATIC = {"daily", "before-run", "before-assemble", "before-export"}  # rotated
-PINNED = {"manual", "before-restore", "before-delete"}  # never rotated (the only way back to a deleted book)
+PINNED = {"manual", "before-restore", "before-delete"}  # never rotated with the automatic ones
+# PR #122: the pinned kinds were never removed at all, so a long book's many restores / deletes / "Back up now" presses
+# filled the disk. Each kind now keeps its newest N (verified or not); the one being restored from always stays.
+PINNED_KEEP = {"manual": 20, "before-restore": 5, "before-delete": 10}
 DISK_MESSAGE = "the backup could not be written (is the disk full or the data folder read-only?)"
 
 
@@ -112,7 +119,8 @@ class BackupManager:
                 self.dir.mkdir(parents=True, exist_ok=True)
                 dest = self.dir / f"bk-{self._next_seq():06d}-{_stamp()}-{reason}"
                 flush_before = best_effort_flushes()
-                manifest = self.store.backup(dest)
+                prev = next((b for b in self.list() if b.get("verified")), None)
+                manifest = self.store.backup(dest, link_from=self.dir / prev["name"] if prev else None)
                 problems = Store.verify_backup(dest)
                 info = {"reason": reason, "label": REASONS[reason], "verified": not problems,
                         "problems": problems[:5]}
@@ -194,9 +202,14 @@ class BackupManager:
         Pinned backups and ``protect`` (e.g. the backup being restored from) always stay."""
         keep = self.keep()
         good = bad = 0
+        pinned_seen: dict[str, int] = {}
         with self._lock:
             for b in self.list():
                 if b["pinned"]:
+                    kind = b.get("reason") if b.get("reason") in PINNED_KEEP else "manual"
+                    pinned_seen[kind] = pinned_seen.get(kind, 0) + 1
+                    if pinned_seen[kind] > PINNED_KEEP[kind] and b["name"] not in protect:
+                        shutil.rmtree(self.dir / b["name"], ignore_errors=True)
                     continue
                 if b["verified"]:
                     if good < keep:

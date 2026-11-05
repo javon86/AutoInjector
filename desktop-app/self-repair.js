@@ -47,6 +47,7 @@
 const crypto = require('crypto');
 const { rowKit, rowConfigFor, isChromeSelector } = require('./transcript-rows');
 const DEFAULT_SITES = require('./selectors');
+const siteErrors = require('./site-errors'); // PR #123: when a usage limit resets (limitResetAt)
 
 const MARKER = '__AUTOINJECTOR_SELFREPAIR__';
 const LEARNED_VERSION = 1;
@@ -479,15 +480,21 @@ function pageKit(rk) {
     };
     const pageText = () => { if (page == null) page = lc(doc.body ? textOf(doc.body) : '').slice(0, 30000); return page; };
     const codes = [];
+    let limitText = null; // PR #123: the words around a usage-limit notice ("…until 3:40 pm") — when it resets
     for (const sig of table) {
       if (sig.noInput && inputFound) continue;
       let hit = false;
       try { if (sig.url && new RegExp(sig.url, 'i').test(url)) hit = true; } catch (_) {}
       if (!hit && sig.selector) { const l = qsa(doc, sig.selector); hit = !!(l && l.some((e) => shown(e) && !inOverlay(e))); }
-      if (!hit && sig.text) { const hay = sig.where === 'page' ? pageText() : noticeText(); hit = sig.text.some((t) => hay.indexOf(t) !== -1); }
+      if (!hit && sig.text) {
+        const hay = sig.where === 'page' ? pageText() : noticeText();
+        const t = sig.text.find((x) => hay.indexOf(x) !== -1);
+        hit = t !== undefined;
+        if (hit && sig.code === 'USAGE_LIMIT' && limitText == null) { const i = hay.indexOf(t); limitText = hay.slice(Math.max(0, i - 200), i + t.length + 300); }
+      }
       if (hit) codes.push({ code: sig.code, id: sig.id });
     }
-    return { ok: true, inputFound, codes };
+    return limitText != null ? { ok: true, inputFound, codes, limitText } : { ok: true, inputFound, codes };
   }
 
   // ---- P18.6 unfreeze: press the Stop button -------------------------------------------
@@ -1394,6 +1401,11 @@ function createSelfRepair(deps) {
   // ---- one check-in ---------------------------------------------------------------------
   async function signalsOf(site) {
     const r = await page(site, buildSignalScript(site, d.SITES, overrides(site)));
+    // PR #123: a usage-limit notice that says when it resets -> /v1/health limit_reset_at (Akọwe waits until then)
+    if (r && r.ok && S[site]) {
+      if (typeof r.limitText === 'string') { const at = siteErrors.limitResetAt(r.limitText, now()); if (at) S[site].limitResetAt = at; }
+      else if (!(r.codes || []).some((c) => c && c.code === 'USAGE_LIMIT')) S[site].limitResetAt = null;
+    }
     return r && r.ok ? r : { ok: false, codes: [], inputFound: null };
   }
   function readState(site) { try { return (typeof d.readState === 'function' && d.readState(site)) || {}; } catch (_) { return {}; } }
@@ -1946,7 +1958,9 @@ function createSelfRepair(deps) {
   function health(site) {
     const x = S[site];
     if (!x) return { state: 'unknown', problem: null, since: null, last_probe_ok_at: null };
-    return { state: x.state, problem: x.problem, since: x.since, last_probe_ok_at: x.lastProbeOkAt };
+    const out = { state: x.state, problem: x.problem, since: x.since, last_probe_ok_at: x.lastProbeOkAt };
+    if (x.state === 'needs_user' && x.problem === 'USAGE_LIMIT' && x.limitResetAt && x.limitResetAt > now()) out.limit_reset_at = x.limitResetAt;
+    return out;
   }
   function isUsable(site) { const x = S[site]; return !x || ((x.state === 'ok' || x.state === 'unknown') && !teachActive(site)); }
 

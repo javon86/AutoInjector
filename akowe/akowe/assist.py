@@ -77,8 +77,8 @@ FIX = {
     "CAPABILITY_UNAVAILABLE": "Connect AutoInjector in Settings, or add an API key.",
     "UPSTREAM_UNAVAILABLE": "Start the AutoInjector desktop app, open and log in to the site's pane, then press "
                             "Test connection in Settings and try again.",
-    "TIMEOUT": "The AI did not answer in time. Check the site's pane in AutoInjector (logged in and idle?) and press "
-               "Regenerate.",
+    "TIMEOUT": "The AI did not answer in time. Open AutoInjector and look at that AI's window (if it says the chat is "
+               "too long, press the site's New chat; if it asks you to log in, do that), then press Regenerate.",
     "RATE_LIMITED": "The AI is busy with other work. Wait a moment and try again, or pick another AI.",
     "CONTEXT_TOO_LARGE": "Pick fewer context records, or choose an AI slot with a larger context limit in Settings.",
     "NOT_APPLICABLE": "This module is switched off for this branch. Turn the feature on in the feature manifest.",
