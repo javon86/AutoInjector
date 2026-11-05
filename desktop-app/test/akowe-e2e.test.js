@@ -50,7 +50,7 @@
 //                                (e.g. the proposed BF-01 phase fix)
 //       AKOWE_ROOT=path      Akọwe checkout (default ../../akowe)
 //       FAULTS=steal,timeout,contention  disturbances to inject (default all three; "none")
-//       SPEED=0.35  HOP_MAX=3  RUN_TIMEOUT_MS=170000  VERBOSE=1  OUT=file.json
+//       SPEED=0.35  HOP_MAX=3  RUN_TIMEOUT_MS=600000  STALL_MS=90000  VERBOSE=1  OUT=file.json
 //       EXPECT_FAIL=BF-01,...    report-only: exit 0 when exactly these checks fail
 "use strict";
 const path = require("path");
@@ -77,7 +77,12 @@ const QUIRKS = String(process.env.QUIRKS || "default");
 const SPEED = Number(process.env.SPEED) || 0.35;
 const HOP_MAX = Number(process.env.HOP_MAX) || 3;
 const FANOUT = 2; // Auto routing forwards a reply to both other AIs
-const RUN_TIMEOUT_MS = Number(process.env.RUN_TIMEOUT_MS) || 170000;
+// The run is given as long as it keeps making progress: it ends early only when nothing happened (no new Akọwe
+// request, no new step) for STALL_MS. (A fixed 170 s total became too short once a short story's run grew to ~75 AI
+// requests — scene cards, details, editor, planned-to-page, checkpoints — and every check then failed together.)
+// RUN_TIMEOUT_MS stays as a hard cap below the pytest fixture's own limit (1200 s).
+const RUN_TIMEOUT_MS = Number(process.env.RUN_TIMEOUT_MS) || 600000;
+const STALL_MS = Number(process.env.STALL_MS) || 90000;
 const VERBOSE = process.env.VERBOSE === "1";
 const FAULTS = new Set(String(process.env.FAULTS || "steal,timeout,contention").split(",").map((s) => s.trim()).filter((s) => s && s !== "none"));
 const EXPECT_FAIL = new Set(String(process.env.EXPECT_FAIL || "").split(",").map((s) => s.trim()).filter(Boolean));
@@ -386,11 +391,15 @@ async function main() {
     const decisions = [];
     const runDeadline = t0 + RUN_TIMEOUT_MS;
     let lastStep = null;
-    while (Date.now() < runDeadline) {
+    let progressAt = Date.now(), seenReqs = proxyLog.length, seenEvents = -1;
+    while (Date.now() < runDeadline && Date.now() - progressAt < STALL_MS) {
       await sleep(400);
+      if (proxyLog.length !== seenReqs) { seenReqs = proxyLog.length; progressAt = Date.now(); }
       const g = await api("GET", `/api/autobook/${runId}`);
       if (g.status !== 200) continue;
       run = g.json;
+      const nEv = Array.isArray(run.events) ? run.events.length : 0;
+      if (nEv !== seenEvents) { seenEvents = nEv; progressAt = Date.now(); }
       if (run.current && run.current !== lastStep) {
         lastStep = run.current;
         if (VERBOSE) console.log(`    ${((Date.now() - tB) / 1000).toFixed(1)}s step ${run.current}`);
@@ -412,7 +421,7 @@ async function main() {
     }
     faultHook = null;
     const runMs = Date.now() - tB;
-    await quiet(3000, Math.max(5000, runDeadline + 20000 - Date.now()));
+    await quiet(3000, Math.max(5000, Math.min(runDeadline, Date.now() + STALL_MS) + 20000 - Date.now()));
 
     // ================= collect =================
     const dumps = {};

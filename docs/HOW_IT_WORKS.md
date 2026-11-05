@@ -127,7 +127,9 @@ bridge to your home Wi-Fi, behind its key.
   4. It removes the tags and hands the text back to Akọwe. That reply is never relayed to the other AIs.
   5. Akọwe checks the answer. Most answers must be a tidy block of data (JSON). If not, it asks again, up to two
      more times. When AutoInjector says the chat can be continued, the second ask is only a short correction ("your
-     last answer was not valid JSON: …"), not the whole prompt again. If the answer is still broken, or the AI
+     last answer was not valid JSON: …"), not the whole prompt again. AutoInjector types it into the **same chat**,
+     and only when nothing changed there since the answer (no fresh chat, nothing else typed, you did not type in
+     that pane); otherwise it types nothing and Akọwe sends the whole prompt at once. If the answer is still broken, or the AI
      refused, the work goes to another AI that works before anything stops.
 - **When it can't answer:**
   - **Busy:** one request per AI at a time. A second one hears "busy", and Akọwe waits and retries.
@@ -140,7 +142,8 @@ bridge to your home Wi-Fi, behind its key.
     in that pane first (see **Fresh chats** below).
   - **Every AI at its usage limit:** Akọwe waits for a limit to reset, by itself: "All AIs hit their usage limits
     — waiting; resumes by itself at about 3:40 PM" shows in the run window and the activity strip. It checks every
-    few minutes (or at the reset time the site showed) for up to 6 hours (Settings › ⏳ When the AI is busy), then
+    few minutes (or at the reset time the site showed: AutoInjector reads "until 3:40 PM", "resets 3pm" or "try
+    again in 2 hours" from the site's limit notice and passes it on) for up to 6 hours (Settings › ⏳ When the AI is busy), then
     goes on. Only after that whole time does the run pause.
   - **Not working:** an AI that is being repaired, logged out or broken is skipped. Its work goes to another AI.
   - **Timeout:** no answer in time (every AI call has its own time: at least 5 minutes for a web AI, also for each
@@ -148,6 +151,10 @@ bridge to your home Wi-Fi, behind its key.
     the same request number, so nothing is typed twice). If none comes, the work goes to another AI that works, or,
     with only one AI, that AI is asked once more after a minute. Only then does the step pause for 🔁 Try again. A
     late answer is never used twice.
+- **"Akọwe is using this AI":** while Akọwe waits for an AI's answer, that AI's card in the 🤖 AutoInjector tab
+  shows a yellow note: "📖 Akọwe is using Claude right now… Please don't type in Claude's window until it is done —
+  use another AI meanwhile." It goes when the answer is in. (Typing your own question there would land between
+  Akọwe's prompt and its answer.)
 - **Fresh chats:** a book run sends about 1,000 messages. Kept in one chat, the chat gets slow and the site stops
   it ("this chat is too long"). So AutoInjector opens a **new chat** in an AI's pane for Akọwe after **15 Akọwe
   requests** or about **300,000 characters** in that chat (change it in the 📖 Akọwe panel: 🆕 Fresh chat for

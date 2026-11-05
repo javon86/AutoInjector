@@ -159,6 +159,21 @@ const needsYou = Object.assign({}, interrupted, { status: "paused", pause_reason
     cur = snap(null); await render();
     assert(d.getElementById("bf-run").hidden && txt("bf-progress-text") === "10/10", "no run: the checklist as before");
     assert(!/couldn't update/.test(txt("bf-msg")), "no panel error");
+
+    console.log("\n== PR #123: “📖 Akọwe is using this AI” on the AI's card while a request waits for it ==");
+    const box = (s) => d.getElementById(`akowe-using-${s}`);
+    assert(box("claude") && box("claude").hidden && box("gemini").hidden, "no request: no notice");
+    cur = Object.assign(snap(null), { sites: { claude: { inFlight: { request_id: "bf-1", typed: true, phase: "waiting" } }, gemini: { inFlight: null }, chatgpt: { inFlight: { request_id: "selftest-x", typed: true, selftest: true } } } });
+    await render();
+    assert(!box("claude").hidden && /Akọwe is using Claude right now/.test(box("claude").textContent) && /don't type in Claude's window/.test(box("claude").textContent), `Claude's card: “${box("claude").textContent}”`);
+    assert(box("gemini").hidden, "Gemini (nothing in flight): no notice");
+    assert(!box("chatgpt").hidden && /link test/.test(box("chatgpt").textContent), "the link test says it is the link test");
+    cur = Object.assign(snap(null), { sites: { claude: { inFlight: { request_id: "bf-2", typed: false, phase: "sending" } } } });
+    await render();
+    assert(/about to type into Claude/.test(box("claude").textContent) && box("chatgpt").hidden, "not typed yet: “about to type”; the finished one is gone");
+    cur = Object.assign(snap(null), { enabled: false, sites: { claude: { inFlight: { request_id: "bf-3", typed: true } } } });
+    await render();
+    assert(box("claude").hidden, "bridge off: no notice");
   }
 
   console.log(`\n${passed} passed, ${failed} failed`);

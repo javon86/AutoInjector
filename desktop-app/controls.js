@@ -911,6 +911,15 @@ function buildAiColumn(site) {
   head.appendChild(collapseBtn);
   strip.appendChild(head);
 
+  // PR #123: while Akọwe waits for this AI's answer, say so — typing your own question into the same chat now would
+  // land between Akọwe's prompt and its answer (the answer could be late, or a short correction could no longer go in).
+  const using = document.createElement("div");
+  using.className = "akowe-using";
+  using.id = `akowe-using-${site}`;
+  using.setAttribute("role", "status");
+  using.hidden = true;
+  strip.appendChild(using);
+
   const pickMenu = document.createElement("div");
   pickMenu.className = "pick-menu picker-card collapsed";
   pickMenu.id = `pick-menu-${site}`;
@@ -4310,6 +4319,26 @@ function akoweRender(s) {
   bf.at = Date.now();
   bf.actionProblems.delete("status");
   bfRenderAll();
+  akoweRenderUsing(s);
+}
+// PR #123: "📖 Akọwe is using this AI" on each AI card while a bridge request waits for that AI.
+function akoweUsingText(site, f) {
+  if (!f) return "";
+  const L = SITE_LABELS[site] || site;
+  if (f.selftest) return `🧪 The link test is asking ${L} a question — it takes a few seconds.`;
+  return f.typed
+    ? `📖 Akọwe is using ${L} right now and waits for its answer. Please don't type in ${L}'s window until it is done — use another AI meanwhile.`
+    : `📖 Akọwe is about to type into ${L}. Please don't type in ${L}'s window until it is done — use another AI meanwhile.`;
+}
+function akoweRenderUsing(s) {
+  const sites = (s && s.sites) || {};
+  for (const site of Object.keys(SITE_LABELS)) {
+    const box = el(`akowe-using-${site}`);
+    if (!box) continue;
+    const txt = s && s.enabled ? akoweUsingText(site, sites[site] && sites[site].inFlight) : "";
+    if (box.textContent !== txt) box.textContent = txt;
+    box.hidden = !txt;
+  }
 }
 function bfRenderAll() {
   const s = bf.snap || BF_EMPTY_SNAP;
