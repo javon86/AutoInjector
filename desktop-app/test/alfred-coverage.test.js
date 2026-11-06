@@ -99,7 +99,7 @@ const IPC_INVENTORY = [
   'sd:lists', 'sd:open-images-folder', 'sd:open-install-folder', 'sd:open-log', 'sd:open-ui', 'sd:progress', 'sd:record', 'sd:set-autostart',
   'sd:settings', 'sd:show-file', 'sd:start', 'sd:start-cpu', 'sd:use-other-build', 'sd:status', 'sd:stop', 'sd:targets', 'sd:test', 'sd:fix-retry',
   'sd:img2img', 'sd:inpaint', 'sd:upscale', 'sd:extras', 'sd:options-get', 'sd:options-set', 'sd:interrupt', 'sd:skip', 'sd:refresh', 'sd:memory', 'sd:workflows', 'sd:workflow-get', 'sd:workflow-save', 'sd:workflow-delete', 'sd:workflow-run', 'sd:capabilities',
-  'sd:request', 'sd:chatgpt-status', 'sd:chatgpt-cancel', 'sd:chatgpt-settings', 'sd:model-check', 'sd:restart-with-models', 'sd:open-workflows-folder', 'sd:comfy-use-stuff',
+  'sd:request', 'sd:chatgpt-status', 'sd:chatgpt-cancel', 'sd:chatgpt-settings', 'sd:quality', 'sd:model-check', 'sd:restart-with-models', 'sd:open-workflows-folder', 'sd:comfy-use-stuff',
   'sd:addons', 'sd:addons-install', 'sd:addons-update', 'sd:addons-remove', 'sd:addons-restart', 'sd:addons-open-page', 'sd:addons-folder', 'sd:addons-open-folder', // PR #125
   'sdlib:add-folder', 'sdlib:check', 'sdlib:collection', 'sdlib:delete-lock', 'sdlib:folders', 'sdlib:list', 'sdlib:locks', 'sdlib:remove-folder',
   'sdlib:save-lock', 'sdlib:scan', 'sdlib:update', 'selector:clear', 'selector:pick',
@@ -166,7 +166,7 @@ const SD_API_METHODS = ['images.status', 'images.generate', 'images.progress', '
   'sd.targets', 'sd.start', 'sd.stop', 'sd.install.check', 'sd.install.install', 'sd.install.downloadModel', 'sd.install.cancel', 'library.find', 'library.get',
   'library.characterLock', 'library.locks', 'library.scan',
   'images.img2img', 'images.inpaint', 'images.upscale', 'sd.lists', 'sd.options.get', 'sd.options.set', 'sd.options.schema', 'sd.controlnet.models', 'sd.controlnet.modules', 'sd.adetailer.models', 'sd.styles', 'sd.scripts', 'sd.embeddings', 'sd.upscalers', 'sd.extraFields', 'sd.interrupt', 'sd.skip', 'sd.refresh', 'sd.memory', 'sd.workflows.list', 'sd.workflows.get', 'sd.workflows.save', 'sd.workflows.delete', 'sd.workflows.run', 'sd.comfy.objectInfo', 'sd.comfy.queue', 'sd.comfy.upload', 'sd.comfy.free',
-  'images.chatgptStatus', 'images.chatgptCancel', 'images.chatgptSettings'];
+  'images.chatgptStatus', 'images.chatgptCancel', 'images.chatgptSettings', 'images.qualitySettings'];
 // The 🎬 Video module (video-api.js): every method through video_call.
 const VIDEO_API_METHODS = ['video.status', 'video.capabilities', 'video.models', 'video.progress', 'video.gallery', 'video.cancel', 'video.generate', 'video.animate', 'video.test', 'video.settings',
   'video.install.check', 'video.install.downloadModel', 'video.install.installAll', 'video.install.cancel',
@@ -438,6 +438,9 @@ async function main() {
     d = await drive('sd_call', { method: 'images.chatgptSettings', args: { freshChatPerSeries: true } });
     if (assert(d.carded && d.result && d.result.ok && d.result.data.freshChatPerSeries === true && (await call('sd:chatgpt-status')).freshChatPerSeries === true, 'sd_call images.chatgptSettings: asks first, then "a fresh ChatGPT chat per series" is on')) mark('sd:images.chatgptSettings', 'real sd-api');
     await call('sd:chatgpt-settings', { freshChatPerSeries: false });
+    d = await drive('sd_call', { method: 'images.qualitySettings', args: { bookCheckpoint: 'dreamshaper_8.safetensors [879db523c3]' } });
+    if (assert(d.carded && d.result && d.result.ok && d.result.data.bookCheckpoint === 'dreamshaper_8.safetensors [879db523c3]' && (await call('sd:quality', {})).bookCheckpoint === 'dreamshaper_8.safetensors [879db523c3]', 'sd_call images.qualitySettings: asks first, then "Book pictures use" is set (PR #128)')) mark('sd:images.qualitySettings', 'real sd-api');
+    await call('sd:quality', { bookCheckpoint: '' });
     d = await drive('sd_call', { method: 'images.chatgptCancel', args: {} });
     if (assert(d.carded && d.result && d.result.ok !== false, 'sd_call images.chatgptCancel: asks first, then stops (nothing running here)')) mark('sd:images.chatgptCancel', 'real sd-api');
     cgPane.state.mode = 'refuse';

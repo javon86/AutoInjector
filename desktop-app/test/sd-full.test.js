@@ -283,7 +283,7 @@ async function main() {
   assert(!r.ok && r.code === 'UNKNOWN_VALUE' && /control_v11p_sd15_canny\.pth/.test(r.hint), 'an unknown ControlNet model is refused');
   const aux = await fakeComfy({ aux: true });
   await studio.connect(aux.base);
-  r = await api.images.generate({ prompt: 'x', width: 640, height: 512, controlnet: [{ image: pic, model: 'control_v11p_sd15_canny', module: 'CannyEdgePreprocessor', pixelPerfect: true }], pollMs: 20 });
+  r = await api.images.generate({ prompt: 'x', quality: false, width: 640, height: 512, controlnet: [{ image: pic, model: 'control_v11p_sd15_canny', module: 'CannyEdgePreprocessor', pixelPerfect: true }], pollMs: 20 });
   const pre = one('AIO_Preprocessor', aux.state.lastGraph);
   assert(r.ok && pre[1] && pre[1].inputs.preprocessor === 'CannyEdgePreprocessor' && pre[1].inputs.resolution === 512 && one('ControlNetApplyAdvanced', aux.state.lastGraph)[1].inputs.image[0] === pre[0], 'with comfyui_controlnet_aux: AIO_Preprocessor (pixel perfect → resolution from the size) feeds the ControlNet');
   r = await api.sd.controlnet.modules();

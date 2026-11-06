@@ -153,7 +153,55 @@ SD app** — AutoInjector checks ports 7860–7865, 8188, 8000 and 8888. Add its
 
 ## Using it
 
-- **LoRAs:** type in the LoRA box and pick one. It becomes a chip with a weight (its
+### Good pictures by default (PR #128)
+
+The 🖌 Generate form is one short block for the narrow panel: **Engine · Checkpoint** (with a
+badge for the model family), **Style**, **Size**, **Prompt**, **Negative** (one line until you
+open it), **🧩 LoRAs**, **🔒 Character**, then **⚙ More settings** and the folded extra steps.
+The 🎨 Generate / ⏹ Stop bar stays at the bottom. Open sections, the style and the size are
+remembered.
+
+| Model family (from the checkpoint) | Sizes (Portrait / Square / Landscape) | Sampler + scheduler | Steps | CFG |
+|---|---|---|---|---|
+| SDXL (also Pony, Illustrious, NoobAI) | 832×1216 / 1024×1024 / 1216×832 | DPM++ 2M + Karras | 28 | 5.5 (Pony 6) |
+| SD 1.5 | 512×768 / 512×512 / 768×512 (+ ✨ Hires ×1.5) | DPM++ 2M + Karras | 28 | 7 |
+| Flux | 896×1152 / 1024×1024 / 1152×896 | Euler + Simple | 20 | 1 (Forge's distilled CFG 3.5) |
+
+- **Which family?** The library's read of the file's header, else its name (`sd_xl_base_1.0` → SDXL),
+  else its size (about 7 GB → SDXL, 2–4 GB → SD 1.5, 11 GB+ → Flux).
+- **SDXL at 512 px makes poor, cartoonish pictures** — it is made for about one megapixel. The size
+  buttons always use the family's own sizes; **Custom** shows the exact Width / Height sliders and
+  warns when SDXL is used below 768×768 worth of pixels. A request from Alfred or Akọwe at such a
+  size is made at SDXL's own size (with a ⚠ line saying so).
+- **"(default)" sampler** = the family's best one, but only a name your SD app lists (the list
+  says "(default → DPM++ 2M)"). Steps and CFG follow the family until you move them yourself.
+- **Negative prompt:** empty = a sensible default ("lowres, blurry, deformed, bad anatomy, extra
+  fingers, watermark, text …"); Flux has none (it ignores it). Your own words replace it.
+- **Style chips:** 📷 Photo-real (RAW photo, natural skin texture, sharp focus — and "cartoon, 3d
+  render" to avoid), 🎬 Cinematic, 🖊 Illustration, ✨ Anime, 🖌 Painting. Click again to turn off.
+- **Long prompts:** CLIP reads 75 tokens at a time and the first words count most. Above about 150
+  tokens the tab shows **📝 Shortened for the model** (show what is sent / shorten off): who, the
+  looks (age, build, skin, hair, eyes, scars), clothing, place, light, style — the story is left out.
+  Akọwe's and Alfred's long prompts are shortened the same way. The full text is kept in the
+  picture's `.json` (`fullPrompt`).
+- **📖 Book pictures use** (⚙ More settings): the checkpoint Akọwe's book pictures are made with.
+  It starts as "whatever is loaded" — nothing is switched unless you choose one; a character lock's
+  own checkpoint still wins. Every picture shows which checkpoint (and family) made it.
+- Callers that need exact settings send `quality: false` (`images.generate`).
+
+### LoRAs
+
+- **🧩 LoRAs** opens a small LoRA browser under the LoRA row (like the SD app's Lora tab, sized for
+  the panel): search (name, trigger words, tags), **All / Fits SDXL / Recent / ★**, and cards with
+  the preview picture next to the file (`.preview.png`, `.png`, Civitai Helper) or its initials,
+  the base model (from `ss_base_model_version` / `modelspec.architecture` / `.civitai.info`), its
+  trigger words (or the most used tags of its training set) and ☆/★. Click a card to add it; ⛔
+  marks one made for another model family. **↻** asks the SD app to look for new LoRAs
+  (`/sdapi/v1/refresh-loras`) and rescans the folders ("stuff and thing"/models/lora, Stability
+  Matrix's Data\Models\Lora, the SD app's own folder).
+- Each chosen LoRA is a row: name, a **weight slider** (−1 … 2, step 0.05, default 0.8 or its own
+  default), **🔑** (put its trigger words in the prompt) and **✕**.
+- **Type to find a LoRA…** next to the button still works: type and pick one. It becomes a row with a weight (its
   default weight, usually 0.8) and its **trigger words are added to the prompt**. Forge /
   A1111 get `<lora:name:0.8>` in the prompt; ComfyUI gets LoRA loader nodes. You can also
   type `<lora:name:0.8>` yourself — both backends understand it.

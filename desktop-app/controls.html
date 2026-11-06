@@ -71,9 +71,11 @@
     .sd-view { flex:1 1 auto; min-height:0; overflow:auto; padding:10px; }
     .sd-view[hidden] { display:none !important; }
     .sd-badges { display:flex; gap:4px; flex-wrap:wrap; align-items:center; }
-    #sd-view-generate { display:grid; grid-template-columns:minmax(320px, 440px) minmax(0, 1fr); gap:12px; align-items:start; }
-    @media (min-width:1600px) { #sd-view-generate { grid-template-columns:520px minmax(0, 1fr); } }
-    @media (max-width:820px) { #sd-view-generate { grid-template-columns:1fr; } }
+    #sd-view-generate { display:grid; grid-template-columns:minmax(340px, 460px) minmax(0, 1fr); gap:12px; align-items:start; }
+    @media (min-width:1600px) { #sd-view-generate { grid-template-columns:540px minmax(0, 1fr); } }
+    @media (max-width:820px) { #sd-view-generate { grid-template-columns:minmax(0, 1fr); } }
+    #sd-view-generate > .sd-card { min-width:0; }
+    #sd-form details.sd-adv > summary { min-width:0; overflow:hidden; }
     .sd-card { background:#171717; border:1px solid #2a2a2a; border-radius:8px; padding:9px 11px; }
     .sd-ao-item { display:flex; gap:8px; align-items:flex-start; padding:6px 4px; border-bottom:1px solid #242424; }
     .sd-ao-item[data-focus="1"] { background:#1d2a1f; outline:1px solid #3b6a45; border-radius:6px; }
@@ -105,11 +107,15 @@
     .sd-gobar #sd-progress, .sd-gobar #vd-progress, .sd-gobar #vd-tr-progress { margin:6px 0 0; }
     .sd-slider { display:grid; grid-template-columns:62px 1fr 46px; gap:6px; align-items:center; font-size:11.5px; margin:3px 0; }
     .sd-slider span { text-align:right; font-variant-numeric:tabular-nums; }
-    #sd-lora-chips { display:flex; flex-wrap:wrap; gap:5px; margin:5px 0; min-height:4px; }
-    .sd-chip { display:inline-flex; align-items:center; gap:4px; padding:2px 4px 2px 8px; border-radius:12px; background:#1e2230; border:1px solid #34405e; font-size:11.5px; }
+    #sd-lora-chips { display:flex; flex-direction:column; gap:3px; margin:5px 0 0; }
+    #sd-lora-chips:empty { display:none; }
+    .sd-chip { display:grid; grid-template-columns:minmax(0, 1fr) minmax(60px, 130px) 34px auto auto; align-items:center; gap:5px; padding:2px 4px 2px 8px; border-radius:8px; background:#1e2230; border:1px solid #34405e; font-size:11.5px; min-width:0; }
+    .sd-chip .sd-chip-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .sd-chip input[type=range] { width:100%; min-width:0; padding:0; margin:0; }
+    .sd-chip .sd-chip-w { font-variant-numeric:tabular-nums; text-align:right; font-size:11px; }
+    .sd-chip button[hidden] { display:none; }
     .sd-chip[data-compat="hard"] { border-color:#a04a4a; background:#2a1616; }
     .sd-chip[data-compat="soft"] { border-color:#8a7a3a; background:#262212; }
-    .sd-chip input { width:48px; font-size:11px; padding:0 2px; }
     .sd-chip button { font-size:11px; padding:0 5px; line-height:1.3; }
     #sd-lora-suggest { position:relative; }
     #sd-lora-list { position:absolute; left:0; right:0; top:100%; z-index:20; background:#1a1a1a; border:1px solid #333; border-radius:6px; max-height:240px; overflow:auto; }
@@ -143,8 +149,64 @@
     #sd-progress { height:8px; background:#222; border-radius:4px; overflow:hidden; margin:6px 0 2px; }
     #sd-progress-bar { height:100%; width:0; background:linear-gradient(90deg,#5a4ca0,#8a6cf0); transition:width .3s; }
     #sd-msg { font-size:12px; opacity:.9; min-height:18px; white-space:pre-line; }
-    #sd-engine-row { display:flex; gap:8px; align-items:flex-end; flex-wrap:wrap; margin-bottom:6px; }
-    #sd-engine-row select { width:auto; }
+    #sd-engine-row { display:grid; grid-template-columns:minmax(0, 0.8fr) minmax(0, 1.2fr); gap:4px 8px; align-items:end; margin-bottom:4px; }
+    #sd-engine-row > div { min-width:0; }
+    #sd-engine-row label.sd-l { margin-top:0; display:flex; align-items:center; gap:5px; white-space:nowrap; overflow:hidden; }
+    #sd-engine-row #sd-engine-note { grid-column:1 / -1; }
+    #sd-engine-note:empty { display:none; }
+    @media (max-width:380px) { #sd-engine-row { grid-template-columns:1fr; } }
+    /* PR #128 compact form: pill rows (style chips, size picker, LoRA filters), the LoRA browser and chips */
+    #sd-form { position:relative; }
+    #sd-form h3 { margin:0; }
+    .sd-pillrow { display:flex; flex-wrap:wrap; gap:3px; align-items:center; margin:5px 0 0; min-width:0; }
+    .sd-rowlabel { font-size:10.5px; opacity:.7; text-transform:uppercase; letter-spacing:.03em; width:34px; flex:0 0 auto; }
+    .sd-pill { font-size:11px; padding:2px 6px; border-radius:12px; border:1px solid #333; background:#1b1b1b; color:#d6d6d6; cursor:pointer; line-height:1.45; white-space:nowrap; }
+    .sd-pill:hover { border-color:#5a4ca0; }
+    .sd-pill[aria-pressed="true"] { background:#2a2440; border-color:#7c5ce0; color:#f3efff; }
+    .sd-pill .sd-dim { opacity:.6; font-size:10.5px; margin-left:3px; }
+    #sd-size-readout { margin-left:2px; font-variant-numeric:tabular-nums; }
+    #sd-size-hires-wrap { display:inline-flex; align-items:center; gap:3px; margin-left:auto; }
+    #sd-size-hires-wrap[hidden], #sd-size-custom[hidden], #sd-prompt-short[hidden], #sd-prompt-short-text[hidden], #sd-lora-drawer[hidden], #sd-ld-empty[hidden], #sd-size-warn[hidden], #sd-family[hidden], #sd-size-preset[hidden] { display:none !important; }
+    #sd-size-custom { margin-top:2px; }
+    .sd-labelrow { display:flex; align-items:baseline; justify-content:space-between; gap:8px; margin:8px 0 3px; }
+    #sd-prompt-tokens[data-level="warn"] { color:#f0c674; }
+    #sd-prompt-short { font-size:11.5px; margin:3px 0 0; padding:4px 7px; border:1px solid #3a3420; background:#1c1910; border-radius:6px; }
+    #sd-prompt-short .sd-row { gap:6px; }
+    #sd-prompt-short-msg { flex:1 1 auto; }
+    #sd-prompt-short-text { margin-top:4px; font-size:11px; opacity:.85; word-break:break-word; max-height:110px; overflow:auto; }
+    .sd-linkbtn { background:none; border:none; color:#a99cff; padding:0 2px; font-size:11.5px; cursor:pointer; text-decoration:underline; }
+    .sd-oneline { flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; opacity:.7; font-size:11px; }
+    details.sd-adv > summary .sd-oneline.sd-on { color:#b8b0d8; opacity:.8; }
+    details.sd-neg { margin-top:5px; }
+    #sd-lora-row { display:flex; gap:6px; align-items:center; margin-top:6px; min-width:0; }
+    #sd-lora-row > #sd-lora-suggest { flex:1 1 auto; min-width:0; }
+    #btn-sd-lora-browser { font-size:12px; padding:3px 9px; white-space:nowrap; }
+    #btn-sd-lora-browser[aria-expanded="true"] { background:#2a2440; border-color:#7c5ce0; }
+    #sd-lora-count:empty { display:none; }
+    #sd-lora-count { font-size:10.5px; padding:0 5px; border-radius:8px; background:#3a3160; margin-left:2px; }
+    #sd-lora-drawer { margin-top:5px; border:1px solid #34305a; background:#131220; border-radius:8px; padding:6px; }
+    .sd-ld-head { display:flex; gap:5px; align-items:center; }
+    .sd-ld-head input { flex:1 1 auto; min-width:0; }
+    .sd-ld-head button { padding:2px 8px; }
+    .sd-ld-filters { margin-top:5px; }
+    #sd-ld-count { margin-left:auto; }
+    #sd-ld-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(96px, 1fr)); gap:6px; margin-top:6px; max-height:min(360px, 46vh); overflow:auto; padding:1px; }
+    .sd-ldcard { position:relative; background:#1a1a24; border:1px solid #2c2c3c; border-radius:7px; padding:4px; cursor:pointer; font-size:11px; display:flex; flex-direction:column; gap:2px; min-width:0; }
+    .sd-ldcard:hover, .sd-ldcard:focus-visible { border-color:#7c5ce0; outline:none; }
+    .sd-ldcard[data-added="1"] { border-color:#3b8a5a; background:#14231a; }
+    .sd-ldcard[data-compat="hard"] { opacity:.6; }
+    .sd-ldcard[data-compat="hard"] .sd-ld-thumb::after { content:'⛔'; position:absolute; left:4px; bottom:2px; font-size:12px; }
+    .sd-ld-thumb { position:relative; width:100%; aspect-ratio:1; border-radius:5px; background:linear-gradient(135deg,#2a2440,#1b2a33); display:flex; align-items:center; justify-content:center; font-size:20px; font-weight:700; color:#cfc6ff; overflow:hidden; }
+    .sd-ld-thumb img { width:100%; height:100%; object-fit:cover; display:block; }
+    .sd-ld-fav { position:absolute; top:5px; right:5px; padding:0 4px; font-size:12px; line-height:1.3; background:rgba(0,0,0,.55); border:1px solid #444; border-radius:6px; color:#ffd36b; cursor:pointer; }
+    .sd-ld-name { font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .sd-ld-meta { display:flex; gap:3px; align-items:center; flex-wrap:wrap; min-height:15px; }
+    .sd-ld-trig { opacity:.7; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:10.5px; }
+    .sd-ld-added { color:#8ef0b0; font-size:10.5px; }
+    #sd-lock-row { display:flex; gap:6px; align-items:center; margin-top:6px; font-size:11.5px; }
+    #sd-lock-row > label { opacity:.85; white-space:nowrap; }
+    #sd-lock-row > select { flex:1 1 auto; min-width:0; width:auto; }
+    #sd-sec-more { margin-top:8px; }
     #sd-engine-note { font-size:11.5px; opacity:.85; }
     #sd-engine-note[data-tone="warn"] { color:#ffcf7a; opacity:1; }
     .sd-rv-buttons { display:flex; flex-wrap:wrap; gap:4px; margin-top:6px; }
@@ -159,7 +221,8 @@
     #sd-error pre { white-space:pre-wrap; word-break:break-word; max-height:180px; overflow:auto; margin:4px 0 0; padding:6px; background:#160c0c; border-radius:4px; font-size:11px; }
     #sd-vae option[data-bad] { color:#8a8a8a; }
     #sd-vae-warn[hidden] { display:none; }
-    #sd-final-prompt { font-size:11px; opacity:.6; word-break:break-word; margin-top:3px; }
+    #sd-final-prompt { font-size:11px; opacity:.6; word-break:break-word; margin-top:3px; white-space:pre-line; }
+    #sd-final-prompt:empty { display:none; }
     #sd-preview { display:block; max-width:100%; max-height:62vh; margin:0 auto; border-radius:6px; border:1px solid #2a2a2a; }
     #sd-preview[hidden] { display:none; }
     #sd-preview-empty { padding:40px 12px; text-align:center; opacity:.5; border:1px dashed #2a2a2a; border-radius:8px; }
@@ -1365,56 +1428,110 @@
     <div id="sd-hint" role="note" hidden></div>
 
     <div id="sd-view-generate" class="sd-view" role="tabpanel" aria-labelledby="sd-sub-generate">
-      <div class="sd-card">
+      <div class="sd-card" id="sd-form">
+        <!-- PR #128: one tight top block (engine · checkpoint · style · size · prompt · negative · LoRAs · character),
+             then ⚙ More settings and the collapsed sections, then the sticky Generate bar. Every old id is kept. -->
         <div id="sd-engine-row">
-          <div><label class="sd-l" for="sd-engine">Engine</label>
+          <div class="sd-f-engine"><label class="sd-l" for="sd-engine">Engine</label>
             <select id="sd-engine" title="Who draws the picture">
               <option value="sd">Stable Diffusion</option>
               <option value="chatgpt">ChatGPT (its own image generation, in its pane)</option>
               <option value="auto">Auto (Stable Diffusion if connected, else ChatGPT)</option>
             </select></div>
+          <div class="sd-f-ck"><label class="sd-l" for="sd-checkpoint">Checkpoint (model) <span id="sd-family" class="sd-badge" title="The model family — it decides the best size, sampler and CFG" hidden></span></label><select id="sd-checkpoint"><option value="">(the one loaded in your SD app)</option></select></div>
           <span id="sd-engine-note" role="status" aria-live="polite"></span>
         </div>
-        <h3>Prompt</h3>
-        <textarea id="sd-prompt" rows="4" placeholder="Describe the picture… e.g. portrait of an old ferryman at dusk, lantern light, oil painting"></textarea>
-        <label class="sd-l" for="sd-negative">Negative prompt (what to avoid)</label>
-        <textarea id="sd-negative" rows="2" placeholder="blurry, extra fingers, text, watermark"></textarea>
-        <label class="sd-l" for="sd-lock-pick">Character lock (same face every time)</label>
-        <select id="sd-lock-pick"><option value="">— none —</option></select>
-        <label class="sd-l" for="sd-lora-search">LoRAs</label>
-        <div id="sd-lora-suggest">
-          <input type="text" id="sd-lora-search" placeholder="Type to find a LoRA… (or choose from the Library)" autocomplete="off" aria-autocomplete="list" aria-controls="sd-lora-list">
-          <div id="sd-lora-list" role="listbox" hidden></div>
+        <div id="sd-style-row" class="sd-pillrow" role="group" aria-label="Style: adds short quality words and matching things to avoid">
+          <span class="sd-rowlabel">Style</span>
+          <button type="button" class="sd-pill" data-style="photo" aria-pressed="false" title="Photo-real: RAW photo, natural skin, sharp focus — and keeps cartoon / 3D render out">📷 Photo-real</button>
+          <button type="button" class="sd-pill" data-style="cinematic" aria-pressed="false" title="Cinematic film still, dramatic light, film grain">🎬 Cinematic</button>
+          <button type="button" class="sd-pill" data-style="illustration" aria-pressed="false" title="Detailed digital illustration, clean lines">🖊 Illustration</button>
+          <button type="button" class="sd-pill" data-style="anime" aria-pressed="false" title="Anime style, cel shading">✨ Anime</button>
+          <button type="button" class="sd-pill" data-style="painting" aria-pressed="false" title="Oil painting, visible brush strokes">🖌 Painting</button>
+        </div>
+        <div id="sd-size-row" class="sd-pillrow" role="group" aria-label="Picture size (the model's own sizes)">
+          <span class="sd-rowlabel">Size</span>
+          <button type="button" class="sd-pill" data-aspect="portrait" aria-pressed="false">▯ Portrait</button>
+          <button type="button" class="sd-pill" data-aspect="square" aria-pressed="false">□ Square</button>
+          <button type="button" class="sd-pill" data-aspect="landscape" aria-pressed="false">▭ Landscape</button>
+          <button type="button" class="sd-pill" data-aspect="custom" aria-pressed="false" title="Exact width and height">Custom</button>
+          <span id="sd-size-readout" class="sd-small"></span>
+          <label id="sd-size-hires-wrap" class="sd-small" hidden title="SD1.5: make it at 512 px, then upscale ×1.5 and add detail (the Hires fix)"><input type="checkbox" id="sd-size-hires"> ✨ Hires ×1.5</label>
+        </div>
+        <div id="sd-size-custom" hidden>
+          <div class="sd-slider"><label for="sd-width">Width</label><input type="range" id="sd-width" min="256" max="2048" step="64" value="512"><span id="sd-width-v">512</span></div>
+          <div class="sd-slider"><label for="sd-height">Height</label><input type="range" id="sd-height" min="256" max="2048" step="64" value="512"><span id="sd-height-v">512</span></div>
+        </div>
+        <div id="sd-size-warn" class="sd-warn" role="note" hidden></div>
+        <div class="sd-labelrow"><h3>Prompt</h3><span id="sd-prompt-tokens" class="sd-small" title="CLIP reads the prompt 75 tokens at a time — the first words count most"></span></div>
+        <textarea id="sd-prompt" rows="3" placeholder="Describe the picture… e.g. portrait of an old ferryman at dusk, lantern light, oil painting"></textarea>
+        <div id="sd-prompt-short" role="note" hidden>
+          <div class="sd-row"><span id="sd-prompt-short-msg">📝 Shortened for the model</span>
+            <button type="button" class="sd-fixed sd-linkbtn" id="btn-sd-prompt-full" aria-expanded="false">show what is sent</button>
+            <label class="sd-fixed sd-small"><input type="checkbox" id="sd-prompt-short-on" checked> shorten</label></div>
+          <div id="sd-prompt-short-text" hidden></div>
+        </div>
+        <details class="sd-adv sd-neg" id="sd-neg-box"><summary>Negative <span id="sd-neg-preview" class="sd-oneline"></span></summary><div class="sd-adv-body">
+          <label class="sd-l" for="sd-negative">Negative prompt (what to avoid)</label>
+          <textarea id="sd-negative" rows="2" placeholder="blurry, extra fingers, text, watermark"></textarea>
+          <div class="sd-note" id="sd-neg-note"></div>
+        </div></details>
+        <div id="sd-lora-row">
+          <button type="button" class="sd-fixed" id="btn-sd-lora-browser" aria-expanded="false" aria-controls="sd-lora-drawer" title="Browse your LoRAs (like Stable Diffusion's Lora tab)">🧩 LoRAs <span id="sd-lora-count"></span></button>
+          <div id="sd-lora-suggest">
+            <input type="text" id="sd-lora-search" placeholder="Type to find a LoRA…" autocomplete="off" aria-autocomplete="list" aria-controls="sd-lora-list" aria-label="Find a LoRA">
+            <div id="sd-lora-list" role="listbox" hidden></div>
+          </div>
+        </div>
+        <div id="sd-lora-drawer" role="region" aria-label="LoRA browser" hidden>
+          <div class="sd-ld-head">
+            <input type="search" id="sd-ld-q" placeholder="Search LoRAs, trigger words, tags…" aria-label="Search LoRAs" autocomplete="off">
+            <button type="button" class="sd-fixed" id="btn-sd-ld-refresh" title="Ask the SD app to look for new LoRAs, and rescan the folders">↻</button>
+            <button type="button" class="sd-fixed" id="btn-sd-ld-close" aria-label="Close the LoRA browser" title="Close (Esc)">✕</button>
+          </div>
+          <div class="sd-pillrow sd-ld-filters" role="group" aria-label="Show">
+            <button type="button" class="sd-pill" data-ldf="all" aria-pressed="true">All</button>
+            <button type="button" class="sd-pill" data-ldf="match" aria-pressed="false" id="sd-ld-f-match">Fits this model</button>
+            <button type="button" class="sd-pill" data-ldf="recent" aria-pressed="false">Recent</button>
+            <button type="button" class="sd-pill" data-ldf="fav" aria-pressed="false" title="Favourites">★</button>
+            <span id="sd-ld-count" class="sd-small"></span>
+          </div>
+          <div id="sd-ld-grid" role="listbox" aria-label="LoRAs — click to add"></div>
+          <div id="sd-ld-empty" class="sd-small" hidden></div>
         </div>
         <div id="sd-lora-chips" aria-label="Chosen LoRAs"></div>
         <div id="sd-warnings" aria-live="polite"></div>
-        <div class="sd-row" style="margin-top:4px;">
-          <div><label class="sd-l" for="sd-checkpoint">Checkpoint (model)</label><select id="sd-checkpoint"><option value="">(the one loaded in your SD app)</option></select></div>
-          <div><label class="sd-l" for="sd-vae">VAE</label><select id="sd-vae"><option value="">Automatic</option></select></div>
-        </div>
-        <div id="sd-vae-warn" class="sd-warn" role="note" hidden></div>
-        <div class="sd-row">
-          <div><label class="sd-l" for="sd-sampler">Sampler</label><select id="sd-sampler"><option value="">(default)</option></select></div>
-          <div><label class="sd-l" for="sd-scheduler">Scheduler</label><select id="sd-scheduler"><option value="">(default)</option></select></div>
-        </div>
-        <div style="margin-top:6px;">
-          <div class="sd-slider"><label for="sd-steps">Steps</label><input type="range" id="sd-steps" min="1" max="100" value="20"><span id="sd-steps-v">20</span></div>
-          <div class="sd-slider"><label for="sd-cfg">CFG</label><input type="range" id="sd-cfg" min="1" max="20" step="0.5" value="7"><span id="sd-cfg-v">7</span></div>
-          <div class="sd-slider"><label for="sd-width">Width</label><input type="range" id="sd-width" min="256" max="2048" step="64" value="512"><span id="sd-width-v">512</span></div>
-          <div class="sd-slider"><label for="sd-height">Height</label><input type="range" id="sd-height" min="256" max="2048" step="64" value="512"><span id="sd-height-v">512</span></div>
-          <div class="sd-slider"><label for="sd-batch">Batch</label><input type="range" id="sd-batch" min="1" max="8" value="1"><span id="sd-batch-v">1</span></div>
-        </div>
-        <div class="sd-row" style="margin-top:4px;">
-          <label class="sd-fixed" for="sd-seed" style="font-size:11.5px;">Seed</label>
-          <input type="number" id="sd-seed" value="-1" title="-1 = a new random picture each time; a fixed number makes the same picture again">
-          <button class="sd-fixed" id="btn-sd-seed-rand" title="Random seed (-1)">🎲</button>
-          <button class="sd-fixed" id="btn-sd-seed-last" title="Reuse the last picture's seed">♻</button>
-          <select class="sd-fixed" id="sd-size-preset" title="Common sizes" style="width:auto;">
-            <option value="">Size…</option><option value="512x512">512² (SD1.5)</option><option value="512x768">512×768 portrait</option><option value="768x512">768×512 wide</option>
-            <option value="1024x1024">1024² (SDXL)</option><option value="832x1216">832×1216 portrait</option><option value="1216x832">1216×832 wide</option>
-          </select>
-        </div>
-        <div id="sd-advanced" aria-label="More settings">
+        <div id="sd-lock-row"><label class="sd-fixed" for="sd-lock-pick" title="Character lock: the same face every time">🔒 Character</label>
+          <select id="sd-lock-pick"><option value="">— none —</option></select></div>
+        <details class="sd-adv" id="sd-sec-more"><summary>⚙ More settings <span class="sd-on sd-oneline" id="sd-more-sum"></span></summary><div class="sd-adv-body">
+          <div class="sd-row">
+            <div><label class="sd-l" for="sd-sampler">Sampler</label><select id="sd-sampler"><option value="">(default)</option></select></div>
+            <div><label class="sd-l" for="sd-scheduler">Scheduler</label><select id="sd-scheduler"><option value="">(default)</option></select></div>
+          </div>
+          <div class="sd-note" id="sd-more-note"></div>
+          <div style="margin-top:4px;">
+            <div class="sd-slider"><label for="sd-steps">Steps</label><input type="range" id="sd-steps" min="1" max="100" value="20"><span id="sd-steps-v">20</span></div>
+            <div class="sd-slider"><label for="sd-cfg">CFG</label><input type="range" id="sd-cfg" min="1" max="20" step="0.5" value="7"><span id="sd-cfg-v">7</span></div>
+            <div class="sd-slider"><label for="sd-batch">Batch</label><input type="range" id="sd-batch" min="1" max="8" value="1"><span id="sd-batch-v">1</span></div>
+          </div>
+          <div class="sd-row" style="margin-top:4px;">
+            <label class="sd-fixed" for="sd-seed" style="font-size:11.5px;">Seed</label>
+            <input type="number" id="sd-seed" value="-1" title="-1 = a new random picture each time; a fixed number makes the same picture again">
+            <button class="sd-fixed" id="btn-sd-seed-rand" title="Random seed (-1)">🎲</button>
+            <button class="sd-fixed" id="btn-sd-seed-last" title="Reuse the last picture's seed">♻</button>
+            <select class="sd-fixed" id="sd-size-preset" title="Common sizes" style="width:auto;" hidden>
+              <option value="">Size…</option><option value="512x512">512² (SD1.5)</option><option value="512x768">512×768 portrait</option><option value="768x512">768×512 wide</option>
+              <option value="1024x1024">1024² (SDXL)</option><option value="832x1216">832×1216 portrait</option><option value="1216x832">1216×832 wide</option>
+            </select>
+          </div>
+          <div class="sd-row" style="margin-top:2px;">
+            <div><label class="sd-l" for="sd-vae">VAE</label><select id="sd-vae"><option value="">Automatic</option></select></div>
+            <div><label class="sd-l" for="sd-book-checkpoint" title="Akọwe's book pictures (portraits, covers, scenes) are made with this checkpoint. Nothing is switched without this setting.">📖 Book pictures use</label><select id="sd-book-checkpoint"><option value="">(whatever is loaded)</option></select></div>
+          </div>
+          <div id="sd-vae-warn" class="sd-warn" role="note" hidden></div>
+          <div class="sd-note" id="sd-book-note"></div>
+        </div></details>
+        <div id="sd-advanced" aria-label="Extra steps (all off by default)">
           <details class="sd-adv" id="sd-sec-views"><summary>Reference views — portrait, 10 full-body views, turnaround sheet <span class="sd-on" id="sd-rv-badge"></span></summary><div class="sd-adv-body">
             <div class="sd-row"><div><label class="sd-l" for="sd-rv-lock">Character</label><select id="sd-rv-lock"><option value="">— no lock: describe them below —</option></select></div></div>
             <label class="sd-l" for="sd-rv-appearance">What they look like (with or without a lock)</label>
@@ -2640,6 +2757,7 @@
   </div>
 
   <script src="controls.js"></script>
+  <script src="sd-quality.js"></script><!-- 🎨 quality defaults by model family, prompt shortening, styles (window.sdQuality, PR #128) -->
   <script src="images-studio.js"></script>
   <script src="videos-studio.js"></script>
   <script src="videos-trailer.js"></script><!-- 🎞 book trailers in the 🎬 Video tab -->

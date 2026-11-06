@@ -100,6 +100,22 @@ function load(api, opts = {}) {
   assert($('llm-btn-go').disabled && /Loading qwen3:14b/.test($('llm-msg').textContent), 'busy while it starts; says what it is doing');
   await tick(60);
   assert(s.calls.some((c) => c[0] === 'startAlfred') && !s.calls.some((c) => c[0] === 'setupAll') && /ready with qwen3:14b/.test($('llm-msg').textContent) && !$('llm-btn-go').disabled, 'calls llmStartAlfred (never setupAll) and shows "ready"');
+  // The real app sends steps and the final answer by two routes, so a step can land AFTER the answer (CI saw
+  // "Loading…" stay on screen for good). A late step of a finished run must not overwrite "ready".
+  s.api.llmStartAlfred = async () => { s.calls.push(['startAlfred']); await tick(10); setTimeout(() => s.emit({ type: 'step', task: 'start-alfred', run: 7, message: 'Loading qwen3:14b into memory…' }), 15); return { ok: true, run: 7, model: 'qwen3:14b', message: '✓ Alfred is ready with qwen3:14b.' }; };
+  $('llm-btn-go').click();
+  await tick(60);
+  assert(/ready with qwen3:14b/.test($('llm-msg').textContent), `a late "Loading…" step after the answer does not overwrite "ready" ("${$('llm-msg').textContent.slice(0, 60)}")`);
+  s.emit({ type: 'step', task: 'start-alfred', run: 8, message: 'Looking for the models you already have…' }); await tick(5);
+  assert(/Looking for the models/.test($('llm-msg').textContent), 'a new run\'s steps (e.g. starting by himself when the app opens) still show');
+  s.emit({ type: 'done', task: 'pull', run: 8, runTask: 'start-alfred', ok: true, message: 'downloaded' });
+  s.emit({ type: 'step', task: 'start-alfred', run: 8, runTask: 'start-alfred', message: 'Using qwen3:14b…' }); await tick(5);
+  assert(/Using qwen3:14b/.test($('llm-msg').textContent), 'a part\'s own "done" (a download inside the run) does not end the run');
+  s.emit({ type: 'done', task: 'start-alfred', run: 8, runTask: 'start-alfred', ok: true, message: '✓ Alfred is ready with qwen3:14b.' });
+  s.emit({ type: 'step', task: 'start-alfred', run: 8, message: 'Loading qwen3:14b into memory…' }); await tick(5);
+  assert(/Using qwen3:14b/.test($('llm-msg').textContent), 'once its "done" arrived, that run\'s later steps are dropped too');
+  s.emit({ type: 'step', task: 'setup', run: 8, runTask: 'setup', step: 'check', label: 'Check everything', state: 'done', message: 'All set' }); await tick(5);
+  assert(/Using qwen3:14b/.test($('llm-msg').textContent) && /✔ Check everything/.test($('llm-steps').textContent), 'a late ✔ of a finished setup still ticks its row, without overwriting the message');
   $('llm-autostart').checked = true; $('llm-autostart').dispatchEvent(new w.Event('change')); await tick(5);
   assert(s.calls.some((c) => c[0] === 'alfredSettings' && c[1].autoStart === true) && /start by himself/.test($('llm-msg').textContent), 'ticking "Start him when the app opens" saves autoStart');
 

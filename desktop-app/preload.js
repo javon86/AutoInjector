@@ -168,6 +168,7 @@ contextBridge.exposeInMainWorld("api", {
     chatgptStatus: () => ipcRenderer.invoke("sd:chatgpt-status"),
     chatgptCancel: () => ipcRenderer.invoke("sd:chatgpt-cancel"),
     chatgptSettings: (patch) => ipcRenderer.invoke("sd:chatgpt-settings", patch || {}),
+    quality: (patch) => ipcRenderer.invoke("sd:quality", patch || {}), // 🎨 { bookCheckpoint } — "Book pictures use" (PR #128)
     onChatgptImage: (cb) => ipcRenderer.on("chatgpt-image", (_e, st) => cb(st)),
     libList: (filters) => ipcRenderer.invoke("sdlib:list", { filters }),
     libScan: () => ipcRenderer.invoke("sdlib:scan"),

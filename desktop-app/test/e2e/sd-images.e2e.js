@@ -93,6 +93,32 @@ async function main() {
     assert((await c.$$('#sd-gallery img')).length >= 1, 'the gallery shows it');
     await shot(c, '03-images-result');
 
+    // ---- PR #128: an SDXL checkpoint → its own size + DPM++ 2M/Karras + a default negative; a LoRA from the 🧩 browser
+    await c.selectOption('#sd-checkpoint', 'juggernautXL_v9.safetensors [c9e3e68f89]');
+    await c.waitForFunction(() => document.getElementById('sd-family').textContent === 'SDXL', null, { timeout: 5000 }).catch(() => {});
+    assert(await c.textContent('#sd-family') === 'SDXL', 'choosing juggernautXL shows the SDXL badge');
+    const xlSize = await c.evaluate(() => `${document.getElementById('sd-width').value}x${document.getElementById('sd-height').value}`);
+    assert(['832x1216', '1024x1024', '1216x832'].includes(xlSize), `the size jumps to an SDXL size (${xlSize})`);
+    await c.click('.sd-chip[data-name="odile_face"] button[aria-label="Remove odile_face"]');
+    await c.click('#btn-sd-lora-browser');
+    await c.waitForSelector('#sd-ld-grid .sd-ldcard[data-name="xl_ink"]', { timeout: 5000 }).catch(() => {});
+    assert((await c.$$('#sd-ld-grid .sd-ldcard')).length >= 2, 'the 🧩 LoRA browser lists the LoRAs as cards');
+    assert(/SDXL/.test(await c.textContent('#sd-ld-grid .sd-ldcard[data-name="xl_ink"] .sd-badge').catch(() => '')), 'xl_ink\'s card says SDXL (from its metadata)');
+    await shot(c, '03d-images-lora-browser');
+    await c.click('#sd-ld-grid .sd-ldcard[data-name="xl_ink"]');
+    await c.click('#btn-sd-ld-close');
+    await c.click('#sd-style-row [data-style="photo"]');
+    await c.click('#btn-sd-generate');
+    await c.waitForFunction(() => /saved/.test(document.getElementById('sd-msg').textContent) && !document.getElementById('btn-sd-generate').disabled, null, { timeout: 20000 }).catch(() => {});
+    const xb = forge.state.lastTxt2img || {};
+    assert(`${xb.width}x${xb.height}` === xlSize && xb.sampler_name === 'DPM++ 2M' && xb.scheduler === 'Karras' && xb.cfg_scale === 5.5 && xb.steps === 28, `Forge got SDXL settings: ${xb.width}×${xb.height}, ${xb.sampler_name} ${xb.scheduler}, ${xb.steps} steps, CFG ${xb.cfg_scale}`);
+    assert(/<lora:xl_ink:0\.8>/.test(xb.prompt || '') && /RAW photo/.test(xb.prompt || '') && /lowres/.test(xb.negative_prompt || '') && /cartoon/.test(xb.negative_prompt || ''), 'the LoRA (<lora:xl_ink:0.8>), the Photo-real words and the default negative reach Forge');
+    assert(/SDXL/.test(await c.textContent('#sd-preview-info')), 'the result says which checkpoint (SDXL) made it');
+    await shot(c, '03e-images-sdxl-result');
+    await c.click('#sd-style-row [data-style="photo"]');
+    await c.click('.sd-chip[data-name="xl_ink"] button[aria-label="Remove xl_ink"]');
+    await c.selectOption('#sd-checkpoint', 'dreamshaper_8.safetensors [879db523c3]');
+
     // ---- more settings: hires fix, then a real inpaint with the mask brush
     await c.click('#sd-sec-hires > summary');
     await c.check('#sd-hr-on');
@@ -163,6 +189,7 @@ async function main() {
 
     // ---- a VAE that can't be loaded: labelled in the dropdown, a red box with the fix, one click fixes it
     await c.click('#sd-sub-generate');
+    if (!(await c.$eval('#sd-sec-more', (d) => d.open))) await c.click('#sd-sec-more > summary'); // the VAE is under ⚙ More settings (PR #128)
     const vaeLabel = await c.$eval('#sd-vae', (sel) => { const o = [...sel.options].find((x) => x.value === 'taesd_decoder'); return o ? o.textContent : ''; });
     assert(/not a full VAE/.test(vaeLabel), `the VAE dropdown flags the decoder-only file ("${vaeLabel}")`);
     await c.selectOption('#sd-vae', 'taesd_decoder');

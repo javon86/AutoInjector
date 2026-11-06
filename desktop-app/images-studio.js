@@ -24,19 +24,35 @@
  *   • Reference views: a character lock or a typed appearance → a portrait, any of
  *     the ten full-body views, all ten in one series, or one turnaround sheet
  *     (the same path as Akọwe's POST /image/request).
+ *   • PR #128 quality + a compact form (window.sdQuality = sd-quality.js): the checkpoint's model family
+ *     (SDXL / SD1.5 / Pony / Flux …) picks the size (Portrait / Square / Landscape map to its own sizes;
+ *     Custom shows the exact sliders), steps and CFG (until you move them), the sampler shown for
+ *     "(default)" and the default negative prompt; Style chips (Photo-real · Cinematic · Illustration ·
+ *     Anime · Painting); a very long prompt gets "📝 Shortened for the model"; 🧩 LoRAs opens a small
+ *     LoRA browser (search, All / Fits this model / Recent / ★, cards with preview, base and trigger
+ *     words) and chosen LoRAs are rows with a weight slider, 🔑 trigger words and ✕; ⚙ More settings
+ *     holds sampler / steps / CFG / batch / seed / VAE / "📖 Book pictures use". Open/closed sections
+ *     are remembered (localStorage).
  * Talks only to window.api.sd (preload.js). If that is missing the tab says so.
  */
 (function () {
   const $ = (id) => document.getElementById(id);
   const api = (window.api && window.api.sd) || null;
   if (!$('images-tab')) return;
+  const Q = window.sdQuality || null; // sd-quality.js (absent in old test pages: the form then works as before)
+  function lsGet(k, d) { try { const v = window.localStorage.getItem(k); return v == null ? d : v; } catch (_) { return d; } }
+  function lsSet(k, v) { try { window.localStorage.setItem(k, v); } catch (_) {} }
 
   const st = {
     connected: false, status: null, lists: null, loras: [], locks: [], lib: null, libSel: null, lockSel: null,
     chips: [], generating: false, pollTimer: null, lastSeed: null, current: null, libItemsById: new Map(), loaded: false,
     extras: null, i2i: null, maskDirty: false, cnUnits: [], fail: null,
     engine: 'sd', jobEngine: 'sd', rvStop: false, rvSeries: '',
+    family: '', style: '', aspect: '', short: null, ldFilter: 'all', recent: [], quality: { bookCheckpoint: '' },
   };
+  st.style = Q && Q.STYLES[lsGet('sd-style', '')] ? lsGet('sd-style', '') : '';
+  st.aspect = ['portrait', 'square', 'landscape', 'custom'].includes(lsGet('sd-aspect', '')) ? lsGet('sd-aspect', '') : '';
+  try { st.recent = JSON.parse(lsGet('sd-lora-recent', '[]')).filter((x) => typeof x === 'string').slice(0, 24); } catch (_) { st.recent = []; }
 
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
   function setText(id, t) { const e = $(id); if (e) e.textContent = t; }
@@ -174,6 +190,9 @@
     st.loras = l.loras;
     const dl = $('sd-lk-lora-names'); if (dl) { dl.textContent = ''; for (const x of l.loras) { const o = document.createElement('option'); o.value = `${x.alias || x.name}:0.8`; dl.appendChild(o); } }
     fillSelect('sd-rf-checkpoint', l.checkpoints.map((c) => ({ value: c.name, label: c.title || c.name })), null, '(choose)');
+    fillSelect('sd-book-checkpoint', l.checkpoints.map((c) => ({ value: c.name, label: c.title || c.name })), st.quality.bookCheckpoint || '', '(whatever is loaded)');
+    bookNote();
+    qualityRefresh();
     checkCompat();
     await loadExtras();
   }
@@ -193,13 +212,180 @@
   function setSlider(id, v) { if (v == null || !$(id)) return; $(id).value = v; setText(`${id}-v`, $(id).value); }
   $('btn-sd-seed-rand').onclick = () => { $('sd-seed').value = '-1'; };
   $('btn-sd-seed-last').onclick = () => { if (st.lastSeed != null) $('sd-seed').value = String(st.lastSeed); };
-  $('sd-size-preset').onchange = (e) => { const v = e.target.value; if (!v) return; const [w, h] = v.split('x'); setSlider('sd-width', w); setSlider('sd-height', h); e.target.value = ''; };
-  $('sd-checkpoint').onchange = () => { checkCompat(); refreshLibraryData().catch(() => {}); };
+  $('sd-size-preset').onchange = (e) => { const v = e.target.value; if (!v) return; const [w, h] = v.split('x'); setSlider('sd-width', w); setSlider('sd-height', h); aspectFromSize(w, h); e.target.value = ''; };
+  $('sd-checkpoint').onchange = () => { qualityRefresh(); checkCompat(); refreshLibraryData().then(() => qualityRefresh()).catch(() => {}); };
+  // ------------------------------------------------------------ quality defaults (sd-quality.js, PR #128)
+  // The checkpoint's family → its own sizes, steps / CFG (until the user moves them), the sampler "(default)"
+  // stands for, the default negative prompt; the Style chips; the size picker; "📝 Shortened for the model".
+  function ckName() { return $('sd-checkpoint').value || (st.status && (st.status.checkpoint || st.status.model)) || (st.lists && st.lists.current && st.lists.current.checkpoint) || ''; }
+  function currentFamily() {
+    if (!Q) return '';
+    const ck = ckName(); if (!ck) return '';
+    const it = st.libItemsById.get(libIdOf('checkpoint', ck));
+    return Q.familyOf(ck, { base: it && it.base, size: it && it.size });
+  }
+  function sliderNum(id) { return Number($(id).value); }
+  function setAspectButtons() {
+    for (const b of document.querySelectorAll('#sd-size-row [data-aspect]')) b.setAttribute('aria-pressed', String(b.dataset.aspect === st.aspect));
+    $('sd-size-custom').hidden = st.aspect !== 'custom';
+  }
+  function setAspect(a, fromUser) {
+    if (!Q) return;
+    st.aspect = a;
+    if (fromUser) lsSet('sd-aspect', a);
+    if (a !== 'custom') { const sz = Q.sizeFor(st.family, a); setSlider('sd-width', sz.width); setSlider('sd-height', sz.height); }
+    setAspectButtons(); sizeNote();
+  }
+  // a size put in from outside (Remake, the size list, a lock's "Try it"): the matching button, else Custom
+  function aspectFromSize(w, h) {
+    if (!Q) return;
+    const a = Q.aspectOf(w, h); const sz = Q.sizeFor(st.family, a);
+    st.aspect = sz.width === Number(w) && sz.height === Number(h) ? a : 'custom';
+    setAspectButtons(); sizeNote();
+  }
+  function sizeNote() {
+    if (!Q) return;
+    const w = sliderNum('sd-width'), h = sliderNum('sd-height');
+    setText('sd-size-readout', `${w}×${h}`);
+    for (const b of document.querySelectorAll('#sd-size-row [data-aspect]')) {
+      if (b.dataset.aspect === 'custom') continue;
+      const sz = Q.sizeFor(st.family, b.dataset.aspect); b.title = `${sz.width}×${sz.height} — ${Q.familyLabel(st.family)}'s own size`;
+    }
+    const warn = Q.sizeWarning(st.family, w, h);
+    $('sd-size-warn').hidden = !warn; setText('sd-size-warn', warn ? `⚠ ${warn}` : '');
+    const sd15 = st.family === 'SD1.5' || st.family === 'SD2';
+    $('sd-size-hires-wrap').hidden = !sd15;
+    $('sd-size-hires').checked = $('sd-hr-on').checked;
+  }
+  function familyDefaults() {
+    const d = Q.defaultsFor(st.family);
+    const pk = st.lists ? Q.pickSampler(st.family, st.lists) : null;
+    return { d, pk };
+  }
+  function moreSummary() {
+    if (!Q) return;
+    const { pk } = familyDefaults();
+    const smp = $('sd-sampler').value || (pk ? `${pk.sampler}${pk.scheduler ? ` · ${pk.scheduler}` : ''}` : 'default sampler');
+    const sch = $('sd-sampler').value && $('sd-scheduler').value ? ` · ${$('sd-scheduler').value}` : '';
+    const seed = Number($('sd-seed').value) >= 0 ? `seed ${$('sd-seed').value}` : 'random seed';
+    const b = sliderNum('sd-batch');
+    setText('sd-more-sum', `${smp}${sch} · ${$('sd-steps').value} steps · CFG ${$('sd-cfg').value} · ${seed}${b > 1 ? ` · ×${b}` : ''}`);
+    const first = $('sd-sampler').options[0];
+    if (first && !first.value) first.textContent = pk ? `(default → ${pk.sampler})` : '(default)';
+    const sfirst = $('sd-scheduler').options[0];
+    if (sfirst && !sfirst.value) sfirst.textContent = pk && pk.scheduler && !$('sd-sampler').value ? `(default → ${pk.scheduler})` : '(default)';
+    const d = Q.defaultsFor(st.family);
+    setText('sd-more-note', st.family ? `${Q.familyLabel(st.family)}: about ${d.steps} steps, CFG ${d.cfgScale}${d.distilledCfg ? ` (distilled CFG ${d.distilledCfg} is Forge's own default)` : ''}${pk ? `, ${pk.sampler}${pk.scheduler ? ` + ${pk.scheduler}` : ''}` : ''}.` : 'Pick a checkpoint to get its best settings.');
+  }
+  function negNote() {
+    if (!Q) return;
+    const user = $('sd-negative').value.trim();
+    const def = Q.defaultNegative(st.family, st.style);
+    $('sd-negative').placeholder = def ? `empty = the default: ${def}` : 'Flux ignores the negative prompt';
+    setText('sd-neg-preview', user ? user : def ? `default: ${def}` : '(none — Flux ignores it)');
+    setText('sd-neg-note', def ? `Empty = the default for ${Q.familyLabel(st.family)}${st.style ? ` + ${Q.STYLES[st.style].label}` : ''}. Your own words replace it${st.style ? ` (the style's terms are still added)` : ''}.` : '');
+  }
+  function styleButtons() { for (const b of document.querySelectorAll('#sd-style-row [data-style]')) b.setAttribute('aria-pressed', String(b.dataset.style === st.style)); }
+  function stepsTouched() { return lsGet('sd-q-touched', '') === '1'; }
+  // Called when the checkpoint (or what the library knows about it) changes.
+  function qualityRefresh() {
+    if (!Q) return;
+    const fam = currentFamily();
+    const changed = fam !== st.family;
+    st.family = fam;
+    const badge = $('sd-family');
+    badge.hidden = !fam; badge.textContent = fam || ''; if (fam) badge.dataset.base = fam; else delete badge.dataset.base;
+    if (!st.aspect) st.aspect = Q.aspectOf(sliderNum('sd-width'), sliderNum('sd-height'));
+    if (st.aspect !== 'custom') { const sz = Q.sizeFor(fam, st.aspect); setSlider('sd-width', sz.width); setSlider('sd-height', sz.height); }
+    if (changed && !stepsTouched() && st.lists) { const d = Q.defaultsFor(fam); setSlider('sd-steps', d.steps); setSlider('sd-cfg', d.cfgScale); }
+    setAspectButtons(); sizeNote(); moreSummary(); negNote();
+    if ($('sd-ld-f-match')) $('sd-ld-f-match').textContent = fam ? `Fits ${fam === 'Pony' || fam === 'Illustrious' || fam === 'NoobAI' ? `${fam}/SDXL` : fam}` : 'Fits this model';
+    if (!$('sd-lora-drawer').hidden) renderDrawer();
+    updateFinalPrompt();
+  }
+  function promptShortCheck() {
+    if (!Q) return;
+    const v = $('sd-prompt').value;
+    const n = Q.estimateTokens(v);
+    const el = $('sd-prompt-tokens');
+    el.textContent = v.trim() ? `≈${n} tokens${n > 75 ? ` · ${Math.ceil(n / 75)} chunks` : ''}` : '';
+    el.dataset.level = n > 150 ? 'warn' : '';
+    const c = n > 150 ? Q.condensePrompt(v, { maxTokens: 150 }) : null;
+    st.short = c && c.condensed ? c : null;
+    $('sd-prompt-short').hidden = !st.short;
+    if (st.short) {
+      setText('sd-prompt-short-msg', `📝 Shortened for the model (≈${c.tokensBefore} → ${c.tokensAfter} tokens): the looks first, the story left out.`);
+      setText('sd-prompt-short-text', c.prompt);
+    }
+    updateFinalPrompt();
+  }
+  let shortTimer = null;
+  $('sd-prompt').addEventListener('input', () => { clearTimeout(shortTimer); shortTimer = setTimeout(promptShortCheck, 200); });
+  $('btn-sd-prompt-full').onclick = () => {
+    const box = $('sd-prompt-short-text'); box.hidden = !box.hidden;
+    $('btn-sd-prompt-full').setAttribute('aria-expanded', String(!box.hidden));
+    $('btn-sd-prompt-full').textContent = box.hidden ? 'show what is sent' : 'hide';
+  };
+  $('sd-prompt-short-on').onchange = updateFinalPrompt;
+  for (const b of document.querySelectorAll('#sd-style-row [data-style]')) b.onclick = () => {
+    st.style = st.style === b.dataset.style ? '' : b.dataset.style;
+    lsSet('sd-style', st.style); styleButtons(); negNote(); updateFinalPrompt();
+  };
+  for (const b of document.querySelectorAll('#sd-size-row [data-aspect]')) b.onclick = () => setAspect(b.dataset.aspect, true);
+  $('sd-size-hires').onchange = (e) => {
+    $('sd-hr-on').checked = e.target.checked;
+    if (e.target.checked && Number($('sd-hr-scale').value) === 2) $('sd-hr-scale').value = '1.5';
+    updateBadges();
+  };
+  $('sd-hr-on').addEventListener('change', () => { if ($('sd-size-hires')) $('sd-size-hires').checked = $('sd-hr-on').checked; });
+  for (const id of ['sd-steps', 'sd-cfg']) $(id).addEventListener('input', () => { lsSet('sd-q-touched', '1'); moreSummary(); });
+  for (const id of ['sd-batch', 'sd-seed', 'sd-sampler', 'sd-scheduler']) { $(id).addEventListener('input', moreSummary); $(id).addEventListener('change', moreSummary); }
+  for (const id of ['sd-width', 'sd-height']) $(id).addEventListener('input', () => { st.aspect = 'custom'; lsSet('sd-aspect', 'custom'); setAspectButtons(); sizeNote(); });
+  $('sd-negative').addEventListener('input', negNote);
+  // The prompt / negative actually sent: the shortened prompt (when on), the style's words, Pony's score tags.
+  function finalPrompt(raw) {
+    let prompt = raw;
+    let fullPrompt;
+    if (Q && st.short && $('sd-prompt-short-on').checked && raw === $('sd-prompt').value) { fullPrompt = raw; prompt = st.short.prompt; }
+    if (Q) prompt = Q.applyStyle(prompt, st.style, st.family).prompt;
+    return { prompt, fullPrompt };
+  }
+  function finalNegative() {
+    const user = $('sd-negative').value.trim();
+    if (!Q) return $('sd-negative').value;
+    if (user) return st.style ? Q.mergeTerms(user, Q.STYLES[st.style].negative) : user;
+    return Q.defaultNegative(st.family, st.style);
+  }
+  // Remember which sections are open (Negative, More settings, Hires fix, …).
+  for (const d of document.querySelectorAll('#sd-view-generate details[id]')) {
+    if (lsGet(`sd-open:${d.id}`, '') === '1') d.open = true;
+    d.addEventListener('toggle', () => lsSet(`sd-open:${d.id}`, d.open ? '1' : '0'));
+  }
+  styleButtons();
+  // 📖 Book pictures use: <checkpoint> (Akọwe's pictures; nothing is switched without it)
+  async function loadQuality() {
+    const r = await call('quality');
+    if (r && r.ok) st.quality = { bookCheckpoint: r.bookCheckpoint || '' };
+    bookNote();
+  }
+  function bookNote() {
+    const sel = $('sd-book-checkpoint'); const v = st.quality.bookCheckpoint || '';
+    if (v && ![...sel.options].some((o) => o.value === v)) { const o = document.createElement('option'); o.value = v; o.textContent = v; sel.appendChild(o); }
+    sel.value = v;
+    setText('sd-book-note', v ? `📖 Akọwe's book pictures are made with ${v} (a character lock's own checkpoint still wins).` : '📖 Akọwe\'s book pictures use whatever checkpoint is loaded. For realistic portraits pick a realistic checkpoint here.');
+  }
+  $('sd-book-checkpoint').onchange = async (e) => {
+    const r = await call('quality', { bookCheckpoint: e.target.value });
+    if (r && r.ok) st.quality = { bookCheckpoint: r.bookCheckpoint || '' };
+    bookNote();
+  };
+
 
   function formRequest() {
     const num = (id) => Number($(id).value);
+    const fp = finalPrompt($('sd-prompt').value);
     return {
-      prompt: $('sd-prompt').value, negativePrompt: $('sd-negative').value,
+      prompt: fp.prompt, negativePrompt: finalNegative(), fullPrompt: fp.fullPrompt, style: (Q && st.style) || undefined,
       steps: num('sd-steps'), cfgScale: num('sd-cfg'), width: num('sd-width'), height: num('sd-height'), batchSize: num('sd-batch'),
       seed: Number.isFinite(num('sd-seed')) ? num('sd-seed') : -1,
       checkpoint: $('sd-checkpoint').value, vae: $('sd-vae').value, sampler: $('sd-sampler').value, scheduler: $('sd-scheduler').value,
@@ -428,9 +614,11 @@
   };
   function fillForm(rec, keepSeed) {
     if (!rec) return;
-    $('sd-prompt').value = rec.prompt || '';
+    $('sd-prompt').value = rec.fullPrompt || rec.prompt || ''; // a shortened prompt comes back whole (it is shortened again)
     $('sd-negative').value = rec.negativePrompt || '';
     setSlider('sd-steps', rec.steps); setSlider('sd-cfg', rec.cfgScale); setSlider('sd-width', rec.width); setSlider('sd-height', rec.height);
+    if (rec.steps != null || rec.cfgScale != null) lsSet('sd-q-touched', '1');
+    if (rec.style && Q && Q.STYLES[rec.style]) { st.style = ''; styleButtons(); } // the style's words are already in the recorded prompt
     $('sd-seed').value = keepSeed && rec.seed != null ? String(rec.seed) : '-1';
     for (const [sel, v] of [['sd-checkpoint', rec.checkpoint], ['sd-vae', rec.vae], ['sd-sampler', rec.sampler], ['sd-scheduler', rec.scheduler]]) {
       const e = $(sel); if (!e || v == null) continue;
@@ -446,20 +634,39 @@
     $('sd-adv-restore').checked = !!rec.restoreFaces; $('sd-adv-tiling').checked = !!rec.tiling;
     $('sd-ad-on').checked = !!(rec.adetailer && rec.adetailer.length);
     updateBadges();
-    st.chips = (rec.loras || []).map((l) => ({ name: String(l.name).replace(/\\/g, '/').split('/').pop().replace(/\.(safetensors|ckpt|pt)$/i, ''), weight: Number(l.weight) || 0.8 }));
+    st.chips = (rec.loras || []).map((l) => {
+      const name = String(l.name).replace(/\\/g, '/').split('/').pop().replace(/\.(safetensors|ckpt|pt)$/i, '');
+      const it = allLoras().find((x) => x.name.toLowerCase() === name.toLowerCase()) || {};
+      return { name, weight: Number(l.weight) || 0.8, triggers: (it.triggerWords || []).filter(Boolean), dataset: (it.datasetTags || []).slice(0, 3), base: it.base || '' };
+    });
     renderChips(); checkCompat();
+    if (rec.width && rec.height) aspectFromSize(rec.width, rec.height);
+    qualityRefresh(); promptShortCheck();
     subTab('generate');
   }
 
   // ------------------------------------------------------------ LoRA picker
-  function loraCandidates(q) {
-    const words = String(q || '').toLowerCase().split(/\s+/).filter(Boolean);
+  // Every LoRA we know: the library's (scanned folders — "stuff and thing"/models/lora, Stability Matrix,
+  // the SD app's own folder — with previews, base model, trigger words, ★) plus what the SD app lists
+  // (its metadata read with sd-quality's loraInfo when the library doesn't have the file).
+  function allLoras() {
     const libLoras = st.lib ? st.lib.items.filter((x) => x.kind === 'lora') : [];
     const byId = new Map();
     for (const x of libLoras) byId.set(x.name.toLowerCase(), x);
-    for (const l of st.loras || []) { const n = String(l.alias || l.name).replace(/\\/g, '/').split('/').pop().replace(/\.(safetensors|ckpt|pt)$/i, ''); if (!byId.has(n.toLowerCase())) byId.set(n.toLowerCase(), { name: n, kind: 'lora', base: '', triggerWords: [], tags: [], collections: [] }); }
-    let all = [...byId.values()];
-    if (words.length) all = all.filter((x) => { const hay = [x.name, x.title, x.base, ...(x.tags || []), ...(x.collections || []), ...(x.triggerWords || [])].join(' ').toLowerCase(); return words.every((w) => hay.includes(w)); });
+    for (const l of st.loras || []) {
+      const n = String(l.alias || l.name).replace(/\\/g, '/').split('/').pop().replace(/\.(safetensors|ckpt|pt)$/i, '');
+      const have = byId.get(n.toLowerCase());
+      const info = Q && l.metadata ? Q.loraInfo(l.metadata) : null;
+      if (!have) byId.set(n.toLowerCase(), { name: n, kind: 'lora', base: info ? info.base : '', triggerWords: info ? info.triggers : [], datasetTags: info ? info.datasetTags : [], tags: [], collections: [], inBackend: true });
+      else if (info && !have.base && info.base) byId.set(n.toLowerCase(), Object.assign({}, have, { base: info.base }));
+    }
+    return [...byId.values()];
+  }
+  function loraMatches(x, words) { const hay = [x.name, x.title, x.base, ...(x.tags || []), ...(x.collections || []), ...(x.triggerWords || []), ...(x.datasetTags || [])].join(' ').toLowerCase(); return words.every((w) => hay.includes(w)); }
+  function loraCandidates(q) {
+    const words = String(q || '').toLowerCase().split(/\s+/).filter(Boolean);
+    let all = allLoras();
+    if (words.length) all = all.filter((x) => loraMatches(x, words));
     return all.sort((a, b) => (b.favorite ? 1 : 0) - (a.favorite ? 1 : 0) || a.name.localeCompare(b.name)).slice(0, 40);
   }
   function renderSuggest() {
@@ -484,60 +691,158 @@
     if (e.key === 'Escape') $('sd-lora-list').hidden = true;
   });
 
+  function triggersOf(it) { const t = (it && it.triggerWords || []).filter(Boolean); return t.length ? t : ((it && it.datasetTags) || []).slice(0, 3); }
+  function insertWords(words, name) {
+    const p = $('sd-prompt');
+    const missing = (words || []).filter((t) => t && !p.value.toLowerCase().includes(String(t).toLowerCase()));
+    if (missing.length) { p.value = p.value.trim() ? `${p.value.trim().replace(/,\s*$/, '')}, ${missing.join(', ')}` : missing.join(', '); msg(`Added ${name}'s trigger words: ${missing.join(', ')}`); promptShortCheck(); }
+    return missing;
+  }
   function addChip(it) {
     const name = it.name;
     if (!st.chips.some((c) => c.name.toLowerCase() === name.toLowerCase())) {
       const w = it.defaultWeight != null ? Number(it.defaultWeight) : 0.8;
-      st.chips.push({ name, weight: Number.isFinite(w) ? w : 0.8 });
+      st.chips.push({ name, weight: Number.isFinite(w) ? w : 0.8, triggers: (it.triggerWords || []).filter(Boolean), dataset: (it.datasetTags || []).slice(0, 3), base: it.base || '' });
       // Put its trigger words in the prompt so the LoRA actually shows up.
-      const trig = (it.triggerWords || []).filter(Boolean);
-      const p = $('sd-prompt');
-      const missing = trig.filter((t) => !p.value.toLowerCase().includes(t.toLowerCase()));
-      if (missing.length) { p.value = p.value.trim() ? `${p.value.trim().replace(/,\s*$/, '')}, ${missing.join(', ')}` : missing.join(', '); msg(`Added ${name}'s trigger words: ${missing.join(', ')}`); }
+      insertWords((it.triggerWords || []).filter(Boolean), name);
+      st.recent = [name, ...st.recent.filter((n) => n.toLowerCase() !== name.toLowerCase())].slice(0, 24);
+      lsSet('sd-lora-recent', JSON.stringify(st.recent));
     }
     $('sd-lora-search').value = ''; $('sd-lora-list').hidden = true;
     renderChips(); checkCompat();
+    if (!$('sd-lora-drawer').hidden) renderDrawer();
   }
+  function fmtW(n) { return (Math.round(n * 100) / 100).toFixed(2).replace(/0$/, ''); }
   function renderChips() {
     const box = $('sd-lora-chips');
     box.textContent = '';
     for (const c of st.chips) {
-      const chip = document.createElement('span');
+      const chip = document.createElement('div');
       chip.className = 'sd-chip'; chip.dataset.name = c.name; if (c.compat) chip.dataset.compat = c.compat;
       chip.title = c.compatMsg || '';
-      const lbl = document.createElement('span'); lbl.textContent = c.name;
-      const w = document.createElement('input'); w.type = 'number'; w.step = '0.05'; w.min = '-3'; w.max = '3'; w.value = String(c.weight); w.setAttribute('aria-label', `${c.name} weight`);
-      w.oninput = () => { const n = Number(w.value); if (Number.isFinite(n)) c.weight = n; updateFinalPrompt(); };
-      const x = document.createElement('button'); x.type = 'button'; x.textContent = '×'; x.title = 'Remove'; x.setAttribute('aria-label', `Remove ${c.name}`);
-      x.onclick = () => { st.chips = st.chips.filter((k) => k !== c); renderChips(); checkCompat(); };
-      chip.append(lbl, w, x);
+      const lbl = document.createElement('span'); lbl.className = 'sd-chip-name'; lbl.textContent = `🧩 ${c.name}`; lbl.title = c.name;
+      // the weight: a slider −1 … 2 (step 0.05) and its number
+      const w = document.createElement('input'); w.type = 'range'; w.step = '0.05'; w.min = '-1'; w.max = '2'; w.value = String(c.weight); w.setAttribute('aria-label', `${c.name} weight`);
+      const wv = document.createElement('span'); wv.className = 'sd-chip-w'; wv.textContent = fmtW(c.weight);
+      w.oninput = () => { const n = Number(w.value); if (Number.isFinite(n)) { c.weight = n; wv.textContent = fmtW(n); } updateFinalPrompt(); };
+      const words = (c.triggers && c.triggers.length ? c.triggers : c.dataset) || [];
+      const tb = document.createElement('button'); tb.type = 'button'; tb.textContent = '🔑'; tb.className = 'sd-chip-trig';
+      tb.title = words.length ? `Put its trigger words in the prompt: ${words.join(', ')}` : 'No trigger words known for this LoRA'; tb.setAttribute('aria-label', `Insert ${c.name}'s trigger words`);
+      tb.hidden = !words.length;
+      tb.onclick = () => { if (!insertWords(words, c.name).length) msg(`${c.name}'s trigger words are already in the prompt.`); };
+      const x = document.createElement('button'); x.type = 'button'; x.textContent = '✕'; x.title = 'Remove'; x.setAttribute('aria-label', `Remove ${c.name}`);
+      x.onclick = () => { st.chips = st.chips.filter((k) => k !== c); renderChips(); checkCompat(); if (!$('sd-lora-drawer').hidden) renderDrawer(); };
+      chip.append(lbl, w, wv, tb, x);
       box.appendChild(chip);
     }
+    setText('sd-lora-count', st.chips.length ? String(st.chips.length) : '');
     updateFinalPrompt();
   }
   function updateFinalPrompt() {
     const backend = st.status && st.status.backend;
-    if (!st.chips.length) { setText('sd-final-prompt', ''); return; }
-    const tags = st.chips.map((c) => `<lora:${c.name}:${Math.round(c.weight * 100) / 100}>`).join(' ');
-    setText('sd-final-prompt', backend === 'comfy' ? `ComfyUI gets ${st.chips.length} LoRA loader node(s): ${st.chips.map((c) => `${c.name} ×${c.weight}`).join(', ')}` : `Sent to the WebUI as: … ${tags}`);
+    const lines = [];
+    if (Q && $('sd-prompt').value.trim()) {
+      const fp = finalPrompt($('sd-prompt').value);
+      if (fp.prompt.trim() !== $('sd-prompt').value.trim()) lines.push(`Sent: ${fp.prompt.length > 320 ? `${fp.prompt.slice(0, 320)}…` : fp.prompt}`);
+    }
+    if (st.chips.length) {
+      const tags = st.chips.map((c) => `<lora:${c.name}:${Math.round(c.weight * 100) / 100}>`).join(' ');
+      lines.push(backend === 'comfy' ? `ComfyUI gets ${st.chips.length} LoRA loader node(s): ${st.chips.map((c) => `${c.name} ×${c.weight}`).join(', ')}` : `Sent to the WebUI as: … ${tags}`);
+    }
+    setText('sd-final-prompt', lines.join('\n'));
   }
   async function checkCompat() {
     const box = $('sd-warnings'); if (!box) return;
     box.textContent = '';
     for (const c of st.chips) { delete c.compat; delete c.compatMsg; }
     if (!st.chips.length) { renderChipsFlags(); return; }
-    const ck = $('sd-checkpoint').value || (st.status && (st.status.checkpoint || st.status.model)) || (st.lists && st.lists.current && st.lists.current.checkpoint) || '';
+    const ck = ckName();
     const r = await call('check', st.chips.map((c) => ({ name: c.name, weight: c.weight })), ck);
-    if (!r || !r.ok) return;
-    for (const w of r.warnings || []) {
-      const c = st.chips.find((k) => k.name.toLowerCase() === String(w.name).toLowerCase());
-      if (c) { c.compat = w.level; c.compatMsg = w.message; }
-      const d = document.createElement('div'); d.className = 'sd-warn'; d.dataset.level = w.level; d.textContent = `${w.level === 'hard' ? '⛔' : '⚠'} ${w.message}`;
+    const warned = new Set();
+    const show = (name, level, message) => {
+      const c = st.chips.find((k) => k.name.toLowerCase() === String(name).toLowerCase());
+      if (c) { c.compat = level; c.compatMsg = message; }
+      warned.add(String(name).toLowerCase());
+      const d = document.createElement('div'); d.className = 'sd-warn'; d.dataset.level = level; d.textContent = `${level === 'hard' ? '⛔' : '⚠'} ${message}`;
       box.appendChild(d);
+    };
+    if (r && r.ok) for (const w of r.warnings || []) show(w.name, w.level, w.message);
+    // what the library didn't know (a LoRA only the SD app lists): its metadata's base against the checkpoint's family
+    if (Q && st.family) for (const c of st.chips) {
+      if (warned.has(c.name.toLowerCase()) || !c.base) continue;
+      const m = Q.baseMatch(c.base, st.family);
+      if (m === 'hard') show(c.name, 'hard', `“${c.name}” was made for ${c.base}, but the checkpoint is ${st.family} — it won't work (no effect, garbage, or an error). Pick a ${c.base} checkpoint or a ${st.family} LoRA.`);
     }
     renderChipsFlags();
   }
   function renderChipsFlags() { for (const chip of document.querySelectorAll('#sd-lora-chips .sd-chip')) { const c = st.chips.find((k) => k.name === chip.dataset.name); if (c && c.compat) { chip.dataset.compat = c.compat; chip.title = c.compatMsg || ''; } else { delete chip.dataset.compat; chip.title = ''; } } }
+
+  // ---- 🧩 the LoRA browser (a small drawer under the LoRA row, like the SD app's Lora tab)
+  function openDrawer(open) {
+    const d = $('sd-lora-drawer');
+    d.hidden = !open;
+    $('btn-sd-lora-browser').setAttribute('aria-expanded', String(open));
+    if (open) { renderDrawer(); try { $('sd-ld-q').focus(); } catch (_) {} }
+  }
+  $('btn-sd-lora-browser').onclick = () => openDrawer($('sd-lora-drawer').hidden);
+  $('btn-sd-ld-close').onclick = () => { openDrawer(false); try { $('btn-sd-lora-browser').focus(); } catch (_) {} };
+  $('sd-lora-drawer').addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); openDrawer(false); try { $('btn-sd-lora-browser').focus(); } catch (_) {} } });
+  let ldTimer = null;
+  $('sd-ld-q').addEventListener('input', () => { clearTimeout(ldTimer); ldTimer = setTimeout(renderDrawer, 120); });
+  for (const b of document.querySelectorAll('#sd-lora-drawer [data-ldf]')) b.onclick = () => {
+    st.ldFilter = b.dataset.ldf;
+    for (const x of document.querySelectorAll('#sd-lora-drawer [data-ldf]')) x.setAttribute('aria-pressed', String(x === b));
+    renderDrawer();
+  };
+  $('btn-sd-ld-refresh').onclick = async () => {
+    const b = $('btn-sd-ld-refresh'); b.disabled = true; setText('sd-ld-count', 'looking for new LoRAs…');
+    if (st.connected) { await call('refresh', 'loras'); await loadLists(); }
+    await call('libScan');
+    await refreshLibraryData();
+    b.disabled = false; renderDrawer();
+  };
+  function compatOf(it) {
+    if (it.compat && it.compat.level && it.compat.level !== 'unknown') return it.compat.level;
+    return Q && it.base && st.family ? Q.baseMatch(it.base, st.family) : 'unknown';
+  }
+  function renderDrawer() {
+    const grid = $('sd-ld-grid'); if (!grid) return;
+    const words = String($('sd-ld-q').value || '').toLowerCase().split(/\s+/).filter(Boolean);
+    let all = allLoras();
+    const total = all.length;
+    if (words.length) all = all.filter((x) => loraMatches(x, words));
+    const f = st.ldFilter;
+    if (f === 'match') all = all.filter((x) => ['ok', 'soft'].includes(compatOf(x)));
+    if (f === 'fav') all = all.filter((x) => x.favorite);
+    if (f === 'recent') { const rank = new Map(st.recent.map((n, i) => [n.toLowerCase(), i])); all = all.filter((x) => rank.has(x.name.toLowerCase())).sort((a, b) => rank.get(a.name.toLowerCase()) - rank.get(b.name.toLowerCase())); }
+    else all.sort((a, b) => (b.favorite ? 1 : 0) - (a.favorite ? 1 : 0) || (compatOf(a) === 'hard' ? 1 : 0) - (compatOf(b) === 'hard' ? 1 : 0) || a.name.localeCompare(b.name));
+    grid.textContent = '';
+    const added = new Set(st.chips.map((c) => c.name.toLowerCase()));
+    for (const it of all.slice(0, 200)) {
+      const card = document.createElement('div');
+      card.className = 'sd-ldcard'; card.tabIndex = 0; card.setAttribute('role', 'option'); card.dataset.name = it.name;
+      const cp = compatOf(it); if (cp !== 'unknown') card.dataset.compat = cp;
+      const isAdded = added.has(it.name.toLowerCase()); if (isAdded) card.dataset.added = '1';
+      card.setAttribute('aria-selected', String(isAdded));
+      const trig = triggersOf(it);
+      const initials = it.name.replace(/[^A-Za-z0-9]+/g, ' ').trim().split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase() || '🧩';
+      card.title = `${it.name}${it.base ? ` · ${it.base}` : ''}${cp === 'hard' ? ` · ⛔ not for ${st.family}` : cp === 'soft' ? ' · may look off on this checkpoint' : ''}${trig.length ? `\nTrigger words: ${trig.join(', ')}` : ''}\nClick to add${isAdded ? ' (already added)' : ''}`;
+      card.innerHTML = `<div class="sd-ld-thumb">${it.previewUrl ? `<img src="${esc(it.previewUrl)}" alt="" loading="lazy">` : esc(initials)}</div>
+        ${it.id ? `<button type="button" class="sd-ld-fav" aria-label="${it.favorite ? 'Remove from' : 'Add to'} favourites" aria-pressed="${it.favorite ? 'true' : 'false'}">${it.favorite ? '★' : '☆'}</button>` : ''}
+        <div class="sd-ld-name">${esc(it.name)}</div>
+        <div class="sd-ld-meta">${it.base ? `<span class="sd-badge" data-base="${esc(it.base)}">${esc(it.base)}</span>` : '<span class="sd-badge">base ?</span>'}${isAdded ? '<span class="sd-ld-added">✓ added</span>' : ''}</div>
+        <div class="sd-ld-trig">${trig.length ? `🔑 ${esc(trig.join(', '))}` : '&nbsp;'}</div>`;
+      const fav = card.querySelector('.sd-ld-fav');
+      if (fav) fav.onclick = async (e) => { e.stopPropagation(); await call('libUpdate', it.id, { favorite: !it.favorite }); await refreshLibraryData(); renderDrawer(); };
+      card.onclick = () => addChip(it);
+      card.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); addChip(it); } };
+      grid.appendChild(card);
+    }
+    const empty = $('sd-ld-empty');
+    empty.hidden = all.length > 0;
+    if (!all.length) empty.textContent = !total ? 'No LoRAs found yet. Put .safetensors LoRAs in "stuff and thing"/models/lora or your SD app\'s Lora folder, then press ↻.' : f === 'recent' ? 'No LoRAs used yet.' : f === 'fav' ? 'No favourites yet — press ☆ on a card.' : f === 'match' ? `None of your LoRAs is known to fit ${st.family || 'this checkpoint'}.` : 'Nothing matches.';
+    setText('sd-ld-count', `${all.length} of ${total}`);
+  }
 
   // ------------------------------------------------------------ generate
   function setBusy(on) {
@@ -628,10 +933,10 @@
     if (!req && !isTest) {
       try { r0 = Object.assign(r0, advancedRequest()); } catch (e) { msg(`✖ ${e.message}`); return; }
     }
-    if (!isTest && !String(r0.prompt || '').trim() && !r0.characterLock && !r0.initImage) { msg('Type a prompt first.'); $('sd-prompt').focus(); return; }
+    if (!isTest && !String(req ? r0.prompt || '' : $('sd-prompt').value).trim() && !r0.characterLock && !r0.initImage) { msg('Type a prompt first.'); $('sd-prompt').focus(); return; }
     // ChatGPT (or Auto with no SD app connected): the two-engine path, only the words go to ChatGPT.
     if (!isTest && !req && (st.engine === 'chatgpt' || (st.engine === 'auto' && !st.connected))) {
-      const body = { engine: st.engine, prompt: r0.prompt, characterLock: r0.characterLock };
+      const body = { engine: st.engine, prompt: r0.fullPrompt || r0.prompt, characterLock: r0.characterLock };
       st.jobEngine = 'chatgpt'; st.jobPrefix = '';
       await render(() => call('request', body), false, body, st.engine === 'chatgpt' ? '🎨 Asking ChatGPT for the picture… (it usually takes 30–180 s)' : '🎨 No Stable Diffusion app is connected — asking ChatGPT…');
       return;
@@ -772,8 +1077,11 @@
     const lines = [];
     if (r.prompt) lines.push(r.prompt);
     if (r.negativePrompt) lines.push(`Negative: ${r.negativePrompt}`);
-    const kv = [r.width && r.height ? `${r.width}×${r.height}` : '', r.steps ? `${r.steps} steps` : '', r.cfgScale ? `CFG ${r.cfgScale}` : '', r.sampler || '', r.seed != null ? `seed ${r.seed}` : '', r.checkpoint ? `model ${r.checkpoint}` : '', r.label || r.backend || ''].filter(Boolean);
+    if (r.fullPrompt) lines.push(`📝 Shortened for the model — the full description is kept in the picture's .json (${r.fullPrompt.length} characters).`);
+    const kv = [r.width && r.height ? `${r.width}×${r.height}` : '', r.steps ? `${r.steps} steps` : '', r.cfgScale ? `CFG ${r.cfgScale}` : '', r.sampler ? `${r.sampler}${r.scheduler ? ` ${r.scheduler}` : ''}` : '', r.seed != null ? `seed ${r.seed}` : '', r.label || r.backend || ''].filter(Boolean);
     if (kv.length) lines.push(kv.join(' · '));
+    // which checkpoint made it (and its family), always on a line of its own
+    if (r.checkpoint || r.family) lines.push(`🧠 ${r.checkpoint ? `model ${r.checkpoint}` : 'model: whatever was loaded'}${r.family ? ` (${r.family})` : ''}${r.bookCheckpoint ? ' — the "Book pictures use" checkpoint' : ''}${r.style && Q && Q.STYLES[r.style] ? ` · style ${Q.STYLES[r.style].label}` : ''}`);
     if (r.loras && r.loras.length) lines.push(`LoRAs: ${r.loras.map((l) => `${l.name} ${l.weight}`).join(', ')}`);
     if (r.characterLock) lines.push(`Character lock: ${r.characterLock.character}`);
     const extra = [r.hires ? `hires ×${r.hires.scale || 2}${r.hires.upscaler ? ` ${r.hires.upscaler}` : ''}` : '', r.refiner && r.refiner.checkpoint ? `refiner ${r.refiner.checkpoint}` : '', r.initImage ? (r.mask ? 'inpaint' : `img2img ${r.denoise != null ? r.denoise : ''}`) : '', r.controlnet ? `ControlNet ×${r.controlnet.length}` : '', r.adetailer ? 'ADetailer' : '', r.clipSkip ? `clip skip ${r.clipSkip}` : '', r.kind === 'upscale' ? `upscaled ×${r.factor || 2} ${r.upscaler || ''}` : '', r.kind === 'workflow' ? `workflow ${r.workflowName}` : ''].filter(Boolean);
@@ -794,7 +1102,9 @@
     if (!r || !r.ok) return;
     for (const g of r.items) {
       const im = document.createElement('img');
-      im.src = g.url; im.alt = (g.record && g.record.prompt) ? g.record.prompt.slice(0, 80) : g.name; im.title = im.alt; im.tabIndex = 0; im.loading = 'lazy';
+      im.src = g.url; im.alt = (g.record && g.record.prompt) ? g.record.prompt.slice(0, 80) : g.name; im.tabIndex = 0; im.loading = 'lazy';
+      const rc = g.record || {};
+      im.title = `${im.alt}${rc.checkpoint ? `\n🧠 ${rc.checkpoint}${rc.family ? ` (${rc.family})` : ''}` : ''}${rc.from && /^bridge:|^api:/.test(rc.from) ? `\nasked by ${rc.from.replace(/^bridge:|^api:/, '')}` : ''}`;
       im.onclick = () => showImage(g);
       im.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); showImage(g); } };
       box.appendChild(im);
@@ -832,7 +1142,7 @@
   async function refreshLibraryData() {
     const f = { q: $('sd-lib-q').value, kind: $('sd-lib-kind').value, base: $('sd-lib-base').value, collection: $('sd-lib-coll').value, favorite: $('sd-lib-fav').checked, checkpoint: $('sd-checkpoint').value || (st.status && st.status.checkpoint) || (st.lists && st.lists.current && st.lists.current.checkpoint) || '' };
     const all = await call('libList', { checkpoint: f.checkpoint });
-    if (all && all.ok) { st.lib = all; st.libItemsById = new Map(all.items.map((x) => [x.id, x])); markVaes(); }
+    if (all && all.ok) { st.lib = all; st.libItemsById = new Map(all.items.map((x) => [x.id, x])); markVaes(); if (st.lists) qualityRefresh(); }
     return f;
   }
   async function refreshLibrary() {
@@ -1367,9 +1677,11 @@
   async function init() {
     if (!api) { hint('The Images tab needs a newer AutoInjector (preload is missing window.api.sd). Restart the app.', 'error'); return; }
     const s = await call('status');
+    await loadQuality();
     if (s && s.ok) {
       renderStatus(s);
       setSlider('sd-steps', s.steps); setSlider('sd-cfg', s.cfgScale); setSlider('sd-width', s.width); setSlider('sd-height', s.height); setSlider('sd-batch', s.batchSize);
+      qualityRefresh();
       if (s.seed != null) $('sd-seed').value = String(s.seed);
       if (s.enabled && s.endpoint) {
         // Check it really answers right now (the app may have been closed since).
@@ -1381,6 +1693,7 @@
       }
     }
     await refreshLibraryData();
+    qualityRefresh(); promptShortCheck();
     refreshLocks();
     refreshGallery();
     refreshTargets();

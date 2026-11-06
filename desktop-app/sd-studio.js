@@ -32,6 +32,7 @@ const sdWorkflows = require('./sd-workflows');
 const sdErrors = require('./sd-errors');
 const sdSanitize = require('./sd-sanitize');
 const views = require('./image-views');
+const Q = require('./sd-quality');
 const fsMod = require('fs');
 const pathMod = require('path');
 
@@ -172,12 +173,86 @@ function createSdStudio(deps) {
     }
     return lastLists && lastLists.backend === st.backend ? lastLists : null;
   }
+  // The checkpoint's model family (sd-quality.js): the library's header read, else its name, else its file size.
   function familyOf(ck) {
     const name = ck || ip.status().checkpoint || ip.status().model || (lastLists && lastLists.current && lastLists.current.checkpoint) || '';
     if (!name) return '';
-    let fam = '';
-    try { fam = lib ? lib.checkLoras([], name).checkpointBase || '' : ''; } catch (_) { fam = ''; }
-    if (!fam && /sdxl|xl(?:[_\-\s.]|v?\d)|pony|illustrious|noob/i.test(String(name))) fam = 'SDXL';
+    let base = ''; let size = 0;
+    try {
+      if (lib) {
+        base = lib.checkLoras([], name).checkpointBase || '';
+        const it = typeof lib.findItem === 'function' ? lib.findItem('checkpoint', name) : null;
+        if (it) { size = Number(it.size) || 0; base = base || it.base || ''; }
+      }
+    } catch (_) { base = ''; }
+    return Q.familyOf(name, { base, size });
+  }
+  // ---- quality defaults (PR #128): "Book pictures use: <checkpoint>" + the per-family defaults below.
+  const qualitySettings = { bookCheckpoint: '' };
+  if (deps.quality && typeof deps.quality === 'object' && deps.quality.bookCheckpoint) qualitySettings.bookCheckpoint = String(deps.quality.bookCheckpoint).slice(0, 300);
+  function quality(patch) {
+    if (patch && typeof patch === 'object' && 'bookCheckpoint' in patch) {
+      qualitySettings.bookCheckpoint = String(patch.bookCheckpoint || '').slice(0, 300);
+      try { if (deps.persistQuality) deps.persistQuality(Object.assign({}, qualitySettings)); } catch (_) {}
+      log('sd-quality-settings', { bookCheckpoint: qualitySettings.bookCheckpoint || '(whatever is loaded)' });
+    }
+    return Object.assign({ ok: true }, qualitySettings);
+  }
+  const isInteractive = (from) => !from || String(from).startsWith('images-tab');
+  const isBook = (from, req) => String(from || '').startsWith('bridge:') || !!(req && req.book);
+  // Before buildRequest: shorten a story-long prompt (not for the Images tab, which shows its own toggle) and
+  // put the "Book pictures use" checkpoint in (never over a checkpoint the caller or the character lock chose).
+  function qualityBefore(req, from) {
+    const q = { notes: [], fullPrompt: undefined };
+    const interactive = isInteractive(from);
+    if (req.fullPrompt != null) { if (interactive && String(req.fullPrompt).trim() && String(req.fullPrompt).trim() !== String(req.prompt || '').trim()) q.fullPrompt = String(req.fullPrompt).slice(0, 20000); delete req.fullPrompt; }
+    if (req.quality === false || req.purpose === 'test') { q.off = true; return q; }
+    if (!interactive && req.prompt) {
+      const c = Q.condensePrompt(req.prompt, { maxTokens: 150 });
+      if (c.condensed) { q.fullPrompt = c.full.slice(0, 20000); req.prompt = c.prompt; q.notes.push(`prompt shortened ${c.tokensBefore}→${c.tokensAfter} tokens`); }
+    }
+    if (isBook(from, req) && !req.checkpoint && qualitySettings.bookCheckpoint) {
+      let lockCk = '';
+      const key = req.characterLock || req.lockId || req.character;
+      try { const l = key && lib ? lib.getLock(key) : null; lockCk = (l && l.checkpoint) || ''; } catch (_) {}
+      if (!lockCk) { req.checkpoint = qualitySettings.bookCheckpoint; q.notes.push('book checkpoint'); q.bookCheckpoint = true; }
+    }
+    return q;
+  }
+  // After buildRequest: the family's size / sampler / steps / CFG / negative prompt where nothing was chosen.
+  // Only names the connected app lists are used; the Images tab sets its own size, steps and CFG.
+  async function qualityAfter(b, req, from, q, warnings) {
+    if (q.off) return '';
+    const interactive = isInteractive(from);
+    const o = b.opts;
+    const st = ip.status();
+    const fam = familyOf(o.checkpoint);
+    const d = Q.defaultsFor(fam);
+    if (!o.initImage && !interactive) {
+      const given = req.width != null && req.height != null;
+      if (!given && b.purpose === 'free' && !req.size && !(b.lock && b.lock.width)) {
+        const sz = Q.sizeFor(fam, Q.aspectOf(st.width || 512, st.height || 768));
+        o.width = sz.width; o.height = sz.height; q.notes.push(`size ${sz.width}×${sz.height}`);
+      } else if (fam && !o.hires && Q.tooSmall(fam, o.width, o.height)) {
+        const sz = Q.nearestBucket(fam, o.width, o.height);
+        warnings.push({ level: 'soft', kind: 'quality', field: 'size', message: `${fam} makes poor pictures at ${o.width}×${o.height} — made at ${sz.width}×${sz.height} (its own size) instead.` });
+        o.width = sz.width; o.height = sz.height; q.notes.push(`size ${sz.width}×${sz.height}`);
+      }
+    }
+    if (!o.sampler && !st.sampler) {
+      let L = null; try { L = await liveLists(false); } catch (_) { L = null; }
+      const pk = L ? Q.pickSampler(fam, L) : null;
+      if (pk) { o.sampler = pk.sampler; if (!o.scheduler && !st.scheduler && pk.scheduler) o.scheduler = pk.scheduler; q.notes.push(`sampler ${pk.sampler}${pk.scheduler ? ` · ${pk.scheduler}` : ''}`); }
+    }
+    if (!interactive) {
+      if (req.steps == null && (st.steps == null || Number(st.steps) === 20)) { o.steps = d.steps; q.notes.push(`${d.steps} steps`); }
+      if (req.cfgScale == null && (st.cfgScale == null || Number(st.cfgScale) === 7)) { o.cfgScale = d.cfgScale; q.notes.push(`CFG ${d.cfgScale}`); }
+      if (fam === 'Pony' && !/score_9/i.test(b.prompt)) b.prompt = `${Q.PONY_PREFIX}, ${b.prompt}`;
+    }
+    if (!String(o.negativePrompt || '').trim()) {
+      const n = Q.defaultNegative(fam, req.style);
+      if (n) { o.negativePrompt = n; q.notes.push('default negative prompt'); }
+    }
     return fam;
   }
   // Names / numbers / model family checked against the connected app before anything is sent.
@@ -237,7 +312,7 @@ function createSdStudio(deps) {
     }
     if (!opts.width || !opts.height) {
       const ck = opts.checkpoint || ip.status().checkpoint || ip.status().model;
-      const base = lib ? lib.checkLoras([], ck).checkpointBase : '';
+      const base = familyOf(ck);
       const shaped = r.size ? sizeForShape(purpose, base, r.size) : null;
       if (shaped) Object.assign(opts, shaped);
       else if (purpose !== 'free' || !ip.status().width) Object.assign(opts, sizeFor(purpose, base));
@@ -250,9 +325,14 @@ function createSdStudio(deps) {
   // Generate + save + record. from = 'images-tab' | 'bridge:akowe' | …
   // gopts: { noRetry } — fixAndRetry's own retry must not retry again.
   async function generate(req, from, gopts) {
-    const b = buildRequest(req);
+    const qreq = Object.assign({}, req || {});
+    const q = qualityBefore(qreq, from);
+    const style = Q.STYLES[qreq.style] ? qreq.style : undefined; delete qreq.style;
+    const b = buildRequest(qreq);
     if (b.error) return { ok: false, error: b.error, message: b.message };
     const warnings = [];
+    let family = '';
+    try { family = await qualityAfter(b, Object.assign({}, qreq, { style }), from, q, warnings); } catch (_) { family = ''; }
     // Make it safe before sending: real names, sane numbers, size vs model family (sd-sanitize.js).
     let safe = null;
     try { safe = await makeSafe(b.opts); } catch (_) { safe = null; }
@@ -311,6 +391,9 @@ function createSdStudio(deps) {
       backend: r.backend, label: r.label || ip.status().label, seeds: r.seeds, purpose: b.purpose, view: b.view, engine: 'sd', from: from || 'images-tab',
       characterLock: b.lock ? { id: b.lock.id, character: b.lock.character, book: b.lock.book } : undefined,
       book: req && req.book ? String(req.book).slice(0, 200) : undefined,
+      // what the quality defaults did (sd-quality.js), the full description when the prompt was shortened, the style chip
+      family: family || undefined, quality: q.notes.length ? q.notes : undefined, fullPrompt: q.fullPrompt, style,
+      bookCheckpoint: q.bookCheckpoint ? true : undefined,
     });
     if (record.backend === 'a1111' && r.infoObj && r.infoObj.sd_model_name && !record.checkpoint) record.checkpoint = r.infoObj.sd_model_name;
     let saved;
@@ -726,7 +809,7 @@ function createSdStudio(deps) {
   return { detect, connect, lists, settings, buildRequest, generate, fixAndRetry, gallery, record, libList, libScan, request, requestFrom, chatgptStatus, chatgptSettings, chatgptCancel, backendInfo, locks, addLock,
     img2img, inpaint, upscale, optionsGet, optionsSet, optionsSchema, upscalers, controlnetModels, controlnetModules, adetailerModels, styles, scripts, embeddings, extraFields,
     interrupt, skip, refresh, memory, objectInfo, queue, uploadImage, free, workflowsList, workflowGet, workflowSave, workflowDelete, runWorkflow, extras, features,
-    progress: () => ip.progress(), cancel: () => ip.cancel(), status: () => Object.assign({ ok: true }, ip.status()),
+    progress: () => ip.progress(), cancel: () => ip.cancel(), status: () => Object.assign({ ok: true }, ip.status()), quality, familyOf,
     test: () => testRender(), modelHelp, modelCheck };
 }
 

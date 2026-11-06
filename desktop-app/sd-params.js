@@ -89,6 +89,7 @@ const GENERATE_SCHEMA = {
     appearance: Object.assign(T.str('What the character looks like, in words (instead of / besides a character lock)'), { 'x-a1111': [], 'x-comfy': 'yes' }),
     upscale: Object.assign(T.int('Upscale the finished picture ×2 or ×4 (Stable Diffusion Extras / an upscale model; also for ChatGPT pictures when an SD app is connected)', 2, 4), { 'x-a1111': [], 'x-comfy': 'yes' }),
     size: Object.assign({ type: 'object', description: 'A shape hint {width, height} in any unit (e.g. a 6×9 in cover): the picture gets the purpose\'s pixel area in that shape', properties: { width: { type: 'number', minimum: 0.01 }, height: { type: 'number', minimum: 0.01 } }, required: ['width', 'height'], additionalProperties: false }, { 'x-a1111': [], 'x-comfy': 'yes' }),
+    quality: Object.assign(T.bool('false = send exactly what was given: no model-family size / sampler / steps / CFG / negative-prompt defaults and no shortening of a very long prompt (sd-quality.js)'), { 'x-a1111': [], 'x-comfy': 'yes' }),
     newChat: Object.assign(T.bool('ChatGPT engine: start a fresh ChatGPT chat for this picture'), { 'x-a1111': [], 'x-comfy': 'yes' }),
     series: Object.assign(T.str('ChatGPT engine: a name for a view series (with the "fresh chat per series" setting, a new series opens a new chat)'), { 'x-a1111': [], 'x-comfy': 'yes' }),
     loras: Object.assign(T.arr('LoRAs', LORA), { 'x-a1111': ['prompt'], 'x-comfy': 'yes', 'x-comfy-note': 'LoraLoader chain' }),
