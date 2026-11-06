@@ -171,10 +171,14 @@
   async function refresh() { renderStatus(await call('llmStatus')); }
   let refreshTimer = null;
   function refreshSoon() { if (refreshTimer) clearTimeout(refreshTimer); refreshTimer = setTimeout(() => { refreshTimer = null; refresh(); }, 300); }
+  // Runs that already gave their final answer. Live steps travel by a different route than the answer, so a
+  // late "Loading…" step could land after "✓ Alfred is ready" and overwrite it; steps of a finished run are dropped.
+  const doneRuns = new Set();
+  const markDone = (run) => { if (run) { doneRuns.add(run); if (doneRuns.size > 50) doneRuns.delete(doneRuns.values().next().value); } };
   async function task(fn) {
     if (running) return null;
     running = true; setBusy(true);
-    try { return await fn(); } finally { running = false; setBusy(false); refresh(); }
+    try { const r = await fn(); if (r && typeof r === 'object') markDone(r.run); return r; } finally { running = false; setBusy(false); refresh(); }
   }
   async function setupAll() {
     $('llm-steps').textContent = '';
@@ -307,6 +311,13 @@
   if (typeof api.onLlm === 'function') {
     api.onLlm((ev) => {
       if (!ev || typeof ev !== 'object') return;
+      if ((ev.type === 'step' || ev.type === 'progress') && ev.run && doneRuns.has(ev.run)) {
+        // A late event of a finished run: its final answer is already on screen, so it never overwrites the message.
+        // A setup step still updates its own row (a late ✔ is true); a "Loading…" line or a progress bar is not.
+        if (ev.type === 'step' && ev.task !== 'start-alfred' && ev.step) renderStep(ev);
+        return;
+      }
+      if (ev.type === 'done' && (!ev.runTask || ev.runTask === ev.task)) markDone(ev.run); // a download's own "done" inside ⚡ Set up is not the end of the setup
       if (ev.type === 'progress') progress(ev);
       else if (ev.type === 'step' && ev.task === 'start-alfred') msg(ev.message);
       else if (ev.type === 'step') { renderStep(ev); if (ev.state === 'running') msg(ev.message); }

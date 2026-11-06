@@ -160,7 +160,15 @@ function createLlmSetup(deps = {}) {
     if (typeof v === 'object') { const o = {}; for (const [k, x] of Object.entries(v)) { if (/token|secret|password|apikey/i.test(k)) continue; o[k] = scrub(x); } return o; }
     return v;
   }
-  function emit(payload) { try { d.emit(scrub(payload)); } catch (_) {} }
+  // Every event sent while a task runs carries that task's run number. The screen gets these events and the
+  // task's final answer over two different routes, so a late "Loading…" step can land AFTER "✓ Alfred is ready";
+  // the run number lets the screen drop steps of a run that already finished (CI saw a stale "Loading…" stay).
+  function emit(payload) {
+    try {
+      const p = runId && payload && typeof payload === 'object' && payload.run == null ? Object.assign({ run: runId, runTask: busy }, payload) : payload;
+      d.emit(scrub(p));
+    } catch (_) {}
+  }
   function log(kind, detail) { try { d.log(kind, scrub(detail || {})); } catch (_) {} }
   function say(message, level = 'info', task) { emit({ type: 'log', level, task: task || null, message, at: Date.now() }); }
 
@@ -168,8 +176,18 @@ function createLlmSetup(deps = {}) {
   let busy = null;       // 'install' | 'pull' | 'setup' | null
   let controller = null; // AbortController for the running task
   let child = null;      // a running installer / extractor
-  function begin(task) { busy = task; controller = new AbortController(); return controller.signal; }
-  function end(task) { if (busy === task) { busy = null; controller = null; child = null; } }
+  let runSeq = 0;       // counts tasks started
+  let runId = 0;        // the running task's number (0 = none)
+  let lastRun = 0;      // the last task that ended, so its answer can carry its number
+  function begin(task) { busy = task; controller = new AbortController(); runId = ++runSeq; return controller.signal; }
+  function end(task) { if (busy === task) { busy = null; controller = null; child = null; lastRun = runId; runId = 0; } }
+  // A task's answer carries its run number (see emit), so the screen knows which steps are now out of date.
+  const withRun = (fn) => async (...args) => {
+    const before = runSeq;
+    const r = await fn(...args);
+    if (r && typeof r === 'object' && r.run == null && runSeq > before && lastRun > before) r.run = lastRun;
+    return r;
+  };
   function cancel() {
     if (!busy) return { ok: true, cancelled: false, message: 'Nothing is running.' };
     const was = busy;
@@ -1305,8 +1323,8 @@ function createLlmSetup(deps = {}) {
   }
 
   return {
-    findOllama, installOllama, startOllama, stopOllama, pullModel, removeModel, listModels, useModel, startAlfred, allServers, bestInstalled, storeHasModels, scanInstalled, useStore, importGguf, findGgufs,
-    check, fix, setupAll, cancel, status, hardware, hwLine, recommendedPicks, fitFor, choose, currentServer, download,
+    findOllama, installOllama: withRun(installOllama), startOllama, stopOllama, pullModel: withRun(pullModel), removeModel, listModels, useModel, startAlfred: withRun(startAlfred), allServers, bestInstalled, storeHasModels, scanInstalled, useStore, importGguf, findGgufs,
+    check, fix, setupAll: withRun(setupAll), cancel, status, hardware, hwLine, recommendedPicks, fitFor, choose, currentServer, download,
     isBusy: () => busy,
   };
 }

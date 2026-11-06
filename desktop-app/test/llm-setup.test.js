@@ -550,8 +550,14 @@ async function testStartAlfred() {
   const pulls = OLL.st.pulls.length;
   const r2 = await s.setupAll();
   assert(r2.ok && OLL.st.pulls.length === pulls && r2.model === 'mistral-nemo:12b', `⚡ Set up keeps your own model too — no download (${r2.model})`);
+  w.events.length = 0;
   r = await s.startAlfred();
   assert(r.ok && r.model === 'mistral-nemo:12b', 'pressing it again is harmless');
+  // its steps and its answer carry the same run number (the screen drops steps that arrive after the answer)
+  const runSteps = w.events.filter((e) => e.task === 'start-alfred');
+  assert(r.run > 0 && runSteps.length >= 2 && runSteps.every((e) => e.run === r.run), `steps, done and the answer share run ${r.run} (${runSteps.map((e) => e.run).join(',')})`);
+  const rb = await s.startAlfred(); const rc = await s.startAlfred();
+  assert(rb.run > r.run && rc.run > rb.run, 'each press gets a new run number');
 
   // a load into memory that never answers must not keep ▶ Start Alfred busy (CI saw it hang 150 s+)
   {
