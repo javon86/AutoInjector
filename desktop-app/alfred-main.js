@@ -92,6 +92,7 @@ const SD_META = {
   'images.test': { changes: true, schema: { type: 'object', properties: {}, additionalProperties: false } },
   'images.chatgptStatus': { changes: false, schema: { type: 'object', properties: {}, additionalProperties: false } },
   'images.chatgptCancel': { changes: true, schema: { type: 'object', properties: {}, additionalProperties: false } },
+  'images.qualitySettings': { changes: true, schema: { type: 'object', properties: { bookCheckpoint: { type: 'string', maxLength: 300 } }, additionalProperties: false }, call: (a) => [a] },
   'images.chatgptSettings': { changes: true, schema: { type: 'object', properties: { freshChatPerSeries: { type: 'boolean' }, timeoutMs: { type: 'integer', minimum: 10000, maximum: 1800000 } }, additionalProperties: false }, call: (a) => [a] },
   'sd.status': { changes: false, schema: { type: 'object', properties: {}, additionalProperties: false } },
   'sd.targets': { changes: false, schema: { type: 'object', properties: {}, additionalProperties: false } },

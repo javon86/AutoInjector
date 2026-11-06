@@ -12,6 +12,7 @@
  *   images.status() · generate(opts) · img2img(opts) · inpaint(opts) · upscale(opts)
  *          · progress() · cancel() · gallery(limit) · test() · fixAndRetry(fix, request)
  *          · chatgptStatus() · chatgptCancel() · chatgptSettings({ freshChatPerSeries })
+ *          · qualitySettings({ bookCheckpoint }) — "Book pictures use: <checkpoint>" ('' = whatever is loaded; PR #128)
  *     generate also takes engine: "auto" | "sd" | "chatgpt" (ChatGPT's own image generation in
  *     its logged-in pane), purpose "view" + view (front, three_quarter_front, side,
  *     three_quarter_back, back, idle, draw, attack, dash, defend) or purpose "sheet", appearance,
@@ -71,6 +72,7 @@ const OPS = [
   { name: 'images.test', description: 'Make a 512×512 test picture', params: O(), args: [], backends: BOTH },
   { name: 'images.chatgptStatus', description: 'The ChatGPT image engine: is its pane ready (and why not), is it drawing, for how long, the last result', params: O(), args: [], backends: ['*'] },
   { name: 'images.chatgptCancel', description: 'Stop waiting for the ChatGPT picture being made', params: O(), args: [], backends: ['*'] },
+  { name: 'images.qualitySettings', description: 'Picture quality settings: bookCheckpoint = the checkpoint Akọwe\'s book pictures are made with ("" = whatever is loaded). Without arguments: read them.', params: O({ bookCheckpoint: { type: 'string', maxLength: 300 } }), args: 'object', backends: ['*'] },
   { name: 'images.chatgptSettings', description: 'ChatGPT image engine settings: freshChatPerSeries = a new ChatGPT chat for each reference-view series (default: one chat, which keeps the character the same)', params: O({ freshChatPerSeries: { type: 'boolean' }, timeoutMs: { type: 'integer', minimum: 10000, maximum: 1800000 } }), args: 'object', backends: ['*'] },
   { name: 'images.fixAndRetry', description: 'Apply the one-click fix a failed picture offered (its actions[].id, e.g. "vae-automatic" = VAE → Automatic, also in A1111\'s settings) and try the same request once more', params: O({ fix: { type: 'string', enum: ['vae-automatic'] }, request: OPEN('The images.generate params that failed') }, ['fix']), args: ['fix', 'request'], backends: BOTH },
   { name: 'sd.status', description: 'Image module + managed runner + installer state', params: O(), args: [], backends: ['*'] },
@@ -165,6 +167,7 @@ function createImagesApi(d) {
       chatgptStatus: wrap(async () => S('chatgptStatus')),
       chatgptCancel: wrap(async () => S('chatgptCancel')),
       chatgptSettings: wrap(async (o) => S('chatgptSettings', o || {})),
+      qualitySettings: wrap(async (o) => S('quality', o && Object.keys(o).length ? o : null)),
       fixAndRetry: wrap((fix, request) => S('fixAndRetry', fix, request || {}, `api:${String((request && request.from) || 'alfred').slice(0, 40)}`)),
     },
     sd: {

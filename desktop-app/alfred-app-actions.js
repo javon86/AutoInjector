@@ -322,7 +322,7 @@ const TOOL_CHANNELS = {
   'sd:refresh': 'sd_call:sd.refresh', 'sd:memory': 'sd_call:sd.memory', 'sd:workflows': 'sd_call:sd.workflows.list', 'sd:workflow-get': 'sd_call:sd.workflows.get',
   'sd:workflow-save': 'sd_call:sd.workflows.save', 'sd:workflow-delete': 'sd_call:sd.workflows.delete', 'sd:workflow-run': 'sd_call:sd.workflows.run',
   // 🎨 the second engine (ChatGPT) + reference views / sheets: images.generate with engine / purpose / view is the same path as sd:request
-  'sd:request': 'sd_call:images.generate', 'sd:chatgpt-status': 'sd_call:images.chatgptStatus', 'sd:chatgpt-cancel': 'sd_call:images.chatgptCancel', 'sd:chatgpt-settings': 'sd_call:images.chatgptSettings',
+  'sd:request': 'sd_call:images.generate', 'sd:chatgpt-status': 'sd_call:images.chatgptStatus', 'sd:chatgpt-cancel': 'sd_call:images.chatgptCancel', 'sd:chatgpt-settings': 'sd_call:images.chatgptSettings', 'sd:quality': 'sd_call:images.qualitySettings',
   // 🎬 the Video tab → the video module API (video-api.js) through video_call
   'video:full-status': 'video_call:video.status', 'video:models': 'video_call:video.models', 'video:settings': 'video_call:video.settings',
   'video:generate-t2v': 'video_call:video.generate', 'video:animate': 'video_call:video.animate', 'video:progress': 'video_call:video.progress',

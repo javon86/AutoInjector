@@ -209,6 +209,14 @@ bridge to your home Wi-Fi, behind its key.
   Auto.
 - **Checkpoint models and LoRAs:** a checkpoint model is the main picture model. A LoRA is a small add-on that
   teaches it one look or style.
+- **Good pictures by default:** AutoInjector sees which kind of model the checkpoint is (SDXL, SD1.5, Pony, Flux)
+  and uses that model's own picture sizes (Portrait / Square / Landscape), its best sampler, steps and CFG, and a
+  sensible "what to avoid" list. **Style** chips (Photo-real, Cinematic, Illustration, Anime, Painting) make
+  "realistic" one click. A very long description (Akọwe's portraits) is shortened for the model, looks first; the
+  full text stays in the picture's `.json`. **📖 Book pictures use** picks the checkpoint for Akọwe's pictures.
+- **🧩 LoRAs:** a small LoRA browser in the form: search, filters (fits this model, recent, ★), cards with a
+  preview, the base model and trigger words. Each chosen LoRA gets a weight slider, 🔑 (add its trigger words)
+  and ✕, and a red warning if it was made for another kind of model.
 - **🔒 Character locks:** a saved recipe (a LoRA, trigger words, fixed looks, or a portrait) that keeps one
   character's face the same in every picture. In a ⚡ run, each character's portrait becomes its lock.
 - If you turn on something the picture program doesn't have (ADetailer or ControlNet on a Forge without that

@@ -171,7 +171,7 @@ async function main() {
   g = await api.images.generate({ prompt: 'x', sampler: 'DPM++ 2M', width: 512, height: 512, steps: 4 });
   assert(!g.ok && forge.state.txt2imgCalls - calls0 === 2 && g.retried && g.retried.ok === false && g.warnings.some((w) => /Tried once more \(with only the basic settings\) — that failed too/.test(w.message)), 'still failing → exactly one retry, then the error (no loop)');
   calls0 = forge.state.txt2imgCalls;
-  g = await api.images.generate({ prompt: 'x', width: 512, height: 512, steps: 4 });
+  g = await api.images.generate({ prompt: 'x', quality: false, width: 512, height: 512, steps: 4 }); // quality:false = no sampler default added (sd-quality.js)
   assert(!g.ok && g.code === 'SD_ERROR' && forge.state.txt2imgCalls - calls0 === 1 && !g.retried, 'an unknown 500 on a basic request → no retry (nothing to leave out)');
   forge.state.failWith = 'ckpt';
   calls0 = forge.state.txt2imgCalls;

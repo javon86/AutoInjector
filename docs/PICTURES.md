@@ -67,6 +67,22 @@ the Character Forge's (`forge.ART_PROBLEMS`: `SD_NOT_CONNECTED`, `CHATGPT_NOT_RE
 The request to AutoInjector: `{engine, purpose: "illustration" | "map", prompt, characterLock?, book, from:
 "akowe-pictures", returnImage: true}` (`docs/SD_IMAGE_API.md`).
 
+### How AutoInjector makes the picture (PR #128)
+
+* **Quality defaults by model family** (`desktop-app/sd-quality.js`): with no size given, the checkpoint's own size
+  for the purpose (SDXL 832×1216 portraits, SD1.5 512×768, Flux 896×1152); an SDXL request below 768×768 worth of
+  pixels is made at SDXL's own size (⚠ in `warnings`); "(default)" sampler → DPM++ 2M + Karras (Flux: Euler +
+  Simple), 28 steps, CFG 5.5 SDXL / 7 SD1.5 / 1 Flux while the app's stored steps / CFG are the factory 20 / 7; an
+  empty negative → the family's default. `quality: false` turns all of it off.
+* **Long prompts are shortened** for CLIP (75 tokens per chunk): a description over ≈150 tokens (a ~1,900-character
+  portrait) becomes short tag phrases — who, the looks (age, build, skin, hair, eyes, scars), clothing, setting,
+  light, style — most important first, the story left out. The picture's `.json` keeps the whole text as
+  `fullPrompt`, and `quality` lists what was applied.
+* **📖 Book pictures use: <checkpoint>** (🎨 Images → ⚙ More settings) picks the checkpoint for every `bridge:` request
+  (portraits, covers, chapter pictures, maps). Default: whatever is loaded — the model is never switched without
+  this setting; a character lock's checkpoint or the request's own `checkpoint` still wins. The record says which
+  checkpoint made the picture (`checkpoint`, `family`, `bookCheckpoint: true`).
+
 ## Storage
 
 Companion data `pictures:<pid>:<branch>` = `{style, revision, counter, pictures: {pic-001: {id, kind:

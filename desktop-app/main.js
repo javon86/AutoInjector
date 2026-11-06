@@ -266,6 +266,7 @@ const state = {
     costLimit: 5
   },
   sdManaged: { startWithApp: false, targetId: "", addonsDir: "" }, // 🎨 "Start Stable Diffusion with AutoInjector" (default off) + which package to start
+  sdQuality: { bookCheckpoint: "" }, // 🎨 "Book pictures use: <checkpoint>" (Akọwe's pictures; "" = whatever is loaded) — sd-quality.js, PR #128
   chatImage: { freshChatPerSeries: false }, // 🎨 ChatGPT image engine: a new ChatGPT chat for each reference-view series (default: one chat, keeps the character)
   imageConfig: null, // Stable Diffusion settings mirror (imageProvider owns the live copy); persisted so the endpoint survives a restart
   videoConfig: null, // text-to-video settings mirror (videoProvider owns the live copy); persisted so the endpoint survives a restart
@@ -738,6 +739,7 @@ function buildStateSnapshotText() {
         managerConfig: sealManagerConfig(state.managerConfig), // AI-001: the API key is sealed (apiKeyEnc), never written plaintext
         sdManaged: state.sdManaged,
         chatImage: state.chatImage,
+        sdQuality: state.sdQuality,
         imageConfig: state.imageConfig || imageProvider.getSettings(), // Stable Diffusion endpoint/size — no secret, stored as-is
         videoConfig: state.videoConfig || videoProvider.getSettings(), // text-to-video endpoint/size — no secret, stored as-is
         videoStudio: state.videoStudio || null, // 🎬 Video engine settings — no secret
@@ -869,6 +871,7 @@ function loadPersistedState() {
     state.nextLoginId = maxId + 1;
   }
   if (snap.chatImage && typeof snap.chatImage === "object") state.chatImage = { freshChatPerSeries: !!snap.chatImage.freshChatPerSeries };
+  if (snap.sdQuality && typeof snap.sdQuality === "object") state.sdQuality = { bookCheckpoint: String(snap.sdQuality.bookCheckpoint || "").slice(0, 300) };
   if (snap.sdManaged && typeof snap.sdManaged === "object") {
     state.sdManaged = { startWithApp: !!snap.sdManaged.startWithApp, targetId: String(snap.sdManaged.targetId || ""), addonsDir: String(snap.sdManaged.addonsDir || "") };
   }
@@ -6786,6 +6789,8 @@ function sdStudio() {
   _sdStudio = createSdStudio({
     chatgpt: chatImage(),
     persistChatgpt: (o) => { state.chatImage = { freshChatPerSeries: !!(o && o.freshChatPerSeries) }; saveStateDebounced(); },
+    quality: state.sdQuality || {},
+    persistQuality: (o) => { state.sdQuality = { bookCheckpoint: String((o && o.bookCheckpoint) || "") }; saveStateDebounced(); },
     imageProvider,
     library: sdLibrary(),
     imagesDir: () => outputManager.imagesDir(),
@@ -6837,6 +6842,7 @@ ipcMain.handle("sd:workflow-delete", sdSafe((a) => sdStudio().workflowDelete(a.i
 ipcMain.handle("sd:workflow-run", sdSafe((a) => sdStudio().runWorkflow(a, "images-tab:workflow")));
 // 🎨 Both engines (Stable Diffusion / ChatGPT / Auto) + reference views and sheets — the same path as POST /image/request.
 ipcMain.handle("sd:request", sdSafe((a) => sdStudio().requestFrom(a, "images-tab")));
+ipcMain.handle("sd:quality", sdSafe((a) => sdStudio().quality(a && Object.keys(a).length ? a : null)));
 ipcMain.handle("sd:chatgpt-status", sdSafe(() => sdStudio().chatgptStatus()));
 ipcMain.handle("sd:chatgpt-cancel", sdSafe(() => sdStudio().chatgptCancel()));
 ipcMain.handle("sd:chatgpt-settings", sdSafe((a) => sdStudio().chatgptSettings({ freshChatPerSeries: a.freshChatPerSeries, timeoutMs: a.timeoutMs })));
