@@ -169,11 +169,20 @@ class FakeWebContents extends EventEmitter {
 
 const registry = {};
 
+// ⬇ one session per partition, shared by every view made with it (like Electron's persist:<site> sessions), so a
+// test can fire "will-download" and check the app listens once however often the pane is re-made.
+const sessions = {};
+class FakeSession extends EventEmitter {
+  constructor(partition) { super(); this.partition = partition; }
+}
+function sessionFor(partition) { return (sessions[partition || ""] = sessions[partition || ""] || new FakeSession(partition || "")); }
+
 class WebContentsView {
   constructor(opts) {
     const partition = opts && opts.webPreferences && opts.webPreferences.partition;
     const label = partition ? partition.replace("persist:", "") : "controls";
     this.webContents = new FakeWebContents(label);
+    this.webContents.session = sessionFor(partition);
     this.partition = partition || "";
     this.opts = opts || {}; // PR #123: what it was made with (backgroundThrottling…)
     registry[label] = this;
@@ -264,6 +273,7 @@ class BrowserWindow extends EventEmitter {
     if (!prevented) this.destroy();
   }
   destroy() { if (this._destroyed) return; this._destroyed = true; this._visible = false; this.webContents.destroyedFlag = true; this.emit("closed"); }
+  static fromWebContents(wc) { return browserWindows.find((w) => w.webContents === wc) || null; }
 }
 // screen: one 1920x1080 display unless a test sets others (__setDisplays).
 let displays = [{ id: 1, bounds: { x: 0, y: 0, width: 1920, height: 1080 }, workArea: { x: 0, y: 0, width: 1920, height: 1040 } }];
@@ -332,5 +342,5 @@ module.exports = {
   app, BaseWindow, WebContentsView, ipcMain, dialog, safeStorage, BrowserWindow, screen, __browserWindows: browserWindows, __setDisplays, __emitApp,
   powerSaveBlocker, Notification, Tray, __notifications: notifications, __trays: trays, __messageBoxes: messageBoxes, __setMessageBoxResponse,
   __ipcHandlers: ipcHandlers, __registry: registry, __windowRegistry: windowRegistry, __userDataDir: userDataDir,
-  __setDialogResult, __setEncryptionAvailable
+  __setDialogResult, __setEncryptionAvailable, __sessions: sessions, __sessionFor: sessionFor
 };

@@ -562,12 +562,26 @@ then carries the locked facts, belongings, status and a summary of book 1.
 | What | Where |
 |---|---|
 | Pictures, videos, trailers | `stuff and thing/images/`, `videos/` (trailers in `videos/trailers/`) |
+| Files an AI gives you to download (a .zip "packet", a .docx, a .pdf…) | `stuff and thing/ai-work/<the AI>/`, for example `ai-work/claude/` |
 | Models (checkpoints, LoRAs, FramePack, Ollama…) | `stuff and thing/models/` (one folder per kind) |
 | Installed programs (ComfyUI, Ollama) | `stuff and thing/apps/` |
 | Reports and test results | `stuff and thing/logs/` |
 | Your books | `Documents\Akowe Books\` in your real Documents folder, also when Windows moved it to OneDrive (change it in Akọwe → Settings → 📁 Where books are saved; a folder OneDrive, Dropbox or Google Drive syncs gets a ⚠️ and a button for a folder they do not sync) |
 | Akọwe's working data and backups | `%LOCALAPPDATA%\Akowe` (backups share unchanged pictures and clips instead of copying them again; its own log is `logs\akowe.log`, 10 MB × 5 files; each story checkpoint and chapter check is saved on its own, so a long book never rewrites one big record) |
 | AutoInjector settings, transcript, connection key | `%APPDATA%\autoinjector-desktop\` (older messages: `autoinjector-transcript-archive.jsonl`, then `.1`) |
+
+**Files the AIs give you.** When ChatGPT, Claude or Gemini offers a file to download in its pane and you click it,
+there is no Save window: AutoInjector saves it straight into that AI's folder, `stuff and thing/ai-work/<the AI>/`,
+under the file's own name (a second file with the same name gets `-1`, `-2` …; a file with no name is called
+`download` with the right ending). While it comes in, that AI's column shows `⬇ Claude: report.zip — 45% · 3 MB of
+7 MB`. When it is in, it says `✅ Claude gave you report.zip (7 MB). Saved in:` with the whole folder path and two
+buttons, **📂 Open folder** and **Open file** (Open file is not offered for a program or a script — look at those in
+the folder first). The **⬇** button in each AI's header, and **File → ⬇ Open the AIs' downloads folder**, open the
+folder any time. A download that breaks off is tried again by itself (up to 3 times); if it still fails, the column
+says why in plain words. While a file is still coming in: closing the window (or File → Quit) asks first ("A
+download is still coming in … keep it running in the background, or stop it?"), the PC is kept awake, and
+AutoInjector's own reloads of that AI's page (self-repair, a fresh chat for Akọwe) wait until the file is in.
+Reloading the page yourself (⟳) does not stop a download that has started.
 
 **Inside one book's folder:** `Book/` (PDF, EPUB, Word), `Chapters/`, `Book Bible/`, `Reports/`, `Log/` (the
 journal), `Progress/`, `Cover/`, `Pictures/`, `Character Forge/`, `Trailer/`, `Launch kit/` (the store listing: launch-kit.md and one .txt per part), `Marketing/` (the 📣 mockups, ads and teaser clips), and **`book.akowe`**. That last file

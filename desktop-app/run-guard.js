@@ -28,11 +28,14 @@ function activityOf(a = {}) {
   const runLive = !!(run && !run.stale && (run.live || LIVE_RUN.has(run.state)));
   const inFlight = Math.max(0, Number(a.inFlight) || 0);
   const media = (Array.isArray(a.media) ? a.media : []).filter(Boolean);
+  // files an AI is giving you (ai-downloads.js busyWhy(): "a download is still coming in (Claude: report.zip)")
+  const downloads = (Array.isArray(a.downloads) ? a.downloads : []).filter(Boolean);
   const why = [];
   if (runLive) why.push('a book is being written');
   else if (inFlight) why.push('Akọwe is waiting for an AI answer');
   for (const m of media) why.push(m);
-  return { busy: runLive || inFlight > 0 || media.length > 0, runLive, inFlight, media, why };
+  for (const d of downloads) why.push(d);
+  return { busy: runLive || inFlight > 0 || media.length > 0 || downloads.length > 0, runLive, inFlight, media, downloads, why };
 }
 
 /**
@@ -77,12 +80,17 @@ function createWakeLock(opts = {}) {
 function closeQuestion(activity) {
   const a = activity || {};
   if (!a.busy) return null;
-  const what = a.runLive ? 'A book is being written.' : a.inFlight ? 'Akọwe is waiting for an AI to answer.' : `Something is still working (${(a.why || []).join(', ') || 'a job'}).`;
+  const dl = Array.isArray(a.downloads) ? a.downloads.filter(Boolean) : [];
+  const others = (a.why || []).filter((w) => !dl.includes(w));
+  let what = a.runLive ? 'A book is being written.' : a.inFlight ? 'Akọwe is waiting for an AI to answer.'
+    : others.length ? `Something is still working (${others.join(', ')}).` : dl.length ? '' : `Something is still working (${(a.why || []).join(', ') || 'a job'}).`;
+  // a file an AI is giving you: quitting now would throw the unfinished download away
+  if (dl.length) what = `${what ? `${what} ` : ''}${dl.map((d) => d.charAt(0).toUpperCase() + d.slice(1)).join('. ')}.`;
   return {
     type: 'question',
     title: 'Keep it running?',
     message: `${what} Keep it running in the background, or stop it?`,
-    detail: 'Keep running: the window hides and the work carries on. Click the AutoInjector icon by the clock (bottom right of the screen) to open it again. Your PC is kept awake while it works.\n\nStop and quit: everything stops now. A book run can be carried on later with ▶ Resume.',
+    detail: 'Keep running: the window hides and the work carries on. Click the AutoInjector icon by the clock (bottom right of the screen) to open it again. Your PC is kept awake while it works.\n\nStop and quit: everything stops now. A book run can be carried on later with ▶ Resume.' + (dl.length ? ' A download that has not finished is lost (click it in the AI\'s pane again later).' : ''),
     buttons: ['Keep running in the background', 'Stop it and quit', 'Cancel'],
     defaultId: 0,
     cancelId: 2,
