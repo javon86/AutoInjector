@@ -174,6 +174,9 @@ const registry = {};
 const sessions = {};
 class FakeSession extends EventEmitter {
   constructor(partition) { super(); this.partition = partition; }
+  // 🎤 permission handlers (main.js lets only the control panel use the microphone): kept so a test can call them
+  setPermissionRequestHandler(fn) { this.req = fn; }
+  setPermissionCheckHandler(fn) { this.chk = fn; }
 }
 function sessionFor(partition) { return (sessions[partition || ""] = sessions[partition || ""] || new FakeSession(partition || "")); }
 

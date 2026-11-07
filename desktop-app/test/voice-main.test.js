@@ -35,19 +35,6 @@ function assert(c, m) { if (c) { passed++; console.log(`  ok   - ${m}`); } else 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 function freePort() { return new Promise((resolve) => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => resolve(p)); }); }); }
 
-// A fake session on every WebContents, to see the permission handlers main.js sets on the control panel's.
-const sessions = [];
-{
-  const probe = new mock.WebContentsView({ webPreferences: { partition: 'probe' } });
-  Object.defineProperty(Object.getPrototypeOf(probe.webContents), 'session', {
-    configurable: true,
-    get() {
-      if (!this.__ses) { this.__ses = { owner: this, setPermissionRequestHandler(fn) { this.req = fn; }, setPermissionCheckHandler(fn) { this.chk = fn; } }; sessions.push(this.__ses); }
-      return this.__ses;
-    },
-  });
-}
-
 const SECRET_WORDS = 'purple elephant marmalade';
 const transcript = [
   { id: 1, site: 'claude', label: 'Claude', text: '[TO: ChatGPT]\nFirst **answer** from Claude about the plan.\n[FROM: Claude]', ts: 1 },
@@ -75,7 +62,7 @@ fs.writeFileSync(path.join(mock.__userDataDir, 'autoinjector-state.json'), JSON.
   assert(CH.every((c) => typeof H[c] === 'function'), `all ${CH.length} handlers registered`);
 
   console.log('\n== the control panel may use the microphone, never the camera ==');
-  const ctl = sessions.find((s) => s.owner === (ui && ui.webContents));
+  const ctl = ui && ui.webContents.session; // mock-electron gives each partition one session (with the permission setters)
   assert(!!(ctl && ctl.req && ctl.chk), 'the control panel\'s session got a permission request + check handler');
   if (ctl && ctl.req) {
     const ask = (perm, details) => new Promise((r) => ctl.req(null, perm, r, details));
@@ -85,7 +72,7 @@ fs.writeFileSync(path.join(mock.__userDataDir, 'autoinjector-state.json'), JSON.
     assert(await ask('clipboard-sanitized-write', {}) === true, 'other permissions keep the old default (allowed)');
     assert(ctl.chk(null, 'media', 'file://', { mediaType: 'audio' }) === true && ctl.chk(null, 'media', 'file://', { mediaType: 'video' }) === false, 'the permission check says the same');
   }
-  const paneSessions = sessions.filter((s) => s !== ctl && s.req);
+  const paneSessions = Object.values(mock.__sessions).filter((s) => s !== ctl && s.req);
   assert(paneSessions.length === 0, 'no AI pane session got a handler from this');
 
   console.log('\n== voice:replies / voice:reply-text ==');
