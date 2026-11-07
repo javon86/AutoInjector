@@ -31,7 +31,7 @@ A plain-words record of every big change, newest first, so that if something bre
 | **Book Bible binder** | 12 templates, 7 genre looks, and PDF and Word export. | #95, #96 |
 | **FramePack video** | Uses your FramePack for clips and trailers. Includes the RTX 50-series fixes. | #92, #101, #103, #104 |
 | **Media self-test** | 🩺 tests pictures, video and the trailer in one press. | #105 |
-| **🎤 Talk to the AIs, 🔊 hear their replies** | A mic in the title bar (to all, or one AI from its header) and ◀ 🔊 ▶ "3 / 7" on each AI to read a reply aloud, each in its own voice. Offline (voice engine + this PC's voices). | #TBD |
+| **🎤 Talk to the AIs, 🔊 hear their replies** | A mic in the title bar (to all, or one AI from its header) and ◀ 🔊 ▶ "3 / 7" on each AI to read a reply aloud, each in its own voice. Offline (voice engine + this PC's voices). | #130 |
 | **Alfred** | The app-wide assistant: tools, a side panel, one-button AI setup, a model finder with star ratings, an uncensored finder and a 🧪 "What will it write?" test. | #74, #82, #84, #86, #105, #127 |
 | **Stable Diffusion pictures** | Forge, A1111 or ComfyUI, with character locks, a LoRA library and 🧩 Add-ons (install extensions). Realistic by default: each model family gets its own size, sampler, steps, CFG and negative prompt; a 🧩 LoRA browser; long book descriptions are shortened for the model. | #73, #75, #91, #125, #128 |
 | **Wan video on ComfyUI** | Local video made through ComfyUI. | #78 |
