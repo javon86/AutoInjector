@@ -30,12 +30,18 @@ let settings = {
   micDevice: '',       // preferred input (microphone) device — passed to the shim
   speakerDevice: '',   // preferred output (speaker) device — passed to the shim
   timeoutMs: 60000,
+  // 🎤 / 🔊 in the control panel (voice-ui.js): who the title-bar mic sends to, the read-aloud speed, and the
+  // built-in (no-install) voice per speaker — the browser's own voices, used when piper isn't there.
+  micTarget: 'all',    // 'all' | 'chatgpt' | 'claude' | 'gemini' | 'butler'
+  rate: 1,             // read-aloud speed (0.5 – 2)
+  browserVoices: { butler: '', chatgpt: '', claude: '', gemini: '' },
 };
+const MIC_TARGETS = ['all', 'chatgpt', 'claude', 'gemini', 'butler'];
 const managed = { child: null, lastError: '' };
 // The address the managed shim listens on when nothing else is configured.
 const DEFAULT_ENDPOINT = 'http://127.0.0.1:8232';
 
-function getSettings() { return { ...settings, voices: { ...settings.voices } }; }
+function getSettings() { return { ...settings, voices: { ...settings.voices }, browserVoices: { ...settings.browserVoices } }; }
 function setSettings(patch) {
   if (!patch || typeof patch !== 'object') return getSettings();
   for (const k of ['enabled', 'speakOnAck']) if (k in patch) settings[k] = !!patch[k];
@@ -43,10 +49,13 @@ function setSettings(patch) {
   if (patch.voices && typeof patch.voices === 'object') { for (const who of Object.keys(settings.voices)) if (who in patch.voices) settings.voices[who] = String(patch.voices[who] || ''); }
   if ('listenSeconds' in patch) { const n = Number(patch.listenSeconds); if (Number.isFinite(n)) settings.listenSeconds = Math.max(1, Math.min(60, n)); }
   if ('timeoutMs' in patch) settings.timeoutMs = Math.max(2000, Number(patch.timeoutMs) || settings.timeoutMs);
+  if ('micTarget' in patch && MIC_TARGETS.includes(patch.micTarget)) settings.micTarget = patch.micTarget;
+  if ('rate' in patch) { const n = Number(patch.rate); if (Number.isFinite(n)) settings.rate = Math.max(0.5, Math.min(2, Math.round(n * 100) / 100)); }
+  if (patch.browserVoices && typeof patch.browserVoices === 'object') { for (const who of Object.keys(settings.browserVoices)) if (who in patch.browserVoices) settings.browserVoices[who] = String(patch.browserVoices[who] || '').slice(0, 200); }
   return getSettings();
 }
 function status() {
-  return { configured: !!settings.endpoint, enabled: !!settings.enabled, endpoint: settings.endpoint, speakOnAck: !!settings.speakOnAck, voices: { ...settings.voices }, micDevice: settings.micDevice, speakerDevice: settings.speakerDevice, managed: !!managed.child, managedPid: managed.child ? managed.child.pid : null, lastStartError: managed.lastError || '' };
+  return { configured: !!settings.endpoint, enabled: !!settings.enabled, endpoint: settings.endpoint, speakOnAck: !!settings.speakOnAck, voices: { ...settings.voices }, micDevice: settings.micDevice, speakerDevice: settings.speakerDevice, micTarget: settings.micTarget, rate: settings.rate, browserVoices: { ...settings.browserVoices }, managed: !!managed.child, managedPid: managed.child ? managed.child.pid : null, lastStartError: managed.lastError || '' };
 }
 // Resolve the piper voice for a speaker id (butler/chatgpt/claude/gemini).
 function voiceFor(who) { return (settings.voices && settings.voices[who]) || ''; }
@@ -117,6 +126,14 @@ function explainError(r, endpoint) {
   if (code === 'NO_ENDPOINT') return `No voice service address is set. Enter it in ${WHERE_SETTINGS} (usually ${DEFAULT_ENDPOINT}) and press Save.`;
   if (code === 'BAD_ENDPOINT') return `The voice address "${ep}" isn't a valid web address. Use something like ${DEFAULT_ENDPOINT} in ${WHERE_SETTINGS}.`;
   if (code === 'NEED_TEXT') return 'There was nothing to say.';
+  if (code === 'NEED_AUDIO') return 'Nothing was recorded — try the 🎤 again and speak after it turns red.';
+  if (code === 'AUDIO_TOO_LONG') return 'That recording is too long. Keep each 🎤 message under about 5 minutes.';
+  if (code === 'BAD_AUDIO') return "The recording couldn't be read. Try the 🎤 again; if it keeps happening, pick another microphone in the 🔊 Voice settings.";
+  if (code === 'VOICE_NOT_INSTALLED') return 'Talking to the AIs needs the free voice engine on this PC (it works offline). Install it once: Setup Wizard → Installs → "Voice engine".';
+  if (code === 'NO_STT') return 'The voice engine is running but its speech-to-text part is missing. Install it again from Setup Wizard → Installs → "Voice engine".';
+  if (code === 'NO_TTS' || code === 'NO_TTS_MODEL') return 'No piper voice is installed yet, so the built-in voices of this PC are used. For nicer voices: Setup Wizard → Installs → "Voice model".';
+  if (code === 'STT_FAILED') return `The voice engine couldn't turn the recording into words${r && r.detail ? ` (${redactPaths(String(r.detail)).slice(0, 160)})` : ''}. Try again; if it keeps happening, restart AutoInjector.`;
+  if (code === 'TTS_FAILED') return "The piper voice couldn't speak that, so the built-in voice is used.";
   if (code === 'ECONNREFUSED') {
     const tried = managed.lastError ? ` (The app tried to start the voice service but it didn't come up: ${managed.lastError}.)` : '';
     // On Windows "localhost" can resolve to the IPv6 ::1 while the shim listens
@@ -240,6 +257,79 @@ async function listen(opts = {}) {
   return _withMessage(await _postJson('/listen', body));
 }
 
+// ---- 🎤 transcribe / 🔊 synthesize (voice-ui.js in the control panel) ------
+// The mic records in the page (MediaRecorder, webm/opus); the bytes come here and go to the shim's
+// /transcribe. /synthesize returns a WAV the page plays itself (so ⏹ Stop is instant). Neither needs
+// "Speak the butler's replies aloud" ticked — that switch is about the butler talking on its own.
+// An empty address means the usual one (DEFAULT_ENDPOINT), where the app runs the shim.
+function effectiveEndpoint() { return settings.endpoint || DEFAULT_ENDPOINT; }
+function _request(method, ep, pathName, body, timeoutMs) {
+  return new Promise((resolve) => {
+    let base; try { base = new URL(ep); } catch { return resolve({ ok: false, error: 'BAD_ENDPOINT' }); }
+    if (base.protocol !== 'http:' && base.protocol !== 'https:') return resolve({ ok: false, error: 'BAD_ENDPOINT' });
+    const lib = base.protocol === 'https:' ? https : http;
+    const payload = body == null ? null : JSON.stringify(body);
+    const headers = { Accept: 'application/json' };
+    if (payload != null) { headers['Content-Type'] = 'application/json'; headers['Content-Length'] = Buffer.byteLength(payload); }
+    let settled = false;
+    const done = (r) => { if (!settled) { settled = true; resolve(r); } };
+    let req;
+    try {
+      req = lib.request({ hostname: base.hostname, port: base.port || (base.protocol === 'https:' ? 443 : 80), path: pathName, method, timeout: timeoutMs, headers }, (res) => {
+        const parts = []; res.on('data', (d) => parts.push(d));
+        res.on('end', () => {
+          const buf = Buffer.concat(parts).toString('utf8');
+          let j = null; try { j = JSON.parse(buf || '{}'); } catch { /* not JSON */ }
+          if (res.statusCode && res.statusCode >= 400) return done(j && j.error ? { ok: false, ...j, status: res.statusCode } : { ok: false, error: `HTTP_${res.statusCode}`, body: buf.slice(0, 2000) });
+          if (!j || typeof j !== 'object') return done({ ok: false, error: 'BAD_JSON', body: buf.slice(0, 2000) });
+          done(j.ok === false ? { ok: false, ...j } : { ok: true, ...j });
+        });
+        res.on('error', (e) => done({ ok: false, error: String((e && e.code) || (e && e.message) || e) }));
+      });
+    } catch (e) { return done({ ok: false, error: String((e && e.code) || (e && e.message) || e) }); }
+    req.on('error', (e) => done({ ok: false, error: String((e && e.code) || (e && e.message) || e) }));
+    req.on('timeout', () => { done({ ok: false, error: 'TIMEOUT' }); try { req.destroy(); } catch {} });
+    if (payload != null) req.write(payload);
+    req.end();
+  });
+}
+// GET /health at the effective address -> { ok, tts, stt, stt_model, stt_loaded, stt_cached, stt_mb, ... }
+async function health(opts = {}) {
+  const ep = effectiveEndpoint();
+  const r = await _request('GET', ep, '/health', null, Math.max(300, Number(opts.timeoutMs) || 1500));
+  if (!r.ok) return { ...r, endpoint: ep, message: explainError(r, ep) };
+  return { ...r, endpoint: ep };
+}
+const MAX_AUDIO_B64 = 40 * 1024 * 1024; // ~30 MB of audio: far more than a few minutes of opus
+async function transcribe(audioB64, opts = {}) {
+  const a = typeof audioB64 === 'string' ? audioB64.replace(/^data:[^,]*,/, '') : '';
+  if (!a || a.length < 16) return _withMessageAt({ ok: false, error: 'NEED_AUDIO' });
+  if (a.length > MAX_AUDIO_B64) return _withMessageAt({ ok: false, error: 'AUDIO_TOO_LONG' });
+  const mime = String(opts.mime || 'audio/webm').slice(0, 80);
+  const r = await _request('POST', effectiveEndpoint(), '/transcribe', { audio_b64: a, mime }, Math.max(5000, Number(opts.timeoutMs) || 10 * 60000));
+  if (r.ok) return { ok: true, text: String(r.text || '').trim(), ms: r.ms, device: r.device, model: r.model };
+  return _withMessageAt(r);
+}
+async function synthesize(text, opts = {}) {
+  const t = String(text || '').trim();
+  if (!t) return _withMessageAt({ ok: false, error: 'NEED_TEXT' });
+  const voice = String(opts.voice || voiceFor(opts.who) || '');
+  const body = { text: t.slice(0, 4000) };
+  if (voice) body.voice = voice;
+  const r = await _request('POST', effectiveEndpoint(), '/synthesize', body, Math.max(3000, Number(opts.timeoutMs) || 60000));
+  if (r.ok && typeof r.audio_b64 === 'string' && r.audio_b64) return { ok: true, audio: r.audio_b64, mime: r.mime || 'audio/wav', voice: r.voice || voice };
+  if (r.ok) return _withMessageAt({ ok: false, error: 'BAD_JSON' });
+  return _withMessageAt(r);
+}
+function _withMessageAt(r) {
+  const out = _withMessage(r);
+  if (out && out.ok === false) {
+    out.message = (out.error === 'VOICE_MODEL_DAMAGED') ? out.message : explainError(out, effectiveEndpoint());
+    delete out.body;
+  }
+  return out;
+}
+
 // ---- Managed mode: the app runs the shim itself (same pattern as OI) --------
 function _pingHealth(host, port, cb) {
   const req = http.request({ hostname: host, port, path: '/health', method: 'GET', timeout: 1500 }, (res) => { res.resume(); cb(res.statusCode && res.statusCode < 500); });
@@ -296,4 +386,4 @@ function stopManaged() {
   return { ok: true, stopped: false };
 }
 
-module.exports = { DEFAULT_ENDPOINT, getSettings, setSettings, status, speak, listen, checkConnection, explainError, voiceModelProblem, redactPaths, setRedactionProvider, startManaged, stopManaged, _setHome: (h) => { _home = String(h || ''); } };
+module.exports = { DEFAULT_ENDPOINT, MIC_TARGETS, getSettings, setSettings, status, speak, listen, checkConnection, effectiveEndpoint, health, transcribe, synthesize, explainError, voiceModelProblem, redactPaths, setRedactionProvider, startManaged, stopManaged, _setHome: (h) => { _home = String(h || ''); } };

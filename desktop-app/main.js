@@ -51,6 +51,7 @@ const renderPdf = require("./render-pdf");
 const interpreterProvider = require("./interpreter-provider");
 const toolProvider = require("./tool-provider");
 const voiceProvider = require("./voice-provider");
+const voiceRead = require("./voice-read"); // 🎤 / 🔊 in the control panel: reply lists + read-aloud text clean-up
 const imageProvider = require("./image-provider");
 const videoProvider = require("./video-provider");
 const setupManager = require("./setup-manager");
@@ -1255,6 +1256,28 @@ async function syncPaneBounds() {
   }
 }
 
+// 🎤 The control panel records the user's voice (voice-ui.js: getUserMedia + MediaRecorder). Its session may use
+// the microphone; it never gets the camera. Every other permission keeps Electron's default (allowed), as before.
+// Only the control panel's own session — the AI panes have their own sessions and are untouched.
+function allowControlsMicrophone(view) {
+  try {
+    const ses = view && view.webContents && view.webContents.session;
+    if (!ses || typeof ses.setPermissionRequestHandler !== "function") return;
+    ses.setPermissionRequestHandler((_wc, permission, callback, details) => {
+      if (permission === "media") {
+        const types = (details && Array.isArray(details.mediaTypes)) ? details.mediaTypes : [];
+        const ok = !types.includes("video");
+        if (!ok) logEvent("voice-mic-permission", { step: "camera-refused" });
+        return callback(ok);
+      }
+      callback(true);
+    });
+    if (typeof ses.setPermissionCheckHandler === "function") {
+      ses.setPermissionCheckHandler((_wc, permission, _origin, details) => (permission === "media" ? !(details && details.mediaType === "video") : true));
+    }
+  } catch (e) { logEvent("voice-mic-permission-error", { error: String(e) }); }
+}
+
 function createWindow() {
   win = new BaseWindow({ width: 1700, height: 1050, title: "AutoInjector Desktop — Automation" });
   loadBuildInfoAsync((bi) => {
@@ -1274,6 +1297,7 @@ function createWindow() {
     }
   });
   win.contentView.addChildView(controlsView);
+  allowControlsMicrophone(controlsView);
   controlsView.webContents.loadFile(path.join(__dirname, "controls.html"));
   controlsView.webContents.once("did-finish-load", () => {
     syncPaneBounds();
@@ -6729,6 +6753,99 @@ ipcMain.handle("voice:redownload", async () => redownloadVoice());
 // OP-12: cheap connectivity check (GET /health on the voice address).
 ipcMain.handle("voice:check", async () => { try { return await voiceProvider.checkConnection(); } catch (e) { return { ok: false, reachable: false, error: String(e), message: `Couldn't check the voice service: ${e}` }; } });
 
+// ---- 🎤 talk to the AIs / 🔊 read their replies aloud (voice-ui.js) ------------------------------------------
+// The control panel records (MediaRecorder) and sends the bytes here; the local voice shim turns them into words
+// (/transcribe), and makes piper WAVs for read-aloud (/synthesize). When the shim isn't running but the voice
+// engine is installed, the app starts it (without turning "Speak the butler's replies aloud" on). Logs carry
+// codes and sizes only — never what was said or read.
+const VOICE_FIX_SETUP = { action: "open-setup", label: "🧙 Set up the voice engine" };
+let voiceStarting = null;      // the one start in flight
+let voiceDownUntil = 0;        // after a failed start, read-aloud skips the shim for a while (instant fallback)
+async function ensureVoiceShim(opts = {}) {
+  let h = await voiceProvider.health({ timeoutMs: opts.timeoutMs || 1500 });
+  if (h.ok) { voiceDownUntil = 0; return h; }
+  if (opts.start === false) return h;
+  if (Date.now() < voiceDownUntil && !opts.force) return h;
+  const command = process.env.AUTOINJECTOR_VOICE_SPAWN || (state.setupStatus.voice ? setupManager.pythonBin() : "");
+  if (!command) {
+    voiceDownUntil = Date.now() + 30000;
+    return { ok: false, error: "VOICE_NOT_INSTALLED", message: voiceProvider.explainError({ error: "VOICE_NOT_INSTALLED" }), fix: VOICE_FIX_SETUP };
+  }
+  if (!voiceStarting) {
+    const wasEnabled = !!voiceProvider.getSettings().enabled;
+    broadcast("voice-mic", { phase: "starting" });
+    voiceStarting = startManagedVoice(command).then(() => {
+      // starting the engine for the 🎤 must not switch on the butler's own talking
+      if (!wasEnabled) voiceProvider.setSettings({ enabled: false });
+    }).finally(() => { voiceStarting = null; });
+  }
+  try { await voiceStarting; } catch (_) {}
+  h = await voiceProvider.health({ timeoutMs: 2500 });
+  if (h.ok) { voiceDownUntil = 0; return h; }
+  voiceDownUntil = Date.now() + 30000;
+  const why = voiceProvider.status().lastStartError;
+  return { ok: false, error: "VOICE_NOT_STARTED", message: `The voice engine didn't start${why ? ` (${voiceProvider.redactPaths(why).slice(0, 200)})` : ""}. Try once more; if it keeps happening, install it again from Setup Wizard → Installs → "Voice engine".`, fix: VOICE_FIX_SETUP };
+}
+ipcMain.handle("voice:transcribe", async (_evt, args = {}) => {
+  const t0 = Date.now();
+  const a = args && typeof args === "object" ? args : {};
+  const audio = typeof a.audio === "string" ? a.audio : "";
+  const mime = typeof a.mime === "string" ? a.mime : "audio/webm";
+  if (!audio) { const r = await voiceProvider.transcribe("", { mime }); logEvent("voice-mic", { step: "no-audio" }); return r; }
+  try {
+    const h = await ensureVoiceShim({ force: true });
+    if (!h.ok) { logEvent("voice-mic", { step: "no-engine", error: h.error, severity: "warning" }); return { ok: false, error: h.error, message: h.message, fix: h.fix || VOICE_FIX_SETUP }; }
+    if (!h.stt) { logEvent("voice-mic", { step: "no-stt", severity: "warning" }); return { ok: false, error: "NO_STT", message: voiceProvider.explainError({ error: "NO_STT" }), fix: VOICE_FIX_SETUP }; }
+    if (!h.stt_loaded) broadcast("voice-mic", { phase: h.stt_cached ? "loading" : "downloading", mb: Number(h.stt_mb) || 0 });
+    const r = await voiceProvider.transcribe(audio, { mime });
+    if (r.ok) logEvent("voice-mic", { step: "heard", chars: r.text.length, audioKB: Math.round(audio.length * 0.75 / 1024), ms: Date.now() - t0, device: r.device || null });
+    else logEvent("voice-mic", { step: "failed", error: r.error, severity: "warning" });
+    if (!r.ok && /^NO_STT$|^VOICE_NOT/.test(String(r.error))) r.fix = VOICE_FIX_SETUP;
+    return r;
+  } catch (e) {
+    logEvent("voice-mic", { step: "error", error: String((e && e.message) || e).slice(0, 200), severity: "error" });
+    return { ok: false, error: "ERROR", message: "Something went wrong while listening. Try the 🎤 again." };
+  }
+});
+ipcMain.handle("voice:synthesize", async (_evt, args = {}) => {
+  const a = args && typeof args === "object" ? args : {};
+  const text = typeof a.text === "string" ? a.text : "";
+  const who = typeof a.who === "string" && voiceRead.WHO.includes(a.who) ? a.who : "";
+  if (!text.trim()) return { ok: false, error: "NEED_TEXT", message: "There was nothing to say." };
+  try {
+    // read-aloud never waits for an engine start: no shim -> the page's built-in voices, at once
+    const h = await ensureVoiceShim({ start: false, timeoutMs: 700 });
+    if (!h.ok) return { ok: false, error: "NO_SHIM", fallback: true, message: "Using this PC's built-in voices." };
+    if (!h.tts || !Number(h.piper_voices)) return { ok: false, error: "NO_TTS_MODEL", fallback: true, message: voiceProvider.explainError({ error: "NO_TTS_MODEL" }) };
+    let voice = typeof a.voice === "string" ? a.voice : "";
+    if (!voice && who) voice = voiceProvider.getSettings().voices[who] || piperDefaults()[who] || "";
+    const r = await voiceProvider.synthesize(text, { voice });
+    if (!r.ok) { r.fallback = true; logEvent("voice-read", { step: "piper-failed", error: r.error, severity: "warning" }); }
+    return r;
+  } catch (e) { return { ok: false, error: "ERROR", fallback: true, message: String((e && e.message) || e).slice(0, 200) }; }
+});
+// piper voice files in models/voice -> names; and a distinct default per speaker
+function piperVoiceNames() {
+  try { return fs.readdirSync(outputManager.modelsDir("voice")).filter((f) => /\.onnx$/i.test(f)).map((f) => f.replace(/\.onnx$/i, "")).sort(); } catch (_) { return []; }
+}
+function piperDefaults() { return voiceRead.defaultPiperVoices(piperVoiceNames()); }
+ipcMain.handle("voice:piper-voices", async () => ({ ok: true, voices: piperVoiceNames(), defaults: piperDefaults() }));
+// One AI's replies, oldest first, with a short preview each (no full text) …
+ipcMain.handle("voice:replies", (_evt, args = {}) => {
+  const site = args && typeof args === "object" ? args.site : args;
+  if (!SITES[site]) return { ok: false, error: "BAD_SITE", items: [], count: 0 };
+  const items = voiceRead.replyList(state.transcript, site, { words: 10 });
+  return { ok: true, site, count: items.length, items };
+});
+// … and one reply's full text by its id (for ▶︎ play).
+ipcMain.handle("voice:reply-text", (_evt, args = {}) => {
+  const id = Number(args && typeof args === "object" ? args.id : args);
+  const t = Number.isFinite(id) ? state.transcript.find((x) => x && x.id === id) : null;
+  if (!t || typeof t.text !== "string") return { ok: false, error: "NOT_FOUND", message: "That reply isn't in the conversation any more." };
+  logEvent("voice-read", { step: "play", site: t.site, chars: t.text.length });
+  return { ok: true, id: t.id, site: t.site, text: stripEnvelope(t.text) };
+});
+
 // Image generation (Stable Diffusion): status/config + a manual generate for the
 // wizard's "Test" button. Config persists in the app state snapshot.
 ipcMain.handle("image:status", () => ({ ok: true, ...imageProvider.status() }));
@@ -8163,6 +8280,7 @@ async function startManagedVoice(explicitCommand) {
       env: {
         VOICE_TTS_MODEL: process.env.AUTOINJECTOR_VOICE_TTS_MODEL || "",
         VOICE_STT_MODEL: process.env.AUTOINJECTOR_VOICE_STT_MODEL || "",
+        VOICE_MODELS_DIR: (() => { try { return outputManager.modelsDir("voice"); } catch (_) { return ""; } })(), // every piper voice there (🔊 one per speaker)
       },
       onLog: (kind, text) => logEvent("voice-shim", { kind, text: String(text).slice(0, 300) }),
     });

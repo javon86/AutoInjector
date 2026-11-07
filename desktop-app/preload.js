@@ -125,6 +125,13 @@ contextBridge.exposeInMainWorld("api", {
   voiceListen: (opts) => ipcRenderer.invoke("voice:listen", opts || {}),
   voiceCheck: () => ipcRenderer.invoke("voice:check"),
   voiceRedownload: () => ipcRenderer.invoke("voice:redownload"),
+  // 🎤 talk to the AIs / 🔊 read their replies aloud (voice-ui.js)
+  voiceTranscribe: (audio, mime) => ipcRenderer.invoke("voice:transcribe", { audio, mime }),
+  voiceSynthesize: (text, who, voice) => ipcRenderer.invoke("voice:synthesize", { text, who, voice }),
+  voicePiperVoices: () => ipcRenderer.invoke("voice:piper-voices"),
+  voiceReplies: (site) => ipcRenderer.invoke("voice:replies", { site }),
+  voiceReplyText: (id) => ipcRenderer.invoke("voice:reply-text", { id }),
+  onVoiceMic: (cb) => ipcRenderer.on("voice-mic", (_e, payload) => cb(payload)),
   // Image generation (Stable Diffusion)
   imageStatus: () => ipcRenderer.invoke("image:status"),
   configureImage: (patch) => ipcRenderer.invoke("image:configure", patch),

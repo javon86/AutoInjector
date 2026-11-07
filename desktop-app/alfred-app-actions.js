@@ -178,6 +178,9 @@ A('voice.check', 'voice:check', { t: 'Check the voice service', c: false });
 A('voice.configure', 'voice:configure', { t: 'Change voice settings', c: true, a: { settings: pass }, r: ['settings'], call: (a) => [a.settings], ex: { settings: { enabled: true } } });
 A('voice.speak', 'voice:speak', { t: 'Say something out loud', c: true, aa: true, a: { text: text(2000), who: opt(40) }, r: ['text'], ex: { text: 'Good evening.' } });
 A('voice.redownload', 'voice:redownload', { t: 'Re-download the voice file (when it is damaged or incomplete)', c: true, ex: {} });
+A('voice.replies', 'voice:replies', { t: "One AI's replies, numbered, with their first words (what the 🔊 ◀ ▶ buttons step through)", c: false, a: { site: { type: 'string', enum: ['chatgpt', 'claude', 'gemini'] } }, r: ['site'], ex: { site: 'claude' } });
+A('voice.reply_text', 'voice:reply-text', { t: 'The full text of one reply, by its id from voice.replies', c: false, a: { id: { type: 'integer', minimum: 1 } }, r: ['id'], ex: { id: 1 } });
+A('voice.piper_voices', 'voice:piper-voices', { t: 'The piper voices on this PC and which speaker uses which by default', c: false });
 A('voice.listen', 'voice:listen', { t: 'Listen with the microphone', c: true, a: { seconds: { type: 'integer', minimum: 1, maximum: 60 } }, ex: { seconds: 5 } });
 A('image.status', 'image:status', { t: 'Image generator settings', c: false });
 A('image.configure', 'image:configure', { t: 'Change image generator settings', c: true, a: { settings: pass }, r: ['settings'], call: (a) => [a.settings], ex: { settings: { steps: 25 } } });
@@ -267,6 +270,8 @@ A('ui.show_tab', null, { t: 'Show a tab (🤖 AutoInjector, 📖 Akọwe, 🎨 I
 /** Channels the AI must not drive — each with the reason. The coverage test checks every channel is
  *  either an ACTIONS entry, a direct Alfred tool (TOOL_CHANNELS), or here. */
 const EXCLUDED = {
+  'voice:transcribe': 'the control panel\'s 🎤 hands its recording (audio bytes) to the voice engine — Alfred listens with voice.listen',
+  'voice:synthesize': 'returns a WAV for the control panel to play (🔊 read-aloud) — Alfred speaks with voice.speak',
   'sd:addons-update': 'updates an add-on in the user\'s SD app (its code changes) — done by the user in 🎨 Images → 🧩 Add-ons',
   'sd:addons-remove': 'takes an add-on out of the user\'s SD app — done by the user in 🎨 Images → 🧩 Add-ons',
   'sd:addons-folder': 'a folder picker the user answers (which SD app folder add-ons go into)',

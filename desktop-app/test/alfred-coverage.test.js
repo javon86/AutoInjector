@@ -116,6 +116,7 @@ const IPC_INVENTORY = [
   'video:trailer-make', 'video:trailer-status', 'video:trailer-cancel', 'video:trailer-list', 'video:trailer-plan', 'video:trailer-pick-file',
   'video:framepack-status', 'video:framepack-load', 'video:framepack-unload', 'video:framepack-test', 'video:framepack-choose-folder',
   'voice:check', 'voice:configure', 'voice:listen', 'voice:redownload', 'voice:speak', 'voice:status',
+  'voice:transcribe', 'voice:synthesize', 'voice:piper-voices', 'voice:replies', 'voice:reply-text',
   'window:toggle-collapse', 'wizard-window:close', 'wizard:catalog', 'wizard:open', 'wizard:open-app-tab',
 ];
 // Live updates the window listens to (not actions). The ones that matter to the user feed Alfred's watcher.
@@ -129,7 +130,7 @@ const EVENTS = {
   'manager-ack': 'UI live update', 'manager-state': 'UI live update', 'ollama-progress': 'UI live update', 'llm': 'UI live update (setup / download progress — Alfred reads llm.status / llm.check)', 'pane-health': 'UI live update (→ ai_health)', 'picker': 'UI live update',
   'prompts-changed': 'UI live update', 'relay-paused': 'UI live update', 'sd-connected': 'UI live update', 'sd-install': 'UI live update', 'sd-runner': 'UI live update', 'sd-addons': 'UI live update (🧩 add-on install progress — Alfred reads sd.addons)', 'video-install': 'UI live update (model download progress — Alfred reads video.install.check / video.status)', 'video-done': 'UI live update (a video finished — Alfred gets the result from video_call)', 'video-framepack': 'UI live update (FramePack loading / loaded — Alfred reads video.framepack.status)',
   'send-error': 'UI live update', 'sent': 'UI live update', 'sequence-state': 'UI live update', 'setup-progress': 'UI live update', 'setup-status': 'UI live update',
-  'terminal-data': 'UI live update', 'terminal-state': 'UI live update', 'tuner-state': 'UI live update', 'voice-speaking': 'UI live update', 'waiting-changed': 'UI live update',
+  'terminal-data': 'UI live update', 'terminal-state': 'UI live update', 'tuner-state': 'UI live update', 'voice-speaking': 'UI live update', 'voice-mic': 'UI live update (🎤 "starting the voice engine / downloading the speech model")', 'waiting-changed': 'UI live update',
   'window-collapse-changed': 'UI live update',
   'ai-download': 'UI live update (⬇ a file an AI gives you: progress, then where it was saved)',
 };
