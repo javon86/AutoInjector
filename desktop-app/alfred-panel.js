@@ -668,6 +668,10 @@
     // a note about something that has changed since (a book run resumed / finished, a problem fixed)
     if (m.outdated) e.prepend(h('div', { class: 'al-old' }, `Old news${m.nowText ? ` — now: ${m.nowText}` : ''}`));
     if (m.image) e.append(h('img', { src: fileUrl(m.image), alt: 'the image Alfred made' }));
+    // 🔊 ▶︎ read his answer aloud (voice-ui.js — one speaker for the whole app; absent → no button)
+    if (m.role === 'alfred' && m.text && window.VoiceUI && typeof window.VoiceUI.speakButton === 'function') {
+      try { e.append(h('div', { class: 'al-speak' }, window.VoiceUI.speakButton(() => m.text, 'butler'))); } catch (_) {}
+    }
     // 🩺 a health notice with a one-click fix (health-watch.js → health:fix)
     if (m.action && m.action.code && typeof api.healthFix === 'function') {
       const b = h('button', { class: 'al-fix', type: 'button', 'data-code': m.action.code }, m.action.label || 'Fix it');

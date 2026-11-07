@@ -83,6 +83,38 @@ async function main() {
   if (bj.status === 400 && /BAD_JSON/.test(bj.body || '')) ok('POST /speak with bad JSON -> 400 BAD_JSON');
   else note(`bad-JSON check returned ${bj.status} ${(bj.body || '').slice(0, 60)}`);
 
+  // 🎤 /transcribe and 🔊 /synthesize argument checks (no model needed).
+  const noAudio = await req('POST', '/transcribe', {});
+  if (noAudio.status === 400 && /NEED_AUDIO/.test(noAudio.body || '')) ok('POST /transcribe with no audio -> 400 NEED_AUDIO');
+  else bad(`expected 400 NEED_AUDIO, got ${noAudio.status} ${(noAudio.body || noAudio.error || '').slice(0, 80)}`);
+  const numAudio = await req('POST', '/transcribe', { audio_b64: 12345 });
+  if (numAudio.status === 400 && /NEED_AUDIO/.test(numAudio.body || '')) ok('POST /transcribe with a non-text audio_b64 -> 400 NEED_AUDIO');
+  else bad(`expected 400 NEED_AUDIO for a number, got ${numAudio.status} ${(numAudio.body || '').slice(0, 80)}`);
+  const junk = await req('POST', '/transcribe', { audio_b64: Buffer.from('not really audio at all').toString('base64'), mime: 'audio/webm' });
+  let jj = {}; try { jj = JSON.parse(junk.body || '{}'); } catch (_) {}
+  if (junk.status === 200 && jj.ok === false && /^(NO_STT|BAD_AUDIO|STT_FAILED)$/.test(jj.error || '')) ok(`POST /transcribe with junk audio -> a clean {ok:false, error:${jj.error}} (no crash)`);
+  else if (junk.status === 200 && jj.ok === true) note('junk audio was accepted as silence (speech-to-text installed)');
+  else bad(`junk /transcribe: ${junk.status} ${(junk.body || junk.error || '').slice(0, 120)}`);
+  const noText = await req('POST', '/synthesize', { text: '   ' });
+  if (noText.status === 400 && /NEED_TEXT/.test(noText.body || '')) ok('POST /synthesize with no text -> 400 NEED_TEXT');
+  else bad(`expected 400 NEED_TEXT from /synthesize, got ${noText.status} ${(noText.body || '').slice(0, 80)}`);
+  const badVoice = await req('POST', '/synthesize', { text: 'hello', voice: '../../etc/passwd' });
+  if (badVoice.status === 400 && /BAD_VOICE/.test(badVoice.body || '')) ok('POST /synthesize with a path as the voice -> 400 BAD_VOICE');
+  else bad(`expected 400 BAD_VOICE, got ${badVoice.status} ${(badVoice.body || '').slice(0, 80)}`);
+  const longText = await req('POST', '/synthesize', { text: 'a'.repeat(4001) });
+  if (longText.status === 413 && /TEXT_TOO_LONG/.test(longText.body || '')) ok('POST /synthesize with 4001 characters -> 413 TEXT_TOO_LONG');
+  else bad(`expected 413 TEXT_TOO_LONG, got ${longText.status} ${(longText.body || '').slice(0, 80)}`);
+  const syn = await req('POST', '/synthesize', { text: 'hello' });
+  let sj = {}; try { sj = JSON.parse(syn.body || '{}'); } catch (_) {}
+  if (syn.status === 200 && sj.ok && sj.audio_b64) ok(`/synthesize returned a WAV (${Math.round(sj.audio_b64.length * 0.75 / 1024)} KB, voice ${sj.voice})`);
+  else if (syn.status === 200 && sj.ok === false) note(`/synthesize: shim OK, no piper voice (${sj.error})`);
+  else bad(`/synthesize: ${syn.status} ${(syn.body || syn.error || '').slice(0, 80)}`);
+  const voices = await req('GET', '/voices');
+  let vj = {}; try { vj = JSON.parse(voices.body || '{}'); } catch (_) {}
+  if (voices.status === 200 && vj.ok && Array.isArray(vj.voices)) ok(`GET /voices lists ${vj.voices.length} piper voice(s)`);
+  else bad(`GET /voices: ${voices.status} ${(voices.body || '').slice(0, 80)}`);
+  try { const h = JSON.parse(health.body || '{}'); if ('stt_model' in h && 'stt_loaded' in h && 'stt_mb' in h) ok(`/health says which speech model (${h.stt_model || 'none'}, ${h.stt_mb} MB, loaded=${h.stt_loaded})`); else bad('/health lacks stt_model / stt_loaded / stt_mb'); } catch (_) { bad('/health is not JSON'); }
+
   // Real speak: needs a TTS backend. Report, don't hard-fail.
   console.log(`\nTrying a real /speak: "${TEXT}" (needs a TTS backend: piper or say/espeak)`);
   const spoke = await req('POST', '/speak', { text: TEXT });

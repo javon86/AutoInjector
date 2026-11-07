@@ -275,6 +275,32 @@ bridge to your home Wi-Fi, behind its key.
 - **Tool servers (MCP):** you can add outside tools (files, a database, a web service). He uses them only through
   an "I will" card, every time.
 
+### 🎤 Talking to the AIs and 🔊 hearing their replies
+
+- **🎤 at the top (title bar):** click it and speak; it turns red and counts the seconds. Click again and your words
+  are typed into the AIs for you — the same way the Compose box sends, so House Rules and relaying work the same.
+  The box beside it says who hears it: **All** (every AI ticked as Active, plus 🎩 Alfred when his box is ticked, just
+  like → All), or one AI, or 🎩 Alfred (only while he is on). It remembers your choice. **Esc** stops without sending.
+- **🎤 in each AI's header** sends to that AI only.
+- **What was heard** shows in one short line at the top: "🎤 Heard: “…” → sent to Claude". While it is still working
+  out the words you can press ✕ Cancel. If nothing was said, nothing is sent.
+- **◀ 🔊 ▶ "3 / 7" on each AI** (beside 💬 Last reply): ◀ and ▶ step through that AI's replies (it starts on the
+  newest and follows new replies while you are on the newest); the number says which one you are on, and the tooltip
+  shows its first words. 🔊 reads it aloud; ⏹ stops at once. Code is read as "(code block)" and links as "a link to
+  example.com". Only one thing speaks at a time. Alfred's messages in his panel have a 🔊 too.
+- **What it needs:**
+  - *Speaking to the AIs* needs the free **voice engine** (Setup Wizard → 📦 Installs → "Voice engine"). It works
+    offline. The app starts it by itself when you press 🎤. The first time, it downloads the speech model (about
+    150 MB; a bigger, better one on a graphics card). It uses the graphics card when it can, else the processor.
+  - *Hearing the replies* needs nothing: it uses the voices built into Windows. For nicer voices install a
+    **piper voice** (Setup Wizard → 📦 Installs → "Voice model"; more `.onnx` voices can go in
+    `stuff and thing/models/voice`).
+- **A voice for each speaker:** ChatGPT, Claude, Gemini and Alfred each get a different voice (and a slightly
+  different pitch and pace). Change them in the System AI panel → 🔊 Voice → "Read-aloud voices", with the speed and
+  a ▶︎ test.
+- **Privacy:** what you say and what is read stay on your PC. The log notes only that something was heard or read
+  (and how long it was), never the words.
+
 ### 🩺 The self-tests
 
 | Test | Where | What it proves |
