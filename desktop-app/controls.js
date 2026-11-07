@@ -893,6 +893,15 @@ function buildAiColumn(site) {
   loginBtn.title = "Saved logins: fill in a saved username/password and click Sign In for this site";
   loginBtn.onclick = () => toggleLoginMenu(site);
   head.appendChild(loginBtn);
+  // ⬇ the folder this AI's downloads go into (stuff and thing/ai-work/<ai>)
+  const dlBtn = document.createElement("button");
+  dlBtn.className = "reload-btn dl-btn";
+  dlBtn.id = `dl-btn-${site}`;
+  dlBtn.textContent = "⬇";
+  dlBtn.title = `Downloads: open the folder where files ${SITE_LABELS[site]} gives you are saved`;
+  dlBtn.setAttribute("aria-label", `Open ${SITE_LABELS[site]}'s downloads folder`);
+  dlBtn.onclick = (e) => { e.stopPropagation(); dlOpen({ site }); };
+  head.appendChild(dlBtn);
   const reloadBtn = document.createElement("button");
   reloadBtn.className = "reload-btn";
   reloadBtn.textContent = "⟳";
@@ -919,6 +928,15 @@ function buildAiColumn(site) {
   using.setAttribute("role", "status");
   using.hidden = true;
   strip.appendChild(using);
+
+  // ⬇ a file this AI is giving you: progress while it comes in, then where it was saved (dlRender)
+  const dl = document.createElement("div");
+  dl.className = "dl-strip";
+  dl.id = `dl-strip-${site}`;
+  dl.setAttribute("role", "status");
+  dl.setAttribute("aria-live", "polite");
+  dl.hidden = true;
+  strip.appendChild(dl);
 
   const pickMenu = document.createElement("div");
   pickMenu.className = "pick-menu picker-card collapsed";
@@ -4322,6 +4340,98 @@ function akoweRender(s) {
   akoweRenderUsing(s);
 }
 // PR #123: "📖 Akọwe is using this AI" on each AI card while a bridge request waits for that AI.
+// ---- ⬇ files the AIs give you to download (main.js / ai-downloads.js broadcast "ai-download") ----
+// One line per download in that AI's column: "⬇ Claude: report.zip — 45% · 3 MB of 7 MB" with a bar, then
+// "✅ Claude gave you report.zip (7 MB). Saved in: <folder>" with 📂 Open folder / Open file, or a plain-words reason.
+const dlState = { items: new Map() }; // id -> latest payload
+const DL_KEEP_DONE = 3;               // finished notices kept per AI (✕ closes one)
+function dlFmt(n) {
+  const b = Number(n) || 0;
+  if (b < 1024) return `${b} bytes`;
+  if (b < 1048576) return `${Math.round(b / 1024)} KB`;
+  if (b < 1073741824) { const m = b / 1048576; return `${m < 10 ? m.toFixed(1).replace(/\.0$/, "") : Math.round(m)} MB`; }
+  return `${(b / 1073741824).toFixed(1).replace(/\.0$/, "")} GB`;
+}
+async function dlOpen(payload) {
+  try {
+    const r = window.api && window.api.downloadsOpen ? await window.api.downloadsOpen(payload) : null;
+    if (r && r.ok === false) setStatus(r.message || "Couldn't open it.");
+  } catch (e) { setStatus(`Couldn't open it: ${e && e.message || e}`); }
+}
+function dlTake(d) {
+  if (!d || d.id == null || !d.site) return;
+  dlState.items.set(d.id, d);
+  // keep the newest few finished ones per AI
+  const done = Array.from(dlState.items.values()).filter((x) => x.site === d.site && !["progressing", "paused", "resuming"].includes(x.state)).sort((a, b) => (a.endedAt || 0) - (b.endedAt || 0));
+  while (done.length > DL_KEEP_DONE) dlState.items.delete(done.shift().id);
+  dlRender(d.site);
+  if (d.state === "completed") setStatus(`⬇ ${d.label || SITE_LABELS[d.site]} gave you ${d.name} — saved in ${d.folder}`);
+  else if (d.state === "failed" || d.state === "cancelled") setStatus(d.text || `${d.name}: the download did not finish.`);
+}
+function dlRender(site) {
+  const box = el(`dl-strip-${site}`);
+  if (!box) return;
+  const list = Array.from(dlState.items.values()).filter((x) => x.site === site).sort((a, b) => a.id - b.id);
+  box.textContent = "";
+  for (const d of list) {
+    const live = ["progressing", "paused", "resuming"].includes(d.state);
+    const item = document.createElement("div");
+    item.className = `dl-item ${live ? "live" : d.state === "completed" ? "done" : "bad"}`;
+    item.id = `dl-item-${d.id}`;
+    item.dataset.state = d.state;
+    const line = document.createElement("div");
+    line.className = "dl-line";
+    const text = document.createElement("span");
+    text.className = "dl-text";
+    const L = d.label || SITE_LABELS[site] || site;
+    text.textContent = d.state === "completed" ? `✅ ${L} gave you ${d.name} (${dlFmt(d.received || d.total)}). Saved in:` : (d.text || `${L}: ${d.name}`);
+    line.appendChild(text);
+    if (!live) {
+      const x = document.createElement("button");
+      x.className = "dl-x"; x.textContent = "✕"; x.title = "Close this notice (the file stays where it is)";
+      x.setAttribute("aria-label", "Close this notice");
+      x.onclick = (e) => { e.stopPropagation(); dlState.items.delete(d.id); dlRender(site); };
+      line.appendChild(x);
+    }
+    item.appendChild(line);
+    if (live) {
+      const bar = document.createElement("div");
+      bar.className = `dl-bar${d.percent == null ? " unknown" : ""}`;
+      const fill = document.createElement("span");
+      if (d.percent != null) fill.style.width = `${d.percent}%`;
+      bar.appendChild(fill);
+      item.appendChild(bar);
+    }
+    if (d.folder && (d.state === "completed" || d.state === "failed")) {
+      const f = document.createElement("div");
+      f.className = "dl-folder"; f.textContent = d.folder; f.title = d.file || d.folder;
+      item.appendChild(f);
+    }
+    if (d.state === "completed" || d.state === "failed" || d.state === "cancelled") {
+      const acts = document.createElement("div");
+      acts.className = "dl-acts";
+      const fb = document.createElement("button");
+      fb.className = "dl-open-folder"; fb.textContent = "📂 Open folder"; fb.title = "Open the folder in File Explorer";
+      fb.onclick = (e) => { e.stopPropagation(); dlOpen(d.state === "completed" ? { id: d.id, what: "folder" } : { site }); };
+      acts.appendChild(fb);
+      if (d.state === "completed" && d.canOpen !== false) {
+        const ob = document.createElement("button");
+        ob.className = "dl-open-file"; ob.textContent = "Open file"; ob.title = `Open ${d.name} with its usual program`;
+        ob.onclick = (e) => { e.stopPropagation(); dlOpen({ id: d.id, what: "file" }); };
+        acts.appendChild(ob);
+      }
+      item.appendChild(acts);
+    }
+    box.appendChild(item);
+  }
+  box.hidden = !list.length;
+}
+if (window.api && window.api.onAiDownload) window.api.onAiDownload((d) => { try { dlTake(d); } catch (_) {} });
+// after a reload of the panel: show what is still coming in
+if (window.api && window.api.downloadsList) {
+  Promise.resolve(window.api.downloadsList()).then((r) => { try { for (const d of (r && r.active) || []) dlTake(d); } catch (_) {} }).catch(() => {});
+}
+
 function akoweUsingText(site, f) {
   if (!f) return "";
   const L = SITE_LABELS[site] || site;

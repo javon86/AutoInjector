@@ -787,6 +787,23 @@
     /* PR #123: "📖 Akọwe is using this AI" while a bridge request waits for this pane's answer */
     .akowe-using { margin:0 0 8px; padding:6px 9px; border-radius:7px; background:#2b2414; border:1px solid #6b5520; color:#f3dfa6; font-size:12px; line-height:1.35; overflow-wrap:anywhere; }
     .ai-col.state-min .akowe-using { display:none; }
+    /* ⬇ a file an AI is giving you (ai-downloads.js): progress while it comes in, then where it went */
+    .dl-strip { margin:0 0 8px; display:flex; flex-direction:column; gap:4px; }
+    .ai-col.state-min .dl-strip { display:none; }
+    .dl-item { padding:5px 8px; border-radius:7px; background:#14202b; border:1px solid #2a5170; color:#cfe6fa; font-size:12px; line-height:1.35; overflow-wrap:anywhere; }
+    .dl-item.done { background:#132519; border-color:#2f6b41; color:#cdeed6; }
+    .dl-item.bad { background:#2b1616; border-color:#7a3333; color:#f6cccc; }
+    .dl-item .dl-line { display:flex; gap:6px; align-items:flex-start; }
+    .dl-item .dl-text { flex:1 1 auto; min-width:0; }
+    .dl-item .dl-x { background:none; border:none; color:inherit; opacity:.7; cursor:pointer; padding:0 2px; font-size:13px; line-height:1; }
+    .dl-item .dl-x:hover { opacity:1; }
+    .dl-bar { height:4px; border-radius:2px; background:#0b1620; margin-top:4px; overflow:hidden; }
+    .dl-bar > span { display:block; height:100%; width:0; background:#4ea3e0; transition:width .3s; }
+    .dl-bar.unknown > span { width:30%; animation:dl-slide 1.2s linear infinite; }
+    @keyframes dl-slide { from { margin-left:-30%; } to { margin-left:100%; } }
+    .dl-item .dl-folder { font-family:Consolas, monospace; font-size:11px; opacity:.85; margin-top:2px; }
+    .dl-item .dl-acts { display:flex; gap:6px; margin-top:4px; flex-wrap:wrap; }
+    .dl-item .dl-acts button { font-size:11.5px; padding:2px 8px; }
     .card-head { display:flex; align-items:center; gap:7px; font-weight:600; margin-bottom:8px; }
     .collapse-btn { background:none; border:1px solid transparent; border-radius:6px; padding:3px 8px; font-size:16px; line-height:1; opacity:.85; cursor:pointer; color:inherit; min-width:28px; min-height:24px; }
     .collapse-btn:hover { opacity:1; background:#2a2a2a; border-color:#3a3a3a; }
