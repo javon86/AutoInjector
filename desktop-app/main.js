@@ -927,6 +927,57 @@ function broadcast(channel, payload) {
   for (const fn of broadcastListeners) { try { fn(channel, payload); } catch (_) {} }
 }
 
+// ⬇ Files an AI gives you to download in its pane ("a packet": a .zip, .docx, .pdf…) — ai-downloads.js.
+// Saved into <stuff and thing>/ai-work/<ai>/ with no Save dialog; the panel shows the progress and then a notice with
+// the folder and 📂 Open folder / Open file; closing the app asks while one is still coming in; the app's own
+// reloads of that pane wait for it; a broken-off download is resumed.
+const DOWNLOAD_WAIT_MS = Number(process.env.AUTOINJECTOR_DOWNLOAD_WAIT_MS) || 5 * 60000;      // the app's own reload waits at most this long
+const DOWNLOAD_START_GRACE_MS = Number(process.env.AUTOINJECTOR_DOWNLOAD_START_GRACE_MS) || 4000; // …and this long for a link the user just clicked to answer
+const aiDownloads = require("./ai-downloads").createAiDownloads({
+  dirFor: (site) => outputManager.aiWorkDir(site),
+  fallbackDir: () => { try { return path.join(app.getPath("downloads"), "AutoInjector"); } catch (_) { return path.join(userDataDir(), "downloads"); } },
+  label: (site) => siteLabel(site),
+  log: (kind, detail) => logEvent(kind, detail),
+  emit: (d) => broadcast("ai-download", d),
+  isPane: (site, wc) => !!(siteViews[site] && siteViews[site].webContents === wc),
+  onPopup: (wc, phase) => tidyDownloadPopup(wc, phase),
+  maxResumes: process.env.AUTOINJECTOR_DOWNLOAD_RESUMES !== undefined ? Number(process.env.AUTOINJECTOR_DOWNLOAD_RESUMES) : undefined,
+  resumeDelayMs: process.env.AUTOINJECTOR_DOWNLOAD_RESUME_DELAY_MS !== undefined ? Number(process.env.AUTOINJECTOR_DOWNLOAD_RESUME_DELAY_MS) : undefined,
+  progressMs: process.env.AUTOINJECTOR_DOWNLOAD_PROGRESS_MS !== undefined ? Number(process.env.AUTOINJECTOR_DOWNLOAD_PROGRESS_MS) : undefined
+});
+// A window the pane opened only to download a file (window.open / a target=_blank link): it stays empty, so it is
+// hidden while the file comes in (closing it might stop the download) and closed once the file is in.
+function tidyDownloadPopup(wc, phase) {
+  try {
+    if (!wc || (typeof wc.isDestroyed === "function" && wc.isDestroyed())) return;
+    const u = typeof wc.getURL === "function" ? String(wc.getURL() || "") : "";
+    if (u && u !== "about:blank") return; // a real page the user may be using (a sign-in window…): leave it alone
+    const { BrowserWindow } = require("electron");
+    const w = BrowserWindow && typeof BrowserWindow.fromWebContents === "function" ? BrowserWindow.fromWebContents(wc) : null;
+    if (!w || (typeof w.isDestroyed === "function" && w.isDestroyed())) return;
+    if (phase === "start") { if (typeof w.hide === "function") w.hide(); }
+    else if (typeof w.close === "function") w.close();
+  } catch (_) {}
+}
+// Before the app ITSELF reloads / re-addresses an AI pane (self-repair, a fresh chat for Akọwe, the ChatGPT picture
+// job): let a file that is coming in from that pane finish first. A reload in the moment between the click on
+// "Download" and the site's answer cancels the download before it has even started, so a request the page is still
+// waiting on gets a few seconds to answer (and maybe turn into a download) first.
+async function waitForPaneDownloads(site, why) {
+  const wc = siteViews[site] && siteViews[site].webContents;
+  const waiting = () => { try { return !!(wc && !wc.isDestroyed() && typeof wc.isWaitingForResponse === "function" && wc.isWaitingForResponse()); } catch (_) { return false; } };
+  if (waiting()) {
+    for (const t0 = Date.now(); waiting() && Date.now() - t0 < DOWNLOAD_START_GRACE_MS;) await new Promise((r) => setTimeout(r, 200));
+    await new Promise((r) => setTimeout(r, 500)); // the answer came: a moment for it to become a download (will-download)
+  }
+  if (!aiDownloads.active(site).length) return { waited: 0, still: 0 };
+  const names = aiDownloads.active(site).map((d) => d.name).join(", ");
+  logEvent("ai-download-wait", { site, why, files: aiDownloads.active(site).length, note: `Waiting for ${siteLabel(site)}'s download (${names}) to finish before ${why}` });
+  const r = await aiDownloads.waitIdle(site, DOWNLOAD_WAIT_MS);
+  if (r.still) logEvent("ai-download-wait", { site, why, still: r.still, waitedMs: r.waited, severity: "warn", note: `${siteLabel(site)}'s download is still coming in after ${Math.round(r.waited / 60000)} minutes — going ahead (the download carries on)` });
+  return r;
+}
+
 // The control panel always fills the entire Automation window; each AI's live
 // pane is positioned by measuring the real "pane-slot-<site>" placeholder div
 // inside controls.html, so it tracks whatever the actual page layout does
@@ -1291,18 +1342,11 @@ function createWindow() {
         });
       }
     } catch (_) {}
-    // When an AI produces a file you download from its pane, grab it into the
-    // output folder under that AI's name (output/ai-work/<site>/) instead of
-    // popping a save dialog — a tidy local record of each AI's work.
-    try {
-      view.webContents.session.on("will-download", (_event, item) => {
-        try {
-          const dest = outputManager.uniquePath(outputManager.aiWorkDir(site), item.getFilename());
-          item.setSavePath(dest);
-          item.once("done", (_e, stateStr) => logEvent("ai-download", { site, state: stateStr, file: dest }));
-        } catch (e) { logEvent("ai-download-error", { site, error: String(e) }); }
-      });
-    } catch (_) {}
+    // When an AI gives you a file to download in its pane, it goes into the output folder under that AI's name
+    // (stuff and thing/ai-work/<site>/) with no Save dialog, and the panel shows it coming in (ai-downloads.js).
+    // attach() listens ONCE per session: a re-made pane (window reopened) reuses the same persist:<site> session.
+    // Windows the pane opens (window.open / target=_blank) share that session, so their downloads land here too.
+    try { aiDownloads.attach(view.webContents.session, site); } catch (e) { logEvent("ai-download-error", { site, error: String(e) }); }
     // Nothing is sent to the panes on startup anymore — the app stays silent
     // until the user hits Start (Auto / a House Rule / a Sequence). At that point
     // ensureProtocolTaught() sends the [TO:]/[FROM:] routing explainer once, so
@@ -5273,7 +5317,13 @@ function buildAppMenu() {
     const isMac = process.platform === "darwin";
     const template = [
       ...(isMac ? [{ role: "appMenu" }] : []),
-      { label: "File", submenu: [isMac ? { role: "close" } : { role: "quit" }] },
+      // File > Quit goes through the same question as closing the window ("a download is still coming in — keep it
+      // running?"); the plain role "quit" used to quit at once and throw unfinished downloads (and book runs) away.
+      { label: "File", submenu: [
+        { label: "⬇ Open the AIs' downloads folder", click: () => { try { const d = outputManager.dir("aiwork"); if (shell && d) shell.openPath(d); } catch (_) {} } },
+        { type: "separator" },
+        isMac ? { role: "close" } : { label: "Quit", click: () => requestQuit("menu") }
+      ] },
       { label: "View", submenu: [
         { role: "reload" }, { role: "forceReload" }, { type: "separator" },
         { role: "resetZoom" }, { role: "zoomIn" }, { role: "zoomOut" }, { type: "separator" },
@@ -5900,6 +5950,47 @@ ipcMain.handle("transcript:toggle-pin", (_evt, id) => {
   if (!turn) return { ok: false, error: "NOT_FOUND" };
   turn.pinned = !turn.pinned;
   return { ok: true, id, pinned: turn.pinned };
+});
+
+// ⬇ The panel's download notices: the list (after the panel reloads), and 📂 Open folder / Open file. Only a file or
+// folder AutoInjector itself saved is opened (by its id / the AI's name) — never a path the page sends.
+ipcMain.handle("downloads:list", () => {
+  const folders = {};
+  for (const s of SITE_IDS) { try { folders[s] = outputManager.aiWorkDir(s); } catch (_) { folders[s] = null; } }
+  return Object.assign({ ok: true, folders }, aiDownloads.list());
+});
+ipcMain.handle("downloads:open", async (_evt, payload) => {
+  const p = payload && typeof payload === "object" ? payload : {};
+  let target = null; let what = p.what === "file" ? "file" : "folder"; let site = null;
+  if (p.id != null) {
+    const d = aiDownloads.byId(p.id);
+    if (!d) return { ok: false, error: "NOT_FOUND", message: "That download is no longer in the list." };
+    site = d.site;
+    if (what === "file" && d.state !== "completed") return { ok: false, error: "NOT_FINISHED", message: "The file has not finished downloading yet." };
+    if (what === "file" && !d.canOpen) return { ok: false, error: "NOT_ALLOWED", message: `${d.name} could be a program or a script, so AutoInjector doesn't open it for you. Use 📂 Open folder and look at it there first.` };
+    target = what === "file" ? d.file : d.file || d.folder;
+  } else if (SITES[p.site]) {
+    site = p.site; what = "folder";
+    try { target = outputManager.aiWorkDir(p.site); } catch (_) { return { ok: false, error: "NO_FOLDER", message: "The content folder isn't ready yet." }; }
+  } else {
+    try { target = outputManager.dir("aiwork"); what = "folder"; } catch (_) { return { ok: false, error: "NO_FOLDER", message: "The content folder isn't ready yet." }; }
+  }
+  if (!shell) return { ok: false, error: "NO_SHELL" };
+  try {
+    if (what === "file") {
+      if (!fs.existsSync(target)) return { ok: false, error: "MISSING", message: "The file isn't there any more (it was moved or deleted)." };
+      const err = await shell.openPath(target);
+      if (err) return { ok: false, error: "OPEN_FAILED", message: `Windows couldn't open it (${String(err).slice(0, 120)}). Use 📂 Open folder and double-click it there.` };
+    } else if (p.id != null && fs.existsSync(target) && typeof shell.showItemInFolder === "function") {
+      shell.showItemInFolder(target); // the folder opens with the file picked out
+    } else {
+      const dir = p.id != null ? path.dirname(target) : target;
+      const err = await shell.openPath(dir);
+      if (err) return { ok: false, error: "OPEN_FAILED", message: `The folder didn't open (${String(err).slice(0, 120)}).` };
+    }
+  } catch (e) { return { ok: false, error: "OPEN_FAILED", message: String(e && e.message || e).slice(0, 160) }; }
+  logEvent("ai-download-open", { site: site || undefined, what });
+  return { ok: true, what };
 });
 
 ipcMain.handle("site:reload", (_evt, site) => {
@@ -8556,6 +8647,8 @@ async function selfRepairRunPage(site, script) {
   finally { clearTimeout(timer); }
 }
 async function selfRepairReload(site, { home = false } = {}) {
+  // ⬇ a file coming in from this pane (or a "Download" the user just clicked) finishes first
+  try { await waitForPaneDownloads(site, home ? "opening a fresh chat" : "reloading the page"); } catch (_) {}
   const view = siteViews[site];
   if (!view || !view.webContents || view.webContents.isDestroyed()) return { ok: false };
   const wc = view.webContents;
@@ -8876,6 +8969,8 @@ function freshChatForget(site) {
 // Open a new chat in the pane: the site's own "New chat" button first, then (if that didn't give an empty chat with a
 // message box) the site's new-chat address. -> { ok, how: 'button' | 'address' }
 async function startFreshChat(site) {
+  // ⬇ a file coming in from this pane (or a "Download" just clicked) is let finish before the chat is swapped
+  try { await waitForPaneDownloads(site, "opening a fresh chat"); } catch (_) {}
   const view = siteViews[site];
   if (!view || !view.webContents || view.webContents.isDestroyed()) return { ok: false, error: "NO_VIEW" };
   const sel = SITES[site] || {};
@@ -9107,7 +9202,7 @@ function bridgeInFlightNow() {
   try { const st = akoweBridge && akoweBridge.status(); return st && st.active ? Object.values(st.active).filter(Boolean).length : 0; } catch (_) { return 0; }
 }
 function runActivityNow() {
-  return runGuardMod.activityOf({ run: runGuardState.run, inFlight: bridgeInFlightNow(), media: mediaJobsNow() });
+  return runGuardMod.activityOf({ run: runGuardState.run, inFlight: bridgeInFlightNow(), media: mediaJobsNow(), downloads: (() => { try { return aiDownloads.busyWhy(); } catch (_) { return []; } })() });
 }
 // The book run as Akọwe reports it. Asked of Akọwe's own API only when AutoInjector may talk to it (the bridge is on,
 // the user asked, or it is our own Akọwe server); otherwise only what Akọwe pushed itself.
@@ -9218,6 +9313,12 @@ function hideToBackground() {
     runGuardState.toldBackground = true;
     showAttention({ key: "background", title: "AutoInjector is still working", body: t ? "The book carries on in the background. Click the AutoInjector icon by the clock (bottom right) to open the window again." : "The book carries on. The window is minimised on the taskbar.", silent: true, target: "akowe" });
   }
+}
+// File > Quit: ask first while something works (a download coming in, a book…), the same as closing the window.
+function requestQuit(reason) {
+  const q = runGuardMod.closeQuestion(runActivityNow());
+  if (!q || !win) return quitConfirmed(reason);
+  try { win.close(); } catch (_) { quitConfirmed(reason); } // -> onMainWindowClose asks
 }
 function onMainWindowClose(e) {
   if (runGuardState.quitConfirmed || runGuardState.appQuitting) return;

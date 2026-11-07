@@ -32,6 +32,10 @@ contextBridge.exposeInMainWorld("api", {
   downloadAllLogs: () => ipcRenderer.invoke("logs:download-all"),
   togglePin: (id) => ipcRenderer.invoke("transcript:toggle-pin", id),
   reloadSite: (site) => ipcRenderer.invoke("site:reload", site),
+  // ⬇ files the AIs give you to download: what is coming in / came in, and 📂 Open folder / Open file (by id or AI name)
+  downloadsList: () => ipcRenderer.invoke("downloads:list"),
+  downloadsOpen: (payload) => ipcRenderer.invoke("downloads:open", payload || {}),
+  onAiDownload: (cb) => ipcRenderer.on("ai-download", (_e, payload) => cb(payload)),
   startNewChatAll: () => ipcRenderer.invoke("sites:new-chat-all"),
   inspectSite: (site) => ipcRenderer.invoke("site:inspect", site),
   listSites: () => ipcRenderer.invoke("site:list"),

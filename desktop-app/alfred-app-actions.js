@@ -44,6 +44,8 @@ A('health.status', 'health:status', { t: 'Is anything wrong? What the 🩺 healt
 A('health.fix', 'health:fix', { t: 'Apply the one-click fix for a problem the health watch found', c: true, a: { code: text(80) }, r: ['code'], ex: { code: 'brain-ollama-down' } });
 A('sites.list', 'site:list', { t: 'The AI panes and their state', c: false });
 A('site.reload', 'site:reload', { t: 'Reload an AI pane', c: true, aa: true, a: { site }, r: ['site'], call: (a) => [a.site], ex: { site: 'gemini' } });
+A('downloads.list', 'downloads:list', { t: 'Files the AIs gave you to download: what is coming in, what came in and where it is saved', c: false });
+A('downloads.open_folder', 'downloads:open', { t: 'Open the folder where an AI\'s downloads are saved', c: true, aa: true, a: { site }, ex: { site: 'claude' } });
 A('sites.new_chat_all', 'sites:new-chat-all', { t: 'Start a new chat in every AI pane', c: true });
 A('site.zoom', 'site:zoom', { t: 'Zoom an AI pane', c: true, aa: true, a: { site, factor: { type: 'number', minimum: 0.25, maximum: 3 } }, r: ['site', 'factor'], ex: { site: 'chatgpt', factor: 0.9 } });
 A('transcript.clear', 'transcript:clear', { t: 'Clear the transcript', c: true });

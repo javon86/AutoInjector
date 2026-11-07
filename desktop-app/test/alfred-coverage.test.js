@@ -104,6 +104,7 @@ const IPC_INVENTORY = [
   'sdlib:add-folder', 'sdlib:check', 'sdlib:collection', 'sdlib:delete-lock', 'sdlib:folders', 'sdlib:list', 'sdlib:locks', 'sdlib:remove-folder',
   'sdlib:save-lock', 'sdlib:scan', 'sdlib:update', 'selector:clear', 'selector:pick',
   'attention:settings', 'attention:test', 'akowe:fresh-chat-settings', // PR #123
+  'downloads:list', 'downloads:open', // ⬇ files the AIs give you to download (ai-downloads.js)
   'selfrepair:forget-learned', 'selfrepair:probe', 'selfrepair:reload', 'selfrepair:settings', 'selfrepair:status', 'selfrepair:teach-cancel', 'selfrepair:teach-start',
   'selftest:run', 'send:compose', 'send:forward', 'send:regenerate', 'sequence-editor:close', 'sequence:open', 'sequence:run', 'sequence:stop',
   'setup:auto', 'setup:detect', 'setup:install', 'setup:list', 'site:inspect', 'site:list', 'site:reload', 'site:zoom', 'sites:new-chat-all', 'state:get',
@@ -131,6 +132,7 @@ const EVENTS = {
   'send-error': 'UI live update', 'sent': 'UI live update', 'sequence-state': 'UI live update', 'setup-progress': 'UI live update', 'setup-status': 'UI live update',
   'terminal-data': 'UI live update', 'terminal-state': 'UI live update', 'tuner-state': 'UI live update', 'voice-speaking': 'UI live update', 'voice-mic': 'UI live update (🎤 "starting the voice engine / downloading the speech model")', 'waiting-changed': 'UI live update',
   'window-collapse-changed': 'UI live update',
+  'ai-download': 'UI live update (⬇ a file an AI gives you: progress, then where it was saved)',
 };
 // The butler's decision actions (manager-provider.js): Alfred reaches them by giving the butler a task, or directly.
 const MANAGER_ACTIONS_MAP = {
@@ -210,7 +212,8 @@ const AKOWE_API_USED = {
 const MENU_ITEMS = {
   'Setup Wizard': 'app_control:wizard.open', 'Relay Trace report (where every message went)': 'app_control:ledger.trace_save', 'Reset Relay Trace': 'app_control:ledger.trace_reset',
   'Run relay check (Bucket Brigade, ~23 messages)…': 'app_control:brigade.run', 'Stop relay check': 'app_control:brigade.stop',
-  'Open Content Folder ("stuff and thing")': 'app_control:models.open', 'User Guide': 'EXCLUDE: opens the online guide (window chrome)',
+  'Open Content Folder ("stuff and thing")': 'app_control:models.open', '⬇ Open the AIs\' downloads folder': 'app_control:downloads.open_folder',
+  'Quit': 'EXCLUDE: quits the app (window chrome; asks first while something works)', 'User Guide': 'EXCLUDE: opens the online guide (window chrome)',
   'Under Construction / Status': 'EXCLUDE: opens the online status page (window chrome)', 'About AutoInjector': 'EXCLUDE: about box (window chrome)',
 };
 const TABS = { 'tab-app-main': 'app_info:ui.show_tab', 'tab-app-akowe': 'open_akowe_page / app_info:ui.show_tab', 'tab-app-images': 'app_info:ui.show_tab', 'tab-app-video': 'app_info:ui.show_tab' };
