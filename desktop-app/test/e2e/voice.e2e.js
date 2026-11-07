@@ -41,7 +41,7 @@ async function main() {
     args: ['.', '--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--force-device-scale-factor=2', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'],
     cwd: APP_DIR,
     env: Object.assign({}, process.env, {
-      HOME: home, AUTOINJECTOR_AKOWE_SERVER: '0', AUTOINJECTOR_CHECKIN: '0', AUTOINJECTOR_BRIDGE: '0', AUTOINJECTOR_SD_AUTOSTART: '0',
+      HOME: home, XDG_CONFIG_HOME: path.join(home, '.config'), AUTOINJECTOR_AKOWE_SERVER: '0', AUTOINJECTOR_CHECKIN: '0', AUTOINJECTOR_BRIDGE: '0', AUTOINJECTOR_SD_AUTOSTART: '0',
       AUTOINJECTOR_VIDEO_AUTOSTART: '0', AUTOINJECTOR_CONTENT_SCAN: '0', AUTOINJECTOR_SD_HOME: path.join(home, 'sdhome'),
       AUTOINJECTOR_SITE_URL_CHATGPT: `${fake}?site=chatgpt&quirks=none`, AUTOINJECTOR_SITE_URL_CLAUDE: `${fake}?site=claude&quirks=none`, AUTOINJECTOR_SITE_URL_GEMINI: `${fake}?site=gemini&quirks=none`,
       AUTOINJECTOR_VOICE_SPAWN: process.execPath, AUTOINJECTOR_VOICE_SHIM: path.join(APP_DIR, 'test', 'fixtures', 'fake-voice-shim.js'),
@@ -210,6 +210,9 @@ async function main() {
     await sleep(1200);
     const opts2 = await controls.$$eval('#voice-mic-target option', (os) => os.map((o) => o.value));
     assert(opts2.includes('butler'), `the picker now offers 🎩 Alfred (${opts2.join(' · ')})`);
+    // a long-running chat has big counters ("88 / 888"): still nothing may be pushed off the edge
+    await controls.evaluate(() => { for (const e of document.querySelectorAll('.vr-count')) e.textContent = '88 / 888'; });
+    await sleep(200);
     const cut = await controls.evaluate(() => {
       const r = (e) => e.getBoundingClientRect();
       const tb = document.getElementById('window-titlebar');
@@ -225,7 +228,7 @@ async function main() {
       }
       return bad;
     });
-    assert(cut.length === 0, `no button is cut off or wraps with his panel open (${cut.join(', ') || 'none'})`);
+    assert(cut.length === 0, `no button is cut off or wraps with his panel open, even with "88 / 888" counters (${cut.join(', ') || 'none'})`);
     await sleep(300);
     screen('voice-1280x720-alfred-on', 1280, 720);
   } finally {

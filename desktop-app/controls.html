@@ -939,6 +939,10 @@
     .locker-tabs .vr-group .vr-play.on { opacity:1; background:#2b2414; border-color:#e0b84a; color:#f3dfa6; }
     .vr-count { font-size:11px; opacity:.8; min-width:34px; text-align:center; font-variant-numeric:tabular-nums; }
     .locker-tabs > button { white-space:nowrap; }
+    /* a narrow column (🎩 Alfred's panel open at 1280) or a long counter ("12 / 340"): the two word buttons shrink with
+       "…" first, so ◀ 🔊 ▶, the counter and ↻ are never pushed off the edge */
+    .locker-tabs > button:not(.lk-refresh) { flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; }
+    .locker-tabs > .lk-refresh, .locker-tabs .vr-group { flex:0 0 auto; }
     @container (max-width: 360px) {
       .locker-tabs { gap:2px; }
       .locker-tabs button { padding:1px 3px; }
