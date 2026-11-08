@@ -538,6 +538,9 @@ class App:
                     return self.route_grid_costs(rest[0], query, principal, pid, branch)
                 if rest and rest[0] == "report":
                     return self.route_report(method, rest[1:], query, body, principal, pid, branch)
+                if rest and rest[0] == "storymap":  # 🗺 the story map (story_map.py)
+                    from . import story_map  # noqa: PLC0415
+                    return story_map.route(self, method, rest[1:], query, body, principal, pid, branch)
                 if rest and rest[0] == "binder":  # 📖 the Book Bible binder (binder.py, binder_fields.py)
                     from . import binder  # noqa: PLC0415
                     return binder.route(self, method, rest[1:], query, body, principal, pid, branch, headers)

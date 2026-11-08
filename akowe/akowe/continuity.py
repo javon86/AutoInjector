@@ -256,6 +256,10 @@ def _context(store, pid, branch, bp, chapter: dict, order: list[str]) -> dict:
             ctx["story_before"] = sb
     except Exception:  # noqa: BLE001
         log.exception("could not add the story ledger to the tracker")
+    from . import story_map  # noqa: PLC0415 - 🗺 the known connections (the tracker says what is new or changed)
+    known = story_map.tracker_context(store, pid, branch)
+    if known:
+        ctx["story_map"] = known
     phys = ps_mod.end_state(_ordered(store, pid, branch, "physical", before, approved_only=False))
     chars = cs_mod.brief(cs_mod.latest(_ordered(store, pid, branch, "characters", before, approved_only=False)))
     if phys or chars:
@@ -335,9 +339,12 @@ def _track_story(store, pid, branch, ch: dict, order: list[str], raw, slot, *, u
         before = sl_mod.ordered(store, pid, branch, order[:idx])
         entry = dict(story, chapter_id=ch["chapter_id"], number=ch.get("number"))
         flags = sl_mod.check(before, entry, ch.get("text") or "")
+        from . import story_map  # noqa: PLC0415 - 🗺 the map's rules this chapter breaks (no AI), then its new links
+        flags += story_map.flags(store, pid, branch, ch["chapter_id"], ch.get("number"), ch.get("text") or "")
         sl_mod.save_chapter(store, pid, branch, ch, story, made_by="akowe" if weak else "ai", slot=None if weak else slot,
                             weak=weak, weak_why=why, flags=flags)
-        return {"weak": weak, "weak_why": why, "flags": flags}
+        smap = story_map.from_chapter(store, pid, branch, ch, story, weak=weak)
+        return {"weak": weak, "weak_why": why, "flags": flags, "map": smap}
     except Exception:  # noqa: BLE001 - the ledger is help, never a reason to fail the tracking
         log.exception("could not keep the story ledger of chapter %s", ch.get("chapter_id"))
         return {"weak": True, "weak_why": "error", "flags": []}
@@ -821,6 +828,15 @@ def _story_events(svc, run: dict, res: dict, chapter_id: str, item: dict | None)
         svc.event(run, "note", f"⚠️ Continuity, chapter {num}: {f['message']}" + (f" — “{f['quote'][:160]}”"
                                                                                   if f.get("quote") else ""),
                   step="chapters", chapter_id=chapter_id, code="CONTINUITY_FLAG")
+    sm = story.get("map") or {}
+    if sm.get("added") or sm.get("locked"):  # 🗺 the story map grew (numbers only: no names, no quotes)
+        svc.event(run, "note", f"🗺 Story map after chapter {num}: {sm.get('added', 0)} new connection(s), "
+                               f"{sm.get('locked', 0)} now 🔒 locked (on the page)", step="chapters",
+                  chapter_id=chapter_id, code="STORY_MAP")
+    for c in (sm.get("conflicts") or [])[:4]:
+        svc.event(run, "note", f"⚠️ Story map: chapter {num} seems to change link {c.get('link')} (conflict "
+                               f"{c.get('id')}). Nothing was changed: decide it on 📖 Book Bible → 🗺 Story map",
+                  step="chapters", chapter_id=chapter_id, code="STORY_MAP_CONFLICT")
 
 
 def retrack_weak(svc, run: dict, before: str | None = None, chapter_ids: list[str] | None = None,

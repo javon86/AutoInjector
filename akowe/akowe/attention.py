@@ -6,7 +6,8 @@ Gathers, in plain words, without any AI call:
 * H5 — later chapters to re-check after an earlier chapter was changed by hand (continuity.py ``rechecks``);
 * H13 — what was cut from a chapter's instructions because they were too long (brief_cuts.py);
 * H11 / H12 — promises the ending did not keep (ending_check.py: setups without a payoff, vanished characters,
-  the main character's change, the book's question).
+  the main character's change, the book's question);
+* 🗺 the story map's open conflicts and gap warnings (story_map.py ``attention_lines``).
 
 Never raises: a part that cannot be read is left out.
 """
@@ -18,7 +19,7 @@ log = logging.getLogger("akowe.attention")
 
 
 def of_book(store, pid: str, branch: str) -> dict:
-    out = {"unchecked": [], "rechecks": [], "cuts": [], "ending": [], "lines": []}
+    out = {"unchecked": [], "rechecks": [], "cuts": [], "ending": [], "story_map": [], "lines": []}
     try:
         from . import approval_trust  # noqa: PLC0415
         out["unchecked"] = [{k: e.get(k) for k in ("record_id", "label", "chapter_id", "how", "why", "notes", "line")}
@@ -41,9 +42,15 @@ def of_book(store, pid: str, branch: str) -> dict:
         out["ending"] = ending_check.open_items(store, pid, branch)
     except Exception:  # noqa: BLE001
         log.exception("attention: ending check")
+    try:
+        from . import story_map  # noqa: PLC0415
+        out["story_map"] = story_map.attention_lines(store, pid, branch)
+    except Exception:  # noqa: BLE001
+        log.exception("attention: story map")
     lines = [f"⚠️ {e['line']}" for e in out["unchecked"] if e.get("line")]
     lines += [r["message"] for r in out["rechecks"] if r.get("message")]
     lines += [c["line"] for c in out["cuts"] if c.get("line")]
     lines += [f"⚠️ {e['line']}" for e in out["ending"] if e.get("line")]
+    lines += out["story_map"]
     out["lines"] = lines
     return out

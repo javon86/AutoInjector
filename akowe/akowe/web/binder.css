@@ -1023,3 +1023,7 @@ a.bnd-gl-row:focus-visible { outline: 3px solid var(--bnd-link); outline-offset:
 .bnd-shape-strip li { padding: 2px 9px; border-radius: 999px; border: 1px solid var(--bnd-track); font-size: 12px; overflow-wrap: anywhere; }
 .bnd-shape-strip li.is-miss { border-color: #c0392b; }
 .bnd-kind-promise { margin: 0 0 6px; font-size: 12px; color: var(--bnd-label); overflow-wrap: anywhere; }
+/* 🗺 the story map's way in (Relationship map page) */
+.bnd .bnd-storymap-cta { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; justify-content: space-between; margin: 0 0 12px;
+  padding: 10px 12px; border: 1px dashed var(--bnd-accent); border-radius: 8px; font: 13.5px var(--bnd-f-body); color: var(--bnd-ink); }
+.bnd .bnd-storymap-cta a.bnd-gl-btn { text-decoration: none; padding: 6px 12px; display: inline-block; }
