@@ -871,7 +871,7 @@ the browser: `tests/campaign/ui/test_ui_continuity.py`):
   human, the next section); the lists are English; "triplet adjectives" use the pattern checker's
   general lists of three (no part-of-speech tagging).
 
-## ✍ Sounding human: prevention, repeats across chapters, the end-of-book pass (2026-11, PR #TBD) — done
+## ✍ Sounding human: prevention, repeats across chapters, the end-of-book pass (2026-11, PR #133) — done
 
 User: "books that are less likely to sound AI-written". New `akowe/akowe/human_voice.py`; data in `ai_tells.json`
 (`writer_brief`: how many phrases of each list to take, `always`, `show`, `patterns`, `craft`, `gestures`).
@@ -998,7 +998,7 @@ spawns it itself (`akowe/akowe/claude_code.py`), so the jobs live next to the bo
 - [ ] Extras in the background (pictures' prompts, launch kit, report parts) while chapters are written.
 - [ ] Specialist reviewers (dialogue, pacing, sensory detail, genre conventions) as helper jobs.
 - [x] Variety across the book (openings, chapter shapes, sentence rhythm tracked book-wide and steered in the brief) —
-  ✍ Sounding human (PR #TBD).
+  ✍ Sounding human (PR #133).
 - [ ] Voice match from the user's own pages (style card checked line by line).
 - [ ] Specific details (replace generic nouns and stock images with concrete, researched ones).
 - [ ] Real dialogue (subtext, interruptions, people not saying what they mean).
