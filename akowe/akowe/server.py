@@ -160,6 +160,10 @@ class App:
         self.backups = BackupManager(self.store, busy=self._restore_busy, exclusive=self.exclusive,
                                      after_restore=self._after_restore)
         self.autobook = AutoBookService(self)
+        from .run_schedule import RunScheduler  # noqa: PLC0415 - ⏰ 3e start a ⚡ run later
+        self.scheduler = RunScheduler(self)
+        from . import usage_meter  # noqa: PLC0415 - 📊 3e usage meter per AI (counts every AI answer)
+        usage_meter.attach(self.store)
         self.write_all = WriteAllService(self)
         self.ai_check_timeout_s = 45.0  # P37.5 🔁 check again: wait at most this long for the AIs' check-ins
         self.reports = ReportService(self)     # 📊 P13 book reports + whole-book AI reviews
@@ -432,9 +436,21 @@ class App:
                 raise ApiError(400, "INVALID_INPUT", "/probe", "probe must be true or false")
             return 200, ai_check.check(self.engine.providers, pinned=AssistService._check_slot(pinned), probe=probe,
                                        timeout_s=self.ai_check_timeout_s)
-        if parts == ["estimate"] and method == "POST":  # ⏱ P28: AI calls and minutes before a run starts
-            from . import costs as costs_mod  # noqa: PLC0415
-            return 200, costs_mod.estimate(self, body if isinstance(body, dict) else {})
+        if parts == ["estimate"] and method == "POST":  # ⏱ P28 + 3d: time, answers per AI and usage limits
+            from . import run_forecast  # noqa: PLC0415
+            return 200, run_forecast.estimate(self, body if isinstance(body, dict) else {})
+        if parts == ["usage-meter"] and method == "GET":  # 📊 3e how much of each AI's limit was used lately
+            from . import usage_meter  # noqa: PLC0415
+            return 200, usage_meter.meter(self)
+        if parts == ["starter-sheet", "parse"] and method == "POST":  # 📋 6c read a pasted starter sheet
+            from . import starter_sheet  # noqa: PLC0415
+            text = body.get("text") if isinstance(body, dict) else None
+            if not isinstance(text, str) or not text.strip():
+                raise ApiError(400, "INVALID_INPUT", "/text", "paste the AI's answer with the starter sheet first")
+            if len(text) > 60000:
+                raise ApiError(400, "INVALID_INPUT", "/text", "that is too long to be a starter sheet (over 60,000 "
+                               "characters) — paste only the AI's answer")
+            return 200, starter_sheet.parse(text)
         if parts == ["reviewer-leniency"] and method == "GET":
             # P36: how generous each AI reviewer has been (numbers only) and the calibration rules
             return 200, {"ais": calibration.table(self.store), "rules": calibration.RULES}
@@ -773,7 +789,19 @@ class App:
             if parts == ["autobook"] and method == "GET":
                 runs = ab.list(principal)
                 return 200, {"runs": runs, "active": [ab.public(r) for r in ab.active()],
-                             "current": ab.current(principal, runs)}
+                             "current": ab.current(principal, runs), "scheduled": self.scheduler.public()}
+            if len(parts) >= 2 and parts[1] == "schedule":  # ⏰ 3e start a run later (run_schedule.py)
+                sch = self.scheduler
+                if len(parts) == 2 and method == "GET":
+                    sch.tick()
+                    return 200, sch.public()
+                if len(parts) == 2 and method == "POST":
+                    return 201, sch.create(principal, body)
+                if len(parts) == 3 and method == "POST":
+                    act = {"cancel": sch.cancel, "start-now": sch.start_now, "dismiss": sch.dismiss}.get(parts[2])
+                    if act:
+                        return 200, act(principal)
+                raise ApiError(404, "NOT_FOUND", "/" + "/".join(parts), "no such endpoint")
             if parts == ["autobook"] and method == "POST":
                 for k in ("genre", "length", "slot_id", "idea"):
                     if body.get(k) is not None and not isinstance(body.get(k), str):
@@ -1725,6 +1753,7 @@ def main(argv=None):
     args.port = httpd.server_address[1]
     app.port = args.port
     app.pusher.start()  # sends status to AutoInjector only when a slot is connected to it
+    app.scheduler.start()  # ⏰ 3e a ⚡ run scheduled for later (resumes a saved schedule; asks when 2+ hours late)
     # S9: one automatic backup per day, on the first start of the day (in the background).
     threading.Thread(target=app.backups.daily_if_needed, name="akowe-daily-backup", daemon=True).start()
     url = f"http://{args.host}:{args.port}/#token={app.token}"

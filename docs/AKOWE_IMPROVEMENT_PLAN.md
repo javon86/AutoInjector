@@ -871,6 +871,41 @@ the browser: `tests/campaign/ui/test_ui_continuity.py`):
   human, the next section); the lists are English; "triplet adjectives" use the pattern checker's
   general lists of three (no part-of-speech tagging).
 
+## ⚡ Planning before a book starts: estimate (3d), usage meter + start later (3e), paste starter sheet (6c) (2026-11, PR #TBD) — done
+
+- **3d ⏱ The estimate** (`akowe/akowe/run_forecast.py`, `POST /api/estimate`; the screen: `web/run-plan.js`
+  `planBox`). On top of `costs.estimate` (P28): the options' answers (`option_calls`: checkers all/two/one, writers'
+  room, beta readers 1–3, pictures = Stable Diffusion time only, fill the whole Book Bible, the end-of-book pass = 2
+  answers — PR #133 had not been counted —, Claude Code helpers), the answers per AI (writer vs checkers, or the
+  measured shares), each AI's usage limit over the run (`_pauses`: which chapter, how long; answers already used in
+  the current window count), "when only one AI works" (wait = the whole pause adds to the time; continue = a quarter)
+  and a plain range ("about 6–8 hours"). Calibration: measured runs replace the per-answer seconds, the per-AI shares
+  and the optional steps' answers; options inside the measured steps (checkers, writers' room, end pass) add only the
+  difference from the measured runs' settings.
+- **3e 📊 The usage meter** (`usage_meter.py`, `GET /api/usage-meter`; `meterBox`): answers per AI (an
+  `ai_activity.on_call_ended` listener — the choke point every AI call passes, Claude Code included), limit hits
+  (`USAGE_LIMIT` / `SITE_RATE_LIMITED` failures, `usage_limits.on_note`, the site state), reset times, colours; a
+  learned limit per AI after a real hit. Setting `usage_meter`, numbers only.
+- **3e ⏰ Start later** (`run_schedule.py`, `/api/autobook/schedule` GET/POST, `/cancel`, `/start-now`, `/dismiss`;
+  `startLaterField`, `scheduledView`): one schedule, checked like a start, kept in the setting `autobook_schedule`,
+  a 15 s tick thread started in `server.main`; more than 2 hours late → state `ask`. Keep-awake: `status_push`
+  reports a waiting schedule as a `waiting` run (an `ask` as `paused` + needs decision), which AutoInjector's
+  run-guard already treats as live — no desktop-app change. The top-bar chip shows "Book starts 11:00 PM".
+- **6c 📋 Paste starter sheet** (`starter_sheet.py`, `POST /api/starter-sheet/parse`; `pasteButton`): tolerant
+  headings (numbers, emoji, ▶, markdown, same line or below, the last sheet title wins), marked options in echoed
+  lists, On/Off variants, run options on lines or "·"-separated, commentary and fences skipped; a summary
+  (understood / not understood / missing / too long with a sentence-boundary trim) before applying. LOCK LIST → run
+  setting `locks` (≤ 20 × 300 chars) → told to the profile AI (`must_stay_true`) and seeded into the story-rules
+  ledger as author hard rules before the premise (`AutoBookService._seed_locks`, `starter_sheet.seed_locks`; the
+  author's locks are kept when the ledger is full).
+- Also: a 🖼 Character pictures switch on the Make-a-book screen (default from Settings › Pictures).
+- Tests: `tests/test_run_plan.py` (estimate directions and calibration, meter, scheduler incl. restart / late ask /
+  cancel / keep-awake through AutoInjector's own `akowe-run.js` + `run-guard.js`, parser with messy pastes, the lock
+  list in a run), `tests/campaign/ui/test_ui_run_plan.py` (estimate box, meter, Start at, paste flow, trim).
+- *Not done:* the meter is not shown in AutoInjector's own 📖 Akọwe tab (the bridge whitelists status fields; the
+  scheduled run does show there as "Scheduled: the book starts at …"). Usage limits are guesses until an AI hits one
+  on this PC. The forecast assumes a fresh usage window at the start (except answers the meter saw in it).
+
 ## ✍ Sounding human: prevention, repeats across chapters, the end-of-book pass (2026-11, PR #133) — done
 
 User: "books that are less likely to sound AI-written". New `akowe/akowe/human_voice.py`; data in `ai_tells.json`

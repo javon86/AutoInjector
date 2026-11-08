@@ -62,7 +62,7 @@ def build_summary(app, base_url: str) -> dict:
             "working_on": app.work.current(None), "approvals": {"count": 0, "items": [], "url": base + "#/"},
             "checklist": [], "done": 0, "total": 0, "run": None, "updated_at": _now_iso()}
     if not last:
-        return body
+        return _with_schedule(app, body, base)
     pid, branch = last["project_id"], last.get("branch_id") or "main"
     from .book_path import BookPath, get_profile  # noqa: PLC0415
     proj = app.store.project(pid)
@@ -91,6 +91,26 @@ def build_summary(app, base_url: str) -> dict:
     if body["current_task"]["state"] in ("ai_can", "needs_you") and body["working_on"]:
         body["current_task"]["state"] = "working"
     body["run"] = run_brief(app, pid, base + "#/" + "/".join(quote(x, safe="") for x in ("p", pid, branch, "book")))
+    return _with_schedule(app, body, base)
+
+
+LIVE_STATES = ("working", "waiting", "pausing", "needs_decision")
+
+
+def _with_schedule(app, body: dict, base: str) -> dict:
+    """⏰ 3e A ⚡ run scheduled for later counts as a waiting run while no other run works: AutoInjector's run guard
+    then keeps the PC awake until it starts (and asks the author when it is too late to start by itself)."""
+    sch = getattr(app, "scheduler", None)
+    if sch is None:
+        return body
+    try:
+        pseudo = sch.as_run()
+    except Exception:  # noqa: BLE001 - status is a convenience
+        log.debug("could not read the schedule for the status push", exc_info=True)
+        return body
+    cur = body.get("run") or {}
+    if pseudo and cur.get("state") not in LIVE_STATES:
+        body["run"] = dict(pseudo, url=base + "#/")
     return body
 
 

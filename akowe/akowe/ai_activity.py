@@ -68,6 +68,15 @@ OP_WORDS = {
     "C02": "Writing a chapter",
 }
 
+# 📊 3e: called as fn(slot_id, ai_name, exc_or_None) when an AI call ends (usage_meter.note_answer)
+_LISTENERS: list = []
+
+
+def on_call_ended(fn) -> None:
+    if fn not in _LISTENERS:
+        _LISTENERS.append(fn)
+
+
 _ctx: contextvars.ContextVar[dict | None] = contextvars.ContextVar("akowe_ai_doing", default=None)
 _scope_ids = itertools.count(1)
 
@@ -163,6 +172,19 @@ class Registry:
             e.update(stage="answering", stage_since=self.clock(), retry_at=None, calls=e["calls"] + 1)
 
     def call_ended(self, exc: BaseException | None = None) -> None:
+        # 📊 3e usage meter: tell the listeners which AI this call was on (numbers only, never text)
+        with self._lock:
+            e = self._live.get(threading.get_ident())
+            who = (e.get("slot"), e.get("ai")) if e else None
+        self._call_ended(exc)
+        if who and who[0]:
+            for fn in list(_LISTENERS):
+                try:
+                    fn(who[0], who[1], exc)
+                except Exception:  # noqa: BLE001 - a listener never breaks an AI call
+                    pass
+
+    def _call_ended(self, exc: BaseException | None = None) -> None:
         key = threading.get_ident()
         with self._lock:
             e = self._live.get(key)
