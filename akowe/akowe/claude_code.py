@@ -253,11 +253,27 @@ def kill_tree(proc) -> None:
         pass
 
 
+# Claude Code bills an API account instead of the user's Claude plan when one of these is set on the PC, so the
+# helpers leave them out (the helpers are meant to use the plan the user signed in with). Someone who really wants
+# API billing sets AKOWE_CLAUDE_USE_API_KEY=1.
+API_BILLING_VARS = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
+
+
+def child_env(base=None) -> dict:
+    """The environment for a Claude Code process: this one, without the API-billing keys (see API_BILLING_VARS)."""
+    env = dict(os.environ if base is None else base)
+    if str(env.get("AKOWE_CLAUDE_USE_API_KEY", "")).strip().lower() not in ("1", "true", "yes", "on"):
+        for k in API_BILLING_VARS:
+            env.pop(k, None)
+    return env
+
+
 def run_process(cmd: list[str], stdin_text: str, *, timeout_s: float, cancel=None, env=None) -> tuple[int, str, str]:
     """Run ``cmd`` in a new empty temp folder with ``stdin_text`` on stdin. (exit code, stdout, stderr). Raises
     CCError TIMEOUT (tree killed), a cancel (CCError CANCELLED as UPSTREAM_UNAVAILABLE, tree killed) or
     not_installed."""
     work = tempfile.mkdtemp(prefix="akowe-cc-")
+    env = child_env() if env is None else env
     proc = None
     try:
         try:

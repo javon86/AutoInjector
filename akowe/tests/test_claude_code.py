@@ -388,3 +388,20 @@ def test_make_a_book_option_is_checked(tmp_path):
     assert ccb.clean_run_option({}) == {} and ccb.clean_run_option({"claude_code": False}) == {"claude_code": False}
     with pytest.raises(AkoweError):
         ccb.clean_run_option({"claude_code": "yes"})
+
+
+def test_helpers_use_the_claude_plan_not_an_api_key(monkeypatch):
+    """An ANTHROPIC_API_KEY on the PC would make Claude Code bill that API account instead of the user's plan:
+    the helper processes never get it (unless AKOWE_CLAUDE_USE_API_KEY=1)."""
+    import sys
+    from akowe import claude_code as cc
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-not-real")
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "tok-test")
+    monkeypatch.delenv("AKOWE_CLAUDE_USE_API_KEY", raising=False)
+    env = cc.child_env()
+    assert "ANTHROPIC_API_KEY" not in env and "ANTHROPIC_AUTH_TOKEN" not in env and "PATH" in env
+    code = "import os,sys; sys.stdout.write(os.environ.get('ANTHROPIC_API_KEY','-'))"
+    rc, out, _ = cc.run_process([sys.executable, "-c", code], "", timeout_s=30)
+    assert rc == 0 and out == "-"
+    monkeypatch.setenv("AKOWE_CLAUDE_USE_API_KEY", "1")
+    assert cc.child_env().get("ANTHROPIC_API_KEY") == "sk-test-not-real"

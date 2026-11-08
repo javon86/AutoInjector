@@ -935,7 +935,7 @@ Claude Code is a command-line tool on the user's PC that a program can run (`cla
 copies at once, signed in with the user's own Claude plan (shared limits with claude.ai and the Claude pane). Akọwe
 spawns it itself (`akowe/akowe/claude_code.py`), so the jobs live next to the book logic.
 
-### Step 1 — the connection and four jobs — done (2026-11-08, PR #TBD)
+### Step 1 — the connection and four jobs — done (2026-11-08, PR #132)
 
 - [x] **The connection** (`claude_code.py`): finds `claude` / `claude.cmd` / `claude.exe` on PATH, the native installer
   (`%USERPROFILE%\.local\bin\claude.exe`), the npm global folder, or an override (setting / `AKOWE_CLAUDE_PATH`);
