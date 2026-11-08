@@ -5340,8 +5340,9 @@ function buildAppMenu() {
         { label: "Open Content Folder (\"stuff and thing\")", click: () => { try { const r = outputManager.root(); if (shell && r) shell.openPath(r); } catch (_) {} } },
       ] },
       { label: "Help", submenu: [
-        { label: "User Guide", click: () => { if (shell) shell.openExternal("https://github.com/javon86/AutoInjector/blob/main/USER_GUIDE.md"); } },
-        { label: "Under Construction / Status", click: () => { if (shell) shell.openExternal("https://github.com/javon86/AutoInjector/blob/main/UNDER_CONSTRUCTION.md"); } },
+        // ✅ EASE: Setup checklist · Something's wrong? · 📖 User guide (docs/USER_GUIDE.md in an app window) · Replay tours
+        ...(() => { try { return easeApi.helpMenuItems((what) => { try { showMainWindow(); } catch (_) {} broadcast("ease-show", { what }); }); } catch (_) { return []; } })(),
+        { type: "separator" },
         { label: "About AutoInjector", click: () => { if (dialog && dialog.showMessageBox) dialog.showMessageBox({ type: "info", title: "AutoInjector", message: `AutoInjector Desktop ${app.getVersion ? app.getVersion() : ""}`.trim(), detail: `${buildLine()}\nElectron ${process.versions.electron || "?"} · Node ${process.versions.node}\n\nRuns ChatGPT, Claude and Gemini together. See the User Guide (Help menu).` }); } },
       ] },
     ];
@@ -10266,6 +10267,57 @@ broadcastListeners.add((channel, payload) => {
 ipcMain.handle("health:status", async (_e, opts) => { try { return opts && opts.fresh ? await healthWatch.runOnce() : healthWatch.status(); } catch (_) { return { ok: false, problems: [], error: "Something went wrong on my side." }; } });
 ipcMain.handle("health:fix", async (_e, p) => { try { return await healthWatch.fix(p && typeof p === "object" ? p.code : p); } catch (_) { return { ok: false, error: "Something went wrong on my side." }; } });
 // ==== end 🩺 HEALTH WATCH ====
+
+// ==== ✅ EASE OF USE (ease.js / ease-main.js / ease-ui.js) — Setup checklist, Something's wrong?, tours, guide ====
+// Read-only getters for what the app already knows, and existing controls (by their IPC channel) for the
+// "Fix it" buttons. Nothing new is checked here: pane states (self-repair), Akọwe's server, llm-setup, the setup
+// manager, Images / Video, Akọwe's /settings/claude-code, the content folder, free space and the health watch.
+const easeApi = require("./ease-main").installEase({
+  ipcMain, shell, BaseWindow, WebContentsView, userDataDir, logEvent,
+  hasSwitch: (sw) => !!(app.commandLine && typeof app.commandLine.hasSwitch === "function" && app.commandLine.hasSwitch(sw)), // no checklist / tours popping up under Playwright
+  guideFiles: [path.join(__dirname, "..", "docs", "USER_GUIDE.md"), path.join(__dirname, "docs", "USER_GUIDE.md")],
+  parts: {
+    sites: () => { const sr = selfRepairStatus(); return SITE_IDS.map((s) => { const x = (sr.sites && sr.sites[s]) || {}; return { site: s, label: x.label || siteLabel(s), active: !!x.active, state: x.state, problem: x.problem }; }); },
+    akowe: () => akoweServerPublicStatus(),
+    llm: () => llmSetup.status(),
+    voice: async () => { const d = await setupManager.detect("voice"); const s = voiceProvider.status(); return { installed: d ? d.installed : null, reason: d && d.reason, running: !!s.managed, lastStartError: s.lastStartError || "" }; },
+    sd: async () => { const im = imageProvider.status(); const connected = !!(im.enabled && im.base) && await healthProbe(im.base); return { connected, label: im.label, noModels: !!im.noModels, found: sdTargets().filter((t) => t.supported).map((t) => t.displayName || t.label) }; },
+    video: () => videoStatusFull(),
+    claudeCode: async () => { if (akoweServerPublicStatus().phase !== "running") return null; const r = await akoweApi("GET", "/api/settings/claude-code", undefined, 5000); return r && r.status === 200 && r.json && r.json.status ? { state: r.json.status.state, words: r.json.status.words } : null; },
+    content: () => contentRootsInfo(false),
+    disk: async () => { const p = outputManager.root(); return { path: p, freeBytes: await healthWatchLib.defaultFreeBytes(p) }; },
+    health: async () => (await healthWatch.runOnce()).problems,
+    runConditions: () => { const sites = {}; for (const s of SITE_IDS) sites[s] = { label: siteLabel(s), active: !!state.enabled[s], health: (() => { try { return selfRepair.health(s); } catch (_) { return null; } })() }; return runGuardMod.conditionsFrom({ run: runGuardState.run, sites, watching: true }); },
+    log: () => logForExtract(),
+  },
+  actions: {
+    akoweStart: () => require("./alfred-main").invokeChannel("akowe-server:retry"),
+    akoweOn: () => require("./alfred-main").invokeChannel("akowe-server:set-autostart", { on: true }),
+    llmStart: () => require("./alfred-main").invokeChannel("llm:fix", { action: "start" }),
+    healthFix: (code) => require("./alfred-main").invokeChannel("health:fix", { code }),
+    contentUse: (root) => require("./alfred-main").invokeChannel("content:use-root", { root }),
+    paneCheck: (site) => require("./alfred-main").invokeChannel("selfrepair:probe", { sites: site ? [site] : null }),
+    paneOn: (site) => require("./alfred-main").invokeChannel("participants:set", { site, enabled: true }),
+    openClaudeCode: () => { const base = akoweServerBase(); if (base && akoweShowInTab(base.replace(/\/$/, "") + "/#/settings")) return { ok: true }; broadcast("app-tab-show", { tab: "akowe" }); return { ok: true, message: "Open ⚙️ Settings → 🤖 Claude Code helpers in Akọwe." }; },
+    openExternal: async (url) => { await shell.openExternal(url); return { ok: true }; },
+    openPath: async (p) => { const err = await shell.openPath(p); return err ? { ok: false, message: "I couldn't open that folder." } : { ok: true }; },
+  },
+  // the support report: log-extract.js, last 24 hours, activity + Relay Trace only (never the conversation), redacted
+  buildReport: async (lines) => {
+    const r = logExtract.buildExtract({
+      scope: "time", preset: "day", include: { conversation: false, activity: true, relay: true },
+      transcript: [], log: logForExtract(),
+      relayReport: (f) => { const rep = relayTrace.report(f); return { text: relayTraceLib.formatReport(rep, { label: siteLabel }), messages: rep.messages }; },
+      siteLabel, buildLine: buildLine(), now: Date.now(), redaction: extractRedaction(),
+      appendix: [{ title: "SOMETHING'S WRONG? AND THE SETUP CHECKLIST (support report)", text: lines.join("\n") }].concat((() => { try { const x = mediaSelfTestAppendix(); return x ? [x] : []; } catch (_) { return []; } })()),
+    });
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-").replace("T", "_").slice(0, 19);
+    const file = outputManager.saveBuffer(outputManager.logsDir(), `support-report-${stamp}.txt`, r.text);
+    try { if (shell && shell.showItemInFolder) shell.showItemInFolder(file); } catch (_) {}
+    return { ok: true, file, events: r.counts && r.counts.events, redactions: r.redactions };
+  },
+});
+// ==== end ✅ EASE OF USE ====
 
 app.whenReady().then(() => {
   // Windows shows a desktop notification only for an app with an id (PR #123: "your book needs you")

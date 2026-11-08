@@ -141,6 +141,15 @@ async function main() {
     await controls.setViewportSize({ width: 1280, height: 720 }).catch(() => {}); await sleep(300);
     const cut = await controls.evaluate(() => { const t = document.getElementById('term-tools').getBoundingClientRect(); return [...document.querySelectorAll('#term-tools > *')].filter((e) => e.offsetParent && e.getBoundingClientRect().right > t.right + 1).map((e) => e.id || e.textContent.trim()); });
     assert(cut.length === 0, `1280×720 with his panel open: no terminal button is cut off (${cut.join(', ') || 'none'})`);
+    // 6b: the typing boxes' grey hints are not cut off at 1280 with his panel open (the terminal box narrows the most)
+    const hints = await controls.evaluate(() => ['term-input', 'alfred-input'].map((id) => {
+      const e = document.getElementById(id); if (!e || !e.offsetParent) return { id, ok: false, why: 'not shown' };
+      const cs = getComputedStyle(e); const cv = document.createElement('canvas').getContext('2d'); cv.font = `${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+      const text = cv.measureText(e.placeholder).width; const inner = e.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+      if (e.tagName === 'TEXTAREA') { const lineH = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.3; const lines = Math.ceil(text / Math.max(1, inner - 4)); return { id, ok: lines * lineH <= e.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom) + 2, why: `${lines} lines in ${e.clientHeight}px` }; }
+      return { id, ok: text <= inner, why: `${Math.round(text)}px text in ${Math.round(inner)}px` };
+    }));
+    assert(hints.every((x) => x.ok), `1280×720: the typing boxes' hints fit (${hints.map((x) => `${x.id}: ${x.why}`).join('; ')})`);
     await controls.setViewportSize({ width: 1500, height: 950 }).catch(() => {}); await sleep(300);
     await sleep(400);
     await shot(controls, '02-side-panel-buttons');

@@ -7,6 +7,7 @@ import { estimateBox, runCostLine, viewCosts, viewSceneGrid } from './grid.js'; 
 import * as S7C from './section7c.js';  // P23 beta reader + P25 your writing style (Section 7c)
 import * as WR from './writers-room.js';  // 🗳 the three-AI writers' room (writers_room.py)
 import * as CC from './claude-code.js';  // 🤖 Claude Code helpers (claude_code.py)
+import { maybeStartTour, replayTour } from './tour.js';  // 🧭 the short guided tour of My books (first visit; ❓ Help replays it)
 import { originalityCard } from './originality.js';  // ✨ #20 originality and "sounds like AI" check
 import { forgeRoute } from './forge.js';  // 🗂 B5 Character Forge dossiers (characters, items, places, magic)
 import { viewPictures } from './pictures.js';  // 🖼 B3 chapter/scene pictures and the map
@@ -679,6 +680,7 @@ async function route() {
     document.title = h1 ? `${h1.textContent} – Akọwe` : 'Akọwe';
     if (!main.contains(document.activeElement) || document.activeElement === document.body) main.focus({ preventScroll: true });
     window.scrollTo(0, 0);
+    if (!parts.length) maybeStartTour();  // 🧭 the first time My books shows
     if (S.pendingFocus === 'new') {
       S.pendingFocus = null;
       setTimeout(() => {
@@ -1284,6 +1286,9 @@ async function viewHelp(main) {
   main.appendChild(h('section', { class: 'card', 'aria-labelledby': 'hl-codes' }, h('h2', { id: 'hl-codes' }, '🔢 Book Bible codes'),
     h('p', null, 'Every detail of the Book Bible has a short code: a kind letter, a section number and a field letter. C1c is a character’s eyes; C11 (the number twice) is all of their Looks. Checks and corrections use the codes to say exactly which detail they mean.'),
     h('div', { class: 'row' }, h('a', { class: 'btn primary', href: '#/help/codes', 'data-testid': 'help-codemap-link' }, '🔢 Open the code map'))));
+  main.appendChild(h('section', { class: 'card', 'aria-labelledby': 'hl-tour' }, h('h2', { id: 'hl-tour' }, '🧭 The short tour'),
+    h('p', null, 'A one-minute tour of My books: where your books are, how to start one, Settings and Help.'),
+    h('div', { class: 'row' }, h('button', { type: 'button', 'data-testid': 'help-tour', onclick: () => replayTour() }, '🧭 Take the tour'))));
   main.appendChild(helpCard());
 }
 

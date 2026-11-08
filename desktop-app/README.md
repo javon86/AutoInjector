@@ -1,9 +1,8 @@
 # AutoInjector Desktop
 
 > 📄 **Updated 1 November 2026.** The sections in the contents below are current. A few long
-> technical sections further down are older; the parked ATELIER engine is marked as such. See
-> [`../UNDER_CONSTRUCTION.md`](../UNDER_CONSTRUCTION.md) for what's parked and
-> [`FEATURES.md`](FEATURES.md) for the built inventory. The short overview of the whole
+> technical sections further down are older. See [`FEATURES.md`](FEATURES.md) for the built inventory and
+> [`../docs/USER_GUIDE.md`](../docs/USER_GUIDE.md) for the user guide. The short overview of the whole
 > program is the front page, [`../README.md`](../README.md).
 
 ## What's new (October 2026)
@@ -43,8 +42,7 @@
 - For developers: [How it's built](#how-its-built) · [Running the test suite](#running-the-test-suite) ·
   [Live checks](#live-checks-outside-sites-changing-under-us) ·
   [Building a real installer](#building-a-real-installer-exe--dmg--appimage)
-- Older sections: [Book Governance (ATELIER), parked](#book-governance-atelier--optional-off-by-default) ·
-  [Manager / Orchestrator](#manager--orchestrator-phase-1--backend-only-no-ui-panel-yet)
+- Older sections: [Manager / Orchestrator](#manager--orchestrator-phase-1--backend-only-no-ui-panel-yet)
 
 One program, one window: ChatGPT, Claude and Gemini as three real Chromium panes
 side by side, with a control panel that lets you route messages between them —
@@ -462,23 +460,6 @@ additionally **auto-pauses** the run (same as before) so you can Resume once
 the limit clears; outside one (plain Auto-routing, Prompt Sequence, or no
 routing at all), there's nothing structured to pause, so routing/mesh state
 is left exactly as it was — only that one message is swallowed.
-
-## Book Governance (ATELIER) — optional, off by default
-
-> 🅿️ **Parked.** The ATELIER engine is not wired into the app today (see
-> [`../UNDER_CONSTRUCTION.md`](../UNDER_CONSTRUCTION.md)). Books are made in **📖 Akọwe** instead.
-> This section is kept for reference.
-
-If you're using the three panes to *build a structured book project*, you can
-turn on **ATELIER governance**: each pane's reply is checked against
-write-authority rules before it's routed anywhere, so an AI can't silently write
-something it shouldn't (e.g. the auditor pane handing back a chapter). A reply
-that fails the check is **held** — shown in the Transcript tagged `⛔ HELD`, but
-not forwarded. Everything is opt-in; leave it off and the app works exactly as
-before. It needs **Python 3** installed (and fails open — passing replies
-through — if Python isn't found). Full details, the role→path policy, and setup
-steps are in [`ATELIER_INTEGRATION.md`](ATELIER_INTEGRATION.md); the toolkit
-itself lives under [`atelier/`](atelier/).
 
 ## Manager / Orchestrator (Phase 1 — backend only, no UI panel yet)
 

@@ -5,8 +5,8 @@
 // It derives its test list from package.json's own scripts (never a hand-kept
 // copy that silently drifts), runs each LAYER as real child processes, and
 // prints a per-layer status. Overall "verified" requires every applicable layer
-// that could actually run to pass; a layer that could not run here (no Python,
-// GUI E2E not requested) is reported UNVERIFIED — never silently folded into a
+// that could actually run to pass; a layer that could not run here (GUI E2E
+// not requested) is reported UNVERIFIED — never silently folded into a
 // green PASS.
 const { spawnSync } = require("child_process");
 const fs = require("fs");
@@ -50,32 +50,6 @@ function layerLine(name, r) {
   return status;
 }
 
-function pythonBin() {
-  for (const bin of (process.platform === "win32" ? ["python", "py", "python3"] : ["python3", "python"])) {
-    const r = spawnSync(bin, ["--version"], { encoding: "utf8" });
-    if (r.status === 0 && /Python\s+3\./.test((r.stdout || "") + (r.stderr || ""))) return bin;
-  }
-  return null;
-}
-function runPythonAtelier() {
-  const bin = pythonBin();
-  const dir = path.join(ROOT, "atelier");
-  if (!bin) return { status: "UNVERIFIED", note: "Python 3 not found on PATH" };
-  if (!fs.existsSync(dir)) return { status: "UNVERIFIED", note: "no atelier/ package" };
-  const tests = fs.readdirSync(dir).filter((f) => /^test_.*\.py$/.test(f));
-  if (!tests.length) return { status: "UNVERIFIED", note: "no atelier test_*.py files" };
-  let passed = 0, failed = 0; const crashed = [];
-  for (const t of tests) {
-    const res = spawnSync(bin, [t], { cwd: dir, encoding: "utf8", timeout: 300000 });
-    const txt = (res.stdout || "") + (res.stderr || "");
-    const m = /(\d+)\s*\/\s*(\d+)\s+passed/.exec(txt) || SUMMARY_RE.exec(txt);
-    if (res.status !== 0 || res.error || !m) { crashed.push(t); failed += 1; continue; }
-    if (m && m[2] != null && /\//.test(m[0])) { passed += Number(m[1]); failed += (Number(m[2]) - Number(m[1])); }
-    else if (m) { passed += Number(m[1]); failed += Number(m[2]); }
-  }
-  return { passed, failed, crashed, count: tests.length };
-}
-
 function main() {
   console.log(`AutoInjector quality check — ${new Date().toISOString()}\n== Layers ==`);
   const statuses = {};
@@ -89,7 +63,6 @@ function main() {
   } else {
     statuses.integration = layerLine("Integration", integ);
   }
-  statuses.python = layerLine("Python ATELIER", runPythonAtelier());
 
   // GUI E2E is heavy (spawns Electron under a display); run only on request, and
   // report UNVERIFIED — not PASS — when we didn't run it here.

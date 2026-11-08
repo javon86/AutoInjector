@@ -343,10 +343,27 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
 - [x] **SM6** Binder PDF/HTML (SVG + table) and Word (PNG with numbered markers + key + table); book package; a sequel
   carries locked and approved links (series.link_sequel → story_map.carry_forward).
 
+## Ease of use (2026-11, approved by the user)  (PR #TBD)
+
+- [x] **3b** ✅ Setup checklist: one screen with ✅ / ❌ (⚪ for optional extras, ⏳ not sure yet) for everything the app
+  can use, each with a Fix it button; opens on the first start and while something needed is ❌, unless "don't show
+  again"; ❓ Help → ✅ Setup checklist any time. Reuses the existing checks (`ease.js`, `ease-main.js`, `ease-ui.js`).
+- [x] **3f** 🩺 Something's wrong?: the top problems from the pane states, Akọwe, a running book, the AI limits, the
+  health watch and the last 24 hours of the log (codes only), each with its fix; 📄 Make a report for support
+  (last 24 hours, never the conversation or Everything, log-extract.js redaction).
+- [x] **3h** 🧭 Guided tours (AutoInjector, 📖 Akọwe tab, 🎨 Images, 🎬 Video, 🎩 Alfred; Akọwe's own My books page) and
+  one current user guide, `docs/USER_GUIDE.md`, in the app at ❓ Help → 📖 User guide.
+- [x] **6a** Folder clean-up: old screenshots (`shots/`, now git-ignored), the parked ATELIER engine and its notes, the
+  audit evidence, `AUTOINJECTOR_UPGRADE_TASKS.md`, `UNDER_CONSTRUCTION.md` and the old `USER_GUIDE.md`.
+- [x] **6b** Layout: the terminal box's hint at 1280 wide with Alfred's panel open; the 🎬 Video engine choice at 1920.
+
 ## Back burner — later, by the user's call  (don't start until asked)
 
 - [ ] Connect Codex / Claude Code as AI options (each needs its own connection; different screens than the chat
   sites) — user parked this 2026-11-08
+- [ ] **3a** A real installer (one setup file instead of Node.js + `run-windows.bat`) — user parked this 2026-11-08
+- [ ] **3c** Simple mode for the AutoInjector window and a home screen — user parked this 2026-11-08
+- [ ] **3g** Backup off the PC (books copied to another drive or the cloud) — user parked this 2026-11-08
 
 - [~] **B1** 🖼 Images: hook Akọwe up to image generation — Stable Diffusion (AutoInjector already has
   an Image Generation panel and a Stable Diffusion endpoint setting in its setup wizard) and/or other image

@@ -1,8 +1,8 @@
 # How AutoInjector works
 
 This page explains how the whole program fits together and what happens behind the buttons. It is not a
-button-by-button manual. For that, see [`README.md`](../README.md), [`akowe/README.md`](../akowe/README.md) and
-[`docs/ALFRED.md`](ALFRED.md). For what changed and when (and how to undo a change), see
+button-by-button manual. For that, see the [user guide](USER_GUIDE.md) (also in the app: ❓ Help → 📖 User guide),
+[`README.md`](../README.md), [`akowe/README.md`](../akowe/README.md) and [`docs/ALFRED.md`](ALFRED.md). For what changed and when (and how to undo a change), see
 [`PROJECT_HISTORY.md`](PROJECT_HISTORY.md).
 
 ## 1. The big picture
@@ -748,9 +748,40 @@ quietly every 10 minutes when a book has changed.
 - **"This chat is too long" in an AI's pane:** nothing to do. AutoInjector opens a fresh chat there before
   Akọwe's next request. You can also press the pane's own **New chat**.
 - **Pictures or video fail:** run **🩺 Test pictures & video**. Each ❌ says what to try.
-- **Not sure what's wrong:** Alfred's **🩺 Check everything**.
+- **Not sure what's wrong:** **❓ Help → 🩺 Something's wrong?** (or Alfred's **🩺 Check everything**). See below.
+- **📄 Make a report for support** (in 🩺 Something's wrong?): a file in `stuff and thing/logs/` with the last 24
+  hours of the activity log and the Relay Trace, made by the same code as 📋 Extract (keys and private folder names
+  removed), plus what 🩺 found and the ✅ checklist rows. The AI conversation is never in it, it is never the
+  "Everything" extract, and none of your own files is opened.
 - **To share a log:** **📋 Extract** → **Last 24 hours**. Never choose **Everything**: it includes all your older,
   private conversations.
+
+### ✅ Setup checklist, 🩺 Something's wrong? and 🧭 tours
+
+Code: `desktop-app/ease.js` (the rules), `ease-main.js` (main process), `ease-ui.js` (the pop-ups and tours).
+They check nothing new: they read what the app already knows.
+
+- **✅ Setup checklist** (❓ Help in the title bar, or the Help menu): one row per thing the app can use, ✅ ready,
+  ❌ needs fixing, ⚪ an optional extra that is not set up, ⏳ not sure yet. **Needed for books:** signed in to ChatGPT,
+  Claude and Gemini (self-repair's state of each pane), Akọwe running (its server's status), the content folder (the
+  "earlier downloads in another folder" check) and free disk space (the health watch's limits: under 5 GB is ❌).
+  **Optional extras:** Alfred's AI (llm-setup: Ollama installed, running, a model), the voice engine (the setup
+  manager's install check), Stable Diffusion (connected, or found on the PC), video (the 🎬 engine's own status) and
+  the Claude Code helpers (Akọwe's `/settings/claude-code`). Each row's **Fix it** opens the right place (a pane, a
+  tab, the Setup Wizard, Akọwe's ⚙️ Settings) or runs an existing control (start Akọwe, start Ollama, turn an AI back
+  on, check an AI now). It opens by itself on the first start and on later starts while something needed is ❌,
+  unless "Don't show this by itself again" is ticked.
+- **🩺 Something's wrong?**: at most five problems, the worst first, each with its fix: the run guard's "your book
+  needs you" (a paused run, every AI at its limit, a pane logged out or broken), the panes' states, Akọwe's server,
+  the health watch (Alfred's brain, disk, Stable Diffusion, logs, FramePack), the voice engine, and the activity log
+  of the **last 24 hours** read by event code and level only (for example "🎨 Pictures: 5 errors … codes:
+  sd-runner-error"). If nothing is found it says so.
+- **🧭 Tours**: 3–5 steps (a highlight, an arrow and one sentence; Skip / Next / Done) the first time the
+  AutoInjector page, the 📖 Akọwe tab, 🎨 Images, 🎬 Video and Alfred's panel open. "Seen" is saved in
+  `autoinjector-ease.json` in the settings folder; ❓ Help → 🧭 Replay tours shows them again. Akọwe's own My books page
+  has its own short tour (`akowe/akowe/web/tour.js`, remembered in that browser; Akọwe → ❓ Help → 🧭 Take the tour).
+- The pop-ups and tours count as dialogs, so the AI panes and the Akọwe page step aside while one is open. Under test
+  automation (Playwright) nothing opens by itself.
 
 ## 8. Glossary
 

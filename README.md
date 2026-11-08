@@ -9,8 +9,7 @@ book writer (**📖 Akọwe**), an assistant (**🎩 Alfred**), pictures (**🎨
 > Automating these sites' web pages may be against their terms of service. AutoInjector only drives sessions
 > where *you* are signed in, on *your* computer. Use it at your own discretion and risk.
 
-> 📄 Some parts of the repo are parked (the old ATELIER engine, some older docs). They are not used when the app
-> runs — see [`UNDER_CONSTRUCTION.md`](UNDER_CONSTRUCTION.md).
+> 📖 Using the app? The **[User guide](docs/USER_GUIDE.md)** explains it in plain words (also in the app: ❓ Help → 📖 User guide).
 
 ## What's new (October 2026)
 

@@ -5110,9 +5110,11 @@ function applyTerminalState(st) {
   const input = el("term-input");
   if (input) {
     input.classList.toggle("answering", termUI.running);
-    input.placeholder = termUI.running
+    // 6b: short placeholders so they are not cut off when Alfred's panel narrows this box (1280 wide); the full words are the tooltip
+    input.placeholder = termUI.running ? "Answer its prompt, or ■ Stop" : "Type a command…";
+    input.title = termUI.running
       ? "A command is running — type here to answer its prompt (e.g. y), or ■ Stop"
-      : "Type a command and press Enter…";
+      : "Type a command and press Enter (or Run)";
   }
   const auto = el("cb-term-autorun");
   if (auto) auto.checked = !!st.autoRunAI;
