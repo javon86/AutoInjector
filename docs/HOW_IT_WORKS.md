@@ -201,6 +201,47 @@ bridge to your home Wi-Fi, behind its key.
   "Available now", words kept clear of the apps' buttons); and 13-second teaser clips, tall and square. AutoInjector
   draws the pictures and joins the clips. When the cover or the hook changes, the old files are marked out of date.
 
+### 🤖 Claude Code helpers (optional, makes books faster)
+
+- **What it is:** Claude Code is Anthropic's command-line tool. When it is on your PC and signed in, Akọwe runs small
+  side jobs through it, several at a time ("helpers", 3 by default, 1–5), while the three web AIs do the main writing.
+  Code: `akowe/akowe/claude_code.py` (finding it, the signed-in check, running one job safely),
+  `claude_code_jobs.py` (the jobs) and `claude_code_book.py` (where they join a ⚡ run).
+- **What the helpers do in a ⚡ run:**
+  - **Research ahead:** while chapter 5 is written, they research what chapters 6–8 will need (history, places,
+    trades, folklore) with real web sources. Each note is labelled **established fact**, **disputed**, **legend** or
+    **invented for the story**, with its source; a note that claims to be real but has no source is thrown away. The
+    notes are handed to those chapters' writers.
+  - **Fact check with sources:** every written chapter's real-world claims are checked on the web. Wrong ones get a
+    small fix. You see them on the chapter page (🤖 Claude Code helpers box) and under 🔎 Fact checks.
+  - **Checks side by side:** the all-AI check of each chapter is split by kind — continuity (against the Book Bible
+    and the running notes), the characters' voices, and facts — and the helpers do these at the same time, while
+    ChatGPT and Gemini read one after another. What they find goes into the same check, with the same "two AIs agree"
+    rules, the same fixes and the same reports.
+  - **"Sounds like AI" pass:** after a chapter is approved, they look only for the lines that sound machine-written
+    (stock phrases, "Not X. Not Y.", lists of three, too many dashes, tidy moral endings, feelings explained after
+    they were shown, every chapter opening or ending the same way, a gesture used too often) and propose a rewrite of
+    just those lines. Nothing changes until you tick them and press ✔ Use — that saves a new draft for you to approve.
+    Lines with a locked detail, a name or a number they would change are never proposed.
+- **The writer never checks itself:** Claude Code counts as Claude. When Claude wrote a chapter, the helpers only
+  check its facts and propose "sounds like AI" fixes; the independent reviews stay with ChatGPT and Gemini. When
+  ChatGPT or Gemini wrote it, the helpers read it for Claude, so the Claude pane is free.
+- **It shares your Claude plan's limits:** Claude Code signs in with your own Claude account, so its use counts
+  against the same limits as the Claude pane and claude.ai. Fewer helpers at once = slower but gentler on the limits.
+- **How to install and sign in:** follow the official install page, https://code.claude.com/docs/en/setup (on
+  Windows: open PowerShell and run `irm https://claude.ai/install.ps1 | iex`). Then type `claude` in PowerShell once,
+  press Enter and sign in with your Claude account. In Akọwe, ⚙️ Settings → 🤖 Claude Code helpers shows
+  "✔ Claude Code 2.x found, signed in" (press ↻ Check again after installing).
+- **Without it nothing breaks:** if Claude Code is not installed, signed out, at its limit or not working, every job
+  goes back to the web AIs, exactly as before. The book never waits for a helper. The run window says so in one line.
+- **Settings:** ⚙️ Settings → 🤖 Claude Code helpers: on/off (on by itself when it is found), helpers at once (1–5)
+  and which jobs are on. The ⚡ Make-a-book screen has a "Use Claude Code helpers for this book" tick.
+- **Speed is measured:** the run window and ⏱ Time and AI use show "the checks took 1.2 min side by side instead of
+  about 3.4 min one after another".
+- **Safety and privacy:** each job runs in its own empty temporary folder with no file-editing or command tools (only
+  web search and web pages for research and fact checks, nothing for the checks). Your chapters go to Claude Code
+  through its input, never on the command line. Akọwe's log keeps only codes, counts and times — never your text.
+
 ### 🎨 Images
 
 - **What it is:** the 🎨 Images tab. It drives a picture program on your PC: Forge, A1111, SD.Next or ComfyUI.

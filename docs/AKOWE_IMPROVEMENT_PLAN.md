@@ -42,7 +42,10 @@ Legend: `[ ]` to do · `[~]` in progress · `[x]` done · `[!]` problem (see "Pr
   short re-asks into the same chat; both test rounds green); see "🛡 Hardening for long books".
 - **✍ Write alongside me (done 2026-11):** highlight a passage in a chapter and the AI continues, rewrites, describes,
   expands or tightens it; a suggestion with ⚠️ quick checks, used as a new draft version. See "✍ Write alongside me".
-- **🗺 Story map (done 2026-11-08, PR #TBD):** a live, editable map of the Book Bible's connections that feeds the
+- **🤖 Claude Code helpers — Step 1 (done 2026-11-08, PR #132):** research ahead, fact checks with sources, checks side
+  by side and the "sounds like AI" pass through the Claude Code CLI, several at once, with a full fallback to the web
+  AIs. **Next: Step 2** — see "🤖 Claude Code helpers: the speed plan".
+- **🗺 Story map (done 2026-11-08, PR #131):** a live, editable map of the Book Bible's connections that feeds the
   writer and the checks — see "🗺 Story map" below.
 - **Back burner (later, by the user's call):** a first real GPU run of video/trailers; the audiobook export (P29).
 - **Still to try for real:** everything above has only been tested with stand-in AIs — the first real
@@ -925,6 +928,50 @@ Still only checkable on the real PC: the exact wording of each site's limit noti
 
 Tests: `akowe/tests/test_long_book_hardening.py` (25 tests, including a 25-chapter novel with the fake AI that survives
 two time-outs, two refusals and two all-AI usage limits and finishes by itself).
+
+## 🤖 Claude Code helpers: the speed plan (2026-11, "speed up book generation without losing quality, make it sound less AI-written")
+
+Claude Code is a command-line tool on the user's PC that a program can run (`claude -p … --output-format json`), several
+copies at once, signed in with the user's own Claude plan (shared limits with claude.ai and the Claude pane). Akọwe
+spawns it itself (`akowe/akowe/claude_code.py`), so the jobs live next to the book logic.
+
+### Step 1 — the connection and four jobs — done (2026-11-08, PR #132)
+
+- [x] **The connection** (`claude_code.py`): finds `claude` / `claude.cmd` / `claude.exe` on PATH, the native installer
+  (`%USERPROFILE%\.local\bin\claude.exe`), the npm global folder, or an override (setting / `AKOWE_CLAUDE_PATH`);
+  `claude --version` + a one-line signed-in check. Jobs: prompt on stdin, own empty temp folder, no file or shell tools
+  (`--disallowedTools`), only WebSearch/WebFetch for research and facts, a timeout that kills the process tree, at most
+  N at once (1–5, default 3), one retry on a transient error, the JSON answer validated (Akọwe's smart JSON parsing).
+  Signed out / at the limit (reset time read) / not installed / failing → plain words and a full fallback.
+- [x] **Research ahead** for chapters N+1..N+3 while chapter N is written; labelled notes (established / disputed /
+  legend / invented) with sources reach those chapters' writing briefs.
+- [x] **Fact check with real sources** of each chapter (extends `fact_checks.py`: sourced claims; wrong ones with a fix
+  become proposals and problems in the checks).
+- [x] **Checks side by side** in the all-AI check (`checkpoints._read_part_by_all` hook): continuity, voice and facts
+  by helpers in parallel with the web AIs; merged into the same per-AI results; Claude Code counts as Claude for the
+  "writer never reviews itself" rule.
+- [x] **"Sounds like AI" pass**: line-level proposals {quote, problem, rewrite} from ai_tells.json, habits, prose_audit,
+  repetition and new book-wide checks (same openings/closings, repeated gestures, stock phrases the lists lacked);
+  applied only through ✔ Use (a new draft via the editor's apply path); locked details, names, numbers and kept
+  passages are never touched.
+- [x] **Settings card + Make-a-book tick + run-report timing** (checks side by side vs one after another).
+
+### Step 2 — next
+
+- [ ] Get the next chapter ready early (scene cards, needs list and brief prepared while the current one is reviewed).
+- [ ] Fill the Book Bible in parallel (one helper per page kind).
+- [ ] Extras in the background (pictures' prompts, launch kit, report parts) while chapters are written.
+- [ ] Specialist reviewers (dialogue, pacing, sensory detail, genre conventions) as helper jobs.
+- [ ] Variety across the book (openings, chapter shapes, sentence rhythm tracked book-wide and steered in the brief).
+- [ ] Voice match from the user's own pages (style card checked line by line).
+- [ ] Specific details (replace generic nouns and stock images with concrete, researched ones).
+- [ ] Real dialogue (subtext, interruptions, people not saying what they mean).
+
+### Later
+
+- [ ] Two drafts for the big chapters (midpoint, climax), the better one kept (blind comparison).
+- [ ] Claude Research-mode deep fact checks through the Claude pane for history-heavy books.
+- [ ] Codex CLI as a second helper set (OpenAI family: then helpers can review Claude-written chapters too).
 
 ## 🔎 All three AIs check for mistakes and drift + report fixes A–G (2026-11, PR #117) — done
 

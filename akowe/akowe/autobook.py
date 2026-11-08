@@ -995,6 +995,8 @@ class AutoBookService(_Runner):
                              status="REJECTED")
         if ck:
             out["checkers"] = ck
+        from . import claude_code_book  # noqa: PLC0415 - 🤖 Claude Code helpers: on/off for this run (None = Settings)
+        out.update(claude_code_book.clean_run_option(body, self.store))
         n = body.get("beta_readers", 1)  # 👥 idea #14: how many beta readers (1 = one AI; 2-3 = a panel)
         if isinstance(n, bool) or not isinstance(n, int) or not 1 <= n <= 3:
             raise AkoweError("INVALID_INPUT", "/beta_readers", "beta_readers: 1, 2 or 3", status="REJECTED")
@@ -3316,6 +3318,8 @@ class AutoBookService(_Runner):
                 item["state"] = "running"
                 st["message"] = f"Chapter {idx + 1} of {len(chapters)}" + self._eta_words(run)
                 t_chapter = time.monotonic()
+                from . import claude_code_book  # noqa: PLC0415 - 🤖 research the next chapters ahead (background)
+                claude_code_book.chapter_started(self, run, outline, chapters, idx)
                 self.save(run)
                 while True:
                     bp = self.bp(run)
@@ -3357,6 +3361,7 @@ class AutoBookService(_Runner):
                         rid = ref["record_id"]
                         self._made(run, ref)
                         self.event(run, "ai", f"The AI wrote chapter {cid}", record_id=rid, module_id="C02")
+                        claude_code_book.draft_written(self, run, cid, idx + 1, rid)  # 🤖 fact check starts now
                         from . import brief_cuts  # noqa: PLC0415 - H13: say exactly what did not fit
                         cuts = brief_cuts.after_write(self.store, run["project_id"], run["branch_id"], cid, idx + 1, rid,
                                                       payload.get("context_ref"))
@@ -3390,6 +3395,7 @@ class AutoBookService(_Runner):
                 if rec:
                     continuity.note_written(self.store, run["project_id"], run["branch_id"], cid, rec, idx + 1)
                     continuity.recheck_done(self.store, run["project_id"], run["branch_id"], cid)
+                    claude_code_book.chapter_approved(self, run, cid, idx + 1, rec)  # 🤖 facts + "sounds like AI"
                     # 🔎 PR #117: all the AIs check this chapter before the next one is written (checkpoints.py)
                     due = run.setdefault("chapter_checks_due", [])
                     if cid not in due:

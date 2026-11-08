@@ -144,7 +144,18 @@ def run_costs(run: dict, label=None) -> dict:
             "ai_share": round(call_s / wall, 2) if wall >= 1 else None,
             "avg_call_s": round(call_s / calls, 1) if calls else None, "ais": ais, "steps": steps,
             "chapters": {"timed": len(chap), "avg_minutes": _min(sum(chap) / len(chap)) if chap else None},
-            "length": (run.get("settings") or {}).get("length"), "measured": bool(t.get("by_ai"))}
+            "length": (run.get("settings") or {}).get("length"), "measured": bool(t.get("by_ai")),
+            "helpers": _helpers(run)}
+
+
+def _helpers(run: dict) -> dict | None:
+    """🤖 The Claude Code helpers' jobs and the checks' timing with and without them (numbers only)."""
+    try:
+        from .claude_code_book import timing_of  # noqa: PLC0415
+        return timing_of(run)
+    except Exception:  # noqa: BLE001
+        log.exception("could not add the Claude Code helpers' numbers")
+        return None
 
 
 # ====================================================================== one book
@@ -382,6 +393,9 @@ def render_markdown(c: dict) -> str:
     for r in c.get("runs") or []:
         out.append(f"| {(r.get('started_at') or '')[:16].replace('T', ' ')} | {r.get('status')} | {r['calls']} | "
                    f"{r['ai_minutes']} | {r['minutes']} |")
+    hl = [r["helpers"]["line"] for r in c.get("runs") or [] if (r.get("helpers") or {}).get("line")]
+    if hl:  # 🤖 the Claude Code helpers: how long the checks took side by side and one after another
+        out += ["", "## Claude Code helpers", ""] + [f"- {x}" for x in hl]
     if c.get("journal"):
         out += ["", "## AI work counted from the journal", "", "| AI | Total | What |", "|---|---|---|"]
         for j in c["journal"]:

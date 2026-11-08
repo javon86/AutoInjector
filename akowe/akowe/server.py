@@ -873,6 +873,9 @@ class App:
                 val = clean_retry_settings(body)
                 self.store.set_setting("ai_retry", val)
                 return 200, val
+        if parts[:2] == ["settings", "claude-code"]:  # 🤖 Settings › Claude Code helpers (claude_code.py)
+            from . import claude_code  # noqa: PLC0415
+            return claude_code.route(self.store, method, parts[2:], body)
         raise ApiError(404, "NOT_FOUND", "/" + "/".join(parts), "no such endpoint")
 
     def job_summary(self, j: dict) -> dict:
@@ -1061,6 +1064,12 @@ class App:
             if len(rest) == 3 and rest[0] == "planned" and rest[2] in ("check", "fix") and method == "POST":
                 return 202, rv.start_planned(principal, pid, branch, rest[1], body, fix=rest[2] == "fix")
             # 🔎 fact checks: timeline + terms (P26), trade facts (P31), repetition sorter (P30) — fact_checks.py
+            if rest and rest[0] == "claude-code":  # 🤖 a chapter's research notes, sourced facts and proposals
+                from . import claude_code_book  # noqa: PLC0415
+                rv._access(principal, pid, branch)
+                out = claude_code_book.route(self, method, rest[1:], body, principal, pid, branch)
+                if out is not None:
+                    return out
             if rest and rest[0] == "facts":
                 from .fact_checks import route as facts_route  # noqa: PLC0415
                 out = facts_route(rv, principal, pid, branch, rest, method, body)
