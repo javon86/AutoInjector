@@ -190,7 +190,7 @@
     st.loras = l.loras;
     const dl = $('sd-lk-lora-names'); if (dl) { dl.textContent = ''; for (const x of l.loras) { const o = document.createElement('option'); o.value = `${x.alias || x.name}:0.8`; dl.appendChild(o); } }
     fillSelect('sd-rf-checkpoint', l.checkpoints.map((c) => ({ value: c.name, label: c.title || c.name })), null, '(choose)');
-    fillSelect('sd-book-checkpoint', l.checkpoints.map((c) => ({ value: c.name, label: c.title || c.name })), st.quality.bookCheckpoint || '', '(whatever is loaded)');
+    fillBookSelect();
     bookNote();
     qualityRefresh();
     checkCompat();
@@ -365,25 +365,44 @@
   // 📖 Book pictures use: <checkpoint> (Akọwe's pictures; nothing is switched without it)
   async function loadQuality() {
     const r = await call('quality');
-    if (r && r.ok) st.quality = { bookCheckpoint: r.bookCheckpoint || '' };
+    if (r && r.ok) st.quality = { bookCheckpoint: r.bookCheckpoint || '', bookRecipe: r.bookRecipe || '' };
     bookNote();
   }
+  // 📖 Book pictures use: <checkpoint or recipe> — the checkpoints, then the recipes (value "recipe:<id>")
+  function fillBookSelect() {
+    const sel = $('sd-book-checkpoint'); if (!sel) return;
+    sel.textContent = '';
+    const o0 = document.createElement('option'); o0.value = ''; o0.textContent = '(whatever is loaded)'; sel.appendChild(o0);
+    for (const c of (st.lists && st.lists.checkpoints) || []) { const o = document.createElement('option'); o.value = c.name; o.textContent = c.title || c.name; sel.appendChild(o); }
+    if (st.recipes && st.recipes.length) {
+      const g = document.createElement('optgroup'); g.label = 'Recipes (all their settings)';
+      for (const r of st.recipes) { const o = document.createElement('option'); o.value = `recipe:${r.id}`; o.textContent = `💾 ${r.name}`; g.appendChild(o); }
+      sel.appendChild(g);
+    }
+  }
   function bookNote() {
-    const sel = $('sd-book-checkpoint'); const v = st.quality.bookCheckpoint || '';
-    if (v && ![...sel.options].some((o) => o.value === v)) { const o = document.createElement('option'); o.value = v; o.textContent = v; sel.appendChild(o); }
+    const sel = $('sd-book-checkpoint');
+    const rid = st.quality.bookRecipe || '';
+    const v = rid ? `recipe:${rid}` : (st.quality.bookCheckpoint || '');
+    if (v && ![...sel.options].some((o) => o.value === v)) { const o = document.createElement('option'); o.value = v; o.textContent = rid ? `💾 ${rid}` : v; sel.appendChild(o); }
     sel.value = v;
-    setText('sd-book-note', v ? `📖 Akọwe's book pictures are made with ${v} (a character lock's own checkpoint still wins).` : '📖 Akọwe\'s book pictures use whatever checkpoint is loaded. For realistic portraits pick a realistic checkpoint here.');
+    const rname = rid ? ((st.recipes || []).find((x) => x.id === rid) || { name: rid }).name : '';
+    setText('sd-book-note', rid ? `📖 Akọwe's book pictures use the recipe “${rname}” (its model, size, sampler, LoRAs …).` : st.quality.bookCheckpoint ? `📖 Akọwe's book pictures are made with ${st.quality.bookCheckpoint} (a character lock's own checkpoint still wins).` : '📖 Akọwe\'s book pictures use whatever checkpoint is loaded. For realistic portraits pick a realistic checkpoint — or a recipe — here.');
   }
   $('sd-book-checkpoint').onchange = async (e) => {
-    const r = await call('quality', { bookCheckpoint: e.target.value });
-    if (r && r.ok) st.quality = { bookCheckpoint: r.bookCheckpoint || '' };
+    const v = e.target.value;
+    const r = await call('quality', /^recipe:/.test(v) ? { bookRecipe: v.slice(7) } : { bookCheckpoint: v, bookRecipe: '' });
+    if (r && (r.ok || r.bookCheckpoint !== undefined)) st.quality = { bookCheckpoint: r.bookCheckpoint || '', bookRecipe: r.bookRecipe || '' };
+    if (r && r.ok === false && r.message) msg(`✖ ${r.message}`);
     bookNote();
   };
 
 
   function formRequest() {
     const num = (id) => Number($(id).value);
-    const fp = finalPrompt($('sd-prompt').value);
+    // a recipe's prompt template wraps the typed words ({subject})
+    const typedRaw = $('sd-prompt').value;
+    const fp = finalPrompt(st.recipeTemplate && typedRaw.trim() && /\{subject\}/.test(st.recipeTemplate) ? st.recipeTemplate.replace(/\{subject\}/g, typedRaw.trim()) : typedRaw);
     return {
       prompt: fp.prompt, negativePrompt: finalNegative(), fullPrompt: fp.fullPrompt, style: (Q && st.style) || undefined,
       steps: num('sd-steps'), cfgScale: num('sd-cfg'), width: num('sd-width'), height: num('sd-height'), batchSize: num('sd-batch'),
@@ -391,6 +410,9 @@
       checkpoint: $('sd-checkpoint').value, vae: $('sd-vae').value, sampler: $('sd-sampler').value, scheduler: $('sd-scheduler').value,
       loras: st.chips.map((c) => ({ name: c.name, weight: c.weight })),
       characterLock: $('sd-lock-pick').value || undefined,
+      // for the picture's sidecar: what was typed, and the LoRA trigger words that are in it
+      promptTyped: $('sd-prompt').value, recipeUsed: st.recipeSel || undefined,
+      triggers: st.chips.flatMap((c) => c.triggers || []).filter((t) => t && $('sd-prompt').value.toLowerCase().includes(String(t).toLowerCase())),
     };
   }
   // The collapsible sections → advanced request fields. Throws Error(message) on bad JSON.
@@ -614,18 +636,22 @@
   };
   function fillForm(rec, keepSeed) {
     if (!rec) return;
-    $('sd-prompt').value = rec.fullPrompt || rec.prompt || ''; // a shortened prompt comes back whole (it is shortened again)
-    $('sd-negative').value = rec.negativePrompt || '';
+    // What was typed comes back (with its style chip and character lock, so the same words are sent again); an old
+    // picture without promptTyped: the full description (a shortened prompt is shortened again) or what was sent.
+    const lockId = rec.characterLock && rec.characterLock.id && [...$('sd-lock-pick').options].some((o) => o.value === rec.characterLock.id) ? rec.characterLock.id : '';
+    const typed = rec.promptTyped != null && (lockId || !rec.characterLock) ? rec.promptTyped : null;
+    $('sd-prompt').value = typed != null ? typed : (rec.fullPrompt || rec.prompt || '');
+    $('sd-negative').value = rec.negativeAuto ? '' : (rec.negativePrompt || '');
     setSlider('sd-steps', rec.steps); setSlider('sd-cfg', rec.cfgScale); setSlider('sd-width', rec.width); setSlider('sd-height', rec.height);
     if (rec.steps != null || rec.cfgScale != null) lsSet('sd-q-touched', '1');
-    if (rec.style && Q && Q.STYLES[rec.style]) { st.style = ''; styleButtons(); } // the style's words are already in the recorded prompt
+    if (rec.style && Q && Q.STYLES[rec.style]) { st.style = typed != null ? rec.style : ''; lsSet('sd-style', st.style); styleButtons(); } // typed words: the style chip adds its words again; else they are already in the prompt
     $('sd-seed').value = keepSeed && rec.seed != null ? String(rec.seed) : '-1';
     for (const [sel, v] of [['sd-checkpoint', rec.checkpoint], ['sd-vae', rec.vae], ['sd-sampler', rec.sampler], ['sd-scheduler', rec.scheduler]]) {
       const e = $(sel); if (!e || v == null) continue;
       if (v && ![...e.options].some((o) => o.value === v)) { const o = document.createElement('option'); o.value = v; o.textContent = v; e.appendChild(o); }
       e.value = v || '';
     }
-    $('sd-lock-pick').value = ''; // the lock's bits are already inside the recorded prompt
+    $('sd-lock-pick').value = typed != null ? lockId : ''; // with the typed words the lock adds its bits again; else they are already inside the recorded prompt
     const h = rec.hires; $('sd-hr-on').checked = !!h;
     if (h) { if (h.scale != null) $('sd-hr-scale').value = h.scale; if (h.secondPassSteps != null) $('sd-hr-steps').value = h.secondPassSteps; if (h.denoise != null) $('sd-hr-denoise').value = h.denoise; if (h.upscaler && [...$('sd-hr-upscaler').options].some((o) => o.value === h.upscaler)) $('sd-hr-upscaler').value = h.upscaler; }
     $('sd-rf-on').checked = !!(rec.refiner && rec.refiner.checkpoint);
@@ -633,6 +659,7 @@
     $('sd-adv-clipskip').value = rec.clipSkip ? String(rec.clipSkip) : '';
     $('sd-adv-restore').checked = !!rec.restoreFaces; $('sd-adv-tiling').checked = !!rec.tiling;
     $('sd-ad-on').checked = !!(rec.adetailer && rec.adetailer.length);
+    if (rec.adetailer && rec.adetailer[0]) { const u = rec.adetailer[0]; if (u.model) { if (![...$('sd-ad-model').options].some((o) => o.value === u.model)) { const o = document.createElement('option'); o.value = u.model; o.textContent = u.model; $('sd-ad-model').appendChild(o); } $('sd-ad-model').value = u.model; } if (u.confidence != null) $('sd-ad-conf').value = u.confidence; if (u.denoise != null) $('sd-ad-denoise').value = u.denoise; $('sd-ad-prompt').value = u.prompt || ''; }
     updateBadges();
     st.chips = (rec.loras || []).map((l) => {
       const name = String(l.name).replace(/\\/g, '/').split('/').pop().replace(/\.(safetensors|ckpt|pt)$/i, '');
@@ -949,6 +976,7 @@
       try { go = window.confirm(`This failed twice with the same error: ${st.fail.message}\n\nTry again anyway?`); } catch (_) { go = false; }
       if (!go) { msg('Not sent — change a setting (or use the fix above) first.'); return; }
     }
+    if (!isTest && !req && $('sd-make-best') && $('sd-make-best').checked && !r0.initImage) { await runMakeBest(r0); return; }
     await render(() => (isTest ? call('test') : call(r0.mask ? 'inpaint' : r0.initImage ? 'img2img' : 'generate', r0)), isTest, r0);
   }
 
@@ -1088,6 +1116,9 @@
     if (extra.length) lines.push(extra.join(' · '));
     setText('sd-preview-info', lines.join('\n') || g.name || '');
     for (const b of ['btn-sd-remake', 'btn-sd-variation']) $(b).disabled = !g.record;
+    for (const b of ['btn-sd-judge', 'btn-sd-improve', 'btn-sd-save-recipe']) if ($(b)) $(b).disabled = !g.record || !g.path || st.judging;
+    renderUsed(r);
+    renderJudge(r.judge || null);
     $('btn-sd-showfile').disabled = !g.path;
     $('btn-sd-upscale').disabled = !g.path;
   }
@@ -1674,6 +1705,370 @@
     };
   }
 
+  // ------------------------------------------------------------ 💾 recipes · 🧑‍⚖️ AI judge · 🔁 Make it better (PR #TBD)
+  // A recipe = saved settings (sd-recipes.js in main). The picker at the top loads one into the form; 💾 saves the
+  // form; ✏ / 🗑 / ⭐ rename, delete, make default (loaded when the tab opens). Every picture shows "Settings used"
+  // (window.sdRecord = sd-record.js) and has 🧑‍⚖️ Judge, 🔁 Make it better and 💾 Save as recipe.
+  const R = window.sdRecord || null;
+  st.recipes = []; st.recipeSel = ''; st.recipeTemplate = ''; st.defaultRecipe = ''; st.judging = false; st.nameMode = null; st.strip = null; st.judgeSet = null;
+  function recipeNote(t, tone) { const e = $('sd-recipe-note'); if (!e) return; e.hidden = !t; e.textContent = t || ''; e.dataset.tone = tone || ''; }
+  async function loadRecipes(first) {
+    const r = await call('recipes', 'list');
+    if (!r || !r.ok) { st.recipes = []; renderRecipeSelect(); return; }
+    st.recipes = r.recipes || []; st.defaultRecipe = r.defaultId || '';
+    renderRecipeSelect(); fillBookSelect(); bookNote();
+    if (first && st.defaultRecipe && !st.recipeSel) await useRecipe(st.defaultRecipe, true);
+  }
+  function renderRecipeSelect() {
+    const sel = $('sd-recipe'); if (!sel) return;
+    sel.textContent = '';
+    const o0 = document.createElement('option'); o0.value = ''; o0.textContent = '— my own settings —'; sel.appendChild(o0);
+    for (const [label, list] of [['My recipes', st.recipes.filter((x) => !x.starter)], ['Starter recipes (a good beginning)', st.recipes.filter((x) => x.starter)]]) {
+      if (!list.length) continue;
+      const g = document.createElement('optgroup'); g.label = label;
+      for (const x of list) { const o = document.createElement('option'); o.value = x.id; o.textContent = `${x.id === st.defaultRecipe ? '⭐ ' : ''}${x.name}`; o.title = [x.description, x.short].filter(Boolean).join(' — '); g.appendChild(o); }
+      sel.appendChild(g);
+    }
+    sel.value = st.recipes.some((x) => x.id === st.recipeSel) ? st.recipeSel : '';
+    const cur = st.recipes.find((x) => x.id === sel.value);
+    $('btn-sd-recipe-rename').disabled = !cur || cur.starter;
+    $('btn-sd-recipe-delete').disabled = !cur;
+    $('btn-sd-recipe-default').disabled = !cur;
+    $('btn-sd-recipe-default').setAttribute('aria-pressed', String(!!cur && cur.id === st.defaultRecipe));
+  }
+  async function useRecipe(id, quiet) {
+    const r = await call('recipes', 'get', { id });
+    if (!r || !r.ok) { recipeNote(`✖ ${(r && r.message) || 'That recipe could not be loaded.'}`, 'warn'); return; }
+    applyFormPatch(Object.assign({}, r.recipe.settings, { recipeId: r.recipe.id }), 'recipe');
+    st.recipeSel = r.recipe.id; st.recipeTemplate = r.recipe.promptTemplate || '';
+    renderRecipeSelect();
+    const fam = r.recipe.family; const now = st.family;
+    const mismatch = fam && now && !r.recipe.settings.checkpoint && fam !== now ? ` ⚠ It is made for ${fam} checkpoints, but ${now} is loaded — choose a ${fam} checkpoint above.` : '';
+    recipeNote(`${quiet ? '⭐ Default recipe: ' : '✔ Loaded '}“${r.recipe.name}”.${st.recipeTemplate ? ` Your words go into its template: ${st.recipeTemplate}` : ''}${mismatch}`, mismatch ? 'warn' : '');
+  }
+  $('sd-recipe').onchange = (e) => { const v = e.target.value; if (!v) { st.recipeSel = ''; st.recipeTemplate = ''; renderRecipeSelect(); recipeNote(''); return; } useRecipe(v); };
+  // The settings in the form → a recipe's settings (no prompt text: the typed negative only when it isn't the automatic one).
+  function formSettings() {
+    const f = formRequest();
+    let adv = {}; try { adv = advancedRequest(); } catch (_) { adv = {}; }
+    const neg = $('sd-negative').value.trim();
+    return {
+      checkpoint: f.checkpoint || undefined, vae: f.vae || undefined, sampler: f.sampler || undefined, scheduler: f.scheduler || undefined,
+      steps: f.steps, cfgScale: f.cfgScale, width: f.width, height: f.height, style: st.style || undefined,
+      negativeMode: neg ? 'replace' : 'auto', negativePrompt: neg || undefined, loras: f.loras,
+      hires: adv.hires, refiner: adv.refiner, adetailer: adv.adetailer, clipSkip: adv.clipSkip, restoreFaces: adv.restoreFaces,
+    };
+  }
+  function openNameRow(kind, extra) {
+    st.nameMode = Object.assign({ kind }, extra || {});
+    $('sd-recipe-name-row').hidden = false;
+    const cur = st.recipes.find((x) => x.id === st.recipeSel);
+    $('sd-recipe-name').value = kind === 'rename' && cur ? cur.name : (extra && extra.name) || '';
+    $('sd-recipe-template').hidden = kind === 'rename';
+    $('sd-recipe-template').value = kind === 'save' ? st.recipeTemplate : '';
+    $('btn-sd-recipe-name-ok').textContent = kind === 'rename' ? 'Rename' : 'Save';
+    try { $('sd-recipe-name').focus(); } catch (_) {}
+    recipeNote(kind === 'rename' ? 'Type the new name.' : kind === 'save' ? 'Name these settings (model, size, sampler, steps, CFG, LoRAs, hires fix …). The prompt is not saved — only the template, if you type one.' : 'Name these settings — the picture\'s model, size, sampler, steps, CFG and LoRAs.');
+  }
+  function closeNameRow() { st.nameMode = null; $('sd-recipe-name-row').hidden = true; }
+  $('btn-sd-recipe-save').onclick = () => openNameRow('save', { name: st.family ? `${st.family} — ${st.style && Q ? Q.STYLES[st.style].label : 'my settings'}` : '' });
+  $('btn-sd-recipe-rename').onclick = () => { if (st.recipeSel) openNameRow('rename'); };
+  $('btn-sd-recipe-name-cancel').onclick = () => { closeNameRow(); recipeNote(''); };
+  $('sd-recipe-name').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('btn-sd-recipe-name-ok').click(); } else if (e.key === 'Escape') $('btn-sd-recipe-name-cancel').click(); });
+  $('btn-sd-recipe-name-ok').onclick = async () => {
+    const m = st.nameMode; if (!m) return;
+    const name = $('sd-recipe-name').value.trim();
+    if (!name) { recipeNote('Type a name first.', 'warn'); return; }
+    let r;
+    if (m.kind === 'rename') r = await call('recipes', 'rename', { id: st.recipeSel, name });
+    else if (m.kind === 'picture') r = await call('recipes', 'fromPicture', { path: m.path, name });
+    else r = await call('recipes', 'save', { recipe: { name, settings: formSettings(), promptTemplate: $('sd-recipe-template').value.trim() || undefined, replace: true } });
+    if (!r || !r.ok) { recipeNote(`✖ ${(r && r.message) || 'It could not be saved.'}`, 'warn'); return; }
+    closeNameRow();
+    st.recipeSel = r.recipe.id; st.recipeTemplate = r.recipe.promptTemplate || '';
+    await loadRecipes(false);
+    recipeNote(`✔ ${m.kind === 'rename' ? 'Renamed to' : 'Saved the recipe'} “${r.recipe.name}”. Pick it in Recipe to use these settings again.`);
+  };
+  $('btn-sd-recipe-delete').onclick = async () => {
+    const cur = st.recipes.find((x) => x.id === st.recipeSel); if (!cur) return;
+    let go = false; try { go = window.confirm(cur.starter ? `Hide the starter recipe “${cur.name}”?` : `Delete the recipe “${cur.name}”? Pictures made with it keep their settings.`); } catch (_) { go = true; }
+    if (!go) return;
+    const r = await call('recipes', 'delete', { id: cur.id });
+    if (!r || !r.ok) { recipeNote(`✖ ${(r && r.message) || 'It could not be deleted.'}`, 'warn'); return; }
+    st.recipeSel = ''; st.recipeTemplate = '';
+    await loadRecipes(false);
+    recipeNote(`🗑 ${r.starterHidden ? 'Hid' : 'Deleted'} “${cur.name}”.`);
+  };
+  $('btn-sd-recipe-default').onclick = async () => {
+    const cur = st.recipes.find((x) => x.id === st.recipeSel); if (!cur) return;
+    const off = cur.id === st.defaultRecipe;
+    const r = await call('recipes', 'setDefault', { id: off ? '' : cur.id });
+    if (!r || !r.ok) { recipeNote(`✖ ${(r && r.message) || 'It could not be set.'}`, 'warn'); return; }
+    await loadRecipes(false);
+    recipeNote(off ? `No default recipe now.` : `⭐ “${cur.name}” is the default: it is loaded when the Images tab opens.`);
+  };
+
+  // ---- the form as one object: applied from a recipe or by 🎩 Alfred (sd-form-apply), read by Alfred (sd:form-report)
+  function selectValue(id, v) {
+    const e = $(id); if (!e || v == null) return;
+    if (v && ![...e.options].some((o) => o.value === v)) { const o = document.createElement('option'); o.value = v; o.textContent = v; e.appendChild(o); }
+    e.value = v || '';
+  }
+  function applyFormPatch(p0, how) {
+    const p = p0 || {};
+    const done = [];
+    if (p.engine && $('sd-engine') && ['sd', 'chatgpt', 'auto'].includes(p.engine)) { $('sd-engine').value = p.engine; st.engine = p.engine; lsSet('sd-engine', p.engine); engineNote(); done.push('engine'); }
+    if (p.checkpoint !== undefined) { selectValue('sd-checkpoint', p.checkpoint || ''); qualityRefresh(); checkCompat(); done.push('checkpoint'); }
+    if (p.prompt !== undefined) { $('sd-prompt').value = String(p.prompt || ''); promptShortCheck(); done.push('prompt'); }
+    if (p.negativeMode === 'auto' || p.negativeMode === 'none') { $('sd-negative').value = ''; done.push('negative (automatic)'); }
+    if (p.negativePrompt !== undefined && p.negativeMode !== 'auto') { $('sd-negative').value = String(p.negativePrompt || ''); done.push('negative'); }
+    if (p.style !== undefined && (!p.style || (Q && Q.STYLES[p.style]))) { st.style = p.style || ''; lsSet('sd-style', st.style); styleButtons(); done.push('style'); }
+    else if (how === 'recipe' && p.style === undefined) { st.style = ''; styleButtons(); }
+    if (p.aspect && ['portrait', 'square', 'landscape', 'custom'].includes(p.aspect)) { setAspect(p.aspect, true); done.push('size'); }
+    if (p.width != null || p.height != null) { setSlider('sd-width', p.width != null ? p.width : $('sd-width').value); setSlider('sd-height', p.height != null ? p.height : $('sd-height').value); aspectFromSize($('sd-width').value, $('sd-height').value); lsSet('sd-aspect', st.aspect); done.push('size'); }
+    for (const [k, id] of [['vae', 'sd-vae'], ['sampler', 'sd-sampler'], ['scheduler', 'sd-scheduler']]) if (p[k] !== undefined) { selectValue(id, p[k] || ''); done.push(k); }
+    else if (how === 'recipe' && k !== 'vae') selectValue(id, '');
+    if (p.steps != null) { setSlider('sd-steps', p.steps); lsSet('sd-q-touched', '1'); done.push('steps'); }
+    if (p.cfgScale != null) { setSlider('sd-cfg', p.cfgScale); lsSet('sd-q-touched', '1'); done.push('CFG'); }
+    if (p.batchSize != null) { setSlider('sd-batch', p.batchSize); done.push('batch'); }
+    if (p.seed != null) { $('sd-seed').value = String(p.seed); done.push('seed'); }
+    if (p.characterLock !== undefined) { selectValue('sd-lock-pick', p.characterLock || ''); done.push('character'); }
+    if (Array.isArray(p.loras) || (how === 'recipe' && !p.loras)) {
+      st.chips = (p.loras || []).filter((l) => l && l.name).map((l) => {
+        const name = String(l.name).replace(/\\/g, '/').split('/').pop().replace(/\.(safetensors|ckpt|pt)$/i, '');
+        const it = allLoras().find((x) => x.name.toLowerCase() === name.toLowerCase()) || {};
+        return { name, weight: Number.isFinite(Number(l.weight)) ? Number(l.weight) : 0.8, triggers: (it.triggerWords || []).filter(Boolean), dataset: (it.datasetTags || []).slice(0, 3), base: it.base || '' };
+      });
+      renderChips(); checkCompat(); if (Array.isArray(p.loras)) done.push('LoRAs');
+    }
+    if (p.hires !== undefined || how === 'recipe') {
+      const h = p.hires; $('sd-hr-on').checked = !!h;
+      if (h) { if (h.scale != null) $('sd-hr-scale').value = h.scale; if (h.secondPassSteps != null) $('sd-hr-steps').value = h.secondPassSteps; if (h.denoise != null) $('sd-hr-denoise').value = h.denoise; if (h.upscaler) selectValue('sd-hr-upscaler', h.upscaler); }
+      if (p.hires !== undefined) done.push('hires fix');
+    }
+    if (p.refiner !== undefined || how === 'recipe') {
+      const rf = p.refiner; $('sd-rf-on').checked = !!(rf && rf.checkpoint);
+      if (rf && rf.checkpoint) { selectValue('sd-rf-checkpoint', rf.checkpoint); if (rf.switchAt != null) $('sd-rf-switch').value = rf.switchAt; }
+      if (p.refiner !== undefined) done.push('refiner');
+    }
+    if (p.adetailer !== undefined || how === 'recipe') {
+      const u = Array.isArray(p.adetailer) ? p.adetailer[0] : null; $('sd-ad-on').checked = !!u;
+      if (u) { if (u.model) selectValue('sd-ad-model', u.model); if (u.confidence != null) $('sd-ad-conf').value = u.confidence; if (u.denoise != null) $('sd-ad-denoise').value = u.denoise; $('sd-ad-prompt').value = u.prompt || ''; }
+      if (p.adetailer !== undefined) done.push('ADetailer');
+    }
+    if (p.clipSkip !== undefined || how === 'recipe') { $('sd-adv-clipskip').value = p.clipSkip > 1 ? String(p.clipSkip) : ''; if (p.clipSkip !== undefined) done.push('CLIP skip'); }
+    if (p.restoreFaces !== undefined) { $('sd-adv-restore').checked = !!p.restoreFaces; done.push('restore faces'); }
+    if (p.tiling !== undefined) { $('sd-adv-tiling').checked = !!p.tiling; done.push('tiling'); }
+    if (p.makeBest !== undefined && $('sd-make-best')) { $('sd-make-best').checked = !!p.makeBest; done.push('make 4, pick the best'); }
+    if (p.recipeId !== undefined && how !== 'recipe') { st.recipeSel = p.recipeId || ''; renderRecipeSelect(); }
+    updateBadges(); qualityRefresh(); promptShortCheck(); moreSummary(); negNote();
+    subTab('generate');
+    reportForm();
+    return done;
+  }
+  function formSnapshot() {
+    const f = formRequest();
+    let adv = {}; try { adv = advancedRequest(); } catch (_) { adv = {}; }
+    delete adv.initImage; delete adv.mask; delete adv.controlnet;
+    return Object.assign({}, f, adv, { prompt: $('sd-prompt').value, negativePrompt: $('sd-negative').value, negativeSent: f.negativePrompt, promptSent: f.prompt, aspect: st.aspect, family: st.family, engine: st.engine, makeBest: !!($('sd-make-best') && $('sd-make-best').checked), recipe: st.recipeSel || '', triggers: undefined, promptTyped: undefined });
+  }
+  let reportTimer = null;
+  function reportForm() { clearTimeout(reportTimer); reportTimer = setTimeout(() => { try { call('formReport', formSnapshot()); } catch (_) {} }, 400); }
+  for (const ev of ['input', 'change']) $('sd-form').addEventListener(ev, () => reportForm());
+  if (api && typeof api.onFormApply === 'function') api.onFormApply((ev) => {
+    if (!ev || !ev.patch) return;
+    if (!st.loaded) { st.loaded = true; init().then(() => applyFromAlfred(ev)); return; }
+    applyFromAlfred(ev);
+  });
+  function applyFromAlfred(ev) {
+    if (ev.how === 'recipe' && ev.patch.recipeId) { useRecipe(ev.patch.recipeId).then(() => msg(`🎩 Alfred loaded the recipe “${ev.patch.recipeName || ev.patch.recipeId}” into the form — press Generate when you're ready.`)); return; }
+    const done = applyFormPatch(ev.patch, ev.how);
+    msg(`🎩 Alfred changed the form: ${done.join(', ') || 'nothing'} — press Generate when you're ready.`);
+  }
+
+  // ---- Settings used (every setting in plain words) and the judge's verdict
+  function renderUsed(rec) {
+    const dl = $('sd-used-list'); if (!dl) return;
+    dl.textContent = '';
+    const rows = R && rec ? R.settingsUsed(rec) : [];
+    $('sd-used').hidden = !rows.length;
+    for (const row of rows) { const dt = document.createElement('dt'); dt.textContent = row.label; const dd = document.createElement('dd'); dd.textContent = row.value; dl.append(dt, dd); }
+  }
+  const SCORE_WORDS = { prompt: 'Matches the prompt', quality: 'Realism / style', anatomy: 'Hands, faces, eyes, limbs', artifacts: 'No blur, noise, text, extra limbs', composition: 'Composition and light', character: 'Looks like the character' };
+  const VERDICT_WORDS = { keep: '✔ Keep it', fix: '🔧 Good start — fix it', redo: '↺ Make it again' };
+  function fixWords(f) {
+    const w = { steps: () => `steps ${f.delta > 0 ? '+' : ''}${f.delta != null ? f.delta : f.value}`, cfg: () => `CFG ${f.delta > 0 ? '+' : ''}${f.delta != null ? f.delta : f.value}`, sampler: () => `sampler ${f.name}`, scheduler: () => `scheduler ${f.name}`, size: () => `${f.aspect || 'its own'} size`, hires: () => `hires fix ${f.on === false ? 'off' : 'on'}`, adetailer: () => `fix the ${f.target || 'face'} (ADetailer)`, negative_add: () => `avoid: ${(f.terms || []).join(', ')}`, lora_weight: () => `LoRA ${f.name} → ${f.weight}`, checkpoint: () => `use ${f.name}`, seed: () => 'another seed', img2img: () => 'redo it lightly', inpaint: () => `repaint the ${f.region || 'region'}` };
+    return `${(w[f.type] || (() => f.type))()}${f.why ? ` — ${f.why}` : ''}`;
+  }
+  function renderJudge(j) {
+    const box = $('sd-judge-box'); if (!box) return;
+    if (!j || !j.scores) { box.hidden = true; box.textContent = ''; return; }
+    box.hidden = false; box.textContent = '';
+    const head = document.createElement('div');
+    const v = document.createElement('span'); v.className = 'sd-jv'; v.dataset.v = j.verdict; v.textContent = `${VERDICT_WORDS[j.verdict] || j.verdict} · ${j.overall}/10`;
+    head.appendChild(v);
+    const by = document.createElement('div'); by.className = 'sd-jby'; by.textContent = `🧑‍⚖️ judged by ${j.byLabel || j.by}${j.weaker ? ' (a local model — weaker)' : ''}${j.seconds ? ` in ${j.seconds} s` : ''}${j.selfConflict ? ' · its verdict didn\'t match its own scores, so the scores decided' : ''}`;
+    head.appendChild(by); box.appendChild(head);
+    const sc = document.createElement('div'); sc.className = 'sd-jscores';
+    for (const k of Object.keys(SCORE_WORDS)) {
+      const n = j.scores[k]; if (typeof n !== 'number') continue;
+      const l = document.createElement('span'); l.textContent = SCORE_WORDS[k];
+      const bar = document.createElement('span'); bar.className = 'sd-jbar'; const i = document.createElement('i'); i.style.width = `${n * 10}%`; bar.appendChild(i);
+      const nv = document.createElement('span'); nv.textContent = String(n);
+      sc.append(l, bar, nv);
+    }
+    box.appendChild(sc);
+    for (const [label, list] of [['Good', j.good], ['Not so good', j.bad], ['What to change', (j.fixes || []).map(fixWords).concat(j.promptEdits && j.promptEdits.add && j.promptEdits.add.length ? [`add to the prompt: ${j.promptEdits.add.join(', ')}`] : [], j.promptEdits && j.promptEdits.remove && j.promptEdits.remove.length ? [`take out: ${j.promptEdits.remove.join(', ')}`] : [])]]) {
+      if (!list || !list.length) continue;
+      const b = document.createElement('b'); b.textContent = label; box.appendChild(b);
+      const ul = document.createElement('ul'); ul.className = 'sd-jlist';
+      for (const t of list.slice(0, 8)) { const li = document.createElement('li'); li.textContent = t; ul.appendChild(li); }
+      box.appendChild(ul);
+    }
+  }
+  function judgeButtons() { const has = !!(st.current && st.current.record && st.current.path); for (const b of ['btn-sd-judge', 'btn-sd-improve', 'btn-sd-save-recipe']) if ($(b)) $(b).disabled = !has || st.judging; }
+  async function judgeCurrent() {
+    const g = st.current; if (!g || !g.path || st.judging) return;
+    st.judging = true; judgeButtons(); setBusy(true);
+    msg('🧑‍⚖️ Asking the AI judge to look at the picture… (uses one AI answer; Claude Code takes about 20–60 s)');
+    const r = await call('judge', g.path);
+    st.judging = false; setBusy(false); judgeButtons();
+    if (!r || !r.ok) { msg(`✖ ${(r && r.message) || 'The judge could not answer.'}${r && r.hint ? `\n${r.hint}` : ''}`); return; }
+    g.record = Object.assign({}, g.record, { judge: r.judge });
+    renderJudge(r.judge); renderUsed(g.record);
+    msg(`🧑‍⚖️ ${r.say}`);
+  }
+  $('btn-sd-judge').onclick = judgeCurrent;
+  $('btn-sd-save-recipe').onclick = () => { if (st.current && st.current.path) openNameRow('picture', { path: st.current.path, name: R && st.current.record ? '' : '' }); };
+
+  // ---- 🔁 Make it better / Make 4 and pick the best: a strip of rounds with scores
+  function stripMsg(t) { setText('sd-improve-msg', t || ''); }
+  function renderStrip() {
+    const box = $('sd-improve-strip'); if (!box || !st.strip) return;
+    box.textContent = '';
+    st.strip.items.forEach((it, i) => {
+      const c = document.createElement('div'); c.className = 'sd-round'; c.setAttribute('role', 'option'); c.tabIndex = 0;
+      c.dataset.best = String(i === st.strip.best ? 1 : 0); c.setAttribute('aria-selected', String(i === st.strip.sel));
+      if (it.url) { const im = document.createElement('img'); im.src = it.url; im.alt = `${st.strip.kind === 'best' ? 'Picture' : 'Round'} ${it.label}`; c.appendChild(im); }
+      const s1 = document.createElement('div'); s1.className = 'sd-rs';
+      s1.textContent = `${st.strip.kind === 'best' ? 'Picture' : 'Round'} ${it.label}: ${it.overall != null ? `${it.overall}/10` : it.error ? '✖' : '…'}${it.verdict ? ` ${it.verdict === 'keep' ? '✔' : it.verdict === 'redo' ? '↺' : '🔧'}` : ''}${i === st.strip.best ? ' ★ best' : ''}`;
+      const s2 = document.createElement('div'); s2.className = 'sd-rc';
+      s2.textContent = it.error ? it.error : it.changed && it.changed.length ? `changed: ${it.changed.join('; ')}` : st.strip.kind === 'best' ? `seed ${it.seed != null ? it.seed : '?'}` : 'the start';
+      c.append(s1, s2);
+      const pick = () => { st.strip.sel = i; renderStrip(); if (it.path) showImage({ path: it.path, url: it.url, record: Object.assign({}, it.record || {}, it.judge ? { judge: it.judge } : {}) }); };
+      c.onclick = pick; c.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); } };
+      box.appendChild(c);
+    });
+    $('sd-improve-actions').hidden = !st.strip.done || !st.strip.items.some((x) => x.path);
+  }
+  function openStrip(kind, items) {
+    st.strip = { kind, items: items || [], best: -1, sel: -1, done: false };
+    $('sd-improve-box').hidden = false; $('btn-sd-improve-stop').hidden = false;
+    renderStrip();
+  }
+  if (api && typeof api.onJudge === 'function') api.onJudge((e) => {
+    if (!e || !st.strip || e.kind !== st.strip.kind) return;
+    if (e.kind === 'improve') {
+      if (e.phase === 'making') stripMsg(`🔁 Round ${e.round} of ${e.rounds}: making the picture again${e.changed && e.changed.length ? ` (${e.changed.slice(0, 3).join('; ')})` : ''}…`);
+      else if (e.phase === 'judging') stripMsg(`🧑‍⚖️ Round ${e.round} of ${e.rounds}: the judge is looking…`);
+      else if (e.phase === 'judged' && e.result) {
+        const it = { label: e.result.round, path: e.result.path, url: e.result.url, overall: e.result.overall, verdict: e.result.verdict, changed: e.result.changed, judge: e.result.judge, seed: e.result.seed, error: e.result.error };
+        const k = st.strip.items.findIndex((x) => x.label === it.label); if (k >= 0) st.strip.items[k] = it; else st.strip.items.push(it);
+        renderStrip();
+      }
+    } else if (e.kind === 'best') {
+      if (e.phase === 'making') stripMsg(`🎨 Making ${e.count} pictures with different seeds…`);
+      else if (e.phase === 'judging') stripMsg(`🧑‍⚖️ The judge is looking at picture ${e.index + 1} of ${e.count}…`);
+    }
+  });
+  async function improveCurrent() {
+    const g = st.current; if (!g || !g.path || st.judging) return;
+    const rounds = Number($('sd-judge-rounds') && $('sd-judge-rounds').value) || 3;
+    st.judging = true; judgeButtons(); setBusy(true);
+    openStrip('improve', []);
+    stripMsg(`🧑‍⚖️ Round 1 of ${rounds}: the judge is looking at this picture… (each round uses one AI answer; your defaults are not changed)`);
+    msg('🔁 Making it better…');
+    const r = await call('improve', g.path, rounds);
+    st.judging = false; setBusy(false); judgeButtons(); $('btn-sd-improve-stop').hidden = true;
+    if (!r || !r.ok) { stripMsg(`✖ ${(r && r.message) || 'It could not run.'}`); msg(`✖ ${(r && r.message) || 'Make it better could not run.'}`); if (r && r.rounds && r.rounds.length) { st.strip.items = r.rounds.map((x) => ({ label: x.round, path: x.path, url: x.url, overall: x.overall, verdict: x.verdict, changed: x.changed, judge: x.judge, error: x.error })); st.strip.done = true; renderStrip(); } return; }
+    st.strip.items = r.rounds.map((x) => ({ label: x.round, path: x.path, url: x.url, overall: x.overall, verdict: x.verdict, changed: x.changed, judge: x.judge, seed: x.seed, error: x.error }));
+    st.strip.best = r.best; st.strip.sel = r.best; st.strip.done = true;
+    renderStrip();
+    stripMsg(`🔁 ${r.say} Pick a round to see it.`);
+    msg(`🔁 ${r.say}`);
+    const b = r.rounds[r.best];
+    if (b && b.path) showImage({ path: b.path, url: b.url, record: Object.assign({}, b.judge ? { judge: b.judge } : {}) });
+    refreshGallery();
+    if (b && b.path) { const rr = await call('record', b.path); if (rr && rr.ok && st.current && st.current.path === b.path) { st.current.record = rr.record; renderUsed(rr.record); renderJudge(rr.record.judge); judgeButtons(); } }
+  }
+  $('btn-sd-improve').onclick = improveCurrent;
+  $('btn-sd-improve-stop').onclick = async () => { stripMsg('Stopping…'); await call('improveStop'); };
+  $('btn-sd-improve-keep').onclick = () => {
+    if (!st.strip) return;
+    const it = st.strip.items[st.strip.sel >= 0 ? st.strip.sel : st.strip.best]; if (!it || !it.path) return;
+    call('record', it.path).then((rr) => { showImage({ path: it.path, url: it.url, record: rr && rr.ok ? rr.record : (it.judge ? { judge: it.judge } : null) }); msg(`✔ Kept ${st.strip.kind === 'best' ? 'picture' : 'round'} ${it.label} — it is the result now (the others stay in the gallery).`); });
+  };
+  $('btn-sd-improve-recipe').onclick = () => {
+    if (!st.strip) return;
+    const it = st.strip.items[st.strip.sel >= 0 ? st.strip.sel : st.strip.best]; if (!it || !it.path) return;
+    openNameRow('picture', { path: it.path });
+  };
+  async function runMakeBest(r0) {
+    if (st.judging) return;
+    st.judging = true; judgeButtons(); setBusy(true); hideError();
+    openStrip('best', []);
+    stripMsg('🎨 Making 4 pictures with different seeds, then the judge looks at each (4 AI answers)…');
+    msg('🎨 Making 4 and picking the best…');
+    const req = Object.assign({}, r0); delete req.batchSize;
+    const r = await call('makeBest', req, 4);
+    st.judging = false; setBusy(false); judgeButtons(); $('btn-sd-improve-stop').hidden = true;
+    if (!r || !r.ok) { stripMsg(`✖ ${(r && r.message) || 'It could not run.'}`); msg('✖ The pictures failed — see the red box below.'); showError(r, { req: r0 }); return; }
+    st.strip.items = r.images.map((x, i) => ({ label: i + 1, path: x.path, url: x.url, overall: x.overall, verdict: x.judge && x.judge.verdict, judge: x.judge, seed: x.seed, error: x.error }));
+    st.strip.best = r.best; st.strip.sel = r.best >= 0 ? r.best : 0; st.strip.done = true;
+    renderStrip();
+    stripMsg(r.say); msg(`✔ ${r.say}`);
+    const b = r.images[r.best >= 0 ? r.best : 0];
+    if (b) { const rr = await call('record', b.path); showImage({ path: b.path, url: b.url, record: rr && rr.ok ? rr.record : null }); }
+    refreshGallery();
+  }
+  $('btn-sd-stop').addEventListener('click', () => { if (st.judging) call('improveStop'); });
+
+  // ---- 🧑‍⚖️ judge settings: order, on/off, which pane, rounds, pass mark, book pictures
+  const JUDGE_LABEL = { 'claude-code': 'Claude Code (on this PC)', pane: 'Web AI pane (Claude / ChatGPT)', local: 'Local vision model (Ollama, offline — weaker)' };
+  async function loadJudgeSettings() {
+    const r = await call('judgeSettings');
+    if (!r || !r.ok) { if ($('sd-sec-judge')) $('sd-sec-judge').hidden = !!(r && r.error === 'NO_API'); return; }
+    st.judgeSet = r; renderJudgeSettings();
+  }
+  function renderJudgeSettings() {
+    const s = st.judgeSet; const box = $('sd-judge-order'); if (!s || !box) return;
+    box.textContent = '';
+    s.order.forEach((id, i) => {
+      const row = document.createElement('div'); row.className = 'sd-row'; row.setAttribute('role', 'listitem');
+      const lab = document.createElement('label'); lab.className = 'sd-fixed';
+      const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = s.enabled[id] !== false; cb.dataset.judge = id;
+      cb.onchange = () => saveJudge({ enabled: { [id]: cb.checked } });
+      lab.append(cb, document.createTextNode(` ${i + 1}. ${JUDGE_LABEL[id]}`));
+      row.appendChild(lab);
+      if (i > 0) { const up = document.createElement('button'); up.type = 'button'; up.className = 'sd-mini'; up.textContent = '▲'; up.title = 'Try this one earlier'; up.setAttribute('aria-label', `Move ${JUDGE_LABEL[id]} up`); up.onclick = () => { const o = s.order.slice(); o.splice(i, 1); o.splice(i - 1, 0, id); saveJudge({ order: o }); }; row.appendChild(up); }
+      box.appendChild(row);
+    });
+    $('sd-judge-pane').value = s.paneSite || 'claude';
+    $('sd-judge-rounds').value = s.rounds; $('sd-judge-bar').value = s.bar; $('sd-judge-autobook').checked = !!s.autoBook;
+    setText('sd-judge-badge', `${s.order.filter((x) => s.enabled[x] !== false).length} on${s.autoBook ? ' · book pictures' : ''}`);
+  }
+  async function saveJudge(patch) { const r = await call('judgeSettings', patch); if (r && r.ok) { st.judgeSet = r; renderJudgeSettings(); judgeStatusLine(); } }
+  $('sd-judge-pane').onchange = (e) => saveJudge({ paneSite: e.target.value });
+  $('sd-judge-rounds').onchange = (e) => saveJudge({ rounds: Number(e.target.value) });
+  $('sd-judge-bar').onchange = (e) => saveJudge({ bar: Number(e.target.value) });
+  $('sd-judge-autobook').onchange = (e) => saveJudge({ autoBook: !!e.target.checked });
+  async function judgeStatusLine() {
+    const r = await call('judgeStatus');
+    if (!r || !r.ok) { setText('sd-judge-status', ''); return; }
+    const parts = Object.entries(r.judges).map(([id, j]) => `${j.ok ? '✔' : '✖'} ${JUDGE_LABEL[id].split(' (')[0]}${j.ok ? '' : `: ${j.why || j.state}`}`);
+    setText('sd-judge-status', `${r.next ? `Next judge: ${r.nextLabel}.` : 'No judge is ready right now.'}\n${parts.join('\n')}`);
+  }
+  if ($('sd-sec-judge')) $('sd-sec-judge').addEventListener('toggle', () => { if ($('sd-sec-judge').open) { loadJudgeSettings(); judgeStatusLine(); } });
   async function init() {
     if (!api) { hint('The Images tab needs a newer AutoInjector (preload is missing window.api.sd). Restart the app.', 'error'); return; }
     const s = await call('status');
@@ -1698,6 +2093,9 @@
     refreshGallery();
     refreshTargets();
     engineNote();
+    await loadRecipes(true);
+    loadJudgeSettings();
+    reportForm();
   }
   // Keep the dot honest without opening the tab: a cheap status read at start.
   if (api) call('status').then((s) => { if (s && s.ok && s.enabled && s.endpoint && $('sd-tab-dot')) $('sd-tab-dot').dataset.tone = s.noModels ? 'warn' : 'ok'; });

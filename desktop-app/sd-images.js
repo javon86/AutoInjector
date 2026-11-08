@@ -88,9 +88,11 @@ function infotext(rec) {
   if (r.cfgScale) kv.push(`CFG scale: ${r.cfgScale}`);
   if (r.seed != null) kv.push(`Seed: ${r.seed}`);
   if (r.width && r.height) kv.push(`Size: ${r.width}x${r.height}`);
+  if (r.checkpointHash) kv.push(`Model hash: ${r.checkpointHash}`);
   if (r.checkpoint) kv.push(`Model: ${String(r.checkpoint).replace(/\s*\[[0-9a-f]+\]$/i, '')}`);
   if (r.vae && !/^(automatic|none)$/i.test(r.vae)) kv.push(`VAE: ${r.vae}`);
   if (Array.isArray(r.loras) && r.loras.length) kv.push(`Lora: "${r.loras.map((l) => `${l.name}:${l.weight}`).join(', ')}"`);
+  if (Array.isArray(r.loras) && r.loras.some((l) => l.hash)) kv.push(`Lora hashes: "${r.loras.filter((l) => l.hash).map((l) => `${l.name}: ${String(l.hash).slice(0, 12)}`).join(', ')}"`);
   if (r.clipSkip > 1) kv.push(`Clip skip: ${r.clipSkip}`);
   if (r.initImage && r.denoise != null) kv.push(`Denoising strength: ${r.denoise}`);
   if (r.hires) {
@@ -102,7 +104,11 @@ function infotext(rec) {
   if (r.refiner && r.refiner.checkpoint) kv.push(`Refiner: ${r.refiner.checkpoint}`, `Refiner switch at: ${r.refiner.switchAt != null ? r.refiner.switchAt : 0.8}`);
   if (r.variation && r.variation.subseed != null) kv.push(`Variation seed: ${r.variation.subseed}`, `Variation seed strength: ${r.variation.strength || 0}`);
   if (Array.isArray(r.controlnet)) r.controlnet.forEach((u, i) => kv.push(`ControlNet ${i}: "Module: ${u.module || 'none'}, Model: ${u.model || ''}, Weight: ${u.weight != null ? u.weight : 1}"`));
+  if (Array.isArray(r.adetailer) && r.adetailer.length) r.adetailer.forEach((u, i) => kv.push(`ADetailer model${i ? ` ${i + 1}${['nd', 'rd'][i - 1] || 'th'}` : ''}: ${u.model || 'face_yolov8n.pt'}`));
   if (r.backend) kv.push(`Backend: ${r.label || r.backend}`);
+  if (r.workflowName && r.backend === 'comfy') kv.push(`Workflow: ${String(r.workflowName).replace(/[,\n]/g, ' ')}`);
+  if (r.style) kv.push(`Style: ${r.style}`);
+  kv.push(`Version: AutoInjector${r.appVersion ? ` ${r.appVersion}` : ''}`);
   lines.push(kv.join(', '));
   return lines.join('\n');
 }
@@ -177,4 +183,14 @@ function readRecord(file) {
   return null;
 }
 
-module.exports = { crc32, addPngText, readPngText, infotext, saveGeneration, listGallery, readRecord, isPng };
+// Add to a picture's sidecar (the judge's verdict, "kept"). The PNG itself is left alone (its hash stays the same).
+function updateRecord(file, patch) {
+  const j = String(file).replace(/\.(png|jpe?g)$/i, '.json');
+  const cur = readRecord(file);
+  if (!cur) return null;
+  const next = Object.assign({}, cur, typeof patch === 'function' ? patch(cur) : patch);
+  try { fs.writeFileSync(j, JSON.stringify(next, null, 1)); } catch { return null; }
+  return next;
+}
+
+module.exports = { updateRecord, crc32, addPngText, readPngText, infotext, saveGeneration, listGallery, readRecord, isPng };

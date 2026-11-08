@@ -270,7 +270,8 @@ const state = {
     costLimit: 5
   },
   sdManaged: { startWithApp: false, targetId: "", addonsDir: "" }, // 🎨 "Start Stable Diffusion with AutoInjector" (default off) + which package to start
-  sdQuality: { bookCheckpoint: "" }, // 🎨 "Book pictures use: <checkpoint>" (Akọwe's pictures; "" = whatever is loaded) — sd-quality.js, PR #128
+  imageJudge: null, // 🧑‍⚖️ the AI judge's settings (image-judge.js cleanSettings): order, on/off per judge, pass mark, rounds, auto-judge book pictures
+  sdQuality: { bookCheckpoint: "", bookRecipe: "" }, // 🎨 "Book pictures use: <checkpoint>" (Akọwe's pictures; "" = whatever is loaded) — sd-quality.js, PR #128
   chatImage: { freshChatPerSeries: false }, // 🎨 ChatGPT image engine: a new ChatGPT chat for each reference-view series (default: one chat, keeps the character)
   imageConfig: null, // Stable Diffusion settings mirror (imageProvider owns the live copy); persisted so the endpoint survives a restart
   videoConfig: null, // text-to-video settings mirror (videoProvider owns the live copy); persisted so the endpoint survives a restart
@@ -767,6 +768,7 @@ function buildStateSnapshotText() {
         sdManaged: state.sdManaged,
         chatImage: state.chatImage,
         sdQuality: state.sdQuality,
+        imageJudge: state.imageJudge,
         imageConfig: state.imageConfig || imageProvider.getSettings(), // Stable Diffusion endpoint/size — no secret, stored as-is
         videoConfig: state.videoConfig || videoProvider.getSettings(), // text-to-video endpoint/size — no secret, stored as-is
         videoStudio: state.videoStudio || null, // 🎬 Video engine settings — no secret
@@ -891,7 +893,8 @@ function loadPersistedState() {
     state.nextLoginId = maxId + 1;
   }
   if (snap.chatImage && typeof snap.chatImage === "object") state.chatImage = { freshChatPerSeries: !!snap.chatImage.freshChatPerSeries };
-  if (snap.sdQuality && typeof snap.sdQuality === "object") state.sdQuality = { bookCheckpoint: String(snap.sdQuality.bookCheckpoint || "").slice(0, 300) };
+  if (snap.sdQuality && typeof snap.sdQuality === "object") state.sdQuality = { bookCheckpoint: String(snap.sdQuality.bookCheckpoint || "").slice(0, 300), bookRecipe: String(snap.sdQuality.bookRecipe || "").slice(0, 120) };
+  if (snap.imageJudge && typeof snap.imageJudge === "object") { try { state.imageJudge = require("./image-judge").cleanSettings(snap.imageJudge); } catch (_) {} }
   if (snap.sdManaged && typeof snap.sdManaged === "object") {
     state.sdManaged = { startWithApp: !!snap.sdManaged.startWithApp, targetId: String(snap.sdManaged.targetId || ""), addonsDir: String(snap.sdManaged.addonsDir || "") };
   }
@@ -7071,6 +7074,49 @@ function chatImage() {
   });
   return _chatImage;
 }
+// ---- 💾 picture recipes + 🧑‍⚖️ the AI judge (sd-recipes.js, image-judge-service.js) --------------------------
+let _sdRecipes = null;
+function sdRecipes() {
+  if (!_sdRecipes) _sdRecipes = require("./sd-recipes").createRecipeStore({ file: path.join(userDataDir(), "sd-recipes.json"), log: (t, d) => logEvent(t, d) });
+  return _sdRecipes;
+}
+let _imageJudge = null;
+function imageJudgeOllamaBases() {
+  const out = [];
+  if (process.env.AUTOINJECTOR_JUDGE_OLLAMA) out.push(process.env.AUTOINJECTOR_JUDGE_OLLAMA);
+  try { const s = alfred.getSettings(); if (s && s.local && s.local.endpoint && /:\/\/(127\.0\.0\.1|localhost)/.test(s.local.endpoint)) out.push(String(s.local.endpoint).replace(/\/v1\/?$/, "")); } catch (_) {}
+  try { const m = ollamaManager.managedStatus(); if (m && m.running && m.endpoint) out.push(String(m.endpoint).replace(/\/v1\/?$/, "")); } catch (_) {}
+  if (!process.env.AUTOINJECTOR_JUDGE_OLLAMA) out.push(`http://${process.env.AUTOINJECTOR_OLLAMA_HOST || "127.0.0.1:11435"}`, "http://127.0.0.1:11434");
+  return out;
+}
+function imageJudge() {
+  if (_imageJudge) return _imageJudge;
+  const JS = require("./image-judge-service");
+  const settings = () => state.imageJudge || {};
+  _imageJudge = JS.createJudgeService({
+    settings,
+    readRecord: (p) => require("./sd-images").readRecord(p),
+    updateRecord: (p, patch) => require("./sd-images").updateRecord(p, patch),
+    log: (t, d) => logEvent(t, d),
+    judges: {
+      "claude-code": require("./image-judge-cc").createClaudeCodeJudge({ log: (t, d) => logEvent(t, d) }),
+      // a FRESH chat in the Claude (or ChatGPT) pane, the picture attached — never while Akọwe uses that pane
+      pane: JS.createPaneJudge({
+        site: () => (settings().paneSite === "chatgpt" ? "chatgpt" : "claude"),
+        problem: (site) => {
+          if (!state.enabled[site]) return { code: "TURNED_OFF", say: `the ${siteLabel(site)} pane is turned off` };
+          if (akoweUsingPane(site)) return { code: "AKOWE_USING", say: `Akọwe is using the ${siteLabel(site)} pane for the book` };
+          if (site === CHAT_IMAGE_SITE && chatImageHold) return { code: "AKOWE_USING", say: "ChatGPT is drawing a picture" };
+          const p = akoweSiteProblem(site);
+          return p && p.code !== "CHECKING" ? p : null;
+        },
+        ask: (site, text, o) => alfredAskPane(site, text, { attach: o && o.attach, freshChat: !!(o && o.freshChat), signal: o && o.signal, timeoutMs: Number(process.env.AUTOINJECTOR_JUDGE_PANE_MS) || 240000 }),
+      }),
+      local: JS.createOllamaJudge({ fetch: (...a) => fetch(...a), bases: imageJudgeOllamaBases, model: () => process.env.AUTOINJECTOR_JUDGE_OLLAMA_MODEL || "" }),
+    },
+  });
+  return _imageJudge;
+}
 let _sdStudio = null;
 function sdStudio() {
   if (_sdStudio) return _sdStudio;
@@ -7078,7 +7124,14 @@ function sdStudio() {
     chatgpt: chatImage(),
     persistChatgpt: (o) => { state.chatImage = { freshChatPerSeries: !!(o && o.freshChatPerSeries) }; saveStateDebounced(); },
     quality: state.sdQuality || {},
-    persistQuality: (o) => { state.sdQuality = { bookCheckpoint: String((o && o.bookCheckpoint) || "") }; saveStateDebounced(); },
+    persistQuality: (o) => { state.sdQuality = { bookCheckpoint: String((o && o.bookCheckpoint) || ""), bookRecipe: String((o && o.bookRecipe) || "") }; saveStateDebounced(); },
+    // ♻ / 💾 / 🧑‍⚖️ / 🔁 (sd-record.js, sd-recipes.js, image-judge*.js, sd-improve.js)
+    recipes: sdRecipes(),
+    judge: imageJudge(),
+    persistJudge: (s) => { state.imageJudge = s; saveStateDebounced(); },
+    appVersion: () => { const b = buildInfo(); return `${b.version || ""}${b.commit ? ` (${String(b.commit).slice(0, 7)})` : ""}`.trim(); },
+    onJudgeProgress: (e) => broadcast("sd-judge", e),
+    applyToForm: (patch, how) => broadcast("sd-form-apply", { patch, how }),
     imageProvider,
     library: sdLibrary(),
     imagesDir: () => outputManager.imagesDir(),
@@ -7134,6 +7187,16 @@ ipcMain.handle("sd:quality", sdSafe((a) => sdStudio().quality(a && Object.keys(a
 ipcMain.handle("sd:chatgpt-status", sdSafe(() => sdStudio().chatgptStatus()));
 ipcMain.handle("sd:chatgpt-cancel", sdSafe(() => sdStudio().chatgptCancel()));
 ipcMain.handle("sd:chatgpt-settings", sdSafe((a) => sdStudio().chatgptSettings({ freshChatPerSeries: a.freshChatPerSeries, timeoutMs: a.timeoutMs })));
+// ♻ Remake exactly · 💾 recipes · 🧑‍⚖️ judge · 🔁 Make it better · Make 4 and pick the best · the form for Alfred
+ipcMain.handle("sd:remake", sdSafe((a) => sdStudio().remake(a.path, "images-tab:remake")));
+ipcMain.handle("sd:recipes", sdSafe((a) => sdStudio().recipesOp(a.op, a)));
+ipcMain.handle("sd:judge", sdSafe((a) => sdStudio().judgeImage(a.path, { only: a.judge || undefined })));
+ipcMain.handle("sd:improve", sdSafe((a) => sdStudio().improve(a.path, { rounds: a.rounds, from: "images-tab:improve" })));
+ipcMain.handle("sd:improve-stop", sdSafe(() => sdStudio().improveStop()));
+ipcMain.handle("sd:make-best", sdSafe((a) => sdStudio().makeBest(a.request || {}, { count: a.count, from: "images-tab:best" })));
+ipcMain.handle("sd:judge-status", sdSafe(() => sdStudio().judgeStatus()));
+ipcMain.handle("sd:judge-settings", sdSafe((a) => sdStudio().judgeSettings(a && Object.keys(a).length ? a : null)));
+ipcMain.handle("sd:form-report", sdSafe((a) => sdStudio().formReport(a.form)));
 ipcMain.handle("sd:capabilities", sdSafe(() => sdApiMod.get() ? sdApiMod.get().capabilities() : { ok: false, error: "NOT_WIRED" }));
 ipcMain.handle("sdlib:list", sdSafe((a) => sdStudio().libList(a.filters || {})));
 ipcMain.handle("sdlib:scan", sdSafe(() => sdStudio().libScan()));
@@ -8660,7 +8723,9 @@ function alfredTakeReply(site, turn) {
   a.reply = { text: String(turn.text || "") };
   return true;
 }
-async function alfredAskPane(site, text, { timeoutMs = 180000, signal } = {}) {
+// attach: a file to upload with the message (🧑‍⚖️ the picture judge); freshChat: open a new chat first, so the
+// question never lands in a book's conversation.
+async function alfredAskPane(site, text, { timeoutMs = 180000, signal, attach = null, freshChat = false } = {}) {
   if (!SITES[site]) return { ok: false, error: "BAD_SITE" };
   if (!state.enabled[site]) return { ok: false, error: "TURNED_OFF" };
   if (akoweUsingPane(site)) { logEvent("alfred-ask-ai", { site, outcome: "AKOWE_USING" }); return { ok: false, error: "AKOWE_USING" }; }
@@ -8678,6 +8743,13 @@ async function alfredAskPane(site, text, { timeoutMs = 180000, signal } = {}) {
     await selfRepairMakeWay(site, token); // a check-in on this AI settles first (bounded), like an Akọwe prompt
     if (token.cancelled) { outcome = "CANCELLED"; return { ok: false, error: "CANCELLED", typed: false }; }
     if (akoweUsingPane(site)) { outcome = "AKOWE_USING"; return { ok: false, error: "AKOWE_USING" }; } // it took the pane meanwhile
+    if (freshChat) { try { await selfRepairReload(site, { home: true }); } catch (_) {} }
+    if (token.cancelled) { outcome = "CANCELLED"; return { ok: false, error: "CANCELLED", typed: false }; }
+    if (attach) {
+      const at = await attachFileToSite(site, attach);
+      if (!at || !at.ok) { outcome = "ATTACH_FAILED"; return { ok: false, error: "ATTACH_FAILED", code: at && at.error ? String(at.error).slice(0, 40) : undefined, typed: false }; }
+      await new Promise((r) => setTimeout(r, Number(process.env.AUTOINJECTOR_JUDGE_UPLOAD_MS) || 4000)); // the site uploads the picture before the message goes
+    }
     entry.sentAt = Date.now();
     const res = await sendTextTo(site, withEnvelope(String(text), site), null, { cancelToken: token });
     if (!res || !res.ok) {

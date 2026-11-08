@@ -33,6 +33,8 @@ const sdErrors = require('./sd-errors');
 const sdSanitize = require('./sd-sanitize');
 const views = require('./image-views');
 const Q = require('./sd-quality');
+const sdRecord = require('./sd-record');
+const { createImprover } = require('./sd-improve');
 const fsMod = require('fs');
 const pathMod = require('path');
 
@@ -74,6 +76,23 @@ function createSdStudio(deps) {
   const chatgpt = deps.chatgpt || null; // chatgpt-image.js engine (optional)
   let lastLists = null;
   let lastListsAt = 0;
+  const recipes = deps.recipes || null; // sd-recipes.js store (optional)
+  const appVersion = () => { try { return typeof deps.appVersion === 'function' ? deps.appVersion() : (deps.appVersion || ''); } catch (_) { return ''; } };
+  // A LoRA's hash, when the library knows it (Civitai's SHA256, first 10 like A1111's "Lora hashes").
+  const libHashes = { loraHash: (name) => { try { const it = lib && typeof lib.findItem === 'function' ? lib.findItem('lora', name) : null; const h = it && it.civitai && it.civitai.sha256; return h ? String(h).slice(0, 10).toLowerCase() : ''; } catch (_) { return ''; } } };
+  // req.recipe (id or name) → { req: recipe settings + req, recipe } | { error }
+  function withRecipe(req) {
+    const r0 = Object.assign({}, req || {});
+    // The Images tab fills the form from a recipe itself and only says which one (recorded, nothing merged).
+    const used = r0.recipeUsed; delete r0.recipeUsed;
+    if (!r0.recipe) { let rc; try { const g = used && recipes ? recipes.get(used) : null; rc = g && g.ok ? g.recipe : undefined; } catch (_) { rc = undefined; } return { req: r0, recipe: rc }; }
+    if (!recipes) return { error: { ok: false, error: 'NOT_WIRED', code: 'NOT_WIRED', message: 'Recipes are not available in this build.' } };
+    const rec = recipes.get(r0.recipe);
+    if (!rec.ok) return { error: Object.assign({ ok: false }, rec) };
+    const merged = recipes.toRequest(rec.recipe, { subject: r0.prompt, request: r0 });
+    delete merged.recipe;
+    return { req: merged, recipe: rec.recipe };
+  }
 
   function withUrls(item) { return item && item.preview ? Object.assign({}, item, { previewUrl: fileUrl(item.preview) }) : item; }
 
@@ -188,10 +207,21 @@ function createSdStudio(deps) {
     return Q.familyOf(name, { base, size });
   }
   // ---- quality defaults (PR #128): "Book pictures use: <checkpoint>" + the per-family defaults below.
-  const qualitySettings = { bookCheckpoint: '' };
+  const qualitySettings = { bookCheckpoint: '', bookRecipe: '' };
   if (deps.quality && typeof deps.quality === 'object' && deps.quality.bookCheckpoint) qualitySettings.bookCheckpoint = String(deps.quality.bookCheckpoint).slice(0, 300);
+  if (deps.quality && typeof deps.quality === 'object' && deps.quality.bookRecipe) qualitySettings.bookRecipe = String(deps.quality.bookRecipe).slice(0, 120);
   function quality(patch) {
+    if (patch && typeof patch === 'object' && 'bookRecipe' in patch) {
+      // "📖 Book pictures use: <recipe>" — a recipe instead of (not as well as) a plain checkpoint
+      const id = String(patch.bookRecipe || '').slice(0, 120);
+      if (id && recipes && !recipes.get(id).ok) return Object.assign({ ok: false, error: 'NO_RECIPE', code: 'NO_RECIPE', message: `There's no recipe called “${id}”.` }, qualitySettings);
+      qualitySettings.bookRecipe = id && recipes ? recipes.get(id).recipe.id : '';
+      if (qualitySettings.bookRecipe && !('bookCheckpoint' in patch)) qualitySettings.bookCheckpoint = '';
+      try { if (deps.persistQuality) deps.persistQuality(Object.assign({}, qualitySettings)); } catch (_) {}
+      log('sd-quality-settings', { bookRecipe: qualitySettings.bookRecipe || '(none)' });
+    }
     if (patch && typeof patch === 'object' && 'bookCheckpoint' in patch) {
+      if (String(patch.bookCheckpoint || '')) qualitySettings.bookRecipe = '';
       qualitySettings.bookCheckpoint = String(patch.bookCheckpoint || '').slice(0, 300);
       try { if (deps.persistQuality) deps.persistQuality(Object.assign({}, qualitySettings)); } catch (_) {}
       log('sd-quality-settings', { bookCheckpoint: qualitySettings.bookCheckpoint || '(whatever is loaded)' });
@@ -325,7 +355,14 @@ function createSdStudio(deps) {
   // Generate + save + record. from = 'images-tab' | 'bridge:akowe' | …
   // gopts: { noRetry } — fixAndRetry's own retry must not retry again.
   async function generate(req, from, gopts) {
+    // A saved recipe (sd-recipes.js): its settings first, then what the caller gave.
+    const rr = withRecipe(req);
+    if (rr.error) return rr.error;
+    req = rr.req;
+    const typed = req && (req.promptTyped != null ? req.promptTyped : req.prompt);
+    const extraTriggers = Array.isArray(req && req.triggers) ? req.triggers.filter((t) => typeof t === 'string') : [];
     const qreq = Object.assign({}, req || {});
+    delete qreq.promptTyped; delete qreq.triggers; delete qreq.recipe;
     const q = qualityBefore(qreq, from);
     const style = Q.STYLES[qreq.style] ? qreq.style : undefined; delete qreq.style;
     const b = buildRequest(qreq);
@@ -396,6 +433,13 @@ function createSdStudio(deps) {
       bookCheckpoint: q.bookCheckpoint ? true : undefined,
     });
     if (record.backend === 'a1111' && r.infoObj && r.infoObj.sd_model_name && !record.checkpoint) record.checkpoint = r.infoObj.sd_model_name;
+    // Everything else that decided the picture (sd-record.js): what was typed, the automatic negative, trigger words, hashes, who asked.
+    const lockTriggers = b.lock && Array.isArray(b.lock.triggerWords) ? b.lock.triggerWords : [];
+    Object.assign(record, sdRecord.enrich(record, {
+      from: from || 'images-tab', promptTyped: q.fullPrompt || typed, negativeAuto: q.notes.includes('default negative prompt'),
+      triggers: [...lockTriggers, ...extraTriggers], infoObj: r.infoObj, library: libHashes, appVersion: appVersion(),
+      source: req && req.initImage, recipe: rr.recipe,
+    }));
     let saved;
     const prefix = b.view ? `view-${b.view}` : b.purpose !== 'free' ? b.purpose : b.opts.mask ? 'inpaint' : b.opts.initImage ? 'img2img' : 'sd';
     try { saved = sdImages.saveGeneration(imagesDir(), r.images, record, { prefix }); }
@@ -453,7 +497,8 @@ function createSdStudio(deps) {
   // Save pictures that are not from generate() (upscale, workflows) the same way.
   function saveOther(r, record, prefix, from, req) {
     let saved;
-    try { saved = sdImages.saveGeneration(imagesDir(), r.images, Object.assign({ backend: r.backend, label: r.label || ip.status().label, from }, record), { prefix }); }
+    const rec0 = Object.assign({ backend: r.backend, label: r.label || ip.status().label, from }, record);
+    try { saved = sdImages.saveGeneration(imagesDir(), r.images, sdRecord.enrich(rec0, { from, appVersion: appVersion(), library: libHashes, workflowName: record && record.workflowName, source: record && record.source }), { prefix }); }
     catch (e) { return { ok: false, error: 'SAVE_FAILED', message: `The picture was made but couldn't be saved: ${e.message || e}` }; }
     for (const s of saved) { try { recordImage({ path: s.path, prompt: s.record.prompt || `(${prefix})`, seed: s.record.seed, model: s.record.checkpoint || '', from, sha256: s.sha256 }); } catch (_) {} }
     log(`sd-${prefix}`, { ok: true, from, count: saved.length, backend: r.backend });
@@ -675,9 +720,10 @@ function createSdStudio(deps) {
   }
   // The contract's answer: today's shape + engine, view echoed, paths.
   function contractShape(r, engine, purpose, view, withUrl) {
-    const images = (r.images || []).map((im) => { const o = { path: im.path, seed: im.seed, sha256: im.sha256 }; if (im.width) { o.width = im.width; o.height = im.height; } if (withUrl && im.url) o.url = im.url; if (im.imageBase64) o.imageBase64 = im.imageBase64; if (im.upscaled) { o.upscaled = im.upscaled; o.original = im.original; } return o; });
+    const images = (r.images || []).map((im) => { const o = { path: im.path, seed: im.seed, sha256: im.sha256 }; if (im.width) { o.width = im.width; o.height = im.height; } if (withUrl && im.url) o.url = im.url; if (im.imageBase64) o.imageBase64 = im.imageBase64; if (im.upscaled) { o.upscaled = im.upscaled; o.original = im.original; } if (im.improvedFrom) o.improvedFrom = im.improvedFrom; return o; });
     const out = { ok: true, engine, purpose: (r.settings && r.settings.purpose) || purpose, backend: r.backend || engine, seed: r.seed == null ? null : r.seed, warnings: r.warnings || [], settings: r.settings, paths: images.map((im) => im.path), images };
     if (view) out.view = view;
+    if (r.judged) out.judged = r.judged; // 🧑‍⚖️ book pictures judged and improved automatically
     return out;
   }
   async function viaChatgpt(b, purpose, from) {
@@ -699,6 +745,9 @@ function createSdStudio(deps) {
       prompt: String(b.prompt || '').trim() || subject, appearance: b.appearance ? String(b.appearance).slice(0, 2000) : undefined,
       characterLock: lock ? { id: lock.id, character: lock.character, book: lock.book } : undefined,
       book: b.book ? String(b.book).slice(0, 200) : undefined, from,
+      // what ChatGPT can't tell us (no seed, no sampler) stays out; the rest of the sidecar (sd-record.js)
+      promptTyped: String(b.prompt || '').trim() || subject, askedBy: sdRecord.askedByOf(from, { book: b.book, characterLock: lock ? { character: lock.character } : undefined }),
+      appVersion: appVersion() || undefined, engine: 'chatgpt', backend: 'chatgpt',
     };
     log('chatgpt-image-request', { from, purpose, view, lock: lock ? lock.character : null });
     let r;
@@ -731,8 +780,25 @@ function createSdStudio(deps) {
     const st = ip.status();
     if (!st.endpoint) return { ok: false, engine: 'sd', error: 'SD_NOT_CONNECTED', code: 'SD_NOT_CONNECTED', message: `No Stable Diffusion app is connected. ${sdBackends.explain('NO_ENDPOINT')}`, hint: 'Start Forge / A1111 / ComfyUI, or ask with engine "chatgpt".' };
     for (const k of ['engine', 'series', 'newChat', 'timeoutMs']) delete b[k];
+    // 📖 Book pictures use: a recipe (when chosen, and the request names no recipe / checkpoint of its own)
+    if (isBook(from, b) && !b.recipe && !b.checkpoint && qualitySettings.bookRecipe && recipes && recipes.get(qualitySettings.bookRecipe).ok) b.recipe = qualitySettings.bookRecipe;
     const r = await generate(Object.assign(b, { purpose: pick.purpose, batchSize: Math.max(1, Math.min(4, Number(b.count) || 1)) }), from);
     if (!r.ok) return Object.assign({ engine: 'sd' }, r);
+    // "Judge and improve book pictures automatically" (off by default — it costs AI usage): at most 2 rounds.
+    if (isBook(from, b) && judgeSvc && judgeSvc.settings().autoBook && r.images && r.images[0]) {
+      let imp = null;
+      try { imp = await improver.improve(r.images[0].path, { rounds: 2, bar: judgeSvc.settings().bar, from: `${from}:improve`.slice(0, 60) }); } catch (_) { imp = null; }
+      if (imp && imp.ok) {
+        const bestR = imp.rounds[imp.best];
+        r.judged = { rounds: imp.rounds.length, best: bestR.round, scores: imp.rounds.map((x) => x.overall), verdict: bestR.verdict, by: bestR.judge && bestR.judge.by };
+        if (imp.best > 0 && bestR.path) {
+          const rec = sdImages.readRecord(bestR.path) || {};
+          Object.assign(r.images[0], { path: bestR.path, url: fileUrl(bestR.path), seed: rec.seed, sha256: rec.sha256, json: bestR.path.replace(/\.(png|jpe?g)$/i, '.json'), improvedFrom: pathMod.basename(imp.rounds[0].path) });
+          r.settings = rec; r.seed = rec.seed;
+          if (b.returnImage) { try { r.images[0].imageBase64 = fsMod.readFileSync(bestR.path).toString('base64'); } catch (_) {} }
+        }
+      } else if (imp) (r.warnings = r.warnings || []).push({ level: 'soft', kind: 'judge', message: `Not judged: ${imp.message || 'no AI judge answered'}.` });
+    }
     if (up) await upscaleAll(r, up, from);
     return contractShape(r, 'sd', pick.purpose, view, !String(from).startsWith('bridge:'));
   }
@@ -806,7 +872,126 @@ function createSdStudio(deps) {
     return { ok: true, created: true, lock: r.lock };
   }
 
-  return { detect, connect, lists, settings, buildRequest, generate, fixAndRetry, gallery, record, libList, libScan, request, requestFrom, chatgptStatus, chatgptSettings, chatgptCancel, backendInfo, locks, addLock,
+  // ---- ♻ Remake exactly · 💾 recipes · 🧑‍⚖️ judge · 🔁 Make it better · Make 4 and pick the best (PR #TBD)
+  // Remake: the sidecar's exact request (the prompt as sent, the same seed and every setting; no automatic changes).
+  async function remake(p, from) {
+    const rec = sdImages.readRecord(p);
+    if (!rec) return { ok: false, error: 'NO_RECORD', code: 'NO_RECORD', message: 'No settings were recorded for that picture, so it can\'t be made again.' };
+    const rm = sdRecord.remakeRequest(rec);
+    let r;
+    if (rm.engine === 'chatgpt') r = await requestFrom(rm.request, from || 'images-tab:remake');
+    else if (rm.engine === 'workflow') r = await runWorkflow(rm.request, from || 'images-tab:remake');
+    else if (rm.engine === 'upscale') r = rm.request.image ? await upscale(rm.request, from || 'images-tab:remake') : { ok: false, error: 'NO_SOURCE', message: 'The upscaled picture\'s original is not known.' };
+    else r = await generate(rm.request, from || 'images-tab:remake');
+    if (r && r.ok) { r.remadeFrom = pathMod.basename(p); if (rm.note) r.note = rm.note; r.sameSeed = rm.engine === 'sd' && Number(rm.request.seed) >= 0; }
+    log('sd-remake', { ok: !!(r && r.ok), engine: rm.engine, seed: rm.engine === 'sd' ? rm.request.seed >= 0 : undefined, code: r && !r.ok ? (r.code || r.error) : undefined });
+    return r;
+  }
+  // Recipes (sd-recipes.js). list → also the families of the installed checkpoints (the Flux starter shows only with Flux).
+  function noRecipes() { return { ok: false, error: 'NOT_WIRED', code: 'NOT_WIRED', message: 'Recipes are not available in this build.' }; }
+  function installedFamilies() {
+    const names = new Set();
+    try { for (const c of (lastLists && lastLists.checkpoints) || []) names.add(c.title || c.name || c); } catch (_) {}
+    try { if (lib) for (const it of lib.list({ kind: 'checkpoint', limit: 5000 }).items || []) names.add(it.name); } catch (_) {}
+    return [...new Set([...names].map((n) => familyOf(String(n))).filter(Boolean))];
+  }
+  function recipesOp(op, a) {
+    if (!recipes) return noRecipes();
+    const x = a || {};
+    switch (op) {
+      case 'list': return recipes.list({ families: installedFamilies() });
+      case 'get': return recipes.get(x.id || x.name);
+      case 'save': return recipes.save(Object.assign({ from: x.from || 'form' }, x.recipe || x));
+      case 'rename': return recipes.rename(x.id, x.name);
+      case 'delete': return recipes.remove(x.id || x.name);
+      case 'setDefault': return recipes.setDefault(x.id || '');
+      case 'fromPicture': {
+        const rec = x.path ? sdImages.readRecord(x.path) : null;
+        if (!rec) return { ok: false, error: 'NO_RECORD', code: 'NO_RECORD', message: 'That picture has no saved settings.' };
+        const r = recipes.fromRecord(rec, x.name);
+        if (x.save === false) return { ok: true, recipe: r };
+        return recipes.save(Object.assign(r, { makeDefault: !!x.makeDefault }));
+      }
+      default: return { ok: false, error: 'BAD_OP', code: 'BAD_OP', message: `There is no recipe action “${op}”.` };
+    }
+  }
+  // What the judge and the fixes need to know: the installed lists, the family, the character it should look like.
+  async function ctxFor(rec) {
+    const r = rec || {};
+    let L = null; try { L = await liveLists(false); } catch (_) { L = null; }
+    const nm = (arr) => (arr || []).map((x) => (typeof x === 'string' ? x : x.title || x.name)).filter(Boolean);
+    const lists = L ? { checkpoints: nm(L.checkpoints), samplers: nm(L.samplers), schedulers: nm(L.schedulers), loras: nm(L.loras) } : {};
+    const fam = r.family || familyOf(r.checkpoint);
+    let ad = undefined;
+    try { const st = ip.status(); if (st.backend === 'a1111' && st.base) { const f = await control.a1111Features(st.base); if (f && typeof f.adetailer === 'boolean') ad = f.adetailer; } } catch (_) {}
+    let character = null;
+    const key = r.characterLock && (r.characterLock.id || r.characterLock.character);
+    if (key && lib) { try { const l = lib.getLock(key); if (l) character = { name: l.character, looks: l.prompt || '' }; } catch (_) {} }
+    return { judge: Object.assign({ family: fam, backend: r.backend }, lists, { character }), fix: { family: fam, backend: r.backend || ip.status().backend, lists, adetailer: ad } };
+  }
+  const judgeSvc = deps.judge || null;
+  function noJudge() { return { ok: false, error: 'NOT_WIRED', code: 'NOT_WIRED', message: 'The AI judge is not available in this build.' }; }
+  async function judgeImage(p, o) {
+    if (!judgeSvc) return noJudge();
+    const rec = sdImages.readRecord(p);
+    const c = await ctxFor(rec || {});
+    const r = await judgeSvc.judge(p, Object.assign({ ctx: c.judge, record: rec || undefined }, o || {}));
+    if (r && r.ok) r.url = fileUrl(p);
+    return r;
+  }
+  function genFor(req, from) { return req && req.engine === 'chatgpt' ? requestFrom(req, from) : generate(req, from); }
+  const improver = createImprover({
+    generate: genFor, judge: (p, o) => (judgeSvc ? judgeSvc.judge(p, o) : noJudge()), readRecord: (p) => sdImages.readRecord(p),
+    updateRecord: (p, patch) => sdImages.updateRecord(p, patch), ctxFor, cancelRender: () => { try { ip.cancel(); } catch (_) {} try { if (chatgpt && chatgpt.cancel) chatgpt.cancel(); } catch (_) {} },
+    log, onProgress: (e) => { try { if (deps.onJudgeProgress) deps.onJudgeProgress(Object.assign({}, e, e.result ? { result: Object.assign({}, e.result, { url: e.result.path ? fileUrl(e.result.path) : '' }) } : {})); } catch (_) {} },
+  });
+  async function improve(p, o) {
+    if (!judgeSvc) return noJudge();
+    const x = o || {};
+    const js = judgeSvc.settings();
+    const r = await improver.improve(p, { rounds: x.rounds || js.rounds, bar: x.bar != null ? x.bar : js.bar, from: x.from, url: fileUrl(p) });
+    if (r && r.rounds) r.rounds.forEach((rd) => { if (rd.path) rd.url = fileUrl(rd.path); });
+    return r;
+  }
+  async function makeBest(req, o) {
+    if (!judgeSvc) return noJudge();
+    const rr = withRecipe(req); if (rr.error) return rr.error;
+    const r = await improver.best(rr.req, Object.assign({}, o || {}, { recipe: undefined }));
+    if (r && r.images) r.images.forEach((im) => { if (im.path) im.url = fileUrl(im.path); });
+    return r;
+  }
+  function judgeSettings(patch) {
+    if (!judgeSvc) return noJudge();
+    if (patch && Object.keys(patch).length) {
+      const s = require('./image-judge').cleanSettings(patch, judgeSvc.settings());
+      try { if (deps.persistJudge) deps.persistJudge(s); } catch (_) {}
+      log('image-judge-settings', { order: s.order.join('>'), on: Object.keys(s.enabled).filter((k) => s.enabled[k]).join(','), rounds: s.rounds, bar: s.bar, autoBook: s.autoBook });
+      return Object.assign({ ok: true }, s);
+    }
+    return Object.assign({ ok: true }, judgeSvc.settings());
+  }
+  async function judgeStatus() { return judgeSvc ? judgeSvc.status() : noJudge(); }
+  // The Images form, for Alfred: he reads it (what the window last reported) and changes it (the window fills it in).
+  let formState = null;
+  function formReport(f) { if (f && typeof f === 'object') formState = Object.assign({}, f, { at: Date.now() }); return { ok: true }; }
+  function formGet() { return formState ? { ok: true, form: formState } : { ok: true, form: null, note: 'The 🎨 Images tab has not been opened yet in this session.' }; }
+  function formSet(patch, how) {
+    if (!patch || typeof patch !== 'object' || !Object.keys(patch).length) return { ok: false, error: 'INVALID_PARAM', code: 'INVALID_PARAM', message: 'Say which Images form fields to set, e.g. { "steps": 30, "style": "photo" }.' };
+    if (!deps.applyToForm) return { ok: false, error: 'NOT_WIRED', code: 'NOT_WIRED', message: 'The Images window is not open.' };
+    deps.applyToForm(Object.assign({}, patch), how || 'set');
+    log('sd-form-set', { keys: Object.keys(patch).slice(0, 30), how: how || 'set' });
+    return { ok: true, applied: Object.keys(patch), message: 'The Images tab form now shows these settings (nothing was made yet — press Generate).' };
+  }
+  function recipeToForm(idOrName) {
+    if (!recipes) return noRecipes();
+    const g = recipes.get(idOrName);
+    if (!g.ok) return g;
+    const r = formSet(Object.assign({}, g.recipe.settings, { recipeId: g.recipe.id, recipeName: g.recipe.name, promptTemplate: g.recipe.promptTemplate || '' }), 'recipe');
+    return r.ok ? Object.assign(r, { recipe: { id: g.recipe.id, name: g.recipe.name } }) : r;
+  }
+
+  return { remake, recipesOp, judgeImage, improve, makeBest, improveStop: () => improver.stop(), improveStatus: () => improver.status(), judgeSettings, judgeStatus, formReport, formGet, formSet, recipeToForm, ctxFor,
+    detect, connect, lists, settings, buildRequest, generate, fixAndRetry, gallery, record, libList, libScan, request, requestFrom, chatgptStatus, chatgptSettings, chatgptCancel, backendInfo, locks, addLock,
     img2img, inpaint, upscale, optionsGet, optionsSet, optionsSchema, upscalers, controlnetModels, controlnetModules, adetailerModels, styles, scripts, embeddings, extraFields,
     interrupt, skip, refresh, memory, objectInfo, queue, uploadImage, free, workflowsList, workflowGet, workflowSave, workflowDelete, runWorkflow, extras, features,
     progress: () => ip.progress(), cancel: () => ip.cancel(), status: () => Object.assign({ ok: true }, ip.status()), quality, familyOf,

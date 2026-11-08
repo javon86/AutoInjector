@@ -181,6 +181,18 @@ contextBridge.exposeInMainWorld("api", {
     chatgptSettings: (patch) => ipcRenderer.invoke("sd:chatgpt-settings", patch || {}),
     quality: (patch) => ipcRenderer.invoke("sd:quality", patch || {}), // 🎨 { bookCheckpoint } — "Book pictures use" (PR #128)
     onChatgptImage: (cb) => ipcRenderer.on("chatgpt-image", (_e, st) => cb(st)),
+    // ♻ Remake exactly · 💾 recipes · 🧑‍⚖️ AI judge · 🔁 Make it better · Make 4 and pick the best
+    remake: (path) => ipcRenderer.invoke("sd:remake", { path }),
+    recipes: (op, args) => ipcRenderer.invoke("sd:recipes", Object.assign({}, args || {}, { op })),
+    judge: (path, judge) => ipcRenderer.invoke("sd:judge", { path, judge }),
+    improve: (path, rounds) => ipcRenderer.invoke("sd:improve", { path, rounds }),
+    improveStop: () => ipcRenderer.invoke("sd:improve-stop"),
+    makeBest: (request, count) => ipcRenderer.invoke("sd:make-best", { request, count }),
+    judgeStatus: () => ipcRenderer.invoke("sd:judge-status"),
+    judgeSettings: (patch) => ipcRenderer.invoke("sd:judge-settings", patch || {}),
+    formReport: (form) => ipcRenderer.invoke("sd:form-report", { form }),
+    onJudge: (cb) => ipcRenderer.on("sd-judge", (_e, ev) => cb(ev)),
+    onFormApply: (cb) => ipcRenderer.on("sd-form-apply", (_e, ev) => cb(ev)),
     libList: (filters) => ipcRenderer.invoke("sdlib:list", { filters }),
     libScan: () => ipcRenderer.invoke("sdlib:scan"),
     libUpdate: (id, patch) => ipcRenderer.invoke("sdlib:update", { id, patch }),

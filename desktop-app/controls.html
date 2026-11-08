@@ -251,6 +251,36 @@
     #sd-gallery:empty::before { content:'No pictures yet.'; grid-column:1 / -1; font-size:12px; opacity:.55; }
     #sd-gallery img { width:100%; aspect-ratio:1; object-fit:cover; border-radius:5px; border:1px solid #2a2a2a; cursor:pointer; }
     #sd-gallery img:focus-visible, .sd-libcard:focus-visible { outline:2px solid #7c5ce0; }
+    /* 💾 recipes · 🧑‍⚖️ AI judge · 🔁 Make it better (small buttons and drawers: the panel still fits 1280×720) */
+    #sd-recipe-row { display:flex; gap:4px; align-items:center; margin-bottom:6px; }
+    #sd-recipe-row > select { flex:1 1 auto; min-width:0; width:auto; }
+    .sd-mini { padding:2px 6px; font-size:12px; line-height:1.2; min-width:0; flex:0 0 auto; }
+    #sd-recipe-name-row { display:flex; gap:4px; align-items:center; margin:0 0 6px; flex-wrap:wrap; }
+    #sd-recipe-name-row[hidden], #sd-recipe-note[hidden], #sd-judge-box[hidden], #sd-improve-box[hidden] { display:none; }
+    #sd-recipe-name-row input { flex:1 1 140px; min-width:0; width:auto; }
+    #sd-recipe-note { font-size:11.5px; opacity:.85; margin:-2px 0 6px; }
+    .sd-judge-actions { margin-top:6px; }
+    #sd-used { margin-top:6px; font-size:11.5px; }
+    #sd-used summary { cursor:pointer; opacity:.85; }
+    #sd-used-list { display:grid; grid-template-columns:minmax(110px, 38%) 1fr; gap:2px 8px; margin:4px 0 0; max-height:30vh; overflow:auto; }
+    #sd-used-list dt { opacity:.7; }
+    #sd-used-list dd { margin:0; word-break:break-word; }
+    #sd-judge-box { margin-top:8px; padding:7px 9px; border:1px solid #3a3360; background:#16142a; border-radius:8px; font-size:12px; }
+    #sd-judge-box .sd-jv { font-weight:600; }
+    #sd-judge-box .sd-jv[data-v="keep"] { color:#8ef0b0; } #sd-judge-box .sd-jv[data-v="fix"] { color:#ffcf7a; } #sd-judge-box .sd-jv[data-v="redo"] { color:#ff9c9c; }
+    .sd-jscores { display:grid; grid-template-columns:minmax(120px, 44%) 1fr 30px; gap:2px 6px; align-items:center; margin:5px 0; font-size:11.5px; }
+    .sd-jbar { height:6px; background:#2a2a2a; border-radius:3px; overflow:hidden; } .sd-jbar > i { display:block; height:100%; background:#7c5ce0; }
+    .sd-jlist { margin:2px 0 4px 16px; padding:0; } .sd-jlist li { margin:1px 0; }
+    .sd-jby { font-size:11px; opacity:.7; }
+    #sd-improve-box { margin-top:8px; padding:7px 9px; border:1px solid #2d4a6a; background:#101a26; border-radius:8px; font-size:12px; }
+    #sd-improve-strip { display:flex; gap:6px; overflow-x:auto; padding:6px 0 2px; }
+    .sd-round { flex:0 0 132px; border:1px solid #2a2a2a; border-radius:6px; padding:4px; background:#171717; font-size:11px; cursor:pointer; }
+    .sd-round[data-best="1"] { border-color:#3b9a65; box-shadow:0 0 0 1px #3b9a65 inset; }
+    .sd-round[aria-selected="true"] { outline:2px solid #7c5ce0; }
+    .sd-round img { width:100%; aspect-ratio:1; object-fit:cover; border-radius:4px; display:block; }
+    .sd-round .sd-rs { font-weight:600; margin-top:2px; } .sd-round .sd-rc { opacity:.75; max-height:4.2em; overflow:hidden; }
+    #sd-judge-order { display:flex; flex-direction:column; gap:3px; margin:4px 0; }
+    #sd-judge-order .sd-row { font-size:11.5px; }
     #sd-lib-tools { display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin-bottom:8px; }
     #sd-lib-tools input, #sd-lib-tools select, #sd-lib-tools button { font-size:12px; padding:3px 7px; }
     #sd-lib-wrap { display:grid; grid-template-columns:1fr minmax(260px, 340px); gap:10px; align-items:start; }
@@ -1502,6 +1532,21 @@
       <div class="sd-card" id="sd-form">
         <!-- PR #128: one tight top block (engine · checkpoint · style · size · prompt · negative · LoRAs · character),
              then ⚙ More settings and the collapsed sections, then the sticky Generate bar. Every old id is kept. -->
+        <div id="sd-recipe-row" role="group" aria-label="Recipes: saved settings">
+          <label class="sd-rowlabel" for="sd-recipe" title="A recipe is a set of saved settings (model, size, sampler, steps, LoRAs …) you can use again">Recipe</label>
+          <select id="sd-recipe" title="Pick a recipe to load its settings into the form"><option value="">— my own settings —</option></select>
+          <button type="button" id="btn-sd-recipe-save" class="sd-mini" title="💾 Save the settings in this form as a recipe">💾</button>
+          <button type="button" id="btn-sd-recipe-rename" class="sd-mini" title="✏ Rename this recipe" disabled>✏</button>
+          <button type="button" id="btn-sd-recipe-delete" class="sd-mini" title="🗑 Delete this recipe (a starter recipe is only hidden)" disabled>🗑</button>
+          <button type="button" id="btn-sd-recipe-default" class="sd-mini" aria-pressed="false" title="⭐ Make this the default — it is loaded when the Images tab opens" disabled>⭐</button>
+        </div>
+        <div id="sd-recipe-name-row" hidden>
+          <input type="text" id="sd-recipe-name" maxlength="120" placeholder="Name, e.g. Realistic portrait — SDXL" aria-label="Recipe name">
+          <input type="text" id="sd-recipe-template" maxlength="2000" placeholder="Prompt template (optional): {subject}, soft window light" aria-label="Prompt template with {subject}" title="Optional: words this recipe always adds. {subject} is where each picture's own words go.">
+          <button type="button" id="btn-sd-recipe-name-ok" class="sd-mini primary">Save</button>
+          <button type="button" id="btn-sd-recipe-name-cancel" class="sd-mini" aria-label="Cancel">✕</button>
+        </div>
+        <div id="sd-recipe-note" role="status" aria-live="polite" hidden></div>
         <div id="sd-engine-row">
           <div class="sd-f-engine"><label class="sd-l" for="sd-engine">Engine</label>
             <select id="sd-engine" title="Who draws the picture">
@@ -1597,7 +1642,7 @@
           </div>
           <div class="sd-row" style="margin-top:2px;">
             <div><label class="sd-l" for="sd-vae">VAE</label><select id="sd-vae"><option value="">Automatic</option></select></div>
-            <div><label class="sd-l" for="sd-book-checkpoint" title="Akọwe's book pictures (portraits, covers, scenes) are made with this checkpoint. Nothing is switched without this setting.">📖 Book pictures use</label><select id="sd-book-checkpoint"><option value="">(whatever is loaded)</option></select></div>
+            <div><label class="sd-l" for="sd-book-checkpoint" title="Akọwe's book pictures (portraits, covers, scenes) are made with this checkpoint — or with all the settings of a recipe. Nothing is switched without this setting.">📖 Book pictures use</label><select id="sd-book-checkpoint"><option value="">(whatever is loaded)</option></select></div>
           </div>
           <div id="sd-vae-warn" class="sd-warn" role="note" hidden></div>
           <div class="sd-note" id="sd-book-note"></div>
@@ -1624,6 +1669,15 @@
             </div>
             <label class="sd-fixed" style="font-size:12px;margin-top:5px;"><input type="checkbox" id="sd-rv-fresh"> ChatGPT: start a new chat for each series (off = one chat, which keeps the character the same)</label>
             <div class="sd-note" id="sd-rv-note">Uses the Engine above. Stable Diffusion keeps one seed across the views; ChatGPT draws them in one conversation. AutoInjector writes the framing (full body, the angle, a plain light-grey background).</div>
+          </div></details>
+          <details class="sd-adv" id="sd-sec-judge"><summary>🧑‍⚖️ AI judge settings <span class="sd-on" id="sd-judge-badge"></span></summary><div class="sd-adv-body">
+            <div class="sd-note">The judge looks at a picture and says what is good, what is bad and what to change. Each judgement uses one AI answer (your Claude plan or ChatGPT), except the local model. The first one that is ready is used:</div>
+            <div id="sd-judge-order" role="list" aria-label="Which AI judges, in order"></div>
+            <div class="sd-row"><div><label class="sd-l" for="sd-judge-pane">Web pane</label><select id="sd-judge-pane"><option value="claude">Claude</option><option value="chatgpt">ChatGPT</option></select></div>
+              <div><label class="sd-l" for="sd-judge-rounds" title="Make it better tries at most this many rounds (each round = one new picture + one AI answer)">Rounds</label><input type="number" id="sd-judge-rounds" min="1" max="5" value="3"></div>
+              <div><label class="sd-l" for="sd-judge-bar" title="A picture passes when the judge says keep and the average score reaches this">Pass mark</label><input type="number" id="sd-judge-bar" min="5" max="10" step="0.5" value="7.5"></div></div>
+            <label class="sd-fixed" style="font-size:12px;" title="Off by default: it costs AI usage. When on, Akọwe's character pictures are judged and improved (at most 2 rounds) before Akọwe gets them."><input type="checkbox" id="sd-judge-autobook"> Judge and improve book pictures automatically</label>
+            <div class="sd-note" id="sd-judge-status" role="status"></div>
           </div></details>
           <details class="sd-adv" id="sd-sec-hires"><summary>Hires fix <span class="sd-on" id="sd-hr-badge"></span></summary><div class="sd-adv-body">
             <label class="sd-fixed" style="font-size:12px;"><input type="checkbox" id="sd-hr-on"> Render small, upscale, then add detail</label>
@@ -1705,6 +1759,7 @@
         <div class="sd-gobar">
           <div class="sd-row">
             <button id="btn-sd-generate" class="primary">🎨 Generate</button>
+            <label class="sd-fixed sd-small" title="Makes 4 pictures with different seeds, asks the AI judge about each and shows the best. Uses 4 AI answers."><input type="checkbox" id="sd-make-best"> Make 4, pick the best</label>
             <button id="btn-sd-stop" class="sd-fixed" disabled>⏹ Stop</button>
           </div>
           <div id="sd-progress" aria-hidden="true"><div id="sd-progress-bar"></div></div>
@@ -1730,6 +1785,21 @@
           <button id="btn-sd-showfile" disabled title="Show the file in its folder">📂 Show file</button>
           <button id="btn-sd-folder" title="Open the images folder">🗂 Images folder</button>
         </div>
+        <div class="sd-actions sd-judge-actions">
+          <button id="btn-sd-judge" disabled title="Ask an AI judge what is good and bad about this picture (uses one AI answer)">🧑‍⚖️ Judge</button>
+          <button id="btn-sd-improve" disabled title="Judge → change the settings → make it again, up to 3 rounds; keeps every round (uses one AI answer per round). Your defaults are never changed.">🔁 Make it better</button>
+          <button id="btn-sd-save-recipe" disabled title="Use these settings again: save them as a recipe">💾 Save as recipe</button>
+        </div>
+        <div id="sd-judge-box" role="region" aria-label="The AI judge's verdict" aria-live="polite" hidden></div>
+        <div id="sd-improve-box" role="region" aria-label="Make it better" hidden>
+          <div class="sd-row"><span id="sd-improve-msg" role="status" aria-live="polite"></span><button type="button" id="btn-sd-improve-stop" class="sd-mini sd-fixed">⏹ Stop</button></div>
+          <div id="sd-improve-strip" role="listbox" aria-label="Each round, with its score"></div>
+          <div class="sd-actions" id="sd-improve-actions" hidden>
+            <button type="button" id="btn-sd-improve-keep" class="primary" title="Show this one as the result (the others stay in the gallery)">✔ Keep this one</button>
+            <button type="button" id="btn-sd-improve-recipe" title="Save the chosen round's settings as a recipe">💾 Save these settings as a recipe</button>
+          </div>
+        </div>
+        <details id="sd-used"><summary>Settings used</summary><dl id="sd-used-list"></dl></details>
         <h3 class="sd-h-gap">Gallery</h3>
         <div id="sd-gallery" aria-label="Recent pictures"></div>
       </div>
@@ -2841,6 +2911,7 @@
   </div>
 
   <script src="controls.js"></script>
+  <script src="sd-record.js"></script><!-- 🎨 what is saved with each picture, in plain words; the exact Remake request (window.sdRecord) -->
   <script src="sd-quality.js"></script><!-- 🎨 quality defaults by model family, prompt shortening, styles (window.sdQuality, PR #128) -->
   <script src="images-studio.js"></script>
   <script src="videos-studio.js"></script>

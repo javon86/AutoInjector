@@ -315,6 +315,7 @@ const EXCLUDED = {
   'panes:sync': 'internal layout sync (not a user action)',
   'ui:log': 'internal UI logging (not a user action)',
   'sd:extras': 'internal: the Images tab\'s one-call bundle (upscalers, ControlNet, ADetailer, styles, scripts, options, workflows); Alfred reads each through sd_call (sd.upscalers, sd.controlnet.*, sd.adetailer.models, sd.styles, sd.scripts, sd.options.get, sd.workflows.list)',
+  'sd:form-report': 'internal: the 🎨 Images window tells AutoInjector what its form shows; Alfred reads it with sd_call images.form.get and changes it with images.form.set',
   'sd:capabilities': 'internal: Alfred reads sd-api capabilities() directly when he builds his sd_call method list and schemas (alfred-main.js sdMethodsOf)',
   'akowe-view:tab': 'internal: the tab tells main it is showing (Alfred uses ui.show_tab / open_akowe_page)',
   'video:capabilities': 'internal: Alfred reads video-api capabilities() directly when he builds his video_call method list and schemas',
@@ -342,6 +343,8 @@ const TOOL_CHANNELS = {
   'sd:refresh': 'sd_call:sd.refresh', 'sd:memory': 'sd_call:sd.memory', 'sd:workflows': 'sd_call:sd.workflows.list', 'sd:workflow-get': 'sd_call:sd.workflows.get',
   'sd:workflow-save': 'sd_call:sd.workflows.save', 'sd:workflow-delete': 'sd_call:sd.workflows.delete', 'sd:workflow-run': 'sd_call:sd.workflows.run',
   // 🎨 the second engine (ChatGPT) + reference views / sheets: images.generate with engine / purpose / view is the same path as sd:request
+  'sd:remake': 'sd_call:images.remake', 'sd:recipes': 'sd_call:images.recipes.list', 'sd:judge': 'sd_call:images.judge', 'sd:improve': 'sd_call:images.improve',
+  'sd:improve-stop': 'sd_call:images.improveStop', 'sd:make-best': 'sd_call:images.makeBest', 'sd:judge-status': 'sd_call:images.judgeStatus', 'sd:judge-settings': 'sd_call:images.judgeSettings',
   'sd:request': 'sd_call:images.generate', 'sd:chatgpt-status': 'sd_call:images.chatgptStatus', 'sd:chatgpt-cancel': 'sd_call:images.chatgptCancel', 'sd:chatgpt-settings': 'sd_call:images.chatgptSettings', 'sd:quality': 'sd_call:images.qualitySettings',
   // 🎬 the Video tab → the video module API (video-api.js) through video_call
   'video:full-status': 'video_call:video.status', 'video:models': 'video_call:video.models', 'video:settings': 'video_call:video.settings',

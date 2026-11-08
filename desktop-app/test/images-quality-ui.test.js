@@ -81,7 +81,7 @@ async function generate(t) { t.click('btn-sd-generate'); await tick(60); return 
   for (const id of ['sd-sampler', 'sd-scheduler', 'sd-steps', 'sd-cfg', 'sd-batch', 'sd-seed', 'sd-vae', 'sd-book-checkpoint']) assert(t.$('sd-sec-more').contains(t.$(id)), `#${id} is inside ⚙ More settings`);
   assert(!t.$('sd-sec-more').open && t.$('sd-neg-box').tagName === 'DETAILS' && !t.$('sd-neg-box').open, '⚙ More settings and the negative prompt start folded (one line each)');
   assert(t.$('sd-size-custom').hidden && t.$('sd-size-custom').contains(t.$('sd-width')) && t.$('sd-size-custom').contains(t.$('sd-height')), 'the exact Width / Height sliders live under Custom (hidden by default)');
-  assert([...t.d.querySelectorAll('#sd-advanced > details')].map((x) => x.id).join() === 'sd-sec-views,sd-sec-hires,sd-sec-refiner,sd-sec-img2img,sd-sec-cn,sd-sec-ad,sd-sec-up,sd-sec-adv,sd-sec-wf', 'the extra sections stay as collapsed rows with their ids');
+  assert([...t.d.querySelectorAll('#sd-advanced > details')].map((x) => x.id).join() === 'sd-sec-views,sd-sec-judge,sd-sec-hires,sd-sec-refiner,sd-sec-img2img,sd-sec-cn,sd-sec-ad,sd-sec-up,sd-sec-adv,sd-sec-wf', 'the extra sections stay as collapsed rows with their ids');
   assert(t.d.querySelector('.sd-gobar').contains(t.$('btn-sd-generate')) && t.d.querySelector('.sd-gobar').contains(t.$('btn-sd-stop')), 'Generate / Stop stay in the sticky bar');
   assert(t.d.querySelectorAll('#sd-style-row [data-style]').length === 5 && t.d.querySelectorAll('#sd-size-row [data-aspect]').length === 4, 'Style: 5 chips; Size: Portrait / Square / Landscape / Custom');
 

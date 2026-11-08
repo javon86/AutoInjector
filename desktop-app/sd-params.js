@@ -141,6 +141,8 @@ const GENERATE_SCHEMA = {
     alwaysonScripts: Object.assign({ type: 'object', description: 'Raw alwayson_scripts for any extension: { "<extension>": { "args": [...] } }', additionalProperties: true }, { 'x-a1111': ['alwayson_scripts'], 'x-comfy': 'no' }),
     overrideSettings: Object.assign({ type: 'object', description: 'Any settings-menu option, for this picture only (keys: sd.options.get())', additionalProperties: true }, { 'x-a1111': ['override_settings', 'override_settings_restore_afterwards'], 'x-comfy': 'no' }),
     extra: Object.assign({ type: 'object', description: 'Any other txt2img/img2img payload field, checked against the server\'s /openapi.json (list: sd.extraFields())', additionalProperties: true }, { 'x-a1111': ['*'], 'x-comfy': 'no', 'x-comfy-note': 'run a workflow instead (sd.workflows.run)' }),
+    recipe: Object.assign(T.str('A saved recipe (id or name, images.recipes.list): its settings first, then the ones given here; its prompt template wraps the prompt'), { 'x-a1111': [], 'x-comfy': 'yes' }),
+    style: Object.assign(T.str('Style words added to the prompt (and matching things to avoid)', { enum: ['photo', 'cinematic', 'illustration', 'anime', 'painting'] }), { 'x-a1111': [], 'x-comfy': 'yes' }),
     book: Object.assign(T.str('Book title, recorded with the picture'), { 'x-a1111': [], 'x-comfy': 'yes' }),
     from: Object.assign(T.str('Who asked (recorded)'), { 'x-a1111': [], 'x-comfy': 'yes' }),
     returnImage: Object.assign(T.bool('Also return base64'), { 'x-a1111': [], 'x-comfy': 'yes' }),
