@@ -33,6 +33,7 @@ let settings = {
   // 🎤 / 🔊 in the control panel (voice-ui.js): who the title-bar mic sends to, the read-aloud speed, and the
   // built-in (no-install) voice per speaker — the browser's own voices, used when piper isn't there.
   micTarget: 'all',    // 'all' | 'chatgpt' | 'claude' | 'gemini' | 'butler'
+  micSendNow: false,   // false = "check first": the words wait in the Compose box until the user presses Send
   rate: 1,             // read-aloud speed (0.5 – 2)
   browserVoices: { butler: '', chatgpt: '', claude: '', gemini: '' },
 };
@@ -50,12 +51,13 @@ function setSettings(patch) {
   if ('listenSeconds' in patch) { const n = Number(patch.listenSeconds); if (Number.isFinite(n)) settings.listenSeconds = Math.max(1, Math.min(60, n)); }
   if ('timeoutMs' in patch) settings.timeoutMs = Math.max(2000, Number(patch.timeoutMs) || settings.timeoutMs);
   if ('micTarget' in patch && MIC_TARGETS.includes(patch.micTarget)) settings.micTarget = patch.micTarget;
+  if ('micSendNow' in patch) settings.micSendNow = !!patch.micSendNow;
   if ('rate' in patch) { const n = Number(patch.rate); if (Number.isFinite(n)) settings.rate = Math.max(0.5, Math.min(2, Math.round(n * 100) / 100)); }
   if (patch.browserVoices && typeof patch.browserVoices === 'object') { for (const who of Object.keys(settings.browserVoices)) if (who in patch.browserVoices) settings.browserVoices[who] = String(patch.browserVoices[who] || '').slice(0, 200); }
   return getSettings();
 }
 function status() {
-  return { configured: !!settings.endpoint, enabled: !!settings.enabled, endpoint: settings.endpoint, speakOnAck: !!settings.speakOnAck, voices: { ...settings.voices }, micDevice: settings.micDevice, speakerDevice: settings.speakerDevice, micTarget: settings.micTarget, rate: settings.rate, browserVoices: { ...settings.browserVoices }, managed: !!managed.child, managedPid: managed.child ? managed.child.pid : null, lastStartError: managed.lastError || '' };
+  return { configured: !!settings.endpoint, enabled: !!settings.enabled, endpoint: settings.endpoint, speakOnAck: !!settings.speakOnAck, voices: { ...settings.voices }, micDevice: settings.micDevice, speakerDevice: settings.speakerDevice, micTarget: settings.micTarget, micSendNow: !!settings.micSendNow, rate: settings.rate, browserVoices: { ...settings.browserVoices }, managed: !!managed.child, managedPid: managed.child ? managed.child.pid : null, lastStartError: managed.lastError || '' };
 }
 // Resolve the piper voice for a speaker id (butler/chatgpt/claude/gemini).
 function voiceFor(who) { return (settings.voices && settings.voices[who]) || ''; }

@@ -3,7 +3,9 @@
  *
  *   Title bar     🎤 + "who hears it" (All · ChatGPT · Claude · Gemini · 🎩 Alfred when he is on) + one short line
  *                 that says what was heard and where it went ("🎤 Heard: “…” → sent to Claude").
- *                 Click 🎤 = record (it turns red with a timer), click again = stop → words → sent. Esc stops
+ *                 Click 🎤 = record (it turns red with a timer), click again = stop → words. "Check first" (the default):
+ *                 the words wait in the Compose box with a → Send button so a misheard name can be fixed; with
+ *                 "Send what I say right away" ticked (🔊 Voice box) they go at once. Esc stops
  *                 without sending. The words go through the SAME send as the Compose box (window.api.sendCompose,
  *                 and sendToAlfred for Alfred), so House Rules, relaying and every guard behave the same.
  *   Each AI pane  🎤 in its header (sends to that AI only) and, beside "💬 Last reply", ◀ 🔊 ▶ with "3 / 7":
@@ -34,7 +36,7 @@
     const $ = (id) => doc.getElementById(id);
     const has = (fn) => typeof api[fn] === 'function';
 
-    const prefs = { micTarget: 'all', rate: 1, voices: {}, browserVoices: {}, micDevice: '', engine: 'auto' };
+    const prefs = { micSendNow: false, micTarget: 'all', rate: 1, voices: {}, browserVoices: {}, micDevice: '', engine: 'auto' };
     try { const t = win.localStorage && win.localStorage.getItem('voice.micTarget'); if (t) prefs.micTarget = t; } catch (_) {}
     let alfredOn = false;
 
@@ -121,6 +123,46 @@
       return { ok: sent.length > 0, sent, failed };
     }
 
+    // ---- ✔ check first: the words wait in the Compose box until the user presses → Send ---------------------
+    const pending = { text: '', target: 'all' };
+    const targetName = (target) => (target === 'all' ? 'everyone ticked' : LABELS[target] || target);
+    function composer() { return $('composer-text'); }
+    function review(text, target) {
+      pending.text = text; pending.target = target;
+      const box = composer();
+      if (box) {
+        const before = String(box.value || '');
+        const sep = before && !/\s$/.test(before) ? ' ' : '';
+        box.value = before + sep + text;
+        try { box.dispatchEvent(new win.Event('input', { bubbles: true })); } catch (_) {}
+        try { box.focus(); box.setSelectionRange(before.length + sep.length, box.value.length); } catch (_) {}
+      }
+      const send = { label: `→ Send to ${targetName(target)}`, title: 'Send the words in the Compose box (fix anything first)', run: () => sendReviewed() };
+      const drop = { label: '✕ Clear', title: 'Forget it — nothing is sent', run: () => clearReviewed() };
+      say(box ? `🎤 Check what I heard in the Compose box, fix anything, then send: “${short(text, 60)}”`
+              : `🎤 Heard: “${short(text, 70)}” — send it?`, { sticky: true, tone: 'ok', title: `Heard: ${text}`, actions: [send, drop] });
+      return { ok: true, review: true, text, target };
+    }
+    async function sendReviewed() {
+      const box = composer();
+      const text = String(box ? box.value : pending.text).trim();
+      if (!text) { say('🎤 The Compose box is empty — nothing was sent.', { tone: 'warn', autoHideMs: 6000 }); return { ok: false, error: 'EMPTY' }; }
+      const r = await deliver(text, pending.target);
+      if (r && r.ok && box) { box.value = ''; try { box.dispatchEvent(new win.Event('input', { bubbles: true })); } catch (_) {} }
+      pending.text = '';
+      return r;
+    }
+    function clearReviewed() {
+      const box = composer();
+      if (box && pending.text) {
+        const v = String(box.value || '');
+        const at = v.lastIndexOf(pending.text);
+        if (at >= 0) { box.value = (v.slice(0, at) + v.slice(at + pending.text.length)).replace(/\s+$/, ''); try { box.dispatchEvent(new win.Event('input', { bubbles: true })); } catch (_) {} }
+      }
+      pending.text = '';
+      say('🎤 Cleared — nothing was sent.', { autoHideMs: 5000 });
+    }
+
     // ---- 🎤 recording -------------------------------------------------------------------------------------
     const mic = { phase: 'idle', target: 'all', rec: null, stream: null, chunks: [], t0: 0, timer: null, token: 0, mime: '' };
     function paintMic() {
@@ -133,7 +175,7 @@
         b.classList.toggle('rec', rec);
         b.classList.toggle('busy', busy);
         b.setAttribute('aria-pressed', String(rec));
-        b.title = rec ? `Recording for ${mic.target === 'all' ? 'everyone ticked' : LABELS[mic.target]} — click to stop and send (Esc stops without sending)` : busy ? 'Working out what you said…' : 'Talk to the AIs: click, speak, click again to send (Esc stops without sending)';
+        b.title = rec ? `Recording for ${mic.target === 'all' ? 'everyone ticked' : LABELS[mic.target]} — click to stop (Esc stops without keeping it)` : busy ? 'Working out what you said…' : 'Talk to the AIs: click, speak, click again — then check the words and press Send (Esc stops without keeping it)';
       }
       for (const s of SITES) {
         const pb = $(`voice-mic-${s}`);
@@ -241,7 +283,7 @@
       }
       const text = String(r.text || '').trim();
       if (!text || /^[\s.,!?…-]*$/.test(text)) { say("🎤 I didn't catch any words — nothing was sent.", { tone: 'warn', autoHideMs: 8000 }); return { ok: false, error: 'NO_WORDS' }; }
-      return deliver(text, target);
+      return prefs.micSendNow ? deliver(text, target) : review(text, target);
     }
     function cancelTranscribe() {
       if (mic.phase !== 'transcribing') return;
@@ -520,6 +562,13 @@
       const box = $('voice-read-settings');
       if (!box) return;
       box.textContent = '';
+      const now = h('input', { type: 'checkbox', id: 'mic-send-now' });
+      now.checked = !!prefs.micSendNow;
+      now.addEventListener('change', () => {
+        prefs.micSendNow = now.checked;
+        if (has('configureVoice')) try { api.configureVoice({ micSendNow: now.checked }); } catch (_) {}
+      });
+      box.append(h('label', { class: 'vrs-note', for: 'mic-send-now', title: 'Off (the default): what you say waits in the Compose box so you can fix a misheard word, then you press Send' }, now, ' 🎤 Send what I say right away (skip checking it first)'));
       box.append(h('div', { class: 'vrs-title' }, '🔊 Read-aloud voices (the 🔊 on each AI)'));
       const piperNote = piperList.length ? `${piperList.length} piper voice${piperList.length === 1 ? '' : 's'} found.` : 'Using this PC\'s built-in voices. Nicer ones: Setup Wizard → Installs → "Voice model".';
       box.append(h('div', { class: 'vrs-note', id: 'vrs-note' }, piperNote));
@@ -571,6 +620,7 @@
           const s = await api.voiceStatus();
           if (s) {
             if (s.micTarget) prefs.micTarget = s.micTarget;
+            prefs.micSendNow = !!s.micSendNow;
             if (Number(s.rate)) prefs.rate = Number(s.rate);
             prefs.voices = Object.assign({}, s.voices || {});
             prefs.browserVoices = Object.assign({}, s.browserVoices || {});
@@ -605,7 +655,7 @@
     }
 
     return {
-      init, say, deliver, resolveTargets, micToggle, micStart, micStop, cancelTranscribe, refreshReplies, step, playReply, speakButton,
+      init, say, deliver, review, sendReviewed, clearReviewed, resolveTargets, micToggle, micStart, micStop, cancelTranscribe, refreshReplies, step, playReply, speakButton,
       speaker, prefs, replies, mic, testVoice, openVoiceSettings, _setAlfredOn: (on) => { alfredOn = !!on; paintTargets(); },
     };
   }
