@@ -113,10 +113,10 @@ async function main() {
   assert(vp.status().lastStartError === '', 'status() reports no managed-start error by default');
 
   console.log('\n== settings round-trip (what the app persists + restores) ==');
-  const want = { enabled: true, endpoint: 'http://127.0.0.1:8299', speakOnAck: false, listenSeconds: 9, voices: { butler: 'en_US-amy', chatgpt: '', claude: 'en_GB-alan', gemini: '' }, micDevice: 'mic-1', speakerDevice: 'spk-2', timeoutMs: 30000, micTarget: 'claude', rate: 1.2, browserVoices: { butler: 'Microsoft George', chatgpt: '', claude: '', gemini: 'Microsoft Zira' } };
+  const want = { enabled: true, endpoint: 'http://127.0.0.1:8299', speakOnAck: false, listenSeconds: 9, voices: { butler: 'en_US-amy', chatgpt: '', claude: 'en_GB-alan', gemini: '' }, micDevice: 'mic-1', speakerDevice: 'spk-2', timeoutMs: 30000, micTarget: 'claude', micSendNow: true, rate: 1.2, browserVoices: { butler: 'Microsoft George', chatgpt: '', claude: '', gemini: 'Microsoft Zira' } };
   vp.setSettings(want);
   const saved = JSON.parse(JSON.stringify(vp.getSettings())); // as written to autoinjector-state.json
-  vp.setSettings({ enabled: false, endpoint: '', speakOnAck: true, listenSeconds: 6, voices: { butler: '', chatgpt: '', claude: '', gemini: '' }, micDevice: '', speakerDevice: '', timeoutMs: 60000, micTarget: 'all', rate: 1, browserVoices: { butler: '', chatgpt: '', claude: '', gemini: '' } });
+  vp.setSettings({ enabled: false, endpoint: '', speakOnAck: true, listenSeconds: 6, voices: { butler: '', chatgpt: '', claude: '', gemini: '' }, micDevice: '', speakerDevice: '', timeoutMs: 60000, micTarget: 'all', micSendNow: false, rate: 1, browserVoices: { butler: '', chatgpt: '', claude: '', gemini: '' } });
   vp.setSettings(saved); // as restored on startup
   assert(JSON.stringify(vp.getSettings()) === JSON.stringify(want), 'getSettings() -> JSON -> setSettings() restores every voice setting exactly');
   assert(!Object.keys(saved).some((k) => /key|token|secret|password/i.test(k)), 'the persisted voice settings hold no secret fields');

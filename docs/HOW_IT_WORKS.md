@@ -329,8 +329,10 @@ bridge to your home Wi-Fi, behind its key.
 
 ### 🎤 Talking to the AIs and 🔊 hearing their replies
 
-- **🎤 at the top (title bar):** click it and speak; it turns red and counts the seconds. Click again and your words
-  are typed into the AIs for you — the same way the Compose box sends, so House Rules and relaying work the same.
+- **🎤 at the top (title bar):** click it and speak; it turns red and counts the seconds. Click again and **your words
+  appear in the Compose box first, so you can fix a misheard name** — then press **→ Send** on the line at the top (or
+  ✕ Clear). Sending goes the same way the Compose box sends, so House Rules and relaying work the same. If you would
+  rather skip the check, tick **"🎤 Send what I say right away"** in System AI → 🔊 Voice.
   The box beside it says who hears it: **All** (every AI ticked as Active, plus 🎩 Alfred when his box is ticked, just
   like → All), or one AI, or 🎩 Alfred (only while he is on). It remembers your choice. **Esc** stops without sending.
 - **🎤 in each AI's header** sends to that AI only.
