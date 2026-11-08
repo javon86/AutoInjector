@@ -11,6 +11,9 @@ slow_tree (also starts a child process), crash, unknown_flag (refuses --permissi
 call only; state file FAKE_CLAUDE_STATE). FAKE_CLAUDE_DELAY: seconds to wait before answering. FAKE_CLAUDE_LOG: a folder
 where each call writes {job, start, end, pid, argv, stdin_chars, argv_chars} (for the overlap and privacy tests).
 FAKE_CLAUDE_FACTS=wrong: the fact check finds one wrong claim with a fix. FAKE_CLAUDE_PROBLEM=1: continuity finds one.
+Step 2 jobs: prepare (two scene cards and an empty needs list), variety, the specialists (dialogue / pacing / sensory /
+subtext: one minor problem with FAKE_CLAUDE_SPECIALIST=1), style and specifics (line rewrites), bible_fill (every
+asked field) and launch_kit (every asked field in its shape).
 """
 import json
 import os
@@ -86,6 +89,64 @@ def answer(job, ctx):
         for s in [x for x in re.findall(r"[A-Z][^.!?\n]{10,200}[.!?]", text) if text.count(x) == 1][:25]:
             lines.append({"quote": s, "problem": "stock rhythm", "rewrite": s[:-1] + ", and that was all."})
         return {"lines": lines}
+    # ---- 🤖 Step 2 jobs (claude_code_speed.py)
+    if job == "prepare":
+        names = [c.get("name") for c in ctx.get("characters") or [] if c.get("name")][:2] or ["Mara"]
+        n = (ctx.get("chapter") or {}).get("number") or 1
+        cards = [{"place": f"The lamp room ({k})", "time": "dusk", "characters": names,
+                  "goals": [{"character": nm, "goal": "keep the light burning", "hidden_agenda": "hide the logbook"}
+                            for nm in names],
+                  "obstacle": "the storm cuts the supply boat", "obstacle_source": "weather",
+                  "change": f"scene {k} of chapter {n} turns", "unsaid": "who broke the lens", "beat": "the objective"}
+                 for k in (1, 2)]
+        return {"scenes": cards, "needs": {"things": [], "earlier": [], "notes": []}}
+    if job == "variety":
+        used = ctx.get("used_so_far") or []
+        first = used[0]["chapter"] if used else 1
+        return {"opening": {"repeats": True, "chapters": [first, 99],
+                            "advice": "Open on the cracked lens in her hands, not on the weather."},
+                "closing": {"repeats": False, "chapters": [], "advice": ""}}
+    if job in ("dialogue", "pacing", "sensory", "subtext"):
+        probs = []
+        if env("FAKE_CLAUDE_SPECIALIST") == "1":
+            s = first_sentence(ctx.get("chapter_text") or "")
+            if s:
+                probs.append({"chapter": ctx.get("chapter") or 1, "quote": s, "problem": f"{job} problem here",
+                              "severity": "minor"})
+        return {"problems": probs, "summary": f"{job} checked"}
+    if job in ("style", "specifics"):
+        text = ctx.get("chapter_text") or ""
+        lines = []
+        for i, s in enumerate([x for x in re.findall(r"[A-Z][^.!?\n]{10,200}[.!?]", text) if text.count(x) == 1][:6]):
+            ln = {"quote": s, "problem": f"{job} line", "rewrite": s[:-1] + ", brass-cold and close."}
+            if job == "specifics":
+                ln["type"] = ("generic_detail", "tidy_dialogue")[i % 2]
+            lines.append(ln)
+        return {"lines": lines, "summary": job}
+    if job == "bible_fill":
+        out = {}
+        for subj in ctx.get("subjects") or []:
+            for k, label in (subj.get("fields") or {}).items():
+                out[k] = "ally" if "Relationship type with " in str(label) else "4 — weathered brass and salt-stained wool"
+        return out
+    if job == "launch_kit":
+        out = {}
+        for f in ctx.get("fields") or []:
+            if f in ("blurb_short", "blurb_long", "author_bio"):
+                out[f] = " ".join(["The keeper keeps the light while the storm keeps coming."] * (8 if f != "blurb_long" else 18))
+            elif f == "hook":
+                out[f] = "One keeper, one storm, and a light that must not go out."
+            elif f == "keywords":
+                out[f] = ["lighthouse mystery", "storm novel", "keeper secrets", "coastal suspense",
+                          "victorian lighthouse", "family secret book", "sea storm story"]
+            elif f == "categories":
+                out[f] = list((ctx.get("category_choices") or [])[:3])
+            elif f == "comps":
+                out[f] = [{"title": f"Book {i}", "author": f"Writer {i}", "why": "a lighthouse story"} for i in (1, 2, 3)]
+            elif f == "aplus":
+                out[f] = [{"headline": f"Module {i}", "text": "The light, the storm and the keeper.", "image": ""}
+                          for i in (1, 2, 3)]
+        return out
     return {}
 
 
@@ -113,6 +174,7 @@ def main():
         if logdir:
             with open(os.path.join(logdir, f"{os.getpid()}-{time.time_ns()}.json"), "w", encoding="utf-8") as f:
                 json.dump(dict(job=job, start=t0, end=time.time(), pid=os.getpid(), argv=argv,
+                               rel=("Relationship type with " in stdin) if job == "bible_fill" else None,
                                stdin_chars=len(stdin), argv_chars=sum(len(a) for a in argv), cwd=os.getcwd(),
                                cwd_files=os.listdir(os.getcwd()), mode=mode, **kw), f)
 

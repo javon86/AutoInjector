@@ -18,6 +18,20 @@ approves.
    closings, samey rhythm, tidy moral endings, over-explained feelings, gestures repeated across the book) — and the
    AI flags and rewrites ONLY those lines: [{quote, problem, rewrite}]. A rewrite that drops a locked detail, a name,
    a number or a protected voice/motif repeat is left out.
+
+🤖 Step 2 (placed in the run by ``claude_code_speed``):
+
+5. **prepare** (no tools) — the next chapter's scene cards and needs list: the scene planner's own task, PLAN_SCHEMA and
+   cleaning (scenes.clean_cards; the needs list through needs_list.clean).
+6. **variety** (no tools) — the planned first and last scene against how the chapters so far opened and ended.
+7. **dialogue / pacing / sensory / subtext** (no tools) — specialist reviewers, problems in the checks' format,
+   labelled ("Pacing: …"), quotes found word for word.
+8. **style** (no tools) — narration that drifts from the author's ✒️ style card (numbers compared without AI,
+   ``style_drift``), rewritten in the author's manner; guarded by clean_tells.
+9. **specifics** (no tools) — generic details and too-tidy dialogue with concrete / messier rewrites (typed);
+   guarded by clean_tells.
+10. **bible_fill** / **launch_kit** (no tools) — whole_bible's and launch_kit's own tasks and schemas, validated here
+    and read by those modules exactly like a web AI's answer.
 """
 from __future__ import annotations
 
@@ -363,3 +377,220 @@ def clean_tells(raw, text: str, *, keep_exactly=None, keep_repeats=None) -> list
         if len(out) >= MAX_LINES:
             break
     return out
+
+
+# ====================================================================== 🤖 Step 2 (claude_code_speed.py places them)
+# 5. prepare — the next chapter's scene cards and needs list (the scene planner's own task, schema and context)
+def prepare(store, task: str, ctx: dict, *, cancel=None) -> tuple[dict, dict]:
+    """{cards: [clean scene cards], needs_raw} — the same PLAN_SCHEMA and cleaning as scenes.ScenePlanner.make; the
+    needs list is validated by the caller (needs_list.clean needs the store). Raises CCError when unusable."""
+    from . import scenes  # noqa: PLC0415
+    res = cc.run_job(store, kind="prepare", prompt=prompt("prepare", task, scenes.PLAN_SCHEMA, ctx),
+                     schema=scenes.PLAN_SCHEMA, tools="none", max_turns=3, cancel=cancel)
+    raw = res["data"] if isinstance(res["data"], dict) else {}
+    cards = scenes.clean_cards(raw)
+    if not cards:
+        raise cc.CCError("UPSTREAM_UNAVAILABLE", "the prepared scene plan had no usable scene", detail="EMPTY")
+    return {"cards": cards, "needs_raw": raw.get("needs")}, res
+
+
+# 6. variety — the planned opening and closing against how the chapters so far opened and ended
+VARIETY_SCHEMA = {
+    "type": "object", "required": ["opening", "closing"],
+    "properties": {k: {"type": "object", "required": ["repeats", "advice"],
+                       "properties": {"repeats": {"type": "boolean"},
+                                      "chapters": {"type": "array", "maxItems": 20, "items": {"type": "integer"}},
+                                      "advice": {"type": "string", "maxLength": 400}}}
+                   for k in ("opening", "closing")}}
+VARIETY_TASK = (
+    "You help a novelist keep a book from falling into a pattern. context.used_so_far lists, for each chapter written "
+    "so far, how it opened and how it ended (a kind like weather, waking, dialogue, a jump in time, a moral, a "
+    "fragment — or other) with its first and last sentence, and how many scenes it had. context.planned is the plan "
+    "of the NEXT chapter: its first scene and its last scene. Say whether the planned opening and the planned "
+    "closing would repeat what earlier chapters already did (repeats, and the chapter numbers it echoes), and in "
+    "advice ONE short, concrete sentence for the writer: how to open (or end) this chapter differently, using this "
+    "chapter's own scene (an object, a sound, an action in the middle, a line only this character would say). When "
+    "it does not repeat: repeats false and advice empty.")
+
+
+def clean_variety(raw, used_numbers) -> dict:
+    """{opening: {repeats, chapters, advice}, closing: {...}} — chapter numbers only from the chapters so far; a
+    repeat without advice is no repeat (nothing to tell the writer)."""
+    ok = set(used_numbers or [])
+    out = {}
+    for k in ("opening", "closing"):
+        v = (raw or {}).get(k) if isinstance(raw, dict) else None
+        v = v if isinstance(v, dict) else {}
+        advice = _clip(v.get("advice"), 300)
+        rep = bool(v.get("repeats")) and bool(advice)
+        out[k] = {"repeats": rep, "chapters": sorted({n for n in v.get("chapters") or [] if isinstance(n, int)
+                                                      and not isinstance(n, bool) and n in ok})[:8] if rep else [],
+                  "advice": advice if rep else ""}
+    return out
+
+
+def variety(store, used: list[dict], planned: dict, *, cancel=None) -> tuple[dict, dict]:
+    ctx = {"used_so_far": used[-12:], "planned": planned}
+    res = cc.run_job(store, kind="variety", prompt=prompt("variety", VARIETY_TASK, VARIETY_SCHEMA, ctx),
+                     schema=VARIETY_SCHEMA, tools="none", max_turns=2, cancel=cancel)
+    return clean_variety(res["data"], [u.get("chapter") for u in used]), res
+
+
+# 7. specialist reviewers — problems in the checks' format (the same merge as the checks side by side)
+SPECIALIST_LABEL = {"dialogue": "Dialogue voice", "pacing": "Pacing", "sensory": "Senses and detail",
+                    "subtext": "Subtext"}
+SPECIALIST_TASKS = {
+    "dialogue": (
+        "You are a dialogue editor. Read ONLY what context.character says in context.chapter_text and check it "
+        "against their voice card (context.voice_card: rhythm, register, words they use and never use, habits). "
+        "Report each line where they sound unlike their card, sound like another character, or explain what the "
+        "listener already knows. Do not report narration, plot or facts. For each problem: the chapter number "
+        "(context.chapter), the exact words (quote, word for word), the problem in one plain sentence, severity, and "
+        "when a small change fixes it, original (a short exact phrase, found once) and replacement in their voice."),
+    "pacing": (
+        "You are a pacing editor. Read context.chapter_text (context.chapter is its number; context.target_words the "
+        "planned length). Report only clear pacing problems: a scene that drags (the same beat repeated, a long "
+        "stretch where nothing changes), a turning point rushed in a sentence, summary where the moment needs a "
+        "scene, an ending that stops before the change lands. For each problem: the chapter number, the exact words "
+        "where it happens (quote, word for word), the problem in one plain sentence and severity. No rewrites of "
+        "whole passages."),
+    "sensory": (
+        "You are a line editor for concrete detail. Read context.chapter_text (context.chapter is its number). "
+        "Report places where the reader cannot see, hear, smell or touch the scene: a scene with no physical "
+        "setting, generic nouns where this book's world has something specific (context.book says what book it is), "
+        "an important moment told in abstractions. For each problem: the chapter number, the exact words (quote, "
+        "word for word), the problem in one plain sentence, severity, and when a small change fixes it, original (a "
+        "short exact phrase, found once) and replacement with one concrete detail that fits the book. Never invent "
+        "plot, names or numbers."),
+    "subtext": (
+        "You are an editor for subtext. Read context.chapter_text (context.chapter is its number). Report where the "
+        "narration NAMES a feeling right after the scene already showed it (“Her hands shook. She was afraid.”), "
+        "where characters say exactly what they feel or mean, and where a scene's unsaid tension is explained away. "
+        "For each problem: the chapter number, the exact words (quote, word for word), the problem in one plain "
+        "sentence, severity, and when cutting or changing a short phrase fixes it, original (a short exact phrase, "
+        "found once) and replacement (may be shorter)."),
+}
+
+
+def specialist(store, kind: str, context: dict, *, cancel=None) -> tuple[dict, dict]:
+    res = cc.run_job(store, kind=kind, prompt=prompt(kind, SPECIALIST_TASKS[kind], CHECK_SCHEMA, context),
+                     schema=CHECK_SCHEMA, tools="none", max_turns=3, cancel=cancel)
+    return res["data"], res
+
+
+def clean_specialist(raw, kind: str, chapters: dict[int, str], texts: dict[str, str], who: str = "") -> list[dict]:
+    """The specialist's problems in the checks' format, labelled ("Pacing: …", "Dialogue voice — Mara: …"); only
+    quotes found word for word in the chapter (cross_check.merge drops the rest anyway); minor unless it says major."""
+    from .cross_check import quote_in  # noqa: PLC0415
+    label = SPECIALIST_LABEL[kind] + (f" — {who}" if who else "")
+    out = []
+    for p in clean_problems(raw, chapters, texts, kind):
+        if not p["quote"] or not quote_in(p["quote"], texts.get(p["chapter_id"]) or ""):
+            continue
+        p["problem"] = _clip(f"{label}: {p['problem']}", 400)
+        p.setdefault("severity", "minor")
+        out.append(p)
+    return out[:12]
+
+
+# 8. match the author's style (✒️ style card) and 9. specific details and real dialogue — proposals only
+LINES_SCHEMA = {
+    "type": "object", "required": ["lines"],
+    "properties": {"summary": {"type": "string", "maxLength": 600},
+                   "lines": {"type": "array", "maxItems": 30, "items": {
+                       "type": "object", "required": ["quote", "problem", "rewrite"],
+                       "properties": {"quote": {"type": "string", "maxLength": 800},
+                                      "type": {"type": "string", "maxLength": 40},
+                                      "problem": {"type": "string", "maxLength": 300},
+                                      "rewrite": {"type": "string", "maxLength": 1200}}}}}}
+STYLE_TASK = (
+    "You compare one chapter's NARRATION with the author's own writing style (context.style_card: the author's "
+    "numbers — sentence length, variety, short and long sentences, dialogue share, person, tense, reading grade — and "
+    "a summary of their voice, its do and avoid lists). context.chapter_numbers are the same numbers measured on "
+    "this chapter and context.drift the ones that differ most. Find the narration lines that drift furthest from the "
+    "author's voice (dialogue keeps each character's own voice: never flag it) and rewrite just those in the "
+    "author's manner. quote: the exact words of the chapter (word for word, one or two sentences); problem: what "
+    "drifts, in plain words; rewrite: the replacement for exactly those words. Keep every fact, name, number and "
+    "every locked detail (context.keep_exactly) and the repeats in context.keep_repeats. At most 12 lines, the "
+    "clearest drift first; none when the chapter already sounds like the author.")
+SPECIFICS_TYPES = ("generic_detail", "tidy_dialogue")
+SPECIFICS_TASK = (
+    "You make one chapter of a novel more specific and its dialogue more real (context.chapter_text; context.book "
+    "says what book it is, context.world the book's own places, things and texture). Find two kinds of lines: "
+    "type generic_detail — a generic noun or stock image (“a nice house”, “a delicious meal”, “the old car”) where "
+    "this book's world would have something concrete; and type tidy_dialogue — dialogue that is too tidy (people "
+    "answer exactly the question, speak in complete paragraphs, say what they mean and feel, never interrupt, "
+    "dodge or talk past each other). Rewrite just that line: a concrete, story-specific detail (from context.world "
+    "when it fits; never a new plot fact, person or place), or messier, more human dialogue (interrupted, "
+    "evasive, half-said) that keeps what the scene needs. quote: the exact words of the chapter (word for word); "
+    "rewrite: the replacement for exactly those words. Keep every name, number and locked detail "
+    "(context.keep_exactly) and the repeats in context.keep_repeats. At most 12 lines, the clearest first.")
+STYLE_KEYS = ("avg_sentence", "variety", "short_share", "long_share", "dialogue_share", "person", "tense", "grade")
+
+
+def style_drift(card_numbers: dict, chapter_numbers: dict) -> list[dict]:
+    """The numbers that differ most between the author's card and this chapter (no AI): [{what, card, chapter}]."""
+    out = []
+    for k in STYLE_KEYS:
+        a, b = (card_numbers or {}).get(k), (chapter_numbers or {}).get(k)
+        if a in (None, "") or b in (None, ""):
+            continue
+        if isinstance(a, str) or isinstance(b, str):
+            if str(a) != str(b):
+                out.append({"what": k, "card": a, "chapter": b})
+            continue
+        try:
+            a, b = float(a), float(b)
+        except (TypeError, ValueError):
+            continue
+        share = k.endswith("_share") or k == "variety"
+        if (share and abs(a - b) >= 0.12) or (not share and a and abs(a - b) / abs(a) >= 0.3):
+            out.append({"what": k, "card": a, "chapter": b})
+    return out
+
+
+def _lines_job(store, kind: str, task: str, ctx: dict, cancel) -> dict:
+    return cc.run_job(store, kind=kind, prompt=prompt(kind, task, LINES_SCHEMA, ctx), schema=LINES_SCHEMA,
+                      tools="none", max_turns=3, cancel=cancel)
+
+
+def match_style(store, text: str, card: dict, *, keep_exactly=None, keep_repeats=None,
+                cancel=None) -> tuple[dict, dict]:
+    """{lines: [{id, quote, problem, rewrite}], drift: [...]} — drift findings with quotes, guarded like the AI-tell
+    rewrites (clean_tells: exact once, names / numbers / locked details / protected repeats kept)."""
+    from . import style_card  # noqa: PLC0415
+    numbers = style_card.stats([text])
+    mine = {k: numbers.get(k) for k in STYLE_KEYS}
+    drift = style_drift((card or {}).get("numbers") or {}, mine)
+    ctx = {"style_card": card, "chapter_numbers": mine, "drift": drift, "chapter_text": text,
+           "keep_exactly": list(keep_exactly or [])[:40], "keep_repeats": list(keep_repeats or [])[:40]}
+    res = _lines_job(store, "style", STYLE_TASK, ctx, cancel)
+    lines = clean_tells(res["data"], text, keep_exactly=keep_exactly, keep_repeats=keep_repeats)[:12]
+    return {"lines": lines, "drift": drift}, res
+
+
+def specifics(store, text: str, *, book: dict | None = None, world: list | None = None, keep_exactly=None,
+              keep_repeats=None, cancel=None) -> tuple[list[dict], dict]:
+    """[{id, quote, problem, rewrite, type}] — generic details and too-tidy dialogue, guarded like clean_tells; a line
+    without a known type is dropped."""
+    ctx = {"book": book or {}, "world": list(world or [])[:24], "chapter_text": text,
+           "keep_exactly": list(keep_exactly or [])[:40], "keep_repeats": list(keep_repeats or [])[:40]}
+    res = _lines_job(store, "specifics", SPECIFICS_TASK, ctx, cancel)
+    raw = res["data"] if isinstance(res["data"], dict) else {}
+    typed = [ln for ln in raw.get("lines") or [] if isinstance(ln, dict) and ln.get("type") in SPECIFICS_TYPES]
+    kept = clean_tells({"lines": typed}, text, keep_exactly=keep_exactly, keep_repeats=keep_repeats)
+    types = {str(ln.get("quote")): ln["type"] for ln in typed}
+    return [dict(k, type=types.get(k["quote"], "generic_detail")) for k in kept][:12], res
+
+
+# 10. the Book Bible's sections side by side and 11. the launch kit's first drafts — the modules' own task / schema
+def bible_fill(store, task: str, schema: dict, ctx: dict, *, cancel=None) -> tuple[dict, dict]:
+    res = cc.run_job(store, kind="bible_fill", prompt=prompt("bible_fill", task, schema, ctx), schema=schema,
+                     tools="none", max_turns=3, cancel=cancel)
+    return res["data"] if isinstance(res["data"], dict) else {}, res
+
+
+def launch_kit(store, task: str, schema: dict, ctx: dict, *, cancel=None) -> tuple[dict, dict]:
+    res = cc.run_job(store, kind="launch_kit", prompt=prompt("launch_kit", task, schema, ctx), schema=schema,
+                     tools="none", max_turns=3, cancel=cancel)
+    return res["data"] if isinstance(res["data"], dict) else {}, res

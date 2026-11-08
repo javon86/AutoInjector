@@ -50,13 +50,28 @@ log = logging.getLogger("akowe.claude_code")
 
 SETTINGS_KEY = "claude_code"
 INSTALL_URL = "https://code.claude.com/docs/en/setup"
-JOBS = ("research", "facts", "checks", "ai_tells")
+JOBS = ("research", "facts", "checks", "ai_tells",
+        # 🤖 Step 2 (claude_code_speed.py): speed, quality and a less machine-written sound
+        "prepare", "bible", "extras", "specialists", "variety", "style", "specifics")
 JOB_WORDS = {"research": "Research ahead (the next chapters' facts, with sources)",
              "facts": "Fact-check each written chapter with real sources",
              "checks": "Checks side by side (continuity, voices, facts)",
-             "ai_tells": "“Sounds like AI” pass (proposed rewrites of single lines)"}
+             "ai_tells": "“Sounds like AI” pass (proposed rewrites of single lines)",
+             "prepare": "Get the next chapter ready early (its scene plan and needs list, while this one is checked)",
+             "bible": "Fill the Book Bible side by side (when “Fill the whole Book Bible” is on)",
+             "extras": "Extras in the background (character pictures, the launch kit's first drafts)",
+             "specialists": "Specialist reviewers (the ones ticked below, only where they are useful)",
+             "variety": "Variety across the book (how the chapters so far open and end, checked against this plan)",
+             "style": "Match my writing style (when the book uses your ✒️ style card: proposed fixes)",
+             "specifics": "Specific details and real dialogue (proposed rewrites of generic or too-tidy lines)"}
+# 🤖 Step 2: which specialist reviewers run (each only on chapters where it is useful)
+SPECIALISTS = ("dialogue", "pacing", "sensory", "subtext")
+SPECIALIST_WORDS = {"dialogue": "Dialogue voice — each main character who speaks, against their voice card",
+                    "pacing": "Pacing — scenes that drag or rush",
+                    "sensory": "Senses and concrete detail — only when a chapter has few",
+                    "subtext": "Subtext — feelings named after they were already shown"}
 DEFAULTS = {"enabled": None, "helpers": 3, "jobs": {j: True for j in JOBS}, "path": "", "model": "",
-            "timeout_s": 600}
+            "timeout_s": 600, "specialists": {"dialogue": True, "pacing": False, "sensory": True, "subtext": True}}
 MIN_HELPERS, MAX_HELPERS = 1, 5
 VERSION_TIMEOUT_S = 20
 LOGIN_TIMEOUT_S = 90
@@ -121,6 +136,8 @@ def settings(store) -> dict:
                 out[k] = cur[k]
         if isinstance(cur.get("jobs"), dict):
             out["jobs"].update({k: bool(v) for k, v in cur["jobs"].items() if k in JOBS})
+        if isinstance(cur.get("specialists"), dict):  # 🤖 Step 2
+            out["specialists"].update({k: bool(v) for k, v in cur["specialists"].items() if k in SPECIALISTS})
     out["helpers"] = helpers_of(out)
     return out
 
@@ -150,6 +167,12 @@ def save_settings(store, body) -> dict:
             raise AkoweError("INVALID_INPUT", "/jobs", "jobs: " + ", ".join(JOBS) + " each true or false",
                              status="REJECTED")
         cur["jobs"].update(jobs)
+    if "specialists" in body:  # 🤖 Step 2: which specialist reviewers run
+        sp = body["specialists"]
+        if not isinstance(sp, dict) or any(k not in SPECIALISTS or not isinstance(v, bool) for k, v in sp.items()):
+            raise AkoweError("INVALID_INPUT", "/specialists", "specialists: " + ", ".join(SPECIALISTS)
+                             + " each true or false", status="REJECTED")
+        cur["specialists"].update(sp)
     if "path" in body:
         p = body["path"]
         if p is not None and (not isinstance(p, str) or len(p) > 400):
@@ -654,6 +677,7 @@ def public(store, *, force: bool = False, wait: bool = False) -> dict:
     cur["words"] = cur.get("words") or status_words(cur)
     on = enabled(store) and cur.get("state") == "ready"
     return {"settings": st, "status": cur, "active": on, "install_url": INSTALL_URL, "job_words": JOB_WORDS,
+            "specialist_words": SPECIALIST_WORDS,
             "helpers_range": [MIN_HELPERS, MAX_HELPERS],
             "shares_limits": "Claude Code uses your Claude plan, so it shares that plan's usage limits with the "
                              "Claude pane and claude.ai."}
