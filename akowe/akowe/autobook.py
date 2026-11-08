@@ -1042,6 +1042,10 @@ class AutoBookService(_Runner):
                 out["length"] = src["length"]
             if not body.get("choices") and isinstance(src.get("choices"), dict):
                 out["choices"] = story_choices.clean(src["choices"])
+        from . import starter_sheet  # noqa: PLC0415 - 📋 6c: the starter sheet's lock list
+        locks = starter_sheet.clean_locks(body.get("locks"))
+        if locks:
+            out["locks"] = locks
         idea = body.get("idea")
         if idea not in (None, ""):
             if not isinstance(idea, str) or len(idea) > 2000:
@@ -2236,6 +2240,8 @@ class AutoBookService(_Runner):
             wishes["genre"] = s["genre"]
         if s.get("idea"):
             wishes["idea"] = s["idea"]
+        if s.get("locks"):  # 📋 6c: the starter sheet's lock list (facts that must stay true)
+            wishes["must_stay_true"] = list(s["locks"])
         job = self._job(run, "profile", "B01")
         st["message"] = "The AI is inventing your book"
         self.save(run)
@@ -3213,7 +3219,26 @@ class AutoBookService(_Runner):
         self.save(run)
 
     def _s_premise(self, run, st):
+        self._seed_locks(run)  # 📋 6c: the starter sheet's lock list -> the story rules (once)
         self._planning(run, st, "B01", "premise")
+
+    def _seed_locks(self, run):
+        """📋 6c Paste starter sheet: the run's lock list (setting ``locks``) becomes hard rules from the author in the
+        book's story-rules ledger, after the AI's own rules were made (the world step). Never blocks the book."""
+        locks = run["settings"].get("locks") or []
+        if not locks or run.get("locks_seeded"):
+            return
+        from . import starter_sheet  # noqa: PLC0415
+        try:
+            n = starter_sheet.seed_locks(self.store, run["project_id"], run["branch_id"], locks)
+            self.event(run, "world", f"📋 Your lock list: {n} fact(s) that must stay true put into the story rules",
+                       step="world")
+        except Exception as exc:  # noqa: BLE001 - the book goes on; the list is still in the run's settings
+            log.exception("could not put the lock list into the story rules")
+            self.event(run, "note", f"⚠️ Your lock list could not be put into the story rules ({type(exc).__name__}); "
+                       "add the facts on the book's 🌍 Story rules page", code="LOCKS_FAILED")
+        run["locks_seeded"] = True
+        self.save(run)
 
     def _s_plot(self, run, st):
         from . import writers_room  # noqa: PLC0415 - 🗳 optional (run setting writers_room): a room on the twist

@@ -552,6 +552,52 @@ A 40–50 chapter book takes a day or two. AutoInjector looks after it while you
   (older ones go to `autoinjector-transcript-archive.jsonl` in the settings folder), and shows the newest 300 with
   a **⬆ Show older messages** button. The settings file is saved in the background, at most every few seconds.
 
+### Before you press Start: the estimate, the usage meter, Start later and the starter sheet
+
+All four are on the ⚡ **AI writes the whole book** screen (code: `akowe/akowe/run_forecast.py`,
+`usage_meter.py`, `run_schedule.py`, `starter_sheet.py`; the screen part is `akowe/akowe/web/run-plan.js`).
+
+- **⏱ The estimate** (`POST /api/estimate`) says, for exactly the settings on the screen, roughly how long the run
+  will take ("about 6–8 hours"), how many answers each AI will give (ChatGPT, Claude, Gemini, and the 🤖 Claude Code
+  helpers when they are on), and whether an AI will probably hit its usage limit and when ("Claude will probably
+  reach its limit around chapter 14; the other AIs carry on and it is back about 4 hours later"). It changes as you
+  change the length, how many AIs check for mistakes, the writers' room, beta readers, character pictures, "fill the
+  whole Book Bible", the end-of-book "sounds like a person" pass (about 2 answers), the Claude Code helpers, "when
+  only one AI works" and which AI writes. It starts from the P28 numbers (`costs.estimate`: AI calls per step); once
+  this PC has finished runs, it uses their measured seconds per answer, each AI's share of the answers, and the
+  answers of the optional steps. The usage limits are rough public guesses (Claude ~40 long messages per 5 hours,
+  ChatGPT ~80 per 3 hours, Gemini ~100 a day) until an AI really hits its limit on this PC: then the number of
+  answers it gave before the hit is used instead. It is always labelled an estimate.
+- **📊 The usage meter** (`GET /api/usage-meter`) shows one row per AI, on the setup screen, the run window and the
+  countdown: "used today: 34 answers · last limit hit at 3:10 PM · resets ~8:10 PM" and a colour (🔴 at its limit
+  now, 🟠 hit a limit in the last day or used most of its usual allowance, 🟢 fine, ⚪ not connected). The AI sites do
+  not publish exact limits, so it only shows what Akọwe saw: every AI answer (counted where every AI call passes,
+  `ai_activity`), the limit notices (the bridge's `USAGE_LIMIT` problem, "all AIs at their limits", the site states
+  AutoInjector reports) and the reset time when the site gave one (else a guess, said so). Saved as numbers only in
+  the setting `usage_meter`.
+- **⏰ Start later.** Tick **Start later, at** and pick a time (for example 11 pm); the Start buttons become
+  **⏰ Schedule…**. The settings are checked at once (a mistake is said now, not at 11 pm) and kept, with your consent,
+  in the setting `autobook_schedule`. The window shows a countdown with **▶ Start now** and **✖ Cancel the scheduled
+  start**; the top bar shows "Book starts 11:00 PM". At that time the run starts by itself, exactly as if you had
+  pressed Start, as long as Akọwe is running. **AutoInjector keeps the PC awake while it waits:** Akọwe's status
+  report to AutoInjector shows the scheduled book as a waiting run, and the run guard keeps the PC awake for a
+  waiting run (no change was needed in AutoInjector). If Akọwe was closed: when it opens again before the time, the
+  schedule simply waits; up to 2 hours late it starts; **more than 2 hours late it asks** ("This book was meant to
+  start at 11:00 PM, but Akọwe was not running then. Start it now?") and AutoInjector's notification says the
+  scheduled book needs you. If it cannot start (another run is working, no AI…), the window says why with
+  **▶ Try again now**.
+- **📋 Paste starter sheet.** If you planned the book with your master prompt in a chat AI, press **📋 Paste
+  starter sheet**, paste the AI's whole answer and press **🔍 Read it**. Akọwe finds the "AKỌWE STARTER SHEET" (the
+  last one, if the prompt was quoted too) and reads its 14 headings — with or without numbers, ▶ markers, emoji,
+  bold, code fences, On/Off written as Yes/✅, and chatty lines around it. It shows what it understood, what it did
+  not understand and what was missing, **before** anything changes; **✔ Fill the form** then fills every field. An
+  idea over 2,000 characters (or a genre over 120) is pointed out with a ✂ "shorten it" box (cut at the end of a
+  sentence). **The LOCK LIST** goes into the book's 📏 **Story rules** as rules from you (category "hard rule",
+  source "Your starter sheet (lock list)"): the run sends it with your settings (`locks`), tells the AI that invents
+  the book about it, and adds the facts to the story rules right after the AI made its own (before the premise) —
+  the planners, the writer's brief, the editor and the consistency checks all read the story rules. (If "story
+  rules" is switched off in the pipeline, the facts are still added before the premise.)
+
 ## 4. How quality is kept
 
 | Check | What it catches | When it runs |
