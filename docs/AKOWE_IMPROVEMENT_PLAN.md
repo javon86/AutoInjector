@@ -345,6 +345,53 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
 
 ## Back burner — later, by the user's call  (don't start until asked)
 
+- [~] **5a 📥 Bring in my book** and **5d 📝 Fix it with my notes** — PARKED 2026-11-08 by the user's request (built, then put on the back burner before it was switched on). **Not loaded by the app:** no button, no route, no import from any existing module. Parked code: `akowe/akowe/book_import.py`, `akowe/akowe/notes_fix.py`, `akowe/akowe/web/book-import.js`, `akowe/akowe/web/notes-fix.js`; tests (all skipped, "back burner: feature parked"): `akowe/tests/test_book_import.py`, `akowe/tests/test_notes_fix.py`, `akowe/tests/campaign/ui/test_ui_book_import.py`, fake AI `akowe/tests/import_fake.py`. They passed (44 unit + 3 UI) before parking.
+  **To switch it on later** (small edits, none made now): `server.py` — `/api/import…` → `book_import.route_global`, `…/branches/<b>/import…` → `book_import.route_book`, `…/notes-fix…` → `notes_fix.route`; `web/app.js` — import `viewImport`/`viewImported`/`viewNotesFix`, routes `#/import`, `#/p/…/import`, `#/p/…/notes`, a "📥 Bring in my book" button on My books, "📝 Fix it with my notes" on Book home, an `importUI()` helper (s7c + stateBox, checkNowBox, originalityCard, go, choiceDialog, loadProjects); `web/problems.js` — `IMPORT_BAD_FILE`, `IMPORT_EMPTY`, `IMPORT_TOO_LARGE`, `IMPORT_UNKNOWN_KIND`, `IMPORT_DRAFT_GONE`, `IMPORT_FAILED`; `web/claude-code.js` — label "From your notes: " for proposals of kind `note`. Then un-skip the tests and write the HOW_IT_WORKS section.
+  What was built (done) and what was not:
+  User: "bring in a book I already wrote" and "fix a finished book with my notes". New `akowe/akowe/book_import.py`,
+  `akowe/akowe/notes_fix.py`, `web/book-import.js`, `web/notes-fix.js`; routes `/api/import/…` and
+  `…/branches/<b>/import[…]`, `…/notes-fix[…]`; problems.js codes `IMPORT_*`.
+
+  - [x] **Readers (stdlib only, no new dependency):** .docx (`word/document.xml` + `word/styles.xml`: heading styles by
+    name or outline level, tracked deletions left out), .odt (`content.xml`, `text:h`), .md (# and setext headings),
+    .txt (blank-line or one-line paragraphs; UTF-8 / BOM / UTF-16 / cp1252), pasted text. Damaged, empty, too large
+    (40 MB / ~650 000 words / 400 chapters) and unknown files refused in plain words.
+  - [x] **Tolerant split** (`split_chapters`) + the author's adjustments (merge, split at a paragraph, rename, leave out)
+    on a draft kept in a 0600 temp file (`/dev/shm` first; never the database; a day).
+  - [x] **The book:** A04 / A01 the author confirmed, honest B01 / B03, B11 with one item per chapter and **no target
+    length** (so it can grow), C01 + C02 manual candidates approved — provenance MANUAL = "You" (`review.made_by`), so
+    `AutoBookService._ai_made` and the end pass skip them. Made through `manual_bp` (a BookPath that offers no AI): no
+    AI call, not even the C02 event extraction. A failure before the chapters archives the half-made project; the
+    chapters are then stored by a background job (`store_chapters`, texts waiting in `book_import_pending:<pid>:<b>`,
+    progress in the meta, idempotent ▶ Go on after a stop or restart) — the kernel re-checks the whole outline for every
+    chapter, so 100 chapters take ~40 s and 300 a few minutes.
+  - [x] **Book Bible from the text** (`BibleBuild`, a ReviewService job, resumable from `book_import:<pid>:<b>`): per
+    chapter `continuity.track_chapter` (ledger N, timeline, story map — on-page links 🔒), then the cast from the
+    ledger's names (`forge.create_character` drafts, place / item dossiers via `story_details._ensure`, group names
+    noted), one AI call per main character (≤ 12) for looks / voice / wants / relationships as `forge.apply_proposals`
+    (a value whose quote is verbatim in the book is approved + `forge.protect`ed and recorded in story_details' locked
+    list → checkpoints / contradictions see it), then `story_rules.generate` (as PROPOSALS on an empty ledger). Budget (`max_calls`), Stop, ▶ Go on,
+    weak (busy-AI) chapters read again, "interrupted" after a restart, AI activity strip labels.
+  - [x] **Offers:** check-now on the whole book (proposals only), the originality card, ✍ Continue the book
+    (`style_from_chapters`: the author's style card from ≤ 6 of their chapters, only with `author_confirms`, a second OK
+    to replace existing samples; `plan_more`: an AI plan for chapters N+1… the author edits; `use_plan`: B11 UPDATE with
+    the new items, the author's chapters re-bound on the new outline with their exact text (still "You"), profile
+    chapter count; ✍ Write all chapters writes the rest).
+  - [x] **📝 Fix it with my notes** (`notes_fix.py`): notes → Akọwe's own mapping (chapter numbers / ranges, the ending,
+    the opening, names, rare words) + one AI mapping call (quotes checked) → the author confirms → per note × chapter
+    (≤ 40) exact before/after changes (`clean_changes`: once in the text, no overlaps, ≤ 1 000 characters; dropping a
+    locked passage / story-map evidence / protected repeat = a CONFLICT, unticked, needs `accept_conflicts`) → the
+    INDEPENDENT AI checks the projected chapter (writer slots avoided; one AI only = said, not used) + Akọwe's
+    story_map.flags / story_details.contradictions → proposals also on the chapter page (`cc_proposals` kind `note`) →
+    ✔ Use = `claude_code_book.use_proposals` (editor.apply, one new draft per chapter) → "12 notes → 19 changes
+    proposed, 15 accepted".
+  - *Not done / limits:* groups are named in the summary and the rules note but get no dossier of their own (Akọwe has
+    no group dossier yet); .doc / .rtf / .pdf / .epub are refused (no stdlib reader); footnotes, comments and images in
+    a .docx are not brought in; the per-character reading covers the 12 most-mentioned characters; the notes pass
+    proposes at most 6 changes per note and chapter; ✍ Continue plans at most 30 chapters at a time.
+  - *Found on the way:* `human_voice._story_map_quotes` iterates the story map's `links` as a list, but it is a dict,
+    so it always returns [] (the end pass does not protect story-map evidence). notes_fix has its own correct reader.
+
 - [ ] Connect Codex / Claude Code as AI options (each needs its own connection; different screens than the chat
   sites) — user parked this 2026-11-08
 
