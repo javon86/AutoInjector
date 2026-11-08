@@ -112,6 +112,17 @@ bridge to your home Wi-Fi, behind its key.
   failed 3 times in a row while the built-in way worked is forgotten by itself, and the log says so once ("ChatGPT's
   saved Send button was out of date and has been forgotten; the built-in one works"). **↺ Undo** on the 🎯 card
   brings it back. A part you saved in the last hour is never forgotten this way.
+- **📁 AI lockers (hidden, off by default):** an older feature that gave each AI (ChatGPT, Claude, Gemini) its own
+  private folder on this PC (`stuff and thing/ai-lockers/<ai>/`) and let it run file commands there by writing
+  `[TO: TERMINAL]`. It was not being used, so it is **switched off and out of sight**, but the code is kept:
+  - While off: no 📁 Locker tab in the AI columns (the row is 💬 Last reply · ◀ 🔊 ▶ · ↻, and 💬 Last reply is
+    what you see); the AIs are not taught `[TO: TERMINAL]`; if an AI still sends one, nothing runs, the log says so,
+    and that AI is told once ("File commands are switched off in AutoInjector") and never again until the next
+    start, so it cannot turn into a loop; Alfred does not list or use the locker controls; the 🔬 Feature Test says
+    it needs the lockers. No `ai-lockers` folder is made, and an existing one is left alone (never deleted).
+  - **To turn them back on:** System AI panel (🎩 Alfred's side) → ⚙ More settings → **⚙ Advanced** → tick
+    **AI lockers (advanced, off)**. Everything works as before at once, and the choice is saved. Untick it to hide
+    them again. For one run only, starting the app with `AUTOINJECTOR_LOCKERS=1` (or `=0`) overrides the tick.
 - **Logs and 📋 Extract:** the app keeps an activity log and a record of every message's journey (the Relay
   Trace). Extract turns these into one file you can share. Keys and private paths are removed.
 
@@ -318,8 +329,10 @@ bridge to your home Wi-Fi, behind its key.
 
 ### 🎤 Talking to the AIs and 🔊 hearing their replies
 
-- **🎤 at the top (title bar):** click it and speak; it turns red and counts the seconds. Click again and your words
-  are typed into the AIs for you — the same way the Compose box sends, so House Rules and relaying work the same.
+- **🎤 at the top (title bar):** click it and speak; it turns red and counts the seconds. Click again and **your words
+  appear in the Compose box first, so you can fix a misheard name** — then press **→ Send** on the line at the top (or
+  ✕ Clear). Sending goes the same way the Compose box sends, so House Rules and relaying work the same. If you would
+  rather skip the check, tick **"🎤 Send what I say right away"** in System AI → 🔊 Voice.
   The box beside it says who hears it: **All** (every AI ticked as Active, plus 🎩 Alfred when his box is ticked, just
   like → All), or one AI, or 🎩 Alfred (only while he is on). It remembers your choice. **Esc** stops without sending.
 - **🎤 in each AI's header** sends to that AI only.

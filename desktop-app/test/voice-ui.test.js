@@ -19,16 +19,19 @@ const UI_SRC = fs.readFileSync(path.join(__dirname, '..', 'voice-ui.js'), 'utf8'
 const HTML = fs.readFileSync(path.join(__dirname, '..', 'controls.html'), 'utf8');
 const SITES = ['chatgpt', 'claude', 'gemini'];
 
-function paneHtml(site) {
+// The pane row as controls.js builds it. The 📁 AI lockers are hidden by default (no Locker tab); setup({ lockers: true })
+// builds the row as it is with them switched on in ⚙ Advanced.
+function paneHtml(site, withLocker) {
   return `<div class="ai-col ${site}" id="col-${site}"><div class="control-strip"><div class="card-head"><span class="pane-name">${site}</span><span class="spacer"></span><button class="zoom-btn">－</button><span class="zoom-level">60%</span><button class="zoom-btn">＋</button><button class="reload-btn">⟳</button></div>
-    <div class="locker-box"><div class="locker-tabs"><button id="locker-tab-${site}" class="active">📁 Locker</button><button id="reply-tab-${site}">💬 Last reply</button><span class="spacer"></span><button class="lk-refresh">↻</button></div></div></div></div>`;
+    <div class="locker-box"><div class="locker-tabs">${withLocker ? `<button id="locker-tab-${site}" class="active">📁 Locker</button>` : ''}<button id="reply-tab-${site}"${withLocker ? '' : ' class="active"'}>💬 Last reply</button><span class="spacer"></span><button class="lk-refresh">↻</button></div></div></div></div>`;
 }
 
 function setup(over = {}) {
   const dom = new JSDOM(`<!doctype html><body>
     <div id="window-titlebar"><span class="wt-name">AutoInjector</span><div id="app-tabs"></div><div id="voice-bar"></div><button id="btn-alfred-switch">🎩 Alfred: Off</button></div>
+    <textarea id="composer-text"></textarea>
     <input type="checkbox" id="p-chatgpt" checked><input type="checkbox" id="p-claude" checked><input type="checkbox" id="p-gemini" checked><input type="checkbox" id="p-butler">
-    ${SITES.map(paneHtml).join('')}
+    ${SITES.map((s) => paneHtml(s, !!over.lockers)).join('')}
     <details id="sai"><summary>System AI</summary><details id="vbox"><summary>🔊 Voice</summary>
       <input id="voice-v-butler"><input id="voice-v-chatgpt"><input id="voice-v-claude"><input id="voice-v-gemini"><select id="voice-mic"><option value="">Default</option><option value="mic-2">USB mic</option></select>
       <div id="voice-read-settings"></div></details></details>
@@ -49,7 +52,7 @@ function setup(over = {}) {
   if (!over.quiet) assert(typeof w.createVoiceUI === 'function' && !w.VoiceUI, 'voice-ui.js loads (and waits for window.api to start by itself)');
   const st = { transcribe: over.transcribe || ((b64, mime) => ({ ok: true, text: 'please summarise chapter two' })), synth: over.synth || (() => ({ ok: false, error: 'NO_SHIM', fallback: true })) };
   w.api = {
-    voiceStatus: async () => ({ ok: true, micTarget: over.micTarget || 'all', rate: 1, voices: { butler: '', chatgpt: '', claude: '', gemini: '' }, browserVoices: { butler: '', chatgpt: '', claude: '', gemini: '' }, micDevice: '' }),
+    voiceStatus: async () => ({ ok: true, micTarget: over.micTarget || 'all', micSendNow: !!over.micSendNow, rate: 1, voices: { butler: '', chatgpt: '', claude: '', gemini: '' }, browserVoices: { butler: '', chatgpt: '', claude: '', gemini: '' }, micDevice: '' }),
     configureVoice: async (p) => { log('configure', p); return { ok: true }; },
     voicePiperVoices: async () => ({ ok: true, voices: over.piperVoices || [] }),
     voiceReplies: async (site) => { log('replies', site); return { ok: true, site, count: replies[site].length, items: replies[site].slice() }; },
@@ -106,6 +109,7 @@ function setup(over = {}) {
   return { w, ui, calls, replies, texts, spoken, synthState, audios, mic, st, capture: (t) => captureCb && captureCb(t), alfred: (p) => alfredCb && alfredCb(p), micEvent: (p) => micCb && micCb(p) };
 }
 const $ = (w, id) => w.document.getElementById(id);
+const actBtn = (w, re) => [...$(w, 'voice-heard').querySelectorAll('.vh-act')].find((b) => re.test(b.textContent));
 const heard = (w) => { const e = $(w, 'voice-heard'); return e && !e.hidden ? e.textContent : ''; };
 const click = (w, id) => $(w, id).dispatchEvent(new w.MouseEvent('click', { bubbles: true }));
 
@@ -127,10 +131,19 @@ const click = (w, id) => $(w, id).dispatchEvent(new w.MouseEvent('click', { bubb
     assert(pm && pm.parentNode.classList.contains('card-head') && pm.nextElementSibling.classList.contains('zoom-btn'), `${s}: 🎤 in the pane header, before the zoom buttons`);
     const g = $(w, `voice-read-${s}`);
     assert(g && g.previousElementSibling && g.previousElementSibling.id === `reply-tab-${s}` && ['◀', '🔊', '▶'].every((x, i) => g.children[i].textContent === x), `${s}: ◀ 🔊 ▶ beside 💬 Last reply`);
+    const row = [...$(w, `col-${s}`).querySelector('.locker-tabs').children].map((c) => c.id === `reply-tab-${s}` ? 'reply' : c.classList.contains('vr-group') ? 'read' : c.classList.contains('spacer') ? 'spacer' : c.classList.contains('lk-refresh') ? 'refresh' : c.id || c.className);
+    assert(row.join(',') === 'reply,read,spacer,refresh', `${s}: lockers hidden (the default) → the row is 💬 Last reply · ◀ 🔊 ▶ n/m · ↻ (${row.join(',')})`);
   }
   assert($(w, 'voice-count-claude').textContent === '3 / 3' && $(w, 'voice-count-gemini').textContent === '0 / 0', `counters: Claude "3 / 3", Gemini "0 / 0"`);
   assert(/Claude third/.test($(w, 'voice-play-claude').title) && $(w, 'voice-next-claude').disabled && !$(w, 'voice-prev-claude').disabled, 'newest selected; its first words in the tooltip; ▶ off at the newest');
   assert($(w, 'voice-play-gemini').disabled && $(w, 'voice-prev-gemini').disabled, 'no reply yet: the buttons are off');
+
+  {
+    const tl = setup({ lockers: true });
+    await tl.ui.init(); await tick(30);
+    const row = [...$(tl.w, 'col-claude').querySelector('.locker-tabs').children].map((c) => c.id || c.className);
+    assert(row[0] === 'locker-tab-claude' && row[1] === 'reply-tab-claude' && row[2] === 'voice-read-claude', `lockers switched on: 📁 Locker · 💬 Last reply · ◀ 🔊 ▶ as before (${row.slice(0, 3).join(',')})`);
+  }
 
   console.log('\n== ◀ ▶ move through the replies; new replies are followed ==');
   click(w, 'voice-prev-claude');
@@ -206,12 +219,19 @@ const click = (w, id) => $(w, id).dispatchEvent(new w.MouseEvent('click', { bubb
   assert(/Listening/.test(heard(t.w)), 'the line says it is listening');
   await tick(600);
   click(t.w, 'btn-voice-mic');
+  for (let i = 0; i < 30 && !/Check what I heard/.test(heard(t.w)); i++) await tick(20);
+  // ✔ check first (the default): the words wait in the Compose box; nothing is sent yet
+  assert(/Check what I heard in the Compose box/.test(heard(t.w)) && $(t.w, 'composer-text').value === 'please summarise chapter two' && !t.calls.some((c) => c[0] === 'send'), `check first: the words wait in the Compose box, nothing sent ("${heard(t.w).slice(0, 70)}")`);
+  assert(!!actBtn(t.w, /→ Send to everyone ticked/) && !!actBtn(t.w, /Clear/), 'the line offers → Send and ✕ Clear');
+  $(t.w, 'composer-text').value = 'please summarise chapter two again'; // the user fixes a misheard word
+  actBtn(t.w, /→ Send/).click();
   for (let i = 0; i < 30 && !t.calls.some((c) => c[0] === 'send'); i++) await tick(20);
+  await tick(30); // the send finishes (the heard line, the Compose box)
   const tr = t.calls.find((c) => c[0] === 'transcribe');
   assert(tr && tr[1] === 4000 && tr[2] === 'audio/webm', `the recording goes to be transcribed (base64 ${tr && tr[1]} chars, ${tr && tr[2]})`);
   const send = t.calls.find((c) => c[0] === 'send');
-  assert(send && send[1] === 'please summarise chapter two' && send[2].join(',') === 'chatgpt,claude', `sent through the Compose send to the ticked AIs (${send && send[2]})`);
-  assert(/Heard: “please summarise chapter two” → sent to ChatGPT, Claude/.test(heard(t.w)), `"${heard(t.w)}"`);
+  assert(send && send[1] === 'please summarise chapter two again' && send[2].join(',') === 'chatgpt,claude', `the CHECKED words go through the Compose send to the ticked AIs (${send && send[1]} → ${send && send[2]})`);
+  assert(/Heard: “please summarise chapter two again” → sent to ChatGPT, Claude/.test(heard(t.w)) && $(t.w, 'composer-text').value === '', `"${heard(t.w)}" and the Compose box is empty again`);
   assert(t.mic.tracksStopped >= 1 && !$(t.w, 'btn-voice-mic').classList.contains('rec') && $(t.w, 'btn-voice-mic').textContent === '🎤', 'the microphone is released; 🎤 again');
 
   console.log('\n== 🎤 in a pane header: only that AI ==');
@@ -220,9 +240,34 @@ const click = (w, id) => $(w, id).dispatchEvent(new w.MouseEvent('click', { bubb
   assert($(t.w, 'voice-mic-gemini').classList.contains('rec') && $(t.w, 'voice-mic-gemini').textContent === '⏺', 'that pane\'s 🎤 turns red');
   await tick(600);
   click(t.w, 'voice-mic-gemini');
+  for (let i = 0; i < 30 && !actBtn(t.w, /→ Send/); i++) await tick(20);
+  assert(!!actBtn(t.w, /→ Send to Gemini/), 'from Gemini\'s 🎤 the button says → Send to Gemini');
+  actBtn(t.w, /→ Send/).click();
   for (let i = 0; i < 30 && !t.calls.some((c) => c[0] === 'send'); i++) await tick(20);
+  await tick(30); // the send finishes (the heard line, the Compose box)
   const s2 = t.calls.find((c) => c[0] === 'send');
   assert(s2 && s2[2].join(',') === 'gemini' && /sent to Gemini/.test(heard(t.w)) && !/ChatGPT|Claude/.test(heard(t.w)), 'sent to Gemini only (even though Gemini is not ticked for → All)');
+
+  console.log('\n== ✕ Clear takes the heard words back out; a draft already in the box stays ==');
+  t.calls.length = 0;
+  $(t.w, 'composer-text').value = 'my own draft';
+  click(t.w, 'btn-voice-mic'); await tick(600); click(t.w, 'btn-voice-mic');
+  for (let i = 0; i < 30 && !actBtn(t.w, /Clear/); i++) await tick(20);
+  assert($(t.w, 'composer-text').value === 'my own draft please summarise chapter two', `added after the draft ("${$(t.w, 'composer-text').value}")`);
+  actBtn(t.w, /Clear/).click(); await tick(10);
+  assert($(t.w, 'composer-text').value === 'my own draft' && !t.calls.some((c) => c[0] === 'send') && /Cleared/.test(heard(t.w)), 'Clear removes only the heard words; nothing sent');
+
+  console.log('\n== "Send what I say right away" (🔊 Voice box) skips the check ==');
+  t = setup({ micSendNow: true });
+  await t.ui.init(); await tick(30);
+  assert($(t.w, 'mic-send-now') && $(t.w, 'mic-send-now').checked, 'the setting shows ticked');
+  click(t.w, 'btn-voice-mic'); await tick(600); click(t.w, 'btn-voice-mic');
+  for (let i = 0; i < 30 && !t.calls.some((c) => c[0] === 'send'); i++) await tick(20);
+  await tick(30); // the send finishes (the heard line, the Compose box)
+  assert(t.calls.some((c) => c[0] === 'send' && c[1] === 'please summarise chapter two') && $(t.w, 'composer-text').value === '', 'sent at once, the Compose box untouched');
+  $(t.w, 'mic-send-now').checked = false; $(t.w, 'mic-send-now').dispatchEvent(new t.w.Event('change'));
+  await tick(5);
+  assert(t.calls.some((c) => c[0] === 'configure' && c[1] && c[1].micSendNow === false), 'unticking saves micSendNow: false');
 
   console.log('\n== a send that one AI refuses is reported plainly ==');
   t = setup({ sendFail: { claude: 'SITE_REPAIRING' } });

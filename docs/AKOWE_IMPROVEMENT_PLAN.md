@@ -364,6 +364,11 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
 - [ ] **3a** A real installer (one setup file instead of Node.js + `run-windows.bat`) — user parked this 2026-11-08
 - [ ] **3c** Simple mode for the AutoInjector window and a home screen — user parked this 2026-11-08
 - [ ] **3g** Backup off the PC (books copied to another drive or the cloud) — user parked this 2026-11-08
+- [ ] **5a/5d** 📥 Bring in my own book + 📝 Fix it with my notes — started, then parked by the user 2026-11-08.
+  The work in progress (new files only, not wired in) is saved on the GitHub branch `parked/import-book-fix-notes`.
+- [ ] **5b/5c** 🎧 Audiobook + 🖥 Alfred's local AI as backup when the online AIs hit limits — started, then parked by
+  the user 2026-11-08. The work in progress (partly wired, local-AI part nearly done) is saved on the GitHub branch
+  `parked/audiobook-local-ai`. Not merged; review before reuse.
 
 - [~] **B1** 🖼 Images: hook Akọwe up to image generation — Stable Diffusion (AutoInjector already has
   an Image Generation panel and a Stable Diffusion endpoint setting in its setup wizard) and/or other image

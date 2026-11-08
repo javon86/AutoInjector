@@ -1341,13 +1341,16 @@ def({
 const appActions = require('./alfred-app-actions');
 const smartJson = require('./smart-json'); // tool arguments with “curly” quotes still read (PC test 2026-10-28)
 function appTool(changes) {
+  // Worked out each time the tool list is made (list()), so a switched-off feature's actions (the 📁 AI
+  // lockers, hidden by default) are not offered.
+  const describeNow = () => (changes
+    ? `Any other control of AutoInjector (changes something). action: ${appActions.catalogText(true)}. args: that action's arguments (app_help shows titles and argument details).`
+    : `Read anything else in AutoInjector (read-only). action: ${appActions.catalogText(false)}. args: that action's arguments (app_help shows titles and argument details).`);
   return {
     name: changes ? 'app_control' : 'app_info',
     title: changes ? 'Use an app control' : 'Look something up in the app',
     group: 'app', changes, timeoutMs: 180000,
-    description: changes
-      ? `Any other control of AutoInjector (changes something). action: ${appActions.catalogText(true)}. args: that action's arguments (app_help shows titles and argument details).`
-      : `Read anything else in AutoInjector (read-only). action: ${appActions.catalogText(false)}. args: that action's arguments (app_help shows titles and argument details).`,
+    describeNow, description: describeNow(),
     args: { type: 'object', required: ['action'], properties: { action: { type: 'string', maxLength: 60 }, args: { type: 'object', 'x-passthrough': true } }, additionalProperties: false },
     allowAlwaysFor: (a) => { const e = appActions.get(a && a.action); return !!(e && e.allowAlways); },
     allowKey: (a) => `${changes ? 'app_control' : 'app_info'}:${a && a.action}`,
@@ -1360,6 +1363,7 @@ function appTool(changes) {
     describe: (a) => { const e = appActions.get(a.action); const args = a.args && Object.keys(a.args).length ? ` — ${clip(JSON.stringify(a.args), 300)}` : ''; return `${e ? e.title : a.action}${args}`; },
     async run(a, ctx) {
       const e = appActions.get(a.action);
+      if (!e) return { ok: false, error: 'NOT_AVAILABLE', message: `"${str(a.action, 60)}" is switched off in this app.` };
       if (e.local) { const r = await ctx.local(e.local, a.args || {}); return r && r.ok === false ? r : { ok: true, message: `${e.title}: done.`, data: r }; }
       if (typeof ctx.invoke !== 'function') return { ok: false, error: 'NOT_WIRED', message: 'That control is not available here.' };
       const r = await ctx.invoke(e.channel, ...e.call(a.args || {}));
@@ -1650,7 +1654,7 @@ function tidyArgs(a, schema, ignored = []) {
 // ----------------------------------------------------------------------------- registry API
 function get(name) { return TOOLS.find((t) => t.name === name) || null; }
 function list(opts = {}) {
-  return TOOLS.filter((t) => !t.interpreter || opts.interpreter).map((t) => t);
+  return TOOLS.filter((t) => !t.interpreter || opts.interpreter).map((t) => (typeof t.describeNow === 'function' ? Object.assign({}, t, { description: t.describeNow() }) : t));
 }
 /** OpenAI-compatible "tools" array for the AI (the interpreter tool only when it is turned on). */
 function openAiTools(opts = {}) {

@@ -661,6 +661,82 @@ function fmtDate(ms) {
   return sameDay ? `Today ${time}` : `${d.toLocaleDateString([], { month: "short", day: "numeric" })} ${time}`;
 }
 function fmtSize(n) { return n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(1)} MB`; }
+// ---- 📁 the AI lockers switch (lockers-switch.js): hidden (off) by default ----
+const lockersUI = { on: false, forcedByEnv: false };
+function paintLockerRefresh(site) {
+  const b = el(`lk-refresh-${site}`);
+  if (!b) return;
+  b.title = lockersUI.on ? "Refresh the file list" : "Refresh the last reply";
+  b.setAttribute("aria-label", lockersUI.on ? `Refresh ${SITE_LABELS[site]}'s locker list` : `Refresh ${SITE_LABELS[site]}'s last reply`);
+}
+function showLockerView(site, on) {
+  const list = el(`locker-list-${site}`), preview = el(`preview-${site}`);
+  const lkTab = el(`locker-tab-${site}`), rpTab = el(`reply-tab-${site}`);
+  const showList = !!(on && list);
+  if (list) list.hidden = !showList;
+  if (preview) preview.hidden = showList;
+  if (lkTab) lkTab.classList.toggle("active", showList);
+  if (rpTab) rpTab.classList.toggle("active", !showList);
+  if (showList) refreshLocker(site);
+}
+// The 📁 Locker tab + file list, put back in front of 💬 Last reply (and shown first, as before the switch existed).
+function addLockerUI(site) {
+  const rpTab = el(`reply-tab-${site}`), preview = el(`preview-${site}`);
+  if (!rpTab || !preview || el(`locker-tab-${site}`)) return;
+  const lkTab = document.createElement("button");
+  lkTab.id = `locker-tab-${site}`;
+  lkTab.textContent = "📁 Locker";
+  lkTab.title = `Files in ${SITE_LABELS[site]}'s locker. Click a file to put it in Compose, then click an AI's name to give it to them.`;
+  lkTab.onclick = (e) => { e.stopPropagation(); showLockerView(site, true); };
+  rpTab.parentNode.insertBefore(lkTab, rpTab);
+  const lkList = document.createElement("div");
+  lkList.className = "locker-list";
+  lkList.id = `locker-list-${site}`;
+  preview.parentNode.insertBefore(lkList, preview);
+  showLockerView(site, true);
+}
+function removeLockerUI(site) {
+  for (const id of [`locker-tab-${site}`, `locker-list-${site}`]) { const n = el(id); if (n) n.remove(); }
+  showLockerView(site, false);
+}
+// ↻ while the lockers are off: fetch the last captured reply again.
+async function refreshLastReply(site) {
+  if (typeof window.api.getState !== "function") return;
+  let r = null;
+  try { r = await window.api.getState(); } catch (_) { r = null; }
+  if (r && r.ok && r.captured && r.captured[site]) renderPreview(site, r.captured[site]);
+}
+function applyLockersEnabled(info) {
+  const on = !!(info && info.enabled);
+  const changed = on !== lockersUI.on;
+  lockersUI.on = on;
+  lockersUI.forcedByEnv = !!(info && info.forcedByEnv);
+  for (const s of SITES) { if (changed) { if (on) addLockerUI(s); else removeLockerUI(s); } paintLockerRefresh(s); }
+  // The Command Prompt's locker controls (open the lockers folder, auto-run AI scripts) only make sense while on.
+  if (el("btn-open-lockers")) el("btn-open-lockers").hidden = !on;
+  const auto = el("cb-term-autorun"); const autoLabel = auto && auto.closest ? auto.closest("label") : null;
+  if (autoLabel) autoLabel.hidden = !on;
+  const cb = el("cb-lockers-enabled");
+  if (cb) { cb.checked = on; cb.disabled = lockersUI.forcedByEnv; }
+  const txt = el("lockers-adv-text");
+  if (txt) txt.textContent = `AI lockers (advanced, ${on ? "on" : "off"})${lockersUI.forcedByEnv ? " — set by AUTOINJECTOR_LOCKERS for this run" : ""}`;
+}
+function wireLockersSwitch() {
+  if (typeof window.api.lockersStatus === "function") {
+    Promise.resolve().then(() => window.api.lockersStatus()).then((r) => { if (r && r.ok) applyLockersEnabled(r); }).catch(() => {});
+  } else applyLockersEnabled({ enabled: false });
+  if (typeof window.api.onLockersState === "function") window.api.onLockersState((p) => applyLockersEnabled(p));
+  const cb = el("cb-lockers-enabled");
+  if (cb) cb.onchange = async () => {
+    const want = !!cb.checked;
+    if (typeof window.api.lockersSetEnabled !== "function") { cb.checked = lockersUI.on; return; }
+    let r = null;
+    try { r = await window.api.lockersSetEnabled(want); } catch (e) { r = { ok: false, error: String(e) }; }
+    if (r && r.ok) { applyLockersEnabled(r); setStatus(r.enabled ? "📁 AI lockers switched on (⚙ Advanced)." : "📁 AI lockers switched off and hidden. Their folders are kept."); }
+    else { cb.checked = lockersUI.on; setStatus(`Couldn't change the AI lockers switch: ${(r && (r.message || r.error)) || "error"}`); }
+  };
+}
+
 async function refreshLocker(site) {
   const list = el(`locker-list-${site}`);
   if (!list || typeof window.api.lockersList !== "function") return;
@@ -986,47 +1062,37 @@ function buildAiColumn(site) {
   loginMenu.appendChild(loginStatus);
   strip.appendChild(loginMenu);
 
-  // 📁 Locker (default) / 💬 Last reply. The live pane below already shows the
-  // reply, so this box shows what's in that AI's locker instead; the old reply
-  // preview is one click away (same #preview-<site> element as before).
+  // 💬 Last reply / 📁 Locker. The 📁 AI lockers are HIDDEN by default (lockers-switch.js): then this row is
+  // just 💬 Last reply (the default view) · ◀ 🔊 ▶ (voice-ui.js) · ↻, and there is no Locker tab in the DOM.
+  // Switched on in ⚙ Advanced, the 📁 Locker tab comes back in front and is the default again, exactly as before
+  // (addLockerUI — the old reply preview is the same #preview-<site> element either way).
   const lockerBox = document.createElement("div");
   lockerBox.className = "locker-box";
+  lockerBox.id = `locker-box-${site}`;
   const ltabs = document.createElement("div");
   ltabs.className = "locker-tabs";
-  const lkTab = document.createElement("button");
-  lkTab.className = "active";
-  lkTab.id = `locker-tab-${site}`;
-  lkTab.textContent = "📁 Locker";
-  lkTab.title = `Files in ${SITE_LABELS[site]}'s locker. Click a file to put it in Compose, then click an AI's name to give it to them.`;
   const rpTab = document.createElement("button");
   rpTab.id = `reply-tab-${site}`;
+  rpTab.className = "active";
   rpTab.textContent = "💬 Last reply";
+  rpTab.title = `${SITE_LABELS[site]}'s last reply`;
   const lkSpacer = document.createElement("span");
   lkSpacer.className = "spacer";
   const lkRefresh = document.createElement("button");
   lkRefresh.className = "lk-refresh";
+  lkRefresh.id = `lk-refresh-${site}`;
   lkRefresh.textContent = "↻";
-  lkRefresh.title = "Refresh the file list";
-  lkRefresh.setAttribute("aria-label", `Refresh ${SITE_LABELS[site]}'s locker list`);
-  ltabs.append(lkTab, rpTab, lkSpacer, lkRefresh);
-  const lkList = document.createElement("div");
-  lkList.className = "locker-list";
-  lkList.id = `locker-list-${site}`;
+  ltabs.append(rpTab, lkSpacer, lkRefresh);
   const preview = document.createElement("div");
   preview.className = "preview";
   preview.id = `preview-${site}`;
   preview.textContent = "No reply captured yet.";
-  preview.hidden = true;
-  const showLocker = (on) => {
-    lkList.hidden = !on; preview.hidden = on;
-    lkTab.classList.toggle("active", on); rpTab.classList.toggle("active", !on);
-    if (on) refreshLocker(site);
-  };
-  lkTab.onclick = (e) => { e.stopPropagation(); showLocker(true); };
-  rpTab.onclick = (e) => { e.stopPropagation(); showLocker(false); };
-  lkRefresh.onclick = (e) => { e.stopPropagation(); refreshLocker(site); };
-  lockerBox.append(ltabs, lkList, preview);
+  rpTab.onclick = (e) => { e.stopPropagation(); showLockerView(site, false); };
+  lkRefresh.onclick = (e) => { e.stopPropagation(); if (lockersUI.on) refreshLocker(site); else refreshLastReply(site); };
+  lockerBox.append(ltabs, preview);
   strip.appendChild(lockerBox);
+  lkRefresh.title = "Refresh the last reply"; // applyLockersEnabled() repaints it once the column is on the page
+  lkRefresh.setAttribute("aria-label", `Refresh ${SITE_LABELS[site]}'s last reply`);
 
   const fwdRow = document.createElement("div");
   fwdRow.className = "btns fwd-row";
@@ -1187,6 +1253,7 @@ function buildAiRow() {
   const box = el("expanded-strip");
   box.innerHTML = "";
   for (const site of SITES) box.appendChild(buildAiColumn(site));
+  for (const site of SITES) { if (lockersUI.on) addLockerUI(site); paintLockerRefresh(site); } // 📁 only while switched on
   try { wireLedChecks(); } catch (_) {}
 }
 
@@ -5268,6 +5335,7 @@ function wireComposeCommands() {
 }
 try { wireComposeCommands(); } catch (e) { console.error("compose command init failed", e); }
 try { wireLockers(); } catch (e) { console.error("locker browser init failed", e); }
+try { wireLockersSwitch(); } catch (e) { console.error("lockers switch init failed", e); }
 
 // ISS-001: the AI panes are native views drawn ON TOP of this page. Ask main to
 // re-place them the moment the page scrolls or a dialog opens/closes, so they

@@ -24,6 +24,7 @@ function A(id, channel, o) {
   ACTIONS.push(Object.freeze({
     id, channel, title: o.t, changes: !!o.c, allowAlways: !!o.aa, args: o.a || {}, required: o.r || [],
     call: o.call || (Object.keys(o.a || {}).length ? (a) => [a] : () => []), example: o.ex || {}, local: o.local || null,
+    feature: o.f || null,
   }));
 }
 
@@ -109,11 +110,13 @@ A('memory.summary', 'memory:summary', { t: 'What the butler remembers (summary)'
 A('memory.search', 'memory:search', { t: 'Search the butler\'s memory', c: false, a: { query: text(400) }, r: ['query'], ex: { query: 'lighthouse' } });
 
 // ---- 🗄 lockers, terminal, database, files ----------------------------------------------------------------
-A('lockers.status', 'lockers:status', { t: 'AI lockers status', c: false });
-A('lockers.list', 'lockers:list', { t: 'Files in an AI\'s locker', c: false, a: { site }, r: ['site'], ex: { site: 'claude' } });
-A('lockers.read', 'lockers:read', { t: 'Read a file from an AI\'s locker', c: false, a: { site, rel: text(500) }, r: ['site', 'rel'], ex: { site: 'claude', rel: 'notes.txt' } });
-A('lockers.attach', 'lockers:attach', { t: 'Attach a locker file to AIs\' chats', c: true, a: { site, rel: text(500), targets: sites }, r: ['site', 'rel', 'targets'], ex: { site: 'claude', rel: 'notes.txt', targets: ['gemini'] } });
-A('lockers.open', 'lockers:open', { t: 'Open the lockers folder', c: true, aa: true });
+// f: 'lockers' — hidden from Alfred (his tool list, app_help, "Everything I can do") while the 📁 AI lockers are
+// switched off, which is the default (lockers-switch.js; main.js calls setFeature('lockers', on)).
+A('lockers.status', 'lockers:status', { f: 'lockers', t: 'AI lockers status', c: false });
+A('lockers.list', 'lockers:list', { f: 'lockers', t: 'Files in an AI\'s locker', c: false, a: { site }, r: ['site'], ex: { site: 'claude' } });
+A('lockers.read', 'lockers:read', { f: 'lockers', t: 'Read a file from an AI\'s locker', c: false, a: { site, rel: text(500) }, r: ['site', 'rel'], ex: { site: 'claude', rel: 'notes.txt' } });
+A('lockers.attach', 'lockers:attach', { f: 'lockers', t: 'Attach a locker file to AIs\' chats', c: true, a: { site, rel: text(500), targets: sites }, r: ['site', 'rel', 'targets'], ex: { site: 'claude', rel: 'notes.txt', targets: ['gemini'] } });
+A('lockers.open', 'lockers:open', { f: 'lockers', t: 'Open the lockers folder', c: true, aa: true });
 A('terminal.state', 'terminal:state', { t: 'Command Prompt connection state', c: false });
 A('terminal.start', 'terminal:start', { t: 'Start the Command Prompt connection', c: true });
 A('terminal.stop', 'terminal:stop', { t: 'Stop / restart the Command Prompt connection', c: true, aa: true, a: { restart: { type: 'boolean' } }, ex: { restart: false } });
@@ -315,6 +318,7 @@ const EXCLUDED = {
   'akowe-view:tab': 'internal: the tab tells main it is showing (Alfred uses ui.show_tab / open_akowe_page)',
   'video:capabilities': 'internal: Alfred reads video-api capabilities() directly when he builds his video_call method list and schemas',
   'video:trailer-pick-file': 'opens a file chooser for the person at the screen (music / a picture for a trailer shot) — Alfred passes the file path straight to trailer.make',
+  'lockers:set-enabled': 'the ⚙ Advanced switch that brings back the hidden AI lockers (file commands for the web AIs) — only the person at the screen turns it on, never an AI',
   'video:framepack-choose-folder': 'opens a folder chooser for the person at the screen — Alfred sets the FramePack folder by path through video_call video.settings { framepackDir }',
 };
 /** IPC channels that a dedicated Alfred tool covers (alfred-tools.js). */
@@ -352,16 +356,23 @@ const TOOL_CHANNELS = {
   'video:framepack-unload': 'video_call:video.framepack.unload', 'video:framepack-test': 'video_call:video.framepack.test',
 };
 
-function get(id) { return ACTIONS.find((a) => a.id === id) || null; }
+// Optional features that can be switched off: their actions are hidden (and refused) while off.
+const FEATURES = { lockers: false }; // 📁 AI lockers are hidden by default
+function setFeature(name, on) { if (Object.prototype.hasOwnProperty.call(FEATURES, name)) FEATURES[name] = on === true; }
+function featureOn(name) { return FEATURES[name] === true; }
+function isAvailable(entry) { return !!entry && (!entry.feature || featureOn(entry.feature)); }
+/** The actions Alfred can use right now (ACTIONS stays the full fixed list, e.g. for the coverage test). */
+function visible() { return ACTIONS.filter(isAvailable); }
+function get(id) { const e = ACTIONS.find((a) => a.id === id) || null; return isAvailable(e) ? e : null; }
 function schemaOf(entry) { return { type: 'object', properties: entry.args, required: entry.required, additionalProperties: false }; }
 /** Compact list for the AI: ids with their argument names (titles/schemas via the app_help tool). */
 function catalogText(changes) {
-  return ACTIONS.filter((a) => a.changes === !!changes).map((a) => `${a.id}${Object.keys(a.args).length ? `(${Object.keys(a.args).map((k) => (a.required.includes(k) ? k : `${k}?`)).join(',')})` : ''}`).join(' ');
+  return visible().filter((a) => a.changes === !!changes).map((a) => `${a.id}${Object.keys(a.args).length ? `(${Object.keys(a.args).map((k) => (a.required.includes(k) ? k : `${k}?`)).join(',')})` : ''}`).join(' ');
 }
 /** Titles + argument schemas, for the app_help tool. */
 function help(prefix) {
   const p = String(prefix || '');
-  return ACTIONS.filter((a) => !p || a.id.startsWith(p)).map((a) => ({ action: a.id, tool: a.changes ? 'app_control' : 'app_info', title: a.title, args: a.args, required: a.required }));
+  return visible().filter((a) => !p || a.id.startsWith(p)).map((a) => ({ action: a.id, tool: a.changes ? 'app_control' : 'app_info', title: a.title, args: a.args, required: a.required }));
 }
 
-module.exports = { ACTIONS, EXCLUDED, TOOL_CHANNELS, get, schemaOf, catalogText, help, SITES: S };
+module.exports = { ACTIONS, EXCLUDED, TOOL_CHANNELS, get, schemaOf, catalogText, help, visible, isAvailable, setFeature, featureOn, SITES: S };
