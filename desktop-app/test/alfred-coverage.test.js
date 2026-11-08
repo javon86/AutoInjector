@@ -382,6 +382,10 @@ async function main() {
   d = await drive('generate_image', { prompt: 'a lighthouse at dusk', width: 640, height: 512, loras: [{ name: 'odile_face', weight: 0.7 }] });
   const png = d.result && d.result.data && d.result.data.path;
   check('generate_image', d.carded && !!forge.state.lastTxt2img && /a lighthouse at dusk/.test(forge.state.lastTxt2img.prompt) && /<lora:odile_face:0\.7>/.test(forge.state.lastTxt2img.prompt) && forge.state.lastTxt2img.width === 640 && png && fs.existsSync(png), 'card → ✔ → txt2img on Forge (prompt, LoRA, size) → PNG saved');
+  // log 2026-11-08: an AI-written prompt (~4,000 characters) was refused 4 times ("max 1000"); the Images module shortens it
+  const longPrompt = ('Hyperrealistic cinematic portrait of a superheroine in a lantern-lit harbor, ' + 'detailed armour, dramatic rim light, ').repeat(40).slice(0, 4200);
+  d = await drive('generate_image', { prompt: longPrompt });
+  check('generate_image', d.carded && d.result && d.result.ok && !!forge.state.lastTxt2img && forge.state.lastTxt2img.prompt.length < longPrompt.length, `a ${longPrompt.length}-character prompt is accepted and shortened for the model (sent ${forge.state.lastTxt2img && forge.state.lastTxt2img.prompt.length} characters)`);
   d = await drive('sd_call', { method: 'images.generate', args: { prompt: 'harbor at night', steps: 33, cfgScale: 5.5, sampler: 'DPM++ 2M', seed: 42, count: 2 } });
   check('sd_call', d.carded && forge.state.lastTxt2img.steps === 33 && forge.state.lastTxt2img.cfg_scale === 5.5 && forge.state.lastTxt2img.sampler_name === 'DPM++ 2M' && forge.state.lastTxt2img.seed === 42 && d.result && d.result.ok, 'images.generate sets the generation fields (steps, CFG, sampler, seed, count) on Forge');
   mark('sd:images.generate', 'real sd-api + fake Forge');

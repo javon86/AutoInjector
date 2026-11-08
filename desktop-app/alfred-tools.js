@@ -962,13 +962,15 @@ def({
   name: 'generate_image', title: 'Generate an image', group: 'images', changes: true, allowAlways: true, timeoutMs: 480000,
   description: 'Make a picture from a description. engine: "sd" = the local Stable Diffusion, "chatgpt" = ChatGPT\'s own image generation in its logged-in pane (30–180 s), "auto" (default) = SD when connected, else ChatGPT. For a character\'s reference pictures: purpose "portrait", purpose "view" with one view (front, three_quarter_front, side, three_quarter_back, back, idle, draw, attack, dash, defend — AutoInjector adds the framing), or purpose "sheet" (one turnaround sheet with all ten). Optional size, style, character (their character lock is used) and appearance.',
   args: { type: 'object', properties: {
-    prompt: { type: 'string', minLength: 2, maxLength: 1000 },
+    // long prompts are fine: the Images module shortens them to what the model reads (~150 tokens) and keeps the full
+    // text with the picture (fullPrompt) — an AI-written prompt is often 2,000–5,000 characters (log 2026-11-08: four refusals)
+    prompt: { type: 'string', minLength: 2, maxLength: 12000 },
     width: { type: 'integer', minimum: 256, maximum: 2048 },
     height: { type: 'integer', minimum: 256, maximum: 2048 },
     style: { type: 'string', maxLength: 200 },
     character: { type: 'string', maxLength: 200, description: 'A character name: their saved character lock is used when there is one' },
-    appearance: { type: 'string', maxLength: 1000, description: 'What the character looks like, in words' },
-    negative_prompt: { type: 'string', maxLength: 1000 },
+    appearance: { type: 'string', maxLength: 4000, description: 'What the character looks like, in words' },
+    negative_prompt: { type: 'string', maxLength: 2000 },
     loras: { type: 'array', maxItems: 4, items: { type: 'object', required: ['name'], properties: { name: { type: 'string', minLength: 1, maxLength: 200 }, weight: { type: 'number' } }, additionalProperties: false } },
     engine: { type: 'string', enum: ['auto', 'sd', 'chatgpt'] },
     purpose: { type: 'string', enum: ['free', 'portrait', 'cover', 'scene', 'illustration', 'map', 'view', 'sheet'] },
