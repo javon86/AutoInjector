@@ -213,7 +213,7 @@ def test_ai_pass_api_job_and_independent_reader(tmp_path):
     fake = SlotFake()
     fake.chapter_texts["ch1"] = CHAPTER_TEXT[1][0] + "\n\n" + AI_PAR
     app = make_app(tmp_path, fake)
-    run = run_book(app, {"slot_id": "AI-1"})
+    run = run_book(app, {"slot_id": "AI-1", "human_pass": False})  # the button alone (the end pass is off)
     assert run["status"] == "done", run.get("problem")
     pid = run["project_id"]
     base = f"/api/projects/{pid}/branches/main/originality"

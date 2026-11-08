@@ -5711,6 +5711,9 @@ function renderBook(holder, book, redraw) {
     sequelBox(S.pid, S.branch)));
   // ⚠️ what needs a look: approved without checks (H14), chapters to re-check after a hand edit (H5), instructions
   // that were cut (H13), promises the ending did not keep (H11 / H12)
+  // ✍ the end-of-book "sounds like a person" pass (human_voice.py): before → after the fixes you approved
+  if (book.human_voice && book.human_voice.line) holder.appendChild(h('p', { class: 'card small hv-home', 'data-testid': 'home-human-voice' }, book.human_voice.line,
+    book.human_voice.waiting ? h('span', { class: 'muted' }, ' — open a chapter to see them (✔ Use makes a new draft for you to approve).') : null));
   const att = (book.attention || {}).lines || [];
   if (att.length) holder.appendChild(h('section', { class: 'card attention-card', 'data-testid': 'book-attention', 'aria-label': 'Needs a look' },
     h('h2', null, '⚠️ Needs a look'),
@@ -8164,6 +8167,17 @@ function fillBibleSwitch(prefix) {
     h('p', { class: 'hint', id: `${id}-hint` }, 'Off (recommended): only the essentials are decided before chapter one, and the rest just in time, when a chapter needs it — fewer AI answers. On: before chapter one the AI fills every empty section of every page — characters, places, items, magic, groups, the world and the story plan — in a few batched answers, approved under your consent. Your own text is never replaced.'));
   return { el, box, apply(body) { if (box.checked) body.fill_bible = true; } };
 }
+/** ✍ "Check that it sounds like a person at the end" (run setting human_pass): on by default */
+function humanPassSwitch(prefix) {
+  const id = `${prefix}-human-pass`;
+  const box = h('input', { type: 'checkbox', role: 'switch', id, 'data-testid': id, checked: true, 'aria-describedby': `${id}-hint` });
+  const state = h('span', { class: 'hp-state', 'aria-hidden': 'true' }, 'On');
+  box.addEventListener('change', () => { state.textContent = box.checked ? 'On' : 'Off'; });
+  const el = h('fieldset', { class: 'field hp-switch' }, h('legend', null, '✍ Sounds like a person'),
+    h('div', { class: 'check-row' }, box, h('label', { for: id }, h('strong', null, 'At the end, check that the book sounds like a person wrote it'), ' ', state)),
+    h('p', { class: 'hint', id: `${id}-hint` }, 'On (recommended): when the book is made, Akọwe reads every chapter for lines that sound machine-written or repeat, asks an AI that did not write them to read them too, and suggests better lines (up to 20, worst first). Nothing changes until you approve a suggestion on its chapter page. About two more AI answers.'));
+  return { el, box, apply(body) { if (!box.checked) body.human_pass = false; } };
+}
 /** 🔎 PR #117 "How many AIs check for mistakes" (run setting checkers): all (default) / two / one (the old way) */
 function checkersField(prefix) {
   const id = `${prefix}-checkers`;
@@ -8201,6 +8215,7 @@ async function renderMakeSetup() {
   const cf = choicesFields({}, 'mb');
   const s7 = await S7C.makeSetupExtras(s7c());  // P23 / P25 (Section 7c)
   const fb = fillBibleSwitch('mb');  // 📖 Fill the whole Book Bible before writing (whole_bible.py), off by default
+  const hp = humanPassSwitch('mb');  // ✍ the end-of-book "sounds like a person" pass (human_voice.py), on by default
   const wr = WR.makeSetupSwitch(s7c());  // 🗳 Use the writers' room for the big twists (writers_room.py), off by default
   const ck = checkersField('mb');  // 🔎 PR #117: how many AIs check for mistakes (all by default)
   fields.checkers = ck.sel;
@@ -8220,7 +8235,7 @@ async function renderMakeSetup() {
         h('div', { class: 'field' }, h('label', { for: 'mb-genre' }, 'Genre'), genre, h('datalist', { id: 'mb-genres' }, GENRES.map(g => h('option', { value: g }))), h('span', { class: 'hint' }, 'Empty = the AI chooses.')),
         h('div', { class: 'field' }, h('label', { for: 'mb-slot' }, 'Which AI'), slot, h('span', { class: 'hint' }, 'Automatic uses whichever AI is ready.'))),
       lengthBox,
-      h('div', { class: 'field' }, h('label', { for: 'mb-idea' }, 'Your idea (optional)'), idea), cf.el, pipe.el, s7.el, fb.el, wr.el, ck.el, ccf.el),
+      h('div', { class: 'field' }, h('label', { for: 'mb-idea' }, 'Your idea (optional)'), idea), cf.el, pipe.el, s7.el, fb.el, hp.el, wr.el, ck.el, ccf.el),
     err, h('div', { class: 'form-actions' }, startAll, startSet));
   const est = estimateBox(gridUI(), () => {  // ⏱ P28: AI answers and minutes before the run starts
     const l = form.querySelector('input[name="mb-len"]:checked'); const pl = pipe.get();
@@ -8247,6 +8262,7 @@ async function renderMakeSetup() {
     }
     s7.apply(body);  // P23 / P25 (Section 7c): beta reader and "write in my style"
     fb.apply(body);  // 📖 the whole Book Bible before chapter one (only when switched on)
+    hp.apply(body);  // ✍ the end-of-book pass (sent only when switched off)
     wr.apply(body);  // 🗳 the writers' room for the big twists (only when switched on)
     ck.apply(body);  // 🔎 how many AIs check for mistakes (sent only when not the default)
     one.apply(body);  // PR #122: when only one AI works (sent only when not the default)
@@ -8512,7 +8528,9 @@ function runReportBox(r) {
     h('p', null, '📊 ', rp && rp.reviewers ? `Book report: ${rp.reviewers} AI(s) read the whole book${rp.independent < rp.reviewers ? ` (${rp.reviewers - rp.independent} not independent ⚠️)` : ''} — overall ${rp.overall}/10.`
       : 'Book report made without an AI review (no independent AI was working).',
     (rp && (rp.disagreements || []).length) ? ` ⚠️ They disagree on ${rp.disagreements.join(', ')}.` : '', ' ',
-    h('a', { class: 'btn small primary', href, onclick: () => closeMakeBook() }, '📊 Open the book report')));
+    h('a', { class: 'btn small primary', href, onclick: () => closeMakeBook() }, '📊 Open the book report')),
+    // ✍ the end-of-book "sounds like a person" pass: the score now and with the suggested rewrites
+    rp && rp.human ? h('p', { 'data-testid': 'mb-human' }, rp.human) : null);
 }
 /** 🧪 Pipeline switches (P14): preset + the five switches, each with ⓘ. get() -> null (full, the default) or {preset, flags}. */
 const PIPE = { info: null };

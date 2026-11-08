@@ -530,6 +530,7 @@ A 40–50 chapter book takes a day or two. AutoInjector looks after it while you
 | Timeline arithmetic (no AI) | ages and years that don't add up ("twelve, twenty years ago… now forty") | the whole-book fact check, near the end |
 | Readability (no AI) | prose too hard or too simple for the book's readers | the book report and the scene grid |
 | Pattern check (no AI) | repeated habits ("went very still"), lists of three, same-length sentences; a habit 2+ checks flag (pattern, originality, editor) is a must-fix for the editor, and the run says how many are left | before the editor |
+| ✍ Sounding human (see below) | AI phrases and patterns told to the writer beforehand; the book's own repeats (openings, endings, gestures, phrases, rhythm); a "Sounds like a person" score | every chapter's instructions, every checkpoint, and at the end of a ⚡ run (suggestions you approve) |
 | ✨ Originality check (no AI, optional AI pass) | clichés and AI-sounding phrases ("a testament to", "a breath she didn't know she was holding", "It wasn't X. It was Y."), long dashes everywhere, too much hedging; per chapter, with quotes and reasons. Dialogue is left out unless you ask. An optional second AI (not the writer) rates passages 1–5 for "sounds machine-written"; its quotes are checked against the book | before the editor (so its rewrites target them; a rewrite that adds such phrases is not kept), in the book report, and on the 📊 report page (✨ button). Never blocks the book |
 | Voice cards | characters who all talk alike | writing and editing |
 | Locked details | eyes, hair, weapon or weapon hand changing | after each chapter |
@@ -600,6 +601,47 @@ one. Alfred acts on the run of the book that is open. Replies that look cut off 
 - Locked-detail checks cover colours, an item's metal, weapons and the weapon hand only. The AI checks the rest.
 - Everything here has been tested with stand-in AIs. Real books with the real websites are the real test.
 - Video is not yet confirmed on your RTX 5070 Ti (see 🎬 Video above).
+
+### ✍ How Akọwe keeps the book sounding human
+
+AI-written fiction gives itself away with the same habits: stock phrases ("a breath she didn't know she was
+holding"), "Not X. Not Y.", lists of three, a little lesson at the end of every scene, the same jaw tightening in
+every chapter. Akọwe works against this in four places.
+
+1. **Before a chapter is written (prevention).** Every chapter's instructions carry a short "never write these" list:
+   the best-known AI phrases and clichés, the patterns to avoid, and six craft rules — vary sentence length, use
+   details only this story could have, leave the feeling unsaid after showing it, let dialogue be messy (people
+   interrupt, dodge, trail off), end scenes on an action or an image instead of a lesson, and don't repeat a gesture
+   from earlier chapters. The list comes from the same file the checks use (`ai_tells.json`): change the file and every
+   new chapter gets the new list. The writer is also told this book's own repeats so far, counted without any AI:
+   "Don't open with the weather again (chapters 2, 4 and 5 did)", "Avoid “jaw tightened”: already 6× in chapters 1–5".
+   The whole block is small (under 1 900 characters) and is shortened, least important first, if it would not fit.
+   **A narrator voice even without your writing samples:** when you have no ✒️ style card, a ⚡ Make-a-book run gives
+   the book its own narrator voice at the start, chosen with the book's genre, tone, point of view and tense (by the
+   AI in the same answer that invents the book, so no extra AI answer; otherwise from the book's profile). The writer
+   and the editor get it exactly like a style card. If you later press ✒️ Use for this book, your own style replaces
+   it.
+2. **Every chapter.** As before: the ✨ originality check points the editor at the machine-sounding lines, and a
+   rewrite that adds new ones is not kept.
+3. **Every 5 chapters (the checkpoint).** Akọwe counts, without any AI, what repeats across the chapters: chapters that
+   open or end the same way (the weather, waking up, a line of dialogue, a lesson, falling asleep…), the same gestures
+   and body language, the same phrases and similes, the same sentence rhythm chapter after chapter, and a rising
+   number of AI-sounding spots. The AIs reading the stretch get this list and say for each one whether a reader would
+   notice it (confirmed) or not (rejected), and they give a new score, **Sounds like a person** (1–10, like the other
+   scores), with their reasons and exact quotes. A line they want changed goes through the checkpoint's usual fix
+   path (reviewed and approved like any fix; outside a run it is a suggestion for you). The 🔎 Check consistency now
+   box and the 🧭 continuity report show all of it. If no AI answers, Akọwe's own count is still shown.
+4. **At the end of the book.** When a ⚡ run finishes, Akọwe reads every chapter for machine-sounding lines, asks an AI
+   that did not write those chapters to rate the passages (the usual rules: never the writer when another AI works),
+   and checks the whole book for repeats. The worst spots (up to 20, worst first) become **suggestions** on their
+   chapter pages ("✍ Suggestions to sound more like a person"): tick the ones you like and press ✔ Use — that makes a
+   new draft for you to approve; nothing changes until you do. The rewrites come from the 🤖 Claude Code helpers when
+   they work, otherwise from one web AI answer. A suggestion that would change a name, a number, a 🔒 locked detail, a
+   story-map passage or a protected repeat is never offered, and chapters you wrote yourself are left alone. The run's
+   report and 🏠 Book home show the score: "✍ Sounds like a person: 72/100 — 18 suggestions (about 88 if you use them
+   all)", and after you approve fixes "✍ Sounds like a person: 72 → 88 after your approved fixes". It costs about two
+   AI answers; when every AI is at its usage limit, Akọwe's own results are still shown. To switch it off, untick
+   "✍ At the end, check that the book sounds like a person wrote it" on the Make-a-book screen.
 
 ## 5. The Book Bible and series
 

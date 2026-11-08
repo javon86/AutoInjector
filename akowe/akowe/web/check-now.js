@@ -50,6 +50,17 @@ export function checkNowBox(c, pid, branch = 'main', { testid = 'check-now', com
           Object.entries(x.by || {}).map(([n, v]) => `${n} ${v}`).join(', '), x.agree ? ')' : ' — they disagree)'))));
         if ((sr.agree || []).length) rev.appendChild(h('ul', { class: 'small' }, sr.agree.map(a => h('li', null,
           `${a.names.join(' and ')} agree ${a.kind === 'not_working' ? 'this is not working' : 'this works'}: ${a.point}`))));
+        // ✍ does it sound like a person? each AI's reasons with its exact quotes
+        const hv = (sr.views || []).filter(v => v.human || (v.human_quotes || []).length);
+        if (hv.length) rev.appendChild(h('div', { 'data-testid': `${testid}-human` }, h('p', { class: 'small' }, h('strong', null, '✍ Sounds like a person?')),
+          h('ul', { class: 'small' }, hv.map(v => h('li', null, h('strong', null, `${v.name}: `), v.human || '',
+            (v.human_quotes || []).length ? h('ul', { class: 'muted' }, v.human_quotes.slice(0, 3).map(q => h('li', null, `“${q}”`))) : null)))));
+        // 🔁 Akọwe's own repeat check across chapters (no AI), with what the AIs said about each finding
+        const reps = sr.repeats || [];
+        if (reps.length) rev.appendChild(h('div', { 'data-testid': `${testid}-repeats` }, h('p', { class: 'small' }, h('strong', null, '🔁 Repeated across chapters (Akọwe’s own count)')),
+          h('ul', { class: 'small' }, reps.map(r => h('li', { 'data-status': r.status }, r.message, h('span', { class: 'muted' },
+            ` — ${{ confirmed: 'the AIs agree a reader would notice', rejected: 'the AIs think it is fine', not_checked: 'not checked by an AI' }[r.status] || ''}`),
+            (r.examples || []).length ? h('div', { class: 'muted' }, `“${r.examples[0].quote}” (chapter ${r.examples[0].chapter})`) : null)))));
         rev.appendChild(h('ul', { class: 'small muted' }, (sr.views || []).map(v => h('li', null, h('strong', null, `${v.name}: `),
           [v.pacing, v.arc, v.direction, v.sense, v.drift].filter(Boolean).join(' ')))));
         out.appendChild(rev);

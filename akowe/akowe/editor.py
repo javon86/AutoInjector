@@ -629,9 +629,9 @@ class EditorService:
             if rec["module_id"] == "C02":
                 from . import habits  # noqa: PLC0415
                 task = f"{task} {rubric.IN_CHAPTER_WORDS}" + (f" {habits.ASK}" if ctx.get("must_fix") else "")
-            if ctx.get("narrator_style"):  # P25 (Section 7c)
-                from .style_card import EDITOR_NOTE  # noqa: PLC0415
-                task = f"{task} {EDITOR_NOTE}"
+            if ctx.get("narrator_style"):  # P25 (Section 7c); ✍ or the book's own narrator voice (human_voice.py)
+                from .human_voice import editor_note_for  # noqa: PLC0415
+                task = f"{task} {editor_note_for(ctx['narrator_style'])}"
             ask = dict(rec=rec, task=task, dims=dims, ctx=ctx, protected=protected, text=text,
                        strictness=st["strictness"], relax=relax, report=report, prev_disc=prev_disc)
             first = self._ask(job, **ask)

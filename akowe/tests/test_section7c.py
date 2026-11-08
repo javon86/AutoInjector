@@ -249,7 +249,9 @@ def test_my_style_without_a_card_is_a_note(tmp_path):
     run = run_book(app, {"slot_id": "AI-1", "my_style": True})
     assert run["status"] == "done"
     assert any(e.get("code") == "STYLE_MISSING" for e in run["events"])
-    assert sc.brief_for(app.store, run["project_id"]) is None
+    # ✍ without a card the book gets its own narrator voice instead (human_voice.py), marked auto
+    b = sc.brief_for(app.store, run["project_id"])
+    assert b and b.get("auto") is True and b.get("voice_summary")
 
 
 def test_run_settings_are_booleans(tmp_path):

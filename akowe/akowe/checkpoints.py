@@ -71,6 +71,15 @@ CHECK_SCHEMA = {
         "stretch_review": {"type": "object", "additionalProperties": False,
                            "required": ["pacing", "arc", "drift", "working", "not_working", "scores"],
                            "properties": {"pacing": _S, "arc": _S, "drift": _S, "direction": _S, "sense": _S,
+                                          # ✍ does it sound like a person? (reasons and exact quotes, optional)
+                                          "human": _S, "human_quotes": {"type": "array", "maxItems": 5, "items": _S},
+                                          # ✍ Akọwe's own repeat findings (context.stretch.repeats_found), confirmed
+                                          # or rejected by this AI
+                                          "repeats": {"type": "array", "maxItems": 12, "items": {
+                                              "type": "object", "additionalProperties": False,
+                                              "required": ["id", "verdict"],
+                                              "properties": {"id": _S, "verdict": {"type": "string", "enum": [
+                                                  "confirmed", "rejected"]}, "why": _S}}},
                                           "working": {"type": "array", "maxItems": 5, "items": _S},
                                           "not_working": {"type": "array", "maxItems": 5, "items": _S},
                                           "scores": {"type": "object", "additionalProperties": False,
@@ -80,10 +89,10 @@ CHECK_SCHEMA = {
                                                                         "maximum": 10}
                                                                     for k in ("pacing", "arc_progress", "continuity",
                                                                               "characters", "direction",
-                                                                              "makes_sense")}}}}}}
+                                                                              "makes_sense", "human")}}}}}}
 STRETCH_SCORES = {"pacing": "Pacing", "arc_progress": "Story and arc progress", "continuity": "Continuity",
                   "characters": "Characters stay themselves", "direction": "Heading the right way",
-                  "makes_sense": "Makes sense"}
+                  "makes_sense": "Makes sense", "human": "Sounds like a person"}
 STRETCH_TASK = (
     " ALSO review this stretch of chapters as a whole (context.stretch) in stretch_review: pacing (one or two plain "
     "sentences: does it move, drag or rush?), arc (do the story and the main character's arc move forward as planned?), "
@@ -91,8 +100,15 @@ STRETCH_TASK = (
     "heading the right way: toward the planned ending, the premise and the book's central question, or wandering off? "
     "name the chapter where it turns), sense (does it make sense: are events, motives and cause-and-effect believable "
     "and clear to a reader? name what does not add up), working (up to 5 things that "
-    "work, concrete), not_working (up to 5 concrete things that do not, each naming the chapter), scores 1-10 for "
-    "pacing, arc_progress, continuity, characters, direction and makes_sense (most good drafts score 6-8).")
+    "work, concrete), not_working (up to 5 concrete things that do not, each naming the chapter), human (does the "
+    "prose sound like a person wrote it? one or two plain sentences with the reasons: stock phrases, tidy patterns, "
+    "the same openings, endings, gestures or rhythm chapter after chapter), human_quotes (up to 5 exact quotes, word "
+    "for word from the chapters, that sound most machine-made), repeats (for each finding in "
+    "context.stretch.repeats_found, Akọwe's own count of repeats across chapters: its id and verdict confirmed — a "
+    "reader would notice it — or rejected — it is deliberate or harmless — with why), scores 1-10 for "
+    "pacing, arc_progress, continuity, characters, direction, makes_sense and human (most good drafts score 6-8). "
+    "A line that sounds machine-written or repeats what earlier chapters did may also be a problem (severity minor, "
+    "problem starting “Sounds machine-made:”) with the smallest rewrite as its fix.")
 PLAN_RULE = (
     " Check each chapter against its plan too (context.plan: what the chapter must do): a chapter that strays off its "
     "plan or the story's path, or drops what the plan needs, is a problem (severity major) — quote where it strays.")
@@ -651,6 +667,9 @@ def _run_one(svc, run: dict, st: dict, cp: dict, chapters: list[dict]) -> None:
                                    "text": (texts.get(c) or {}).get("text") or ""} for c in span])
         _put(store, pid, branch, cp)
     flags = _flags_now(store, pid, branch, order, span, texts)
+    if _is_stretch(cp) and cp.get("repeats") is None:  # ✍ the repeat check across chapters (no AI), once
+        cp["repeats"] = _repeats_now(order, span, texts, cp)
+        _put(store, pid, branch, cp)
     # 🧠 the chapters' needs lists: each listed section checked (Akọwe's single-field mismatches join the flags) and
     # what the chapters used without planning it (listed in the report)
     from . import needs_list  # noqa: PLC0415
@@ -699,6 +718,9 @@ def _run_one(svc, run: dict, st: dict, cp: dict, chapters: list[dict]) -> None:
             task += PLAN_RULE
         if _is_stretch(cp):
             ctx["stretch"] = {"chapters": label, "after_chapter": cp["after"]}
+            if cp.get("repeats"):  # ✍ Akọwe's own repeat findings: the AIs confirm or reject them
+                ctx["stretch"]["repeats_found"] = [{k: f.get(k) for k in ("id", "label", "message", "examples")}
+                                                   for f in cp["repeats"]]
             task += STRETCH_TASK
             kd = _kind_of_stretch(svc, run, outline, nums_here)
             if kd:  # 📚 is the story on its way to its kind's promise?
@@ -937,6 +959,20 @@ def _kind_of_stretch(svc, run: dict, outline: dict | None, nums: set) -> dict | 
         return None
 
 
+def _repeats_now(order: list[str], span: list[str], texts: dict, cp: dict) -> list[dict]:
+    """✍ Repeats across chapters (human_voice.repeats, no AI) that touch this stretch, over the book so far."""
+    try:
+        from . import human_voice  # noqa: PLC0415
+        upto = order[:max(cp.get("after") or 0, max((order.index(c) + 1 for c in span if c in order), default=0))]
+        chs = [{"chapter_id": c, "number": i + 1, "text": (texts.get(c) or {}).get("text") or ""}
+               for i, c in enumerate(upto)]
+        focus = {order.index(c) + 1 for c in span if c in order}
+        return human_voice.for_stretch(chs, focus)
+    except Exception:  # noqa: BLE001 - advice, never a reason to stop a checkpoint
+        log.exception("repeat check of a stretch")
+        return []
+
+
 def _is_stretch(cp: dict) -> bool:
     """A checkpoint every N chapters (or at an act's end) — not the final whole-book one, not a chapter check."""
     return not cp.get("final") and cp.get("kind") != "chapter"
@@ -954,11 +990,20 @@ def clean_stretch(raw) -> dict | None:
 
     def lst(v):
         return [_clip(x, 240) for x in v if isinstance(x, str) and x.strip()][:5] if isinstance(v, list) else []
+    reps = []
+    for x in r.get("repeats") if isinstance(r.get("repeats"), list) else []:
+        if isinstance(x, dict) and isinstance(x.get("id"), str) and x.get("verdict") in ("confirmed", "rejected"):
+            reps.append({"id": _clip(x["id"], 20), "verdict": x["verdict"], "why": _clip(x.get("why"), 240)})
+    quotes = r.get("human_quotes")
     out = {"pacing": _clip(r.get("pacing"), 400), "arc": _clip(r.get("arc"), 400), "drift": _clip(r.get("drift"), 400),
            "direction": _clip(r.get("direction"), 400), "sense": _clip(r.get("sense"), 400),
+           "human": _clip(r.get("human"), 400),
+           "human_quotes": [str(q).strip()[:300] for q in quotes if isinstance(q, str) and q.strip()][:5]
+           if isinstance(quotes, list) else [],
+           "repeats": reps[:12],
            "working": lst(r.get("working")), "not_working": lst(r.get("not_working")), "scores": sc}
-    return out if any(out[k] for k in ("pacing", "arc", "drift", "direction", "sense", "working", "not_working",
-                                         "scores")) else None
+    return out if any(out[k] for k in ("pacing", "arc", "drift", "direction", "sense", "human", "working",
+                                         "not_working", "scores")) else None
 
 
 def combine_stretch(views: list[dict], label: str) -> dict:
@@ -995,14 +1040,31 @@ def combine_stretch(views: list[dict], label: str) -> dict:
             "readers": [v["name"] for v in views]}
 
 
+def repeat_verdicts(found: list[dict], views: list[dict]) -> list[dict]:
+    """✍ Akọwe's repeat findings with what the AIs said: confirmed (more said confirmed than rejected), rejected, or
+    not checked (no AI gave a verdict)."""
+    out = []
+    for f in found or []:
+        said = [(v["name"], r) for v in views for r in v.get("repeats") or [] if r.get("id") == f.get("id")]
+        yes = [n for n, r in said if r["verdict"] == "confirmed"]
+        no = [n for n, r in said if r["verdict"] == "rejected"]
+        status = "confirmed" if yes and len(yes) >= len(no) else "rejected" if no else "not_checked"
+        out.append(dict(f, status=status, confirmed_by=yes, rejected_by=no,
+                        why=next((r.get("why") for _n, r in said if r.get("why")), "")))
+    return out
+
+
 def stretch_line(sr: dict) -> str:
     """One plain line for the run window and the journal."""
     bits = [f"{s['label'].lower()} {s['average']:g}/10" + ("" if s["agree"] else f" (they disagree: {s['low']}–"
                                                                                    f"{s['high']})")
             for s in sr.get("scores") or []]
     ag = [a for a in sr.get("agree") or [] if a["kind"] == "not_working"]
-    return (f"📖 {sr['title']} by {', '.join(sr.get('readers') or [])}: " + (", ".join(bits) or "no scores")
-            + (f" · they agree: {ag[0]['point']}" if ag else ""))
+    reps = [r for r in sr.get("repeats") or [] if r.get("status") != "rejected"]
+    who = f" by {', '.join(sr['readers'])}" if sr.get("readers") else " (Akọwe's own check; no AI answered)"
+    return (f"📖 {sr['title']}{who}: " + (", ".join(bits) or "no scores")
+            + (f" · they agree: {ag[0]['point']}" if ag else "")
+            + (f" · 🔁 {len(reps)} repeat(s) across chapters" if reps else ""))
 
 
 def _stretch(svc, run: dict, cp: dict) -> None:
@@ -1013,22 +1075,29 @@ def _stretch(svc, run: dict, cp: dict) -> None:
         for v in p.get("reviews") or []:
             cur = views.setdefault(v["name"], {"name": v["name"], "slot": v.get("slot"), "pacing": v.get("pacing"),
                                                "arc": v.get("arc"), "drift": v.get("drift"),
-                                               "direction": v.get("direction"), "sense": v.get("sense"), "working": [],
-                                               "not_working": [], "scores": {}, "_n": {}})
+                                               "direction": v.get("direction"), "sense": v.get("sense"),
+                                               "human": v.get("human"), "human_quotes": [], "repeats": [],
+                                               "working": [], "not_working": [], "scores": {}, "_n": {}})
+            cur["human_quotes"] = (cur["human_quotes"] + list(v.get("human_quotes") or []))[:5]
+            cur["repeats"] = (cur["repeats"] + list(v.get("repeats") or []))[:12]
             cur["working"] = (cur["working"] + list(v.get("working") or []))[:5]
             cur["not_working"] = (cur["not_working"] + list(v.get("not_working") or []))[:5]
             for k, x in (v.get("scores") or {}).items():
                 n = cur["_n"].get(k, 0)
                 cur["scores"][k] = round(((cur["scores"].get(k) or 0) * n + x) / (n + 1), 1)
                 cur["_n"][k] = n + 1
-    if not views:
-        return
-    for v in views.values():
-        v.pop("_n", None)
     order = [c for c in cp.get("chapter_ids") or []]
     first = cp.get("from") or cp["after"] - len(order) + 1
     label = f"chapters {first}–{cp['after']}" if len(order) > 1 else f"chapter {cp['after']}"
+    if not views:
+        if cp.get("repeats"):  # ✍ no AI answered: Akọwe's own repeat check still stands
+            cp["stretch"] = dict(combine_stretch([], label), repeats=repeat_verdicts(cp["repeats"], []))
+            _put(svc.store, run["project_id"], run.get("branch_id") or "main", cp)
+        return
+    for v in views.values():
+        v.pop("_n", None)
     cp["stretch"] = combine_stretch(list(views.values()), label)
+    cp["stretch"]["repeats"] = repeat_verdicts(cp.get("repeats") or [], list(views.values()))
     _put(svc.store, run["project_id"], run.get("branch_id") or "main", cp)
     svc.event(run, "note", stretch_line(cp["stretch"]), step="chapters", code="STRETCH_REVIEW")
 
@@ -1305,6 +1374,16 @@ def stretch_markdown(sr: dict, level: str = "####") -> list[str]:
     for a in sr.get("agree") or []:
         out.append(f"- {' and '.join(a['names'])} agree "
                    + ("this is not working" if a["kind"] == "not_working" else "this works") + f": {a['point']}")
+    for r in sr.get("repeats") or []:
+        st = {"confirmed": "the AIs confirm it", "rejected": "the AIs think it is fine",
+              "not_checked": "not checked by an AI"}.get(r.get("status"), "")
+        out.append(f"- 🔁 {r.get('message')} — {st}" + (f" ({r['why']})" if r.get("why") else "")
+                   + "".join(f"\n  - chapter {e.get('chapter')}: “{e.get('quote')}”" for e in (r.get("examples")
+                                                                                         or [])[:2]))
+    for v in sr.get("views") or []:
+        if v.get("human"):
+            out.append(f"- ✍ **{v['name']}** on sounding like a person: {v['human']}"
+                       + "".join(f"\n  - “{q}”" for q in (v.get("human_quotes") or [])[:3]))
     for v in sr.get("views") or []:
         out.append(f"- **{v['name']}**: " + " ".join(x for x in (v.get("pacing"), v.get("arc"), v.get("direction"),
                                                                  v.get("sense"), v.get("drift")) if x)

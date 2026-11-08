@@ -304,12 +304,20 @@ def checklist(text: str, earlier: list[str] | None = None) -> dict:
 
 
 def ai_tells(store, text: str, *, earlier: list[str] | None = None, keep_exactly: list[str] | None = None,
-             keep_repeats: list[str] | None = None, cancel=None) -> tuple[list[dict], dict]:
+             keep_repeats: list[str] | None = None, spots: list[dict] | None = None,
+             cancel=None) -> tuple[list[dict], dict]:
+    """``spots`` (the end-of-book pass, human_voice.py): the worst lines Akọwe already picked — rewrite those first."""
     chk = checklist(text, earlier)
     ctx = {"chapter_text": text, "checklist": {k: v for k, v in chk.items() if k != "book_echoes"},
            "book_echoes": chk["book_echoes"], "keep_exactly": list(keep_exactly or [])[:40],
            "keep_repeats": list(keep_repeats or [])[:40]}
-    res = cc.run_job(store, kind="ai_tells", prompt=prompt("ai_tells", TELLS_TASK, TELLS_SCHEMA, ctx),
+    task = TELLS_TASK
+    if spots:
+        ctx["worst_spots"] = [{"quote": _clip(s.get("quote"), MAX_QUOTE), "problem": _clip(s.get("problem"), 240)}
+                              for s in spots[:MAX_LINES]]
+        task += (" context.worst_spots are the lines Akọwe found worst in this chapter: rewrite those first (quote "
+                 "them exactly).")
+    res = cc.run_job(store, kind="ai_tells", prompt=prompt("ai_tells", task, TELLS_SCHEMA, ctx),
                      schema=TELLS_SCHEMA, tools="none", max_turns=3, cancel=cancel)
     return clean_tells(res["data"], text, keep_exactly=keep_exactly, keep_repeats=keep_repeats), res
 

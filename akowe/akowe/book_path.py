@@ -741,7 +741,9 @@ class BookPath:
         except Exception:  # noqa: BLE001 - a progress number must never break the checklist
             words = None
         from . import attention  # noqa: PLC0415 - ⚠️ what needs a look (H5 / H13 / H14 / H11)
+        from . import human_voice  # noqa: PLC0415 - ✍ "Sounds like a person: 72 → 88 after your approved fixes"
         return {"project_id": self.pid, "branch_id": self.branch, "ai_ready": ai, "profile": prof,
+                "human_voice": human_voice.home(self),
                 "steps": steps, "next": nxt["id"] if nxt else None, "words": words,
                 "done_count": sum(1 for s in steps if s["state"] == "done"), "total": len(steps),
                 "attention": attention.of_book(self.store, self.pid, self.branch)}

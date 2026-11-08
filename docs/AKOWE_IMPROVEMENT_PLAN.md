@@ -867,8 +867,43 @@ the browser: `tests/campaign/ui/test_ui_continuity.py`):
   report has a one-line summary (and a Markdown section); the report page has the ✨ Originality check card
   (`web/originality.js`): per-chapter scores, the findings, the counts and the AI pass. A ⚡ run notes the line after
   the report. Never blocks the book.
-- *Not done:* the AI pass is a button only (not a ⚡ run step); the lists are English; "triplet adjectives" use the
-  pattern checker's general lists of three (no part-of-speech tagging).
+- *Not done:* ~~the AI pass is a button only (not a ⚡ run step)~~ — it now runs at the end of every ⚡ run (see ✍ Sounding
+  human, the next section); the lists are English; "triplet adjectives" use the pattern checker's
+  general lists of three (no part-of-speech tagging).
+
+## ✍ Sounding human: prevention, repeats across chapters, the end-of-book pass (2026-11, PR #TBD) — done
+
+User: "books that are less likely to sound AI-written". New `akowe/akowe/human_voice.py`; data in `ai_tells.json`
+(`writer_brief`: how many phrases of each list to take, `always`, `show`, `patterns`, `craft`, `gestures`).
+
+- [x] **Prevention in every chapter brief** (`chapter_brief._human_voice` → `writing_brief.human_voice` + one rule):
+  `never_write` (first N of each list, best-known first), `never_do` (8 patterns), `do` (6 craft rules) and
+  `this_book_so_far` (the book's own repeat offenders in the last 12 approved chapters, read from `c_manuscript`, no
+  AI, cached). ≤ 1 900 characters of JSON (measured 1 740–1 900 in the fake runs) + a ~300-character rule; trimmed
+  least important first, a cut of the book's own lines is reported (brief_cuts).
+- [x] **Narrator voice without samples**: folded into the run's first AI call (`narrator_voice`, optional in the
+  profile schema), else derived from genre / tone / POV / tense / choices; stored as `style_card:<pid>` with
+  `auto: true` (`set_auto` never replaces a real card); writer rule `AUTO_RULE`, editor `AUTO_EDITOR_NOTE`;
+  ✒️ Use for this book replaces it. The ✒️ page's book list does not show it as "your style" (`auto_voice`).
+- [x] **Repeat check across chapters** (`repeats`, no AI): openings / closings by kind, gestures (data list; also
+  repetition.py filler so they are trimmed, not protected as motifs), 5-word phrases and similes in 2+ chapters
+  (names left out), the same sentence-rhythm fingerprint, a rising AI-tell rate. At each stretch checkpoint
+  (`checkpoints._repeats_now` → `cp["repeats"]` → `context.stretch.repeats_found`); the AIs confirm or reject each
+  (`stretch_review.repeats`, `repeat_verdicts`) and give `scores.human` ("Sounds like a person", 1–10 like the other
+  scores — not 1–5) with `human` reasons and `human_quotes`; all optional in the schema; problems they list go through
+  the usual checkpoint fix flow. Shown in check-now (`web/check-now.js`), the continuity report and the book report.
+- [x] **End-of-book pass** (`end_pass`, from `autobook._s_report` after the report): the no-AI check, the
+  originality AI read (independent reader, its rules; skipped when every AI is at its usage limit; a writer-only read
+  is dropped in the "wait" / "ask" single-AI modes), the book-wide repeat check; worst spots ranked (AI ratings,
+  originality findings, repeat examples), ≤ 20 rewrite suggestions as `cc_proposals` kind `voice` (✔ Use = a new draft
+  via `editor.apply`, approved by the author). Rewrites: Claude Code helpers (`claude_code_jobs.ai_tells(spots=…)`, ≤ 5
+  chapters) when active, else one web-AI call (the independent reader's slot). Guard: `clean_tells` (exact once,
+  numbers, names, locked details, protected repeats) + cast names + story-map locked/approved evidence; the author's
+  own chapters skipped. Stored `human_pass:<pid>:<branch>`; run report `report.human`; 🏠 Book home
+  `status.human_voice` ("72 → 88 after your approved fixes"). Run setting `human_pass` (default on; Make-a-book switch).
+- *Not done:* the score is Akọwe's own (originality score minus a repeat penalty), not the AI's; the opening/closing
+  kinds and gestures are English only; a phrase repeated on purpose across chapters is still listed (the AIs can reject
+  it; the end pass never rewrites a protected motif); the rewrites of a long book are capped at 20 per run.
 
 ## 📣 Mockups & ads (2026-11, idea #17) — done
 
@@ -962,7 +997,8 @@ spawns it itself (`akowe/akowe/claude_code.py`), so the jobs live next to the bo
 - [ ] Fill the Book Bible in parallel (one helper per page kind).
 - [ ] Extras in the background (pictures' prompts, launch kit, report parts) while chapters are written.
 - [ ] Specialist reviewers (dialogue, pacing, sensory detail, genre conventions) as helper jobs.
-- [ ] Variety across the book (openings, chapter shapes, sentence rhythm tracked book-wide and steered in the brief).
+- [x] Variety across the book (openings, chapter shapes, sentence rhythm tracked book-wide and steered in the brief) —
+  ✍ Sounding human (PR #TBD).
 - [ ] Voice match from the user's own pages (style card checked line by line).
 - [ ] Specific details (replace generic nouns and stock images with concrete, researched ones).
 - [ ] Real dialogue (subtext, interruptions, people not saying what they mean).
