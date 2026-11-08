@@ -71,6 +71,8 @@ def _slot(prov, sid):
 def name_of(prov, sid) -> str:
     """The AI's everyday name ("Claude", "ChatGPT"), or the slot id."""
     from .approval_trust import ai_word  # noqa: PLC0415
+    if sid == "LOCAL":  # 🖥 5c: Alfred's local model (local_ai.py)
+        return "🖥 Local AI"
     s = _slot(prov, sid)
     return ai_word(s) if s else str(sid or "the AI")
 

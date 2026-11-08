@@ -659,8 +659,17 @@ class AssistService:
     def _call_ai_retrying(self, job: Job, *, op_for_roles: str, task: str, schema: dict, context: dict,
                           protected: list) -> dict:
         def once():
-            return self._call_ai_once(job, op_for_roles=op_for_roles, task=task, schema=schema, context=context,
-                                      protected=protected)
+            from . import local_ai  # noqa: PLC0415 - 🖥 5c: the local model covers while every online AI is limited
+            try:
+                with local_ai.assist_scope():
+                    return self._call_ai_once(job, op_for_roles=op_for_roles, task=task, schema=schema,
+                                              context=context, protected=protected)
+            except AkoweError as exc:
+                got = local_ai.cover_job(self, job, exc, op_for_roles=op_for_roles, task=task, schema=schema,
+                                         context=context, protected=protected)
+                if got is None:
+                    raise
+                return got
         retry = job.retry_busy if getattr(job, "retry_busy", None) is not None else self.retry_busy
         if not retry:
             return once()

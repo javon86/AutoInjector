@@ -873,6 +873,9 @@ class App:
                 val = clean_retry_settings(body)
                 self.store.set_setting("ai_retry", val)
                 return 200, val
+        if parts[:2] == ["settings", "local-ai"]:  # 🖥 5c Settings › Local AI backup (local_ai.py) [audio agent]
+            from . import local_ai  # noqa: PLC0415
+            return local_ai.route(self, method, parts[2:], body)
         if parts[:2] == ["settings", "claude-code"]:  # 🤖 Settings › Claude Code helpers (claude_code.py)
             from . import claude_code  # noqa: PLC0415
             return claude_code.route(self.store, method, parts[2:], body)

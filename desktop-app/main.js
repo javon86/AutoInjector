@@ -8187,6 +8187,8 @@ const serviceBridge = createServiceBridge({
     speak: (text) => voiceProvider.speak(text),
     listen: (o) => voiceProvider.listen(o),
   },
+  // 🖥 GET /llm/local: Alfred's Ollama, model, size and fit rating for Akọwe's local AI backup (5c)
+  llm: { local: async () => require("./llm-local-info").localInfo(await llmSetup.status(), llmSetupLib.paramsFromName) },
   // Image generation (Stable Diffusion) as a callable capability on the bridge.
   image: {
     status: () => imageProvider.status(),

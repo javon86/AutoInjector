@@ -45,6 +45,8 @@ Legend: `[ ]` to do · `[~]` in progress · `[x]` done · `[!]` problem (see "Pr
 - **🤖 Claude Code helpers — Step 1 (done 2026-11-08, PR #132):** research ahead, fact checks with sources, checks side
   by side and the "sounds like AI" pass through the Claude Code CLI, several at once, with a full fallback to the web
   AIs. **Next: Step 2** — see "🤖 Claude Code helpers: the speed plan".
+- **🎧 Audiobook (5b) and 🖥 Local AI backup (5c) (done 2026-11-08, PR #TBD):** P29 is done — see "🎧 Audiobook" and
+  "🖥 Local AI backup" below.
 - **🗺 Story map (done 2026-11-08, PR #131):** a live, editable map of the Book Bible's connections that feeds the
   writer and the checks — see "🗺 Story map" below.
 - **Back burner (later, by the user's call):** a first real GPU run of video/trailers; the audiobook export (P29).
@@ -870,6 +872,46 @@ the browser: `tests/campaign/ui/test_ui_continuity.py`):
 - *Not done:* ~~the AI pass is a button only (not a ⚡ run step)~~ — it now runs at the end of every ⚡ run (see ✍ Sounding
   human, the next section); the lists are English; "triplet adjectives" use the pattern checker's
   general lists of three (no part-of-speech tagging).
+
+## 🎧 Audiobook (2026-11-08, plan item 5b / P29, PR #TBD) — done
+
+User: "turn a finished book into an audiobook". `akowe/akowe/audiobook.py`, `web/audiobook.js` (card on 📤 Export).
+
+- [x] **Engine:** piper through AutoInjector's service bridge (`GET /voice/voices`, `POST /voice/synthesize` — the
+  managed voice engine is started when installed), like the pictures; else a running voice shim (`AKOWE_VOICE_URL`,
+  default `http://127.0.0.1:8232`). No engine / no voices / key refused → plain words + Setup Wizard hint (`PROBLEMS`).
+- [x] **Voices:** narrator from the installed voices (▶ test); optional character voices for dialogue — speaker tags
+  (the prose_audit tag patterns the repetition sorter uses) plus careful rules (one speaker per paragraph, a pronoun
+  that fits exactly one of the two talking, an action beat naming one character, strict alternation), the narrator
+  when unsure; table with gender / age hints from the character attributes and Forge looks, defaults by the voice's
+  known gender, ▶ per character.
+- [x] **Output:** `audiobook/NN - Title.mp3|wav`, whole-book file (optional), `.m4b` with chapter marks (ffmpeg);
+  spoken chapter titles; RMS −20 dBFS / peak −3 dBFS for every chapter; text cleanup (markdown, scene breaks → pause,
+  numbers, money, ordinals, years, abbreviations); `About these files.txt` with the retail notes.
+- [x] **Progress / resume / cancel:** background job, chapter n of N + time left, ✕ Cancel between pieces, manifest
+  `.akowe-audiobook.json` keyed by the chapter's text version and voices (changed chapters only are read again).
+- *Not done:* no AI pass for speaker attribution (the existing tags + rules are used; unsure lines go to the
+  narrator); per-character speed / pitch; ACX's separate opening / closing credit files; the noise floor is digital
+  silence (piper), not measured.
+
+## 🖥 Local AI backup (2026-11-08, plan item 5c, PR #TBD) — done
+
+User: "let Alfred's on-PC AI keep working when the online AIs hit their limits". `akowe/akowe/local_ai.py`,
+`web/local-ai.js` (⚙️ Settings card), AutoInjector `GET /llm/local` (`desktop-app/llm-local-info.js`).
+
+- [x] **When:** every online AI is at its usage limit (usage_limits.py, or the slots' own `USAGE_LIMIT` states).
+- [x] **What it may do:** job kinds in `CHECK_KINDS` (review, scenes_check, planned_check, checkpoint, ending_check,
+  continuity_track, story_shape, story_kind, facts_find, facts_research, originality_read), from the assist job
+  wrapper (`AssistService._call_ai_retrying`). Writing (every other job, and engine steps through
+  `providers.generate`) only with `allow_write` (off; needs `author_confirms`, warning shown).
+- [x] **Quality:** the same JSON schema; one re-ask with the errors; still broken → the original limit error (the
+  run waits as before). Slot `LOCAL`, family `local` (`providers.slot_family`): never reviews what it wrote. Reviews
+  carry `local_ai: true` and "🖥 Local AI (model)"; `cross_check.name_of` / `review.slot_label` name it.
+- [x] **Private fourth reviewer** (`fourth_reviewer`, off): `review_one` adds `local_second_opinion` to a chapter's
+  review, never changing the verdict.
+- [x] **Model:** AutoInjector's `/llm/local` (Alfred's model, size, fit rating), else Ollama `/api/tags` (biggest
+  7–14B model); good enough = ≥ 7B and a usable fit; On by default only then. Activity strip stage `local_cover`.
+- *Not done:* the cost/usage meters do not count local calls (no cost); no per-job model choice.
 
 ## ✍ Sounding human: prevention, repeats across chapters, the end-of-book pass (2026-11, PR #133) — done
 

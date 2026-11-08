@@ -36,6 +36,7 @@ STAGE_WORDS = {
     "checking": "Checking the answer",
     "busy_wait": "Waiting after a busy site",
     "limit_wait": "All AIs hit their usage limits — waiting",
+    "local_cover": "🖥 Local AI is covering for the online AIs",  # 5c local_ai.py
 }
 OUTCOMES = {  # outcome -> (icon, words)
     "done": ("✔", "Done"),
@@ -160,7 +161,8 @@ class Registry:
             e = self._entry_for_call(key, ctx, slot_id, ai, fallback, book_id, book_title)
             if branch_id and not e["branch_id"]:
                 e["branch_id"] = branch_id
-            e.update(stage="answering", stage_since=self.clock(), retry_at=None, calls=e["calls"] + 1)
+            e.update(stage="answering", stage_since=self.clock(), retry_at=None, calls=e["calls"] + 1,
+                     wait_message=None)
 
     def call_ended(self, exc: BaseException | None = None) -> None:
         key = threading.get_ident()
@@ -210,6 +212,15 @@ class Registry:
             limit = info.get("kind") == "usage_limit"
             e.update(stage="limit_wait" if limit else "busy_wait", stage_since=self.clock(),
                      retry_at=self.clock() + secs, wait_message=str(info.get("message") or "")[:300] if limit else None)
+
+    def note_local(self, message: str) -> None:
+        """🖥 5c: this thread's call is answered by the local model while the online AIs are limited (local_ai.py):
+        the row says so ("🖥 Local AI is doing the checks while Claude rests until 3:45 PM")."""
+        key = threading.get_ident()
+        with self._lock:
+            e = self._live.get(key)
+            if e is not None:
+                e.update(stage="local_cover", wait_message=str(message or "")[:300])
 
     def scope_ended(self, scope: int, exc: BaseException | None) -> None:
         key = threading.get_ident()
@@ -357,6 +368,10 @@ def note_queued(*a, **kw):
 
 def note_wait(info, **kw):
     _safe(REGISTRY.note_wait, info, **kw)
+
+
+def note_local(message: str):
+    _safe(REGISTRY.note_local, message)
 
 
 def snapshot() -> dict:

@@ -11,6 +11,7 @@ import { originalityCard } from './originality.js';  // ✨ #20 originality and 
 import { forgeRoute } from './forge.js';  // 🗂 B5 Character Forge dossiers (characters, items, places, magic)
 import { viewPictures } from './pictures.js';  // 🖼 B3 chapter/scene pictures and the map
 import { viewTrailer } from './trailer.js';  // 🎞 B2 the book trailer (AutoInjector 🎬 Video)
+import { localAiCard } from './local-ai.js';  // 🖥 5c Settings › Local AI backup (local_ai.py) [audio agent]
 import { viewLaunch } from './launch.js';  // 🚀 the launch kit (store listing, checked against the canon)
 import { viewMarketing } from './marketing.js';  // 📣 #17 mockups, ads and teaser clips
 import { viewCover } from './cover.js';  // 🎨 B3 book covers
@@ -3361,6 +3362,7 @@ async function viewSettings(main) {
   main.appendChild(autoInjectorCard(main));
   for (const s of slots) main.appendChild(slotForm(s));
   main.appendChild(retryCard());
+  main.appendChild(localAiCard(Object.assign(forgeUI(), { put })));  // 🖥 5c [audio agent]
   main.appendChild(reviewerCard());
   main.appendChild(CC.helpersCard(Object.assign(s7c(), { put })));  // 🤖 Claude Code helpers
   main.appendChild(editorSettingsCard());
@@ -7991,6 +7993,7 @@ function aiaElapsed(r) {
 function aiaStage(r) {
   if (r.state === 'done') return r.outcome_words || 'Done';
   if (r.stage === 'limit_wait' && r.wait_message) return r.wait_message;  // ⏳ PR #122: all AIs at their usage limits
+  if (r.stage === 'local_cover' && r.wait_message) return r.wait_message;  // 🖥 5c: the local AI covers (local_ai.py)
   if (r.stage === 'busy_wait') {
     const left = r.retry_at_ms ? Math.max(0, Math.ceil((r.retry_at_ms - Date.now()) / 1000)) : r.retry_in_s;
     return `${r.stage_words} (${left == null ? 'asking again soon' : `${left} s left`})`;

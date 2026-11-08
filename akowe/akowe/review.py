@@ -436,6 +436,8 @@ class ReviewService:
         return next((s for s in memo[1] if s["slot_id"] == slot_id), None)
 
     def slot_label(self, slot_id: str | None) -> str | None:
+        if slot_id == "LOCAL":  # 🖥 5c: Alfred's local model (local_ai.py)
+            return "🖥 Local AI"
         s = self._slot(slot_id)
         return providers_mod.slot_name(s) if s else slot_id
 
@@ -1442,6 +1444,16 @@ class ReviewService:
                       writer_slot=writer.get("slot"), writer=writer.get("label"), writer_kind=writer.get("kind"),
                       independent=not same, warning=NOT_INDEPENDENT if same else None,
                       writer_ai=approval_trust.ai_word(self._slot(writer.get("slot"))) if writer.get("slot") else None)
+        if job.slot == "LOCAL":  # 🖥 5c: made by the local model while the online AIs were limited — say so
+            stored.update(local_ai=True, reviewer=job.slot_label or "🖥 Local AI",
+                          local_note="Reviewed by the local AI on this PC while the online AIs were at their limits.")
+        elif rec["module_id"] == "C02":  # 🖥 5c: the optional private fourth reviewer (never changes the verdict)
+            from . import local_ai  # noqa: PLC0415
+            second = local_ai.private_review(self.store, local_ai.app_view(self.assist), task=task,
+                                             schema=REVIEW_SCHEMA, context=ctx, protected=protected,
+                                             writer_slot=writer.get("slot"))
+            if second:
+                stored["local_second_opinion"] = second
         # H6: an APPROVE approves on its own only from a different AI, with a reason and real confidence
         trust = approval_trust.problem(stored, "chapter" if rec["module_id"] == "C02" else "draft",
                                        stored.get("writer_ai"))

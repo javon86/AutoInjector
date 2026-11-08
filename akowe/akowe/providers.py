@@ -77,6 +77,8 @@ def slot_family(slot: dict | None) -> str | None:
     slot itself. Two slots of the same family are the same AI, so one cannot independently review the other."""
     if not slot:
         return None
+    if slot.get("slot_id") == "LOCAL" or slot.get("adapter_id") == "ollama":
+        return "local"  # 🖥 5c: Alfred's local model is its own AI family (local_ai.py)
     if slot.get("adapter_id") == "autoinjector" and slot.get("site"):
         return str(slot["site"])
     if slot.get("adapter_id") == "anthropic":
@@ -1443,14 +1445,21 @@ class ProviderRegistry:
             out = self._generate(ctx, task=task, output_schema=output_schema, context=context, capability=capability,
                                  protected_facts=protected_facts, slot_id=slot_id)
         except AkoweError as exc:
+            # 🖥 5c: every online AI is limited — the local model writes only with "Let the local AI write" on
+            from . import local_ai  # noqa: PLC0415
+            got = local_ai.cover_generate(self, ctx, exc, task=task, output_schema=output_schema, context=context,
+                                          protected_facts=protected_facts)
+            if got is not None:
+                return got
             if not getattr(exc, "usage_limited", False):
                 usage_limits.clear()
             raise
         usage_limits.clear()  # an AI answered: whatever limit there was is over
         return out
 
-    def _generate(self, ctx, *, task: str, output_schema: dict, context: dict, capability: str,
-                  protected_facts: list, slot_id: str | None = None) -> tuple[dict, dict]:
+    @staticmethod
+    def build_messages(task: str, context: dict, protected_facts: list) -> tuple[str, str]:
+        """(system, user) of one generation — the same for the online AIs and the 🖥 local model (local_ai.py)."""
         system = (
             "You are a module worker inside Akọwe, a book production system. "
             f"{task}\nRules: keep every protected fact exactly as given; never invent references, record IDs or "
@@ -1458,6 +1467,11 @@ class ProviderRegistry:
             "beliefs/plans honestly; output JSON only.")
         package = {"protected_facts": protected_facts, "context": context}
         user = "Project context package (JSON):\n" + json.dumps(package, ensure_ascii=False, sort_keys=True)
+        return system, user
+
+    def _generate(self, ctx, *, task: str, output_schema: dict, context: dict, capability: str,
+                  protected_facts: list, slot_id: str | None = None) -> tuple[dict, dict]:
+        system, user = self.build_messages(task, context, protected_facts)
         needed = estimate_tokens(system + user)
         operation = getattr(ctx, "op_id", None)
         if slot_id is not None:

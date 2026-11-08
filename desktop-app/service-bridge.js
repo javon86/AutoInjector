@@ -59,6 +59,8 @@ function createServiceBridge(deps) {
   // Optional external-tool registry (N5) and local voice capability (N2).
   const tools = d.tools || null; // { list(), run(name, args, {onEvent}) }
   const voice = d.voice || null; // { status(), configure(patch), speak(text), listen(opts) }
+  // 🖥 Akọwe's local AI backup (5c): { local() } -> Alfred's Ollama address, model, size and fit rating
+  const llm = d.llm || null;
   const image = d.image || null; // { status(), configure(patch), generate(prompt, {onEvent}) }
   // 🎨 Akọwe's image contract: { request(body), locks(), backend() } — docs/SD_IMAGE_API.md
   const sdStudio = d.sdStudio || null;
@@ -313,6 +315,12 @@ function createServiceBridge(deps) {
         const r = await voice.listen(body || {});
         return reply(res, r && r.ok ? 200 : 400, Object.assign({ ok: false }, r));
       }
+      // 🖥 GET /llm/local — where Alfred's local model is (Akọwe's local AI backup, docs/AKOWE_AUTOINJECTOR_BRIDGE.md)
+      if (llm && method === 'GET' && path === '/llm/local') {
+        const r = await llm.local();
+        return reply(res, 200, Object.assign({ ok: true }, r || { found: false }));
+      }
+      if (!llm && path === '/llm/local') return reply(res, 501, { ok: false, error: 'LLM_NOT_WIRED' });
       if (!voice && (path === '/voice/status' || path === '/voice/settings' || path === '/voice/speak' || path === '/voice/listen')) {
         return reply(res, 501, { ok: false, error: 'VOICE_NOT_WIRED' });
       }

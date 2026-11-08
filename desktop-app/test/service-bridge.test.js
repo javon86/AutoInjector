@@ -59,6 +59,8 @@ const bridge = createServiceBridge({
     speak: async (text) => { calls.voiceSpeak = text; return { ok: true, ms: 5 }; },
     listen: async (opts) => { calls.voiceListen = opts; return { ok: true, text: 'heard something' }; },
   },
+  // 🖥 Akọwe's local AI backup (5c)
+  llm: { local: async () => ({ found: true, endpoint: 'http://127.0.0.1:11434', model: 'qwen2.5:7b', params_b: 7.6, fit: { rating: 'good', label: '★★ Good fit' }, models: [] }) },
   image: {
     status: () => ({ configured: true, enabled: true, endpoint: 'http://127.0.0.1:7860/sdapi/v1/txt2img', steps: 20, width: 512, height: 512 }),
     configure: (patch) => ({ configured: true, enabled: !!patch.enabled, endpoint: patch.endpoint || 'http://127.0.0.1:7860/sdapi/v1/txt2img' }),
@@ -294,6 +296,14 @@ async function main() {
     assert(noText.status === 400 && noText.json.error === 'NEED_TEXT', 'a speak with no text is rejected');
     const lsn = await req('POST', '/voice/listen', { token: TOKEN, body: { seconds: 4 } });
     assert(lsn.status === 200 && lsn.json.ok === true && lsn.json.text === 'heard something', 'POST /voice/listen returns a transcript');
+    // 🖥 5c: where Alfred's local model is
+    const ll = await req('GET', '/llm/local', { token: TOKEN });
+    assert(ll.status === 200 && ll.json.found === true && ll.json.model === 'qwen2.5:7b' && ll.json.fit.rating === 'good', 'GET /llm/local tells Akọwe Alfred\'s model and its fit');
+    const { localInfo } = require('../llm-local-info');
+    const li = localInfo({ ok: true, server: { running: true, base: 'http://127.0.0.1:11434/v1' }, alfred: { model: 'qwen2.5:14b' },
+      models: [{ name: 'qwen2.5:14b', params: '14.8B', fit: { rating: 'good', label: '★★ Good fit' } }, { name: 'nomic-embed-text', params: '137M' }, { name: 'llama3.2:3b' }] }, require('../llm-setup').paramsFromName);
+    assert(li.found && li.model === 'qwen2.5:14b' && li.params_b === 14.8 && li.endpoint === 'http://127.0.0.1:11434' && li.models.length === 2 && li.models[1].params_b === 3, 'localInfo: the endpoint, Alfred\'s model, its size (embedding models left out)');
+    assert(localInfo({ ok: true, server: { running: false } }).found === false, 'localInfo: Ollama not running -> found false');
   }
 
   console.log('\n== Image generation (Stable Diffusion) ==');
@@ -359,8 +369,10 @@ async function main() {
     const bare = createServiceBridge({});
     const bs = await bare.start({ port: 0, token: TOKEN });
     const nr = await new Promise((resolve) => { const data = JSON.stringify({ svg: SVG, width: 100, height: 100 }); const rq = http.request({ host: '127.0.0.1', port: bs.port, path: '/render/image', method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data), Authorization: `Bearer ${TOKEN}` } }, (res) => { let b = ''; res.on('data', (c) => { b += c; }); res.on('end', () => resolve({ status: res.statusCode, json: safeJson(b) })); }); rq.write(data); rq.end(); });
+    const nl = await new Promise((resolve) => { const rq = http.request({ host: '127.0.0.1', port: bs.port, path: '/llm/local', method: 'GET', headers: { Authorization: `Bearer ${TOKEN}` } }, (res) => { let b = ''; res.on('data', (c) => { b += c; }); res.on('end', () => resolve({ status: res.statusCode, json: safeJson(b) })); }); rq.end(); });
     await bare.stop();
     assert(nr.status === 501 && nr.json.error === 'RENDER_NOT_WIRED', 'a bridge without the renderer answers 501 RENDER_NOT_WIRED');
+    assert(nl.status === 501 && nl.json.error === 'LLM_NOT_WIRED', 'a bridge without the local model answers 501 (Akọwe then asks Ollama itself)');
   }
 
   console.log('\n== 🖨 POST /render/pdf (HTML → PDF; fake window) ==');

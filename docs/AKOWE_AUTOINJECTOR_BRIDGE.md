@@ -447,3 +447,20 @@ AutoInjector's bridge now implements both optional fields above.
   while the follow-up waited its turn (a check-in got in first). A malformed `followup_of` (not a request-id string,
   or the request's own id) is `400 BAD_REQUEST`.
 
+
+## Service bridge additions for the audiobook and the local AI backup (2026-11-08, PR #TBD)
+
+These are on the **service bridge** (port 8765, Bearer token — the one Akọwe uses for pictures), not the AI bridge.
+
+* **`GET /voice/voices`** → `{ok: true, voices: ["en_US-amy-medium", …], defaults}`. AutoInjector starts its managed
+  voice engine when it is installed but not running. No engine: `503 {ok: false, error: "VOICE_NOT_INSTALLED" |
+  "VOICE_NOT_STARTED"}`; no piper voice: `503 {error: "NO_TTS_MODEL"}`.
+* **`POST /voice/synthesize`** `{text (≤ 4000 characters), voice?}` → `{ok: true, audio_b64: "<WAV>", mime:
+  "audio/wav", voice}` (the voice shim's `/synthesize`). `400 NEED_TEXT` / `BAD_VOICE` (a name, never a path),
+  `413 TEXT_TOO_LONG`, `503` with the engine's code. The text is never logged (only its length on a failure).
+* **`GET /llm/local`** → `{ok: true, found, endpoint: "http://127.0.0.1:11434", model (Alfred's), params_b, fit:
+  {rating, label}, models: [{name, params_b, fit}]}` (llm-setup.js status + llm-hardware.js fit rating). Embedding
+  models are left out.
+* An older AutoInjector answers `404` / `501` (`VOICE_NOT_WIRED`, `LLM_NOT_WIRED`): Akọwe then asks the voice shim
+  (`AKOWE_VOICE_URL`, default `http://127.0.0.1:8232`) or Ollama (`AKOWE_OLLAMA_URL` / `OLLAMA_HOST`, default
+  `http://127.0.0.1:11434`) itself.

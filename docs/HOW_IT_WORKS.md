@@ -342,6 +342,50 @@ bridge to your home Wi-Fi, behind its key.
 - **Privacy:** what you say and what is read stay on your PC. The log notes only that something was heard or read
   (and how long it was), never the words.
 
+### 🎧 Audiobook (in Akọwe)
+
+- **Where:** 📤 Export → the 🎧 Audiobook card. It reads the finished book aloud, chapter by chapter, with the
+  piper voices on your PC. Nothing goes online.
+- **How Akọwe gets the voices:** it asks AutoInjector through the **service bridge** (`GET /voice/voices`,
+  `POST /voice/synthesize`), the same way it asks for pictures; AutoInjector starts its voice engine when it is
+  installed. Without AutoInjector, Akọwe talks to a running voice shim directly. With no voice engine the card says
+  "No voice engine is ready on this PC" and how to fix it (Setup Wizard → Installs → "Voice engine", then "Voice
+  models").
+- **Voices:** you pick the **narrator** (▶ plays a sample). Tick **Character voices for dialogue** to give each
+  character their own voice: a small table shows each character with the hints from the Book Bible (woman / man,
+  child / older), a voice chosen for them, and ▶. Akọwe finds who speaks from the speech tags ("…," Mara said) and a
+  few careful rules; any line it is not sure about is read by the narrator.
+- **Files** (in the book's folder, `audiobook/`): one file per chapter, starting with the chapter's title; with
+  ffmpeg on the PC they are MP3 (192 kbps) plus one M4B audiobook with chapter marks, else WAV. Optionally one file for
+  the whole book. Every chapter gets the same loudness (about −20 dB, peaks at most −3 dB). Before speaking, markdown
+  marks go, a scene break becomes a pause, and numbers and short forms ("Dr.", "e.g.") are written out.
+- **Progress:** "chapter 3 of 20 · about 40 minutes left", with ✕ Cancel. Pressing 🎧 Make audiobook again skips the
+  chapters already made (only changed chapters, or a new voice, are read again).
+- **Selling it:** the card (and `About these files.txt`) lists what ACX / Audible ask for (loudness, peaks, noise
+  floor, bit rate) and that rules about AI voices differ by store — information, not a guarantee.
+- Code: `akowe/akowe/audiobook.py`, `akowe/akowe/web/audiobook.js`.
+
+### 🖥 Local AI backup (Akọwe + 🎩 Alfred's model)
+
+- **The problem it solves:** in a long book, ChatGPT, Claude and Gemini all hit their usage limits, and Akọwe waited
+  (up to 6 hours).
+- **What happens now:** while **every** online AI is at its limit, the AI on your PC that 🎩 Alfred uses (Ollama)
+  does the **checks**: each chapter's review, the scene and plan checks, the continuity checkpoints and the ending
+  check, the running notes, the story-map placement, trade facts and research notes, and the "sounds like AI" read.
+  The activity strip says so: "🖥 Local AI is doing the checks while Claude rests until 3:45 PM". As soon as an online
+  AI works again, it takes over.
+- **What it does not do:** write. Chapters, fixes and rewrites wait for an online AI, unless you tick "Let the local
+  AI write when all online AIs are limited" (off; local models write noticeably worse prose).
+- **Checked like any AI:** its answer must match the same form (JSON schema); a broken answer is asked again once,
+  then the work waits as before. Its results are marked 🖥 Local AI in reviews and reports. It counts as its own AI,
+  so it never reviews what it wrote itself.
+- **Private fourth reviewer** (optional): the local AI also reads each chapter after the online review; its opinion
+  is shown next to the review and never changes it.
+- **The ⚙️ Settings card "🖥 Local AI backup"** shows whether Ollama is found, which model (from AutoInjector's
+  `GET /llm/local`: Alfred's model and its fit for this PC; else Ollama's own list), whether it is good enough (7B or
+  bigger), and the switches. It is on by itself when a 7B+ model is installed.
+- Code: `akowe/akowe/local_ai.py`, `akowe/akowe/web/local-ai.js`, `desktop-app/llm-local-info.js`.
+
 ### 🩺 The self-tests
 
 | Test | Where | What it proves |

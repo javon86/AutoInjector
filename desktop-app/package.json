@@ -143,6 +143,7 @@
       "transcript-store.js",
       "alfred-persona-ui.js",
       "llm-setup.js",
+      "llm-local-info.js",
       "llm-setup-ui.js",
       "health-watch.js",
       "db-service.js",
