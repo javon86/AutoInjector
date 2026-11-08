@@ -146,6 +146,13 @@ async function main() {
     assert(/^⏺ 0:0[1-9]$/.test(recTxt) && await controls.evaluate(() => document.getElementById('btn-voice-mic').classList.contains('rec')), `recording: red with a timer ("${recTxt}")`);
     await shotState(controls, 'recording');
     await controls.click('#btn-voice-mic');
+    // ✔ check first (the default): the words wait in the Compose box with → Send; nothing goes until it is pressed
+    const review = await until(async () => { const t = await controls.textContent('#voice-heard'); return /Check what I heard/.test(t) ? t : null; }, 20000, 200);
+    const boxText = await controls.inputValue('#composer-text').catch(() => '');
+    const early = await posted();
+    assert(!!review && /what do you think of chapter two/.test(boxText) && ['chatgpt', 'claude', 'gemini'].every((s) => early[s].length === before[s].length), `check first: the words wait in the Compose box ("${boxText}"), nothing sent yet`);
+    await shotState(controls, 'check-first');
+    await controls.click('#voice-heard .vh-act:has-text("Send")');
     const heard = await until(async () => { const t = await controls.textContent('#voice-heard'); return /sent to/.test(t) ? t : null; }, 20000, 200);
     assert(heard && /Heard: “what do you think of chapter two” → sent to ChatGPT, Claude, Gemini/.test(heard), `the heard line: "${heard}"`);
     const got = await until(async () => { const o = await posted(); return ['chatgpt', 'claude', 'gemini'].every((s) => o[s].length > before[s].length && /what do you think of chapter two/.test(o[s][o[s].length - 1])) ? o : null; }, 20000, 300);
@@ -158,6 +165,8 @@ async function main() {
     await sleep(1100);
     assert(await controls.evaluate(() => document.getElementById('voice-mic-claude').classList.contains('rec')), 'Claude\'s 🎤 is red while recording');
     await controls.click('#voice-mic-claude');
+    await until(async () => /Send to Claude/.test(await controls.textContent('#voice-heard')), 20000, 200);
+    await controls.click('#voice-heard .vh-act:has-text("Send to Claude")');
     const heard2 = await until(async () => { const t = await controls.textContent('#voice-heard'); return /sent to Claude/.test(t) && !/ChatGPT/.test(t) ? t : null; }, 20000, 200);
     assert(!!heard2, `"${heard2}"`);
     await sleep(2500);

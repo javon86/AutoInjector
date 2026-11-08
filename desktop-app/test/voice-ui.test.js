@@ -27,6 +27,7 @@ function paneHtml(site) {
 function setup(over = {}) {
   const dom = new JSDOM(`<!doctype html><body>
     <div id="window-titlebar"><span class="wt-name">AutoInjector</span><div id="app-tabs"></div><div id="voice-bar"></div><button id="btn-alfred-switch">🎩 Alfred: Off</button></div>
+    <textarea id="composer-text"></textarea>
     <input type="checkbox" id="p-chatgpt" checked><input type="checkbox" id="p-claude" checked><input type="checkbox" id="p-gemini" checked><input type="checkbox" id="p-butler">
     ${SITES.map(paneHtml).join('')}
     <details id="sai"><summary>System AI</summary><details id="vbox"><summary>🔊 Voice</summary>
@@ -49,7 +50,7 @@ function setup(over = {}) {
   if (!over.quiet) assert(typeof w.createVoiceUI === 'function' && !w.VoiceUI, 'voice-ui.js loads (and waits for window.api to start by itself)');
   const st = { transcribe: over.transcribe || ((b64, mime) => ({ ok: true, text: 'please summarise chapter two' })), synth: over.synth || (() => ({ ok: false, error: 'NO_SHIM', fallback: true })) };
   w.api = {
-    voiceStatus: async () => ({ ok: true, micTarget: over.micTarget || 'all', rate: 1, voices: { butler: '', chatgpt: '', claude: '', gemini: '' }, browserVoices: { butler: '', chatgpt: '', claude: '', gemini: '' }, micDevice: '' }),
+    voiceStatus: async () => ({ ok: true, micTarget: over.micTarget || 'all', micSendNow: !!over.micSendNow, rate: 1, voices: { butler: '', chatgpt: '', claude: '', gemini: '' }, browserVoices: { butler: '', chatgpt: '', claude: '', gemini: '' }, micDevice: '' }),
     configureVoice: async (p) => { log('configure', p); return { ok: true }; },
     voicePiperVoices: async () => ({ ok: true, voices: over.piperVoices || [] }),
     voiceReplies: async (site) => { log('replies', site); return { ok: true, site, count: replies[site].length, items: replies[site].slice() }; },
@@ -106,6 +107,7 @@ function setup(over = {}) {
   return { w, ui, calls, replies, texts, spoken, synthState, audios, mic, st, capture: (t) => captureCb && captureCb(t), alfred: (p) => alfredCb && alfredCb(p), micEvent: (p) => micCb && micCb(p) };
 }
 const $ = (w, id) => w.document.getElementById(id);
+const actBtn = (w, re) => [...$(w, 'voice-heard').querySelectorAll('.vh-act')].find((b) => re.test(b.textContent));
 const heard = (w) => { const e = $(w, 'voice-heard'); return e && !e.hidden ? e.textContent : ''; };
 const click = (w, id) => $(w, id).dispatchEvent(new w.MouseEvent('click', { bubbles: true }));
 
@@ -206,12 +208,19 @@ const click = (w, id) => $(w, id).dispatchEvent(new w.MouseEvent('click', { bubb
   assert(/Listening/.test(heard(t.w)), 'the line says it is listening');
   await tick(600);
   click(t.w, 'btn-voice-mic');
+  for (let i = 0; i < 30 && !/Check what I heard/.test(heard(t.w)); i++) await tick(20);
+  // ✔ check first (the default): the words wait in the Compose box; nothing is sent yet
+  assert(/Check what I heard in the Compose box/.test(heard(t.w)) && $(t.w, 'composer-text').value === 'please summarise chapter two' && !t.calls.some((c) => c[0] === 'send'), `check first: the words wait in the Compose box, nothing sent ("${heard(t.w).slice(0, 70)}")`);
+  assert(!!actBtn(t.w, /→ Send to everyone ticked/) && !!actBtn(t.w, /Clear/), 'the line offers → Send and ✕ Clear');
+  $(t.w, 'composer-text').value = 'please summarise chapter two again'; // the user fixes a misheard word
+  actBtn(t.w, /→ Send/).click();
   for (let i = 0; i < 30 && !t.calls.some((c) => c[0] === 'send'); i++) await tick(20);
+  await tick(30); // the send finishes (the heard line, the Compose box)
   const tr = t.calls.find((c) => c[0] === 'transcribe');
   assert(tr && tr[1] === 4000 && tr[2] === 'audio/webm', `the recording goes to be transcribed (base64 ${tr && tr[1]} chars, ${tr && tr[2]})`);
   const send = t.calls.find((c) => c[0] === 'send');
-  assert(send && send[1] === 'please summarise chapter two' && send[2].join(',') === 'chatgpt,claude', `sent through the Compose send to the ticked AIs (${send && send[2]})`);
-  assert(/Heard: “please summarise chapter two” → sent to ChatGPT, Claude/.test(heard(t.w)), `"${heard(t.w)}"`);
+  assert(send && send[1] === 'please summarise chapter two again' && send[2].join(',') === 'chatgpt,claude', `the CHECKED words go through the Compose send to the ticked AIs (${send && send[1]} → ${send && send[2]})`);
+  assert(/Heard: “please summarise chapter two again” → sent to ChatGPT, Claude/.test(heard(t.w)) && $(t.w, 'composer-text').value === '', `"${heard(t.w)}" and the Compose box is empty again`);
   assert(t.mic.tracksStopped >= 1 && !$(t.w, 'btn-voice-mic').classList.contains('rec') && $(t.w, 'btn-voice-mic').textContent === '🎤', 'the microphone is released; 🎤 again');
 
   console.log('\n== 🎤 in a pane header: only that AI ==');
@@ -220,9 +229,34 @@ const click = (w, id) => $(w, id).dispatchEvent(new w.MouseEvent('click', { bubb
   assert($(t.w, 'voice-mic-gemini').classList.contains('rec') && $(t.w, 'voice-mic-gemini').textContent === '⏺', 'that pane\'s 🎤 turns red');
   await tick(600);
   click(t.w, 'voice-mic-gemini');
+  for (let i = 0; i < 30 && !actBtn(t.w, /→ Send/); i++) await tick(20);
+  assert(!!actBtn(t.w, /→ Send to Gemini/), 'from Gemini\'s 🎤 the button says → Send to Gemini');
+  actBtn(t.w, /→ Send/).click();
   for (let i = 0; i < 30 && !t.calls.some((c) => c[0] === 'send'); i++) await tick(20);
+  await tick(30); // the send finishes (the heard line, the Compose box)
   const s2 = t.calls.find((c) => c[0] === 'send');
   assert(s2 && s2[2].join(',') === 'gemini' && /sent to Gemini/.test(heard(t.w)) && !/ChatGPT|Claude/.test(heard(t.w)), 'sent to Gemini only (even though Gemini is not ticked for → All)');
+
+  console.log('\n== ✕ Clear takes the heard words back out; a draft already in the box stays ==');
+  t.calls.length = 0;
+  $(t.w, 'composer-text').value = 'my own draft';
+  click(t.w, 'btn-voice-mic'); await tick(600); click(t.w, 'btn-voice-mic');
+  for (let i = 0; i < 30 && !actBtn(t.w, /Clear/); i++) await tick(20);
+  assert($(t.w, 'composer-text').value === 'my own draft please summarise chapter two', `added after the draft ("${$(t.w, 'composer-text').value}")`);
+  actBtn(t.w, /Clear/).click(); await tick(10);
+  assert($(t.w, 'composer-text').value === 'my own draft' && !t.calls.some((c) => c[0] === 'send') && /Cleared/.test(heard(t.w)), 'Clear removes only the heard words; nothing sent');
+
+  console.log('\n== "Send what I say right away" (🔊 Voice box) skips the check ==');
+  t = setup({ micSendNow: true });
+  await t.ui.init(); await tick(30);
+  assert($(t.w, 'mic-send-now') && $(t.w, 'mic-send-now').checked, 'the setting shows ticked');
+  click(t.w, 'btn-voice-mic'); await tick(600); click(t.w, 'btn-voice-mic');
+  for (let i = 0; i < 30 && !t.calls.some((c) => c[0] === 'send'); i++) await tick(20);
+  await tick(30); // the send finishes (the heard line, the Compose box)
+  assert(t.calls.some((c) => c[0] === 'send' && c[1] === 'please summarise chapter two') && $(t.w, 'composer-text').value === '', 'sent at once, the Compose box untouched');
+  $(t.w, 'mic-send-now').checked = false; $(t.w, 'mic-send-now').dispatchEvent(new t.w.Event('change'));
+  await tick(5);
+  assert(t.calls.some((c) => c[0] === 'configure' && c[1] && c[1].micSendNow === false), 'unticking saves micSendNow: false');
 
   console.log('\n== a send that one AI refuses is reported plainly ==');
   t = setup({ sendFail: { claude: 'SITE_REPAIRING' } });
