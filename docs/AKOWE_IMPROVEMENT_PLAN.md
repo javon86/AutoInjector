@@ -44,7 +44,11 @@ Legend: `[ ]` to do · `[~]` in progress · `[x]` done · `[!]` problem (see "Pr
   expands or tightens it; a suggestion with ⚠️ quick checks, used as a new draft version. See "✍ Write alongside me".
 - **🤖 Claude Code helpers — Step 1 (done 2026-11-08, PR #132):** research ahead, fact checks with sources, checks side
   by side and the "sounds like AI" pass through the Claude Code CLI, several at once, with a full fallback to the web
-  AIs. **Next: Step 2** — see "🤖 Claude Code helpers: the speed plan".
+  AIs.
+- **🤖 Claude Code helpers — Step 2 (done 2026-11-08, PR #136):** the next chapter planned while the current one is
+  checked (rebuilt when the facts changed), the Book Bible filled side by side, extras in the background, specialist
+  reviewers, variety of openings and endings, your-style and specifics proposals — see "🤖 Claude Code helpers: the
+  speed plan". Later: two drafts for the big chapters, Research-mode fact checks, the Codex CLI.
 - **🗺 Story map (done 2026-11-08, PR #131):** a live, editable map of the Book Bible's connections that feeds the
   writer and the checks — see "🗺 Story map" below.
 - **Back burner (later, by the user's call):** a first real GPU run of video/trailers; the audiobook export (P29).
@@ -343,7 +347,7 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
 - [x] **SM6** Binder PDF/HTML (SVG + table) and Word (PNG with numbered markers + key + table); book package; a sequel
   carries locked and approved links (series.link_sequel → story_map.carry_forward).
 
-## Ease of use (2026-11, approved by the user)  (PR #TBD)
+## Ease of use (2026-11, approved by the user)  (PR #136)
 
 - [x] **3b** ✅ Setup checklist: one screen with ✅ / ❌ (⚪ for optional extras, ⏳ not sure yet) for everything the app
   can use, each with a Fix it button; opens on the first start and while something needed is ❌, unless "don't show
@@ -1013,17 +1017,41 @@ spawns it itself (`akowe/akowe/claude_code.py`), so the jobs live next to the bo
   passages are never touched.
 - [x] **Settings card + Make-a-book tick + run-report timing** (checks side by side vs one after another).
 
-### Step 2 — next
+### Step 2 — speed, quality, a less machine-written sound — done (2026-11-08, PR #136)
 
-- [ ] Get the next chapter ready early (scene cards, needs list and brief prepared while the current one is reviewed).
-- [ ] Fill the Book Bible in parallel (one helper per page kind).
-- [ ] Extras in the background (pictures' prompts, launch kit, report parts) while chapters are written.
-- [ ] Specialist reviewers (dialogue, pacing, sensory detail, genre conventions) as helper jobs.
-- [x] Variety across the book (openings, chapter shapes, sentence rhythm tracked book-wide and steered in the brief) —
-  ✍ Sounding human (PR #133).
-- [ ] Voice match from the user's own pages (style card checked line by line).
-- [ ] Specific details (replace generic nouns and stock images with concrete, researched ones).
-- [ ] Real dialogue (subtext, interruptions, people not saying what they mean).
+Code: `akowe/akowe/claude_code_speed.py` (where each job joins the run), the jobs in `claude_code_jobs.py` (5–10),
+short marked hooks in `autobook.py`, `whole_bible.py` and `claude_code_book.py`. Tests: `test_claude_code_speed.py`
+(28 unit tests), `test_claude_code_speed_run.py` (5 fake runs).
+
+- [x] **Get the next chapter ready early:** as soon as chapter N is approved and its running notes and details are
+  updated, a helper plans chapter N+1's scene cards and needs list (the scene planner's own task, schema and cleaning)
+  while chapter N goes through its all-AI check. The plan carries a fingerprint of the planner's whole context (the
+  outline revision, running notes, what earlier chapters used, characters, world, beats, writers' room…). When N+1
+  starts, the context is built again: the same → the plan is saved as the chapter's cards (an independent,
+  non-Claude AI still checks them, approved as before); different → marked stale, planned the old way. A prepare
+  still running is waited for at most 45 s. (The brief itself is built without AI at writing time, from the approved
+  cards, so it can never be stale.)
+- [x] **Fill the Book Bible in parallel:** the "Fill the whole Book Bible" run step sends its batches to helpers side
+  by side in waves — first every record's own sections, then the relationship types (after the characters) — and
+  reads and accepts every answer on the run's thread in the old order (same schemas, same approval under the run
+  consent). A batch whose helper fails or is too slow (capped like the checks side by side) is asked of the web AI.
+- [x] **Extras in the background:** character pictures (the 🎨 Images module, Stable Diffusion only — a chat pane
+  would be shared with the run) on a background thread once the looks are approved; the launch kit's first drafts
+  once the chapter outline is approved (drafts, never approved by the run). The end of the run waits at most 45 s for
+  them. 📣 Marketing needs an approved 🎨 cover, which a run never approves, so it is not started.
+- [x] **Specialist reviewers:** dialogue voice (each main character with a voice card who speaks in the chapter, at
+  most 3), pacing (off by default), senses and concrete detail (only chapters with few sense words), subtext (only
+  chapters that name feelings) — problems in the checks' format, merged like the checks side by side; never on a
+  chapter Claude wrote (Claude Code counts as Claude). Settings: which specialists run.
+- [x] **Variety across the book:** ✍ Sounding human (PR #133) names habits; now the next chapter's brief also lists
+  how each chapter so far opened and ended and how many scenes it had, and a helper checks the planned first and last
+  scene against them (`writing_brief.variety`, with advice when the prepared plan was used).
+- [x] **Voice match** with the ✒️ style card: the chapter's narration numbers against the card's (no AI), the lines
+  that drift most rewritten in the author's manner — proposals (✔ Use = a new draft).
+- [x] **Specific details** and **real dialogue:** generic details and too-tidy dialogue with concrete / messier
+  rewrites — proposals; names, numbers, locked details, protected repeats and story-map passages never touched.
+- [x] **Settings card** (seven new job switches with plain words, the specialists) and **the run report** ("next
+  chapter ready early … Book Bible filled side by side in … instead of … extras in the background …").
 
 ### Later
 

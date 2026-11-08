@@ -16,7 +16,7 @@ export function helpersCard(c) {
   const { h, api, put, clear, toast, problemBox, toProblem } = c;
   const box = h('div', { 'aria-live': 'polite' });
   const card = h('section', { class: 'card', 'aria-labelledby': 'cc-h', 'data-testid': 'cc-card' }, h('h2', { id: 'cc-h' }, '🤖 Claude Code helpers'),
-    h('p', { class: 'small' }, 'Claude Code is Anthropic’s command-line tool. With it, Akọwe runs small side jobs several at a time — research ahead for the next chapters, fact checks with real sources, checks side by side and a “sounds like AI” pass — so the book is made faster and checked more. It uses your Claude plan, so it shares that plan’s usage limits with the Claude pane and claude.ai. Without it (or when it is signed out or at its limit), the web AIs do all the work, as before.'), box);
+    h('p', { class: 'small' }, 'Claude Code is Anthropic’s command-line tool. With it, Akọwe runs small side jobs several at a time — research ahead for the next chapters, fact checks with real sources, checks side by side, a “sounds like AI” pass, the next chapter planned while this one is checked, the Book Bible filled side by side, pictures and launch-kit drafts in the background, specialist reviewers and proposed fixes for your style, generic details and too-tidy dialogue — so the book is made faster and checked more. It uses your Claude plan, so it shares that plan’s usage limits with the Claude pane and claude.ai. Without it (or when it is signed out or at its limit), the web AIs do all the work, as before.'), box);
   const where = { step: 'Settings › Claude Code helpers' };
   const draw = (cur) => {
     const s = cur.settings;
@@ -29,6 +29,12 @@ export function helpersCard(c) {
       const b = h('input', { type: 'checkbox', id, 'data-job': k, checked: s.jobs[k] !== false });
       return h('div', { class: 'check-row' }, b, h('label', { for: id }, l));
     });
+    // 🤖 Step 2: which specialist reviewers run (each only on chapters where it is useful)
+    const specs = Object.entries(cur.specialist_words || {}).map(([k, l]) => {
+      const id = `cc-spec-${k}`;
+      const b = h('input', { type: 'checkbox', id, 'data-spec': k, checked: !!(s.specialists || {})[k] });
+      return h('div', { class: 'check-row' }, b, h('label', { for: id }, l));
+    });
     const recheck = h('button', { type: 'button', class: 'small', 'data-testid': 'cc-recheck', onclick: async () => {
       recheck.disabled = true;
       try { draw(await api('POST', '/settings/claude-code/check')); } catch (e) { box.appendChild(problemBox(toProblem(e, where))); recheck.disabled = false; }
@@ -36,6 +42,7 @@ export function helpersCard(c) {
     const save = h('button', { type: 'button', class: 'small primary', 'data-testid': 'cc-save', onclick: async () => {
       const body = { enabled: on.value === 'auto' ? null : on.value === 'on', helpers: parseInt(n.value, 10), jobs: {} };
       card.querySelectorAll('input[data-job]').forEach(b => { body.jobs[b.dataset.job] = b.checked; });
+      if (specs.length) { body.specialists = {}; card.querySelectorAll('input[data-spec]').forEach(b => { body.specialists[b.dataset.spec] = b.checked; }); }
       try { draw(await api('PUT', '/settings/claude-code', { body })); toast('Saved'); }
       catch (e) { box.appendChild(problemBox(toProblem(e, where))); }
     } }, 'Save');
@@ -43,6 +50,8 @@ export function helpersCard(c) {
       h('div', { class: 'grid-2' }, h('div', { class: 'field' }, h('label', { for: 'cc-on' }, 'Claude Code helpers'), on),
         h('div', { class: 'field' }, h('label', { for: 'cc-n' }, 'Helpers at once (1–5)'), n, h('span', { class: 'hint' }, 'More helpers finish sooner but use your Claude plan’s limits faster. 3 is a good start.'))),
       h('fieldset', { class: 'field' }, h('legend', null, 'Which jobs the helpers do'), ...jobs),
+      specs.length ? h('fieldset', { class: 'field', 'data-testid': 'cc-specialists' }, h('legend', null, 'Which specialist reviewers run'),
+        h('p', { class: 'hint' }, 'Each reads only the chapters where it helps (dialogue: chapters where that character speaks; senses: chapters with few; subtext: chapters that name feelings). They never review a chapter Claude wrote.'), ...specs) : null,
       h('p', { class: 'small muted' }, cur.shares_limits, ' To sign in: open PowerShell, type ', h('code', null, 'claude'), ', press Enter and follow the steps once.'),
       h('div', { class: 'row' }, save, recheck));
   };
@@ -89,6 +98,9 @@ export function runLine(c, r) {
   return c.h('p', { class: 'small mb-cc-line', 'data-testid': 'mb-cc-line' }, hl.line);
 }
 
+// 🤖 the chapter page's words for each kind of proposal (Step 1 and Step 2)
+const KIND_WORDS = { fact: 'Fact fix: ', voice: 'To sound more like a person: ', ai_tell: 'Sounds like AI: ', style: 'Closer to your style: ', detail: 'A specific detail: ', dialogue: 'More real dialogue: ' };
+
 /** The chapter page: research notes, the sourced fact check and the proposed rewrites (✔ Use = a new draft). */
 export function chapterBox(c, rid, { onSaved } = {}) {
   const { h, api, bpath, clear, toast, problemBox, toProblem } = c;
@@ -119,7 +131,7 @@ export function chapterBox(c, rid, { onSaved } = {}) {
         const id = `cc-p-${p.id}`;
         const b = h('input', { type: 'checkbox', id, value: p.id, checked: true });
         return h('div', { class: 'check-row cc-prop', 'data-kind': p.kind }, b, h('label', { for: id },
-          h('span', { class: 'muted' }, p.kind === 'fact' ? 'Fact fix: ' : p.kind === 'voice' ? 'To sound more like a person: ' : 'Sounds like AI: '), h('del', null, p.original), ' → ', h('ins', null, p.replacement),
+          h('span', { class: 'muted' }, KIND_WORDS[p.kind] || 'Sounds like AI: '), h('del', null, p.original), ' → ', h('ins', null, p.replacement),
           h('span', { class: 'small muted' }, ` — ${p.problem}`)));
       });
       const msg = h('div', { 'aria-live': 'polite' });

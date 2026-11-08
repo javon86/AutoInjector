@@ -234,6 +234,27 @@ bridge to your home Wi-Fi, behind its key.
     they were shown, every chapter opening or ending the same way, a gesture used too often) and propose a rewrite of
     just those lines. Nothing changes until you tick them and press ✔ Use — that saves a new draft for you to approve.
     Lines with a locked detail, a name or a number they would change are never proposed.
+- **Step 2 — faster, better, less machine-written** (code `claude_code_speed.py`):
+  - **The next chapter is ready early:** as soon as a chapter is approved and its running notes are updated, a
+    helper plans the next chapter's scenes and its needs list while this one is checked. When the next chapter
+    starts, Akọwe reads the facts again: if nothing changed, the chapter starts at once with that plan (another AI —
+    never Claude — still checks the scenes); if the check or the notes changed something, the early plan is thrown
+    away and the chapter is planned again. A chapter is never written from out-of-date facts.
+  - **The Book Bible is filled side by side:** with "Fill the whole Book Bible" on, its batches go to several helpers
+    at once (relationships after the characters); every answer is checked and approved the same way; a batch a
+    helper cannot do is asked of a web AI.
+  - **Extras in the background:** the character pictures (🎨 Images, Stable Diffusion) are made while the book is
+    written, and the 🚀 launch kit gets first drafts (blurb, description, hook, keywords…) as soon as the chapter
+    outline is approved — drafts for you to approve. The book does not wait for them.
+  - **Specialist reviewers** in each chapter's all-AI check: each main character's dialogue against their voice card
+    (only when they speak), pacing (off unless you tick it), senses and concrete detail (only chapters with few) and
+    subtext (only chapters that name feelings). What they find joins the same check and the same fixes.
+  - **Variety:** the next chapter's writer sees how every chapter so far opened and ended, with a helper's advice
+    for the planned opening and ending.
+  - **Your style, specific details, real dialogue:** with a ✒️ style card, lines that drift from your style; and
+    generic details ("a nice house") and too-tidy dialogue — each with a proposed rewrite on the chapter page.
+    Nothing changes until you tick them and press ✔ Use. Names, numbers, locked details and story-map passages are
+    never touched.
 - **The writer never checks itself:** Claude Code counts as Claude. When Claude wrote a chapter, the helpers only
   check its facts and propose "sounds like AI" fixes; the independent reviews stay with ChatGPT and Gemini. When
   ChatGPT or Gemini wrote it, the helpers read it for Claude, so the Claude pane is free.
@@ -245,10 +266,13 @@ bridge to your home Wi-Fi, behind its key.
   "✔ Claude Code 2.x found, signed in" (press ↻ Check again after installing).
 - **Without it nothing breaks:** if Claude Code is not installed, signed out, at its limit or not working, every job
   goes back to the web AIs, exactly as before. The book never waits for a helper. The run window says so in one line.
-- **Settings:** ⚙️ Settings → 🤖 Claude Code helpers: on/off (on by itself when it is found), helpers at once (1–5)
-  and which jobs are on. The ⚡ Make-a-book screen has a "Use Claude Code helpers for this book" tick.
+- **Settings:** ⚙️ Settings → 🤖 Claude Code helpers: on/off (on by itself when it is found), helpers at once (1–5),
+  which jobs are on (eleven, all on by default) and which specialist reviewers run (dialogue, senses and subtext on;
+  pacing off). The ⚡ Make-a-book screen has a "Use Claude Code helpers for this book" tick.
 - **Speed is measured:** the run window and ⏱ Time and AI use show "the checks took 1.2 min side by side instead of
-  about 3.4 min one after another".
+  about 3.4 min one after another", and for Step 2 "next chapter ready early: 9 chapter(s) started without waiting
+  for their scene plan", "Book Bible filled side by side in 2.1 min instead of about 8.0 min" and "extras in the
+  background: about 6 min … off the run".
 - **Safety and privacy:** each job runs in its own empty temporary folder with no file-editing or command tools (only
   web search and web pages for research and fact checks, nothing for the checks). Your chapters go to Claude Code
   through its input, never on the command line. Akọwe's log keeps only codes, counts and times — never your text.

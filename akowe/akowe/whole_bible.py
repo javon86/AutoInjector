@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 
 from . import code_map
 from .errors import AkoweError
@@ -384,15 +385,32 @@ def _remember(store, pid, branch, u: dict, done: list[str]) -> None:
 
 
 # ====================================================================== the fill (shared by the run and the button)
+def waves(us: list[dict]) -> list[list[list[dict]]]:
+    """🤖 The calls in waves for the side-by-side fill: first every record's own sections (independent of each
+    other), then the relationship types (after the characters)."""
+    first, second = [], []
+    for u in us:
+        rel = [k for k in u["keys"] if k.startswith("rel_")]
+        rest = [k for k in u["keys"] if not k.startswith("rel_")]
+        if rest:
+            first.append(dict(u, keys=rest))
+        if rel:
+            second.append(dict(u, keys=rel))
+    return [w for w in (chunks(first), chunks(second)) if w]
+
+
 def fill(app, pid: str, branch: str, *, ask, check, progress, by: str | None, skip: dict | None = None,
-         on_call=None) -> dict:
+         on_call=None, helper=None) -> dict:
     """Fill every open field. ``ask(task, schema, ctx) -> (raw, slot)`` makes one AI call; ``check()`` raises on
     pause / cancel / Stop; ``progress(done_calls, total_calls, names)``; ``by``: the run's consent (approve at once)
     or None (proposals wait for the author); ``on_call(parts, filled)`` after each call. Returns the summary
-    (``summary()``)."""
+    (``summary()``). 🤖 ``helper`` (claude_code_speed.BibleHelper): each wave's calls run side by side as helper
+    jobs; their answers are read and accepted here, in order, exactly like ``ask``'s; a call the helper did not
+    answer is asked with ``ask`` as before."""
     skip = {k: list(v) for k, v in (skip or {}).items()}
     us, info = units(app, pid, branch, skip=skip)
-    calls = chunks(us)
+    plan = waves(us) if helper is not None else [chunks(us)]
+    calls = [c for w in plan for c in w]
     base = base_context(app, pid, branch) if calls else {}
     res = {"calls": len(calls), "done_calls": 0, "filled": {}, "asked": {}, "failed": [], "stopped": False,
            "info": info, "units": list(us)}
@@ -405,35 +423,52 @@ def fill(app, pid: str, branch: str, *, ask, check, progress, by: str | None, sk
                 if not us:
                     break
                 res["units"] += us
-                calls = chunks(us)
-                res["calls"] += len(calls)
-            for parts in calls:
-                check()
-                names = ", ".join(dict.fromkeys(f"“{p['name']}”" for p in parts))
-                progress(res["done_calls"], res["calls"], names)
-                ctx = context(app, pid, branch, parts, base)
-                try:
-                    raw, slot = ask(FILL_TASK, schema(parts), ctx)
-                except AkoweError as exc:
-                    if getattr(exc, "control", False):
-                        raise
-                    res["failed"].append({"names": names, "code": exc.code,
-                                          "keys": sum(len(p["keys"]) for p in parts)})
+                plan = waves(us) if helper is not None else [chunks(us)]
+                res["calls"] += sum(len(w) for w in plan)
+            for wave in plan:
+                if helper is not None:  # 🤖 the whole wave starts side by side
+                    def build(parts):
+                        ctx_ = context(app, pid, branch, parts, base)  # (names the parts: before the schema)
+                        return FILL_TASK, schema(parts), ctx_
+                    helper.start(wave, build)
+                web_s = 0.0
+                for i, parts in enumerate(wave):
+                    check()
+                    names = ", ".join(dict.fromkeys(f"“{p['name']}”" for p in parts))
+                    progress(res["done_calls"], res["calls"], names)
+                    ctx = context(app, pid, branch, parts, base)
+                    pre = helper.result(i) if helper is not None else None
+                    try:
+                        if pre is not None:
+                            raw, slot = pre
+                        else:
+                            t_ask = time.monotonic()
+                            try:
+                                raw, slot = ask(FILL_TASK, schema(parts), ctx)
+                            finally:
+                                web_s += time.monotonic() - t_ask
+                    except AkoweError as exc:
+                        if getattr(exc, "control", False):
+                            raise
+                        res["failed"].append({"names": names, "code": exc.code,
+                                              "keys": sum(len(p["keys"]) for p in parts)})
+                        for p in parts:
+                            res["asked"].setdefault(p["ref"], [])
+                        res["done_calls"] += 1
+                        continue
+                    ans = read_answer(raw, parts)
+                    filled = []
                     for p in parts:
-                        res["asked"].setdefault(p["ref"], [])
+                        got = accept(app, pid, branch, p, ans.get(p["ref_id"]) or {}, slot, by=by)
+                        res["filled"].setdefault(p["ref"], []).extend(got)
+                        res["asked"].setdefault(p["ref"], []).extend(p["keys"])
+                        filled.append((p, got))
                     res["done_calls"] += 1
-                    continue
-                ans = read_answer(raw, parts)
-                filled = []
-                for p in parts:
-                    got = accept(app, pid, branch, p, ans.get(p["ref_id"]) or {}, slot, by=by)
-                    res["filled"].setdefault(p["ref"], []).extend(got)
-                    res["asked"].setdefault(p["ref"], []).extend(p["keys"])
-                    filled.append((p, got))
-                res["done_calls"] += 1
-                if on_call:
-                    on_call(parts, filled)
-                progress(res["done_calls"], res["calls"], names)
+                    if on_call:
+                        on_call(parts, filled)
+                    progress(res["done_calls"], res["calls"], names)
+                if helper is not None:
+                    helper.wave_done(web_s)
     except Exception as exc:  # noqa: BLE001 - a Stop / pause keeps what is filled, then goes on up
         res["stopped"] = True
         res["summary"] = summary(app, pid, branch, res)
@@ -509,9 +544,10 @@ def run_step(svc, run, st) -> None:
                                           f"({', '.join(sorted({_unit_section(p, k) for k in got}))}), approved under "
                                           f"your Make-a-book-for-me consent, run {run['id']}", step="bible")
         svc.save(run)
+    from .claude_code_speed import bible_helper  # noqa: PLC0415 - 🤖 Step 2: side by side (None = one after another)
     try:
         res = fill(svc.app, pid, branch, ask=ask, check=lambda: svc.check(run), progress=progress, by=by,
-                   skip=skip, on_call=on_call)
+                   skip=skip, on_call=on_call, helper=bible_helper(svc, run))
     except Exception as exc:
         res = getattr(exc, "whole_bible", None)
         if res:

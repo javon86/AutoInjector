@@ -1191,6 +1191,8 @@ class AutoBookService(_Runner):
             # ★ the guarantee: never a finished book without its main character (repaired, else a plain pause)
             run["current"] = "check"
             self._guarantee_main(run, self._step(run, "check"), "before the book is marked done")
+            from . import claude_code_speed  # noqa: PLC0415 - 🤖 Step 2: the background extras (capped wait)
+            claude_code_speed.finish(self, run)
             self.save(run)
             run.update(status="done", finished_at=now_iso(), current=None, waiting=None, pause_reason=None,
                        phase="Your book is made — download it below")
@@ -2483,6 +2485,9 @@ class AutoBookService(_Runner):
         """🖼 A portrait for every character, the full set for the ★ protagonist (book_pictures.py). Never blocks
         the book: what cannot be made now goes on the book's to-make list (only pause / cancel stop it)."""
         from . import book_pictures  # noqa: PLC0415
+        from . import claude_code_speed  # noqa: PLC0415 - 🤖 Step 2: made in the background, the book goes on
+        if claude_code_speed.pictures_in_background(self, run, st):
+            return
         try:
             book_pictures.run_step(self, run, st)
         except (RunPaused, RunCancelled, Cancelled):
@@ -2510,6 +2515,9 @@ class AutoBookService(_Runner):
         counts = run.setdefault("fix_counts", {})
         key = f"scenes:{outline['record_id']}:{cid}"
         try:
+            if not scenes_mod.usable(entry, outline):  # 🤖 Step 2: planned early by a helper, facts unchanged
+                from . import claude_code_speed  # noqa: PLC0415
+                entry = claude_code_speed.use_prepared(self, run, outline, cid, label) or entry
             if not scenes_mod.usable(entry, outline):
                 st["message"] = f"The AI is planning the scenes of {label}"
                 item["phase"] = "planning scenes"
@@ -3443,6 +3451,8 @@ class AutoBookService(_Runner):
                 if self._on(run, "voices"):  # ⏱ 🔒 what this chapter relied on is fixed; contradictions are flagged
                     from . import story_details  # noqa: PLC0415
                     story_details.after_chapter(self, run, cid, idx + 1)
+                from . import claude_code_speed  # noqa: PLC0415 - 🤖 Step 2: plan the next chapter while this one is checked
+                claude_code_speed.chapter_done(self, run, outline, chapters, idx)
                 item.update(state="done", words=len((((rec or {}).get("data") or {}).get("text") or "").split()),
                             seconds=round(time.monotonic() - t_chapter, 1))
                 tm = run.setdefault("timing", {"calls": 0, "call_s": 0.0})

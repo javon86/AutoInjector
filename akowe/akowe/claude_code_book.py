@@ -21,6 +21,11 @@ Where the helpers join the run (short, marked hook calls in autobook.py, checkpo
   ✔ Use saves them as a new draft through the editor's usual apply path (the author approves it like any draft).
   Nothing is ever changed silently, and lines with a locked detail are never proposed.
 
+🤖 Step 2 (``claude_code_speed``) joins here too: the launch kit's first drafts start with the first chapter, the
+specialist reviewers join the per-chapter checks (``_Checks``), the style and specifics passes run after an approval,
+the variety block joins the writing brief (``add_to_brief``) and the background extras' events are written into the
+run by ``sync``.
+
 Every hook falls back: Claude Code off / missing / signed out / limited / failing -> the hook does nothing and the run
 goes on exactly as before. Hooks never raise (except the run's own pause / cancel while the checks wait).
 
@@ -147,6 +152,12 @@ def timing_of(run: dict) -> dict | None:
     if chk:
         line += (f"; the checks took {wall / 60:.1f} min side by side instead of about {one / 60:.1f} min one after "
                  f"another" + (f" ({s['speedup']}× faster)" if s["speedup"] and s["speedup"] > 1 else ""))
+    from .claude_code_speed import saved_s, speed_lines  # noqa: PLC0415 - 🤖 Step 2: what it saved
+    more = speed_lines(s.get("speed"))
+    if more:
+        line += "; " + "; ".join(more)
+        s["speed_lines"] = more
+        s["speed_saved_s"] = saved_s(s.get("speed"))
     if s.get("failed"):
         line += f"; {s['failed']} fell back to the web AIs"
     s["line"] = line + "."
@@ -160,6 +171,7 @@ def sync(svc, run: dict) -> None:
         return
     with _LOCK:
         notes, st["notes"] = st["notes"], []
+        evs, st["events"] = st.get("events") or [], []  # 🤖 Step 2: what the background extras did
         stats = json.loads(json.dumps(st["stats"]))
     run.setdefault("timing", {"calls": 0, "call_s": 0.0})["helpers"] = stats
     for msg, code in notes:
@@ -167,6 +179,16 @@ def sync(svc, run: dict) -> None:
             svc.event(run, "note", msg, code=code)
         except Exception:  # noqa: BLE001
             pass
+    for kind, msg, kw in evs:
+        try:
+            svc.event(run, kind, msg, **kw)
+        except Exception:  # noqa: BLE001
+            pass
+    try:
+        from .claude_code_speed import sync_steps  # noqa: PLC0415 - 🤖 Step 2: the background pictures' progress
+        sync_steps(run)
+    except Exception:  # noqa: BLE001
+        log.exception("could not copy the background extras' progress")
 
 
 # ====================================================================== is it on for this run?
@@ -299,6 +321,9 @@ def chapter_started(svc, run: dict, outline: dict, chapters: list[dict], idx: in
     """🤖 hook: chapter ``idx`` (0-based) starts being written -> research chapters idx+2..idx+4 in the background."""
     try:
         sync(svc, run)
+        if idx == 0:  # 🤖 Step 2: the outline is approved -> the launch kit's first drafts in the background
+            from .claude_code_speed import launch_kit_start  # noqa: PLC0415
+            launch_kit_start(svc, run)
         if not active(svc, run, "research"):
             return
         pid, branch = run["project_id"], run.get("branch_id") or "main"
@@ -355,13 +380,17 @@ def brief_notes(store, pid: str, branch: str, chapter_id: str) -> list[dict]:
 def add_to_brief(store, pid: str, branch: str, chapter_id: str, brief: dict | None) -> dict | None:
     """🤖 hook (modules/set_c.py, the chapter writer): the chapter's research notes join its writing brief."""
     try:
-        notes = brief_notes(store, pid, branch, chapter_id)
-        if not notes:
-            return brief
         out = dict(brief or {})
-        out["research_notes"] = notes
-        out["rules"] = list(out.get("rules") or []) + [BRIEF_RULE]
-        return out
+        notes = brief_notes(store, pid, branch, chapter_id)
+        if notes:
+            out["research_notes"] = notes
+            out["rules"] = list(out.get("rules") or []) + [BRIEF_RULE]
+        from .claude_code_speed import VARIETY_RULE, brief_variety  # noqa: PLC0415 - 🤖 Step 2: variety
+        var = brief_variety(store, pid, branch, chapter_id)
+        if var:
+            out["variety"] = var
+            out["rules"] = list(out.get("rules") or []) + [VARIETY_RULE]
+        return out if (notes or var) else brief
     except Exception:  # noqa: BLE001 - the brief is help for the writer, never a reason to fail the chapter
         log.exception("could not add the research notes to the brief")
         return brief
@@ -504,6 +533,8 @@ def chapter_approved(svc, run: dict, cid: str, number: int, rec: dict | None) ->
             _facts_future(svc, run, cid, number, text)
         if active(svc, run, "ai_tells"):
             tells_future(svc, run, cid, number, rec)
+        from .claude_code_speed import after_approval  # noqa: PLC0415 - 🤖 Step 2: your style, specific details
+        after_approval(svc, run, cid, number, rec)
     except Exception:  # noqa: BLE001
         log.exception("the helpers' after-approval jobs could not start")
 
@@ -571,6 +602,9 @@ class _Checks(_Null):
         if st["jobs"].get("facts") or st["jobs"].get("checks"):
             self.futs["facts"] = [(_facts_future(svc, run, cid, n, self.texts[cid]), cid, n)
                                   for n, cid in self.nums.items() if self.texts.get(cid, "").strip()]
+        if cp.get("kind") == "chapter" and not self.claude_wrote:  # 🤖 Step 2: the specialist reviewers
+            from .claude_code_speed import specialist_futures  # noqa: PLC0415
+            self.futs.update(specialist_futures(svc, run, cp, self.nums, self.texts))
         self.sub = self.claude_slots[0] if (cp.get("kind") == "chapter" and "continuity" in self.futs
                                             and self.claude_slots) else None
         self.covered = None
@@ -609,9 +643,9 @@ class _Checks(_Null):
                         self.used.add(("facts", cid))
                         out += jobs.fact_problems(f.result()["out"], cid, n)
             else:
-                for f in self.futs.get(kind) or []:
-                    if f.done() and f.result() and kind not in self.used:
-                        self.used.add(kind)
+                for i, f in enumerate(self.futs.get(kind) or []):
+                    if f.done() and f.result() and (kind, i) not in self.used:
+                        self.used.add((kind, i))
                         out += f.result()["out"]
         return out
 
@@ -628,7 +662,7 @@ class _Checks(_Null):
                        "the Claude pane reads it as before", "CLAUDE_CODE_FALLBACK")
             self.sub = None
             return False
-        by[slot] = {"done": True, "name": NAME, "problems": self._problems(("continuity", "voice", "facts")),
+        by[slot] = {"done": True, "name": NAME, "problems": self._problems(tuple(self.futs)),
                     "summary": "", "at": _now(), "review": None, "helpers": sorted(self.futs)}
         self.covered = slot
         return True
@@ -638,7 +672,7 @@ class _Checks(_Null):
             end = time.monotonic()
             pending = [f for k in self.futs for f in ((x[0] if isinstance(x, tuple) else x) for x in self.futs[k])]
             self._wait(pending, FINISH_WAIT_S)
-            extra = self._problems(("continuity", "voice", "facts"))
+            extra = self._problems(tuple(self.futs))
             target = self.covered or next((s for s in self.claude_slots if (by.get(s) or {}).get("done")), None)
             out = list(checkers)
             if target:
