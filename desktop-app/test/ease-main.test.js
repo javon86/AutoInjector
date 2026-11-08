@@ -48,7 +48,7 @@ async function main() {
 
   require(path.join(__dirname, "..", "main.js"));
   await waitUntil(() => reg("claude") && reg("controls-ui"));
-  for (const ch of ["ease:prefs", "ease:set-prefs", "ease:checklist", "ease:problems", "ease:report", "ease:fix", "ease:guide"]) assert(typeof mockElectron.__ipcHandlers[ch] === "function", `${ch} is registered`);
+  for (const ch of ["ease:prefs", "ease:set-prefs", "ease:checklist", "ease:problems", "ease:report", "ease:report-show", "ease:fix", "ease:guide"]) assert(typeof mockElectron.__ipcHandlers[ch] === "function", `${ch} is registered`);
 
   console.log("\n== ✅ ease:checklist from the app's own state ==");
   const cl = await call("ease:checklist", {});
@@ -89,13 +89,18 @@ async function main() {
   assert(pr.problems.length <= 5, "at most 5");
 
   console.log("\n== 📄 ease:report ==");
+  const early = await call("ease:report-show", {});
+  assert(early && early.ok === false && early.error === "NO_REPORT", "📂 Show it before any report -> 'Make the report first'");
+  const openedBefore = opened.length;
   const rep = await call("ease:report", {});
   assert(rep.ok && rep.file && fs.existsSync(rep.file) && path.dirname(rep.file) === outputManager.logsDir() && /^support-report-.*\.txt$/.test(path.basename(rep.file)), `saved in the logs folder (${rep.file && path.basename(rep.file)})`);
   const text = fs.readFileSync(rep.file, "utf8");
   assert(/the last 24 hours/.test(text) && /AI conversation:\s+not included/.test(text), "last 24 hours; the AI conversation is not included");
   assert(/SOMETHING'S WRONG\? \(what the app found\)/.test(text) && /SETUP CHECKLIST/.test(text) && /sd-runner-error/.test(text), "what 🩺 found and the checklist are in it");
   assert(!/Everything — includes all conversations/.test(text), "never the Everything scope");
-  assert(opened.some((o) => o[0] === "showItemInFolder" && o[1] === rep.file), "the file is shown in its folder");
+  assert(!opened.slice(openedBefore).some((o) => o[0] === "showItemInFolder"), "the folder is NOT opened by itself (that can hang the app on some PCs)");
+  const shown = await call("ease:report-show", {});
+  assert(shown.ok && opened.some((o) => o[0] === "showItemInFolder" && o[1] === rep.file), "📂 Show it shows the file in its folder");
   if (failed) console.log(text.slice(-1500));
   fs.unlinkSync(rep.file);
 

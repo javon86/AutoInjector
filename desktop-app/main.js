@@ -10381,6 +10381,7 @@ const easeApi = require("./ease-main").installEase({
     paneOn: (site) => require("./alfred-main").invokeChannel("participants:set", { site, enabled: true }),
     openClaudeCode: () => { const base = akoweServerBase(); if (base && akoweShowInTab(base.replace(/\/$/, "") + "/#/settings")) return { ok: true }; broadcast("app-tab-show", { tab: "akowe" }); return { ok: true, message: "Open ⚙️ Settings → 🤖 Claude Code helpers in Akọwe." }; },
     openExternal: async (url) => { await shell.openExternal(url); return { ok: true }; },
+    showFile: async (f) => { if (shell && shell.showItemInFolder) shell.showItemInFolder(f); return { ok: true }; },
     openPath: async (p) => { const err = await shell.openPath(p); return err ? { ok: false, message: "I couldn't open that folder." } : { ok: true }; },
   },
   // the support report: log-extract.js, last 24 hours, activity + Relay Trace only (never the conversation), redacted
@@ -10394,7 +10395,8 @@ const easeApi = require("./ease-main").installEase({
     });
     const stamp = new Date().toISOString().replace(/[:.]/g, "-").replace("T", "_").slice(0, 19);
     const file = outputManager.saveBuffer(outputManager.logsDir(), `support-report-${stamp}.txt`, r.text);
-    try { if (shell && shell.showItemInFolder) shell.showItemInFolder(file); } catch (_) {}
+    // not opened by itself: on some PCs (and headless test machines) showing a folder can hang the app — the
+    // 📂 Show it button does it when the user asks (ease:report-show)
     return { ok: true, file, events: r.counts && r.counts.events, redactions: r.redactions };
   },
 });

@@ -122,7 +122,7 @@ const IPC_INVENTORY = [
   'voice:check', 'voice:configure', 'voice:listen', 'voice:redownload', 'voice:speak', 'voice:status',
   'voice:transcribe', 'voice:synthesize', 'voice:piper-voices', 'voice:replies', 'voice:reply-text',
   'window:toggle-collapse', 'wizard-window:close', 'wizard:catalog', 'wizard:open', 'wizard:open-app-tab',
-  'ease:prefs', 'ease:set-prefs', 'ease:checklist', 'ease:problems', 'ease:report', 'ease:fix', 'ease:guide', // ✅ EASE (ease-main.js)
+  'ease:prefs', 'ease:set-prefs', 'ease:checklist', 'ease:problems', 'ease:report', 'ease:report-show', 'ease:fix', 'ease:guide', // ✅ EASE (ease-main.js)
 ];
 // Live updates the window listens to (not actions). The ones that matter to the user feed Alfred's watcher.
 const EVENTS = {

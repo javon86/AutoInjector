@@ -247,6 +247,7 @@
         let r; try { r = await ease.report(); } catch (_) { r = { ok: false }; }
         rep.disabled = false;
         out.textContent = r && r.ok ? `✔ Saved: ${r.file} — attach this file when you ask for help.` : `✖ ${(r && r.message) || 'The report could not be made.'}`;
+        if (r && r.ok && typeof ease.reportShow === 'function') out.appendChild(h('button', { type: 'button', id: 'ease-report-show', title: 'Open the folder with the report picked out', onclick: () => { Promise.resolve(ease.reportShow()).catch(() => {}); } }, '📂 Show it'));
       } }, '📄 Make a report for support');
       o.foot.appendChild(rep); o.foot.appendChild(out); o.foot.appendChild(h('span', { class: 'sp' }));
       o.foot.appendChild(h('button', { type: 'button', id: 'ease-problems-again', onclick: () => loadProblems() }, '↻ Look again'));

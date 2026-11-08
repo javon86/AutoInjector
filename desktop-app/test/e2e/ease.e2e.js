@@ -133,6 +133,7 @@ async function main() {
       const text = fs.readFileSync(reportFile, 'utf8');
       assert(/the last 24 hours/.test(text) && /AI conversation:\s+not included/.test(text) && !/Everything — includes all conversations/.test(text), 'the report: last 24 hours, no conversation, never Everything');
     }
+    assert(!!(await c.$('#ease-report-show')), 'a 📂 Show it button opens the folder when asked (never by itself)');
     await c.keyboard.press('Escape');
     assert(!(await c.$('#ease-problems')), 'Esc closes it');
 
@@ -148,7 +149,7 @@ async function main() {
     }
     assert(/^data:text\/html/.test(guideUrl), 'it shows the rendered guide');
   } finally {
-    await app.close().catch(() => {});
+    await closeApp(app);
   }
 
   console.log('\n== after a restart ==');
@@ -165,12 +166,20 @@ async function main() {
     await c.waitForSelector('.ease-row[data-id="disk"]', { timeout: 20000 }).catch(() => {});
     assert(!!(await c.$('#ease-checklist')), 'it still opens from ❓ Help → ✅ Setup checklist');
   } finally {
-    await app.close().catch(() => {});
+    await closeApp(app);
     await sd.close();
     if (reportFile) { try { fs.unlinkSync(reportFile); } catch (_) {} }
     fs.rmSync(tmp, { recursive: true, force: true });
   }
   console.log(`\n${state.passed} passed, ${state.failed} failed`);
   process.exit(state.failed ? 1 : 0);
+}
+// A teardown that can never eat the CI job's time limit: if the app won't quit in 20 s it is force-killed and the
+// log says so (PR #136: a CI run sat here 10 minutes after the last check).
+async function closeApp(app) {
+  let t = null;
+  const done = await Promise.race([app.close().then(() => true, () => true), new Promise((r) => { t = setTimeout(() => r(false), 20000); })]);
+  clearTimeout(t);
+  if (!done) { console.log('  (teardown: the app did not quit in 20 s — force-killed)'); try { const pr = app.process && app.process(); if (pr && pr.pid) process.kill(pr.pid, 'SIGKILL'); } catch (_) {} }
 }
 main().catch((e) => { console.error(e); process.exit(1); });

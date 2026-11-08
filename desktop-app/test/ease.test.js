@@ -167,7 +167,7 @@ async function main() {
     actions: { openPath: async (p) => { calls.push(['openPath', p]); return { ok: true }; }, akoweStart: async () => { calls.push(['akoweStart']); return { ok: true }; }, openExternal: async (u) => { calls.push(['openExternal', u]); return { ok: true }; } },
     buildReport: async (lines) => { reportLines = lines; return { ok: true, file: '/logs/support-report.txt', events: 3, redactions: 1 }; },
   });
-  assert(['ease:prefs', 'ease:set-prefs', 'ease:checklist', 'ease:problems', 'ease:report', 'ease:fix', 'ease:guide'].every((c) => typeof handlers[c] === 'function'), 'all 7 channels registered');
+  assert(['ease:prefs', 'ease:set-prefs', 'ease:checklist', 'ease:problems', 'ease:report', 'ease:report-show', 'ease:fix', 'ease:guide'].every((c) => typeof handlers[c] === 'function'), 'all 8 channels registered');
   const t0 = Date.now();
   const got = await handlers['ease:checklist']({}, {});
   assert(got.ok && got.items.length === 11 && Date.now() - t0 < 9000, `answers within the time limits (${Date.now() - t0} ms)`);

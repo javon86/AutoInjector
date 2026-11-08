@@ -279,6 +279,7 @@ const EXCLUDED = {
   'ease:checklist': 'the ✅ Setup checklist pop-up for the user — Alfred checks the same things with health.status / llm.check',
   'ease:problems': 'the 🩺 Something\'s wrong? pop-up for the user — Alfred reads health.status',
   'ease:report': 'saves a support file for the user to send — Alfred can preview the same last-24-hours extract (logs.extract_preview)',
+  'ease:report-show': 'shows the support file the user just made in its folder — not a control',
   'ease:fix': 'the pop-ups\' Fix it buttons run existing controls Alfred already has (akowe, llm, health.fix, participants)',
   'ease:guide': 'opens the user guide window for the user to read — not a control',
   'voice:transcribe': 'the control panel\'s 🎤 hands its recording (audio bytes) to the voice engine — Alfred listens with voice.listen',

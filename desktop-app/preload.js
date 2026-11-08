@@ -439,6 +439,7 @@ contextBridge.exposeInMainWorld("api", {
     checklist: () => ipcRenderer.invoke("ease:checklist"),
     problems: () => ipcRenderer.invoke("ease:problems"),
     report: () => ipcRenderer.invoke("ease:report"),
+    reportShow: () => ipcRenderer.invoke("ease:report-show"),
     fix: (action, args) => ipcRenderer.invoke("ease:fix", { action, args: args || {} }),
     guide: () => ipcRenderer.invoke("ease:guide"),
     onShow: (cb) => ipcRenderer.on("ease-show", (_e, payload) => cb(payload)),

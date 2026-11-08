@@ -85,6 +85,7 @@ function installEase(deps = {}) {
   // A file for support, covering the last 24 hours: the activity log and the Relay Trace through log-extract.js
   // (its scope "time / last 24 hours" and its redaction of keys and private paths) — NEVER the AI conversation,
   // never "Everything", and no file of the user's is opened. Plus what 🩺 found and the ✅ rows, in plain words.
+  let lastReport = null; // the support report this app start made — the only file 📂 Show it may show
   async function report() {
     if (typeof deps.buildReport !== 'function') return { ok: false, error: 'NOT_AVAILABLE', message: 'Reports are not available in this build.' };
     let found = []; let rows = [];
@@ -99,6 +100,7 @@ function installEase(deps = {}) {
       const r = await deps.buildReport(lines);
       if (!r || !r.ok) return { ok: false, error: (r && r.error) || 'REPORT_FAILED', message: 'The report could not be made.' };
       log('report', { events: r.events, redactions: r.redactions });
+      lastReport = r.file;
       return { ok: true, file: r.file };
     } catch (e) { log('report-error', { error: String((e && e.code) || 'ERROR') }); return { ok: false, error: 'REPORT_FAILED', message: 'The report could not be made.' }; }
   }
@@ -166,6 +168,11 @@ function installEase(deps = {}) {
     ipcMain.handle('ease:checklist', safe(checklist));
     ipcMain.handle('ease:problems', safe(problems));
     ipcMain.handle('ease:report', safe(report));
+    ipcMain.handle('ease:report-show', safe(async () => {
+      if (!lastReport) return { ok: false, error: 'NO_REPORT', message: 'Make the report first.' };
+      const a = deps.actions || {};
+      return typeof a.showFile === 'function' ? a.showFile(lastReport) : { ok: false, error: 'NOT_AVAILABLE', message: 'Open the logs folder in “stuff and thing” to find it.' };
+    }));
     ipcMain.handle('ease:fix', safe((a) => runFix(String(a.action || ''), a.args && typeof a.args === 'object' ? a.args : {})));
     ipcMain.handle('ease:guide', safe(async () => openGuide()));
   }
