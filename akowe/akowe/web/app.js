@@ -14,6 +14,7 @@ import { viewLaunch } from './launch.js';  // 🚀 the launch kit (store listing
 import { viewMarketing } from './marketing.js';  // 📣 #17 mockups, ads and teaser clips
 import { viewCover } from './cover.js';  // 🎨 B3 book covers
 import { viewBinder } from './binder.js';  // 📖 Book Bible binder (the author's template studio design)
+import { viewStoryMap } from './storymap.js';  // 🗺 the story map (story_map.py)
 import { CODE_MAP, CODE_MAP_MD } from './code-map.js';  // 🔢 the Book Bible code map (code_map.py)
 import { needsBox } from './needs-list.js';
 import { checkNowBox } from './check-now.js';  // 🔎 PR #117: Check consistency now (check_now.py)  // 🧠 a chapter's needs list (needs_list.py)
@@ -722,6 +723,7 @@ async function pickView(parts) {
     if (rest[0] === 'cover') return m => viewCover(m, forgeUI());  // 🎨 B3 cover designer
     if (rest[0] === 'launch') return m => viewLaunch(m, Object.assign(forgeUI(), { badge, quickSave }));  // 🚀 launch kit
     if (rest[0] === 'marketing') return m => viewMarketing(m, forgeUI());  // 📣 #17 mockups & ads
+    if (rest[0] === 'storymap') return m => viewStoryMap(m, forgeUI());  // 🗺 the story map (story_map.py)
     if (rest[0] === 'bible' || rest[0] === 'binder') return m => viewBinder(m, forgeUI(), rest.slice(1));  // 📖 Book Bible binder (…/binder: the 🆕 fields' edit route)
     if (rest[0] === 'manifest') return viewManifest;
     if (rest[0] === 'activity') return viewActivity;
@@ -856,12 +858,13 @@ const SIDE_ITEMS = [
  * kit or 📣 Mockups & ads were only reachable through the part's own page). */
 const SIDE_SUB = {
   write: [['grid', '🗂', 'Scene grid']],
+  bible: [['storymap', '🗺', 'Story map']],
   art: [['pictures', '🖼', 'Pictures'], ['cover', '🎨', 'Cover'], ['marketing', '📣', 'Mockups & ads']],
   fix: [['continuity', '🧭', 'Continuity'], ['report', '📊', 'Book report']],
   export: [['launch', '🚀', 'Launch kit']],
 };
 const SIDE_OF = { '': 'home', book: 'home', people: 'people', forge: 'people', world: 'people', plan: 'plan', write: 'write', scenes: 'write',
-  bible: 'bible', binder: 'bible', art: 'art', pictures: 'art', cover: 'art', marketing: 'art', trailer: 'trailer', launch: 'export', fix: 'fix', continuity: 'fix', report: 'fix', export: 'export', grid: 'write' };
+  bible: 'bible', binder: 'bible', storymap: 'bible', art: 'art', pictures: 'art', cover: 'art', marketing: 'art', trailer: 'trailer', launch: 'export', fix: 'fix', continuity: 'fix', report: 'fix', export: 'export', grid: 'write' };
 function renderNav() {
   const nav = clear($('#sidenav'));
   const parts = parseRoute();

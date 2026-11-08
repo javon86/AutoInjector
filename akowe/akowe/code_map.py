@@ -7,7 +7,8 @@ the order the Book Bible shows the fields; details that only the Character Forge
 dossiers) holds come after them.
 
 Kinds: ``B`` book · ``C`` character · ``P`` place · ``M`` magic · ``I`` item · ``G`` group · ``S`` story plan ·
-``H`` chapter · ``W`` world rules & facts · ``N`` running notes (the story ledger, ``story_ledger.py``).
+``H`` chapter · ``W`` world rules & facts · ``N`` running notes (the story ledger, ``story_ledger.py``; ``N00`` is the
+🗺 story map, ``story_map.py``, whose links are named ``L1``, ``L2``…).
 
 This module is the ONE source of truth that ties every code to
 
@@ -392,6 +393,10 @@ SPEC: dict[str, dict[int, tuple[str, list[tuple[str, str]]]]] = {
         7: ("Repeats to watch", [("Phrase", "12.7.1"), ("Kind", "12.7.2")]),
     },
     "N": {
+        0: ("Story map: who and what is connected (🗺, links L1, L2…)", [
+            ("Connections (who or what is linked to whom)", "l:links"), ("Kind of connection", ""),
+            ("Since which chapter", ""), ("Draft, ✔ approved or 🔒 locked", ""), ("Evidence on the page", ""),
+            ("Gap warnings", "")]),
         1: ("Injuries and health", [("Injuries", "l:people.injuries"), ("After-effects of powers",
                                                                          "l:people.magic_cost")]),
         2: ("What each character carries, has gained or has lost", [

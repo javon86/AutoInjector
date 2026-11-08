@@ -1027,6 +1027,7 @@ def clean_sequel_setting(store, raw) -> dict | None:
         raise _err("INVALID_INPUT", "/sequel/number", "sequel number: 2 to 999")
     keys = raw.get("keys") if isinstance(raw.get("keys"), dict) else {}
     return {"series_id": raw["series_id"], "number": n, "previous": str(raw.get("previous") or "")[:80],
+            "previous_branch": str(raw.get("previous_branch") or "main")[:80],
             "previous_number": raw.get("previous_number") if isinstance(raw.get("previous_number"), int) else n - 1,
             "previous_title": _clip(raw.get("previous_title"), 200), "title": _clip(raw.get("title"), 200),
             "keys": {str(k)[:120]: str(v)[:40] for k, v in list(keys.items())[:200]}, "hook": bool(raw.get("hook")),
@@ -1074,6 +1075,10 @@ def link_sequel(store, sequel: dict, pid: str, branch: str, bible_map: dict) -> 
         _save(store, s)
     if rids:
         chars_mod.mark_series_fixed(store, pid, branch, rids)
+    if sequel.get("previous"):  # 🗺 the story map's locked and approved connections carry forward like other facts
+        from . import story_map  # noqa: PLC0415
+        story_map.carry_forward(store, sequel["previous"], sequel.get("previous_branch") or "main", pid, branch,
+                                bible_map, book_number=sequel.get("previous_number"))
     return n
 
 

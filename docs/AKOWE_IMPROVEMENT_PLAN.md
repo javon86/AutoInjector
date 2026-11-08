@@ -42,6 +42,8 @@ Legend: `[ ]` to do · `[~]` in progress · `[x]` done · `[!]` problem (see "Pr
   short re-asks into the same chat; both test rounds green); see "🛡 Hardening for long books".
 - **✍ Write alongside me (done 2026-11):** highlight a passage in a chapter and the AI continues, rewrites, describes,
   expands or tightens it; a suggestion with ⚠️ quick checks, used as a new draft version. See "✍ Write alongside me".
+- **🗺 Story map (done 2026-11-08, PR #TBD):** a live, editable map of the Book Bible's connections that feeds the
+  writer and the checks — see "🗺 Story map" below.
 - **Back burner (later, by the user's call):** a first real GPU run of video/trailers; the audiobook export (P29).
 - **Still to try for real:** everything above has only been tested with stand-in AIs — the first real
   run on the user's PC is the real test (see "Problems to come back to").
@@ -318,7 +320,30 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
   Done: akowe/character_state.py — 0-10 values (book's own list), observes / assumes / own action per scene, checks
   (big jump, no own-goal action), latest state in the next chapter's brief.
 
+## 🗺 Story map (2026-11-08, user: "a visual aspect … in the book Bible, but it will be updated as stories getting written … once it's makes that rule, it gets set in") — done
+
+- [x] **SM1** Data, not a drawing: `akowe/story_map.py`, settings `story_map:<pid>:<branch>`. Nodes are the Book
+  Bible's own entries (`C:`/`P:`/`I:`/`M:`/`G:` ids from binder.py, `W:` protected mysteries = secrets, `S:` the main
+  plot's obligations = clues and the outline's open threads = subplots) plus the map's own `X<n>` entries. Links
+  `L<n>` {from, to, kind, note, since, ended, status draft/approved/locked, source ai/user, evidence, history}. Code
+  map `N00`.
+- [x] **SM2** Live updates with no extra AI call: a `links` field in the story-ledger part of the per-chapter tracking
+  call (story_ledger.STORY_SCHEMA); the ledger's who-knows-what and relationship lines fill gaps. On the page (a real
+  quote, not a weak reading) → 🔒 locked; else a draft. A change to an approved / locked / user link → a conflict
+  `K<n>` (keep / accept, with a reason).
+- [x] **SM3** Both ways: add / edit / ✔ approve / delete, "✎ Change it…" with a reason for locked links; the writer's
+  brief (`story_map` part, three tiers, ≤ 1 400 chars), the chapter reviewer, the checkpoints / check-now, and a quick
+  no-AI check ("met for the first time") name the link code.
+- [x] **SM4** Gap warnings (no AI) on the map and in 🏠 Needs a look.
+- [x] **SM5** The page `#/p/<pid>/<b>/storymap` (web/storymap.js, vanilla SVG, force layout, saved positions, zoom /
+  pan, label cap, filters by kind, as of chapter, only problems).
+- [x] **SM6** Binder PDF/HTML (SVG + table) and Word (PNG with numbered markers + key + table); book package; a sequel
+  carries locked and approved links (series.link_sequel → story_map.carry_forward).
+
 ## Back burner — later, by the user's call  (don't start until asked)
+
+- [ ] Connect Codex / Claude Code as AI options (each needs its own connection; different screens than the chat
+  sites) — user parked this 2026-11-08
 
 - [~] **B1** 🖼 Images: hook Akọwe up to image generation — Stable Diffusion (AutoInjector already has
   an Image Generation panel and a Stable Diffusion endpoint setting in its setup wizard) and/or other image

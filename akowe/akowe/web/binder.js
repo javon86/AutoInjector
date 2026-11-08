@@ -957,7 +957,13 @@ export async function viewBinder(main, x, rest = []) {
   T[6] = p => {
     const ties = rowsOf(p, '6.3');
     const legendNames = { family: '6.2.1', love: '6.2.2', ally: '6.2.3', rival: '6.2.4', enemy: '6.2.5', mentor: '6.2.6' };
+    const sm = p.story_map && typeof p.story_map === 'object' ? p.story_map : null;   // 🗺 story_map.py
+    const smc = (sm && sm.counts) || {};
     return [
+      h('div', { class: 'bnd-storymap-cta no-print', 'data-testid': 'bnd-storymap' },
+        h('span', null, h('b', null, '🗺 Story map'), sm ? ` — ${smc.links || 0} connections (${smc.locked || 0} 🔒 on the page, ${smc.approved || 0} ✔ approved, ${smc.draft || 0} drafts)${smc.conflicts ? `, ⚠️ ${smc.conflicts} to decide` : ''}.`
+          : ' — the live map of every connection: who loves, hates or knows what, clues and subplots. It fills itself as chapters are written.'),
+        h('a', { class: 'bnd-gl-btn', href: plink('storymap'), 'data-testid': 'bnd-open-storymap' }, '🗺 Open the story map')),
       sec(p, '6.1', relMap(p), { cls: 'bnd-sec-map' }),
       sec(p, '6.2', h('ul', { class: 'bnd-legend' }, REL_TYPES.map(([k, w]) => h('li', { 'data-fid': legendNames[k] },
         h('i', { class: `bnd-ln bnd-ln-${k}`, 'aria-hidden': 'true' }), txt(fld(p, legendNames[k])) || w)))),
@@ -1957,7 +1963,8 @@ export async function viewBinder(main, x, rest = []) {
     pages.forEach(p => { const g = groups[groups.length - 1]; if (g && g.tid === p.template) g.pages.push(p); else groups.push({ tid: p.template, pages: [p] }); });
     const gl = pageLink({ page_id: GLANCE_ID }, [h('span', { class: 'bnd-ci', 'aria-hidden': 'true' }, '📖'), h('span', { class: 'bnd-cn' }, 'At a glance')], 'bnd-c-link bnd-c-glance');
     if (st.home && st.mode === 'one') gl.setAttribute('aria-current', 'page');
-    contentsNav.appendChild(h('ol', null, h('li', { class: st.home && st.mode === 'one' ? 'is-here' : null }, gl), groups.map(g => {
+    const smLink = h('a', { href: plink('storymap'), class: 'bnd-c-link bnd-c-storymap', 'data-testid': 'bnd-rail-storymap' }, h('span', { class: 'bnd-ci', 'aria-hidden': 'true' }, '🗺'), h('span', { class: 'bnd-cn' }, 'Story map'));
+    contentsNav.appendChild(h('ol', null, h('li', { class: st.home && st.mode === 'one' ? 'is-here' : null }, gl), h('li', null, smLink), groups.map(g => {
       const [icon, name] = TPL[g.tid];
       const cur = !(st.home && st.mode === 'one') && g.pages.includes(pages[st.idx]);
       const head = pageLink(g.pages[0], [h('span', { class: 'bnd-ci', 'aria-hidden': 'true' }, icon), h('span', { class: 'bnd-cn' }, g.pages.length > 1 || ENTITY.has(g.tid) ? name : pageTitle(g.pages[0])),

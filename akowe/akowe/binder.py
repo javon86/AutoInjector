@@ -2352,7 +2352,7 @@ def fill(page: Page) -> dict:
     if page.template == "5" and page.subject.get("char"):
         out["story_role"] = page.book.story_role(page.subject["char"])
         out.update(page.book.role_fields(page.subject["char"]))
-    for k in ("graph", "map"):
+    for k in ("graph", "map", "story_map"):
         if page.extra.get(k):
             out[k] = page.extra[k]
     if page.template == "10":  # 📐 the story shape's beats on the chapters (story_shape.py)
@@ -2487,6 +2487,10 @@ def _build(app, pid: str, branch: str = "main", *, look: str | None = None) -> d
             continue
         if p.template == "6":
             p.extra["graph"] = _graph(b)
+            from . import story_map  # noqa: PLC0415 - 🗺 the story map: its picture and its table of links
+            sm = story_map.binder_part(b)
+            if sm:
+                p.extra["story_map"] = sm
         if p.template == "9" and b.map_graph:
             g = b.map_graph
             p.extra["map"] = {"coordinate_system": g.get("coordinate_system"), "nodes": [

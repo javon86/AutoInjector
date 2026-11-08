@@ -48,6 +48,9 @@ scene cards / voice cards / story rules and texture / must-show details here, ev
   first), each with its own budget.
 * ``series_state`` (📚 series.py): in book 2+ of a series, each present character as the book before left them (looks,
   belongings, abilities, relationships, status), ≤ 2 400 characters.
+* ``story_map`` (🗺 story_map.py): the approved (✔) and locked (🔒, on the page) connections of the characters in this
+  chapter and of the places / items / groups its plan names, each with its link code (L12), in three tiers (both ends
+  here, then 🔒, then ✔), ≤ 1 400 characters; what did not fit is listed as cut (H13).
 
 Prompt budget of the brief (characters of JSON): voice cards ≤ 7 000, scene cards ≤ 6 × ~1 500, story rules ≤ 2 500,
 world texture ≤ 1 200, must-show ≤ 5 × 160, story choices ≤ 1 600, length ≤ 400 — about 22 000 at most, typically
@@ -378,6 +381,21 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str, *
                 needs_list.filter_ledger(brief, needs)
             if cut:  # H13: the continuity part's own cuts join the ⚠️ "what was cut" list (brief_cuts.py)
                 meta["cut"] = cut
+        try:  # 🗺 the story map's approved / 🔒 locked connections of the people and places in this chapter
+            from . import story_map  # noqa: PLC0415
+            from .book_path import BookPath  # noqa: PLC0415
+            order_m = [c["chapter_id"] for c in BookPath.outline_chapters(None, outline)]
+            smap = story_map.brief(store, pid, branch, [c["name"] for c in present],
+                                   order_m.index(chapter_id) + 1 if chapter_id in order_m else None, cut,
+                                   texts + [json.dumps(cards, ensure_ascii=False)])
+        except Exception:  # noqa: BLE001
+            log.exception("story map of chapter %s", chapter_id)
+            smap = []
+        if smap:
+            brief["story_map"] = smap
+            rules.append(story_map.RULE)
+            if cut:
+                meta["cut"] = cut
         if length:
             from . import lengths as lengths_mod  # noqa: PLC0415
             rules.append(lengths_mod.rule(length))
@@ -403,7 +421,7 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str, *
                 or brief.get("earlier_moments") or brief.get("story_beats") or brief.get("story_stage")
                 or any(k in brief for k in ("physical_state", "character_state", "two_readings", "version_changes",
                                             "previous_chapter_end", "story_so_far", "story_ledger",
-                                            "series_state", "series_world"))):
+                                            "series_state", "series_world", "story_map"))):
             return None, meta
         meta.update(characters=[c["record_id"] for c in present], voice_cards=len(vb["cards"]),
                     other_voices=len(vb["others"]), summarized=vb["summarized"],
@@ -418,6 +436,7 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str, *
                                             "previous_chapter_end", "story_so_far", "story_ledger")
                                 if k in brief] or None,
                     narrator_style=bool(style), series_state=len(brief.get("series_state") or []) or None,
+                    story_map=len(brief.get("story_map") or []) or None,
                     detail_refs=refs or None, character_mode=cmode,
                     chars=len(json.dumps(brief, ensure_ascii=False)))
         if needs and measure:  # 🧠 how big the old way (keyword guessing) would have been, for the size metric

@@ -561,6 +561,10 @@ def _context(svc, run, cp: dict, part: dict, texts: dict, order: list[str], flag
         pass
     if needs:  # 🧠 what each chapter's plan said it needs (needs_list.py), its mismatches and unplanned uses
         ctx["needs_lists"] = needs
+    from . import story_map  # noqa: PLC0415 - 🗺 the approved / locked connections of the people in these chapters
+    sm = story_map.checkpoint_part(store, pid, branch, [c.get("text") or "" for c in chs], cp.get("after"))
+    if sm:
+        ctx["story_map"] = sm
     return ctx
 
 
@@ -596,6 +600,11 @@ def _flags_now(store, pid, branch, order: list[str], cids: list[str], texts: dic
     for cid in cids:
         if cid in order:
             out += sl_mod.in_chapter((texts.get(cid) or {}).get("text") or "", names, cid, order.index(cid) + 1)
+    from . import story_map  # noqa: PLC0415 - 🗺 a chapter that breaks a story-map rule (the link's code, no AI)
+    for cid in cids:
+        if cid in order:
+            out += story_map.flags(store, pid, branch, cid, order.index(cid) + 1,
+                                   (texts.get(cid) or {}).get("text") or "")
     return out
 
 
@@ -683,6 +692,9 @@ def _run_one(svc, run: dict, st: dict, cp: dict, chapters: list[dict]) -> None:
         rows_here = [r for r in needs_rows if r.get("chapter") in nums_here]
         ctx = _context(svc, run, cp, part, texts, order, flags, rows_here)
         task = CHECK_TASK.format(part=j + 1, parts=k, after=cp["after"]) + (needs_list.CHECK_NOTE if rows_here else "")
+        if ctx.get("story_map"):
+            from .story_map import CHECK_NOTE as MAP_NOTE  # noqa: PLC0415
+            task += MAP_NOTE
         if ctx.get("plan"):
             task += PLAN_RULE
         if _is_stretch(cp):

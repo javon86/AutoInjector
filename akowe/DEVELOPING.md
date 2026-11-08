@@ -105,6 +105,11 @@ akowe/
     compare.py             ⚖️ P14 blind comparison of two books / chapter versions
     scene_grid.py          🗂 P27 scene grid: chapters × scenes (scene cards, words + readability per scene, problems)
     costs.py               ⏱ P28 AI calls and minutes per AI / per run / per book, estimate before a run (web/grid.js)
+    story_map.py           🗺 the story map (settings story_map:<pid>:<b>, code N00): links L<n> between the Book Bible's
+                           own entries; filled from the per-chapter tracking call's story ``links`` (on the page = 🔒
+                           locked, else draft; a change to a rule = conflict K<n>), author edits, gap warnings, the
+                           writer's brief / reviewer / checkpoint parts, binder SVG/PNG, sequel carry-forward, routes
+                           …/storymap; web/storymap.js (#/p/<pid>/<b>/storymap)
     book_bible.py          📖 P20/P21 the book bible: build (versioned JSON), Markdown, clean (a file from outside),
                            summary, remap_refs
     binder.py              📖 Book Bible binder: build() = the binder contract (pages per template of binder_schema.json,
