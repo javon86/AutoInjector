@@ -52,6 +52,7 @@ class _Media:
         self.media: list = []
         self.rels: list = []
         self.by_url: dict = {}
+        self.inline: dict = {}   # url -> bytes made here (the 🗺 story map's PNG)
         self.n = 0
 
     def drawing(self, url: str | None, alt: str, max_mm: float) -> str:
@@ -60,7 +61,7 @@ class _Media:
             return ""
         if url not in self.by_url:
             try:
-                data = self.fetch(url) if self.fetch else None
+                data = self.inline.get(url) or (self.fetch(url) if self.fetch else None)
                 info = load_image(data) if data else None
             except (UnsupportedImage, ValueError, Exception):  # noqa: BLE001 - an SVG or a broken picture: left out
                 info, data = None, None
@@ -110,6 +111,39 @@ def _pic_paras(media: _Media, pic: dict | None, max_mm: float) -> str:
     return _p(runs) if runs else ""
 
 
+def _story_map(media: "_Media", sm: dict, accent: str, rule: str) -> list[str]:
+    """🗺 The story map (story_map.py) for Word: the picture (a PNG with numbered markers — Word has no SVG), its key,
+    and the table of links."""
+    from . import story_map  # noqa: PLC0415
+    out = [_p(_run("🗺 Story map  ", bold=True, color=accent, size=26) + _run("N00", color="999999", size=16),
+              "Heading2")]
+    c = sm.get("counts") or {}
+    out.append(_p(_run(f"{int(c.get('links') or 0)} connections: {int(c.get('locked') or 0)} 🔒 locked (on the page), "
+                       f"{int(c.get('approved') or 0)} ✔ approved, {int(c.get('draft') or 0)} drafts (dotted lines). "
+                       "Red = a conflict to decide.", size=18)))
+    try:
+        data, key = story_map.png(sm.get("view") or {})
+        url = "storymap://png"
+        media.inline[url] = data
+        out.append(_p(media.drawing(url, "Story map", 165)))
+        if key:
+            out.append(_p(_run("Key: ", bold=True, size=18) + _run(" · ".join(f"{k['n']} {k['name']} ({k['kind']})"
+                                                                            for k in key), size=18)))
+    except Exception:  # noqa: BLE001 - the table below still says everything
+        pass
+    head = ["Code", "From", "Link", "To", "Since", "Status", "On the page"]
+    w = 9000 // len(head)
+    rows = [[_cell(_p(_run(x, bold=True, size=16)), w, rule) for x in head]]
+    for r in sm.get("rows") or []:
+        vals = [r["code"], r["from"], r["kind"] + (f" ({r['note']})" if r.get("note") else ""), r["to"],
+                str(r["since"]) if r.get("since") else "start", r["status"], r["evidence"]]
+        rows.append([_cell(_p(_run(v, size=16)), w) for v in vals])
+    out.append(_table(rows, [w] * len(head), rule))
+    for warn in sm.get("warnings") or []:
+        out.append(_p(_run(f"⚠️ {warn}", size=18)))
+    return out
+
+
 def build_docx(data: dict, *, pic_bytes=None) -> bytes:
     look = data["book"]["look"]
     v = LOOK_VARS.get(look) or LOOK_VARS["classic"]
@@ -149,6 +183,8 @@ def build_docx(data: dict, *, pic_bytes=None) -> bytes:
             body.append(_p(_run(f"{pct}% approved  ", bold=True, color=accent, size=22) + _run(bar + "  ", color=accent2)
                            + _run(f"{dw} draft page{'' if dw == 1 else 's'} waiting · {mp} picture"
                                   f"{'' if mp == 1 else 's'} missing", size=18)))
+        if p["template"] == "6" and p.get("story_map"):
+            body += _story_map(media, p["story_map"], accent, rule)
         for sec in tpl["sections"]:
             code = sec["code"]
             s = p["sections"].get(code) or {"fields": {}}

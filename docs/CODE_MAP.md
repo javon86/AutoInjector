@@ -925,6 +925,17 @@ Examples:
 
 ## N: Running notes (the story ledger: updated after every chapter)
 
+### `N00` Story map: who and what is connected (🗺, links L1, L2…)
+
+| Code | Detail | Binder no. | Forge / ledger field |
+|---|---|---|---|
+| `N0a` | Connections (who or what is linked to whom) | — | ledger links |
+| `N0b` | Kind of connection | — | — |
+| `N0c` | Since which chapter | — | — |
+| `N0d` | Draft, ✔ approved or 🔒 locked | — | — |
+| `N0e` | Evidence on the page | — | — |
+| `N0f` | Gap warnings | — | — |
+
 ### `N11` Injuries and health
 
 | Code | Detail | Binder no. | Forge / ledger field |

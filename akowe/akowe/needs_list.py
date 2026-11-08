@@ -68,7 +68,7 @@ TOKEN = re.compile(r"^\s*([A-Z])(\d)([\da-z])?\s*(?:\(\s*([^()]{1,60}?)\s*\))?\s
 # the ledger keys of the writing brief's story_ledger that each N section stands for (N99 is always on)
 LEDGER_KEYS = {"N11": ("people",), "N22": ("people",), "N33": ("people",), "N44": ("who_knows",),
                "N55": ("relationships",), "N66": ("time", "travel"), "N77": ("numbers",), "N88": ("names",),
-               "N99": ()}
+               "N99": (), "N00": ()}  # N00 the 🗺 story map: its own part of the brief (story_map.brief)
 # W sections that stand for a part of the writing brief (W22 story rules and the rest stay always on)
 WORLD_PARTS = {"W55": "world_texture"}
 

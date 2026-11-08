@@ -41,6 +41,8 @@ import re
 import threading
 from datetime import datetime, timezone
 
+from . import story_map as smap
+
 log = logging.getLogger("akowe.story_ledger")
 
 KEY = "story_ledger:{pid}:{branch}"
@@ -80,7 +82,9 @@ STORY_SCHEMA = _obj({
     "knowledge": _arr(_obj({"who": _S, "what": _S, "how": {"type": "string", "enum": ["learns", "surprised"]}}), 12),
     "relationships": _arr(_obj({"a": _S, "b": _S, "line": _S}), 12),
     "numbers": _arr(_obj({"what": _S, "value": _S, "kind": {"type": "string",
-                                                             "enum": ["money", "price", "distance", "count"]}}), 12)})
+                                                             "enum": ["money", "price", "distance", "count"]}}), 12),
+    # 🗺 the story map's connections the chapter shows (story_map.py: merged into the map, on-page ones locked)
+    "links": smap.LINKS_SCHEMA})
 
 TASK = (
     " Also return ``story`` for the WHOLE chapter: summary — two to four short lines of what actually happened (events, "
@@ -91,8 +95,8 @@ TASK = (
     "day (\"day 3\"), date, season and the time since the previous chapter ended (\"the next morning\", \"three days\"); "
     "trips — a journey the text describes and how long it takes; knowledge — a character who learns a secret, or is "
     "surprised by one (how: learns / surprised); relationships — one line for each pair whose relationship is shown "
-    "or changes; numbers — money, prices, distances and counts that matter. context.story_before is what was true "
-    "before this chapter: continue from it. Only what the text shows.")
+    "or changes; numbers — money, prices, distances and counts that matter;" + smap.TASK + " context.story_before is "
+    "what was true before this chapter: continue from it. Only what the text shows.")
 
 RULE = ("Story so far (context.writing_brief.previous_chapter_end, story_so_far, story_ledger): this chapter starts "
         "right after previous_chapter_end — continue from where and when it ends (never restart the scene, never "
@@ -168,6 +172,7 @@ def clean(raw) -> dict:
                        "kind": x.get("kind") if x.get("kind") in ("money", "price", "distance", "count") else "count"}
                       for x in raw.get("numbers") or [] if isinstance(x, dict) and _clip(x.get("what"))
                       and _clip(x.get("value"))][:12]
+    out["links"] = smap.clean_links(raw.get("links"))
     return out
 
 
@@ -353,7 +358,7 @@ def extract(text: str, known_people: list[str] | None = None) -> dict:
            "people": [], "names": [{"name": n, "kind": "person" if any(n == p or n == _first(p) for p in people_names)
                                     else "thing"} for n in names][:40],
            "time": {"day": "", "date": "", "season": season_of(text), "since_previous": ""},
-           "trips": [], "knowledge": [], "relationships": [], "numbers": []}
+           "trips": [], "knowledge": [], "relationships": [], "numbers": [], "links": []}
     m = SINCE_RE.search(" ".join(sents[:4]))
     if m:
         out["time"]["since_previous"] = _clip(m.group(0), 60)

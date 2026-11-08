@@ -624,6 +624,37 @@ You can download it as **⬇ PDF** or **⬇ Word**. Each save also puts it in th
 Before a sequel, **✨ Find what changed in this book** reads book 1. It proposes those changes for you to approve. The sequel
 then carries the locked facts, belongings, status and a summary of book 1.
 
+### 🗺 The story map
+
+The Book Bible has a **🗺 Story map** (📖 Book Bible → 🗺 Story map, also on the side bar under 📖 Book Bible and on
+the Relationship map page). It is a live map of who and what is connected: family, love and hate, friends and enemies,
+who works for whom, who knows which secret, who owns what, who lives where, who belongs to which group, clues and
+subplots. The circles are the Book Bible's own entries (★ is the main character). It is not just a picture: the
+writer and the checks use it.
+
+- **It fills itself.** After every chapter, the same AI call that updates the running notes also lists the
+  chapter's connections (no extra AI message). New ones arrive as **drafts** (dotted lines).
+- **On the page = locked.** A connection the chapter shows on the page becomes **🔒 locked**, like every other detail
+  that is already on the page. It never changes silently.
+- **Conflicts.** If a later chapter seems to change a locked or approved connection (two sisters suddenly strangers),
+  nothing is changed. The line turns **red**; you choose **Keep it as it is** or **Accept the change**, and say why.
+- **You can edit it.** Add a connection, edit it, **✔ approve** a draft (then it is a rule) or delete it. A locked
+  one has **✎ Change it…**, which asks why and keeps the reason in its history. Add your own secrets, clues (with the
+  chapter where they should pay off) and subplots.
+- **The writer gets it.** Each chapter's writer is given the approved and locked connections of the people and places
+  in that chapter (not the whole map). The chapter's reviewer and the 🧭 checkpoints / 🔎 Check consistency now get
+  them too, and a chapter that breaks one is flagged with the connection's code (for example `L12`).
+- **Gap warnings** (no AI needed): a subplot that has not moved for 5 chapters, a clue never paid off (by the end or by
+  its planned chapter), a main character with no new connections lately, a secret nobody learns, two connections that
+  cannot both be true, entries with no connections, and connections about a character who was deleted. They show on
+  the map (tick **Only problems**) and in 🏠 Book home's ⚠️ Needs a look.
+- **As of chapter.** The slider shows the map as it stood after any chapter. You can drag circles around; the map
+  remembers where you put them. Scroll to zoom, drag the background to move.
+- It is in the Book Bible's **⬇ PDF** and **⬇ Word** (a picture of the map and a table of every connection), it is
+  saved in `book.akowe`, and a **sequel** starts with the locked and approved connections of the book before.
+
+In the code map the story map is `N00` (running notes, section 0); each connection has its own code `L1`, `L2`…
+
 ## 6. Where everything is saved
 
 | What | Where |

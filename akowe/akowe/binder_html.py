@@ -204,6 +204,26 @@ def _graph_svg(g: dict) -> str:
     return "".join(out)
 
 
+def _story_map(sm: dict) -> str:
+    """🗺 The story map (story_map.py): its picture and a table of every link (code, who, kind, since, status,
+    evidence), then its warnings."""
+    rows = "".join(
+        f'<tr><td>{escape(r["code"])}</td><td>{escape(r["from"])}</td><td>{escape(r["kind"])}</td>'
+        f'<td>{escape(r["to"])}</td><td>{escape(r["note"])}</td>'
+        f'<td>{escape(str(r["since"]) if r.get("since") else "start")}</td><td>{escape(r["status"])}</td>'
+        f'<td>{escape(r["evidence"])}</td></tr>' for r in sm.get("rows") or [])
+    c = sm.get("counts") or {}
+    warn = "".join(f"<li>{escape(w)}</li>" for w in sm.get("warnings") or [])
+    return (f'<div class="box story-map" data-id="story-map"><h3>🗺 Story map<span class="code">N00</span></h3>'
+            f'<p>{int(c.get("links") or 0)} connections: {int(c.get("locked") or 0)} 🔒 locked (on the page), '
+            f'{int(c.get("approved") or 0)} ✔ approved, {int(c.get("draft") or 0)} drafts (dotted). Solid line = a '
+            'rule, dotted = a draft, red = a conflict to decide, ★ = the main character.</p>'
+            f'{sm.get("svg") or ""}'
+            '<table class="rows"><thead><tr><th>Code</th><th>From</th><th>Link</th><th>To</th><th>Note</th>'
+            f'<th>Since chapter</th><th>Status</th><th>On the page</th></tr></thead><tbody>{rows}</tbody></table>'
+            + (f'<h3>⚠️ Gaps and warnings</h3><ul>{warn}</ul>' if warn else "") + '</div>')
+
+
 def _starred(r: dict, fid: str) -> dict:
     """A row's name field with a ★ when the row is the protagonist (cast list, main cast, quick-jump)."""
     f = r.get(fid) or {}
@@ -272,6 +292,8 @@ def _page(p: dict, data: dict, pics: _Pics) -> str:
                     f'<div class="bar"><i style="width:{pct}%"></i></div></div>')
     if p["template"] == "6" and p.get("graph"):
         body.append(f'<div class="box">{_graph_svg(p["graph"])}</div>')
+    if p["template"] == "6" and p.get("story_map"):
+        body.append(_story_map(p["story_map"]))
     for sec in tpl["sections"]:
         code = sec["code"]
         s = p["sections"].get(code) or {"fields": {}}
