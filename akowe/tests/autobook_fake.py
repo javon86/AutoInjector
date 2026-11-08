@@ -210,6 +210,8 @@ class BookFakeAI:
         self.terms_script: list = []             # P31: scripted "which trade facts to check" answers
         self.beta_script: list = []              # P23: scripted beta reads (dicts or callables(ctx))
         self.originality_script: list = []       # ✨ #20: scripted "sounds machine-written" ratings
+        self.voice = None                        # ✍ the narrator_voice the invent step returns (when asked), a dict
+        self.human_script: list = []             # ✍ scripted end-of-book rewrite answers (dicts or callables(ctx))
         # Character entries that break an Akọwe check: name -> kinds, one consumed per proposal of that name
         # ("interval": a fact whose effective_to is not after effective_from (the save is refused); "authority": a
         # home place no pinned A04 declares (VALIDATE refuses it); "schema": a fact missing its fields (the proposal
@@ -341,6 +343,13 @@ class BookFakeAI:
             if scripted is not None:
                 return "beta", scripted(ctx) if callable(scripted) else copy.deepcopy(scripted)
             return "beta", self._beta(ctx)
+        if "lines" in props and "spots" in ctx:  # ✍ the end-of-book pass: better lines for the worst spots
+            with self.lock:
+                scripted = self.human_script.pop(0) if self.human_script else None
+            if scripted is not None:
+                return "human_rewrite", scripted(ctx) if callable(scripted) else copy.deepcopy(scripted)
+            return "human_rewrite", {"lines": [{"id": sp["id"], "quote": sp["quote"],
+                                                "rewrite": self.plain_line(sp["quote"])} for sp in ctx["spots"]]}
         if "machine_ratings" in props:  # ✨ #20: does it sound machine-written? (a real quote, then an invented one)
             with self.lock:
                 scripted = self.originality_script.pop(0) if getattr(self, "originality_script", None) else None
@@ -470,6 +479,8 @@ class BookFakeAI:
                    "idea": "When the Gullhaven lighthouse goes dark, apprentice keeper Mara Vell searches "
                            "the fog-bound harbor for her missing master. Every captain hides something, "
                            "and the only clue is a brass key that should not exist."}
+            if "narrator_voice" in props and self.voice:  # ✍ the book's own narrator voice (folded in)
+                out["narrator_voice"] = copy.deepcopy(self.voice)
             if "story_kind" in props and self.kind_pick:  # 📚 "Let the AI decide": the AI picks the kind
                 out.update(story_kind=self.kind_pick, story_kind_why="A search across a strange, dangerous harbor "
                                                                      "for a lost master.")
@@ -580,7 +591,27 @@ class BookFakeAI:
                                      "working": ["The harbour feels real"],
                                      "not_working": [f"Chapter {first[-1] if first else 1}: the harbour talk drags"],
                                      "scores": {"pacing": 7, "arc_progress": 7, "continuity": 8, "characters": 7,
-                                                "direction": 8, "makes_sense": 7}}
+                                                "direction": 8, "makes_sense": 7, "human": 6},
+                                     # ✍ does it sound like a person? and Akọwe's repeat findings, confirmed
+                                     "human": "Mostly a person's voice; the same gestures come back too often.",
+                                     "human_quotes": [next((s for c in ctx.get("chapters") or []
+                                                            for s in self.sentences(c.get("text") or "")
+                                                            if len(s) > 20), "")][:1],
+                                     "repeats": [{"id": f["id"], "verdict": "confirmed", "why": "A reader notices."}
+                                                 for f in (ctx["stretch"].get("repeats_found") or [])]}
+        return out
+
+    PLAIN = (("a testament to", "proof of"), ("couldn't help but smile", "smiled"), ("a tapestry of", "a mess of"),
+             ("let out a breath she didn't know she was holding", "breathed out"), ("jaw tightened", "jaw set"),
+             ("let out a breath", "breathed out"))
+
+    def plain_line(self, quote: str) -> str:
+        """✍ A fake "plainer" rewrite: swaps the stock phrases it knows, else trims the line's last clause."""
+        out = quote
+        for a, b in self.PLAIN:
+            out = out.replace(a, b)
+        if out == quote:
+            out = quote.rstrip(".") + ", and nothing more."
         return out
 
     def _details(self, ctx):

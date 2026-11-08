@@ -533,8 +533,14 @@ class ReportService:
     @staticmethod
     def _originality(chapters) -> dict:  # ✨ #20: one summary line and the worst spots (no AI)
         try:
-            from . import originality  # noqa: PLC0415
-            return originality.brief(originality.check(chapters))
+            from . import human_voice, originality  # noqa: PLC0415
+            rep = originality.check(chapters)
+            out = originality.brief(rep)
+            reps = human_voice.repeats(chapters)  # ✍ the repeat check across chapters and the person score
+            out["person"] = human_voice.person_score(chapters, rep, reps)
+            out["repeats"] = [{k: f.get(k) for k in ("kind", "label", "severity", "chapters", "message")}
+                              for f in reps["findings"]][:10]
+            return out
         except Exception:  # noqa: BLE001
             log.exception("originality check failed in the report")
             return {"error": True}
@@ -1157,6 +1163,12 @@ def render_markdown(rep: dict) -> str:
         for e in og.get("examples") or []:
             L.append(f"- Chapter {e['chapter']}: {e['label']} — {quoted(e['quote'])}")
         if og.get("examples"):
+            L.append("")
+        if (og.get("person") or {}).get("score") is not None:  # ✍ human_voice.py
+            L += [f"✍ Sounds like a person: {og['person']['score']}/100 ({og['person']['rating']}).", ""]
+        for f in og.get("repeats") or []:
+            L.append(f"- 🔁 {f['label']}: {f['message']}")
+        if og.get("repeats"):
             L.append("")
     rd = rep.get("readability") or {}
     rt = rd.get("totals") or {}

@@ -375,8 +375,11 @@ def test_pinned_run_still_gets_an_independent_reviewer(tmp_path):
     run = run_book(app, {"slot_id": "AI-2"})
     assert run["status"] == "done", (run["phase"], run.get("problem"))
     writes = {s for s, k in fake.per_slot if k not in ("review", "fail", "craft", "scene_review", "planned", "ending",
-                                                       "book_review", "checkpoint")}  # P13: the whole-book read is a review; PR #117: every AI checks
-    #                                                                          (a checkpoint read is a check)
+                                                       "book_review", "checkpoint", "originality",
+                                                       "human_rewrite")}  # P13: the whole-book read is a review; PR #117: every AI checks
+    #                                                                          (a checkpoint read is a check); ✍ the
+    #                                                                          end-of-book read and its suggestions
+    #                                                                          come from the AI that did not write
     reviews = {s for s, k in fake.per_slot if k == "review"}
     crafts = {s for s, k in fake.per_slot if k == "craft"}
     assert writes == {"AI-2"} and reviews == {"AI-1"}
@@ -384,6 +387,7 @@ def test_pinned_run_still_gets_an_independent_reviewer(tmp_path):
     assert {s for s, k in fake.per_slot if k == "scene_review"} == {"AI-1"}  # so is the scene-card checker (P8)
     assert {s for s, k in fake.per_slot if k == "planned"} == {"AI-1"}  # and the planned-to-page checker (P11)
     assert {s for s, k in fake.per_slot if k == "book_review"} == {"AI-1"}  # and the whole-book report (P13)
+    assert {s for s, k in fake.per_slot if k in ("originality", "human_rewrite")} == {"AI-1"}  # ✍ and the end pass
 
 
 # ============================================================================================ real adapter

@@ -1769,7 +1769,7 @@ def a_narrative_voice(page: Page):
         card = style_card.brief_for(page.book.store, page.book.pid)
     except Exception:  # noqa: BLE001
         card = None
-    return _clip((card or {}).get("summary") or "", 400) if card else ""
+    return _clip((card or {}).get("voice_summary") or (card or {}).get("summary") or "", 400) if card else ""
 
 
 def a_pov_rules(page: Page):

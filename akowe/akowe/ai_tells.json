@@ -660,5 +660,75 @@
    "minor": 1.0,
    "major": 2.5
   }
+ },
+ "writer_brief": {
+  "about": "What the chapter writer is told BEFORE it writes (human_voice.py, the brief's human_voice block): the first 'take' phrases of each list above (they are in order, best-known first) plus 'always', shown with she/her/was for the placeholders ('show' gives a phrase's display form), the patterns to never write and the craft rules. 'gestures' is the body-language list the cross-chapter repeat check counts. Edit this to change what every new chapter is told.",
+  "take": {
+   "ai_phrases": 18,
+   "cliches": 6,
+   "hedges": 4
+  },
+  "always": [
+   "a breath {pron} didn't know {pron} {be} holding",
+   "sent a shiver down {poss} spine",
+   "little did {pron} know",
+   "every fiber of {poss} being"
+  ],
+  "show": {
+   "delv*": "delve",
+   "embark* on a journey": "embark on a journey"
+  },
+  "patterns": [
+   "“Not X. Not Y.” lists of what something is not",
+   "“It wasn't X. It was Y.” (say what it is, straight away)",
+   "lists of three (“cold, wet, and tired”) again and again",
+   "a paragraph or scene that ends on a moral or a big truth about life",
+   "long dashes (—) in most paragraphs: use full stops and commas",
+   "hedging (perhaps, somehow, seemed to, as if) in sentence after sentence",
+   "questions the narrator asks the reader (“What did it mean?”)",
+   "naming a feeling right after showing it (“Her hands shook. She was afraid.”)"
+  ],
+  "craft": [
+   "Vary sentence length: mix short, blunt sentences with longer ones; never three of the same length in a row.",
+   "Use concrete details only this story could have (a name, a smell, a brand, a worn object), not generic ones.",
+   "Leave subtext: show the feeling through action and what people avoid saying; never name it afterwards.",
+   "Make dialogue messy and real: people interrupt, dodge questions, answer the wrong thing, trail off.",
+   "End scenes on an action or an image, never on a lesson or a summary.",
+   "Do not repeat a gesture or a description from earlier chapters (jaws, breaths, nods, glances)."
+  ],
+  "gestures": [
+   "jaw tightened",
+   "jaw clenched",
+   "{poss} jaw tightened",
+   "a muscle ticked",
+   "let out a breath",
+   "released a breath",
+   "breath caught",
+   "{poss} breath hitched",
+   "swallowed hard",
+   "nodded slowly",
+   "raised an eyebrow",
+   "pinched the bridge of {poss} nose",
+   "ran a hand through {poss} hair",
+   "pressed {poss} lips into a thin line",
+   "{poss} lips thinned",
+   "{poss} shoulders slumped",
+   "{poss} eyes narrowed",
+   "{poss} stomach dropped",
+   "{poss} stomach twisted",
+   "clenched {poss} fists",
+   "went very still",
+   "went still",
+   "met {poss} eyes",
+   "{poss} heart pounded",
+   "{poss} throat tightened",
+   "the corner of {poss} mouth",
+   "exchanged a look",
+   "shook {poss} head",
+   "a slow smile",
+   "{poss} hands trembled",
+   "for a long moment",
+   "the silence stretched"
+  ]
  }
 }

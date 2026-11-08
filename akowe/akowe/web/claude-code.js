@@ -92,7 +92,8 @@ export function runLine(c, r) {
 /** The chapter page: research notes, the sourced fact check and the proposed rewrites (✔ Use = a new draft). */
 export function chapterBox(c, rid, { onSaved } = {}) {
   const { h, api, bpath, clear, toast, problemBox, toProblem } = c;
-  const box = h('section', { class: 'card cc-chapter', 'data-testid': 'cc-chapter', hidden: true }, h('h2', null, '🤖 Claude Code helpers'));
+  const title = h('h2', null, '🤖 Claude Code helpers');
+  const box = h('section', { class: 'card cc-chapter', 'data-testid': 'cc-chapter', hidden: true }, title);
   const body = h('div', { 'aria-live': 'polite' });
   box.appendChild(body);
   const where = { step: 'Claude Code helpers' };
@@ -104,6 +105,8 @@ export function chapterBox(c, rid, { onSaved } = {}) {
     const props = info.proposals || [];
     if (!notes.length && !claims.length && !props.length) return;
     box.hidden = false;
+    // ✍ only the end-of-book suggestions (no helper notes): a plain title, the helpers may be off
+    if (!notes.length && !claims.length && props.every(p => p.kind === 'voice')) title.textContent = '✍ Suggestions to sound more like a person';
     clear(body);
     if (notes.length) body.appendChild(h('details', { 'data-testid': 'cc-notes' }, h('summary', null, `📚 Research notes for this chapter (${notes.length})`),
       h('ul', { class: 'plain-list' }, notes.map(n => h('li', null, h('strong', null, `${n.label}: `), n.topic ? `${n.topic} — ` : '', n.note,
@@ -116,7 +119,7 @@ export function chapterBox(c, rid, { onSaved } = {}) {
         const id = `cc-p-${p.id}`;
         const b = h('input', { type: 'checkbox', id, value: p.id, checked: true });
         return h('div', { class: 'check-row cc-prop', 'data-kind': p.kind }, b, h('label', { for: id },
-          h('span', { class: 'muted' }, p.kind === 'fact' ? 'Fact fix: ' : 'Sounds like AI: '), h('del', null, p.original), ' → ', h('ins', null, p.replacement),
+          h('span', { class: 'muted' }, p.kind === 'fact' ? 'Fact fix: ' : p.kind === 'voice' ? 'To sound more like a person: ' : 'Sounds like AI: '), h('del', null, p.original), ' → ', h('ins', null, p.replacement),
           h('span', { class: 'small muted' }, ` — ${p.problem}`)));
       });
       const msg = h('div', { 'aria-live': 'polite' });

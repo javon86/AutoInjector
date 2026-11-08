@@ -18,7 +18,11 @@
   serves the stage “The nightmare” of this Overcoming the Monster story (chapters 9–11) …") and the kind's promise.
 * ``story_choices`` (P12): the author's style choices (and the ending-state matrix in the last chapter).
 * ``length`` (P15): the chapter's word target, scenes and words per scene, and whether it is written scene by scene.
-* ``narrator_style`` (P25): the author's own style card (style_card.py) when the book writes in the author's style.
+* ``narrator_style`` (P25): the author's own style card (style_card.py) when the book writes in the author's style
+  — or, without a card, the book's own narrator voice chosen at the start of a ⚡ run (``auto: true``, human_voice.py).
+* ✍ ``human_voice`` (human_voice.py): what never to write (the best-known AI phrases, clichés and patterns, built from
+  ai_tells.json), the craft rules (vary sentence length, concrete details, subtext, messy dialogue, end on action or
+  image, no repeated gestures) and this book's own repeat offenders so far (no AI), ≤ 1 900 characters.
 * ``character_details`` (B5): accepted Character Forge dossier fields with only the letters the chapter needs (E; A on
   a character's first appearance; F / M when the plan reads like a fight / powers), ≤ 2 500 characters
   (``forge.chapter_brief``).
@@ -401,10 +405,19 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str, *
             rules.append(lengths_mod.rule(length))
         brief.pop("choice_rules", None)
         style = _narrator_style(store, pid)  # P25 (Section 7c): the author's own narrating style, when chosen
-        if style:
-            from .style_card import RULE as STYLE_RULE  # noqa: PLC0415
+        if style:  # ✍ or the book's own narrator voice, chosen at the start of a ⚡ run (human_voice.py)
+            from .human_voice import rule_for  # noqa: PLC0415
             brief["narrator_style"] = style
-            rules.append(STYLE_RULE)
+            rules.append(rule_for(style))
+        hv = _human_voice(store, pid, branch, outline, chapter_id, cut)  # ✍ never write these; this book's repeats
+        if hv:
+            from .human_voice import RULE as HV_RULE  # noqa: PLC0415
+            brief["human_voice"] = hv
+            rules.append(HV_RULE)
+            meta["human_voice"] = {"chars": len(json.dumps(hv, ensure_ascii=False)),
+                                   "own": len(hv.get("this_book_so_far") or [])}
+            if cut:
+                meta["cut"] = cut
         try:  # 🗳 the writers' room's decision for this chapter (a ⚡ run's pick; writers_room.py)
             from . import writers_room  # noqa: PLC0415
             room = writers_room.chapter_decision(store, pid, branch, chapter_id)
@@ -448,6 +461,18 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str, *
     except Exception:  # noqa: BLE001 - a brief is help for the writer, never a reason to fail the chapter
         log.exception("could not build the writing brief of chapter %s", chapter_id)
         return None, meta
+
+
+def _human_voice(store, pid: str, branch: str, outline: dict, chapter_id: str, cut: list) -> dict | None:
+    """✍ The "sounding human" block (human_voice.py): what never to write (from ai_tells.json), the craft rules and
+    this book's own repeat offenders in the chapters before (no AI). Never raises."""
+    try:
+        from . import human_voice  # noqa: PLC0415
+        earlier = human_voice.earlier_chapters(store, pid, branch, outline, chapter_id)
+        return human_voice.brief(earlier, cut)
+    except Exception:  # noqa: BLE001
+        log.exception("could not add the sounding-human block to the brief")
+        return None
 
 
 def _narrator_style(store, pid: str) -> dict | None:

@@ -16,7 +16,9 @@ Where it lives (companion data, like the story rules): the author's card in the 
 ``style_card:author:<principal>`` (samples, numbers, AI summary, ``version``); a book that writes in the author's style
 holds a SNAPSHOT of the card's brief in ``style_card:<pid>`` (``{"on": true, "brief", "from_version", "at"}``), so a
 later edit of the card never silently changes a book that is being written (✒️ Use for this book takes the new one).
-A ⚡ Make-a-book run with ``my_style: true`` copies the card to its new book when it creates it.
+A ⚡ Make-a-book run with ``my_style: true`` copies the card to its new book when it creates it. ✍ A book without a
+card gets its own narrator voice at the start of a ⚡ run instead (human_voice.py: the same key, ``auto: true``); a real
+card applied later replaces it.
 
 Who reads it: the chapter writing brief (chapter_brief.py: ``narrator_style`` plus one rule) and the AI editor (the
 same brief in its context and one sentence in its task: flag narration that drifts from it). Dialogue keeps each
@@ -430,9 +432,10 @@ class StyleService:
                 if getattr(self.app, "is_test_project", None) and self.app.is_test_project(r["project_id"]):
                     continue
                 e = book_entry(self.store, r["project_id"]) or {}
-                out.append({"project_id": r["project_id"], "name": r["name"], "on": bool(e.get("on")),
+                out.append({"project_id": r["project_id"], "name": r["name"],
+                            "on": bool(e.get("on")) and not e.get("auto"), "auto_voice": bool(e.get("auto")),
                             "from_version": e.get("from_version"),
-                            "outdated": bool(e.get("on") and card.get("version") and
+                            "outdated": bool(e.get("on") and not e.get("auto") and card.get("version") and
                                              e.get("from_version") != card.get("version"))})
         except Exception:  # noqa: BLE001
             log.exception("could not list the books for the style card")

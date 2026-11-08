@@ -978,6 +978,11 @@ class AutoBookService(_Runner):
             if not isinstance(pics, bool):
                 raise AkoweError("INVALID_INPUT", "/pictures", "pictures must be true or false", status="REJECTED")
             out["pictures"] = pics
+        hp = body.get("human_pass")  # ✍ the end-of-book "sounds like a person" pass (on unless switched off)
+        if hp is not None:
+            if not isinstance(hp, bool):
+                raise AkoweError("INVALID_INPUT", "/human_pass", "human_pass must be true or false", status="REJECTED")
+            out["human_pass"] = hp
         for k in ("beta_reader", "my_style", "fill_bible", "writers_room"):  # P23 / P25 / 📖 / 🗳: off unless asked
             v = body.get(k, False)
             if not isinstance(v, bool):
@@ -2222,6 +2227,7 @@ class AutoBookService(_Runner):
             self._name_book(pid, prof["title"])  # a stop between saving the profile and naming the book
             run["title"] = prof["title"]
             st["message"] = f"“{prof['title']}”"
+            self._auto_voice(run, pid)  # ✍ the book's own narrator voice (no AI here: from its profile)
             return
         wishes = {"length": LENGTHS[s["length"]][0]}
         if s.get("genre"):
@@ -2240,6 +2246,10 @@ class AutoBookService(_Runner):
             task = PROFILE_TASK.replace(" Return only the JSON object.", story_kind.PICK_TASK
                                         + " Return only the JSON object.")
             context["story_kinds"] = story_kind.pick_options()
+        if self._wants_voice(pid):  # ✍ the narrator voice is folded into this first AI call (human_voice.py)
+            from . import human_voice  # noqa: PLC0415
+            schema = dict(schema, properties=dict(schema["properties"], narrator_voice=human_voice.VOICE_FIELD))
+            task = task.replace(" Return only the JSON object.", human_voice.VOICE_TASK + " Return only the JSON object.")
         try:
             raw = self._assist._call_ai(job, op_for_roles="B01", task=task, schema=schema, context=context,
                                         protected=[])
@@ -2267,6 +2277,7 @@ class AutoBookService(_Runner):
         st["message"] = f"“{prof['title']}” by {prof['author']} ({prof['genre'] or 'any genre'}; told in the " \
                         f"{book_promises.POV_WORDS[dec['pov']]}, {dec['tense']} tense)"
         self.event(run, "ai", f"The AI invented the book “{prof['title']}”", slot=job.slot)
+        self._auto_voice(run, pid, raw.get("narrator_voice"))
         if pick:
             try:
                 kid = story_kind.record_pick(self.store, pid, raw)
@@ -2277,6 +2288,35 @@ class AutoBookService(_Runner):
                 st["message"] += f"; kind of story: {story_kind.label_of(kid)} (picked by the AI)"
                 self.event(run, "note", f"📚 Kind of story: {story_kind.label_of(kid)} — picked by the AI"
                            + (f": {why[:200]}" if why else ""), step="profile", code="KIND_PICKED")
+
+    def _wants_voice(self, pid) -> bool:
+        """✍ The book has no style of the author's (no card applied): it gets its own narrator voice."""
+        from . import style_card  # noqa: PLC0415
+        e = style_card.book_entry(self.store, pid)
+        return not (e and not e.get("auto"))
+
+    def _auto_voice(self, run, pid, raw=None):
+        """✍ Without a style card, a distinct narrator voice for this book (the AI's, from the first call, else derived
+        from the genre, tone, point of view, tense and story choices), stored like the style card's snapshot (auto) so
+        the writer and the editor get it. Never stops the run."""
+        if run.get("voice_set") or not self._wants_voice(pid):
+            return
+        from . import human_voice  # noqa: PLC0415
+        try:
+            prof = get_profile(self.store, pid)
+            voice, source = human_voice.clean_voice(raw), "ai"
+            if voice is None:
+                voice, source = human_voice.derive_voice(prof, prof.get("choices") or (run.get("settings") or {})
+                                                         .get("choices")), "profile"
+            entry = human_voice.set_auto(self.store, pid, voice, source=source, profile=prof)
+        except Exception:  # noqa: BLE001
+            log.exception("could not set the narrator voice in run %s", run["id"])
+            entry = None
+        run["voice_set"] = True
+        if entry:
+            self.event(run, "note", "✍ This book has its own narrator voice: " + str(entry["brief"].get("voice_summary")
+                       or "")[:200] + " (✒️ My writing style can replace it with your own)", step="profile",
+                       code="VOICE_SET")
 
     def _series_changes(self, run):
         """📚 A finished book of a series: the AI proposes what changed for each character in it (proposals only —
@@ -3681,6 +3721,7 @@ class AutoBookService(_Runner):
         rp = getattr(self.app, "reports", None)
         if rp is None:
             st["message"] = "Not available"
+            self._human_pass(run, st)
             return
         st["message"] = "The other AIs are reading the whole book"
         run["phase"] = st["message"]
@@ -3701,6 +3742,7 @@ class AutoBookService(_Runner):
             code = exc.code if isinstance(exc, AkoweError) else type(exc).__name__
             st["message"] = f"⚠️ The report could not be made ({code}); make it on the book's 📊 report page"
             self.event(run, "note", st["message"], step="report", code="REPORT_FAILED")
+            self._human_pass(run, st)
             return
         agg = rep.get("aggregate") or {}
         run["report"] = {"id": rep["id"], "overall": agg.get("overall"), "reviewers": agg.get("reviewers"),
@@ -3719,6 +3761,25 @@ class AutoBookService(_Runner):
         if og:
             run["report"]["originality"] = og
             self.event(run, "report", og + " (see ✨ Originality check on the 📊 report page)", step="report")
+        self._human_pass(run, st)
+
+    def _human_pass(self, run, st):
+        """✍ The end-of-book "sounds like a person" pass (human_voice.end_pass): the no-AI check of every chapter, an
+        independent AI read, the book-wide repeat check, then up to 20 rewrite suggestions for the author to approve on
+        the chapter pages. Never blocks the book (only a pause / cancel stops it)."""
+        from . import human_voice  # noqa: PLC0415
+        msg = st.get("message")
+        hp = human_voice.end_pass(self, run, st)
+        st["message"] = msg
+        if not hp:
+            return
+        run.setdefault("report", {})["human"] = hp["line"]
+        run["report"]["human_score"] = {"before": (hp.get("before") or {}).get("score"),
+                                        "projected": hp.get("projected"), "proposals": hp.get("proposals")}
+        self.event(run, "report", hp["line"], step="report", code="HUMAN_PASS")
+        for n in hp.get("notes") or []:
+            self.event(run, "note", f"✍ {n}", step="report")
+        self.save(run)
 
     # ------------------------------------------------------------------ Section 7c (P23 beta reader, P25 style)
     def _s_bible(self, run, st):
@@ -3743,7 +3804,8 @@ class AutoBookService(_Runner):
                        f"{ok.get('from_version')})", step="profile", code="STYLE_APPLIED")
         else:
             self.event(run, "note", "✒️ You asked for your own writing style, but there is no style card yet (✒️ My "
-                       "writing style): the book is written without it", step="profile", code="STYLE_MISSING")
+                       "writing style): the book gets its own narrator voice instead", step="profile",
+                       code="STYLE_MISSING")
 
     def _s_check(self, run, st):
         out = self.bp(run).a_check({})

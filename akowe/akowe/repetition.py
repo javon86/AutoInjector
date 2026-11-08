@@ -44,6 +44,24 @@ FILLER = tuple(dict.fromkeys(GESTURES + (
     "in that moment", "let out a breath", "the fact that", "all of a sudden", "for some reason", "at the same time",
     "a long moment", "for a long moment", "for a second", "in the end", "it was as if", "as if to say",
     "without a word", "out of nowhere", "the corner of her eye", "the corner of his eye")))
+
+
+def _gesture_filler() -> tuple:
+    """✍ The body-language list of the repeat check across chapters (ai_tells.json writer_brief.gestures, read by
+    human_voice.py) is filler too: a repeated "jaw tightened" is trimmed, never protected as a motif."""
+    try:
+        from .human_voice import _data  # noqa: PLC0415
+        out = []
+        for g in _data()["gestures"]:
+            g = re.sub(r"^\{poss\} ", "", g)
+            if "{" not in g:
+                out.append(g.lower())
+        return tuple(out)
+    except Exception:  # noqa: BLE001
+        return ()
+
+
+FILLER = tuple(dict.fromkeys(FILLER + _gesture_filler()))
 _NUMW = (r"(?:(?:twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)(?:-(?:one|two|three|four|five|six|seven|"
          r"eight|nine))?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|"
          r"sixteen|seventeen|eighteen|nineteen|hundred|\d{1,3})")
