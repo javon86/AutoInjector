@@ -540,6 +540,8 @@ class ChapterWriter(ProseWriter):
             from ..chapter_brief import build as build_brief  # noqa: PLC0415
             brief, info = build_brief(ctx.store, ctx.project_id, ctx.branch_id, ctx.field_record("outline_ref"),
                                       ctx.payload["chapter_id"], measure=True)  # 🧠 + the smart-memory sizes
+            from ..claude_code_book import add_to_brief  # noqa: PLC0415 - 🤖 research notes from the helpers
+            brief = add_to_brief(ctx.store, ctx.project_id, ctx.branch_id, ctx.payload["chapter_id"], brief)
             ctx.writing_brief = brief
             meta["brief"] = info
         return meta

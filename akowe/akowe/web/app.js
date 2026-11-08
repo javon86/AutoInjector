@@ -6,6 +6,7 @@ import { viewContinuity } from './continuity.js';   // 🧭 Section 7 (P32–P35
 import { estimateBox, runCostLine, viewCosts, viewSceneGrid } from './grid.js';  // 🗂 P27 · ⏱ P28
 import * as S7C from './section7c.js';  // P23 beta reader + P25 your writing style (Section 7c)
 import * as WR from './writers-room.js';  // 🗳 the three-AI writers' room (writers_room.py)
+import * as CC from './claude-code.js';  // 🤖 Claude Code helpers (claude_code.py)
 import { originalityCard } from './originality.js';  // ✨ #20 originality and "sounds like AI" check
 import { forgeRoute } from './forge.js';  // 🗂 B5 Character Forge dossiers (characters, items, places, magic)
 import { viewPictures } from './pictures.js';  // 🖼 B3 chapter/scene pictures and the map
@@ -3160,6 +3161,7 @@ async function viewWrite(main, rid, mode) {
   edSlot.appendChild(editorCard(latest, { onSaved: () => { S.details[rid] = null; go(plink('write', rid)); } }));
   // ✅ planned to page (P11): what the plan says must be in this chapter, and whether it is
   if (isChapter && chapterRow) edSlot.appendChild(plannedCard(rid, { onSaved: () => { S.details[rid] = null; go(plink('write', rid)); } }));
+  if (isChapter && chapterRow) edSlot.appendChild(CC.chapterBox(s7c(), rid, { onSaved: () => { S.details[rid] = null; go(plink('write', rid)); } }));  // 🤖
   // 🔎 timeline, trade facts and repeats (P26/P30/P31)
   if (isChapter && chapterRow) edSlot.appendChild(factsCard(rid, { onSaved: () => { S.details[rid] = null; go(plink('write', rid)); } }));
 }
@@ -3357,6 +3359,7 @@ async function viewSettings(main) {
   for (const s of slots) main.appendChild(slotForm(s));
   main.appendChild(retryCard());
   main.appendChild(reviewerCard());
+  main.appendChild(CC.helpersCard(Object.assign(s7c(), { put })));  // 🤖 Claude Code helpers
   main.appendChild(editorSettingsCard());
   main.appendChild(lengthSettingsCard());
   main.appendChild(booksFolderCard());
@@ -8201,6 +8204,7 @@ async function renderMakeSetup() {
   const one = singleAiField('mb');  // PR #122: when only one AI works (keep going by default)
   ck.el.appendChild(one.el);
   fields.single_ai = one.sel;
+  const ccf = CC.makeSetupField(s7c());  // 🤖 Claude Code helpers for this run (ticked when ready)
   fields.length = lengthBox.querySelector('input');
   const startAll = h('button', { type: 'button', class: 'primary big mab-go', 'data-testid': 'mb-start-auto' }, '⚡ Start — let the AI choose everything');
   const startSet = h('button', { type: 'submit', class: 'big', 'data-testid': 'mb-start' }, '⚡ Start with these settings');
@@ -8213,7 +8217,7 @@ async function renderMakeSetup() {
         h('div', { class: 'field' }, h('label', { for: 'mb-genre' }, 'Genre'), genre, h('datalist', { id: 'mb-genres' }, GENRES.map(g => h('option', { value: g }))), h('span', { class: 'hint' }, 'Empty = the AI chooses.')),
         h('div', { class: 'field' }, h('label', { for: 'mb-slot' }, 'Which AI'), slot, h('span', { class: 'hint' }, 'Automatic uses whichever AI is ready.'))),
       lengthBox,
-      h('div', { class: 'field' }, h('label', { for: 'mb-idea' }, 'Your idea (optional)'), idea), cf.el, pipe.el, s7.el, fb.el, wr.el, ck.el),
+      h('div', { class: 'field' }, h('label', { for: 'mb-idea' }, 'Your idea (optional)'), idea), cf.el, pipe.el, s7.el, fb.el, wr.el, ck.el, ccf.el),
     err, h('div', { class: 'form-actions' }, startAll, startSet));
   const est = estimateBox(gridUI(), () => {  // ⏱ P28: AI answers and minutes before the run starts
     const l = form.querySelector('input[name="mb-len"]:checked'); const pl = pipe.get();
@@ -8243,6 +8247,7 @@ async function renderMakeSetup() {
     wr.apply(body);  // 🗳 the writers' room for the big twists (only when switched on)
     ck.apply(body);  // 🔎 how many AIs check for mistakes (sent only when not the default)
     one.apply(body);  // PR #122: when only one AI works (sent only when not the default)
+    ccf.apply(body);  // 🤖 Claude Code helpers (sent only when switched off for this run)
     startAll.disabled = startSet.disabled = true;
     err.appendChild(loadingState('Checking your AIs…'));
     if (!(await withAiCheck(body, 'the book'))) { clear(err); startAll.disabled = startSet.disabled = false; return; }
@@ -8354,7 +8359,7 @@ function renderRun() {
       h('div', { class: 'row' }, badge(w[0], w[1], w[2]), h('span', { class: 'small' }, `${done} of ${r.steps.length} steps`), h('span', { class: 'small muted' }, '⏱ ', h('span', { class: 'mb-elapsed' }, fmtElapsed(sinceMs(r.started_at, runEnd(r))))),
         r.eta && ['running', 'waiting', 'queued', 'pausing'].includes(r.status) ? h('span', { class: 'small mb-eta', 'data-testid': 'mb-eta', title: `Estimated from this run's measured times: ${r.eta.per_chapter_s} s per chapter, ${r.eta.calls} AI answers so far (${r.eta.avg_call_s} s each on average)` },
           `⏳ ${etaWords(r.eta.seconds_left)} left · ${r.eta.chapters_left} chapter(s) to go`) : null),
-      runVariantLine(r), runCostLine(gridUI(), r)),
+      runVariantLine(r), runCostLine(gridUI(), r), CC.runLine(s7c(), r)),
     h('progress', { class: 'mb-bar', max: String(r.steps.length), value: String(done), 'aria-label': `${done} of ${r.steps.length} steps done` }));
   const phase = h('p', { class: `mb-phase ${r.status}`, 'aria-live': 'polite' },
     ['running', 'queued'].includes(r.status) ? h('span', { class: 'spinner', 'aria-hidden': 'true' }) : null, ' ',

@@ -813,10 +813,16 @@ def _read_part_by_all(svc, run: dict, cp: dict, part: dict, j: int, rid: str, ct
     prov = svc.app.engine.providers
     by = part.setdefault("by_ai", {})
     what, what_done = activity_words(cp, label, j, parts)
+    from . import claude_code_book  # noqa: PLC0415 - 🤖 Claude Code helpers check side by side (off -> no change)
+    helpers = claude_code_book.checks_start(svc, run, cp, part, ctx, checkers, texts, order)
+    checkers = helpers.order(checkers)
     for slot in checkers:
         if (by.get(slot) or {}).get("done"):
             continue
         svc.check(run)
+        if helpers.covers(slot, by):  # 🤖 the helpers read for this AI (Claude family; else it reads as before)
+            _put(store, pid, branch, cp)
+            continue
         name = cross_check.name_of(prov, slot)
         job = svc._sub_job(run, "checkpoint", rid, slot)  # noqa: SLF001
         job.retry_busy, job.cross_pin = False, True
@@ -842,6 +848,7 @@ def _read_part_by_all(svc, run: dict, cp: dict, part: dict, j: int, rid: str, ct
                     "summary": _clip((raw or {}).get("summary") if isinstance(raw, dict) else "", 800), "at": _now(),
                     "review": clean_stretch(raw)}
         _put(store, pid, branch, cp)
+    checkers = helpers.finish(by, checkers)  # 🤖 what the helpers found joins the merge below
     done = [(s, by[s]) for s in checkers if (by.get(s) or {}).get("done")]
     if not done:
         part["error"] = next((by[s].get("error") for s in checkers if by.get(s)), "CAPABILITY_UNAVAILABLE")

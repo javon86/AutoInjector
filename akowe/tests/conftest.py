@@ -17,6 +17,9 @@ os.environ.setdefault("AKOWE_AUTOSAVE", "0")
 # 🖼 The suite never asks a real AutoInjector on this computer for pictures (⚡ runs make character pictures by
 # default): the default picture bridge is a closed local port; tests that want pictures run a fake bridge.
 os.environ.setdefault("AKOWE_IMAGE_BRIDGE", "http://127.0.0.1:9")
+# 🤖 The suite never runs a real Claude Code CLI found on this computer (it would use the developer's Claude plan):
+# the helpers are off unless a test turns them on with its own fake `claude` (tests/test_claude_code*.py).
+os.environ.setdefault("AKOWE_CLAUDE_CODE", "off")
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 

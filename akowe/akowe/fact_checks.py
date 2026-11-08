@@ -154,6 +154,33 @@ def editor_context(engine, principal, pid, branch, rec) -> dict:
         return {}
 
 
+# ====================================================================== 🤖 sourced fact checks (Claude Code helpers)
+SOURCED_KEY = "facts_sourced:{pid}:{branch}"
+
+
+def save_sourced(store, pid, branch, chapter_id: str, result: dict) -> None:
+    """Keep a chapter's fact check WITH real sources (claude_code_jobs.facts: each claim with its verdict, label —
+    established fact / disputed / legend / invented for the story —, source URL and, for a wrong one, a fix).
+    Advice only: nothing in the book changes here."""
+    key = SOURCED_KEY.format(pid=pid, branch=branch)
+    cur = store.get_setting(key) or {}
+    cur = cur if isinstance(cur, dict) else {}
+    cur[chapter_id] = dict(result, at=_now())
+    store.set_setting(key, cur)
+
+
+def sourced_of(store, pid, branch, chapter_id: str) -> dict | None:
+    """The chapter's sourced fact check, with counts per verdict, or None."""
+    cur = store.get_setting(SOURCED_KEY.format(pid=pid, branch=branch)) or {}
+    row = cur.get(chapter_id) if isinstance(cur, dict) else None
+    if not isinstance(row, dict):
+        return None
+    counts: dict = {}
+    for c in row.get("claims") or []:
+        counts[c.get("verdict")] = counts.get(c.get("verdict"), 0) + 1
+    return dict(row, counts=counts)
+
+
 # ====================================================================== the service
 class FactChecker:
     """Chapter and book views, the AI jobs and the fixes, with this ReviewService's AIs."""
@@ -193,6 +220,7 @@ class FactChecker:
                 "terms": dict(tc, candidates=cands, version=int((ctx["terms"] or {}).get("version") or 0)),
                 "repetition": dict(here, labels_version=ctx["labels_version"]),
                 "fix": {"terms": len(fixable_terms), "repeats": here["counts"]["trim"]},
+                "sourced": sourced_of(self.store, pid, branch, me["chapter_id"]),  # 🤖 Claude Code fact check
                 "class_words": rep_mod.CLASS_WORDS, "status_words": terms_mod.STATUS_WORDS}
 
     def book(self, principal, pid, branch) -> dict:
