@@ -430,6 +430,19 @@ contextBridge.exposeInMainWorld("api", {
   // ==== 🩺 health watch (health-watch.js): problems found BEFORE something breaks ====
   healthStatus: (opts) => ipcRenderer.invoke("health:status", opts || {}),
   healthFix: (code) => ipcRenderer.invoke("health:fix", { code }),
-  onHealth: (cb) => ipcRenderer.on("health", (_e, payload) => cb(payload))
+  onHealth: (cb) => ipcRenderer.on("health", (_e, payload) => cb(payload)),
   // ==== end 🎩 Alfred ====
+  // ==== ✅ ease of use (ease-main.js): Setup checklist, Something's wrong?, tours' "seen", the user guide ====
+  ease: {
+    prefs: () => ipcRenderer.invoke("ease:prefs"),
+    setPrefs: (patch) => ipcRenderer.invoke("ease:set-prefs", patch || {}),
+    checklist: () => ipcRenderer.invoke("ease:checklist"),
+    problems: () => ipcRenderer.invoke("ease:problems"),
+    report: () => ipcRenderer.invoke("ease:report"),
+    reportShow: () => ipcRenderer.invoke("ease:report-show"),
+    fix: (action, args) => ipcRenderer.invoke("ease:fix", { action, args: args || {} }),
+    guide: () => ipcRenderer.invoke("ease:guide"),
+    onShow: (cb) => ipcRenderer.on("ease-show", (_e, payload) => cb(payload)),
+  }
+  // ==== end ✅ ease of use ====
 });

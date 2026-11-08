@@ -1929,3 +1929,28 @@ table.s7-heat { width: auto; }
 .sm-row-conflict td { background: var(--bad-soft); }
 .sm-list > summary { cursor: pointer; font-weight: 600; }
 @media (max-width: 1000px) { .sm-body { grid-template-columns: minmax(0, 1fr); } .sm-card { max-height: none; } .sm-svg { max-height: 70vh; } }
+
+/* ⏱ 3d estimate · 📊 3e usage meter · ⏰ start later · 📋 6c paste starter sheet (run-plan.js) */
+.mb-plan p { margin: 4px 0; }
+.mb-est-ais { margin: 4px 0; padding-left: 0; }
+.mb-est-ai { overflow-wrap: anywhere; }
+.mb-est-ai.st-limit { color: var(--warn); }
+.mb-est-limits.ok { color: var(--ok); }
+.usage-meter { margin: 8px 0; padding: 6px 8px; border: 1px solid var(--line, #d0d5dd); border-radius: 8px; }
+.usage-meter .um-head { margin: 0 0 4px; }
+.um-list { margin: 0; padding: 0; }
+.um-row { display: block; margin: 2px 0; overflow-wrap: anywhere; font-size: 0.92em; }
+.um-dot { display: inline-block; width: 0.75em; height: 0.75em; border-radius: 50%; margin-right: 6px; vertical-align: baseline; background: #9aa1ab; }
+.um-green .um-dot { background: #1f9d55; }
+.um-amber .um-dot { background: #d99a00; }
+.um-red .um-dot { background: #d14343; }
+.um-red .um-word { color: #b42318; font-weight: 600; }
+.um-bar { display: inline-block; width: 80px; max-width: 30%; height: 0.55em; margin-left: 8px; background: var(--ok-soft); border-radius: 4px; overflow: hidden; vertical-align: middle; }
+.um-fill { display: block; height: 100%; background: var(--warn-line); }
+.usage-meter.compact .um-row { font-size: 0.88em; }
+.mb-later input[type=time] { width: auto; min-width: 7.5em; }
+.mb-scheduled .lead { font-size: 1.1em; }
+.mab-btn.scheduled { box-shadow: 0 0 0 2px var(--info, #1d4ed8); }
+.mb-paste-row { gap: 8px; align-items: center; flex-wrap: wrap; margin: 6px 0; }
+.paste-dialog textarea { width: 100%; max-width: 100%; box-sizing: border-box; font-family: inherit; }
+.paste-summary ul { margin: 2px 0 8px; }

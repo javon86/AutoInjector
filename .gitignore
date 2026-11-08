@@ -15,5 +15,5 @@ node_modules/
 .DS_Store
 Thumbs.db
 desktop.ini
-\# Audit evidence notes.txt
-\# Audit evidence notes.txt
+# Screenshots the Akọwe UI tests write (tests/campaign/ui, CI uploads them as an artifact) — never committed
+/shots/

@@ -273,6 +273,15 @@ A('ui.show_tab', null, { t: 'Show a tab (🤖 AutoInjector, 📖 Akọwe, 🎨 I
 /** Channels the AI must not drive — each with the reason. The coverage test checks every channel is
  *  either an ACTIONS entry, a direct Alfred tool (TOOL_CHANNELS), or here. */
 const EXCLUDED = {
+  // ✅ EASE (ease-main.js): pop-ups for the user; Alfred has the same answers through 🩺 Check everything (health.status, llm.check)
+  'ease:prefs': 'the panel\'s own "seen" list for the guided tours and the checklist — not a control',
+  'ease:set-prefs': 'the panel saves "don\'t show again" / a tour seen — not a control',
+  'ease:checklist': 'the ✅ Setup checklist pop-up for the user — Alfred checks the same things with health.status / llm.check',
+  'ease:problems': 'the 🩺 Something\'s wrong? pop-up for the user — Alfred reads health.status',
+  'ease:report': 'saves a support file for the user to send — Alfred can preview the same last-24-hours extract (logs.extract_preview)',
+  'ease:report-show': 'shows the support file the user just made in its folder — not a control',
+  'ease:fix': 'the pop-ups\' Fix it buttons run existing controls Alfred already has (akowe, llm, health.fix, participants)',
+  'ease:guide': 'opens the user guide window for the user to read — not a control',
   'voice:transcribe': 'the control panel\'s 🎤 hands its recording (audio bytes) to the voice engine — Alfred listens with voice.listen',
   'voice:synthesize': 'returns a WAV for the control panel to play (🔊 read-aloud) — Alfred speaks with voice.speak',
   'sd:addons-update': 'updates an add-on in the user\'s SD app (its code changes) — done by the user in 🎨 Images → 🧩 Add-ons',

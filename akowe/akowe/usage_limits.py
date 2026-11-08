@@ -31,6 +31,14 @@ _LOCK = threading.Lock()
 _STATE: dict = {}
 
 
+_LISTENERS: list = []  # 📊 3e usage meter: fn(names, reset_at) on every note()
+
+
+def on_note(fn) -> None:
+    if fn not in _LISTENERS:
+        _LISTENERS.append(fn)
+
+
 def is_limit_problem(problem) -> bool:
     return isinstance(problem, str) and problem.upper() in LIMIT_PROBLEMS
 
@@ -41,6 +49,11 @@ def note(names: list[str], reset_at: float | None = None) -> None:
         _STATE.clear()
         _STATE.update(at=time.time(), names=[str(n) for n in names or []][:6],
                       reset_at=float(reset_at) if isinstance(reset_at, (int, float)) and reset_at > 0 else None)
+    for fn in list(_LISTENERS):  # 📊 3e: the usage meter remembers the hit per AI
+        try:
+            fn(names, reset_at)
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def clear() -> None:

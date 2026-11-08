@@ -1,5 +1,5 @@
 """🤖 Claude Code helpers in the browser: the Settings card (status in plain words, on/off, helpers at once, which
-jobs) and the Make-a-book tick (off and greyed when the helpers are not ready; the start request then carries nothing).
+jobs, which specialist reviewers) and the Make-a-book tick (off and greyed when the helpers are not ready; the start request then carries nothing).
 The suite switches the helpers off (AKOWE_CLAUDE_CODE=off), so the card says so."""
 from __future__ import annotations
 
@@ -17,13 +17,19 @@ def test_settings_card_shows_the_status_and_saves(make_context, ai_server):
     st.wait_for(timeout=15000)
     assert st.get_attribute("data-state") == "off" and "Switched off" in st.inner_text()
     assert card.locator("[data-testid=cc-helpers]").input_value() == "3"
-    assert card.locator("input[data-job]").count() == 4
+    assert card.locator("input[data-job]").count() == 11  # Step 1's four jobs and Step 2's seven
+    specs = card.locator("[data-testid=cc-specialists] input[data-spec]")
+    assert specs.count() == 4 and not card.locator("#cc-spec-pacing").is_checked()  # pacing is off by default
+    assert card.locator("#cc-spec-dialogue").is_checked()
+    card.locator("label[for=cc-spec-pacing]").click()
     assert "shares that plan" in card.inner_text()
     card.locator("[data-testid=cc-helpers]").fill("2")
     with page.expect_response(lambda r: r.url.endswith("/api/settings/claude-code") and r.request.method == "PUT",
                               timeout=15000) as resp:
         card.locator("[data-testid=cc-save]").click()
-    assert resp.value.status == 200 and json.loads(resp.value.request.post_data)["helpers"] == 2
+    sent = json.loads(resp.value.request.post_data)
+    assert resp.value.status == 200 and sent["helpers"] == 2
+    assert sent["specialists"]["pacing"] is True and sent["jobs"]["prepare"] is True
     page.wait_for_timeout(300)
     assert card.locator("[data-testid=cc-helpers]").input_value() == "2"
     assert_clean(page, "claude code settings card")

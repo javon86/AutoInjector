@@ -44,6 +44,16 @@ async function main() {
     assert(/No ComfyUI|not running|installed/.test(setupText) && (await c.$$('.vd-model')).length === 2, `Setup says what is missing: "${setupText.split('\n')[0]}"`);
     assert(/not set up|Install ComfyUI/i.test(await c.textContent('#vd-status-text')), 'the status bar says video is not set up');
     await shot(c, 'v01-video-setup');
+    // 6b: the Video engine dropdowns show their whole choice at 1920 and at 1280 wide (Setup and Make video)
+    for (const [w, h] of [[1920, 1080], [1280, 720]]) {
+      await c.setViewportSize({ width: w, height: h }).catch(() => {});
+      for (const [sub, id] of [['#vd-sub-setup', 'vd-backend'], ['#vd-sub-make', 'vd-engine']]) {
+        await c.click(sub); await c.waitForTimeout(250);
+        const m = await c.evaluate((sid) => { const e = document.getElementById(sid); const b = e.getBoundingClientRect(); return { shown: !!e.offsetParent, scroll: e.scrollWidth, client: e.clientWidth, right: Math.round(b.right), vw: innerWidth }; }, id);
+        assert(m.shown && m.scroll <= m.client + 2 && m.right <= m.vw, `${w}×${h}: #${id} is not cut off (${m.scroll}px choice in ${m.client}px, right edge ${m.right} of ${m.vw})`);
+      }
+    }
+    await c.click('#vd-sub-setup');
 
     // connect to the (fake) ComfyUI by its address
     await c.fill('#vd-comfy-url', comfy.base);

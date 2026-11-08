@@ -3,10 +3,12 @@
 import { configureClipboard, copyText, readText } from './clipboard.js';
 import { AI_STATE, plainCheck, problemFor, siteProblemWords, slugName } from './problems.js';
 import { viewContinuity } from './continuity.js';   // 🧭 Section 7 (P32–P35)
-import { estimateBox, runCostLine, viewCosts, viewSceneGrid } from './grid.js';  // 🗂 P27 · ⏱ P28
+import { runCostLine, viewCosts, viewSceneGrid } from './grid.js';  // 🗂 P27 · ⏱ P28 (the setup's estimate: run-plan.js)
 import * as S7C from './section7c.js';  // P23 beta reader + P25 your writing style (Section 7c)
 import * as WR from './writers-room.js';  // 🗳 the three-AI writers' room (writers_room.py)
 import * as CC from './claude-code.js';  // 🤖 Claude Code helpers (claude_code.py)
+import { maybeStartTour, replayTour } from './tour.js';  // 🧭 the short guided tour of My books (first visit; ❓ Help replays it)
+import * as RP from './run-plan.js';  // ⏱ 3d estimate · 📊 3e usage meter + ⏰ start later · 📋 6c paste starter sheet
 import { originalityCard } from './originality.js';  // ✨ #20 originality and "sounds like AI" check
 import { forgeRoute } from './forge.js';  // 🗂 B5 Character Forge dossiers (characters, items, places, magic)
 import { viewPictures } from './pictures.js';  // 🖼 B3 chapter/scene pictures and the map
@@ -679,6 +681,7 @@ async function route() {
     document.title = h1 ? `${h1.textContent} – Akọwe` : 'Akọwe';
     if (!main.contains(document.activeElement) || document.activeElement === document.body) main.focus({ preventScroll: true });
     window.scrollTo(0, 0);
+    if (!parts.length) maybeStartTour();  // 🧭 the first time My books shows
     if (S.pendingFocus === 'new') {
       S.pendingFocus = null;
       setTimeout(() => {
@@ -1284,6 +1287,9 @@ async function viewHelp(main) {
   main.appendChild(h('section', { class: 'card', 'aria-labelledby': 'hl-codes' }, h('h2', { id: 'hl-codes' }, '🔢 Book Bible codes'),
     h('p', null, 'Every detail of the Book Bible has a short code: a kind letter, a section number and a field letter. C1c is a character’s eyes; C11 (the number twice) is all of their Looks. Checks and corrections use the codes to say exactly which detail they mean.'),
     h('div', { class: 'row' }, h('a', { class: 'btn primary', href: '#/help/codes', 'data-testid': 'help-codemap-link' }, '🔢 Open the code map'))));
+  main.appendChild(h('section', { class: 'card', 'aria-labelledby': 'hl-tour' }, h('h2', { id: 'hl-tour' }, '🧭 The short tour'),
+    h('p', null, 'A one-minute tour of My books: where your books are, how to start one, Settings and Help.'),
+    h('div', { class: 'row' }, h('button', { type: 'button', 'data-testid': 'help-tour', onclick: () => replayTour() }, '🧭 Take the tour'))));
   main.appendChild(helpCard());
 }
 
@@ -8116,6 +8122,16 @@ async function refreshRunChip() {
   MB.latest = live || pend || null;
   const btn = $('#mab-btn'); if (!btn) return;
   const lab = btn.querySelector('.tb-label');
+  const sch = !live && !pend && out.scheduled && ['waiting', 'ask'].includes(out.scheduled.state) ? out.scheduled : null;  // ⏰ 3e
+  btn.classList.toggle('scheduled', !!sch);
+  if (sch) {
+    const at = sch.at_epoch ? new Date(sch.at_epoch * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '';
+    btn.hidden = false; btn.classList.remove('running'); btn.classList.toggle('needs-you', sch.state === 'ask');
+    lab.textContent = sch.state === 'ask' ? 'Scheduled book needs you' : `Book starts ${at}`;
+    btn.setAttribute('aria-label', sch.state === 'ask' ? 'The scheduled book did not start at its time: open to start it now or cancel it' : `A book is scheduled to start at ${at}. Open to see the countdown or cancel it`);
+    btn.title = sch.state === 'ask' ? 'Akọwe was closed at the scheduled time' : 'Scheduled ⚡ run: click for the countdown, Start now or Cancel';
+    return;
+  }
   // ONE status chip for runs: "⚡ AI working 3/10" while a run works, "⚡ AI needs you" when it is paused; hidden otherwise
   btn.classList.toggle('running', !!live);
   btn.classList.toggle('needs-you', !live && !!pend);
@@ -8140,8 +8156,22 @@ async function openMakeBook(opener, { runId = null, fresh = false } = {}) {
     if (runId) run = await api('GET', `/autobook/${encodeURIComponent(runId)}`);
     else if (!fresh) { await refreshRunChip(); if (MB.latest) run = await api('GET', `/autobook/${encodeURIComponent(MB.latest.id)}`); }
   } catch (e) { run = null; }
-  if (run) { MB.run = run; MB.view = 'progress'; renderRun(); startRunPolling(); }
+  if (run) { MB.run = run; MB.view = 'progress'; renderRun(); startRunPolling(); return; }
+  let sch = null;  // ⏰ 3e a run scheduled for later: its countdown instead of the setup
+  if (!fresh) { try { sch = await api('GET', '/autobook/schedule'); } catch { sch = null; } }
+  if (sch && ['waiting', 'ask', 'failed'].includes(sch.state)) renderScheduled(sch);
   else { MB.view = 'setup'; renderMakeSetup(); }
+}
+/** ⏰ 3e: the scheduled run in the Make-a-book window (countdown, Start now, Cancel; "too late — start now?"). */
+function renderScheduled(sch) {
+  MB.view = 'scheduled';
+  const meter = RP.meterBox(s7c(), { compact: true });
+  mbShell('⚡ AI writes the whole book', RP.scheduledView(s7c(), sch, {
+    meter,
+    onStarted: async runId => { refreshRunChip(); try { MB.run = await api('GET', `/autobook/${encodeURIComponent(runId)}`); MB.view = 'progress'; renderRun(); startRunPolling(); } catch { openMakeBook(MB.opener, { fresh: true }); } },
+    onCancelled: () => { refreshRunChip(); MB.view = 'setup'; renderMakeSetup(); },
+    onSetup: () => { refreshRunChip(); MB.view = 'setup'; renderMakeSetup(); },
+  }));
 }
 function closeMakeBook() {
   stopRunPolling();
@@ -8166,6 +8196,20 @@ function fillBibleSwitch(prefix) {
     h('div', { class: 'check-row' }, box, h('label', { for: id }, h('strong', null, 'Fill the whole Book Bible before writing'), ' ', state)),
     h('p', { class: 'hint', id: `${id}-hint` }, 'Off (recommended): only the essentials are decided before chapter one, and the rest just in time, when a chapter needs it — fewer AI answers. On: before chapter one the AI fills every empty section of every page — characters, places, items, magic, groups, the world and the story plan — in a few batched answers, approved under your consent. Your own text is never replaced.'));
   return { el, box, apply(body) { if (box.checked) body.fill_bible = true; } };
+}
+/** 🖼 3d/6c "Character pictures" for this run (run setting pictures): the default is Settings › Pictures; only a
+ * different choice is sent. */
+async function picturesSwitch(prefix) {
+  const id = `${prefix}-pictures`;
+  let def = true;
+  try { const cur = await api('GET', '/settings/image-bridge'); def = !cur.run_pictures || cur.run_pictures.run !== false; } catch { /* default on */ }
+  const box = h('input', { type: 'checkbox', role: 'switch', id, 'data-testid': id, checked: def, 'aria-describedby': `${id}-hint` });
+  const state = h('span', { class: 'pc-state', 'aria-hidden': 'true' }, def ? 'On' : 'Off');
+  box.addEventListener('change', () => { state.textContent = box.checked ? 'On' : 'Off'; });
+  const el = h('fieldset', { class: 'field pc-switch' }, h('legend', null, '🖼 Character pictures'),
+    h('div', { class: 'check-row' }, box, h('label', { for: id }, h('strong', null, 'Make character pictures during this run'), ' ', state)),
+    h('p', { class: 'hint', id: `${id}-hint` }, 'A portrait of every character and the full set for the main character, made by Stable Diffusion in AutoInjector — no AI answers, a few minutes. If the picture maker is not running, the book goes on and the pictures wait in the 📖 Book Bible. The default comes from Settings › Pictures.'));
+  return { el, box, set(v) { box.checked = !!v; box.dispatchEvent(new Event('change')); }, apply(body) { if (box.checked !== def) body.pictures = box.checked; } };
 }
 /** ✍ "Check that it sounds like a person at the end" (run setting human_pass): on by default */
 function humanPassSwitch(prefix) {
@@ -8223,9 +8267,26 @@ async function renderMakeSetup() {
   ck.el.appendChild(one.el);
   fields.single_ai = one.sel;
   const ccf = CC.makeSetupField(s7c());  // 🤖 Claude Code helpers for this run (ticked when ready)
+  const pics = await picturesSwitch('mb');  // 🖼 3d/6c: character pictures for this run (default: Settings › Pictures)
   fields.length = lengthBox.querySelector('input');
   const startAll = h('button', { type: 'button', class: 'primary big mab-go', 'data-testid': 'mb-start-auto' }, '⚡ Start — let the AI choose everything');
   const startSet = h('button', { type: 'submit', class: 'big', 'data-testid': 'mb-start' }, '⚡ Start with these settings');
+  // ⏰ 3e start later: the Start buttons schedule the run instead
+  const later = RP.startLaterField(s7c(), g => {
+    startAll.textContent = g && !g.error ? `⏰ Schedule for ${g.words} — let the AI choose everything` : '⚡ Start — let the AI choose everything';
+    startSet.textContent = g && !g.error ? `⏰ Schedule for ${g.words} with these settings` : '⚡ Start with these settings';
+  });
+  let locks = [];  // 📋 6c: the starter sheet's lock list (run setting locks -> the book's story rules)
+  const locksBox = h('div', { class: 'small', 'data-testid': 'mb-locks', 'aria-live': 'polite' });
+  const drawLocks = () => {
+    clear(locksBox);
+    if (!locks.length) return;
+    locksBox.append(h('p', null, h('strong', null, `🔒 Lock list (${locks.length}): `), 'facts that must stay true. They go into the book’s 📏 Story rules as rules from you, and the AI that invents the book is told about them.'),
+      h('ul', { class: 'plain-list' }, locks.map(x => h('li', null, '• ', x))),
+      h('button', { type: 'button', class: 'small', 'data-testid': 'mb-locks-clear', onclick: () => { locks = []; drawLocks(); } }, '✕ Don’t use the lock list'));
+  };
+  const ideaWarn = h('p', { class: 'words-warn', 'data-testid': 'mb-idea-long', hidden: true });
+  const paste = RP.pasteButton(s7c(), (res, { trim }) => applySheet(res, trim));
   const form = h('form', { novalidate: true, class: 'mb-setup', onsubmit: ev => { ev.preventDefault(); go(false); } },
     h('p', { class: 'lead' }, 'Akọwe makes a whole new book for you with your AI — characters, plot, every chapter — and gives you a PDF, EPUB and Word file at the end. You can watch every step, pause or cancel any time.'),
     h('div', { class: 'consent-box', role: 'note' }, h('strong', null, '✋ Your consent for this run: '),
@@ -8235,13 +8296,14 @@ async function renderMakeSetup() {
         h('div', { class: 'field' }, h('label', { for: 'mb-genre' }, 'Genre'), genre, h('datalist', { id: 'mb-genres' }, GENRES.map(g => h('option', { value: g }))), h('span', { class: 'hint' }, 'Empty = the AI chooses.')),
         h('div', { class: 'field' }, h('label', { for: 'mb-slot' }, 'Which AI'), slot, h('span', { class: 'hint' }, 'Automatic uses whichever AI is ready.'))),
       lengthBox,
-      h('div', { class: 'field' }, h('label', { for: 'mb-idea' }, 'Your idea (optional)'), idea), cf.el, pipe.el, s7.el, fb.el, hp.el, wr.el, ck.el, ccf.el),
-    err, h('div', { class: 'form-actions' }, startAll, startSet));
-  const est = estimateBox(gridUI(), () => {  // ⏱ P28: AI answers and minutes before the run starts
-    const l = form.querySelector('input[name="mb-len"]:checked'); const pl = pipe.get();
-    return Object.assign({ length: l ? l.value : 'short_story' }, pl ? { pipeline: pl } : {});
-  });
-  form.insertBefore(est.el, err); form.addEventListener('change', () => est.refresh()); est.refresh();
+      h('div', { class: 'field' }, h('label', { for: 'mb-idea' }, 'Your idea (optional)'), idea, ideaWarn, locksBox), cf.el, pipe.el, s7.el, fb.el, hp.el, wr.el, ck.el, pics.el, ccf.el),
+    later.el, err, h('div', { class: 'form-actions' }, startAll, startSet));
+  form.insertBefore(h('div', { class: 'row mb-paste-row' }, paste, h('span', { class: 'small muted' }, 'Planned your book with an AI? Paste its starter sheet to fill these settings.')), form.querySelector('.mb-quick'));
+  // ⏱ 3d: time, AI answers per AI and usage limits for exactly these settings; 📊 3e the usage meter per AI
+  const est = RP.planBox(s7c(), () => buildBody(false));
+  const meter = RP.meterBox(s7c());
+  form.insertBefore(est.el, later.el); form.insertBefore(meter.el, later.el);
+  form.addEventListener('change', () => est.refresh()); est.refresh(); meter.refresh();
   mbShell('⚡ AI writes the whole book', form);
   startAll.addEventListener('click', () => go(true));
   try {
@@ -8251,14 +8313,14 @@ async function renderMakeSetup() {
       slot.appendChild(h('option', { value: s.slot_id }, `${s.slot_id} · ${slotName(s)} — ${st.word}`));
     }
   } catch { /* automatic still works */ }
-  async function go(auto) {
-    clear(err); clearFieldProblems(form);
+  function buildBody(auto) {  // the start body (also what the ⏱ estimate is for)
     const body = { author_confirms: true };
     if (!auto) {
       body.genre = genre.value.trim(); body.idea = idea.value.trim(); body.slot_id = slot.value || null;
       const l = form.querySelector('input[name="mb-len"]:checked'); body.length = l ? l.value : 'short_story';
       if (CH.info) body.choices = cf.get();
       const pl = pipe.get(); if (pl) body.pipeline = pl;
+      if (locks.length) body.locks = locks.slice();  // 📋 6c the starter sheet's lock list
     }
     s7.apply(body);  // P23 / P25 (Section 7c): beta reader and "write in my style"
     fb.apply(body);  // 📖 the whole Book Bible before chapter one (only when switched on)
@@ -8267,6 +8329,54 @@ async function renderMakeSetup() {
     ck.apply(body);  // 🔎 how many AIs check for mistakes (sent only when not the default)
     one.apply(body);  // PR #122: when only one AI works (sent only when not the default)
     ccf.apply(body);  // 🤖 Claude Code helpers (sent only when switched off for this run)
+    pics.apply(body);  // 🖼 character pictures (sent only when not the Settings › Pictures default)
+    return body;
+  }
+  /** 📋 6c: fill the form from a read starter sheet (trim: {idea|genre: shortened text | null}) */
+  function applySheet(res, trim) {
+    const f = res.fields || {};
+    const setSel = (el, v) => { if (el && v != null && [...el.options].some(o => o.value === v)) el.value = v; };
+    if (f.idea != null) idea.value = (trim && trim.idea) || f.idea;
+    if (f.genre != null) genre.value = (trim && trim.genre) || f.genre;
+    const longIdea = idea.value.length > 2000, longGenre = genre.value.length > 120;
+    ideaWarn.hidden = !(longIdea || longGenre);
+    ideaWarn.textContent = `${longIdea ? `Your idea is ${idea.value.length.toLocaleString()} characters; the limit is 2,000. ` : ''}${longGenre ? `The genre is ${genre.value.length} characters; the limit is 120. ` : ''}Shorten it before you start.`;
+    if (f.length) { const r = form.querySelector(`#mb-len-${f.length}`); if (r) r.checked = true; }
+    for (const [k, v] of Object.entries(f.choices || {})) setSel(form.querySelector(`#mb-ch-${k}`), v);
+    if (['dialogue', 'pace', 'humor'].some(k => (f.choices || {})[k] != null)) { const kn = form.querySelector('.style-knobs'); if (kn) kn.open = true; }
+    const run = f.run || {};
+    if (run.pictures != null) pics.set(run.pictures);
+    if (run.fill_bible != null) { fb.box.checked = run.fill_bible; fb.box.dispatchEvent(new Event('change')); }
+    if (run.checkers) setSel(ck.sel, run.checkers);
+    if (run.writers_room != null) { const b = form.querySelector('#mb-room'); if (b) b.checked = run.writers_room; }
+    if (run.beta_readers != null) {
+      const b = form.querySelector('#mb-beta'), n = form.querySelector('#mb-beta-n');
+      if (b) b.checked = run.beta_readers > 0;
+      if (n && run.beta_readers > 0) n.value = String(run.beta_readers);
+    }
+    if (run.single_ai) setSel(one.sel, run.single_ai);
+    if ((f.locks || []).length) { locks = f.locks.slice(0, 20); drawLocks(); }
+    form.dispatchEvent(new Event('change', { bubbles: true }));
+    toast(`Filled ${res.filled.length} setting(s) from your starter sheet — check them, then press Start`);
+  }
+  async function go(auto) {
+    clear(err); clearFieldProblems(form);
+    const body = buildBody(auto);
+    const when = later.get();  // ⏰ 3e start later
+    if (when && when.error) { err.appendChild(h('p', { class: 'words-warn', role: 'alert' }, when.error)); return; }
+    if (when) {
+      startAll.disabled = startSet.disabled = true;
+      try {
+        const sch = await api('POST', '/autobook/schedule', { body: { at: when.iso, body } });
+        announce(`The book is scheduled for ${when.words}`); toast(`⏰ Scheduled for ${when.words}`);
+        renderScheduled(sch); refreshRunChip();
+      } catch (e) {
+        const rest = showFieldErrors(e, fields, { book: 'New book', step: 'Schedule the book' });
+        if (rest.length || !(e instanceof ApiError)) err.appendChild(problemBox(toProblem(rest[0] ? new ApiError(e.status, { errors: rest }) : e, { step: 'Schedule the book' })));
+        startAll.disabled = startSet.disabled = false;
+      }
+      return;
+    }
     startAll.disabled = startSet.disabled = true;
     err.appendChild(loadingState('Checking your AIs…'));
     if (!(await withAiCheck(body, 'the book'))) { clear(err); startAll.disabled = startSet.disabled = false; return; }
@@ -8488,7 +8598,8 @@ function renderRun() {
   const cnBox = r.project_id && !['cancelled', 'replaced'].includes(r.status) && r.state !== 'replaced'
     ? h('details', { class: 'mb-check-now', 'data-testid': 'mb-check-now-wrap', open: !!MB.cnOpen, ontoggle: ev => { MB.cnOpen = ev.currentTarget.open; } }, h('summary', null, '🔎 Check consistency now'),
       checkNowBox(s7c(), r.project_id, r.branch_id || 'main', { testid: 'mb-check-now', compact: true })) : null;
-  mbShell('⚡ AI writes the whole book', head, runBibleLine(r), phase, ais, alerts, indep, doneBox, doneBox ? null : edBox, runSaveLine(r), msg, ol, ctl, cnBox, consent,
+  if (!MB.meter || MB.meterRun !== r.id) { MB.meter = RP.meterBox(s7c(), { compact: true }); MB.meterRun = r.id; MB.meter.refresh(); }  // 📊 3e
+  mbShell('⚡ AI writes the whole book', head, runBibleLine(r), phase, ais, alerts, ['done', 'cancelled'].includes(r.status) ? null : MB.meter.el, indep, doneBox, doneBox ? null : edBox, runSaveLine(r), msg, ol, ctl, cnBox, consent,
     r.project_id && r.status !== 'done' ? h('p', { class: 'small' }, h('a', { href: link('p', r.project_id, r.branch_id || 'main', 'book'), onclick: () => closeMakeBook() }, 'Open the book being made')) : null);
   updateRunClocks();
 }

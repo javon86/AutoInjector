@@ -122,6 +122,7 @@ const IPC_INVENTORY = [
   'voice:check', 'voice:configure', 'voice:listen', 'voice:redownload', 'voice:speak', 'voice:status',
   'voice:transcribe', 'voice:synthesize', 'voice:piper-voices', 'voice:replies', 'voice:reply-text',
   'window:toggle-collapse', 'wizard-window:close', 'wizard:catalog', 'wizard:open', 'wizard:open-app-tab',
+  'ease:prefs', 'ease:set-prefs', 'ease:checklist', 'ease:problems', 'ease:report', 'ease:report-show', 'ease:fix', 'ease:guide', // ✅ EASE (ease-main.js)
 ];
 // Live updates the window listens to (not actions). The ones that matter to the user feed Alfred's watcher.
 const EVENTS = {
@@ -138,6 +139,7 @@ const EVENTS = {
   'window-collapse-changed': 'UI live update',
   'lockers-state': 'UI live update (the 📁 AI lockers switched on / off in ⚙ Advanced — the Locker tab comes back or goes)',
   'ai-download': 'UI live update (⬇ a file an AI gives you: progress, then where it was saved)',
+  'ease-show': 'UI live update (the Help menu asks the panel to open ✅ Setup checklist / 🩺 Something\'s wrong? / tours)',
 };
 // The butler's decision actions (manager-provider.js): Alfred reaches them by giving the butler a task, or directly.
 const MANAGER_ACTIONS_MAP = {
@@ -218,8 +220,8 @@ const MENU_ITEMS = {
   'Setup Wizard': 'app_control:wizard.open', 'Relay Trace report (where every message went)': 'app_control:ledger.trace_save', 'Reset Relay Trace': 'app_control:ledger.trace_reset',
   'Run relay check (Bucket Brigade, ~23 messages)…': 'app_control:brigade.run', 'Stop relay check': 'app_control:brigade.stop',
   'Open Content Folder ("stuff and thing")': 'app_control:models.open', '⬇ Open the AIs\' downloads folder': 'app_control:downloads.open_folder',
-  'Quit': 'EXCLUDE: quits the app (window chrome; asks first while something works)', 'User Guide': 'EXCLUDE: opens the online guide (window chrome)',
-  'Under Construction / Status': 'EXCLUDE: opens the online status page (window chrome)', 'About AutoInjector': 'EXCLUDE: about box (window chrome)',
+  'Quit': 'EXCLUDE: quits the app (window chrome; asks first while something works)', 
+  'About AutoInjector': 'EXCLUDE: about box (window chrome)',
 };
 const TABS = { 'tab-app-main': 'app_info:ui.show_tab', 'tab-app-akowe': 'open_akowe_page / app_info:ui.show_tab', 'tab-app-images': 'app_info:ui.show_tab', 'tab-app-video': 'app_info:ui.show_tab' };
 

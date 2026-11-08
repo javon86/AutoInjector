@@ -1,8 +1,8 @@
 # How AutoInjector works
 
 This page explains how the whole program fits together and what happens behind the buttons. It is not a
-button-by-button manual. For that, see [`README.md`](../README.md), [`akowe/README.md`](../akowe/README.md) and
-[`docs/ALFRED.md`](ALFRED.md). For what changed and when (and how to undo a change), see
+button-by-button manual. For that, see the [user guide](USER_GUIDE.md) (also in the app: ❓ Help → 📖 User guide),
+[`README.md`](../README.md), [`akowe/README.md`](../akowe/README.md) and [`docs/ALFRED.md`](ALFRED.md). For what changed and when (and how to undo a change), see
 [`PROJECT_HISTORY.md`](PROJECT_HISTORY.md).
 
 ## 1. The big picture
@@ -234,6 +234,27 @@ bridge to your home Wi-Fi, behind its key.
     they were shown, every chapter opening or ending the same way, a gesture used too often) and propose a rewrite of
     just those lines. Nothing changes until you tick them and press ✔ Use — that saves a new draft for you to approve.
     Lines with a locked detail, a name or a number they would change are never proposed.
+- **Step 2 — faster, better, less machine-written** (code `claude_code_speed.py`):
+  - **The next chapter is ready early:** as soon as a chapter is approved and its running notes are updated, a
+    helper plans the next chapter's scenes and its needs list while this one is checked. When the next chapter
+    starts, Akọwe reads the facts again: if nothing changed, the chapter starts at once with that plan (another AI —
+    never Claude — still checks the scenes); if the check or the notes changed something, the early plan is thrown
+    away and the chapter is planned again. A chapter is never written from out-of-date facts.
+  - **The Book Bible is filled side by side:** with "Fill the whole Book Bible" on, its batches go to several helpers
+    at once (relationships after the characters); every answer is checked and approved the same way; a batch a
+    helper cannot do is asked of a web AI.
+  - **Extras in the background:** the character pictures (🎨 Images, Stable Diffusion) are made while the book is
+    written, and the 🚀 launch kit gets first drafts (blurb, description, hook, keywords…) as soon as the chapter
+    outline is approved — drafts for you to approve. The book does not wait for them.
+  - **Specialist reviewers** in each chapter's all-AI check: each main character's dialogue against their voice card
+    (only when they speak), pacing (off unless you tick it), senses and concrete detail (only chapters with few) and
+    subtext (only chapters that name feelings). What they find joins the same check and the same fixes.
+  - **Variety:** the next chapter's writer sees how every chapter so far opened and ended, with a helper's advice
+    for the planned opening and ending.
+  - **Your style, specific details, real dialogue:** with a ✒️ style card, lines that drift from your style; and
+    generic details ("a nice house") and too-tidy dialogue — each with a proposed rewrite on the chapter page.
+    Nothing changes until you tick them and press ✔ Use. Names, numbers, locked details and story-map passages are
+    never touched.
 - **The writer never checks itself:** Claude Code counts as Claude. When Claude wrote a chapter, the helpers only
   check its facts and propose "sounds like AI" fixes; the independent reviews stay with ChatGPT and Gemini. When
   ChatGPT or Gemini wrote it, the helpers read it for Claude, so the Claude pane is free.
@@ -245,10 +266,13 @@ bridge to your home Wi-Fi, behind its key.
   "✔ Claude Code 2.x found, signed in" (press ↻ Check again after installing).
 - **Without it nothing breaks:** if Claude Code is not installed, signed out, at its limit or not working, every job
   goes back to the web AIs, exactly as before. The book never waits for a helper. The run window says so in one line.
-- **Settings:** ⚙️ Settings → 🤖 Claude Code helpers: on/off (on by itself when it is found), helpers at once (1–5)
-  and which jobs are on. The ⚡ Make-a-book screen has a "Use Claude Code helpers for this book" tick.
+- **Settings:** ⚙️ Settings → 🤖 Claude Code helpers: on/off (on by itself when it is found), helpers at once (1–5),
+  which jobs are on (eleven, all on by default) and which specialist reviewers run (dialogue, senses and subtext on;
+  pacing off). The ⚡ Make-a-book screen has a "Use Claude Code helpers for this book" tick.
 - **Speed is measured:** the run window and ⏱ Time and AI use show "the checks took 1.2 min side by side instead of
-  about 3.4 min one after another".
+  about 3.4 min one after another", and for Step 2 "next chapter ready early: 9 chapter(s) started without waiting
+  for their scene plan", "Book Bible filled side by side in 2.1 min instead of about 8.0 min" and "extras in the
+  background: about 6 min … off the run".
 - **Safety and privacy:** each job runs in its own empty temporary folder with no file-editing or command tools (only
   web search and web pages for research and fact checks, nothing for the checks). Your chapters go to Claude Code
   through its input, never on the command line. Akọwe's log keeps only codes, counts and times — never your text.
@@ -528,6 +552,52 @@ A 40–50 chapter book takes a day or two. AutoInjector looks after it while you
   (older ones go to `autoinjector-transcript-archive.jsonl` in the settings folder), and shows the newest 300 with
   a **⬆ Show older messages** button. The settings file is saved in the background, at most every few seconds.
 
+### Before you press Start: the estimate, the usage meter, Start later and the starter sheet
+
+All four are on the ⚡ **AI writes the whole book** screen (code: `akowe/akowe/run_forecast.py`,
+`usage_meter.py`, `run_schedule.py`, `starter_sheet.py`; the screen part is `akowe/akowe/web/run-plan.js`).
+
+- **⏱ The estimate** (`POST /api/estimate`) says, for exactly the settings on the screen, roughly how long the run
+  will take ("about 6–8 hours"), how many answers each AI will give (ChatGPT, Claude, Gemini, and the 🤖 Claude Code
+  helpers when they are on), and whether an AI will probably hit its usage limit and when ("Claude will probably
+  reach its limit around chapter 14; the other AIs carry on and it is back about 4 hours later"). It changes as you
+  change the length, how many AIs check for mistakes, the writers' room, beta readers, character pictures, "fill the
+  whole Book Bible", the end-of-book "sounds like a person" pass (about 2 answers), the Claude Code helpers, "when
+  only one AI works" and which AI writes. It starts from the P28 numbers (`costs.estimate`: AI calls per step); once
+  this PC has finished runs, it uses their measured seconds per answer, each AI's share of the answers, and the
+  answers of the optional steps. The usage limits are rough public guesses (Claude ~40 long messages per 5 hours,
+  ChatGPT ~80 per 3 hours, Gemini ~100 a day) until an AI really hits its limit on this PC: then the number of
+  answers it gave before the hit is used instead. It is always labelled an estimate.
+- **📊 The usage meter** (`GET /api/usage-meter`) shows one row per AI, on the setup screen, the run window and the
+  countdown: "used today: 34 answers · last limit hit at 3:10 PM · resets ~8:10 PM" and a colour (🔴 at its limit
+  now, 🟠 hit a limit in the last day or used most of its usual allowance, 🟢 fine, ⚪ not connected). The AI sites do
+  not publish exact limits, so it only shows what Akọwe saw: every AI answer (counted where every AI call passes,
+  `ai_activity`), the limit notices (the bridge's `USAGE_LIMIT` problem, "all AIs at their limits", the site states
+  AutoInjector reports) and the reset time when the site gave one (else a guess, said so). Saved as numbers only in
+  the setting `usage_meter`.
+- **⏰ Start later.** Tick **Start later, at** and pick a time (for example 11 pm); the Start buttons become
+  **⏰ Schedule…**. The settings are checked at once (a mistake is said now, not at 11 pm) and kept, with your consent,
+  in the setting `autobook_schedule`. The window shows a countdown with **▶ Start now** and **✖ Cancel the scheduled
+  start**; the top bar shows "Book starts 11:00 PM". At that time the run starts by itself, exactly as if you had
+  pressed Start, as long as Akọwe is running. **AutoInjector keeps the PC awake while it waits:** Akọwe's status
+  report to AutoInjector shows the scheduled book as a waiting run, and the run guard keeps the PC awake for a
+  waiting run (no change was needed in AutoInjector). If Akọwe was closed: when it opens again before the time, the
+  schedule simply waits; up to 2 hours late it starts; **more than 2 hours late it asks** ("This book was meant to
+  start at 11:00 PM, but Akọwe was not running then. Start it now?") and AutoInjector's notification says the
+  scheduled book needs you. If it cannot start (another run is working, no AI…), the window says why with
+  **▶ Try again now**.
+- **📋 Paste starter sheet.** If you planned the book with your master prompt in a chat AI, press **📋 Paste
+  starter sheet**, paste the AI's whole answer and press **🔍 Read it**. Akọwe finds the "AKỌWE STARTER SHEET" (the
+  last one, if the prompt was quoted too) and reads its 14 headings — with or without numbers, ▶ markers, emoji,
+  bold, code fences, On/Off written as Yes/✅, and chatty lines around it. It shows what it understood, what it did
+  not understand and what was missing, **before** anything changes; **✔ Fill the form** then fills every field. An
+  idea over 2,000 characters (or a genre over 120) is pointed out with a ✂ "shorten it" box (cut at the end of a
+  sentence). **The LOCK LIST** goes into the book's 📏 **Story rules** as rules from you (category "hard rule",
+  source "Your starter sheet (lock list)"): the run sends it with your settings (`locks`), tells the AI that invents
+  the book about it, and adds the facts to the story rules right after the AI made its own (before the premise) —
+  the planners, the writer's brief, the editor and the consistency checks all read the story rules. (If "story
+  rules" is switched off in the pipeline, the facts are still added before the premise.)
+
 ## 4. How quality is kept
 
 | Check | What it catches | When it runs |
@@ -761,9 +831,40 @@ quietly every 10 minutes when a book has changed.
 - **"This chat is too long" in an AI's pane:** nothing to do. AutoInjector opens a fresh chat there before
   Akọwe's next request. You can also press the pane's own **New chat**.
 - **Pictures or video fail:** run **🩺 Test pictures & video**. Each ❌ says what to try.
-- **Not sure what's wrong:** Alfred's **🩺 Check everything**.
+- **Not sure what's wrong:** **❓ Help → 🩺 Something's wrong?** (or Alfred's **🩺 Check everything**). See below.
+- **📄 Make a report for support** (in 🩺 Something's wrong?): a file in `stuff and thing/logs/` with the last 24
+  hours of the activity log and the Relay Trace, made by the same code as 📋 Extract (keys and private folder names
+  removed), plus what 🩺 found and the ✅ checklist rows. The AI conversation is never in it, it is never the
+  "Everything" extract, and none of your own files is opened.
 - **To share a log:** **📋 Extract** → **Last 24 hours**. Never choose **Everything**: it includes all your older,
   private conversations.
+
+### ✅ Setup checklist, 🩺 Something's wrong? and 🧭 tours
+
+Code: `desktop-app/ease.js` (the rules), `ease-main.js` (main process), `ease-ui.js` (the pop-ups and tours).
+They check nothing new: they read what the app already knows.
+
+- **✅ Setup checklist** (❓ Help in the title bar, or the Help menu): one row per thing the app can use, ✅ ready,
+  ❌ needs fixing, ⚪ an optional extra that is not set up, ⏳ not sure yet. **Needed for books:** signed in to ChatGPT,
+  Claude and Gemini (self-repair's state of each pane), Akọwe running (its server's status), the content folder (the
+  "earlier downloads in another folder" check) and free disk space (the health watch's limits: under 5 GB is ❌).
+  **Optional extras:** Alfred's AI (llm-setup: Ollama installed, running, a model), the voice engine (the setup
+  manager's install check), Stable Diffusion (connected, or found on the PC), video (the 🎬 engine's own status) and
+  the Claude Code helpers (Akọwe's `/settings/claude-code`). Each row's **Fix it** opens the right place (a pane, a
+  tab, the Setup Wizard, Akọwe's ⚙️ Settings) or runs an existing control (start Akọwe, start Ollama, turn an AI back
+  on, check an AI now). It opens by itself on the first start and on later starts while something needed is ❌,
+  unless "Don't show this by itself again" is ticked.
+- **🩺 Something's wrong?**: at most five problems, the worst first, each with its fix: the run guard's "your book
+  needs you" (a paused run, every AI at its limit, a pane logged out or broken), the panes' states, Akọwe's server,
+  the health watch (Alfred's brain, disk, Stable Diffusion, logs, FramePack), the voice engine, and the activity log
+  of the **last 24 hours** read by event code and level only (for example "🎨 Pictures: 5 errors … codes:
+  sd-runner-error"). If nothing is found it says so.
+- **🧭 Tours**: 3–5 steps (a highlight, an arrow and one sentence; Skip / Next / Done) the first time the
+  AutoInjector page, the 📖 Akọwe tab, 🎨 Images, 🎬 Video and Alfred's panel open. "Seen" is saved in
+  `autoinjector-ease.json` in the settings folder; ❓ Help → 🧭 Replay tours shows them again. Akọwe's own My books page
+  has its own short tour (`akowe/akowe/web/tour.js`, remembered in that browser; Akọwe → ❓ Help → 🧭 Take the tour).
+- The pop-ups and tours count as dialogs, so the AI panes and the Akọwe page step aside while one is open. Under test
+  automation (Playwright) nothing opens by itself.
 
 ## 8. Glossary
 
