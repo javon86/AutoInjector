@@ -353,6 +353,8 @@ contextBridge.exposeInMainWorld("api", {
   lockersAttach: (site, rel, targets) => ipcRenderer.invoke("lockers:attach", { site, rel, targets }),
   onLockerChanged: (cb) => ipcRenderer.on("locker-changed", (_e, payload) => cb(payload)),
   lockersStatus: () => ipcRenderer.invoke("lockers:status"),
+  lockersSetEnabled: (enabled) => ipcRenderer.invoke("lockers:set-enabled", { enabled: enabled === true }), // ⚙ Advanced: the hidden AI lockers on/off
+  onLockersState: (cb) => ipcRenderer.on("lockers-state", (_e, payload) => cb(payload)),
   onTerminalData: (cb) => ipcRenderer.on("terminal-data", (_e, payload) => cb(payload)),
   onTerminalState: (cb) => ipcRenderer.on("terminal-state", (_e, payload) => cb(payload)),
   // Akọwe bridge (experimental) — see docs/AKOWE_AUTOINJECTOR_BRIDGE.md
