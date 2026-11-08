@@ -1320,8 +1320,55 @@ async function testComposeRunsCommands() {
   assert(runs[2] === "C:\\tools\\build.bat --fast", "a path to a script counts as a command");
 }
 
+// 📁 The AI lockers are HIDDEN by default (lockers-switch.js): no Locker tab in the DOM, 💬 Last reply is the
+// default view, the row is Last reply · ◀ 🔊 ▶ · ↻, and ⚙ Advanced can switch them back on (live).
+async function testLockersHiddenByDefault() {
+  console.log("\n== 📁 AI lockers switched off (the default): no Locker tab, 💬 Last reply first, ⚙ Advanced brings it back ==");
+  const api = makeApi();
+  const listCalls = []; const setCalls = []; let stateCb = null;
+  Object.assign(api, {
+    lockersStatus: async () => ({ ok: true, enabled: false, saved: false, forcedByEnv: false }),
+    lockersList: async (site) => { listCalls.push(site); return { ok: false, error: "LOCKERS_OFF" }; },
+    onLockerChanged: () => {},
+    onLockersState: (cb) => { stateCb = cb; },
+    lockersSetEnabled: async (on) => { setCalls.push(on); return { ok: true, enabled: on, saved: on, forcedByEnv: false }; },
+    getState: async () => ({ ok: true, global: null, captured: { claude: { id: 9, site: "claude", text: "Fresh reply text", ts: Date.now() } }, transcript: [], prompts: [], logins: {}, log: [] }),
+  });
+  const dom = await loadWindow(api);
+  const doc = dom.window.document;
+  await new Promise((r) => setTimeout(r, 20));
+  for (const s of ["chatgpt", "claude", "gemini"]) {
+    assert(!doc.getElementById(`locker-tab-${s}`) && !doc.getElementById(`locker-list-${s}`), `${s}: no Locker tab and no locker list in the DOM`);
+    const tabs = doc.querySelector(`#col-${s} .locker-tabs`);
+    const btns = Array.from(tabs.querySelectorAll(":scope > button")).map((b) => b.textContent);
+    assert(btns.length === 2 && btns[0] === "💬 Last reply" && btns[1] === "↻", `${s}: the row is just 💬 Last reply and ↻ (${btns.join(" | ")})`);
+    assert(doc.getElementById(`reply-tab-${s}`).classList.contains("active") && !doc.getElementById(`preview-${s}`).hidden, `${s}: 💬 Last reply is selected and its content is the view`);
+    assert(!/locker/i.test(doc.getElementById(`lk-refresh-${s}`).getAttribute("aria-label")), `${s}: ↻ refreshes the last reply, not a locker`);
+  }
+  assert(listCalls.length === 0, "no locker list is asked for while they're off");
+  assert(doc.getElementById("btn-open-lockers").hidden, "the Command Prompt's 📁 lockers-folder button is hidden");
+  assert(doc.getElementById("cb-term-autorun").closest("label").hidden, "the 'auto-run AI scripts' tick is hidden");
+  const cb = doc.getElementById("cb-lockers-enabled");
+  assert(cb && !cb.checked && /AI lockers \(advanced, off\)/.test(doc.getElementById("lockers-adv-text").textContent), "⚙ Advanced shows 'AI lockers (advanced, off)', unticked");
+  doc.getElementById("lk-refresh-claude").dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 20));
+  assert(/Fresh reply text/.test(doc.getElementById("preview-claude").textContent), "↻ fetches the last reply again");
+  // switch on from ⚙ Advanced → the Locker tab comes back in front, as the default
+  cb.checked = true; cb.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 30));
+  assert(setCalls.length === 1 && setCalls[0] === true, "ticking it asks main to switch the lockers on");
+  const lk = doc.getElementById("locker-tab-claude");
+  assert(lk && lk.nextElementSibling && lk.nextElementSibling.id === "reply-tab-claude" && lk.classList.contains("active"), "on: 📁 Locker is back in front of 💬 Last reply and selected");
+  assert(doc.getElementById("locker-list-claude") && !doc.getElementById("locker-list-claude").hidden && doc.getElementById("preview-claude").hidden, "on: the locker list is the view again (as before)");
+  assert(!doc.getElementById("btn-open-lockers").hidden, "on: the lockers-folder button is back");
+  assert(listCalls.includes("claude"), "on: the locker list is loaded");
+  // switched off again from elsewhere (main broadcasts lockers-state)
+  stateCb({ enabled: false, saved: false, forcedByEnv: false });
+  assert(!doc.getElementById("locker-tab-claude") && !doc.getElementById("preview-claude").hidden && doc.getElementById("reply-tab-claude").classList.contains("active"), "off again: the tab is gone and 💬 Last reply is the view");
+}
+
 async function testLockerBrowser() {
-  console.log("\n== 📁 Locker browser: each AI's files, click to put in Compose, upload on send ==");
+  console.log("\n== 📁 Locker browser (lockers switched ON in ⚙ Advanced): each AI's files, click to put in Compose, upload on send ==");
   const api = makeApi();
   const attached = []; const sent = [];
   const files = {
@@ -1329,6 +1376,7 @@ async function testLockerBrowser() {
     chatgpt: [], gemini: [],
   };
   Object.assign(api, {
+    lockersStatus: async () => ({ ok: true, enabled: true, saved: true, forcedByEnv: false }), // the old behaviour, switched on
     lockersList: async (site) => ({ ok: true, site, files: files[site] || [] }),
     lockersRead: async (site, rel) => ({ ok: true, kind: "text", text: "# Plan\nstep one" }),
     lockersAttach: async (site, rel, targets) => { attached.push({ site, rel, targets }); return { ok: true }; },
@@ -1467,6 +1515,7 @@ async function main() {
   await testActivityLogCapturesEverything();
   await testTerminalZone();
   await testComposeRunsCommands();
+  await testLockersHiddenByDefault();
   await testLockerBrowser();
 
   console.log(`\n${passed} passed, ${failed} failed`);

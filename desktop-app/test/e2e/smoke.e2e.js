@@ -75,11 +75,21 @@ async function main() {
       ['#btn-feature-test', '🔬 Feature Test button'],
       ['#term-output', 'Terminal output'],
       ['#term-input', 'Terminal command box'],
-      ['#locker-list-claude', "Claude's locker file list"],
+      ['#preview-claude', "Claude's 💬 Last reply box"],
+      ['#cb-lockers-enabled', '⚙ Advanced → AI lockers switch'],
       ['#compose-attachments', 'Compose attachment chips'],
     ]) {
       assert(await controls.$(sel), `${label} is present (${sel})`);
     }
+
+    // 📁 The AI lockers are hidden (off) by default: no Locker tab in any AI column, 💬 Last reply is the view.
+    await controls.waitForTimeout(300);
+    const lk = await controls.evaluate(() => ({
+      tabs: ['chatgpt', 'claude', 'gemini'].filter((s) => document.getElementById(`locker-tab-${s}`) || document.getElementById(`locker-list-${s}`)).length,
+      reply: ['chatgpt', 'claude', 'gemini'].every((s) => { const p = document.getElementById(`preview-${s}`); const t = document.getElementById(`reply-tab-${s}`); return p && !p.hidden && t && t.classList.contains('active'); }),
+      cb: !!(document.getElementById('cb-lockers-enabled') || {}).checked,
+    }));
+    assert(lk.tabs === 0 && lk.reply && !lk.cb, `AI lockers hidden by default: no Locker tab, 💬 Last reply shown, ⚙ Advanced switch off (${JSON.stringify(lk)})`);
 
     // Layout sanity: the page must not scroll sideways (a recurring bug class).
     const overflowsX = await controls.evaluate(() => {

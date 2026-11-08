@@ -62,6 +62,8 @@ const logBundle = require("./log-bundle");
 const logTags = require("./log-tags");
 const terminalProvider = require("./terminal-provider");
 const aiLockers = require("./ai-lockers");
+const lockersSwitch = require("./lockers-switch"); // 📁 AI lockers on/off — HIDDEN (off) by default, ⚙ Advanced turns them back on
+const alfredAppActions = require("./alfred-app-actions"); // so Alfred's lockers.* controls are hidden while the lockers are off
 const featureTest = require("./feature-test");
 const siteErrors = require("./site-errors"); // a site's own short error notice ("Sorry, something went wrong…") is never an Akọwe answer
 const { replyLooksCut } = require("./smart-json"); // H26: an untagged JSON reply whose brackets are still open is not finished
@@ -237,6 +239,7 @@ const state = {
   log: [], // { ts, kind, detail } — internal activity, for the troubleshooting panel
   ledger: [], // { id, ts, source, target, textPreview, status, error, duplicate } — one entry per sendTextTo() attempt; see recordLedgerEntry(). Program-owned transport record, independent of what any AI believes happened -- never trust an AI's own claim about whether a message arrived.
   meshActive: false, // whether global Auto is currently on
+  lockers: { enabled: false }, // 📁 AI lockers: off (hidden) unless switched on in ⚙ Advanced — an older state file without it reads as off (lockers-switch.js)
   relayEnabled: true, // master switch for AUTOMATIC AI->AI forwarding (baseline [TO:] tag relay + mesh). "Stop AIs Talking" flips this off; the next user send / relay-mode start turns it back on. Direct user sends are never gated by it.
   nextTurnId: 1,
   nextMsgSeq: 1,
@@ -338,15 +341,38 @@ function lockerGuide(site) {
     "Results come back to you as a [FROM: TERMINAL] message.";
 }
 
-function defaultRoutingExplainerPrompt() {
+// The lockers are hidden (off) by default: then the explainer doesn't mention
+// [TO: TERMINAL] or the locker commands at all (lockersSwitch.stripLockerTeaching).
+function lockersOn() { return lockersSwitch.effective(state.lockers && state.lockers.enabled, process.env); }
+function defaultRoutingExplainerPrompt(withLockers = lockersOn()) {
   const text = {};
   for (const site of SITE_IDS) {
     text[site] = `Quick reference, not a task — no need to reply unless you want to. This app relays messages between the three of us (ChatGPT, Claude, Gemini); we're not talking to each other directly, everything is routed on this end. Wrap EVERY message in a two-tag envelope. START with a tag on its own line — [TO: CHATGPT], [TO: CLAUDE], [TO: GEMINI], [TO: ALL], [TO: USER], [TO: TERMINAL], or [TO: NONE] — to control who sees it next: a specific one of us, everyone, just the human running this, your own private folder ("locker") on the human's PC, through a command prompt that only works inside it (put commands in a \`\`\` code block — dir, type, copy, del, md, plus write/append/give/send; send \`help\` for the list; results come back as a [FROM: TERMINAL] message; \`send <file> to <ai>\` passes a file to another of us), or nobody if you have nothing to add. END with your own closing tag in the same bracket form: [FROM: ${site.toUpperCase()}]. The [FROM: ...] tag is how this end knows your message is finished — until it's there, nothing you wrote is delivered; if you stop without it the message is discarded and you'll be asked to resend the whole thing. Put nothing after the closing tag. The one exception: if you have nothing to add, just reply NONE (or [TO: NONE]) — that's a complete message on its own, it needs no [FROM:] tag, and it's dropped silently. This applies all the time, not just for a specific "mode." Also: the app stamps every message it hands you with a running number at the very top, like [MSG #0007] — you don't generate these, but you can refer to that number to say which message you're answering so nobody falls out of sync.` + lockerGuide(site);
+    if (!withLockers) text[site] = lockersSwitch.stripLockerTeaching(text[site]);
   }
   return { id: 2, name: "System Prompt (How Routing Works)", text };
 }
 state.prompts = [defaultTestPrompt(), defaultRoutingExplainerPrompt()];
 state.nextPromptId = 3;
+// The built-in routing prompt (id 2) as saved: if it is still an untouched
+// built-in (same name, and an older build's text without TERMINAL, or the exact
+// lockers-on / lockers-off text), swap in the text for the switch as it is now.
+// A prompt the user edited themselves is left alone (protocolGuideFor still
+// leaves its terminal lines out while the lockers are off).
+function refreshBuiltinRoutingPrompt() {
+  try {
+    const fresh = defaultRoutingExplainerPrompt();
+    const old = (state.prompts || []).find((p) => p && p.id === 2);
+    if (!old || old.name !== fresh.name) return false;
+    const now = JSON.stringify(old.text || "");
+    if (now === JSON.stringify(fresh.text)) return false;
+    const builtIn = !now.includes("TERMINAL") || now === JSON.stringify(defaultRoutingExplainerPrompt(true).text) || now === JSON.stringify(defaultRoutingExplainerPrompt(false).text);
+    if (!builtIn) return false;
+    old.text = fresh.text;
+    logEvent("prompt-builtin-refreshed", { id: 2, lockers: lockersOn() });
+    return true;
+  } catch (_) { return false; }
+}
 
 function resetHouseRule(mode, topic, rounds) {
   state.hr = {
@@ -748,6 +774,7 @@ function buildStateSnapshotText() {
         akowe: { enabled: !!state.akowe.enabled, startWithApp: state.akowe.startWithApp !== false, autoConnect: state.akowe.autoConnect !== false }, // the bridge token itself lives in its own 0600 file, never here
         attention: { notify: state.attention.notify !== false, sound: state.attention.sound !== false },
         freshChat: { everyRequests: state.freshChat.everyRequests, everyChars: state.freshChat.everyChars },
+        lockers: lockersSwitch.toSnapshot(state.lockers.enabled), // 📁 AI lockers switch (off = hidden)
         hr: hr && hr.mode ? {
           mode: hr.mode,
           topic: hr.topic,
@@ -796,19 +823,11 @@ function loadPersistedState() {
   if (snap.customRole) {
     for (const site of SITE_IDS) if (typeof snap.customRole[site] === "string") state.customRole[site] = snap.customRole[site];
   }
+  // 📁 AI lockers switch. A file from an older build has no "lockers" key → off (the user chose to hide them).
+  state.lockers.enabled = lockersSwitch.fromSnapshot(snap);
   if (Array.isArray(snap.prompts)) {
     state.prompts = snap.prompts;
-    // The built-in routing prompt (id 2) saved by an older build doesn't teach
-    // the locker commands. If it's still the untouched built-in (same name, no
-    // TERMINAL), swap in the current text; a user-edited prompt is left alone.
-    try {
-      const fresh = defaultRoutingExplainerPrompt();
-      const old = state.prompts.find((p) => p && p.id === 2);
-      if (old && old.name === fresh.name && !JSON.stringify(old.text || "").includes("TERMINAL")) {
-        old.text = fresh.text;
-        logEvent("prompt-builtin-refreshed", { id: 2 });
-      }
-    } catch (_) {}
+    refreshBuiltinRoutingPrompt();
     state.nextPromptId = snap.prompts.reduce((m, p) => Math.max(m, (p.id || 0) + 1), 1);
   }
   if (snap.selectorOverrides) {
@@ -2524,7 +2543,8 @@ function withEnvelope(text, target) {
 // edits the user made to it), so the AI is re-taught the rules each time.
 function protocolGuideFor(site) {
   const saved = (state.prompts || []).find((p) => p && p.id === 2);
-  const text = (saved && saved.text && String(saved.text[site] || "").trim()) || defaultRoutingExplainerPrompt().text[site] || "";
+  let text = (saved && saved.text && String(saved.text[site] || "").trim()) || defaultRoutingExplainerPrompt().text[site] || "";
+  if (!lockersOn()) text = lockersSwitch.stripLockerTeaching(text); // lockers off: never teach [TO: TERMINAL]
   return text.replace(/^Quick reference, not a task[^.]*\.\s*/i, "");
 }
 function composeEnvelopeReminder(site, kind = "missing-from", { forwarded = 0 } = {}) {
@@ -3560,6 +3580,7 @@ function terminalSnapshot() {
   return {
     ...t,
     autoRunAI: terminalState.autoRunAI,
+    lockers: lockersOn(), // 📁 off: the panel hides the lockers folder button + the AI-scripts tick
     pending: terminalState.pending.map((p) => ({ ...p })),
     hasLastUserResult: !!terminalState.lastUserResult,
   };
@@ -3592,14 +3613,20 @@ async function replyFromTerminal(site, body) {
 
 // ---- AI lockers: every AI's [TO: TERMINAL] runs ONLY inside its own folder ----
 // (ai-lockers.js does the folder gate; this wires it to the chat panes.)
+// HIDDEN by default (lockers-switch.js): while lockersOn() is false nothing here
+// runs and getLockers() is never called, so no ai-lockers folders are made
+// (existing ones are left exactly as they are, never deleted).
 let lockers = null;
-function getLockers() {
-  if (lockers) return lockers;
+function lockersRootPath() {
   let base = "";
   try { base = outputManager.root(); } catch (_) {}
   if (!base) base = path.join(contentBaseFolder(), "stuff and thing");
+  return path.join(base, "ai-lockers");
+}
+function getLockers() {
+  if (lockers) return lockers;
   lockers = aiLockers.createLockers({
-    root: path.join(base, "ai-lockers"),
+    root: lockersRootPath(),
     sites: SITE_IDS,
     onData: (chunk, stream) => broadcast("terminal-data", { chunk, stream }),
     onState: () => broadcastTerminalState(),
@@ -3638,8 +3665,24 @@ const lockerCtx = {
   },
 };
 
+// Lockers off: an AI's [TO: TERMINAL] block is never run. It is logged every
+// time; the AI gets ONE short plain notice per app run (through the normal send
+// path), so a model that keeps trying can't start a notice → reply → notice loop.
+const terminalOffNotice = lockersSwitch.createNoticeGate();
+function terminalOffWouldNotify(site) { return !terminalOffNotice.told(site); }
+function ignoreTerminalWhileOff(turn, relayOn) {
+  const from = turn.site;
+  const notify = relayOn && terminalOffNotice.first(from);
+  logEvent("terminal-request-ignored", { from, reason: "lockers-off", notified: notify, note: `${siteLabel(from)} sent a [TO: TERMINAL] block — not run, the AI lockers are switched off (⚙ Advanced → AI lockers)` });
+  if (!notify) return;
+  sendTextTo(from, `[FROM: AUTOINJECTOR]\n${lockersSwitch.OFF_NOTICE}`, null, { automatic: true })
+    .then((r) => { if (!r || !r.ok) logEvent("terminal-reply-error", { to: from, error: (r && r.error) || "unknown" }); })
+    .catch((e) => logEvent("terminal-reply-error", { to: from, error: String(e) }));
+}
+
 function deliverToTerminal(turn) {
   const from = turn.site;
+  if (!lockersOn()) return ignoreTerminalWhileOff(turn, true);
   const label = siteLabel(from);
   const ops = aiLockers.parseRequest(turn.text);
   logEvent("terminal-request", { from, ops: ops.length });
@@ -3676,6 +3719,7 @@ function deliverToTerminal(turn) {
 // Run a request's ops in the AI's locker, in order, stopping at the first
 // failure, then send the combined result back to that AI.
 async function executeTerminalRequest(req) {
+  if (!lockersOn()) { logEvent("terminal-request-ignored", { id: req.id, from: req.from, reason: "lockers-off" }); return { ok: false, error: "LOCKERS_OFF" }; }
   const L = getLockers();
   const results = [];
   // Scripts run only if the user approved THIS request (or ticked Auto-run).
@@ -3713,6 +3757,7 @@ async function executeTerminalRequest(req) {
 // of waiting for the next PANE_SYNC_MS tick — ISS-001.
 ipcMain.handle("panes:sync", async () => { await syncPaneBounds().catch(() => {}); return { ok: true }; });
 ipcMain.handle("lockers:open", async () => {
+  if (!lockersOn()) return lockersSwitch.offResult();
   try {
     const L = getLockers();
     const err = await shell.openPath(L.root());
@@ -3720,9 +3765,11 @@ ipcMain.handle("lockers:open", async () => {
   } catch (e) { return { ok: false, error: String(e) }; }
 });
 ipcMain.handle("lockers:list", (_evt, { site } = {}) => {
+  if (!lockersOn()) return lockersSwitch.offResult();
   try { return getLockers().listFiles(site); } catch (e) { return { ok: false, error: String(e) }; }
 });
 ipcMain.handle("lockers:read", (_evt, { site, rel } = {}) => {
+  if (!lockersOn()) return lockersSwitch.offResult();
   try {
     const f = getLockers().userFile(site, rel);
     return f.ok ? { ok: true, kind: f.kind, size: f.size, text: f.text } : f;
@@ -3730,6 +3777,7 @@ ipcMain.handle("lockers:read", (_evt, { site, rel } = {}) => {
 });
 // Upload a locker file into one or more AI chats (pictures, PDFs, anything).
 ipcMain.handle("lockers:attach", async (_evt, { site, rel, targets } = {}) => {
+  if (!lockersOn()) return lockersSwitch.offResult();
   try {
     const f = getLockers().userFile(site, rel);
     if (!f.ok) return f;
@@ -3758,6 +3806,7 @@ async function runFeatureTestNow() {
   if (ftState.running) return { ok: false, error: "ALREADY_RUNNING" };
   if (state.hr && state.hr.active) return { ok: false, error: "A House Rules format is running — stop it first." };
   if (state.sequence && state.sequence.active) return { ok: false, error: "A Prompt Sequence is running — stop it first." };
+  if (!lockersOn()) return { ok: false, error: `The Feature Test checks the AI lockers' file commands. ${lockersSwitch.OFF_MESSAGE}`, code: "LOCKERS_OFF" };
   const sites = SITE_IDS.filter((s) => state.enabled[s] && siteViews[s] && !siteViews[s].webContents.isDestroyed());
   if (!sites.length) return { ok: false, error: "No AI is checked Active." };
   // Quiet the relay for the test: no mesh forwarding (it would spray test
@@ -3891,7 +3940,35 @@ ipcMain.handle("featuretest:open-report", async (_evt, { file } = {}) => {
     return err ? { ok: false, error: err } : { ok: true };
   } catch (e) { return { ok: false, error: String(e) }; }
 });
-ipcMain.handle("lockers:status", () => { try { return { ok: true, ...getLockers().status() }; } catch (e) { return { ok: false, error: String(e) }; } });
+// lockers:status is the one call that answers while the lockers are off — and then it touches nothing on disk.
+function lockersSwitchInfo() {
+  const forced = lockersSwitch.envOverride(process.env);
+  return { enabled: lockersOn(), saved: state.lockers.enabled === true, forcedByEnv: forced != null };
+}
+ipcMain.handle("lockers:status", () => {
+  try {
+    if (!lockersOn()) return { ok: true, ...lockersSwitchInfo(), root: lockersRootPath(), message: lockersSwitch.OFF_MESSAGE };
+    return { ok: true, ...getLockers().status(), ...lockersSwitchInfo() };
+  } catch (e) { return { ok: false, error: String(e) }; }
+});
+// ⚙ Advanced → "AI lockers (advanced, off)". Off → on brings everything back as before; on → off drops any
+// script still waiting for approval. The folders are never deleted either way.
+function setLockersEnabled(on) {
+  const was = lockersOn();
+  state.lockers.enabled = on === true;
+  const now = lockersOn();
+  terminalOffNotice.reset();
+  try { alfredAppActions.setFeature("lockers", now); } catch (_) {}
+  if (was && !now) { cancelPendingTerminalRequests("lockers-off"); try { if (lockers) lockers.stopAll(); } catch (_) {} lockers = null; }
+  if (refreshBuiltinRoutingPrompt()) broadcast("prompts-changed", state.prompts);
+  saveStateDebounced();
+  logEvent("lockers-switch", { enabled: now, saved: state.lockers.enabled, forcedByEnv: lockersSwitch.envOverride(process.env) != null });
+  const info = lockersSwitchInfo();
+  broadcast("lockers-state", info);
+  broadcastTerminalState();
+  return { ok: true, ...info };
+}
+ipcMain.handle("lockers:set-enabled", (_evt, { enabled } = {}) => { try { return setLockersEnabled(enabled === true); } catch (e) { return { ok: false, error: String(e) }; } });
 
 function takePending(id) {
   const i = terminalState.pending.findIndex((p) => p.id === Number(id));
@@ -4844,7 +4921,8 @@ async function pollSite(site) {
     // bounded by their own rounds and don't count.
     if (!stageActive && relayOn && !looping) {
       const tagTargets = roundtableTargetsFor(turn);
-      const wouldRelay = turn.roundtableTag === "BUTLER" || turn.roundtableTag === "TERMINAL" || tagTargets.length > 0 ||
+      const terminalActs = turn.roundtableTag === "TERMINAL" && (lockersOn() || terminalOffWouldNotify(site)); // lockers off: only the one notice counts
+      const wouldRelay = turn.roundtableTag === "BUTLER" || terminalActs || tagTargets.length > 0 ||
         relayPolicy.meshTargetsFor({ site, tag: meshTag, routing: state.routing[site], alreadyCovered: new Set(tagTargets), stageActive: false }).length > 0;
       if (wouldRelay) {
         const hop = autoHops.note();
@@ -4867,7 +4945,8 @@ async function pollSite(site) {
       // mesh-forwarded to the other AIs. Gated by "Stop AIs Talking" (and the
       // hop limit) like every other automatic path; the run itself is
       // fire-and-forget so a long command never holds this pane's poll loop.
-      if (relayOn) { try { relayTrace.noteHandoff(turn.id, "terminal"); } catch (_) {} deliverToTerminal(turn); }
+      if (!lockersOn()) ignoreTerminalWhileOff(turn, relayOn); // 📁 lockers off: never run; logged, one notice per AI
+      else if (relayOn) { try { relayTrace.noteHandoff(turn.id, "terminal"); } catch (_) {} deliverToTerminal(turn); }
       else logEvent("terminal-request-dropped", { from: site, reason: state.relayEnabled ? "hop-limit" : "relay-silenced" });
     } else {
       let hrSentTargets = new Set();
@@ -8028,14 +8107,16 @@ ipcMain.handle("butler:install-missing", async () => {
 // only when you press the button — nothing goes out on its own.
 function butlerIntroMessage(target) {
   const name = String(target || "").toUpperCase() || "YOU";
+  const on = lockersOn(); // 📁 lockers off (the default): the intro doesn't teach [TO: TERMINAL]
   return (
     "Quick orientation before we work together.\n\n" +
     "WHO'S COORDINATING: a local \"Butler\" (a supervisor AI running on this machine) is running this conversation. It plans the work and passes messages between you and the other assistants (ChatGPT, Claude, Gemini). You are one of those assistants — the Butler may ask you to do part of a task and then combine your answer with the others.\n\n" +
     "HOW MESSAGES WORK (important — or your reply is not delivered):\n" +
-    "• START every message with a routing tag: [TO: USER] (answer the person) / [TO: CHATGPT] / [TO: CLAUDE] / [TO: GEMINI] / [TO: ALL] / [TO: TERMINAL] (your own private folder on this PC — file commands in a ``` code block, `help` lists them; results come back as [FROM: TERMINAL]) / [TO: NONE]\n" +
+    "• START every message with a routing tag: [TO: USER] (answer the person) / [TO: CHATGPT] / [TO: CLAUDE] / [TO: GEMINI] / [TO: ALL] / " +
+    (on ? "[TO: TERMINAL] (your own private folder on this PC — file commands in a ``` code block, `help` lists them; results come back as [FROM: TERMINAL]) / " : "") + "[TO: NONE]\n" +
     "• END every message with your own closing tag: [FROM: " + name + "]\n" +
     "The closing [FROM: ...] tag is how the app knows your message is finished — put nothing after it." +
-    lockerGuide(target) + "\n\n" +
+    (on ? lockerGuide(target) : "") + "\n\n" +
     "Please confirm you understand, using the envelope: start with [TO: USER] and end with [FROM: " + name + "]."
   );
 }
@@ -10271,6 +10352,7 @@ app.whenReady().then(() => {
   // Windows shows a desktop notification only for an app with an id (PR #123: "your book needs you")
   try { if (process.platform === "win32" && typeof app.setAppUserModelId === "function") app.setAppUserModelId("com.autoinjector.desktop"); } catch (_) {}
   loadPersistedState();
+  try { alfredAppActions.setFeature("lockers", lockersOn()); logEvent("lockers-switch", { enabled: lockersOn(), saved: state.lockers.enabled, forcedByEnv: lockersSwitch.envOverride(process.env) != null, at: "startup" }); } catch (_) {} // 📁 hidden unless switched on
   selfRepairApplySettings(); // P18.1: the saved check-in interval
   try { const s = dbService.init(userDataDir()); logEvent("db-init", { available: s.available, reason: s.reason }); }
   catch (e) { logEvent("db-init-error", { error: String(e) }); }

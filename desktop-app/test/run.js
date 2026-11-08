@@ -2058,7 +2058,8 @@ async function testTagReminderTeachesTheRules() {
   await waitUntil(() => sentLog("claude").some(isFlag), { label: "Claude is flagged for the missing [TO:] tag" });
   let f = sentLog("claude").find(isFlag);
   assert(/went to the user ONLY/.test(f.text) && /\[FROM: CLAUDE\]/.test(f.text), "the flag says it only reached the user and how to resend");
-  assert(/HOW WE TALK TO EACH OTHER/.test(f.text) && /\[TO: CHATGPT\]/.test(f.text) && /YOUR LOCKER/.test(f.text), "it carries the full rules (routing tags, closing tag, locker)");
+  assert(/HOW WE TALK TO EACH OTHER/.test(f.text) && /\[TO: CHATGPT\]/.test(f.text), "it carries the full rules (routing tags, closing tag)");
+  assert(!/YOUR LOCKER|TO: TERMINAL/.test(f.text), "…without the locker / [TO: TERMINAL] lines, the 📁 AI lockers being switched off (the default)");
   assert(sentLog("gemini").length === 0, "the untagged message itself was not sent on");
   // capped: a model that keeps forgetting isn't spammed forever
   say("claude", "Still no tag, attempt two."); await settle(400);
@@ -2667,6 +2668,8 @@ async function testAiAddressesTerminal() {
   for (const s of SITES) await call("participants:set", { site: s, enabled: true });
   await call("routing:auto-all", {}); // mesh ON: the TERMINAL tag must still never be forwarded to the other panes
   const ledgerTo = async (site, re, from) => (await call("state:get", {})).ledger.slice(from).some((e) => e.target === site && re.test(e.textPreview || ""));
+  // 📁 The lockers are hidden (off) by default — this scenario tests them switched on (⚙ Advanced), as before.
+  assert((await call("lockers:set-enabled", { enabled: true })).enabled === true, "the AI lockers are switched on for this scenario");
   const st0 = await call("lockers:status", {});
   assert(st0.ok && st0.root && /ai-lockers$/.test(st0.root), `lockers live in .../ai-lockers (${st0.root})`);
   for (const s of SITES) assert(fs.existsSync(path.join(st0.root, s, "inbox")), `${s} has its own locker with an inbox`);
@@ -2745,6 +2748,7 @@ async function testAiAddressesTerminal() {
   assert(shared.ok && await ledgerTo("gemini", /from-user/, before), "the user's output is delivered to the chosen AI");
   await call("terminal:stop", {});
   await call("relay:silence", {});
+  await call("lockers:set-enabled", { enabled: false }); // back to the default (hidden)
 }
 
 async function testFeatureTestButton() {
@@ -2754,6 +2758,10 @@ async function testFeatureTestButton() {
   await call("routing:auto-all", {});
   const pick = (g) => JSON.stringify({ r: g.routing, m: g.meshActive, e: g.relayEnabled });
   const routingBefore = pick((await call("state:get", {})).global);
+  // 📁 Lockers off (the default): the Feature Test (which checks their file commands) says why it can't run.
+  const offRun = await call("featuretest:run", {});
+  assert(!offRun.ok && /AI lockers are switched off/.test(offRun.error), "with the AI lockers switched off it refuses with a clear message");
+  await call("lockers:set-enabled", { enabled: true });
   const t0 = Date.now();
   const running = call("featuretest:run", {});
   // step 1's prompt goes to ChatGPT; answer it exactly as asked, through the normal capture path
@@ -2780,6 +2788,7 @@ async function testFeatureTestButton() {
   assert(!none.ok && /Active/.test(none.error), "with no AI checked Active it refuses with a clear message");
   for (const s of SITES) await call("participants:set", { site: s, enabled: true });
   await call("relay:silence", {});
+  await call("lockers:set-enabled", { enabled: false });
 }
 
 async function testModelsFolderInfo() {

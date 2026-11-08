@@ -19,16 +19,18 @@ const UI_SRC = fs.readFileSync(path.join(__dirname, '..', 'voice-ui.js'), 'utf8'
 const HTML = fs.readFileSync(path.join(__dirname, '..', 'controls.html'), 'utf8');
 const SITES = ['chatgpt', 'claude', 'gemini'];
 
-function paneHtml(site) {
+// The pane row as controls.js builds it. The 📁 AI lockers are hidden by default (no Locker tab); setup({ lockers: true })
+// builds the row as it is with them switched on in ⚙ Advanced.
+function paneHtml(site, withLocker) {
   return `<div class="ai-col ${site}" id="col-${site}"><div class="control-strip"><div class="card-head"><span class="pane-name">${site}</span><span class="spacer"></span><button class="zoom-btn">－</button><span class="zoom-level">60%</span><button class="zoom-btn">＋</button><button class="reload-btn">⟳</button></div>
-    <div class="locker-box"><div class="locker-tabs"><button id="locker-tab-${site}" class="active">📁 Locker</button><button id="reply-tab-${site}">💬 Last reply</button><span class="spacer"></span><button class="lk-refresh">↻</button></div></div></div></div>`;
+    <div class="locker-box"><div class="locker-tabs">${withLocker ? `<button id="locker-tab-${site}" class="active">📁 Locker</button>` : ''}<button id="reply-tab-${site}"${withLocker ? '' : ' class="active"'}>💬 Last reply</button><span class="spacer"></span><button class="lk-refresh">↻</button></div></div></div></div>`;
 }
 
 function setup(over = {}) {
   const dom = new JSDOM(`<!doctype html><body>
     <div id="window-titlebar"><span class="wt-name">AutoInjector</span><div id="app-tabs"></div><div id="voice-bar"></div><button id="btn-alfred-switch">🎩 Alfred: Off</button></div>
     <input type="checkbox" id="p-chatgpt" checked><input type="checkbox" id="p-claude" checked><input type="checkbox" id="p-gemini" checked><input type="checkbox" id="p-butler">
-    ${SITES.map(paneHtml).join('')}
+    ${SITES.map((s) => paneHtml(s, !!over.lockers)).join('')}
     <details id="sai"><summary>System AI</summary><details id="vbox"><summary>🔊 Voice</summary>
       <input id="voice-v-butler"><input id="voice-v-chatgpt"><input id="voice-v-claude"><input id="voice-v-gemini"><select id="voice-mic"><option value="">Default</option><option value="mic-2">USB mic</option></select>
       <div id="voice-read-settings"></div></details></details>
@@ -127,10 +129,19 @@ const click = (w, id) => $(w, id).dispatchEvent(new w.MouseEvent('click', { bubb
     assert(pm && pm.parentNode.classList.contains('card-head') && pm.nextElementSibling.classList.contains('zoom-btn'), `${s}: 🎤 in the pane header, before the zoom buttons`);
     const g = $(w, `voice-read-${s}`);
     assert(g && g.previousElementSibling && g.previousElementSibling.id === `reply-tab-${s}` && ['◀', '🔊', '▶'].every((x, i) => g.children[i].textContent === x), `${s}: ◀ 🔊 ▶ beside 💬 Last reply`);
+    const row = [...$(w, `col-${s}`).querySelector('.locker-tabs').children].map((c) => c.id === `reply-tab-${s}` ? 'reply' : c.classList.contains('vr-group') ? 'read' : c.classList.contains('spacer') ? 'spacer' : c.classList.contains('lk-refresh') ? 'refresh' : c.id || c.className);
+    assert(row.join(',') === 'reply,read,spacer,refresh', `${s}: lockers hidden (the default) → the row is 💬 Last reply · ◀ 🔊 ▶ n/m · ↻ (${row.join(',')})`);
   }
   assert($(w, 'voice-count-claude').textContent === '3 / 3' && $(w, 'voice-count-gemini').textContent === '0 / 0', `counters: Claude "3 / 3", Gemini "0 / 0"`);
   assert(/Claude third/.test($(w, 'voice-play-claude').title) && $(w, 'voice-next-claude').disabled && !$(w, 'voice-prev-claude').disabled, 'newest selected; its first words in the tooltip; ▶ off at the newest');
   assert($(w, 'voice-play-gemini').disabled && $(w, 'voice-prev-gemini').disabled, 'no reply yet: the buttons are off');
+
+  {
+    const tl = setup({ lockers: true });
+    await tl.ui.init(); await tick(30);
+    const row = [...$(tl.w, 'col-claude').querySelector('.locker-tabs').children].map((c) => c.id || c.className);
+    assert(row[0] === 'locker-tab-claude' && row[1] === 'reply-tab-claude' && row[2] === 'voice-read-claude', `lockers switched on: 📁 Locker · 💬 Last reply · ◀ 🔊 ▶ as before (${row.slice(0, 3).join(',')})`);
+  }
 
   console.log('\n== ◀ ▶ move through the replies; new replies are followed ==');
   click(w, 'voice-prev-claude');

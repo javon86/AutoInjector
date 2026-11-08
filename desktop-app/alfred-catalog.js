@@ -134,7 +134,7 @@ function build(opts = {}) {
     const g = TOOL_GROUP[t.name] || TOOL_GROUP[t.group] || (by.has(t.group) ? t.group : 'app');
     by.get(g).push({ id: t.name, kind: 'tool', title: plainTitle(t.title), say: TOOL_SAY[t.name] || firstSentence(t.description), example: TOOL_EXAMPLE[t.name] || `${t.title}.`, changes: !!t.changes });
   }
-  for (const a of appActions.ACTIONS) {
+  for (const a of appActions.visible()) { // a switched-off feature (the 📁 AI lockers, by default) is not listed
     const words = exampleWords(a.example);
     by.get(actionGroup(a.id)).push({ id: a.id, kind: 'control', title: a.title, say: `${a.title}${a.changes ? '' : ' (just looks)'}.`, example: `${a.title}${words ? ` — ${words}` : ''}.`, changes: !!a.changes });
   }

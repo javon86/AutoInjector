@@ -12,6 +12,9 @@
 //    changing ones) against the real handlers.
 // Prints a coverage table: capability → tool → tested ✔.     Run: node test/alfred-coverage.test.js
 process.env.AUTOINJECTOR_BRIDGE = '0';
+// 📁 The AI lockers are hidden (off) by default; this test drives EVERY app action, the lockers.* ones included,
+// so it switches them on for this run (test/lockers-switch.test.js covers them hidden while off).
+process.env.AUTOINJECTOR_LOCKERS = '1';
 process.env.AUTOINJECTOR_CHECKIN = '0';
 process.env.AUTOINJECTOR_AKOWE_SERVER = '0';
 process.env.AUTOINJECTOR_SD_AUTOSTART = '0';
@@ -58,6 +61,7 @@ interpreterProvider.startManaged = async () => ({ ok: false });
 
 const registry = require('../alfred-tools');
 const appActions = require('../alfred-app-actions');
+appActions.setFeature('lockers', true); // see AUTOINJECTOR_LOCKERS above
 const alfredMain = require('../alfred-main');
 const { createAlfred } = require('../alfred');
 const { nodeHttp } = require('../akowe-link-test');
@@ -86,7 +90,7 @@ const IPC_INVENTORY = [
   'db:recent-messages', 'db:status', 'endpoints:detect', 'endpoints:presets', 'endpoints:test', 'external:open',
   'featuretest:open-report', 'featuretest:run', 'featuretest:stop', 'mediatest:run', 'mediatest:stop', 'mediatest:status', 'mediatest:copy', 'mediatest:open-report', 'feed-window:close', 'feed:history', 'feed:open', 'gpu:info',
   'health:check', 'health:get', 'health:status', 'health:fix', 'houserule:pause', 'houserule:resume', 'houserule:start', 'houserule:stop', 'houserule:wrap-up-brainstorm',
-  'image:configure', 'image:generate', 'image:status', 'lockers:attach', 'lockers:list', 'lockers:open', 'lockers:read', 'lockers:status',
+  'image:configure', 'image:generate', 'image:status', 'lockers:attach', 'lockers:list', 'lockers:open', 'lockers:read', 'lockers:status', 'lockers:set-enabled',
   'logins:delete', 'logins:fill', 'logins:list', 'logins:save', 'logs:download-all', 'logs:extract-all', 'logs:extract-options', 'logs:extract-preview', 'logs:tags',
   'manager:approve', 'manager:configure-provider', 'manager:get-state', 'manager:pause', 'manager:reject', 'manager:resume', 'manager:start-task',
   'manager:stop', 'manager:test-connection', 'mcp:list', 'mcp:add', 'mcp:start', 'mcp:stop', 'mcp:remove', 'memory:search', 'memory:summary', 'models:info', 'models:open',
@@ -132,6 +136,7 @@ const EVENTS = {
   'send-error': 'UI live update', 'sent': 'UI live update', 'sequence-state': 'UI live update', 'setup-progress': 'UI live update', 'setup-status': 'UI live update',
   'terminal-data': 'UI live update', 'terminal-state': 'UI live update', 'tuner-state': 'UI live update', 'voice-speaking': 'UI live update', 'voice-mic': 'UI live update (🎤 "starting the voice engine / downloading the speech model")', 'waiting-changed': 'UI live update',
   'window-collapse-changed': 'UI live update',
+  'lockers-state': 'UI live update (the 📁 AI lockers switched on / off in ⚙ Advanced — the Locker tab comes back or goes)',
   'ai-download': 'UI live update (⬇ a file an AI gives you: progress, then where it was saved)',
 };
 // The butler's decision actions (manager-provider.js): Alfred reaches them by giving the butler a task, or directly.
