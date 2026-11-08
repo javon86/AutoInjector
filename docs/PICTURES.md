@@ -83,6 +83,17 @@ The request to AutoInjector: `{engine, purpose: "illustration" | "map", prompt, 
   this setting; a character lock's checkpoint or the request's own `checkpoint` still wins. The record says which
   checkpoint made the picture (`checkpoint`, `family`, `bookCheckpoint: true`).
 
+### Recipes and the AI judge for book pictures
+
+* **📖 Book pictures use: <checkpoint or recipe>**: instead of a checkpoint, a saved recipe (`bookRecipe`,
+  `desktop-app/sd-recipes.js`) — its model, size, sampler, steps, CFG, LoRAs, hires fix and prompt template are used for
+  every `bridge:` request that names no recipe or checkpoint of its own. A request may also name `recipe` itself.
+* **Judge and improve book pictures automatically** (🎨 Images → 🧑‍⚖️ AI judge settings, `autoBook`, off by default —
+  it costs AI usage): the picture is judged and improved (at most 2 rounds, `desktop-app/sd-improve.js`) before it is
+  returned; the answer then carries `judged: {rounds, best, scores, verdict, by}` and the image `improvedFrom`.
+* Every picture's `.json` records who asked (`askedBy: {who: "Akọwe", book, character}`), what was typed, the real seed,
+  the hashes and the judge's verdict (`judge`) — see "What is saved with each picture" in `docs/HOW_IT_WORKS.md`.
+
 ## Storage
 
 Companion data `pictures:<pid>:<branch>` = `{style, revision, counter, pictures: {pic-001: {id, kind:

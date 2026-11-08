@@ -440,6 +440,13 @@ function createSdStudio(deps) {
       triggers: [...lockTriggers, ...extraTriggers], infoObj: r.infoObj, library: libHashes, appVersion: appVersion(),
       source: req && req.initImage, recipe: rr.recipe,
     }));
+    // the checkpoint's hash when the server named it without one: the "[879db523c3]" in the app's own list
+    if (!record.checkpointHash && record.checkpoint && lastLists && Array.isArray(lastLists.checkpoints)) {
+      const want = sdRecord.cleanName(record.checkpoint).replace(/\.(safetensors|ckpt|gguf)$/i, '').toLowerCase();
+      const hit = lastLists.checkpoints.find((c) => { const t = sdRecord.cleanName(c.title || c.name || c).replace(/\.(safetensors|ckpt|gguf)$/i, '').toLowerCase(); return t === want || t.split(/[\\/]/).pop() === want; });
+      const h = hit ? sdRecord.hashOfName(hit.title || hit.name || '') : '';
+      if (h) record.checkpointHash = h;
+    }
     let saved;
     const prefix = b.view ? `view-${b.view}` : b.purpose !== 'free' ? b.purpose : b.opts.mask ? 'inpaint' : b.opts.initImage ? 'img2img' : 'sd';
     try { saved = sdImages.saveGeneration(imagesDir(), r.images, record, { prefix }); }

@@ -337,7 +337,7 @@ async function partI() {
   env = Object.assign({}, envBase, { FAKE_CLAUDE_JUDGE_MODE: 'malformed_once' });
   r = await svc.judge(pic, {});
   assert(r.ok && r.judge.by === 'claude-code' && r.judge.attempts === 2, 'Claude Code answering once without JSON → asked once more → fine');
-  env = Object.assign({}, envBase, { AUTOINJECTOR_CLAUDE_PATH: path.join(TMP, 'no-claude-here'), HOME: path.join(TMP, 'nohome'), USERPROFILE: path.join(TMP, 'nohome'), APPDATA: '', NPM_CONFIG_PREFIX: '' });
+  env = Object.assign({}, envBase, { AUTOINJECTOR_CLAUDE_PATH: path.join(TMP, 'no-claude-here'), HOME: path.join(TMP, 'nohome'), USERPROFILE: path.join(TMP, 'nohome'), APPDATA: '', NPM_CONFIG_PREFIX: '', npm_config_prefix: '' });
   const j2 = CC.createClaudeCodeJudge({ env: () => env });
   const av = j2.available();
   r = await j2.ask({ imagePath: pic, prompt: 'x' });

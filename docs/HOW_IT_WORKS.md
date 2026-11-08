@@ -306,6 +306,73 @@ bridge to your home Wi-Fi, behind its key.
 - Pictures are saved in `stuff and thing/images/`, each with a `.json` file of the settings that made it.
 - **Tested for real:** pictures have been made with Forge on your PC.
 
+#### What is saved with each picture
+
+Every picture keeps a full note of how it was made, in its `.json` file and inside the PNG itself (the "parameters"
+text that Forge, A1111 and Civitai can read). Open **Settings used** under a picture to see it in plain words:
+
+- what you typed, what was actually sent (shortened, with the style words) and the full description;
+- the "things to avoid" list, and whether it was the automatic one;
+- the style chip, the checkpoint model with its hash and kind (SDXL, SD1.5, Flux …), the VAE;
+- the sampler and scheduler, steps, CFG, size, and the **real seed** (the number that makes this exact picture, never -1),
+  and which picture of a batch it was;
+- hires fix, refiner, every LoRA with its weight (and hash when known) and the trigger words added;
+- ADetailer and ControlNet, the start picture and how much it changed (img2img / inpaint), CLIP skip;
+- which program made it (Forge, A1111, ComfyUI and its workflow, or ChatGPT — ChatGPT has no seed or sampler, so those
+  are left out), the AutoInjector version;
+- who asked: you, 🎩 Alfred, or Akọwe (with the book and the character), and the recipe if one was used;
+- the AI judge's verdict, once a picture is judged.
+
+**♻ Remake** puts those settings back into the form; press 🎨 Generate and the same seed makes the same picture.
+
+#### 💾 Recipes (saved settings)
+
+A **recipe** is a set of saved settings with a name, for example "Realistic portrait — SDXL": the model, size,
+sampler, steps, CFG, style, "things to avoid", LoRAs and their weights, hires fix and ADetailer. It never holds the
+words of one picture; it can hold a **prompt template** such as `{subject}, soft window light`, where `{subject}` is
+replaced by what you type.
+
+- The **Recipe** list at the top of the form loads one. **💾** saves the form as a recipe, **✏** renames, **🗑** deletes,
+  **⭐** makes it the default (it is loaded when the Images tab opens).
+- **💾 Save as recipe** under any picture saves the settings that picture was made with ("use these settings again").
+- A few **starter** recipes come with the app, made from the usual settings for each kind of model: Realistic portrait
+  (SDXL), Cinematic scene (SDXL), Portrait with hires fix (SD1.5), Book character portrait (SDXL), and Natural
+  picture (Flux, shown only when a Flux model is installed). They are a good beginning, not magic: you can copy them
+  and change them.
+- **📖 Book pictures use** can be a checkpoint or a recipe, so Akọwe's pictures get all of that recipe's settings.
+- Alfred can list, load, save, rename and delete recipes, and change any field of the Images form. He always shows
+  his "I will…" card first.
+- Recipes are kept in AutoInjector's own data folder (`sd-recipes.json`, next to `sd-library.json`).
+
+#### 🧑‍⚖️ The AI judge and 🔁 Make it better
+
+- **🧑‍⚖️ Judge** (under a picture) sends the picture and its settings to an AI that looks at it. It gives scores from 1
+  to 10 (does it match the words, how good it looks, hands and faces, mistakes such as blur, extra fingers, text or
+  melted details, composition and light, and how well it looks like the character when there is a character lock),
+  a verdict (**keep**, **fix** or **redo**), what is good, what is bad, and what to change. The verdict is saved with
+  the picture. If the judge's verdict doesn't match its own scores, AutoInjector goes by the scores and says so.
+- **🔁 Make it better** judges the picture, changes the settings and words the judge suggested (more steps, a different
+  sampler, the model's own size, hires fix, ADetailer for the face or hands, words to avoid, a LoRA weight, another
+  installed model, a new seed …), makes it again and judges again — up to 3 rounds (you can choose 1 to 5). It stops
+  early when a picture passes, or when it stops getting better. Every round is kept and shown side by side with its
+  score and what changed. **✔ Keep this one** shows the one you like; **💾 Save these settings as a recipe** keeps its
+  settings. Your own defaults are never changed. **⏹ Stop** stops it.
+- **Make 4, pick the best** (next to 🎨 Generate) makes 4 pictures with different seeds, judges each, and shows the best.
+- **Which AI judges** (🧑‍⚖️ AI judge settings, in the form): the first one that is ready, in this order unless you change it:
+  1. **Claude Code** on your PC (it uses your Claude plan). AutoInjector puts the picture alone in an empty folder and
+     lets Claude Code use only its Read tool to look at it.
+  2. **A web AI pane** (Claude or ChatGPT): a new chat, with the picture uploaded. It never interrupts a pane Akọwe is
+     using for a book; it says so instead.
+  3. **A local vision model** in Ollama (for example qwen2.5vl or llava): offline and free, but weaker — its verdicts
+     are marked "weaker".
+  The result always says which judge was used. Each judge can be switched off.
+- **It uses AI usage.** Each judgement is one AI answer (your Claude plan or ChatGPT), except the local model. Make it
+  better uses one per round, Make 4 uses four. The buttons' tooltips say so.
+- **Judge and improve book pictures automatically** (off by default, because it costs AI usage): Akọwe's character
+  pictures are judged and improved (at most 2 rounds) before Akọwe gets them.
+- Alfred can judge a picture, run Make it better and Make 4 for you, and explains the verdict in plain words.
+- The log keeps only codes and scores, never your prompts.
+
 ### 🎬 Video
 
 - **What it is:** the 🎬 Video tab. Two engines:

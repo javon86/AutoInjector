@@ -1714,8 +1714,8 @@
   function recipeNote(t, tone) { const e = $('sd-recipe-note'); if (!e) return; e.hidden = !t; e.textContent = t || ''; e.dataset.tone = tone || ''; }
   async function loadRecipes(first) {
     const r = await call('recipes', 'list');
-    if (!r || !r.ok) { st.recipes = []; renderRecipeSelect(); return; }
-    st.recipes = r.recipes || []; st.defaultRecipe = r.defaultId || '';
+    if (!r || !r.ok || !Array.isArray(r.recipes)) { st.recipes = []; renderRecipeSelect(); return; }
+    st.recipes = r.recipes; st.defaultRecipe = r.defaultId || '';
     renderRecipeSelect(); fillBookSelect(); bookNote();
     if (first && st.defaultRecipe && !st.recipeSel) await useRecipe(st.defaultRecipe, true);
   }
@@ -2037,11 +2037,12 @@
   const JUDGE_LABEL = { 'claude-code': 'Claude Code (on this PC)', pane: 'Web AI pane (Claude / ChatGPT)', local: 'Local vision model (Ollama, offline — weaker)' };
   async function loadJudgeSettings() {
     const r = await call('judgeSettings');
-    if (!r || !r.ok) { if ($('sd-sec-judge')) $('sd-sec-judge').hidden = !!(r && r.error === 'NO_API'); return; }
+    if (!r || !r.ok || !Array.isArray(r.order)) { if ($('sd-sec-judge')) $('sd-sec-judge').hidden = !!(r && r.error === 'NO_API'); return; }
     st.judgeSet = r; renderJudgeSettings();
   }
   function renderJudgeSettings() {
-    const s = st.judgeSet; const box = $('sd-judge-order'); if (!s || !box) return;
+    const s = st.judgeSet; const box = $('sd-judge-order'); if (!s || !box || !Array.isArray(s.order)) return;
+    s.enabled = s.enabled || {};
     box.textContent = '';
     s.order.forEach((id, i) => {
       const row = document.createElement('div'); row.className = 'sd-row'; row.setAttribute('role', 'listitem');
@@ -2057,14 +2058,14 @@
     $('sd-judge-rounds').value = s.rounds; $('sd-judge-bar').value = s.bar; $('sd-judge-autobook').checked = !!s.autoBook;
     setText('sd-judge-badge', `${s.order.filter((x) => s.enabled[x] !== false).length} on${s.autoBook ? ' · book pictures' : ''}`);
   }
-  async function saveJudge(patch) { const r = await call('judgeSettings', patch); if (r && r.ok) { st.judgeSet = r; renderJudgeSettings(); judgeStatusLine(); } }
+  async function saveJudge(patch) { const r = await call('judgeSettings', patch); if (r && r.ok && Array.isArray(r.order)) { st.judgeSet = r; renderJudgeSettings(); judgeStatusLine(); } }
   $('sd-judge-pane').onchange = (e) => saveJudge({ paneSite: e.target.value });
   $('sd-judge-rounds').onchange = (e) => saveJudge({ rounds: Number(e.target.value) });
   $('sd-judge-bar').onchange = (e) => saveJudge({ bar: Number(e.target.value) });
   $('sd-judge-autobook').onchange = (e) => saveJudge({ autoBook: !!e.target.checked });
   async function judgeStatusLine() {
     const r = await call('judgeStatus');
-    if (!r || !r.ok) { setText('sd-judge-status', ''); return; }
+    if (!r || !r.ok || !r.judges) { setText('sd-judge-status', ''); return; }
     const parts = Object.entries(r.judges).map(([id, j]) => `${j.ok ? '✔' : '✖'} ${JUDGE_LABEL[id].split(' (')[0]}${j.ok ? '' : `: ${j.why || j.state}`}`);
     setText('sd-judge-status', `${r.next ? `Next judge: ${r.nextLabel}.` : 'No judge is ready right now.'}\n${parts.join('\n')}`);
   }

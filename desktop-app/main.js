@@ -6008,6 +6008,7 @@ ipcMain.handle("logs:download-all", async () => {
     addIfExists(debugLogPath());
     addIfExists(stateFilePath());
     addIfExists(path.join(ud, "autoinjector-shared.db"));
+    addIfExists(path.join(ud, "sd-recipes.json")); // 💾 the picture recipes (settings, so a "bad pictures" report shows what was used)
     // Sweep the user-data folder for any other *.log the app (or a subsystem) left.
     try { for (const n of fs.readdirSync(ud)) if (/\.log$/i.test(n)) addIfExists(path.join(ud, n)); } catch (_) {}
 
