@@ -189,3 +189,21 @@ img2img / inpaint / upscale, ControlNet / ADetailer / styles / scripts lists, Co
 and `capabilities()` (a machine-readable list of every operation + parameter schema for the
 connected app) — are available without HTTP through `require('./sd-api').get()` — see
 `desktop-app/STABLE_DIFFUSION_PLAN.md` ("Module API" and "Coverage").
+
+## Recipes and the AI judge (PR #TBD)
+
+* `POST /image/request` (and `images.generate`) take **`recipe`**: a saved recipe's id or name (`images.recipes.list`).
+  Its settings come first, the request's own fields win; its prompt template wraps `prompt` (`{subject}`). With no
+  recipe and no checkpoint, a `bridge:` request uses "📖 Book pictures use" — a checkpoint or a recipe (`bookRecipe`).
+* With **Judge and improve book pictures automatically** on (off by default; it costs AI usage), an SD picture for a
+  `bridge:` request is judged and improved (at most 2 rounds) first; the answer then has
+  `judged: {rounds, best, scores, verdict, by}` and the returned image `improvedFrom` (the first round's file name).
+* Every saved picture's `.json` holds the full record (`desktop-app/sd-record.js`): `promptTyped`, `prompt`,
+  `fullPrompt`, `negativePrompt` + `negativeAuto`, `style`, `checkpoint` + `checkpointHash` + `family`, `vae`, `sampler`,
+  `scheduler`, `steps`, `cfgScale`, the real `seed`, `width`, `height`, `index`, `hires`, `refiner`, `loras` (with
+  `hash`), `triggers`, `adetailer`, `controlnet`, `source` + `denoise`, `clipSkip`, `engine`, `backend`,
+  `workflowName`, `appVersion`, `askedBy {who, from, book?, character?}`, `recipe`, `judge`.
+* Module operations (`sd-api.js`, Alfred's `sd_call`): `images.remake`, `images.judge`, `images.improve`,
+  `images.improveStop`, `images.makeBest`, `images.judgeStatus`, `images.judgeSettings`, `images.recipes.list / get /
+  save / rename / delete / setDefault / fromPicture / apply`, `images.form.get / set`.
+

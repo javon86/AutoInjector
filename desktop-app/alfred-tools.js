@@ -1383,7 +1383,7 @@ def(appTool(true));
 
 def({
   name: 'sd_call', title: 'Use the 🎨 Images module', group: 'images', changes: true, timeoutMs: 600000,
-  description: 'Any Stable Diffusion control through the 🎨 Images module (sd-api): method = a module method such as images.generate (every generation field: prompt, negativePrompt, loras, characterLock, width, height, steps, cfgScale, seed, sampler, scheduler, checkpoint, vae, count, initImage, denoise … plus, when the module supports it, extra = raw A1111 payload fields, options = /sdapi/v1/options keys, workflow = a ComfyUI workflow JSON with {{name}} parameters), images.status/progress/cancel/gallery/test, sd.status/detect/connect/targets/start/stop, sd.install.*, library.find/get/characterLock/locks/scan, and any newer method the module lists. Read-only methods run directly; the rest ask first.',
+  description: 'Any Stable Diffusion control through the 🎨 Images module (sd-api): method = a module method such as images.generate (every generation field: prompt, negativePrompt, loras, characterLock, width, height, steps, cfgScale, seed, sampler, scheduler, checkpoint, vae, count, initImage, denoise … plus, when the module supports it, extra = raw A1111 payload fields, options = /sdapi/v1/options keys, workflow = a ComfyUI workflow JSON with {{name}} parameters), images.status/progress/cancel/gallery/test, sd.status/detect/connect/targets/start/stop, sd.install.*, library.find/get/characterLock/locks/scan, images.form.get/set (read or change ANY field of the 🎨 Images form), images.recipes.list/get/save/rename/delete/setDefault/fromPicture/apply (saved settings; generate takes recipe), images.remake (exactly again, same seed), images.judge (an AI judge scores a picture — explain its verdict to the person in plain words), images.improve (🔁 Make it better: judge → fix → remake, rounds), images.makeBest (4 seeds, judged, best picked), images.judgeStatus/judgeSettings, and any newer method the module lists. Judging uses AI usage. Read-only methods run directly; the rest ask first.',
   args: { type: 'object', required: ['method'], properties: { method: { type: 'string', minLength: 3, maxLength: 80 }, args: { 'x-passthrough': true } }, additionalProperties: false },
   allowAlwaysFor: () => false,
   allowKey: (a) => `sd_call:${a && a.method}`,
@@ -1406,7 +1406,9 @@ def({
     const images = r && Array.isArray(r.images) ? r.images.map((x) => x.path).filter(Boolean) : [];
     // what the Images module corrected or retried (unknown sampler, size, "made it with the basics") — Alfred should see it
     const notes = imageNotes(r && r.warnings);
-    return { ok: true, message: `${images.length ? `Saved ${images.length} picture(s).` : 'Done.'}${notes.length ? ` Notes: ${clip(notes.join(' '), 600)}` : ''}`, data: shrink(r), image: images[0] || null };
+    // 🧑‍⚖️ the judge / 🔁 Make it better / Make 4 and pick the best answer with `say`: plain words Alfred passes on
+    const say = r && typeof r.say === 'string' && r.say ? ` ${clip(r.say, 700)}` : '';
+    return { ok: true, message: `${images.length ? `Saved ${images.length} picture(s).` : 'Done.'}${say}${notes.length ? ` Notes: ${clip(notes.join(' '), 600)}` : ''}`, data: shrink(r), image: images[0] || (r && r.bestPath) || null };
   },
 });
 // ---- 🧰 tool servers (MCP) the user added in ⚙ More settings → 🧰 Tools ----------------------------------

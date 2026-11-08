@@ -103,6 +103,7 @@ const IPC_INVENTORY = [
   'sd:lists', 'sd:open-images-folder', 'sd:open-install-folder', 'sd:open-log', 'sd:open-ui', 'sd:progress', 'sd:record', 'sd:set-autostart',
   'sd:settings', 'sd:show-file', 'sd:start', 'sd:start-cpu', 'sd:use-other-build', 'sd:status', 'sd:stop', 'sd:targets', 'sd:test', 'sd:fix-retry',
   'sd:img2img', 'sd:inpaint', 'sd:upscale', 'sd:extras', 'sd:options-get', 'sd:options-set', 'sd:interrupt', 'sd:skip', 'sd:refresh', 'sd:memory', 'sd:workflows', 'sd:workflow-get', 'sd:workflow-save', 'sd:workflow-delete', 'sd:workflow-run', 'sd:capabilities',
+  'sd:remake', 'sd:recipes', 'sd:judge', 'sd:improve', 'sd:improve-stop', 'sd:make-best', 'sd:judge-status', 'sd:judge-settings', 'sd:form-report', // ♻ 💾 🧑‍⚖️ 🔁
   'sd:request', 'sd:chatgpt-status', 'sd:chatgpt-cancel', 'sd:chatgpt-settings', 'sd:quality', 'sd:model-check', 'sd:restart-with-models', 'sd:open-workflows-folder', 'sd:comfy-use-stuff',
   'sd:addons', 'sd:addons-install', 'sd:addons-update', 'sd:addons-remove', 'sd:addons-restart', 'sd:addons-open-page', 'sd:addons-folder', 'sd:addons-open-folder', // PR #125
   'sdlib:add-folder', 'sdlib:check', 'sdlib:collection', 'sdlib:delete-lock', 'sdlib:folders', 'sdlib:list', 'sdlib:locks', 'sdlib:remove-folder',
@@ -137,6 +138,8 @@ const EVENTS = {
   'send-error': 'UI live update', 'sent': 'UI live update', 'sequence-state': 'UI live update', 'setup-progress': 'UI live update', 'setup-status': 'UI live update',
   'terminal-data': 'UI live update', 'terminal-state': 'UI live update', 'tuner-state': 'UI live update', 'voice-speaking': 'UI live update', 'voice-mic': 'UI live update (🎤 "starting the voice engine / downloading the speech model")', 'waiting-changed': 'UI live update',
   'window-collapse-changed': 'UI live update',
+  'sd-judge': 'UI live update (🧑‍⚖️ / 🔁 judge and Make it better progress — Alfred gets the result of images.judge / images.improve)',
+  'sd-form-apply': 'UI live update (the 🎨 Images form fills in a recipe or Alfred\'s images.form.set — Alfred causes it, through his card)',
   'lockers-state': 'UI live update (the 📁 AI lockers switched on / off in ⚙ Advanced — the Locker tab comes back or goes)',
   'ai-download': 'UI live update (⬇ a file an AI gives you: progress, then where it was saved)',
   'ease-show': 'UI live update (the Help menu asks the panel to open ✅ Setup checklist / 🩺 Something\'s wrong? / tours)',
@@ -176,7 +179,10 @@ const SD_API_METHODS = ['images.status', 'images.generate', 'images.progress', '
   'sd.targets', 'sd.start', 'sd.stop', 'sd.install.check', 'sd.install.install', 'sd.install.downloadModel', 'sd.install.cancel', 'library.find', 'library.get',
   'library.characterLock', 'library.locks', 'library.scan',
   'images.img2img', 'images.inpaint', 'images.upscale', 'sd.lists', 'sd.options.get', 'sd.options.set', 'sd.options.schema', 'sd.controlnet.models', 'sd.controlnet.modules', 'sd.adetailer.models', 'sd.styles', 'sd.scripts', 'sd.embeddings', 'sd.upscalers', 'sd.extraFields', 'sd.interrupt', 'sd.skip', 'sd.refresh', 'sd.memory', 'sd.workflows.list', 'sd.workflows.get', 'sd.workflows.save', 'sd.workflows.delete', 'sd.workflows.run', 'sd.comfy.objectInfo', 'sd.comfy.queue', 'sd.comfy.upload', 'sd.comfy.free',
-  'images.chatgptStatus', 'images.chatgptCancel', 'images.chatgptSettings', 'images.qualitySettings'];
+  'images.chatgptStatus', 'images.chatgptCancel', 'images.chatgptSettings', 'images.qualitySettings',
+  'images.remake', 'images.judge', 'images.improve', 'images.improveStop', 'images.makeBest', 'images.judgeStatus', 'images.judgeSettings',
+  'images.recipes.list', 'images.recipes.get', 'images.recipes.save', 'images.recipes.rename', 'images.recipes.delete', 'images.recipes.setDefault', 'images.recipes.fromPicture', 'images.recipes.apply',
+  'images.form.get', 'images.form.set'];
 // The 🎬 Video module (video-api.js): every method through video_call.
 const VIDEO_API_METHODS = ['video.status', 'video.capabilities', 'video.models', 'video.progress', 'video.gallery', 'video.cancel', 'video.generate', 'video.animate', 'video.test', 'video.settings',
   'video.install.check', 'video.install.downloadModel', 'video.install.installAll', 'video.install.cancel',
@@ -395,6 +401,54 @@ async function main() {
   // the one-click fix a failed picture offers (VAE → Automatic, also in Forge's own settings) + one retry
   d = await drive('sd_call', { method: 'images.fixAndRetry', args: { fix: 'vae-automatic', request: { prompt: 'retry the lighthouse' } } });
   if (assert(d.carded && d.result && d.result.ok && forge.state.options.sd_vae === 'Automatic' && /retry the lighthouse/.test(forge.state.lastTxt2img.prompt), 'images.fixAndRetry: asks first, then sets VAE → Automatic on Forge and makes the picture again')) mark('sd:images.fixAndRetry', 'real sd-api + fake Forge');
+  // ---- ♻ Remake · 💾 recipes · 🧑‍⚖️ judge (a fake `claude` CLI) · 🔁 Make it better · Make 4, pick the best · the form
+  {
+    const { makeFakeClaude } = require('./fixtures/fake-claude-judge');
+    process.env.AUTOINJECTOR_CLAUDE_PATH = makeFakeClaude(path.join(TMP, 'fakeclaude'));
+    process.env.FAKE_CLAUDE_JUDGE_STATE = path.join(TMP, 'fakeclaude', 'n');
+    const rec0 = JSON.parse(fs.readFileSync(png.replace(/\.png$/, '.json'), 'utf8'));
+    d = await drive('sd_call', { method: 'images.remake', args: { path: png } });
+    const lr = forge.state.lastTxt2img;
+    if (assert(d.carded && d.result && d.result.ok && lr.seed === rec0.seed && lr.prompt.startsWith(rec0.prompt) && lr.width === rec0.width && lr.steps === rec0.steps && /<lora:odile_face:0\.7>/.test(lr.prompt), `images.remake: asks first, then makes the picture again with the same seed (${lr.seed}), prompt, size, steps and LoRA`)) mark('sd:images.remake', 'real sd-api + fake Forge');
+    d = await drive('sd_call', { method: 'images.recipes.list', args: {} });
+    if (assert(!d.carded && d.result && d.result.data && d.result.data.recipes.some((x) => x.starter), 'images.recipes.list: read-only, lists the starter recipes')) mark('sd:images.recipes.list', 'real sd-api');
+    d = await drive('sd_call', { method: 'images.recipes.save', args: { name: 'Cov portrait', settings: { steps: 31, cfgScale: 6, width: 512, height: 768, loras: [{ name: 'odile_face', weight: 0.5 }] }, promptTemplate: '{subject}, soft light' } });
+    const rid = d.result && d.result.data && d.result.data.recipe && d.result.data.recipe.id;
+    if (assert(d.carded && !!rid, 'images.recipes.save: asks first, then saves a recipe')) mark('sd:images.recipes.save', 'real sd-api');
+    d = await drive('sd_call', { method: 'images.recipes.get', args: { id: 'Cov portrait' } });
+    if (assert(!d.carded && d.result && d.result.data && d.result.data.recipe.settings.steps === 31, 'images.recipes.get: read-only, by name')) mark('sd:images.recipes.get', 'real sd-api');
+    d = await drive('sd_call', { method: 'images.recipes.rename', args: { id: rid, name: 'Cov portrait 2' } });
+    if (assert(d.carded && d.result && d.result.ok, 'images.recipes.rename: asks first, renames')) mark('sd:images.recipes.rename', 'real sd-api');
+    d = await drive('sd_call', { method: 'images.recipes.setDefault', args: { id: rid } });
+    if (assert(d.carded && d.result && d.result.data && d.result.data.defaultId === rid, 'images.recipes.setDefault: asks first, sets the default')) mark('sd:images.recipes.setDefault', 'real sd-api');
+    d = await drive('sd_call', { method: 'images.generate', args: { prompt: 'a ferryman', recipe: 'Cov portrait 2' } });
+    const lg = forge.state.lastTxt2img;
+    assert(d.carded && d.result && d.result.ok && lg.steps === 31 && lg.cfg_scale === 6 && /^a ferryman, soft light/.test(lg.prompt) && /<lora:odile_face:0\.5>/.test(lg.prompt), 'images.generate with recipe: the recipe\'s settings, template and LoRA reach Forge');
+    d = await drive('sd_call', { method: 'images.recipes.fromPicture', args: { path: png, name: 'From the lighthouse' } });
+    if (assert(d.carded && d.result && d.result.data && d.result.data.recipe.settings.width === 640, 'images.recipes.fromPicture: asks first, saves the picture\'s settings as a recipe')) mark('sd:images.recipes.fromPicture', 'real sd-api');
+    d = await drive('sd_call', { method: 'images.recipes.apply', args: { id: rid } });
+    if (assert(d.carded && d.result && d.result.ok, 'images.recipes.apply: asks first, puts the recipe into the Images form')) mark('sd:images.recipes.apply', 'real sd-api');
+    d = await drive('sd_call', { method: 'images.form.set', args: { fields: { steps: 40, style: 'photo', hires: { scale: 1.5, denoise: 0.4 } } } });
+    if (assert(d.carded && d.result && d.result.ok, 'images.form.set: asks first, changes the Images form fields')) mark('sd:images.form.set', 'real sd-api');
+    await call('sd:form-report', { form: { steps: 40, prompt: 'x' } });
+    d = await drive('sd_call', { method: 'images.form.get', args: {} });
+    if (assert(!d.carded && d.result && d.result.data && d.result.data.form && d.result.data.form.steps === 40, 'images.form.get: read-only, what the form shows')) mark('sd:images.form.get', 'real sd-api');
+    d = await drive('sd_call', { method: 'images.recipes.delete', args: { id: rid } });
+    if (assert(d.carded && d.result && d.result.ok, 'images.recipes.delete: asks first, deletes')) mark('sd:images.recipes.delete', 'real sd-api');
+    d = await drive('sd_call', { method: 'images.judgeStatus', args: {} });
+    if (assert(!d.carded && d.result && d.result.data && d.result.data.judges['claude-code'].ok && d.result.data.next === 'claude-code', 'images.judgeStatus: read-only — Claude Code (the fake CLI) is ready and goes first')) mark('sd:images.judgeStatus', 'real sd-api + fake claude');
+    d = await drive('sd_call', { method: 'images.judgeSettings', args: { rounds: 2, enabled: { local: false } } });
+    if (assert(d.carded && d.result && d.result.data && d.result.data.rounds === 2 && d.result.data.enabled.local === false, 'images.judgeSettings: asks first, changes the judge settings')) mark('sd:images.judgeSettings', 'real sd-api');
+    d = await drive('sd_call', { method: 'images.judge', args: { path: png } });
+    const jrec = JSON.parse(fs.readFileSync(png.replace(/\.png$/, '.json'), 'utf8'));
+    if (assert(d.carded && d.result && d.result.data && d.result.data.judge && d.result.data.judge.by === 'claude-code' && jrec.judge && jrec.judge.scores && /judged by Claude Code/.test(d.text), 'images.judge: asks first (it uses AI usage), Claude Code judges, the verdict is saved with the picture and explained in plain words')) mark('sd:images.judge', 'real sd-api + fake claude');
+    d = await drive('sd_call', { method: 'images.improve', args: { path: png, rounds: 2 } });
+    if (assert(d.carded && d.result && d.result.data && d.result.data.rounds.length === 2 && d.result.data.defaultsChanged === false, 'images.improve: asks first, runs 2 rounds (judge → fix → remake), never touches the defaults')) mark('sd:images.improve', 'real sd-api + fake claude + fake Forge');
+    d = await drive('sd_call', { method: 'images.makeBest', args: { request: { prompt: 'four ferries' }, count: 2 } });
+    if (assert(d.carded && d.result && d.result.data && d.result.data.images.length === 2 && d.result.data.best >= 0, 'images.makeBest: asks first, makes 2 with different seeds, judges them, picks the best')) mark('sd:images.makeBest', 'real sd-api + fake claude + fake Forge');
+    d = await drive('sd_call', { method: 'images.improveStop', args: {} });
+    if (assert(d.carded && d.result && d.result.ok, 'images.improveStop: asks first, stops (nothing running → fine)')) mark('sd:images.improveStop', 'real sd-api');
+  }
   for (const m of ['images.status', 'images.progress', 'images.gallery', 'sd.status', 'sd.targets', 'sd.detect', 'sd.install.check', 'library.locks']) {
     d = await drive('sd_call', { method: m, args: m === 'images.gallery' ? { limit: 5 } : {} });
     if (assert(!d.carded && d.result && d.result.ok !== false && d.result.data !== undefined, `sd_call ${m}: read-only, runs directly against the real module`)) mark(`sd:${m}`, 'real sd-api');

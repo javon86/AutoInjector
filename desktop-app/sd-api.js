@@ -72,9 +72,27 @@ const OPS = [
   { name: 'images.test', description: 'Make a 512×512 test picture', params: O(), args: [], backends: BOTH },
   { name: 'images.chatgptStatus', description: 'The ChatGPT image engine: is its pane ready (and why not), is it drawing, for how long, the last result', params: O(), args: [], backends: ['*'] },
   { name: 'images.chatgptCancel', description: 'Stop waiting for the ChatGPT picture being made', params: O(), args: [], backends: ['*'] },
-  { name: 'images.qualitySettings', description: 'Picture quality settings: bookCheckpoint = the checkpoint Akọwe\'s book pictures are made with ("" = whatever is loaded). Without arguments: read them.', params: O({ bookCheckpoint: { type: 'string', maxLength: 300 } }), args: 'object', backends: ['*'] },
+  { name: 'images.qualitySettings', description: 'Picture quality settings: bookCheckpoint = the checkpoint Akọwe\'s book pictures are made with ("" = whatever is loaded), or bookRecipe = a saved recipe they use instead. Without arguments: read them.', params: O({ bookCheckpoint: { type: 'string', maxLength: 300 }, bookRecipe: { type: 'string', maxLength: 200 } }), args: 'object', backends: ['*'] },
   { name: 'images.chatgptSettings', description: 'ChatGPT image engine settings: freshChatPerSeries = a new ChatGPT chat for each reference-view series (default: one chat, which keeps the character the same)', params: O({ freshChatPerSeries: { type: 'boolean' }, timeoutMs: { type: 'integer', minimum: 10000, maximum: 1800000 } }), args: 'object', backends: ['*'] },
   { name: 'images.fixAndRetry', description: 'Apply the one-click fix a failed picture offered (its actions[].id, e.g. "vae-automatic" = VAE → Automatic, also in A1111\'s settings) and try the same request once more', params: O({ fix: { type: 'string', enum: ['vae-automatic'] }, request: OPEN('The images.generate params that failed') }, ['fix']), args: ['fix', 'request'], backends: BOTH },
+  // ♻ remake · 💾 recipes · 🧑‍⚖️ judge · 🔁 Make it better · the Images form (PR #TBD). changes: true → Alfred asks first.
+  { name: 'images.remake', changes: true, description: 'Make a saved picture again EXACTLY from its sidecar: the prompt as sent, the same seed, every setting and LoRA (ChatGPT pictures: the same words, no seed)', params: O({ path: { type: 'string', maxLength: 1000 } }, ['path']), args: ['path'], backends: ['*'] },
+  { name: 'images.judge', changes: true, description: 'Ask an AI judge (Claude Code on this PC, else a web AI pane, else a local Ollama vision model) to look at a picture with its prompt and settings: scores 1–10, verdict keep / fix / redo, what is good / bad, and fixes. Uses one AI answer. The verdict is saved with the picture', params: O({ path: { type: 'string', maxLength: 1000 }, judge: { type: 'string', enum: ['claude-code', 'pane', 'local'], description: 'only this judge (default: the best available)' } }, ['path']), args: 'object', backends: ['*'] },
+  { name: 'images.improve', changes: true, description: '🔁 Make it better: judge → apply the suggested setting and prompt changes → make it again → judge again, up to `rounds` (default 3, max 5); stops early when it passes or stops improving. Keeps every round. Never changes the defaults. Each round uses one AI answer', params: O({ path: { type: 'string', maxLength: 1000 }, rounds: { type: 'integer', minimum: 1, maximum: 5 }, bar: { type: 'number', minimum: 5, maximum: 10 } }, ['path']), args: 'object', backends: ['*'] },
+  { name: 'images.improveStop', changes: true, description: 'Stop "Make it better" / "Make 4 and pick the best"', params: O(), args: [], backends: ['*'] },
+  { name: 'images.makeBest', changes: true, description: 'Make 4 pictures with different seeds, judge them all and pick the best (uses 4 AI answers)', params: O({ request: OPEN('images.generate params (prompt, recipe, settings …)'), count: { type: 'integer', minimum: 2, maximum: 4 } }, ['request']), args: 'object', backends: BOTH },
+  { name: 'images.judgeStatus', changes: false, description: 'Which AI judges are available now (Claude Code installed / signed in, the panes, Ollama with a vision model) and which goes first', params: O(), args: [], backends: ['*'] },
+  { name: 'images.judgeSettings', changes: true, description: 'Judge settings: order (["claude-code","pane","local"]), enabled {id: bool}, paneSite ("claude" | "chatgpt"), bar (pass mark 5–10), rounds (1–5), autoBook (judge and improve Akọwe\'s book pictures automatically, max 2 rounds — costs AI usage). Without arguments: read them', params: O({ order: { type: 'array', items: { type: 'string', enum: ['claude-code', 'pane', 'local'] }, maxItems: 3 }, enabled: OPEN('{ "claude-code": true, "pane": false, "local": true }'), paneSite: { type: 'string', enum: ['claude', 'chatgpt'] }, bar: { type: 'number', minimum: 5, maximum: 10 }, rounds: { type: 'integer', minimum: 1, maximum: 5 }, autoBook: { type: 'boolean' } }), args: 'object', backends: ['*'] },
+  { name: 'images.recipes.list', changes: false, description: 'Saved picture recipes (named settings, incl. the starter ones) and which is the default', params: O(), args: [], backends: ['*'] },
+  { name: 'images.recipes.get', changes: false, description: 'One recipe with all its settings', params: O({ id: { type: 'string', maxLength: 200, description: 'id or name' } }, ['id']), args: 'object', backends: ['*'] },
+  { name: 'images.recipes.save', changes: true, description: 'Save a recipe: name, settings {checkpoint, vae, sampler, scheduler, steps, cfgScale, width, height, clipSkip, style, negativePrompt, negativeMode ("auto"|"replace"|"add"|"none"), loras [{name, weight}], hires {scale, upscaler, denoise, secondPassSteps}, refiner {checkpoint, switchAt}, adetailer [...]}, promptTemplate (with {subject}), makeDefault. Same name or id = update', params: O({ id: { type: 'string', maxLength: 200 }, name: { type: 'string', maxLength: 120 }, settings: OPEN('the settings'), promptTemplate: { type: 'string', maxLength: 2000 }, description: { type: 'string', maxLength: 600 }, makeDefault: { type: 'boolean' } }, ['name', 'settings']), args: 'object', backends: ['*'] },
+  { name: 'images.recipes.rename', changes: true, description: 'Rename a recipe', params: O({ id: { type: 'string', maxLength: 200 }, name: { type: 'string', maxLength: 120 } }, ['id', 'name']), args: 'object', backends: ['*'] },
+  { name: 'images.recipes.delete', changes: true, description: 'Delete a recipe (a starter recipe is hidden)', params: O({ id: { type: 'string', maxLength: 200 } }, ['id']), args: 'object', backends: ['*'] },
+  { name: 'images.recipes.setDefault', changes: true, description: 'Make a recipe the default (it is loaded into the Images form when the tab opens); "" = none', params: O({ id: { type: 'string', maxLength: 200 } }), args: 'object', backends: ['*'] },
+  { name: 'images.recipes.fromPicture', changes: true, description: 'Save the settings a picture was made with as a recipe ("use these settings again")', params: O({ path: { type: 'string', maxLength: 1000 }, name: { type: 'string', maxLength: 120 }, makeDefault: { type: 'boolean' } }, ['path']), args: 'object', backends: ['*'] },
+  { name: 'images.recipes.apply', changes: true, description: 'Put a recipe\'s settings into the 🎨 Images tab form, so the person sees them (nothing is made until Generate)', params: O({ id: { type: 'string', maxLength: 200 } }, ['id']), args: 'object', backends: ['*'] },
+  { name: 'images.form.get', changes: false, description: 'What the 🎨 Images tab form shows now (prompt, style, size, checkpoint, sampler, steps, CFG, seed, LoRAs, hires, refiner, ADetailer …)', params: O(), args: [], backends: ['*'] },
+  { name: 'images.form.set', changes: true, description: 'Change any field of the 🎨 Images tab form: prompt, negativePrompt, style, aspect ("portrait"|"square"|"landscape"), width, height, checkpoint, vae, sampler, scheduler, steps, cfgScale, batchSize, seed, loras [{name, weight}], characterLock, hires {…} | false, refiner {…} | false, adetailer [...] | false, clipSkip, restoreFaces, tiling, engine, makeBest (bool). Nothing is made until Generate', params: O({ fields: OPEN('{ "steps": 30, "style": "photo", "hires": { "scale": 1.5, "denoise": 0.4 } }') }, ['fields']), args: 'object', backends: ['*'] },
   { name: 'sd.status', description: 'Image module + managed runner + installer state', params: O(), args: [], backends: ['*'] },
   { name: 'sd.detect', description: 'Look for SD apps on this PC (ports 7860–7865, 8188, …)', params: O(), args: [], backends: ['*'] },
   { name: 'sd.connect', description: 'Connect to an SD app (empty url = find one)', params: O({ url: { type: 'string', description: 'e.g. http://127.0.0.1:7860' } }), args: ['url'], backends: ['*'] },
@@ -162,12 +180,45 @@ function createImagesApi(d) {
       upscale: wrap((opts) => S('upscale', opts || {}, `api:${String((opts && opts.from) || 'alfred').slice(0, 40)}`)),
       progress: wrap(() => studio.progress()),
       cancel: wrap(() => studio.cancel()),
-      gallery: wrap(async (limit) => studio.gallery(limit)),
+      // compact records (Alfred reads ~6000 characters of a tool result): the main settings + the judge's verdict
+      gallery: wrap(async (limit) => {
+        const g = await studio.gallery(limit);
+        if (!g || !Array.isArray(g.items)) return g;
+        const keep = ['prompt', 'negativePrompt', 'checkpoint', 'family', 'sampler', 'scheduler', 'steps', 'cfgScale', 'seed', 'width', 'height', 'loras', 'style', 'engine', 'backend', 'purpose', 'createdAt', 'recipe'];
+        return Object.assign({}, g, { items: g.items.map((it) => {
+          const r = it.record || null; if (!r) return it;
+          const c = {}; for (const k of keep) if (r[k] !== undefined) c[k] = typeof r[k] === 'string' && r[k].length > 300 ? `${r[k].slice(0, 300)}…` : r[k];
+          if (r.judge) c.judge = { verdict: r.judge.verdict, overall: r.judge.overall, by: r.judge.by };
+          if (r.askedBy) c.askedBy = r.askedBy.who;
+          return Object.assign({}, it, { record: c });
+        }) });
+      }),
       test: wrap(() => studio.test()),
       chatgptStatus: wrap(async () => S('chatgptStatus')),
       chatgptCancel: wrap(async () => S('chatgptCancel')),
       chatgptSettings: wrap(async (o) => S('chatgptSettings', o || {})),
       qualitySettings: wrap(async (o) => S('quality', o && Object.keys(o).length ? o : null)),
+      remake: wrap((p) => S('remake', p, 'api:alfred-remake')),
+      judge: wrap((o) => S('judgeImage', o && o.path, { only: o && o.judge })),
+      improve: wrap((o) => S('improve', o && o.path, { rounds: o && o.rounds, bar: o && o.bar, from: 'api:alfred-improve' })),
+      improveStop: wrap(async () => S('improveStop')),
+      makeBest: wrap((o) => S('makeBest', Object.assign({}, (o && o.request) || {}), { count: o && o.count, from: 'api:alfred-best' })),
+      judgeStatus: wrap(() => S('judgeStatus')),
+      judgeSettings: wrap(async (o) => S('judgeSettings', o && Object.keys(o).length ? o : null)),
+      recipes: {
+        list: wrap(async () => S('recipesOp', 'list', {})),
+        get: wrap(async (o) => S('recipesOp', 'get', o || {})),
+        save: wrap(async (o) => S('recipesOp', 'save', Object.assign({ from: 'alfred' }, o || {}))),
+        rename: wrap(async (o) => S('recipesOp', 'rename', o || {})),
+        delete: wrap(async (o) => S('recipesOp', 'delete', o || {})),
+        setDefault: wrap(async (o) => S('recipesOp', 'setDefault', o || {})),
+        fromPicture: wrap(async (o) => S('recipesOp', 'fromPicture', o || {})),
+        apply: wrap(async (o) => S('recipeToForm', o && o.id)),
+      },
+      form: {
+        get: wrap(async () => S('formGet')),
+        set: wrap(async (o) => S('formSet', o && o.fields, 'set')),
+      },
       fixAndRetry: wrap((fix, request) => S('fixAndRetry', fix, request || {}, `api:${String((request && request.from) || 'alfred').slice(0, 40)}`)),
     },
     sd: {
@@ -236,7 +287,7 @@ function createImagesApi(d) {
         else if (!op.backends.includes(backend)) { supported = false; hint = backend === 'comfy' ? 'Needs Automatic1111 / Forge (this is ComfyUI).' : 'Needs ComfyUI (this is an A1111-family WebUI).'; }
         else if (op.feature && f[op.feature] === false) { supported = false; hint = op.feature === 'controlnet' ? (backend === 'comfy' ? 'This ComfyUI has no ControlNet nodes.' : 'Install the ControlNet extension (Forge has it built in).') : op.feature === 'adetailer' ? 'Install the ADetailer extension.' : `The server has no ${op.feature} endpoint.`; }
       }
-      return { name: op.name, description: op.description, params: _schemaFor(op, backend), args: op.args, backends: op.backends, supported, hint, code: supported ? undefined : 'UNSUPPORTED_ON_BACKEND' };
+      return { name: op.name, description: op.description, params: _schemaFor(op, backend), args: op.args, backends: op.backends, supported, hint, code: supported ? undefined : 'UNSUPPORTED_ON_BACKEND', changes: typeof op.changes === 'boolean' ? op.changes : undefined };
     });
     const generateParams = Object.entries(P.GENERATE_SCHEMA.properties).map(([name, v]) => ({
       name, type: v.type, supported: backend === 'comfy' ? v['x-comfy'] : backend ? 'yes' : 'unknown', note: backend === 'comfy' ? (v['x-comfy-note'] || '') : '', a1111Fields: v['x-a1111'],

@@ -104,6 +104,10 @@
 -->
 <div id="log"></div>
 <div id="composer-area"></div>
+<!-- 🧑‍⚖️ the picture judge (image-judge-service.js createPaneJudge): AutoInjector uploads the picture into this
+     file input (attachFileToSite, CDP DOM.setFileInputFiles); a message asking "judge of AI-made pictures" is then
+     answered with the judge JSON when a picture was attached, else with "I can't see a picture". -->
+<input type="file" id="fake-upload" accept="image/*" style="position:absolute;left:-9999px" aria-label="Attach a file">
 <script>
 (function () {
   const Q = new URLSearchParams(location.search);
@@ -429,6 +433,7 @@
       else if (bare) hook = { lines: ["Got it: " + bare[1] + ". What would you like me to do with it?"], to: "USER", tagged: false, bare: true };
       else if (pw) hook = { lines: [pw[1]], to: "USER", tagged: true };
       else if (tn) hook = { lines: [tn[1]], to: "USER", tagged: false, bare: true };
+      else if (/judge of AI-made pictures/.test(msg)) hook = judgeHook();
       else if (typeof window.__fakeHook === "function") { try { hook = await window.__fakeHook(msg); } catch (_) { hook = null; } }
       r = newReply("#" + seq, hook);
     }
@@ -454,6 +459,18 @@
     if (has("redraw") && !aborted) {
       setTimeout(() => { paint(md, full, true, r.raw); rec.redrawn = true; F.redraws++; }, between(200, 1200));
     }
+  }
+  // 🧑‍⚖️ the uploaded picture → the judge's JSON (one line, so the reply reads back as one JSON object)
+  const up = document.getElementById("fake-upload");
+  F.attached = [];
+  if (up) up.addEventListener("change", () => { for (const f of up.files || []) F.attached.push({ name: f.name, size: f.size, type: f.type }); });
+  function judgeHook() {
+    F.judged = (F.judged || 0) + 1;
+    const pic = F.attached.length > 0;
+    F.attached = [];
+    if (!pic) return { lines: ["I can't see a picture attached to your message."], to: "USER", tagged: true };
+    const j = { scores: { prompt: 8, quality: 7, anatomy: 6, artifacts: 7, composition: 8, character: null }, verdict: "fix", good: ["the pane saw the picture", "good light"], bad: ["hands a little soft"], fixes: [{ type: "steps", delta: 4 }], prompt: { add: ["detailed hands"] } };
+    return { lines: [JSON.stringify(j)], to: "USER", tagged: true };
   }
   F.idle = () => !generating && F.jobs === 0;
   F.dump = () => ({ site: SITE, quirks: F.quirks, posted: F.posted, replies: F.replies, stopClicks: F.stopClicks, ignoredPosts: F.ignoredPosts, redraws: F.redraws, idle: F.idle() });

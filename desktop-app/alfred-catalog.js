@@ -82,7 +82,7 @@ const TOOL_EXAMPLE = {
 };
 // Plain words where the tool's own description is written for the AI rather than for you.
 const TOOL_SAY = {
-  sd_call: 'Any picture setting the 🎨 Images tab has: size, steps, sampler, model, LoRAs, several at once, picture-to-picture, upscale.',
+  sd_call: 'Any picture setting the 🎨 Images tab has: size, steps, sampler, model, LoRAs, several at once, picture-to-picture, upscale; saved recipes; "judge this picture", "make it better", "make 4 and pick the best", remake it exactly.',
   video_call: 'Any 🎬 Video tab control: make a clip from words, bring a picture to life, models, progress, cancel.',
   open_akowe_page: 'Show a page of your book in the 📖 Akọwe tab (checklist, report, scene grid, journal, world, characters, pictures, cover).',
   character_dossier: 'Read a character\'s dossier: what is filled in, what is proposed, the portrait and the views.',
