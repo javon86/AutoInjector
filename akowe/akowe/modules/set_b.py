@@ -708,6 +708,15 @@ class PlanHandler(OperationHandler):
             out += (" Follow the story rules (context.story_rules): never break a hard rule; keep beliefs as beliefs "
                     "and protected mysteries unexplained; every exception, special object or power the plan uses must "
                     "stay inside a stated limit (scope).")
+        try:  # 🧠 lessons from the author's last books (quality_history.py)
+            from .. import quality_history  # noqa: PLC0415
+            if quality_history.planner_block(ctx.store, ctx.project_id):
+                out += " " + quality_history.PLAN_RULE
+        except Exception:  # noqa: BLE001 - guidance is best effort
+            pass
+        if rules and self.op_id in ("B03", "B11"):  # 📏 a special mechanism always needs its bounds in the plan
+            from .. import story_rules  # noqa: PLC0415
+            out += " " + story_rules.SPECIAL_PLAN_RULE
         if self._story_kind(ctx):  # 📚 the kind of story: its stages in order, its promise kept by the ending
             from .. import story_kind  # noqa: PLC0415
             out += " " + (story_kind.OUTLINE_RULE if self.op_id == "B11" else story_kind.PLAN_RULE)
@@ -847,6 +856,13 @@ class PlanHandler(OperationHandler):
             base["character_mode"] = character_mode.brief(character_mode.of_choices(choices))
             if rules and self.op_id in ("B03", "B11"):
                 base["story_rules"] = rules
+            try:  # 🧠 lessons from the author's last books (quality_history.py), carried onto this book at the start
+                from .. import quality_history  # noqa: PLC0415
+                ls = quality_history.planner_block(ctx.store, ctx.project_id)
+                if ls:
+                    base["lessons"] = ls
+            except Exception:  # noqa: BLE001 - guidance is best effort
+                pass
         base["predicate_conventions"] = pr.registry_brief(ctx.contracts.predicate_registry)
         base["selected_features"] = (ctx.manifest or {}).get("features") or {}
         return base

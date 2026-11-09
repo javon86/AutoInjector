@@ -521,8 +521,14 @@ class App:
             if len(parts) == 3 and parts[2] == "profile" and method in ("GET", "PUT"):
                 self._require_access(principal, pid)
                 if method == "GET":
-                    return 200, get_profile(self.store, pid)
-                return 200, save_profile(self.store, pid, body if isinstance(body, dict) else None)
+                    return 200, self._profile_out(pid, get_profile(self.store, pid))
+                old_author = get_profile(self.store, pid).get("author") or ""
+                prof = save_profile(self.store, pid, body if isinstance(body, dict) else None)
+                if isinstance(body, dict) and isinstance(body.get("author"), str) \
+                        and " ".join(body["author"].split()) != " ".join(str(old_author).split()):
+                    from . import pen_name  # noqa: PLC0415 - ✒️ the pen name the author typed is their saved one
+                    pen_name.remember(self.store, body["author"])
+                return 200, self._profile_out(pid, prof)
             if len(parts) >= 4 and parts[2] == "branches":
                 branch = parts[3]
                 self._require_access(principal, pid, branch)
@@ -1257,6 +1263,19 @@ class App:
                 s["last_opened_at"] = (stored.get("at") if stored.get("project_id") == s["project_id"] else None) \
                     or utcnow()
             out.append(s)
+        return out
+
+    def _profile_out(self, pid: str, prof: dict) -> dict:
+        """The book profile as the page gets it, with ``pen_name_warning`` when the pen name is a character's name
+        (in this book or another on the shelf; ✒️ pen_name.py). Never stored."""
+        out = dict(prof or {})
+        try:
+            from . import pen_name  # noqa: PLC0415
+            w = pen_name.warning(self.store, pid, out.get("author")) if out.get("author") else None
+        except Exception:  # noqa: BLE001 - a warning never breaks the profile
+            w = None
+        if w:
+            out["pen_name_warning"] = w
         return out
 
     def project_summary(self, principal: str, pid: str, branch: str = "main") -> dict:

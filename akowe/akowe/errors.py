@@ -8,9 +8,11 @@ ERROR_CODES = {
     "APPROVAL_REQUIRED", "EXPIRED_APPROVAL", "LOCKED_FACT", "SPAN_CONFLICT", "PATCH_OVERLAP",
     "DEPENDENCY_CYCLE", "LEASE_EXPIRED", "QUOTA_EXCEEDED", "CONTEXT_TOO_LARGE",
     "VALIDATOR_UNAVAILABLE", "TOC_NONCONVERGENCE",
+    # the AI answered with a short canned refusal ("I can't help with that") instead of doing the task
+    "AI_DECLINED",
 }
 
-RETRYABLE = {"TIMEOUT", "UPSTREAM_UNAVAILABLE", "RATE_LIMITED"}
+RETRYABLE = {"TIMEOUT", "UPSTREAM_UNAVAILABLE", "RATE_LIMITED", "AI_DECLINED"}
 
 
 def error(code: str, path: str = "", message: str | None = None) -> dict:

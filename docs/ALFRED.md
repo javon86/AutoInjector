@@ -271,7 +271,8 @@ the database, models, logs, setup, voice/image settings, self-repair, Akọwe co
 and `app_control` for doing (routing / Auto / hop limit / roles / active AIs, House Rules, prompt sequences and the
 prompt library, tests and checks, the butler's tasks and settings, lockers, the terminal connection, setup and
 downloads, voice, image/video settings, self-repair and the 🎯 picker, the Akọwe bridge/server/view, the Images
-tab's settings, library folders, collections and character locks, which tab is shown …). `app_help` explains any
+tab's settings, library folders, collections and character locks, which tab is shown, 💾 saved states —
+`saves.save` / `saves.load` / `saves.rename` / `saves.delete`, with `saves.list` to look …). `app_help` explains any
 action. They call the very same handlers as the buttons. A few things are deliberately **not** reachable, each
 with its reason in the file: saved passwords and connection keys, the phone/LAN switch, opening any web address,
 free command execution (the terminal's run/approve, the butler's run-command tool), developer tools and window

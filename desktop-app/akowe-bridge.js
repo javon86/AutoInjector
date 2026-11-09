@@ -658,7 +658,7 @@ function createBridge(opts) {
       const why = kind === 'rate-limit'
         ? `${entry.site} showed a usage-limit message instead of an answer to [MSG #${entry.seq}]; wait and try again later, or use another AI`
         : kind === 'refused'
-          ? `${entry.site} answered [MSG #${entry.seq}] with a short refusal ("I can't help with that") instead of an answer; wait and try again, or use another AI${longNote}`
+          ? `${entry.site} declined to answer [MSG #${entry.seq}] (a short refusal: "I can't help with that") instead of an answer; wait and try again, or use another AI${longNote}`
           : kind === 'too-long'
             ? `${entry.site} said [MSG #${entry.seq}] was too long; use another AI or a shorter prompt${longNote}`
             : kind === 'chat-full'
@@ -667,7 +667,8 @@ function createBridge(opts) {
       if (kind === 'rate-limit' && turn.limitResetAt != null) noteLimitReset(entry.site, turn.limitResetAt);
       const resetIso = kind === 'rate-limit' ? limitResetIso(entry.site, null) : null;
       finish(entry, { status: 503, body: Object.assign(errBody('SITE_ERROR', why, false),
-        { site_error: kind, retry_after_s: retryAfter, seq: entry.seq, prompt_chars: entry.promptChars, long_prompt: !!longNote },
+        // declined: Akọwe reports a refusal as its own code (AI_DECLINED), not as an unreachable site
+        { site_error: kind, declined: kind === 'refused', retry_after_s: retryAfter, seq: entry.seq, prompt_chars: entry.promptChars, long_prompt: !!longNote },
         resetIso ? { limit_reset_at: resetIso } : {}) });
       return;
     }

@@ -37,6 +37,14 @@ contextBridge.exposeInMainWorld("api", {
   downloadsOpen: (payload) => ipcRenderer.invoke("downloads:open", payload || {}),
   onAiDownload: (cb) => ipcRenderer.on("ai-download", (_e, payload) => cb(payload)),
   startNewChatAll: () => ipcRenderer.invoke("sites:new-chat-all"),
+  // 💾 Save state / 📂 Load state (save-state.js): the chats each pane is on + the set-up, kept on this PC
+  saveStateList: () => ipcRenderer.invoke("savestate:list"),
+  saveStateSave: (name, replace) => ipcRenderer.invoke("savestate:save", { name, replace: replace === true }),
+  saveStateLoad: (id, anyway) => ipcRenderer.invoke("savestate:load", { id, anyway: anyway === true }),
+  saveStateRename: (id, name) => ipcRenderer.invoke("savestate:rename", { id, name }),
+  saveStateDelete: (id) => ipcRenderer.invoke("savestate:delete", { id }),
+  saveStateView: (id) => ipcRenderer.invoke("savestate:view", { id }),
+  sequenceDraft: () => ipcRenderer.invoke("sequence:draft"),
   inspectSite: (site) => ipcRenderer.invoke("site:inspect", site),
   listSites: () => ipcRenderer.invoke("site:list"),
   setZoom: (site, factor) => ipcRenderer.invoke("site:zoom", { site, factor }),
@@ -56,6 +64,7 @@ contextBridge.exposeInMainWorld("api", {
   pickerUndoRetire: (site, role) => ipcRenderer.invoke("picker:undo-retire", { site, role }), // PR #120: ↺ Undo a forgotten out-of-date part
   pickerPageStructure: (site) => ipcRenderer.invoke("picker:page-structure", { site }),
   onPicker: (cb) => ipcRenderer.on("picker", (_e, payload) => cb(payload)),
+  onSelectorRetired: (cb) => ipcRenderer.on("selector-retired", (_e, payload) => cb(payload)), // 2026-11-09: "X's page changed … ↩ Put it back"
   runSelfTest: (site) => ipcRenderer.invoke("selftest:run", { site }),
   runTuner: () => ipcRenderer.invoke("tuner:run"),
   onTunerState: (cb) => ipcRenderer.on("tuner-state", (_e, payload) => cb(payload)),

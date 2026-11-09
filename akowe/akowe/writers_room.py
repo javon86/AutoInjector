@@ -438,6 +438,7 @@ def _failure(exc) -> dict:
     else:
         code, msg = "INTERNAL_ERROR", "Akọwe hit an unexpected problem"
     word = {"TIMEOUT": "did not answer in time", "RATE_LIMITED": "stayed busy", "UPSTREAM_UNAVAILABLE": "is not working",
+            "AI_DECLINED": "declined to answer (it said it can't help with that)",
             "CAPABILITY_UNAVAILABLE": "is not connected"}.get(code, "gave no usable answer")
     return {"status": "failed", "error": code, "message": msg, "word": word}
 

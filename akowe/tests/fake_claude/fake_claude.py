@@ -49,11 +49,16 @@ def first_sentence(text):
 def answer(job, ctx):
     if job == "login_check":
         return {"ok": True}
-    if job == "stand_in":  # 🧑‍⚖️ FAKE_CLAUDE_STANDIN: accept (default) | keep | unsure | low
+    if job == "stand_in":  # 🧑‍⚖️ FAKE_CLAUDE_STANDIN: accept (default) | keep | unsure | low (one vote)
         how = env("FAKE_CLAUDE_STANDIN", "accept")
-        choice = {"accept": "accept_change", "keep": "keep_original", "unsure": "unsure"}.get(how, "accept_change")
-        return {"choice": choice, "confidence": 0.4 if how == "low" else 0.92,
-                "reason": f"Claude Code read the finding and the canon ({how})."}
+        choice = "unsure"
+        for o in ctx.get("options") or []:  # the letter of the option this mode means (the order is random)
+            does = o.get("does") or ""
+            accept = "corrected version" in does or "as it is" in does
+            if (how in ("accept", "low") and accept) or (how == "keep" and not accept):
+                choice = o.get("letter")
+        return {"choice": choice, "confident": 0.4 if how == "low" else 0.92,
+                "why": f"Claude Code read the finding and the canon ({how})."}
     if job == "research":
         notes = []
         for c in ctx.get("chapters") or []:

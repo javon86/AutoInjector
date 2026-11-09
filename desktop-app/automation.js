@@ -754,13 +754,42 @@ function buildReadScript(site, overrides) {
     // whole reply, with the same guards (no user message, one reply only).
     if (!via && node && !fragmentFixed && !hasFrom(text) && text.trim().length <= 40 && startsWithTo(text)) {
       const USER_MARKERS2 = '[data-message-author-role="user"], [data-testid="user-message"], user-query, .user-query';
+      // 2026-11-09 (ChatGPT, build a916ba9): the "[TO: USER]" line sits in its own small block and the rest of the
+      // reply in the blocks AFTER it, side by side with the user's message in one long list — so no single parent
+      // holds just this reply. Read the tag's block plus the blocks that follow it, up to the reply's [FROM: …], and
+      // never into a block that holds the user's message or a new [MSG #] (the next message).
+      const fromSiblings = (box, start) => {
+        const parts = [];
+        let seen = false;
+        for (const c of Array.from(box.children)) {
+          if (!seen) { if (c === start) seen = true; else continue; }
+          if (c !== start) {
+            let isUser = false; try { isUser = (c.matches && c.matches(USER_MARKERS2)) || !!c.querySelector(USER_MARKERS2); } catch (_) {}
+            if (isUser) break;
+          }
+          const ct = textOf(c);
+          if (c !== start && /^\\s*\\[MSG #\\d+\\]/.test(ct)) break;
+          if (!ct.trim()) continue;
+          parts.push(ct.replace(/\\s+$/, ""));
+          if (hasFrom(ct)) break; // the reply's closing tag: the reply ends here
+        }
+        let all = parts.join("\\n");
+        const tm = /(^|\\n)[ \\t]*\\[\\s*TO\\s*:/i.exec(all);
+        if (!tm) return "";
+        all = all.slice(tm.index + tm[1].length);
+        if (hasFrom(all)) { let end = all.length, fm; const fre = /\\[\\s*FROM\\s*:[^\\]]*\\]/gi; while ((fm = fre.exec(all))) end = fm.index + fm[0].length; all = all.slice(0, end); }
+        return all;
+      };
       let cur = node;
       for (let i = 0; i < 10 && cur.parentElement && cur.parentElement !== document.body; i++) {
         const p = cur.parentElement;
         let hasUser = false; try { hasUser = !!p.querySelector(USER_MARKERS2); } catch (_) {}
-        if (hasUser) break;
         const t = textOf(p);
-        if ((t.match(/\\[\\s*FROM\\s*:/gi) || []).length > 1) break;
+        if (hasUser || (t.match(/\\[\\s*FROM\\s*:/gi) || []).length > 1) {
+          const sib = fromSiblings(p, cur);
+          if (sib.trim().length > text.trim().length + 5) { node = cur; text = sib; fragmentFixed = "siblings"; }
+          break;
+        }
         cur = p;
         // the FIRST line-start [TO: — the reply's own tag (a quoted example later
         // in the reply must not cut it short)

@@ -129,7 +129,9 @@ IN_CHAPTER_RULE = (
     "chapter is still so later in the same chapter (an injured knee limps, kneels with pain, takes the stairs slowly; a "
     "dropped knife is not drawn again) unless the page shows the change. A within-chapter physical contradiction is a "
     "MAJOR problem: verdict REVISE, and say which line contradicts which. context.akowe_in_chapter (when given) lists "
-    "possible ones Akọwe's own reading found: confirm them only when the text really contradicts itself.")
+    "possible ones Akọwe's own reading found: confirm them only when the text really contradicts itself. Entries named "
+    "\"time\" are clock or tide contradictions with this chapter and the chapters before (a tide going out before the "
+    "stated high water, two high waters that cannot both be true): when the text really says so, that is MAJOR too.")
 
 NOT_INDEPENDENT = "Reviews are not independent — the same AI wrote and reviewed this"
 REVIEWER_CHOICES = (None, "AI-1", "AI-2", "AI-3")
@@ -425,21 +427,35 @@ class ReviewService:
         an AI wrote it (from the AI-fix note, the provenance of the AI call, or the Bible Builder writer note)."""
         fix = fixes.get(_rkey(rec["record_id"], rec["version"]))
         if fix and fix.get("restored_from"):
-            return {"kind": "ai", "label": f"{self.slot_label(fix.get('slot')) or 'AI'} (version {fix['restored_from']} "
-                    "again — the editor's rewrite was not kept)", "slot": fix.get("slot")}
+            # the editor's rewrite was undone: the text is an earlier version again, so whoever wrote THAT version
+            # wrote this one (the note may not name the AI when the earlier version was itself an editor's fix)
+            slot, who, n = fix.get("slot"), None, fix["restored_from"]
+            if isinstance(n, int) and _depth < 8 and (not slot or not self.slot_label(slot)):
+                base = self.store.get_record(pid, branch, rec["record_id"], n)
+                if base:
+                    b = self.made_by(pid, branch, base, fixes, writers, _depth + 1)
+                    if b.get("kind") in ("ai", "ai_fix"):
+                        slot = slot or b.get("slot")
+                        who = None if slot else str(b.get("label") or "").replace(" + editor", "") or None
+            who = (self.slot_label(slot) if slot else None) or who or "AI"
+            return {"kind": "ai", "label": f"{who} (version {n} kept; the editor's rewrite was not kept)",
+                    "slot": slot, "restored": n}
         if fix and fix.get("alongside"):
             return {"kind": "ai_fix", "label": f"Written alongside you by {self.slot_label(fix.get('slot')) or 'AI'}"
                     " (you chose to use it)", "slot": fix.get("slot")}
         if fix and fix.get("editor"):
             # PR #117 (G): name the AI that wrote the chapter and mark the editor's changes ("Claude + editor")
-            who = self.slot_label(fix.get("slot")) if fix.get("slot") else None
+            slot = fix.get("slot")
+            who = self.slot_label(slot) if slot else None
             if not who and isinstance(fix.get("from_version"), int) and _depth < 8:
                 base = self.store.get_record(pid, branch, rec["record_id"], fix["from_version"])
                 if base:
                     b = self.made_by(pid, branch, base, fixes, writers, _depth + 1)
-                    who = b["label"] if b.get("kind") in ("ai", "ai_fix") else None
+                    if b.get("kind") in ("ai", "ai_fix"):
+                        slot = slot or b.get("slot")  # the AI that wrote the chapter the editor changed
+                        who = self.slot_label(slot) if slot else b["label"]
             who = (who or "AI").replace(" + editor", "")
-            return {"kind": "ai_fix", "label": f"{who} + editor", "slot": fix.get("slot"), "editor": True}
+            return {"kind": "ai_fix", "label": f"{who} + editor", "slot": slot, "editor": True}
         if fix:
             return {"kind": "ai_fix", "label": f"AI fix by {self.slot_label(fix.get('slot')) or 'AI'} (you asked for it)",
                     "slot": fix.get("slot")}
@@ -503,7 +519,8 @@ class ReviewService:
     def writer_of(self, pid, branch, rec) -> dict:
         mb = self.made_by(pid, branch, rec, self.fixes(pid, branch))
         slot = mb.get("slot") if mb.get("kind") in ("ai", "ai_fix") else None
-        return {"kind": mb.get("kind"), "slot": slot, "label": self.slot_label(slot) if slot else mb.get("label"),
+        return {"kind": mb.get("kind"), "slot": slot,
+                "label": self.slot_label(slot) if slot and not mb.get("restored") else mb.get("label"),
                 **({"editor": True} if mb.get("editor") else {})}
 
     def plan_reviewer(self, job: ReviewJob, writer: dict) -> None:
@@ -1532,6 +1549,10 @@ class ReviewService:
                                                 cast_names(self.store, pid, branch))
                 if flags:
                     ctx["akowe_in_chapter"] = [{k: f.get(k) for k in ("name", "message", "quote")} for f in flags[:8]]
+                from . import clock_check  # noqa: PLC0415 - 🕰️ a clock / tide contradiction is a MAJOR problem too
+                clocks = clock_check.flags_for(self.engine, job.principal, pid, branch, rec)
+                if clocks:
+                    ctx["akowe_in_chapter"] = list(ctx.get("akowe_in_chapter") or []) + clocks
                 task = task + IN_CHAPTER_RULE
             raw = self.assist._call_ai(job, op_for_roles=rec["module_id"], task=task, schema=REVIEW_SCHEMA,
                                        context=ctx, protected=protected)

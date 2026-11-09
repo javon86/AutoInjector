@@ -90,7 +90,7 @@ Behavior:
 | 413 | TOO_LARGE | body over 1 MiB | false |
 | 502 | SEND_FAILED | the prompt could not be delivered to the pane | false |
 | 503 | SITE_NOT_READY | pane missing/destroyed/not loaded | false |
-| 503 | SITE_ERROR | the site showed its OWN short error notice instead of an answer ("Sorry, something went wrong…", "Claude will return soon", a usage limit); `site_error` is `error` or `rate-limit`, `retry_after_s` a wait hint (30 / 60). Temporary: the site is free again; Akọwe waits (30 s, 60 s, 120 s…) or uses another AI. Only short replies with no JSON and no `[FROM:]` tag are ever taken for one | false |
+| 503 | SITE_ERROR | the site showed its OWN short error notice instead of an answer ("Sorry, something went wrong…", "Claude will return soon", a usage limit); `site_error` is `error`, `rate-limit`, `refused`, `too-long` or `chat-full`, `retry_after_s` a wait hint (30 / 60). A `refused` one (a short canned "I can't help with that") also carries `declined: true`, and Akọwe reports it as **AI_DECLINED** (not UPSTREAM_UNAVAILABLE). Temporary: the site is free again; Akọwe waits (30 s, 60 s, 120 s…) or uses another AI. Only short replies with no JSON and no `[FROM:]` tag are ever taken for one | false |
 | 504 | TIMEOUT | no captured answer before timeout_ms; `typed` says whether the prompt was typed | **true** if typed |
 
 Every 504 says `"typed": true|false`.
@@ -305,7 +305,8 @@ pre-run check-in.
   and surrounding prose tolerated), validates it against the sanitized schema, and on
   failure re-asks the same site up to 2 more times with the exact validation errors
   (free re-asks). The kernel still validates the full OUTPUT schema afterwards.
-* Error mapping: connection refused / 503 -> UPSTREAM_UNAVAILABLE (retryable);
+* Error mapping: connection refused / 503 -> UPSTREAM_UNAVAILABLE (retryable); 503 SITE_ERROR with
+  `site_error: "refused"` (or `declined: true`) -> AI_DECLINED (the AI declined; the call moves to another AI);
   409 -> RATE_LIMITED (retryable); 401 -> CAPABILITY_UNAVAILABLE; 400/413 ->
   INVALID_INPUT; 502 -> UPSTREAM_UNAVAILABLE; 504 -> TIMEOUT (ambiguous: user decides).
 * "All three": each slot may declare `roles` (list of operation IDs or set letters,

@@ -594,3 +594,11 @@ def launch_kit(store, task: str, schema: dict, ctx: dict, *, cancel=None) -> tup
     res = cc.run_job(store, kind="launch_kit", prompt=prompt("launch_kit", task, schema, ctx), schema=schema,
                      tools="none", max_turns=3, cancel=cancel)
     return res["data"] if isinstance(res["data"], dict) else {}, res
+
+
+# 12. a whole-book review as a stand-in for a web AI that declined (book_report.ReportService.review_with_helper) — the
+# report's own task and schema, checked by book_report.clean_review exactly like a web AI's answer
+def book_review(store, task: str, schema: dict, ctx: dict, *, cancel=None) -> tuple[dict, dict]:
+    res = cc.run_job(store, kind="book_review", prompt=prompt("book_review", task, schema, ctx), schema=schema,
+                     tools="none", max_turns=3, cancel=cancel)
+    return res["data"] if isinstance(res["data"], dict) else {}, res

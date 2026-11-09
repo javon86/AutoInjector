@@ -8,6 +8,7 @@
   .composer { border: 1px solid #888; min-height: 24px; padding: 4px; }
   .composer p { margin: 0; }
   button { min-width: 20px; min-height: 16px; }
+  .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; }
 </style>
 </head>
 <body>
@@ -33,6 +34,10 @@
                        alternatives -> only the page search (P18.4) can find them
               alt      ChatGPT-like article[data-turn="assistant"] blocks, which only
                        the built-in alternative list (P18.3) knows
+              tagsplit (log 2026-11-09, ChatGPT) the reply's "[TO: …]" line alone in a small
+                       [data-message-author-role="assistant"] block (next to a hidden
+                       "ChatGPT said:" heading), the rest of the reply in a block AFTER
+                       it — all in one list with the user's messages
     page    (P18 self-repair) chat (default) | login | limit | error
               login    a signed-out page: no message box, "Log in" / "Sign up"
               limit    the chat, plus a usage-limit banner (role=alert)
@@ -340,6 +345,14 @@
     let md;
     if (LAYOUT === "changed") { const b = el("div", { class: "convo-turn bot-turn", "data-turn-role": "model" }, log); md = el("div", { class: "answer-body" }, b); }
     else if (LAYOUT === "alt") { const b = el("article", { "data-turn": "assistant" }, log); md = el("div", { class: "answer-body" }, b); }
+    else if (LAYOUT === "tagsplit") {
+      const head = el("div", { class: "turn-head" }, log);
+      el("h6", { class: "sr-only", text: "ChatGPT said:" }, head);
+      const tag = el("div", { "data-message-author-role": "assistant" }, head);
+      el("div", {}, head);
+      md = el("div", { class: "markdown prose" }, log);
+      md.__tag = tag;
+    }
     else if (SITE === "chatgpt") { const b = el("div", { "data-message-author-role": "assistant" }, log); md = el("div", { class: "markdown" }, b); }
     else if (SITE === "claude") { const b = el("div", { class: "font-claude-message" }, log); md = el("div", { class: "standard-markdown" }, b); }
     else { const b = el("model-response", {}, log); const mc = el("message-content", {}, b); md = el("div", { class: "markdown" }, mc); }
@@ -354,6 +367,12 @@
   function paint(md, text, redrawn, raw) {
     md.innerHTML = "";
     text = pretty(text);
+    if (md.__tag) { // layout=tagsplit: the [TO: …] line goes into its own small block
+      const ls = text.split("\n");
+      md.__tag.textContent = /^\[TO:[^\]]*\]$/.test(ls[0]) ? ls.shift() : "";
+      text = ls.join("\n");
+      if (!text) return;
+    }
     const lines = text.split("\n");
     if (!redrawn) { for (const l of lines) el("p", { text: l }, md); return; }
     if (raw) { for (const l of lines) el("p", { text: l }, md); if (SITE === "gemini") el("p", { text: "PDF", class: "chip" }, md); return; }

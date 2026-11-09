@@ -48,6 +48,12 @@ A('site.reload', 'site:reload', { t: 'Reload an AI pane', c: true, aa: true, a: 
 A('downloads.list', 'downloads:list', { t: 'Files the AIs gave you to download: what is coming in, what came in and where it is saved', c: false });
 A('downloads.open_folder', 'downloads:open', { t: 'Open the folder where an AI\'s downloads are saved', c: true, aa: true, a: { site }, ex: { site: 'claude' } });
 A('sites.new_chat_all', 'sites:new-chat-all', { t: 'Start a new chat in every AI pane', c: true });
+// 💾 / 📂 saved states (save-state.js): the chat each pane is on + the set-up, under a name, on this PC
+A('saves.list', 'savestate:list', { t: 'The saved states (💾 Save state): name, when it was saved, which AIs had a chat, the book', c: false });
+A('saves.save', 'savestate:save', { t: 'Save state under a name: the chat each AI pane is on, a copy of their recent replies, and the set-up (Compose box, Active AIs, tab, pane sizes, relay, sequence, the open book). replace: true replaces a save with the same name', c: true, aa: true, a: { name: text(80), replace: { type: 'boolean' } }, r: ['name'], ex: { name: 'Salt Keeper ch 12' } });
+A('saves.load', 'savestate:load', { t: 'Load a saved state by its name: all three AI panes go to their saved chats (this changes what is on screen) and the set-up is put back. If something is working (a book run, a picture, a video) it refuses and says what — only pass anyway: true after the user said to load it anyway', c: true, a: { name: text(200), anyway: { type: 'boolean' } }, r: ['name'], ex: { name: 'Salt Keeper ch 12' } });
+A('saves.rename', 'savestate:rename', { t: 'Rename a saved state (id = its current name or id)', c: true, aa: true, a: { id: text(200), name: text(80) }, r: ['id', 'name'], ex: { id: 'Salt Keeper ch 12', name: 'Salt Keeper chapter 12' } });
+A('saves.delete', 'savestate:delete', { t: 'Delete a saved state for good (by its name)', c: true, a: { name: text(200) }, r: ['name'], ex: { name: 'Salt Keeper ch 12' } });
 A('site.zoom', 'site:zoom', { t: 'Zoom an AI pane', c: true, aa: true, a: { site, factor: { type: 'number', minimum: 0.25, maximum: 3 } }, r: ['site', 'factor'], ex: { site: 'chatgpt', factor: 0.9 } });
 A('transcript.clear', 'transcript:clear', { t: 'Clear the transcript', c: true });
 A('transcript.toggle_pin', 'transcript:toggle-pin', { t: 'Pin / unpin a transcript message', c: true, aa: true, a: { id: { type: 'integer', minimum: 0 } }, r: ['id'], call: (a) => [a.id], ex: { id: 1 } });
@@ -321,6 +327,8 @@ const EXCLUDED = {
   'video:capabilities': 'internal: Alfred reads video-api capabilities() directly when he builds his video_call method list and schemas',
   'video:trailer-pick-file': 'opens a file chooser for the person at the screen (music / a picture for a trailer shot) — Alfred passes the file path straight to trailer.make',
   'lockers:set-enabled': 'the ⚙ Advanced switch that brings back the hidden AI lockers (file commands for the web AIs) — only the person at the screen turns it on, never an AI',
+  'savestate:view': 'the 📂 read-only viewer of a save\'s backup text, for the person at the screen (whole chat replies) — Alfred lists saves with saves.list and loads one with saves.load',
+  'sequence:draft': 'internal: the 🧵 Sequence editor picks up the steps a loaded save put back',
   'video:framepack-choose-folder': 'opens a folder chooser for the person at the screen — Alfred sets the FramePack folder by path through video_call video.settings { framepackDir }',
 };
 /** IPC channels that a dedicated Alfred tool covers (alfred-tools.js). */

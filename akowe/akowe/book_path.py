@@ -742,8 +742,10 @@ class BookPath:
             words = None
         from . import attention  # noqa: PLC0415 - ⚠️ what needs a look (H5 / H13 / H14 / H11)
         from . import human_voice  # noqa: PLC0415 - ✍ "Sounds like a person: 72 → 88 after your approved fixes"
+        from . import quality_history  # noqa: PLC0415 - 📈 "7.6/10 — down 0.4 from your last book"
         return {"project_id": self.pid, "branch_id": self.branch, "ai_ready": ai, "profile": prof,
                 "human_voice": human_voice.home(self),
+                "quality_trend": quality_history.home(self.store, self.principal, self.pid, self.branch),
                 "steps": steps, "next": nxt["id"] if nxt else None, "words": words,
                 "done_count": sum(1 for s in steps if s["state"] == "done"), "total": len(steps),
                 "attention": attention.of_book(self.store, self.pid, self.branch)}
@@ -851,7 +853,7 @@ class BookPath:
             return {"ok": True, "message": f"Your AI wrote the {what}. Read it, then approve it.",
                     "created": r["output_refs"][0]}
         codes = {e.get("code") for e in r.get("errors") or []}
-        if codes & {"CAPABILITY_UNAVAILABLE", "UPSTREAM_UNAVAILABLE", "TIMEOUT", "RATE_LIMITED"}:
+        if codes & {"CAPABILITY_UNAVAILABLE", "UPSTREAM_UNAVAILABLE", "TIMEOUT", "RATE_LIMITED", "AI_DECLINED"}:
             m = self._manual(op, payload, f"The AI could not write the {what} ({', '.join(sorted(codes))}). "
                              "Check the AI in Settings (Test connection) and try again, or write it yourself in the "
                              "form that opens now.")

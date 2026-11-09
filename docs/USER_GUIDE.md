@@ -59,8 +59,33 @@ its own short tour too (Akọwe → ❓ Help → 🧭 Take the tour).
   pressing Stop). If it cannot, it tells you once.
 - If a website changed its layout and the AI still does not work, press **🎯 Point at it** and click the message box,
   the Send button or the reply, or press **🔢 Do it for me with a number** and follow the steps.
+- **"Claude's page changed; AutoInjector stopped using an old saved setting that no longer fits."** You may see
+  this line under the Compose box. It means a part you (or AutoInjector) once saved with 🎯 no longer matches that
+  website, so AutoInjector went back to its built-in way, which works. Nothing to do. If things got worse after it,
+  press **↩ Put it back**; **✕** just hides the line.
 - **"Akọwe is using this AI":** while Akọwe waits for an answer, that AI's card shows a yellow note. Don't type in that
   AI's window until it is done; use another AI meanwhile.
+
+### 💾 Save state / 📂 Load state — come back to where you were
+
+- **💾 Save state** (top bar): type a name, for example *Salt Keeper ch 12*, and press **💾 Save**. AutoInjector
+  remembers the chat each AI is on (ChatGPT, Claude and Gemini), a copy of their recent replies, what is in the
+  Compose box, which AIs are **Active** (and whether 🎩 Alfred is in **→ All**), the open tab, how big each pane is,
+  the folded panels, the window size, who forwards to whom, the AIs' roles, your 🧵 prompt sequence and the 📖 book
+  that was open. Saving again with the same name asks before it replaces the old one.
+- **📂 Load state** shows your saves with their name, date and time. **📂 Load** sends all three AIs back to their
+  saved chats at once, so you can keep talking where you stopped, and puts everything else back. A loaded 🧵
+  sequence waits in **🧵 Sequence** — nothing is sent until you press Run there.
+- **If a chat is gone** (deleted on the site, the site opened a new chat instead, or you are signed out), the result
+  says so in plain words and shows **the saved copy** of that chat's replies to read (you cannot change it).
+  **📜 Saved text** shows a save's copy any time.
+- **✎ Rename** and **🗑 Delete** are on each save. AutoInjector keeps up to 200 saves.
+- If a book is being written, or a picture or video is being made, **📂 Load** asks first ("Load it anyway?"),
+  because moving the AIs to other chats could spoil that work.
+- You can also ask 🎩 Alfred: "save this as Salt Keeper ch 12", "load Salt Keeper ch 12". Before he loads one he
+  shows an "I will…" card.
+- Saves stay on your PC (`%APPDATA%\autoinjector-desktop\saved-states\`, one file each). Nothing is sent anywhere.
+  A save only ever opens chats on chatgpt.com, chat.openai.com, claude.ai and gemini.google.com.
 
 ## 3. Making a book (📖 Akọwe)
 
@@ -75,8 +100,9 @@ it; **⇱ Pop out** gives Akọwe its own window.
   Start is your permission for that one run only; it makes a new book and never touches your other books. You can
   watch, **⏸ Pause**, **▶ Resume** or **✖ Cancel**. A long book takes a day or two.
 
-On the Make-a-book screen you can choose, among other things: the kind of story and the story shape (or leave them
-to the AI), **How many AIs check for mistakes**, **Use Claude Code helpers for this book**, and **"✍ At the end,
+On the Make-a-book screen you can choose, among other things: your **Pen name** (printed on the title page and the
+cover; the AI never makes one up — leave it empty to use the pen name you typed last, or none; the plan check warns
+if it is also the name of one of your characters), the kind of story and the story shape (or leave them to the AI), **How many AIs check for mistakes**, **Use Claude Code helpers for this book**, and **"✍ At the end,
 check that the book sounds like a person wrote it"**.
 
 ### While a long book runs
@@ -109,7 +135,8 @@ book carries on after you choose; until then that record is not approved. Your c
 - The reviewer and the writer disagree about the same thing twice, or a fix would change something you already
   approved: one question with before → after (see above).
 - A reviewer still says no after two fixes: choose **✔ Approve anyway**, **✏️ Edit it myself** (then Continue) or
-  **🔁 Try again**.
+  **🔁 Try again**. With ✔ Approve anyway your approval stands, and the editor's major notes on that chapter (and the
+  reviewer's reasons) are not thrown away: they wait for the final **🔁 Improve until better** pass.
 - An AI did not answer in time, even after a second try.
 - A check found a problem it could not fix safely.
 - Akọwe was closed in the middle of a run: the run shows **Interrupted**; **▶ Resume** carries on.
@@ -171,7 +198,35 @@ Every chapter is checked several times before it counts as part of the book:
 - **🔎 Check consistency now** (on the run window, 🏠 Book home and 🧭 Continuity) runs the same all-AI review on the
   chapters you choose, at any time.
 - The **📊 Book report** shows the scores, who checked the book and how far they agreed. An optional beta-reader
-  step reads the book as 1, 2 or 3 kinds of readers.
+  step reads the book as 1, 2 or 3 kinds of readers. If an AI declines to review the book ("I can't help with
+  that" — a sad or dark story sometimes trips its safety filter by mistake), Akọwe tells it once that the book is
+  fiction under review; if it still declines, another AI (or the 🤖 Claude Code helper) reads the book instead, and
+  the report says who declined and who stood in.
+- **🕰️ Clock and tide check:** Akọwe works out the times, days and tides the book states ("high water at 18:06")
+  and flags one that cannot be true ("the tide was going out at 14:30" — before high water the tide comes in). The
+  editor and the reviewer must fix it, and the next chapter's writer is told the tide times so far.
+- **📏 Special rules:** a ghost, magic, a curse or a strange device in the story rules must say where and when it
+  works (scope), what it costs and what it can never do (limits). If one does not, the AI fills them in once, before
+  the plan is written.
+
+### 🔁 Improve until better, and 📈 your books over time
+
+- **🔁 Improve until better** (on the ⚡ Make-a-book screen, on by default, 1–3 rounds, default 2): when the book is
+  made, Akọwe collects what the reviewers' "What to try next", the beta readers' top fixes, the editor's major notes
+  and its own checks (clock and tide times, the same phrase or simile in several chapters, a plain word like "went"
+  used far too often, sentences too simple for adult readers) found, and the writer reworks the chapters that need it
+  most. The **same** AI reviewers then read the book again. The change is **kept only if the score went up and
+  nothing dropped by more than a point**; otherwise your book stays exactly as it was. Kept chapters are checked and
+  approved like every chapter, and the PDF, EPUB and Word files are made again. The run window, the journal and the
+  report show both numbers: "🔁 Improve pass: 7.6 → 8.1/10 (kept)". Chapters you wrote yourself are never touched.
+- **📈 Your books over time** (🏠 Book home and the 📊 Book report): "7.6/10 — down 0.4 from your last book",
+  "Rule rigor is your weakest area for 3 books", and which scores are falling. Only numbers are kept for this,
+  never your book's words.
+- **🧠 Lessons for the next book:** your weakest areas and habits from the last books (for example "Every special
+  rule needs scope, cost and limits", "Check all clock, tide and date arithmetic") are given to the next book's
+  planners and to the writer of every chapter. Inside a book, each new chapter's writer is also told what the
+  chapters before already used (a simile, a phrase, "went" 26 times) so it is not repeated, the tide and day facts so
+  far, and the reading level to aim for (adult books: at least grade 5).
 
 ### 📊 Who checks, and how good each checker is
 
@@ -186,13 +241,17 @@ Every chapter is checked several times before it counts as part of the book:
   wrote a draft never checks it while another AI can. If you switch off so many that too few can check, Akọwe says so,
   for example "Only ChatGPT can check right now because Gemini is switched off for checks and Claude is the writer."
 - **🧑‍⚖️ Stand-in when I don't answer** (⚙️ Settings, off until you switch it on): when a book waits for your answer on
-  an AI disagreement and you don't answer within the time you picked (10, 20, 30 or 60 minutes), a stand-in decides so
-  the book goes on — 🤖 Claude Code, or the AI that was not part of the disagreement, or 🎩 Alfred for small, simple
-  corrections only. It never decides the plot, the ending, the main character, point of view or tense, your content
-  limits or your lock list; if it is unsure, it keeps waiting for you. Each decision is shown in the run window and on
-  🏠 Book home — "🎩 Alfred approved the correction to Ansel Marrant (character) at 10:05 because you didn't answer for
-  20 minutes. Why: …" — and the desktop notification says it was decided for you. Press **↩ Undo** to put the other
-  choice back for your own approval. At most 5 stand-in decisions per book run.
+  an AI disagreement — the reviewer and the writer went round in circles, or the reviewer still objects to a chapter
+  after the fixes — and you don't answer within the time you picked (10, 20, 30 or 60 minutes), every working AI is
+  asked the same question. **They decide only if they all agree:** with two AIs both must agree, with three all three
+  must. If only one AI is working, or any AI picks the other option, is unsure or doesn't answer, the book keeps
+  waiting for you. The Claude Code helper may vote for Claude when the Claude window isn't working (still one vote for
+  Claude). It never decides the plot, the ending, the main character, point of view or tense, approved facts, your
+  content limits or your lock list. Each decision is shown in the run window and on 🏠 Book home — "ChatGPT, Claude
+  and Gemini all agreed to accept the correction to Ansel Marrant (character) at 03:12 because you didn't answer for
+  20 minutes. Why: …" — and the desktop notification says it was decided for you. When they don't agree you see how
+  each voted, for example "The AIs didn't all agree (ChatGPT: accept, Gemini: keep) — waiting for you." Press
+  **↩ Undo** to put the other choice back for your own approval. At most 5 stand-in decisions per book run.
 
 ## 6. Pictures
 
@@ -256,6 +315,8 @@ AIs' downloads folder**, open the folder any time. A download that breaks off is
   of the ChatGPT / Claude / Gemini panes. Choose it with **⚙** in his panel. The first time, **⚡ Set up** installs
   Ollama and a model that fits your PC (or uses what you already have).
 - **🩺 Check everything** checks his AI and the whole app and shows what to fix.
+- **Saved states:** "save this as …", "load …", "what saves do I have?", "rename …", "delete …" (see 💾 Save state
+  in section 2).
 
 ## 11. 🤖 Claude Code helpers (optional — makes books faster)
 
@@ -299,6 +360,7 @@ Without it nothing breaks: every job goes to the web AIs, exactly as before. The
 | Your books (one folder each) | `Documents\Akowe Books\` (change it in Akọwe → ⚙️ Settings → 📁 Where books are saved) |
 | Akọwe's working data and backups | `%LOCALAPPDATA%\Akowe` |
 | AutoInjector's settings and sign-ins | `%APPDATA%\autoinjector-desktop\` |
+| Your 💾 saved states (one file each) | `%APPDATA%\autoinjector-desktop\saved-states\` |
 
 Inside one book's folder: `Book/` (PDF, EPUB, Word), `Chapters/`, `Book Bible/`, `Reports/`, `Log/`, `Cover/`,
 `Pictures/`, `Trailer/`, `Launch kit/` and **`book.akowe`** — the whole book in one file, for opening it again, even on

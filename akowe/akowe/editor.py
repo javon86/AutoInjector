@@ -167,6 +167,25 @@ def _in_chapter_major(findings: list, flags: list) -> list:
     return out
 
 
+def clock_findings(findings: list, clocks: list, text: str) -> list:
+    """🕰️ A clock / tide contradiction Akọwe found (clock_check.flags_for) that no editor note covers becomes a MAJOR
+    note of its own (dimension timeline), so the rewrite must fix it; one already covered is raised to MAJOR."""
+    out = list(findings)
+    for c in clocks or []:
+        q = str(c.get("quote") or "")
+        hit = next((i for i, f in enumerate(out) if f.get("passage") and q and (f["passage"] in q or q in f["passage"])),
+                   None)
+        if hit is not None:
+            if out[hit].get("severity") != "major":
+                out[hit] = dict(out[hit], severity="major", severity_raised="a clock or tide contradiction")
+            continue
+        if q and q in (text or ""):
+            out.append({"id": f"clock{len(out) + 1}", "dimension": "timeline", "severity": "major", "passage": q,
+                        "why": str(c.get("message") or "")[:400], "suggestion": "Make this time or tide agree with "
+                        "the times stated earlier.", "keep_nearby": [], "source": "akowe_clock"})
+    return out
+
+
 # ====================================================================== pure helpers (unit-tested)
 def decide(scores: dict, findings: list, strictness: str, relax: dict | None = None) -> tuple[str, list[str]]:
     """Akọwe's own PASS / REVISE from the editor's scores and findings (Settings › Editor › strictness).
@@ -572,6 +591,7 @@ class EditorService:
                 flags = story_ledger.in_chapter(ctx["chapter_text"], cast_names(self.store, pid, branch))
                 if flags:
                     ctx["akowe_in_chapter"] = [{k: f.get(k) for k in ("name", "message", "quote")} for f in flags[:6]]
+
             except Exception:  # noqa: BLE001 - hints, never a reason to fail the review
                 log.exception("must-fix / in-chapter hints failed for the editor")
         else:
@@ -625,6 +645,12 @@ class EditorService:
         try:
             ctx, protected = self._context(pid, branch, rec, report, info, brief, guide)
             ctx.update(fact_checks_context(self.engine, job.principal, pid, branch, rec))  # P26/P30/P31 (never raises)
+            clocks = []
+            if rec["module_id"] == "C02":  # 🕰️ clock / tide contradictions with the chapters before: must-fix
+                from . import clock_check  # noqa: PLC0415
+                clocks = clock_check.flags_for(self.engine, job.principal, pid, branch, rec)
+                if clocks:
+                    ctx["akowe_in_chapter"] = list(ctx.get("akowe_in_chapter") or []) + clocks
             task = rubric.task_text(rec["module_id"], dims, notes)
             if rec["module_id"] == "C02":
                 from . import habits  # noqa: PLC0415
@@ -663,6 +689,7 @@ class EditorService:
         must = list(ctx.get("must_fix") or []) if rec["module_id"] == "C02" else []
         if rec["module_id"] == "C02":
             findings = _in_chapter_major(findings, ctx.get("akowe_in_chapter") or [])
+            findings = clock_findings(findings, clocks, text)
             if must:  # 🔁 PR #117 (F): a must-fix habit the editor did not target becomes a major finding
                 from . import habits  # noqa: PLC0415
                 findings = (findings + habits.findings_for(must, findings, dims))[:MAX_FINDINGS + len(must)]
@@ -874,12 +901,17 @@ class EditorService:
                 ctx["narrator_style"] = brief_for(self.store, pid)
         except Exception:  # noqa: BLE001
             log.exception("could not add the narrator style to the rewrite")
+        task = rubric.REWRITE_TASK
+        if craft.get("improve"):  # 🔁 the final improve pass (improve_pass.py): what must never change
+            from .improve_pass import IMPROVE_RULES, IMPROVE_WORDS  # noqa: PLC0415
+            ctx["improve_rules"] = IMPROVE_RULES
+            task = task + IMPROVE_WORDS
         from .review import safe_title  # noqa: PLC0415
         title = safe_title(self.contracts, rec)
         job.phase = f"The writer is reworking the flagged passages of “{title}”"
         tok = rv.work.begin(pid, rec["module_id"], f"The writer is reworking {title}")
         try:
-            raw = self.assist._call_ai(job, op_for_roles=rec["module_id"], task=rubric.REWRITE_TASK,
+            raw = self.assist._call_ai(job, op_for_roles=rec["module_id"], task=task,
                                        schema=REWRITE_SCHEMA, context=ctx, protected=protected)
         finally:
             rv.work.end(tok)

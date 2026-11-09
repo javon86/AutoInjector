@@ -7,7 +7,8 @@ around which chapter — a limit will probably pause it:
 
 * **options** (``OPTION_MODEL``): how many AIs check for mistakes (all / two / one), the writers' room, beta readers,
   character pictures (Stable Diffusion: time, no AI answers), "fill the whole Book Bible", the end-of-book "sounds like
-  a person" pass (PR #133: about 2 answers), the 🤖 Claude Code helpers and "when only one AI works". With measured
+  a person" pass (PR #133: about 2 answers), the 🔁 final improve pass (rounds × (rewrites + the reviewers' re-read)
+  + the kept chapters' reviews), the 🤖 Claude Code helpers and "when only one AI works". With measured
   runs, the options whose answers fall inside the measured steps (the checkers, the writers' room and the end pass)
   count only as the DIFFERENCE from the options those runs had (they are already in the measured numbers), and the
   optional steps P28 does not model (beta readers, the whole Book Bible) use their own measured answers when there
@@ -43,7 +44,7 @@ CHAPTERS_FROM, CHAPTERS_TO = 0.15, 0.9   # where the chapters lie in the run's t
 DEFAULT_AIS = (("AI-1", "AI-1 · Claude", "claude"), ("AI-2", "AI-2 · ChatGPT", "chatgpt"),
                ("AI-3", "AI-3 · Gemini", "gemini"))
 INSIDE_MEASURED = ("checkers", "writers_room", "human_pass")   # their answers are inside costs' measured steps
-OWN_STEP = {"beta": "beta", "bible": "bible"}                   # option -> its own run step (measured when made)
+OWN_STEP = {"beta": "beta", "bible": "bible", "improve": "improve"}   # option -> its own run step (measured when made)
 
 
 # ====================================================================== the options of a run
@@ -71,6 +72,9 @@ def options_of(app, body: dict | None) -> dict:
             cc_on = False
     return {"checkers": ck, "writers_room": b.get("writers_room") is True, "beta_readers": n_beta,
             "pictures": pics, "fill_bible": b.get("fill_bible") is True, "human_pass": b.get("human_pass") is not False,
+            "improve_pass": b.get("improve_pass") is not False,
+            "improve_rounds": b.get("improve_rounds") if isinstance(b.get("improve_rounds"), int)
+            and not isinstance(b.get("improve_rounds"), bool) and 1 <= b.get("improve_rounds") <= 3 else 2,
             "claude_code": cc_on, "single_ai": b.get("single_ai") if b.get("single_ai") in SINGLE_AI else "continue",
             "slot_id": b.get("slot_id") if isinstance(b.get("slot_id"), str) and b.get("slot_id") else None}
 
@@ -91,6 +95,15 @@ def option_calls(opts: dict, n: int, ais: int) -> dict:
                     "label": "Fill the whole Book Bible"}
     hp = 2 if opts.get("human_pass") else 0   # PR #133: the AI read + the rewrites
     out["human_pass"] = {"calls": hp, "to": "others", "label": "End-of-book “sounds like a person” pass"}
+    # 🔁 the final improve pass (improve_pass.py): per round one rewrite per chapter worked on (≤ 3) and the same
+    # reviewers' re-read (the AIs that did not write it); a kept round adds each chapter's review and editor read
+    if opts.get("improve_pass"):
+        c, r = min(3, n), max(1, min(ais - 1, 3)) if ais > 1 else 1
+        rounds = int(opts.get("improve_rounds") or 2)
+        out["improve"] = {"calls": rounds * (c + r) + 3 * c, "to": "all",
+                          "label": f"Improve until better (up to {rounds} round{'s' if rounds != 1 else ''})"}
+    else:
+        out["improve"] = {"calls": 0, "to": "all", "label": "Improve until better"}
     out["pictures"] = {"calls": 0, "to": "none", "label": "Character pictures (Stable Diffusion: no AI answers)",
                        "minutes": PICTURES * PICTURE_MIN if opts.get("pictures") else 0}
     helpers = (3 * n + 2 * math.ceil(n / 5)) if opts.get("claude_code") else 0
@@ -124,7 +137,8 @@ def _run_opts(j: dict) -> dict:
     s = j.get("settings") or {}
     return {"checkers": s.get("checkers") or "all", "writers_room": bool(s.get("writers_room")),
             "human_pass": s.get("human_pass") is not False, "beta_readers": (s.get("beta_readers") or 1)
-            if s.get("beta_reader") else 0, "fill_bible": bool(s.get("fill_bible"))}
+            if s.get("beta_reader") else 0, "fill_bible": bool(s.get("fill_bible")),
+            "improve_pass": bool(s.get("improve_pass")), "improve_rounds": s.get("improve_rounds") or 2}
 
 
 def calibration(app, n: int, opts: dict, ais: int) -> dict:
@@ -369,4 +383,18 @@ def estimate(app, body: dict | None) -> dict:
         "about": base["about"] + (" Per AI: from your earlier runs." if cal["shares"] else "") +
         " Usage limits: rough guesses (the AI sites do not publish them), or what this computer saw before.",
     })
+    out.update(pen_name_check(app, body))
     return out
+
+
+def pen_name_check(app, body: dict) -> dict:
+    """✒️ The plan check of the pen name: which one the new book gets (typed here, else the saved one, else none) and
+    a ⚠️ when it is also a character's name in another book on the shelf (or the book this run is a variant of)."""
+    from . import pen_name  # noqa: PLC0415
+    try:
+        name, how = pen_name.for_new_book(app.store, body.get("pen_name"))
+        warn = pen_name.warning(app.store, None, name) if name else None
+    except Exception:  # noqa: BLE001 - a plan hint never breaks the estimate
+        return {"pen_name": {"name": "", "from": ""}, "warnings": []}
+    return {"pen_name": {"name": name, "from": how, "saved": pen_name.saved(app.store)},
+            "warnings": [warn] if warn else []}

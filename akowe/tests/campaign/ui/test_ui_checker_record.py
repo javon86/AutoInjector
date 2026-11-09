@@ -80,6 +80,8 @@ def test_how_good_is_each_checker_card(make_context, tmp_path, size):
         si.locator("[data-testid=si-on]").wait_for(timeout=10000)
         assert not si.locator("[data-testid=si-on]").is_checked()
         assert si.locator("[data-testid=si-wait]").input_value() == "20"
+        si_text = si.inner_text()  # the new rule: the AIs decide only when they all agree; no Alfred any more
+        assert "all agree" in si_text.lower() and "Alfred" not in si_text and not si.locator("#si-model").count()
         assert overflow(page) <= 1
         assert_clean(page, "checker cards")
     finally:
@@ -124,21 +126,26 @@ def test_stand_in_note_with_undo(make_context, tmp_path, size):
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     from autobook_fake import BookFakeAI
     from test_review_loop import SAME, scripted
-    from test_stand_in import FakeOllama
     from akowe import stand_in
 
     fake = BookFakeAI()
     fake.verdicts = [scripted({"Tom Reed": [SAME, SAME, SAME]})] * 40
     srv = InProcess(tmp_path, fake=fake)
-    oll = FakeOllama()
     app = srv.app
+    asked = []
+
+    def vote(ctx):  # every AI votes "accept"; after the last vote the resumed run waits on its next AI answer
+        asked.append(1)
+        if len(asked) == 2:
+            fake.gate = threading.Event()
+        return {"pick": "accept", "confident": 0.9, "why": "The correction answers the finding."}
     try:
         r = app.autobook.start("author", {"author_confirms": True, "pictures": False})
         app.autobook.wait_for(r["id"], 120)
         run = app.autobook.get(r["id"])
         assert run["problem"]["code"] == "REVIEW_DECISION", run["phase"]
-        stand_in.save_settings(app.store, {"enabled": True, "local_endpoint": oll.url})
-        fake.gate = threading.Event()  # the resumed run then waits on its next AI answer (it stays open to look at)
+        stand_in.save_settings(app.store, {"enabled": True})
+        fake.stand_in_script = [vote, vote]
         at = datetime.fromisoformat(run["problem"]["at"].replace("Z", "+00:00")).timestamp()
         res = stand_in.tick(app, now=at + 21 * 60)
         assert res and res[0]["code"] == "DECIDED", res
@@ -148,7 +155,7 @@ def test_stand_in_note_with_undo(make_context, tmp_path, size):
         note = page.locator("#mab-dialog [data-testid=si-note]")
         note.wait_for(timeout=15000)
         txt = note.inner_text()
-        assert "🎩 Alfred approved the correction to Tom Reed (character)" in txt
+        assert "both agreed to accept the correction to Tom Reed (character)" in txt
         assert "because you didn't answer for 20 minutes. Why:" in txt
         box = note.bounding_box()
         assert box and box["x"] >= 0 and box["x"] + box["width"] <= size[0] + 1, box
@@ -172,5 +179,4 @@ def test_stand_in_note_with_undo(make_context, tmp_path, size):
             app.autobook.wait_for(r["id"], 60)
         except Exception:  # noqa: BLE001
             pass
-        oll.close()
         srv.close()

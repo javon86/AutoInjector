@@ -88,7 +88,14 @@ bridge to your home Wi-Fi, behind its key.
 - **Typing and reading:** to send a message, AutoInjector types it into the AI's message box and presses Send.
   Every message starts with a number, `[MSG #n]`. A send only counts when that number shows up in the chat.
 - **Tags:** each AI is asked to start its reply with `[TO: …]` (who it is for) and end with `[FROM: …]` (who wrote
-  it). The closing tag tells AutoInjector the reply is finished. Then it reads the reply.
+  it). The closing tag tells AutoInjector the reply is finished. Then it reads the reply. When a site shows the
+  `[TO: …]` line in its own little block and the answer in the blocks after it (ChatGPT did in November 2026),
+  AutoInjector reads that block and the ones after it, up to `[FROM: …]`, so it gets the whole reply, never just
+  "[TO: USER]". It never reads into your own message or the next one.
+- **"You forgot your tag" reminders:** a reply with no `[TO: …]` tag is still passed on, and the AI gets one
+  reminder. No reminder is typed while Akọwe or Alfred is waiting on that AI, or while its chat is being swapped
+  for a fresh one (the reminder would only get in the way of the next request). A reply drawn again a moment later
+  with its tags showing is the same reply, not a new one: it is not passed on again.
 - **Relay:** a reply marked `[TO: CLAUDE]` is passed on to Claude, and so on. This lets the AIs talk to each other.
   After 30 hand-offs in a row it pauses until you step in.
 - **Check-ins and self-repair:** about every 20 minutes, AutoInjector sends each idle AI a tiny test ("Reply with
@@ -110,8 +117,14 @@ bridge to your home Wi-Fi, behind its key.
   box, the Send button or the reply. AutoInjector saves that per site. **🔢 Do it for me with a number** teaches it
   by watching you type a number. **↺ Forget what I taught** goes back to the built-in ways. A saved part that
   failed 3 times in a row while the built-in way worked is forgotten by itself, and the log says so once ("ChatGPT's
-  saved Send button was out of date and has been forgotten; the built-in one works"). **↺ Undo** on the 🎯 card
-  brings it back. A part you saved in the last hour is never forgotten this way.
+  saved Send button was out of date and has been forgotten; the built-in one works"). The same happens when a saved
+  part was seen not to fit on **3 different starts** of the app (log: `selector-stale-seen`, then `selector-retired`
+  with `starts: 3`), because one start often sees too few replies from that AI; a start where the saved part works
+  wipes that count. The page then shows one line: "Claude's page changed; AutoInjector stopped using an old saved
+  setting that no longer fits." with **↩ Put it back** (the same as **↺ Undo** on the 🎯 card), which brings it
+  back. A part you saved in the last hour is never forgotten this way. The "reads only part of each reply" warning
+  is only given when there really is a saved reply part; when a site splits a reply over several blocks and there is
+  no saved part, reading the whole reply is simply the reader's job.
 - **📁 AI lockers (hidden, off by default):** an older feature that gave each AI (ChatGPT, Claude, Gemini) its own
   private folder on this PC (`stuff and thing/ai-lockers/<ai>/`) and let it run file commands there by writing
   `[TO: TERMINAL]`. It was not being used, so it is **switched off and out of sight**, but the code is kept:
@@ -125,6 +138,34 @@ bridge to your home Wi-Fi, behind its key.
     them again. For one run only, starting the app with `AUTOINJECTOR_LOCKERS=1` (or `=0`) overrides the tick.
 - **Logs and 📋 Extract:** the app keeps an activity log and a record of every message's journey (the Relay
   Trace). Extract turns these into one file you can share. Keys and private paths are removed.
+- **💾 Save state / 📂 Load state** (`save-state.js`, the dialog in `save-state-ui.js`, the wiring in `main.js`):
+  a named snapshot of where you are.
+  - **What is saved:** each pane's current address (the exact ChatGPT / Claude / Gemini conversation); a backup of
+    each pane's newest replies (up to 30, each up to 12,000 characters, from the conversation list the app already
+    keeps); the set-up — which AIs are Active, the Compose box, whether 🎩 Alfred is in → All, the open tab, each
+    pane's size (open / reduced / minimized), the folded panels, the window size, each pane's zoom; and what you
+    were doing — who forwards to whom, Auto, the roles, the hop limit, the 🧵 prompt sequence, and the 📖 Akọwe book
+    open in the Akọwe tab (or the one Akọwe last said was open).
+  - **Where:** one JSON file per save in AutoInjector's own data folder, `saved-states/` (on Windows
+    `%APPDATA%\autoinjector-desktop\saved-states\`). The file name is made from the name (letters, digits and dashes
+    only) plus the time; it is written to a temp file and then renamed, so a crash never leaves half a save. The
+    file's first line holds the name, time and a short summary, so the 📂 list reads only that. Up to 200 saves are
+    kept (the 201st asks you to delete some). A damaged file is listed as damaged and can be deleted; it never stops
+    the list. Saves are never sent anywhere.
+  - **Loading:** all three panes are sent to their saved chats at the same time. Only `https` addresses on
+    chatgpt.com / chat.openai.com (ChatGPT), claude.ai (Claude) and gemini.google.com (Gemini) are opened — anything
+    else in a save file (it may have been edited) is refused and that pane stays where it is. After each page loads,
+    AutoInjector looks where it really landed: a 404 or a "conversation not found" page means **gone**, a jump to a
+    sign-in page means **signed out**, and a jump to another page (the site's new chat) means **moved**. Each is said
+    in plain words and the saved replies are shown read-only instead. Then the set-up is put back, and the 🧵 steps
+    wait in the Sequence editor (nothing is sent by itself).
+  - **Busy:** while a book is written, Akọwe waits for an answer, a picture / video is made, a file is downloading,
+    a prompt sequence or a House Rule is running, 📂 Load asks first ("Load it anyway?").
+  - **🎩 Alfred** has `saves.list`, `saves.save`, `saves.load`, `saves.rename` and `saves.delete` (app actions in
+    `alfred-app-actions.js`); loading shows his "I will…" card, and when something is busy he is told so and only
+    loads anyway after you say so.
+  - The log gets codes and counts only (`savestate-save`, `savestate-load` with each pane's result word) — never a
+    name, an address or chat text.
 
 ### 🔗 The bridge (how Akọwe asks an AI)
 
@@ -148,6 +189,10 @@ bridge to your home Wi-Fi, behind its key.
     refusal ("I'm having a hard time fulfilling your request. Can I help you with something else instead?"). Akọwe
     waits (30 s, or 60 s after a usage limit, then longer, up to 2 minutes each and about 10 minutes in all) or uses
     another AI. When the refused prompt was very long (30,000 characters or more), the note says so.
+  - **The AI declined:** a short canned refusal ("I can't help with that") has its own code, **AI_DECLINED**
+    (AutoInjector's bridge marks it `declined`). It is never reported as "the site is not working": the reports say
+    "Gemini declined to answer (it said it can't help with that)". The work still moves to another AI, or waits and
+    asks again. Sad or dark story material (a death, grief, a ghost) sometimes trips an AI's safety filter by mistake.
   - **Chat full:** the site says the conversation is too long ("…exceed the length limit for this chat", "start a
     new chat"). Akọwe hears "site error: chat full" and asks again after 10 seconds; AutoInjector opens a fresh chat
     in that pane first (see **Fresh chats** below).
@@ -172,7 +217,10 @@ bridge to your home Wi-Fi, behind its key.
   Akọwe), and at once when the site says the chat is full. It presses the site's own **New chat** button, or opens
   the site's new-chat page if that button can't be found. It only happens **between** Akọwe requests (never while
   an AI is writing), and never in a pane **you** used yourself in the last 10 minutes (unless the site says the chat
-  is full). The activity log says each time, in plain words. Code: `desktop-app/fresh-chat.js`.
+  is full). The activity log says each time, in plain words. Code: `desktop-app/fresh-chat.js`. While the pane
+  switches to the new chat, AutoInjector reads nothing from it: a half-swapped page is never taken for a new reply.
+  When the New chat button does not give an empty chat, the page is reloaded at the new-chat address; the log's
+  `reload` line then says `by: "fresh-chat"` (not "self-repair").
 - A second door, the **service bridge** (port 8765), does more than the AI bridge. Akọwe uses it for pictures,
   video clips, trailers, the ebook cover JPG and the Book Bible PDF. It also carries the app's tools, voice (speak
   and listen), messages to the AIs, live events, and the phone page.
@@ -502,7 +550,12 @@ background** to carry on. First, AutoInjector checks in with every AI (up
 to a minute), so the run knows which AIs work.
 
 1. **Safety backup** of all your books.
-2. **Invent the book:** title, pen name, genre, readers, tone and the idea. The point of view (first or third
+2. **Invent the book:** title, genre, readers, tone and the idea. The AI **never** chooses the pen name (code:
+   `akowe/akowe/pen_name.py`): the book gets the pen name you typed on the Make-a-book screen, else the last pen name
+   you typed into a book profile (your saved pen name), else none. Why: the AI used to be asked for "an invented pen
+   name", and a web AI whose chat still held your other book answered with that book's main character, which went
+   onto the title page. The plan check before Start shows which pen name the book gets and warns (⚠️) when it is also
+   the name of a character in another book on your shelf; the run and the book profile warn the same way. The point of view (first or third
    person) and the tense (past or present) are fixed here too, from your choice, else the AI's pick for this
    story, else the genre's usual. If you left the **kind of story** to the AI, it picks the one of the seven basic
    plots that fits the idea best here, and the run's notes and the plan page say which and why.
@@ -594,7 +647,16 @@ to a minute), so the run knows which AIs work.
       on the **Book format** step of Book home, and see a print preview of two page spreads. The inside margin
       (where the book is bound) gets wider as the book gets longer. The EPUB and Word files follow the same design
       where they can. Code: `akowe/akowe/exporters/interior.py`, `akowe/akowe/book_design.py`.
-12. **Content check** (every chapter once, in order) and the **book report**. An optional **beta reader** step
+12. **Content check** (every chapter once, in order) and the **book report**. When a whole-book reviewer declines
+    ("I can't help with that"), Akọwe asks it once more with a short, plain note in front of the same task: the book
+    is a work of fiction the author wants an editor's critique of (no tricks, only context). If it declines again,
+    another AI takes its place, so the book gets two independent reviewers when it can: first a working AI that did
+    not write the book and has not reviewed it, then the 🤖 Claude Code helper (a fresh session) when it is ready,
+    then, only when fewer than two reviewers answered, the AI that wrote most of the book (marked "not independent").
+    The report says who declined and who stood in. In the AI usage table, a chapter whose editor's rewrite was not
+    kept names the AI that wrote the version that was kept ("AI-2 · ChatGPT (version 4 kept; the editor's rewrite was
+    not kept)"), and it counts for that AI in "Most of the book was written by". Code: `akowe/akowe/book_report.py`,
+    `akowe/akowe/review.py`. An optional **beta reader** step
     reads the book as its target reader. You can ask for **1, 2 or 3 readers**. With 2 or 3, each reader is a
     different AI playing a different kind of reader: a typical fan, a picky reader of the genre, and a casual reader
     who gives up on slow starts. You can rewrite who they are on the 📊 report page. Each says whether they would
@@ -605,6 +667,61 @@ to a minute), so the run knows which AIs work.
     Every quote is checked against the book again; one not found word for word is marked and never used as evidence.
     An AI that is not working is skipped with a note. If the run is paused, the panel carries on with the readers
     still to read.
+13. **🔁 Improve until better** (code: `akowe/akowe/improve_pass.py`; run settings `improve_pass`, on by default, and
+    `improve_rounds`, 1–3, default 2; the switch is on the Make-a-book screen). Akọwe gathers, per chapter, without
+    any AI: the editor's MAJOR notes on the approved version, the notes kept when you pressed **✔ Approve anyway**
+    (setting `improve_queue:<book>:<branch>`), the clock / tide / day contradictions (`clock_check.py`), every
+    later use of a phrase or simile repeated across chapters, plain-word tics ("went" 26×), chapters under the reading
+    floor for the book's readers, the beta readers' top fixes and the reviewers' "What to try next". The (at most 3)
+    chapters with the most to fix get ONE targeted rewrite each by their writer — the editor's rewrite machinery
+    (exact passages only, the keep list, the voices, protected facts and approved canon), plus the improve rules:
+    never change what happens, the ending's outcome, names, the main character, a locked detail, an approved fact or
+    a story rule. Nothing is saved yet: the **same** whole-book reviewers re-read the book with those chapters
+    (`ReportService.rescore`, their known generosity discounts applied, nothing added to their track record). The
+    rewrite is **kept only if** the overall score went up (by at least 0.1) and no dimension dropped by more than 1
+    point (and every reviewer could read it); then each chapter becomes a new draft, goes through the usual review
+    and approval under the run consent (a chapter the reviewer does not pass gets its approved text back), the report
+    is saved with the re-read scores, and the book is put together, exported and checked again. Otherwise the book is
+    left exactly as it was. A round that does not improve ends the pass. With the editor or its rewrites switched
+    off (Settings › Editor, rounds 0, or the run's pipeline) the pass does nothing and says so. The run window ("Improve until better"
+    step), the journal and the report say both numbers: "🔁 Improve pass: 7.6 → 8.1/10 (kept)". About (chapters +
+    reviewers) answers per round plus the kept chapters' reviews — counted in the ⏱ estimate.
+14. **📈 Quality history** (code: `akowe/akowe/quality_history.py`): when a run finishes, the report's numbers — the
+    overall score, the median of each whole-book dimension, the editor's average per category, the "sounds like a
+    person" score, the reading grade, the beta average, fixed habit codes (`triad`, `simile`, `word:went`, `clock`,
+    `simple`…) and the improve pass's before → after — are added to your history (setting `quality_history:<you>`,
+    the last 30 books; numbers and codes only, never the book's words). 🏠 Book home, the 📊 report and the run window
+    show the trend: "7.6/10 — down 0.4 from your last book. Rule rigor is your weakest area for 3 books (5/10).
+    Falling: Peril and uncertainty 7→6."
+
+**🧠 Lessons that carry forward.** At the start of the plan (the premise step) a ⚡ run copies the author's lessons
+onto the new book (setting `quality_lessons:<book>`): the whole-book dimensions and editor categories that were weak
+(≤ 6.5) in the last 3 books, and the recurring habits, each as one instruction ("Every special rule (ghost, magic,
+curse, device) needs scope, cost and limits", "Check all clock, tide and date arithmetic before writing a time on the
+page"), at most 6, most frequent first. The premise, main plot and outline prompts get them as `context.lessons`
+(≤ 900 characters). Every chapter's writer gets `writing_brief.quality_lessons` (≤ 1 400 characters; what does not
+fit is listed in the ⚠️ "what was cut" note): those lessons, the editor categories that scored low in THIS book's
+earlier chapters, an **avoid-list** of the similes, phrases and plain-word tics the chapters before already used
+(one chapter is enough — chapter 2 is told not to reuse chapter 1's "like a hook"), the tide and day facts stated so
+far with any contradiction as **must_fix**, and the **reading-level floor** (adult: aim for grade 5 or more; young
+adult 4; middle grade 3).
+
+**🕰️ The clock and tide check** (code: `akowe/akowe/clock_check.py`, no AI): stated times ("14:30", "half past two",
+"four o'clock", "eight in the evening"; a 12-hour time without a part of the day keeps both readings and is only
+called wrong when both are), days (weekday names, "the next morning") and tides ("high water at 18:06", "the tide was
+going out", "on the flood"). It flags a tide running the wrong way for the high water the book stated (it rises for
+about 6 h 12 min before high water and falls after it; ±40 minutes around a turn is never flagged), two high waters
+that cannot both be true (12 h 25 min apart, about 50 minutes later each day; ±1 hour), and a clock that runs
+backwards inside a chapter on the same day. The chapter's editor and reviewer get this chapter's contradictions as
+`akowe_in_chapter` entries named "time": a MAJOR problem; one the editor does not note itself becomes a major note of
+its own (so the rewrite fixes it).
+
+**📏 Special rules need scope, cost and limits** (code: `akowe/akowe/story_rules.py`): a story rule about a ghost,
+magic, a curse, a prophecy, a strange device… that does not state all three (scope: where/when/for whom; cost: what it
+takes or risks; limits: what it can never do) is a major "is it bounded?" finding (`SPECIAL_UNBOUNDED`), shown on the
+📏 Story rules page and sent to the plot/outline planners and their reviewers as `not_bounded`. A ⚡ run asks the AI
+once to bound such rules (after the first rules and again after the plan, at most twice) and accepts the update under
+the run consent; the planners are told that every special mechanism keeps its scope, cost and limits.
 
 **How a fix is judged (code: `akowe/akowe/review.py`, `review_loop.py`):** when the writer revises a draft to answer
 the reviewer, the reviewer judges the new version **only against approved canon**: approved records and protected
@@ -724,7 +841,8 @@ All four are on the ⚡ **AI writes the whole book** screen (code: `akowe/akowe/
   helpers when they are on), and whether an AI will probably hit its usage limit and when ("Claude will probably
   reach its limit around chapter 14; the other AIs carry on and it is back about 4 hours later"). It changes as you
   change the length, how many AIs check for mistakes, the writers' room, beta readers, character pictures, "fill the
-  whole Book Bible", the end-of-book "sounds like a person" pass (about 2 answers), the Claude Code helpers, "when
+  whole Book Bible", the end-of-book "sounds like a person" pass (about 2 answers), the 🔁 improve pass and its
+  rounds (per round the rewrites plus the reviewers' re-read, plus the kept chapters' reviews), the Claude Code helpers, "when
   only one AI works" and which AI writes. It starts from the P28 numbers (`costs.estimate`: AI calls per step); once
   this PC has finished runs, it uses their measured seconds per answer, each AI's share of the answers, and the
   answers of the optional steps. The usage limits are rough public guesses (Claude ~40 long messages per 5 hours,
@@ -774,7 +892,11 @@ All four are on the ⚡ **AI writes the whole book** screen (code: `akowe/akowe/
 | Point of view and tense | a chapter that slips into another person or tense | every chapter |
 | Editor rubric | told-not-shown feelings, flat side characters, same-sounding voices, no stakes | every chapter |
 | Timeline arithmetic (no AI) | ages and years that don't add up ("twelve, twenty years ago… now forty") | the whole-book fact check, near the end |
-| Readability (no AI) | prose too hard or too simple for the book's readers | the book report and the scene grid |
+| Readability (no AI) | prose too hard or too simple for the book's readers | the book report and the scene grid; the reading-level floor in every chapter's brief and the final improve pass |
+| 🕰️ Clock and tide (no AI) | a tide going out before the stated high water, high waters that cannot both be true, a clock running backwards | every chapter's editor and reviewer (must-fix), the next chapter's brief, the final improve pass |
+| 📏 Special rules bounded (no AI + one AI update) | a ghost, magic or device rule with no scope, cost or limits | after the story rules and after the plan |
+| 🔁 Improve until better | what the reviewers, beta readers, the editor and Akọwe's checks found — kept only if the same reviewers score it higher | after the beta readers, at the end of a ⚡ run (on by default) |
+| 📈 Quality history and 🧠 lessons | your recurring weak areas and habits | recorded when a run finishes; given to the next book's planners and writer |
 | Pattern check (no AI) | repeated habits ("went very still"), lists of three, same-length sentences; a habit 2+ checks flag (pattern, originality, editor) is a must-fix for the editor, and the run says how many are left | before the editor |
 | ✍ Sounding human (see below) | AI phrases and patterns told to the writer beforehand; the book's own repeats (openings, endings, gestures, phrases, rhythm); a "Sounds like a person" score | every chapter's instructions, every checkpoint, and at the end of a ⚡ run (suggestions you approve) |
 | ✨ Originality check (no AI, optional AI pass) | clichés and AI-sounding phrases ("a testament to", "a breath she didn't know she was holding", "It wasn't X. It was Y."), long dashes everywhere, too much hedging; per chapter, with quotes and reasons. Dialogue is left out unless you ask. An optional second AI (not the writer) rates passages 1–5 for "sounds machine-written"; its quotes are checked against the book | before the editor (so its rewrites target them; a rewrite that adds such phrases is not kept), in the book report, and on the 📊 report page (✨ button). Never blocks the book |
@@ -796,7 +918,9 @@ A few of these need more words:
   as the same AI.
 - **Approved without checks.** "Approve anyway", "approve it yourself" and the standing auto-approve skip some
   checks. Each such approval is written down. The editor and the plan check still run as notes. The book report
-  and a ⚠️ *Needs a look* card on 🏠 Book home list these chapters.
+  and a ⚠️ *Needs a look* card on 🏠 Book home list these chapters. After **✔ Approve anyway** on a chapter the
+  reviewer had not passed, the editor's major notes and the reviewer's reasons are kept for the final 🔁 Improve
+  until better pass (your approval stands; the notes are no longer dropped).
 - **Hand edits.** When you change a chapter, what Akọwe read from the old text is set aside: its running notes,
   the notes of every later chapter (they were built on top of it), its lines in the story so far, and any
   checkpoint that read it — only those: of the final whole-book read, only the part that holds the changed chapter.
@@ -842,38 +966,45 @@ A few of these need more words:
   once in plain words: "Only ChatGPT can check right now because Gemini is switched off for checks and Claude is the
   writer." The checkpoints and the ending check still include the writer's own reading as one of several (a
   whole-book consistency read, merged by agreement), as since PR #117.
-- **🧑‍⚖️ The stand-in decider** (code: `akowe/akowe/stand_in.py`; ⚙️ Settings › Stand-in when I don't answer,
-  `GET/PUT /api/settings/stand-in`; off by default). When a run waits for you on ONE AI disagreement — the reviewer and
-  the writer went round in circles about the same finding (`REVIEW_DECISION`, kind `loop`): accept the writer's
-  correction or keep the original — and you have not answered within the wait time (10, 20, 30 or 60 minutes, default
-  20), a stand-in decides:
-  1. the 🤖 Claude Code helper, when it is installed and signed in and Claude is neither the writer nor the reviewer
-     who objected;
-  2. else the AI that is not part of the disagreement, best track record first (never one switched off for checks);
-  3. else 🎩 Alfred — only for a **simple case**: a plain "accept this correction?", the correction answers a finding
-     a reviewer raised, it touches no locked detail already on the page and no locked story-map connection, Akọwe's
-     own no-AI checks pass the corrected record, and the change is small. Alfred can only accept a correction.
+- **🧑‍⚖️ The stand-in vote** (code: `akowe/akowe/stand_in.py`; ⚙️ Settings › Stand-in when I don't answer,
+  `GET/PUT /api/settings/stand-in`; off by default). Your rule: "If the user doesn't pick anything, two AIs have to
+  agree on it. If there's three of them, all three have to." When a run waits for you on an AI disagreement and you
+  have not answered within the wait time (10, 20, 30 or 60 minutes, default 20), the AIs vote. Two kinds of decision
+  can be voted on:
+  1. the reviewer and the writer went round in circles about the same finding (`REVIEW_DECISION`, kind `loop`):
+     accept the writer's correction, or keep the original;
+  2. the reviewer still objects after the writer's fixes (`REVIEW_NOT_PASSED`, e.g. a chapter that waited all night):
+     accept the writer's version as it is, or send it back for two more fixes that follow the reviewer's notes.
 
-  **Never a stand-in** — these always wait for you: a change to an approved fact, the plot or outline (premise, main
+  **Who votes:** every AI that is connected, working and not switched off for checks — ChatGPT, Claude, Gemini, one
+  vote each, including the two that disagreed. The 🤖 Claude Code helper votes for Claude only when no Claude window
+  or API is working — never two votes for Claude. 🎩 Alfred (the local model) no longer decides anything here.
+  **The question:** each AI gets a fresh, neutral request with the finding, both options and the records involved
+  (the changed text or the current version, the approved canon, Akọwe's no-AI check results). The two options are
+  shown as A and B in a random order for each AI (the order is kept with the vote), so no AI is pushed towards the
+  writer's side. The answer is JSON `{choice: A | B | unsure, confident: 0–1, why}`, checked by Akọwe.
+  **The rule:** it decides only when at least two AIs could be asked, every one of them answered, all chose the same
+  option and each is at least 75% sure. Two AIs working: both must agree. Three working: all three. It keeps waiting
+  for you when only one AI (or none) is working, any AI chooses the other option, is unsure, or does not answer
+  clearly — and when three were working and one fails or refuses during the vote, the two left do **not** decide on
+  their own. The vote stops at the first answer that already rules a decision out (fewer calls at night). The run
+  window then says, for example, "The AIs didn't all agree (ChatGPT: accept, Gemini: keep) — waiting for you."
+
+  **Never voted on** — these always wait for you: a change to an approved fact, the plot or outline (premise, main
   plot, outline), the ending (the last chapter, or a finding about the ending), the main character's own record,
-  point of view or tense, your content limits, and anything on your lock list.
-  **How it decides:** a structured request — the finding, before → after, the approved canon and Akọwe's no-AI check
-  results — and a JSON answer `{choice: accept_change | keep_original | unsure, confidence, reason}`, checked by
-  Akọwe. Unsure, under 75% sure, or not the JSON asked for → it keeps waiting for you (it never guesses, and it
-  does not ask the next one). A stand-in that is missing or not working (Claude Code not installed or signed out, an
-  AI at its limit, Ollama not running) is skipped for the next one; when none is left it keeps waiting.
-  **How Alfred is reached:** Akọwe calls the local model directly through Ollama's OpenAI-compatible address on this
-  computer (default `http://127.0.0.1:11434/v1`, the same server Alfred uses; the model is the one named in Settings,
-  else the one Ollama lists first, Qwen first). Any address that is not this computer is refused, so the book never
-  leaves the PC. This needs no change to AutoInjector or the bridge and works even when AutoInjector is closed.
-  **Visible and reversible:** each decision is written to the run's journal, the run window and 🏠 Book home —
-  "🎩 Alfred approved the correction to Ansel Marrant (character) at 10:05 because you didn't answer for 20 minutes.
-  Why: … [↩ Undo]" — and AutoInjector's desktop notification says "Decided for you". While a run waits, the alert's
-  "what happens next" says when the stand-in will step in (or why it won't). **↩ Undo** puts the other choice back as
-  a new draft that waits for your approval, and turns that decision's track-record outcomes round. At most 5 stand-in
-  decisions per run (Settings), then it always waits. The stand-in's decisions count in its own track record
-  (labelled "stand-in decisions"). Logs and the outbox keep codes only (who decided, the choice) — never the book's
-  words or the reason.
+  point of view or tense (also when Akọwe's own promise check flagged it), your content limits, anything on your lock
+  list, and stops that are not a choice between two options (for example "only one AI checked it").
+  **Visible and reversible:** each decision is written to the run's journal, the run window and 🏠 Book home with
+  every vote — "ChatGPT, Claude and Gemini all agreed to accept the correction to Ansel Marrant (character) at 03:12
+  because you didn't answer for 20 minutes. Why: … [↩ Undo]" — and AutoInjector's desktop notification says "Decided
+  for you". While a run waits, the alert's "what happens next" says when the AIs will vote (or why they won't, or how
+  the vote went). **↩ Undo** puts the other choice back as a new draft that waits for your approval (for "accept as
+  it is": the same version, no longer approved; for "fix again": the version the AIs sent back), and turns that
+  decision's track-record outcomes round. At most 5 stand-in decisions per run (Settings), then it always waits.
+  **Track record:** every vote counts for that AI ("stand-in decisions"): a decision that stands counts as held up
+  for each AI that voted (Undo turns it round); when the AIs did not all agree, each vote is compared with what you
+  chose later — the same choice holds up, the other is overruled. Logs and the outbox keep codes only (which AIs
+  voted, the choice) — never the book's words or the reasons.
 - **Book report.** It shows who checked the book and how far they agreed, and each stretch review. Its PDF keeps
   accented letters and other alphabets (ọ, ẹ, ł, Greek); a symbol it cannot print becomes a word or "•". "Written by"
   names the AI that wrote the chapter ("Claude + editor" when the editor's changes are in it). Advice with nothing
@@ -1017,6 +1148,7 @@ In the code map the story map is `N00` (running notes, section 0); each connecti
 | Your books | `Documents\Akowe Books\` in your real Documents folder, also when Windows moved it to OneDrive (change it in Akọwe → Settings → 📁 Where books are saved; a folder OneDrive, Dropbox or Google Drive syncs gets a ⚠️ and a button for a folder they do not sync) |
 | Akọwe's working data and backups | `%LOCALAPPDATA%\Akowe` (backups share unchanged pictures and clips instead of copying them again; its own log is `logs\akowe.log`, 10 MB × 5 files; each story checkpoint and chapter check is saved on its own, so a long book never rewrites one big record) |
 | AutoInjector settings, transcript, connection key | `%APPDATA%\autoinjector-desktop\` (older messages: `autoinjector-transcript-archive.jsonl`, then `.1`) |
+| 💾 Saved states (one JSON file each, up to 200) | `%APPDATA%\autoinjector-desktop\saved-states\` |
 
 **Files the AIs give you.** When ChatGPT, Claude or Gemini offers a file to download in its pane and you click it,
 there is no Save window: AutoInjector saves it straight into that AI's folder, `stuff and thing/ai-work/<the AI>/`,

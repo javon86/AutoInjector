@@ -37,7 +37,9 @@ PREFIX = "job:"
 MAX_KEPT = 300
 KEEP_FINISHED_S = 14 * 24 * 3600
 LIVE = ("queued", "running", "waiting", "pausing")
-BUSY_CODES = ("UPSTREAM_UNAVAILABLE", "RATE_LIMITED")
+# AI_DECLINED (the AI said "I can't help with that"): its own code so reports name it plainly, but the work treats it
+# like a busy AI - it moves to another AI, or waits and asks again (a refusal of a story is often a one-off)
+BUSY_CODES = ("UPSTREAM_UNAVAILABLE", "RATE_LIMITED", "AI_DECLINED")
 # After a 504 for a prompt it already typed, the AutoInjector bridge keeps that site reserved for the late answer
 # for at most this long (akowe-bridge.js LATE_WINDOW_MAX_MS); meanwhile other requests to the site get
 # 409 SITE_BUSY (-> RATE_LIMITED here). The default busy-retry budget is twice that, so they still get their turn.
@@ -55,6 +57,8 @@ def now_iso() -> str:
 def is_busy_error(exc) -> bool:
     """An AI answer that means "try again later": unreachable/overloaded/rate limited/site busy (never TIMEOUT)."""
     if not isinstance(exc, AkoweError):
+        return False
+    if getattr(exc, "no_wait", False):  # e.g. an AI that declined the same request several times already
         return False
     if exc.code in BUSY_CODES:
         return True
@@ -181,7 +185,7 @@ def wait_and_retry(fn, *, policy: RetryPolicy, check=None, on_wait=None, who: st
                 raise AkoweError(exc.code, exc.errors[0].get("path") or "",
                                      f"{who() if callable(who) else who} stayed busy or unreachable for {int(waited)} s, so Akọwe stopped "
                                      f"waiting ({exc.errors[0].get('message')})", status=exc.status) from exc
-            word = "busy" if exc.code == "RATE_LIMITED" else "not reachable"
+            word = {"RATE_LIMITED": "busy", "AI_DECLINED": "it declined to answer"}.get(exc.code, "not reachable")
             name = who() if callable(who) else who
             info = {"code": exc.code, "attempt": attempt, "retry_in_s": int(delay),
                     "retry_at": datetime.fromtimestamp(time.time() + delay, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
