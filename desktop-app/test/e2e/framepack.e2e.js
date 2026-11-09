@@ -113,10 +113,10 @@ async function main() {
     await c.waitForSelector('#vd-error:not([hidden])', { timeout: 20000 }).catch(() => {});
     assert(/Stopped/.test(await c.textContent('#vd-error-msg')) && !(await c.$eval('#btn-vd-generate', (b) => b.disabled)), '⏹ Stop → "Stopped." and Make is ready again');
 
-    // ♻ Remake
+    // ✎ To form (♻ Remake now makes the same video again exactly — test/e2e/video-judge.e2e.js)
     await c.click('#vd-gallery .vd-thumb');
-    await c.click('#btn-vd-remake');
-    assert(await c.evaluate(() => document.getElementById('vd-engine').value === 'framepack' && document.getElementById('vd-fp-steps').value === '6' && document.getElementById('vd-seed').value !== '-1'), '♻ Remake puts FramePack and its settings (steps, seed) back');
+    await c.click('#btn-vd-to-form');
+    assert(await c.evaluate(() => document.getElementById('vd-engine').value === 'framepack' && document.getElementById('vd-fp-steps').value === '6' && document.getElementById('vd-seed').value !== '-1'), '✎ To form puts FramePack and its settings (steps, seed) back');
 
     // 🧪 the 2-second test from a test picture
     await c.click('#vd-sub-setup');

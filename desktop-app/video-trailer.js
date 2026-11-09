@@ -17,7 +17,10 @@
  *
  * deps: studio (video-studio: generate / animate / cancel / busy), record(plan, outPath, { onProgress }) →
  * { done, stop, abort }, trailersDir() (the trailers folder), fileUrl(p), log(type, data), ffmpeg() → path | null
- * (optional; default findFfmpeg({ roots: deps.comfyRoots() })), runFfmpeg(bin, args, ms) (optional), waitMs.
+ * (optional; default findFfmpeg({ roots: deps.comfyRoots() })), runFfmpeg(bin, args, ms) (optional), waitMs,
+ * recipeRequest(id, { subject, request }) → { ok, request } (💾 a video recipe for every shot / one shot, optional),
+ * improveShot(path, { rounds, final }) (🧑‍⚖️ 🔁 video-improve.js, optional) and autoJudge() → bool (the "Judge and improve
+ * trailer shots automatically" setting, off by default; a plan's judgeShots wins).
  */
 const fs = require('fs');
 const path = require('path');
@@ -30,10 +33,10 @@ const DEFAULTS = { shotSeconds: 4, cardSeconds: 3, stillSeconds: 3, width: 1280,
 const MOTIONS = ['zoom-in', 'zoom-out', 'pan-left', 'pan-right', 'pan-up', 'pan-down', 'none'];
 const STILL_EXT = /\.(png|jpe?g|webp)$/i;
 const MUSIC_EXT = /\.(mp3|ogg|oga|opus|wav|m4a|aac|flac|webm)$/i;
-const SHOT_KEYS = ['type', 'prompt', 'image', 'seconds', 'characterLock', 'negativePrompt', 'seed', 'model'];
+const SHOT_KEYS = ['type', 'prompt', 'image', 'seconds', 'characterLock', 'negativePrompt', 'seed', 'model', 'recipe'];
 const CARD_KEYS = ['type', 'text', 'subtitle', 'seconds', 'at'];
 const STILL_KEYS = ['type', 'image', 'seconds', 'motion'];
-const TOP_KEYS = ['book', 'title', 'items', 'shots', 'cards', 'music', 'musicVolume', 'width', 'height', 'fps', 'fade', 'model', 'engine', 'resume', 'mp4', 'from', 'wait'];
+const TOP_KEYS = ['book', 'title', 'items', 'shots', 'cards', 'music', 'musicVolume', 'width', 'height', 'fps', 'fade', 'model', 'engine', 'resume', 'mp4', 'from', 'wait', 'recipe', 'judgeShots'];
 const ENGINES = { auto: 'auto', wan: 'comfy-wan', comfy: 'comfy-wan', 'comfy-wan': 'comfy-wan', framepack: 'framepack', endpoint: 'endpoint' };
 const ERRORS = {
   TRAILER_JOIN_FAILED: 'The shots were made, but joining them into one video failed.',
@@ -125,7 +128,7 @@ function normalizeTrailer(req) {
     const seconds = Math.round(clamp(want, lo, hi) * 10) / 10;
     if (seconds !== want) warnings.push({ level: 'soft', field: `items[${i}].seconds`, message: `Shot ${n}: ${want} s → ${seconds} s (a shot is ${lo}–${hi} s).` });
     const shot = { type: 'shot', prompt, image, seconds };
-    for (const k of ['characterLock', 'negativePrompt', 'model']) if (x[k] != null && x[k] !== '') { if (typeof x[k] !== 'string') return { error: bad(`items[${i}].${k}`, `Shot ${n}: ${k} must be text.`) }; shot[k] = x[k].slice(0, k === 'negativePrompt' ? 4000 : 200); }
+    for (const k of ['characterLock', 'negativePrompt', 'model', 'recipe']) if (x[k] != null && x[k] !== '') { if (typeof x[k] !== 'string') return { error: bad(`items[${i}].${k}`, `Shot ${n}: ${k} must be text.`) }; shot[k] = x[k].slice(0, k === 'negativePrompt' ? 4000 : 200); }
     if (isNum(x.seed) && Number(x.seed) >= 0) shot.seed = Math.floor(Number(x.seed));
     items.push(shot);
   }
@@ -154,13 +157,15 @@ function normalizeTrailer(req) {
     if (!st || !st.isFile()) return { error: bad('music', `The music file “${p}” was not found.`, 'Give the full path of the music file, or leave music out.') };
     music = p;
   }
-  for (const k of ['book', 'title', 'model', 'from', 'engine']) if (r[k] != null && typeof r[k] !== 'string') return { error: bad(k, `${k} must be text.`) };
+  for (const k of ['book', 'title', 'model', 'from', 'engine', 'recipe']) if (r[k] != null && typeof r[k] !== 'string') return { error: bad(k, `${k} must be text.`) };
+  if (r.judgeShots != null && typeof r.judgeShots !== 'boolean') return { error: bad('judgeShots', 'judgeShots must be true or false.') };
   if (r.engine != null && r.engine !== '' && !ENGINES[String(r.engine).toLowerCase()]) return { error: bad('engine', `“${r.engine}” is not a video engine.`, 'engine is "auto", "wan", "framepack" or "endpoint".') };
   const book = String(r.book || r.title || '').trim().slice(0, 200);
   const plan = {
     book: book || 'Untitled', title: String(r.title || book || '').trim().slice(0, 200), folder: safeName(book, 'Untitled'),
     items, music, musicVolume: MV.v, width: W.v, height: H.v, fps: F.v, fade: Math.round(FD.v * 100) / 100,
     model: r.model ? String(r.model).slice(0, 80) : undefined, engine: r.engine ? ENGINES[String(r.engine).toLowerCase()] : undefined, resume: r.resume !== false, mp4: r.mp4 !== false, from: r.from ? String(r.from).slice(0, 60) : '',
+    recipe: r.recipe ? String(r.recipe).slice(0, 200) : undefined, judgeShots: typeof r.judgeShots === 'boolean' ? r.judgeShots : undefined,
   };
   plan.total = Math.round(items.reduce((n, x) => n + x.seconds, 0) * 100) / 100;
   return { plan, warnings };
@@ -172,6 +177,7 @@ function shotKey(shot, model, engine) {
   const img = shot.image ? (shot.image.length > 300 ? `b64:${crypto.createHash('sha1').update(shot.image).digest('hex')}` : shot.image) : '';
   const parts = [shot.prompt || '', img, shot.seconds, shot.characterLock || '', shot.negativePrompt || '', shot.model || model || '', shot.seed == null ? null : shot.seed];
   if (engine === 'framepack') parts.push('framepack');
+  if (shot.recipe) parts.push(`recipe:${shot.recipe}`);
   const k = JSON.stringify(parts);
   return crypto.createHash('sha1').update(k).digest('hex').slice(0, 16);
 }
@@ -282,7 +288,7 @@ function createTrailerMaker(deps = {}) {
     return {
       id: j.id, book: j.plan.book, phase: j.phase, busy: !j.finished, seconds: Math.round((Date.now() - j.startedAt) / 1000), pct: Math.round(pct * 1000) / 1000,
       shot: j.shotNo || 0, shots: shots.length, shotsDone: doneShots, total: j.plan.total, message: j.message || '',
-      items: j.items.map((x) => ({ type: x.type, status: x.status, label: x.label, seconds: x.seconds, path: x.path || null, url: x.path ? fileUrl(x.path) : null, poster: x.poster || null, error: x.error || null })),
+      items: j.items.map((x) => ({ type: x.type, status: x.status, label: x.label, seconds: x.seconds, path: x.path || null, url: x.path ? fileUrl(x.path) : null, poster: x.poster || null, error: x.error || null, improved: x.improved || undefined, judge: x.judge || undefined })),
       shotProgress: j.shotProgress || null,
     };
   }
@@ -317,9 +323,33 @@ function createTrailerMaker(deps = {}) {
     for (const k of ['characterLock', 'negativePrompt', 'seed']) if (shot[k] != null) req[k] = shot[k];
     if ((shot.model || j.plan.model) && engine !== 'framepack') req.model = shot.model || j.plan.model;
     if (j.plan.engine && j.plan.engine !== 'auto') req.backend = j.plan.engine;
+    let call = req;
+    // 💾 a video recipe for this shot (or the whole trailer): its settings under the shot's own
+    const rid = shot.recipe || j.plan.recipe;
+    if (rid && typeof deps.recipeRequest === 'function') {
+      const rr = deps.recipeRequest(rid, { subject: req.prompt, request: Object.assign({}, req, { prompt: undefined }) });
+      if (!rr || !rr.ok) return rr || fail('NO_RECIPE', `There's no video recipe called “${rid}”.`);
+      call = rr.request; if (!call.prompt) delete call.prompt;
+    }
     let r;
-    if (shot.image) { req.image = shot.image; r = await studio.animate(req, 'trailer'); } else r = await studio.generate(req, 'trailer');
+    if (shot.image) { call.image = shot.image; r = await studio.animate(call, 'trailer'); } else r = await studio.generate(call, 'trailer');
     if (!r || !r.ok) return r || fail('VIDEO_FAILED', 'The shot could not be made.');
+    // 🧑‍⚖️ "Judge and improve trailer shots automatically" (off by default; at most 2 quick-preview rounds + the full shot)
+    const judgeOn = typeof j.plan.judgeShots === 'boolean' ? j.plan.judgeShots : !!(deps.autoJudge && deps.autoJudge());
+    if (judgeOn && r.path && typeof deps.improveShot === 'function' && !j.cancelled) {
+      it.status = 'judging';
+      j.message = `🧑‍⚖️ Judging and improving shot ${j.shotNo} (quick previews, at most 2 rounds)…`;
+      let imp = null;
+      try { imp = await deps.improveShot(r.path, { rounds: 2, final: 'auto', from: 'trailer:judge' }); } catch (_) { imp = null; }
+      if (j.cancelled) return fail('VIDEO_CANCELLED', 'Stopped.');
+      if (imp && imp.ok && imp.bestPath && imp.bestPath !== r.path && fs.existsSync(imp.bestPath)) {
+        const stem = imp.bestPath.replace(/\.[^.\\/]+$/, '');
+        r = Object.assign({}, r, { path: imp.bestPath, poster: fs.existsSync(`${stem}.png`) ? `${stem}.png` : r.poster });
+        it.improved = true;
+      }
+      it.judge = imp && imp.ok && imp.rounds ? { best: imp.best, scores: imp.rounds.map((x) => x.overall) } : { error: imp ? imp.code || imp.error : 'FAILED' };
+      log('trailer-judge', { shot: j.shotNo, improved: !!it.improved, scores: it.judge.scores, error: it.judge.error });
+    }
     if (!r.path) return fail('VIDEO_FAILED', 'The video engine answered with an address, not a file — a trailer needs the clip on this computer.', 'Use ComfyUI + Wan or FramePack (🎬 Video → Setup).');
     // keep a copy with the trailer (resume, and so deleting it from videos/ doesn't break the trailer)
     const sd = path.join(j.dir, 'shots'); fs.mkdirSync(sd, { recursive: true });

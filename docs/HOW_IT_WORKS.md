@@ -380,6 +380,41 @@ replaced by what you type.
   - **Wan** on ComfyUI. Its models download inside the app.
 - **Trailers:** shots and title cards joined into one trailer (WebM, plus MP4 when ffmpeg is found). Akọwe's
   🎬 Trailer page plans the shots from the book.
+- **Everything is saved with every video** (`video-record.js`): next to each clip is a `.json` file with what you typed
+  and what was sent, the negative prompt, the engine (Wan 2.2 5B / Wan 2.1 1.3B / FramePack) and its model files, the
+  ComfyUI graph, the length, fps, frame count and size, steps, CFG, shift / sampler / scheduler (FramePack: distilled
+  CFG, TeaCache, GPU memory kept free), the **real seed**, the starting picture (and a link to its own `.json`), who
+  asked (you / Alfred / Akọwe's trailer + book), the recipe, the AI judge's verdicts, how long it took and the app
+  version. **Settings used** under the player shows it in plain words. **♻ Remake** makes the same video again,
+  exactly (same prompt as sent, same seed, same settings, same starting picture); **✎ To form** puts the settings back
+  into the form so you can change one thing.
+- **💾 Recipes** (`video-recipes.js`, `video-recipes.json`): the picker at the top of the form, with 💾 ✏ 🗑 ⭐, the
+  same as 🎨 Images. They are a separate list from the picture recipes (a video recipe has nothing a picture can use
+  and the other way round), kept by the same store. Five starters come from the engines' own defaults: text → video and
+  picture → video with Wan 2.2 5B, "Quick and light" with Wan 2.1 1.3B (about 8 GB), picture → video and "Character
+  moves" with FramePack. A trailer can use a recipe for all its shots.
+- **🧑‍⚖️ Judge** (`video-frames.js`, `video-judge.js`, `video-improve.js`): AIs can't watch a video, so the judge gets a
+  **contact sheet**: about 8 frames taken evenly across the clip, side by side in time order, each labelled with its
+  frame number and time (for picture → video the starting picture is the first tile, labelled START). The frames come
+  from ffmpeg when it is on the PC (found the way the trailer finds it), otherwise from the app's own player (a hidden
+  window plays the clip and copies each frame). A **frame check that needs no AI** compares up to 32 frames and flags a
+  frozen video, sudden jumps and flicker. The judges are the same ones, in the same order, as for pictures (Claude Code
+  on your PC, then a web pane, then a local model) and each judgement uses **one AI answer**. Scores 1–10: matches the
+  prompt, picture quality, stays the same across frames, natural motion (no melting), no flicker (the AI's view and the
+  frame check together), and for picture → video, faithful to the starting picture. Suggested changes come from a fixed
+  list (steps, CFG, seconds, fps, the model's own sizes, shift / calmer motion, distilled CFG and TeaCache for FramePack,
+  a new seed, words to avoid, prompt words, another engine, "use a better starting picture" → 🎨 Images).
+- **🔁 Make it better:** the judge looks at your video, its changes are tried in a **quick preview** (about 1.5 s, the
+  model's smaller size of the same shape, the same seed), the preview is judged, and so on — up to 3 rounds (5 at most).
+  It stops early when one passes or when two in a row are no better. The strip shows every round (point at one to play
+  it) with its score and what changed. Then it asks before the **one full-length, full-size video** with the best
+  settings and says how long it will take (measured from your earlier videos when it can). ⏹ Stop works at any point,
+  also in the middle of a render. ✔ Keep this one / 💾 Save these settings as a recipe. Your defaults are never
+  changed. **Make 2, pick the best** (2–4) makes several videos with different seeds and marks the best one.
+- **Trailers:** "🧑‍⚖️ Judge and improve trailer shots automatically" (off by default — it costs AI answers and time):
+  each new shot is judged and improved (at most 2 quick previews, then the full shot) before joining.
+- **Alfred** can do all of it (`video_call`: `video.record`, `video.remake`, `video.judge`, `video.improve` →
+  `video.improveFinal`, `video.makeBest`, `video.recipes.*`, `video.judgeSettings` …), always through his "I will" card.
 - **Not yet confirmed on your PC:** on your RTX 5070 Ti, four test rounds fixed start-up and loading problems.
   A first finished clip, picture → video, text → video and a trailer still need to be confirmed. Use
   🩺 Test pictures & video (Full).

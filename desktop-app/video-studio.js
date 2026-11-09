@@ -29,6 +29,7 @@ const VI = require('./video-installer');
 const VE = require('./video-errors');
 const { fmtBytes } = require('./sd-installer');
 const FP = require('./framepack');
+const VR = require('./video-record');
 
 const PURPOSES = ['clip', 'trailer_shot', 'free', 'test'];
 const BACKENDS = ['auto', 'comfy-wan', 'framepack', 'endpoint'];
@@ -432,11 +433,14 @@ function createVideoStudio(deps = {}) {
     const nz = normalize(mode, r, { settings, imageInfo: image ? { width: image.width, height: image.height } : null });
     if (nz.error) return nz.error;
     const p = nz.params; const warnings = nz.warnings;
+    // what was typed (before a character lock's looks are added) and whether the negative was the automatic one: kept in the sidecar
+    const typed = { promptTyped: r.promptTyped != null ? String(r.promptTyped) : p.prompt, negativeAuto: r.negativePrompt == null };
     const lk = lockApply(p);
     if (lk && lk.error) return lk.error;
     if (lk) { p.prompt = lk.prompt; p.negativePrompt = lk.negativePrompt; p.lock = { id: lk.lock.id, character: lk.lock.character, book: lk.lock.book }; }
     if (!p.prompt) { if (mode === 'i2v') p.prompt = IDLE_PROMPT; else return fail('NEED_PROMPT', 'Describe the video first (prompt), or give a characterLock.', '', { error: 'NEED_PROMPT' }); }
-    const job = { id: crypto.randomUUID(), mode, model: p.model, startedAt: Date.now(), phase: 'starting', cancelled: false, from: from || 'video-tab', noWs: !!deps.noWs };
+    const job = { id: crypto.randomUUID(), mode, model: p.model, startedAt: Date.now(), phase: 'starting', cancelled: false, from: from || 'video-tab', noWs: !!deps.noWs,
+      ctx: { promptTyped: typed.promptTyped, negativeAuto: typed.negativeAuto, recipe: r.recipeUsed || null, preview: !!r.preview, improve: r.improve || null } };
     current = job;
     try {
       let out;
@@ -548,9 +552,11 @@ function createVideoStudio(deps = {}) {
       if (!pbuf && image) pbuf = image.type === 'png' ? image.buf : (deps.toPng ? safeToPng(image.buf) : null);
       const rec = Object.assign({}, p, { model: FRAMEPACK_MODEL, width: r.width || null, height: r.height || null, frames: r.frames || q.frames, fps: r.fps || 30, seconds: r.seconds || q.seconds,
         steps: q.steps, cfgScale: undefined, sampler: undefined, scheduler: undefined, shift: undefined });
-      const fpRec = { sections: r.sections || q.sections, steps: q.steps, distilledCfg: q.distilledCfg, teacache: q.teacache, gpuMemoryPreservation: q.gpuMemoryPreservation, folder: s.dir, models: s.hfSource };
+      const fpRec = { sections: r.sections || q.sections, steps: q.steps, cfg: 1, distilledCfg: q.distilledCfg, rs: 0, teacache: q.teacache, gpuMemoryPreservation: q.gpuMemoryPreservation, wantSeconds: q.wantSeconds, mp4Crf: q.mp4Crf, folder: s.dir, models: s.hfSource };
+      const modelFiles = { folder: s.hfHome || s.dir || '', source: s.hfSource || undefined, repos: (s.models && Array.isArray(s.models.repos) ? s.models.repos : []).slice(0, 6).map((x) => (typeof x === 'string' ? x : (x && (x.repo || x.id || x.name)) || '')).filter(Boolean) };
       return save1({ engine: 'framepack', p: rec, vbuf, ext: '.mp4', pbuf, image: p.mode === 'i2v' ? image : null,
-        extra: { framepack: fpRec, distilledCfg: q.distilledCfg, teacache: q.teacache, gpuMemoryPreservation: q.gpuMemoryPreservation, sourcePicture: picture ? picture.path : undefined, pictureEngine: picture ? (picture.engine || 'sd') : undefined }, req });
+        extra: { framepack: fpRec, distilledCfg: q.distilledCfg, teacache: q.teacache, gpuMemoryPreservation: q.gpuMemoryPreservation, sourcePicture: picture ? picture.path : undefined, pictureEngine: picture ? (picture.engine || 'sd') : undefined,
+          modelFiles, workflow: 'FramePack (HunyuanVideo, picture → video)' }, req });
     } finally { for (const t of tmp) { try { fs.unlinkSync(t); } catch (_) {} } }
   }
 
@@ -613,7 +619,8 @@ function createVideoStudio(deps = {}) {
     if (!pbuf && image) pbuf = image.type === 'png' ? image.buf : (deps.toPng ? safeToPng(image.buf) : null);
     if (!pbuf) warnings.push({ level: 'soft', field: 'poster', message: 'No poster (first frame) could be made: this ComfyUI lacks ImageFromBatch / SaveImage.' });
     const ext = path.extname(vids[0].filename).toLowerCase() || '.mp4';
-    return save1({ engine: 'comfy-wan', p, vbuf, ext, pbuf, image, extra: { promptId: run.promptId, server: base, comfyFile: `${vids[0].subfolder ? `${vids[0].subfolder}/` : ''}${vids[0].filename}`, imageName: p.imageName }, req });
+    return save1({ engine: 'comfy-wan', p, vbuf, ext, pbuf, image, extra: { promptId: run.promptId, server: base, comfyFile: `${vids[0].subfolder ? `${vids[0].subfolder}/` : ''}${vids[0].filename}`, imageName: p.imageName,
+      modelFiles: { diffusion: names.diffusion_models, textEncoder: names.text_encoders, vae: names.vae }, workflow: 'built-in Wan graph (AutoInjector)', comfyGraph: graph }, req });
   }
   function safeToPng(buf) { try { return deps.toPng(buf) || null; } catch (_) { return null; } }
 
@@ -713,11 +720,24 @@ function createVideoStudio(deps = {}) {
       poster: poster ? path.basename(poster) : null, file: path.basename(file), bytes: vbuf.length, createdAt: new Date().toISOString(), app: 'AutoInjector',
     };
     Object.assign(record, extra || {});
+    // everything else that is known: what was typed, who asked, the recipe, the starting picture's own sidecar, the app version
+    const job = current || { ctx: {}, startedAt: Date.now() };
+    const jc = job.ctx || {};
+    let startPicture = ''; let startPictureRecord = null;
+    if (record.sourcePicture) startPicture = record.sourcePicture;
+    else if (p.mode === 'i2v' && image && image.sourcePath) startPicture = image.sourcePath;
+    if (startPicture) { try { startPictureRecord = JSON.parse(fs.readFileSync(VR.sidecarOf(startPicture), 'utf8')); } catch (_) { startPictureRecord = null; } }
+    let appVersion = ''; try { appVersion = typeof deps.appVersion === 'function' ? deps.appVersion() : (deps.appVersion || ''); } catch (_) { appVersion = ''; }
+    const full = VR.enrich(record, { from: p.from || job.from, promptTyped: jc.promptTyped, negativeAuto: jc.negativeAuto && record.negativePrompt === DEFAULT_NEGATIVE, appVersion, recipe: jc.recipe,
+      startPicture, startPictureRecord, renderSeconds: (Date.now() - job.startedAt) / 1000, preview: jc.preview, improve: jc.improve });
+    if (!full.from && job.from) full.from = job.from;
+    for (const k of Object.keys(record)) delete record[k];
+    Object.assign(record, full);
     const json = path.join(dir, `${stem}.json`);
     try { fs.writeFileSync(json, JSON.stringify(record, null, 2)); } catch (_) {}
     try { if (deps.recordVideo) deps.recordVideo({ path: file, prompt: p.prompt, seed: p.seed, model: p.model, from: p.from }); } catch (_) {}
     const out = { ok: true, engine, model: p.model, path: file, poster, seconds: p.seconds, frames: p.frames, fps: p.fps, width: p.width, height: p.height, seed: p.seed,
-      mode: p.mode, url: fileUrl(file), posterUrl: poster ? fileUrl(poster) : null, json, warnings: [] };
+      mode: p.mode, url: fileUrl(file), posterUrl: poster ? fileUrl(poster) : null, json, warnings: [], record };
     if (req && req.returnPoster && pbuf) out.posterBase64 = pbuf.toString('base64');
     return out;
   }

@@ -6,6 +6,7 @@
 //   claude --version                         → "2.1.300 (Claude Code)"
 //   claude -p "<instruction>" --output-format json … (prompt on stdin, the picture in the working folder)
 //                                            → ONE JSON result object {"type":"result","subtype":"success","result":"<judge JSON>"}
+// A 🎬 video question (the prompt says CONTACT SHEET — video-judge.js) gets the video scores instead (videoAnswer).
 // Modes (env FAKE_CLAUDE_JUDGE_MODE): improving (default: every call scores higher — 5, 7, 9 …), keep (9/10),
 // malformed (never JSON), malformed_once (the first answer is not JSON), logged_out, limit, slow (sleeps 30 s),
 // unknown_flag (refuses --permission-mode), crash. FAKE_CLAUDE_JUDGE_STATE: a counter file (improving).
@@ -28,7 +29,24 @@ function makeFakeClaude(dir) {
   return p;
 }
 
+// 🎬 a video judge question (it says CONTACT SHEET): the video scores and fixes from the video vocabulary.
+function videoAnswer(n, prompt) {
+  const mode = process.env.FAKE_CLAUDE_JUDGE_MODE || 'improving';
+  const base = mode === 'keep' ? 9 : Math.min(9.5, 3 + 2 * n);
+  const s = (d) => Math.max(1, Math.min(10, Math.round((base + d) * 10) / 10));
+  const i2v = /"faithful":1-10/.test(prompt);
+  return {
+    scores: { prompt: s(0.5), quality: s(0), consistency: s(-0.5), motion: s(-1), flicker: s(0.5), faithful: i2v ? s(0) : null },
+    verdict: base >= 8 ? 'keep' : base < 4 ? 'redo' : 'fix',
+    good: ['the light is right', 'the camera is steady'],
+    bad: base >= 8 ? [] : ['her hands melt in frames 40–60', 'the face changes a little'],
+    fixes: base >= 8 ? [] : [{ type: 'steps', delta: 4, why: 'more detail' }, { type: 'motion', amount: 'less', why: 'calmer movement' }, { type: 'negative_add', terms: ['morphing hands', 'flicker'] }, { type: 'teleport', why: 'not in the vocabulary' }],
+    prompt: base >= 8 ? {} : { add: ['steady camera'], remove: [], front: [] },
+  };
+}
+
 function judgeAnswer(n, prompt) {
+  if (/CONTACT SHEET/.test(prompt || '')) return videoAnswer(n, prompt);
   const mode = process.env.FAKE_CLAUDE_JUDGE_MODE || 'improving';
   const base = mode === 'keep' ? 9 : Math.min(9.5, 3 + 2 * n);
   const s = (d) => Math.max(1, Math.min(10, Math.round((base + d) * 10) / 10));
@@ -70,4 +88,4 @@ async function main() {
 }
 
 if (require.main === module) main().then((c) => process.exit(c || 0), () => process.exit(9));
-module.exports = { makeFakeClaude, judgeAnswer };
+module.exports = { makeFakeClaude, judgeAnswer, videoAnswer };

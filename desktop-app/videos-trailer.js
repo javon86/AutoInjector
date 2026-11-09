@@ -90,6 +90,9 @@
       : { type: 'shot', prompt: (x.prompt || '').trim() || undefined, image: x.image || undefined, seconds: Number(x.seconds) || 4, characterLock: x.characterLock || undefined }));
     const r = { book: book || undefined, items, width: w, height: h, fade: Number($('vd-tr-fade').value), musicVolume: Number($('vd-tr-volume').value) };
     if ($('vd-tr-music').value.trim()) r.music = $('vd-tr-music').value.trim();
+    // 💾 a video recipe for every shot · 🧑‍⚖️ judge and improve the shots (videos-judge.js fills these)
+    if ($('vd-tr-recipe') && $('vd-tr-recipe').value) r.recipe = $('vd-tr-recipe').value;
+    if ($('vd-tr-judge')) r.judgeShots = !!$('vd-tr-judge').checked;
     return r;
   }
 

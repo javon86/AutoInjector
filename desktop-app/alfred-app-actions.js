@@ -356,6 +356,10 @@ const TOOL_CHANNELS = {
   'video:trailer-make': 'video_call:trailer.make', 'video:trailer-status': 'video_call:trailer.status', 'video:trailer-cancel': 'video_call:trailer.cancel',
   'video:trailer-list': 'video_call:trailer.list', 'video:trailer-plan': 'video_call:trailer.plan',
   // 🎞 FramePack (framepack.js): found / models, warm-up, unload, the 2-second test
+  'video:record': 'video_call:video.record', 'video:remake': 'video_call:video.remake', 'video:recipes': 'video_call:video.recipes.list',
+  'video:judge': 'video_call:video.judge', 'video:improve': 'video_call:video.improve', 'video:improve-final': 'video_call:video.improveFinal',
+  'video:improve-stop': 'video_call:video.improveStop', 'video:make-best': 'video_call:video.makeBest', 'video:estimate': 'video_call:video.estimate',
+  'video:judge-settings': 'video_call:video.judgeSettings',
   'video:framepack-status': 'video_call:video.framepack.status', 'video:framepack-load': 'video_call:video.framepack.load',
   'video:framepack-unload': 'video_call:video.framepack.unload', 'video:framepack-test': 'video_call:video.framepack.test',
 };

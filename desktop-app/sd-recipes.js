@@ -11,10 +11,13 @@
  * "starter" recipes are built in (from sd-quality.js's model-family defaults); they can be used, copied and
  * hidden, not changed. Electron-free; unit-tested in test/images-judge.test.js.
  *
- *   createRecipeStore({ file, log }) → {
+ *   createRecipeStore({ file, log, kind }) → {
  *     list({ families }) · get(idOrName) · save(recipe) · rename(id, name) · remove(id) · setDefault(id|'') · defaultRecipe()
  *     fromRecord(record, name) · fromForm(form, name) · toRequest(recipe, { subject, request }) · exportAll()
  *   }
+ *   kind (optional, default = pictures): { starters, clean(settings), summary(recipe) → short words, family(settings),
+ *   tag (the log type), what ('picture' | 'video') } — 🎬 video recipes (video-recipes.js) use the same store with
+ *   their own starters and settings, in their own file (video-recipes.json).
  */
 const fs = require('fs');
 const path = require('path');
@@ -81,10 +84,18 @@ function cleanSettings(s0) {
   return o;
 }
 
+function pictureSummary(s) {
+  return [s.width && s.height ? `${s.width}×${s.height}` : '', s.sampler ? `${s.sampler}${s.scheduler ? ` ${s.scheduler}` : ''}` : '', s.steps ? `${s.steps} steps` : '', s.cfgScale != null ? `CFG ${s.cfgScale}` : '', s.loras && s.loras.length ? `${s.loras.length} LoRA${s.loras.length > 1 ? 's' : ''}` : '', s.hires ? 'hires fix' : ''].filter(Boolean).join(' · ');
+}
+const PICTURE_KIND = { starters: STARTERS, clean: cleanSettings, summary: pictureSummary, family: (s) => Q.familyOf((s && s.checkpoint) || '') || '', tag: 'sd-recipes', what: 'picture' };
+
 function createRecipeStore(opts) {
   const o = opts || {};
   const file = o.file || null;
-  const log = o.log || (() => {});
+  const log0 = o.log || (() => {});
+  const K = Object.assign({}, PICTURE_KIND, o.kind || {});
+  const STARTERS = K.starters; const cleanSettings = K.clean; // eslint-disable-line no-shadow
+  const log = (t, d) => log0(t === 'sd-recipes' ? K.tag : t, d);
   let data = { version: 1, defaultId: '', recipes: [], hiddenStarters: [] };
   function load() {
     if (!file) return;
@@ -108,8 +119,7 @@ function createRecipeStore(opts) {
   }
   function summary(r) {
     const s = r.settings || {};
-    const bits = [s.width && s.height ? `${s.width}×${s.height}` : '', s.sampler ? `${s.sampler}${s.scheduler ? ` ${s.scheduler}` : ''}` : '', s.steps ? `${s.steps} steps` : '', s.cfgScale != null ? `CFG ${s.cfgScale}` : '', s.loras && s.loras.length ? `${s.loras.length} LoRA${s.loras.length > 1 ? 's' : ''}` : '', s.hires ? 'hires fix' : ''].filter(Boolean);
-    return { id: r.id, name: r.name, starter: !!r.starter, family: r.family || Q.familyOf(s.checkpoint || '') || '', checkpoint: s.checkpoint || '', isDefault: data.defaultId === r.id, short: bits.join(' · '), description: r.description || '', hasTemplate: !!r.promptTemplate, updatedAt: r.updatedAt || null };
+    return { id: r.id, name: r.name, starter: !!r.starter, family: r.family || K.family(s) || '', checkpoint: s.checkpoint || '', isDefault: data.defaultId === r.id, short: K.summary(s), description: r.description || '', hasTemplate: !!r.promptTemplate, updatedAt: r.updatedAt || null, engine: s.engine || undefined, mode: r.mode || undefined };
   }
   function list(ctx) {
     const fams = new Set((ctx && ctx.families) || []);
@@ -124,14 +134,14 @@ function createRecipeStore(opts) {
   function save(rec) {
     const r = rec || {};
     const name = String(r.name || '').trim().slice(0, 120);
-    if (!name) return { ok: false, error: 'INVALID_PARAM', code: 'INVALID_PARAM', field: 'name', message: 'Give the recipe a name, e.g. “Realistic portrait — SDXL”.' };
+    if (!name) return { ok: false, error: 'INVALID_PARAM', code: 'INVALID_PARAM', field: 'name', message: K.what === 'video' ? 'Give the recipe a name, e.g. “Calm character clip — Wan 2.2”.' : 'Give the recipe a name, e.g. “Realistic portrait — SDXL”.' };
     if (r.id && STARTERS.some((s) => s.id === r.id)) return { ok: false, error: 'STARTER', code: 'STARTER', message: 'Starter recipes can\'t be changed — save it under a new name instead.' };
     const prev = r.id ? data.recipes.find((x) => x.id === r.id) : data.recipes.find((x) => x.name.toLowerCase() === name.toLowerCase());
     // updating: the given settings are added to the recipe's (Alfred changes one thing); replace: true = exactly these (the form)
     const settings = cleanSettings(prev && !r.replace ? Object.assign({}, prev.settings, r.settings || {}) : r.settings);
     if (!Object.keys(settings).length) return { ok: false, error: 'INVALID_PARAM', code: 'INVALID_PARAM', field: 'settings', message: 'That recipe has no settings to save.' };
     const promptTemplate = r.promptTemplate !== undefined && r.promptTemplate !== null ? String(r.promptTemplate).slice(0, 2000) : (prev && !r.replace ? prev.promptTemplate || '' : '');
-    if (promptTemplate && !/\{subject\}/.test(promptTemplate)) return { ok: false, error: 'INVALID_PARAM', code: 'INVALID_PARAM', field: 'promptTemplate', message: 'A prompt template needs {subject} where the picture\'s own words go, e.g. “{subject}, soft window light”.' };
+    if (promptTemplate && !/\{subject\}/.test(promptTemplate)) return { ok: false, error: 'INVALID_PARAM', code: 'INVALID_PARAM', field: 'promptTemplate', message: `A prompt template needs {subject} where the ${K.what}'s own words go, e.g. “{subject}, soft window light”.` };
     const now = new Date().toISOString();
     let cur = r.id ? data.recipes.find((x) => x.id === r.id) : data.recipes.find((x) => x.name.toLowerCase() === name.toLowerCase());
     if (!cur && data.recipes.length >= MAX_RECIPES) return { ok: false, error: 'TOO_MANY', code: 'TOO_MANY', message: `There are already ${MAX_RECIPES} recipes — delete some first.` };
@@ -144,7 +154,8 @@ function createRecipeStore(opts) {
       cur = { id, createdAt: now };
       data.recipes.push(cur);
     }
-    Object.assign(cur, { name, settings, promptTemplate, description: r.description ? String(r.description).slice(0, 600) : (cur.description || ''), family: r.family || Q.familyOf(settings.checkpoint || '') || cur.family || '', from: String(r.from || cur.from || 'form').slice(0, 40), updatedAt: now });
+    Object.assign(cur, { name, settings, promptTemplate, description: r.description ? String(r.description).slice(0, 600) : (cur.description || ''), family: r.family || K.family(settings) || cur.family || '', from: String(r.from || cur.from || 'form').slice(0, 40), updatedAt: now });
+    if (r.mode || cur.mode) cur.mode = String(r.mode || cur.mode).slice(0, 10);
     if (r.makeDefault) data.defaultId = cur.id;
     if (!persist()) return { ok: false, error: 'SAVE_FAILED', code: 'SAVE_FAILED', message: 'The recipe couldn\'t be saved (the data folder is not writable).' };
     log('sd-recipes', { op: created ? 'add' : 'update', id: cur.id, keys: Object.keys(settings).length, template: !!promptTemplate });
@@ -214,4 +225,4 @@ function toRequest(recipe, ctx) {
   return out; // LoRAs given with the request replace the recipe's (an empty list = none)
 }
 
-module.exports = { createRecipeStore, cleanSettings, fromRecord, fromForm, toRequest, STARTERS };
+module.exports = { createRecipeStore, cleanSettings, fromRecord, fromForm, toRequest, STARTERS, PICTURE_KIND };

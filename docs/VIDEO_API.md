@@ -165,7 +165,20 @@ Exports `{ createVideoApi, register, get, operationNames, OPS }`. Every method r
 | `video.install.downloadModel({id})` | yes | download one model |
 | `video.install.installAll({id})` | yes | ComfyUI (if none) + the model |
 | `video.install.cancel` | yes | pause / cancel the download |
-| `trailer.make(params)` | yes | 🎞 a book trailer (section 7): shots rendered one by one, joined with title cards → `trailer.webm` (+ `.mp4`) |
+| `video.record({path})` | no | everything saved with a video (its sidecar, section 9) + `used` (the same in plain words) + `remake` (the exact request) |
+| `video.remake({path})` | yes | make the same video again exactly: prompt as sent, the same seed, size, frames, fps, engine settings, starting picture → the `generate`/`animate` result + `sameSeed`, `note` |
+| `video.contactSheet({path})` | no | the contact sheet (`<stem>.sheet.png`) + the no-AI frame check — `{sheet, sheetUrl, tiles, hasStart, frames:[{index,time}], check:{score, frozen, jumps, flicker, words}, how: ffmpeg\|player}` |
+| `video.judge({path, judge?})` | yes (one AI answer) | the AI judge on the contact sheet: `{judge:{kind:'video', scores:{prompt, quality, consistency, motion, flicker, faithful\|null}, overall, min, verdict, good, bad, fixes, promptEdits, flickerAi, flickerCheck, by, byLabel, sheet}, say, sheetUrl, check}`; saved in the sidecar (`judge`, `judges`, `frameCheck`) |
+| `video.improve({path, rounds?, bar?, final?})` | yes (one AI answer per round) | 🔁 round 0 = the video judged; rounds 1–N (default 3, max 5) = quick previews (~1.5 s, the model's smaller size, the same seed) judged each; stops early (passed / two no better / Stop). `final`: `confirm` (default — answers `awaitingFinal:true, final:{estimateSeconds, say, changed, seed}`), `auto` (renders it now: `finalResult`), `none`. `{id, rounds:[{round, label, path, url, judge, overall, changed, skipped, settings, preview}], best, stopReason, say, defaultsChanged:false}` |
+| `video.improveFinal({id?})` | yes | the full-length, full-size render of the best settings (judged too) → `{final, path, say}`; `NO_PENDING` when nothing waits |
+| `video.improveStop()` | yes | stops Make it better / Make N, and the render in progress (`video.cancel`) |
+| `video.makeBest({request, count?})` | yes (one AI answer per video) | 2–4 (default 2) videos with different seeds, each judged → `{videos:[{path, seed, judge, overall}], best, bestPath, say}` |
+| `video.estimate({request})` | no | `{seconds, say}` — from this PC's last videos (`renderSeconds`) when known, else a 16 GB-card guess |
+| `video.judgeStatus()` | no | the judges (shared with pictures): available / order / next |
+| `video.judgeSettings({rounds, bestCount, previewSeconds, autoTrailer})` | yes | video-only settings; the judge order / on-off / pane / pass mark are `images.judgeSettings` |
+| `video.recipes.list/get` | no | 🎬 video recipes (separate list, `video-recipes.json`) incl. 5 starters |
+| `video.recipes.save/rename/delete/setDefault/fromVideo/apply` | yes | save `{name, settings:{engine, model, seconds, fps, width, height, steps, cfgScale, shift, sampler, scheduler, negativePrompt, negativeMode, distilledCfg, teacache, gpuMemoryPreservation}, promptTemplate ({subject}), makeDefault}`; `apply` fills the 🎬 Video form (event `video-form-apply`) |
+| `trailer.make(params)` | yes | 🎞 a book trailer (section 7): shots rendered one by one, joined with title cards → `trailer.webm` (+ `.mp4`). Also `recipe` (a video recipe for every shot; a shot can have its own `recipe`) and `judgeShots` (judge + improve each new shot, at most 2 preview rounds + the full shot; default: the "Judge and improve trailer shots automatically" setting, off) |
 | `trailer.status({id})` | no | the trailer being made (phase, shot n of m, each part's state) or the last result |
 | `trailer.cancel` | yes | stop the trailer (finished shots are kept for next time) |
 | `trailer.list({book})` | no | the saved trailers |
@@ -264,6 +277,12 @@ New: `video:full-status`, `video:models`, `video:capabilities`, `video:settings`
 `video:test`, `video:install-check`, `video:install-model`, `video:install-all`,
 `video:install-cancel`, `video:open-folder`, `video:show-file`. Events: `video-install`
 (download progress), `video-done`.
+
+♻ 💾 🧑‍⚖️ 🔁 (video-improve.js): `video:record`, `video:remake`, `video:recipes` (`{op: list|get|save|rename|delete|setDefault|fromVideo|fromSettings|apply|request}`),
+`video:judge`, `video:improve` (`{path, rounds, final}`), `video:improve-final`, `video:improve-stop`, `video:make-best`,
+`video:estimate`, `video:judge-settings`. Events: `video-judge` (round / preview / final progress), `video-form-apply`
+(Alfred's `video.recipes.apply`). `generate` / `animate` also take `recipeUsed` and `promptTyped` from the tab (a recipe
+template) — recorded in the sidecar.
 
 Alfred: every new channel is mapped in `alfred-app-actions.js` (`TOOL_CHANNELS` →
 `video_call:<method>`, `video.open_folder` / `video.show_file` as app actions,
@@ -427,3 +446,40 @@ speaks the same protocol — started through `AUTOINJECTOR_FRAMEPACK_PYTHON` / `
 its server with a fake engine — any Python 3, no torch. **Not yet confirmed on a real GPU:** the real models loading
 and a real clip. To try it on the PC: 🎬 Video → ⚙ Setup & models → the FramePack card → ▶ Load FramePack, then
 🧪 Test (2-second clip from a test picture).
+
+---
+
+## 9. Everything saved with a video, recipes, the judge, Make it better (`video-record.js`, `video-recipes.js`, `video-frames.js`, `video-judge.js`, `video-improve.js`)
+
+**The sidecar** (`<stem>.json`, both engines): `promptTyped`, `prompt` (as sent), `negativePrompt` + `negativeAuto`, `engine`
+(`comfy-wan` / `framepack` / `endpoint`), `model`, `modelFiles` (`{diffusion, textEncoder, vae}` as ComfyUI spells them, or
+FramePack's `{folder, source, repos}`), `workflow` + `comfyGraph` (the exact graph queued), `mode`, `seconds`, `fps`, `frames`,
+`width`, `height`, `steps`, `cfgScale`, `shift`, `sampler`, `scheduler`, `framepack {steps, cfg:1, distilledCfg, rs:0, teacache,
+gpuMemoryPreservation, sections, wantSeconds, mp4Crf}`, `seed` (the real one), `startPicture {path, sidecar, seed?, madeFirst?}`,
+`characterLock`, `askedBy {who, from, book?}`, `recipe {id, name}`, `judge` / `judges` / `frameCheck`, `improve {session, round,
+preview|final, changed}`, `preview`, `picked`, `renderSeconds`, `appVersion`, `createdAt`. `remakeRequest(rec)` rebuilds the exact
+request (the lock's looks are already in the sent prompt, so no `characterLock`; FramePack text → video remakes from the picture that
+was made first).
+
+**Recipes:** the picture store (`sd-recipes.js createRecipeStore`) with a video `kind` (starters, settings cleaner, summary) and its
+own file — a separate list because the settings don't overlap and the pickers live on different tabs.
+
+**The contact sheet:** `planFrames` takes up to 32 frames evenly (every frame of a short clip); ffmpeg reads them in ONE run
+(`-vf select='eq(n\,a)+…',scale=W:H -vsync vfr -f rawvideo -pix_fmt rgb24 -`), or — no ffmpeg — a hidden offscreen window
+(`media-probe.html`) seeks a `<video>` to each time and copies a canvas (`createElectronGrabber`). 8 of them are tiled 4 wide
+(320 px tiles) with `#frame time` labels in a built-in pixel font, after the START picture for picture → video, written as a
+PNG with zlib (no new dependency). `motionCheck` (no AI): mean grey difference between neighbours → frozen (all < 0.6) = 2/10,
+a jump (> max(14, 3.5 × median)) −2 each, brightness up-down-up −1 each.
+
+**The judge:** `image-judge-service.js createJudgeService({ rules: video-judge, judges: <the pictures' three> })` — the same
+order, settings, "asked once more, then the next judge", one plain error. The final flicker score is (2 × the lower + the higher) / 3
+of the AI's and the check's. Fix vocabulary: `steps`, `cfg`, `seconds` (frames), `fps`, `size` (the model's own sizes:
+5B 1280×704 / 704×1280 / 960×960, 1.3B 832×480 / 480×832 / 624×624), `shift`, `motion` (less/more → shift ∓2; FramePack: words),
+`distilled_cfg`, `teacache`, `seed`, `negative_add`, `engine` (wan22 / wan21 / framepack, only when installed / ready),
+`better_picture` (→ 🎨 Images Make it better); prompt edits as for pictures.
+
+**Quick previews:** `previewRequest` — 1.5 s (1–2, never longer than the video), the model's preview size of the same shape (5B
+832×480 / 480×832 / 640×640, 1.3B 640×368 / 368×640 / 480×480; FramePack 1–2 s, its own size), everything else (seed, steps,
+CFG, shift…) the same; a "new seed" fix keeps the seed the preview really got, so the final uses it. The loop is the pictures'
+`runRounds` (`sd-improve.js`). The logs (`video-improve`, `video-best`, `video-sheet`, `video-judge`, `trailer-judge`) hold ids,
+codes, scores and timings — never the prompt.

@@ -14,8 +14,10 @@
  *
  *   createPaneJudge({ site(), problem(site), ask(site, text, { attach, freshChat, signal }) })
  *   createOllamaJudge({ fetch, bases(), model() })
- *   createJudgeService({ judges, settings(), readRecord, updateRecord, log, now })
- *     → { status(), judge(imagePath, { ctx, signal, only }) }
+ *   createJudgeService({ judges, settings(), readRecord, updateRecord, log, now, rules, tag })
+ *     → { status(), judge(imagePath, { ctx, signal, only, record, save, validateOpts }) }
+ *   rules: the judging rules (default image-judge.js; 🎬 video passes video-judge.js — the same judges, the same order,
+ *   the same "ask once more, then the next judge" runner, its own instruction, scores and fixes). tag: the log type.
  *   Logs hold judge ids, error codes, scores and timings — never the prompt or the answer text.
  */
 const fs = require('fs');
@@ -100,6 +102,8 @@ function createJudgeService(deps) {
   const judges = deps.judges || {};
   const log = deps.log || (() => {});
   const now = deps.now || (() => Date.now());
+  const R = deps.rules || J; // the judging rules: buildPrompt, extractJson, validate, sayVerdict (+ the shared order / settings)
+  const TAG = deps.tag || 'image-judge';
   const settings = () => J.cleanSettings(typeof deps.settings === 'function' ? deps.settings() : deps.settings);
 
   async function status() {
@@ -138,7 +142,7 @@ function createJudgeService(deps) {
       const j = judges[id];
       if (!j) { tried.push({ by: id, error: 'MISSING' }); continue; }
       if (o.signal && o.signal.aborted) return { ok: false, error: 'CANCELLED', code: 'CANCELLED', message: 'Stopped.', tried };
-      const prompt = J.buildPrompt(rec, Object.assign({}, ctx, { where: id === 'claude-code' ? 'the picture file' : 'the attached picture' }));
+      const prompt = R.buildPrompt(rec, Object.assign({}, ctx, { where: id === 'claude-code' ? 'the picture file' : 'the attached picture' }));
       let attempt = 0; let answer = null; let lastProblems = null;
       while (attempt < 2) {
         attempt++;
@@ -146,23 +150,23 @@ function createJudgeService(deps) {
         let r;
         try { r = await j.ask({ imagePath, prompt: q, signal: o.signal }); } catch (e) { r = { ok: false, error: 'FAILED', message: String((e && e.message) || e).slice(0, 160) }; }
         if (!r || !r.ok) { tried.push({ by: id, error: (r && r.error) || 'FAILED', message: r && r.message }); if (r && r.error === 'CANCELLED') return { ok: false, error: 'CANCELLED', code: 'CANCELLED', message: 'Stopped.', tried }; break; }
-        const obj = J.extractJson(r.text);
-        const v = obj ? J.validate(obj, { character: hasCharacter }) : { ok: false, problems: ['no JSON object in the answer'] };
+        const obj = R.extractJson(r.text);
+        const v = obj ? R.validate(obj, Object.assign({ character: hasCharacter }, o.validateOpts || {})) : { ok: false, problems: ['no JSON object in the answer'] };
         if (v.ok) { answer = Object.assign(v.judge, { by: id, byLabel: j.label, model: r.model, attempts: attempt, seconds: Math.round((now() - t0) / 100) / 10, at: new Date(now()).toISOString() }); break; }
         lastProblems = v.problems;
         if (attempt === 2) tried.push({ by: id, error: 'BAD_JSON', message: `${j.label} answered, but not with the scores AutoInjector asked for (twice).` });
       }
       if (answer) {
         if (id === 'local') answer.weaker = true;
-        log('image-judge', { judge: id, ok: true, verdict: answer.verdict, overall: answer.overall, min: answer.min, fixes: answer.fixes.length, selfConflict: answer.selfConflict || undefined, attempts: answer.attempts, ms: now() - t0, tried: tried.map((t) => `${t.by}:${t.error}`) });
+        log(TAG, { judge: id, ok: true, verdict: answer.verdict, overall: answer.overall, min: answer.min, fixes: answer.fixes.length, selfConflict: answer.selfConflict || undefined, attempts: answer.attempts, ms: now() - t0, tried: tried.map((t) => `${t.by}:${t.error}`) });
         if (o.save !== false && deps.updateRecord) { try { deps.updateRecord(imagePath, (cur) => ({ judge: answer, judges: [...(Array.isArray(cur.judges) ? cur.judges : []), ...(cur.judge ? [cur.judge] : [])].slice(-10) })); } catch (_) {} }
-        return { ok: true, judge: answer, say: J.sayVerdict(answer), tried };
+        return { ok: true, judge: answer, say: R.sayVerdict(answer), tried };
       }
     }
-    log('image-judge', { ok: false, tried: tried.map((t) => `${t.by}:${t.error}`), ms: now() - t0 });
+    log(TAG, { ok: false, tried: tried.map((t) => `${t.by}:${t.error}`), ms: now() - t0 });
     const none = !tried.length;
     const msg = none ? 'Every AI judge is switched off — switch one on in 🧑‍⚖️ Judge settings.'
-      : `No AI judge could look at the picture. ${tried.map((t) => t.message || `${J.JUDGE_WORDS[t.by] || t.by}: ${t.error}`).join(' ')}`;
+      : `No AI judge could look at ${R.NOUN || 'the picture'}. ${tried.map((t) => t.message || `${J.JUDGE_WORDS[t.by] || t.by}: ${t.error}`).join(' ')}`;
     return { ok: false, error: none ? 'NO_JUDGE' : 'NO_JUDGE_ANSWERED', code: none ? 'NO_JUDGE' : 'NO_JUDGE_ANSWERED', message: msg.slice(0, 900), hint: 'Install Claude Code (and sign in), keep the Claude or ChatGPT pane logged in, or add a vision model to Ollama.', tried };
   }
   return { status, judge, settings };
