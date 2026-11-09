@@ -319,10 +319,25 @@ function sanitizeAkoweStatus(body) {
     needs_you: run.needs_you === true, needs_decision: typeof run.needs_decision === 'boolean' ? run.needs_decision : null,
     step: capInt(run.step, 1000), steps_done: capInt(run.steps_done, 1000), steps_total: capInt(run.steps_total, 1000),
     problem: rp ? { code: capStr(rp.code, 60), message: capStr(rp.message, 300) } : (typeof run.problem === 'string' ? { code: null, message: capStr(run.problem, 300) } : null),
-    replaced_by: capStr(run.replaced_by, 80), updated_at: toEpochMs(run.updated_at), finished_at: toEpochMs(run.finished_at), url: loopbackUrl(run.url)
+    replaced_by: capStr(run.replaced_by, 80), updated_at: toEpochMs(run.updated_at), finished_at: toEpochMs(run.finished_at), url: loopbackUrl(run.url),
+    alert: alertOf(run.alert)
   } : null;
   out.updated_at = toEpochMs(body.updated_at);
   return { ok: true, value: out };
+}
+
+// 🔔 the run's plain alert (akowe/alerts.py): category, icon, label, what, wrong, why, next, choices, change — bounded
+function alertOf(a) {
+  const obj = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v : null);
+  const x = obj(a);
+  if (!x || !capStr(x.label, 40)) return null;
+  const ch = obj(x.change);
+  return {
+    category: capStr(x.category, 20), icon: capStr(x.icon, 8), label: capStr(x.label, 40), what: capStr(x.what, 80),
+    wrong: capStr(x.wrong, 220), why: capStr(x.why, 160), next: capStr(x.next, 220), key: capStr(x.key, 160), code: capStr(x.code, 40),
+    choices: (Array.isArray(x.choices) ? x.choices : []).slice(0, 5).map(obj).filter(Boolean).map((c) => ({ action: capStr(c.action, 30), label: capStr(c.label, 40) })),
+    change: ch ? { field: capStr(ch.field, 60), before: capStr(ch.before, 200), after: capStr(ch.after, 200) } : null
+  };
 }
 
 // --- the bridge ---------------------------------------------------------------

@@ -86,6 +86,10 @@ async function main() {
     r = await post(port, '/v1/status', token, { app: 'akowe', version: 1, project: { id: 'p1', title: 'The Glass Road' }, run: { id: 'run-e2e', title: 'The Glass Road', status: 'paused', state: 'needs_decision', needs_decision: true, step: 9, steps_total: 16 } });
     const told = await waitUntil(() => logHas((e) => e.kind === 'attention' && /run:run-e2e:needs_you/.test(e.detail.key))[0]);
     assert(told && /needs your decision \(step 9 of 16\)/.test(told.detail.note), `a desktop notification ("${told && told.detail.note}")`);
+    // 🔔 a newer Akọwe's alert: a new decision is told at once, and the log keeps its category and code only
+    r = await post(port, '/v1/status', token, { app: 'akowe', version: 1, project: { id: 'p1', title: 'The Glass Road' }, run: { id: 'run-e2e', title: 'The Glass Road', status: 'paused', state: 'needs_decision', needs_decision: true, step: 9, steps_total: 16, alert: { category: 'continuity', icon: '🔗', label: 'Story continuity', what: 'Chapter 9', wrong: 'Mara limps in chapter 8 but runs up the stairs here.', why: 'A story check found something it could not fix safely by itself.', next: 'Read it on the Continuity page.', key: 'continuity:CHECKPOINT_WAITING:ch9:', code: 'CHECKPOINT_WAITING' } } });
+    const toldAlert = await waitUntil(() => logHas((e) => e.kind === 'attention' && e.detail.category === 'continuity')[0]);
+    assert(toldAlert && toldAlert.detail.code === 'CHECKPOINT_WAITING' && /^run:run-e2e:needs_you:/.test(toldAlert.detail.key) && !JSON.stringify(toldAlert.detail).includes('stairs'), 'the alert is told, logged by category and code (no book words)');
 
     console.log('\n== "Stop it and quit" really quits ==');
     await post(port, '/v1/status', token, { app: 'akowe', version: 1, run: { id: 'run-e2e', status: 'running', state: 'working', step: 9, steps_total: 16 } });

@@ -92,8 +92,22 @@ check that the book sounds like a person wrote it"**.
 - Fresh chats: after about 15 Akọwe requests in one chat, AutoInjector opens a new chat in that AI's pane so the chat
   never gets too long. Nothing for you to do.
 
+### When your book needs you
+
+When a run stops for you, the run window, the ⚡ button at the top, the desktop notification and Alfred all say the
+same five things: **what kind of issue** it is (for example 🧑 Character issue, 🔗 Story continuity, ⏳ Timeline,
+📍 Place / world rule, 📖 Chapter quality, ⚠ AI problem, ⏸ Paused by you), **what it is about** ("Ansel Marrant
+(character)", "Chapter 3"), **what is wrong** in a sentence or two, **why it stopped**, and **what to do next**.
+Click the notification to go straight to it.
+
+If the AI reviewer and the writer keep disagreeing about the same thing, you get **one** question with the exact
+change, before → after, and three buttons: **✔ Accept change**, **↩ Keep the original** or **✏️ Let me edit**. The
+book carries on after you choose; until then that record is not approved. Your choice counts as your own approval.
+
 ### Where the run stops for you
 
+- The reviewer and the writer disagree about the same thing twice, or a fix would change something you already
+  approved: one question with before → after (see above).
 - A reviewer still says no after two fixes: choose **✔ Approve anyway**, **✏️ Edit it myself** (then Continue) or
   **🔁 Try again**.
 - An AI did not answer in time, even after a second try.

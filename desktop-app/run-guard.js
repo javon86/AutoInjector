@@ -99,8 +99,39 @@ function closeQuestion(activity) {
 }
 function closeChoice(response) { return response === 0 ? 'background' : response === 1 ? 'quit' : 'cancel'; }
 
+// 🔔 Notification text limits (Windows shows about two lines of title and four of body; macOS cuts longer text).
+const TITLE_MAX = 96;
+const BODY_MAX = 200;
+function clipText(t, n) {
+  const x = String(t == null ? '' : t).replace(/\s+/g, ' ').trim();
+  if (x.length <= n) return x;
+  const cut = x.slice(0, n - 1); const sp = cut.lastIndexOf(' ');
+  return `${(sp > n * 0.5 ? cut.slice(0, sp) : cut).replace(/[\s,;:.\-–—]+$/, '')}…`;
+}
+function shortHash(s) { let h = 0; for (const c of String(s || '')) h = (h * 31 + c.charCodeAt(0)) >>> 0; return h.toString(36); }
 /**
- * What needs the user right now. -> [{ key, title, body, target: 'akowe' | 'pane', site? }]
+ * 🔔 A book run that waits for the user, from Akọwe's alert (category, what, wrong, why): the notification title
+ * "📖 <book>: 🧑 Character issue (step 3 of 19)" and a short body "what: what is wrong. why it stopped" — both
+ * within TITLE_MAX / BODY_MAX. -> { title, body } or null (no alert: the older words are used).
+ */
+function alertNotice(run) {
+  const a = run && run.alert;
+  if (!a || !a.label) return null;
+  const step = run.total && run.at ? ` (step ${run.at} of ${run.total})` : '';
+  const head = `${a.icon ? `${a.icon} ` : ''}${a.label}${step}`;
+  const room = Math.max(12, TITLE_MAX - head.length - 6); // "📖 " and ": " (the emoji is two code units)
+  const book = clipText(run.title || 'Your book', room);
+  const title = clipText(`📖 ${book}: ${head}`, TITLE_MAX);
+  const why = clipText(a.why || '', 90);
+  const what = clipText(a.what || '', 60);
+  const roomWrong = Math.max(30, BODY_MAX - why.length - what.length - 3);
+  const wrong = clipText(a.wrong || '', roomWrong);
+  const body = clipText([what && wrong ? `${what}: ${wrong}` : what || wrong, why].filter(Boolean).join(' '), BODY_MAX);
+  return { title, body };
+}
+
+/**
+ * What needs the user right now. -> [{ key, title, body, target: 'akowe' | 'pane', site?, category? }]
  *   run:   the run summary (akowe-run.js summarizeRun shape) or null
  *   sites: { site: { label, active, health: { state, problem } } }
  *   watching: a book run is going (or Akọwe used the AIs recently) — pane problems only count then
@@ -112,7 +143,10 @@ function conditionsFrom({ run, sites, watching } = {}) {
     const name = run.title ? `“${String(run.title).slice(0, 80)}”` : 'The book';
     const step = run.total && run.at ? ` (step ${run.at} of ${run.total})` : '';
     const what = run.state === 'needs_you' ? 'Open Akọwe to decide, then it carries on.' : 'Open Akọwe and press ▶ Resume when you are ready.';
-    out.push({ key: `run:${run.id || '?'}:${run.state}`, title, body: `${name} ${RUN_NEEDS_YOU[run.state]}${step}. ${what}`, target: 'akowe' });
+    const al = alertNotice(run);
+    const key = `run:${run.id || '?'}:${run.state}${al && run.alert.key ? `:${shortHash(run.alert.key)}` : ''}`;
+    if (al) out.push({ key, title: al.title, body: al.body, target: 'akowe', category: run.alert.category || '', code: run.alert.code || '' });
+    else out.push({ key, title, body: `${name} ${RUN_NEEDS_YOU[run.state]}${step}. ${what}`, target: 'akowe' });
   }
   const runGoing = !!(run && !run.stale && (LIVE_RUN.has(run.state) || RUN_NEEDS_YOU[run.state]));
   if (!(watching || runGoing)) return out;
@@ -204,4 +238,4 @@ function makeIconPng(size = 32) {
   return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), pngChunk('IHDR', ihdr), pngChunk('IDAT', zlib.deflateSync(raw)), pngChunk('IEND', Buffer.alloc(0))]);
 }
 
-module.exports = { activityOf, createWakeLock, closeQuestion, closeChoice, conditionsFrom, createNotifier, makeIconPng, LIVE_RUN };
+module.exports = { activityOf, createWakeLock, closeQuestion, closeChoice, conditionsFrom, alertNotice, createNotifier, makeIconPng, LIVE_RUN, TITLE_MAX, BODY_MAX };

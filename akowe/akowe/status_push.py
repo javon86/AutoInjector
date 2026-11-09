@@ -11,7 +11,9 @@ summary of where the most recently opened book stands to ``POST <bridge_url>/v1/
      "approvals": {"count", "items": [{"op", "set", "title"}] (max 20), "url"},
      "checklist": [{"id", "title", "set", "state"}], "done", "total", "words": {"total", "target"},
      "run": {"id", "title", "state", "state_words", "status", "needs_you", "needs_decision", "steps_done",
-             "steps_total", "phase", "problem", "updated_at", "finished_at", "url"} | null, "updated_at"}
+             "steps_total", "phase", "problem", "updated_at", "finished_at", "url",
+             "alert": {"category", "icon", "label", "what", "wrong", "why", "next", "choices", "change", "key",
+                       "code"} | null} | null, "updated_at"}
 
 ``checklist``/``done``/``total`` are the BOOK's steps (Make my book), not a run: a book can be 10/10 while its last
 ⚡ Make-a-book run stopped part-way. ``run`` is the newest ⚡ Make-a-book run of that book (the working one first; runs
@@ -19,7 +21,9 @@ a newer run replaced are skipped) and ``run.state`` is the one word to show for 
 paused | needs_decision | problem | interrupted | done | cancelled (``AutoBookService.run_state``).
 
 Titles only - never chapter text, prompts or keys (canon entries are named by their concept, every other draft by
-its step name). Sent on change (at most every 5 s) and as a heartbeat every 30 s; the body stays below 32 KiB.
+its step name) - except ``run.alert`` (alerts.py) while a run waits for the author: what it is about and what is wrong,
+in one or two sentences that may quote a few words of the author's own book, for the author's own notification
+(AutoInjector never logs them). Sent on change (at most every 5 s) and as a heartbeat every 30 s; the body stays below 32 KiB.
 Errors never reach the author: connection refused/timeouts back off quietly (up to 60 s), HTTP 401 stops pushing
 with that key until a new key is saved (pairing again).
 """
@@ -131,10 +135,26 @@ def run_brief(app, pid: str, url: str) -> dict | None:
                 "state_words": p["state_words"], "status": p.get("status"), "needs_you": p["needs_you"],
                 "needs_decision": p["needs_decision"], "steps_done": p["steps_done"], "steps_total": p["steps_total"],
                 "phase": str(p.get("phase") or "")[:200], "problem": str(prob.get("message") or "")[:300] or None,
-                "updated_at": p.get("updated_at"), "finished_at": p.get("finished_at"), "url": url}
+                "updated_at": p.get("updated_at"), "finished_at": p.get("finished_at"), "url": url,
+                "alert": alert_brief(p.get("alert"))}
     except Exception:  # noqa: BLE001 - status is a convenience
         log.debug("could not read the book's run for the status push", exc_info=True)
         return None
+
+
+def alert_brief(alert) -> dict | None:
+    """🔔 The run's alert (alerts.py), bounded: category, icon, label, what, wrong, why, next, choices, change."""
+    if not isinstance(alert, dict):
+        return None
+    out = {k: str(alert.get(k) or "")[:n] for k, n in (("category", 20), ("icon", 8), ("label", 40), ("what", 80),
+                                                        ("wrong", 220), ("why", 160), ("next", 220), ("key", 160),
+                                                        ("code", 40))}
+    out["choices"] = [{"action": str(c.get("action") or "")[:30], "label": str(c.get("label") or "")[:40]}
+                      for c in (alert.get("choices") or [])[:5] if isinstance(c, dict)]
+    ch = alert.get("change")
+    out["change"] = {k: str(ch.get(k) or "")[:200] for k in ("field", "before", "after")} \
+        if isinstance(ch, dict) else None
+    return out
 
 
 def encode(body: dict) -> bytes:

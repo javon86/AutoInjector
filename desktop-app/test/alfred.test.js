@@ -493,6 +493,15 @@ async function main() {
     ak.state.run.status = 'done'; ak.state.run.problem = null;
     await a.pollBooks();
     assert(/finished/.test(notes()[notes().length - 1].text), 'a book run finished -> notice');
+    // 🔔 a newer Akọwe sends its alert: Alfred's book notice names the kind of issue, what, why and what comes next
+    ak.state.run.status = 'paused'; ak.state.run.state = 'needs_decision'; ak.state.run.needs_decision = true;
+    ak.state.run.problem = { record_id: 'rec-a1', code: 'REVIEW_DECISION', message: 'x' };
+    ak.state.run.alert = { category: 'character', icon: '🧑', label: 'Character issue', what: 'Ansel Marrant (character)', wrong: "His age at his father's wake doesn't match the family timeline.", why: 'The reviewer and the writer disagreed twice about the same thing, so it needs you.', next: 'Pick one: accept the change, keep the original, or edit it yourself.', key: 'k1' };
+    await a.pollBooks();
+    const al = notes()[notes().length - 1].text;
+    assert(/🧑 Character issue — Ansel Marrant \(character\)\./.test(al) && /family timeline/.test(al) && /disagreed twice/.test(al) && /accept the change/.test(al), `Alfred's book notice carries the alert ("${al}")`);
+    ak.state.run.status = 'done'; ak.state.run.state = 'done'; ak.state.run.needs_decision = false; ak.state.run.problem = null; ak.state.run.alert = null;
+    await a.pollBooks();
     a.onAppEvent('manager-log', { category: 'image', summary: 'Image rendered -> /out/images/img-9.png' });
     assert(/An image finished/.test(notes()[notes().length - 1].text), 'an image finished -> notice');
     for (let i = 0; i < 12; i++) a.onAppEvent('self-repair', { site: `s${i}`, event: { kind: 'broken' } });

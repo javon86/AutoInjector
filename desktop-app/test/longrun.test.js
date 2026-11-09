@@ -174,6 +174,48 @@ async function runGuard() {
 
   const png = RG.makeIconPng(32);
   assert(png.slice(1, 4).toString() === 'PNG' && png.length > 100 && png.readUInt32BE(16) === 32, 'the tray icon is a real 32×32 PNG');
+  alertNotices();
+}
+
+// 🔔 Akọwe's alert (akowe/alerts.py) -> the desktop notification: category + icon, what, what is wrong, why it stopped
+function alertNotices() {
+  console.log('\n== run-guard.js / akowe-run.js: the plain alert of a run that needs the user ==');
+  const AR = require('../akowe-run');
+  const ansel = { category: 'character', icon: '🧑', label: 'Character issue', what: 'Ansel Marrant (character)',
+    wrong: "His background has a timeline contradiction: he is eight at his father's wake but about ten when his mother died, while the approved family timeline says the father drowned when he was a baby.",
+    why: 'The reviewer and the writer disagreed twice about the same thing, so it needs you.',
+    next: 'Pick one: accept the change, keep the original, or edit it yourself. The book carries on after you choose.',
+    choices: [{ action: 'accept_change', label: '✔ Accept change' }], change: { field: 'background', before: "At eight, during their father's wake…", after: "During their mother's wake…" },
+    key: 'character:REVIEW_DECISION:A01-x:2', code: 'REVIEW_DECISION' };
+  const sum = AR.summarizeRun({ id: 'run-7', title: "The Salt Keeper's Ledger", status: 'paused', state: 'needs_decision', needs_decision: true, steps_total: 19, step: 3, alert: ansel });
+  assert(sum.alert && sum.alert.label === 'Character issue' && sum.alert.icon === '🧑' && sum.alert.what === 'Ansel Marrant (character)' && sum.alert.change.after, 'the run summary carries Akọwe\'s alert');
+  assert(AR.summarizeRun({ id: 'r', status: 'running', state: 'working', alert: ansel }).alert === null, 'a working run carries no alert');
+  assert(AR.alertOf({ label: '' }) === null && AR.alertOf(null) === null, 'no label: no alert (older Akọwe)');
+  let c = RG.conditionsFrom({ run: sum });
+  assert(c.length === 1 && c[0].title === "📖 The Salt Keeper's Ledger: 🧑 Character issue (step 3 of 19)", `the title names the book, the category and the step ("${c[0].title}")`);
+  assert(c[0].body.startsWith('Ansel Marrant (character): His background has a timeline contradiction') && /disagreed twice about the same thing, so it needs you\.$/.test(c[0].body), `the body says what and why ("${c[0].body}")`);
+  assert(c[0].title.length <= RG.TITLE_MAX && c[0].body.length <= RG.BODY_MAX && RG.BODY_MAX <= 200, 'title and body within the notification limits');
+  assert(c[0].key.startsWith('run:run-7:needs_you:') && c[0].target === 'akowe' && c[0].category === 'character' && c[0].code === 'REVIEW_DECISION', 'one condition: opens Akọwe, keyed by the decision, codes for the log');
+  const longBook = Object.assign({}, sum, { title: 'A'.repeat(150), alert: Object.assign({}, sum.alert, { label: 'Story map connection', icon: '🗺', what: 'W'.repeat(80), wrong: 'x '.repeat(400) }) });
+  c = RG.conditionsFrom({ run: longBook });
+  assert(c[0].title.length <= RG.TITLE_MAX && /🗺 Story map connection \(step 3 of 19\)$/.test(c[0].title) && c[0].body.length <= RG.BODY_MAX && /…/.test(c[0].title), 'a very long book name / finding is cut, the category and step stay');
+  const paused = AR.summarizeRun({ id: 'run-8', title: 'B', status: 'paused', state: 'paused', pause_reason: 'author', steps_total: 19, step: 5, alert: { category: 'paused', icon: '⏸', label: 'Paused by you', what: 'Write every chapter', wrong: 'Nothing is wrong.', why: 'You pressed Pause.', next: 'Press ▶ Resume when you are ready.', key: 'paused:paused::' } });
+  c = RG.conditionsFrom({ run: paused });
+  assert(c[0].title === '📖 B: ⏸ Paused by you (step 5 of 19)' && /You pressed Pause\.$/.test(c[0].body), 'Pause says so plainly');
+  const ai = AR.summarizeRun({ id: 'run-9', title: 'B', status: 'paused', state: 'problem', steps_total: 19, step: 11, problem: { message: 'x' }, alert: { category: 'ai', icon: '⚠', label: 'AI problem', what: 'Write every chapter', wrong: 'The AI did not answer in time while writing chapter 4.', why: 'The AI could not do this step (a usage limit, the connection or an error).', next: 'Press 🔁 Try again.', key: 'ai:TIMEOUT:x:' } });
+  c = RG.conditionsFrom({ run: ai });
+  assert(/⚠ AI problem \(step 11 of 19\)$/.test(c[0].title) && /did not answer in time/.test(c[0].body), 'an AI problem is named as one');
+  // repeats: the same decision once (again after 30 min); a NEW decision of the same run is said at once
+  let t = 0; const shown = [];
+  const n = RG.createNotifier({ now: () => t, show: (x) => shown.push(x), renotifyMs: 30 * 60000, getSettings: () => ({ on: true, sound: true }) });
+  const first = RG.conditionsFrom({ run: sum });
+  n.update(first); t += 60000; n.update(first);
+  assert(shown.length === 1 && shown[0].silent === false, 'the same decision is said once (with its sound)');
+  t += 30 * 60000; n.update(first);
+  assert(shown.length === 2 && shown[1].again === true, 'still waiting after 30 minutes: said again');
+  const next = RG.conditionsFrom({ run: Object.assign({}, sum, { alert: Object.assign({}, sum.alert, { key: 'place:REVIEW_NOT_PASSED:A04-y:3', label: 'Place / world rule', icon: '📍' }) }) });
+  n.update(next);
+  assert(shown.length === 3 && /📍 Place \/ world rule/.test(shown[2].title), 'a different decision of the same run is announced at once');
 }
 
 async function transcriptStore() {

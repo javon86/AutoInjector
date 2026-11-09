@@ -3761,7 +3761,16 @@ function bfRunFor(s) {
 }
 function bfRunLine(run) {
   if (!run) return "";
-  return `${run.text}${run.stale ? " (last known — Akọwe isn't answering right now)" : ""}`;
+  // 🔔 a run that waits for you says what kind of issue and what it is about ("· 🧑 Character issue: Ansel Marrant")
+  const a = run.alert && run.alert.label ? run.alert : null;
+  const about = a ? ` · ${a.icon ? `${a.icon} ` : ""}${a.label}${a.what ? `: ${a.what}` : ""}` : "";
+  return `${run.text}${about}${run.stale ? " (last known — Akọwe isn't answering right now)" : ""}`;
+}
+/** The longer words of the run's alert, for the line's tooltip: what is wrong, why it stopped, what happens next. */
+function bfRunTip(run) {
+  const a = run && run.alert;
+  if (!a || !a.label) return "";
+  return [a.wrong, a.why ? `Why it stopped: ${a.why}` : "", a.next ? `Next: ${a.next}` : ""].filter(Boolean).join("\n");
 }
 function bfRenderRun(run) {
   const box = el("bf-run");
@@ -3771,6 +3780,8 @@ function bfRenderRun(run) {
   box.dataset.tone = run.tone || "off";
   box.dataset.state = run.state || "";
   bfText("bf-run-text", bfRunLine(run));
+  const rt = el("bf-run-text");
+  if (rt) rt.title = bfRunTip(run);
   const res = el("btn-bf-run-resume");
   if (res) res.hidden = !(run.resumable && !run.stale && run.id);
   const dec = el("btn-bf-run-decide");

@@ -154,7 +154,12 @@ const needsYou = Object.assign({}, interrupted, { status: "paused", pause_reason
     assert(/Writing — step 9 of 16/.test(txt("bf-run-text")) && d.getElementById("btn-bf-run-resume").hidden, `after Resume: “${txt("bf-run-text")}”, no Resume button`);
     cur = snap(needsYou); await render();
     assert(/needs your decision/.test(txt("bf-run-text")) && d.getElementById("btn-bf-run-resume").hidden && !d.getElementById("btn-bf-run-decide").hidden, "a decision: “Decide in Akọwe”, no Resume");
+    // 🔔 a newer Akọwe's alert: the line says what kind of issue and what it is about; the tooltip says why
+    cur = snap(Object.assign({}, needsYou, { alert: { category: "character", icon: "🧑", label: "Character issue", what: "Ansel Marrant (character)", wrong: "His age at his father's wake doesn't match the family timeline.", why: "The reviewer and the writer disagreed twice about the same thing, so it needs you.", next: "Pick one: accept the change, keep the original, or edit it yourself.", key: "k" } })); await render();
+    assert(/needs your decision.* · 🧑 Character issue: Ansel Marrant \(character\)$/.test(txt("bf-run-text")), `the run line names the issue: “${txt("bf-run-text")}”`);
+    assert(/family timeline/.test(d.getElementById("bf-run-text").title) && /Why it stopped: The reviewer and the writer disagreed twice/.test(d.getElementById("bf-run-text").title), "its tooltip says what is wrong and why it stopped");
     cur = snap(finished); await render();
+    assert(d.getElementById("bf-run-text").title === "", "no alert, no tooltip");
     assert(txt("bf-run-text") === "Finished" && txt("bf-progress-text") === "16/16" && d.getElementById("bf-run").dataset.tone === "ok", "finished: “Finished”, 16/16, green");
     cur = snap(null); await render();
     assert(d.getElementById("bf-run").hidden && txt("bf-progress-text") === "10/10", "no run: the checklist as before");
