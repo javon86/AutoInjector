@@ -1,15 +1,15 @@
 'use strict';
 // video-judge.e2e.js — 🎬 💾 video recipes, 🧑‍⚖️ the video judge (a contact sheet of the frames) and 🔁 Make it better with
-// quick previews in the REAL app (xvfb), with the fake ComfyUI (test/fixtures/fake-sd.js — it hands back a real clip made
-// by ffmpeg's test pattern) and the fake `claude` CLI as the judge (test/fixtures/fake-claude-judge.js: video scores).
+// quick previews in the REAL app (xvfb), with the fake ComfyUI (test/fixtures/fake-sd.js — it hands back a real 2-second
+// clip kept in test/fixtures/test-clip-2s.webm, so no ffmpeg is needed) and the fake `claude` CLI as the judge (test/fixtures/fake-claude-judge.js: video scores).
 //   make a clip → 🧑‍⚖️ Judge shows the video scores and the contact sheet → 🔁 Make it better: 2 quick previews (short,
 //   small) + the full video after the OK, with a visible strip → 💾 Save these settings as a recipe → load it →
 //   ♻ Remake reproduces the seed and settings.
 // The app gets its own HOME and XDG_CONFIG_HOME (like voice.e2e.js) and a teardown that force-kills (like ease.e2e.js).
 // The window is 1280×720. Screenshots: VJ_SHOTS (default test/e2e/__screenshots__); 2× screenshots:
 //   VJ_SCALE=2 TMPDIR=/dev/shm xvfb-run -a -s "-screen 0 2700x1600x24" node test/e2e/video-judge.e2e.js
-// No ffmpeg (AUTOINJECTOR_FFMPEG=none): the contact sheet comes from the app's own player instead.
-//   TMPDIR=/dev/shm xvfb-run -a node test/e2e/video-judge.e2e.js
+// No ffmpeg (AUTOINJECTOR_FFMPEG=none, or none installed as on CI): the contact sheet comes from the app's own player.
+//   AUTOINJECTOR_FFMPEG=none TMPDIR=/dev/shm xvfb-run -a node test/e2e/video-judge.e2e.js
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
