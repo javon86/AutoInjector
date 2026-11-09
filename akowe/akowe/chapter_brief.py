@@ -23,6 +23,9 @@
 * ✍ ``human_voice`` (human_voice.py): what never to write (the best-known AI phrases, clichés and patterns, built from
   ai_tells.json), the craft rules (vary sentence length, concrete details, subtext, messy dialogue, end on action or
   image, no repeated gestures) and this book's own repeat offenders so far (no AI), ≤ 1 900 characters.
+* 🧠 ``quality_lessons`` (quality_history.py): the author's lessons from the last books, the editor categories that
+  scored low in this book's earlier chapters, an avoid-list (similes, phrases and plain-word tics already used), the
+  tide and day facts so far with any clock contradiction (must_fix) and the reading-level floor, ≤ 1 400 characters.
 * ``character_details`` (B5): accepted Character Forge dossier fields with only the letters the chapter needs (E; A on
   a character's first appearance; F / M when the plan reads like a fight / powers), ≤ 2 500 characters
   (``forge.chapter_brief``).
@@ -416,6 +419,15 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str, *
             rules.append(HV_RULE)
             meta["human_voice"] = {"chars": len(json.dumps(hv, ensure_ascii=False)),
                                    "own": len(hv.get("this_book_so_far") or [])}
+            if cut:
+                meta["cut"] = cut
+        from . import quality_history  # noqa: PLC0415 - 🧠 lessons: last books, this book so far, avoid, clock
+        ql = quality_history.brief_block(store, pid, branch, outline, chapter_id, cut)
+        if ql:
+            brief["quality_lessons"] = ql
+            rules.append(quality_history.BRIEF_RULE)
+            meta["quality_lessons"] = {"chars": len(json.dumps(ql, ensure_ascii=False)),
+                                       "parts": sorted(ql)}
             if cut:
                 meta["cut"] = cut
         try:  # 🗳 the writers' room's decision for this chapter (a ⚡ run's pick; writers_room.py)

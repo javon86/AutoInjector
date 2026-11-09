@@ -5724,6 +5724,8 @@ function renderBook(holder, book, redraw) {
   // ✍ the end-of-book "sounds like a person" pass (human_voice.py): before → after the fixes you approved
   if (book.human_voice && book.human_voice.line) holder.appendChild(h('p', { class: 'card small hv-home', 'data-testid': 'home-human-voice' }, book.human_voice.line,
     book.human_voice.waiting ? h('span', { class: 'muted' }, ' — open a chapter to see them (✔ Use makes a new draft for you to approve).') : null));
+  // 📈 this book against your earlier books (quality_history.py): up or down, the weakest area, what is falling
+  if (book.quality_trend && book.quality_trend.line) holder.appendChild(qualityTrendCard(book.quality_trend, 'home-quality-trend', plink('report')));
   const att = (book.attention || {}).lines || [];
   if (att.length) holder.appendChild(h('section', { class: 'card attention-card', 'data-testid': 'book-attention', 'aria-label': 'Needs a look' },
     h('h2', null, '⚠️ Needs a look'),
@@ -7436,7 +7438,7 @@ function bookSection4Card() {
     catch (e) { clear(body).appendChild(problemBox(toProblem(e, { book: S.project.name, step: 'Story rules and world' }), {})); return; }
     const nRules = w.rules ? (w.rules.rules || []).filter(r => r.status !== 'retired').length : 0;
     const nTex = w.texture ? (w.texture.items || []).length : 0;
-    const unbounded = (w.rules_lint || []).filter(x => ['UNBOUNDED_EXCEPTION', 'NO_LIMITS'].includes(x.code)).length;
+    const unbounded = (w.rules_lint || []).filter(x => ['SPECIAL_UNBOUNDED', 'UNBOUNDED_EXCEPTION', 'NO_LIMITS'].includes(x.code)).length;
     clear(body).appendChild(h('p', null, h('a', { class: 'btn small', href: plink('world'), 'data-testid': 'open-world' }, '🌍 Story rules and world'), ' ',
       `${nRules} story rule(s), ${nTex} world detail(s)`,
       unbounded ? [' ', hazard({ code: 'RULE_NOT_BOUNDED', message: `${unbounded} rule(s) have no limits` }, { open: plink('world'), openLabel: 'Open the rules' }, { small: true })] : null,
@@ -8219,6 +8221,33 @@ async function picturesSwitch(prefix) {
     h('p', { class: 'hint', id: `${id}-hint` }, 'A portrait of every character and the full set for the main character, made by Stable Diffusion in AutoInjector — no AI answers, a few minutes. If the picture maker is not running, the book goes on and the pictures wait in the 📖 Book Bible. The default comes from Settings › Pictures.'));
   return { el, box, set(v) { box.checked = !!v; box.dispatchEvent(new Event('change')); }, apply(body) { if (box.checked !== def) body.pictures = box.checked; } };
 }
+/** 📈 "Your books over time" (quality_history.trend): the score against your last book, the weakest area, what is falling. */
+function qualityTrendCard(tr, testid, href) {
+  const pts = (tr.points || []).filter(p => p.overall != null);
+  const down = tr.change != null && tr.change < 0;
+  return h('section', { class: 'card small quality-trend', 'data-testid': testid, 'aria-label': 'Your books over time' },
+    h('p', null, h('strong', null, down ? '📉 ' : '📈 '), h('strong', null, tr.line)),
+    tr.weakest ? h('p', { 'data-testid': `${testid}-weakest` }, '🎯 ', tr.weakest.line) : null,
+    (tr.falling || []).length ? h('p', { class: 'words-warn', 'data-testid': `${testid}-falling` }, '⬇ Falling: ', tr.falling.map(f => `${f.label} ${f.from}→${f.to}`).join(', ')) : null,
+    (tr.rising || []).length ? h('p', { class: 'muted' }, '⬆ Rising: ', tr.rising.map(f => `${f.label} ${f.from}→${f.to}`).join(', ')) : null,
+    pts.length > 1 ? h('p', { class: 'muted', 'aria-label': 'Overall score of your last books, oldest first' }, 'Your last books: ', pts.map(p => `${p.overall}`).join(' → ')) : null,
+    tr.improve && tr.improve.before != null ? h('p', { class: 'muted' }, `🔁 Final improve pass: ${tr.improve.before} → ${tr.improve.after}${tr.improve.kept ? ' (kept)' : ' (not kept)'}`) : null,
+    h('p', { class: 'muted' }, '🧠 Your weakest areas become lessons for your next book’s planners and writer.', href ? [' ', h('a', { href }, '📊 Open the report')] : null));
+}
+/** 🔁 "Improve until better" (run settings improve_pass, improve_rounds): on by default, 2 rounds */
+function improvePassSwitch(prefix) {
+  const id = `${prefix}-improve`;
+  const box = h('input', { type: 'checkbox', role: 'switch', id, 'data-testid': id, checked: true, 'aria-describedby': `${id}-hint` });
+  const state = h('span', { class: 'ip-state', 'aria-hidden': 'true' }, 'On');
+  const rounds = h('select', { id: `${id}-rounds`, 'data-testid': `${id}-rounds`, 'aria-label': 'How many rounds at most' },
+    [1, 2, 3].map(n => h('option', { value: String(n), selected: n === 2 }, `${n} round${n > 1 ? 's' : ''} at most`)));
+  box.addEventListener('change', () => { state.textContent = box.checked ? 'On' : 'Off'; rounds.disabled = !box.checked; });
+  const el = h('fieldset', { class: 'field ip-switch' }, h('legend', null, '🔁 Improve until better'),
+    h('div', { class: 'check-row' }, box, h('label', { for: id }, h('strong', null, 'At the end, fix what the reviewers and readers found — keep it only if the score goes up'), ' ', state)),
+    h('div', { class: 'row' }, rounds),
+    h('p', { class: 'hint', id: `${id}-hint` }, 'On (recommended): when the book is made, the reviewers’ “What to try next”, the beta readers’ top fixes, the editor’s major notes (also of chapters you approved anyway) and Akọwe’s own checks (clock and tide times, repeated phrases, too-simple sentences) go to the chapters that need them most. The same AIs read the book again; the change is kept only if the score went up and nothing dropped — otherwise your book stays exactly as it was. The run window shows both scores. About 5 to 10 more AI answers per round.'));
+  return { el, box, apply(body) { if (!box.checked) body.improve_pass = false; else if (rounds.value !== '2') body.improve_rounds = Number(rounds.value); } };
+}
 /** ✍ "Check that it sounds like a person at the end" (run setting human_pass): on by default */
 function humanPassSwitch(prefix) {
   const id = `${prefix}-human-pass`;
@@ -8268,6 +8297,7 @@ async function renderMakeSetup() {
   const s7 = await S7C.makeSetupExtras(s7c());  // P23 / P25 (Section 7c)
   const fb = fillBibleSwitch('mb');  // 📖 Fill the whole Book Bible before writing (whole_bible.py), off by default
   const hp = humanPassSwitch('mb');  // ✍ the end-of-book "sounds like a person" pass (human_voice.py), on by default
+  const ipw = improvePassSwitch('mb');  // 🔁 the final improve pass (improve_pass.py), on by default
   const wr = WR.makeSetupSwitch(s7c());  // 🗳 Use the writers' room for the big twists (writers_room.py), off by default
   const ck = checkersField('mb');  // 🔎 PR #117: how many AIs check for mistakes (all by default)
   fields.checkers = ck.sel;
@@ -8306,7 +8336,7 @@ async function renderMakeSetup() {
         h('div', { class: 'field' }, h('label', { for: 'mb-genre' }, 'Genre'), genre, h('datalist', { id: 'mb-genres' }, GENRES.map(g => h('option', { value: g }))), h('span', { class: 'hint' }, 'Empty = the AI chooses.')),
         h('div', { class: 'field' }, h('label', { for: 'mb-slot' }, 'Which AI'), slot, h('span', { class: 'hint' }, 'Automatic uses whichever AI is ready.'))),
       lengthBox,
-      h('div', { class: 'field' }, h('label', { for: 'mb-idea' }, 'Your idea (optional)'), idea, ideaWarn, locksBox), cf.el, pipe.el, s7.el, fb.el, hp.el, wr.el, ck.el, pics.el, ccf.el),
+      h('div', { class: 'field' }, h('label', { for: 'mb-idea' }, 'Your idea (optional)'), idea, ideaWarn, locksBox), cf.el, pipe.el, s7.el, fb.el, hp.el, ipw.el, wr.el, ck.el, pics.el, ccf.el),
     later.el, err, h('div', { class: 'form-actions' }, startAll, startSet));
   form.insertBefore(h('div', { class: 'row mb-paste-row' }, paste, h('span', { class: 'small muted' }, 'Planned your book with an AI? Paste its starter sheet to fill these settings.')), form.querySelector('.mb-quick'));
   // ⏱ 3d: time, AI answers per AI and usage limits for exactly these settings; 📊 3e the usage meter per AI
@@ -8335,6 +8365,7 @@ async function renderMakeSetup() {
     s7.apply(body);  // P23 / P25 (Section 7c): beta reader and "write in my style"
     fb.apply(body);  // 📖 the whole Book Bible before chapter one (only when switched on)
     hp.apply(body);  // ✍ the end-of-book pass (sent only when switched off)
+    ipw.apply(body);  // 🔁 the final improve pass (sent only when changed)
     wr.apply(body);  // 🗳 the writers' room for the big twists (only when switched on)
     ck.apply(body);  // 🔎 how many AIs check for mistakes (sent only when not the default)
     one.apply(body);  // PR #122: when only one AI works (sent only when not the default)
@@ -8695,6 +8726,9 @@ function runReportBox(r) {
     h('a', { class: 'btn small primary', href, onclick: () => closeMakeBook() }, '📊 Open the book report')),
     // ✍ the end-of-book "sounds like a person" pass: the score now and with the suggested rewrites
     rp && rp.human ? h('p', { 'data-testid': 'mb-human' }, rp.human) : null,
+    // 🔁 the final improve pass: both scores; 📈 this book against your last books
+    rp && rp.improve ? h('p', { 'data-testid': 'mb-improve' }, rp.improve) : null,
+    rp && rp.trend ? h('p', { 'data-testid': 'mb-trend' }, '📈 ', rp.trend) : null,
     CK.recordCard(s7c(), { compact: true, testid: 'mb-ck-record' }));  // 📊 how good each checker was (folded)
 }
 /** 🧪 Pipeline switches (P14): preset + the five switches, each with ⓘ. get() -> null (full, the default) or {preset, flags}. */
@@ -9214,6 +9248,8 @@ async function viewReport(main) {
         h('p', null, h('strong', null, r.name), r.independent ? '' : h('span', { class: 'words-warn small' }, ' ⚠️ not independent'), (r.calibration || {}).flagged ? h('span', { class: 'words-warn small', 'data-testid': 'rp-flagged' }, ' ⚠️ not backed by quotes') : '', ': ', r.summary || ''),
         (r.trust_notes || []).length ? h('ul', { class: 'small', 'data-testid': 'rp-trust' }, r.trust_notes.map(n => h('li', { class: /^⚠️/.test(n) ? 'words-warn' : 'muted' }, n))) : null))));
     }
+    if (rep.improve) holder.appendChild(h('p', { class: 'card small', 'data-testid': 'rp-improve' }, rep.improve));
+    if (ov.trend && ov.trend.line) holder.appendChild(qualityTrendCard(ov.trend, 'rp-trend', null));
     holder.appendChild(h('section', { class: 'card', 'data-testid': 'rp-next' }, h('h2', null, '🧭 What to try next'),
       (rep.try_next || []).length ? h('ul', null, rep.try_next.map(t => h('li', null, t.text, h('span', { class: 'small muted' }, ` (${t.from})`)))) : h('p', { class: 'small muted' }, 'Nothing stands out. Try ⚖️ comparing a variant to see what the pipeline changes.')));
     const ed = rep.editor || {}; const pl = rep.planned || {}; const pa = rep.patterns || {};
