@@ -164,3 +164,19 @@ def describe(run: dict, state: str) -> dict | None:
             "why": clip(why, 160), "next": clip(nxt, 220), "choices": choices, "change": change, "code": code or None,
             "key": f"{cat}:{code or state}:{prob.get('record_id') or prob.get('step') or ''}"
                    f":{prob.get('version') or ''}"}
+
+
+def with_stand_in(alert: dict, view: dict | None) -> dict:
+    """🧑‍⚖️ The alert mentions the stand-in decider (stand_in.py): when it steps in if the author does not answer, why
+    it does not (only the author may decide this one, it was unsure …), and the last decision it made in this run."""
+    if not alert or not view:
+        return alert
+    out = dict(alert)
+    pend = view.get("pending") or {}
+    if pend.get("state") in ("waiting", "waits", "cap") and pend.get("words"):
+        out["next"] = clip(f"{out.get('next') or ''} {pend['words']}".strip(), 320)
+        out["stand_in_words"] = clip(pend["words"], 220)
+    last = next((d for d in reversed(view.get("decisions") or []) if not d.get("undone")), None)
+    if last:
+        out["stand_in"] = {"line": clip(last.get("line"), 300), "id": last.get("id")}
+    return out

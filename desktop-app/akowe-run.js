@@ -62,6 +62,15 @@ function alertOf(a) {
 }
 
 /**
+ * 🧑‍⚖️ "Decided for you" (akowe/stand_in.py): the stand-in the user switched on decided an AI disagreement because they
+ * did not answer in time. Bounded plain text for the desktop notification, or null (none / older Akọwe).
+ */
+function noticeOf(n) {
+  if (!n || typeof n !== 'object' || !str(n.key, 60) || !str(n.title, 120)) return null;
+  return { key: str(n.key, 60), title: str(n.title, 120), body: str(n.body, 300), at: str(n.at, 40) };
+}
+
+/**
  * One run (Akọwe's public run object, or the `run` a newer Akọwe pushes) -> what the panel shows:
  * { id, project_id, title, status, state, word, text, tone, done, total, at, stepTitle, resumable, needsDecision,
  *   live, phase }
@@ -105,6 +114,7 @@ function summarizeRun(run) {
     phase: str(run.phase, 200), problem: problem ? str(problem.message, 200) : '',
     updated_at: str(run.updated_at || run.finished_at || run.started_at, 40) || null,
     alert: ['needs_you', 'paused', 'interrupted', 'problem'].includes(state) ? alertOf(run.alert) : null,
+    notice: noticeOf(run.notice),
   };
 }
 
@@ -175,4 +185,4 @@ function createRunWatch(opts = {}) {
   return { peek, refresh, _state: () => ({ last, lastAt, unreachable }) };
 }
 
-module.exports = { summarizeRun, pickRun, stepsOf, createRunWatch, alertOf };
+module.exports = { summarizeRun, pickRun, stepsOf, createRunWatch, alertOf, noticeOf };

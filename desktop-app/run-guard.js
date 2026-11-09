@@ -148,6 +148,10 @@ function conditionsFrom({ run, sites, watching } = {}) {
     if (al) out.push({ key, title: al.title, body: al.body, target: 'akowe', category: run.alert.category || '', code: run.alert.code || '' });
     else out.push({ key, title, body: `${name} ${RUN_NEEDS_YOU[run.state]}${step}. ${what}`, target: 'akowe' });
   }
+  // 🧑‍⚖️ a stand-in decided for the user (they did not answer in time): said once, with how to undo it
+  if (run && !run.stale && run.notice && run.notice.key) {
+    out.push({ key: `decided:${run.id || '?'}:${shortHash(run.notice.key)}`, title: clipText(run.notice.title, TITLE_MAX), body: clipText(run.notice.body, BODY_MAX), target: 'akowe', category: 'decided', code: 'STAND_IN_DECIDED' });
+  }
   const runGoing = !!(run && !run.stale && (LIVE_RUN.has(run.state) || RUN_NEEDS_YOU[run.state]));
   if (!(watching || runGoing)) return out;
   const list = Object.entries(sites || {}).filter(([, x]) => x && x.active);

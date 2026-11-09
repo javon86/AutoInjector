@@ -772,11 +772,17 @@ class EditorService:
             return None
         wslot = writer.get("slot")
         bad = {providers_mod.slot_family(rv._slot(x)) for x in (wslot, first_slot) if x} - {None}
-        cands = [s["slot_id"] for s in elig if s["slot_id"] not in (wslot, first_slot)
-                 and providers_mod.slot_family(s) not in bad]
-        if prefer in cands:
+        cands = [s for s in elig if s["slot_id"] not in (wslot, first_slot) and providers_mod.slot_family(s) not in bad]
+        try:  # 🔢 the checker order: an AI switched off for checks never gives a second opinion; best / chosen first
+            from . import checker_order  # noqa: PLC0415
+            pol = rv.checker_policy or checker_order.settings(self.store)
+            cands, _how = checker_order.order_slots(self.store, pol, cands)
+        except Exception:  # noqa: BLE001
+            log.exception("could not apply the checker order to the second editor")
+        ids = [s["slot_id"] for s in cands]
+        if prefer in ids:
             return prefer
-        return cands[0] if cands else None
+        return ids[0] if ids else None
 
     @staticmethod
     def _reviewer_row(r: dict) -> dict:

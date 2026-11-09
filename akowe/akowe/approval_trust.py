@@ -90,7 +90,10 @@ SKIPPED_WORDS = {"approve_anyway": "you approved it anyway (the AI reviewer had 
                  "self_review": "only the AI that wrote it checked it (no second AI)",
                  # PR #122: the run kept going with the one working AI (run setting "when only one AI works")
                  "self_review_later": "only the AI that wrote it checked it (no second AI was working) — needs your "
-                                      "check later"}
+                                      "check later",
+                 # 🧑‍⚖️ stand_in.py: you did not answer in time and the stand-in you switched on decided (undo it on
+                 # the run window or Book home)
+                 "stand_in": "your stand-in decided it because you didn't answer in time — you can undo it"}
 
 
 def note(store, pid: str, branch: str, rec: dict, *, how: str, label: str | None = None,

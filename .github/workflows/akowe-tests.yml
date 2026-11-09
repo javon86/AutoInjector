@@ -27,7 +27,7 @@ jobs:
   test:
     name: pytest (everything but the browser UI tests)
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     defaults:
       run:
         working-directory: akowe
@@ -47,8 +47,10 @@ jobs:
       - run: python -m pip install -r requirements.txt -r requirements-test.txt
       # Playwright is not installed here, so tests/campaign/ui is skipped (its conftest ignores it); the job below
       # runs those. The AutoInjector desktop-app e2e skips too (it needs desktop-app/node_modules).
+      # The suite grew past 25 minutes (≈3,900 tests; PR #140's run timed out at 98% with no failure), so the step
+      # gets 40: a time limit, not a skip — every test still runs.
       - run: python -m pytest -q -p no:cacheprovider
-        timeout-minutes: 25
+        timeout-minutes: 40
 
   ui-test:
     name: Playwright UI campaign tests (Chromium)

@@ -47,6 +47,12 @@ def of_book(store, pid: str, branch: str) -> dict:
         out["story_map"] = story_map.attention_lines(store, pid, branch)
     except Exception:  # noqa: BLE001
         log.exception("attention: story map")
+    try:  # 🧑‍⚖️ decisions a stand-in made while you were away (each with ↩ Undo on Book home)
+        from . import stand_in  # noqa: PLC0415
+        out["stand_in"] = stand_in.book_notes(store, pid, branch)
+    except Exception:  # noqa: BLE001
+        log.exception("attention: stand-in decisions")
+        out["stand_in"] = []
     lines = [f"⚠️ {e['line']}" for e in out["unchecked"] if e.get("line")]
     lines += [r["message"] for r in out["rechecks"] if r.get("message")]
     lines += [c["line"] for c in out["cuts"] if c.get("line")]

@@ -173,6 +173,27 @@ Every chapter is checked several times before it counts as part of the book:
 - The **📊 Book report** shows the scores, who checked the book and how far they agreed. An optional beta-reader
   step reads the book as 1, 2 or 3 kinds of readers.
 
+### 📊 Who checks, and how good each checker is
+
+- **📊 How good is each checker** (⚙️ Settings, the run window when a book is done, and the 📊 Book report) shows, for
+  ChatGPT, Claude, Gemini (and the 🤖 Claude Code helpers and 🎩 Alfred when they check), how often their corrections
+  held up, how many were false alarms lately, and how often they missed something another AI found — for example
+  "ChatGPT: 87% of its corrections held up · 3 false alarms in the last 50". With fewer than 10 checks behind it, an AI
+  says "needs more data": a few lucky or unlucky checks prove nothing. Only numbers are kept, never your book's words.
+- **🔢 Which AI checks first** (⚙️ Settings, and "Checkers: … Change" on the ⚡ Make-a-book screen for one book):
+  **Automatic** puts the AI with the best track record first once there is enough data; **My own order** lets you
+  move them with ↑ ↓; tick **Don't use for checks** to keep an AI from checking (it can still write). The AI that
+  wrote a draft never checks it while another AI can. If you switch off so many that too few can check, Akọwe says so,
+  for example "Only ChatGPT can check right now because Gemini is switched off for checks and Claude is the writer."
+- **🧑‍⚖️ Stand-in when I don't answer** (⚙️ Settings, off until you switch it on): when a book waits for your answer on
+  an AI disagreement and you don't answer within the time you picked (10, 20, 30 or 60 minutes), a stand-in decides so
+  the book goes on — 🤖 Claude Code, or the AI that was not part of the disagreement, or 🎩 Alfred for small, simple
+  corrections only. It never decides the plot, the ending, the main character, point of view or tense, your content
+  limits or your lock list; if it is unsure, it keeps waiting for you. Each decision is shown in the run window and on
+  🏠 Book home — "🎩 Alfred approved the correction to Ansel Marrant (character) at 10:05 because you didn't answer for
+  20 minutes. Why: …" — and the desktop notification says it was decided for you. Press **↩ Undo** to put the other
+  choice back for your own approval. At most 5 stand-in decisions per book run.
+
 ## 6. Pictures
 
 **In the 🎨 Images tab:**

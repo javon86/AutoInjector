@@ -162,6 +162,8 @@ class App:
         self.autobook = AutoBookService(self)
         from .run_schedule import RunScheduler  # noqa: PLC0415 - ⏰ 3e start a ⚡ run later
         self.scheduler = RunScheduler(self)
+        from .stand_in import Ticker as StandInTicker  # noqa: PLC0415 - 🧑‍⚖️ the stand-in decider's clock
+        self.stand_in = StandInTicker(self)
         from . import usage_meter  # noqa: PLC0415 - 📊 3e usage meter per AI (counts every AI answer)
         usage_meter.attach(self.store)
         self.write_all = WriteAllService(self)
@@ -486,7 +488,7 @@ class App:
             from . import forge  # noqa: PLC0415
             return 200, forge.bridge_info(self) if method == "GET" else forge.save_bridge_settings(self, body)
         if parts and parts[0] in ("autobook", "jobs", "health", "diagnostics", "backups", "shelf", "settings",
-                                  "story-choices", "lengths", "pipeline", "compare"):
+                                  "story-choices", "lengths", "pipeline", "compare", "checkers"):
             return self.route_ops(method, parts, query, body, principal)
         if parts and parts[0] in ("assist", "bible-builder"):
             return self.route_ai(method, parts, query, body, principal)
@@ -815,6 +817,9 @@ class App:
                     return 200, act(principal, parts[1])
                 if parts[2] == "decide":
                     return 200, ab.decide(principal, parts[1], body)
+                if parts[2] == "stand-in-undo":  # 🧑‍⚖️ ↩ Undo a stand-in decision
+                    from . import stand_in  # noqa: PLC0415
+                    return 200, stand_in.undo(self, principal, parts[1], body)
         if head == "jobs":
             if parts == ["jobs"] and method == "GET":
                 pid = (query.get("project_id") or [None])[0]
@@ -858,6 +863,23 @@ class App:
                 return 200, out
         if parts == ["shelf"] and method == "GET":
             return 200, shelf_page(self, principal=principal)
+        if parts == ["settings", "checkers"]:  # 🔢 which AI checks first, and which never check (checker_order.py)
+            from . import checker_order  # noqa: PLC0415
+            if method == "PUT":
+                checker_order.save_settings(self.store, body)
+            if method in ("GET", "PUT"):
+                want = {"all": 3, "two": 2, "one": 1}.get((query.get("checkers") or ["all"])[0], 3)
+                writer = (query.get("writer") or [None])[0]
+                return 200, checker_order.preview(self, self.store, writer_slot=writer, want=max(1, want - 1))
+        if parts == ["checkers", "record"] and method == "GET":  # 📊 how good is each checker (checker_record.py)
+            from . import checker_record  # noqa: PLC0415
+            return 200, checker_record.card(self.store, self.engine.providers)
+        if parts == ["settings", "stand-in"]:  # 🧑‍⚖️ the stand-in decider (stand_in.py)
+            from . import stand_in  # noqa: PLC0415
+            if method == "GET":
+                return 200, stand_in.public(self.store)
+            if method == "PUT":
+                return 200, stand_in.save_settings(self.store, body)
         if parts == ["settings", "reviewer-ai"]:
             if method == "GET":
                 return 200, self.review.reviewer_settings()
@@ -1754,6 +1776,7 @@ def main(argv=None):
     app.port = args.port
     app.pusher.start()  # sends status to AutoInjector only when a slot is connected to it
     app.scheduler.start()  # ⏰ 3e a ⚡ run scheduled for later (resumes a saved schedule; asks when 2+ hours late)
+    app.stand_in.start()  # 🧑‍⚖️ the stand-in decider (does nothing unless switched on in Settings)
     # S9: one automatic backup per day, on the first start of the day (in the background).
     threading.Thread(target=app.backups.daily_if_needed, name="akowe-daily-backup", daemon=True).start()
     url = f"http://{args.host}:{args.port}/#token={app.token}"
