@@ -94,4 +94,12 @@ window.api.onSequenceState(({ active, index, total, ended }) => {
   else if (total > 0) el("status").textContent = "Sequence finished.";
 });
 
-addStep("all", "");
+// 📂 A loaded save puts its 🧵 steps back: they fill the editor when it opens (nothing is sent until you press Run).
+(async () => {
+  let steps = [];
+  try { const r = window.api.sequenceDraft ? await window.api.sequenceDraft() : null; steps = (r && Array.isArray(r.steps)) ? r.steps : []; } catch (_) { steps = []; }
+  if (steps.length) {
+    for (const s of steps) addStep(s.target, s.text);
+    el("status").textContent = `${steps.length} step${steps.length === 1 ? "" : "s"} from your saved state — press Run when you are ready.`;
+  } else addStep("all", "");
+})();

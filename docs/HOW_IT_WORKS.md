@@ -125,6 +125,34 @@ bridge to your home Wi-Fi, behind its key.
     them again. For one run only, starting the app with `AUTOINJECTOR_LOCKERS=1` (or `=0`) overrides the tick.
 - **Logs and 📋 Extract:** the app keeps an activity log and a record of every message's journey (the Relay
   Trace). Extract turns these into one file you can share. Keys and private paths are removed.
+- **💾 Save state / 📂 Load state** (`save-state.js`, the dialog in `save-state-ui.js`, the wiring in `main.js`):
+  a named snapshot of where you are.
+  - **What is saved:** each pane's current address (the exact ChatGPT / Claude / Gemini conversation); a backup of
+    each pane's newest replies (up to 30, each up to 12,000 characters, from the conversation list the app already
+    keeps); the set-up — which AIs are Active, the Compose box, whether 🎩 Alfred is in → All, the open tab, each
+    pane's size (open / reduced / minimized), the folded panels, the window size, each pane's zoom; and what you
+    were doing — who forwards to whom, Auto, the roles, the hop limit, the 🧵 prompt sequence, and the 📖 Akọwe book
+    open in the Akọwe tab (or the one Akọwe last said was open).
+  - **Where:** one JSON file per save in AutoInjector's own data folder, `saved-states/` (on Windows
+    `%APPDATA%\autoinjector-desktop\saved-states\`). The file name is made from the name (letters, digits and dashes
+    only) plus the time; it is written to a temp file and then renamed, so a crash never leaves half a save. The
+    file's first line holds the name, time and a short summary, so the 📂 list reads only that. Up to 200 saves are
+    kept (the 201st asks you to delete some). A damaged file is listed as damaged and can be deleted; it never stops
+    the list. Saves are never sent anywhere.
+  - **Loading:** all three panes are sent to their saved chats at the same time. Only `https` addresses on
+    chatgpt.com / chat.openai.com (ChatGPT), claude.ai (Claude) and gemini.google.com (Gemini) are opened — anything
+    else in a save file (it may have been edited) is refused and that pane stays where it is. After each page loads,
+    AutoInjector looks where it really landed: a 404 or a "conversation not found" page means **gone**, a jump to a
+    sign-in page means **signed out**, and a jump to another page (the site's new chat) means **moved**. Each is said
+    in plain words and the saved replies are shown read-only instead. Then the set-up is put back, and the 🧵 steps
+    wait in the Sequence editor (nothing is sent by itself).
+  - **Busy:** while a book is written, Akọwe waits for an answer, a picture / video is made, a file is downloading,
+    a prompt sequence or a House Rule is running, 📂 Load asks first ("Load it anyway?").
+  - **🎩 Alfred** has `saves.list`, `saves.save`, `saves.load`, `saves.rename` and `saves.delete` (app actions in
+    `alfred-app-actions.js`); loading shows his "I will…" card, and when something is busy he is told so and only
+    loads anyway after you say so.
+  - The log gets codes and counts only (`savestate-save`, `savestate-load` with each pane's result word) — never a
+    name, an address or chat text.
 
 ### 🔗 The bridge (how Akọwe asks an AI)
 
@@ -1017,6 +1045,7 @@ In the code map the story map is `N00` (running notes, section 0); each connecti
 | Your books | `Documents\Akowe Books\` in your real Documents folder, also when Windows moved it to OneDrive (change it in Akọwe → Settings → 📁 Where books are saved; a folder OneDrive, Dropbox or Google Drive syncs gets a ⚠️ and a button for a folder they do not sync) |
 | Akọwe's working data and backups | `%LOCALAPPDATA%\Akowe` (backups share unchanged pictures and clips instead of copying them again; its own log is `logs\akowe.log`, 10 MB × 5 files; each story checkpoint and chapter check is saved on its own, so a long book never rewrites one big record) |
 | AutoInjector settings, transcript, connection key | `%APPDATA%\autoinjector-desktop\` (older messages: `autoinjector-transcript-archive.jsonl`, then `.1`) |
+| 💾 Saved states (one JSON file each, up to 200) | `%APPDATA%\autoinjector-desktop\saved-states\` |
 
 **Files the AIs give you.** When ChatGPT, Claude or Gemini offers a file to download in its pane and you click it,
 there is no Save window: AutoInjector saves it straight into that AI's folder, `stuff and thing/ai-work/<the AI>/`,

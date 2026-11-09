@@ -6122,6 +6122,210 @@ ipcMain.handle("sites:new-chat-all", () => {
   return { ok: true, results };
 });
 
+// ==== 💾 SAVE STATE / 📂 LOAD STATE (save-state.js) ====
+// A save = the chat each pane is on (its address), a backup of each chat's recent replies, the set-up (Active AIs,
+// the Compose box, the open tab, pane sizes, folded panels, window size, zoom), the relay set-up, the 🧵 sequence and
+// the 📖 Akọwe book that was open. One JSON per save in userData/saved-states (never sent anywhere). Loading opens
+// all three saved chats at once — only addresses on the real AI sites (save-state.js isAllowedChatUrl) — and says in
+// plain words when a chat is gone (the saved copy is shown instead). The log gets codes and counts only.
+const saveStateMod = require("./save-state");
+let _saveStore = null;
+function saveStore() {
+  if (!_saveStore) _saveStore = saveStateMod.createStore({ dir: path.join(userDataDir(), "saved-states"), onError: (e) => logEvent("savestate-io", { code: (e && e.code) || "ERR", severity: "warn" }) });
+  return _saveStore;
+}
+let sequenceDraft = null; // the 🧵 steps a loaded save put back (the editor fills itself with them when it opens)
+const SAVESTATE_LOAD_MS = Number(process.env.AUTOINJECTOR_SAVESTATE_LOAD_MS) || 30000;
+const SAVESTATE_SETTLE_MS = Number(process.env.AUTOINJECTOR_SAVESTATE_SETTLE_MS) >= 0 && process.env.AUTOINJECTOR_SAVESTATE_SETTLE_MS !== undefined ? Number(process.env.AUTOINJECTOR_SAVESTATE_SETTLE_MS) : 2500;
+async function controlsEval(js) {
+  try { if (!controlsView || controlsView.webContents.isDestroyed()) return null; return await controlsView.webContents.executeJavaScript(js, true); } catch (_) { return null; }
+}
+function akoweOpenHash() {
+  try {
+    const u = akoweView && !akoweView.webContents.isDestroyed() ? akoweView.webContents.getURL() : "";
+    const h = u ? new URL(u).hash : "";
+    return /^#\/p\//.test(h) && !/token=/i.test(h) ? h : "";
+  } catch (_) { return ""; }
+}
+async function buildSaveData() {
+  const ui = await controlsEval("window.saveStateUi && typeof window.saveStateUi.snapshot === 'function' ? window.saveStateUi.snapshot() : null");
+  const panes = {};
+  for (const site of SITE_IDS) {
+    const view = siteViews[site];
+    if (!view || view.webContents.isDestroyed()) continue;
+    panes[site] = { url: view.webContents.getURL() || "", title: view.webContents.getTitle() || "", zoom: paneZoom[site] || null };
+  }
+  let winBox = null;
+  try { if (win && !win.isDestroyed()) { const b = win.getBounds(); winBox = { width: b.width, height: b.height, maximized: !!(win.isMaximized && win.isMaximized()) }; } } catch (_) {}
+  let akowe = null;
+  try {
+    const hash = akoweOpenHash();
+    const pushed = akoweCarry.akowe && akoweCarry.akowe.project;
+    const fromHash = /^#\/p\/([^/?&#]+)/.exec(hash);
+    if (hash || (pushed && pushed.id)) akowe = { project_id: fromHash ? decodeURIComponent(fromHash[1]) : String(pushed.id), title: pushed && (!fromHash || String(pushed.id) === decodeURIComponent(fromHash[1])) ? String(pushed.title || "") : "", hash };
+  } catch (_) {}
+  const seq = state.sequence || {};
+  const seqSteps = seq.steps && seq.steps.length ? seq.steps : (sequenceDraft || []);
+  return {
+    panes,
+    backup: saveStateMod.backupOf(state.transcript),
+    setup: { enabled: { ...state.enabled }, ui: ui || {}, window: winBox },
+    relay: { routing: routingSnapshot(), meshActive: !!state.meshActive, relayEnabled: state.relayEnabled !== false, roles: { ...state.customRole }, hopLimit: (() => { try { return autoHops.status().max; } catch (_) { return null; } })() },
+    sequence: { steps: seqSteps, at: seq.active ? seq.index : 0, wasRunning: !!seq.active },
+    akowe,
+  };
+}
+function saveStateBusy() {
+  const extra = [];
+  if (state.sequence && state.sequence.active) extra.push("a prompt sequence is running");
+  if (state.hr && state.hr.active) extra.push("a House Rule is running");
+  return saveStateMod.busyQuestion(runActivityNow(), extra);
+}
+// Open `url` in `site`'s pane and see where it really lands (HTTP code, redirects, "not found" pages).
+function openSavedChat(site, url) {
+  return new Promise((resolve) => {
+    const view = siteViews[site];
+    if (!view || view.webContents.isDestroyed()) { resolve({ loadError: "the pane is not open" }); return; }
+    const wc = view.webContents;
+    let httpCode = 0; let loadError = null; let done = false;
+    const onNav = (_e, _u, code) => { if (code) httpCode = code; };
+    const onFail = (_e, code, desc, _u, isMain) => { if (isMain !== false && code !== -3) loadError = desc || `error ${code}`; };
+    const off = () => { try { wc.removeListener("did-navigate", onNav); wc.removeListener("did-fail-load", onFail); } catch (_) {} };
+    try { wc.on("did-navigate", onNav); wc.on("did-fail-load", onFail); } catch (_) {}
+    const finish = async () => {
+      if (done) return; done = true;
+      await new Promise((r) => setTimeout(r, SAVESTATE_SETTLE_MS)); // a site's own redirect (to a new chat / sign-in) comes a moment later
+      off();
+      let pageSaysGone = false;
+      if (!loadError) {
+        const re = saveStateMod.GONE_TEXT.source;
+        try { pageSaysGone = (await wc.executeJavaScript(`(() => { try { const t = (document.title || "") + "\\n" + ((document.body && document.body.innerText) || "").slice(0, 3000); return new RegExp(${JSON.stringify(re)}, "i").test(t); } catch (_) { return false; } })()`, true)) === true; } catch (_) { pageSaysGone = false; }
+      }
+      let finalUrl = "";
+      try { finalUrl = wc.getURL(); } catch (_) {}
+      resolve({ finalUrl, httpCode, loadError, pageSaysGone });
+    };
+    const timer = setTimeout(() => { if (!done) { loadError = loadError || "it took too long"; finish(); } }, SAVESTATE_LOAD_MS);
+    try {
+      state.pending[site] = { text: "", sinceTs: Date.now(), reprompted: false };
+      state.captured[site] = null;
+      state.noTagReprompts[site] = 0;
+      try { freshChat.reset(site); } catch (_) {}
+      Promise.resolve(wc.loadURL(url)).then(() => { clearTimeout(timer); finish(); }, (e) => { if (!loadError && !/ERR_ABORTED/.test(String(e && e.message))) loadError = String((e && e.code) || (e && e.message) || e).slice(0, 80); clearTimeout(timer); finish(); });
+    } catch (e) { loadError = String(e).slice(0, 80); clearTimeout(timer); finish(); }
+  });
+}
+function applyWindowBox(box) {
+  if (!box || !win || win.isDestroyed()) return;
+  try {
+    if (box.maximized) { if (!win.isMaximized()) win.maximize(); return; }
+    if (win.isMaximized && win.isMaximized()) win.unmaximize();
+    let area = null;
+    try { const { screen } = require("electron"); area = screen && screen.getDisplayMatching ? screen.getDisplayMatching(win.getBounds()).workArea : null; } catch (_) {}
+    const w = area ? Math.min(box.width, area.width) : box.width;
+    const h = area ? Math.min(box.height, area.height) : box.height;
+    const b = win.getBounds();
+    win.setBounds({ x: b.x, y: b.y, width: w, height: h });
+  } catch (_) {}
+}
+async function loadSavedState({ id, name, anyway } = {}) {
+  const store = saveStore();
+  const f = store.find(id || name);
+  if (!f.ok) return Object.assign({ ok: false }, f, { message: saveStateMod.sayError(f) });
+  const rec = store.read(f.save.id);
+  if (!rec.ok) { logEvent("savestate-load", { ok: false, error: rec.error }); return Object.assign({ ok: false }, rec, { message: saveStateMod.sayError(rec) }); }
+  const busy = saveStateBusy();
+  if (busy && !anyway) return { ok: false, error: "BUSY", why: busy.why, message: busy.message, id: rec.id, name: rec.name };
+  const testBases = {};
+  for (const site of SITE_IDS) { const t = siteUrlOverride(site); if (t) testBases[site] = t; }
+  const plan = saveStateMod.planLoad(rec.data, { testBases });
+  const d = plan.data;
+  // the set-up first (so the panes that come back are the ones that were on)
+  for (const site of SITE_IDS) if (typeof d.setup.enabled[site] === "boolean") state.enabled[site] = d.setup.enabled[site];
+  for (const site of SITE_IDS) state.routing[site] = new Set(state.enabled[site] ? d.relay.routing[site].filter((t) => state.enabled[t]) : []);
+  state.meshActive = !!d.relay.meshActive;
+  state.relayEnabled = d.relay.relayEnabled !== false;
+  for (const site of SITE_IDS) state.customRole[site] = typeof d.relay.roles[site] === "string" ? d.relay.roles[site] : "";
+  if (d.relay.hopLimit != null) { try { autoHops.setMax(d.relay.hopLimit); } catch (_) {} }
+  for (const site of SITE_IDS) { const z = d.panes[site] && d.panes[site].zoom; if (z) { paneZoom[site] = z; try { siteViews[site] && siteViews[site].webContents.setZoomFactor(z); } catch (_) {} } }
+  sequenceDraft = d.sequence.steps.length ? d.sequence.steps : null;
+  // the 🧵 editor already open (and not running): show it the saved steps now
+  if (sequenceDraft && !state.sequence.active) { try { if (sequenceView && !sequenceView.webContents.isDestroyed()) sequenceView.webContents.reload(); } catch (_) {} }
+  applyWindowBox(d.setup.window);
+  // 📖 the book that was open (in the Akọwe tab, when it is our Akọwe and it is running)
+  let book = null;
+  if (d.akowe) {
+    book = { title: d.akowe.title || d.akowe.project_id || "", shown: false };
+    try {
+      const base = akoweServerBase();
+      if (base && d.akowe.hash && akoweView && !akoweView.webContents.isDestroyed() && akoweViewLink) {
+        const target = new URL(base.replace(/\/$/, "") + "/" + d.akowe.hash);
+        if (akoweSameServer(target.href)) { akoweView.webContents.loadURL(target.href); book.shown = true; }
+      }
+    } catch (_) {}
+  }
+  // the three chats, all at once
+  const results = {};
+  const opens = Object.entries(plan.open).map(async ([site, url]) => {
+    const r = await openSavedChat(site, url);
+    const j = saveStateMod.judgeLanding({ site, wanted: url, finalUrl: r.finalUrl, httpCode: r.httpCode, pageSaysGone: r.pageSaysGone, loadError: r.loadError });
+    results[site] = { state: j.state, say: j.say, turns: (d.backup[site] || []).length };
+  });
+  for (const [site, x] of Object.entries(plan.refused)) results[site] = { state: "refused", say: x.say, turns: (d.backup[site] || []).length };
+  for (const site of plan.none) results[site] = { state: "none", say: `${siteLabel(site)}: no chat was saved for this pane — left as it is.`, turns: (d.backup[site] || []).length };
+  await Promise.all(opens);
+  syncPaneBounds().catch(() => {});
+  const problems = Object.entries(results).filter(([, x]) => !["ok", "none"].includes(x.state)).map(([s]) => s);
+  const out = {
+    ok: true, id: rec.id, name: rec.name, savedAt: rec.savedAt, results, problems, book,
+    sequenceSteps: d.sequence.steps.length,
+    message: `Loaded “${rec.name}”.${problems.length ? ` ${problems.map((s) => results[s].say).join(" ")}` : " All saved chats are back."}${sequenceDraft ? ` Your prompt sequence (${sequenceDraft.length} step${sequenceDraft.length === 1 ? "" : "s"}) is back in 🧵 Sequence — press Run there when you are ready.` : ""}`,
+  };
+  // the window's own bits (Compose box, tab, pane sizes …) and the result card with the saved copies
+  await controlsEval(`window.saveStateUi && window.saveStateUi.apply(${JSON.stringify({ ui: d.setup.ui, global: globalSnapshot(), result: out })})`);
+  logEvent("savestate-load", { ok: true, states: Object.fromEntries(Object.entries(results).map(([s, x]) => [s, x.state])), anyway: !!anyway, book: !!book, steps: d.sequence.steps.length });
+  return out;
+}
+ipcMain.handle("savestate:list", () => {
+  try { const saves = saveStore().list(); return { ok: true, saves, count: saves.length, max: saveStore().max }; } catch (e) { return { ok: false, error: "LIST_FAILED", message: "The saves could not be read." }; }
+});
+ipcMain.handle("savestate:save", async (_evt, { name, replace } = {}) => {
+  try {
+    const data = await buildSaveData();
+    const r = saveStore().save(name, data, { replace: replace === true });
+    logEvent("savestate-save", { ok: !!r.ok, error: r.ok ? undefined : r.error, replaced: r.ok ? !!r.replaced : undefined, chats: Object.values(data.panes).filter((p) => p && p.url).length, turns: Object.values(data.backup).reduce((n, l) => n + l.length, 0) });
+    return r.ok ? Object.assign(r, { message: `Saved as “${r.name}”${r.replaced ? " (the old one with that name was replaced)" : ""}.` }) : Object.assign(r, { message: saveStateMod.sayError(r) });
+  } catch (e) { logEvent("savestate-save", { ok: false, error: "EXCEPTION" }); return { ok: false, error: "SAVE_FAILED", message: "The save could not be made." }; }
+});
+ipcMain.handle("savestate:load", async (_evt, { id, name, anyway } = {}) => {
+  try { return await loadSavedState({ id, name, anyway: anyway === true }); } catch (e) { logEvent("savestate-load", { ok: false, error: "EXCEPTION" }); return { ok: false, error: "LOAD_FAILED", message: "The save could not be loaded." }; }
+});
+ipcMain.handle("savestate:rename", (_evt, { id, name } = {}) => {
+  const f = saveStore().find(id);
+  if (!f.ok) return Object.assign({ ok: false }, f, { message: saveStateMod.sayError(f) });
+  const r = saveStore().rename(f.save.id, name);
+  logEvent("savestate-rename", { ok: !!r.ok, error: r.ok ? undefined : r.error });
+  return r.ok ? Object.assign(r, { message: `Renamed to “${r.name}”.` }) : Object.assign(r, { message: saveStateMod.sayError(r) });
+});
+ipcMain.handle("savestate:delete", (_evt, { id, name } = {}) => {
+  const f = saveStore().find(id || name);
+  if (!f.ok) return Object.assign({ ok: false }, f, { message: saveStateMod.sayError(f) });
+  const r = saveStore().remove(f.save.id);
+  logEvent("savestate-delete", { ok: !!r.ok, error: r.ok ? undefined : r.error });
+  return r.ok ? { ok: true, id: f.save.id, name: f.save.name, message: `Deleted “${f.save.name}”.` } : Object.assign(r, { message: saveStateMod.sayError(r) });
+});
+// The read-only viewer: one save's backup text (what each chat said), for the person at the screen.
+ipcMain.handle("savestate:view", (_evt, { id } = {}) => {
+  const r = saveStore().read(String(id || ""));
+  if (!r.ok) return Object.assign(r, { message: saveStateMod.sayError(r) });
+  const panes = {};
+  for (const site of SITE_IDS) panes[site] = { url: (r.data.panes[site] && r.data.panes[site].url) || "", title: (r.data.panes[site] && r.data.panes[site].title) || "" };
+  return { ok: true, id: r.id, name: r.name, savedAt: r.savedAt, backup: r.data.backup, panes };
+});
+// The 🧵 editor asks for the steps a loaded save put back (once: they are handed over, then forgotten).
+ipcMain.handle("sequence:draft", () => { const steps = sequenceDraft; sequenceDraft = null; return { ok: true, steps: steps || [] }; });
+// ==== end 💾 SAVE STATE ====
+
 ipcMain.handle("site:list", () => {
   const out = {};
   for (const site of SITE_IDS) {

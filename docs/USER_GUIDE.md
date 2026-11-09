@@ -62,6 +62,27 @@ its own short tour too (Akọwe → ❓ Help → 🧭 Take the tour).
 - **"Akọwe is using this AI":** while Akọwe waits for an answer, that AI's card shows a yellow note. Don't type in that
   AI's window until it is done; use another AI meanwhile.
 
+### 💾 Save state / 📂 Load state — come back to where you were
+
+- **💾 Save state** (top bar): type a name, for example *Salt Keeper ch 12*, and press **💾 Save**. AutoInjector
+  remembers the chat each AI is on (ChatGPT, Claude and Gemini), a copy of their recent replies, what is in the
+  Compose box, which AIs are **Active** (and whether 🎩 Alfred is in **→ All**), the open tab, how big each pane is,
+  the folded panels, the window size, who forwards to whom, the AIs' roles, your 🧵 prompt sequence and the 📖 book
+  that was open. Saving again with the same name asks before it replaces the old one.
+- **📂 Load state** shows your saves with their name, date and time. **📂 Load** sends all three AIs back to their
+  saved chats at once, so you can keep talking where you stopped, and puts everything else back. A loaded 🧵
+  sequence waits in **🧵 Sequence** — nothing is sent until you press Run there.
+- **If a chat is gone** (deleted on the site, the site opened a new chat instead, or you are signed out), the result
+  says so in plain words and shows **the saved copy** of that chat's replies to read (you cannot change it).
+  **📜 Saved text** shows a save's copy any time.
+- **✎ Rename** and **🗑 Delete** are on each save. AutoInjector keeps up to 200 saves.
+- If a book is being written, or a picture or video is being made, **📂 Load** asks first ("Load it anyway?"),
+  because moving the AIs to other chats could spoil that work.
+- You can also ask 🎩 Alfred: "save this as Salt Keeper ch 12", "load Salt Keeper ch 12". Before he loads one he
+  shows an "I will…" card.
+- Saves stay on your PC (`%APPDATA%\autoinjector-desktop\saved-states\`, one file each). Nothing is sent anywhere.
+  A save only ever opens chats on chatgpt.com, chat.openai.com, claude.ai and gemini.google.com.
+
 ## 3. Making a book (📖 Akọwe)
 
 Open the **📖 Akọwe** tab. Akọwe's pages show inside AutoInjector. If the page looks stuck, press **↻ Reload** above
@@ -256,6 +277,8 @@ AIs' downloads folder**, open the folder any time. A download that breaks off is
   of the ChatGPT / Claude / Gemini panes. Choose it with **⚙** in his panel. The first time, **⚡ Set up** installs
   Ollama and a model that fits your PC (or uses what you already have).
 - **🩺 Check everything** checks his AI and the whole app and shows what to fix.
+- **Saved states:** "save this as …", "load …", "what saves do I have?", "rename …", "delete …" (see 💾 Save state
+  in section 2).
 
 ## 11. 🤖 Claude Code helpers (optional — makes books faster)
 
@@ -299,6 +322,7 @@ Without it nothing breaks: every job goes to the web AIs, exactly as before. The
 | Your books (one folder each) | `Documents\Akowe Books\` (change it in Akọwe → ⚙️ Settings → 📁 Where books are saved) |
 | Akọwe's working data and backups | `%LOCALAPPDATA%\Akowe` |
 | AutoInjector's settings and sign-ins | `%APPDATA%\autoinjector-desktop\` |
+| Your 💾 saved states (one file each) | `%APPDATA%\autoinjector-desktop\saved-states\` |
 
 Inside one book's folder: `Book/` (PDF, EPUB, Word), `Chapters/`, `Book Bible/`, `Reports/`, `Log/`, `Cover/`,
 `Pictures/`, `Trailer/`, `Launch kit/` and **`book.akowe`** — the whole book in one file, for opening it again, even on

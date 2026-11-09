@@ -110,6 +110,7 @@ const IPC_INVENTORY = [
   'sdlib:save-lock', 'sdlib:scan', 'sdlib:update', 'selector:clear', 'selector:pick',
   'attention:settings', 'attention:test', 'akowe:fresh-chat-settings', // PR #123
   'downloads:list', 'downloads:open', // ⬇ files the AIs give you to download (ai-downloads.js)
+  'savestate:list', 'savestate:save', 'savestate:load', 'savestate:rename', 'savestate:delete', 'savestate:view', 'sequence:draft', // 💾 / 📂 saved states (save-state.js)
   'selfrepair:forget-learned', 'selfrepair:probe', 'selfrepair:reload', 'selfrepair:settings', 'selfrepair:status', 'selfrepair:teach-cancel', 'selfrepair:teach-start',
   'selftest:run', 'send:compose', 'send:forward', 'send:regenerate', 'sequence-editor:close', 'sequence:open', 'sequence:run', 'sequence:stop',
   'setup:auto', 'setup:detect', 'setup:install', 'setup:list', 'site:inspect', 'site:list', 'site:reload', 'site:zoom', 'sites:new-chat-all', 'state:get',
