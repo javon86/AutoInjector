@@ -369,4 +369,18 @@ def estimate(app, body: dict | None) -> dict:
         "about": base["about"] + (" Per AI: from your earlier runs." if cal["shares"] else "") +
         " Usage limits: rough guesses (the AI sites do not publish them), or what this computer saw before.",
     })
+    out.update(pen_name_check(app, body))
     return out
+
+
+def pen_name_check(app, body: dict) -> dict:
+    """✒️ The plan check of the pen name: which one the new book gets (typed here, else the saved one, else none) and
+    a ⚠️ when it is also a character's name in another book on the shelf (or the book this run is a variant of)."""
+    from . import pen_name  # noqa: PLC0415
+    try:
+        name, how = pen_name.for_new_book(app.store, body.get("pen_name"))
+        warn = pen_name.warning(app.store, None, name) if name else None
+    except Exception:  # noqa: BLE001 - a plan hint never breaks the estimate
+        return {"pen_name": {"name": "", "from": ""}, "warnings": []}
+    return {"pen_name": {"name": name, "from": how, "saved": pen_name.saved(app.store)},
+            "warnings": [warn] if warn else []}

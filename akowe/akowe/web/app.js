@@ -5301,7 +5301,7 @@ const LENGTH_TIP = () => [h('p', null, 'The length sets how many chapters the ou
   h('p', null, 'Long chapters (more than about 2,500 words — a novel’s) are written scene by scene, one AI answer per scene, so web AIs never hit their reply limit. A chapter that comes back far too short is continued once within its scene plan — never padded: the editor still checks it.'),
   h('p', null, 'A novel takes many AI answers (about 25 chapters × scenes, reviews and the editor): the run window shows how long it will still take.')];
 const PROFILE_HELP = {
-  title: 'The working title. You can change it any time.', author: 'Your name or pen name, printed on the title page.',
+  title: 'The working title. You can change it any time.', author: 'Your name or pen name, printed on the title page. Akọwe never makes one up: a new book gets the pen name you typed last.',
   genre: 'What kind of story it is — it guides the AI’s choices.', audience: 'Who will read it; the AI matches the words and themes to them.',
   length: 'How long the book should be; it sets how many chapters are planned.', tone: 'How it should feel to read.', language: 'The language the book is written in, as a short code: en (English), yo (Yorùbá), pl (Polish), el (Greek)… Empty = English. The PDF, EPUB and Word files say it.',
   idea: 'Your story in a few sentences: who, where, and what goes wrong. Everything is built to fit this.',
@@ -5360,7 +5360,7 @@ async function openProfileDialog(onSaved) {
       try {
         const saved = await api('PUT', `/projects/${encodeURIComponent(S.pid)}/profile`, { body });
         S.project.profile = saved;
-        toast('Book profile saved'); close();
+        toast(saved && saved.pen_name_warning ? `Book profile saved. ${saved.pen_name_warning}` : 'Book profile saved'); close();
         if (onSaved) onSaved(saved); else route();
       } catch (e) {
         clearFieldProblems(pf.el);
@@ -8254,6 +8254,8 @@ async function renderMakeSetup() {
   const err = h('div', { 'aria-live': 'polite' });
   const genre = h('input', { type: 'text', id: 'mb-genre', list: 'mb-genres', maxlength: '120', placeholder: 'Let the AI choose', autocomplete: 'off' });
   const idea = h('textarea', { id: 'mb-idea', rows: '3', maxlength: '2000', placeholder: 'Let the AI choose (or write one sentence: who, where, what goes wrong)' });
+  // ✒️ the pen name is only ever the author's own (pen_name.py): empty = the saved one (shown by the plan check), else none
+  const penName = h('input', { type: 'text', id: 'mb-pen-name', maxlength: '200', autocomplete: 'off', 'data-testid': 'mb-pen-name', placeholder: 'Your saved pen name, or none' });
   const lengths = Object.entries(LENGTH_INFO).map(([k, [l, dsc]]) => {
     const id = `mb-len-${k}`;
     return h('div', { class: 'check-row wz-opt' }, h('input', { type: 'radio', name: 'mb-len', id, value: k, checked: k === 'short_story' }),
@@ -8306,7 +8308,8 @@ async function renderMakeSetup() {
         h('div', { class: 'field' }, h('label', { for: 'mb-genre' }, 'Genre'), genre, h('datalist', { id: 'mb-genres' }, GENRES.map(g => h('option', { value: g }))), h('span', { class: 'hint' }, 'Empty = the AI chooses.')),
         h('div', { class: 'field' }, h('label', { for: 'mb-slot' }, 'Which AI'), slot, h('span', { class: 'hint' }, 'Automatic uses whichever AI is ready.'))),
       lengthBox,
-      h('div', { class: 'field' }, h('label', { for: 'mb-idea' }, 'Your idea (optional)'), idea, ideaWarn, locksBox), cf.el, pipe.el, s7.el, fb.el, hp.el, wr.el, ck.el, pics.el, ccf.el),
+      h('div', { class: 'field' }, h('label', { for: 'mb-idea' }, 'Your idea (optional)'), idea, ideaWarn, locksBox),
+      h('div', { class: 'field' }, h('label', { for: 'mb-pen-name' }, 'Pen name (optional)'), penName, h('span', { class: 'hint' }, 'Printed on the title page and cover. The AI never invents one: empty = the pen name you typed last, or none.')), cf.el, pipe.el, s7.el, fb.el, hp.el, wr.el, ck.el, pics.el, ccf.el),
     later.el, err, h('div', { class: 'form-actions' }, startAll, startSet));
   form.insertBefore(h('div', { class: 'row mb-paste-row' }, paste, h('span', { class: 'small muted' }, 'Planned your book with an AI? Paste its starter sheet to fill these settings.')), form.querySelector('.mb-quick'));
   // ⏱ 3d: time, AI answers per AI and usage limits for exactly these settings; 📊 3e the usage meter per AI
@@ -8332,6 +8335,7 @@ async function renderMakeSetup() {
       const pl = pipe.get(); if (pl) body.pipeline = pl;
       if (locks.length) body.locks = locks.slice();  // 📋 6c the starter sheet's lock list
     }
+    if (penName.value.trim()) body.pen_name = penName.value.trim();  // ✒️ also for "let the AI choose everything"
     s7.apply(body);  // P23 / P25 (Section 7c): beta reader and "write in my style"
     fb.apply(body);  // 📖 the whole Book Bible before chapter one (only when switched on)
     hp.apply(body);  // ✍ the end-of-book pass (sent only when switched off)
@@ -9181,7 +9185,7 @@ async function viewReport(main) {
     if (ov.stale) holder.appendChild(h('p', { class: 'words-warn', role: 'note', 'data-testid': 'rp-stale' }, hazard({ code: 'REPORT_STALE' }, { retry: () => run({ ai: true }), retryLabel: '📊 Make a new report' }, { small: true }), ' This report is for an earlier version of the book: a chapter changed since.'));
     for (const w of rep.warnings || []) holder.appendChild(h('p', { class: /⚠️|📖 Sampled/.test(w) ? 'words-warn' : 'small muted', role: 'note', 'data-testid': /^📖 Sampled/.test(w) ? 'rp-sampled' : null }, w));
     if (rep.book_mode === 'digest' && ov.written) {  // H17: a long book was only sampled: offer the full read in parts
-      const slots = (rep.reviews || []).filter(r => r.slot).map(r => r.slot).slice(0, 3);
+      const slots = (rep.reviews || []).filter(r => r.slot && /^AI-\d+$/.test(r.slot)).map(r => r.slot).slice(0, 3);  // never the 🤖 Claude Code stand-in
       holder.appendChild(h('div', { class: 'row' }, h('button', { type: 'button', 'data-testid': 'rp-full', title: 'Each reviewer reads every part of the book in full (one AI message per part), then Akọwe merges what they found. This takes longer and uses more AI messages.',
         onclick: ev => run(slots.length ? { slots, full: true } : { ai: true, full: true }, ev.currentTarget) }, '📖 Read the whole book')));
     }

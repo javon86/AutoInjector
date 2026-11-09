@@ -146,7 +146,7 @@ async function main() {
   console.log("\n== PR #120: Gemini's canned refusal of a ~56,000-character editor prompt -> 503 SITE_ERROR (refused), the length named ==");
   const bigPrompt = `Edit this chapter and answer as JSON (bf-refuse-1). ${"The rain fell on the old town. ".repeat(1870)}`;
   r = await ask("gemini", "bf-refuse-1-gemini-c0-a0", "I'm having a hard time fulfilling your request. Can I help you with something else instead?", bigPrompt);
-  assert(r.status === 503 && r.json.error === "SITE_ERROR" && r.json.site_error === "refused" && r.json.retry_after_s === 30 && r.json.text === undefined, `the refusal is a site problem, not the answer (${r.status} ${r.json && r.json.site_error})`);
+  assert(r.status === 503 && r.json.error === "SITE_ERROR" && r.json.site_error === "refused" && r.json.declined === true && /declined to answer/.test(r.json.message) && r.json.retry_after_s === 30 && r.json.text === undefined, `the refusal is a site problem, not the answer (${r.status} ${r.json && r.json.site_error})`);
   assert(r.json.long_prompt === true && r.json.prompt_chars === bigPrompt.length && /short refusal/.test(r.json.message) && /very long \(5\d,\d{3} characters\)/.test(r.json.message), `…and says the prompt was very long (${r.json && r.json.message})`);
   assert(await waitUntil(() => feed.some((e) => e.outcome === "SITE_ERROR" && /short refusal/.test(e.say) && /very long/.test(e.say)), 3000), "the Akọwe activity feed names the refusal and the long prompt");
   assert(!kindLines("akowe-outcome").some((l) => l.detail.outcome === "OK" && l.detail.request_id === "bf-refuse-1-gemini-c0-a0"), "never logged as an OK answer");

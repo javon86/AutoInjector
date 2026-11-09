@@ -4,7 +4,7 @@ A Make-a-book run creates a NEW book (it never touches an existing project) and 
 with the AI, in a background thread whose state is persisted (``JobStore``, kind ``autobook``) after every change,
 so a page reload shows it and an Akọwe restart shows it as "interrupted — Resume":
 
-    safety backup -> book profile (the AI invents title, genre, audience, tone, idea, pen name)
+    safety backup -> book profile (the AI invents title, genre, audience, tone, idea; never the pen name: pen_name.py)
     -> characters and places (A01/A04/A03 through the Bible Builder: world sketch + proposals, created as drafts)
     -> character sheets and voice cards (P7/P17: made with the characters, or made now for any without)
     -> character looks and voice details (story_details.py: essentials only; the rest is decided just in time,
@@ -163,7 +163,9 @@ STEP_OPTIONAL = {"beta": "beta_reader", "bible": "fill_bible"}
 
 PROFILE_SCHEMA = {
     "type": "object", "additionalProperties": False,
-    "required": ["title", "author", "genre", "audience", "tone", "idea"],
+    # ✒️ no pen name: the author's pen name is only ever what they typed (pen_name.py). "author" stays an allowed
+    # (ignored) property so an AI that still sends one is not refused for it.
+    "required": ["title", "genre", "audience", "tone", "idea"],
     "properties": {"title": {"type": "string"}, "author": {"type": "string"}, "genre": {"type": "string"},
                    "audience": {"type": "string"}, "tone": {"type": "string"}, "idea": {"type": "string"},
                    # H10: optional — when the AI leaves them out, Akọwe chooses from the genre (book_promises.decide)
@@ -173,10 +175,11 @@ PROFILE_SCHEMA = {
 PROFILE_TASK = (
     "Task: invent an ORIGINAL book for the author to make with Akọwe. Use the author's wishes in "
     "context.wishes when given (genre, length, an idea) and choose everything else yourself. Return: title (a short, "
-    "evocative working title), author (an invented pen name), genre, audience (who it is for, e.g. Adult, Young adult "
+    "evocative working title), genre, audience (who it is for, e.g. Adult, Young adult "
     "(12-18), Middle grade (8-12)), tone (a few words), idea (one paragraph of 3-5 sentences: who the main character "
     "is, where it happens, what goes wrong and what is at stake), point_of_view (first or third person) and tense "
-    "(past or present) that suit the genre. No real people, no existing franchises. Return only the JSON object.")
+    "(past or present) that suit the genre. No real people, no existing franchises. Do not choose an author name or "
+    "pen name (the author's own name goes there). Return only the JSON object.")
 
 TIMEOUT_FIX = ("The AI did not answer in time. Akọwe already waited for a late answer and asked another AI (or the "
                "same one again), so it stopped here instead of guessing. What to do: open AutoInjector and look at "
@@ -185,6 +188,9 @@ TIMEOUT_FIX = ("The AI did not answer in time. Akọwe already waited for a late
 BUSY_FIX = ("The AIs stayed busy or could not be reached for a long time. What to do: make sure AutoInjector (the "
             "program with the AI windows) is open; look at each AI's window (logged in? a usage-limit message?); "
             "Settings → 🧪 Test connection shows which AI works. Then press 🔁 Try again.")
+DECLINED_FIX = ("The AI declined to answer (it said it can't help with that) — story material such as a death or a "
+                "crime sometimes trips an AI's safety filter by mistake. Akọwe already asked again and tried the other "
+                "AIs. What to do: press 🔁 Try again, or pick another AI for the book in the run's settings.")
 CHECKS_FIX = ("Press 🔁 Try again: the AI writes it again and is told exactly what Akọwe refused. Or ✏️ Edit it "
               "yourself so the checks pass, then press Continue.")
 STALE_FIX = ("It was made from a plan or other inputs that changed since, so it is out of date: editing it cannot fix "
@@ -1120,6 +1126,11 @@ class AutoBookService(_Runner):
                 out["length"] = src["length"]
             if not body.get("choices") and isinstance(src.get("choices"), dict):
                 out["choices"] = story_choices.clean(src["choices"])
+        pn = body.get("pen_name")  # ✒️ the author's own pen name for this book (empty: the saved one, else none)
+        if pn not in (None, ""):
+            if not isinstance(pn, str) or len(pn.strip()) > 200:
+                raise AkoweError("INVALID_INPUT", "/pen_name", "pen name: up to 200 characters", status="REJECTED")
+            out["pen_name"] = " ".join(pn.split())
         from . import starter_sheet  # noqa: PLC0415 - 📋 6c: the starter sheet's lock list
         locks = starter_sheet.clean_locks(body.get("locks"))
         if locks:
@@ -1324,7 +1335,8 @@ class AutoBookService(_Runner):
         except AkoweError as exc:
             e = exc.errors[0] if exc.errors else {}
             code = exc.code
-            fix = TIMEOUT_FIX if code == "TIMEOUT" else BUSY_FIX if code in BUSY_CODES else (
+            fix = TIMEOUT_FIX if code == "TIMEOUT" else DECLINED_FIX if code == "AI_DECLINED" else \
+                BUSY_FIX if code in BUSY_CODES else (
                 "Press 🔁 Try again. If it keeps failing, use 📋 Copy diagnostics.")
             self._pause_problem(run, {"code": code, "message": e.get("message") or code, "fix": fix,
                                       "path": e.get("path") or ""})
@@ -2367,6 +2379,7 @@ class AutoBookService(_Runner):
                      if src.get(k)}
             if not copy_.get("title"):
                 copy_["title"] = "Untitled book"
+            copy_["author"] = self._pen_name(run, pid, s, carried=copy_.get("author"))
             pre = (s.get("pipeline") or {}).get("preset") or "full"
             with self.store.transaction():
                 save_profile(self.store, pid, copy_)
@@ -2380,6 +2393,7 @@ class AutoBookService(_Runner):
             bp_.pop("ai_slot", None)
             bp_["title"] = str(bp_.get("title") or s["bible"].get("title") or "Untitled book")[:200]
             bp_["idea"] = str(bp_.get("idea") or bp_["title"])[:4000]
+            bp_["author"] = self._pen_name(run, pid, s, carried=bp_.get("author"))
             if b.get("choices"):
                 bp_["choices"] = b["choices"]
             with self.store.transaction():
@@ -2431,11 +2445,13 @@ class AutoBookService(_Runner):
         except AkoweError as exc:
             self._ai_problem(exc, "inventing the book")
         raw = raw if isinstance(raw, dict) else {}
-        prof = {k: str(raw.get(k) or "").strip() for k in ("title", "author", "genre", "audience", "tone", "idea")}
+        prof = {k: str(raw.get(k) or "").strip() for k in ("title", "genre", "audience", "tone", "idea")}
         if s.get("genre"):
             prof["genre"] = s["genre"]
         prof["title"] = prof["title"][:200] or "Untitled book"
-        prof["author"] = prof["author"][:200] or "Akowe author"  # plain ASCII: the book fonts are WinAnsi
+        # ✒️ the pen name is never the AI's: what the author typed (this run, or the book profile), else their saved
+        # pen name, else empty (pen_name.py). An AI's "author" in its answer is ignored.
+        prof["author"] = self._pen_name(run, pid, s)
         prof["idea"] = (prof["idea"] or s.get("idea") or prof["title"])[:4000]
         for k, n in (("genre", 120), ("audience", 120), ("tone", 200)):
             prof[k] = prof[k][:n]
@@ -2449,7 +2465,8 @@ class AutoBookService(_Runner):
             save_profile(self.store, pid, prof)
             self._name_book(pid, prof["title"])
         run["title"] = prof["title"]
-        st["message"] = f"“{prof['title']}” by {prof['author']} ({prof['genre'] or 'any genre'}; told in the " \
+        st["message"] = f"“{prof['title']}”" + (f" by {prof['author']}" if prof["author"] else "") \
+            + f" ({prof['genre'] or 'any genre'}; told in the " \
                         f"{book_promises.POV_WORDS[dec['pov']]}, {dec['tense']} tense)"
         self.event(run, "ai", f"The AI invented the book “{prof['title']}”", slot=job.slot)
         self._auto_voice(run, pid, raw.get("narrator_voice"))
@@ -2522,6 +2539,25 @@ class AutoBookService(_Runner):
             self.event(run, "note", f"📚 The AI proposed what changed for {who} in this book. "
                        "Open the 📖 Book Bible → 📚 Series to read and ✔ approve them (nothing is used before you do)",
                        code="SERIES_CHANGES_PROPOSED")
+
+    def _pen_name(self, run, pid: str, s: dict, carried=None) -> str:
+        """✒️ The new book's pen name: typed for this run, else already in its profile (typed by the author), else
+        ``carried`` (the source book's, for a variant or a rerun from a book bible), else the author's saved pen name,
+        else ''. Never an AI's. A pen name that is also a character's name (this book or another on the shelf) gets a
+        ⚠️ note: it is kept only when the author typed it for this run, else left out."""
+        from . import pen_name  # noqa: PLC0415
+        typed = pen_name.clean(s.get("pen_name")) or pen_name.clean(get_profile(self.store, pid).get("author"))
+        name, how = pen_name.for_new_book(self.store, typed)
+        if how != "typed" and pen_name.clean(carried):
+            name, how = pen_name.clean(carried), "carried"
+        warn = pen_name.warning(self.store, pid, name) if name else None
+        if warn:
+            if how != "typed":
+                self.event(run, "note", f"{warn} Akọwe left the pen name empty for this book.", step="profile",
+                           code="PEN_NAME_IS_CHARACTER")
+                return ""
+            self.event(run, "note", warn, step="profile", code="PEN_NAME_IS_CHARACTER")
+        return name
 
     def _name_book(self, pid: str, title: str):
         with self.store.transaction() as tx:

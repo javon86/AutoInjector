@@ -52,7 +52,10 @@ export function planBox(c, getBody) {
         `Usage limits: ${e.limits.join('. ')}.${e.wait_minutes ? ` That adds about ${minutesWords(e.wait_minutes)} of waiting (included above). The run waits and goes on by itself.` : ''}`)
       : h('p', { class: 'mb-est-limits ok', 'data-testid': 'mb-est-limits' }, '✔ No AI should hit its usage limit on this run.');
     const about = h('p', { class: 'muted mb-est-about' }, `It is an estimate: fixes, retries and busy AIs make runs longer. ${e.about || ''}${e.ais_assumed ? ' (No AI is connected yet: Claude, ChatGPT and Gemini assumed.)' : ''}`);
-    clear(el).append(main, ais || '', lim, about);
+    const pn = e.pen_name || {};  // ✒️ which pen name the book gets, and a ⚠️ when it is a character's name
+    const pen = h('p', { class: 'mb-est-pen', 'data-testid': 'mb-est-pen' }, '✒️ ', pn.name ? `Pen name: ${pn.name}${pn.from === 'saved' ? ' (your saved pen name)' : ''}.` : 'No pen name: type yours above (the AI never makes one up).');
+    const warns = (e.warnings || []).map(w => h('p', { class: 'words-warn', role: 'note', 'data-testid': 'mb-est-warning' }, w));
+    clear(el).append(main, ais || '', lim, pen, ...warns, about);
   };
   const refresh = () => {
     clearTimeout(timer);

@@ -82,7 +82,7 @@ const notRefusals = [
 ];
 for (const t of notRefusals) assert(SE.siteErrorOf(t) === null, `a real answer that holds the words is not a refusal: ${JSON.stringify(t.slice(0, 50))}`);
 assert(SE.REFUSAL_MAX_CHARS === 300, 'refusals are only looked for in replies under 300 characters');
-assert(/short refusal/.test(SE.describeSiteError('Gemini', 'refused')) && !/very long/.test(SE.describeSiteError('Gemini', 'refused', 2000)), 'plain words for a refusal (a normal-length prompt is not mentioned)');
+assert(/declined to answer/.test(SE.describeSiteError('Gemini', 'refused')) && /short refusal/.test(SE.describeSiteError('Gemini', 'refused')) && !/very long/.test(SE.describeSiteError('Gemini', 'refused', 2000)), 'plain words for a refusal (a normal-length prompt is not mentioned)');
 const longNote = SE.describeSiteError('Gemini', 'refused', 56012);
 assert(/56,012 characters/.test(longNote) && /may refuse prompts that long/.test(longNote), `a refusal of a very long prompt names its length (${longNote})`);
 assert(SE.longPromptNote('Gemini', 'error', 90000) === '', 'an ordinary error notice never blames the prompt length');

@@ -780,6 +780,20 @@ class AutoInjectorAdapter:
             # usage limit) instead of an answer: a temporary problem, never a bad answer. UPSTREAM_UNAVAILABLE so the
             # call moves to another working AI, or waits and asks again (jobs.wait_and_retry) - 30 s, 60 s, 120 s.
             name = SITE_NAMES.get(site, site)
+            if body.get("site_error") == "refused" or body.get("declined") is True:
+                # a short canned refusal ("I can't help with that"): its own code, AI_DECLINED, so the reports say so
+                # plainly. The call still moves to another AI (try_other_ai), or waits and asks again (a busy code).
+                err = AkoweError("AI_DECLINED", "", f"{name} declined to answer (it said it can't help with that); "
+                                     "Akọwe asks again or uses another AI")
+                err.site_state = None
+                err.site_problem = "AI_DECLINED"
+                err.try_other_ai = True
+                err.declined = True
+                ra = body.get("retry_after_s")
+                err.retry_after_s = float(ra) if isinstance(ra, (int, float)) and not isinstance(ra, bool) \
+                    and 0 < ra <= 900 else 30.0
+                err.reset_at = None
+                return err
             limit = body.get("site_error") == "rate-limit"
             err = AkoweError("UPSTREAM_UNAVAILABLE", "", f"{name} showed "
                                  + ("a usage-limit message" if limit else "an error message")
@@ -981,9 +995,10 @@ class AutoInjectorAdapter:
             prev_id = bridge_id
             followup_ok = reply.get("followup") is True
         if refused:
-            err = AkoweError("INTERNAL_ERROR", "", f"{SITE_NAMES.get(site, site)} declined to answer this request "
+            err = AkoweError("AI_DECLINED", "", f"{SITE_NAMES.get(site, site)} declined to answer this request "
                                  f"(a refusal, no JSON) {self.MAX_REASKS + 1} times; nothing was saved")
-            err.refusal = True
+            err.refusal = err.declined = True
+            err.no_wait = True  # already asked MAX_REASKS + 1 times: another AI, never the same one again after a wait
         else:
             err = AkoweError("INTERNAL_ERROR", "", f"the {site} web session did not return JSON matching the output "
                                  f"schema after {self.MAX_REASKS + 1} tries; nothing was saved. Last errors: "

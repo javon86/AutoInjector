@@ -54,7 +54,8 @@ STEP_CAT = {"canon": "character", "characters": "character", "looks": "character
             "world": "place", "premise": "plot", "plot": "plot", "outline": "plot", "bible": "character",
             "chapters": "chapter", "planned": "chapter", "report": "chapter", "beta": "chapter", "human": "style"}
 AI_CODES = {"TIMEOUT", "UPSTREAM_UNAVAILABLE", "RATE_LIMITED", "CAPABILITY_UNAVAILABLE", "USAGE_LIMIT", "SITE_BUSY",
-            "SITE_NOT_READY", "NETWORK", "INTERNAL_ERROR", "LOGGED_OUT", "CAPTCHA", "AI_REFUSED"}
+            "SITE_NOT_READY", "NETWORK", "INTERNAL_ERROR", "LOGGED_OUT", "CAPTCHA", "AI_REFUSED",
+            "AI_DECLINED"}
 TRUST_CODES = {"NO_SECOND_AI", "NO_REASON", "LOW_CONFIDENCE"}
 # words in a problem CODE (never in the book text) -> category
 CODE_CAT = (("TIMELINE", "timeline"), ("STORY_MAP", "story_map"), ("MAP_LINK", "story_map"),

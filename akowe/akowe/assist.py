@@ -80,6 +80,7 @@ FIX = {
     "TIMEOUT": "The AI did not answer in time. Open AutoInjector and look at that AI's window (if it says the chat is "
                "too long, press the site's New chat; if it asks you to log in, do that), then press Regenerate.",
     "RATE_LIMITED": "The AI is busy with other work. Wait a moment and try again, or pick another AI.",
+    "AI_DECLINED": "The AI declined to answer (it said it can't help with that). Press Regenerate, or pick another AI.",
     "CONTEXT_TOO_LARGE": "Pick fewer context records, or choose an AI slot with a larger context limit in Settings.",
     "NOT_APPLICABLE": "This module is switched off for this branch. Turn the feature on in the feature manifest.",
     "PERMISSION_DENIED": "Open the project you have access to and try again.",
@@ -716,7 +717,7 @@ class AssistService:
                     s = next(x for x in prov.slots() if x["slot_id"] == slot["slot_id"])
                     if exc.code == "CAPABILITY_UNAVAILABLE" and s["active_jobs"] >= s["max_concurrent"]:
                         continue  # another operation grabbed the slot first: wait for it again
-                    if exc.code == "UPSTREAM_UNAVAILABLE" and not job.slot_pref and \
+                    if exc.code in ("UPSTREAM_UNAVAILABLE", "AI_DECLINED") and not job.slot_pref and \
                             self._other_ai(job, prov, op_for_roles, needed, failed + [slot["slot_id"]]):
                         failed.append(slot["slot_id"])
                         job.failovers.append({"from": slot["slot_id"], "from_name": providers_mod.slot_name(slot),

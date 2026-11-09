@@ -140,7 +140,7 @@ function describeSiteError(label, kind, promptChars) {
   const L = label || 'The AI';
   const tail = longPromptNote(label, kind, promptChars);
   if (kind === 'rate-limit') return `${L} showed a usage-limit message instead of an answer — waiting and trying again (or another AI)`;
-  if (kind === 'refused') return `${L} answered with a short refusal ("I can't help with that") instead of an answer — waiting and trying again, or another AI${tail}`;
+  if (kind === 'refused') return `${L} declined to answer — a short refusal ("I can't help with that") instead of an answer; Akọwe asks again or uses another AI${tail}`;
   if (kind === 'chat-full') return `${L} said its chat is full ("too long — start a new chat") — AutoInjector starts a fresh ${L} chat before the next request`;
   if (kind === 'too-long') return `${L} said the message was too long — another AI, or a shorter prompt${tail}`;
   return `${L} showed an error message instead of an answer — waiting and trying again`;
