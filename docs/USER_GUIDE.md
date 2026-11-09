@@ -186,13 +186,17 @@ Every chapter is checked several times before it counts as part of the book:
   wrote a draft never checks it while another AI can. If you switch off so many that too few can check, Akọwe says so,
   for example "Only ChatGPT can check right now because Gemini is switched off for checks and Claude is the writer."
 - **🧑‍⚖️ Stand-in when I don't answer** (⚙️ Settings, off until you switch it on): when a book waits for your answer on
-  an AI disagreement and you don't answer within the time you picked (10, 20, 30 or 60 minutes), a stand-in decides so
-  the book goes on — 🤖 Claude Code, or the AI that was not part of the disagreement, or 🎩 Alfred for small, simple
-  corrections only. It never decides the plot, the ending, the main character, point of view or tense, your content
-  limits or your lock list; if it is unsure, it keeps waiting for you. Each decision is shown in the run window and on
-  🏠 Book home — "🎩 Alfred approved the correction to Ansel Marrant (character) at 10:05 because you didn't answer for
-  20 minutes. Why: …" — and the desktop notification says it was decided for you. Press **↩ Undo** to put the other
-  choice back for your own approval. At most 5 stand-in decisions per book run.
+  an AI disagreement — the reviewer and the writer went round in circles, or the reviewer still objects to a chapter
+  after the fixes — and you don't answer within the time you picked (10, 20, 30 or 60 minutes), every working AI is
+  asked the same question. **They decide only if they all agree:** with two AIs both must agree, with three all three
+  must. If only one AI is working, or any AI picks the other option, is unsure or doesn't answer, the book keeps
+  waiting for you. The Claude Code helper may vote for Claude when the Claude window isn't working (still one vote for
+  Claude). It never decides the plot, the ending, the main character, point of view or tense, approved facts, your
+  content limits or your lock list. Each decision is shown in the run window and on 🏠 Book home — "ChatGPT, Claude
+  and Gemini all agreed to accept the correction to Ansel Marrant (character) at 03:12 because you didn't answer for
+  20 minutes. Why: …" — and the desktop notification says it was decided for you. When they don't agree you see how
+  each voted, for example "The AIs didn't all agree (ChatGPT: accept, Gemini: keep) — waiting for you." Press
+  **↩ Undo** to put the other choice back for your own approval. At most 5 stand-in decisions per book run.
 
 ## 6. Pictures
 

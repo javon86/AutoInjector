@@ -98,20 +98,17 @@ export function standInCard(c) {
     const wait = h('select', { id: 'si-wait', 'data-testid': 'si-wait' }, (cur.waits || [10, 20, 30, 60]).map(m => h('option', { value: String(m) }, `${m} minutes`)));
     wait.value = String(cur.wait_min);
     const max = h('input', { type: 'number', id: 'si-max', min: '1', max: '20', value: String(cur.max_per_run), class: 'wz-num' });
-    const model = h('input', { type: 'text', id: 'si-model', value: cur.local_model || '', placeholder: 'Empty = the model Ollama lists first (Qwen first)', maxlength: '120' });
     const save = h('button', { type: 'button', class: 'small primary', 'data-testid': 'si-save', onclick: async () => {
       try {
-        await api('PUT', '/settings/stand-in', { body: { enabled: on.checked, wait_min: Number(wait.value), max_per_run: Number(max.value) || 5, local_model: model.value.trim() } });
+        await api('PUT', '/settings/stand-in', { body: { enabled: on.checked, wait_min: Number(wait.value), max_per_run: Number(max.value) || 5 } });
         toast('Saved');
       } catch (e) { box.appendChild(problemBox(toProblem(e, WHERE))); }
     } }, 'Save');
     fresh(c, box, h('p', { class: 'small' }, cur.about),
-      h('div', { class: 'check-row field' }, on, h('label', { for: 'si-on' }, h('strong', null, 'Let a stand-in decide AI disagreements when I don’t answer'))),
+      h('div', { class: 'check-row field' }, on, h('label', { for: 'si-on' }, h('strong', null, 'Let the AIs decide a disagreement when I don’t answer — only if they all agree'))),
       h('div', { class: 'grid-2' }, h('div', { class: 'field' }, h('label', { for: 'si-wait' }, 'Wait for me first'), wait),
         h('div', { class: 'field' }, h('label', { for: 'si-max' }, 'At most this many stand-in decisions per book run'), max)),
-      h('details', { class: 'small' }, h('summary', null, '🎩 Alfred (the AI on this computer)'),
-        h('p', null, 'For simple corrections only, Alfred’s local model decides when no other stand-in can. Akọwe talks to it on this computer only (Ollama, ', h('code', null, cur.local_endpoint), '); nothing leaves your PC.'),
-        h('div', { class: 'field' }, h('label', { for: 'si-model' }, 'Local model'), model)),
+      h('p', { class: 'hint' }, 'Two AIs working: both must agree. Three AIs working: all three must agree. Only one AI working, or any AI disagrees or is unsure: it waits for you.'),
       h('div', { class: 'row' }, save));
   })();
   return card;
@@ -146,7 +143,7 @@ export function makeSetupField(c) {
   return { el, apply(body) { if (dirty && ed) body.checker_order = ed.get(); } };
 }
 
-/** The run window and Book home: one note per stand-in decision ("🎩 Alfred approved … Why: …") with ↩ Undo. */
+/** The run window and Book home: one note per stand-in decision ("ChatGPT and Gemini both agreed to … Why: …") with ↩ Undo. */
 export function decisionList(c, decisions, runIdOf, after, testid = 'si-note') {
   const { h, api, toast, problemBox, toProblem } = c;
   if (!(decisions || []).length) return null;

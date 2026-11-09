@@ -880,6 +880,10 @@ class AutoBookService(_Runner):
                 raise AkoweError("VERSION_CONFLICT", "/run", "another Make-a-book run is working",
                                      status="REJECTED")
             self._refuse_while_checking(run.get("project_id"))
+            prob = run.get("problem") or {}
+            if run.get("status") == "paused" and prob.get("code") == "REVIEW_NOT_PASSED":
+                from . import stand_in  # noqa: PLC0415 - 🔁 Try again on a vote the AIs did not all agree on
+                stand_in.settle_votes(self.store, run, prob, "retry")
             run["status"], run["phase"], run["problem"], run["pause_reason"] = "running", \
                 "Continuing where it stopped", None, None
             for s in run["steps"]:
@@ -965,6 +969,8 @@ class AutoBookService(_Runner):
             self.event(run, "retry", "You asked the AI to try again")
         else:
             self.event(run, "retry", "Continuing after your change" if action == "edited" else "Trying again")
+        from . import stand_in  # noqa: PLC0415 - 🧑‍⚖️ the AIs' votes on this decision (if they did not all agree)
+        stand_in.settle_votes(self.store, run, prob, None if action == "edited" else action)
         self.save(run)
         return self.resume(principal, run_id)
 
@@ -1019,6 +1025,8 @@ class AutoBookService(_Runner):
                             label=subject, chapter_id=prob.get("chapter_id"), by=principal)
         run.setdefault("notes_due", {})[rid] = {"label": subject, "chapter_id": prob.get("chapter_id")}
         (run.get("review_trail") or {}).pop(rid, None)
+        from . import stand_in  # noqa: PLC0415 - 🧑‍⚖️ the AIs' votes on this decision (if they did not all agree)
+        stand_in.settle_votes(self.store, run, prob, action)
         self.save(run)
         return self.resume(principal, run["id"])
 
@@ -1620,7 +1628,10 @@ class AutoBookService(_Runner):
                                   "Continue, or 🔁 Try again (the AI gets two more fixes).",
                                   record_id=rid, version=head["version"], module_id=head["module_id"],
                                   verdict=verdict, reasons=reasons[:4], chapter_id=chapter_id,
-                                  options=["approve_anyway", "edit", "retry"])
+                                  options=["approve_anyway", "edit", "retry"],
+                                  # 🧑‍⚖️ Akọwe's own promise checks flagged it: only the author decides (stand_in.py)
+                                  promise={"pov_tense": bool(res["review"].get("pov_tense")),
+                                           "content_limits": bool(res["review"].get("content_limits_breach"))})
             counts[rid] = n + 1
             st["message"] = f"AI is fixing the {label} (fix {n + 1} of {MAX_FIXES})"
             run["phase"] = st["message"]
