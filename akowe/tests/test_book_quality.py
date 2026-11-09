@@ -384,3 +384,13 @@ def test_a_tide_contradiction_reaches_the_editor_as_must_fix_and_the_next_chapte
     later = [b["quality_lessons"] for b in briefs if (b.get("quality_lessons") or {}).get("clock")]
     assert later and "18:06" in later[0]["clock"][0]
     assert any("like a hook" in " ".join(b.get("avoid") or []) for b in later)
+
+
+def test_the_improve_pass_does_nothing_when_the_editors_rewrites_are_off(tmp_path):
+    fake = SlotFake()
+    app = make_app(tmp_path, fake)
+    app.review.editor.save_settings({"enabled": True, "rounds": 0})
+    run = run_book(app, {"length": "short_story"})
+    st = {s["id"]: s for s in run["steps"]}
+    assert st["improve"]["state"] == "done" and "switched off" in st["improve"]["message"]
+    assert "rewrite" not in fake.kinds and "IMPROVE_SKIPPED" in [e.get("code") for e in run["events"]]

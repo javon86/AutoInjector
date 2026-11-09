@@ -262,7 +262,7 @@ def test_make_a_book_with_the_editor_end_to_end(tmp_path):
     fake = SlotFake()
     fake.editor_flags = {PHRASE: BETTER}
     app = make_app(tmp_path, fake, slots=("AI-1", "AI-2"))
-    run = run_book(app, {"slot_id": "AI-1"})
+    run = run_book(app, {"slot_id": "AI-1", "improve_pass": False})  # the final improve pass has its own tests
     assert run["status"] == "done", (run["phase"], run.get("problem"))
     assert run["editor_settings"] == {"enabled": True, "rounds": 2, "strictness": "normal"}
     bp, ch, latest, appr = chapter2_ids(app, run)

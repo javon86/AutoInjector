@@ -299,6 +299,14 @@ def _run(runner, run, st, mem):
     pid, branch = run["project_id"], run["branch_id"]
     rp = getattr(app, "reports", None)
     rounds = rounds_of(run.get("settings") or {})
+    es = runner._editor_settings(run)  # noqa: SLF001
+    if not mem.get("approving") and (not es.get("enabled") or not int(es.get("rounds") or 0)
+                                     or not runner._on(run, "editor")):  # noqa: SLF001
+        # the pass uses the editor's rewrite machinery: with the editor (or its rewrites) off it changes nothing
+        st["message"] = "Not run: the editor's rewrites are switched off (Settings › Editor, or this run's pipeline)"
+        runner.event(run, "note", f"🔁 Improve pass: {st['message']}", step="improve", code="IMPROVE_SKIPPED")
+        mem["skipped"] = "EDITOR_OFF"
+        return
     if mem.get("approving"):  # resumed while kept chapters waited for their review
         _approve_kept(runner, run, st, mem)
     while int(mem.get("done") or 0) < rounds:

@@ -620,7 +620,8 @@ to a minute), so the run knows which AIs work.
     point (and every reviewer could read it); then each chapter becomes a new draft, goes through the usual review
     and approval under the run consent (a chapter the reviewer does not pass gets its approved text back), the report
     is saved with the re-read scores, and the book is put together, exported and checked again. Otherwise the book is
-    left exactly as it was. A round that does not improve ends the pass. The run window ("Improve until better"
+    left exactly as it was. A round that does not improve ends the pass. With the editor or its rewrites switched
+    off (Settings › Editor, rounds 0, or the run's pipeline) the pass does nothing and says so. The run window ("Improve until better"
     step), the journal and the report say both numbers: "🔁 Improve pass: 7.6 → 8.1/10 (kept)". About (chapters +
     reviewers) answers per round plus the kept chapters' reviews — counted in the ⏱ estimate.
 14. **📈 Quality history** (code: `akowe/akowe/quality_history.py`): when a run finishes, the report's numbers — the
