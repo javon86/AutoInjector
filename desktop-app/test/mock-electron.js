@@ -23,7 +23,8 @@ if (process.env.AUTOINJECTOR_AKOWE_SERVER === undefined) process.env.AUTOINJECTO
 if (process.env.AUTOINJECTOR_FRESH_CHAT_REQUESTS === undefined) process.env.AUTOINJECTOR_FRESH_CHAT_REQUESTS = "0";
 if (process.env.AUTOINJECTOR_FRESH_CHAT_CHARS === undefined) process.env.AUTOINJECTOR_FRESH_CHAT_CHARS = "0";
 
-const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "autoinjector-test-"));
+// AUTOINJECTOR_TEST_USERDATA: a test that "restarts the app" (several processes) keeps the same folder.
+const userDataDir = process.env.AUTOINJECTOR_TEST_USERDATA ? (fs.mkdirSync(process.env.AUTOINJECTOR_TEST_USERDATA, { recursive: true }), process.env.AUTOINJECTOR_TEST_USERDATA) : fs.mkdtempSync(path.join(os.tmpdir(), "autoinjector-test-"));
 
 const ipcHandlers = {};
 const ipcMain = {

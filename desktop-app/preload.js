@@ -64,6 +64,7 @@ contextBridge.exposeInMainWorld("api", {
   pickerUndoRetire: (site, role) => ipcRenderer.invoke("picker:undo-retire", { site, role }), // PR #120: ↺ Undo a forgotten out-of-date part
   pickerPageStructure: (site) => ipcRenderer.invoke("picker:page-structure", { site }),
   onPicker: (cb) => ipcRenderer.on("picker", (_e, payload) => cb(payload)),
+  onSelectorRetired: (cb) => ipcRenderer.on("selector-retired", (_e, payload) => cb(payload)), // 2026-11-09: "X's page changed … ↩ Put it back"
   runSelfTest: (site) => ipcRenderer.invoke("selftest:run", { site }),
   runTuner: () => ipcRenderer.invoke("tuner:run"),
   onTunerState: (cb) => ipcRenderer.on("tuner-state", (_e, payload) => cb(payload)),

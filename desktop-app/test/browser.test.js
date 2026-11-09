@@ -247,6 +247,15 @@ async function testSplitReplyClimb() {
     assert(!/MSG #0013/.test(res.text), "the user's message is not pulled in");
   });
 }
+// 2026-11-09: ChatGPT's "[TO: USER]" in its own small block, the answer in the blocks after it.
+async function testChatgptTagSplit() {
+  console.log("\n== 2026-11-09: ChatGPT reply that starts with a tag line in its own block is read whole ==");
+  await withFixture("chatgpt-tag-split.html", async (page) => {
+    const res = await page.evaluate(buildReadScript("chatgpt"));
+    assert(/^\[TO: USER\]/.test(res.text.trim()) && /plan for chapter two/.test(res.text) && /"beats"/.test(res.text) && /\[FROM: CHATGPT\]$/.test(res.text.trim()), `the whole reply is read (got ${JSON.stringify(res.text)})`);
+    assert(!/MSG #004/.test(res.text) && !/older answer/i.test(res.text) && !/ChatGPT said/.test(res.text), "nothing from the user's message, the older answer or the hidden heading");
+  });
+}
 // TR-30: an AI still writing whose Stop button isn't recognised.
 async function testNoStopButtonStreaming() {
   console.log("\n== TR-30: Send stays locked while the page is still writing → wait (AI_BUSY), don't click when it unlocks ==");
@@ -619,6 +628,7 @@ async function main() {
   await testAiBusyNotTyped();
   await testWrapperOverrideStillSends();
   await testSplitReplyClimb();
+  await testChatgptTagSplit();
   await testNoStopButtonStreaming();
   await testWrapperHiddenFallback();
   await testReplyChromeSkipped();
