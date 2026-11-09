@@ -78,7 +78,8 @@ def check_exports(app, pid, chapters, title, author, files=None):
 def test_make_a_book_every_step_follows_through(tmp_path):
     ai = fk.TraceAI()
     app = fk.make_app(tmp_path, fake=ai)
-    run = fk.run_book(app, {"genre": "Mystery", "length": "novella"})
+    # ✒️ the pen name is the author's own (typed here); the fake AI's "Rowan Ashby"-style answer is never used
+    run = fk.run_book(app, {"genre": "Mystery", "length": "novella", "pen_name": "Rowan Ashby"})
     assert run["status"] == "done", (run.get("problem"), [(s["id"], s["state"]) for s in run["steps"]])
     pid = run["project_id"]
     bp = fk.bp_of(app, pid)
@@ -141,7 +142,7 @@ def test_make_a_book_every_step_follows_through(tmp_path):
 
 def test_edit_chapter_two_then_reassemble_exports_new_text_only(tmp_path):
     app = fk.make_app(tmp_path, fake=fk.TraceAI())
-    run = fk.run_book(app)
+    run = fk.run_book(app, {"pen_name": "Rowan Ashby"})  # ✒️ the author's typed pen name
     assert run["status"] == "done"
     pid = run["project_id"]
     old = dict(fk.approved_chapters(app, pid))["ch2"]
@@ -186,7 +187,7 @@ def test_title_page_shows_profile_title_and_author(tmp_path):
             out["text"] = "# Chapter 2: The *Brass* Key\n\n" + out["text"]
         return out
     app = fk.make_app(tmp_path, fake=fk.TraceAI(overrides={"C02": titled}))
-    run = fk.run_book(app)
+    run = fk.run_book(app, {"pen_name": "Rowan Ashby"})  # ✒️ the author's typed pen name
     ex = fk.export_files(app, run["project_id"], run["files"])
     first = fk.norm(fk.pdf_info(ex["PDF"])["pages"][0])
     assert "The Keeper of Gullhaven" in first and "Rowan Ashby" in first

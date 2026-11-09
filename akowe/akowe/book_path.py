@@ -853,7 +853,7 @@ class BookPath:
             return {"ok": True, "message": f"Your AI wrote the {what}. Read it, then approve it.",
                     "created": r["output_refs"][0]}
         codes = {e.get("code") for e in r.get("errors") or []}
-        if codes & {"CAPABILITY_UNAVAILABLE", "UPSTREAM_UNAVAILABLE", "TIMEOUT", "RATE_LIMITED"}:
+        if codes & {"CAPABILITY_UNAVAILABLE", "UPSTREAM_UNAVAILABLE", "TIMEOUT", "RATE_LIMITED", "AI_DECLINED"}:
             m = self._manual(op, payload, f"The AI could not write the {what} ({', '.join(sorted(codes))}). "
                              "Check the AI in Settings (Test connection) and try again, or write it yourself in the "
                              "form that opens now.")

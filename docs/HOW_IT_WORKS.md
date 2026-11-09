@@ -189,6 +189,10 @@ bridge to your home Wi-Fi, behind its key.
     refusal ("I'm having a hard time fulfilling your request. Can I help you with something else instead?"). Akọwe
     waits (30 s, or 60 s after a usage limit, then longer, up to 2 minutes each and about 10 minutes in all) or uses
     another AI. When the refused prompt was very long (30,000 characters or more), the note says so.
+  - **The AI declined:** a short canned refusal ("I can't help with that") has its own code, **AI_DECLINED**
+    (AutoInjector's bridge marks it `declined`). It is never reported as "the site is not working": the reports say
+    "Gemini declined to answer (it said it can't help with that)". The work still moves to another AI, or waits and
+    asks again. Sad or dark story material (a death, grief, a ghost) sometimes trips an AI's safety filter by mistake.
   - **Chat full:** the site says the conversation is too long ("…exceed the length limit for this chat", "start a
     new chat"). Akọwe hears "site error: chat full" and asks again after 10 seconds; AutoInjector opens a fresh chat
     in that pane first (see **Fresh chats** below).
@@ -546,7 +550,12 @@ background** to carry on. First, AutoInjector checks in with every AI (up
 to a minute), so the run knows which AIs work.
 
 1. **Safety backup** of all your books.
-2. **Invent the book:** title, pen name, genre, readers, tone and the idea. The point of view (first or third
+2. **Invent the book:** title, genre, readers, tone and the idea. The AI **never** chooses the pen name (code:
+   `akowe/akowe/pen_name.py`): the book gets the pen name you typed on the Make-a-book screen, else the last pen name
+   you typed into a book profile (your saved pen name), else none. Why: the AI used to be asked for "an invented pen
+   name", and a web AI whose chat still held your other book answered with that book's main character, which went
+   onto the title page. The plan check before Start shows which pen name the book gets and warns (⚠️) when it is also
+   the name of a character in another book on your shelf; the run and the book profile warn the same way. The point of view (first or third
    person) and the tense (past or present) are fixed here too, from your choice, else the AI's pick for this
    story, else the genre's usual. If you left the **kind of story** to the AI, it picks the one of the seven basic
    plots that fits the idea best here, and the run's notes and the plan page say which and why.
@@ -638,7 +647,16 @@ to a minute), so the run knows which AIs work.
       on the **Book format** step of Book home, and see a print preview of two page spreads. The inside margin
       (where the book is bound) gets wider as the book gets longer. The EPUB and Word files follow the same design
       where they can. Code: `akowe/akowe/exporters/interior.py`, `akowe/akowe/book_design.py`.
-12. **Content check** (every chapter once, in order) and the **book report**. An optional **beta reader** step
+12. **Content check** (every chapter once, in order) and the **book report**. When a whole-book reviewer declines
+    ("I can't help with that"), Akọwe asks it once more with a short, plain note in front of the same task: the book
+    is a work of fiction the author wants an editor's critique of (no tricks, only context). If it declines again,
+    another AI takes its place, so the book gets two independent reviewers when it can: first a working AI that did
+    not write the book and has not reviewed it, then the 🤖 Claude Code helper (a fresh session) when it is ready,
+    then, only when fewer than two reviewers answered, the AI that wrote most of the book (marked "not independent").
+    The report says who declined and who stood in. In the AI usage table, a chapter whose editor's rewrite was not
+    kept names the AI that wrote the version that was kept ("AI-2 · ChatGPT (version 4 kept; the editor's rewrite was
+    not kept)"), and it counts for that AI in "Most of the book was written by". Code: `akowe/akowe/book_report.py`,
+    `akowe/akowe/review.py`. An optional **beta reader** step
     reads the book as its target reader. You can ask for **1, 2 or 3 readers**. With 2 or 3, each reader is a
     different AI playing a different kind of reader: a typical fan, a picky reader of the genre, and a casual reader
     who gives up on slow starts. You can rewrite who they are on the 📊 report page. Each says whether they would

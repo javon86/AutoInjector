@@ -29,6 +29,7 @@ export const PROBLEMS = {
   QUOTA_EXCEEDED: { title: 'Budget reached', what: 'The cost or usage limit for this project was reached.', fix: 'Raise the limit in Project Control (K12), or wait until it resets.', action: 'open' },
   CONTEXT_TOO_LARGE: { title: 'Too much for the AI at once', what: 'The material sent to the AI is larger than it can read at once.', fix: 'Pick fewer context records, or choose an AI with a larger limit in Settings.', action: 'settings' },
   VALIDATOR_UNAVAILABLE: { title: 'A checker is missing', what: 'An external checking tool (for example EPUBCheck) is not installed, so this check is UNKNOWN.', fix: 'Install the tool if you need this check, or ignore it for drafts.', action: 'none' },
+  AI_DECLINED: { title: 'The AI declined to answer', what: 'The AI answered with a short refusal (“I can’t help with that”) instead of doing the task. Story material (a death, grief, a crime) sometimes trips an AI’s safety filter by mistake.', fix: 'Press 🔁 Try again (Akọwe also asks another AI on its own when one works), or pick another AI for this job.', action: 'retry' },
   TOC_NONCONVERGENCE: { title: 'Contents did not settle', what: 'The table of contents page numbers kept changing.', fix: 'Press 🔁 Try again; if it repeats, change the page or font settings slightly.', action: 'retry' },
 
   // ---------------------------------------------------------------- Akọwe app codes

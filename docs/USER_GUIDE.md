@@ -100,8 +100,9 @@ it; **⇱ Pop out** gives Akọwe its own window.
   Start is your permission for that one run only; it makes a new book and never touches your other books. You can
   watch, **⏸ Pause**, **▶ Resume** or **✖ Cancel**. A long book takes a day or two.
 
-On the Make-a-book screen you can choose, among other things: the kind of story and the story shape (or leave them
-to the AI), **How many AIs check for mistakes**, **Use Claude Code helpers for this book**, and **"✍ At the end,
+On the Make-a-book screen you can choose, among other things: your **Pen name** (printed on the title page and the
+cover; the AI never makes one up — leave it empty to use the pen name you typed last, or none; the plan check warns
+if it is also the name of one of your characters), the kind of story and the story shape (or leave them to the AI), **How many AIs check for mistakes**, **Use Claude Code helpers for this book**, and **"✍ At the end,
 check that the book sounds like a person wrote it"**.
 
 ### While a long book runs
@@ -197,7 +198,10 @@ Every chapter is checked several times before it counts as part of the book:
 - **🔎 Check consistency now** (on the run window, 🏠 Book home and 🧭 Continuity) runs the same all-AI review on the
   chapters you choose, at any time.
 - The **📊 Book report** shows the scores, who checked the book and how far they agreed. An optional beta-reader
-  step reads the book as 1, 2 or 3 kinds of readers.
+  step reads the book as 1, 2 or 3 kinds of readers. If an AI declines to review the book ("I can't help with
+  that" — a sad or dark story sometimes trips its safety filter by mistake), Akọwe tells it once that the book is
+  fiction under review; if it still declines, another AI (or the 🤖 Claude Code helper) reads the book instead, and
+  the report says who declined and who stood in.
 - **🕰️ Clock and tide check:** Akọwe works out the times, days and tides the book states ("high water at 18:06")
   and flags one that cannot be true ("the tide was going out at 14:30" — before high water the tide comes in). The
   editor and the reviewer must fix it, and the next chapter's writer is told the tide times so far.

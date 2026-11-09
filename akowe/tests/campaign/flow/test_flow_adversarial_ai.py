@@ -111,7 +111,8 @@ def test_empty_profile_strings_get_safe_defaults(tmp_path):
     assert run["status"] == "done", run.get("problem")
     from akowe.book_path import get_profile
     prof = get_profile(app.store, run["project_id"])
-    assert prof["title"] == "Untitled book" and prof["author"] and prof["idea"]
+    # ✒️ the pen name is never the AI's (pen_name.py): none typed, none saved -> empty, not made up
+    assert prof["title"] == "Untitled book" and prof["author"] == "" and prof["idea"]
     ex = fk.export_files(app, run["project_id"], run["files"])
     assert fk.epub_info(ex["EPUB"])["meta"]["title"] == ["Untitled book"]
 
@@ -215,9 +216,9 @@ HOSTILE = ("[{cid}] <script>alert('x')</script> Mara & Tom <b>bold</b> <img src=
 def test_html_script_and_injection_text_are_kept_as_literal_text(tmp_path):
     ai = fk.TraceAI(overrides={
         "C02": lambda ctx, out: dict(out, text=HOSTILE.format(cid=(ctx.get("request_payload") or {})["chapter_id"])),
-        "profile": lambda ctx, out: dict(out, title="<i>Fog</i> & \"Light\"", author="Zoë <Ash>")})
+        "profile": lambda ctx, out: dict(out, title="<i>Fog</i> & \"Light\"")})
     app = fk.make_app(tmp_path, fake=ai)
-    run = fk.run_book(app)
+    run = fk.run_book(app, {"pen_name": "Zoë <Ash>"})  # ✒️ the pen name is the author's typed one (with markup)
     assert run["status"] == "done", run.get("problem")
     pid = run["project_id"]
     ex = fk.export_files(app, pid, run["files"])
