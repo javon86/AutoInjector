@@ -136,10 +136,24 @@ def run_brief(app, pid: str, url: str) -> dict | None:
                 "needs_decision": p["needs_decision"], "steps_done": p["steps_done"], "steps_total": p["steps_total"],
                 "phase": str(p.get("phase") or "")[:200], "problem": str(prob.get("message") or "")[:300] or None,
                 "updated_at": p.get("updated_at"), "finished_at": p.get("finished_at"), "url": url,
-                "alert": alert_brief(p.get("alert"))}
+                "alert": alert_brief(p.get("alert")), "notice": _notice(run)}
     except Exception:  # noqa: BLE001 - status is a convenience
         log.debug("could not read the book's run for the status push", exc_info=True)
         return None
+
+
+def _notice(run: dict) -> dict | None:
+    """🧑‍⚖️ "Decided for you": a stand-in decided while the author was away (stand_in.py) — for AutoInjector's desktop
+    notification, bounded, for a short while after the decision."""
+    try:
+        from . import stand_in  # noqa: PLC0415
+        n = stand_in.notice(run)
+    except Exception:  # noqa: BLE001
+        return None
+    if not n:
+        return None
+    return {"key": str(n.get("key") or "")[:60], "title": str(n.get("title") or "")[:120],
+            "body": str(n.get("body") or "")[:300], "at": str(n.get("at") or "")[:40]}
 
 
 def alert_brief(alert) -> dict | None:

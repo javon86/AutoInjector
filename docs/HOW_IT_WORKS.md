@@ -734,6 +734,7 @@ All four are on the ⚡ **AI writes the whole book** screen (code: `akowe/akowe/
 | 🔎 All-AI chapter check | mistakes, drift and straying off the plan, read by every working AI (the writer too); 2+ agree = fixed | every chapter (setting All) |
 | 🔎 Check consistency now | the same all-AI review as a checkpoint, on the chapters you choose | whenever you press it (queued between chapters during a run) |
 | No self-approval | an AI approving its own writing, or approving with no reason | every approval |
+| 📊 Checker track record (no AI) | how often each AI's corrections held up, its false alarms and misses | after every approval and checkpoint |
 | Your promises (content limits, themes, question) | a chapter showing what you ruled out | writer, reviewer and editor, every chapter |
 | Point of view and tense | a chapter that slips into another person or tense | every chapter |
 | Editor rubric | told-not-shown feelings, flat side characters, same-sounding voices, no stakes | every chapter |
@@ -776,6 +777,68 @@ A few of these need more words:
   confirmed and fixed; a problem one AI found needs a quote Akọwe finds in the chapter (else it is dropped, with a
   note) and is fixed only when it is major, otherwise listed for you. One combined fix pass, not one per AI. With
   three AIs this costs about 3 to 5 more AI answers per chapter and three times the answers per checkpoint.
+- **📊 How good is each checker** (code: `akowe/akowe/checker_record.py`; ⚙️ Settings, the run window when a book is
+  done, the 📊 Book report; API `GET /api/checkers/record`). For each AI (ChatGPT, Claude, Gemini, and the 🤖 Claude
+  Code helpers and 🎩 Alfred when they check) Akọwe writes down how each finding and review verdict turned out, from
+  what really happened — never by asking an AI:
+  - **held up (confirmed):** the writer's fix answered it and the record was then approved; two AIs reported the same
+    problem on their own at a checkpoint; you accepted the change; the editor's notes led to a rewrite that was kept.
+  - **false alarm (overruled):** you kept the original; the very version it rejected was approved after all (you
+    accepted the change or approved it anyway); or it quoted words that are not in the chapter (the word-for-word quote
+    check the checkpoints already use).
+  - **missed:** another AI's confirmed problem in exactly the text this AI read (the same checkpoint part) or approved
+    (the same approved version of the chapter, with the quote found in it word for word). Nothing looser counts.
+
+  Only numbers are kept (setting `checker_record`: the kind of check, the outcome and the time — never a quote or a
+  name), the last 200 outcomes per AI, so recent books weigh most. Kinds: Book Bible records, chapters, continuity,
+  style, and stand-in decisions. The card says, for example, "ChatGPT: 87% of its corrections held up · 3 false
+  alarms in the last 50"; under 10 judged outcomes it says "needs more data" and labels the small numbers as a small
+  sample. Honest limit: the style kind only counts the editor's notes that led to a kept rewrite (held up); it has no
+  false-alarm signal yet.
+- **🔢 Which AI checks first** (code: `akowe/akowe/checker_order.py`; ⚙️ Settings, `GET/PUT /api/settings/checkers`,
+  and the Make-a-book start body `checker_order: {mode, order, off}` for one book). **Automatic** (default): the AI
+  whose corrections held up best checks first, once at least two AIs have 10 or more judged outcomes — until then the
+  usual order (the Settings "Reviewer AI", then slot order). **My own order**: for example ChatGPT → Claude → Gemini.
+  **Don't use for checks**: an AI that never checks (it can still write). Used everywhere a checker is chosen: each
+  record's review (Book Bible records and chapters), the second chapter reviewer, the editor's second opinion, the
+  all-AI chapter checks, the continuity checkpoints, the ending check and the stand-in below. The hard rules stay:
+  the AI that wrote a draft never reviews it while another AI may (only when no other AI may check does the "when only
+  one AI works" setting apply, as before), a switched-off AI is never asked, and when too few are left the run says so
+  once in plain words: "Only ChatGPT can check right now because Gemini is switched off for checks and Claude is the
+  writer." The checkpoints and the ending check still include the writer's own reading as one of several (a
+  whole-book consistency read, merged by agreement), as since PR #117.
+- **🧑‍⚖️ The stand-in decider** (code: `akowe/akowe/stand_in.py`; ⚙️ Settings › Stand-in when I don't answer,
+  `GET/PUT /api/settings/stand-in`; off by default). When a run waits for you on ONE AI disagreement — the reviewer and
+  the writer went round in circles about the same finding (`REVIEW_DECISION`, kind `loop`): accept the writer's
+  correction or keep the original — and you have not answered within the wait time (10, 20, 30 or 60 minutes, default
+  20), a stand-in decides:
+  1. the 🤖 Claude Code helper, when it is installed and signed in and Claude is neither the writer nor the reviewer
+     who objected;
+  2. else the AI that is not part of the disagreement, best track record first (never one switched off for checks);
+  3. else 🎩 Alfred — only for a **simple case**: a plain "accept this correction?", the correction answers a finding
+     a reviewer raised, it touches no locked detail already on the page and no locked story-map connection, Akọwe's
+     own no-AI checks pass the corrected record, and the change is small. Alfred can only accept a correction.
+
+  **Never a stand-in** — these always wait for you: a change to an approved fact, the plot or outline (premise, main
+  plot, outline), the ending (the last chapter, or a finding about the ending), the main character's own record,
+  point of view or tense, your content limits, and anything on your lock list.
+  **How it decides:** a structured request — the finding, before → after, the approved canon and Akọwe's no-AI check
+  results — and a JSON answer `{choice: accept_change | keep_original | unsure, confidence, reason}`, checked by
+  Akọwe. Unsure, under 75% sure, or not the JSON asked for → it keeps waiting for you (it never guesses, and it
+  does not ask the next one). A stand-in that is missing or not working (Claude Code not installed or signed out, an
+  AI at its limit, Ollama not running) is skipped for the next one; when none is left it keeps waiting.
+  **How Alfred is reached:** Akọwe calls the local model directly through Ollama's OpenAI-compatible address on this
+  computer (default `http://127.0.0.1:11434/v1`, the same server Alfred uses; the model is the one named in Settings,
+  else the one Ollama lists first, Qwen first). Any address that is not this computer is refused, so the book never
+  leaves the PC. This needs no change to AutoInjector or the bridge and works even when AutoInjector is closed.
+  **Visible and reversible:** each decision is written to the run's journal, the run window and 🏠 Book home —
+  "🎩 Alfred approved the correction to Ansel Marrant (character) at 10:05 because you didn't answer for 20 minutes.
+  Why: … [↩ Undo]" — and AutoInjector's desktop notification says "Decided for you". While a run waits, the alert's
+  "what happens next" says when the stand-in will step in (or why it won't). **↩ Undo** puts the other choice back as
+  a new draft that waits for your approval, and turns that decision's track-record outcomes round. At most 5 stand-in
+  decisions per run (Settings), then it always waits. The stand-in's decisions count in its own track record
+  (labelled "stand-in decisions"). Logs and the outbox keep codes only (who decided, the choice) — never the book's
+  words or the reason.
 - **Book report.** It shows who checked the book and how far they agreed, and each stretch review. Its PDF keeps
   accented letters and other alphabets (ọ, ẹ, ł, Greek); a symbol it cannot print becomes a word or "•". "Written by"
   names the AI that wrote the chapter ("Claude + editor" when the editor's changes are in it). Advice with nothing

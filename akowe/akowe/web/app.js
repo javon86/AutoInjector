@@ -7,6 +7,7 @@ import { runCostLine, viewCosts, viewSceneGrid } from './grid.js';  // 🗂 P27 
 import * as S7C from './section7c.js';  // P23 beta reader + P25 your writing style (Section 7c)
 import * as WR from './writers-room.js';  // 🗳 the three-AI writers' room (writers_room.py)
 import * as CC from './claude-code.js';  // 🤖 Claude Code helpers (claude_code.py)
+import * as CK from './checkers.js';  // 📊 checker track record · 🔢 checker order · 🧑‍⚖️ stand-in decider
 import { maybeStartTour, replayTour } from './tour.js';  // 🧭 the short guided tour of My books (first visit; ❓ Help replays it)
 import * as RP from './run-plan.js';  // ⏱ 3d estimate · 📊 3e usage meter + ⏰ start later · 📋 6c paste starter sheet
 import { originalityCard } from './originality.js';  // ✨ #20 originality and "sounds like AI" check
@@ -3368,6 +3369,9 @@ async function viewSettings(main) {
   for (const s of slots) main.appendChild(slotForm(s));
   main.appendChild(retryCard());
   main.appendChild(reviewerCard());
+  main.appendChild(CK.recordCard(s7c()));  // 📊 how good is each checker (checker_record.py)
+  main.appendChild(CK.orderCard(s7c()));  // 🔢 which AI checks first, and which never check (checker_order.py)
+  main.appendChild(CK.standInCard(s7c()));  // 🧑‍⚖️ the stand-in when you don't answer (stand_in.py)
   main.appendChild(CC.helpersCard(Object.assign(s7c(), { put })));  // 🤖 Claude Code helpers
   main.appendChild(editorSettingsCard());
   main.appendChild(lengthSettingsCard());
@@ -5725,6 +5729,9 @@ function renderBook(holder, book, redraw) {
     h('h2', null, '⚠️ Needs a look'),
     h('ul', { class: 'small' }, att.slice(0, 12).map(l => h('li', null, l))),
     att.length > 12 ? h('p', { class: 'small muted' }, `…and ${att.length - 12} more.`) : null));
+  // 🧑‍⚖️ what a stand-in decided while you were away (↩ Undo puts the other option back for your approval)
+  const siBook = CK.bookNotes(s7c(), (book.attention || {}).stand_in || [], () => { S.details = {}; if (S.bookRedraw) S.bookRedraw(); });
+  if (siBook) holder.appendChild(siBook);
   holder.appendChild(stepRail(book.steps.map(s => ({ id: s.id, title: s.title, state: BOOK_ERR[`${S.pid}:${s.id}`] ? 'problem' : s.state, word: RAIL_WORD[s.state] })),
     { label: 'Book home: all steps', current: book.next }));
   const ol = h('ol', { class: 'book-steps' });
@@ -8266,6 +8273,8 @@ async function renderMakeSetup() {
   fields.checkers = ck.sel;
   const one = singleAiField('mb');  // PR #122: when only one AI works (keep going by default)
   ck.el.appendChild(one.el);
+  const cko = CK.makeSetupField(s7c());  // 🔢 which AI checks first / never checks, for this book (compact)
+  ck.el.appendChild(cko.el);
   fields.single_ai = one.sel;
   const ccf = CC.makeSetupField(s7c());  // 🤖 Claude Code helpers for this run (ticked when ready)
   const pics = await picturesSwitch('mb');  // 🖼 3d/6c: character pictures for this run (default: Settings › Pictures)
@@ -8329,6 +8338,7 @@ async function renderMakeSetup() {
     wr.apply(body);  // 🗳 the writers' room for the big twists (only when switched on)
     ck.apply(body);  // 🔎 how many AIs check for mistakes (sent only when not the default)
     one.apply(body);  // PR #122: when only one AI works (sent only when not the default)
+    cko.apply(body);  // 🔢 the checker order for this book (sent only when changed here)
     ccf.apply(body);  // 🤖 Claude Code helpers (sent only when switched off for this run)
     pics.apply(body);  // 🖼 character pictures (sent only when not the Settings › Pictures default)
     return body;
@@ -8512,7 +8522,7 @@ function whoRead(u, who, at) {
 }
 function renderRun() {
   const r = MB.run; if (!r || !MB.dialog) return;
-  const sig = JSON.stringify([r.status, r.phase, r.current, r.problem && r.problem.code, (r.waiting || {}).retry_at, r.steps.map(s => [s.state, s.message, s.review_note, s.editor_note, (s.items || []).map(i => [i.state, i.editor, i.scenes, i.phase, i.note, i.planned, i.length, i.continuity, i.memory]), s.planned_note, s.checkpoints]), (r.files || []).length, r.ais, r.ai_alerts, r.review_summary, r.editor_summary, r.planned_summary, r.eta, r.report, r.save, r.costs && [r.costs.calls, r.costs.ais], r.check_later, (r.waiting || {}).message, r.alert && r.alert.key]);
+  const sig = JSON.stringify([r.status, r.phase, r.current, r.problem && r.problem.code, (r.waiting || {}).retry_at, r.steps.map(s => [s.state, s.message, s.review_note, s.editor_note, (s.items || []).map(i => [i.state, i.editor, i.scenes, i.phase, i.note, i.planned, i.length, i.continuity, i.memory]), s.planned_note, s.checkpoints]), (r.files || []).length, r.ais, r.ai_alerts, r.review_summary, r.editor_summary, r.planned_summary, r.eta, r.report, r.save, r.costs && [r.costs.calls, r.costs.ais], r.check_later, (r.waiting || {}).message, r.alert && r.alert.key, r.stand_in]);
   if (sig === MB.sig && MB.dialog.querySelector('.mb-steps')) { updateRunClocks(); return; }
   MB.sig = sig;
   const w = r.state === 'replaced' ? ['↪', 'Replaced by a newer run', 'b-muted'] : r.state === 'interrupted' ? RUN_WORD.interrupted
@@ -8576,6 +8586,9 @@ function renderRun() {
   const msg = h('div', { class: 'mb-msg', 'aria-live': 'polite' });
   const alertCard = ['paused', 'interrupted'].includes(r.status) ? runAlertCard(r) : null;
   if (alertCard) msg.appendChild(alertCard);
+  // 🧑‍⚖️ the stand-in: its decisions in this run (↩ Undo) and, while it waits for you, when it steps in
+  const siNotes = CK.runNotes(s7c(), r, async () => { try { MB.run = await api('GET', `/autobook/${encodeURIComponent(r.id)}`); MB.sig = null; renderRun(); } catch { /* the next poll redraws */ } });
+  if (siNotes) msg.appendChild(siNotes);
   if (r.problem && r.status === 'paused' && r.problem.code === 'REVIEW_DECISION' && alertCard) {
     // the decision card above carries the buttons; the reviewer's own words stay one click away
     if (r.problem.reasons && r.problem.reasons.length) msg.appendChild(h('details', { class: 'small rv-why' }, h('summary', null, 'What the AI reviewer said'), h('ul', null, r.problem.reasons.map(x => h('li', null, x)))));
@@ -8681,7 +8694,8 @@ function runReportBox(r) {
     (rp && (rp.disagreements || []).length) ? ` ⚠️ They disagree on ${rp.disagreements.join(', ')}.` : '', ' ',
     h('a', { class: 'btn small primary', href, onclick: () => closeMakeBook() }, '📊 Open the book report')),
     // ✍ the end-of-book "sounds like a person" pass: the score now and with the suggested rewrites
-    rp && rp.human ? h('p', { 'data-testid': 'mb-human' }, rp.human) : null);
+    rp && rp.human ? h('p', { 'data-testid': 'mb-human' }, rp.human) : null,
+    CK.recordCard(s7c(), { compact: true, testid: 'mb-ck-record' }));  // 📊 how good each checker was (folded)
 }
 /** 🧪 Pipeline switches (P14): preset + the five switches, each with ⓘ. get() -> null (full, the default) or {preset, flags}. */
 const PIPE = { info: null };
@@ -9114,6 +9128,7 @@ async function viewReport(main) {
     h('h1', null, '📊 Book report')), h('div', { class: 'row' }, infoTip('Book report', ...TIP_REPORT()))));
   const holder = h('div', { 'aria-live': 'polite' }, loadingState('Loading the report…'));
   main.appendChild(holder);
+  main.appendChild(CK.recordCard(s7c(), { testid: 'rp-ck-record' }));  // 📊 how good is each checker (checker_record.py)
   let ov;
   const load = async () => {
     try { ov = await api('GET', bpath('/report')); } catch (e) { clear(holder).appendChild(problemBox(toProblem(e, { book: title, step: 'Book report' }), { retry: load })); return; }

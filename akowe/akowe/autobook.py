@@ -49,6 +49,7 @@ from . import ai_activity, ai_check
 from . import approval_trust
 from . import assist as assist_mod
 from . import characters as chars_mod
+from . import checker_record
 from . import costs as costs_mod
 from . import check_now as check_now_mod
 from . import cross_check
@@ -691,6 +692,10 @@ class AutoBookService(_Runner):
         except Exception:  # noqa: BLE001 - display only
             log.debug("could not describe the run's alert", exc_info=True)
             out["alert"] = None
+        from . import stand_in  # noqa: PLC0415 - 🧑‍⚖️ the stand-in decider: its decisions (↩ Undo) and when it steps in
+        out["stand_in"] = stand_in.view(self.app, run)
+        if out["alert"]:
+            out["alert"] = alerts_mod.with_stand_in(out["alert"], out["stand_in"])
         out["steps_done"] = sum(1 for s in run.get("steps") or [] if s.get("state") in ("done", "skipped"))
         out["steps_total"] = len(run.get("steps") or [])
         # A run that stopped (paused, waiting for a decision, interrupted) is not working: its clock stops at its last
@@ -936,6 +941,8 @@ class AutoBookService(_Runner):
                                      status="REJECTED")
             self.event(run, "approve", "You approved it anyway (your own approval)", approval="author",
                        record_id=rid)
+            checker_record.settle(self.store, run, rid, int((self.bp(run).rec(rid) or {}).get("version") or 0),
+                                  how="approve_anyway", chapter_id=prob.get("chapter_id"))
             # H14: the editor and the plan check this draft skipped still run (as notes) when the run goes on
             label = (f"chapter {prob['chapter_id']}" if prob.get("chapter_id") else
                      safe_title(self.app.engine.contracts, self.bp(run).rec(rid) or {"module_id": prob.get("module_id")}))
@@ -1006,6 +1013,8 @@ class AutoBookService(_Runner):
             if line not in later:
                 later.append(line)
         head = bp.rec(rid) or head
+        checker_record.settle(self.store, run, rid, int(head.get("version") or 0), how=action,
+                              chapter_id=prob.get("chapter_id"))
         approval_trust.note(self.store, run["project_id"], run["branch_id"], head, how="approve_anyway",
                             label=subject, chapter_id=prob.get("chapter_id"), by=principal)
         run.setdefault("notes_due", {})[rid] = {"label": subject, "chapter_id": prob.get("chapter_id")}
@@ -1065,6 +1074,10 @@ class AutoBookService(_Runner):
                              status="REJECTED")
         if ck:
             out["checkers"] = ck
+        from . import checker_order  # noqa: PLC0415 - 🔢 which AI checks first, and which never check
+        co = checker_order.clean(body.get("checker_order"))
+        if co:
+            out["checker_order"] = co
         from . import claude_code_book  # noqa: PLC0415 - 🤖 Claude Code helpers: on/off for this run (None = Settings)
         out.update(claude_code_book.clean_run_option(body, self.store))
         n = body.get("beta_readers", 1)  # 👥 idea #14: how many beta readers (1 = one AI; 2-3 = a panel)
@@ -1142,6 +1155,8 @@ class AutoBookService(_Runner):
                 sink(time.monotonic() - t0, slot=getattr(job, "slot", None), ok=ok)
         assist._call_ai_once = timed_once  # type: ignore[method-assign]
         review = ReviewService(engine, assist, run["principal"], work=self.app.work, on_change=self.app.changed)
+        from . import checker_order  # noqa: PLC0415 - 🔢 the run's checker order (else Settings › AI)
+        review.checker_policy = checker_order.of_run(run, self.store)
         return engine, assist, review
 
     @staticmethod
@@ -1521,6 +1536,10 @@ class AutoBookService(_Runner):
                 self._ai_problem(exc, f"reviewing the {label}", record_id=rid, chapter_id=chapter_id)
             verdict = res["review"]["verdict"]
             self._note_review(run, st, label, res["review"])
+            # 📊 who said what about this version (settled into each AI's track record when it is approved)
+            checker_record.remember_verdicts(run, rid, int(res.get("version") or head["version"]), head["module_id"],
+                                             res["review"], self.app.engine.providers)
+            cross_check.note_reviewers(self, run, res["review"], two)
             self.event(run, "review", f"AI review of the {label}: {verdict} · {st['review_note']}", verdict=verdict,
                        slot=rj.slot, record_id=rid, independent=res["review"].get("independent"))
             if res.get("auto_approved"):
@@ -1530,6 +1549,7 @@ class AutoBookService(_Runner):
                 # H14: the editor and the plan check were skipped: they still run, as notes
                 approval_trust.note(self.store, run["project_id"], run["branch_id"], head, how="auto_approve",
                                     label=label, chapter_id=chapter_id, by=run["principal"])
+                checker_record.settle(self.store, run, rid, head["version"], chapter_id=chapter_id)
                 self._notes_after_approval(run, st, rid, label, chapter_id)
                 return bp.rec(rid)
             head = bp.rec(rid)
@@ -1571,6 +1591,7 @@ class AutoBookService(_Runner):
                     if pl.get("flagged"):
                         why += " · ⚠️ planned details not all on the page"
                 self._approve(run, head["ref"], why=why, verdict="APPROVE", slot=rj.slot)
+                checker_record.settle(self.store, run, rid, head["version"], chapter_id=chapter_id)
                 if trust:
                     approval_trust.note(self.store, run["project_id"], run["branch_id"], head,
                                         how="self_review_later" if trust.get("later") else "self_review",
@@ -1660,6 +1681,14 @@ class AutoBookService(_Runner):
                    if kind == "loop" else f"🔁 The {label}: fixing it would change an approved fact — asking you",
                    record_id=rid, code="REVIEW_LOOP" if kind == "loop" else "CANON_CHANGE")
         what = d["change"]
+        rows = review.get("reviewers") if isinstance(review.get("reviewers"), list) else \
+            [{"slot": review.get("slot"), "verdict": review.get("verdict")}]
+        prov = self.app.engine.providers
+        parties = {"writer_slot": review.get("writer_slot"),  # 🧑‍⚖️ who disagrees (stand_in.py never asks them)
+                   "writer": checker_record.family_of_slot(prov, review.get("writer_slot")),
+                   "reviewer_slots": [r.get("slot") for r in rows if r.get("slot") and r.get("verdict") != "APPROVE"],
+                   "reviewers": sorted({checker_record.family_of_slot(prov, r.get("slot")) for r in rows
+                                        if r.get("slot") and r.get("verdict") != "APPROVE"} - {None})}
         msg = (f"{subject}: the AI reviewer keeps asking for the same change, and the fix did not settle it."
                if kind == "loop" else f"{subject}: fixing it would change an approved fact.")
         return StepProblem(
@@ -1668,7 +1697,7 @@ class AutoBookService(_Runner):
             "choose. Until then it is not approved.",
             record_id=rid, version=head["version"], module_id=head["module_id"], chapter_id=chapter_id,
             verdict=review.get("verdict"), reasons=(review.get("reasons") or [])[:4], options=d["options"],
-            decision=dict(d, change=what), subject=subject,
+            decision=dict(d, change=what), subject=subject, parties=parties,
             prev_version=int(prev["version"]) if prev_data is not None else None)
 
     def _subject(self, head: dict | None, chapter_id: str | None = None) -> str:
@@ -1821,6 +1850,9 @@ class AutoBookService(_Runner):
                                   "applied": len(applied), "at": now_iso()})
             if ok:
                 ed["kept"] = int(ed.get("kept", 0)) + 1
+                if craft.get("independent") is not False:  # 📊 the editor's notes held up: its rewrite made it better
+                    checker_record.note(self.store, checker_record.family_of_slot(
+                        self.app.engine.providers, craft.get("slot")), "style", "confirmed")
                 self._made(run, self.bp(run).rec(rid)["ref"])
                 self.event(run, "editor", f"Editor's rewrite of the {label} kept (round {n}): {why}", record_id=rid,
                            code="EDITOR_REWRITE_KEPT")
