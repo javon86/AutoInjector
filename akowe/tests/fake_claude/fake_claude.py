@@ -10,7 +10,8 @@ Modes (env FAKE_CLAUDE_MODE, or FAKE_CLAUDE_MODE_<JOB> for one job kind): ok, ma
 slow_tree (also starts a child process), crash, unknown_flag (refuses --permission-mode), flaky (crashes on the first
 call only; state file FAKE_CLAUDE_STATE). FAKE_CLAUDE_DELAY: seconds to wait before answering. FAKE_CLAUDE_LOG: a folder
 where each call writes {job, start, end, pid, argv, stdin_chars, argv_chars} (for the overlap and privacy tests).
-FAKE_CLAUDE_FACTS=wrong: the fact check finds one wrong claim with a fix. FAKE_CLAUDE_PROBLEM=1: continuity finds one.
+FAKE_CLAUDE_FACTS=wrong: the fact check finds one wrong claim with a fix. FAKE_CLAUDE_STANDIN (stand_in job):
+accept | keep | unsure | low (a low confidence). FAKE_CLAUDE_PROBLEM=1: continuity finds one.
 Step 2 jobs: prepare (two scene cards and an empty needs list), variety, the specialists (dialogue / pacing / sensory /
 subtext: one minor problem with FAKE_CLAUDE_SPECIALIST=1), style and specifics (line rewrites), bible_fill (every
 asked field) and launch_kit (every asked field in its shape).
@@ -48,6 +49,11 @@ def first_sentence(text):
 def answer(job, ctx):
     if job == "login_check":
         return {"ok": True}
+    if job == "stand_in":  # 🧑‍⚖️ FAKE_CLAUDE_STANDIN: accept (default) | keep | unsure | low
+        how = env("FAKE_CLAUDE_STANDIN", "accept")
+        choice = {"accept": "accept_change", "keep": "keep_original", "unsure": "unsure"}.get(how, "accept_change")
+        return {"choice": choice, "confidence": 0.4 if how == "low" else 0.92,
+                "reason": f"Claude Code read the finding and the canon ({how})."}
     if job == "research":
         notes = []
         for c in ctx.get("chapters") or []:

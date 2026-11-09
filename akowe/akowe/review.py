@@ -376,6 +376,7 @@ class ReviewService:
         self._jobs: dict[str, ReviewJob] = {}
         self._editor = None
         self._scenes = None
+        self.checker_policy: dict | None = None  # 🔢 a ⚡ run's own checker order (None: Settings › AI)
 
     @property
     def editor(self):
@@ -516,6 +517,23 @@ class ReviewService:
         job.avoid_families = {fam} if fam else set()
         pref = self.reviewer_settings()["slot"]
         job.prefer_slots = [pref] if pref else []
+        # 🔢 the checker order setting (checker_order.py): best track record first / the author's own order, and the
+        # AIs switched off for checks are never asked (the writer stays the last resort, as before)
+        try:
+            from . import checker_order  # noqa: PLC0415
+            pol = self.checker_policy or checker_order.settings(self.store)
+            prov = getattr(self.engine.providers, "_base", self.engine.providers)
+            slots = [s for s in prov.slots() if s.get("adapter_id") not in ("none", None)]
+            ordered, how = checker_order.order_slots(self.store, pol, [s for s in slots
+                                                                       if providers_mod.slot_family(s) != fam])
+            job.never_slots = [s["slot_id"] for s in slots if checker_order.is_off(
+                pol, providers_mod.slot_family(s) or s["slot_id"]) and s["slot_id"] != writer.get("slot")]
+            if how != "usual":
+                job.prefer_slots = [s["slot_id"] for s in ordered]
+            elif pref in job.never_slots:
+                job.prefer_slots = []
+        except Exception:  # noqa: BLE001 - who checks first is a preference: never break a review over it
+            log.exception("could not apply the checker order")
 
     # ------------------------------------------------------------------ settings and stored verdicts
     def settings(self, pid: str) -> dict:

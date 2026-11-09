@@ -450,6 +450,7 @@ class Job:
         self.prefer_slots: list[str] = []
         self.avoid_slots: list[str] = []
         self.avoid_families: set = set()
+        self.never_slots: list[str] = []   # 🔢 AIs switched off for checks: never chosen for this job
         self.cross_pin = False
         self.failovers: list[dict] = []    # calls moved to another AI because one was not working (P18.9)
 
@@ -611,6 +612,8 @@ class AssistService:
         (UPSTREAM_UNAVAILABLE). ``exclude``: slots that already failed in this call."""
         prov = self._providers(job)
         waited_since = time.monotonic()
+        if not job.slot_pref and getattr(job, "never_slots", None):
+            exclude = set(exclude) | set(job.never_slots)  # 🔢 switched off for checks (checker_order.py)
         while True:
             job.check()
             slots = prov.slots()

@@ -4,6 +4,8 @@ author's typed draft away (it was kept only for the version it was started on). 
 offers to load the newest version, and the draft comes back on top of it with a notice; saving then works."""
 from __future__ import annotations
 
+import time
+
 from .test_ui_followthrough import autobook
 from .ui_helpers import assert_clean, open_app
 
@@ -39,7 +41,14 @@ def test_conflict_keeps_the_typed_chapter_and_saves_it_on_the_newest_version(mak
     assert "MY TYPED PARAGRAPH" in page.input_value("#sd-text")
     page.get_by_role("button", name="💾 Save as a new version").click()
     page.wait_for_function("() => /waiting for your approval/.test(document.querySelector('#main').innerText)", timeout=10000)
-    det = ai_server.api("GET", f"/projects/{pid}/branches/main/records/{rid}")
+    # "waiting for your approval" can already be on the page (the other window's version) before this save lands, so
+    # wait for the save itself (a CI run read the record one save too early: version 2 instead of 3)
+    deadline = time.monotonic() + 15
+    while True:
+        det = ai_server.api("GET", f"/projects/{pid}/branches/main/records/{rid}")
+        if det["versions"][-1]["version"] >= cur["version"] + 2 or time.monotonic() > deadline:
+            break
+        time.sleep(0.2)
     assert det["versions"][-1]["version"] == cur["version"] + 2
     assert "MY TYPED PARAGRAPH" in det["versions"][-1]["data"]["text"]
     assert_clean(page, "edit conflict")

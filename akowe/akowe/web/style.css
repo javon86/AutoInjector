@@ -1963,3 +1963,13 @@ table.s7-heat { width: auto; }
 .mb-paste-row { gap: 8px; align-items: center; flex-wrap: wrap; margin: 6px 0; }
 .paste-dialog textarea { width: 100%; max-width: 100%; box-sizing: border-box; font-family: inherit; }
 .paste-summary ul { margin: 2px 0 8px; }
+
+/* 📊 🔢 🧑‍⚖️ checkers: the track record, the order editor and the stand-in notes (checkers.js) */
+.ck-rows li { margin: .25rem 0; }
+.ck-small strong { font-weight: 600; opacity: .85; }
+.ck-order { padding-left: 1.4rem; }
+.ck-item { margin: .2rem 0; display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; }
+.ck-off .ck-name { text-decoration: line-through; opacity: .7; }
+.ck-make .row { gap: .5rem; flex-wrap: wrap; }
+.si-note { margin: .3rem 0; overflow-wrap: anywhere; }
+.si-undone { opacity: .75; }

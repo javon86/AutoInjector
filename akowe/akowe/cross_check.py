@@ -94,23 +94,82 @@ def working(svc, run: dict, *, needed: int = 4000) -> list[dict]:
     return out
 
 
+def policy_of(svc, run: dict | None) -> dict:
+    """🔢 The checker order setting of this run (checker_order.py): the run's own, else Settings › AI."""
+    from . import checker_order  # noqa: PLC0415
+    try:
+        return checker_order.of_run(run, getattr(svc, "store", None))
+    except Exception:  # noqa: BLE001
+        return dict(checker_order.DEFAULT)
+
+
 def checker_slots(svc, run: dict, *, writer: str | None = None, needed: int = 4000) -> list[str]:
     """The AIs that check (slot ids), the writer's AI last. ``[]`` means "the old way": the setting is One, or fewer
-    than two AIs work right now (the caller then uses its one AI exactly as before)."""
+    than two AIs work right now (the caller then uses its one AI exactly as before). 🔢 In the order the checker order
+    setting asks for (best track record first / the author's own order); an AI switched off for checks never checks."""
+    from . import checker_order  # noqa: PLC0415
     n = LIMIT.get(setting_of(run), 3)
     if n < 2:
         return []
-    ws = working(svc, run, needed=needed)
-    if len(ws) < 2:
-        return []
+    pol = policy_of(svc, run)
     try:
         prov = _base(svc.app.engine.providers)
         wfam = providers_mod.slot_family(_slot(prov, writer)) if writer else None
     except Exception:  # noqa: BLE001
         wfam = None
-    ordered = [s for s in ws if providers_mod.slot_family(s) != wfam] + \
-        [s for s in ws if wfam and providers_mod.slot_family(s) == wfam]
+    ws = working(svc, run, needed=needed)
+    allowed = [s for s in ws if not checker_order.is_off(pol, providers_mod.slot_family(s) or s["slot_id"])]
+    if len(allowed) < len(ws):
+        note_shortfall(svc, run, ws, pol, wfam, n)
+    if len(allowed) < 2:
+        return []
+    others, _how = checker_order.order_slots(getattr(svc, "store", None), pol, [s for s in allowed
+                                                             if providers_mod.slot_family(s) != wfam])
+    ordered = others + [s for s in allowed if wfam and providers_mod.slot_family(s) == wfam]
     return [s["slot_id"] for s in ordered[:n]]
+
+
+def note_reviewers(svc, run: dict, review: dict, two: bool) -> None:
+    """🔢 After a record's review in a run: when AIs switched off for checks leave fewer reviewers than wanted (two for a
+    chapter with "All"/"Two", else one besides the writer), say so once in plain words. Never raises."""
+    try:
+        pol = policy_of(svc, run)
+        if not pol.get("off"):
+            return
+        prov = _base(svc.app.engine.providers)
+        wfam = providers_mod.slot_family(_slot(prov, review.get("writer_slot"))) if review.get("writer_slot") else None
+        note_shortfall(svc, run, working(svc, run), pol, wfam, 3 if two else 2)
+    except Exception:  # noqa: BLE001
+        log.debug("could not check the reviewers against the checker order", exc_info=True)
+
+
+def note_shortfall(svc, run: dict | None, ws: list[dict], pol: dict, wfam: str | None, want: int) -> None:
+    """🔢 Say once per run, in plain words, when switching AIs off for checks leaves fewer checkers than wanted."""
+    from . import checker_order  # noqa: PLC0415
+    if not run:
+        return
+    try:
+        prov = _base(svc.app.engine.providers)
+        fams_work = [providers_mod.slot_family(s) or s["slot_id"] for s in ws]
+        fams_all = list(dict.fromkeys(providers_mod.slot_family(s) or s["slot_id"] for s in prov.ai_slots()))
+        can = [f for f in fams_work if f != wfam and not checker_order.is_off(pol, f)]
+        off = [f for f in pol.get("off") or [] if f in fams_all]
+        down = [f for f in fams_all if f not in fams_work and f != wfam and not checker_order.is_off(pol, f)]
+        line = checker_order.shortfall_line(can=can, off=off, writer=wfam, down=down, want=max(1, want - 1))
+    except Exception:  # noqa: BLE001
+        log.debug("could not word the checker shortfall", exc_info=True)
+        return
+    if not line:
+        return
+    said = run.setdefault("checker_notes", [])
+    if line in said:
+        return
+    said.append(line)
+    run["checker_shortfall"] = line
+    try:
+        svc.event(run, "note", "🔢 " + line, code="CHECKERS_SHORT")
+    except Exception:  # noqa: BLE001
+        log.debug("could not note the checker shortfall", exc_info=True)
 
 
 # ====================================================================== merging what the AIs found (no AI)
@@ -278,14 +337,18 @@ def second_slot(svc, run: dict, first: dict) -> str | None:
     none right now (never waits)."""
     if setting_of(run) == "one" or first.get("independent") is False:
         return None
+    from . import checker_order  # noqa: PLC0415
     try:
         prov = _base(svc.app.engine.providers)
         bad = {providers_mod.slot_family(_slot(prov, x)) for x in (first.get("writer_slot"), first.get("slot")) if x}
         bad.discard(None)
-        for s in working(svc, run):
-            if s["slot_id"] in (first.get("writer_slot"), first.get("slot")) or providers_mod.slot_family(s) in bad:
-                continue
-            return s["slot_id"]
+        pol = policy_of(svc, run)
+        cand = [s for s in working(svc, run)
+                if s["slot_id"] not in (first.get("writer_slot"), first.get("slot"))
+                and providers_mod.slot_family(s) not in bad]
+        ordered, _how = checker_order.order_slots(getattr(svc, "store", None), pol, cand)  # 🔢 switched-off AIs never check
+        if ordered:
+            return ordered[0]["slot_id"]
     except Exception:  # noqa: BLE001
         log.exception("could not look for a second reviewer")
     return None

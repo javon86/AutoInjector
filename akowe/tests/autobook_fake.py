@@ -247,6 +247,10 @@ class BookFakeAI:
         self.kind_script: list = []              # 📚 scripted stage placements (dicts or callables(ctx)), one per call
         self.kind_pick = None                    # 📚 the kind of story the invent step picks (when asked), e.g. "quest"
         self.alongside_script: list = []         # ✍ Write alongside me: scripted answers (dicts or callables(ctx))
+        # 🧑‍⚖️ the stand-in decider (stand_in.py): its answers, one per call (dicts or callables(ctx)); default: accept
+        self.stand_in_script: list = []
+        self.stand_in_default = {"choice": "accept_change", "confidence": 0.9,
+                                 "reason": "The correction answers the reviewer's finding and agrees with the canon."}
 
     def fail_next(self, *excs):
         self.failures.extend(excs)
@@ -285,6 +289,12 @@ class BookFakeAI:
 
     # ------------------------------------------------------------------ answers
     def _answer(self, ctx, props, schema):
+        if ctx.get("akowe_task") == "stand_in":  # 🧑‍⚖️ the stand-in decider: accept / keep / unsure
+            with self.lock:
+                scripted = self.stand_in_script.pop(0) if self.stand_in_script else None
+            if scripted is not None:
+                return "stand_in", scripted(ctx) if callable(scripted) else copy.deepcopy(scripted)
+            return "stand_in", copy.deepcopy(self.stand_in_default)
         if ctx.get("akowe_task") == "story_details":  # ⏱ story details (essentials / just in time)
             return "details", self._details(ctx)
         if "placements" in props and "story_kind" in ctx:  # 📚 place where each stage of the kind of story begins
