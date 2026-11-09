@@ -59,6 +59,10 @@ its own short tour too (Akọwe → ❓ Help → 🧭 Take the tour).
   pressing Stop). If it cannot, it tells you once.
 - If a website changed its layout and the AI still does not work, press **🎯 Point at it** and click the message box,
   the Send button or the reply, or press **🔢 Do it for me with a number** and follow the steps.
+- **"Claude's page changed; AutoInjector stopped using an old saved setting that no longer fits."** You may see
+  this line under the Compose box. It means a part you (or AutoInjector) once saved with 🎯 no longer matches that
+  website, so AutoInjector went back to its built-in way, which works. Nothing to do. If things got worse after it,
+  press **↩ Put it back**; **✕** just hides the line.
 - **"Akọwe is using this AI":** while Akọwe waits for an answer, that AI's card shows a yellow note. Don't type in that
   AI's window until it is done; use another AI meanwhile.
 

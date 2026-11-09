@@ -366,6 +366,52 @@ async function clearPickOverrides(site) {
 }
 // the number teach's progress also shows on the pane's 🎯 card
 if (window.api && window.api.onSelfRepair) window.api.onSelfRepair((p) => { try { if (!p || !p.site || !pickerUi[p.site]) return; const ps = pickerState(p.site); ps.status = Object.assign({ items: {} }, ps.status || {}, { repair: p.repair }); renderPicker(p.site); } catch (_) {} });
+// 2026-11-09: a saved 🎯 / learned setting that no longer fit the AI's page was retired by itself — one plain line
+// per AI, with "↩ Put it back" (the same as ↺ Undo on that AI's 🎯 card).
+const retireNoticeShown = new Map(); // "site:role" -> notice
+function renderRetireNotices() {
+  const box = el("retire-notice");
+  if (!box) return;
+  box.textContent = "";
+  for (const [key, n] of retireNoticeShown) {
+    const line = document.createElement("div");
+    line.className = "rn-line";
+    const t = document.createElement("span");
+    t.className = "rn-text";
+    t.textContent = `⚠️ ${n.say}`;
+    const back = document.createElement("button");
+    back.type = "button";
+    back.textContent = "↩ Put it back";
+    back.title = `Use the old saved setting for ${n.label} again`;
+    back.addEventListener("click", async () => {
+      back.disabled = true;
+      let r = null;
+      try { r = await window.api.pickerUndoRetire(n.site, n.role); } catch (_) { r = null; }
+      if (r && r.ok) { retireNoticeShown.delete(key); setStatus(`${n.label}: the old saved setting is back.`); }
+      else { back.disabled = false; setStatus(`${n.label}: couldn't put the old setting back${r && r.error === "NOTHING_TO_UNDO" ? " — there is nothing to put back" : ""}.`); if (r && r.error === "NOTHING_TO_UNDO") retireNoticeShown.delete(key); }
+      renderRetireNotices();
+    });
+    const x = document.createElement("button");
+    x.type = "button";
+    x.className = "rn-x";
+    x.textContent = "✕";
+    x.title = "Hide this message";
+    x.setAttribute("aria-label", "Hide this message");
+    x.addEventListener("click", () => { retireNoticeShown.delete(key); renderRetireNotices(); });
+    line.append(t, back, x);
+    box.appendChild(line);
+  }
+  box.hidden = retireNoticeShown.size === 0;
+}
+function noteRetireNotice(n) {
+  if (!n || !n.site || !n.role) return;
+  const key = `${n.site}:${n.role}`;
+  if (n.undone) retireNoticeShown.delete(key);
+  else retireNoticeShown.set(key, n);
+  renderRetireNotices();
+}
+if (window.api && window.api.onSelectorRetired) window.api.onSelectorRetired(noteRetireNotice);
+if (window.api && window.api.getState) window.api.getState().then((s) => { for (const n of (s && s.retireNotices) || []) noteRetireNotice(n); }).catch(() => {});
 if (window.api && window.api.onPicker) window.api.onPicker((st) => { try { if (st && st.ok && st.site) { const ps = pickerState(st.site); ps.status = st; if (!st.picking && ps.busy && ps.busy !== "test") ps.busy = null; renderPicker(st.site); } } catch (_) {} });
 
 function toggleLoginMenu(site) {

@@ -253,6 +253,7 @@ const state = {
   selectorOverrides: {}, // site -> { input?, send?, assistant? } — user-picked CSS selectors (see selector:pick), tried before the built-in candidates in selectors.js
   learnedSelectors: {}, // site -> { input?|send?|assistant?|stop?|user?: { selector, how: alternative|page-search|teach, learnedAt, version } } — found by the self-repair (P18.3/4/7) and proved by a check-in; persisted (versioned)
   retiredSelectors: {}, // PR #120: site -> role -> { selector, source: pick|learned, retiredAt, kind, meta?, learned? } — a saved / learned selector that kept failing while the built-in way worked, forgotten by itself; kept so ↺ Undo can bring it back
+  staleEvidence: {}, // 2026-11-09: site -> role -> { selector, starts, lastRun, at } — on how many app starts a saved reply selector was seen not to fit (found nothing / only part of a reply) while the built-in reader worked; at STALE_RETIRE_STARTS it is retired by itself
   pickMeta: {}, // P38: site -> { input?|send?|assistant?|user?: { savedAt, how: pick|number, rev, version } } — when each 🎯 / 🔢 SAVED selector (in selectorOverrides) was locked in; persisted (versioned)
   selfRepair: { intervalMin: 20, startup: true, carryOn: true }, // P18.1 check-ins: every N minutes while an AI is idle (0 = off), and once at start; carryOn: after a check-in / 🔢, ask a busy AI to carry on
   savedLogins: {}, // site -> [{ id, label, username, encryptedPassword }] — encryptedPassword is a safeStorage-encrypted (OS keychain) ciphertext, base64-encoded; the plaintext password is never stored, never sent to the renderer, never logged. See logins:save/logins:fill.
@@ -307,6 +308,7 @@ for (const site of SITE_IDS) {
   state.learnedSelectors[site] = {};
   state.pickMeta[site] = {};
   state.retiredSelectors[site] = {};
+  state.staleEvidence[site] = {};
 }
 
 // Built-in starter prompt: a one-click sanity check that the whole
@@ -761,6 +763,7 @@ function buildStateSnapshotText() {
         selectorOverrides: state.selectorOverrides,
         pickMeta: { version: PICK_VERSION, sites: state.pickMeta }, // P38: when each saved pick was locked in (no page text)
         retiredSelectors: state.retiredSelectors, // PR #120: out-of-date saved selectors that were forgotten (for ↺ Undo)
+        staleEvidence: state.staleEvidence, // 2026-11-09: on how many starts a saved selector did not fit (CSS + counts only)
         learnedSelectors: { version: selfRepairLib.LEARNED_VERSION, sites: state.learnedSelectors }, // P18: selectors the self-repair learned (CSS only — never page text)
         selfRepair: { intervalMin: state.selfRepair.intervalMin, startup: state.selfRepair.startup !== false, carryOn: state.selfRepair.carryOn !== false },
         nextMsgSeq: state.nextMsgSeq, // TR-29: [MSG #] numbers carry on after a restart (the AIs remember the old ones)
@@ -857,6 +860,16 @@ function loadPersistedState() {
         const x = m[role];
         if (!x || typeof x !== "object" || typeof x.selector !== "string" || !x.selector.trim() || x.selector.length > 300) continue;
         state.retiredSelectors[site][role] = { selector: x.selector, source: x.source === "learned" ? "learned" : "pick", retiredAt: Number(x.retiredAt) || 0, kind: typeof x.kind === "string" ? x.kind.slice(0, 20) : null, meta: x.meta && typeof x.meta === "object" ? x.meta : null, learned: x.learned && typeof x.learned === "object" ? x.learned : null };
+      }
+    }
+  }
+  if (snap.staleEvidence && typeof snap.staleEvidence === "object") {
+    for (const site of SITE_IDS) {
+      const m = snap.staleEvidence[site]; if (!m || typeof m !== "object") continue;
+      for (const role of PICK_ROLES_ALL) {
+        const x = m[role];
+        if (!x || typeof x !== "object" || typeof x.selector !== "string" || !x.selector.trim() || x.selector.length > 300) continue;
+        state.staleEvidence[site][role] = { selector: x.selector, starts: Math.max(0, Math.min(99, Math.round(Number(x.starts) || 0))), lastRun: typeof x.lastRun === "string" ? x.lastRun.slice(0, 40) : null, at: Number(x.at) || 0 };
       }
     }
   }
@@ -1197,7 +1210,8 @@ async function probePane(site) {
   // built-in reader does — the reader uses the built-in one (it passes the saved one
   // over); say so, and how to clear it.
   const ovMiss = !!(r.assistant && r.assistant.overrideMisses);
-  logEvent("pane-check", { site, overrides: Object.keys(state.selectorOverrides[site] || {}).length ? { ...state.selectorOverrides[site] } : null, learned: Object.keys(learnedNow).length ? learnedNow : undefined, ok: !!r.ok, input: r.input ? r.input.found : null, send: r.send ? r.send.found : null, replies: r.assistant ? r.assistant.count : null, replySelector: r.assistant ? r.assistant.selector : null, rows: r.rows || undefined, usingBuiltIns: ovMiss || undefined, note: ovMiss ? `the saved reply selector (${eff.assistant}) finds no reply on ${siteLabel(site)}'s page, but the built-in reader finds ${r.assistant.builtinCount} — using the built-in one. Press 🎯 → "↺ Forget what I taught" to clear it.` : undefined, signedOutHint: !!r.signedOutHint, severity: (r.ok && r.input && !r.input.found) || ovMiss ? "warn" : undefined });
+  if (ovMiss) { try { noteStaleThisStart(site, "assistant", "ignored"); } catch (_) {} }
+  logEvent("pane-check", { site, overrides: Object.keys(state.selectorOverrides[site] || {}).length ? { ...state.selectorOverrides[site] } : null, learned: Object.keys(learnedNow).length ? learnedNow : undefined, ok: !!r.ok, input: r.input ? r.input.found : null, send: r.send ? r.send.found : null, replies: r.assistant ? r.assistant.count : null, replySelector: r.assistant ? r.assistant.selector : null, rows: r.rows || undefined, usingBuiltIns: ovMiss || undefined, note: ovMiss ? `the saved reply selector (${eff.assistant}) finds no reply on ${siteLabel(site)}'s page, but the built-in reader finds ${r.assistant.builtinCount} — using the built-in one. If this keeps happening AutoInjector stops using it by itself (or press 🎯 → "↺ Forget what I taught").` : undefined, signedOutHint: !!r.signedOutHint, severity: (r.ok && r.input && !r.input.found) || ovMiss ? "warn" : undefined });
   broadcastHealth();
   return r;
 }
@@ -1713,6 +1727,7 @@ function noteStaleSavedSend(target, r) {
   const sel = (effectiveOverrides(target) || {}).send || "";
   if (staleSendNoted[target] === sel) return;
   staleSendNoted[target] = sel;
+  if (r && r.ok) { try { noteStaleThisStart(target, "send", "send"); } catch (_) {} } // the built-in Send worked this start
   const L = siteLabel(target);
   logEvent("send-saved-button-missing", { target, selector: sel, severity: "warn", note: `The Send button saved for ${L} (🎯 / 🔢 / learned) isn't on ${L}'s page any more — AutoInjector used ${L}'s usual Send button or the Enter key instead${r && r.ok === false ? ", and that didn't send either" : ""}. Clear it on ${L}'s 🎯 card (or run 🔢 again) to stop this warning.` });
 }
@@ -1741,7 +1756,13 @@ function effectiveSource(site, role) {
 function noteSavedSelectorOutcome(site, role, failed, kind) {
   const map = staleStreak[site] || (staleStreak[site] = {});
   const src = effectiveSource(site, role);
-  if (!src || !failed) { delete map[role]; return null; }
+  if (!src || !failed) {
+    delete map[role];
+    // the saved one worked: what earlier starts saw against it no longer counts
+    const ev = (state.staleEvidence[site] || {})[role];
+    if (src && ev && ev.selector === src.selector) { const n = { ...state.staleEvidence[site] }; delete n[role]; state.staleEvidence[site] = n; saveStateDebounced(); }
+    return null;
+  }
   if (!map[role] || map[role].selector !== src.selector) map[role] = { selector: src.selector, n: 0 };
   map[role].n++;
   if (map[role].n < STALE_RETIRE_AFTER) return null;
@@ -1749,8 +1770,34 @@ function noteSavedSelectorOutcome(site, role, failed, kind) {
   delete map[role];
   return retireSavedSelector(site, role, src, kind);
 }
+// 2026-11-09 (log: "reply-selector-ignored" for Claude's div[data-cds="Prose"] and "reply-selector-fragment" for
+// Gemini at EVERY start, never forgotten — a start rarely saw 3 replies in a row from that AI). The same selector
+// seen not to fit on STALE_RETIRE_STARTS different app starts (while the built-in way worked each time) is also
+// forgotten by itself — remembered across starts in state.staleEvidence. Once per start; a saved one that works
+// in between starts the count over; never one the user set in the last hour.
+const STALE_RETIRE_STARTS = Number(process.env.AUTOINJECTOR_STALE_RETIRE_STARTS) || 3;
+const RUN_ID = `${Date.now().toString(36)}-${process.pid}`;
+function noteStaleThisStart(site, role, kind) {
+  const src = effectiveSource(site, role);
+  if (!src) return null;
+  const m = state.staleEvidence[site] || (state.staleEvidence[site] = {});
+  let ev = m[role];
+  if (!ev || ev.selector !== src.selector) ev = { selector: src.selector, starts: 0, lastRun: null, at: 0 };
+  if (ev.lastRun === RUN_ID) return null; // this start already counted
+  ev = { selector: ev.selector, starts: ev.starts + 1, lastRun: RUN_ID, at: Date.now() };
+  m[role] = ev;
+  saveStateDebounced();
+  logEvent("selector-stale-seen", { site, role, selector: src.selector, source: src.source, kind: kind || null, starts: ev.starts, retireAt: STALE_RETIRE_STARTS });
+  if (ev.starts < STALE_RETIRE_STARTS) return null;
+  if (src.at && Date.now() - src.at < STALE_KEEP_RECENT_MS) return null; // the user set it in the last hour: left alone
+  if (staleStreak[site]) delete staleStreak[site][role];
+  return retireSavedSelector(site, role, src, kind, { starts: ev.starts });
+}
+// The plain one-line notices for the control panel (this run): "Claude's page changed; … ↩ Put it back".
+const retireNotices = [];
+function retireNoticeSay(site) { return `${siteLabel(site)}'s page changed; AutoInjector stopped using an old saved setting that no longer fits.`; }
 const ROLE_WORDS = { send: "Send button", assistant: "reply reader", input: "message box", user: "your-message marker", stop: "Stop button", image: "picture finder" };
-function retireSavedSelector(site, role, src, kind) {
+function retireSavedSelector(site, role, src, kind, extra) {
   const backup = { selector: src.selector, source: src.source, retiredAt: Date.now(), kind: kind || null, meta: null, learned: null };
   if (src.source === "learned") {
     backup.learned = { ...(state.learnedSelectors[site] || {})[role] };
@@ -1761,10 +1808,16 @@ function retireSavedSelector(site, role, src, kind) {
     const m = { ...(state.pickMeta[site] || {}) }; delete m[role]; state.pickMeta[site] = m;
   }
   state.retiredSelectors[site] = { ...(state.retiredSelectors[site] || {}), [role]: backup };
+  if (state.staleEvidence[site] && state.staleEvidence[site][role]) { const n = { ...state.staleEvidence[site] }; delete n[role]; state.staleEvidence[site] = n; }
   if (role === "assistant") { overrideIgnoredWarned[site] = false; fragmentWarned[site] = false; }
   saveStateDebounced();
   const L = siteLabel(site);
-  logEvent("selector-retired", { site, role, selector: src.selector, source: src.source, after: STALE_RETIRE_AFTER, note: `${L}'s saved ${ROLE_WORDS[role] || role} was out of date and has been forgotten; the built-in one works. (↺ Undo on ${L}'s 🎯 card brings it back.)` });
+  const starts = extra && extra.starts ? extra.starts : undefined;
+  logEvent("selector-retired", { site, role, selector: src.selector, source: src.source, after: starts ? undefined : STALE_RETIRE_AFTER, starts, note: `${L}'s saved ${ROLE_WORDS[role] || role} was out of date and has been forgotten; the built-in one works. (↺ Undo on ${L}'s 🎯 card brings it back.)` });
+  const notice = { site, role, label: L, say: retireNoticeSay(site), at: Date.now() };
+  for (let i = retireNotices.length - 1; i >= 0; i--) if (retireNotices[i].site === site && retireNotices[i].role === role) retireNotices.splice(i, 1);
+  retireNotices.push(notice);
+  broadcast("selector-retired", notice);
   pickerStatus(site).then((st) => broadcast("picker", st)).catch(() => {});
   return backup;
 }
@@ -1779,6 +1832,9 @@ function undoRetiredSelector(site, role) {
   }
   const n = { ...(state.retiredSelectors[site] || {}) }; delete n[role]; state.retiredSelectors[site] = n;
   if (staleStreak[site]) delete staleStreak[site][role];
+  if (state.staleEvidence[site] && state.staleEvidence[site][role]) { const e = { ...state.staleEvidence[site] }; delete e[role]; state.staleEvidence[site] = e; }
+  for (let i = retireNotices.length - 1; i >= 0; i--) if (retireNotices[i].site === site && retireNotices[i].role === role) retireNotices.splice(i, 1);
+  broadcast("selector-retired", { site, role, label: siteLabel(site), undone: true });
   saveStateDebounced();
   logEvent("selector-retire-undone", { site, role, selector: b.selector, note: `${siteLabel(site)}'s saved ${ROLE_WORDS[role] || role} is back (↺ Undo)` });
   return { ok: true, role, selector: b.selector };
@@ -2592,6 +2648,10 @@ async function missingEndTagReprompt(site, rawText) {
 // (a model that keeps forgetting can't loop), reset by a correctly tagged reply.
 async function missingToReminder(site, { forwarded = 0 } = {}) {
   if (!state.relayEnabled) return;
+  // 2026-11-09 log: never while Akọwe (or Alfred) waits on this AI or its chat is being swapped for a fresh one —
+  // the reply was read and handed on fine; a reminder typed now only gets in the way of the next request.
+  const busyWith = akoweUsingPane(site) ? "akowe" : alfredAsks[site] ? "alfred" : freshChatSwitching[site] ? "fresh-chat" : null;
+  if (busyWith) { logEvent("totag-missing", { site, skipped: busyWith, forwardedByAuto: forwarded, note: "no [TO:] tag, but no reminder: this AI is busy with another job" }); return; }
   const n = (state.noToReminders[site] || 0) + 1;
   state.noToReminders[site] = n;
   logEvent("totag-missing", { site, attempt: n, forwardedByAuto: forwarded, severity: "warn" });
@@ -4397,6 +4457,7 @@ function probeReplyKindFor(site, text, answers) {
 }
 async function pollSite(site) {
   if (state.busy[site]) return;
+  if (freshChatSwitching[site]) return; // the pane is switching to a new chat: nothing on it is a reply (2026-11-09 log)
   const view = siteViews[site];
   if (!view || view.webContents.isDestroyed()) return;
   state.busy[site] = true;
@@ -4424,14 +4485,19 @@ async function pollSite(site) {
     // TR-28: the Stop button alone (older read results without the field fall back to `generating`).
     state.stopShown[site] = res && typeof res.stopShown === "boolean" ? res.stopShown : generating;
     readCount[site] = res && Number.isInteger(res.count) ? res.count : null;
-    if (res && res.ok) lastReadFlags[site] = { ignored: !!res.overrideIgnored, fragment: !!res.fragmentFixed };
+    // 2026-11-09: a "part of the reply" fix with NO saved reply selector is the reader's own job (the page split one
+    // reply over several blocks) — never blamed on a saved selector (the log's Gemini warning at every start).
+    const savedReader = !!effectiveOverrides(site).assistant;
+    if (res && res.ok) lastReadFlags[site] = { ignored: !!res.overrideIgnored, fragment: !!res.fragmentFixed && savedReader };
     if (res && res.overrideIgnored && !overrideIgnoredWarned[site]) {
       overrideIgnoredWarned[site] = true;
-      logEvent("reply-selector-ignored", { site, selector: effectiveOverrides(site).assistant || null, severity: "warn", note: `the saved reply selector finds no reply of ${siteLabel(site)}'s (nothing, only your own messages, or the sidebar) — reading with the built-in reader instead. Press 🎯 → "↺ Forget what I taught" to clear it.` });
+      try { noteStaleThisStart(site, "assistant", "ignored"); } catch (_) {}
+      logEvent("reply-selector-ignored", { site, selector: effectiveOverrides(site).assistant || null, severity: "warn", note: `the saved reply selector finds no reply of ${siteLabel(site)}'s (nothing, only your own messages, or the sidebar) — reading with the built-in reader instead; if this keeps happening AutoInjector stops using it by itself.` });
     } else if (res && res.ok && !res.overrideIgnored && overrideIgnoredWarned[site] && res.text) overrideIgnoredWarned[site] = false;
-    if (res && res.fragmentFixed && !fragmentWarned[site]) {
+    if (res && res.fragmentFixed && savedReader && !fragmentWarned[site]) {
       fragmentWarned[site] = true;
-      logEvent("reply-selector-fragment", { site, selector: (state.selectorOverrides[site] || {}).assistant || null, severity: "warn", note: "the saved reply selector only reads part of each reply; using the whole reply instead — clear it with 🎯 → Clear Overrides" });
+      try { noteStaleThisStart(site, "assistant", "fragment"); } catch (_) {}
+      logEvent("reply-selector-fragment", { site, selector: effectiveOverrides(site).assistant || null, severity: "warn", note: "the saved reply selector only reads part of each reply; using the whole reply instead — if this keeps happening AutoInjector stops using it by itself" });
     }
     if (generating || !hasEndTag(text)) tagSeenAt[site] = 0; // the settle ceiling restarts with each new tagged reply
     paneHealth.onRead(site, { textLen: text.length, generating, hasEndTag: hasEndTag(text), tail: text.slice(-160), nodeInfo: (res && res.nodeInfo) || null, inputFound: res && typeof res.inputFound === "boolean" ? res.inputFound : undefined });
@@ -4621,7 +4687,10 @@ async function pollSite(site) {
     // Applies on the baseline AND during House Rules stages; only the bare-token
     // self-tests / Tuner / test runs are left alone.
     const redrawCheck = !(selftestInFlight.has(site) || tunerInFlight.active || testRunInFlight.has(site));
-    if (redrawCheck && !answersNew && already && sameBlock && Date.now() - (already.ts || 0) < REPLY_REVISION_MS && sameReplyText(already.text, text)) {
+    // 2026-11-09: also the same words with the envelope tags now showing ([TO: USER] / [FROM: X] drawn in their own
+    // blocks a moment later) — e.g. a reply already handed to Akọwe untagged must not come back as a "new" reply.
+    const sameBody = !!already && sameReplyText(stripEnvelope(already.rawText || already.text), stripEnvelope(text));
+    if (redrawCheck && !answersNew && already && sameBlock && Date.now() - (already.ts || 0) < REPLY_REVISION_MS && (sameReplyText(already.text, text) || sameBody)) {
       state.captured[site] = { ...already, text, ts: Date.now() }; // a later re-draw is measured from this one
       if (forcedAccept) state.captured[site].rawText = acceptedUntaggedRaw[site];
       logEvent("reply-redrawn", { site, chars: text.length, note: "same reply re-drawn by the page — not captured or relayed again" });
@@ -5775,7 +5844,8 @@ ipcMain.handle("state:get", () => ({
   sequence: { active: state.sequence.active, index: state.sequence.index, total: state.sequence.steps.length },
   manager: managerSnapshot(),
   managerConfig: managerConfigSnapshot(),
-  managerLog: state.managerLog
+  managerLog: state.managerLog,
+  retireNotices: retireNotices.slice() // 2026-11-09: "X's page changed; … ↩ Put it back" (this run)
 }));
 
 ipcMain.handle("transcript:clear", () => { state.transcript = []; saveStateDebounced(); return { ok: true }; });
@@ -7049,7 +7119,7 @@ function chatImage() {
       try { await pollSite(CHAT_IMAGE_SITE); } catch (_) {}
       chatImageReleasedAt = 0; // the grace ends here: waiting messages for ChatGPT go in now, and their replies are normal replies again
     },
-    newChat: () => selfRepairReload(CHAT_IMAGE_SITE, { home: true }),
+    newChat: () => selfRepairReload(CHAT_IMAGE_SITE, { home: true, why: "picture" }),
     fetchViaSession: async (url) => {
       const view = siteViews[CHAT_IMAGE_SITE];
       const ses = view && view.webContents && view.webContents.session;
@@ -8803,7 +8873,7 @@ async function alfredAskPane(site, text, { timeoutMs = 180000, signal, attach = 
     await selfRepairMakeWay(site, token); // a check-in on this AI settles first (bounded), like an Akọwe prompt
     if (token.cancelled) { outcome = "CANCELLED"; return { ok: false, error: "CANCELLED", typed: false }; }
     if (akoweUsingPane(site)) { outcome = "AKOWE_USING"; return { ok: false, error: "AKOWE_USING" }; } // it took the pane meanwhile
-    if (freshChat) { try { await selfRepairReload(site, { home: true }); } catch (_) {} }
+    if (freshChat) { try { await selfRepairReload(site, { home: true, why: "alfred" }); } catch (_) {} }
     if (token.cancelled) { outcome = "CANCELLED"; return { ok: false, error: "CANCELLED", typed: false }; }
     if (attach) {
       const at = await attachFileToSite(site, attach);
@@ -8860,7 +8930,9 @@ async function selfRepairRunPage(site, script) {
   } catch (e) { return { ok: false, error: "SCRIPT_FAILED" }; }
   finally { clearTimeout(timer); }
 }
-async function selfRepairReload(site, { home = false } = {}) {
+// why: what asked for it, for the log ("self-repair" = a self-repair step; "fresh-chat" = Akọwe's
+// fresh chat before its next request; "picture" / "alfred" = a fresh chat for a 🎨 / 🎩 job; "you" = the ↻ button)
+async function selfRepairReload(site, { home = false, why = "self-repair" } = {}) {
   // ⬇ a file coming in from this pane (or a "Download" the user just clicked) finishes first
   try { await waitForPaneDownloads(site, home ? "opening a fresh chat" : "reloading the page"); } catch (_) {}
   const view = siteViews[site];
@@ -8881,7 +8953,7 @@ async function selfRepairReload(site, { home = false } = {}) {
   } catch (_) { return { ok: false }; }
   state.pending[site] = { text: "", sinceTs: Date.now(), reprompted: false };
   if (home) { state.captured[site] = null; capturedCount[site] = null; try { freshChat.reset(site); } catch (_) {} } // a fresh page is a new chat
-  logEvent("reload", { site, by: "self-repair", freshPage: !!home });
+  logEvent("reload", { site, by: why === "self-repair" ? "self-repair" : String(why).slice(0, 20), freshPage: !!home, note: why === "fresh-chat" ? "a fresh chat for Akọwe's next request (the New chat button did not give an empty chat)" : undefined });
   const ok = await loaded;
   return { ok: ok && !paneLoadFailed[site] };
 }
@@ -9138,7 +9210,7 @@ ipcMain.handle("selfrepair:teach-cancel", (_evt, payload) => {
 ipcMain.handle("selfrepair:reload", async (_evt, payload) => {
   const site = payload && payload.site;
   if (!SITES[site]) return { ok: false, error: "BAD_SITE" };
-  const r = await selfRepairReload(site, {});
+  const r = await selfRepairReload(site, { why: "you" });
   if (r.ok) selfRepair.requestCheck(site, "after-reload");
   return r;
 });
@@ -9182,7 +9254,17 @@ function freshChatForget(site) {
 }
 // Open a new chat in the pane: the site's own "New chat" button first, then (if that didn't give an empty chat with a
 // message box) the site's new-chat address. -> { ok, how: 'button' | 'address' }
+// 2026-11-09 log (build a916ba9): while the pane switched to a new chat (New chat clicked, then the page reloaded
+// when that did not give an empty chat) the reader kept reading the half-swapped page, took a piece of the OLD
+// reply for a new one, relayed it and nagged the AI about its missing [TO:] tag — typed into the new chat ahead of
+// Akọwe's request. Nothing on this pane is read while the switch runs; the new chat starts clean afterwards.
+const freshChatSwitching = {}; // site -> true while startFreshChat() runs
 async function startFreshChat(site) {
+  freshChatSwitching[site] = true;
+  try { return await startFreshChatNow(site); }
+  finally { freshChatSwitching[site] = false; }
+}
+async function startFreshChatNow(site) {
   // ⬇ a file coming in from this pane (or a "Download" just clicked) is let finish before the chat is swapped
   try { await waitForPaneDownloads(site, "opening a fresh chat"); } catch (_) {}
   const view = siteViews[site];
@@ -9197,7 +9279,7 @@ async function startFreshChat(site) {
     const chk = await selfRepairRunPage(site, freshChatMod.buildFreshCheckScript(assistant, input));
     if (chk && chk.ok && chk.replies === 0 && chk.input) { freshChatForget(site); return { ok: true, how: "button" }; }
   }
-  const r = await selfRepairReload(site, { home: true });
+  const r = await selfRepairReload(site, { home: true, why: "fresh-chat" });
   return { ok: !!(r && r.ok), how: "address" };
 }
 async function akoweFreshChatIfDue(site, ct) {

@@ -1,0 +1,21 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>ChatGPT tag-split reply fixture</title>
+<style>.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}</style></head>
+<body>
+<!-- 2026-11-09 log (build a916ba9): ChatGPT showed the reply's "[TO: USER]" line in its OWN small
+     block (the [data-message-author-role="assistant"] div holds nothing else; its parent holds the
+     hidden "ChatGPT said:" heading, that block and an empty one — about 25 characters), and the rest
+     of the answer in the blocks AFTER it, in one long list with the user's messages. The reader saw
+     only "[TO: USER]" (reply-unreadable, nodeInfo {tag:div, cls:null, parentTag:div, parentChars:25,
+     siblings:3, containerChars:null}). The user's message quotes the envelope ([TO: USER] … [FROM: CHATGPT]),
+     so a parent that holds it has two [FROM:] tags. -->
+<div id="thread">
+  <div data-message-author-role="user"><div class="user-text">[MSG #0040] Plan chapter 1. [Reply envelope required: start with [TO: USER] and end with [FROM: CHATGPT] — the closing tag is how this app knows your reply is complete; without it your reply is not received.]</div></div>
+  <div class="turn-head"><h6 class="sr-only">ChatGPT said:</h6><div data-message-author-role="assistant">[TO: USER]</div><div></div></div>
+  <div class="markdown prose"><p>An older answer.</p><p>[FROM: CHATGPT]</p></div>
+  <div data-message-author-role="user"><div class="user-text">[MSG #0041] Plan chapter 2. [Reply envelope required: start with [TO: USER] and end with [FROM: CHATGPT] — the closing tag is how this app knows your reply is complete; without it your reply is not received.]</div></div>
+  <div class="turn-head"><h6 class="sr-only">ChatGPT said:</h6><div data-message-author-role="assistant">[TO: USER]</div><div></div></div>
+  <div class="markdown prose"><p>Here is the plan for chapter two.</p><pre><code>{"chapter": 2, "beats": ["arrival", "storm"]}</code></pre><p>[FROM: CHATGPT]</p></div>
+  <div class="turn-actions"><button aria-label="Copy">Copy</button></div>
+</div>
+</body></html>

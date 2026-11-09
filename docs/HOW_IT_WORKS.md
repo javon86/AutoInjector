@@ -88,7 +88,14 @@ bridge to your home Wi-Fi, behind its key.
 - **Typing and reading:** to send a message, AutoInjector types it into the AI's message box and presses Send.
   Every message starts with a number, `[MSG #n]`. A send only counts when that number shows up in the chat.
 - **Tags:** each AI is asked to start its reply with `[TO: …]` (who it is for) and end with `[FROM: …]` (who wrote
-  it). The closing tag tells AutoInjector the reply is finished. Then it reads the reply.
+  it). The closing tag tells AutoInjector the reply is finished. Then it reads the reply. When a site shows the
+  `[TO: …]` line in its own little block and the answer in the blocks after it (ChatGPT did in November 2026),
+  AutoInjector reads that block and the ones after it, up to `[FROM: …]`, so it gets the whole reply, never just
+  "[TO: USER]". It never reads into your own message or the next one.
+- **"You forgot your tag" reminders:** a reply with no `[TO: …]` tag is still passed on, and the AI gets one
+  reminder. No reminder is typed while Akọwe or Alfred is waiting on that AI, or while its chat is being swapped
+  for a fresh one (the reminder would only get in the way of the next request). A reply drawn again a moment later
+  with its tags showing is the same reply, not a new one: it is not passed on again.
 - **Relay:** a reply marked `[TO: CLAUDE]` is passed on to Claude, and so on. This lets the AIs talk to each other.
   After 30 hand-offs in a row it pauses until you step in.
 - **Check-ins and self-repair:** about every 20 minutes, AutoInjector sends each idle AI a tiny test ("Reply with
@@ -110,8 +117,14 @@ bridge to your home Wi-Fi, behind its key.
   box, the Send button or the reply. AutoInjector saves that per site. **🔢 Do it for me with a number** teaches it
   by watching you type a number. **↺ Forget what I taught** goes back to the built-in ways. A saved part that
   failed 3 times in a row while the built-in way worked is forgotten by itself, and the log says so once ("ChatGPT's
-  saved Send button was out of date and has been forgotten; the built-in one works"). **↺ Undo** on the 🎯 card
-  brings it back. A part you saved in the last hour is never forgotten this way.
+  saved Send button was out of date and has been forgotten; the built-in one works"). The same happens when a saved
+  part was seen not to fit on **3 different starts** of the app (log: `selector-stale-seen`, then `selector-retired`
+  with `starts: 3`), because one start often sees too few replies from that AI; a start where the saved part works
+  wipes that count. The page then shows one line: "Claude's page changed; AutoInjector stopped using an old saved
+  setting that no longer fits." with **↩ Put it back** (the same as **↺ Undo** on the 🎯 card), which brings it
+  back. A part you saved in the last hour is never forgotten this way. The "reads only part of each reply" warning
+  is only given when there really is a saved reply part; when a site splits a reply over several blocks and there is
+  no saved part, reading the whole reply is simply the reader's job.
 - **📁 AI lockers (hidden, off by default):** an older feature that gave each AI (ChatGPT, Claude, Gemini) its own
   private folder on this PC (`stuff and thing/ai-lockers/<ai>/`) and let it run file commands there by writing
   `[TO: TERMINAL]`. It was not being used, so it is **switched off and out of sight**, but the code is kept:
@@ -172,7 +185,10 @@ bridge to your home Wi-Fi, behind its key.
   Akọwe), and at once when the site says the chat is full. It presses the site's own **New chat** button, or opens
   the site's new-chat page if that button can't be found. It only happens **between** Akọwe requests (never while
   an AI is writing), and never in a pane **you** used yourself in the last 10 minutes (unless the site says the chat
-  is full). The activity log says each time, in plain words. Code: `desktop-app/fresh-chat.js`.
+  is full). The activity log says each time, in plain words. Code: `desktop-app/fresh-chat.js`. While the pane
+  switches to the new chat, AutoInjector reads nothing from it: a half-swapped page is never taken for a new reply.
+  When the New chat button does not give an empty chat, the page is reloaded at the new-chat address; the log's
+  `reload` line then says `by: "fresh-chat"` (not "self-repair").
 - A second door, the **service bridge** (port 8765), does more than the AI bridge. Akọwe uses it for pictures,
   video clips, trailers, the ebook cover JPG and the Book Bible PDF. It also carries the app's tools, voice (speak
   and listen), messages to the AIs, live events, and the phone page.

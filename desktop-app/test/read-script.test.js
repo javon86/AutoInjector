@@ -111,6 +111,20 @@ console.log("\n== P37.2: read the WHOLE reply when the page splits it over sever
   assert(r.fragmentFixed === false || r.fragmentFixed === undefined, `an ordinary reply needs no fix (${r.fragmentFixed})`);
 }
 
+console.log("\n== 2026-11-09: ChatGPT's \"[TO: USER]\" in its own small block, the answer in the blocks after it ==");
+{
+  const fixture = require("fs").readFileSync(require("path").join(__dirname, "fixtures", "chatgpt-tag-split.html"), "utf8");
+  const dom = new JSDOM(fixture, { runScripts: "outside-only" });
+  const r = vm.runInContext(buildReadScript("chatgpt"), dom.getInternalVMContext());
+  assert(/^\[TO: USER\]/.test(r.text.trim()) && /plan for chapter two/.test(r.text) && /"beats"/.test(r.text) && /\[FROM: CHATGPT\]$/.test(r.text.trim()), `the whole reply is read, not just "[TO: USER]" (${JSON.stringify(r.text.slice(0, 70))})`);
+  assert(!/MSG #004/.test(r.text) && !/older answer/i.test(r.text) && !/Copy/.test(r.text) && !/ChatGPT said/.test(r.text), "never the user's message, the older answer, the Copy button or the hidden heading");
+  assert(r.fragmentFixed === "siblings", `fixed by reading the blocks after the tag (${r.fragmentFixed})`);
+  // a reply whose answer is still missing (only the tag so far) stays just the tag — nothing from the user's next message
+  const dom2 = new JSDOM(fixture.replace(/<div class="markdown prose"><p>Here is the plan[\s\S]*?<\/div>\s*<div class="turn-actions">[\s\S]*?<\/div>/, '<div data-message-author-role="user"><div>[MSG #0042] next</div></div>'), { runScripts: "outside-only" });
+  const r2 = vm.runInContext(buildReadScript("chatgpt"), dom2.getInternalVMContext());
+  assert(!/MSG #0042/.test(r2.text) && !/older answer/i.test(r2.text), `the next user message is never pulled in (${JSON.stringify(r2.text)})`);
+}
+
 console.log("\n== generating: a visible Stop button means the model is still speaking ==");
 {
   const r = runGen(`<div data-message-author-role="assistant">half a rep</div>
