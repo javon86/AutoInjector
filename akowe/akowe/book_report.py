@@ -613,7 +613,8 @@ class ReportService:
         return {"words": rep.get("words"), "summary": rep.get("summary"),
                 # P36: the highest believable whole-book score where the pattern check found a habit
                 "ceilings": calibration.audit_ceilings(rep, calibration.BOOK_AUDIT_DIMS),
-                "findings": [{"label": f.get("label"), "severity": f.get("severity"), "count": f.get("count"),
+                "findings": [{"label": f.get("label"), "check": f.get("check"), "severity": f.get("severity"),
+                              "count": f.get("count"),
                               "per_1000": f.get("per_1000"), "advice": _clip(f.get("advice"), 200),
                               "example": _clip(((f.get("passages") or [{}])[0]).get("excerpt"), 80)}
                              for f in fs if f.get("severity") in ("major", "minor")][:8]}
@@ -758,9 +759,11 @@ class ReportService:
     # ------------------------------------------------------------------ make a report
     def make(self, principal, pid, branch, *, assist=None, review=None, ai: bool = True, slots: list | None = None,
              made_by: str = "author", run_id: str | None = None, add_to: str | None = None, check=None,
-             on_progress=None, full: bool = False) -> dict:
+             on_progress=None, full: bool = False, reviews: list | None = None, note: str | None = None) -> dict:
         """Build (or extend) the report of the book's current version. ``ai``: ask reviewer AIs (``slots`` or the
-        independent working ones). ``add_to``: a report id of the same version to add the new reviews to."""
+        independent working ones). ``add_to``: a report id of the same version to add the new reviews to.
+        ``reviews``: whole-book reviews already made (🔁 the improve pass's re-read) — used as they are, no AI asked;
+        ``note``: a line for the report's warnings saying where they come from."""
         review = review or self.app.review
         assist = assist or self.app.assist
         bp = BookPath(review.engine, principal, pid, branch)
@@ -787,8 +790,11 @@ class ReportService:
         base["book_mode"] = "parts" if parts else view["mode"]
         base["read"] = {"mode": base["book_mode"], "percent": 100 if view["mode"] == "whole" or parts
                         else view.get("read_percent"), "parts": len(parts) if parts else None}
-        notes = []
-        if ai:
+        notes = [note] if note else []
+        if reviews:
+            base["reviews"] = [dict(r) for r in reviews]
+            base["rescored"] = True
+        if ai and not reviews:
             picks = self.pick(base["usage"], slots)
             if not picks:
                 notes.append("No independent AI was working, so no AI reviewed the whole book: press 📨 Ask the "
@@ -839,9 +845,50 @@ class ReportService:
         base["unchecked"] = [{k: e.get(k) for k in ("label", "chapter_id", "how", "why", "notes", "line", "at")}
                              for e in approval_trust.entries(self.store, pid, branch)]
         base["warnings"] = notes + self._warnings(base)
+        base["trend"] = self.trend(principal, pid, base)  # 📈 against the author's earlier books
         base["updated_at"] = _now()
         self._save(pid, branch, base)
         return base
+
+    def rescore(self, principal, pid, branch, *, assist=None, review=None, overrides: dict | None = None,
+                slots: list | None = None, check=None) -> dict:
+        """🔁 The improve pass: the SAME reviewers (``slots``) read the book with some chapters rewritten
+        (``overrides``: {chapter_id: text}; nothing is saved to the book or as a report). Each reviewer's known
+        generosity discount is applied exactly as in a report, but nothing is added to their track record. Returns
+        {reviews, aggregate}."""
+        review = review or self.app.review
+        assist = assist or self.app.assist
+        bp = BookPath(review.engine, principal, pid, branch)
+        chapters = book_chapters(bp)
+        for c in chapters:
+            if c["chapter_id"] in (overrides or {}):
+                c["text"] = str(overrides[c["chapter_id"]])
+                c["words"] = lengths_mod.words(c["text"])
+        det = {"words": {"total": sum(c["words"] for c in chapters),
+                         "target": lengths_mod.chapter_plan(get_profile(self.store, pid), len(chapters) or None,
+                                                            self.store)["book_words"],
+                         "chapters": [{"number": c["number"]} for c in chapters],
+                         "length": (get_profile(self.store, pid) or {}).get("length")}}
+        usage = self._usage(review, pid, branch, chapters)
+        picks = [o for o in self.reviewer_options(usage) if o["slot_id"] in (slots or [])]
+        view = book_view(chapters)
+        text_norm = _norm("\n".join(c["text"] for c in chapters))
+        prof_brief = book_profile_brief(self.store, pid)
+        rows = []
+        for s in picks:
+            row = self.review_with(assist, principal, pid, branch, s, view, prof_brief, det, text_norm, check)
+            if row.get("status") == "done" and row.get("scores"):
+                try:
+                    sd = {x["slot_id"]: x for x in self.app.engine.providers.slots()}.get(row["slot"])
+                    disc = calibration.discount_for(self.store, providers_mod.slot_family(sd) or row["slot"])
+                    if disc:
+                        row["scores"] = calibration.discounted(row["scores"], disc)
+                        row["discount"] = disc
+                except Exception:  # noqa: BLE001 - the discount is a hint
+                    log.exception("could not apply the reviewer's discount to the re-read")
+                row["trust_notes"] = reviewer_notes(row)
+            rows.append(row)
+        return {"reviews": rows, "aggregate": aggregate(rows)}
 
     def _calibrate(self, reviews: list[dict], new: set, ceilings: dict | None = None):
         """P36: each new whole-book review vs the median of the other reviewers and vs the book's pattern check
@@ -1061,7 +1108,22 @@ class ReportService:
                 "reviewers": self.reviewer_options(usage) if chapters else [], "job": running,
                 "dimensions": [{"key": k, "label": LABELS[k], "help": QUESTIONS[k]} for k in DIM_KEYS],
                 "budget": {"whole_max_chars": WHOLE_MAX_CHARS, "digest_max_chars": DIGEST_MAX_CHARS},
-                "leniency": calibration.table(self.store), "calibration": calibration.RULES["about"]}
+                "leniency": calibration.table(self.store), "calibration": calibration.RULES["about"],
+                "trend": self.trend(principal, pid, latest)}
+
+    def trend(self, principal, pid, rep: dict | None) -> dict | None:
+        """📈 This book against the author's earlier books (quality_history.py): its recorded numbers, else the newest
+        report's (never raises)."""
+        try:
+            from . import quality_history  # noqa: PLC0415
+            cur = next((r for r in quality_history.books(self.store, principal) if r.get("book") == pid), None)
+            if rep and (rep.get("aggregate") or {}).get("overall") is not None and (
+                    cur is None or cur.get("overall") != rep["aggregate"]["overall"]):
+                cur = quality_history.snapshot(rep, book=pid)  # the newest report (not recorded yet)
+            return quality_history.trend(self.store, principal, current=cur) if cur else None
+        except Exception:  # noqa: BLE001
+            log.exception("could not work out the quality trend")
+            return None
 
     def summary(self, pid, branch) -> dict | None:
         """The few numbers the shelf shows next to a book."""
@@ -1222,6 +1284,11 @@ def render_markdown(rep: dict) -> str:
     if rep.get("beta"):  # 👥 idea #14: the newest beta read or panel (beta_reader.with_beta adds it for downloads)
         from . import beta_reader  # noqa: PLC0415
         L += beta_reader.report_markdown(rep["beta"], (rep.get("version") or {}).get("key"))
+    tr = rep.get("trend") or {}
+    if tr.get("text"):
+        L += ["## 📈 Your books over time", "", tr["text"], ""]
+    if rep.get("improve"):
+        L += [str(rep["improve"]), ""]
     L += ["## What to try next", ""]
     for t in rep.get("try_next") or []:
         L.append(f"- {t['text']} *({t['from']})*")

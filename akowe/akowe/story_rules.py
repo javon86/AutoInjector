@@ -102,8 +102,9 @@ RULES_TASK = (
     "to happen; WHY stays open unless a hard rule gives it), belief (what characters believe — a superstition, a "
     "narrator's guess; it never becomes confirmed fact just because a later scene needs it), mystery (must stay "
     "unexplained); text (one sentence); scope (the limits: where, when, how often, at what cost, what it can never "
-    "do — every special object, power or exception the story uses must be bounded here); source (the record or part "
-    "of the plan it comes from); stated_by (the canon, the narrator, or a character's exact name); id (empty for a "
+    "do — every special object, power or exception the story uses must be bounded here; a supernatural, magical or "
+    "uncanny mechanism (a ghost, a curse, a strange device) must state all three: scope, cost and limits); source "
+    "(the record or part of the plan it comes from); stated_by (the canon, the narrator, or a character's exact name); id (empty for a "
     "new rule). 4 to 12 rules: fewer, sharper rules are better than many vague ones. Never invent major new events or "
     "characters. If context.current_rules is given, the canon or the plan changed since the ledger was made: return "
     "the COMPLETE updated list, keep the id of every rule you keep or change, leave out rules that no longer apply. "
@@ -117,7 +118,46 @@ LINT_WORDS = {
     "DUPLICATE": "the same rule twice",
     "EMPTY": "no rule text",
 }
-MAJOR_LINT = ("UNBOUNDED_EXCEPTION",)
+LINT_WORDS["SPECIAL_UNBOUNDED"] = ("a special mechanism (supernatural, magic or a strange device) without all of "
+                                   "scope, cost and limits")
+MAJOR_LINT = ("UNBOUNDED_EXCEPTION", "SPECIAL_UNBOUNDED")
+# 📏 a special mechanism: anything supernatural, magical or uncanny the story leans on (a ghost, a curse, a device)
+SPECIAL = re.compile(r"\b(ghost\w*|spirit\w*|haunt\w*|curse\w*|magic\w*|spell\w*|witch\w*|supernatural|the dead|"
+                     r"revenant\w*|possess\w*|prophec\w*|prophes\w*|ritual\w*|enchant\w*|demon\w*|psychic\w*|"
+                     r"telepath\w*|second sight|immortal\w*|resurrect\w*|portal\w*|otherworld\w*|phantom\w*|"
+                     r"apparition\w*|wraith\w*|banshee\w*|fae|fairy|fairies|sorcer\w*|wizard\w*|relic\w*|"
+                     r"uncanny|miracl\w*|vision\w*|summon\w*|undead|vampir\w*|werewol\w*|shapeshift\w*|"
+                     r"time travel\w*|voices? of the dead)\b", re.I)
+SCOPE_WORDS = re.compile(r"\b(where|when|whenever|only|within|during|near|while|until|range|inside|outside|at night|"
+                         r"by day|at high|at low|tide|once|in the|on the|anyone|those who)\b", re.I)
+COST_WORDS = re.compile(r"\b(cost\w*|price|pay\w*|drain\w*|toll|lose\w*|loss|exhaust\w*|weaken\w*|harm\w*|hurt\w*|"
+                        r"blood|sacrific\w*|risk\w*|consequence\w*|takes? (?:a|its|their|the)|ages?|sick\w*|pain\w*|"
+                        r"fever\w*|memor\w* (?:lost|fade\w*)|in exchange|debt)\b", re.I)
+LIMIT_WORDS = re.compile(r"\b(never|cannot|can't|can ?not|no more than|at most|limit\w*|unless|except|until|once|"
+                         r"twice|must|only|not (?:able|beyond|past)|fails?|stops?)\b", re.I)
+SPECIAL_PLAN_RULE = ("Every special mechanism the plan uses (a ghost, magic, a curse, a strange device) must have all "
+                     "three in the story rules and keep them: scope (where, when, for whom), cost (what using it "
+                     "takes or risks) and limits (what it can never do). The plan never solves a problem with it "
+                     "beyond those limits.")
+
+
+def special_missing(rule: dict) -> list[str]:
+    """For a special-mechanism rule: which of scope / cost / limits its text and scope do not state ([] = bounded
+    or not special)."""
+    if rule.get("category") == "belief":
+        return []
+    text = f"{rule.get('text') or ''} {rule.get('scope') or ''}"
+    if not SPECIAL.search(text):
+        return []
+    sc = str(rule.get("scope") or "")
+    missing = []
+    if not sc.strip() or not SCOPE_WORDS.search(sc):
+        missing.append("scope")
+    if not COST_WORDS.search(text):
+        missing.append("cost")
+    if not LIMIT_WORDS.search(sc or text):
+        missing.append("limits")
+    return missing
 
 
 def _now() -> str:
@@ -197,6 +237,10 @@ def lint(rules: list[dict]) -> list[dict]:
                             "message": LINT_WORDS["UNBOUNDED_EXCEPTION"]})
             elif cat == "hard_rule":
                 out.append({"rule": rid, "code": "NO_LIMITS", "severity": "minor", "message": LINT_WORDS["NO_LIMITS"]})
+        miss = special_missing(r)
+        if miss:  # 📏 a ghost / magic / device rule needs scope, cost AND limits
+            out.append({"rule": rid, "code": "SPECIAL_UNBOUNDED", "severity": "major", "missing": miss,
+                        "message": LINT_WORDS["SPECIAL_UNBOUNDED"] + " — missing: " + ", ".join(miss)})
         if cat == "belief" and not r.get("stated_by"):
             out.append({"rule": rid, "code": "BELIEF_NO_HOLDER", "severity": "minor",
                         "message": LINT_WORDS["BELIEF_NO_HOLDER"]})
@@ -549,7 +593,7 @@ def plan_brief(store, pid: str, branch: str, budget: int = PLAN_BUDGET) -> dict 
         return None
     items = _bounded([compact(r) for r in rules], budget - 600)
     probs = [f"{next((r['text'][:80] for r in rules if r['id'] == p['rule']), p['rule'])}: {p['message']}"
-             for p in lint(rules) if p["code"] in ("UNBOUNDED_EXCEPTION", "NO_LIMITS")][:5]
+             for p in lint(rules) if p["code"] in ("SPECIAL_UNBOUNDED", "UNBOUNDED_EXCEPTION", "NO_LIMITS")][:5]
     out = {"rules": items}
     if probs:
         out["not_bounded"] = probs
@@ -571,3 +615,21 @@ def editor_view(store, pid: str, branch: str, *, mystery_mode: str | None = None
                                    "last chapter" if last else "the author chose to explain the mysteries by the end — "
                                    "not in this chapter (only the last chapter may explain them)")
     return out
+
+
+def special_unbounded(entry: dict | None) -> list[dict]:
+    """📏 The special-mechanism rules of a ledger that lack scope, cost or limits: [{rule, text, missing}]."""
+    rules = active(entry)
+    out = []
+    for p in lint(rules):
+        if p["code"] == "SPECIAL_UNBOUNDED":
+            r = next((x for x in rules if x["id"] == p["rule"]), {})
+            out.append({"rule": p["rule"], "text": (r.get("text") or "")[:120], "missing": p.get("missing") or []})
+    return out
+
+
+def bound_note(items: list[dict]) -> str:
+    """The author note for one AI update that bounds the special rules (no text of the book besides the rules)."""
+    return ("Bound these special rules — each needs scope (where, when, for whom), cost (what using it takes or "
+            "risks) and limits (what it can never do), written in its scope; keep their meaning: "
+            + "; ".join(f"[{i['rule']}] {i['text']} (missing: {', '.join(i['missing'])})" for i in items[:8]))

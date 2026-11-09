@@ -52,7 +52,8 @@ KIND_WORD = {"A01": "character", "A02": "species", "A03": "world", "A04": "place
 # run step -> category (when the problem names no record)
 STEP_CAT = {"canon": "character", "characters": "character", "looks": "character", "pictures": "picture",
             "world": "place", "premise": "plot", "plot": "plot", "outline": "plot", "bible": "character",
-            "chapters": "chapter", "planned": "chapter", "report": "chapter", "beta": "chapter", "human": "style"}
+            "chapters": "chapter", "planned": "chapter", "report": "chapter", "beta": "chapter", "improve": "chapter",
+            "human": "style"}
 AI_CODES = {"TIMEOUT", "UPSTREAM_UNAVAILABLE", "RATE_LIMITED", "CAPABILITY_UNAVAILABLE", "USAGE_LIMIT", "SITE_BUSY",
             "SITE_NOT_READY", "NETWORK", "INTERNAL_ERROR", "LOGGED_OUT", "CAPTCHA", "AI_REFUSED"}
 TRUST_CODES = {"NO_SECOND_AI", "NO_REASON", "LOW_CONFIDENCE"}

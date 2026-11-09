@@ -132,6 +132,12 @@ STEPS = [
     ("beta", "H", None, "Beta reader", "An AI reads the whole book as its target reader and marks where it got "
      "confused, bored or guessed a twist, each with a quote checked against the book. (Optional; never holds up the "
      "book.)"),
+    # 🔁 improve_pass.py: on by default (run setting improve_pass), at most improve_rounds rounds
+    ("improve", "H", None, "Improve until better", "The reviewers' “What to try next”, the beta readers' top fixes, "
+     "the editor's major notes (also those of chapters you approved anyway) and Akọwe's own checks (clock and tide "
+     "times, repeated phrases, plain-word tics, too-simple sentences) go to the chapters that need them most; the same "
+     "reviewers re-read the book, and the rewrite is kept only if the score went up and nothing dropped. (On by "
+     "default; never holds up the book.)"),
 ]
 # ⚡ #116: what the AI activity strip says while a step works (present tense, plain words); else the step's title
 STEP_DOING = {
@@ -143,7 +149,7 @@ STEP_DOING = {
     "planned": "Checking the planned details are on the page", "format": "Setting the book format",
     "assemble": "Putting the book together", "export": "Making the PDF, EPUB and Word files",
     "check": "Checking the book's content", "report": "Writing the book report",
-    "beta": "Beta readers reading the book",
+    "beta": "Beta readers reading the book", "improve": "Improving the book until it scores better",
 }
 
 
@@ -159,7 +165,7 @@ STEP_IDS = [s[0] for s in STEPS]
 # P14: steps that belong to a pipeline switch (switched off -> the step is skipped)
 STEP_FLAGS = {"characters": "voices", "looks": "voices", "world": "rules", "planned": "planned"}
 # P23 (Section 7c): steps that run only when the run's settings ask for them (step -> setting)
-STEP_OPTIONAL = {"beta": "beta_reader", "bible": "fill_bible"}
+STEP_OPTIONAL = {"beta": "beta_reader", "bible": "fill_bible", "improve": "improve_pass"}
 
 PROFILE_SCHEMA = {
     "type": "object", "additionalProperties": False,
@@ -950,7 +956,9 @@ class AutoBookService(_Runner):
                                              "module_id": prob.get("module_id")}
             approval_trust.note(self.store, run["project_id"], run["branch_id"], head, how="approve_anyway",
                                 label=label, chapter_id=prob.get("chapter_id"), by=principal)
-            run.setdefault("notes_due", {})[rid] = {"label": label, "chapter_id": prob.get("chapter_id")}
+            run.setdefault("notes_due", {})[rid] = {"label": label, "chapter_id": prob.get("chapter_id"),
+                                                    "approved_anyway": True,  # 🔁 its notes wait for the improve pass
+                                                    "reasons": [str(x)[:300] for x in (prob.get("reasons") or [])][:4]}
             if prob.get("no_second_check") and body.get("for_rest_of_run") is True:
                 # H6: the author chose to trust the one working AI for the rest of this run (said in every approval)
                 run["self_review_ok"] = True
@@ -1057,6 +1065,17 @@ class AutoBookService(_Runner):
             if not isinstance(hp, bool):
                 raise AkoweError("INVALID_INPUT", "/human_pass", "human_pass must be true or false", status="REJECTED")
             out["human_pass"] = hp
+        ip = body.get("improve_pass", True)  # 🔁 the final improve pass (improve_pass.py): on unless switched off
+        if not isinstance(ip, bool):
+            raise AkoweError("INVALID_INPUT", "/improve_pass", "improve_pass must be true or false", status="REJECTED")
+        out["improve_pass"] = ip
+        ir = body.get("improve_rounds")
+        if ir is not None:
+            from . import improve_pass  # noqa: PLC0415
+            if isinstance(ir, bool) or not isinstance(ir, int) or not 1 <= ir <= improve_pass.ROUNDS_MAX:
+                raise AkoweError("INVALID_INPUT", "/improve_rounds", f"improve_rounds: 1 to {improve_pass.ROUNDS_MAX}",
+                                 status="REJECTED")
+            out["improve_rounds"] = ir
         for k in ("beta_reader", "my_style", "fill_bible", "writers_room"):  # P23 / P25 / 📖 / 🗳: off unless asked
             v = body.get(k, False)
             if not isinstance(v, bool):
@@ -1304,6 +1323,7 @@ class AutoBookService(_Runner):
                            code="REVIEW_NOT_INDEPENDENT")
             self._length_warning(run)
             self._series_changes(run)
+            self._record_quality(run)  # 📈 the trend over the author's books, and the lessons for the next one
             self.save(run)
         except RunPaused:
             st = self._step(run, run.get("current") or "backup")
@@ -1763,12 +1783,13 @@ class AutoBookService(_Runner):
         """A draft approved anyway / by the standing auto-approve skipped the editor and the plan check: they still
         run now, as notes only (nothing is rewritten — it is already approved). The outcome is stored with the
         "approved without checks" entry (book report, Book home) and said in the run. Never blocks the book."""
-        run.setdefault("notes_due", {}).pop(rid, None)
+        due = run.setdefault("notes_due", {}).pop(rid, None) or {}
         bp = self.bp(run)
         head = bp.rec(rid)
         if head is None:
             return
         notes = {}
+        craft = None
         es = self._editor_settings(run)
         if head["module_id"] in ("C02", "B01", "B03", "B11") and es.get("enabled") and self._on(run, "editor"):
             st["message"] = f"The editor reads the {label} (as notes: it is already approved)"
@@ -1797,6 +1818,19 @@ class AutoBookService(_Runner):
                 if getattr(exc, "control", False):
                     raise
                 notes["planned"] = f"could not check it ({exc.code})"
+        if due.get("approved_anyway") and head["module_id"] == "C02" and chapter_id:
+            # 🔁 approved although the reviewer had not passed it: its major notes (and the reviewer's reasons) are
+            # kept for the final improve pass instead of being dropped (improve_pass.py)
+            from . import improve_pass  # noqa: PLC0415
+            fs = [f for f in (craft or {}).get("findings") or [] if f.get("severity") == "major"]
+            fs += [{"id": f"r{i + 1}", "dimension": "review", "passage": "", "why": r} for i, r in
+                   enumerate(due.get("reasons") or [])]
+            if fs:
+                n = improve_pass.queue(self.store, run["project_id"], run["branch_id"], chapter_id, head, fs,
+                                       "approved_anyway")
+                notes["improve"] = f"{n} note(s) kept for the final improve pass"
+                self.event(run, "note", f"🔁 The {label}: {n} note(s) are kept for the final improve pass",
+                           code="IMPROVE_QUEUED", record_id=rid)
         approval_trust.add_notes(self.store, run["project_id"], run["branch_id"], rid, notes)
         self.event(run, "note", f"⚠️ The {label} was approved without checks; checked afterwards as notes — "
                    + ("; ".join(f"{k}: {v}" for k, v in notes.items()) or "nothing to check"),
@@ -2267,6 +2301,7 @@ class AutoBookService(_Runner):
             self.save(run)
         ok = [i["label"] for i in st["items"] if i["state"] == "done"]
         st["message"] = (", ".join(ok) + " ready") if ok else "⚠️ Neither could be made (the book goes on)"
+        self._bound_special(run, st)
 
     def _update_rules(self, run, st):
         """After the plan is approved: the AI suggests updates of the story rules for it; they are accepted under the
@@ -2299,6 +2334,45 @@ class AutoBookService(_Runner):
                                          run_id=run["id"])
         self.event(run, "world", f"Story rules updated for the plan: {len(items)} suggestion(s) accepted under your "
                    f"Make-a-book-for-me consent, run {run['id']}", approval="run_consent", slot=rj.slot)
+        self._bound_special(run, st)
+
+    def _bound_special(self, run, st):
+        """📏 Every special mechanism (a ghost, magic, a curse, a strange device) needs scope, cost and limits: rules
+        that lack one are bounded by ONE AI update, accepted under the run consent (at most twice per run: after the
+        first rules and after the plan). Never blocks the book."""
+        pid, branch = run["project_id"], run["branch_id"]
+        if not self._on(run, "rules"):
+            return
+        entry = story_rules.get_entry(self.store, pid, branch)
+        todo = story_rules.special_unbounded(entry)
+        mem = run.setdefault("special_rules", {"asked": 0})
+        mem["open"] = len(todo)
+        if not todo or int(mem.get("asked") or 0) >= 2:
+            return
+        mem["asked"] = int(mem.get("asked") or 0) + 1
+        st["message"] = f"The AI gives {len(todo)} special rule(s) their scope, cost and limits"
+        run["phase"] = st["message"]
+        self.save(run)
+        rj = self._sub_job(run, "world_rules", "rules", run["settings"].get("slot_id"))
+        try:
+            e = story_rules.generate(self._assist, rj, self.bp(run), update=True, note=story_rules.bound_note(todo))
+        except AkoweError as exc:
+            if getattr(exc, "control", False):
+                raise
+            self.event(run, "note", f"⚠️ {len(todo)} special rule(s) still have no scope, cost or limits ({exc.code}); "
+                       "add them on the 📏 Story rules page", code="RULES_UNBOUNDED")
+            return
+        items = (e.get("proposals") or {}).get("items") or []
+        if items:
+            self._check_consent(run, pid)
+            story_rules.decide_proposals(self.store, pid, branch, accept=None, version=e["version"], by="ai",
+                                         run_id=run["id"])
+        left = story_rules.special_unbounded(story_rules.get_entry(self.store, pid, branch))
+        mem.update(open=len(left), bounded=len(todo) - len(left))
+        self.event(run, "world", f"📏 Special rules bounded: {len(todo) - len(left)} of {len(todo)} now state scope, "
+                   "cost and limits" + (f" — ⚠️ {len(left)} still open (📏 Story rules page)" if left else ""),
+                   approval="run_consent" if items else None, slot=rj.slot,
+                   code="RULES_UNBOUNDED" if left else "RULES_BOUNDED")
 
     def _note_review(self, run, st, label: str, review: dict):
         """"written by X · reviewed by Y" on the step, and the run's count of independent / same-AI reviews (P3.2)."""
@@ -3387,7 +3461,22 @@ class AutoBookService(_Runner):
 
     def _s_premise(self, run, st):
         self._seed_locks(run)  # 📋 6c: the starter sheet's lock list -> the story rules (once)
+        self._carry_lessons(run)  # 🧠 the lessons from the author's last books, for the planners and the writer
         self._planning(run, st, "B01", "premise")
+
+    def _carry_lessons(self, run):
+        """🧠 Once per run: the author's lessons from the last books (quality_history.py) are copied onto this book."""
+        if run.get("lessons_carried"):
+            return
+        from . import quality_history  # noqa: PLC0415
+        ls = quality_history.carry(self.store, run["principal"], run["project_id"])
+        run["lessons_carried"] = True
+        run["lessons"] = [x["text"] for x in ls]
+        if ls:
+            self.event(run, "note", f"🧠 {len(ls)} lesson(s) from your last books go to the planners and the writer: "
+                       + "; ".join(x["text"] for x in ls[:3]) + (" …" if len(ls) > 3 else ""), step="premise",
+                       code="LESSONS_CARRIED")
+        self.save(run)
 
     def _seed_locks(self, run):
         """📋 6c Paste starter sheet: the run's lock list (setting ``locks``) becomes hard rules from the author in the
@@ -3992,6 +4081,37 @@ class AutoBookService(_Runner):
     def _s_beta(self, run, st):
         from . import beta_reader  # noqa: PLC0415
         beta_reader.run_step(self, run, st, control=(RunPaused, RunCancelled))
+
+    def _s_improve(self, run, st):
+        """🔁 Improve until better (improve_pass.py): targeted rewrites, the same reviewers re-read, kept only when the
+        score went up and nothing dropped."""
+        from . import improve_pass  # noqa: PLC0415
+        improve_pass.run_step(self, run, st)
+
+    def _record_quality(self, run):
+        """📈 The finished book's report numbers join the author's quality history (quality_history.py); the trend
+        line goes to the run window. Never raises."""
+        try:
+            from . import quality_history  # noqa: PLC0415
+            rp = getattr(self.app, "reports", None)
+            rep = rp.latest(run["project_id"], run["branch_id"]) if rp else None
+            if not rep or (rep.get("aggregate") or {}).get("overall") is None:
+                return
+            from .improve_pass import _latest_beta  # noqa: PLC0415
+            beta = _latest_beta(self.app, run["project_id"], run["branch_id"])
+            from .book_report import book_chapters  # noqa: PLC0415
+            texts = [c["text"] for c in book_chapters(self.bp(run))]
+            im = run.get("improve") or {}
+            snap = quality_history.snapshot(rep, book=run["project_id"], run_id=run["id"], texts=texts, beta=beta,
+                                            improve={k: im.get(k) for k in ("before", "after", "kept")}
+                                            if im.get("rounds") else None)
+            quality_history.record(self.store, run["principal"], snap)
+            tr = quality_history.trend(self.store, run["principal"], book=run["project_id"])
+            if tr:
+                run.setdefault("report", {})["trend"] = tr["text"]
+                self.event(run, "report", f"📈 {tr['text']}", step="report", code="QUALITY_TREND")
+        except Exception:  # noqa: BLE001 - a hint, never a reason to fail the finished book
+            log.exception("could not record the quality history of run %s", run.get("id"))
 
     def _apply_style(self, run, pid):
         from . import style_card  # noqa: PLC0415

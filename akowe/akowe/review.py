@@ -129,7 +129,9 @@ IN_CHAPTER_RULE = (
     "chapter is still so later in the same chapter (an injured knee limps, kneels with pain, takes the stairs slowly; a "
     "dropped knife is not drawn again) unless the page shows the change. A within-chapter physical contradiction is a "
     "MAJOR problem: verdict REVISE, and say which line contradicts which. context.akowe_in_chapter (when given) lists "
-    "possible ones Akọwe's own reading found: confirm them only when the text really contradicts itself.")
+    "possible ones Akọwe's own reading found: confirm them only when the text really contradicts itself. Entries named "
+    "\"time\" are clock or tide contradictions with this chapter and the chapters before (a tide going out before the "
+    "stated high water, two high waters that cannot both be true): when the text really says so, that is MAJOR too.")
 
 NOT_INDEPENDENT = "Reviews are not independent — the same AI wrote and reviewed this"
 REVIEWER_CHOICES = (None, "AI-1", "AI-2", "AI-3")
@@ -1532,6 +1534,10 @@ class ReviewService:
                                                 cast_names(self.store, pid, branch))
                 if flags:
                     ctx["akowe_in_chapter"] = [{k: f.get(k) for k in ("name", "message", "quote")} for f in flags[:8]]
+                from . import clock_check  # noqa: PLC0415 - 🕰️ a clock / tide contradiction is a MAJOR problem too
+                clocks = clock_check.flags_for(self.engine, job.principal, pid, branch, rec)
+                if clocks:
+                    ctx["akowe_in_chapter"] = list(ctx.get("akowe_in_chapter") or []) + clocks
                 task = task + IN_CHAPTER_RULE
             raw = self.assist._call_ai(job, op_for_roles=rec["module_id"], task=task, schema=REVIEW_SCHEMA,
                                        context=ctx, protected=protected)

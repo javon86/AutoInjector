@@ -134,7 +134,8 @@ book carries on after you choose; until then that record is not approved. Your c
 - The reviewer and the writer disagree about the same thing twice, or a fix would change something you already
   approved: one question with before → after (see above).
 - A reviewer still says no after two fixes: choose **✔ Approve anyway**, **✏️ Edit it myself** (then Continue) or
-  **🔁 Try again**.
+  **🔁 Try again**. With ✔ Approve anyway your approval stands, and the editor's major notes on that chapter (and the
+  reviewer's reasons) are not thrown away: they wait for the final **🔁 Improve until better** pass.
 - An AI did not answer in time, even after a second try.
 - A check found a problem it could not fix safely.
 - Akọwe was closed in the middle of a run: the run shows **Interrupted**; **▶ Resume** carries on.
@@ -197,6 +198,31 @@ Every chapter is checked several times before it counts as part of the book:
   chapters you choose, at any time.
 - The **📊 Book report** shows the scores, who checked the book and how far they agreed. An optional beta-reader
   step reads the book as 1, 2 or 3 kinds of readers.
+- **🕰️ Clock and tide check:** Akọwe works out the times, days and tides the book states ("high water at 18:06")
+  and flags one that cannot be true ("the tide was going out at 14:30" — before high water the tide comes in). The
+  editor and the reviewer must fix it, and the next chapter's writer is told the tide times so far.
+- **📏 Special rules:** a ghost, magic, a curse or a strange device in the story rules must say where and when it
+  works (scope), what it costs and what it can never do (limits). If one does not, the AI fills them in once, before
+  the plan is written.
+
+### 🔁 Improve until better, and 📈 your books over time
+
+- **🔁 Improve until better** (on the ⚡ Make-a-book screen, on by default, 1–3 rounds, default 2): when the book is
+  made, Akọwe collects what the reviewers' "What to try next", the beta readers' top fixes, the editor's major notes
+  and its own checks (clock and tide times, the same phrase or simile in several chapters, a plain word like "went"
+  used far too often, sentences too simple for adult readers) found, and the writer reworks the chapters that need it
+  most. The **same** AI reviewers then read the book again. The change is **kept only if the score went up and
+  nothing dropped by more than a point**; otherwise your book stays exactly as it was. Kept chapters are checked and
+  approved like every chapter, and the PDF, EPUB and Word files are made again. The run window, the journal and the
+  report show both numbers: "🔁 Improve pass: 7.6 → 8.1/10 (kept)". Chapters you wrote yourself are never touched.
+- **📈 Your books over time** (🏠 Book home and the 📊 Book report): "7.6/10 — down 0.4 from your last book",
+  "Rule rigor is your weakest area for 3 books", and which scores are falling. Only numbers are kept for this,
+  never your book's words.
+- **🧠 Lessons for the next book:** your weakest areas and habits from the last books (for example "Every special
+  rule needs scope, cost and limits", "Check all clock, tide and date arithmetic") are given to the next book's
+  planners and to the writer of every chapter. Inside a book, each new chapter's writer is also told what the
+  chapters before already used (a simile, a phrase, "went" 26 times) so it is not repeated, the tide and day facts so
+  far, and the reading level to aim for (adult books: at least grade 5).
 
 ### 📊 Who checks, and how good each checker is
 
