@@ -120,6 +120,7 @@ const IPC_INVENTORY = [
   'video:install-check', 'video:install-model', 'video:install-all', 'video:install-cancel', 'video:open-folder', 'video:show-file',
   'video:trailer-make', 'video:trailer-status', 'video:trailer-cancel', 'video:trailer-list', 'video:trailer-plan', 'video:trailer-pick-file',
   'video:framepack-status', 'video:framepack-load', 'video:framepack-unload', 'video:framepack-test', 'video:framepack-choose-folder',
+  'video:record', 'video:remake', 'video:recipes', 'video:judge', 'video:improve', 'video:improve-final', 'video:improve-stop', 'video:make-best', 'video:estimate', 'video:judge-settings', // 🎬 ♻ 💾 🧑‍⚖️ 🔁
   'voice:check', 'voice:configure', 'voice:listen', 'voice:redownload', 'voice:speak', 'voice:status',
   'voice:transcribe', 'voice:synthesize', 'voice:piper-voices', 'voice:replies', 'voice:reply-text',
   'window:toggle-collapse', 'wizard-window:close', 'wizard:catalog', 'wizard:open', 'wizard:open-app-tab',
@@ -139,6 +140,8 @@ const EVENTS = {
   'terminal-data': 'UI live update', 'terminal-state': 'UI live update', 'tuner-state': 'UI live update', 'voice-speaking': 'UI live update', 'voice-mic': 'UI live update (🎤 "starting the voice engine / downloading the speech model")', 'waiting-changed': 'UI live update',
   'window-collapse-changed': 'UI live update',
   'sd-judge': 'UI live update (🧑‍⚖️ / 🔁 judge and Make it better progress — Alfred gets the result of images.judge / images.improve)',
+  'video-judge': 'UI live update (🎬 🧑‍⚖️ / 🔁 video judge, quick previews and Make N progress — Alfred gets the result of video.judge / video.improve / video.makeBest)',
+  'video-form-apply': 'UI live update (the 🎬 Video form loads a recipe from Alfred\'s video.recipes.apply — Alfred causes it, through his card)',
   'sd-form-apply': 'UI live update (the 🎨 Images form fills in a recipe or Alfred\'s images.form.set — Alfred causes it, through his card)',
   'lockers-state': 'UI live update (the 📁 AI lockers switched on / off in ⚙ Advanced — the Locker tab comes back or goes)',
   'ai-download': 'UI live update (⬇ a file an AI gives you: progress, then where it was saved)',
@@ -187,6 +190,8 @@ const SD_API_METHODS = ['images.status', 'images.generate', 'images.progress', '
 const VIDEO_API_METHODS = ['video.status', 'video.capabilities', 'video.models', 'video.progress', 'video.gallery', 'video.cancel', 'video.generate', 'video.animate', 'video.test', 'video.settings',
   'video.install.check', 'video.install.downloadModel', 'video.install.installAll', 'video.install.cancel',
   'video.framepack.status', 'video.framepack.load', 'video.framepack.unload', 'video.framepack.test',
+  'video.record', 'video.remake', 'video.contactSheet', 'video.judge', 'video.improve', 'video.improveFinal', 'video.improveStop', 'video.makeBest', 'video.estimate', 'video.judgeStatus', 'video.judgeSettings',
+  'video.recipes.list', 'video.recipes.get', 'video.recipes.save', 'video.recipes.rename', 'video.recipes.delete', 'video.recipes.setDefault', 'video.recipes.fromVideo', 'video.recipes.apply',
   'trailer.make', 'trailer.status', 'trailer.cancel', 'trailer.list', 'trailer.plan'];
 // The 📖 Akọwe API Alfred uses (method + path pattern) → the tool that calls it.
 const AKOWE_API_USED = {

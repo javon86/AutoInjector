@@ -1457,6 +1457,36 @@
     #vd-ep-clip > div { flex:1 1 64px; min-width:56px; }
     #vd-ep-clip input { width:100% !important; }
 
+    /* 🎬 💾 video recipes · 🧑‍⚖️ video judge (contact sheet) · 🔁 Make it better with quick previews (videos-judge.js) */
+    #vd-recipe-row { display:flex; gap:4px; align-items:center; margin-bottom:6px; }
+    #vd-recipe-row > select { flex:1 1 auto; min-width:0; width:auto; }
+    #vd-recipe-name-row { display:flex; gap:4px; align-items:center; margin:0 0 6px; flex-wrap:wrap; }
+    #vd-recipe-name-row input { flex:1 1 140px; min-width:0; width:auto; }
+    #vd-recipe-name-row[hidden], #vd-recipe-note[hidden], #vd-judge-box[hidden], #vd-improve-box[hidden], #vd-final-row[hidden], #vd-improve-actions[hidden] { display:none; }
+    #vd-recipe-note { font-size:11.5px; opacity:.85; margin:-2px 0 6px; }
+    #vd-best-row { font-size:11.5px; display:flex; gap:4px; align-items:center; margin-top:4px; }
+    #vd-best-row select { width:auto; padding:1px 4px; font-size:11.5px; }
+    #vd-judge-box { margin-top:8px; padding:7px 9px; border:1px solid #3a3360; background:#16142a; border-radius:8px; font-size:12px; }
+    #vd-judge-box .sd-jv { font-weight:600; }
+    #vd-judge-box .sd-jv[data-v="keep"] { color:#8ef0b0; } #vd-judge-box .sd-jv[data-v="fix"] { color:#ffcf7a; } #vd-judge-box .sd-jv[data-v="redo"] { color:#ff9c9c; }
+    #vd-judge-sheet { display:block; width:100%; max-height:150px; object-fit:contain; background:#000; border-radius:4px; margin:4px 0; cursor:zoom-in; }
+    #vd-judge-sheet.vd-big { max-height:none; cursor:zoom-out; }
+    #vd-improve-box { margin-top:8px; padding:7px 9px; border:1px solid #2d4a6a; background:#101a26; border-radius:8px; font-size:12px; }
+    #vd-improve-strip { display:flex; gap:6px; overflow-x:auto; padding:6px 0 2px; }
+    .vd-round { flex:0 0 140px; border:1px solid #2a2a2a; border-radius:6px; padding:4px; background:#171717; font-size:11px; cursor:pointer; }
+    .vd-round[data-best="1"] { border-color:#3b9a65; box-shadow:0 0 0 1px #3b9a65 inset; }
+    .vd-round[aria-selected="true"] { outline:2px solid #7c5ce0; }
+    .vd-round video { width:100%; aspect-ratio:16/9; object-fit:cover; border-radius:4px; display:block; background:#000; }
+    .vd-round .sd-rs { font-weight:600; margin-top:2px; } .vd-round .sd-rc { opacity:.75; max-height:4.2em; overflow:hidden; }
+    #vd-final-row { margin-top:6px; padding:6px 8px; border:1px dashed #3b6a9a; border-radius:6px; display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
+    #vd-final-row span { flex:1 1 200px; }
+    #vd-used { margin-top:6px; font-size:11.5px; }
+    #vd-used summary, #vd-judge-set summary { cursor:pointer; opacity:.85; }
+    #vd-used-list { display:grid; grid-template-columns:minmax(110px, 38%) 1fr; gap:2px 8px; margin:4px 0 0; max-height:30vh; overflow:auto; }
+    #vd-used-list dt { opacity:.7; } #vd-used-list dd { margin:0; word-break:break-word; }
+    #vd-judge-set { margin-top:4px; font-size:11.5px; }
+    #vd-judge-set .sd-row input { width:64px; }
+
     @media (max-width:620px) {
       .bf-exp { display:none; }
       .bf-head-text { flex-basis:100%; order:9; }
@@ -1986,6 +2016,21 @@
 
     <div id="vd-view-make" class="sd-view" role="tabpanel" aria-labelledby="vd-sub-make">
       <div class="sd-card">
+        <div id="vd-recipe-row" role="group" aria-label="Video recipes: saved settings">
+          <label class="sd-rowlabel" for="vd-recipe" title="A recipe is a set of saved video settings (engine, model, length, size, steps, CFG …) you can use again">Recipe</label>
+          <select id="vd-recipe" title="Pick a recipe to load its settings into the form"><option value="">— my own settings —</option></select>
+          <button type="button" id="btn-vd-recipe-save" class="sd-mini" title="💾 Save the settings in this form as a recipe">💾</button>
+          <button type="button" id="btn-vd-recipe-rename" class="sd-mini" title="✏ Rename this recipe" disabled>✏</button>
+          <button type="button" id="btn-vd-recipe-delete" class="sd-mini" title="🗑 Delete this recipe (a starter recipe is only hidden)" disabled>🗑</button>
+          <button type="button" id="btn-vd-recipe-default" class="sd-mini" aria-pressed="false" title="⭐ Make this the default — it is loaded when the Video tab opens" disabled>⭐</button>
+        </div>
+        <div id="vd-recipe-name-row" hidden>
+          <input type="text" id="vd-recipe-name" maxlength="120" placeholder="Name, e.g. Calm character clip — Wan 2.2" aria-label="Recipe name">
+          <input type="text" id="vd-recipe-template" maxlength="2000" placeholder="Prompt template (optional): {subject}, steady camera" aria-label="Prompt template with {subject}" title="Optional: words this recipe always adds. {subject} is where each video's own words go.">
+          <button type="button" id="btn-vd-recipe-name-ok" class="sd-mini primary">Save</button>
+          <button type="button" id="btn-vd-recipe-name-cancel" class="sd-mini" aria-label="Cancel">✕</button>
+        </div>
+        <div id="vd-recipe-note" role="status" aria-live="polite" hidden></div>
         <div id="vd-mode-row" role="group" aria-label="What to make">
           <button id="btn-vd-mode-t2v" aria-pressed="true" title="Describe the video in words">✍ Text → video</button>
           <button id="btn-vd-mode-i2v" aria-pressed="false" title="Bring a picture to life">🖼 Picture → video</button>
@@ -2047,6 +2092,7 @@
             <button id="btn-vd-generate" class="primary">🎬 Make video</button>
             <button id="btn-vd-stop" class="sd-fixed" disabled>⏹ Stop</button>
           </div>
+          <div id="vd-best-row"><label class="sd-fixed" title="Makes several videos with different seeds, asks the AI judge about each (one AI answer per video) and shows the best. Each video takes minutes."><input type="checkbox" id="vd-make-best"> Make</label><select id="vd-best-count" aria-label="How many videos"><option value="2">2</option><option value="3">3</option><option value="4">4</option></select><span>, pick the best</span><span id="vd-best-est" class="sd-note" style="opacity:.7;"></span></div>
           <div id="vd-progress" aria-hidden="true"><div id="vd-progress-bar"></div></div>
         </div>
         <div id="vd-msg" role="status" aria-live="polite"></div>
@@ -2064,10 +2110,32 @@
         <video id="vd-player" controls loop playsinline hidden></video>
         <div id="vd-player-info"></div>
         <div class="sd-actions">
-          <button id="btn-vd-remake" disabled title="Put this video's settings (and seed) back into the form">♻ Remake</button>
+          <button id="btn-vd-remake" disabled title="Make this video again exactly: the same prompt, seed and every setting">♻ Remake</button>
+          <button id="btn-vd-to-form" disabled title="Put this video's settings (and seed) back into the form, to change something">✎ To form</button>
           <button id="btn-vd-showfile" disabled title="Show the file in its folder">📂 Show file</button>
           <button id="btn-vd-folder" title="Open the videos folder">🗂 Videos folder</button>
         </div>
+        <div class="sd-actions">
+          <button id="btn-vd-judge" disabled title="Ask an AI judge to look at this video's frames (a contact sheet) — uses one AI answer">🧑‍⚖️ Judge</button>
+          <button id="btn-vd-improve" disabled title="Judge → change the settings → a quick short preview → judge again (up to 3 rounds, one AI answer each), then one full video after you say OK. Your defaults are never changed.">🔁 Make it better</button>
+          <button id="btn-vd-save-recipe" disabled title="Use these settings again: save them as a recipe">💾 Save as recipe</button>
+        </div>
+        <div id="vd-judge-box" role="region" aria-label="The AI judge's verdict" aria-live="polite" hidden></div>
+        <div id="vd-improve-box" role="region" aria-label="Make it better" hidden>
+          <div class="sd-row"><span id="vd-improve-msg" role="status" aria-live="polite"></span><button type="button" id="btn-vd-improve-stop" class="sd-mini sd-fixed">⏹ Stop</button></div>
+          <div id="vd-improve-strip" role="listbox" aria-label="Each round, with its score"></div>
+          <div id="vd-final-row" hidden><span id="vd-final-msg"></span><button type="button" id="btn-vd-final" class="primary" title="Make the full-length, full-size video with the best settings (takes as long as a normal video, and one AI answer to judge it)">▶ Make the full video</button><button type="button" id="btn-vd-final-skip" class="sd-mini" title="Not now: the previews stay in the gallery">Not now</button></div>
+          <div class="sd-actions" id="vd-improve-actions" hidden>
+            <button type="button" id="btn-vd-improve-keep" class="primary" title="Show this one as the result (the others stay in the gallery)">✔ Keep this one</button>
+            <button type="button" id="btn-vd-improve-recipe" title="Save the chosen round's settings as a recipe">💾 Save these settings as a recipe</button>
+          </div>
+        </div>
+        <details id="vd-used"><summary>Settings used</summary><dl id="vd-used-list"></dl></details>
+        <details id="vd-judge-set"><summary>🧑‍⚖️ Judge settings</summary>
+          <div class="sd-row"><div><label class="sd-l" for="vd-judge-rounds" title="Make it better tries at most this many quick previews (each = one short video + one AI answer)">Preview rounds</label><input type="number" id="vd-judge-rounds" min="1" max="5" value="3"></div>
+            <div><label class="sd-l" for="vd-judge-preview" title="How long each quick preview is">Preview seconds</label><input type="number" id="vd-judge-preview" min="1" max="2" step="0.5" value="1.5"></div></div>
+          <div class="sd-note" id="vd-judge-status" role="status">Which AI judges are used, their order and the pass mark are shared with pictures: 🎨 Images → 🧑‍⚖️ AI judge settings. Each judgement uses one AI answer (your Claude plan or ChatGPT), except a local model.</div>
+        </details>
         <h3 class="sd-h-gap">Gallery</h3>
         <div id="vd-gallery" aria-label="Recent videos"></div>
       </div>
@@ -2099,6 +2167,10 @@
           <div><label class="sd-l" for="vd-tr-fade">Fades (seconds)</label><input type="number" id="vd-tr-fade" min="0" max="1" step="0.1" value="0.4"></div>
           <div><label class="sd-l" for="vd-tr-volume">Music volume</label><input type="range" id="vd-tr-volume" min="0" max="1" step="0.05" value="0.8"></div>
         </div>
+        <div class="sd-row" style="margin-top:4px;">
+          <div><label class="sd-l" for="vd-tr-recipe" title="A saved 🎬 video recipe for every shot (engine, model, steps …); a shot's own words and seconds win">Recipe for the shots</label><select id="vd-tr-recipe"><option value="">— the 🎬 Video settings —</option></select></div>
+        </div>
+        <label class="sd-fixed" style="font-size:12px;" title="Off by default: it costs AI usage (one answer per round) and time. When on, each new shot is judged from its frames and improved with quick previews (at most 2 rounds) and one full shot before joining."><input type="checkbox" id="vd-tr-judge"> 🧑‍⚖️ Judge and improve trailer shots automatically</label>
         <div class="sd-gobar">
           <div class="sd-row">
             <button id="btn-vd-tr-make" class="primary">🎞 Make trailer</button>
@@ -2915,6 +2987,8 @@
   <script src="sd-quality.js"></script><!-- 🎨 quality defaults by model family, prompt shortening, styles (window.sdQuality, PR #128) -->
   <script src="images-studio.js"></script>
   <script src="videos-studio.js"></script>
+  <script src="video-record.js"></script>
+  <script src="videos-judge.js"></script>
   <script src="videos-trailer.js"></script><!-- 🎞 book trailers in the 🎬 Video tab -->
   <script src="media-selftest-ui.js"></script><!-- 🩺 Test pictures & video (🎬 Video → 🩺 Test) -->
   <script src="alfred-format.js"></script><!-- 🎩 his replies as simple, safe formatting (used by alfred-panel.js) -->

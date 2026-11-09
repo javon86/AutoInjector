@@ -14,7 +14,12 @@
  *   video.settings({ backend, model, comfyUrl, timeoutMs, framepackDir, framepackGpuMemory })
  *   video.framepack.status() · video.framepack.load() · video.framepack.unload() · video.framepack.test() — FramePack (framepack.js)
  *   video.install.check() · video.install.downloadModel({ id }) · video.install.installAll({ id }) · video.install.cancel()
- *   🎞 trailer.make({ book, items | shots + cards, music, … }) · trailer.status({ id }) · trailer.cancel() · trailer.list({ book })
+ *   ♻ video.record / video.remake({ path }) · 🧑‍⚖️ video.contactSheet / video.judge({ path, judge }) · 🔁 video.improve({ path, rounds, final })
+ *   · video.improveFinal({ id }) · video.improveStop() · video.makeBest({ request, count }) · video.estimate({ request })
+ *   · video.judgeStatus() · video.judgeSettings({ rounds, bestCount, previewSeconds, autoTrailer })
+ *   · 💾 video.recipes.list / get / save / rename / delete / setDefault / fromVideo / apply (video-improve.js, video-recipes.js)
+ *   generate / animate also take recipe (a saved video recipe's settings; the request's own fields win)
+ *   🎞 trailer.make({ book, items | shots + cards, music, recipe, judgeShots, … }) · trailer.status({ id }) · trailer.cancel() · trailer.list({ book })
  *   · trailer.plan({ book }) — book trailers: shots rendered one by one, joined with title cards (video-trailer.js)
  * generate / animate params: prompt, negativePrompt, image (animate: a path or base64), width, height,
  *   seconds | frames, fps, model, steps, cfgScale, seed, sampler, scheduler, shift, characterLock,
@@ -67,6 +72,7 @@ const GEN_PROPS = {
   gpuMemoryPreservation: { type: 'number', minimum: 6, maximum: 128, description: 'FramePack: graphics memory (GB) to keep free (default 6; raise it when the card runs out of memory)' },
   distilledCfg: { type: 'number', minimum: 1, maximum: 32, description: 'FramePack: distilled CFG (default 10)' },
   timeoutMs: { type: 'integer', minimum: 10000, maximum: 21600000, description: 'Give up after this long (default 45 min)' },
+  recipe: { type: 'string', maxLength: 200, description: 'A saved 🎬 video recipe (id or name, video.recipes.list): its settings are used; anything given here wins. A recipe template wraps the prompt ({subject})' },
 };
 const SHOT_ITEM = { type: 'object', additionalProperties: false, properties: {
   type: { type: 'string', enum: ['shot', 'card'], description: 'shot (a video made from prompt / image) or card (a title card: text + subtitle)' },
@@ -89,6 +95,8 @@ const TRAILER_PROPS = {
   model: { type: 'string', enum: Object.keys(VI.MODELS), description: 'Video model for every shot' },
   engine: { type: 'string', enum: ['auto', 'wan', 'framepack', 'endpoint'], description: 'The video engine for every shot (default: the one picked in 🎬 Video → Settings). framepack = FramePack (a shot from text gets its picture made first)' },
   resume: { type: 'boolean', description: 'Reuse shots already made for this trailer (default true)' },
+  recipe: { type: 'string', maxLength: 200, description: 'A saved 🎬 video recipe (id or name) for every shot (a shot\'s own settings win)' },
+  judgeShots: { type: 'boolean', description: 'Judge each new shot and improve it (at most 2 quick-preview rounds + the full shot) before joining — costs AI usage (one answer per round). Default: the 🧑‍⚖️ "Judge and improve trailer shots automatically" setting (off)' },
   mp4: { type: 'boolean', description: 'Also make an .mp4 copy when ffmpeg is found (default true)' },
   from: { type: 'string', maxLength: 60 }, wait: { type: 'boolean', description: 'Wait for the finished trailer instead of returning at once' },
 };
@@ -117,6 +125,26 @@ const OPS = [
   { name: 'video.install.downloadModel', description: 'Download a video model into ComfyUI\'s model folders (big: 2.8–18 GB; resumes where it stopped)', params: O({ id: { type: 'string', enum: MODEL_IDS } }), args: 'object', changes: true, needs: 'comfyInstalled' },
   { name: 'video.install.installAll', description: 'One click: install ComfyUI (when there is none) and then the video model', params: O({ id: { type: 'string', enum: MODEL_IDS } }), args: 'object', changes: true },
   { name: 'video.install.cancel', description: 'Stop / pause the video download (it continues where it stopped next time)', params: O(), args: [], changes: true },
+  // ♻ remake · 🧑‍⚖️ judge (a contact sheet of the frames) · 🔁 Make it better (quick previews, then one full video) · Make N, pick the best · 💾 recipes
+  { name: 'video.record', description: 'Everything saved with a video (its sidecar): prompt typed and sent, engine, model files, workflow, length, fps, size, steps, CFG, shift / sampler / FramePack settings, the real seed, the starting picture, who asked, recipe, the judge\'s verdicts — and the same in plain words', params: O({ path: { type: 'string', maxLength: 1000 } }, ['path']), args: 'object', changes: false },
+  { name: 'video.remake', description: 'Make a saved video again EXACTLY from its sidecar: the prompt as sent, the same seed, size, frames, fps and every engine setting (and the same starting picture). Takes minutes', params: O({ path: { type: 'string', maxLength: 1000 } }, ['path']), args: 'object', changes: true, needs: 'ready' },
+  { name: 'video.contactSheet', description: 'Make the contact sheet of a video (about 8 frames in time order with their numbers, plus the starting picture) and the frame check without AI (frozen / sudden jumps / flicker). No AI is asked', params: O({ path: { type: 'string', maxLength: 1000 } }, ['path']), args: 'object', changes: false },
+  { name: 'video.judge', description: 'Ask an AI judge (Claude Code on this PC, else a web AI pane, else a local Ollama vision model) to look at a video\'s contact sheet with its prompt and settings: scores 1–10 (matches the prompt, picture quality, stays the same across frames, natural motion, no flicker, faithful to the starting picture), verdict keep / fix / redo, fixes. Uses ONE AI answer. Saved with the video', params: O({ path: { type: 'string', maxLength: 1000 }, judge: { type: 'string', enum: ['claude-code', 'pane', 'local'], description: 'only this judge (default: the best available)' } }, ['path']), args: 'object', changes: true },
+  { name: 'video.improve', description: '🔁 Make it better: judge the video → apply the fixes → make a QUICK PREVIEW (about 1.5 s, smaller) → judge it, up to `rounds` previews (default 3, max 5); stops early when it passes or stops improving. Then ONE full-length video with the best settings: final "confirm" (default: it waits — video.improveFinal makes it, the answer says how long it takes), "auto" (makes it straight away) or "none". One AI answer per round. Never changes the defaults', params: O({ path: { type: 'string', maxLength: 1000 }, rounds: { type: 'integer', minimum: 1, maximum: 5 }, bar: { type: 'number', minimum: 5, maximum: 10 }, final: { type: 'string', enum: ['confirm', 'auto', 'none'] } }, ['path']), args: 'object', changes: true, needs: 'ready' },
+  { name: 'video.improveFinal', description: 'Make the full-length, full-size video with the best settings "Make it better" found (it is judged too: one more AI answer). Takes as long as a normal video', params: O({ id: { type: 'string', maxLength: 40, description: 'the improve id (default: the one waiting)' } }), args: 'object', changes: true, needs: 'ready' },
+  { name: 'video.improveStop', description: 'Stop "Make it better" / "Make several, pick the best" — also the video being made for it', params: O(), args: [], changes: true },
+  { name: 'video.makeBest', description: 'Make 2–4 videos with different seeds (count, default 2), judge each from its contact sheet and pick the best. Each video takes minutes and one AI answer', params: O({ request: { type: 'object', additionalProperties: true, description: 'video.generate / video.animate params (prompt, image, recipe, settings …)' }, count: { type: 'integer', minimum: 2, maximum: 4 } }, ['request']), args: 'object', changes: true, needs: 'ready' },
+  { name: 'video.estimate', description: 'About how long a video with these settings takes on this PC (from the last videos when known)', params: O({ request: { type: 'object', additionalProperties: true } }, ['request']), args: 'object', changes: false },
+  { name: 'video.judgeStatus', description: 'Which AI judges are available now (Claude Code, the panes, Ollama with a vision model) and which goes first — the same judges as for pictures', params: O(), args: [], changes: false },
+  { name: 'video.judgeSettings', description: 'Video judge settings: rounds (quick previews in Make it better, 1–5, default 3), bestCount (Make N, pick the best: 2–4, default 2), previewSeconds (1–2), autoTrailer (judge and improve trailer shots automatically, max 2 rounds — costs AI usage, default off). The judge order / on-off / pane / pass mark are shared with pictures (images.judgeSettings). Without arguments: read them', params: O({ rounds: { type: 'integer', minimum: 1, maximum: 5 }, bestCount: { type: 'integer', minimum: 2, maximum: 4 }, previewSeconds: { type: 'number', minimum: 1, maximum: 2 }, autoTrailer: { type: 'boolean' } }), args: 'object', changes: true },
+  { name: 'video.recipes.list', description: 'Saved 🎬 video recipes (named settings, incl. the starter ones for Wan 2.2 5B, Wan 2.1 1.3B and FramePack) and which is the default', params: O(), args: [], changes: false },
+  { name: 'video.recipes.get', description: 'One video recipe with all its settings', params: O({ id: { type: 'string', maxLength: 200, description: 'id or name' } }, ['id']), args: 'object', changes: false },
+  { name: 'video.recipes.save', description: 'Save a video recipe: name, settings {engine ("comfy-wan" | "framepack"), model, seconds, fps, width, height, steps, cfgScale, shift, sampler, scheduler, negativePrompt, negativeMode ("auto" | "replace"), distilledCfg, teacache, gpuMemoryPreservation}, promptTemplate (with {subject}), makeDefault. Same name or id = update', params: O({ id: { type: 'string', maxLength: 200 }, name: { type: 'string', maxLength: 120 }, settings: { type: 'object', additionalProperties: true }, promptTemplate: { type: 'string', maxLength: 2000 }, description: { type: 'string', maxLength: 600 }, makeDefault: { type: 'boolean' } }, ['name', 'settings']), args: 'object', changes: true },
+  { name: 'video.recipes.rename', description: 'Rename a video recipe', params: O({ id: { type: 'string', maxLength: 200 }, name: { type: 'string', maxLength: 120 } }, ['id', 'name']), args: 'object', changes: true },
+  { name: 'video.recipes.delete', description: 'Delete a video recipe (a starter recipe is hidden)', params: O({ id: { type: 'string', maxLength: 200 } }, ['id']), args: 'object', changes: true },
+  { name: 'video.recipes.setDefault', description: 'Make a video recipe the default (loaded into the 🎬 Video form when the tab opens); "" = none', params: O({ id: { type: 'string', maxLength: 200 } }), args: 'object', changes: true },
+  { name: 'video.recipes.fromVideo', description: 'Save the settings a video was made with as a recipe ("use these settings again")', params: O({ path: { type: 'string', maxLength: 1000 }, name: { type: 'string', maxLength: 120 }, makeDefault: { type: 'boolean' } }, ['path']), args: 'object', changes: true },
+  { name: 'video.recipes.apply', description: 'Put a video recipe\'s settings into the 🎬 Video tab form, so the person sees them (nothing is made until Make video)', params: O({ id: { type: 'string', maxLength: 200 } }, ['id']), args: 'object', changes: true },
   { name: 'trailer.make', description: 'Make a book trailer: each shot is rendered (text→video, or a picture brought to life) one after the other, then joined with title cards (fades, optional music) into a .webm (+ an .mp4 when ffmpeg is found) in videos/trailers/<book>/ — the result path and mp4 name the files. Shots already made are reused. Starts in the background (trailer.status) unless wait:true. Takes minutes per shot.', params: O(TRAILER_PROPS), args: 'object', changes: true, needs: 'ready' },
   { name: 'trailer.status', description: 'The trailer being made: phase (shots / joining / mp4 / done), which shot, each part\'s state; the result when finished', params: O({ id: { type: 'string', maxLength: 80 } }), args: 'object', changes: false },
   { name: 'trailer.cancel', description: 'Stop the trailer being made (the shots already made are kept for next time)', params: O(), args: [], changes: true },
@@ -129,6 +157,17 @@ function _get(obj, p) { return p.split('.').reduce((o, k) => (o == null ? undefi
 function createVideoApi(d = {}) {
   const studio = d.studio;
   const trailer = d.trailer || null;
+  const vj = d.judge || null; // video-improve.js: remake · judge · improve · best · recipes
+  const V = (name, ...a) => { const fn = vj && vj[name]; return typeof fn === 'function' ? fn(...a) : notWired(`video.${name}`); };
+  // a recipe (id or name) → its settings under the request (the request's own fields win)
+  const withRecipe = (o) => {
+    if (!o || !o.recipe) return o;
+    const { recipe, prompt, ...rest } = o;
+    const r = V('recipesOp', 'request', { id: recipe, subject: prompt, request: rest });
+    if (!r || !r.ok) return { __error: r || notWired('video.recipes') };
+    return r.request;
+  };
+  const gen = (kind, o) => { const q = withRecipe(strip(o)); if (q && q.__error) return q.__error; return S(kind, q, from(o)); };
   const T = (name, ...a) => { const fn = trailer && trailer[name]; return typeof fn === 'function' ? fn(...a) : notWired(`trailer.${name}`); };
   const S = (name, ...a) => { const fn = name.split('.').reduce((o, k) => (o == null ? undefined : o[k]), studio); return typeof fn === 'function' ? fn(...a) : notWired(name); };
   const from = (o) => `api:${String((o && o.from) || 'alfred').slice(0, 40)}`;
@@ -141,8 +180,29 @@ function createVideoApi(d = {}) {
       progress: wrap(() => S('progress')),
       gallery: wrap((o) => S('gallery', o && typeof o === 'object' ? o.limit : o)),
       cancel: wrap(() => S('cancel')),
-      generate: wrap((o) => checkKeys('video.generate', o, GEN_PROPS) || S('generate', strip(o), from(o))),
-      animate: wrap((o) => checkKeys('video.animate', o, ANIMATE_PROPS) || S('animate', strip(o), from(o))),
+      generate: wrap((o) => checkKeys('video.generate', o, GEN_PROPS) || gen('generate', o)),
+      animate: wrap((o) => checkKeys('video.animate', o, ANIMATE_PROPS) || gen('animate', o)),
+      record: wrap(async (o) => V('record', o && o.path)),
+      remake: wrap((o) => V('remake', o && o.path, 'api:alfred-remake')),
+      contactSheet: wrap((o) => V('contactSheet', o && o.path)),
+      judge: wrap((o) => V('judge', o && o.path, { only: o && o.judge })),
+      improve: wrap((o) => V('improve', o && o.path, { rounds: o && o.rounds, bar: o && o.bar, final: o && o.final, from: 'api:alfred-improve' })),
+      improveFinal: wrap((o) => V('improveFinal', o && o.id)),
+      improveStop: wrap(async () => V('stop')),
+      makeBest: wrap((o) => { const q = withRecipe(Object.assign({}, (o && o.request) || {})); if (q && q.__error) return q.__error; return V('makeBest', q, { count: o && o.count, from: 'api:alfred-best' }); }),
+      estimate: wrap(async (o) => V('estimate', withRecipe(Object.assign({}, (o && o.request) || {})))),
+      judgeStatus: wrap(() => V('judgeStatus')),
+      judgeSettings: wrap(async (o) => V('settings', o || {})),
+      recipes: {
+        list: wrap(async () => V('recipesOp', 'list', {})),
+        get: wrap(async (o) => V('recipesOp', 'get', o || {})),
+        save: wrap(async (o) => V('recipesOp', 'save', Object.assign({ from: 'alfred' }, o || {}))),
+        rename: wrap(async (o) => V('recipesOp', 'rename', o || {})),
+        delete: wrap(async (o) => V('recipesOp', 'delete', o || {})),
+        setDefault: wrap(async (o) => V('recipesOp', 'setDefault', o || {})),
+        fromVideo: wrap(async (o) => V('recipesOp', 'fromVideo', o || {})),
+        apply: wrap(async (o) => V('recipesOp', 'apply', o || {})),
+      },
       test: wrap(() => S('test')),
       settings: wrap((o) => S('settings', o || {})),
       framepack: {
@@ -159,7 +219,7 @@ function createVideoApi(d = {}) {
       },
     },
     trailer: {
-      make: wrap((o) => checkKeys('trailer.make', o, TRAILER_PROPS) || T('make', Object.assign({}, o || {}, { from: (o && o.from) || 'alfred' }))),
+      make: wrap((o) => checkKeys('trailer.make', o, TRAILER_PROPS) || T('make', Object.assign({}, o || {}, { from: (o && o.from) || 'alfred' }))), // recipe / judgeShots: video-trailer.js
       status: wrap((o) => T('status', o && typeof o === 'object' ? o : {})),
       cancel: wrap(() => T('cancel')),
       list: wrap((o) => T('list', o && typeof o === 'object' ? o : {})),

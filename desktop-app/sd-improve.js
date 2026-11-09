@@ -18,6 +18,31 @@ const crypto = require('crypto');
 const J = require('./image-judge');
 const sdRecord = require('./sd-record');
 
+/**
+ * The shared "Make it better" round loop (🎨 pictures here, 🎬 video's quick previews in video-improve.js).
+ * rounds: [round 1, already judged]; step(n, best) → { item } | { item, judgeFailed } | { failed: item } | { stopped, item? }.
+ * Stops when the best passes, on Stop, on a failure, or when two rounds in a row are no better.
+ * → { bestI, stopReason: 'rounds' | 'passed' | 'stopped' | 'failed' | 'judge-failed' | 'no-better' } (rounds is filled in).
+ */
+async function runRounds(o) {
+  const rounds = o.rounds;
+  let bestI = 0; let worse = 0; let stopReason = 'rounds';
+  for (let n = rounds.length + 1; n <= o.N; n++) {
+    const best = rounds[bestI];
+    if (o.passes(best.judge)) { stopReason = 'passed'; break; }
+    if (o.signal && o.signal.aborted) { stopReason = 'stopped'; break; }
+    if (o.onRound) o.onRound(n);
+    const r = (await o.step(n, best)) || { failed: { round: n, error: 'nothing came back' } };
+    if (r.stopped) { if (r.item) rounds.push(r.item); stopReason = 'stopped'; break; }
+    if (r.failed) { rounds.push(r.failed); stopReason = 'failed'; break; }
+    rounds.push(r.item);
+    if (r.judgeFailed) { stopReason = 'judge-failed'; break; }
+    if (o.better(r.item.judge, best.judge)) { bestI = rounds.length - 1; worse = 0; } else if (++worse >= 2) { stopReason = 'no-better'; break; }
+  }
+  if (stopReason === 'rounds' && o.passes(rounds[bestI].judge)) stopReason = 'passed';
+  return { bestI, stopReason };
+}
+
 function createImprover(d) {
   const log = d.log || (() => {});
   const progress = (e) => { try { if (d.onProgress) d.onProgress(e); } catch (_) {} };
@@ -60,48 +85,46 @@ function createImprover(d) {
       if (!j1.ok) return Object.assign({ rounds }, j1);
       rounds.push(roundOut(1, path, o.url, rec0, j1.judge, [], []));
       progress({ kind: 'improve', id, phase: 'judged', round: 1, rounds: N, result: rounds[0] });
-      let bestI = 0; let worse = 0;
       const tried = new Set();
-      for (let n = 2; n <= N; n++) {
-        const best = rounds[bestI];
-        if (J.passes(best.judge, bar)) { stopReason = 'passed'; break; }
-        if (ctl.signal.aborted) { stopReason = 'stopped'; break; }
-        running.round = n;
-        const recB = n === 2 ? rec0 : d.readRecord(best.path) || rec0;
-        const base = sdRecord.remakeRequest(recB);
-        const ctx = d.ctxFor ? await d.ctxFor(recB) : {};
-        let req; let changed; let skipped;
-        if (base.engine === 'chatgpt') {
-          const pe = best.judge.promptEdits || {};
-          req = Object.assign({}, base.request, { prompt: J.applyPromptEdits(base.request.prompt, pe) });
-          changed = req.prompt !== base.request.prompt ? ['the words of the request'] : ['asked again (ChatGPT has no settings to change)'];
-          skipped = (best.judge.fixes || []).map((f) => ({ type: f.type, why: 'ChatGPT pictures have no Stable Diffusion settings' }));
-        } else {
-          const a = J.applyFixes(base.request, best.judge, Object.assign({}, ctx.fix || {}, { imagePath: best.path }));
-          req = a.request; changed = a.changed; skipped = a.skipped;
-        }
-        const key = JSON.stringify(Object.assign({}, req, { seed: req.seed === -1 ? 'r' : req.seed }));
-        if (tried.has(key) || !changed.length) { req.seed = -1; if (!changed.includes('a new random seed')) changed.push('a new random seed'); }
-        tried.add(JSON.stringify(req));
-        progress({ kind: 'improve', id, phase: 'making', round: n, rounds: N, changed });
-        const g = await d.generate(Object.assign(req, { batchSize: 1 }), o.from || 'images-tab:improve');
-        if (ctl.signal.aborted) { stopReason = 'stopped'; break; }
-        if (!g || !g.ok || !g.images || !g.images[0]) {
-          log('image-improve', { id, round: n, error: (g && (g.code || g.error)) || 'FAILED' });
-          rounds.push(Object.assign(roundOut(n, '', '', null, null, changed, skipped), { error: (g && g.message) || 'The picture could not be made.' }));
-          stopReason = 'failed'; break;
-        }
-        const p = g.images[0].path;
-        try { d.updateRecord(p, { improve: { session: id, round: n, of: N, from: rec0.file || path.split(/[\\/]/).pop(), changed } }); } catch (_) {}
-        progress({ kind: 'improve', id, phase: 'judging', round: n, rounds: N });
-        const recN = d.readRecord(p) || g.settings;
-        const jn = await judgeOne(p, recN, ctl.signal);
-        if (ctl.signal.aborted) { rounds.push(roundOut(n, p, g.images[0].url, recN, null, changed, skipped)); stopReason = 'stopped'; break; }
-        rounds.push(Object.assign(roundOut(n, p, g.images[0].url, recN, jn.ok ? jn.judge : null, changed, skipped), jn.ok ? {} : { error: jn.message }));
-        progress({ kind: 'improve', id, phase: 'judged', round: n, rounds: N, result: rounds[rounds.length - 1] });
-        if (!jn.ok) { stopReason = 'judge-failed'; break; }
-        if (J.better(jn.judge, best.judge)) { bestI = rounds.length - 1; worse = 0; } else if (++worse >= 2) { stopReason = 'no-better'; break; }
-      }
+      const loop = await runRounds({
+        rounds, N, signal: ctl.signal, passes: (j) => J.passes(j, bar), better: J.better,
+        onRound: (n) => { running.round = n; },
+        step: async (n, best) => {
+          const recB = n === 2 ? rec0 : d.readRecord(best.path) || rec0;
+          const base = sdRecord.remakeRequest(recB);
+          const ctx = d.ctxFor ? await d.ctxFor(recB) : {};
+          let req; let changed; let skipped;
+          if (base.engine === 'chatgpt') {
+            const pe = best.judge.promptEdits || {};
+            req = Object.assign({}, base.request, { prompt: J.applyPromptEdits(base.request.prompt, pe) });
+            changed = req.prompt !== base.request.prompt ? ['the words of the request'] : ['asked again (ChatGPT has no settings to change)'];
+            skipped = (best.judge.fixes || []).map((f) => ({ type: f.type, why: 'ChatGPT pictures have no Stable Diffusion settings' }));
+          } else {
+            const a = J.applyFixes(base.request, best.judge, Object.assign({}, ctx.fix || {}, { imagePath: best.path }));
+            req = a.request; changed = a.changed; skipped = a.skipped;
+          }
+          const key = JSON.stringify(Object.assign({}, req, { seed: req.seed === -1 ? 'r' : req.seed }));
+          if (tried.has(key) || !changed.length) { req.seed = -1; if (!changed.includes('a new random seed')) changed.push('a new random seed'); }
+          tried.add(JSON.stringify(req));
+          progress({ kind: 'improve', id, phase: 'making', round: n, rounds: N, changed });
+          const g = await d.generate(Object.assign(req, { batchSize: 1 }), o.from || 'images-tab:improve');
+          if (ctl.signal.aborted) return { stopped: true };
+          if (!g || !g.ok || !g.images || !g.images[0]) {
+            log('image-improve', { id, round: n, error: (g && (g.code || g.error)) || 'FAILED' });
+            return { failed: Object.assign(roundOut(n, '', '', null, null, changed, skipped), { error: (g && g.message) || 'The picture could not be made.' }) };
+          }
+          const p = g.images[0].path;
+          try { d.updateRecord(p, { improve: { session: id, round: n, of: N, from: rec0.file || path.split(/[\\/]/).pop(), changed } }); } catch (_) {}
+          progress({ kind: 'improve', id, phase: 'judging', round: n, rounds: N });
+          const recN = d.readRecord(p) || g.settings;
+          const jn = await judgeOne(p, recN, ctl.signal);
+          if (ctl.signal.aborted) return { stopped: true, item: roundOut(n, p, g.images[0].url, recN, null, changed, skipped) };
+          const item = Object.assign(roundOut(n, p, g.images[0].url, recN, jn.ok ? jn.judge : null, changed, skipped), jn.ok ? {} : { error: jn.message });
+          progress({ kind: 'improve', id, phase: 'judged', round: n, rounds: N, result: item });
+          return jn.ok ? { item } : { item, judgeFailed: true };
+        },
+      });
+      let bestI = loop.bestI; stopReason = loop.stopReason;
       if (stopReason === 'rounds' && J.passes(rounds[bestI].judge, bar)) stopReason = 'passed';
       const best = rounds[bestI];
       log('image-improve', { id, rounds: rounds.length, best: best.round, scores: rounds.map((r) => r.overall), stop: stopReason, ms: Date.now() - t0 });
@@ -152,4 +175,4 @@ function createImprover(d) {
   return { improve, best, stop, status };
 }
 
-module.exports = { createImprover };
+module.exports = { createImprover, runRounds };

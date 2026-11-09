@@ -355,6 +355,17 @@
     if (st.generating) return;
     hideError();
     const req = formRequest();
+    // 💾 a recipe's prompt template wraps the typed words; "Make N, pick the best" (videos-judge.js)
+    if (window.vdJudge && typeof window.vdJudge.decorate === 'function') window.vdJudge.decorate(req);
+    if (window.vdJudge && window.vdJudge.wantBest && window.vdJudge.wantBest()) {
+      if (st.mode === 'i2v' && !req.image) { showError({ message: 'Choose a picture first (drop one, choose a file, or pick one from the 🎨 gallery).' }); return; }
+      if (st.mode === 't2v' && !req.prompt && !req.characterLock) { showError({ message: 'Describe the video first.' }); return; }
+      busy(true); msg('🎬 Making several videos and asking the AI judge about each…');
+      const rb = await window.vdJudge.makeBest(req);
+      busy(false);
+      if (!rb || !rb.ok) { msg(''); showError(rb); return; }
+      loadGallery(); return;
+    }
     if (st.mode === 'i2v' && !req.image) { showError({ message: 'Choose a picture first (drop one, choose a file, or pick one from the 🎨 gallery).' }); return; }
     if (st.mode === 't2v' && !req.prompt && !req.characterLock) { showError({ message: 'Describe the video first.' }); return; }
     busy(true);
@@ -381,7 +392,9 @@
     v.hidden = false; $('vd-player-empty').hidden = true;
     const r = it.record || {};
     setText('vd-player-info', [r.prompt ? `“${String(r.prompt).slice(0, 300)}”` : '', [r.model, r.width && `${r.width}×${r.height}`, r.seconds != null && `${r.seconds} s`, r.fps && `${r.fps} fps`, r.seed != null && `seed ${r.seed}`].filter(Boolean).join(' · ')].filter(Boolean).join('\n'));
-    $('btn-vd-remake').disabled = !it.record; $('btn-vd-showfile').disabled = !it.path;
+    $('btn-vd-remake').disabled = !it.record || !it.path; $('btn-vd-showfile').disabled = !it.path;
+    if ($('btn-vd-to-form')) $('btn-vd-to-form').disabled = !it.record;
+    try { document.dispatchEvent(new CustomEvent('vd-current', { detail: it })); } catch (_) {}
   }
   async function loadGallery() {
     const g = await call('gallery', 40);
@@ -397,8 +410,21 @@
     }
     if (!box.children.length) box.textContent = 'No videos yet.';
   }
-  $('btn-vd-remake').onclick = () => {
-    const r = st.current && st.current.record; if (!r) return;
+  // ♻ Remake: the same video again, exactly (the saved sidecar: prompt as sent, seed, every setting — video-improve.js remake)
+  $('btn-vd-remake').onclick = async () => {
+    const it = st.current; if (!it || !it.path || st.generating) return;
+    hideError(); busy(true); msg('♻ Making the same video again (the same prompt, seed and settings)…');
+    const r = await call('remake', it.path);
+    busy(false);
+    if (!r || !r.ok) { msg(''); showError(r); return; }
+    st.lastSeed = r.seed;
+    msg(`✔ Remade: ${String(r.path || '').split(/[\\/]/).pop()} — seed ${r.seed}${r.sameSeed ? ' (the same seed)' : ''}.${r.note ? `\n${r.note}` : ''}`);
+    play({ path: r.path, url: r.url, posterUrl: r.posterUrl, record: r.record || r });
+    loadGallery();
+  };
+  // ✎ To form: put a video's settings back into the form (to change one thing)
+  function toForm(r) {
+    if (!r) return;
     if (r.prompt) $('vd-prompt').value = r.prompt;
     if (r.negativePrompt) $('vd-negative').value = r.negativePrompt;
     if (r.engine === 'framepack' || r.model === 'framepack-i2v-hy') {
@@ -420,7 +446,10 @@
     if (r.scheduler) $('vd-scheduler').value = r.scheduler;
     setMode(r.mode === 'i2v' ? 'i2v' : 't2v');
     framesNote();
-  };
+  }
+  if ($('btn-vd-to-form')) $('btn-vd-to-form').onclick = () => toForm(st.current && st.current.record);
+  // for videos-judge.js (💾 recipes, 🧑‍⚖️ judge, 🔁 Make it better): the parts of this tab it shares
+  window.vdHooks = { current: () => st.current, play, formRequest, toForm, setSlider, setMode, applyEngine, applyModelLimits, framesNote, loadGallery, msg, showError, hideError, busy, call, isBusy: () => st.generating, mode: () => st.mode };
   $('btn-vd-showfile').onclick = () => { if (st.current && st.current.path) call('showFile', st.current.path); };
   $('btn-vd-folder').onclick = () => call('openFolder');
 

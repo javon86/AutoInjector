@@ -270,6 +270,7 @@ const state = {
     costLimit: 5
   },
   sdManaged: { startWithApp: false, targetId: "", addonsDir: "" }, // 🎨 "Start Stable Diffusion with AutoInjector" (default off) + which package to start
+  videoJudge: null, // 🎬🧑‍⚖️ video judge settings (video-judge.js cleanVideoSettings): preview rounds, Make N count, preview length, auto-judge trailer shots
   imageJudge: null, // 🧑‍⚖️ the AI judge's settings (image-judge.js cleanSettings): order, on/off per judge, pass mark, rounds, auto-judge book pictures
   sdQuality: { bookCheckpoint: "", bookRecipe: "" }, // 🎨 "Book pictures use: <checkpoint>" (Akọwe's pictures; "" = whatever is loaded) — sd-quality.js, PR #128
   chatImage: { freshChatPerSeries: false }, // 🎨 ChatGPT image engine: a new ChatGPT chat for each reference-view series (default: one chat, keeps the character)
@@ -769,6 +770,7 @@ function buildStateSnapshotText() {
         chatImage: state.chatImage,
         sdQuality: state.sdQuality,
         imageJudge: state.imageJudge,
+        videoJudge: state.videoJudge,
         imageConfig: state.imageConfig || imageProvider.getSettings(), // Stable Diffusion endpoint/size — no secret, stored as-is
         videoConfig: state.videoConfig || videoProvider.getSettings(), // text-to-video endpoint/size — no secret, stored as-is
         videoStudio: state.videoStudio || null, // 🎬 Video engine settings — no secret
@@ -895,6 +897,7 @@ function loadPersistedState() {
   if (snap.chatImage && typeof snap.chatImage === "object") state.chatImage = { freshChatPerSeries: !!snap.chatImage.freshChatPerSeries };
   if (snap.sdQuality && typeof snap.sdQuality === "object") state.sdQuality = { bookCheckpoint: String(snap.sdQuality.bookCheckpoint || "").slice(0, 300), bookRecipe: String(snap.sdQuality.bookRecipe || "").slice(0, 120) };
   if (snap.imageJudge && typeof snap.imageJudge === "object") { try { state.imageJudge = require("./image-judge").cleanSettings(snap.imageJudge); } catch (_) {} }
+  if (snap.videoJudge && typeof snap.videoJudge === "object") { try { state.videoJudge = require("./video-judge").cleanVideoSettings(snap.videoJudge); } catch (_) {} }
   if (snap.sdManaged && typeof snap.sdManaged === "object") {
     state.sdManaged = { startWithApp: !!snap.sdManaged.startWithApp, targetId: String(snap.sdManaged.targetId || ""), addonsDir: String(snap.sdManaged.addonsDir || "") };
   }
@@ -7090,31 +7093,39 @@ function imageJudgeOllamaBases() {
   if (!process.env.AUTOINJECTOR_JUDGE_OLLAMA) out.push(`http://${process.env.AUTOINJECTOR_OLLAMA_HOST || "127.0.0.1:11435"}`, "http://127.0.0.1:11434");
   return out;
 }
+// The three judges (Claude Code, a web pane, a local vision model) — shared by 🎨 pictures and 🎬 video (one order, one setting).
+let _judgeAgents = null;
+function judgeAgents() {
+  if (_judgeAgents) return _judgeAgents;
+  const JS = require("./image-judge-service");
+  const settings = () => state.imageJudge || {};
+  _judgeAgents = {
+    "claude-code": require("./image-judge-cc").createClaudeCodeJudge({ log: (t, d) => logEvent(t, d) }),
+    // a FRESH chat in the Claude (or ChatGPT) pane, the picture attached — never while Akọwe uses that pane
+    pane: JS.createPaneJudge({
+      site: () => (settings().paneSite === "chatgpt" ? "chatgpt" : "claude"),
+      problem: (site) => {
+        if (!state.enabled[site]) return { code: "TURNED_OFF", say: `the ${siteLabel(site)} pane is turned off` };
+        if (akoweUsingPane(site)) return { code: "AKOWE_USING", say: `Akọwe is using the ${siteLabel(site)} pane for the book` };
+        if (site === CHAT_IMAGE_SITE && chatImageHold) return { code: "AKOWE_USING", say: "ChatGPT is drawing a picture" };
+        const p = akoweSiteProblem(site);
+        return p && p.code !== "CHECKING" ? p : null;
+      },
+      ask: (site, text, o) => alfredAskPane(site, text, { attach: o && o.attach, freshChat: !!(o && o.freshChat), signal: o && o.signal, timeoutMs: Number(process.env.AUTOINJECTOR_JUDGE_PANE_MS) || 240000 }),
+    }),
+    local: JS.createOllamaJudge({ fetch: (...a) => fetch(...a), bases: imageJudgeOllamaBases, model: () => process.env.AUTOINJECTOR_JUDGE_OLLAMA_MODEL || "" }),
+  };
+  return _judgeAgents;
+}
 function imageJudge() {
   if (_imageJudge) return _imageJudge;
   const JS = require("./image-judge-service");
-  const settings = () => state.imageJudge || {};
   _imageJudge = JS.createJudgeService({
-    settings,
+    settings: () => state.imageJudge || {},
     readRecord: (p) => require("./sd-images").readRecord(p),
     updateRecord: (p, patch) => require("./sd-images").updateRecord(p, patch),
     log: (t, d) => logEvent(t, d),
-    judges: {
-      "claude-code": require("./image-judge-cc").createClaudeCodeJudge({ log: (t, d) => logEvent(t, d) }),
-      // a FRESH chat in the Claude (or ChatGPT) pane, the picture attached — never while Akọwe uses that pane
-      pane: JS.createPaneJudge({
-        site: () => (settings().paneSite === "chatgpt" ? "chatgpt" : "claude"),
-        problem: (site) => {
-          if (!state.enabled[site]) return { code: "TURNED_OFF", say: `the ${siteLabel(site)} pane is turned off` };
-          if (akoweUsingPane(site)) return { code: "AKOWE_USING", say: `Akọwe is using the ${siteLabel(site)} pane for the book` };
-          if (site === CHAT_IMAGE_SITE && chatImageHold) return { code: "AKOWE_USING", say: "ChatGPT is drawing a picture" };
-          const p = akoweSiteProblem(site);
-          return p && p.code !== "CHECKING" ? p : null;
-        },
-        ask: (site, text, o) => alfredAskPane(site, text, { attach: o && o.attach, freshChat: !!(o && o.freshChat), signal: o && o.signal, timeoutMs: Number(process.env.AUTOINJECTOR_JUDGE_PANE_MS) || 240000 }),
-      }),
-      local: JS.createOllamaJudge({ fetch: (...a) => fetch(...a), bases: imageJudgeOllamaBases, model: () => process.env.AUTOINJECTOR_JUDGE_OLLAMA_MODEL || "" }),
-    },
+    judges: judgeAgents(),
   });
   return _imageJudge;
 }
@@ -7629,6 +7640,7 @@ function videoStudio() {
     comfy: (o) => videoComfy(o), installer: () => videoInstaller(), library: sdLibrary(), videoProvider,
     framepack: () => framepack(), makePicture: (o) => videoMakePicture(o),
     videosDir: () => outputManager.videosDir(),
+    appVersion: () => { const b = buildInfo(); return `${b.version || ""}${b.commit ? ` (${String(b.commit).slice(0, 7)})` : ""}`.trim(); },
     fileUrl: (p) => { try { return pathToFileURL(p).href; } catch (_) { return ""; } },
     log: (t, d) => logEvent(t, d),
     settings: state.videoStudio || {},
@@ -7742,9 +7754,55 @@ function videoTrailer() {
     log: (t, d) => logEvent(t, d),
     comfyRoots: () => { const out = []; try { for (const t of sdTargets()) { if (t.dir) out.push(t.dir); if (t.python) out.push(path.dirname(path.dirname(t.python))); } } catch (_) {} return out; },
     onDone: (r) => broadcast("video-done", { ok: !!(r && r.ok), path: r && r.path, trailer: true, error: r && !r.ok ? r.error : undefined }),
+    // 💾 a video recipe per shot / trailer, and 🧑‍⚖️ 🔁 "Judge and improve trailer shots automatically" (off by default)
+    recipeRequest: (id, o) => videoJudgeStudio().recipesOp("request", Object.assign({ id }, o || {})),
+    improveShot: (p, o) => videoJudgeStudio().improve(p, o),
+    autoJudge: () => !!(state.videoJudge && state.videoJudge.autoTrailer),
   });
   return _videoTrailer;
 }
+// ---- 🎬 ♻ remake · 💾 video recipes · 🧑‍⚖️ the video judge (a contact sheet of the frames) · 🔁 Make it better with
+// quick previews · Make N, pick the best (video-improve.js, video-judge.js, video-frames.js, video-recipes.js)
+let _videoRecipes = null;
+function videoRecipes() {
+  if (!_videoRecipes) _videoRecipes = require("./video-recipes").createVideoRecipeStore({ file: path.join(userDataDir(), "video-recipes.json"), log: (t, d) => logEvent(t, d) });
+  return _videoRecipes;
+}
+let _videoJudge = null;
+function videoJudgeService() {
+  if (!_videoJudge) _videoJudge = require("./image-judge-service").createJudgeService({ settings: () => state.imageJudge || {}, rules: require("./video-judge"), tag: "video-judge", judges: judgeAgents(), log: (t, d) => logEvent(t, d) });
+  return _videoJudge;
+}
+// The frames for the contact sheet: ffmpeg when one is on this PC (found like the trailer finds it), else the app's own player.
+async function videoFrameGrabber() {
+  const VF = require("./video-frames");
+  let bin = null;
+  try { bin = videoTrailerMod.findFfmpeg({ roots: (() => { const out = []; try { for (const t of sdTargets()) { if (t.dir) out.push(t.dir); if (t.python) out.push(path.dirname(path.dirname(t.python))); } } catch (_) {} return out; })() }); } catch (_) { bin = null; }
+  return bin ? VF.createFfmpegGrabber({ bin }) : VF.createElectronGrabber({ electron: require("electron"), dir: __dirname });
+}
+let _videoJudgeStudio = null;
+function videoJudgeStudio() {
+  if (_videoJudgeStudio) return _videoJudgeStudio;
+  _videoJudgeStudio = require("./video-improve").createVideoJudgeStudio({
+    studio: videoStudio(), judge: videoJudgeService(), grabber: videoFrameGrabber, recipes: videoRecipes(),
+    settings: () => state.videoJudge || {}, persistSettings: (s) => { state.videoJudge = s; saveStateDebounced(); },
+    judgeSettings: () => state.imageJudge || {},
+    engineInfo: async () => { const s = _videoLastStatus || await videoStatusFull().catch(() => null); return { installed: (s && s.installed) || [], framepack: !!(s && s.framepack && s.framepack.ready) }; },
+    log: (t, d) => logEvent(t, d), onProgress: (e) => broadcast("video-judge", e), applyToForm: (patch, how) => broadcast("video-form-apply", { patch, how }),
+    fileUrl: (p) => { try { return pathToFileURL(p).href; } catch (_) { return ""; } },
+  });
+  return _videoJudgeStudio;
+}
+ipcMain.handle("video:record", videoSafe((a) => videoJudgeStudio().record(a.path)));
+ipcMain.handle("video:remake", videoSafe((a) => videoJudgeStudio().remake(a.path, "video-tab:remake")));
+ipcMain.handle("video:recipes", videoSafe((a) => videoJudgeStudio().recipesOp(a.op, a)));
+ipcMain.handle("video:judge", videoSafe((a) => videoJudgeStudio().judge(a.path, { only: a.judge || undefined })));
+ipcMain.handle("video:improve", videoSafe((a) => videoJudgeStudio().improve(a.path, { rounds: a.rounds, final: a.final || "confirm", from: "video-tab:improve" })));
+ipcMain.handle("video:improve-final", videoSafe((a) => videoJudgeStudio().improveFinal(a.id)));
+ipcMain.handle("video:improve-stop", videoSafe(() => videoJudgeStudio().stop()));
+ipcMain.handle("video:make-best", videoSafe((a) => videoJudgeStudio().makeBest(a.request || {}, { count: a.count, from: "video-tab:best" })));
+ipcMain.handle("video:estimate", videoSafe((a) => videoJudgeStudio().estimate(a.request || {})));
+ipcMain.handle("video:judge-settings", videoSafe((a) => videoJudgeStudio().settings(a && Object.keys(a).length ? a : null)));
 ipcMain.handle("video:trailer-make", videoSafe((a) => videoTrailer().make(Object.assign({}, a, { from: a.from || "video-tab" }))));
 ipcMain.handle("video:trailer-status", videoSafe((a) => videoTrailer().status(a)));
 ipcMain.handle("video:trailer-cancel", videoSafe(() => videoTrailer().cancel()));
@@ -7761,6 +7819,7 @@ ipcMain.handle("video:trailer-pick-file", videoSafe(async (a) => {
 // The module API for Alfred (video_call) and other callers in the main process (docs/VIDEO_API.md).
 videoApiMod.register(videoApiMod.createVideoApi({
   studio: new Proxy({}, { get: (_t, k) => { const s = videoStudio(); const v = s[k]; return typeof v === "function" ? v.bind(s) : v; }, has: (_t, k) => k in videoStudio() }),
+  judge: new Proxy({}, { get: (_t, k) => { const s = videoJudgeStudio(); const v = s[k]; return typeof v === "function" ? v.bind(s) : v; }, has: (_t, k) => k in videoJudgeStudio() }),
   trailer: new Proxy({}, { get: (_t, k) => { const s = videoTrailer(); const v = s[k]; return typeof v === "function" ? v.bind(s) : v; }, has: (_t, k) => k in videoTrailer() }),
 }));
 
