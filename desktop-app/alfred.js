@@ -1168,7 +1168,11 @@ function createAlfred(deps = {}) {
     // whatever happens next, the older notes about this run are old news now
     outdate(ref, sum.text);
     const step = sum.total ? ` (step ${sum.at || Math.min((sum.done || 0) + 1, sum.total)} of ${sum.total})` : '';
-    if (run.status === 'paused') {
+    if (run.status === 'paused' && sum.alert) {
+      // 🔔 Akọwe's own alert: what kind of issue, what it is about, what is wrong, why it stopped, what comes next
+      const a = sum.alert;
+      notice('book', `run-${run.id}-paused-${a.key || a.category}`, `📖 The book run for ${name} stopped${step}: ${a.icon ? `${a.icon} ` : ''}${a.label} — ${a.what}. ${a.wrong ? `${a.wrong} ` : ''}${a.why ? `${a.why} ` : ''}${a.next ? `${a.next} ` : ''}Open it in the 📖 Akọwe tab.`.replace(/\s+/g, ' '), { ref });
+    } else if (run.status === 'paused') {
       const needs = needsDecision;
       notice('book', `run-${run.id}-paused`, needs ? `📖 The book run for ${name} paused and needs your decision${step} (approve anyway / edit / try again) — open it in the 📖 Akọwe tab.` : `📖 The book run for ${name} paused${step}${run.problem && run.problem.message ? `: ${String(run.problem.message).slice(0, 160)}` : '.'}`, { ref });
     } else if (run.status === 'done') notice('book', `run-${run.id}-done`, `📖 The book run for ${name} finished.`, { ref, force: true });

@@ -571,8 +571,29 @@ to a minute), so the run knows which AIs work.
     An AI that is not working is skipped with a note. If the run is paused, the panel carries on with the readers
     still to read.
 
+**How a fix is judged (code: `akowe/akowe/review.py`, `review_loop.py`):** when the writer revises a draft to answer
+the reviewer, the reviewer judges the new version **only against approved canon**: approved records and protected
+facts, the records it was built from, the story rules, and the approved and locked facts and links of the
+continuity record and the 🗺 story map. The version being replaced is shown as **"the previous draft — not canon"**,
+and the notes an AI wrote together with an earlier draft (a character's sheet and voice card) as **"not canon"**
+too; only notes you wrote yourself count as canon. The reviewer also gets its own earlier findings and is told to
+accept a change that resolves them. When the writer changes a detail its own notes also state, the notes are
+corrected with it (never your own notes). Why: in a real run the reviewer refused a correct fix of Ansel's family
+timeline twice, because the AI's earlier notes were sent as "the character sheet" — so any change looked like a
+contradiction.
+
+**Going round in circles:** if the same finding comes back twice in a row after a fix that was meant to answer it,
+or the reviewer says only a change to an APPROVED or LOCKED fact could fix it, the run stops the loop at once and
+asks you **one specific question** instead of more rounds: what would change (**before → after**, taken from the two
+versions), why, and three choices — **✔ Accept change**, **↩ Keep the original** (the version before the fix comes
+back; the approved fact it disagrees with is listed for you to fix) or **✏️ Let me edit**. The record stays
+**unapproved** until you choose; the run never moves on with it silently. This applies to every record a run reviews
+— characters, places, items, groups, the plan and chapters (a chapter's earlier version is never shown as canon).
+
 **Where it stops for you:**
 
+- The reviewer and the writer disagree about the same thing twice, or a fix would change an approved fact: one
+  decision with before → after (see above).
 - The reviewer still says no after two fixes. You choose:
   - **✔ Approve anyway:** your own approval.
   - **✏️ Edit it myself**, then Continue.
@@ -612,8 +633,47 @@ A 40–50 chapter book takes a day or two. AutoInjector looks after it while you
   when: the run is paused or needs your decision; an AI's pane is logged out, shows an "are you human?" check, or
   stopped working and could not be fixed (only while a book is being made); or every AI has hit its usage limit.
   Click the notification to open the right place (the 📖 Akọwe tab for the run). Each one is said once, and again
-  after 30 minutes if it is still waiting. Turn it off, or turn its sound off, in the 📖 Akọwe panel
-  (🖥 Tell me on the desktop when a book needs me · with a sound).
+  after 30 minutes if it is still waiting (a different decision of the same run is said at once). Turn it off, or
+  turn its sound off, in the 📖 Akọwe panel (🖥 Tell me on the desktop when a book needs me · with a sound).
+
+### What a "needs you" alert tells you
+
+Every stop of a book run says, in plain words (code: `akowe/akowe/alerts.py`; shown by the run window, the top-bar
+chip, AutoInjector's notification and its 📖 Akọwe-tab line, and Alfred's book notice):
+
+- **(a) what kind of issue it is**, with an icon;
+- **(b) what it is about** — the record or chapter, for example "Ansel Marrant (character)" or "Chapter 3";
+- **(c) what is wrong**, in one or two sentences taken from the finding itself;
+- **(d) why it stopped** — for example "The reviewer and the writer disagreed twice about the same thing, so it needs
+  you", "This would change an approved fact, so only you can decide", "Only one AI is working, so no other AI could
+  check it", "You pressed Pause";
+- **(e) what happens next, and the choices** — for example "Pick one: accept the change, keep the original, or edit
+  it yourself. The book carries on after you choose."
+
+The kinds of issue (a fixed list; Akọwe picks one from where the stop came from — the step, the kind of record, the
+check — never by asking an AI):
+
+| Icon | Kind | When |
+|---|---|---|
+| 🧑 | Character issue | a character record, sheet, look or voice |
+| 🔗 | Story continuity | a continuity checkpoint or the story ledger (injuries, items, who knows what) |
+| ⏳ | Timeline | the book's history or timeline records, timeline checks |
+| 📍 | Place / world rule | places, the world, groups, cultures, magic and technology rules |
+| 📦 | Item | items, artifacts and weapons |
+| 🗺 | Story map connection | the story map's links and conflicts |
+| 📖 | Chapter quality | a chapter's review, its planned details |
+| 🧭 | Plot / outline | the premise, the main plot, the chapter outline |
+| ✍ | Style / sounds like AI | the "sounds like a person" pass and style checks |
+| ✔ | Approval needed | a draft only its own AI could check, or an OK that was not sure enough |
+| 🎨 | Picture | character pictures |
+| ⏸ | Paused by you | you pressed Pause |
+| ⚠ | AI problem | an AI did not answer, a usage limit, a connection error, Akọwe was closed |
+
+The desktop notification reads, for example: title **"📖 The Salt Keeper's Ledger: 🧑 Character issue (step 3 of 19)"**,
+body **"Ansel Marrant (character): His background has a timeline contradiction: … The reviewer and the writer
+disagreed twice about the same thing, so it needs you."** (title at most 96 characters, body at most 200). The
+notification and Akọwe's window may quote a few words of your own book; the activity logs keep only the kind of issue
+and the code (for example `character` / `REVIEW_DECISION`), never the book's words.
 - **Memory stays small.** The conversation list keeps only the first 2,000 characters of each answer Akọwe took
   ("… (full answer handed to Akọwe)" — Akọwe saves the whole answer in the book), keeps the newest 2,000 messages
   (older ones go to `autoinjector-transcript-archive.jsonl` in the settings folder), and shows the newest 300 with

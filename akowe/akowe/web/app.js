@@ -8142,9 +8142,10 @@ async function refreshRunChip() {
     btn.setAttribute('aria-label', `AI working on “${live.title || 'a new book'}”: ${done} of ${live.steps.length} steps done${live.status === 'waiting' ? ', waiting for an AI' : ''}. Open the progress window`);
     btn.title = 'The AI is making a book. What each AI is doing right now shows just below the top bar. Click to watch, pause or cancel.';
   } else if (pend) {
-    lab.textContent = 'AI needs you';
-    btn.setAttribute('aria-label', `AI needs you${pend.title ? ` (“${pend.title}”)` : ''}: ${pend.state_words || 'the run is paused.'} Open the progress window`);
-    btn.title = pend.state === 'needs_decision' ? 'The AI run needs a decision from you' : (pend.state === 'interrupted' || pend.status === 'interrupted') ? 'The AI run was interrupted: open it to continue' : 'The AI run is paused: open it to resume or cancel';
+    const al = pend.alert;  // 🔔 what kind of issue, what it is about and why it stopped (alerts.py)
+    lab.textContent = al ? `AI needs you · ${al.icon} ${al.label}` : 'AI needs you';
+    btn.setAttribute('aria-label', `AI needs you${pend.title ? ` (“${pend.title}”)` : ''}: ${al ? `${al.label} — ${al.what}. ${al.why}` : pend.state_words || 'the run is paused.'} Open the progress window`);
+    btn.title = al ? `${al.icon} ${al.label}: ${al.what}\n${al.wrong}\n${al.why}` : pend.state === 'needs_decision' ? 'The AI run needs a decision from you' : (pend.state === 'interrupted' || pend.status === 'interrupted') ? 'The AI run was interrupted: open it to continue' : 'The AI run is paused: open it to resume or cancel';
   } else { lab.textContent = 'AI working'; btn.setAttribute('aria-label', 'AI working'); }
 }
 async function openMakeBook(opener, { runId = null, fresh = false } = {}) {
@@ -8457,6 +8458,40 @@ function runDecision(prob) {
   }
   return extra;
 }
+/**
+ * 🔔 The alert card of a run that waits for you (alerts.py): the category with its icon, what it is about, what is
+ * wrong, before → after when a change is the question, why it stopped and what happens next. For ONE specific
+ * decision (REVIEW_DECISION) the card carries the buttons itself: accept the change / keep the original / edit.
+ */
+function runAlertCard(r) {
+  const a = r.alert; if (!a) return null;
+  const prob = r.problem || {};
+  const dec = prob.code === 'REVIEW_DECISION';
+  const card = h('section', { class: `mb-alert cat-${a.category}${dec ? ' mb-decision' : ''}`, 'data-testid': dec ? 'mb-decision' : 'mb-alert', 'data-category': a.category, 'aria-label': `${a.label}: ${a.what}` },
+    h('p', { class: 'mb-alert-head' }, h('span', { class: 'mb-alert-icon', 'aria-hidden': 'true' }, a.icon), ' ',
+      h('strong', { 'data-testid': 'mb-alert-label' }, a.label), h('span', { class: 'muted' }, ' · '), h('span', { 'data-testid': 'mb-alert-what' }, a.what)),
+    a.wrong ? h('p', { class: 'mb-alert-wrong', 'data-testid': 'mb-alert-wrong' }, a.wrong) : null,
+    a.change && (a.change.before || a.change.after) ? h('div', { class: 'mb-change', 'data-testid': 'mb-alert-change' },
+      h('p', { class: 'small muted' }, `What would change (${a.change.field || 'text'}):`),
+      h('p', { class: 'mb-before' }, h('span', { class: 'small muted' }, 'Before: '), quoted(a.change.before) || '—'),
+      h('p', { class: 'mb-after' }, h('span', { class: 'small muted' }, '→ After: '), quoted(a.change.after) || '—')) : null,
+    h('p', { class: 'small', 'data-testid': 'mb-alert-why' }, h('strong', null, 'Why it stopped: '), a.why),
+    h('p', { class: 'small', 'data-testid': 'mb-alert-next' }, h('strong', null, 'What happens next: '), a.next));
+  if (dec) {
+    const opts = prob.options || [];
+    const canon = prob.decision && prob.decision.kind === 'canon';
+    const row = h('div', { class: 'form-actions mb-decision-actions' });
+    row.appendChild(h('button', { type: 'button', class: 'primary', 'data-testid': 'mb-accept-change', onclick: () => runAction('decide', { action: 'accept_change', author_confirms: true }, 'Change accepted; continuing') }, '✔ Accept change'));
+    if (opts.includes('keep_original')) row.appendChild(h('button', { type: 'button', 'data-testid': 'mb-keep-original', onclick: () => runAction('decide', { action: 'keep_original', author_confirms: true }, 'Original kept; continuing') }, canon ? '↩ Keep the original and fix the approved fact instead' : '↩ Keep the original'));
+    if (opts.includes('edit') && prob.record_id) {
+      row.appendChild(h('button', { type: 'button', 'data-testid': 'mb-edit-it', onclick: () => { closeMakeBook(); go(link('p', r.project_id, r.branch_id || 'main', 'edit', prob.record_id)); toast('Edit and save it, then open ⚡ and press “I edited it — continue”'); } }, '✏️ Let me edit'));
+      row.appendChild(h('button', { type: 'button', 'data-testid': 'mb-edited', onclick: () => runAction('decide', { action: 'edited' }, 'Continuing') }, '▶ I edited it — continue'));
+    }
+    card.appendChild(row);
+    card.appendChild(h('p', { class: 'small muted' }, 'Your choice counts as your own approval (it is logged as yours).'));
+  }
+  return card;
+}
 /** A quoted line of the book: “…” added only when the text is not already in quote marks (no ""…"" doubles). */
 function quoted(t) {
   const x = String(t == null ? '' : t).trim();
@@ -8477,7 +8512,7 @@ function whoRead(u, who, at) {
 }
 function renderRun() {
   const r = MB.run; if (!r || !MB.dialog) return;
-  const sig = JSON.stringify([r.status, r.phase, r.current, r.problem && r.problem.code, (r.waiting || {}).retry_at, r.steps.map(s => [s.state, s.message, s.review_note, s.editor_note, (s.items || []).map(i => [i.state, i.editor, i.scenes, i.phase, i.note, i.planned, i.length, i.continuity, i.memory]), s.planned_note, s.checkpoints]), (r.files || []).length, r.ais, r.ai_alerts, r.review_summary, r.editor_summary, r.planned_summary, r.eta, r.report, r.save, r.costs && [r.costs.calls, r.costs.ais], r.check_later, (r.waiting || {}).message]);
+  const sig = JSON.stringify([r.status, r.phase, r.current, r.problem && r.problem.code, (r.waiting || {}).retry_at, r.steps.map(s => [s.state, s.message, s.review_note, s.editor_note, (s.items || []).map(i => [i.state, i.editor, i.scenes, i.phase, i.note, i.planned, i.length, i.continuity, i.memory]), s.planned_note, s.checkpoints]), (r.files || []).length, r.ais, r.ai_alerts, r.review_summary, r.editor_summary, r.planned_summary, r.eta, r.report, r.save, r.costs && [r.costs.calls, r.costs.ais], r.check_later, (r.waiting || {}).message, r.alert && r.alert.key]);
   if (sig === MB.sig && MB.dialog.querySelector('.mb-steps')) { updateRunClocks(); return; }
   MB.sig = sig;
   const w = r.state === 'replaced' ? ['↪', 'Replaced by a newer run', 'b-muted'] : r.state === 'interrupted' ? RUN_WORD.interrupted
@@ -8539,7 +8574,12 @@ function renderRun() {
     ol.appendChild(li);
   }
   const msg = h('div', { class: 'mb-msg', 'aria-live': 'polite' });
-  if (r.problem && r.status === 'paused') {
+  const alertCard = ['paused', 'interrupted'].includes(r.status) ? runAlertCard(r) : null;
+  if (alertCard) msg.appendChild(alertCard);
+  if (r.problem && r.status === 'paused' && r.problem.code === 'REVIEW_DECISION' && alertCard) {
+    // the decision card above carries the buttons; the reviewer's own words stay one click away
+    if (r.problem.reasons && r.problem.reasons.length) msg.appendChild(h('details', { class: 'small rv-why' }, h('summary', null, 'What the AI reviewer said'), h('ul', null, r.problem.reasons.map(x => h('li', null, x)))));
+  } else if (r.problem && r.status === 'paused') {
     msg.appendChild(problemBox(r.problem, { retry: () => runAction('resume', {}, 'Trying again'), retryLabel: r.problem.code === 'REVIEW_NOT_PASSED' ? '🔁 Try again (2 more AI fixes)' : r.problem.code === 'CHECKPOINT_WAITING' ? '▶ Continue' : '🔁 Try again',
       extra: runDecision(r.problem), settings: ['CAPABILITY_UNAVAILABLE', 'UPSTREAM_UNAVAILABLE'].includes(r.problem.code) },
     `${r.problem.where ? r.problem.where.step : 'A step'} needs you`));

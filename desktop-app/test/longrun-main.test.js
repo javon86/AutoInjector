@@ -176,6 +176,19 @@ async function main() {
   note.emit("click");
   assert(win.isVisible() && logs.filter((e) => e.kind === "ui:akowe-tab-show").length === tabShows + 1, "a click opens the window on the Akọwe tab");
   assert(win.flashes[win.flashes.length - 1] === false, "back in the window: the flashing stops");
+  console.log("\n== 🔔 a decision with Akọwe's alert: the category in the title, what + why in the body, no book words in the log ==");
+  const nAlert = mockElectron.__notifications.length;
+  const alert = { category: "character", icon: "🧑", label: "Character issue", what: "Ansel Marrant (character)", wrong: "His age at his father's wake doesn't match the family timeline.", why: "The reviewer and the writer disagreed twice about the same thing, so it needs you.", next: "Pick one: accept the change, keep the original, or edit it yourself.", key: "character:REVIEW_DECISION:A01-1:2", code: "REVIEW_DECISION", choices: [{ action: "accept_change", label: "✔ Accept change" }] };
+  r = await request("POST", "/v1/status", token, { app: "akowe", version: 1, project: { id: "p1", title: "The Salt Keeper's Ledger" }, run: { id: "run-10", title: "The Salt Keeper's Ledger", status: "paused", state: "needs_decision", needs_decision: true, steps_done: 2, steps_total: 19, alert } });
+  const an = await waitUntil(() => mockElectron.__notifications.slice(nAlert).find((n) => /Character issue/.test(n.opts.title)));
+  assert(an && an.opts.title === "📖 The Salt Keeper's Ledger: 🧑 Character issue (step 3 of 19)", `the title names the book, the category and the step ("${an && an.opts.title}")`);
+  assert(an && an.opts.body === "Ansel Marrant (character): His age at his father's wake doesn't match the family timeline. The reviewer and the writer disagreed twice about the same thing, so it needs you.", `the body says what and why ("${an && an.opts.body}")`);
+  const alog = logs.filter((e) => e.kind === "attention" && /run:run-10/.test(e.detail.key)).pop();
+  assert(alog && alog.detail.category === "character" && alog.detail.code === "REVIEW_DECISION" && !JSON.stringify(alog.detail).includes("wake") && !JSON.stringify(alog.detail).includes("Ansel"), "the log keeps the category and code only, never the book's words");
+  const tabShows2 = logs.filter((e) => e.kind === "ui:akowe-tab-show").length;
+  win.hide();
+  an.emit("click");
+  assert(win.isVisible() && logs.filter((e) => e.kind === "ui:akowe-tab-show").length === tabShows2 + 1, "a click still opens Akọwe at the decision");
   const set = await call("attention:settings", { sound: false });
   assert(set.ok && set.attention.sound === false && set.attention.notify === true, "the sound can be turned off");
 

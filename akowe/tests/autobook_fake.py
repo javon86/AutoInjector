@@ -135,6 +135,15 @@ TEXTURE = [
 ]
 
 
+# 🔁 the plain REVISE answers, one after another: different findings (the same one twice in a row is a loop)
+REVISE_NOTES = [("The opening could name the place sooner.", "Name the harbor in the first line."),
+                ("The motive is unclear in the middle.", "Give the keeper a clearer motive."),
+                ("The weather arrives too late.", "Show the fog earlier on."),
+                ("One sentence runs far too long.", "Shorten the long middle sentence."),
+                ("Nothing can be heard in it.", "Add one concrete sound."),
+                ("The ending lands softly.", "Make the last line land harder.")]
+
+
 def voice_for(name):
     v = VOICES.get(name)
     if v is None:
@@ -181,6 +190,7 @@ class BookFakeAI:
     def __init__(self, verdicts=None, default_verdict="APPROVE"):
         self.calls: list[dict] = []
         self.verdicts = list(verdicts or [])  # consumed one per review call
+        self.revise_n = 0                     # which REVISE_NOTES entry the next plain REVISE uses
         self.default_verdict = default_verdict
         self.failures: list[AkoweError] = []  # raised before answering, one per call
         self.kind_failures: dict[str, list] = {}  # answer kind -> errors raised instead of that answer
@@ -465,10 +475,13 @@ class BookFakeAI:
             if isinstance(v, dict):  # a whole scripted review (H6: no reasons, low confidence, H3: limits …)
                 return "review", dict({"verdict": "APPROVE", "reasons": [], "suggested_changes": [],
                                        "confidence": 0.8}, **v)
-            return "review", {"verdict": v, "reasons": ["It fits the book profile and the plan." if v == "APPROVE"
-                                                        else "The opening could name the place sooner."],
-                              "suggested_changes": [] if v == "APPROVE" else ["Name the harbor in the first line."],
-                              "confidence": 0.8}
+            if v == "APPROVE":
+                return "review", {"verdict": v, "reasons": ["It fits the book profile and the plan."],
+                                  "suggested_changes": [], "confidence": 0.8}
+            with self.lock:  # 🔁 each REVISE asks for something different (the same finding twice = a loop)
+                reason, change = REVISE_NOTES[self.revise_n % len(REVISE_NOTES)]
+                self.revise_n += 1
+            return "review", {"verdict": v, "reasons": [reason], "suggested_changes": [change], "confidence": 0.8}
         if "draft" in ctx and "review" in ctx:  # "Ask AI to fix it": the whole draft, one sentence revised
             data = json.loads(ctx["draft"]["data_json"])
             return "fix", self._revise(data)

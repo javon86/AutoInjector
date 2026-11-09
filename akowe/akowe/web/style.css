@@ -865,6 +865,15 @@ button.mab-cta:hover, .mab-cta:hover { background: #ffe066; filter: none; }
 .mb-phase.waiting, .mb-phase.pausing { background: var(--warn-soft); }
 .mb-phase.paused, .mb-phase.interrupted { background: color-mix(in srgb, var(--hazard) 22%, var(--surface)); }
 .mb-phase.done { background: var(--ok-soft); }
+/* 🔔 the alert card of a run that waits for you (category, what, why, next; a decision carries its buttons) */
+.mb-alert { margin: 6px 0 10px; padding: 10px 12px; border-radius: var(--radius); border: 1px solid color-mix(in srgb, var(--hazard) 45%, var(--border, #ccc)); background: color-mix(in srgb, var(--hazard) 10%, var(--surface)); }
+.mb-alert p { margin: 4px 0; }
+.mb-alert-head { font-size: 1.05em; }
+.mb-alert-icon { font-size: 1.15em; }
+.mb-alert.cat-paused { border-color: var(--border, #ccc); background: var(--info-soft); }
+.mb-change { margin: 6px 0; padding: 6px 10px; border-left: 3px solid var(--hazard); background: var(--surface); }
+.mb-change .mb-before { text-decoration: line-through; text-decoration-thickness: 1px; opacity: .85; }
+.mb-decision-actions { margin-top: 8px; flex-wrap: wrap; }
 .mb-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .mb-step { display: grid; grid-template-columns: 2rem minmax(0, 1fr); gap: 8px; align-items: start; padding: 8px 10px; border-radius: var(--radius);
   border: 1px solid var(--border); border-left: 6px solid var(--blocked); background: var(--surface); }

@@ -9401,7 +9401,9 @@ function appIconImage() {
   return _appIcon;
 }
 function showAttention(n) {
-  logEvent("attention", { key: n.key, title: n.title, again: !!n.again, sound: !n.silent, note: n.body, severity: "warn" });
+  // 🔔 a book alert may quote the user's own book (for the notification only): the log keeps the codes, never its words
+  logEvent("attention", n.category ? { key: n.key, category: n.category, code: n.code || "", again: !!n.again, sound: !n.silent, severity: "warn" }
+    : { key: n.key, title: n.title, again: !!n.again, sound: !n.silent, note: n.body, severity: "warn" });
   try {
     if (!Notification || (typeof Notification.isSupported === "function" && !Notification.isSupported())) return false;
     const opts = { title: n.title, body: n.body, silent: !!n.silent };

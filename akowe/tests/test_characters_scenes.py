@@ -206,9 +206,11 @@ def test_sheets_made_with_the_characters_and_edited_by_the_author(tmp_path):
     assert e.value.code == "NOT_FOUND"
     ev = outbox(app, pid, "characters.sheet_saved")
     assert ev and ev[-1]["by"] == "author" and "clipped" not in json.dumps(ev)  # numbers only, never sheet text
-    # the A01 consistency review saw the sheet and voice card
-    canon_reviews = [c for s, c in fake.prompts["review"] if "character_sheet" in c]
-    assert canon_reviews and canon_reviews[0]["voice_card"]["rhythm"]
+    # the A01 consistency review saw the sheet and voice card — the AI's own notes, labelled NOT canon (🔁 Ansel case)
+    canon_reviews = [c for s, c in fake.prompts["review"] if "companion_draft" in c]
+    assert canon_reviews and canon_reviews[0]["companion_draft"]["voice_card"]["rhythm"]
+    assert "NOT canon" in canon_reviews[0]["companion_draft"]["note"]
+    assert not any("character_sheet" in c for s, c in fake.prompts["review"])
 
 
 def test_the_ai_writes_a_missing_sheet_in_the_run_and_on_request(tmp_path):

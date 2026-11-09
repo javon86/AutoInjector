@@ -48,6 +48,20 @@ function stepsOf(run) {
 }
 
 /**
+ * 🔔 Akọwe's alert for a run that waits for the user (akowe/alerts.py): the category with its icon, what it is
+ * about, what is wrong, why it stopped and what happens next. Bounded plain text, or null (older Akọwe / none).
+ */
+function alertOf(a) {
+  if (!a || typeof a !== 'object' || !str(a.label, 40)) return null;
+  const change = a.change && typeof a.change === 'object' ? { field: str(a.change.field, 60), before: str(a.change.before, 200), after: str(a.change.after, 200) } : null;
+  return {
+    category: str(a.category, 20), icon: str(a.icon, 8), label: str(a.label, 40), what: str(a.what, 80),
+    wrong: str(a.wrong, 220), why: str(a.why, 160), next: str(a.next, 220), key: str(a.key, 160), code: str(a.code, 40),
+    change: change && (change.before || change.after) ? change : null,
+  };
+}
+
+/**
  * One run (Akọwe's public run object, or the `run` a newer Akọwe pushes) -> what the panel shows:
  * { id, project_id, title, status, state, word, text, tone, done, total, at, stepTitle, resumable, needsDecision,
  *   live, phase }
@@ -90,6 +104,7 @@ function summarizeRun(run) {
     resumable: RESUMABLE.has(status) && !needsDecision && !run.replaced_by, needsDecision, live: LIVE.has(status),
     phase: str(run.phase, 200), problem: problem ? str(problem.message, 200) : '',
     updated_at: str(run.updated_at || run.finished_at || run.started_at, 40) || null,
+    alert: ['needs_you', 'paused', 'interrupted', 'problem'].includes(state) ? alertOf(run.alert) : null,
   };
 }
 
@@ -160,4 +175,4 @@ function createRunWatch(opts = {}) {
   return { peek, refresh, _state: () => ({ last, lastAt, unreachable }) };
 }
 
-module.exports = { summarizeRun, pickRun, stepsOf, createRunWatch };
+module.exports = { summarizeRun, pickRun, stepsOf, createRunWatch, alertOf };

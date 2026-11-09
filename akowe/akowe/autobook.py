@@ -35,6 +35,7 @@ AI availability: busy/unreachable answers wait and retry (jobs.wait_and_retry, s
 """
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import logging
@@ -55,7 +56,9 @@ from . import h_checks as hc
 from . import lengths as lengths_mod
 from . import pipeline as pipeline_mod
 from . import planned as planned_mod
+from . import alerts as alerts_mod
 from . import protagonist
+from . import review_loop
 from . import scenes as scenes_mod
 from . import story_choices
 from . import story_roles
@@ -642,6 +645,9 @@ class AutoBookService(_Runner):
         if status in ("queued", "running"):
             return "working", "Working."
         if status == "paused":
+            if prob.get("code") == "REVIEW_DECISION":
+                return "needs_decision", "Paused: it needs your decision (accept the change, keep the original, or " \
+                                         "edit it yourself)."
             if {"approve_anyway", "edit"} & set(prob.get("options") or []):
                 return "needs_decision", "Paused: it needs your decision (approve anyway, edit it, or try again)."
             if run.get("pause_reason") == "author":
@@ -680,6 +686,11 @@ class AutoBookService(_Runner):
         out["state"], out["state_words"] = self.run_state(run)
         out["needs_you"] = out["state"] in ("paused", "needs_decision", "problem", "interrupted")
         out["needs_decision"] = out["state"] == "needs_decision"
+        try:  # 🔔 what the alert says: category, what, what is wrong, why it stopped, what happens next (alerts.py)
+            out["alert"] = alerts_mod.describe(run, out["state"])
+        except Exception:  # noqa: BLE001 - display only
+            log.debug("could not describe the run's alert", exc_info=True)
+            out["alert"] = None
         out["steps_done"] = sum(1 for s in run.get("steps") or [] if s.get("state") in ("done", "skipped"))
         out["steps_total"] = len(run.get("steps") or [])
         # A run that stopped (paused, waiting for a decision, interrupted) is not working: its clock stops at its last
@@ -892,9 +903,9 @@ class AutoBookService(_Runner):
         run = self.owned(principal, run_id)
         body = body if isinstance(body, dict) else {}
         action = body.get("action")
-        if action not in ("approve_anyway", "retry", "edited"):
-            raise AkoweError("INVALID_INPUT", "/action", "action: approve_anyway, retry or edited",
-                                 status="REJECTED")
+        if action not in ("approve_anyway", "retry", "edited", "accept_change", "keep_original"):
+            raise AkoweError("INVALID_INPUT", "/action", "action: approve_anyway, retry, edited, accept_change or "
+                             "keep_original", status="REJECTED")
         if self.alive(run_id):
             raise AkoweError("VERSION_CONFLICT", "/run", "the run is still working; pause it first",
                                  status="REJECTED")
@@ -904,6 +915,8 @@ class AutoBookService(_Runner):
                                  "to decide (nothing was changed)", status="REJECTED")
         prob = run.get("problem") or {}
         rid = prob.get("record_id")
+        if action in ("accept_change", "keep_original"):
+            return self._decide_change(principal, run, prob, action, body)
         if action == "approve_anyway":
             if body.get("author_confirms") is not True:
                 raise AkoweError("APPROVAL_REQUIRED", "/author_confirms", "approving needs your explicit "
@@ -947,6 +960,58 @@ class AutoBookService(_Runner):
             self.event(run, "retry", "Continuing after your change" if action == "edited" else "Trying again")
         self.save(run)
         return self.resume(principal, run_id)
+
+    def _decide_change(self, principal: str, run: dict, prob: dict, action: str, body: dict) -> dict:
+        """🔁 The author's answer to ONE specific decision (REVIEW_DECISION): ✔ accept the change (the draft as it is
+        now, approved as the author's own) or ↩ keep the original (the version before the fix is put back as a new
+        draft and approved as the author's own; the approved fact it disagrees with is listed to fix later)."""
+        rid = prob.get("record_id")
+        if action not in (prob.get("options") or []) or not rid:
+            raise AkoweError("INVALID_INPUT", "/action", "this choice is not offered for the step that waits "
+                             "(nothing was changed)", status="REJECTED")
+        if body.get("author_confirms") is not True:
+            raise AkoweError("APPROVAL_REQUIRED", "/author_confirms", "your choice approves this record as yours: it "
+                             "needs your explicit confirmation (author_confirms: true)", status="REJECTED")
+        bp = self.bp(run)
+        head = bp.rec(rid)
+        if head is None:
+            raise AkoweError("NOT_FOUND", "/record_id", "this draft no longer exists", status="REJECTED")
+        if action == "keep_original":
+            pv = prob.get("prev_version")
+            old = self.store.get_record(run["project_id"], run["branch_id"], rid, int(pv)) if pv else None
+            if not old:
+                raise AkoweError("NOT_FOUND", "/prev_version", "the original version is not there any more; edit "
+                                 "it yourself instead (nothing was changed)", status="REJECTED")
+            resp = bp.dispatch(head["module_id"], "UPDATE", base_ref=head["ref"], payload=copy.deepcopy(old["data"]))
+            if resp["status"] != "DRAFT" or not resp.get("output_refs"):
+                raise AkoweError("INVALID_INPUT", "/action", "Akọwe's checks refused the original version now: "
+                                 + plain_problem(problems(resp)) + " — edit it yourself instead (nothing was "
+                                 "approved)", status="REJECTED")
+        out = self.app.review.approve(principal, run["project_id"], run["branch_id"],
+                                      {"record_ids": [rid], "author_confirms": True, "how": "one"})
+        res = out["results"][0] if out.get("results") else {"ok": False, "message": "not approved"}
+        if not res.get("ok"):
+            raise AkoweError("INVALID_INPUT", "/action", res.get("message") or "it could not be approved",
+                             status="REJECTED")
+        subject = prob.get("subject") or "the draft"
+        if action == "accept_change":
+            self.event(run, "approve", f"You accepted the change to {subject} (your own approval)", approval="author",
+                       record_id=rid, code="CHANGE_ACCEPTED")
+        else:
+            self.event(run, "approve", f"You kept the original {subject} (your own approval); the approved fact it "
+                       "disagrees with is listed for you to fix", approval="author", record_id=rid,
+                       code="ORIGINAL_KEPT")
+            later = run.setdefault("check_later", [])
+            line = f"{subject}: you kept the original — make the approved facts agree with it"
+            if line not in later:
+                later.append(line)
+        head = bp.rec(rid) or head
+        approval_trust.note(self.store, run["project_id"], run["branch_id"], head, how="approve_anyway",
+                            label=subject, chapter_id=prob.get("chapter_id"), by=principal)
+        run.setdefault("notes_due", {})[rid] = {"label": subject, "chapter_id": prob.get("chapter_id")}
+        (run.get("review_trail") or {}).pop(rid, None)
+        self.save(run)
+        return self.resume(principal, run["id"])
 
     # ------------------------------------------------------------------ settings
     def _note_ai_choice(self, run: dict):
@@ -1300,8 +1365,15 @@ class AutoBookService(_Runner):
         problem = dict(problem, where=where, step=sid, at=now_iso())
         if problem.get("code") == "TIMEOUT":
             problem.setdefault("options", ["retry"])
+        if not problem.get("subject") and (problem.get("record_id") or problem.get("chapter_id")):
+            try:  # what it is about, in plain words (the alert says it: "Ansel Marrant (character)", "Chapter 3")
+                head = self.bp(run).rec(problem["record_id"]) if problem.get("record_id") else None
+                problem["subject"] = self._subject(head, problem.get("chapter_id"))
+            except Exception:  # noqa: BLE001 - the alert falls back to the step's name
+                log.debug("could not name the subject of the problem", exc_info=True)
         st.update(state="failed" if problem.get("code") not in ("TIMEOUT", "REVIEW_NOT_PASSED", "CHECKS_REFUSED",
-                                                                "NO_SECOND_AI", "NO_REASON", "LOW_CONFIDENCE")
+                                                                "NO_SECOND_AI", "NO_REASON", "LOW_CONFIDENCE",
+                                                                "REVIEW_DECISION")
                   else "paused",
                   problem=problem, message=problem["message"])
         run.update(status="paused", pause_reason="problem", problem=problem, waiting=None,
@@ -1481,6 +1553,7 @@ class AutoBookService(_Runner):
                                   reasons=(res["review"].get("reasons") or [])[:4], chapter_id=chapter_id,
                                   options=["approve_anyway", "retry"], no_second_check=True)
             if verdict == "APPROVE":
+                (run.get("review_trail") or {}).pop(rid, None)
                 why = f"AI review: APPROVE ({label})"
                 if trust and trust.get("later"):
                     why += " · ⚠️ only the AI that wrote it checked it (no second AI was working) — needs your check later"
@@ -1514,6 +1587,9 @@ class AutoBookService(_Runner):
                 return bp.rec(rid)
             if self._realign_subject(run, bp, head, label, res["review"].get("reasons") or []):
                 continue  # reviewed again with the canon's ID; no AI fix used up
+            loop = self._loop_decision(run, head, label, res["review"], chapter_id)
+            if loop is not None:  # 🔁 going round in circles (or an approved fact would change): the author decides
+                raise loop
             n = int(counts.get(rid, 0))
             if n >= MAX_FIXES:
                 reasons = res["review"].get("reasons") or []
@@ -1545,6 +1621,65 @@ class AutoBookService(_Runner):
                 self.event(run, "fix_failed", f"The AI's fix of the {label} did not pass Akọwe's checks; "
                                               "nothing was saved", code=exc.code, record_id=rid)
             self.save(run)
+
+    def _loop_decision(self, run, head, label: str, review: dict, chapter_id: str | None) -> StepProblem | None:
+        """🔁 Loop detection (review_loop.py). Remembers each record's last review; when the same finding comes back
+        REVISE right after a fix that was meant to answer it, or the reviewer says only an APPROVED / LOCKED fact
+        elsewhere could fix it, returns ONE specific decision for the author (StepProblem REVIEW_DECISION) instead of
+        more fix rounds. The record stays unapproved until the author chooses. None: carry on with the usual loop."""
+        rid = head["record_id"]
+        trail = run.setdefault("review_trail", {})
+        prev = trail.get(rid) if isinstance(trail.get(rid), dict) else None
+        trail[rid] = {"version": head["version"], "verdict": review.get("verdict"),
+                      "review": {k: review.get(k) for k in ("reasons", "suggested_changes", "canon_change")
+                                 if review.get(k)}}
+        if review.get("pov_tense") or review.get("content_limits_breach"):
+            return None  # Akọwe's own promise checks (H3 / H10): not a disagreement — the usual fixes, then you decide
+        prev_data, match, kind = None, None, None
+        names = [str(f.get("value")) for f in (head.get("data") or {}).get("facts") or []
+                 if isinstance(f, dict) and f.get("predicate") == "entity.name" and isinstance(f.get("value"), str)]
+        ignore = review_loop.tokens(" ".join(names[:4] + [safe_title(self.app.engine.contracts, head)]))
+        if prev and prev.get("verdict") in ("REVISE", "REJECT") and int(prev.get("version") or 0) < head["version"]:
+            try:
+                old = self.store.get_record(run["project_id"], run["branch_id"], rid, int(prev["version"]))
+            except Exception:  # noqa: BLE001 - no earlier version: no loop to detect
+                old = None
+            prev_data = (old or {}).get("data") if old else None
+            if prev_data is not None:
+                match = review_loop.same_finding(prev.get("review"), review, prev_data, head.get("data"), ignore)
+                kind = "loop" if match else None
+        if kind is None and review.get("canon_change"):
+            kind = "canon"
+        if kind is None:
+            return None
+        subject = self._subject(head, chapter_id)
+        d = review_loop.decision(kind=kind, subject=subject, review=review, prev_review=(prev or {}).get("review"),
+                                 match=match, prev_data=prev_data, cur_data=head.get("data"),
+                                 can_keep=prev_data is not None, ignore=ignore)
+        self.event(run, "problem", f"🔁 The {label}: the AI reviewer and the writer went round in circles — asking you"
+                   if kind == "loop" else f"🔁 The {label}: fixing it would change an approved fact — asking you",
+                   record_id=rid, code="REVIEW_LOOP" if kind == "loop" else "CANON_CHANGE")
+        what = d["change"]
+        msg = (f"{subject}: the AI reviewer keeps asking for the same change, and the fix did not settle it."
+               if kind == "loop" else f"{subject}: fixing it would change an approved fact.")
+        return StepProblem(
+            "REVIEW_DECISION", msg,
+            "Pick one: accept the change, keep the original, or edit it yourself. The book carries on after you "
+            "choose. Until then it is not approved.",
+            record_id=rid, version=head["version"], module_id=head["module_id"], chapter_id=chapter_id,
+            verdict=review.get("verdict"), reasons=(review.get("reasons") or [])[:4], options=d["options"],
+            decision=dict(d, change=what), subject=subject,
+            prev_version=int(prev["version"]) if prev_data is not None else None)
+
+    def _subject(self, head: dict | None, chapter_id: str | None = None) -> str:
+        """'Ansel Marrant (character)', 'Chapter 3', 'the main plot' — what a decision is about, in plain words."""
+        if chapter_id:
+            return alerts_mod.chapter_words(chapter_id)
+        if not head:
+            return "a draft"
+        title = safe_title(self.app.engine.contracts, head)
+        kind = alerts_mod.KIND_WORD.get(head.get("module_id") or "")
+        return f"{title} ({kind})" if kind and kind not in title.lower() else title
 
     def _realign_subject(self, run, bp, head, label: str, reasons) -> bool:
         """The reviewer asks a Set A entry to use the ID the canon already gives this person ("silas-rook", not
