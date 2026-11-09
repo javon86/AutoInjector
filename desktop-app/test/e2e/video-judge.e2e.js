@@ -13,7 +13,6 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const childProcess = require('child_process');
 const { makeAsserts, APP_DIR } = require('./helpers');
 const { fakeComfy } = require('../fixtures/fake-sd');
 const { makeFakeClaude } = require('../fixtures/fake-claude-judge');
@@ -41,15 +40,11 @@ async function main() {
   const userData = path.join(tmp, 'userdata');
   const claude = makeFakeClaude(path.join(tmp, 'fakeclaude'));
   const ccLog = path.join(tmp, 'fakeclaude', 'calls.jsonl');
-  // a real 1-second clip (ffmpeg's test pattern) for the fake ComfyUI to hand back; without ffmpeg the tiny stub is used
-  const ffmpeg = VT.findFfmpeg({ roots: [], env: Object.assign({}, process.env, { AUTOINJECTOR_FFMPEG: '' }) }); // the test clip is made even when the app is told not to use ffmpeg
+  // a real 2-second clip (ffmpeg's test pattern, kept in test/fixtures so it is there even on a PC/CI box with no ffmpeg)
+  // for the fake ComfyUI to hand back. AUTOINJECTOR_FFMPEG=none tells the app not to use ffmpeg (its own player reads it).
+  const ffmpeg = VT.findFfmpeg({ roots: [], env: Object.assign({}, process.env, { AUTOINJECTOR_FFMPEG: '' }) });
   const appFfmpeg = process.env.AUTOINJECTOR_FFMPEG !== 'none' && ffmpeg;
-  let clip = null;
-  if (ffmpeg) {
-    const out = path.join(tmp, 'clip.webm');
-    childProcess.execFileSync(ffmpeg, ['-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=24', '-t', '2', '-c:v', 'libvpx', '-b:v', '300k', out]);
-    clip = fs.readFileSync(out);
-  }
+  const clip = fs.readFileSync(path.join(__dirname, '..', 'fixtures', 'test-clip-2s.webm'));
   const comfy = await fakeComfy({ videoPolls: 2, noSaveVideo: !!clip, clip: () => clip });
   const app = await electron.launch({
     args: ['.', '--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu', `--force-device-scale-factor=${process.env.VJ_SCALE || '1'}`, `--user-data-dir=${userData}`], cwd: APP_DIR,
@@ -142,8 +137,8 @@ async function main() {
     assert(cards.length === 3 && /Your video/.test(cards[0]) && /Preview 1/.test(cards[1]) && /Preview 2/.test(cards[2]), `the strip: your video + 2 previews (${cards.join(' | ')})`);
     assert(/takes about/.test(finalMsg), `before the full video: the time it takes (“${finalMsg.slice(0, 90)}”)`);
     const previews = comfy.state.videoGraphs.slice(nGraphs);
-    const lat = (g) => Object.values(g).find((n) => /LatentVideo|ImageToVideoLatent/.test(n.class_type)).inputs;
-    const ks = (g) => Object.values(g).find((n) => n.class_type === 'KSampler').inputs;
+    const lat = (g) => (Object.values(g || {}).find((n) => /LatentVideo|ImageToVideoLatent/.test(n.class_type)) || { inputs: {} }).inputs;
+    const ks = (g) => (Object.values(g || {}).find((n) => n.class_type === 'KSampler') || { inputs: {} }).inputs;
     assert(previews.length === 2 && previews.every((g) => lat(g).width === 832 && lat(g).height === 480 && lat(g).length === 37) && ks(previews[0]).seed === rec0.seed, `the previews are short (37 frames) and small (832×480) with the same seed (${previews.map((g) => `${lat(g).width}×${lat(g).height}/${lat(g).length}`).join(', ')})`);
     assert(ks(previews[0]).steps === 24 && ks(previews[1]).steps === 28, `the judge's fixes are carried forward (steps ${ks(previews[0]).steps} → ${ks(previews[1]).steps})`);
     assert(await c.$$eval('#vd-improve-strip .vd-round video', (v) => v.length === 3 && v.every((x) => /^file:/.test(x.src))), 'each round has a small playable preview');
