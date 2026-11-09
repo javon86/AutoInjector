@@ -59,6 +59,8 @@
       "interpreter-provider.js",
       "terminal-provider.js",
       "pane-layout.js",
+      "save-state.js",
+      "save-state-ui.js",
       "relay-policy.js",
       "pane-health.js",
       "relay-trace.js",
