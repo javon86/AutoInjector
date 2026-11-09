@@ -12,8 +12,9 @@ check — Akọwe writes down how each of its findings and review verdicts turne
   approved: the same checkpoint part, or the same approved version of the chapter with the quote found in it word for
   word. Nothing else counts as "the same passage".
 
-A 🧑‍⚖️ stand-in decision (stand_in.py) counts too, as its own kind (``stand_in``): confirmed when it stands, overruled
-when the author presses ↩ Undo.
+A 🧑‍⚖️ stand-in vote (stand_in.py) counts too, as its own kind (``stand_in``), for each AI that voted: confirmed when
+the decision stands (overruled when the author presses ↩ Undo); when the AIs did not all agree, confirmed when the vote
+matched what the author chose later, else overruled.
 
 What is stored (setting ``checker_record``): per AI the last ``WINDOW`` outcomes as codes and times only —
 ``{"k": kind, "o": outcome, "t": epoch}`` (plus a short id for a stand-in decision, so Undo can turn it round) — and

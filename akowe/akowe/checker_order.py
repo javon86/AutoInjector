@@ -17,7 +17,8 @@ writer").
 
 Where the order is used: each record's review (Book Bible records and chapters: review.plan_reviewer), the second
 chapter reviewer (cross_check.second_slot), the all-AI chapter checks, the continuity checkpoints and the end-of-book
-ending check (cross_check.checker_slots), and the 🧑‍⚖️ stand-in decider (stand_in.py).
+ending check (cross_check.checker_slots), and the 🧑‍⚖️ stand-in vote (stand_in.py: who votes, in this order;
+switched-off AIs never vote).
 """
 from __future__ import annotations
 

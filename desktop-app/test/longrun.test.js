@@ -207,7 +207,7 @@ function alertNotices() {
   assert(/⚠ AI problem \(step 11 of 19\)$/.test(c[0].title) && /did not answer in time/.test(c[0].body), 'an AI problem is named as one');
   // 🧑‍⚖️ a stand-in decided for the user: one notification that says so (and how to undo it), keyed by the decision
   const decided = AR.summarizeRun({ id: 'run-10', title: 'B', status: 'running', state: 'working', steps_total: 19, step: 6,
-    notice: { key: 'dec-abc', title: 'Decided for you: “B”', body: "🎩 Alfred approved the correction to Ansel Marrant (character) at 10:05 because you didn't answer for 20 minutes. Why: it fixes the timeline. Open Akọwe to undo it.", at: '2026-11-09T10:05:00Z' } });
+    notice: { key: 'dec-abc', title: 'Decided for you: “B”', body: "ChatGPT, Claude and Gemini all agreed to accept the correction to Ansel Marrant (character) at 03:12 because you didn't answer for 20 minutes. Why: it fixes the timeline. Open Akọwe to undo it.", at: '2026-11-09T10:05:00Z' } });
   assert(decided.notice && decided.notice.key === 'dec-abc' && AR.noticeOf({ title: 'x' }) === null, 'the run summary carries the stand-in notice');
   c = RG.conditionsFrom({ run: decided });
   assert(c.length === 1 && c[0].title === 'Decided for you: “B”' && /because you didn't answer for 20 minutes/.test(c[0].body) && c[0].target === 'akowe' && c[0].code === 'STAND_IN_DECIDED' && c[0].body.length <= RG.BODY_MAX, `decided for you: said plainly ("${c[0].body}")`);

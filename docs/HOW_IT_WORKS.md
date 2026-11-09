@@ -948,38 +948,45 @@ A few of these need more words:
   once in plain words: "Only ChatGPT can check right now because Gemini is switched off for checks and Claude is the
   writer." The checkpoints and the ending check still include the writer's own reading as one of several (a
   whole-book consistency read, merged by agreement), as since PR #117.
-- **🧑‍⚖️ The stand-in decider** (code: `akowe/akowe/stand_in.py`; ⚙️ Settings › Stand-in when I don't answer,
-  `GET/PUT /api/settings/stand-in`; off by default). When a run waits for you on ONE AI disagreement — the reviewer and
-  the writer went round in circles about the same finding (`REVIEW_DECISION`, kind `loop`): accept the writer's
-  correction or keep the original — and you have not answered within the wait time (10, 20, 30 or 60 minutes, default
-  20), a stand-in decides:
-  1. the 🤖 Claude Code helper, when it is installed and signed in and Claude is neither the writer nor the reviewer
-     who objected;
-  2. else the AI that is not part of the disagreement, best track record first (never one switched off for checks);
-  3. else 🎩 Alfred — only for a **simple case**: a plain "accept this correction?", the correction answers a finding
-     a reviewer raised, it touches no locked detail already on the page and no locked story-map connection, Akọwe's
-     own no-AI checks pass the corrected record, and the change is small. Alfred can only accept a correction.
+- **🧑‍⚖️ The stand-in vote** (code: `akowe/akowe/stand_in.py`; ⚙️ Settings › Stand-in when I don't answer,
+  `GET/PUT /api/settings/stand-in`; off by default). Your rule: "If the user doesn't pick anything, two AIs have to
+  agree on it. If there's three of them, all three have to." When a run waits for you on an AI disagreement and you
+  have not answered within the wait time (10, 20, 30 or 60 minutes, default 20), the AIs vote. Two kinds of decision
+  can be voted on:
+  1. the reviewer and the writer went round in circles about the same finding (`REVIEW_DECISION`, kind `loop`):
+     accept the writer's correction, or keep the original;
+  2. the reviewer still objects after the writer's fixes (`REVIEW_NOT_PASSED`, e.g. a chapter that waited all night):
+     accept the writer's version as it is, or send it back for two more fixes that follow the reviewer's notes.
 
-  **Never a stand-in** — these always wait for you: a change to an approved fact, the plot or outline (premise, main
+  **Who votes:** every AI that is connected, working and not switched off for checks — ChatGPT, Claude, Gemini, one
+  vote each, including the two that disagreed. The 🤖 Claude Code helper votes for Claude only when no Claude window
+  or API is working — never two votes for Claude. 🎩 Alfred (the local model) no longer decides anything here.
+  **The question:** each AI gets a fresh, neutral request with the finding, both options and the records involved
+  (the changed text or the current version, the approved canon, Akọwe's no-AI check results). The two options are
+  shown as A and B in a random order for each AI (the order is kept with the vote), so no AI is pushed towards the
+  writer's side. The answer is JSON `{choice: A | B | unsure, confident: 0–1, why}`, checked by Akọwe.
+  **The rule:** it decides only when at least two AIs could be asked, every one of them answered, all chose the same
+  option and each is at least 75% sure. Two AIs working: both must agree. Three working: all three. It keeps waiting
+  for you when only one AI (or none) is working, any AI chooses the other option, is unsure, or does not answer
+  clearly — and when three were working and one fails or refuses during the vote, the two left do **not** decide on
+  their own. The vote stops at the first answer that already rules a decision out (fewer calls at night). The run
+  window then says, for example, "The AIs didn't all agree (ChatGPT: accept, Gemini: keep) — waiting for you."
+
+  **Never voted on** — these always wait for you: a change to an approved fact, the plot or outline (premise, main
   plot, outline), the ending (the last chapter, or a finding about the ending), the main character's own record,
-  point of view or tense, your content limits, and anything on your lock list.
-  **How it decides:** a structured request — the finding, before → after, the approved canon and Akọwe's no-AI check
-  results — and a JSON answer `{choice: accept_change | keep_original | unsure, confidence, reason}`, checked by
-  Akọwe. Unsure, under 75% sure, or not the JSON asked for → it keeps waiting for you (it never guesses, and it
-  does not ask the next one). A stand-in that is missing or not working (Claude Code not installed or signed out, an
-  AI at its limit, Ollama not running) is skipped for the next one; when none is left it keeps waiting.
-  **How Alfred is reached:** Akọwe calls the local model directly through Ollama's OpenAI-compatible address on this
-  computer (default `http://127.0.0.1:11434/v1`, the same server Alfred uses; the model is the one named in Settings,
-  else the one Ollama lists first, Qwen first). Any address that is not this computer is refused, so the book never
-  leaves the PC. This needs no change to AutoInjector or the bridge and works even when AutoInjector is closed.
-  **Visible and reversible:** each decision is written to the run's journal, the run window and 🏠 Book home —
-  "🎩 Alfred approved the correction to Ansel Marrant (character) at 10:05 because you didn't answer for 20 minutes.
-  Why: … [↩ Undo]" — and AutoInjector's desktop notification says "Decided for you". While a run waits, the alert's
-  "what happens next" says when the stand-in will step in (or why it won't). **↩ Undo** puts the other choice back as
-  a new draft that waits for your approval, and turns that decision's track-record outcomes round. At most 5 stand-in
-  decisions per run (Settings), then it always waits. The stand-in's decisions count in its own track record
-  (labelled "stand-in decisions"). Logs and the outbox keep codes only (who decided, the choice) — never the book's
-  words or the reason.
+  point of view or tense (also when Akọwe's own promise check flagged it), your content limits, anything on your lock
+  list, and stops that are not a choice between two options (for example "only one AI checked it").
+  **Visible and reversible:** each decision is written to the run's journal, the run window and 🏠 Book home with
+  every vote — "ChatGPT, Claude and Gemini all agreed to accept the correction to Ansel Marrant (character) at 03:12
+  because you didn't answer for 20 minutes. Why: … [↩ Undo]" — and AutoInjector's desktop notification says "Decided
+  for you". While a run waits, the alert's "what happens next" says when the AIs will vote (or why they won't, or how
+  the vote went). **↩ Undo** puts the other choice back as a new draft that waits for your approval (for "accept as
+  it is": the same version, no longer approved; for "fix again": the version the AIs sent back), and turns that
+  decision's track-record outcomes round. At most 5 stand-in decisions per run (Settings), then it always waits.
+  **Track record:** every vote counts for that AI ("stand-in decisions"): a decision that stands counts as held up
+  for each AI that voted (Undo turns it round); when the AIs did not all agree, each vote is compared with what you
+  chose later — the same choice holds up, the other is overruled. Logs and the outbox keep codes only (which AIs
+  voted, the choice) — never the book's words or the reasons.
 - **Book report.** It shows who checked the book and how far they agreed, and each stretch review. Its PDF keeps
   accented letters and other alphabets (ọ, ẹ, ł, Greek); a symbol it cannot print becomes a word or "•". "Written by"
   names the AI that wrote the chapter ("Claude + editor" when the editor's changes are in it). Advice with nothing

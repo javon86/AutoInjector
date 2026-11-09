@@ -247,10 +247,13 @@ class BookFakeAI:
         self.kind_script: list = []              # 📚 scripted stage placements (dicts or callables(ctx)), one per call
         self.kind_pick = None                    # 📚 the kind of story the invent step picks (when asked), e.g. "quest"
         self.alongside_script: list = []         # ✍ Write alongside me: scripted answers (dicts or callables(ctx))
-        # 🧑‍⚖️ the stand-in decider (stand_in.py): its answers, one per call (dicts or callables(ctx)); default: accept
+        # 🧑‍⚖️ the stand-in vote (stand_in.py): answers per slot ({slot: answer or [answers]}) or one per call (in
+        # call order); an answer is {"pick": option code, "confident", "why"} (put on the voter's own random A / B),
+        # any other dict / text as it is, or a callable(ctx). Default: the "accept" option, confident.
+        self.stand_in_by_slot: dict = {}
         self.stand_in_script: list = []
-        self.stand_in_default = {"choice": "accept_change", "confidence": 0.9,
-                                 "reason": "The correction answers the reviewer's finding and agrees with the canon."}
+        self.stand_in_default = {"pick": "accept", "confident": 0.9,
+                                 "why": "The correction answers the reviewer's finding and agrees with the canon."}
 
     def fail_next(self, *excs):
         self.failures.extend(excs)
@@ -276,7 +279,10 @@ class BookFakeAI:
         if self.delay:
             import time  # noqa: PLC0415
             time.sleep(self.delay)
-        kind, out = self._answer(ctx, props, schema)
+        if ctx.get("akowe_task") == "stand_in":
+            kind, out = "stand_in", self._stand_in(slot["slot_id"], ctx)
+        else:
+            kind, out = self._answer(ctx, props, schema)
         with self.lock:
             self.prompts.setdefault(kind, []).append((system, ctx))
             pending = self.kind_failures.get(kind)
@@ -287,14 +293,33 @@ class BookFakeAI:
             self.kinds.append(kind)
         return out, usage
 
+    def _stand_in(self, slot_id, ctx):
+        """🧑‍⚖️ One vote: the scripted answer for this slot (or the next in call order), the option code put on the
+        letter this voter sees (the order is random per voter)."""
+        from akowe.stand_in import OPTION_WORDS  # noqa: PLC0415
+        with self.lock:
+            per = self.stand_in_by_slot.get(slot_id)
+            if isinstance(per, list):
+                a = per.pop(0) if per else None
+            else:
+                a = per
+            if a is None and self.stand_in_script:
+                a = self.stand_in_script.pop(0)
+        a = copy.deepcopy(self.stand_in_default) if a is None else a
+        a = a(ctx) if callable(a) else copy.deepcopy(a)
+        if not isinstance(a, dict) or "pick" not in a:
+            return a
+        letters = {o["does"]: o["letter"] for o in ctx.get("options") or []}
+        code_of = {OPTION_WORDS[c]: c for c in OPTION_WORDS}
+        by_code = {code_of.get(d): letter for d, letter in letters.items()}
+        pick = a.pop("pick")
+        if pick == "accept":
+            pick = "accept_change" if "accept_change" in by_code else "approve_anyway"
+        a["choice"] = "unsure" if pick == "unsure" else by_code[pick]
+        return a
+
     # ------------------------------------------------------------------ answers
     def _answer(self, ctx, props, schema):
-        if ctx.get("akowe_task") == "stand_in":  # 🧑‍⚖️ the stand-in decider: accept / keep / unsure
-            with self.lock:
-                scripted = self.stand_in_script.pop(0) if self.stand_in_script else None
-            if scripted is not None:
-                return "stand_in", scripted(ctx) if callable(scripted) else copy.deepcopy(scripted)
-            return "stand_in", copy.deepcopy(self.stand_in_default)
         if ctx.get("akowe_task") == "story_details":  # ⏱ story details (essentials / just in time)
             return "details", self._details(ctx)
         if "placements" in props and "story_kind" in ctx:  # 📚 place where each stage of the kind of story begins
