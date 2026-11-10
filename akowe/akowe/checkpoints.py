@@ -648,12 +648,17 @@ def _run_one(svc, run: dict, st: dict, cp: dict, chapters: list[dict]) -> None:
     elif cp.get("kind") == "now":
         title = f"🔎 Consistency check ({label})"
     if cp.get("status") == "waiting" and cp.get("paused_once"):
+        by_stand_in = any(p.get("stand_in") for p in cp.get("problems") or [])
+        if any(p.get("status") in ("new", "applied") for p in cp.get("problems") or []):
+            _fix(svc, run, st, cp, title)  # 🧑‍⚖️ the fixes the stand-in vote chose (stand_in_checkpoint.py)
+            cp["counts"] = _counts(cp)
         _setups_so_far(svc, run, cp)
         cp["status"] = "done"  # the author pressed ▶ Continue: the problems stay in the report
         cp["finished_at"] = _now()
         _put(store, pid, branch, cp)
         _note(svc, run, st, cp)
-        svc.event(run, "note", line(cp) + " (you chose to go on)", step="chapters", code="CHECKPOINT")
+        svc.event(run, "note", line(cp) + (" (your stand-in chose to go on)" if by_stand_in else
+                                           " (you chose to go on)"), step="chapters", code="CHECKPOINT")
         svc.save(run)
         return
     # 1. weak readings of these chapters first (H21)
@@ -796,15 +801,7 @@ def _run_one(svc, run: dict, st: dict, cp: dict, chapters: list[dict]) -> None:
         _beats(svc, run, st, cp, chapters, outline)  # 📐 story beats that did not land: reported, one targeted fix
     _stretch(svc, run, cp)  # 📖 PR #117: the combined review of this stretch of chapters
     # 5. done (or waiting for the author once)
-    c = {"found": len([p for p in cp["problems"] if p["status"] not in ("possible", "dropped")]),
-         "fixed": len([p for p in cp["problems"] if p["status"] == "fixed"]),
-         "waiting": len([p for p in cp["problems"] if p["status"] == "waiting"]),
-         "possible": len([p for p in cp["problems"] if p["status"] == "possible"]),
-         "listed": len([p for p in cp["problems"] if p["status"] == "listed"]),
-         "dropped": len([p for p in cp["problems"] if p["status"] == "dropped"]),
-         "confirmed": len([p for p in cp["problems"] if p.get("agreement") == "confirmed"]),
-         "proposed": len([p for p in cp["problems"] if p["status"] == "proposed"])}
-    cp["counts"] = c
+    c = cp["counts"] = _counts(cp)
     incomplete = any(not p.get("done") for p in cp["parts"])
     if c["waiting"] and not cp.get("paused_once"):
         cp["status"] = "waiting"
@@ -830,6 +827,18 @@ def _run_one(svc, run: dict, st: dict, cp: dict, chapters: list[dict]) -> None:
     _note(svc, run, st, cp)
     svc.event(run, "note", line(cp), step="chapters", code="CHECKPOINT")
     svc.save(run)
+
+
+def _counts(cp: dict) -> dict:
+    ps = cp.get("problems") or []
+    return {"found": len([p for p in ps if p["status"] not in ("possible", "dropped")]),
+            "fixed": len([p for p in ps if p["status"] == "fixed"]),
+            "waiting": len([p for p in ps if p["status"] == "waiting"]),
+            "possible": len([p for p in ps if p["status"] == "possible"]),
+            "listed": len([p for p in ps if p["status"] == "listed"]),
+            "dropped": len([p for p in ps if p["status"] == "dropped"]),
+            "confirmed": len([p for p in ps if p.get("agreement") == "confirmed"]),
+            "proposed": len([p for p in ps if p["status"] == "proposed"])}
 
 
 def _read_part_by_all(svc, run: dict, cp: dict, part: dict, j: int, rid: str, ctx: dict, task: str,
@@ -1302,7 +1311,7 @@ def report(store, pid: str, branch: str) -> list[dict]:
                     "parts_unread": len([p for p in c.get("parts") or [] if not p.get("done")]),
                     "problems": [{k: p.get(k) for k in ("number", "chapter_id", "problem", "quote", "status", "why",
                                                         "source", "original", "replacement", "found_by", "agree",
-                                                        "of", "agreement", "severity", "verified")}
+                                                        "of", "agreement", "severity", "verified", "stand_in")}
                                  for p in c.get("problems") or []],
                     "checked_by": checked_by(c), "kind": c.get("kind") or "checkpoint", "stretch": c.get("stretch"),
                     "skipped": sorted({n for p in c.get("parts") or [] for n in p.get("skipped") or []}),
@@ -1354,6 +1363,9 @@ def markdown(rep: list[dict]) -> list[str]:
             out.append(f"- Chapter {p.get('number')}: {p.get('problem')} — {STATUS_WORDS.get(p.get('status'), '')}"
                        + (f" ({p['why']})" if p.get("why") and p.get("status") != "fixed" else "")
                        + (f" — {_who(p)}" if p.get("found_by") else "")
+                       + (" — 🧑‍⚖️ fix chosen by your stand-in (every AI agreed)" if p.get("status") == "fixed"
+                          and (p.get("stand_in") or {}).get("choice") == "apply_fix"
+                          and not (p.get("stand_in") or {}).get("undone") else "")
                        + (f"\n  - “{p['quote']}”" if p.get("quote") else "")
                        + (f"\n  - changed “{_clip(p['original'], 200)}” → “{_clip(p['replacement'], 200)}”"
                           if p.get("status") == "fixed" and p.get("original") else ""))

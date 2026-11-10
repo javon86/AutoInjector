@@ -11,7 +11,12 @@ of them, all three have to."
   accept the writer's correction (``accept_change``) or keep the original (``keep_original``);
 * ``REVIEW_NOT_PASSED`` — the reviewer still objects after the writer's fixes (e.g. a chapter): accept the writer's
   version as it is (``approve_anyway``) or send it back for two more fixes that follow the reviewer's notes
-  (``retry``).
+  (``retry``);
+* ``CHECKPOINT_WAITING`` — a 🧭 continuity checkpoint found problems it could not fix safely by itself
+  (stand_in_checkpoint.py: one A / B question per waiting problem — make the offered fix / leave it as it is, or leave
+  it as it is for now / it needs the author; the whole checkpoint is decided only when every problem's vote agrees on
+  going ahead). Settings › AI can leave the checkpoints to the author (``checkpoints``: on by default when the
+  stand-in is on).
 
 **Never anyone but the author** (``author_only``): a change to an approved fact (kind ``canon``), the plot or outline
 (premise, main plot, outline records), the ending (the last chapter, or a finding about the ending), the main
@@ -74,7 +79,8 @@ log = logging.getLogger("akowe.stand_in")
 
 SETTING = "stand_in"
 WAITS = (10, 20, 30, 60)
-DEFAULTS = {"enabled": False, "wait_min": 20, "max_per_run": 5}
+DEFAULTS = {"enabled": False, "wait_min": 20, "max_per_run": 5, "checkpoints": True}
+CHECKPOINT = "CHECKPOINT_WAITING"   # 🧭 a continuity checkpoint question (stand_in_checkpoint.py)
 MAX_PER_RUN_RANGE = (1, 20)
 MIN_CONFIDENCE = 0.75
 MIN_VOTERS = 2
@@ -95,9 +101,14 @@ OPTION_WORDS = {
     "approve_anyway": "Accept the current version as it is (context.current_text), although the reviewer still has "
                       "notes.",
     "retry": "Send it back to the writer for two more fixes that follow the reviewer's notes (context.reviewer_now).",
+    # 🧭 a continuity checkpoint problem (stand_in_checkpoint.py)
+    "apply_fix": "Make the small fix offered (context.proposed_fix: replace original with replacement in the chapter).",
+    "leave_as_is": "Leave the chapter as it is for now: the book goes on and the problem stays in the report for the "
+                   "novelist.",
+    "needs_author": "Stop the book until the novelist fixes it: later chapters would build on the mistake.",
 }
 PICK_SHORT = {"accept_change": "accept", "keep_original": "keep", "approve_anyway": "accept as it is",
-              "retry": "fix again"}
+              "retry": "fix again", "apply_fix": "make the fix", "leave_as_is": "leave it", "needs_author": "needs you"}
 AGREED_TO = {"accept_change": "accept the correction to {s}", "keep_original": "keep the original of {s}",
              "approve_anyway": "accept the writer's version of {s}",
              "retry": "send {s} back to the writer for two more fixes"}
@@ -184,6 +195,7 @@ def settings(store) -> dict:
     if isinstance(cur, dict):
         out.update({k: cur[k] for k in DEFAULTS if k in cur})
     out["enabled"] = out.get("enabled") is True
+    out["checkpoints"] = out.get("checkpoints") is not False
     if out.get("wait_min") not in WAITS:
         out["wait_min"] = DEFAULTS["wait_min"]
     try:
@@ -194,13 +206,15 @@ def settings(store) -> dict:
 
 
 def save_settings(store, body) -> dict:
-    """``enabled``, ``wait_min``, ``max_per_run``. Other keys (e.g. the old local-model fields) are ignored."""
+    """``enabled``, ``wait_min``, ``max_per_run``, ``checkpoints``. Other keys (e.g. the old local-model fields) are
+    ignored."""
     body = body if isinstance(body, dict) else {}
     cur = settings(store)
-    if "enabled" in body:
-        if not isinstance(body["enabled"], bool):
-            raise AkoweError("INVALID_INPUT", "/enabled", "enabled must be true or false", status="REJECTED")
-        cur["enabled"] = body["enabled"]
+    for k in ("enabled", "checkpoints"):
+        if k in body:
+            if not isinstance(body[k], bool):
+                raise AkoweError("INVALID_INPUT", f"/{k}", f"{k} must be true or false", status="REJECTED")
+            cur[k] = body[k]
     if "wait_min" in body:
         if body["wait_min"] not in WAITS or isinstance(body["wait_min"], bool):
             raise AkoweError("INVALID_INPUT", "/wait_min", "wait time: 10, 20, 30 or 60 minutes", status="REJECTED")
@@ -216,7 +230,8 @@ def save_settings(store, body) -> dict:
 
 
 ABOUT = ("Off unless you switch it on. When a book run waits for your answer on an AI disagreement (the reviewer and "
-         "the writer went round in circles, or the reviewer still objects after the fixes) and you do not answer "
+         "the writer went round in circles, or the reviewer still objects after the fixes) or on a story check "
+         "(continuity checkpoint) it could not fix by itself, and you do not answer "
          "within the wait time, every working AI (ChatGPT, Claude, Gemini — not those switched off for checks) is "
          "asked the same neutral question. They decide only if they ALL agree: with two AIs both must agree, with "
          "three all three. If only one AI is working, or any AI disagrees, is unsure or cannot answer, it keeps "
@@ -604,7 +619,13 @@ def _state(run: dict) -> dict:
 
 def waiting_on(run: dict) -> bool:
     prob = run.get("problem") or {}
-    return run.get("status") == "paused" and run.get("pause_reason") == "problem" and prob.get("code") in OPTIONS
+    return run.get("status") == "paused" and run.get("pause_reason") == "problem" and \
+        (prob.get("code") in OPTIONS or prob.get("code") == CHECKPOINT)
+
+
+def _off_for(stg: dict, prob: dict) -> bool:
+    """The stand-in is off, or the author left the checkpoint questions to themselves (Settings › AI)."""
+    return not stg["enabled"] or (prob.get("code") == CHECKPOINT and not stg.get("checkpoints"))
 
 
 def tick(app, now: float | None = None) -> list[dict]:
@@ -647,9 +668,9 @@ def consider(app, run_id: str, now: float | None = None) -> dict | None:
         if not run or not waiting_on(run) or ab.alive(run_id):
             return None
         stg = settings(app.store)
-        if not stg["enabled"]:
-            return None
         prob = copy.deepcopy(run.get("problem") or {})
+        if _off_for(stg, prob):
+            return None
         due = due_at(app, run)
         if due is None or now < due:
             return None
@@ -660,6 +681,9 @@ def consider(app, run_id: str, now: float | None = None) -> dict | None:
         if int(sst["count"]) >= stg["max_per_run"]:
             return _tried(ab, run, key, "CAP", "The AIs already decided "
                           f"{stg['max_per_run']} time(s) for you in this run, so it waits for you")
+        if prob.get("code") == CHECKPOINT:  # 🧭 one question per waiting problem (stand_in_checkpoint.py)
+            from . import stand_in_checkpoint  # noqa: PLC0415
+            return stand_in_checkpoint.decide(app, run, prob, key, stg, now)
         why = author_only(app, run, prob)
         if why:
             return _tried(ab, run, key, "AUTHOR_ONLY:" + why, f"Only you can decide this one: "
@@ -711,13 +735,17 @@ def _tried(ab, run: dict, key: str, code: str, words: str, votes: list[dict] | N
     return {"code": code}
 
 
-def settle_votes(store, run: dict, prob: dict | None, action: str | None) -> list[tuple]:
+def settle_votes(store, run: dict, prob: dict | None, action: str | None, chapters: dict | None = None) -> list[tuple]:
     """The author answered a decision the AIs did not all agree on: each AI's vote counts in its track record —
     the same choice as the author's → confirmed, another → overruled. ``action`` None (e.g. the author edited it
-    themselves): the votes are dropped uncounted. The caller saves the run. Never raises."""
+    themselves): the votes are dropped uncounted. A checkpoint question: ``chapters`` (the book's chapters now) tells
+    which chapters the author left unchanged. The caller saves the run. Never raises."""
     try:
         if not prob:
             return []
+        if prob.get("code") == CHECKPOINT:  # 🧭 ▶ Continue: "leave it as it is" for each chapter left unchanged
+            from . import stand_in_checkpoint as sic  # noqa: PLC0415
+            return sic.settle(store, run, prob, action, chapters)
         pend = ((run.get("stand_in") or {}).get("votes") or {}).pop(_key(prob), None)
         if not pend or action not in PICK_SHORT:
             return []
@@ -853,7 +881,7 @@ def view(app, run: dict) -> dict | None:
         if waiting_on(run):
             prob = run.get("problem") or {}
             tried = (sst.get("tried") or {}).get(_key(prob))
-            if not st["enabled"]:
+            if _off_for(st, prob):
                 pending = {"state": "off", "words": ""}
             elif tried:
                 pending = {"state": "waits", "words": tried.get("words") or "It waits for you.",
@@ -909,6 +937,10 @@ def undo(app, principal: str, run_id: str, body) -> dict:
     if d.get("undone"):
         raise AkoweError("INVALID_INPUT", "/decision_id", "this decision was already undone (nothing was changed)",
                          status="REJECTED")
+    if d.get("code") == CHECKPOINT:  # 🧭 a story-check decision (stand_in_checkpoint.py)
+        from . import stand_in_checkpoint  # noqa: PLC0415
+        res = stand_in_checkpoint.undo(app, run, d)
+        return _undone(app, run, run_id, d, res["what"], res["version"])
     choice = d.get("choice")
     if choice == "retry" and ab.alive(run_id):
         raise AkoweError("VERSION_CONFLICT", "/run", "the run is still working on it; pause it first (nothing was "
@@ -932,26 +964,32 @@ def undo(app, principal: str, run_id: str, body) -> dict:
                          + plain_problem(problems(resp)) + " — edit it yourself (nothing was changed)",
                          status="REJECTED")
     new_v = resp["output_refs"][0]["version"]
-    d.update(undone=True, undone_at=_iso(_now()), undone_version=new_v)
-    checker_record.flip_all(app.store, d["id"])
     try:
         from . import approval_trust  # noqa: PLC0415
         approval_trust.forget(app.store, run["project_id"], run["branch_id"], d["record_id"])
     except Exception:  # noqa: BLE001
         log.debug("could not update the approvals list after an undo", exc_info=True)
-    _book_put(app.store, run, d)
     what = UNDO_BACK.get(choice, "the other option")
-    ab.event(run, "note", f"↩ You undid the stand-in's decision on {d['subject']}: {what} is back as a draft for you "
-             "to approve (it is not approved until you do)", record_id=d["record_id"], code="STAND_IN_UNDONE",
-             decision_id=d["id"])
+    return _undone(app, run, run_id, d, f"{what} is back as a draft for you to approve (it is not approved until you "
+                   "do)", new_v, message=f"Undone: {what} is back as a draft — approve it on its page when you are "
+                   "happy with it.")
+
+
+def _undone(app, run: dict, run_id: str, d: dict, what: str, new_v, message: str | None = None) -> dict:
+    """The decision is marked undone everywhere (run, Book home, track record, outbox)."""
+    ab = app.autobook
+    d.update(undone=True, undone_at=_iso(_now()), undone_version=new_v)
+    checker_record.flip_all(app.store, d["id"])
+    _book_put(app.store, run, d)
+    ab.event(run, "note", f"↩ You undid the stand-in's decision on {d['subject']}: {what}",
+             record_id=d.get("record_id"), code="STAND_IN_UNDONE", decision_id=d["id"])
     with app.store.transaction() as tx:
         tx.insert_outbox(run["project_id"], run["branch_id"], "autobook.stand_in_undone",
-                         {"record_id": d["record_id"], "version": new_v, "run_id": run_id, "decision_id": d["id"],
-                          "label": "The author undid the stand-in's decision; the other option waits for approval"})
+                         {"record_id": d.get("record_id"), "version": new_v, "run_id": run_id, "decision_id": d["id"],
+                          "label": "The author undid the stand-in's decision; the other option waits for the author"})
     ab.save(run)
     log.info("stand-in %s: decision undone", run_id)
-    return {"ok": True, "decision": d, "version": new_v,
-            "message": f"Undone: {what} is back as a draft — approve it on its page when you are happy with it."}
+    return {"ok": True, "decision": d, "version": new_v, "message": message or f"Undone: {what}."}
 
 
 class Ticker:

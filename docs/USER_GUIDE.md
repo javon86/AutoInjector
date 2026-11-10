@@ -293,6 +293,13 @@ Chapter 1 is written before the rest of the book exists, and readers decide on t
   20 minutes. Why: …" — and the desktop notification says it was decided for you. When they don't agree you see how
   each voted, for example "The AIs didn't all agree (ChatGPT: accept, Gemini: keep) — waiting for you." Press
   **↩ Undo** to put the other choice back for your own approval. At most 5 stand-in decisions per book run.
+  It also covers the 🧭 **story checks** (continuity checkpoints) that wait for you overnight — switch off "Also the
+  story checks" in the same card to keep those for yourself. For each problem the check couldn't fix, the AIs choose
+  between "leave it as it is for now" (the book goes on and the problem stays in the report) and "it needs you" — or,
+  when a small safe fix was offered, between "make the fix" and "leave it". The book goes on only if they all agree
+  on every problem. A problem about the ending, the plot, the main character, point of view, tense, your content
+  limits, a locked detail or your lock list always waits for you. ↩ Undo puts the problems back on your list (and
+  takes a fix back out as a draft for you to approve).
 
 ## 6. Pictures
 

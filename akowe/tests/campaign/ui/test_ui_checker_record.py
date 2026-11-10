@@ -82,6 +82,15 @@ def test_how_good_is_each_checker_card(make_context, tmp_path, size):
         assert si.locator("[data-testid=si-wait]").input_value() == "20"
         si_text = si.inner_text()  # the new rule: the AIs decide only when they all agree; no Alfred any more
         assert "all agree" in si_text.lower() and "Alfred" not in si_text and not si.locator("#si-model").count()
+        # 🧭 the story checks are on by default (when the stand-in is on) and can be left to the author
+        assert si.locator("[data-testid=si-cp]").is_checked() and "story checks" in si_text
+        si.locator("[data-testid=si-cp]").uncheck()
+        si.locator("[data-testid=si-save]").click()
+        for _ in range(100):  # the PUT lands
+            if (srv.app.store.get_setting("stand_in") or {}).get("checkpoints") is False:
+                break
+            page.wait_for_timeout(100)
+        assert srv.app.store.get_setting("stand_in")["checkpoints"] is False
         assert overflow(page) <= 1
         assert_clean(page, "checker cards")
     finally:
