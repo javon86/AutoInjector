@@ -132,6 +132,12 @@ STEPS = [
     ("beta", "H", None, "Beta reader", "An AI reads the whole book as its target reader and marks where it got "
      "confused, bored or guessed a twist, each with a quote checked against the book. (Optional; never holds up the "
      "book.)"),
+    # ✍ opening_pass.py: on by default (run setting opening_pass): chapter 1 once more, with the whole book known
+    ("opening", "H", None, "Rewrite chapter 1 last", "Chapter 1 was written before the rest of the book existed: now "
+     "the writer reworks it once with the whole book in view (a short summary, the ending, the setups it must plant, "
+     "where the twist must stay hidden and the readers' and reviewers' notes on it). The same reviewers re-read the "
+     "book; the new chapter 1 is kept only if the score is at least as good (a tie: only if their notes on chapter 1 "
+     "went down). Never a chapter you wrote. (On by default; never holds up the book.)"),
     # 🔁 improve_pass.py: on by default (run setting improve_pass), at most improve_rounds rounds
     ("improve", "H", None, "Improve until better", "The reviewers' “What to try next”, the beta readers' top fixes, "
      "the editor's major notes (also those of chapters you approved anyway) and Akọwe's own checks (clock and tide "
@@ -149,7 +155,8 @@ STEP_DOING = {
     "planned": "Checking the planned details are on the page", "format": "Setting the book format",
     "assemble": "Putting the book together", "export": "Making the PDF, EPUB and Word files",
     "check": "Checking the book's content", "report": "Writing the book report",
-    "beta": "Beta readers reading the book", "improve": "Improving the book until it scores better",
+    "beta": "Beta readers reading the book", "opening": "Rewriting chapter 1 with the whole book in view",
+    "improve": "Improving the book until it scores better",
 }
 
 
@@ -165,7 +172,7 @@ STEP_IDS = [s[0] for s in STEPS]
 # P14: steps that belong to a pipeline switch (switched off -> the step is skipped)
 STEP_FLAGS = {"characters": "voices", "looks": "voices", "world": "rules", "planned": "planned"}
 # P23 (Section 7c): steps that run only when the run's settings ask for them (step -> setting)
-STEP_OPTIONAL = {"beta": "beta_reader", "bible": "fill_bible", "improve": "improve_pass"}
+STEP_OPTIONAL = {"beta": "beta_reader", "bible": "fill_bible", "opening": "opening_pass", "improve": "improve_pass"}
 
 PROFILE_SCHEMA = {
     "type": "object", "additionalProperties": False,
@@ -575,6 +582,15 @@ class _TimedProviders(PinnedProviders):
     def __init__(self, base, slot_id, sink):
         super().__init__(base, slot_id)
         self._sink = sink
+        self.prefer_writer = None  # 🏆 writer_record.py: the AI with the best chapters writes this chapter first
+
+    def eligible(self, project_id, capability, needed_tokens, operation=None):
+        out = super().eligible(project_id, capability, needed_tokens, operation)
+        pref = self.prefer_writer
+        if pref and not self.pinned and operation == "C02" and len(out) > 1:
+            # only a re-order of the AIs that may write anyway: a busy / limited / broken AI is never added
+            out.sort(key=lambda s: (self.health.failed(s["slot_id"]) is not None, s["slot_id"] != pref))
+        return out
 
     def _generate_on(self, *a, **kw):
         t0 = time.monotonic()
@@ -1083,6 +1099,11 @@ class AutoBookService(_Runner):
         if not isinstance(ip, bool):
             raise AkoweError("INVALID_INPUT", "/improve_pass", "improve_pass must be true or false", status="REJECTED")
         out["improve_pass"] = ip
+        for k in ("opening_pass", "first_page"):  # ✍ chapter 1 last / two first pages: on unless switched off
+            v = body.get(k, True)
+            if not isinstance(v, bool):
+                raise AkoweError("INVALID_INPUT", f"/{k}", f"{k} must be true or false", status="REJECTED")
+            out[k] = v
         ir = body.get("improve_rounds")
         if ir is not None:
             from . import improve_pass  # noqa: PLC0415
@@ -3733,7 +3754,21 @@ class AutoBookService(_Runner):
                                                    done=f"Decided the details chapter {idx + 1} needs"):
                                 story_details.before_chapter(self, run, st, cid, idx + 1, item)
                         payload = bp.prepare_chapter(cid)
-                        ref = self.ai_create(run, self.bp(run), "C02", payload, f"chapter {cid}")
+                        from . import writer_record  # noqa: PLC0415 - 🏆 let the best writer write more
+                        prov_ = self._engine.providers
+                        if hasattr(prov_, "prefer_writer"):
+                            prov_.prefer_writer = writer_record.before_chapter(
+                                self.store, prov_, run, idx + 1, editor_on=bool(
+                                    self._editor_settings(run).get("enabled") and self._on(run, "editor")))
+                            st["writer_note"] = (run.get("writer_pick") or {}).get("line")
+                        try:
+                            if idx == 0:  # ✍ two first pages, the better one starts chapter 1 (first_page.py) — by the preferred writer
+                                from . import first_page  # noqa: PLC0415
+                                first_page.before_first_chapter(self, run, st, outline, cid, payload, item)
+                            ref = self.ai_create(run, self.bp(run), "C02", payload, f"chapter {cid}")
+                        finally:
+                            if hasattr(prov_, "prefer_writer"):
+                                prov_.prefer_writer = None
                         rid = ref["record_id"]
                         self._made(run, ref)
                         self.event(run, "ai", f"The AI wrote chapter {cid}", record_id=rid, module_id="C02")
@@ -3768,10 +3803,15 @@ class AutoBookService(_Runner):
                 with ai_activity.doing(f"Updating the running notes after chapter {idx + 1}",
                                        done=f"Updated the running notes after chapter {idx + 1}"):
                     continuity.after_chapter(self, run, cid, rec, item)
+                if idx == 0:  # ✍ the chosen first page leaves the writing brief once chapter 1 is approved
+                    from . import first_page  # noqa: PLC0415
+                    first_page.after_first_chapter(self, run, cid, rec)
                 if rec:
                     continuity.note_written(self.store, run["project_id"], run["branch_id"], cid, rec, idx + 1)
                     continuity.recheck_done(self.store, run["project_id"], run["branch_id"], cid)
                     claude_code_book.chapter_approved(self, run, cid, idx + 1, rec)  # 🤖 facts + "sounds like AI"
+                    from . import writer_record  # noqa: PLC0415 - 🏆 the writer's score joins its track record
+                    writer_record.after_chapter(self, run, rec)
                     # 🔎 PR #117: all the AIs check this chapter before the next one is written (checkpoints.py)
                     due = run.setdefault("chapter_checks_due", [])
                     if cid not in due:
@@ -4128,6 +4168,12 @@ class AutoBookService(_Runner):
     def _s_beta(self, run, st):
         from . import beta_reader  # noqa: PLC0415
         beta_reader.run_step(self, run, st, control=(RunPaused, RunCancelled))
+
+    def _s_opening(self, run, st):
+        """✍ Rewrite chapter 1 last (opening_pass.py): one rewrite with the whole book in view, kept only if the same
+        reviewers score the book at least as well."""
+        from . import opening_pass  # noqa: PLC0415
+        opening_pass.run_step(self, run, st)
 
     def _s_improve(self, run, st):
         """🔁 Improve until better (improve_pass.py): targeted rewrites, the same reviewers re-read, kept only when the

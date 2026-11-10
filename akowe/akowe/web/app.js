@@ -8,6 +8,7 @@ import * as S7C from './section7c.js';  // P23 beta reader + P25 your writing st
 import * as WR from './writers-room.js';  // 🗳 the three-AI writers' room (writers_room.py)
 import * as CC from './claude-code.js';  // 🤖 Claude Code helpers (claude_code.py)
 import * as CK from './checkers.js';  // 📊 checker track record · 🔢 checker order · 🧑‍⚖️ stand-in decider
+import * as WRT from './writers.js';  // 🏆 who writes best · 🤫 hide the twist better
 import { maybeStartTour, replayTour } from './tour.js';  // 🧭 the short guided tour of My books (first visit; ❓ Help replays it)
 import * as RP from './run-plan.js';  // ⏱ 3d estimate · 📊 3e usage meter + ⏰ start later · 📋 6c paste starter sheet
 import { originalityCard } from './originality.js';  // ✨ #20 originality and "sounds like AI" check
@@ -3370,6 +3371,8 @@ async function viewSettings(main) {
   main.appendChild(retryCard());
   main.appendChild(reviewerCard());
   main.appendChild(CK.recordCard(s7c()));  // 📊 how good is each checker (checker_record.py)
+  main.appendChild(WRT.writerCard(s7c()));  // 🏆 who writes best (writer_record.py)
+  main.appendChild(WRT.twistCard(s7c()));  // 🤫 hide the twist better (twist_guard.py)
   main.appendChild(CK.orderCard(s7c()));  // 🔢 which AI checks first, and which never check (checker_order.py)
   main.appendChild(CK.standInCard(s7c()));  // 🧑‍⚖️ the stand-in when you don't answer (stand_in.py)
   main.appendChild(CC.helpersCard(Object.assign(s7c(), { put })));  // 🤖 Claude Code helpers
@@ -7921,6 +7924,15 @@ const MB = { dialog: null, run: null, poll: null, tick: null, opener: null, late
 const RUN_WORD = { queued: ['…', 'Starting', 'b-info'], running: ['⏳', 'Working', 'b-ai'], waiting: ['⏳', 'Waiting for the AI', 'b-warn'],
   pausing: ['⏸', 'Pausing…', 'b-warn'], paused: ['⏸', 'Paused', 'b-warn'], done: ['✔', 'Done', 'b-ok'], cancelled: ['✖', 'Cancelled', 'b-muted'],
   interrupted: ['⚠️', 'Interrupted', 'b-warn'] };
+/** 💡 A one-line tip by Start: the strongest model in each AI window makes the best book. ✕ hides it for good. */
+function modelTip() {
+  if (loadJSON('akowe_model_tip_hidden', false)) return null;
+  const tip = h('p', { class: 'small model-tip', role: 'note', 'data-testid': 'mb-model-tip' },
+    '💡 For the best book, pick the strongest model in each AI window (ChatGPT, Claude, Gemini) before you start — for example a “thinking” model if your plan has one. ',
+    h('button', { type: 'button', class: 'link', 'data-testid': 'mb-model-tip-hide',
+      onclick: () => { saveJSON('akowe_model_tip_hidden', true); tip.remove(); } }, '✕ Hide this tip'));
+  return tip;
+}
 /* ======================================================================= 🩺 P37.5 before a run: which AIs work, and how to fix the others */
 /**
  * Before a book run starts: Akọwe asks AutoInjector (/v1/health) about every AI the run will use. When all work it
@@ -8248,6 +8260,23 @@ function improvePassSwitch(prefix) {
     h('p', { class: 'hint', id: `${id}-hint` }, 'On (recommended): when the book is made, the reviewers’ “What to try next”, the beta readers’ top fixes, the editor’s major notes (also of chapters you approved anyway) and Akọwe’s own checks (clock and tide times, repeated phrases, too-simple sentences) go to the chapters that need them most. The same AIs read the book again; the change is kept only if the score went up and nothing dropped — otherwise your book stays exactly as it was. The run window shows both scores. About 5 to 10 more AI answers per round.'));
   return { el, box, apply(body) { if (!box.checked) body.improve_pass = false; else if (rounds.value !== '2') body.improve_rounds = Number(rounds.value); } };
 }
+/** ✍ Chapter 1: two first pages, keep the better one (first_page) and rewrite chapter 1 last (opening_pass): both on */
+function chapterOneSwitch(prefix) {
+  const mk = (key, label, hint) => {
+    const id = `${prefix}-${key}`;
+    const box = h('input', { type: 'checkbox', role: 'switch', id, 'data-testid': id, checked: true, 'aria-describedby': `${id}-hint` });
+    const state = h('span', { class: 'c1-state', 'aria-hidden': 'true' }, 'On');
+    box.addEventListener('change', () => { state.textContent = box.checked ? 'On' : 'Off'; });
+    return { box, row: [h('div', { class: 'check-row' }, box, h('label', { for: id }, h('strong', null, label), ' ', state)),
+      h('p', { class: 'hint', id: `${id}-hint` }, hint)] };
+  };
+  const two = mk('first-page', 'Two first pages for chapter 1, keep the better one',
+    'On (recommended): before chapter 1 is written, the writer drafts two different first pages and another AI picks the one that hooks a reader better; chapter 1 is written on from it. The run window says which was picked and why. About 2 more AI answers.');
+  const last = mk('opening-pass', 'Rewrite chapter 1 last, with the whole book in view',
+    'On (recommended): when the whole book is written, the writer reworks chapter 1 once knowing the ending, the setups it must plant and where the twist must stay hidden. The same AIs read the book again; the new chapter 1 is kept only if the score is at least as good — otherwise your chapter 1 stays exactly as it was. Never a chapter you wrote yourself. About 3 to 4 more AI answers.');
+  const el = h('fieldset', { class: 'field c1-switch' }, h('legend', null, '✍ Chapter 1'), ...two.row, ...last.row);
+  return { el, apply(body) { if (!two.box.checked) body.first_page = false; if (!last.box.checked) body.opening_pass = false; } };
+}
 /** ✍ "Check that it sounds like a person at the end" (run setting human_pass): on by default */
 function humanPassSwitch(prefix) {
   const id = `${prefix}-human-pass`;
@@ -8300,6 +8329,7 @@ async function renderMakeSetup() {
   const fb = fillBibleSwitch('mb');  // 📖 Fill the whole Book Bible before writing (whole_bible.py), off by default
   const hp = humanPassSwitch('mb');  // ✍ the end-of-book "sounds like a person" pass (human_voice.py), on by default
   const ipw = improvePassSwitch('mb');  // 🔁 the final improve pass (improve_pass.py), on by default
+  const c1 = chapterOneSwitch('mb');  // ✍ two first pages + chapter 1 rewritten last (first_page.py, opening_pass.py)
   const wr = WR.makeSetupSwitch(s7c());  // 🗳 Use the writers' room for the big twists (writers_room.py), off by default
   const ck = checkersField('mb');  // 🔎 PR #117: how many AIs check for mistakes (all by default)
   fields.checkers = ck.sel;
@@ -8339,8 +8369,8 @@ async function renderMakeSetup() {
         h('div', { class: 'field' }, h('label', { for: 'mb-slot' }, 'Which AI'), slot, h('span', { class: 'hint' }, 'Automatic uses whichever AI is ready.'))),
       lengthBox,
       h('div', { class: 'field' }, h('label', { for: 'mb-idea' }, 'Your idea (optional)'), idea, ideaWarn, locksBox),
-      h('div', { class: 'field' }, h('label', { for: 'mb-pen-name' }, 'Pen name (optional)'), penName, h('span', { class: 'hint' }, 'Printed on the title page and cover. The AI never invents one: empty = the pen name you typed last, or none.')), cf.el, pipe.el, s7.el, fb.el, hp.el, ipw.el, wr.el, ck.el, pics.el, ccf.el),
-    later.el, err, h('div', { class: 'form-actions' }, startAll, startSet));
+      h('div', { class: 'field' }, h('label', { for: 'mb-pen-name' }, 'Pen name (optional)'), penName, h('span', { class: 'hint' }, 'Printed on the title page and cover. The AI never invents one: empty = the pen name you typed last, or none.')), cf.el, pipe.el, s7.el, fb.el, hp.el, ipw.el, c1.el, wr.el, ck.el, pics.el, ccf.el),
+    later.el, err, modelTip(), h('div', { class: 'form-actions' }, startAll, startSet));
   form.insertBefore(h('div', { class: 'row mb-paste-row' }, paste, h('span', { class: 'small muted' }, 'Planned your book with an AI? Paste its starter sheet to fill these settings.')), form.querySelector('.mb-quick'));
   // ⏱ 3d: time, AI answers per AI and usage limits for exactly these settings; 📊 3e the usage meter per AI
   const est = RP.planBox(s7c(), () => buildBody(false));
@@ -8370,6 +8400,7 @@ async function renderMakeSetup() {
     fb.apply(body);  // 📖 the whole Book Bible before chapter one (only when switched on)
     hp.apply(body);  // ✍ the end-of-book pass (sent only when switched off)
     ipw.apply(body);  // 🔁 the final improve pass (sent only when changed)
+    c1.apply(body);  // ✍ chapter 1: two first pages / rewritten last (sent only when switched off)
     wr.apply(body);  // 🗳 the writers' room for the big twists (only when switched on)
     ck.apply(body);  // 🔎 how many AIs check for mistakes (sent only when not the default)
     one.apply(body);  // PR #122: when only one AI works (sent only when not the default)
@@ -8557,7 +8588,7 @@ function whoRead(u, who, at) {
 }
 function renderRun() {
   const r = MB.run; if (!r || !MB.dialog) return;
-  const sig = JSON.stringify([r.status, r.phase, r.current, r.problem && r.problem.code, (r.waiting || {}).retry_at, r.steps.map(s => [s.state, s.message, s.review_note, s.editor_note, (s.items || []).map(i => [i.state, i.editor, i.scenes, i.phase, i.note, i.planned, i.length, i.continuity, i.memory]), s.planned_note, s.checkpoints]), (r.files || []).length, r.ais, r.ai_alerts, r.review_summary, r.editor_summary, r.planned_summary, r.eta, r.report, r.save, r.costs && [r.costs.calls, r.costs.ais], r.check_later, (r.waiting || {}).message, r.alert && r.alert.key, r.stand_in]);
+  const sig = JSON.stringify([r.status, r.phase, r.current, r.problem && r.problem.code, (r.waiting || {}).retry_at, r.steps.map(s => [s.state, s.message, s.review_note, s.editor_note, s.writer_note, (s.items || []).map(i => [i.state, i.editor, i.scenes, i.phase, i.note, i.planned, i.length, i.continuity, i.memory]), s.planned_note, s.checkpoints]), (r.files || []).length, r.ais, r.ai_alerts, r.review_summary, r.editor_summary, r.planned_summary, r.eta, r.report, r.save, r.costs && [r.costs.calls, r.costs.ais], r.check_later, (r.waiting || {}).message, r.alert && r.alert.key, r.stand_in]);
   if (sig === MB.sig && MB.dialog.querySelector('.mb-steps')) { updateRunClocks(); return; }
   MB.sig = sig;
   const w = r.state === 'replaced' ? ['↪', 'Replaced by a newer run', 'b-muted'] : r.state === 'interrupted' ? RUN_WORD.interrupted
@@ -8587,6 +8618,7 @@ function renderRun() {
         h('p', { class: 'small mb-msg-line' }, s.message || s.about),
         s.review_note ? h('p', { class: `small mb-review-note${s.review_independent === false ? ' not-independent' : ''}`, 'data-testid': 'mb-review-note' }, '🧐 ', s.review_note) : null,
         s.editor_note ? h('p', { class: `small mb-review-note${/⚠️/.test(s.editor_note) ? ' not-independent' : ''}`, 'data-testid': 'mb-editor-note' }, '🖋 ', s.editor_note) : null,
+        s.writer_note ? h('p', { class: 'small mb-review-note', 'data-testid': 'mb-writer-note' }, '🏆 ', s.writer_note) : null,
         s.planned_note ? h('p', { class: `small mb-review-note${/⚠️/.test(s.planned_note) ? ' not-independent' : ''}`, 'data-testid': 'mb-planned-note' }, '✅ ', s.planned_note) : null,
         (s.checkpoints || []).length ? h('ul', { class: 'small plain-list mb-checkpoints', 'data-testid': 'mb-checkpoints' }, s.checkpoints.map(line =>
           h('li', { class: /waiting for you|⚠️/.test(line) ? 'not-independent' : '' }, line, ' ',
@@ -8730,6 +8762,9 @@ function runReportBox(r) {
     h('a', { class: 'btn small primary', href, onclick: () => closeMakeBook() }, '📊 Open the book report')),
     // ✍ the end-of-book "sounds like a person" pass: the score now and with the suggested rewrites
     rp && rp.human ? h('p', { 'data-testid': 'mb-human' }, rp.human) : null,
+    // ✍ chapter 1: the first page picked from two, and chapter 1 rewritten with the whole book in view
+    r.first_page && r.first_page.line ? h('p', { 'data-testid': 'mb-first-page' }, r.first_page.line) : null,
+    rp && rp.opening ? h('p', { 'data-testid': 'mb-opening' }, rp.opening) : null,
     // 🔁 the final improve pass: both scores; 📈 this book against your last books
     rp && rp.improve ? h('p', { 'data-testid': 'mb-improve' }, rp.improve) : null,
     rp && rp.trend ? h('p', { 'data-testid': 'mb-trend' }, '📈 ', rp.trend) : null,
@@ -9252,6 +9287,7 @@ async function viewReport(main) {
         h('p', null, h('strong', null, r.name), r.independent ? '' : h('span', { class: 'words-warn small' }, ' ⚠️ not independent'), (r.calibration || {}).flagged ? h('span', { class: 'words-warn small', 'data-testid': 'rp-flagged' }, ' ⚠️ not backed by quotes') : '', ': ', r.summary || ''),
         (r.trust_notes || []).length ? h('ul', { class: 'small', 'data-testid': 'rp-trust' }, r.trust_notes.map(n => h('li', { class: /^⚠️/.test(n) ? 'words-warn' : 'muted' }, n))) : null))));
     }
+    if (rep.opening) holder.appendChild(h('p', { class: 'card small', 'data-testid': 'rp-opening' }, rep.opening));
     if (rep.improve) holder.appendChild(h('p', { class: 'card small', 'data-testid': 'rp-improve' }, rep.improve));
     if (ov.trend && ov.trend.line) holder.appendChild(qualityTrendCard(ov.trend, 'rp-trend', null));
     holder.appendChild(h('section', { class: 'card', 'data-testid': 'rp-next' }, h('h2', null, '🧭 What to try next'),

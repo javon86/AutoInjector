@@ -306,6 +306,28 @@ def author_card(store, principal: str) -> dict | None:
     return v if isinstance(v, dict) else None
 
 
+NUDGE_SETTING = "style_nudge"
+NUDGE_TEXT = ("Tip: paste a few paragraphs of your own writing into ✒️ My writing style so every AI writes in your "
+              "voice.")
+
+
+def nudge(store, principal: str) -> dict | None:
+    """✒️ The one-line tip on the ⚡ Make-a-book plan when the author's writing style card is empty (never blocks a
+    run; setting ``style_nudge`` {"enabled": false} hides it). None: nothing to say. Never raises."""
+    try:
+        cur = store.get_setting(NUDGE_SETTING)
+        if isinstance(cur, dict) and cur.get("enabled") is False:
+            return None
+        card = author_card(store, principal)
+        if (card or {}).get("samples") or ((card or {}).get("stats") or {}).get("words"):
+            return None
+        link = "✒️ My writing style"
+        before, after = NUDGE_TEXT.split(link, 1)
+        return {"text": NUDGE_TEXT, "href": "#/style", "link": link, "before": before, "after": after}
+    except Exception:  # noqa: BLE001 - a tip never breaks the plan
+        return None
+
+
 def apply_to_book(store, principal: str, pid: str) -> dict | None:
     """Copy the author's card (its brief) to this book. None when the author has no usable card."""
     card = author_card(store, principal)

@@ -11,7 +11,7 @@
  *     port = 17891, host = "127.0.0.1",
  *     getToken()                         -> current bearer token string ('' = refuse all)
  *     sendToSite(site, text, meta)       -> Promise<{ ok, error?, seq? }>
- *                                           meta = { request_id, cancelToken }; cancelToken is
+ *                                           meta = { request_id, cancelToken, book? }; cancelToken is
  *                                           { cancelled, typing }: the bridge sets cancelled when
  *                                           the request times out before its prompt was typed, and
  *                                           the host then withdraws the queued send (error
@@ -125,6 +125,11 @@
  *                   sends the whole prompt. sendToSite gets meta.followup = true and meta.chatKey (the host must
  *                   not open a fresh chat, and answers error 'FOLLOWUP_STALE' — 409, nothing typed — if the chat
  *                   changed meanwhile).
+ *
+ * Fresh chat per book (backward compatible): /v1/complete may carry "book_id" (the Akọwe book, e.g. "proj-…") and
+ *   "run_id" (the ⚡ Make-a-book run, e.g. "run-…"), each 1..128 chars of [A-Za-z0-9._:-]; ids only, never titles.
+ *   sendToSite then gets meta.book = { id, run } so the host can start a NEW book in a fresh chat (fresh-chat.js
+ *   noteBook). Missing = unknown (nothing changes); a malformed one is 400 BAD_REQUEST. Never logged.
  *
  * timeScale (default 1) multiplies every real wait (request timeout and the
  * post-504 late window). It exists only so tests / the fake host can exercise
@@ -526,7 +531,7 @@ function createBridge(opts) {
     lastOk.delete(site); // something new goes into this chat: an older answer can no longer be followed up
     log('request', { site, request_id: requestId, chars: prompt.length });
     let sendPromise;
-    try { sendPromise = Promise.resolve(sendToSite(site, wrapPrompt(site, prompt), Object.assign({ request_id: requestId, cancelToken }, extra && extra.followup ? { followup: true, chatKey: extra.chatKey } : {}))); }
+    try { sendPromise = Promise.resolve(sendToSite(site, wrapPrompt(site, prompt), Object.assign({ request_id: requestId, cancelToken }, extra && extra.followup ? { followup: true, chatKey: extra.chatKey } : {}, extra && extra.book ? { book: extra.book } : {}))); }
     catch (e) { sendPromise = Promise.reject(e); }
     entry.sendSettled = sendPromise.then((r) => {
       if (r && r.ok) {
@@ -904,6 +909,13 @@ function createBridge(opts) {
     if (followupOf !== undefined && followupOf !== null && (typeof followupOf !== 'string' || !REQUEST_ID_RE.test(followupOf) || followupOf === requestId)) {
       return refuse(res, 400, 'BAD_REQUEST', 'followup_of must be the request_id of an earlier request (1..128 chars of [A-Za-z0-9._:-])', site, requestId);
     }
+    // which book / ⚡ run this request is for (optional): a new book gets a fresh chat in the pane (host side)
+    for (const k of ['book_id', 'run_id']) {
+      const v = body[k];
+      if (v !== undefined && v !== null && (typeof v !== 'string' || !REQUEST_ID_RE.test(v))) return refuse(res, 400, 'BAD_REQUEST', `${k} must be 1..128 chars of [A-Za-z0-9._:-]`, site, requestId);
+    }
+    const book = typeof body.book_id === 'string' || typeof body.run_id === 'string'
+      ? { id: typeof body.book_id === 'string' ? body.book_id : null, run: typeof body.run_id === 'string' ? body.run_id : null } : null;
 
     pruneCache();
     const cached = cache.get(requestId);
@@ -955,7 +967,7 @@ function createBridge(opts) {
             : userActedSince(site, lo.at) ? `you used ${site}'s pane yourself since request ${followupOf}` : null;
       if (why) return refuse(res, 409, 'FOLLOWUP_UNAVAILABLE', `${why}; nothing was typed — send the whole prompt instead`, site, requestId);
     }
-    const entry = begin(site, prompt, requestId, { followup: isFollowup, chatKey: isFollowup ? chatKeyOf(site) : null });
+    const entry = begin(site, prompt, requestId, { followup: isFollowup, chatKey: isFollowup ? chatKeyOf(site) : null, book });
     const out = await awaitEntry(entry, timeoutMs);
     return send(res, out.status, out.body);
   }

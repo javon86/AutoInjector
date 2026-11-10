@@ -221,6 +221,20 @@ bridge to your home Wi-Fi, behind its key.
   switches to the new chat, AutoInjector reads nothing from it: a half-swapped page is never taken for a new reply.
   When the New chat button does not give an empty chat, the page is reloaded at the new-chat address; the log's
   `reload` line then says `by: "fresh-chat"` (not "self-repair").
+- **A fresh chat for every new book:** each Akọwe request says which book (`book_id`) and which ⚡ run (`run_id`)
+  it is for — ids only. When an AI pane's last Akọwe request was for a **different book** (a new ⚡ Make-a-book run,
+  a sequel, or you switch books), AutoInjector opens a new chat in that pane **before** typing the first request
+  of the new book. Otherwise the AI could take names or story details from the other book still in that chat (a
+  real run used a character from the author's other book as the "invented" pen name). The **same book** keeps its
+  chat: ⏸ Pause → ▶ Resume, ▶ Continue making this book, or a restart of the app (the last book of each pane is
+  saved, ids only). The same safety rules apply: only between requests, never while the AI writes, never in a pane
+  you used in the last 10 minutes (it waits for a later request instead). The log line is `akowe-fresh-chat` with
+  `reason: "new-book"`. Switch: 📖 Akọwe panel → 🆕 Fresh chat for Akọwe → **and for every new book** (on by
+  default). Costs no AI answers. Code: `fresh-chat.js` (`noteBook`), `akowe-bridge.js`, Akọwe `providers.py`
+  (`bridge_book_fields`).
+- **💡 Strongest model tip:** a one-line tip by Start on the Make-a-book screen and above the AI cards in the 📖
+  Akọwe panel: pick the strongest model in each AI window before you start. ✕ hides it for good (remembered in that
+  browser / on that PC).
 - A second door, the **service bridge** (port 8765), does more than the AI bridge. Akọwe uses it for pictures,
   video clips, trailers, the ebook cover JPG and the Book Bible PDF. It also carries the app's tools, voice (speak
   and listen), messages to the AIs, live events, and the phone page.
@@ -596,6 +610,15 @@ to a minute), so the run knows which AIs work.
      story so far, and your promises to the reader: content limits, themes, the central question, the point of
      view and tense. If the instructions are too long, the least important parts are cut first, and the run shows
      ⚠️ with exactly what was cut.
+   - **✍ Two first pages (chapter 1 only)** (code: `akowe/akowe/first_page.py`; run setting `first_page`, on by
+     default; the switch is under "✍ Chapter 1" on the Make-a-book screen). Before chapter 1 is first written, the
+     writer is asked once for TWO different openings — only the first page (about 300–400 words), not the chapter.
+     One reviewer that did not write them (another AI, never the writer's family) picks the one that hooks a reader
+     better (`{pick: "A"|"B", why}`). The chosen opening goes into chapter 1's writing brief (`first_page`) and the
+     writer writes the rest of the chapter on from it; it leaves the brief once chapter 1 is approved. The run window
+     says which was picked and why ("✍ First page: … picked opening B — …"; kept in `run.first_page`). If anything
+     fails (no second AI, not two usable openings, a bad pick, an AI problem), chapter 1 is written exactly as before
+     and only a code is logged (`state: fallback`, e.g. `NO_REVIEWER`, `OPENINGS_LENGTH`). 2 AI answers per book.
    - **Akọwe's own checks**, then **two independent reviewers**: both AIs that did not write the chapter read it, each
      on its own. If either asks for changes, the writer fixes the draft, at most twice; it is approved only when
      neither objects. (With only one other AI working, one reviews it, as before.) A chapter that breaks your content
@@ -671,6 +694,26 @@ to a minute), so the run knows which AIs work.
     Every quote is checked against the book again; one not found word for word is marked and never used as evidence.
     An AI that is not working is skipped with a note. If the run is paused, the panel carries on with the readers
     still to read.
+
+    **✍ Rewrite chapter 1 last** (code: `akowe/akowe/opening_pass.py`; run setting `opening_pass`, on by default;
+    the "Rewrite chapter 1 last" step, after the beta readers and before the improve pass). Chapter 1 was written
+    before the rest of the book existed, so the writer reworks it ONCE with the whole book in view. Its brief
+    (`opening_brief`, made without AI): a short summary of the whole book (premise, main plot, one line per chapter),
+    the ending (the last chapter's plan and last lines), the setups chapter 1 must plant (the main plot's obligations
+    and open threads) and the book's question, where the twist must stay hidden (protected mysteries, what the beta
+    readers guessed in chapter 1), the notes about chapter 1 (beta readers' fixes, whole-book reviewers' weaknesses
+    that quote it, the editor's major notes) and the rules: make it clear who is there, where we are and what just
+    happened; open on a concrete moment; keep every approved fact, name, the plot and the main character. It goes
+    through the editor's rewrite path (exact passages: the opening stretch, plus one stretch per setup or note; the
+    editor's keep list holds). Nothing is saved yet: the same whole-book reviewers re-read the book with the new
+    chapter 1. **The keep rule:** (1) the re-read must be comparable — the same reviewers, and no dimension down by
+    more than 1 point — else the original stays; (2) the overall score went up → kept; (3) the same score → kept only
+    if the reviewers' notes on chapter 1 went down (their weaknesses that quote chapter 1 or name it / the opening);
+    (4) lower → the original stays. A kept chapter 1 is reviewed and approved like every chapter (not passed → its
+    approved text comes back unchanged); the report is saved with the re-read scores and the book is exported again.
+    A chapter 1 you wrote yourself is never touched; with the editor's rewrites off it does nothing and says so. The
+    run window, the run's report box and the 📊 report say "✍ Chapter 1 rewritten with the whole book in view: kept
+    (7.6 → 7.8/10)" (or not kept, and why). About 1 rewrite + the reviewers' re-read + 1 review, in the ⏱ estimate.
 13. **🔁 Improve until better** (code: `akowe/akowe/improve_pass.py`; run settings `improve_pass`, on by default, and
     `improve_rounds`, 1–3, default 2; the switch is on the Make-a-book screen). Akọwe gathers, per chapter, without
     any AI: the editor's MAJOR notes on the approved version, the notes kept when you pressed **✔ Approve anyway**
@@ -726,6 +769,16 @@ takes or risks; limits: what it can never do) is a major "is it bounded?" findin
 📏 Story rules page and sent to the plot/outline planners and their reviewers as `not_bounded`. A ⚡ run asks the AI
 once to bound such rules (after the first rules and again after the plan, at most twice) and accepts the update under
 the run consent; the planners are told that every special mechanism keeps its scope, cost and limits.
+
+**🤫 Hide the twist better** (code: `akowe/akowe/twist_guard.py`; ⚙️ Settings › 🤫 Hide the twist better,
+`GET/PUT /api/settings/twist-guard {enabled}`; default on; planning rules only, no extra AI answers). In one book all
+three beta readers guessed the twist in chapter 1. Now the plot (B03), the reveal plan (B08) and the chapter outline
+(B11) planners are told: every clue to a secret or twist must also have a believable innocent explanation; plant at
+least one fair red herring; and the earliest point where a reader may work the twist out is about two-thirds of the
+way through the book — "chapter K of N" in the outline (K = 65% of N, rounded up, at least chapter 2). The writer
+brief of every chapter BEFORE chapter K gets a `twist_guard` block — "do not confirm or over-signal “<secret>”; keep
+its clues ambiguous" — for each protected mystery of the 📏 story rules (up to 4), or "the secret or twist the plan
+hides" when the book has none, plus one rule (no knowing looks, no narrator hints). Chapters from K on do not get it.
 
 **How a fix is judged (code: `akowe/akowe/review.py`, `review_loop.py`):** when the writer revises a draft to answer
 the reviewer, the reviewer judges the new version **only against approved canon**: approved records and protected
@@ -845,7 +898,8 @@ All four are on the ⚡ **AI writes the whole book** screen (code: `akowe/akowe/
   helpers when they are on), and whether an AI will probably hit its usage limit and when ("Claude will probably
   reach its limit around chapter 14; the other AIs carry on and it is back about 4 hours later"). It changes as you
   change the length, how many AIs check for mistakes, the writers' room, beta readers, character pictures, "fill the
-  whole Book Bible", the end-of-book "sounds like a person" pass (about 2 answers), the 🔁 improve pass and its
+  whole Book Bible", the end-of-book "sounds like a person" pass (about 2 answers), ✍ the two first pages (2
+  answers) and chapter 1 rewritten last (1 rewrite + the reviewers' re-read + 1 review), the 🔁 improve pass and its
   rounds (per round the rewrites plus the reviewers' re-read, plus the kept chapters' reviews), the Claude Code helpers, "when
   only one AI works" and which AI writes. It starts from the P28 numbers (`costs.estimate`: AI calls per step); once
   this PC has finished runs, it uses their measured seconds per answer, each AI's share of the answers, and the
@@ -899,6 +953,8 @@ All four are on the ⚡ **AI writes the whole book** screen (code: `akowe/akowe/
 | Readability (no AI) | prose too hard or too simple for the book's readers | the book report and the scene grid; the reading-level floor in every chapter's brief and the final improve pass |
 | 🕰️ Clock and tide (no AI) | a tide going out before the stated high water, high waters that cannot both be true, a clock running backwards | every chapter's editor and reviewer (must-fix), the next chapter's brief, the final improve pass |
 | 📏 Special rules bounded (no AI + one AI update) | a ghost, magic or device rule with no scope, cost or limits | after the story rules and after the plan |
+| ✍ Two first pages | a weak first page (chapter 1 is written before anything else) | before chapter 1 is written (on by default) |
+| ✍ Rewrite chapter 1 last | a chapter 1 that loses readers, gives the twist away or plants nothing — kept only if the same reviewers score the book at least as well | after the beta readers, before the improve pass (on by default) |
 | 🔁 Improve until better | what the reviewers, beta readers, the editor and Akọwe's checks found — kept only if the same reviewers score it higher | after the beta readers, at the end of a ⚡ run (on by default) |
 | 📈 Quality history and 🧠 lessons | your recurring weak areas and habits | recorded when a run finishes; given to the next book's planners and writer |
 | Pattern check (no AI) | repeated habits ("went very still"), lists of three, same-length sentences; a habit 2+ checks flag (pattern, originality, editor) is a must-fix for the editor, and the run says how many are left | before the editor |
@@ -958,6 +1014,21 @@ A few of these need more words:
   alarms in the last 50"; under 10 judged outcomes it says "needs more data" and labels the small numbers as a small
   sample. Honest limit: the style kind only counts the editor's notes that led to a kept rewrite (held up); it has no
   false-alarm signal yet.
+- **🏆 Who writes best** (code: `akowe/akowe/writer_record.py`; ⚙️ Settings, the run window; API
+  `GET /api/writers/record`, `PUT /api/settings/writer-pick {enabled}`; default on). The writer's side of the
+  checker record: for each AI the editor's score of every chapter it wrote — the editor's FIRST reading, before any
+  rewrite, so it measures the writer's own draft. The writer is the AI that wrote the approved version
+  (`review.writer_of`). A chapter whose editor was the writer itself does not count, nor one the editor did not read.
+  Only numbers are kept (setting `writer_record`: score, time and a record-id:version code so a chapter counts once),
+  the last 60 chapters per AI. When ⚡ Make-a-book chooses the writer by itself (you did not pick an AI in "Which
+  AI"), and once at least two working AIs have 3 or more scored chapters, the AI with the best average writes the
+  chapter; every 4th chapter goes to another working AI (the one with the fewest scored chapters) so the record stays
+  fair. Before there is enough data, every 4th chapter also goes to the AI with the fewest scored chapters so the data
+  can build. It is only a re-order of the AIs that may write anyway (`_TimedProviders.eligible`, operation C02): a
+  busy AI, one at its usage limit or being repaired is never chosen — the usual fallback applies. Your own "Which AI"
+  choice always wins, and with the editor switched off nothing changes (no scores). No extra AI calls. The run
+  window shows one line under the chapters step: "🏆 Claude writes most chapters: its chapters score 8.1 vs ChatGPT
+  7.4".
 - **🔢 Which AI checks first** (code: `akowe/akowe/checker_order.py`; ⚙️ Settings, `GET/PUT /api/settings/checkers`,
   and the Make-a-book start body `checker_order: {mode, order, off}` for one book). **Automatic** (default): the AI
   whose corrections held up best checks first, once at least two AIs have 10 or more judged outcomes — until then the
@@ -1059,6 +1130,9 @@ every chapter. Akọwe works against this in four places.
    new chapter gets the new list. The writer is also told this book's own repeats so far, counted without any AI:
    "Don't open with the weather again (chapters 2, 4 and 5 did)", "Avoid “jaw tightened”: already 6× in chapters 1–5".
    The whole block is small (under 1 900 characters) and is shortened, least important first, if it would not fit.
+   **✒️ The style tip:** while your ✒️ My writing style card is empty, the ⚡ Make-a-book plan (under the estimate)
+   shows one line: "Tip: paste a few paragraphs of your own writing into ✒️ My writing style so every AI writes in
+   your voice", with a link to the page and "Don't show again" (setting `style_nudge`). It never blocks the start.
    **A narrator voice even without your writing samples:** when you have no ✒️ style card, a ⚡ Make-a-book run gives
    the book its own narrator voice at the start, chosen with the book's genre, tone, point of view and tense (by the
    AI in the same answer that invents the book, so no extra AI answer; otherwise from the book's profile). The writer

@@ -30,6 +30,13 @@ import threading
 
 from akowe.errors import AkoweError
 
+# ✍ two first pages (first_page.py): about 150 words each, different ways in
+OPENING_A = ("Mara Vell was forty steps up the old lighthouse when the lantern went out in her hand. " + " ".join(
+    ["She stood still on the iron stair and listened to the fog breathe against the glass, counting the steps "
+     "she had left and the reasons she had to climb them."] * 5))
+OPENING_B = ("The lens in the lamp room of Gullhaven light was cracked from rim to centre, and Mara Vell knew at once "
+             "that no storm had done it. " + " ".join(["Her master's letter was folded in her coat, and the logbook "
+                                                      "lay open on the desk where he had left it a week ago."] * 5))
 CHAPTER_TEXT = {
     1: ["The fog rolled in over Gullhaven before dawn, and Mara Vell climbed the hundred and twelve steps of the old "
         "lighthouse with a lantern in one hand and her master's last letter in the other.",
@@ -251,6 +258,11 @@ class BookFakeAI:
         # call order); an answer is {"pick": option code, "confident", "why"} (put on the voter's own random A / B),
         # any other dict / text as it is, or a callable(ctx). Default: the "accept" option, confident.
         self.stand_in_by_slot: dict = {}
+        # ✍ two first pages (first_page.py) and chapter 1 rewritten last (opening_pass.py)
+        self.openings_script: list = []          # scripted "two openings" answers (dicts or callables(ctx))
+        self.pick_script: list = []              # scripted picks ({pick, why} or callables(ctx)); default B
+        self.opening_rewrite_script: list = []   # scripted opening-pass rewrites (dicts or callables(ctx))
+        self.use_first_page = False              # the chapter writer starts chapter 1 with the chosen first page
         self.stand_in_script: list = []
         self.stand_in_default = {"pick": "accept", "confident": 0.9,
                                  "why": "The correction answers the reviewer's finding and agrees with the canon."}
@@ -320,6 +332,25 @@ class BookFakeAI:
 
     # ------------------------------------------------------------------ answers
     def _answer(self, ctx, props, schema):
+        if "openings" in props:  # ✍ the writer's two first pages for chapter 1 (one answer)
+            with self.lock:
+                scripted = self.openings_script.pop(0) if self.openings_script else None
+            if scripted is not None:
+                return "openings", scripted(ctx) if callable(scripted) else copy.deepcopy(scripted)
+            return "openings", {"openings": [{"approach": "in the middle of the climb", "text": OPENING_A},
+                                             {"approach": "on the cracked lens", "text": OPENING_B}]}
+        if "pick" in props and "openings" in ctx:  # ✍ one reviewer picks the better first page
+            with self.lock:
+                scripted = self.pick_script.pop(0) if self.pick_script else None
+            if scripted is not None:
+                return "first_page_pick", scripted(ctx) if callable(scripted) else copy.deepcopy(scripted)
+            return "first_page_pick", {"pick": "B", "why": "B opens on a concrete moment and says who and where."}
+        if "replacements" in props and ctx.get("opening_brief"):  # ✍ chapter 1 rewritten last
+            with self.lock:
+                scripted = self.opening_rewrite_script.pop(0) if self.opening_rewrite_script else None
+            if scripted is not None:
+                return "opening_rewrite", scripted(ctx) if callable(scripted) else copy.deepcopy(scripted)
+            return "opening_rewrite", {"replacements": []}
         if ctx.get("akowe_task") == "story_details":  # ⏱ story details (essentials / just in time)
             return "details", self._details(ctx)
         if "placements" in props and "story_kind" in ctx:  # 📚 place where each stage of the kind of story begins
@@ -593,6 +624,9 @@ class BookFakeAI:
             if num > 3:  # chapters past the third get their own sentence (the content check refuses duplicates)
                 paras = [p + f" That was night {num} of the search." for p in paras]
             text = self.chapter_texts.get(cid) or "\n\n".join(paras)
+            fp = (ctx.get("writing_brief") or {}).get("first_page") or {}
+            if self.use_first_page and fp.get("text"):  # ✍ the chapter starts from the chosen first page
+                text = fp["text"] + "\n\n" + text
             return "C02", {"text": text,
                            "objective_assessments": [{"item_id": cid, "decision": "PASS", "message": "reached"}]}
         if "events" in props:

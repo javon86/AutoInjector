@@ -105,6 +105,19 @@ cover; the AI never makes one up — leave it empty to use the pen name you type
 if it is also the name of one of your characters), the kind of story and the story shape (or leave them to the AI), **How many AIs check for mistakes**, **Use Claude Code helpers for this book**, and **"✍ At the end,
 check that the book sounds like a person wrote it"**.
 
+💡 **Tip:** for the best book, pick the strongest model in each AI window (ChatGPT, Claude, Gemini) before you press
+Start — for example a "thinking" model if your plan has one. The tip by Start (and above the AI cards in AutoInjector)
+goes away for good when you press ✕.
+
+If you have not filled in **✒️ My writing style** yet, the plan shows a short tip: "Tip: paste a few paragraphs of your
+own writing into ✒️ My writing style so every AI writes in your voice". Click the link to go there, or **Don't show
+again** to hide it. It never stops you from starting.
+
+**🤫 Hide the twist better** (⚙️ Settings, on unless you switch it off): when the AI plans the book, every clue to a
+secret also gets an innocent explanation, there is at least one fair red herring, and readers should not be able to
+work out the twist before about two-thirds of the book. The chapters before that point are told not to give the
+secret away or hint at it too hard. This costs no extra AI work.
+
 ### While a long book runs
 
 - The PC stays awake while a book is being written. A Windows restart (updates) still stops the run; press
@@ -117,6 +130,10 @@ check that the book sounds like a person wrote it"**.
 - When every AI is at its usage limit, Akọwe waits and carries on by itself when a limit resets.
 - Fresh chats: after about 15 Akọwe requests in one chat, AutoInjector opens a new chat in that AI's pane so the chat
   never gets too long. Nothing for you to do.
+- Every **new book** also starts in a fresh chat in each AI, so nothing from your last book (a character's name,
+  story details) can slip into it. Resuming the same book keeps its chat. If you are typing in an AI's window
+  yourself, AutoInjector waits and does it a bit later. To switch it off: 📖 Akọwe panel → untick **and for every
+  new book**.
 
 ### When your book needs you
 
@@ -209,6 +226,23 @@ Every chapter is checked several times before it counts as part of the book:
   works (scope), what it costs and what it can never do (limits). If one does not, the AI fills them in once, before
   the plan is written.
 
+### ✍ Chapter 1: two first pages, and rewritten last
+
+Chapter 1 is written before the rest of the book exists, and readers decide on the first page. So, under **✍ Chapter
+1** on the ⚡ Make-a-book screen (both on by default; switch either off there):
+
+- **Two first pages, keep the better one:** before chapter 1 is written, the writer drafts two different first pages
+  and another AI picks the one that hooks a reader better. Chapter 1 is written on from it. The run window says which
+  was picked and why. If that cannot be done (for example only one AI works), chapter 1 is simply written the usual
+  way. About 2 more AI answers.
+- **Rewrite chapter 1 last:** when the whole book is written, the writer reworks chapter 1 once, now knowing the
+  ending, the setups it must plant for later, where the twist must stay hidden, and what the beta readers and
+  reviewers said about it. It keeps every name, fact, the plot and the main character. The same AI reviewers read
+  the book again: the new chapter 1 is **kept only if the score is at least as good** (if the score is the same, only
+  if they found fewer problems in chapter 1). Otherwise your chapter 1 stays exactly as it was. A chapter 1 you wrote
+  yourself is never touched. The run window and the report say what happened: "✍ Chapter 1 rewritten with the whole
+  book in view: kept (7.6 → 7.8/10)". About 3 to 4 more AI answers.
+
 ### 🔁 Improve until better, and 📈 your books over time
 
 - **🔁 Improve until better** (on the ⚡ Make-a-book screen, on by default, 1–3 rounds, default 2): when the book is
@@ -235,6 +269,13 @@ Every chapter is checked several times before it counts as part of the book:
   held up, how many were false alarms lately, and how often they missed something another AI found — for example
   "ChatGPT: 87% of its corrections held up · 3 false alarms in the last 50". With fewer than 10 checks behind it, an AI
   says "needs more data": a few lucky or unlucky checks prove nothing. Only numbers are kept, never your book's words.
+- **🏆 Who writes best** (⚙️ Settings): the editor scores every chapter, and Akọwe keeps each AI's average — for
+  example "Claude: its chapters score 8.1/10 on average (12 chapters)". When you let ⚡ Make-a-book choose the AI,
+  the AI whose chapters score best writes most chapters, once at least two AIs have 3 scored chapters each; every 4th
+  chapter still goes to another AI so the comparison stays fair. An AI that is busy or at its limit is never chosen.
+  If you pick an AI yourself in "Which AI", your choice always wins. The run window says who writes and why: "🏆 Claude
+  writes most chapters: its chapters score 8.1 vs ChatGPT 7.4". Untick **Let the AI whose chapters score best write
+  most chapters** to switch it off. Only numbers are kept, never your book's words.
 - **🔢 Which AI checks first** (⚙️ Settings, and "Checkers: … Change" on the ⚡ Make-a-book screen for one book):
   **Automatic** puts the AI with the best track record first once there is enough data; **My own order** lets you
   move them with ↑ ↓; tick **Don't use for checks** to keep an AI from checking (it can still write). The AI that

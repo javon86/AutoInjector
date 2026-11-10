@@ -696,7 +696,24 @@ class PlanHandler(OperationHandler):
         except Exception:  # noqa: BLE001 - guidance is best effort
             return None, None
 
+    def _twist_rule(self, ctx: Context) -> str:
+        """🤫 twist_guard.py: hide every secret / twist fairly (plot, reveal plan and outline; never raises)."""
+        if self.op_id not in ("B03", "B08", "B11"):
+            return ""
+        try:
+            from .. import twist_guard  # noqa: PLC0415
+            if not twist_guard.settings(ctx.store)["enabled"]:
+                return ""
+            target = ctx.payload.get("target_length") if isinstance(ctx.payload, dict) else None
+            n = target.get("value") if isinstance(target, dict) and target.get("unit") == "chapters" else None
+            return twist_guard.planner_rule(n if self.op_id == "B11" else None)
+        except Exception:  # noqa: BLE001 - guidance is best effort
+            return ""
+
     def _guidance_rules(self, ctx: Context) -> str:
+        if self.op_id == "B08":
+            tr = self._twist_rule(ctx)
+            return (tr + " ") if tr else ""
         if self.op_id not in ("B01", "B03", "B11"):
             return ""
         from .. import story_choices  # noqa: PLC0415
@@ -717,6 +734,9 @@ class PlanHandler(OperationHandler):
         if rules and self.op_id in ("B03", "B11"):  # 📏 a special mechanism always needs its bounds in the plan
             from .. import story_rules  # noqa: PLC0415
             out += " " + story_rules.SPECIAL_PLAN_RULE
+        tr = self._twist_rule(ctx)  # 🤫 clues with innocent explanations, a red herring, no early guess
+        if tr:
+            out += " " + tr
         if self._story_kind(ctx):  # 📚 the kind of story: its stages in order, its promise kept by the ending
             from .. import story_kind  # noqa: PLC0415
             out += " " + (story_kind.OUTLINE_RULE if self.op_id == "B11" else story_kind.PLAN_RULE)

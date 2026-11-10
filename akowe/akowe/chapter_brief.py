@@ -430,6 +430,19 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str, *
                                        "parts": sorted(ql)}
             if cut:
                 meta["cut"] = cut
+        try:  # 🤫 before the point a reader may work out the twist: do not confirm or over-signal it
+            from . import twist_guard  # noqa: PLC0415
+            from .book_path import BookPath  # noqa: PLC0415
+            order_t = [c["chapter_id"] for c in BookPath.outline_chapters(None, outline)]
+            tg = twist_guard.writer_block(store, pid, branch, order_t.index(chapter_id) + 1
+                                          if chapter_id in order_t else None, len(order_t))
+        except Exception:  # noqa: BLE001
+            log.exception("twist guard of chapter %s", chapter_id)
+            tg = None
+        if tg:
+            brief["twist_guard"] = tg
+            rules.append(twist_guard.WRITER_RULE)
+            meta["twist_guard"] = {"until": tg["may_be_worked_out_from_chapter"], "secrets": len(tg["secrets"])}
         try:  # 🗳 the writers' room's decision for this chapter (a ⚡ run's pick; writers_room.py)
             from . import writers_room  # noqa: PLC0415
             room = writers_room.chapter_decision(store, pid, branch, chapter_id)
@@ -439,11 +452,21 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str, *
         if room:
             brief["writers_room"] = room
             rules.append(writers_room.BRIEF_RULE)
+        try:  # ✍ the first page chosen from two drafts (a ⚡ run's chapter 1; first_page.py)
+            from . import first_page  # noqa: PLC0415
+            fp = first_page.brief_block(store, pid, branch, chapter_id)
+        except Exception:  # noqa: BLE001
+            log.exception("first page of chapter %s", chapter_id)
+            fp = None
+        if fp:
+            brief["first_page"] = fp
+            rules.append(first_page.BRIEF_RULE)
         brief["rules"] = rules
-        if not (cards or vb["cards"] or vb["others"] or pov or planned or room or extra.get("story_rules")
+        if not (cards or vb["cards"] or vb["others"] or pov or planned or room or fp or extra.get("story_rules")
                 or extra.get("world_texture") or extra.get("story_choices") or length or style
                 or brief.get("character_details") or main or world or fixed or brief.get("needed_details")
                 or brief.get("earlier_moments") or brief.get("story_beats") or brief.get("story_stage")
+                or (tg and tg["secrets"] != [twist_guard.GENERIC])  # 🤫 real secrets alone make a brief
                 or any(k in brief for k in ("physical_state", "character_state", "two_readings", "version_changes",
                                             "previous_chapter_end", "story_so_far", "story_ledger",
                                             "series_state", "series_world", "story_map"))):
