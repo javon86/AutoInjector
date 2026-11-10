@@ -27,7 +27,7 @@ async function main() {
   const run = (f, q, opts) => app.evaluate((_e, a) => global.runAttach(a), { url: page(f, q), file: pic, opts });
   const old = (f, q) => app.evaluate((_e, a) => global.runOld(a), { url: page(f, q), file: pic });
   const one = (r, via) => r.page && r.page.got.length === 1 && r.page.got[0].via === via && r.page.got[0].name === 'judge-me.png' && r.page.got[0].size === PNG.length && r.page.got[0].type === 'image/png';
-  const show = (r) => `${r.ok ? `ok via ${r.how}` : r.error} [${(r.tried || []).join(', ')}] ${r.ms}ms`;
+  const show = (r) => `${r.ok ? `ok via ${r.how}` : r.error}${r.detail ? ` (${r.detail})` : ''} [${(r.tried || []).join(', ')}] ${r.ms}ms`;
   try {
     console.log('\n== (a) the input is made only after clicking ==');
     let r = await run('attach-button.html', 'mode=menu');

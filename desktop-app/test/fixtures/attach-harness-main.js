@@ -8,12 +8,19 @@ const { attachFile } = require('../../file-attach');
 const SITES = require('../../selectors');
 
 let win = null;
+let ready = null; // the start-up load of about:blank; every test call waits for it first (a call that raced it was
+                  // cut off by that load under load — "Script failed to execute" on the first step)
 async function load(url) {
+  if (ready) await ready;
   if (!win) win = new BrowserWindow({ width: 900, height: 600, show: true, webPreferences: { sandbox: true, contextIsolation: true } });
-  await win.loadURL(url);
+  // a fixture page can fail to load (ERR_FAILED) on a very busy machine (seen with 5 test runs at once); try again
+  for (let i = 0; ; i++) {
+    try { await win.loadURL(url); break; } catch (e) { if (i >= 2) throw e; await new Promise((r) => setTimeout(r, 500)); }
+  }
   return win.webContents;
 }
-global.runAttach = async ({ url, file, opts }) => {
+global.runAttach = async (a) => { try { return await runAttach(a); } catch (e) { return { ok: false, error: 'HARNESS', detail: String(e && e.stack || e).slice(0, 600) }; } };
+async function runAttach({ url, file, opts }) {
   const wc = await load(url);
   const dbg = wc.debugger;
   dbg.attach('1.3');
@@ -23,7 +30,7 @@ global.runAttach = async ({ url, file, opts }) => {
     const page = await wc.executeJavaScript('({ got: window.__attach.got, wrong: window.__attach.wrong, ignored: window.__attach.ignored || 0, chips: document.querySelectorAll("[data-testid=file-thumbnail]").length, menuOpen: !!document.querySelector("[role=menu]") })', true);
     return Object.assign({ ms: Date.now() - t0 }, r, { page });
   } finally { try { dbg.detach(); } catch (_) {} }
-};
+}
 global.runOld = async ({ url, file }) => {
   const wc = await load(url);
   const dbg = wc.debugger;
@@ -38,6 +45,9 @@ global.runOld = async ({ url, file }) => {
     return { ok: true, page };
   } finally { try { dbg.detach(); } catch (_) {} }
 };
-app.whenReady().then(() => load('about:blank'));
+ready = app.whenReady().then(async () => {
+  win = new BrowserWindow({ width: 900, height: 600, show: true, webPreferences: { sandbox: true, contextIsolation: true } });
+  await win.loadURL('about:blank');
+});
 app.on('window-all-closed', () => app.quit());
 void path;
