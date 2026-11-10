@@ -7,7 +7,8 @@ around which chapter — a limit will probably pause it:
 
 * **options** (``OPTION_MODEL``): how many AIs check for mistakes (all / two / one), the writers' room, beta readers,
   character pictures (Stable Diffusion: time, no AI answers), "fill the whole Book Bible", the end-of-book "sounds like
-  a person" pass (PR #133: about 2 answers), ✍ chapter 1 rewritten last (1 rewrite + the reviewers' re-read + 1
+  a person" pass (PR #133: about 2 answers), the 🧑‍⚖️ stand-in's votes at the story checkpoints (at most one vote
+  per AI per checkpoint, up to its decisions per run — only when the author does not answer), ✍ chapter 1 rewritten last (1 rewrite + the reviewers' re-read + 1
   review) and the two first pages (2 answers), the 🔁 final improve pass (rounds × (rewrites + the reviewers' re-read)
   + the kept chapters' reviews), the 🤖 Claude Code helpers and "when only one AI works". With measured
   runs, the options whose answers fall inside the measured steps (the checkers, the writers' room and the end pass)
@@ -71,7 +72,13 @@ def options_of(app, body: dict | None) -> dict:
             cc_on = bool(cc.enabled(app.store) and (cc.cached_status() or {}).get("state") == "ready")
         except Exception:  # noqa: BLE001
             cc_on = False
-    return {"checkers": ck, "writers_room": b.get("writers_room") is True, "beta_readers": n_beta,
+    try:  # 🧑‍⚖️ the stand-in may vote at the story checkpoints when the author does not answer (stand_in.py)
+        from . import stand_in  # noqa: PLC0415
+        si = stand_in.settings(app.store)
+        si_cp = si["max_per_run"] if si["enabled"] and si["checkpoints"] else 0
+    except Exception:  # noqa: BLE001
+        si_cp = 0
+    return {"checkers": ck, "writers_room": b.get("writers_room") is True, "stand_in_checkpoints": si_cp, "beta_readers": n_beta,
             "pictures": pics, "fill_bible": b.get("fill_bible") is True, "human_pass": b.get("human_pass") is not False,
             "improve_pass": b.get("improve_pass") is not False,
             "opening_pass": b.get("opening_pass") is not False, "first_page": b.get("first_page") is not False,
@@ -115,6 +122,11 @@ def option_calls(opts: dict, n: int, ais: int) -> dict:
                          "label": "Two first pages for chapter 1, keep the better one"}
     out["pictures"] = {"calls": 0, "to": "none", "label": "Character pictures (Stable Diffusion: no AI answers)",
                        "minutes": PICTURES * PICTURE_MIN if opts.get("pictures") else 0}
+    # 🧑‍⚖️ the stand-in vote at a story checkpoint the author does not answer: every AI votes on each waiting problem
+    # (counted as one problem per checkpoint, at most the stand-in's decisions per run; none when you answer)
+    si_cp = min(int(opts.get("stand_in_checkpoints") or 0), math.ceil(n / 5) + 1) if ais >= 2 else 0
+    out["stand_in"] = {"calls": si_cp * ais, "to": "all",
+                       "label": "Stand-in votes at the story checkpoints (at most; only if you don't answer)"}
     helpers = (3 * n + 2 * math.ceil(n / 5)) if opts.get("claude_code") else 0
     out["helpers"] = {"calls": helpers, "to": "helpers", "label": "Claude Code helpers (research, fact checks, "
                       "“sounds like AI” pass)"}

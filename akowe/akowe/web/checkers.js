@@ -98,9 +98,10 @@ export function standInCard(c) {
     const wait = h('select', { id: 'si-wait', 'data-testid': 'si-wait' }, (cur.waits || [10, 20, 30, 60]).map(m => h('option', { value: String(m) }, `${m} minutes`)));
     wait.value = String(cur.wait_min);
     const max = h('input', { type: 'number', id: 'si-max', min: '1', max: '20', value: String(cur.max_per_run), class: 'wz-num' });
+    const cps = h('input', { type: 'checkbox', id: 'si-cp', 'data-testid': 'si-cp', checked: cur.checkpoints !== false });
     const save = h('button', { type: 'button', class: 'small primary', 'data-testid': 'si-save', onclick: async () => {
       try {
-        await api('PUT', '/settings/stand-in', { body: { enabled: on.checked, wait_min: Number(wait.value), max_per_run: Number(max.value) || 5 } });
+        await api('PUT', '/settings/stand-in', { body: { enabled: on.checked, wait_min: Number(wait.value), max_per_run: Number(max.value) || 5, checkpoints: cps.checked } });
         toast('Saved');
       } catch (e) { box.appendChild(problemBox(toProblem(e, WHERE))); }
     } }, 'Save');
@@ -108,6 +109,7 @@ export function standInCard(c) {
       h('div', { class: 'check-row field' }, on, h('label', { for: 'si-on' }, h('strong', null, 'Let the AIs decide a disagreement when I don’t answer — only if they all agree'))),
       h('div', { class: 'grid-2' }, h('div', { class: 'field' }, h('label', { for: 'si-wait' }, 'Wait for me first'), wait),
         h('div', { class: 'field' }, h('label', { for: 'si-max' }, 'At most this many stand-in decisions per book run'), max)),
+      h('div', { class: 'check-row field' }, cps, h('label', { for: 'si-cp' }, 'Also the 🧭 story checks (continuity checkpoints): leave a problem as it is for now, or make the small fix offered — only if every problem can be voted on and they all agree')),
       h('p', { class: 'hint' }, 'Two AIs working: both must agree. Three AIs working: all three must agree. Only one AI working, or any AI disagrees or is unsure: it waits for you.'),
       h('div', { class: 'row' }, save));
   })();

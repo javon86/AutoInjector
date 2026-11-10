@@ -912,6 +912,11 @@ class AutoBookService(_Runner):
             if run.get("status") == "paused" and prob.get("code") == "REVIEW_NOT_PASSED":
                 from . import stand_in  # noqa: PLC0415 - 🔁 Try again on a vote the AIs did not all agree on
                 stand_in.settle_votes(self.store, run, prob, "retry")
+            elif run.get("status") == "paused" and prob.get("code") == "CHECKPOINT_WAITING":
+                from . import stand_in  # noqa: PLC0415 - 🧭 ▶ Continue after a story-check vote that did not agree
+                from .continuity import chapters_of  # noqa: PLC0415
+                stand_in.settle_votes(self.store, run, prob, "continue",
+                                      {c["chapter_id"]: c for c in chapters_of(self.bp(run))})
             run["status"], run["phase"], run["problem"], run["pause_reason"] = "running", \
                 "Continuing where it stopped", None, None
             for s in run["steps"]:

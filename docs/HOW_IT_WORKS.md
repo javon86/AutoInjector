@@ -1059,7 +1059,16 @@ A few of these need more words:
   1. the reviewer and the writer went round in circles about the same finding (`REVIEW_DECISION`, kind `loop`):
      accept the writer's correction, or keep the original;
   2. the reviewer still objects after the writer's fixes (`REVIEW_NOT_PASSED`, e.g. a chapter that waited all night):
-     accept the writer's version as it is, or send it back for two more fixes that follow the reviewer's notes.
+     accept the writer's version as it is, or send it back for two more fixes that follow the reviewer's notes;
+  3. a 🧭 story check (continuity checkpoint) found problems it could not fix safely by itself (`CHECKPOINT_WAITING`,
+     code: `akowe/akowe/stand_in_checkpoint.py`; Settings › "Also the story checks", on when the stand-in is on).
+     You answer a story check as a whole (▶ Continue, or fix the chapter yourself first), so the stand-in does too:
+     each waiting problem gets its own A / B question — if the checking AI offered a small fix that is still safe
+     (an AI-written chapter, the words found exactly once): **make that fix** or **leave it as it is**; otherwise:
+     **leave it as it is for now** (the book goes on, the problem stays in the report) or **it needs you** (the AIs
+     never write a fix themselves). It decides only when every problem can be voted on and the AIs all agree to go
+     ahead on every one; a fix they chose goes through the normal review before it is approved. If one problem is
+     yours to decide, there are more than 4, or the AIs all say it needs you, the whole story check keeps waiting.
 
   **Who votes:** every AI that is connected, working and not switched off for checks — ChatGPT, Claude, Gemini, one
   vote each, including the two that disagreed. The 🤖 Claude Code helper votes for Claude only when no Claude window
@@ -1078,17 +1087,24 @@ A few of these need more words:
   **Never voted on** — these always wait for you: a change to an approved fact, the plot or outline (premise, main
   plot, outline), the ending (the last chapter, or a finding about the ending), the main character's own record,
   point of view or tense (also when Akọwe's own promise check flagged it), your content limits, anything on your lock
-  list, and stops that are not a choice between two options (for example "only one AI checked it").
+  list, and stops that are not a choice between two options (for example "only one AI checked it"). For a story
+  check: a problem in the book's last chapter or about the ending, about the plot, the outline or a chapter straying
+  off its plan, naming the main character, about point of view, tense or content limits, about a locked story detail
+  or approved fact (or the lock list).
   **Visible and reversible:** each decision is written to the run's journal, the run window and 🏠 Book home with
   every vote — "ChatGPT, Claude and Gemini all agreed to accept the correction to Ansel Marrant (character) at 03:12
   because you didn't answer for 20 minutes. Why: … [↩ Undo]" — and AutoInjector's desktop notification says "Decided
   for you". While a run waits, the alert's "what happens next" says when the AIs will vote (or why they won't, or how
   the vote went). **↩ Undo** puts the other choice back as a new draft that waits for your approval (for "accept as
   it is": the same version, no longer approved; for "fix again": the version the AIs sent back), and turns that
-  decision's track-record outcomes round. At most 5 stand-in decisions per run (Settings), then it always waits.
+  decision's track-record outcomes round. For a story check, ↩ Undo puts the problems it left as they are back on
+  your list ("Check later" and the 🧭 Continuity page) and takes a fix it made back out, word for word, as a new
+  draft for you to approve. At most 5 stand-in decisions per run (Settings), then it always waits (a story check
+  counts as one). The run forecast counts the possible story-check votes (at most one per AI per checkpoint).
   **Track record:** every vote counts for that AI ("stand-in decisions"): a decision that stands counts as held up
   for each AI that voted (Undo turns it round); when the AIs did not all agree, each vote is compared with what you
-  chose later — the same choice holds up, the other is overruled. Logs and the outbox keep codes only (which AIs
+  chose later — the same choice holds up, the other is overruled (a story check: ▶ Continue with the chapter
+  unchanged means you left it as it is; a chapter you changed is not counted). Logs and the outbox keep codes only (which AIs
   voted, the choice) — never the book's words or the reasons.
 - **Book report.** It shows who checked the book and how far they agreed, and each stretch review. Its PDF keeps
   accented letters and other alphabets (ọ, ẹ, ł, Greek); a symbol it cannot print becomes a word or "•". "Written by"
