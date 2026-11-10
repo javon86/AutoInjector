@@ -31,7 +31,7 @@ const VERDICTS = ['keep', 'fix', 'redo'];
 const FIX_TYPES = ['steps', 'cfg', 'sampler', 'scheduler', 'size', 'hires', 'adetailer', 'negative_add', 'lora_weight', 'checkpoint', 'seed', 'img2img', 'inpaint'];
 const JUDGES = ['claude-code', 'pane', 'local'];
 const JUDGE_WORDS = { 'claude-code': 'Claude Code (on this PC)', pane: 'a web AI pane (Claude or ChatGPT)', local: 'a local vision model (Ollama, offline — weaker)' };
-const DEFAULT_SETTINGS = { order: ['claude-code', 'pane', 'local'], enabled: { 'claude-code': true, pane: true, local: true }, paneSite: 'claude', bar: 7.5, rounds: 3, autoBook: false };
+const DEFAULT_SETTINGS = { order: ['claude-code', 'pane', 'local'], enabled: { 'claude-code': true, pane: true, local: true }, paneSite: 'claude', attachCheck: true, bar: 7.5, rounds: 3, autoBook: false };
 
 function clip(s, n) { const t = String(s == null ? '' : s).replace(/\s+/g, ' ').trim(); return t.length > n ? `${t.slice(0, n - 1)}…` : t; }
 
@@ -292,7 +292,8 @@ function cleanSettings(p, cur) {
   if (x.bar != null && Number.isFinite(Number(x.bar))) s.bar = Math.min(10, Math.max(5, Number(x.bar)));
   if (x.rounds != null && Number.isFinite(Number(x.rounds))) s.rounds = Math.min(5, Math.max(1, Math.round(Number(x.rounds))));
   if (typeof x.autoBook === 'boolean') s.autoBook = x.autoBook;
-  return { order: s.order, enabled: s.enabled, paneSite: s.paneSite, bar: s.bar, rounds: s.rounds, autoBook: s.autoBook };
+  if (typeof x.attachCheck === 'boolean') s.attachCheck = x.attachCheck;
+  return { order: s.order, enabled: s.enabled, paneSite: s.paneSite, attachCheck: s.attachCheck !== false, bar: s.bar, rounds: s.rounds, autoBook: s.autoBook };
 }
 
 function sayVerdict(j) {

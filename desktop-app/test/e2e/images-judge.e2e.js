@@ -37,8 +37,8 @@ async function main() {
       HOME: home, XDG_CONFIG_HOME: path.join(home, '.config'), AUTOINJECTOR_AKOWE_SERVER: '0', AUTOINJECTOR_CHECKIN: '0', AUTOINJECTOR_BRIDGE: '0', AUTOINJECTOR_SD_AUTOSTART: '0',
       AUTOINJECTOR_VIDEO_AUTOSTART: '0', AUTOINJECTOR_CONTENT_SCAN: '0', AUTOINJECTOR_SD_HOME: path.join(home, 'sdhome'), AUTOINJECTOR_SD_MODEL_DIRS: path.join(tmp, 'nomodels'),
       AUTOINJECTOR_CLAUDE_PATH: claude, FAKE_CLAUDE_JUDGE_STATE: path.join(tmp, 'fakeclaude', 'n'), FAKE_CLAUDE_JUDGE_LOG: ccLog,
-      AUTOINJECTOR_JUDGE_OLLAMA: 'http://127.0.0.1:9', AUTOINJECTOR_JUDGE_UPLOAD_MS: '600', AUTOINJECTOR_JUDGE_PANE_MS: '60000', AUTOINJECTOR_PROBE_DELAY_MS: '800',
-      AUTOINJECTOR_SITE_URL_CHATGPT: url('site=chatgpt&quirks=none&speed=0.3'), AUTOINJECTOR_SITE_URL_CLAUDE: url('site=claude&quirks=none&speed=0.3'), AUTOINJECTOR_SITE_URL_GEMINI: url('site=gemini&quirks=none&speed=0.3'),
+      AUTOINJECTOR_JUDGE_OLLAMA: 'http://127.0.0.1:9', AUTOINJECTOR_JUDGE_UPLOAD_MS: '600', AUTOINJECTOR_ATTACH_VERIFY_MS: '2500', AUTOINJECTOR_JUDGE_PANE_MS: '60000', AUTOINJECTOR_PROBE_DELAY_MS: '800',
+      AUTOINJECTOR_SITE_URL_CHATGPT: url('site=chatgpt&quirks=none&speed=0.3&upload=paste'), AUTOINJECTOR_SITE_URL_CLAUDE: url('site=claude&quirks=none&speed=0.3&upload=menu'), AUTOINJECTOR_SITE_URL_GEMINI: url('site=gemini&quirks=none&speed=0.3'),
       AUTOINJECTOR_AKOWE_DIR: path.join(tmp, 'noakowe'), NO_PROXY: '127.0.0.1,localhost', no_proxy: '127.0.0.1,localhost',
     }),
   });
@@ -139,6 +139,15 @@ async function main() {
     assert(pj && pj.ok && pj.judge.by === 'pane' && pj.judge.good.includes('the pane saw the picture'), `the Claude pane judged it with the picture attached (${pj && (pj.ok ? pj.judge.byLabel : pj.message)})`);
     const att = await app.evaluate(async ({ webContents }) => { const wc = webContents.getAllWebContents().find((w) => /fake-chat\.html/.test(w.getURL()) && w.getURL().includes('site=claude')); return wc ? wc.executeJavaScript('({ judged: window.__fake.judged || 0, posted: window.__fake.posted.length })', true) : null; });
     assert(att && att.judged >= 1, `the fake Claude page got the judge question (${JSON.stringify(att)})`);
+    // claude.ai since 2026-11 (upload=menu): no file input in the page — "+" → "Add files or photos", the chooser caught
+    const via = await app.evaluate(async ({ webContents }) => { const wc = webContents.getAllWebContents().find((w) => /fake-chat\.html/.test(w.getURL()) && w.getURL().includes('site=claude')); return wc ? wc.executeJavaScript('({ via: (window.__fake.lastAttached || []).map((a) => a.via), wrong: window.__fake.wrongClicks || 0, menus: document.querySelectorAll("[role=menu]").length })', true) : null; });
+    assert(via && via.via.join() === 'chooser' && via.wrong === 0 && via.menus === 0, `Claude's page with no file input: the picture went in through "+" → "Add files or photos" (${JSON.stringify(via)})`);
+    // ChatGPT (upload=paste): no input, no button — a paste into the composer
+    await c.evaluate(() => window.api.sd.judgeSettings({ paneSite: 'chatgpt' }));
+    let pj2 = null;
+    for (let i = 0; i < 20 && !(pj2 && pj2.ok); i++) { pj2 = await c.evaluate((p) => window.api.sd.judge(p), first); if (!(pj2 && pj2.ok)) await sleep(1500); }
+    const via2 = await app.evaluate(async ({ webContents }) => { const wc = webContents.getAllWebContents().find((w) => /fake-chat\.html/.test(w.getURL()) && w.getURL().includes('site=chatgpt')); return wc ? wc.executeJavaScript('(window.__fake.lastAttached || []).map((a) => a.via)', true) : null; });
+    assert(pj2 && pj2.ok && pj2.judge.good.includes('the pane saw the picture') && via2 && via2.join() === 'paste', `the ChatGPT pane judged it with the picture pasted in (${pj2 && (pj2.ok ? pj2.judge.byLabel : pj2.message)}; ${JSON.stringify(via2)})`);
     assert(!errors.length, `no page errors${errors.length ? `: ${errors.slice(0, 3).join(' | ')}` : ''}`);
   } finally {
     await app.close().catch(() => {});

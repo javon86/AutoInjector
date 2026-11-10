@@ -41,9 +41,18 @@ function createPaneJudge(d) {
     if (!r || !r.ok) {
       const e = (r && r.error) || 'FAILED';
       const busy = e === 'AKOWE_USING' || e === 'BUSY';
-      return { ok: false, error: busy ? 'PANE_BUSY' : e === 'ATTACH_FAILED' || e === 'NO_FILE_INPUT_FOUND' ? 'PANE_ATTACH_FAILED' : `PANE_${String(e).toUpperCase()}`.slice(0, 40), unavailable: busy || e === 'NOT_READY' || e === 'TURNED_OFF', message: busy ? `The ${label()} is busy (a book run or another question), so it wasn't interrupted — try again when it's free.` : e === 'TIMEOUT' ? `The ${label()} didn't answer in time.` : /ATTACH|FILE_INPUT/.test(e) ? `The picture couldn't be uploaded to the ${label()}.` : `The ${label()} couldn't judge it (${String(e).slice(0, 40)}).` };
+      const attach = e === 'ATTACH_FAILED' || e === 'NO_FILE_INPUT_FOUND';
+      const why = String((r && r.code) || (e === 'NO_FILE_INPUT_FOUND' ? e : ''));
+      return { ok: false, error: busy ? 'PANE_BUSY' : attach ? 'PANE_ATTACH_FAILED' : `PANE_${String(e).toUpperCase()}`.slice(0, 40), code: attach && why ? why.slice(0, 40) : undefined, unavailable: busy || e === 'NOT_READY' || e === 'TURNED_OFF', message: busy ? `The ${label()} is busy (a book run or another question), so it wasn't interrupted — try again when it's free.` : e === 'TIMEOUT' ? `The ${label()} didn't answer in time.` : attach ? attachMessage(why) : `The ${label()} couldn't judge it (${String(e).slice(0, 40)}).` };
     }
     return { ok: true, text: r.text, model: site() };
+  }
+  // the picture didn't get into the chat: say what happened in plain words (the question was not sent)
+  function attachMessage(why) {
+    if (why === 'ATTACH_NOT_SEEN') return `The picture couldn't be uploaded to the ${label()}: AutoInjector tried to attach it, but the page never showed it as attached, so the question wasn't sent.`;
+    if (why === 'NO_FILE_INPUT_FOUND') return `The picture couldn't be uploaded to the ${label()}: AutoInjector found no way to attach a file on the page (the site may have changed), so the question wasn't sent.`;
+    if (why === 'ATTACH_FAILED') return `The picture couldn't be uploaded to the ${label()}: its developer tools are open (🔍 Inspect) — close them and try again.`;
+    return `The picture couldn't be uploaded to the ${label()}.`;
   }
   return { id: 'pane', get label() { return label(); }, available, ask };
 }
@@ -149,7 +158,7 @@ function createJudgeService(deps) {
         const q = attempt === 1 ? prompt : `${prompt}\n\nYour last answer could not be used (${(lastProblems || []).slice(0, 3).join('; ')}). Answer again with ONLY the JSON object, exactly in the shape above.`;
         let r;
         try { r = await j.ask({ imagePath, prompt: q, signal: o.signal }); } catch (e) { r = { ok: false, error: 'FAILED', message: String((e && e.message) || e).slice(0, 160) }; }
-        if (!r || !r.ok) { tried.push({ by: id, error: (r && r.error) || 'FAILED', message: r && r.message }); if (r && r.error === 'CANCELLED') return { ok: false, error: 'CANCELLED', code: 'CANCELLED', message: 'Stopped.', tried }; break; }
+        if (!r || !r.ok) { tried.push({ by: id, error: (r && r.error) || 'FAILED', code: r && r.code, message: r && r.message }); if (r && r.error === 'CANCELLED') return { ok: false, error: 'CANCELLED', code: 'CANCELLED', message: 'Stopped.', tried }; break; }
         const obj = R.extractJson(r.text);
         const v = obj ? R.validate(obj, Object.assign({ character: hasCharacter }, o.validateOpts || {})) : { ok: false, problems: ['no JSON object in the answer'] };
         if (v.ok) { answer = Object.assign(v.judge, { by: id, byLabel: j.label, model: r.model, attempts: attempt, seconds: Math.round((now() - t0) / 100) / 10, at: new Date(now()).toISOString() }); break; }
@@ -158,12 +167,12 @@ function createJudgeService(deps) {
       }
       if (answer) {
         if (id === 'local') answer.weaker = true;
-        log(TAG, { judge: id, ok: true, verdict: answer.verdict, overall: answer.overall, min: answer.min, fixes: answer.fixes.length, selfConflict: answer.selfConflict || undefined, attempts: answer.attempts, ms: now() - t0, tried: tried.map((t) => `${t.by}:${t.error}`) });
+        log(TAG, { judge: id, ok: true, verdict: answer.verdict, overall: answer.overall, min: answer.min, fixes: answer.fixes.length, selfConflict: answer.selfConflict || undefined, attempts: answer.attempts, ms: now() - t0, tried: tried.map((t) => `${t.by}:${t.error}${t.code ? `/${t.code}` : ''}`) });
         if (o.save !== false && deps.updateRecord) { try { deps.updateRecord(imagePath, (cur) => ({ judge: answer, judges: [...(Array.isArray(cur.judges) ? cur.judges : []), ...(cur.judge ? [cur.judge] : [])].slice(-10) })); } catch (_) {} }
         return { ok: true, judge: answer, say: R.sayVerdict(answer), tried };
       }
     }
-    log(TAG, { ok: false, tried: tried.map((t) => `${t.by}:${t.error}`), ms: now() - t0 });
+    log(TAG, { ok: false, tried: tried.map((t) => `${t.by}:${t.error}${t.code ? `/${t.code}` : ''}`), ms: now() - t0 });
     const none = !tried.length;
     const msg = none ? 'Every AI judge is switched off — switch one on in 🧑‍⚖️ Judge settings.'
       : `No AI judge could look at ${R.NOUN || 'the picture'}. ${tried.map((t) => t.message || `${J.JUDGE_WORDS[t.by] || t.by}: ${t.error}`).join(' ')}`;

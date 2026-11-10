@@ -1,0 +1,19 @@
+<!doctype html><html><head><meta charset="utf-8"><title>attach: input inside a shadow root</title></head><body>
+<!-- (b) the only file input lives in a web component's shadow root (closed=1: a CLOSED one, which page scripts can't
+     see — only DevTools' own tree). A decoy input that takes only PDFs sits in the page itself. -->
+<script src="attach-common.js"></script>
+<script>
+(function () {
+  const A = window.__attach; const closed = new URLSearchParams(location.search).get('closed') === '1';
+  const pdf = document.createElement('input'); pdf.type = 'file'; pdf.accept = '.pdf'; pdf.style.display = 'none'; pdf.onchange = () => { A.wrong++; }; document.body.appendChild(pdf);
+  class Uploader extends HTMLElement {
+    constructor() {
+      super(); const root = this.attachShadow({ mode: closed ? 'closed' : 'open' });
+      root.innerHTML = '<button type="button" aria-label="Upload">⬆</button><input type="file" accept="image/png,image/jpeg,image/webp" style="display:none">';
+      const i = root.querySelector('input'); i.onchange = () => A.take(i.files, 'shadow');
+    }
+  }
+  customElements.define('file-uploader', Uploader);
+  A.row.appendChild(document.createElement('file-uploader'));
+})();
+</script></body></html>

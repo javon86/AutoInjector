@@ -421,14 +421,24 @@ replaced by what you type.
   sampler, the model's own size, hires fix, ADetailer for the face or hands, words to avoid, a LoRA weight, another
   installed model, a new seed …), makes it again and judges again — up to 3 rounds (you can choose 1 to 5). It stops
   early when a picture passes, or when it stops getting better. Every round is kept and shown side by side with its
-  score and what changed. **✔ Keep this one** shows the one you like; **💾 Save these settings as a recipe** keeps its
+  score and what changed (a round whose picture couldn't be made shows ✖ and why, in plain words — for example "your
+  Stable Diffusion app reported an error while making it", with what to try). **✔ Keep this one** shows the one you like; **💾 Save these settings as a recipe** keeps its
   settings. Your own defaults are never changed. **⏹ Stop** stops it.
 - **Make 4, pick the best** (next to 🎨 Generate) makes 4 pictures with different seeds, judges each, and shows the best.
 - **Which AI judges** (🧑‍⚖️ AI judge settings, in the form): the first one that is ready, in this order unless you change it:
   1. **Claude Code** on your PC (it uses your Claude plan). AutoInjector puts the picture alone in an empty folder and
      lets Claude Code use only its Read tool to look at it.
   2. **A web AI pane** (Claude or ChatGPT): a new chat, with the picture uploaded. It never interrupts a pane Akọwe is
-     using for a book; it says so instead.
+     using for a book; it says so instead. Sites change how their "attach a file" works (claude.ai stopped keeping a
+     file box in its page in November 2026), so AutoInjector (`file-attach.js`) tries, in order: a file box in the page
+     (also one tucked inside a page component), the composer's **+** / 📎 / "Attach" button and its "Upload a file" /
+     "Add files or photos" item (the file window it would open is caught, so nothing pops up; "Google Drive",
+     "screenshot" and the like are never clicked), pasting the picture into the message box, and dropping it on the
+     message box. After each try it checks the picture really shows next to the message box (a thumbnail, a file
+     chip, its name). If it never shows, the question is **not sent** and the result says so in plain words — the AI
+     never judges a picture it can't see. **Web pane: check the picture shows in the chat before asking** (in the
+     judge settings, on by default) switches that check off if it ever wrongly says the picture is missing. The same
+     attach is used for the 🗄 locker's "give a file to an AI". The log keeps only what was tried (codes).
   3. **A local vision model** in Ollama (for example qwen2.5vl or llava): offline and free, but weaker — its verdicts
      are marked "weaker".
   The result always says which judge was used. Each judge can be switched off.
@@ -619,6 +629,28 @@ to a minute), so the run knows which AIs work.
      says which was picked and why ("✍ First page: … picked opening B — …"; kept in `run.first_page`). If anything
      fails (no second AI, not two usable openings, a bad pick, an AI problem), chapter 1 is written exactly as before
      and only a code is logged (`state: fallback`, e.g. `NO_REVIEWER`, `OPENINGS_LENGTH`). 2 AI answers per book.
+   - **📏 Chapter polish** (code: `akowe/akowe/chapter_polish.py`; run setting `chapter_polish`, on by default; the
+     switch is on the Make-a-book screen). Right after the draft is written, before its review, Akọwe checks it
+     without any AI: the reading grade against the floor for the book's readers (adult 5, young adult 4, middle grade
+     3, none for children) and the phrases, similes and gestures it repeats from the chapters before it (the earlier
+     chapters are read as one block, so only repeats INTO this chapter count), plus plain-word tics. When the chapter
+     is under the floor or has 2 or more repeats, its writer gets ONE targeted request through the editor's rewrite
+     path: exact passages only (the stretches of shortest sentences without dialogue, and the sentences that
+     repeat), the keep list, protected facts and approved canon, and the polish rules (join some short sentences into
+     longer precise ones, say repeated phrases anew; never change what happens, a fact, a name, a number or a line of
+     dialogue). The polished text is **kept only if** the checks improved (the grade rose by at least 0.3 while under
+     the floor, or fewer repeats or tics) and nothing got worse (more repeats or tics, more AI-sounding phrases, a
+     grade that drops under the floor or above the readers' usual range), every line of dialogue, name and number is
+     unchanged, the length stays within ±20 %, and Akọwe's canon checks accept the saved version; otherwise the draft
+     stays as written. Repeats Akọwe itself only guessed to be motifs ("comes back in 2 chapters, never crowded") may
+     be said anew; a repeat you labelled, a voice-card phrase or a world detail stays protected. At most one polish
+     per chapter (also after a pause); never a chapter you wrote; a chapter that reads well costs nothing. The run
+     window says per chapter "📏 Chapter 3 polished: reading level 2.9 → 5.4, repeats from earlier chapters 3 → 0
+     (kept)" and, after the chapters (also in the run's report box and the 📊 report), "📏 Reading level 2.9 → 5.4
+     after polish in chapters 1, 3". Counted in the ⏱ estimate: 1 answer per chapter when your last book read
+     too simply or repeated phrases, else about a quarter of the chapters. The writer's brief
+     already asks for this (`quality_lessons.reading_level`: the floor, a target range such as 6–8, the mix of
+     sentence lengths and one example of two short sentences joined).
    - **Akọwe's own checks**, then **two independent reviewers**: both AIs that did not write the chapter read it, each
      on its own. If either asks for changes, the writer fixes the draft, at most twice; it is approved only when
      neither objects. (With only one other AI working, one reviews it, as before.) A chapter that breaks your content
@@ -733,6 +765,16 @@ to a minute), so the run knows which AIs work.
     off (Settings › Editor, rounds 0, or the run's pipeline) the pass does nothing and says so. The run window ("Improve until better"
     step), the journal and the report say both numbers: "🔁 Improve pass: 7.6 → 8.1/10 (kept)". About (chapters +
     reviewers) answers per round plus the kept chapters' reviews — counted in the ⏱ estimate.
+    **A round that is not kept still keeps its repeated-phrase fixes** when they are safe (`improve_pass.repeat_only`,
+    run setting `chapter_polish`, the same switch as the 📏 chapter polish): only the replacements that answered a
+    repeated phrase or a plain-word tic (each ≤ 400 characters), applied alone to the chapter as it is, and only if
+    the whole book then repeats fewer phrases or leans less on plain words and nothing got worse (no new repeat, the
+    chapter's reading grade not lower, no more AI-sounding phrases, the editor's keep quotes, every line of dialogue,
+    name and number unchanged). No new AI call and no score is claimed for it: those chapters go through the usual
+    review and approval (a chapter the reviewer does not pass gets its text back) and the book is exported again. The
+    line then adds "· repeated phrases fixed alone in chapter(s) 3 (repeats 3 → 1)". Repeats that Akọwe itself only
+    guessed to be motifs ("comes back in 2 chapters, never crowded") may be said anew by these fixes; a repeat you
+    labelled, a voice-card phrase or a world detail stays protected.
 14. **📈 Quality history** (code: `akowe/akowe/quality_history.py`): when a run finishes, the report's numbers — the
     overall score, the median of each whole-book dimension, the editor's average per category, the "sounds like a
     person" score, the reading grade, the beta average, fixed habit codes (`triad`, `simile`, `word:went`, `clock`,
@@ -900,7 +942,9 @@ All four are on the ⚡ **AI writes the whole book** screen (code: `akowe/akowe/
   change the length, how many AIs check for mistakes, the writers' room, beta readers, character pictures, "fill the
   whole Book Bible", the end-of-book "sounds like a person" pass (about 2 answers), ✍ the two first pages (2
   answers) and chapter 1 rewritten last (1 rewrite + the reviewers' re-read + 1 review), the 🔁 improve pass and its
-  rounds (per round the rewrites plus the reviewers' re-read, plus the kept chapters' reviews), the Claude Code helpers, "when
+  rounds (per round the rewrites plus the reviewers' re-read, plus the kept chapters' reviews), 📏 the chapter polish
+  (at most 1 answer per chapter, only when needed: every chapter if your last book read too simply or repeated, else
+  about a quarter), the Claude Code helpers, "when
   only one AI works" and which AI writes. It starts from the P28 numbers (`costs.estimate`: AI calls per step); once
   this PC has finished runs, it uses their measured seconds per answer, each AI's share of the answers, and the
   answers of the optional steps. The usage limits are rough public guesses (Claude ~40 long messages per 5 hours,
@@ -955,6 +999,7 @@ All four are on the ⚡ **AI writes the whole book** screen (code: `akowe/akowe/
 | 📏 Special rules bounded (no AI + one AI update) | a ghost, magic or device rule with no scope, cost or limits | after the story rules and after the plan |
 | ✍ Two first pages | a weak first page (chapter 1 is written before anything else) | before chapter 1 is written (on by default) |
 | ✍ Rewrite chapter 1 last | a chapter 1 that loses readers, gives the twist away or plants nothing — kept only if the same reviewers score the book at least as well | after the beta readers, before the improve pass (on by default) |
+| 📏 Chapter polish | a draft under the reading floor for its readers, or repeating phrases of earlier chapters — one polish, kept only if the no-AI checks improved and nothing protected changed | right after each chapter's draft, before its review (on by default) |
 | 🔁 Improve until better | what the reviewers, beta readers, the editor and Akọwe's checks found — kept only if the same reviewers score it higher | after the beta readers, at the end of a ⚡ run (on by default) |
 | 📈 Quality history and 🧠 lessons | your recurring weak areas and habits | recorded when a run finishes; given to the next book's planners and writer |
 | Pattern check (no AI) | repeated habits ("went very still"), lists of three, same-length sentences; a habit 2+ checks flag (pattern, originality, editor) is a must-fix for the editor, and the run says how many are left | before the editor |
@@ -1049,7 +1094,16 @@ A few of these need more words:
   1. the reviewer and the writer went round in circles about the same finding (`REVIEW_DECISION`, kind `loop`):
      accept the writer's correction, or keep the original;
   2. the reviewer still objects after the writer's fixes (`REVIEW_NOT_PASSED`, e.g. a chapter that waited all night):
-     accept the writer's version as it is, or send it back for two more fixes that follow the reviewer's notes.
+     accept the writer's version as it is, or send it back for two more fixes that follow the reviewer's notes;
+  3. a 🧭 story check (continuity checkpoint) found problems it could not fix safely by itself (`CHECKPOINT_WAITING`,
+     code: `akowe/akowe/stand_in_checkpoint.py`; Settings › "Also the story checks", on when the stand-in is on).
+     You answer a story check as a whole (▶ Continue, or fix the chapter yourself first), so the stand-in does too:
+     each waiting problem gets its own A / B question — if the checking AI offered a small fix that is still safe
+     (an AI-written chapter, the words found exactly once): **make that fix** or **leave it as it is**; otherwise:
+     **leave it as it is for now** (the book goes on, the problem stays in the report) or **it needs you** (the AIs
+     never write a fix themselves). It decides only when every problem can be voted on and the AIs all agree to go
+     ahead on every one; a fix they chose goes through the normal review before it is approved. If one problem is
+     yours to decide, there are more than 4, or the AIs all say it needs you, the whole story check keeps waiting.
 
   **Who votes:** every AI that is connected, working and not switched off for checks — ChatGPT, Claude, Gemini, one
   vote each, including the two that disagreed. The 🤖 Claude Code helper votes for Claude only when no Claude window
@@ -1068,17 +1122,24 @@ A few of these need more words:
   **Never voted on** — these always wait for you: a change to an approved fact, the plot or outline (premise, main
   plot, outline), the ending (the last chapter, or a finding about the ending), the main character's own record,
   point of view or tense (also when Akọwe's own promise check flagged it), your content limits, anything on your lock
-  list, and stops that are not a choice between two options (for example "only one AI checked it").
+  list, and stops that are not a choice between two options (for example "only one AI checked it"). For a story
+  check: a problem in the book's last chapter or about the ending, about the plot, the outline or a chapter straying
+  off its plan, naming the main character, about point of view, tense or content limits, about a locked story detail
+  or approved fact (or the lock list).
   **Visible and reversible:** each decision is written to the run's journal, the run window and 🏠 Book home with
   every vote — "ChatGPT, Claude and Gemini all agreed to accept the correction to Ansel Marrant (character) at 03:12
   because you didn't answer for 20 minutes. Why: … [↩ Undo]" — and AutoInjector's desktop notification says "Decided
   for you". While a run waits, the alert's "what happens next" says when the AIs will vote (or why they won't, or how
   the vote went). **↩ Undo** puts the other choice back as a new draft that waits for your approval (for "accept as
   it is": the same version, no longer approved; for "fix again": the version the AIs sent back), and turns that
-  decision's track-record outcomes round. At most 5 stand-in decisions per run (Settings), then it always waits.
+  decision's track-record outcomes round. For a story check, ↩ Undo puts the problems it left as they are back on
+  your list ("Check later" and the 🧭 Continuity page) and takes a fix it made back out, word for word, as a new
+  draft for you to approve. At most 5 stand-in decisions per run (Settings), then it always waits (a story check
+  counts as one). The run forecast counts the possible story-check votes (at most one per AI per checkpoint).
   **Track record:** every vote counts for that AI ("stand-in decisions"): a decision that stands counts as held up
   for each AI that voted (Undo turns it round); when the AIs did not all agree, each vote is compared with what you
-  chose later — the same choice holds up, the other is overruled. Logs and the outbox keep codes only (which AIs
+  chose later — the same choice holds up, the other is overruled (a story check: ▶ Continue with the chapter
+  unchanged means you left it as it is; a chapter you changed is not counted). Logs and the outbox keep codes only (which AIs
   voted, the choice) — never the book's words or the reasons.
 - **Book report.** It shows who checked the book and how far they agreed, and each stretch review. Its PDF keeps
   accented letters and other alphabets (ọ, ẹ, ł, Greek); a symbol it cannot print becomes a word or "•". "Written by"

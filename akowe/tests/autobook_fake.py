@@ -263,6 +263,10 @@ class BookFakeAI:
         self.pick_script: list = []              # scripted picks ({pick, why} or callables(ctx)); default B
         self.opening_rewrite_script: list = []   # scripted opening-pass rewrites (dicts or callables(ctx))
         self.use_first_page = False              # the chapter writer starts chapter 1 with the chosen first page
+        # 📏 chapter polish (chapter_polish.py): scripted answers (dicts or callables(ctx)) used first; by default a
+        # reading-level passage gets its sentences joined and a repeat passage gets ``polish_swaps`` (phrase -> new)
+        self.polish_script: list = []
+        self.polish_swaps: dict[str, str] = {}
         self.stand_in_script: list = []
         self.stand_in_default = {"pick": "accept", "confident": 0.9,
                                  "why": "The correction answers the reviewer's finding and agrees with the canon."}
@@ -345,6 +349,12 @@ class BookFakeAI:
             if scripted is not None:
                 return "first_page_pick", scripted(ctx) if callable(scripted) else copy.deepcopy(scripted)
             return "first_page_pick", {"pick": "B", "why": "B opens on a concrete moment and says who and where."}
+        if "replacements" in props and ctx.get("polish_rules"):  # 📏 one line-level polish of a fresh draft
+            with self.lock:
+                scripted = self.polish_script.pop(0) if self.polish_script else None
+            if scripted is not None:
+                return "polish", scripted(ctx) if callable(scripted) else copy.deepcopy(scripted)
+            return "polish", self._polish(ctx)
         if "replacements" in props and ctx.get("opening_brief"):  # ✍ chapter 1 rewritten last
             with self.lock:
                 scripted = self.opening_rewrite_script.pop(0) if self.opening_rewrite_script else None
@@ -924,6 +934,24 @@ class BookFakeAI:
                 if ph in p:
                     out.append({"finding_id": f["id"], "original": p, "replacement": p.replace(ph, rep)})
                     break
+        return {"replacements": out}
+
+    JOIN_LOWER = ("The", "She", "He", "It", "They", "Her", "His", "A", "An", "There", "Then")
+
+    def _polish(self, ctx):
+        """📏 Join the sentences of a reading-level passage; swap ``polish_swaps`` phrases in a repeat passage."""
+        import re  # noqa: PLC0415
+        out = []
+        for f in ctx.get("findings") or []:
+            p = f.get("passage") or ""
+            new = p
+            if f.get("dimension") == "reading_level":
+                new = re.sub(r"\. ([A-Z][a-z]*)", lambda m: ", and " + (m.group(1).lower() if m.group(1) in
+                                                                       self.JOIN_LOWER else m.group(1)), p)
+            for ph, rep in self.polish_swaps.items():
+                new = new.replace(ph, rep)
+            if new != p:
+                out.append({"finding_id": f["id"], "original": p, "replacement": new})
         return {"replacements": out}
 
     def _fact_rewrite(self, ctx):

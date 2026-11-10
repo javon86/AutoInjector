@@ -48,7 +48,7 @@ module.exports = {
     ],
     // Best-effort/unverified, same as every other candidate list in this
     // file — used to deliver a real file into the chat via the CDP-based
-    // attach flow in main.js's attachFileToSite(). Fix via the 🔍 Inspect
+    // attach flow (file-attach.js, via main.js attachFileToSite()), which also tries the attach button, paste and drop. Fix via the 🔍 Inspect
     // button on the live pane if these ever stop matching.
     FILE_INPUT_CANDIDATES: [
       'input[type="file"]',

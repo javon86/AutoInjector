@@ -2055,7 +2055,7 @@
       box.appendChild(row);
     });
     $('sd-judge-pane').value = s.paneSite || 'claude';
-    $('sd-judge-rounds').value = s.rounds; $('sd-judge-bar').value = s.bar; $('sd-judge-autobook').checked = !!s.autoBook;
+    $('sd-judge-rounds').value = s.rounds; $('sd-judge-bar').value = s.bar; $('sd-judge-autobook').checked = !!s.autoBook; if ($('sd-judge-attachcheck')) $('sd-judge-attachcheck').checked = s.attachCheck !== false;
     setText('sd-judge-badge', `${s.order.filter((x) => s.enabled[x] !== false).length} on${s.autoBook ? ' · book pictures' : ''}`);
   }
   async function saveJudge(patch) { const r = await call('judgeSettings', patch); if (r && r.ok && Array.isArray(r.order)) { st.judgeSet = r; renderJudgeSettings(); judgeStatusLine(); } }
@@ -2063,6 +2063,7 @@
   $('sd-judge-rounds').onchange = (e) => saveJudge({ rounds: Number(e.target.value) });
   $('sd-judge-bar').onchange = (e) => saveJudge({ bar: Number(e.target.value) });
   $('sd-judge-autobook').onchange = (e) => saveJudge({ autoBook: !!e.target.checked });
+  if ($('sd-judge-attachcheck')) $('sd-judge-attachcheck').onchange = (e) => saveJudge({ attachCheck: !!e.target.checked });
   async function judgeStatusLine() {
     const r = await call('judgeStatus');
     if (!r || !r.ok || !r.judges) { setText('sd-judge-status', ''); return; }

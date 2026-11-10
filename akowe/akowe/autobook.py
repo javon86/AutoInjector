@@ -912,6 +912,11 @@ class AutoBookService(_Runner):
             if run.get("status") == "paused" and prob.get("code") == "REVIEW_NOT_PASSED":
                 from . import stand_in  # noqa: PLC0415 - 🔁 Try again on a vote the AIs did not all agree on
                 stand_in.settle_votes(self.store, run, prob, "retry")
+            elif run.get("status") == "paused" and prob.get("code") == "CHECKPOINT_WAITING":
+                from . import stand_in  # noqa: PLC0415 - 🧭 ▶ Continue after a story-check vote that did not agree
+                from .continuity import chapters_of  # noqa: PLC0415
+                stand_in.settle_votes(self.store, run, prob, "continue",
+                                      {c["chapter_id"]: c for c in chapters_of(self.bp(run))})
             run["status"], run["phase"], run["problem"], run["pause_reason"] = "running", \
                 "Continuing where it stopped", None, None
             for s in run["steps"]:
@@ -1099,7 +1104,7 @@ class AutoBookService(_Runner):
         if not isinstance(ip, bool):
             raise AkoweError("INVALID_INPUT", "/improve_pass", "improve_pass must be true or false", status="REJECTED")
         out["improve_pass"] = ip
-        for k in ("opening_pass", "first_page"):  # ✍ chapter 1 last / two first pages: on unless switched off
+        for k in ("opening_pass", "first_page", "chapter_polish"):  # ✍ / 📏 on unless switched off
             v = body.get(k, True)
             if not isinstance(v, bool):
                 raise AkoweError("INVALID_INPUT", f"/{k}", f"{k} must be true or false", status="REJECTED")
@@ -3787,6 +3792,8 @@ class AutoBookService(_Runner):
                             item["cut"] = cuts["cut"]
                             self.event(run, "note", cuts["line"], code="INSTRUCTIONS_CUT", record_id=rid,
                                        chapter_id=cid)
+                    from . import chapter_polish  # noqa: PLC0415 - 📏 reading level + repeats: ≤ 1 polish, kept if better
+                    chapter_polish.after_draft(self, run, st, outline, cid, idx + 1, rid, item)
                     try:
                         rec = self._review_until_approved(run, st, rid, f"chapter {cid}", chapter_id=cid)
                         break
@@ -3846,6 +3853,10 @@ class AutoBookService(_Runner):
         # H11 / H12: the ending keeps the book's promises — the ONE final ending check (the final 🧭 checkpoint does
         # not run its own; the checkpoints before it run the light setups-so-far check, ending_check upto=N)
         self._ending_pass(run, st, outline, chapters)
+        from . import chapter_polish  # noqa: PLC0415 - 📏 both numbers in the run window
+        pl = chapter_polish.to_report(self, run)
+        if pl:
+            self.event(run, "report", pl, step="chapters", code="CHAPTER_POLISH")
         words = sum(i.get("words") or 0 for i in st["items"])
         target = lengths_mod.of_book(self.store, run["project_id"], len(chapters))
         st["message"] = f"{len(chapters)} chapter(s) written and approved · {words:,} words (target about " \
@@ -4126,6 +4137,8 @@ class AutoBookService(_Runner):
         run["report"] = {"id": rep["id"], "overall": agg.get("overall"), "reviewers": agg.get("reviewers"),
                          "independent": agg.get("independent"), "disagreements": agg.get("disagreements") or [],
                          "words": (rep.get("words") or {}).get("total"), "warnings": rep.get("warnings") or []}
+        from . import chapter_polish  # noqa: PLC0415 - 📏 the chapter polish's numbers in the saved report too
+        chapter_polish.to_report(self, run, rep)
         if agg.get("reviewers"):
             st["message"] = (f"{agg['reviewers']} AI(s) read the whole book · overall {agg.get('overall')}/10"
                              + (f" · ⚠️ they disagree on {', '.join(agg['disagreements'])}" if agg.get("disagreements")

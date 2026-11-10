@@ -43,6 +43,32 @@ async function runRounds(o) {
   return { bestI, stopReason };
 }
 
+// A round's picture couldn't be made: why, in plain words (never a bare code like "SD_ERROR"), with what to try.
+const ROUND_FAIL_PLAIN = {
+  SD_ERROR: 'your Stable Diffusion app reported an error while making it (its own window shows the details)',
+  HTTP_500: 'your Stable Diffusion app reported an error while making it (its own window shows the details)',
+  REFUSED: 'your Stable Diffusion app stopped answering (it may have closed or crashed)',
+  CONNECTION_REFUSED: 'your Stable Diffusion app stopped answering (it may have closed or crashed)',
+  ECONNRESET: 'your Stable Diffusion app closed the connection (it may have crashed)',
+  TIMEOUT: 'your Stable Diffusion app took too long to answer',
+  OOM: 'your graphics card ran out of memory',
+  NO_IMAGE: 'the image server answered but sent no picture back',
+  NO_ENDPOINT: 'no Stable Diffusion app is connected any more',
+  SD_NOT_CONNECTED: 'no Stable Diffusion app is connected any more',
+};
+function roundFailText(g) {
+  const code = String((g && (g.code || g.error)) || 'FAILED');
+  let msg = g && typeof g.message === 'string' ? g.message.trim() : '';
+  // a message that is only the code ("Image generation failed: SD_ERROR") says nothing to a person
+  if (!msg || /^[A-Z0-9_]+$/.test(msg) || (code.length > 3 && msg.includes(code) && /failed: [A-Z0-9_]+\.?$/.test(msg))) {
+    const plain = ROUND_FAIL_PLAIN[code] || (/^HTTP_5/.test(code) ? ROUND_FAIL_PLAIN.SD_ERROR : 'something went wrong while making it');
+    msg = `The picture couldn't be made: ${plain}.`;
+  }
+  const fix = g && typeof g.fix === 'string' ? g.fix.trim() : '';
+  if (fix && !msg.includes(fix)) msg += ` ${fix}`;
+  return msg.slice(0, 400);
+}
+
 function createImprover(d) {
   const log = d.log || (() => {});
   const progress = (e) => { try { if (d.onProgress) d.onProgress(e); } catch (_) {} };
@@ -111,7 +137,9 @@ function createImprover(d) {
           if (ctl.signal.aborted) return { stopped: true };
           if (!g || !g.ok || !g.images || !g.images[0]) {
             log('image-improve', { id, round: n, error: (g && (g.code || g.error)) || 'FAILED' });
-            return { failed: Object.assign(roundOut(n, '', '', null, null, changed, skipped), { error: (g && g.message) || 'The picture could not be made.' }) };
+            const failed = Object.assign(roundOut(n, '', '', null, null, changed, skipped), { error: roundFailText(g) });
+            progress({ kind: 'improve', id, phase: 'judged', round: n, rounds: N, result: failed }); // the strip shows ✖ and why at once
+            return { failed };
           }
           const p = g.images[0].path;
           try { d.updateRecord(p, { improve: { session: id, round: n, of: N, from: rec0.file || path.split(/[\\/]/).pop(), changed } }); } catch (_) {}
@@ -131,7 +159,7 @@ function createImprover(d) {
       const say = stopReason === 'passed' ? `Round ${best.round} passed (${best.overall}/10).`
         : stopReason === 'no-better' ? `It stopped getting better — round ${best.round} is the best (${best.overall}/10).`
           : stopReason === 'stopped' ? `Stopped. The best so far is round ${best.round} (${best.overall != null ? `${best.overall}/10` : 'not judged'}).`
-            : stopReason === 'failed' || stopReason === 'judge-failed' ? `It stopped at round ${rounds.length}: ${rounds[rounds.length - 1].error || 'something failed'}. The best is round ${best.round}.`
+            : stopReason === 'failed' || stopReason === 'judge-failed' ? `It stopped at round ${rounds.length}: ${String(rounds[rounds.length - 1].error || 'something failed').replace(/[.\s]+$/, '').replace(/^The /, 'the ')}. The best is round ${best.round}.`
               : `After ${rounds.length} rounds the best is round ${best.round} (${best.overall}/10).`;
       progress({ kind: 'improve', id, phase: 'done', rounds: N, best: bestI, stopReason });
       return { ok: true, id, rounds, best: bestI, bestPath: best.path, stopReason, bar, say, defaultsChanged: false };
@@ -175,4 +203,4 @@ function createImprover(d) {
   return { improve, best, stop, status };
 }
 
-module.exports = { createImprover, runRounds };
+module.exports = { roundFailText, createImprover, runRounds };

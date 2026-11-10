@@ -1753,6 +1753,7 @@
               <div><label class="sd-l" for="sd-judge-rounds" title="Make it better tries at most this many rounds (each round = one new picture + one AI answer)">Rounds</label><input type="number" id="sd-judge-rounds" min="1" max="5" value="3"></div>
               <div><label class="sd-l" for="sd-judge-bar" title="A picture passes when the judge says keep and the average score reaches this">Pass mark</label><input type="number" id="sd-judge-bar" min="5" max="10" step="0.5" value="7.5"></div></div>
             <label class="sd-fixed" style="font-size:12px;" title="Off by default: it costs AI usage. When on, Akọwe's character pictures are judged and improved (at most 2 rounds) before Akọwe gets them."><input type="checkbox" id="sd-judge-autobook"> Judge and improve book pictures automatically</label>
+            <label class="sd-fixed" style="font-size:12px;" title="On: before the web pane is asked, AutoInjector checks that the picture really shows as attached in the chat, and stops with a plain message if it doesn't (so the AI never judges a picture it can't see). Switch off only if the check wrongly says the picture is missing."><input type="checkbox" id="sd-judge-attachcheck" checked> Web pane: check the picture shows in the chat before asking</label>
             <div class="sd-note" id="sd-judge-status" role="status"></div>
           </div></details>
           <details class="sd-adv" id="sd-sec-hires"><summary>Hires fix <span class="sd-on" id="sd-hr-badge"></span></summary><div class="sd-adv-body">

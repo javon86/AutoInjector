@@ -253,6 +253,16 @@ Chapter 1 is written before the rest of the book exists, and readers decide on t
   nothing dropped by more than a point**; otherwise your book stays exactly as it was. Kept chapters are checked and
   approved like every chapter, and the PDF, EPUB and Word files are made again. The run window, the journal and the
   report show both numbers: "🔁 Improve pass: 7.6 → 8.1/10 (kept)". Chapters you wrote yourself are never touched.
+- **📏 Sentence polish** (on the ⚡ Make-a-book screen, on by default): as soon as a chapter is written, Akọwe
+  checks — without any AI — whether it reads too simply for your readers (for adult books, under reading grade 5)
+  and which phrases it repeats from earlier chapters ("water ran off his elbows" again). Only when it does, the writer
+  polishes that chapter once: it joins some short sentences into longer, precise ones and says repeated phrases in a
+  new way. The story, the facts, the names, the numbers and every line of dialogue stay exactly as they were. The
+  polish is kept only if Akọwe's checks got better; otherwise the chapter stays as written. The run window shows both
+  numbers ("📏 Reading level 2.9 → 5.4 after polish in chapters 1, 3"), and so does the 📊 report. The same switch
+  lets the improve pass keep its repeated-phrase fixes on their own when the rest of its changes are not kept (those
+  chapters are checked and approved again like every chapter). At most one more AI answer per chapter, only for the
+  chapters that need it. Switch it off to write the chapters the old way.
 - **📈 Your books over time** (🏠 Book home and the 📊 Book report): "7.6/10 — down 0.4 from your last book",
   "Rule rigor is your weakest area for 3 books", and which scores are falling. Only numbers are kept for this,
   never your book's words.
@@ -293,6 +303,13 @@ Chapter 1 is written before the rest of the book exists, and readers decide on t
   20 minutes. Why: …" — and the desktop notification says it was decided for you. When they don't agree you see how
   each voted, for example "The AIs didn't all agree (ChatGPT: accept, Gemini: keep) — waiting for you." Press
   **↩ Undo** to put the other choice back for your own approval. At most 5 stand-in decisions per book run.
+  It also covers the 🧭 **story checks** (continuity checkpoints) that wait for you overnight — switch off "Also the
+  story checks" in the same card to keep those for yourself. For each problem the check couldn't fix, the AIs choose
+  between "leave it as it is for now" (the book goes on and the problem stays in the report) and "it needs you" — or,
+  when a small safe fix was offered, between "make the fix" and "leave it". The book goes on only if they all agree
+  on every problem. A problem about the ending, the plot, the main character, point of view, tense, your content
+  limits, a locked detail or your lock list always waits for you. ↩ Undo puts the problems back on your list (and
+  takes a fix back out as a draft for you to approve).
 
 ## 6. Pictures
 
@@ -305,6 +322,10 @@ Chapter 1 is written before the rest of the book exists, and readers decide on t
   file of the settings that made it.
 - **🔒 Character locks** keep a character's face the same in every picture. **🧩 LoRAs** and **🧩 Add-ons** are for
   extra looks and tools.
+- **🧑‍⚖️ Judge** and **🔁 Make it better** ask an AI to look at the picture. When the Claude or ChatGPT pane is the
+  judge, AutoInjector puts the picture into a new chat by itself (with the **+** / attach button, or by pasting it) and
+  checks it really shows there before asking. If it can't, nothing is sent and you see why. If a round of Make it
+  better fails, its card shows ✖ and the reason in plain words.
 
 **In Akọwe:** 🖼 Pictures & cover makes pictures of characters, places and chapters, and the 🎨 cover. In a ⚡ run each
 character gets a portrait, which becomes that character's lock. Pictures never hold up the book.
@@ -390,6 +411,10 @@ Without it nothing breaks: every job goes to the web AIs, exactly as before. The
   AutoInjector notices by itself. Meanwhile, Akọwe gives the work to the other AIs.
 - **A book run pauses with ⚠️:** read the message on that step; it says what happened and what to do.
 - **Pictures or video fail:** run **🩺 Test pictures & video**.
+- **"The picture couldn't be uploaded to the Claude (web pane)":** open that pane and check you are signed in and a
+  new chat is showing, then judge again. If it keeps saying the picture "never showed as attached" although you can
+  see it in the chat, untick **Web pane: check the picture shows in the chat before asking** (🎨 Images → 🧑‍⚖️ AI judge
+  settings).
 - **To share a log yourself:** **⤓ Extract All** → **Last 24 hours**. Never choose **Everything**: it includes all
   your older, private conversations.
 

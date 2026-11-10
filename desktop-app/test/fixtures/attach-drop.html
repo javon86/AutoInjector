@@ -1,0 +1,10 @@
+<!doctype html><html><head><meta charset="utf-8"><title>attach: drop only</title></head><body>
+<!-- (d) no file input, no attach button, a paste is ignored: only a file dropped on the page is taken. -->
+<script src="attach-common.js"></script>
+<script>
+(function () {
+  const A = window.__attach;
+  document.addEventListener('dragover', (e) => e.preventDefault());
+  document.addEventListener('drop', (e) => { e.preventDefault(); const fs = e.dataTransfer && e.dataTransfer.files; if (fs && fs.length) A.take(fs, 'drop'); });
+})();
+</script></body></html>

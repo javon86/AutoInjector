@@ -1,0 +1,30 @@
+<!doctype html><html><head><meta charset="utf-8"><title>attach: input made only after clicking</title></head><body>
+<!-- (a) no <input type=file> in the page. mode=menu (default, like claude.ai 2026-11): the "+" button opens a menu on
+     pointerdown (Radix style); "Add files or photos" makes a file input, clicks it (the file chooser) and leaves it out
+     of the page. mode=reveal: the paperclip button adds a file input to the page (no chooser). -->
+<script src="attach-common.js"></script>
+<script>
+(function () {
+  const A = window.__attach; const mode = new URLSearchParams(location.search).get('mode') || 'menu';
+  A.decoy('Add from Google Drive'); A.decoy('Take a screenshot');
+  if (mode === 'reveal') {
+    const b = document.createElement('button'); b.type = 'button'; b.setAttribute('aria-label', 'Attach files'); b.textContent = '📎';
+    b.onclick = () => { if (document.querySelector('input[type=file]')) return; const i = document.createElement('input'); i.type = 'file'; i.accept = 'image/*,.pdf'; i.hidden = true; i.onchange = () => A.take(i.files, 'reveal'); A.card.appendChild(i); };
+    A.row.appendChild(b); return;
+  }
+  const plus = document.createElement('button'); plus.type = 'button'; plus.setAttribute('aria-label', 'Open attachments menu'); plus.setAttribute('aria-haspopup', 'menu'); plus.textContent = '+';
+  let menu = null;
+  plus.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    if (menu) { menu.remove(); menu = null; return; }
+    menu = document.createElement('div'); menu.setAttribute('role', 'menu');
+    const item = (text, fn) => { const m = document.createElement('div'); m.setAttribute('role', 'menuitem'); m.tabIndex = -1; m.textContent = text; m.style.padding = '4px'; m.onclick = () => { fn(); if (menu) { menu.remove(); menu = null; } }; menu.appendChild(m); };
+    item('Take a screenshot', () => { A.wrong++; });
+    item('Add from GitHub', () => { A.wrong++; });
+    item('Add files or photos', () => { const i = document.createElement('input'); i.type = 'file'; i.multiple = true; i.onchange = () => A.take(i.files, 'chooser'); i.click(); });
+    document.body.appendChild(menu);
+  });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && menu) { menu.remove(); menu = null; } });
+  A.row.appendChild(plus);
+})();
+</script></body></html>

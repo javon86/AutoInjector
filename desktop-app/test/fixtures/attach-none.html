@@ -1,0 +1,12 @@
+<!doctype html><html><head><meta charset="utf-8"><title>attach: the page never takes it</title></head><body>
+<!-- the check: a file input whose page throws the file away (clears it, shows nothing), no paste, no drop — the
+     attachment never appears, so attaching must fail with ATTACH_NOT_SEEN (never "sent without the picture"). -->
+<script src="attach-common.js"></script>
+<script>
+(function () {
+  const A = window.__attach;
+  const i = document.createElement('input'); i.type = 'file'; i.accept = 'image/*'; i.style.display = 'none';
+  i.onchange = () => { A.ignored = (A.ignored || 0) + 1; i.value = ''; };
+  document.body.appendChild(i);
+})();
+</script></body></html>

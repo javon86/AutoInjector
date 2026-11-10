@@ -29,7 +29,8 @@ const freshChatMod = require("./fresh-chat"); // a fresh chat in an AI pane befo
 const runGuardMod = require("./run-guard"); // keep the PC awake, ask before closing, tell the user when a run needs them (PR #123)
 const transcriptStore = require("./transcript-store"); // short Akọwe replies in the conversation list, archive, background state writes (PR #123)
 const { selftestPrompt, classifySelftestReply } = require("./selftest-verdict");
-const { buildSendScript, buildReadScript, buildFileInputFinderExpression, buildPickScript, buildLoginFillScript, buildProbeScript, isBareTagSelector } = require("./automation");
+const fileAttach = require("./file-attach");
+const { buildSendScript, buildReadScript, buildPickScript, buildLoginFillScript, buildProbeScript, isBareTagSelector } = require("./automation");
 const { isChromeSelector } = require("./transcript-rows");
 const { buildPageStructureScript } = require("./tools/page-structure");
 // 2026-10-29: a reply / your-message selector that names page chrome (the sidebar's
@@ -2397,7 +2398,12 @@ async function waitForTestReply(site, token, reversedToken, sentTs, timeoutMs, p
 // open on this pane when this runs, attach() can still throw; that's
 // reported as ATTACH_FAILED rather than specifically diagnosed, since it's
 // a rare, transient collision, not a distinct failure mode worth its own code.
-async function attachFileToSite(site, absolutePath) {
+// Since 2026-11 this goes through file-attach.js: claude.ai stopped keeping an <input type=file> in the page (the
+// user's log: NO_FILE_INPUT_FOUND every time), so besides the input it also finds one in a shadow root, clicks the
+// "+" / attach button (catching the file chooser — no window opens), pastes, or drops the file on the composer, and
+// checks the page shows the attachment before the message goes (ATTACH_NOT_SEEN when it never does).
+// opts.verify: false skips that check (🧑‍⚖️ judge setting "Check the picture shows in the chat").
+async function attachFileToSite(site, absolutePath, opts = {}) {
   const view = siteViews[site];
   if (!view || view.webContents.isDestroyed()) {
     logEvent("file-attach-error", { site, error: "NO_VIEW" });
@@ -2408,35 +2414,32 @@ async function attachFileToSite(site, absolutePath) {
   try {
     dbg.attach(FILE_ATTACH_PROTOCOL_VERSION);
   } catch (e) {
-    logEvent("file-attach-error", { site, error: "ATTACH_FAILED", detail: String(e) });
+    logEvent("file-attach-error", { site, error: "ATTACH_FAILED" });
     return { ok: false, error: "ATTACH_FAILED", detail: String(e) };
   }
 
+  const t0 = Date.now();
   try {
-    let evalRes;
+    let ov = {};
+    try { ov = effectiveOverrides(site) || {}; } catch (_) { ov = {}; }
+    const cfg = SITES[site] || {};
+    const composer = [].concat(typeof ov.input === "string" && ov.input ? [ov.input] : [], cfg.INPUT_CANDIDATES || []);
+    let r;
     try {
-      evalRes = await dbg.sendCommand("Runtime.evaluate", {
-        expression: buildFileInputFinderExpression(site),
-        returnByValue: false
+      r = await fileAttach.attachFile(dbg, absolutePath, {
+        composer, candidates: cfg.FILE_INPUT_CANDIDATES || [], verify: opts.verify !== false,
+        verifyMs: Number(process.env.AUTOINJECTOR_ATTACH_VERIFY_MS) || undefined,
+        revealWaitMs: Number(process.env.AUTOINJECTOR_ATTACH_REVEAL_MS) || undefined,
       });
     } catch (e) {
-      logEvent("file-attach-error", { site, error: "EVAL_FAILED", detail: String(e) });
-      return { ok: false, error: "EVAL_FAILED", detail: String(e) };
+      r = { ok: false, error: "EVAL_FAILED", tried: [] };
     }
-    const objectId = evalRes && evalRes.result && evalRes.result.objectId;
-    if (!objectId) {
-      logEvent("file-attach-error", { site, error: "NO_FILE_INPUT_FOUND" });
-      return { ok: false, error: "NO_FILE_INPUT_FOUND" };
+    if (!r.ok) {
+      logEvent("file-attach-error", { site, error: r.error, tried: r.tried, ms: Date.now() - t0 });
+      return { ok: false, error: r.error, tried: r.tried };
     }
-    try {
-      await dbg.sendCommand("DOM.setFileInputFiles", { files: [absolutePath], objectId });
-    } catch (e) {
-      logEvent("file-attach-error", { site, error: "SET_FILES_FAILED", detail: String(e) });
-      return { ok: false, error: "SET_FILES_FAILED", detail: String(e) };
-    }
-    try { await dbg.sendCommand("Runtime.releaseObject", { objectId }); } catch {}
-    logEvent("file-attached", { site, path: absolutePath });
-    return { ok: true };
+    logEvent("file-attached", { site, how: r.how, verified: r.verified, tried: r.tried, ms: Date.now() - t0 });
+    return { ok: true, how: r.how, verified: r.verified };
   } finally {
     try { dbg.detach(); } catch {}
   }
@@ -7388,7 +7391,7 @@ function judgeAgents() {
         const p = akoweSiteProblem(site);
         return p && p.code !== "CHECKING" ? p : null;
       },
-      ask: (site, text, o) => alfredAskPane(site, text, { attach: o && o.attach, freshChat: !!(o && o.freshChat), signal: o && o.signal, timeoutMs: Number(process.env.AUTOINJECTOR_JUDGE_PANE_MS) || 240000 }),
+      ask: (site, text, o) => alfredAskPane(site, text, { attach: o && o.attach, attachCheck: settings().attachCheck !== false, freshChat: !!(o && o.freshChat), signal: o && o.signal, timeoutMs: Number(process.env.AUTOINJECTOR_JUDGE_PANE_MS) || 240000 }),
     }),
     local: JS.createOllamaJudge({ fetch: (...a) => fetch(...a), bases: imageJudgeOllamaBases, model: () => process.env.AUTOINJECTOR_JUDGE_OLLAMA_MODEL || "" }),
   };
@@ -9062,7 +9065,7 @@ function alfredTakeReply(site, turn) {
 }
 // attach: a file to upload with the message (🧑‍⚖️ the picture judge); freshChat: open a new chat first, so the
 // question never lands in a book's conversation.
-async function alfredAskPane(site, text, { timeoutMs = 180000, signal, attach = null, freshChat = false } = {}) {
+async function alfredAskPane(site, text, { timeoutMs = 180000, signal, attach = null, attachCheck = true, freshChat = false } = {}) {
   if (!SITES[site]) return { ok: false, error: "BAD_SITE" };
   if (!state.enabled[site]) return { ok: false, error: "TURNED_OFF" };
   if (akoweUsingPane(site)) { logEvent("alfred-ask-ai", { site, outcome: "AKOWE_USING" }); return { ok: false, error: "AKOWE_USING" }; }
@@ -9083,7 +9086,7 @@ async function alfredAskPane(site, text, { timeoutMs = 180000, signal, attach = 
     if (freshChat) { try { await selfRepairReload(site, { home: true, why: "alfred" }); } catch (_) {} }
     if (token.cancelled) { outcome = "CANCELLED"; return { ok: false, error: "CANCELLED", typed: false }; }
     if (attach) {
-      const at = await attachFileToSite(site, attach);
+      const at = await attachFileToSite(site, attach, { verify: attachCheck !== false });
       if (!at || !at.ok) { outcome = "ATTACH_FAILED"; return { ok: false, error: "ATTACH_FAILED", code: at && at.error ? String(at.error).slice(0, 40) : undefined, typed: false }; }
       await new Promise((r) => setTimeout(r, Number(process.env.AUTOINJECTOR_JUDGE_UPLOAD_MS) || 4000)); // the site uploads the picture before the message goes
     }

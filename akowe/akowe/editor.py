@@ -906,6 +906,10 @@ class EditorService:
             from .improve_pass import IMPROVE_RULES, IMPROVE_WORDS  # noqa: PLC0415
             ctx["improve_rules"] = IMPROVE_RULES
             task = task + IMPROVE_WORDS
+        if craft.get("polish"):  # 📏 one line-level polish of a fresh draft (chapter_polish.py)
+            from .chapter_polish import POLISH_RULES, POLISH_WORDS  # noqa: PLC0415
+            ctx["polish_rules"] = POLISH_RULES
+            task = task + POLISH_WORDS
         if craft.get("opening"):  # ✍ chapter 1 rewritten last, with the whole book in view (opening_pass.py)
             from .opening_pass import OPENING_RULES, OPENING_WORDS  # noqa: PLC0415
             ctx["opening_brief"] = dict(craft["opening"], rules=OPENING_RULES)
