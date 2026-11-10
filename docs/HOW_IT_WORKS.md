@@ -308,10 +308,14 @@ bridge to your home Wi-Fi, behind its key.
   ChatGPT or Gemini wrote it, the helpers read it for Claude, so the Claude pane is free.
 - **It shares your Claude plan's limits:** Claude Code signs in with your own Claude account, so its use counts
   against the same limits as the Claude pane and claude.ai. Fewer helpers at once = slower but gentler on the limits.
-- **How to install and sign in:** follow the official install page, https://code.claude.com/docs/en/setup (on
-  Windows: open PowerShell and run `irm https://claude.ai/install.ps1 | iex`). Then type `claude` in PowerShell once,
-  press Enter and sign in with your Claude account. In Akọwe, ⚙️ Settings → 🤖 Claude Code helpers shows
-  "✔ Claude Code 2.x found, signed in" (press ↻ Check again after installing).
+- **How to install and sign in:** ⚙️ Settings → 🤖 Claude Code helpers has two buttons (`claude_code_window.py`).
+  **⬇ Install Claude Code** opens a PowerShell window running Anthropic's official installer
+  (`irm https://claude.ai/install.ps1 | iex`, as on https://code.claude.com/docs/en/setup). **⌨ Open Claude Code**
+  opens a command window (`cmd /k`) with the Claude Code Akọwe found already started, in your home folder and without
+  any API-billing key, so it signs in to your Claude plan; follow its steps once. Only fixed commands are run, and
+  only for a request from this computer (a phone on the network is refused). Afterwards the card shows
+  "✔ Claude Code 2.x found, signed in" (press ↻ Check again). On a Mac it opens Terminal; on Linux the first terminal
+  found.
 - **Without it nothing breaks:** if Claude Code is not installed, signed out, at its limit or not working, every job
   goes back to the web AIs, exactly as before. The book never waits for a helper. The run window says so in one line.
 - **Settings:** ⚙️ Settings → 🤖 Claude Code helpers: on/off (on by itself when it is found), helpers at once (1–5),

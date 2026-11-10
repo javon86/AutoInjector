@@ -54,3 +54,23 @@ def test_make_a_book_tick_is_off_when_the_helpers_are_not_ready(make_context, ai
     page.wait_for_timeout(300)
     page.bf_problems.clear()
     assert_clean(page, "make-a-book claude code tick")
+
+
+def test_open_claude_code_button_asks_the_server_and_shows_what_happens(make_context, ai_server):
+    """⌨ Open Claude Code: one request to /settings/claude-code/window; its message is shown in plain words. The
+    request is answered here, so no window opens on the test machine."""
+    page = open_app(make_context(), ai_server)
+    page.route("**/api/settings/claude-code/window", lambda route: route.fulfill(
+        status=200, content_type="application/json",
+        body=json.dumps({"ok": True, "kind": "claude", "message": "Claude Code is open in a new window."})))
+    goto(page, "#/settings")
+    card = page.locator("[data-testid=cc-card]")
+    btn = card.locator("[data-testid=cc-open-window]")
+    btn.wait_for(timeout=15000)
+    with page.expect_request(lambda r: r.url.endswith("/api/settings/claude-code/window") and r.method == "POST",
+                             timeout=15000) as req:
+        btn.click()
+    assert json.loads(req.value.post_data) == {"install": False}
+    card.locator("[data-testid=cc-window-msg]").filter(has_text="open in a new window").wait_for(timeout=5000)
+    assert "Open Claude Code" in card.inner_text()
+    assert_clean(page, "claude code open window button")

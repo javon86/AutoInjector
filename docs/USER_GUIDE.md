@@ -325,9 +325,12 @@ through it while the three web AIs do the main writing: research for the chapter
 checks side by side, and the "sounds like AI" pass. It uses your own Claude plan, so it shares that plan's usage
 limits with the Claude pane.
 
-1. Install it from the official page, https://code.claude.com/docs/en/setup (on Windows: open PowerShell and run
-   `irm https://claude.ai/install.ps1 | iex`).
-2. Type `claude` in PowerShell once, press Enter and sign in with your Claude account.
+1. In Akọwe, open **⚙️ Settings → 🤖 Claude Code helpers**. If Claude Code is not installed yet, press
+   **⬇ Install Claude Code**: a PowerShell window opens and runs Anthropic's official installer (the same command as
+   the official page, https://code.claude.com/docs/en/setup). Close it when it says it is done.
+2. Press **⌨ Open Claude Code**: a command window opens with `claude` already started. The first time, follow its
+   steps to sign in with your Claude account. You can also use Claude Code yourself in that window; close it when you
+   are finished. (Both buttons only work on the computer Akọwe runs on, never from a phone.)
 3. In Akọwe, **⚙️ Settings → 🤖 Claude Code helpers** should say "✔ Claude Code … found, signed in" (press
    **↻ Check again** after installing). There you can turn it on or off, choose how many helpers work at once (1–5)
    and which jobs they do.
