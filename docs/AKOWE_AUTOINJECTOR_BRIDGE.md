@@ -447,4 +447,11 @@ AutoInjector's bridge now implements both optional fields above.
   (with the same list of errors) at once, as part of the same re-ask. The same `409` comes back if the chat changed
   while the follow-up waited its turn (a check-in got in first). A malformed `followup_of` (not a request-id string,
   or the request's own id) is `400 BAD_REQUEST`.
+* **`book_id` / `run_id`** (optional, backward compatible). Which Akọwe book (`"proj-…"`) and which ⚡ Make-a-book
+  run (`"run-…"`) the request is for; each 1..128 chars of `[A-Za-z0-9._:-]` — ids only, never titles. A malformed
+  one is `400 BAD_REQUEST`; a missing one means "unknown" and changes nothing. AutoInjector opens a fresh chat in the
+  pane before the first request of a **different book** than that pane's last Akọwe request (both name a book:
+  compare books, so ▶ Continue of the same book keeps its chat; else both name a run: compare runs; nothing known
+  about the last one: a fresh chat), with the same holds as the other fresh chats (never mid-answer, never in a pane
+  the user used in the last few minutes). A follow-up never gets one. The ids are never logged.
 

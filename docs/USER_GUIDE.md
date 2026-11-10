@@ -105,6 +105,10 @@ cover; the AI never makes one up — leave it empty to use the pen name you type
 if it is also the name of one of your characters), the kind of story and the story shape (or leave them to the AI), **How many AIs check for mistakes**, **Use Claude Code helpers for this book**, and **"✍ At the end,
 check that the book sounds like a person wrote it"**.
 
+💡 **Tip:** for the best book, pick the strongest model in each AI window (ChatGPT, Claude, Gemini) before you press
+Start — for example a "thinking" model if your plan has one. The tip by Start (and above the AI cards in AutoInjector)
+goes away for good when you press ✕.
+
 ### While a long book runs
 
 - The PC stays awake while a book is being written. A Windows restart (updates) still stops the run; press
@@ -117,6 +121,10 @@ check that the book sounds like a person wrote it"**.
 - When every AI is at its usage limit, Akọwe waits and carries on by itself when a limit resets.
 - Fresh chats: after about 15 Akọwe requests in one chat, AutoInjector opens a new chat in that AI's pane so the chat
   never gets too long. Nothing for you to do.
+- Every **new book** also starts in a fresh chat in each AI, so nothing from your last book (a character's name,
+  story details) can slip into it. Resuming the same book keeps its chat. If you are typing in an AI's window
+  yourself, AutoInjector waits and does it a bit later. To switch it off: 📖 Akọwe panel → untick **and for every
+  new book**.
 
 ### When your book needs you
 

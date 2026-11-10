@@ -682,6 +682,22 @@ def bridge_request_id(request_id: str | None, site: str, call: int, reask: int) 
     return f"bf-{base}-{site}-c{call}-a{reask}"
 
 
+_BOOK_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
+
+
+def bridge_book_fields() -> dict:
+    """Which book (``book_id``) and ⚡ Make-a-book run (``run_id``) the AI call running now is for — ids only, from
+    the AI activity context. AutoInjector starts a NEW book in a fresh chat in each AI window, so nothing from the
+    last book (a character's name, story details) can slip into it; the same book (a resume) keeps its chat."""
+    cur = ai_activity.current()
+    out = {}
+    for field, key in (("book_id", "book_id"), ("run_id", "run_id")):
+        v = cur.get(key)
+        if isinstance(v, str) and _BOOK_ID_RE.match(v):
+            out[field] = v
+    return out
+
+
 class AutoInjectorAdapter:
     """Experimental adapter: one slot = one logged-in web site driven by the AutoInjector desktop
     app through its local bridge (contract v1). Stdlib urllib only; never logs prompts, replies or
@@ -949,13 +965,14 @@ class AutoInjectorAdapter:
         bridge_id = None
         prev_id = None
         followup_ok = refused = False
+        book = bridge_book_fields()  # a new book -> a fresh chat in that AI's window (AutoInjector decides)
         for reask in range(self.MAX_REASKS + 1):
             short = bool(errors) and followup_ok and prev_id is not None
             prompt = self.correction_prompt(errors) if short else self.build_prompt(system, user, schema, errors)
             late_key = _late_key(self.bridge_url, site, prompt)
             # A "Try again" after a 504 whose prompt WAS typed: collect that answer under its own bridge id.
             bridge_id = _late_get(late_key) or bridge_request_id(request_id, site, call, reask)
-            body = {"site": site, "prompt": prompt, "request_id": bridge_id, "timeout_ms": tmo}
+            body = {"site": site, "prompt": prompt, "request_id": bridge_id, "timeout_ms": tmo, **book}
             if short:
                 body["followup_of"] = prev_id
             started = time.monotonic()
@@ -973,7 +990,7 @@ class AutoInjectorAdapter:
                 prompt = self.build_prompt(system, user, schema, errors)
                 late_key = _late_key(self.bridge_url, site, prompt)
                 bridge_id = _late_get(late_key) or bridge_request_id(request_id, site, call, reask) + "-full"
-                body = {"site": site, "prompt": prompt, "request_id": bridge_id, "timeout_ms": tmo}
+                body = {"site": site, "prompt": prompt, "request_id": bridge_id, "timeout_ms": tmo, **book}
                 reply = self._post_collecting(body, late_key, tmo)
             _late_drop(late_key)
             text = reply.get("text")
@@ -1635,9 +1652,14 @@ class ProviderRegistry:
         with self._lock:
             self._active[slot["slot_id"]] += 1
         self._activity_start(ctx, slot)  # ⚡ #116: the AI activity strip (what each AI is doing right now)
+        # the book this call is for (when the code that asks did not say): AutoInjector gives a new book a fresh chat
+        pid = getattr(ctx, "project_id", None)
+        book = ai_activity.doing(None, book_id=pid if isinstance(pid, str) and not ai_activity.current().get("book_id")
+                                 else None)
         try:
-            data, usage = self._with_retries(adapter, slot, system, user, schema, self.call_deadline(ctx, slot),
-                                             request_id=ctx.request.get("request_id"), call=call)
+            with book:
+                data, usage = self._with_retries(adapter, slot, system, user, schema, self.call_deadline(ctx, slot),
+                                                 request_id=ctx.request.get("request_id"), call=call)
         except AkoweError as exc:
             ai_activity.call_ended(exc)
             # A timed-out paid call may still have run: keep the reservation until it reconciles (spec K).

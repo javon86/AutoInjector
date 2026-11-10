@@ -7921,6 +7921,15 @@ const MB = { dialog: null, run: null, poll: null, tick: null, opener: null, late
 const RUN_WORD = { queued: ['…', 'Starting', 'b-info'], running: ['⏳', 'Working', 'b-ai'], waiting: ['⏳', 'Waiting for the AI', 'b-warn'],
   pausing: ['⏸', 'Pausing…', 'b-warn'], paused: ['⏸', 'Paused', 'b-warn'], done: ['✔', 'Done', 'b-ok'], cancelled: ['✖', 'Cancelled', 'b-muted'],
   interrupted: ['⚠️', 'Interrupted', 'b-warn'] };
+/** 💡 A one-line tip by Start: the strongest model in each AI window makes the best book. ✕ hides it for good. */
+function modelTip() {
+  if (loadJSON('akowe_model_tip_hidden', false)) return null;
+  const tip = h('p', { class: 'small model-tip', role: 'note', 'data-testid': 'mb-model-tip' },
+    '💡 For the best book, pick the strongest model in each AI window (ChatGPT, Claude, Gemini) before you start — for example a “thinking” model if your plan has one. ',
+    h('button', { type: 'button', class: 'link', 'data-testid': 'mb-model-tip-hide',
+      onclick: () => { saveJSON('akowe_model_tip_hidden', true); tip.remove(); } }, '✕ Hide this tip'));
+  return tip;
+}
 /* ======================================================================= 🩺 P37.5 before a run: which AIs work, and how to fix the others */
 /**
  * Before a book run starts: Akọwe asks AutoInjector (/v1/health) about every AI the run will use. When all work it
@@ -8358,7 +8367,7 @@ async function renderMakeSetup() {
       lengthBox,
       h('div', { class: 'field' }, h('label', { for: 'mb-idea' }, 'Your idea (optional)'), idea, ideaWarn, locksBox),
       h('div', { class: 'field' }, h('label', { for: 'mb-pen-name' }, 'Pen name (optional)'), penName, h('span', { class: 'hint' }, 'Printed on the title page and cover. The AI never invents one: empty = the pen name you typed last, or none.')), cf.el, pipe.el, s7.el, fb.el, hp.el, ipw.el, c1.el, wr.el, ck.el, pics.el, ccf.el),
-    later.el, err, h('div', { class: 'form-actions' }, startAll, startSet));
+    later.el, err, modelTip(), h('div', { class: 'form-actions' }, startAll, startSet));
   form.insertBefore(h('div', { class: 'row mb-paste-row' }, paste, h('span', { class: 'small muted' }, 'Planned your book with an AI? Paste its starter sheet to fill these settings.')), form.querySelector('.mb-quick'));
   // ⏱ 3d: time, AI answers per AI and usage limits for exactly these settings; 📊 3e the usage meter per AI
   const est = RP.planBox(s7c(), () => buildBody(false));
