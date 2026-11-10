@@ -253,6 +253,16 @@ Chapter 1 is written before the rest of the book exists, and readers decide on t
   nothing dropped by more than a point**; otherwise your book stays exactly as it was. Kept chapters are checked and
   approved like every chapter, and the PDF, EPUB and Word files are made again. The run window, the journal and the
   report show both numbers: "🔁 Improve pass: 7.6 → 8.1/10 (kept)". Chapters you wrote yourself are never touched.
+- **📏 Sentence polish** (on the ⚡ Make-a-book screen, on by default): as soon as a chapter is written, Akọwe
+  checks — without any AI — whether it reads too simply for your readers (for adult books, under reading grade 5)
+  and which phrases it repeats from earlier chapters ("water ran off his elbows" again). Only when it does, the writer
+  polishes that chapter once: it joins some short sentences into longer, precise ones and says repeated phrases in a
+  new way. The story, the facts, the names, the numbers and every line of dialogue stay exactly as they were. The
+  polish is kept only if Akọwe's checks got better; otherwise the chapter stays as written. The run window shows both
+  numbers ("📏 Reading level 2.9 → 5.4 after polish in chapters 1, 3"), and so does the 📊 report. The same switch
+  lets the improve pass keep its repeated-phrase fixes on their own when the rest of its changes are not kept (those
+  chapters are checked and approved again like every chapter). At most one more AI answer per chapter, only for the
+  chapters that need it. Switch it off to write the chapters the old way.
 - **📈 Your books over time** (🏠 Book home and the 📊 Book report): "7.6/10 — down 0.4 from your last book",
   "Rule rigor is your weakest area for 3 books", and which scores are falling. Only numbers are kept for this,
   never your book's words.
