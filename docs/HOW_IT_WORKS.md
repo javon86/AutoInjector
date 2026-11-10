@@ -421,14 +421,24 @@ replaced by what you type.
   sampler, the model's own size, hires fix, ADetailer for the face or hands, words to avoid, a LoRA weight, another
   installed model, a new seed …), makes it again and judges again — up to 3 rounds (you can choose 1 to 5). It stops
   early when a picture passes, or when it stops getting better. Every round is kept and shown side by side with its
-  score and what changed. **✔ Keep this one** shows the one you like; **💾 Save these settings as a recipe** keeps its
+  score and what changed (a round whose picture couldn't be made shows ✖ and why, in plain words — for example "your
+  Stable Diffusion app reported an error while making it", with what to try). **✔ Keep this one** shows the one you like; **💾 Save these settings as a recipe** keeps its
   settings. Your own defaults are never changed. **⏹ Stop** stops it.
 - **Make 4, pick the best** (next to 🎨 Generate) makes 4 pictures with different seeds, judges each, and shows the best.
 - **Which AI judges** (🧑‍⚖️ AI judge settings, in the form): the first one that is ready, in this order unless you change it:
   1. **Claude Code** on your PC (it uses your Claude plan). AutoInjector puts the picture alone in an empty folder and
      lets Claude Code use only its Read tool to look at it.
   2. **A web AI pane** (Claude or ChatGPT): a new chat, with the picture uploaded. It never interrupts a pane Akọwe is
-     using for a book; it says so instead.
+     using for a book; it says so instead. Sites change how their "attach a file" works (claude.ai stopped keeping a
+     file box in its page in November 2026), so AutoInjector (`file-attach.js`) tries, in order: a file box in the page
+     (also one tucked inside a page component), the composer's **+** / 📎 / "Attach" button and its "Upload a file" /
+     "Add files or photos" item (the file window it would open is caught, so nothing pops up; "Google Drive",
+     "screenshot" and the like are never clicked), pasting the picture into the message box, and dropping it on the
+     message box. After each try it checks the picture really shows next to the message box (a thumbnail, a file
+     chip, its name). If it never shows, the question is **not sent** and the result says so in plain words — the AI
+     never judges a picture it can't see. **Web pane: check the picture shows in the chat before asking** (in the
+     judge settings, on by default) switches that check off if it ever wrongly says the picture is missing. The same
+     attach is used for the 🗄 locker's "give a file to an AI". The log keeps only what was tried (codes).
   3. **A local vision model** in Ollama (for example qwen2.5vl or llava): offline and free, but weaker — its verdicts
      are marked "weaker".
   The result always says which judge was used. Each judge can be switched off.

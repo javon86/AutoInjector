@@ -305,6 +305,10 @@ Chapter 1 is written before the rest of the book exists, and readers decide on t
   file of the settings that made it.
 - **🔒 Character locks** keep a character's face the same in every picture. **🧩 LoRAs** and **🧩 Add-ons** are for
   extra looks and tools.
+- **🧑‍⚖️ Judge** and **🔁 Make it better** ask an AI to look at the picture. When the Claude or ChatGPT pane is the
+  judge, AutoInjector puts the picture into a new chat by itself (with the **+** / attach button, or by pasting it) and
+  checks it really shows there before asking. If it can't, nothing is sent and you see why. If a round of Make it
+  better fails, its card shows ✖ and the reason in plain words.
 
 **In Akọwe:** 🖼 Pictures & cover makes pictures of characters, places and chapters, and the 🎨 cover. In a ⚡ run each
 character gets a portrait, which becomes that character's lock. Pictures never hold up the book.
@@ -390,6 +394,10 @@ Without it nothing breaks: every job goes to the web AIs, exactly as before. The
   AutoInjector notices by itself. Meanwhile, Akọwe gives the work to the other AIs.
 - **A book run pauses with ⚠️:** read the message on that step; it says what happened and what to do.
 - **Pictures or video fail:** run **🩺 Test pictures & video**.
+- **"The picture couldn't be uploaded to the Claude (web pane)":** open that pane and check you are signed in and a
+  new chat is showing, then judge again. If it keeps saying the picture "never showed as attached" although you can
+  see it in the chat, untick **Web pane: check the picture shows in the chat before asking** (🎨 Images → 🧑‍⚖️ AI judge
+  settings).
 - **To share a log yourself:** **⤓ Extract All** → **Last 24 hours**. Never choose **Everything**: it includes all
   your older, private conversations.
 

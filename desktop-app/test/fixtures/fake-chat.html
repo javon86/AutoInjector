@@ -57,6 +57,8 @@
               outside  the picture is in an article[data-turn="assistant"] wrapper
                        OUTSIDE the message's [data-message-author-role] div
     imgdelay  ms until the finished picture (default 1500 × speed)
+    upload    how a file gets into the chat (🧑‍⚖️ the picture judge): input (default) = a file input in the page;
+              menu = none until "+" → "Add files or photos" (claude.ai since 2026-11); paste = only a pasted picture
     avatar    1 = every assistant turn also has a 28 px avatar <img> (to ignore)
     (PC test 2026-10-28)
     curly     1 = replies are SHOWN with curly quotes (" -> “ ”, ' -> ’), the way
@@ -480,13 +482,45 @@
     }
   }
   // 🧑‍⚖️ the uploaded picture → the judge's JSON (one line, so the reply reads back as one JSON object)
-  const up = document.getElementById("fake-upload");
+  // upload=input (default): the file input above. upload=menu (claude.ai since 2026-11): NO file input in the page —
+  // "+" opens a menu on pointerdown, "Add files or photos" makes an input and opens the file chooser with it.
+  // upload=paste: no input and no button — only a picture pasted into the composer is taken. A taken file shows a
+  // chip (data-testid="file-thumbnail") next to the composer, like the real sites.
+  const UPLOAD = (Q.get("upload") || "input").toLowerCase();
+  let up = document.getElementById("fake-upload");
   F.attached = [];
-  if (up) up.addEventListener("change", () => { for (const f of up.files || []) F.attached.push({ name: f.name, size: f.size, type: f.type }); });
+  const takeFiles = (files, via) => {
+    for (const f of Array.from(files || [])) {
+      F.attached.push({ name: f.name, size: f.size, type: f.type, via });
+      if (UPLOAD !== "input") { const chip = el("div", { "data-testid": "file-thumbnail", class: "chip", text: "🖼" }); ed.parentNode.insertBefore(chip, ed); }
+    }
+  };
+  if (UPLOAD !== "input" && up) { up.remove(); up = null; }
+  if (up) up.addEventListener("change", () => takeFiles(up.files, "input"));
+  if (UPLOAD === "menu") {
+    const plus = el("button", { type: "button", "aria-label": "Open attachments menu", "aria-haspopup": "menu", text: "+" });
+    sendBtn.parentNode.insertBefore(plus, sendBtn);
+    let menu = null;
+    const close = () => { if (menu) { menu.remove(); menu = null; } };
+    plus.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0) return;
+      if (menu) { close(); return; }
+      menu = el("div", { role: "menu" }, document.body);
+      for (const [text, fn] of [["Take a screenshot", () => { F.wrongClicks = (F.wrongClicks || 0) + 1; }], ["Add files or photos", () => { const i = document.createElement("input"); i.type = "file"; i.onchange = () => takeFiles(i.files, "chooser"); i.click(); }]]) {
+        const m = el("div", { role: "menuitem", tabindex: "-1", text }, menu);
+        m.addEventListener("click", () => { fn(); close(); });
+      }
+    });
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") close(); });
+  } else if (UPLOAD === "paste") {
+    ed.addEventListener("paste", (e) => { const fs = e.clipboardData && e.clipboardData.files; if (fs && fs.length) { e.preventDefault(); takeFiles(fs, "paste"); } });
+  }
   function judgeHook() {
     F.judged = (F.judged || 0) + 1;
     const pic = F.attached.length > 0;
+    F.lastAttached = F.attached;
     F.attached = [];
+    for (const c of document.querySelectorAll('[data-testid="file-thumbnail"]')) c.remove();
     if (!pic) return { lines: ["I can't see a picture attached to your message."], to: "USER", tagged: true };
     const j = { scores: { prompt: 8, quality: 7, anatomy: 6, artifacts: 7, composition: 8, character: null }, verdict: "fix", good: ["the pane saw the picture", "good light"], bad: ["hands a little soft"], fixes: [{ type: "steps", delta: 4 }], prompt: { add: ["detailed hands"] } };
     return { lines: [JSON.stringify(j)], to: "USER", tagged: true };

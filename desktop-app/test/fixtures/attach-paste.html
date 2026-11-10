@@ -1,0 +1,9 @@
+<!doctype html><html><head><meta charset="utf-8"><title>attach: paste only</title></head><body>
+<!-- (c) no file input and no attach button: the composer takes a pasted picture (like pasting a screenshot). -->
+<script src="attach-common.js"></script>
+<script>
+(function () {
+  const A = window.__attach;
+  A.editor.addEventListener('paste', (e) => { const fs = e.clipboardData && e.clipboardData.files; if (fs && fs.length) { e.preventDefault(); A.take(fs, 'paste'); } });
+})();
+</script></body></html>
