@@ -1440,6 +1440,8 @@ def render_markdown(rep: dict) -> str:
     tr = rep.get("trend") or {}
     if tr.get("text"):
         L += ["## 📈 Your books over time", "", tr["text"], ""]
+    if rep.get("polish"):  # 📏 chapter_polish.py: the reading level before → after the chapter polish
+        L += [str(rep["polish"]), ""]
     if rep.get("improve"):
         L += [str(rep["improve"]), ""]
     L += ["## What to try next", ""]

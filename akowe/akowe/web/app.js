@@ -8260,6 +8260,17 @@ function improvePassSwitch(prefix) {
     h('p', { class: 'hint', id: `${id}-hint` }, 'On (recommended): when the book is made, the reviewers’ “What to try next”, the beta readers’ top fixes, the editor’s major notes (also of chapters you approved anyway) and Akọwe’s own checks (clock and tide times, repeated phrases, too-simple sentences) go to the chapters that need them most. The same AIs read the book again; the change is kept only if the score went up and nothing dropped — otherwise your book stays exactly as it was. The run window shows both scores. About 5 to 10 more AI answers per round.'));
   return { el, box, apply(body) { if (!box.checked) body.improve_pass = false; else if (rounds.value !== '2') body.improve_rounds = Number(rounds.value); } };
 }
+/** 📏 "Polish each chapter's sentences" (run setting chapter_polish): on by default */
+function chapterPolishSwitch(prefix) {
+  const id = `${prefix}-chapter-polish`;
+  const box = h('input', { type: 'checkbox', role: 'switch', id, 'data-testid': id, checked: true, 'aria-describedby': `${id}-hint` });
+  const state = h('span', { class: 'cpo-state', 'aria-hidden': 'true' }, 'On');
+  box.addEventListener('change', () => { state.textContent = box.checked ? 'On' : 'Off'; });
+  const el = h('fieldset', { class: 'field cpo-switch' }, h('legend', null, '📏 Sentence polish'),
+    h('div', { class: 'check-row' }, box, h('label', { for: id }, h('strong', null, 'Polish a chapter when it reads too simply or repeats earlier chapters'), ' ', state)),
+    h('p', { class: 'hint', id: `${id}-hint` }, 'On (recommended): as soon as a chapter is written, Akọwe checks its reading level for your readers and the phrases it repeats from earlier chapters (no AI). Only when needed, the writer polishes it once: joins some short sentences and says repeated phrases in a new way — never the story, the facts, the names, the numbers or the dialogue. The polish is kept only if the checks got better; otherwise the chapter stays as written. The same switch lets the final improve pass keep its repeated-phrase fixes when the rest of its changes are not kept. At most one more AI answer per chapter.'));
+  return { el, box, apply(body) { if (!box.checked) body.chapter_polish = false; } };
+}
 /** ✍ Chapter 1: two first pages, keep the better one (first_page) and rewrite chapter 1 last (opening_pass): both on */
 function chapterOneSwitch(prefix) {
   const mk = (key, label, hint) => {
@@ -8329,6 +8340,7 @@ async function renderMakeSetup() {
   const fb = fillBibleSwitch('mb');  // 📖 Fill the whole Book Bible before writing (whole_bible.py), off by default
   const hp = humanPassSwitch('mb');  // ✍ the end-of-book "sounds like a person" pass (human_voice.py), on by default
   const ipw = improvePassSwitch('mb');  // 🔁 the final improve pass (improve_pass.py), on by default
+  const cpo = chapterPolishSwitch('mb');  // 📏 the chapter polish (chapter_polish.py), on by default
   const c1 = chapterOneSwitch('mb');  // ✍ two first pages + chapter 1 rewritten last (first_page.py, opening_pass.py)
   const wr = WR.makeSetupSwitch(s7c());  // 🗳 Use the writers' room for the big twists (writers_room.py), off by default
   const ck = checkersField('mb');  // 🔎 PR #117: how many AIs check for mistakes (all by default)
@@ -8369,7 +8381,7 @@ async function renderMakeSetup() {
         h('div', { class: 'field' }, h('label', { for: 'mb-slot' }, 'Which AI'), slot, h('span', { class: 'hint' }, 'Automatic uses whichever AI is ready.'))),
       lengthBox,
       h('div', { class: 'field' }, h('label', { for: 'mb-idea' }, 'Your idea (optional)'), idea, ideaWarn, locksBox),
-      h('div', { class: 'field' }, h('label', { for: 'mb-pen-name' }, 'Pen name (optional)'), penName, h('span', { class: 'hint' }, 'Printed on the title page and cover. The AI never invents one: empty = the pen name you typed last, or none.')), cf.el, pipe.el, s7.el, fb.el, hp.el, ipw.el, c1.el, wr.el, ck.el, pics.el, ccf.el),
+      h('div', { class: 'field' }, h('label', { for: 'mb-pen-name' }, 'Pen name (optional)'), penName, h('span', { class: 'hint' }, 'Printed on the title page and cover. The AI never invents one: empty = the pen name you typed last, or none.')), cf.el, pipe.el, s7.el, fb.el, hp.el, cpo.el, ipw.el, c1.el, wr.el, ck.el, pics.el, ccf.el),
     later.el, err, modelTip(), h('div', { class: 'form-actions' }, startAll, startSet));
   form.insertBefore(h('div', { class: 'row mb-paste-row' }, paste, h('span', { class: 'small muted' }, 'Planned your book with an AI? Paste its starter sheet to fill these settings.')), form.querySelector('.mb-quick'));
   // ⏱ 3d: time, AI answers per AI and usage limits for exactly these settings; 📊 3e the usage meter per AI
@@ -8400,6 +8412,7 @@ async function renderMakeSetup() {
     fb.apply(body);  // 📖 the whole Book Bible before chapter one (only when switched on)
     hp.apply(body);  // ✍ the end-of-book pass (sent only when switched off)
     ipw.apply(body);  // 🔁 the final improve pass (sent only when changed)
+    cpo.apply(body);  // 📏 the chapter polish (sent only when switched off)
     c1.apply(body);  // ✍ chapter 1: two first pages / rewritten last (sent only when switched off)
     wr.apply(body);  // 🗳 the writers' room for the big twists (only when switched on)
     ck.apply(body);  // 🔎 how many AIs check for mistakes (sent only when not the default)
@@ -8766,6 +8779,7 @@ function runReportBox(r) {
     r.first_page && r.first_page.line ? h('p', { 'data-testid': 'mb-first-page' }, r.first_page.line) : null,
     rp && rp.opening ? h('p', { 'data-testid': 'mb-opening' }, rp.opening) : null,
     // 🔁 the final improve pass: both scores; 📈 this book against your last books
+    rp && rp.polish ? h('p', { 'data-testid': 'mb-polish' }, rp.polish) : null,  // 📏 reading level before → after the chapter polish
     rp && rp.improve ? h('p', { 'data-testid': 'mb-improve' }, rp.improve) : null,
     rp && rp.trend ? h('p', { 'data-testid': 'mb-trend' }, '📈 ', rp.trend) : null,
     CK.recordCard(s7c(), { compact: true, testid: 'mb-ck-record' }));  // 📊 how good each checker was (folded)
@@ -9288,6 +9302,7 @@ async function viewReport(main) {
         (r.trust_notes || []).length ? h('ul', { class: 'small', 'data-testid': 'rp-trust' }, r.trust_notes.map(n => h('li', { class: /^⚠️/.test(n) ? 'words-warn' : 'muted' }, n))) : null))));
     }
     if (rep.opening) holder.appendChild(h('p', { class: 'card small', 'data-testid': 'rp-opening' }, rep.opening));
+    if (rep.polish) holder.appendChild(h('p', { class: 'card small', 'data-testid': 'rp-polish' }, rep.polish));
     if (rep.improve) holder.appendChild(h('p', { class: 'card small', 'data-testid': 'rp-improve' }, rep.improve));
     if (ov.trend && ov.trend.line) holder.appendChild(qualityTrendCard(ov.trend, 'rp-trend', null));
     holder.appendChild(h('section', { class: 'card', 'data-testid': 'rp-next' }, h('h2', null, '🧭 What to try next'),

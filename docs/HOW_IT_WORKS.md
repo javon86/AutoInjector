@@ -629,6 +629,28 @@ to a minute), so the run knows which AIs work.
      says which was picked and why ("✍ First page: … picked opening B — …"; kept in `run.first_page`). If anything
      fails (no second AI, not two usable openings, a bad pick, an AI problem), chapter 1 is written exactly as before
      and only a code is logged (`state: fallback`, e.g. `NO_REVIEWER`, `OPENINGS_LENGTH`). 2 AI answers per book.
+   - **📏 Chapter polish** (code: `akowe/akowe/chapter_polish.py`; run setting `chapter_polish`, on by default; the
+     switch is on the Make-a-book screen). Right after the draft is written, before its review, Akọwe checks it
+     without any AI: the reading grade against the floor for the book's readers (adult 5, young adult 4, middle grade
+     3, none for children) and the phrases, similes and gestures it repeats from the chapters before it (the earlier
+     chapters are read as one block, so only repeats INTO this chapter count), plus plain-word tics. When the chapter
+     is under the floor or has 2 or more repeats, its writer gets ONE targeted request through the editor's rewrite
+     path: exact passages only (the stretches of shortest sentences without dialogue, and the sentences that
+     repeat), the keep list, protected facts and approved canon, and the polish rules (join some short sentences into
+     longer precise ones, say repeated phrases anew; never change what happens, a fact, a name, a number or a line of
+     dialogue). The polished text is **kept only if** the checks improved (the grade rose by at least 0.3 while under
+     the floor, or fewer repeats or tics) and nothing got worse (more repeats or tics, more AI-sounding phrases, a
+     grade that drops under the floor or above the readers' usual range), every line of dialogue, name and number is
+     unchanged, the length stays within ±20 %, and Akọwe's canon checks accept the saved version; otherwise the draft
+     stays as written. Repeats Akọwe itself only guessed to be motifs ("comes back in 2 chapters, never crowded") may
+     be said anew; a repeat you labelled, a voice-card phrase or a world detail stays protected. At most one polish
+     per chapter (also after a pause); never a chapter you wrote; a chapter that reads well costs nothing. The run
+     window says per chapter "📏 Chapter 3 polished: reading level 2.9 → 5.4, repeats from earlier chapters 3 → 0
+     (kept)" and, after the chapters (also in the run's report box and the 📊 report), "📏 Reading level 2.9 → 5.4
+     after polish in chapters 1, 3". Counted in the ⏱ estimate: 1 answer per chapter when your last book read
+     too simply or repeated phrases, else about a quarter of the chapters. The writer's brief
+     already asks for this (`quality_lessons.reading_level`: the floor, a target range such as 6–8, the mix of
+     sentence lengths and one example of two short sentences joined).
    - **Akọwe's own checks**, then **two independent reviewers**: both AIs that did not write the chapter read it, each
      on its own. If either asks for changes, the writer fixes the draft, at most twice; it is approved only when
      neither objects. (With only one other AI working, one reviews it, as before.) A chapter that breaks your content
@@ -743,6 +765,16 @@ to a minute), so the run knows which AIs work.
     off (Settings › Editor, rounds 0, or the run's pipeline) the pass does nothing and says so. The run window ("Improve until better"
     step), the journal and the report say both numbers: "🔁 Improve pass: 7.6 → 8.1/10 (kept)". About (chapters +
     reviewers) answers per round plus the kept chapters' reviews — counted in the ⏱ estimate.
+    **A round that is not kept still keeps its repeated-phrase fixes** when they are safe (`improve_pass.repeat_only`,
+    run setting `chapter_polish`, the same switch as the 📏 chapter polish): only the replacements that answered a
+    repeated phrase or a plain-word tic (each ≤ 400 characters), applied alone to the chapter as it is, and only if
+    the whole book then repeats fewer phrases or leans less on plain words and nothing got worse (no new repeat, the
+    chapter's reading grade not lower, no more AI-sounding phrases, the editor's keep quotes, every line of dialogue,
+    name and number unchanged). No new AI call and no score is claimed for it: those chapters go through the usual
+    review and approval (a chapter the reviewer does not pass gets its text back) and the book is exported again. The
+    line then adds "· repeated phrases fixed alone in chapter(s) 3 (repeats 3 → 1)". Repeats that Akọwe itself only
+    guessed to be motifs ("comes back in 2 chapters, never crowded") may be said anew by these fixes; a repeat you
+    labelled, a voice-card phrase or a world detail stays protected.
 14. **📈 Quality history** (code: `akowe/akowe/quality_history.py`): when a run finishes, the report's numbers — the
     overall score, the median of each whole-book dimension, the editor's average per category, the "sounds like a
     person" score, the reading grade, the beta average, fixed habit codes (`triad`, `simile`, `word:went`, `clock`,
@@ -910,7 +942,9 @@ All four are on the ⚡ **AI writes the whole book** screen (code: `akowe/akowe/
   change the length, how many AIs check for mistakes, the writers' room, beta readers, character pictures, "fill the
   whole Book Bible", the end-of-book "sounds like a person" pass (about 2 answers), ✍ the two first pages (2
   answers) and chapter 1 rewritten last (1 rewrite + the reviewers' re-read + 1 review), the 🔁 improve pass and its
-  rounds (per round the rewrites plus the reviewers' re-read, plus the kept chapters' reviews), the Claude Code helpers, "when
+  rounds (per round the rewrites plus the reviewers' re-read, plus the kept chapters' reviews), 📏 the chapter polish
+  (at most 1 answer per chapter, only when needed: every chapter if your last book read too simply or repeated, else
+  about a quarter), the Claude Code helpers, "when
   only one AI works" and which AI writes. It starts from the P28 numbers (`costs.estimate`: AI calls per step); once
   this PC has finished runs, it uses their measured seconds per answer, each AI's share of the answers, and the
   answers of the optional steps. The usage limits are rough public guesses (Claude ~40 long messages per 5 hours,
@@ -965,6 +999,7 @@ All four are on the ⚡ **AI writes the whole book** screen (code: `akowe/akowe/
 | 📏 Special rules bounded (no AI + one AI update) | a ghost, magic or device rule with no scope, cost or limits | after the story rules and after the plan |
 | ✍ Two first pages | a weak first page (chapter 1 is written before anything else) | before chapter 1 is written (on by default) |
 | ✍ Rewrite chapter 1 last | a chapter 1 that loses readers, gives the twist away or plants nothing — kept only if the same reviewers score the book at least as well | after the beta readers, before the improve pass (on by default) |
+| 📏 Chapter polish | a draft under the reading floor for its readers, or repeating phrases of earlier chapters — one polish, kept only if the no-AI checks improved and nothing protected changed | right after each chapter's draft, before its review (on by default) |
 | 🔁 Improve until better | what the reviewers, beta readers, the editor and Akọwe's checks found — kept only if the same reviewers score it higher | after the beta readers, at the end of a ⚡ run (on by default) |
 | 📈 Quality history and 🧠 lessons | your recurring weak areas and habits | recorded when a run finishes; given to the next book's planners and writer |
 | Pattern check (no AI) | repeated habits ("went very still"), lists of three, same-length sentences; a habit 2+ checks flag (pattern, originality, editor) is a must-fix for the editor, and the run says how many are left | before the editor |

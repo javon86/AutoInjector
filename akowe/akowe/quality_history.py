@@ -368,7 +368,8 @@ PLAN_RULE = ("Lessons from the author's last books (context.lessons): plan so th
 BRIEF_RULE = ("Lessons (context.writing_brief.quality_lessons): from_your_last_books and this_book_so_far are what "
               "readers and editors marked down before — do better on each; never reuse anything in avoid; keep every "
               "time and tide consistent with clock; must_fix are contradictions in the chapters before that this "
-              "chapter must not repeat or build on; reading_level is the floor for this book's readers.")
+              "chapter must not repeat or build on; reading_level is the floor and the target for this book's readers "
+              "— follow its mix of sentence lengths.")
 
 
 def _bounded(block: dict, budget: int, order: tuple, cut: list | None, what: str) -> dict:
@@ -469,8 +470,13 @@ def reading_floor(store, pid: str) -> str | None:
         return None
     if floor is None:
         return None
-    return (f"{aud['label']} readers: aim for a reading grade of at least {floor:g} — mix short sentences with "
-            "longer, more complex ones and precise words; never write like a children's book.")
+    # concrete (📏): a target grade, the mix of sentence lengths and one joined sentence as an example
+    mx = int(aud.get("sentence_max") or 24)
+    return (f"{aud['label']} readers: aim for a reading grade of at least {floor:g} (about {floor + 1:g}–"
+            f"{floor + 3:g} is right). Mix sentence lengths: a few short ones for punch, most of 10–{mx - 4} words, "
+            f"and a longer, precise sentence ({mx + 1}+ words) in most paragraphs. Join short sentences that belong "
+            "together: not “He stopped. He listened. The mill was quiet.” but “He stopped at the mill door and "
+            "listened, but the wheel had gone quiet.” Never write like a children's book.")
 
 
 def brief_block(store, pid: str, branch: str, outline: dict | None, chapter_id: str, cut: list | None = None,

@@ -58,7 +58,8 @@ def made(tmp_path, editor=False, name="data"):
     app = make_app(tmp_path, fake, slots=("AI-1", "AI-2"), name=name)
     if not editor:
         app.review.editor.save_settings({"enabled": False})
-    run = run_book(app, {"slot_id": "AI-1"})
+    # 📏 the chapter polish would already rework these simple, repeating drafts: these tests check the trims themselves
+    run = run_book(app, {"slot_id": "AI-1", "chapter_polish": False})
     assert run["status"] == "done", (run["phase"], run.get("problem"))
     return app, fake, run
 

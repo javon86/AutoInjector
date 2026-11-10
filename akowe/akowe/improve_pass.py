@@ -22,6 +22,11 @@ earlier text back), the book is put together and exported again and the report i
 Otherwise the original book stays exactly as it was. Both numbers are said in the run window, the journal and the
 report ("🔁 Improve pass: 7.6 → 8.1, kept"). A round that does not improve ends the pass.
 
+📏 A round that is not kept still keeps its phrase-repeat fixes alone when they are safe (``repeat_only``; run setting
+``chapter_polish``): only the replacements that answered a repeated phrase or a plain-word tic, applied to the
+chapter as it is, kept when the whole book then repeats less and nothing else got worse or changed (Akọwe's own
+checks, no AI); those chapters then go through the usual review and approval like a kept round's chapters.
+
 Never blocks the book: an AI problem is a ⚠️ note (only the run's pause / cancel stop it). AI calls go through the
 usual request plumbing (assist._call_ai, usage limits, failover). Logs: codes and numbers only.
 """
@@ -160,6 +165,9 @@ def targets(store, pid: str, branch: str, chapters: list[dict], rep: dict | None
                 _add(out, ch, "repeat", {"dimension": "prose_variety", "passage": q if q in ch["text"] else "",
                                          "why": f"{f['label']}: {f['message']}", "suggestion": "Say it in a new way "
                                          "only this moment could have."})
+                row = out.get(ch["number"])
+                if row is not None and f.get("what") and f["what"] not in row.setdefault("phrases", []):
+                    row["phrases"].append(f["what"])
     # 4. plain-word tics: to the chapter that leans on them most
     allt = "\n".join(c["text"] for c in chapters)
     for t in quality_history.word_tics(allt)[:3]:
@@ -309,7 +317,7 @@ def _run(runner, run, st, mem):
         return
     if mem.get("approving"):  # resumed while kept chapters waited for their review
         _approve_kept(runner, run, st, mem)
-    while int(mem.get("done") or 0) < rounds:
+    while int(mem.get("done") or 0) < rounds and not mem.get("stop"):
         runner.check(run)
         rep = rp.latest(pid, branch) if rp else None
         agg = (rep or {}).get("aggregate") or {}
@@ -378,6 +386,7 @@ def _run(runner, run, st, mem):
         runner.event(run, "improve", line(res) + f" — round {n}, chapter(s) {', '.join(map(str, row['chapters']))}",
                      step="improve", code="IMPROVE_KEPT" if res["keep"] else "IMPROVE_NOT_KEPT")
         if not res["keep"]:
+            _repeat_fixes(runner, run, st, mem, chapters, cands, n)
             break
         # what to approve is kept for a resume: numbers in the run, the reviewers' re-read with the book's data
         app.store.set_setting(RESCORE_KEY.format(pid=pid, branch=branch), {"reviews": again.get("reviews") or [],
@@ -400,6 +409,10 @@ def _propose(runner, run, todo, n, rounds, total) -> list[dict]:
     for t in todo:
         runner.check(run)
         craft = {"findings": t["findings"], "keep": [], "slot": None, "version": t["version"], "improve": True}
+        if t.get("phrases"):  # 📏 a repeat Akọwe only guessed to be a motif may be said anew (never the author's)
+            from .chapter_polish import released_motifs  # noqa: PLC0415
+            craft["except_keys"] = released_motifs(runner.app.engine, run["principal"], run["project_id"],
+                                                   run["branch_id"], t["phrases"])
         try:
             with ai_activity.doing(f"Improve pass: reworking chapter {t['number']}",
                                    done=f"Improve pass: reworked chapter {t['number']}", chapter=t["number"],
@@ -419,9 +432,113 @@ def _propose(runner, run, todo, n, rounds, total) -> list[dict]:
                                  t["findings"], list(prop.get("keep") or []))
         if not res["applied"]:
             continue
+        by_f = {f["id"]: f for f in t["findings"]}
         out.append({"chapter_id": t["chapter_id"], "number": t["number"], "record_id": t["record_id"],
-                    "version": t["version"], "text": res["text"], "applied": len(res["applied"])})
+                    "version": t["version"], "text": res["text"], "applied": len(res["applied"]),
+                    "fixes": [dict(a, source=(by_f.get(a["finding_id"]) or {}).get("source"),
+                                   passage=(by_f.get(a["finding_id"]) or {}).get("passage") or "")
+                              for a in res["applied"]]})
     return out
+
+
+# ====================================================================== 📏 a round not kept: its repeat fixes alone
+REPEAT_SOURCES = ("repeat", "tic")
+REPEAT_ORIGINAL_MAX = 400   # a phrase-level change, never a rewritten scene
+
+
+def _book_repeats(chs: list[dict]) -> tuple[int, int]:
+    """(phrases / similes / gestures repeated across chapters, uses of plain-word tics) of the whole book."""
+    from . import human_voice, quality_history  # noqa: PLC0415
+    f = [x for x in human_voice.repeats(chs).get("findings") or [] if x.get("kind") in ("phrase", "gesture")]
+    return len(f), sum(t["count"] for t in quality_history.word_tics("\n".join(c["text"] for c in chs)))
+
+
+def repeat_only(chapters: list[dict], cands: list[dict], names=(), keeps: dict | None = None) -> list[dict]:
+    """The safe rule for a round that was NOT kept (no AI): from each rewritten chapter take only the replacements
+    that answered a repeated phrase or a plain-word tic (each ≤ REPEAT_ORIGINAL_MAX characters) and apply them alone
+    to the chapter as it is. They are kept only if the book then repeats fewer phrases or leans less on plain words,
+    and nothing else got worse or changed: no new repeat, the chapter's reading grade not lower, no more AI-sounding
+    phrases, every line of dialogue, name and number as before (chapter_polish.protected_change). The whole-book
+    score was never measured for this smaller change, so it is not claimed: the chapters then go through the usual
+    review and approval. ``keeps``: chapter id -> the quotes the editor said to keep (never changed). Returns
+    [{chapter_id, number, record_id, version, accept, text, before, after}]."""
+    from . import originality, readability  # noqa: PLC0415
+    from .chapter_polish import protected_change  # noqa: PLC0415
+    from .editor import apply_replacements  # noqa: PLC0415
+    work = [dict(c) for c in chapters]
+    idx = {c["chapter_id"]: i for i, c in enumerate(work)}
+    base = _book_repeats(work)
+    out = []
+    for c in cands:
+        fixes = [a for a in c.get("fixes") or [] if a.get("source") in REPEAT_SOURCES
+                 and len(a.get("original") or "") <= REPEAT_ORIGINAL_MAX]
+        i = idx.get(c["chapter_id"])
+        if not fixes or i is None or work[i].get("version") != c.get("version"):
+            continue
+        old = work[i]["text"]
+        res = apply_replacements(old, [{k: a[k] for k in ("finding_id", "original", "replacement")} for a in fixes],
+                                 [{"id": a["finding_id"], "passage": a.get("passage") or ""} for a in fixes],
+                                 list((keeps or {}).get(c["chapter_id"]) or []))
+        if not res["applied"]:
+            continue
+        new = res["text"]
+        if protected_change(old, new, names) or originality.counts(new) > originality.counts(old):
+            continue
+        g0, g1 = readability.chapter(old).get("grade"), readability.chapter(new).get("grade")
+        if g0 is not None and g1 is not None and g1 < g0 - 0.1:
+            continue
+        trial = list(work)
+        trial[i] = dict(work[i], text=new)
+        now = _book_repeats(trial)
+        if now[0] > base[0] or now[1] > base[1] or now == base:
+            continue
+        out.append({"chapter_id": c["chapter_id"], "number": c["number"], "record_id": c["record_id"],
+                    "version": c["version"], "accept": [a["finding_id"] for a in res["applied"]], "text": new,
+                    "before": base[0] + base[1], "after": now[0] + now[1]})
+        work, base = trial, now
+    return out
+
+
+def repeat_line(mem: dict) -> str:
+    rf = mem.get("repeat_fixes") or {}
+    if not rf.get("chapters"):
+        return ""
+    return (f" · repeated phrases fixed alone in chapter(s) {', '.join(map(str, rf['chapters']))} (repeats "
+            f"{rf.get('before')} → {rf.get('after')})")
+
+
+def _repeat_fixes(runner, run, st, mem, chapters, cands, n):
+    """A round was not kept: keep its repeat fixes alone when repeat_only says they are safe (run setting
+    ``chapter_polish``, the same switch as the chapter polish). No AI call of its own: the chapters go through the
+    usual review and approval like a kept round's (a chapter the reviewer does not pass gets its text back)."""
+    from . import chapter_polish  # noqa: PLC0415
+    if not chapter_polish.enabled(run.get("settings")):
+        return
+    pid, branch = run["project_id"], run["branch_id"]
+    try:
+        names = runner._review.editor.names(pid, branch)  # noqa: SLF001
+    except Exception:  # noqa: BLE001
+        names = []
+    from .editor import _rkey, keep_quotes_of  # noqa: PLC0415
+    crafts = runner._review.editor.crafts(pid, branch) or {}  # noqa: SLF001
+    keeps = {c["chapter_id"]: keep_quotes_of(crafts.get(_rkey(c["record_id"], c["version"])) or {}, c["text"])
+             for c in chapters}
+    picked = repeat_only(chapters, cands, names, keeps)
+    if not picked:
+        return
+    mem["stop"] = True  # this ends the pass, also after a resume
+    mem["repeat_fixes"] = {"round": n, "before": picked[0]["before"], "after": picked[-1]["after"],
+                           "chapters": [p["number"] for p in picked]}
+    runner.app.store.set_setting(RESCORE_KEY.format(pid=pid, branch=branch), {"reviews": [], "round": n,
+                                                                             "at": _now()})
+    mem["approving"] = {"chapters": [{k: p[k] for k in ("chapter_id", "number", "record_id", "version", "accept")}
+                                     for p in picked], "round": n, "repeat_only": True}
+    runner.event(run, "improve", "🔁 Improve pass: the repeated-phrase fixes alone are kept in chapter(s) "
+                 f"{', '.join(str(p['number']) for p in picked)} (repeats {picked[0]['before']} → "
+                 f"{picked[-1]['after']}); they go through the usual review", step="improve",
+                 code="IMPROVE_REPEATS_KEPT")
+    runner.save(run)
+    _approve_kept(runner, run, st, mem)
 
 
 def _approve_kept(runner, run, st, mem):
@@ -448,7 +565,7 @@ def _approve_kept(runner, run, st, mem):
             continue
         if head["version"] == c["version"]:
             try:
-                ed.apply(run["principal"], pid, branch, c["record_id"], c["version"], None, how="run")
+                ed.apply(run["principal"], pid, branch, c["record_id"], c["version"], c.get("accept"), how="run")
             except AkoweError as exc:
                 runner.event(run, "note", f"⚠️ Improve pass: chapter {c['number']}'s rewrite could not be saved "
                              f"({exc.code}); its text stays as it was", step="improve", code="IMPROVE_APPLY_FAILED")
@@ -481,7 +598,8 @@ def _approve_kept(runner, run, st, mem):
                          "its approved text is back", step="improve", code="IMPROVE_NOT_APPROVED")
         c["state"] = "done"
         runner.save(run)
-    clear(app.store, pid, branch, [c["chapter_id"] for c in ap.get("chapters") or [] if c["number"] not in back])
+    clear(app.store, pid, branch, [c["chapter_id"] for c in ap.get("chapters") or [] if c["number"] not in back
+                                   and not c.get("accept")])  # repeat fixes alone leave the other notes waiting
     rp = getattr(app, "reports", None)
     rows = (app.store.get_setting(RESCORE_KEY.format(pid=pid, branch=branch)) or {}).get("reviews") or []
     if rp and rows and len(back) < len(ap.get("chapters") or []):
@@ -498,7 +616,12 @@ def _approve_kept(runner, run, st, mem):
             if getattr(exc, "control", False):
                 raise
             log.warning("improve pass: the report could not be saved: %s", getattr(exc, "code", type(exc).__name__))
-    mem["kept"] = int(mem.get("kept") or 0) + 1
+    if ap.get("repeat_only"):  # 🔁 only the phrase-repeat fixes of a round that was not kept
+        rf = mem.setdefault("repeat_fixes", {})
+        rf["chapters"] = [c["number"] for c in ap.get("chapters") or [] if c["number"] not in back]
+        rf["back"] = back
+    else:
+        mem["kept"] = int(mem.get("kept") or 0) + 1
     mem.pop("approving", None)
     _export_again(runner, run)
     runner.save(run)
@@ -520,7 +643,7 @@ def _finish(runner, run, st, mem):
     mem.update(before=first, after=final, kept=bool(kept), last_try=rs[-1].get("after"))
     res = {"before": first, "after": final if kept else rs[-1].get("after"), "keep": bool(kept),
            "why": rs[-1].get("why")}
-    mem["line"] = line(res) + (f" · {len(rs)} round(s)" if len(rs) > 1 else "")
+    mem["line"] = line(res) + (f" · {len(rs)} round(s)" if len(rs) > 1 else "") + repeat_line(mem)
     st["message"] = mem["line"]
     run.setdefault("report", {})["improve"] = mem["line"]
     try:  # the report says both numbers too
@@ -528,6 +651,8 @@ def _finish(runner, run, st, mem):
         rep = rp.latest(run["project_id"], run["branch_id"]) if rp else None
         if rep:
             rep["improve"] = mem["line"]
+            if (run.get("report") or {}).get("polish"):  # 📏 a remade report keeps the chapter polish's line
+                rep["polish"] = run["report"]["polish"]
             rp._save(run["project_id"], run["branch_id"], rep)  # noqa: SLF001
     except Exception:  # noqa: BLE001 - a line in the report never breaks the run
         log.exception("could not add the improve line to the report")

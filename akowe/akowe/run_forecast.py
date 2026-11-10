@@ -8,13 +8,14 @@ around which chapter — a limit will probably pause it:
 * **options** (``OPTION_MODEL``): how many AIs check for mistakes (all / two / one), the writers' room, beta readers,
   character pictures (Stable Diffusion: time, no AI answers), "fill the whole Book Bible", the end-of-book "sounds like
   a person" pass (PR #133: about 2 answers), the 🧑‍⚖️ stand-in's votes at the story checkpoints (at most one vote
-  per AI per checkpoint, up to its decisions per run — only when the author does not answer), ✍ chapter 1 rewritten last (1 rewrite + the reviewers' re-read + 1
-  review) and the two first pages (2 answers), the 🔁 final improve pass (rounds × (rewrites + the reviewers' re-read)
-  + the kept chapters' reviews), the 🤖 Claude Code helpers and "when only one AI works". With measured
-  runs, the options whose answers fall inside the measured steps (the checkers, the writers' room and the end pass)
-  count only as the DIFFERENCE from the options those runs had (they are already in the measured numbers), and the
-  optional steps P28 does not model (beta readers, the whole Book Bible) use their own measured answers when there
-  are some;
+  per AI per checkpoint, up to its decisions per run — only when the author does not answer), ✍ chapter 1 rewritten
+  last (1 rewrite + the reviewers' re-read + 1 review) and the two first pages (2 answers), 📏 the chapter polish
+  (≤ 1 rewrite per chapter, only when needed), the 🔁 final improve pass (rounds × (rewrites + the reviewers'
+  re-read) + the kept chapters' reviews), the 🤖 Claude Code helpers and "when only one AI works". With measured
+  runs, the options whose answers fall inside the measured steps (the checkers, the writers' room, the end pass and
+  the chapter polish) count only as the DIFFERENCE from the options those runs had (they are already in the measured
+  numbers), and the optional steps P28 does not model (beta readers, the whole Book Bible) use their own measured
+  answers when there are some;
 * **per AI**: the writer (the AI picked, else the first) writes, the other AIs review and check; measured runs' share
   of answers per AI replaces that guess; option answers go where the option sends them (the checkers to every AI,
   beta readers and the end pass to the AIs that did not write, the helpers to Claude Code);
@@ -45,7 +46,7 @@ CARRY_ON_SHARE = 0.25          # share of a limit pause that still makes the run
 CHAPTERS_FROM, CHAPTERS_TO = 0.15, 0.9   # where the chapters lie in the run's time (the rest: planning, the end)
 DEFAULT_AIS = (("AI-1", "AI-1 · Claude", "claude"), ("AI-2", "AI-2 · ChatGPT", "chatgpt"),
                ("AI-3", "AI-3 · Gemini", "gemini"))
-INSIDE_MEASURED = ("checkers", "writers_room", "human_pass", "first_page")   # their answers are inside costs' measured steps
+INSIDE_MEASURED = ("checkers", "writers_room", "human_pass", "first_page", "chapter_polish")   # their answers are inside costs' measured steps
 OWN_STEP = {"beta": "beta", "bible": "bible", "improve": "improve", "opening": "opening"}   # option -> its own run step (measured when made)
 
 
@@ -82,10 +83,16 @@ def options_of(app, body: dict | None) -> dict:
             "pictures": pics, "fill_bible": b.get("fill_bible") is True, "human_pass": b.get("human_pass") is not False,
             "improve_pass": b.get("improve_pass") is not False,
             "opening_pass": b.get("opening_pass") is not False, "first_page": b.get("first_page") is not False,
+            "chapter_polish": b.get("chapter_polish") is not False, "polish_share": _polish_share(app),
             "improve_rounds": b.get("improve_rounds") if isinstance(b.get("improve_rounds"), int)
             and not isinstance(b.get("improve_rounds"), bool) and 1 <= b.get("improve_rounds") <= 3 else 2,
             "claude_code": cc_on, "single_ai": b.get("single_ai") if b.get("single_ai") in SINGLE_AI else "continue",
             "slot_id": b.get("slot_id") if isinstance(b.get("slot_id"), str) and b.get("slot_id") else None}
+
+
+def _polish_share(app) -> float:
+    from . import chapter_polish  # noqa: PLC0415
+    return chapter_polish.expected_share(getattr(app, "store", None), getattr(app, "principal_id", None))
 
 
 def option_calls(opts: dict, n: int, ais: int) -> dict:
@@ -120,6 +127,13 @@ def option_calls(opts: dict, n: int, ais: int) -> dict:
                       "label": "Rewrite chapter 1 last (with the whole book in view)"}
     out["first_page"] = {"calls": 2 if opts.get("first_page") else 0, "to": "all",
                          "label": "Two first pages for chapter 1, keep the better one"}
+    # 📏 chapter polish (chapter_polish.py): at most one rewrite request per chapter, only for a chapter that reads
+    # under the floor or repeats earlier chapters: every chapter when the author's last book did, else about a quarter
+    share = opts.get("polish_share")
+    share = share if isinstance(share, (int, float)) and 0 <= share <= 1 else 1.0
+    out["chapter_polish"] = {"calls": math.ceil(share * n) if opts.get("chapter_polish") else 0, "to": "writer",
+                             "label": "Polish each chapter's sentences when it reads too simply or repeats (only "
+                                      "when needed)"}
     out["pictures"] = {"calls": 0, "to": "none", "label": "Character pictures (Stable Diffusion: no AI answers)",
                        "minutes": PICTURES * PICTURE_MIN if opts.get("pictures") else 0}
     # 🧑‍⚖️ the stand-in vote at a story checkpoint the author does not answer: every AI votes on each waiting problem
@@ -160,7 +174,8 @@ def _run_opts(j: dict) -> dict:
             "human_pass": s.get("human_pass") is not False, "beta_readers": (s.get("beta_readers") or 1)
             if s.get("beta_reader") else 0, "fill_bible": bool(s.get("fill_bible")),
             "improve_pass": bool(s.get("improve_pass")), "improve_rounds": s.get("improve_rounds") or 2,
-            "opening_pass": s.get("opening_pass") is True, "first_page": s.get("first_page") is True}
+            "opening_pass": s.get("opening_pass") is True, "first_page": s.get("first_page") is True,
+            "chapter_polish": s.get("chapter_polish") is True}
 
 
 def calibration(app, n: int, opts: dict, ais: int) -> dict:
