@@ -929,6 +929,15 @@ class App:
                 val = clean_retry_settings(body)
                 self.store.set_setting("ai_retry", val)
                 return 200, val
+        if parts == ["settings", "claude-code", "window"] and method == "POST":  # 🤖 ⌨ open Claude Code in a window
+            from . import claude_code_window  # noqa: PLC0415
+            try:
+                return 200, claude_code_window.open_window(
+                    self.store, local=self.is_local(), install=bool(isinstance(body, dict) and body.get("install")))
+            except claude_code_window.WindowError as exc:
+                api_code = {"LOCAL_ONLY": "PERMISSION_DENIED"}.get(exc.code, "CAPABILITY_UNAVAILABLE")
+                raise ApiError(403 if exc.code == "LOCAL_ONLY" else 409, api_code, "/settings/claude-code/window",
+                               exc.message) from exc
         if parts[:2] == ["settings", "claude-code"]:  # 🤖 Settings › Claude Code helpers (claude_code.py)
             from . import claude_code  # noqa: PLC0415
             return claude_code.route(self.store, method, parts[2:], body)

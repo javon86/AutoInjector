@@ -46,14 +46,28 @@ export function helpersCard(c) {
       try { draw(await api('PUT', '/settings/claude-code', { body })); toast('Saved'); }
       catch (e) { box.appendChild(problemBox(toProblem(e, where))); }
     } }, 'Save');
+    // ⌨ a command window on this computer with `claude` already started (claude_code_window.py)
+    const notInstalled = cur.status.state === 'not_installed';
+    const winMsg = h('p', { class: 'small', 'data-testid': 'cc-window-msg', 'aria-live': 'polite' });
+    const openWindow = async (btn, install) => {
+      btn.disabled = true; winMsg.textContent = install ? 'Opening the installer…' : 'Opening Claude Code…';
+      try { const out = await api('POST', '/settings/claude-code/window', { body: { install } }); winMsg.textContent = out.message; }
+      catch (e) { winMsg.textContent = ''; box.appendChild(problemBox(toProblem(e, where))); }
+      finally { setTimeout(() => { btn.disabled = false; }, 3000); }
+    };
+    const openBtn = h('button', { type: 'button', class: notInstalled ? 'small' : 'small primary', 'data-testid': 'cc-open-window',
+      title: 'Opens a command window on this computer with Claude Code already started', onclick: () => openWindow(openBtn, false) }, '⌨ Open Claude Code');
+    const install = h('button', { type: 'button', class: 'small primary', 'data-testid': 'cc-install-window',
+      title: 'Runs Anthropic’s official Claude Code installer in a window you can watch', onclick: () => openWindow(install, true) }, '⬇ Install Claude Code');
     put(clear(box), statusLine(c, Object.assign({ install_url: cur.install_url }, cur.status)),
       h('div', { class: 'grid-2' }, h('div', { class: 'field' }, h('label', { for: 'cc-on' }, 'Claude Code helpers'), on),
         h('div', { class: 'field' }, h('label', { for: 'cc-n' }, 'Helpers at once (1–5)'), n, h('span', { class: 'hint' }, 'More helpers finish sooner but use your Claude plan’s limits faster. 3 is a good start.'))),
       h('fieldset', { class: 'field' }, h('legend', null, 'Which jobs the helpers do'), ...jobs),
       specs.length ? h('fieldset', { class: 'field', 'data-testid': 'cc-specialists' }, h('legend', null, 'Which specialist reviewers run'),
         h('p', { class: 'hint' }, 'Each reads only the chapters where it helps (dialogue: chapters where that character speaks; senses: chapters with few; subtext: chapters that name feelings). They never review a chapter Claude wrote.'), ...specs) : null,
-      h('p', { class: 'small muted' }, cur.shares_limits, ' To sign in: open PowerShell, type ', h('code', null, 'claude'), ', press Enter and follow the steps once.'),
-      h('div', { class: 'row' }, save, recheck));
+      h('p', { class: 'small muted' }, cur.shares_limits, ' To sign in, press ', h('strong', null, notInstalled ? '⬇ Install Claude Code' : '⌨ Open Claude Code'),
+        notInstalled ? ', wait until the window says it is done, then press ⌨ Open Claude Code and follow its steps once.' : ' and follow its steps once in the window that opens.'),
+      h('div', { class: 'row' }, save, recheck, ...(notInstalled ? [install, openBtn] : [openBtn])), winMsg);
   };
   (async () => {
     for (let i = 0; i < 40; i++) {  // the status is checked in the background: ask again while it says "checking"
