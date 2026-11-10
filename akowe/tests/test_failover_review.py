@@ -376,7 +376,7 @@ def test_pinned_run_still_gets_an_independent_reviewer(tmp_path):
     assert run["status"] == "done", (run["phase"], run.get("problem"))
     writes = {s for s, k in fake.per_slot if k not in ("review", "fail", "craft", "scene_review", "planned", "ending",
                                                        "book_review", "checkpoint", "originality",
-                                                       "human_rewrite")}  # P13: the whole-book read is a review; PR #117: every AI checks
+                                                       "human_rewrite", "first_page_pick")}  # P13: the whole-book read is a review; PR #117: every AI checks
     #                                                                          (a checkpoint read is a check); ✍ the
     #                                                                          end-of-book read and its suggestions
     #                                                                          come from the AI that did not write
@@ -388,6 +388,8 @@ def test_pinned_run_still_gets_an_independent_reviewer(tmp_path):
     assert {s for s, k in fake.per_slot if k == "planned"} == {"AI-1"}  # and the planned-to-page checker (P11)
     assert {s for s, k in fake.per_slot if k == "book_review"} == {"AI-1"}  # and the whole-book report (P13)
     assert {s for s, k in fake.per_slot if k in ("originality", "human_rewrite")} == {"AI-1"}  # ✍ and the end pass
+    assert {s for s, k in fake.per_slot if k == "first_page_pick"} == {"AI-1"}  # ✍ and the first-page pick
+    assert {s for s, k in fake.per_slot if k in ("openings", "opening_rewrite")} == {"AI-2"}  # the writer drafts
 
 
 # ============================================================================================ real adapter

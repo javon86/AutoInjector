@@ -209,6 +209,23 @@ Every chapter is checked several times before it counts as part of the book:
   works (scope), what it costs and what it can never do (limits). If one does not, the AI fills them in once, before
   the plan is written.
 
+### ✍ Chapter 1: two first pages, and rewritten last
+
+Chapter 1 is written before the rest of the book exists, and readers decide on the first page. So, under **✍ Chapter
+1** on the ⚡ Make-a-book screen (both on by default; switch either off there):
+
+- **Two first pages, keep the better one:** before chapter 1 is written, the writer drafts two different first pages
+  and another AI picks the one that hooks a reader better. Chapter 1 is written on from it. The run window says which
+  was picked and why. If that cannot be done (for example only one AI works), chapter 1 is simply written the usual
+  way. About 2 more AI answers.
+- **Rewrite chapter 1 last:** when the whole book is written, the writer reworks chapter 1 once, now knowing the
+  ending, the setups it must plant for later, where the twist must stay hidden, and what the beta readers and
+  reviewers said about it. It keeps every name, fact, the plot and the main character. The same AI reviewers read
+  the book again: the new chapter 1 is **kept only if the score is at least as good** (if the score is the same, only
+  if they found fewer problems in chapter 1). Otherwise your chapter 1 stays exactly as it was. A chapter 1 you wrote
+  yourself is never touched. The run window and the report say what happened: "✍ Chapter 1 rewritten with the whole
+  book in view: kept (7.6 → 7.8/10)". About 3 to 4 more AI answers.
+
 ### 🔁 Improve until better, and 📈 your books over time
 
 - **🔁 Improve until better** (on the ⚡ Make-a-book screen, on by default, 1–3 rounds, default 2): when the book is

@@ -7,7 +7,8 @@ around which chapter — a limit will probably pause it:
 
 * **options** (``OPTION_MODEL``): how many AIs check for mistakes (all / two / one), the writers' room, beta readers,
   character pictures (Stable Diffusion: time, no AI answers), "fill the whole Book Bible", the end-of-book "sounds like
-  a person" pass (PR #133: about 2 answers), the 🔁 final improve pass (rounds × (rewrites + the reviewers' re-read)
+  a person" pass (PR #133: about 2 answers), ✍ chapter 1 rewritten last (1 rewrite + the reviewers' re-read + 1
+  review) and the two first pages (2 answers), the 🔁 final improve pass (rounds × (rewrites + the reviewers' re-read)
   + the kept chapters' reviews), the 🤖 Claude Code helpers and "when only one AI works". With measured
   runs, the options whose answers fall inside the measured steps (the checkers, the writers' room and the end pass)
   count only as the DIFFERENCE from the options those runs had (they are already in the measured numbers), and the
@@ -43,8 +44,8 @@ CARRY_ON_SHARE = 0.25          # share of a limit pause that still makes the run
 CHAPTERS_FROM, CHAPTERS_TO = 0.15, 0.9   # where the chapters lie in the run's time (the rest: planning, the end)
 DEFAULT_AIS = (("AI-1", "AI-1 · Claude", "claude"), ("AI-2", "AI-2 · ChatGPT", "chatgpt"),
                ("AI-3", "AI-3 · Gemini", "gemini"))
-INSIDE_MEASURED = ("checkers", "writers_room", "human_pass")   # their answers are inside costs' measured steps
-OWN_STEP = {"beta": "beta", "bible": "bible", "improve": "improve"}   # option -> its own run step (measured when made)
+INSIDE_MEASURED = ("checkers", "writers_room", "human_pass", "first_page")   # their answers are inside costs' measured steps
+OWN_STEP = {"beta": "beta", "bible": "bible", "improve": "improve", "opening": "opening"}   # option -> its own run step (measured when made)
 
 
 # ====================================================================== the options of a run
@@ -73,6 +74,7 @@ def options_of(app, body: dict | None) -> dict:
     return {"checkers": ck, "writers_room": b.get("writers_room") is True, "beta_readers": n_beta,
             "pictures": pics, "fill_bible": b.get("fill_bible") is True, "human_pass": b.get("human_pass") is not False,
             "improve_pass": b.get("improve_pass") is not False,
+            "opening_pass": b.get("opening_pass") is not False, "first_page": b.get("first_page") is not False,
             "improve_rounds": b.get("improve_rounds") if isinstance(b.get("improve_rounds"), int)
             and not isinstance(b.get("improve_rounds"), bool) and 1 <= b.get("improve_rounds") <= 3 else 2,
             "claude_code": cc_on, "single_ai": b.get("single_ai") if b.get("single_ai") in SINGLE_AI else "continue",
@@ -104,6 +106,13 @@ def option_calls(opts: dict, n: int, ais: int) -> dict:
                           "label": f"Improve until better (up to {rounds} round{'s' if rounds != 1 else ''})"}
     else:
         out["improve"] = {"calls": 0, "to": "all", "label": "Improve until better"}
+    # ✍ chapter 1 rewritten last (opening_pass.py): 1 rewrite + the same reviewers' re-read + the kept chapter's
+    # review; two first pages (first_page.py): the writer's two openings in one answer + one reviewer's pick
+    r = max(1, min(ais - 1, 3)) if ais > 1 else 1
+    out["opening"] = {"calls": (1 + r + 1) if opts.get("opening_pass") else 0, "to": "all",
+                      "label": "Rewrite chapter 1 last (with the whole book in view)"}
+    out["first_page"] = {"calls": 2 if opts.get("first_page") else 0, "to": "all",
+                         "label": "Two first pages for chapter 1, keep the better one"}
     out["pictures"] = {"calls": 0, "to": "none", "label": "Character pictures (Stable Diffusion: no AI answers)",
                        "minutes": PICTURES * PICTURE_MIN if opts.get("pictures") else 0}
     helpers = (3 * n + 2 * math.ceil(n / 5)) if opts.get("claude_code") else 0
@@ -138,7 +147,8 @@ def _run_opts(j: dict) -> dict:
     return {"checkers": s.get("checkers") or "all", "writers_room": bool(s.get("writers_room")),
             "human_pass": s.get("human_pass") is not False, "beta_readers": (s.get("beta_readers") or 1)
             if s.get("beta_reader") else 0, "fill_bible": bool(s.get("fill_bible")),
-            "improve_pass": bool(s.get("improve_pass")), "improve_rounds": s.get("improve_rounds") or 2}
+            "improve_pass": bool(s.get("improve_pass")), "improve_rounds": s.get("improve_rounds") or 2,
+            "opening_pass": s.get("opening_pass") is True, "first_page": s.get("first_page") is True}
 
 
 def calibration(app, n: int, opts: dict, ais: int) -> dict:

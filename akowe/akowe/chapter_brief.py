@@ -439,8 +439,17 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str, *
         if room:
             brief["writers_room"] = room
             rules.append(writers_room.BRIEF_RULE)
+        try:  # ✍ the first page chosen from two drafts (a ⚡ run's chapter 1; first_page.py)
+            from . import first_page  # noqa: PLC0415
+            fp = first_page.brief_block(store, pid, branch, chapter_id)
+        except Exception:  # noqa: BLE001
+            log.exception("first page of chapter %s", chapter_id)
+            fp = None
+        if fp:
+            brief["first_page"] = fp
+            rules.append(first_page.BRIEF_RULE)
         brief["rules"] = rules
-        if not (cards or vb["cards"] or vb["others"] or pov or planned or room or extra.get("story_rules")
+        if not (cards or vb["cards"] or vb["others"] or pov or planned or room or fp or extra.get("story_rules")
                 or extra.get("world_texture") or extra.get("story_choices") or length or style
                 or brief.get("character_details") or main or world or fixed or brief.get("needed_details")
                 or brief.get("earlier_moments") or brief.get("story_beats") or brief.get("story_stage")
