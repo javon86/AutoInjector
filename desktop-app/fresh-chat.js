@@ -13,6 +13,11 @@
  *     once when the site said the chat is full ('chat-full');
  *   - holds off while the AI is still writing, and while YOU have been using that pane yourself in the last few
  *     minutes (your own conversation is never swapped away under you — unless the site itself says it is full).
+ *   - a NEW BOOK starts in a fresh chat (reason 'new-book'): Akọwe says which book (and which ⚡ run) each request is
+ *     for; when that differs from the book of the pane's last Akọwe request, the chat is swapped first — otherwise
+ *     the AI can take names or story details from the other book still in that chat (a user's run "invented" a pen
+ *     name that was a character from their other book). The same book (a resume, ▶ Continue) keeps its chat. Same
+ *     holds as above (never mid-answer, never under the user). Setting: newBook (default on).
  * The page scripts click the site's own "New chat" button (several selectors, then a "New chat" label match); if
  * that doesn't give an empty chat, main.js opens the site's new-chat address instead.
  *
@@ -52,8 +57,31 @@ const LABEL_WORDS = ['new chat', 'new conversation', 'start new chat'];
 const DEFAULTS = Object.freeze({
   everyRequests: 15,       // a fresh chat after this many Akọwe requests in one chat (0 = never by count)
   everyChars: 300000,      // …or after about this many characters went through the chat (0 = never by size)
-  userQuietMs: 10 * 60000  // the user's own use of the pane in the last 10 minutes holds a planned fresh chat back
+  userQuietMs: 10 * 60000, // the user's own use of the pane in the last 10 minutes holds a planned fresh chat back
+  newBook: true            // a new book (or ⚡ run of another book) starts each pane it uses in a fresh chat
 });
+
+const ID_RE = /^[A-Za-z0-9._:-]{1,128}$/;
+/** { id, run } from what Akọwe sent (ids only; anything else is dropped) -> null when it names no book. */
+function cleanBook(b) {
+  if (!b || typeof b !== 'object') return null;
+  const id = typeof b.id === 'string' && ID_RE.test(b.id) ? b.id : null;
+  const run = typeof b.run === 'string' && ID_RE.test(b.run) ? b.run : null;
+  return id || run ? { id, run } : null;
+}
+/**
+ * Is `cur` another book than `prev` (the book of the pane's last Akọwe request)?
+ *   both name a book -> compare the books (a new ⚡ run that continues the SAME book keeps its chat);
+ *   otherwise both name a run -> compare the runs (a new run's first steps come before its book exists);
+ *   nothing known about the last one -> yes (the chat may hold anything: another book, the user's own chat).
+ */
+function isNewBook(prev, cur) {
+  if (!cur) return false;
+  if (!prev) return true;
+  if (cur.id && prev.id) return cur.id !== prev.id;
+  if (cur.run && prev.run) return cur.run !== prev.run;
+  return false;
+}
 
 const clampInt = (v, lo, hi, dflt) => { const n = Math.round(Number(v)); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : dflt; };
 
@@ -62,10 +90,12 @@ function createFreshChat(opts = {}) {
   const cfg = {
     everyRequests: clampInt(opts.everyRequests, 0, 500, DEFAULTS.everyRequests),
     everyChars: clampInt(opts.everyChars, 0, 50000000, DEFAULTS.everyChars),
-    userQuietMs: clampInt(opts.userQuietMs, 0, 24 * 3600000, DEFAULTS.userQuietMs)
+    userQuietMs: clampInt(opts.userQuietMs, 0, 24 * 3600000, DEFAULTS.userQuietMs),
+    newBook: opts.newBook === undefined ? DEFAULTS.newBook : opts.newBook !== false
   };
   const S = {};
-  const site = (s) => (S[s] = S[s] || { requests: 0, chars: 0, full: false, since: now(), fresh: 0 });
+  const site = (s) => (S[s] = S[s] || { requests: 0, chars: 0, full: false, since: now(), fresh: 0, book: null, newBook: false });
+
 
   /** An Akọwe prompt of `chars` characters was typed into this pane's current chat. */
   function noteSent(s, chars) { const x = site(s); x.requests++; x.chars += Math.max(0, Number(chars) || 0); }
@@ -74,7 +104,31 @@ function createFreshChat(opts = {}) {
   /** The site said "this chat is too long / start a new chat". */
   function markFull(s) { site(s).full = true; }
   /** A new chat was opened (by us, by self-repair, or by the user's "fresh chat" button). */
-  function reset(s) { const x = site(s); x.requests = 0; x.chars = 0; x.full = false; x.since = now(); x.fresh++; }
+  function reset(s) { const x = site(s); x.requests = 0; x.chars = 0; x.full = false; x.since = now(); x.fresh++; x.newBook = false; }
+  /**
+   * The next Akọwe request to `s` is for this book ({ id, run }). A different book than the last one marks the
+   * pane's chat for a fresh start (reason 'new-book') — kept until a fresh chat really happens (a hold by the
+   * user only delays it). A chat this app opened that nothing went into yet needs no new one.
+   * -> { changed } (changed: another book than the last one)
+   */
+  function noteBook(s, book) {
+    const cur = cleanBook(book);
+    if (!cur) return { changed: false };
+    const x = site(s);
+    const prev = x.book;
+    const changed = isNewBook(prev, cur);
+    // remember the most complete name of the book: a run's first steps say only the run, later ones the book too
+    x.book = !changed && prev ? { id: cur.id || prev.id, run: cur.run || prev.run } : cur;
+    const emptyChat = x.fresh > 0 && x.requests === 0 && x.chars === 0;
+    if (changed && cfg.newBook && !emptyChat) x.newBook = true;
+    return { changed };
+  }
+  /** The book of each pane's last Akọwe request, from an earlier start of the app (saved with the settings). */
+  function restoreBooks(map) {
+    if (!map || typeof map !== 'object') return;
+    for (const [s, b] of Object.entries(map)) { const c = cleanBook(b); if (c && !site(s).book) site(s).book = c; }
+  }
+  function books() { const o = {}; for (const k of Object.keys(S)) if (S[k].book) o[k] = Object.assign({}, S[k].book); return o; }
 
   /**
    * Should a fresh chat be started before the next Akọwe prompt to `s`?
@@ -86,6 +140,7 @@ function createFreshChat(opts = {}) {
     const x = site(s);
     const out = { due: false, reason: null, held: null, requests: x.requests, chars: x.chars };
     if (x.full) out.reason = 'full';
+    else if (x.newBook && cfg.newBook) out.reason = 'new-book';
     else if (cfg.everyRequests > 0 && x.requests >= cfg.everyRequests) out.reason = 'requests';
     else if (cfg.everyChars > 0 && x.chars >= cfg.everyChars) out.reason = 'chars';
     if (!out.reason) return out;
@@ -102,11 +157,12 @@ function createFreshChat(opts = {}) {
       if (patch.everyRequests !== undefined) cfg.everyRequests = clampInt(patch.everyRequests, 0, 500, cfg.everyRequests);
       if (patch.everyChars !== undefined) cfg.everyChars = clampInt(patch.everyChars, 0, 50000000, cfg.everyChars);
       if (patch.userQuietMs !== undefined) cfg.userQuietMs = clampInt(patch.userQuietMs, 0, 24 * 3600000, cfg.userQuietMs);
+      if (patch.newBook !== undefined) cfg.newBook = patch.newBook !== false;
     }
     return Object.assign({}, cfg);
   }
   function snapshot() { const o = {}; for (const k of Object.keys(S)) o[k] = Object.assign({}, S[k]); return o; }
-  return { noteSent, noteReply, markFull, reset, due, settings, snapshot };
+  return { noteSent, noteReply, markFull, reset, noteBook, books, restoreBooks, due, settings, snapshot };
 }
 
 /** Plain words for the activity log. */
@@ -116,11 +172,17 @@ function describe(label, reason, info) {
   const n = Number(i.requests) || 0;
   const k = Math.round((Number(i.chars) || 0) / 1000);
   if (reason === 'full') return `${L} said its chat is full, so AutoInjector started a fresh ${L} chat for Akọwe`;
+  if (reason === 'new-book') return `Started a fresh ${L} chat for Akọwe's new book — nothing from the last book's chat (names, story details) can slip into this one`;
   const why = reason === 'requests' ? `the old one already had ${n} Akọwe requests` : `about ${k.toLocaleString('en-US')},000 characters had gone through the old one`;
   return `Started a fresh ${L} chat for Akọwe (${why}) — long chats get slow and hit the site's length limit`;
 }
-function describeHeld(label, held) {
+function describeHeld(label, held, reason) {
   const L = label || 'the AI';
+  if (reason === 'new-book') {
+    return held === 'user'
+      ? `Akọwe started another book, but you've used ${L}'s pane yourself in the last few minutes, so AutoInjector left your conversation alone for now (a fresh chat comes with a later request)`
+      : `Akọwe started another book; a fresh ${L} chat starts once ${L} has finished what it is doing`;
+  }
   return held === 'user'
     ? `${L}'s chat is getting long, but you've used that pane yourself in the last few minutes, so AutoInjector left your conversation alone for now`
     : `${L}'s chat is getting long; a fresh chat starts once ${L} has finished what it is doing`;
@@ -160,4 +222,4 @@ function buildFreshCheckScript(assistantSelectors, inputSelectors) {
 })()`;
 }
 
-module.exports = { createFreshChat, describe, describeHeld, buildNewChatScript, buildFreshCheckScript, NEW_CHAT_CANDIDATES, DEFAULTS, MARKER };
+module.exports = { createFreshChat, cleanBook, isNewBook, describe, describeHeld, buildNewChatScript, buildFreshCheckScript, NEW_CHAT_CANDIDATES, DEFAULTS, MARKER };

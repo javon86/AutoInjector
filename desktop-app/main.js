@@ -287,12 +287,12 @@ const state = {
   // PR #123: tell the user when a book run needs them (a Windows notification + the taskbar flashing; sound optional)
   attention: { notify: true, sound: true },
   // PR #123: a fresh chat in each AI pane for Akọwe after this many Akọwe requests / characters (0 = never by that)
-  freshChat: { everyRequests: Number(process.env.AUTOINJECTOR_FRESH_CHAT_REQUESTS) >= 0 && process.env.AUTOINJECTOR_FRESH_CHAT_REQUESTS !== undefined ? Number(process.env.AUTOINJECTOR_FRESH_CHAT_REQUESTS) : 15, everyChars: Number(process.env.AUTOINJECTOR_FRESH_CHAT_CHARS) >= 0 && process.env.AUTOINJECTOR_FRESH_CHAT_CHARS !== undefined ? Number(process.env.AUTOINJECTOR_FRESH_CHAT_CHARS) : 300000 },
+  freshChat: { everyRequests: Number(process.env.AUTOINJECTOR_FRESH_CHAT_REQUESTS) >= 0 && process.env.AUTOINJECTOR_FRESH_CHAT_REQUESTS !== undefined ? Number(process.env.AUTOINJECTOR_FRESH_CHAT_REQUESTS) : 15, everyChars: Number(process.env.AUTOINJECTOR_FRESH_CHAT_CHARS) >= 0 && process.env.AUTOINJECTOR_FRESH_CHAT_CHARS !== undefined ? Number(process.env.AUTOINJECTOR_FRESH_CHAT_CHARS) : 300000, newBook: true },
   manager: null, // set by resetManagerTask() below — always idle on startup, a restart must never auto-resume a live task
   managerLog: [] // manager-only event stream (mirrors state.log's shape but filtered to source:"manager"), see logManagerEvent()
 };
 // PR #123: counts the Akọwe requests / characters in each pane's current chat and says when a fresh chat is due.
-const freshChat = freshChatMod.createFreshChat({ everyRequests: state.freshChat.everyRequests, everyChars: state.freshChat.everyChars, userQuietMs: Number(process.env.AUTOINJECTOR_FRESH_CHAT_USER_QUIET_MS) || undefined });
+const freshChat = freshChatMod.createFreshChat({ everyRequests: state.freshChat.everyRequests, everyChars: state.freshChat.everyChars, newBook: state.freshChat.newBook, userQuietMs: Number(process.env.AUTOINJECTOR_FRESH_CHAT_USER_QUIET_MS) || undefined });
 for (const site of SITE_IDS) {
   state.routing[site] = new Set();
   state.captured[site] = null;
@@ -780,7 +780,8 @@ function buildStateSnapshotText() {
         voiceConfig: state.voiceConfig || null, // voice address/on-off/speaker voices/devices — no secret (the voice shim has no key), stored as-is
         akowe: { enabled: !!state.akowe.enabled, startWithApp: state.akowe.startWithApp !== false, autoConnect: state.akowe.autoConnect !== false }, // the bridge token itself lives in its own 0600 file, never here
         attention: { notify: state.attention.notify !== false, sound: state.attention.sound !== false },
-        freshChat: { everyRequests: state.freshChat.everyRequests, everyChars: state.freshChat.everyChars },
+        // books: which book (ids only) each pane's last Akọwe request was for, so a restart knows a new book from a resume
+        freshChat: { everyRequests: state.freshChat.everyRequests, everyChars: state.freshChat.everyChars, newBook: state.freshChat.newBook !== false, books: (() => { try { return freshChat.books(); } catch (_) { return {}; } })() },
         lockers: lockersSwitch.toSnapshot(state.lockers.enabled), // 📁 AI lockers switch (off = hidden)
         hr: hr && hr.mode ? {
           mode: hr.mode,
@@ -890,6 +891,8 @@ function loadPersistedState() {
   }
   if (snap.freshChat && typeof snap.freshChat === "object") {
     for (const k of ["everyRequests", "everyChars"]) { const n = Number(snap.freshChat[k]); if (Number.isFinite(n) && n >= 0) state.freshChat[k] = Math.round(n); }
+    if (snap.freshChat.newBook !== undefined) state.freshChat.newBook = snap.freshChat.newBook !== false;
+    try { freshChat.restoreBooks(snap.freshChat.books); } catch (_) {}
   }
   if (snap.selfRepair && typeof snap.selfRepair === "object") {
     const n = Number(snap.selfRepair.intervalMin);
@@ -9486,11 +9489,13 @@ async function startFreshChatNow(site) {
   const r = await selfRepairReload(site, { home: true, why: "fresh-chat" });
   return { ok: !!(r && r.ok), how: "address" };
 }
-async function akoweFreshChatIfDue(site, ct) {
+async function akoweFreshChatIfDue(site, ct, book) {
   try { freshChat.settings(state.freshChat); } catch (_) {}
+  // a new book (or ⚡ run of another book) than the pane's last Akọwe request: its chat is swapped first ('new-book')
+  if (book) { try { if (freshChat.noteBook(site, book).changed) saveStateDebounced(); } catch (_) {} }
   const d = freshChat.due(site, { busy: freshChatBusy(site), userAt: freshChatUserAt(site) });
   if (!d.due) {
-    if (d.held && freshChatHeldSaid[site] !== d.held) { freshChatHeldSaid[site] = d.held; logEvent("akowe-fresh-chat-held", { site, reason: d.reason, held: d.held, requests: d.requests, chars: d.chars, note: freshChatMod.describeHeld(siteLabel(site), d.held) }); }
+    if (d.held && freshChatHeldSaid[site] !== d.held) { freshChatHeldSaid[site] = d.held; logEvent("akowe-fresh-chat-held", { site, reason: d.reason, held: d.held, requests: d.requests, chars: d.chars, note: freshChatMod.describeHeld(siteLabel(site), d.held, d.reason) }); }
     return { started: false, held: d.held || null };
   }
   if (ct && ct.cancelled) return { started: false };
@@ -9503,6 +9508,10 @@ async function akoweFreshChatIfDue(site, ct) {
 }
 ipcMain.handle("akowe:fresh-chat-settings", (_evt, payload) => {
   const p = payload && typeof payload === "object" ? payload : {};
+  if (p.newBook !== undefined) {
+    if (typeof p.newBook !== "boolean") return { ok: false, error: "BAD_VALUE" };
+    state.freshChat.newBook = p.newBook;
+  }
   for (const k of ["everyRequests", "everyChars"]) {
     if (p[k] === undefined) continue;
     const n = Number(p[k]);
@@ -9511,7 +9520,7 @@ ipcMain.handle("akowe:fresh-chat-settings", (_evt, payload) => {
   }
   const cfg = freshChat.settings(state.freshChat);
   saveStateDebounced();
-  return { ok: true, freshChat: { everyRequests: cfg.everyRequests, everyChars: cfg.everyChars }, counts: freshChat.snapshot() };
+  return { ok: true, freshChat: { everyRequests: cfg.everyRequests, everyChars: cfg.everyChars, newBook: cfg.newBook }, counts: freshChat.snapshot() };
 });
 // ==== end fresh chat ====
 let akoweStarting = null; // in-flight start, so a double toggle can't race two listeners onto the port
@@ -9550,7 +9559,7 @@ async function startAkoweBridgeNow() {
         if (akoweChatKey(site) !== meta.chatKey) return { ok: false, error: "FOLLOWUP_STALE", seq: null };
       } else {
         // PR #123: between Akọwe requests, a chat that is too long (or full) is swapped for a fresh one first
-        try { await akoweFreshChatIfDue(site, ct); } catch (e) { logEvent("akowe-fresh-chat", { site, ok: false, error: String(e), severity: "warn" }); }
+        try { await akoweFreshChatIfDue(site, ct, meta && meta.book); } catch (e) { logEvent("akowe-fresh-chat", { site, ok: false, error: String(e), severity: "warn" }); }
       }
       if (ct && ct.cancelled) return { ok: false, error: "CANCELLED", seq: null };
       // sendTextTo() stamps state.nextMsgSeq synchronously (before its first
@@ -9668,7 +9677,7 @@ function akoweStatusSnapshotBase() {
     akowe: bfStatus,
     selfRepair: { intervalMin: state.selfRepair.intervalMin, startup: state.selfRepair.startup !== false, carryOn: carryOnEnabled(), automatic: CHECKINS_ENABLED }, // P18.1 check-in settings
     attention: { notify: state.attention.notify !== false, sound: state.attention.sound !== false }, // PR #123
-    freshChat: { everyRequests: state.freshChat.everyRequests, everyChars: state.freshChat.everyChars }, // PR #123
+    freshChat: { everyRequests: state.freshChat.everyRequests, everyChars: state.freshChat.everyChars, newBook: state.freshChat.newBook !== false }, // PR #123 (+ a fresh chat for every new book)
     awake: (() => { try { return wakeLock.awake(); } catch (_) { return false; } })(), // PR #123: the PC is kept awake right now
     pairing: st && st.pairing ? { pending: st.pairing.pending, expiresAt: st.pairing.expiresAt, lastPairedAt: st.pairing.lastPairedAt, locked: st.pairing.locked } : null
   };

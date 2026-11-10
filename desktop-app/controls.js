@@ -4389,7 +4389,24 @@ function bfRenderAttention(s) {
     if (!Array.from(sel.options).some((o) => o.value === v)) { const o = document.createElement("option"); o.value = v; o.textContent = `every ${v} requests`; sel.appendChild(o); }
     if (sel.value !== v) sel.value = v;
   }
+  const nb = el("bf-fresh-newbook");
+  if (fc && nb && document.activeElement !== nb) nb.checked = fc.newBook !== false;
 }
+if (el("bf-fresh-newbook")) el("bf-fresh-newbook").onchange = bfSafe(async (e) => {
+  const on = !!e.target.checked;
+  const r = await bfCall("fresh-chat-newbook", "freshChatSettings", [{ newBook: on }], { where: "Fresh chats", anchor: "#bf-checkin-anchor" });
+  if (r && r.ok) bfMsg(on ? "✓ Every new book starts in a fresh chat in each AI (nothing from the last book can slip in)." : "✓ A new book carries on in the AI's current chat.");
+  akoweRefresh();
+}, "fresh-chat-newbook");
+// 💡 the "pick the strongest model" tip by the AIs: shown until the user hides it (remembered on this PC)
+(function modelTip() {
+  const tip = el("bf-model-tip"); const x = el("bf-model-tip-x");
+  if (!tip) return;
+  let hidden = false;
+  try { hidden = localStorage.getItem("modelTipHidden") === "1"; } catch (_) {}
+  tip.hidden = hidden;
+  if (x) x.onclick = () => { tip.hidden = true; try { localStorage.setItem("modelTipHidden", "1"); } catch (_) {} };
+})();
 if (el("bf-notify")) el("bf-notify").onchange = bfSafe(async (e) => {
   const on = !!e.target.checked;
   const r = await bfCall("attention-notify", "attentionSettings", [{ notify: on }], { where: "Notifications", anchor: "#bf-checkin-anchor" });

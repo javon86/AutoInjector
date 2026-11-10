@@ -221,6 +221,20 @@ bridge to your home Wi-Fi, behind its key.
   switches to the new chat, AutoInjector reads nothing from it: a half-swapped page is never taken for a new reply.
   When the New chat button does not give an empty chat, the page is reloaded at the new-chat address; the log's
   `reload` line then says `by: "fresh-chat"` (not "self-repair").
+- **A fresh chat for every new book:** each Akọwe request says which book (`book_id`) and which ⚡ run (`run_id`)
+  it is for — ids only. When an AI pane's last Akọwe request was for a **different book** (a new ⚡ Make-a-book run,
+  a sequel, or you switch books), AutoInjector opens a new chat in that pane **before** typing the first request
+  of the new book. Otherwise the AI could take names or story details from the other book still in that chat (a
+  real run used a character from the author's other book as the "invented" pen name). The **same book** keeps its
+  chat: ⏸ Pause → ▶ Resume, ▶ Continue making this book, or a restart of the app (the last book of each pane is
+  saved, ids only). The same safety rules apply: only between requests, never while the AI writes, never in a pane
+  you used in the last 10 minutes (it waits for a later request instead). The log line is `akowe-fresh-chat` with
+  `reason: "new-book"`. Switch: 📖 Akọwe panel → 🆕 Fresh chat for Akọwe → **and for every new book** (on by
+  default). Costs no AI answers. Code: `fresh-chat.js` (`noteBook`), `akowe-bridge.js`, Akọwe `providers.py`
+  (`bridge_book_fields`).
+- **💡 Strongest model tip:** a one-line tip by Start on the Make-a-book screen and above the AI cards in the 📖
+  Akọwe panel: pick the strongest model in each AI window before you start. ✕ hides it for good (remembered in that
+  browser / on that PC).
 - A second door, the **service bridge** (port 8765), does more than the AI bridge. Akọwe uses it for pictures,
   video clips, trailers, the ebook cover JPG and the Book Bible PDF. It also carries the app's tools, voice (speak
   and listen), messages to the AIs, live events, and the phone page.
