@@ -582,6 +582,15 @@ class _TimedProviders(PinnedProviders):
     def __init__(self, base, slot_id, sink):
         super().__init__(base, slot_id)
         self._sink = sink
+        self.prefer_writer = None  # 🏆 writer_record.py: the AI with the best chapters writes this chapter first
+
+    def eligible(self, project_id, capability, needed_tokens, operation=None):
+        out = super().eligible(project_id, capability, needed_tokens, operation)
+        pref = self.prefer_writer
+        if pref and not self.pinned and operation == "C02" and len(out) > 1:
+            # only a re-order of the AIs that may write anyway: a busy / limited / broken AI is never added
+            out.sort(key=lambda s: (self.health.failed(s["slot_id"]) is not None, s["slot_id"] != pref))
+        return out
 
     def _generate_on(self, *a, **kw):
         t0 = time.monotonic()
@@ -3745,10 +3754,21 @@ class AutoBookService(_Runner):
                                                    done=f"Decided the details chapter {idx + 1} needs"):
                                 story_details.before_chapter(self, run, st, cid, idx + 1, item)
                         payload = bp.prepare_chapter(cid)
-                        if idx == 0:  # ✍ two first pages, the better one starts chapter 1 (first_page.py)
-                            from . import first_page  # noqa: PLC0415
-                            first_page.before_first_chapter(self, run, st, outline, cid, payload, item)
-                        ref = self.ai_create(run, self.bp(run), "C02", payload, f"chapter {cid}")
+                        from . import writer_record  # noqa: PLC0415 - 🏆 let the best writer write more
+                        prov_ = self._engine.providers
+                        if hasattr(prov_, "prefer_writer"):
+                            prov_.prefer_writer = writer_record.before_chapter(
+                                self.store, prov_, run, idx + 1, editor_on=bool(
+                                    self._editor_settings(run).get("enabled") and self._on(run, "editor")))
+                            st["writer_note"] = (run.get("writer_pick") or {}).get("line")
+                        try:
+                            if idx == 0:  # ✍ two first pages, the better one starts chapter 1 (first_page.py) — by the preferred writer
+                                from . import first_page  # noqa: PLC0415
+                                first_page.before_first_chapter(self, run, st, outline, cid, payload, item)
+                            ref = self.ai_create(run, self.bp(run), "C02", payload, f"chapter {cid}")
+                        finally:
+                            if hasattr(prov_, "prefer_writer"):
+                                prov_.prefer_writer = None
                         rid = ref["record_id"]
                         self._made(run, ref)
                         self.event(run, "ai", f"The AI wrote chapter {cid}", record_id=rid, module_id="C02")
@@ -3790,6 +3810,8 @@ class AutoBookService(_Runner):
                     continuity.note_written(self.store, run["project_id"], run["branch_id"], cid, rec, idx + 1)
                     continuity.recheck_done(self.store, run["project_id"], run["branch_id"], cid)
                     claude_code_book.chapter_approved(self, run, cid, idx + 1, rec)  # 🤖 facts + "sounds like AI"
+                    from . import writer_record  # noqa: PLC0415 - 🏆 the writer's score joins its track record
+                    writer_record.after_chapter(self, run, rec)
                     # 🔎 PR #117: all the AIs check this chapter before the next one is written (checkpoints.py)
                     due = run.setdefault("chapter_checks_due", [])
                     if cid not in due:

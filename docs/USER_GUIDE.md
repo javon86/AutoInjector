@@ -109,6 +109,15 @@ check that the book sounds like a person wrote it"**.
 Start — for example a "thinking" model if your plan has one. The tip by Start (and above the AI cards in AutoInjector)
 goes away for good when you press ✕.
 
+If you have not filled in **✒️ My writing style** yet, the plan shows a short tip: "Tip: paste a few paragraphs of your
+own writing into ✒️ My writing style so every AI writes in your voice". Click the link to go there, or **Don't show
+again** to hide it. It never stops you from starting.
+
+**🤫 Hide the twist better** (⚙️ Settings, on unless you switch it off): when the AI plans the book, every clue to a
+secret also gets an innocent explanation, there is at least one fair red herring, and readers should not be able to
+work out the twist before about two-thirds of the book. The chapters before that point are told not to give the
+secret away or hint at it too hard. This costs no extra AI work.
+
 ### While a long book runs
 
 - The PC stays awake while a book is being written. A Windows restart (updates) still stops the run; press
@@ -260,6 +269,13 @@ Chapter 1 is written before the rest of the book exists, and readers decide on t
   held up, how many were false alarms lately, and how often they missed something another AI found — for example
   "ChatGPT: 87% of its corrections held up · 3 false alarms in the last 50". With fewer than 10 checks behind it, an AI
   says "needs more data": a few lucky or unlucky checks prove nothing. Only numbers are kept, never your book's words.
+- **🏆 Who writes best** (⚙️ Settings): the editor scores every chapter, and Akọwe keeps each AI's average — for
+  example "Claude: its chapters score 8.1/10 on average (12 chapters)". When you let ⚡ Make-a-book choose the AI,
+  the AI whose chapters score best writes most chapters, once at least two AIs have 3 scored chapters each; every 4th
+  chapter still goes to another AI so the comparison stays fair. An AI that is busy or at its limit is never chosen.
+  If you pick an AI yourself in "Which AI", your choice always wins. The run window says who writes and why: "🏆 Claude
+  writes most chapters: its chapters score 8.1 vs ChatGPT 7.4". Untick **Let the AI whose chapters score best write
+  most chapters** to switch it off. Only numbers are kept, never your book's words.
 - **🔢 Which AI checks first** (⚙️ Settings, and "Checkers: … Change" on the ⚡ Make-a-book screen for one book):
   **Automatic** puts the AI with the best track record first once there is enough data; **My own order** lets you
   move them with ↑ ↓; tick **Don't use for checks** to keep an AI from checking (it can still write). The AI that

@@ -440,7 +440,10 @@ class App:
                                        timeout_s=self.ai_check_timeout_s)
         if parts == ["estimate"] and method == "POST":  # ⏱ P28 + 3d: time, answers per AI and usage limits
             from . import run_forecast  # noqa: PLC0415
-            return 200, run_forecast.estimate(self, body if isinstance(body, dict) else {})
+            out = run_forecast.estimate(self, body if isinstance(body, dict) else {})
+            from .style_card import nudge  # noqa: PLC0415 - ✒️ an empty writing style card: a one-line tip
+            out["style_tip"] = nudge(self.store, principal)
+            return 200, out
         if parts == ["usage-meter"] and method == "GET":  # 📊 3e how much of each AI's limit was used lately
             from . import usage_meter  # noqa: PLC0415
             return 200, usage_meter.meter(self)
@@ -488,7 +491,8 @@ class App:
             from . import forge  # noqa: PLC0415
             return 200, forge.bridge_info(self) if method == "GET" else forge.save_bridge_settings(self, body)
         if parts and parts[0] in ("autobook", "jobs", "health", "diagnostics", "backups", "shelf", "settings",
-                                  "story-choices", "lengths", "pipeline", "compare", "checkers"):
+                                  "story-choices", "lengths", "pipeline", "compare", "checkers",
+                                  "writers"):
             return self.route_ops(method, parts, query, body, principal)
         if parts and parts[0] in ("assist", "bible-builder"):
             return self.route_ai(method, parts, query, body, principal)
@@ -880,6 +884,24 @@ class App:
         if parts == ["checkers", "record"] and method == "GET":  # 📊 how good is each checker (checker_record.py)
             from . import checker_record  # noqa: PLC0415
             return 200, checker_record.card(self.store, self.engine.providers)
+        if parts == ["writers", "record"] and method == "GET":  # 🏆 who writes best (writer_record.py)
+            from . import writer_record  # noqa: PLC0415
+            return 200, writer_record.card(self.store, self.engine.providers)
+        if parts == ["settings", "writer-pick"] and method == "PUT":  # 🏆 let the best writer write more
+            from . import writer_record  # noqa: PLC0415
+            writer_record.save_settings(self.store, body)
+            return 200, writer_record.card(self.store, self.engine.providers)
+        if parts == ["settings", "twist-guard"]:  # 🤫 hide the twist better (twist_guard.py)
+            from . import twist_guard  # noqa: PLC0415
+            if method == "GET":
+                return 200, twist_guard.settings(self.store)
+            if method == "PUT":
+                return 200, twist_guard.save_settings(self.store, body)
+        if parts == ["settings", "style-tip"] and method == "PUT":  # ✒️ hide the writing-style tip
+            if not isinstance(body, dict) or not isinstance(body.get("enabled"), bool):
+                raise ApiError(400, "INVALID_INPUT", "/enabled", "enabled must be true or false")
+            self.store.set_setting("style_nudge", {"enabled": body["enabled"]})
+            return 200, {"enabled": body["enabled"]}
         if parts == ["settings", "stand-in"]:  # 🧑‍⚖️ the stand-in decider (stand_in.py)
             from . import stand_in  # noqa: PLC0415
             if method == "GET":

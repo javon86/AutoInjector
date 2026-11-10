@@ -8,6 +8,7 @@ import * as S7C from './section7c.js';  // P23 beta reader + P25 your writing st
 import * as WR from './writers-room.js';  // 🗳 the three-AI writers' room (writers_room.py)
 import * as CC from './claude-code.js';  // 🤖 Claude Code helpers (claude_code.py)
 import * as CK from './checkers.js';  // 📊 checker track record · 🔢 checker order · 🧑‍⚖️ stand-in decider
+import * as WRT from './writers.js';  // 🏆 who writes best · 🤫 hide the twist better
 import { maybeStartTour, replayTour } from './tour.js';  // 🧭 the short guided tour of My books (first visit; ❓ Help replays it)
 import * as RP from './run-plan.js';  // ⏱ 3d estimate · 📊 3e usage meter + ⏰ start later · 📋 6c paste starter sheet
 import { originalityCard } from './originality.js';  // ✨ #20 originality and "sounds like AI" check
@@ -3370,6 +3371,8 @@ async function viewSettings(main) {
   main.appendChild(retryCard());
   main.appendChild(reviewerCard());
   main.appendChild(CK.recordCard(s7c()));  // 📊 how good is each checker (checker_record.py)
+  main.appendChild(WRT.writerCard(s7c()));  // 🏆 who writes best (writer_record.py)
+  main.appendChild(WRT.twistCard(s7c()));  // 🤫 hide the twist better (twist_guard.py)
   main.appendChild(CK.orderCard(s7c()));  // 🔢 which AI checks first, and which never check (checker_order.py)
   main.appendChild(CK.standInCard(s7c()));  // 🧑‍⚖️ the stand-in when you don't answer (stand_in.py)
   main.appendChild(CC.helpersCard(Object.assign(s7c(), { put })));  // 🤖 Claude Code helpers
@@ -8585,7 +8588,7 @@ function whoRead(u, who, at) {
 }
 function renderRun() {
   const r = MB.run; if (!r || !MB.dialog) return;
-  const sig = JSON.stringify([r.status, r.phase, r.current, r.problem && r.problem.code, (r.waiting || {}).retry_at, r.steps.map(s => [s.state, s.message, s.review_note, s.editor_note, (s.items || []).map(i => [i.state, i.editor, i.scenes, i.phase, i.note, i.planned, i.length, i.continuity, i.memory]), s.planned_note, s.checkpoints]), (r.files || []).length, r.ais, r.ai_alerts, r.review_summary, r.editor_summary, r.planned_summary, r.eta, r.report, r.save, r.costs && [r.costs.calls, r.costs.ais], r.check_later, (r.waiting || {}).message, r.alert && r.alert.key, r.stand_in]);
+  const sig = JSON.stringify([r.status, r.phase, r.current, r.problem && r.problem.code, (r.waiting || {}).retry_at, r.steps.map(s => [s.state, s.message, s.review_note, s.editor_note, s.writer_note, (s.items || []).map(i => [i.state, i.editor, i.scenes, i.phase, i.note, i.planned, i.length, i.continuity, i.memory]), s.planned_note, s.checkpoints]), (r.files || []).length, r.ais, r.ai_alerts, r.review_summary, r.editor_summary, r.planned_summary, r.eta, r.report, r.save, r.costs && [r.costs.calls, r.costs.ais], r.check_later, (r.waiting || {}).message, r.alert && r.alert.key, r.stand_in]);
   if (sig === MB.sig && MB.dialog.querySelector('.mb-steps')) { updateRunClocks(); return; }
   MB.sig = sig;
   const w = r.state === 'replaced' ? ['↪', 'Replaced by a newer run', 'b-muted'] : r.state === 'interrupted' ? RUN_WORD.interrupted
@@ -8615,6 +8618,7 @@ function renderRun() {
         h('p', { class: 'small mb-msg-line' }, s.message || s.about),
         s.review_note ? h('p', { class: `small mb-review-note${s.review_independent === false ? ' not-independent' : ''}`, 'data-testid': 'mb-review-note' }, '🧐 ', s.review_note) : null,
         s.editor_note ? h('p', { class: `small mb-review-note${/⚠️/.test(s.editor_note) ? ' not-independent' : ''}`, 'data-testid': 'mb-editor-note' }, '🖋 ', s.editor_note) : null,
+        s.writer_note ? h('p', { class: 'small mb-review-note', 'data-testid': 'mb-writer-note' }, '🏆 ', s.writer_note) : null,
         s.planned_note ? h('p', { class: `small mb-review-note${/⚠️/.test(s.planned_note) ? ' not-independent' : ''}`, 'data-testid': 'mb-planned-note' }, '✅ ', s.planned_note) : null,
         (s.checkpoints || []).length ? h('ul', { class: 'small plain-list mb-checkpoints', 'data-testid': 'mb-checkpoints' }, s.checkpoints.map(line =>
           h('li', { class: /waiting for you|⚠️/.test(line) ? 'not-independent' : '' }, line, ' ',

@@ -770,6 +770,16 @@ takes or risks; limits: what it can never do) is a major "is it bounded?" findin
 once to bound such rules (after the first rules and again after the plan, at most twice) and accepts the update under
 the run consent; the planners are told that every special mechanism keeps its scope, cost and limits.
 
+**🤫 Hide the twist better** (code: `akowe/akowe/twist_guard.py`; ⚙️ Settings › 🤫 Hide the twist better,
+`GET/PUT /api/settings/twist-guard {enabled}`; default on; planning rules only, no extra AI answers). In one book all
+three beta readers guessed the twist in chapter 1. Now the plot (B03), the reveal plan (B08) and the chapter outline
+(B11) planners are told: every clue to a secret or twist must also have a believable innocent explanation; plant at
+least one fair red herring; and the earliest point where a reader may work the twist out is about two-thirds of the
+way through the book — "chapter K of N" in the outline (K = 65% of N, rounded up, at least chapter 2). The writer
+brief of every chapter BEFORE chapter K gets a `twist_guard` block — "do not confirm or over-signal “<secret>”; keep
+its clues ambiguous" — for each protected mystery of the 📏 story rules (up to 4), or "the secret or twist the plan
+hides" when the book has none, plus one rule (no knowing looks, no narrator hints). Chapters from K on do not get it.
+
 **How a fix is judged (code: `akowe/akowe/review.py`, `review_loop.py`):** when the writer revises a draft to answer
 the reviewer, the reviewer judges the new version **only against approved canon**: approved records and protected
 facts, the records it was built from, the story rules, and the approved and locked facts and links of the
@@ -1004,6 +1014,21 @@ A few of these need more words:
   alarms in the last 50"; under 10 judged outcomes it says "needs more data" and labels the small numbers as a small
   sample. Honest limit: the style kind only counts the editor's notes that led to a kept rewrite (held up); it has no
   false-alarm signal yet.
+- **🏆 Who writes best** (code: `akowe/akowe/writer_record.py`; ⚙️ Settings, the run window; API
+  `GET /api/writers/record`, `PUT /api/settings/writer-pick {enabled}`; default on). The writer's side of the
+  checker record: for each AI the editor's score of every chapter it wrote — the editor's FIRST reading, before any
+  rewrite, so it measures the writer's own draft. The writer is the AI that wrote the approved version
+  (`review.writer_of`). A chapter whose editor was the writer itself does not count, nor one the editor did not read.
+  Only numbers are kept (setting `writer_record`: score, time and a record-id:version code so a chapter counts once),
+  the last 60 chapters per AI. When ⚡ Make-a-book chooses the writer by itself (you did not pick an AI in "Which
+  AI"), and once at least two working AIs have 3 or more scored chapters, the AI with the best average writes the
+  chapter; every 4th chapter goes to another working AI (the one with the fewest scored chapters) so the record stays
+  fair. Before there is enough data, every 4th chapter also goes to the AI with the fewest scored chapters so the data
+  can build. It is only a re-order of the AIs that may write anyway (`_TimedProviders.eligible`, operation C02): a
+  busy AI, one at its usage limit or being repaired is never chosen — the usual fallback applies. Your own "Which AI"
+  choice always wins, and with the editor switched off nothing changes (no scores). No extra AI calls. The run
+  window shows one line under the chapters step: "🏆 Claude writes most chapters: its chapters score 8.1 vs ChatGPT
+  7.4".
 - **🔢 Which AI checks first** (code: `akowe/akowe/checker_order.py`; ⚙️ Settings, `GET/PUT /api/settings/checkers`,
   and the Make-a-book start body `checker_order: {mode, order, off}` for one book). **Automatic** (default): the AI
   whose corrections held up best checks first, once at least two AIs have 10 or more judged outcomes — until then the
@@ -1105,6 +1130,9 @@ every chapter. Akọwe works against this in four places.
    new chapter gets the new list. The writer is also told this book's own repeats so far, counted without any AI:
    "Don't open with the weather again (chapters 2, 4 and 5 did)", "Avoid “jaw tightened”: already 6× in chapters 1–5".
    The whole block is small (under 1 900 characters) and is shortened, least important first, if it would not fit.
+   **✒️ The style tip:** while your ✒️ My writing style card is empty, the ⚡ Make-a-book plan (under the estimate)
+   shows one line: "Tip: paste a few paragraphs of your own writing into ✒️ My writing style so every AI writes in
+   your voice", with a link to the page and "Don't show again" (setting `style_nudge`). It never blocks the start.
    **A narrator voice even without your writing samples:** when you have no ✒️ style card, a ⚡ Make-a-book run gives
    the book its own narrator voice at the start, chosen with the book's genre, tone, point of view and tense (by the
    AI in the same answer that invents the book, so no extra AI answer; otherwise from the book's profile). The writer

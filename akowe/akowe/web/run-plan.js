@@ -55,7 +55,16 @@ export function planBox(c, getBody) {
     const pn = e.pen_name || {};  // ✒️ which pen name the book gets, and a ⚠️ when it is a character's name
     const pen = h('p', { class: 'mb-est-pen', 'data-testid': 'mb-est-pen' }, '✒️ ', pn.name ? `Pen name: ${pn.name}${pn.from === 'saved' ? ' (your saved pen name)' : ''}.` : 'No pen name: type yours above (the AI never makes one up).');
     const warns = (e.warnings || []).map(w => h('p', { class: 'words-warn', role: 'note', 'data-testid': 'mb-est-warning' }, w));
-    clear(el).append(main, ais || '', lim, pen, ...warns, about);
+    const st = e.style_tip;  // ✒️ an empty writing style card: one plain tip with a link (never blocks the start)
+    const tip = st && st.text ? h('p', { class: 'small mb-style-tip', 'data-testid': 'mb-style-tip', role: 'note' },
+      h('span', { 'aria-hidden': 'true' }, '💡 '), st.before || '',
+      h('a', { href: st.href || '#/style', 'data-testid': 'mb-style-tip-link' }, st.link || 'My writing style'),
+      `${st.after || ''} `,
+      h('button', { type: 'button', class: 'link small', 'data-testid': 'mb-style-tip-hide', onclick: async ev => {
+        ev.target.closest('p').remove();
+        try { await api('PUT', '/settings/style-tip', { body: { enabled: false } }); } catch { /* a tip: nothing to do */ }
+      } }, 'Don’t show again')) : null;
+    clear(el).append(main, ais || '', lim, pen, ...warns, tip || '', about);
   };
   const refresh = () => {
     clearTimeout(timer);
