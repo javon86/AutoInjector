@@ -295,12 +295,15 @@ def track_chapter(review, job, chapter_id: str, *, use_ai: bool = True, fallback
     ai_failed = None
     if use_ai:
         ctx = _context(store, pid, branch, bp, ch, order)
+        from . import magic_rules  # noqa: PLC0415 - ✨ the same call lists the ability uses (no extra AI call)
+        task, schema = magic_rules.track_ask(store, pid, branch, ctx, TRACK_TASK, TRACK_SCHEMA)
         job.phase = f"An AI is tracking the continuity of chapter {ch['number']}"
         tok = review.work.begin(pid, "C02", f"Tracking chapter {ch['number']}")
         try:
-            raw = review.assist._call_ai(job, op_for_roles="C02", task=TRACK_TASK, schema=TRACK_SCHEMA, context=ctx,
+            raw = review.assist._call_ai(job, op_for_roles="C02", task=task, schema=schema, context=ctx,
                                          protected=[])
             slot = job.slot
+            magic_rules.save_tracked(store, pid, branch, chapter_id, ch.get("version"), raw)
         except AkoweError as exc:
             if not fallback:
                 raise

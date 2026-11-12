@@ -12,6 +12,7 @@ import * as WRT from './writers.js';  // 🏆 who writes best · 🤫 hide the t
 import { maybeStartTour, replayTour } from './tour.js';  // 🧭 the short guided tour of My books (first visit; ❓ Help replays it)
 import * as RP from './run-plan.js';  // ⏱ 3d estimate · 📊 3e usage meter + ⏰ start later · 📋 6c paste starter sheet
 import { originalityCard } from './originality.js';  // ✨ #20 originality and "sounds like AI" check
+import { magicCard, magicFields, magicSummary } from './magic.js';  // ✨ magic rules that are kept (magic_rules.py)
 import { forgeRoute } from './forge.js';  // 🗂 B5 Character Forge dossiers (characters, items, places, magic)
 import { viewPictures } from './pictures.js';  // 🖼 B3 chapter/scene pictures and the map
 import { viewTrailer } from './trailer.js';  // 🎞 B2 the book trailer (AutoInjector 🎬 Video)
@@ -7191,13 +7192,14 @@ async function viewWorld(main) {
   const prog = h('div', { 'aria-live': 'polite' });
   const rulesBox = h('section', { class: 'card world-card', 'aria-labelledby': 'wr-h', 'data-testid': 'rules-card' });
   const texBox = h('section', { class: 'card world-card', 'aria-labelledby': 'wt-h', 'data-testid': 'texture-card' });
-  main.append(msg, prog, rulesBox, texBox);
+  const magic = magicCard({ h, clear, api, bpath, toast, infoTip, uid, S, problemBox, toProblem, stateBox, loadingState });
+  main.append(msg, prog, rulesBox, magic.el, texBox);
   let info;
   const where = { book: S.project.name, step: 'Story rules and world' };
   const load = async () => {
     try { info = await api('GET', bpath('/review/world')); }
     catch (e) { clear(msg).appendChild(problemBox(toProblem(e, where), { retry: load }, 'Could not load the story rules')); return; }
-    drawRules(); drawTexture();
+    drawRules(); drawTexture(); magic.refresh();
   };
   const ai = async (what, body, label) => {
     clear(msg);
@@ -7227,7 +7229,8 @@ async function viewWorld(main) {
           h('p', null, h('strong', null, r.text), r.status === 'retired' ? h('span', { class: 'muted small' }, ' (retired)') : null,
             (lintBy[r.id] || []).map(p => [' ', hazard({ code: 'RULE_NOT_BOUNDED', message: p.message }, {}, { small: true })])),
           h('p', { class: 'small' }, h('span', { class: 'muted' }, 'Limits: '), r.scope || h('em', { class: 'muted' }, 'none stated'),
-            r.stated_by ? [h('span', { class: 'muted' }, ' · stated by '), r.stated_by] : null, r.source ? [h('span', { class: 'muted' }, ' · from '), r.source] : null)))));
+            r.stated_by ? [h('span', { class: 'muted' }, ' · stated by '), r.stated_by] : null, r.source ? [h('span', { class: 'muted' }, ' · from '), r.source] : null),
+          magicSummary(h, r.magic)))));
       }
       const props = (e.proposals || {}).items || [];
       if (props.length) rulesBox.appendChild(proposalBox(e, props, catLabel));
@@ -7270,6 +7273,7 @@ async function viewWorld(main) {
       const sc = h('textarea', { id: `${k}-scope`, rows: '2', 'data-k': 'scope' }); sc.value = (r || {}).scope || '';
       const so = h('input', { type: 'text', id: `${k}-source`, 'data-k': 'source' }); so.value = (r || {}).source || '';
       const sb = h('input', { type: 'text', id: `${k}-stated_by`, 'data-k': 'stated_by' }); sb.value = (r || {}).stated_by || '';
+      const mg = magicFields({ h, uid, tipLabel }, r, F.magic);  // ✨ an ability, spell or device: its checkable rule
       const st = h('select', { id: `${k}-status`, 'data-k': 'status' }, h('option', { value: 'active', selected: (r || {}).status !== 'retired' }, 'In use'), h('option', { value: 'retired', selected: (r || {}).status === 'retired' }, 'Retired (kept for history)'));
       const fs = h('fieldset', { class: 'field rule-edit', 'data-id': (r || {}).id || '' }, h('legend', null, 'Rule'),
         h('div', { class: 'grid-2' }, h('div', { class: 'field' }, tipLabel(cat.id, 'Kind of rule', F.categories.map(c => `${c.label}: ${c.help}`).join(' ')), cat),
@@ -7278,8 +7282,8 @@ async function viewWorld(main) {
         h('div', { class: 'field' }, tipLabel(sc.id, FL.scope.label, FL.scope.help), sc),
         h('div', { class: 'grid-2' }, h('div', { class: 'field' }, tipLabel(so.id, FL.source.label, FL.source.help), so),
           h('div', { class: 'field' }, tipLabel(sb.id, FL.stated_by.label, FL.stated_by.help), sb)),
-        h('button', { type: 'button', class: 'small link', onclick: () => fs.remove() }, 'Remove this rule'));
-      fs.collect = () => Object.assign({ id: fs.dataset.id }, Object.fromEntries([...fs.querySelectorAll('[data-k]')].map(x => [x.dataset.k, x.value.trim()])));
+        mg.el, h('button', { type: 'button', class: 'small link', onclick: () => fs.remove() }, 'Remove this rule'));
+      fs.collect = () => Object.assign({ id: fs.dataset.id, magic: mg.collect() }, Object.fromEntries([...fs.querySelectorAll('[data-k]')].map(x => [x.dataset.k, x.value.trim()])));
       list.appendChild(fs);
     };
     ((e && e.rules) || []).forEach(row);
@@ -9290,7 +9294,8 @@ async function viewReport(main) {
         h('div', { class: 'kpi' }, h('strong', null, `${agg.reviewers || 0}`), h('span', { class: 'small' }, `AI reviewer(s), ${agg.independent || 0} independent`)),
         h('div', { class: 'kpi' }, h('strong', null, `${(wd.total || 0).toLocaleString()}`), h('span', { class: 'small' }, `words of about ${(wd.target || 0).toLocaleString()} (${wd.length || ''})`))),
       (rep.story_kind || {}).line ? h('p', { class: 'small', 'data-testid': 'rp-story-kind' }, `📚 ${rep.story_kind.line}`) : null,
-      (rep.originality || {}).line ? h('p', { class: 'small', 'data-testid': 'rp-originality' }, rep.originality.line, h('span', { class: 'muted' }, ' (details: ✨ Originality check below)')) : null));
+      (rep.originality || {}).line ? h('p', { class: 'small', 'data-testid': 'rp-originality' }, rep.originality.line, h('span', { class: 'muted' }, ' (details: ✨ Originality check below)')) : null,
+      (rep.magic || {}).line ? h('p', { class: 'small', 'data-testid': 'rp-magic' }, rep.magic.line, (rep.magic.problems || []).length ? h('span', { class: 'muted' }, ` — ${rep.magic.problems[0]}`) : null) : null));
     if ((agg.dimensions || []).some(d => d.n)) {
       const t = h('table', { class: 'rp-table', 'data-testid': 'rp-scores' }, h('caption', { class: 'small' }, 'Scores from 1 to 10. Median = the middle score of the reviewers. ⚠️ = they are 3 or more points apart.'),
         h('thead', null, h('tr', null, h('th', null, 'Dimension'), h('th', null, 'Median'), h('th', null, 'Range'), reviews.map(r => h('th', null, r.name, r.independent && !(r.calibration || {}).flagged ? '' : ' ⚠️')))),
