@@ -91,8 +91,11 @@ def test_the_plain_line_and_the_settings():
 
 def test_the_forecast_counts_the_doctor_and_the_voice_check_and_their_switches():
     on = run_forecast.option_calls(run_forecast.options_of(None, {}), 10, 3)
-    assert on["story_doctor"]["calls"] == 3 + 2 + 3 and "Story doctor" in on["story_doctor"]["label"]
-    assert on["voice_contrast"]["calls"] == 1
+    # three AIs: the two that did not write the plan score it, one revision (fix + review) and their new scores
+    assert on["story_doctor"]["calls"] == 2 + 2 + 2 and "Story doctor" in on["story_doctor"]["label"]
+    assert on["story_doctor"]["to"] == "others"
+    assert on["voice_contrast"]["calls"] == run_forecast.VOICE_SHARE  # one answer, only when cards sound alike
+    assert run_forecast.option_calls(run_forecast.options_of(None, {}), 10, 1)["story_doctor"]["calls"] == 1 + 2 + 1
     off = run_forecast.option_calls(run_forecast.options_of(None, {"story_doctor": False, "voice_contrast": False}),
                                     10, 3)
     assert off["story_doctor"]["calls"] == 0 and off["voice_contrast"]["calls"] == 0
@@ -103,14 +106,16 @@ def test_the_forecast_counts_the_doctor_and_the_voice_check_and_their_switches()
 # ====================================================================== in a run
 def test_a_weak_plan_is_revised_through_the_plan_fix_scored_again_and_said_plainly(tmp_path):
     fake = SlotFake()
-    fake.plan_review_script = [7, 7, 7]  # round 1: every AI 7/10; round 2 (the fake's default): 9/10 with proof
+    fake.plan_review_script = [7, 7]  # round 1: both reviewers 7/10; round 2 (the fake's default): 9/10 with proof
     app = make_app(tmp_path, fake)
     run = run_book(app, dict(OFF, idea="A lighthouse keeper's apprentice and a brass key"))
     assert run["status"] == "done", run.get("problem")
     mem = app.autobook.get(run["id"])["story_doctor"]
     assert mem["line"] == "🩺 Plan scored 7.0 → 9.0 after 1 revision." and mem["revisions"] == 1
-    assert [r["score"] for r in mem["rounds"]] == [7.0, 9.0] and len(mem["rounds"][0]["by"]) == 3
-    assert fake.kinds.count("plan_review") == 6 and fake.doctor_fixes == 1
+    assert [r["score"] for r in mem["rounds"]] == [7.0, 9.0] and len(mem["rounds"][0]["by"]) == 2
+    assert fake.kinds.count("plan_review") == 4 and fake.doctor_fixes == 1
+    writer = next(sl for sl, k in fake.per_slot if k == "B11")  # the AIs that did not write the plan score it
+    assert writer not in {sl for sl, k in fake.per_slot if k == "plan_review"}
     # the revision went through the plan's own fix path, then the usual review, and is the approved outline
     i = fake.kinds.index("doctor_fix")
     assert fake.kinds[i + 1] == "review" and fake.kinds.index("doctor_fix") < fake.kinds.index("C02")
@@ -141,7 +146,7 @@ def test_a_good_plan_is_only_scored_and_off_means_no_check(tmp_path):
     assert run["status"] == "done", run.get("problem")
     mem = app.autobook.get(run["id"])["story_doctor"]
     assert mem["line"].startswith("🩺 Plan scored 9.0/10 — ready to write from") and mem["revisions"] == 0
-    assert fake.kinds.count("plan_review") == 3 and "doctor_fix" not in fake.kinds
+    assert fake.kinds.count("plan_review") == 2 and "doctor_fix" not in fake.kinds
     fake2 = SlotFake()
     app2 = make_app(tmp_path, fake2, name="data2")
     run2 = run_book(app2, dict(OFF, story_doctor=False))
@@ -151,7 +156,7 @@ def test_a_good_plan_is_only_scored_and_off_means_no_check(tmp_path):
 
 def test_a_revision_that_scores_lower_is_undone_and_the_first_plan_kept(tmp_path):
     fake = SlotFake()
-    fake.plan_review_script = [7, 7, 7, 5, 5, 5]
+    fake.plan_review_script = [7, 7, 5, 5]
     app = make_app(tmp_path, fake)
     run = run_book(app, dict(OFF, doctor_rounds=1))
     assert run["status"] == "done", run.get("problem")
@@ -168,7 +173,7 @@ def test_a_revision_that_scores_lower_is_undone_and_the_first_plan_kept(tmp_path
 def test_unproven_nines_do_not_pass_the_target(tmp_path):
     fake = SlotFake()
     proofless = {"plan_scores": {d: 9 for d in DIM_KEYS}, "weaknesses": [], "strengths": [], "summary": "great"}
-    fake.plan_review_script = [proofless] * 3
+    fake.plan_review_script = [proofless] * 2
     app = make_app(tmp_path, fake)
     run = run_book(app, OFF)
     mem = app.autobook.get(run["id"])["story_doctor"]
@@ -177,7 +182,7 @@ def test_unproven_nines_do_not_pass_the_target(tmp_path):
 
 def test_a_revision_the_ai_cannot_make_leaves_the_plan_and_never_stops_the_book(tmp_path):
     fake = SlotFake()
-    fake.plan_review_script = [6, 6, 6]
+    fake.plan_review_script = [6, 6]
     fake.fail_kind("doctor_fix", AkoweError("INVALID_INPUT", "/x", "refused"))
     app = make_app(tmp_path, fake)
     run = run_book(app, OFF)
@@ -193,7 +198,7 @@ def test_a_revision_the_ai_cannot_make_leaves_the_plan_and_never_stops_the_book(
 
 def test_the_authors_own_outline_is_only_scored(tmp_path, monkeypatch):
     fake = SlotFake()
-    fake.plan_review_script = [6, 6, 6]
+    fake.plan_review_script = [6, 6]
     app = make_app(tmp_path, fake)
     orig = app.autobook._ai_made
     monkeypatch.setattr(app.autobook, "_ai_made",

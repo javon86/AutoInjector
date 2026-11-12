@@ -46,6 +46,7 @@ CARRY_ON_SHARE = 0.25          # share of a limit pause that still makes the run
 CHAPTERS_FROM, CHAPTERS_TO = 0.15, 0.9   # where the chapters lie in the run's time (the rest: planning, the end)
 DEFAULT_AIS = (("AI-1", "AI-1 · Claude", "claude"), ("AI-2", "AI-2 · ChatGPT", "chatgpt"),
                ("AI-3", "AI-3 · Gemini", "gemini"))
+VOICE_SHARE = 0.4             # 🗣 share of books whose voice cards need the one rewrite answer (an estimate)
 INSIDE_MEASURED = ("checkers", "writers_room", "human_pass", "first_page", "chapter_polish", "story_doctor",
                    "voice_contrast")   # their answers are inside costs' measured steps
 OWN_STEP = {"beta": "beta", "bible": "bible", "improve": "improve", "opening": "opening"}   # option -> its own run step (measured when made)
@@ -141,11 +142,13 @@ def option_calls(opts: dict, n: int, ais: int) -> dict:
     # 🩺 the story doctor (story_doctor.py): every AI scores the plan once; a plan under the target is revised (1 fix +
     # its review) and scored again — counted as one revision (most plans need one; at most doctor_rounds)
     rounds = int(opts.get("doctor_rounds") or 2)
-    out["story_doctor"] = {"calls": (min(ais, 3) + 2 + min(ais, 3)) if opts.get("story_doctor") else 0, "to": "all",
+    sc = max(1, min(ais - 1, 3)) if ais >= 3 else min(ais, 2)   # the AIs that did not write the plan (else all, ≤ 2)
+    out["story_doctor"] = {"calls": (sc + 2 + sc) if opts.get("story_doctor") else 0, "to": "others",
                            "label": f"🩺 Story doctor: the AIs score the plan before chapter 1 and it is revised when "
                                     f"weak (up to {rounds} revision{'s' if rounds != 1 else ''})"}
-    # 🗣 voice cards made distinct (voice_contrast.py): one answer, only when cards sound alike
-    out["voice_contrast"] = {"calls": 1 if opts.get("voice_contrast") else 0, "to": "writer",
+    # 🗣 voice cards made distinct (voice_contrast.py): one answer, only when two cards sound alike or one is thin —
+    # counted as its expected share (cards made with the whole cast in view usually differ already)
+    out["voice_contrast"] = {"calls": VOICE_SHARE if opts.get("voice_contrast") else 0, "to": "all",
                              "label": "🗣 Voice cards made distinct (only when two sound alike)"}
     out["pictures"] = {"calls": 0, "to": "none", "label": "Character pictures (Stable Diffusion: no AI answers)",
                        "minutes": PICTURES * PICTURE_MIN if opts.get("pictures") else 0}

@@ -7,8 +7,8 @@ check. A plan is cheap to fix while no chapter exists yet.
 What happens, in a ⚡ Make-a-book run, right after the chapter outline (B11) is approved and before the story rules are
 updated for it (autobook.py ``_s_outline``):
 
-1. **Score.** Each working AI (one per AI family, the checker order's "never checks" respected, at most
-   ``MAX_REVIEWERS``) reads the plan — premise, main plot, chapter outline, story rules, the cast — and scores it on
+1. **Score.** Each working AI that did not write the plan (one per AI family, the checker order's "never checks"
+   respected; the writer's AI too when fewer than two others work) reads the plan — premise, main plot, chapter outline, story rules, the cast — and scores it on
    the SAME dimensions as the whole-book review (book_report.DIMENSIONS) as "how good can a book written from this
    plan be", with quoted weaknesses and a concrete fix for each (JSON, ``PLAN_SCHEMA``). The same strictness rules as
    the whole-book review (calibration.py): a 9 or 10 needs a quote from the plan that proves it, and a near-perfect
@@ -319,7 +319,9 @@ def _control(exc) -> bool:
 
 
 def reviewers(svc, run: dict) -> list[dict]:
-    """The AIs that score the plan: every working AI (one per family), the checker order's "never checks" left out."""
+    """The AIs that score the plan: the working AIs (one per family, the checker order's "never checks" left out) that
+    did not write the plan, like the whole-book review; when fewer than two of them work, the plan's writer too (two
+    opinions are better than one)."""
     from . import checker_order, cross_check  # noqa: PLC0415
     from . import providers as providers_mod  # noqa: PLC0415
     try:
@@ -327,7 +329,19 @@ def reviewers(svc, run: dict) -> list[dict]:
         ws = [s for s in cross_check.working(svc, run, needed=8000)
               if not checker_order.is_off(pol, providers_mod.slot_family(s) or s["slot_id"])]
         ordered, _how = checker_order.order_slots(svc.store, pol, ws)
-        return ordered[:MAX_REVIEWERS]
+        wfam = None
+        try:
+            outline = svc.bp(run).outline()
+            wslot = (svc._review.writer_of(run["project_id"], run["branch_id"], outline) or {}).get("slot") \
+                if outline else None  # noqa: SLF001
+            wfam = providers_mod.slot_family(cross_check._slot(cross_check._base(svc.app.engine.providers), wslot)) \
+                if wslot else None  # noqa: SLF001
+        except Exception:  # noqa: BLE001 - unknown writer: everyone scores
+            log.debug("story doctor: could not tell who wrote the plan", exc_info=True)
+        others = [s for s in ordered if not wfam or providers_mod.slot_family(s) != wfam]
+        if len(others) >= 2:
+            return others[:MAX_REVIEWERS]
+        return (others + [s for s in ordered if s not in others])[:MAX_REVIEWERS]
     except Exception:  # noqa: BLE001 - who reviews is a choice; never break the book over it
         log.exception("story doctor: could not list the reviewers")
         return []
