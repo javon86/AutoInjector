@@ -48,8 +48,9 @@ CHAPTERS_FROM, CHAPTERS_TO = 0.15, 0.9   # where the chapters lie in the run's t
 DEFAULT_AIS = (("AI-1", "AI-1 · Claude", "claude"), ("AI-2", "AI-2 · ChatGPT", "chatgpt"),
                ("AI-3", "AI-3 · Gemini", "gemini"))
 VOICE_SHARE = 0.4             # 🗣 share of books whose voice cards need the one rewrite answer (an estimate)
+FRESH_SHARE = 0.5             # 🔁 share of books where a repeated title word or name is renamed (one answer each)
 INSIDE_MEASURED = ("checkers", "writers_room", "human_pass", "first_page", "chapter_polish", "story_doctor",
-                   "voice_contrast")   # their answers are inside costs' measured steps
+                   "voice_contrast", "trade_card", "fresh_names")   # their answers are inside costs' measured steps
 OWN_STEP = {"beta": "beta", "bible": "bible", "improve": "improve", "opening": "opening", "reread": "reread"}   # option -> its own run step (measured when made)
 
 
@@ -91,6 +92,7 @@ def options_of(app, body: dict | None) -> dict:
             "beta_reread": b.get("beta_reread") is not False,
             "improve_mode": "chapters" if b.get("improve_mode") == "chapters" else "scenes",
             "story_doctor": b.get("story_doctor") is not False, "voice_contrast": b.get("voice_contrast") is not False,
+            "trade_card": b.get("trade_card") is not False, "fresh_names": b.get("fresh_names") is not False,
             "doctor_rounds": b.get("doctor_rounds") if isinstance(b.get("doctor_rounds"), int)
             and not isinstance(b.get("doctor_rounds"), bool) and 1 <= b.get("doctor_rounds") <= 3 else 2,
             "improve_rounds": b.get("improve_rounds") if isinstance(b.get("improve_rounds"), int)
@@ -173,6 +175,15 @@ def option_calls(opts: dict, n: int, ais: int) -> dict:
     # counted as its expected share (cards made with the whole cast in view usually differ already)
     out["voice_contrast"] = {"calls": VOICE_SHARE if opts.get("voice_contrast") else 0, "to": "all",
                              "label": "🗣 Voice cards made distinct (only when two sound alike)"}
+    # 🔧 the trade card (trade_card.py): one research request at planning (a web AI; with the helpers ready also one
+    # Claude Code job, counted with the helpers below) — none when the book centres on no trade
+    out["trade_card"] = {"calls": 1 if opts.get("trade_card") else 0, "to": "all",
+                         "label": "🔧 Trade card: how the main characters' trade is really done (one research)"}
+    # 🔁 kept fresh (fresh_names.py): at most one rename answer for a repeated title word or name in the profile and one
+    # in the cast, only when one repeats a recent book's — counted as its expected share
+    out["fresh_names"] = {"calls": 2 * FRESH_SHARE if opts.get("fresh_names") else 0, "to": "all",
+                          "label": "🔁 Kept fresh: rename a title word or name your recent books used (only when "
+                                   "needed)"}
     out["pictures"] = {"calls": 0, "to": "none", "label": "Character pictures (Stable Diffusion: no AI answers)",
                        "minutes": PICTURES * PICTURE_MIN if opts.get("pictures") else 0}
     # 🧑‍⚖️ the stand-in vote at a story checkpoint the author does not answer: every AI votes on each waiting problem
@@ -180,7 +191,7 @@ def option_calls(opts: dict, n: int, ais: int) -> dict:
     si_cp = min(int(opts.get("stand_in_checkpoints") or 0), math.ceil(n / 5) + 1) if ais >= 2 else 0
     out["stand_in"] = {"calls": si_cp * ais, "to": "all",
                        "label": "Stand-in votes at the story checkpoints (at most; only if you don't answer)"}
-    helpers = (3 * n + 2 * math.ceil(n / 5)) if opts.get("claude_code") else 0
+    helpers = (3 * n + 2 * math.ceil(n / 5) + (1 if opts.get("trade_card") else 0)) if opts.get("claude_code") else 0
     out["helpers"] = {"calls": helpers, "to": "helpers", "label": "Claude Code helpers (research, fact checks, "
                       "“sounds like AI” pass)"}
     return out
@@ -219,6 +230,7 @@ def _run_opts(j: dict) -> dict:
             "reread_after_rewrites": s.get("reread_after_rewrites") is not False,
             "beta_reread": s.get("beta_reread") is not False,
             "story_doctor": s.get("story_doctor") is True, "voice_contrast": s.get("voice_contrast") is True,
+            "trade_card": s.get("trade_card") is True, "fresh_names": s.get("fresh_names") is True,
             "doctor_rounds": s.get("doctor_rounds") or 2}
 
 

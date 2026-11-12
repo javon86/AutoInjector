@@ -148,6 +148,8 @@ def editor_context(engine, principal, pid, branch, rec) -> dict:
                                     for r in here["repeats"] if r["class"] in ("voice", "motif")][:10],
                            "may_trim": [{"phrase": r["phrase"][:60], "class": r["class"], "uses_to_trim": r["trim_here"]}
                                         for r in here["repeats"] if r["trim_here"]][:10]}}
+        from . import trade_card  # noqa: PLC0415 - 🔧 trade accuracy against the book's trade card
+        out.update(trade_card.editor_block(engine.store, pid, branch, text))
         return {"fact_checks": out}
     except Exception:  # noqa: BLE001 - context is best effort
         log.exception("could not add the fact checks to the editor's context")

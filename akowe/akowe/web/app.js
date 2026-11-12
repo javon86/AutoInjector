@@ -8302,16 +8302,26 @@ function storyDoctorSwitch(prefix) {
   box.addEventListener('change', () => { state.textContent = box.checked ? 'On' : 'Off'; rounds.disabled = target.disabled = !box.checked; });
   const vid = `${prefix}-voice-contrast`;
   const vbox = h('input', { type: 'checkbox', role: 'switch', id: vid, 'data-testid': vid, checked: true, 'aria-describedby': `${vid}-hint` });
+  const tid = `${prefix}-trade-card`;  // 🔧 trade_card: how the main characters' trade is really done
+  const tbox = h('input', { type: 'checkbox', role: 'switch', id: tid, 'data-testid': tid, checked: true, 'aria-describedby': `${tid}-hint` });
+  const fid = `${prefix}-fresh-names`;  // 🔁 fresh_names: don't repeat the recent books' names, title words and settings
+  const fbox = h('input', { type: 'checkbox', role: 'switch', id: fid, 'data-testid': fid, checked: true, 'aria-describedby': `${fid}-hint` });
   const el = h('fieldset', { class: 'field sd-switch' }, h('legend', null, '🩺 Plan check'),
     h('div', { class: 'check-row' }, box, h('label', { for: id }, h('strong', null, 'Story doctor: check and mend the plan before chapter 1'), ' ', state)),
     h('div', { class: 'row' }, rounds, target),
     h('p', { class: 'hint', id: `${id}-hint` }, 'On (recommended): when the plan (premise, main plot, chapter outline) is made, every working AI scores it on the same points as the book report — with quotes and a fix for each weakness. If it scores under your aim, the outline is revised with their fixes and scored again; the best plan is kept. Your own idea and your lock list are never replaced, and an outline you wrote yourself is only scored. The run window says e.g. “🩺 Plan scored 7.4 → 8.6 after 1 revision”. About 3 to 8 more AI answers.'),
     h('div', { class: 'check-row' }, vbox, h('label', { for: vid }, h('strong', null, '🗣 Make sure every character sounds different'))),
-    h('p', { class: 'hint', id: `${vid}-hint` }, 'On (recommended): Akọwe compares the voice cards (how each character talks) without AI; only when two sound alike or one is too thin, the AI makes them distinct in one answer. Cards you wrote yourself are never changed.'));
+    h('p', { class: 'hint', id: `${vid}-hint` }, 'On (recommended): Akọwe compares the voice cards (how each character talks) without AI; only when two sound alike or one is too thin, the AI makes them distinct in one answer. Cards you wrote yourself are never changed.'),
+    h('div', { class: 'check-row' }, tbox, h('label', { for: tid }, h('strong', null, '🔧 Get the main characters\' trade right'))),
+    h('p', { class: 'hint', id: `${tid}-hint` }, 'On (recommended): when the story centres on a trade or craft (a piano tuner, a lighthouse keeper…), one research request writes a short card on how it is really done — tools, steps, terms, the mistakes writers make, sensory details (with sources when Claude Code researched it). The writer gets it in the chapters that show the work, and the editor checks those chapters against it. 1–2 more AI answers.'),
+    h('div', { class: 'check-row' }, fbox, h('label', { for: fid }, h('strong', null, '🔁 Keep it fresh: don\'t reuse names, title words and settings from my recent books'))),
+    h('p', { class: 'hint', id: `${fid}-hint` }, 'On (recommended): what the AI invents (title, names, setting) avoids what your last books already used, and a repeated name or title word is renamed once. What you typed yourself is always kept. The run window says e.g. “🔁 Kept fresh: avoided Odile, Salt, coastal town”.'));
   return { el, apply(body) {
     if (!box.checked) body.story_doctor = false;
     else { if (rounds.value !== '2') body.doctor_rounds = Number(rounds.value); if (target.value !== '8.5') body.doctor_target = Number(target.value); }
     if (!vbox.checked) body.voice_contrast = false;
+    if (!tbox.checked) body.trade_card = false;
+    if (!fbox.checked) body.fresh_names = false;
   } };
 }
 /** ✍ Chapter 1: two first pages, keep the better one (first_page) and rewrite chapter 1 last (opening_pass): both on */

@@ -70,6 +70,15 @@ def answer(job, ctx):
                       {"chapter": n, "topic": "Unsourced", "note": "A claim with no source must be dropped.",
                        "label": "established"}]
         return {"notes": notes}
+    if job == "trade_card":  # 🔧 trade_card.py: one sourced card per craft
+        return {"craft_cards": [{"craft": c, "how_it_works": f"How a {c} really works (researched).",
+                                 "tools": ["trimming scissors"], "steps": ["Trim the wick", "Light at dusk"],
+                                 "terms": [{"term": "lamp room", "meaning": "the glazed room at the top"}],
+                                 "mistakes": [{"wrong": "a brass crank", "right": "the clockwork turns the lens",
+                                               "watch_words": ["brass crank"]}],
+                                 "sensory": ["paraffin"],
+                                 "sources": [{"url": "https://example.org/lighthouse-keeping", "about": "keeping"},
+                                             {"url": "not a url"}]} for c in (ctx.get("crafts") or [])[:2]]}
     if job == "facts":
         text = ctx.get("chapter_text") or ""
         s = first_sentence(text)

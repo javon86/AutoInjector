@@ -542,6 +542,9 @@ class ChapterWriter(ProseWriter):
                                       ctx.payload["chapter_id"], measure=True)  # 🧠 + the smart-memory sizes
             from ..claude_code_book import add_to_brief  # noqa: PLC0415 - 🤖 research notes from the helpers
             brief = add_to_brief(ctx.store, ctx.project_id, ctx.branch_id, ctx.payload["chapter_id"], brief)
+            from ..trade_card import add_to_brief as trade_brief  # noqa: PLC0415 - 🔧 how the trade is really done
+            brief = trade_brief(ctx.store, ctx.project_id, ctx.branch_id, ctx.field_record("outline_ref"),
+                                ctx.payload["chapter_id"], brief)
             ctx.writing_brief = brief
             meta["brief"] = info
         return meta
