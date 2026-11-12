@@ -39,7 +39,7 @@ def test_skip_link_and_tab_order(make_context, ai_server, book):
     stops = []
     for _ in range(12):
         info = page.evaluate("""() => { const e = document.activeElement; const r = e.getBoundingClientRect();
-            return { inTop: !!e.closest('.topbar') && !e.closest('#ai-activity'), inStrip: !!e.closest('#ai-activity'), x: r.x, y: r.y, vis: r.width > 0 && r.height > 0,
+            return { inTop: !!e.closest('.topbar') && !e.closest('#ai-activity, #run-strip'), inStrip: !!e.closest('#ai-activity, #run-strip'), x: r.x, y: r.y, vis: r.width > 0 && r.height > 0,
                      name: (e.getAttribute('aria-label') || e.textContent || e.title || '').trim().slice(0, 30) }; }""")
         stops.append(info)
         page.keyboard.press("Tab")
@@ -48,7 +48,8 @@ def test_skip_link_and_tab_order(make_context, ai_server, book):
     assert all(s["vis"] and s["name"] for s in top), [s for s in top if not (s["vis"] and s["name"])]
     xs = [s["x"] for s in top]
     assert xs == sorted(xs), f"tab order jumps around the top bar: {[(s['name'], s['x']) for s in top]}"
-    # ⚡ #116: rows of the AI activity strip (the line under the top bar, while an AI works) come after the top bar
+    # ⚡ #116: rows of the AI activity strip (the line under the top bar, while an AI works) and ⏳ the run progress
+    # line (run-strip.js, while a run works or for a while after it finished) come after the top bar
     strip = [i for i, s in enumerate(stops) if s.get("inStrip")]
     assert not strip or min(strip) > max(i for i, s in enumerate(stops) if s["inTop"]), stops
 
