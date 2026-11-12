@@ -252,7 +252,7 @@ def test_the_improve_pass_keeps_a_rewrite_the_same_reviewers_score_higher(tmp_pa
     fake.rewrite_script = [_rewrite_first]
     fake.book_review_script = [None, None, _better_review, _better_review]
     app = make_app(tmp_path, fake)
-    run = run_book(app, {"length": "short_story"})
+    run = run_book(app, {"length": "short_story", "improve_mode": "chapters"})
     assert run["status"] == "done", run.get("problem")
     mem = app.autobook.get(run["id"])["improve"]
     assert mem["kept"] is True and mem["after"] > mem["before"], mem
@@ -276,7 +276,7 @@ def test_the_improve_pass_keeps_the_original_when_the_score_drops(tmp_path):
     fake.rewrite_script = [_rewrite_first]
     fake.book_review_script = [None, None, _worse_review, _worse_review]
     app = make_app(tmp_path, fake)
-    run = run_book(app, {"length": "short_story"})
+    run = run_book(app, {"length": "short_story", "improve_mode": "chapters"})
     assert run["status"] == "done", run.get("problem")
     mem = app.autobook.get(run["id"])["improve"]
     assert mem["kept"] is False and mem["after"] == mem["before"] and mem["last_try"] < mem["before"]
@@ -291,9 +291,10 @@ def test_the_improve_pass_is_a_setting_and_counts_in_the_forecast(tmp_path):
     run = run_book(app, {"length": "short_story", "improve_pass": False})
     st = {s["id"]: s for s in run["steps"]}
     assert st["improve"]["state"] == "done" and st["improve"]["message"] == "Not asked for in this run"
-    on = run_forecast.option_calls(run_forecast.options_of(app, {}), 3, 3)["improve"]
+    on = run_forecast.option_calls(run_forecast.options_of(app, {"improve_mode": "chapters"}), 3, 3)["improve"]
     off = run_forecast.option_calls(run_forecast.options_of(app, {"improve_pass": False}), 3, 3)["improve"]
-    one = run_forecast.option_calls(run_forecast.options_of(app, {"improve_rounds": 1}), 3, 3)["improve"]
+    one = run_forecast.option_calls(run_forecast.options_of(app, {"improve_rounds": 1, "improve_mode": "chapters"}),
+                                    3, 3)["improve"]
     assert on["calls"] > one["calls"] > off["calls"] == 0
     with pytest.raises(Exception):
         app.autobook.start("author", {"author_confirms": True, "improve_rounds": 9})
@@ -390,7 +391,7 @@ def test_the_improve_pass_does_nothing_when_the_editors_rewrites_are_off(tmp_pat
     fake = SlotFake()
     app = make_app(tmp_path, fake)
     app.review.editor.save_settings({"enabled": True, "rounds": 0})
-    run = run_book(app, {"length": "short_story"})
+    run = run_book(app, {"length": "short_story", "improve_mode": "chapters"})
     st = {s["id"]: s for s in run["steps"]}
     assert st["improve"]["state"] == "done" and "switched off" in st["improve"]["message"]
     assert "rewrite" not in fake.kinds and "IMPROVE_SKIPPED" in [e.get("code") for e in run["events"]]

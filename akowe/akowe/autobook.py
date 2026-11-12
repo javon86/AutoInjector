@@ -141,7 +141,8 @@ STEPS = [
     # 🔁 improve_pass.py: on by default (run setting improve_pass), at most improve_rounds rounds
     ("improve", "H", None, "Improve until better", "The reviewers' “What to try next”, the beta readers' top fixes, "
      "the editor's major notes (also those of chapters you approved anyway) and Akọwe's own checks (clock and tide "
-     "times, repeated phrases, plain-word tics, too-simple sentences) go to the chapters that need them most; the same "
+     "times, repeated phrases, plain-word tics, too-simple sentences) go to the 🎯 3 weakest scenes (or, the older way, "
+     "the chapters that need them most); the same "
      "reviewers re-read the book, and the rewrite is kept only if the score went up and nothing dropped. (On by "
      "default; never holds up the book.)"),
 ]
@@ -1104,6 +1105,11 @@ class AutoBookService(_Runner):
         if not isinstance(ip, bool):
             raise AkoweError("INVALID_INPUT", "/improve_pass", "improve_pass must be true or false", status="REJECTED")
         out["improve_pass"] = ip
+        im = body.get("improve_mode", "scenes")  # 🎯 weak_scenes.py: the weakest scenes (default) or whole chapters
+        if im not in ("scenes", "chapters"):
+            raise AkoweError("INVALID_INPUT", "/improve_mode", "improve_mode must be \"scenes\" or \"chapters\"",
+                             status="REJECTED")
+        out["improve_mode"] = im
         for k in ("opening_pass", "first_page", "chapter_polish"):  # ✍ / 📏 on unless switched off
             v = body.get(k, True)
             if not isinstance(v, bool):

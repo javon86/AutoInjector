@@ -8246,19 +8246,26 @@ function qualityTrendCard(tr, testid, href) {
     tr.improve && tr.improve.before != null ? h('p', { class: 'muted' }, `🔁 Final improve pass: ${tr.improve.before} → ${tr.improve.after}${tr.improve.kept ? ' (kept)' : ' (not kept)'}`) : null,
     h('p', { class: 'muted' }, '🧠 Your weakest areas become lessons for your next book’s planners and writer.', href ? [' ', h('a', { href }, '📊 Open the report')] : null));
 }
-/** 🔁 "Improve until better" (run settings improve_pass, improve_rounds): on by default, 2 rounds */
+/** 🔁 "Improve until better" (run settings improve_pass, improve_mode, improve_rounds): on by default — 🎯 the 3
+ * weakest scenes, 1 round (weak_scenes.py); "whole chapters" is the older way (2 rounds by default) */
 function improvePassSwitch(prefix) {
   const id = `${prefix}-improve`;
   const box = h('input', { type: 'checkbox', role: 'switch', id, 'data-testid': id, checked: true, 'aria-describedby': `${id}-hint` });
   const state = h('span', { class: 'ip-state', 'aria-hidden': 'true' }, 'On');
+  const mode = h('select', { id: `${id}-mode`, 'data-testid': `${id}-mode`, 'aria-label': 'What to rewrite' },
+    h('option', { value: 'scenes', selected: true }, '🎯 The 3 weakest scenes (recommended)'),
+    h('option', { value: 'chapters' }, 'Whole chapters (the older way)'));
   const rounds = h('select', { id: `${id}-rounds`, 'data-testid': `${id}-rounds`, 'aria-label': 'How many rounds at most' },
-    [1, 2, 3].map(n => h('option', { value: String(n), selected: n === 2 }, `${n} round${n > 1 ? 's' : ''} at most`)));
-  box.addEventListener('change', () => { state.textContent = box.checked ? 'On' : 'Off'; rounds.disabled = !box.checked; });
+    [1, 2].map(n => h('option', { value: String(n), selected: n === 1 }, `${n} round${n > 1 ? 's' : ''} at most`)));
+  box.addEventListener('change', () => { state.textContent = box.checked ? 'On' : 'Off'; rounds.disabled = mode.disabled = !box.checked; });
   const el = h('fieldset', { class: 'field ip-switch' }, h('legend', null, '🔁 Improve until better'),
     h('div', { class: 'check-row' }, box, h('label', { for: id }, h('strong', null, 'At the end, fix what the reviewers and readers found — keep it only if the score goes up'), ' ', state)),
-    h('div', { class: 'row' }, rounds),
-    h('p', { class: 'hint', id: `${id}-hint` }, 'On (recommended): when the book is made, the reviewers’ “What to try next”, the beta readers’ top fixes, the editor’s major notes (also of chapters you approved anyway) and Akọwe’s own checks (clock and tide times, repeated phrases, too-simple sentences) go to the chapters that need them most. The same AIs read the book again; the change is kept only if the score went up and nothing dropped — otherwise your book stays exactly as it was. The run window shows both scores. About 5 to 10 more AI answers per round.'));
-  return { el, box, apply(body) { if (!box.checked) body.improve_pass = false; else if (rounds.value !== '2') body.improve_rounds = Number(rounds.value); } };
+    h('div', { class: 'row' }, mode, rounds),
+    h('p', { class: 'hint', id: `${id}-hint` }, 'On (recommended): when the book is made, every complaint — the reviewers’ quoted weak spots, the beta readers’ top fixes, the editor’s major notes (also of chapters you approved anyway) and Akọwe’s own checks (clock and tide times, repeated phrases) — is matched to its scene, and only the 3 weakest scenes are rewritten (never longer than 10% more words; your own chapters, names, locked details and the ending’s outcome stay). The same AIs read the book again; the change is kept only if the score went up and nothing dropped — otherwise your book stays exactly as it was. The run window shows both scores. About 6 more AI answers per round.'));
+  return { el, box, apply(body) {
+    if (!box.checked) { body.improve_pass = false; return; }
+    if (mode.value === 'chapters') { body.improve_mode = 'chapters'; body.improve_rounds = Number(rounds.value); } else if (rounds.value !== '1') body.improve_rounds = Number(rounds.value);
+  } };
 }
 /** 📏 "Polish each chapter's sentences" (run setting chapter_polish): on by default */
 function chapterPolishSwitch(prefix) {

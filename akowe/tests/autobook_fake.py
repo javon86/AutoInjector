@@ -267,6 +267,9 @@ class BookFakeAI:
         # reading-level passage gets its sentences joined and a repeat passage gets ``polish_swaps`` (phrase -> new)
         self.polish_script: list = []
         self.polish_swaps: dict[str, str] = {}
+        # 🎯 the weakest scenes (weak_scenes.py): scripted scene rewrites (dicts or callables(ctx)), one per call;
+        # by default the scene comes back unchanged (Akọwe then keeps the book as it was)
+        self.weak_scene_script: list = []
         self.stand_in_script: list = []
         self.stand_in_default = {"pick": "accept", "confident": 0.9,
                                  "why": "The correction answers the reviewer's finding and agrees with the canon."}
@@ -336,6 +339,12 @@ class BookFakeAI:
 
     # ------------------------------------------------------------------ answers
     def _answer(self, ctx, props, schema):
+        if "rewritten_scene" in props:  # 🎯 one of the weakest scenes rewritten
+            with self.lock:
+                scripted = self.weak_scene_script.pop(0) if self.weak_scene_script else None
+            if scripted is not None:
+                return "weak_scene", scripted(ctx) if callable(scripted) else copy.deepcopy(scripted)
+            return "weak_scene", {"rewritten_scene": (ctx.get("scene") or {}).get("text") or "", "what_changed": []}
         if "openings" in props:  # ✍ the writer's two first pages for chapter 1 (one answer)
             with self.lock:
                 scripted = self.openings_script.pop(0) if self.openings_script else None
