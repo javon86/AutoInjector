@@ -75,7 +75,11 @@ VOICE_TEXT = (
     ("under_pressure", "Speech under fear, anger or grief", "How the way they talk changes when it matters: shorter, "
                                                             "louder, polite, silent, jokes…"),
     ("talks_around", "What they talk around", "The thing they never name directly, and how they circle it."),
+    # 🗣 voice_contrast.py: how they dodge (optional: older cards and answers without it stay valid)
+    ("deflects", "How they dodge a question", "What they do when asked something they don't want to answer: a joke, a "
+                                              "counter-question, work talk, silence, sudden anger…"),
 )
+VOICE_OPTIONAL = ("deflects",)
 VOICE_LISTS = (
     ("vocabulary", "Words from their job, era and place", "Example words only they would use (trade terms, local "
                                                           "words, old words).", 12, ITEM_MAX),
@@ -126,7 +130,7 @@ SHEET_SCHEMA = {
                        must_show={"type": "array", "maxItems": MUST_SHOW_MAX, "items": _str()}),
 }
 VOICE_SCHEMA = {
-    "type": "object", "additionalProperties": False, "required": list(VOICE_KEYS),
+    "type": "object", "additionalProperties": False, "required": [k for k in VOICE_KEYS if k not in VOICE_OPTIONAL],
     "properties": dict({k: _str() for k, _l, _h in VOICE_TEXT},
                        **{k: {"type": "array", "items": _str(), "maxItems": n} for k, _l, _h, n, _m in VOICE_LISTS}),
 }
@@ -148,7 +152,7 @@ COMPANION_TASK = (
     "to help or absolve anyone. "
     "voice_card: rhythm, register, vocabulary (words from their job, era and place), phrases (favourite phrases and "
     "tics), never_words, habits (in conversation), under_pressure (how speech changes under fear, anger, grief), "
-    "talks_around (what they never name directly) and samples (2-3 short lines in their voice that do not name "
+    "talks_around (what they never name directly), deflects (how they dodge a question they don't want to answer) and samples (2-3 short lines in their voice that do not name "
     "feelings outright). Make the voice clearly different from every other character in the context (another rhythm, "
     "another vocabulary, other habits); never a shared calm, philosophical register.")
 
@@ -226,7 +230,7 @@ def missing(entry: dict | None) -> list[str]:
     sheet, voice = entry.get("sheet") or {}, entry.get("voice") or {}
     role = sheet.get("role") or entry.get("role") or "main"
     out = [label for k, label, _h in SHEET_FIELDS if not sheet.get(k) and (k != "own_wish" or role == "side")]
-    out += [label for k, label, _h in VOICE_TEXT if not voice.get(k)]
+    out += [label for k, label, _h in VOICE_TEXT if not voice.get(k) and k not in VOICE_OPTIONAL]
     out += [label for k, label, _h, _n, _m in VOICE_LISTS if not voice.get(k)]
     return out
 
@@ -534,7 +538,9 @@ def voice_brief(store, pid: str, branch: str, present: list[dict], *, first: str
     while others and size() > budget:
         others.pop()
         summarized = True
-    return {"cards": cards, "others": others, "summarized": summarized}
+    full = {c["name"] for c in cards}  # ✂️ brief_cuts.py: whose card went in as one line (or not at all)
+    short = [c["name"] for c in with_card if c["name"] not in full]
+    return {"cards": cards, "others": others, "summarized": summarized, "short": short}
 
 
 def voice_words(store, pid: str, branch: str) -> dict:

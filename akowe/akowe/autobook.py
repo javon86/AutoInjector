@@ -1139,6 +1139,9 @@ class AutoBookService(_Runner):
             out["checker_order"] = co
         from . import claude_code_book  # noqa: PLC0415 - 🤖 Claude Code helpers: on/off for this run (None = Settings)
         out.update(claude_code_book.clean_run_option(body, self.store))
+        from . import story_doctor, voice_contrast  # noqa: PLC0415 - 🩺 the plan check / 🗣 distinct voice cards
+        out.update(story_doctor.clean_run_option(body))
+        out.update(voice_contrast.clean_run_option(body))
         n = body.get("beta_readers", 1)  # 👥 idea #14: how many beta readers (1 = one AI; 2-3 = a panel)
         if isinstance(n, bool) or not isinstance(n, int) or not 1 <= n <= 3:
             raise AkoweError("INVALID_INPUT", "/beta_readers", "beta_readers: 1, 2 or 3", status="REJECTED")
@@ -2793,8 +2796,12 @@ class AutoBookService(_Runner):
                        slot=rj.slot, record_id=rec["record_id"])
             self.save(run)
         ok = sum(1 for i in st["items"] if i["state"] == "done")
-        st["message"] = f"{ok} of {len(people)} character(s) have a sheet and a voice card" + (
+        msg = f"{ok} of {len(people)} character(s) have a sheet and a voice card" + (
             f" ({made} made now)" if made else "") + (f" · ⚠️ {failed} could not be made" if failed else "")
+        from . import voice_contrast  # noqa: PLC0415 - 🗣 the cards must really differ (≤ 1 AI answer, only if not)
+        voice_contrast.run_check(self, run, st)
+        vc = (run.get("voice_contrast") or {}).get("line")
+        st["message"] = msg + (f" · {vc}" if vc else "")
 
     def _s_looks(self, run, st):
         """⏱ Essentials only, before chapter one (story_details.py). Never blocks the book."""
@@ -3588,9 +3595,11 @@ class AutoBookService(_Runner):
             self._repin_plan(run, st)
         self._planning(run, st, "B11", "chapter outline", precheck=lambda rid: self._outline_has_main(run, rid),
                        on_refused=made_missing)
+        from . import story_doctor  # noqa: PLC0415 - 🩺 the plan is scored (and mended) before chapter 1
+        story_doctor.run_doctor(self, run, st)
         self._update_rules(run, st)
         n = len(self.bp(run).outline_chapters(self.bp(run).outline()))
-        st["message"] = f"{n} chapter(s) planned and approved"
+        st["message"] = f"{n} chapter(s) planned and approved" + (f" · {st['doctor']}" if st.get("doctor") else "")
         self._place_beats(run, st)
         self._place_stages(run, st)
 
@@ -4139,6 +4148,8 @@ class AutoBookService(_Runner):
                          "words": (rep.get("words") or {}).get("total"), "warnings": rep.get("warnings") or []}
         from . import chapter_polish  # noqa: PLC0415 - 📏 the chapter polish's numbers in the saved report too
         chapter_polish.to_report(self, run, rep)
+        from . import story_doctor  # noqa: PLC0415 - 🩺 the plan check's line in the saved report too
+        story_doctor.to_report(self, run, rep)
         if agg.get("reviewers"):
             st["message"] = (f"{agg['reviewers']} AI(s) read the whole book · overall {agg.get('overall')}/10"
                              + (f" · ⚠️ they disagree on {', '.join(agg['disagreements'])}" if agg.get("disagreements")
