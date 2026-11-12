@@ -554,6 +554,19 @@ replaced by what you type.
   - *Hearing the replies* needs nothing: it uses the voices built into Windows. For nicer voices install a
     **piper voice** (Setup Wizard → 📦 Installs → "Voice model"; more `.onnx` voices can go in
     `stuff and thing/models/voice`).
+- **✨ Better voices** (System AI → 🔊 Voice; code: `desktop-app/voice-catalog.js` the list, `voice-picker.js` the
+  box, `voice-downloads.js` the downloads, `voice_shim.py` the engines): a list of recommended free Piper voices from
+  the official piper-voices collection, each with ▶ sample (the makers' short recording until it is downloaded, then
+  the voice itself), ⬇ download into `models/voice` (progress, ✕ cancel, carries on where it stopped, the small
+  `.onnx.json` settings first and checked, a file already there never replaced) and "Use for" a speaker. Piper runs
+  on the processor, only while reading. The default per speaker prefers the recommended voices (Alfred
+  en_GB-alan, ChatGPT en_US-lessac-high, Claude en_US-ryan-high, Gemini en_GB-alba).
+- **✨ Kokoro (optional, best quality):** "Install best-quality voice" pip-installs `kokoro-onnx` into the voice
+  engine's Python and downloads its two model files (~350 MB) into `models/voice/kokoro`. With **Use it** ticked,
+  read-aloud asks the voice shim for Kokoro (setting `engine`); it runs on the processor by default (half the cores,
+  so the PC stays usable, and the graphics card stays free) or on the graphics card when picked and available.
+  Fallback order on any problem: Kokoro → Piper → the PC's built-in voices. Nothing requires it. No internet use
+  except the buttons the user presses (▶ on a voice not downloaded, ⬇, Install).
 - **A voice for each speaker:** ChatGPT, Claude, Gemini and Alfred each get a different voice (and a slightly
   different pitch and pace). Change them in the System AI panel → 🔊 Voice → "Read-aloud voices", with the speed and
   a ▶︎ test.

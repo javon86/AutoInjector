@@ -463,9 +463,35 @@ fully confirmed on your PC; the 🩺 test shows what works.
 - **◀ 🔊 ▶ on each AI** steps through its replies; **🔊** reads one aloud and **⏹** stops.
 - Speaking to the AIs needs the free **voice engine** (Setup Wizard → 📦 Installs → "Voice engine"). It works offline.
   The first time, it downloads the speech model (about 150 MB).
-- Hearing the replies needs nothing: it uses the voices built into Windows. For nicer voices, install a voice
-  model (Setup Wizard → 📦 Installs → "Voice model").
+- Hearing the replies needs nothing: it uses the voices built into Windows. For nicer voices, see **Better voices**
+  below.
 - What you say and what is read stay on your PC. The log notes only that something was heard, never the words.
+
+### Better voices (free)
+
+Open **System AI → 🔊 Voice** and scroll to **✨ Better voices**. It lists good, free voices (British and American,
+men and women), each with its size:
+
+- **▶ Sample** plays a short recording of it (about 90 KB, fetched only when you press ▶). Once a voice is downloaded,
+  ▶ plays the voice itself.
+- **⬇ Download** saves it into `stuff and thing/models/voice` (about 60–115 MB each, once; then it works offline).
+  You see how far it is; **✕ Cancel** stops it, and pressing ⬇ again carries on where it stopped. A file you already
+  have there is never replaced.
+- **Use for…** picks who reads with it: Alfred, ChatGPT, Claude or Gemini. Without a choice each one gets a different
+  good voice by itself (Alfred a British butler, ChatGPT Lessac, Claude Ryan, Gemini Alba) as soon as it is
+  downloaded.
+- These voices (Piper) run on your processor and use a little of it only while reading — your graphics card stays
+  free for pictures and video. Reading needs the voice engine (Setup Wizard → 📦 Installs → "Voice engine"); without
+  it the PC's own voices read.
+
+**✨ Best quality (optional): Kokoro.** Even more natural voices. Press **Install best-quality voice (Kokoro,
+~350 MB)** — it adds the Kokoro engine to the voice engine and downloads its voice file, with progress. Then tick
+**Use it**, choose where it runs — **Processor** (recommended: it leaves the graphics card free for pictures and
+video) or **Graphics card** (faster, but pictures and video wait) — and a Kokoro voice for each speaker, with ▶ to try
+it. Nothing needs Kokoro: if it has any problem, a Piper voice reads instead, and if that fails too, the PC's own
+voices do. Untick **Use it** to go back.
+
+Nothing in this box goes on the internet unless you press ▶ on a voice you haven't downloaded, ⬇, or Install.
 
 ## 9. Files the AIs give you (downloads)
 

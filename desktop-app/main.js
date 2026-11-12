@@ -53,6 +53,8 @@ const interpreterProvider = require("./interpreter-provider");
 const toolProvider = require("./tool-provider");
 const voiceProvider = require("./voice-provider");
 const voiceRead = require("./voice-read"); // 🎤 / 🔊 in the control panel: reply lists + read-aloud text clean-up
+const voiceCatalog = require("./voice-catalog"); // 🔊 Better voices: recommended free piper voices + optional ✨ Kokoro
+const { createVoiceDownloads } = require("./voice-downloads"); // ⬇ those voices, only when the user presses ⬇
 const imageProvider = require("./image-provider");
 const videoProvider = require("./video-provider");
 const setupManager = require("./setup-manager");
@@ -7209,11 +7211,23 @@ ipcMain.handle("voice:synthesize", async (_evt, args = {}) => {
     // read-aloud never waits for an engine start: no shim -> the page's built-in voices, at once
     const h = await ensureVoiceShim({ start: false, timeoutMs: 700 });
     if (!h.ok) return { ok: false, error: "NO_SHIM", fallback: true, message: "Using this PC's built-in voices." };
-    if (!h.tts || !Number(h.piper_voices)) return { ok: false, error: "NO_TTS_MODEL", fallback: true, message: voiceProvider.explainError({ error: "NO_TTS_MODEL" }) };
-    let voice = typeof a.voice === "string" ? a.voice : "";
-    if (!voice && who) voice = voiceProvider.getSettings().voices[who] || piperDefaults()[who] || "";
-    const r = await voiceProvider.synthesize(text, { voice });
-    if (!r.ok) { r.fallback = true; logEvent("voice-read", { step: "piper-failed", error: r.error, severity: "warning" }); }
+    // which engine: ✨ Kokoro when switched on and ready, else piper, else the page's built-in voices
+    let pick = voiceProvider.pickEngine(h, who, piperDefaults(), voiceCatalog.KOKORO.defaults);
+    const askedKokoro = typeof a.kokoroVoice === "string" && voiceCatalog.kokoroVoiceOk(a.kokoroVoice);
+    if (askedKokoro) { // ▶ a Kokoro voice in the picker: Kokoro even before it is switched on for everyone
+      if (!h.kokoro_ready) return { ok: false, error: "NO_KOKORO", fallback: true, message: "The best-quality voice (Kokoro) isn't installed yet." };
+      pick = { engine: "kokoro", kokoroVoice: a.kokoroVoice, device: voiceProvider.getSettings().kokoroDevice, voice: "" };
+    } else if (typeof a.voice === "string" && a.voice) { // ▶ one piper voice: that voice, with piper
+      if (!h.tts || !Number(h.piper_voices)) return { ok: false, error: "NO_TTS_MODEL", fallback: true, message: voiceProvider.explainError({ error: "NO_TTS_MODEL" }) };
+      pick = { engine: "piper", voice: a.voice };
+    }
+    if (pick.engine === "none") return { ok: false, error: "NO_TTS_MODEL", fallback: true, message: voiceProvider.explainError({ error: "NO_TTS_MODEL" }) };
+    const r = await voiceProvider.synthesize(text, { voice: pick.voice, engine: pick.engine, kokoroVoice: pick.kokoroVoice, device: pick.device });
+    if (r.ok && r.fallbackFrom) {
+      logEvent("voice-read", { step: "kokoro-fallback", error: r.kokoroError || null, severity: "warning" });
+      r.message = "The best-quality voice (Kokoro) couldn't read this, so a piper voice read it.";
+    }
+    if (!r.ok) { r.fallback = true; logEvent("voice-read", { step: `${pick.engine}-failed`, error: r.error, severity: "warning" }); }
     return r;
   } catch (e) { return { ok: false, error: "ERROR", fallback: true, message: String((e && e.message) || e).slice(0, 200) }; }
 });
@@ -7223,6 +7237,109 @@ function piperVoiceNames() {
 }
 function piperDefaults() { return voiceRead.defaultPiperVoices(piperVoiceNames()); }
 ipcMain.handle("voice:piper-voices", async () => ({ ok: true, voices: piperVoiceNames(), defaults: piperDefaults() }));
+// ---- 🔊 Better voices (voice-ui.js → voice-picker.js): recommended free piper voices, ⬇ download with progress /
+// cancel / resume, ▶ sample, and the optional ✨ Kokoro install. Nothing here goes on the internet unless the user
+// pressed a button (⬇, ▶ on a voice that isn't downloaded yet, or "Install best-quality voice").
+const voiceDownloads = createVoiceDownloads({
+  emit: (e) => broadcast("voice-download", e),
+  log: (code, data) => logEvent(code, data),
+});
+function voiceDir() { return outputManager.modelsDir("voice"); }
+function kokoroDir() { return path.join(voiceDir(), voiceCatalog.KOKORO.folder); }
+function piperInstalled(v) {
+  let dir; try { dir = voiceDir(); } catch (_) { return false; }
+  return v.files.every((f) => !voiceDownloads.fileProblem(path.join(dir, f.name), { minBytes: f.minBytes, json: f.json }));
+}
+function kokoroModelInstalled() {
+  let dir; try { dir = kokoroDir(); } catch (_) { return false; }
+  return voiceCatalog.KOKORO.files.every((f) => !voiceDownloads.fileProblem(path.join(dir, f.name), { minBytes: f.minBytes }));
+}
+const kokoroJob = { running: false, step: "" };
+async function voiceCatalogState() {
+  const active = new Map(voiceDownloads.active().map((x) => [x.id, x]));
+  let dir = ""; try { dir = voiceDir(); } catch (_) { dir = ""; }
+  const voices = voiceCatalog.PIPER_VOICES.map((v) => ({
+    id: v.id, label: v.label, gender: v.gender, lang: v.lang, langLabel: v.langLabel, quality: v.quality, bytes: v.bytes, suits: v.suits,
+    installed: piperInstalled(v), downloading: active.has(v.id), partial: dir ? voiceDownloads.partial(dir, `${v.id}.onnx`) : 0,
+  }));
+  let h = null; try { h = await voiceProvider.health({ timeoutMs: 600 }); } catch (_) { h = null; }
+  const settings = voiceProvider.getSettings();
+  return {
+    ok: true, voices, installedNames: piperVoiceNames(), defaults: piperDefaults(),
+    kokoro: {
+      approxMB: voiceCatalog.KOKORO.approxMB, voices: voiceCatalog.KOKORO.voices, defaults: voiceCatalog.KOKORO.defaults,
+      model: kokoroModelInstalled(), pkg: h && h.ok ? !!h.kokoro : null, ready: !!(h && h.ok && h.kokoro_ready),
+      installing: kokoroJob.running, step: kokoroJob.step, device: (h && h.kokoro_device) || "",
+    },
+    engine: settings.engine, kokoroDevice: settings.kokoroDevice, kokoroVoices: settings.kokoroVoices,
+  };
+}
+ipcMain.handle("voice:catalog", async () => { try { return await voiceCatalogState(); } catch (e) { return { ok: false, error: String(e), voices: [] }; } });
+ipcMain.handle("voice:download", async (_evt, args = {}) => {
+  const id = String((args && args.id) || "");
+  const v = voiceCatalog.piperVoice(id);
+  if (!v) return { ok: false, error: "UNKNOWN_VOICE", message: "That voice isn't in the list." };
+  const r = await voiceDownloads.start({ id, dir: () => voiceDir(), files: v.files });
+  if (r.ok) refreshSetupStatus();
+  delete r.paths;
+  return r;
+});
+ipcMain.handle("voice:download-cancel", async (_evt, args = {}) => voiceDownloads.cancel(String((args && args.id) || "")));
+// ▶ sample: an installed voice reads a line through the shim; one that isn't downloaded yet plays the short
+// recording its makers published (~90 KB, fetched only because the user pressed ▶, never saved).
+ipcMain.handle("voice:sample", async (_evt, args = {}) => {
+  const id = String((args && args.id) || "");
+  const v = voiceCatalog.piperVoice(id);
+  if (!v) return { ok: false, error: "UNKNOWN_VOICE", message: "That voice isn't in the list." };
+  const line = "Hello. This is how I sound when I read your chapters aloud.";
+  if (piperInstalled(v)) {
+    const h = await ensureVoiceShim({ start: false, timeoutMs: 700 });
+    if (h.ok && h.tts) {
+      const r = await voiceProvider.synthesize(line, { voice: id });
+      if (r.ok) { logEvent("voice-sample", { id, from: "voice" }); return { ok: true, audio: r.audio, mime: r.mime, from: "voice" }; }
+    }
+  }
+  const r = await voiceDownloads.fetchSmall(v.sample, 1024 * 1024);
+  logEvent("voice-sample", { id, from: "sample", ok: !!r.ok, error: r.ok ? null : r.error });
+  if (!r.ok) return { ok: false, error: r.error, message: "Couldn't fetch the sample (no internet?). Download the voice to hear it." };
+  return { ok: true, audio: r.buffer.toString("base64"), mime: r.mime || "audio/mpeg", from: "sample" };
+});
+// ✨ Install the best-quality voice (Kokoro): the kokoro-onnx package into the voice engine's Python, then its two
+// model files (~350 MB, resumable) into models/voice/kokoro, then a restart of the voice engine. Optional, never
+// required anywhere: any failure leaves piper and the built-in voices working exactly as before.
+async function installKokoro() {
+  if (kokoroJob.running) return { ok: false, error: "ALREADY_RUNNING", message: "The best-quality voice is already being installed." };
+  kokoroJob.running = true;
+  const say = (phase, extra) => broadcast("voice-download", Object.assign({ id: "kokoro", phase }, extra || {}));
+  try {
+    logEvent("voice-kokoro-install", { step: "start" });
+    kokoroJob.step = "package";
+    say("install", { message: "Step 1 of 2: installing the Kokoro engine (a few minutes)…" });
+    let n = 0;
+    const pip = await setupManager.pipInstall(voiceCatalog.KOKORO.packages, (line) => { if (++n % 3 === 0) say("install", { message: `Step 1 of 2: installing… ${String(line).replace(/\s+/g, " ").slice(0, 90)}` }); });
+    if (!pip.ok) {
+      const err = voiceProvider.redactPaths(String(pip.error || "")).slice(0, 200);
+      logEvent("voice-kokoro-install", { step: "package-failed", severity: "warning" });
+      say("error", { message: `Couldn't install the Kokoro engine: ${err}. Your other voices still work.` });
+      return { ok: false, error: "PIP_FAILED", message: `Couldn't install the Kokoro engine: ${err}. Your other voices still work.` };
+    }
+    kokoroJob.step = "model";
+    const r = await voiceDownloads.start({ id: "kokoro", dir: () => kokoroDir(), files: voiceCatalog.KOKORO.files });
+    if (!r.ok) return r;
+    kokoroJob.step = "restart";
+    try { if (voiceProvider.status().managed) { voiceProvider.stopManaged(); await startManagedVoice(setupManager.pythonBin()); } } catch (_) {}
+    logEvent("voice-kokoro-install", { step: "done" });
+    say("done", { message: "The best-quality voice is installed. Tick \"Use it\" to switch it on." });
+    return { ok: true, message: "The best-quality voice is installed." };
+  } catch (e) {
+    return { ok: false, error: "ERROR", message: `Couldn't install the best-quality voice: ${voiceProvider.redactPaths(String((e && e.message) || e)).slice(0, 200)}` };
+  } finally { kokoroJob.running = false; kokoroJob.step = ""; }
+}
+ipcMain.handle("voice:kokoro-install", async () => installKokoro());
+ipcMain.handle("voice:kokoro-cancel", async () => {
+  if (kokoroJob.step === "model") return voiceDownloads.cancel("kokoro");
+  return { ok: false, error: "CANT_CANCEL_NOW", message: kokoroJob.running ? "The engine part can't be stopped halfway; the download after it can." : "Nothing is being installed." };
+});
 // One AI's replies, oldest first, with a short preview each (no full text) …
 ipcMain.handle("voice:replies", (_evt, args = {}) => {
   const site = args && typeof args === "object" ? args.site : args;
@@ -8792,6 +8909,8 @@ async function startManagedVoice(explicitCommand) {
         VOICE_TTS_MODEL: process.env.AUTOINJECTOR_VOICE_TTS_MODEL || "",
         VOICE_STT_MODEL: process.env.AUTOINJECTOR_VOICE_STT_MODEL || "",
         VOICE_MODELS_DIR: (() => { try { return outputManager.modelsDir("voice"); } catch (_) { return ""; } })(), // every piper voice there (🔊 one per speaker)
+        VOICE_KOKORO_DIR: (() => { try { return path.join(outputManager.modelsDir("voice"), voiceCatalog.KOKORO.folder); } catch (_) { return ""; } })(), // ✨ optional Kokoro model
+        VOICE_KOKORO_DEVICE: voiceProvider.getSettings().kokoroDevice || "cpu",
       },
       onLog: (kind, text) => logEvent("voice-shim", { kind, text: String(text).slice(0, 300) }),
     });

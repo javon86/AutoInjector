@@ -124,6 +124,7 @@ const IPC_INVENTORY = [
   'video:record', 'video:remake', 'video:recipes', 'video:judge', 'video:improve', 'video:improve-final', 'video:improve-stop', 'video:make-best', 'video:estimate', 'video:judge-settings', // 🎬 ♻ 💾 🧑‍⚖️ 🔁
   'voice:check', 'voice:configure', 'voice:listen', 'voice:redownload', 'voice:speak', 'voice:status',
   'voice:transcribe', 'voice:synthesize', 'voice:piper-voices', 'voice:replies', 'voice:reply-text',
+  'voice:catalog', 'voice:download', 'voice:download-cancel', 'voice:sample', 'voice:kokoro-install', 'voice:kokoro-cancel', // 🔊 ✨ Better voices (voice-picker.js)
   'window:toggle-collapse', 'wizard-window:close', 'wizard:catalog', 'wizard:open', 'wizard:open-app-tab',
   'ease:prefs', 'ease:set-prefs', 'ease:checklist', 'ease:problems', 'ease:report', 'ease:report-show', 'ease:fix', 'ease:guide', // ✅ EASE (ease-main.js)
 ];
@@ -138,7 +139,7 @@ const EVENTS = {
   'manager-ack': 'UI live update', 'manager-state': 'UI live update', 'ollama-progress': 'UI live update', 'llm': 'UI live update (setup / download progress — Alfred reads llm.status / llm.check)', 'pane-health': 'UI live update (→ ai_health)', 'picker': 'UI live update', 'selector-retired': 'UI live update (an out-of-date saved setting was retired; ↩ Put it back = picker.undo-retire)',
   'prompts-changed': 'UI live update', 'relay-paused': 'UI live update', 'sd-connected': 'UI live update', 'sd-install': 'UI live update', 'sd-runner': 'UI live update', 'sd-addons': 'UI live update (🧩 add-on install progress — Alfred reads sd.addons)', 'video-install': 'UI live update (model download progress — Alfred reads video.install.check / video.status)', 'video-done': 'UI live update (a video finished — Alfred gets the result from video_call)', 'video-framepack': 'UI live update (FramePack loading / loaded — Alfred reads video.framepack.status)',
   'send-error': 'UI live update', 'sent': 'UI live update', 'sequence-state': 'UI live update', 'setup-progress': 'UI live update', 'setup-status': 'UI live update',
-  'terminal-data': 'UI live update', 'terminal-state': 'UI live update', 'tuner-state': 'UI live update', 'voice-speaking': 'UI live update', 'voice-mic': 'UI live update (🎤 "starting the voice engine / downloading the speech model")', 'waiting-changed': 'UI live update',
+  'terminal-data': 'UI live update', 'terminal-state': 'UI live update', 'tuner-state': 'UI live update', 'voice-speaking': 'UI live update', 'voice-mic': 'UI live update (🎤 "starting the voice engine / downloading the speech model")', 'voice-download': 'UI live update (🔊 ✨ Better voices: download / Kokoro install progress)', 'waiting-changed': 'UI live update',
   'window-collapse-changed': 'UI live update',
   'sd-judge': 'UI live update (🧑‍⚖️ / 🔁 judge and Make it better progress — Alfred gets the result of images.judge / images.improve)',
   'video-judge': 'UI live update (🎬 🧑‍⚖️ / 🔁 video judge, quick previews and Make N progress — Alfred gets the result of video.judge / video.improve / video.makeBest)',

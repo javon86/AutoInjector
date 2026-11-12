@@ -127,6 +127,8 @@ async function main() {
     assert(said[0].voice && claudeVoice && said[0].voice !== claudeVoice, `ChatGPT and Claude have different voices (${said[0].voice} / ${claudeVoice})`);
     const synthCalls = await (async () => { const st = await controls.evaluate(() => window.api.voiceStatus()); return st; })();
     assert(synthCalls && synthCalls.managed, 'the app started the voice shim itself (managed)');
+    const better = await controls.evaluate(() => { const b = document.querySelector('#voice-read-settings #voice-picker'); return b ? { rows: b.querySelectorAll('.vp-row').length, dl: !!document.getElementById('vp-dl-en_US-ryan-high'), kokoro: !!document.getElementById('vp-kokoro-install'), note: /only while reading/.test(b.textContent) } : null; });
+    assert(better && better.rows >= 8 && better.dl && better.kokoro && better.note, `🔊 Voice box: "✨ Better voices" lists the free voices with ⬇ and the optional Kokoro install (${JSON.stringify(better)})`);
 
     console.log('\n== 🎤 title bar -> every ticked AI ==');
     const posted = async () => { const o = {}; for (const [s, p] of Object.entries(pages)) o[s] = await p.evaluate(() => window.__fake.posted.map((x) => x.text)); return o; };

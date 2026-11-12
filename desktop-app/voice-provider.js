@@ -36,13 +36,20 @@ let settings = {
   micSendNow: false,   // false = "check first": the words wait in the Compose box until the user presses Send
   rate: 1,             // read-aloud speed (0.5 – 2)
   browserVoices: { butler: '', chatgpt: '', claude: '', gemini: '' },
+  // ✨ Kokoro (optional, best quality): 'piper' (the default) or 'kokoro' when the user switched it on; it runs on
+  // the processor by default ('cpu' leaves the graphics card free for pictures and video) or the graphics card.
+  engine: 'piper',
+  kokoroDevice: 'cpu',
+  kokoroVoices: { butler: '', chatgpt: '', claude: '', gemini: '' },
 };
+const ENGINES = ['piper', 'kokoro'];
+const KOKORO_VOICE_RE = /^[a-z]{2}_[a-z0-9]{1,24}$/;
 const MIC_TARGETS = ['all', 'chatgpt', 'claude', 'gemini', 'butler'];
 const managed = { child: null, lastError: '' };
 // The address the managed shim listens on when nothing else is configured.
 const DEFAULT_ENDPOINT = 'http://127.0.0.1:8232';
 
-function getSettings() { return { ...settings, voices: { ...settings.voices }, browserVoices: { ...settings.browserVoices } }; }
+function getSettings() { return { ...settings, voices: { ...settings.voices }, browserVoices: { ...settings.browserVoices }, kokoroVoices: { ...settings.kokoroVoices } }; }
 function setSettings(patch) {
   if (!patch || typeof patch !== 'object') return getSettings();
   for (const k of ['enabled', 'speakOnAck']) if (k in patch) settings[k] = !!patch[k];
@@ -54,10 +61,15 @@ function setSettings(patch) {
   if ('micSendNow' in patch) settings.micSendNow = !!patch.micSendNow;
   if ('rate' in patch) { const n = Number(patch.rate); if (Number.isFinite(n)) settings.rate = Math.max(0.5, Math.min(2, Math.round(n * 100) / 100)); }
   if (patch.browserVoices && typeof patch.browserVoices === 'object') { for (const who of Object.keys(settings.browserVoices)) if (who in patch.browserVoices) settings.browserVoices[who] = String(patch.browserVoices[who] || '').slice(0, 200); }
+  if ('engine' in patch && ENGINES.includes(patch.engine)) settings.engine = patch.engine;
+  if ('kokoroDevice' in patch && (patch.kokoroDevice === 'cpu' || patch.kokoroDevice === 'gpu')) settings.kokoroDevice = patch.kokoroDevice;
+  if (patch.kokoroVoices && typeof patch.kokoroVoices === 'object') {
+    for (const who of Object.keys(settings.kokoroVoices)) if (who in patch.kokoroVoices) { const v = String(patch.kokoroVoices[who] || ''); settings.kokoroVoices[who] = KOKORO_VOICE_RE.test(v) ? v : ''; }
+  }
   return getSettings();
 }
 function status() {
-  return { configured: !!settings.endpoint, enabled: !!settings.enabled, endpoint: settings.endpoint, speakOnAck: !!settings.speakOnAck, voices: { ...settings.voices }, micDevice: settings.micDevice, speakerDevice: settings.speakerDevice, micTarget: settings.micTarget, micSendNow: !!settings.micSendNow, rate: settings.rate, browserVoices: { ...settings.browserVoices }, managed: !!managed.child, managedPid: managed.child ? managed.child.pid : null, lastStartError: managed.lastError || '' };
+  return { configured: !!settings.endpoint, enabled: !!settings.enabled, endpoint: settings.endpoint, speakOnAck: !!settings.speakOnAck, voices: { ...settings.voices }, micDevice: settings.micDevice, speakerDevice: settings.speakerDevice, micTarget: settings.micTarget, micSendNow: !!settings.micSendNow, rate: settings.rate, browserVoices: { ...settings.browserVoices }, engine: settings.engine, kokoroDevice: settings.kokoroDevice, kokoroVoices: { ...settings.kokoroVoices }, managed: !!managed.child, managedPid: managed.child ? managed.child.pid : null, lastStartError: managed.lastError || '' };
 }
 // Resolve the piper voice for a speaker id (butler/chatgpt/claude/gemini).
 function voiceFor(who) { return (settings.voices && settings.voices[who]) || ''; }
@@ -318,10 +330,31 @@ async function synthesize(text, opts = {}) {
   const voice = String(opts.voice || voiceFor(opts.who) || '');
   const body = { text: t.slice(0, 4000) };
   if (voice) body.voice = voice;
-  const r = await _request('POST', effectiveEndpoint(), '/synthesize', body, Math.max(3000, Number(opts.timeoutMs) || 60000));
-  if (r.ok && typeof r.audio_b64 === 'string' && r.audio_b64) return { ok: true, audio: r.audio_b64, mime: r.mime || 'audio/wav', voice: r.voice || voice };
+  if (opts.engine === 'kokoro') {
+    body.engine = 'kokoro';
+    if (KOKORO_VOICE_RE.test(String(opts.kokoroVoice || ''))) body.kokoro_voice = opts.kokoroVoice;
+    body.device = opts.device === 'gpu' ? 'gpu' : 'cpu';
+  }
+  const r = await _request('POST', effectiveEndpoint(), '/synthesize', body, Math.max(3000, Number(opts.timeoutMs) || (opts.engine === 'kokoro' ? 120000 : 60000)));
+  const extra = r.fallback_from ? { fallbackFrom: r.fallback_from, kokoroError: String(r.kokoro_error || '') } : {};
+  if (r.ok && typeof r.audio_b64 === 'string' && r.audio_b64) return { ok: true, audio: r.audio_b64, mime: r.mime || 'audio/wav', voice: r.voice || voice, engine: r.engine || 'piper', device: r.device || '', ...extra };
   if (r.ok) return _withMessageAt({ ok: false, error: 'BAD_JSON' });
   return _withMessageAt(r);
+}
+// Which engine reads for a speaker, from the settings and the shim's /health:
+//   'kokoro' when the user switched it on AND the shim says it is ready (its piper voice goes along as the fallback);
+//   'piper'  when piper voices are there; 'none' -> the page uses this PC's built-in voices.
+// piperDefaults: who -> a piper voice name (voice-read.js defaultPiperVoices over the installed voices).
+function pickEngine(health, who, piperDefaults, kokoroDefaults) {
+  const h = health || {};
+  const piperOk = !!(h.ok && h.tts && Number(h.piper_voices) > 0);
+  const voice = (settings.voices && settings.voices[who]) || (piperDefaults && piperDefaults[who]) || '';
+  if (settings.engine === 'kokoro' && h.ok && h.kokoro_ready) {
+    const kv = (settings.kokoroVoices && settings.kokoroVoices[who]) || (kokoroDefaults && kokoroDefaults[who]) || '';
+    return { engine: 'kokoro', kokoroVoice: kv, device: settings.kokoroDevice, voice: piperOk ? voice : '' };
+  }
+  if (piperOk) return { engine: 'piper', voice, reason: settings.engine === 'kokoro' ? 'KOKORO_NOT_READY' : '' };
+  return { engine: 'none', reason: !h.ok ? 'NO_SHIM' : settings.engine === 'kokoro' ? 'KOKORO_NOT_READY' : 'NO_TTS_MODEL' };
 }
 function _withMessageAt(r) {
   const out = _withMessage(r);
@@ -388,4 +421,4 @@ function stopManaged() {
   return { ok: true, stopped: false };
 }
 
-module.exports = { DEFAULT_ENDPOINT, MIC_TARGETS, getSettings, setSettings, status, speak, listen, checkConnection, effectiveEndpoint, health, transcribe, synthesize, explainError, voiceModelProblem, redactPaths, setRedactionProvider, startManaged, stopManaged, _setHome: (h) => { _home = String(h || ''); } };
+module.exports = { DEFAULT_ENDPOINT, MIC_TARGETS, ENGINES, pickEngine, getSettings, setSettings, status, speak, listen, checkConnection, effectiveEndpoint, health, transcribe, synthesize, explainError, voiceModelProblem, redactPaths, setRedactionProvider, startManaged, stopManaged, _setHome: (h) => { _home = String(h || ''); } };
