@@ -119,8 +119,11 @@ bridge to your home Wi-Fi, behind its key.
   failed 3 times in a row while the built-in way worked is forgotten by itself, and the log says so once ("ChatGPT's
   saved Send button was out of date and has been forgotten; the built-in one works"). The same happens when a saved
   part was seen not to fit on **3 different starts** of the app (log: `selector-stale-seen`, then `selector-retired`
-  with `starts: 3`), because one start often sees too few replies from that AI; a start where the saved part works
-  wipes that count. The page then shows one line: "Claude's page changed; AutoInjector stopped using an old saved
+  with `starts: 3`), because one start often sees too few replies from that AI. A saved part that fits some replies
+  and not others still counts: a reply it fits does not wipe the count any more (that kept the count at 1 forever);
+  only a whole start where it fits and never misses starts the count over. A saved reply part that never found a
+  single reply on **2 starts** while the built-in reader read them all is forgotten on the 2nd start (`starts: 2`;
+  `AUTOINJECTOR_STALE_RETIRE_STARTS_SURE=0` switches that back to 3). The page then shows one line: "Claude's page changed; AutoInjector stopped using an old saved
   setting that no longer fits." with **↩ Put it back** (the same as **↺ Undo** on the 🎯 card), which brings it
   back. A part you saved in the last hour is never forgotten this way. The "reads only part of each reply" warning
   is only given when there really is a saved reply part; when a site splits a reply over several blocks and there is

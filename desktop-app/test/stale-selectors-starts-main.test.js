@@ -5,7 +5,7 @@
 // rarely sees that many from one AI. Now the same saved selector seen not to fit on 3 different app starts (while
 // the built-in reader worked each time) is retired by itself — with a backup, a log code (selector-retired, starts:3)
 // and a plain one-line notice for the control panel ("Claude's page changed; AutoInjector stopped using an old saved
-// setting that no longer fits." + ↩ Put it back). A saved selector that works in between starts the count over; the
+// setting that no longer fits." + ↩ Put it back). A WHOLE start where the saved selector only fits starts the count over; the
 // reader's own "read the whole reply" fixes with NO saved selector are never blamed on one.
 // The REAL main.js (mock Electron) is started 3 times over the same user-data folder (3 child processes).
 // Run with: node test/stale-selectors-starts-main.test.js
@@ -40,18 +40,22 @@ if (!CHILD) {
   const s1 = runStart(1);
   assert(s1 && s1.seen.claude === 1 && s1.seen.gemini === 1 && s1.retired.length === 0, `counted once each, nothing forgotten yet (${JSON.stringify(s1 && s1.seen)})`);
   assert(s1 && s1.evidence.claude && s1.evidence.claude.assistant.starts === 1 && s1.evidence.gemini.assistant.starts === 1, "remembered on disk for the next start");
-  assert(s1 && !(s1.evidence.chatgpt || {}).assistant, "ChatGPT's saved reader worked this start: its earlier count is wiped");
+  // 2026-11-12: a reply it fits no longer wipes the count at once (that kept Claude's at "starts":1 forever); the
+  // start is marked, and the next start that sees it miss counts from 1 again (stale-selectors-user-log-main.test.js)
+  const ce = s1 && (s1.evidence.chatgpt || {}).assistant;
+  assert(!ce || (ce.okRun && ce.okRun !== ce.lastRun), `ChatGPT's saved reader worked this start: its earlier count will not carry on (${JSON.stringify(ce)})`);
   assert(s1 && s1.chatgptFragmentWarnings === 0, "the reader's own whole-reply fix with NO saved selector is not blamed on one (no reply-selector-fragment)");
-  console.log("\n== start 2 ==");
+  console.log("\n== start 2: Claude's reader never found a reply on 2 starts — forgotten now (2026-11-12) ==");
   const s2 = runStart(2);
-  assert(s2 && s2.seen.claude === 2 && s2.seen.gemini === 2 && s2.retired.length === 0, `second start counted (${JSON.stringify(s2 && s2.seen)})`);
+  const rc = s2 && s2.retired.find((x) => x.site === "claude");
+  assert(s2 && s2.seen.claude === 2 && s2.seen.gemini === 2 && rc && rc.role === "assistant" && rc.starts === 2 && rc.source === "learned" && !s2.retired.some((x) => x.site === "gemini"), `second start counted; Claude's (never fitted a reply) retired with starts:2, Gemini's (part of a reply) not yet (${JSON.stringify(s2 && s2.seen)} ${JSON.stringify(s2 && s2.retired)})`);
+  assert(s2 && s2.notices.some((n) => n.site === "claude" && n.say === "Claude's page changed; AutoInjector stopped using an old saved setting that no longer fits."), `the control panel got the plain one-line notice (${s2 && JSON.stringify(s2.notices.map((n) => n.say))})`);
   console.log("\n== start 3: forgotten by itself, with a backup and a plain notice ==");
   const s3 = runStart(3);
-  const rc = s3 && s3.retired.find((x) => x.site === "claude");
   const rg = s3 && s3.retired.find((x) => x.site === "gemini");
-  assert(rc && rc.role === "assistant" && rc.starts === 3 && rc.source === "learned" && rg && rg.starts === 3 && rg.source === "pick", `both retired on the 3rd start (selector-retired, starts:3) (${JSON.stringify(s3 && s3.retired)})`);
-  assert(s3 && s3.notices.some((n) => n.site === "claude" && n.say === "Claude's page changed; AutoInjector stopped using an old saved setting that no longer fits."), `the control panel got the plain one-line notice (${s3 && JSON.stringify(s3.notices.map((n) => n.say))})`);
-  assert(s3 && s3.stateNotices === 2, "…and it is there for a control panel opened later (state:get retireNotices)");
+  assert(rg && rg.starts === 3 && rg.source === "pick" && !s3.retired.some((x) => x.site === "claude"), `Gemini's retired on the 3rd start (selector-retired, starts:3) (${JSON.stringify(s3 && s3.retired)})`);
+  assert(s3 && s3.notices.some((n) => n.site === "gemini" && n.say === "Gemini's page changed; AutoInjector stopped using an old saved setting that no longer fits."), `the control panel got the plain one-line notice (${s3 && JSON.stringify(s3.notices.map((n) => n.say))})`);
+  assert(s3 && s3.stateNotices === 1, "…and it is there for a control panel opened later (state:get retireNotices)");
   assert(s3 && s3.saved.claudeLearned === null && s3.saved.geminiOverride === null && s3.saved.backupClaude === 'div[data-cds="Prose"]' && s3.saved.backupGemini === "div.old-reply-part", "saved: gone from use, kept as a backup");
   assert(s3 && s3.undo.ok && s3.undo.backClaude === 'div[data-cds="Prose"]' && s3.undo.noticeGone && s3.undo.undoneBroadcast, "↩ Put it back: Claude's old setting is used again and its notice goes");
   assert(s3 && s3.warnedAfterRetire === 0, "no more warnings about it after it was retired");
