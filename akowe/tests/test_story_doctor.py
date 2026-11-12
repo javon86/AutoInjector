@@ -80,10 +80,10 @@ def test_the_plain_line_and_the_settings():
         "🩺 Plan scored 8.7/10 — ready to write from")
     assert "did not score higher" in sd.line(dict(m, best_score=7.4))
     assert "only scored it" in sd.line(dict(m, revisions=0, own_text=True))
-    assert sd.clean_run_option({}) == {"story_doctor": True}
+    assert sd.clean_run_option({}) == {"story_doctor": True, "doctor_gate": True}
     assert sd.clean_run_option({"story_doctor": False, "doctor_rounds": 3, "doctor_target": 9}) == {
-        "story_doctor": False, "doctor_rounds": 3, "doctor_target": 9.0}
-    for bad in ({"story_doctor": "yes"}, {"doctor_rounds": 4}, {"doctor_rounds": True}, {"doctor_target": 10}):
+        "story_doctor": False, "doctor_gate": True, "doctor_rounds": 3, "doctor_target": 9.0}
+    for bad in ({"story_doctor": "yes"}, {"doctor_gate": 1}, {"doctor_rounds": 4}, {"doctor_rounds": True}, {"doctor_target": 10}):
         with pytest.raises(AkoweError):
             sd.clean_run_option(bad)
     assert sd.rounds_of({}) == 2 and sd.target_of({}) == 8.5 and sd.target_of({"doctor_target": 8.0}) == 8.0

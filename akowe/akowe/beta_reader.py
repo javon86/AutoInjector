@@ -989,7 +989,19 @@ def with_beta(app, pid: str, branch: str, rep: dict) -> dict:
     except Exception:  # noqa: BLE001 - the report never fails because of the beta reader
         log.exception("could not read the beta reads for the report")
         return rep
-    return dict(rep, beta=done[-1]) if done else rep
+    if not done:
+        return rep
+    out = dict(rep, beta=done[-1])
+    try:  # the warning compares the read with the book as it is NOW, not with the version the report scored: Akọwe's
+        # own last fixes (the final check read again) can change a chapter after the report, and the beta readers
+        # then read that final book (final_reads.py) — that read is current, not "for an earlier version"
+        bp = BookPath(app.engine, getattr(app, "principal_id", None) or "author", pid, branch)
+        chapters = br.book_chapters(bp)
+        if chapters:
+            out["book_key_now"] = br.version_key(chapters)
+    except Exception:  # noqa: BLE001 - without it, the report's own version is compared (as before)
+        log.debug("could not tell the book's current version for the beta section", exc_info=True)
+    return out
 
 
 def route(app, method: str, rest: list, body, principal: str, pid: str, branch: str):

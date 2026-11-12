@@ -641,6 +641,22 @@ to a minute), so the run knows which AIs work.
      either way, and "Read the final book again" put it back). It never holds up the book: an AI that cannot answer is skipped; a revision that is
      refused or does not pass its review leaves the best plan. About 3–8 AI answers (each AI scores once; a revision
      is 1 fix + its review + a new score), counted in the ⏱ estimate.
+     **It runs whenever the outline is approved, however it was approved:** by the AI review, or by you (✔ approve
+     anyway, accept the change, keep the original). An outline that is still the AI's text (also the AI's earlier
+     version you chose to keep) is scored and revised like any AI outline; text you typed or edited is only scored.
+     A run started on an older Akọwe and resumed after the update gets the check too (only `story_doctor: false`
+     switches it off). When no AI could score the plan, the run window and the report say so in one line.
+     **The doctor is the plan's quality gate** (run setting `doctor_gate`, on by default; the switch "Let the story
+     doctor settle the plan reviewer's objections" under 🩺 Plan check): when the AI reviewer keeps objecting to the
+     AI's main plot or chapter outline — the same finding back after a fix, or its fixes used up — the run no longer
+     stops to ask you. The draft is approved under the run consent and the reviewer's objections are added to the
+     doctor's revision note ("The AI plan reviewer also objected…"); with open objections the outline gets one
+     revision even when its score is over the target, and that revision is reviewed again like any outline (a tie in
+     the new score goes to it). The run still stops for you on author-only topics (point of view and tense, content
+     limits, a change to an approved fact), for text you wrote yourself, and when the doctor's revision cannot settle
+     the objections (its review still objects, or the revision could not be made): then you decide on the revision as
+     usual, and the run goes on from there. Objections nothing could take up are listed for your check later.
+     `story_doctor.take_objections` (hook in `autobook._review_until_approved`).
    - **Optional: fill the whole Book Bible** from the plan before chapter one. It is off unless you turn it on
      (on the start screen, or 📖 Book Bible → At a glance). It never holds up the book.
 9. **Every chapter.** For each one:
@@ -859,7 +875,9 @@ to a minute), so the run knows which AIs work.
     may make small fixes like any checkpoint and never pauses the finished book (what it cannot fix waits in the
     report); its line says "(read again after Akọwe's own rewrites)". (2) The beta reader(s) read the final book once
     more when the book changed since their read; the new read is the one the report shows (no more "This read is for
-    an earlier version of the book"). (3) The run window, the run's report box and the 📊 report say the book's
+    an earlier version of the book"). That warning compares the read with the book as it is NOW
+    (`beta_reader.with_beta` adds `book_key_now`), not with the version the report scored: the final check read again
+    can fix a line after the report was made, and the beta readers then read exactly that final book. (3) The run window, the run's report box and the 📊 report say the book's
     length against its target ("📏 Length: 4,310 words (108% of the 4,000-word target)", with ⚠️ when it is more than
     115 % or less than 80 %). Counted in the ⏱ estimate as an upper bound (each checking AI once, plus one answer per
     beta reader) when chapter 1 last or the improve pass is on.

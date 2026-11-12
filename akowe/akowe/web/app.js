@@ -8299,18 +8299,22 @@ function storyDoctorSwitch(prefix) {
     [1, 2, 3].map(n => h('option', { value: String(n), selected: n === 2 }, `${n} revision${n > 1 ? 's' : ''} at most`)));
   const target = h('select', { id: `${id}-target`, 'data-testid': `${id}-target`, 'aria-label': 'Target score' },
     ['8', '8.5', '9'].map(v => h('option', { value: v, selected: v === '8.5' }, `aim for ${v}/10`)));
-  box.addEventListener('change', () => { state.textContent = box.checked ? 'On' : 'Off'; rounds.disabled = target.disabled = !box.checked; });
+  const gid = `${id}-gate`;  // 🩺 the plan reviewer's objections go to the doctor instead of stopping the run
+  const gbox = h('input', { type: 'checkbox', role: 'switch', id: gid, 'data-testid': gid, checked: true, 'aria-describedby': `${gid}-hint` });
+  box.addEventListener('change', () => { state.textContent = box.checked ? 'On' : 'Off'; rounds.disabled = target.disabled = gbox.disabled = !box.checked; });
   const vid = `${prefix}-voice-contrast`;
   const vbox = h('input', { type: 'checkbox', role: 'switch', id: vid, 'data-testid': vid, checked: true, 'aria-describedby': `${vid}-hint` });
   const el = h('fieldset', { class: 'field sd-switch' }, h('legend', null, '🩺 Plan check'),
     h('div', { class: 'check-row' }, box, h('label', { for: id }, h('strong', null, 'Story doctor: check and mend the plan before chapter 1'), ' ', state)),
     h('div', { class: 'row' }, rounds, target),
+    h('div', { class: 'check-row' }, gbox, h('label', { for: gid }, 'Let the story doctor settle the plan reviewer\'s objections (fewer stops for you)')),
+    h('p', { class: 'hint', id: `${gid}-hint` }, 'On (recommended): when the AI reviewer keeps objecting to the AI\'s main plot or chapter outline, the run does not stop to ask you — the story doctor revises the outline with those objections and it is reviewed again. You are still asked about your own text, your point of view, tense and content limits, a change to an approved fact, or when the doctor\'s revision cannot settle it.'),
     h('p', { class: 'hint', id: `${id}-hint` }, 'On (recommended): when the plan (premise, main plot, chapter outline) is made, every working AI scores it on the same points as the book report — with quotes and a fix for each weakness. If it scores under your aim, the outline is revised with their fixes and scored again; the best plan is kept. Your own idea and your lock list are never replaced, and an outline you wrote yourself is only scored. The run window says e.g. “🩺 Plan scored 7.4 → 8.6 after 1 revision”. About 3 to 8 more AI answers.'),
     h('div', { class: 'check-row' }, vbox, h('label', { for: vid }, h('strong', null, '🗣 Make sure every character sounds different'))),
     h('p', { class: 'hint', id: `${vid}-hint` }, 'On (recommended): Akọwe compares the voice cards (how each character talks) without AI; only when two sound alike or one is too thin, the AI makes them distinct in one answer. Cards you wrote yourself are never changed.'));
   return { el, apply(body) {
     if (!box.checked) body.story_doctor = false;
-    else { if (rounds.value !== '2') body.doctor_rounds = Number(rounds.value); if (target.value !== '8.5') body.doctor_target = Number(target.value); }
+    else { if (!gbox.checked) body.doctor_gate = false; if (rounds.value !== '2') body.doctor_rounds = Number(rounds.value); if (target.value !== '8.5') body.doctor_target = Number(target.value); }
     if (!vbox.checked) body.voice_contrast = false;
   } };
 }
