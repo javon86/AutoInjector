@@ -117,6 +117,7 @@ UNRESOLVED_WORDS = {
     "NO_REPLACEMENT": "the AI gave no replacement for this note",
     "NOT_ASKED": "the AI changed a passage nobody asked it to change",
     "REJECTED_BY_AUTHOR": "you chose not to use this change",
+    "TOO_LONG_FOR_BUDGET": "the change made the chapter too long for the book's word budget (length_guard.py)",
 }
 
 
@@ -914,6 +915,11 @@ class EditorService:
             from .opening_pass import OPENING_RULES, OPENING_WORDS  # noqa: PLC0415
             ctx["opening_brief"] = dict(craft["opening"], rules=OPENING_RULES)
             task = task + OPENING_WORDS
+        budget = self._word_budget(job, pid, branch, rec, text, craft)  # 📏 length_guard.py
+        if budget:
+            from .length_guard import WORDS as BUDGET_WORDS  # noqa: PLC0415
+            ctx["word_budget"] = budget
+            task = task + BUDGET_WORDS
         from .review import safe_title  # noqa: PLC0415
         title = safe_title(self.contracts, rec)
         job.phase = f"The writer is reworking the flagged passages of “{title}”"
@@ -929,6 +935,9 @@ class EditorService:
             raise AkoweError("INTERNAL_ERROR", "/replacements", "the writer's answer had no list of replacements; "
                                  "nothing was changed")
         res = apply_replacements(text, reps, findings, keep)
+        if budget:  # 📏 the replacements that add the most words go first when the chapter would grow too much
+            from .length_guard import trim  # noqa: PLC0415
+            res, _cut = trim(text, res, findings, keep, budget["may_add"])
         byf = {f["id"]: f for f in findings}
         items = []
         for a in res["applied"]:
@@ -945,6 +954,19 @@ class EditorService:
                 "applied": len(res["applied"]), "unresolved": len(res["unresolved"])}
         rv._put(f"editor_proposals:{pid}:{branch}", _rkey(rid, rec["version"]), prop)
         return prop
+
+    def _word_budget(self, job, pid, branch, rec, text, craft) -> dict | None:
+        """📏 The word budget of a chapter rewrite (length_guard.py); None when off or not a chapter. Never raises."""
+        try:
+            from . import length_guard  # noqa: PLC0415
+            if rec.get("module_id") != "C02" or craft.get("length_guard") is False or \
+                    not length_guard.enabled(getattr(job, "run_settings", None)):
+                return None
+            book, target, per = length_guard.book_numbers(self.engine, self.store, job.principal, pid, branch)
+            return length_guard.budget(length_guard.words(text), book, target, per)
+        except Exception:  # noqa: BLE001 - a budget is help; never a reason to stop a rewrite
+            log.exception("could not work out the word budget")
+            return None
 
     # ------------------------------------------------------------------ apply (deterministic) -> new draft version
     def apply(self, principal, pid, branch, rid, version, accept=None, *, proposal: dict | None = None,

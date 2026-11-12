@@ -428,6 +428,7 @@ def _approve(runner, run, st, mem):
                 raise
             try:  # the reviewer did not pass the new chapter 1: its approved text comes back (never half-done)
                 ref = ed.restore(run["principal"], pid, branch, c["record_id"], old, "OPENING_NOT_APPROVED")
+                runner._made(run, ref)  # noqa: SLF001 - Akọwe's own text put back, not a hand edit
                 runner._approve(run, ref, why="the opening pass's new chapter 1 was not approved by the reviewer: "  # noqa: SLF001
                                               "the approved text is put back (unchanged)")
             except AkoweError as exc2:

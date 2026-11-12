@@ -351,7 +351,8 @@ def _run(runner, run, st, mem):
         st["items"] = [{"id": f"r{n}c{t['number']}", "label": f"Round {n}: chapter {t['number']}", "state": "running",
                         "notes": len(t["findings"])} for t in todo]
         runner.save(run)
-        cands = _propose(runner, run, todo, n, rounds, len(chapters))
+        cands = within_budget(chapters, _propose(runner, run, todo, n, rounds, len(chapters)), app.store, pid,
+                              run.get("settings"))  # 📏 the reworked chapters together keep the book's length
         if not cands:
             mem["done"] = n
             mem["rounds"].append({"round": n, "chapters": [t["number"] for t in todo], "changed": 0,
@@ -439,6 +440,28 @@ def _propose(runner, run, todo, n, rounds, total) -> list[dict]:
                                    passage=(by_f.get(a["finding_id"]) or {}).get("passage") or "")
                               for a in res["applied"]]})
     return out
+
+
+def within_budget(chapters: list[dict], cands: list[dict], store, pid: str, settings: dict | None) -> list[dict]:
+    """📏 The length guard over a whole round (length_guard.py; each rewrite was already held to its own budget):
+    the reworked chapters that grow the book past its cap are left out, the ones that add the most words first."""
+    from . import length_guard, lengths  # noqa: PLC0415
+    if not cands or not length_guard.enabled(settings):
+        return cands
+    try:
+        target = lengths.of_book(store, pid)["book_words"]
+    except Exception:  # noqa: BLE001
+        return cands
+    old = {c["chapter_id"]: length_guard.words(c["text"]) for c in chapters}
+    total = sum(old.values())
+    keep = list(cands)
+
+    def grow(c):
+        return length_guard.words(c["text"]) - old.get(c["chapter_id"], length_guard.words(c["text"]))
+    while keep and sum(grow(c) for c in keep) > 0 and \
+            total + sum(grow(c) for c in keep) > target * length_guard.BOOK_CAP:
+        keep.remove(max(keep, key=grow))
+    return keep
 
 
 # ====================================================================== 📏 a round not kept: its repeat fixes alone
@@ -587,6 +610,7 @@ def _approve_kept(runner, run, st, mem):
             # the reviewer did not pass the reworked chapter: its approved text comes back (never left half-done)
             try:
                 ref = ed.restore(run["principal"], pid, branch, c["record_id"], old, "IMPROVE_NOT_APPROVED")
+                runner._made(run, ref)  # noqa: SLF001 - Akọwe's own text put back, not a hand edit
                 runner._approve(run, ref, why="the improve pass's rewrite was not approved by the reviewer: the "
                                               "approved text is put back (unchanged)")
             except AkoweError as exc2:

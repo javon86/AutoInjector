@@ -219,9 +219,15 @@ Every chapter is checked several times before it counts as part of the book:
   that" — a sad or dark story sometimes trips its safety filter by mistake), Akọwe tells it once that the book is
   fiction under review; if it still declines, another AI (or the 🤖 Claude Code helper) reads the book instead, and
   the report says who declined and who stood in.
-- **🕰️ Clock and tide check:** Akọwe works out the times, days and tides the book states ("high water at 18:06")
-  and flags one that cannot be true ("the tide was going out at 14:30" — before high water the tide comes in). The
-  editor and the reviewer must fix it, and the next chapter's writer is told the tide times so far.
+- **🕰️ Clock, days and tide check:** Akọwe works out the times, days and tides the book states ("high water at
+  18:06") and flags one that cannot be true ("the tide was going out at 14:30" — before high water the tide comes
+  in). It also counts the days: "On Sunday … the next morning, Saturday", a Friday "four days later" that is not
+  four days later, or "Monday, 6 January" and "Friday, 14 January" in the same book are flagged. The editor and the
+  reviewer must fix it, and the next chapter's writer is told the tide times so far.
+- **💬 Dialogue in any style:** Akọwe recognises dialogue in "double quotes", “curly quotes”, 'single quotes' (the
+  British way) and lines that start with a dash (— Where are you going?), and tells it apart from apostrophes
+  (don't, Teo's, the '90s). So the report's dialogue share is right, and the sentence polish never changes a line of
+  dialogue, whatever style your book uses.
 - **📏 Special rules:** a ghost, magic, a curse or a strange device in the story rules must say where and when it
   works (scope), what it costs and what it can never do (limits). If one does not, the AI fills them in once, before
   the plan is written.
@@ -254,15 +260,27 @@ Chapter 1 is written before the rest of the book exists, and readers decide on t
   approved like every chapter, and the PDF, EPUB and Word files are made again. The run window, the journal and the
   report show both numbers: "🔁 Improve pass: 7.6 → 8.1/10 (kept)". Chapters you wrote yourself are never touched.
 - **📏 Sentence polish** (on the ⚡ Make-a-book screen, on by default): as soon as a chapter is written, Akọwe
-  checks — without any AI — whether it reads too simply for your readers (for adult books, under reading grade 5)
-  and which phrases it repeats from earlier chapters ("water ran off his elbows" again). Only when it does, the writer
-  polishes that chapter once: it joins some short sentences into longer, precise ones and says repeated phrases in a
-  new way. The story, the facts, the names, the numbers and every line of dialogue stay exactly as they were. The
+  checks — without any AI — whether it reads too simply for your readers (for adult books, under reading grade 5),
+  which phrases it repeats from earlier chapters ("water ran off his elbows" again) and whether it has too many lists
+  of three ("cold, wet, and tired" more than 3 times per 1,000 words). Only when it does, the writer polishes that
+  chapter once: it joins some short sentences into longer, precise ones, says repeated phrases in a new way and breaks
+  up some lists of three ("cold and wet", or one exact detail). The story, the facts, the names, the numbers and every line of dialogue stay exactly as they were. The
   polish is kept only if Akọwe's checks got better; otherwise the chapter stays as written. The run window shows both
   numbers ("📏 Reading level 2.9 → 5.4 after polish in chapters 1, 3"), and so does the 📊 report. The same switch
   lets the improve pass keep its repeated-phrase fixes on their own when the rest of its changes are not kept (those
   chapters are checked and approved again like every chapter). At most one more AI answer per chapter, only for the
   chapters that need it. Switch it off to write the chapters the old way.
+- **📏 Keep the book's length** (under "Extras" on the ⚡ Make-a-book screen, on by default): Akọwe's own rewrites
+  (the editor's rewrites, the sentence polish, chapter 1 rewritten last, the improve pass) may make a chapter at most
+  about 10 % longer and never make the book more than about 115 % of its target length. The writer is told the word
+  budget and asked to cut repeated explanation rather than add. The run window and the report say the finished
+  book's length: "📏 Length: 4,310 words (108% of the 4,000-word target)".
+- **🔁 Read the final book again** (under "Extras", on by default): when chapter 1 is rewritten last or the improve
+  pass changes chapters, the final whole-book continuity check reads those chapters again at the very end (it says
+  "read again after Akọwe's own rewrites"; Akọwe's own changes are never called "changed by hand"), and — if you
+  asked for beta readers — they read the finished book once more, so the report is about the book you get. A
+  separate switch turns the beta readers' second read off. Nothing extra happens when nothing changed. The number of
+  beta readers is 1 unless you choose 2 or 3 next to "📖 Beta reader at the end".
 - **📈 Your books over time** (🏠 Book home and the 📊 Book report): "7.6/10 — down 0.4 from your last book",
   "Rule rigor is your weakest area for 3 books", and which scores are falling. Only numbers are kept for this,
   never your book's words.

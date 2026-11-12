@@ -26,6 +26,8 @@ import logging
 import re
 from collections import Counter
 
+from . import dialogue
+
 log = logging.getLogger("akowe.chapter_polish")
 
 SETTING = "chapter_polish"
@@ -34,21 +36,32 @@ GRADE_GAIN = 0.3         # a polish for the reading level must raise the grade a
 MAX_FINDINGS = 8
 READING_STRETCHES = 3    # stretches of short sentences sent for joining
 STRETCH_MAX = 450        # characters per stretch
-MAX_LENGTH_CHANGE = 0.2  # the polished chapter keeps its length within ±20 %
+MAX_LENGTH_CHANGE = 0.2  # the polished chapter may shrink by at most 20 % …
+MAX_GROWTH = 0.1         # … and grow by at most 10 % (📏 length_guard.MAX_GROWTH; ±20 % with the guard off)
 REPEAT_KINDS = ("phrase", "gesture")
+SLACK_WORDS = 25         # … though a few words more are always fine (length_guard.SLACK_WORDS)
+TRIADS_PER_1000 = 3.0    # ✂ lists of three in the narration per 1 000 words that call for a polish …
+MIN_TRIADS = 3           # … and at least this many
+TRIAD_FINDINGS = 4       # lists of three sent for breaking up (the most crowded sentences first)
+TRIAD_SETTING = "polish_triads"
 
 POLISH_WORDS = (" This is a LINE-LEVEL POLISH of a fresh draft (context.polish_rules): change only the flagged "
                 "passages. Where a passage is a string of short sentences, join some of them into longer, precise "
                 "sentences (keep a few short ones for punch); where a phrase repeats an earlier chapter, say it in a "
-                "fresh, specific way only this moment could have. Never change what happens, any fact, name, number, "
-                "line of dialogue or approved detail.")
+                "fresh, specific way only this moment could have; where a sentence is flagged for a list of three, "
+                "break up that list: keep the two items that matter (or one exact detail), or turn it into a longer "
+                "sentence with a different rhythm. Never change what happens, any fact, name, number, line of "
+                "dialogue or approved detail, and never make the chapter longer than context.word_budget allows.")
 POLISH_RULES = ["Change only the flagged passages, and only their wording.",
                 "Keep every line of dialogue word for word, every name, every number and every fact.",
                 "Join short sentences that belong together into one longer, precise sentence; keep some short ones.",
                 "Replace a phrase or simile used in an earlier chapter with a fresh, specific one.",
+                "Break up a flagged list of three (“cold, wet, and tired”): two items (“cold and wet”), one exact "
+                "detail (“her socks squelched”) or a longer sentence — never a list of three inside dialogue.",
+                "Do not make the chapter longer: prefer cutting repeated explanation.",
                 "Never add events, people, places or details that are not already there."]
 
-_QUOTED = re.compile(r"“[^”]*”|\"[^\"\n]*\"")
+_QUOTED = dialogue.FINDER   # 💬 every dialogue style (dialogue.py)
 _NUM_WORDS = ("one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen "
               "seventeen eighteen nineteen twenty thirty forty fifty sixty seventy eighty ninety hundred thousand "
               "million first second third fourth fifth sixth seventh eighth ninth tenth").split()
@@ -108,18 +121,46 @@ def measure(text: str, earlier: list[str]) -> dict:
     rd = readability.chapter(text or "")
     phrases = repeats_into(text, earlier)
     tics = quality_history.word_tics(text or "")
+    tri = triads(text or "")
     return {"grade": rd.get("grade"), "words": rd.get("words") or 0, "phrases": phrases, "tics": tics,
             "repeats": len(phrases) + len(tics), "tic_uses": sum(t["count"] for t in tics),
-            "ai": originality.counts(text or "")}
+            "ai": originality.counts(text or ""), "triads": len(tri), "triad_spots": tri}
 
 
-def needs(m: dict, floor: float | None) -> list[str]:
-    """Why this chapter needs a polish ([] = it does not): "reading" and/or "repeats"."""
+def triads(text: str) -> list[str]:
+    """✂ The lists of three in the narration (dialogue never counts: dialogue.py): one entry per list, the exact
+    sentence that holds it, the most crowded sentences first (the pattern of the originality / pattern check,
+    prose_audit._TRIAD)."""
+    from .prose_audit import _SENT, _TRIAD, paragraphs  # noqa: PLC0415
+    rows: list[tuple[int, int, str]] = []
+    for par in paragraphs(text or ""):
+        nar = dialogue.mask(par)
+        for sm in _SENT.finditer(par):
+            sent = sm.group(0).strip()
+            if not sent or dialogue.has_dialogue(sent):
+                continue
+            n = sum(1 for m in _TRIAD.finditer(nar[sm.start():sm.end()])
+                    if sum(len(g.split()) for g in m.groups()) <= 9)
+            rows += [(-n, len(rows), sent)] * n
+    rows.sort()
+    return [r[2] for r in rows]
+
+
+def _too_many_triads(m: dict) -> bool:
+    t = m.get("triads", 0) or 0
+    return t >= MIN_TRIADS and t * 1000 / max(m.get("words") or 1, 1) > TRIADS_PER_1000
+
+
+def needs(m: dict, floor: float | None, settings: dict | None = None) -> list[str]:
+    """Why this chapter needs a polish ([] = it does not): "reading", "repeats" and/or "triads" (✂ more lists of
+    three than ``TRIADS_PER_1000`` per 1 000 words; run setting ``polish_triads``, on by default)."""
     out = []
     if floor is not None and isinstance(m.get("grade"), (int, float)) and m["grade"] < floor:
         out.append("reading")
     if m.get("repeats", 0) >= MIN_REPEATS:
         out.append("repeats")
+    if (settings or {}).get(TRIAD_SETTING) is not False and _too_many_triads(m):
+        out.append("triads")
     return out
 
 
@@ -172,6 +213,12 @@ def findings(text: str, m: dict, floor: float | None, why: list[str]) -> list[di
             if not _QUOTED.search(q):
                 add("prose_variety", q, f"“{t['word']}” is used {t['count']}× in this chapter.",
                     "Use the precise verb or detail for this moment instead.")
+    if "triads" in why:
+        rate = round((m.get("triads") or 0) * 1000 / max(m.get("words") or 1, 1), 1)
+        for q in list(dict.fromkeys(m.get("triad_spots") or []))[:TRIAD_FINDINGS]:
+            add("prose_variety", q, f"A list of three; this chapter has {m.get('triads')} ({rate:g} per 1,000 words).",
+                "Break up the list: keep two items or one exact detail, or make it one longer sentence with a "
+                "different rhythm. Keep what happens and every fact.")
     if "reading" in why:
         g = m.get("grade")
         for s in _stretches(text):
@@ -181,10 +228,11 @@ def findings(text: str, m: dict, floor: float | None, why: list[str]) -> list[di
     return out[:MAX_FINDINGS]
 
 
-def protected_change(old: str, new: str, names=()) -> str | None:
-    """None when nothing protected changed; else a code: DIALOGUE (a line of dialogue changed), NAMES (a name was
-    lost or added), NUMBERS (a number changed) or LENGTH (the chapter grew or shrank too much)."""
-    if Counter(_QUOTED.findall(old)) != Counter(_QUOTED.findall(new)):
+def protected_change(old: str, new: str, names=(), growth: float | None = MAX_GROWTH) -> str | None:
+    """None when nothing protected changed; else a code: DIALOGUE (a line of dialogue changed, in any quoting style),
+    NAMES (a name was lost or added), NUMBERS (a number changed) or LENGTH (the chapter grew by more than ``growth``
+    — 📏 the length guard; ``None`` = the old ±``MAX_LENGTH_CHANGE`` — or shrank by more than MAX_LENGTH_CHANGE)."""
+    if not dialogue.same_dialogue(old, new):   # 💬 "…", “…”, '…', ‘…’ and dash dialogue alike
         return "DIALOGUE"
     for nm in {str(n).strip() for n in names or [] if str(n or "").strip() and len(str(n).strip()) >= 3}:
         rx = re.compile(rf"\b{re.escape(nm)}\b")
@@ -195,6 +243,8 @@ def protected_change(old: str, new: str, names=()) -> str | None:
     a, b = len(old.split()), len(new.split())
     if a and abs(b - a) / a > MAX_LENGTH_CHANGE:
         return "LENGTH"
+    if a and growth is not None and b - a > max(SLACK_WORDS, a * growth):
+        return "LENGTH"
     return None
 
 
@@ -202,6 +252,7 @@ WHY = {"DIALOGUE": "a line of dialogue changed", "NAMES": "a name was lost or ad
        "NUMBERS": "a number changed", "LENGTH": "the chapter's length changed too much",
        "MORE_REPEATS": "it repeats more than before", "MORE_TICS": "it leans on plain words more than before",
        "MORE_AI": "it sounds more machine-written", "GRADE_DOWN": "it reads more simply than before",
+       "MORE_TRIADS": "it has more lists of three than before",
        "TOO_HARD": "it reads harder than these readers usually expect", "NO_GAIN": "the checks did not improve",
        "KEPT": "the checks improved and nothing protected changed"}
 
@@ -215,6 +266,8 @@ def judge(before: dict, after: dict, floor: float | None, top: float | None = No
         return False, "MORE_TICS"
     if after.get("ai", 0) > before.get("ai", 0):
         return False, "MORE_AI"
+    if after.get("triads", 0) > before.get("triads", 0) and _too_many_triads(after):
+        return False, "MORE_TRIADS"
     if isinstance(gb, (int, float)) and isinstance(ga, (int, float)):
         if ga < gb - 0.1 and (floor is None or ga < floor or gb < floor):
             return False, "GRADE_DOWN"
@@ -223,7 +276,7 @@ def judge(before: dict, after: dict, floor: float | None, top: float | None = No
     better_grade = (floor is not None and isinstance(gb, (int, float)) and gb < floor
                     and isinstance(ga, (int, float)) and ga >= gb + GRADE_GAIN)
     if not better_grade and after["repeats"] >= before["repeats"] and after.get("tic_uses", 0) >= \
-            before.get("tic_uses", 0):
+            before.get("tic_uses", 0) and after.get("triads", 0) >= before.get("triads", 0):
         return False, "NO_GAIN"
     return True, "KEPT"
 
@@ -258,7 +311,7 @@ def released_motifs(engine, principal, pid, branch, phrases) -> list[str]:
 
 def _nums(m: dict) -> dict:
     return {"grade": m.get("grade"), "repeats": m.get("repeats"), "phrases": len(m.get("phrases") or []),
-            "tics": len(m.get("tics") or []), "words": m.get("words")}
+            "tics": len(m.get("tics") or []), "words": m.get("words"), "triads": m.get("triads", 0)}
 
 
 # ====================================================================== the run hook
@@ -305,7 +358,7 @@ def _after_draft(runner, run, st, mem, outline, cid, number, rid, item):
     earlier = [c["text"] for c in human_voice.earlier_chapters(app.store, pid, branch, outline, cid)]
     floor, top = audience(app.store, pid)
     before = measure(text, earlier)
-    why = needs(before, floor)
+    why = needs(before, floor, run.get("settings"))
     row = {"number": number, "before": _nums(before), "floor": floor, "why": why}
     mem["chapters"][cid] = row
     if not why:
@@ -347,7 +400,8 @@ def _after_draft(runner, run, st, mem, outline, cid, number, rid, item):
         names = ed.names(pid, branch)
     except Exception:  # noqa: BLE001
         names = []
-    bad = protected_change(text, new, names)
+    from . import length_guard  # noqa: PLC0415 - 📏 a polish may not make the chapter much longer
+    bad = protected_change(text, new, names, MAX_GROWTH if length_guard.enabled(run.get("settings")) else None)
     after = measure(new, earlier)
     row["after"] = _nums(after)
     if bad:
@@ -397,6 +451,8 @@ def _change_words(row: dict) -> str:
         parts.append(f"reading level {b['grade']:g} → {a['grade']:g}")
     if b.get("repeats") or a.get("repeats"):
         parts.append(f"repeats from earlier chapters {b.get('repeats') or 0} → {a.get('repeats') or 0}")
+    if b.get("triads") and b.get("triads") != a.get("triads"):
+        parts.append(f"lists of three {b.get('triads')} → {a.get('triads') or 0}")
     return ", ".join(parts) or "nothing measurable"
 
 

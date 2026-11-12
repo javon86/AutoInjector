@@ -485,6 +485,8 @@ def line(cp: dict) -> str:
         head = f"🔎 All-AI check of chapter {cp['after']}"
     elif cp.get("kind") == "now":
         head = f"🔎 Consistency check ({cp.get('label') or 'chapters ' + str(cp.get('from')) + '–' + str(cp['after'])})"
+    if cp.get("reread_own"):  # 🔁 final_reads.py: read again after Akọwe's own rewrites at the end of the run
+        head += " (read again after Akọwe's own rewrites)"
     if cp.get("status") == "new" and cp.get("redo_because"):
         return head + f": to be read again (chapter {cp['redo_because'].get('number')} was changed by hand)"
     if cp.get("status") not in ("done", "incomplete", "waiting"):

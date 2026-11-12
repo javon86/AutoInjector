@@ -58,7 +58,7 @@ from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
 
-from . import prose_audit
+from . import dialogue, prose_audit
 from .prose_audit import _WORD, paragraphs, sentences
 
 log = logging.getLogger("akowe.human_voice")
@@ -217,7 +217,7 @@ CLOSE_WORDS = {"dialogue": "a line of dialogue", "sleep": "someone falling aslee
 # how many chapters before a kind of opening / closing counts as a habit (and the share of chapters)
 KIND_MIN = {"dialogue": (4, 0.5), "moral": (2, 0.0), "fragment": (4, 0.4), "question": (3, 0.3)}
 KIND_DEFAULT = (3, 0.25)
-_QUOTE_START = ("\"", "“", "'", "‘")
+_QUOTE_START = ("\"", "“", "'", "‘")  # kept for callers; dialogue.starts_with_dialogue decides
 
 
 def _first_last(text: str) -> tuple[str, str]:
@@ -237,7 +237,7 @@ def opening_kind(sent: str) -> str | None:
     s = (sent or "").strip()
     if not s:
         return None
-    if s.startswith(_QUOTE_START):
+    if dialogue.starts_with_dialogue(s):
         return "dialogue"
     low = _low(s)
     for kind, rx in _OPEN_RX:
@@ -252,7 +252,8 @@ def closing_kind(sent: str) -> str | None:
     s = (sent or "").strip()
     if not s:
         return None
-    if s.startswith(_QUOTE_START) or s.endswith(("\"", "”")):
+    if dialogue.starts_with_dialogue(s) or s.endswith(("\"", "”")) or \
+            (s.endswith(("'", "’")) and dialogue.has_dialogue(s)):
         return "dialogue"
     if s.rstrip("\"'”’) ").endswith("?"):
         return "question"
