@@ -295,12 +295,15 @@ def track_chapter(review, job, chapter_id: str, *, use_ai: bool = True, fallback
     ai_failed = None
     if use_ai:
         ctx = _context(store, pid, branch, bp, ch, order)
+        from . import magic_rules  # noqa: PLC0415 - ✨ the same call lists the ability uses (no extra AI call)
+        task, schema = magic_rules.track_ask(store, pid, branch, ctx, TRACK_TASK, TRACK_SCHEMA)
         job.phase = f"An AI is tracking the continuity of chapter {ch['number']}"
         tok = review.work.begin(pid, "C02", f"Tracking chapter {ch['number']}")
         try:
-            raw = review.assist._call_ai(job, op_for_roles="C02", task=TRACK_TASK, schema=TRACK_SCHEMA, context=ctx,
+            raw = review.assist._call_ai(job, op_for_roles="C02", task=task, schema=schema, context=ctx,
                                          protected=[])
             slot = job.slot
+            magic_rules.save_tracked(store, pid, branch, chapter_id, ch.get("version"), raw)
         except AkoweError as exc:
             if not fallback:
                 raise
@@ -646,6 +649,45 @@ def note_written(store, pid: str, branch: str, chapter_id: str, rec: dict, numbe
         log.exception("could not note the chapter text")
 
 
+OWN_MAX = 12   # versions remembered per chapter record
+
+
+def note_own(store, pid: str, branch: str, record_id: str | None, version) -> None:
+    """🔁 This exact chapter revision is Akọwe's OWN (a run's rewrite, polish, fix or an earlier text put back), not a
+    hand edit: registered BEFORE it is approved, so check_edits never takes it for the author's edit (final_reads.py).
+    Never raises."""
+    if not record_id or not isinstance(version, int):
+        return
+    try:
+        with _LOCK:
+            cur = _recheck_all(store, pid, branch)
+            own = cur.setdefault("own", {})
+            row = [r for r in own.get(record_id) or [] if r.get("version") != version]
+            row.append({"version": version, "at": _now()})
+            own[record_id] = row[-OWN_MAX:]
+            _recheck_save(store, pid, branch, cur)
+    except Exception:  # noqa: BLE001
+        log.exception("could not note Akọwe's own revision")
+
+
+def is_own(store, pid: str, branch: str, record_id: str | None, version) -> bool:
+    cur = _recheck_all(store, pid, branch)
+    return any(r.get("version") == version for r in (cur.get("own") or {}).get(record_id or "") or [])
+
+
+def own_changes_since(store, pid: str, branch: str, records: dict, since: str | None) -> list:
+    """The keys of ``records`` ({key: record id}) whose chapter got one of Akọwe's own revisions after ``since`` (an
+    ISO time; None = never read)."""
+    cur = _recheck_all(store, pid, branch)
+    own = cur.get("own") or {}
+    out = []
+    for k, rid in (records or {}).items():
+        rows = own.get(rid) or []
+        if rows and (since is None or any(str(r.get("at") or "") > str(since) for r in rows)):
+            out.append(k)
+    return out
+
+
 def message(changed_number, later_number) -> str:
     return (f"⚠ Chapter {changed_number} changed after chapter {later_number} was written — check chapter "
             f"{later_number}")
@@ -730,13 +772,23 @@ def check_edits(store, pid: str, branch: str, later: list | None = None) -> list
             for cid, e in get_all(store, pid, branch, kind)["chapters"].items():
                 if e.get("status") in ("approved", "draft"):
                     used.setdefault(cid, (e.get("record_id"), e.get("text_version"), e.get("number")))
+        own_skip = []
         for cid, (rid, ver, num) in used.items():
             now = _approved_version(store, pid, branch, rid)
             if now is None or ver is None or now == ver:
                 continue
+            if is_own(store, pid, branch, rid, now):
+                own_skip.append((cid, rid, now, num))  # 🔁 Akọwe's own rewrite, not a hand edit (final_reads.py)
+                continue
             res = invalidate_after_chapter(store, pid, branch, cid, number=num, later=later,
                                            reason=f"the chapter's text changed (version {ver} -> {now})")
             found.append({"chapter_id": cid, "number": num, "flagged": res["flagged"]})
+        if own_skip:
+            with _LOCK:
+                cur = _recheck_all(store, pid, branch)
+                for cid, rid, now, num in own_skip:
+                    cur["seen"][cid] = {"record_id": rid, "version": now, "number": num}
+                _recheck_save(store, pid, branch, cur)
     except Exception:  # noqa: BLE001
         log.exception("could not check for changed chapters")
     return found

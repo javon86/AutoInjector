@@ -900,7 +900,9 @@ function buildReadScript(site, overrides) {
     const stopShown = !!(stopBtn && isVisible(stopBtn)); // TR-28: the page's own "still writing" signal, on its own
     const inputFound = !!inputBox; // the AI's message box is on the page (a signed-out page has none)
     const rows = rowMode ? { n: rowInfo.rows.length, user: rowInfo.users, assistant: rowInfo.assistants, how: rowInfo.how, waiting: via === "rows-waiting" } : null;
-    return { ok: true, text, generating, stopShown, sendReady, composerEmpty, inputFound, count, fragmentFixed, nodeInfo, rows, overrideIgnored };
+    // 2026-11-12: the saved reply selector itself found this reply (whole) — only that proves a saved reader works
+    const overrideHit = !!(CFG.OVERRIDE && overrideOk > 0 && !overrideIgnored && !fragmentFixed && text.trim());
+    return { ok: true, text, generating, stopShown, sendReady, composerEmpty, inputFound, count, fragmentFixed, nodeInfo, rows, overrideIgnored, overrideHit };
   })();
   `;
 }

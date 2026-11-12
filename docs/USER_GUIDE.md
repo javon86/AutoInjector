@@ -61,7 +61,9 @@ its own short tour too (Akọwe → ❓ Help → 🧭 Take the tour).
   the Send button or the reply, or press **🔢 Do it for me with a number** and follow the steps.
 - **"Claude's page changed; AutoInjector stopped using an old saved setting that no longer fits."** You may see
   this line under the Compose box. It means a part you (or AutoInjector) once saved with 🎯 no longer matches that
-  website, so AutoInjector went back to its built-in way, which works. Nothing to do. If things got worse after it,
+  website, so AutoInjector went back to its built-in way, which works. It does this after the old part did not fit on
+  3 starts of the app (2 if it never found a single reply). One you saved in the last hour is left alone. Nothing to
+  do. If things got worse after it,
   press **↩ Put it back**; **✕** just hides the line.
 - **"Akọwe is using this AI":** while Akọwe waits for an answer, that AI's card shows a yellow note. Don't type in that
   AI's window until it is done; use another AI meanwhile.
@@ -219,12 +221,77 @@ Every chapter is checked several times before it counts as part of the book:
   that" — a sad or dark story sometimes trips its safety filter by mistake), Akọwe tells it once that the book is
   fiction under review; if it still declines, another AI (or the 🤖 Claude Code helper) reads the book instead, and
   the report says who declined and who stood in.
-- **🕰️ Clock and tide check:** Akọwe works out the times, days and tides the book states ("high water at 18:06")
-  and flags one that cannot be true ("the tide was going out at 14:30" — before high water the tide comes in). The
-  editor and the reviewer must fix it, and the next chapter's writer is told the tide times so far.
+- **🕰️ Clock, days and tide check:** Akọwe works out the times, days and tides the book states ("high water at
+  18:06") and flags one that cannot be true ("the tide was going out at 14:30" — before high water the tide comes
+  in). It also counts the days: "On Sunday … the next morning, Saturday", a Friday "four days later" that is not
+  four days later, or "Monday, 6 January" and "Friday, 14 January" in the same book are flagged. The editor and the
+  reviewer must fix it, and the next chapter's writer is told the tide times so far.
+- **💬 Dialogue in any style:** Akọwe recognises dialogue in "double quotes", “curly quotes”, 'single quotes' (the
+  British way) and lines that start with a dash (— Where are you going?), and tells it apart from apostrophes
+  (don't, Teo's, the '90s). So the report's dialogue share is right, and the sentence polish never changes a line of
+  dialogue, whatever style your book uses.
 - **📏 Special rules:** a ghost, magic, a curse or a strange device in the story rules must say where and when it
   works (scope), what it costs and what it can never do (limits). If one does not, the AI fills them in once, before
   the plan is written.
+- **✨ Magic rules kept:** an ability, spell or magical device can have a rule Akọwe checks in every chapter (see
+  "How to write a magic rule" below). A use that breaks its rule is a must-fix note for the editor before the
+  chapter is approved, and the book report says "✨ Magic rules kept: 7 uses, 0 broken".
+
+### ✨ How to write a magic rule
+
+If your book has magic, the book must follow the rules of the magic. Open **🌍 Story rules and world**, press
+**✏️ Change them**, and in the rule tick **✨ This rule is an ability, spell or magical device**. Then fill in plain
+words, for example teleportation that needs two anchor stones:
+
+| Field | Example |
+|---|---|
+| Name | Teleportation |
+| What it does | Mara steps from where she is to a place she can see. |
+| What it needs (one per line) | 2 anchor stones · line of sight · at night only |
+| Limits (one per line) | 3 times a day · cooldown 1 hour |
+| Side effect or price | a nosebleed |
+| Who can use it | Mara |
+| Exceptions | (leave empty: there are none) |
+| Who holds what at the start | Mara: 3 anchor stones |
+
+- **Things with a number are counted.** "2 anchor stones" is used up at every use (write "2 anchor stones (kept)"
+  when they are not used up). Akọwe keeps a **ledger**: who used what in which chapter, what it cost, and what
+  people still hold ("Mara found one anchor stone" adds one). You see it on the Story rules page under **✨ Magic
+  rules**.
+- **Every use is checked**, with no extra AI: enough of what it needs (on the page and in the ledger), the right time
+  of day, not too often on one day, not again in the same scene before the cooldown, only by who may use it, and the
+  price shown. A broken rule becomes a must-fix note in plain words — "Mara uses Teleportation in chapter 3 with only
+  one anchor stone; the rule needs 2." Things Akọwe cannot count (line of sight) are checked by the editor and the
+  reviewer, who get the rules too.
+- **Breaking a rule on purpose:** write "deliberate twist" (or "breaks the rule") and the ability's name in that
+  chapter's outline, or add it under **🎭 Deliberate rule-breaks** on the Story rules page. It is then allowed and
+  shown as a deliberate twist.
+- The writer of each chapter gets the rules of the abilities the chapter uses and the ledger so far.
+- When the AI drafts your story rules, it fills these fields in from your premise; you can change them. An older
+  rule written as one sentence ("Teleportation requires two anchor stones; at most three times a day") still works:
+  Akọwe reads it the same way when it can.
+- Switch it off with the tick box **Check the magic rules in every chapter** on the same page (or the "Story rules
+  and world texture" switch of the pipeline).
+
+### 🩺 Plan check: the story doctor, and voices that differ
+
+Most of what reviewers dislike in a finished book — a rule whose numbers do not add up, a final mistake that is hard
+to believe, a middle that sags — is already in the plan. A plan is cheap to fix while no chapter exists yet. So,
+under **🩺 Plan check** on the ⚡ Make-a-book screen (both on by default; switch either off there):
+
+- **Story doctor:** as soon as the plan (premise, main plot, chapter outline) is made, every working AI scores it on
+  the same points as the book report, quotes its weaknesses and suggests a fix for each. The AIs must prove a 9 or 10
+  with a quote, or it counts as 7 — the same strict rules as the book report. If the plan scores under your aim
+  (8.5 unless you pick 8 or 9), the chapter outline is revised with their fixes, checked, reviewed and approved as
+  usual, and scored again — at most 2 times unless you pick 1 or 3. The best-scoring plan is kept. Your own idea and
+  your lock list are never replaced, and an outline you wrote yourself is only scored. The run window says what
+  happened, e.g. "🩺 Plan scored 7.4 → 8.6 after 1 revision", and so does the book report. About 3 to 8 more AI
+  answers.
+- **Make sure every character sounds different:** each character already gets a voice card (how they talk: sentence
+  length, words, favourite phrases, what they never say, how they dodge a question). Akọwe now compares the cards
+  without AI; only when two sound alike or one is too thin does the AI make them distinct, in one answer. Cards you
+  wrote yourself are never changed. Each chapter's writer gets the cards of the characters in it, and the editor
+  checks that every character sounds like their own card.
 
 ### ✍ Chapter 1: two first pages, and rewritten last
 
@@ -245,24 +312,42 @@ Chapter 1 is written before the rest of the book exists, and readers decide on t
 
 ### 🔁 Improve until better, and 📈 your books over time
 
-- **🔁 Improve until better** (on the ⚡ Make-a-book screen, on by default, 1–3 rounds, default 2): when the book is
-  made, Akọwe collects what the reviewers' "What to try next", the beta readers' top fixes, the editor's major notes
-  and its own checks (clock and tide times, the same phrase or simile in several chapters, a plain word like "went"
-  used far too often, sentences too simple for adult readers) found, and the writer reworks the chapters that need it
-  most. The **same** AI reviewers then read the book again. The change is **kept only if the score went up and
+- **🔁 Improve until better** (on the ⚡ Make-a-book screen, on by default): when the book is made, Akọwe finds the
+  **🎯 3 weakest scenes** and rewrites only those. Every complaint — the reviewers' quoted weak spots, the beta
+  readers' top fixes, the editor's major notes and Akọwe's own checks (clock and tide times, the same phrase in
+  several chapters) — is matched to the scene it is about; the scenes with the most and most serious complaints win
+  (complaints about your book's lowest scores count most). The writer rewrites each of those scenes once, seeing its
+  complaints, its scene card, the lines just before and after it, the characters' voices and your style. A rewritten
+  scene may be at most 10% longer, and must keep every name and every line the editor said to keep — otherwise it
+  stays as it was. The report then says, for example, "🎯 Rewrote 3 weakest scenes (ch1 opening, ch2 photograph
+  investigation, ch3 final miscalculation): 7.9 → 8.4 (kept)". 1 round by default (you can pick 2); about 6 more AI
+  answers per round. Prefer the older way? Pick "Whole chapters" next to the switch: the writer then reworks the
+  chapters with the most to fix (1 or 2 rounds). The **same** AI reviewers then read the book again. The change is **kept only if the score went up and
   nothing dropped by more than a point**; otherwise your book stays exactly as it was. Kept chapters are checked and
   approved like every chapter, and the PDF, EPUB and Word files are made again. The run window, the journal and the
   report show both numbers: "🔁 Improve pass: 7.6 → 8.1/10 (kept)". Chapters you wrote yourself are never touched.
 - **📏 Sentence polish** (on the ⚡ Make-a-book screen, on by default): as soon as a chapter is written, Akọwe
-  checks — without any AI — whether it reads too simply for your readers (for adult books, under reading grade 5)
-  and which phrases it repeats from earlier chapters ("water ran off his elbows" again). Only when it does, the writer
-  polishes that chapter once: it joins some short sentences into longer, precise ones and says repeated phrases in a
-  new way. The story, the facts, the names, the numbers and every line of dialogue stay exactly as they were. The
+  checks — without any AI — whether it reads too simply for your readers (for adult books, under reading grade 5),
+  which phrases it repeats from earlier chapters ("water ran off his elbows" again) and whether it has too many lists
+  of three ("cold, wet, and tired" more than 3 times per 1,000 words). Only when it does, the writer polishes that
+  chapter once: it joins some short sentences into longer, precise ones, says repeated phrases in a new way and breaks
+  up some lists of three ("cold and wet", or one exact detail). The story, the facts, the names, the numbers and every line of dialogue stay exactly as they were. The
   polish is kept only if Akọwe's checks got better; otherwise the chapter stays as written. The run window shows both
   numbers ("📏 Reading level 2.9 → 5.4 after polish in chapters 1, 3"), and so does the 📊 report. The same switch
   lets the improve pass keep its repeated-phrase fixes on their own when the rest of its changes are not kept (those
   chapters are checked and approved again like every chapter). At most one more AI answer per chapter, only for the
   chapters that need it. Switch it off to write the chapters the old way.
+- **📏 Keep the book's length** (under "Extras" on the ⚡ Make-a-book screen, on by default): Akọwe's own rewrites
+  (the editor's rewrites, the sentence polish, chapter 1 rewritten last, the improve pass) may make a chapter at most
+  about 10 % longer and never make the book more than about 115 % of its target length. The writer is told the word
+  budget and asked to cut repeated explanation rather than add. The run window and the report say the finished
+  book's length: "📏 Length: 4,310 words (108% of the 4,000-word target)".
+- **🔁 Read the final book again** (under "Extras", on by default): when chapter 1 is rewritten last or the improve
+  pass changes chapters, the final whole-book continuity check reads those chapters again at the very end (it says
+  "read again after Akọwe's own rewrites"; Akọwe's own changes are never called "changed by hand"), and — if you
+  asked for beta readers — they read the finished book once more, so the report is about the book you get. A
+  separate switch turns the beta readers' second read off. Nothing extra happens when nothing changed. The number of
+  beta readers is 1 unless you choose 2 or 3 next to "📖 Beta reader at the end".
 - **📈 Your books over time** (🏠 Book home and the 📊 Book report): "7.6/10 — down 0.4 from your last book",
   "Rule rigor is your weakest area for 3 books", and which scores are falling. Only numbers are kept for this,
   never your book's words.

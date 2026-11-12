@@ -141,9 +141,15 @@ STEPS = [
     # 🔁 improve_pass.py: on by default (run setting improve_pass), at most improve_rounds rounds
     ("improve", "H", None, "Improve until better", "The reviewers' “What to try next”, the beta readers' top fixes, "
      "the editor's major notes (also those of chapters you approved anyway) and Akọwe's own checks (clock and tide "
-     "times, repeated phrases, plain-word tics, too-simple sentences) go to the chapters that need them most; the same "
+     "times, repeated phrases, plain-word tics, too-simple sentences) go to the 🎯 3 weakest scenes (or, the older way, "
+     "the chapters that need them most); the same "
      "reviewers re-read the book, and the rewrite is kept only if the score went up and nothing dropped. (On by "
      "default; never holds up the book.)"),
+    # 🔁 final_reads.py: once at the end, only where the book changed (run settings reread_after_rewrites, beta_reread)
+    ("reread", "H", None, "Read the final book again", "After Akọwe's own rewrites at the end (chapter 1 rewritten "
+     "last, the improve pass), the final whole-book check reads the chapters again, and the beta readers read the "
+     "final book once more — only when something changed since they read it. The run window also says the book's "
+     "length against its target. (On by default; never holds up the book.)"),
 ]
 # ⚡ #116: what the AI activity strip says while a step works (present tense, plain words); else the step's title
 STEP_DOING = {
@@ -156,7 +162,7 @@ STEP_DOING = {
     "assemble": "Putting the book together", "export": "Making the PDF, EPUB and Word files",
     "check": "Checking the book's content", "report": "Writing the book report",
     "beta": "Beta readers reading the book", "opening": "Rewriting chapter 1 with the whole book in view",
-    "improve": "Improving the book until it scores better",
+    "improve": "Improving the book until it scores better", "reread": "Reading the final book again",
 }
 
 
@@ -1104,7 +1110,13 @@ class AutoBookService(_Runner):
         if not isinstance(ip, bool):
             raise AkoweError("INVALID_INPUT", "/improve_pass", "improve_pass must be true or false", status="REJECTED")
         out["improve_pass"] = ip
-        for k in ("opening_pass", "first_page", "chapter_polish"):  # ✍ / 📏 on unless switched off
+        im = body.get("improve_mode", "scenes")  # 🎯 weak_scenes.py: the weakest scenes (default) or whole chapters
+        if im not in ("scenes", "chapters"):
+            raise AkoweError("INVALID_INPUT", "/improve_mode", "improve_mode must be \"scenes\" or \"chapters\"",
+                             status="REJECTED")
+        out["improve_mode"] = im
+        for k in ("opening_pass", "first_page", "chapter_polish", "length_guard",  # ✍ / 📏 on unless switched off
+                  "reread_after_rewrites", "beta_reread"):  # 🔁 final_reads.py
             v = body.get(k, True)
             if not isinstance(v, bool):
                 raise AkoweError("INVALID_INPUT", f"/{k}", f"{k} must be true or false", status="REJECTED")
@@ -1139,6 +1151,9 @@ class AutoBookService(_Runner):
             out["checker_order"] = co
         from . import claude_code_book  # noqa: PLC0415 - 🤖 Claude Code helpers: on/off for this run (None = Settings)
         out.update(claude_code_book.clean_run_option(body, self.store))
+        from . import story_doctor, voice_contrast  # noqa: PLC0415 - 🩺 the plan check / 🗣 distinct voice cards
+        out.update(story_doctor.clean_run_option(body))
+        out.update(voice_contrast.clean_run_option(body))
         n = body.get("beta_readers", 1)  # 👥 idea #14: how many beta readers (1 = one AI; 2-3 = a panel)
         if isinstance(n, bool) or not isinstance(n, int) or not 1 <= n <= 3:
             raise AkoweError("INVALID_INPUT", "/beta_readers", "beta_readers: 1, 2 or 3", status="REJECTED")
@@ -1483,6 +1498,7 @@ class AutoBookService(_Runner):
         """Approve exactly this revision under the author's consent for THIS run (never outside one)."""
         self._check_consent(run, ref.get("project_id"))
         bp = self.bp(run)
+        self._note_own(run, bp, ref)  # 🔁 Akọwe's own chapter text is never taken for a hand edit (final_reads.py)
         res = bp.approve_ref(ref)
         label = f"Approved under your Make-a-book-for-me consent, run {run['id']}"
         with self.store.transaction() as tx:
@@ -1499,6 +1515,18 @@ class AutoBookService(_Runner):
         self.event(run, "approve", f"{safe_title(self.app.engine.contracts, bp.rec(ref['record_id']))}: {label}",
                    approval="run_consent", record_id=ref["record_id"], module_id=ref["module_id"], verdict=verdict)
         return res
+
+    def _note_own(self, run, bp, ref):
+        """🔁 Register an AI-made chapter revision as Akọwe's own BEFORE it is approved (continuity.note_own)."""
+        try:
+            if ref.get("module_id") != "C02":
+                return
+            rec = bp.rec(ref["record_id"], ref["version"])
+            if rec is not None and self._ai_made(run, rec):
+                from . import continuity  # noqa: PLC0415
+                continuity.note_own(self.store, run["project_id"], run["branch_id"], ref["record_id"], ref["version"])
+        except Exception:  # noqa: BLE001 - only a note; the approval goes on
+            log.exception("could not note Akọwe's own chapter text")
 
     def _second_ai_working(self, writer_slot: str | None) -> bool:
         """Is an AI of another family than the writer's working right now (it could review independently)?"""
@@ -1821,6 +1849,7 @@ class AutoBookService(_Runner):
         rj = ReviewJob(kind, run["principal"], run["project_id"], run["branch_id"], [rid], slot)
         for k in ("started", "status", "retry_busy", "check", "on_wait"):
             setattr(rj, k, getattr(job, k))
+        rj.run_settings = run.get("settings") or {}  # 📏 e.g. the length guard of the rewrites (length_guard.py)
         return rj
 
     # ------------------------------------------------------------------ H14: approved without checks -> notes
@@ -2793,8 +2822,12 @@ class AutoBookService(_Runner):
                        slot=rj.slot, record_id=rec["record_id"])
             self.save(run)
         ok = sum(1 for i in st["items"] if i["state"] == "done")
-        st["message"] = f"{ok} of {len(people)} character(s) have a sheet and a voice card" + (
+        msg = f"{ok} of {len(people)} character(s) have a sheet and a voice card" + (
             f" ({made} made now)" if made else "") + (f" · ⚠️ {failed} could not be made" if failed else "")
+        from . import voice_contrast  # noqa: PLC0415 - 🗣 the cards must really differ (≤ 1 AI answer, only if not)
+        voice_contrast.run_check(self, run, st)
+        vc = (run.get("voice_contrast") or {}).get("line")
+        st["message"] = msg + (f" · {vc}" if vc else "")
 
     def _s_looks(self, run, st):
         """⏱ Essentials only, before chapter one (story_details.py). Never blocks the book."""
@@ -3588,9 +3621,11 @@ class AutoBookService(_Runner):
             self._repin_plan(run, st)
         self._planning(run, st, "B11", "chapter outline", precheck=lambda rid: self._outline_has_main(run, rid),
                        on_refused=made_missing)
+        from . import story_doctor  # noqa: PLC0415 - 🩺 the plan is scored (and mended) before chapter 1
+        story_doctor.run_doctor(self, run, st)
         self._update_rules(run, st)
         n = len(self.bp(run).outline_chapters(self.bp(run).outline()))
-        st["message"] = f"{n} chapter(s) planned and approved"
+        st["message"] = f"{n} chapter(s) planned and approved" + (f" · {st['doctor']}" if st.get("doctor") else "")
         self._place_beats(run, st)
         self._place_stages(run, st)
 
@@ -4139,6 +4174,8 @@ class AutoBookService(_Runner):
                          "words": (rep.get("words") or {}).get("total"), "warnings": rep.get("warnings") or []}
         from . import chapter_polish  # noqa: PLC0415 - 📏 the chapter polish's numbers in the saved report too
         chapter_polish.to_report(self, run, rep)
+        from . import story_doctor  # noqa: PLC0415 - 🩺 the plan check's line in the saved report too
+        story_doctor.to_report(self, run, rep)
         if agg.get("reviewers"):
             st["message"] = (f"{agg['reviewers']} AI(s) read the whole book · overall {agg.get('overall')}/10"
                              + (f" · ⚠️ they disagree on {', '.join(agg['disagreements'])}" if agg.get("disagreements")
@@ -4193,6 +4230,11 @@ class AutoBookService(_Runner):
         score went up and nothing dropped."""
         from . import improve_pass  # noqa: PLC0415
         improve_pass.run_step(self, run, st)
+
+    def _s_reread(self, run, st):
+        """🔁 Read the final book again where Akọwe's own rewrites changed it (final_reads.py)."""
+        from . import final_reads  # noqa: PLC0415
+        final_reads.run_step(self, run, st)
 
     def _record_quality(self, run):
         """📈 The finished book's report numbers join the author's quality history (quality_history.py); the trend

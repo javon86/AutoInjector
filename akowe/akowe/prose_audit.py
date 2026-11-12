@@ -40,6 +40,8 @@ import re
 import statistics
 from collections import Counter, defaultdict
 
+from . import dialogue
+
 EXCERPT_MAX = 80
 MAX_PASSAGES = 8
 STRICTNESS = {"gentle": 1.5, "normal": 1.0, "strict": 0.7}
@@ -151,11 +153,11 @@ ADVICE = {
 _PARA_SPLIT = re.compile(r"\n\s*\n")
 _SENT = re.compile(r"[^.!?…]+(?:[.!?…]+[\"'”’)]*|$)", re.S)
 _WORD = re.compile(r"[A-Za-z’'][A-Za-z’'-]*")
-_QUOTE = re.compile(r"[\"“]([^\"“”]{1,1200})[\"”]")
+_QUOTE = dialogue.FINDER   # 💬 every dialogue style (dialogue.py); group(1) = the words inside
 _NOT_PAR = re.compile(r"\bnot\b[^.;!?]{1,60}?,\s*(?:and\s+|but\s+)?not\b|\bnot\b[^.;!?,]{1,40}?\bbut\b", re.I)
 _TRIAD = re.compile(r"\b([\w'’-]+(?: [\w'’-]+){0,2}), ([\w'’-]+(?: [\w'’-]+){0,2}),? (?:and|or) ([\w'’-]+(?: [\w'’-]+){0,2})\b")
-_TAG_AFTER = re.compile(r"[\"”][,]?\s*(?:([A-Z][\w'’-]+|he|she|they|I|we)\s+([a-z]+)|([a-z]+)\s+([A-Z][\w'’-]+|he|she|they))\b")
-_TAG_BEFORE = re.compile(r"\b([A-Z][\w'’-]+|He|She|They|I|We)\s+([a-z]+)(?:\s+\w+)?\s*[,:]\s*[\"“]")
+_TAG_AFTER = re.compile(r"[\"”’'][,]?\s*(?:([A-Z][\w'’-]+|he|she|they|I|we)\s+([a-z]+)|([a-z]+)\s+([A-Z][\w'’-]+|he|she|they))\b")
+_TAG_BEFORE = re.compile(r"\b([A-Z][\w'’-]+|He|She|They|I|We)\s+([a-z]+)(?:\s+\w+)?\s*[,:]\s*[\"“‘']")
 
 
 def _norm_q(s: str) -> str:

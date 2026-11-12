@@ -254,7 +254,7 @@ const state = {
   selectorOverrides: {}, // site -> { input?, send?, assistant? } — user-picked CSS selectors (see selector:pick), tried before the built-in candidates in selectors.js
   learnedSelectors: {}, // site -> { input?|send?|assistant?|stop?|user?: { selector, how: alternative|page-search|teach, learnedAt, version } } — found by the self-repair (P18.3/4/7) and proved by a check-in; persisted (versioned)
   retiredSelectors: {}, // PR #120: site -> role -> { selector, source: pick|learned, retiredAt, kind, meta?, learned? } — a saved / learned selector that kept failing while the built-in way worked, forgotten by itself; kept so ↺ Undo can bring it back
-  staleEvidence: {}, // 2026-11-09: site -> role -> { selector, starts, lastRun, at } — on how many app starts a saved reply selector was seen not to fit (found nothing / only part of a reply) while the built-in reader worked; at STALE_RETIRE_STARTS it is retired by itself
+  staleEvidence: {}, // 2026-11-09: site -> role -> { selector, starts, lastRun, at, okRun, worked, nothingOnly } — on how many app starts a saved reply selector was seen not to fit (found nothing / only part of a reply) while the built-in reader worked; at STALE_RETIRE_STARTS it is retired by itself
   pickMeta: {}, // P38: site -> { input?|send?|assistant?|user?: { savedAt, how: pick|number, rev, version } } — when each 🎯 / 🔢 SAVED selector (in selectorOverrides) was locked in; persisted (versioned)
   selfRepair: { intervalMin: 20, startup: true, carryOn: true }, // P18.1 check-ins: every N minutes while an AI is idle (0 = off), and once at start; carryOn: after a check-in / 🔢, ask a busy AI to carry on
   savedLogins: {}, // site -> [{ id, label, username, encryptedPassword }] — encryptedPassword is a safeStorage-encrypted (OS keychain) ciphertext, base64-encoded; the plaintext password is never stored, never sent to the renderer, never logged. See logins:save/logins:fill.
@@ -871,7 +871,7 @@ function loadPersistedState() {
       for (const role of PICK_ROLES_ALL) {
         const x = m[role];
         if (!x || typeof x !== "object" || typeof x.selector !== "string" || !x.selector.trim() || x.selector.length > 300) continue;
-        state.staleEvidence[site][role] = { selector: x.selector, starts: Math.max(0, Math.min(99, Math.round(Number(x.starts) || 0))), lastRun: typeof x.lastRun === "string" ? x.lastRun.slice(0, 40) : null, at: Number(x.at) || 0 };
+        state.staleEvidence[site][role] = { selector: x.selector, starts: Math.max(0, Math.min(99, Math.round(Number(x.starts) || 0))), lastRun: typeof x.lastRun === "string" ? x.lastRun.slice(0, 40) : null, at: Number(x.at) || 0, okRun: typeof x.okRun === "string" ? x.okRun.slice(0, 40) : null, worked: !!x.worked, nothingOnly: x.nothingOnly !== false };
       }
     }
   }
@@ -1130,7 +1130,7 @@ function markCaptured(site) {
   // only part of the reply) with the built-in reader. The latter counts toward
   // forgetting the out-of-date saved one.
   const rf = lastReadFlags[site];
-  if (rf) { try { noteSavedSelectorOutcome(site, "assistant", rf.ignored || rf.fragment, rf.fragment ? "fragment" : "ignored"); } catch (_) {} }
+  if (rf) { try { noteSavedSelectorOutcome(site, "assistant", rf.ignored || rf.fragment, rf.fragment ? "fragment" : "ignored", rf.hit); } catch (_) {} }
   wroteSinceCapture[site] = false;
   genReads[site] = 0;
   try { delete unreadableWarned[site]; } catch (_) {} // TR-31: a later fragment is logged again
@@ -1757,14 +1757,22 @@ function effectiveSource(site, role) {
 }
 // failed: the saved selector failed AND the built-in way worked (a proven send, a
 // captured reply); false: the saved one worked — the count starts over.
-function noteSavedSelectorOutcome(site, role, failed, kind) {
+// worked (default: !failed): the saved one really found what it is for (a reply read WITH it) — a read that found
+// nothing either way (Claude still thinking, "rows-waiting") is not proof that it works.
+function noteSavedSelectorOutcome(site, role, failed, kind, worked) {
   const map = staleStreak[site] || (staleStreak[site] = {});
   const src = effectiveSource(site, role);
   if (!src || !failed) {
     delete map[role];
-    // the saved one worked: what earlier starts saw against it no longer counts
+    // 2026-11-12 (log, build de64cbb: selector-stale-seen … "starts":1 four times over two starts, never retired):
+    // the saved one fitting ONCE used to wipe what earlier starts saw against it — at once, even in a start that
+    // had just seen it not fit (Claude's div[data-cds="Prose"] fits some replies and not others). Now it is only
+    // noted ("okRun"); the count starts over only when a WHOLE start saw it fit and never fail (noteStaleThisStart).
     const ev = (state.staleEvidence[site] || {})[role];
-    if (src && ev && ev.selector === src.selector) { const n = { ...state.staleEvidence[site] }; delete n[role]; state.staleEvidence[site] = n; saveStateDebounced(); }
+    if (src && ev && ev.selector === src.selector && (worked === undefined ? true : !!worked) && ev.okRun !== RUN_ID) {
+      state.staleEvidence[site] = { ...state.staleEvidence[site], [role]: { ...ev, okRun: RUN_ID, worked: true } };
+      saveStateDebounced();
+    }
     return null;
   }
   if (!map[role] || map[role].selector !== src.selector) map[role] = { selector: src.selector, n: 0 };
@@ -1777,22 +1785,40 @@ function noteSavedSelectorOutcome(site, role, failed, kind) {
 // 2026-11-09 (log: "reply-selector-ignored" for Claude's div[data-cds="Prose"] and "reply-selector-fragment" for
 // Gemini at EVERY start, never forgotten — a start rarely saw 3 replies in a row from that AI). The same selector
 // seen not to fit on STALE_RETIRE_STARTS different app starts (while the built-in way worked each time) is also
-// forgotten by itself — remembered across starts in state.staleEvidence. Once per start; a saved one that works
-// in between starts the count over; never one the user set in the last hour.
+// forgotten by itself — remembered across starts in state.staleEvidence. Once per start; a whole start where the
+// saved one fits and never misses starts the count over; never one the user set in the last hour.
 const STALE_RETIRE_STARTS = Number(process.env.AUTOINJECTOR_STALE_RETIRE_STARTS) || 3;
+// 2026-11-12: a saved REPLY reader that found no reply at all on 2 starts — and never fitted a single reply since it
+// was first seen not to — while the built-in reader read every reply, is forgotten on the 2nd start (a third start
+// adds nothing: it has never worked). Only part of a reply ("fragment"), a Send button, or one that fitted even once
+// still takes STALE_RETIRE_STARTS. AUTOINJECTOR_STALE_RETIRE_STARTS_SURE=0 switches this off (back to 3 starts).
+const STALE_RETIRE_STARTS_SURE = (() => {
+  const raw = process.env.AUTOINJECTOR_STALE_RETIRE_STARTS_SURE;
+  const n = raw == null || raw === "" ? 2 : Math.round(Number(raw));
+  return n >= 1 ? Math.min(n, STALE_RETIRE_STARTS) : STALE_RETIRE_STARTS;
+})();
 const RUN_ID = `${Date.now().toString(36)}-${process.pid}`;
 function noteStaleThisStart(site, role, kind) {
   const src = effectiveSource(site, role);
   if (!src) return null;
   const m = state.staleEvidence[site] || (state.staleEvidence[site] = {});
+  const fresh = () => ({ selector: src.selector, starts: 0, lastRun: null, at: 0, okRun: null, worked: false, nothingOnly: true });
   let ev = m[role];
-  if (!ev || ev.selector !== src.selector) ev = { selector: src.selector, starts: 0, lastRun: null, at: 0 };
+  if (!ev || ev.selector !== src.selector) ev = fresh();
   if (ev.lastRun === RUN_ID) return null; // this start already counted
-  ev = { selector: ev.selector, starts: ev.starts + 1, lastRun: RUN_ID, at: Date.now() };
+  // an earlier start saw the saved one fit and never fail: what came before it no longer counts
+  if (ev.okRun && ev.okRun !== RUN_ID && ev.okRun !== ev.lastRun) ev = fresh();
+  ev = {
+    selector: ev.selector, starts: ev.starts + 1, lastRun: RUN_ID, at: Date.now(),
+    okRun: ev.okRun === RUN_ID ? RUN_ID : null,
+    worked: !!ev.worked,
+    nothingOnly: ev.nothingOnly !== false && kind === "ignored"
+  };
   m[role] = ev;
   saveStateDebounced();
-  logEvent("selector-stale-seen", { site, role, selector: src.selector, source: src.source, kind: kind || null, starts: ev.starts, retireAt: STALE_RETIRE_STARTS });
-  if (ev.starts < STALE_RETIRE_STARTS) return null;
+  const retireAt = role === "assistant" && ev.nothingOnly && !ev.worked ? STALE_RETIRE_STARTS_SURE : STALE_RETIRE_STARTS;
+  logEvent("selector-stale-seen", { site, role, selector: src.selector, source: src.source, kind: kind || null, starts: ev.starts, retireAt });
+  if (ev.starts < retireAt) return null;
   if (src.at && Date.now() - src.at < STALE_KEEP_RECENT_MS) return null; // the user set it in the last hour: left alone
   if (staleStreak[site]) delete staleStreak[site][role];
   return retireSavedSelector(site, role, src, kind, { starts: ev.starts });
@@ -4494,7 +4520,7 @@ async function pollSite(site) {
     // 2026-11-09: a "part of the reply" fix with NO saved reply selector is the reader's own job (the page split one
     // reply over several blocks) — never blamed on a saved selector (the log's Gemini warning at every start).
     const savedReader = !!effectiveOverrides(site).assistant;
-    if (res && res.ok) lastReadFlags[site] = { ignored: !!res.overrideIgnored, fragment: !!res.fragmentFixed && savedReader };
+    if (res && res.ok) lastReadFlags[site] = { ignored: !!res.overrideIgnored, fragment: !!res.fragmentFixed && savedReader, hit: typeof res.overrideHit === "boolean" ? res.overrideHit : undefined };
     if (res && res.overrideIgnored && !overrideIgnoredWarned[site]) {
       overrideIgnoredWarned[site] = true;
       try { noteStaleThisStart(site, "assistant", "ignored"); } catch (_) {}

@@ -86,7 +86,8 @@ RULES = {
                "costs something; the change happens; the 'unsaid' stays unsaid (never stated by a character or the "
                "narrator)."),
     "voices": ("Dialogue: every character talks as their voice card says (context.writing_brief.voice_cards: rhythm, "
-               "register, vocabulary, favourite phrases, habits, how they talk under pressure, what they talk around); "
+               "register, vocabulary, favourite phrases, habits, how they talk under pressure, what they talk around, how they "
+               "deflect a question); "
                "never give two characters the same calm, explaining register; nobody uses their never_words; nobody "
                "announces their feelings. With the names hidden, a reader should still know who speaks."),
     "pov": ("The point-of-view character is context.writing_brief.pov: use their name on the page (in dialogue or "
@@ -240,7 +241,8 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str, *
         brief_cuts.note(cut, "planned details", planned[MAX_PLANNED:])
         planned = planned[:MAX_PLANNED]
         if vb.get("summarized"):
-            cut.append("voice cards: shortened to their essentials (too many characters for full cards)")
+            cut.append("voice cards: shortened to their essentials (too many characters for full cards)"
+                       + (f" — one line only for {', '.join(vb['short'][:6])}" if vb.get("short") else ""))
         brief = {"pov": _pov_view(pov) if pov else None, "voice_cards": vb["cards"], "other_voices": vb["others"],
                  "scene_cards": cards, "planned_details": planned}
         main = _main_character(store, pid, branch, cs, present, pov)  # ★ every chapter knows who the book is about
@@ -294,6 +296,7 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str, *
             meta["cut"] = cut
         if not flags["rules"]:
             extra.pop("story_rules", None)
+            extra.pop("magic_rules", None)
             extra.pop("world_texture", None)
         if not flags["planned"]:
             extra.pop("must_show", None)
@@ -332,6 +335,9 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str, *
             rules.append(RULES["planned"])
         if brief.get("story_rules"):
             rules.append(RULES["story_rules"])
+        if brief.get("magic_rules"):
+            from .magic_rules import WRITER_RULE as MAGIC_RULE  # noqa: PLC0415
+            rules.append(MAGIC_RULE)
         if brief.get("world_texture"):
             from .texture import RULE as TEXTURE_RULE  # noqa: PLC0415
             rules.append(TEXTURE_RULE)
@@ -566,6 +572,9 @@ def _section4(store, pid: str, branch: str, outline: dict, chapter_id: str, card
                         [r["text"] for r in story_rules.active(story_rules.get_entry(store, pid, branch))
                          if r["text"] not in given])
         out["world_texture"] = texture_mod.chapter_brief(texture_mod.get_entry(store, pid, branch), cards, *texts)
+        from . import magic_rules  # noqa: PLC0415 - ✨ the rules of the abilities in this chapter + the ledger
+        out["magic_rules"] = magic_rules.brief_part(store, pid, branch, order.index(chapter_id) + 1 if chapter_id in
+                                                    order else None, [*texts, card_text])
         out["story_choices"] = story_choices.brief(choices, ending=last)
         out["choice_rules"] = story_choices.rules(choices, ending=last)
     except Exception:  # noqa: BLE001 - guidance, never a reason to fail the chapter

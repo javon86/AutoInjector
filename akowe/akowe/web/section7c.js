@@ -23,9 +23,24 @@ export async function makeSetupExtras(c) {
     h('div', { class: 'check-row' }, style, h('label', { for: 'mb-style' }, h('strong', null, '✒️ Write in my style'),
       h('span', { class: 'hint' }, hasCard ? ' — the narration follows your style card (✒️ My writing style).' : ' — make your style card first: ',
         hasCard ? null : h('a', { href: '#/style' }, '✒️ My writing style')))));
+  // 🔁 / 📏 three switches for the end of the run, all on by default (final_reads.py, length_guard.py)
+  const sw = (id, label, hint) => {
+    const box = h('input', { type: 'checkbox', id, 'data-testid': id, checked: true });
+    el.appendChild(h('div', { class: 'check-row' }, box, h('label', { for: id }, h('strong', null, label), h('span', { class: 'hint' }, ' — ' + hint))));
+    return box;
+  };
+  const reread = sw('mb-reread', '🔁 Read the final book again after Akọwe’s own rewrites',
+    'when chapter 1 is rewritten last or the improve pass changes a chapter, the final whole-book check reads those chapters again (only if something changed; about one more AI answer per checking AI).');
+  const betaAgain = sw('mb-beta-reread', '📖 Beta readers read the final book again',
+    'with a beta reader on: when the book changed after they read it, they read the final version once more, so the report is about the finished book (one more AI answer per reader).');
+  const guard = sw('mb-length-guard', '📏 Keep rewrites within the book’s length',
+    'Akọwe’s own rewrites may grow a chapter by about 10% at most and never push the book past about 115% of its target length; the writer is told the word budget.');
   return { el, apply(body) {
     if (beta.checked) { body.beta_reader = true; if (count.value !== '1') body.beta_readers = Number(count.value); }
     if (style.checked && !style.disabled) body.my_style = true;
+    if (!reread.checked) body.reread_after_rewrites = false;
+    if (!betaAgain.checked) body.beta_reread = false;
+    if (!guard.checked) body.length_guard = false;
   } };
 }
 

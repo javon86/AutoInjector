@@ -27,6 +27,10 @@ report ("🔁 Improve pass: 7.6 → 8.1, kept"). A round that does not improve e
 chapter as it is, kept when the whole book then repeats less and nothing else got worse or changed (Akọwe's own
 checks, no AI); those chapters then go through the usual review and approval like a kept round's chapters.
 
+🎯 By default (run setting ``improve_mode`` "scenes") a round does not rework whole chapters: every complaint is placed
+in its scene and only the 3 weakest scenes are rewritten (weak_scenes.py; default 1 round, at most 2); the keep rule,
+the review of kept chapters and the report work as above. ``improve_mode`` "chapters" is the older way described here.
+
 Never blocks the book: an AI problem is a ⚠️ note (only the run's pause / cancel stop it). AI calls go through the
 usual request plumbing (assist._call_ai, usage limits, failover). Logs: codes and numbers only.
 """
@@ -36,6 +40,8 @@ import logging
 import re
 import threading
 from datetime import datetime, timezone
+
+from . import weak_scenes
 
 log = logging.getLogger("akowe.improve_pass")
 
@@ -129,8 +135,10 @@ def _add(out: dict, ch: dict, src: str, f: dict):
 
 
 def targets(store, pid: str, branch: str, chapters: list[dict], rep: dict | None, beta: dict | None,
-            crafts: dict | None = None, skip: set | None = None) -> list[dict]:
-    """The chapters to rewrite, most to fix first (≤ MAX_CHAPTERS), each with ≤ MAX_FINDINGS findings."""
+            crafts: dict | None = None, skip: set | None = None, max_chapters: int | None = MAX_CHAPTERS,
+            max_findings: int | None = MAX_FINDINGS) -> list[dict]:
+    """The chapters to rewrite, most to fix first (≤ max_chapters), each with ≤ max_findings findings (None: all;
+    🎯 weak_scenes.py places every finding in its scene)."""
     from . import clock_check, human_voice, quality_history  # noqa: PLC0415
     out: dict[int, dict] = {}
     by_id = {c["chapter_id"]: c for c in chapters}
@@ -209,8 +217,8 @@ def targets(store, pid: str, branch: str, chapters: list[dict], rep: dict | None
     rows.sort(key=lambda r: (-r["weight"], r["number"]))
     for r in rows:
         r["findings"].sort(key=lambda f: (-WEIGHT.get(f["source"], 1), not f["passage"]))
-        r["findings"] = r["findings"][:MAX_FINDINGS]
-    return rows[:MAX_CHAPTERS]
+        r["findings"] = r["findings"][:max_findings]
+    return rows[:max_chapters]
 
 
 # ====================================================================== keep or not
@@ -250,6 +258,9 @@ def line(res: dict) -> str:
 
 # ====================================================================== the run step
 def rounds_of(settings: dict) -> int:
+    from . import weak_scenes  # noqa: PLC0415
+    if weak_scenes.enabled(settings):  # 🎯 the weakest scenes: default 1 round, at most 2
+        return weak_scenes.rounds_of(settings)
     n = (settings or {}).get("improve_rounds", ROUNDS_DEFAULT)
     return n if isinstance(n, int) and not isinstance(n, bool) and 1 <= n <= ROUNDS_MAX else ROUNDS_DEFAULT
 
@@ -338,25 +349,52 @@ def _run(runner, run, st, mem):
                 skip.add(c["number"])
         crafts = runner._review.editor.crafts(pid, branch)
         beta = _latest_beta(app, pid, branch)
-        todo = targets(app.store, pid, branch, chapters, rep, beta, crafts, skip)
+        scenes = weak_scenes.enabled(run.get("settings"))  # 🎯 the weakest scenes (default), else whole chapters
+        if scenes:
+            mem["mode"] = "scenes"
+            chosen = weak_scenes.pick(runner, run, chapters, rep, beta, crafts, skip)
+            todo = chosen["picks"]
+        else:
+            todo = targets(app.store, pid, branch, chapters, rep, beta, crafts, skip)
         n = int(mem.get("done") or 0) + 1
         if not todo:
             st["message"] = "Nothing left to fix" if n > 1 else "Nothing to fix: the reviewers, the editor and " \
                                                                 "Akọwe's checks found nothing concrete"
             runner.event(run, "note", f"🔁 Improve pass: {st['message']}", step="improve", code="IMPROVE_NOTHING")
             return
-        st["message"] = f"Round {n} of {rounds}: the writer reworks chapter(s) " + ", ".join(
-            str(t["number"]) for t in todo)
+        if scenes:
+            st["message"] = f"Round {n} of {rounds}: the writer rewrites the {len(todo)} weakest scene(s) (" + \
+                ", ".join(t["label"] for t in todo) + ")"
+            st["items"] = [{"id": f"r{n}c{t['chapter']['number']}s{t['scene']['n']}", "label": f"Round {n}: "
+                            f"{t['label']}", "state": "running", "notes": len(t["items"])} for t in todo]
+        else:
+            st["message"] = f"Round {n} of {rounds}: the writer reworks chapter(s) " + ", ".join(
+                str(t["number"]) for t in todo)
+            st["items"] = [{"id": f"r{n}c{t['number']}", "label": f"Round {n}: chapter {t['number']}",
+                            "state": "running", "notes": len(t["findings"])} for t in todo]
         run["phase"] = st["message"]
-        st["items"] = [{"id": f"r{n}c{t['number']}", "label": f"Round {n}: chapter {t['number']}", "state": "running",
-                        "notes": len(t["findings"])} for t in todo]
         runner.save(run)
-        cands = _propose(runner, run, todo, n, rounds, len(chapters))
+        refused = []
+        if scenes:
+            cands, refused = weak_scenes.propose(runner, run, chosen, len(chapters))
+        else:
+            cands = _propose(runner, run, todo, n, rounds, len(chapters))
+        fit = within_budget(chapters, cands, app.store, pid, run.get("settings"))  # 📏 the round keeps the length
+        if scenes:  # 🎯 a chapter whose rewritten scenes would push the book past its cap keeps its text
+            ok = {c["chapter_id"] for c in fit}
+            refused += [{"label": lb, "code": "BOOK_TOO_LONG"} for c in cands if c["chapter_id"] not in ok
+                        for lb in c.get("scenes") or []]
+        cands = fit
         if not cands:
             mem["done"] = n
-            mem["rounds"].append({"round": n, "chapters": [t["number"] for t in todo], "changed": 0,
+            mem["rounds"].append({"round": n, "chapters": sorted({t["chapter"]["number"] if scenes else t["number"]
+                                                                  for t in todo}), "changed": 0,
                                   "before": agg.get("overall"), "after": None, "keep": False,
-                                  "why": "the writer's changes did not match the text word for word"})
+                                  **({"scenes": [], "refused": refused} if scenes else {}),
+                                  "why": "the rewritten scenes did not pass Akọwe's checks (" + ", ".join(
+                                      weak_scenes.REJECT_WORDS.get(r["code"], r["code"]) for r in refused) + ")"
+                                  if scenes and refused else "the writer's changes did not match the text word for "
+                                  "word"})
             runner.event(run, "note", f"🔁 Improve pass round {n}: the writer's changes could not be applied; the "
                          "book stays as it was", step="improve", code="IMPROVE_UNRESOLVED")
             break
@@ -379,20 +417,27 @@ def _run(runner, run, st, mem):
         row = {"round": n, "chapters": [c["number"] for c in cands], "changed": sum(c["applied"] for c in cands),
                "before": res["before"], "after": res["after"], "keep": res["keep"], "why": res["why"],
                "drops": res["drops"]}
+        if scenes:
+            row.update(scenes=[lb for c in cands for lb in c["scenes"]], refused=refused)
         mem["rounds"].append(row)
         mem.setdefault("first", res["before"])
         for it in st.get("items") or []:
             it["state"] = "done" if res["keep"] else "skipped"
-        runner.event(run, "improve", line(res) + f" — round {n}, chapter(s) {', '.join(map(str, row['chapters']))}",
+        said = weak_scenes.line(res, row["scenes"]) if scenes else line(res)
+        runner.event(run, "improve", said + f" — round {n}, chapter(s) {', '.join(map(str, row['chapters']))}",
                      step="improve", code="IMPROVE_KEPT" if res["keep"] else "IMPROVE_NOT_KEPT")
         if not res["keep"]:
-            _repeat_fixes(runner, run, st, mem, chapters, cands, n)
+            if not scenes:  # 📏 a whole-chapter round keeps its safe repeat fixes; scene rewrites are all or nothing
+                _repeat_fixes(runner, run, st, mem, chapters, cands, n)
             break
+        if scenes:  # the rewritten chapters wait for their review (a resume finds them)
+            weak_scenes.remember(app.store, pid, branch, cands)
         # what to approve is kept for a resume: numbers in the run, the reviewers' re-read with the book's data
         app.store.set_setting(RESCORE_KEY.format(pid=pid, branch=branch), {"reviews": again.get("reviews") or [],
                                                                           "round": n, "at": _now()})
-        mem["approving"] = {"chapters": [{k: c[k] for k in ("chapter_id", "number", "record_id", "version")}
-                                         for c in cands], "round": n}
+        mem["approving"] = {"chapters": [{k: c[k] for k in ("chapter_id", "number", "record_id", "version",
+                                                            "applied")} for c in cands], "round": n,
+                            **({"scenes": True} if scenes else {})}
         runner.save(run)
         _approve_kept(runner, run, st, mem)
     _finish(runner, run, st, mem)
@@ -439,6 +484,28 @@ def _propose(runner, run, todo, n, rounds, total) -> list[dict]:
                                    passage=(by_f.get(a["finding_id"]) or {}).get("passage") or "")
                               for a in res["applied"]]})
     return out
+
+
+def within_budget(chapters: list[dict], cands: list[dict], store, pid: str, settings: dict | None) -> list[dict]:
+    """📏 The length guard over a whole round (length_guard.py; each rewrite was already held to its own budget):
+    the reworked chapters that grow the book past its cap are left out, the ones that add the most words first."""
+    from . import length_guard, lengths  # noqa: PLC0415
+    if not cands or not length_guard.enabled(settings):
+        return cands
+    try:
+        target = lengths.of_book(store, pid)["book_words"]
+    except Exception:  # noqa: BLE001
+        return cands
+    old = {c["chapter_id"]: length_guard.words(c["text"]) for c in chapters}
+    total = sum(old.values())
+    keep = list(cands)
+
+    def grow(c):
+        return length_guard.words(c["text"]) - old.get(c["chapter_id"], length_guard.words(c["text"]))
+    while keep and sum(grow(c) for c in keep) > 0 and \
+            total + sum(grow(c) for c in keep) > target * length_guard.BOOK_CAP:
+        keep.remove(max(keep, key=grow))
+    return keep
 
 
 # ====================================================================== 📏 a round not kept: its repeat fixes alone
@@ -565,7 +632,10 @@ def _approve_kept(runner, run, st, mem):
             continue
         if head["version"] == c["version"]:
             try:
-                ed.apply(run["principal"], pid, branch, c["record_id"], c["version"], c.get("accept"), how="run")
+                if ap.get("scenes"):  # 🎯 the rewritten weakest scenes become the new draft
+                    weak_scenes.save(runner, run, c)
+                else:
+                    ed.apply(run["principal"], pid, branch, c["record_id"], c["version"], c.get("accept"), how="run")
             except AkoweError as exc:
                 runner.event(run, "note", f"⚠️ Improve pass: chapter {c['number']}'s rewrite could not be saved "
                              f"({exc.code}); its text stays as it was", step="improve", code="IMPROVE_APPLY_FAILED")
@@ -587,6 +657,7 @@ def _approve_kept(runner, run, st, mem):
             # the reviewer did not pass the reworked chapter: its approved text comes back (never left half-done)
             try:
                 ref = ed.restore(run["principal"], pid, branch, c["record_id"], old, "IMPROVE_NOT_APPROVED")
+                runner._made(run, ref)  # noqa: SLF001 - Akọwe's own text put back, not a hand edit
                 runner._approve(run, ref, why="the improve pass's rewrite was not approved by the reviewer: the "
                                               "approved text is put back (unchanged)")
             except AkoweError as exc2:
@@ -643,7 +714,12 @@ def _finish(runner, run, st, mem):
     mem.update(before=first, after=final, kept=bool(kept), last_try=rs[-1].get("after"))
     res = {"before": first, "after": final if kept else rs[-1].get("after"), "keep": bool(kept),
            "why": rs[-1].get("why")}
-    mem["line"] = line(res) + (f" · {len(rs)} round(s)" if len(rs) > 1 else "") + repeat_line(mem)
+    if mem.get("mode") == "scenes":  # 🎯 "Rewrote 3 weakest scenes (ch1 opening, …): 7.9 → 8.4 (kept)"
+        labels = [lb for r in (kept or rs[-1:]) for lb in r.get("scenes") or []]
+        mem["scenes"] = labels
+        mem["line"] = weak_scenes.line(res, labels, len(rs))
+    else:
+        mem["line"] = line(res) + (f" · {len(rs)} round(s)" if len(rs) > 1 else "") + repeat_line(mem)
     st["message"] = mem["line"]
     run.setdefault("report", {})["improve"] = mem["line"]
     try:  # the report says both numbers too
@@ -654,5 +730,8 @@ def _finish(runner, run, st, mem):
             if (run.get("report") or {}).get("polish"):  # 📏 a remade report keeps the chapter polish's line
                 rep["polish"] = run["report"]["polish"]
             rp._save(run["project_id"], run["branch_id"], rep)  # noqa: SLF001
+            if not rep.get("doctor"):  # 🩺 and the plan check's line and notes (both improve modes remake it)
+                from . import story_doctor  # noqa: PLC0415
+                story_doctor.to_report(runner, run, rep)
     except Exception:  # noqa: BLE001 - a line in the report never breaks the run
         log.exception("could not add the improve line to the report")

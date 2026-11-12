@@ -12,6 +12,7 @@ import * as WRT from './writers.js';  // 🏆 who writes best · 🤫 hide the t
 import { maybeStartTour, replayTour } from './tour.js';  // 🧭 the short guided tour of My books (first visit; ❓ Help replays it)
 import * as RP from './run-plan.js';  // ⏱ 3d estimate · 📊 3e usage meter + ⏰ start later · 📋 6c paste starter sheet
 import { originalityCard } from './originality.js';  // ✨ #20 originality and "sounds like AI" check
+import { magicCard, magicFields, magicSummary } from './magic.js';  // ✨ magic rules that are kept (magic_rules.py)
 import { forgeRoute } from './forge.js';  // 🗂 B5 Character Forge dossiers (characters, items, places, magic)
 import { viewPictures } from './pictures.js';  // 🖼 B3 chapter/scene pictures and the map
 import { viewTrailer } from './trailer.js';  // 🎞 B2 the book trailer (AutoInjector 🎬 Video)
@@ -7191,13 +7192,14 @@ async function viewWorld(main) {
   const prog = h('div', { 'aria-live': 'polite' });
   const rulesBox = h('section', { class: 'card world-card', 'aria-labelledby': 'wr-h', 'data-testid': 'rules-card' });
   const texBox = h('section', { class: 'card world-card', 'aria-labelledby': 'wt-h', 'data-testid': 'texture-card' });
-  main.append(msg, prog, rulesBox, texBox);
+  const magic = magicCard({ h, clear, api, bpath, toast, infoTip, uid, S, problemBox, toProblem, stateBox, loadingState });
+  main.append(msg, prog, rulesBox, magic.el, texBox);
   let info;
   const where = { book: S.project.name, step: 'Story rules and world' };
   const load = async () => {
     try { info = await api('GET', bpath('/review/world')); }
     catch (e) { clear(msg).appendChild(problemBox(toProblem(e, where), { retry: load }, 'Could not load the story rules')); return; }
-    drawRules(); drawTexture();
+    drawRules(); drawTexture(); magic.refresh();
   };
   const ai = async (what, body, label) => {
     clear(msg);
@@ -7227,7 +7229,8 @@ async function viewWorld(main) {
           h('p', null, h('strong', null, r.text), r.status === 'retired' ? h('span', { class: 'muted small' }, ' (retired)') : null,
             (lintBy[r.id] || []).map(p => [' ', hazard({ code: 'RULE_NOT_BOUNDED', message: p.message }, {}, { small: true })])),
           h('p', { class: 'small' }, h('span', { class: 'muted' }, 'Limits: '), r.scope || h('em', { class: 'muted' }, 'none stated'),
-            r.stated_by ? [h('span', { class: 'muted' }, ' · stated by '), r.stated_by] : null, r.source ? [h('span', { class: 'muted' }, ' · from '), r.source] : null)))));
+            r.stated_by ? [h('span', { class: 'muted' }, ' · stated by '), r.stated_by] : null, r.source ? [h('span', { class: 'muted' }, ' · from '), r.source] : null),
+          magicSummary(h, r.magic)))));
       }
       const props = (e.proposals || {}).items || [];
       if (props.length) rulesBox.appendChild(proposalBox(e, props, catLabel));
@@ -7270,6 +7273,7 @@ async function viewWorld(main) {
       const sc = h('textarea', { id: `${k}-scope`, rows: '2', 'data-k': 'scope' }); sc.value = (r || {}).scope || '';
       const so = h('input', { type: 'text', id: `${k}-source`, 'data-k': 'source' }); so.value = (r || {}).source || '';
       const sb = h('input', { type: 'text', id: `${k}-stated_by`, 'data-k': 'stated_by' }); sb.value = (r || {}).stated_by || '';
+      const mg = magicFields({ h, uid, tipLabel }, r, F.magic);  // ✨ an ability, spell or device: its checkable rule
       const st = h('select', { id: `${k}-status`, 'data-k': 'status' }, h('option', { value: 'active', selected: (r || {}).status !== 'retired' }, 'In use'), h('option', { value: 'retired', selected: (r || {}).status === 'retired' }, 'Retired (kept for history)'));
       const fs = h('fieldset', { class: 'field rule-edit', 'data-id': (r || {}).id || '' }, h('legend', null, 'Rule'),
         h('div', { class: 'grid-2' }, h('div', { class: 'field' }, tipLabel(cat.id, 'Kind of rule', F.categories.map(c => `${c.label}: ${c.help}`).join(' ')), cat),
@@ -7278,8 +7282,8 @@ async function viewWorld(main) {
         h('div', { class: 'field' }, tipLabel(sc.id, FL.scope.label, FL.scope.help), sc),
         h('div', { class: 'grid-2' }, h('div', { class: 'field' }, tipLabel(so.id, FL.source.label, FL.source.help), so),
           h('div', { class: 'field' }, tipLabel(sb.id, FL.stated_by.label, FL.stated_by.help), sb)),
-        h('button', { type: 'button', class: 'small link', onclick: () => fs.remove() }, 'Remove this rule'));
-      fs.collect = () => Object.assign({ id: fs.dataset.id }, Object.fromEntries([...fs.querySelectorAll('[data-k]')].map(x => [x.dataset.k, x.value.trim()])));
+        mg.el, h('button', { type: 'button', class: 'small link', onclick: () => fs.remove() }, 'Remove this rule'));
+      fs.collect = () => Object.assign({ id: fs.dataset.id, magic: mg.collect() }, Object.fromEntries([...fs.querySelectorAll('[data-k]')].map(x => [x.dataset.k, x.value.trim()])));
       list.appendChild(fs);
     };
     ((e && e.rules) || []).forEach(row);
@@ -8246,19 +8250,26 @@ function qualityTrendCard(tr, testid, href) {
     tr.improve && tr.improve.before != null ? h('p', { class: 'muted' }, `🔁 Final improve pass: ${tr.improve.before} → ${tr.improve.after}${tr.improve.kept ? ' (kept)' : ' (not kept)'}`) : null,
     h('p', { class: 'muted' }, '🧠 Your weakest areas become lessons for your next book’s planners and writer.', href ? [' ', h('a', { href }, '📊 Open the report')] : null));
 }
-/** 🔁 "Improve until better" (run settings improve_pass, improve_rounds): on by default, 2 rounds */
+/** 🔁 "Improve until better" (run settings improve_pass, improve_mode, improve_rounds): on by default — 🎯 the 3
+ * weakest scenes, 1 round (weak_scenes.py); "whole chapters" is the older way (2 rounds by default) */
 function improvePassSwitch(prefix) {
   const id = `${prefix}-improve`;
   const box = h('input', { type: 'checkbox', role: 'switch', id, 'data-testid': id, checked: true, 'aria-describedby': `${id}-hint` });
   const state = h('span', { class: 'ip-state', 'aria-hidden': 'true' }, 'On');
+  const mode = h('select', { id: `${id}-mode`, 'data-testid': `${id}-mode`, 'aria-label': 'What to rewrite' },
+    h('option', { value: 'scenes', selected: true }, '🎯 The 3 weakest scenes (recommended)'),
+    h('option', { value: 'chapters' }, 'Whole chapters (the older way)'));
   const rounds = h('select', { id: `${id}-rounds`, 'data-testid': `${id}-rounds`, 'aria-label': 'How many rounds at most' },
-    [1, 2, 3].map(n => h('option', { value: String(n), selected: n === 2 }, `${n} round${n > 1 ? 's' : ''} at most`)));
-  box.addEventListener('change', () => { state.textContent = box.checked ? 'On' : 'Off'; rounds.disabled = !box.checked; });
+    [1, 2].map(n => h('option', { value: String(n), selected: n === 1 }, `${n} round${n > 1 ? 's' : ''} at most`)));
+  box.addEventListener('change', () => { state.textContent = box.checked ? 'On' : 'Off'; rounds.disabled = mode.disabled = !box.checked; });
   const el = h('fieldset', { class: 'field ip-switch' }, h('legend', null, '🔁 Improve until better'),
     h('div', { class: 'check-row' }, box, h('label', { for: id }, h('strong', null, 'At the end, fix what the reviewers and readers found — keep it only if the score goes up'), ' ', state)),
-    h('div', { class: 'row' }, rounds),
-    h('p', { class: 'hint', id: `${id}-hint` }, 'On (recommended): when the book is made, the reviewers’ “What to try next”, the beta readers’ top fixes, the editor’s major notes (also of chapters you approved anyway) and Akọwe’s own checks (clock and tide times, repeated phrases, too-simple sentences) go to the chapters that need them most. The same AIs read the book again; the change is kept only if the score went up and nothing dropped — otherwise your book stays exactly as it was. The run window shows both scores. About 5 to 10 more AI answers per round.'));
-  return { el, box, apply(body) { if (!box.checked) body.improve_pass = false; else if (rounds.value !== '2') body.improve_rounds = Number(rounds.value); } };
+    h('div', { class: 'row' }, mode, rounds),
+    h('p', { class: 'hint', id: `${id}-hint` }, 'On (recommended): when the book is made, every complaint — the reviewers’ quoted weak spots, the beta readers’ top fixes, the editor’s major notes (also of chapters you approved anyway) and Akọwe’s own checks (clock and tide times, repeated phrases) — is matched to its scene, and only the 3 weakest scenes are rewritten (never longer than 10% more words; your own chapters, names, locked details and the ending’s outcome stay). The same AIs read the book again; the change is kept only if the score went up and nothing dropped — otherwise your book stays exactly as it was. The run window shows both scores. About 6 more AI answers per round.'));
+  return { el, box, apply(body) {
+    if (!box.checked) { body.improve_pass = false; return; }
+    if (mode.value === 'chapters') { body.improve_mode = 'chapters'; body.improve_rounds = Number(rounds.value); } else if (rounds.value !== '1') body.improve_rounds = Number(rounds.value);
+  } };
 }
 /** 📏 "Polish each chapter's sentences" (run setting chapter_polish): on by default */
 function chapterPolishSwitch(prefix) {
@@ -8270,6 +8281,30 @@ function chapterPolishSwitch(prefix) {
     h('div', { class: 'check-row' }, box, h('label', { for: id }, h('strong', null, 'Polish a chapter when it reads too simply or repeats earlier chapters'), ' ', state)),
     h('p', { class: 'hint', id: `${id}-hint` }, 'On (recommended): as soon as a chapter is written, Akọwe checks its reading level for your readers and the phrases it repeats from earlier chapters (no AI). Only when needed, the writer polishes it once: joins some short sentences and says repeated phrases in a new way — never the story, the facts, the names, the numbers or the dialogue. The polish is kept only if the checks got better; otherwise the chapter stays as written. The same switch lets the final improve pass keep its repeated-phrase fixes when the rest of its changes are not kept. At most one more AI answer per chapter.'));
   return { el, box, apply(body) { if (!box.checked) body.chapter_polish = false; } };
+}
+/** 🩺 Story doctor (story_doctor) with its rounds and target, and 🗣 distinct voice cards (voice_contrast): both on */
+function storyDoctorSwitch(prefix) {
+  const id = `${prefix}-story-doctor`;
+  const box = h('input', { type: 'checkbox', role: 'switch', id, 'data-testid': id, checked: true, 'aria-describedby': `${id}-hint` });
+  const state = h('span', { class: 'sd-state', 'aria-hidden': 'true' }, 'On');
+  const rounds = h('select', { id: `${id}-rounds`, 'data-testid': `${id}-rounds`, 'aria-label': 'Revisions at most' },
+    [1, 2, 3].map(n => h('option', { value: String(n), selected: n === 2 }, `${n} revision${n > 1 ? 's' : ''} at most`)));
+  const target = h('select', { id: `${id}-target`, 'data-testid': `${id}-target`, 'aria-label': 'Target score' },
+    ['8', '8.5', '9'].map(v => h('option', { value: v, selected: v === '8.5' }, `aim for ${v}/10`)));
+  box.addEventListener('change', () => { state.textContent = box.checked ? 'On' : 'Off'; rounds.disabled = target.disabled = !box.checked; });
+  const vid = `${prefix}-voice-contrast`;
+  const vbox = h('input', { type: 'checkbox', role: 'switch', id: vid, 'data-testid': vid, checked: true, 'aria-describedby': `${vid}-hint` });
+  const el = h('fieldset', { class: 'field sd-switch' }, h('legend', null, '🩺 Plan check'),
+    h('div', { class: 'check-row' }, box, h('label', { for: id }, h('strong', null, 'Story doctor: check and mend the plan before chapter 1'), ' ', state)),
+    h('div', { class: 'row' }, rounds, target),
+    h('p', { class: 'hint', id: `${id}-hint` }, 'On (recommended): when the plan (premise, main plot, chapter outline) is made, every working AI scores it on the same points as the book report — with quotes and a fix for each weakness. If it scores under your aim, the outline is revised with their fixes and scored again; the best plan is kept. Your own idea and your lock list are never replaced, and an outline you wrote yourself is only scored. The run window says e.g. “🩺 Plan scored 7.4 → 8.6 after 1 revision”. About 3 to 8 more AI answers.'),
+    h('div', { class: 'check-row' }, vbox, h('label', { for: vid }, h('strong', null, '🗣 Make sure every character sounds different'))),
+    h('p', { class: 'hint', id: `${vid}-hint` }, 'On (recommended): Akọwe compares the voice cards (how each character talks) without AI; only when two sound alike or one is too thin, the AI makes them distinct in one answer. Cards you wrote yourself are never changed.'));
+  return { el, apply(body) {
+    if (!box.checked) body.story_doctor = false;
+    else { if (rounds.value !== '2') body.doctor_rounds = Number(rounds.value); if (target.value !== '8.5') body.doctor_target = Number(target.value); }
+    if (!vbox.checked) body.voice_contrast = false;
+  } };
 }
 /** ✍ Chapter 1: two first pages, keep the better one (first_page) and rewrite chapter 1 last (opening_pass): both on */
 function chapterOneSwitch(prefix) {
@@ -8342,6 +8377,7 @@ async function renderMakeSetup() {
   const ipw = improvePassSwitch('mb');  // 🔁 the final improve pass (improve_pass.py), on by default
   const cpo = chapterPolishSwitch('mb');  // 📏 the chapter polish (chapter_polish.py), on by default
   const c1 = chapterOneSwitch('mb');  // ✍ two first pages + chapter 1 rewritten last (first_page.py, opening_pass.py)
+  const sdw = storyDoctorSwitch('mb');  // 🩺 the plan check before chapter 1 + 🗣 distinct voice cards, both on
   const wr = WR.makeSetupSwitch(s7c());  // 🗳 Use the writers' room for the big twists (writers_room.py), off by default
   const ck = checkersField('mb');  // 🔎 PR #117: how many AIs check for mistakes (all by default)
   fields.checkers = ck.sel;
@@ -8381,7 +8417,7 @@ async function renderMakeSetup() {
         h('div', { class: 'field' }, h('label', { for: 'mb-slot' }, 'Which AI'), slot, h('span', { class: 'hint' }, 'Automatic uses whichever AI is ready.'))),
       lengthBox,
       h('div', { class: 'field' }, h('label', { for: 'mb-idea' }, 'Your idea (optional)'), idea, ideaWarn, locksBox),
-      h('div', { class: 'field' }, h('label', { for: 'mb-pen-name' }, 'Pen name (optional)'), penName, h('span', { class: 'hint' }, 'Printed on the title page and cover. The AI never invents one: empty = the pen name you typed last, or none.')), cf.el, pipe.el, s7.el, fb.el, hp.el, cpo.el, ipw.el, c1.el, wr.el, ck.el, pics.el, ccf.el),
+      h('div', { class: 'field' }, h('label', { for: 'mb-pen-name' }, 'Pen name (optional)'), penName, h('span', { class: 'hint' }, 'Printed on the title page and cover. The AI never invents one: empty = the pen name you typed last, or none.')), cf.el, pipe.el, s7.el, sdw.el, fb.el, hp.el, cpo.el, ipw.el, c1.el, wr.el, ck.el, pics.el, ccf.el),
     later.el, err, modelTip(), h('div', { class: 'form-actions' }, startAll, startSet));
   form.insertBefore(h('div', { class: 'row mb-paste-row' }, paste, h('span', { class: 'small muted' }, 'Planned your book with an AI? Paste its starter sheet to fill these settings.')), form.querySelector('.mb-quick'));
   // ⏱ 3d: time, AI answers per AI and usage limits for exactly these settings; 📊 3e the usage meter per AI
@@ -8414,6 +8450,7 @@ async function renderMakeSetup() {
     ipw.apply(body);  // 🔁 the final improve pass (sent only when changed)
     cpo.apply(body);  // 📏 the chapter polish (sent only when switched off)
     c1.apply(body);  // ✍ chapter 1: two first pages / rewritten last (sent only when switched off)
+    sdw.apply(body);  // 🩺 story doctor / 🗣 voice cards (sent only when changed)
     wr.apply(body);  // 🗳 the writers' room for the big twists (only when switched on)
     ck.apply(body);  // 🔎 how many AIs check for mistakes (sent only when not the default)
     one.apply(body);  // PR #122: when only one AI works (sent only when not the default)
@@ -8776,11 +8813,13 @@ function runReportBox(r) {
     // ✍ the end-of-book "sounds like a person" pass: the score now and with the suggested rewrites
     rp && rp.human ? h('p', { 'data-testid': 'mb-human' }, rp.human) : null,
     // ✍ chapter 1: the first page picked from two, and chapter 1 rewritten with the whole book in view
+    rp && rp.doctor ? h('p', { 'data-testid': 'mb-doctor' }, rp.doctor) : null,  // 🩺 the plan's score before chapter 1
     r.first_page && r.first_page.line ? h('p', { 'data-testid': 'mb-first-page' }, r.first_page.line) : null,
     rp && rp.opening ? h('p', { 'data-testid': 'mb-opening' }, rp.opening) : null,
     // 🔁 the final improve pass: both scores; 📈 this book against your last books
     rp && rp.polish ? h('p', { 'data-testid': 'mb-polish' }, rp.polish) : null,  // 📏 reading level before → after the chapter polish
     rp && rp.improve ? h('p', { 'data-testid': 'mb-improve' }, rp.improve) : null,
+    rp && rp.length ? h('p', { 'data-testid': 'mb-length' }, rp.length) : null,  // 📏 the book's length against its target
     rp && rp.trend ? h('p', { 'data-testid': 'mb-trend' }, '📈 ', rp.trend) : null,
     CK.recordCard(s7c(), { compact: true, testid: 'mb-ck-record' }));  // 📊 how good each checker was (folded)
 }
@@ -9282,7 +9321,8 @@ async function viewReport(main) {
         h('div', { class: 'kpi' }, h('strong', null, `${agg.reviewers || 0}`), h('span', { class: 'small' }, `AI reviewer(s), ${agg.independent || 0} independent`)),
         h('div', { class: 'kpi' }, h('strong', null, `${(wd.total || 0).toLocaleString()}`), h('span', { class: 'small' }, `words of about ${(wd.target || 0).toLocaleString()} (${wd.length || ''})`))),
       (rep.story_kind || {}).line ? h('p', { class: 'small', 'data-testid': 'rp-story-kind' }, `📚 ${rep.story_kind.line}`) : null,
-      (rep.originality || {}).line ? h('p', { class: 'small', 'data-testid': 'rp-originality' }, rep.originality.line, h('span', { class: 'muted' }, ' (details: ✨ Originality check below)')) : null));
+      (rep.originality || {}).line ? h('p', { class: 'small', 'data-testid': 'rp-originality' }, rep.originality.line, h('span', { class: 'muted' }, ' (details: ✨ Originality check below)')) : null,
+      (rep.magic || {}).line ? h('p', { class: 'small', 'data-testid': 'rp-magic' }, rep.magic.line, (rep.magic.problems || []).length ? h('span', { class: 'muted' }, ` — ${rep.magic.problems[0]}`) : null) : null));
     if ((agg.dimensions || []).some(d => d.n)) {
       const t = h('table', { class: 'rp-table', 'data-testid': 'rp-scores' }, h('caption', { class: 'small' }, 'Scores from 1 to 10. Median = the middle score of the reviewers. ⚠️ = they are 3 or more points apart.'),
         h('thead', null, h('tr', null, h('th', null, 'Dimension'), h('th', null, 'Median'), h('th', null, 'Range'), reviews.map(r => h('th', null, r.name, r.independent && !(r.calibration || {}).flagged ? '' : ' ⚠️')))),
@@ -9301,8 +9341,10 @@ async function viewReport(main) {
         h('p', null, h('strong', null, r.name), r.independent ? '' : h('span', { class: 'words-warn small' }, ' ⚠️ not independent'), (r.calibration || {}).flagged ? h('span', { class: 'words-warn small', 'data-testid': 'rp-flagged' }, ' ⚠️ not backed by quotes') : '', ': ', r.summary || ''),
         (r.trust_notes || []).length ? h('ul', { class: 'small', 'data-testid': 'rp-trust' }, r.trust_notes.map(n => h('li', { class: /^⚠️/.test(n) ? 'words-warn' : 'muted' }, n))) : null))));
     }
+    if (rep.doctor) holder.appendChild(h('p', { class: 'card small', 'data-testid': 'rp-doctor' }, rep.doctor));
     if (rep.opening) holder.appendChild(h('p', { class: 'card small', 'data-testid': 'rp-opening' }, rep.opening));
     if (rep.polish) holder.appendChild(h('p', { class: 'card small', 'data-testid': 'rp-polish' }, rep.polish));
+    if (rep.length) holder.appendChild(h('p', { class: 'card small', 'data-testid': 'rp-length' }, rep.length));
     if (rep.improve) holder.appendChild(h('p', { class: 'card small', 'data-testid': 'rp-improve' }, rep.improve));
     if (ov.trend && ov.trend.line) holder.appendChild(qualityTrendCard(ov.trend, 'rp-trend', null));
     holder.appendChild(h('section', { class: 'card', 'data-testid': 'rp-next' }, h('h2', null, '🧭 What to try next'),

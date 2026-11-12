@@ -524,7 +524,7 @@ async function testClaudeRowsRead() {
     assert(pr.assistant.count === 2 && !/sidebar/.test(String(pr.assistant.selector)), `the page check counts Claude's 2 replies, not the sidebar (${JSON.stringify(pr.assistant)})`);
     // the PC's learned selector — the sidebar's recent chats — is never read as a reply
     const side = await page.evaluate(buildReadScript("claude", { assistant: 'div[data-testid="sidebar-recents"]', assistantStrict: true }));
-    assert(/Then the beans/.test(side.text) && side.overrideIgnored === true, `a learned "reply" selector that names the sidebar is passed over (${JSON.stringify(side.text.slice(0, 40))})`);
+    assert(/Then the beans/.test(side.text) && side.overrideIgnored === true && side.overrideHit === false, `a learned "reply" selector that names the sidebar is passed over (${JSON.stringify(side.text.slice(0, 40))})`);
     const sideProbe = await page.evaluate(buildProbeScript("claude", { assistant: 'div[data-testid="sidebar-recents"]' }));
     assert(sideProbe.assistant.overrideMisses === true && sideProbe.assistant.builtinCount === 2, `the page check says the built-ins find the reply instead (${JSON.stringify(sideProbe.assistant)})`);
   });
@@ -534,6 +534,8 @@ async function testClaudeRowsTaughtSelectors() {
   await withFixture("claude-rows.html", async (page) => {
     const r = await page.evaluate(buildReadScript("claude", LOG_OVERRIDES));
     assert(/Then the beans/.test(r.text) && !/And after that/.test(r.text), `with the saved Prose selector (it matches the user's rows too) the reply is Claude's latest (${JSON.stringify(r.text.slice(0, 60))})`);
+    // 2026-11-12: here the saved Prose selector itself reads the reply — the one read result that proves it still fits
+    assert(r.overrideHit === true && !r.overrideIgnored, `the read says the saved reader found the reply itself (overrideHit) (${r.overrideHit})`);
     const pr = await page.evaluate(buildProbeScript("claude", LOG_OVERRIDES));
     assert(pr.assistant.count === 2 && pr.assistant.selector, `the page check finds replies with those overrides (was "replies: 0, replySelector: null" on the PC) (${JSON.stringify(pr.assistant)})`);
     // the user's latest row comes AFTER Claude's latest: nothing to read yet (never the old reply, never the user's)

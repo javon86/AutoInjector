@@ -214,7 +214,8 @@ def test_an_improve_round_not_kept_still_keeps_its_safe_repeat_fixes(tmp_path):
     fake.rewrite_script = [_repeat_and_more] * 3
     fake.book_review_script = [None, None, _worse_review, _worse_review]
     app = make_app(tmp_path, fake)
-    run = run_book(app, {"length": "short_story", "opening_pass": False, "first_page": False, "improve_rounds": 1})
+    run = run_book(app, {"length": "short_story", "opening_pass": False, "first_page": False, "improve_rounds": 1,
+                         "improve_mode": "chapters"})
     assert run["status"] == "done", run.get("problem")
     mem = app.autobook.get(run["id"])["improve"]
     assert mem["kept"] is False and mem["repeat_fixes"]["chapters"] == [3], mem
@@ -231,6 +232,7 @@ def test_switched_off_an_improve_round_not_kept_changes_nothing(tmp_path):
     fake.book_review_script = [None, None, _worse_review, _worse_review]
     app = make_app(tmp_path, fake)
     run = run_book(app, {"length": "short_story", "opening_pass": False, "first_page": False, "improve_rounds": 1,
+                         "improve_mode": "chapters",
                          "chapter_polish": False})
     assert run["status"] == "done", run.get("problem")
     mem = app.autobook.get(run["id"])["improve"]

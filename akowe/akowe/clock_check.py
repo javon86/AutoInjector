@@ -32,6 +32,8 @@ from __future__ import annotations
 import logging
 import re
 
+from . import dialogue
+
 log = logging.getLogger("akowe.clock_check")
 
 PERIOD = 745          # minutes between two high waters (12 h 25 min)
@@ -45,13 +47,16 @@ MAX_FINDINGS = 20
 DAY = 1440
 
 LABELS = {"tide_direction": "The tide runs the wrong way", "tide_times": "Tide times do not fit together",
-          "clock_back": "The clock runs backwards"}
+          "clock_back": "The clock runs backwards", "weekday_jump": "The days of the week do not add up",
+          "weekday_date": "A date and its weekday do not fit"}
 ADVICE = {
     "tide_direction": "Before high water the tide comes in (rises); for about six hours after it, it goes out "
                       "(falls). Change the time or the direction so they agree.",
     "tide_times": "High waters come about 12 hours 25 minutes apart (about 50 minutes later each day). Change one of "
                   "the times so they fit.",
     "clock_back": "Check the order of the times in this chapter, or make the day change (or the flashback) clear.",
+    "weekday_jump": "Count the days again: change the weekday, the date or the number of days so they agree.",
+    "weekday_date": "Two dates in the book fall on weekdays that cannot both be true: change the date or the weekday.",
 }
 WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
 _NUMS = {w: i for i, w in enumerate("zero one two three four five six seven eight nine ten eleven twelve".split())}
@@ -90,7 +95,7 @@ FLASHBACK = re.compile(r"\b(?:years (?:earlier|before|ago)|back then|long ago|th
                        r"as)|had been|remembered|used to)\b", re.I)
 _PARA = re.compile(r"\n\s*\n")
 _SENT = re.compile(r"[^.!?…]+(?:[.!?…]+[\"'”’)]*|$)", re.S)
-_QUOTED = re.compile(r"“[^”]*”|\"[^\"\n]*\"")
+_QUOTED = dialogue.FINDER   # 💬 every dialogue style (dialogue.py)
 
 
 def _clip(s: str, n: int = EXCERPT_MAX) -> str:
@@ -202,8 +207,12 @@ def extract(chapters) -> dict:
         last_times: list[int] | None = None
         last_part = None
         for par in _paragraphs(c["text"]):
-            for sent in [s.strip() for s in _SENT.findall(par) if s.strip()]:
-                nar = _QUOTED.sub(" ", sent)
+            masked = dialogue.mask(par)  # 💬 a speech over several sentences ('…. …,' she said) is dialogue too
+            for sm in _SENT.finditer(par):
+                sent = sm.group(0).strip()
+                if not sent:
+                    continue
+                nar = masked[sm.start():sm.end()]
                 if NEXT_DAY.search(nar):
                     day += 1
                     last_times, last_part = None, None
@@ -225,7 +234,7 @@ def extract(chapters) -> dict:
                     last_part = pm.group("part").lower()
                 base = {"chapter_id": c["chapter_id"], "number": c["number"], "sentence": sent, "day": day,
                         "weekday": WEEKDAYS[weekday] if weekday is not None else None,
-                        "flashback": bool(FLASHBACK.search(nar)), "dialogue": nar.strip() != sent.strip()}
+                        "flashback": bool(FLASHBACK.search(nar)), "dialogue": nar.strip() != sm.group(0).strip()}
                 hi, lo = HIGH.search(sent), LOW.search(sent)
                 if (hi or lo) and ts:
                     # the time nearest the tide word belongs to it ("high water at 18:06")
@@ -343,6 +352,7 @@ def _check(chapters) -> dict:
                 f"{hhmm(e['minutes'][0])} on the same day, with no day change between.", [_passage(prev), _passage(e)],
                 severity="minor"))
         prev = e
+    findings += calendar_findings(chapters)  # 📅 weekdays, dates and "N days later" (calendar_findings)
     seen, out = set(), []
     for f in findings:
         key = (f["check"], tuple(p["quote"] for p in f["passages"]))
@@ -353,7 +363,7 @@ def _check(chapters) -> dict:
     out = out[:MAX_FINDINGS]
     for i, f in enumerate(out):
         f["id"] = f"ck{i + 1}"
-    summary = (f"🕰️ Clock and tide: {len(out)} problem(s) — " + "; ".join(f["detail"] for f in out[:2])) if out else ""
+    summary = (f"🕰️ Clock, days and tide: {len(out)} problem(s) — " + "; ".join(f["detail"] for f in out[:2])) if out else ""
     return {"events": events, "anchors": [{k: a.get(k) for k in ("kind", "day", "weekday", "minutes", "number")}
                                           for a in anchors], "findings": out, "summary": summary}
 
@@ -402,3 +412,255 @@ def flags_for(engine, principal: str, pid: str, branch: str, rec: dict) -> list[
     except Exception:  # noqa: BLE001
         log.exception("could not check the clock of this chapter")
         return []
+
+
+# ====================================================================== 📅 weekdays, dates and "N days later"
+# The book "The Tide Ledger" had a Friday "four days later" that was not four days later, a "Sunday … the next
+# morning … Saturday" and "the second Saturday" six days after the first. Akọwe follows the stated weekdays and dates
+# and the explicit day jumps ("the next morning", "four days later", "a week later") through the narration (never the
+# dialogue, never a flashback) and flags a weekday or date stated right after a jump (in that sentence or the next
+# two) that the jump cannot reach, and two dates whose weekdays cannot both be true. A vague jump ("a few days
+# later", "weeks passed") forgets what day it is, so nothing after it is called wrong.
+MONTHS = ("january", "february", "march", "april", "may", "june", "july", "august", "september", "october",
+          "november", "december")
+_MONTH_DAYS = (31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
+_MONTH_START = [sum(_MONTH_DAYS[:i]) for i in range(12)]
+_WD = r"(?P<d>Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)"
+_MON = r"(?P<m>January|February|March|April|May|June|July|August|September|October|November|December)"
+_ORD_WORDS = {w: i + 1 for i, w in enumerate((
+    "first second third fourth fifth sixth seventh eighth ninth tenth eleventh twelfth thirteenth fourteenth "
+    "fifteenth sixteenth seventeenth eighteenth nineteenth twentieth twenty-first twenty-second twenty-third "
+    "twenty-fourth twenty-fifth twenty-sixth twenty-seventh twenty-eighth twenty-ninth thirtieth thirty-first").split())}
+_ORD = r"(?:\d{1,2}(?:st|nd|rd|th)?|" + "|".join(sorted(_ORD_WORDS, key=len, reverse=True)) + r")"
+_COUNT = {w: i for i, w in enumerate("zero one two three four five six seven eight nine ten eleven twelve thirteen "
+                                     "fourteen fifteen sixteen seventeen eighteen nineteen twenty".split())}
+_COUNT.update({"a": 1, "an": 1, "a couple of": 2, "twenty-one": 21, "thirty": 30})
+_CNT = r"(?P<n>\d{1,2}|a couple of|twenty-one|thirty|" + "|".join(sorted((w for w in _COUNT if " " not in w and
+                                                                           "-" not in w), key=len, reverse=True)) + r")"
+JUMP_NEXT = re.compile(r"\b(?:the next (?:morning|day|evening|night|afternoon)|next morning|the following (?:morning|"
+                       r"day|evening|night|afternoon)|the morning after|the day after(?! tomorrow)|by morning)\b", re.I)
+JUMP_DAYS = re.compile(r"\b" + _CNT + r"\s+(?P<u>days?|weeks?|fortnights?)\s+(?:later|afterwards?|after that|on|had "
+                       r"passed|passed|went by)\b", re.I)
+JUMP_VAGUE = re.compile(r"\b(?:(?:a few|several|some|many|few|the|those|countless)\s+(?:days|weeks|months|years)\b|"
+                        r"(?:days|weeks|months|years)\s+(?:later|passed|went by|had passed)|a (?:month|year) later|"
+                        r"months? later|the (?:week|month) (?:passed|went by)|in the days that followed|over the "
+                        r"(?:next|following) (?:days|weeks))", re.I)
+DAY_WORD = re.compile(r"\b" + _WD + r"\b(?!s\b)(?:['’]s)?")
+NOT_TODAY = re.compile(r"(?:\b(?:last|next|every|each|until|till|since|before|by|from|coming|on a|that coming|"
+                       r"the previous|the last|the next|this coming)\s+(?:the\s+)?)$", re.I)
+ORD_WD = re.compile(r"\bthe (?P<o>first|second|third|fourth|last) " + _WD + r"(?: (?:of|in) " + _MON + r")?\b", re.I)
+DATE_DM = re.compile(r"\b(?:the )?(?P<n>" + _ORD + r")(?: of)? " + _MON + r"\b", re.I)
+DATE_MD = re.compile(r"\b" + _MON + r" (?:the )?(?P<n>" + _ORD + r")\b", re.I)
+DATE_D = re.compile(r"\bthe (?P<n>\d{1,2}(?:st|nd|rd|th)|" + "|".join(
+    sorted((w for w in _ORD_WORDS if _ORD_WORDS[w] > 4), key=len, reverse=True)) + r")\b(?! (?:of|in) (?:the|a|his|"
+    r"her|their|its|my|our|your)\b)(?! (?:time|day|week|month|year|chapter|floor|step|man|woman|one|of|in|to|"
+    r"and|or|night|morning|letter|page|bell|ring|knock|try|attempt|round|lap)\b)", re.I)
+JUMP_WINDOW = 3   # sentences (the jump's own and the next two) a stated weekday or date is checked against the jump
+
+
+def _ord(w: str) -> int | None:
+    w = (w or "").lower()
+    m = re.match(r"(\d{1,2})", w)
+    if m:
+        n = int(m.group(1))
+        return n if 1 <= n <= 31 else None
+    return _ORD_WORDS.get(w)
+
+
+def _doy(month: int, dom: int) -> int | None:
+    if not 0 <= month < 12 or not 1 <= dom <= _MONTH_DAYS[month] + (1 if month == 1 else 0):
+        return None
+    return _MONTH_START[month] + dom - 1
+
+
+def _month_of(doy: int) -> int:
+    doy %= 365
+    return max(i for i in range(12) if _MONTH_START[i] <= doy)
+
+
+def _mentions(nar: str, cur_month: int | None) -> list[dict]:
+    """The weekdays and dates a narration segment states as the current day: [{at, wd, doys, text}]."""
+    out, used = [], []
+
+    def add(m, wd=None, doys=None):
+        if any(a <= m.start() < b or m.start() <= a < m.end() for a, b in used):
+            return
+        used.append((m.start(), m.end()))
+        out.append({"at": m.start(), "wd": wd, "doys": doys, "text": m.group(0)})
+    for m in ORD_WD.finditer(nar):
+        if NOT_TODAY.search(nar[:m.start()]):
+            continue
+        wd = WEEKDAYS.index(m.group("d").lower())
+        mon = MONTHS.index(m.group("m").lower()) if m.group("m") else cur_month
+        o = m.group("o").lower()
+        doys = None
+        if mon is not None:
+            if o == "last":
+                last = _MONTH_DAYS[mon]
+                doys = {_doy(mon, d) for d in range(last - 6, last + 1)}
+            else:
+                k = ("first", "second", "third", "fourth").index(o)
+                doys = {_doy(mon, d) for d in range(7 * k + 1, 7 * k + 8)}
+            doys.discard(None)
+        add(m, wd, doys or None)
+    for rx in (DATE_DM, DATE_MD):
+        for m in rx.finditer(nar):
+            n = _ord(m.group("n"))
+            d = _doy(MONTHS.index(m.group("m").lower()), n) if n else None
+            if d is not None:
+                add(m, None, {d})
+    if cur_month is not None:
+        for m in DATE_D.finditer(nar):
+            n = _ord(m.group("n"))
+            d = _doy(cur_month, n) if n else None
+            if d is not None:
+                add(m, None, {d})
+    for m in DAY_WORD.finditer(nar):
+        if NOT_TODAY.search(nar[:m.start()]):
+            continue
+        add(m, WEEKDAYS.index(m.group("d").lower()))
+    out.sort(key=lambda x: x["at"])
+    # a weekday next to a date is one day ("Friday, 9 January", "Friday the 9th")
+    merged: list[dict] = []
+    for x in out:
+        if merged and x["at"] - (merged[-1]["at"] + len(merged[-1]["text"])) <= 6 and \
+                (merged[-1]["wd"] is None) != (x["wd"] is None) and (merged[-1]["doys"] is None) != (x["doys"] is None):
+            y = merged[-1]
+            y.update(wd=y["wd"] if y["wd"] is not None else x["wd"], doys=y["doys"] or x["doys"],
+                     text=nar[y["at"]:x["at"] + len(x["text"])])
+            continue
+        merged.append(dict(x))
+    return merged
+
+
+def _jumps(nar: str) -> list[tuple[int, int | None, str]]:
+    """The day jumps of a narration segment: [(position, days or None for a vague jump, words)]."""
+    out = []
+    for m in JUMP_VAGUE.finditer(nar):
+        out.append((m.start(), None, m.group(0)))
+    for m in JUMP_DAYS.finditer(nar):
+        n = m.group("n").lower()
+        k = int(n) if n.isdigit() else _COUNT.get(n)
+        if k is None:
+            continue
+        u = m.group("u").lower()
+        k *= 14 if u.startswith("fortnight") else 7 if u.startswith("week") else 1
+        out = [j for j in out if not (j[1] is None and m.start() <= j[0] < m.end())]
+        out.append((m.start(), k, m.group(0)))
+    for m in JUMP_NEXT.finditer(nar):
+        out.append((m.start(), 1, m.group(0)))
+    out.sort()
+    return out
+
+
+def _shift(doys: set | None, n: int) -> set | None:
+    return {(d + n) % 365 for d in doys} if doys else None
+
+
+def _pair_ok(a: dict, b: dict) -> bool:
+    """Can both (dates, weekday) pairs be true in the same year (or the next one)?"""
+    for d1 in a["doys"]:
+        for d2 in b["doys"]:
+            gap = d2 - d1 if d2 >= d1 else d2 + 365 - d1
+            for g in (gap, gap + 1):  # a leap year may add a day
+                if (a["wd"] + g) % 7 == b["wd"]:
+                    return True
+    return False
+
+
+def _day_words(wd: int | None, doys: set | None) -> str:
+    bits = []
+    if wd is not None:
+        bits.append(WEEKDAYS[wd].title())
+    if doys and len(doys) == 1:
+        d = next(iter(doys))
+        mo = _month_of(d)
+        bits.append(f"{d - _MONTH_START[mo] + 1} {MONTHS[mo].title()}")
+    return " ".join(bits) or "that day"
+
+
+def calendar_findings(chapters) -> list[dict]:
+    """📅 Weekday / date contradictions in book order (findings like the clock's; no AI). Never raises."""
+    try:
+        return _calendar(chapters)
+    except Exception:  # noqa: BLE001
+        log.exception("calendar check failed")
+        return []
+
+
+def _calendar(chapters) -> list[dict]:
+    findings: list[dict] = []
+    wd: int | None = None            # the weekday of the narration's current day (stated or counted)
+    doys: set | None = None          # its possible days of the year
+    anchor = None                    # the sentence that stated the day last
+    pending = None                   # an explicit jump still waiting for a stated day: {n, left, sentence, chain}
+    pairs: list[dict] = []           # stated (dates, weekday) pairs
+    for c in _chapters(chapters):
+        for par in _paragraphs(c["text"]):
+            masked = dialogue.mask(par)
+            for sm in _SENT.finditer(par):
+                sent = sm.group(0).strip()
+                nar = masked[sm.start():sm.end()]
+                if not sent or not nar.strip():
+                    continue
+                if FLASHBACK.search(nar):
+                    if pending:
+                        pending["left"] -= 1
+                    continue
+                here = {"chapter_id": c["chapter_id"], "number": c["number"], "sentence": sent}
+                cuts = [(p, n, w) for p, n, w in _jumps(nar)]
+                bounds = [0] + [p for p, _n, _w in cuts] + [len(nar)]
+                for k in range(len(bounds) - 1):
+                    if k > 0:
+                        _p, n, words = cuts[k - 1]
+                        if n is None:
+                            wd, doys, pending = None, None, None
+                        else:
+                            wd = (wd + n) % 7 if wd is not None else None
+                            doys = _shift(doys, n)
+                            if wd is not None or doys:
+                                if pending is None:
+                                    pending = {"n": 0, "from": anchor, "words": []}
+                                pending.update(n=pending["n"] + n, left=JUMP_WINDOW)
+                                pending["words"].append(words)
+                    seg = nar[bounds[k]:bounds[k + 1]]
+                    mon = _month_of(min(doys)) if doys else None
+                    for x in _mentions(seg, mon):
+                        if pending and pending.get("from"):
+                            was = pending["from"]
+                            if x["wd"] is not None and wd is not None and x["wd"] != wd:
+                                findings.append(_finding(
+                                    "weekday_jump", f"{_day_words(was['wd'], None)} (chapter {was['number']}) and "
+                                    f"then {' and '.join(w.lower() for w in pending['words'])} makes it {WEEKDAYS[wd].title()}, but the "
+                                    f"book says {WEEKDAYS[x['wd']].title()} (chapter {c['number']}).",
+                                    [_passage(was), _passage(here)]))
+                            elif x["doys"] and doys and not (x["doys"] & doys):
+                                findings.append(_finding(
+                                    "weekday_jump", f"{_day_words(None, was['doys'])} (chapter {was['number']}) and "
+                                    f"then {' and '.join(w.lower() for w in pending['words'])} makes it {_day_words(None, doys)}, but "
+                                    f"the book says {x['text']} (chapter {c['number']}).",
+                                    [_passage(was), _passage(here)]))
+                        if x["wd"] is not None and x["doys"]:
+                            pair = {"wd": x["wd"], "doys": x["doys"], **here}
+                            prev = pairs[-1] if pairs else None
+                            if prev and not _pair_ok(prev, pair):
+                                findings.append(_finding(
+                                    "weekday_date", f"{prev['text']} (chapter {prev['number']}) and {x['text']} "
+                                    f"(chapter {c['number']}) cannot both be true: the days between them do not fit "
+                                    "the weekdays.", [_passage(prev), _passage(here)]))
+                            pair["text"] = x["text"]
+                            pairs.append(pair)
+                        implicit = x["wd"] is not None and wd is not None and x["wd"] != wd and not pending
+                        if x["wd"] is not None:
+                            wd = x["wd"]
+                        if x["doys"]:
+                            doys = set(x["doys"])
+                        elif implicit:
+                            doys = None  # the narration skipped some days without saying how many
+                        anchor = {"wd": wd, "doys": doys, **here}
+                        pending = None
+                if pending:
+                    pending["left"] = pending.get("left", JUMP_WINDOW) - 1
+                    if pending["left"] <= 0:
+                        pending = None
+    return findings

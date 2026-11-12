@@ -119,8 +119,11 @@ bridge to your home Wi-Fi, behind its key.
   failed 3 times in a row while the built-in way worked is forgotten by itself, and the log says so once ("ChatGPT's
   saved Send button was out of date and has been forgotten; the built-in one works"). The same happens when a saved
   part was seen not to fit on **3 different starts** of the app (log: `selector-stale-seen`, then `selector-retired`
-  with `starts: 3`), because one start often sees too few replies from that AI; a start where the saved part works
-  wipes that count. The page then shows one line: "Claude's page changed; AutoInjector stopped using an old saved
+  with `starts: 3`), because one start often sees too few replies from that AI. A saved part that fits some replies
+  and not others still counts: a reply it fits does not wipe the count any more (that kept the count at 1 forever);
+  only a whole start where it fits and never misses starts the count over. A saved reply part that never found a
+  single reply on **2 starts** while the built-in reader read them all is forgotten on the 2nd start (`starts: 2`;
+  `AUTOINJECTOR_STALE_RETIRE_STARTS_SURE=0` switches that back to 3). The page then shows one line: "Claude's page changed; AutoInjector stopped using an old saved
   setting that no longer fits." with **↩ Put it back** (the same as **↺ Undo** on the 🎯 card), which brings it
   back. A part you saved in the last hour is never forgotten this way. The "reads only part of each reply" warning
   is only given when there really is a saved reply part; when a site splits a reply over several blocks and there is
@@ -589,7 +592,18 @@ to a minute), so the run knows which AIs work.
    plots that fits the idea best here, and the run's notes and the plan page say which and why.
 3. **Characters and places:** drafted, reviewed, approved. The main character (★) is guaranteed to exist.
 4. **Character sheets and voices:** what each character wants, needs, fears and hides, and a **voice card** for
-   how each one talks.
+   how each one talks (sentence rhythm, register, words from their job and place, favourite phrases and tics, words
+   they would never use, habits, how they dodge a question, speech under pressure, sample lines).
+   **🗣 Voice cards that really differ** (code: `akowe/akowe/voice_contrast.py`; run setting `voice_contrast`, on by
+   default; the switch is under "🩺 Plan check" on the Make-a-book screen). Then Akọwe compares the cards of the
+   speaking characters (everyone but minor characters and extras) without any AI: two cards with the same rhythm and
+   register, a shared favourite phrase, three or more shared vocabulary words, or a card too thin to write from. Only
+   then ONE AI answer rewrites the cards that need it, with the whole cast in view, so every character is told apart by
+   how they talk. A card you wrote or edited (and a series character's fixed voice) is never changed. The run says it:
+   "🗣 Voice cards: Mara and Tom: the same rhythm and register — 1 card(s) made distinct". At most 1 AI answer per
+   book (none when the cards already differ). Each chapter's writing brief carries the cards of the characters in that
+   chapter (full cards for up to 4, one line for the rest; when they are cut to fit, the run's ⚠️ "instructions cut"
+   note names whose card went to one line), and the editor checks each speaking character against their OWN card.
 5. **Looks and voice details:** only the essentials (height, face, hair, clothes…). Everything else waits.
 6. **Character pictures:** a portrait each, made with Stable Diffusion; each becomes that character's 🔒 lock.
    This never holds up the book.
@@ -605,6 +619,28 @@ to a minute), so the run knows which AIs work.
    - **Optional: the writers' room for the big twists** (off unless you turn it on at the start). Before the main
      plot, and before the middle chapter and the climax, each working AI pitches an idea and they vote blind. The
      winner is used under your run consent and written in the journal. It never holds up the book.
+   - **🩺 Story doctor: the plan is checked before chapter 1** (code: `akowe/akowe/story_doctor.py`; run setting
+     `story_doctor`, on by default, with `doctor_rounds` 1–3 (default 2) and `doctor_target` (default 8.5); the switch
+     is "🩺 Plan check" on the Make-a-book screen). Right after the chapter outline is approved, every working AI (one
+     per AI, up to 3, not one you switched off for checks) reads the plan — premise, main plot, chapter outline, story
+     rules and cast — and scores it on the same points as the whole-book review (premise, plot continuity, structure,
+     character differentiation, psychological complexity, rule rigor, peril and uncertainty, subtext, ending…) as "how
+     good can a book written from this plan be", with weaknesses quoted from the plan and one concrete fix each. The
+     same strictness as the book review: a 9 or 10 needs a quote from the plan that proves it, and a near-perfect
+     review needs 3 quoted weaknesses — otherwise those scores count as 7; an AI known to be too generous is lowered by
+     its usual discount. The plan's score is the lower median of the reviewers' scores (each reviewer's score is the
+     average of its points; with two reviewers the stricter counts). Under the target, the chapter outline is revised
+     with their combined fixes (weakest points first) through the outline's usual "Ask AI to fix it" path, checked by
+     Akọwe and reviewed and approved like any outline, then scored again — at most `doctor_rounds` times. The best plan
+     is kept: a revision that scores lower is undone (the earlier outline's text approved again, no AI). The premise
+     and main plot stay as approved, so an idea you typed is never replaced (the outline is strengthened around it);
+     your lock list, point of view, tense, content limits, main character, story shape or kind of story and the
+     chapters stay. An outline you wrote or edited yourself (or kept from a book bible) is only scored. The run window
+     says it plainly ("🩺 Plan scored 7.4 → 8.6 after 1 revision") and the 📊 book report repeats it with the last
+     round's main weaknesses (also after the end rewrites remake the report: chapter 1 last, the improve pass in
+     either way, and "Read the final book again" put it back). It never holds up the book: an AI that cannot answer is skipped; a revision that is
+     refused or does not pass its review leaves the best plan. About 3–8 AI answers (each AI scores once; a revision
+     is 1 fix + its review + a new score), counted in the ⏱ estimate.
    - **Optional: fill the whole Book Bible** from the plan before chapter one. It is off unless you turn it on
      (on the start screen, or 📖 Book Bible → At a glance). It never holds up the book.
 9. **Every chapter.** For each one:
@@ -634,14 +670,19 @@ to a minute), so the run knows which AIs work.
      without any AI: the reading grade against the floor for the book's readers (adult 5, young adult 4, middle grade
      3, none for children) and the phrases, similes and gestures it repeats from the chapters before it (the earlier
      chapters are read as one block, so only repeats INTO this chapter count), plus plain-word tics. When the chapter
-     is under the floor or has 2 or more repeats, its writer gets ONE targeted request through the editor's rewrite
-     path: exact passages only (the stretches of shortest sentences without dialogue, and the sentences that
-     repeat), the keep list, protected facts and approved canon, and the polish rules (join some short sentences into
-     longer precise ones, say repeated phrases anew; never change what happens, a fact, a name, a number or a line of
-     dialogue). The polished text is **kept only if** the checks improved (the grade rose by at least 0.3 while under
-     the floor, or fewer repeats or tics) and nothing got worse (more repeats or tics, more AI-sounding phrases, a
-     grade that drops under the floor or above the readers' usual range), every line of dialogue, name and number is
-     unchanged, the length stays within ±20 %, and Akọwe's canon checks accept the saved version; otherwise the draft
+     is under the floor, has 2 or more repeats, or has **too many lists of three** in its narration (more than 3 per
+     1,000 words and at least 3, the same "cold, wet, and tired" pattern the ✨ originality check counts; run setting
+     `polish_triads`, on by default), its writer gets ONE targeted request through the editor's rewrite path: exact
+     passages only (the stretches of shortest sentences without dialogue, the sentences that repeat, and up to 4
+     sentences that hold a list of three — never one with dialogue), the keep list, protected facts and approved
+     canon, and the polish rules (join some short sentences into longer precise ones, say repeated phrases anew,
+     break up a flagged list of three into a pair, one exact detail or a longer sentence; never change what happens,
+     a fact, a name, a number or a line of dialogue; never make the chapter longer than its word budget). The polished text is **kept only if** the checks improved (the grade rose by at least 0.3 while under
+     the floor, or fewer repeats, tics or lists of three) and nothing got worse (more repeats or tics, more
+     AI-sounding phrases, more lists of three when there were already too many, a grade that drops under the floor or
+     above the readers' usual range), every line of dialogue — in any quoting style, see 💬 below — name and number is
+     unchanged, the chapter grows by at most 10 % (or 25 words) and shrinks by at most 20 % (📏 the length guard;
+     ±20 % with it off), and Akọwe's canon checks accept the saved version; otherwise the draft
      stays as written. Repeats Akọwe itself only guessed to be motifs ("comes back in 2 chapters, never crowded") may
      be said anew; a repeat you labelled, a voice-card phrase or a world detail stays protected. At most one polish
      per chapter (also after a pause); never a chapter you wrote; a chapter that reads well costs nothing. The run
@@ -725,7 +766,10 @@ to a minute), so the run knows which AIs work.
     first; when the writer must read too, it is named "(wrote most of the book)" and counts half when readers agree.
     Every quote is checked against the book again; one not found word for word is marked and never used as evidence.
     An AI that is not working is skipped with a note. If the run is paused, the panel carries on with the readers
-    still to read.
+    still to read. **One reader is the default** (the Make-a-book screen's "How many" starts at 1 reader); choose 2
+    or 3 there for a panel. The beta readers read BEFORE chapter 1 is rewritten last and before the improve pass on
+    purpose (both use their notes); when either pass changed the book, they read the final book once more in the
+    🔁 "Read the final book again" step (below), so the report is about the finished book.
 
     **✍ Rewrite chapter 1 last** (code: `akowe/akowe/opening_pass.py`; run setting `opening_pass`, on by default;
     the "Rewrite chapter 1 last" step, after the beta readers and before the improve pass). Chapter 1 was written
@@ -746,8 +790,33 @@ to a minute), so the run knows which AIs work.
     A chapter 1 you wrote yourself is never touched; with the editor's rewrites off it does nothing and says so. The
     run window, the run's report box and the 📊 report say "✍ Chapter 1 rewritten with the whole book in view: kept
     (7.6 → 7.8/10)" (or not kept, and why). About 1 rewrite + the reviewers' re-read + 1 review, in the ⏱ estimate.
-13. **🔁 Improve until better** (code: `akowe/akowe/improve_pass.py`; run settings `improve_pass`, on by default, and
-    `improve_rounds`, 1–3, default 2; the switch is on the Make-a-book screen). Akọwe gathers, per chapter, without
+13. **🔁 Improve until better** (code: `akowe/akowe/improve_pass.py` and `akowe/akowe/weak_scenes.py`; run settings
+    `improve_pass`, on by default, `improve_mode` — `scenes`, the default, or `chapters`, the older way — and
+    `improve_rounds`; the switch and both choices are on the Make-a-book screen).
+    **🎯 By default it rewrites only the 3 weakest scenes** (`improve_mode: scenes`, 1 round by default, at most 2).
+    Whole-chapter rewrites had moved the author's last book only 7.8 → 7.9 for about 20 AI answers; what lifts a score
+    is fixing the exact scenes the reviewers quote. Without any AI, every complaint is placed in its scene: the
+    whole-book reviewers' weaknesses (their quotes, checked word for word as in the report), the editor's major notes
+    and the ✔ Approve-anyway notes, the clock / tide contradictions, phrases repeated across chapters and the beta
+    readers' top fixes. Scenes are the parts between scene-break lines (`***`), as on the 🗂 scene grid; a chapter
+    written without breaks is cut at paragraph ends into as many parts as it has scene cards (or about 900 words
+    each). A note that quotes nothing but names a chapter counts half, for that chapter's first scene; plain-word
+    tics and a too-simple reading level go along as notes but never choose a scene. Each complaint counts by where it
+    comes from (the reviewers' quotes and the editor's major notes most) times how weak that part of the book is —
+    the book's lowest dimensions weigh most (5/10 counts 2.5×, 8 or more 1×). The top 3 scenes each get ONE rewrite
+    by the chapter's writer (one AI answer per scene) with: the scene, its complaints, its plan beat (the scene card),
+    the paragraphs just before and after it, the voice cards, your style card when the book has one, the protected
+    facts, the lines the editor said to keep and a **word budget: at most 10% more words**. Before anything is
+    judged Akọwe checks each new scene (no AI): within the budget, not cut to under 60%, every name and kept line
+    still there, no new title or scene break — a scene that fails keeps its text. The rewritten scenes are put back
+    in their chapters exactly where they were, and from here the keep rule below is the same: the same reviewers
+    re-read, kept only if the overall score went up and no dimension dropped by more than 1, kept chapters go
+    through the usual review and approval. The run window, the journal and the report say "🎯 Rewrote 3 weakest
+    scenes (ch1 opening, ch2 photograph investigation, ch3 final miscalculation): 7.9 → 8.4 (kept)". About 3
+    rewrites + the reviewers' re-read per round plus the kept chapters' reviews — fewer than the older 2
+    whole-chapter rounds, counted in the ⏱ estimate. A round of scene rewrites is all or nothing (the repeated-phrase
+    fallback below belongs to the older way). Chapters you wrote are never touched.
+    **The older way** (`improve_mode: chapters`, `improve_rounds` 1–3, default 2): Akọwe gathers, per chapter, without
     any AI: the editor's MAJOR notes on the approved version, the notes kept when you pressed **✔ Approve anyway**
     (setting `improve_queue:<book>:<branch>`), the clock / tide / day contradictions (`clock_check.py`), every
     later use of a phrase or simile repeated across chapters, plain-word tics ("went" 26×), chapters under the reading
@@ -775,6 +844,38 @@ to a minute), so the run knows which AIs work.
     line then adds "· repeated phrases fixed alone in chapter(s) 3 (repeats 3 → 1)". Repeats that Akọwe itself only
     guessed to be motifs ("comes back in 2 chapters, never crowded") may be said anew by these fixes; a repeat you
     labelled, a voice-card phrase or a world detail stays protected.
+    📏 A round as a whole also keeps the book within its length: the reworked chapters that would push the book past
+    115 % of its target are left out, the ones that add the most words first (`improve_pass.within_budget`).
+13b. **🔁 Read the final book again** (code: `akowe/akowe/final_reads.py`; the last step, "Read the final book
+    again"; run settings `reread_after_rewrites` and `beta_reread`, both on by default, switches under "Extras" on the
+    Make-a-book screen). The final whole-book continuity check (🧭) runs after the last chapter — before chapter 1 is
+    rewritten last and before the improve pass. Before, those passes' own rewrites were taken for hand edits ("Final
+    check of the whole book after chapter 3: to be read again (chapter 1 was changed by hand)") and the check was
+    never read again. Now every chapter revision Akọwe itself approves in a run (a rewrite, a polish, a fix, an
+    earlier text put back, and the chapters with 🎯 rewritten weakest scenes) is registered as its own BEFORE it is
+    approved (`continuity.note_own`, from `autobook._approve`), so the hand-edit check (`continuity.check_edits`, also run by the book's pages while a run
+    works) skips it. Once at the end, only where something changed: (1) the final whole-book check reads the book
+    again when a chapter it read got one of Akọwe's own revisions after it finished (or a hand edit marked it); it
+    may make small fixes like any checkpoint and never pauses the finished book (what it cannot fix waits in the
+    report); its line says "(read again after Akọwe's own rewrites)". (2) The beta reader(s) read the final book once
+    more when the book changed since their read; the new read is the one the report shows (no more "This read is for
+    an earlier version of the book"). (3) The run window, the run's report box and the 📊 report say the book's
+    length against its target ("📏 Length: 4,310 words (108% of the 4,000-word target)", with ⚠️ when it is more than
+    115 % or less than 80 %). Counted in the ⏱ estimate as an upper bound (each checking AI once, plus one answer per
+    beta reader) when chapter 1 last or the improve pass is on.
+13c. **📏 The length guard** (code: `akowe/akowe/length_guard.py`; run setting `length_guard`, on by default).
+    "The Tide Ledger" was asked for about 4,000 words and came out at 5,756 (144 %): every rewrite added a little.
+    Every rewrite the writer is asked for through the editor's rewrite path (the editor's rewrites, the 📏 polish,
+    chapter 1 last, the improve pass, and the editor's fixes you ask for yourself) now carries a word budget in its
+    brief (`context.word_budget`: the chapter's words, the most it may have, the book's words against its target, and
+    "prefer cutting repeated explanation over adding"). A rewrite may grow a chapter by at most 10 % (at least 25
+    words, so a small fix always fits; a chapter still under its own target length may grow up to it) and never push
+    the book past 115 % of its target. When the writer's replacements together grow the chapter too much, the ones
+    that add the most words are left out (listed as "not used: it made the chapter too long for the book's word
+    budget"). A shorter replacement is always fine. The 🔁 improve pass is held to the same book cap in both ways:
+    a round whose reworked chapters (or 🎯 rewritten scenes, each already at most 10 % longer) would together push
+    the book past 115 % leaves out the chapters that add the most words (a scene left out this way says "it would
+    make the book longer than its length allows").
 14. **📈 Quality history** (code: `akowe/akowe/quality_history.py`): when a run finishes, the report's numbers — the
     overall score, the median of each whole-book dimension, the editor's average per category, the "sounds like a
     person" score, the reading grade, the beta average, fixed habit codes (`triad`, `simile`, `word:went`, `clock`,
@@ -798,12 +899,34 @@ adult 4; middle grade 3).
 **🕰️ The clock and tide check** (code: `akowe/akowe/clock_check.py`, no AI): stated times ("14:30", "half past two",
 "four o'clock", "eight in the evening"; a 12-hour time without a part of the day keeps both readings and is only
 called wrong when both are), days (weekday names, "the next morning") and tides ("high water at 18:06", "the tide was
-going out", "on the flood"). It flags a tide running the wrong way for the high water the book stated (it rises for
+going out", "on the flood"). Text inside dialogue never counts (💬 every quoting style). It flags a tide running
+the wrong way for the high water the book stated (it rises for
 about 6 h 12 min before high water and falls after it; ±40 minutes around a turn is never flagged), two high waters
 that cannot both be true (12 h 25 min apart, about 50 minutes later each day; ±1 hour), and a clock that runs
-backwards inside a chapter on the same day. The chapter's editor and reviewer get this chapter's contradictions as
+backwards inside a chapter on the same day. **📅 Weekdays and dates** (added after "The Tide Ledger"): it follows
+the weekdays and dates the narration states ("on Sunday", "Friday, 9 January", "the first Monday of January", "the
+second Saturday") and the explicit day jumps ("the next morning", "four days later", "a week later") through the
+chapters, and flags a weekday or date stated right after a jump (in that sentence or the next two) that the jump
+cannot reach — "Sunday … the next morning, Saturday", "the first Monday … the next morning … four days later, on the
+Friday", "the second Saturday" six days after the first — and two dates whose weekdays cannot both be true ("Monday,
+6 January" and "Friday, 14 January"). A vague jump ("a few days later", "weeks passed") forgets what day it is, so
+nothing after it is called wrong; "next Friday", "every Sunday", "by Friday" and flashbacks are not the current day.
+These are major, like a tide error. The chapter's editor and reviewer get this chapter's contradictions as
 `akowe_in_chapter` entries named "time": a MAJOR problem; one the editor does not note itself becomes a major note of
 its own (so the rewrite fixes it).
+
+**💬 One dialogue finder for every quoting style** (code: `akowe/akowe/dialogue.py`, no AI). "The Tide Ledger" put its
+dialogue in 'single quotes' and the report said "0% dialogue": the checks only knew double quotes. Now every check
+that treats dialogue differently from narration uses one finder: the readability dialogue share, the 📏 chapter
+polish's "dialogue never changes" guard and the passages it may touch, the ✨ originality, pattern and repeat checks
+(they leave dialogue out), the plain-word tics, the style card, the ✍ "sounds like a person" openings and endings,
+and the 🕰️ clock check. It knows "double" and “curly” quotes, 'single' and ‘curly single’ quotes (British style),
+and em-dash dialogue (a line that opens with "— "). A single quote only counts as speech when it opens after a space,
+a dash or the start of a line and closes after punctuation or before a speech word ("she said") or a stop; an
+apostrophe inside a word (don't, Teo's), after a plural (the boys' boat) or at the start of a short form ('90s, rock
+'n' roll, 'em, 'tis) never does. A speech carried into the next paragraph (left open, the British way) is speech up
+to the end of its paragraph. The polish guard compares every line of dialogue word for word (curly or straight marks
+and spacing do not count as a change), so a polish never changes dialogue in any style.
 
 **📏 Special rules need scope, cost and limits** (code: `akowe/akowe/story_rules.py`): a story rule about a ghost,
 magic, a curse, a prophecy, a strange device… that does not state all three (scope: where/when/for whom; cost: what it
@@ -811,6 +934,30 @@ takes or risks; limits: what it can never do) is a major "is it bounded?" findin
 📏 Story rules page and sent to the plot/outline planners and their reviewers as `not_bounded`. A ⚡ run asks the AI
 once to bound such rules (after the first rules and again after the plan, at most twice) and accepts the update under
 the run consent; the planners are told that every special mechanism keeps its scope, cost and limits.
+
+**✨ Magic rules kept** (code: `akowe/akowe/magic_rules.py`, no extra AI call; web: `akowe/akowe/web/magic.js`): a
+story rule may carry `magic` = name, what it does, requires (lines such as "2 anchor stones", "line of sight", "at
+night only"), limits ("3 times a day", "cooldown 1 hour", "range: …"), price, who may use it, exceptions (none by
+default), who holds the counted things at the start, and the words that show a use. The author fills it in the Story
+rules form; the AI fills it when it drafts the story rules (the same call: the rules schema has an optional `magic`
+part). An old one-sentence rule ("Teleportation requires two anchor stones; at most three times a day") is read into
+the same fields when it clearly describes one. Per chapter, Akọwe reads every use of an ability outside dialogue (who
+— the named person, else the last one named; the counted things stated nearby; day or night; the day and the scene)
+and every "found / lost / had N anchor stones"; for an approved chapter the continuity tracker's existing AI call also
+lists `ability_uses` / `ability_gains`, which replace Akọwe's reading when they are for the same text version. The
+ledger starts from "who holds what at the start", deducts what is used up, adds what is found. Each use is checked:
+too few of a counted need on the page (`needs_more`) or in the ledger (`not_enough`), wrong time of day
+(`wrong_time`), more uses on one day than allowed (`too_many`), again in the same scene with a cooldown and no time
+passing (`cooldown`), someone not named in "who" (`not_allowed`) — all MAJOR — and the price not shown near the use
+(`price_missing`, minor, report only). A major problem is allowed (and counted as a deliberate twist) when that
+chapter's outline says "deliberate twist" / "breaks the rule" and names the ability, or the author listed it on the
+page. The chapter's editor and reviewer get the broken rules as `akowe_in_chapter` entries named "magic" (must-fix;
+one the editor does not note becomes a major `story_rules` note of its own) and `context.magic_rules` (the abilities
+and the ledger before the chapter) for what Akọwe cannot count (line of sight, unwritten exceptions). The writer's
+brief gets `magic_rules` (the abilities the chapter's plan mentions, or the ones used so far, and the ledger; ≤ 1 500
+characters). The book report shows "✨ Magic rules kept: N use(s), M broken". Stored in settings `magic:<book>:
+<branch>` (on/off, the allowed rule-breaks, the tracker's uses, the last ledger snapshot for the briefs); routes GET
+`/review/magic` and PUT `/review/magic/settings`. Off with the page's tick box or the pipeline's rules switch.
 
 **🤫 Hide the twist better** (code: `akowe/akowe/twist_guard.py`; ⚙️ Settings › 🤫 Hide the twist better,
 `GET/PUT /api/settings/twist-guard {enabled}`; default on; planning rules only, no extra AI answers). In one book all
@@ -942,9 +1089,11 @@ All four are on the ⚡ **AI writes the whole book** screen (code: `akowe/akowe/
   change the length, how many AIs check for mistakes, the writers' room, beta readers, character pictures, "fill the
   whole Book Bible", the end-of-book "sounds like a person" pass (about 2 answers), ✍ the two first pages (2
   answers) and chapter 1 rewritten last (1 rewrite + the reviewers' re-read + 1 review), the 🔁 improve pass and its
-  rounds (per round the rewrites plus the reviewers' re-read, plus the kept chapters' reviews), 📏 the chapter polish
+  rounds (per round the rewrites — 3 scenes by default — plus the reviewers' re-read, plus the kept chapters'
+  reviews), 📏 the chapter polish
   (at most 1 answer per chapter, only when needed: every chapter if your last book read too simply or repeated, else
-  about a quarter), the Claude Code helpers, "when
+  about a quarter), 🩺 the story doctor (each AI scores the plan once, plus one revision: 1 fix + its review + a new
+  score from each AI), 🗣 the voice-card check (1 answer, only when cards sound alike), the Claude Code helpers, "when
   only one AI works" and which AI writes. It starts from the P28 numbers (`costs.estimate`: AI calls per step); once
   this PC has finished runs, it uses their measured seconds per answer, each AI's share of the answers, and the
   answers of the optional steps. The usage limits are rough public guesses (Claude ~40 long messages per 5 hours,
@@ -995,17 +1144,21 @@ All four are on the ⚡ **AI writes the whole book** screen (code: `akowe/akowe/
 | Editor rubric | told-not-shown feelings, flat side characters, same-sounding voices, no stakes | every chapter |
 | Timeline arithmetic (no AI) | ages and years that don't add up ("twelve, twenty years ago… now forty") | the whole-book fact check, near the end |
 | Readability (no AI) | prose too hard or too simple for the book's readers | the book report and the scene grid; the reading-level floor in every chapter's brief and the final improve pass |
-| 🕰️ Clock and tide (no AI) | a tide going out before the stated high water, high waters that cannot both be true, a clock running backwards | every chapter's editor and reviewer (must-fix), the next chapter's brief, the final improve pass |
+| 🕰️ Clock, days and tide (no AI) | a tide going out before the stated high water, high waters that cannot both be true, a clock running backwards, a weekday or date that "four days later" / "the next morning" cannot reach, two dates whose weekdays cannot both be true | every chapter's editor and reviewer (must-fix), the next chapter's brief, the final improve pass |
 | 📏 Special rules bounded (no AI + one AI update) | a ghost, magic or device rule with no scope, cost or limits | after the story rules and after the plan |
+| ✨ Magic rules kept (no AI) | a use of an ability without what it needs, at the wrong time, too often, by the wrong person | every chapter's editor and reviewer (must-fix), the next chapter's brief, the book report |
 | ✍ Two first pages | a weak first page (chapter 1 is written before anything else) | before chapter 1 is written (on by default) |
 | ✍ Rewrite chapter 1 last | a chapter 1 that loses readers, gives the twist away or plants nothing — kept only if the same reviewers score the book at least as well | after the beta readers, before the improve pass (on by default) |
-| 📏 Chapter polish | a draft under the reading floor for its readers, or repeating phrases of earlier chapters — one polish, kept only if the no-AI checks improved and nothing protected changed | right after each chapter's draft, before its review (on by default) |
-| 🔁 Improve until better | what the reviewers, beta readers, the editor and Akọwe's checks found — kept only if the same reviewers score it higher | after the beta readers, at the end of a ⚡ run (on by default) |
+| 📏 Chapter polish | a draft under the reading floor for its readers, repeating phrases of earlier chapters, or with too many lists of three — one polish, kept only if the no-AI checks improved and nothing protected changed | right after each chapter's draft, before its review (on by default) |
+| 📏 Length guard (no AI) | rewrites that make the book longer and longer — at most +10 % per chapter (+10 % per scene for the 🎯 weakest scenes), the book at most 115 % of its target | every rewrite through the editor's rewrite path and every improve-pass round, whole chapters or 🎯 scenes (on by default) |
+| 🔁 Read the final book again | a final continuity check and a beta read made before the end rewrites | the last step of a ⚡ run, only when something changed (on by default) |
+| 🔁 Improve until better | what the reviewers, beta readers, the editor and Akọwe's checks found — placed in their scenes, the 3 weakest scenes rewritten (🎯), kept only if the same reviewers score it higher | after the beta readers, at the end of a ⚡ run (on by default) |
 | 📈 Quality history and 🧠 lessons | your recurring weak areas and habits | recorded when a run finishes; given to the next book's planners and writer |
 | Pattern check (no AI) | repeated habits ("went very still"), lists of three, same-length sentences; a habit 2+ checks flag (pattern, originality, editor) is a must-fix for the editor, and the run says how many are left | before the editor |
 | ✍ Sounding human (see below) | AI phrases and patterns told to the writer beforehand; the book's own repeats (openings, endings, gestures, phrases, rhythm); a "Sounds like a person" score | every chapter's instructions, every checkpoint, and at the end of a ⚡ run (suggestions you approve) |
 | ✨ Originality check (no AI, optional AI pass) | clichés and AI-sounding phrases ("a testament to", "a breath she didn't know she was holding", "It wasn't X. It was Y."), long dashes everywhere, too much hedging; per chapter, with quotes and reasons. Dialogue is left out unless you ask. An optional second AI (not the writer) rates passages 1–5 for "sounds machine-written"; its quotes are checked against the book | before the editor (so its rewrites target them; a rewrite that adds such phrases is not kept), in the book report, and on the 📊 report page (✨ button). Never blocks the book |
-| Voice cards | characters who all talk alike | writing and editing |
+| 🩺 Story doctor | a weak plan: unclear rule arithmetic, a final mistake that is hard to believe, a sagging middle, helpers who cooperate too easily — scored by every AI on the book report's points and revised until it reaches the target (best plan kept) | after the chapter outline, before chapter 1 (on by default) |
+| Voice cards | characters who all talk alike: cards compared without AI at planning (alike or thin cards made distinct in one AI answer), each chapter's cards in its brief, the editor's own-card check | planning, writing and editing |
 | Locked details | eyes, hair, weapon or weapon hand changing | after each chapter |
 | Running notes (ledgers) | a healed limp, a lost knife drawn again, the dead speaking, misspelled names, wrong travel times | after each chapter |
 | Hand-edit follow-through | later chapters still built on what you edited away | when a changed chapter is approved again |

@@ -11,7 +11,8 @@ around which chapter — a limit will probably pause it:
   per AI per checkpoint, up to its decisions per run — only when the author does not answer), ✍ chapter 1 rewritten
   last (1 rewrite + the reviewers' re-read + 1 review) and the two first pages (2 answers), 📏 the chapter polish
   (≤ 1 rewrite per chapter, only when needed), the 🔁 final improve pass (rounds × (rewrites + the reviewers'
-  re-read) + the kept chapters' reviews), the 🤖 Claude Code helpers and "when only one AI works". With measured
+  re-read) + the kept chapters' reviews; 🎯 by default 1 round of 3 scene rewrites), the 🤖 Claude Code helpers and
+  "when only one AI works". With measured
   runs, the options whose answers fall inside the measured steps (the checkers, the writers' room, the end pass and
   the chapter polish) count only as the DIFFERENCE from the options those runs had (they are already in the measured
   numbers), and the optional steps P28 does not model (beta readers, the whole Book Bible) use their own measured
@@ -46,8 +47,10 @@ CARRY_ON_SHARE = 0.25          # share of a limit pause that still makes the run
 CHAPTERS_FROM, CHAPTERS_TO = 0.15, 0.9   # where the chapters lie in the run's time (the rest: planning, the end)
 DEFAULT_AIS = (("AI-1", "AI-1 · Claude", "claude"), ("AI-2", "AI-2 · ChatGPT", "chatgpt"),
                ("AI-3", "AI-3 · Gemini", "gemini"))
-INSIDE_MEASURED = ("checkers", "writers_room", "human_pass", "first_page", "chapter_polish")   # their answers are inside costs' measured steps
-OWN_STEP = {"beta": "beta", "bible": "bible", "improve": "improve", "opening": "opening"}   # option -> its own run step (measured when made)
+VOICE_SHARE = 0.4             # 🗣 share of books whose voice cards need the one rewrite answer (an estimate)
+INSIDE_MEASURED = ("checkers", "writers_room", "human_pass", "first_page", "chapter_polish", "story_doctor",
+                   "voice_contrast")   # their answers are inside costs' measured steps
+OWN_STEP = {"beta": "beta", "bible": "bible", "improve": "improve", "opening": "opening", "reread": "reread"}   # option -> its own run step (measured when made)
 
 
 # ====================================================================== the options of a run
@@ -84,8 +87,15 @@ def options_of(app, body: dict | None) -> dict:
             "improve_pass": b.get("improve_pass") is not False,
             "opening_pass": b.get("opening_pass") is not False, "first_page": b.get("first_page") is not False,
             "chapter_polish": b.get("chapter_polish") is not False, "polish_share": _polish_share(app),
+            "reread_after_rewrites": b.get("reread_after_rewrites") is not False,
+            "beta_reread": b.get("beta_reread") is not False,
+            "improve_mode": "chapters" if b.get("improve_mode") == "chapters" else "scenes",
+            "story_doctor": b.get("story_doctor") is not False, "voice_contrast": b.get("voice_contrast") is not False,
+            "doctor_rounds": b.get("doctor_rounds") if isinstance(b.get("doctor_rounds"), int)
+            and not isinstance(b.get("doctor_rounds"), bool) and 1 <= b.get("doctor_rounds") <= 3 else 2,
             "improve_rounds": b.get("improve_rounds") if isinstance(b.get("improve_rounds"), int)
-            and not isinstance(b.get("improve_rounds"), bool) and 1 <= b.get("improve_rounds") <= 3 else 2,
+            and not isinstance(b.get("improve_rounds"), bool) and 1 <= b.get("improve_rounds") <= 3 else
+            (2 if b.get("improve_mode") == "chapters" else 1),
             "claude_code": cc_on, "single_ai": b.get("single_ai") if b.get("single_ai") in SINGLE_AI else "continue",
             "slot_id": b.get("slot_id") if isinstance(b.get("slot_id"), str) and b.get("slot_id") else None}
 
@@ -113,7 +123,16 @@ def option_calls(opts: dict, n: int, ais: int) -> dict:
     out["human_pass"] = {"calls": hp, "to": "others", "label": "End-of-book “sounds like a person” pass"}
     # 🔁 the final improve pass (improve_pass.py): per round one rewrite per chapter worked on (≤ 3) and the same
     # reviewers' re-read (the AIs that did not write it); a kept round adds each chapter's review and editor read
-    if opts.get("improve_pass"):
+    # 🎯 the weakest scenes (weak_scenes.py, the default): per round one rewrite per scene (3), the same re-read and
+    # the kept chapters' review; 1 round by default (at most 2)
+    if opts.get("improve_pass") and opts.get("improve_mode", "scenes") == "scenes":
+        from . import weak_scenes  # noqa: PLC0415
+        c, r = min(3, n), max(1, min(ais - 1, 3)) if ais > 1 else 1
+        rounds = min(int(opts.get("improve_rounds") or 1), weak_scenes.ROUNDS_MAX)
+        out["improve"] = {"calls": rounds * (weak_scenes.MAX_SCENES + r) + 3 * c, "to": "all",
+                          "label": f"Rewrite the {weak_scenes.MAX_SCENES} weakest scenes (up to {rounds} "
+                                   f"round{'s' if rounds != 1 else ''})"}
+    elif opts.get("improve_pass"):
         c, r = min(3, n), max(1, min(ais - 1, 3)) if ais > 1 else 1
         rounds = int(opts.get("improve_rounds") or 2)
         out["improve"] = {"calls": rounds * (c + r) + 3 * c, "to": "all",
@@ -134,6 +153,26 @@ def option_calls(opts: dict, n: int, ais: int) -> dict:
     out["chapter_polish"] = {"calls": math.ceil(share * n) if opts.get("chapter_polish") else 0, "to": "writer",
                              "label": "Polish each chapter's sentences when it reads too simply or repeats (only "
                                       "when needed)"}
+    # 🔁 final_reads.py: after the end rewrites (chapter 1 last, the improve pass) the final whole-book check is read
+    # again by each checking AI (about one part per 15 chapters) and the beta readers read the final book once more —
+    # only when a rewrite was kept (counted as if it always is: an upper bound)
+    rw = opts.get("opening_pass") or opts.get("improve_pass")
+    k_all = min(CHECKER_LIMIT[opts.get("checkers") or "all"], ais)
+    rr = (k_all * (1 + n // 15) if opts.get("reread_after_rewrites", True) else 0) + \
+        (int(opts.get("beta_readers") or 0) if opts.get("beta_reread", True) else 0)
+    out["reread"] = {"calls": rr if rw else 0, "to": "others",
+                     "label": "Read the final book again after the end rewrites (only if something changed)"}
+    # 🩺 the story doctor (story_doctor.py): every AI scores the plan once; a plan under the target is revised (1 fix +
+    # its review) and scored again — counted as one revision (most plans need one; at most doctor_rounds)
+    rounds = int(opts.get("doctor_rounds") or 2)
+    sc = max(1, min(ais - 1, 3)) if ais >= 3 else min(ais, 2)   # the AIs that did not write the plan (else all, ≤ 2)
+    out["story_doctor"] = {"calls": (sc + 2 + sc) if opts.get("story_doctor") else 0, "to": "others",
+                           "label": f"🩺 Story doctor: the AIs score the plan before chapter 1 and it is revised when "
+                                    f"weak (up to {rounds} revision{'s' if rounds != 1 else ''})"}
+    # 🗣 voice cards made distinct (voice_contrast.py): one answer, only when two cards sound alike or one is thin —
+    # counted as its expected share (cards made with the whole cast in view usually differ already)
+    out["voice_contrast"] = {"calls": VOICE_SHARE if opts.get("voice_contrast") else 0, "to": "all",
+                             "label": "🗣 Voice cards made distinct (only when two sound alike)"}
     out["pictures"] = {"calls": 0, "to": "none", "label": "Character pictures (Stable Diffusion: no AI answers)",
                        "minutes": PICTURES * PICTURE_MIN if opts.get("pictures") else 0}
     # 🧑‍⚖️ the stand-in vote at a story checkpoint the author does not answer: every AI votes on each waiting problem
@@ -173,9 +212,14 @@ def _run_opts(j: dict) -> dict:
     return {"checkers": s.get("checkers") or "all", "writers_room": bool(s.get("writers_room")),
             "human_pass": s.get("human_pass") is not False, "beta_readers": (s.get("beta_readers") or 1)
             if s.get("beta_reader") else 0, "fill_bible": bool(s.get("fill_bible")),
-            "improve_pass": bool(s.get("improve_pass")), "improve_rounds": s.get("improve_rounds") or 2,
+            "improve_pass": bool(s.get("improve_pass")), "improve_mode": s.get("improve_mode") or "chapters",
+            "improve_rounds": s.get("improve_rounds") or (1 if s.get("improve_mode") == "scenes" else 2),
             "opening_pass": s.get("opening_pass") is True, "first_page": s.get("first_page") is True,
-            "chapter_polish": s.get("chapter_polish") is True}
+            "chapter_polish": s.get("chapter_polish") is True,
+            "reread_after_rewrites": s.get("reread_after_rewrites") is not False,
+            "beta_reread": s.get("beta_reread") is not False,
+            "story_doctor": s.get("story_doctor") is True, "voice_contrast": s.get("voice_contrast") is True,
+            "doctor_rounds": s.get("doctor_rounds") or 2}
 
 
 def calibration(app, n: int, opts: dict, ais: int) -> dict:
