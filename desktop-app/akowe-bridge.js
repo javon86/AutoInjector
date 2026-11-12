@@ -279,6 +279,10 @@ function loopbackUrl(v) {
   if (u.username || u.password) return null;
   return u.href.slice(0, 1000);
 }
+function isoOf(v) {
+  const t = typeof v === 'string' && /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d+)?Z$/.test(v) ? v : null;
+  return t && !Number.isNaN(Date.parse(t)) ? t.replace(/\.\d+Z$/, 'Z') : null;
+}
 function capInt(v, max) {
   const n = Number(v);
   if (typeof v === 'boolean' || v === null || v === '' || !Number.isFinite(n)) return null;
@@ -325,7 +329,12 @@ function sanitizeAkoweStatus(body) {
     step: capInt(run.step, 1000), steps_done: capInt(run.steps_done, 1000), steps_total: capInt(run.steps_total, 1000),
     problem: rp ? { code: capStr(rp.code, 60), message: capStr(rp.message, 300) } : (typeof run.problem === 'string' ? { code: null, message: capStr(run.problem, 300) } : null),
     replaced_by: capStr(run.replaced_by, 80), updated_at: toEpochMs(run.updated_at), finished_at: toEpochMs(run.finished_at), url: loopbackUrl(run.url),
-    alert: alertOf(run.alert)
+    alert: alertOf(run.alert),
+    // ⏳ the run's clock (akowe/run_clock.py): numbers, ISO times and the step's plain words (the title bar shows them)
+    total_estimate_s: capInt(run.total_estimate_s, 1e8), elapsed_active_s: capInt(run.elapsed_active_s, 1e8), left_s: capInt(run.left_s, 1e8),
+    actual_s: capInt(run.actual_s, 1e8), percent: capInt(run.percent, 100), step_index: capInt(run.step_index, 1000), step_total: capInt(run.step_total, 1000),
+    step_label: capStr(run.step_label, 80), finish_at: isoOf(run.finish_at), waiting_since: isoOf(run.waiting_since), started_at: isoOf(run.started_at),
+    run_url: loopbackUrl(run.run_url)
   } : null;
   out.updated_at = toEpochMs(body.updated_at);
   return { ok: true, value: out };

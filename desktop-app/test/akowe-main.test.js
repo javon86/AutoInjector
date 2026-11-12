@@ -244,6 +244,17 @@ async function main() {
   assert(st.connect.phase === "connected" && st.connection.connected === true, "first status after pairing -> 'Connected ✔'");
   assert(st.akowe && st.akowe.project.title === "The Lantern Keeper" && st.akowe.current_task.op === "B03" && st.akowe.approvals.count === 1 && st.akowe.stale === false && st.akowe.total === 9, "Akọwe's status (step, approvals, checklist) shows up in the snapshot");
   assert(st.app.running === true && st.app.base === `http://127.0.0.1:${BF_APP_PORT}/`, "snapshot knows where Akọwe runs");
+  // ⏳ the run's clock pushed by Akọwe (run_clock.py) reaches the title bar's run line (runStrip), bounded
+  const finishAt = new Date(Date.now() + 6000e3).toISOString().replace(/\.\d+Z$/, "Z");
+  r = await request("POST", "/v1/status", after, Object.assign({}, statusBody, { run: { id: "run-77", title: "The Lantern Keeper", state: "working", status: "running", steps_done: 11, steps_total: 22,
+    step_index: 12, step_total: 19, step_label: "Writing chapter 2 of 10", left_s: 6000.7, total_estimate_s: 15000, percent: 40, finish_at: finishAt, started_at: "2026-11-12T09:21:00Z",
+    waiting_since: "not a time", run_url: `http://127.0.0.1:${BF_APP_PORT}/#/run/run-77`, secret: "x" } }));
+  assert(r.status === 200, "Akọwe pushes a run with its clock");
+  st = await call("akowe:status");
+  const rp = st.runStrip && st.runStrip.progress;
+  assert(rp && rp.left_s === 6000 && rp.total_estimate_s === 15000 && rp.percent === 40 && rp.step_index === 12 && rp.step_total === 19 && rp.step_label === "Writing chapter 2 of 10", `the title bar's run line gets the clock (${JSON.stringify(rp)})`);
+  assert(rp && rp.finish_at === finishAt && rp.started_at === "2026-11-12T09:21:00Z" && rp.waiting_since === null && rp.run_url === `http://127.0.0.1:${BF_APP_PORT}/#/run/run-77`, "times are ISO (a bad one dropped) and the run link is loopback");
+  assert(st.runStrip.state === "writing" && st.runStrip.title === "The Lantern Keeper" && !("secret" in st.runStrip), "the run's state and title; nothing unknown passes");
   assert(await waitUntil(() => activity.some((a) => a.event && a.event.kind === "pair" && a.event.outcome === "PAIRED") && activity.some((a) => a.event && a.event.kind === "status")), "pairing + first status are broadcast as activity (outcome only)");
   const actDump2 = JSON.stringify(activity.map((x) => x.event)) + JSON.stringify(st.activity);
   assert(!actDump2.includes(code) && !actDump2.includes("Lantern Keeper") && !actDump2.includes("Drafting the main plot"), "activity never carries the code or the status content");

@@ -10,6 +10,7 @@ import * as CC from './claude-code.js';  // 🤖 Claude Code helpers (claude_cod
 import * as CK from './checkers.js';  // 📊 checker track record · 🔢 checker order · 🧑‍⚖️ stand-in decider
 import * as WRT from './writers.js';  // 🏆 who writes best · 🤫 hide the twist better
 import { maybeStartTour, replayTour } from './tour.js';  // 🧭 the short guided tour of My books (first visit; ❓ Help replays it)
+import * as RS from './run-strip.js';  // ⏳ the always-visible run progress strip (run_clock.py)
 import * as RP from './run-plan.js';  // ⏱ 3d estimate · 📊 3e usage meter + ⏰ start later · 📋 6c paste starter sheet
 import { originalityCard } from './originality.js';  // ✨ #20 originality and "sounds like AI" check
 import { magicCard, magicFields, magicSummary } from './magic.js';  // ✨ magic rules that are kept (magic_rules.py)
@@ -703,6 +704,11 @@ async function pickView(parts) {
   if (parts[0] === 'help' && (parts[1] || '').split('?')[0] === 'codes') return viewCodeMap;
   if (parts[0] === 'help') return viewHelp;
   if (parts[0] === 'shelf') return viewShelf;
+  if (parts[0] === 'run' && parts[1]) {  // ⏳ #/run/<id>: the run window over My books (AutoInjector's top bar opens it)
+    const id = parts[1];
+    setTimeout(() => openMakeBook(null, { runId: id }), 0);
+    return viewHome;
+  }
   if (parts[0] === 'style') return m => S7C.viewStyle(m, s7c());  // ✒️ P25
   if ((parts[0] || '').split('?')[0] === 'compare') return m => viewCompare(m, parts[1] ? parts[1].split('?')[0] : null);
   if (parts[0] === 'p') {
@@ -7994,6 +8000,7 @@ async function withAiCheck(body, what) {
 
 const STEP_ICON = { pending: '○', running: '⏳', waiting: '⏳', later: '🕓', done: '✔', failed: '⚠️', paused: '⏸', cancelled: '✖', skipped: '–' };
 function initMakeBook() {
+  RS.init({ h, open: runId => openMakeBook(null, { runId }) });  // ⏳ the progress strip (run-strip.js)
   const btn = $('#mab-btn');
   if (btn) btn.addEventListener('click', ev => openMakeBook(ev.currentTarget));
   const d = $('#mab-dialog');
@@ -8141,6 +8148,7 @@ async function refreshRunChip() {
   if (!S.token || S.authFailed) return;
   let out;
   try { out = await api('GET', '/autobook'); } catch { return; }
+  RS.update(out);  // ⏳ the progress strip at the top of every page (run-strip.js)
   const live = (out.active || [])[0];
   // a run a newer run of the same book replaced (replaced_by) never makes the button say Paused / Interrupted
   const pend = (out.runs || []).find(r => ['paused', 'interrupted', 'pausing'].includes(r.status) && !r.replaced_by);
@@ -8647,8 +8655,9 @@ function renderRun() {
   const head = h('div', { class: 'mb-head' },
     h('div', null, h('p', { class: 'mb-book' }, r.title ? `“${r.title}”` : 'A new book', r.settings && r.settings.length ? h('span', { class: 'muted small' }, ` · ${(LENGTH_INFO[r.settings.length] || [''])[0]}`) : null),
       h('div', { class: 'row' }, badge(w[0], w[1], w[2]), h('span', { class: 'small' }, `${done} of ${r.steps.length} steps`), h('span', { class: 'small muted' }, '⏱ ', h('span', { class: 'mb-elapsed' }, fmtElapsed(sinceMs(r.started_at, runEnd(r))))),
-        r.eta && ['running', 'waiting', 'queued', 'pausing'].includes(r.status) ? h('span', { class: 'small mb-eta', 'data-testid': 'mb-eta', title: `Estimated from this run's measured times: ${r.eta.per_chapter_s} s per chapter, ${r.eta.calls} AI answers so far (${r.eta.avg_call_s} s each on average)` },
-          `⏳ ${etaWords(r.eta.seconds_left)} left · ${r.eta.chapters_left} chapter(s) to go`) : null),
+        (r.eta || r.left_s != null) && ['running', 'waiting', 'queued', 'pausing'].includes(r.status) ? h('span', { class: 'small mb-eta', 'data-testid': 'mb-eta', title: r.eta ? `Estimated from this run's measured times: ${r.eta.per_chapter_s} s per chapter, ${r.eta.calls} AI answers so far (${r.eta.avg_call_s} s each on average)` : 'The estimate made before the start, corrected by how fast this run went so far' },
+          // ⏳ run_clock.py: the whole run's time left (every step, the end steps too); the chapters still to go (P15)
+          `⏳ ${etaWords(r.left_s != null ? r.left_s : r.eta.seconds_left)} left`, r.total_estimate_s ? ` (estimate at start: ${RS.durWords(r.total_estimate_s)})` : '', r.eta ? ` · ${r.eta.chapters_left} chapter(s) to go` : '') : null),
       runVariantLine(r), runCostLine(gridUI(), r), CC.runLine(s7c(), r)),
     h('progress', { class: 'mb-bar', max: String(r.steps.length), value: String(done), 'aria-label': `${done} of ${r.steps.length} steps done` }));
   const phase = h('p', { class: `mb-phase ${r.status}`, 'aria-live': 'polite' },
