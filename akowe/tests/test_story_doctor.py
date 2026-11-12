@@ -189,7 +189,7 @@ def test_a_revision_the_ai_cannot_make_leaves_the_plan_and_never_stops_the_book(
     assert run["status"] == "done", run.get("problem")
     mem = app.autobook.get(run["id"])["story_doctor"]
     assert mem["revisions"] == 1 and len(mem["rounds"]) == 1
-    assert "stays as it was" in mem["line"] or "did not score higher" in mem["line"]
+    assert "the AI's revision did not pass Akọwe's checks, so the plan stays as it was" in mem["line"]
     assert "DOCTOR_REVISION_FAILED" in _codes(app, run)
     bp = BookPath(app.engine, "author", run["project_id"], "main")
     head = bp.rec(bp.outline()["record_id"])

@@ -416,7 +416,7 @@ def line(mem: dict) -> str | None:
     if mem.get("own_text"):
         return (f"🩺 Plan scored {first}/10 by {len(rounds[0]['by'])} AI(s) (target {target}). The outline is your own "
                 "text, so the story doctor only scored it — its notes are in the book report.")
-    if not rev:
+    if not rev or len(rounds) == 1:  # no revision, or none that could be scored (it failed or was refused)
         if first >= target:
             return f"🩺 Plan scored {first}/10 — ready to write from (target {target})."
         why = mem.get("why") or "no revision could be made"
@@ -518,7 +518,7 @@ def _revise(svc, run, st, mem, rid: str, note: str) -> bool:
         r = bp.dispatch("B11", "UPDATE", base_ref=head["ref"], payload=copy.deepcopy(head.get("data") or {}))
         if r.get("status") != "DRAFT" or not r.get("output_refs"):
             mem["why"] = "the outline could not be opened for revision"
-            log.info("story doctor: draft copy refused: %s", "; ".join(problems(r))[:200])
+            log.info("story doctor: draft copy refused (%s, %d problem(s))", r.get("status"), len(problems(r)))
             return False
         svc._made(run, r["output_refs"][0])  # noqa: SLF001 - the AI's own text, unchanged
     k = mem["revisions"] + 1
@@ -591,7 +591,8 @@ def _restore_best(svc, run, mem) -> None:
     # the best text again as a new revision (also when only a stray draft of a stopped revision waits: nothing waits)
     r = bp.dispatch("B11", "UPDATE", base_ref=head["ref"], payload=copy.deepcopy(best.get("data") or {}))
     if r.get("status") != "DRAFT" or not r.get("output_refs"):
-        log.warning("story doctor: the best outline could not be put back: %s", "; ".join(problems(r))[:200])
+        log.warning("story doctor: the best outline could not be put back (%s, %d problem(s))", r.get("status"),
+                    len(problems(r)))
         return
     ref = r["output_refs"][0]
     bp.dispatch("B11", "VALIDATE", base_ref=ref, payload=candidate_payload(ref, None))
