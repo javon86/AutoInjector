@@ -55,6 +55,7 @@ const voiceProvider = require("./voice-provider");
 const voiceRead = require("./voice-read"); // 🎤 / 🔊 in the control panel: reply lists + read-aloud text clean-up
 const voiceCatalog = require("./voice-catalog"); // 🔊 Better voices: recommended free piper voices + optional ✨ Kokoro
 const { createVoiceDownloads } = require("./voice-downloads"); // ⬇ those voices, only when the user presses ⬇
+const voicePython = require("./voice-python"); // which Python runs the voice engine (keeps a working one)
 const imageProvider = require("./image-provider");
 const videoProvider = require("./video-provider");
 const setupManager = require("./setup-manager");
@@ -8932,12 +8933,38 @@ async function startManagedInterpreter(explicitCommand) {
 // The Python the app runs voice_shim.py with: AUTOINJECTOR_VOICE_SPAWN when set (taken as is), else the same Python
 // the Setup Wizard pip-installs into (setupManager.resolvePython), so the voice engine, piper, whisper and the optional
 // Kokoro all live in ONE interpreter. -> { cmd, pre }
+// Never break a voice set-up that already works: voice-python.js keeps the remembered Python while it still has the
+// voice packages, else takes one that already has them (plain python / python3 — what older versions used — then
+// the installer's pick), else the installer's pick. The choice is remembered in the voice settings; probes are cached.
+let voicePyProbe = null;
+let voicePyChoice = null;
+function resetVoicePythonChoice() { voicePyChoice = null; try { if (voicePyProbe && voicePyProbe.clear) voicePyProbe.clear(); } catch (_) {} }
+async function chooseVoicePythonNow() {
+  if (!voicePyProbe) voicePyProbe = voicePython.makeProbe();
+  let pick = null;
+  try { const py = await setupManager.resolvePython(); if (py && !py.missing && py.cmd) pick = { cmd: py.cmd, pre: Array.isArray(py.pre) ? py.pre : [] }; } catch (_) {}
+  const win = process.platform === "win32";
+  const plain = [{ cmd: setupManager.pythonBin(), pre: [] }, { cmd: win ? "python" : "python3", pre: [] }, { cmd: win ? "python3" : "python", pre: [] }];
+  const remembered = voiceProvider.getSettings().python;
+  const c = await voicePython.chooseVoicePython({ remembered, plain, installerPick: pick, probe: voicePyProbe });
+  if (!c) return null;
+  const chosen = { cmd: c.cmd, pre: c.pre };
+  if (!remembered || remembered.cmd !== chosen.cmd || remembered.pre.join(" ") !== chosen.pre.join(" ")) {
+    voiceProvider.setSettings({ python: chosen });
+    state.voiceConfig = voiceProvider.getSettings();
+    saveStateDebounced();
+  }
+  logEvent("voice-python", { why: c.why, exe: path.basename(chosen.cmd), pre: chosen.pre.join(" ") || null });
+  return chosen;
+}
 async function voiceLaunchPython(explicitCommand) {
   const spawnEnv = process.env.AUTOINJECTOR_VOICE_SPAWN;
   if (spawnEnv) return { cmd: spawnEnv, pre: [] };
   if (explicitCommand && explicitCommand !== setupManager.pythonBin()) return { cmd: explicitCommand, pre: [] };
-  try { const py = await setupManager.resolvePython(); if (py && !py.missing && py.cmd) return { cmd: py.cmd, pre: Array.isArray(py.pre) ? py.pre : [] }; } catch (_) {}
-  return explicitCommand ? { cmd: explicitCommand, pre: [] } : null;
+  if (!voicePyChoice) voicePyChoice = chooseVoicePythonNow().catch(() => null);
+  const c = await voicePyChoice;
+  if (!c) voicePyChoice = null;
+  return c || (explicitCommand ? { cmd: explicitCommand, pre: [] } : null);
 }
 async function startManagedVoice(explicitCommand) {
   if (!explicitCommand && !process.env.AUTOINJECTOR_VOICE_SPAWN) return;
@@ -8999,6 +9026,7 @@ async function autoWireAfterSetup(target) {
     await startManagedInterpreter(py);
     logEvent("setup-autowire", { target, wired: "interpreter-shim" });
   } else if (target === "voice" || target === "voice-model") {
+    if (target === "voice") resetVoicePythonChoice(); // the packages may now be in another Python: look again
     // (Re)start the voice shim; if a model was just downloaded, point at it.
     let ttsModel = process.env.AUTOINJECTOR_VOICE_TTS_MODEL || "";
     try {

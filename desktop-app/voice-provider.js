@@ -41,6 +41,9 @@ let settings = {
   engine: 'piper',
   kokoroDevice: 'cpu',
   kokoroVoices: { butler: '', chatgpt: '', claude: '', gemini: '' },
+  // the Python the voice engine runs with ({ cmd, pre } — chosen by voice-python.js and remembered so a working
+  // set-up keeps the same one); null = not chosen yet
+  python: null,
 };
 const ENGINES = ['piper', 'kokoro'];
 const KOKORO_VOICE_RE = /^[a-z]{2}_[a-z0-9]{1,24}$/;
@@ -49,7 +52,7 @@ const managed = { child: null, lastError: '' };
 // The address the managed shim listens on when nothing else is configured.
 const DEFAULT_ENDPOINT = 'http://127.0.0.1:8232';
 
-function getSettings() { return { ...settings, voices: { ...settings.voices }, browserVoices: { ...settings.browserVoices }, kokoroVoices: { ...settings.kokoroVoices } }; }
+function getSettings() { return { ...settings, voices: { ...settings.voices }, browserVoices: { ...settings.browserVoices }, kokoroVoices: { ...settings.kokoroVoices }, python: settings.python ? { cmd: settings.python.cmd, pre: settings.python.pre.slice() } : null }; }
 function setSettings(patch) {
   if (!patch || typeof patch !== 'object') return getSettings();
   for (const k of ['enabled', 'speakOnAck']) if (k in patch) settings[k] = !!patch[k];
@@ -62,6 +65,12 @@ function setSettings(patch) {
   if ('rate' in patch) { const n = Number(patch.rate); if (Number.isFinite(n)) settings.rate = Math.max(0.5, Math.min(2, Math.round(n * 100) / 100)); }
   if (patch.browserVoices && typeof patch.browserVoices === 'object') { for (const who of Object.keys(settings.browserVoices)) if (who in patch.browserVoices) settings.browserVoices[who] = String(patch.browserVoices[who] || '').slice(0, 200); }
   if ('engine' in patch && ENGINES.includes(patch.engine)) settings.engine = patch.engine;
+  if ('python' in patch) {
+    const p = patch.python;
+    settings.python = p && typeof p.cmd === 'string' && p.cmd.trim() && p.cmd.length <= 500
+      ? { cmd: p.cmd.trim(), pre: (Array.isArray(p.pre) ? p.pre : []).filter((x) => typeof x === 'string' && x.length < 40).slice(0, 4) }
+      : null;
+  }
   if ('kokoroDevice' in patch && (patch.kokoroDevice === 'cpu' || patch.kokoroDevice === 'gpu')) settings.kokoroDevice = patch.kokoroDevice;
   if (patch.kokoroVoices && typeof patch.kokoroVoices === 'object') {
     for (const who of Object.keys(settings.kokoroVoices)) if (who in patch.kokoroVoices) { const v = String(patch.kokoroVoices[who] || ''); settings.kokoroVoices[who] = KOKORO_VOICE_RE.test(v) ? v : ''; }

@@ -561,8 +561,12 @@ replaced by what you type.
   `.onnx.json` settings first and checked, a file already there never replaced) and "Use for" a speaker. Piper runs
   on the processor, only while reading. The default per speaker prefers the recommended voices (Alfred
   en_GB-alan, ChatGPT en_US-lessac-high, Claude en_US-ryan-high, Gemini en_GB-alba).
-- **One Python for the voice engine:** the app starts `voice_shim.py` with the same Python the Setup Wizard
-  installs into (the one it picks for pip), so piper, whisper and Kokoro always land where the engine runs.
+- **One Python for the voice engine** (code: `desktop-app/voice-python.js`): a voice set-up that already works is
+  never switched. The app keeps the Python it used before while that still has the voice packages; otherwise it
+  takes one that already has them (plain `python`/`python3` first, then the installer's pick such as `py -3.12`);
+  with nothing installed anywhere, the installer's pick (where the Setup Wizard installs them). A quick, cached check
+  (`find_spec("faster_whisper")` / `piper`) decides; the choice is remembered in the voice settings.
+  `AUTOINJECTOR_VOICE_SPAWN` still overrides it. Kokoro is installed into that same Python.
 - **✨ Kokoro (optional, best quality):** "Install best-quality voice" pip-installs `kokoro-onnx` into the voice
   engine's own Python (the one the running engine reports in `/health`, else the one the app starts it with),
   downloads its two model files (~350 MB) into `models/voice/kokoro`, then asks the engine whether it now finds

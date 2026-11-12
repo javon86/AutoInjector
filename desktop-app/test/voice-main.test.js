@@ -209,11 +209,17 @@ fs.writeFileSync(path.join(mock.__userDataDir, 'autoinjector-state.json'), JSON.
     // 3) the voice engine isn't running: install into the Python the app starts it with (same lookup as the launch)
     voice.setSettings({ endpoint: `http://127.0.0.1:${await freePort()}` });
     sm.resolvePython = async () => ({ cmd: 'py', pre: ['-3.12'], version: '3.12', compatible: true });
+    const vpy = require('../voice-python');
+    const realMakeProbe = vpy.makeProbe;
+    vpy.makeProbe = () => { const f = async (c) => (c.cmd === 'py' ? { runs: true, has: false } : /python/.test(c.cmd) ? { runs: true, has: false } : { runs: false, has: false }); f.clear = () => {}; return f; };
     sm.pipInstall = async (pkgs, onP, o) => { pipInto = o && o.python; return { ok: true }; };
     pipInto = null;
     r = await call('voice:kokoro-install');
-    assert(pipInto && pipInto.cmd === 'py' && pipInto.pre.join(' ') === '-3.12', `engine not running: installed into the Python the app launches the voice engine with (${pipInto && [pipInto.cmd, ...pipInto.pre].join(' ')})`);
+    assert(pipInto && pipInto.cmd === 'py' && pipInto.pre.join(' ') === '-3.12', `engine not running: installed into the Python the app chose for the voice engine (nothing installed anywhere -> the installer's pick) (${pipInto && [pipInto.cmd, ...pipInto.pre].join(' ')})`);
     assert(r.ok && r.unchecked && /couldn't be checked/.test(r.message), 'and it says it could not be checked yet');
+    const remembered = voice.getSettings().python;
+    assert(remembered && remembered.cmd === 'py' && remembered.pre.join(' ') === '-3.12', 'the chosen Python is remembered in the voice settings (so it keeps being used)');
+    vpy.makeProbe = realMakeProbe;
     sm.pipInstall = realPip; sm.resolvePython = realResolve;
     const shim5 = await startFakeVoiceShim({ piper: true, kokoro: 'ready' });
     voice.setSettings({ endpoint: shim5.base, engine: 'piper', voices: { claude: '' } });
