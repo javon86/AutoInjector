@@ -310,7 +310,12 @@ under **🩺 Plan check** on the ⚡ Make-a-book screen (both on by default; swi
   usual, and scored again — at most 2 times unless you pick 1 or 3. The best-scoring plan is kept. Your own idea and
   your lock list are never replaced, and an outline you wrote yourself is only scored. The run window says what
   happened, e.g. "🩺 Plan scored 7.4 → 8.6 after 1 revision", and so does the book report. About 3 to 8 more AI
-  answers.
+  answers. It also runs when you approved the outline yourself (✔ Approve anyway or accept the change).
+- **Fewer stops on the plan:** when the AI reviewer keeps objecting to the AI's main plot or chapter outline, the
+  run does not stop to ask you any more: the story doctor revises the outline with those objections, and the
+  revision is reviewed again. You are still asked about your own text, point of view, tense, content limits, a change
+  to an approved fact, or when the doctor's revision cannot settle it. To be asked every time, switch off "Let the
+  story doctor settle the plan reviewer's objections".
 - **Make sure every character sounds different:** each character already gets a voice card (how they talk: sentence
   length, words, favourite phrases, what they never say, how they dodge a question). Akọwe now compares the cards
   without AI; only when two sound alike or one is too thin does the AI make them distinct, in one answer. Cards you

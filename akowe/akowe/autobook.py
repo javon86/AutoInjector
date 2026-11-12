@@ -1716,9 +1716,20 @@ class AutoBookService(_Runner):
             if self._realign_subject(run, bp, head, label, res["review"].get("reasons") or []):
                 continue  # reviewed again with the canon's ID; no AI fix used up
             loop = self._loop_decision(run, head, label, res["review"], chapter_id)
+            from . import story_doctor  # noqa: PLC0415 - 🩺 the plan's quality gate (take_objections)
             if loop is not None:  # 🔁 going round in circles (or an approved fact would change): the author decides
-                raise loop
+                if loop.problem.get("code") == "DOCTOR_TAKES":  # 🩺 the story doctor takes the objections
+                    took = story_doctor.take_objections(self, run, st, head, label, res["review"],
+                                                        loop.problem.get("kind"))
+                    if took is not None:
+                        return took
+                else:
+                    raise loop
             n = int(counts.get(rid, 0))
+            if n >= MAX_FIXES and head["module_id"] in ("B03", "B11"):
+                took = story_doctor.take_objections(self, run, st, head, label, res["review"], None)  # 🩺
+                if took is not None:
+                    return took
             if n >= MAX_FIXES:
                 reasons = res["review"].get("reasons") or []
                 raise StepProblem("REVIEW_NOT_PASSED",
@@ -1783,6 +1794,9 @@ class AutoBookService(_Runner):
             kind = "canon"
         if kind is None:
             return None
+        from . import story_doctor  # noqa: PLC0415
+        if story_doctor.can_take(self, run, head, review, kind):  # 🩺 the doctor takes it: nobody is asked
+            return StepProblem("DOCTOR_TAKES", "", kind=kind)
         subject = self._subject(head, chapter_id)
         d = review_loop.decision(kind=kind, subject=subject, review=review, prev_review=(prev or {}).get("review"),
                                  match=match, prev_data=prev_data, cur_data=head.get("data"),

@@ -1443,7 +1443,7 @@ def render_markdown(rep: dict) -> str:
     L.append("")
     if rep.get("beta"):  # 👥 idea #14: the newest beta read or panel (beta_reader.with_beta adds it for downloads)
         from . import beta_reader  # noqa: PLC0415
-        L += beta_reader.report_markdown(rep["beta"], (rep.get("version") or {}).get("key"))
+        L += beta_reader.report_markdown(rep["beta"], rep.get("book_key_now") or (rep.get("version") or {}).get("key"))
     tr = rep.get("trend") or {}
     if tr.get("text"):
         L += ["## 📈 Your books over time", "", tr["text"], ""]
