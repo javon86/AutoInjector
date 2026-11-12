@@ -7307,6 +7307,16 @@ ipcMain.handle("voice:sample", async (_evt, args = {}) => {
 // ✨ Install the best-quality voice (Kokoro): the kokoro-onnx package into the voice engine's Python, then its two
 // model files (~350 MB, resumable) into models/voice/kokoro, then a restart of the voice engine. Optional, never
 // required anywhere: any failure leaves piper and the built-in voices working exactly as before.
+// The Python to pip-install Kokoro into: the one the running voice shim reports (sys.executable — exact), else the
+// one the app starts the shim with (voiceLaunchPython). -> { cmd, pre, from } or null
+async function kokoroTargetPython() {
+  let h = null;
+  try { h = await voiceProvider.health({ timeoutMs: 1200 }); } catch (_) { h = null; }
+  if (h && h.ok && typeof h.python === "string" && h.python.trim()) return { cmd: h.python.trim(), pre: [], from: "shim" };
+  const spawnCmd = process.env.AUTOINJECTOR_VOICE_SPAWN || setupManager.pythonBin();
+  const py = await voiceLaunchPython(spawnCmd);
+  return py ? Object.assign({}, py, { from: "launch" }) : null;
+}
 async function installKokoro() {
   if (kokoroJob.running) return { ok: false, error: "ALREADY_RUNNING", message: "The best-quality voice is already being installed." };
   kokoroJob.running = true;
@@ -7314,9 +7324,17 @@ async function installKokoro() {
   try {
     logEvent("voice-kokoro-install", { step: "start" });
     kokoroJob.step = "package";
-    say("install", { message: "Step 1 of 2: installing the Kokoro engine (a few minutes)…" });
+    // into the SAME Python the voice engine runs in: the one it reports when running, else the one the app starts it with
+    const target = await kokoroTargetPython();
+    if (!target) {
+      const message = "Couldn't find the Python the voice engine uses. Install the voice engine first (Setup Wizard → Installs → \"Voice engine\"), then try again.";
+      say("error", { message });
+      return { ok: false, error: "NO_PYTHON", message };
+    }
+    logEvent("voice-kokoro-install", { step: "python", from: target.from });
+    say("install", { message: "Step 1 of 2: installing the Kokoro engine into the voice engine (a few minutes)…" });
     let n = 0;
-    const pip = await setupManager.pipInstall(voiceCatalog.KOKORO.packages, (line) => { if (++n % 3 === 0) say("install", { message: `Step 1 of 2: installing… ${String(line).replace(/\s+/g, " ").slice(0, 90)}` }); });
+    const pip = await setupManager.pipInstall(voiceCatalog.KOKORO.packages, (line) => { if (++n % 3 === 0) say("install", { message: `Step 1 of 2: installing… ${String(line).replace(/\s+/g, " ").slice(0, 90)}` }); }, { python: target });
     if (!pip.ok) {
       const err = voiceProvider.redactPaths(String(pip.error || "")).slice(0, 200);
       logEvent("voice-kokoro-install", { step: "package-failed", severity: "warning" });
@@ -7328,6 +7346,22 @@ async function installKokoro() {
     if (!r.ok) return r;
     kokoroJob.step = "restart";
     try { if (voiceProvider.status().managed) { voiceProvider.stopManaged(); await startManagedVoice(setupManager.pythonBin()); } } catch (_) {}
+    // check it: the voice engine itself must now say Kokoro is there (start it if it isn't running)
+    let h = null;
+    try { h = await ensureVoiceShim({ force: true, timeoutMs: 2500 }); } catch (_) { h = null; }
+    if (!h || !h.ok) {
+      logEvent("voice-kokoro-install", { step: "done-unchecked", severity: "warning" });
+      const message = "The best-quality voice is installed, but the voice engine isn't running so it couldn't be checked. It will be used once the voice engine starts.";
+      say("done", { message });
+      return { ok: true, unchecked: true, message };
+    }
+    if (!h.kokoro || !h.kokoro_ready) {
+      const why = !h.kokoro ? "the voice engine still can't find the Kokoro engine (it may use a different Python)" : "the voice engine can't find Kokoro's voice file";
+      logEvent("voice-kokoro-install", { step: "not-found", pkg: !!h.kokoro, model: !!h.kokoro_model, severity: "warning" });
+      const message = `Installed, but ${why}. Your other voices still work. Restart AutoInjector and try Install again; if it keeps happening, reinstall the voice engine (Setup Wizard → Installs → "Voice engine").`;
+      say("error", { message });
+      return { ok: false, error: "KOKORO_NOT_FOUND", message };
+    }
     logEvent("voice-kokoro-install", { step: "done" });
     say("done", { message: "The best-quality voice is installed. Tick \"Use it\" to switch it on." });
     return { ok: true, message: "The best-quality voice is installed." };
@@ -8895,15 +8929,27 @@ async function startManagedInterpreter(explicitCommand) {
 // N2: like the interpreter shim, the app can run the local voice shim itself.
 // AUTOINJECTOR_VOICE_SPAWN is the command (e.g. "python"); the shim path + port
 // follow. Spawned on ready, stopped on quit; a failure never blocks startup.
+// The Python the app runs voice_shim.py with: AUTOINJECTOR_VOICE_SPAWN when set (taken as is), else the same Python
+// the Setup Wizard pip-installs into (setupManager.resolvePython), so the voice engine, piper, whisper and the optional
+// Kokoro all live in ONE interpreter. -> { cmd, pre }
+async function voiceLaunchPython(explicitCommand) {
+  const spawnEnv = process.env.AUTOINJECTOR_VOICE_SPAWN;
+  if (spawnEnv) return { cmd: spawnEnv, pre: [] };
+  if (explicitCommand && explicitCommand !== setupManager.pythonBin()) return { cmd: explicitCommand, pre: [] };
+  try { const py = await setupManager.resolvePython(); if (py && !py.missing && py.cmd) return { cmd: py.cmd, pre: Array.isArray(py.pre) ? py.pre : [] }; } catch (_) {}
+  return explicitCommand ? { cmd: explicitCommand, pre: [] } : null;
+}
 async function startManagedVoice(explicitCommand) {
-  const command = explicitCommand || process.env.AUTOINJECTOR_VOICE_SPAWN;
-  if (!command) return;
+  if (!explicitCommand && !process.env.AUTOINJECTOR_VOICE_SPAWN) return;
+  const py = await voiceLaunchPython(explicitCommand);
+  if (!py) return;
+  const command = py.cmd;
   const shim = process.env.AUTOINJECTOR_VOICE_SHIM || path.join(__dirname, "..", "integrations", "voice", "voice_shim.py");
   const port = Number(process.env.AUTOINJECTOR_VOICE_PORT) || 8232;
   try {
     const r = await voiceProvider.startManaged({
       command,
-      args: [shim, "--port", String(port)],
+      args: [...py.pre, shim, "--port", String(port)],
       port,
       env: {
         VOICE_TTS_MODEL: process.env.AUTOINJECTOR_VOICE_TTS_MODEL || "",

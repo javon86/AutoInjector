@@ -27,6 +27,7 @@ function startFakeVoiceShim(opts = {}) {
     delayMs: Number(opts.delayMs != null ? opts.delayMs : process.env.FAKE_VOICE_DELAY_MS) || 0,
     stt: opts.stt !== false,
     kokoro: opts.kokoro != null ? opts.kokoro : (process.env.FAKE_VOICE_KOKORO || ''), // '' | 'ready' | 'fail'
+    python: opts.python != null ? opts.python : '/fake/voice-engine/python', // the interpreter it says it runs in
   };
   const calls = [];
   let loaded = false;
@@ -36,7 +37,7 @@ function startFakeVoiceShim(opts = {}) {
     req.on('end', async () => {
       const send = (code, obj) => { const b = Buffer.from(JSON.stringify(obj)); res.writeHead(code, { 'Content-Type': 'application/json', 'Content-Length': b.length, Connection: 'close' }); res.end(b); };
       const url = (req.url || '').replace(/\/+$/, '') || '/';
-      if (req.method === 'GET' && (url === '/' || url === '/health')) return send(200, { ok: true, service: 'voice-shim', fake: true, tts: true, stt: o.stt, piper_voices: o.piper ? 2 : 0, stt_model: 'base.en', stt_loaded: loaded, stt_cached: false, stt_mb: 145, kokoro: !!o.kokoro, kokoro_model: !!o.kokoro, kokoro_ready: !!o.kokoro, kokoro_loaded: false, kokoro_device: '' });
+      if (req.method === 'GET' && (url === '/' || url === '/health')) return send(200, { ok: true, service: 'voice-shim', fake: true, tts: true, stt: o.stt, piper_voices: o.piper ? 2 : 0, stt_model: 'base.en', stt_loaded: loaded, stt_cached: false, stt_mb: 145, kokoro: !!o.kokoro, kokoro_model: !!o.kokoro, kokoro_ready: !!o.kokoro, kokoro_loaded: false, kokoro_device: '', python: o.python });
       if (req.method === 'GET' && url === '/voices') return send(200, { ok: true, voices: o.piper ? ['en_US-lessac-medium', 'en_GB-alan-medium'] : [] });
       if (req.method === 'GET' && url === '/__calls') return send(200, { ok: true, calls });
       if (req.method !== 'POST') return send(404, { ok: false, error: 'NOT_FOUND' });

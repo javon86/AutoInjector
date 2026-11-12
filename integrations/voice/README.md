@@ -71,7 +71,8 @@ GET  /voices                                                                    
   a graphics-card onnxruntime provider when one is installed, else the processor. Any problem (no package, no model,
   an unknown voice, a crash) falls back to piper with the same request and adds `fallback_from:"kokoro"` and
   `kokoro_error`. `/health` adds `kokoro`, `kokoro_model`, `kokoro_ready`, `kokoro_loaded`, `kokoro_device`;
-  `/voices` adds `kokoro_voices` once it is loaded. Tests with a fake Kokoro: `python -m pytest -q integrations/voice`.
+  `/voices` adds `kokoro_voices` once it is loaded. `/health` also reports `python` (`sys.executable`): the app
+  installs Kokoro into exactly that interpreter. Tests with a fake Kokoro: `python -m pytest -q integrations/voice`.
 - Errors are codes (`NEED_AUDIO`, `BAD_AUDIO`, `NO_STT`, `STT_FAILED`, `NEED_TEXT`, `BAD_VOICE`, `TEXT_TOO_LONG`,
   `NO_TTS`, `NO_TTS_MODEL`, `TTS_FAILED`); the app turns them into plain words. A `voice` is only ever a name from
   the folder, never a path.

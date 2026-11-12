@@ -222,3 +222,9 @@ def test_plain_requests_still_use_piper(shim, monkeypatch):
     r = shim.post("/synthesize", {"text": "Hello."})
     assert r["ok"] and r["engine"] == "piper" and "fallback_from" not in r
     assert FakeKokoro.calls == []
+
+
+def test_health_reports_the_shims_own_python(shim, monkeypatch):
+    _install(monkeypatch, kokoro=False)
+    h = shim.get("/health")
+    assert h["python"] == sys.executable, "the app installs Kokoro into exactly this interpreter"

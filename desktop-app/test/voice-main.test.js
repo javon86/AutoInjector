@@ -186,17 +186,35 @@ fs.writeFileSync(path.join(mock.__userDataDir, 'autoinjector-state.json'), JSON.
 
     console.log('\n== ✨ Kokoro: optional install, engine choice, fallback ==');
     const sm = require('../setup-manager');
-    const realPip = sm.pipInstall;
+    const realPip = sm.pipInstall, realResolve = sm.resolvePython;
+    // 1) the voice engine is running and says which Python it is: Kokoro goes into exactly that one, then is checked
+    const eng = await startFakeVoiceShim({ piper: true, kokoro: '', python: 'C:/AutoInjector/voice-env/python.exe' });
+    voice.setSettings({ endpoint: eng.base });
     sm.pipInstall = async () => ({ ok: false, error: 'pip exited 1' });
     r = await call('voice:kokoro-install');
     assert(!r.ok && /Couldn't install the Kokoro engine/.test(r.message) && /still work/.test(r.message), 'a failed engine install says so plainly — the other voices still work');
     assert(!fs.existsSync(path.join(vdir, 'kokoro', 'kokoro-v1.0.onnx')), 'and nothing was downloaded');
-    let pipAsked = null;
-    sm.pipInstall = async (pkgs, onP) => { pipAsked = pkgs; onP('Collecting kokoro-onnx'); return { ok: true }; };
+    let pipAsked = null, pipInto = null;
+    sm.pipInstall = async (pkgs, onP, o) => { pipAsked = pkgs; pipInto = o && o.python; onP('Collecting kokoro-onnx'); eng.options.kokoro = 'ready'; return { ok: true }; };
     r = await call('voice:kokoro-install');
-    sm.pipInstall = realPip;
-    assert(r.ok && pipAsked && pipAsked.includes('kokoro-onnx'), 'Install: the kokoro-onnx package goes into the voice engine\'s Python');
+    assert(r.ok && !r.unchecked && pipAsked && pipAsked.includes('kokoro-onnx'), 'Install: the kokoro-onnx package is installed and the voice engine then finds it');
+    assert(pipInto && pipInto.cmd === 'C:/AutoInjector/voice-env/python.exe' && pipInto.pre.length === 0, `into the SAME Python the running voice engine reported (${pipInto && pipInto.cmd})`);
     assert(fs.existsSync(path.join(vdir, 'kokoro', 'kokoro-v1.0.onnx')) && fs.existsSync(path.join(vdir, 'kokoro', 'voices-v1.0.bin')), 'then its model files go into models/voice/kokoro');
+    // 2) installed, but the engine still can't import it (another Python): said plainly, not "installed"
+    eng.options.kokoro = '';
+    sm.pipInstall = async () => ({ ok: true });
+    r = await call('voice:kokoro-install');
+    assert(!r.ok && r.error === 'KOKORO_NOT_FOUND' && /still can't find the Kokoro engine/.test(r.message) && /other voices still work/.test(r.message), `the engine still can't find it -> plain words ("${r.message}")`);
+    await eng.close();
+    // 3) the voice engine isn't running: install into the Python the app starts it with (same lookup as the launch)
+    voice.setSettings({ endpoint: `http://127.0.0.1:${await freePort()}` });
+    sm.resolvePython = async () => ({ cmd: 'py', pre: ['-3.12'], version: '3.12', compatible: true });
+    sm.pipInstall = async (pkgs, onP, o) => { pipInto = o && o.python; return { ok: true }; };
+    pipInto = null;
+    r = await call('voice:kokoro-install');
+    assert(pipInto && pipInto.cmd === 'py' && pipInto.pre.join(' ') === '-3.12', `engine not running: installed into the Python the app launches the voice engine with (${pipInto && [pipInto.cmd, ...pipInto.pre].join(' ')})`);
+    assert(r.ok && r.unchecked && /couldn't be checked/.test(r.message), 'and it says it could not be checked yet');
+    sm.pipInstall = realPip; sm.resolvePython = realResolve;
     const shim5 = await startFakeVoiceShim({ piper: true, kokoro: 'ready' });
     voice.setSettings({ endpoint: shim5.base, engine: 'piper', voices: { claude: '' } });
     r = await call('voice:synthesize', { text: 'Hello.', who: 'claude' });

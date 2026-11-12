@@ -192,11 +192,20 @@ def _kokoro_files():
 
 
 def _have_kokoro_pkg():
-    try:
-        import kokoro_onnx  # noqa: F401
-        return "kokoro-onnx"
-    except Exception:
-        return None
+    for attempt in (0, 1):
+        try:
+            import kokoro_onnx  # noqa: F401
+            return "kokoro-onnx"
+        except Exception:
+            if attempt:
+                return None
+            # installed while this shim was running? let Python look at site-packages again
+            try:
+                import importlib
+                importlib.invalidate_caches()
+            except Exception:
+                return None
+    return None
 
 
 def _kokoro_ready():
@@ -516,7 +525,9 @@ class Handler(BaseHTTPRequestHandler):
                              "stt_mb": _STT_MB.get(name, 0),
                              "kokoro": bool(_have_kokoro_pkg()), "kokoro_model": bool(_kokoro_files()),
                              "kokoro_ready": _kokoro_ready(), "kokoro_loaded": _KOKORO["engine"] is not None,
-                             "kokoro_device": _KOKORO["device"] or ""})
+                             "kokoro_device": _KOKORO["device"] or "",
+                             # the interpreter this shim runs in: the app installs extras (Kokoro) into THIS one
+                             "python": sys.executable or ""})
         elif self.path.rstrip("/") == "/voices":
             self._send(200, {"ok": True, "voices": _list_voices(), "kokoro_voices": _kokoro_voice_list()})
         else:

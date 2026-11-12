@@ -485,7 +485,8 @@ men and women), each with its size:
   it the PC's own voices read.
 
 **✨ Best quality (optional): Kokoro.** Even more natural voices. Press **Install best-quality voice (Kokoro,
-~350 MB)** — it adds the Kokoro engine to the voice engine and downloads its voice file, with progress. Then tick
+~350 MB)** — it adds the Kokoro engine to the voice engine and downloads its voice file, with progress, then checks
+that the voice engine finds it (if not, it says so and your other voices keep working). Then tick
 **Use it**, choose where it runs — **Processor** (recommended: it leaves the graphics card free for pictures and
 video) or **Graphics card** (faster, but pictures and video wait) — and a Kokoro voice for each speaker, with ▶ to try
 it. Nothing needs Kokoro: if it has any problem, a Piper voice reads instead, and if that fails too, the PC's own

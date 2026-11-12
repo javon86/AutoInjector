@@ -561,8 +561,12 @@ replaced by what you type.
   `.onnx.json` settings first and checked, a file already there never replaced) and "Use for" a speaker. Piper runs
   on the processor, only while reading. The default per speaker prefers the recommended voices (Alfred
   en_GB-alan, ChatGPT en_US-lessac-high, Claude en_US-ryan-high, Gemini en_GB-alba).
+- **One Python for the voice engine:** the app starts `voice_shim.py` with the same Python the Setup Wizard
+  installs into (the one it picks for pip), so piper, whisper and Kokoro always land where the engine runs.
 - **✨ Kokoro (optional, best quality):** "Install best-quality voice" pip-installs `kokoro-onnx` into the voice
-  engine's Python and downloads its two model files (~350 MB) into `models/voice/kokoro`. With **Use it** ticked,
+  engine's own Python (the one the running engine reports in `/health`, else the one the app starts it with),
+  downloads its two model files (~350 MB) into `models/voice/kokoro`, then asks the engine whether it now finds
+  Kokoro — and says plainly if it doesn't. With **Use it** ticked,
   read-aloud asks the voice shim for Kokoro (setting `engine`); it runs on the processor by default (half the cores,
   so the PC stays usable, and the graphics card stays free) or on the graphics card when picked and available.
   Fallback order on any problem: Kokoro → Piper → the PC's built-in voices. Nothing requires it. No internet use

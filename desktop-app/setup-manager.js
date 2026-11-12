@@ -406,9 +406,12 @@ function _download(fileUrl, destPath, onProgress, redirects) {
 
 // pip-install fixed packages into the chosen Python, streaming pip's lines to onProgress. Also used outside the
 // wizard's targets (the optional ✨ Kokoro voice in the 🔊 Voice box), so it is exported.
-async function pipInstall(packages, onProgress) {
+// opts.python ({ cmd, pre? }): install into exactly that interpreter (e.g. the one the voice shim runs in) instead
+// of the best one found on this PC.
+async function pipInstall(packages, onProgress, opts = {}) {
   const say = typeof onProgress === 'function' ? onProgress : () => {};
-  const py = await resolvePython();
+  const want = opts && opts.python && typeof opts.python.cmd === 'string' && opts.python.cmd ? opts.python : null;
+  const py = want ? { cmd: want.cmd, pre: Array.isArray(want.pre) ? want.pre : [], version: want.version || null, compatible: true } : await resolvePython();
   if (py.missing) return { ok: false, error: 'No Python found. Install Python 3.12 from python.org, then try again.' };
   say(`Using Python ${py.version || '?'} (${[py.cmd, ...py.pre].join(' ')})`);
   if (!py.compatible) {
