@@ -11,7 +11,8 @@ around which chapter — a limit will probably pause it:
   per AI per checkpoint, up to its decisions per run — only when the author does not answer), ✍ chapter 1 rewritten
   last (1 rewrite + the reviewers' re-read + 1 review) and the two first pages (2 answers), 📏 the chapter polish
   (≤ 1 rewrite per chapter, only when needed), the 🔁 final improve pass (rounds × (rewrites + the reviewers'
-  re-read) + the kept chapters' reviews), the 🤖 Claude Code helpers and "when only one AI works". With measured
+  re-read) + the kept chapters' reviews; 🎯 by default 1 round of 3 scene rewrites), the 🤖 Claude Code helpers and
+  "when only one AI works". With measured
   runs, the options whose answers fall inside the measured steps (the checkers, the writers' room, the end pass and
   the chapter polish) count only as the DIFFERENCE from the options those runs had (they are already in the measured
   numbers), and the optional steps P28 does not model (beta readers, the whole Book Bible) use their own measured
@@ -86,8 +87,10 @@ def options_of(app, body: dict | None) -> dict:
             "chapter_polish": b.get("chapter_polish") is not False, "polish_share": _polish_share(app),
             "reread_after_rewrites": b.get("reread_after_rewrites") is not False,
             "beta_reread": b.get("beta_reread") is not False,
+            "improve_mode": "chapters" if b.get("improve_mode") == "chapters" else "scenes",
             "improve_rounds": b.get("improve_rounds") if isinstance(b.get("improve_rounds"), int)
-            and not isinstance(b.get("improve_rounds"), bool) and 1 <= b.get("improve_rounds") <= 3 else 2,
+            and not isinstance(b.get("improve_rounds"), bool) and 1 <= b.get("improve_rounds") <= 3 else
+            (2 if b.get("improve_mode") == "chapters" else 1),
             "claude_code": cc_on, "single_ai": b.get("single_ai") if b.get("single_ai") in SINGLE_AI else "continue",
             "slot_id": b.get("slot_id") if isinstance(b.get("slot_id"), str) and b.get("slot_id") else None}
 
@@ -115,7 +118,16 @@ def option_calls(opts: dict, n: int, ais: int) -> dict:
     out["human_pass"] = {"calls": hp, "to": "others", "label": "End-of-book “sounds like a person” pass"}
     # 🔁 the final improve pass (improve_pass.py): per round one rewrite per chapter worked on (≤ 3) and the same
     # reviewers' re-read (the AIs that did not write it); a kept round adds each chapter's review and editor read
-    if opts.get("improve_pass"):
+    # 🎯 the weakest scenes (weak_scenes.py, the default): per round one rewrite per scene (3), the same re-read and
+    # the kept chapters' review; 1 round by default (at most 2)
+    if opts.get("improve_pass") and opts.get("improve_mode", "scenes") == "scenes":
+        from . import weak_scenes  # noqa: PLC0415
+        c, r = min(3, n), max(1, min(ais - 1, 3)) if ais > 1 else 1
+        rounds = min(int(opts.get("improve_rounds") or 1), weak_scenes.ROUNDS_MAX)
+        out["improve"] = {"calls": rounds * (weak_scenes.MAX_SCENES + r) + 3 * c, "to": "all",
+                          "label": f"Rewrite the {weak_scenes.MAX_SCENES} weakest scenes (up to {rounds} "
+                                   f"round{'s' if rounds != 1 else ''})"}
+    elif opts.get("improve_pass"):
         c, r = min(3, n), max(1, min(ais - 1, 3)) if ais > 1 else 1
         rounds = int(opts.get("improve_rounds") or 2)
         out["improve"] = {"calls": rounds * (c + r) + 3 * c, "to": "all",
@@ -184,7 +196,8 @@ def _run_opts(j: dict) -> dict:
     return {"checkers": s.get("checkers") or "all", "writers_room": bool(s.get("writers_room")),
             "human_pass": s.get("human_pass") is not False, "beta_readers": (s.get("beta_readers") or 1)
             if s.get("beta_reader") else 0, "fill_bible": bool(s.get("fill_bible")),
-            "improve_pass": bool(s.get("improve_pass")), "improve_rounds": s.get("improve_rounds") or 2,
+            "improve_pass": bool(s.get("improve_pass")), "improve_mode": s.get("improve_mode") or "chapters",
+            "improve_rounds": s.get("improve_rounds") or (1 if s.get("improve_mode") == "scenes" else 2),
             "opening_pass": s.get("opening_pass") is True, "first_page": s.get("first_page") is True,
             "chapter_polish": s.get("chapter_polish") is True,
             "reread_after_rewrites": s.get("reread_after_rewrites") is not False,

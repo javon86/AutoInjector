@@ -253,11 +253,17 @@ Chapter 1 is written before the rest of the book exists, and readers decide on t
 
 ### 🔁 Improve until better, and 📈 your books over time
 
-- **🔁 Improve until better** (on the ⚡ Make-a-book screen, on by default, 1–3 rounds, default 2): when the book is
-  made, Akọwe collects what the reviewers' "What to try next", the beta readers' top fixes, the editor's major notes
-  and its own checks (clock and tide times, the same phrase or simile in several chapters, a plain word like "went"
-  used far too often, sentences too simple for adult readers) found, and the writer reworks the chapters that need it
-  most. The **same** AI reviewers then read the book again. The change is **kept only if the score went up and
+- **🔁 Improve until better** (on the ⚡ Make-a-book screen, on by default): when the book is made, Akọwe finds the
+  **🎯 3 weakest scenes** and rewrites only those. Every complaint — the reviewers' quoted weak spots, the beta
+  readers' top fixes, the editor's major notes and Akọwe's own checks (clock and tide times, the same phrase in
+  several chapters) — is matched to the scene it is about; the scenes with the most and most serious complaints win
+  (complaints about your book's lowest scores count most). The writer rewrites each of those scenes once, seeing its
+  complaints, its scene card, the lines just before and after it, the characters' voices and your style. A rewritten
+  scene may be at most 10% longer, and must keep every name and every line the editor said to keep — otherwise it
+  stays as it was. The report then says, for example, "🎯 Rewrote 3 weakest scenes (ch1 opening, ch2 photograph
+  investigation, ch3 final miscalculation): 7.9 → 8.4 (kept)". 1 round by default (you can pick 2); about 6 more AI
+  answers per round. Prefer the older way? Pick "Whole chapters" next to the switch: the writer then reworks the
+  chapters with the most to fix (1 or 2 rounds). The **same** AI reviewers then read the book again. The change is **kept only if the score went up and
   nothing dropped by more than a point**; otherwise your book stays exactly as it was. Kept chapters are checked and
   approved like every chapter, and the PDF, EPUB and Word files are made again. The run window, the journal and the
   report show both numbers: "🔁 Improve pass: 7.6 → 8.1/10 (kept)". Chapters you wrote yourself are never touched.
