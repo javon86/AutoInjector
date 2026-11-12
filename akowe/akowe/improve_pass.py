@@ -730,5 +730,8 @@ def _finish(runner, run, st, mem):
             if (run.get("report") or {}).get("polish"):  # 📏 a remade report keeps the chapter polish's line
                 rep["polish"] = run["report"]["polish"]
             rp._save(run["project_id"], run["branch_id"], rep)  # noqa: SLF001
+            if not rep.get("doctor"):  # 🩺 and the plan check's line and notes (both improve modes remake it)
+                from . import story_doctor  # noqa: PLC0415
+                story_doctor.to_report(runner, run, rep)
     except Exception:  # noqa: BLE001 - a line in the report never breaks the run
         log.exception("could not add the improve line to the report")

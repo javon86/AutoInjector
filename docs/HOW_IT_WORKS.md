@@ -592,7 +592,18 @@ to a minute), so the run knows which AIs work.
    plots that fits the idea best here, and the run's notes and the plan page say which and why.
 3. **Characters and places:** drafted, reviewed, approved. The main character (★) is guaranteed to exist.
 4. **Character sheets and voices:** what each character wants, needs, fears and hides, and a **voice card** for
-   how each one talks.
+   how each one talks (sentence rhythm, register, words from their job and place, favourite phrases and tics, words
+   they would never use, habits, how they dodge a question, speech under pressure, sample lines).
+   **🗣 Voice cards that really differ** (code: `akowe/akowe/voice_contrast.py`; run setting `voice_contrast`, on by
+   default; the switch is under "🩺 Plan check" on the Make-a-book screen). Then Akọwe compares the cards of the
+   speaking characters (everyone but minor characters and extras) without any AI: two cards with the same rhythm and
+   register, a shared favourite phrase, three or more shared vocabulary words, or a card too thin to write from. Only
+   then ONE AI answer rewrites the cards that need it, with the whole cast in view, so every character is told apart by
+   how they talk. A card you wrote or edited (and a series character's fixed voice) is never changed. The run says it:
+   "🗣 Voice cards: Mara and Tom: the same rhythm and register — 1 card(s) made distinct". At most 1 AI answer per
+   book (none when the cards already differ). Each chapter's writing brief carries the cards of the characters in that
+   chapter (full cards for up to 4, one line for the rest; when they are cut to fit, the run's ⚠️ "instructions cut"
+   note names whose card went to one line), and the editor checks each speaking character against their OWN card.
 5. **Looks and voice details:** only the essentials (height, face, hair, clothes…). Everything else waits.
 6. **Character pictures:** a portrait each, made with Stable Diffusion; each becomes that character's 🔒 lock.
    This never holds up the book.
@@ -608,6 +619,28 @@ to a minute), so the run knows which AIs work.
    - **Optional: the writers' room for the big twists** (off unless you turn it on at the start). Before the main
      plot, and before the middle chapter and the climax, each working AI pitches an idea and they vote blind. The
      winner is used under your run consent and written in the journal. It never holds up the book.
+   - **🩺 Story doctor: the plan is checked before chapter 1** (code: `akowe/akowe/story_doctor.py`; run setting
+     `story_doctor`, on by default, with `doctor_rounds` 1–3 (default 2) and `doctor_target` (default 8.5); the switch
+     is "🩺 Plan check" on the Make-a-book screen). Right after the chapter outline is approved, every working AI (one
+     per AI, up to 3, not one you switched off for checks) reads the plan — premise, main plot, chapter outline, story
+     rules and cast — and scores it on the same points as the whole-book review (premise, plot continuity, structure,
+     character differentiation, psychological complexity, rule rigor, peril and uncertainty, subtext, ending…) as "how
+     good can a book written from this plan be", with weaknesses quoted from the plan and one concrete fix each. The
+     same strictness as the book review: a 9 or 10 needs a quote from the plan that proves it, and a near-perfect
+     review needs 3 quoted weaknesses — otherwise those scores count as 7; an AI known to be too generous is lowered by
+     its usual discount. The plan's score is the lower median of the reviewers' scores (each reviewer's score is the
+     average of its points; with two reviewers the stricter counts). Under the target, the chapter outline is revised
+     with their combined fixes (weakest points first) through the outline's usual "Ask AI to fix it" path, checked by
+     Akọwe and reviewed and approved like any outline, then scored again — at most `doctor_rounds` times. The best plan
+     is kept: a revision that scores lower is undone (the earlier outline's text approved again, no AI). The premise
+     and main plot stay as approved, so an idea you typed is never replaced (the outline is strengthened around it);
+     your lock list, point of view, tense, content limits, main character, story shape or kind of story and the
+     chapters stay. An outline you wrote or edited yourself (or kept from a book bible) is only scored. The run window
+     says it plainly ("🩺 Plan scored 7.4 → 8.6 after 1 revision") and the 📊 book report repeats it with the last
+     round's main weaknesses (also after the end rewrites remake the report: chapter 1 last, the improve pass in
+     either way, and "Read the final book again" put it back). It never holds up the book: an AI that cannot answer is skipped; a revision that is
+     refused or does not pass its review leaves the best plan. About 3–8 AI answers (each AI scores once; a revision
+     is 1 fix + its review + a new score), counted in the ⏱ estimate.
    - **Optional: fill the whole Book Bible** from the plan before chapter one. It is off unless you turn it on
      (on the start screen, or 📖 Book Bible → At a glance). It never holds up the book.
 9. **Every chapter.** For each one:
@@ -1059,7 +1092,8 @@ All four are on the ⚡ **AI writes the whole book** screen (code: `akowe/akowe/
   rounds (per round the rewrites — 3 scenes by default — plus the reviewers' re-read, plus the kept chapters'
   reviews), 📏 the chapter polish
   (at most 1 answer per chapter, only when needed: every chapter if your last book read too simply or repeated, else
-  about a quarter), the Claude Code helpers, "when
+  about a quarter), 🩺 the story doctor (each AI scores the plan once, plus one revision: 1 fix + its review + a new
+  score from each AI), 🗣 the voice-card check (1 answer, only when cards sound alike), the Claude Code helpers, "when
   only one AI works" and which AI writes. It starts from the P28 numbers (`costs.estimate`: AI calls per step); once
   this PC has finished runs, it uses their measured seconds per answer, each AI's share of the answers, and the
   answers of the optional steps. The usage limits are rough public guesses (Claude ~40 long messages per 5 hours,
@@ -1123,7 +1157,8 @@ All four are on the ⚡ **AI writes the whole book** screen (code: `akowe/akowe/
 | Pattern check (no AI) | repeated habits ("went very still"), lists of three, same-length sentences; a habit 2+ checks flag (pattern, originality, editor) is a must-fix for the editor, and the run says how many are left | before the editor |
 | ✍ Sounding human (see below) | AI phrases and patterns told to the writer beforehand; the book's own repeats (openings, endings, gestures, phrases, rhythm); a "Sounds like a person" score | every chapter's instructions, every checkpoint, and at the end of a ⚡ run (suggestions you approve) |
 | ✨ Originality check (no AI, optional AI pass) | clichés and AI-sounding phrases ("a testament to", "a breath she didn't know she was holding", "It wasn't X. It was Y."), long dashes everywhere, too much hedging; per chapter, with quotes and reasons. Dialogue is left out unless you ask. An optional second AI (not the writer) rates passages 1–5 for "sounds machine-written"; its quotes are checked against the book | before the editor (so its rewrites target them; a rewrite that adds such phrases is not kept), in the book report, and on the 📊 report page (✨ button). Never blocks the book |
-| Voice cards | characters who all talk alike | writing and editing |
+| 🩺 Story doctor | a weak plan: unclear rule arithmetic, a final mistake that is hard to believe, a sagging middle, helpers who cooperate too easily — scored by every AI on the book report's points and revised until it reaches the target (best plan kept) | after the chapter outline, before chapter 1 (on by default) |
+| Voice cards | characters who all talk alike: cards compared without AI at planning (alike or thin cards made distinct in one AI answer), each chapter's cards in its brief, the editor's own-card check | planning, writing and editing |
 | Locked details | eyes, hair, weapon or weapon hand changing | after each chapter |
 | Running notes (ledgers) | a healed limp, a lost knife drawn again, the dead speaking, misspelled names, wrong travel times | after each chapter |
 | Hand-edit follow-through | later chapters still built on what you edited away | when a changed chapter is approved again |

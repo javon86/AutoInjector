@@ -86,7 +86,8 @@ RULES = {
                "costs something; the change happens; the 'unsaid' stays unsaid (never stated by a character or the "
                "narrator)."),
     "voices": ("Dialogue: every character talks as their voice card says (context.writing_brief.voice_cards: rhythm, "
-               "register, vocabulary, favourite phrases, habits, how they talk under pressure, what they talk around); "
+               "register, vocabulary, favourite phrases, habits, how they talk under pressure, what they talk around, how they "
+               "deflect a question); "
                "never give two characters the same calm, explaining register; nobody uses their never_words; nobody "
                "announces their feelings. With the names hidden, a reader should still know who speaks."),
     "pov": ("The point-of-view character is context.writing_brief.pov: use their name on the page (in dialogue or "
@@ -240,7 +241,8 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str, *
         brief_cuts.note(cut, "planned details", planned[MAX_PLANNED:])
         planned = planned[:MAX_PLANNED]
         if vb.get("summarized"):
-            cut.append("voice cards: shortened to their essentials (too many characters for full cards)")
+            cut.append("voice cards: shortened to their essentials (too many characters for full cards)"
+                       + (f" — one line only for {', '.join(vb['short'][:6])}" if vb.get("short") else ""))
         brief = {"pov": _pov_view(pov) if pov else None, "voice_cards": vb["cards"], "other_voices": vb["others"],
                  "scene_cards": cards, "planned_details": planned}
         main = _main_character(store, pid, branch, cs, present, pov)  # ★ every chapter knows who the book is about

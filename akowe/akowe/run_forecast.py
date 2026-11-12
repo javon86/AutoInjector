@@ -47,7 +47,9 @@ CARRY_ON_SHARE = 0.25          # share of a limit pause that still makes the run
 CHAPTERS_FROM, CHAPTERS_TO = 0.15, 0.9   # where the chapters lie in the run's time (the rest: planning, the end)
 DEFAULT_AIS = (("AI-1", "AI-1 · Claude", "claude"), ("AI-2", "AI-2 · ChatGPT", "chatgpt"),
                ("AI-3", "AI-3 · Gemini", "gemini"))
-INSIDE_MEASURED = ("checkers", "writers_room", "human_pass", "first_page", "chapter_polish")   # their answers are inside costs' measured steps
+VOICE_SHARE = 0.4             # 🗣 share of books whose voice cards need the one rewrite answer (an estimate)
+INSIDE_MEASURED = ("checkers", "writers_room", "human_pass", "first_page", "chapter_polish", "story_doctor",
+                   "voice_contrast")   # their answers are inside costs' measured steps
 OWN_STEP = {"beta": "beta", "bible": "bible", "improve": "improve", "opening": "opening", "reread": "reread"}   # option -> its own run step (measured when made)
 
 
@@ -88,6 +90,9 @@ def options_of(app, body: dict | None) -> dict:
             "reread_after_rewrites": b.get("reread_after_rewrites") is not False,
             "beta_reread": b.get("beta_reread") is not False,
             "improve_mode": "chapters" if b.get("improve_mode") == "chapters" else "scenes",
+            "story_doctor": b.get("story_doctor") is not False, "voice_contrast": b.get("voice_contrast") is not False,
+            "doctor_rounds": b.get("doctor_rounds") if isinstance(b.get("doctor_rounds"), int)
+            and not isinstance(b.get("doctor_rounds"), bool) and 1 <= b.get("doctor_rounds") <= 3 else 2,
             "improve_rounds": b.get("improve_rounds") if isinstance(b.get("improve_rounds"), int)
             and not isinstance(b.get("improve_rounds"), bool) and 1 <= b.get("improve_rounds") <= 3 else
             (2 if b.get("improve_mode") == "chapters" else 1),
@@ -157,6 +162,17 @@ def option_calls(opts: dict, n: int, ais: int) -> dict:
         (int(opts.get("beta_readers") or 0) if opts.get("beta_reread", True) else 0)
     out["reread"] = {"calls": rr if rw else 0, "to": "others",
                      "label": "Read the final book again after the end rewrites (only if something changed)"}
+    # 🩺 the story doctor (story_doctor.py): every AI scores the plan once; a plan under the target is revised (1 fix +
+    # its review) and scored again — counted as one revision (most plans need one; at most doctor_rounds)
+    rounds = int(opts.get("doctor_rounds") or 2)
+    sc = max(1, min(ais - 1, 3)) if ais >= 3 else min(ais, 2)   # the AIs that did not write the plan (else all, ≤ 2)
+    out["story_doctor"] = {"calls": (sc + 2 + sc) if opts.get("story_doctor") else 0, "to": "others",
+                           "label": f"🩺 Story doctor: the AIs score the plan before chapter 1 and it is revised when "
+                                    f"weak (up to {rounds} revision{'s' if rounds != 1 else ''})"}
+    # 🗣 voice cards made distinct (voice_contrast.py): one answer, only when two cards sound alike or one is thin —
+    # counted as its expected share (cards made with the whole cast in view usually differ already)
+    out["voice_contrast"] = {"calls": VOICE_SHARE if opts.get("voice_contrast") else 0, "to": "all",
+                             "label": "🗣 Voice cards made distinct (only when two sound alike)"}
     out["pictures"] = {"calls": 0, "to": "none", "label": "Character pictures (Stable Diffusion: no AI answers)",
                        "minutes": PICTURES * PICTURE_MIN if opts.get("pictures") else 0}
     # 🧑‍⚖️ the stand-in vote at a story checkpoint the author does not answer: every AI votes on each waiting problem
@@ -201,7 +217,9 @@ def _run_opts(j: dict) -> dict:
             "opening_pass": s.get("opening_pass") is True, "first_page": s.get("first_page") is True,
             "chapter_polish": s.get("chapter_polish") is True,
             "reread_after_rewrites": s.get("reread_after_rewrites") is not False,
-            "beta_reread": s.get("beta_reread") is not False}
+            "beta_reread": s.get("beta_reread") is not False,
+            "story_doctor": s.get("story_doctor") is True, "voice_contrast": s.get("voice_contrast") is True,
+            "doctor_rounds": s.get("doctor_rounds") or 2}
 
 
 def calibration(app, n: int, opts: dict, ais: int) -> dict:

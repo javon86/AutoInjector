@@ -182,6 +182,22 @@ def sheet_for(name, others=(), story_role=None):
     return out
 
 
+def plan_review(ctx, score=9):
+    """🩺 A plan review: every dimension ``score``; quotes from the plan's chapter summaries (so they verify), a proof
+    for every 9-10 and three quoted weaknesses with a fix each."""
+    from akowe.book_report import DIM_KEYS  # noqa: PLC0415
+    chs = ((ctx.get("plan") or {}).get("outline") or {}).get("chapters") or [{"summary": "no outline"}]
+    qs = [c.get("summary") or c.get("objective") or "" for c in chs] or [""]
+    out = {"plan_scores": {d: score for d in DIM_KEYS},
+           "weaknesses": [{"dimension": "structure", "point": "The middle waits.", "quote": qs[i % len(qs)][:120],
+                           "fix": f"In chapter {i + 1}, let the search cost Mara something she cannot get back."}
+                          for i in range(3)],
+           "strengths": [{"point": "A clear goal.", "quote": qs[0][:120]}], "summary": "A plan read by the fake."}
+    if score >= 9:
+        out["score_evidence"] = [{"dimension": d, "quote": qs[0][:120], "why": "clear"} for d in DIM_KEYS]
+    return out
+
+
 def trust_one_ai(app, run_id, timeout=120):
     """H6: with only one AI the run pauses at its first draft (nobody else checked it). Answer like an author who
     trusts that AI: ✔ approve it yourself, and the rest of this run too. Returns the stored run."""
@@ -271,6 +287,14 @@ class BookFakeAI:
         # by default the scene comes back unchanged (Akọwe then keeps the book as it was)
         self.weak_scene_script: list = []
         self.stand_in_script: list = []
+        # 🩺 story doctor (story_doctor.py): scripted plan reviews (dicts, callables(ctx) or an int = every score),
+        # one per call; default: a strong, well-quoted plan (9s) so no revision is needed. doctor_fixes: the writer's
+        # revisions of the outline with the doctor's note (the first chapter's summary gets " (doctor fix)").
+        self.plan_review_script: list = []
+        self.doctor_fixes = 0
+        # 🗣 voice contrast (voice_contrast.py): scripted card rewrites (dicts or callables(ctx)); default: each card
+        # in context.rewrite gets its own rhythm, register and phrase
+        self.voice_contrast_script: list = []
         self.stand_in_default = {"pick": "accept", "confident": 0.9,
                                  "why": "The correction answers the reviewer's finding and agrees with the canon."}
 
@@ -345,6 +369,23 @@ class BookFakeAI:
             if scripted is not None:
                 return "weak_scene", scripted(ctx) if callable(scripted) else copy.deepcopy(scripted)
             return "weak_scene", {"rewritten_scene": (ctx.get("scene") or {}).get("text") or "", "what_changed": []}
+        if "plan_scores" in props:  # 🩺 the story doctor scores the plan
+            with self.lock:
+                scripted = self.plan_review_script.pop(0) if self.plan_review_script else None
+            if callable(scripted):
+                return "plan_review", scripted(ctx)
+            if isinstance(scripted, dict):
+                return "plan_review", copy.deepcopy(scripted)
+            return "plan_review", plan_review(ctx, scripted if isinstance(scripted, int) else 9)
+        if "cards" in props and "rewrite" in ctx:  # 🗣 voice cards made distinct
+            with self.lock:
+                scripted = self.voice_contrast_script.pop(0) if self.voice_contrast_script else None
+            if scripted is not None:
+                return "voice_contrast", scripted(ctx) if callable(scripted) else copy.deepcopy(scripted)
+            return "voice_contrast", {"cards": [{"name": n, "voice_card": dict(
+                voice_for("x"), rhythm=f"{n}'s own clipped rhythm, {i + 2}-word sentences", register=f"register {i}",
+                phrases=[f"{n.split()[0]} swears by it"], vocabulary=[f"{n.split()[0]}-term"],
+                deflects="answers with a question")} for i, n in enumerate(ctx.get("rewrite") or [])]}
         if "openings" in props:  # ✍ the writer's two first pages for chapter 1 (one answer)
             with self.lock:
                 scripted = self.openings_script.pop(0) if self.openings_script else None
@@ -569,6 +610,11 @@ class BookFakeAI:
             return "review", {"verdict": v, "reasons": [reason], "suggested_changes": [change], "confidence": 0.8}
         if "draft" in ctx and "review" in ctx:  # "Ask AI to fix it": the whole draft, one sentence revised
             data = json.loads(ctx["draft"]["data_json"])
+            if str(ctx.get("author_note") or "").startswith("🩺") and data.get("chapters"):  # 🩺 the doctor's fixes
+                with self.lock:
+                    self.doctor_fixes += 1
+                data["chapters"][0]["summary"] = str(data["chapters"][0].get("summary") or "") + " (doctor fix)"
+                return "doctor_fix", data
             return "fix", self._revise(data)
         if {"title", "author", "genre", "audience", "tone", "idea"} <= set(props):
             w = ctx.get("wishes") or {}

@@ -56,6 +56,7 @@ def run_step(runner, run: dict, st: dict) -> None:
     ln = _length(runner, run)
     if ln:
         lines.append(ln)
+    _keep_doctor(runner, run)
     st["message"] = " · ".join(lines) if lines else "Nothing changed since the last reads"
     runner.save(run)
 
@@ -153,6 +154,22 @@ def _beta_again(runner, run, st, mem) -> str | None:
     mem["beta_done"] = True
     runner.event(run, "note", mem["beta_line"], step="reread", code="BETA_AGAIN")
     return mem["beta_line"]
+
+
+# ---------------------------------------------------------------------- 🩺 the plan check's line stays
+def _keep_doctor(runner, run) -> None:
+    """A report remade by the end rewrites (chapter 1 last, the improve pass) keeps the story doctor's line and notes
+    (story_doctor.to_report). Never raises."""
+    try:
+        if not (run.get("story_doctor") or {}).get("line"):
+            return
+        rp = getattr(runner.app, "reports", None)
+        rep = rp.latest(run["project_id"], run["branch_id"]) if rp else None
+        if rep and not rep.get("doctor"):
+            from . import story_doctor  # noqa: PLC0415
+            story_doctor.to_report(runner, run, rep)
+    except Exception:  # noqa: BLE001 - a line in the report never breaks the run
+        log.exception("could not keep the story doctor's line in the report")
 
 
 # ---------------------------------------------------------------------- 📏 the finished book's length

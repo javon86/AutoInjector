@@ -273,6 +273,26 @@ words, for example teleportation that needs two anchor stones:
 - Switch it off with the tick box **Check the magic rules in every chapter** on the same page (or the "Story rules
   and world texture" switch of the pipeline).
 
+### 🩺 Plan check: the story doctor, and voices that differ
+
+Most of what reviewers dislike in a finished book — a rule whose numbers do not add up, a final mistake that is hard
+to believe, a middle that sags — is already in the plan. A plan is cheap to fix while no chapter exists yet. So,
+under **🩺 Plan check** on the ⚡ Make-a-book screen (both on by default; switch either off there):
+
+- **Story doctor:** as soon as the plan (premise, main plot, chapter outline) is made, every working AI scores it on
+  the same points as the book report, quotes its weaknesses and suggests a fix for each. The AIs must prove a 9 or 10
+  with a quote, or it counts as 7 — the same strict rules as the book report. If the plan scores under your aim
+  (8.5 unless you pick 8 or 9), the chapter outline is revised with their fixes, checked, reviewed and approved as
+  usual, and scored again — at most 2 times unless you pick 1 or 3. The best-scoring plan is kept. Your own idea and
+  your lock list are never replaced, and an outline you wrote yourself is only scored. The run window says what
+  happened, e.g. "🩺 Plan scored 7.4 → 8.6 after 1 revision", and so does the book report. About 3 to 8 more AI
+  answers.
+- **Make sure every character sounds different:** each character already gets a voice card (how they talk: sentence
+  length, words, favourite phrases, what they never say, how they dodge a question). Akọwe now compares the cards
+  without AI; only when two sound alike or one is too thin does the AI make them distinct, in one answer. Cards you
+  wrote yourself are never changed. Each chapter's writer gets the cards of the characters in it, and the editor
+  checks that every character sounds like their own card.
+
 ### ✍ Chapter 1: two first pages, and rewritten last
 
 Chapter 1 is written before the rest of the book exists, and readers decide on the first page. So, under **✍ Chapter

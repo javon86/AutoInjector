@@ -20,8 +20,10 @@ DIMENSIONS = [
     ("voice_distinction", "Distinct voices",
      "With the names hidden, could a reader tell who is speaking? Each character has their own rhythm, vocabulary, "
      "habits and things they talk around. Compare the dialogue with the characters' voice cards (context.voice_cards: "
-     "rhythm, register, vocabulary, favourite phrases, words they would never use, habits, speech under pressure) and "
-     "the pattern report's voice statistics (context.pattern_report.voices). For every line that sounds like another "
+     "rhythm, register, vocabulary, favourite phrases, words they would never use, habits, how they deflect a question, "
+     "speech under pressure) and the pattern report's voice statistics (context.pattern_report.voices). Check EACH "
+     "character who speaks against their OWN card: does their sentence length, vocabulary, favourite phrases and tics, "
+     "never-words and way of dodging a question match it? For every line that sounds like another "
      "character (or like nobody in particular, the shared calm explaining register), quote exactly that line as the "
      "passage and say in why whose voice it sounds like and what this character would say instead."),
     ("world_friction", "Obstacles from the world",

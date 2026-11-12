@@ -8282,6 +8282,30 @@ function chapterPolishSwitch(prefix) {
     h('p', { class: 'hint', id: `${id}-hint` }, 'On (recommended): as soon as a chapter is written, Akọwe checks its reading level for your readers and the phrases it repeats from earlier chapters (no AI). Only when needed, the writer polishes it once: joins some short sentences and says repeated phrases in a new way — never the story, the facts, the names, the numbers or the dialogue. The polish is kept only if the checks got better; otherwise the chapter stays as written. The same switch lets the final improve pass keep its repeated-phrase fixes when the rest of its changes are not kept. At most one more AI answer per chapter.'));
   return { el, box, apply(body) { if (!box.checked) body.chapter_polish = false; } };
 }
+/** 🩺 Story doctor (story_doctor) with its rounds and target, and 🗣 distinct voice cards (voice_contrast): both on */
+function storyDoctorSwitch(prefix) {
+  const id = `${prefix}-story-doctor`;
+  const box = h('input', { type: 'checkbox', role: 'switch', id, 'data-testid': id, checked: true, 'aria-describedby': `${id}-hint` });
+  const state = h('span', { class: 'sd-state', 'aria-hidden': 'true' }, 'On');
+  const rounds = h('select', { id: `${id}-rounds`, 'data-testid': `${id}-rounds`, 'aria-label': 'Revisions at most' },
+    [1, 2, 3].map(n => h('option', { value: String(n), selected: n === 2 }, `${n} revision${n > 1 ? 's' : ''} at most`)));
+  const target = h('select', { id: `${id}-target`, 'data-testid': `${id}-target`, 'aria-label': 'Target score' },
+    ['8', '8.5', '9'].map(v => h('option', { value: v, selected: v === '8.5' }, `aim for ${v}/10`)));
+  box.addEventListener('change', () => { state.textContent = box.checked ? 'On' : 'Off'; rounds.disabled = target.disabled = !box.checked; });
+  const vid = `${prefix}-voice-contrast`;
+  const vbox = h('input', { type: 'checkbox', role: 'switch', id: vid, 'data-testid': vid, checked: true, 'aria-describedby': `${vid}-hint` });
+  const el = h('fieldset', { class: 'field sd-switch' }, h('legend', null, '🩺 Plan check'),
+    h('div', { class: 'check-row' }, box, h('label', { for: id }, h('strong', null, 'Story doctor: check and mend the plan before chapter 1'), ' ', state)),
+    h('div', { class: 'row' }, rounds, target),
+    h('p', { class: 'hint', id: `${id}-hint` }, 'On (recommended): when the plan (premise, main plot, chapter outline) is made, every working AI scores it on the same points as the book report — with quotes and a fix for each weakness. If it scores under your aim, the outline is revised with their fixes and scored again; the best plan is kept. Your own idea and your lock list are never replaced, and an outline you wrote yourself is only scored. The run window says e.g. “🩺 Plan scored 7.4 → 8.6 after 1 revision”. About 3 to 8 more AI answers.'),
+    h('div', { class: 'check-row' }, vbox, h('label', { for: vid }, h('strong', null, '🗣 Make sure every character sounds different'))),
+    h('p', { class: 'hint', id: `${vid}-hint` }, 'On (recommended): Akọwe compares the voice cards (how each character talks) without AI; only when two sound alike or one is too thin, the AI makes them distinct in one answer. Cards you wrote yourself are never changed.'));
+  return { el, apply(body) {
+    if (!box.checked) body.story_doctor = false;
+    else { if (rounds.value !== '2') body.doctor_rounds = Number(rounds.value); if (target.value !== '8.5') body.doctor_target = Number(target.value); }
+    if (!vbox.checked) body.voice_contrast = false;
+  } };
+}
 /** ✍ Chapter 1: two first pages, keep the better one (first_page) and rewrite chapter 1 last (opening_pass): both on */
 function chapterOneSwitch(prefix) {
   const mk = (key, label, hint) => {
@@ -8353,6 +8377,7 @@ async function renderMakeSetup() {
   const ipw = improvePassSwitch('mb');  // 🔁 the final improve pass (improve_pass.py), on by default
   const cpo = chapterPolishSwitch('mb');  // 📏 the chapter polish (chapter_polish.py), on by default
   const c1 = chapterOneSwitch('mb');  // ✍ two first pages + chapter 1 rewritten last (first_page.py, opening_pass.py)
+  const sdw = storyDoctorSwitch('mb');  // 🩺 the plan check before chapter 1 + 🗣 distinct voice cards, both on
   const wr = WR.makeSetupSwitch(s7c());  // 🗳 Use the writers' room for the big twists (writers_room.py), off by default
   const ck = checkersField('mb');  // 🔎 PR #117: how many AIs check for mistakes (all by default)
   fields.checkers = ck.sel;
@@ -8392,7 +8417,7 @@ async function renderMakeSetup() {
         h('div', { class: 'field' }, h('label', { for: 'mb-slot' }, 'Which AI'), slot, h('span', { class: 'hint' }, 'Automatic uses whichever AI is ready.'))),
       lengthBox,
       h('div', { class: 'field' }, h('label', { for: 'mb-idea' }, 'Your idea (optional)'), idea, ideaWarn, locksBox),
-      h('div', { class: 'field' }, h('label', { for: 'mb-pen-name' }, 'Pen name (optional)'), penName, h('span', { class: 'hint' }, 'Printed on the title page and cover. The AI never invents one: empty = the pen name you typed last, or none.')), cf.el, pipe.el, s7.el, fb.el, hp.el, cpo.el, ipw.el, c1.el, wr.el, ck.el, pics.el, ccf.el),
+      h('div', { class: 'field' }, h('label', { for: 'mb-pen-name' }, 'Pen name (optional)'), penName, h('span', { class: 'hint' }, 'Printed on the title page and cover. The AI never invents one: empty = the pen name you typed last, or none.')), cf.el, pipe.el, s7.el, sdw.el, fb.el, hp.el, cpo.el, ipw.el, c1.el, wr.el, ck.el, pics.el, ccf.el),
     later.el, err, modelTip(), h('div', { class: 'form-actions' }, startAll, startSet));
   form.insertBefore(h('div', { class: 'row mb-paste-row' }, paste, h('span', { class: 'small muted' }, 'Planned your book with an AI? Paste its starter sheet to fill these settings.')), form.querySelector('.mb-quick'));
   // ⏱ 3d: time, AI answers per AI and usage limits for exactly these settings; 📊 3e the usage meter per AI
@@ -8425,6 +8450,7 @@ async function renderMakeSetup() {
     ipw.apply(body);  // 🔁 the final improve pass (sent only when changed)
     cpo.apply(body);  // 📏 the chapter polish (sent only when switched off)
     c1.apply(body);  // ✍ chapter 1: two first pages / rewritten last (sent only when switched off)
+    sdw.apply(body);  // 🩺 story doctor / 🗣 voice cards (sent only when changed)
     wr.apply(body);  // 🗳 the writers' room for the big twists (only when switched on)
     ck.apply(body);  // 🔎 how many AIs check for mistakes (sent only when not the default)
     one.apply(body);  // PR #122: when only one AI works (sent only when not the default)
@@ -8787,6 +8813,7 @@ function runReportBox(r) {
     // ✍ the end-of-book "sounds like a person" pass: the score now and with the suggested rewrites
     rp && rp.human ? h('p', { 'data-testid': 'mb-human' }, rp.human) : null,
     // ✍ chapter 1: the first page picked from two, and chapter 1 rewritten with the whole book in view
+    rp && rp.doctor ? h('p', { 'data-testid': 'mb-doctor' }, rp.doctor) : null,  // 🩺 the plan's score before chapter 1
     r.first_page && r.first_page.line ? h('p', { 'data-testid': 'mb-first-page' }, r.first_page.line) : null,
     rp && rp.opening ? h('p', { 'data-testid': 'mb-opening' }, rp.opening) : null,
     // 🔁 the final improve pass: both scores; 📈 this book against your last books
@@ -9314,6 +9341,7 @@ async function viewReport(main) {
         h('p', null, h('strong', null, r.name), r.independent ? '' : h('span', { class: 'words-warn small' }, ' ⚠️ not independent'), (r.calibration || {}).flagged ? h('span', { class: 'words-warn small', 'data-testid': 'rp-flagged' }, ' ⚠️ not backed by quotes') : '', ': ', r.summary || ''),
         (r.trust_notes || []).length ? h('ul', { class: 'small', 'data-testid': 'rp-trust' }, r.trust_notes.map(n => h('li', { class: /^⚠️/.test(n) ? 'words-warn' : 'muted' }, n))) : null))));
     }
+    if (rep.doctor) holder.appendChild(h('p', { class: 'card small', 'data-testid': 'rp-doctor' }, rep.doctor));
     if (rep.opening) holder.appendChild(h('p', { class: 'card small', 'data-testid': 'rp-opening' }, rep.opening));
     if (rep.polish) holder.appendChild(h('p', { class: 'card small', 'data-testid': 'rp-polish' }, rep.polish));
     if (rep.length) holder.appendChild(h('p', { class: 'card small', 'data-testid': 'rp-length' }, rep.length));
