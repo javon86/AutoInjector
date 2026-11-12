@@ -274,6 +274,7 @@ def _latest_beta(app, pid, branch) -> dict | None:
     for r in reversed(reads or []):
         if r.get("status") != "done":
             continue
+        r = beta_reader.refilter(app, pid, branch, r)  # 🔮 a guess that only restates the premise is no complaint
         if r.get("kind") == "panel":
             cmp_ = r.get("comparison") or {}
             return {"fixes": cmp_.get("fixes") or [], "average": (cmp_.get("totals") or {}).get("average_score")}

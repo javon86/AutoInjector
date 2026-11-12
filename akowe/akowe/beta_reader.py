@@ -23,7 +23,9 @@ lost / bored readers, everyone's verdict and the consensus top-5 fixes.
 
 What the reader sees: the book text only (the same bounded view as the whole-book review: the whole book up to
 ``book_report.WHOLE_MAX_CHARS``, else a per-chapter digest) and the profile's audience/genre/tone — never the outline,
-the story rules or the scene cards (a beta reader must not know the twists in advance).
+the story rules or the scene cards (a beta reader must not know the twists in advance). 🔮 It does get the book's
+premise (``context.premise``) with the rule that what the premise establishes is never a twist, and Akọwe drops every
+guess that only restates the premise from "twists guessed too early" (beta_secrets.py; ``refilter`` for stored reads).
 
 What it returns (``SCHEMA``): ``reactions`` (chapter, kind — confused / bored / guessed / hooked / moved / doubted —
 a quote and a note), ``interest`` per chapter (1-10 and "would keep reading"), ``guesses`` (what it guessed in which
@@ -252,9 +254,10 @@ def _list(nums) -> str:
 
 
 def _early(read: dict) -> list[dict]:
-    """Guesses that came true before the book revealed them."""
+    """Guesses that came true before the book revealed them (🔮 never one that only restates the premise:
+    beta_secrets.py)."""
     return [g for g in read.get("guesses") or [] if g["came_true"] in ("yes", "partly") and g["revealed_in_chapter"]
-            and g["guessed_in_chapter"] < g["revealed_in_chapter"]]
+            and g["guessed_in_chapter"] < g["revealed_in_chapter"] and not g.get("premise")]
 
 
 def findings(read: dict, n_chapters: int) -> list[dict]:
@@ -754,6 +757,13 @@ class BetaReaderService:
             job.check = check  # type: ignore[method-assign]
         ctx = {"book": view, "reader": dict({k: prof.get(k) for k in ("audience", "genre", "tone") if prof.get(k)},
                                             who=who.get("kind") or "typical"), "chapters": len(chapters)}
+        from . import beta_secrets  # noqa: PLC0415 - 🔮 the premise is never a twist (the secrets stay with Akọwe)
+        info = beta_secrets.known(getattr(self.app, "engine", None) or self.app.review.engine, self.store, principal,
+                                  pid, branch)
+        task = TASK.format(persona=who["text"])
+        if info and info.get("premise"):
+            ctx["premise"] = info["premise"]
+            task = task + " " + beta_secrets.RULE
         t0 = time.monotonic()
         n = len(chapters)
         kind = str(who.get("kind") or "").replace("_", " ")
@@ -762,8 +772,7 @@ class BetaReaderService:
         try:
             with ai_activity.doing(what, done=what.replace(": reading", ": read", 1), book_id=pid, branch_id=branch,
                                    link="report"):  # ⚡ #116 the AI activity strip
-                raw = assist._call_ai(job, op_for_roles="C02", task=TASK.format(persona=who["text"]), schema=SCHEMA,
-                                      context=ctx, protected=[])
+                raw = assist._call_ai(job, op_for_roles="C02", task=task, schema=SCHEMA, context=ctx, protected=[])
         except Cancelled:
             raise
         except AkoweError as exc:
@@ -779,8 +788,10 @@ class BetaReaderService:
         out.update(clean(raw, chapters), model=job.model, seconds=round(time.monotonic() - t0, 1))
         if not out["reactions"] and not out["interest"]:
             out.update(status="failed", error="INVALID_INPUT", message="the AI gave no usable reactions")
+        out["premise_guesses"] = beta_secrets.mark(out, info)   # 🔮 guesses that only restate the premise
         out["findings"] = findings(out, len(chapters))
-        out["counts"] = {k: sum(1 for r in out["reactions"] if r["kind"] == k and r["verified"]) for k in KINDS}
+        out["counts"] = {k: sum(1 for r in out["reactions"] if r["kind"] == k and r["verified"] and not r.get("premise"))
+                         for k in KINDS}
         out["counts"]["unverified"] = sum(1 for r in out["reactions"] if r["quote"] and not r["verified"])
         sc = [i["score"] for i in out["interest"]]
         out["average_interest"] = round(sum(sc) / len(sc), 1) if sc else None
@@ -972,6 +983,38 @@ class BetaReaderService:
                                                            "done"]) if r.get("kind") == "panel" else 1,
                                            "average_interest": r.get("average_interest")}
                                           for r in reversed(self.reads(pid, branch))]}
+
+
+def refilter(app, pid: str, branch: str, read: dict | None, principal: str | None = None) -> dict | None:
+    """🔮 A stored read (single or panel) with its guesses checked again against the book's premise and secrets
+    (beta_secrets.py), its findings and the panel's comparison made again — so a guess that only restates the premise
+    never ranks a scene for the improve pass. Returns a copy; the read itself when switched off or on any problem."""
+    if not isinstance(read, dict) or read.get("status") != "done":
+        return read
+    try:
+        import copy  # noqa: PLC0415
+        from . import beta_secrets  # noqa: PLC0415
+        info = beta_secrets.known(app.engine, app.store, principal or getattr(app, "principal_id", None) or "author",
+                                  pid, branch)
+        if not info:
+            return read
+        out = copy.deepcopy(read)
+        n = int(out.get("chapters") or 0)
+        rows = out.get("readers") if out.get("kind") == "panel" else [out]
+        marked = 0
+        for r in rows or []:
+            if r.get("status") == "done":
+                r["premise_guesses"] = beta_secrets.mark(r, info)
+                marked += r["premise_guesses"]
+                r["findings"] = findings(r, n or len(r.get("interest") or []))
+        if not marked:
+            return read   # nothing restates the premise: the read as it was stored
+        if out.get("kind") == "panel":
+            out["comparison"] = compare(out.get("readers") or [], n)
+        return out
+    except Exception:  # noqa: BLE001 - the stored read as it was
+        log.exception("could not check the beta readers' guesses again")
+        return read
 
 
 def service_of(app) -> BetaReaderService:

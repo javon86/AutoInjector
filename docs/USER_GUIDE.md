@@ -365,13 +365,23 @@ Chapter 1 is written before the rest of the book exists, and readers decide on t
   (the editor's rewrites, the sentence polish, chapter 1 rewritten last, the improve pass) may make a chapter at most
   about 10 % longer and never make the book more than about 115 % of its target length. The writer is told the word
   budget and asked to cut repeated explanation rather than add. The run window and the report say the finished
-  book's length: "📏 Length: 4,310 words (108% of the 4,000-word target)".
+  book's length and each chapter's length against its share: "📏 Length: 4,310 words (108% of the 4,000-word
+  target) · chapters against their ~1,333-word share: ch1 1,300 (98%), ch2 1,600 (120% ⚠️), …".
+  Each chapter is also written to its share from the start: the writer is told "about 1,333 words — between 1,200
+  and 1,466". A chapter that still comes out more than 15 % too long is trimmed in its sentence polish (repeated
+  explanation and summary go; dialogue and what happens stay). And when the book is already at its limit, the 🎯
+  weakest scenes are still rewritten — the writer is told the exact number of words to stay within (the same length
+  or shorter), and a scene that comes back too long is asked once to cut back before it is left as it was.
 - **🔁 Read the final book again** (under "Extras", on by default): when chapter 1 is rewritten last or the improve
   pass changes chapters, the final whole-book continuity check reads those chapters again at the very end (it says
   "read again after Akọwe's own rewrites"; Akọwe's own changes are never called "changed by hand"), and — if you
   asked for beta readers — they read the finished book once more, so the report is about the book you get. A
   separate switch turns the beta readers' second read off. Nothing extra happens when nothing changed. The number of
   beta readers is 1 unless you choose 2 or 3 next to "📖 Beta reader at the end".
+- **🔮 Beta readers and the premise:** what your premise and blurb say is known from page 1, so a beta reader who
+  "guesses" it is not counted as guessing a twist too early. Readers are told the premise; Akọwe keeps the real
+  secrets to itself and only counts a guess that is one of them (or one it cannot place). The 🔁 improve pass does not
+  treat such a "guess" as a complaint either.
 - **📈 Your books over time** (🏠 Book home and the 📊 Book report): "7.6/10 — down 0.4 from your last book",
   "Rule rigor is your weakest area for 3 books", and which scores are falling. Only numbers are kept for this,
   never your book's words.
