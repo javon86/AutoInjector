@@ -105,7 +105,7 @@ def test_beta_reader_in_a_run(tmp_path):
     assert {"confused", "guessed", "unverified"} <= ids
     # the reader never sees the plan: no outline, rules or scene cards in its context
     ctx = fake.prompts["beta"][0][1]
-    assert set(ctx) == {"book", "reader", "chapters"}
+    assert set(ctx) <= {"book", "reader", "chapters", "premise"}   # 🔮 the premise (beta_secrets.py), never the plan
     assert run["beta"]["id"] == r["id"]
 
 
