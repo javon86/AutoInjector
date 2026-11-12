@@ -294,6 +294,7 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str, *
             meta["cut"] = cut
         if not flags["rules"]:
             extra.pop("story_rules", None)
+            extra.pop("magic_rules", None)
             extra.pop("world_texture", None)
         if not flags["planned"]:
             extra.pop("must_show", None)
@@ -332,6 +333,9 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str, *
             rules.append(RULES["planned"])
         if brief.get("story_rules"):
             rules.append(RULES["story_rules"])
+        if brief.get("magic_rules"):
+            from .magic_rules import WRITER_RULE as MAGIC_RULE  # noqa: PLC0415
+            rules.append(MAGIC_RULE)
         if brief.get("world_texture"):
             from .texture import RULE as TEXTURE_RULE  # noqa: PLC0415
             rules.append(TEXTURE_RULE)
@@ -566,6 +570,9 @@ def _section4(store, pid: str, branch: str, outline: dict, chapter_id: str, card
                         [r["text"] for r in story_rules.active(story_rules.get_entry(store, pid, branch))
                          if r["text"] not in given])
         out["world_texture"] = texture_mod.chapter_brief(texture_mod.get_entry(store, pid, branch), cards, *texts)
+        from . import magic_rules  # noqa: PLC0415 - ✨ the rules of the abilities in this chapter + the ledger
+        out["magic_rules"] = magic_rules.brief_part(store, pid, branch, order.index(chapter_id) + 1 if chapter_id in
+                                                    order else None, [*texts, card_text])
         out["story_choices"] = story_choices.brief(choices, ending=last)
         out["choice_rules"] = story_choices.rules(choices, ending=last)
     except Exception:  # noqa: BLE001 - guidance, never a reason to fail the chapter

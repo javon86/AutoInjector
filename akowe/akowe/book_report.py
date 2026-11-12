@@ -560,6 +560,10 @@ class ReportService:
                "planned": self._planned(review, bp), "patterns": self._patterns(chapters),
                "usage": self._usage(review, pid, branch, chapters),
                "readability": self._readability(chapters, prof), "originality": self._originality(chapters)}
+        from . import magic_rules  # noqa: PLC0415 - ✨ "Magic rules kept: 7 uses, 0 broken" (no AI)
+        magic = magic_rules.report_part(review.engine, bp.principal, pid, branch) if review is not None else None
+        if magic:
+            out["magic"] = magic
         return out
 
     @staticmethod
@@ -1395,6 +1399,9 @@ def render_markdown(rep: dict) -> str:
         if not rd.get("findings"):
             L.append("Reading level and pacing fit the audience.")
         L.append("")
+    if (rep.get("magic") or {}).get("line"):  # ✨ the magic rules kept (no AI)
+        L += ["## Magic rules (no AI)", "", rep["magic"]["line"], ""] + [f"- {p}" for p in rep["magic"].get("problems")
+                                                                       or []] + [""]
     if (rep.get("story_kind") or {}).get("line"):  # 📚 the kind of story and its promise
         L += ["## Kind of story", "", rep["story_kind"]["line"], "", f"The promise: {rep['story_kind']['promise']}",
               ""]

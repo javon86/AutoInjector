@@ -1270,7 +1270,7 @@ class ReviewService:
     # ------------------------------------------------------------------ 📏 story rules (P9) and 🧺 world texture (P10)
     def world_info(self, principal, pid, branch) -> dict:
         """The story-rules ledger and the world-texture list of a book, with Akọwe's own checks and usage."""
-        from . import story_choices, story_rules  # noqa: PLC0415
+        from . import magic_rules, story_choices, story_rules  # noqa: PLC0415
         from . import texture as texture_mod  # noqa: PLC0415
         self._access(principal, pid, branch)
         bp = self.bp(principal, pid, branch)
@@ -1296,7 +1296,8 @@ class ReviewService:
                 "texture_problems": texture_mod.problems(texture_mod.items_of(tex)), "texture_usage": usage,
                 "texture_changed": story_rules.changed_since(tex, now) if tex else [],
                 "mystery_mode": story_choices.mystery_mode(choices),
-                "fields": {"rules": story_rules.field_info(), "texture": texture_mod.field_info()},
+                "fields": {"rules": dict(story_rules.field_info(), magic=magic_rules.field_list()),
+                           "texture": texture_mod.field_info()},
                 # AI buttons are offered unless the book is written by hand (a missing AI gives a ⚠️ with the fix)
                 "ai_ready": bp.ai_slot != "manual"}
 
@@ -1553,6 +1554,14 @@ class ReviewService:
                 clocks = clock_check.flags_for(self.engine, job.principal, pid, branch, rec)
                 if clocks:
                     ctx["akowe_in_chapter"] = list(ctx.get("akowe_in_chapter") or []) + clocks
+                from . import magic_rules  # noqa: PLC0415 - ✨ the abilities' rules, the ledger, what is broken
+                magic = magic_rules.flags_for(self.engine, job.principal, pid, branch, rec)
+                if magic:
+                    ctx["akowe_in_chapter"] = list(ctx.get("akowe_in_chapter") or []) + magic
+                mctx = magic_rules.reviewer_context(self.engine, job.principal, pid, branch, rec)
+                if mctx:
+                    ctx["magic_rules"] = mctx
+                    task = task + " " + magic_rules.REVIEW_RULE
                 task = task + IN_CHAPTER_RULE
             raw = self.assist._call_ai(job, op_for_roles=rec["module_id"], task=task, schema=REVIEW_SCHEMA,
                                        context=ctx, protected=protected)

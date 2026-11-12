@@ -225,6 +225,45 @@ Every chapter is checked several times before it counts as part of the book:
 - **📏 Special rules:** a ghost, magic, a curse or a strange device in the story rules must say where and when it
   works (scope), what it costs and what it can never do (limits). If one does not, the AI fills them in once, before
   the plan is written.
+- **✨ Magic rules kept:** an ability, spell or magical device can have a rule Akọwe checks in every chapter (see
+  "How to write a magic rule" below). A use that breaks its rule is a must-fix note for the editor before the
+  chapter is approved, and the book report says "✨ Magic rules kept: 7 uses, 0 broken".
+
+### ✨ How to write a magic rule
+
+If your book has magic, the book must follow the rules of the magic. Open **🌍 Story rules and world**, press
+**✏️ Change them**, and in the rule tick **✨ This rule is an ability, spell or magical device**. Then fill in plain
+words, for example teleportation that needs two anchor stones:
+
+| Field | Example |
+|---|---|
+| Name | Teleportation |
+| What it does | Mara steps from where she is to a place she can see. |
+| What it needs (one per line) | 2 anchor stones · line of sight · at night only |
+| Limits (one per line) | 3 times a day · cooldown 1 hour |
+| Side effect or price | a nosebleed |
+| Who can use it | Mara |
+| Exceptions | (leave empty: there are none) |
+| Who holds what at the start | Mara: 3 anchor stones |
+
+- **Things with a number are counted.** "2 anchor stones" is used up at every use (write "2 anchor stones (kept)"
+  when they are not used up). Akọwe keeps a **ledger**: who used what in which chapter, what it cost, and what
+  people still hold ("Mara found one anchor stone" adds one). You see it on the Story rules page under **✨ Magic
+  rules**.
+- **Every use is checked**, with no extra AI: enough of what it needs (on the page and in the ledger), the right time
+  of day, not too often on one day, not again in the same scene before the cooldown, only by who may use it, and the
+  price shown. A broken rule becomes a must-fix note in plain words — "Mara uses Teleportation in chapter 3 with only
+  one anchor stone; the rule needs 2." Things Akọwe cannot count (line of sight) are checked by the editor and the
+  reviewer, who get the rules too.
+- **Breaking a rule on purpose:** write "deliberate twist" (or "breaks the rule") and the ability's name in that
+  chapter's outline, or add it under **🎭 Deliberate rule-breaks** on the Story rules page. It is then allowed and
+  shown as a deliberate twist.
+- The writer of each chapter gets the rules of the abilities the chapter uses and the ledger so far.
+- When the AI drafts your story rules, it fills these fields in from your premise; you can change them. An older
+  rule written as one sentence ("Teleportation requires two anchor stones; at most three times a day") still works:
+  Akọwe reads it the same way when it can.
+- Switch it off with the tick box **Check the magic rules in every chapter** on the same page (or the "Story rules
+  and world texture" switch of the pipeline).
 
 ### ✍ Chapter 1: two first pages, and rewritten last
 

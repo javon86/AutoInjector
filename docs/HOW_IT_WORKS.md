@@ -812,6 +812,30 @@ takes or risks; limits: what it can never do) is a major "is it bounded?" findin
 once to bound such rules (after the first rules and again after the plan, at most twice) and accepts the update under
 the run consent; the planners are told that every special mechanism keeps its scope, cost and limits.
 
+**✨ Magic rules kept** (code: `akowe/akowe/magic_rules.py`, no extra AI call; web: `akowe/akowe/web/magic.js`): a
+story rule may carry `magic` = name, what it does, requires (lines such as "2 anchor stones", "line of sight", "at
+night only"), limits ("3 times a day", "cooldown 1 hour", "range: …"), price, who may use it, exceptions (none by
+default), who holds the counted things at the start, and the words that show a use. The author fills it in the Story
+rules form; the AI fills it when it drafts the story rules (the same call: the rules schema has an optional `magic`
+part). An old one-sentence rule ("Teleportation requires two anchor stones; at most three times a day") is read into
+the same fields when it clearly describes one. Per chapter, Akọwe reads every use of an ability outside dialogue (who
+— the named person, else the last one named; the counted things stated nearby; day or night; the day and the scene)
+and every "found / lost / had N anchor stones"; for an approved chapter the continuity tracker's existing AI call also
+lists `ability_uses` / `ability_gains`, which replace Akọwe's reading when they are for the same text version. The
+ledger starts from "who holds what at the start", deducts what is used up, adds what is found. Each use is checked:
+too few of a counted need on the page (`needs_more`) or in the ledger (`not_enough`), wrong time of day
+(`wrong_time`), more uses on one day than allowed (`too_many`), again in the same scene with a cooldown and no time
+passing (`cooldown`), someone not named in "who" (`not_allowed`) — all MAJOR — and the price not shown near the use
+(`price_missing`, minor, report only). A major problem is allowed (and counted as a deliberate twist) when that
+chapter's outline says "deliberate twist" / "breaks the rule" and names the ability, or the author listed it on the
+page. The chapter's editor and reviewer get the broken rules as `akowe_in_chapter` entries named "magic" (must-fix;
+one the editor does not note becomes a major `story_rules` note of its own) and `context.magic_rules` (the abilities
+and the ledger before the chapter) for what Akọwe cannot count (line of sight, unwritten exceptions). The writer's
+brief gets `magic_rules` (the abilities the chapter's plan mentions, or the ones used so far, and the ledger; ≤ 1 500
+characters). The book report shows "✨ Magic rules kept: N use(s), M broken". Stored in settings `magic:<book>:
+<branch>` (on/off, the allowed rule-breaks, the tracker's uses, the last ledger snapshot for the briefs); routes GET
+`/review/magic` and PUT `/review/magic/settings`. Off with the page's tick box or the pipeline's rules switch.
+
 **🤫 Hide the twist better** (code: `akowe/akowe/twist_guard.py`; ⚙️ Settings › 🤫 Hide the twist better,
 `GET/PUT /api/settings/twist-guard {enabled}`; default on; planning rules only, no extra AI answers). In one book all
 three beta readers guessed the twist in chapter 1. Now the plot (B03), the reveal plan (B08) and the chapter outline
@@ -997,6 +1021,7 @@ All four are on the ⚡ **AI writes the whole book** screen (code: `akowe/akowe/
 | Readability (no AI) | prose too hard or too simple for the book's readers | the book report and the scene grid; the reading-level floor in every chapter's brief and the final improve pass |
 | 🕰️ Clock and tide (no AI) | a tide going out before the stated high water, high waters that cannot both be true, a clock running backwards | every chapter's editor and reviewer (must-fix), the next chapter's brief, the final improve pass |
 | 📏 Special rules bounded (no AI + one AI update) | a ghost, magic or device rule with no scope, cost or limits | after the story rules and after the plan |
+| ✨ Magic rules kept (no AI) | a use of an ability without what it needs, at the wrong time, too often, by the wrong person | every chapter's editor and reviewer (must-fix), the next chapter's brief, the book report |
 | ✍ Two first pages | a weak first page (chapter 1 is written before anything else) | before chapter 1 is written (on by default) |
 | ✍ Rewrite chapter 1 last | a chapter 1 that loses readers, gives the twist away or plants nothing — kept only if the same reviewers score the book at least as well | after the beta readers, before the improve pass (on by default) |
 | 📏 Chapter polish | a draft under the reading floor for its readers, or repeating phrases of earlier chapters — one polish, kept only if the no-AI checks improved and nothing protected changed | right after each chapter's draft, before its review (on by default) |

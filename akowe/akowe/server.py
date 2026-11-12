@@ -1137,6 +1137,11 @@ class App:
                 return 200, rv.save_texture(principal, pid, branch, body)
             if len(rest) == 3 and rest[0] == "world" and rest[2] == "ai" and method == "POST":
                 return 202, rv.start_world_ai(principal, pid, branch, rest[1], body)
+            if rest and rest[0] == "magic":  # ✨ the magic rules: abilities, use ledger, rule check (magic_rules.py)
+                from . import magic_rules  # noqa: PLC0415
+                out = magic_rules.route(self, method, rest[1:], body, principal, pid, branch)
+                if out is not None:
+                    return out
             # 🧭 Section 7 continuity: physical / character state, two readings, version ledger (continuity.py)
             if rest and rest[0] == "continuity":
                 from . import continuity  # noqa: PLC0415

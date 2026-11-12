@@ -645,16 +645,25 @@ class EditorService:
         try:
             ctx, protected = self._context(pid, branch, rec, report, info, brief, guide)
             ctx.update(fact_checks_context(self.engine, job.principal, pid, branch, rec))  # P26/P30/P31 (never raises)
-            clocks = []
+            clocks, magic = [], []
             if rec["module_id"] == "C02":  # 🕰️ clock / tide contradictions with the chapters before: must-fix
                 from . import clock_check  # noqa: PLC0415
                 clocks = clock_check.flags_for(self.engine, job.principal, pid, branch, rec)
                 if clocks:
                     ctx["akowe_in_chapter"] = list(ctx.get("akowe_in_chapter") or []) + clocks
+                from . import magic_rules  # noqa: PLC0415 - ✨ a broken magic rule is must-fix too
+                magic = magic_rules.flags_for(self.engine, job.principal, pid, branch, rec)
+                if magic:
+                    ctx["akowe_in_chapter"] = list(ctx.get("akowe_in_chapter") or []) + magic
+                mctx = magic_rules.reviewer_context(self.engine, job.principal, pid, branch, rec)
+                if mctx:
+                    ctx["magic_rules"] = mctx
             task = rubric.task_text(rec["module_id"], dims, notes)
             if rec["module_id"] == "C02":
                 from . import habits  # noqa: PLC0415
                 task = f"{task} {rubric.IN_CHAPTER_WORDS}" + (f" {habits.ASK}" if ctx.get("must_fix") else "")
+                if ctx.get("magic_rules"):
+                    task = f"{task} {magic_rules.REVIEW_RULE}"
             if ctx.get("narrator_style"):  # P25 (Section 7c); ✍ or the book's own narrator voice (human_voice.py)
                 from .human_voice import editor_note_for  # noqa: PLC0415
                 task = f"{task} {editor_note_for(ctx['narrator_style'])}"
@@ -690,6 +699,8 @@ class EditorService:
         if rec["module_id"] == "C02":
             findings = _in_chapter_major(findings, ctx.get("akowe_in_chapter") or [])
             findings = clock_findings(findings, clocks, text)
+            from .magic_rules import magic_findings  # noqa: PLC0415
+            findings = magic_findings(findings, magic, text)
             if must:  # 🔁 PR #117 (F): a must-fix habit the editor did not target becomes a major finding
                 from . import habits  # noqa: PLC0415
                 findings = (findings + habits.findings_for(must, findings, dims))[:MAX_FINDINGS + len(must)]
