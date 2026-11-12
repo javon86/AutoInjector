@@ -2273,6 +2273,11 @@ def texture_rows(page: Page) -> list[dict]:
             where = _chapters_text([nums.get(c, c) if not isinstance(c, dict) else nums.get(c.get("chapter_id"), "?")
                                     for c in chs]) if chs else f"{u.get('count', 0)} use(s)"
         rows.append({"detail": t.get("detail") or "", "where": where or (t.get("effect") or "")})
+    try:  # 🔧 the trade card: how the book's trade is really done (trade_card.py)
+        from . import trade_card  # noqa: PLC0415
+        rows += trade_card.bible_rows(b.store, b.pid, b.branch)
+    except Exception:  # noqa: BLE001 - a Book Bible row is never a reason to fail the page
+        pass
     return rows
 
 

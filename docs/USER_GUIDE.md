@@ -301,7 +301,7 @@ words, for example teleportation that needs two anchor stones:
 
 Most of what reviewers dislike in a finished book — a rule whose numbers do not add up, a final mistake that is hard
 to believe, a middle that sags — is already in the plan. A plan is cheap to fix while no chapter exists yet. So,
-under **🩺 Plan check** on the ⚡ Make-a-book screen (both on by default; switch either off there):
+under **🩺 Plan check** on the ⚡ Make-a-book screen (all on by default; switch any of them off there):
 
 - **Story doctor:** as soon as the plan (premise, main plot, chapter outline) is made, every working AI scores it on
   the same points as the book report, quotes its weaknesses and suggests a fix for each. The AIs must prove a 9 or 10
@@ -321,6 +321,21 @@ under **🩺 Plan check** on the ⚡ Make-a-book screen (both on by default; swi
   without AI; only when two sound alike or one is too thin does the AI make them distinct, in one answer. Cards you
   wrote yourself are never changed. Each chapter's writer gets the cards of the characters in it, and the editor
   checks that every character sounds like their own card.
+- **🔧 Get the main characters' trade right:** when your story centres on a trade or craft (a piano tuner, a
+  lamplighter, a lighthouse keeper, glassblowing…), Akọwe spots it in the idea, the characters and the chapter plan
+  (no AI) and asks for ONE short "how it's really done" card: the right tools, the steps in order, the trade words,
+  the mistakes writers usually make (such as turning a tuning pin a quarter-turn) and a few sensory details. When
+  🤖 Claude Code is ready it researches the card on the web and lists its sources; otherwise a web AI writes it. You
+  find the card in the 📖 Book Bible (World details, and the saved bible file). The writer of every chapter that shows
+  the work gets it, and the editor checks those chapters against it: a wrong tool or step is a major note that must
+  be fixed. 1–2 more AI answers; none when the story has no trade.
+- **🔁 Keep it fresh:** Akọwe remembers short labels of your last 8 books — title words, the main characters' first
+  names, the kind of setting, the main motifs (tides, fog, grief…) and the kind of story; never their text. When the
+  AI invents your title, names and setting, it is asked to avoid these and to pick a different setting and kind of
+  story than your last books. If a title word or a main character's first name still repeats, it is renamed once.
+  What you typed yourself (your idea, genre, lock list, choices) is never changed — if your idea says "a coastal
+  town", it stays a coastal town. The run window says it, e.g. "🔁 Kept fresh: avoided Odile, Salt, coastal town".
+  At most 2 more AI answers, usually none.
 
 ### ✍ Chapter 1: two first pages, and rewritten last
 

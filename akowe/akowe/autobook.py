@@ -1160,6 +1160,9 @@ class AutoBookService(_Runner):
         from . import story_doctor, voice_contrast  # noqa: PLC0415 - 🩺 the plan check / 🗣 distinct voice cards
         out.update(story_doctor.clean_run_option(body))
         out.update(voice_contrast.clean_run_option(body))
+        from . import fresh_names, trade_card  # noqa: PLC0415 - 🔁 kept fresh / 🔧 the trade card (both on)
+        out.update(trade_card.clean_run_option(body))
+        out.update(fresh_names.clean_run_option(body))
         n = body.get("beta_readers", 1)  # 👥 idea #14: how many beta readers (1 = one AI; 2-3 = a panel)
         if isinstance(n, bool) or not isinstance(n, int) or not 1 <= n <= 3:
             raise AkoweError("INVALID_INPUT", "/beta_readers", "beta_readers: 1, 2 or 3", status="REJECTED")
@@ -2603,6 +2606,10 @@ class AutoBookService(_Runner):
             task = PROFILE_TASK.replace(" Return only the JSON object.", story_kind.PICK_TASK
                                         + " Return only the JSON object.")
             context["story_kinds"] = story_kind.pick_options()
+        from . import fresh_names  # noqa: PLC0415 - 🔁 what the author's recent books used (unless typed now)
+        fresh = fresh_names.profile_task(self, run, wishes)
+        if fresh:
+            task = task.replace(" Return only the JSON object.", fresh + " Return only the JSON object.")
         if self._wants_voice(pid):  # ✍ the narrator voice is folded into this first AI call (human_voice.py)
             from . import human_voice  # noqa: PLC0415
             schema = dict(schema, properties=dict(schema["properties"], narrator_voice=human_voice.VOICE_FIELD))
@@ -2637,6 +2644,7 @@ class AutoBookService(_Runner):
             + f" ({prof['genre'] or 'any genre'}; told in the " \
                         f"{book_promises.POV_WORDS[dec['pov']]}, {dec['tense']} tense)"
         self.event(run, "ai", f"The AI invented the book “{prof['title']}”", slot=job.slot)
+        fresh_names.after_profile(self, run, st)  # 🔁 a repeated title word or name -> one rename (no AI to find)
         self._auto_voice(run, pid, raw.get("narrator_voice"))
         if pick:
             try:
@@ -2976,6 +2984,8 @@ class AutoBookService(_Runner):
         sess = BibleSession(self._assist, run["principal"], run["project_id"], run["branch_id"],
                             prof.get("idea") or prof.get("title") or "a new book", run["settings"].get("slot_id"))
         sess._check_cancel = lambda: self.check(run)  # type: ignore[method-assign]
+        from . import fresh_names  # noqa: PLC0415 - 🔁 the cast's names: not the recent books' (fresh_names.py)
+        sess.fresh = fresh_names.sketch_hook(self, run)
         orig_job = sess._job
 
         def hooked_job(op_id, slot):
@@ -3656,6 +3666,11 @@ class AutoBookService(_Runner):
         st["message"] = f"{n} chapter(s) planned and approved" + (f" · {st['doctor']}" if st.get("doctor") else "")
         self._place_beats(run, st)
         self._place_stages(run, st)
+        from . import trade_card  # noqa: PLC0415 - 🔧 how the book's trade is really done (≤ 1 request)
+        trade_card.run_step(self, run, st)
+        tc = (run.get("trade_card") or {}).get("line")
+        if tc:
+            st["message"] += f" · {tc}"
 
     def _place_stages(self, run, st):
         """📚 story_kind.py: the planner places the chapter where each stage of the book's kind of story begins (one

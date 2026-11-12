@@ -288,6 +288,9 @@ bridge to your home Wi-Fi, behind its key.
     trades, folklore) with real web sources. Each note is labelled **established fact**, **disputed**, **legend** or
     **invented for the story**, with its source; a note that claims to be real but has no source is thrown away. The
     notes are handed to those chapters' writers.
+  - **The trade card:** once per book, right after the chapter outline, a helper researches how the main
+    characters' trade is really done (tools, steps, terms, the mistakes writers make), with sources. It follows the
+    "Research ahead" switch; without the helpers a web AI writes the card (see 🔧 in section 3).
   - **Fact check with sources:** every written chapter's real-world claims are checked on the web. Wrong ones get a
     small fix. You see them on the chapter page (🤖 Claude Code helpers box) and under 🔎 Fact checks.
   - **Checks side by side:** the all-AI check of each chapter is split by kind — continuity (against the Book Bible
@@ -611,6 +614,20 @@ to a minute), so the run knows which AIs work.
    person) and the tense (past or present) are fixed here too, from your choice, else the AI's pick for this
    story, else the genre's usual. If you left the **kind of story** to the AI, it picks the one of the seven basic
    plots that fits the idea best here, and the run's notes and the plan page say which and why.
+   **🔁 Kept fresh** (code: `akowe/akowe/fresh_names.py`; run setting `fresh_names`, on by default; the switch is
+   under "🩺 Plan check"). Before the AI invents the book, Akọwe builds a "recently used" list from your last 8 books
+   on the shelf (test books left out): the key words of their titles, the first names of their main and secondary
+   characters, their setting type (coastal town, big city, island…), central motifs (tides, fog, flooding, grief, a
+   widow, a quiet supernatural rule…) and kind of story — short labels and counts from fixed word lists, no AI and no
+   book text. It avoids every recent name and title word, the settings of the last 3 books and any setting or motif
+   two books share, and the kinds of the last 3 books. Anything you typed or chose (idea, genre, lock list, choices,
+   a kind of story you picked) is taken off the list. The invent-the-book prompt, the world sketch that names the
+   cast and the premise / main plot / outline planners get "avoid these unless the author asked for them; prefer a
+   different setting and kind of story". Then a check without AI: a title word or a name in the invented idea that
+   still repeats (and that you did not type) is renamed in ONE AI answer; after the world sketch, a character whose
+   first name repeats is renamed in one more answer before the character is made. The run window says it ("🔁 Kept
+   fresh: avoided Odile, Salt, coastal town") and logs counts only. Never for a rerun from a saved book bible, a
+   variant or a sequel (their names are the book's own). At most 2 AI answers, usually none.
 3. **Characters and places:** drafted, reviewed, approved. The main character (★) is guaranteed to exist.
 4. **Character sheets and voices:** what each character wants, needs, fears and hides, and a **voice card** for
    how each one talks (sentence rhythm, register, words from their job and place, favourite phrases and tics, words
@@ -678,6 +695,24 @@ to a minute), so the run knows which AIs work.
      the objections (its review still objects, or the revision could not be made): then you decide on the revision as
      usual, and the run goes on from there. Objections nothing could take up are listed for your check later.
      `story_doctor.take_objections` (hook in `autobook._review_until_approved`).
+   - **🔧 The trade card: how the main characters' trade is really done** (code: `akowe/akowe/trade_card.py`; run
+     setting `trade_card`, on by default; the switch is under "🩺 Plan check" on the Make-a-book screen). Right after
+     the chapter outline (and the story doctor), Akọwe looks for the trades, crafts and techniques the book relies on,
+     without any AI: a list of trade words in the book idea, the main characters' roles and the chapter outline
+     ("piano tuner", "tide-gauge keeper", "glassblowing"). None found: nothing is asked. Otherwise ONE request writes a
+     short card per craft (at most 2): how it works, the right tools, the steps in order, the trade terms, the mistakes
+     writers typically make (each with the right way and "watch words", short phrases a wrong passage would contain)
+     and sensory details. A 🤖 Claude Code helper does it with web research when it is ready (each card keeps the
+     pages it read; a source that is not a real web address is dropped); otherwise a web AI writes it (no sources
+     kept). The card is saved with the book (settings key `trade_card:<book>:<branch>`), shown in the 📖 Book Bible
+     (World details, and a "Trade card" section in the saved bible file), and goes into the writing brief of every
+     chapter whose plan or scene cards show the craft (at most about 1,600 characters). The AI editor gets it in its
+     fact checks with a "trade accuracy" rule: a procedure, tool or term that contradicts the card is a MAJOR note
+     (dimension "Right trade and period terms"), and a watch phrase Akọwe finds on the page without AI ("a
+     quarter-turn", "with a wick key") becomes a MAJOR note of its own, so the rewrite must fix it. The run says it
+     ("🔧 Trade card (piano tuner): how the work is really done — researched by Claude Code with 4 source(s)"). An AI
+     problem is a ⚠️ note; the book goes on. 1 answer (with Claude Code ready, 1 helper job instead), counted in the
+     ⏱ estimate.
    - **Optional: fill the whole Book Bible** from the plan before chapter one. It is off unless you turn it on
      (on the start screen, or 📖 Book Bible → At a glance). It never holds up the book.
 9. **Every chapter.** For each one:
@@ -1228,6 +1263,8 @@ All four are on the ⚡ **AI writes the whole book** screen (code: `akowe/akowe/
 | Your promises (content limits, themes, question) | a chapter showing what you ruled out | writer, reviewer and editor, every chapter |
 | Point of view and tense | a chapter that slips into another person or tense | every chapter |
 | Editor rubric | told-not-shown feelings, flat side characters, same-sounding voices, no stakes | every chapter |
+| 🔧 Trade card | a tool, step or term of the main characters' trade done wrong (a tuning pin turned a quarter-turn) — major notes against a researched "how it's really done" card | made once after the outline; every chapter that shows the craft (writer's brief and editor) |
+| 🔁 Kept fresh (no AI + up to 2 renames) | a title word, main character name, setting or motif repeated from your last books | when a ⚡ run invents the book and its cast |
 | Timeline arithmetic (no AI) | ages and years that don't add up ("twelve, twenty years ago… now forty") | the whole-book fact check, near the end |
 | Readability (no AI) | prose too hard or too simple for the book's readers | the book report and the scene grid; the reading-level floor in every chapter's brief and the final improve pass |
 | 🕰️ Clock, days and tide (no AI) | a tide going out before the stated high water, high waters that cannot both be true, a clock running backwards, a weekday or date that "four days later" / "the next morning" cannot reach, two dates whose weekdays cannot both be true | every chapter's editor and reviewer (must-fix), the next chapter's brief, the final improve pass |

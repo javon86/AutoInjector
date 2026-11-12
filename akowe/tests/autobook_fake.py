@@ -151,6 +151,16 @@ REVISE_NOTES = [("The opening could name the place sooner.", "Name the harbor in
                 ("The ending lands softly.", "Make the last line land harder.")]
 
 
+def trade_card_for(craft):
+    """🔧 A small trade card (trade_card.py) for the fake web AI."""
+    return {"craft": craft, "how_it_works": f"How a {craft} really works: the lamp is trimmed and lit at dusk.",
+            "tools": ["trimming scissors", "brass oil can"], "steps": ["Trim the wick", "Fill the oil", "Light at dusk"],
+            "terms": [{"term": "lamp room", "meaning": "the glazed room at the top"}],
+            "mistakes": [{"wrong": "winding the lens with a brass crank", "right": "the clockwork turns the lens",
+                          "watch_words": ["brass crank"]}],
+            "sensory": ["the smell of paraffin", "warm brass"]}
+
+
 def voice_for(name):
     v = VOICES.get(name)
     if v is None:
@@ -384,6 +394,14 @@ class BookFakeAI:
             if isinstance(scripted, dict):
                 return "plan_review", copy.deepcopy(scripted)
             return "plan_review", plan_review(ctx, scripted if isinstance(scripted, int) else 9)
+        if "craft_cards" in props:  # 🔧 the trade card (trade_card.py, one web-AI request)
+            return "trade_card", {"craft_cards": [trade_card_for(c) for c in (ctx.get("crafts") or [])[:2]]}
+        if "fresh_names" in props and "repeats" in ctx:  # 🔁 kept fresh: rename what repeats the recent books
+            rep = ctx["repeats"]
+            fresh = ["Juno", "Bram", "Cass", "Ottoline", "Pell", "Rook"]
+            return "fresh_names", {"fresh_title": "A Light Over Brackwater" if rep.get("title_words") else "",
+                                   "fresh_names": [{"old": n, "new": " ".join([fresh[i % len(fresh)]] + n.split()[1:])}
+                                                   for i, n in enumerate(rep.get("names") or [])]}
         if "cards" in props and "rewrite" in ctx:  # 🗣 voice cards made distinct
             with self.lock:
                 scripted = self.voice_contrast_script.pop(0) if self.voice_contrast_script else None
