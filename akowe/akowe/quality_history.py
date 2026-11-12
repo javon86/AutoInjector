@@ -29,6 +29,8 @@ import threading
 from collections import Counter
 from datetime import datetime, timezone
 
+from . import dialogue
+
 log = logging.getLogger("akowe.quality_history")
 
 KEY = "quality_history:{who}"
@@ -81,7 +83,8 @@ EDITOR_LESSONS = {
 }
 # habit codes (Akọwe's own counts) -> lesson
 HABIT_LESSONS = {
-    "triad": "Avoid lists of three; one precise detail or two.",
+    "triad": "Avoid lists of three: not “cold, wet, and tired” but “cold and wet”, or one exact detail (“her socks "
+             "squelched”).",
     "gesture": "Do not repeat a gesture (the same jaw, breath or stillness) across chapters.",
     "simile": "Never reuse a simile or an image from an earlier chapter.",
     "phrase": "Never reuse a distinctive phrase from an earlier chapter.",
@@ -104,7 +107,7 @@ TIC_WORDS = {"went": 3.0, "looked": 3.5, "turned": 3.0, "felt": 3.0, "just": 3.5
 MIN_TIC = 6
 READING_FLOOR = {"adult": 5.0, "young_adult": 4.0, "middle_grade": 3.0, "children": None}
 _WORD = re.compile(r"[A-Za-z’']+")
-_QUOTED = re.compile(r"“[^”]*”|\"[^\"\n]*\"")
+_QUOTED = dialogue.FINDER   # 💬 every dialogue style (dialogue.py)
 
 
 def _now() -> str:

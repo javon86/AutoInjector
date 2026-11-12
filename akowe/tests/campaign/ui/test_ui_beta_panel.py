@@ -48,4 +48,6 @@ def test_panel_of_beta_readers(make_context, ai_server):
     assert not d.locator("[data-testid=mb-beta]").is_checked()
     d.locator("[data-testid=mb-beta-n]").select_option("2")
     assert d.locator("[data-testid=mb-beta]").is_checked()  # choosing a panel switches the beta reader on
+    for sw in ("mb-reread", "mb-beta-reread", "mb-length-guard"):  # 🔁 / 📏 final_reads.py, length_guard.py: on
+        assert d.locator(f"[data-testid={sw}]").is_checked()
     assert_clean(page, "make-a-book beta panel choice")

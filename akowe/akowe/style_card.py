@@ -38,7 +38,7 @@ import time
 from collections import Counter
 from datetime import datetime, timezone
 
-from . import readability
+from . import dialogue, readability
 from .errors import AkoweError
 from .prose_audit import paragraphs, sentences, words
 
@@ -91,7 +91,7 @@ SCHEMA = {"type": "object", "additionalProperties": False,
                              "type": "object", "additionalProperties": False, "required": ["quote", "move"],
                              "properties": {"quote": _S, "move": _S}}}}}
 
-_QUOTED = re.compile(r"“[^”]*”|\"[^\"\n]*\"")
+_QUOTED = dialogue.FINDER   # 💬 every dialogue style (dialogue.py)
 _LOCK = threading.RLock()
 
 

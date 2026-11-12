@@ -10,7 +10,7 @@ What is measured:
                      words per sentence and syllables per word (a vowel-group syllable counter, English only).
 * sentence variety   average words per sentence, how much sentence lengths vary (coefficient of variation) and the
                      share of very long (> 30 words) and very short (<= 6 words) sentences.
-* dialogue share     the share of words inside quotation marks (“…”, "…").
+* dialogue share     the share of words inside quotation marks (“…”, "…", ‘…’, '…' and dash dialogue: dialogue.py).
 * paragraphs         average words per paragraph.
 * scenes             scenes per chapter (split on scene-break lines such as ``* * *``, ``***``, ``#`` or ``---``),
                      average / shortest / longest scene in words.
@@ -29,6 +29,7 @@ from __future__ import annotations
 import re
 import statistics
 
+from . import dialogue
 from .prose_audit import paragraphs, sentences, words
 
 LONG_SENTENCE = 30
@@ -50,7 +51,7 @@ AUDIENCES = {
 LITERARY_BONUS = 2.0
 
 _SCENE_BREAK = re.compile(r"^\s*(?:(?:\*\s*){3,}|#{1,3}|(?:[-—–~_=]\s*){3,}|[*#⁂§•·]|(?:•\s*){3,})\s*$", re.M)
-_QUOTED = re.compile(r"“[^”]*”|\"[^\"\n]*\"")
+_QUOTED = dialogue.FINDER   # 💬 every dialogue style (dialogue.py)
 _VOWELS = re.compile(r"[aeiouy]+")
 
 

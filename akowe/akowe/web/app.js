@@ -8781,6 +8781,7 @@ function runReportBox(r) {
     // 🔁 the final improve pass: both scores; 📈 this book against your last books
     rp && rp.polish ? h('p', { 'data-testid': 'mb-polish' }, rp.polish) : null,  // 📏 reading level before → after the chapter polish
     rp && rp.improve ? h('p', { 'data-testid': 'mb-improve' }, rp.improve) : null,
+    rp && rp.length ? h('p', { 'data-testid': 'mb-length' }, rp.length) : null,  // 📏 the book's length against its target
     rp && rp.trend ? h('p', { 'data-testid': 'mb-trend' }, '📈 ', rp.trend) : null,
     CK.recordCard(s7c(), { compact: true, testid: 'mb-ck-record' }));  // 📊 how good each checker was (folded)
 }
@@ -9303,6 +9304,7 @@ async function viewReport(main) {
     }
     if (rep.opening) holder.appendChild(h('p', { class: 'card small', 'data-testid': 'rp-opening' }, rep.opening));
     if (rep.polish) holder.appendChild(h('p', { class: 'card small', 'data-testid': 'rp-polish' }, rep.polish));
+    if (rep.length) holder.appendChild(h('p', { class: 'card small', 'data-testid': 'rp-length' }, rep.length));
     if (rep.improve) holder.appendChild(h('p', { class: 'card small', 'data-testid': 'rp-improve' }, rep.improve));
     if (ov.trend && ov.trend.line) holder.appendChild(qualityTrendCard(ov.trend, 'rp-trend', null));
     holder.appendChild(h('section', { class: 'card', 'data-testid': 'rp-next' }, h('h2', null, '🧭 What to try next'),

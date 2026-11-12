@@ -1444,6 +1444,8 @@ def render_markdown(rep: dict) -> str:
         L += [str(rep["polish"]), ""]
     if rep.get("improve"):
         L += [str(rep["improve"]), ""]
+    if rep.get("length"):  # 📏 length_guard.line: the finished book's length against its target
+        L += [str(rep["length"]), ""]
     L += ["## What to try next", ""]
     for t in rep.get("try_next") or []:
         L.append(f"- {t['text']} *({t['from']})*")
