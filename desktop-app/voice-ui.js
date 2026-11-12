@@ -10,7 +10,9 @@
  *                 and sendToAlfred for Alfred), so House Rules, relaying and every guard behave the same.
  *   Each AI pane  🎤 in its header (sends to that AI only) and, beside "💬 Last reply", ◀ 🔊 ▶ with "3 / 7":
  *                 pick one of that AI's replies (newest by default, follows new replies) and play / stop it.
- *   🔊 settings   in the System AI panel's 🔊 Voice box: a voice per speaker + speed, ▶ to test each.
+ *   🔊 settings   in the System AI panel's 🔊 Voice box: a voice per speaker + speed, ▶ to test each, and
+ *                 "✨ Better voices" (voice-picker.js): free Piper voices to ▶ hear / ⬇ download / use, and the optional
+ *                 ✨ Kokoro engine (best quality).
  *
  * Speech-to-text is local and offline: the page records (getUserMedia + MediaRecorder, webm/opus), main.js hands
  * the bytes to the voice shim (faster-whisper). Read-aloud uses a piper voice through the shim when one is
@@ -36,7 +38,7 @@
     const $ = (id) => doc.getElementById(id);
     const has = (fn) => typeof api[fn] === 'function';
 
-    const prefs = { micSendNow: false, micTarget: 'all', rate: 1, voices: {}, browserVoices: {}, micDevice: '', engine: 'auto' };
+    const prefs = { micSendNow: false, micTarget: 'all', rate: 1, voices: {}, browserVoices: {}, micDevice: '', engine: 'piper' };
     try { const t = win.localStorage && win.localStorage.getItem('voice.micTarget'); if (t) prefs.micTarget = t; } catch (_) {}
     let alfredOn = false;
 
@@ -367,7 +369,7 @@
       }
       async function synthPiper(text, who) {
         if (!has('voiceSynthesize') || Date.now() < piperOffUntil) return null;
-        if (prefs.browserVoices[who] && !prefs.voices[who]) return null; // the user picked a built-in voice for them
+        if (prefs.browserVoices[who] && !prefs.voices[who] && prefs.engine !== 'kokoro') return null; // the user picked a built-in voice for them
         try {
           const r = await api.voiceSynthesize(text, who);
           if (r && r.ok && r.audio) return r;
@@ -397,7 +399,7 @@
             if (my !== token) return { ok: true, stopped: true };
             if (r) {
               next = i + 1 < chunks.length ? synthPiper(chunks[i + 1], who) : null;
-              sp.lastEngine = 'piper';
+              sp.lastEngine = r.engine === 'kokoro' ? 'kokoro' : 'piper';
               const ok = await playWav(r, my);
               if (ok) { anySpoke = true; continue; }
             }
@@ -417,6 +419,15 @@
       }
       sp.speak = speak; sp.stop = stop; sp.onChange = (f) => subs.push(f); sp.browserVoices = browserVoices;
       sp.resetPiper = () => { piperOffUntil = 0; };
+      // one short clip (a ▶ sample in "Better voices"): same one-speaker rule, ⏹ stops it
+      sp.playClip = async (r) => {
+        stop();
+        const my = ++token;
+        setCurrent({ clip: true });
+        const ok = await playWav(r, my);
+        if (my === token) setCurrent(null);
+        return ok;
+      };
       return sp;
     }());
     const NO_VOICE_MSG = "🔊 This PC has no voice to read with. Install a free one: Setup Wizard → Installs → \"Voice model\" (or add a voice in Windows Settings → Time & language → Speech).";
@@ -558,6 +569,18 @@
 
     // ---- 🔊 settings (in the 🔊 Voice box) --------------------------------------------------------------------
     let piperList = [];
+    // ✨ Better voices (voice-picker.js, when the page has it)
+    const picker = typeof win.createVoicePicker === 'function' ? win.createVoicePicker({
+      win, doc, api, catalog: opts.catalog || win.VoiceCatalog, labels: { butler: 'Alfred' },
+      play: (r) => speaker.playClip(r),
+      onChanged: async (c) => {
+        if (c && c.downloaded && has('voicePiperVoices')) { try { const r = await api.voicePiperVoices(); piperList = (r && Array.isArray(r.voices)) ? r.voices : piperList; } catch (_) {} }
+        if (c && c.who) { prefs.voices[c.who] = c.voice; prefs.browserVoices[c.who] = ''; }
+        if (c && c.kokoro && c.kokoro.engine) prefs.engine = c.kokoro.engine;
+        speaker.resetPiper();
+        if (c && (c.downloaded || c.who)) buildSettings();
+      },
+    }) : null;
     function buildSettings() {
       const box = $('voice-read-settings');
       if (!box) return;
@@ -570,7 +593,7 @@
       });
       box.append(h('label', { class: 'vrs-note', for: 'mic-send-now', title: 'Off (the default): what you say waits in the Compose box so you can fix a misheard word, then you press Send' }, now, ' 🎤 Send what I say right away (skip checking it first)'));
       box.append(h('div', { class: 'vrs-title' }, '🔊 Read-aloud voices (the 🔊 on each AI)'));
-      const piperNote = piperList.length ? `${piperList.length} piper voice${piperList.length === 1 ? '' : 's'} found.` : 'Using this PC\'s built-in voices. Nicer ones: Setup Wizard → Installs → "Voice model".';
+      const piperNote = piperList.length ? `${piperList.length} piper voice${piperList.length === 1 ? '' : 's'} found.` : `Using this PC's built-in voices. Nicer ones: ${picker ? '✨ Better voices below' : 'Setup Wizard → Installs → "Voice model"'}.`;
       box.append(h('div', { class: 'vrs-note', id: 'vrs-note' }, piperNote));
       const pcVoices = speaker.browserVoices().filter((v) => /^en/i.test(String(v.lang || '')) || !v.lang);
       for (const who of VR.WHO) {
@@ -596,6 +619,7 @@
       const testAll = h('button', { type: 'button', id: 'ra-test', title: 'Hear each speaker once' }, '▶︎ Test voice');
       testAll.addEventListener('click', async () => { for (const who of VR.WHO) { const out = await testVoice(who); if (!out.ok || out.stopped) break; } });
       box.append(h('div', { class: 'voice-assign' }, h('span', null, 'Speed'), rate, rv, testAll));
+      if (picker) box.append(picker.render({ voices: prefs.voices }));
     }
     function saveVoiceChoice(who, val) {
       const piper = val.startsWith('piper:') ? val.slice(6) : '';
@@ -609,7 +633,7 @@
       const out = await speaker.speak(`Hello, this is ${who === 'butler' ? 'Alfred' : LABELS[who]}. This is how I sound when I read my replies.`, who, { test: who });
       const note = $('vrs-note');
       if (!out.ok && out.error === 'NO_VOICE') { if (note) note.textContent = NO_VOICE_MSG.replace(/^🔊 /, ''); say(NO_VOICE_MSG, { tone: 'error', actions: [setupAction] }); }
-      else if (note && out.ok) note.textContent = `Played with ${out.engine === 'piper' ? 'a piper voice' : "this PC's built-in voice"}.`;
+      else if (note && out.ok) note.textContent = `Played with ${out.engine === 'kokoro' ? 'the best-quality voice (Kokoro)' : out.engine === 'piper' ? 'a piper voice' : "this PC's built-in voice"}.`;
       return out;
     }
 
@@ -625,10 +649,12 @@
             prefs.voices = Object.assign({}, s.voices || {});
             prefs.browserVoices = Object.assign({}, s.browserVoices || {});
             prefs.micDevice = s.micDevice || '';
+            prefs.engine = s.engine === 'kokoro' ? 'kokoro' : 'piper';
           }
         } catch (_) {}
       }
       if (has('voicePiperVoices')) { try { const r = await api.voicePiperVoices(); piperList = (r && Array.isArray(r.voices)) ? r.voices : []; } catch (_) { piperList = []; } }
+      if (picker) await picker.load();
       paintTargets();
       buildSettings();
     }
@@ -656,7 +682,7 @@
 
     return {
       init, say, deliver, review, sendReviewed, clearReviewed, resolveTargets, micToggle, micStart, micStop, cancelTranscribe, refreshReplies, step, playReply, speakButton,
-      speaker, prefs, replies, mic, testVoice, openVoiceSettings, _setAlfredOn: (on) => { alfredOn = !!on; paintTargets(); },
+      speaker, prefs, replies, mic, testVoice, openVoiceSettings, picker, _setAlfredOn: (on) => { alfredOn = !!on; paintTargets(); },
     };
   }
 

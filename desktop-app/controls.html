@@ -588,7 +588,10 @@
     #btn-run-strip[data-tone="ok"] .rsx-fill { background:#57c07a; }
     @media (max-width:1500px) { #btn-run-strip .rsx-long { display:none; } #btn-run-strip .rsx-short { display:block; } #window-titlebar #btn-run-strip { max-width:300px; flex-shrink:0; }
       /* the run's line needs the room more than the words "Save state" / "Load state" (their icons stay) */
-      #window-titlebar:has(#btn-run-strip:not([hidden])) .ss-lbl { display:none; } }
+      #window-titlebar:has(#btn-run-strip:not([hidden])) .ss-lbl { display:none; }
+      /* and the window's name gives way first (it shrinks with "…" instead of pushing 💾 / 📂 / ❓ Help off the edge —
+         fonts differ a few pixels between PCs); the run's short line keeps its full width */
+      #window-titlebar:has(#btn-run-strip:not([hidden])) .wt-name { flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; } }
     @media (max-width:1200px) { #btn-run-strip .rsx-short { display:none !important; } #btn-run-strip .rsx-tiny { display:block; }
       #window-titlebar:has(#btn-run-strip:not([hidden])) .wt-name { display:none; } }
     #window-titlebar:has(#voice-heard:not([hidden])) #btn-run-strip .rsx-long { display:none; }
@@ -1041,6 +1044,23 @@
     #voice-read-settings select { flex:1 1 auto; min-width:0; font-size:11px; }
     #voice-read-settings input[type=range] { flex:1 1 auto; min-width:0; }
     #voice-read-settings .vrs-rate { width:auto !important; font-size:11px; opacity:.8; }
+    /* ✨ Better voices (voice-picker.js) */
+    #voice-picker { margin-top:6px; padding-top:5px; border-top:1px solid #2a2a2a; }
+    #voice-picker .vp-row { padding:4px 0; border-bottom:1px solid #1f1f1f; font-size:11.5px; }
+    #voice-picker .vp-meta { opacity:.7; font-size:11px; }
+    #voice-picker .vp-used { color:#9fe7b5; font-size:11px; }
+    #voice-picker .vp-actions { display:flex; flex-wrap:wrap; align-items:center; gap:5px; margin-top:2px; }
+    #voice-picker .vp-actions select { flex:0 1 auto; max-width:110px; }
+    #voice-picker .vp-prog { display:inline-flex; align-items:center; gap:5px; flex:1 1 160px; min-width:0; }
+    #voice-picker .vp-prog progress { flex:1 1 auto; min-width:60px; height:8px; }
+    #voice-picker .vp-pct { font-size:11px; opacity:.85; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    #voice-picker .vp-ok { color:#9fe7b5; font-size:11px; }
+    #voice-picker .vp-msg { font-size:11px; opacity:.85; min-height:0; }
+    #voice-picker .vp-msg:empty { display:none; }
+    #voice-picker .vp-msg[data-tone="ok"] { color:#9fe7b5; }
+    #voice-picker .vp-msg[data-tone="warn"] { color:#f3dfa6; }
+    #voice-picker .vp-msg[data-tone="error"] { color:#ffb3b3; }
+    #voice-picker .vp-kokoro { margin-top:6px; }
     .vr-alfred { font-size:10.5px; line-height:1; padding:1px 5px; margin-top:4px; border-radius:5px; opacity:.75; cursor:pointer; }
     .vr-alfred:hover { opacity:1; }
     .vr-alfred::before { content:attr(data-icon); }
@@ -3090,6 +3110,8 @@
   <script src="media-selftest-ui.js"></script><!-- 🩺 Test pictures & video (🎬 Video → 🩺 Test) -->
   <script src="alfred-format.js"></script><!-- 🎩 his replies as simple, safe formatting (used by alfred-panel.js) -->
     <script src="voice-read.js"></script><!-- 🎤 / 🔊 shared helpers (window.VoiceRead) -->
+    <script src="voice-catalog.js"></script><!-- 🔊 the recommended free voices + ✨ Kokoro (window.VoiceCatalog) -->
+    <script src="voice-picker.js"></script><!-- 🔊 ✨ Better voices: ▶ sample, ⬇ download, use for… (window.createVoicePicker) -->
     <script src="voice-ui.js"></script><!-- 🎤 talk to the AIs + 🔊 read their replies aloud -->
     <script src="alfred-panel.js"></script><!-- 🎩 Alfred panel (off by default) -->
   <script src="llm-write-test-ui.js"></script><!-- 🧪 "What will it write?" table, shared by the two below -->

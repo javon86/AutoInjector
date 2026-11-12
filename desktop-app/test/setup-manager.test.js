@@ -284,6 +284,16 @@ async function main() {
     sm._resetPython();
   }
 
+  console.log('\n== pipInstall into one named Python (the voice engine\'s own) ==');
+  {
+    let seen = null;
+    sm.configure({ spawn: (cmd, args) => { seen = { cmd, args }; return fakeChild(0, 'Successfully installed kokoro-onnx'); } });
+    const r = await sm.pipInstall(['kokoro-onnx'], () => {}, { python: { cmd: 'C:/voice-env/python.exe', pre: [] } });
+    assert(r.ok && seen && seen.cmd === 'C:/voice-env/python.exe' && seen.args.join(' ') === '-m pip install --upgrade --prefer-binary kokoro-onnx', `runs that Python's pip, not another one (${seen && seen.cmd} ${seen && seen.args.join(' ')})`);
+    await sm.pipInstall(['kokoro-onnx'], () => {}, { python: { cmd: 'py', pre: ['-3.12'] } });
+    assert(seen.cmd === 'py' && seen.args[0] === '-3.12' && seen.args[1] === '-m', 'keeps the launcher\'s version switch (py -3.12 -m pip …)');
+  }
+
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 }

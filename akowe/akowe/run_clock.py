@@ -39,7 +39,8 @@ FIXED_S = {"backup": 15, "format": 5, "assemble": 20, "export": 45, "check": 10,
 OPTION_STEP = {"checkers": "chapters", "writers_room": "plot", "beta": "beta", "bible": "bible",
                "human_pass": "report", "improve": "improve", "opening": "opening", "first_page": "chapters",
                "chapter_polish": "chapters", "reread": "reread", "story_doctor": "outline",
-               "voice_contrast": "characters", "stand_in": "chapters"}
+               "voice_contrast": "characters", "stand_in": "chapters", "trade_card": "outline",
+               "fresh_names": "profile"}
 
 
 def _now() -> float:

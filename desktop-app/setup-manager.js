@@ -404,6 +404,36 @@ function _download(fileUrl, destPath, onProgress, redirects) {
   });
 }
 
+// pip-install fixed packages into the chosen Python, streaming pip's lines to onProgress. Also used outside the
+// wizard's targets (the optional ✨ Kokoro voice in the 🔊 Voice box), so it is exported.
+// opts.python ({ cmd, pre? }): install into exactly that interpreter (e.g. the one the voice shim runs in) instead
+// of the best one found on this PC.
+async function pipInstall(packages, onProgress, opts = {}) {
+  const say = typeof onProgress === 'function' ? onProgress : () => {};
+  const want = opts && opts.python && typeof opts.python.cmd === 'string' && opts.python.cmd ? opts.python : null;
+  const py = want ? { cmd: want.cmd, pre: Array.isArray(want.pre) ? want.pre : [], version: want.version || null, compatible: true } : await resolvePython();
+  if (py.missing) return { ok: false, error: 'No Python found. Install Python 3.12 from python.org, then try again.' };
+  say(`Using Python ${py.version || '?'} (${[py.cmd, ...py.pre].join(' ')})`);
+  if (!py.compatible) {
+    // Warn up-front — a too-new Python is the usual cause of the litellm /
+    // Rust source-build failure. We still try (a wheel may exist), but the
+    // guidance is there if it fails.
+    say(`⚠ Python ${py.version} is newer than these packages support (need 3.8–3.12). If this fails, install Python 3.12 from python.org and it will be picked up automatically.`);
+  }
+  // --prefer-binary: take a prebuilt wheel over compiling from source, so a
+  // missing Rust/compiler toolchain can't sink the install.
+  const r = await _runProcess(py.cmd, [...py.pre, '-m', 'pip', 'install', '--upgrade', '--prefer-binary', ...packages], say);
+  if (r.ok) return { ok: true, message: `Installed ${packages.join(', ')}` };
+  // Add the actionable cause when the failure looks like the too-new-Python
+  // source-build trap (Rust/Cargo, or wheel-build metadata failures).
+  const hint = !py.compatible
+    ? ` — Python ${py.version} has no prebuilt package for one of these; install Python 3.12 from https://www.python.org/downloads/ and run Install Missing again.`
+    : '';
+  return { ok: false, error: `${r.error}${hint}` };
+}
+/** Is one pip package installed in the chosen Python? (best-effort, never throws) */
+async function pipHas(pkg) { try { return await _pipShow(pkg); } catch (_) { return false; } }
+
 const OLLAMA_MODEL_RE = /^[A-Za-z0-9][A-Za-z0-9._:\/-]{0,80}$/;
 
 // install(id, { model?, onProgress?, force? }) -> { ok, message?, error? }
@@ -415,27 +445,7 @@ async function install(id, opts = {}) {
   onProgress(`Installing: ${t.label}`);
 
   try {
-    if (t.kind === 'pip') {
-      const py = await resolvePython();
-      if (py.missing) return { ok: false, error: 'No Python found. Install Python 3.12 from python.org, then try again.' };
-      onProgress(`Using Python ${py.version || '?'} (${[py.cmd, ...py.pre].join(' ')})`);
-      if (!py.compatible) {
-        // Warn up-front — a too-new Python is the usual cause of the litellm /
-        // Rust source-build failure. We still try (a wheel may exist), but the
-        // guidance is there if it fails.
-        onProgress(`⚠ Python ${py.version} is newer than these packages support (need 3.8–3.12). If this fails, install Python 3.12 from python.org and it will be picked up automatically.`);
-      }
-      // --prefer-binary: take a prebuilt wheel over compiling from source, so a
-      // missing Rust/compiler toolchain can't sink the install.
-      const r = await _runProcess(py.cmd, [...py.pre, '-m', 'pip', 'install', '--upgrade', '--prefer-binary', ...t.packages], onProgress);
-      if (r.ok) return { ok: true, message: `Installed ${t.packages.join(', ')}` };
-      // Add the actionable cause when the failure looks like the too-new-Python
-      // source-build trap (Rust/Cargo, or wheel-build metadata failures).
-      const hint = !py.compatible
-        ? ` — Python ${py.version} has no prebuilt package for one of these; install Python 3.12 from https://www.python.org/downloads/ and run Install Missing again.`
-        : '';
-      return { ok: false, error: `${r.error}${hint}` };
-    }
+    if (t.kind === 'pip') return await pipInstall(t.packages, onProgress);
 
     if (t.kind === 'download') {
       let dir;
@@ -501,4 +511,4 @@ async function auto(opts = {}) {
   return { ok: okCount > 0, results, installed: okCount, total: results.length };
 }
 
-module.exports = { TARGETS, AUTO_ORDER, fileProblem, configure, pythonBin, resolvePython, pythonStatus, _resetPython, _pyCandidates, has, get, list, detect, detectAll, install, auto };
+module.exports = { TARGETS, AUTO_ORDER, fileProblem, pipInstall, pipHas, configure, pythonBin, resolvePython, pythonStatus, _resetPython, _pyCandidates, has, get, list, detect, detectAll, install, auto };

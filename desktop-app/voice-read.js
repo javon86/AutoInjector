@@ -136,11 +136,13 @@
     return out;
   }
   // piper voice files (names without .onnx) -> who -> name; distinct while there are enough.
+  // The better voices first (voice-catalog.js recommends: Alfred en_GB-alan, ChatGPT en_US-lessac-high, Claude
+  // en_US-ryan-high, Gemini en_GB-alba), then their smaller / similar ones — a "-high" voice beats its "-medium".
   const PIPER_PREFER = {
-    butler: [/en_GB-(alan|northern_english_male|semaine)/i, /en_GB/i],
-    chatgpt: [/en_US-lessac/i, /en_US-(hfc_female|kristin|amy)/i],
-    claude: [/en_US-(ryan|joe|john|bryce|kusal)/i, /en_US/i],
-    gemini: [/en_US-(amy|kathleen|hfc_female)|en_GB-(jenny|alba|cori)/i, /en_/i],
+    butler: [/en_GB-alan/i, /en_GB-(northern_english_male|semaine)/i, /en_GB/i],
+    chatgpt: [/en_US-lessac-high/i, /en_US-lessac/i, /en_US-(hfc_female|kristin|amy)/i],
+    claude: [/en_US-ryan-high/i, /en_US-(ryan|joe|john|bryce|kusal)/i, /en_US/i],
+    gemini: [/en_GB-alba/i, /en_GB-(cori|jenny)/i, /en_US-(amy|kathleen|hfc_female)/i, /en_/i],
   };
   function defaultPiperVoices(names) {
     const pool = (Array.isArray(names) ? names : []).map(String).filter(Boolean);

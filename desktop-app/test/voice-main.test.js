@@ -142,6 +142,110 @@ fs.writeFileSync(path.join(mock.__userDataDir, 'autoinjector-state.json'), JSON.
   let st = {}; try { st = JSON.parse(fs.readFileSync(path.join(mock.__userDataDir, 'autoinjector-state.json'), 'utf8')); } catch (_) {}
   assert(st.voiceConfig && st.voiceConfig.micTarget === 'claude' && st.voiceConfig.browserVoices && st.voiceConfig.browserVoices.gemini === 'Microsoft Zira', 'persisted in the app state like the other voice settings');
 
+  console.log('\n== 🔊 Better voices: the list, ⬇ download, ▶ sample (only when pressed) ==');
+  {
+    const http = require('http');
+    const cat = require('../voice-catalog');
+    const BIG = Buffer.alloc(5000, 3);
+    const JS = Buffer.from(JSON.stringify({ audio: { sample_rate: 22050 }, pad: 'p'.repeat(600) }));
+    const hits = [];
+    const dsrv = http.createServer((req, res) => {
+      hits.push(req.url);
+      if (/\.onnx$/.test(req.url) || /\.bin$/.test(req.url)) { res.writeHead(200, { 'Content-Length': BIG.length }); return res.end(BIG); }
+      if (/\.json$/.test(req.url)) { res.writeHead(200, { 'Content-Length': JS.length }); return res.end(JS); }
+      if (/\.mp3$/.test(req.url)) { res.writeHead(200, { 'Content-Type': 'audio/mpeg' }); return res.end(Buffer.alloc(900, 9)); }
+      res.writeHead(404); res.end();
+    });
+    await new Promise((ok) => dsrv.listen(0, '127.0.0.1', ok));
+    const lb = `http://127.0.0.1:${dsrv.address().port}`;
+    for (const v of cat.PIPER_VOICES) { v.sample = `${lb}/${v.id}/sample.mp3`; for (const f of v.files) { f.url = `${lb}/${f.name}`; if (!f.json) { f.bytes = BIG.length; f.minBytes = 1000; } } }
+    for (const f of cat.KOKORO.files) { f.url = `${lb}/${f.name}`; f.bytes = BIG.length; f.minBytes = 1000; }
+    const vdir = require('../output-manager').modelsDir('voice');
+    r = await call('voice:catalog');
+    assert(r.ok && r.voices.length === cat.PIPER_VOICES.length && r.voices.every((v) => v.installed === false && v.bytes > 0), 'the recommended voices are listed, none downloaded yet');
+    assert(r.kokoro && r.kokoro.model === false && r.kokoro.approxMB === 350 && r.engine === 'piper', 'Kokoro: not installed, not used (piper is the default)');
+    assert(hits.length === 0, 'opening the list fetched nothing from the internet');
+    const id = 'en_US-ryan-high';
+    sent.length = 0;
+    r = await call('voice:download', { id });
+    assert(r.ok && fs.existsSync(path.join(vdir, `${id}.onnx`)) && fs.existsSync(path.join(vdir, `${id}.onnx.json`)), 'pressing ⬇ downloads the voice and its settings into models/voice');
+    assert(sent.some(([c, p]) => c === 'voice-download' && p.id === id && p.phase === 'done'), 'progress goes to the page (and "done")');
+    r = await call('voice:catalog');
+    assert(r.voices.find((v) => v.id === id).installed === true && r.defaults.claude === id, 'it now shows as downloaded, and Claude reads with it by default');
+    r = await call('voice:download', { id: '../../evil' });
+    assert(!r.ok && r.error === 'UNKNOWN_VOICE', 'only voices from the list can be downloaded');
+    const before = hits.length;
+    r = await call('voice:sample', { id: 'en_GB-alba-medium' });
+    assert(r.ok && r.from === 'sample' && r.mime === 'audio/mpeg' && Buffer.from(r.audio, 'base64').length === 900, '▶ on a voice not downloaded yet plays its short published sample');
+    assert(hits.length === before + 1 && !fs.readdirSync(vdir).some((f) => /alba/.test(f)), 'fetched once, kept in memory only (nothing saved)');
+    const shim4 = await startFakeVoiceShim({ piper: true });
+    voice.setSettings({ endpoint: shim4.base });
+    r = await call('voice:sample', { id });
+    assert(r.ok && r.from === 'voice' && shim4.calls.some((c) => c.path === '/synthesize' && c.voice === id), '▶ on a downloaded voice reads with that voice (no internet)');
+    await shim4.close();
+
+    console.log('\n== ✨ Kokoro: optional install, engine choice, fallback ==');
+    const sm = require('../setup-manager');
+    const realPip = sm.pipInstall, realResolve = sm.resolvePython;
+    // 1) the voice engine is running and says which Python it is: Kokoro goes into exactly that one, then is checked
+    const eng = await startFakeVoiceShim({ piper: true, kokoro: '', python: 'C:/AutoInjector/voice-env/python.exe' });
+    voice.setSettings({ endpoint: eng.base });
+    sm.pipInstall = async () => ({ ok: false, error: 'pip exited 1' });
+    r = await call('voice:kokoro-install');
+    assert(!r.ok && /Couldn't install the Kokoro engine/.test(r.message) && /still work/.test(r.message), 'a failed engine install says so plainly — the other voices still work');
+    assert(!fs.existsSync(path.join(vdir, 'kokoro', 'kokoro-v1.0.onnx')), 'and nothing was downloaded');
+    let pipAsked = null, pipInto = null;
+    sm.pipInstall = async (pkgs, onP, o) => { pipAsked = pkgs; pipInto = o && o.python; onP('Collecting kokoro-onnx'); eng.options.kokoro = 'ready'; return { ok: true }; };
+    r = await call('voice:kokoro-install');
+    assert(r.ok && !r.unchecked && pipAsked && pipAsked.includes('kokoro-onnx'), 'Install: the kokoro-onnx package is installed and the voice engine then finds it');
+    assert(pipInto && pipInto.cmd === 'C:/AutoInjector/voice-env/python.exe' && pipInto.pre.length === 0, `into the SAME Python the running voice engine reported (${pipInto && pipInto.cmd})`);
+    assert(fs.existsSync(path.join(vdir, 'kokoro', 'kokoro-v1.0.onnx')) && fs.existsSync(path.join(vdir, 'kokoro', 'voices-v1.0.bin')), 'then its model files go into models/voice/kokoro');
+    // 2) installed, but the engine still can't import it (another Python): said plainly, not "installed"
+    eng.options.kokoro = '';
+    sm.pipInstall = async () => ({ ok: true });
+    r = await call('voice:kokoro-install');
+    assert(!r.ok && r.error === 'KOKORO_NOT_FOUND' && /still can't find the Kokoro engine/.test(r.message) && /other voices still work/.test(r.message), `the engine still can't find it -> plain words ("${r.message}")`);
+    await eng.close();
+    // 3) the voice engine isn't running: install into the Python the app starts it with (same lookup as the launch)
+    voice.setSettings({ endpoint: `http://127.0.0.1:${await freePort()}` });
+    sm.resolvePython = async () => ({ cmd: 'py', pre: ['-3.12'], version: '3.12', compatible: true });
+    const vpy = require('../voice-python');
+    const realMakeProbe = vpy.makeProbe;
+    vpy.makeProbe = () => { const f = async (c) => (c.cmd === 'py' ? { runs: true, has: false } : /python/.test(c.cmd) ? { runs: true, has: false } : { runs: false, has: false }); f.clear = () => {}; return f; };
+    sm.pipInstall = async (pkgs, onP, o) => { pipInto = o && o.python; return { ok: true }; };
+    pipInto = null;
+    r = await call('voice:kokoro-install');
+    assert(pipInto && pipInto.cmd === 'py' && pipInto.pre.join(' ') === '-3.12', `engine not running: installed into the Python the app chose for the voice engine (nothing installed anywhere -> the installer's pick) (${pipInto && [pipInto.cmd, ...pipInto.pre].join(' ')})`);
+    assert(r.ok && r.unchecked && /couldn't be checked/.test(r.message), 'and it says it could not be checked yet');
+    const remembered = voice.getSettings().python;
+    assert(remembered && remembered.cmd === 'py' && remembered.pre.join(' ') === '-3.12', 'the chosen Python is remembered in the voice settings (so it keeps being used)');
+    vpy.makeProbe = realMakeProbe;
+    sm.pipInstall = realPip; sm.resolvePython = realResolve;
+    const shim5 = await startFakeVoiceShim({ piper: true, kokoro: 'ready' });
+    voice.setSettings({ endpoint: shim5.base, engine: 'piper', voices: { claude: '' } });
+    r = await call('voice:synthesize', { text: 'Hello.', who: 'claude' });
+    assert(r.ok && r.engine === 'piper', 'installed but not switched on: piper still reads');
+    await call('voice:configure', { engine: 'kokoro', kokoroVoices: { claude: 'bm_fable' } });
+    r = await call('voice:synthesize', { text: 'Hello.', who: 'claude' });
+    let kc = shim5.calls.filter((c) => c.path === '/synthesize').pop();
+    assert(r.ok && r.engine === 'kokoro' && kc.kokoro_voice === 'bm_fable' && kc.device === 'cpu', 'switched on: Kokoro reads, with Claude\'s Kokoro voice, on the processor');
+    await shim5.close();
+    const shim6 = await startFakeVoiceShim({ piper: true, kokoro: 'fail' });
+    voice.setSettings({ endpoint: shim6.base });
+    r = await call('voice:synthesize', { text: 'Hello.', who: 'claude' });
+    assert(r.ok && r.engine === 'piper' && /piper voice read it/.test(r.message), 'Kokoro breaks: a piper voice reads, and it says so');
+    await shim6.close();
+    const shim7 = await startFakeVoiceShim({ piper: false, kokoro: '' });
+    voice.setSettings({ endpoint: shim7.base });
+    r = await call('voice:synthesize', { text: 'Hello.', who: 'claude' });
+    assert(!r.ok && r.fallback === true, 'nothing installed in the engine: the page falls back to the PC\'s voices');
+    r = await call('voice:synthesize', { text: 'Hi.', who: 'claude', kokoroVoice: 'af_heart' });
+    assert(!r.ok && r.error === 'NO_KOKORO', '▶ a Kokoro voice before Kokoro is ready: a plain "not installed"');
+    await shim7.close();
+    await call('voice:configure', { engine: 'piper' });
+    dsrv.close();
+  }
+
   console.log('\n== privacy: the log has codes and sizes, never the words ==');
   await sleep(150);
   let dbg = ''; try { dbg = fs.readFileSync(path.join(mock.__userDataDir, 'autoinjector-debug.log'), 'utf8'); } catch (_) {}

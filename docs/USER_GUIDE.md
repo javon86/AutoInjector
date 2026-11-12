@@ -301,7 +301,7 @@ words, for example teleportation that needs two anchor stones:
 
 Most of what reviewers dislike in a finished book — a rule whose numbers do not add up, a final mistake that is hard
 to believe, a middle that sags — is already in the plan. A plan is cheap to fix while no chapter exists yet. So,
-under **🩺 Plan check** on the ⚡ Make-a-book screen (both on by default; switch either off there):
+under **🩺 Plan check** on the ⚡ Make-a-book screen (all on by default; switch any of them off there):
 
 - **Story doctor:** as soon as the plan (premise, main plot, chapter outline) is made, every working AI scores it on
   the same points as the book report, quotes its weaknesses and suggests a fix for each. The AIs must prove a 9 or 10
@@ -310,12 +310,32 @@ under **🩺 Plan check** on the ⚡ Make-a-book screen (both on by default; swi
   usual, and scored again — at most 2 times unless you pick 1 or 3. The best-scoring plan is kept. Your own idea and
   your lock list are never replaced, and an outline you wrote yourself is only scored. The run window says what
   happened, e.g. "🩺 Plan scored 7.4 → 8.6 after 1 revision", and so does the book report. About 3 to 8 more AI
-  answers.
+  answers. It also runs when you approved the outline yourself (✔ Approve anyway or accept the change).
+- **Fewer stops on the plan:** when the AI reviewer keeps objecting to the AI's main plot or chapter outline, the
+  run does not stop to ask you any more: the story doctor revises the outline with those objections, and the
+  revision is reviewed again. You are still asked about your own text, point of view, tense, content limits, a change
+  to an approved fact, or when the doctor's revision cannot settle it. To be asked every time, switch off "Let the
+  story doctor settle the plan reviewer's objections".
 - **Make sure every character sounds different:** each character already gets a voice card (how they talk: sentence
   length, words, favourite phrases, what they never say, how they dodge a question). Akọwe now compares the cards
   without AI; only when two sound alike or one is too thin does the AI make them distinct, in one answer. Cards you
   wrote yourself are never changed. Each chapter's writer gets the cards of the characters in it, and the editor
   checks that every character sounds like their own card.
+- **🔧 Get the main characters' trade right:** when your story centres on a trade or craft (a piano tuner, a
+  lamplighter, a lighthouse keeper, glassblowing…), Akọwe spots it in the idea, the characters and the chapter plan
+  (no AI) and asks for ONE short "how it's really done" card: the right tools, the steps in order, the trade words,
+  the mistakes writers usually make (such as turning a tuning pin a quarter-turn) and a few sensory details. When
+  🤖 Claude Code is ready it researches the card on the web and lists its sources; otherwise a web AI writes it. You
+  find the card in the 📖 Book Bible (World details, and the saved bible file). The writer of every chapter that shows
+  the work gets it, and the editor checks those chapters against it: a wrong tool or step is a major note that must
+  be fixed. 1–2 more AI answers; none when the story has no trade.
+- **🔁 Keep it fresh:** Akọwe remembers short labels of your last 8 books — title words, the main characters' first
+  names, the kind of setting, the main motifs (tides, fog, grief…) and the kind of story; never their text. When the
+  AI invents your title, names and setting, it is asked to avoid these and to pick a different setting and kind of
+  story than your last books. If a title word or a main character's first name still repeats, it is renamed once.
+  What you typed yourself (your idea, genre, lock list, choices) is never changed — if your idea says "a coastal
+  town", it stays a coastal town. The run window says it, e.g. "🔁 Kept fresh: avoided Odile, Salt, coastal town".
+  At most 2 more AI answers, usually none.
 
 ### ✍ Chapter 1: two first pages, and rewritten last
 
@@ -365,13 +385,23 @@ Chapter 1 is written before the rest of the book exists, and readers decide on t
   (the editor's rewrites, the sentence polish, chapter 1 rewritten last, the improve pass) may make a chapter at most
   about 10 % longer and never make the book more than about 115 % of its target length. The writer is told the word
   budget and asked to cut repeated explanation rather than add. The run window and the report say the finished
-  book's length: "📏 Length: 4,310 words (108% of the 4,000-word target)".
+  book's length and each chapter's length against its share: "📏 Length: 4,310 words (108% of the 4,000-word
+  target) · chapters against their ~1,333-word share: ch1 1,300 (98%), ch2 1,600 (120% ⚠️), …".
+  Each chapter is also written to its share from the start: the writer is told "about 1,333 words — between 1,200
+  and 1,466". A chapter that still comes out more than 15 % too long is trimmed in its sentence polish (repeated
+  explanation and summary go; dialogue and what happens stay). And when the book is already at its limit, the 🎯
+  weakest scenes are still rewritten — the writer is told the exact number of words to stay within (the same length
+  or shorter), and a scene that comes back too long is asked once to cut back before it is left as it was.
 - **🔁 Read the final book again** (under "Extras", on by default): when chapter 1 is rewritten last or the improve
   pass changes chapters, the final whole-book continuity check reads those chapters again at the very end (it says
   "read again after Akọwe's own rewrites"; Akọwe's own changes are never called "changed by hand"), and — if you
   asked for beta readers — they read the finished book once more, so the report is about the book you get. A
   separate switch turns the beta readers' second read off. Nothing extra happens when nothing changed. The number of
   beta readers is 1 unless you choose 2 or 3 next to "📖 Beta reader at the end".
+- **🔮 Beta readers and the premise:** what your premise and blurb say is known from page 1, so a beta reader who
+  "guesses" it is not counted as guessing a twist too early. Readers are told the premise; Akọwe keeps the real
+  secrets to itself and only counts a guess that is one of them (or one it cannot place). The 🔁 improve pass does not
+  treat such a "guess" as a complaint either.
 - **📈 Your books over time** (🏠 Book home and the 📊 Book report): "7.6/10 — down 0.4 from your last book",
   "Rule rigor is your weakest area for 3 books", and which scores are falling. Only numbers are kept for this,
   never your book's words.
@@ -463,9 +493,36 @@ fully confirmed on your PC; the 🩺 test shows what works.
 - **◀ 🔊 ▶ on each AI** steps through its replies; **🔊** reads one aloud and **⏹** stops.
 - Speaking to the AIs needs the free **voice engine** (Setup Wizard → 📦 Installs → "Voice engine"). It works offline.
   The first time, it downloads the speech model (about 150 MB).
-- Hearing the replies needs nothing: it uses the voices built into Windows. For nicer voices, install a voice
-  model (Setup Wizard → 📦 Installs → "Voice model").
+- Hearing the replies needs nothing: it uses the voices built into Windows. For nicer voices, see **Better voices**
+  below.
 - What you say and what is read stay on your PC. The log notes only that something was heard, never the words.
+
+### Better voices (free)
+
+Open **System AI → 🔊 Voice** and scroll to **✨ Better voices**. It lists good, free voices (British and American,
+men and women), each with its size:
+
+- **▶ Sample** plays a short recording of it (about 90 KB, fetched only when you press ▶). Once a voice is downloaded,
+  ▶ plays the voice itself.
+- **⬇ Download** saves it into `stuff and thing/models/voice` (about 60–115 MB each, once; then it works offline).
+  You see how far it is; **✕ Cancel** stops it, and pressing ⬇ again carries on where it stopped. A file you already
+  have there is never replaced.
+- **Use for…** picks who reads with it: Alfred, ChatGPT, Claude or Gemini. Without a choice each one gets a different
+  good voice by itself (Alfred a British butler, ChatGPT Lessac, Claude Ryan, Gemini Alba) as soon as it is
+  downloaded.
+- These voices (Piper) run on your processor and use a little of it only while reading — your graphics card stays
+  free for pictures and video. Reading needs the voice engine (Setup Wizard → 📦 Installs → "Voice engine"); without
+  it the PC's own voices read.
+
+**✨ Best quality (optional): Kokoro.** Even more natural voices. Press **Install best-quality voice (Kokoro,
+~350 MB)** — it adds the Kokoro engine to the voice engine and downloads its voice file, with progress, then checks
+that the voice engine finds it (if not, it says so and your other voices keep working). Then tick
+**Use it**, choose where it runs — **Processor** (recommended: it leaves the graphics card free for pictures and
+video) or **Graphics card** (faster, but pictures and video wait) — and a Kokoro voice for each speaker, with ▶ to try
+it. Nothing needs Kokoro: if it has any problem, a Piper voice reads instead, and if that fails too, the PC's own
+voices do. Untick **Use it** to go back.
+
+Nothing in this box goes on the internet unless you press ▶ on a voice you haven't downloaded, ⬇, or Install.
 
 ## 9. Files the AIs give you (downloads)
 

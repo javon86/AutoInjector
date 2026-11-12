@@ -731,6 +731,12 @@ class PlanHandler(OperationHandler):
                 out += " " + quality_history.PLAN_RULE
         except Exception:  # noqa: BLE001 - guidance is best effort
             pass
+        try:  # 🔁 what the author's recent books already used (fresh_names.py; a ⚡ book only)
+            from .. import fresh_names  # noqa: PLC0415
+            if fresh_names.planner_avoid(ctx.store, ctx.project_id):
+                out += " " + fresh_names.PLAN_RULE
+        except Exception:  # noqa: BLE001 - guidance is best effort
+            pass
         if rules and self.op_id in ("B03", "B11"):  # 📏 a special mechanism always needs its bounds in the plan
             from .. import story_rules  # noqa: PLC0415
             out += " " + story_rules.SPECIAL_PLAN_RULE
@@ -881,6 +887,13 @@ class PlanHandler(OperationHandler):
                 ls = quality_history.planner_block(ctx.store, ctx.project_id)
                 if ls:
                     base["lessons"] = ls
+            except Exception:  # noqa: BLE001 - guidance is best effort
+                pass
+            try:  # 🔁 what the author's recent books already used (fresh_names.py)
+                from .. import fresh_names  # noqa: PLC0415
+                av = fresh_names.planner_avoid(ctx.store, ctx.project_id)
+                if av:
+                    base["avoid_recently_used"] = av
             except Exception:  # noqa: BLE001 - guidance is best effort
                 pass
         base["predicate_conventions"] = pr.registry_brief(ctx.contracts.predicate_registry)

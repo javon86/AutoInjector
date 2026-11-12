@@ -18,14 +18,20 @@ def test_make_a_book_screen_has_the_plan_check_switches(make_context, ai_server)
     assert dlg.get_by_label("Make sure every character sounds different").count() == 1
     assert "Plan scored 7.4 → 8.6" in dlg.locator("#mb-story-doctor-hint").inner_text()
     body = _start_body(page, dlg)
-    assert not {"story_doctor", "doctor_rounds", "doctor_target", "voice_contrast"} & set(body)  # defaults: none sent
+    assert not {"story_doctor", "doctor_rounds", "doctor_target", "voice_contrast", "doctor_gate"} & set(body)  # defaults: none sent
     dlg.locator("[data-testid=mb-story-doctor-rounds]").select_option("3")
     dlg.locator("[data-testid=mb-story-doctor-target]").select_option("9")
     body = _start_body(page, dlg)
-    assert body.get("doctor_rounds") == 3 and body.get("doctor_target") == 9
+    assert body.get("doctor_rounds") == 3 and body.get("doctor_target") == 9 and "doctor_gate" not in body
+    gate = dlg.locator("[data-testid=mb-story-doctor-gate]")  # 🩺 the reviewer's objections go to the doctor
+    assert gate.is_checked() and dlg.get_by_label("Let the story doctor settle the plan reviewer's objections "
+                                                 "(fewer stops for you)").count() == 1
+    gate.uncheck()
+    assert _start_body(page, dlg).get("doctor_gate") is False
+    gate.check()
     doc.uncheck()
     voices.uncheck()
-    assert dlg.locator("[data-testid=mb-story-doctor-rounds]").is_disabled()
+    assert dlg.locator("[data-testid=mb-story-doctor-rounds]").is_disabled() and gate.is_disabled()
     body = _start_body(page, dlg)
     assert body.get("story_doctor") is False and body.get("voice_contrast") is False and "doctor_rounds" not in body
     assert_clean(page, "make-a-book plan check")

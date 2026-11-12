@@ -665,6 +665,9 @@ class EditorService:
                 task = f"{task} {rubric.IN_CHAPTER_WORDS}" + (f" {habits.ASK}" if ctx.get("must_fix") else "")
                 if ctx.get("magic_rules"):
                     task = f"{task} {magic_rules.REVIEW_RULE}"
+                if (ctx.get("fact_checks") or {}).get("trade_card"):  # 🔧 trade accuracy against the trade card
+                    from .trade_card import EDITOR_RULE  # noqa: PLC0415
+                    task = f"{task} {EDITOR_RULE}"
             if ctx.get("narrator_style"):  # P25 (Section 7c); ✍ or the book's own narrator voice (human_voice.py)
                 from .human_voice import editor_note_for  # noqa: PLC0415
                 task = f"{task} {editor_note_for(ctx['narrator_style'])}"
@@ -702,6 +705,8 @@ class EditorService:
             findings = clock_findings(findings, clocks, text)
             from .magic_rules import magic_findings  # noqa: PLC0415
             findings = magic_findings(findings, magic, text)
+            from .trade_card import trade_findings  # noqa: PLC0415 - 🔧 a wrong procedure is a MAJOR note
+            findings = trade_findings(findings, ctx, text)
             if must:  # 🔁 PR #117 (F): a must-fix habit the editor did not target becomes a major finding
                 from . import habits  # noqa: PLC0415
                 findings = (findings + habits.findings_for(must, findings, dims))[:MAX_FINDINGS + len(must)]

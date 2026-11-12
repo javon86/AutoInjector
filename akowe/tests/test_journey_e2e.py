@@ -493,7 +493,9 @@ def test_pause_resume_cancel_at_three_seeded_points_never_loses_or_doubles(journ
     fake.on_call = hook
     b.on_request = hook
     ok0, locks0 = len(b.ok), len(b.locks)
-    r = app.autobook.start("author", {"author_confirms": True, "genre": "Fantasy", "length": "short_story"})
+    # 🔁 fresh_names off: this book must come out the same as the calibration book (same names, same pictures)
+    r = app.autobook.start("author", {"author_confirms": True, "genre": "Fantasy", "length": "short_story",
+                                      "fresh_names": False})
     state["run"] = r["id"]
     run = _drive(app, r["id"])
     assert run["status"] == "cancelled", (seed, points, done, run["status"], run.get("problem"))

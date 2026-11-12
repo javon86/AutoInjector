@@ -5,11 +5,13 @@ on:
     branches: [main]
     paths:
       - "desktop-app/**"
+      - "integrations/voice/**"
       - "AutoInjector/extension/selectors.js"
       - ".github/workflows/desktop-app-tests.yml"
   pull_request:
     paths:
       - "desktop-app/**"
+      - "integrations/voice/**"
       - "AutoInjector/extension/selectors.js"
       - ".github/workflows/desktop-app-tests.yml"
 
@@ -35,6 +37,18 @@ jobs:
           cache-dependency-path: desktop-app/package-lock.json
       - run: npm ci
       - run: npm test
+
+  voice-shim:
+    name: Voice shim (Python, fake Kokoro / piper)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pytest numpy
+      - run: python -m pytest -q -p no:cacheprovider integrations/voice
 
   browser-test:
     name: Real-Chromium selector tests (Playwright)

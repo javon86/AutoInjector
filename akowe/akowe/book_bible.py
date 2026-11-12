@@ -173,6 +173,13 @@ def build(app, pid: str, branch: str = "main") -> dict:
     }
     if series:
         out["series"] = series
+    try:  # 🔧 the trade card (trade_card.py): how the book's trade is really done
+        from . import trade_card  # noqa: PLC0415
+        cards = trade_card.cards_of(store, pid, branch)
+    except Exception:  # noqa: BLE001
+        cards = []
+    if cards:
+        out["trade_card"] = copy.deepcopy(cards)
     return out
 
 
@@ -576,6 +583,9 @@ def render_markdown(b: dict) -> str:
             out.append(f"- **{i.get('term')}** — {str(i.get('status') or '').replace('_', ' ')}"
                        + (f"; use instead: {i['use_instead']}" if i.get("use_instead") else "")
                        + (f" ({i['note']})" if i.get("note") else ""))
+    if b.get("trade_card"):  # 🔧 trade_card.py
+        from . import trade_card  # noqa: PLC0415
+        out += trade_card.markdown(b["trade_card"])
     if b.get("repeat_labels"):
         out += ["", f"## Repeat labels ({len(b['repeat_labels'])})", ""]
         out += [f"- “{k}”: {v}" for k, v in b["repeat_labels"].items()]

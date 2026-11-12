@@ -136,7 +136,15 @@ contextBridge.exposeInMainWorld("api", {
   voiceRedownload: () => ipcRenderer.invoke("voice:redownload"),
   // 🎤 talk to the AIs / 🔊 read their replies aloud (voice-ui.js)
   voiceTranscribe: (audio, mime) => ipcRenderer.invoke("voice:transcribe", { audio, mime }),
-  voiceSynthesize: (text, who, voice) => ipcRenderer.invoke("voice:synthesize", { text, who, voice }),
+  voiceSynthesize: (text, who, voice, kokoroVoice) => ipcRenderer.invoke("voice:synthesize", { text, who, voice, kokoroVoice }),
+  // 🔊 Better voices: the recommended list, ⬇ download (progress on onVoiceDownload) / cancel, ▶ sample, ✨ Kokoro
+  voiceCatalog: () => ipcRenderer.invoke("voice:catalog"),
+  voiceDownload: (id) => ipcRenderer.invoke("voice:download", { id }),
+  voiceDownloadCancel: (id) => ipcRenderer.invoke("voice:download-cancel", { id }),
+  voiceSample: (id) => ipcRenderer.invoke("voice:sample", { id }),
+  voiceKokoroInstall: () => ipcRenderer.invoke("voice:kokoro-install"),
+  voiceKokoroCancel: () => ipcRenderer.invoke("voice:kokoro-cancel"),
+  onVoiceDownload: (cb) => ipcRenderer.on("voice-download", (_e, payload) => cb(payload)),
   voicePiperVoices: () => ipcRenderer.invoke("voice:piper-voices"),
   voiceReplies: (site) => ipcRenderer.invoke("voice:replies", { site }),
   voiceReplyText: (id) => ipcRenderer.invoke("voice:reply-text", { id }),

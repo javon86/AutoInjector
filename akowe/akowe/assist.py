@@ -1330,6 +1330,7 @@ class BibleSession:
         self.mentioned_subjects: set = set()  # subject IDs the canon only mentions (no entry owns them yet)
         self.roles: dict | None = None  # the last story-role settlement (story_roles.enforce) of a create
         self.role_notes: list[str] = []  # plain notes: who stays the one protagonist when the AI gave several
+        self.fresh = None  # 🔁 fresh_names.SketchHook of a ⚡ run: the names the author's recent books used
 
     # ------------------------------------------------------------------ state
     def busy(self) -> bool:
@@ -1601,11 +1602,17 @@ class BibleSession:
         profile = book_profile_brief(svc.store, self.project_id)
         if profile:
             context["book_profile"] = profile
+        fresh = self.fresh if "A01" in counts else None  # 🔁 fresh_names.py
+        if fresh is not None:
+            context["avoid_recently_used"] = fresh.context()
+            task += fresh.TASK
         data = svc._call_ai(job, op_for_roles="A", task=task, schema=schema, context=context, protected=protected)
         self._phase("World sketch ready", job)
         if isinstance(data.get("world_summary"), str) and data["world_summary"].strip() and not self.world_summary:
             self.world_summary = data["world_summary"].strip()[:1500]
         items = [i for i in data.get("items") or [] if isinstance(i, dict) and i.get("section") in counts]
+        if fresh is not None:
+            items = fresh.after(items)
         return items
 
     def _add_items(self, sketch: list[dict], counts: dict, run_no: int) -> list[str]:

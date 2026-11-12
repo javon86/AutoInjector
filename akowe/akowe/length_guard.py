@@ -14,7 +14,9 @@ nothing ever took it out again. So every rewrite the writer is asked for through
   (``trim``: they count as "not used: too long", like any replacement that did not fit) until the rest fits. A
   replacement that makes the chapter shorter or keeps its length is always fine.
 
-The run window and the book report say the finished book's length against its target (``line``). Never raises.
+The run window and the book report say the finished book's length against its target and each chapter's length
+against its share of the book (``line``; a chapter more than ``CHAPTER_OVER`` (15 %) over its share is marked ⚠️ — the
+chapter polish trims such a chapter right after it is written, chapter_polish.py). Never raises.
 Logs: numbers only.
 """
 from __future__ import annotations
@@ -29,6 +31,7 @@ MAX_GROWTH = 0.10     # a rewrite may grow a chapter by at most this share …
 SLACK_WORDS = 25      # … but always by this many words (a small fix must fit)
 BOOK_CAP = 1.15       # and never push the book past this share of its target length
 TOO_LONG = "TOO_LONG_FOR_BUDGET"
+CHAPTER_OVER = 0.15   # a chapter more than this share over its part of the book is trimmed (chapter_polish.py)
 
 WORDS = (" WORD BUDGET (context.word_budget): the book is already long enough. The reworked chapter must not have "
          "more than most_words words in all; prefer cutting repeated explanation, restated feelings and summaries of "
@@ -124,11 +127,36 @@ def book_numbers(engine, store, principal, pid: str, branch: str) -> tuple[int |
         return None, None, None
 
 
-def line(book_words: int | None, target: int | None) -> str | None:
-    """"📏 Length: 4,310 words (108% of the 4,000-word target)" — None when unknown."""
+def chapter_words(engine, principal, pid: str, branch: str) -> list[int]:
+    """The words of every written chapter, in order ([] when unknown). Never raises."""
+    try:
+        from .fact_checks import book_texts  # noqa: PLC0415
+        return [words(c["text"]) for c in book_texts(engine, principal, pid, branch)]
+    except Exception:  # noqa: BLE001
+        log.exception("could not count the chapters' words")
+        return []
+
+
+def chapters_part(chapters: list[int] | None, per: int | None) -> str:
+    """" · chapters against their ~1,333-word share: ch1 1,410 (106%), ch2 1,702 (128% ⚠️)" — a chapter more than
+    ``CHAPTER_OVER`` over its share is marked; "" when unknown."""
+    if not chapters or not per:
+        return ""
+    parts = []
+    for i, w in enumerate(chapters):
+        pct = round(100 * w / per)
+        parts.append(f"ch{i + 1} {w:,} ({pct}%{' ⚠️' if w > per * (1 + CHAPTER_OVER) else ''})")
+    return f" · chapters against their ~{per:,}-word share: " + ", ".join(parts)
+
+
+def line(book_words: int | None, target: int | None, chapters: list[int] | None = None,
+         per: int | None = None) -> str | None:
+    """"📏 Length: 4,310 words (108% of the 4,000-word target)" plus, when given, each chapter against its share of
+    the book (``chapters_part``) — None when unknown."""
     if not book_words or not target:
         return None
     share = round(100 * book_words / target)
     warn = " ⚠️ longer than planned" if book_words > target * BOOK_CAP else (
         " ⚠️ shorter than planned" if book_words < target * 0.8 else "")
-    return f"📏 Length: {book_words:,} words ({share}% of the {target:,}-word target){warn}"
+    return f"📏 Length: {book_words:,} words ({share}% of the {target:,}-word target){warn}" + \
+        chapters_part(chapters, per)

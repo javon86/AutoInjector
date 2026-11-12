@@ -288,6 +288,9 @@ bridge to your home Wi-Fi, behind its key.
     trades, folklore) with real web sources. Each note is labelled **established fact**, **disputed**, **legend** or
     **invented for the story**, with its source; a note that claims to be real but has no source is thrown away. The
     notes are handed to those chapters' writers.
+  - **The trade card:** once per book, right after the chapter outline, a helper researches how the main
+    characters' trade is really done (tools, steps, terms, the mistakes writers make), with sources. It follows the
+    "Research ahead" switch; without the helpers a web AI writes the card (see 🔧 in section 3).
   - **Fact check with sources:** every written chapter's real-world claims are checked on the web. Wrong ones get a
     small fix. You see them on the chapter page (🤖 Claude Code helpers box) and under 🔎 Fact checks.
   - **Checks side by side:** the all-AI check of each chapter is split by kind — continuity (against the Book Bible
@@ -591,6 +594,27 @@ replaced by what you type.
   - *Hearing the replies* needs nothing: it uses the voices built into Windows. For nicer voices install a
     **piper voice** (Setup Wizard → 📦 Installs → "Voice model"; more `.onnx` voices can go in
     `stuff and thing/models/voice`).
+- **✨ Better voices** (System AI → 🔊 Voice; code: `desktop-app/voice-catalog.js` the list, `voice-picker.js` the
+  box, `voice-downloads.js` the downloads, `voice_shim.py` the engines): a list of recommended free Piper voices from
+  the official piper-voices collection, each with ▶ sample (the makers' short recording until it is downloaded, then
+  the voice itself), ⬇ download into `models/voice` (progress, ✕ cancel, carries on where it stopped, the small
+  `.onnx.json` settings first and checked, a file already there never replaced) and "Use for" a speaker. Piper runs
+  on the processor, only while reading. The default per speaker prefers the recommended voices (Alfred
+  en_GB-alan, ChatGPT en_US-lessac-high, Claude en_US-ryan-high, Gemini en_GB-alba).
+- **One Python for the voice engine** (code: `desktop-app/voice-python.js`): a voice set-up that already works is
+  never switched. The app keeps the Python it used before while that still has the voice packages; otherwise it
+  takes one that already has them (plain `python`/`python3` first, then the installer's pick such as `py -3.12`);
+  with nothing installed anywhere, the installer's pick (where the Setup Wizard installs them). A quick, cached check
+  (`find_spec("faster_whisper")` / `piper`) decides; the choice is remembered in the voice settings.
+  `AUTOINJECTOR_VOICE_SPAWN` still overrides it. Kokoro is installed into that same Python.
+- **✨ Kokoro (optional, best quality):** "Install best-quality voice" pip-installs `kokoro-onnx` into the voice
+  engine's own Python (the one the running engine reports in `/health`, else the one the app starts it with),
+  downloads its two model files (~350 MB) into `models/voice/kokoro`, then asks the engine whether it now finds
+  Kokoro — and says plainly if it doesn't. With **Use it** ticked,
+  read-aloud asks the voice shim for Kokoro (setting `engine`); it runs on the processor by default (half the cores,
+  so the PC stays usable, and the graphics card stays free) or on the graphics card when picked and available.
+  Fallback order on any problem: Kokoro → Piper → the PC's built-in voices. Nothing requires it. No internet use
+  except the buttons the user presses (▶ on a voice not downloaded, ⬇, Install).
 - **A voice for each speaker:** ChatGPT, Claude, Gemini and Alfred each get a different voice (and a slightly
   different pitch and pace). Change them in the System AI panel → 🔊 Voice → "Read-aloud voices", with the speed and
   a ▶︎ test.
@@ -627,6 +651,20 @@ to a minute), so the run knows which AIs work.
    person) and the tense (past or present) are fixed here too, from your choice, else the AI's pick for this
    story, else the genre's usual. If you left the **kind of story** to the AI, it picks the one of the seven basic
    plots that fits the idea best here, and the run's notes and the plan page say which and why.
+   **🔁 Kept fresh** (code: `akowe/akowe/fresh_names.py`; run setting `fresh_names`, on by default; the switch is
+   under "🩺 Plan check"). Before the AI invents the book, Akọwe builds a "recently used" list from your last 8 books
+   on the shelf (test books left out): the key words of their titles, the first names of their main and secondary
+   characters, their setting type (coastal town, big city, island…), central motifs (tides, fog, flooding, grief, a
+   widow, a quiet supernatural rule…) and kind of story — short labels and counts from fixed word lists, no AI and no
+   book text. It avoids every recent name and title word, the settings of the last 3 books and any setting or motif
+   two books share, and the kinds of the last 3 books. Anything you typed or chose (idea, genre, lock list, choices,
+   a kind of story you picked) is taken off the list. The invent-the-book prompt, the world sketch that names the
+   cast and the premise / main plot / outline planners get "avoid these unless the author asked for them; prefer a
+   different setting and kind of story". Then a check without AI: a title word or a name in the invented idea that
+   still repeats (and that you did not type) is renamed in ONE AI answer; after the world sketch, a character whose
+   first name repeats is renamed in one more answer before the character is made. The run window says it ("🔁 Kept
+   fresh: avoided Odile, Salt, coastal town") and logs counts only. Never for a rerun from a saved book bible, a
+   variant or a sequel (their names are the book's own). At most 2 AI answers, usually none.
 3. **Characters and places:** drafted, reviewed, approved. The main character (★) is guaranteed to exist.
 4. **Character sheets and voices:** what each character wants, needs, fears and hides, and a **voice card** for
    how each one talks (sentence rhythm, register, words from their job and place, favourite phrases and tics, words
@@ -678,6 +716,40 @@ to a minute), so the run knows which AIs work.
      either way, and "Read the final book again" put it back). It never holds up the book: an AI that cannot answer is skipped; a revision that is
      refused or does not pass its review leaves the best plan. About 3–8 AI answers (each AI scores once; a revision
      is 1 fix + its review + a new score), counted in the ⏱ estimate.
+     **It runs whenever the outline is approved, however it was approved:** by the AI review, or by you (✔ approve
+     anyway, accept the change, keep the original). An outline that is still the AI's text (also the AI's earlier
+     version you chose to keep) is scored and revised like any AI outline; text you typed or edited is only scored.
+     A run started on an older Akọwe and resumed after the update gets the check too (only `story_doctor: false`
+     switches it off). When no AI could score the plan, the run window and the report say so in one line.
+     **The doctor is the plan's quality gate** (run setting `doctor_gate`, on by default; the switch "Let the story
+     doctor settle the plan reviewer's objections" under 🩺 Plan check): when the AI reviewer keeps objecting to the
+     AI's main plot or chapter outline — the same finding back after a fix, or its fixes used up — the run no longer
+     stops to ask you. The draft is approved under the run consent and the reviewer's objections are added to the
+     doctor's revision note ("The AI plan reviewer also objected…"); with open objections the outline gets one
+     revision even when its score is over the target, and that revision is reviewed again like any outline (a tie in
+     the new score goes to it). The run still stops for you on author-only topics (point of view and tense, content
+     limits, a change to an approved fact), for text you wrote yourself, and when the doctor's revision cannot settle
+     the objections (its review still objects, or the revision could not be made): then you decide on the revision as
+     usual, and the run goes on from there. Objections nothing could take up are listed for your check later.
+     `story_doctor.take_objections` (hook in `autobook._review_until_approved`).
+   - **🔧 The trade card: how the main characters' trade is really done** (code: `akowe/akowe/trade_card.py`; run
+     setting `trade_card`, on by default; the switch is under "🩺 Plan check" on the Make-a-book screen). Right after
+     the chapter outline (and the story doctor), Akọwe looks for the trades, crafts and techniques the book relies on,
+     without any AI: a list of trade words in the book idea, the main characters' roles and the chapter outline
+     ("piano tuner", "tide-gauge keeper", "glassblowing"). None found: nothing is asked. Otherwise ONE request writes a
+     short card per craft (at most 2): how it works, the right tools, the steps in order, the trade terms, the mistakes
+     writers typically make (each with the right way and "watch words", short phrases a wrong passage would contain)
+     and sensory details. A 🤖 Claude Code helper does it with web research when it is ready (each card keeps the
+     pages it read; a source that is not a real web address is dropped); otherwise a web AI writes it (no sources
+     kept). The card is saved with the book (settings key `trade_card:<book>:<branch>`), shown in the 📖 Book Bible
+     (World details, and a "Trade card" section in the saved bible file), and goes into the writing brief of every
+     chapter whose plan or scene cards show the craft (at most about 1,600 characters). The AI editor gets it in its
+     fact checks with a "trade accuracy" rule: a procedure, tool or term that contradicts the card is a MAJOR note
+     (dimension "Right trade and period terms"), and a watch phrase Akọwe finds on the page without AI ("a
+     quarter-turn", "with a wick key") becomes a MAJOR note of its own, so the rewrite must fix it. The run says it
+     ("🔧 Trade card (piano tuner): how the work is really done — researched by Claude Code with 4 source(s)"). An AI
+     problem is a ⚠️ note; the book goes on. 1 answer (with Claude Code ready, 1 helper job instead), counted in the
+     ⏱ estimate.
    - **Optional: fill the whole Book Bible** from the plan before chapter one. It is off unless you turn it on
      (on the start screen, or 📖 Book Bible → At a glance). It never holds up the book.
 9. **Every chapter.** For each one:
@@ -803,7 +875,16 @@ to a minute), so the run knows which AIs work.
     first; when the writer must read too, it is named "(wrote most of the book)" and counts half when readers agree.
     Every quote is checked against the book again; one not found word for word is marked and never used as evidence.
     An AI that is not working is skipped with a note. If the run is paused, the panel carries on with the readers
-    still to read. **One reader is the default** (the Make-a-book screen's "How many" starts at 1 reader); choose 2
+    still to read. **🔮 Only real secrets count as "a twist guessed too early"** (`akowe/akowe/beta_secrets.py`; setting
+    `beta_premise_guard`, on by default; no AI): in "The Salt Tuner" all three readers "guessed" in chapter 1 what the
+    premise says on the back cover. Each reader now gets the book's premise (the B01 premise, dramatic question and
+    concept, else the idea / blurb) with the rule "what the premise establishes is known from the start — never a
+    guess". The readers still never see the outline, the story rules or the reveal plan (they must read blind), so
+    Akọwe itself matches every guess against the book's protected secrets (story-rules mysteries, the reveal plan) and
+    the premise: a guess that clearly restates the premise (≥ 2 and ≥ 70 % of its content words) and matches no
+    secret better never counts as a twist guessed early — not in a reader's findings, the panel's agreement and top
+    fixes, nor the 🔁 improve pass / 🎯 weakest-scenes ranking (stored reads are checked again there). A guess that
+    matches neither still counts. **One reader is the default** (the Make-a-book screen's "How many" starts at 1 reader); choose 2
     or 3 there for a panel. The beta readers read BEFORE chapter 1 is rewritten last and before the improve pass on
     purpose (both use their notes); when either pass changed the book, they read the final book once more in the
     🔁 "Read the final book again" step (below), so the report is about the finished book.
@@ -896,7 +977,9 @@ to a minute), so the run knows which AIs work.
     may make small fixes like any checkpoint and never pauses the finished book (what it cannot fix waits in the
     report); its line says "(read again after Akọwe's own rewrites)". (2) The beta reader(s) read the final book once
     more when the book changed since their read; the new read is the one the report shows (no more "This read is for
-    an earlier version of the book"). (3) The run window, the run's report box and the 📊 report say the book's
+    an earlier version of the book"). That warning compares the read with the book as it is NOW
+    (`beta_reader.with_beta` adds `book_key_now`), not with the version the report scored: the final check read again
+    can fix a line after the report was made, and the beta readers then read exactly that final book. (3) The run window, the run's report box and the 📊 report say the book's
     length against its target ("📏 Length: 4,310 words (108% of the 4,000-word target)", with ⚠️ when it is more than
     115 % or less than 80 %). Counted in the ⏱ estimate as an upper bound (each checking AI once, plus one answer per
     beta reader) when chapter 1 last or the improve pass is on.
@@ -913,6 +996,23 @@ to a minute), so the run knows which AIs work.
     a round whose reworked chapters (or 🎯 rewritten scenes, each already at most 10 % longer) would together push
     the book past 115 % leaves out the chapters that add the most words (a scene left out this way says "it would
     make the book longer than its length allows").
+    **Chapters near their share from the start.** The writer of every chapter is told its share of the book (book
+    target ÷ chapters) and the range it must stay within, ±10 % ("about 1,333 words — between 1,200 and 1,466 words,
+    never more than 1,466"; `lengths.rule`). When a fresh draft is still more than 15 % over its share, the 📏 chapter
+    polish (`chapter_polish.py`) trims it in the same one polish it already makes: the longest narration paragraphs
+    (never dialogue) are flagged "cut repeated explanation, restated feelings and summary — keep every plot beat";
+    a trim that made the chapter at least 3 % shorter counts as a gain, it may shrink the chapter down to 90 % of its
+    share, and dialogue, names and numbers stay checked as always (run setting `chapter_trim`, on by default; no extra
+    AI answer for a chapter that is polished anyway, at most one for a chapter that is only too long). The report's
+    length line names each chapter against its share: "📏 Length: 4,560 words (114% of the 4,000-word target) ·
+    chapters against their ~1,333-word share: ch1 1,300 (98%), ch2 1,600 (120% ⚠️), …".
+    **🎯 Weakest scenes at the cap.** "The Salt Tuner" was at 114 % of its target, so all three rewritten scenes were
+    refused ("longer than the word budget, it would make the book longer than its length allows"). Now each scene's
+    budget is what the book has left (`weak_scenes.scene_max`): at the cap "the same length or shorter", with the exact
+    most words told to the writer. A scene is accepted while the BOOK stays within 115 % after all the scenes accepted
+    before it (a scene that got shorter makes room for the next). A rewrite that comes back too long gets ONE short
+    extra request — "cut it to at most N words: drop repeated explanation, keep every line of dialogue and every plot
+    beat" — before it is refused (run setting `scene_cut_retry`, on by default; counted in the run forecast).
 14. **📈 Quality history** (code: `akowe/akowe/quality_history.py`): when a run finishes, the report's numbers — the
     overall score, the median of each whole-book dimension, the editor's average per category, the "sounds like a
     person" score, the reading grade, the beta average, fixed habit codes (`triad`, `simile`, `word:went`, `clock`,
@@ -1200,6 +1300,8 @@ All four are on the ⚡ **AI writes the whole book** screen (code: `akowe/akowe/
 | Your promises (content limits, themes, question) | a chapter showing what you ruled out | writer, reviewer and editor, every chapter |
 | Point of view and tense | a chapter that slips into another person or tense | every chapter |
 | Editor rubric | told-not-shown feelings, flat side characters, same-sounding voices, no stakes | every chapter |
+| 🔧 Trade card | a tool, step or term of the main characters' trade done wrong (a tuning pin turned a quarter-turn) — major notes against a researched "how it's really done" card | made once after the outline; every chapter that shows the craft (writer's brief and editor) |
+| 🔁 Kept fresh (no AI + up to 2 renames) | a title word, main character name, setting or motif repeated from your last books | when a ⚡ run invents the book and its cast |
 | Timeline arithmetic (no AI) | ages and years that don't add up ("twelve, twenty years ago… now forty") | the whole-book fact check, near the end |
 | Readability (no AI) | prose too hard or too simple for the book's readers | the book report and the scene grid; the reading-level floor in every chapter's brief and the final improve pass |
 | 🕰️ Clock, days and tide (no AI) | a tide going out before the stated high water, high waters that cannot both be true, a clock running backwards, a weekday or date that "four days later" / "the next morning" cannot reach, two dates whose weekdays cannot both be true | every chapter's editor and reviewer (must-fix), the next chapter's brief, the final improve pass |
