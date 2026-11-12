@@ -238,3 +238,58 @@ def test_switched_off_an_improve_round_not_kept_changes_nothing(tmp_path):
     mem = app.autobook.get(run["id"])["improve"]
     assert mem["kept"] is False and not mem.get("repeat_fixes")
     assert _texts(app, run)[3]["text"] == CH3
+
+
+# ====================================================================== 📏 a chapter far over its share is trimmed
+LONG = ("Mara stood at the rail and looked at the water for a long time, thinking about the lamp, the keeper, the "
+        "missing log and everything that had gone wrong since the storm, and she knew again that the keeper was gone "
+        "and that the log was gone, which she had known since the morning.\n\n"
+        "“Where is he?” Nessa asked.\n\n"
+        "The boat came in. Mara climbed down to meet it.")
+
+
+def test_a_chapter_far_over_its_share_is_flagged_for_trimming_never_its_dialogue():
+    m = cp.measure(LONG, [])
+    w = m["plain_words"]
+    assert cp.needs(m, None, None, target=w) == []                       # at its share: nothing to do
+    assert cp.needs(m, None, None, target=int(w / 1.1)) == []            # 10 % over: still fine (the cap is 15 %)
+    assert cp.needs(m, None, None, target=int(w / 1.3)) == ["long"]      # 30 % over: trim
+    assert cp.needs(m, None, {"chapter_trim": False}, target=int(w / 1.3)) == []   # switched off
+    fs = cp.findings(LONG, m, None, ["long"], target=int(w / 1.3))
+    assert fs and all(f["dimension"] == "length" and f["passage"] in LONG and "“" not in f["passage"] for f in fs)
+    assert "Mara stood at the rail" in fs[0]["passage"] and f"{w:,} words" in fs[0]["why"]
+    # a trim counts as a gain only for a too-long chapter, and only when it really got shorter
+    b = {"grade": 7.0, "repeats": 0, "tic_uses": 0, "ai": 0, "plain_words": 100}
+    assert cp.judge(b, dict(b, plain_words=90), None, None, long=True) == (True, "KEPT")
+    assert cp.judge(b, dict(b, plain_words=99), None, None, long=True) == (False, "NO_GAIN")
+    assert cp.judge(b, dict(b, plain_words=90), None, None) == (False, "NO_GAIN")
+    # a too-long chapter may shrink down to the bottom of its range (90 % of its share), more than the usual 20 %
+    old = "word " * 100
+    assert cp.protected_change(old, "word " * 70) == "LENGTH"
+    assert cp.protected_change(old, "word " * 70, shrink=cp.trim_shrink(100, 60)) is None
+    assert cp.protected_change(old, "word " * 50, shrink=cp.trim_shrink(100, 60)) == "LENGTH"
+    assert cp.trim_shrink(100, 95) == cp.MAX_LENGTH_CHANGE
+
+
+def test_a_draft_far_over_its_share_is_trimmed_in_its_one_polish(tmp_path, monkeypatch):
+    fake = _fake()
+    fake.chapter_texts = {"ch1": LONG, "ch2": CH2, "ch3": CH3}
+    cut = ", thinking about the lamp, the keeper, the missing log and everything that had gone wrong since the storm"
+
+    def trims(ctx):
+        reps = [{"finding_id": f["id"], "original": f["passage"], "replacement": f["passage"].replace(cut, "")}
+                for f in ctx["findings"] if f["dimension"] == "length" and cut in f["passage"]]
+        return {"replacements": reps}
+    fake.polish_script = [trims, trims, trims]
+    app = make_app(tmp_path, fake)
+    monkeypatch.setattr(cp, "chapter_target", lambda store, pid, outline: 30)   # each chapter's share: 30 words
+    monkeypatch.setattr(cp, "audience", lambda store, pid: (None, None))       # no reading floor: length only
+    run = run_book(app, QUICK)
+    assert run["status"] == "done", run.get("problem")
+    r1 = app.autobook.get(run["id"])["polish"]["chapters"]["ch1"]
+    assert "long" in r1["why"] and r1["target"] == 30 and r1["kept"], {k: r1.get(k) for k in ("code", "reason", "state", "after", "before")}
+    assert r1["after"]["plain_words"] < r1["before"]["plain_words"]
+    ch = _texts(app, run)
+    assert cut not in ch[1]["text"] and "“Where is he?” Nessa asked." in ch[1]["text"]   # dialogue untouched
+    ev = [e for e in run["events"] if e.get("code") == "CHAPTER_POLISH_KEPT" and e.get("chapter_id") == "ch1"]
+    assert ev and "length" in ev[0]["message"] and "share 30" in ev[0]["message"]

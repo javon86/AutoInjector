@@ -90,6 +90,7 @@ def options_of(app, body: dict | None) -> dict:
             "reread_after_rewrites": b.get("reread_after_rewrites") is not False,
             "beta_reread": b.get("beta_reread") is not False,
             "improve_mode": "chapters" if b.get("improve_mode") == "chapters" else "scenes",
+            "scene_cut_retry": b.get("scene_cut_retry") is not False,
             "story_doctor": b.get("story_doctor") is not False, "voice_contrast": b.get("voice_contrast") is not False,
             "doctor_rounds": b.get("doctor_rounds") if isinstance(b.get("doctor_rounds"), int)
             and not isinstance(b.get("doctor_rounds"), bool) and 1 <= b.get("doctor_rounds") <= 3 else 2,
@@ -129,7 +130,8 @@ def option_calls(opts: dict, n: int, ais: int) -> dict:
         from . import weak_scenes  # noqa: PLC0415
         c, r = min(3, n), max(1, min(ais - 1, 3)) if ais > 1 else 1
         rounds = min(int(opts.get("improve_rounds") or 1), weak_scenes.ROUNDS_MAX)
-        out["improve"] = {"calls": rounds * (weak_scenes.MAX_SCENES + r) + 3 * c, "to": "all",
+        cut = weak_scenes.CUT_EXPECTED if opts.get("scene_cut_retry", True) else 0  # 📏 a too-long scene cut back
+        out["improve"] = {"calls": rounds * (weak_scenes.MAX_SCENES + r + cut) + 3 * c, "to": "all",
                           "label": f"Rewrite the {weak_scenes.MAX_SCENES} weakest scenes (up to {rounds} "
                                    f"round{'s' if rounds != 1 else ''})"}
     elif opts.get("improve_pass"):

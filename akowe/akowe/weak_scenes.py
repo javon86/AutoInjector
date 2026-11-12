@@ -22,6 +22,13 @@ fixing the exact scenes the reviewers quote. So, per round (``improve_rounds``: 
 4. **Checks before anything is judged** (no AI, ``check_scene``): the budget, not cut to less than ``SHRINK`` of the
    scene, every name and every kept line of the scene still there, no new chapter title or scene break. A scene that
    fails keeps its text.
+
+   📏 **A book at its length cap** (length_guard.BOOK_CAP, 115 % of its target; run setting ``length_guard``): the
+   scenes are still rewritten, but each scene's budget shrinks to what the book has left (``scene_max``): at the cap,
+   "the same length or shorter", with the exact most words told to the writer. A scene is accepted when the BOOK stays
+   within its cap after all the scenes accepted before it (a scene that got shorter makes room for the next). A rewrite
+   that comes back too long gets ONE short extra request — "cut this to at most N words" (``CUT_TASK``; run setting
+   ``scene_cut_retry``, on by default; counted in the run forecast) — before it is refused.
 5. The improve pass then does what it always did (improve_pass.py): the SAME reviewers re-read the book with the
    rewritten scenes; kept only if the overall score went up and no dimension dropped by more than 1; kept chapters
    go through the usual review and approval (``save`` makes the new draft); the report says
@@ -102,6 +109,16 @@ SCENE_SCHEMA = {"type": "object", "additionalProperties": False,
                                "what_changed": {"type": "array", "maxItems": 10,
                                                 "items": {"type": "string", "maxLength": 300}}},
                 "required": ["rewritten_scene"]}
+CUT_TASK = (
+    "You are the writer of this book. Your rewritten scene (context.scene.text) is {words} words; it must have at most "
+    "{most} words. Cut it to at most {most} words: drop repeated explanation, restated feelings and summary of what "
+    "the reader already saw. Keep every line of dialogue, every plot beat, every name and every line in context.keep "
+    "word for word, and change nothing else. Return the whole cut scene as plain prose in rewritten_scene.")
+CUT_SETTING = "scene_cut_retry"
+CUT_EXPECTED = 1       # cut requests expected per round in the run forecast (at most one per scene)
+TIGHT_WORDS = ("The book is already at the most words its length allows: the rewritten scene must have at most "
+               "{most} words (it has {words} now) — the same length or shorter. Tighter is better: cut repeated "
+               "explanation rather than add.")
 REJECT_WORDS = {"EMPTY": "the answer had no scene", "TOO_LONG": "longer than the word budget",
                 "TOO_SHORT": "much shorter than the scene (cut off?)", "NAME_LOST": "a name of the scene was lost",
                 "KEEP_LOST": "a line the editor said to keep was lost", "NO_CHANGE": "nothing changed",
@@ -382,9 +399,32 @@ def budget(words: int) -> int:
     return max(1, math.floor(words * (1 + GROWTH)))
 
 
+def scene_max(words: int, room: int | None = None) -> int:
+    """📏 The most words a rewritten scene of ``words`` words may have: its own budget, and no more than the book has
+    left (``room``: words the book may still grow before its cap; None = no cap known). At the cap: the same length."""
+    most = budget(words)
+    if room is not None:
+        most = min(most, words + max(0, int(room)))
+    return max(1, most)
+
+
+def book_room(store, pid: str, chapters: list[dict], settings: dict | None) -> int | None:
+    """📏 How many words the book may still grow before its cap (negative when already over it); None when the length
+    guard is off or the target is unknown. Never raises."""
+    from . import length_guard, lengths  # noqa: PLC0415
+    if not length_guard.enabled(settings) or not chapters:
+        return None
+    try:
+        target = int(lengths.of_book(store, pid)["book_words"])
+    except Exception:  # noqa: BLE001
+        return None
+    book = sum(length_guard.words(c["text"]) for c in chapters)
+    return int(math.floor(target * length_guard.BOOK_CAP)) - book
+
+
 def brief(pick: dict, *, rep: dict | None, notes: list | None = None, keep: list | None = None,
           names: list | None = None, voices: list | None = None, style: dict | None = None,
-          profile: dict | None = None, protected: list | None = None) -> dict:
+          profile: dict | None = None, protected: list | None = None, max_words: int | None = None) -> dict:
     """The context of one scene rewrite (see the module docstring)."""
     from .book_report import LABELS, TRY  # noqa: PLC0415
     ch, sc = pick["chapter"], pick["scene"]
@@ -394,7 +434,7 @@ def brief(pick: dict, *, rep: dict | None, notes: list | None = None, keep: list
     dims = {it["dimension"] for it in pick["items"] if it.get("dimension")}
     ctx = {"akowe_task": "weak_scene",
            "scene": {"chapter": ch["number"], "scene": sc["n"], "label": pick.get("label"), "text": sc["text"],
-                     "words": sc["words"], "max_words": budget(sc["words"])},
+                     "words": sc["words"], "max_words": max_words or budget(sc["words"])},
            "complaints": [{k: it[k] for k in ("source", "why", "passage", "suggestion")} | {"dimension": LABELS.get(
                it["dimension"], it["dimension"] or "")} for it in pick["items"][:MAX_COMPLAINTS]],
            "chapter_objective": _clip(ch.get("objective"), 300),
@@ -407,6 +447,8 @@ def brief(pick: dict, *, rep: dict | None, notes: list | None = None, keep: list
            "keep": [k for k in keep or [] if k in sc["text"]],
            "names": names_in(sc["text"], names)[:30],
            "rules": SCENE_RULES}
+    if max_words and max_words < budget(sc["words"]):  # 📏 the book is at (or near) its length cap
+        ctx["scene"]["length_rule"] = TIGHT_WORDS.format(most=max_words, words=sc["words"])
     if notes:
         ctx["chapter_notes"] = notes[:4]
     if voices:
@@ -420,8 +462,9 @@ def brief(pick: dict, *, rep: dict | None, notes: list | None = None, keep: list
     return ctx
 
 
-def check_scene(old: str, new, keep=(), names=()) -> tuple[str | None, str]:
-    """(reason it is refused or None, the cleaned new scene). See the module docstring, step 4."""
+def check_scene(old: str, new, keep=(), names=(), max_words: int | None = None) -> tuple[str | None, str]:
+    """(reason it is refused or None, the cleaned new scene). See the module docstring, step 4 (``max_words``: the
+    scene's budget when the book is near its cap, ``scene_max``)."""
     from .readability import _SCENE_BREAK  # noqa: PLC0415
     if not isinstance(new, str) or not _words(new):
         return "EMPTY", ""
@@ -429,7 +472,7 @@ def check_scene(old: str, new, keep=(), names=()) -> tuple[str | None, str]:
     if new.startswith("#") or _SCENE_BREAK.search(new):
         return "FORM", new
     w0, w1 = _words(old), _words(new)
-    if w1 > budget(w0):
+    if w1 > (max_words or budget(w0)):
         return "TOO_LONG", new
     if w1 < w0 * SHRINK:
         return "TOO_SHORT", new
@@ -461,7 +504,7 @@ def pick(runner, run, chapters, rep, beta, crafts, skip) -> dict:
     for p in picks:
         n_sc = len(chapter_scenes(p["chapter"], cards.get(p["chapter"]["chapter_id"])))
         p["label"] = label_of(p["chapter"], p["scene"], last, n_sc)
-    return {"picks": picks, "notes": placed["notes"], "lost": placed["lost"], "rep": rep}
+    return {"picks": picks, "notes": placed["notes"], "lost": placed["lost"], "rep": rep, "chapters": chapters}
 
 
 def propose(runner, run, chosen: dict, total: int) -> tuple[list[dict], list[dict]]:
@@ -498,6 +541,9 @@ def propose(runner, run, chosen: dict, total: int) -> tuple[list[dict], list[dic
     rep = chosen.get("rep")
     changes: dict[str, dict] = {}
     refused = []
+    from . import length_guard  # noqa: PLC0415
+    room = book_room(app.store, pid, chosen.get("chapters") or [], run.get("settings"))  # 📏 None: no cap to keep
+    cut_retry = (run.get("settings") or {}).get(CUT_SETTING) is not False
     for p in chosen["picks"]:
         runner.check(run)
         ch, sc = p["chapter"], p["scene"]
@@ -506,8 +552,9 @@ def propose(runner, run, chosen: dict, total: int) -> tuple[list[dict], list[dic
             keep = list(dict.fromkeys(keep + protected_keep(app.engine, run["principal"], pid, branch, sc["text"])))
         except Exception:  # noqa: BLE001
             pass
+        most = scene_max(sc["words"], room)
         ctx = brief(p, rep=rep, notes=chosen.get("notes", {}).get(ch["number"]), keep=keep, names=names,
-                    voices=voices, style=style, profile=profile, protected=protected)
+                    voices=voices, style=style, profile=profile, protected=protected, max_words=most)
         job = runner._sub_job(run, "improve", ch["record_id"], run["settings"].get("slot_id"))  # noqa: SLF001
         if not job.slot_pref:
             try:
@@ -530,10 +577,26 @@ def propose(runner, run, chosen: dict, total: int) -> tuple[list[dict], list[dic
             continue
         runner.check(run)
         new = raw.get("rewritten_scene") if isinstance(raw, dict) else None
-        why, new = check_scene(sc["text"], new, keep, ctx["names"])
+
+        def judge(text):
+            code, text = check_scene(sc["text"], text, keep, ctx["names"], most)
+            if code is None and room is not None and \
+                    length_guard.words(text) - length_guard.words(sc["text"]) > max(0, room):
+                code = "BOOK_TOO_LONG"   # 📏 the book would pass its cap (words counted as the length guard does)
+            return code, text
+        why, new = judge(new)
+        if why in ("TOO_LONG", "BOOK_TOO_LONG") and cut_retry:  # 📏 one short extra request: cut it to the most
+            cut = _cut(runner, run, ed, job, ch, sc, new, most, keep, ctx["names"], protected, total)
+            if cut is not None:
+                why2, cut = judge(cut)
+                if why2 is None:
+                    why, new = None, cut
+                    log.info("weak scenes: a rewrite was cut back to its budget")
         if why:
             refused.append({"label": p["label"], "code": why})
             continue
+        if room is not None:  # what this scene added (or freed) counts for the next ones
+            room -= length_guard.words(new) - length_guard.words(sc["text"])
         row = changes.setdefault(ch["chapter_id"], {"chapter": ch, "edits": [], "labels": []})
         row["edits"].append((sc["start"], sc["end"], new))
         row["labels"].append(p["label"])
@@ -545,6 +608,29 @@ def propose(runner, run, chosen: dict, total: int) -> tuple[list[dict], list[dic
                     "scenes": row["labels"]})
     out.sort(key=lambda c: c["number"])
     return out, refused
+
+
+def _cut(runner, run, ed, job, ch, sc, new: str, most: int, keep, names, protected, total) -> str | None:
+    """📏 The one extra request for a rewrite that came back too long: "cut it to at most ``most`` words". None when
+    the AI could not answer (the rewrite is then refused as before). Raises only the run's pause / cancel."""
+    from . import ai_activity  # noqa: PLC0415
+    from .errors import AkoweError  # noqa: PLC0415
+    ctx = {"akowe_task": "weak_scene_cut", "scene": {"text": new, "words": _words(new), "max_words": most},
+           "keep": [k for k in keep or [] if k in new], "names": list(names or [])[:30]}
+    try:
+        with ai_activity.doing(f"Improve pass: cutting a rewritten scene of chapter {ch['number']} to its length",
+                               done=f"Improve pass: cut a rewritten scene of chapter {ch['number']}",
+                               chapter=ch["number"], chapters=total):
+            raw = ed.assist._call_ai(job, op_for_roles="C02", task=CUT_TASK.format(words=_words(new), most=most),
+                                     schema=SCENE_SCHEMA, context=ctx, protected=protected)
+    except AkoweError as exc:
+        if getattr(exc, "control", False):
+            raise
+        log.info("weak scenes: the cut request failed (%s)", exc.code)
+        return None
+    runner.check(run)
+    out = raw.get("rewritten_scene") if isinstance(raw, dict) else None
+    return out if isinstance(out, str) else None
 
 
 def remember(store, pid, branch, cands: list[dict]) -> None:

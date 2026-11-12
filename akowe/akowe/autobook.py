@@ -1120,7 +1120,8 @@ class AutoBookService(_Runner):
             raise AkoweError("INVALID_INPUT", "/improve_mode", "improve_mode must be \"scenes\" or \"chapters\"",
                              status="REJECTED")
         out["improve_mode"] = im
-        for k in ("opening_pass", "first_page", "chapter_polish", "length_guard",  # ✍ / 📏 on unless switched off
+        for k in ("opening_pass", "first_page", "chapter_polish", "length_guard", "chapter_trim",  # ✍ / 📏 on
+                  "scene_cut_retry",  # 📏 weak_scenes.py: one "cut it to N words" request before a scene is refused
                   "reread_after_rewrites", "beta_reread"):  # 🔁 final_reads.py
             v = body.get(k, True)
             if not isinstance(v, bool):

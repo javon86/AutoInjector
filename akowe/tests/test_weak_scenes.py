@@ -264,13 +264,30 @@ def test_a_kept_scenes_round_is_akowes_own_and_the_final_book_is_read_again(tmp_
 
 
 def test_a_scenes_round_that_would_make_the_book_too_long_is_left_out(tmp_path, monkeypatch):
-    import akowe.lengths as lengths
     fake = SlotFake()
     fake.weak_scene_script = [lambda ctx: {"rewritten_scene": ctx["scene"]["text"] + " The wind rose."}] * 3
     app = make_app(tmp_path, fake)
+    _book_past_its_cap(monkeypatch)
+    run = run_book(app, {"length": "short_story", "opening_pass": False})
+    assert run["status"] == "done", run.get("problem")
+    mem = app.autobook.get(run["id"])["improve"]
+    # 📏 the book is past its cap: the scene's budget became "the same length or shorter" (told to the writer), the
+    # longer answer got one "cut it" request, and was refused only after that
+    assert mem["kept"] is False and mem["rounds"][0]["refused"][0]["code"] == "TOO_LONG", mem
+    assert "longer than the word budget" in mem["line"]
+    ctx = fake.prompts["weak_scene"][0][1]
+    assert ctx["scene"]["max_words"] == ctx["scene"]["words"] and "the same length or shorter" in \
+        ctx["scene"]["length_rule"] and str(ctx["scene"]["max_words"]) in ctx["scene"]["length_rule"]
+    assert fake.kinds.count("weak_scene_cut") == 1
+    assert fake.prompts["weak_scene_cut"][0][1]["scene"]["max_words"] == ctx["scene"]["max_words"]
+    assert "The wind rose." not in _book(app, run)[1]["text"]
+
+
+def _book_past_its_cap(monkeypatch):
+    import akowe.lengths as lengths
     real, propose, late = lengths.of_book, ws.propose, []
 
-    def proposed(*a, **k):   # from the improve round on, the book is far past its cap (a 10-word target)
+    def proposed(*a, **k):   # from the improve round on, the book is past its cap (a 10-word target)
         late.append(1)
         return propose(*a, **k)
 
@@ -281,9 +298,54 @@ def test_a_scenes_round_that_would_make_the_book_too_long_is_left_out(tmp_path, 
         return out
     monkeypatch.setattr(ws, "propose", proposed)
     monkeypatch.setattr(lengths, "of_book", tiny)
+
+
+def test_a_book_at_its_cap_still_gets_its_scenes_rewritten_when_they_stay_the_same_length(tmp_path, monkeypatch):
+    """The Salt Tuner: the book at 114 % of its target, every scene refused. Now a rewrite that keeps the scene's
+    length passes, and one that came back too long is cut back by one short extra request."""
+    fake = SlotFake()
+    fake.weak_scene_script = [lambda ctx: {"rewritten_scene": ctx["scene"]["text"].replace(
+        "only in a whisper", "only for a coin") + " The wind rose and rose."}] * 3
+    fake.scene_cut_script = [lambda ctx: {"rewritten_scene": ctx["scene"]["text"].replace(
+        " The wind rose and rose.", "")}]
+    app = make_app(tmp_path, fake)
+    _book_past_its_cap(monkeypatch)
     run = run_book(app, {"length": "short_story", "opening_pass": False})
     assert run["status"] == "done", run.get("problem")
     mem = app.autobook.get(run["id"])["improve"]
-    assert mem["kept"] is False and mem["rounds"][0]["refused"][0]["code"] == "BOOK_TOO_LONG", mem
-    assert "longer than its length allows" in mem["line"]
-    assert "The wind rose." not in _book(app, run)[1]["text"]
+    r0 = mem["rounds"][0]
+    assert r0["refused"] == [] and r0["changed"] == 1 and r0["after"] is not None, mem   # re-read, not refused
+    assert fake.kinds.count("weak_scene_cut") == 1
+    cut = fake.prompts["weak_scene_cut"][0][1]
+    assert "The wind rose and rose." in cut["scene"]["text"] and cut["scene"]["max_words"] == \
+        fake.prompts["weak_scene"][0][1]["scene"]["words"]
+
+
+def test_the_cut_request_can_be_switched_off(tmp_path, monkeypatch):
+    fake = SlotFake()
+    fake.weak_scene_script = [lambda ctx: {"rewritten_scene": ctx["scene"]["text"] + " The wind rose."}] * 3
+    app = make_app(tmp_path, fake)
+    _book_past_its_cap(monkeypatch)
+    run = run_book(app, {"length": "short_story", "opening_pass": False, "scene_cut_retry": False})
+    assert run["status"] == "done", run.get("problem")
+    assert fake.kinds.count("weak_scene_cut") == 0
+    assert app.autobook.get(run["id"])["improve"]["rounds"][0]["refused"][0]["code"] == "TOO_LONG"
+
+
+def test_scene_budget_near_the_book_cap():
+    assert ws.scene_max(100) == ws.budget(100) == 110          # no cap known: the scene's own budget
+    assert ws.scene_max(100, 500) == 110                       # plenty of room
+    assert ws.scene_max(100, 4) == 104                         # the book has 4 words left
+    assert ws.scene_max(100, 0) == ws.scene_max(100, -300) == 100   # at or past the cap: the same length or shorter
+    old = "Mara walked to the harbour and waited for the boat to come in."
+    longer = old + " Waiting."
+    assert ws.check_scene(old, longer)[0] is None              # within its own 10 %
+    assert ws.check_scene(old, longer, max_words=ws._words(old))[0] == "TOO_LONG"
+    assert ws.check_scene(old, old.replace("walked", "went"), max_words=ws._words(old))[0] is None
+
+
+def test_the_forecast_counts_the_cut_request(tmp_path):
+    app = make_app(tmp_path, SlotFake())
+    on = run_forecast.option_calls(run_forecast.options_of(app, {}), 6, 3)["improve"]["calls"]
+    off = run_forecast.option_calls(run_forecast.options_of(app, {"scene_cut_retry": False}), 6, 3)["improve"]["calls"]
+    assert on == off + ws.CUT_EXPECTED
