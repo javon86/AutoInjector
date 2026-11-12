@@ -64,6 +64,15 @@ GET  /voices                                                                    
   voice, named without `.onnx`; `VOICE_TTS_MODEL` is the default one. Voices are loaded once and kept. The page plays
   the WAV itself, so ⏹ Stop is instant. With no piper voice, `/synthesize` answers `NO_TTS_MODEL` and the page uses the
   PC's built-in voices instead.
+- **✨ Kokoro (optional, best quality):** when `kokoro-onnx` is installed and `VOICE_KOKORO_DIR` (default
+  `<VOICE_MODELS_DIR>/kokoro`) holds `kokoro-v1.0.onnx` + `voices-v1.0.bin`, `/synthesize {engine:"kokoro",
+  kokoro_voice:"af_heart", device:"cpu"|"gpu"}` reads with Kokoro (24 kHz WAV, `engine:"kokoro"`). `cpu` (the
+  default, also `VOICE_KOKORO_DEVICE`) uses half the processor's cores and leaves the graphics card alone; `gpu` uses
+  a graphics-card onnxruntime provider when one is installed, else the processor. Any problem (no package, no model,
+  an unknown voice, a crash) falls back to piper with the same request and adds `fallback_from:"kokoro"` and
+  `kokoro_error`. `/health` adds `kokoro`, `kokoro_model`, `kokoro_ready`, `kokoro_loaded`, `kokoro_device`;
+  `/voices` adds `kokoro_voices` once it is loaded. `/health` also reports `python` (`sys.executable`): the app
+  installs Kokoro into exactly that interpreter. Tests with a fake Kokoro: `python -m pytest -q integrations/voice`.
 - Errors are codes (`NEED_AUDIO`, `BAD_AUDIO`, `NO_STT`, `STT_FAILED`, `NEED_TEXT`, `BAD_VOICE`, `TEXT_TOO_LONG`,
   `NO_TTS`, `NO_TTS_MODEL`, `TTS_FAILED`); the app turns them into plain words. A `voice` is only ever a name from
   the folder, never a path.

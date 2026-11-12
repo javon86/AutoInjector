@@ -14,7 +14,10 @@ Where the targets go:
 
 * B11 outline: ``target_length`` = the chapter count, and a sentence with the words per chapter (set_b);
 * scene cards (P8): ``scene_hint`` = scenes per chapter, ``target_words`` and ``words_per_scene`` (scenes.py);
-* chapter prompts (C02): ``length`` in the writing brief and one plain rule; the instruction names the words;
+* chapter prompts (C02): ``length`` in the writing brief and one plain rule; the instruction names the words — the
+  chapter's share of the book (book target ÷ chapters) and the range ±``TARGET_BAND`` (10 %) it must stay within
+  (``aim_min_words`` – ``aim_max_words``; a draft more than 15 % over its share is trimmed by the chapter polish,
+  chapter_polish.py);
 * the writer (set_c ChapterWriter): when a chapter's target is above ``per_call_words`` (default 2 500, the most a
   web AI reliably writes in one reply) the chapter is written scene by scene, one AI call per scene card, each with
   the end of the previous scene for continuity; a chapter that comes back far under its target gets at most
@@ -46,8 +49,10 @@ MAX_SCENES = 5          # scene cards per chapter the writer is asked for (scene
 DEFAULT_SETTINGS = {"per_call_words": 2500, "expand_rounds": 1, "under_share": 0.6, "scale": 1.0}
 LIMITS = {"per_call_words": (300, 8000), "expand_rounds": (0, 3), "under_share": (0.3, 0.9), "scale": (0.001, 1.0)}
 SETTINGS_KEY = "length_settings"
+TARGET_BAND = 0.10      # 📏 a chapter is asked for its share of the book ±10 % (the writer is told the exact range)
 
-RULE = ("Length: this chapter should be about {target} words (context.length: the whole book is a {label} of about "
+RULE = ("Length: this chapter should be about {target} words — between {lo} and {hi} words, never more than {hi} "
+        "(context.length: the whole book is a {label} of about "
         "{book} words in {n} chapters{scenes}). Earn the length with story — more of each scene's goals, obstacles "
         "and consequences, concrete texture, dialogue that does work — never with padding, summary, repetition or "
         "restating what the reader already knows.")
@@ -132,6 +137,9 @@ def chapter_plan(prof: dict, n_chapters: int | None = None, store=None, cfg: dic
     scenes = scenes_for(unscaled, p["scenes"])
     per_call = max(1, int(round(cfg["per_call_words"] * cfg["scale"]))) if cfg["scale"] < 1 else cfg["per_call_words"]
     return {"length": p["key"], "label": p["label"], "book_words": total, "chapters": n, "target_words": target,
+            # 📏 the chapter's share of the book ±10 % (TARGET_BAND): what the writer is told to stay within
+            "aim_min_words": int(round(target * (1 - TARGET_BAND))),
+            "aim_max_words": int(round(target * (1 + TARGET_BAND))),
             "min_words": int(math.floor(target * cfg["under_share"])), "scenes": scenes,
             "words_per_scene": max(1, int(round(target / scenes))), "per_call_words": per_call,
             "scene_by_scene": target > per_call, "expand_rounds": int(cfg["expand_rounds"])}
@@ -151,7 +159,10 @@ def calls_per_chapter(plan: dict) -> int:
 
 def rule(plan: dict) -> str:
     scenes = f", {plan['scenes']} scenes of about {plan['words_per_scene']} words each" if plan.get("scenes") else ""
-    return RULE.format(target=f"{plan['target_words']:,}", label=plan["label"].lower(),
+    t = int(plan["target_words"])
+    lo = int(plan.get("aim_min_words") or round(t * (1 - TARGET_BAND)))
+    hi = int(plan.get("aim_max_words") or round(t * (1 + TARGET_BAND)))
+    return RULE.format(target=f"{t:,}", lo=f"{lo:,}", hi=f"{hi:,}", label=plan["label"].lower(),
                        book=f"{plan['book_words']:,}", n=plan["chapters"], scenes=scenes)
 
 

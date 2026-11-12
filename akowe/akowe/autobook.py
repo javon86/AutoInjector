@@ -1120,7 +1120,8 @@ class AutoBookService(_Runner):
             raise AkoweError("INVALID_INPUT", "/improve_mode", "improve_mode must be \"scenes\" or \"chapters\"",
                              status="REJECTED")
         out["improve_mode"] = im
-        for k in ("opening_pass", "first_page", "chapter_polish", "length_guard",  # ✍ / 📏 on unless switched off
+        for k in ("opening_pass", "first_page", "chapter_polish", "length_guard", "chapter_trim",  # ✍ / 📏 on
+                  "scene_cut_retry",  # 📏 weak_scenes.py: one "cut it to N words" request before a scene is refused
                   "reread_after_rewrites", "beta_reread"):  # 🔁 final_reads.py
             v = body.get(k, True)
             if not isinstance(v, bool):
@@ -1159,6 +1160,9 @@ class AutoBookService(_Runner):
         from . import story_doctor, voice_contrast  # noqa: PLC0415 - 🩺 the plan check / 🗣 distinct voice cards
         out.update(story_doctor.clean_run_option(body))
         out.update(voice_contrast.clean_run_option(body))
+        from . import fresh_names, trade_card  # noqa: PLC0415 - 🔁 kept fresh / 🔧 the trade card (both on)
+        out.update(trade_card.clean_run_option(body))
+        out.update(fresh_names.clean_run_option(body))
         n = body.get("beta_readers", 1)  # 👥 idea #14: how many beta readers (1 = one AI; 2-3 = a panel)
         if isinstance(n, bool) or not isinstance(n, int) or not 1 <= n <= 3:
             raise AkoweError("INVALID_INPUT", "/beta_readers", "beta_readers: 1, 2 or 3", status="REJECTED")
@@ -1716,9 +1720,20 @@ class AutoBookService(_Runner):
             if self._realign_subject(run, bp, head, label, res["review"].get("reasons") or []):
                 continue  # reviewed again with the canon's ID; no AI fix used up
             loop = self._loop_decision(run, head, label, res["review"], chapter_id)
+            from . import story_doctor  # noqa: PLC0415 - 🩺 the plan's quality gate (take_objections)
             if loop is not None:  # 🔁 going round in circles (or an approved fact would change): the author decides
-                raise loop
+                if loop.problem.get("code") == "DOCTOR_TAKES":  # 🩺 the story doctor takes the objections
+                    took = story_doctor.take_objections(self, run, st, head, label, res["review"],
+                                                        loop.problem.get("kind"))
+                    if took is not None:
+                        return took
+                else:
+                    raise loop
             n = int(counts.get(rid, 0))
+            if n >= MAX_FIXES and head["module_id"] in ("B03", "B11"):
+                took = story_doctor.take_objections(self, run, st, head, label, res["review"], None)  # 🩺
+                if took is not None:
+                    return took
             if n >= MAX_FIXES:
                 reasons = res["review"].get("reasons") or []
                 raise StepProblem("REVIEW_NOT_PASSED",
@@ -1783,6 +1798,9 @@ class AutoBookService(_Runner):
             kind = "canon"
         if kind is None:
             return None
+        from . import story_doctor  # noqa: PLC0415
+        if story_doctor.can_take(self, run, head, review, kind):  # 🩺 the doctor takes it: nobody is asked
+            return StepProblem("DOCTOR_TAKES", "", kind=kind)
         subject = self._subject(head, chapter_id)
         d = review_loop.decision(kind=kind, subject=subject, review=review, prev_review=(prev or {}).get("review"),
                                  match=match, prev_data=prev_data, cur_data=head.get("data"),
@@ -2588,6 +2606,10 @@ class AutoBookService(_Runner):
             task = PROFILE_TASK.replace(" Return only the JSON object.", story_kind.PICK_TASK
                                         + " Return only the JSON object.")
             context["story_kinds"] = story_kind.pick_options()
+        from . import fresh_names  # noqa: PLC0415 - 🔁 what the author's recent books used (unless typed now)
+        fresh = fresh_names.profile_task(self, run, wishes)
+        if fresh:
+            task = task.replace(" Return only the JSON object.", fresh + " Return only the JSON object.")
         if self._wants_voice(pid):  # ✍ the narrator voice is folded into this first AI call (human_voice.py)
             from . import human_voice  # noqa: PLC0415
             schema = dict(schema, properties=dict(schema["properties"], narrator_voice=human_voice.VOICE_FIELD))
@@ -2622,6 +2644,7 @@ class AutoBookService(_Runner):
             + f" ({prof['genre'] or 'any genre'}; told in the " \
                         f"{book_promises.POV_WORDS[dec['pov']]}, {dec['tense']} tense)"
         self.event(run, "ai", f"The AI invented the book “{prof['title']}”", slot=job.slot)
+        fresh_names.after_profile(self, run, st)  # 🔁 a repeated title word or name -> one rename (no AI to find)
         self._auto_voice(run, pid, raw.get("narrator_voice"))
         if pick:
             try:
@@ -2961,6 +2984,8 @@ class AutoBookService(_Runner):
         sess = BibleSession(self._assist, run["principal"], run["project_id"], run["branch_id"],
                             prof.get("idea") or prof.get("title") or "a new book", run["settings"].get("slot_id"))
         sess._check_cancel = lambda: self.check(run)  # type: ignore[method-assign]
+        from . import fresh_names  # noqa: PLC0415 - 🔁 the cast's names: not the recent books' (fresh_names.py)
+        sess.fresh = fresh_names.sketch_hook(self, run)
         orig_job = sess._job
 
         def hooked_job(op_id, slot):
@@ -3641,6 +3666,11 @@ class AutoBookService(_Runner):
         st["message"] = f"{n} chapter(s) planned and approved" + (f" · {st['doctor']}" if st.get("doctor") else "")
         self._place_beats(run, st)
         self._place_stages(run, st)
+        from . import trade_card  # noqa: PLC0415 - 🔧 how the book's trade is really done (≤ 1 request)
+        trade_card.run_step(self, run, st)
+        tc = (run.get("trade_card") or {}).get("line")
+        if tc:
+            st["message"] += f" · {tc}"
 
     def _place_stages(self, run, st):
         """📚 story_kind.py: the planner places the chapter where each stage of the book's kind of story begins (one

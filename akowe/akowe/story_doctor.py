@@ -26,6 +26,14 @@ updated for it (autobook.py ``_s_outline``):
 4. **Keep the best plan.** If a revision scored lower, the best-scoring outline is put back (the same text, approved
    again under the run consent — no AI).
 
+It runs whenever the outline is approved — also after the author's ✔ approve anyway / accept the change, and on a
+run saved by an older Akọwe (only ``story_doctor: false`` switches it off). **The plan's quality gate** (run setting
+``doctor_gate``, on by default; ``take_objections``): when the AI reviewer keeps objecting to the AI's main plot or
+outline, the draft is approved under the run consent and the objections go into the doctor's revision note (one
+revision even over the target), which is reviewed again; the author is asked only on author-only topics (point of
+view / tense, content limits, a change to an approved fact), for their own text, or when that revision cannot settle
+them (``doctor_stop``: the revision waits for the author's decision and the doctor goes on after it).
+
 Never holds up the book: an AI that cannot answer is skipped; no answer at all, a refused revision or a review that
 does not pass leaves the plan as it was, with a ⚠️ note. An outline the author wrote or edited is only scored, never
 revised. The run window says it plainly ("🩺 Plan scored 7.4 → 8.6 after 1 revision") and the book report repeats the
@@ -121,6 +129,10 @@ def clean_run_option(body: dict) -> dict:
     if not isinstance(on, bool):
         raise AkoweError("INVALID_INPUT", "/story_doctor", "story_doctor must be true or false", status="REJECTED")
     out["story_doctor"] = on
+    g = body.get("doctor_gate", True)  # the plan reviewer's objections go to the doctor instead of stopping the run
+    if not isinstance(g, bool):
+        raise AkoweError("INVALID_INPUT", "/doctor_gate", "doctor_gate must be true or false", status="REJECTED")
+    out["doctor_gate"] = g
     r = body.get("doctor_rounds")
     if r is not None:
         if isinstance(r, bool) or not isinstance(r, int) or not 1 <= r <= ROUNDS_MAX:
@@ -136,8 +148,9 @@ def clean_run_option(body: dict) -> dict:
 
 
 def enabled(run: dict) -> bool:
-    """On unless the run switched it off (a run saved before this setting existed: off, as it was)."""
-    return (run.get("settings") or {}).get("story_doctor") is True
+    """On unless the run switched it off. A run saved before this setting existed (started on an older Akọwe and
+    resumed after the update — "The Salt Tuner") gets it too: its plan is checked when its outline step runs."""
+    return (run.get("settings") or {}).get("story_doctor") is not False
 
 
 def rounds_of(settings: dict | None) -> int:
@@ -284,17 +297,106 @@ def combined_fixes(rows: list[dict], target: float) -> list[dict]:
     return items[:MAX_FIXES]
 
 
-def revision_note(rows: list[dict], score: float, target: float, protect: list[str]) -> str:
+def revision_note(rows: list[dict], score: float, target: float, protect: list[str],
+                  objections: list[dict] | None = None) -> str:
     fixes = combined_fixes(rows, target)
     lines = [NOTE_HEAD.format(n=len(rows), score=score, target=target)]
+    i = 0
     for i, f in enumerate(fixes, 1):
         dim = br.LABELS.get(f["dimension"] or "", "")
         lines.append(f"{i}. " + (f"[{dim}] " if dim else "") + (f["fix"] or f["point"])
                      + (f" (the problem: {f['point']}" + (f" — “{f['quote']}”" if f["quote"] else "") + ")"
                         if f["fix"] else ""))
+    obj = objection_lines(objections)
+    if obj:  # the plan reviewer's objections the run did not stop for (handed to this revision)
+        lines.append(OBJECTIONS_HEAD)
+        lines += [f"{i + k}. {x}" for k, x in enumerate(obj, 1)]
     lines.append(NOTE_KEEP)
     lines += protect
     return "\n".join(lines)[:NOTE_MAX]
+
+
+OBJECTIONS_HEAD = ("The AI plan reviewer also objected to the plan and the run did not stop to ask the author: settle "
+                   "each of these in the chapter outline (the main plot stays as approved — answer a main-plot "
+                   "objection through the chapters):")
+OBJ_MAX = 6          # objections kept per record (reasons + suggested changes)
+AUTHOR_ONLY = ("pov_tense", "content_limits_breach", "canon_change")  # only the author decides these
+
+
+def objection_lines(objections: list[dict] | None) -> list[str]:
+    out, seen = [], set()
+    for o in objections or []:
+        what = o.get("what") or "the plan"
+        for x in list(o.get("changes") or []) + list(o.get("reasons") or []):
+            t = _clip(x, FIX_MAX)
+            k = calibration.norm(t)[:120]
+            if t and k not in seen:
+                seen.add(k)
+                out.append(f"[{what}] {t}")
+    return out[:2 * OBJ_MAX]
+
+
+def _ai_text(svc, run: dict, rec: dict) -> bool:
+    """The AI's text (an AI draft or fix) — also when the author approved it anyway or chose to keep the AI's earlier
+    version (the same text as an AI-made version of this record). False for text the author typed or edited."""
+    if svc._ai_made(run, rec):  # noqa: SLF001
+        return True
+    try:
+        h = rec.get("content_hash")
+        if not h:
+            return False
+        for v in range(int(rec.get("version") or 1) - 1, 0, -1):
+            old = svc.store.get_record(run["project_id"], run["branch_id"], rec["record_id"], v)
+            if old and old.get("content_hash") == h and svc._ai_made(run, old):  # noqa: SLF001
+                return True
+    except Exception:  # noqa: BLE001 - when in doubt, never rewrite the author's text
+        log.debug("story doctor: could not compare with earlier versions", exc_info=True)
+    return False
+
+
+def can_take(svc, run: dict, head: dict, review: dict, kind: str | None) -> bool:
+    """Would the doctor take the reviewer's objections to this draft (see take_objections)? Never raises."""
+    try:
+        if head.get("module_id") not in ("B03", "B11") or not enabled(run) or kind == "canon" or \
+                (run.get("settings") or {}).get("doctor_gate") is False:
+            return False
+        if any(review.get(k) for k in AUTHOR_ONLY):
+            return False
+        mem = run.get("story_doctor") or {}
+        if mem.get("state") == "done" or mem.get("pending") or mem.get("author_gate"):
+            return False  # the doctor's own revision is being reviewed (or it already ran): the author decides
+        return _ai_text(svc, run, head)
+    except Exception:  # noqa: BLE001 - when in doubt, the author decides as before
+        log.debug("story doctor: could not tell whether it takes the objections", exc_info=True)
+        return False
+
+
+def take_objections(svc, run: dict, st: dict, head: dict, label: str, review: dict, kind: str | None) -> dict | None:
+    """🩺 The doctor is the plan's quality gate: when the AI reviewer keeps objecting to the AI's main plot or chapter
+    outline (the same finding again after a fix, or the fixes used up), the run does not stop for the author. The
+    draft is approved under the run consent and the reviewer's objections are kept for the doctor's revision of the
+    outline (which is reviewed again; if that cannot settle them, the run stops for the author then). Returns the
+    approved record, or None when the author must decide as before: the doctor is off or already working, an
+    author-only topic (point of view / tense, content limits, a change to an approved fact), or the author's own
+    text."""
+    if not can_take(svc, run, head, review, kind):
+        return None
+    mem = run.setdefault("story_doctor", {})
+    rid = head["record_id"]
+    obj = {"what": "main plot" if head["module_id"] == "B03" else LABEL, "module_id": head["module_id"],
+           "record_id": rid, "version": head["version"],
+           "reasons": [_clip(x, FIX_MAX) for x in (review.get("reasons") or [])][:OBJ_MAX],
+           "changes": [_clip(x, FIX_MAX) for x in (review.get("suggested_changes") or [])][:OBJ_MAX]}
+    svc._approve(run, head["ref"], why=f"AI review: {review.get('verdict')} ({label}) — its objections go to the "  # noqa: SLF001
+                 "🩺 story doctor's revision of the outline", verdict=review.get("verdict"))
+    mem.setdefault("objections", []).append(obj)
+    (run.get("review_trail") or {}).pop(rid, None)
+    n = len(obj["reasons"]) + len(obj["changes"])
+    svc.event(run, "note", f"🩺 The AI reviewer still objects to the {label}; instead of stopping for you, its "
+              f"objections ({n}) go to the story doctor, who revises the chapter outline with them before chapter 1",
+              record_id=rid, code="DOCTOR_TAKES_OBJECTIONS")
+    svc.save(run)
+    return svc.bp(run).rec(rid)
 
 
 def protected_lines(svc, run: dict) -> list[str]:
@@ -312,6 +414,11 @@ def protected_lines(svc, run: dict) -> list[str]:
 
 
 # ====================================================================== the run
+def _author_stop(exc) -> bool:
+    """A stop for the author the doctor asked for (its revision could not settle the reviewer's objections)."""
+    return isinstance(getattr(exc, "problem", None), dict) and bool(exc.problem.get("doctor_stop"))
+
+
 def _control(exc) -> bool:
     from .assist import Cancelled  # noqa: PLC0415
     from .autobook import RunCancelled, RunPaused  # noqa: PLC0415
@@ -408,8 +515,9 @@ def _summary_row(rows: list[dict], score, version, revised: bool) -> dict:
 def line(mem: dict) -> str | None:
     """'🩺 Plan scored 7.4 → 8.6 after 1 revision' (plain words for the run window and the report)."""
     rounds = [r for r in mem.get("rounds") or [] if r.get("score") is not None]
-    if not rounds:
-        return None
+    if not rounds:  # it ran but could not score: said plainly too (the report never just lacks the line)
+        return f"🩺 The plan could not be scored ({mem['why']}); the book was written from the plan as it was." \
+            if mem.get("state") == "done" and mem.get("why") else None
     first, best = rounds[0]["score"], mem.get("best_score", rounds[0]["score"])
     target = mem.get("target", TARGET)
     rev = int(mem.get("revisions") or 0)
@@ -422,6 +530,9 @@ def line(mem: dict) -> str | None:
         why = mem.get("why") or "no revision could be made"
         return f"🩺 Plan scored {first}/10 (target {target}); {why}, so the plan stays as it was."
     word = f"{rev} revision{'s' if rev != 1 else ''}"
+    if mem.get("objections_answered") and mem.get("objections_answered") == mem.get("best_version"):
+        return (f"🩺 Plan scored {first} → {best} after {word}; the AI reviewer's objections to the plan were settled "
+                "in it" + ("." if best >= target else f" (target {target})."))
     if best > first:
         return f"🩺 Plan scored {first} → {best} after {word}" + ("" if best >= target else f" (target {target})") + "."
     return f"🩺 Plan scored {first}/10; {word} did not score higher, so the first plan is kept (target {target})."
@@ -437,12 +548,13 @@ def run_doctor(svc, run: dict, st: dict) -> None:
     try:
         _work(svc, run, st, mem)
     except Exception as exc:  # noqa: BLE001 - the plan stays as it is; the book goes on
-        if _control(exc):
+        if _control(exc) or _author_stop(exc):
             raise
         code = getattr(exc, "code", None) or type(exc).__name__
         log.warning("story doctor of run %s: stopped (%s)", run.get("id"), code)
         mem.update(state="done", code=code, why=mem.get("why") or "the check stopped")
         try:
+            _objections_later(svc, run, mem)
             _restore_best(svc, run, mem)
         except Exception as exc2:  # noqa: BLE001
             if _control(exc2):
@@ -464,6 +576,7 @@ def _work(svc, run, st, mem):
     outline = bp.outline()
     if not outline:
         mem.update(state="done", why="there is no approved outline")
+        _objections_later(svc, run, mem)
         return
     rid = outline["record_id"]
     mem["record_id"] = rid
@@ -480,31 +593,53 @@ def _work(svc, run, st, mem):
         rows = score_plan(svc, run, n)
         if not rows:
             mem.update(state="done", why="no AI could score the plan now", code="NO_REVIEWER")
+            _objections_later(svc, run, mem)
             svc.event(run, "note", "⚠️ 🩺 Story doctor: no AI could score the plan now; the book goes on with the plan as "
                       "it is", step="outline", code="DOCTOR_NO_REVIEWER")
             return
         score = plan_score(rows)
         mem["rounds"].append(_summary_row(rows, score, outline["version"], n > 0))
-        if mem.get("best_score") is None or score > mem["best_score"]:
+        if mem.get("best_score") is None or score > mem["best_score"] or \
+                (score == mem["best_score"] and mem.get("objections_answered") == outline["version"]):
+            # a tie goes to the revision that settled the reviewer's objections
             mem.update(best_score=score, best_version=outline["version"])
         svc.event(run, "note", f"🩺 Story doctor: the plan scored {score}/10 ("
                   + ", ".join(f"{r['name']} {r['score']}" for r in rows) + f"; target {target})", step="outline",
                   code="DOCTOR_SCORED", score=score)
         svc.save(run)
-        if score >= target or mem["revisions"] >= max_rev:
+        objections = mem.get("objections") or []
+        if (score >= target and not objections) or mem["revisions"] >= max_rev:
             break
-        if outline.get("lifecycle") == "LOCKED" or not svc._ai_made(run, outline) or \
-                (s.get("bible") or {}).get("reuse_plan"):  # noqa: SLF001 - the author's own (or kept) outline
+        if outline.get("lifecycle") == "LOCKED" or not _ai_text(svc, run, outline) or \
+                (s.get("bible") or {}).get("reuse_plan"):  # the author's own (or kept) outline: only scored
             mem.update(own_text=True, why="the outline is your own text")
+            _objections_later(svc, run, mem)
             break
-        note = revision_note(rows, score, target, protected_lines(svc, run))
+        note = revision_note(rows, score, target, protected_lines(svc, run), objections)
+        mem["revisions"] += 1  # counted before: a stop for the author inside it must not give an extra round later
+        svc.save(run)
         ok = _revise(svc, run, st, mem, rid, note)
-        mem["revisions"] += 1
         svc.save(run)
         if not ok:
             break
+    if mem.get("objections"):  # none of the revisions settled them (refused, or the rounds were used up)
+        _objections_later(svc, run, mem)
     _restore_best(svc, run, mem)
     mem["state"] = "done"
+
+
+def _objections_later(svc, run, mem) -> None:
+    """The reviewer's objections no revision could take up: listed for the author's check later (book home, report)."""
+    obj = mem.pop("objections", None) or []
+    if not obj:
+        return
+    later = run.setdefault("check_later", [])
+    for o in obj:
+        ln = f"{o.get('what') or 'the plan'}: the AI reviewer's objections were not settled by the story doctor"
+        if ln not in later:
+            later.append(ln)
+    svc.event(run, "note", "⚠️ 🩺 The AI reviewer's objections to the plan could not be settled by the story doctor; "
+              "they are listed for your check later", step="outline", code="DOCTOR_OBJECTIONS_OPEN")
 
 
 def _revise(svc, run, st, mem, rid: str, note: str) -> bool:
@@ -521,7 +656,7 @@ def _revise(svc, run, st, mem, rid: str, note: str) -> bool:
             log.info("story doctor: draft copy refused (%s, %d problem(s))", r.get("status"), len(problems(r)))
             return False
         svc._made(run, r["output_refs"][0])  # noqa: SLF001 - the AI's own text, unchanged
-    k = mem["revisions"] + 1
+    k = mem["revisions"]
     st["message"] = f"🩺 Story doctor: the AI revises the plan with the reviewers' fixes (revision {k})"
     run["phase"] = st["message"]
     svc.event(run, "fix", f"🩺 Story doctor: the plan scored under {mem.get('target', TARGET)}; the AI revises the "
@@ -541,10 +676,30 @@ def _revise(svc, run, st, mem, rid: str, note: str) -> bool:
             f"the AI could not revise it now ({code})"
         svc.event(run, "note", f"⚠️ 🩺 Story doctor: {mem['why']}; the plan stays as it was", step="outline",
                   code="DOCTOR_REVISION_FAILED")
+        if mem.get("objections"):
+            _stop_for_author(svc, run, mem, rid)
         return False
     mem["pending"] = {"record_id": rid, "at": _now()}
     svc.save(run)
     return _review_revision(svc, run, st, mem)
+
+
+def _stop_for_author(svc, run, mem, rid: str) -> None:
+    """The doctor could not revise the outline the reviewer objected to: the run stops for the author, with the
+    unchanged copy of the outline waiting (✔ Approve anyway keeps it, ✏️ edit it, 🔁 the AI tries again)."""
+    from .autobook import StepProblem  # noqa: PLC0415
+    head = svc.bp(run).rec(rid)
+    if head is None or head.get("approved_version") == head["version"]:
+        return  # nothing waits for a decision (no copy could be made): the objections are listed for later
+    obj = objection_lines(mem.get("objections"))
+    mem.update(pending={"record_id": rid, "at": _now()}, author_gate=True)
+    mem.pop("objections", None)
+    svc.save(run)
+    raise StepProblem("REVIEW_NOT_PASSED", "The AI reviewer objected to the plan and the story doctor could not revise "
+                      "the chapter outline now.", "Decide: ✔ Approve anyway (the outline as it is), ✏️ Edit it "
+                      "yourself and then press Continue, or 🔁 Try again.", record_id=rid, version=head["version"],
+                      module_id=head["module_id"], verdict="REVISE", reasons=[x[:300] for x in obj[:4]],
+                      options=["approve_anyway", "edit", "retry"], doctor_stop=True)
 
 
 def _review_revision(svc, run, st, mem) -> bool:
@@ -557,6 +712,14 @@ def _review_revision(svc, run, st, mem) -> bool:
         svc._review_until_approved(run, st, rid, LABEL,  # noqa: SLF001
                                    precheck=lambda r: svc._outline_has_main(run, r))  # noqa: SLF001
     except StepProblem as exc:  # also ChecksRefused
+        if mem.get("objections") or mem.get("author_gate"):
+            # the doctor's revision did not settle the reviewer's objections: now the author decides (the revision
+            # waits; the run goes on from here after the decision)
+            mem["author_gate"] = True
+            mem.pop("objections", None)
+            svc.save(run)
+            exc.problem["doctor_stop"] = True
+            raise
         mem.pop("pending", None)
         code = exc.problem.get("code") if isinstance(getattr(exc, "problem", None), dict) else "REFUSED"
         mem["why"] = "the revised outline did not pass its review"
@@ -565,6 +728,10 @@ def _review_revision(svc, run, st, mem) -> bool:
         _restore_best(svc, run, mem)
         return False
     mem.pop("pending", None)
+    if mem.pop("objections", None) or mem.get("author_gate"):  # the revision that answered them passed the review
+        head = svc.bp(run).rec(rid)                              # (or the author approved it)
+        mem["objections_answered"] = head["version"] if head else None
+    mem.pop("author_gate", None)
     svc.save(run)
     return True
 

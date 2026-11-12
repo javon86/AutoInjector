@@ -85,6 +85,8 @@ const pv = VR.defaultPiperVoices(['en_US-lessac-medium']);
 assert(Object.values(pv).every((v) => v === 'en_US-lessac-medium'), 'one piper voice: everyone uses it');
 const pv2 = VR.defaultPiperVoices(['en_US-lessac-medium', 'en_GB-alan-medium', 'en_US-ryan-high', 'en_US-amy-medium']);
 assert(new Set(Object.values(pv2)).size === 4 && pv2.butler === 'en_GB-alan-medium' && pv2.chatgpt === 'en_US-lessac-medium', `four piper voices: one each (${JSON.stringify(pv2)})`);
+const pv3 = VR.defaultPiperVoices(['en_US-lessac-medium', 'en_US-lessac-high', 'en_US-ryan-high', 'en_GB-alba-medium', 'en_GB-alan-medium', 'en_US-amy-medium', 'en_GB-northern_english_male-medium']);
+assert(pv3.butler === 'en_GB-alan-medium' && pv3.chatgpt === 'en_US-lessac-high' && pv3.claude === 'en_US-ryan-high' && pv3.gemini === 'en_GB-alba-medium', `the better (recommended) voices win when they are there (${JSON.stringify(pv3)})`);
 assert(VR.STYLE.butler.pitch !== VR.STYLE.gemini.pitch, 'each speaker also has its own pitch / pace');
 
 console.log(`\n${passed} passed, ${failed} failed`);

@@ -10,8 +10,11 @@ request/response, not a stream):
     POST /listen {seconds?}    -> {"ok": true, "text": "<transcript>"}
     POST /transcribe {audio_b64, mime?}  -> {"ok": true, "text": "...", "ms", "device", "model"}
                                (the app's 🎤: audio recorded in the control panel, webm/opus or wav)
-    POST /synthesize {text, voice?}      -> {"ok": true, "audio_b64": "<WAV>", "mime": "audio/wav", "voice"}
-                               (the app's 🔊 read-aloud: the page plays the WAV itself, so Stop is instant)
+    POST /synthesize {text, voice?, engine?, kokoro_voice?, device?}
+                               -> {"ok": true, "audio_b64": "<WAV>", "mime": "audio/wav", "voice", "engine"}
+                               (the app's 🔊 read-aloud: the page plays the WAV itself, so Stop is instant).
+                               engine "kokoro" (optional, best quality) falls back to piper on any problem and
+                               then says fallback_from/kokoro_error.
     GET  /voices               -> {"ok": true, "voices": ["en_US-lessac-medium", ...]}
 
 Speech-to-text runs on the graphics card when it can (faster-whisper on CUDA, float16) and falls
@@ -153,6 +156,164 @@ def _synthesize_wav(text, voice_name=""):
         return buf.getvalue(), os.path.basename(path)[:-5], None, None
     except Exception as exc:  # pragma: no cover - backend-specific
         return None, "", "TTS_FAILED", str(exc)[:300]
+
+
+# ---- ✨ Kokoro (optional "best quality" engine) -----------------------------------
+# Used only when the request asks for it (engine "kokoro") AND the kokoro-onnx package and its two model files
+# (kokoro-v1.0.onnx + voices-v1.0.bin in VOICE_KOKORO_DIR, default <VOICE_MODELS_DIR>/kokoro) are there. Never
+# required: any problem -> the caller falls back to piper (and the app then to the PC's built-in voices).
+# Device: "cpu" (the default — leaves the graphics card free for pictures and video; it uses only half the
+# processor's cores) or "gpu" (a graphics-card onnxruntime provider when one is installed, else the processor).
+# (Only kokoro-onnx: the torch `kokoro` package fetches its model from the internet on first use, which this app
+# never does behind the user's back.)
+KOKORO_MODEL_FILE = "kokoro-v1.0.onnx"
+KOKORO_VOICES_FILE = "voices-v1.0.bin"
+_KOKORO = {"engine": None, "key": None, "device": "", "kind": "", "lock": threading.Lock(), "error": ""}
+_GPU_PROVIDERS = ("CUDAExecutionProvider", "DmlExecutionProvider", "ROCMExecutionProvider", "CoreMLExecutionProvider")
+
+
+def _kokoro_dir():
+    d = os.environ.get("VOICE_KOKORO_DIR") or ""
+    if d:
+        return d
+    v = _voices_dir()
+    return os.path.join(v, "kokoro") if v else ""
+
+
+def _kokoro_files():
+    """-> (model_path, voices_path) when both files are there, else None."""
+    d = _kokoro_dir()
+    if not d:
+        return None
+    m, v = os.path.join(d, KOKORO_MODEL_FILE), os.path.join(d, KOKORO_VOICES_FILE)
+    if os.path.isfile(m) and os.path.isfile(v):
+        return m, v
+    return None
+
+
+def _have_kokoro_pkg():
+    for attempt in (0, 1):
+        try:
+            import kokoro_onnx  # noqa: F401
+            return "kokoro-onnx"
+        except Exception:
+            if attempt:
+                return None
+            # installed while this shim was running? let Python look at site-packages again
+            try:
+                import importlib
+                importlib.invalidate_caches()
+            except Exception:
+                return None
+    return None
+
+
+def _kokoro_ready():
+    return bool(_have_kokoro_pkg() and _kokoro_files())
+
+
+def _kokoro_device(want):
+    want = (want or os.environ.get("VOICE_KOKORO_DEVICE") or "cpu").strip().lower()
+    return "gpu" if want in ("gpu", "cuda", "graphics") else "cpu"
+
+
+def _load_kokoro(device):
+    """Load (once per device) and return the engine. Raises with a short reason."""
+    kind = _have_kokoro_pkg()
+    if not kind:
+        raise RuntimeError("NO_KOKORO")
+    key = (kind, device)
+    if _KOKORO["engine"] is not None and _KOKORO["key"] == key:
+        return _KOKORO["engine"]
+    _KOKORO["engine"] = None
+    files = _kokoro_files()
+    if not files:
+        raise RuntimeError("NO_KOKORO_MODEL")
+    from kokoro_onnx import Kokoro  # type: ignore
+    used = "cpu"
+    engine = None
+    try:
+        import onnxruntime as rt  # type: ignore
+        avail = list(rt.get_available_providers() or [])
+        providers = ["CPUExecutionProvider"]
+        if device == "gpu":
+            gpu = [p for p in _GPU_PROVIDERS if p in avail]
+            if gpu:
+                providers = gpu + providers
+                used = "gpu"
+        so = rt.SessionOptions()
+        if used == "cpu":
+            # stay light: half the cores, so the PC keeps working while it reads
+            so.intra_op_num_threads = max(1, (os.cpu_count() or 2) // 2)
+        try:
+            sess = rt.InferenceSession(files[0], sess_options=so, providers=providers)
+        except Exception:
+            if used != "gpu":
+                raise
+            sys.stderr.write("voice-shim: Kokoro on the graphics card failed; using the processor\n")
+            used = "cpu"
+            sess = rt.InferenceSession(files[0], sess_options=so, providers=["CPUExecutionProvider"])
+        if hasattr(Kokoro, "from_session"):
+            engine = Kokoro.from_session(sess, files[1])
+    except ImportError:
+        engine = None
+    if engine is None:
+        engine = Kokoro(files[0], files[1])
+    _KOKORO.update(engine=engine, key=key, device=used, kind=kind)
+    return engine
+
+
+def _kokoro_voice_ok(name):
+    import re
+    return bool(re.match(r"^[a-z]{2}_[a-z0-9]{1,24}$", name or ""))
+
+
+def _float_to_wav(samples, rate):
+    import numpy as np  # type: ignore
+    a = np.asarray(samples, dtype="float32").reshape(-1)
+    pcm = (np.clip(a, -1.0, 1.0) * 32767.0).astype("<i2").tobytes()
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(int(rate))
+        wf.writeframes(pcm)
+    return buf.getvalue()
+
+
+def _kokoro_wav(text, voice="", device=""):
+    """-> (wav_bytes, voice_name, error, detail). Never raises."""
+    voice = (voice or "af_heart").strip()
+    if not _kokoro_voice_ok(voice):
+        return None, "", "BAD_VOICE", "kokoro voice names look like af_heart"
+    if not _have_kokoro_pkg():
+        return None, "", "NO_KOKORO", "pip install kokoro-onnx"
+    if _have_kokoro_pkg() == "kokoro-onnx" and not _kokoro_files():
+        return None, "", "NO_KOKORO_MODEL", "put kokoro-v1.0.onnx and voices-v1.0.bin in models/voice/kokoro"
+    dev = _kokoro_device(device)
+    lang = "en-gb" if voice[:1] == "b" else "en-us"
+    try:
+        with _KOKORO["lock"]:
+            engine = _load_kokoro(dev)
+            samples, rate = engine.create(text, voice=voice, speed=1.0, lang=lang)
+        if samples is None or len(samples) == 0:
+            return None, "", "KOKORO_FAILED", "no audio"
+        _KOKORO["error"] = ""
+        return _float_to_wav(samples, rate), voice, None, None
+    except Exception as exc:  # any backend problem -> the caller falls back to piper
+        _KOKORO["error"] = str(exc)[:200]
+        _KOKORO["engine"] = None
+        return None, "", "KOKORO_FAILED", str(exc)[:300]
+
+
+def _kokoro_voice_list():
+    eng = _KOKORO["engine"]
+    try:
+        if eng is not None and hasattr(eng, "get_voices"):
+            return list(eng.get_voices())
+    except Exception:
+        pass
+    return []
 
 
 def _speak(text, voice_name=""):
@@ -361,9 +522,14 @@ class Handler(BaseHTTPRequestHandler):
                              "stt_model": name, "stt_loaded": _STT["model"] is not None,
                              "stt_device": _STT["device"] or ("cuda" if stt and _cuda_ok() else "cpu"),
                              "stt_cached": bool(stt and _stt_cached(name)),
-                             "stt_mb": _STT_MB.get(name, 0)})
+                             "stt_mb": _STT_MB.get(name, 0),
+                             "kokoro": bool(_have_kokoro_pkg()), "kokoro_model": bool(_kokoro_files()),
+                             "kokoro_ready": _kokoro_ready(), "kokoro_loaded": _KOKORO["engine"] is not None,
+                             "kokoro_device": _KOKORO["device"] or "",
+                             # the interpreter this shim runs in: the app installs extras (Kokoro) into THIS one
+                             "python": sys.executable or ""})
         elif self.path.rstrip("/") == "/voices":
-            self._send(200, {"ok": True, "voices": _list_voices()})
+            self._send(200, {"ok": True, "voices": _list_voices(), "kokoro_voices": _kokoro_voice_list()})
         else:
             self._send(404, {"ok": False, "error": "NOT_FOUND"})
 
@@ -402,11 +568,24 @@ class Handler(BaseHTTPRequestHandler):
             voice = body.get("voice") or ""
             if not isinstance(voice, str) or os.path.sep in voice or "/" in voice or ".." in voice:
                 return self._send(400, {"ok": False, "error": "BAD_VOICE"})
+            engine = str(body.get("engine") or "piper").lower()
+            extra = {}
+            if engine == "kokoro":
+                kv = body.get("kokoro_voice") or ""
+                if not isinstance(kv, str):
+                    kv = ""
+                wav, name, err, hint = _kokoro_wav(text.strip(), kv, str(body.get("device") or ""))
+                if not err:
+                    return self._send(200, {"ok": True, "audio_b64": base64.b64encode(wav).decode("ascii"),
+                                            "mime": "audio/wav", "voice": name, "engine": "kokoro",
+                                            "device": _KOKORO["device"] or "cpu"})
+                # fall back to piper; say why so the app can tell the user once
+                extra = {"fallback_from": "kokoro", "kokoro_error": err, "kokoro_detail": (hint or "")[:200]}
             wav, name, err, hint = _synthesize_wav(text.strip(), voice)
             if err:
-                return self._send(200, {"ok": False, "error": err, "detail": hint})
-            return self._send(200, {"ok": True, "audio_b64": base64.b64encode(wav).decode("ascii"),
-                                    "mime": "audio/wav", "voice": name})
+                return self._send(200, dict({"ok": False, "error": err, "detail": hint}, **extra))
+            return self._send(200, dict({"ok": True, "audio_b64": base64.b64encode(wav).decode("ascii"),
+                                         "mime": "audio/wav", "voice": name, "engine": "piper"}, **extra))
         if path == "/listen":
             seconds = max(1, min(60, int(body.get("seconds") or 6)))
             ok, text, err, hint = _listen(seconds)

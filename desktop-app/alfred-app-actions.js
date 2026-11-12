@@ -190,6 +190,10 @@ A('voice.redownload', 'voice:redownload', { t: 'Re-download the voice file (when
 A('voice.replies', 'voice:replies', { t: "One AI's replies, numbered, with their first words (what the 🔊 ◀ ▶ buttons step through)", c: false, a: { site: { type: 'string', enum: ['chatgpt', 'claude', 'gemini'] } }, r: ['site'], ex: { site: 'claude' } });
 A('voice.reply_text', 'voice:reply-text', { t: 'The full text of one reply, by its id from voice.replies', c: false, a: { id: { type: 'integer', minimum: 1 } }, r: ['id'], ex: { id: 1 } });
 A('voice.piper_voices', 'voice:piper-voices', { t: 'The piper voices on this PC and which speaker uses which by default', c: false });
+A('voice.catalog', 'voice:catalog', { t: 'The recommended free read-aloud voices (downloaded or not, size) and whether the best-quality Kokoro voice is installed', c: false });
+A('voice.download', 'voice:download', { t: 'Download one recommended free voice (by its id from voice.catalog) into models/voice', c: true, a: { id: text(80) }, r: ['id'], ex: { id: 'en_US-ryan-high' } });
+A('voice.download_cancel', 'voice:download-cancel', { t: 'Stop a voice download (it carries on later from where it stopped)', c: true, aa: true, a: { id: text(80) }, r: ['id'], ex: { id: 'en_US-ryan-high' } });
+A('voice.install_best', 'voice:kokoro-install', { t: 'Install the optional best-quality voice (Kokoro, about 350 MB)', c: true, ex: {} });
 A('voice.listen', 'voice:listen', { t: 'Listen with the microphone', c: true, a: { seconds: { type: 'integer', minimum: 1, maximum: 60 } }, ex: { seconds: 5 } });
 A('image.status', 'image:status', { t: 'Image generator settings', c: false });
 A('image.configure', 'image:configure', { t: 'Change image generator settings', c: true, a: { settings: pass }, r: ['settings'], call: (a) => [a.settings], ex: { settings: { steps: 25 } } });
@@ -290,6 +294,8 @@ const EXCLUDED = {
   'ease:guide': 'opens the user guide window for the user to read — not a control',
   'voice:transcribe': 'the control panel\'s 🎤 hands its recording (audio bytes) to the voice engine — Alfred listens with voice.listen',
   'voice:synthesize': 'returns a WAV for the control panel to play (🔊 read-aloud) — Alfred speaks with voice.speak',
+  'voice:sample': 'returns a short recording for the 🔊 Voice box to play (▶ Sample) — not a control',
+  'voice:kokoro-cancel': 'the ✕ on the Kokoro install in the 🔊 Voice box — Alfred stops a download with voice.download_cancel',
   'sd:addons-update': 'updates an add-on in the user\'s SD app (its code changes) — done by the user in 🎨 Images → 🧩 Add-ons',
   'sd:addons-remove': 'takes an add-on out of the user\'s SD app — done by the user in 🎨 Images → 🧩 Add-ons',
   'sd:addons-folder': 'a folder picker the user answers (which SD app folder add-ons go into)',

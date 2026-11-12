@@ -176,9 +176,10 @@ def _keep_doctor(runner, run) -> None:
 def _length(runner, run) -> str | None:
     try:
         from . import length_guard  # noqa: PLC0415
-        book, target, _per = length_guard.book_numbers(runner.app.engine, runner.store, run["principal"],
-                                                 run["project_id"], run["branch_id"])
-        ln = length_guard.line(book, target)
+        book, target, per = length_guard.book_numbers(runner.app.engine, runner.store, run["principal"],
+                                                run["project_id"], run["branch_id"])
+        chs = length_guard.chapter_words(runner.app.engine, run["principal"], run["project_id"], run["branch_id"])
+        ln = length_guard.line(book, target, chs, per)  # 📏 the book and each chapter against its share
     except Exception:  # noqa: BLE001
         log.exception("could not measure the book's length")
         return None

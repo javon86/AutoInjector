@@ -113,10 +113,10 @@ async function main() {
   assert(vp.status().lastStartError === '', 'status() reports no managed-start error by default');
 
   console.log('\n== settings round-trip (what the app persists + restores) ==');
-  const want = { enabled: true, endpoint: 'http://127.0.0.1:8299', speakOnAck: false, listenSeconds: 9, voices: { butler: 'en_US-amy', chatgpt: '', claude: 'en_GB-alan', gemini: '' }, micDevice: 'mic-1', speakerDevice: 'spk-2', timeoutMs: 30000, micTarget: 'claude', micSendNow: true, rate: 1.2, browserVoices: { butler: 'Microsoft George', chatgpt: '', claude: '', gemini: 'Microsoft Zira' } };
+  const want = { enabled: true, endpoint: 'http://127.0.0.1:8299', speakOnAck: false, listenSeconds: 9, voices: { butler: 'en_US-amy', chatgpt: '', claude: 'en_GB-alan', gemini: '' }, micDevice: 'mic-1', speakerDevice: 'spk-2', timeoutMs: 30000, micTarget: 'claude', micSendNow: true, rate: 1.2, browserVoices: { butler: 'Microsoft George', chatgpt: '', claude: '', gemini: 'Microsoft Zira' }, engine: 'kokoro', kokoroDevice: 'gpu', kokoroVoices: { butler: 'bm_george', chatgpt: '', claude: 'am_michael', gemini: '' }, python: { cmd: 'py', pre: ['-3.12'] } };
   vp.setSettings(want);
   const saved = JSON.parse(JSON.stringify(vp.getSettings())); // as written to autoinjector-state.json
-  vp.setSettings({ enabled: false, endpoint: '', speakOnAck: true, listenSeconds: 6, voices: { butler: '', chatgpt: '', claude: '', gemini: '' }, micDevice: '', speakerDevice: '', timeoutMs: 60000, micTarget: 'all', micSendNow: false, rate: 1, browserVoices: { butler: '', chatgpt: '', claude: '', gemini: '' } });
+  vp.setSettings({ enabled: false, endpoint: '', speakOnAck: true, listenSeconds: 6, voices: { butler: '', chatgpt: '', claude: '', gemini: '' }, micDevice: '', speakerDevice: '', timeoutMs: 60000, micTarget: 'all', micSendNow: false, rate: 1, browserVoices: { butler: '', chatgpt: '', claude: '', gemini: '' }, engine: 'piper', kokoroDevice: 'cpu', kokoroVoices: { butler: '', chatgpt: '', claude: '', gemini: '' }, python: null });
   vp.setSettings(saved); // as restored on startup
   assert(JSON.stringify(vp.getSettings()) === JSON.stringify(want), 'getSettings() -> JSON -> setSettings() restores every voice setting exactly');
   assert(!Object.keys(saved).some((k) => /key|token|secret|password/i.test(k)), 'the persisted voice settings hold no secret fields');
@@ -160,6 +160,53 @@ async function main() {
     bad.close();
     vp.setSettings({ enabled: false, endpoint: '' });
     vp._setHome(require('os').homedir());
+  }
+
+  console.log('\n== ✨ engine choice: Kokoro when switched on and ready, else piper, else the PC voices ==');
+  {
+    const { startFakeVoiceShim } = require('./fixtures/fake-voice-shim');
+    const H = (o) => Object.assign({ ok: true, tts: true, piper_voices: 2, kokoro_ready: false }, o);
+    const pd = { butler: 'en_GB-alan-medium', chatgpt: 'en_US-lessac-high', claude: 'en_US-ryan-high', gemini: 'en_GB-alba-medium' };
+    const kd = { butler: 'bm_george', chatgpt: 'af_heart', claude: 'am_michael', gemini: 'bf_emma' };
+    vp.setSettings({ engine: 'piper', voices: { claude: '' }, kokoroVoices: { claude: '' }, kokoroDevice: 'cpu' });
+    let pk = vp.pickEngine(H({ kokoro_ready: true }), 'claude', pd, kd);
+    assert(pk.engine === 'piper' && pk.voice === 'en_US-ryan-high', 'Kokoro installed but not switched on -> piper, with the recommended voice');
+    vp.setSettings({ engine: 'kokoro' });
+    pk = vp.pickEngine(H({ kokoro_ready: true }), 'claude', pd, kd);
+    assert(pk.engine === 'kokoro' && pk.kokoroVoice === 'am_michael' && pk.device === 'cpu' && pk.voice === 'en_US-ryan-high', 'switched on + ready -> Kokoro on the processor, its default voice, a piper voice as the fallback');
+    vp.setSettings({ kokoroVoices: { claude: 'bm_fable' }, kokoroDevice: 'gpu' });
+    pk = vp.pickEngine(H({ kokoro_ready: true }), 'claude', pd, kd);
+    assert(pk.kokoroVoice === 'bm_fable' && pk.device === 'gpu', 'the chosen Kokoro voice and the graphics card when picked');
+    vp.setSettings({ kokoroVoices: { claude: 'not a voice!' } });
+    assert(vp.getSettings().kokoroVoices.claude === '', 'a strange Kokoro voice name is never stored');
+    pk = vp.pickEngine(H({ kokoro_ready: false }), 'claude', pd, kd);
+    assert(pk.engine === 'piper' && pk.reason === 'KOKORO_NOT_READY', 'switched on but not ready -> piper');
+    pk = vp.pickEngine(H({ kokoro_ready: false, piper_voices: 0 }), 'claude', pd, kd);
+    assert(pk.engine === 'none', 'neither -> the PC\'s built-in voices');
+    assert(vp.pickEngine({ ok: false }, 'claude', pd, kd).engine === 'none', 'no voice engine running -> the PC\'s built-in voices');
+    vp.setSettings({ engine: 'nonsense', kokoroDevice: 'tpu' });
+    assert(vp.getSettings().engine === 'kokoro' && vp.getSettings().kokoroDevice === 'gpu', 'unknown engine / device values are ignored');
+
+    const shim = await startFakeVoiceShim({ piper: true, kokoro: 'ready' });
+    vp.setSettings({ endpoint: shim.base });
+    let r = await vp.synthesize('Hello there.', { engine: 'kokoro', kokoroVoice: 'bf_emma', device: 'cpu', voice: 'en_GB-alba-medium' });
+    assert(r.ok && r.engine === 'kokoro' && r.voice === 'bf_emma' && r.device === 'cpu', 'synthesize with Kokoro returns its WAV');
+    const c = shim.calls[shim.calls.length - 1];
+    assert(c.engine === 'kokoro' && c.kokoro_voice === 'bf_emma' && c.device === 'cpu' && c.voice === 'en_GB-alba-medium', 'the shim is asked for Kokoro, its voice, the processor, and the piper fallback voice');
+    await shim.close();
+    const shim2 = await startFakeVoiceShim({ piper: true, kokoro: 'fail' });
+    vp.setSettings({ endpoint: shim2.base });
+    r = await vp.synthesize('Hello there.', { engine: 'kokoro', kokoroVoice: 'bf_emma', voice: 'en_GB-alba-medium' });
+    assert(r.ok && r.engine === 'piper' && r.fallbackFrom === 'kokoro' && r.kokoroError === 'KOKORO_FAILED', 'Kokoro breaks -> piper reads and it says so');
+    r = await vp.synthesize('Hello there.', { voice: 'en_GB-alba-medium' });
+    assert(r.ok && r.engine === 'piper' && !shim2.calls[shim2.calls.length - 1].engine, 'a plain request does not ask for Kokoro');
+    await shim2.close();
+    const shim3 = await startFakeVoiceShim({ piper: false, kokoro: 'fail' });
+    vp.setSettings({ endpoint: shim3.base });
+    r = await vp.synthesize('Hello there.', { engine: 'kokoro', kokoroVoice: 'bf_emma' });
+    assert(!r.ok && r.error === 'NO_TTS_MODEL', 'Kokoro and piper both missing -> a failure the page turns into the PC\'s voices');
+    await shim3.close();
+    vp.setSettings({ endpoint: '', engine: 'piper', kokoroDevice: 'cpu', kokoroVoices: { claude: '' } });
   }
 
   console.log('\n== managed mode requires a command ==');
