@@ -1973,3 +1973,26 @@ table.s7-heat { width: auto; }
 .ck-make .row { gap: .5rem; flex-wrap: wrap; }
 .si-note { margin: .3rem 0; overflow-wrap: anywhere; }
 .si-undone { opacity: .75; }
+
+/* ---------------------------------------------------------------- ⏳ the run progress strip (run-strip.js)
+   Inside the top bar (it stays with it), above the AI activity: one line per page while a ⚡ run works, waits or is
+   paused, a thin bar under it (% of the estimated total). It wraps on a phone, never scrolls sideways. */
+.run-strip { flex: 1 0 100%; order: 98; min-width: 0; margin: 2px 0 0; }
+.run-strip[hidden] { display: none; }
+.rs-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.rs-main { flex: 1 1 auto; min-width: 0; text-align: left; font: inherit; font-size: .88rem; color: var(--top-text);
+  background: transparent; border: 1px solid transparent; border-radius: var(--radius); padding: 2px 6px; cursor: pointer; }
+.rs-main:hover { border-color: rgba(255, 255, 255, .38); background: rgba(255, 255, 255, .06); }
+.rs-text { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rs-wait { font-weight: 700; color: var(--hazard); }
+.rs-left { font-weight: 700; }
+.rs-more, .rs-x { flex: none; font: inherit; font-size: .8rem; padding: 1px 8px; border-radius: 999px; cursor: pointer;
+  color: var(--top-text); background: rgba(255, 255, 255, .08); border: 1px solid rgba(255, 255, 255, .38); }
+.rs-bar { height: 4px; margin: 2px 6px 0; border-radius: 2px; background: rgba(255, 255, 255, .18); overflow: hidden; }
+.rs-fill { height: 100%; background: var(--hazard); transition: width .6s ease; }
+.run-strip[data-tone="warn"] .rs-fill { background: var(--warn-line); }
+.run-strip[data-tone="ok"] .rs-fill { background: var(--ok); }
+@media (max-width: 800px) {
+  .rs-text { white-space: normal; overflow-wrap: anywhere; }
+  .rs-minor { display: none; }
+}

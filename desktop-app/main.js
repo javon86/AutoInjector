@@ -9900,6 +9900,9 @@ function akoweStatusSnapshot(opts) {
   if (snap.enabled || bfApp.userAsked || (opts && opts.panelOpen)) akoweAppCheckSoon();
   const bfb = snap.akowe || {};
   snap.run = (snap.enabled || bfApp.userAsked || (opts && opts.panelOpen)) && (akoweServerBase() || bfb.run) ? akoweRunWatch.peek(bfb.project && bfb.project.id, bfb.run) : null;
+  // ⏳ the title bar's run progress (run-strip-ui.js) shows even with the panel closed: the run the run guard read
+  // (every RUN_GUARD_MS, from Akọwe's own API or its push), else the panel's
+  snap.runStrip = snap.run || runGuardState.run || null;
   snap.app = { running: bfApp.running, base: bfApp.base, version: bfApp.version, checkedAt: bfApp.checkedAt, launcherAvailable: !!akoweLauncher() };
   snap.server = akoweServerPublicStatus();
   snap.health = akoweHealth(snap);

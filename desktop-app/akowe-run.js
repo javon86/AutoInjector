@@ -71,6 +71,28 @@ function noticeOf(n) {
 }
 
 /**
+ * ⏳ The run's clock (akowe/run_clock.py, Akọwe's run status API and status push): the start estimate, the working
+ * time so far, the time left, the finish time, the step "12 of 19 — Writing chapter 2", since when it waits for the
+ * user, and (finished) the real time. Bounded numbers and plain words, or null (an older Akọwe sends none).
+ */
+function progressOf(run) {
+  if (!run || typeof run !== 'object') return null;
+  // ISO times from Akọwe's API; epoch ms from the bridge (it turns updated_at / finished_at into numbers)
+  const iso = (v) => {
+    if (typeof v === 'number' && Number.isFinite(v) && v > 0) { try { return new Date(v).toISOString().replace(/\.\d+Z$/, 'Z'); } catch (_) { return null; } }
+    return /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/.test(str(v, 40)) ? str(v, 40) : null;
+  };
+  const p = {
+    total_estimate_s: num(run.total_estimate_s), elapsed_active_s: num(run.elapsed_active_s), left_s: num(run.left_s),
+    finish_at: iso(run.finish_at), percent: num(run.percent) == null ? null : Math.min(100, num(run.percent)),
+    step_index: num(run.step_index), step_total: num(run.step_total), step_label: str(run.step_label, 80),
+    waiting_since: iso(run.waiting_since), actual_s: num(run.actual_s), started_at: iso(run.started_at),
+    finished_at: iso(run.finished_at), run_url: /^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?\//.test(str(run.run_url, 300)) ? str(run.run_url, 300) : null,
+  };
+  return p.total_estimate_s == null && p.left_s == null && p.step_index == null && p.actual_s == null ? null : p;
+}
+
+/**
  * One run (Akọwe's public run object, or the `run` a newer Akọwe pushes) -> what the panel shows:
  * { id, project_id, title, status, state, word, text, tone, done, total, at, stepTitle, resumable, needsDecision,
  *   live, phase }
@@ -115,6 +137,7 @@ function summarizeRun(run) {
     updated_at: str(run.updated_at || run.finished_at || run.started_at, 40) || null,
     alert: ['needs_you', 'paused', 'interrupted', 'problem'].includes(state) ? alertOf(run.alert) : null,
     notice: noticeOf(run.notice),
+    progress: progressOf(run),
   };
 }
 
@@ -185,4 +208,4 @@ function createRunWatch(opts = {}) {
   return { peek, refresh, _state: () => ({ last, lastAt, unreachable }) };
 }
 
-module.exports = { summarizeRun, pickRun, stepsOf, createRunWatch, alertOf, noticeOf };
+module.exports = { summarizeRun, pickRun, stepsOf, createRunWatch, alertOf, noticeOf, progressOf };

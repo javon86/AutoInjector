@@ -60,6 +60,7 @@ from . import planned as planned_mod
 from . import alerts as alerts_mod
 from . import protagonist
 from . import review_loop
+from . import run_clock
 from . import scenes as scenes_mod
 from . import story_choices
 from . import story_roles
@@ -745,6 +746,10 @@ class AutoBookService(_Runner):
             steps.append(s)
         out["steps"] = steps
         out["events"] = (run.get("events") or [])[-60:]
+        try:  # ⏳ the progress strip: time left against the start estimate, the step, the finish time (run_clock.py)
+            out.update(run_clock.progress(run, out["alive"], out["state"]))
+        except Exception:  # noqa: BLE001 - display only
+            log.exception("could not add the run's progress")
         try:  # ⏱ P28: calls and minutes of this run, per AI and per step (numbers only)
             out["costs"] = costs_mod.run_costs(run, getattr(self.app.review, "slot_label", None))
         except Exception:  # noqa: BLE001 - display only
@@ -1302,6 +1307,8 @@ class AutoBookService(_Runner):
         self._tl.engine, self._tl.assist, self._tl.review = self._services(run)
         self._tl.run_id = run_id
         run["status"] = "running"
+        run_clock.clock_start(run)  # ⏳ the run's working clock (the author's waiting time is never counted)
+        run_clock.plan_run(self.app, run)  # ⏳ the plan's estimate, kept on the run once
         self.save(run)
         health = self.app.engine.providers.health
         health.set_listener(lambda info: self.on_failover(run, info))
@@ -1335,6 +1342,7 @@ class AutoBookService(_Runner):
                 st.update(state="running", started_at=st.get("started_at") or now_iso(), finished_at=None,
                           problem=None, message="Working…")
                 run["phase"] = f"{st['title']}…"
+                run_clock.step_start(run, st)
                 self.refresh_ais(run)
                 self.save(run)
                 self._flush_notes_due(run, st)  # H14: the checks an "approve anyway" skipped, as notes
@@ -1345,6 +1353,7 @@ class AutoBookService(_Runner):
                                        steps=len(STEP_IDS), step_title=st["title"]):
                     getattr(self, f"_s_{sid}")(run, st)
                 st.update(state="done", finished_at=now_iso())
+                run_clock.step_done(run, st)
                 if not st.get("message") or st["message"] == "Working…":
                     st["message"] = "Done"
                 self.event(run, "done", f"{st['title']}: {st['message']}", step=sid)
@@ -1357,6 +1366,7 @@ class AutoBookService(_Runner):
             from . import claude_code_speed  # noqa: PLC0415 - 🤖 Step 2: the background extras (capped wait)
             claude_code_speed.finish(self, run)
             self.save(run)
+            run_clock.finish(run)  # ⏳ the real working time beside the estimate (the next estimate learns from it)
             run.update(status="done", finished_at=now_iso(), current=None, waiting=None, pause_reason=None,
                        phase="Your book is made — download it below")
             if (run.get("problem") or {}).get("severity") != "warning":
@@ -1418,6 +1428,9 @@ class AutoBookService(_Runner):
                                       "message": f"Akọwe hit an unexpected problem ({type(exc).__name__}).",
                                       "fix": "Press 🔁 Try again. If it keeps happening, use 📋 Copy diagnostics."})
         finally:
+            if (run.get("clock") or {}).get("since"):  # ⏳ the run stopped working: its clock stops too
+                run_clock.clock_stop(run)
+                self.save(run)
             health.set_listener(None)
             self._tl.run_id = None
             self._tl.engine = self._tl.assist = self._tl.review = None

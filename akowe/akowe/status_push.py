@@ -11,7 +11,9 @@ summary of where the most recently opened book stands to ``POST <bridge_url>/v1/
      "approvals": {"count", "items": [{"op", "set", "title"}] (max 20), "url"},
      "checklist": [{"id", "title", "set", "state"}], "done", "total", "words": {"total", "target"},
      "run": {"id", "title", "state", "state_words", "status", "needs_you", "needs_decision", "steps_done",
-             "steps_total", "phase", "problem", "updated_at", "finished_at", "url",
+             "steps_total", "phase", "problem", "updated_at", "finished_at", "url", "run_url", "started_at",
+             ⏳ "total_estimate_s", "elapsed_active_s", "left_s", "finish_at", "percent", "step_index", "step_total",
+             "step_label", "waiting_since", "actual_s" (run_clock.py: working time only, numbers),
              "alert": {"category", "icon", "label", "what", "wrong", "why", "next", "choices", "change", "key",
                        "code"} | null} | null, "updated_at"}
 
@@ -99,6 +101,9 @@ def build_summary(app, base_url: str) -> dict:
 
 
 LIVE_STATES = ("working", "waiting", "pausing", "needs_decision")
+# ⏳ run_clock.py: the progress strip's numbers (AutoInjector's top bar shows them)
+PROGRESS_KEYS = ("total_estimate_s", "elapsed_active_s", "left_s", "finish_at", "percent", "step_index", "step_total",
+                 "waiting_since", "actual_s")
 
 
 def _with_schedule(app, body: dict, base: str) -> dict:
@@ -136,7 +141,9 @@ def run_brief(app, pid: str, url: str) -> dict | None:
                 "needs_decision": p["needs_decision"], "steps_done": p["steps_done"], "steps_total": p["steps_total"],
                 "phase": str(p.get("phase") or "")[:200], "problem": str(prob.get("message") or "")[:300] or None,
                 "updated_at": p.get("updated_at"), "finished_at": p.get("finished_at"), "url": url,
-                "alert": alert_brief(p.get("alert")), "notice": _notice(run)}
+                "alert": alert_brief(p.get("alert")), "notice": _notice(run),
+                "started_at": p.get("started_at"), "run_url": url.split("#", 1)[0] + "#/run/" + str(p["id"]),
+                **{k: p.get(k) for k in PROGRESS_KEYS}, "step_label": str(p.get("step_label") or "")[:80]}
     except Exception:  # noqa: BLE001 - status is a convenience
         log.debug("could not read the book's run for the status push", exc_info=True)
         return None

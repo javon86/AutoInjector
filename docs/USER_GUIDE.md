@@ -137,6 +137,30 @@ secret away or hint at it too hard. This costs no extra AI work.
   yourself, AutoInjector waits and does it a bit later. To switch it off: 📖 Akọwe panel → untick **and for every
   new book**.
 
+### ⏳ How long is my book going to take?
+
+Before you press Start, the ⚡ screen shows an estimate ("about 4–6 hours"). Once the run starts, Akọwe keeps that
+estimate and shows where you are in it **at the top of every page**, in one line:
+
+> 📖 “The Salt Road” · Step 12 of 19 — Writing chapter 2 of 10 · ⏳ about 1 h 40 m left (estimate at start: 4 h 10 m)
+> · started 9:21 · should finish around 11:05
+
+with a thin bar under it (how much of the estimated time is done). Click the line to open the run window.
+
+- **The time left gets better as the run goes.** It counts every step still to do — the chapters and also the end
+  steps (✍ chapter 1 rewritten last, 🎯 the weakest scenes, 🔁 the final read, beta readers, 🩺 the story doctor, 📏
+  the chapter polish). If your AIs are faster or slower than expected, the time left follows how fast this run really
+  went (at most twice as long, or half).
+- **Waiting for you does not count.** When the run waits for you (a decision, a pause, Akọwe was closed), the line says
+  so plainly — "⏸ waiting for you since 9:33 — the clock is paused" — and the clock starts again when you answer.
+  Waiting for an AI's usage limit does count: it is part of making the book.
+- **More than one run?** The line shows the one that is working, with "+1 more" to see the next.
+- **When it is finished** the line says, for a few hours, "✔ “The Salt Road” finished in 5 h 2 m (estimated 4 h 10 m)"
+  (✕ hides it). Akọwe remembers how long your runs really took, so the next estimate is closer.
+- **In AutoInjector** the same line sits in the title bar, next to 💾 / 📂 / ❓ Help (shorter on a smaller window:
+  "⏳ 1 h 40 m left · ~11:05 · 12/19", then "⏳ 1 h 40 m"). Hover it for the whole line; click it to open the run in
+  the 📖 Akọwe tab.
+
 ### When your book needs you
 
 When a run stops for you, the run window, the ⚡ button at the top, the desktop notification and Alfred all say the

@@ -4479,6 +4479,18 @@ function akoweRender(s) {
   bf.actionProblems.delete("status");
   bfRenderAll();
   akoweRenderUsing(s);
+  akoweRenderRunStrip(s);
+}
+// ⏳ the book run's progress in the title bar (run-strip-ui.js): title, step, time left, finish time; a click opens
+// the run window in the 📖 Akọwe tab (the same "open an Akọwe page" as the panel's buttons)
+function akoweRenderRunStrip(s) {
+  const btn = el("btn-run-strip");
+  const ui = window.runStripUi;
+  if (!btn || !ui) return;
+  try {
+    ui.wire(btn, (url) => bfOpen(url || bfOpenFor(bf.snap || {}), "the book run", "open"));
+    ui.render(btn, s.runStrip || s.run || null, { base: bfOpenFor(s) });
+  } catch (e) { bfReportUiError(e, "run progress"); }
 }
 // PR #123: "📖 Akọwe is using this AI" on each AI card while a bridge request waits for that AI.
 // ---- ⬇ files the AIs give you to download (main.js / ai-downloads.js broadcast "ai-download") ----

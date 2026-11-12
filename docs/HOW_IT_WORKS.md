@@ -1099,6 +1099,27 @@ All four are on the ⚡ **AI writes the whole book** screen (code: `akowe/akowe/
   answers of the optional steps. The usage limits are rough public guesses (Claude ~40 long messages per 5 hours,
   ChatGPT ~80 per 3 hours, Gemini ~100 a day) until an AI really hits its limit on this PC: then the number of
   answers it gave before the hit is used instead. It is always labelled an estimate.
+- **⏳ The run's clock and the progress strip** (`akowe/akowe/run_clock.py`, screen: `web/run-strip.js`; AutoInjector:
+  `desktop-app/run-strip-ui.js`). When a run starts, it keeps this estimate on the run (`run["forecast"]`: the total
+  and seconds per run step — every option row is put on the step that does it: the checkers, first pages, chapter
+  polish and stand-in on the chapters, the story doctor on the outline, the writers' room on the plot, the voice
+  check on the character sheets, ✍ chapter 1 last, 🎯/🔁 the improve pass, the final reads and the beta readers on
+  their own steps, pictures and usage-limit waits too). A **working clock** (`run["clock"]`) counts only the time the
+  run works: it stops when the run stops (paused, a decision, a problem, cancelled, finished) and starts again on
+  Resume, so waiting for the author never counts (waiting for an AI does). Each step keeps its own working time.
+  The run status API (`GET /api/autobook`, `GET /api/autobook/<id>`) adds `total_estimate_s`, `elapsed_active_s`,
+  `left_s`, `finish_at`, `percent` (of the estimated total), `step_index` / `step_total` (the steps this run really
+  does), `step_label` ("Writing chapter 2 of 10"), `waiting_since`, `speed_ratio` and, when finished, `actual_s`;
+  `r.eta` (P15, chapters only) stays as it was. **Time left** = the estimated time of the steps still to do × this
+  run's own speed (measured ÷ estimated for its finished steps and chapters, clamped 0.5–2×, trusted fully once about
+  a quarter of the estimated work is done); the chapters use their measured average once one is written. The status
+  push to AutoInjector carries the same numbers plus `run_url` (`#/run/<id>`, which opens the run window). When the
+  run finishes it keeps `actual_s` beside the estimate; the next estimate multiplies its working time by the median
+  "real ÷ estimated" of the last 5 finished runs (only runs of at least 5 minutes, not continued books; 0.6–1.8×),
+  and says so. The page shows one line at the top of every page (several runs: "+N more"; a finished run for 3
+  hours, ✕ hides it); AutoInjector shows it in the title bar (a short line under 1500 px, a tiny one under 1200 px;
+  the 💾 / 📂 words give way first) from the run it already reads (`akowe-run.js` `progress`, `snap.runStrip` in
+  main.js). Logs: numbers only.
 - **📊 The usage meter** (`GET /api/usage-meter`) shows one row per AI, on the setup screen, the run window and the
   countdown: "used today: 34 answers · last limit hit at 3:10 PM · resets ~8:10 PM" and a colour (🔴 at its limit
   now, 🟠 hit a limit in the last day or used most of its usual allowance, 🟢 fine, ⚪ not connected). The AI sites do

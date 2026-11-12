@@ -573,6 +573,26 @@
     #ex-preview { background:#0a0d11; border:1px solid #232a33; border-radius:8px; padding:8px 9px; font-size:11px; line-height:1.35; max-height:210px; overflow:auto; white-space:pre-wrap; word-break:break-word; margin:0; }
     #extract-modal .foot { display:flex; align-items:center; gap:8px; margin-top:10px; flex-wrap:wrap; }
     #extract-modal .foot .spacer { flex:1; }
+    /* ⏳ the book run's progress in the title bar (run-strip-ui.js): the only title-bar item that shrinks (ellipsis),
+       a shorter line under 1500 px, the whole line in its tooltip — never sideways scrolling */
+    #window-titlebar #btn-run-strip { position:relative; flex:0 1 auto; min-width:0; max-width:560px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; font-size:12px; font-weight:500; padding:3px 9px 5px; margin-right:6px; border-radius:7px; border:1px solid #3a5a8a; background:#121a26; color:#dbe7ff; cursor:pointer; text-align:left; }
+    #window-titlebar #btn-run-strip[hidden] { display:none; }
+    #window-titlebar #btn-run-strip:hover { border-color:#5b8ad0; }
+    #window-titlebar #btn-run-strip[data-tone="warn"] { border-color:#8a6a20; background:#231c0d; color:#f3dfa6; }
+    #window-titlebar #btn-run-strip[data-tone="ok"] { border-color:#3f6b4c; background:#122017; color:#c9f5d6; }
+    #btn-run-strip .rsx-long, #btn-run-strip .rsx-short, #btn-run-strip .rsx-tiny { display:block; overflow:hidden; text-overflow:ellipsis; }
+    #btn-run-strip .rsx-short, #btn-run-strip .rsx-tiny { display:none; }
+    #btn-run-strip .rsx-bar { position:absolute; left:6px; right:6px; bottom:2px; height:2px; border-radius:1px; background:rgba(255,255,255,.14); overflow:hidden; }
+    #btn-run-strip .rsx-fill { display:block; height:100%; width:0; background:#5b8ad0; transition:width .6s ease; }
+    #btn-run-strip[data-tone="warn"] .rsx-fill { background:#d9a133; }
+    #btn-run-strip[data-tone="ok"] .rsx-fill { background:#57c07a; }
+    @media (max-width:1500px) { #btn-run-strip .rsx-long { display:none; } #btn-run-strip .rsx-short { display:block; } #window-titlebar #btn-run-strip { max-width:300px; flex-shrink:0; }
+      /* the run's line needs the room more than the words "Save state" / "Load state" (their icons stay) */
+      #window-titlebar:has(#btn-run-strip:not([hidden])) .ss-lbl { display:none; } }
+    @media (max-width:1200px) { #btn-run-strip .rsx-short { display:none !important; } #btn-run-strip .rsx-tiny { display:block; }
+      #window-titlebar:has(#btn-run-strip:not([hidden])) .wt-name { display:none; } }
+    #window-titlebar:has(#voice-heard:not([hidden])) #btn-run-strip .rsx-long { display:none; }
+    #window-titlebar:has(#voice-heard:not([hidden])) #btn-run-strip .rsx-short { display:block; }
     /* 💾 Save state / 📂 Load state (save-state-ui.js) */
     #window-titlebar .ss-top { flex-shrink:0; white-space:nowrap; font-size:12px; padding:3px 9px; margin-right:6px; border-radius:7px; border:1px solid #2a2a2a; background:#151515; color:#cfcfcf; cursor:pointer; }
     #window-titlebar .ss-top:hover { border-color:#3f6b4c; }
@@ -1555,6 +1575,8 @@
     <button id="btn-alfred-switch" type="button" role="switch" aria-checked="false" title="Alfred, your assistant who can use everything in the app (off by default)" style="font-size:12px;padding:3px 10px;margin-right:8px;border-radius:7px;border:1px solid #2a2a2a;background:#151515;color:#cfcfcf;cursor:pointer;">🎩 Alfred: Off</button>
     <!-- ✅ EASE: ❓ Help — Setup checklist · Something's wrong? · User guide · Replay tours (ease-ui.js); after the 🎩 switch, so the 🎤 stays beside it -->
     <!-- 💾 / 📂 save where you are (the three chats + the set-up) and come back to it later (save-state-ui.js) -->
+    <!-- ⏳ the book run's progress: title, step, time left, finish time (run-strip-ui.js); click → the run in Akọwe -->
+    <button id="btn-run-strip" type="button" data-testid="run-strip" hidden><span class="rsx-long"></span><span class="rsx-short"></span><span class="rsx-tiny"></span><span class="rsx-bar" aria-hidden="true"><span class="rsx-fill"></span></span></button>
     <button id="btn-save-state" type="button" class="ss-top" title="Save state: the chat each AI pane is on, a copy of their recent replies, and how everything is set up — under a name you choose, on this PC" aria-label="Save state">💾<span class="ss-lbl"> Save state</span></button>
     <button id="btn-load-state" type="button" class="ss-top" title="Load state: pick a save and all three AI panes go back to their saved chats, with everything else put back" aria-label="Load state">📂<span class="ss-lbl"> Load state</span></button>
     <button id="btn-ease-help" type="button" aria-haspopup="menu" title="Setup checklist, Something's wrong?, the user guide and the guided tours">❓ Help</button>
@@ -3058,6 +3080,7 @@
   <script src="llm-hardware.js"></script><!-- B6 fit ratings (window.LlmHardware), needed by llm-models-ui.js -->
   <script src="llm-models-ui.js"></script><!-- B6 🔎 model finder (#llm-models) -->
   <script src="alfred-persona-ui.js"></script><!-- B6 🎩 personality + saved set-ups (#alfred-persona) -->
+  <script src="run-strip-ui.js"></script><!-- ⏳ the book run's progress in the title bar (akowe-run.js progress) -->
   <script src="save-state-ui.js"></script><!-- 💾 Save state / 📂 Load state (save-state.js in main) -->
   <script src="ease-ui.js"></script><!-- ✅ EASE: Setup checklist, Something's wrong?, guided tours, ❓ Help (ease-main.js) -->
 </body>

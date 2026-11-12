@@ -404,6 +404,10 @@ def estimate(app, body: dict | None) -> dict:
     if helpers:
         work_min -= 0.5 * n * per_call / 60.0
     work_min = max(1.0, work_min)
+    # ⏳ run_clock.py: how long the last finished runs really worked against their estimate (0.6–1.8×)
+    from . import run_clock  # noqa: PLC0415
+    learned = run_clock.learned_ratio(app)
+    work_min = max(1.0, work_min * learned["ratio"])
     # ---- limits
     limits, wait_min = [], 0.0
     out_ais = []
@@ -460,9 +464,11 @@ def estimate(app, body: dict | None) -> dict:
         "minutes": {"expected": int(round(exp)), "low": max(1, int(math.floor(lo))), "high": max(1, int(math.ceil(hi)))},
         "time_words": duration_words(lo, hi), "steps": rows, "options": opts, "ais": out_ais, "ais_assumed": assumed,
         "helpers_calls": int(round(helpers)), "limits": limits, "will_hit_limit": bool(limits),
-        "wait_minutes": int(round(wait_min)), "is_estimate": True,
+        "wait_minutes": int(round(wait_min)), "is_estimate": True, "learned": learned,
         "about": base["about"] + (" Per AI: from your earlier runs." if cal["shares"] else "") +
-        " Usage limits: rough guesses (the AI sites do not publish them), or what this computer saw before.",
+        " Usage limits: rough guesses (the AI sites do not publish them), or what this computer saw before." +
+        (f" Corrected by your last {learned['runs']} finished run(s): they took about {learned['ratio']:.1f}× "
+         "their estimate." if learned["runs"] and learned["ratio"] != 1.0 else ""),
     })
     out.update(pen_name_check(app, body))
     return out
