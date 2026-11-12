@@ -186,7 +186,7 @@ def test_a_run_with_a_panel_of_three(tmp_path):
     # every reader saw its own persona and never the plan
     ctxs = fake.prompts["beta"]
     assert [c[1]["reader"]["who"] for c in ctxs] == ["typical", "picky", "casual"]
-    assert all(set(c[1]) == {"book", "reader", "chapters"} for c in ctxs)
+    assert all(set(c[1]) <= {"book", "reader", "chapters", "premise"} for c in ctxs)   # 🔮 the premise, no plan
     cmp_ = r["comparison"]
     agree = {(g["kind"], g["chapter"]): g for g in cmp_["agree"]}
     assert agree[("confused", 1)]["count"] == 3 and agree[("confused", 1)]["same_moment"]

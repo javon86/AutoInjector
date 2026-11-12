@@ -803,7 +803,16 @@ to a minute), so the run knows which AIs work.
     first; when the writer must read too, it is named "(wrote most of the book)" and counts half when readers agree.
     Every quote is checked against the book again; one not found word for word is marked and never used as evidence.
     An AI that is not working is skipped with a note. If the run is paused, the panel carries on with the readers
-    still to read. **One reader is the default** (the Make-a-book screen's "How many" starts at 1 reader); choose 2
+    still to read. **🔮 Only real secrets count as "a twist guessed too early"** (`akowe/akowe/beta_secrets.py`; setting
+    `beta_premise_guard`, on by default; no AI): in "The Salt Tuner" all three readers "guessed" in chapter 1 what the
+    premise says on the back cover. Each reader now gets the book's premise (the B01 premise, dramatic question and
+    concept, else the idea / blurb) with the rule "what the premise establishes is known from the start — never a
+    guess". The readers still never see the outline, the story rules or the reveal plan (they must read blind), so
+    Akọwe itself matches every guess against the book's protected secrets (story-rules mysteries, the reveal plan) and
+    the premise: a guess that clearly restates the premise (≥ 2 and ≥ 70 % of its content words) and matches no
+    secret better never counts as a twist guessed early — not in a reader's findings, the panel's agreement and top
+    fixes, nor the 🔁 improve pass / 🎯 weakest-scenes ranking (stored reads are checked again there). A guess that
+    matches neither still counts. **One reader is the default** (the Make-a-book screen's "How many" starts at 1 reader); choose 2
     or 3 there for a panel. The beta readers read BEFORE chapter 1 is rewritten last and before the improve pass on
     purpose (both use their notes); when either pass changed the book, they read the final book once more in the
     🔁 "Read the final book again" step (below), so the report is about the finished book.
@@ -915,6 +924,23 @@ to a minute), so the run knows which AIs work.
     a round whose reworked chapters (or 🎯 rewritten scenes, each already at most 10 % longer) would together push
     the book past 115 % leaves out the chapters that add the most words (a scene left out this way says "it would
     make the book longer than its length allows").
+    **Chapters near their share from the start.** The writer of every chapter is told its share of the book (book
+    target ÷ chapters) and the range it must stay within, ±10 % ("about 1,333 words — between 1,200 and 1,466 words,
+    never more than 1,466"; `lengths.rule`). When a fresh draft is still more than 15 % over its share, the 📏 chapter
+    polish (`chapter_polish.py`) trims it in the same one polish it already makes: the longest narration paragraphs
+    (never dialogue) are flagged "cut repeated explanation, restated feelings and summary — keep every plot beat";
+    a trim that made the chapter at least 3 % shorter counts as a gain, it may shrink the chapter down to 90 % of its
+    share, and dialogue, names and numbers stay checked as always (run setting `chapter_trim`, on by default; no extra
+    AI answer for a chapter that is polished anyway, at most one for a chapter that is only too long). The report's
+    length line names each chapter against its share: "📏 Length: 4,560 words (114% of the 4,000-word target) ·
+    chapters against their ~1,333-word share: ch1 1,300 (98%), ch2 1,600 (120% ⚠️), …".
+    **🎯 Weakest scenes at the cap.** "The Salt Tuner" was at 114 % of its target, so all three rewritten scenes were
+    refused ("longer than the word budget, it would make the book longer than its length allows"). Now each scene's
+    budget is what the book has left (`weak_scenes.scene_max`): at the cap "the same length or shorter", with the exact
+    most words told to the writer. A scene is accepted while the BOOK stays within 115 % after all the scenes accepted
+    before it (a scene that got shorter makes room for the next). A rewrite that comes back too long gets ONE short
+    extra request — "cut it to at most N words: drop repeated explanation, keep every line of dialogue and every plot
+    beat" — before it is refused (run setting `scene_cut_retry`, on by default; counted in the run forecast).
 14. **📈 Quality history** (code: `akowe/akowe/quality_history.py`): when a run finishes, the report's numbers — the
     overall score, the median of each whole-book dimension, the editor's average per category, the "sounds like a
     person" score, the reading grade, the beta average, fixed habit codes (`triad`, `simile`, `word:went`, `clock`,

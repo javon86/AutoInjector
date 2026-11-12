@@ -363,6 +363,13 @@ class BookFakeAI:
 
     # ------------------------------------------------------------------ answers
     def _answer(self, ctx, props, schema):
+        if "rewritten_scene" in props and ctx.get("akowe_task") == "weak_scene_cut":  # 📏 cut back to its budget
+            with self.lock:
+                scripted = getattr(self, "scene_cut_script", None)
+                scripted = scripted.pop(0) if scripted else None
+            if scripted is not None:
+                return "weak_scene_cut", scripted(ctx) if callable(scripted) else copy.deepcopy(scripted)
+            return "weak_scene_cut", {"rewritten_scene": (ctx.get("scene") or {}).get("text") or ""}
         if "rewritten_scene" in props:  # 🎯 one of the weakest scenes rewritten
             with self.lock:
                 scripted = self.weak_scene_script.pop(0) if self.weak_scene_script else None
