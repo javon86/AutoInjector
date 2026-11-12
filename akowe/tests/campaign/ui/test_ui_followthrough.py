@@ -266,6 +266,8 @@ def test_profile_dialog_validation_and_persistence(make_context, ai_server):
 
 def test_profile_dialog_refuses_an_empty_title(make_context, ai_server):
     pid = autobook(ai_server)
+    # the title the run gave the book (🔁 "kept fresh" may rename a title word other test books on this shelf used)
+    before = ai_server.api("GET", f"/projects/{pid}/profile")["title"]
     ctx = make_context()
     page = open_app(ctx, ai_server, f"#/p/{pid}/main/book")
     # empty title: refused, the problem is shown at the title field, the dialog stays open
@@ -278,7 +280,7 @@ def test_profile_dialog_refuses_an_empty_title(make_context, ai_server):
     if dlg.count():
         txt = dlg.inner_text()
         assert dlg.locator("input[id$='-title'][aria-invalid=true]").count() or "title" in txt.lower(), txt
-    assert profile["title"] == "The Keeper of Gullhaven", "an empty title was saved"
+    assert before and profile["title"] == before, "an empty title was saved"
 
 
 def test_retitled_finished_book_is_not_downloaded_with_stale_metadata(make_context, ai_server, tmp_path):
