@@ -588,7 +588,10 @@
     #btn-run-strip[data-tone="ok"] .rsx-fill { background:#57c07a; }
     @media (max-width:1500px) { #btn-run-strip .rsx-long { display:none; } #btn-run-strip .rsx-short { display:block; } #window-titlebar #btn-run-strip { max-width:300px; flex-shrink:0; }
       /* the run's line needs the room more than the words "Save state" / "Load state" (their icons stay) */
-      #window-titlebar:has(#btn-run-strip:not([hidden])) .ss-lbl { display:none; } }
+      #window-titlebar:has(#btn-run-strip:not([hidden])) .ss-lbl { display:none; }
+      /* and the window's name gives way first (it shrinks with "…" instead of pushing 💾 / 📂 / ❓ Help off the edge —
+         fonts differ a few pixels between PCs); the run's short line keeps its full width */
+      #window-titlebar:has(#btn-run-strip:not([hidden])) .wt-name { flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; } }
     @media (max-width:1200px) { #btn-run-strip .rsx-short { display:none !important; } #btn-run-strip .rsx-tiny { display:block; }
       #window-titlebar:has(#btn-run-strip:not([hidden])) .wt-name { display:none; } }
     #window-titlebar:has(#voice-heard:not([hidden])) #btn-run-strip .rsx-long { display:none; }
