@@ -291,19 +291,26 @@ def child_env(base=None) -> dict:
     return env
 
 
-def run_process(cmd: list[str], stdin_text: str, *, timeout_s: float, cancel=None, env=None) -> tuple[int, str, str]:
+def run_process(cmd: list[str], stdin_text: str, *, timeout_s: float, cancel=None, env=None,
+                files=None, on_start=None) -> tuple[int, str, str]:
     """Run ``cmd`` in a new empty temp folder with ``stdin_text`` on stdin. (exit code, stdout, stderr). Raises
     CCError TIMEOUT (tree killed), a cancel (CCError CANCELLED as UPSTREAM_UNAVAILABLE, tree killed) or
-    not_installed."""
+    not_installed. ``files``: copied into the folder first (⌨ command-line mode: a picture to look at); ``cmd``
+    may name the folder as ``{work}``. ``on_start(proc)``: told the process once it runs (so it can be stopped)."""
     work = tempfile.mkdtemp(prefix="akowe-cc-")
     env = child_env() if env is None else env
     proc = None
     try:
+        for f in files or ():
+            shutil.copy2(f, Path(work) / Path(f).name)
+        cmd = [a.replace("{work}", work) for a in cmd]
         try:
             proc = _popen(cmd, work, env)
         except (FileNotFoundError, PermissionError, OSError) as exc:
             raise CCError("CAPABILITY_UNAVAILABLE", STATE_WORDS["not_installed"].format(url=INSTALL_URL),
                           state="not_installed", detail=type(exc).__name__) from None
+        if on_start is not None:
+            on_start(proc)
         deadline = time.monotonic() + timeout_s
         pending = stdin_text
         while True:

@@ -1229,6 +1229,23 @@
 
     /* ---------- body ---------- */
     #akowe-body { display:flex; flex-direction:column; gap:6px; margin-top:6px; }
+    /* ⌨ command-line AIs (cli-mode-ui.js) */
+    #cli-card .cli-about { font-size:12px; opacity:.8; margin:2px 0 6px; }
+    #cli-card .cli-row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:12px; padding:2px 0; }
+    #cli-card .cli-row[data-tone="warn"] .cli-note { color:#f3c66b; }
+    #cli-card .cli-row[data-tone="ok"] .cli-note { color:#8fd18f; }
+    #cli-card .cli-slot { min-width:110px; font-weight:600; }
+    #cli-card .cli-note { opacity:.9; overflow-wrap:anywhere; }
+    #cli-card .cli-actions { display:flex; gap:6px; flex-wrap:wrap; margin:6px 0; }
+    #cli-card .cli-msg { font-size:12px; margin:2px 0; min-height:1em; }
+    #cli-card .cli-ex { margin:4px 0 0; padding-left:18px; max-height:260px; overflow:auto; font-size:12px; }
+    #cli-card .cli-ex-head { opacity:.75; }
+    #cli-card .cli-ex-answer { white-space:pre-wrap; overflow-wrap:anywhere; max-height:120px; overflow:auto; margin:2px 0 6px; padding:4px 6px; background:#111; border-radius:5px; font-size:11px; }
+    .cli-pane-card { margin:18px; padding:14px 16px; background:#171717; border:1px solid #2a2a2a; border-radius:10px; line-height:1.5; font-size:13px; }
+    .cli-pane-card[data-tone="warn"] { border-color:#6b5520; }
+    .cli-pane-card h3 { margin:0 0 6px; font-size:15px; }
+    .cli-pane-card p { margin:0 0 6px; }
+    .cli-pane-card .cli-pane-hint { font-size:12px; opacity:.75; }
     .bf-line { display:flex; flex-wrap:wrap; align-items:center; gap:4px 10px; padding:4px 9px; border-radius:8px; font-size:12.5px; background:#14141f; border:1px solid var(--bf-line); border-left:3px solid var(--bf-tone); color:#dcdaf0; }
     .bf-line[data-tone="ok"] { border-left-color:var(--bf-ok); } .bf-line[data-tone="warn"] { border-left-color:var(--bf-wait); background:#1c1810; }
     .bf-line[data-tone="err"] { border-left-color:var(--bf-err); background:#1f1214; } .bf-line[data-tone="work"] { border-left-color:var(--bf-work); }
@@ -3080,6 +3097,7 @@
   <script src="llm-hardware.js"></script><!-- B6 fit ratings (window.LlmHardware), needed by llm-models-ui.js -->
   <script src="llm-models-ui.js"></script><!-- B6 🔎 model finder (#llm-models) -->
   <script src="alfred-persona-ui.js"></script><!-- B6 🎩 personality + saved set-ups (#alfred-persona) -->
+  <script src="cli-mode-ui.js"></script><!-- ⌨ command-line AIs: the panel card, the conversation, the pane status cards -->
   <script src="run-strip-ui.js"></script><!-- ⏳ the book run's progress in the title bar (akowe-run.js progress) -->
   <script src="save-state-ui.js"></script><!-- 💾 Save state / 📂 Load state (save-state.js in main) -->
   <script src="ease-ui.js"></script><!-- ✅ EASE: Setup checklist, Something's wrong?, guided tours, ❓ Help (ease-main.js) -->

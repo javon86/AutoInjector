@@ -17,6 +17,7 @@ import threading
 import time
 from datetime import datetime, timezone
 
+from . import cli_mode
 from .jobs import LIVE, now_iso
 
 CACHE_S = 30.0
@@ -185,6 +186,8 @@ class HealthService:
                 else:
                     out.append(dict(base, status="ok", detail=f"Anthropic API · {s.get('model')} · key saved.",
                                     fix=None))
+            elif cli_mode.is_cli(s):  # ⌨ command line: is the tool installed and signed in?
+                out.append(self._cli_slot(base, s, force))
             elif ad == "autoinjector":
                 site = {"claude": "Claude", "chatgpt": "ChatGPT", "gemini": "Gemini"}.get(s.get("site"), s.get("site"))
                 if not s.get("has_credentials"):
@@ -224,9 +227,28 @@ class HealthService:
                         "action": "settings"})
         return out
 
+    def _cli_slot(self, base: dict, s: dict, force: bool) -> dict:
+        tool = cli_mode.tool_of(s)
+        name = cli_mode.TOOL_NAMES[tool]
+        site = cli_mode.SITE_WORDS.get(s.get("site"), s.get("site"))
+        st = cli_mode.detect(self.app.store, tool, force=force)
+        state = st.get("state")
+        detail = f"{site} on the command line ({name}): {st.get('words') or state}."
+        if state == "ready":
+            return dict(base, status="ok", detail=detail, fix=None)
+        if state == "limited":
+            return dict(base, status="warn", detail=detail, code="USAGE_LIMIT", problem="USAGE_LIMIT",
+                        fix="Akọwe uses the other AIs meanwhile, or waits for the limit to reset.")
+        fix = {"signed_out": f"Open Settings › ⌨ Command-line mode and press “⌨ Open {name}” to sign in.",
+               "not_installed": f"Install {name}, or choose “Web window” for this AI in Settings."}.get(
+            state, "Open Settings › ⌨ Command-line mode and press ↻ Check again, or choose “Web window” for this AI.")
+        return dict(base, status="problem", detail=detail, code={"signed_out": "SIGNED_OUT",
+                    "not_installed": "NOT_INSTALLED"}.get(state, "CAPABILITY_UNAVAILABLE"), fix=fix, action="settings")
+
     def c_bridge(self, force):
         prov = self.app.engine.providers
-        ai = [s for s in prov.slots() if s["adapter_id"] == "autoinjector" and s.get("has_credentials")]
+        ai = [s for s in prov.slots() if s["adapter_id"] == "autoinjector" and s.get("has_credentials")
+              and not cli_mode.is_cli(s)]
         if not ai:
             return {"id": "bridge", "title": "AutoInjector link", "status": "info",
                     "detail": "Not connected (only needed for the AutoInjector web AIs).", "fix": None}

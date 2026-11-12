@@ -508,6 +508,29 @@ limits with the Claude pane.
 
 Without it nothing breaks: every job goes to the web AIs, exactly as before. The ✅ Setup checklist shows its state.
 
+### ⌨ Command-line mode (try it first)
+
+Instead of typing into the Claude and ChatGPT web windows, Akọwe can ask them through their own command-line tools on
+your PC: **Claude Code** for Claude and **Codex** for ChatGPT. There is no web page to wait for, so answers come
+straight back, several at a time. They use the same plans you sign in with (your Claude plan and your ChatGPT plan),
+so they share those plans' usage limits. **Web window stays the default** — nothing changes until you choose it.
+It is new, so it lives on its own test version first.
+
+1. Sign Claude Code in once (the steps just above). For ChatGPT, install Codex: in a command window type
+   `npm install -g @openai/codex` (needs Node.js). Then in Akọwe press **⚙️ Settings → ⌨ Command-line mode →
+   ⌨ Open Codex (sign in)**: a window opens running `codex login`; sign in with your ChatGPT account.
+2. Press **↻ Check again**. The card should say "✔ Claude Code … found, signed in" and "✔ Codex … found, signed in".
+3. Press **⌨ Two AIs: Claude + ChatGPT on command line, Gemini off**. Or choose per AI slot: each slot has
+   **How Akọwe reaches this AI: Web window / Command line** (Gemini is a web window only for now).
+4. Make a book as usual. In AutoInjector, the Claude and ChatGPT panes show a small card ("⌨ Claude is on the command
+   line") instead of the web page, and the 📚 Akọwe panel has a **⌨ Command-line AIs** card with the same choice and a
+   **📜 Conversation**: what Akọwe asked (one line) and the start of each answer.
+
+What you will see when something is wrong: "signed out — press ⌨ Open Codex and sign in" (another AI takes the work
+meanwhile), "at your ChatGPT plan's usage limit until about 3:45 PM" (another AI takes the work, or the book waits
+for the limit, like a web window at its limit), or "took too long" (it is asked again or another AI takes it).
+⚡ Cancel stops a command-line AI at once. To go back, press **🌐 All back to web windows**.
+
 ## 12. When something goes wrong
 
 - **❓ Help → 🩺 Something's wrong?** looks at the AI panes, Akọwe, a running book, the AIs' usage limits, Ollama,

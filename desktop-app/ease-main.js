@@ -54,7 +54,7 @@ function installEase(deps = {}) {
 
   async function snapshot(which) {
     const want = new Set(which);
-    const names = ['sites', 'akowe', 'llm', 'voice', 'sd', 'video', 'claudeCode', 'content', 'disk', 'health', 'runConditions', 'log'].filter((n) => want.has(n));
+    const names = ['sites', 'akowe', 'llm', 'voice', 'sd', 'video', 'claudeCode', 'cliMode', 'content', 'disk', 'health', 'runConditions', 'log'].filter((n) => want.has(n));
     const vals = await Promise.all(names.map((n) => part(n, n === 'health' ? 12000 : PART_MS)));
     const snap = {};
     names.forEach((n, i) => { snap[n] = vals[i] == null ? null : vals[i]; });
@@ -62,7 +62,7 @@ function installEase(deps = {}) {
   }
 
   async function checklist() {
-    const snap = await snapshot(['sites', 'akowe', 'llm', 'voice', 'sd', 'video', 'claudeCode', 'content', 'disk']);
+    const snap = await snapshot(['sites', 'akowe', 'llm', 'voice', 'sd', 'video', 'claudeCode', 'cliMode', 'content', 'disk']);
     const r = ease.buildChecklist(snap);
     lastPaths = new Set(r.items.map((i) => i.fix && i.fix.action === 'open-folder' && i.fix.args.path).filter(Boolean));
     lastUrls = new Set(r.items.map((i) => i.fix && i.fix.action === 'open-url' && i.fix.args.url).filter(Boolean));

@@ -346,6 +346,43 @@ bridge to your home Wi-Fi, behind its key.
   web search and web pages for research and fact checks, nothing for the checks). Your chapters go to Claude Code
   through its input, never on the command line. Akọwe's log keeps only codes, counts and times — never your text.
 
+### ⌨ Command-line mode (try it first)
+
+Code: `akowe/akowe/cli_mode.py` (the adapter, detection, the preset, the conversation), small hooks in
+`providers.py` (a slot's `mode`), AutoInjector's `desktop-app/cli-mode-watch.js` (mirrors Akọwe's setting) and
+`cli-mode-ui.js` (the panel card and the pane cards).
+
+- **The choice:** each AutoInjector slot of Claude or ChatGPT has `mode`: `web` (default: AutoInjector types into the
+  web window) or `cli`. Akọwe owns it (⚙️ Settings, each slot, and the ⌨ Command-line mode card); AutoInjector's
+  panel reads it from Akọwe's `GET /api/cli-mode` and changes it through Akọwe's API, so both always agree. The preset
+  "Two AIs: Claude + ChatGPT on command line, Gemini off" sets AI-1 = Claude (cli), AI-2 = ChatGPT (cli), AI-3 off.
+  Gemini has no command-line mode yet (refused with a plain message; a TODO in the code for the Gemini CLI).
+- **One request:** a fresh process per request in a new empty temporary folder, the prompt on its input (never on
+  the command line), the same prompt and JSON checks as the web AIs (up to two re-asks when the answer has the wrong
+  shape, each a new process). Claude: `claude -p … --output-format json` with every file, shell, web and MCP tool
+  switched off, `--permission-mode dontAsk --no-session-persistence --strict-mcp-config`, API-billing keys removed so
+  it uses the Claude plan. ChatGPT: `codex exec --skip-git-repo-check --ephemeral --sandbox read-only --color never
+  -C <empty folder> -o <answer file> -` (`-` = read the prompt from the input), with `OPENAI_API_KEY` / `CODEX_API_KEY`
+  removed so it uses the ChatGPT plan of `codex login`. These Codex flags were checked against Codex's own source
+  code (its `exec` options, shared options and `login status`); an older Codex that does not know `--ephemeral` /
+  `--color` is asked once more without them.
+- **Limits and problems:** at most 2 answers at once per tool (Settings, 1–4); a time limit per answer (15 min by
+  default) after which the whole process tree is killed; ⚡ Cancel kills it at once. A usage-limit message becomes
+  `RATE_LIMITED` (problem `USAGE_LIMIT`, with the reset time when the tool says it): the AI counts as "needs you"
+  until then, the work goes to another AI, and when every AI is at its limit the book waits for the limit like with
+  the web windows. Signed out / not installed become `CAPABILITY_UNAVAILABLE` with what to do; a crash or a bad
+  answer goes to another AI. The detection (`claude --version` + a tiny prompt; `codex --version` + `codex login
+  status`) is cached and shown in Settings, in Akọwe's ❤️ health list and in AutoInjector's ✅ setup checklist (where
+  a command-line AI's web window is then no longer "needed for books").
+- **Pictures:** `generate(images=[…])` sends picture files only to a command-line AI: Claude Code gets the picture in
+  its empty folder and may use only its Read tool on it; Codex gets `-i <file>`. A Codex that refuses `-i` gives the
+  call to another AI. The web windows can't take a picture through the bridge (AutoInjector's 🧑‍⚖️ judge still looks at
+  pictures in a web window).
+- **AutoInjector:** the panes of command-line AIs are moved out of sight (never 0×0) and show a status card; the
+  📚 Akọwe panel shows the ⌨ Command-line AIs card with the choice, the preset and the 📜 conversation (the last 40
+  exchanges: a one-line summary of the task and the answer's start, kept in Akọwe's memory only, never written to a
+  log). Logs hold codes, counts and times only.
+
 ### 🎨 Images
 
 - **What it is:** the 🎨 Images tab. It drives a picture program on your PC: Forge, A1111, SD.Next or ComfyUI.

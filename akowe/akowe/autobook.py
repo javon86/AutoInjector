@@ -945,6 +945,8 @@ class AutoBookService(_Runner):
         if self.alive(run_id):
             self._ctl[run_id]["cancel"] = True
             run["status"], run["phase"] = "pausing", "Cancelling after the current answer…"
+            from . import cli_mode  # noqa: PLC0415 - ⌨ a command-line AI working for this run is stopped at once
+            cli_mode.cancel(run_id=run_id)
         else:
             self._finish_cancel(run)
         self.event(run, "cancel", "You pressed Cancel")

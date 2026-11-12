@@ -1283,6 +1283,14 @@ async function syncPaneBounds() {
       continue;
     }
     const r = visible[site];
+    let onCli = false;
+    try { onCli = cliWatch.cliSites().has(site); } catch (_) {}
+    if (onCli) {
+      // ⌨ this AI is on the command line (Akọwe runs Claude Code / Codex): its pane shows a status card
+      // (cli-mode-ui.js) instead of the website, so the page moves out of sight (off-screen, never 0x0)
+      view.setBounds({ x: -4000, y: 0, width: 800, height: 600 });
+      continue;
+    }
     if (!r || r.width < 4 || r.height < 4) {
       // Still enabled and participating -- just its pane got collapsed (or
       // this is a transient layout-measurement gap). Keep the view at a
@@ -9714,6 +9722,9 @@ function akoweStatusSnapshotBase() {
 // The real state of the "⚡ Make a book for me" run (akowe-run.js) — the checklist alone said "10/10 Done"
 // for a run that had stopped at step 7 of 16.
 const akoweRunWatch = require("./akowe-run").createRunWatch({ api: (m, p) => akoweApi(m, p, null, 8000) });
+// ⌨ Command-line mode: which AI slots Akọwe runs on the command line (Claude Code / Codex), mirrored for the panel
+// (cli-mode-watch.js); the panes of those AIs show a status card instead of the website (layout below).
+const cliWatch = require("./cli-mode-watch").createCliWatch({ api: (m, p, b) => akoweApi(m, p, b, 8000) });
 
 // ==== PR #123: while a book run (or a video / picture job) works — run-guard.js ====
 // Keeps the PC awake, asks before the window closes, hides to the tray to carry on, and tells the user (a Windows
@@ -9903,6 +9914,8 @@ function akoweStatusSnapshot(opts) {
   // ⏳ the title bar's run progress (run-strip-ui.js) shows even with the panel closed: the run the run guard read
   // (every RUN_GUARD_MS, from Akọwe's own API or its push), else the panel's
   snap.runStrip = snap.run || runGuardState.run || null;
+  if (akoweServerBase()) cliWatch.refresh().then(() => {}, () => {}); // ⌨ at most every 4 s; the newest view next time
+  snap.cliMode = cliWatch.peek();
   snap.app = { running: bfApp.running, base: bfApp.base, version: bfApp.version, checkedAt: bfApp.checkedAt, launcherAvailable: !!akoweLauncher() };
   snap.server = akoweServerPublicStatus();
   snap.health = akoweHealth(snap);
@@ -10011,6 +10024,9 @@ function akoweDiagnostics(extra) {
   return L.join("\n") + "\n";
 }
 ipcMain.handle("akowe:status", (_evt, payload) => akoweStatusSnapshot({ panelOpen: !!(payload && payload.panelOpen) }));
+// ⌨ Command-line mode: the panel's "Web window / Command line" choice and the preset go to Akọwe (it owns them)
+ipcMain.handle("akowe-cli:set-mode", async (_evt, p) => { const r = await cliWatch.setMode(p && p.slot_id, p && p.mode); logEvent("akowe-cli-mode", { slot: p && p.slot_id, mode: p && p.mode, ok: r.ok, error: r.error || null }); return r; });
+ipcMain.handle("akowe-cli:preset", async (_evt, p) => { const r = await cliWatch.preset(p && p.preset); logEvent("akowe-cli-preset", { preset: p && p.preset, ok: r.ok }); return r; });
 ipcMain.handle("akowe:run-resume", async (_evt, payload) => {
   const id = String((payload && payload.id) || "").replace(/[^\w.:-]/g, "").slice(0, 80);
   if (!id) return { ok: false, message: "There is no stopped book run to resume." };
@@ -10825,6 +10841,7 @@ const easeApi = require("./ease-main").installEase({
     voice: async () => { const d = await setupManager.detect("voice"); const s = voiceProvider.status(); return { installed: d ? d.installed : null, reason: d && d.reason, running: !!s.managed, lastStartError: s.lastStartError || "" }; },
     sd: async () => { const im = imageProvider.status(); const connected = !!(im.enabled && im.base) && await healthProbe(im.base); return { connected, label: im.label, noModels: !!im.noModels, found: sdTargets().filter((t) => t.supported).map((t) => t.displayName || t.label) }; },
     video: () => videoStatusFull(),
+    cliMode: async () => (akoweServerPublicStatus().phase === "running" ? cliWatch.refresh() : null),
     claudeCode: async () => { if (akoweServerPublicStatus().phase !== "running") return null; const r = await akoweApi("GET", "/api/settings/claude-code", undefined, 5000); return r && r.status === 200 && r.json && r.json.status ? { state: r.json.status.state, words: r.json.status.words } : null; },
     content: () => contentRootsInfo(false),
     disk: async () => { const p = outputManager.root(); return { path: p, freeBytes: await healthWatchLib.defaultFreeBytes(p) }; },

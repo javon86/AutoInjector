@@ -63,7 +63,7 @@ def _sh_quote(s: str) -> str:
 
 
 def commands(kind: str, cli: str | None, os_name: str | None = None, platform: str | None = None,
-             which=shutil.which) -> list[str]:
+             which=shutil.which, args: tuple = ()) -> list[str]:
     """The fixed command that opens the window. ``kind``: "claude" (run ``cli``) or "install". Raises WindowError
     NO_TERMINAL when this computer has no terminal Akọwe knows how to open."""
     os_name = os_name or os.name
@@ -73,8 +73,8 @@ def commands(kind: str, cli: str | None, os_name: str | None = None, platform: s
             return ["powershell.exe", "-NoExit", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command",
                     "Write-Host 'Installing Claude Code (Anthropic''s installer). When it says it is done, close this "
                     "window and press Open Claude Code in Akowe.'; " + INSTALL_WIN]
-        return ["cmd.exe", "/k", cli]
-    line = INSTALL_UNIX if kind == "install" else _sh_quote(cli or "claude")
+        return ["cmd.exe", "/k", cli, *args]
+    line = INSTALL_UNIX if kind == "install" else " ".join([_sh_quote(cli or "claude"), *map(_sh_quote, args)])
     if platform == "darwin":
         return ["osascript", "-e", f'tell application "Terminal" to do script {_applescript_quote(line)}',
                 "-e", 'tell application "Terminal" to activate']
@@ -83,7 +83,8 @@ def commands(kind: str, cli: str | None, os_name: str | None = None, platform: s
         if exe:
             return [exe, *flag, "bash", "-lc", line + "; exec bash"]
     raise WindowError("NO_TERMINAL", "This computer has no terminal window Akọwe knows how to open. Open one yourself "
-                                     "and type: " + ("claude" if kind != "install" else INSTALL_UNIX))
+                                     "and type: " + (" ".join([os.path.basename(cli or "claude"), *args])
+                                                     if kind != "install" else INSTALL_UNIX))
 
 
 def _launch(cmd: list[str], cwd: str, env: dict, os_name: str | None = None):

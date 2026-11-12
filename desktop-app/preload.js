@@ -394,6 +394,8 @@ contextBridge.exposeInMainWorld("api", {
   // Akọwe bridge (experimental) — see docs/AKOWE_AUTOINJECTOR_BRIDGE.md
   akoweStatus: (opts) => ipcRenderer.invoke("akowe:status", opts || {}),
   akoweRunResume: (id) => ipcRenderer.invoke("akowe:run-resume", { id }),
+  akoweCliSetMode: (slotId, mode) => ipcRenderer.invoke("akowe-cli:set-mode", { slot_id: slotId, mode }), // ⌨ cli-mode-ui.js
+  akoweCliPreset: (preset) => ipcRenderer.invoke("akowe-cli:preset", { preset }),
   // 📖 Akọwe tab: the server AutoInjector runs itself, and the view showing it
   akoweServerStatus: () => ipcRenderer.invoke("akowe-server:status"),
   akoweServerRetry: () => ipcRenderer.invoke("akowe-server:retry"),

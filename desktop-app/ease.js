@@ -112,6 +112,21 @@ function claudeCodeItem(c, akoweRunning) {
   return Object.assign(base, { ok: false, text: words || 'Not working right now — the web AIs do the work.', fix: fix('Open Akọwe ⚙️ Settings', 'claude-code') });
 }
 
+/** ⌨ Command-line AIs (Akọwe's /api/cli-mode, mirrored by cli-mode-watch.js): shown only when an AI slot uses it. */
+function cliModeItem(c) {
+  if (!c || !Array.isArray(c.slots)) return null;
+  const on = c.slots.filter((s) => s && s.cli && s.site);
+  if (!on.length) return null;
+  const base = { id: 'cli-mode', group: 'optional', title: 'Command-line AIs (Claude Code / Codex)' };
+  const TOOL = { claude: 'claude', chatgpt: 'codex' };
+  const NAME = { claude: 'Claude Code', codex: 'Codex' };
+  const lines = on.map((s) => { const t = (c.tools && c.tools[TOOL[s.site]]) || {}; return { ok: t.state === 'ready', checking: !t.state || t.state === 'checking', text: `${NAME[TOOL[s.site]]}: ${str(t.words, 160) || t.state || 'checking'}` }; });
+  const text = lines.map((l) => l.text).join(' · ');
+  if (lines.every((l) => l.ok)) return Object.assign(base, { ok: true, text });
+  if (lines.some((l) => l.checking)) return Object.assign(base, { ok: null, text });
+  return Object.assign(base, { ok: false, text, fix: fix('Open Akọwe ⚙️ Settings', 'claude-code') });
+}
+
 function contentItem(c) {
   const base = { id: 'content', group: 'needed', title: 'Content folder ("stuff and thing") chosen' };
   if (!c || !c.dir) return Object.assign(base, { ok: null, text: 'Could not tell yet.' });
@@ -138,7 +153,12 @@ function buildChecklist(snap = {}) {
   const items = [];
   const safe = (fn, fallback) => { try { const r = fn(); if (r) items.push(r); } catch (_) { items.push(Object.assign({ ok: null, text: 'Could not tell yet.' }, fallback)); } };
   const sites = Array.isArray(snap.sites) ? snap.sites : [];
-  for (const x of sites) safe(() => paneItem(x || {}), { id: `pane-${x && x.site}`, group: 'needed', title: `Signed in to ${(x && x.label) || 'an AI'}` });
+  // ⌨ an AI that Akọwe runs on the command line does not need its web window signed in
+  const cliSites = new Set(((snap.cliMode && snap.cliMode.slots) || []).filter((s) => s && s.cli).map((s) => s.site));
+  for (const x of sites) {
+    if (x && cliSites.has(x.site)) { items.push({ id: `pane-${x.site}`, group: 'optional', title: `Signed in to ${x.label || 'an AI'}`, ok: true, text: `Not needed for books: Akọwe uses ${x.site === 'claude' ? 'Claude Code' : 'Codex'} on the command line for ${x.label || x.site}.` }); continue; }
+    safe(() => paneItem(x || {}), { id: `pane-${x && x.site}`, group: 'needed', title: `Signed in to ${(x && x.label) || 'an AI'}` });
+  }
   safe(() => akoweItem(snap.akowe), { id: 'akowe', group: 'needed', title: 'Akọwe (the book writer) is running' });
   safe(() => contentItem(snap.content), { id: 'content', group: 'needed', title: 'Content folder chosen' });
   safe(() => diskItem(snap.disk), { id: 'disk', group: 'needed', title: 'Enough free disk space' });
@@ -146,6 +166,7 @@ function buildChecklist(snap = {}) {
   safe(() => voiceItem(snap.voice), { id: 'voice', group: 'optional', title: 'Voice engine' });
   safe(() => sdItem(snap.sd), { id: 'sd', group: 'optional', title: 'Stable Diffusion' });
   safe(() => videoItem(snap.video), { id: 'video', group: 'optional', title: 'Video engine' });
+  safe(() => cliModeItem(snap.cliMode), { id: 'cli-mode', group: 'optional', title: 'Command-line AIs' });
   safe(() => claudeCodeItem(snap.claudeCode, !!(snap.akowe && snap.akowe.phase === 'running')), { id: 'claude-code', group: 'optional', title: 'Claude Code helpers' });
   const needed = items.filter((i) => i.group === 'needed');
   const neededBad = needed.filter((i) => i.ok === false).length;
@@ -300,4 +321,4 @@ function createPrefs(file) {
   };
 }
 
-module.exports = { buildChecklist, shouldAutoOpen, findProblems, scanLog, createPrefs, gbText, DISK_WARN, DISK_URGENT, MAX_PROBLEMS };
+module.exports = { cliModeItem, buildChecklist, shouldAutoOpen, findProblems, scanLog, createPrefs, gbText, DISK_WARN, DISK_URGENT, MAX_PROBLEMS };

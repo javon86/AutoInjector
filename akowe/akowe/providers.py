@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from . import ai_activity, legacy, usage_limits
+from . import ai_activity, cli_mode, legacy, usage_limits
 from .errors import AkoweError
 from .store import Store, new_id, utcnow, write_private
 
@@ -66,7 +66,8 @@ def slot_name(slot: dict) -> str:
     """Plain name of a slot for the author: "AI-2 · ChatGPT", "AI-1 · Claude (API)", "AI-3"."""
     sid = slot.get("slot_id") or "AI"
     if slot.get("adapter_id") == "autoinjector" and slot.get("site"):
-        return f"{sid} · {SITE_NAMES.get(slot['site'], slot['site'])}"
+        cli = " (command line)" if slot.get("mode") == "cli" and slot["site"] in ("claude", "chatgpt") else ""
+        return f"{sid} · {SITE_NAMES.get(slot['site'], slot['site'])}{cli}"
     if slot.get("adapter_id") == "anthropic":
         return f"{sid} · Claude (API)"
     return sid
@@ -206,6 +207,9 @@ DEFAULT_SLOT = {
     # autoinjector adapter only: local bridge URL (127.0.0.1/localhost over http) and web site.
     "bridge_url": DEFAULT_BRIDGE_URL,
     "site": None,
+    # ⌨ autoinjector slots of Claude / ChatGPT: "web" (the web window, as always) or "cli" (the command-line tool on
+    # this computer: Claude Code / Codex, cli_mode.py)
+    "mode": "web",
     # Operation IDs ("C02") or set letters ("B") this slot is preferred for (see eligible()).
     "roles": [],
 }
@@ -1142,7 +1146,15 @@ class ProviderRegistry:
             slot["active_jobs"] = self._active.get(sid, 0)
             slot["connected"] = slot["adapter_id"] != "none"
             slot["roles"] = list(slot.get("roles") or [])
-            if slot["adapter_id"] == "autoinjector":
+            slot["mode"] = slot.get("mode") if slot.get("mode") in cli_mode.MODES else "web"
+            if cli_mode.is_cli(slot):
+                # ⌨ command line: the tool reads far more than a web chat; no per-use bill (the plan); no key needed
+                if "context_limit_tokens" not in (stored.get(sid) or {}):
+                    slot["context_limit_tokens"] = cli_mode.CLI_CONTEXT_TOKENS[slot["site"]]
+                slot["input_cost_minor_per_mtok"] = 0
+                slot["output_cost_minor_per_mtok"] = 0
+                slot["has_credentials"] = True
+            elif slot["adapter_id"] == "autoinjector":
                 # H13: a web chat does not take the API's 200 000 tokens in one message: unless the author set a
                 # limit for this slot, use what the site realistically accepts (instructions are cut to fit, visibly)
                 if "context_limit_tokens" not in (stored.get(sid) or {}) and slot.get("site") in WEB_CONTEXT_TOKENS:
@@ -1176,6 +1188,9 @@ class ProviderRegistry:
                 raise AkoweError("INVALID_INPUT", "/" + k, "must be a non-negative integer", status="REJECTED")
         if "bridge_url" in config:
             config["bridge_url"] = validate_bridge_url(config["bridge_url"])
+        if "mode" in config and config["mode"] not in cli_mode.MODES:
+            raise AkoweError("INVALID_INPUT", "/mode", "mode: web (the web window) or cli (the command line)",
+                             status="REJECTED")
         if "site" in config and config["site"] is not None and config["site"] not in AUTOINJECTOR_SITES:
             raise AkoweError("INVALID_INPUT", "/site", "site must be chatgpt, claude or gemini", status="REJECTED")
         if "roles" in config:
@@ -1200,6 +1215,12 @@ class ProviderRegistry:
         if merged["adapter_id"] == "autoinjector" and merged.get("site") not in AUTOINJECTOR_SITES:
             raise AkoweError("INVALID_INPUT", "/site", "an autoinjector slot needs a site: chatgpt, claude or "
                                  "gemini", status="REJECTED")
+        if merged.get("mode") == "cli" and merged["adapter_id"] == "autoinjector" \
+                and merged.get("site") not in cli_mode.CLI_SITES:
+            # TODO(cli-mode): the Gemini CLI — until then Gemini is a web window only
+            raise AkoweError("INVALID_INPUT", "/mode", f"{SITE_NAMES.get(merged.get('site'), 'This AI')} has no "
+                             "command-line mode yet; only Claude (Claude Code) and ChatGPT (Codex) do",
+                             status="REJECTED")
         if "api_key" in config:
             self._store_api_key(slot_id, config.pop("api_key"))
         cur.update(config)
@@ -1240,6 +1261,15 @@ class ProviderRegistry:
             raise AkoweError("INVALID_INPUT", "/adapter_id", "Test connection is available for autoinjector "
                                  "slots only", status="REJECTED")
         base = {"slot_id": slot_id, "site": slot.get("site"), "bridge_url": slot.get("bridge_url")}
+        if cli_mode.is_cli(slot):  # ⌨ command line: is the tool installed and signed in? (no bridge involved)
+            tool = cli_mode.tool_of(slot)
+            st = cli_mode.detect(self.store, tool)  # cached for a while: ↻ Check again (cli_mode) forces a new look
+            ok = st.get("state") == "ready"
+            state = cli_mode.site_state(slot)
+            return dict(base, ok=ok, mode="cli", tool=tool, error=None if ok else {
+                "signed_out": "SIGNED_OUT", "limited": "RATE_LIMITED", "not_installed": "NOT_INSTALLED",
+                "off": "NOT_INSTALLED"}.get(st.get("state"), "CLI_FAILING"), message=st.get("words"), sites={},
+                site_ready=ok, site_busy=None, state=state["state"] if not ok else "ok", problem=state.get("problem"))
         try:
             adapter = AutoInjectorAdapter(self._api_key(slot_id), slot.get("bridge_url") or DEFAULT_BRIDGE_URL)
             out = dict(base, **adapter.health(slot.get("site")), error=None)
@@ -1271,6 +1301,10 @@ class ProviderRegistry:
                            source="test")
             return out
         if slot.get("adapter_id") != "autoinjector":
+            return out
+        if cli_mode.is_cli(slot):  # ⌨ the command-line tool's last known status (never runs anything here)
+            st = cli_mode.site_state(slot)
+            out.update({k: st.get(k) for k in ("state", "problem", "reset_at")}, source="cli")
             return out
         token = self._api_key(slot["slot_id"])
         if not token or slot.get("site") not in AUTOINJECTOR_SITES:
@@ -1347,7 +1381,8 @@ class ProviderRegistry:
             groups: dict = {}
             for s in slots:
                 token = self._api_key(s["slot_id"])
-                if s["adapter_id"] != "autoinjector" or not token or s.get("site") not in AUTOINJECTOR_SITES:
+                if s["adapter_id"] != "autoinjector" or not token or s.get("site") not in AUTOINJECTOR_SITES \
+                        or cli_mode.is_cli(s):
                     continue
                 g = groups.setdefault((s.get("bridge_url") or DEFAULT_BRIDGE_URL, token), [])
                 g.append(s)
@@ -1415,6 +1450,8 @@ class ProviderRegistry:
             return self.test_adapter
         if slot["adapter_id"] == "anthropic":
             return AnthropicAdapter(self._api_key(slot["slot_id"]))
+        if cli_mode.is_cli(slot):
+            return cli_mode.CliAdapter(self.store, slot["site"])
         if slot["adapter_id"] == "autoinjector":
             return AutoInjectorAdapter(self._api_key(slot["slot_id"]), slot.get("bridge_url") or DEFAULT_BRIDGE_URL)
         return None
@@ -1468,12 +1505,15 @@ class ProviderRegistry:
 
     # ------------------------------------------------------------------ generation
     def generate(self, ctx, *, task: str, output_schema: dict, context: dict, capability: str,
-                 protected_facts: list, slot_id: str | None = None) -> tuple[dict, dict]:
+                 protected_facts: list, slot_id: str | None = None, images: list | None = None) -> tuple[dict, dict]:
         """Run one generation on the best eligible slot, or on slot_id when the author picked one
-        explicitly (an explicit pick ignores role routing but never an ineligible slot)."""
+        explicitly (an explicit pick ignores role routing but never an ineligible slot).
+
+        ⌨ ``images``: picture files the AI must look at. Only an AI that can take picture files gets the call (a
+        Claude / ChatGPT slot on the command line); every other slot is skipped."""
         try:
             out = self._generate(ctx, task=task, output_schema=output_schema, context=context, capability=capability,
-                                 protected_facts=protected_facts, slot_id=slot_id)
+                                 protected_facts=protected_facts, slot_id=slot_id, images=images)
         except AkoweError as exc:
             if not getattr(exc, "usage_limited", False):
                 usage_limits.clear()
@@ -1482,7 +1522,7 @@ class ProviderRegistry:
         return out
 
     def _generate(self, ctx, *, task: str, output_schema: dict, context: dict, capability: str,
-                  protected_facts: list, slot_id: str | None = None) -> tuple[dict, dict]:
+                  protected_facts: list, slot_id: str | None = None, images: list | None = None) -> tuple[dict, dict]:
         system = (
             "You are a module worker inside Akọwe, a book production system. "
             f"{task}\nRules: keep every protected fact exactly as given; never invent references, record IDs or "
@@ -1509,6 +1549,13 @@ class ProviderRegistry:
             seen = {s["slot_id"] for s in candidates}
             order = candidates + [s for s in self.eligible(ctx.project_id, capability, needed, None)
                                   if s["slot_id"] not in seen] if candidates else []
+        if images:
+            order = [s for s in order if self._takes_images(s)]
+            candidates = [s for s in candidates if self._takes_images(s)]
+            if not candidates:
+                raise AkoweError("CAPABILITY_UNAVAILABLE", "/images", "no AI that can look at picture files is set up: "
+                                 "pictures need Claude or ChatGPT on the command line (Settings › ⌨ Command-line "
+                                 "mode); in AutoInjector the 🧑‍⚖️ judge looks at pictures in the web window")
         if not candidates:
             any_connected = any(s["connected"] for s in self.slots())
             if any_connected and all(needed > s["context_limit_tokens"] for s in self.slots() if s["connected"]):
@@ -1528,7 +1575,8 @@ class ProviderRegistry:
                 continue  # became busy meanwhile: never overfill a slot when moving work
             try:
                 data, resource = self._generate_timeout_safe(ctx, slot, system, user, output_schema, needed,
-                                                             others=slot_id is None and i + 1 < len(order))
+                                                             others=slot_id is None and i + 1 < len(order),
+                                                             images=images)
             except AkoweError as exc:
                 why = self._move_on_why(exc, slot)
                 if why is None:
@@ -1555,7 +1603,7 @@ class ProviderRegistry:
                 self.health.notify({"event": "failover", "from": failed, "to": slot["slot_id"],
                                     "to_name": slot_name(slot), "operation": operation})
             return data, resource
-        if last is not None and last.code == "UPSTREAM_UNAVAILABLE":
+        if last is not None and last.code in ("UPSTREAM_UNAVAILABLE", "RATE_LIMITED"):
             self._mark_if_all_limited(last, failed, ctx, capability, needed)
         if last is not None:
             if moved_on and getattr(last, "try_other_ai", False):
@@ -1573,18 +1621,24 @@ class ProviderRegistry:
         collected or given up); other_ai: a refusal, or JSON still broken after the re-asks."""
         if exc.code == "UPSTREAM_UNAVAILABLE":
             return "busy"
+        if exc.code == "RATE_LIMITED" and getattr(exc, "cli", False):
+            return "busy"  # ⌨ a command-line AI at its plan's usage limit
         if exc.code == "TIMEOUT" and slot.get("adapter_id") == "autoinjector":
             return "timeout"
         if getattr(exc, "try_other_ai", False):
             return "other_ai"
         return None
 
-    def _generate_timeout_safe(self, ctx, slot, system, user, output_schema, needed, *, others: bool):
+    @staticmethod
+    def _takes_images(slot: dict) -> bool:
+        return cli_mode.is_cli(slot)
+
+    def _generate_timeout_safe(self, ctx, slot, system, user, output_schema, needed, *, others: bool, images=None):
         """One generation on this slot. A web AI that timed out (its late answer already collected or given up by
         the adapter) is asked ONCE more after a short wait when no other AI can take the call; with another AI
         the caller moves the call there instead."""
         try:
-            return self._generate_on(ctx, slot, system, user, output_schema, needed)
+            return self._generate_on(ctx, slot, system, user, output_schema, needed, images=images)
         except AkoweError as exc:
             if exc.code != "TIMEOUT" or slot.get("adapter_id") != "autoinjector" or others:
                 raise
@@ -1601,10 +1655,10 @@ class ProviderRegistry:
                 step = min(0.5, left)
                 time.sleep(step)
                 left -= step
-            return self._generate_on(ctx, slot, system, user, output_schema, needed)
+            return self._generate_on(ctx, slot, system, user, output_schema, needed, images=images)
 
     def _forget_late(self, slot: dict) -> None:
-        if slot.get("adapter_id") != "autoinjector" or self.test_adapter is not None:
+        if slot.get("adapter_id") != "autoinjector" or self.test_adapter is not None or cli_mode.is_cli(slot):
             return
         try:
             AutoInjectorAdapter(self._api_key(slot["slot_id"]), slot.get("bridge_url") or DEFAULT_BRIDGE_URL) \
@@ -1635,7 +1689,7 @@ class ProviderRegistry:
         exc.reset_at = min(resets) if resets and len(resets) == len(rows) else None
         usage_limits.note(exc.limited_names, exc.reset_at)
 
-    def _generate_on(self, ctx, slot: dict, system: str, user: str, output_schema: dict, needed: int):
+    def _generate_on(self, ctx, slot: dict, system: str, user: str, output_schema: dict, needed: int, images=None):
         """One generation on exactly this slot (cost reservation, busy counter, adapter retries)."""
         schema = _sanitize_schema(copy.deepcopy(output_schema))
         adapter = self.adapter(slot)
@@ -1659,7 +1713,8 @@ class ProviderRegistry:
         try:
             with book:
                 data, usage = self._with_retries(adapter, slot, system, user, schema, self.call_deadline(ctx, slot),
-                                                 request_id=ctx.request.get("request_id"), call=call)
+                                                 request_id=ctx.request.get("request_id"), call=call, images=images,
+                                                 cancel=_cancel_of(ctx))
         except AkoweError as exc:
             ai_activity.call_ended(exc)
             # A timed-out paid call may still have run: keep the reservation until it reconciles (spec K).
@@ -1774,7 +1829,7 @@ class ProviderRegistry:
                 log.warning("cost ledger %s/%s not settled: %s", res["account_id"], res["period"], exc)
 
     def _with_retries(self, adapter, slot, system, user, schema, deadline: str | None, *,
-                      request_id: str | None = None, call: int = 0):
+                      request_id: str | None = None, call: int = 0, images=None, cancel=None):
         """At most 3 attempts; delays 1s and 2s plus jitter, capped at 4s and the deadline.
 
         Adapters that set accepts_request_context also receive the Akọwe request_id, the
@@ -1792,12 +1847,17 @@ class ProviderRegistry:
                         break
                 time.sleep(delay)
             try:
+                if getattr(adapter, "accepts_images", False):  # ⌨ the command-line adapter (cli_mode.py)
+                    return adapter.submit(slot, system, user, schema, request_id=request_id, attempt=attempt,
+                                          deadline=deadline, call=call, images=images, cancel=cancel)
                 if getattr(adapter, "accepts_request_context", False):
                     return adapter.submit(slot, system, user, schema, request_id=request_id, attempt=attempt,
                                           deadline=deadline, call=call)
                 return adapter.submit(slot, system, user, schema)
             except AkoweError as exc:
                 last = exc
+                if getattr(exc, "cli", False):
+                    raise  # ⌨ the command-line adapter already asked again where that helps; the registry moves on
                 if exc.code == "UPSTREAM_UNAVAILABLE" and (getattr(exc, "site_state", None)
                                                           or getattr(exc, "retry_after_s", None)):
                     # the bridge says the site is not ready, or the site showed its own error notice (SITE_ERROR,
@@ -1821,6 +1881,21 @@ class ProviderRegistry:
                     raise
                 log.warning("AI attempt %s on %s failed: %s", attempt + 1, slot["slot_id"], exc.code)
         raise last or AkoweError("TIMEOUT", "", "deadline reached before a retry could run")
+
+
+def _cancel_of(ctx):
+    """⌨ A cancel check for a command-line AI: True once the code that asks says stop (its ``check()`` raises)."""
+    check = getattr(ctx, "check", None)
+    if not callable(check):
+        return None
+
+    def cancelled() -> bool:
+        try:
+            check()
+        except Exception:  # noqa: BLE001 - cancel / pause
+            return True
+        return False
+    return cancelled
 
 
 class PinnedProviders(ProviderRegistry):

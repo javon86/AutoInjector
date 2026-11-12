@@ -173,6 +173,8 @@ def main():
     stdin = sys.stdin.read()
     m = re.search(r"^JOB: (\w+)", stdin, re.M)
     job = m.group(1) if m else ("login_check" if "OK" in stdin else "unknown")
+    if not m and "JSON_SCHEMA:" in stdin and "Project context package (JSON):" in stdin:
+        job = "slot"  # ⌨ command-line mode: an Akọwe module request, answered by the Make-a-book fake AI
     mode = env(f"FAKE_CLAUDE_MODE_{job.upper()}") or env("FAKE_CLAUDE_MODE", "ok")
     delay = float(env("FAKE_CLAUDE_DELAY", "0") or 0)
     if job == "login_check":
@@ -229,6 +231,21 @@ def main():
                           "result": "You've hit your session limit · resets 3:45pm", "total_cost_usd": 0}))
         log(outcome="limit")
         return 1
+    if job == "slot":
+        sys.path[:0] = [os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+                        os.path.dirname(os.path.dirname(os.path.abspath(__file__)))]
+        from fake_codex.fake_codex import fake_answer  # noqa: PLC0415 - the same Make-a-book fake answers
+        os.environ.setdefault("FAKE_CODEX_SLOT", "AI-1")
+        if "--allowedTools" in argv and "Read" in argv[argv.index("--allowedTools") + 1].split(","):
+            # a picture to look at: it was copied into this (otherwise empty) folder
+            text = json.dumps({"verdict": env("FAKE_CLAUDE_PICTURE_VERDICT", "keep"), "saw": len(os.listdir("."))})
+        else:
+            text = json.dumps(fake_answer(stdin))
+        print(json.dumps({"type": "result", "subtype": "success", "is_error": False, "result": text,
+                          "total_cost_usd": 0.0, "usage": {"input_tokens": len(stdin) // 4, "output_tokens": 50},
+                          "duration_ms": int((time.time() - t0) * 1000), "num_turns": 1, "session_id": "fake"}))
+        log(outcome="ok")
+        return 0
     ctx = {}
     mm = re.search(r"CONTEXT \(JSON\):\n(.*)\Z", stdin, re.S)
     if mm:

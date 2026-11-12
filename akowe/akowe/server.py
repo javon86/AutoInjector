@@ -136,6 +136,8 @@ class App:
     def __init__(self, data_dir: str | os.PathLike, token: str | None = None, principal_id: str = "author"):
         self.store = Store(data_dir)
         self.engine = Engine(self.store)
+        from . import cli_mode  # noqa: PLC0415 - ⌨ command-line mode reads its settings from this store
+        cli_mode.bind_store(self.store)
         self.principal_id = principal_id
         self.token = token or self._load_or_create_token(Path(data_dir))
         with self.store.transaction() as tx:
@@ -492,7 +494,7 @@ class App:
             return 200, forge.bridge_info(self) if method == "GET" else forge.save_bridge_settings(self, body)
         if parts and parts[0] in ("autobook", "jobs", "health", "diagnostics", "backups", "shelf", "settings",
                                   "story-choices", "lengths", "pipeline", "compare", "checkers",
-                                  "writers"):
+                                  "writers", "cli-mode"):
             return self.route_ops(method, parts, query, body, principal)
         if parts and parts[0] in ("assist", "bible-builder"):
             return self.route_ai(method, parts, query, body, principal)
@@ -960,6 +962,20 @@ class App:
                 api_code = {"LOCAL_ONLY": "PERMISSION_DENIED"}.get(exc.code, "CAPABILITY_UNAVAILABLE")
                 raise ApiError(403 if exc.code == "LOCAL_ONLY" else 409, api_code, "/settings/claude-code/window",
                                exc.message) from exc
+        if parts == ["cli-mode", "window"] and method == "POST":  # ⌨ open Codex (sign in) in a window
+            from . import claude_code_window, cli_mode  # noqa: PLC0415
+            try:
+                return 200, cli_mode.open_codex_window(self.store, local=self.is_local())
+            except claude_code_window.WindowError as exc:
+                api_code = {"LOCAL_ONLY": "PERMISSION_DENIED"}.get(exc.code, "CAPABILITY_UNAVAILABLE")
+                raise ApiError(403 if exc.code == "LOCAL_ONLY" else 409, api_code, "/cli-mode/window",
+                               exc.message) from exc
+        if parts[:1] == ["cli-mode"]:  # ⌨ Settings › Command-line mode (cli_mode.py)
+            from . import cli_mode  # noqa: PLC0415
+            out = cli_mode.route(self, method, parts[1:], body, query)
+            if method != "GET":
+                self.changed()
+            return out
         if parts[:2] == ["settings", "claude-code"]:  # 🤖 Settings › Claude Code helpers (claude_code.py)
             from . import claude_code  # noqa: PLC0415
             return claude_code.route(self.store, method, parts[2:], body)

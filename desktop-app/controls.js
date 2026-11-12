@@ -4480,6 +4480,7 @@ function akoweRender(s) {
   bfRenderAll();
   akoweRenderUsing(s);
   akoweRenderRunStrip(s);
+  if (window.CliModeUi) window.CliModeUi.render(document, s.cliMode || null, window.api); // ⌨ command-line AIs
 }
 // ⏳ the book run's progress in the title bar (run-strip-ui.js): title, step, time left, finish time; a click opens
 // the run window in the 📖 Akọwe tab (the same "open an Akọwe page" as the panel's buttons)

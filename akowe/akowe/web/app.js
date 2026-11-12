@@ -7,6 +7,7 @@ import { runCostLine, viewCosts, viewSceneGrid } from './grid.js';  // 🗂 P27 
 import * as S7C from './section7c.js';  // P23 beta reader + P25 your writing style (Section 7c)
 import * as WR from './writers-room.js';  // 🗳 the three-AI writers' room (writers_room.py)
 import * as CC from './claude-code.js';  // 🤖 Claude Code helpers (claude_code.py)
+import * as CLI from './cli-mode.js';  // ⌨ command-line mode: Claude Code / Codex instead of the web windows (cli_mode.py)
 import * as CK from './checkers.js';  // 📊 checker track record · 🔢 checker order · 🧑‍⚖️ stand-in decider
 import * as WRT from './writers.js';  // 🏆 who writes best · 🤫 hide the twist better
 import { maybeStartTour, replayTour } from './tour.js';  // 🧭 the short guided tour of My books (first visit; ❓ Help replays it)
@@ -3374,6 +3375,7 @@ async function viewSettings(main) {
       h('li', null, 'API keys and AutoInjector connection keys are stored in the local secrets file on this computer, never in project data, exports, reports or logs. Key fields are write-only: a saved key is never shown again.'),
       h('li', null, 'Not sure everything works? Switch on 🛠 Advanced view, open “⋯ More” at the top and press “🧪 Test everything”: it builds a small test book (a separate book) and writes a report.'))));
   main.appendChild(autoInjectorCard(main));
+  main.appendChild(CLI.cliCard(Object.assign(s7c(), { onSlots: () => { clear(main); viewSettings(main); } })));
   for (const s of slots) main.appendChild(slotForm(s));
   main.appendChild(retryCard());
   main.appendChild(reviewerCard());
@@ -3489,13 +3491,16 @@ function slotForm(s) {
   const key = h('input', { type: 'password', autocomplete: 'new-password', spellcheck: 'false', placeholder: s.has_credentials ? 'Stored — leave blank to keep' : 'Not set' });
   const removeKeyBox = h('input', { type: 'checkbox', id: `${p}-rmkey` });
   const isAuto = () => adapter.value === 'autoinjector';
+  const mode = CLI.modeField(s7c(), s, `${p}-mode`);  // ⌨ Web window or Command line (Claude / ChatGPT only)
+  const syncMode = () => { const ok = ['claude', 'chatgpt'].includes(site.value); mode.querySelector('option[value="cli"]').disabled = !ok; if (!ok) mode.value = 'web'; };
+  site.addEventListener('change', syncMode); syncMode();
   const strip = slotStatusStrip(s);
   const status = h('p', { class: 'row' },
     s.connected ? badge('✔', 'Adapter set', 'b-ok') : badge('○', 'Not set up', 'b-muted'),
     s.adapter_id === 'autoinjector'
       ? (s.has_credentials ? badge('⚿︎', 'Connection key saved', 'b-ok') : badge('–', 'No connection key', 'b-muted'))
       : (s.has_credentials ? badge('⚿︎', 'API key available', 'b-ok') : badge('–', 'No API key', 'b-muted')),
-    s.adapter_id === 'autoinjector' && s.site ? badge('◆', `Web: ${s.site}`, 'b-info') : null,
+    s.adapter_id === 'autoinjector' && s.site ? (s.mode === 'cli' ? badge('⌨', `Command line: ${s.site}`, 'b-info') : badge('◆', `Web: ${s.site}`, 'b-info')) : null,
     (s.roles || []).length ? badge('→', `Roles: ${s.roles.join(', ')}`, 'b-info') : null,
     s.healthy === false ? badge('⚠︎', 'Unhealthy', 'b-warn') : null,
     badge('…', `${s.active_jobs || 0} active job(s)`, 'b-muted'));
@@ -3519,7 +3524,8 @@ function slotForm(s) {
     h('p', { class: 'small', role: 'note' }, h('span', { 'aria-hidden': 'true' }, '⚠︎ '), TOS_CAUTION),
     h('div', { class: 'grid-2' },
       f('bridge', 'AutoInjector address', bridgeUrl, 'http://127.0.0.1 or http://localhost only. Default ' + BRIDGE_DEFAULT + '.'),
-      f('site', 'Web site', site, 'Which logged-in AutoInjector pane this slot uses.')),
+      f('site', 'Web site', site, 'Which logged-in AutoInjector pane this slot uses.'),
+      f('mode', 'How Akọwe reaches this AI', mode, 'Web window: AutoInjector types into the web page (as always). Command line: Akọwe runs Claude Code (Claude) or Codex (ChatGPT) on this computer instead — no web page needed. Not for Gemini yet.')),
     h('div', { class: 'row' }, testBtn, infoTip('What does Test connection do?', ...TIP_TEST()),
       h('span', { class: 'hint', id: `${p}-test-h` }, 'Checks the saved settings (save first). Sends no book content.')),
     healthOut);
@@ -3553,6 +3559,7 @@ function slotForm(s) {
       if (!site.value) { site.setAttribute('aria-invalid', 'true'); out.appendChild(stateBox('failed', 'Choose the web site this slot uses')); site.focus(); return; }
       site.removeAttribute('aria-invalid');
       body.site = site.value; body.bridge_url = bridgeUrl.value.trim() || BRIDGE_DEFAULT;
+      body.mode = ['claude', 'chatgpt'].includes(site.value) ? mode.value : 'web';
     }
     if (removeKeyBox.checked) body.api_key = null;
     else if (key.value) body.api_key = key.value;
