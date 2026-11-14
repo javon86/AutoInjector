@@ -588,6 +588,28 @@ meanwhile), "at your ChatGPT plan's usage limit until about 3:45 PM" (another AI
 for the limit, like a web window at its limit), or "took too long" (it is asked again or another AI takes it).
 ⚡ Cancel stops a command-line AI at once. To go back, press **🌐 All back to web windows**.
 
+### 🧪 Money lab (try it first — Windows Pro only)
+
+Press **🧪 Lab** in the title bar. Claude (Claude Code) and ChatGPT (Codex) get their own **Windows Sandbox** — a
+throw-away Windows inside Windows, with Microsoft Edge — and try to earn money honestly for the time you set.
+
+- **What they can reach:** only the folders in *Documents\AutoInjector Money lab*. Not your files, other programs or
+  passwords. Closing the sandbox window wipes everything inside except those folders.
+- **They ask you first** before making any account, posting or selling in public, messaging anyone, or anything that
+  costs money. You get a desktop notice; answer with **✔ Yes** or **✖ No** (and a note) in the lab window.
+- **Locked in their browser:** password boxes (until you say yes to an account on that site) and all card / bank
+  boxes and payment pages. There's no card in the lab.
+- **No API charges:** they use the Claude and ChatGPT plans you sign in with inside the sandbox (the first time, a
+  window there asks you to sign in to each).
+- **What they make:** in the *workshop* folder — each AI's *products* folder, their journals, the shared board,
+  the ledger (only money actually received, with proof) and a *REPORT.md* each at the end.
+- **Settings:** the mission, which AIs, how many hours, round length, "each their own idea" or "as a team", and
+  "Open the lab every time AutoInjector starts".
+- **Needs:** Windows 10/11 **Pro, Enterprise or Education** with Windows Sandbox turned on (the lab window has a
+  **Turn Windows Sandbox on** button; restart afterwards). The first start downloads Node.js, Git and the tools
+  into the lab folder — a few minutes, once.
+- **Stopping:** **⏸ Stop after this round**, or **⏹ Close the sandbox now**.
+
 ## 12. When something goes wrong
 
 - **❓ Help → 🩺 Something's wrong?** looks at the AI panes, Akọwe, a running book, the AIs' usage limits, Ollama,

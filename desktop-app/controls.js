@@ -5623,3 +5623,9 @@ function wireAkoweTab() {
   Promise.resolve(api.akoweServerStatus()).then(render).catch(() => {});
 }
 try { wireAkoweTab(); } catch (e) { console.error("Akọwe tab init failed", e); }
+
+// 🧪 Money lab: the title bar button opens its own window (lab.html)
+(function () {
+  const b = document.getElementById("btn-lab");
+  if (b) b.addEventListener("click", () => { try { if (window.api && window.api.labOpenWindow) window.api.labOpenWindow(); } catch (_) {} });
+})();

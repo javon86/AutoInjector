@@ -10006,6 +10006,7 @@ function showAttention(n) {
 }
 // A click on a notification opens the right place: the window, and the Akọwe tab for a book run.
 function openAttentionTarget(n) {
+  if (n && n.target === "lab") { openLabWindow(); return; } // 🧪 an AI in the Money lab asks you something
   showMainWindow();
   if (n && n.target === "akowe") {
     if (akowePopWin && !akowePopWin.isDestroyed?.()) { try { akowePopWin.show?.(); akowePopWin.focus(); } catch (_) {} }
@@ -10220,6 +10221,60 @@ ipcMain.handle("akowe:status", (_evt, payload) => akoweStatusSnapshot({ panelOpe
 // ⌨ Command-line mode: the panel's "Web window / Command line" choice and the preset go to Akọwe (it owns them)
 ipcMain.handle("akowe-cli:set-mode", async (_evt, p) => { const r = await cliWatch.setMode(p && p.slot_id, p && p.mode); logEvent("akowe-cli-mode", { slot: p && p.slot_id, mode: p && p.mode, ok: r.ok, error: r.error || null }); return r; });
 ipcMain.handle("akowe-cli:preset", async (_evt, p) => { const r = await cliWatch.preset(p && p.preset); logEvent("akowe-cli-preset", { preset: p && p.preset, ok: r.ok }); return r; });
+
+// 🧪 Money lab (money-lab-main.js, lab.html): Claude Code + Codex in a Windows Sandbox, trying to earn money honestly
+// for the time you set. They only see Documents\AutoInjector Money lab; they ask you (a desktop notice + the lab
+// window's Yes / No) before any account, public post, message or money. Windows only (Windows Sandbox: Pro / Enterprise).
+let _moneyLab = null;
+function moneyLab() {
+  if (_moneyLab) return _moneyLab;
+  _moneyLab = require("./money-lab-main").createMoneyLab({
+    root: path.join(app.getPath("documents"), "AutoInjector Money lab"),
+    kitSource: path.join(__dirname, "money-lab-kit"),
+    log: (s) => logEvent("money-lab", { note: String(s).slice(0, 200) }),
+    // the notice quotes the AI's ask; the log keeps only the code (showAttention logs category/code when given)
+    notify: (title, body) => showAttention({ key: `money-lab-${Date.now()}`, category: "money-lab", code: "ASK", title, body: String(body || "").slice(0, 240), target: "lab" }),
+  });
+  return _moneyLab;
+}
+let labWin = null;
+let labView = null;
+function openLabWindow() {
+  if (labWin && labView) { try { if (labWin.isMinimized && labWin.isMinimized()) labWin.restore(); labWin.focus(); } catch (_) {} return; }
+  labWin = new BaseWindow({ width: 1040, height: 860, resizable: true, title: "AutoInjector — 🧪 Money lab" });
+  labView = new WebContentsView({ webPreferences: { partition: "money-lab-ui", preload: path.join(__dirname, "preload.js"), contextIsolation: true, nodeIntegration: false } });
+  labWin.contentView.addChildView(labView);
+  labView.webContents.loadFile(path.join(__dirname, "lab.html"));
+  const layout = () => { if (!labWin || !labView) return; const [w, h] = labWin.getContentSize(); labView.setBounds({ x: 0, y: 0, width: w, height: h }); };
+  layout();
+  labWin.on("resize", layout);
+  labWin.on("closed", () => { labWin = null; labView = null; });
+}
+const labSafe = (fn) => async (_evt, p) => { try { return await fn(p || {}); } catch (e) { logEvent("money-lab-error", { error: String(e && e.message || e).slice(0, 200), severity: "warn" }); return { ok: false, error: "LAB_ERROR", words: `The lab hit a problem: ${e && e.message}` }; } };
+ipcMain.handle("lab:window", labSafe(() => { openLabWindow(); return { ok: true }; }));
+ipcMain.handle("lab:status", labSafe(() => moneyLab().status()));
+ipcMain.handle("lab:save", labSafe((p) => moneyLab().saveSettings(p.settings)));
+ipcMain.handle("lab:start", labSafe((p) => moneyLab().start(p.settings || null)));
+ipcMain.handle("lab:stop", labSafe(() => moneyLab().stopAfterRound()));
+ipcMain.handle("lab:close", labSafe(() => moneyLab().closeNow()));
+ipcMain.handle("lab:answer", labSafe((p) => moneyLab().answer(String(p.id || ""), p.allow === true, String(p.note || ""))));
+ipcMain.handle("lab:enable", labSafe(() => moneyLab().enableSandbox()));
+ipcMain.handle("lab:open", labSafe(async (p) => {
+  const dir = moneyLab().folder(String(p.which || ""));
+  if (!dir) return { ok: false, error: "BAD_FOLDER" };
+  try { require("fs").mkdirSync(dir, { recursive: true }); } catch (_) {}
+  const err = await shell.openPath(dir);
+  return err ? { ok: false, error: "OPEN_FAILED", words: err } : { ok: true };
+}));
+// A new ask → a desktop notice (checked every 20 s, only once the lab folder exists); "open the lab when AutoInjector starts"
+function moneyLabStartup() {
+  if (process.platform !== "win32") return;
+  setInterval(() => { try { if (require("fs").existsSync(moneyLab().paths.root)) moneyLab().poll(); } catch (_) {} }, 20000);
+  try {
+    const lab = moneyLab();
+    if (lab.getSettings().autoStart) setTimeout(() => { try { const r = lab.start(null); logEvent("money-lab-autostart", { ok: r.ok, error: r.error || null }); if (r.ok) openLabWindow(); } catch (e) { logEvent("money-lab-error", { error: String(e), severity: "warn" }); } }, 8000);
+  } catch (e) { logEvent("money-lab-error", { error: String(e), severity: "warn" }); }
+}
 ipcMain.handle("akowe:run-resume", async (_evt, payload) => {
   const id = String((payload && payload.id) || "").replace(/[^\w.:-]/g, "").slice(0, 80);
   if (!id) return { ok: false, message: "There is no stopped book run to resume." };
@@ -11074,6 +11129,7 @@ const easeApi = require("./ease-main").installEase({
 // ==== end ✅ EASE OF USE ====
 
 app.whenReady().then(() => {
+  setTimeout(() => { try { moneyLabStartup(); } catch (_) {} }, 0); // 🧪 Money lab: notices for asks, the optional start with the app
   // Windows shows a desktop notification only for an app with an id (PR #123: "your book needs you")
   try { if (process.platform === "win32" && typeof app.setAppUserModelId === "function") app.setAppUserModelId("com.autoinjector.desktop"); } catch (_) {}
   loadPersistedState();

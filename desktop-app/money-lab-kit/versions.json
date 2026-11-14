@@ -1,0 +1,6 @@
+{
+  "node_major": 22,
+  "node_fallback": "v22.12.0",
+  "git_fallback_url": "https://github.com/git-for-windows/git/releases/download/v2.47.1.windows.1/PortableGit-2.47.1-64-bit.7z.exe",
+  "tools": ["@anthropic-ai/claude-code@latest", "@openai/codex@latest", "@playwright/mcp@0.0.85"]
+}

@@ -283,6 +283,16 @@ A('ui.show_tab', null, { t: 'Show a tab (🤖 AutoInjector, 📖 Akọwe, 🎨 I
 /** Channels the AI must not drive — each with the reason. The coverage test checks every channel is
  *  either an ACTIONS entry, a direct Alfred tool (TOOL_CHANNELS), or here. */
 const EXCLUDED = {
+  // 🧪 Money lab (money-lab-main.js, lab.html): the owner's own decisions — the AIs in the sandbox must not be answered or started by another AI
+  'lab:window': 'opens the 🧪 Money lab window — the owner\'s',
+  'lab:status': 'the lab window\'s own read of the sandbox — not a control',
+  'lab:save': 'the owner\'s mission and limits for the lab — not for Alfred to change',
+  'lab:start': 'starts AIs with internet access in a sandbox — only the owner may',
+  'lab:stop': 'the owner stops the lab after the round',
+  'lab:close': 'the owner closes the sandbox',
+  'lab:answer': 'the owner\'s Yes / No to an AI in the lab (accounts, posts, messages, money) — never answered by an AI',
+  'lab:open': 'opens a lab folder in Explorer — the owner\'s',
+  'lab:enable': 'turns on Windows Sandbox (asks Windows for admin) — the owner\'s',
   // ⌨ command-line mode (cli-mode-ui.js): the 📚 Akọwe panel's mirror of Akọwe's own setting
   'akowe-cli:set-mode': 'the panel\'s Web window / Command line choice per AI slot — Akọwe owns it (⚙️ Settings); not for Alfred to switch',
   'akowe-cli:preset': 'the panel\'s "Two AIs on command line" preset — Akọwe owns it (⚙️ Settings); not for Alfred to switch',

@@ -404,6 +404,16 @@ contextBridge.exposeInMainWorld("api", {
   akoweRunResume: (id) => ipcRenderer.invoke("akowe:run-resume", { id }),
   akoweCliSetMode: (slotId, mode) => ipcRenderer.invoke("akowe-cli:set-mode", { slot_id: slotId, mode }), // ⌨ cli-mode-ui.js
   akoweCliPreset: (preset) => ipcRenderer.invoke("akowe-cli:preset", { preset }),
+  // 🧪 Money lab (money-lab-ui.js / lab.html)
+  labOpenWindow: () => ipcRenderer.invoke("lab:window"),
+  labStatus: () => ipcRenderer.invoke("lab:status"),
+  labSave: (settings) => ipcRenderer.invoke("lab:save", { settings }),
+  labStart: (settings) => ipcRenderer.invoke("lab:start", { settings }),
+  labStop: () => ipcRenderer.invoke("lab:stop"),
+  labClose: () => ipcRenderer.invoke("lab:close"),
+  labAnswer: (id, allow, note) => ipcRenderer.invoke("lab:answer", { id, allow: allow === true, note: note || "" }),
+  labOpen: (which) => ipcRenderer.invoke("lab:open", { which }),
+  labEnable: () => ipcRenderer.invoke("lab:enable"),
   // 📖 Akọwe tab: the server AutoInjector runs itself, and the view showing it
   akoweServerStatus: () => ipcRenderer.invoke("akowe-server:status"),
   akoweServerRetry: () => ipcRenderer.invoke("akowe-server:retry"),

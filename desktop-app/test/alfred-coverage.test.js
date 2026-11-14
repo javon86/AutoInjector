@@ -110,6 +110,7 @@ const IPC_INVENTORY = [
   'sdlib:save-lock', 'sdlib:scan', 'sdlib:update', 'selector:clear', 'selector:pick',
   'attention:settings', 'attention:test', 'akowe:fresh-chat-settings', // PR #123
   'akowe-cli:set-mode', 'akowe-cli:preset', // ⌨ command-line mode (cli-mode-ui.js)
+  'lab:window', 'lab:status', 'lab:save', 'lab:start', 'lab:stop', 'lab:close', 'lab:answer', 'lab:open', 'lab:enable', // 🧪 Money lab (money-lab-main.js)
   'downloads:list', 'downloads:open', // ⬇ files the AIs give you to download (ai-downloads.js)
   'savestate:list', 'savestate:save', 'savestate:load', 'savestate:rename', 'savestate:delete', 'savestate:view', 'sequence:draft', // 💾 / 📂 saved states (save-state.js)
   'selfrepair:forget-learned', 'selfrepair:probe', 'selfrepair:reload', 'selfrepair:settings', 'selfrepair:status', 'selfrepair:teach-cancel', 'selfrepair:teach-start',

@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <title>AutoInjector — 🧪 Money lab</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin:0; background:#111; color:#eee; font:12.5px/1.45 system-ui, sans-serif; padding:14px 16px 24px; }
+    main { max-width:980px; margin:0 auto; display:flex; flex-direction:column; gap:12px; }
+    h1 { font-size:16px; margin:0; }
+    h2 { font-size:13.5px; margin:0 0 6px; }
+    h3 { font-size:12.5px; margin:0 0 4px; }
+    p { margin:4px 0; }
+    section { background:#171717; border:1px solid #2a2a2a; border-radius:8px; padding:10px 12px; }
+    label { font-size:12px; color:#ccc; }
+    input, textarea, select, button { background:#1d1d1d; color:#eee; border:1px solid #363636; border-radius:6px; padding:5px 8px; font:inherit; }
+    textarea { width:100%; min-height:86px; resize:vertical; }
+    button { cursor:pointer; }
+    button:hover:not(:disabled) { background:#262626; }
+    button:disabled { opacity:.45; cursor:default; }
+    button.primary { background:#1a3a2a; border-color:#2a5a3a; }
+    button.danger { background:#3a1a1a; border-color:#5a2a2a; }
+    .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+    .lab-dim { opacity:.65; }
+    .lab-about { opacity:.85; }
+    #lab-avail { border-color:#6b5a1f; background:#1f1b10; }
+    #lab-avail ol { margin:6px 0 6px 18px; padding:0; }
+    #lab-phase { font-weight:700; }
+    #lab-phase[data-running="1"] { color:#8fd18f; }
+    #lab-msg { min-height:1.2em; }
+    #lab-msg[data-tone="warn"] { color:#f3c66b; }
+    #lab-msg[data-tone="ok"] { color:#8fd18f; }
+    #lab-agents { display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:10px; }
+    .lab-agent { border:1px solid #2f2f2f; border-radius:7px; padding:8px 10px; background:#141414; min-width:0; }
+    .lab-agent[data-state="working"] { border-color:#2a5a3a; }
+    .lab-agent[data-state="trouble"], .lab-agent[data-state="signed-out"] { border-color:#6b5a1f; }
+    .lab-agent-last { white-space:pre-wrap; overflow-wrap:anywhere; background:#0d0d0d; padding:6px 8px; border-radius:5px; margin:6px 0 0; font-size:11.5px; max-height:160px; overflow:auto; }
+    .lab-ask { border:1px solid #4a3f17; background:#1b1810; border-radius:7px; padding:8px 10px; margin:0 0 8px; }
+    .lab-ask-head { font-weight:600; }
+    .lab-ask-what, .lab-ask-why { overflow-wrap:anywhere; }
+    .lab-ask-why { opacity:.8; }
+    .lab-ask-note { width:100%; margin:4px 0; }
+    .lab-ask-row { display:flex; gap:8px; }
+    .lab-yes { background:#1a3a2a; border-color:#2a5a3a; }
+    .lab-no { background:#3a1a1a; border-color:#5a2a2a; }
+    .lab-small { padding:1px 7px; margin-left:8px; font-size:11.5px; }
+    ul, ol { margin:4px 0 0 18px; padding:0; }
+    li { overflow-wrap:anywhere; margin:2px 0; }
+    details summary { cursor:pointer; }
+    @media (max-width: 600px) { body { padding:10px; } }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>🧪 Money lab — Claude and ChatGPT in a sealed Windows Sandbox</h1>
+    <p class="lab-about">They get their own Windows inside Windows, with Microsoft Edge, and try to earn money honestly for the time you set.
+      They can only see the lab's folders (Documents\AutoInjector Money lab) — not the rest of your PC. They must ask you before
+      any account, public post, message or anything that costs money. Your Claude and ChatGPT plans are used (no API charges).</p>
+  </header>
+
+  <section id="lab-avail" hidden>
+    <h2>⚠ Windows Sandbox isn't ready</h2>
+    <p id="lab-avail-words"></p>
+    <ol id="lab-avail-steps"></ol>
+    <button id="lab-enable" type="button">🛠 Turn Windows Sandbox on</button>
+  </section>
+
+  <section aria-labelledby="lab-mission-h">
+    <h2 id="lab-mission-h">The mission</h2>
+    <textarea id="lab-mission" aria-label="The mission" maxlength="4000"></textarea>
+    <div class="row" style="margin-top:6px">
+      <label><input type="checkbox" id="lab-ai-claude"> Claude (Claude Code)</label>
+      <label><input type="checkbox" id="lab-ai-codex"> ChatGPT (Codex)</label>
+      <label>How long: <input type="number" id="lab-hours" min="1" max="72" style="width:64px"> hours</label>
+      <label>Rounds of <input type="number" id="lab-round" min="5" max="120" style="width:64px"> minutes</label>
+      <label>They <select id="lab-style">
+        <option value="solo">each try their own idea</option>
+        <option value="team">work together as a team</option>
+      </select></label>
+    </div>
+    <div class="row" style="margin-top:6px">
+      <label><input type="checkbox" id="lab-autostart"> Open the lab every time AutoInjector starts</label>
+      <button id="lab-save" type="button">💾 Save</button>
+    </div>
+  </section>
+
+  <section aria-labelledby="lab-now-h">
+    <h2 id="lab-now-h">Now: <span id="lab-phase">…</span></h2>
+    <p id="lab-words" role="status" aria-live="polite"></p>
+    <div class="row">
+      <button id="lab-start" class="primary" type="button" data-testid="lab-start">▶ Start the lab</button>
+      <button id="lab-stop" type="button">⏸ Stop after this round</button>
+      <button id="lab-close" class="danger" type="button">⏹ Close the sandbox now</button>
+      <button id="lab-open-workshop" type="button">📂 Open the workshop folder</button>
+    </div>
+    <p id="lab-msg" data-tone="info"></p>
+    <div id="lab-agents"></div>
+    <p id="lab-money" class="lab-dim"></p>
+  </section>
+
+  <section aria-labelledby="lab-asks-h">
+    <h2 id="lab-asks-h">They're asking you<span id="lab-asks-count"></span></h2>
+    <div id="lab-asks"></div>
+    <details><summary>Your earlier answers</summary><ul id="lab-asks-done"></ul></details>
+  </section>
+
+  <section aria-labelledby="lab-made-h">
+    <h2 id="lab-made-h">What they made</h2>
+    <ul id="lab-products"></ul>
+    <h3 style="margin-top:8px">Money ledger (money actually received, with proof)</h3>
+    <ul id="lab-ledger"></ul>
+  </section>
+
+  <section aria-labelledby="lab-rules-h">
+    <h2 id="lab-rules-h">The fence and the rules</h2>
+    <ul>
+      <li>The sandbox is a separate Windows. Closing it wipes it; only the lab folders are kept. It can't see your files, other programs or your passwords.</li>
+      <li>In their browser, password boxes are locked until you say yes to an account on that site, and card / bank boxes and payment pages are always blocked. There's no card in the lab.</li>
+      <li>The rules they follow are in <em>lab-kit\RULES.md</em>: honest and legal only, no spending, no gambling, trading or crypto, no spam or fake reviews, ask before any account, post, message or money.</li>
+      <li>The sandbox has internet access, so they can read any website. You can watch them in the sandbox window and close it any time.</li>
+    </ul>
+  </section>
+</main>
+<script src="money-lab-ui.js"></script>
+<script src="lab.js"></script>
+</body>
+</html>
