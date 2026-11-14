@@ -908,6 +908,7 @@ def _read_part_by_all(svc, run: dict, cp: dict, part: dict, j: int, rid: str, ct
     checker_record.from_merge(store, run, merged, [s for s, _d in done], prov, kind="continuity",
                               versions={c: (texts.get(c) or {}).get("version") for c in part["chapter_ids"]})
     part.update(done=True, error=None, problems=merged, summary=done[0][1].get("summary") or "",
+                versions={c: (texts.get(c) or {}).get("version") for c in part["chapter_ids"]},  # what was read
                 slot=done[0][0], checked_by=[d["name"] for _s, d in done],
                 skipped=[by[s]["name"] for s in checkers if by.get(s) and not by[s].get("done")], at=_now(),
                 reviews=[dict(d["review"], name=d["name"], slot=s) for s, d in done if d.get("review")])
