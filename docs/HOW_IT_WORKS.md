@@ -1250,6 +1250,46 @@ All four are on the ⚡ **AI writes the whole book** screen (code: `akowe/akowe/
   the planners, the writer's brief, the editor and the consistency checks all read the story rules. (If "story
   rules" is switched off in the pipeline, the facts are still added before the premise.)
 
+### 📖 Growing the author's own start into a novel
+
+`grow_novel.py` (page `#/grow`, then `#/p/<pid>/<branch>/grow`; `web/grow-novel.js`; routes `/api/grow/start` and
+`…/branches/<b>/grow[/understand|/understood|/accept|/plan|/plan/use|/write]`). The author's opening (1–12 chapters, or
+a few pages) becomes a whole book in four steps:
+
+1. **Import, no AI.** `book_import.py` reads the file (.docx and .odt with the standard library; .pdf with `pypdf` when
+   it is installed, else a small built-in reader for simple text PDFs; .txt, .md, pasted text) and splits it at its
+   headings (none = chapter 1). `start` makes a new book (project setting `grown_book`) with the title and target
+   length; the chapter texts wait in `book_import_pending:<pid>:<b>`.
+2. **Fill the Book Bible, two AI requests.** (a) The reading: premise and dramatic question, kind of story, a summary
+   per chapter, the characters (story role, wants / fear / secret, looks each with the quote that shows it — checked
+   word for word), places, the world, the story rules — every magic system as a STRUCTURED rule (`magic_rules.py`:
+   needs with quantities, limits, price, who, holdings) — protected mysteries (rules of category `mystery`) and the
+   open threads. (b) The voices: Akọwe finds each character's own lines without AI (a quote belongs to the name in its
+   speech tag), the AI writes their voice cards from them (the sample lines are their real lines) and describes the
+   narrator's style (`style_card.py`; the numbers, point of view and tense are measured without AI; quotes checked).
+   The result is stored in `grow:<pid>:<b>` and shown on one screen; the author's edits are saved there. **✔ Use
+   this** (`accept`, no AI) writes the profile (incl. `central_question`, the kind of story, pov/tense), the places
+   (A04), the world (A03), the characters (A01, approved) with their sheets, voice cards and story roles saved as the
+   **author's** (so `voice_contrast` and later runs never rewrite them; an AI only fills empty fields), the looks
+   quoted from the page as 🔒 protected Character Forge fields (so just-in-time details never contradict them), the
+   story rules (the magic check enforces them on every new chapter), and a style card for this book only
+   (`style_card:<pid>`; the author's own card is untouched).
+3. **Plan the rest, one AI request.** For the target (length preset or a chapter count) the AI plans chapters N+1…
+   from the chapter summaries, the end of the last chapter, the cast, the rules (magic included), the open threads and
+   the kind of story's stages. **✔ Use this plan** makes B01 premise, B03 main plot (the setups as plot obligations)
+   and B11 outline (the author's chapters 1..N, then the new ones) as manual candidates approved by the author's OK,
+   then stores the author's chapters on that outline (C02 manual candidates: made by "you").
+4. **Write on.** `write` starts ⚡ Make a book with `continue_project`: every step already done is skipped; the 🩺
+   story doctor scores the outline (it is the author's, so it is scored, never revised); the trade card is made; the
+   author's chapters are tracked by the continuity tracker (running notes, 🔒 details, the magic ledger's uses and
+   holdings) and the writer starts at chapter N+1. Fresh names are off for a continued book.
+
+The author's chapters are protected everywhere: every rewrite pass asks `AutoBookService._ai_made`, which is False for
+them (improve pass + weakest scenes, opening pass, chapter polish, end-of-book voice pass, checkpoint fixes, and the
+ending pass's fix); and when the outline changes after they were stored (a new version makes their old approval out of
+date), `book_import.keep_author_chapter` puts each one back on the new outline word for word — the run never writes
+an author's chapter.
+
 ## 4. How quality is kept
 
 | Check | What it catches | When it runs |

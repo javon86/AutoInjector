@@ -659,7 +659,9 @@ def _write_through(store, pid, branch, rid, canon, fields: dict, changed: set, b
         sheet["relationships"] = rels[:8]
     # a Make-a-book run's approval (by "run:<id>") is AI work under the run consent, not the author's: the sheet keeps
     # its AI maker (and the story role is not turned into an author's choice)
-    run = str(by).startswith("run:")
+    # 📖 a card the author made (or approved from their own chapters) stays the author's: a run only filled its empty
+    # fields, so voice_contrast and later runs never treat it as AI work to rewrite
+    run = str(by).startswith("run:") and (cent.get("made_by") or {}).get("kind") != "author"
     sheet_changed = bool(mirrored & (set(SHEET_SCALAR) | set(MUST_KEYS) | set(REL_KEYS)))
     chars_mod.save_entry(store, pid, branch, rid, sheet=sheet if sheet_changed or not run else None, voice=voice,
                          by="ai" if run else "author",

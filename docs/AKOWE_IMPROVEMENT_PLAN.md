@@ -347,6 +347,35 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
 - [x] **SM6** Binder PDF/HTML (SVG + table) and Word (PNG with numbered markers + key + table); book package; a sequel
   carries locked and approved links (series.link_sequel → story_map.carry_forward).
 
+## 📖 Grow my start into a novel (2026-11, user: "if a person gives them an initial three-page book / three-chapter book, they can turn that into a complete novel … the magic system in it must be followed too") — done
+
+Built on the parked 5a "Bring in my book" import (`parked/import-book-fix-notes`, brought up to date with main; its
+readers, chapter split and author-text storage are now loaded). `grow_novel.py`, `web/grow-novel.js`; USER_GUIDE "📖 Grow
+my start into a novel", HOW_IT_WORKS "📖 Growing the author's own start into a novel".
+
+- [x] **Import:** paste or upload 1–12 chapters or a few pages (.docx/.odt/.txt/.md, and now **.pdf** — `pypdf` when
+  installed, else a small built-in reader; a scan is refused in plain words); headings split it, none = chapter 1.
+- [x] **Book Bible from the chapters** (2 AI requests), shown on ONE screen to fix before anything is used: characters
+  (roles, wants/fear/secret, looks quoted from the page → 🔒 Forge fields), voice cards from each character's REAL lines
+  (found without AI), places, world, story rules with every magic system as a STRUCTURED magic rule (needs with
+  quantities, limits, price, who, holdings → the per-chapter rule check enforces it), protected mysteries, open threads,
+  premise + dramatic question, kind of story, pov/tense measured from the prose, the style card (this book only).
+- [x] **Plan the rest** (1 AI request) for a length or chapter count, from chapter N+1; editable; the author's chapters
+  stay 1..N; the 🩺 story doctor scores the plan in the run (the author's outline: scored, never rewritten).
+- [x] **Write on** with ⚡ Make a book (`continue_project`): style card, continuity and the magic ledger from the
+  author's chapters, trade card; fresh names off (a continued book's names are the author's).
+- [x] **The author's chapters are never edited:** improve pass / weakest scenes, opening pass, chapter polish, end pass
+  and checkpoint fixes skip them (`_ai_made`); the **ending pass's fix now skips them too** (it did not ask before); a
+  changed outline puts them back word for word (`book_import.keep_author_chapter`), never written by the AI.
+- [x] Found on the way and fixed: the 🩺 story doctor crashed on a main plot with setups (`plot_obligations` are
+  strings; it called `.get` on them); a run's just-in-time details turned the author's character card into "AI made"
+  (forge write-through), and a character sheet the AI completed replaced the author's fields (now it only fills empty
+  ones).
+- [x] Entry points: My books, ➕ New book, the ⚡ Make-a-book screen ("📖 Start from my own chapters"), and Book home of a
+  grown book. Tests: `tests/test_grow_novel.py` (+ `tests/grow_fake.py`), `tests/test_book_import.py`,
+  `tests/campaign/ui/test_ui_grow_novel.py`.
+- Not done: an 🎩 Alfred tool for it (optional); 📝 Fix it with my notes stays on the parked branch (not loaded).
+
 ## Ease of use (2026-11, approved by the user)  (PR #136)
 
 - [x] **3b** ✅ Setup checklist: one screen with ✅ / ❌ (⚪ for optional extras, ⏳ not sure yet) for everything the app
@@ -368,8 +397,6 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
 - [ ] **3a** A real installer (one setup file instead of Node.js + `run-windows.bat`) — user parked this 2026-11-08
 - [ ] **3c** Simple mode for the AutoInjector window and a home screen — user parked this 2026-11-08
 - [ ] **3g** Backup off the PC (books copied to another drive or the cloud) — user parked this 2026-11-08
-- [ ] **5a/5d** 📥 Bring in my own book + 📝 Fix it with my notes — started, then parked by the user 2026-11-08.
-  The work in progress (new files only, not wired in) is saved on the GitHub branch `parked/import-book-fix-notes`.
 - [ ] **5b/5c** 🎧 Audiobook + 🖥 Alfred's local AI as backup when the online AIs hit limits — started, then parked by
   the user 2026-11-08. The work in progress (partly wired, local-AI part nearly done) is saved on the GitHub branch
   `parked/audiobook-local-ai`. Not merged; review before reuse.

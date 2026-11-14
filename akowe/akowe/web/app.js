@@ -24,6 +24,7 @@ import { viewBinder } from './binder.js';  // 📖 Book Bible binder (the author
 import { viewStoryMap } from './storymap.js';  // 🗺 the story map (story_map.py)
 import { CODE_MAP, CODE_MAP_MD } from './code-map.js';  // 🔢 the Book Bible code map (code_map.py)
 import { needsBox } from './needs-list.js';
+import { viewGrowStart, viewGrow } from './grow-novel.js';  // 📖 Grow my start into a novel (grow_novel.py)
 import { checkNowBox } from './check-now.js';  // 🔎 PR #117: Check consistency now (check_now.py)  // 🧠 a chapter's needs list (needs_list.py)
 
 /* ======================================================================= constants */
@@ -710,6 +711,7 @@ async function pickView(parts) {
     return viewHome;
   }
   if (parts[0] === 'style') return m => S7C.viewStyle(m, s7c());  // ✒️ P25
+  if (parts[0] === 'grow') return m => viewGrowStart(m, growUI());  // 📖 Grow my start into a novel
   if ((parts[0] || '').split('?')[0] === 'compare') return m => viewCompare(m, parts[1] ? parts[1].split('?')[0] : null);
   if (parts[0] === 'p') {
     const rest = parts.slice(3);
@@ -731,6 +733,7 @@ async function pickView(parts) {
     if (rest[0] === 'continuity') return m => viewContinuity(m, { h, clear, api, bpath, plink, S, crumbs, problemBox, toProblem, runAiJob, choiceDialog, toast, infoTip, route });
     if (rest[0] === 'report') return viewReport;
     if (rest[0] === 'forge') return m => forgeRoute(m, rest.slice(1), forgeUI());  // 🗂 B5 (…/forge/<rid>, …/forge/items/<rid>)
+    if (rest[0] === 'grow') return m => viewGrow(m, growUI());  // 📖 Grow my start into a novel
     if (rest[0] === 'pictures') return m => viewPictures(m, forgeUI());  // 🖼 B3
     if (rest[0] === 'trailer') return m => viewTrailer(m, Object.assign(forgeUI(), { fmtClock }));  // 🎞 B2
     if (rest[0] === 'cover') return m => viewCover(m, forgeUI());  // 🎨 B3 cover designer
@@ -986,6 +989,7 @@ async function viewHome(main) {
   main.appendChild(h('div', { class: 'page-head' }, h('h1', null, '📚 My books'),
     h('div', { class: 'row' }, h('a', { class: 'btn primary big', href: '#/start', 'data-testid': 'home-new' }, '➕ New book'),
       h('button', { type: 'button', class: 'big mab-cta', 'aria-label': 'AI writes the whole book (Make a book for me)', onclick: ev => openMakeBook(ev.currentTarget) }, boltLabel('AI writes the whole book')),
+      h('a', { class: 'btn big', href: '#/grow', 'data-testid': 'home-grow' }, '📖 Start from my own chapters'),
       h('a', { class: 'btn big', href: '#/shelf' }, '📚 My finished books'),
       h('button', { type: 'button', class: 'big', 'data-testid': 'home-open', onclick: ev => openSavedBookDialog(ev.currentTarget) }, '📂 Open a saved book'))));
   const listCard = h('section', { class: 'card', 'aria-labelledby': 'proj-list-h' }, h('h2', { id: 'proj-list-h' }, 'Books you are working on'));
@@ -5418,7 +5422,8 @@ async function viewStart(main) {
       landingBtn({ icon: '✍', label: 'Write it with me', line: 'You decide each step and the AI helps when you ask. Fill in the steps below.', testid: 'start-me', primary: true,
         onclick: () => { const c = document.querySelector('.wz-card'); if (c) { c.scrollIntoView({ block: 'start' }); const f = c.querySelector('input, select, textarea, button'); if (f) f.focus({ preventScroll: true }); } } }),
       landingBtn({ icon: '⚡', label: 'AI writes the whole book', line: 'The AI makes the whole book in one go while you watch; you can pause or cancel and get PDF, EPUB and Word at the end.', testid: 'start-ai',
-        onclick: ev => openMakeBook(ev.currentTarget) }))));
+        onclick: ev => openMakeBook(ev.currentTarget) }),
+      landingBtn({ icon: '📖', label: 'Start from my own chapters', line: 'You wrote the first chapters (or a few pages): the AI fills the Book Bible from them — magic rules included — plans the rest and writes on in your voice.', testid: 'start-grow', href: '#/grow' }))));
   main.appendChild(h('h2', { class: 'wz-h2' }, '✍ Write it with me'));
   const steps = ['Your book', 'Your AI', 'What to make', 'Review and go'];
   main.appendChild(h('ol', { class: 'wz-steps step-rail', 'aria-label': 'Steps' }, steps.map((s, i) => h('li', { class: i + 1 === w.step ? 'cur here rail-needs_you' : i + 1 < w.step ? 'done rail-done' : 'rail-blocked', 'aria-current': i + 1 === w.step ? 'step' : null },
@@ -5567,6 +5572,9 @@ async function viewBook(main) {
     h('a', { class: 'btn', href: plink('grid'), 'data-testid': 'bk-grid' }, '🗂 Scene grid'),
     WR.roomButton(wrc()))));  // 🗳 the three-AI writers' room: a twist, a chapter, a character or your own question
   main.appendChild(bookSaveCard());
+  if (S.project && (S.project.settings || {}).grown_book) {  // 📖 started from the author's own chapters
+    main.appendChild(h('p', { class: 'notice', 'data-testid': 'home-grow-link' }, '📖 This book grows from your own chapters: ', h('a', { href: plink('grow') }, 'Grow my start into a novel'), ' (what the AI understood, the plan of the rest, ⚡ write the rest).'));
+  }
   const holder = h('div', null, loadingState('Checking where your book is…'));
   main.appendChild(holder);
   let book = null;
@@ -6596,6 +6604,8 @@ const TIP_SHEET = () => [
 function forgeUI() {
   return { h, clear, api, bpath, plink, S, crumbs, problemBox, toProblem, runAiJob, choiceDialog, toast, infoTip, route, loadingState, stateBox, openMakeBook, confirmSequel };
 }
+/** What 📖 Grow my start into a novel (grow-novel.js) needs from this file. */
+function growUI() { return Object.assign(forgeUI(), { go, loadProjects }); }
 
 /* ======================================================================= 📚 start a sequel (book page, finished screen) */
 const sequelPath = (pid, branch) => `/projects/${encodeURIComponent(pid)}/branches/${encodeURIComponent(branch || 'main')}/binder/series/sequel`;
@@ -8442,6 +8452,7 @@ async function renderMakeSetup() {
       h('div', { class: 'field' }, h('label', { for: 'mb-pen-name' }, 'Pen name (optional)'), penName, h('span', { class: 'hint' }, 'Printed on the title page and cover. The AI never invents one: empty = the pen name you typed last, or none.')), cf.el, pipe.el, s7.el, sdw.el, fb.el, hp.el, cpo.el, ipw.el, c1.el, wr.el, ck.el, pics.el, ccf.el),
     later.el, err, modelTip(), h('div', { class: 'form-actions' }, startAll, startSet));
   form.insertBefore(h('div', { class: 'row mb-paste-row' }, paste, h('span', { class: 'small muted' }, 'Planned your book with an AI? Paste its starter sheet to fill these settings.')), form.querySelector('.mb-quick'));
+  form.insertBefore(h('p', { class: 'small mb-grow-row' }, 'Already wrote the first chapters? ', h('a', { href: '#/grow', 'data-testid': 'mb-grow', onclick: () => closeMakeBook() }, '📖 Start from my own chapters'), ' — the AI writes on from where you stopped.'), form.querySelector('.mb-quick'));
   // ⏱ 3d: time, AI answers per AI and usage limits for exactly these settings; 📊 3e the usage meter per AI
   const est = RP.planBox(s7c(), () => buildBody(false));
   const meter = RP.meterBox(s7c());

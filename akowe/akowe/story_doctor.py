@@ -184,8 +184,9 @@ def plan_view(svc, run: dict) -> dict:
         d = plot[0].get("data") or {}
         mp = d.get("main_plot") if isinstance(d.get("main_plot"), dict) else {}
         plan["main_plot"] = {"summary": _clip(mp.get("summary"), 2 * TEXT_MAX)}
-        obls = [_clip(o.get("summary") or o.get("description") or o if not isinstance(o, dict) else
-                      json.dumps(o, ensure_ascii=False), 300) for o in d.get("plot_obligations") or []][:12]
+        obls = [_clip(o if not isinstance(o, dict) else (o.get("summary") or o.get("description")
+                                                         or json.dumps(o, ensure_ascii=False)), 300)
+                for o in d.get("plot_obligations") or []][:12]  # the contract's setups are strings
         if obls:
             plan["main_plot"]["setups_to_pay_off"] = obls
     outline = bp.outline()

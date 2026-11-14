@@ -102,6 +102,9 @@ it; **⇱ Pop out** gives Akọwe its own window.
   Start is your permission for that one run only; it makes a new book and never touches your other books. You can
   watch, **⏸ Pause**, **▶ Resume** or **✖ Cancel**. A long book takes a day or two.
 
+- **📖 Start from my own chapters** (also called 📖 Grow my start into a novel): you wrote the first chapters, or only a
+  few pages — the AI turns them into a whole book. See "📖 Grow my start into a novel" below.
+
 On the Make-a-book screen you can choose, among other things: your **Pen name** (printed on the title page and the
 cover; the AI never makes one up — leave it empty to use the pen name you typed last, or none; the plan check warns
 if it is also the name of one of your characters), the kind of story and the story shape (or leave them to the AI), **How many AIs check for mistakes**, **Use Claude Code helpers for this book**, and **"✍ At the end,
@@ -119,6 +122,47 @@ again** to hide it. It never stops you from starting.
 secret also gets an innocent explanation, there is at least one fair red herring, and readers should not be able to
 work out the twist before about two-thirds of the book. The chapters before that point are told not to give the
 secret away or hint at it too hard. This costs no extra AI work.
+
+### 📖 Grow my start into a novel
+
+You wrote the opening — one to a dozen chapters, or just three pages — and want the rest written in your voice, with
+your characters, your world and its rules (magic included). Press **📖 Start from my own chapters** on My books, on
+➕ New book or on the ⚡ Make-a-book screen.
+
+1. **Give Akọwe your chapters.** Paste them, or choose a Word (.docx), PDF, OpenDocument (.odt), text (.txt) or
+   Markdown (.md) file. Headings such as "Chapter 1" or Word's Heading 1 show where chapters start; text with no
+   heading becomes chapter 1. Check the chapters Akọwe found, type the title and choose how long the finished book is
+   (short story, novelette, novella, novel — or the exact number of chapters). Press **📖 Start my book from these
+   chapters**. A PDF that is only pictures of pages (a scan) cannot be read: save the book as .docx or paste the text.
+2. **✨ Read my chapters and fill the Book Bible.** The AI reads them (two requests) and shows ONE screen: **"Here's
+   what I understood from your chapters — fix anything"**:
+   - the story: title, genre, readers, tone, the kind of story, first or third person and the tense (measured from
+     your prose), the premise and the question the book must answer, what happens in each of your chapters;
+   - the people: who they are, their role, what they want, fear and hide, their looks (✔ = word for word from your
+     pages), and **how they talk** — their real lines from your chapters, and the voice card made from them;
+   - places and the world;
+   - **story rules and magic.** Every magic or special system your chapters show becomes a rule with exactly what each
+     use **needs** (with numbers when it is used up: "2 tide-stones"), its **limits** ("3 times a day"), its **price**
+     ("a nosebleed"), who can use it and **who holds what now** ("Mara: 3 tide-stones"). Every new chapter is checked
+     against it, like a magic rule you typed yourself (see "✨ How to write a magic rule"). What your chapters keep
+     unexplained is a **protected mystery**; the questions they leave open are listed too;
+   - your writing style (the narrator's voice), for this book only.
+
+   Change anything, add or remove characters, places and rules, then press **✔ Use this**. Nothing goes into your
+   book before that.
+3. **🗺 Plan the rest.** The AI plans chapters N+1 onward so the book goes on from exactly where you stopped: the main
+   plot to the end, the setups to pay off, and each new chapter's events, who tells it and where. Add a note if you
+   want ("a storm in the middle", "she must lose the stones"). Change any chapter, add or remove one, or **🔁 Plan
+   again**, then press **✔ Use this plan**.
+4. **⚡ Write the rest of my book.** A normal ⚡ run continues this book: the 🩺 story doctor scores the plan first,
+   then the AI writes from chapter N+1 in your voice, with every check of a normal run. It ends with PDF, EPUB and Word
+   files like any ⚡ book.
+
+**Your chapters are never changed.** They stay word for word, approved and "written by you": the improve pass, the
+weakest-scene rewrites, "rewrite chapter 1 last", the chapter polish, the end-of-book "sounds like a person" pass and
+the ending's fixes all skip them. If the chapter list changes later, your chapters are put back exactly as you wrote
+them — the AI never writes them. You can still edit them yourself, like any chapter. The book's 🏠 Book home has a
+link back to this page.
 
 ### While a long book runs
 
