@@ -84,7 +84,7 @@ function availability({ platform, sandboxExe, exists }) {
     words: 'Windows Sandbox is not turned on (or this Windows can\'t have it).',
     steps: [
       'Windows Sandbox comes with Windows 10/11 Pro, Enterprise and Education (not Home). To check: Start → Settings → System → About → Edition.',
-      'Turn it on: press “Turn Windows Sandbox on” below and say Yes to the Windows question — or Start → type “Turn Windows features on or off” → tick “Windows Sandbox” → OK.',
+      'Turn it on: press “Turn Windows Sandbox on” below (or Start → type “Turn Windows features on or off”), tick “Windows Sandbox”, press OK.',
       'Restart the PC when Windows asks.',
       'If it says virtualization is off: turn on “Intel VT-x” / “AMD SVM” (virtualization) in the PC\'s BIOS / UEFI settings.',
     ],

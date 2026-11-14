@@ -128,7 +128,7 @@ const DIR = path.join(__dirname, '..');
     assert(lab.folder('workshop') === lab.paths.workshop && lab.folder('claude').endsWith(path.join('claude', 'products')) && lab.folder('../x') === null, 'the folders it may open');
     spawned.length = 0;
     r = lab.enableSandbox();
-    assert(r.ok && spawned[0].cmd === 'powershell.exe' && /RunAs/.test(spawned[0].args.join(' ')) && /Containers-DisposableClientVM/.test(spawned[0].args.join(' ')), 'Turn Windows Sandbox on → an admin PowerShell that enables the feature');
+    assert(r.ok && /OptionalFeatures\.exe$/.test(spawned[0].cmd) && /Windows Sandbox/.test(r.words), 'Turn Windows Sandbox on → Windows\' own features list opens, with what to tick');
     // not Windows / sandbox off
     const lab2 = createMoneyLab({ root: path.join(root, 'lab2'), kitSource: path.join(DIR, 'money-lab-kit'), fs, spawn: fakeSpawn, platform: 'linux', env: {} });
     assert(lab2.start({}).error === 'NOT_WINDOWS' && lab2.closeNow().error === 'NOT_WINDOWS', 'not Windows → refused, nothing started');

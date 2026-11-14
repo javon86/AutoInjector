@@ -190,8 +190,11 @@ function createMoneyLab(deps) {
     return null;
   }
 
+  // Opens Windows' own "Turn Windows features on or off" list (optionalfeatures.exe): the owner ticks Windows Sandbox
+  // and presses OK — Windows asks for the restart itself. (A hidden admin PowerShell put its "Yes" prompt out of sight.)
   function enableCommand() {
-    return ['powershell.exe', ['-NoProfile', '-Command', "Start-Process powershell.exe -Verb RunAs -ArgumentList '-NoExit','-Command','Enable-WindowsOptionalFeature -Online -FeatureName Containers-DisposableClientVM -All -NoRestart; Write-Host; Write-Host ''Done. Restart the PC, then open the Money lab again.'''"]];
+    const root = (env && (env.SystemRoot || env.windir)) || 'C:\\Windows';
+    return [path.win32.join(root, 'System32', 'OptionalFeatures.exe'), []];
   }
   function enableSandbox() {
     if (platform !== 'win32') return { ok: false, error: 'NOT_WINDOWS', words: 'Windows only.' };
@@ -200,8 +203,8 @@ function createMoneyLab(deps) {
       const c = spawn(cmd, args, { detached: true, stdio: 'ignore' });
       if (c && c.on) c.on('error', () => {});
       if (c && c.unref) c.unref();
-      return { ok: true, words: 'Say Yes to the Windows question. When it says Done, restart the PC.' };
-    } catch (e) { return { ok: false, error: 'SPAWN_FAILED', words: e.message }; }
+      return { ok: true, words: 'The Windows features list opened (it may be behind this window): tick “Windows Sandbox”, press OK, then restart the PC.' };
+    } catch (e) { return { ok: false, error: 'SPAWN_FAILED', words: `Open it yourself: Start → type “Turn Windows features on or off”. (${e.message})` }; }
   }
 
   return { paths: P, available, getSettings, saveSettings, status, start, stopAfterRound, closeNow, answer, poll, folder, enableSandbox, enableCommand, SANDBOX_PROCESSES };
