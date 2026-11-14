@@ -80,7 +80,7 @@ def _continuity_again(runner, run, st, mem) -> str | None:
     status = cp.get("status")
     if status in ("done", "incomplete"):
         changed = continuity.own_changes_since(store, pid, branch, _record_ids(bp, outline, cp),
-                                               cp.get("finished_at"))
+                                               cp.get("finished_at"), _read_versions(bp, outline, cp))
         if not changed:
             mem["continuity_done"] = True
             return None
@@ -119,6 +119,26 @@ def _record_ids(bp, outline, cp) -> dict:
         r = appr or latest
         if r:
             out[i + 1] = r["record_id"]
+    return out
+
+
+def _read_versions(bp, outline, cp) -> dict:
+    """record id -> the version of it the final check read (noted per part since the check started noting it)."""
+    by_cid = {}
+    for p in cp.get("parts") or []:
+        for cid, v in (p.get("versions") or {}).items():
+            if isinstance(v, int) and not isinstance(v, bool):
+                by_cid[cid] = v
+    if not by_cid or not outline:
+        return {}
+    out = {}
+    for c in bp.outline_chapters(outline):
+        if c["chapter_id"] not in by_cid:
+            continue
+        _ctx, latest, appr = bp.chapter_prose(outline, c["chapter_id"])
+        r = appr or latest
+        if r:
+            out[r["record_id"]] = by_cid[c["chapter_id"]]
     return out
 
 

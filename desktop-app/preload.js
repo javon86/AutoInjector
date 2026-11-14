@@ -468,6 +468,10 @@ contextBridge.exposeInMainWorld("api", {
   // "❓ Everything I can do" and the side panel's big buttons (read-only)
   alfredCatalog: () => ipcRenderer.invoke("alfred:catalog"),
   alfredBooks: () => ipcRenderer.invoke("alfred:books"),
+  // 👥 Alfred's team (alfred-team.js): one model per role, the "team ready" line, ★ fit ratings
+  alfredTeam: () => ipcRenderer.invoke("alfred:team"),
+  alfredTeamSet: (role, model) => ipcRenderer.invoke("alfred:team-set", { role, model: model == null ? "" : String(model) }),
+  alfredTeamBest: () => ipcRenderer.invoke("alfred:team-best"),
   onAlfred: (cb) => ipcRenderer.on("alfred", (_e, payload) => cb(payload)),
   // ==== 🩺 health watch (health-watch.js): problems found BEFORE something breaks ====
   healthStatus: (opts) => ipcRenderer.invoke("health:status", opts || {}),

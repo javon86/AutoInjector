@@ -99,9 +99,28 @@ export function standInCard(c) {
     wait.value = String(cur.wait_min);
     const max = h('input', { type: 'number', id: 'si-max', min: '1', max: '20', value: String(cur.max_per_run), class: 'wz-num' });
     const cps = h('input', { type: 'checkbox', id: 'si-cp', 'data-testid': 'si-cp', checked: cur.checkpoints !== false });
+    // 🗳 when something goes wrong, let the AIs vote instead of stopping (stand_in_errors.py) — off by default
+    const err = h('input', { type: 'checkbox', id: 'si-err', 'data-testid': 'si-err', checked: !!cur.errors });
+    const when = h('select', { id: 'si-err-when', 'data-testid': 'si-err-when' },
+      h('option', { value: 'now' }, 'Right away'), h('option', { value: 'wait' }, 'After the usual wait time'));
+    when.value = cur.errors_when === 'now' ? 'now' : 'wait';
+    const [ccLo, ccHi] = cur.cc_voters_range || [0, 3];
+    const cc = h('select', { id: 'si-err-cc', 'data-testid': 'si-err-cc' },
+      Array.from({ length: ccHi - ccLo + 1 }, (_x, i) => ccLo + i).map(n => h('option', { value: String(n) }, n === 0 ? 'None' : `${n} Claude Code helper${n > 1 ? 's' : ''}`)));
+    cc.value = String(cur.cc_voters ?? 1);
+    const errMore = h('div', { 'data-testid': 'si-err-more', hidden: !err.checked },
+      h('div', { class: 'grid-2' }, h('div', { class: 'field' }, h('label', { for: 'si-err-when' }, 'When the AIs vote'), when),
+        h('div', { class: 'field' }, h('label', { for: 'si-err-cc' }, 'Claude’s agents vote too (extra voters)'), cc)),
+      h('p', { class: 'hint', 'data-testid': 'si-err-hint' }, 'Every voter must agree, so an extra Claude Code helper can only stop a decision, never force one. Each helper votes on its own, with its own reviewer persona.'));
+    err.addEventListener('change', () => { errMore.hidden = !err.checked; });
+    let maxTouched = false;
+    max.addEventListener('input', () => { maxTouched = true; });
     const save = h('button', { type: 'button', class: 'small primary', 'data-testid': 'si-save', onclick: async () => {
       try {
-        await api('PUT', '/settings/stand-in', { body: { enabled: on.checked, wait_min: Number(wait.value), max_per_run: Number(max.value) || 5, checkpoints: cps.checked } });
+        const body = { enabled: on.checked, wait_min: Number(wait.value), checkpoints: cps.checked, errors: err.checked, errors_when: when.value, cc_voters: Number(cc.value) };
+        if (maxTouched || cur.max_set) body.max_per_run = Number(max.value) || 5;  // else 🗳 raises the cap to 10 by itself
+        const out = await api('PUT', '/settings/stand-in', { body });
+        if (out && out.max_per_run) max.value = String(out.max_per_run);
         toast('Saved');
       } catch (e) { box.appendChild(problemBox(toProblem(e, WHERE))); }
     } }, 'Save');
@@ -111,6 +130,9 @@ export function standInCard(c) {
         h('div', { class: 'field' }, h('label', { for: 'si-max' }, 'At most this many stand-in decisions per book run'), max)),
       h('div', { class: 'check-row field' }, cps, h('label', { for: 'si-cp' }, 'Also the 🧭 story checks (continuity checkpoints): leave a problem as it is for now, or make the small fix offered — only if every problem can be voted on and they all agree')),
       h('p', { class: 'hint' }, 'Two AIs working: both must agree. Three AIs working: all three must agree. Only one AI working, or any AI disagrees or is unsure: it waits for you.'),
+      h('div', { class: 'check-row field' }, err, h('label', { for: 'si-err' }, h('strong', null, '🗳 When something goes wrong, let the AIs vote instead of stopping'))),
+      h('p', { class: 'small', 'data-testid': 'si-err-about' }, cur.errors_about || ''),
+      errMore,
       h('div', { class: 'row' }, save));
   })();
   return card;
@@ -151,8 +173,8 @@ export function decisionList(c, decisions, runIdOf, after, testid = 'si-note') {
   if (!(decisions || []).length) return null;
   const err = h('div', { 'aria-live': 'polite' });
   return h('div', { class: 'si-notes', 'data-testid': `${testid}s` }, decisions.map(d => h('p', { class: `small si-note${d.undone ? ' si-undone' : ''}`, 'data-testid': testid, 'data-decision': d.id },
-    h('span', { 'aria-hidden': 'true' }, '🧑‍⚖️ '), d.line, ' ',
-    d.undone ? h('em', { class: 'muted' }, '(undone — the other option waits for your approval)')
+    h('span', { 'aria-hidden': 'true' }, `${d.icon || '🧑‍⚖️'} `), d.line, ' ',
+    d.undone ? h('em', { class: 'muted' }, d.undone_words || '(undone — the other option waits for your approval)')
       : h('button', { type: 'button', class: 'small', 'data-testid': `${testid}-undo`, onclick: async ev => {
         ev.currentTarget.disabled = true;
         try { const out = await api('POST', `/autobook/${encodeURIComponent(runIdOf(d))}/stand-in-undo`, { body: { decision_id: d.id } }); toast(out.message || 'Undone'); if (after) after(out); }

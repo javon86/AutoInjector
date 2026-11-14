@@ -232,6 +232,19 @@ def test_own_revisions_are_registered_and_dated():
     assert len(st.s["continuity_rechecks:p:main"]["own"]["r2"]) == continuity.OWN_MAX
 
 
+def test_a_rewrite_in_the_same_second_as_the_read_still_counts_when_the_read_version_is_known():
+    """The times are to the second: a rewrite noted in the same second the final check finished looked older than the
+    read and was missed (flaky test_doctor_gate). With the version the check read, the newer revision counts."""
+    st = _MemStore()
+    continuity.note_own(st, "p", "main", "r1", 1)
+    continuity.note_own(st, "p", "main", "r1", 2)
+    at = st.s["continuity_rechecks:p:main"]["own"]["r1"][-1]["at"]
+    assert continuity.own_changes_since(st, "p", "main", {1: "r1"}, at) == []  # by time alone: missed
+    assert continuity.own_changes_since(st, "p", "main", {1: "r1"}, at, {"r1": 1}) == [1]  # read v1, v2 is newer
+    assert continuity.own_changes_since(st, "p", "main", {1: "r1"}, "2000-01-01T00:00:00Z", {"r1": 2}) == []  # read v2
+    assert continuity.own_changes_since(st, "p", "main", {1: "r1"}, at, {"r1": True}) == []  # not a version: by time
+
+
 def test_the_forecast_counts_the_second_reads():
     opts = run_forecast.options_of(None, {"beta_reader": True})
     on = run_forecast.option_calls(opts, 3, 3)["reread"]["calls"]
