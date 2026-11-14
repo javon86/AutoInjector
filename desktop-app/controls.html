@@ -2598,6 +2598,8 @@
              (llm-models-ui.js) and his personality + saved set-ups (alfred-persona-ui.js). -->
         <div id="llm-zone">
           <div id="llm-setup"></div>
+          <!-- 👥 Alfred's team: one model per role, ★ fit, 💡 better downloaded models (alfred-team-ui.js) -->
+          <div id="alfred-team-panel"></div>
           <div id="llm-models"></div>
           <div class="llm-pair">
             <div id="alfred-persona"></div>
@@ -3097,6 +3099,8 @@
     <script src="voice-picker.js"></script><!-- 🔊 ✨ Better voices: ▶ sample, ⬇ download, use for… (window.createVoicePicker) -->
     <script src="voice-ui.js"></script><!-- 🎤 talk to the AIs + 🔊 read their replies aloud -->
     <script src="alfred-panel.js"></script><!-- 🎩 Alfred panel (off by default) -->
+    <script src="alfred-team.js"></script><!-- 👥 his team's roles, routing words, ★ ratings (window.AlfredTeam) -->
+    <script src="alfred-team-ui.js"></script><!-- 👥 the "team ready" line on 🤖 AutoInjector + the team panel -->
   <script src="llm-write-test-ui.js"></script><!-- 🧪 "What will it write?" table, shared by the two below -->
   <script src="llm-setup-ui.js"></script><!-- B6 🎩 Alfred's AI: one-button setup + check (#llm-setup) -->
   <script src="llm-hardware.js"></script><!-- B6 fit ratings (window.LlmHardware), needed by llm-models-ui.js -->

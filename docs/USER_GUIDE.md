@@ -546,6 +546,35 @@ AIs' downloads folder**, open the folder any time. A download that breaks off is
 - **Saved states:** "save this as …", "load …", "what saves do I have?", "rename …", "delete …" (see 💾 Save state
   in section 2).
 
+### Alfred's team
+
+Alfred can use **several local models at once, each for its own job**:
+
+- 🎩 **Butler** — talks with you (the main one).
+- 🧰 **Assistant** — does the jobs in the app.
+- 🎬 **Director** — makes a plan for a big job and hands the steps to the others; the Butler tells you how it went.
+- 🎨 **Prompt writer** — writes the prompt for a picture, cover, portrait or video.
+- 😈 **Bad boy** — the uncensored one, for frank chat and creative writing.
+
+**How to use them:** just say who you want — "bad boy, write a nasty villain speech", "director, plan my book
+launch", "assistant, check my book". "Make me a picture of …" goes to the Prompt writer and "do it step by step"
+to the Director (once you have given them a model). Above each answer you see who wrote it.
+
+**Choosing their models:** open ⚙ in Alfred's panel (or click the team line, below). Each role has a list of the
+models already on your PC and **stars (★1–5)** for how well each fits that job on your PC — point at the stars to
+read why. A 💡 tip appears when a better model is already on your PC: press **Use it**. Or press **✨ Pick the
+best for each role**. A role you leave empty uses the Butler's model, so one model is enough. Nothing is
+downloaded here.
+
+**Is the team ready?** At the top of the 🤖 AutoInjector tab one line tells you, e.g. "🎩 Alfred's team is
+connected and working for your book: Butler ✔ · Assistant ✔ · Director ✔ · Prompt writer ✔ · Bad boy ✔".
+✔ ready · ⚪ not set (the Butler does that job) · ⚠ something to fix — the line says what to press. While Akọwe
+is writing your book, it says the team is standing by for it.
+
+**Safe as before:** Alfred still shows an "I will" card and waits for ✔ Do it before he changes or makes
+anything. The Bad boy can only write text, and for your book he keeps to the book's content limits. Only one big
+model is kept on the graphics card at a time, so two big models never slow each other down.
+
 ## 11. 🤖 Claude Code helpers (optional — makes books faster)
 
 Claude Code is Anthropic's command-line tool. When it is on your PC and signed in, Akọwe runs small side jobs

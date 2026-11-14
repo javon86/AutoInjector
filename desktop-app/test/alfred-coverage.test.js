@@ -86,6 +86,7 @@ const IPC_INVENTORY = [
   'alfred:settings', 'alfred:status', 'alfred:test-ai',
   'alfred:personality', 'alfred:profiles', 'alfred:profile-save', 'alfred:profile-use', 'alfred:profile-delete',
   'alfred:panel', 'alfred:panel-toggle', 'alfred:show-butler', 'alfred:catalog', 'alfred:books', 'alfred:quick',
+  'alfred:team', 'alfred:team-set', 'alfred:team-best',
   'brigade:run', 'brigade:stop', 'butler:capability-test', 'butler:chat', 'butler:install-missing', 'butler:selfcheck', 'butler:send-intro',
   'db:recent-messages', 'db:status', 'endpoints:detect', 'endpoints:presets', 'endpoints:test', 'external:open',
   'featuretest:open-report', 'featuretest:run', 'featuretest:stop', 'mediatest:run', 'mediatest:stop', 'mediatest:status', 'mediatest:copy', 'mediatest:open-report', 'feed-window:close', 'feed:history', 'feed:open', 'gpu:info',
