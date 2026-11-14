@@ -1417,6 +1417,38 @@ A few of these need more words:
   chose later — the same choice holds up, the other is overruled (a story check: ▶ Continue with the chapter
   unchanged means you left it as it is; a chapter you changed is not counted). Logs and the outbox keep codes only (which AIs
   voted, the choice) — never the book's words or the reasons.
+- **🗳 When something goes wrong, let the AIs vote instead of stopping** (code: `akowe/akowe/stand_in_errors.py`;
+  ⚙️ Settings › AI, in the stand-in card; `PUT /api/settings/stand-in` with `errors`, `errors_when` = `now` | `wait`,
+  `cc_voters` = 0–3; off by default — with it off everything above works exactly as before). Your words: "If there
+  are any errors, vote" — "all the agents, even Claude's agents, vote on what they want". With it on, every stop that
+  asks you to choose and is not yours alone is voted on, **right away** or **after the usual wait time**; the review
+  decisions and story checks above are voted on too (even with the stand-in itself off), and the per-run cap rises to
+  10 unless you set one yourself. The stops and their options (letters in a random order per voter, the same JSON
+  answer and the same all-must-agree rule):
+  1. **a reviewer's OK that did not count** (`NO_REASON`, `LOW_CONFIDENCE`): approve the version as it is (exactly
+     like "accept as it is" above, undone the same way) or ask the reviewers to read it again;
+  2. **anything that went wrong** — an AI timed out, stayed busy, refused or failed, no AI was ready, Akọwe's checks
+     refused a draft (`CHECKS_REFUSED`), an editor's or planned-detail rewrite could not be put back, a file did not
+     read back, an unexpected error: **try again** (at most 2 times per step and error), **let another AI do it**
+     (only with two or more AIs: the writer is no longer pinned and the AI whose call failed is not used while
+     another works), **skip this optional step** (only steps that never hold up the book: pictures, the whole Book
+     Bible, planned details, the report, beta readers, chapter 1 last, the improve pass, the final re-read), or **wait
+     for you** (when they all say so, it waits). Nothing here approves or changes text: what the AI makes next goes
+     through Akọwe's checks and the reviews as always.
+  **Always yours:** signing in to an AI's site or solving its check (`LOGGED_OUT`, `CAPTCHA`), "only one AI checked
+  it" (`NO_SECOND_AI`), a missing main character, a stop with no choice (the book is gone), and every topic listed
+  above (approved facts, plot, ending, main character, POV/tense, content limits, lock list).
+  **Claude's agents vote too:** when the 🤖 Claude Code helper is ready, 0–3 extra Claude Code helper voters (default
+  1), each an independent run with its own reviewer persona (a continuity editor, a production editor, a cautious
+  publisher), are asked after the AIs. Every voter must agree, so an extra voter can only block a decision, never
+  force one, and they never count as one of the two AIs a decision needs. Each voter is named in the decision line and
+  counts in the track record (the helpers as "Claude Code helpers"): "🗳 ChatGPT, Claude, Gemini and 1 Claude Code
+  helper all agreed: try again with another AI (the AI did not answer in time while reviewing chapter 3) at 03:12 …
+  [↩ Undo]" in the run window and on 🏠 Book home. **↩ Undo** gives the run its AI choice back (another AI) or puts a
+  skipped step back on the run's list (it runs when the run resumes); a "try again" that already happened cannot be
+  taken back, so Undo only turns the track record round. When the votes split, your own 🔁 Try again settles them
+  ("try again" / "review again" held up). The run forecast counts the possible votes (at most one per AI per stop,
+  one stop per 10 chapters plus two, up to the cap) and the extra helper voters with the helpers.
 - **Book report.** It shows who checked the book and how far they agreed, and each stretch review. Its PDF keeps
   accented letters and other alphabets (ọ, ẹ, ł, Greek); a symbol it cannot print becomes a word or "•". "Written by"
   names the AI that wrote the chapter ("Claude + editor" when the editor's changes are in it). Advice with nothing

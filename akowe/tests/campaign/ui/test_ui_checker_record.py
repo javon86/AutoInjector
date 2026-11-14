@@ -97,6 +97,58 @@ def test_how_good_is_each_checker_card(make_context, tmp_path, size):
         srv.close()
 
 
+@pytest.mark.parametrize("size", SIZES, ids=["desktop", "phone"])
+def test_when_something_goes_wrong_let_the_ais_vote(make_context, tmp_path, size):
+    """🗳 Settings › AI: off by default; switched on it shows "right away" / "after the usual wait time" and the extra
+    Claude Code helper voters (that can only block), and saves them."""
+    srv = InProcess(tmp_path)
+    try:
+        page = srv.open(make_context(*size), "#/settings")
+        si = page.locator("[data-testid=si-card]")
+        err = si.locator("[data-testid=si-err]")
+        err.wait_for(timeout=10000)
+        assert not err.is_checked() and si.locator("[data-testid=si-err-more]").is_hidden()
+        text = si.inner_text()
+        assert "When something goes wrong, let the AIs vote instead of stopping" in text
+        assert "can only block a decision, never force one" in text
+        err.check()
+        more = si.locator("[data-testid=si-err-more]")
+        assert more.is_visible() and si.locator("[data-testid=si-err-when]").input_value() == "wait"
+        assert si.locator("[data-testid=si-err-cc]").input_value() == "1"
+        assert "never force one" in si.locator("[data-testid=si-err-hint]").inner_text()
+        si.locator("[data-testid=si-err-when]").select_option("now")
+        si.locator("[data-testid=si-err-cc]").select_option("2")
+        si.locator("[data-testid=si-save]").click()
+        for _ in range(100):  # the PUT lands
+            if (srv.app.store.get_setting("stand_in") or {}).get("errors") is True:
+                break
+            page.wait_for_timeout(100)
+        st = srv.app.store.get_setting("stand_in")
+        assert (st["errors"], st["errors_when"], st["cc_voters"]) == (True, "now", 2)
+        assert st["enabled"] is False  # the stand-in itself stays as it was
+        page.wait_for_function("() => document.querySelector('#si-max').value === '10'", timeout=10000)
+        assert overflow(page) <= 1
+        # 🏠 Book home: a 🗳 decision line with ↩ Undo
+        from akowe import stand_in
+        pid = srv.app.engine.bootstrap_project("author", "Errors book")
+        line = ("ChatGPT, Claude, Gemini and 1 Claude Code helper all agreed: try again with another AI (the AI did "
+                "not answer in time while reviewing chapter 3) at 03:12 right away, as your settings ask.")
+        stand_in._book_put(srv.app.store, {"project_id": pid, "branch_id": "main"},  # noqa: SLF001
+                           {"id": "dec-x1", "run_id": "run-x", "line": line, "icon": "🗳", "errors": True,
+                            "undone": False})
+        goto(page, f"#/p/{pid}/main/book")
+        settle(page)
+        home = page.locator("[data-testid=si-book-note]")
+        home.wait_for(timeout=15000)
+        txt = home.inner_text()
+        assert txt.startswith("🗳") and "1 Claude Code helper all agreed: try again with another AI" in txt
+        assert home.locator("[data-testid=si-book-note-undo]").is_visible()
+        assert overflow(page) <= 1
+        assert_clean(page, "errors vote setting")
+    finally:
+        srv.close()
+
+
 def test_make_a_book_checker_order(make_context, ai_server):
     page = watch(make_context().new_page())
     page.goto(ai_server.start_url)

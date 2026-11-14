@@ -442,6 +442,21 @@ Chapter 1 is written before the rest of the book exists, and readers decide on t
   20 minutes. Why: …" — and the desktop notification says it was decided for you. When they don't agree you see how
   each voted, for example "The AIs didn't all agree (ChatGPT: accept, Gemini: keep) — waiting for you." Press
   **↩ Undo** to put the other choice back for your own approval. At most 5 stand-in decisions per book run.
+- **🗳 When something goes wrong, let the AIs vote instead of stopping** (⚙️ Settings › AI, in the same card; off
+  until you switch it on). A book run that stops on an error and asks you to choose — an AI timed out or failed,
+  Akọwe's checks refused a draft, a reviewer's OK did not count — asks the working AIs instead, **right away** or
+  **after the usual wait time** (you pick). They choose between plain options: try again, let another AI do it, skip
+  this step (only the optional steps that never hold up the book, like the beta reader), or wait for you — and the
+  same rule holds: they decide only if they **all** agree. With it on, the review disagreements and story checks
+  above are voted on too, and up to 10 decisions per run (unless you set your own number). **Claude's agents vote
+  too:** pick 0–3 extra Claude Code helpers (default 1), each voting on its own with its own reviewer persona. Because
+  every voter must agree, an extra helper can only stop a decision, never force one — and the helpers never count as
+  one of the two AIs a decision needs. Signing in to an AI's site, "only one AI checked it", the main character, the
+  plot, the ending, point of view or tense, approved facts, content limits and your lock list always wait for you.
+  Each decision shows who voted, for example "🗳 ChatGPT, Claude, Gemini and 1 Claude Code helper all agreed: try
+  again with another AI (the AI did not answer in time while reviewing chapter 3) … ↩ Undo". Undo gives the run its
+  AI choice back or puts a skipped step back on the run's list; a "try again" that already happened can't be taken
+  back, but Undo still counts the votes as overruled. The run forecast counts these votes (at most).
   It also covers the 🧭 **story checks** (continuity checkpoints) that wait for you overnight — switch off "Also the
   story checks" in the same card to keep those for yourself. For each problem the check couldn't fix, the AIs choose
   between "leave it as it is for now" (the book goes on and the problem stays in the report) and "it needs you" — or,

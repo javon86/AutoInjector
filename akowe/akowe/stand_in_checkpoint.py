@@ -216,9 +216,9 @@ def decide(app, run: dict, prob: dict, key: str, stg: dict, now: float) -> dict:
                              f"Only you can decide chapter {p.get('number')}'s problem: "
                              f"{si.AUTHOR_ONLY_WORDS.get(why, why)}")
     vs = si.voters(app, run, prob)
-    if len(vs) < si.MIN_VOTERS:
-        _pick, code = si.tally([], len(vs))
-        return si._tried(ab, run, key, code, si.wait_words(code, [], vs))  # noqa: SLF001
+    few = si.too_few(vs)  # the extra 🤖 helper voters never make up the two AIs
+    if few:
+        return si._tried(ab, run, key, few, si.wait_words(few, [], vs))  # noqa: SLF001
     results = []
     all_votes: list[dict] = []
     for p in items:
@@ -305,13 +305,13 @@ def apply(app, run_id: str, prob: dict, cp_id: str, results: list[dict], vs: lis
     names = [v["name"] for v in voters]
     fams = [v["family"] for v in voters]
     what = agreed_words(results)
-    line = (f"{si._and(names)} {'both agreed' if len(names) == 2 else 'all agreed'} to {what} at "  # noqa: SLF001
-            f"{si._clock(now)} because you didn't answer for {waited_min} minutes, so the book went on.")  # noqa: SLF001
+    line = (f"{si.who_words(voters)} {'both agreed' if len(names) == 2 else 'all agreed'} to {what} at "
+            f"{si._clock(now)} {si.because(waited_min)}, so the book went on.")  # noqa: SLF001
     why = next((v.get("why") for v in all_votes if v.get("why")), "")
     line += f" Why: {why}" if why else ""
     subject = f"the story check after chapter {cp.get('after')}"
     d = {"id": did, "at": si._iso(now), "run_id": run_id, "who": "vote", "family": "+".join(fams),  # noqa: SLF001
-         "name": si._and(names), "choice": "checkpoint", "code": CODE,  # noqa: SLF001
+         "name": si.who_words(voters), "choice": "checkpoint", "code": CODE,
          "confidence": min(float(v["confident"]) for v in all_votes), "reason": why,
          "votes": si._shown_votes(all_votes), "subject": subject, "record_id": prob.get("record_id"),  # noqa: SLF001
          "chapter_id": prob.get("chapter_id"), "checkpoint": cp_id, "waited_min": waited_min, "line": line,
