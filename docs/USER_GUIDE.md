@@ -696,6 +696,11 @@ throw-away Windows inside Windows, with Microsoft Edge — and try to earn money
 - **Needs:** Windows 10/11 **Pro, Enterprise or Education** with Windows Sandbox turned on (the lab window has a
   **Turn Windows Sandbox on** button; restart afterwards). The first start downloads Node.js, Git and the tools
   into the lab folder — a few minutes, once.
+- **⌨ Their Command Prompts:** each AI has a real Command Prompt inside the sandbox — what it types runs there and
+  what comes back goes to it. You watch it live in a "Command Prompt — Claude / ChatGPT" window in the sandbox and in
+  the lab window. It can't reach your PC.
+- **💬 They talk to each other:** they send each other messages (say who does what, share finds, ask for help). You
+  read the whole conversation in the lab window and in a "Lab talk" window in the sandbox.
 - **Stopping:** **⏸ Stop after this round**, or **⏹ Close the sandbox now**.
 
 ## 12. When something goes wrong

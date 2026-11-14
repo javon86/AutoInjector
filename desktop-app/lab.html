@@ -47,6 +47,10 @@
     ul, ol { margin:4px 0 0 18px; padding:0; }
     li { overflow-wrap:anywhere; margin:2px 0; }
     details summary { cursor:pointer; }
+    .lab-scroll { max-height:220px; overflow:auto; }
+    .lab-consoles { display:grid; grid-template-columns:repeat(auto-fit, minmax(300px, 1fr)); gap:10px; }
+    .lab-consoles > div { min-width:0; }
+    .lab-console { background:#0a0a0a; color:#cfe8cf; font:11.5px/1.4 Consolas, 'Cascadia Mono', monospace; padding:8px; border-radius:6px; margin:0; height:260px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; }
     @media (max-width: 600px) { body { padding:10px; } }
   </style>
 </head>
@@ -105,6 +109,20 @@
     <details><summary>Your earlier answers</summary><ul id="lab-asks-done"></ul></details>
   </section>
 
+  <section aria-labelledby="lab-talk-h">
+    <h2 id="lab-talk-h">💬 What they say to each other</h2>
+    <ul id="lab-talk" class="lab-scroll" data-testid="lab-talk"></ul>
+  </section>
+
+  <section aria-labelledby="lab-console-h">
+    <h2 id="lab-console-h">⌨ Their Command Prompts</h2>
+    <p class="lab-dim">Every command they run in the sandbox and what came back (the sandbox also shows these live in their own windows).</p>
+    <div class="lab-consoles">
+      <div><h3>Claude</h3><pre id="lab-console-claude" class="lab-console" data-testid="lab-console-claude"></pre></div>
+      <div><h3>ChatGPT</h3><pre id="lab-console-codex" class="lab-console" data-testid="lab-console-codex"></pre></div>
+    </div>
+  </section>
+
   <section aria-labelledby="lab-made-h">
     <h2 id="lab-made-h">What they made</h2>
     <ul id="lab-products"></ul>
@@ -119,6 +137,7 @@
       <li>In their browser, password boxes are locked until you say yes to an account on that site, and card / bank boxes and payment pages are always blocked. There's no card in the lab.</li>
       <li>The rules they follow are in <em>lab-kit\RULES.md</em>: honest and legal only, no spending, no gambling, trading or crypto, no spam or fake reviews, ask before any account, post, message or money.</li>
       <li>The sandbox has internet access, so they can read any website. You can watch them in the sandbox window and close it any time.</li>
+      <li>Their Command Prompt runs inside the sandbox only — anything they type there can't reach your PC.</li>
     </ul>
   </section>
 </main>

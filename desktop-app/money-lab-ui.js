@@ -42,6 +42,7 @@
       moneyClaimed: money(st.moneyClaimed || 0),
       openAsks: asks.filter((q) => q.open), answeredAsks: asks.filter((q) => !q.open).slice(0, 30),
       ledger: d.ledger || [], products: d.products || {}, workshop: d.workshop || '',
+      consoles: d.consoles || {}, talk: d.talk || [],
       settings: d.settings || null,
       canStart: !!av.ok && !running, canStop: running,
     };
@@ -150,6 +151,28 @@
     }
     if ($('lab-asks-count')) $('lab-asks-count').textContent = m.openAsks.length ? ` (${m.openAsks.length} waiting)` : '';
 
+    const talkBox = $('lab-talk');
+    if (talkBox) {
+      const key = m.talk.join('\n');
+      if (talkBox.dataset.key !== key) {
+        talkBox.dataset.key = key;
+        talkBox.textContent = '';
+        if (!m.talk.length) talkBox.appendChild(node(doc, 'li', { class: 'lab-dim', text: 'They haven\'t said anything to each other yet.' }));
+        for (const l of m.talk) talkBox.appendChild(node(doc, 'li', { text: l }));
+        talkBox.scrollTop = talkBox.scrollHeight;
+      }
+    }
+    for (const [id, label] of [['claude', 'Claude'], ['codex', 'ChatGPT']]) {
+      const pre = $(`lab-console-${id}`);
+      if (!pre) continue;
+      const lines = m.consoles[id] || [];
+      const text = lines.length ? lines.join('\n') : `${label} hasn't used its Command Prompt yet.`;
+      if (pre.textContent !== text) {
+        const atEnd = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 30;
+        pre.textContent = text;
+        if (atEnd) pre.scrollTop = pre.scrollHeight;
+      }
+    }
     const led = $('lab-ledger');
     if (led) {
       led.textContent = '';

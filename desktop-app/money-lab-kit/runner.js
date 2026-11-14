@@ -18,6 +18,7 @@
 const fsReal = require('fs');
 const path = require('path');
 const core = require('./runner-core');
+const talk = require('./lab-talk');
 
 const HEARTBEAT_MS = 15000;
 const MISSION_POLL_MS = 10000;
@@ -100,6 +101,7 @@ async function runLab(deps) {
       if (ok) ready.push(a);
       save();
     }
+    if (ready.length && deps.openWatchWindows) { try { deps.openWatchWindows(ready); } catch (e) { log(`watch windows: ${e && e.message}`); } }
     if (!ready.length) { set({ phase: 'needs-sign-in', words: 'Neither AI is signed in. Close the sandbox, press ▶ Start again and sign in when the windows ask.' }); return status; }
 
     // 3. the rounds
@@ -117,8 +119,12 @@ async function runLab(deps) {
       const asks = readDirJson(fs, path.join(dirs.workshop, 'asks'), core.cleanAsk);
       const answers = readDirJson(fs, path.join(dirs.control, 'answers'), core.cleanAnswer);
       const signIn = core.approvedHosts(readJson(fs, path.join(dirs.control, 'approved-sites.json'), []));
+      const talkDir = path.join(dirs.workshop, 'talk');
+      const allTalk = talk.readAll(talkDir);
       await Promise.all(ready.map(async (a) => {
-        const prompt = core.buildPrompt({
+        const messages = talk.forMe(allTalk, a, talk.readMark(talkDir, a)).slice(-20);
+        if (messages.length) talk.setMark(talkDir, a, messages[messages.length - 1].at); // delivered with this round
+        const prompt = core.buildPrompt({ messages,
           agent: a, agents: ready, mission: mission.mission, style: mission.style, round: st.round, roundMinutes: Math.round(budget / 60000),
           minutesLeft: (st.ends_at - now()) / 60000, lastRound, rules, answers: core.answersFor(a, asks, answers), waiting: core.openAsks(a, asks, answers),
           signInSites: signIn, dirs: { mine: path.join(dirs.workshop, a), workshop: dirs.workshop, kit: dirs.kit },
@@ -253,7 +259,21 @@ function realDeps(base) {
     return r.code === 0 && /\bOK\b/i.test(r.output) && !/(invalid api key|please run \/login|not logged in)/i.test(r.output);
   }
 
+  /** The sandbox shows each AI's Command Prompt and the lab talk live, in their own windows (you watch; they type). */
+  function openWatchWindows(agents) {
+    if (process.platform !== 'win32') return;
+    const watch = (title, file) => {
+      fsReal.mkdirSync(path.dirname(file), { recursive: true });
+      if (!fsReal.existsSync(file)) fsReal.writeFileSync(file, '');
+      const ps = `$Host.UI.RawUI.WindowTitle = '${title}'; Write-Host '${title} - what the AI types and what comes back shows here.'; Get-Content -LiteralPath '${file.replace(/'/g, "''")}' -Wait -Tail 200`;
+      require('child_process').spawn('cmd.exe', ['/c', 'start', '', 'powershell.exe', '-NoProfile', '-NoExit', '-Command', ps], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
+    };
+    for (const a of agents) watch(`Command Prompt - ${core.AGENTS[a].label}`, path.join(dirs.workshop, 'console', `${a}.log`));
+    if (agents.length > 1) watch('Lab talk - Claude and ChatGPT', path.join(dirs.workshop, 'talk.log'));
+  }
+
   return {
+    openWatchWindows,
     fs: fsReal, dirs, log, now: () => Date.now(), sleep: (ms) => new Promise((r) => setTimeout(r, ms)), setInterval, clearInterval,
     async ensureSignedIn(a, say) {
       const t = tool(a);

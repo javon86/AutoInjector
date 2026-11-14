@@ -113,6 +113,13 @@ const DIR = path.join(__dirname, '..');
     assert(JSON.parse(fs.readFileSync(lab.paths.approved, 'utf8')).includes('gumroad.com'), 'sign-in unlocked on gumroad.com');
     assert(lab.status().asks[0].answer.allow === true, 'the window shows your answer');
     assert(!lab.answer('../../etc', true).ok && !lab.answer('codex-nope', true).ok, 'answers only to real asks');
+    // the Command Prompt logs and the talk, for the window (only the end of big files is read)
+    fs.mkdirSync(path.join(lab.paths.workshop, 'console'), { recursive: true });
+    fs.writeFileSync(path.join(lab.paths.workshop, 'console', 'claude.log'), `${'old line\n'.repeat(5000)}[10:00:01] Claude C:\\w> dir /b\r\nplanner.pdf\r\n[exit 0, 0.2 s]\n`);
+    fs.writeFileSync(path.join(lab.paths.workshop, 'talk.log'), '[10:00] Claude → ChatGPT: I build, you list\n');
+    const stc = lab.status();
+    assert(stc.consoles.claude.slice(-3).join('|') === '[10:00:01] Claude C:\\w> dir /b|planner.pdf|[exit 0, 0.2 s]' && stc.consoles.claude.length === 80 && stc.consoles.codex.length === 0, 'status: the end of each AI\'s Command Prompt log');
+    assert(stc.talk.length === 1 && /I build, you list/.test(stc.talk[0]), 'status: the lab talk');
     // close
     spawned.length = 0;
     r = lab.closeNow();
@@ -141,6 +148,7 @@ const DIR = path.join(__dirname, '..');
     asks: [{ id: 'claude-zz11', agent: 'claude', label: 'Claude', kind: 'post', site: 'reddit.com', what: '<img src=x onerror="window.pwned=1">Post it', why: 'reach', at: now, answer: null },
       { id: 'codex-yy22', agent: 'codex', label: 'ChatGPT', kind: 'account', site: 'etsy.com', what: 'Shop', at: now, answer: { allow: false, note: 'not yet' } }],
     ledger: ['| 1 Nov | Claude | $7 | Gumroad | receipt |'], products: { claude: ['planner.pdf'], codex: [] }, workshop: 'W',
+    consoles: { claude: ['[10:00:01] Claude C:\\w> dir', '<b>not html</b>', '[exit 0, 0.1 s]'], codex: [] }, talk: ['[10:00] Claude → ChatGPT: I build, you list'],
   };
   const mm = UI.model(data, now);
   assert(mm.running && mm.canStop && !mm.canStart && mm.timeLeft === '1 h 30 min left' && mm.roundLeft === '10 min left', 'model: running, the time left');
@@ -182,6 +190,9 @@ const DIR = path.join(__dirname, '..');
     assert(/Allowed/.test($('lab-msg').textContent), 'the answer is confirmed');
     assert(/You said no/.test($('lab-asks-done').textContent), 'earlier answers listed');
     assert(/planner\.pdf/.test($('lab-products').textContent) && /\$7/.test($('lab-ledger').textContent), 'what they made and the ledger');
+    assert(/I build, you list/.test($('lab-talk').textContent), 'the window shows what they say to each other');
+    assert(/dir/.test($('lab-console-claude').textContent) && /<b>not html<\/b>/.test($('lab-console-claude').textContent) && !$('lab-console-claude').querySelector('b'), 'the window shows each Command Prompt, as text');
+    assert(/hasn't used its Command Prompt/.test($('lab-console-codex').textContent), 'an AI with no commands yet says so');
     $('lab-stop').click();
     await new Promise((r) => setTimeout(r, 30));
     assert(calls.some((c) => c[0] === 'stop'), '⏸ Stop → labStop');

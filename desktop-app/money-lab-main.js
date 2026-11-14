@@ -68,11 +68,31 @@ function createMoneyLab(deps) {
     return out;
   }
 
+  /** The last lines of a text file the AIs write (read from its end only — the files grow all run). */
+  function tail(file, lines, bytes = 16384) {
+    let fd;
+    try {
+      fd = fs.openSync(file, 'r');
+      const size = fs.fstatSync(fd).size;
+      const len = Math.min(size, bytes);
+      const buf = Buffer.alloc(len);
+      fs.readSync(fd, buf, 0, len, size - len);
+      const text = buf.toString('utf8').replace(/\r/g, '');
+      const all = text.split('\n');
+      if (size > len) all.shift(); // a cut first line
+      while (all.length && !all[all.length - 1].trim()) all.pop();
+      return all.slice(-lines).map((l) => l.slice(0, 400));
+    } catch (_) { return []; } finally { if (fd != null) try { fs.closeSync(fd); } catch (_) { /* closed */ } }
+  }
+
   function status() {
     const st = L.readStatus(readJson(P.status, null), now());
     let ledger = [];
     try { ledger = L.ledgerTail(fs.readFileSync(P.ledger, 'utf8')); } catch (_) { /* no ledger yet */ }
-    return { available: available(), settings: getSettings(), status: st, asks: asks(), ledger, products: products(), root: P.root, workshop: P.workshop };
+    const consoles = {};
+    for (const a of core.AGENT_IDS) consoles[a] = tail(path.join(P.workshop, 'console', `${a}.log`), 80);
+    const talk = tail(path.join(P.workshop, 'talk.log'), 60);
+    return { available: available(), settings: getSettings(), status: st, asks: asks(), ledger, products: products(), consoles, talk, root: P.root, workshop: P.workshop };
   }
 
   /** Copy the app's kit into lab-kit (fresh each start, so an update to the app reaches the lab). */
