@@ -10999,6 +10999,7 @@ const alfred = require("./alfred-main").installAlfred({
   mcp: mcpManager, // 🧰 tool servers (mcp_tools / mcp_call)
   // his side panel is docked in the control panel; main hooks Ctrl/Cmd+Shift+A on every page of the app
   app, mainWindow: () => win,
+  hardware: () => llmSetup.hardware(), speeds: () => llmSpeeds(), // 👥 his team: fit ratings + the VRAM guard
 });
 // ==== end 🎩 ALFRED HOOK ====
 

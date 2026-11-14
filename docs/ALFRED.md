@@ -123,6 +123,52 @@ The one button also sets the Butler's local model.
 
 **Test my AI** in ⚙ checks the connection (it sends no question) **and that the model is really installed** in Ollama. If it isn't, it lists the installed models with a **Use …** button for each. Very small models (under 3B, e.g. `qwen2.5:0.5b`) work but often pick the wrong tool, and he says so. Small slips by the model (arguments wrapped twice, extra arguments, numbers sent as text) are forgiven; extra arguments are dropped and he is told which.
 
+### 👥 Alfred's team — one local model for each job
+
+Alfred can be a **team** of local models instead of one. Each role has its own Ollama model:
+
+| Role | What it does | Used when you say… |
+|---|---|---|
+| 🎩 **Butler** | talks with you (the main one; his model is ⚙ → Model) | anything else (the default) |
+| 🧰 **Assistant** | does the jobs with the app's tools | "assistant, …"; the Director's job steps |
+| 🎬 **Director** | makes a plan: splits a big request into 2–5 steps and hands each to the others; the Butler reports back at the end | "director, …", or "break it up", "step by step", "make a plan", "first … then … finally …" |
+| 🎨 **Prompt writer** | writes the prompt for a picture, cover, portrait or video; then the usual 🎨 / 🎬 tools make it (on the "I will" card) | "prompt writer, …", or "make me a picture / portrait / cover / video of …" |
+| 😈 **Bad boy** | the uncensored one: frank chat and creative writing, no lectures | "bad boy, …" or "the bad boy" anywhere in the sentence |
+
+- **A role without a model uses the Butler's**, so one model is enough and nothing breaks.
+- **Naming a role always works.** The *by-intent* choice (a picture → the Prompt writer, "step by step" → the
+  Director) only happens once that role has a model of its own; until then the Butler does the job as before.
+- **Who answered** is written above each reply and on the card: "🎨 Prompt writer (qwen2.5:14b)".
+- **The same rules for everyone.** Anything that changes or creates something still goes on the "I will" card and
+  waits for ✔ Do it. The Bad boy has **no tools** at all (he only writes text); when he writes for your book, the
+  book's **content limits** (Book profile) are hard rules for him too. "Bad boy, make me a picture of …" = he writes
+  the picture prompt, and the card asks first.
+- **One graphics card, no fighting.** Before a role's model answers, Alfred checks what Ollama has in memory
+  (`/api/ps`) and unloads the others that would not fit beside it on the card (16 GB on an RTX 5070 Ti). Roles
+  that share a model just reuse it. The Butler's model stays in memory for 30 minutes, another role's for 5.
+- With a **web pane** or the **connected AI** as his AI, every role thinks with that one AI.
+
+**The "team ready" line.** On the 🤖 AutoInjector tab, above the User Panel, one line says how the team is — e.g.
+"🎩 Alfred's team is connected and working for your book “The Lighthouse Keeper”: Butler ✔ · Assistant ✔ ·
+Director ✔ · Prompt writer ✔ · Bad boy ✔". ✔ = ready, ⚪ = not set (the Butler's model does that job), ⚠ = a
+problem, with the fix in plain words (e.g. "Ollama isn't running — press 🛠 Set up his AI"). While Akọwe writes a
+book it says the team is **standing by** for it. Hover for each role's model; click (or **👥 Team**) to change them.
+
+**Choosing the models** — ⚙ in his side panel (under Model), and the same panel in the 🎩 Butler section. One row
+per role: what it is for, the model (a dropdown of the **downloaded** models only), and a **fit rating ★1–5 for
+that role** — hover the stars for the reasons in plain words. The rating looks at:
+- the size against your graphics card (★ drops when it spills onto the processor or is too big);
+- the speed Alfred **measured** on this PC (when he has used the model);
+- how big (clever) it is — very small models misread requests and pick the wrong tool;
+- what the role needs: tool calling for the Assistant (and the Butler), a reasoning ("thinking") model for the
+  Director, an uncensored model for the Bad boy, a good creative writer for the Prompt writer (coding models score
+  lower there).
+
+When another downloaded model fits a role clearly better you see "💡 Qwen3 14B fits the Director better (★5 vs ★3)
+— **Use it**". **✨ Pick the best for each role** gives every role its best-rated downloaded model (a tie goes to
+the model the Butler already uses, so fewer models swap in and out). Nothing is ever downloaded here — use the
+⬇ buttons in 🔎 Find a model for that.
+
 ### Starting his AI (🎩 Butler section)
 
 Everything for getting him running is at the top of the **🎩 Butler** section. You talk to him in his side panel.
@@ -384,6 +430,10 @@ At most one of each every 5 minutes and 6 in 10 minutes.
 | `desktop-app/mcp-client.js` | the MCP client: JSON-RPC 2.0 over stdio or Streamable HTTP, initialize / tools/list (cursor) / tools/call, timeouts, bounded restart, clean stop, redaction |
 | `desktop-app/mcp-manager.js` | the saved tool servers (`autoinjector-mcp-servers.json` in the app data folder, keys sealed), start/stop/remove, registration into `tool-provider.js` |
 | `desktop-app/alfred-ai.js` | his AI: OpenAI-compatible tool calling (Ollama `/v1`, the connected AI), the JSON text protocol (web panes / models without tools) |
+| `desktop-app/alfred-team.js` | 👥 the team, pure: the five roles, `route(text)` (named / intent / default), `modelFor()` (no model → the Butler's), `rate(role, model, ctx)` ★1–5 + reasons, `suggest()`, `pickBest()`, `vramPlan()`, `teamLine()`, the roles' instructions, `parsePlan()`. Also `window.AlfredTeam` in the renderer |
+| `desktop-app/alfred-team-ui.js` | the "team ready" line (`#alfred-team-line`, top of `#wrap`) and the team panel (`#alfred-team` in his ⚙, `#alfred-team-panel` in the 🎩 Butler section) |
+| team in `alfred.js` | settings `team: {assistant, director, prompt, badboy: {model}}` ('' = the Butler's `local.model`); `ask()` routes; `roleCfg()` (model, keep_alive 30m/5m, temperature); `makeRoom()` = the VRAM guard (`alfred-ai.ollamaPs` / `ollamaUnload` = `keep_alive: 0`); flows `badboyFlow` (no tools, the book's `profile.content_limits` from `GET /api/projects`), `promptFlow` (→ `directCard` with `generate_image` / `generate_video` / `make_cover_art`), `directorFlow` → `runPlan` (a card pauses it; `confirm()` / `reject()` carry on / stop it) → `planReport`; `teamStatus()`, `setTeam()`, `pickBestTeam()`. Replies and cards carry `by: {role, icon, name, model}`. Logs (codes only): `alfred-team` `{role, why}`, `alfred-team-vram`, `alfred-team-plan`, `alfred-team-done`, `alfred-team-fallback`, `alfred-team-limits`, `alfred-team-set` |
+| IPC (👥 team) | `alfred:team` (status: roles ✔/⚪/⚠ + fix, ratings, suggestions, models, line, book/run, graphics card), `alfred:team-set` `{role, model}`, `alfred:team-best`; main hands `hardware` (`llmSetup.hardware()`) and `speeds` (`llm-speed.js`) to `installAlfred` |
 | `desktop-app/alfred-image.js` | the ONE image adapter (sd-api `images.generate`; falls back to image-provider) |
 | `desktop-app/alfred-main.js` | wiring into Electron: tool context, IPC `alfred:*`, app events → watcher |
 | IPC (PR #124) | `alfred:quick` `{kind: picture\|video\|cover\|character\|newbook\|book\|continue, fields}` — a big button's form → `quickPlan()` in `alfred.js` → the tool call(s) → the "I will" card at once (book / continue: his AI, with the direct status as fallback) |
@@ -406,7 +456,7 @@ action and every Images-module method** from a fake model's tool call: against t
 fake panes), a fake Forge and a fake ComfyUI through the real sd-api, and a fake Akọwe API — checking the effect
 and that anything that changes something waits for ✔ Do it — and prints the coverage table.
 
-Tests: `desktop-app/test/alfred.test.js` (fake Ollama/OpenAI server, fake Akọwe API), `desktop-app/test/alfred-quick.test.js` (the big buttons and "draw me …" with a model that never calls a tool, the outcome log lines, the picture tool on a Forge without ADetailer), `desktop-app/test/alfred-ask.test.js` (PR #126: "get a prompt from ChatGPT … and make it more dramatic" with a model that never calls a tool → 💬 card → the real main.js's ChatGPT pane answers → rewritten; the timeout, an AI Akọwe is using, an empty reply, refused calls, the stronger-brain tip) and
+Tests: `desktop-app/test/alfred-team.test.js` (👥 routing, fallback, ratings, suggestions, VRAM guard, the flows against `test/fixtures/fake-ollama.js`), `alfred-team-ui.test.js` (jsdom: the line and the panel), `alfred-team-main.test.js` (the real main.js + the fake Ollama + a fake nvidia-smi), `desktop-app/test/alfred.test.js` (fake Ollama/OpenAI server, fake Akọwe API), `desktop-app/test/alfred-quick.test.js` (the big buttons and "draw me …" with a model that never calls a tool, the outcome log lines, the picture tool on a Forge without ADetailer), `desktop-app/test/alfred-ask.test.js` (PR #126: "get a prompt from ChatGPT … and make it more dramatic" with a model that never calls a tool → 💬 card → the real main.js's ChatGPT pane answers → rewritten; the timeout, an AI Akọwe is using, an empty reply, refused calls, the stronger-brain tip) and
 `desktop-app/test/e2e/alfred.e2e.js` (the real app under xvfb with the real Akọwe server, a fake model and
 a fake Forge); Akọwe side: `akowe/tests/test_alfred_hooks.py`.
 

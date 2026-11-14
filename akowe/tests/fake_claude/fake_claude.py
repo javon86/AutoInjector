@@ -11,7 +11,8 @@ slow_tree (also starts a child process), crash, unknown_flag (refuses --permissi
 call only; state file FAKE_CLAUDE_STATE). FAKE_CLAUDE_DELAY: seconds to wait before answering. FAKE_CLAUDE_LOG: a folder
 where each call writes {job, start, end, pid, argv, stdin_chars, argv_chars} (for the overlap and privacy tests).
 FAKE_CLAUDE_FACTS=wrong: the fact check finds one wrong claim with a fix. FAKE_CLAUDE_STANDIN (stand_in job):
-accept | keep | unsure | low (a low confidence). FAKE_CLAUDE_PROBLEM=1: continuity finds one.
+accept | keep | unsure | low (a low confidence); FAKE_CLAUDE_STANDIN_MATCH / _P<n> (🗳): the option whose words hold
+this text (P<n>: only the extra helper voter with persona n). FAKE_CLAUDE_PROBLEM=1: continuity finds one.
 Step 2 jobs: prepare (two scene cards and an empty needs list), variety, the specialists (dialogue / pacing / sensory /
 subtext: one minor problem with FAKE_CLAUDE_SPECIALIST=1), style and specifics (line rewrites), bible_fill (every
 asked field) and launch_kit (every asked field in its shape).
@@ -51,11 +52,19 @@ def answer(job, ctx):
         return {"ok": True}
     if job == "stand_in":  # 🧑‍⚖️ FAKE_CLAUDE_STANDIN: accept (default) | keep | unsure | low (one vote)
         how = env("FAKE_CLAUDE_STANDIN", "accept")
+        persona = (ctx.get("judge_persona") or {}).get("number")
+        # 🗳 FAKE_CLAUDE_STANDIN_MATCH: pick the option whose words contain this text (any ballot);
+        # FAKE_CLAUDE_STANDIN_P<n>: the same for the extra helper voter with persona n (a dissent)
+        match = env(f"FAKE_CLAUDE_STANDIN_P{persona}") if persona and env(f"FAKE_CLAUDE_STANDIN_P{persona}") else \
+            env("FAKE_CLAUDE_STANDIN_MATCH")
         choice = "unsure"
         for o in ctx.get("options") or []:  # the letter of the option this mode means (the order is random)
             does = o.get("does") or ""
             accept = "corrected version" in does or "as it is" in does
-            if (how in ("accept", "low") and accept) or (how == "keep" and not accept):
+            if match:
+                if match in does:
+                    choice = o.get("letter")
+            elif (how in ("accept", "low") and accept) or (how == "keep" and not accept):
                 choice = o.get("letter")
         return {"choice": choice, "confident": 0.4 if how == "low" else 0.92,
                 "why": f"Claude Code read the finding and the canon ({how})."}

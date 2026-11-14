@@ -24,11 +24,18 @@ const registry = require('./alfred-tools');
 const brainLib = require('./alfred-ai');
 const akoweRun = require('./akowe-run');
 const replyFormat = require('./alfred-format');
+const teamLib = require('./alfred-team'); // 👥 his team: Butler, Assistant, Director, Prompt writer, Bad boy
+const client = require('./openai-client');
+function optional(name) { try { return require(name); } catch (_) { return null; } }
+const hwLib = optional('./llm-hardware');
+const catalogLib = optional('./model-catalog');
+const speedLib = optional('./llm-speed');
 
 const DEFAULTS = Object.freeze({
   enabled: false,
   brain: 'auto',                 // auto | local | api | pane
-  local: { endpoint: '', model: 'qwen2.5:7b' },
+  local: { endpoint: '', model: 'qwen2.5:7b' },   // the Butler's model (and every role's without its own)
+  team: { assistant: { model: '' }, director: { model: '' }, prompt: { model: '' }, badboy: { model: '' } }, // '' = the Butler's
   pane: { site: 'chatgpt' },
   maxSteps: 8,                   // AI calls per request
   aiTimeoutMs: 120000,           // per AI call
@@ -358,6 +365,7 @@ function createAlfred(deps = {}) {
     out.brain = ['auto', 'local', 'api', 'pane'].includes(s.brain) ? s.brain : 'auto';
     out.local = { endpoint: String((s.local && s.local.endpoint) || '').trim().slice(0, 300), model: String((s.local && s.local.model) || DEFAULTS.local.model).trim().slice(0, 120) || DEFAULTS.local.model };
     out.pane = { site: registry.SITES.includes(s.pane && s.pane.site) ? s.pane.site : 'chatgpt' };
+    out.team = teamLib.sanitizeTeam(s.team);
     out.maxSteps = Math.min(20, Math.max(1, Math.round(Number(s.maxSteps) || DEFAULTS.maxSteps)));
     out.aiTimeoutMs = Math.min(600000, Math.max(5000, Math.round(Number(s.aiTimeoutMs) || DEFAULTS.aiTimeoutMs)));
     out.interpreter = s.interpreter === true;
@@ -406,6 +414,7 @@ function createAlfred(deps = {}) {
     for (const k of ['brain', 'maxSteps', 'aiTimeoutMs', 'interpreter', 'notices', 'autoStart']) if (k in patch) next[k] = patch[k];
     if (patch.local && typeof patch.local === 'object') next.local = Object.assign({}, next.local, patch.local);
     if (patch.pane && typeof patch.pane === 'object') next.pane = Object.assign({}, next.pane, patch.pane);
+    if (patch.team && typeof patch.team === 'object') next.team = Object.assign({}, next.team, patch.team);
     if (patch.alwaysAllow && typeof patch.alwaysAllow === 'object') next.alwaysAllow = Object.assign({}, next.alwaysAllow, patch.alwaysAllow);
     if (patch.personality && typeof patch.personality === 'object') next.personality = checkPersonality(patch.personality, next.personality).value;
     if (patch.panel && typeof patch.panel === 'object') next.panel = Object.assign({}, next.panel, patch.panel);
@@ -548,12 +557,209 @@ function createAlfred(deps = {}) {
   }
   function tools() { return registry.openAiTools({ interpreter: settings.interpreter }); }
 
+  // ------------------------------------------------------------------ 👥 his team: one model per role
+  const roleInfo = (id) => teamLib.byId(id);
+  /** Does this role have a model of its own (else the Butler's model does its job)? */
+  const ownModel = (role) => role === 'butler' || !!(settings.team[role] && settings.team[role].model);
+  /** The brain for a role: a local brain gets the role's model (its own, else the Butler's); a pane / API is shared. */
+  function roleCfg(cfg, role) {
+    const out = Object.assign({}, cfg);
+    if (cfg.kind === 'local' && !cfg.missing) {
+      const mf = teamLib.modelFor(settings.team, role, settings.local.model);
+      out.model = mf.model || cfg.model;
+      // the Butler's model stays in memory (he answers most); another role's leaves sooner, so two big models
+      // don't sit on a 16 GB card together
+      out.keepAlive = teamLib.sameModel(out.model, settings.local.model) ? '30m' : '5m';
+    }
+    if (role === 'badboy' || role === 'prompt') out.temperature = 0.8;
+    else if (role === 'director') out.temperature = 0.3;
+    return out;
+  }
+  const byFor = (role, cfg) => { const i = roleInfo(role); return { role: i.id, icon: i.icon, name: i.name, model: safeModel(cfg && (cfg.kind === 'pane' ? (registry.SITE_LABEL[cfg.site] || cfg.site) : cfg.model)) }; };
+  // VRAM guard: before a local role's model answers, make room on the graphics card (unload the others that
+  // would not fit beside it). The same model as last time = nothing to check (it is loaded).
+  let lastLocalModel = null;
+  async function makeRoom(cfg, r) {
+    if (!cfg || cfg.kind !== 'local' || cfg.missing || typeof deps.hardware !== 'function') return null;
+    if (lastLocalModel && teamLib.sameModel(lastLocalModel, cfg.model)) return { reuse: true };
+    lastLocalModel = cfg.model;
+    let hw = null; try { hw = await deps.hardware(); } catch (_) { hw = null; }
+    const vramMB = hw && Number(hw.bestVramMB);
+    if (!vramMB) return null;
+    const [ps, tags] = await Promise.all([brainLib.ollamaPs(cfg.endpoint), brainLib.ollamaTags(cfg.endpoint)]);
+    if (!ps.ok) return null;
+    const sizeOf = (n) => { const m = (tags.models || []).find((x) => teamLib.sameModel(x.name, n)); return m ? m.sizeBytes : null; };
+    const plan = teamLib.vramPlan({ want: cfg.model, loaded: ps.models, vramMB, sizeOf });
+    if (plan.unload.length) {
+      for (const n of plan.unload) await brainLib.ollamaUnload(cfg.endpoint, n);
+      log('alfred-team-vram', { req: r ? r.id : undefined, role: r ? r.role : undefined, model: safeModel(cfg.model), unloaded: plan.unload.map(safeModel), fits: plan.fits });
+    }
+    return plan;
+  }
+  /** One text-only call (no tools) for a role → { ok, text, cfg } | { ok:false, why, cfg }. */
+  async function roleText(r, role, system, user, opts = {}) {
+    let cfg;
+    try { cfg = roleCfg(await resolveBrain(), role); } catch (_) { cfg = null; }
+    if (!cfg || cfg.missing) return { ok: false, why: plainAiError({ kind: 'config', error: 'NO_AI' }, cfg || { kind: 'api' }), cfg };
+    r.steps += 1; r.doing = 'thinking'; r.toolTitle = null; r.roleNow = role;
+    r.brain = cfg.kind; r.model = cfg.model || cfg.site || null;
+    emitState();
+    await makeRoom(cfg, r);
+    const messages = [{ role: 'system', content: system }].concat(opts.history || [], [{ role: 'user', content: user }]);
+    let res;
+    try { res = await brainLib.next(cfg, messages, [], { paneAsk: deps.paneAsk }, { signal: r.controller.signal }); } catch (_) { res = { ok: false, kind: 'network' }; }
+    if (r.cancelled || (res && res.kind === 'cancelled')) { r.cancelled = true; return { ok: false, why: 'you pressed Stop.', cancelled: true, cfg }; }
+    if (!res || !res.ok) {
+      lastAi = { kind: cfg.kind, ok: false, at: now(), model: cfg.model || cfg.site || null };
+      log('alfred-ai-error', { brain: cfg.kind, role, code: safeName((res && (res.status ? `HTTP_${res.status}` : res.kind)) || 'error') });
+      return { ok: false, why: plainAiError(res, cfg).replace(/ Everything else in the app still works\.$/, ''), cfg };
+    }
+    lastAi = { kind: cfg.kind, ok: true, at: now(), model: cfg.model || cfg.site || null };
+    const raw = String((res.message && res.message.content) || '');
+    return { ok: true, text: replyFormat.cleanReply(raw).trim(), raw, cfg };
+  }
+  /** The last few plain turns of the conversation (no tool traffic), for a role that chats. */
+  function chatHistory(n) {
+    return history.filter((m) => (m.role === 'user' && !m._toolResult) || (m.role === 'assistant' && m.content && !m.tool_calls)).slice(-(n || 8), -1).map((m) => ({ role: m.role, content: String(m.content).slice(0, 2000) }));
+  }
+  /** 📖 The open book's content limits (the author's "never show"), for the Bad boy writing for a book. */
+  async function bookLimits() {
+    try {
+      if (!deps.ctx || typeof deps.ctx.akowe !== 'function' || (deps.akoweReady && !deps.akoweReady())) return null;
+      const ob = typeof deps.ctx.openBook === 'function' ? await deps.ctx.openBook() : null;
+      const r = await deps.ctx.akowe('GET', '/api/projects');
+      const list = r && r.status === 200 && Array.isArray(r.json) ? r.json : [];
+      const b = (ob && list.find((x) => x && x.project_id === ob.project_id)) || list.find((x) => x && x.open) || null;
+      if (!b) return null;
+      const prof = b.profile || {};
+      const limits = String(prof.content_limits || '').trim();
+      return { title: String(prof.title || b.title || b.name || '').slice(0, 120), limits: limits.slice(0, 1000) };
+    } catch (_) { return null; }
+  }
+  const BOOKISH = /\b(?:book|chapters?|scenes?|novel|manuscript|story|stories|characters?|dossiers?|my (?:villain|hero|heroine))\b/i;
+
+  /** 😈 the Bad boy: uncensored chat / creative text (no tools — nothing in the app changes). */
+  async function badboyFlow(r, text) {
+    let system = teamLib.BADBOY_SYSTEM;
+    if (BOOKISH.test(text)) {
+      const b = await bookLimits();
+      if (b && b.limits) system += ` This is for the user's book${b.title ? ` "${b.title}"` : ''}. The author's CONTENT LIMITS for this book are hard rules even for you — never write anything they exclude: <<<${b.limits}>>>`;
+      if (b && b.limits) log('alfred-team-limits', { req: r.id, role: 'badboy' });
+    }
+    const out = await roleText(r, 'badboy', system, text, { history: chatHistory(8) });
+    if (out.cancelled) return quickReply(r, 'Stopped. (Nothing else was done.)', 'cancelled');
+    r.by = byFor('badboy', out.cfg);
+    if (!out.ok) return quickReply(r, `${r.by.icon} ${r.by.name} couldn't answer: ${out.why}`, 'error', { by: r.by });
+    if (!out.text || !/[\p{L}\p{N}]/u.test(out.text)) return quickReply(r, `${r.by.icon} ${r.by.name} sent back nothing I could use. Try again in other words.`, 'empty', { by: r.by });
+    return quickReply(r, out.text, 'done', { by: r.by });
+  }
+  /** Clean what the Prompt writer wrote down to the prompt itself. */
+  function cleanPrompt(t, max) {
+    let p = String(t || '').trim();
+    p = p.replace(/^\s*(?:here(?:'s| is)[^:\n]{0,60}:|(?:image|picture|video)?\s*prompt\s*:)\s*/i, '');
+    p = p.replace(/^["“'`]+|["”'`]+$/g, '').replace(/\*\*/g, '').replace(/\s*\n+\s*/g, ' ').trim();
+    return p.slice(0, max);
+  }
+  /** 🎨 the Prompt writer writes the prompt; the existing generate_image / generate_video / make_cover_art run it (card first). */
+  async function promptFlow(r, route) {
+    const media = route.media || teamLib.mediaIntent(route.text) || { kind: /\b(?:video|clip|animation)s?\b/i.test(route.text) ? 'video' : 'picture', purpose: 'free' };
+    const writer = r.role === 'badboy' ? 'badboy' : 'prompt';
+    const video = media.kind === 'video';
+    const system = `${writer === 'badboy' ? `${teamLib.BADBOY_SYSTEM} ` : ''}${video ? teamLib.VIDEO_WRITER_SYSTEM : teamLib.PROMPT_WRITER_SYSTEM}`;
+    const what = media.purpose && media.purpose !== 'free' && media.purpose !== 'video' ? ` It is a ${media.purpose}.` : '';
+    const out = await roleText(r, writer, system, `Write the ${video ? 'video' : 'picture'} prompt for this request:${what}\n<<<${String(route.text).slice(0, 2000)}>>>`, { history: chatHistory(4) });
+    if (out.cancelled) return quickReply(r, 'Stopped. (Nothing else was done.)', 'cancelled');
+    r.by = byFor(writer, out.cfg);
+    const max = video ? 1000 : 4000;
+    let prompt = out.ok ? cleanPrompt(out.text, max) : '';
+    const bad = !prompt || prompt.length < 8 || /^(?:sorry|i (?:can(?:no|')t|am unable|won't)|as an ai)\b/i.test(prompt) || client.extractJsonObject(prompt);
+    let intro;
+    if (bad) {
+      const ai = actionIntent(route.text);
+      prompt = (ai && ai.subject) || String(route.text).slice(0, max);
+      intro = `${r.by.icon} ${r.by.name} couldn't write a prompt${out.ok ? '' : ` (${String(out.why || '').slice(0, 200)})`}, so I'll use your own words.`;
+      log('alfred-team-fallback', { req: r.id, role: writer, why: out.ok ? 'BAD_PROMPT' : 'AI_ERROR' });
+    } else intro = `${r.by.icon} ${r.by.name} (${r.by.model}) wrote this prompt:\n“${prompt.length > 700 ? `${prompt.slice(0, 700)}…` : prompt}”`;
+    let step;
+    if (video) step = { name: 'generate_video', args: { prompt } };
+    else if (media.purpose === 'cover' && /\b(?:my|the|our) (?:book|novel)\b|\bbook cover\b/i.test(route.text)) step = { name: 'make_cover_art', args: { note: prompt.slice(0, 400) } };
+    else { step = { name: 'generate_image', args: { prompt } }; if (['cover', 'portrait', 'illustration'].includes(media.purpose)) step.args.purpose = media.purpose; }
+    return directCard(r, [step], { intro: intro.slice(0, 900), doLabel: video ? '🎬 Make it now' : '🎨 Make it now', by: r.by, fallback: bad });
+  }
+  /** 💬 a role that answers in words only (the Director's "butler" steps). */
+  async function wordsFlow(r, role, text) {
+    const out = await roleText(r, role, `${systemPromptFor(settings)} For this step answer in words only (no tools).`, text, { history: chatHistory(4) });
+    if (out.cancelled) return quickReply(r, 'Stopped. (Nothing else was done.)', 'cancelled');
+    r.by = byFor(role, out.cfg);
+    if (!out.ok) return quickReply(r, `${r.by.icon} ${r.by.name} couldn't answer: ${out.why}`, 'error', { by: r.by });
+    return quickReply(r, out.text || '(nothing)', out.text ? 'done' : 'empty', { by: r.by });
+  }
+  const STEP_ICON = (role) => `${roleInfo(role).icon} ${roleInfo(role).name}`;
+  /** 🎬 the Director splits the request into steps and hands them to the others; the Butler reports back. */
+  async function directorFlow(r, text) {
+    const out = await roleText(r, 'director', teamLib.DIRECTOR_SYSTEM, text);
+    if (out.cancelled) return quickReply(r, 'Stopped. (Nothing else was done.)', 'cancelled');
+    const by = byFor('director', out.cfg);
+    const steps = out.ok ? teamLib.parsePlan(client.extractJsonObject(out.raw || out.text)) : null;
+    if (!steps) {
+      // no usable plan: the Butler takes the whole request as before
+      log('alfred-team-fallback', { req: r.id, role: 'director', why: out.ok ? 'BAD_PLAN' : 'AI_ERROR' });
+      say('notice', `🎬 The Director couldn't make a plan${out.ok ? '' : ` (${String(out.why || '').slice(0, 160)})`}, so the 🎩 Butler takes it.`, { kind: 'team' });
+      r.role = 'butler'; r.steps = 0;
+      return loop(r);
+    }
+    r.plan = { steps, i: 0, results: [], text: r.text };
+    const planText = `🎬 **Here is the plan** — I hand each step to the right one:\n${steps.map((s, i) => `${i + 1}. ${STEP_ICON(s.role)} — ${s.task}`).join('\n')}`;
+    say('alfred', planText, { by });
+    history.push({ role: 'assistant', content: planText });
+    log('alfred-team-plan', { req: r.id, steps: steps.length, roles: steps.map((s) => s.role) });
+    return runPlan(r);
+  }
+  /** The plan's next steps, one after another. A card stops it until ✔ / ✖ (confirm / reject carry on). */
+  async function runPlan(r) {
+    const p = r.plan;
+    while (p && p.i < p.steps.length) {
+      if (r.cancelled) { r.plan = null; return quickReply(r, 'Stopped. (The rest of the plan was not done.)', 'cancelled'); }
+      const st = p.steps[p.i]; p.i += 1;
+      req = r; card = null;
+      Object.assign(r, { role: st.role, text: st.task, steps: 0, tools: [], carded: false, retried: false, results: [], lastAsk: null, nudge: null, refusedSteps: 0, struggled: false, by: null });
+      log('alfred-team', { req: r.id, role: st.role, why: 'plan', step: p.i });
+      say('notice', `${STEP_ICON(st.role)} — step ${p.i} of ${p.steps.length}: ${st.task}`, { kind: 'team' });
+      let out;
+      if (st.role === 'prompt') out = await promptFlow(r, { text: st.task, media: teamLib.mediaIntent(st.task) });
+      else if (st.role === 'badboy') out = await badboyFlow(r, st.task);
+      else if (st.role === 'butler') out = await wordsFlow(r, 'butler', st.task);
+      else { history.push({ role: 'user', content: `(Step ${p.i} of ${p.steps.length} of the Director's plan) ${st.task}` }); trimHistory(); out = await loop(r); }
+      if (out && out.type === 'confirm') return out; // waits for the card; confirm() / reject() carry on
+      p.results.push({ role: st.role, task: st.task, ok: !(out && out.failed), text: String((out && out.text) || '').slice(0, 1500) });
+    }
+    return planReport(r);
+  }
+  /** After a card in a plan was answered: note what came out and go on with the next step. */
+  async function afterStep(r, out) {
+    if (!r || !r.plan || !out || out.type === 'confirm') return out;
+    const p = r.plan; const st = p.steps[p.i - 1];
+    if (st) p.results.push({ role: st.role, task: st.task, ok: !out.failed, text: String(out.text || '').slice(0, 1500) });
+    if (r.cancelled) { r.plan = null; return out; }
+    return runPlan(r);
+  }
+  async function planReport(r) {
+    const p = r.plan; r.plan = null;
+    req = r; r.role = 'butler'; r.text = p.text; r.steps = 0;
+    const lines = p.results.map((x, i) => `${i + 1}. ${STEP_ICON(x.role)} (${x.task}): ${x.ok ? '' : 'did not work — '}${x.text.replace(/\s+/g, ' ').slice(0, 600)}`);
+    const out = await roleText(r, 'butler', teamLib.REPORT_SYSTEM, `What the user asked: <<<${String(p.text).slice(0, 1500)}>>>\n\nStep results:\n${lines.join('\n')}`);
+    r.by = byFor('butler', out.cfg);
+    const text = out.ok && out.text && /[\p{L}\p{N}]/u.test(out.text) ? out.text : `All done. What the team did:\n${p.results.map((x) => `- ${x.ok ? '✔' : '✖'} ${STEP_ICON(x.role)}: ${x.task}`).join('\n')}`;
+    log('alfred-team-done', { req: r.id, steps: p.results.length, failed: p.results.filter((x) => !x.ok).length });
+    return quickReply(r, text, p.results.some((x) => !x.ok) ? 'error' : 'done', { by: r.by });
+  }
+
   // ------------------------------------------------------------------ status / UI events
   function status() {
     return {
       ok: true, enabled: settings.enabled, settings: publicSettings(), busy: !!req && !card, card: card ? card.public : null,
       // what he is doing right now, for the "🎩 Thinking… 12 s" line (so a slow local model doesn't look stuck)
-      progress: req && !card ? { doing: req.doing || 'thinking', tool: req.toolTitle || null, step: req.steps, elapsedMs: Math.max(0, now() - (req.startedAt || now())), brain: lastAi.kind || null } : null,
+      progress: req && !card ? { doing: req.doing || 'thinking', role: req.roleNow || null, tool: req.toolTitle || null, step: req.steps, elapsedMs: Math.max(0, now() - (req.startedAt || now())), brain: lastAi.kind || null } : null,
       ai: lastAi, chat: chat.slice(-60), activity: activity.slice(-ACTIVITY_MAX),
       tools: registry.publicList({ interpreter: settings.interpreter }).map((t) => ({ name: t.name, title: t.title, group: t.group, changes: t.changes, allowAlways: t.allowAlways })),
       connected: connectedTools(),
@@ -663,7 +869,17 @@ function createAlfred(deps = {}) {
     const busy = busyAnswer(); if (busy) return busy;
     if (t.length > 6000) return { ok: false, error: 'TOO_LONG', message: 'That message is too long for me (6000 characters at most).' };
     const mine = startRequest(t, opts.quick && QUICK_KINDS.includes(opts.quick) ? opts.quick : null);
+    // 👥 the words choose the role: named ("bad boy, …", "director, …") or by intent (a picture / video → the Prompt
+    // writer, "step by step" → the Director) — by intent only when that role has a model of its own; else the Butler
+    // does it as before (one model = everything works as it always did)
+    let route = mine.quick ? { role: 'butler', why: 'default', text: t } : teamLib.route(t);
+    if (route.why === 'intent' && !ownModel(route.role)) route = { role: 'butler', why: 'default', text: t };
+    mine.role = route.role; mine.origText = t;
+    log('alfred-team', { req: mine.id, role: route.role, why: route.why });
+    if (route.role === 'prompt' || (route.role === 'badboy' && route.media)) return promptFlow(mine, route);
+    if (route.role === 'badboy') return badboyFlow(mine, route.text || t);
     await refreshBookNow(); // the current book / run / problem, live (2 small reads, bounded wait)
+    if (route.role === 'director') return directorFlow(mine, route.text || t);
     return loop(mine); // (a Stop pressed meanwhile is handled there)
   }
 
@@ -725,7 +941,7 @@ function createAlfred(deps = {}) {
     r.carded = true;
     card = {
       id, req: r, steps: pending, quick: true,
-      public: { id, intro: opts.intro || '', doLabel: opts.doLabel || undefined, steps: pending.map((p, i) => ({ n: i + 1, tool: p.tool.name, title: p.tool.title, text: p.text, allowAlways: registry.canAllowAlways(p.tool, p.args), allowKey: registry.allowKeyOf(p.tool, p.args), code: null })) },
+      public: { id, by: opts.by || undefined, intro: opts.intro || '', doLabel: opts.doLabel || undefined, steps: pending.map((p, i) => ({ n: i + 1, tool: p.tool.name, title: p.tool.title, text: p.text, allowAlways: registry.canAllowAlways(p.tool, p.args), allowKey: registry.allowKeyOf(p.tool, p.args), code: null })) },
     };
     log('alfred-card', { req: r.id, card: id, tools: pending.map((p) => p.tool.name), quick: r.quick || undefined, fallback: opts.fallback || undefined });
     logReply(r, opts.fallback ? 'fallback-card' : 'card', 0);
@@ -770,7 +986,7 @@ function createAlfred(deps = {}) {
     if (card && card.req === r) card = null;
     history.push({ role: 'assistant', content: text });
     trimHistory();
-    say('alfred', text, extra);
+    say('alfred', text, r.by && !(extra && extra.by) ? Object.assign({ by: r.by }, extra || {}) : extra);
     logReply(r, outcome, text.length);
     emitState();
     return Object.assign({ ok: true, type: 'reply', text }, outcome === 'error' ? { failed: true } : {});
@@ -778,6 +994,7 @@ function createAlfred(deps = {}) {
   /** Do the quick card's steps in order (a later step needs the earlier one) and say what happened, plainly. */
   async function runQuick(r, steps, { auto } = {}) {
     const lines = []; let image = null; let failed = false;
+    r.by = null; // what the app did, not what a role wrote (the card said who wrote the prompt)
     for (let i = 0; i < steps.length; i++) {
       const s = steps[i];
       if (r.cancelled) { lines.push('Stopped. (Nothing else was done.)'); break; }
@@ -863,11 +1080,15 @@ function createAlfred(deps = {}) {
       emitState();
       return Object.assign({ ok: true }, out);
     };
-    const reply = (textOut, extra, outcome) => { say('alfred', textOut, extra); logReply(r, outcome || 'done', String(textOut || '').length); return finish(Object.assign({ type: 'reply', text: textOut }, extra || {})); };
+    const reply = (textOut, extra, outcome) => { say('alfred', textOut, Object.assign(r.by ? { by: r.by } : {}, extra || {})); logReply(r, outcome || 'done', String(textOut || '').length); return finish(Object.assign({ type: 'reply', text: textOut }, extra || {})); };
     let cfg;
     try { cfg = await resolveBrain(); } catch (_) { cfg = { kind: 'local', endpoint: brainLib.DEFAULT_LOCAL_BASE, model: settings.local.model }; }
+    const role = r.role === 'assistant' ? 'assistant' : 'butler'; // the tool loop: the Butler, or the Assistant
+    cfg = roleCfg(cfg, role);
+    r.roleNow = role;
     if (!Array.isArray(r.tools)) r.tools = [];
     r.brain = cfg.kind; r.model = cfg.model || cfg.site || null;
+    r.by = cfg.missing ? null : byFor(role, cfg);
     for (;;) {
       if (r.cancelled) { log('alfred-cancel', { req: r.id, steps: r.steps }); return reply('Stopped. (Nothing else was done.)', { cancelled: true }, 'cancelled'); }
       if (r.steps >= settings.maxSteps) {
@@ -885,6 +1106,7 @@ function createAlfred(deps = {}) {
       const messages = [{ role: 'system', content: systemPromptFor(settings) + bookNowPrompt() }].concat(history.map((m) => { const c = Object.assign({}, m); delete c._toolResult; delete c._tool; return c; }));
       // the one stricter retry (free text that clearly asked for a picture / video, answered in words): for this call only
       if (r.nudge) { messages.push({ role: 'user', content: r.nudge }); r.nudge = null; }
+      await makeRoom(cfg, r);
       let res;
       try { res = await brainLib.next(cfg, messages, tools(), { paneAsk: deps.paneAsk }, { signal: r.controller.signal }); }
       catch (_) { res = { ok: false, kind: 'network' }; }
@@ -1010,7 +1232,7 @@ function createAlfred(deps = {}) {
         const id = `card-${seq}-${r.steps}`;
         card = {
           id, req: r, steps: pending,
-          public: { id, intro: msg.content ? replyFormat.cleanReply(msg.content).slice(0, 600) : '', steps: pending.map((p, i) => ({ n: i + 1, tool: p.tool.name, title: p.tool.title, text: p.text, allowAlways: registry.canAllowAlways(p.tool, p.args), allowKey: registry.allowKeyOf(p.tool, p.args), code: p.tool.interpreter ? { language: p.args.language, code: p.args.code } : (typeof p.tool.showCode === 'function' ? p.tool.showCode(p.args) : null) })) },
+          public: { id, by: r.by || undefined, intro: msg.content ? replyFormat.cleanReply(msg.content).slice(0, 600) : '', steps: pending.map((p, i) => ({ n: i + 1, tool: p.tool.name, title: p.tool.title, text: p.text, allowAlways: registry.canAllowAlways(p.tool, p.args), allowKey: registry.allowKeyOf(p.tool, p.args), code: p.tool.interpreter ? { language: p.args.language, code: p.args.code } : (typeof p.tool.showCode === 'function' ? p.tool.showCode(p.args) : null) })) },
         };
         log('alfred-card', { req: r.id, card: id, tools: pending.map((p) => p.tool.name) });
         r.carded = true;
@@ -1053,7 +1275,7 @@ function createAlfred(deps = {}) {
     if (changed) { save(); log('alfred-settings', { alwaysAllow: Object.keys(settings.alwaysAllow) }); }
     log('alfred-confirm', { req: c.req.id, card: c.id, tools: c.steps.map((s) => s.tool.name) });
     emitState();
-    if (c.quick) return runQuick(c.req, c.steps); // the big buttons: done and said plainly, without asking his AI
+    if (c.quick) return afterStep(c.req, await runQuick(c.req, c.steps)); // the big buttons: done and said plainly, without asking his AI
     for (const s of c.steps) {
       if (c.req.cancelled) { history.push(toolMessage(s.call, { ok: false, error: 'CANCELLED', message: 'The user stopped it before this step; nothing was done.' })); continue; }
       const out = await execute(s.tool, s.args);
@@ -1061,7 +1283,7 @@ function createAlfred(deps = {}) {
       c.req.results.push({ title: s.tool.title, ok: !!out.ok, message: String(out.message || (out.ok ? 'Done.' : out.error || 'failed')).slice(0, 400) });
       history.push(toolMessage(s.call, resultForAi(out)));
     }
-    return loop(c.req);
+    return afterStep(c.req, await loop(c.req)); // (in a Director's plan: then the next step)
   }
 
   function reject(cardId) {
@@ -1069,13 +1291,16 @@ function createAlfred(deps = {}) {
     const c = card;
     card = null;
     if (!c.quick) for (const s of c.steps) history.push(toolMessage(s.call, { ok: false, error: 'DECLINED', message: 'The user said no. Nothing was done.' }));
-    history.push({ role: 'assistant', content: "All right — I didn't do that." });
+    const planLeft = c.req.plan && c.req.plan.i < c.req.plan.steps.length;
+    if (c.req.plan) { log('alfred-team-done', { req: c.req.id, steps: c.req.plan.results.length, stopped: true }); c.req.plan = null; }
+    const no = planLeft ? "All right — I didn't do that, and I stopped the Director's plan here." : "All right — I didn't do that.";
+    history.push({ role: 'assistant', content: no });
     log('alfred-reject', { req: c.req.id, card: c.id, tools: c.steps.map((s) => s.tool.name) });
     logReply(c.req, 'declined', 0);
     if (req === c.req) req = null;
-    say('alfred', "All right — I didn't do that.");
+    say('alfred', no);
     emitState();
-    return { ok: true, type: 'reply', text: "All right — I didn't do that." };
+    return { ok: true, type: 'reply', text: no };
   }
 
   function cancel() {
@@ -1236,9 +1461,113 @@ function createAlfred(deps = {}) {
     return { ok: true, kind: cfg.kind, model: cfg.model, small: b != null && b < 3, message: `My AI answers (${cfg.kind === 'local' ? 'Ollama' : 'the connected AI'}, model ${cfg.model}).${b != null && b < 3 ? ` ${SMALL_MODEL_NOTE(cfg.model)}` : ''}` };
   }
 
+  // ------------------------------------------------------------------ 👥 the team: status, models, ratings
+  function localEndpointNow() {
+    if (settings.local.endpoint) return settings.local.endpoint;
+    try { const m = deps.managedOllama && deps.managedOllama(); if (m && m.running && m.endpoint) return `${String(m.endpoint).replace(/\/+$/, '')}/v1`; } catch (_) {}
+    return brainLib.DEFAULT_LOCAL_BASE;
+  }
+  async function rateCtx() {
+    let hw = null; try { hw = deps.hardware ? await deps.hardware() : null; } catch (_) { hw = null; }
+    let speeds = {}; try { speeds = deps.speeds ? deps.speeds() || {} : speedLib ? speedLib.all() : {}; } catch (_) { speeds = {}; }
+    return { hw, speeds, HW: hwLib, catalog: catalogLib && Array.isArray(catalogLib.CURATED) ? catalogLib.CURATED : [] };
+  }
+  /** The book the team works for, and whether Akọwe is writing one right now (bounded, read-only). */
+  async function teamBook() {
+    if (!deps.ctx || typeof deps.ctx.akowe !== 'function' || (deps.akoweReady && !deps.akoweReady())) return { book: null, run: null };
+    const late = (ms) => new Promise((res) => { const t = setTimeout(() => res(null), ms); if (t.unref) t.unref(); });
+    let book = null; let run = null;
+    try {
+      const ob = typeof deps.ctx.openBook === 'function' ? await Promise.race([deps.ctx.openBook(), late(2000)]) : null;
+      if (ob && ob.project_id) {
+        book = { project_id: ob.project_id, title: ob.title || '' };
+        if (!book.title) {
+          const r = await Promise.race([deps.ctx.akowe('GET', '/api/projects'), late(2500)]);
+          const b = r && Array.isArray(r.json) ? r.json.find((x) => x && x.project_id === ob.project_id) : null;
+          if (b) book.title = String(b.title || (b.profile && b.profile.title) || b.name || '').slice(0, 120);
+        }
+      }
+      const ar = await Promise.race([deps.ctx.akowe('GET', '/api/autobook'), late(2500)]);
+      const live = ar && ar.json && Array.isArray(ar.json.runs) ? ar.json.runs.find((x) => x && RUN_STATES_LIVE.has(String(x.status))) : null;
+      if (live) run = { id: live.id, title: String(live.title || (book && book.title) || '').slice(0, 120), live: true, status: live.status };
+    } catch (_) { /* best effort */ }
+    return { book, run };
+  }
+  /**
+   * IPC alfred:team — everything the team panel and the "team ready" line need: per role its model (own or the
+   * Butler's), ✔ / ⚪ / ⚠ with a plain fix, loaded in memory or not, the fit rating ★ for every downloaded model,
+   * a better downloaded model when there is one; the downloaded models; the book it works for. No AI call.
+   */
+  async function teamStatus() {
+    const brain = await resolveBrain().catch(() => ({ kind: 'local', endpoint: localEndpointNow() }));
+    const local = brain.kind === 'local';
+    const endpoint = local ? brain.endpoint : localEndpointNow();
+    const [tags, ps, ctxR, bk] = await Promise.all([brainLib.ollamaTags(endpoint), brainLib.ollamaPs(endpoint), rateCtx(), teamBook()]);
+    const models = (tags.models || []).filter((m) => !/(?:embed|bge-|nomic|minilm)/i.test(m.name));
+    const has = (n) => models.some((m) => teamLib.sameModel(m.name, n));
+    const brainWord = brain.kind === 'pane' ? `${registry.SITE_LABEL[brain.site] || brain.site} (web pane)` : brain.kind === 'api' ? 'the connected AI' : null;
+    const roles = teamLib.ROLES.map((info) => {
+      const mf = teamLib.modelFor(settings.team, info.id, settings.local.model);
+      const out = { id: info.id, icon: info.icon, name: info.name, for: info.for, model: mf.model, own: mf.own, chosen: info.id === 'butler' ? settings.local.model : (settings.team[info.id] && settings.team[info.id].model) || '' };
+      if (!local) {
+        out.state = brain.missing ? 'problem' : 'ok';
+        out.fix = brain.missing ? 'Alfred has no AI yet — press 🛠 Set up his AI.' : '';
+        out.note = brainWord ? `thinks with ${brainWord}` : '';
+      } else if (!tags.ok) {
+        out.state = 'problem'; out.fix = 'Ollama isn\'t running — press 🛠 Set up his AI (one button).';
+      } else if (!mf.model || !has(mf.model)) {
+        out.state = 'problem';
+        out.fix = `${mf.model || 'No model'} isn't downloaded — pick a downloaded one in ⚙ Alfred's team${models.length ? '' : ' (or download one with 🔎 Find a model)'}.`;
+      } else out.state = mf.own ? 'ok' : 'unset';
+      if (out.state === 'unset') out.note = `uses the Butler's model (${mf.model})`;
+      out.loaded = local && ps.ok ? ps.models.some((x) => teamLib.sameModel(x.name, mf.model)) : null;
+      const cur = models.find((m) => teamLib.sameModel(m.name, mf.model)) || (mf.model ? { name: mf.model } : null);
+      out.rating = cur ? teamLib.rate(info.id, cur, ctxR) : null;
+      out.ratings = {};
+      for (const m of models) { const rt = teamLib.rate(info.id, m, ctxR); out.ratings[m.name] = { stars: rt.stars, text: rt.text }; }
+      out.suggestion = local && models.length ? teamLib.suggest(info.id, mf.model, models, ctxR) : null;
+      return out;
+    });
+    const st = { enabled: settings.enabled, local, brainWord, roles, book: bk.book, run: bk.run };
+    const line = teamLib.teamLine(st);
+    const hw = ctxR.hw && ctxR.hw.bestVramMB ? { vramMB: ctxR.hw.bestVramMB, gpu: ((ctxR.hw.gpus || [])[0] || {}).name || null } : null;
+    return {
+      ok: true, enabled: settings.enabled, local, brain: brain.kind, brainWord, ollama: !!tags.ok, roles, line, book: bk.book, run: bk.run, hw,
+      models: models.map((m) => ({ name: m.name, sizeBytes: m.sizeBytes, sizeText: m.sizeBytes ? teamLib.gbText(m.sizeBytes) : '', params: m.params || null, loaded: ps.ok ? ps.models.some((x) => teamLib.sameModel(x.name, m.name)) : null })),
+    };
+  }
+  /** Give a role a model ('' = use the Butler's). The Butler's model is his ⚙ Model. → teamStatus() */
+  async function setTeam(p) {
+    const o = p && typeof p === 'object' ? p : {};
+    const role = String(o.role || '');
+    if (!teamLib.ROLE_IDS.includes(role)) return { ok: false, error: 'BAD_ROLE', message: 'There is no such role in Alfred\'s team.' };
+    const model = String(o.model == null ? '' : o.model).replace(/[^A-Za-z0-9_.:/@+-]/g, '').slice(0, 160);
+    if (role === 'butler' && !model) return { ok: false, error: 'EMPTY', message: 'The Butler needs a model (the others can borrow his).' };
+    if (role === 'butler') setSettings({ local: { model } });
+    else setSettings({ team: { [role]: { model } } });
+    log('alfred-team-set', { role, own: !!model, model: safeModel(model) || undefined });
+    const st = await teamStatus();
+    return Object.assign(st, { message: `${roleInfo(role).icon} ${roleInfo(role).name}: ${model ? model : 'uses the Butler\'s model'}.` });
+  }
+  /** "Pick the best for each role": the best-rated DOWNLOADED model per role (nothing is downloaded). */
+  async function pickBestTeam() {
+    const endpoint = localEndpointNow();
+    const [tags, ctxR] = await Promise.all([brainLib.ollamaTags(endpoint), rateCtx()]);
+    const models = (tags.models || []).filter((m) => !/(?:embed|bge-|nomic|minilm)/i.test(m.name));
+    if (!tags.ok || !models.length) return Object.assign(await teamStatus(), { ok: false, error: 'NO_MODELS', message: tags.ok ? 'There are no downloaded models yet — download one with 🔎 Find a model first.' : 'Ollama isn\'t running, so I can\'t see the downloaded models — press 🛠 Set up his AI.' });
+    const best = teamLib.pickBest(models, ctxR, settings.local.model);
+    const team = {};
+    for (const id of teamLib.ROLE_IDS) if (id !== 'butler') team[id] = { model: best[id] || '' };
+    setSettings({ local: { model: best.butler || settings.local.model }, team });
+    log('alfred-team-set', { role: 'all', best: true, models: [...new Set(Object.values(best).map(safeModel))].length });
+    const st = await teamStatus();
+    return Object.assign(st, { message: `Done — ${teamLib.ROLES.map((r) => `${r.icon} ${r.name}: ${best[r.id]}`).join(' · ')}. (Nothing was downloaded.)` });
+  }
+
   if (settings.enabled) startWatch();
 
   return {
+    teamStatus, setTeam, pickBestTeam,
     status, getSettings: publicSettings, setSettings, setEnabled, ask, quick, confirm, reject, cancel, clearChat, testAi,
     personality, setPersonality, profiles, saveProfile, useProfile, deleteProfile, setPanel,
     onAppEvent, pollBooks, notice, stopWatch,
@@ -1247,4 +1576,4 @@ function createAlfred(deps = {}) {
   };
 }
 
-module.exports = { createAlfred, quickPlan, actionIntent, askAiIntent, QUICK_KINDS, ACTION_KINDS, PICTURE_SIZES, DEFAULTS, SYSTEM_PROMPT, plainAiError, NOTICE_MAX, PERSONALITY_PRESETS, personalityPrompt, systemPromptFor, checkPersonality, PROFILE_MAX };
+module.exports = { teamLib, createAlfred, quickPlan, actionIntent, askAiIntent, QUICK_KINDS, ACTION_KINDS, PICTURE_SIZES, DEFAULTS, SYSTEM_PROMPT, plainAiError, NOTICE_MAX, PERSONALITY_PRESETS, personalityPrompt, systemPromptFor, checkPersonality, PROFILE_MAX };

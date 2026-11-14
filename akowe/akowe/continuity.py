@@ -675,15 +675,25 @@ def is_own(store, pid: str, branch: str, record_id: str | None, version) -> bool
     return any(r.get("version") == version for r in (cur.get("own") or {}).get(record_id or "") or [])
 
 
-def own_changes_since(store, pid: str, branch: str, records: dict, since: str | None) -> list:
+def own_changes_since(store, pid: str, branch: str, records: dict, since: str | None,
+                      read_versions: dict | None = None) -> list:
     """The keys of ``records`` ({key: record id}) whose chapter got one of Akọwe's own revisions after ``since`` (an
-    ISO time; None = never read)."""
+    ISO time; None = never read). When the reader noted the version it read (``read_versions``: {record id:
+    version}), a revision newer than that version counts — the times are to the second, so a rewrite in the same
+    second as the end of the read would otherwise be missed."""
     cur = _recheck_all(store, pid, branch)
     own = cur.get("own") or {}
+    read_versions = read_versions or {}
     out = []
     for k, rid in (records or {}).items():
         rows = own.get(rid) or []
-        if rows and (since is None or any(str(r.get("at") or "") > str(since) for r in rows)):
+        if not rows:
+            continue
+        seen = read_versions.get(rid)
+        if isinstance(seen, int) and not isinstance(seen, bool):
+            if any(isinstance(r.get("version"), int) and r["version"] > seen for r in rows):
+                out.append(k)
+        elif since is None or any(str(r.get("at") or "") > str(since) for r in rows):
             out.append(k)
     return out
 

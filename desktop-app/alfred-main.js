@@ -350,6 +350,9 @@ function installAlfred(h) {
     paneAsk,
     listModels: (endpoint) => h.ollamaManager.listInstalled(String(endpoint || 'http://127.0.0.1:11434/v1').replace(/\/v1\/?$/, '').replace(/\/+$/, ''), 3000),
     akoweReady: () => !!h.akoweServerBase(),
+    // 👥 his team: this PC's graphics card (the fit ratings, the VRAM guard) and the speeds measured per model
+    hardware: typeof h.hardware === 'function' ? () => h.hardware() : undefined,
+    speeds: typeof h.speeds === 'function' ? () => h.speeds() : undefined,
     connected: () => {
       const im = h.imageProvider.status(); const vi = (h.videoStatus ? h.videoStatus() : null) || h.videoProvider.status(); const oi = h.interpreterProvider.status();
       return { akowe: !!h.akoweServerBase(), images: !!(im.enabled && im.configured && !im.noModels), video: !!(vi.enabled && vi.configured), panes: SITE_IDS.filter((s) => h.state.enabled[s]).length, interpreter: !!(oi.enabled && oi.configured) };
@@ -412,6 +415,10 @@ function installAlfred(h) {
     const base = (s.local.endpoint || 'http://127.0.0.1:11434/v1').replace(/\/v1\/?$/, '').replace(/\/+$/, '');
     try { return await h.ollamaManager.listInstalled(base, 3000); } catch (_) { return { ok: false, models: [] }; }
   });
+  // 👥 his team: one model per role (status + the "team ready" line, set a role's model, pick the best downloaded ones)
+  ipcMain.handle('alfred:team', async () => { try { return await alfred.teamStatus(); } catch (_) { return { ok: false, error: 'ERROR', message: 'Something went wrong on my side.' }; } });
+  ipcMain.handle('alfred:team-set', async (_e, p) => { try { return await alfred.setTeam(p || {}); } catch (_) { return { ok: false, error: 'ERROR', message: 'Something went wrong on my side.' }; } });
+  ipcMain.handle('alfred:team-best', async () => { try { return await alfred.pickBestTeam(); } catch (_) { return { ok: false, error: 'ERROR', message: 'Something went wrong on my side.' }; } });
   ipcMain.handle('alfred:open-path', async (_e, p) => openOutput(String((p && p.path) || '')));
   // personality (voice only) + saved set-ups
   const safe = (fn, fallback) => async (...a) => { try { return await fn(...a); } catch (_) { return Object.assign({ ok: false, error: 'ERROR', message: 'Something went wrong on my side.' }, fallback || {}); } };

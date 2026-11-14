@@ -102,6 +102,9 @@ it; **⇱ Pop out** gives Akọwe its own window.
   Start is your permission for that one run only; it makes a new book and never touches your other books. You can
   watch, **⏸ Pause**, **▶ Resume** or **✖ Cancel**. A long book takes a day or two.
 
+- **📖 Start from my own chapters** (also called 📖 Grow my start into a novel): you wrote the first chapters, or only a
+  few pages — the AI turns them into a whole book. See "📖 Grow my start into a novel" below.
+
 On the Make-a-book screen you can choose, among other things: your **Pen name** (printed on the title page and the
 cover; the AI never makes one up — leave it empty to use the pen name you typed last, or none; the plan check warns
 if it is also the name of one of your characters), the kind of story and the story shape (or leave them to the AI), **How many AIs check for mistakes**, **Use Claude Code helpers for this book**, and **"✍ At the end,
@@ -119,6 +122,47 @@ again** to hide it. It never stops you from starting.
 secret also gets an innocent explanation, there is at least one fair red herring, and readers should not be able to
 work out the twist before about two-thirds of the book. The chapters before that point are told not to give the
 secret away or hint at it too hard. This costs no extra AI work.
+
+### 📖 Grow my start into a novel
+
+You wrote the opening — one to a dozen chapters, or just three pages — and want the rest written in your voice, with
+your characters, your world and its rules (magic included). Press **📖 Start from my own chapters** on My books, on
+➕ New book or on the ⚡ Make-a-book screen.
+
+1. **Give Akọwe your chapters.** Paste them, or choose a Word (.docx), PDF, OpenDocument (.odt), text (.txt) or
+   Markdown (.md) file. Headings such as "Chapter 1" or Word's Heading 1 show where chapters start; text with no
+   heading becomes chapter 1. Check the chapters Akọwe found, type the title and choose how long the finished book is
+   (short story, novelette, novella, novel — or the exact number of chapters). Press **📖 Start my book from these
+   chapters**. A PDF that is only pictures of pages (a scan) cannot be read: save the book as .docx or paste the text.
+2. **✨ Read my chapters and fill the Book Bible.** The AI reads them (two requests) and shows ONE screen: **"Here's
+   what I understood from your chapters — fix anything"**:
+   - the story: title, genre, readers, tone, the kind of story, first or third person and the tense (measured from
+     your prose), the premise and the question the book must answer, what happens in each of your chapters;
+   - the people: who they are, their role, what they want, fear and hide, their looks (✔ = word for word from your
+     pages), and **how they talk** — their real lines from your chapters, and the voice card made from them;
+   - places and the world;
+   - **story rules and magic.** Every magic or special system your chapters show becomes a rule with exactly what each
+     use **needs** (with numbers when it is used up: "2 tide-stones"), its **limits** ("3 times a day"), its **price**
+     ("a nosebleed"), who can use it and **who holds what now** ("Mara: 3 tide-stones"). Every new chapter is checked
+     against it, like a magic rule you typed yourself (see "✨ How to write a magic rule"). What your chapters keep
+     unexplained is a **protected mystery**; the questions they leave open are listed too;
+   - your writing style (the narrator's voice), for this book only.
+
+   Change anything, add or remove characters, places and rules, then press **✔ Use this**. Nothing goes into your
+   book before that.
+3. **🗺 Plan the rest.** The AI plans chapters N+1 onward so the book goes on from exactly where you stopped: the main
+   plot to the end, the setups to pay off, and each new chapter's events, who tells it and where. Add a note if you
+   want ("a storm in the middle", "she must lose the stones"). Change any chapter, add or remove one, or **🔁 Plan
+   again**, then press **✔ Use this plan**.
+4. **⚡ Write the rest of my book.** A normal ⚡ run continues this book: the 🩺 story doctor scores the plan first,
+   then the AI writes from chapter N+1 in your voice, with every check of a normal run. It ends with PDF, EPUB and Word
+   files like any ⚡ book.
+
+**Your chapters are never changed.** They stay word for word, approved and "written by you": the improve pass, the
+weakest-scene rewrites, "rewrite chapter 1 last", the chapter polish, the end-of-book "sounds like a person" pass and
+the ending's fixes all skip them. If the chapter list changes later, your chapters are put back exactly as you wrote
+them — the AI never writes them. You can still edit them yourself, like any chapter. The book's 🏠 Book home has a
+link back to this page.
 
 ### While a long book runs
 
@@ -442,6 +486,21 @@ Chapter 1 is written before the rest of the book exists, and readers decide on t
   20 minutes. Why: …" — and the desktop notification says it was decided for you. When they don't agree you see how
   each voted, for example "The AIs didn't all agree (ChatGPT: accept, Gemini: keep) — waiting for you." Press
   **↩ Undo** to put the other choice back for your own approval. At most 5 stand-in decisions per book run.
+- **🗳 When something goes wrong, let the AIs vote instead of stopping** (⚙️ Settings › AI, in the same card; off
+  until you switch it on). A book run that stops on an error and asks you to choose — an AI timed out or failed,
+  Akọwe's checks refused a draft, a reviewer's OK did not count — asks the working AIs instead, **right away** or
+  **after the usual wait time** (you pick). They choose between plain options: try again, let another AI do it, skip
+  this step (only the optional steps that never hold up the book, like the beta reader), or wait for you — and the
+  same rule holds: they decide only if they **all** agree. With it on, the review disagreements and story checks
+  above are voted on too, and up to 10 decisions per run (unless you set your own number). **Claude's agents vote
+  too:** pick 0–3 extra Claude Code helpers (default 1), each voting on its own with its own reviewer persona. Because
+  every voter must agree, an extra helper can only stop a decision, never force one — and the helpers never count as
+  one of the two AIs a decision needs. Signing in to an AI's site, "only one AI checked it", the main character, the
+  plot, the ending, point of view or tense, approved facts, content limits and your lock list always wait for you.
+  Each decision shows who voted, for example "🗳 ChatGPT, Claude, Gemini and 1 Claude Code helper all agreed: try
+  again with another AI (the AI did not answer in time while reviewing chapter 3) … ↩ Undo". Undo gives the run its
+  AI choice back or puts a skipped step back on the run's list; a "try again" that already happened can't be taken
+  back, but Undo still counts the votes as overruled. The run forecast counts these votes (at most).
   It also covers the 🧭 **story checks** (continuity checkpoints) that wait for you overnight — switch off "Also the
   story checks" in the same card to keep those for yourself. For each problem the check couldn't fix, the AIs choose
   between "leave it as it is for now" (the book goes on and the problem stays in the report) and "it needs you" — or,
@@ -545,6 +604,35 @@ AIs' downloads folder**, open the folder any time. A download that breaks off is
 - **🩺 Check everything** checks his AI and the whole app and shows what to fix.
 - **Saved states:** "save this as …", "load …", "what saves do I have?", "rename …", "delete …" (see 💾 Save state
   in section 2).
+
+### Alfred's team
+
+Alfred can use **several local models at once, each for its own job**:
+
+- 🎩 **Butler** — talks with you (the main one).
+- 🧰 **Assistant** — does the jobs in the app.
+- 🎬 **Director** — makes a plan for a big job and hands the steps to the others; the Butler tells you how it went.
+- 🎨 **Prompt writer** — writes the prompt for a picture, cover, portrait or video.
+- 😈 **Bad boy** — the uncensored one, for frank chat and creative writing.
+
+**How to use them:** just say who you want — "bad boy, write a nasty villain speech", "director, plan my book
+launch", "assistant, check my book". "Make me a picture of …" goes to the Prompt writer and "do it step by step"
+to the Director (once you have given them a model). Above each answer you see who wrote it.
+
+**Choosing their models:** open ⚙ in Alfred's panel (or click the team line, below). Each role has a list of the
+models already on your PC and **stars (★1–5)** for how well each fits that job on your PC — point at the stars to
+read why. A 💡 tip appears when a better model is already on your PC: press **Use it**. Or press **✨ Pick the
+best for each role**. A role you leave empty uses the Butler's model, so one model is enough. Nothing is
+downloaded here.
+
+**Is the team ready?** At the top of the 🤖 AutoInjector tab one line tells you, e.g. "🎩 Alfred's team is
+connected and working for your book: Butler ✔ · Assistant ✔ · Director ✔ · Prompt writer ✔ · Bad boy ✔".
+✔ ready · ⚪ not set (the Butler does that job) · ⚠ something to fix — the line says what to press. While Akọwe
+is writing your book, it says the team is standing by for it.
+
+**Safe as before:** Alfred still shows an "I will" card and waits for ✔ Do it before he changes or makes
+anything. The Bad boy can only write text, and for your book he keeps to the book's content limits. Only one big
+model is kept on the graphics card at a time, so two big models never slow each other down.
 
 ## 11. 🤖 Claude Code helpers (optional — makes books faster)
 
