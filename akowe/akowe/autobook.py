@@ -3789,6 +3789,10 @@ class AutoBookService(_Runner):
             with ai_activity.doing(None, chapter=idx + 1, chapters=len(chapters), chapter_id=cid):
                 bp = self.bp(run)
                 _ctx, latest, appr = bp.chapter_prose(outline, cid)
+                if not appr:  # 📖 a chapter the author wrote (brought in): put back word for word, never written
+                    from . import book_import  # noqa: PLC0415
+                    appr = book_import.keep_author_chapter(self.app, run["principal"], run["project_id"],
+                                                           run["branch_id"], cid)
                 if appr:
                     from . import continuity  # noqa: PLC0415
                     if not continuity.tracked(self.store, run["project_id"], run["branch_id"], cid, appr):
@@ -4017,6 +4021,10 @@ class AutoBookService(_Runner):
                     if not appr:
                         continue
                     head = self.bp(run).rec(appr["record_id"])
+                    if not self._ai_made(run, head):  # 📖 the author's own chapter is never rewritten
+                        self.event(run, "note", f"Chapter {number} is your own text: the ending's open promises are "
+                                   "not worked into it (listed for you instead)", code="AUTHOR_CHAPTER")
+                        continue
                     fs = ending_check.fix_findings(res, number, str((head.get("data") or {}).get("text") or ""))
                     if not fs:
                         continue
