@@ -120,7 +120,7 @@ async function runLab(deps) {
       const answers = readDirJson(fs, path.join(dirs.control, 'answers'), core.cleanAnswer);
       const signIn = core.approvedHosts(readJson(fs, path.join(dirs.control, 'approved-sites.json'), []));
       const talkDir = path.join(dirs.workshop, 'talk');
-      const allTalk = talk.readAll(talkDir);
+      const allTalk = talk.readAll(talkDir, path.join(dirs.control, 'owner-talk'));
       await Promise.all(ready.map(async (a) => {
         const messages = talk.forMe(allTalk, a, talk.readMark(talkDir, a)).slice(-20);
         if (messages.length) talk.setMark(talkDir, a, messages[messages.length - 1].at); // delivered with this round

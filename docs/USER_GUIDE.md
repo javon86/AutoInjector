@@ -699,8 +699,10 @@ throw-away Windows inside Windows, with Microsoft Edge — and try to earn money
 - **⌨ Their Command Prompts:** each AI has a real Command Prompt inside the sandbox — what it types runs there and
   what comes back goes to it. You watch it live in a "Command Prompt — Claude / ChatGPT" window in the sandbox and in
   the lab window. It can't reach your PC.
-- **💬 They talk to each other:** they send each other messages (say who does what, share finds, ask for help). You
-  read the whole conversation in the lab window and in a "Lab talk" window in the sandbox.
+- **💬 They talk to each other — and you talk to them:** they send each other messages (who does what, finds, help).
+  Write to them in the lab window's **💬 Talk to them** box (both, Claude or ChatGPT; Ctrl+Enter sends): your
+  messages come first — change the plan, give an idea, answer a question — and they reply to you there. Also shown
+  in a "Lab talk" window in the sandbox.
 - **Stopping:** **⏸ Stop after this round**, or **⏹ Close the sandbox now**.
 
 ## 12. When something goes wrong

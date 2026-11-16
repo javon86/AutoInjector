@@ -157,7 +157,7 @@
       if (talkBox.dataset.key !== key) {
         talkBox.dataset.key = key;
         talkBox.textContent = '';
-        if (!m.talk.length) talkBox.appendChild(node(doc, 'li', { class: 'lab-dim', text: 'They haven\'t said anything to each other yet.' }));
+        if (!m.talk.length) talkBox.appendChild(node(doc, 'li', { class: 'lab-dim', text: 'Nothing said yet.' }));
         for (const l of m.talk) talkBox.appendChild(node(doc, 'li', { text: l }));
         talkBox.scrollTop = talkBox.scrollHeight;
       }
@@ -219,6 +219,21 @@
     on('lab-stop', () => act(() => api.labStop(), 'Asking them to stop after this round…'));
     on('lab-close', () => { if (root.confirm && !root.confirm('Close the sandbox now? Anything not saved in the workshop folder is lost.')) return; act(() => api.labClose(), 'Closing the sandbox…'); });
     on('lab-open-workshop', () => api.labOpen('workshop'));
+    const send = async () => {
+      const box = doc.getElementById('lab-say-text');
+      const to = doc.getElementById('lab-say-to');
+      const text = box ? box.value.trim() : '';
+      if (!text) { say(doc, 'Write the message first.', 'warn'); return; }
+      try {
+        const r = await api.labSay(to ? to.value : 'all', text);
+        say(doc, r && r.words, r && r.ok ? 'ok' : 'warn');
+        if (r && r.ok && box) box.value = '';
+      } catch (e) { say(doc, `Couldn't send it: ${e && e.message}`, 'warn'); }
+      refresh();
+    };
+    on('lab-say-send', send);
+    const sayBox = doc.getElementById('lab-say-text');
+    if (sayBox) sayBox.addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); send(); } });
     on('lab-enable', () => act(() => api.labEnable(), 'Asking Windows to turn on Windows Sandbox…'));
     refresh();
     timer = setInterval(refresh, 5000);

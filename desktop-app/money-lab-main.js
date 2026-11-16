@@ -183,6 +183,26 @@ function createMoneyLab(deps) {
     return { fresh: fresh.length, open: open.length };
   }
 
+  /** You → the AIs: written to lab-control/owner-talk (read-only in the sandbox, so only you can write as the owner). */
+  function say(to, text) {
+    const who = ['all', ...core.AGENT_IDS].includes(to) ? to : null;
+    const words = String(text || '').trim();
+    if (!who) return { ok: false, error: 'BAD_TO', words: 'Pick who gets it: both, Claude or ChatGPT.' };
+    if (!words) return { ok: false, error: 'EMPTY', words: 'Write the message first.' };
+    if (words.length > 2000) return { ok: false, error: 'TOO_LONG', words: 'Keep it under 2,000 characters.' };
+    try {
+      const at = now();
+      const m = { id: `${at.toString(36)}-owner-${Math.random().toString(36).slice(2, 6)}`, from: 'owner', to: who, text: words, at };
+      writeJson(path.join(P.control, 'owner-talk', `${m.id}.json`), m);
+      const d = new Date(at);
+      const pad = (n) => String(n).padStart(2, '0');
+      try { fs.mkdirSync(P.workshop, { recursive: true }); fs.appendFileSync(path.join(P.workshop, 'talk.log'), `[${pad(d.getHours())}:${pad(d.getMinutes())}] Owner → ${who === 'all' ? 'everyone' : core.AGENTS[who].label}: ${words}\n`); } catch (_) { /* the log is for watching */ }
+      log(`money-lab: owner message to ${who} (${words.length} chars)`);
+      const st = L.readStatus(readJson(P.status, null), now());
+      return { ok: true, words: st.alive ? 'Sent. They see it when they next check messages, and at the latest at the start of their next round.' : 'Saved. They get it when the lab runs (at the start of their next round).' };
+    } catch (e) { return { ok: false, error: 'WRITE_FAILED', words: `Couldn't send it: ${e.message}` }; }
+  }
+
   function folder(which) {
     if (which === 'workshop') return P.workshop;
     if (which === 'root') return P.root;
@@ -207,7 +227,7 @@ function createMoneyLab(deps) {
     } catch (e) { return { ok: false, error: 'SPAWN_FAILED', words: `Open it yourself: Start → type “Turn Windows features on or off”. (${e.message})` }; }
   }
 
-  return { paths: P, available, getSettings, saveSettings, status, start, stopAfterRound, closeNow, answer, poll, folder, enableSandbox, enableCommand, SANDBOX_PROCESSES };
+  return { paths: P, available, getSettings, saveSettings, status, start, stopAfterRound, closeNow, answer, say, poll, folder, enableSandbox, enableCommand, SANDBOX_PROCESSES };
 }
 
 module.exports = { createMoneyLab, SANDBOX_PROCESSES };

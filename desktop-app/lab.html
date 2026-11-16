@@ -48,6 +48,8 @@
     li { overflow-wrap:anywhere; margin:2px 0; }
     details summary { cursor:pointer; }
     .lab-scroll { max-height:220px; overflow:auto; }
+    .lab-say { margin-top:8px; display:flex; flex-direction:column; gap:6px; }
+    .lab-say textarea { min-height:54px; }
     .lab-consoles { display:grid; grid-template-columns:repeat(auto-fit, minmax(300px, 1fr)); gap:10px; }
     .lab-consoles > div { min-width:0; }
     .lab-console { background:#0a0a0a; color:#cfe8cf; font:11.5px/1.4 Consolas, 'Cascadia Mono', monospace; padding:8px; border-radius:6px; margin:0; height:260px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; }
@@ -110,8 +112,20 @@
   </section>
 
   <section aria-labelledby="lab-talk-h">
-    <h2 id="lab-talk-h">💬 What they say to each other</h2>
+    <h2 id="lab-talk-h">💬 Talk to them</h2>
+    <p class="lab-dim">What they say to each other and to you. Your messages come first for them: change the plan, give an idea, answer a question.</p>
     <ul id="lab-talk" class="lab-scroll" data-testid="lab-talk"></ul>
+    <div class="lab-say">
+      <textarea id="lab-say-text" maxlength="2000" placeholder="Write to them… (Ctrl+Enter sends)" aria-label="Your message to them"></textarea>
+      <div class="row">
+        <label>To <select id="lab-say-to" aria-label="Who gets it">
+          <option value="all">both</option>
+          <option value="claude">Claude</option>
+          <option value="codex">ChatGPT</option>
+        </select></label>
+        <button id="lab-say-send" class="primary" type="button" data-testid="lab-say-send">💬 Send</button>
+      </div>
+    </div>
   </section>
 
   <section aria-labelledby="lab-console-h">

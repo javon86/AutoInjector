@@ -124,14 +124,14 @@ function buildPrompt(o) {
   lines.push(`  node "${d.kit}\\lab-cmd.js" --cwd <folder> --timeout <minutes> "npm install"`);
   lines.push('Whatever you send runs in Command Prompt (cmd.exe) and whatever it prints comes back to you. Use it for every command you run (building, installing, testing, files) so the owner can see your work. Node.js and Git are installed. It starts in your folder.');
   lines.push('');
-  if (other.length) {
-    lines.push(`TALKING TO ${other.join(' AND ').toUpperCase()} (the owner reads all of it):`);
-    lines.push(`  node "${d.kit}\\lab-talk.js" --to ${o.agents.filter((a) => a !== o.agent).join('|')}|all "your message"`);
-    lines.push(`  node "${d.kit}\\lab-talk.js" --read              new messages for you`);
-    lines.push(`  node "${d.kit}\\lab-talk.js" --wait 5            wait up to 5 minutes for a reply`);
-    lines.push('Talk early and often: say what you are working on, share what you found, ask for help, agree who does what. Check --read during your round, not only at the start. Keep messages short and concrete.');
-    lines.push('');
-  }
+  lines.push(`TALKING${other.length ? ` TO ${other.join(' AND ').toUpperCase()} AND` : ' TO'} THE OWNER (the owner reads all of it):`);
+  if (other.length) lines.push(`  node "${d.kit}\\lab-talk.js" --to ${o.agents.filter((a) => a !== o.agent).join('|')}|all "your message"`);
+  lines.push(`  node "${d.kit}\\lab-talk.js" --to owner "your message to the owner"`);
+  lines.push(`  node "${d.kit}\\lab-talk.js" --read              new messages for you (from ${other.length ? `${other.join(' and ')} or ` : ''}the owner)`);
+  lines.push(`  node "${d.kit}\\lab-talk.js" --wait 5            wait up to 5 minutes for a reply`);
+  lines.push('The owner can write to you at any time. The OWNER\'S messages come first: if the owner changes the plan, follow it (the lab rules still apply) and answer the owner with --to owner. Check --read during your round, not only at the start.');
+  if (other.length) lines.push('Talk to the other AI early and often: say what you are working on, share what you found, ask for help, agree who does what. Keep messages short and concrete.');
+  lines.push('');
   lines.push('TO ASK THE OWNER (required before making an account, posting or selling anything in public, messaging or emailing anyone, or anything that costs money):');
   lines.push(`  node "${d.kit}\\ask-owner.js" --kind account|post|message|money|other --site example.com "what you want to do" "why it helps the mission"`);
   lines.push('It waits a few minutes for an answer. If none comes, carry on with other work; the answer will be in your next round. Never do the thing before a yes.');
@@ -148,7 +148,7 @@ function buildPrompt(o) {
   if (o.messages && o.messages.length) {
     lines.push('');
     lines.push('NEW MESSAGES FOR YOU (from the lab talk):');
-    for (const m of o.messages) lines.push(`- ${AGENTS[m.from] ? AGENTS[m.from].label : m.from}${m.to === 'all' ? ' (to everyone)' : ''}: ${cut(m.text, 1500)}`);
+    for (const m of o.messages) lines.push(`- ${m.from === 'owner' ? 'THE OWNER' : AGENTS[m.from] ? AGENTS[m.from].label : m.from}${m.to === 'all' ? ' (to everyone)' : ''}: ${cut(m.text, 1500)}`);
   }
   if (o.signInSites && o.signInSites.length) {
     lines.push('');

@@ -293,6 +293,7 @@ const EXCLUDED = {
   'lab:answer': 'the owner\'s Yes / No to an AI in the lab (accounts, posts, messages, money) — never answered by an AI',
   'lab:open': 'opens a lab folder in Explorer — the owner\'s',
   'lab:enable': 'turns on Windows Sandbox (asks Windows for admin) — the owner\'s',
+  'lab:say': 'the owner\'s own message to the AIs in the lab — never written by another AI',
   // ⌨ command-line mode (cli-mode-ui.js): the 📚 Akọwe panel's mirror of Akọwe's own setting
   'akowe-cli:set-mode': 'the panel\'s Web window / Command line choice per AI slot — Akọwe owns it (⚙️ Settings); not for Alfred to switch',
   'akowe-cli:preset': 'the panel\'s "Two AIs on command line" preset — Akọwe owns it (⚙️ Settings); not for Alfred to switch',

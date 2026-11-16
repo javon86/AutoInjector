@@ -120,6 +120,14 @@ const DIR = path.join(__dirname, '..');
     const stc = lab.status();
     assert(stc.consoles.claude.slice(-3).join('|') === '[10:00:01] Claude C:\\w> dir /b|planner.pdf|[exit 0, 0.2 s]' && stc.consoles.claude.length === 80 && stc.consoles.codex.length === 0, 'status: the end of each AI\'s Command Prompt log');
     assert(stc.talk.length === 1 && /I build, you list/.test(stc.talk[0]), 'status: the lab talk');
+    // you → the AIs
+    let rs = lab.say('all', '  Focus on planners  ');
+    const ownerFiles = fs.readdirSync(path.join(lab.paths.control, 'owner-talk'));
+    const om = JSON.parse(fs.readFileSync(path.join(lab.paths.control, 'owner-talk', ownerFiles[0]), 'utf8'));
+    assert(rs.ok && ownerFiles.length === 1 && om.from === 'owner' && om.to === 'all' && om.text === 'Focus on planners', 'Send → a message from the owner in lab-control (read-only for them)');
+    assert(/Owner → everyone: Focus on planners/.test(lab.status().talk.join('\n')), 'your message shows in the talk list');
+    assert(lab.say('codex', 'x').ok && /Owner → ChatGPT: x/.test(lab.status().talk.join('\n')), 'to one AI');
+    assert(lab.say('gemini', 'x').error === 'BAD_TO' && lab.say('all', '   ').error === 'EMPTY' && lab.say('all', 'x'.repeat(2001)).error === 'TOO_LONG', 'wrong AI / empty / too long → refused');
     // close
     spawned.length = 0;
     r = lab.closeNow();
@@ -173,6 +181,7 @@ const DIR = path.join(__dirname, '..');
       labSave: async (st) => { calls.push(['save', st]); return { ok: true }; },
       labStop: async () => { calls.push(['stop']); return { ok: true, words: 'stopping' }; },
       labClose: async () => ({ ok: true }), labOpen: async (x) => { calls.push(['open', x]); return { ok: true }; }, labEnable: async () => ({ ok: true }),
+      labSay: async (to, text) => { calls.push(['say', to, text]); return { ok: true, words: 'Sent.' }; },
     };
     const stopTimer = w.MoneyLabUi.start(w.document, api);
     await new Promise((r) => setTimeout(r, 50));
@@ -193,6 +202,15 @@ const DIR = path.join(__dirname, '..');
     assert(/I build, you list/.test($('lab-talk').textContent), 'the window shows what they say to each other');
     assert(/dir/.test($('lab-console-claude').textContent) && /<b>not html<\/b>/.test($('lab-console-claude').textContent) && !$('lab-console-claude').querySelector('b'), 'the window shows each Command Prompt, as text');
     assert(/hasn't used its Command Prompt/.test($('lab-console-codex').textContent), 'an AI with no commands yet says so');
+    $('lab-say-to').value = 'claude';
+    $('lab-say-text').value = 'Try printables';
+    $('lab-say-send').click();
+    await new Promise((r) => setTimeout(r, 30));
+    assert(calls.some((c) => c[0] === 'say' && c[1] === 'claude' && c[2] === 'Try printables') && $('lab-say-text').value === '' && /Sent/.test($('lab-msg').textContent), '💬 Send → labSay(who, text); the box empties');
+    $('lab-say-text').value = 'Second one';
+    $('lab-say-text').dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true }));
+    await new Promise((r) => setTimeout(r, 30));
+    assert(calls.some((c) => c[0] === 'say' && c[2] === 'Second one'), 'Ctrl+Enter sends too');
     $('lab-stop').click();
     await new Promise((r) => setTimeout(r, 30));
     assert(calls.some((c) => c[0] === 'stop'), '⏸ Stop → labStop');
@@ -213,10 +231,10 @@ const DIR = path.join(__dirname, '..');
 
   console.log('== wiring ==');
   const main = fs.readFileSync(path.join(DIR, 'main.js'), 'utf8');
-  for (const ch of ['lab:window', 'lab:status', 'lab:save', 'lab:start', 'lab:stop', 'lab:close', 'lab:answer', 'lab:open', 'lab:enable']) assert(main.includes(`ipcMain.handle("${ch}"`), `main.js handles ${ch}`);
+  for (const ch of ['lab:window', 'lab:status', 'lab:save', 'lab:start', 'lab:stop', 'lab:close', 'lab:answer', 'lab:open', 'lab:enable', 'lab:say']) assert(main.includes(`ipcMain.handle("${ch}"`), `main.js handles ${ch}`);
   assert(/AutoInjector Money lab/.test(main) && /target === "lab"/.test(main), 'main.js: the lab folder in Documents; a notice click opens the lab');
   const preload = fs.readFileSync(path.join(DIR, 'preload.js'), 'utf8');
-  for (const fn of ['labOpenWindow', 'labStatus', 'labSave', 'labStart', 'labStop', 'labClose', 'labAnswer', 'labOpen', 'labEnable']) assert(preload.includes(`${fn}:`), `preload: ${fn}`);
+  for (const fn of ['labOpenWindow', 'labStatus', 'labSave', 'labStart', 'labStop', 'labClose', 'labAnswer', 'labOpen', 'labEnable', 'labSay']) assert(preload.includes(`${fn}:`), `preload: ${fn}`);
   const controls = fs.readFileSync(path.join(DIR, 'controls.html'), 'utf8');
   assert(/id="btn-lab"/.test(controls) && /labOpenWindow/.test(fs.readFileSync(path.join(DIR, 'controls.js'), 'utf8')), 'the 🧪 button in the title bar opens the lab');
   const pkg = JSON.parse(fs.readFileSync(path.join(DIR, 'package.json'), 'utf8'));

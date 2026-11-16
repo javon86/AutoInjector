@@ -10259,6 +10259,7 @@ ipcMain.handle("lab:stop", labSafe(() => moneyLab().stopAfterRound()));
 ipcMain.handle("lab:close", labSafe(() => moneyLab().closeNow()));
 ipcMain.handle("lab:answer", labSafe((p) => moneyLab().answer(String(p.id || ""), p.allow === true, String(p.note || ""))));
 ipcMain.handle("lab:enable", labSafe(() => moneyLab().enableSandbox()));
+ipcMain.handle("lab:say", labSafe((p) => moneyLab().say(String(p.to || ""), String(p.text || ""))));
 ipcMain.handle("lab:open", labSafe(async (p) => {
   const dir = moneyLab().folder(String(p.which || ""));
   if (!dir) return { ok: false, error: "BAD_FOLDER" };

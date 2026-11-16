@@ -414,6 +414,7 @@ contextBridge.exposeInMainWorld("api", {
   labAnswer: (id, allow, note) => ipcRenderer.invoke("lab:answer", { id, allow: allow === true, note: note || "" }),
   labOpen: (which) => ipcRenderer.invoke("lab:open", { which }),
   labEnable: () => ipcRenderer.invoke("lab:enable"),
+  labSay: (to, text) => ipcRenderer.invoke("lab:say", { to, text }),
   // 📖 Akọwe tab: the server AutoInjector runs itself, and the view showing it
   akoweServerStatus: () => ipcRenderer.invoke("akowe-server:status"),
   akoweServerRetry: () => ipcRenderer.invoke("akowe-server:retry"),
