@@ -635,6 +635,20 @@ class App:
                     return 200, self.progress(pid, branch)
                 if rest == ["book"] and method == "GET":
                     return 200, BookPath(self.engine, principal, pid, branch).status()
+                if rest and rest[0] == "chapters" and len(rest) <= 2 and method == "GET":  # 📱 the phone's reader
+                    from .book_report import book_chapters  # noqa: PLC0415
+                    chs = book_chapters(BookPath(self.engine, principal, pid, branch))
+                    if len(rest) == 1:
+                        return 200, {"chapters": [{k: c[k] for k in ("number", "title", "words", "approved")}
+                                                  for c in chs]}
+                    try:
+                        n = int(rest[1])
+                    except ValueError:
+                        raise ApiError(400, "INVALID_INPUT", "/number", "the chapter number must be a number") from None
+                    c = next((c for c in chs if c["number"] == n), None)
+                    if c is None:
+                        raise ApiError(404, "NOT_FOUND", "/number", f"there is no written chapter {n}")
+                    return 200, {k: c[k] for k in ("number", "title", "words", "approved", "text")} | {"of": len(chs)}
                 if len(rest) == 2 and rest[0] == "book" and method == "POST":
                     return 200, self.book_act(principal, pid, branch, rest[1], body if isinstance(body, dict) else {})
         raise ApiError(404, "NOT_FOUND", path, "no such endpoint")

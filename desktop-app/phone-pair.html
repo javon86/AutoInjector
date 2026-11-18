@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>AutoInjector — 📱 Phone</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #111; color: #eee; font: 13px/1.5 system-ui, sans-serif; padding: 18px; }
+  main { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
+  h1 { font-size: 17px; margin: 0; }
+  section { background: #181818; border: 1px solid #2c2c2c; border-radius: 10px; padding: 14px; }
+  .switch { display: flex; align-items: center; gap: 10px; font-size: 15px; font-weight: 700; cursor: pointer; }
+  .switch input { width: 20px; height: 20px; }
+  .dim { opacity: .72; }
+  .pair { display: grid; grid-template-columns: 240px 1fr; gap: 18px; align-items: start; }
+  @media (max-width: 620px) { .pair { grid-template-columns: 1fr; } }
+  #qr { width: 240px; height: 240px; background: #fff; border-radius: 10px; padding: 10px; display: flex; align-items: center; justify-content: center; color: #333; text-align: center; }
+  #qr img { width: 100%; height: 100%; image-rendering: pixelated; }
+  ol { margin: 6px 0 0 18px; padding: 0; } li { margin: 4px 0; }
+  .link { display: flex; gap: 6px; margin-top: 8px; }
+  .link input { flex: 1; min-width: 0; background: #0d0d0d; color: #cfe; border: 1px solid #333; border-radius: 6px; padding: 6px 8px; font: 11.5px Consolas, monospace; }
+  button { background: #1d1d1d; color: #eee; border: 1px solid #383838; border-radius: 6px; padding: 6px 11px; font: inherit; cursor: pointer; }
+  button:hover { background: #262626; }
+  button.danger { background: #3a1a1a; border-color: #5a2a2a; }
+  #msg { min-height: 1.3em; } #msg[data-tone="warn"] { color: #f3c66b; } #msg[data-tone="ok"] { color: #8fd18f; }
+  .warn { color: #f3c66b; }
+  ul { margin: 6px 0 0 18px; padding: 0; }
+</style>
+</head>
+<body>
+<main>
+  <h1>📱 Your phone</h1>
+  <p class="dim">Use AutoInjector from your phone: see how the book is going, answer its questions, read the chapters, talk to the AIs and to Alfred.
+    The PC does all the work. The phone can't open, change or delete files, run commands or change settings.</p>
+
+  <section>
+    <label class="switch"><input type="checkbox" id="ph-on" data-testid="phone-on"> Let my phone connect (on this Wi-Fi)</label>
+    <p id="ph-state" class="dim" role="status" aria-live="polite"></p>
+    <p id="msg" data-tone="info"></p>
+  </section>
+
+  <section id="ph-pair" hidden>
+    <div class="pair">
+      <div id="qr" data-testid="phone-qr">The code appears here</div>
+      <div>
+        <b>Pair your phone</b>
+        <ol>
+          <li>Make sure the phone is on the <b>same Wi-Fi</b> as this PC.</li>
+          <li>Open the phone's <b>camera</b> and point it at the code. Tap the link that pops up.</li>
+          <li>Add it to your home screen: on iPhone, <b>Share → Add to Home Screen</b>; on Android, <b>⋮ → Add to Home screen</b>.</li>
+        </ol>
+        <p class="dim">If the phone can't open it: the first time, Windows may ask whether AutoInjector may use the network — choose <b>Allow</b> (private networks).</p>
+        <div class="link"><input id="ph-link" readonly aria-label="The phone link"><button id="ph-copy" type="button">📋 Copy</button></div>
+        <p class="dim" id="ph-other"></p>
+      </div>
+    </div>
+  </section>
+
+  <section id="ph-phones-box" hidden>
+    <b>Phones that used it today</b>
+    <ul id="ph-phones"></ul>
+  </section>
+
+  <section>
+    <b>Un-pair</b>
+    <p class="dim">Lost a phone, or want to start fresh? This makes a new code; every paired phone stops working until it scans the new one.</p>
+    <button id="ph-newkey" class="danger" type="button">🔒 Un-pair all phones</button>
+  </section>
+</main>
+<script src="phone-pair.js"></script>
+</body>
+</html>

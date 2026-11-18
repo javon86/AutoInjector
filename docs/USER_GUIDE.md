@@ -653,6 +653,30 @@ limits with the Claude pane.
 
 Without it nothing breaks: every job goes to the web AIs, exactly as before. The ✅ Setup checklist shows its state.
 
+### 📱 Your phone
+
+Use AutoInjector from your phone at home — its own screen, made for a thumb. The PC does all the work.
+
+**Pair it (once):** on the PC press **📱 Phone** (in the side panel), tick **Let my phone connect**, and point your
+phone's camera at the code. Then add it to your home screen: iPhone **Share → Add to Home Screen**, Android
+**⋮ → Add to Home screen**. The first time, Windows may ask whether AutoInjector may use the network — choose
+**Allow** (private networks). The phone and PC must be on the same Wi-Fi.
+
+**The five tabs:**
+- **🏠 Home** — the book's progress (time left, ⏸ Pause / ▶ Continue), anything that needs you, which AIs are on.
+- **💬 Chat** — talk to ChatGPT, Claude and Gemini (tap who hears you), and a big ⏹ Stop.
+- **📖 Book** — the book's questions with big answer buttons (the same choices as the run window; "edit it
+  yourself" stays on the PC), and the chapters to read in a comfortable reader (A− / A+).
+- **🎩 Alfred** — talk to him; tick 🔊 Read aloud to hear his answers. Anything he wants to *do* still waits for
+  your OK on the PC.
+- **🔔 Alerts** — everything that needs you; the phone buzzes while the app is open.
+
+**To talk instead of typing**, use the 🎤 on your phone's keyboard (the phone's own microphone button needs a
+secure connection that a home link doesn't have).
+
+**Safe by design:** it is off until you turn it on; only a phone that scanned the code can connect; the phone can't
+open, change or delete files, run commands or change settings. **🔒 Un-pair all phones** makes a new code.
+
 ## 12. When something goes wrong
 
 - **❓ Help → 🩺 Something's wrong?** looks at the AI panes, Akọwe, a running book, the AIs' usage limits, Ollama,

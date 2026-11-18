@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f1115">
+<meta name="color-scheme" content="dark light">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="AutoInjector">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icon.svg">
+<title>AutoInjector</title>
+<link rel="stylesheet" href="/phone-app.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand"><span class="logo" aria-hidden="true">✦</span> AutoInjector</div>
+  <div class="pc" id="pc" role="status" aria-live="polite"><span class="dot" id="pc-dot"></span><span id="pc-words">Connecting…</span></div>
+</header>
+
+<main id="screens">
+  <!-- not paired yet -->
+  <section class="screen" id="s-pair" hidden>
+    <div class="card hero">
+      <div class="hero-icon" aria-hidden="true">📱</div>
+      <h1>Pair this phone</h1>
+      <p>On your PC, open AutoInjector and press <b>📱 Phone</b>. Turn it on, then point this phone's camera at the code.</p>
+      <p class="dim">Your phone and PC need to be on the same Wi-Fi.</p>
+    </div>
+  </section>
+
+  <!-- 🏠 Home -->
+  <section class="screen" id="s-home" hidden aria-label="Home">
+    <div id="home-book"></div>
+    <div id="home-question"></div>
+    <div class="card">
+      <div class="card-head">The AIs</div>
+      <div class="ais" id="home-ais"></div>
+    </div>
+    <div class="card row-card" id="home-alfred"></div>
+    <div class="card row-card" id="home-alerts"></div>
+  </section>
+
+  <!-- 💬 Chat -->
+  <section class="screen chat-screen" id="s-chat" hidden aria-label="Chat">
+    <div class="chat-top">
+      <div class="chips" id="chat-to" role="group" aria-label="Who hears you"></div>
+      <button class="stop" id="chat-stop" type="button">⏹ Stop</button>
+    </div>
+    <div class="feed" id="chat-feed" aria-live="polite"></div>
+    <form class="composer" id="chat-form">
+      <textarea id="chat-text" rows="1" placeholder="Message the AIs…" aria-label="Message to the AIs" maxlength="8000"></textarea>
+      <button class="send" type="submit" aria-label="Send">➤</button>
+    </form>
+  </section>
+
+  <!-- 📖 Book -->
+  <section class="screen" id="s-book" hidden aria-label="Book">
+    <div id="book-card"></div>
+    <div id="book-question"></div>
+    <div class="card">
+      <div class="card-head">Chapters</div>
+      <div id="book-chapters" class="list"></div>
+    </div>
+  </section>
+
+  <!-- 📖 Reader (opened from a chapter) -->
+  <section class="screen reader" id="s-reader" hidden aria-label="Reader">
+    <div class="reader-bar">
+      <button type="button" id="reader-back" class="ghost">‹ Chapters</button>
+      <div class="reader-size">
+        <button type="button" id="reader-smaller" class="ghost" aria-label="Smaller text">A−</button>
+        <button type="button" id="reader-bigger" class="ghost" aria-label="Bigger text">A+</button>
+      </div>
+    </div>
+    <article id="reader-text" class="reader-text"></article>
+    <div class="reader-nav">
+      <button type="button" id="reader-prev" class="ghost">‹ Previous</button>
+      <span id="reader-where" class="dim"></span>
+      <button type="button" id="reader-next" class="ghost">Next ›</button>
+    </div>
+  </section>
+
+  <!-- 🎩 Alfred -->
+  <section class="screen chat-screen" id="s-alfred" hidden aria-label="Alfred">
+    <div class="chat-top">
+      <div class="alfred-title">🎩 Alfred</div>
+      <label class="speak"><input type="checkbox" id="alfred-speak"> 🔊 Read aloud</label>
+    </div>
+    <div id="alfred-waiting"></div>
+    <div class="feed" id="alfred-feed" aria-live="polite"></div>
+    <form class="composer" id="alfred-form">
+      <textarea id="alfred-text" rows="1" placeholder="Ask Alfred…" aria-label="Message to Alfred" maxlength="6000"></textarea>
+      <button class="send alfred-send" type="submit" aria-label="Send to Alfred">➤</button>
+    </form>
+  </section>
+
+  <!-- 🔔 Alerts -->
+  <section class="screen" id="s-alerts" hidden aria-label="Alerts">
+    <div class="alerts-top"><h2>Alerts</h2><button type="button" id="alerts-all" class="ghost">Mark all read</button></div>
+    <div id="alerts-list" class="list"></div>
+  </section>
+</main>
+
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+<dialog id="confirm" class="confirm">
+  <p id="confirm-text"></p>
+  <div class="confirm-row"><button type="button" id="confirm-no" class="ghost">Cancel</button><button type="button" id="confirm-yes" class="primary">Yes</button></div>
+</dialog>
+
+<nav class="tabs" id="tabs" aria-label="Screens">
+  <button type="button" data-tab="home" aria-label="Home"><span class="ti">🏠</span><span class="tl">Home</span></button>
+  <button type="button" data-tab="chat" aria-label="Chat"><span class="ti">💬</span><span class="tl">Chat</span></button>
+  <button type="button" data-tab="book" aria-label="Book"><span class="ti">📖</span><span class="tl">Book</span></button>
+  <button type="button" data-tab="alfred" aria-label="Alfred"><span class="ti">🎩</span><span class="tl">Alfred</span></button>
+  <button type="button" data-tab="alerts" aria-label="Alerts"><span class="ti">🔔</span><span class="tl">Alerts</span><span class="badge" id="alerts-badge" hidden></span></button>
+</nav>
+<script src="/phone-app.js"></script>
+</body>
+</html>
