@@ -107,7 +107,7 @@
     return r;
   }
 
-  const ENGINE_WORDS = { a1111: 'Forge / Automatic1111', comfy: 'ComfyUI', chatgpt: 'ChatGPT (its own pictures, in its pane)' };
+  const ENGINE_WORDS = { a1111: 'Forge / Automatic1111', comfy: 'ComfyUI', chatgpt: 'ChatGPT (its own pictures, in its pane)', openai: 'OpenAI (paid image service, your API key)' };
   const STYLE_WORDS = { photo: 'Photo-real', cinematic: 'Cinematic', illustration: 'Illustration', anime: 'Anime', painting: 'Painting' };
   function num(v) { return v == null || v === '' ? '' : String(v); }
 
@@ -158,6 +158,9 @@
   /** The exact request that makes the same picture again (same prompt as sent, same seed, every setting, no automatic changes). */
   function remakeRequest(rec) {
     const r = rec || {};
+    if (r.engine === 'openai' || r.backend === 'openai') {
+      return { engine: 'openai', request: { engine: 'openai', prompt: r.promptTyped || r.prompt || '' }, note: 'OpenAI has no seed, so it draws a new picture from the same words (a paid picture).' };
+    }
     if (r.engine === 'chatgpt' || r.backend === 'chatgpt') {
       return { engine: 'chatgpt', request: { engine: 'chatgpt', prompt: r.promptTyped || r.prompt || '' }, note: 'ChatGPT has no seed, so it draws a new picture from the same words.' };
     }

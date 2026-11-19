@@ -1671,10 +1671,24 @@
               <option value="sd">Stable Diffusion</option>
               <option value="chatgpt">ChatGPT (its own image generation, in its pane)</option>
               <option value="auto">Auto (Stable Diffusion if connected, else ChatGPT)</option>
+              <option value="openai">💳 OpenAI (paid — your API key)</option>
             </select></div>
           <div class="sd-f-ck"><label class="sd-l" for="sd-checkpoint">Checkpoint (model) <span id="sd-family" class="sd-badge" title="The model family — it decides the best size, sampler and CFG" hidden></span></label><select id="sd-checkpoint"><option value="">(the one loaded in your SD app)</option></select></div>
           <span id="sd-engine-note" role="status" aria-live="polite"></span>
         </div>
+        <details id="sd-openai-box" class="sd-adv"><summary>💳 ⚙ OpenAI pictures (paid, your API key)</summary><div class="sd-adv-body">
+          <p class="sd-small">OpenAI's image service draws with your own OpenAI API key — you pay OpenAI for each picture. A monthly limit stops it before a surprise bill. The key is kept sealed on this PC and never shown again. Get a key at platform.openai.com → API keys.</p>
+          <label class="sd-small"><input type="checkbox" id="sd-oa-on"> Use OpenAI pictures</label>
+          <div style="display:flex;gap:6px;margin:6px 0;flex-wrap:wrap"><input type="password" id="sd-oa-key" autocomplete="off" spellcheck="false" style="flex:1;min-width:180px" aria-label="OpenAI API key"><button type="button" id="sd-oa-savekey">💾 Save key</button><button type="button" id="sd-oa-clearkey" title="Remove the key from this PC">🗑</button><button type="button" id="sd-oa-check" title="Checks the key by reading the model list — free, no picture is made">✔ Check key</button></div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:end">
+            <div><label class="sd-l" for="sd-oa-model">Model</label><input id="sd-oa-model" list="sd-oa-models" style="width:150px"><datalist id="sd-oa-models"><option value="gpt-image-1"><option value="gpt-image-1-mini"></datalist></div>
+            <div><label class="sd-l" for="sd-oa-quality">Quality</label><select id="sd-oa-quality"><option value="low">Low (cheapest)</option><option value="medium">Medium</option><option value="high">High (dearest)</option><option value="auto">Auto</option></select></div>
+            <div><label class="sd-l" for="sd-oa-limit">Pictures per month (limit)</label><input type="number" id="sd-oa-limit" min="0" max="1000" style="width:80px"></div>
+          </div>
+          <label class="sd-small" style="display:block;margin-top:6px"><input type="checkbox" id="sd-oa-books"> Use OpenAI for book pictures (Akọwe's covers, portraits, maps — "Auto" then picks OpenAI for them)</label>
+          <p id="sd-oa-state" class="sd-small" role="status"></p>
+          <p id="sd-oa-msg" class="sd-small" role="status" aria-live="polite"></p>
+        </div></details>
         <div id="sd-style-row" class="sd-pillrow" role="group" aria-label="Style: adds short quality words and matching things to avoid">
           <span class="sd-rowlabel">Style</span>
           <button type="button" class="sd-pill" data-style="photo" aria-pressed="false" title="Photo-real: RAW photo, natural skin, sharp focus — and keeps cartoon / 3D render out">📷 Photo-real</button>

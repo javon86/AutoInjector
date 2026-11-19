@@ -885,6 +885,12 @@
   function startPolling() {
     clearInterval(st.pollTimer);
     st.pollTimer = setInterval(async () => {
+      if (st.jobEngine === 'openai') { // no progress from OpenAI: a slow steady bar (it takes ~20–60 s)
+        if (!st.generating) return;
+        st.oaTicks = (st.oaTicks || 0) + 1;
+        $('sd-progress-bar').style.width = `${Math.min(92, st.oaTicks * 3)}%`;
+        return;
+      }
       if (st.jobEngine === 'chatgpt') {
         const p = await call('chatgptStatus');
         if (!st.generating || !p || !p.busy) return;
@@ -961,6 +967,14 @@
       try { r0 = Object.assign(r0, advancedRequest()); } catch (e) { msg(`✖ ${e.message}`); return; }
     }
     if (!isTest && !String(req ? r0.prompt || '' : $('sd-prompt').value).trim() && !r0.characterLock && !r0.initImage) { msg('Type a prompt first.'); $('sd-prompt').focus(); return; }
+    // 💳 OpenAI (paid): only the words go to OpenAI, one picture per request.
+    if (!isTest && !req && st.engine === 'openai') {
+      const body = { engine: 'openai', prompt: r0.fullPrompt || r0.prompt, characterLock: r0.characterLock };
+      st.jobEngine = 'openai'; st.jobPrefix = ''; st.oaTicks = 0;
+      await render(() => call('request', body), false, body, '🎨 Asking OpenAI for the picture… (usually 20–60 s; a paid picture)');
+      openaiRefresh();
+      return;
+    }
     // ChatGPT (or Auto with no SD app connected): the two-engine path, only the words go to ChatGPT.
     if (!isTest && !req && (st.engine === 'chatgpt' || (st.engine === 'auto' && !st.connected))) {
       const body = { engine: st.engine, prompt: r0.fullPrompt || r0.prompt, characterLock: r0.characterLock };
@@ -1003,7 +1017,7 @@
     }
     st.lastSeed = r.seed;
     const warn = (r.warnings || []).map((w) => `⚠ ${w.message}`).join('\n');
-    const by = r.engine === 'chatgpt' ? ` — drawn by ChatGPT${r.settings && r.settings.seconds ? ` in ${r.settings.seconds} s` : ''}` : ` (seed ${r.seed})`;
+    const by = r.engine === 'chatgpt' ? ` — drawn by ChatGPT${r.settings && r.settings.seconds ? ` in ${r.settings.seconds} s` : ''}` : r.engine === 'openai' ? ` — drawn by OpenAI${r.settings && r.settings.model ? ` (${r.settings.model})` : ''}${r.settings && r.settings.seconds ? ` in ${r.settings.seconds} s` : ''}` : ` (seed ${r.seed})`;
     msg(`✔ ${r.images.length} picture${r.images.length > 1 ? 's' : ''} saved${isTest ? ' — Stable Diffusion works!' : ''}${r.retried && r.fixed === 'vae-automatic' ? ' — VAE is now Automatic' : ''}${by}${warn ? `\n${warn}` : ''}`);
     addonLinks(r.warnings);
     if (r.images[0]) showImage({ path: r.images[0].path, url: r.images[0].url, record: Object.assign({}, r.settings, { seed: r.images[0].seed }) });
@@ -1011,10 +1025,10 @@
   }
   $('btn-sd-generate').onclick = () => runGenerate();
   $('sd-prompt').addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); runGenerate(); } });
-  $('btn-sd-stop').onclick = async () => { msg('Stopping…'); st.rvStop = true; if (st.jobEngine !== 'sd') await call('chatgptCancel'); await call('cancel'); };
+  $('btn-sd-stop').onclick = async () => { msg('Stopping…'); st.rvStop = true; if (st.jobEngine === 'chatgpt') await call('chatgptCancel'); await call('cancel'); };
 
   // ------------------------------------------------------------ engine choice
-  function loadEngine() { let v = 'sd'; try { v = window.localStorage.getItem('sd-engine') || 'sd'; } catch (_) {} return ['sd', 'chatgpt', 'auto'].includes(v) ? v : 'sd'; }
+  function loadEngine() { let v = 'sd'; try { v = window.localStorage.getItem('sd-engine') || 'sd'; } catch (_) {} return ['sd', 'chatgpt', 'auto', 'openai'].includes(v) ? v : 'sd'; }
   st.engine = loadEngine();
   if ($('sd-engine')) {
     $('sd-engine').value = st.engine;
@@ -1022,7 +1036,14 @@
   }
   async function engineNote() {
     const n = $('sd-engine-note'); if (!n) return;
+    if ($('sd-openai-box')) $('sd-openai-box').open = st.engine === 'openai' ? true : $('sd-openai-box').open;
     if (st.engine === 'sd') { n.textContent = st.connected ? '' : 'Stable Diffusion is not connected yet (see above) — or choose ChatGPT.'; n.dataset.tone = st.connected ? '' : 'warn'; return; }
+    if (st.engine === 'openai') {
+      const o = await call('openaiStatus');
+      if (o && o.ok && o.ready) { n.textContent = `💳 OpenAI (${o.model}) is ready — a paid picture each time · ${o.usedThisMonth} of ${o.monthlyLimit} used this month.`; n.dataset.tone = ''; }
+      else { n.textContent = `⚠ OpenAI can't draw yet: ${(o && (o.why || o.message)) || 'not set up'} — see ⚙ OpenAI pictures below.`; n.dataset.tone = 'warn'; }
+      return;
+    }
     const c = await call('chatgptStatus');
     if (st.engine === 'auto' && st.connected) { n.textContent = 'Auto: Stable Diffusion is connected, so it draws.'; n.dataset.tone = ''; return; }
     if (c && c.ok && c.ready) { n.textContent = c.busy ? chatgptLine(c) : '✔ ChatGPT is ready — pictures take about 30–180 s.'; n.dataset.tone = ''; }
@@ -1030,6 +1051,39 @@
     if ($('sd-rv-fresh') && c && c.ok && typeof c.freshChatPerSeries === 'boolean') $('sd-rv-fresh').checked = c.freshChatPerSeries;
   }
   if (api && api.onChatgptImage) api.onChatgptImage(() => { if (!st.generating) engineNote(); });
+
+  // ------------------------------------------------------------ 💳 ⚙ OpenAI pictures (openai-image.js) — paid, your key
+  function openaiPaint(o) {
+    if (!o || !$('sd-oa-on')) return;
+    $('sd-oa-on').checked = !!o.enabled;
+    $('sd-oa-model').value = o.model || 'gpt-image-1';
+    $('sd-oa-quality').value = o.quality || 'medium';
+    $('sd-oa-limit').value = o.monthlyLimit != null ? o.monthlyLimit : 30;
+    $('sd-oa-books').checked = !!o.forBooks;
+    $('sd-oa-key').placeholder = o.hasKey ? '•••••••• (a key is saved — paste a new one to replace it)' : 'sk-… (your OpenAI API key)';
+    $('sd-oa-state').textContent = `${o.hasKey ? '🔑 Key saved' : '🔑 No key yet'} · ${o.usedThisMonth || 0} of ${o.monthlyLimit} pictures used this month${o.ready ? ' · ✔ ready' : o.why ? ` · ${o.why}` : ''}`;
+  }
+  async function openaiRefresh() { const o = await call('openaiStatus'); if (o && o.ok) openaiPaint(o); }
+  async function openaiSave(extra) {
+    const patch = Object.assign({ enabled: $('sd-oa-on').checked, model: $('sd-oa-model').value.trim(), quality: $('sd-oa-quality').value, monthlyLimit: Number($('sd-oa-limit').value), forBooks: $('sd-oa-books').checked }, extra || {});
+    const r = await call('openaiSettings', patch);
+    $('sd-oa-msg').textContent = r && r.ok ? '✔ Saved.' : `✖ ${(r && r.message) || 'Not saved.'}`;
+    if (r && r.ok) openaiPaint(r);
+    engineNote();
+    return r;
+  }
+  if ($('sd-openai-box')) {
+    for (const id of ['sd-oa-on', 'sd-oa-model', 'sd-oa-quality', 'sd-oa-limit', 'sd-oa-books']) $(id).addEventListener('change', () => openaiSave());
+    $('sd-oa-savekey').onclick = async () => {
+      const k = $('sd-oa-key').value.trim();
+      if (!k) { $('sd-oa-msg').textContent = 'Paste the key first.'; return; }
+      const r = await openaiSave({ key: k });
+      if (r && r.ok) $('sd-oa-key').value = '';
+    };
+    $('sd-oa-clearkey').onclick = async () => { await openaiSave({ key: '' }); $('sd-oa-msg').textContent = 'The key is removed from this PC.'; };
+    $('sd-oa-check').onclick = async () => { $('sd-oa-msg').textContent = 'Checking the key (free — no picture is made)…'; const r = await call('openaiCheck'); $('sd-oa-msg').textContent = r && r.ok ? r.message : `✖ ${(r && r.message) || 'The check failed.'}${r && r.hint ? ` ${r.hint}` : ''}`; };
+    openaiRefresh();
+  }
 
   // ------------------------------------------------------------ reference views (portrait · 10 views · sheet)
   const RV_VIEWS = ['front', 'three_quarter_front', 'side', 'three_quarter_back', 'back', 'idle', 'draw', 'attack', 'dash', 'defend'];
@@ -1039,7 +1093,7 @@
     const appearance = $('sd-rv-appearance') ? $('sd-rv-appearance').value.trim() : '';
     return { lock, appearance };
   }
-  function rvEngine() { return st.engine === 'sd' ? 'sd' : st.engine === 'chatgpt' ? 'chatgpt' : (st.connected ? 'sd' : 'auto'); }
+  function rvEngine() { return st.engine === 'sd' ? 'sd' : st.engine === 'chatgpt' ? 'chatgpt' : st.engine === 'openai' ? 'openai' : (st.connected ? 'sd' : 'auto'); }
   function rvBody(purpose, view, extra) {
     const b = rvBase();
     const body = Object.assign({ engine: rvEngine(), purpose }, extra || {});
@@ -1056,9 +1110,9 @@
   }
   // One reference picture; resolves with the result (errors go to the red box).
   async function rvOne(body, label, prefix) {
-    st.jobEngine = body.engine === 'sd' ? 'sd' : 'chatgpt'; st.jobPrefix = prefix || '';
+    st.jobEngine = body.engine === 'sd' ? 'sd' : body.engine === 'openai' ? 'openai' : 'chatgpt'; st.jobPrefix = prefix || ''; st.oaTicks = 0;
     let out = null;
-    await render(async () => { out = await call('request', body); return out; }, false, body, `🎨 ${prefix || ''}Making the ${label}${body.engine === 'sd' ? '' : ' — ChatGPT usually takes 30–180 s'}…`);
+    await render(async () => { out = await call('request', body); return out; }, false, body, `🎨 ${prefix || ''}Making the ${label}${body.engine === 'sd' ? '' : body.engine === 'openai' ? ' — OpenAI usually takes 20–60 s (paid)' : ' — ChatGPT usually takes 30–180 s'}…`);
     return out;
   }
   async function rvSingle(purpose, view) {
@@ -1817,7 +1871,7 @@
   function applyFormPatch(p0, how) {
     const p = p0 || {};
     const done = [];
-    if (p.engine && $('sd-engine') && ['sd', 'chatgpt', 'auto'].includes(p.engine)) { $('sd-engine').value = p.engine; st.engine = p.engine; lsSet('sd-engine', p.engine); engineNote(); done.push('engine'); }
+    if (p.engine && $('sd-engine') && ['sd', 'chatgpt', 'auto', 'openai'].includes(p.engine)) { $('sd-engine').value = p.engine; st.engine = p.engine; lsSet('sd-engine', p.engine); engineNote(); done.push('engine'); }
     if (p.checkpoint !== undefined) { selectValue('sd-checkpoint', p.checkpoint || ''); qualityRefresh(); checkCompat(); done.push('checkpoint'); }
     if (p.prompt !== undefined) { $('sd-prompt').value = String(p.prompt || ''); promptShortCheck(); done.push('prompt'); }
     if (p.negativeMode === 'auto' || p.negativeMode === 'none') { $('sd-negative').value = ''; done.push('negative (automatic)'); }
