@@ -428,7 +428,7 @@ async function load(over) {
     };
     t2.click('tab-app-images'); await tick(60);
     const eng = t2.$('sd-engine');
-    assert(eng && [...eng.options].map((o) => o.value).join() === 'sd,chatgpt,auto' && eng.value === 'sd', 'Engine: Stable Diffusion / ChatGPT / Auto (Stable Diffusion by default)');
+    assert(eng && [...eng.options].map((o) => o.value).join() === 'sd,chatgpt,auto,openai' && eng.value === 'sd', 'Engine: Stable Diffusion / ChatGPT / Auto / 💳 OpenAI (Stable Diffusion by default)');
     eng.value = 'chatgpt'; t2.fire(eng, 'change'); await tick(40);
     assert(/ChatGPT is ready/.test(t2.$('sd-engine-note').textContent), `the note says ChatGPT is ready ("${t2.$('sd-engine-note').textContent}")`);
     t2.$('sd-prompt').value = 'a ferry at dawn';
