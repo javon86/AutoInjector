@@ -283,6 +283,10 @@ A('ui.show_tab', null, { t: 'Show a tab (🤖 AutoInjector, 📖 Akọwe, 🎨 I
 /** Channels the AI must not drive — each with the reason. The coverage test checks every channel is
  *  either an ACTIONS entry, a direct Alfred tool (TOOL_CHANNELS), or here. */
 const EXCLUDED = {
+  // 💳 OpenAI's paid image service (openai-image.js): money and an API key — the author's own decisions
+  'sd:openai-status': 'the ⚙ OpenAI pictures box\'s own read — not a control',
+  'sd:openai-settings': 'turns on a PAID picture service and stores the author\'s API key — never for Alfred',
+  'sd:openai-check': 'checks the author\'s API key — the ⚙ OpenAI pictures box only',
   // ✅ EASE (ease-main.js): pop-ups for the user; Alfred has the same answers through 🩺 Check everything (health.status, llm.check)
   'ease:prefs': 'the panel\'s own "seen" list for the guided tours and the checklist — not a control',
   'ease:set-prefs': 'the panel saves "don\'t show again" / a tour seen — not a control',

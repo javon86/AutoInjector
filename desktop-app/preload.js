@@ -194,6 +194,10 @@ contextBridge.exposeInMainWorld("api", {
     // 🎨 two engines (Stable Diffusion / ChatGPT / Auto) + reference views & sheets (= POST /image/request)
     request: (req) => ipcRenderer.invoke("sd:request", req),
     chatgptStatus: () => ipcRenderer.invoke("sd:chatgpt-status"),
+    // 💳 OpenAI's paid image service (openai-image.js): status, ⚙ settings (+ the key, sealed on the PC), ✔ Check key (free)
+    openaiStatus: () => ipcRenderer.invoke("sd:openai-status"),
+    openaiSettings: (patch) => ipcRenderer.invoke("sd:openai-settings", patch || {}),
+    openaiCheck: () => ipcRenderer.invoke("sd:openai-check"),
     chatgptCancel: () => ipcRenderer.invoke("sd:chatgpt-cancel"),
     chatgptSettings: (patch) => ipcRenderer.invoke("sd:chatgpt-settings", patch || {}),
     quality: (patch) => ipcRenderer.invoke("sd:quality", patch || {}), // 🎨 { bookCheckpoint } — "Book pictures use" (PR #128)

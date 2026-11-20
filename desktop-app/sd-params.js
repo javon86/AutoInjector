@@ -40,7 +40,7 @@ const INPAINT_FILL = ['fill', 'original', 'latent noise', 'latent nothing'];
 const CN_CONTROL_MODES = ['Balanced', 'My prompt is more important', 'ControlNet is more important'];
 const CN_RESIZE_MODES = ['Just Resize', 'Crop and Resize', 'Resize and Fill'];
 const PURPOSES = ['portrait', 'cover', 'scene', 'illustration', 'map', 'test', 'free', 'view', 'sheet'];
-const ENGINES = ['auto', 'sd', 'chatgpt'];
+const ENGINES = ['auto', 'sd', 'chatgpt', 'openai'];
 const VIEWS = ['front', 'three_quarter_front', 'side', 'three_quarter_back', 'back', 'idle', 'draw', 'attack', 'dash', 'defend'];
 
 // ------------------------------------------------------------------ the schema
@@ -84,7 +84,7 @@ const GENERATE_SCHEMA = {
     characterLock: Object.assign(T.str('A character lock id or name (same face every time)'), { 'x-a1111': [], 'x-comfy': 'yes' }),
     keepSeed: Object.assign(T.bool('false = ignore the character lock\'s seed'), { 'x-a1111': [], 'x-comfy': 'yes' }),
     purpose: Object.assign(T.str('Picks a size when none is given; "view" = one full-body reference view (needs view), "sheet" = one turnaround sheet with all ten views', { enum: PURPOSES }), { 'x-a1111': [], 'x-comfy': 'yes' }),
-    engine: Object.assign(T.str('"sd" = Stable Diffusion, "chatgpt" = ChatGPT\'s own image generation in its logged-in pane, "auto" = SD when connected, else ChatGPT', { enum: ENGINES }), { 'x-a1111': [], 'x-comfy': 'yes' }),
+    engine: Object.assign(T.str('"sd" = Stable Diffusion, "chatgpt" = ChatGPT\'s own image generation in its logged-in pane, "openai" = OpenAI\'s paid image service (the author\'s key; only when it is turned on), "auto" = SD when connected, else ChatGPT (book pictures: OpenAI when the author chose it)', { enum: ENGINES }), { 'x-a1111': [], 'x-comfy': 'yes' }),
     view: Object.assign(T.str('Which reference view (with purpose "view"); AutoInjector adds the framing words', { enum: VIEWS }), { 'x-a1111': [], 'x-comfy': 'yes' }),
     appearance: Object.assign(T.str('What the character looks like, in words (instead of / besides a character lock)'), { 'x-a1111': [], 'x-comfy': 'yes' }),
     upscale: Object.assign(T.int('Upscale the finished picture ×2 or ×4 (Stable Diffusion Extras / an upscale model; also for ChatGPT pictures when an SD app is connected)', 2, 4), { 'x-a1111': [], 'x-comfy': 'yes' }),

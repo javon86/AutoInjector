@@ -278,6 +278,7 @@ const state = {
   videoJudge: null, // 🎬🧑‍⚖️ video judge settings (video-judge.js cleanVideoSettings): preview rounds, Make N count, preview length, auto-judge trailer shots
   imageJudge: null, // 🧑‍⚖️ the AI judge's settings (image-judge.js cleanSettings): order, on/off per judge, pass mark, rounds, auto-judge book pictures
   sdQuality: { bookCheckpoint: "", bookRecipe: "" }, // 🎨 "Book pictures use: <checkpoint>" (Akọwe's pictures; "" = whatever is loaded) — sd-quality.js, PR #128
+  openaiImage: { enabled: false, model: "gpt-image-1", quality: "medium", monthlyLimit: 30, forBooks: false, keyEnc: null, usage: { month: "", count: 0 } }, // 💳 OpenAI's paid image service (openai-image.js): the key is sealed (secret-store.js), never written plain
   chatImage: { freshChatPerSeries: false }, // 🎨 ChatGPT image engine: a new ChatGPT chat for each reference-view series (default: one chat, keeps the character)
   imageConfig: null, // Stable Diffusion settings mirror (imageProvider owns the live copy); persisted so the endpoint survives a restart
   videoConfig: null, // text-to-video settings mirror (videoProvider owns the live copy); persisted so the endpoint survives a restart
@@ -775,6 +776,7 @@ function buildStateSnapshotText() {
         managerConfig: sealManagerConfig(state.managerConfig), // AI-001: the API key is sealed (apiKeyEnc), never written plaintext
         sdManaged: state.sdManaged,
         chatImage: state.chatImage,
+        openaiImage: state.openaiImage, // the key only as keyEnc (sealed)
         sdQuality: state.sdQuality,
         imageJudge: state.imageJudge,
         videoJudge: state.videoJudge,
@@ -915,6 +917,11 @@ function loadPersistedState() {
     state.nextLoginId = maxId + 1;
   }
   if (snap.chatImage && typeof snap.chatImage === "object") state.chatImage = { freshChatPerSeries: !!snap.chatImage.freshChatPerSeries };
+  if (snap.openaiImage && typeof snap.openaiImage === "object") {
+    const o = snap.openaiImage;
+    state.openaiImage = Object.assign(require("./openai-image").cleanSettings(o), { keyEnc: typeof o.keyEnc === "string" ? o.keyEnc : null,
+      usage: o.usage && typeof o.usage === "object" ? { month: String(o.usage.month || "").slice(0, 7), count: Math.max(0, Number(o.usage.count) || 0) } : { month: "", count: 0 } });
+  }
   if (snap.sdQuality && typeof snap.sdQuality === "object") state.sdQuality = { bookCheckpoint: String(snap.sdQuality.bookCheckpoint || "").slice(0, 300), bookRecipe: String(snap.sdQuality.bookRecipe || "").slice(0, 120) };
   if (snap.imageJudge && typeof snap.imageJudge === "object") { try { state.imageJudge = require("./image-judge").cleanSettings(snap.imageJudge); } catch (_) {} }
   if (snap.videoJudge && typeof snap.videoJudge === "object") { try { state.videoJudge = require("./video-judge").cleanVideoSettings(snap.videoJudge); } catch (_) {} }
@@ -7587,11 +7594,53 @@ function imageJudge() {
   });
   return _imageJudge;
 }
+// ---- 💳 OpenAI's paid image service as the third engine (openai-image.js) ------------------------------------
+let _openaiImage = null;
+function openaiImageKey() {
+  const enc = state.openaiImage && state.openaiImage.keyEnc;
+  if (!enc) return "";
+  try { return secretStore.open(enc) || ""; } catch (_) { return ""; }
+}
+function openaiImage() {
+  if (_openaiImage) return _openaiImage;
+  _openaiImage = require("./openai-image").createOpenAiImage({
+    key: () => openaiImageKey(),
+    settings: () => state.openaiImage || {},
+    usage: () => (state.openaiImage && state.openaiImage.usage) || null,
+    addUse: (n, month) => {
+      const u = state.openaiImage.usage && state.openaiImage.usage.month === month ? state.openaiImage.usage : { month, count: 0 };
+      state.openaiImage.usage = { month, count: u.count + n };
+      saveStateDebounced();
+    },
+    imagesDir: () => outputManager.imagesDir(),
+    recordImage: (e) => dbService.recordImage(e),
+    log: (t, d) => logEvent(t, d),
+    fileUrl: (p) => { try { return pathToFileURL(p).href; } catch (_) { return ""; } },
+  });
+  return _openaiImage;
+}
+/** ⚙ OpenAI pictures: the settings (and the key: "" clears it; absent keeps it). The key is sealed before it is kept. */
+function openaiImageSettings(patch) {
+  const p = patch && typeof patch === "object" ? patch : {};
+  const cur = state.openaiImage || {};
+  const next = Object.assign(require("./openai-image").cleanSettings(Object.assign({}, cur, p)), { keyEnc: cur.keyEnc || null, usage: cur.usage || { month: "", count: 0 } });
+  if (typeof p.key === "string") {
+    const k = p.key.trim();
+    if (k && !/^[\w-]{20,300}$/.test(k)) return { ok: false, error: "BAD_KEY", message: "That doesn't look like an OpenAI API key (it starts with sk- and has no spaces)." };
+    next.keyEnc = k ? secretStore.seal(k) : null;
+    if (k && !next.keyEnc) return { ok: false, error: "CANT_SEAL", message: "This PC can't store the key safely (Windows' protected storage isn't available)." };
+  }
+  state.openaiImage = next;
+  saveStateDebounced();
+  logEvent("openai-image-settings", { enabled: next.enabled, model: next.model, quality: next.quality, monthlyLimit: next.monthlyLimit, forBooks: next.forBooks, hasKey: !!next.keyEnc }); // never the key
+  return Object.assign({ ok: true }, openaiImage().status());
+}
 let _sdStudio = null;
 function sdStudio() {
   if (_sdStudio) return _sdStudio;
   _sdStudio = createSdStudio({
     chatgpt: chatImage(),
+    openai: openaiImage(), // 💳 the paid engine: only when chosen, or for book pictures when "Use OpenAI for book pictures" is ticked
     persistChatgpt: (o) => { state.chatImage = { freshChatPerSeries: !!(o && o.freshChatPerSeries) }; saveStateDebounced(); },
     quality: state.sdQuality || {},
     persistQuality: (o) => { state.sdQuality = { bookCheckpoint: String((o && o.bookCheckpoint) || ""), bookRecipe: String((o && o.bookRecipe) || "") }; saveStateDebounced(); },
@@ -7655,6 +7704,9 @@ ipcMain.handle("sd:workflow-run", sdSafe((a) => sdStudio().runWorkflow(a, "image
 ipcMain.handle("sd:request", sdSafe((a) => sdStudio().requestFrom(a, "images-tab")));
 ipcMain.handle("sd:quality", sdSafe((a) => sdStudio().quality(a && Object.keys(a).length ? a : null)));
 ipcMain.handle("sd:chatgpt-status", sdSafe(() => sdStudio().chatgptStatus()));
+ipcMain.handle("sd:openai-status", sdSafe(() => sdStudio().openaiStatus()));
+ipcMain.handle("sd:openai-settings", sdSafe((a) => openaiImageSettings(a)));
+ipcMain.handle("sd:openai-check", sdSafe(() => openaiImage().checkKey()));
 ipcMain.handle("sd:chatgpt-cancel", sdSafe(() => sdStudio().chatgptCancel()));
 ipcMain.handle("sd:chatgpt-settings", sdSafe((a) => sdStudio().chatgptSettings({ freshChatPerSeries: a.freshChatPerSeries, timeoutMs: a.timeoutMs })));
 // ♻ Remake exactly · 💾 recipes · 🧑‍⚖️ judge · 🔁 Make it better · Make 4 and pick the best · the form for Alfred

@@ -528,6 +528,22 @@ Chapter 1 is written before the rest of the book exists, and readers decide on t
 **In Akọwe:** 🖼 Pictures & cover makes pictures of characters, places and chapters, and the 🎨 cover. In a ⚡ run each
 character gets a portrait, which becomes that character's lock. Pictures never hold up the book.
 
+### 💳 OpenAI pictures (paid, your API key)
+
+A third picture engine next to Stable Diffusion and ChatGPT: OpenAI's image service, with your own OpenAI API key —
+you pay OpenAI for each picture.
+
+1. Get a key at platform.openai.com → **API keys** (and add credit under **Billing**).
+2. 🎨 Images → **💳 ⚙ OpenAI pictures**: paste the key → **💾 Save key** (it is kept sealed on this PC and never shown
+   again), tick **Use OpenAI pictures**, press **✔ Check key** (free — it makes no picture).
+3. Pick **Engine: 💳 OpenAI** to draw with it, or tick **Use OpenAI for book pictures** so Akọwe's covers, portraits
+   and maps use it ("Auto" never picks OpenAI for anything else).
+
+**Model** (default `gpt-image-1`; type a newer name if your account has one), **Quality** (Low is cheapest, High
+dearest) and **Pictures per month** (default 30) — at the limit it stops and says so, so there's no surprise bill.
+If OpenAI says no (a bad key, no credit, a refused description, a model your account can't use yet) you get the
+reason in plain words and what to do.
+
 ## 7. Video
 
 **In the 🎬 Video tab:**
