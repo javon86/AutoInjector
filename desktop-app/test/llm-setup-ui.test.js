@@ -66,7 +66,7 @@ function load(api, opts = {}) {
   assert(bc && bc.firstElementChild && bc.firstElementChild.id === 'llm-zone', '#llm-zone is the first thing in #butler-controls');
   assert(['llm-setup', 'llm-models'].every((id) => d.getElementById(id) && d.getElementById(id).parentElement.id === 'llm-zone'), '#llm-setup, then #llm-models');
   const order = [...d.getElementById('llm-zone').children].map((e) => e.id || e.className).join(',');
-  assert(order === 'llm-setup,llm-models,llm-pair', `in that order, then the pair row (${order})`);
+  assert(order === 'llm-setup,alfred-team-panel,llm-models,llm-pair', `in that order (👥 Alfred's team between the setup and the model finder), then the pair row (${order})`);
   const pair = [...d.querySelector('#llm-zone .llm-pair').children].map((e) => e.id || e.className).join(',');
   const right = [...d.querySelector('#llm-zone .llm-right').children].map((e) => e.id).join(',');
   assert(pair === 'alfred-persona,llm-right' && right === 'butler-more,butler-chat', `personality (half) beside ⚙ More settings + the activity log (${pair} | ${right})`);

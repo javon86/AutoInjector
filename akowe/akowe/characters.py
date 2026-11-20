@@ -449,7 +449,13 @@ def generate(assist, job, pid: str, branch: str, rid: str, *, note: str | None =
     if sheet is None or voice is None:
         raise AkoweError("INTERNAL_ERROR", "/character_sheet", "the AI's answer had no usable character sheet and "
                              "voice card; nothing was changed")
-    return save_entry(assist.store, pid, branch, rid, sheet=sheet, voice=voice, by="ai", slot=job.slot,
+    by = "ai"
+    old = entries.get(rid) or {}
+    if (old.get("made_by") or {}).get("kind") == "author":  # the author's own card: the AI only fills what is empty
+        sheet = dict(sheet, **{k: v for k, v in (old.get("sheet") or {}).items() if v})
+        voice = dict(voice, **{k: v for k, v in (old.get("voice") or {}).items() if v})
+        by = "author"
+    return save_entry(assist.store, pid, branch, rid, sheet=sheet, voice=voice, by=by, slot=job.slot,
                       name=me["name"], subject_id=me["subject_id"])
 
 

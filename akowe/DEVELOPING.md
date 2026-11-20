@@ -120,6 +120,10 @@ akowe/
                            proposals, ✨ Fill from the book job), binder_html.py (print HTML, 7 looks), binder_docx.py
     book_package.py        📦 P20/P21 book.akowe: build, read + check, transplant into a NEW project, import, verify
     book_save.py           💾 P20 books folder settings, one folder per book, atomic writes, debounced auto-saves
+    book_import.py         📥 readers (.docx/.odt/.pdf/.txt/.md/paste), chapter split, the author's chapters stored as
+                           manual candidates ("you"); keep_author_chapter() puts them back on a changed outline
+    grow_novel.py          📖 Grow my start into a novel: import → Book Bible from the chapters (2 AI requests, one
+                           screen to fix; magic as structured rules) → plan the rest → ⚡ continue_project; web/grow-novel.js
     book_open.py           📂 P21 books-folder list, open a folder / upload (package or book-bible.json), resolve_bible
     workflow_test.py       🧪 Test workflow runner (rows, separate "🧪 Workflow test" project, reports/workflow-test-*)
     status_push.py         status summary pushed to the AutoInjector bridge (POST /v1/status; incl. words {total, target})

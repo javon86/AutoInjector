@@ -2,7 +2,9 @@
 // test/fixtures/fake-ollama.js — a fake Ollama HTTP server for tests (no real Ollama, no network):
 //   GET /api/version, GET /api/tags, POST /api/pull (NDJSON progress), DELETE /api/delete,
 //   POST /v1/chat/completions (native tool calls, the text tool protocol, or a plain answer),
-//   POST /api/chat (the 🧪 writing test: st.write(body) or st.writeAnswer; st.noThink = an Ollama that rejects "think").
+//   POST /api/chat (the 🧪 writing test: st.write(body) or st.writeAnswer; st.noThink = an Ollama that rejects "think";
+//   👥 Alfred's team: st.chat(body) → an assistant message {content, tool_calls?} answers instead),
+//   GET /api/ps (the models in memory: st.loaded, filled by /api/chat), POST /api/generate {keep_alive:0} (unload → st.unloads).
 // fakeOllama(port) -> { st, port, base, up(), down(), running }. `st` is live state the test can poke:
 //   models [{name,size}], version, pulls[], deletes[], chats[], nativeTools, textTools,
 //   pullMode ('ok'|'slow'|'missing'|'secret'|'cut'), pullSize (bytes), pullDelayMs (per step), answer.
@@ -15,7 +17,7 @@ function fakeOllama(port) {
   const st = {
     models: [], version: '0.5.7', pulls: [], deletes: [], chats: [], nativeTools: true, textTools: true,
     pullMode: 'ok', pullSize: 4 * 1024 * 1024, answer: 'ready',
-    apiChats: [], noThink: false, writeDelayMs: 0, write: null,
+    apiChats: [], noThink: false, writeDelayMs: 0, write: null, chat: null, loaded: [], unloads: [],
     writeAnswer: 'Blood ran hot from the wound in his side and he screamed as the blade tore free. "Fuck you, Marco, you lying bastard," she spat. "I will make you suffer, and watch everyone you love burn." Grief for her brother was a dark, numb weight. Her lips found his in a slow kiss. The corrupt banker deserved to lose every stolen coin.',
   };
   let server = null;
@@ -53,6 +55,8 @@ function fakeOllama(port) {
         return res.end();
       }
       // loading a model into memory (an empty prompt): answers at once, like a real Ollama with the model loaded
+      if (req.url === '/api/ps') return send(200, { models: st.loaded.map((n) => { const m = st.models.find((x) => x.name === n) || { size: 0 }; return { name: n, model: n, size: m.size, size_vram: m.size }; }) });
+      if (req.url === '/api/generate' && req.method === 'POST' && j.keep_alive === 0) { st.unloads.push(j.model); st.loaded = st.loaded.filter((n) => n !== j.model); return send(200, { model: j.model, response: '', done: true, done_reason: 'unload' }); }
       if (req.url === '/api/generate' && req.method === 'POST' && st.generateHang) { st.warmed = (st.warmed || 0) + 1; return; } // never answers (a stuck load)
       if (req.url === '/api/generate' && req.method === 'POST') { st.warmed = (st.warmed || 0) + 1; return send(200, { model: 'x', response: '', done: true, done_reason: 'load' }); }
       // 🧪 "What will it write?" uses the native /api/chat (think:false, num_predict ~150).
@@ -61,6 +65,9 @@ function fakeOllama(port) {
         if (!st.models.some((m) => m.name === j.model || m.name === `${j.model}:latest`)) return send(404, { error: `model "${j.model}" not found, try pulling it first` });
         if (st.noThink && j.think !== undefined) return send(400, { error: `"${j.model}" does not support thinking` });
         if (st.writeDelayMs) await sleep(st.writeDelayMs);
+        const name = (st.models.find((m) => m.name === j.model || m.name === `${j.model}:latest`) || {}).name;
+        if (name && !st.loaded.includes(name)) st.loaded.push(name);
+        if (typeof st.chat === 'function') return send(200, { model: j.model, message: Object.assign({ role: 'assistant', content: '' }, st.chat(j)), done: true, eval_count: 120, eval_duration: 1500000000 });
         const content = typeof st.write === 'function' ? st.write(j) : st.writeAnswer;
         return send(200, { model: j.model, message: { role: 'assistant', content }, done: true, eval_count: 120, eval_duration: 1500000000 });
       }

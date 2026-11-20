@@ -118,6 +118,7 @@
       .al-rich p { margin:0 0 5px; } .al-rich p:last-child { margin-bottom:0; } .al-rich ul, .al-rich ol { margin:2px 0 5px; padding-left:20px; white-space:normal; } .al-rich li { margin:1px 0; white-space:pre-wrap; }
       .al-rich code { background:#0b0e16; border:1px solid #2b3550; border-radius:4px; padding:0 3px; font-size:11.5px; } .al-rich pre { background:#0b0e16; border:1px solid #2b3550; border-radius:6px; padding:5px 7px; margin:3px 0; overflow:auto; white-space:pre; font-size:11.5px; } .al-rich .al-h { margin:2px 0 4px; }
       .al-outdated { opacity:.62; } .al-outdated .al-rich { text-decoration:line-through; text-decoration-color:rgba(241,227,176,.45); } .al-old { font-size:11px; color:#cfe0ff; margin-bottom:3px; text-decoration:none; }
+      .al-by { font-size:10.5px; color:#9fb2e0; margin-bottom:3px; font-weight:600; }
       .al-msg img { display:block; max-width:100%; max-height:180px; margin-top:6px; border-radius:6px; }
       #alfred-card { flex:0 0 auto; margin:8px 10px; padding:9px 10px; border:1px solid #c79a3a; background:#1d1709; border-radius:10px; max-height:52vh; display:flex; flex-direction:column; min-height:0; box-shadow:0 -4px 14px rgba(0,0,0,.35); }
       #alfred-card[hidden] { display:none; }
@@ -210,9 +211,11 @@
       h('select', { id: 'alfred-set-brain' }, opt('auto', 'Automatic (local model, else the connected AI)'), opt('local', 'Local model (Ollama)'), opt('api', 'The connected AI (manager / API)'), opt('pane', 'A web AI pane')),
       h('label', { for: 'alfred-set-endpoint' }, 'Ollama address'),
       h('input', { id: 'alfred-set-endpoint', type: 'text', placeholder: 'http://127.0.0.1:11434/v1' }),
-      h('label', { for: 'alfred-set-model' }, 'Model'),
+      h('label', { for: 'alfred-set-model', title: 'The 🎩 Butler\'s model — every role without its own model uses it too' }, 'Model (🎩 Butler)'),
       h('input', { id: 'alfred-set-model', type: 'text', list: 'alfred-models', placeholder: 'qwen2.5:7b' }),
       h('datalist', { id: 'alfred-models' }),
+      // 👥 his team: one model per role, ★ fit, 💡 better downloaded models (alfred-team-ui.js fills it)
+      h('div', { id: 'alfred-team', class: 'full' }),
       h('label', { for: 'alfred-set-pane' }, 'Web AI'),
       h('select', { id: 'alfred-set-pane' }, opt('chatgpt', 'ChatGPT'), opt('claude', 'Claude'), opt('gemini', 'Gemini')),
       h('label', { for: 'alfred-set-steps' }, 'Max steps'),
@@ -241,6 +244,7 @@
     $('alfred-set-brain').value = s.brain; $('alfred-set-endpoint').value = s.local.endpoint || ''; $('alfred-set-model').value = s.local.model || '';
     $('alfred-set-pane').value = s.pane.site; $('alfred-set-steps').value = String(s.maxSteps);
     $('alfred-set-notices').checked = !!s.notices; $('alfred-set-interpreter').checked = !!s.interpreter;
+    if (window.AlfredTeamUI && $('alfred-team')) window.AlfredTeamUI.mount($('alfred-team'));
     Promise.resolve(api.alfredModels && api.alfredModels()).then((r) => {
       const dl = $('alfred-models'); if (!dl || !r || !Array.isArray(r.models)) return;
       dl.textContent = ''; for (const m of r.models) dl.append(h('option', { value: m }));
@@ -542,6 +546,15 @@
     const t = $('btn-alfred-drawer'); if (t) t.remove();
     sync();
   }
+  /** 👥 "Team" (the line on the 🤖 AutoInjector tab): his panel, ⚙ settings, scrolled to the team. */
+  function showTeam() {
+    if (!built) { try { if (api.alfredPanelToggle) api.alfredPanelToggle(true); } catch (_) {} return; }
+    setOpen(true);
+    showSettings(true);
+    const t = $('alfred-team');
+    if (t) { try { t.scrollIntoView({ block: 'start' }); } catch (_) {} }
+  }
+  window.AlfredPanel = Object.assign(window.AlfredPanel || {}, { showTeam });
   /** "🛠 Set up his AI": bring the 🎩 Butler section (his SETUP panel) into view, on the main tab. */
   function showButler() {
     try { const tab = $('tab-app-main'); if (tab && !tab.classList.contains('active')) tab.click(); } catch (_) {}
@@ -624,7 +637,8 @@
     const t = $('alfred-busy-text'); if (!t) return;
     const sec = Math.max(0, Math.round((Date.now() - busyFrom) / 1000));
     const p = busyWhat || {};
-    const what = p.doing === 'tool' && p.tool ? `Using “${p.tool}”…` : 'Thinking…';
+    const ROLE_BUSY = { assistant: '🧰 The Assistant is working…', director: '🎬 The Director is planning…', prompt: '🎨 The Prompt writer is writing…', badboy: '😈 The Bad boy is writing…' };
+    const what = p.doing === 'tool' && p.tool ? `Using “${p.tool}”…` : (ROLE_BUSY[p.role] || 'Thinking…');
     const slow = sec >= 20 && p.doing !== 'tool' ? (p.brain === 'local' ? ' (a local model can take a minute)' : ' (still waiting for my AI)') : '';
     t.textContent = `🎩 ${what} ${sec} s${slow}`;
   }
@@ -665,6 +679,8 @@
   function msgEl(m) {
     const rich = m.role === 'alfred' || m.role === 'notice';
     const e = h('div', { class: `al-msg al-${m.role}${m.outdated ? ' al-outdated' : ''}`, 'data-role': m.role }, rich ? richEl(m.text) : m.text);
+    // 👥 which of his team answered: "🎨 Prompt writer (qwen2.5:14b)"
+    if (m.by && m.by.name) e.prepend(h('div', { class: 'al-by', 'data-by': m.by.role || '' }, `${m.by.icon || ''} ${m.by.name}${m.by.model ? ` (${m.by.model})` : ''}`.trim()));
     // a note about something that has changed since (a book run resumed / finished, a problem fixed)
     if (m.outdated) e.prepend(h('div', { class: 'al-old' }, `Old news${m.nowText ? ` — now: ${m.nowText}` : ''}`));
     if (m.image) e.append(h('img', { src: fileUrl(m.image), alt: 'the image Alfred made' }));
@@ -724,6 +740,7 @@
     box.hidden = false;
     box.dataset.id = card.id;
     const body = h('div', { class: 'al-card-body' }, h('h3', null, '🎩 I will:'));
+    if (card.by && card.by.name) body.append(h('div', { class: 'al-by', 'data-by': card.by.role || '' }, `${card.by.icon || ''} ${card.by.name}${card.by.model ? ` (${card.by.model})` : ''}`.trim()));
     if (card.intro) body.append(h('p', { style: 'margin:0 0 6px;font-size:12px;color:#cbb98a' }, card.intro));
     const ol = h('ol');
     for (const s of card.steps) {

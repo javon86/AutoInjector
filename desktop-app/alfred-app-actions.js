@@ -286,6 +286,10 @@ const EXCLUDED = {
   // ⌨ command-line mode (cli-mode-ui.js): the 📚 Akọwe panel's mirror of Akọwe's own setting
   'akowe-cli:set-mode': 'the panel\'s Web window / Command line choice per AI slot — Akọwe owns it (⚙️ Settings); not for Alfred to switch',
   'akowe-cli:preset': 'the panel\'s "Two AIs on command line" preset — Akọwe owns it (⚙️ Settings); not for Alfred to switch',
+  // 💳 OpenAI's paid image service (openai-image.js): money and an API key — the author's own decisions
+  'sd:openai-status': 'the ⚙ OpenAI pictures box\'s own read — not a control',
+  'sd:openai-settings': 'turns on a PAID picture service and stores the author\'s API key — never for Alfred',
+  'sd:openai-check': 'checks the author\'s API key — the ⚙ OpenAI pictures box only',
   // ✅ EASE (ease-main.js): pop-ups for the user; Alfred has the same answers through 🩺 Check everything (health.status, llm.check)
   'ease:prefs': 'the panel\'s own "seen" list for the guided tours and the checklist — not a control',
   'ease:set-prefs': 'the panel saves "don\'t show again" / a tour seen — not a control',

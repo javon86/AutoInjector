@@ -27,7 +27,15 @@ AI checked it": H6 stays the author's). Those keep waiting.
 **Who votes** (``voters``): every AI that is connected, working and not switched off for checks — ChatGPT, Claude,
 Gemini (one vote per AI, in the checker order) — including the two that disagree: each gets a fresh, neutral question.
 The 🤖 Claude Code helper votes for Claude only when no Claude pane / API is working (never two votes for Claude).
-🎩 Alfred (the local model) does not vote and never decides on his own.
+🎩 Alfred (the local model) does not vote and never decides on his own. With 🗳 "when something goes wrong" on
+(``errors``), ``cc_voters`` (0–3) EXTRA Claude Code helper voters (``extra``: "Claude Code helper #1" …, each with its
+own reviewer persona, ``PERSONAS``) are asked after the AIs: every voter must agree, so they can only block, and they
+never count towards ``MIN_VOTERS`` (``too_few``).
+
+**🗳 When something goes wrong** (stand_in_errors.py, Settings › AI, off by default): error stops that ask the author
+to choose (an AI error, a draft Akọwe's checks refused, a reviewer's OK that did not count …) are voted on too, right
+away (``errors_when`` ``now``) or after the wait time; the review decisions and checkpoints above too, even with the
+stand-in itself off. The per-run cap then defaults to ``ERRORS_MAX_PER_RUN`` (10).
 
 **The question** (``context_for`` + ``TASK``): the finding, both options and the relevant records (approved canon,
 Akọwe's own no-AI checks, the changed or current text). The two options are listed as A and B in a random order for
@@ -79,7 +87,13 @@ log = logging.getLogger("akowe.stand_in")
 
 SETTING = "stand_in"
 WAITS = (10, 20, 30, 60)
-DEFAULTS = {"enabled": False, "wait_min": 20, "max_per_run": 5, "checkpoints": True}
+DEFAULTS = {"enabled": False, "wait_min": 20, "max_per_run": 5, "checkpoints": True,
+            # 🗳 "When something goes wrong, let the AIs vote instead of stopping" (stand_in_errors.py): off by default
+            "errors": False, "errors_when": "wait", "cc_voters": 1}
+ERRORS_WHEN = ("now", "wait")   # right away | after the usual wait time
+CC_VOTERS_RANGE = (0, 3)        # extra 🤖 Claude Code helper voters (only with "errors" on; they can only block)
+ERRORS_MAX_PER_RUN = 10         # the per-run cap when "errors" is on and the author did not set one themselves
+LETTERS = "ABCDE"
 CHECKPOINT = "CHECKPOINT_WAITING"   # 🧭 a continuity checkpoint question (stand_in_checkpoint.py)
 MAX_PER_RUN_RANGE = (1, 20)
 MIN_CONFIDENCE = 0.75
@@ -106,9 +120,18 @@ OPTION_WORDS = {
     "leave_as_is": "Leave the chapter as it is for now: the book goes on and the problem stays in the report for the "
                    "novelist.",
     "needs_author": "Stop the book until the novelist fixes it: later chapters would build on the mistake.",
+    # 🗳 when something went wrong (stand_in_errors.py)
+    "try_again": "Try the same step again (a timeout, a busy site or a one-off error often passes on a second try).",
+    "other_ai": "Try the step again with another working AI (the AI that failed is not used for it in this run).",
+    "skip_step": "Skip this optional step: the book goes on without it (it never holds up the book).",
+    "review_again": "Ask the AI reviewers to read it again (their OK did not count: no reason given, or not sure "
+                    "enough).",
+    "wait_author": "Stop and wait for the novelist (e.g. the same problem is likely to come back, or it needs them).",
 }
 PICK_SHORT = {"accept_change": "accept", "keep_original": "keep", "approve_anyway": "accept as it is",
-              "retry": "fix again", "apply_fix": "make the fix", "leave_as_is": "leave it", "needs_author": "needs you"}
+              "retry": "fix again", "apply_fix": "make the fix", "leave_as_is": "leave it", "needs_author": "needs you",
+              "try_again": "try again", "other_ai": "another AI", "skip_step": "skip it",
+              "review_again": "review again", "wait_author": "wait for you"}
 AGREED_TO = {"accept_change": "accept the correction to {s}", "keep_original": "keep the original of {s}",
              "approve_anyway": "accept the writer's version of {s}",
              "retry": "send {s} back to the writer for two more fixes"}
@@ -122,6 +145,9 @@ AUTHOR_ONLY_WORDS = {
     "POV_TENSE": "it is about point of view or tense",
     "CONTENT_LIMIT": "it is about your content limits",
     "LOCK_LIST": "it touches your lock list",
+    "SIGN_IN": "only you can sign in to the AI's site or solve its check",
+    "SINGLE_AI": "only one AI is working, and trusting its own check is your call",
+    "NOTHING_LEFT": "the AIs already tried again for this step as often as they may",
 }
 _TOPIC = {"POV_TENSE": re.compile(r"\b(point of view|pov|tense|first[- ]person|third[- ]person|second[- ]person|"
                                   r"past tense|present tense|narrat(or|ion) (switch|change))\b", re.I),
@@ -196,21 +222,32 @@ def settings(store) -> dict:
         out.update({k: cur[k] for k in DEFAULTS if k in cur})
     out["enabled"] = out.get("enabled") is True
     out["checkpoints"] = out.get("checkpoints") is not False
+    out["errors"] = out.get("errors") is True
+    if out.get("errors_when") not in ERRORS_WHEN:
+        out["errors_when"] = DEFAULTS["errors_when"]
+    cv = out.get("cc_voters")
+    if isinstance(cv, bool) or not isinstance(cv, int) or not CC_VOTERS_RANGE[0] <= cv <= CC_VOTERS_RANGE[1]:
+        out["cc_voters"] = DEFAULTS["cc_voters"]
     if out.get("wait_min") not in WAITS:
         out["wait_min"] = DEFAULTS["wait_min"]
     try:
         out["max_per_run"] = min(MAX_PER_RUN_RANGE[1], max(MAX_PER_RUN_RANGE[0], int(out["max_per_run"])))
     except (TypeError, ValueError):
         out["max_per_run"] = DEFAULTS["max_per_run"]
+    out["max_set"] = isinstance(cur, dict) and cur.get("max_set") is True
+    if out["errors"] and not out["max_set"]:
+        out["max_per_run"] = max(out["max_per_run"], ERRORS_MAX_PER_RUN)  # 🗳 more stops can be voted on: a higher cap
     return out
 
 
 def save_settings(store, body) -> dict:
-    """``enabled``, ``wait_min``, ``max_per_run``, ``checkpoints``. Other keys (e.g. the old local-model fields) are
-    ignored."""
+    """``enabled``, ``wait_min``, ``max_per_run``, ``checkpoints``, and 🗳 ``errors``, ``errors_when`` (now | wait),
+    ``cc_voters`` (0–3). Other keys (e.g. the old local-model fields) are ignored."""
     body = body if isinstance(body, dict) else {}
     cur = settings(store)
-    for k in ("enabled", "checkpoints"):
+    if not cur["max_set"]:
+        cur["max_per_run"] = settings_raw_max(store)
+    for k in ("enabled", "checkpoints", "errors"):
         if k in body:
             if not isinstance(body[k], bool):
                 raise AkoweError("INVALID_INPUT", f"/{k}", f"{k} must be true or false", status="REJECTED")
@@ -224,7 +261,17 @@ def save_settings(store, body) -> dict:
         if isinstance(v, bool) or not isinstance(v, int) or not MAX_PER_RUN_RANGE[0] <= v <= MAX_PER_RUN_RANGE[1]:
             raise AkoweError("INVALID_INPUT", "/max_per_run", "at most 1 to 20 stand-in decisions per run",
                              status="REJECTED")
-        cur["max_per_run"] = v
+        cur["max_per_run"], cur["max_set"] = v, True
+    if "errors_when" in body:
+        if body["errors_when"] not in ERRORS_WHEN:
+            raise AkoweError("INVALID_INPUT", "/errors_when", "when: now (right away) or wait (after the wait time)",
+                             status="REJECTED")
+        cur["errors_when"] = body["errors_when"]
+    if "cc_voters" in body:
+        v = body["cc_voters"]
+        if isinstance(v, bool) or not isinstance(v, int) or not CC_VOTERS_RANGE[0] <= v <= CC_VOTERS_RANGE[1]:
+            raise AkoweError("INVALID_INPUT", "/cc_voters", "0 to 3 Claude Code helper voters", status="REJECTED")
+        cur["cc_voters"] = v
     store.set_setting(SETTING, cur)
     return public(store)
 
@@ -240,9 +287,32 @@ ABOUT = ("Off unless you switch it on. When a book run waits for your answer on 
          "and your lock list are always left for you. Every decision says who voted and why, and can be undone.")
 
 
+ERRORS_ABOUT = ("Off unless you switch it on. When a book run stops because something went wrong (an AI timed out "
+                "or failed, Akọwe's checks refused a draft, a reviewer's OK did not count …) and the stop asks you to "
+                "choose, the working AIs vote instead: try again, let another AI do it, skip an optional step, or "
+                "wait for you. They decide only if they ALL agree; otherwise it waits for you. Right away, or after "
+                "the usual wait time. Claude Code helpers can vote too, as extra voters with their own reviewer "
+                "persona: because every voter must agree, an extra voter can only block a decision, never force "
+                "one. Plot, ending, main character, point of view or tense, approved facts, content limits, your "
+                "lock list, signing in to an AI's site and \u201conly one AI checked it\u201d are always left for "
+                "you. Every decision says who voted and why, and can be undone.")
+
+
+def settings_raw_max(store) -> int:
+    """The per-run cap the author set (or the default), without the higher cap that 🗳 errors-on brings."""
+    try:
+        cur = store.get_setting(SETTING)
+        v = int((cur or {}).get("max_per_run", DEFAULTS["max_per_run"]))
+        return min(MAX_PER_RUN_RANGE[1], max(MAX_PER_RUN_RANGE[0], v))
+    except Exception:  # noqa: BLE001
+        return DEFAULTS["max_per_run"]
+
+
 def public(store) -> dict:
     st = settings(store)
-    return dict(st, waits=list(WAITS), min_confidence=MIN_CONFIDENCE, min_voters=MIN_VOTERS, about=ABOUT)
+    return dict(st, waits=list(WAITS), min_confidence=MIN_CONFIDENCE, min_voters=MIN_VOTERS, about=ABOUT,
+                errors_about=ERRORS_ABOUT, errors_whens=list(ERRORS_WHEN), cc_voters_range=list(CC_VOTERS_RANGE),
+                errors_max_per_run=ERRORS_MAX_PER_RUN)
 
 
 # ====================================================================== who may decide what (no AI)
@@ -326,6 +396,14 @@ def author_only(app, run: dict, prob: dict) -> str | None:
             return "POV_TENSE"
         if promise.get("content_limits"):
             return "CONTENT_LIMIT"
+    return topic_guard(app, run, prob)
+
+
+def topic_guard(app, run: dict, prob: dict) -> str | None:
+    """The author-only topics of a stop about a record (also for 🗳 stand_in_errors.py): the plot or outline, the
+    ending, the main character, point of view or tense, content limits, the lock list. None: the AIs may vote."""
+    dec = prob.get("decision") if isinstance(prob.get("decision"), dict) else {}
+    code = prob.get("code")
     mod = prob.get("module_id") or ""
     if mod in PLOT_MODULES:
         return "PLOT"
@@ -409,20 +487,53 @@ def voters(app, run: dict, prob: dict) -> list[dict]:
             out.append({"who": "ai", "family": f, "slot": s["slot_id"], "name": voter_name(f)})
     except Exception:  # noqa: BLE001
         log.debug("could not list the AIs for the stand-in vote", exc_info=True)
-    if any(v["family"] == "claude" for v in out):
-        return out  # Claude's pane / API votes: Claude Code does not (one vote per AI)
-    if checker_order.is_off(pol, "claude") or checker_order.is_off(pol, "claude_code"):
+    if checker_order.is_off(pol, "claude_code"):
         return out
-    try:
-        ok = claude_code.available(app.store)
-        if ok is None and claude_code.enabled(app.store) and claude_code.cached_status() is None:
-            found = claude_code.detect(app.store)  # the tick runs on its own thread: it may wait for the check
-            ok = found if found.get("state") == "ready" else None
-        if ok:
-            out.append({"who": "claude_code", "family": "claude_code", "name": voter_name("claude_code")})
-    except Exception:  # noqa: BLE001
-        log.debug("could not check Claude Code for the stand-in vote", exc_info=True)
+    cc_ready = None
+
+    def ready() -> bool:
+        nonlocal cc_ready
+        if cc_ready is None:
+            try:
+                ok = claude_code.available(app.store)
+                if ok is None and claude_code.enabled(app.store) and claude_code.cached_status() is None:
+                    found = claude_code.detect(app.store)  # the tick runs on its own thread: it may wait for it
+                    ok = found if found.get("state") == "ready" else None
+                cc_ready = bool(ok)
+            except Exception:  # noqa: BLE001
+                log.debug("could not check Claude Code for the stand-in vote", exc_info=True)
+                cc_ready = False
+        return cc_ready
+    # Claude's pane / API votes: Claude Code does not vote for Claude too (one vote per AI)
+    if not any(v["family"] == "claude" for v in out) and not checker_order.is_off(pol, "claude") and ready():
+        out.append({"who": "claude_code", "family": "claude_code", "name": voter_name("claude_code")})
+    stg = settings(app.store)
+    if stg["errors"] and stg["cc_voters"] and ready():
+        # 🗳 the extra Claude Code helper voters: asked after the AIs; every voter must agree, so they can only block
+        for i in range(1, stg["cc_voters"] + 1):
+            out.append({"who": "claude_code", "family": "claude_code", "name": f"Claude Code helper #{i}",
+                        "persona": i, "extra": True})
     return out
+
+
+def main_voters(vs: list[dict]) -> list[dict]:
+    """The AIs that count for "at least two must be able to vote" (never the extra 🤖 helper voters)."""
+    return [v for v in vs if not v.get("extra")]
+
+
+def too_few(vs: list[dict]) -> str | None:
+    """NO_VOTERS / ONE_AI when fewer than ``MIN_VOTERS`` AIs (not counting extra helper voters) can be asked."""
+    n = len(main_voters(vs))
+    return None if n >= MIN_VOTERS else ("NO_VOTERS" if n < 1 else "ONE_AI")
+
+
+def who_words(votes: list[dict]) -> str:
+    """'ChatGPT, Claude, Gemini and 1 Claude Code helper' (the extra helper voters counted, not named one by one)."""
+    names = [v.get("name") or voter_name(v.get("family")) for v in votes if not v.get("extra")]
+    extra = sum(1 for v in votes if v.get("extra"))
+    if extra:
+        names.append(f"{extra} Claude Code helper{'s' if extra > 1 else ''}")
+    return _and(names)
 
 
 def context_for(app, run: dict, prob: dict, checks: dict) -> dict:
@@ -458,17 +569,30 @@ def context_for(app, run: dict, prob: dict, checks: dict) -> dict:
 
 
 def ballot(base: dict, options: tuple) -> tuple[dict, list[str]]:
-    """One voter's question: the options as A and B in a random order. Returns (context, order) — order[0] is A."""
+    """One voter's question: the options as A and B (A, B, C … for a 🗳 stop with more options) in a random order.
+    Returns (context, order) — order[0] is A."""
     order = list(options)
-    if _rand.random() < 0.5:
-        order.reverse()
-    ctx = dict(base, options=[{"letter": "AB"[i], "does": OPTION_WORDS[o]} for i, o in enumerate(order)])
+    if len(order) == 2:
+        if _rand.random() < 0.5:
+            order.reverse()
+    else:
+        order.sort(key=lambda _o: _rand.random())
+    ctx = dict(base, options=[{"letter": LETTERS[i], "does": OPTION_WORDS[o]} for i, o in enumerate(order)])
     return ctx, order
 
 
-def check_answer(raw) -> dict:
-    """A voter's answer, checked: {choice: A | B | unsure, confident, why}. Raises ValueError when it is not the JSON
-    asked for (that vote is missing: the run keeps waiting)."""
+def schema_for(n: int) -> dict:
+    """The answer schema for a ballot of ``n`` options (the usual ``SCHEMA`` for two)."""
+    if n == 2:
+        return SCHEMA
+    s = copy.deepcopy(SCHEMA)
+    s["properties"]["choice"]["enum"] = list(LETTERS[:n]) + ["unsure"]
+    return s
+
+
+def check_answer(raw, letters: str = "AB") -> dict:
+    """A voter's answer, checked: {choice: A | B | unsure, confident, why} (``letters``: the letters of the ballot).
+    Raises ValueError when it is not the JSON asked for (that vote is missing: the run keeps waiting)."""
     if isinstance(raw, str):
         t = raw.strip()
         m = re.search(r"\{.*\}", t, re.S)
@@ -483,7 +607,7 @@ def check_answer(raw) -> dict:
     choice = raw.get("choice")
     conf = raw.get("confident")
     why = raw.get("why")
-    if isinstance(choice, str) and choice.strip().upper() in ("A", "B"):
+    if isinstance(choice, str) and len(choice.strip()) == 1 and choice.strip().upper() in letters:
         choice = choice.strip().upper()
     elif isinstance(choice, str) and choice.strip().lower() == "unsure":
         choice = "unsure"
@@ -498,7 +622,9 @@ def check_answer(raw) -> dict:
 
 def pick_of(ans: dict, order: list[str]) -> str | None:
     """The option a voter chose, mapped back from its own A / B order (None: unsure)."""
-    return {"A": order[0], "B": order[1]}.get(ans.get("choice"))
+    c = ans.get("choice")
+    i = LETTERS.find(c) if isinstance(c, str) and len(c) == 1 else -1
+    return order[i] if 0 <= i < len(order) else None
 
 
 def tally(votes: list[dict], available: int) -> tuple[str | None, str]:
@@ -548,7 +674,8 @@ def wait_words(code: str, votes: list[dict], available: list[dict]) -> str:
     if code == "NO_VOTERS":
         return "No AI could be asked, so it waits for you"
     if code == "ONE_AI":
-        return (f"Only {available[0]['name']} could be asked — at least two AIs must agree, so it waits for you")
+        return (f"Only {main_voters(available)[0]['name']} could be asked — at least two AIs must agree, so it waits "
+                "for you")
     if code == "SPLIT":
         return f"The AIs didn't all agree ({said}) — waiting for you"
     if code == "UNSURE":
@@ -558,27 +685,44 @@ def wait_words(code: str, votes: list[dict], available: list[dict]) -> str:
 
 
 # ====================================================================== asking one AI
-def _ask_claude_code(app, ctx: dict) -> dict:
+def _ask_claude_code(app, ctx: dict, task: str = TASK, schema: dict = SCHEMA) -> dict:
     from . import claude_code, claude_code_jobs  # noqa: PLC0415
-    res = claude_code.run_job(app.store, kind="stand_in", prompt=claude_code_jobs.prompt("stand_in", TASK, SCHEMA, ctx),
-                              schema=SCHEMA, tools="none", timeout_s=CC_TIMEOUT_S, retry=False)
+    res = claude_code.run_job(app.store, kind="stand_in", prompt=claude_code_jobs.prompt("stand_in", task, schema, ctx),
+                              schema=schema, tools="none", timeout_s=CC_TIMEOUT_S, retry=False)
     return res["data"]
 
 
-def _ask_ai(app, run: dict, slot: str, ctx: dict) -> dict:
+def _ask_ai(app, run: dict, slot: str, ctx: dict, task: str = TASK, schema: dict = SCHEMA) -> dict:
     from .assist import Job  # noqa: PLC0415
     job = Job("stand_in", run["principal"], run["project_id"], run["branch_id"], None, slot)
     job.started, job.status, job.retry_busy, job.cross_pin = time.time(), "running", False, True
-    return app.assist._call_ai(job, op_for_roles="C02", task=TASK, schema=SCHEMA,  # noqa: SLF001
+    return app.assist._call_ai(job, op_for_roles="C02", task=task, schema=schema,  # noqa: SLF001
                                context=dict(ctx, akowe_task="stand_in"), protected=[])
 
 
-def ask(app, run: dict, voter: dict, ctx: dict, order: list[str]) -> dict:
+# 🤖 the extra Claude Code helper voters (🗳 errors on): each an independent run with its own reviewer persona
+PERSONAS = (
+    "a careful continuity editor: you protect the book's facts and the novelist's plan",
+    "a practical production editor: you want the book finished, but never at the cost of its quality",
+    "a cautious publisher: when in any doubt you would rather wait for the novelist",
+)
+
+
+def ask(app, run: dict, voter: dict, ctx: dict, order: list[str], task: str = TASK) -> dict:
     """One vote: {family, name, who, order, state, pick, confident, why}. Never raises."""
     v = {"family": voter["family"], "name": voter["name"], "who": voter["who"], "order": list(order),
          "state": "voted", "pick": None, "confident": 0.0, "why": ""}
+    if voter.get("extra"):
+        v["extra"] = True
+    schema = schema_for(len(order))
     try:
-        raw = _ask_claude_code(app, ctx) if voter["who"] == "claude_code" else _ask_ai(app, run, voter["slot"], ctx)
+        if voter["who"] == "claude_code":
+            if voter.get("persona"):
+                n = int(voter["persona"])
+                ctx = dict(ctx, judge_persona={"number": n, "you_are": PERSONAS[(n - 1) % len(PERSONAS)]})
+            raw = _ask_claude_code(app, ctx, task, schema)
+        else:
+            raw = _ask_ai(app, run, voter["slot"], ctx, task, schema)
     except AkoweError as exc:
         bad = getattr(exc, "detail", None) in ("BAD_JSON", "SCHEMA") or exc.code == "INTERNAL_ERROR"
         v["state"] = "unclear" if bad else "no_answer"
@@ -589,7 +733,7 @@ def ask(app, run: dict, voter: dict, ctx: dict, order: list[str]) -> dict:
         log.info("stand-in %s: %s no_answer (%s)", run.get("id"), voter["family"], type(exc).__name__)
         return v
     try:
-        ans = check_answer(raw)
+        ans = check_answer(raw, LETTERS[:len(order)])
     except ValueError as exc:
         v["state"] = "unclear"
         log.info("stand-in %s: %s unclear (%s)", run.get("id"), voter["family"], exc)
@@ -617,15 +761,31 @@ def _state(run: dict) -> dict:
     return s
 
 
+def review_kind(prob: dict) -> bool:
+    """A stop the stand-in itself votes on (a review decision or a 🧭 checkpoint); the others are 🗳 error stops."""
+    return prob.get("code") in OPTIONS or prob.get("code") == CHECKPOINT
+
+
 def waiting_on(run: dict) -> bool:
+    """The run waits for the author on a stop with a code (a review decision, a checkpoint or a 🗳 error stop)."""
     prob = run.get("problem") or {}
-    return run.get("status") == "paused" and run.get("pause_reason") == "problem" and \
-        (prob.get("code") in OPTIONS or prob.get("code") == CHECKPOINT)
+    return run.get("status") == "paused" and run.get("pause_reason") == "problem" and bool(prob.get("code"))
 
 
 def _off_for(stg: dict, prob: dict) -> bool:
-    """The stand-in is off, or the author left the checkpoint questions to themselves (Settings › AI)."""
-    return not stg["enabled"] or (prob.get("code") == CHECKPOINT and not stg.get("checkpoints"))
+    """Nothing votes on this stop: the stand-in is off (and 🗳 "when something goes wrong" too), the author left the
+    checkpoint questions to themselves, or an error stop while 🗳 is off (Settings › AI)."""
+    if review_kind(prob):
+        return not (stg["enabled"] or stg["errors"]) or (prob.get("code") == CHECKPOINT and not stg.get("checkpoints"))
+    return not stg["errors"]
+
+
+def wait_of(stg: dict, prob: dict) -> int:
+    """Minutes to wait for the author first: 0 for a 🗳 stop voted on "right away" (an error stop, or any stop when
+    only 🗳 is on), else the usual wait time."""
+    if stg["errors"] and stg["errors_when"] == "now" and (not review_kind(prob) or not stg["enabled"]):
+        return 0
+    return stg["wait_min"]
 
 
 def tick(app, now: float | None = None) -> list[dict]:
@@ -635,7 +795,7 @@ def tick(app, now: float | None = None) -> list[dict]:
     out = []
     try:
         st = settings(app.store)
-        if not st["enabled"]:
+        if not (st["enabled"] or st["errors"]):
             return out
         ab = app.autobook
         for j in app.jobstore.list(kind=ab.KIND, limit=40):
@@ -651,8 +811,9 @@ def tick(app, now: float | None = None) -> list[dict]:
 
 
 def due_at(app, run: dict) -> float | None:
-    at = _epoch((run.get("problem") or {}).get("at"))
-    return at + 60 * settings(app.store)["wait_min"] if at else None
+    prob = run.get("problem") or {}
+    at = _epoch(prob.get("at"))
+    return at + 60 * wait_of(settings(app.store), prob) if at else None
 
 
 def consider(app, run_id: str, now: float | None = None) -> dict | None:
@@ -681,17 +842,21 @@ def consider(app, run_id: str, now: float | None = None) -> dict | None:
         if int(sst["count"]) >= stg["max_per_run"]:
             return _tried(ab, run, key, "CAP", "The AIs already decided "
                           f"{stg['max_per_run']} time(s) for you in this run, so it waits for you")
+        stg = dict(stg, wait_min=wait_of(stg, prob))
         if prob.get("code") == CHECKPOINT:  # 🧭 one question per waiting problem (stand_in_checkpoint.py)
             from . import stand_in_checkpoint  # noqa: PLC0415
             return stand_in_checkpoint.decide(app, run, prob, key, stg, now)
+        if not review_kind(prob):  # 🗳 something went wrong (stand_in_errors.py)
+            from . import stand_in_errors  # noqa: PLC0415
+            return stand_in_errors.decide(app, run, prob, key, stg, now)
         why = author_only(app, run, prob)
         if why:
             return _tried(ab, run, key, "AUTHOR_ONLY:" + why, f"Only you can decide this one: "
                           f"{AUTHOR_ONLY_WORDS.get(why, why)}")
         vs = voters(app, run, prob)
-        if len(vs) < MIN_VOTERS:
-            _pick, code = tally([], len(vs))
-            return _tried(ab, run, key, code, wait_words(code, [], vs))
+        few = too_few(vs)
+        if few:
+            return _tried(ab, run, key, few, wait_words(few, [], vs))
         checks = no_ai_checks(app, run, prob)
         base = context_for(app, run, prob, checks)
         votes: list[dict] = []
@@ -716,8 +881,8 @@ def consider(app, run_id: str, now: float | None = None) -> dict | None:
 
 
 def _shown_votes(votes: list[dict] | None) -> list[dict]:
-    return [{k: v.get(k) for k in ("family", "name", "who", "order", "state", "pick", "confident", "why")}
-            for v in votes or []]
+    return [{k: v.get(k) for k in ("family", "name", "who", "order", "state", "pick", "confident", "why", "extra")
+             if k != "extra" or v.get("extra")} for v in votes or []]
 
 
 def _tried(ab, run: dict, key: str, code: str, words: str, votes: list[dict] | None = None) -> dict:
@@ -735,6 +900,9 @@ def _tried(ab, run: dict, key: str, code: str, words: str, votes: list[dict] | N
     return {"code": code}
 
 
+SAME_AS = {"retry": {"try_again", "review_again"}}
+
+
 def settle_votes(store, run: dict, prob: dict | None, action: str | None, chapters: dict | None = None) -> list[tuple]:
     """The author answered a decision the AIs did not all agree on: each AI's vote counts in its track record —
     the same choice as the author's → confirmed, another → overruled. ``action`` None (e.g. the author edited it
@@ -749,7 +917,8 @@ def settle_votes(store, run: dict, prob: dict | None, action: str | None, chapte
         pend = ((run.get("stand_in") or {}).get("votes") or {}).pop(_key(prob), None)
         if not pend or action not in PICK_SHORT:
             return []
-        rows = [(v["f"], "stand_in", "confirmed" if v.get("p") == action else "overruled") for v in pend
+        same = {action} | SAME_AS.get(action, set())  # 🗳 the author's 🔁 Try again = "try again" / "review again"
+        rows = [(v["f"], "stand_in", "confirmed" if v.get("p") in same else "overruled") for v in pend
                 if v.get("f") and v.get("p")]
         checker_record.note_many(store, rows)
         return rows
@@ -758,11 +927,15 @@ def settle_votes(store, run: dict, prob: dict | None, action: str | None, chapte
         return []
 
 
+def because(waited_min: int) -> str:
+    return (f"because you didn't answer for {waited_min} minutes" if waited_min else
+            "right away, as your settings ask (when something goes wrong, let the AIs vote)")
+
+
 def decided_line(votes: list[dict], pick: str, subject: str, now: float, waited_min: int) -> str:
-    names = [v["name"] for v in votes]
-    agreed = "both agreed" if len(names) == 2 else "all agreed"
-    line = (f"{_and(names)} {agreed} to {AGREED_TO[pick].format(s=subject)} at {_clock(now)} because you didn't "
-            f"answer for {waited_min} minutes.")
+    agreed = "both agreed" if len(votes) == 2 else "all agreed"
+    line = (f"{who_words(votes)} {agreed} to {AGREED_TO[pick].format(s=subject)} at {_clock(now)} "
+            f"{because(waited_min)}.")
     why = next((v.get("why") for v in votes if v.get("why")), "")
     return line + (f" Why: {why}" if why else "")
 
@@ -802,7 +975,7 @@ def apply(app, run_id: str, prob: dict, pick: str, votes: list[dict], *, now: fl
     line = decided_line(votes, pick, subject, now, waited_min)
     fams = [v["family"] for v in votes]
     d = {"id": did, "at": _iso(now), "run_id": run_id, "who": "vote", "family": "+".join(fams),
-         "name": _and([v["name"] for v in votes]), "choice": pick, "code": prob.get("code"),
+         "name": who_words(votes), "choice": pick, "code": prob.get("code"),
          "confidence": min(float(v["confident"]) for v in votes), "reason": votes[0].get("why") or "",
          "votes": _shown_votes(votes), "subject": subject, "record_id": rid, "chapter_id": prob.get("chapter_id"),
          "module_id": prob.get("module_id"), "prev_version": prob.get("prev_version"), "fix_version": fix_version,
@@ -882,7 +1055,7 @@ def view(app, run: dict) -> dict | None:
             prob = run.get("problem") or {}
             tried = (sst.get("tried") or {}).get(_key(prob))
             if _off_for(st, prob):
-                pending = {"state": "off", "words": ""}
+                pending = {"state": "off", "words": ""} if review_kind(prob) else None
             elif tried:
                 pending = {"state": "waits", "words": tried.get("words") or "It waits for you.",
                            "votes": tried.get("votes") or []}
@@ -891,8 +1064,11 @@ def view(app, run: dict) -> dict | None:
                                                     "this run, so it waits for you."}
             else:
                 due = due_at(app, run)
+                now_mode = wait_of(st, prob) == 0
                 pending = {"state": "waiting", "due_at": _iso(due),
-                           "words": (f"If you don't answer by {_clock(due)}, the AIs vote: if they all agree, a "
+                           "words": ("🗳 The AIs vote on this right away: if they all agree, they decide for you (you "
+                                     "can undo it)." if now_mode else
+                                     f"If you don't answer by {_clock(due)}, the AIs vote: if they all agree, a "
                                      "stand-in decides for you (you can undo it)." if due else "")}
         if not decisions and pending is None:
             return None
@@ -941,6 +1117,10 @@ def undo(app, principal: str, run_id: str, body) -> dict:
         from . import stand_in_checkpoint  # noqa: PLC0415
         res = stand_in_checkpoint.undo(app, run, d)
         return _undone(app, run, run_id, d, res["what"], res["version"])
+    if d.get("errors"):  # 🗳 a decision on something that went wrong (stand_in_errors.py)
+        from . import stand_in_errors  # noqa: PLC0415
+        res = stand_in_errors.undo(app, run, d)
+        return _undone(app, run, run_id, d, res["what"], None, message=res.get("message"))
     choice = d.get("choice")
     if choice == "retry" and ab.alive(run_id):
         raise AkoweError("VERSION_CONFLICT", "/run", "the run is still working on it; pause it first (nothing was "

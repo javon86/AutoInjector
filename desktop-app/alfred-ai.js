@@ -156,7 +156,7 @@ function toOllamaMessages(messages) {
     return out;
   });
 }
-async function ollamaChat({ endpoint, model, messages, tools, timeoutMs, signal, temperature }) {
+async function ollamaChat({ endpoint, model, messages, tools, timeoutMs, signal, temperature, keepAlive }) {
   const base = ollamaBase(endpoint);
   const controller = new AbortController();
   const onAbort = () => controller.abort();
@@ -164,7 +164,7 @@ async function ollamaChat({ endpoint, model, messages, tools, timeoutMs, signal,
   let timedOut = false;
   const timer = setTimeout(() => { timedOut = true; controller.abort(); }, Math.max(1000, timeoutMs || 300000));
   try {
-    const body = { model, messages: toOllamaMessages(messages), stream: false, keep_alive: '30m', options: { num_ctx: stickyContext(base, model, contextFor(messages, tools)), temperature: temperature == null ? 0.2 : temperature } };
+    const body = { model, messages: toOllamaMessages(messages), stream: false, keep_alive: keepAlive || '30m', options: { num_ctx: stickyContext(base, model, contextFor(messages, tools)), temperature: temperature == null ? 0.2 : temperature } };
     if (tools && tools.length) body.tools = tools;
     let res;
     try { res = await fetch(`${base}/api/chat`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: controller.signal }); }
@@ -198,6 +198,46 @@ async function isOllama(endpoint) {
   } catch (_) { yes = false; }
   nativeBases.set(base, yes);
   return yes;
+}
+/**
+ * 👥 Alfred's team on one graphics card: which models Ollama has in memory now (GET /api/ps) →
+ * { ok, models:[{ name, size, sizeVram, expiresAt }] }. Never throws.
+ */
+async function ollamaPs(endpoint, timeoutMs) {
+  const base = ollamaBase(endpoint || DEFAULT_LOCAL_BASE);
+  const c = new AbortController(); const t = setTimeout(() => c.abort(), Math.max(500, timeoutMs || 2500));
+  try {
+    const r = await fetch(`${base}/api/ps`, { signal: c.signal });
+    if (!r.ok) return { ok: false, models: [] };
+    const j = await r.json().catch(() => null);
+    const models = (j && Array.isArray(j.models) ? j.models : []).filter((m) => m && (m.name || m.model))
+      .map((m) => ({ name: String(m.name || m.model), size: Number(m.size) || 0, sizeVram: m.size_vram != null ? Number(m.size_vram) || 0 : null, expiresAt: m.expires_at || null }));
+    return { ok: true, models };
+  } catch (_) { return { ok: false, models: [] }; } finally { clearTimeout(t); }
+}
+/** The downloaded models with their sizes (GET /api/tags) → { ok, models:[{ name, sizeBytes, family, params, quant }] }. */
+async function ollamaTags(endpoint, timeoutMs) {
+  const base = ollamaBase(endpoint || DEFAULT_LOCAL_BASE);
+  const c = new AbortController(); const t = setTimeout(() => c.abort(), Math.max(500, timeoutMs || 3000));
+  try {
+    const r = await fetch(`${base}/api/tags`, { signal: c.signal });
+    if (!r.ok) return { ok: false, models: [], reason: `HTTP ${r.status}` };
+    const j = await r.json().catch(() => null);
+    const models = (j && Array.isArray(j.models) ? j.models : []).filter((m) => m && (m.name || m.model)).map((m) => {
+      const d = m.details || {};
+      return { name: String(m.name || m.model), sizeBytes: Number(m.size) || null, family: d.family || null, params: d.parameter_size || null, quant: d.quantization_level || null };
+    });
+    return { ok: true, models };
+  } catch (e) { return { ok: false, models: [], reason: e && e.name === 'AbortError' ? 'timeout' : 'unreachable' }; } finally { clearTimeout(t); }
+}
+/** Take a model out of memory now (Ollama: keep_alive 0 on an empty generate). → { ok } */
+async function ollamaUnload(endpoint, model, timeoutMs) {
+  const base = ollamaBase(endpoint || DEFAULT_LOCAL_BASE);
+  const c = new AbortController(); const t = setTimeout(() => c.abort(), Math.max(500, timeoutMs || 8000));
+  try {
+    const r = await fetch(`${base}/api/generate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model, keep_alive: 0 }), signal: c.signal });
+    return { ok: !!r.ok };
+  } catch (_) { return { ok: false }; } finally { clearTimeout(t); }
 }
 /** qwen3's documented switch to answer without a long thinking pass (faster, and nothing to strip). */
 function withNoThink(messages, model) {
@@ -264,14 +304,14 @@ async function next(cfg, messages, tools, deps = {}, opts = {}) {
     const ntKey = `${ollamaBase(cfg.endpoint)}|${String(cfg.model || '').toLowerCase()}`;
     const textOnly = () => {
       const m2 = messages.slice(); m2.splice(1, 0, { role: 'system', content: `${TEXT_PROTOCOL}\n\nTools:\n${toolCatalogText(tools)}` });
-      return ollamaChat({ endpoint: cfg.endpoint, model: cfg.model, messages: m2.map((m) => (m.role === 'tool' ? { role: 'user', content: `Result of ${m.name || 'the tool'}: ${m.content}` } : m)), tools: null, timeoutMs: cfg.timeoutMs, signal: opts.signal });
+      return ollamaChat({ endpoint: cfg.endpoint, model: cfg.model, messages: m2.map((m) => (m.role === 'tool' ? { role: 'user', content: `Result of ${m.name || 'the tool'}: ${m.content}` } : m)), tools: null, timeoutMs: cfg.timeoutMs, signal: opts.signal, keepAlive: cfg.keepAlive, temperature: cfg.temperature });
     };
-    let n = noToolsModels.has(ntKey) && tools && tools.length ? await textOnly() : await ollamaChat({ endpoint: cfg.endpoint, model: cfg.model, messages, tools, timeoutMs: cfg.timeoutMs, signal: opts.signal });
+    let n = noToolsModels.has(ntKey) && tools && tools.length ? await textOnly() : await ollamaChat({ endpoint: cfg.endpoint, model: cfg.model, messages, tools, timeoutMs: cfg.timeoutMs, signal: opts.signal, keepAlive: cfg.keepAlive, temperature: cfg.temperature });
     if (!n.ok && n.noTools) { noToolsModels.add(ntKey); n = await textOnly(); }
     if (n.ok || !n.notOllama) return n;
     nativeBases.set(ollamaBase(cfg.endpoint), false); // not Ollama after all: use /v1 from now on
   }
-  const base = { endpoint: cfg.endpoint, apiKey: cfg.apiKey, model: cfg.model, timeoutMs: cfg.timeoutMs, signal: opts.signal };
+  const base = { endpoint: cfg.endpoint, apiKey: cfg.apiKey, model: cfg.model, timeoutMs: cfg.timeoutMs, signal: opts.signal, temperature: cfg.temperature };
   const ntKey = `${baseUrl(cfg.endpoint)}|${String(cfg.model || '').toLowerCase()}`;
   let r = noToolsModels.has(ntKey) && tools && tools.length ? { ok: false, noTools: true } : await chatWithTools(Object.assign({ messages, tools }, base));
   if (!r.ok && r.noTools) {
@@ -284,4 +324,4 @@ async function next(cfg, messages, tools, deps = {}, opts = {}) {
   return r;
 }
 
-module.exports = { DEFAULT_LOCAL_BASE, chatUrl, baseUrl, chatWithTools, probe, next, normalizeMessage, panePrompt, textToolCall, TEXT_PROTOCOL, stripThinking, contextFor, toOllamaMessages, ollamaChat, isOllama, _resetOllamaCache: () => { nativeBases.clear(); ctxSticky.clear(); noToolsModels.clear(); }, stickyContext };
+module.exports = { DEFAULT_LOCAL_BASE, chatUrl, baseUrl, chatWithTools, probe, next, normalizeMessage, panePrompt, textToolCall, TEXT_PROTOCOL, stripThinking, contextFor, toOllamaMessages, ollamaChat, isOllama, ollamaPs, ollamaUnload, ollamaTags, ollamaBase, _resetOllamaCache: () => { nativeBases.clear(); ctxSticky.clear(); noToolsModels.clear(); }, stickyContext };

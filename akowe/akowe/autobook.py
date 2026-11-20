@@ -590,9 +590,12 @@ class _TimedProviders(PinnedProviders):
         super().__init__(base, slot_id)
         self._sink = sink
         self.prefer_writer = None  # 🏆 writer_record.py: the AI with the best chapters writes this chapter first
+        self.avoid: set = set()    # 🗳 stand_in_errors.py: "let another AI do it" — not used while another works
 
     def eligible(self, project_id, capability, needed_tokens, operation=None):
         out = super().eligible(project_id, capability, needed_tokens, operation)
+        if self.avoid and any(s["slot_id"] not in self.avoid for s in out):
+            out = [s for s in out if s["slot_id"] not in self.avoid]
         pref = self.prefer_writer
         if pref and not self.pinned and operation == "C02" and len(out) > 1:
             # only a re-order of the AIs that may write anyway: a busy / limited / broken AI is never added
@@ -920,8 +923,8 @@ class AutoBookService(_Runner):
                                      status="REJECTED")
             self._refuse_while_checking(run.get("project_id"))
             prob = run.get("problem") or {}
-            if run.get("status") == "paused" and prob.get("code") == "REVIEW_NOT_PASSED":
-                from . import stand_in  # noqa: PLC0415 - 🔁 Try again on a vote the AIs did not all agree on
+            if run.get("status") == "paused" and prob.get("code") and prob.get("code") != "CHECKPOINT_WAITING":
+                from . import stand_in  # noqa: PLC0415 - 🔁 Try again on a vote the AIs did not all agree on (also 🗳)
                 stand_in.settle_votes(self.store, run, prob, "retry")
             elif run.get("status") == "paused" and prob.get("code") == "CHECKPOINT_WAITING":
                 from . import stand_in  # noqa: PLC0415 - 🧭 ▶ Continue after a story-check vote that did not agree
@@ -1226,6 +1229,7 @@ class AutoBookService(_Runner):
         slot = run["settings"].get("slot_id")
         sink = lambda secs, **kw: self._timed(run, secs, **kw)  # noqa: E731 - P15 ETA / P28 time per AI
         providers = _TimedProviders(self.app.engine.providers, slot, sink)
+        providers.avoid = set(run["settings"].get("avoid_slots") or [])  # 🗳 an AI the stand-in moved away from
         engine = Engine(self.store, self.app.engine.contracts, providers=providers)
         assist = AssistService(engine, run["principal"], retry_busy=True)
         assist.retry_policy = self.retry_policy
@@ -1252,6 +1256,8 @@ class AutoBookService(_Runner):
     @staticmethod
     def _timed(run, secs: float, slot: str | None = None, ok: bool = True):
         costs_mod.record_call(run, secs, slot, ok)  # P28: totals (P15 ETA) plus per AI and per step
+        if slot:  # 🗳 the AI whose call failed last (stand_in_errors.py: "let another AI do it")
+            run["last_failed_slot"] = None if ok else slot
 
     def _eta(self, run, done: int, total: int) -> dict | None:
         """P15: time left, estimated from this run's measured times: the average chapter so far for the chapters
@@ -3785,6 +3791,10 @@ class AutoBookService(_Runner):
             with ai_activity.doing(None, chapter=idx + 1, chapters=len(chapters), chapter_id=cid):
                 bp = self.bp(run)
                 _ctx, latest, appr = bp.chapter_prose(outline, cid)
+                if not appr:  # 📖 a chapter the author wrote (brought in): put back word for word, never written
+                    from . import book_import  # noqa: PLC0415
+                    appr = book_import.keep_author_chapter(self.app, run["principal"], run["project_id"],
+                                                           run["branch_id"], cid)
                 if appr:
                     from . import continuity  # noqa: PLC0415
                     if not continuity.tracked(self.store, run["project_id"], run["branch_id"], cid, appr):
@@ -4013,6 +4023,10 @@ class AutoBookService(_Runner):
                     if not appr:
                         continue
                     head = self.bp(run).rec(appr["record_id"])
+                    if not self._ai_made(run, head):  # 📖 the author's own chapter is never rewritten
+                        self.event(run, "note", f"Chapter {number} is your own text: the ending's open promises are "
+                                   "not worked into it (listed for you instead)", code="AUTHOR_CHAPTER")
+                        continue
                     fs = ending_check.fix_findings(res, number, str((head.get("data") or {}).get("text") or ""))
                     if not fs:
                         continue

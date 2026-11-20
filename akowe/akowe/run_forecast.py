@@ -8,7 +8,9 @@ around which chapter — a limit will probably pause it:
 * **options** (``OPTION_MODEL``): how many AIs check for mistakes (all / two / one), the writers' room, beta readers,
   character pictures (Stable Diffusion: time, no AI answers), "fill the whole Book Bible", the end-of-book "sounds like
   a person" pass (PR #133: about 2 answers), the 🧑‍⚖️ stand-in's votes at the story checkpoints (at most one vote
-  per AI per checkpoint, up to its decisions per run — only when the author does not answer), ✍ chapter 1 rewritten
+  per AI per checkpoint, up to its decisions per run — only when the author does not answer), the 🗳 votes when
+  something goes wrong (stand_in_errors.py: at most one per AI per stop, the extra Claude Code helper voters with the
+  helpers), ✍ chapter 1 rewritten
   last (1 rewrite + the reviewers' re-read + 1 review) and the two first pages (2 answers), 📏 the chapter polish
   (≤ 1 rewrite per chapter, only when needed), the 🔁 final improve pass (rounds × (rewrites + the reviewers'
   re-read) + the kept chapters' reviews; 🎯 by default 1 round of 3 scene rewrites), the 🤖 Claude Code helpers and
@@ -80,10 +82,14 @@ def options_of(app, body: dict | None) -> dict:
     try:  # 🧑‍⚖️ the stand-in may vote at the story checkpoints when the author does not answer (stand_in.py)
         from . import stand_in  # noqa: PLC0415
         si = stand_in.settings(app.store)
-        si_cp = si["max_per_run"] if si["enabled"] and si["checkpoints"] else 0
+        si_cp = si["max_per_run"] if (si["enabled"] or si["errors"]) and si["checkpoints"] else 0
+        # 🗳 when something goes wrong the AIs vote (stand_in_errors.py), with the extra Claude Code helper voters
+        si_err = si["max_per_run"] if si["errors"] else 0
+        si_cc = si["cc_voters"] if si["errors"] and cc_on else 0
     except Exception:  # noqa: BLE001
-        si_cp = 0
+        si_cp = si_err = si_cc = 0
     return {"checkers": ck, "writers_room": b.get("writers_room") is True, "stand_in_checkpoints": si_cp, "beta_readers": n_beta,
+            "stand_in_errors": si_err, "stand_in_cc_voters": si_cc,
             "pictures": pics, "fill_bible": b.get("fill_bible") is True, "human_pass": b.get("human_pass") is not False,
             "improve_pass": b.get("improve_pass") is not False,
             "opening_pass": b.get("opening_pass") is not False, "first_page": b.get("first_page") is not False,
@@ -193,7 +199,15 @@ def option_calls(opts: dict, n: int, ais: int) -> dict:
     si_cp = min(int(opts.get("stand_in_checkpoints") or 0), math.ceil(n / 5) + 1) if ais >= 2 else 0
     out["stand_in"] = {"calls": si_cp * ais, "to": "all",
                        "label": "Stand-in votes at the story checkpoints (at most; only if you don't answer)"}
+    # 🗳 when something goes wrong, the AIs vote instead of stopping (stand_in_errors.py): at most one vote per AI per
+    # stop, up to the stand-in's decisions per run (counted as one stop per 10 chapters, plus two) — none when nothing
+    # goes wrong; the extra Claude Code helper voters are counted with the helpers
+    si_err = min(int(opts.get("stand_in_errors") or 0), math.ceil(n / 10) + 2) if ais >= 2 else 0
+    out["stand_in_errors"] = {"calls": si_err * ais, "to": "all",
+                              "label": "🗳 Votes when something goes wrong (at most; only when a stop needs a choice)"}
     helpers = (3 * n + 2 * math.ceil(n / 5) + (1 if opts.get("trade_card") else 0)) if opts.get("claude_code") else 0
+    if opts.get("claude_code"):
+        helpers += (si_err + si_cp) * int(opts.get("stand_in_cc_voters") or 0)  # 🗳 the extra helper voters
     out["helpers"] = {"calls": helpers, "to": "helpers", "label": "Claude Code helpers (research, fact checks, "
                       "“sounds like AI” pass)"}
     return out

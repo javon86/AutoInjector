@@ -129,6 +129,11 @@ async function main() {
       assert(ok, `on the ${t} tab the side panel stays and the page is laid out beside it`);
     }
     await controls.click('#tab-app-main');
+    // 👥 the "team ready" line on the 🤖 AutoInjector tab (alfred-team-ui.js), above the AI windows
+    const teamLine = await until(async () => { const t = await controls.evaluate(() => { const l = document.getElementById('alfred-team-line'); return l && !l.hidden ? l.textContent : null; }); return t && /Alfred's team/.test(t) ? t : null; }, 15000, 250);
+    assert(!!teamLine && /Butler ✔/.test(teamLine) && /Assistant ⚪/.test(teamLine) && /Bad boy ⚪/.test(teamLine), `the "team ready" line is on the main tab: "${teamLine}"`);
+    const above = await controls.evaluate(() => { const l = document.getElementById('alfred-team-line'); const u = document.getElementById('col-userpanel'); return !!(l && u && l.getBoundingClientRect().bottom <= u.getBoundingClientRect().top + 1); });
+    assert(above, 'it sits above the User Panel and the AI windows');
     const windowsAfter = await app.evaluate(({ BaseWindow }) => BaseWindow.getAllWindows().length);
     assert(windowsAfter === windowsBefore && !(await controls.$('#alfred-set-mode')), `no separate window (${windowsAfter} app window(s), as before) and no "separate window" choice in ⚙`);
     assert(/Alfred idle/.test(await controls.textContent('#btn-butler-status')) && (await controls.textContent('#btn-ai-toggle')) === '🎩 Alfred: On', 'the User Panel light and On/Off follow him (idle, On)');
@@ -233,7 +238,10 @@ async function main() {
     await controls.click('#btn-send-butler');
     const hi = await until(async () => { const t = await controls.$$eval('#alfred-chat .al-you', (els) => els.map((e) => e.textContent)); return t.includes('hello Alfred'); }, 10000, 200);
     assert(!!hi, '"→ 🎩 Alfred" put the message in his chat');
-    assert(!!(await until(async () => { const t = await controls.$$eval('#alfred-chat .al-alfred', (els) => els.map((e) => e.textContent)); return t[t.length - 1] === 'Good day.'; }, 20000, 200)), 'and he answered there');
+    // (👥 "🎩 Butler (fake-model)" above it says who answered: the reply's own words are in .al-rich)
+    const lastReply = async () => controls.$$eval('#alfred-chat .al-alfred', (els) => els.map((e) => { const r = e.querySelector('.al-rich'); const b = e.querySelector('.al-by'); return { text: r ? r.textContent : e.textContent, by: b ? b.textContent : '' }; }).pop());
+    assert(!!(await until(async () => { const x = await lastReply(); return x && x.text === 'Good day.'; }, 20000, 200)), 'and he answered there');
+    assert((await lastReply()).by === '🎩 Butler (fake-model)', 'above it: who answered (🎩 Butler, his model)');
 
     console.log('\n== records: activity log has codes/titles only ==');
     const logs = await controls.evaluate(() => window.api.getState().then((s) => (s.log || []).filter((e) => /^alfred-/.test(e.kind))));

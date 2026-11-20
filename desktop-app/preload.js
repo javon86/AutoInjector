@@ -194,6 +194,10 @@ contextBridge.exposeInMainWorld("api", {
     // 🎨 two engines (Stable Diffusion / ChatGPT / Auto) + reference views & sheets (= POST /image/request)
     request: (req) => ipcRenderer.invoke("sd:request", req),
     chatgptStatus: () => ipcRenderer.invoke("sd:chatgpt-status"),
+    // 💳 OpenAI's paid image service (openai-image.js): status, ⚙ settings (+ the key, sealed on the PC), ✔ Check key (free)
+    openaiStatus: () => ipcRenderer.invoke("sd:openai-status"),
+    openaiSettings: (patch) => ipcRenderer.invoke("sd:openai-settings", patch || {}),
+    openaiCheck: () => ipcRenderer.invoke("sd:openai-check"),
     chatgptCancel: () => ipcRenderer.invoke("sd:chatgpt-cancel"),
     chatgptSettings: (patch) => ipcRenderer.invoke("sd:chatgpt-settings", patch || {}),
     quality: (patch) => ipcRenderer.invoke("sd:quality", patch || {}), // 🎨 { bookCheckpoint } — "Book pictures use" (PR #128)
@@ -470,6 +474,10 @@ contextBridge.exposeInMainWorld("api", {
   // "❓ Everything I can do" and the side panel's big buttons (read-only)
   alfredCatalog: () => ipcRenderer.invoke("alfred:catalog"),
   alfredBooks: () => ipcRenderer.invoke("alfred:books"),
+  // 👥 Alfred's team (alfred-team.js): one model per role, the "team ready" line, ★ fit ratings
+  alfredTeam: () => ipcRenderer.invoke("alfred:team"),
+  alfredTeamSet: (role, model) => ipcRenderer.invoke("alfred:team-set", { role, model: model == null ? "" : String(model) }),
+  alfredTeamBest: () => ipcRenderer.invoke("alfred:team-best"),
   onAlfred: (cb) => ipcRenderer.on("alfred", (_e, payload) => cb(payload)),
   // ==== 🩺 health watch (health-watch.js): problems found BEFORE something breaks ====
   healthStatus: (opts) => ipcRenderer.invoke("health:status", opts || {}),

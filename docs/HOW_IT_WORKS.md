@@ -1287,6 +1287,46 @@ All four are on the ⚡ **AI writes the whole book** screen (code: `akowe/akowe/
   the planners, the writer's brief, the editor and the consistency checks all read the story rules. (If "story
   rules" is switched off in the pipeline, the facts are still added before the premise.)
 
+### 📖 Growing the author's own start into a novel
+
+`grow_novel.py` (page `#/grow`, then `#/p/<pid>/<branch>/grow`; `web/grow-novel.js`; routes `/api/grow/start` and
+`…/branches/<b>/grow[/understand|/understood|/accept|/plan|/plan/use|/write]`). The author's opening (1–12 chapters, or
+a few pages) becomes a whole book in four steps:
+
+1. **Import, no AI.** `book_import.py` reads the file (.docx and .odt with the standard library; .pdf with `pypdf` when
+   it is installed, else a small built-in reader for simple text PDFs; .txt, .md, pasted text) and splits it at its
+   headings (none = chapter 1). `start` makes a new book (project setting `grown_book`) with the title and target
+   length; the chapter texts wait in `book_import_pending:<pid>:<b>`.
+2. **Fill the Book Bible, two AI requests.** (a) The reading: premise and dramatic question, kind of story, a summary
+   per chapter, the characters (story role, wants / fear / secret, looks each with the quote that shows it — checked
+   word for word), places, the world, the story rules — every magic system as a STRUCTURED rule (`magic_rules.py`:
+   needs with quantities, limits, price, who, holdings) — protected mysteries (rules of category `mystery`) and the
+   open threads. (b) The voices: Akọwe finds each character's own lines without AI (a quote belongs to the name in its
+   speech tag), the AI writes their voice cards from them (the sample lines are their real lines) and describes the
+   narrator's style (`style_card.py`; the numbers, point of view and tense are measured without AI; quotes checked).
+   The result is stored in `grow:<pid>:<b>` and shown on one screen; the author's edits are saved there. **✔ Use
+   this** (`accept`, no AI) writes the profile (incl. `central_question`, the kind of story, pov/tense), the places
+   (A04), the world (A03), the characters (A01, approved) with their sheets, voice cards and story roles saved as the
+   **author's** (so `voice_contrast` and later runs never rewrite them; an AI only fills empty fields), the looks
+   quoted from the page as 🔒 protected Character Forge fields (so just-in-time details never contradict them), the
+   story rules (the magic check enforces them on every new chapter), and a style card for this book only
+   (`style_card:<pid>`; the author's own card is untouched).
+3. **Plan the rest, one AI request.** For the target (length preset or a chapter count) the AI plans chapters N+1…
+   from the chapter summaries, the end of the last chapter, the cast, the rules (magic included), the open threads and
+   the kind of story's stages. **✔ Use this plan** makes B01 premise, B03 main plot (the setups as plot obligations)
+   and B11 outline (the author's chapters 1..N, then the new ones) as manual candidates approved by the author's OK,
+   then stores the author's chapters on that outline (C02 manual candidates: made by "you").
+4. **Write on.** `write` starts ⚡ Make a book with `continue_project`: every step already done is skipped; the 🩺
+   story doctor scores the outline (it is the author's, so it is scored, never revised); the trade card is made; the
+   author's chapters are tracked by the continuity tracker (running notes, 🔒 details, the magic ledger's uses and
+   holdings) and the writer starts at chapter N+1. Fresh names are off for a continued book.
+
+The author's chapters are protected everywhere: every rewrite pass asks `AutoBookService._ai_made`, which is False for
+them (improve pass + weakest scenes, opening pass, chapter polish, end-of-book voice pass, checkpoint fixes, and the
+ending pass's fix); and when the outline changes after they were stored (a new version makes their old approval out of
+date), `book_import.keep_author_chapter` puts each one back on the new outline word for word — the run never writes
+an author's chapter.
+
 ## 4. How quality is kept
 
 | Check | What it catches | When it runs |
@@ -1454,6 +1494,38 @@ A few of these need more words:
   chose later — the same choice holds up, the other is overruled (a story check: ▶ Continue with the chapter
   unchanged means you left it as it is; a chapter you changed is not counted). Logs and the outbox keep codes only (which AIs
   voted, the choice) — never the book's words or the reasons.
+- **🗳 When something goes wrong, let the AIs vote instead of stopping** (code: `akowe/akowe/stand_in_errors.py`;
+  ⚙️ Settings › AI, in the stand-in card; `PUT /api/settings/stand-in` with `errors`, `errors_when` = `now` | `wait`,
+  `cc_voters` = 0–3; off by default — with it off everything above works exactly as before). Your words: "If there
+  are any errors, vote" — "all the agents, even Claude's agents, vote on what they want". With it on, every stop that
+  asks you to choose and is not yours alone is voted on, **right away** or **after the usual wait time**; the review
+  decisions and story checks above are voted on too (even with the stand-in itself off), and the per-run cap rises to
+  10 unless you set one yourself. The stops and their options (letters in a random order per voter, the same JSON
+  answer and the same all-must-agree rule):
+  1. **a reviewer's OK that did not count** (`NO_REASON`, `LOW_CONFIDENCE`): approve the version as it is (exactly
+     like "accept as it is" above, undone the same way) or ask the reviewers to read it again;
+  2. **anything that went wrong** — an AI timed out, stayed busy, refused or failed, no AI was ready, Akọwe's checks
+     refused a draft (`CHECKS_REFUSED`), an editor's or planned-detail rewrite could not be put back, a file did not
+     read back, an unexpected error: **try again** (at most 2 times per step and error), **let another AI do it**
+     (only with two or more AIs: the writer is no longer pinned and the AI whose call failed is not used while
+     another works), **skip this optional step** (only steps that never hold up the book: pictures, the whole Book
+     Bible, planned details, the report, beta readers, chapter 1 last, the improve pass, the final re-read), or **wait
+     for you** (when they all say so, it waits). Nothing here approves or changes text: what the AI makes next goes
+     through Akọwe's checks and the reviews as always.
+  **Always yours:** signing in to an AI's site or solving its check (`LOGGED_OUT`, `CAPTCHA`), "only one AI checked
+  it" (`NO_SECOND_AI`), a missing main character, a stop with no choice (the book is gone), and every topic listed
+  above (approved facts, plot, ending, main character, POV/tense, content limits, lock list).
+  **Claude's agents vote too:** when the 🤖 Claude Code helper is ready, 0–3 extra Claude Code helper voters (default
+  1), each an independent run with its own reviewer persona (a continuity editor, a production editor, a cautious
+  publisher), are asked after the AIs. Every voter must agree, so an extra voter can only block a decision, never
+  force one, and they never count as one of the two AIs a decision needs. Each voter is named in the decision line and
+  counts in the track record (the helpers as "Claude Code helpers"): "🗳 ChatGPT, Claude, Gemini and 1 Claude Code
+  helper all agreed: try again with another AI (the AI did not answer in time while reviewing chapter 3) at 03:12 …
+  [↩ Undo]" in the run window and on 🏠 Book home. **↩ Undo** gives the run its AI choice back (another AI) or puts a
+  skipped step back on the run's list (it runs when the run resumes); a "try again" that already happened cannot be
+  taken back, so Undo only turns the track record round. When the votes split, your own 🔁 Try again settles them
+  ("try again" / "review again" held up). The run forecast counts the possible votes (at most one per AI per stop,
+  one stop per 10 chapters plus two, up to the cap) and the extra helper voters with the helpers.
 - **Book report.** It shows who checked the book and how far they agreed, and each stretch review. Its PDF keeps
   accented letters and other alphabets (ọ, ẹ, ł, Greek); a symbol it cannot print becomes a word or "•". "Written by"
   names the AI that wrote the chapter ("Claude + editor" when the editor's changes are in it). Advice with nothing

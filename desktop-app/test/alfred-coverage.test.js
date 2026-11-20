@@ -86,6 +86,7 @@ const IPC_INVENTORY = [
   'alfred:settings', 'alfred:status', 'alfred:test-ai',
   'alfred:personality', 'alfred:profiles', 'alfred:profile-save', 'alfred:profile-use', 'alfred:profile-delete',
   'alfred:panel', 'alfred:panel-toggle', 'alfred:show-butler', 'alfred:catalog', 'alfred:books', 'alfred:quick',
+  'alfred:team', 'alfred:team-set', 'alfred:team-best',
   'brigade:run', 'brigade:stop', 'butler:capability-test', 'butler:chat', 'butler:install-missing', 'butler:selfcheck', 'butler:send-intro',
   'db:recent-messages', 'db:status', 'endpoints:detect', 'endpoints:presets', 'endpoints:test', 'external:open',
   'featuretest:open-report', 'featuretest:run', 'featuretest:stop', 'mediatest:run', 'mediatest:stop', 'mediatest:status', 'mediatest:copy', 'mediatest:open-report', 'feed-window:close', 'feed:history', 'feed:open', 'gpu:info',
@@ -104,7 +105,7 @@ const IPC_INVENTORY = [
   'sd:settings', 'sd:show-file', 'sd:start', 'sd:start-cpu', 'sd:use-other-build', 'sd:status', 'sd:stop', 'sd:targets', 'sd:test', 'sd:fix-retry',
   'sd:img2img', 'sd:inpaint', 'sd:upscale', 'sd:extras', 'sd:options-get', 'sd:options-set', 'sd:interrupt', 'sd:skip', 'sd:refresh', 'sd:memory', 'sd:workflows', 'sd:workflow-get', 'sd:workflow-save', 'sd:workflow-delete', 'sd:workflow-run', 'sd:capabilities',
   'sd:remake', 'sd:recipes', 'sd:judge', 'sd:improve', 'sd:improve-stop', 'sd:make-best', 'sd:judge-status', 'sd:judge-settings', 'sd:form-report', // ♻ 💾 🧑‍⚖️ 🔁
-  'sd:request', 'sd:chatgpt-status', 'sd:chatgpt-cancel', 'sd:chatgpt-settings', 'sd:quality', 'sd:model-check', 'sd:restart-with-models', 'sd:open-workflows-folder', 'sd:comfy-use-stuff',
+  'sd:request', 'sd:chatgpt-status', 'sd:chatgpt-cancel', 'sd:chatgpt-settings', 'sd:openai-status', 'sd:openai-settings', 'sd:openai-check', 'sd:quality', 'sd:model-check', 'sd:restart-with-models', 'sd:open-workflows-folder', 'sd:comfy-use-stuff',
   'sd:addons', 'sd:addons-install', 'sd:addons-update', 'sd:addons-remove', 'sd:addons-restart', 'sd:addons-open-page', 'sd:addons-folder', 'sd:addons-open-folder', // PR #125
   'sdlib:add-folder', 'sdlib:check', 'sdlib:collection', 'sdlib:delete-lock', 'sdlib:folders', 'sdlib:list', 'sdlib:locks', 'sdlib:remove-folder',
   'sdlib:save-lock', 'sdlib:scan', 'sdlib:update', 'selector:clear', 'selector:pick',
