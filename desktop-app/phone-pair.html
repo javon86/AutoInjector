@@ -14,8 +14,8 @@
   .dim { opacity: .72; }
   .pair { display: grid; grid-template-columns: 240px 1fr; gap: 18px; align-items: start; }
   @media (max-width: 620px) { .pair { grid-template-columns: 1fr; } }
-  #qr { width: 240px; height: 240px; background: #fff; border-radius: 10px; padding: 10px; display: flex; align-items: center; justify-content: center; color: #333; text-align: center; }
-  #qr img { width: 100%; height: 100%; image-rendering: pixelated; }
+  .qr, #qr { width: 240px; height: 240px; background: #fff; border-radius: 10px; padding: 10px; display: flex; align-items: center; justify-content: center; color: #333; text-align: center; }
+  .qr img, #qr img { width: 100%; height: 100%; image-rendering: pixelated; }
   ol { margin: 6px 0 0 18px; padding: 0; } li { margin: 4px 0; }
   .link { display: flex; gap: 6px; margin-top: 8px; }
   .link input { flex: 1; min-width: 0; background: #0d0d0d; color: #cfe; border: 1px solid #333; border-radius: 6px; padding: 6px 8px; font: 11.5px Consolas, monospace; }
@@ -52,6 +52,41 @@
         <p class="dim">If the phone can't open it: the first time, Windows may ask whether AutoInjector may use the network — choose <b>Allow</b> (private networks).</p>
         <div class="link"><input id="ph-link" readonly aria-label="The phone link"><button id="ph-copy" type="button">📋 Copy</button></div>
         <p class="dim" id="ph-other"></p>
+      </div>
+    </div>
+  </section>
+
+  <section id="ph-anywhere" hidden data-testid="phone-anywhere">
+    <b>🌍 From anywhere (Tailscale)</b>
+    <p class="dim">Away from home, your phone reaches this PC through <b>Tailscale</b> — a free app that links your own devices privately (nothing is opened to the internet).</p>
+    <div id="ph-ts-setup">
+      <ol>
+        <li>On this PC: install Tailscale from <b>tailscale.com/download</b> and sign in.</li>
+        <li>On your phone: install the <b>Tailscale</b> app (App Store / Play Store) and sign in with the <b>same account</b>.</li>
+        <li>Keep Tailscale switched on on both. This section then shows a second code.</li>
+      </ol>
+      <p id="ph-ts-state" class="warn"></p>
+    </div>
+    <div id="ph-ts-ready" hidden>
+      <div class="pair">
+        <div id="qr-any" class="qr" data-testid="phone-qr-anywhere"></div>
+        <div>
+          <ol>
+            <li>On the phone, turn <b>Tailscale</b> on.</li>
+            <li>Scan this code (once is enough — it works at home and away).</li>
+          </ol>
+          <div class="link"><input id="ph-any-link" readonly aria-label="The from-anywhere link"><button id="ph-any-copy" type="button">📋 Copy</button></div>
+        </div>
+      </div>
+      <div style="margin-top:12px">
+        <b>🔒 Secure link</b> <span class="dim">(recommended — the phone's own 🎤 works in the app, and it installs as a real app)</span>
+        <p class="dim">Makes https://<span id="ph-ts-name">your-pc</span> for your phone, through Tailscale. The first time, Tailscale may ask you to allow HTTPS for your account — a link shows here.</p>
+        <button id="ph-secure" type="button">🔒 Turn on the secure link</button>
+        <p id="ph-secure-link-row" class="warn" hidden><span id="ph-secure-why"></span><br><input id="ph-secure-link" readonly style="width:100%;margin-top:4px" aria-label="Tailscale's link to allow it"></p>
+        <div class="pair" id="ph-secure-box" hidden style="margin-top:8px">
+          <div id="qr-secure" class="qr" data-testid="phone-qr-secure"></div>
+          <div><p>Scan this one instead — the 🔒 link is the best way in, at home and away.</p><div class="link"><input id="ph-secure-url" readonly aria-label="The secure link"><button id="ph-secure-copy" type="button">📋 Copy</button></div></div>
+        </div>
       </div>
     </div>
   </section>

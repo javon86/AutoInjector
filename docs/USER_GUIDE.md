@@ -687,8 +687,17 @@ phone's camera at the code. Then add it to your home screen: iPhone **Share → 
   your OK on the PC.
 - **🔔 Alerts** — everything that needs you; the phone buzzes while the app is open.
 
-**To talk instead of typing**, use the 🎤 on your phone's keyboard (the phone's own microphone button needs a
-secure connection that a home link doesn't have).
+**🌍 From anywhere (Tailscale):** install the free **Tailscale** app on the PC (tailscale.com/download) and on the
+phone, and sign in to both with the same account. The 📱 Phone window then shows a second code, **From anywhere** —
+scan it once and the app works at home and away (Tailscale links only your own devices; nothing is opened to the
+internet). Better still, press **🔒 Turn on the secure link**: it makes `https://<your-pc>.<tailnet>.ts.net` through
+Tailscale (the first time, Tailscale may show a link to allow HTTPS for your account — open it, allow, press again).
+On the secure link the phone's own **🎤** works inside the app and it installs as a real app. Scan the secure code
+instead of the others. (If the plain Tailscale link doesn't open but the secure one does, that's Windows' firewall —
+the secure link goes around it.)
+
+**To talk instead of typing:** on the 🔒 secure link, tap the 🎤 next to the message box; on the plain home link,
+use the 🎤 on your phone's keyboard (phones only allow a page's microphone on secure links).
 
 **Safe by design:** it is off until you turn it on; only a phone that scanned the code can connect; the phone can't
 open, change or delete files, run commands or change settings. **🔒 Un-pair all phones** makes a new code.

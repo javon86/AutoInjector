@@ -9158,6 +9158,27 @@ ipcMain.handle("phone:set-lan", async () => {
 // 📱 The phone app (phone-main.js · phone-server.js · phone-app.html): its own small server on the home Wi-Fi, off
 // until turned on in the 📱 Phone window. The phone can send to the AIs and stop them, pause / continue the book and
 // answer its questions, read chapters, and talk to Alfred — nothing else (no files, no commands, no settings).
+// 🌍 The Tailscale command line (installed by the Tailscale app): { code, out } or null when Tailscale isn't installed.
+function runTailscale(args, timeoutMs) {
+  const { spawn } = require("child_process");
+  const cands = process.platform === "win32"
+    ? [path.join(process.env.ProgramFiles || "C:\\Program Files", "Tailscale", "tailscale.exe"), "tailscale.exe"]
+    : process.platform === "darwin" ? ["/Applications/Tailscale.app/Contents/MacOS/Tailscale", "tailscale"] : ["tailscale"];
+  const tryOne = (i) => new Promise((resolve) => {
+    if (i >= cands.length) { resolve(null); return; }
+    const c = cands[i];
+    if (path.isAbsolute(c) && !fs.existsSync(c)) { tryOne(i + 1).then(resolve); return; }
+    let out = "";
+    let child;
+    try { child = spawn(c, args, { windowsHide: true }); } catch (_) { tryOne(i + 1).then(resolve); return; }
+    const timer = setTimeout(() => { try { child.kill(); } catch (_) {} }, timeoutMs || 15000);
+    child.stdout.on("data", (b) => { if (out.length < 200000) out += b; });
+    child.stderr.on("data", (b) => { if (out.length < 200000) out += b; });
+    child.on("error", (e) => { clearTimeout(timer); if (e && e.code === "ENOENT") tryOne(i + 1).then(resolve); else resolve({ code: -1, out: String(e && e.message) }); });
+    child.on("close", (code) => { clearTimeout(timer); resolve({ code: code == null ? -1 : code, out }); });
+  });
+  return tryOne(0);
+}
 let _phoneApp = null;
 function phoneApp() {
   if (_phoneApp) return _phoneApp;
@@ -9175,6 +9196,7 @@ function phoneApp() {
     qr: (text) => require("qrcode").toString(text, { type: "svg", margin: 1, errorCorrectionLevel: "M" }),
     interfaces: () => require("os").networkInterfaces(),
     hostname: () => require("os").hostname(),
+    tailscale: (args, ms) => runTailscale(args, ms), // 🌍 from anywhere
     host: process.env.AUTOINJECTOR_PHONE_HOST || "0.0.0.0",
     port: Number(process.env.AUTOINJECTOR_PHONE_PORT) || undefined, // tests pick their own port
     log: (kind, detail) => logEvent(kind, detail),
@@ -9206,6 +9228,7 @@ ipcMain.handle("phoneapp:window", phoneSafe(() => { openPhonePairWindow(); retur
 ipcMain.handle("phoneapp:status", phoneSafe(() => phoneApp().status()));
 ipcMain.handle("phoneapp:set-enabled", phoneSafe((p) => phoneApp().setEnabled(p.on === true)));
 ipcMain.handle("phoneapp:new-key", phoneSafe(() => phoneApp().newKey()));
+ipcMain.handle("phoneapp:secure", phoneSafe((p) => phoneApp().setSecure(p.on === true))); // 🌍 🔒 Tailscale's https link on / off
 
 async function startServiceBridge() {
   if (process.env.AUTOINJECTOR_BRIDGE === "0") return; // opt-out (tests set this)

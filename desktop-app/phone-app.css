@@ -99,6 +99,9 @@ button:disabled { opacity: .45; }
 .composer textarea { flex: 1; min-height: 48px; max-height: 140px; resize: none; border-radius: 16px; border: 1px solid var(--line); background: var(--card); padding: 12px 14px; }
 .send { width: 52px; height: 48px; border-radius: 16px; border: 0; background: var(--accent); color: #fff; font-size: 20px; flex: 0 0 auto; }
 .alfred-send { background: var(--alfred); color: #1b1404; }
+.mic { width: 48px; height: 48px; border-radius: 16px; border: 1px solid var(--line); background: var(--card); font-size: 20px; flex: 0 0 auto; }
+.mic.on { background: var(--bad); border-color: var(--bad); animation: pulse 1.2s infinite; }
+@keyframes pulse { 50% { opacity: .6; } }
 .alfred-title { font-size: 20px; font-weight: 800; }
 .speak { font-size: 14px; color: var(--dim); display: flex; align-items: center; gap: 6px; min-height: 44px; }
 .waiting { border-color: color-mix(in srgb, var(--alfred) 60%, var(--line)); background: color-mix(in srgb, var(--alfred) 10%, var(--card)); }

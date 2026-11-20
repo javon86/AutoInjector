@@ -394,6 +394,37 @@
     sp.checked = store.get(SPEAK_STORE, '0') === '1';
     sp.addEventListener('change', () => store.set(SPEAK_STORE, sp.checked ? '1' : '0'));
 
+    // 🎤 Talk instead of typing — only on the 🔒 secure link (phones allow the microphone on https pages only); on the
+    // plain home link the keyboard's own 🎤 does it.
+    function setupMic(formId, boxId) {
+      const SR = root.SpeechRecognition || root.webkitSpeechRecognition;
+      const form = $(formId);
+      if (!SR || !root.isSecureContext || !form || form.querySelector('.mic')) return null;
+      const btn = el(doc, 'button', { type: 'button', class: 'mic', 'aria-label': 'Talk instead of typing', 'aria-pressed': 'false', text: '🎤' });
+      form.insertBefore(btn, form.querySelector('.send'));
+      let rec = null;
+      const stop = () => { try { if (rec) rec.stop(); } catch (_) { /* stopped */ } };
+      btn.addEventListener('click', () => {
+        if (rec) { stop(); return; }
+        try { rec = new SR(); } catch (_) { toast('This phone can\'t listen here — use the keyboard\'s 🎤.'); return; }
+        rec.lang = (root.navigator && root.navigator.language) || 'en-US';
+        rec.interimResults = false;
+        rec.continuous = false;
+        const box = $(boxId);
+        const before = box.value;
+        rec.onresult = (ev) => { const t = [...ev.results].map((x) => x[0] && x[0].transcript).join(' ').trim(); if (t) { box.value = `${before}${before && !/\s$/.test(before) ? ' ' : ''}${t}`; grow(box); } };
+        rec.onerror = (ev) => { toast(ev && ev.error === 'not-allowed' ? 'Allow the microphone for this page in the phone\'s settings.' : 'Didn\'t catch that — try again.'); };
+        rec.onend = () => { rec = null; btn.setAttribute('aria-pressed', 'false'); btn.classList.remove('on'); };
+        btn.setAttribute('aria-pressed', 'true');
+        btn.classList.add('on');
+        toast('Listening… tap 🎤 again to stop.');
+        try { rec.start(); } catch (_) { rec = null; btn.classList.remove('on'); }
+      });
+      return btn;
+    }
+    setupMic('chat-form', 'chat-text');
+    setupMic('alfred-form', 'alfred-text');
+
     show();
     if (S.key) loadState();
     if (opts.poll !== false) {

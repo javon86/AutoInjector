@@ -10,6 +10,7 @@
 //   akowe(method, path, body) → { status, json }          Akọwe's own API (the book)
 //   alfred(channel, payload)                               Alfred's controls (alfred:status, alfred:ask)
 //   qr(text) → svg string · interfaces() · hostname() · log · now · fs
+//   tailscale(args, timeoutMs) → { code, out } | null   🌍 the Tailscale command line (null: Tailscale not installed)
 
 const path = require('path');
 const core = require('./phone-core');
@@ -170,9 +171,55 @@ function createPhone(deps) {
   }
   function alertsSeen(id) { const n = alerts.seen(id === 'all' ? 'all' : id); return { ok: true, marked: n }; }
 
+  // ------------------------------------------------------------------ 🌍 from anywhere (Tailscale)
+  let tsCache = { at: 0, val: null };
+  async function tailscaleInfo(force) {
+    if (!force && tsCache.val && now() - tsCache.at < 15000) return tsCache.val;
+    const ips = core.tailnetAddresses(deps.interfaces ? deps.interfaces() : {});
+    let val = { installed: false, running: false, dnsName: '', ip: ips[0] ? ips[0].address : '', needsLogin: false };
+    if (deps.tailscale) {
+      let r = null;
+      try { r = await deps.tailscale(['status', '--json'], 10000); } catch (_) { r = null; }
+      if (r) {
+        const st = core.tailscaleStatus(r.out);
+        val = { installed: true, running: st.running, dnsName: st.dnsName, ip: st.ip || val.ip, needsLogin: st.needsLogin };
+      }
+    }
+    tsCache = { at: now(), val };
+    return val;
+  }
+  async function secureOn(ts) {
+    if (!deps.tailscale || !ts.installed || !ts.running || !ts.dnsName) return false;
+    let r = null;
+    try { r = await deps.tailscale(['serve', 'status', '--json'], 10000); } catch (_) { r = null; }
+    const port = (server.info() || {}).port || load().port;
+    return !!(r && r.code === 0 && new RegExp(`(127\\.0\\.0\\.1|localhost):${port}\\b`).test(String(r.out || '')));
+  }
+  /** 🔒 Secure link on / off: `tailscale serve` puts https://<pc>.<tailnet>.ts.net in front of the phone server. */
+  async function setSecure(on) {
+    const ts = await tailscaleInfo(true);
+    if (!ts.installed) return Object.assign(await status(), { ok: false, error: 'NO_TAILSCALE', words: 'Tailscale is not installed on this PC.' });
+    if (!ts.running) return Object.assign(await status(), { ok: false, error: 'TAILSCALE_OFF', words: 'Tailscale is not connected on this PC — open it and sign in.' });
+    const s = load();
+    const port = (server.info() || {}).port || s.port;
+    const args = on ? ['serve', '--bg', `http://127.0.0.1:${port}`] : ['serve', '--https=443', 'off'];
+    let r = null;
+    try { r = await deps.tailscale(args, 25000); } catch (e) { r = { code: -1, out: String((e && e.message) || e) }; }
+    const out = String((r && r.out) || '');
+    log('phone-app', { step: on ? 'secure-on' : 'secure-off', code: r ? r.code : null });
+    if (!r || r.code !== 0) {
+      const link = core.tailscaleLink(out);
+      return Object.assign(await status(), link
+        ? { ok: false, error: 'TAILSCALE_NEEDS_OK', link, words: 'Tailscale needs your OK first: open the link below in your browser, allow it (HTTPS / Serve for your tailnet), then press the button again.' }
+        : { ok: false, error: 'TAILSCALE_REFUSED', words: `Tailscale said: ${core.clip(out.replace(/\s+/g, ' ').trim() || 'no answer', 240)}` });
+    }
+    return Object.assign(await status(), { ok: true, words: on ? 'The secure link is on. Scan its code with your phone.' : 'The secure link is off.' });
+  }
+
   // ------------------------------------------------------------------ the server, on / off
   const server = createPhoneServer({
     now, log, token: () => load().key, files: deps.files || {},
+    trustedHosts: () => (tsCache.val && tsCache.val.dnsName ? [tsCache.val.dnsName] : []),
     state, chat, send, stop, bookPause, bookAnswer, chapters, chapter, alfred, alfredAsk, alertsSeen,
   });
 
@@ -212,8 +259,23 @@ function createPhone(deps) {
     const links = addrs.map((a) => ({ name: a.name, address: a.address, url: core.pairUrl(a.address, port, s.key) }));
     let qr = '';
     if (s.enabled && info && links[0] && deps.qr) { try { qr = await deps.qr(links[0].url); } catch (e) { log('phone-app', { step: 'qr-failed', error: String(e.message || e).slice(0, 120) }); } }
+    // 🌍 from anywhere: the Tailscale address (plain link — WireGuard encrypts it) and the 🔒 secure https link
+    const anywhere = { tailscale: { installed: false, running: false, dnsName: '' }, url: '', qr: '', secure: { on: false, url: '', qr: '' } };
+    if (s.enabled && info) {
+      const ts = await tailscaleInfo(false);
+      anywhere.tailscale = { installed: ts.installed, running: ts.running || (!ts.installed && !!ts.ip), dnsName: ts.dnsName, needsLogin: ts.needsLogin };
+      if (ts.ip) {
+        anywhere.url = core.pairUrl(ts.ip, port, s.key);
+        if (deps.qr) { try { anywhere.qr = await deps.qr(anywhere.url); } catch (_) { anywhere.qr = ''; } }
+      }
+      if (await secureOn(ts)) {
+        anywhere.secure.on = true;
+        anywhere.secure.url = core.secureUrl(ts.dnsName, s.key);
+        if (deps.qr) { try { anywhere.secure.qr = await deps.qr(anywhere.secure.url); } catch (_) { anywhere.secure.qr = ''; } }
+      }
+    }
     return {
-      enabled: s.enabled, running: server.running(), port, links, qr,
+      enabled: s.enabled, running: server.running(), port, links, qr, anywhere,
       phones: server.phones().map((p) => ({ ip: p.ip, phone: phoneName(p.agent), lastSeen: p.lastSeen })),
       noWifi: !addrs.length,
     };
@@ -230,7 +292,7 @@ function createPhone(deps) {
 
   async function startup() { const s = load(); if (s.enabled) await startServer(); }
 
-  return { load, status, setEnabled, newKey, startup, notice, state, chat, send, stop, bookPause, bookAnswer, chapters, chapter, alfred, alfredAsk, alertsSeen, server, phoneName, stopServer: () => server.stop() };
+  return { setSecure, tailscaleInfo, load, status, setEnabled, newKey, startup, notice, state, chat, send, stop, bookPause, bookAnswer, chapters, chapter, alfred, alfredAsk, alertsSeen, server, phoneName, stopServer: () => server.stop() };
 }
 
 module.exports = { createPhone };

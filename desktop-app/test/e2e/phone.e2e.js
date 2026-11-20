@@ -130,11 +130,16 @@ async function partB(assert, browser) {
     const pctx = await browser.newContext({ viewport: { width: 820, height: 760 } });
     const pp = await pctx.newPage();
     await pp.addInitScript((s) => {
-      window.api = { phoneAppStatus: async () => s, phoneAppSetEnabled: async () => s, phoneAppNewKey: async () => s };
-    }, Object.assign({}, st, { qr: await require('qrcode').toString(st.links[0].url, { type: 'svg', margin: 1, errorCorrectionLevel: 'M' }), phones: [{ phone: 'iPhone', lastSeen: Date.now() - 60000 }] }));
+      window.api = { phoneAppStatus: async () => s, phoneAppSetEnabled: async () => s, phoneAppNewKey: async () => s, phoneAppSecure: async () => s };
+    }, Object.assign({}, st, { qr: await require('qrcode').toString(st.links[0].url, { type: 'svg', margin: 1, errorCorrectionLevel: 'M' }), phones: [{ phone: 'iPhone', lastSeen: Date.now() - 60000 }],
+      anywhere: { tailscale: { installed: true, running: true, dnsName: 'batcave-pc.tail1a2b.ts.net' }, url: `http://100.101.5.9:${port}/#k=${key}`,
+        qr: await require('qrcode').toString(`http://100.101.5.9:${port}/#k=${key}`, { type: 'svg', margin: 1 }),
+        secure: { on: true, url: `https://batcave-pc.tail1a2b.ts.net/#k=${key}`, qr: await require('qrcode').toString(`https://batcave-pc.tail1a2b.ts.net/#k=${key}`, { type: 'svg', margin: 1 }) } } }));
     await pp.goto(`file://${path.join(APP_DIR, 'phone-pair.html')}`);
     await pp.waitForSelector('#qr img');
     assert(await pp.evaluate(() => !document.getElementById('ph-pair').hidden && /192\.168\.1\.42/.test(document.getElementById('ph-link').value)), 'the 📱 Phone window: the QR code, the steps and the link');
+    assert(await pp.evaluate(() => !document.getElementById('ph-anywhere').hidden && !!document.querySelector('#qr-any img') && !!document.querySelector('#qr-secure img')), 'the 📱 Phone window: 🌍 from anywhere — the Tailscale code and the 🔒 secure link code');
+    await pp.setViewportSize({ width: 820, height: 1400 });
     await shot(pp, 'phone-pair-window-wifi');
     await pctx.close();
   } finally {

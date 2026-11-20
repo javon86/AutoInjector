@@ -321,6 +321,7 @@ contextBridge.exposeInMainWorld("api", {
   phoneAppStatus: () => ipcRenderer.invoke("phoneapp:status"),
   phoneAppSetEnabled: (on) => ipcRenderer.invoke("phoneapp:set-enabled", { on: on === true }),
   phoneAppNewKey: () => ipcRenderer.invoke("phoneapp:new-key"),
+  phoneAppSecure: (on) => ipcRenderer.invoke("phoneapp:secure", { on: on === true }),
   butlerCapabilityTest: () => ipcRenderer.invoke("butler:capability-test"),
   onCapabilityTestStep: (cb) => ipcRenderer.on("capability-test-step", (_e, payload) => cb(payload)),
   butlerSendIntro: (targets) => ipcRenderer.invoke("butler:send-intro", { targets }),

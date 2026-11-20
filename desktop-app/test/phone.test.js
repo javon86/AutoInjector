@@ -339,13 +339,126 @@ function files() {
     stopPair();
   }
 
+  console.log('== 🌍 from anywhere (Tailscale) ==');
+  {
+    assert(core.tailnetAddresses({ Tailscale: [{ family: 'IPv4', address: '100.101.5.9' }], cgnatNot: [{ family: 'IPv4', address: '100.20.1.1' }], 'Wi-Fi': [{ family: 'IPv4', address: '192.168.1.42' }] }).map((a) => a.address).join() === '100.101.5.9', 'the Tailscale address (100.64–100.127 only)');
+    const tss = core.tailscaleStatus(JSON.stringify({ BackendState: 'Running', Self: { DNSName: 'BATCAVE-PC.tail1a2b.ts.net.', TailscaleIPs: ['100.101.5.9', 'fd7a::1'] } }));
+    assert(tss.running && tss.dnsName === 'batcave-pc.tail1a2b.ts.net' && tss.ip === '100.101.5.9', 'tailscale status: connected, the PC\'s Tailscale name and address');
+    assert(core.tailscaleStatus('not json').running === false && core.tailscaleStatus({ BackendState: 'NeedsLogin' }).needsLogin, 'odd or signed-out status → not running / needs sign-in');
+    assert(core.secureUrl('pc.tail.ts.net.', 'a b') === 'https://pc.tail.ts.net/#k=a%20b' && core.tailscaleLink('To enable, visit:\n  https://login.tailscale.com/f/serve?node=x1 \n') === 'https://login.tailscale.com/f/serve?node=x1', 'the secure link; Tailscale\'s "allow it" link picked out of its words');
+    const tmp2 = fs.mkdtempSync(path.join(os.tmpdir(), 'phone-ts-'));
+    const pcT = makeFakePc();
+    const ts = { installed: false, state: 'Running', serving: false, needOk: false, calls: [] };
+    const fakeTs = async (args) => {
+      ts.calls.push(args.join(' '));
+      if (!ts.installed) return null;
+      if (args[0] === 'status') return { code: 0, out: JSON.stringify({ BackendState: ts.state, Self: { DNSName: 'batcave-pc.tail1a2b.ts.net.', TailscaleIPs: ['100.101.5.9'] } }) };
+      if (args[0] === 'serve' && args[1] === 'status') return { code: 0, out: ts.serving ? JSON.stringify({ Web: { 'batcave-pc.tail1a2b.ts.net:443': { Handlers: { '/': { Proxy: `http://127.0.0.1:${port + 7}` } } } } }) : '{}' };
+      if (args[0] === 'serve' && args[1] === '--bg') { if (ts.needOk) return { code: 1, out: 'Serve is not enabled on your tailnet.\nTo enable, visit:\n\n         https://login.tailscale.com/f/serve?node=nABC123\n' }; ts.serving = true; return { code: 0, out: 'Available within your tailnet: https://batcave-pc.tail1a2b.ts.net/' }; }
+      if (args[0] === 'serve' && args[1] === '--https=443') { ts.serving = false; return { code: 0, out: '' }; }
+      return { code: 1, out: 'unknown' };
+    };
+    let ifs = pcT.deps.interfaces();
+    const pT = createPhone(Object.assign({}, pcT.deps, { settingsFile: path.join(tmp2, 'p.json'), host: '127.0.0.1', port: port + 7, files: files(), tailscale: fakeTs, interfaces: () => ifs }));
+    await pT.setEnabled(true);
+    let st2 = await pT.status();
+    assert(!st2.anywhere.tailscale.installed && !st2.anywhere.url, 'Tailscale not installed → no "anywhere" link (the window shows how to set it up)');
+    ts.installed = true;
+    ts.state = 'NeedsLogin';
+    st2 = await (async () => { await pT.tailscaleInfo(true); return pT.status(); })();
+    assert(st2.anywhere.tailscale.installed && st2.anywhere.tailscale.needsLogin && !st2.anywhere.tailscale.running, 'installed but signed out → says so');
+    ts.state = 'Running';
+    ifs = Object.assign({}, pcT.deps.interfaces(), { Tailscale: [{ family: 'IPv4', address: '100.101.5.9', internal: false }] });
+    await pT.tailscaleInfo(true);
+    st2 = await pT.status();
+    const k7 = pT.load().key;
+    assert(st2.anywhere.tailscale.running && st2.anywhere.url === `http://100.101.5.9:${port + 7}/#k=${k7}` && /^<svg/.test(st2.anywhere.qr), 'connected → the "from anywhere" link and its own QR code');
+    assert(!st2.anywhere.secure.on && !st2.links.some((l) => l.address.startsWith('100.')), 'no secure link yet; the Tailscale address is not offered as a Wi-Fi address');
+    ts.needOk = true;
+    let r7 = await pT.setSecure(true);
+    assert(!r7.ok && r7.error === 'TAILSCALE_NEEDS_OK' && r7.link === 'https://login.tailscale.com/f/serve?node=nABC123' && /allow it/.test(r7.words), 'the first time: Tailscale\'s "allow HTTPS" link is shown with what to do');
+    ts.needOk = false;
+    r7 = await pT.setSecure(true);
+    assert(r7.ok && r7.anywhere.secure.on && r7.anywhere.secure.url === `https://batcave-pc.tail1a2b.ts.net/#k=${k7}` && /^<svg/.test(r7.anywhere.secure.qr), '🔒 secure link on → https://<pc>.<tailnet>.ts.net with its QR code');
+    assert(ts.calls.includes(`serve --bg http://127.0.0.1:${port + 7}`), '…made with `tailscale serve` in front of the phone server');
+    let rr = await req(port + 7, 'POST', '/api/stop', { key: k7, body: {}, headers: { Origin: 'https://batcave-pc.tail1a2b.ts.net' } });
+    assert(rr.status === 200, 'the phone app on the secure link may post (its own name is trusted)');
+    rr = await req(port + 7, 'POST', '/api/stop', { key: k7, body: {}, headers: { Origin: 'https://someone-else.tail9.ts.net' } });
+    assert(rr.status === 403, 'another Tailscale name may not');
+    rr = await req(port + 7, 'POST', '/api/stop', { key: k7, body: {}, headers: { Origin: 'http://batcave-pc.tail1a2b.ts.net' } });
+    assert(rr.status === 403, 'nor the same name over plain http');
+    r7 = await pT.setSecure(false);
+    assert(r7.ok && !r7.anywhere.secure.on && ts.calls.includes('serve --https=443 off'), '🔓 secure link off');
+    ts.state = 'Stopped';
+    await pT.tailscaleInfo(true);
+    r7 = await pT.setSecure(true);
+    assert(!r7.ok && r7.error === 'TAILSCALE_OFF', 'Tailscale switched off → "open it and sign in"');
+    await pT.setEnabled(false);
+    st2 = await pT.status();
+    assert(!st2.anywhere.url && !st2.anywhere.qr, 'phone access off → no anywhere link either');
+    fs.rmSync(tmp2, { recursive: true, force: true });
+
+    if (JSDOM) {
+      const ph = fs.readFileSync(path.join(DIR, 'phone-pair.html'), 'utf8').replace(/<script[^>]*><\/script>/g, '');
+      const dom = new JSDOM(ph, { runScripts: 'outside-only' });
+      const w = dom.window;
+      w.__PHONE_PAIR_NO_AUTOSTART = true;
+      w.eval(fs.readFileSync(path.join(DIR, 'phone-pair.js'), 'utf8'));
+      const $ = (id) => w.document.getElementById(id);
+      const base = { enabled: true, running: true, port: 47800, links: [{ name: 'Wi-Fi', address: '192.168.1.42', url: 'http://192.168.1.42:47800/#k=abc' }], qr: '<svg xmlns="http://www.w3.org/2000/svg"></svg>', phones: [] };
+      let cur = Object.assign({}, base, { anywhere: { tailscale: { installed: false }, url: '', qr: '', secure: { on: false } } });
+      const calls = [];
+      const api = { phoneAppStatus: async () => cur, phoneAppSetEnabled: async () => cur, phoneAppNewKey: async () => cur,
+        phoneAppSecure: async (on) => { calls.push(on); if (calls.length === 1) return Object.assign({ ok: false, error: 'TAILSCALE_NEEDS_OK', link: 'https://login.tailscale.com/f/serve?node=n1', words: 'Tailscale needs your OK first' }, cur); cur = Object.assign({}, cur, { anywhere: Object.assign({}, cur.anywhere, { secure: { on: true, url: 'https://batcave-pc.tail1a2b.ts.net/#k=abc', qr: '<svg xmlns="http://www.w3.org/2000/svg"></svg>' } }) }); return Object.assign({ ok: true, words: 'The secure link is on.' }, cur); } };
+      const stop = w.PhonePair.start(w.document, api);
+      await tick(30);
+      assert(!$('ph-anywhere').hidden && !$('ph-ts-setup').hidden && $('ph-ts-ready').hidden && /not installed/.test($('ph-ts-state').textContent) && /tailscale\.com\/download/.test($('ph-ts-setup').textContent), '📱 Phone window: no Tailscale → the three set-up steps');
+      cur = Object.assign({}, base, { anywhere: { tailscale: { installed: true, running: true, dnsName: 'batcave-pc.tail1a2b.ts.net' }, url: 'http://100.101.5.9:47800/#k=abc', qr: '<svg xmlns="http://www.w3.org/2000/svg"></svg>', secure: { on: false } } });
+      w.PhonePair.render(w.document, cur, Date.now());
+      assert($('ph-ts-setup').hidden && !$('ph-ts-ready').hidden && $('qr-any').querySelector('img') && $('ph-any-link').value === 'http://100.101.5.9:47800/#k=abc' && /batcave-pc\.tail1a2b\.ts\.net/.test($('ph-ts-name').textContent), 'connected → the "from anywhere" QR code and link');
+      $('ph-secure').click();
+      await tick(30);
+      assert(!$('ph-secure-link-row').hidden && $('ph-secure-link').value === 'https://login.tailscale.com/f/serve?node=n1', 'the secure link needs Tailscale\'s OK → its link is shown to open');
+      $('ph-secure').click();
+      await tick(30);
+      assert(calls.join() === 'true,true' && !$('ph-secure-box').hidden && $('qr-secure').querySelector('img') && $('ph-secure-url').value.startsWith('https://') && /Turn off/.test($('ph-secure').textContent), 'then on → the 🔒 QR code and link; the button turns it off');
+      stop();
+
+      // 🎤 on the phone: only on a secure page with speech recognition
+      const ah = fs.readFileSync(path.join(DIR, 'phone-app.html'), 'utf8').replace(/<script[^>]*><\/script>/g, '');
+      const mk = (secure) => {
+        const d2 = new JSDOM(ah, { url: 'https://batcave-pc.tail1a2b.ts.net/', runScripts: 'outside-only', pretendToBeVisual: true });
+        const w2 = d2.window;
+        w2.__PHONE_APP_NO_AUTOSTART = true;
+        w2.scrollTo = () => {};
+        Object.defineProperty(w2, 'isSecureContext', { value: secure, configurable: true });
+        const recs = [];
+        w2.webkitSpeechRecognition = function () { this.start = () => recs.push(this); this.stop = () => { if (this.onend) this.onend(); }; };
+        w2.eval(fs.readFileSync(path.join(DIR, 'phone-app.js'), 'utf8'));
+        w2.PhoneApp.start(w2.document, { fetch: async () => ({ status: 200, json: async () => ({ ok: true }) }), poll: false, location: w2.location, history: w2.history });
+        return { w2, recs };
+      };
+      let M = mk(false);
+      assert(!M.w2.document.querySelector('.mic'), 'plain home link (not secure) → no 🎤 button (the keyboard\'s 🎤 is the way)');
+      M = mk(true);
+      const mics = M.w2.document.querySelectorAll('.mic');
+      assert(mics.length === 2, 'secure link → a 🎤 in Chat and in Alfred');
+      M.w2.document.getElementById('chat-text').value = 'Hello';
+      mics[0].click();
+      assert(M.recs.length === 1 && mics[0].getAttribute('aria-pressed') === 'true', 'tap 🎤 → it listens');
+      M.recs[0].onresult({ results: [[{ transcript: 'tell Claude to keep going' }]] });
+      M.recs[0].stop();
+      assert(M.w2.document.getElementById('chat-text').value === 'Hello tell Claude to keep going' && mics[0].getAttribute('aria-pressed') === 'false', 'what you said is added to the message; tap again / it stops');
+    }
+  }
+
   console.log('== the wiring ==');
   const main = fs.readFileSync(path.join(DIR, 'main.js'), 'utf8');
-  for (const ch of ['phoneapp:window', 'phoneapp:status', 'phoneapp:set-enabled', 'phoneapp:new-key']) assert(main.includes(`ipcMain.handle("${ch}"`), `main.js handles ${ch}`);
+  for (const ch of ['phoneapp:window', 'phoneapp:status', 'phoneapp:set-enabled', 'phoneapp:new-key', 'phoneapp:secure']) assert(main.includes(`ipcMain.handle("${ch}"`), `main.js handles ${ch}`);
   assert(/function phoneLanEnabled\(\) \{\s*return process\.env\.AUTOINJECTOR_BRIDGE_HOST === "0\.0\.0\.0";/.test(main), 'the old switch can no longer put the whole bridge on the Wi-Fi');
   assert(/_phoneApp\.notice\(n\)/.test(main), 'desktop notices go to the phone\'s alerts');
   const preload = fs.readFileSync(path.join(DIR, 'preload.js'), 'utf8');
-  for (const fn of ['phoneAppOpenWindow', 'phoneAppStatus', 'phoneAppSetEnabled', 'phoneAppNewKey']) assert(preload.includes(`${fn}:`), `preload: ${fn}`);
+  for (const fn of ['phoneAppOpenWindow', 'phoneAppStatus', 'phoneAppSetEnabled', 'phoneAppNewKey', 'phoneAppSecure']) assert(preload.includes(`${fn}:`), `preload: ${fn}`);
   const pkg = JSON.parse(fs.readFileSync(path.join(DIR, 'package.json'), 'utf8'));
   for (const f of ['phone-core.js', 'phone-server.js', 'phone-main.js', 'phone-app.html', 'phone-app.js', 'phone-app.css', 'phone-icon.svg', 'phone-pair.html', 'phone-pair.js']) assert(pkg.build.files.includes(f), `packaged: ${f}`);
   assert(pkg.dependencies.qrcode === '1.5.4', 'the QR code maker is a pinned dependency');

@@ -60,10 +60,17 @@ function createPhoneServer(deps) {
   function ipOf(req) { return String((req.socket && req.socket.remoteAddress) || '').replace(/^::ffff:/, ''); }
 
   // A page the phone app served posts back to the same host; a random website on the phone must not.
+  // 🌍 Through Tailscale's secure link (`tailscale serve`) the page is https://<pc>.<tailnet>.ts.net and the request
+  // arrives from Tailscale on this PC: that one name (this PC's own) is trusted too.
   function originOk(req) {
     const o = req.headers.origin;
     if (!o) return true;
-    try { return new URL(o).host === String(req.headers.host || ''); } catch (_) { return false; }
+    let u;
+    try { u = new URL(o); } catch (_) { return false; }
+    if (u.host === String(req.headers.host || '')) return true;
+    let trusted = [];
+    try { trusted = (d.trustedHosts && d.trustedHosts()) || []; } catch (_) { trusted = []; }
+    return u.protocol === 'https:' && trusted.includes(u.hostname.toLowerCase());
   }
 
   async function api(req, res, path) {

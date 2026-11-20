@@ -49,6 +49,45 @@ function lanAddresses(ifaces) {
   return out.sort((a, b) => a.score - b.score).map(({ name, address }) => ({ name, address }));
 }
 
+/** 🌍 The PC's Tailscale address(es) — 100.64.0.0/10 — the "from anywhere" way in (a phone signed in to the same Tailscale account). */
+function tailnetAddresses(ifaces) {
+  const out = [];
+  for (const [name, list] of Object.entries(ifaces || {})) {
+    for (const ni of list || []) {
+      if (!ni || ni.internal || (ni.family !== 'IPv4' && ni.family !== 4) || !ni.address) continue;
+      const m = /^100\.(\d+)\./.exec(ni.address);
+      if (m && Number(m[1]) >= 64 && Number(m[1]) <= 127) out.push({ name, address: ni.address });
+    }
+  }
+  return out;
+}
+
+/** What `tailscale status --json` says: { running, dnsName ("pc.tailnet.ts.net"), ip } — never throws. */
+function tailscaleStatus(json) {
+  let j = json;
+  if (typeof j === 'string') { try { j = JSON.parse(j); } catch (_) { j = null; } }
+  if (!j || typeof j !== 'object') return { running: false, dnsName: '', ip: '' };
+  const self = j.Self || {};
+  const ips = Array.isArray(self.TailscaleIPs) ? self.TailscaleIPs : (Array.isArray(j.TailscaleIPs) ? j.TailscaleIPs : []);
+  return {
+    running: String(j.BackendState || '') === 'Running',
+    dnsName: String(self.DNSName || '').replace(/\.$/, '').toLowerCase().slice(0, 253),
+    ip: ips.find((x) => /^100\./.test(String(x))) || '',
+    needsLogin: String(j.BackendState || '') === 'NeedsLogin' || !!j.AuthURL,
+  };
+}
+
+/** The 🔒 secure link: https on the PC's Tailscale name (served by `tailscale serve`). */
+function secureUrl(dnsName, token) {
+  return `https://${String(dnsName).replace(/\.$/, '')}/#k=${encodeURIComponent(token)}`;
+}
+
+/** The first https://login.tailscale.com/… link Tailscale printed (e.g. "enable HTTPS / Serve for your tailnet"). */
+function tailscaleLink(text) {
+  const m = /https:\/\/login\.tailscale\.com\/[^\s"'<>]+/.exec(String(text || ''));
+  return m ? m[0] : '';
+}
+
 /** The link the phone opens (the key rides in the #fragment: it never reaches a server log or the browser history's URL). */
 function pairUrl(address, port, token) {
   return `http://${address}:${port}/#k=${encodeURIComponent(token)}`;
@@ -162,5 +201,5 @@ function createGuard({ limit = 10, windowMs = 60000 } = {}) {
 
 module.exports = {
   SITES, SITE_LABELS, PHONE_ACTIONS, NEEDS_CONFIRM, DEFAULT_PORT,
-  newToken, sameToken, lanAddresses, pairUrl, bookView, answerRequest, chatView, aisView, targets, alfredView, createAlerts, createGuard, clip,
+  newToken, sameToken, lanAddresses, pairUrl, tailnetAddresses, tailscaleStatus, secureUrl, tailscaleLink, bookView, answerRequest, chatView, aisView, targets, alfredView, createAlerts, createGuard, clip,
 };
