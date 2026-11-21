@@ -17,6 +17,8 @@
 * ``story_stage`` (📚 story_kind.py): the stage of the book's kind of story this chapter serves ("This chapter
   serves the stage “The nightmare” of this Overcoming the Monster story (chapters 9–11) …") and the kind's promise.
 * ``promises`` (📜 promise_ledger.py): the set-ups this chapter must plant and the payoffs that fall due here.
+* ``voice_notes`` (🗣 voice_test.py) / ``subtext_note`` (💬 subtext_check.py): characters of this chapter whose
+  dialogue read alike in the chapters already written, and a note when earlier dialogue said feelings outright.
 * ``story_choices`` (P12): the author's style choices (and the ending-state matrix in the last chapter).
 * ``length`` (P15): the chapter's word target, scenes and words per scene, and whether it is written scene by scene.
 * ``narrator_style`` (P25): the author's own style card (style_card.py) when the book writes in the author's style
@@ -328,6 +330,17 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str, *
             promises = []
         if promises:
             brief["promises"] = promises
+        try:  # 🗣 voices that read alike on the page so far / 💬 lines that said too much (voice_test, subtext_check)
+            from . import subtext_check, voice_test  # noqa: PLC0415
+            vnotes = voice_test.writer_brief(store, pid, branch, [c["name"] for c in present])
+            snote = subtext_check.writer_brief(store, pid, branch, chapter_id)
+        except Exception:  # noqa: BLE001
+            log.exception("could not add the voice / subtext notes to the brief")
+            vnotes, snote = [], None
+        if vnotes:
+            brief["voice_notes"] = vnotes
+        if snote:
+            brief["subtext_note"] = snote
         length = _length(store, pid, outline)
         if length:
             brief["length"] = length
@@ -358,6 +371,10 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str, *
             rules.append(story_kind.WRITER_RULE)
         if brief.get("promises"):
             rules.append(promise_ledger.WRITER_RULE)
+        if brief.get("voice_notes"):
+            rules.append(voice_test.WRITER_RULE)
+        if brief.get("subtext_note"):
+            rules.append(subtext_check.WRITER_RULE)
         if brief.get("character_details"):
             rules.append(RULES["character_details"])
         if brief.get("needed_details"):

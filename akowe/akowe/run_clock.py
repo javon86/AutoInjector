@@ -40,7 +40,7 @@ OPTION_STEP = {"checkers": "chapters", "writers_room": "plot", "beta": "beta", "
                "human_pass": "report", "improve": "improve", "opening": "opening", "first_page": "chapters",
                "chapter_polish": "chapters", "reread": "reread", "story_doctor": "outline",
                "voice_contrast": "characters", "stand_in": "chapters", "trade_card": "outline",
-               "fresh_names": "profile"}
+               "fresh_names": "profile", "voice_test": "chapters", "subtext_check": "chapters"}
 
 
 def _now() -> float:

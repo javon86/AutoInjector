@@ -306,6 +306,10 @@ class BookFakeAI:
         # 🗣 voice contrast (voice_contrast.py): scripted card rewrites (dicts or callables(ctx)); default: each card
         # in context.rewrite gets its own rhythm, register and phrase
         self.voice_contrast_script: list = []
+        # 🗣 / 💬 voice tests on the page (voice_test.py) and the subtext check (subtext_check.py): scripted answers
+        # (dicts or callables(ctx)); defaults: no usable blind attributions, nothing on the nose
+        self.voice_blind_script: list = []
+        self.subtext_script: list = []
         self.stand_in_default = {"pick": "accept", "confident": 0.9,
                                  "why": "The correction answers the reviewer's finding and agrees with the canon."}
 
@@ -412,6 +416,18 @@ class BookFakeAI:
                 voice_for("x"), rhythm=f"{n}'s own clipped rhythm, {i + 2}-word sentences", register=f"register {i}",
                 phrases=[f"{n.split()[0]} swears by it"], vocabulary=[f"{n.split()[0]}-term"],
                 deflects="answers with a question")} for i, n in enumerate(ctx.get("rewrite") or [])]}
+        if "attributions" in props and "lines" in ctx and "cast" in ctx:  # 🗣 the blind speaker test (voice_test.py)
+            with self.lock:
+                scripted = self.voice_blind_script.pop(0) if self.voice_blind_script else None
+            if scripted is not None:
+                return "voice_blind", scripted(ctx) if callable(scripted) else copy.deepcopy(scripted)
+            return "voice_blind", {"attributions": []}  # default: no usable answer (nothing is flagged)
+        if "lines" in props and "candidates" in ctx:  # 💬 the subtext check (subtext_check.py)
+            with self.lock:
+                scripted = self.subtext_script.pop(0) if self.subtext_script else None
+            if scripted is not None:
+                return "subtext", scripted(ctx) if callable(scripted) else copy.deepcopy(scripted)
+            return "subtext", {"lines": []}  # default: nothing on the nose
         if "openings" in props:  # ✍ the writer's two first pages for chapter 1 (one answer)
             with self.lock:
                 scripted = self.openings_script.pop(0) if self.openings_script else None

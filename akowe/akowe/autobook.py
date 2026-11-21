@@ -1198,6 +1198,9 @@ class AutoBookService(_Runner):
         from . import story_doctor, voice_contrast  # noqa: PLC0415 - 🩺 the plan check / 🗣 distinct voice cards
         out.update(story_doctor.clean_run_option(body))
         out.update(voice_contrast.clean_run_option(body))
+        from . import subtext_check, voice_test  # noqa: PLC0415 - 🗣 voices on the page / 💬 subtext (both on)
+        out.update(voice_test.clean_run_option(body))
+        out.update(subtext_check.clean_run_option(body))
         from . import fresh_names, trade_card  # noqa: PLC0415 - 🔁 kept fresh / 🔧 the trade card (both on)
         out.update(trade_card.clean_run_option(body))
         out.update(fresh_names.clean_run_option(body))
@@ -1763,6 +1766,9 @@ class AutoBookService(_Runner):
                     pl = (run.get("planned") or {}).get(rid) or {}
                     if pl.get("flagged"):
                         why += " · ⚠️ planned details not all on the page"
+                if head["module_id"] == "C02":  # 💬 lines that say a feeling outright (subtext_check.py, ≤ 1 AI check)
+                    from . import subtext_check  # noqa: PLC0415
+                    head = subtext_check.chapter_pass(self, run, st, rid, label, chapter_id)
                 self._approve(run, head["ref"], why=why, verdict="APPROVE", slot=rj.slot)
                 checker_record.settle(self.store, run, rid, head["version"], chapter_id=chapter_id)
                 if trust:
@@ -3997,6 +4003,8 @@ class AutoBookService(_Runner):
             cid = ch["chapter_id"]
             item = st["items"][idx]
             self._checkpoints(run, st, outline, chapters, idx)  # 🧭 a checkpoint due after the chapters before this one
+            from . import voice_test  # noqa: PLC0415 - 🗣 do the voices differ on the page so far? (≤ 1 AI mid-book)
+            voice_test.before_chapter(self, run, st, outline, chapters, idx)
             # ⚡ #116: every AI call for this chapter shows "chapter N of M" in the AI activity strip
             with ai_activity.doing(None, chapter=idx + 1, chapters=len(chapters), chapter_id=cid):
                 bp = self.bp(run)
@@ -4153,6 +4161,8 @@ class AutoBookService(_Runner):
         # H11 / H12: the ending keeps the book's promises — the ONE final ending check (the final 🧭 checkpoint does
         # not run its own; the checkpoints before it run the light setups-so-far check, ending_check upto=N)
         self._ending_pass(run, st, outline, chapters)
+        from . import voice_test  # noqa: PLC0415 - 🗣 the finished book's voices: on the page + one blind test
+        voice_test.end_pass(self, run, st, outline, chapters)
         from . import chapter_polish  # noqa: PLC0415 - 📏 both numbers in the run window
         pl = chapter_polish.to_report(self, run)
         if pl:
