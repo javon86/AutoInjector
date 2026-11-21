@@ -912,6 +912,12 @@ class ReportService:
                         "key": key, "chapters": [f"{c['record_id']}:{c['version']}" for c in chapters],
                         "approved": all(c["approved"] for c in chapters)},
                     "made_by": made_by, "run_id": run_id, "reviews": [], **det}
+        if base.get("run_id"):  # 🧼 how cleanly the Make-a-book run went (so far, when it is still running)
+            try:
+                from . import clean_run  # noqa: PLC0415
+                base["clean_run"] = clean_run.score(self.app.autobook.get(base["run_id"]))
+            except Exception:  # noqa: BLE001 - a report never fails for its score line
+                log.warning("book report: no clean-run score for run %s", base.get("run_id"))
         view = book_view(chapters)
         parts = book_parts(chapters) if full and view["mode"] == "digest" and ai else None  # 📖 H17
         base["book_mode"] = "parts" if parts else view["mode"]
@@ -1307,7 +1313,10 @@ def render_markdown(rep: dict) -> str:
     L += ["## Summary", "", f"- Words: **{w.get('total', 0):,}** of about {w.get('target', 0):,} ({w.get('length')}; "
           f"{w.get('percent')}%)", f"- Whole-book reviewers: {agg.get('reviewers', 0)} ({agg.get('independent', 0)} "
           "independent)" + (f" · overall median average **{agg['overall']}**/10" if agg.get("overall") is not None
-                            else ""), f"- The book was sent to the reviewers {SENT.get(rep.get('book_mode'), SENT['digest'])}", ""]
+                            else ""), f"- The book was sent to the reviewers {SENT.get(rep.get('book_mode'), SENT['digest'])}"]
+    if (rep.get("clean_run") or {}).get("line"):
+        L.append(f"- {rep['clean_run']['line']}")
+    L.append("")
     reviews = [r for r in rep.get("reviews") or [] if r.get("status") == "done"]
     if any(d.get("n") for d in agg.get("dimensions") or []):
         L += ["## Scores (whole book)", "", "| Dimension | Median | Range | " + " | ".join(r["name"] for r in reviews)

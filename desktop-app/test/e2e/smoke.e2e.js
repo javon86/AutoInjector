@@ -195,6 +195,8 @@ async function main() {
     await controls.waitForFunction(() => { const c = document.getElementById('ex-counts'); return !!(c && /Will save:/.test(c.textContent)); }, { timeout: 6000 }).catch(() => {});
     await controls.click('#ex-scope-all');
     await controls.waitForFunction(() => document.getElementById('ex-scope-all-row').classList.contains('sel'), { timeout: 6000 }).catch(() => {});
+    // 🔒 the AI conversation is off unless ticked (PR #153): tick it, so Everything would hold the messages
+    await controls.check('#ex-inc-conv');
     await new Promise((r) => setTimeout(r, 400));
     await controls.click('#btn-extract-save');
     const asked = await controls.waitForFunction(

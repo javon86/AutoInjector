@@ -418,10 +418,10 @@ async function main() {
     assert(renderPdf.validatePdfBody({ html: HTML, timeoutMs: 180000, margins: { top: 0, bottom: 100 } }) === null, 'timeoutMs 180000 and margins 0–100 mm are accepted');
     const notJson = await new Promise((resolve) => { const data = '{ html: nope'; const rq = http.request({ host: '127.0.0.1', port: PORT, path: '/render/pdf', method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data), Authorization: `Bearer ${TOKEN}` } }, (res) => { let bb = ''; res.on('data', (x) => { bb += x; }); res.on('end', () => resolve({ status: res.statusCode, json: safeJson(bb) })); }); rq.write(data); rq.end(); });
     assert(notJson.status === 400 && notJson.json.error === 'INVALID_PARAM' && /JSON/.test(notJson.json.message), 'a body that is not JSON: 400 INVALID_PARAM');
-    const big = await req('POST', '/render/pdf', { token: TOKEN, body: { html: '<p>' + 'x'.repeat(41 * 1024 * 1024) + '</p>' } });
-    assert(big.status === 413 && big.json.error === 'TOO_BIG' && /40 MB/.test(big.json.message), 'HTML over 40 MB: 413 TOO_BIG');
-    const huge = await req('POST', '/render/pdf', { token: TOKEN, body: { html: 'x'.repeat(49 * 1024 * 1024) } });
-    assert(huge.status === 413 && huge.json.error === 'TOO_BIG', 'a request body over 48 MB: 413 TOO_BIG (not read into memory)');
+    const big = await req('POST', '/render/pdf', { token: TOKEN, body: { html: '<p>' + 'x'.repeat(121 * 1024 * 1024) + '</p>' } });
+    assert(big.status === 413 && big.json.error === 'TOO_BIG' && /120 MB/.test(big.json.message), 'HTML over 120 MB: 413 TOO_BIG');
+    const huge = await req('POST', '/render/pdf', { token: TOKEN, body: { html: 'x'.repeat(137 * 1024 * 1024) } });
+    assert(huge.status === 413 && huge.json.error === 'TOO_BIG', 'a request body over 136 MB: 413 TOO_BIG (not read into memory)');
     const bigHdr = await req('POST', '/render/pdf', { token: TOKEN, body: { html: HTML, headerFooter: { footer: 'x'.repeat(1024 * 1024 + 1) } } });
     assert(bigHdr.status === 413 && bigHdr.json.error === 'TOO_BIG', 'a footer over 1 MB: 413 TOO_BIG');
 
