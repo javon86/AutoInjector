@@ -44,6 +44,21 @@ HOW_MAX = 300
 
 # (id, plain label, what it is, ((beat id, name, what happens, where in the book in %), ...))
 TEMPLATES = (
+    ("turning_points", "Five turning points", "Five turns that each raise the stakes higher than the one before: a "
+     "chance, a change of plans, a point of no return, a major setback and the climax. The pressure on the main "
+     "character only rises — every turn costs more than the last. Recommended: it keeps the middle of a long book "
+     "from sagging.", (
+         ("opportunity", "The opportunity", "Something new comes into the main character's life — a chance, a "
+                                            "problem or a request — and the story starts to move.", 10),
+         ("change_of_plans", "The change of plans", "The main character takes on a clear, new goal that will drive "
+                                                    "the rest of the story.", 25),
+         ("point_of_no_return", "The point of no return", "The main character commits fully; something happens or "
+                                                          "is decided that cannot be undone, and the stakes rise.",
+          50),
+         ("major_setback", "The major setback", "Everything goes wrong: the main character loses something that "
+                                                "matters and the goal looks out of reach — the worst so far.", 75),
+         ("climax", "The climax", "The biggest, hardest moment of the book: the main character faces the main "
+                                  "problem and wins or loses, and pays a real price either way.", 90))),
     ("three_acts", "Three acts", "The classic shape: a beginning that sets things up, a long middle where things get "
      "harder, and an end where it all comes to a head.", (
          ("setup", "The setup", "We meet the main character in their everyday life and see what they want.", 5),
@@ -116,6 +131,10 @@ TEMPLATES = (
          ("resolution", "The ending", "The main character does what they could not do at the start.", 100))),
 )
 IDS = tuple(t[0] for t in TEMPLATES)
+# the shape the new-book forms (⚡ Make a book, 🚀 wizard) offer first: research ("AI novel quality beyond eight", 2)
+# found AI books sag in the middle and soften their late setbacks; five escalating turns keep the pressure rising.
+# A book made without a form (API, starter sheet without a shape) still has none unless the author picks one.
+DEFAULT = "turning_points"
 _BY_ID = {t[0]: t for t in TEMPLATES}
 
 PLACE_TASK = (
@@ -167,7 +186,7 @@ def template(tid) -> dict | None:
 
 def info() -> dict:
     """For the forms (start screen, wizard, profile, plan page): the options in plain words, default first."""
-    return {"key": KEY, "label": "Story shape", "default": "",
+    return {"key": KEY, "label": "Story shape", "default": DEFAULT,
             "help": "The shape of the story: the big moments (beats) it moves through. The AI places each beat on a "
                     "chapter, the writer makes it happen there, and Akọwe checks that it reached the page. "
                     "“None” lets the AI shape the story freely.",

@@ -33,7 +33,8 @@ from datetime import datetime, timezone
 log = logging.getLogger("akowe.ending_check")
 
 FIX_ROUNDS = 1
-MAX_ITEMS = 16
+MAX_ITEMS = 22             # promises checked (setups, threads, characters, the kind's promise, AI habits)
+MAX_LEDGER = 6             # 📜 promise-ledger set-ups not yet paid off, added as setups
 LAST_SHARE = 1 / 3          # a character not seen in the last third of the book (after appearing) has vanished
 TEXT_LAST = 24000           # characters of the last chapters sent whole
 TEXT_EARLY = 700            # characters from the start and end of each earlier chapter
@@ -155,6 +156,18 @@ def promises(bp, chapters: list[dict], *, final: bool = True) -> dict:
                 "need": _clip(sheet.get("needs") or sheet.get("need"), 300),
                 "change_limits": _clip(sheet.get("change_limits"), 300)}
         main = {k: v for k, v in main.items() if v}
+    if final:
+        try:  # 📜 the promise ledger's set-ups the planned checks did not find paid off yet
+            from . import promise_ledger  # noqa: PLC0415
+            from .needs_list import _outline_of  # noqa: PLC0415
+            known = {i["label"].lower() for i in items}
+            for r in promise_ledger.status(store, pid, branch, _outline_of(store, pid, branch), n):
+                label = _clip(f"{r['promise']} → pays off: {r['payoff']}", 240)
+                if r["status"] != "resolved" and label.lower() not in known and \
+                        sum(1 for i in items if i.get("ledger")) < MAX_LEDGER:
+                    items.append({"id": f"s{len(items) + 1}", "kind": "setup", "label": label, "ledger": r["id"]})
+        except Exception:  # noqa: BLE001
+            log.exception("promise ledger in the ending check")
     try:  # 📚 the kind of story's promise (a Tragedy's downfall, a Comedy's happy union…) is one of the promises
         from . import story_kind  # noqa: PLC0415
         kp = story_kind.ending_promise(store, pid, final=final)
@@ -162,6 +175,10 @@ def promises(bp, chapters: list[dict], *, final: bool = True) -> dict:
             items.insert(0, kp)  # first, so it is never cut
     except Exception:  # noqa: BLE001
         log.exception("story kind promise in the ending check")
+    if final:  # 🤖 the habits of AI-written books, checked on the finished book (kept = the book avoids it)
+        from . import ai_defaults  # noqa: PLC0415
+        habits = ai_defaults.draft_items()
+        items = items[:MAX_ITEMS - len(habits)] + habits
     prof = get_profile(store, pid)
     q = [x for x in (_clip(premise.get("dramatic_question"), 300), _clip(prof.get("central_question"), 300)) if x]
     return {"items": items[:MAX_ITEMS], "people": people, "main": main, "question": " / ".join(dict.fromkeys(q)) or None,
@@ -213,6 +230,9 @@ def check(review, job, *, upto: int | None = None, final: bool = True, ai: bool 
         writer = review.writer_of(pid, branch, bp.rec(last["record_id"]) or {"record_id": last["record_id"],
                                                                              "module_id": "C02"})
         task = TASK + ("" if final else CHECKPOINT_TASK)
+        if any(i.get("kind") == "ai_default" for i in items):
+            from . import ai_defaults  # noqa: PLC0415
+            task += ai_defaults.DRAFT_TASK
         if any(i.get("kind") == "story_kind" for i in items):  # 📚 the kind of story and its promise
             from . import story_kind  # noqa: PLC0415
             ctx["story_kind"] = story_kind.ending_context(review.store, pid) or {}
@@ -365,10 +385,13 @@ def open_list(res: dict) -> list[dict]:
     """The promises still not kept, in plain words: [{id, kind, line, fix, fix_chapter}]."""
     out = []
     for i in res.get("items") or []:
+        if i.get("kind") == "ai_default" and i["status"] == "unchecked":
+            continue  # a habit no AI could check is not a promise left open
         if i["status"] in ("open", "unchecked"):
             what = {"setup": "A setup with no payoff", "thread": "A thread left hanging",
                     "character": "A character who vanishes",
-                    "story_kind": "Not delivered yet (the kind of story's promise)"}.get(i["kind"], "A promise")
+                    "story_kind": "Not delivered yet (the kind of story's promise)",
+                    "ai_default": "A habit of AI-written books"}.get(i["kind"], "A promise")
             out.append({"id": i["id"], "kind": i["kind"], "fix": i.get("fix"), "fix_chapter": i.get("fix_chapter"),
                         "line": f"{what}: {i['label']}" + (f" — {i['note']}" if i.get("note") else "")
                         + (" (not checked: no AI could read the book)" if i["status"] == "unchecked" else "")})
@@ -397,7 +420,10 @@ def fix_findings(res: dict, chapter_number: int, text: str) -> list[dict]:
     if not anchor:
         return []
     out = []
-    for o in res.get("open") or []:
+    # the book's own promises, the main character's change and the question first; 🤖 the AI habits last (the
+    # findings are capped, and a habit must never push a missed payoff out)
+    ordered = sorted(res.get("open") or [], key=lambda o: o.get("kind") == "ai_default")
+    for o in ordered:
         if o.get("fix") and o.get("fix_chapter") == chapter_number:
             out.append({"id": f"e{len(out) + 1}", "dimension": "ending_promises", "label": "A promise the ending "
                         "must keep", "severity": "major", "passage": anchor[:600], "why": o["line"],
@@ -432,8 +458,13 @@ def open_items(store, pid: str, branch: str) -> list[dict]:
 
 def summary_line(res: dict) -> str:
     items = res.get("items") or []
+    habits = [i for i in items if i.get("kind") == "ai_default"]
+    items = [i for i in items if i.get("kind") != "ai_default"]
     kept = sum(1 for i in items if i["status"] == "kept")
     bits = [f"{kept} of {len(items)} promise(s) kept"]
+    if habits and any(i["status"] != "unchecked" for i in habits):
+        bits.append(f"habits of AI-written books avoided: {sum(1 for i in habits if i['status'] == 'kept')} of "
+                    f"{len(habits)}")
     for key, what in (("arc", "main character's change"), ("question", "the book's question")):
         p = res.get(key)
         if p:

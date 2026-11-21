@@ -1,5 +1,5 @@
-"""📐 Story shape in the browser: picked when starting a book (⚡ Make a book, plain words, default "None — let the AI
-decide"), the beats shown as a strip on the plan page ("Ch 3 · Midpoint") and on the Book Bible's story-plan page, and
+"""📐 Story shape in the browser: picked when starting a book (⚡ Make a book, plain words, default "Five turning
+points"), the beats shown as a strip on the plan page ("Ch 3 · Midpoint") and on the Book Bible's story-plan page, and
 changed on the plan page of a book whose chapters are not written yet. Screenshots go to $BF_UI_SHOTS."""
 from __future__ import annotations
 
@@ -28,9 +28,9 @@ def test_story_shape_from_make_a_book_to_the_plan_and_the_book_bible(make_contex
     sel = dlg.locator("[data-testid=mb-story-shape]")
     sel.wait_for(timeout=10000)
     opts = sel.locator("option").all_inner_texts()
-    assert opts[0] == "None — let the AI decide" and len(opts) == 5
+    assert opts[0] == "None — let the AI decide" and len(opts) == 6 and "Five turning points" in opts
     assert "Save the Cat (15 beats)" in opts and "Hero's Journey (12 stages)" in opts
-    assert sel.input_value() == ""  # the default
+    assert sel.input_value() == "turning_points"  # the new-book default (five escalating turns)
     sel.select_option("save_the_cat")
     about = dlg.locator("[data-testid=mb-story-shape-about]").inner_text()
     assert "Dark night of the soul" in about and "_" not in about
@@ -73,7 +73,8 @@ def test_change_the_story_shape_on_the_plan_page_before_chapters(make_context, a
     fill_wizard(page, "Shape Book", chars=1, places=0, world=0)
     box = page.locator("[data-testid=plan-story-shape]")
     box.wait_for(timeout=15000)
-    assert page.inner_text("[data-testid=plan-story-shape-name]") == "None — let the AI decide"
+    # 🚀 a new book from the wizard starts on the recommended shape (five escalating turns)
+    assert page.inner_text("[data-testid=plan-story-shape-name]") == "Five turning points"
     pick = page.locator("[data-testid=plan-story-shape-pick]")
     pick.select_option("three_acts")
     page.locator("[data-testid=plan-story-shape-save]").click()

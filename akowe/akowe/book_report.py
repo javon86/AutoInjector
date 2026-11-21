@@ -998,6 +998,15 @@ class ReportService:
                 base.pop("story_kind", None)
         except Exception:  # noqa: BLE001 - never break the report
             log.exception("could not add the kind of story to the report")
+        try:  # 📜 the promise ledger: which set-ups paid off, and where
+            from . import promise_ledger  # noqa: PLC0415
+            led = promise_ledger.report_info(self.store, pid, branch)
+            if led:
+                base["promises"] = led
+            else:
+                base.pop("promises", None)
+        except Exception:  # noqa: BLE001 - never break the report
+            log.exception("could not add the promise ledger to the report")
         base["aggregate"] = aggregate(base["reviews"])
         base["try_next"] = self.try_next(base)
         from . import approval_trust  # noqa: PLC0415 - H14: chapters approved without (all) checks
@@ -1414,6 +1423,9 @@ def render_markdown(rep: dict) -> str:
     if (rep.get("story_kind") or {}).get("line"):  # 📚 the kind of story and its promise
         L += ["## Kind of story", "", rep["story_kind"]["line"], "", f"The promise: {rep['story_kind']['promise']}",
               ""]
+    if (rep.get("promises") or {}).get("line"):  # 📜 the set-ups and their payoffs
+        from . import promise_ledger  # noqa: PLC0415
+        L += promise_ledger.report_md(rep["promises"])
     ck = rep.get("checks") or {}
     cc = ck.get("chapter_checks") or {}
     if cc.get("chapters") or ck.get("stretch") or ck.get("checkpoints"):

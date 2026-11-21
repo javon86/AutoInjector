@@ -278,6 +278,7 @@ class BookFakeAI:
         self.needs = None                        # 🧠 a needs list returned with every scene plan (dict or callable(ctx))
         self.shape_script: list = []             # 📐 scripted beat placements (dicts or callables(ctx)), one per call
         self.kind_script: list = []              # 📚 scripted stage placements (dicts or callables(ctx)), one per call
+        self.ledger_script: list = []            # 📜 scripted promise ledgers (dicts or callables(ctx)); default: none
         self.kind_pick = None                    # 📚 the kind of story the invent step picks (when asked), e.g. "quest"
         self.alongside_script: list = []         # ✍ Write alongside me: scripted answers (dicts or callables(ctx))
         # 🧑‍⚖️ the stand-in vote (stand_in.py): answers per slot ({slot: answer or [answers]}) or one per call (in
@@ -438,6 +439,12 @@ class BookFakeAI:
             return "opening_rewrite", {"replacements": []}
         if ctx.get("akowe_task") == "story_details":  # ⏱ story details (essentials / just in time)
             return "details", self._details(ctx)
+        if "promises" in props and "main_plot" in ctx and "chapters" in ctx:  # 📜 the book's promises (ledger)
+            with self.lock:
+                scripted = self.ledger_script.pop(0) if self.ledger_script else None
+            if scripted is not None:
+                return "ledger", scripted(ctx) if callable(scripted) else copy.deepcopy(scripted)
+            return "ledger", {"promises": []}
         if "placements" in props and "story_kind" in ctx:  # 📚 place where each stage of the kind of story begins
             with self.lock:
                 scripted = self.kind_script.pop(0) if self.kind_script else None

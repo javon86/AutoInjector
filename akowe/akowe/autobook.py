@@ -1626,8 +1626,9 @@ class AutoBookService(_Runner):
                     "retry_at": datetime.fromtimestamp(nxt, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
                     "message": f"Only {review.get('writer_ai') or 'one AI'} is working — waiting for a second AI to "
                                f"check the {label} (next look at about {usage_limits.clock(nxt)})"}
+            gen = jobs_mod.wake_count()  # before the wait is shown: a Resume from then on ends it
             self.on_wait(run, info)
-            waited += jobs_mod.sleep_unless_woken(pol, step, lambda: self.check(run))
+            waited += jobs_mod.sleep_unless_woken(pol, step, lambda: self.check(run), since=gen)
             self.on_wait(run, None)
         return self._second_ai_working(writer)
 
@@ -3845,6 +3846,7 @@ class AutoBookService(_Runner):
         st["message"] = f"{n} chapter(s) planned and approved" + (f" · {st['doctor']}" if st.get("doctor") else "")
         self._place_beats(run, st)
         self._place_stages(run, st)
+        self._build_ledger(run, st)
         from . import trade_card  # noqa: PLC0415 - 🔧 how the book's trade is really done (≤ 1 request)
         trade_card.run_step(self, run, st)
         tc = (run.get("trade_card") or {}).get("line")
@@ -3878,6 +3880,43 @@ class AutoBookService(_Runner):
             self.event(run, "note", f"📚 {m['label']}: " + "; ".join(story_kind.strip_label(s_) for s_ in m["stages"])
                        + (f" (⚠️ {len(m['problems'])} placed where they usually begin)" if m.get("problems") else ""),
                        step="outline", code="KIND_PLACED")
+        self.save(run)
+
+    def _build_ledger(self, run, st):
+        """📜 promise_ledger.py: one AI call lists the book's set-ups (promises) with the chapters where each must pay
+        off; each chapter is then told what to plant and which payoffs are due, and the planned-to-page check checks
+        them. Once per outline revision; never holds up the book (no answer → no ledger, the book goes on)."""
+        from . import promise_ledger  # noqa: PLC0415
+        bp = self.bp(run)
+        outline = bp.outline()
+        if not outline or run["settings"].get("promise_ledger") is False:
+            return
+        done = run.setdefault("ledger_built", {})
+        key = f"{outline['record_id']}:{outline['version']}"
+        if done.get(key):
+            return
+        try:
+            led = promise_ledger.build(self._review, self._sub_job(run, "promise_ledger", outline["record_id"],
+                                                                   run["settings"].get("slot_id")), bp, outline)
+        except AkoweError as exc:
+            if getattr(exc, "control", False):
+                raise
+            self.event(run, "note", f"⚠️ The promise ledger could not be made ({exc.code}); the book goes on "
+                       "without it and the ending check still looks for set-ups that never paid off",
+                       step="outline", code="LEDGER_FAILED")
+            led = None
+        except Exception:  # noqa: BLE001 - guidance only: never a reason to stop the book
+            log.exception("promise ledger")
+            self.event(run, "note", "⚠️ The promise ledger could not be made; the book goes on without it",
+                       step="outline", code="LEDGER_FAILED")
+            led = None
+        done[key] = True
+        if led:
+            n = len(led["entries"])
+            st["ledger"] = n
+            self.event(run, "note", f"📜 Promise ledger: {n} set-up(s), each with the chapters where it must pay off"
+                       + (f" ({len(led['problems'])} corrected)" if led.get("problems") else ""),
+                       step="outline", code="LEDGER_BUILT")
         self.save(run)
 
     def _place_beats(self, run, st):

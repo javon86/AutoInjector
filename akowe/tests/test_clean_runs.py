@@ -190,6 +190,35 @@ def test_sleep_unless_woken_ends_early_when_woken():
     slept = jobs.sleep_unless_woken(pol, 60, None)
     assert slept < 5 and time.monotonic() - t0 < 5
     assert jobs.sleep_unless_woken(pol, 0.6, None) >= 0.6  # a wake before the wait started does not cut it
+    # the race CI hit: Resume pressed after the wait was announced (run["waiting"] set) but before the sleep began.
+    # The wake count read before the announcement still ends the wait at once.
+    gen = jobs.wake_count()
+    jobs.wake_waits()
+    t1 = time.monotonic()
+    assert jobs.sleep_unless_woken(pol, 60, None, since=gen) == 0 and time.monotonic() - t1 < 1
+
+
+def test_wait_and_retry_reads_the_wake_count_before_it_announces_the_wait():
+    """A Resume pressed inside on_wait (the moment the run shows it waits) ends that wait: the next try is at once."""
+    import time  # noqa: PLC0415
+
+    from akowe import jobs  # noqa: PLC0415
+    from akowe.errors import AkoweError  # noqa: PLC0415
+    pol = jobs.RetryPolicy([30], 120)  # a 30 s wait (within the 120 s budget) that the Resume cuts short
+    calls = []
+
+    def fn():
+        calls.append(1)
+        if len(calls) == 1:
+            raise AkoweError("RATE_LIMITED", "", "busy")
+        return "ok"
+
+    def on_wait(info):
+        if info:
+            jobs.wake_waits()  # the author presses Resume as soon as the wait shows
+    t0 = time.monotonic()
+    assert jobs.wait_and_retry(fn, policy=pol, on_wait=on_wait) == "ok"
+    assert len(calls) == 2 and time.monotonic() - t0 < 5
 
 
 def test_resume_during_a_usage_limit_wait_tries_the_ai_again_now(tmp_path):
