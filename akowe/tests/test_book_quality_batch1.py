@@ -298,3 +298,10 @@ def test_habits_no_ai_could_check_are_not_listed_as_open():
         "A habit of AI-written books")
     assert "habits of AI-written books" not in ending_check.summary_line(
         {"items": [i for i in res["items"] if i["status"] == "unchecked"]})
+
+
+def test_habit_fixes_never_push_a_promise_fix_out_of_the_capped_list():
+    opens = [{"id": f"a{i}", "kind": "ai_default", "fix": f"habit fix {i}", "fix_chapter": 3, "line": "h"}
+             for i in range(6)] + [{"id": "arc", "kind": "arc", "fix": "the arc fix", "fix_chapter": 3, "line": "a"}]
+    f = ending_check.fix_findings({"open": opens}, 3, "One paragraph.\n\nThe last paragraph.")
+    assert len(f) == 6 and f[0]["suggestion"] == "the arc fix"

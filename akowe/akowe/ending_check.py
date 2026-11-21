@@ -420,7 +420,10 @@ def fix_findings(res: dict, chapter_number: int, text: str) -> list[dict]:
     if not anchor:
         return []
     out = []
-    for o in res.get("open") or []:
+    # the book's own promises, the main character's change and the question first; 🤖 the AI habits last (the
+    # findings are capped, and a habit must never push a missed payoff out)
+    ordered = sorted(res.get("open") or [], key=lambda o: o.get("kind") == "ai_default")
+    for o in ordered:
         if o.get("fix") and o.get("fix_chapter") == chapter_number:
             out.append({"id": f"e{len(out) + 1}", "dimension": "ending_promises", "label": "A promise the ending "
                         "must keep", "severity": "major", "passage": anchor[:600], "why": o["line"],
