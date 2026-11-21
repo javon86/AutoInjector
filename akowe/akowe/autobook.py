@@ -73,6 +73,7 @@ from .book_path import EXPORT_FOR, LENGTHS, BookPath, StepError, _step_lock, get
 from .requests import candidate_payload
 from .engine import Engine
 from .errors import AkoweError
+from . import jobs as jobs_mod
 from .jobs import BUSY_CODES, JobStore, RetryPolicy, busy_code, now_iso, slot_word, wait_and_retry
 from .providers import PROBE_POLL_S, PROBE_WAIT_S, PinnedProviders  # noqa: F401 - re-exported (older imports)
 from .editor import judge_rewrite, keep_quotes_of, lost_keeps
@@ -83,6 +84,22 @@ from .review import NOT_INDEPENDENT, REVIEWABLE, ReviewJob, ReviewService, plain
 log = logging.getLogger("akowe.autobook")
 
 MAX_FIXES = 2
+MAX_REPAIRS = 2  # 🩹 per version the checks refused: the AI repairs exactly what they refused, then the last good one
+STALE_RULES = {"STALE", "SOURCE_PIN", "INPUT_NOT_VALIDATED"}  # an old source pin: 🔁 Try again fixes it, not the AI
+_CODE_RE = re.compile(r"[A-Za-z0-9_.\-]{1,60}")
+
+
+def rule_codes(probs) -> list[str]:
+    """The rule codes of Akọwe's check problems ('RULE: what is wrong'), for the log: codes only, never text."""
+    out = []
+    for p in probs or []:
+        c = str(p).split(":", 1)[0].strip()
+        c = c if _CODE_RE.fullmatch(c) else "OTHER"
+        if c not in out:
+            out.append(c)
+    return out[:8]
+
+
 MAX_EVENTS = 400
 RELEASE = ["MANUSCRIPT_PDF", "EPUB_REFLOWABLE", "EDITABLE_DOCX"]
 CANON_COUNTS = {"short_story": {"A01": 2, "A04": 1}, "novelette": {"A01": 3, "A04": 2},
@@ -916,7 +933,19 @@ class AutoBookService(_Runner):
                 if self._ctl.get(run_id, {}).get("pause"):
                     self._ctl[run_id]["pause"] = False
                     run["status"], run["phase"] = "running", "Continuing"
-                    self.save(run)
+                elif run.get("waiting") or run.get("status") == "waiting":
+                    # ⏰ ▶ Resume during a long wait (usage limits, a busy AI, a second AI): try the AI again now
+                    jobs_mod.wake_waits()
+                    self.event(run, "resume", "You pressed Resume: trying the AI again now instead of waiting",
+                               code="WAIT_WOKEN")
+                    log.info("make-a-book run %s: resume woke the wait (%s)", run_id,
+                             (run.get("waiting") or {}).get("code"))
+                    run["phase"] = "Trying the AI again now"
+                else:
+                    # already working: say so (the button never seems to do nothing)
+                    self.event(run, "note", "You pressed Resume: the book is already being made — "
+                               + str(run.get("phase") or "working")[:200], code="ALREADY_RUNNING")
+                self.save(run)
                 return self.public(run)
             if self.active():
                 raise AkoweError("VERSION_CONFLICT", "/run", "another Make-a-book run is working",
@@ -1585,13 +1614,7 @@ class AutoBookService(_Runner):
                     "message": f"Only {review.get('writer_ai') or 'one AI'} is working — waiting for a second AI to "
                                f"check the {label} (next look at about {usage_limits.clock(nxt)})"}
             self.on_wait(run, info)
-            left = step
-            while left > 0:
-                self.check(run)
-                chunk = min(0.5, left)
-                pol.sleep(chunk)
-                left -= chunk
-            waited += step
+            waited += jobs_mod.sleep_unless_woken(pol, step, lambda: self.check(run))
             self.on_wait(run, None)
         return self._second_ai_working(writer)
 
@@ -1622,14 +1645,31 @@ class AutoBookService(_Runner):
             v = bp.dispatch(head["module_id"], "VALIDATE", base_ref=head["ref"],
                             payload=candidate_payload(head["ref"], None))
             if v["status"] not in ("VALIDATED", "APPROVED"):
+                vprobs = problems(v)
+                self._loop_log(run, head, "checks_refused", rules=rule_codes(vprobs))
+                # 🩹 an AI draft or fix the checks refuse: the AI repairs exactly that first (never the author's own
+                # text), else the last version that passed is put back; only then does the run stop
+                if self._repair_refused(run, st, head, label, vprobs, chapter_id):
+                    continue
+                if self._back_to_good(run, st, head, label, chapter_id):
+                    continue
                 self.event(run, "problem", f"Akọwe's checks refused the {label}", record_id=rid,
                            code="CHECKS_REFUSED")
-                raise self._refused(head["ref"], label, problems(v), chapter_id)
+                raise self._refused(head["ref"], label, vprobs, chapter_id)
             probs = precheck(rid) if precheck else []
             if probs:  # e.g. ★ an outline without the main character: refused like Akọwe's own checks
+                self._loop_log(run, head, "checks_refused", rules=["PROTAGONIST_MISSING"])
+                if self._repair_refused(run, st, head, label, ["PROTAGONIST_MISSING: " + p for p in probs],
+                                        chapter_id):
+                    continue
+                if self._back_to_good(run, st, head, label, chapter_id):
+                    continue
                 self.event(run, "problem", f"Akọwe's checks refused the {label}: " + "; ".join(probs)[:300],
                            record_id=rid, code="PROTAGONIST_MISSING")
                 raise self._refused(head["ref"], label, probs, chapter_id)
+            # this version passes Akọwe's checks: remember it (a later fix that breaks them comes back to it)
+            run.setdefault("last_good", {})[rid] = head["version"]
+            (run.get("check_repairs") or {}).pop(rid, None)
             st["message"] = f"AI is reviewing the {label}"
             run["phase"] = st["message"]
             self.save(run)
@@ -1652,6 +1692,8 @@ class AutoBookService(_Runner):
             except AkoweError as exc:
                 self._ai_problem(exc, f"reviewing the {label}", record_id=rid, chapter_id=chapter_id)
             verdict = res["review"]["verdict"]
+            self._loop_log(run, head, "review", verdict=verdict, reasons=len(res["review"].get("reasons") or []),
+                           by=getattr(rj, "slot", None))
             self._note_review(run, st, label, res["review"])
             # 📊 who said what about this version (settled into each AI's track record when it is approved)
             checker_record.remember_verdicts(run, rid, int(res.get("version") or head["version"]), head["module_id"],
@@ -1741,17 +1783,8 @@ class AutoBookService(_Runner):
                 if took is not None:
                     return took
             if n >= MAX_FIXES:
-                reasons = res["review"].get("reasons") or []
-                raise StepProblem("REVIEW_NOT_PASSED",
-                                  f"The AI reviewer still says {verdict} for the {label} after {MAX_FIXES} fixes.",
-                                  "Decide: ✔ Approve anyway (your own approval), ✏️ Edit it yourself and then press "
-                                  "Continue, or 🔁 Try again (the AI gets two more fixes).",
-                                  record_id=rid, version=head["version"], module_id=head["module_id"],
-                                  verdict=verdict, reasons=reasons[:4], chapter_id=chapter_id,
-                                  options=["approve_anyway", "edit", "retry"],
-                                  # 🧑‍⚖️ Akọwe's own promise checks flagged it: only the author decides (stand_in.py)
-                                  promise={"pov_tense": bool(res["review"].get("pov_tense")),
-                                           "content_limits": bool(res["review"].get("content_limits_breach"))})
+                self._loop_log(run, head, "fixes_used_up", verdict=verdict)
+                raise self._not_passed(head, label, verdict, res["review"], chapter_id)
             counts[rid] = n + 1
             st["message"] = f"AI is fixing the {label} (fix {n + 1} of {MAX_FIXES})"
             run["phase"] = st["message"]
@@ -1762,6 +1795,7 @@ class AutoBookService(_Runner):
                            run["settings"].get("slot_id"))
             for k in ("started", "status", "retry_busy", "check", "on_wait"):
                 setattr(fj, k, getattr(job, k))
+            fj.check_problems = (run.get("fix_refusals") or {}).pop(rid, None) or []  # 🩹 the last fix's refusals
             try:
                 with ai_activity.doing(f"Fixing {what} (fix {n + 1} of {MAX_FIXES})",
                                        done=f"Fixed {what} (fix {n + 1} of {MAX_FIXES})"):
@@ -1770,9 +1804,135 @@ class AutoBookService(_Runner):
             except AkoweError as exc:
                 if exc.code in ("TIMEOUT",) or exc.code in BUSY_CODES or exc.code == "CAPABILITY_UNAVAILABLE":
                     self._ai_problem(exc, f"fixing the {label}", record_id=rid, chapter_id=chapter_id)
+                refused = list(getattr(exc, "check_problems", None) or [])
+                if refused:  # 🩹 the next fix is told exactly what Akọwe's checks refused in this one
+                    run.setdefault("fix_refusals", {})[rid] = refused[:12]
+                self._loop_log(run, head, "fix_failed", code=exc.code, rules=rule_codes(refused))
                 self.event(run, "fix_failed", f"The AI's fix of the {label} did not pass Akọwe's checks; "
                                               "nothing was saved", code=exc.code, record_id=rid)
             self.save(run)
+
+    @staticmethod
+    def _not_passed(head, label: str, verdict: str, review: dict, chapter_id: str | None) -> StepProblem:
+        """The reviewer still objects after the fixes: the author (or the AIs' vote, stand_in.py) decides."""
+        return StepProblem("REVIEW_NOT_PASSED",
+                           f"The AI reviewer still says {verdict} for the {label} after {MAX_FIXES} fixes.",
+                           "Decide: ✔ Approve anyway (your own approval), ✏️ Edit it yourself and then press "
+                           "Continue, or 🔁 Try again (the AI gets two more fixes).",
+                           record_id=head["record_id"], version=head["version"], module_id=head["module_id"],
+                           verdict=verdict, reasons=(review.get("reasons") or [])[:4], chapter_id=chapter_id,
+                           options=["approve_anyway", "edit", "retry"],
+                           # 🧑‍⚖️ Akọwe's own promise checks flagged it: only the author decides (stand_in.py)
+                           promise={"pov_tense": bool(review.get("pov_tense")),
+                                    "content_limits": bool(review.get("content_limits_breach"))})
+
+    def _loop_log(self, run, head, what: str, **info):
+        """🧾 One line per review-loop step in akowe.log: codes and counts only (never the book's text)."""
+        try:
+            bits = " ".join(f"{k}={','.join(v) if isinstance(v, list) else v}" for k, v in info.items()
+                            if v not in (None, "", []))
+            log.info("review-loop run=%s record=%s module=%s version=%s step=%s %s", run.get("id"),
+                     head.get("record_id"), head.get("module_id"), head.get("version"), what, bits)
+        except Exception:  # noqa: BLE001 - a log line never stops a book
+            pass
+
+    def _carry_review(self, run, rid: str) -> dict | None:
+        """The reviewer's last points on this record (an earlier version): what a repair must still answer."""
+        t = (run.get("review_trail") or {}).get(rid)
+        if not isinstance(t, dict) or t.get("verdict") not in ("REVISE", "REJECT"):
+            return None
+        return dict(t.get("review") or {}, verdict=t["verdict"])
+
+    def _repair_refused(self, run, st, head, label: str, probs: list, chapter_id: str | None = None) -> bool:
+        """🩹 Akọwe's checks refused this AI version: ask the AI to repair exactly what they refused (at most
+        MAX_REPAIRS times per version that passed). True: a repaired version was saved (check it again). False:
+        not repairable here (the author's own text, an old source pin, no repairs left, the AI failed)."""
+        rid = head["record_id"]
+        rules = {str(p).split(":", 1)[0].strip() for p in probs or []}
+        if not probs or (rules and rules <= STALE_RULES) or not self._ai_made(run, head):
+            return False
+        from .review import MAX_DATA_CHARS  # noqa: PLC0415
+        try:
+            big = len(json.dumps(head.get("data"), ensure_ascii=False)) > MAX_DATA_CHARS
+        except (TypeError, ValueError):
+            big = True
+        if big:  # the fixer would only see part of it, and could not send the whole record back: written again instead
+            self._loop_log(run, head, "repair_skipped", why="too_big")
+            return False
+        reps = run.setdefault("check_repairs", {})
+        n = int(reps.get(rid, 0))
+        if n >= MAX_REPAIRS:
+            return False
+        reps[rid] = n + 1
+        msg = f"Akọwe's checks refused the {label}; the AI is repairing exactly that (repair {n + 1} of {MAX_REPAIRS})"
+        st["message"] = msg
+        run["phase"] = msg
+        self.event(run, "repair", msg + ": " + "; ".join(str(p) for p in probs)[:300], record_id=rid,
+                   code="CHECKS_REPAIR")
+        self._loop_log(run, head, "repair", n=f"{n + 1}/{MAX_REPAIRS}", rules=rule_codes(probs))
+        self.save(run)
+        job = self._job(run, "fix", head["module_id"])
+        fj = ReviewJob("fix", run["principal"], run["project_id"], run["branch_id"], [rid],
+                       run["settings"].get("slot_id"))
+        for k in ("started", "status", "retry_busy", "check", "on_wait"):
+            setattr(fj, k, getattr(job, k))
+        fj.check_problems = list(probs) + list((run.get("fix_refusals") or {}).pop(rid, None) or [])
+        fj.carry_review = self._carry_review(run, rid)
+        what = the(ai_activity.nice(label))
+        try:
+            with ai_activity.doing(f"Repairing {what}", done=f"Repaired {what}"):
+                self._review._run_fix(fj)
+        except AkoweError as exc:
+            if exc.code in ("TIMEOUT",) or exc.code in BUSY_CODES or exc.code == "CAPABILITY_UNAVAILABLE":
+                self._ai_problem(exc, f"repairing the {label}", record_id=rid, chapter_id=chapter_id)
+            refused = list(getattr(exc, "check_problems", None) or [])
+            self._loop_log(run, head, "repair_failed", code=exc.code, rules=rule_codes(refused))
+            if refused:
+                run.setdefault("fix_refusals", {})[rid] = refused[:12]
+            self.save(run)
+            return self._repair_refused(run, st, head, label, probs, chapter_id)  # the next repair (or False)
+        new = self.bp(run).rec(rid)
+        if new is not None:
+            run.setdefault("made", {})[rid] = new["version"]  # the AI made this revision (never the author's)
+        self.event(run, "repair_done", f"The AI repaired the {label}; Akọwe checks it again", record_id=rid)
+        self.save(run)
+        return True
+
+    def _back_to_good(self, run, st, head, label: str, chapter_id: str | None) -> bool:
+        """🩹 The AI's fix broke Akọwe's checks and its repairs did not mend it: put back the last version that
+        passed them (a new version with its text), then the reviewer's objection goes to the story doctor (plot,
+        outline) or to the author / the AIs' vote as REVIEW_NOT_PASSED — never a stop on a broken draft.
+        False: there is no earlier good version (a first draft: it is written again as before)."""
+        rid = head["record_id"]
+        good = int((run.get("last_good") or {}).get(rid) or 0)
+        if not good or good >= int(head["version"]) or not self._ai_made(run, head):
+            return False
+        bp = self.bp(run)
+        try:
+            old = self.store.get_record(run["project_id"], run["branch_id"], rid, good)
+            resp = bp.dispatch(head["module_id"], "UPDATE", base_ref=head["ref"],
+                               payload=copy.deepcopy((old or {}).get("data") or {}))
+        except Exception:  # noqa: BLE001 - could not put it back: the usual stop, with the checks' reasons
+            log.exception("make-a-book run %s: could not put back version %s of %s", run["id"], good, rid)
+            return False
+        if resp.get("status") != "DRAFT" or not resp.get("output_refs"):
+            self._loop_log(run, head, "restore_refused", rules=rule_codes(problems(resp)))
+            return False
+        back = bp.rec(rid)
+        (run.get("check_repairs") or {}).pop(rid, None)
+        self._loop_log(run, back, "restored", good=good)
+        self.event(run, "restore", f"The AI's fix broke Akọwe's checks for the {label}, so the last version that "
+                                   f"passed them (version {good}) is back, as version {back['version']}",
+                   record_id=rid, code="FIX_UNDONE")
+        self.save(run)
+        review = self._carry_review(run, rid) or {"verdict": "REVISE", "reasons": []}
+        run.setdefault("fix_counts", {})[rid] = MAX_FIXES  # the fixes are used up: the objection is decided now
+        if back["module_id"] in ("B03", "B11"):
+            from . import story_doctor  # noqa: PLC0415 - 🩺 the plan's quality gate takes the objections
+            took = story_doctor.take_objections(self, run, st, back, label, review, None)
+            if took is not None:
+                return True  # approved for the doctor's revision: the loop returns it
+        raise self._not_passed(back, label, review.get("verdict") or "REVISE", review, chapter_id)
 
     def _loop_decision(self, run, head, label: str, review: dict, chapter_id: str | None) -> StepProblem | None:
         """🔁 Loop detection (review_loop.py). Remembers each record's last review; when the same finding comes back

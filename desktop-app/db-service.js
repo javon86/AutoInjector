@@ -23,7 +23,8 @@ function init(userDataDir) {
     const { openDatabase } = require('./shared/db');
     const { MessageLog } = require('./shared/message-log');
     const file = path.join(userDataDir || __dirname, 'autoinjector-shared.db');
-    _db = openDatabase(file);
+    const report = {};
+    _db = openDatabase(file, { report });
     _log = new MessageLog(_db);
     _log.ensureProject(PROJECT_ID, 'AutoInjector session');
     // The rest of the shared stores, all on the same database.
@@ -36,6 +37,8 @@ function init(userDataDir) {
     _readpos = new ReadPositions(_db);
     _baselines = new Baselines(_db);
     _status = { available: true, file, count: _safeCount() };
+    // 🩹 the file was damaged and has been repaired at this start (codes and counts only)
+    if (report.repaired) _status.repaired = { how: report.how, damagedCopy: report.damagedCopy || null, snapshot: report.snapshot || null, salvagedRows: report.salvagedRows || 0, skippedRows: report.skippedRows || 0 };
   } catch (e) {
     _db = null; _log = null; _memory = null; _search = null; _artifacts = null; _readpos = null; _baselines = null;
     _status = { available: false, reason: String((e && e.message) || e) };

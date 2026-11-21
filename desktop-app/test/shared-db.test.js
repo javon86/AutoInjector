@@ -80,18 +80,67 @@ function testCorruptionRestoresSnapshot() {
   d.close();
 }
 
-function testCorruptionNoSnapshotRefuses() {
-  console.log('\n== MDC-001: with no snapshot, a corrupt database refuses to start dirty ==');
+function testCorruptionNoSnapshotStartsFresh() {
+  console.log('\n== MDC-001: with no snapshot, a corrupt database is set aside (kept) and a fresh one starts ==');
   const f = tmpFile('e.db');
   db.openDatabase(f).close();
-  // Remove the pre-migration snapshot too, so there is genuinely nothing to
-  // restore from — the true "refuse to start dirty" path.
+  // Remove every snapshot, so there is genuinely nothing to restore from.
   for (const snap of db.listSnapshots(f)) { try { fs.unlinkSync(snap); } catch (_) {} }
   for (const side of ['-wal', '-shm']) { try { fs.unlinkSync(f + side); } catch (_) {} }
   fs.writeFileSync(f, Buffer.from('garbage, and no snapshot exists'));
-  let threw = false;
-  try { db.openDatabase(f); } catch (_) { threw = true; }
-  assert(threw, 'refuses to open a corrupt database when there is nothing good to restore');
+  const report = {};
+  let d = null, threw = null;
+  try { d = db.openDatabase(f, { report }); } catch (e) { threw = e; }
+  assert(!threw && d, 'a corrupt database with nothing to restore no longer stops the app');
+  assert(report.repaired && report.how === 'fresh' && report.salvagedRows === 0, 'the report says: repaired, a fresh database (nothing readable)');
+  const aside = fs.readdirSync(path.dirname(f)).filter((n) => n.startsWith('e.db.damaged-') && !/-(wal|shm)$/.test(n));
+  assert(aside.length === 1 && /garbage/.test(fs.readFileSync(path.join(path.dirname(f), aside[0]), 'utf8')), 'the damaged file is kept beside it, not deleted');
+  const log = new MessageLog(d);
+  log.ensureProject('P9', 'P9');
+  log.append({ projectId: 'P9', from: 'user', body: 'works again' });
+  assert(log.read('P9').length === 1, 'the fresh database works');
+  d.close();
+}
+
+function testCorruptionSalvagesReadableRows() {
+  console.log('\n== a damaged database: every row that can still be read is copied into the fresh one ==');
+  const { DatabaseSync } = require('node:sqlite');
+  const f = tmpFile('s.db');
+  let d = db.openDatabase(f);
+  const log = new MessageLog(d);
+  log.ensureProject('P2', 'P2');
+  for (let i = 0; i < 200; i++) log.append({ projectId: 'P2', from: 'user', body: `message ${i}` });
+  d.close();
+  for (const snap of db.listSnapshots(f)) { try { fs.unlinkSync(snap); } catch (_) {} }
+  // damage it the way a crash can: an index points at the wrong page (integrity_check fails; the table still reads)
+  const raw = new DatabaseSync(f);
+  const rp = raw.prepare("SELECT rootpage FROM sqlite_master WHERE name = 'projects'").get().rootpage;
+  raw.exec('PRAGMA writable_schema=ON');
+  raw.prepare("UPDATE sqlite_master SET rootpage = ? WHERE name = 'idx_messages_project_seq'").run(rp);
+  raw.close();
+  const report = {};
+  d = db.openDatabase(f, { report });
+  const rows = new MessageLog(d).read('P2');
+  assert(report.repaired && report.how === 'fresh', 'the damage is found at start and repaired');
+  assert(rows.length === 200 && rows[199].body === 'message 199', `all 200 readable messages are saved (${rows.length}, report ${report.salvagedRows})`);
+  assert(d.prepare('PRAGMA integrity_check').get().integrity_check === 'ok', 'the new database is undamaged');
+  d.close();
+}
+
+function testDailySnapshot() {
+  console.log('\n== one snapshot a day, the newest 3 kept ==');
+  const f = tmpFile('day.db');
+  const t0 = Date.parse('2026-11-01T10:00:00Z');
+  db.openDatabase(f, { now: t0 }).close();
+  const daily = () => db.listSnapshots(f).filter((s) => /snap-daily-/.test(s));
+  assert(daily().length === 1, 'the first start takes a snapshot');
+  db.openDatabase(f, { now: t0 + 3600e3 }).close();
+  assert(daily().length === 1, 'a second start the same day does not');
+  for (let i = 1; i <= 5; i++) {
+    for (const s of daily()) fs.utimesSync(s, new Date(t0 - 2 * 86400e3), new Date(t0 - 2 * 86400e3 - i * 1000)); // age them
+    db.openDatabase(f, { now: t0 + i * 86400e3 }).close();
+  }
+  assert(daily().length === 3, `only the newest 3 daily snapshots are kept (${daily().length})`);
 }
 
 // ---- SCS-003: routing status handles multi-recipient fan-out sends ----------
@@ -208,7 +257,9 @@ async function main() {
   testMigrationsAreIdempotent();
   testSurvivesRestart();
   testCorruptionRestoresSnapshot();
-  testCorruptionNoSnapshotRefuses();
+  testCorruptionNoSnapshotStartsFresh();
+  testCorruptionSalvagesReadableRows();
+  testDailySnapshot();
   testAllSourcesOneOrderedLog();
   testMultiTargetRoutingStatus();
   testFailedWriteParkedNotPartial();

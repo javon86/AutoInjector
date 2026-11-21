@@ -8756,6 +8756,8 @@ function renderRun() {
   const ctl = h('div', { class: 'form-actions mb-controls' });
   if (['running', 'waiting', 'queued'].includes(r.status)) ctl.appendChild(h('button', { type: 'button', class: 'big', 'data-testid': 'mb-pause', onclick: () => runAction('pause', {}, 'Pausing') }, '⏸ Pause'));
   if (['paused', 'interrupted'].includes(r.status) || (r.status === 'pausing' && !r.alive)) ctl.appendChild(h('button', { type: 'button', class: 'primary big', 'data-testid': 'mb-resume', onclick: () => runAction('resume', {}, 'Resumed') }, '▶ Resume'));
+  // ⏰ a long wait (usage limits, a busy AI, a second AI): try the AI again now instead of waiting for the next look
+  if (r.status === 'waiting' && r.alive !== false) ctl.appendChild(h('button', { type: 'button', class: 'big', 'data-testid': 'mb-try-now', title: 'Stop waiting and try the AI again now (if it is still busy, the wait starts again)', onclick: () => runAction('resume', {}, 'Trying the AI again now') }, '⏰ Try the AI now'));
   if (!['done', 'cancelled'].includes(r.status)) {
     ctl.appendChild(h('button', { type: 'button', class: 'danger', 'data-testid': 'mb-cancel', onclick: async () => {
       const ok = await choiceDialog('Cancel this run?', 'The book made so far stays in My books (you can finish it by hand in Book home). This cannot be resumed.', [{ id: 'yes', label: '✖ Yes, cancel it' }]);

@@ -11192,7 +11192,7 @@ app.whenReady().then(() => {
   loadPersistedState();
   try { alfredAppActions.setFeature("lockers", lockersOn()); logEvent("lockers-switch", { enabled: lockersOn(), saved: state.lockers.enabled, forcedByEnv: lockersSwitch.envOverride(process.env) != null, at: "startup" }); } catch (_) {} // 📁 hidden unless switched on
   selfRepairApplySettings(); // P18.1: the saved check-in interval
-  try { const s = dbService.init(userDataDir()); logEvent("db-init", { available: s.available, reason: s.reason }); }
+  try { const s = dbService.init(userDataDir()); logEvent("db-init", Object.assign({ available: s.available, reason: s.reason }, s.repaired ? { repaired: s.repaired } : {})); }
   catch (e) { logEvent("db-init-error", { error: String(e) }); }
   try {
     const r = outputManager.init(contentBaseFolder()); logEvent("output-init", { root: r });
