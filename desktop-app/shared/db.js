@@ -242,14 +242,112 @@ function restoreLatestSnapshot(file) {
   for (const snap of listSnapshots(resolved)) {
     // Sidecar WAL/SHM files would otherwise shadow the restored copy.
     for (const side of ['-wal', '-shm']) { try { fs.unlinkSync(resolved + side); } catch (_) {} }
-    fs.copyFileSync(snap, resolved);
-    // Verify the restored copy really is clean before accepting it.
-    const db = _connect(resolved);
-    const ok = _integrityOk(db);
-    db.close();
+    try { fs.copyFileSync(snap, resolved); } catch (_) { continue; }
+    // Verify the restored copy really is clean before accepting it. A snapshot that is itself damaged can fail
+    // at connect time (not a database): try the next one instead of giving up.
+    let ok = false;
+    try { const db = _connect(resolved); ok = _integrityOk(db); db.close(); } catch (_) { ok = false; }
     if (ok) return snap;
   }
   return null;
+}
+
+const KEEP_DAMAGED = 2;      // damaged copies kept beside the database (newest first), for a later rescue
+const KEEP_DAILY = 3;        // daily snapshots kept
+const DAILY_MS = 24 * 3600 * 1000;
+
+function _stamp(now) {
+  return new Date(now).toISOString().replace(/[-:]/g, '').replace(/\..*$/, '').replace('T', '-');
+}
+
+/** Move a damaged database (and its WAL/SHM sidecars) aside as <file>.damaged-<stamp>; keep the newest few. */
+function setAsideDamaged(file, now = Date.now()) {
+  const resolved = path.resolve(file);
+  const dest = `${resolved}.damaged-${_stamp(now)}`;
+  try { fs.renameSync(resolved, dest); } catch (_) {
+    try { fs.copyFileSync(resolved, dest); fs.unlinkSync(resolved); } catch (_) { return null; }
+  }
+  for (const side of ['-wal', '-shm']) {
+    try { fs.renameSync(resolved + side, dest + side); } catch (_) { try { fs.unlinkSync(resolved + side); } catch (_) {} }
+  }
+  const dir = path.dirname(resolved);
+  const base = path.basename(resolved) + '.damaged-';
+  let names = [];
+  try { names = fs.readdirSync(dir).filter((n) => n.startsWith(base) && !/-(wal|shm)$/.test(n)); } catch (_) {}
+  names.sort().reverse();
+  for (const n of names.slice(KEEP_DAMAGED)) {
+    for (const side of ['', '-wal', '-shm']) { try { fs.unlinkSync(path.join(dir, n + side)); } catch (_) {} }
+  }
+  return dest;
+}
+
+/** The ordinary tables of an open database (no SQLite internals, no full-text index tables: those are rebuilt). */
+function _plainTables(db, schema = 'main') {
+  const rows = db.prepare(`SELECT name, sql FROM ${schema}.sqlite_master WHERE type = 'table'`).all();
+  const virt = rows.filter((r) => /^CREATE VIRTUAL TABLE/i.test(r.sql || '')).map((r) => r.name);
+  return rows.map((r) => r.name).filter((n) => !n.startsWith('sqlite_') && !virt.includes(n)
+    && !virt.some((v) => n.startsWith(v + '_')));
+}
+
+function _cols(db, schema, table) {
+  return db.prepare(`PRAGMA ${schema}.table_info("${table.replace(/"/g, '""')}")`).all().map((c) => c.name);
+}
+
+/**
+ * Copy every row that can still be read from a damaged database into a fresh, migrated one (same table names,
+ * the columns both have). A table that cannot be read whole is copied row by row, skipping the unreadable rows.
+ * Never throws. Returns {tables, rows, skipped}.
+ */
+function salvageInto(db, damagedFile) {
+  const out = { tables: 0, rows: 0, skipped: 0 };
+  let attached = false;
+  try {
+    db.exec('PRAGMA foreign_keys=OFF');
+    db.prepare('ATTACH DATABASE ? AS old').run(damagedFile);
+    attached = true;
+    let oldTables = [];
+    try { oldTables = _plainTables(db, 'old'); } catch (_) { return out; }
+    for (const t of _plainTables(db, 'main')) {
+      if (!oldTables.includes(t)) continue;
+      let cols = [];
+      try { const have = _cols(db, 'old', t); cols = _cols(db, 'main', t).filter((c) => have.includes(c)); } catch (_) { continue; }
+      if (!cols.length) continue;
+      const q = (n) => `"${n.replace(/"/g, '""')}"`;
+      const list = cols.map(q).join(', ');
+      const before = db.prepare(`SELECT COUNT(*) AS n FROM main.${q(t)}`).get().n;
+      try {
+        db.exec(`INSERT OR IGNORE INTO main.${q(t)} (${list}) SELECT ${list} FROM old.${q(t)}`);
+      } catch (_) {
+        // The table can't be read in one go: row by row, by rowid, skipping what can't be read
+        let ids = [];
+        try { ids = db.prepare(`SELECT rowid AS id FROM old.${q(t)}`).all().map((r) => r.id); } catch (_) { ids = []; }
+        const ins = db.prepare(`INSERT OR IGNORE INTO main.${q(t)} (${list}) SELECT ${list} FROM old.${q(t)} WHERE rowid = ?`);
+        for (const id of ids) { try { ins.run(id); } catch (_) { out.skipped += 1; } }
+      }
+      const after = db.prepare(`SELECT COUNT(*) AS n FROM main.${q(t)}`).get().n;
+      if (after > before) { out.tables += 1; out.rows += after - before; }
+    }
+  } catch (_) {
+    // nothing could be read: the fresh database stays empty
+  } finally {
+    if (attached) { try { db.exec('DETACH DATABASE old'); } catch (_) {} }
+    try { db.exec('PRAGMA foreign_keys=ON'); } catch (_) {}
+  }
+  return out;
+}
+
+/** At most one snapshot a day (VACUUM INTO, safe while in use); keeps the newest KEEP_DAILY. Never throws. */
+function dailySnapshot(db, file, now = Date.now()) {
+  try {
+    const resolved = path.resolve(file);
+    const daily = listSnapshots(resolved).filter((s) => /\.snap-daily-/.test(s));
+    if (daily.length && now - fs.statSync(daily[0]).mtimeMs < DAILY_MS) return null;
+    const dest = snapshot(db, snapshotPathFor(resolved, `daily-${_stamp(now)}`));
+    for (const old of listSnapshots(resolved).filter((s) => /\.snap-daily-/.test(s)).slice(KEEP_DAILY)) {
+      try { fs.unlinkSync(old); } catch (_) {}
+    }
+    return dest;
+  } catch (_) { return null; }
 }
 
 function _userVersion(db) {
@@ -294,13 +392,18 @@ function migrate(db, migrations, file) {
 
 /**
  * Open (creating if needed), self-heal on corruption, and migrate the database.
+ * On corruption it never runs on the damaged data: the damaged file is moved aside (<file>.damaged-<stamp>, kept),
+ * then the newest good snapshot is restored; with none, a fresh database is made and every row that can still be
+ * read from the damaged copy is copied into it. What happened goes into opts.report ({repaired, how, ...}).
  * @param {string} file  path to the .db file
- * @param {{migrations?:string[]}} [opts]
+ * @param {{migrations?:string[], report?:object, now?:number, daily?:boolean}} [opts]
  * @returns {import('node:sqlite').DatabaseSync}
  */
 function openDatabase(file, opts = {}) {
   ensureParent(file);
   const existed = fs.existsSync(file);
+  const report = opts.report || {};
+  const migrations = opts.migrations || MIGRATIONS;
   let db = null;
 
   try {
@@ -313,20 +416,35 @@ function openDatabase(file, opts = {}) {
     db = null;
     // A brand-new file that cannot open is a genuine error, not corruption.
     if (!existed) throw e;
-    // Refuse to run on damaged data. Try the last good snapshot; if there is
-    // none, fail loudly instead of silently corrupting further.
+    report.repaired = true;
+    report.problem = String((e && e.message) || e).slice(0, 120);
+    const damaged = setAsideDamaged(file, opts.now);
+    report.damagedCopy = damaged ? path.basename(damaged) : null;
     const restored = restoreLatestSnapshot(file);
-    if (!restored) {
-      throw new Error(`database at ${file} is corrupt and no snapshot is available — refusing to start dirty`);
-    }
-    db = _connect(file);
-    if (!_integrityOk(db)) {
-      db.close();
-      throw new Error(`database at ${file} is corrupt and the restored snapshot is also damaged`);
+    if (restored) {
+      report.how = 'snapshot';
+      report.snapshot = path.basename(restored);
+      db = _connect(file);
+      // …plus what is newer in the damaged copy and can still be read (the snapshot's own rows win)
+      migrate(db, migrations, null);
+      const got = damaged ? salvageInto(db, damaged) : { tables: 0, rows: 0, skipped: 0 };
+      report.salvagedRows = got.rows;
+      report.skippedRows = got.skipped;
+    } else {
+      // No good snapshot: a fresh database, with every row that can still be read from the damaged copy
+      for (const side of ['', '-wal', '-shm']) { try { fs.unlinkSync(path.resolve(file) + side); } catch (_) {} }
+      db = _connect(file);
+      migrate(db, migrations, null);
+      const got = damaged ? salvageInto(db, damaged) : { tables: 0, rows: 0, skipped: 0 };
+      report.how = 'fresh';
+      report.salvagedRows = got.rows;
+      report.salvagedTables = got.tables;
+      report.skippedRows = got.skipped;
     }
   }
 
-  migrate(db, opts.migrations || MIGRATIONS, file);
+  migrate(db, migrations, file);
+  if (opts.daily !== false) dailySnapshot(db, file, opts.now);
   return db;
 }
 
@@ -338,5 +456,8 @@ module.exports = {
   snapshotPathFor,
   listSnapshots,
   restoreLatestSnapshot,
+  setAsideDamaged,
+  salvageInto,
+  dailySnapshot,
   schemaVersion: _userVersion,
 };
