@@ -145,7 +145,6 @@ const NEEDS_EXACTLY_THREE = new Set(["devil-angel", "chargeback", "rotation", "b
 // #window-titlebar (38px + 1px border), which holds the expand button. The OS
 // frame (native title bar + borders, DPI-dependent on Windows) is added at runtime.
 const COLLAPSED_HEIGHT = 39;
-const MAX_DEBUG_LOG_LINES = Math.max(2000, MAX_LOG + 1000); // the on-disk log keeps at least as much as the in-memory one
 const SAVE_DEBOUNCE_MS = Number(process.env.AUTOINJECTOR_SAVE_DEBOUNCE_MS) || 500;
 // PR #123: the state file is written at most this often (in the background). Tests that shorten the debounce get the
 // same short gap, so they don't wait seconds for the file.
@@ -616,21 +615,35 @@ function validateManagerAction(decision) {
 // something to troubleshoot from, since the in-memory state.log ring buffer
 // (MAX_LOG entries) is lost the moment the process dies. Best-effort only —
 // any failure here (permissions, disk full) must never crash the app.
-let debugLogLineCount = 0;
+// 🧾 Rotating files, not a line cap: the old cap trimmed by a per-start counter, so the file grew across starts and
+// then dropped the start of a long run. Now each file holds up to DEBUG_LOG_MAX_BYTES and the older ones are kept as
+// autoinjector-debug.1.log … .N.log (newest first), so a whole multi-day book run stays readable.
+const DEBUG_LOG_MAX_BYTES = 8 * 1024 * 1024;
+const DEBUG_LOG_KEEP = 4;
+let debugLogAppends = 0;
+function debugLogOldPath(n) { return path.join(userDataDir(), `autoinjector-debug.${n}.log`); }
+function rotateDebugLog() {
+  try {
+    const st = fs.statSync(debugLogPath());
+    if (st.size < DEBUG_LOG_MAX_BYTES) return false;
+    try { fs.unlinkSync(debugLogOldPath(DEBUG_LOG_KEEP)); } catch {}
+    for (let n = DEBUG_LOG_KEEP - 1; n >= 1; n--) { try { fs.renameSync(debugLogOldPath(n), debugLogOldPath(n + 1)); } catch {} }
+    fs.renameSync(debugLogPath(), debugLogOldPath(1));
+    return true;
+  } catch { return false; }
+}
 function appendDebugLog(entry) {
   try {
+    if (debugLogAppends++ % 200 === 0) rotateDebugLog(); // a size check every 200 lines (and at the first one)
     fs.appendFileSync(debugLogPath(), JSON.stringify(entry) + "\n");
-    debugLogLineCount++;
-    if (debugLogLineCount > MAX_DEBUG_LOG_LINES * 1.2) trimDebugLog();
   } catch {}
 }
-function trimDebugLog() {
-  try {
-    const lines = fs.readFileSync(debugLogPath(), "utf8").split("\n").filter(Boolean);
-    const kept = lines.slice(-MAX_DEBUG_LOG_LINES);
-    fs.writeFileSync(debugLogPath(), kept.join("\n") + "\n");
-    debugLogLineCount = kept.length;
-  } catch {}
+/** Every debug log file, oldest first (the rotated ones, then the current one). */
+function debugLogFiles() {
+  const out = [];
+  for (let n = DEBUG_LOG_KEEP; n >= 1; n--) { try { if (fs.existsSync(debugLogOldPath(n))) out.push(debugLogOldPath(n)); } catch {} }
+  out.push(debugLogPath());
+  return out;
 }
 
 // The only place a turn is ever added to the visible transcript -- keeps it
@@ -5963,7 +5976,7 @@ function extractOptions() {
   const def = logExtract.defaultScope({ connected, books, now: Date.now() });
   return {
     ok: true, connected, books, current: tr.current(),
-    default: Object.assign({ include: { conversation: true, activity: true, relay: true } }, def),
+    default: Object.assign({ include: { conversation: false, activity: true, relay: true } }, def), // 🔒 the AI conversation is private: off unless ticked
     totals: { messages: state.transcript.length, events: state.log.length,
       oldestMessageAt: state.transcript.length ? state.transcript[0].ts : null }
   };
@@ -5973,21 +5986,23 @@ function extractOptions() {
 // minutes since then (the user's 2026-11-02 log: 26 events, all from the last 12 s). A time-range or book extract
 // also reads the older events from the on-disk debug log (same entries, written by appendDebugLog), older than the
 // first in-memory one so nothing is counted twice. Best-effort: a missing or damaged file just adds nothing.
-const EXTRACT_DISK_MAX_BYTES = 32 * 1024 * 1024;
+const EXTRACT_DISK_MAX_BYTES = 48 * 1024 * 1024;
 function logForExtract() {
   const firstTs = state.log.length ? state.log[0].ts : Infinity;
   let older = [];
-  try {
-    const f = debugLogPath();
-    const st = fs.statSync(f);
-    if (st.size > 0 && st.size <= EXTRACT_DISK_MAX_BYTES) {
+  let budget = EXTRACT_DISK_MAX_BYTES;
+  for (const f of debugLogFiles().reverse()) { // newest first, so the budget keeps the most recent part of a run
+    try {
+      const st = fs.statSync(f);
+      if (!(st.size > 0) || st.size > budget) continue;
+      budget -= st.size;
       for (const line of fs.readFileSync(f, "utf8").split("\n")) {
         if (!line) continue;
         let e = null; try { e = JSON.parse(line); } catch (_) { continue; }
         if (e && typeof e.ts === "number" && e.ts < firstTs && typeof e.kind === "string") older.push(e);
       }
-    }
-  } catch (_) { older = []; }
+    } catch (_) { /* a missing or damaged file adds nothing */ }
+  }
   if (!older.length) return state.log;
   older.sort((a, b) => a.ts - b.ts);
   return older.concat(state.log);
@@ -6008,8 +6023,8 @@ function buildExtract(opts) {
     book = bookId ? tr.book(String(bookId)) : null;
     if (!book) return { ok: false, error: "NO_BOOK" };
   }
-  const include = Object.assign({ conversation: true, activity: true, relay: true }, o.include || {});
-  for (const k of Object.keys(include)) include[k] = include[k] !== false;
+  const include = Object.assign({ conversation: false, activity: true, relay: true }, o.include || {}); // 🔒 conversation only when asked
+  for (const k of Object.keys(include)) include[k] = k === "conversation" ? include[k] === true : include[k] !== false;
   const r = logExtract.buildExtract({
     scope, preset, from: o.from, to: o.to, book, include,
     transcript: state.transcript, log: scope === "everything" ? state.log : logForExtract(),
@@ -6079,7 +6094,7 @@ const LOG_BUNDLE_README = [
   "",
   "Everything the program logs, gathered in one folder so you can zip it and",
   "share it for troubleshooting. Contents (whatever existed at the time):",
-  "  autoinjector-debug.log      the rolling on-disk event log (survives crashes)",
+  "  autoinjector-debug*.log     the on-disk event log (survives crashes; older parts as .1 … .4)",
   "  autoinjector-state.json     saved app state (config, transcript, settings)",
   "  autoinjector-shared.db      the conversation/memory database (SQLite)",
   "  activity-and-transcript.txt  the in-app Activity log + full transcript",
@@ -6120,7 +6135,7 @@ ipcMain.handle("logs:download-all", async () => {
     const ud = userDataDir();
     const files = [];
     const addIfExists = (p) => { try { if (p && fs.existsSync(p) && !files.includes(p)) files.push(p); } catch (_) {} };
-    addIfExists(debugLogPath());
+    for (const f of debugLogFiles()) addIfExists(f);
     addIfExists(stateFilePath());
     addIfExists(path.join(ud, "autoinjector-shared.db"));
     addIfExists(path.join(ud, "sd-recipes.json")); // 💾 the picture recipes (settings, so a "bad pictures" report shows what was used)
@@ -11109,7 +11124,26 @@ const easeApi = require("./ease-main").installEase({
 });
 // ==== end ✅ EASE OF USE ====
 
+// 🔒 One copy at a time (PR #153): a second copy fought the first over its ports (EADDRINUSE 17891, the log report)
+// and over its files. A second launch now brings the first copy's window to the front and quits. The lock is per
+// user-data folder, so a separate profile (e.g. the Money Lab copy, tests) still runs side by side.
+// AUTOINJECTOR_MULTI=1 switches the lock off.
+const _singleLock = process.env.AUTOINJECTOR_MULTI === "1" ? true : (() => { try { return app.requestSingleInstanceLock(); } catch (_) { return true; } })();
+if (!_singleLock) {
+  try { console.log("AutoInjector is already open: bringing its window to the front."); } catch (_) {}
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    try {
+      logEvent("second-copy", { action: "focused the open window" });
+      const w = typeof win !== "undefined" && win && !win.isDestroyed() ? win : null; // the main AutoInjector window
+      if (w) { if (typeof w.isMinimized === "function" && w.isMinimized()) w.restore(); w.show(); w.focus(); }
+    } catch (_) {}
+  });
+}
+
 app.whenReady().then(() => {
+  if (!_singleLock) return; // this second copy only handed over to the first
   // Windows shows a desktop notification only for an app with an id (PR #123: "your book needs you")
   try { if (process.platform === "win32" && typeof app.setAppUserModelId === "function") app.setAppUserModelId("com.autoinjector.desktop"); } catch (_) {}
   loadPersistedState();

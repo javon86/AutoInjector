@@ -19,8 +19,9 @@ const path = require('path');
 
 const MB = 1024 * 1024;
 const LIMITS = Object.freeze({
-  maxHtmlBytes: 40 * MB,       // the binder with its pictures embedded as data: URIs
-  maxBodyBytes: 48 * MB,       // the JSON around it (escaping makes it a little larger)
+  maxHtmlBytes: 120 * MB,      // the binder with its pictures embedded as data: URIs (was 40 MB: a Book Bible with many
+                               // full-size pictures did not fit — TOO_BIG in the log report; the page is printed from a file)
+  maxBodyBytes: 136 * MB,      // the JSON around it (escaping makes it a little larger)
   maxTemplateBytes: 1 * MB,    // each of header / footer (a small data: logo fits)
   maxTitleChars: 300,
   maxMarginMm: 100,

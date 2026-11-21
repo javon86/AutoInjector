@@ -2085,6 +2085,8 @@ export async function viewBinder(main, x, rest = []) {
         sameFix ? null : h('p', null, fix),
         fmt === 'pdf' || notWired ? h('p', null, 'You can still get a PDF now: press ', h('button', { type: 'button', class: 'bnd-inline-btn', onclick: () => printBinder() }, '🖨 Print'),
           ' and choose “Save as PDF” as the printer.') : null));
+      // 📄 still too big for AutoInjector's page printer: open the print window straight away (Save as PDF has no limit)
+      if (fmt === 'pdf' && /TOO_BIG/.test(code || '')) setTimeout(() => { try { printBinder(); } catch (_) { /* the button above still works */ } }, 300);
     } finally { btn.disabled = false; }
   }
 

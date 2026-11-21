@@ -344,6 +344,12 @@ class _Runner:
         ev = dict({"at": now_iso(), "kind": kind, "step": step or run.get("current"), "message": clip_words(message, 400)},
                   **{k: v for k, v in extra.items() if v is not None})
         run.setdefault("events", []).append(ev)
+        # 🧼 the whole run's counts (the journal below keeps only its newest MAX_EVENTS lines): the clean-run score
+        tally = run.setdefault("tally", {})
+        for k in (f"kind:{kind}", f"code:{ev['code']}" if ev.get("code") else None,
+                  "rewrite" if kind == "fix" and "write it again" in message else None):
+            if k:
+                tally[k] = int(tally.get(k) or 0) + 1
         if len(run["events"]) > MAX_EVENTS:
             run["events"] = run["events"][-MAX_EVENTS:]
 
@@ -1412,6 +1418,13 @@ class AutoBookService(_Runner):
                 run["problem"] = None  # a finished run has nothing left to decide
             self._retire_older(run, "finished this book")
             self.event(run, "finished", "Your book is made: PDF, EPUB and Word files are ready")
+            try:  # 🧼 how cleanly it went: one journal line for the author, one code-only line for akowe.log
+                from . import clean_run  # noqa: PLC0415
+                sc = clean_run.score(run)
+                self.event(run, "note", sc["line"], code="CLEAN_RUN_SCORE", score=sc["score"])
+                log.info(clean_run.log_line(run))
+            except Exception:  # noqa: BLE001
+                log.warning("make-a-book run %s: no clean-run score", run.get("id"))
             es = run.get("editor_summary") or {}
             if es.get("reviewed"):
                 fl = es.get("flagged") or []

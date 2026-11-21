@@ -115,10 +115,10 @@ async function main() {
   assert(opts.default.scope === "book" && opts.default.bookId === "proj-b", "default = this Akọwe book only (the current one, B)");
 
   console.log("\n== preview + save: book A only ==");
-  const pv = await call("logs:extract-preview", { scope: "book", bookId: "proj-a" });
+  const pv = await call("logs:extract-preview", { scope: "book", bookId: "proj-a", include: { conversation: true } }); // ticked: the conversation is private, off unless asked
   assert(pv.ok && pv.counts.messages === 1 && pv.counts.events >= 2, `preview counts (${JSON.stringify(pv.counts)})`);
   assert(/WHAT IS IN THIS FILE/.test(pv.preview) && /The Lighthouse Keeper/.test(pv.preview) && /^The Lighthouse Keeper - AutoInjector log - .*\.txt$/.test(pv.fileName), "preview shows the header + file name");
-  const saved = await call("logs:extract-all", { scope: "book", bookId: "proj-a" });
+  const saved = await call("logs:extract-all", { scope: "book", bookId: "proj-a", include: { conversation: true } });
   assert(saved.ok && /The Lighthouse Keeper - AutoInjector log - [0-9_-]+\.txt$/.test(saved.file) && /[\\/]logs[\\/]/.test(saved.file), `saved into logs/ with the book title in the name (${saved.file})`);
   const body = fs.readFileSync(saved.file, "utf8");
   fs.unlinkSync(saved.file);
@@ -132,10 +132,11 @@ async function main() {
   const def = await call("logs:extract-all", {});
   const dbody = fs.readFileSync(def.file, "utf8");
   fs.unlinkSync(def.file);
-  assert(def.ok && def.scope === "book" && /^Other Book - AutoInjector log/.test(path.basename(def.file)) && /BOOK_B_TEXT/.test(dbody) && !/PRIVATE_LEGAL|UNRELATED_CHAT|BOOK_A_CHAPTER/.test(dbody), "Extract with no choice saves the current book only");
+  assert(def.ok && def.scope === "book" && /^Other Book - AutoInjector log/.test(path.basename(def.file)) && /bf-reqB1/.test(dbody) && !/PRIVATE_LEGAL|UNRELATED_CHAT|BOOK_A_CHAPTER|bf-reqA1/.test(dbody), "Extract with no choice saves the current book only");
+  assert(!/BOOK_B_TEXT/.test(dbody) && /AI conversation: +not included/.test(dbody), "…and, with no choice, leaves the private AI conversation out (🔒 PR #153)");
 
   console.log("\n== time range + everything ==");
-  const tr = await call("logs:extract-all", { scope: "time", preset: "day" });
+  const tr = await call("logs:extract-all", { scope: "time", preset: "day", include: { conversation: true } });
   const tbody = fs.readFileSync(tr.file, "utf8");
   fs.unlinkSync(tr.file);
   assert(/UNRELATED_CHAT/.test(tbody) && /BOOK_A_CHAPTER/.test(tbody) && !/PRIVATE_LEGAL/.test(tbody) && /AutoInjector log - last 24 h - /.test(tr.file), "last 24 h: today's chats, not the 20-day-old private one");
@@ -148,7 +149,7 @@ async function main() {
   assert(logsDirFiles().length === 0, "no 'everything' file exists after the refusal");
   const evPv = await call("logs:extract-preview", { scope: "everything" });
   assert(evPv.ok && evPv.everything && /including older private conversations/.test(evPv.everything.text) && Number.isFinite(evPv.oldestAt), "the preview of Everything carries the same summary for the dialog's question");
-  const ev = await call("logs:extract-all", { scope: "everything", confirmEverything: true });
+  const ev = await call("logs:extract-all", { scope: "everything", confirmEverything: true, include: { conversation: true } });
   const ebody = fs.readFileSync(ev.file, "utf8");
   fs.unlinkSync(ev.file);
   assert(/PRIVATE_LEGAL/.test(ebody) && /includes ALL conversations, including older private ones/.test(ebody), "Everything has it all, with the warning in the header");
