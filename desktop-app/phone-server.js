@@ -17,11 +17,17 @@
 //   GET  /api/book/chapters        the written chapters; GET /api/book/chapters/<n> one chapter's text
 //   GET  /api/alfred · POST /api/alfred {text}
 //   POST /api/alerts/seen {id|"all"}
+//   🖥 the whole control panel (phone-pc.js):
+//   GET  /pc/ · /pc/<script>.js    the PC's own control panel page and its scripts (code only, no key needed)
+//   POST /api/ipc {channel, args}  one of the panel's own actions (only the channels its preload.js uses)
+//   GET  /api/ipc/events?since=n&wait=ms   the panel's live updates (long-poll)
+//   GET  /api/akowe/link           📚 the book app (Akọwe) on the phone: its address + a cookie the book door checks
 
 const http = require('http');
 const core = require('./phone-core');
 
 const MAX_BODY = 32 * 1024;
+const MAX_IPC_BODY = 4 * 1024 * 1024; // a panel action may carry a long prompt or a picture's settings
 
 function createPhoneServer(deps) {
   const d = deps || {};
@@ -36,6 +42,9 @@ function createPhoneServer(deps) {
   const SEC = {
     'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer', 'X-Frame-Options': 'DENY',
   };
+  // the control panel page: its own scripts (same origin), the AIs' pictures it shows (data:, blob:, the PC's https
+  // previews) — still no other site's scripts, and never inside another site's frame
+  const PC_CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' data: blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'none'";
   const CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
 
   function send(res, code, body, headers) {
@@ -46,12 +55,12 @@ function createPhoneServer(deps) {
   }
   const fail = (res, code, error, words) => send(res, code, { ok: false, error, words });
 
-  function readBody(req) {
+  function readBody(req, limit = MAX_BODY) {
     return new Promise((resolve) => {
       const chunks = [];
       let size = 0;
       let over = false;
-      req.on('data', (c) => { if (over) return; size += c.length; if (size > MAX_BODY) { over = true; resolve({ tooBig: true }); return; } chunks.push(c); });
+      req.on('data', (c) => { if (over) return; size += c.length; if (size > limit) { over = true; resolve({ tooBig: true }); return; } chunks.push(c); });
       req.on('end', () => { if (over) return; const raw = Buffer.concat(chunks).toString('utf8'); if (!raw.trim()) { resolve({ body: {} }); return; } try { resolve({ body: JSON.parse(raw) }); } catch (_) { resolve({ bad: true }); } });
       req.on('error', () => resolve({ bad: true }));
     });
@@ -85,7 +94,7 @@ function createPhoneServer(deps) {
     if (req.method === 'POST' && !originOk(req)) return fail(res, 403, 'FOREIGN_PAGE', 'Only the phone app itself may do that.');
     let body = {};
     if (req.method === 'POST') {
-      const b = await readBody(req);
+      const b = await readBody(req, path === '/api/ipc' ? MAX_IPC_BODY : MAX_BODY);
       if (b.tooBig) return fail(res, 413, 'TOO_BIG', 'That is too long.');
       if (b.bad || !b.body || typeof b.body !== 'object' || Array.isArray(b.body)) return fail(res, 400, 'BAD_REQUEST', 'The phone sent something odd — reload the app.');
       body = b.body;
@@ -116,6 +125,27 @@ function createPhoneServer(deps) {
       return out(await call(d.alfredAsk, text));
     }
     if (m === 'POST' && path === '/api/alerts/seen') return out(await call(d.alertsSeen, String(body.id || '')));
+    // 🖥 the whole control panel: the same actions the Windows panel has (phone-pc.js)
+    if (m === 'POST' && path === '/api/ipc') {
+      if (!d.ipc) return fail(res, 404, 'NOT_HERE', 'This PC has no full controls for the phone.');
+      const channel = String(body.channel || '');
+      const args = Array.isArray(body.args) ? body.args : [];
+      return out(await call(d.ipc, channel, args));
+    }
+    if (m === 'GET' && path === '/api/ipc/events') {
+      if (!d.ipcEvents) return fail(res, 404, 'NOT_HERE', 'This PC has no full controls for the phone.');
+      const q = new URL(req.url, 'http://phone').searchParams;
+      return out(await call(d.ipcEvents, Number(q.get('since')) || 0, Math.min(25000, Number(q.get('wait')) || 0)));
+    }
+    if (m === 'GET' && path === '/api/akowe/link') {
+      if (!d.akoweLink) return fail(res, 404, 'NOT_HERE', 'The book app is not on this PC.');
+      const r = await call(d.akoweLink, String(req.headers.host || ''));
+      if (r && r.ok && r.cookie) {
+        const { cookie, ...rest } = r;
+        return send(res, 200, rest, { 'Set-Cookie': `${cookie.name}=${cookie.value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000${cookie.secure ? '; Secure' : ''}` });
+      }
+      return out(r);
+    }
     return fail(res, 404, 'NOT_FOUND', 'The phone app asked for something this PC does not have — update both.');
   }
 
@@ -125,6 +155,13 @@ function createPhoneServer(deps) {
     if (req.method === 'OPTIONS') return send(res, 204, '', { 'Content-Type': 'text/plain' });
     if (path.startsWith('/api/')) return api(req, res, path);
     if (req.method !== 'GET' && req.method !== 'HEAD') return fail(res, 405, 'NOT_ALLOWED', 'Not allowed.');
+    if (path === '/pc' || path.startsWith('/pc/')) {
+      if (path === '/pc') return send(res, 302, '', { Location: '/pc/', 'Content-Type': 'text/plain' });
+      const pf = d.pcFile ? d.pcFile(path.slice(4) || '') : null; // '' = the page
+      if (!pf || pf.body == null) return fail(res, 404, 'NOT_FOUND', 'Not here.');
+      return send(res, 200, pf.body, Object.assign({ 'Content-Type': pf.type, 'Cache-Control': 'no-cache' },
+        pf.type.startsWith('text/html') ? { 'Content-Security-Policy': PC_CSP } : {}));
+    }
     const f = files[path === '/index.html' ? '/' : path];
     if (!f) return fail(res, 404, 'NOT_FOUND', 'Not here.');
     const body = typeof f.body === 'function' ? f.body() : f.body;
@@ -168,4 +205,4 @@ function createPhoneServer(deps) {
   };
 }
 
-module.exports = { createPhoneServer, MAX_BODY };
+module.exports = { createPhoneServer, MAX_BODY, MAX_IPC_BODY };

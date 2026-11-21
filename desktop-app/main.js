@@ -19,6 +19,13 @@
 // and Rotation's "UPDATED" confirmations, neither of which should ever be
 // shown to the user.
 const { app, BaseWindow, WebContentsView, ipcMain, dialog, safeStorage, Menu, shell, clipboard, powerSaveBlocker, Notification, Tray, nativeImage: electronNativeImage } = require("electron");
+// 📱🖥 Every control-panel action by its channel, so the phone's full controls (phone-pc.js) run the very same
+// handlers the Windows panel does (only the channels the panel's preload.js uses are ever called from the phone).
+const ipcHandlerMap = new Map();
+{
+  const _handle = ipcMain.handle.bind(ipcMain);
+  ipcMain.handle = (channel, fn) => { ipcHandlerMap.set(channel, fn); return _handle(channel, fn); };
+}
 require("./alfred-main").captureIpc(ipcMain); // 🎩 ALFRED HOOK: remembers each IPC handler so Alfred's app controls run the same code as the buttons
 const path = require("path");
 const fs = require("fs");
@@ -9197,6 +9204,17 @@ function phoneApp() {
     interfaces: () => require("os").networkInterfaces(),
     hostname: () => require("os").hostname(),
     tailscale: (args, ms) => runTailscale(args, ms), // 🌍 from anywhere
+    // 🖥 the whole control panel on the phone: the same handlers as the Windows panel (ipcHandlerMap)
+    ipcCall: async (channel, args) => {
+      const fn = ipcHandlerMap.get(channel);
+      if (!fn) throw new Error(`no such action: ${channel}`);
+      return fn({ sender: controlsView ? controlsView.webContents : null, fromPhone: true }, ...(args || []));
+    },
+    preloadSource: () => fs.readFileSync(path.join(__dirname, "preload.js"), "utf8"),
+    appFile: (name) => (/^[A-Za-z0-9_\-]+\.(js|html)$/.test(name) ? fs.readFileSync(path.join(__dirname, name), "utf8") : null),
+    // 📚 the book app (Akọwe) on the phone, through the phone app's door
+    akoweLink: () => { const l = akoweServer && akoweServer.startLink(); const m = l && /#token=([^&]+)/.exec(l); return m ? { token: decodeURIComponent(m[1]) } : null; },
+    akowePort: () => { try { const st = akoweServer && akoweServer.status(); return st && st.ready ? st.port : 0; } catch (_) { return 0; } },
     host: process.env.AUTOINJECTOR_PHONE_HOST || "0.0.0.0",
     port: Number(process.env.AUTOINJECTOR_PHONE_PORT) || undefined, // tests pick their own port
     log: (kind, detail) => logEvent(kind, detail),
@@ -9208,6 +9226,7 @@ function phoneApp() {
       "/manifest.webmanifest": { type: "application/manifest+json", body: manifest },
     },
   });
+  broadcastListeners.add((channel, payload) => { try { _phoneApp.pushEvent(channel, payload); } catch (_) {} }); // the panel's live updates, to the phone too
   return _phoneApp;
 }
 let phonePairWin = null;

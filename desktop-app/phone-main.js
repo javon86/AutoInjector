@@ -11,10 +11,19 @@
 //   alfred(channel, payload)                               Alfred's controls (alfred:status, alfred:ask)
 //   qr(text) → svg string · interfaces() · hostname() · log · now · fs
 //   tailscale(args, timeoutMs) → { code, out } | null   🌍 the Tailscale command line (null: Tailscale not installed)
+//   🖥 the whole control panel (phone-pc.js):
+//   ipcCall(channel, args)  run one of the panel's own actions      preloadSource()  the panel's preload.js text
+//   appFile(name) → text    controls.html / its scripts (read from the app folder)
+//   📚 akoweLink() → { token } | null                   Akọwe's access token (its start link), when it runs
+//   akowePort() → number                                Akọwe's port on this PC
 
 const path = require('path');
 const core = require('./phone-core');
 const { createPhoneServer } = require('./phone-server');
+const pc = require('./phone-pc');
+const { createAkoweDoor, doorValue, COOKIE: DOOR_COOKIE } = require('./phone-akowe-door');
+
+const DOOR_SECURE_PORT = 8443; // 🔒 the book app's secure link: https://<pc>.<tailnet>.ts.net:8443
 
 function createPhone(deps) {
   const fs = deps.fs || require('fs');
@@ -205,6 +214,11 @@ function createPhone(deps) {
     const args = on ? ['serve', '--bg', `http://127.0.0.1:${port}`] : ['serve', '--https=443', 'off'];
     let r = null;
     try { r = await deps.tailscale(args, 25000); } catch (e) { r = { code: -1, out: String((e && e.message) || e) }; }
+    const di = door.info();
+    if (r && r.code === 0 && di) { // 📚 the book app's door beside it, on :8443 (best effort: the phone app works without it)
+      const dargs = on ? ['serve', '--bg', `--https=${DOOR_SECURE_PORT}`, `http://127.0.0.1:${di.port}`] : ['serve', `--https=${DOOR_SECURE_PORT}`, 'off'];
+      try { const dr = await deps.tailscale(dargs, 25000); if (!dr || dr.code !== 0) log('phone-app', { step: 'book-door-secure-failed', code: dr ? dr.code : null }); } catch (_) { /* best effort */ }
+    }
     const out = String((r && r.out) || '');
     log('phone-app', { step: on ? 'secure-on' : 'secure-off', code: r ? r.code : null });
     if (!r || r.code !== 0) {
@@ -216,19 +230,74 @@ function createPhone(deps) {
     return Object.assign(await status(), { ok: true, words: on ? 'The secure link is on. Scan its code with your phone.' : 'The secure link is off.' });
   }
 
+  // ------------------------------------------------------------------ 🖥 the whole control panel on the phone
+  const pcQueue = pc.createEventQueue({ now });
+  let channelCache = null;
+  function channels() {
+    if (!channelCache) { try { channelCache = pc.channelsOf(deps.preloadSource ? deps.preloadSource() : ''); } catch (_) { channelCache = pc.channelsOf(''); } }
+    return channelCache;
+  }
+  /** A live update the PC's panel gets (main.js broadcast): the phone's panel gets it too, while the app is on. */
+  function pushEvent(channel, payload) {
+    if (!server.running() || !channels().on.has(channel)) return;
+    pcQueue.push(channel, payload);
+  }
+  async function ipc(channel, args) {
+    if (!deps.ipcCall || !channels().invoke.has(channel)) return { ok: false, error: 'NOT_ALLOWED', words: 'The phone can\'t do that one.' };
+    const value = await deps.ipcCall(channel, Array.isArray(args) ? args.slice(0, 8) : []);
+    return { ok: true, value: pc.jsonSafe(value) };
+  }
+  async function ipcEvents(since, waitMs) { const r = await pcQueue.wait(since, waitMs); return Object.assign({ ok: true }, r); }
+  let pageCache = null;
+  function pcFile(name) {
+    const read = (n) => { try { return deps.appFile ? deps.appFile(n) : null; } catch (_) { return null; } };
+    if (!pageCache) { const html = read('controls.html'); pageCache = html == null ? null : { html: pc.pcPage(html), scripts: pc.pageScripts(html) }; }
+    if (!pageCache) return null;
+    const js = (body) => (body == null ? null : { type: 'text/javascript; charset=utf-8', body });
+    if (name === '' || name === 'index.html') return { type: 'text/html; charset=utf-8', body: pageCache.html };
+    if (name === '__shim.js') return js(pc.shimSource());
+    if (name === '__preload.js') return js(read('preload.js'));
+    if (pageCache.scripts.has(name)) return js(read(name));
+    return null;
+  }
+
+  // ------------------------------------------------------------------ 📚 the book app (Akọwe) on the phone
+  const door = createAkoweDoor({ log, key: () => load().key, akowePort: () => (deps.akowePort ? deps.akowePort() : 0) });
+  async function akoweLink(hostHeader) {
+    let link = null;
+    try { link = deps.akoweLink ? await deps.akoweLink() : null; } catch (_) { link = null; }
+    if (!link || !link.token) return { ok: false, error: 'NO_BOOK_APP', words: 'The book app (Akọwe) isn\'t running on the PC.' };
+    const di = door.info();
+    if (!di) return { ok: false, error: 'DOOR_CLOSED', words: 'Turn the phone app off and on again on the PC.' };
+    const host = String(hostHeader || '').replace(/:\d+$/, '').replace(/^\[|\]$/g, '');
+    const dns = tsCache.val && tsCache.val.dnsName;
+    const secure = !!dns && host.toLowerCase() === String(dns).toLowerCase();
+    const url = secure ? `https://${dns}:${DOOR_SECURE_PORT}/#token=${encodeURIComponent(link.token)}`
+      : `http://${host.includes(':') ? `[${host}]` : host}:${di.port}/#token=${encodeURIComponent(link.token)}`;
+    log('phone-app', { step: 'book-app-link', secure });
+    return { ok: true, url, cookie: { name: DOOR_COOKIE, value: doorValue(load().key), secure } };
+  }
+
   // ------------------------------------------------------------------ the server, on / off
   const server = createPhoneServer({
     now, log, token: () => load().key, files: deps.files || {},
     trustedHosts: () => (tsCache.val && tsCache.val.dnsName ? [tsCache.val.dnsName] : []),
     state, chat, send, stop, bookPause, bookAnswer, chapters, chapter, alfred, alfredAsk, alertsSeen,
+    ipc: deps.ipcCall ? ipc : null, ipcEvents: deps.ipcCall ? ipcEvents : null, pcFile: deps.appFile ? pcFile : null,
+    akoweLink: deps.akoweLink ? akoweLink : null,
   });
 
   async function startServer() {
     const s = load();
     const r = await server.start({ port: s.port, host: deps.host || '0.0.0.0' });
-    if (!r.ok) log('phone-app', { step: 'start-failed', error: r.error });
+    if (!r.ok) { log('phone-app', { step: 'start-failed', error: r.error }); return r; }
+    if (deps.akoweLink) { // 📚 the book app's door, on the next port (it never stops the phone app from starting)
+      const dr = await door.start({ port: (r.port || s.port) + 1, host: deps.host || '0.0.0.0' });
+      if (!dr.ok) log('phone-app', { step: 'book-door-failed', error: dr.error });
+    }
     return r;
   }
+  async function stopAll() { await door.stop(); await server.stop(); }
 
   async function setEnabled(on) {
     const s = load();
@@ -237,7 +306,7 @@ function createPhone(deps) {
     if (s.enabled) {
       const r = await startServer();
       if (!r.ok) { s.enabled = false; save(); return Object.assign(await status(), { ok: false, error: r.error, words: r.words }); }
-    } else await server.stop();
+    } else await stopAll();
     log('phone-app', { step: s.enabled ? 'on' : 'off' });
     return Object.assign(await status(), { ok: true });
   }
@@ -292,7 +361,7 @@ function createPhone(deps) {
 
   async function startup() { const s = load(); if (s.enabled) await startServer(); }
 
-  return { setSecure, tailscaleInfo, load, status, setEnabled, newKey, startup, notice, state, chat, send, stop, bookPause, bookAnswer, chapters, chapter, alfred, alfredAsk, alertsSeen, server, phoneName, stopServer: () => server.stop() };
+  return { setSecure, tailscaleInfo, load, status, setEnabled, newKey, startup, notice, state, chat, send, stop, bookPause, bookAnswer, chapters, chapter, alfred, alfredAsk, alertsSeen, server, door, phoneName, pushEvent, ipc, ipcEvents, pcFile, akoweLink, stopServer: stopAll };
 }
 
 module.exports = { createPhone };

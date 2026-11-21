@@ -139,3 +139,9 @@ button:disabled { opacity: .45; }
 .confirm::backdrop { background: rgba(0, 0, 0, .55); }
 .confirm-row { display: flex; gap: 10px; justify-content: flex-end; margin-top: 14px; }
 .confirm-row button { flex: 1; }
+
+/* 🖥 Full controls / 📚 Book app */
+.big-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.big-btn{display:flex;flex-direction:column;align-items:flex-start;gap:4px;min-height:76px;padding:12px;border-radius:14px;border:1px solid var(--line, #2a2f3a);background:var(--card2, #1a1f29);color:inherit;font:600 16px/1.2 system-ui,sans-serif;text-align:left;cursor:pointer}
+.big-btn small{font-weight:400;font-size:12px;opacity:.75}
+@media (max-width:360px){.big-actions{grid-template-columns:1fr}}

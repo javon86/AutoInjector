@@ -55,6 +55,30 @@ async function partA(assert, browser) {
       assert(perrs.length === 0, `${device}: no page errors (${perrs.join(' | ')})`);
       await ctx.close();
     }
+    // 🖥 the whole control panel on the phone: the PC's own panel, working through the phone server
+    {
+      const ctx = await browser.newContext(Object.assign({}, playwright.devices['iPhone 13']));
+      const page = await ctx.newPage();
+      const perrs = [];
+      page.on('pageerror', (e) => perrs.push(String(e)));
+      await page.goto(`http://127.0.0.1:${port}/#k=${encodeURIComponent(key)}`);
+      await page.waitForSelector('#home-pc', { timeout: 15000 });
+      await page.click('#home-pc');
+      await page.waitForSelector('#up-zone-compose', { timeout: 20000 });
+      await page.waitForFunction(() => /Connected to the PC/.test((document.querySelector('#ai-phone-bar .st') || {}).textContent || ''), null, { timeout: 20000 });
+      const st = await page.evaluate(async () => { const s = await window.api.getState(); return { ok: !!s, keys: Object.keys(s || {}).length, hash: location.hash }; });
+      assert(st.ok && st.keys > 3 && !st.hash, 'iPhone: 🖥 Full controls opens the PC\'s own panel, and its window.api reaches the PC (the key hidden from the address)');
+      // a real action from the phone: switch an AI off and on again, and the PC sees it
+      const before = await app.evaluate(() => null);
+      const flip = await page.evaluate(async () => { const r1 = await window.api.setParticipant('gemini', false); const s1 = await window.api.getState(); const r2 = await window.api.setParticipant('gemini', true); const s2 = await window.api.getState(); const on = (s) => { const p = (s.participants || s.bridge && s.bridge.participants || []).find ? (s.participants || []).find((x) => x.id === 'gemini' || x.site === 'gemini') : null; return p ? p.enabled !== false : null; }; return { r1: !!r1, r2: !!r2, a: on(s1), b: on(s2) }; });
+      assert(flip.r1 && flip.r2, `iPhone: a panel button's action runs on the PC (switch Gemini off and on: ${JSON.stringify(flip)})`);
+      void before;
+      const sideways = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+      await shot(page, 'phone-iphone-full-controls');
+      assert(sideways <= 8, `iPhone: the full panel fits the phone's width (${sideways}px over)`);
+      assert(perrs.length === 0, `iPhone full controls: no page errors (${perrs.slice(0, 3).join(' | ')})`);
+      await ctx.close();
+    }
     const bad = await (await browser.newContext()).newPage();
     await bad.goto(`http://127.0.0.1:${port}/#k=wrong-key-wrong-key-wrong-key-xx`);
     await bad.waitForFunction(() => !document.getElementById('s-pair').hidden, null, { timeout: 10000 });
@@ -148,12 +172,64 @@ async function partB(assert, browser) {
   }
 }
 
+// 📚 the book app on the phone: a REAL Akọwe server, reached through the phone app's door
+async function partC(assert, browser) {
+  const { spawn } = require('child_process');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'phone-book-'));
+  const akPort = 47990 + Math.floor(Math.random() * 8);
+  const py = process.platform === 'win32' ? 'python' : 'python3';
+  const ak = spawn(py, ['-m', 'akowe', '--data-dir', path.join(tmp, 'data'), '--port', String(akPort), '--no-browser'], { cwd: path.join(APP_DIR, '..', 'akowe'), env: Object.assign({}, process.env, { PYTHONUNBUFFERED: '1' }) });
+  let out = '';
+  ak.stdout.on('data', (b) => { out += b; });
+  ak.stderr.on('data', (b) => { out += b; });
+  const t0 = Date.now();
+  let token = '';
+  while (Date.now() - t0 < 30000 && !token) { const m = /#token=([A-Za-z0-9_\-]+)/.exec(out); if (m) token = m[1]; else await new Promise((r) => setTimeout(r, 200)); }
+  if (!assert(!!token, 'a real Akọwe server started (its start link has the token)')) { ak.kill(); return; }
+  const pc = makeFakePc({ now: Date.now() });
+  const port = 47950;
+  const f = (n, type) => ({ type, body: () => fs.readFileSync(path.join(APP_DIR, n)) });
+  const phone = createPhone(Object.assign({ settingsFile: path.join(tmp, 'p.json'), host: '127.0.0.1', port, now: () => Date.now(),
+    files: { '/': f('phone-app.html', 'text/html; charset=utf-8'), '/phone-app.js': f('phone-app.js', 'text/javascript'), '/phone-app.css': f('phone-app.css', 'text/css'), '/icon.svg': f('phone-icon.svg', 'image/svg+xml'), '/manifest.webmanifest': { type: 'application/manifest+json', body: '{}' } },
+    akoweLink: () => ({ token }), akowePort: () => akPort }, pc.deps));
+  await phone.setEnabled(true);
+  const key = phone.load().key;
+  try {
+    for (const [device, tag] of [['iPhone 13', 'iphone'], ['Pixel 7', 'android']]) {
+      const ctx = await browser.newContext(Object.assign({}, playwright.devices[device], { colorScheme: 'dark' }));
+      const page = await ctx.newPage();
+      const perrs = [];
+      page.on('pageerror', (e) => perrs.push(String(e)));
+      await page.goto(`http://127.0.0.1:${port}/#k=${encodeURIComponent(key)}`);
+      await page.waitForSelector('#home-bookapp', { timeout: 15000 });
+      await page.click('#home-bookapp');
+      await page.waitForURL(new RegExp(`:${port + 1}/`), { timeout: 15000 });
+      await page.waitForSelector('#mab-btn', { state: 'attached', timeout: 20000 });
+      await page.waitForFunction(() => { const n = document.querySelector('#sidenav'); return n && n.children.length > 0; }, null, { timeout: 20000 });
+      await page.waitForTimeout(1200);
+      const v = await page.evaluate(() => ({ auth: !!document.querySelector('.auth-problem, [data-auth-problem]') || /access token was missing/i.test(document.body.innerText), port: location.port }));
+      assert(!v.auth && v.port === String(port + 1), `${device}: 📚 Book app opens the real Akọwe on the phone, signed in (through the door)`);
+      await shot(page, `phone-${tag}-book-app`);
+      assert(perrs.length === 0, `${device}: the book app has no page errors (${perrs.slice(0, 3).join(' | ')})`);
+      await ctx.close();
+    }
+    const stranger = await (await browser.newContext()).newPage();
+    await stranger.goto(`http://127.0.0.1:${port + 1}/#token=${token}`);
+    assert(/Open the book app from the phone app/.test(await stranger.textContent('body')), 'a browser that did not come through the phone app is turned away, even with the token');
+  } finally {
+    await phone.setEnabled(false);
+    ak.kill();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
 async function main() {
   const { assert, state } = makeAsserts();
   const browser = await playwright.chromium.launch();
   try {
     await partA(assert, browser);
     await partB(assert, browser);
+    await partC(assert, browser);
   } finally {
     await browser.close().catch(() => {});
   }

@@ -384,6 +384,13 @@
     for (const id of ['chat-text', 'alfred-text']) $(id).addEventListener('input', (e) => grow(e.target));
     $('chat-stop').addEventListener('click', async () => { const r = await api('POST', '/api/stop'); toast((r && r.words) || (r && r.ok ? 'Stopped.' : 'Could not stop them.')); });
     $('alerts-all').addEventListener('click', async () => { await api('POST', '/api/alerts/seen', { id: 'all' }); loadState(); });
+    // 🖥 the PC's whole control panel / 📚 the book app (Akọwe), on this phone
+    $('home-pc').addEventListener('click', () => { if (S.key) (opts.location || root.location).href = `/pc/#k=${encodeURIComponent(S.key)}`; });
+    $('home-bookapp').addEventListener('click', async () => {
+      const r = await api('GET', '/api/akowe/link');
+      if (r && r.ok && r.url) (opts.location || root.location).href = r.url;
+      else toast((r && r.words) || 'The book app can\'t be opened now.');
+    });
     $('reader-back').addEventListener('click', () => { S.reading = null; show('book'); });
     $('reader-prev').addEventListener('click', () => { if (S.reading) openChapter(S.reading.number - 1); });
     $('reader-next').addEventListener('click', () => { if (S.reading) openChapter(S.reading.number + 1); });
