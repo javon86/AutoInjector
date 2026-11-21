@@ -7055,7 +7055,8 @@ function characterModeField(cur, prefix) {
   show();
   return { el: h('div', { class: 'field' }, tipLabel(id, info.label, `${info.help} ${info.options.map(o => `${o.label}: ${o.about}`).join(' ')}`), s, about), get: () => s.value };
 }
-/** 📐 Story shape (story_shape.py): the shape of the story — None (the AI decides, default), Three acts, Save the Cat,
+/** 📐 Story shape (story_shape.py): the shape of the story — Five turning points (the new-book default), None (the AI
+ * decides), Three acts, Save the Cat,
  * Hero's Journey, Seven-point. Stored with the ending and style choices (choices.shape). */
 function storyShapeInfo() { return (CH.info && CH.info.story_shape) || null; }
 function storyShapeWord(v) {
@@ -7066,6 +7067,8 @@ function storyShapeWord(v) {
 function storyShapeField(cur, prefix) {
   const info = storyShapeInfo();
   if (!info) return { el: null, get: () => cur || '' };
+  // a NEW book (⚡ Make a book, 🚀 wizard) starts on the recommended shape; an existing profile shows its own choice
+  if (cur === undefined && (prefix === 'mb' || prefix === 'wz') && info.default && info.options.some(o => o.value === info.default)) cur = info.default;
   const id = `${prefix}-ch-shape`;
   const s = h('select', { id, 'data-choice': 'shape', 'data-testid': `${prefix}-story-shape` },
     info.options.map(o => h('option', { value: o.value, selected: (cur || '') === o.value }, o.label)));

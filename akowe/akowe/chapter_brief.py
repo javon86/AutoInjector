@@ -16,6 +16,7 @@
   shape and a beat falls in this chapter.
 * ``story_stage`` (📚 story_kind.py): the stage of the book's kind of story this chapter serves ("This chapter
   serves the stage “The nightmare” of this Overcoming the Monster story (chapters 9–11) …") and the kind's promise.
+* ``promises`` (📜 promise_ledger.py): the set-ups this chapter must plant and the payoffs that fall due here.
 * ``story_choices`` (P12): the author's style choices (and the ending-state matrix in the last chapter).
 * ``length`` (P15): the chapter's word target, scenes and words per scene, and whether it is written scene by scene.
 * ``narrator_style`` (P25): the author's own style card (style_card.py) when the book writes in the author's style
@@ -319,6 +320,14 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str, *
             stages = []
         if stages:
             brief["story_stage"] = stages
+        try:  # 📜 the promise ledger: what this chapter plants and which payoffs are due here
+            from . import promise_ledger  # noqa: PLC0415
+            promises = promise_ledger.writer_brief(store, pid, branch, outline, chapter_id)
+        except Exception:  # noqa: BLE001
+            log.exception("could not add the promises to the brief")
+            promises = []
+        if promises:
+            brief["promises"] = promises
         length = _length(store, pid, outline)
         if length:
             brief["length"] = length
@@ -347,6 +356,8 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str, *
             rules.append(story_shape.WRITER_RULE)
         if brief.get("story_stage"):
             rules.append(story_kind.WRITER_RULE)
+        if brief.get("promises"):
+            rules.append(promise_ledger.WRITER_RULE)
         if brief.get("character_details"):
             rules.append(RULES["character_details"])
         if brief.get("needed_details"):
@@ -471,7 +482,7 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str, *
         if not (cards or vb["cards"] or vb["others"] or pov or planned or room or fp or extra.get("story_rules")
                 or extra.get("world_texture") or extra.get("story_choices") or length or style
                 or brief.get("character_details") or main or world or fixed or brief.get("needed_details")
-                or brief.get("earlier_moments") or brief.get("story_beats") or brief.get("story_stage")
+                or brief.get("earlier_moments") or brief.get("story_beats") or brief.get("story_stage") or brief.get("promises")
                 or (tg and tg["secrets"] != [twist_guard.GENERIC])  # 🤫 real secrets alone make a brief
                 or any(k in brief for k in ("physical_state", "character_state", "two_readings", "version_changes",
                                             "previous_chapter_end", "story_so_far", "story_ledger",
@@ -483,7 +494,7 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str, *
                     if cards else None, pov=pov["record_id"] if pov else None,
                     story_rules=len(brief.get("story_rules") or []), texture=len(brief.get("world_texture") or []),
                     must_show=len(brief.get("must_show") or []), story_beats=len(beats) or None,
-                    story_stage=len(stages) or None, choices=bool(brief.get("story_choices")),
+                    story_stage=len(stages) or None, promises=len(promises) or None, choices=bool(brief.get("story_choices")),
                     length={k: length[k] for k in ("target_words", "scenes", "scene_by_scene")} if length else None,
                     pipeline=None if all(flags.values()) else {k: v for k, v in flags.items()},
                     continuity=[k for k in ("physical_state", "character_state", "two_readings", "version_changes",

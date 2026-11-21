@@ -17,18 +17,21 @@ from test_world_planned import book, chapters
 
 # ====================================================================== the template data
 def test_templates_are_plain_data_in_order():
-    assert story_shape.IDS == ("three_acts", "save_the_cat", "heros_journey", "seven_point")
-    sizes = {"three_acts": 7, "save_the_cat": 15, "heros_journey": 12, "seven_point": 7}
+    assert story_shape.IDS == ("turning_points", "three_acts", "save_the_cat", "heros_journey", "seven_point")
+    sizes = {"turning_points": 5, "three_acts": 7, "save_the_cat": 15, "heros_journey": 12, "seven_point": 7}
     for tid in story_shape.IDS:
         t = story_shape.template(tid)
         assert len(t["beats"]) == sizes[tid], tid
         ids = [b["id"] for b in t["beats"]]
         assert len(set(ids)) == len(ids)
         ats = [b["at"] for b in t["beats"]]
-        assert ats == sorted(ats) and 0 <= ats[0] and ats[-1] == 100
+        assert ats == sorted(ats) and 0 <= ats[0] and ats[-1] >= 90  # five turning points: the climax at ~90%
         for b in t["beats"]:
             assert b["name"].strip() and len(b["what"]) > 20 and b["what"][-1] in ".?"
             assert "_" not in b["name"]  # plain words, no ids
+    tp = story_shape.template("turning_points")
+    assert [b["at"] for b in tp["beats"]] == [10, 25, 50, 75, 90]
+    assert story_shape.info()["default"] == "turning_points" == story_shape.DEFAULT
     assert story_shape.template("nope") is None and story_shape.template(None) is None
     info = story_shape.info()
     assert info["options"][0]["value"] == "" and info["options"][0]["label"].startswith("None")

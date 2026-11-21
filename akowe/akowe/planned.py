@@ -45,7 +45,8 @@ NOT_INDEPENDENT = "Reviews are not independent — the same AI wrote and reviewe
 
 KIND_WORDS = {"beat": "Outline beat", "scene_obstacle": "Scene obstacle", "scene_change": "Scene change",
               "scene_goal": "Scene goal", "name": "Name on the page", "must_show": "Must show",
-              "detail": "Planned detail", "story_beat": "Story beat", "story_stage": "Story stage"}
+              "detail": "Planned detail", "story_beat": "Story beat", "story_stage": "Story stage",
+              "promise_plant": "Set-up to plant", "promise_payoff": "Payoff due"}
 
 _S = {"type": "string"}
 AI_SCHEMA = {"type": "object", "additionalProperties": False, "required": ["items"],
@@ -173,6 +174,12 @@ def planned_items(bp, outline, chapter_id: str) -> list[dict]:
                 f"{sg.get('how') or sg['what']}", stage=sg["id"])
     except Exception:  # noqa: BLE001 - optional
         log.exception("could not read the story stages")
+    try:  # 📜 the promise ledger: the set-ups this chapter plants and the payoffs that fall due here
+        from . import promise_ledger  # noqa: PLC0415
+        for pr in promise_ledger.planned(store, pid, branch, outline, chapter_id):
+            add(pr["kind"], pr["text"], label=f"{KIND_WORDS[pr['kind']]}: {pr['text']}", promise=pr["id"])
+    except Exception:  # noqa: BLE001 - optional
+        log.exception("could not read the promise ledger")
     cs = chars_mod.canon_characters(store, pid, branch)
     pov = next((c for c in cs if me["pov_id"] and me["pov_id"] in (c["subject_id"], c["record_id"])), None)
     if pov:
@@ -204,7 +211,7 @@ def planned_items(bp, outline, chapter_id: str) -> list[dict]:
 
 # H13: when there are more items than can be checked, the least important go first (never a must-show before a
 # scene goal or a planned detail); the kept items stay in their order.
-PRIORITY = {"beat": 0, "story_beat": 0, "story_stage": 0, "must_show": 1, "name": 2, "scene_change": 3, "scene_obstacle": 4, "scene_goal": 5, "detail": 6}
+PRIORITY = {"beat": 0, "story_beat": 0, "story_stage": 0, "promise_payoff": 0, "promise_plant": 1, "must_show": 1, "name": 2, "scene_change": 3, "scene_obstacle": 4, "scene_goal": 5, "detail": 6}
 
 
 def most_important(items: list[dict], n: int) -> list[dict]:
