@@ -690,3 +690,21 @@ def test_problem_table_covers_every_error_code():
     assert not missing, missing
     for extra in ("NETWORK", "HTTP_500", "REVIEW_NOT_PASSED", "INTERRUPTED", "SITE_BUSY", "NOT_APPLICABLE"):
         assert f"{extra}:" in src, extra
+
+
+def test_the_phone_reader_lists_the_chapters_and_reads_one(tmp_path):
+    """📱 The phone app's 📖 reader: GET …/chapters lists the written chapters (no text), …/chapters/<n> reads one."""
+    app = make_app(tmp_path, fake=BookFakeAI())
+    run = run_book(app, {"genre": "Mystery", "length": "short_story"})
+    assert run["status"] == "done"
+    base = f"/api/projects/{run['project_id']}/branches/main/chapters"
+    code, out = app.route("GET", base, {}, None, "author", {})
+    assert code == 200 and out["chapters"] and out["chapters"][0]["number"] == 1
+    assert all("text" not in c for c in out["chapters"]) and all(c["words"] > 0 for c in out["chapters"])
+    code, one = app.route("GET", f"{base}/1", {}, None, "author", {})
+    assert code == 200 and one["number"] == 1 and len(one["text"]) > 100 and one["of"] == len(out["chapters"])
+    with pytest.raises(Exception) as e:
+        app.route("GET", f"{base}/99", {}, None, "author", {})
+    assert getattr(e.value, "status", None) == 404 or "99" in str(e.value)
+    with pytest.raises(Exception):
+        app.route("GET", f"{base}/abc", {}, None, "author", {})

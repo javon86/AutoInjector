@@ -95,8 +95,14 @@ jobs:
       # its install-deps step also pulls the shared system libraries Electron
       # itself needs on a headless Linux runner.
       - run: npm install --no-save playwright
-      - run: npx playwright install-deps chromium
+      # 📱 the phone app's test also opens phone-sized Chromium pages (iPhone / Android), so the browser itself too
+      - run: npx playwright install --with-deps chromium
       - run: sudo apt-get install -y xvfb
+      # 📚 …and starts a real Akọwe (Python) to open the book app on those phones through the phone app's door
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -r ../akowe/requirements.txt
       # A virtual display so Electron can render; the e2e test launches the real
       # app, clicks through it, and screenshots it. `timeout` + -k guarantee the
       # step ends even if something the app started refuses to quit.

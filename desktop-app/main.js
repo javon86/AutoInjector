@@ -19,6 +19,13 @@
 // and Rotation's "UPDATED" confirmations, neither of which should ever be
 // shown to the user.
 const { app, BaseWindow, WebContentsView, ipcMain, dialog, safeStorage, Menu, shell, clipboard, powerSaveBlocker, Notification, Tray, nativeImage: electronNativeImage } = require("electron");
+// 📱🖥 Every control-panel action by its channel, so the phone's full controls (phone-pc.js) run the very same
+// handlers the Windows panel does (only the channels the panel's preload.js uses are ever called from the phone).
+const ipcHandlerMap = new Map();
+{
+  const _handle = ipcMain.handle.bind(ipcMain);
+  ipcMain.handle = (channel, fn) => { ipcHandlerMap.set(channel, fn); return _handle(channel, fn); };
+}
 require("./alfred-main").captureIpc(ipcMain); // 🎩 ALFRED HOOK: remembers each IPC handler so Alfred's app controls run the same code as the buttons
 const path = require("path");
 const fs = require("fs");
@@ -9146,9 +9153,11 @@ function lanAddress() {
 // LAN access is OFF by default (localhost only): binding to the network is a
 // deliberate opt-in, remembered in a tiny sidecar file so it survives restarts.
 function phoneLanFile() { return path.join(userDataDir(), "autoinjector-phone.json"); }
+// 📱 RETIRED: the bridge can run code and tools, so it no longer goes on the Wi-Fi from a switch (an old "on" is
+// ignored). Phones use the separate 📱 phone app server (phone-main.js), which can only do the phone's few things.
+// AUTOINJECTOR_BRIDGE_HOST=0.0.0.0 still works for someone who sets it on purpose.
 function phoneLanEnabled() {
-  if (process.env.AUTOINJECTOR_BRIDGE_HOST === "0.0.0.0") return true;
-  try { return JSON.parse(fs.readFileSync(phoneLanFile(), "utf8")).lan === true; } catch (_) { return false; }
+  return process.env.AUTOINJECTOR_BRIDGE_HOST === "0.0.0.0";
 }
 function setPhoneLanEnabled(on) { try { fs.writeFileSync(phoneLanFile(), JSON.stringify({ lan: !!on })); } catch (_) {} }
 
@@ -9162,13 +9171,98 @@ function phoneInfo() {
   return { ok: true, url, lanEnabled, lanIp: ip, port: bridgeRuntime.port, hasToken: !!token };
 }
 ipcMain.handle("phone:info", () => phoneInfo());
-ipcMain.handle("phone:set-lan", async (_evt, { enabled } = {}) => {
-  setPhoneLanEnabled(!!enabled);
-  try { await serviceBridge.stop(); } catch (_) {}
-  await startServiceBridge();
-  logEvent("phone-lan-changed", { enabled: !!enabled });
-  return phoneInfo();
+ipcMain.handle("phone:set-lan", async () => {
+  setPhoneLanEnabled(false); // retired: see phoneLanEnabled(); the 📱 Phone window (phoneapp:*) is the phone now
+  logEvent("phone-lan-changed", { enabled: false, retired: true });
+  return Object.assign(phoneInfo(), { ok: false, error: "RETIRED", words: "Use the 📱 Phone window to connect your phone." });
 });
+
+// 📱 The phone app (phone-main.js · phone-server.js · phone-app.html): its own small server on the home Wi-Fi, off
+// until turned on in the 📱 Phone window. The phone can send to the AIs and stop them, pause / continue the book and
+// answer its questions, read chapters, and talk to Alfred — nothing else (no files, no commands, no settings).
+// 🌍 The Tailscale command line (installed by the Tailscale app): { code, out } or null when Tailscale isn't installed.
+function runTailscale(args, timeoutMs) {
+  const { spawn } = require("child_process");
+  const cands = process.platform === "win32"
+    ? [path.join(process.env.ProgramFiles || "C:\\Program Files", "Tailscale", "tailscale.exe"), "tailscale.exe"]
+    : process.platform === "darwin" ? ["/Applications/Tailscale.app/Contents/MacOS/Tailscale", "tailscale"] : ["tailscale"];
+  const tryOne = (i) => new Promise((resolve) => {
+    if (i >= cands.length) { resolve(null); return; }
+    const c = cands[i];
+    if (path.isAbsolute(c) && !fs.existsSync(c)) { tryOne(i + 1).then(resolve); return; }
+    let out = "";
+    let child;
+    try { child = spawn(c, args, { windowsHide: true }); } catch (_) { tryOne(i + 1).then(resolve); return; }
+    const timer = setTimeout(() => { try { child.kill(); } catch (_) {} }, timeoutMs || 15000);
+    child.stdout.on("data", (b) => { if (out.length < 200000) out += b; });
+    child.stderr.on("data", (b) => { if (out.length < 200000) out += b; });
+    child.on("error", (e) => { clearTimeout(timer); if (e && e.code === "ENOENT") tryOne(i + 1).then(resolve); else resolve({ code: -1, out: String(e && e.message) }); });
+    child.on("close", (code) => { clearTimeout(timer); resolve({ code: code == null ? -1 : code, out }); });
+  });
+  return tryOne(0);
+}
+let _phoneApp = null;
+function phoneApp() {
+  if (_phoneApp) return _phoneApp;
+  const file = (f, type) => ({ type, body: () => { try { return fs.readFileSync(path.join(__dirname, f)); } catch (_) { return null; } } });
+  const manifest = JSON.stringify({ name: "AutoInjector", short_name: "AutoInjector", start_url: "/", display: "standalone", background_color: "#0f1115", theme_color: "#0f1115",
+    icons: [{ src: "/icon.svg", sizes: "any", type: "image/svg+xml", purpose: "any maskable" }] });
+  _phoneApp = require("./phone-main").createPhone({
+    settingsFile: path.join(userDataDir(), "autoinjector-phone-app.json"),
+    participants: () => bridgeStatus().participants,
+    replies: (o) => bridgeResponses(o),
+    sendTo: (site, text) => bridgeSendTo(site, text),
+    stopAll: () => silenceAllRelay(),
+    akowe: (method, p, body) => akoweApi(method, p, body, 8000),
+    alfred: (channel, payload) => require("./alfred-main").invokeChannel(channel, payload),
+    qr: (text) => require("qrcode").toString(text, { type: "svg", margin: 1, errorCorrectionLevel: "M" }),
+    interfaces: () => require("os").networkInterfaces(),
+    hostname: () => require("os").hostname(),
+    tailscale: (args, ms) => runTailscale(args, ms), // 🌍 from anywhere
+    // 🖥 the whole control panel on the phone: the same handlers as the Windows panel (ipcHandlerMap)
+    ipcCall: async (channel, args) => {
+      const fn = ipcHandlerMap.get(channel);
+      if (!fn) throw new Error(`no such action: ${channel}`);
+      return fn({ sender: controlsView ? controlsView.webContents : null, fromPhone: true }, ...(args || []));
+    },
+    preloadSource: () => fs.readFileSync(path.join(__dirname, "preload.js"), "utf8"),
+    appFile: (name) => (/^[A-Za-z0-9_\-]+\.(js|html)$/.test(name) ? fs.readFileSync(path.join(__dirname, name), "utf8") : null),
+    // 📚 the book app (Akọwe) on the phone, through the phone app's door
+    akoweLink: () => { const l = akoweServer && akoweServer.startLink(); const m = l && /#token=([^&]+)/.exec(l); return m ? { token: decodeURIComponent(m[1]) } : null; },
+    akowePort: () => { try { const st = akoweServer && akoweServer.status(); return st && st.ready ? st.port : 0; } catch (_) { return 0; } },
+    host: process.env.AUTOINJECTOR_PHONE_HOST || "0.0.0.0",
+    port: Number(process.env.AUTOINJECTOR_PHONE_PORT) || undefined, // tests pick their own port
+    log: (kind, detail) => logEvent(kind, detail),
+    files: {
+      "/": file("phone-app.html", "text/html; charset=utf-8"),
+      "/phone-app.js": file("phone-app.js", "text/javascript; charset=utf-8"),
+      "/phone-app.css": file("phone-app.css", "text/css; charset=utf-8"),
+      "/icon.svg": file("phone-icon.svg", "image/svg+xml"),
+      "/manifest.webmanifest": { type: "application/manifest+json", body: manifest },
+    },
+  });
+  broadcastListeners.add((channel, payload) => { try { _phoneApp.pushEvent(channel, payload); } catch (_) {} }); // the panel's live updates, to the phone too
+  return _phoneApp;
+}
+let phonePairWin = null;
+let phonePairView = null;
+function openPhonePairWindow() {
+  if (phonePairWin && phonePairView) { try { phonePairWin.focus(); } catch (_) {} return; }
+  phonePairWin = new BaseWindow({ width: 820, height: 760, resizable: true, title: "AutoInjector — 📱 Phone" });
+  phonePairView = new WebContentsView({ webPreferences: { partition: "phone-pair-ui", preload: path.join(__dirname, "preload.js"), contextIsolation: true, nodeIntegration: false } });
+  phonePairWin.contentView.addChildView(phonePairView);
+  phonePairView.webContents.loadFile(path.join(__dirname, "phone-pair.html"));
+  const layout = () => { if (!phonePairWin || !phonePairView) return; const [w, h] = phonePairWin.getContentSize(); phonePairView.setBounds({ x: 0, y: 0, width: w, height: h }); };
+  layout();
+  phonePairWin.on("resize", layout);
+  phonePairWin.on("closed", () => { phonePairWin = null; phonePairView = null; });
+}
+const phoneSafe = (fn) => async (_evt, p) => { try { return await fn(p || {}); } catch (e) { logEvent("phone-app-error", { error: String((e && e.message) || e).slice(0, 200), severity: "warn" }); return { ok: false, error: "PHONE_ERROR", words: `The phone connection hit a problem: ${e && e.message}` }; } };
+ipcMain.handle("phoneapp:window", phoneSafe(() => { openPhonePairWindow(); return { ok: true }; }));
+ipcMain.handle("phoneapp:status", phoneSafe(() => phoneApp().status()));
+ipcMain.handle("phoneapp:set-enabled", phoneSafe((p) => phoneApp().setEnabled(p.on === true)));
+ipcMain.handle("phoneapp:new-key", phoneSafe(() => phoneApp().newKey()));
+ipcMain.handle("phoneapp:secure", phoneSafe((p) => phoneApp().setSecure(p.on === true))); // 🌍 🔒 Tailscale's https link on / off
 
 async function startServiceBridge() {
   if (process.env.AUTOINJECTOR_BRIDGE === "0") return; // opt-out (tests set this)
@@ -10044,6 +10138,7 @@ function appIconImage() {
   return _appIcon;
 }
 function showAttention(n) {
+  try { if (_phoneApp) _phoneApp.notice(n); } catch (_) {} // 📱 the phone's 🔔 Alerts
   // 🔔 a book alert may quote the user's own book (for the notification only): the log keeps the codes, never its words
   logEvent("attention", n.category ? { key: n.key, category: n.category, code: n.code || "", again: !!n.again, sound: !n.silent, severity: "warn" }
     : { key: n.key, title: n.title, again: !!n.again, sound: !n.silent, note: n.body, severity: "warn" });
@@ -11144,6 +11239,7 @@ if (!_singleLock) {
 
 app.whenReady().then(() => {
   if (!_singleLock) return; // this second copy only handed over to the first
+  setTimeout(() => { try { phoneApp().startup().catch(() => {}); } catch (_) {} }, 0); // 📱 back on if it was on
   // Windows shows a desktop notification only for an app with an id (PR #123: "your book needs you")
   try { if (process.platform === "win32" && typeof app.setAppUserModelId === "function") app.setAppUserModelId("com.autoinjector.desktop"); } catch (_) {}
   loadPersistedState();

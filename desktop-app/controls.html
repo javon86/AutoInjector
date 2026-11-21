@@ -2437,7 +2437,7 @@
           <button id="btn-new-chat-all" title="Start a fresh chat in all three AIs at once (ChatGPT, Claude and Gemini)" aria-label="Start a fresh chat in all three AIs at once (ChatGPT, Claude and Gemini)">🆕 New Chat</button>
           <button id="btn-ai-toggle" class="auto-toggle" role="switch" aria-checked="false" title="Turn 🎩 Alfred on or off (the same as the 🎩 switch in the title bar). On: his side panel opens beside the app." aria-label="Turn Alfred on or off">🎩 Alfred: Off</button>
           <button id="btn-open-feed" title="Open a separate window that shows every AI's messages as colour-coded bubbles — open/close it any time" aria-label="Open a separate window that shows every AI's messages as colour-coded bubbles — open/close it any time">💬 AI Feed</button>
-          <button id="btn-open-phone" title="Connect an Android phone (or any phone) on the same Wi-Fi to watch the messages and send from your phone. The PC does all the work." aria-label="Connect a phone to view messages and send remotely">📱 Phone</button>
+          <button id="btn-open-phone" title="Your phone: see the book, answer its questions, read chapters, talk to the AIs and Alfred — on the same Wi-Fi. The PC does all the work." aria-label="Connect your phone">📱 Phone</button>
           <button id="btn-capability-test" title="🩺 Check Alfred: his AI (installed, running, answering) and the whole app (disk, Stable Diffusion, Akọwe, the AI panes) — no AI needed. The results show in his side panel, or in the Activity Log while he is off." aria-label="Check Alfred and the whole app; results in his side panel or the Activity Log">🩺 Check Alfred</button>
           <button id="btn-feature-test" title="Feature Test: walks every Active AI through every feature for real (reply, locker write/read/give/send/share, safety, routing) one step at a time, checks each result itself, and shows what works and what doesn't — plus a saved report of how each AI's replies actually end. Click again to stop." aria-label="Run the feature test on every active AI">🔬 Feature Test</button>
           <button id="btn-extract-all" title="Save the AI conversation and the activity/error log to a text file in the program's logs folder — you choose what goes in (this Akọwe book only, a time range, or everything) and see a preview first" aria-label="Extract: choose what to save (this book only, a time range, or everything) and save it to a text file">⤓ Extract All</button>
@@ -2453,19 +2453,6 @@
            wait in the approval strip until you click Run (unless Auto-run is
            on and the command is low-risk), and the output goes back to it. -->
       <div class="up-zone" id="up-zone-messages">
-       <div id="phone-panel" class="phone-panel" hidden aria-label="Phone connection">
-         <div class="phone-head"><p class="zone-label">📱 Connect your phone</p><button id="btn-phone-close" type="button" class="phone-close" title="Close (the 📱 Phone button opens it again)" aria-label="Close the phone panel">✕</button></div>
-         <label class="phone-lan-row">
-           <input type="checkbox" id="phone-lan-toggle" />
-           <span>Allow phone access on this Wi-Fi (LAN)</span>
-         </label>
-         <p id="phone-hint" class="phone-hint">Turn this on, then open the link below on your phone (same Wi-Fi). Your PC does all the work — the phone just shows the messages and lets you send.</p>
-         <input id="phone-url" class="phone-url" type="text" readonly value="" placeholder="Enable LAN access to get a link" />
-         <div class="phone-btns">
-           <button id="btn-phone-copy" title="Copy the phone link">📋 Copy link</button>
-         </div>
-         <p class="phone-warn">Anyone with this link on your network can read the messages and send. Keep it to your own phone.</p>
-       </div>
        <div class="zone-fill">
         <div class="zone-tabs" role="tablist">
           <button class="zone-tab active" id="tab-terminal" role="tab" aria-selected="true" aria-controls="term-pane">⌨ Terminal <span class="term-dot" id="term-dot" title="Shell not started"></span><span class="msg-badge term-badge" id="term-pending-badge" data-zero>0</span></button>

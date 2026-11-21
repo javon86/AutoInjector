@@ -411,28 +411,17 @@ async function testAutoBothButton() {
 }
 
 async function testPhonePanel() {
-  console.log("\n== Phone panel: reveals the connect link and toggles LAN access ==");
+  console.log("\n== 📱 Phone: the button opens the 📱 Phone window (the old bridge-on-the-Wi-Fi panel is gone) ==");
   const api = makeApi();
+  api.phoneAppOpenWindow = async () => { api.calls.push({ fn: "phoneAppOpenWindow" }); return { ok: true }; };
   const dom = await loadWindow(api);
   const doc = dom.window.document;
-
   const btn = doc.getElementById("btn-open-phone");
-  const panel = doc.getElementById("phone-panel");
-  const toggle = doc.getElementById("phone-lan-toggle");
-  const urlEl = doc.getElementById("phone-url");
-  assert(!!btn && !!panel && !!toggle && !!urlEl, "the Phone button, panel, LAN toggle and URL field all exist");
-  assert(panel.hidden === true, "the phone panel starts hidden");
-
+  assert(!!btn, "the 📱 Phone button exists");
+  assert(!doc.getElementById("phone-panel") && !doc.getElementById("phone-lan-toggle"), "the old LAN panel (it put the whole bridge on the Wi-Fi) is gone");
   btn.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
   await new Promise((r) => setTimeout(r, 20));
-  assert(panel.hidden === false, "clicking Phone reveals the panel");
-  assert(!urlEl.value, "no link is shown until LAN access is enabled");
-
-  toggle.checked = true;
-  toggle.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
-  await new Promise((r) => setTimeout(r, 20));
-  assert(api.calls.some((c) => c.fn === "phoneSetLan" && c.enabled === true), "enabling the toggle turns on LAN access via phoneSetLan");
-  assert(/\/m\?token=/.test(urlEl.value), "once LAN is on, the phone link (with its token) is shown to copy");
+  assert(api.calls.some((c) => c.fn === "phoneAppOpenWindow"), "clicking 📱 Phone opens the 📱 Phone window");
 }
 
 async function testZoomControls() {

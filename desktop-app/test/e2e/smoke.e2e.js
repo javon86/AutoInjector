@@ -45,8 +45,6 @@ async function main() {
       ['#activity-log', 'Unified activity log'],
       ['#btn-silence', 'Stop AIs Talking button'],
       ['#btn-open-phone', 'Phone companion button'],
-      ['#phone-panel', 'Phone connect panel'],
-      ['#phone-lan-toggle', 'Phone LAN-access toggle'],
       ['#btn-open-image', '🎨 Images button (opens the Images tab)'],
       ['#btn-open-video', '🎬 Video button (opens the Video tab)'],
       ['#sd-adv-server', 'Images tab → ⚙ Start & install → Advanced: another server'],

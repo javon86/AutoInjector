@@ -314,6 +314,12 @@ const EXCLUDED = {
   'akowe:regenerate-token': 'replaces the Akọwe connection key (breaks pairing) — a security decision for the user',
   'phone:info': 'the phone link carries an access token — secret',
   'phone:set-lan': 'opens the app to the local network — a security setting left to the user',
+  // 📱 the phone app (phone-main.js): pairing a phone is the owner's own decision
+  'phoneapp:window': 'opens the 📱 Phone window — the owner\'s',
+  'phoneapp:status': 'the 📱 Phone window\'s own read; it carries the pairing key — secret',
+  'phoneapp:set-enabled': 'lets phones on the Wi-Fi connect — a security setting left to the owner',
+  'phoneapp:new-key': 'un-pairs every phone — the owner\'s',
+  'phoneapp:secure': 'puts the phone app on the owner\'s Tailscale network with https — a security setting left to the owner',
   'external:open': 'opens any web address — not a direct control (specific tools open their own pages)',
   'terminal:run': 'free command execution — Alfred has no free code; Open Interpreter (optional, confirm-first, exact code shown) is the only code path',
   'terminal:input': 'free command execution (typing into the shell) — see terminal:run',

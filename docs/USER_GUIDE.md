@@ -669,6 +669,39 @@ limits with the Claude pane.
 
 Without it nothing breaks: every job goes to the web AIs, exactly as before. The ✅ Setup checklist shows its state.
 
+### 📱 Your phone
+
+Use AutoInjector from your phone at home — its own screen, made for a thumb. The PC does all the work.
+
+**Pair it (once):** on the PC press **📱 Phone** (in the side panel), tick **Let my phone connect**, and point your
+phone's camera at the code. Then add it to your home screen: iPhone **Share → Add to Home Screen**, Android
+**⋮ → Add to Home screen**. The first time, Windows may ask whether AutoInjector may use the network — choose
+**Allow** (private networks). The phone and PC must be on the same Wi-Fi.
+
+**The five tabs:**
+- **🏠 Home** — the book's progress (time left, ⏸ Pause / ▶ Continue), anything that needs you, which AIs are on.
+- **💬 Chat** — talk to ChatGPT, Claude and Gemini (tap who hears you), and a big ⏹ Stop.
+- **📖 Book** — the book's questions with big answer buttons (the same choices as the run window; "edit it
+  yourself" stays on the PC), and the chapters to read in a comfortable reader (A− / A+).
+- **🎩 Alfred** — talk to him; tick 🔊 Read aloud to hear his answers. Anything he wants to *do* still waits for
+  your OK on the PC.
+- **🔔 Alerts** — everything that needs you; the phone buzzes while the app is open.
+
+**🌍 From anywhere (Tailscale):** install the free **Tailscale** app on the PC (tailscale.com/download) and on the
+phone, and sign in to both with the same account. The 📱 Phone window then shows a second code, **From anywhere** —
+scan it once and the app works at home and away (Tailscale links only your own devices; nothing is opened to the
+internet). Better still, press **🔒 Turn on the secure link**: it makes `https://<your-pc>.<tailnet>.ts.net` through
+Tailscale (the first time, Tailscale may show a link to allow HTTPS for your account — open it, allow, press again).
+On the secure link the phone's own **🎤** works inside the app and it installs as a real app. Scan the secure code
+instead of the others. (If the plain Tailscale link doesn't open but the secure one does, that's Windows' firewall —
+the secure link goes around it.)
+
+**To talk instead of typing:** on the 🔒 secure link, tap the 🎤 next to the message box; on the plain home link,
+use the 🎤 on your phone's keyboard (phones only allow a page's microphone on secure links).
+
+**Safe by design:** it is off until you turn it on; only a phone that scanned the code can connect; the phone can't
+open, change or delete files, run commands or change settings. **🔒 Un-pair all phones** makes a new code.
+
 ## 12. When something goes wrong
 
 - **❓ Help → 🩺 Something's wrong?** looks at the AI panes, Akọwe, a running book, the AIs' usage limits, Ollama,
