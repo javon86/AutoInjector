@@ -306,6 +306,12 @@ class BookFakeAI:
         # 🗣 voice contrast (voice_contrast.py): scripted card rewrites (dicts or callables(ctx)); default: each card
         # in context.rewrite gets its own rhythm, register and phrase
         self.voice_contrast_script: list = []
+        # 🔮 predictability probe / 🎭 key scenes written twice / ⚖ head to head: scripted answers (dicts or
+        # callables(ctx)), one per call; predict_fixes counts the outline revisions asked for less expected turns
+        self.predict_script: list = []
+        self.key_scene_script: list = []
+        self.pairwise_script: list = []
+        self.predict_fixes = 0
         self.stand_in_default = {"pick": "accept", "confident": 0.9,
                                  "why": "The correction answers the reviewer's finding and agrees with the canon."}
 
@@ -374,6 +380,23 @@ class BookFakeAI:
 
     # ------------------------------------------------------------------ answers
     def _answer(self, ctx, props, schema):
+        # 🔮 / 🎭 / ⚖ (predictability.py, key_scenes.py, pairwise.py): scripted answers first; the defaults change
+        # nothing (no turn guessed, no usable second version, a tie)
+        task = ctx.get("akowe_task")
+        if task in ("predictability_probe", "key_scene_version", "pairwise"):
+            name = {"predictability_probe": "predict_script", "key_scene_version": "key_scene_script",
+                    "pairwise": "pairwise_script"}[task]
+            with self.lock:
+                lst = getattr(self, name, None) or []
+                scripted = lst.pop(0) if lst else None
+            if scripted is not None:
+                return task, scripted(ctx) if callable(scripted) else copy.deepcopy(scripted)
+            if task == "predictability_probe":
+                return task, {"predictions": [{"turn": t["turn"], "prediction": "Something nobody saw coming.",
+                                               "matches": "no"} for t in ctx.get("turns") or []]}
+            if task == "key_scene_version":
+                return task, {"approach": "", "text": ""}
+            return task, {"better": "same", "why": "Both work equally well."}
         if "rewritten_scene" in props and ctx.get("akowe_task") == "weak_scene_cut":  # 📏 cut back to its budget
             with self.lock:
                 scripted = getattr(self, "scene_cut_script", None)
@@ -642,6 +665,12 @@ class BookFakeAI:
             return "review", {"verdict": v, "reasons": [reason], "suggested_changes": [change], "confidence": 0.8}
         if "draft" in ctx and "review" in ctx:  # "Ask AI to fix it": the whole draft, one sentence revised
             data = json.loads(ctx["draft"]["data_json"])
+            if str(ctx.get("author_note") or "").startswith("🔮") and data.get("chapters"):  # 🔮 less expected turns
+                with self.lock:
+                    self.predict_fixes += 1
+                data["chapters"][-1]["summary"] = str(data["chapters"][-1].get("summary") or "") + \
+                    " (a less expected turn)"
+                return "predict_fix", data
             if str(ctx.get("author_note") or "").startswith("🩺") and data.get("chapters"):  # 🩺 the doctor's fixes
                 with self.lock:
                     self.doctor_fixes += 1

@@ -1198,6 +1198,8 @@ class AutoBookService(_Runner):
         from . import story_doctor, voice_contrast  # noqa: PLC0415 - 🩺 the plan check / 🗣 distinct voice cards
         out.update(story_doctor.clean_run_option(body))
         out.update(voice_contrast.clean_run_option(body))
+        from . import pairwise  # noqa: PLC0415 - 🔮 predictability probe / 🎭 key scenes twice / ⚖ head to head (on)
+        out.update(pairwise.clean_run_option(body))
         from . import fresh_names, trade_card  # noqa: PLC0415 - 🔁 kept fresh / 🔧 the trade card (both on)
         out.update(trade_card.clean_run_option(body))
         out.update(fresh_names.clean_run_option(body))
@@ -3846,6 +3848,10 @@ class AutoBookService(_Runner):
         st["message"] = f"{n} chapter(s) planned and approved" + (f" · {st['doctor']}" if st.get("doctor") else "")
         self._place_beats(run, st)
         self._place_stages(run, st)
+        from . import predictability  # noqa: PLC0415 - 🔮 can an AI guess the plan's turns? (≤ 2 probes, ≤ 1 revision)
+        predictability.run_probe(self, run, st)
+        if st.get("predict"):
+            st["message"] += f" · {st['predict']}"
         self._build_ledger(run, st)
         from . import trade_card  # noqa: PLC0415 - 🔧 how the book's trade is really done (≤ 1 request)
         trade_card.run_step(self, run, st)
@@ -4092,6 +4098,8 @@ class AutoBookService(_Runner):
                             item["cut"] = cuts["cut"]
                             self.event(run, "note", cuts["line"], code="INSTRUCTIONS_CUT", record_id=rid,
                                        chapter_id=cid)
+                    from . import key_scenes  # noqa: PLC0415 - 🎭 a key chapter written twice, the better one kept
+                    key_scenes.after_draft(self, run, st, outline, chapters, cid, idx + 1, rid, item)
                     from . import chapter_polish  # noqa: PLC0415 - 📏 reading level + repeats: ≤ 1 polish, kept if better
                     chapter_polish.after_draft(self, run, st, outline, cid, idx + 1, rid, item)
                     try:
@@ -4445,6 +4453,9 @@ class AutoBookService(_Runner):
         chapter_polish.to_report(self, run, rep)
         from . import story_doctor  # noqa: PLC0415 - 🩺 the plan check's line in the saved report too
         story_doctor.to_report(self, run, rep)
+        from . import key_scenes, predictability  # noqa: PLC0415 - 🔮 / 🎭 their lines in the saved report too
+        predictability.to_report(self, run, rep)
+        key_scenes.to_report(self, run, rep)
         if agg.get("reviewers"):
             st["message"] = (f"{agg['reviewers']} AI(s) read the whole book · overall {agg.get('overall')}/10"
                              + (f" · ⚠️ they disagree on {', '.join(agg['disagreements'])}" if agg.get("disagreements")
