@@ -1851,6 +1851,14 @@ class AutoBookService(_Runner):
         rules = {str(p).split(":", 1)[0].strip() for p in probs or []}
         if not probs or (rules and rules <= STALE_RULES) or not self._ai_made(run, head):
             return False
+        from .review import MAX_DATA_CHARS  # noqa: PLC0415
+        try:
+            big = len(json.dumps(head.get("data"), ensure_ascii=False)) > MAX_DATA_CHARS
+        except (TypeError, ValueError):
+            big = True
+        if big:  # the fixer would only see part of it, and could not send the whole record back: written again instead
+            self._loop_log(run, head, "repair_skipped", why="too_big")
+            return False
         reps = run.setdefault("check_repairs", {})
         n = int(reps.get(rid, 0))
         if n >= MAX_REPAIRS:
