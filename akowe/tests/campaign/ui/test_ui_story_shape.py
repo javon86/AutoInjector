@@ -73,7 +73,8 @@ def test_change_the_story_shape_on_the_plan_page_before_chapters(make_context, a
     fill_wizard(page, "Shape Book", chars=1, places=0, world=0)
     box = page.locator("[data-testid=plan-story-shape]")
     box.wait_for(timeout=15000)
-    assert page.inner_text("[data-testid=plan-story-shape-name]") == "None — let the AI decide"
+    # 🚀 a new book from the wizard starts on the recommended shape (five escalating turns)
+    assert page.inner_text("[data-testid=plan-story-shape-name]") == "Five turning points"
     pick = page.locator("[data-testid=plan-story-shape-pick]")
     pick.select_option("three_acts")
     page.locator("[data-testid=plan-story-shape-save]").click()
