@@ -1201,6 +1201,8 @@ class AutoBookService(_Runner):
         from . import fresh_names, trade_card  # noqa: PLC0415 - 🔁 kept fresh / 🔧 the trade card (both on)
         out.update(trade_card.clean_run_option(body))
         out.update(fresh_names.clean_run_option(body))
+        from . import cut_pass  # noqa: PLC0415 - ✂ the cut pass / 📊 the book budgets (both on)
+        out.update(cut_pass.clean_run_option(body))
         n = body.get("beta_readers", 1)  # 👥 idea #14: how many beta readers (1 = one AI; 2-3 = a panel)
         if isinstance(n, bool) or not isinstance(n, int) or not 1 <= n <= 3:
             raise AkoweError("INVALID_INPUT", "/beta_readers", "beta_readers: 1, 2 or 3", status="REJECTED")
@@ -1763,6 +1765,9 @@ class AutoBookService(_Runner):
                     pl = (run.get("planned") or {}).get(rid) or {}
                     if pl.get("flagged"):
                         why += " · ⚠️ planned details not all on the page"
+                if head["module_id"] == "C02" and run["settings"].get("cut_pass") is not False:
+                    from . import cut_pass  # noqa: PLC0415 - ✂ cut about 10% and label every cut (≤ 1 AI call)
+                    head = cut_pass.run_pass(self, run, st, rid, label, chapter_id)
                 self._approve(run, head["ref"], why=why, verdict="APPROVE", slot=rj.slot)
                 checker_record.settle(self.store, run, rid, head["version"], chapter_id=chapter_id)
                 if trust:
@@ -4119,6 +4124,8 @@ class AutoBookService(_Runner):
                     claude_code_book.chapter_approved(self, run, cid, idx + 1, rec)  # 🤖 facts + "sounds like AI"
                     from . import writer_record  # noqa: PLC0415 - 🏆 the writer's score joins its track record
                     writer_record.after_chapter(self, run, rec)
+                    from . import book_budgets  # noqa: PLC0415 - 📊 the book budgets: this chapter's counts (no AI)
+                    book_budgets.after_chapter(self, run, outline, cid, idx + 1, rec)
                     # 🔎 PR #117: all the AIs check this chapter before the next one is written (checkpoints.py)
                     due = run.setdefault("chapter_checks_due", [])
                     if cid not in due:

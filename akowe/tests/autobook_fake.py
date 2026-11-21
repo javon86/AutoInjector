@@ -279,6 +279,7 @@ class BookFakeAI:
         self.shape_script: list = []             # 📐 scripted beat placements (dicts or callables(ctx)), one per call
         self.kind_script: list = []              # 📚 scripted stage placements (dicts or callables(ctx)), one per call
         self.ledger_script: list = []            # 📜 scripted promise ledgers (dicts or callables(ctx)); default: none
+        self.cut_script: list = []               # ✂ scripted cut-pass answers (dicts or callables(ctx)); default: none
         self.kind_pick = None                    # 📚 the kind of story the invent step picks (when asked), e.g. "quest"
         self.alongside_script: list = []         # ✍ Write alongside me: scripted answers (dicts or callables(ctx))
         # 🧑‍⚖️ the stand-in vote (stand_in.py): answers per slot ({slot: answer or [answers]}) or one per call (in
@@ -439,6 +440,12 @@ class BookFakeAI:
             return "opening_rewrite", {"replacements": []}
         if ctx.get("akowe_task") == "story_details":  # ⏱ story details (essentials / just in time)
             return "details", self._details(ctx)
+        if "cuts" in props and "cut_rules" in ctx:  # ✂ the cut pass: the editor's labelled cuts (default: none)
+            with self.lock:
+                scripted = self.cut_script.pop(0) if self.cut_script else None
+            if scripted is not None:
+                return "cuts", scripted(ctx) if callable(scripted) else copy.deepcopy(scripted)
+            return "cuts", {"cuts": [], "fat_percent": 0}
         if "promises" in props and "main_plot" in ctx and "chapters" in ctx:  # 📜 the book's promises (ledger)
             with self.lock:
                 scripted = self.ledger_script.pop(0) if self.ledger_script else None

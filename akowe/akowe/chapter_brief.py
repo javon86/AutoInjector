@@ -447,6 +447,19 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str, *
                                        "parts": sorted(ql)}
             if cut:
                 meta["cut"] = cut
+        try:  # 📊 the whole-book budgets over in the chapters before; their over-used similes out of what it rereads
+            from . import book_budgets  # noqa: PLC0415
+            bb = book_budgets.writer_block(store, pid, branch, outline, chapter_id, cut)
+            if bb:
+                brief["book_budgets"] = bb
+                rules.append(book_budgets.BRIEF_RULE)
+                if cut:
+                    meta["cut"] = cut
+            if book_budgets.reread_filter(brief, store, pid, branch, outline, chapter_id):
+                rules.append(book_budgets.REREAD_RULE)
+                meta["reread_filtered"] = True
+        except Exception:  # noqa: BLE001
+            log.exception("book budgets of chapter %s", chapter_id)
         try:  # 🤫 before the point a reader may work out the twist: do not confirm or over-signal it
             from . import twist_guard  # noqa: PLC0415
             from .book_path import BookPath  # noqa: PLC0415

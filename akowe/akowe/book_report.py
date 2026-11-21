@@ -1007,6 +1007,16 @@ class ReportService:
                 base.pop("promises", None)
         except Exception:  # noqa: BLE001 - never break the report
             log.exception("could not add the promise ledger to the report")
+        try:  # ✂ the cut pass's labelled cuts per chapter and 📊 the book budgets (no AI)
+            from . import book_budgets, cut_pass  # noqa: PLC0415
+            for k, info in (("cuts", cut_pass.report_info(self.store, pid, branch)),
+                            ("budgets", book_budgets.report_info(self.store, pid, branch))):
+                if info:
+                    base[k] = info
+                else:
+                    base.pop(k, None)
+        except Exception:  # noqa: BLE001 - never break the report
+            log.exception("could not add the cut pass and the book budgets to the report")
         base["aggregate"] = aggregate(base["reviews"])
         base["try_next"] = self.try_next(base)
         from . import approval_trust  # noqa: PLC0415 - H14: chapters approved without (all) checks
@@ -1426,6 +1436,9 @@ def render_markdown(rep: dict) -> str:
     if (rep.get("promises") or {}).get("line"):  # 📜 the set-ups and their payoffs
         from . import promise_ledger  # noqa: PLC0415
         L += promise_ledger.report_md(rep["promises"])
+    if (rep.get("cuts") or {}).get("line") or (rep.get("budgets") or {}).get("line"):  # ✂ / 📊
+        from . import book_budgets, cut_pass  # noqa: PLC0415
+        L += cut_pass.report_md(rep.get("cuts")) + book_budgets.report_md(rep.get("budgets"))
     ck = rep.get("checks") or {}
     cc = ck.get("chapter_checks") or {}
     if cc.get("chapters") or ck.get("stretch") or ck.get("checkpoints"):
