@@ -1626,8 +1626,9 @@ class AutoBookService(_Runner):
                     "retry_at": datetime.fromtimestamp(nxt, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
                     "message": f"Only {review.get('writer_ai') or 'one AI'} is working — waiting for a second AI to "
                                f"check the {label} (next look at about {usage_limits.clock(nxt)})"}
+            gen = jobs_mod.wake_count()  # before the wait is shown: a Resume from then on ends it
             self.on_wait(run, info)
-            waited += jobs_mod.sleep_unless_woken(pol, step, lambda: self.check(run))
+            waited += jobs_mod.sleep_unless_woken(pol, step, lambda: self.check(run), since=gen)
             self.on_wait(run, None)
         return self._second_ai_working(writer)
 

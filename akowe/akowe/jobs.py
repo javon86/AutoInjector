@@ -177,10 +177,12 @@ def wake_count() -> int:
     return _WAKE_GEN
 
 
-def sleep_unless_woken(policy, seconds: float, check=None) -> float:
+def sleep_unless_woken(policy, seconds: float, check=None, since: int | None = None) -> float:
     """Sleep ``seconds`` in 0.5 s steps (check() between them); stops early when wake_waits() is called. Returns the
-    seconds actually slept."""
-    gen = _WAKE_GEN
+    seconds actually slept. ``since``: the wake count read BEFORE the wait was announced (on_wait) — a Resume pressed
+    between the announcement and the sleep then still ends it (without it, that wake would be missed and the run
+    would sleep the whole wait)."""
+    gen = _WAKE_GEN if since is None else since
     slept = 0.0
     while slept < seconds:
         if check:
@@ -227,10 +229,11 @@ def wait_and_retry(fn, *, policy: RetryPolicy, check=None, on_wait=None, who: st
                     "retry_at": datetime.fromtimestamp(time.time() + delay, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
                     "message": f"Waiting for {name} ({word}) — retrying in {int(delay)} s"}
             log.info("AI busy (%s), retry %s in %.0fs", exc.code, attempt, delay)
+            gen = wake_count()  # before the wait is shown: a Resume from then on ends it
             ai_activity.note_wait(info)  # ⚡ #116: the AI activity strip shows the wait and its seconds left
             if on_wait:
                 on_wait(info)
-            waited += sleep_unless_woken(policy, delay, check)
+            waited += sleep_unless_woken(policy, delay, check, since=gen)
             ai_activity.note_wait(None)
             if on_wait:
                 on_wait(None)
@@ -260,10 +263,11 @@ def _limit_wait(exc, lim: dict, policy: RetryPolicy, limit_waited: float, check,
                                             until=None if reset_known else now + left)}
     log.info("every AI is at its usage limit; waiting %.0fs (waited %.0fs of %.0fs)", delay, limit_waited,
              policy.limit_wait_s)
+    gen = wake_count()  # before the wait is shown: a Resume from then on ends it
     ai_activity.note_wait(info)
     if on_wait:
         on_wait(info)
-    slept = sleep_unless_woken(policy, delay, check)
+    slept = sleep_unless_woken(policy, delay, check, since=gen)
     ai_activity.note_wait(None)
     if on_wait:
         on_wait(None)
