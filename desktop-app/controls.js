@@ -5066,7 +5066,7 @@ async function exOpen() {
   el(scope === "book" ? "ex-scope-book" : "ex-scope-time").checked = true;
   exHideConfirm();
   const inc = (useLast && last.include) || def.include || {};
-  el("ex-inc-conv").checked = inc.conversation !== false;
+  el("ex-inc-conv").checked = inc.conversation === true; // 🔒 private: ticked only when asked
   el("ex-inc-act").checked = inc.activity !== false;
   el("ex-inc-relay").checked = inc.relay !== false;
   const now = Date.now();

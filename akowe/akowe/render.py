@@ -74,7 +74,7 @@ def as_error(exc: forge.ArtProblem, what: str, path: str = "/format") -> AkoweEr
 
 
 PDF_TIMEOUT_S = 120.0
-MAX_PDF_BYTES = 60 * 1024 * 1024
+MAX_PDF_BYTES = 160 * 1024 * 1024  # a Book Bible with many full-size pictures (its HTML may be 120 MB)
 
 
 def render_pdf(app, html: str, *, title: str = "", page_size: str = "A4", landscape: bool = False,

@@ -401,9 +401,9 @@ function createServiceBridge(deps) {
       }
       // --- 🖨 HTML → PDF (render-pdf.js): Akọwe's 📖 Book Bible binder ---
       if (pdfRenderer && method === 'POST' && path === '/render/pdf') {
-        // The page with its pictures embedded as data: URIs: up to 40 MB of HTML (render-pdf.js checks it) in up to 48 MB of JSON.
-        const body = await readJsonBody(req, 48 * 1024 * 1024);
-        if (body === undefined && req.bodyTooBig) return reply(res, 413, { ok: false, error: 'TOO_BIG', code: 'TOO_BIG', message: 'The request is too big (the HTML may be at most 40 MB).' });
+        // The page with its pictures embedded as data: URIs: up to 120 MB of HTML (render-pdf.js checks it) in up to 136 MB of JSON.
+        const body = await readJsonBody(req, 136 * 1024 * 1024);
+        if (body === undefined && req.bodyTooBig) return reply(res, 413, { ok: false, error: 'TOO_BIG', code: 'TOO_BIG', message: 'The request is too big (the HTML may be at most 120 MB).' });
         if (body === undefined) return reply(res, 400, { ok: false, error: 'INVALID_PARAM', code: 'INVALID_PARAM', message: 'The body must be JSON: { "html": "…" }.' });
         let r;
         try { r = await pdfRenderer.render(body || {}); } catch (e) { r = { ok: false, error: 'RENDER_FAILED', code: 'RENDER_FAILED', message: `Something went wrong: ${(e && e.message) || e}` }; }

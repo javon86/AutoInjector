@@ -899,12 +899,20 @@ class AutoInjectorAdapter:
 
     # ------------------------------------------------------------------ generation
     @staticmethod
-    def build_prompt(system: str, user: str, schema: dict, errors: list[str] | None = None) -> str:
+    def build_prompt(system: str, user: str, schema: dict, errors: list[str] | None = None,
+                     site: str | None = None) -> str:
         parts = [system.strip(), "", user.strip(), "", "JSON_SCHEMA:",
                  json.dumps(schema, ensure_ascii=False, sort_keys=True), "END_JSON_SCHEMA", "",
                  "Answer with exactly one JSON object that validates against JSON_SCHEMA. Output only that JSON "
                  "object inside one ```json code block (the chat page would otherwise strip the backslashes from quote "
                  "marks inside text): no explanations, no extra objects, no other markdown."]
+        req = [k for k in (schema.get("required") or []) if isinstance(k, str)] if isinstance(schema, dict) else []
+        if req:  # 🧾 the keys most often left out (the log report: 30 of 231 Gemini answers failed the schema once)
+            parts.append("The object must have every one of these top-level keys: " + ", ".join(req[:40]) + ".")
+        if site == "gemini":
+            parts.append("Check before you answer: every required key is there at every level, each value has the "
+                         "type the schema asks for (numbers as numbers, lists as lists, enum values spelled exactly as "
+                         "listed), no key the schema does not list, nothing shortened or left out.")
         if errors:
             parts += ["", "Your previous answer was rejected because it did not validate against JSON_SCHEMA. "
                       "Validation errors (JSON pointer: message):"]
@@ -968,7 +976,7 @@ class AutoInjectorAdapter:
         book = bridge_book_fields()  # a new book -> a fresh chat in that AI's window (AutoInjector decides)
         for reask in range(self.MAX_REASKS + 1):
             short = bool(errors) and followup_ok and prev_id is not None
-            prompt = self.correction_prompt(errors) if short else self.build_prompt(system, user, schema, errors)
+            prompt = self.correction_prompt(errors) if short else self.build_prompt(system, user, schema, errors, site)
             late_key = _late_key(self.bridge_url, site, prompt)
             # A "Try again" after a 504 whose prompt WAS typed: collect that answer under its own bridge id.
             bridge_id = _late_get(late_key) or bridge_request_id(request_id, site, call, reask)
@@ -987,7 +995,7 @@ class AutoInjectorAdapter:
                 log.info("autoinjector site=%s request_id=%s: the chat can't be continued; sending the whole prompt",
                          site, bridge_id)
                 followup_ok = False
-                prompt = self.build_prompt(system, user, schema, errors)
+                prompt = self.build_prompt(system, user, schema, errors, site)
                 late_key = _late_key(self.bridge_url, site, prompt)
                 bridge_id = _late_get(late_key) or bridge_request_id(request_id, site, call, reask) + "-full"
                 body = {"site": site, "prompt": prompt, "request_id": bridge_id, "timeout_ms": tmo, **book}
@@ -1001,9 +1009,12 @@ class AutoInjectorAdapter:
             out_tok += estimate_tokens(text)
             data = extract_json_object(text)
             errors = ["/: the reply contained no JSON object"] if data is None else schema_errors(schema, data)
-            log.info("autoinjector site=%s request_id=%s attempt=%s reask=%s chars_out=%s outcome=%s elapsed=%.1fs",
+            log.info("autoinjector site=%s request_id=%s attempt=%s reask=%s chars_out=%s outcome=%s elapsed=%.1fs%s",
                      site, bridge_id, attempt + 1, reask, len(text), "ok" if not errors else "schema_invalid",
-                     time.monotonic() - started)
+                     time.monotonic() - started,
+                     # 🧾 where the answer failed the schema: JSON pointers only (never the answer's text)
+                     (" where=" + ",".join(sorted({str(e).split(":", 1)[0][:60] for e in errors})[:6])) if errors
+                     else "")
             if not errors:
                 usage = {"model": f"web:{site}", "input_tokens": in_tok, "output_tokens": out_tok,
                          "provider_request_id": bridge_id}
