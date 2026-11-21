@@ -159,6 +159,42 @@ def slot_word(slot_label: str | None, site: str | None = None) -> str:
     return "the AI"
 
 
+# ⏰ ▶ Resume while a run waits (a busy AI, every AI at its usage limit, a second AI): the waits end early and the AI is
+# tried again now. A counter, not a per-thread flag: the wait may be in any of the run's threads.
+_WAKE_LOCK = threading.Lock()
+_WAKE_GEN = 0
+
+
+def wake_waits() -> int:
+    """End every wait in progress early (each tries its AI again at once). Returns the new wake count."""
+    global _WAKE_GEN
+    with _WAKE_LOCK:
+        _WAKE_GEN += 1
+        return _WAKE_GEN
+
+
+def wake_count() -> int:
+    return _WAKE_GEN
+
+
+def sleep_unless_woken(policy, seconds: float, check=None) -> float:
+    """Sleep ``seconds`` in 0.5 s steps (check() between them); stops early when wake_waits() is called. Returns the
+    seconds actually slept."""
+    gen = _WAKE_GEN
+    slept = 0.0
+    while slept < seconds:
+        if check:
+            check()
+        if _WAKE_GEN != gen:
+            break
+        chunk = min(0.5, seconds - slept)
+        policy.sleep(chunk)
+        slept += chunk
+    if check:
+        check()
+    return slept
+
+
 def wait_and_retry(fn, *, policy: RetryPolicy, check=None, on_wait=None, who: str = "the AI"):
     """Run fn(); on a busy answer wait per policy and run it again. TIMEOUT and other errors are raised at once.
 
@@ -194,16 +230,7 @@ def wait_and_retry(fn, *, policy: RetryPolicy, check=None, on_wait=None, who: st
             ai_activity.note_wait(info)  # ⚡ #116: the AI activity strip shows the wait and its seconds left
             if on_wait:
                 on_wait(info)
-            remaining = delay
-            while remaining > 0:
-                if check:
-                    check()
-                chunk = min(0.5, remaining)
-                policy.sleep(chunk)
-                remaining -= chunk
-            if check:
-                check()
-            waited += delay
+            waited += sleep_unless_woken(policy, delay, check)
             ai_activity.note_wait(None)
             if on_wait:
                 on_wait(None)
@@ -236,19 +263,11 @@ def _limit_wait(exc, lim: dict, policy: RetryPolicy, limit_waited: float, check,
     ai_activity.note_wait(info)
     if on_wait:
         on_wait(info)
-    remaining = delay
-    while remaining > 0:
-        if check:
-            check()
-        chunk = min(0.5, remaining)
-        policy.sleep(chunk)
-        remaining -= chunk
-    if check:
-        check()
+    slept = sleep_unless_woken(policy, delay, check)
     ai_activity.note_wait(None)
     if on_wait:
         on_wait(None)
-    return limit_waited + delay
+    return limit_waited + slept
 
 
 class JobStore:
