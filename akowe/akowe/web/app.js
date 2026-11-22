@@ -3361,6 +3361,10 @@ function eventSummary(e) {
 /* ======================================================================= views: settings */
 const AI_SITES = [['claude', 'Claude'], ['chatgpt', 'ChatGPT'], ['gemini', 'Gemini']];
 const BRIDGE_DEFAULT = 'http://127.0.0.1:17891';
+const OLLAMA_DEFAULT = 'http://localhost:11434';
+const OLLAMA_MODELS = ['llama3.1:8b', 'qwen2.5:14b', 'mistral-nemo:12b'];
+const PRACTICE_NAME = 'Practice AI (test text)';
+const TESTABLE = ['autoinjector', 'ollama', 'practice'];
 const TOS_CAUTION = 'Experimental: automating the ChatGPT, Claude and Gemini web interfaces may be against those sites’ terms of service. Use it at your own risk.';
 
 async function viewSettings(main) {
@@ -3378,6 +3382,7 @@ async function viewSettings(main) {
       h('li', null, 'API keys and AutoInjector connection keys are stored in the local secrets file on this computer, never in project data, exports, reports or logs. Key fields are write-only: a saved key is never shown again.'),
       h('li', null, 'Not sure everything works? Switch on 🛠 Advanced view, open “⋯ More” at the top and press “🧪 Test everything”: it builds a small test book (a separate book) and writes a report.'))));
   main.appendChild(autoInjectorCard(main));
+  main.appendChild(practiceCard(main, slots));
   for (const s of slots) main.appendChild(slotForm(s));
   main.appendChild(retryCard());
   main.appendChild(reviewerCard());
@@ -3452,7 +3457,42 @@ function autoInjectorCard(main) {
   out, h('div', { class: 'form-actions' }, btn));
 }
 
+/** 🧪 One click: AI-1 and AI-2 become the Practice AI (free, instant, test text) for a whole ⚡ test run. */
+function practiceCard(main, slots) {
+  const out = h('div', { 'aria-live': 'polite' });
+  const btn = h('button', { type: 'button', 'data-testid': 'practice-setup' }, '🧪 Use the Practice AI for a test run');
+  const already = slots.filter(s => s.adapter_id === 'practice').map(s => s.slot_id);
+  btn.addEventListener('click', async () => {
+    clear(out);
+    const was = slots.filter(s => ['AI-1', 'AI-2'].includes(s.slot_id)).map(s => `${s.slot_id}: ${slotName(s)}`).join(', ');
+    if (!confirm(`Set AI-1 and AI-2 to the Practice AI?\n\nThis replaces how those two slots are set up now (${was}). AI-3 is not changed. Saved keys stay saved; to go back, choose the adapter again on each slot below.\n\nThe Practice AI writes placeholder text to test Akọwe, not a real book.`)) return;
+    btn.disabled = true;
+    try {
+      for (const sid of ['AI-1', 'AI-2']) await api('PUT', `/slots/${sid}`, { body: { adapter_id: 'practice' } });
+      S.slotCache = null;
+      toast('AI-1 and AI-2 now use the Practice AI — press ⚡ Make a book for me to try a whole run');
+      announce('AI-1 and AI-2 now use the Practice AI.');
+      clear(main); await viewSettings(main);
+      return;
+    } catch (e) { out.appendChild(failedState('The Practice AI was not set up', e)); }
+    btn.disabled = false;
+  });
+  return h('section', { class: 'card', 'aria-labelledby': 'practice-h', 'data-testid': 'practice-card' },
+    h('h2', { id: 'practice-h' }, '🧪 Try Akọwe out with the Practice AI'),
+    h('p', null, 'The Practice AI is built into Akọwe: free, works without internet, and answers at once. It writes placeholder text (always the same little lighthouse story), so a whole ⚡ Make a book for me run finishes in minutes. Use it to see how Akọwe works — not to write your book. Everything it writes is marked “', PRACTICE_NAME, '”.'),
+    already.length ? h('p', { class: 'small' }, badge('🧪', `Practice AI in ${already.join(', ')}`, 'b-info')) : null,
+    out, h('div', { class: 'form-actions' }, btn));
+}
+
+function ollamaResult(r) {
+  const models = r.models || [];
+  return h('div', null, h('p', null, r.message || ''),
+    r.fix ? h('p', { class: 'small' }, h('strong', null, 'Next step: '), r.fix) : null,
+    models.length ? h('p', { class: 'small muted' }, 'Models installed in Ollama: ', models.join(', ')) : null);
+}
+
 function healthResult(r) {
+  if (r.adapter_id === 'ollama' || r.adapter_id === 'practice') return ollamaResult(r);
   const sites = r.sites || {};
   const names = Object.keys(sites);
   return h('div', null,
@@ -3475,7 +3515,8 @@ function slotForm(s) {
     return h('div', { class: 'field' }, h('label', { for: control.id }, label), control, hint ? h('span', { class: 'hint', id: `${p}-${key}-h` }, hint) : null);
   };
   const adapter = h('select', null, [['none', 'None (not connected)'], ['anthropic', 'Anthropic API'], ['manual', 'Manual (author writes candidates)'],
-    ['autoinjector', 'autoinjector (experimental, uses your logged-in web sessions)']]
+    ['autoinjector', 'autoinjector (experimental, uses your logged-in web sessions)'],
+    ['practice', 'Practice AI (free, instant, test text only)'], ['ollama', 'Local model on this PC (Ollama)']]
     .map(([v, l]) => h('option', { value: v, selected: s.adapter_id === v }, l)));
   const model = h('input', { type: 'text', value: s.model || 'claude-opus-5-5' });
   const effort = h('select', null, ['low', 'medium', 'high', 'xhigh', 'max'].map(v => h('option', { value: v, selected: s.effort === v }, v)));
@@ -3493,10 +3534,19 @@ function slotForm(s) {
   const key = h('input', { type: 'password', autocomplete: 'new-password', spellcheck: 'false', placeholder: s.has_credentials ? 'Stored — leave blank to keep' : 'Not set' });
   const removeKeyBox = h('input', { type: 'checkbox', id: `${p}-rmkey` });
   const isAuto = () => adapter.value === 'autoinjector';
+  const isOllama = () => adapter.value === 'ollama';
+  const keyless = () => ['practice', 'ollama'].includes(adapter.value);
+  const ollamaUrl = h('input', { type: 'url', value: s.base_url || OLLAMA_DEFAULT, spellcheck: 'false' });
+  const ollamaModel = h('input', { type: 'text', value: s.adapter_id === 'ollama' ? (s.model || OLLAMA_MODELS[0]) : OLLAMA_MODELS[0], spellcheck: 'false', list: `${p}-ollama-models` });
+  const ollamaList = h('datalist', { id: `${p}-ollama-models` }, OLLAMA_MODELS.map(m => h('option', { value: m })));
+  const ollamaTime = h('input', { type: 'number', min: '1', step: '1', value: String(s.timeout_s ?? 900) });
+  const ollamaTrust = h('input', { type: 'checkbox', id: `${p}-ollama-trust`, checked: !!s.base_url_trusted });
   const strip = slotStatusStrip(s);
   const status = h('p', { class: 'row' },
     s.connected ? badge('✔', 'Adapter set', 'b-ok') : badge('○', 'Not set up', 'b-muted'),
-    s.adapter_id === 'autoinjector'
+    s.adapter_id === 'practice' ? badge('🧪', 'Test text only', 'b-info')
+      : s.adapter_id === 'ollama' ? badge('🖥', `On this PC: ${s.model}`, 'b-info')
+      : s.adapter_id === 'autoinjector'
       ? (s.has_credentials ? badge('⚿︎', 'Connection key saved', 'b-ok') : badge('–', 'No connection key', 'b-muted'))
       : (s.has_credentials ? badge('⚿︎', 'API key available', 'b-ok') : badge('–', 'No API key', 'b-muted')),
     s.adapter_id === 'autoinjector' && s.site ? badge('◆', `Web: ${s.site}`, 'b-info') : null,
@@ -3504,9 +3554,9 @@ function slotForm(s) {
     s.healthy === false ? badge('⚠︎', 'Unhealthy', 'b-warn') : null,
     badge('…', `${s.active_jobs || 0} active job(s)`, 'b-muted'));
   const healthOut = h('div', { 'aria-live': 'polite' });
-  const testBtn = h('button', { type: 'button', disabled: s.adapter_id !== 'autoinjector', 'aria-describedby': `${p}-test-h` }, `Test connection (${s.slot_id})`);
+  const testBtn = h('button', { type: 'button', disabled: !TESTABLE.includes(s.adapter_id), 'aria-describedby': `${p}-test-h`, 'data-testid': `${p}-test` }, `Test connection (${s.slot_id})`);
   testBtn.addEventListener('click', async () => {
-    clear(healthOut); healthOut.appendChild(loadingState('Checking the AutoInjector bridge…'));
+    clear(healthOut); healthOut.appendChild(loadingState(s.adapter_id === 'ollama' ? 'Asking Ollama on this PC…' : s.adapter_id === 'practice' ? 'Checking the Practice AI…' : 'Checking the AutoInjector bridge…'));
     testBtn.disabled = true;
     try {
       const r = await api('GET', `/slots/${encodeURIComponent(s.slot_id)}/health`);
@@ -3523,15 +3573,33 @@ function slotForm(s) {
     h('p', { class: 'small', role: 'note' }, h('span', { 'aria-hidden': 'true' }, '⚠︎ '), TOS_CAUTION),
     h('div', { class: 'grid-2' },
       f('bridge', 'AutoInjector address', bridgeUrl, 'http://127.0.0.1 or http://localhost only. Default ' + BRIDGE_DEFAULT + '.'),
-      f('site', 'Web site', site, 'Which logged-in AutoInjector pane this slot uses.')),
+      f('site', 'Web site', site, 'Which logged-in AutoInjector pane this slot uses.')));
+  const ollamaGroup = h('fieldset', { class: 'field', hidden: !isOllama(), 'data-testid': `${p}-ollama` },
+    h('legend', null, 'Local model on this PC (Ollama)'),
+    h('ol', { class: 'steps-list small' },
+      h('li', null, 'Install Ollama from ollama.com and start it.'),
+      h('li', null, 'Open a terminal (Command Prompt) and download a model, for example: ', h('code', null, 'ollama pull llama3.1:8b'), ' (smaller, faster) or ', h('code', null, 'ollama pull qwen2.5:14b'), ' (better writing, needs a stronger PC).'),
+      h('li', null, 'Type the same model name below, save, then press Test connection.')),
+    h('div', { class: 'grid-2' },
+      f('ollama-url', 'Ollama address', ollamaUrl, 'Default ' + OLLAMA_DEFAULT + ' (Ollama on this PC). Another PC on your home network also works.'),
+      f('ollama-model', 'Model', ollamaModel, 'The name you used with “ollama pull”, for example llama3.1:8b or qwen2.5:14b.'),
+      f('ollama-time', 'Time limit for one answer (seconds)', ollamaTime, 'Local models can be slow: a chapter may take many minutes. Default 900 (15 minutes).')),
+    ollamaList,
+    h('div', { class: 'check-row' }, ollamaTrust, h('label', { for: ollamaTrust.id }, 'I trust this address (only needed when Ollama runs on a computer on the internet, not on this PC or your home network)')));
+  const testBox = h('div', { hidden: !TESTABLE.includes(adapter.value) },
     h('div', { class: 'row' }, testBtn, infoTip('What does Test connection do?', ...TIP_TEST()),
       h('span', { class: 'hint', id: `${p}-test-h` }, 'Checks the saved settings (save first). Sends no book content.')),
     healthOut);
   const keyLegend = h('legend', null, isAuto() ? 'Connection key (write-only)' : 'API key (write-only)');
   const keyLabelText = () => isAuto() ? 'New connection key' : 'New API key';
   const keyField = f('key', keyLabelText(), key, s.has_credentials ? 'A secret is stored for this slot (or ANTHROPIC_API_KEY is set). Leave blank to keep it.' : 'Paste it to store it locally for this slot.');
+  const keyBox = h('fieldset', { class: 'field', hidden: keyless() }, keyLegend, keyField,
+    h('div', { class: 'check-row' }, removeKeyBox, h('label', { for: removeKeyBox.id }, 'Remove the stored secret for this slot')));
   adapter.addEventListener('change', () => {
     autoGroup.hidden = !isAuto();
+    ollamaGroup.hidden = !isOllama();
+    testBox.hidden = !TESTABLE.includes(adapter.value);
+    keyBox.hidden = keyless();
     keyLegend.textContent = isAuto() ? 'Connection key (write-only)' : 'API key (write-only)';
     keyField.querySelector('label').textContent = keyLabelText();
   });
@@ -3558,16 +3626,30 @@ function slotForm(s) {
       site.removeAttribute('aria-invalid');
       body.site = site.value; body.bridge_url = bridgeUrl.value.trim() || BRIDGE_DEFAULT;
     }
-    if (removeKeyBox.checked) body.api_key = null;
+    if (isOllama()) {
+      const t = Number(ollamaTime.value.trim() || '900');
+      if (!Number.isInteger(t) || t < 1) { ollamaTime.setAttribute('aria-invalid', 'true'); out.appendChild(stateBox('failed', 'The time limit must be a whole number of seconds (1 or more)')); ollamaTime.focus(); return; }
+      ollamaTime.removeAttribute('aria-invalid');
+      if (!ollamaModel.value.trim()) { ollamaModel.setAttribute('aria-invalid', 'true'); out.appendChild(stateBox('failed', 'Type the model name, for example llama3.1:8b')); ollamaModel.focus(); return; }
+      ollamaModel.removeAttribute('aria-invalid');
+      body.model = ollamaModel.value.trim(); body.base_url = ollamaUrl.value.trim() || OLLAMA_DEFAULT; body.timeout_s = t;
+      if (ollamaTrust.checked) body.confirm_internet_host = true;
+    }
+    if (keyless()) { /* the Practice AI and a local model need no key */ }
+    else if (removeKeyBox.checked) body.api_key = null;
     else if (key.value) body.api_key = key.value;
     btn.disabled = true;
     try {
       const saved = await api('PUT', `/slots/${s.slot_id}`, { body });
       key.value = ''; removeKeyBox.checked = false;
-      testBtn.disabled = saved.adapter_id !== 'autoinjector';
+      testBtn.disabled = !TESTABLE.includes(saved.adapter_id);
       const secret = saved.adapter_id === 'autoinjector' ? 'Connection key' : 'API key';
       const what = saved.adapter_id === 'autoinjector' ? `web site ${saved.site}` : `model ${saved.model}`;
-      out.appendChild(stateBox('ok', `${s.slot_id} saved`, h('p', null, `Adapter ${saved.adapter_id}, ${what}. ${secret} ${saved.has_credentials ? 'available' : 'not set'}.`)));
+      const said = saved.adapter_id === 'practice' ? `${PRACTICE_NAME}: free, instant, placeholder text to test Akọwe (no key needed).`
+        : saved.adapter_id === 'ollama' ? `Local model ${saved.model} through Ollama at ${saved.base_url} (no key needed). Press Test connection to check that Ollama runs and the model is installed.`
+        : `Adapter ${saved.adapter_id}, ${what}. ${secret} ${saved.has_credentials ? 'available' : 'not set'}.`;
+      out.appendChild(stateBox('ok', `${s.slot_id} saved`, h('p', null, said)));
+      S.slotCache = null;
       Object.assign(s, saved); strip.recheck();
       announce(`${s.slot_id} saved`);
     } catch (e) { out.appendChild(failedState(`${s.slot_id} was not saved`, e)); }
@@ -3576,7 +3658,7 @@ function slotForm(s) {
   h('h2', { id: `${p}-h` }, s.slot_id), strip, status,
   h('div', { class: 'grid-2' },
     f('adapter', 'Adapter', adapter, 'None keeps the slot disconnected; creative work then uses manual candidates.'),
-    f('model', 'Model', model, 'Default claude-opus-5-5. Ignored by autoinjector slots (the web site picks its model).'),
+    f('model', 'Model', model, 'Default claude-opus-5-5. Ignored by autoinjector and Practice AI slots (Ollama slots use the model typed below).'),
     f('effort', 'Effort', effort, 'Higher effort is slower and uses more tokens.'),
     f('caps', 'Capabilities', caps, 'Comma separated, e.g. text, json.'),
     f('roles', 'Roles', roles, 'Optional, comma separated operation IDs or set letters, e.g. B, C02. Matching work goes only to slots with that role.'),
@@ -3586,9 +3668,7 @@ function slotForm(s) {
     f('cur', 'Currency', currency),
     f('incost', 'Input cost per million tokens (minor units)', inCost, 'Integer minor units, e.g. cents. Used to rank slots by cost. Autoinjector slots cost 0.'),
     f('outcost', 'Output cost per million tokens (minor units)', outCost, 'Integer minor units.')),
-  autoGroup,
-  h('fieldset', { class: 'field' }, keyLegend, keyField,
-    h('div', { class: 'check-row' }, removeKeyBox, h('label', { for: removeKeyBox.id }, 'Remove the stored secret for this slot'))),
+  autoGroup, ollamaGroup, testBox, keyBox,
   out, h('div', { class: 'form-actions' }, btn));
 }
 
@@ -3814,7 +3894,7 @@ const TIP_KEY = () => [
   h('p', null, h('strong', null, 'Where to find it: '), 'In AutoInjector: Akọwe bridge panel → Copy connection key. Then paste it here and press Connect.'),
   h('p', null, 'Akọwe saves it in a private file on this computer (never in your projects, exports or reports) and never shows it again. If AutoInjector makes a new key, paste the new one here.')];
 const TIP_TEST = () => [
-  h('p', null, 'Test connection asks AutoInjector “are you there, and is this site logged in and free?”. It sends no book content and costs nothing.'),
+  h('p', null, 'Test connection asks AutoInjector “are you there, and is this site logged in and free?” — or, for a local model, asks Ollama “are you running, and is this model installed?”. It sends no book content and costs nothing.'),
   h('p', null, 'It tells you where things stand — not set up, ready, busy, or the exact problem — and what to do next.')];
 const TIP_URL = () => [
   h('p', null, 'The address where AutoInjector listens on this computer. Leave it at ' + BRIDGE_DEFAULT + ' unless AutoInjector shows a different one.')];
@@ -3824,6 +3904,15 @@ function slotStage(s, health) {
   const site = s.site ? (AI_SITES.find(x => x[0] === s.site) || [s.site, s.site])[1] : 'the site';
   if (s.adapter_id === 'none') return { icon: '○', word: 'Not set up', cls: 'b-muted', now: 'This slot is off. Creative steps use text you write yourself.', next: 'To use AI here: press “Connect AutoInjector” above (with the connection key), or choose an adapter below and save.' };
   if (s.adapter_id === 'manual') return { icon: '✎', word: 'Manual', cls: 'b-muted', now: 'You write the candidates yourself; no AI is used.', next: 'Nothing to do. Choose another adapter if you want AI help.' };
+  if (s.adapter_id === 'practice') return { icon: '🧪', word: 'Ready · test text', cls: 'b-ok', now: `${PRACTICE_NAME}: built into Akọwe, free and instant. It writes placeholder text to test the program, not a real book.`, next: 'Press ⚡ Make a book for me to try a whole run. Choose a real AI here when you want to write your book.' };
+  if (s.adapter_id === 'ollama') {
+    if (!health) return { icon: '…', word: 'Checking', cls: 'b-info', now: `Asking Ollama at ${s.base_url} whether it is running…`, next: 'Wait a moment.' };
+    if (health.ok) return s.active_jobs > 0
+      ? { icon: '◔', word: 'Busy', cls: 'b-warn', now: `The local model ${s.model} is writing an answer right now.`, next: 'Nothing to fix — a model on this PC answers one request at a time.' }
+      : { icon: '✔', word: 'Ready · on this PC', cls: 'b-ok', now: `Ollama is running and the model ${s.model} is installed.`, next: 'Ready to use. Local models are free but can be slow; a whole book may take hours.' };
+    if (health.running) return { icon: '⚠︎', word: 'Model not installed', cls: 'b-warn', now: `Ollama is running, but the model ${s.model} is not installed.`, next: health.fix || `Open a terminal and run: ollama pull ${s.model}` };
+    return { icon: '✕', word: 'Ollama not running', cls: 'b-bad', now: health.message || `Ollama is not answering at ${s.base_url}.`, next: health.fix || `Start Ollama, then run: ollama pull ${s.model}` };
+  }
   if (s.adapter_id === 'anthropic') {
     return s.has_credentials
       ? { icon: '✔', word: 'Ready', cls: 'b-ok', now: `Uses the Anthropic API (model ${s.model}). An API key is available.`, next: 'Nothing to do. Use “Test everything” with “Use my AI slots too” for a real end-to-end check.' }
@@ -3858,7 +3947,7 @@ function slotStatusStrip(s) {
     box.appendChild(h('p', { class: 'small slot-next' }, h('strong', null, 'Next step: '), st.next));
   };
   const check = async () => {
-    if (s.adapter_id !== 'autoinjector' || !s.has_credentials) { draw(null); return; }
+    if (!['autoinjector', 'ollama'].includes(s.adapter_id) || !s.has_credentials) { draw(null); return; }
     draw(null);
     try { draw(await api('GET', `/slots/${encodeURIComponent(s.slot_id)}/health`)); }
     catch (e) { draw({ ok: false, error: 'CHECK_FAILED', message: (e && e.message) || 'check failed' }); }
@@ -3895,6 +3984,8 @@ function slotName(s) {
   if (s.adapter_id === 'autoinjector') return `${SITE_NAME[s.site] || s.site || 'web'} (AutoInjector)`;
   if (s.adapter_id === 'anthropic') return 'Claude (Anthropic API)';
   if (s.adapter_id === 'manual') return 'Manual (no AI)';
+  if (s.adapter_id === 'practice') return PRACTICE_NAME;
+  if (s.adapter_id === 'ollama') return `${s.model || 'local model'} on this PC (Ollama)`;
   return 'not set up';
 }
 async function loadSlotChoices(force) {
@@ -3902,7 +3993,7 @@ async function loadSlotChoices(force) {
   const slots = await api('GET', '/slots');
   const list = slots.map(s => ({ s, health: null }));
   await Promise.all(list.map(async x => {
-    if (x.s.adapter_id !== 'autoinjector' || !x.s.has_credentials) return;
+    if (!['autoinjector', 'ollama'].includes(x.s.adapter_id) || !x.s.has_credentials) return;
     try { x.health = await api('GET', `/slots/${encodeURIComponent(x.s.slot_id)}/health`); }
     catch (e) { x.health = { ok: false, error: 'CHECK_FAILED', message: (e && e.message) || 'check failed' }; }
   }));

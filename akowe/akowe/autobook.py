@@ -465,7 +465,7 @@ class _Runner:
     def _ai_configured(self) -> bool:
         prov = self.app.engine.providers
         for s in prov.slots():
-            if s["adapter_id"] in ("anthropic", "autoinjector") and (s.get("has_credentials") or prov.test_adapter):
+            if s["adapter_id"] in providers_mod.AI_ADAPTERS and (s.get("has_credentials") or prov.test_adapter):
                 return True
             if s["adapter_id"] == "manual" and prov.test_adapter is not None:
                 return True
@@ -474,7 +474,7 @@ class _Runner:
     def _slots_busy(self, pinned: str | None = None) -> bool:
         """True when every AI that may take this step is set up but busy (so the step waits and retries). A book or
         run pinned to one AI (``pinned``) only ever uses that one: its being busy is enough, whatever the others do."""
-        slots = [s for s in self.app.engine.providers.slots() if s["adapter_id"] in ("anthropic", "autoinjector")
+        slots = [s for s in self.app.engine.providers.slots() if s["adapter_id"] in providers_mod.AI_ADAPTERS
                  or (s["adapter_id"] == "manual" and self.app.engine.providers.test_adapter is not None)]
         if pinned:
             slots = [s for s in slots if s["slot_id"] == pinned]
@@ -484,9 +484,11 @@ class _Runner:
         slots = self.app.engine.providers.slots()
         pick = run.get("settings", {}).get("slot_id")
         s = next((x for x in slots if x["slot_id"] == pick), None) or next(
-            (x for x in slots if x["adapter_id"] in ("autoinjector", "anthropic")), None)
+            (x for x in slots if x["adapter_id"] in providers_mod.AI_ADAPTERS), None)
         if not s:
             return "the AI"
+        if providers_mod.ai_label(s):
+            return providers_mod.ai_label(s)
         return slot_word(None, s.get("site")) if s["adapter_id"] == "autoinjector" else "Claude"
 
     def on_wait(self, run: dict, info):
@@ -893,6 +895,7 @@ class AutoBookService(_Runner):
         self.event(run, "start", "Make a book for me started (you pressed the button: consent for this run)",
                    step="backup")
         self._note_ai_choice(run)
+        self._note_practice(run)
         if settings.get("continue"):
             c = settings["continue"]
             run.update(project_id=c["project_id"], title=c["title"])
@@ -1115,6 +1118,21 @@ class AutoBookService(_Runner):
         return self.resume(principal, run["id"])
 
     # ------------------------------------------------------------------ settings
+    PRACTICE_NOTE = ("🧪 The Practice AI (test text) writes this book: placeholder text to try out Akọwe, not a real "
+                     "book. Choose a real AI in Settings › AI to write your book.")
+
+    def _note_practice(self, run: dict):
+        """🧪 Say plainly, at the start, that the Practice AI writes this run's book (never raises)."""
+        try:
+            slots = self.app.engine.providers.ai_slots()
+            pick = run["settings"].get("slot_id")
+            used = [s for s in slots if not pick or s["slot_id"] == pick]
+            if any(s["adapter_id"] == "practice" for s in used):
+                run["practice_ai"] = True
+                self.event(run, "note", self.PRACTICE_NOTE, step="backup", code="PRACTICE_AI")
+        except Exception:  # noqa: BLE001 - a note must never stop the start
+            log.exception("could not note the Practice AI")
+
     def _note_ai_choice(self, run: dict):
         """P37.5: say plainly which AIs the author chose to start without and who does their work (never raises)."""
         try:
@@ -1430,6 +1448,9 @@ class AutoBookService(_Runner):
                 run["problem"] = None  # a finished run has nothing left to decide
             self._retire_older(run, "finished this book")
             self.event(run, "finished", "Your book is made: PDF, EPUB and Word files are ready")
+            if run.get("practice_ai"):  # 🧪 the files are test text: say it where the author reads the result
+                self.event(run, "note", "🧪 Written by the Practice AI (test text): the files hold placeholder "
+                           "text that tests Akọwe, not a real book.", code="PRACTICE_AI")
             try:  # 🧼 how cleanly it went: one journal line for the author, one code-only line for akowe.log
                 from . import clean_run  # noqa: PLC0415
                 sc = clean_run.score(run)
@@ -2605,7 +2626,17 @@ class AutoBookService(_Runner):
             try:
                 e = gen(self._assist, rj, bp)
             except AkoweError as exc:
-                if exc.code == "TIMEOUT" or exc.code in BUSY_CODES or exc.code == "CAPABILITY_UNAVAILABLE":
+                slow = exc.code == "TIMEOUT" or exc.code in BUSY_CODES or exc.code == "CAPABILITY_UNAVAILABLE"
+                if slow and k == "texture" and not getattr(exc, "control", False):
+                    # 🧺 the world texture is extra colour, not a must: an AI that did not answer in time does not
+                    # stop the book — it is tried once more after the outline, else listed for you to check later
+                    run["texture_retry"] = True
+                    item.update(state="failed", note=exc.code)
+                    self.event(run, "note", f"⚠️ The AI did not answer in time for the world texture ({exc.code}); the "
+                               "book goes on and Akọwe tries once more after the chapter outline", code="TEXTURE_LATER")
+                    self.save(run)
+                    continue
+                if slow:
                     item["state"] = "paused"
                     self._ai_problem(exc, f"writing the {label.lower()}")
                 item.update(state="failed", note=exc.code)
@@ -3880,6 +3911,7 @@ class AutoBookService(_Runner):
         if st.get("predict"):
             st["message"] += f" · {st['predict']}"
         self._build_ledger(run, st)
+        self._retry_texture(run, st)
         from . import story_guards  # noqa: PLC0415 - 🧭 the scope guard (no AI) and 🤫 who knows what (≤ 1 request)
         story_guards.after_outline(self, run, st)
         from . import trade_card  # noqa: PLC0415 - 🔧 how the book's trade is really done (≤ 1 request)
@@ -3915,6 +3947,34 @@ class AutoBookService(_Runner):
             self.event(run, "note", f"📚 {m['label']}: " + "; ".join(story_kind.strip_label(s_) for s_ in m["stages"])
                        + (f" (⚠️ {len(m['problems'])} placed where they usually begin)" if m.get("problems") else ""),
                        step="outline", code="KIND_PLACED")
+        self.save(run)
+
+    def _retry_texture(self, run, st):
+        """🧺 The world texture timed out at the start: one more try now (after the outline). Never holds up the book:
+        a second failure is listed for the author's check later (make it on the 🌍 World rules page)."""
+        if not run.get("texture_retry"):
+            return
+        run["texture_retry"] = False
+        pid, branch = run["project_id"], run["branch_id"]
+        if texture_mod.get_entry(self.store, pid, branch):
+            return
+        rj = self._sub_job(run, "world_texture", "texture", run["settings"].get("slot_id"))
+        try:
+            e = texture_mod.generate(self._assist, rj, self.bp(run))
+        except AkoweError as exc:
+            if getattr(exc, "control", False):
+                raise
+            later = run.setdefault("check_later", [])
+            line = "World texture: the AI did not make it (make it on the 🌍 World rules page)"
+            if line not in later:
+                later.append(line)
+            self.event(run, "note", f"⚠️ The world texture could not be made on the second try ({exc.code}); the "
+                       "book goes on without it — it is listed for you to check later", code="TEXTURE_FAILED")
+            self.save(run)
+            return
+        n = len(e.get("items") or [])
+        self.event(run, "world", f"The AI wrote the world texture on the second try ({n})", slot=rj.slot,
+                   code="TEXTURE_RETRIED")
         self.save(run)
 
     def _build_ledger(self, run, st):

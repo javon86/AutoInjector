@@ -11,6 +11,10 @@ from the environment or the local secret file, never from project data or export
 The "autoinjector" adapter (experimental) talks to the AutoInjector desktop app's local
 HTTP bridge (docs/AKOWE_AUTOINJECTOR_BRIDGE.md, contract v1) with stdlib urllib only,
 so a slot can use a logged-in ChatGPT/Claude/Gemini web session instead of an API key.
+
+The "practice" adapter (practice_ai.py) is the built-in Practice AI: free, offline and instant, it answers every
+request with valid placeholder text so a whole ⚡ Make-a-book run can be tried out. The "ollama" adapter
+(ollama_adapter.py) runs a local model on the author's own PC through Ollama's HTTP API.
 """
 from __future__ import annotations
 
@@ -30,7 +34,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from . import ai_activity, legacy, usage_limits
+from . import ai_activity, legacy, ollama_adapter, practice_ai, usage_limits
 from .errors import AkoweError
 from .store import Store, new_id, utcnow, write_private
 
@@ -40,7 +44,11 @@ SLOT_IDS = ("AI-1", "AI-2", "AI-3")
 DEFAULT_MODEL = "claude-opus-5-5"
 RETRYABLE = {"TIMEOUT", "UPSTREAM_UNAVAILABLE", "RATE_LIMITED"}
 
-ADAPTERS = ("none", "anthropic", "manual", "autoinjector")
+ADAPTERS = ("none", "anthropic", "manual", "autoinjector", "practice", "ollama")
+# Adapters that do AI work (an AI answers), and those that need no key (the Practice AI, a model on this PC).
+AI_ADAPTERS = ("anthropic", "autoinjector", "practice", "ollama")
+KEYLESS_ADAPTERS = ("practice", "ollama")
+PRACTICE_NAME = "Practice AI (test text)"
 AUTOINJECTOR_SITES = ("chatgpt", "claude", "gemini")
 DEFAULT_BRIDGE_URL = "http://127.0.0.1:17891"
 # Default mapping used by "connect all three" (contract: AI-1=claude, AI-2=chatgpt, AI-3=gemini).
@@ -69,7 +77,33 @@ def slot_name(slot: dict) -> str:
         return f"{sid} · {SITE_NAMES.get(slot['site'], slot['site'])}"
     if slot.get("adapter_id") == "anthropic":
         return f"{sid} · Claude (API)"
+    if slot.get("adapter_id") == "practice":
+        return f"{sid} · {PRACTICE_NAME}"
+    if slot.get("adapter_id") == "ollama":
+        return f"{sid} · {slot.get('model') or 'local model'} (on this PC)"
     return sid
+
+
+def ai_label(slot: dict | None) -> str | None:
+    """The everyday name of the Practice AI or a local model ("Practice AI (test text)", "llama3.1:8b (on this PC)"),
+    None for the other adapters (their callers name them by site / API)."""
+    if not slot:
+        return None
+    if slot.get("adapter_id") == "practice":
+        return PRACTICE_NAME
+    if slot.get("adapter_id") == "ollama":
+        return f"{slot.get('model') or 'local model'} (on this PC)"
+    return None
+
+
+def family_name(fam: str | None) -> str | None:
+    """The plain name of an AI family that is not a web site / the API: the Practice AI or a local model."""
+    f = str(fam or "")
+    if f.startswith("practice-"):
+        return f"{PRACTICE_NAME[:-1]}, {f[len('practice-'):]})"
+    if f.startswith("ollama:"):
+        return f"{f[len('ollama:'):]} (on this PC)"
+    return None
 
 
 def slot_family(slot: dict | None) -> str | None:
@@ -81,6 +115,11 @@ def slot_family(slot: dict | None) -> str | None:
         return str(slot["site"])
     if slot.get("adapter_id") == "anthropic":
         return "claude"
+    if slot.get("adapter_id") == "practice":
+        # each Practice AI slot is its own reviewer: a test run with 2-3 practice slots has independent checks
+        return f"practice-{slot.get('slot_id')}"
+    if slot.get("adapter_id") == "ollama":
+        return f"ollama:{slot.get('model') or ''}"  # two slots with the same local model are the same AI
     return slot.get("slot_id")
 
 
@@ -189,7 +228,7 @@ class SlotHealth:
                 log.exception("failover listener failed")
 
 DEFAULT_SLOT = {
-    "adapter_id": "none",            # none | anthropic | manual | autoinjector
+    "adapter_id": "none",            # none | anthropic | manual | autoinjector | practice | ollama
     "model": DEFAULT_MODEL,
     "effort": "high",
     "capabilities": ["text", "json"],
@@ -206,6 +245,9 @@ DEFAULT_SLOT = {
     # autoinjector adapter only: local bridge URL (127.0.0.1/localhost over http) and web site.
     "bridge_url": DEFAULT_BRIDGE_URL,
     "site": None,
+    # ollama adapter only: the Ollama address (this PC / the home network) and how long one answer may take
+    "base_url": ollama_adapter.DEFAULT_OLLAMA_URL,
+    "timeout_s": ollama_adapter.DEFAULT_TIMEOUT_S,
     # Operation IDs ("C02") or set letters ("B") this slot is preferred for (see eligible()).
     "roles": [],
 }
@@ -1163,6 +1205,20 @@ class ProviderRegistry:
                 slot["output_cost_minor_per_mtok"] = 0
                 slot["max_concurrent"] = min(int(slot["max_concurrent"]), 1)
                 slot["has_credentials"] = bool(self._api_key(sid))
+            elif slot["adapter_id"] in KEYLESS_ADAPTERS:
+                own = stored.get(sid) or {}
+                if slot["adapter_id"] == "ollama":
+                    # a model on this PC: a window an 8B-14B model runs in, one answer at a time (one graphics card)
+                    if "context_limit_tokens" not in own:
+                        slot["context_limit_tokens"] = ollama_adapter.DEFAULT_CONTEXT_TOKENS
+                    if "max_output_tokens" not in own:
+                        slot["max_output_tokens"] = ollama_adapter.DEFAULT_OUTPUT_TOKENS
+                    slot["max_concurrent"] = min(int(slot["max_concurrent"]), 1)
+                else:
+                    slot["max_concurrent"] = max(int(slot["max_concurrent"]), 8)  # the Practice AI is never busy
+                slot["input_cost_minor_per_mtok"] = 0
+                slot["output_cost_minor_per_mtok"] = 0
+                slot["has_credentials"] = True  # nothing to log in to: it is ready once chosen
             else:
                 slot["has_credentials"] = bool(self._api_key(sid)) or bool(os.environ.get("ANTHROPIC_API_KEY"))
             out.append(slot)
@@ -1175,18 +1231,26 @@ class ProviderRegistry:
             raise AkoweError("INVALID_INPUT", "", "slot configuration must be an object", status="REJECTED")
         config = dict(config)
         allowed = set(DEFAULT_SLOT)
+        trust_host = config.pop("confirm_internet_host", False)
+        if not isinstance(trust_host, bool):
+            raise AkoweError("INVALID_INPUT", "/confirm_internet_host", "must be true or false", status="REJECTED")
         unknown = set(config) - allowed - {"api_key"}
         if unknown:
             raise AkoweError("INVALID_INPUT", "/" + sorted(unknown)[0], "unsupported slot field", status="REJECTED")
         if "adapter_id" in config and config["adapter_id"] not in ADAPTERS:
-            raise AkoweError("INVALID_INPUT", "/adapter_id", "adapter must be none, anthropic, manual or "
-                                 "autoinjector", status="REJECTED")
+            raise AkoweError("INVALID_INPUT", "/adapter_id", "adapter must be none, anthropic, manual, "
+                                 "autoinjector, practice or ollama", status="REJECTED")
         for k in ("context_limit_tokens", "max_output_tokens", "max_concurrent", "input_cost_minor_per_mtok",
                   "output_cost_minor_per_mtok"):
             if k in config and (not isinstance(config[k], int) or isinstance(config[k], bool) or config[k] < 0):
                 raise AkoweError("INVALID_INPUT", "/" + k, "must be a non-negative integer", status="REJECTED")
         if "bridge_url" in config:
             config["bridge_url"] = validate_bridge_url(config["bridge_url"])
+        if "base_url" in config:
+            config["base_url"] = ollama_adapter.validate_ollama_url(config["base_url"], trust_host)
+            config["base_url_trusted"] = trust_host  # kept: an internet address the author said they trust
+        if "timeout_s" in config:
+            config["timeout_s"] = ollama_adapter.validate_timeout(config["timeout_s"])
         if "site" in config and config["site"] is not None and config["site"] not in AUTOINJECTOR_SITES:
             raise AkoweError("INVALID_INPUT", "/site", "site must be chatgpt, claude or gemini", status="REJECTED")
         if "roles" in config:
@@ -1211,6 +1275,14 @@ class ProviderRegistry:
         if merged["adapter_id"] == "autoinjector" and merged.get("site") not in AUTOINJECTOR_SITES:
             raise AkoweError("INVALID_INPUT", "/site", "an autoinjector slot needs a site: chatgpt, claude or "
                                  "gemini", status="REJECTED")
+        if merged["adapter_id"] == "ollama":
+            if "model" not in config and merged.get("model") == DEFAULT_MODEL:
+                config["model"] = ollama_adapter.DEFAULT_OLLAMA_MODEL  # a Claude model name means nothing to Ollama
+            else:
+                config["model"] = ollama_adapter.validate_model(merged.get("model"))
+            if "base_url" not in config:  # an address saved earlier is checked again (never a stale internet host)
+                config["base_url"] = ollama_adapter.validate_ollama_url(merged.get("base_url"), trust_host
+                                                                        or bool(cur.get("base_url_trusted")))
         if "api_key" in config:
             self._store_api_key(slot_id, config.pop("api_key"))
         cur.update(config)
@@ -1242,14 +1314,26 @@ class ProviderRegistry:
         return self.connect_autoinjector(token, url)
 
     def health_check(self, slot_id: str) -> dict:
-        """Test an autoinjector slot's bridge (GET /v1/health). Never raises for bridge problems:
-        returns {ok: false, error, message} so the UI can explain what to fix."""
+        """Test a slot's connection: an autoinjector slot's bridge (GET /v1/health), an ollama slot's Ollama
+        (GET /api/tags: running? model installed?), a practice slot (always works). Never raises for connection
+        problems: returns {ok: false, error, message} so the UI can explain what to fix."""
         slot = next((s for s in self.slots() if s["slot_id"] == slot_id), None)
         if slot is None:
             raise AkoweError("NOT_FOUND", "/slot_id", "slots are AI-1, AI-2 and AI-3 only", status="REJECTED")
+        if slot["adapter_id"] == "practice":
+            return {"slot_id": slot_id, "ok": True, "error": None, "state": "ok", "problem": None, "sites": {},
+                    "site": None, "site_ready": True, "site_busy": False, "adapter_id": "practice",
+                    "message": f"The {PRACTICE_NAME} works: it is built into Akọwe, free and instant. It writes "
+                               "placeholder text to test the program, not a real book."}
+        if slot["adapter_id"] == "ollama":
+            ad = ollama_adapter.OllamaAdapter(slot.get("base_url") or ollama_adapter.DEFAULT_OLLAMA_URL,
+                                              slot.get("timeout_s") or ollama_adapter.DEFAULT_TIMEOUT_S)
+            h = ad.health(slot.get("model"))
+            return dict(h, slot_id=slot_id, adapter_id="ollama", sites={}, site=None, site_ready=h["ok"],
+                        site_busy=False, state="ok" if h["ok"] else "unknown", problem=None)
         if slot["adapter_id"] != "autoinjector":
-            raise AkoweError("INVALID_INPUT", "/adapter_id", "Test connection is available for autoinjector "
-                                 "slots only", status="REJECTED")
+            raise AkoweError("INVALID_INPUT", "/adapter_id", "Test connection is available for AutoInjector, "
+                                 "Ollama and Practice AI slots only", status="REJECTED")
         base = {"slot_id": slot_id, "site": slot.get("site"), "bridge_url": slot.get("bridge_url")}
         try:
             adapter = AutoInjectorAdapter(self._api_key(slot_id), slot.get("bridge_url") or DEFAULT_BRIDGE_URL)
@@ -1321,7 +1405,7 @@ class ProviderRegistry:
 
     def ai_slots(self) -> list[dict]:
         """Slots that can do AI work (any adapter except none; manual only with a test adapter)."""
-        return [s for s in self.slots() if s["adapter_id"] in ("anthropic", "autoinjector")
+        return [s for s in self.slots() if s["adapter_id"] in AI_ADAPTERS
                 or (s["adapter_id"] == "manual" and self.test_adapter is not None)]
 
     def down_error(self, slots: list[dict]) -> AkoweError:
@@ -1428,6 +1512,11 @@ class ProviderRegistry:
             return AnthropicAdapter(self._api_key(slot["slot_id"]))
         if slot["adapter_id"] == "autoinjector":
             return AutoInjectorAdapter(self._api_key(slot["slot_id"]), slot.get("bridge_url") or DEFAULT_BRIDGE_URL)
+        if slot["adapter_id"] == "practice":
+            return practice_ai.shared()
+        if slot["adapter_id"] == "ollama":
+            return ollama_adapter.OllamaAdapter(slot.get("base_url") or ollama_adapter.DEFAULT_OLLAMA_URL,
+                                                slot.get("timeout_s") or ollama_adapter.DEFAULT_TIMEOUT_S)
         return None
 
     # ------------------------------------------------------------------ selection (K11 rules)
@@ -1584,8 +1673,8 @@ class ProviderRegistry:
         collected or given up); other_ai: a refusal, or JSON still broken after the re-asks."""
         if exc.code == "UPSTREAM_UNAVAILABLE":
             return "busy"
-        if exc.code == "TIMEOUT" and slot.get("adapter_id") == "autoinjector":
-            return "timeout"
+        if exc.code == "TIMEOUT" and slot.get("adapter_id") in ("autoinjector", "ollama"):
+            return "timeout"  # a local model that was too slow: another working AI may take the call
         if getattr(exc, "try_other_ai", False):
             return "other_ai"
         return None
@@ -1707,6 +1796,8 @@ class ProviderRegistry:
             per = float(op["timeout_ms"]) / 1000.0
         if slot.get("adapter_id") == "autoinjector":
             per = max(per, cls.WEB_CALL_MIN_S)
+        if slot.get("adapter_id") == "ollama":
+            per = max(per, float(slot.get("timeout_s") or ollama_adapter.DEFAULT_TIMEOUT_S))
         from datetime import datetime, timedelta, timezone  # noqa: PLC0415
         own = datetime.now(timezone.utc) + timedelta(seconds=per)
         if dl:
@@ -1822,6 +1913,8 @@ class ProviderRegistry:
                     err.bridge_body = getattr(exc, "bridge_body", None) or {}
                     err.late_collect_tried = bool(getattr(exc, "late_collect_tried", False))
                     raise err from exc
+                if exc.code == "TIMEOUT" and slot.get("adapter_id") == "ollama":
+                    raise  # free and local: nothing was paid; the step pauses (or another AI takes it), never 3x
                 if exc.code == "TIMEOUT":
                     # Ambiguous paid generation: the Messages API has no job-status lookup, so the
                     # contract requires a user decision instead of silently paying again.

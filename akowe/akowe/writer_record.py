@@ -41,7 +41,8 @@ _clock = time.time
 
 
 def name_of(fam: str | None) -> str:
-    return NAMES.get(str(fam or ""), str(fam or "an AI"))
+    from .providers import family_name  # noqa: PLC0415 - 🧪 the Practice AI / a local model on this PC
+    return NAMES.get(str(fam or "")) or family_name(fam) or str(fam or "an AI")
 
 
 # ====================================================================== settings

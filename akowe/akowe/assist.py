@@ -567,6 +567,10 @@ class AssistService:
             return f"{site} through AutoInjector"
         if slot["adapter_id"] == "anthropic":
             return f"Claude (Anthropic API, {slot.get('model')})"
+        if slot["adapter_id"] == "practice":
+            return providers_mod.PRACTICE_NAME
+        if slot["adapter_id"] == "ollama":
+            return f"{slot.get('model')} on this PC (Ollama)"
         return f"{slot['slot_id']} ({slot['adapter_id']})"
 
     def _usable(self, s: dict, pid: str) -> bool:

@@ -326,7 +326,7 @@ class WorkflowTestRunner:
                 item.update(state="NOT_SET_UP", message="not set up")
             elif adapter == "manual":
                 item.update(state="MANUAL", message="manual (you write it yourself; no AI)")
-            elif adapter == "autoinjector":
+            elif adapter in ("autoinjector", "practice", "ollama"):
                 h = self.base_providers.health_check(s["slot_id"])
                 item.update(state="READY" if h.get("ok") else "ERROR", message=h.get("message"), error=h.get("error"))
             elif adapter == "anthropic":
