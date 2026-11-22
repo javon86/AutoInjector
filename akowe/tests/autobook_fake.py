@@ -278,6 +278,7 @@ class BookFakeAI:
         self.needs = None                        # 🧠 a needs list returned with every scene plan (dict or callable(ctx))
         self.shape_script: list = []             # 📐 scripted beat placements (dicts or callables(ctx)), one per call
         self.kind_script: list = []              # 📚 scripted stage placements (dicts or callables(ctx)), one per call
+        self.fix_script: list = []               # ✋ scripted review fixes (callables(data, ctx) -> data); default: none
         self.ledger_script: list = []            # 📜 scripted promise ledgers (dicts or callables(ctx)); default: none
         self.cut_script: list = []               # ✂ scripted cut-pass answers (dicts or callables(ctx)); default: none
         self.kind_pick = None                    # 📚 the kind of story the invent step picks (when asked), e.g. "quest"
@@ -670,6 +671,10 @@ class BookFakeAI:
                     self.doctor_fixes += 1
                 data["chapters"][0]["summary"] = str(data["chapters"][0].get("summary") or "") + " (doctor fix)"
                 return "doctor_fix", data
+            with self.lock:  # ✋ scripted review fixes (callables(data, ctx) -> data); default: one sentence revised
+                scripted = self.fix_script.pop(0) if self.fix_script else None
+            if scripted is not None:
+                return "fix", scripted(copy.deepcopy(data), ctx) if callable(scripted) else copy.deepcopy(scripted)
             return "fix", self._revise(data)
         if {"title", "author", "genre", "audience", "tone", "idea"} <= set(props):
             w = ctx.get("wishes") or {}

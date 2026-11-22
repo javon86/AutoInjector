@@ -897,6 +897,9 @@ class EditorService:
         # P30: voice and motif repeats are never cut by a rewrite (only Akọwe's own trim of their excess)
         keep = list(dict.fromkeys(keep + protected_repeats(self.engine, job.principal, pid, branch, text,
                                                            except_keys=craft.get("except_keys") or ())))
+        from . import keep_brief  # noqa: PLC0415 - ✋ a ⚡ run's rewrite also keeps the chapter's strongest lines
+        keep_more = keep_brief.for_propose(job, text, findings)
+        keep = list(dict.fromkeys(keep + keep_more))
         if not job.slot_pref:
             writer = rv.writer_of(pid, branch, rec)
             job.prefer_slots = [writer["slot"]] if writer.get("slot") else []
@@ -905,7 +908,7 @@ class EditorService:
         ctx = {"chapter_text": text[:MAX_TEXT_CHARS], "book_profile": book_profile_brief(self.store, pid),
                "findings": [{k: f.get(k) for k in ("id", "dimension", "severity", "passage", "why", "suggestion",
                                                    "keep_nearby")} for f in findings],
-               "keep": craft.get("keep") or [], "voices": self._voices(pid, branch),
+               "keep": list(dict.fromkeys((craft.get("keep") or []) + keep_more)), "voices": self._voices(pid, branch),
                "canon": {"approved_records": approved}, "protected_facts": protected[:40]}
         try:  # H20: the rewrite sees the tracked continuity (state, story ledger, end of the chapter before)
             from . import continuity  # noqa: PLC0415
@@ -918,7 +921,7 @@ class EditorService:
                 ctx["narrator_style"] = brief_for(self.store, pid)
         except Exception:  # noqa: BLE001
             log.exception("could not add the narrator style to the rewrite")
-        task = rubric.REWRITE_TASK
+        task = rubric.REWRITE_TASK + (keep_brief.PROPOSE_RULE if keep_more else "")
         if craft.get("improve"):  # 🔁 the final improve pass (improve_pass.py): what must never change
             from .improve_pass import IMPROVE_RULES, IMPROVE_WORDS  # noqa: PLC0415
             ctx["improve_rules"] = IMPROVE_RULES
@@ -951,6 +954,7 @@ class EditorService:
             raise AkoweError("INTERNAL_ERROR", "/replacements", "the writer's answer had no list of replacements; "
                                  "nothing was changed")
         res = apply_replacements(text, reps, findings, keep)
+        keep_brief.after_propose(job, res)
         if budget:  # 📏 the replacements that add the most words go first when the chapter would grow too much
             from .length_guard import trim  # noqa: PLC0415
             res, _cut = trim(text, res, findings, keep, budget["may_add"])

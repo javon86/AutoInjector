@@ -19,6 +19,8 @@
 * ``promises`` (📜 promise_ledger.py): the set-ups this chapter must plant and the payoffs that fall due here.
 * ``voice_notes`` (🗣 voice_test.py) / ``subtext_note`` (💬 subtext_check.py): characters of this chapter whose
   dialogue read alike in the chapters already written, and a note when earlier dialogue said feelings outright.
+* 🎬 ``ending_brief`` / ``facts_to_cite`` (ending_writer.py, ⚡ runs): the ending checklist of the last and the climax
+  chapter, and the established facts (with their chapters) this chapter's plan relies on.
 * ``story_choices`` (P12): the author's style choices (and the ending-state matrix in the last chapter).
 * ``length`` (P15): the chapter's word target, scenes and words per scene, and whether it is written scene by scene.
 * ``narrator_style`` (P25): the author's own style card (style_card.py) when the book writes in the author's style
@@ -508,8 +510,18 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str, *
         if fp:
             brief["first_page"] = fp
             rules.append(first_page.BRIEF_RULE)
+        try:  # 🎬 the ending checklist (last / climax chapter) and the facts this chapter relies on (ending_writer.py)
+            from . import ending_writer  # noqa: PLC0415
+            ew, ew_rules = ending_writer.writer_parts(store, pid, branch, outline, chapter_id,
+                                                      texts + [json.dumps(cards, ensure_ascii=False)],
+                                                      needs=bool(needs))
+        except Exception:  # noqa: BLE001
+            log.exception("ending writer of chapter %s", chapter_id)
+            ew, ew_rules = {}, []
+        brief.update(ew)
+        rules += ew_rules
         brief["rules"] = rules
-        if not (cards or vb["cards"] or vb["others"] or pov or planned or room or fp or extra.get("story_rules")
+        if not (ew or cards or vb["cards"] or vb["others"] or pov or planned or room or fp or extra.get("story_rules")
                 or extra.get("world_texture") or extra.get("story_choices") or length or style
                 or brief.get("character_details") or main or world or fixed or brief.get("needed_details")
                 or brief.get("earlier_moments") or brief.get("story_beats") or brief.get("story_stage") or brief.get("promises")
