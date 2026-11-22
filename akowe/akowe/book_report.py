@@ -1508,6 +1508,9 @@ def render_markdown(rep: dict) -> str:
     if rep.get("doctor"):  # 🩺 story_doctor.py: the plan's score before chapter 1 and its main weaknesses
         L += ["## 🩺 Story doctor (the plan, before chapter 1)", "", str(rep["doctor"]), ""]
         L += [f"- {n}" for n in rep.get("doctor_notes") or []] + ([""] if rep.get("doctor_notes") else [])
+    if rep.get("plan_and_scenes"):  # 🔮 predictability.py / 🎭 key_scenes.py: the plan's turns, the key scenes
+        from . import pairwise  # noqa: PLC0415
+        L += pairwise.report_md(rep)
     if rep.get("polish"):  # 📏 chapter_polish.py: the reading level before → after the chapter polish
         L += [str(rep["polish"]), ""]
     if rep.get("improve"):

@@ -101,7 +101,8 @@ def test_usage_limits_forecast_pause_and_chapter(app):
     assert novel["will_hit_limit"] and claude["status"] == "limit" and claude["pauses"]
     assert any("Claude will probably" in x and "chapter" in x for x in novel["limits"])
     assert 1 <= claude["pauses"][0]["chapter"] <= novel["chapters"]
-    short = run_forecast.estimate(app, {"length": "short_story"})
+    # (without 🎭 the key scene's second version: that extra writer answer puts the writer right at its guessed limit)
+    short = run_forecast.estimate(app, {"length": "short_story", "key_scene_versions": False})
     assert not any(a["status"] == "limit" for a in short["ais"])
     # "wait for a second AI" + a picked writer: the pauses make the run as long as they are
     wait = run_forecast.estimate(app, {"length": "novel", "single_ai": "wait", "slot_id": "AI-1"})
@@ -139,9 +140,10 @@ def _measured_job(app, per_call_s=12.0, checkers="one", chapters=3, calls=40):
 
 
 def test_calibrated_from_this_pcs_runs(app):
-    first = est(app, length="short_story", chapters=3)
+    new = {"predictability_probe": False, "key_scene_versions": False, "pairwise": False}  # 🔮 🎭 ⚖ not measured here
+    first = est(app, length="short_story", chapters=3, **new)
     _measured_job(app, per_call_s=12.0, checkers="one")
-    e = est(app, length="short_story", chapters=3, checkers="one")
+    e = est(app, length="short_story", chapters=3, checkers="one", **new)
     assert e["basis"] == "measured" and e["runs_measured"] == 1 and e["per_call_s"] == 12.0
     work, work0 = e["minutes"]["expected"] - e["wait_minutes"], first["minutes"]["expected"] - first["wait_minutes"]
     assert work < work0  # 12 s per answer instead of the 45 s guess
@@ -151,7 +153,7 @@ def test_calibrated_from_this_pcs_runs(app):
     # the measured run checked with one AI: asking for all adds the difference, the same setting adds nothing
     same = [r for r in e["steps"] if r["step"] == "option:checkers"]
     assert not same or same[0]["calls"] == 0
-    more = est(app, length="short_story", chapters=3, checkers="all")
+    more = est(app, length="short_story", chapters=3, checkers="all", **new)
     assert more["calls"]["expected"] > e["calls"]["expected"]
 
 

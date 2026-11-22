@@ -376,7 +376,8 @@ def test_pinned_run_still_gets_an_independent_reviewer(tmp_path):
     assert run["status"] == "done", (run["phase"], run.get("problem"))
     writes = {s for s, k in fake.per_slot if k not in ("review", "fail", "craft", "scene_review", "planned", "ending",
                                                        "book_review", "checkpoint", "originality",
-                                                       "human_rewrite", "first_page_pick", "plan_review")}  # P13: the whole-book read is a review; PR #117: every AI checks
+                                                       "human_rewrite", "first_page_pick", "plan_review",
+                                                           "predictability_probe", "pairwise")}  # 🔮 ⚖ checks too  # P13: the whole-book read is a review; PR #117: every AI checks
     #                                                                          (a checkpoint read is a check); ✍ the
     #                                                                          end-of-book read and its suggestions
     #                                                                          come from the AI that did not write

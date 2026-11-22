@@ -24,7 +24,9 @@ updated for it (autobook.py ``_s_outline``):
    replaced; the outline is strengthened around it — and the revision keeps the author's lock list, point of view and
    tense, content limits, the main character, the story shape / kind of story and every chapter ID.
 4. **Keep the best plan.** If a revision scored lower, the best-scoring outline is put back (the same text, approved
-   again under the run consent — no AI).
+   again under the run consent — no AI). ⚖ When the first plan and a revision both exist, they first meet head to
+   head (pairwise.py ``doctor_keep``: random order, both orders when two AIs judge, ties allowed); a clear winner is
+   the plan kept, a tie or no verdict leaves the scores' choice (run setting ``pairwise``).
 
 It runs whenever the outline is approved — also after the author's ✔ approve anyway / accept the change, and on a
 run saved by an older Akọwe (only ``story_doctor: false`` switches it off). **The plan's quality gate** (run setting
@@ -538,6 +540,13 @@ def line(mem: dict) -> str | None:
         why = mem.get("why") or "no revision could be made"
         return f"🩺 Plan scored {first}/10 (target {target}); {why}, so the plan stays as it was."
     word = f"{rev} revision{'s' if rev != 1 else ''}"
+    pw = (mem.get("pairwise") or {}).get("winner")  # ⚖ the first and the revised plan met head to head
+    if pw == "a":
+        return (f"🩺 Plan scored {first}/10; after {word}, a head-to-head comparison preferred the first plan, so it is "
+                f"kept (target {target}).")
+    if pw == "b":
+        return (f"🩺 Plan scored {first} → {best} after {word}; a head-to-head comparison preferred the revised plan, so "
+                "it is kept" + ("." if best >= target else f" (target {target})."))
     if mem.get("objections_answered") and mem.get("objections_answered") == mem.get("best_version"):
         return (f"🩺 Plan scored {first} → {best} after {word}; the AI reviewer's objections to the plan were settled "
                 "in it" + ("." if best >= target else f" (target {target})."))
@@ -639,6 +648,8 @@ def _work(svc, run, st, mem):
             break
     if mem.get("objections"):  # none of the revisions settled them (refused, or the rounds were used up)
         _objections_later(svc, run, mem)
+    from . import pairwise  # noqa: PLC0415 - ⚖ first plan vs the best revision head to head (the scores: fallback)
+    pairwise.doctor_keep(svc, run, mem)
     _restore_best(svc, run, mem)
     mem["state"] = "done"
 
@@ -657,9 +668,10 @@ def _objections_later(svc, run, mem) -> None:
               "they are listed for your check later", step="outline", code="DOCTOR_OBJECTIONS_OPEN")
 
 
-def _revise(svc, run, st, mem, rid: str, note: str) -> bool:
+def _revise(svc, run, st, mem, rid: str, note: str, what: str | None = None) -> bool:
     """The existing plan-revision path: a draft of the approved outline, the AI's fix with the doctor's note (review.py
-    ``_run_fix``), then Akọwe's checks and the usual review and approval. False: nothing new was approved."""
+    ``_run_fix``), then Akọwe's checks and the usual review and approval. False: nothing new was approved. ``what``:
+    the run window's words for a revision asked by another plan check (🔮 predictability.py)."""
     from .book_path import problems  # noqa: PLC0415
     from .errors import AkoweError  # noqa: PLC0415
     bp = svc.bp(run)
@@ -672,11 +684,11 @@ def _revise(svc, run, st, mem, rid: str, note: str) -> bool:
             return False
         svc._made(run, r["output_refs"][0])  # noqa: SLF001 - the AI's own text, unchanged
     k = mem["revisions"]
-    st["message"] = f"🩺 Story doctor: the AI revises the plan with the reviewers' fixes (revision {k})"
+    st["message"] = what or f"🩺 Story doctor: the AI revises the plan with the reviewers' fixes (revision {k})"
     run["phase"] = st["message"]
-    svc.event(run, "fix", f"🩺 Story doctor: the plan scored under {mem.get('target', TARGET)}; the AI revises the "
-              f"chapter outline with the reviewers' fixes (revision {k})", record_id=rid, step="outline",
-              code="DOCTOR_REVISING")
+    svc.event(run, "fix", what or f"🩺 Story doctor: the plan scored under {mem.get('target', TARGET)}; the AI revises "
+              f"the chapter outline with the reviewers' fixes (revision {k})", record_id=rid, step="outline",
+              code="PREDICT_REVISING" if what else "DOCTOR_REVISING")
     svc.save(run)
     fj = svc._sub_job(run, "fix", rid, (run.get("settings") or {}).get("slot_id"))  # noqa: SLF001
     fj.note = note
@@ -751,7 +763,7 @@ def _review_revision(svc, run, st, mem) -> bool:
     return True
 
 
-def _restore_best(svc, run, mem) -> None:
+def _restore_best(svc, run, mem, message: str | None = None) -> None:
     """Put the best-scoring outline back when the approved one is not it (same text, approved again under the run
     consent; no AI), or approve the unchanged draft a stopped revision left behind."""
     from .book_path import problems  # noqa: PLC0415
@@ -782,7 +794,7 @@ def _restore_best(svc, run, mem) -> None:
         svc._made(run, ref)  # noqa: SLF001
     svc._approve(run, ref, why="🩺 Story doctor: the best-scoring plan is kept (the same text as before)")  # noqa: SLF001
     if not unchanged:
-        svc.event(run, "note", f"🩺 Story doctor: the best-scoring plan ({mem.get('best_score')}/10) is kept",
+        svc.event(run, "note", message or f"🩺 Story doctor: the best-scoring plan ({mem.get('best_score')}/10) is kept",
                   step="outline", code="DOCTOR_BEST_KEPT", record_id=rid)
     svc.save(run)
 
