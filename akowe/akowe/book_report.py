@@ -1017,6 +1017,16 @@ class ReportService:
                     base.pop(k, None)
         except Exception:  # noqa: BLE001 - never break the report
             log.exception("could not add the cut pass and the book budgets to the report")
+        try:  # 🗣 the voices on the page / 💬 the dialogue that said too much (voice_test.py, subtext_check.py)
+            from . import subtext_check, voice_test  # noqa: PLC0415
+            for k, info in (("voice_test", voice_test.report_info(self.store, pid, branch)),
+                            ("subtext", subtext_check.report_info(self.store, pid, branch))):
+                if info:
+                    base[k] = info
+                else:
+                    base.pop(k, None)
+        except Exception:  # noqa: BLE001 - never break the report
+            log.exception("could not add the voice test / subtext check to the report")
         base["aggregate"] = aggregate(base["reviews"])
         base["try_next"] = self.try_next(base)
         from . import approval_trust  # noqa: PLC0415 - H14: chapters approved without (all) checks
@@ -1436,6 +1446,8 @@ def render_markdown(rep: dict) -> str:
     if (rep.get("promises") or {}).get("line"):  # 📜 the set-ups and their payoffs
         from . import promise_ledger  # noqa: PLC0415
         L += promise_ledger.report_md(rep["promises"])
+    from . import subtext_check, voice_test  # noqa: PLC0415 - 🗣 voices on the page / 💬 subtext
+    L += voice_test.report_md(rep.get("voice_test")) + subtext_check.report_md(rep.get("subtext"))
     if (rep.get("cuts") or {}).get("line") or (rep.get("budgets") or {}).get("line"):  # ✂ / 📊
         from . import book_budgets, cut_pass  # noqa: PLC0415
         L += cut_pass.report_md(rep.get("cuts")) + book_budgets.report_md(rep.get("budgets"))
