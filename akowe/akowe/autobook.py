@@ -1209,6 +1209,8 @@ class AutoBookService(_Runner):
         from . import ending_writer, keep_brief  # noqa: PLC0415 - ✋ keep briefs / 🎬 ending writer, fact plan (on)
         out.update(keep_brief.clean_run_option(body))
         out.update(ending_writer.clean_run_option(body))
+        from . import story_guards  # noqa: PLC0415 - 🧭 scope guard / 🤫 who knows what (both on)
+        out.update(story_guards.clean_run_option(body))
         n = body.get("beta_readers", 1)  # 👥 idea #14: how many beta readers (1 = one AI; 2-3 = a panel)
         if isinstance(n, bool) or not isinstance(n, int) or not 1 <= n <= 3:
             raise AkoweError("INVALID_INPUT", "/beta_readers", "beta_readers: 1, 2 or 3", status="REJECTED")
@@ -3872,6 +3874,8 @@ class AutoBookService(_Runner):
         self._place_beats(run, st)
         self._place_stages(run, st)
         self._build_ledger(run, st)
+        from . import story_guards  # noqa: PLC0415 - 🧭 the scope guard (no AI) and 🤫 who knows what (≤ 1 request)
+        story_guards.after_outline(self, run, st)
         from . import trade_card  # noqa: PLC0415 - 🔧 how the book's trade is really done (≤ 1 request)
         trade_card.run_step(self, run, st)
         tc = (run.get("trade_card") or {}).get("line")
@@ -4036,6 +4040,8 @@ class AutoBookService(_Runner):
                     appr = book_import.keep_author_chapter(self.app, run["principal"], run["project_id"],
                                                            run["branch_id"], cid)
                 if appr:
+                    from . import story_guards  # noqa: PLC0415 - 🧭 a guard fix paused before its review: review it now
+                    appr = story_guards.resume(self, run, st, cid, appr) or appr
                     from . import continuity  # noqa: PLC0415
                     if not continuity.tracked(self.store, run["project_id"], run["branch_id"], cid, appr):
                         # approved, but a Pause / Cancel came before its continuity was tracked, or the author changed
@@ -4143,6 +4149,8 @@ class AutoBookService(_Runner):
                 if idx == 0:  # ✍ the chosen first page leaves the writing brief once chapter 1 is approved
                     from . import first_page  # noqa: PLC0415
                     first_page.after_first_chapter(self, run, cid, rec)
+                from . import story_guards  # noqa: PLC0415 - 🧭🤫 scope creep / knowing too early: ≤ 1 check, ≤ 1 fix
+                rec = story_guards.after_chapter(self, run, st, outline, chapters, idx, rec)
                 if rec:
                     continuity.note_written(self.store, run["project_id"], run["branch_id"], cid, rec, idx + 1)
                     continuity.recheck_done(self.store, run["project_id"], run["branch_id"], cid)

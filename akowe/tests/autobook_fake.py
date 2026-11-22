@@ -53,6 +53,11 @@ CHAPTER_TEXT = {
 }
 
 
+def GUARD_FIX(passage: str) -> str:  # noqa: N802 - 🧭🤫 the fake writer's fix: the passage, plainly reworded
+    n = len(str(passage or "").split())
+    return f"She kept to what she knew that night, and {n} questions stayed unasked."
+
+
 def fact(s, p, v, a="FACT"):
     return {"subject_id": s, "predicate": p, "value": v, "assertion_type": a, "effective_from": None,
             "effective_to": None, "source_refs": []}
@@ -281,6 +286,12 @@ class BookFakeAI:
         self.fix_script: list = []               # ✋ scripted review fixes (callables(data, ctx) -> data); default: none
         self.ledger_script: list = []            # 📜 scripted promise ledgers (dicts or callables(ctx)); default: none
         self.cut_script: list = []               # ✂ scripted cut-pass answers (dicts or callables(ctx)); default: none
+        # 🧭🤫 story guards (story_guards.py): scripted who-knows-what grids and confirm answers (dicts or
+        # callables(ctx)); default: no grid, nothing confirmed. guard_fix: the writer's fix of a confirmed problem
+        # (default: the quoted sentence is replaced by GUARD_FIX's plain sentence)
+        self.grid_script: list = []
+        self.guard_script: list = []
+        self.guard_fix = True
         self.kind_pick = None                    # 📚 the kind of story the invent step picks (when asked), e.g. "quest"
         self.alongside_script: list = []         # ✍ Write alongside me: scripted answers (dicts or callables(ctx))
         # 🧑‍⚖️ the stand-in vote (stand_in.py): answers per slot ({slot: answer or [answers]}) or one per call (in
@@ -469,6 +480,18 @@ class BookFakeAI:
             if scripted is not None:
                 return "ledger", scripted(ctx) if callable(scripted) else copy.deepcopy(scripted)
             return "ledger", {"promises": []}
+        if "who_knows" in props and "cast" in ctx:  # 🤫 who knows what (knowledge_grid.py)
+            with self.lock:
+                scripted = self.grid_script.pop(0) if self.grid_script else None
+            if scripted is not None:
+                return "grid", scripted(ctx) if callable(scripted) else copy.deepcopy(scripted)
+            return "grid", {"who_knows": []}
+        if "guard_checks" in props and "candidates" in ctx:  # 🧭🤫 confirm the possible scope / knowledge problems
+            with self.lock:
+                scripted = self.guard_script.pop(0) if self.guard_script else None
+            if scripted is not None:
+                return "guard_check", scripted(ctx) if callable(scripted) else copy.deepcopy(scripted)
+            return "guard_check", {"guard_checks": []}
         if "placements" in props and "story_kind" in ctx:  # 📚 place where each stage of the kind of story begins
             with self.lock:
                 scripted = self.kind_script.pop(0) if self.kind_script else None
@@ -580,6 +603,11 @@ class BookFakeAI:
             if scripted is not None:
                 return "craft", scripted(ctx) if callable(scripted) else copy.deepcopy(scripted)
             return "craft", self._craft(ctx, list((props["scores"].get("properties") or {}).keys()))
+        if "replacements" in props and ctx.get("findings") and all(
+                f.get("dimension") in ("story_scope", "who_knows") for f in ctx["findings"]):  # 🧭🤫 a guard fix
+            return "guard_rewrite", {"replacements": [
+                {"finding_id": f["id"], "original": f["passage"], "replacement": GUARD_FIX(f["passage"])}
+                for f in ctx["findings"] if self.guard_fix and f.get("passage")]}
         if "replacements" in props and ctx.get("findings") and all(
                 f.get("dimension") == "planned_to_page" for f in ctx["findings"]):  # ✅ P11: work planned items in
             return "planned_rewrite", self._rewrite(ctx)

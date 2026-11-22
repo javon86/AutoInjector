@@ -1027,6 +1027,15 @@ class ReportService:
                     base.pop(k, None)
         except Exception:  # noqa: BLE001 - never break the report
             log.exception("could not add the voice test / subtext check to the report")
+        try:  # 🧭 the scope guard and 🤫 who knows what: what turned up late or too early, and what was fixed
+            from . import story_guards  # noqa: PLC0415
+            gd = story_guards.report_info(self.store, pid, branch)
+            if gd:
+                base["story_guards"] = gd
+            else:
+                base.pop("story_guards", None)
+        except Exception:  # noqa: BLE001 - never break the report
+            log.exception("could not add the story guards to the report")
         base["aggregate"] = aggregate(base["reviews"])
         base["try_next"] = self.try_next(base)
         from . import approval_trust  # noqa: PLC0415 - H14: chapters approved without (all) checks
@@ -1451,6 +1460,9 @@ def render_markdown(rep: dict) -> str:
     if (rep.get("cuts") or {}).get("line") or (rep.get("budgets") or {}).get("line"):  # ✂ / 📊
         from . import book_budgets, cut_pass  # noqa: PLC0415
         L += cut_pass.report_md(rep.get("cuts")) + book_budgets.report_md(rep.get("budgets"))
+    if (rep.get("story_guards") or {}).get("lines"):  # 🧭🤫 scope and who knows what
+        from . import story_guards  # noqa: PLC0415
+        L += story_guards.report_md(rep["story_guards"])
     ck = rep.get("checks") or {}
     cc = ck.get("chapter_checks") or {}
     if cc.get("chapters") or ck.get("stretch") or ck.get("checkpoints"):
