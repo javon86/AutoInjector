@@ -2605,7 +2605,17 @@ class AutoBookService(_Runner):
             try:
                 e = gen(self._assist, rj, bp)
             except AkoweError as exc:
-                if exc.code == "TIMEOUT" or exc.code in BUSY_CODES or exc.code == "CAPABILITY_UNAVAILABLE":
+                slow = exc.code == "TIMEOUT" or exc.code in BUSY_CODES or exc.code == "CAPABILITY_UNAVAILABLE"
+                if slow and k == "texture" and not getattr(exc, "control", False):
+                    # 🧺 the world texture is extra colour, not a must: an AI that did not answer in time does not
+                    # stop the book — it is tried once more after the outline, else listed for you to check later
+                    run["texture_retry"] = True
+                    item.update(state="failed", note=exc.code)
+                    self.event(run, "note", f"⚠️ The AI did not answer in time for the world texture ({exc.code}); the "
+                               "book goes on and Akọwe tries once more after the chapter outline", code="TEXTURE_LATER")
+                    self.save(run)
+                    continue
+                if slow:
                     item["state"] = "paused"
                     self._ai_problem(exc, f"writing the {label.lower()}")
                 item.update(state="failed", note=exc.code)
@@ -3880,6 +3890,7 @@ class AutoBookService(_Runner):
         if st.get("predict"):
             st["message"] += f" · {st['predict']}"
         self._build_ledger(run, st)
+        self._retry_texture(run, st)
         from . import story_guards  # noqa: PLC0415 - 🧭 the scope guard (no AI) and 🤫 who knows what (≤ 1 request)
         story_guards.after_outline(self, run, st)
         from . import trade_card  # noqa: PLC0415 - 🔧 how the book's trade is really done (≤ 1 request)
@@ -3915,6 +3926,34 @@ class AutoBookService(_Runner):
             self.event(run, "note", f"📚 {m['label']}: " + "; ".join(story_kind.strip_label(s_) for s_ in m["stages"])
                        + (f" (⚠️ {len(m['problems'])} placed where they usually begin)" if m.get("problems") else ""),
                        step="outline", code="KIND_PLACED")
+        self.save(run)
+
+    def _retry_texture(self, run, st):
+        """🧺 The world texture timed out at the start: one more try now (after the outline). Never holds up the book:
+        a second failure is listed for the author's check later (make it on the 🌍 World rules page)."""
+        if not run.get("texture_retry"):
+            return
+        run["texture_retry"] = False
+        pid, branch = run["project_id"], run["branch_id"]
+        if texture_mod.get_entry(self.store, pid, branch):
+            return
+        rj = self._sub_job(run, "world_texture", "texture", run["settings"].get("slot_id"))
+        try:
+            e = texture_mod.generate(self._assist, rj, self.bp(run))
+        except AkoweError as exc:
+            if getattr(exc, "control", False):
+                raise
+            later = run.setdefault("check_later", [])
+            line = "World texture: the AI did not make it (make it on the 🌍 World rules page)"
+            if line not in later:
+                later.append(line)
+            self.event(run, "note", f"⚠️ The world texture could not be made on the second try ({exc.code}); the "
+                       "book goes on without it — it is listed for you to check later", code="TEXTURE_FAILED")
+            self.save(run)
+            return
+        n = len(e.get("items") or [])
+        self.event(run, "world", f"The AI wrote the world texture on the second try ({n})", slot=rj.slot,
+                   code="TEXTURE_RETRIED")
         self.save(run)
 
     def _build_ledger(self, run, st):
