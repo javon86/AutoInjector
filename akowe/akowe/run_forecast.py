@@ -50,9 +50,11 @@ CHAPTERS_FROM, CHAPTERS_TO = 0.15, 0.9   # where the chapters lie in the run's t
 DEFAULT_AIS = (("AI-1", "AI-1 · Claude", "claude"), ("AI-2", "AI-2 · ChatGPT", "chatgpt"),
                ("AI-3", "AI-3 · Gemini", "gemini"))
 VOICE_SHARE = 0.4             # 🗣 share of books whose voice cards need the one rewrite answer (an estimate)
+GUARD_SHARE, GUARD_FIX_SHARE = 0.15, 0.05   # 🧭🤫 share of chapters with a possible / a confirmed scope or knowledge
+#                                              problem (new names are only looked for in the last ~30% of the book)
 FRESH_SHARE = 0.5             # 🔁 share of books where a repeated title word or name is renamed (one answer each)
 INSIDE_MEASURED = ("checkers", "writers_room", "human_pass", "first_page", "chapter_polish", "story_doctor",
-                   "voice_contrast", "trade_card", "fresh_names")   # their answers are inside costs' measured steps
+                   "voice_contrast", "trade_card", "fresh_names", "story_guards")   # their answers are inside costs' measured steps
 OWN_STEP = {"beta": "beta", "bible": "bible", "improve": "improve", "opening": "opening", "reread": "reread"}   # option -> its own run step (measured when made)
 
 
@@ -100,6 +102,7 @@ def options_of(app, body: dict | None) -> dict:
             "scene_cut_retry": b.get("scene_cut_retry") is not False,
             "story_doctor": b.get("story_doctor") is not False, "voice_contrast": b.get("voice_contrast") is not False,
             "trade_card": b.get("trade_card") is not False, "fresh_names": b.get("fresh_names") is not False,
+            "scope_guard": b.get("scope_guard") is not False, "knowledge_grid": b.get("knowledge_grid") is not False,
             "doctor_rounds": b.get("doctor_rounds") if isinstance(b.get("doctor_rounds"), int)
             and not isinstance(b.get("doctor_rounds"), bool) and 1 <= b.get("doctor_rounds") <= 3 else 2,
             "improve_rounds": b.get("improve_rounds") if isinstance(b.get("improve_rounds"), int)
@@ -192,6 +195,13 @@ def option_calls(opts: dict, n: int, ais: int) -> dict:
     out["fresh_names"] = {"calls": 2 * FRESH_SHARE if opts.get("fresh_names") else 0, "to": "all",
                           "label": "🔁 Kept fresh: rename a title word or name your recent books used (only when "
                                    "needed)"}
+    # 🧭🤫 story guards (story_guards.py): one answer for the who-knows-what grid (the planning AI);
+    # per chapter with a possible problem one independent confirm answer, and for a confirmed one the writer's fix and
+    # its review — counted as expected shares, spread over the AIs (the checks go to another AI than the writer)
+    sg, kg = opts.get("scope_guard", True), opts.get("knowledge_grid", True)
+    out["story_guards"] = {"calls": ((1 if kg else 0) + (GUARD_SHARE + 2 * GUARD_FIX_SHARE) * n) if (sg or kg) else 0,
+                           "to": "all", "label": "🧭 Scope guard and 🤫 who knows what (checked after each chapter; "
+                                                 "fixed once when needed)"}
     out["pictures"] = {"calls": 0, "to": "none", "label": "Character pictures (Stable Diffusion: no AI answers)",
                        "minutes": PICTURES * PICTURE_MIN if opts.get("pictures") else 0}
     # 🧑‍⚖️ the stand-in vote at a story checkpoint the author does not answer: every AI votes on each waiting problem
@@ -247,6 +257,7 @@ def _run_opts(j: dict) -> dict:
             "beta_reread": s.get("beta_reread") is not False,
             "story_doctor": s.get("story_doctor") is True, "voice_contrast": s.get("voice_contrast") is True,
             "trade_card": s.get("trade_card") is True, "fresh_names": s.get("fresh_names") is True,
+            "scope_guard": s.get("scope_guard") is True, "knowledge_grid": s.get("knowledge_grid") is True,
             "doctor_rounds": s.get("doctor_rounds") or 2}
 
 

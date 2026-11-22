@@ -17,6 +17,8 @@
 * ``story_stage`` (📚 story_kind.py): the stage of the book's kind of story this chapter serves ("This chapter
   serves the stage “The nightmare” of this Overcoming the Monster story (chapters 9–11) …") and the kind's promise.
 * ``promises`` (📜 promise_ledger.py): the set-ups this chapter must plant and the payoffs that fall due here.
+* ``scope`` (🧭 scope_guard.py) and ``who_knows`` (🤫 knowledge_grid.py): the characters and places this chapter's plan
+  uses (late in the book: nothing new may start), and who knows each secret at this point / what stays hidden.
 * ``story_choices`` (P12): the author's style choices (and the ending-state matrix in the last chapter).
 * ``length`` (P15): the chapter's word target, scenes and words per scene, and whether it is written scene by scene.
 * ``narrator_style`` (P25): the author's own style card (style_card.py) when the book writes in the author's style
@@ -460,6 +462,21 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str, *
             brief["twist_guard"] = tg
             rules.append(twist_guard.WRITER_RULE)
             meta["twist_guard"] = {"until": tg["may_be_worked_out_from_chapter"], "secrets": len(tg["secrets"])}
+        try:  # 🧭 scope guard + 🤫 who knows what at this point of the story (scope_guard.py, knowledge_grid.py)
+            from . import knowledge_grid, scope_guard  # noqa: PLC0415
+            scope = scope_guard.writer_block(store, pid, branch, outline, chapter_id)
+            who_knows = knowledge_grid.writer_block(store, pid, branch, outline, chapter_id)
+        except Exception:  # noqa: BLE001
+            log.exception("scope / who knows what of chapter %s", chapter_id)
+            scope, who_knows = None, []
+        if scope:
+            brief["scope"] = scope
+            rules.append(scope_guard.WRITER_RULE)
+            meta["scope"] = {"late": scope["late_in_book"]}
+        if who_knows:
+            brief["who_knows"] = who_knows
+            rules.append(knowledge_grid.WRITER_RULE)
+            meta["who_knows"] = len(who_knows)
         try:  # 🗳 the writers' room's decision for this chapter (a ⚡ run's pick; writers_room.py)
             from . import writers_room  # noqa: PLC0415
             room = writers_room.chapter_decision(store, pid, branch, chapter_id)
