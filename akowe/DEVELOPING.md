@@ -208,6 +208,20 @@ request; the base handler uses it after the kernel validates it against OUTPUT.
   slots need `site` (chatgpt|claude|gemini) and `bridge_url` (http://127.0.0.1 or
   http://localhost only, default `http://127.0.0.1:17891`); the bridge token uses the
   write-only `api_key` secret. They cost 0 and run one request at a time.
+* 🧪 `practice` (practice_ai.py, the Practice AI): built in, free, offline, instant; answers every request with a
+  schema-valid placeholder answer (the lighthouse test story) so a whole ⚡ run can be tried. Each practice slot is its
+  own family (`practice-AI-n`), costs 0, is never busy, and is named "Practice AI (test text)" (`providers.ai_label`,
+  `family_name`); runs note `PRACTICE_AI` and the book report starts with `book_report.PRACTICE_LINE`.
+  `tests/autobook_fake.BookFakeAI` subclasses `PracticeAI` and only adds the test hooks (scripted failures, gate,
+  recorded prompts/kinds) — change answers in practice_ai.py, never in the fake.
+* 🖥 `ollama` (ollama_adapter.py): a local model through Ollama's HTTP API (stdlib urllib): `POST /api/chat` with
+  `format` = the JSON schema, `GET /api/tags` for Test connection. Slot fields `base_url` (default
+  http://localhost:11434; this PC / home network only unless `confirm_internet_host: true`, stored as
+  `base_url_trusted`), `model`, `timeout_s` (default 900). Not running / model missing → CAPABILITY_UNAVAILABLE with
+  "Start Ollama, then run: ollama pull <model>"; too slow → TIMEOUT (never retried, may move to another AI); not
+  JSON → INTERNAL_ERROR. Family `ollama:<model>`; cost 0; one request at a time; default context 24 000 + 8 000 output.
+* `providers.AI_ADAPTERS` / `KEYLESS_ADAPTERS` list the adapters that do AI work / need no key (keyless slots report
+  `has_credentials: true`). Tests: `tests/test_test_ai.py` (fake Ollama server answering with the Practice AI).
 * `roles` (operation IDs like `C02` or set letters like `B`): when any eligible slot's roles
   match the operation, only those slots are used (`ProviderRegistry.eligible(...,
   operation)`); K11 applies the same rule using the K05 job's operation.

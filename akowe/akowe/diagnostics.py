@@ -78,6 +78,8 @@ def build(app, client: dict | None = None) -> dict:
             item.update(site=s.get("site"), bridge_url=s.get("bridge_url"))
         elif s["adapter_id"] == "anthropic":
             item.update(model=s.get("model"))
+        elif s["adapter_id"] == "ollama":
+            item.update(model=s.get("model"), base_url=s.get("base_url"))
         slots.append(item)
     try:
         health = app.health.run(force=False)

@@ -91,6 +91,8 @@ def ai_word(st: dict) -> str:
         return providers_mod.SITE_NAMES.get(site, site)
     if st.get("adapter_id") == "anthropic":
         return "Claude (API)"
+    if providers_mod.ai_label(st):  # 🧪 the Practice AI / a local model on this PC
+        return providers_mod.ai_label(st)
     return str(st.get("name") or st.get("slot_id") or "An AI")
 
 

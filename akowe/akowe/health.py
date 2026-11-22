@@ -171,6 +171,19 @@ class HealthService:
             configured += 1
             if ad == "manual":
                 out.append(dict(base, status="info", detail="Manual: you write the creative steps yourself.", fix=None))
+            elif ad == "practice":
+                out.append(dict(base, status="ok", detail="Practice AI (test text): built in, free and instant. It "
+                                "writes placeholder text to test Akọwe, not a real book.", fix=None))
+            elif ad == "ollama":
+                h = self._slot_health(s, force)
+                if h.get("ok"):
+                    out.append(dict(base, status="ok", detail=f"Local model {s.get('model')} on this PC (Ollama): "
+                                    "ready.", fix=None))
+                else:
+                    out.append(dict(base, status="problem", detail=f"Local model {s.get('model')} (Ollama): "
+                                    f"{h.get('message')}", code=h.get("error") or "CAPABILITY_UNAVAILABLE",
+                                    fix=h.get("fix") or "Start Ollama, then press Test connection in Settings.",
+                                    action="settings"))
             elif ad == "anthropic":
                 if prov.test_adapter is not None:
                     out.append(dict(base, status="ok", detail="Anthropic API (test adapter).", fix=None))
@@ -220,7 +233,8 @@ class HealthService:
             # not set up is a choice, not a fault: you can write everything yourself (BF-14)
             out.append({"id": "slots", "title": "AI slots", "status": "info",
                         "detail": "No AI is set up: you write the creative steps yourself.",
-                        "fix": "To let an AI help, open Settings: connect AutoInjector or add an Anthropic API key.",
+                        "fix": "To let an AI help, open Settings: connect AutoInjector, add an Anthropic API key or use a "
+                               "model on this PC (Ollama). To just try Akọwe out, use the Practice AI.",
                         "action": "settings"})
         return out
 

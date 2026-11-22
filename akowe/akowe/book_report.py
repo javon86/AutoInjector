@@ -682,6 +682,8 @@ class ReportService:
         fam = providers_mod.slot_family(review._slot(major)) if major else None
         return {"chapters": rows, "writer_slot": major, "writer": review.slot_label(major) if major else None,
                 "writer_family": fam, "writers": dict(writers),
+                "practice_ai": any(str(providers_mod.slot_family(review._slot(sid)) or "").startswith("practice-")
+                                   for sid in writers),
                 "same_ai_reviews": sum(1 for r in rows if r["review_independent"] is False),
                 "same_ai_editor": sum(1 for r in rows if r["editor_independent"] is False)}
 
@@ -1336,12 +1338,18 @@ class ReportService:
 SENT = {"whole": "whole", "digest": "as a per-chapter digest (sampled)", "parts": "whole, in parts (read in full)"}
 
 
+PRACTICE_LINE = ("🧪 This book was written by the Practice AI (test text): placeholder text that tests Akọwe, not a "
+                 "real book. Its scores say nothing about writing quality.")
+
+
 def render_markdown(rep: dict) -> str:
     L = [f"# {rep.get('title')} — Akọwe report", ""]
     L.append(f"*Made {rep.get('at', '')[:16].replace('T', ' ')} UTC · book version {rep['version']['key']} · "
              f"{len(rep['version']['chapters'])} chapter(s)" + (f" · Make-a-book run {rep['run_id']}" if rep.get("run_id")
                                                                 else "") + "*")
     L.append("")
+    if (rep.get("usage") or {}).get("practice_ai"):  # 🧪 test text: said first, before any score
+        L += [f"> {PRACTICE_LINE}", ""]
     for w in rep.get("warnings") or []:
         L.append(f"> {w}")
     if rep.get("warnings"):

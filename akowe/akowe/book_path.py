@@ -421,7 +421,7 @@ class BookPath:
         for s in self.engine.providers.slots():
             if self.ai_slot and s["slot_id"] != self.ai_slot:
                 continue  # the book is pinned to one AI: only that one counts
-            if s.get("adapter_id") in ("anthropic", "autoinjector") and s.get("has_credentials"):
+            if s.get("adapter_id") in ("anthropic", "autoinjector", "practice", "ollama") and s.get("has_credentials"):
                 return True
         return False
 

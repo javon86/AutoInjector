@@ -172,6 +172,8 @@ def slot_summary(slot: dict) -> dict:
         out.update(site=slot.get("site"), bridge_url=slot.get("bridge_url"))
     elif slot["adapter_id"] == "anthropic":
         out.update(model=slot.get("model"))
+    elif slot["adapter_id"] == "ollama":
+        out.update(model=slot.get("model"), base_url=slot.get("base_url"))
     return out
 
 
@@ -510,7 +512,7 @@ class SelfTest:
                 info.update(state="NOT_SET_UP", message="not set up")
             elif adapter == "manual":
                 info.update(state="MANUAL", message="manual adapter (you write candidates; no AI)")
-            elif adapter == "autoinjector":
+            elif adapter in ("autoinjector", "practice", "ollama"):
                 hres = self.base_providers.health_check(sid)
                 ok = bool(hres.get("ok"))
                 info.update(state="READY" if ok else "ERROR", message=hres.get("message"), error=hres.get("error"),

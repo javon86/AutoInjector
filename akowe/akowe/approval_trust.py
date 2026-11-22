@@ -39,7 +39,8 @@ def ai_word(slot: dict | None) -> str:
         return SITE_WORDS.get(slot["site"], str(slot["site"]))
     if slot.get("adapter_id") == "anthropic":
         return "Claude"
-    return str(slot.get("slot_id") or "the AI")
+    from .providers import ai_label  # noqa: PLC0415 - 🧪 the Practice AI / a local model on this PC
+    return ai_label(slot) or str(slot.get("slot_id") or "the AI")
 
 
 def what_word(label: str | None) -> str:
