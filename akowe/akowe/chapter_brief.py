@@ -17,6 +17,12 @@
 * ``story_stage`` (📚 story_kind.py): the stage of the book's kind of story this chapter serves ("This chapter
   serves the stage “The nightmare” of this Overcoming the Monster story (chapters 9–11) …") and the kind's promise.
 * ``promises`` (📜 promise_ledger.py): the set-ups this chapter must plant and the payoffs that fall due here.
+* ``voice_notes`` (🗣 voice_test.py) / ``subtext_note`` (💬 subtext_check.py): characters of this chapter whose
+  dialogue read alike in the chapters already written, and a note when earlier dialogue said feelings outright.
+* 🎬 ``ending_brief`` / ``facts_to_cite`` (ending_writer.py, ⚡ runs): the ending checklist of the last and the climax
+  chapter, and the established facts (with their chapters) this chapter's plan relies on.
+* ``scope`` (🧭 scope_guard.py) and ``who_knows`` (🤫 knowledge_grid.py): the characters and places this chapter's plan
+  uses (late in the book: nothing new may start), and who knows each secret at this point / what stays hidden.
 * ``story_choices`` (P12): the author's style choices (and the ending-state matrix in the last chapter).
 * ``length`` (P15): the chapter's word target, scenes and words per scene, and whether it is written scene by scene.
 * ``narrator_style`` (P25): the author's own style card (style_card.py) when the book writes in the author's style
@@ -328,6 +334,17 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str, *
             promises = []
         if promises:
             brief["promises"] = promises
+        try:  # 🗣 voices that read alike on the page so far / 💬 lines that said too much (voice_test, subtext_check)
+            from . import subtext_check, voice_test  # noqa: PLC0415
+            vnotes = voice_test.writer_brief(store, pid, branch, [c["name"] for c in present])
+            snote = subtext_check.writer_brief(store, pid, branch, chapter_id)
+        except Exception:  # noqa: BLE001
+            log.exception("could not add the voice / subtext notes to the brief")
+            vnotes, snote = [], None
+        if vnotes:
+            brief["voice_notes"] = vnotes
+        if snote:
+            brief["subtext_note"] = snote
         length = _length(store, pid, outline)
         if length:
             brief["length"] = length
@@ -358,6 +375,10 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str, *
             rules.append(story_kind.WRITER_RULE)
         if brief.get("promises"):
             rules.append(promise_ledger.WRITER_RULE)
+        if brief.get("voice_notes"):
+            rules.append(voice_test.WRITER_RULE)
+        if brief.get("subtext_note"):
+            rules.append(subtext_check.WRITER_RULE)
         if brief.get("character_details"):
             rules.append(RULES["character_details"])
         if brief.get("needed_details"):
@@ -447,6 +468,19 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str, *
                                        "parts": sorted(ql)}
             if cut:
                 meta["cut"] = cut
+        try:  # 📊 the whole-book budgets over in the chapters before; their over-used similes out of what it rereads
+            from . import book_budgets  # noqa: PLC0415
+            bb = book_budgets.writer_block(store, pid, branch, outline, chapter_id, cut)
+            if bb:
+                brief["book_budgets"] = bb
+                rules.append(book_budgets.BRIEF_RULE)
+                if cut:
+                    meta["cut"] = cut
+            if book_budgets.reread_filter(brief, store, pid, branch, outline, chapter_id):
+                rules.append(book_budgets.REREAD_RULE)
+                meta["reread_filtered"] = True
+        except Exception:  # noqa: BLE001
+            log.exception("book budgets of chapter %s", chapter_id)
         try:  # 🤫 before the point a reader may work out the twist: do not confirm or over-signal it
             from . import twist_guard  # noqa: PLC0415
             from .book_path import BookPath  # noqa: PLC0415
@@ -460,6 +494,21 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str, *
             brief["twist_guard"] = tg
             rules.append(twist_guard.WRITER_RULE)
             meta["twist_guard"] = {"until": tg["may_be_worked_out_from_chapter"], "secrets": len(tg["secrets"])}
+        try:  # 🧭 scope guard + 🤫 who knows what at this point of the story (scope_guard.py, knowledge_grid.py)
+            from . import knowledge_grid, scope_guard  # noqa: PLC0415
+            scope = scope_guard.writer_block(store, pid, branch, outline, chapter_id)
+            who_knows = knowledge_grid.writer_block(store, pid, branch, outline, chapter_id)
+        except Exception:  # noqa: BLE001
+            log.exception("scope / who knows what of chapter %s", chapter_id)
+            scope, who_knows = None, []
+        if scope:
+            brief["scope"] = scope
+            rules.append(scope_guard.WRITER_RULE)
+            meta["scope"] = {"late": scope["late_in_book"]}
+        if who_knows:
+            brief["who_knows"] = who_knows
+            rules.append(knowledge_grid.WRITER_RULE)
+            meta["who_knows"] = len(who_knows)
         try:  # 🗳 the writers' room's decision for this chapter (a ⚡ run's pick; writers_room.py)
             from . import writers_room  # noqa: PLC0415
             room = writers_room.chapter_decision(store, pid, branch, chapter_id)
@@ -478,8 +527,18 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str, *
         if fp:
             brief["first_page"] = fp
             rules.append(first_page.BRIEF_RULE)
+        try:  # 🎬 the ending checklist (last / climax chapter) and the facts this chapter relies on (ending_writer.py)
+            from . import ending_writer  # noqa: PLC0415
+            ew, ew_rules = ending_writer.writer_parts(store, pid, branch, outline, chapter_id,
+                                                      texts + [json.dumps(cards, ensure_ascii=False)],
+                                                      needs=bool(needs))
+        except Exception:  # noqa: BLE001
+            log.exception("ending writer of chapter %s", chapter_id)
+            ew, ew_rules = {}, []
+        brief.update(ew)
+        rules += ew_rules
         brief["rules"] = rules
-        if not (cards or vb["cards"] or vb["others"] or pov or planned or room or fp or extra.get("story_rules")
+        if not (ew or cards or vb["cards"] or vb["others"] or pov or planned or room or fp or extra.get("story_rules")
                 or extra.get("world_texture") or extra.get("story_choices") or length or style
                 or brief.get("character_details") or main or world or fixed or brief.get("needed_details")
                 or brief.get("earlier_moments") or brief.get("story_beats") or brief.get("story_stage") or brief.get("promises")

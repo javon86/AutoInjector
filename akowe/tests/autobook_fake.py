@@ -53,6 +53,11 @@ CHAPTER_TEXT = {
 }
 
 
+def GUARD_FIX(passage: str) -> str:  # noqa: N802 - 🧭🤫 the fake writer's fix: the passage, plainly reworded
+    n = len(str(passage or "").split())
+    return f"She kept to what she knew that night, and {n} questions stayed unasked."
+
+
 def fact(s, p, v, a="FACT"):
     return {"subject_id": s, "predicate": p, "value": v, "assertion_type": a, "effective_from": None,
             "effective_to": None, "source_refs": []}
@@ -278,7 +283,15 @@ class BookFakeAI:
         self.needs = None                        # 🧠 a needs list returned with every scene plan (dict or callable(ctx))
         self.shape_script: list = []             # 📐 scripted beat placements (dicts or callables(ctx)), one per call
         self.kind_script: list = []              # 📚 scripted stage placements (dicts or callables(ctx)), one per call
+        self.fix_script: list = []               # ✋ scripted review fixes (callables(data, ctx) -> data); default: none
         self.ledger_script: list = []            # 📜 scripted promise ledgers (dicts or callables(ctx)); default: none
+        self.cut_script: list = []               # ✂ scripted cut-pass answers (dicts or callables(ctx)); default: none
+        # 🧭🤫 story guards (story_guards.py): scripted who-knows-what grids and confirm answers (dicts or
+        # callables(ctx)); default: no grid, nothing confirmed. guard_fix: the writer's fix of a confirmed problem
+        # (default: the quoted sentence is replaced by GUARD_FIX's plain sentence)
+        self.grid_script: list = []
+        self.guard_script: list = []
+        self.guard_fix = True
         self.kind_pick = None                    # 📚 the kind of story the invent step picks (when asked), e.g. "quest"
         self.alongside_script: list = []         # ✍ Write alongside me: scripted answers (dicts or callables(ctx))
         # 🧑‍⚖️ the stand-in vote (stand_in.py): answers per slot ({slot: answer or [answers]}) or one per call (in
@@ -306,6 +319,16 @@ class BookFakeAI:
         # 🗣 voice contrast (voice_contrast.py): scripted card rewrites (dicts or callables(ctx)); default: each card
         # in context.rewrite gets its own rhythm, register and phrase
         self.voice_contrast_script: list = []
+        # 🗣 / 💬 voice tests on the page (voice_test.py) and the subtext check (subtext_check.py): scripted answers
+        # (dicts or callables(ctx)); defaults: no usable blind attributions, nothing on the nose
+        self.voice_blind_script: list = []
+        self.subtext_script: list = []
+        # 🔮 predictability probe / 🎭 key scenes written twice / ⚖ head to head: scripted answers (dicts or
+        # callables(ctx)), one per call; predict_fixes counts the outline revisions asked for less expected turns
+        self.predict_script: list = []
+        self.key_scene_script: list = []
+        self.pairwise_script: list = []
+        self.predict_fixes = 0
         self.stand_in_default = {"pick": "accept", "confident": 0.9,
                                  "why": "The correction answers the reviewer's finding and agrees with the canon."}
 
@@ -374,6 +397,23 @@ class BookFakeAI:
 
     # ------------------------------------------------------------------ answers
     def _answer(self, ctx, props, schema):
+        # 🔮 / 🎭 / ⚖ (predictability.py, key_scenes.py, pairwise.py): scripted answers first; the defaults change
+        # nothing (no turn guessed, no usable second version, a tie)
+        task = ctx.get("akowe_task")
+        if task in ("predictability_probe", "key_scene_version", "pairwise"):
+            name = {"predictability_probe": "predict_script", "key_scene_version": "key_scene_script",
+                    "pairwise": "pairwise_script"}[task]
+            with self.lock:
+                lst = getattr(self, name, None) or []
+                scripted = lst.pop(0) if lst else None
+            if scripted is not None:
+                return task, scripted(ctx) if callable(scripted) else copy.deepcopy(scripted)
+            if task == "predictability_probe":
+                return task, {"predictions": [{"turn": t["turn"], "prediction": "Something nobody saw coming.",
+                                               "matches": "no"} for t in ctx.get("turns") or []]}
+            if task == "key_scene_version":
+                return task, {"approach": "", "text": ""}
+            return task, {"better": "same", "why": "Both work equally well."}
         if "rewritten_scene" in props and ctx.get("akowe_task") == "weak_scene_cut":  # 📏 cut back to its budget
             with self.lock:
                 scripted = getattr(self, "scene_cut_script", None)
@@ -412,6 +452,18 @@ class BookFakeAI:
                 voice_for("x"), rhythm=f"{n}'s own clipped rhythm, {i + 2}-word sentences", register=f"register {i}",
                 phrases=[f"{n.split()[0]} swears by it"], vocabulary=[f"{n.split()[0]}-term"],
                 deflects="answers with a question")} for i, n in enumerate(ctx.get("rewrite") or [])]}
+        if "attributions" in props and "lines" in ctx and "cast" in ctx:  # 🗣 the blind speaker test (voice_test.py)
+            with self.lock:
+                scripted = self.voice_blind_script.pop(0) if self.voice_blind_script else None
+            if scripted is not None:
+                return "voice_blind", scripted(ctx) if callable(scripted) else copy.deepcopy(scripted)
+            return "voice_blind", {"attributions": []}  # default: no usable answer (nothing is flagged)
+        if "lines" in props and "candidates" in ctx:  # 💬 the subtext check (subtext_check.py)
+            with self.lock:
+                scripted = self.subtext_script.pop(0) if self.subtext_script else None
+            if scripted is not None:
+                return "subtext", scripted(ctx) if callable(scripted) else copy.deepcopy(scripted)
+            return "subtext", {"lines": []}  # default: nothing on the nose
         if "openings" in props:  # ✍ the writer's two first pages for chapter 1 (one answer)
             with self.lock:
                 scripted = self.openings_script.pop(0) if self.openings_script else None
@@ -439,12 +491,30 @@ class BookFakeAI:
             return "opening_rewrite", {"replacements": []}
         if ctx.get("akowe_task") == "story_details":  # ⏱ story details (essentials / just in time)
             return "details", self._details(ctx)
+        if "cuts" in props and "cut_rules" in ctx:  # ✂ the cut pass: the editor's labelled cuts (default: none)
+            with self.lock:
+                scripted = self.cut_script.pop(0) if self.cut_script else None
+            if scripted is not None:
+                return "cuts", scripted(ctx) if callable(scripted) else copy.deepcopy(scripted)
+            return "cuts", {"cuts": [], "fat_percent": 0}
         if "promises" in props and "main_plot" in ctx and "chapters" in ctx:  # 📜 the book's promises (ledger)
             with self.lock:
                 scripted = self.ledger_script.pop(0) if self.ledger_script else None
             if scripted is not None:
                 return "ledger", scripted(ctx) if callable(scripted) else copy.deepcopy(scripted)
             return "ledger", {"promises": []}
+        if "who_knows" in props and "cast" in ctx:  # 🤫 who knows what (knowledge_grid.py)
+            with self.lock:
+                scripted = self.grid_script.pop(0) if self.grid_script else None
+            if scripted is not None:
+                return "grid", scripted(ctx) if callable(scripted) else copy.deepcopy(scripted)
+            return "grid", {"who_knows": []}
+        if "guard_checks" in props and "candidates" in ctx:  # 🧭🤫 confirm the possible scope / knowledge problems
+            with self.lock:
+                scripted = self.guard_script.pop(0) if self.guard_script else None
+            if scripted is not None:
+                return "guard_check", scripted(ctx) if callable(scripted) else copy.deepcopy(scripted)
+            return "guard_check", {"guard_checks": []}
         if "placements" in props and "story_kind" in ctx:  # 📚 place where each stage of the kind of story begins
             with self.lock:
                 scripted = self.kind_script.pop(0) if self.kind_script else None
@@ -557,6 +627,11 @@ class BookFakeAI:
                 return "craft", scripted(ctx) if callable(scripted) else copy.deepcopy(scripted)
             return "craft", self._craft(ctx, list((props["scores"].get("properties") or {}).keys()))
         if "replacements" in props and ctx.get("findings") and all(
+                f.get("dimension") in ("story_scope", "who_knows") for f in ctx["findings"]):  # 🧭🤫 a guard fix
+            return "guard_rewrite", {"replacements": [
+                {"finding_id": f["id"], "original": f["passage"], "replacement": GUARD_FIX(f["passage"])}
+                for f in ctx["findings"] if self.guard_fix and f.get("passage")]}
+        if "replacements" in props and ctx.get("findings") and all(
                 f.get("dimension") == "planned_to_page" for f in ctx["findings"]):  # ✅ P11: work planned items in
             return "planned_rewrite", self._rewrite(ctx)
         if "replacements" in props and ctx.get("findings") and all(
@@ -642,11 +717,21 @@ class BookFakeAI:
             return "review", {"verdict": v, "reasons": [reason], "suggested_changes": [change], "confidence": 0.8}
         if "draft" in ctx and "review" in ctx:  # "Ask AI to fix it": the whole draft, one sentence revised
             data = json.loads(ctx["draft"]["data_json"])
+            if str(ctx.get("author_note") or "").startswith("🔮") and data.get("chapters"):  # 🔮 less expected turns
+                with self.lock:
+                    self.predict_fixes += 1
+                data["chapters"][-1]["summary"] = str(data["chapters"][-1].get("summary") or "") + \
+                    " (a less expected turn)"
+                return "predict_fix", data
             if str(ctx.get("author_note") or "").startswith("🩺") and data.get("chapters"):  # 🩺 the doctor's fixes
                 with self.lock:
                     self.doctor_fixes += 1
                 data["chapters"][0]["summary"] = str(data["chapters"][0].get("summary") or "") + " (doctor fix)"
                 return "doctor_fix", data
+            with self.lock:  # ✋ scripted review fixes (callables(data, ctx) -> data); default: one sentence revised
+                scripted = self.fix_script.pop(0) if self.fix_script else None
+            if scripted is not None:
+                return "fix", scripted(copy.deepcopy(data), ctx) if callable(scripted) else copy.deepcopy(scripted)
             return "fix", self._revise(data)
         if {"title", "author", "genre", "audience", "tone", "idea"} <= set(props):
             w = ctx.get("wishes") or {}

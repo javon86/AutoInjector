@@ -1007,6 +1007,35 @@ class ReportService:
                 base.pop("promises", None)
         except Exception:  # noqa: BLE001 - never break the report
             log.exception("could not add the promise ledger to the report")
+        try:  # ✂ the cut pass's labelled cuts per chapter and 📊 the book budgets (no AI)
+            from . import book_budgets, cut_pass  # noqa: PLC0415
+            for k, info in (("cuts", cut_pass.report_info(self.store, pid, branch)),
+                            ("budgets", book_budgets.report_info(self.store, pid, branch))):
+                if info:
+                    base[k] = info
+                else:
+                    base.pop(k, None)
+        except Exception:  # noqa: BLE001 - never break the report
+            log.exception("could not add the cut pass and the book budgets to the report")
+        try:  # 🗣 the voices on the page / 💬 the dialogue that said too much (voice_test.py, subtext_check.py)
+            from . import subtext_check, voice_test  # noqa: PLC0415
+            for k, info in (("voice_test", voice_test.report_info(self.store, pid, branch)),
+                            ("subtext", subtext_check.report_info(self.store, pid, branch))):
+                if info:
+                    base[k] = info
+                else:
+                    base.pop(k, None)
+        except Exception:  # noqa: BLE001 - never break the report
+            log.exception("could not add the voice test / subtext check to the report")
+        try:  # 🧭 the scope guard and 🤫 who knows what: what turned up late or too early, and what was fixed
+            from . import story_guards  # noqa: PLC0415
+            gd = story_guards.report_info(self.store, pid, branch)
+            if gd:
+                base["story_guards"] = gd
+            else:
+                base.pop("story_guards", None)
+        except Exception:  # noqa: BLE001 - never break the report
+            log.exception("could not add the story guards to the report")
         base["aggregate"] = aggregate(base["reviews"])
         base["try_next"] = self.try_next(base)
         from . import approval_trust  # noqa: PLC0415 - H14: chapters approved without (all) checks
@@ -1426,6 +1455,14 @@ def render_markdown(rep: dict) -> str:
     if (rep.get("promises") or {}).get("line"):  # 📜 the set-ups and their payoffs
         from . import promise_ledger  # noqa: PLC0415
         L += promise_ledger.report_md(rep["promises"])
+    from . import subtext_check, voice_test  # noqa: PLC0415 - 🗣 voices on the page / 💬 subtext
+    L += voice_test.report_md(rep.get("voice_test")) + subtext_check.report_md(rep.get("subtext"))
+    if (rep.get("cuts") or {}).get("line") or (rep.get("budgets") or {}).get("line"):  # ✂ / 📊
+        from . import book_budgets, cut_pass  # noqa: PLC0415
+        L += cut_pass.report_md(rep.get("cuts")) + book_budgets.report_md(rep.get("budgets"))
+    if (rep.get("story_guards") or {}).get("lines"):  # 🧭🤫 scope and who knows what
+        from . import story_guards  # noqa: PLC0415
+        L += story_guards.report_md(rep["story_guards"])
     ck = rep.get("checks") or {}
     cc = ck.get("chapter_checks") or {}
     if cc.get("chapters") or ck.get("stretch") or ck.get("checkpoints"):
@@ -1471,6 +1508,9 @@ def render_markdown(rep: dict) -> str:
     if rep.get("doctor"):  # 🩺 story_doctor.py: the plan's score before chapter 1 and its main weaknesses
         L += ["## 🩺 Story doctor (the plan, before chapter 1)", "", str(rep["doctor"]), ""]
         L += [f"- {n}" for n in rep.get("doctor_notes") or []] + ([""] if rep.get("doctor_notes") else [])
+    if rep.get("plan_and_scenes"):  # 🔮 predictability.py / 🎭 key_scenes.py: the plan's turns, the key scenes
+        from . import pairwise  # noqa: PLC0415
+        L += pairwise.report_md(rep)
     if rep.get("polish"):  # 📏 chapter_polish.py: the reading level before → after the chapter polish
         L += [str(rep["polish"]), ""]
     if rep.get("improve"):

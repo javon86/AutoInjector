@@ -1044,6 +1044,8 @@ class ReviewService:
             ctx.update(story_kind.review_extra(self.store, pid, branch, rec))
             from . import promise_ledger  # noqa: PLC0415 - 📜 the set-ups to plant and the payoffs due here
             ctx.update(promise_ledger.review_extra(self.store, pid, branch, rec))
+            from . import ending_writer  # noqa: PLC0415 - 🎬 the ending / climax chapter: its checklist
+            ctx.update(ending_writer.review_extra(self.store, pid, branch, rec))
             from . import story_map  # noqa: PLC0415 - 🗺 the approved / locked connections of its people (link codes)
             ctx.update(story_map.review_extra(self.store, pid, branch, rec))
         if extra:
@@ -1574,12 +1576,21 @@ class ReviewService:
                     ctx["magic_rules"] = mctx
                     task = task + " " + magic_rules.REVIEW_RULE
                 task = task + IN_CHAPTER_RULE
-            raw = self.assist._call_ai(job, op_for_roles=rec["module_id"], task=task, schema=REVIEW_SCHEMA,
+            schema = REVIEW_SCHEMA
+            from . import keep_brief  # noqa: PLC0415 - ✋ a ⚡ run's chapter reviewer also names its strongest lines
+            keep_on = rec["module_id"] == "C02" and keep_brief.book_on(self.store, pid, branch)
+            if keep_on:
+                schema, task = keep_brief.review_schema(REVIEW_SCHEMA), task + keep_brief.REVIEW_TASK
+            raw = self.assist._call_ai(job, op_for_roles=rec["module_id"], task=task, schema=schema,
                                        context=ctx, protected=protected)
         finally:
             self.work.end(tok)
         job.check()
         verdict = self.promises_kept(pid, rec, self.clean_verdict(raw))
+        if keep_on:
+            keep = keep_brief.clean_keep(raw, str((rec.get("data") or {}).get("text") or ""))
+            if keep:
+                verdict["keep"] = keep
         reviewer = self._slot(job.slot)
         same = bool(writer.get("slot")) and (job.slot == writer["slot"] or providers_mod.slot_family(reviewer)
                                              == providers_mod.slot_family(self._slot(writer["slot"])))
@@ -1705,6 +1716,11 @@ class ReviewService:
         if checks:  # 🩹 exactly what Akọwe's checks refused: the fixer repairs those first
             extra["akowe_checks"] = checks
             task += CHECKS_FIX_TASK
+        from . import keep_brief  # noqa: PLC0415 - ✋ the chapter's strongest lines must survive the fix
+        kb = keep_brief.fix_part(job, rec, review, checks)
+        if kb:
+            extra.update(kb[0])
+            task += kb[1]
         sheet_update = bool(comp.get("companion_draft")) and isinstance(schema.get("properties"), dict)
         if sheet_update:  # 🔁 the AI's own notes on this character follow the fix (never the author's own sheet)
             from .characters import SHEET_KEYS  # noqa: PLC0415
@@ -1726,6 +1742,8 @@ class ReviewService:
         raw = dict(raw)
         sheet_changes = raw.pop(SHEET_UPDATE_KEY, None)
         payload = keep_refs(rec.get("data") or {}, raw)
+        if kb:  # ✋ a fix that cut a KEEP line (or changed only punctuation) is refused: the earlier version stays
+            keep_brief.guard_fix(job, rec, payload, kb[2], review)
         from . import series as series_mod  # noqa: PLC0415 - 📚 a later book never rewrites the fixed layer
         kept = series_mod.protect_fixed(self.store, pid, branch, rec, payload)
         job.phase = "Saving the revised draft"

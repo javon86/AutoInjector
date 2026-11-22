@@ -1198,9 +1198,21 @@ class AutoBookService(_Runner):
         from . import story_doctor, voice_contrast  # noqa: PLC0415 - 🩺 the plan check / 🗣 distinct voice cards
         out.update(story_doctor.clean_run_option(body))
         out.update(voice_contrast.clean_run_option(body))
+        from . import subtext_check, voice_test  # noqa: PLC0415 - 🗣 voices on the page / 💬 subtext (both on)
+        out.update(voice_test.clean_run_option(body))
+        out.update(subtext_check.clean_run_option(body))
+        from . import pairwise  # noqa: PLC0415 - 🔮 predictability probe / 🎭 key scenes twice / ⚖ head to head (on)
+        out.update(pairwise.clean_run_option(body))
         from . import fresh_names, trade_card  # noqa: PLC0415 - 🔁 kept fresh / 🔧 the trade card (both on)
         out.update(trade_card.clean_run_option(body))
         out.update(fresh_names.clean_run_option(body))
+        from . import cut_pass  # noqa: PLC0415 - ✂ the cut pass / 📊 the book budgets (both on)
+        out.update(cut_pass.clean_run_option(body))
+        from . import ending_writer, keep_brief  # noqa: PLC0415 - ✋ keep briefs / 🎬 ending writer, fact plan (on)
+        out.update(keep_brief.clean_run_option(body))
+        out.update(ending_writer.clean_run_option(body))
+        from . import story_guards  # noqa: PLC0415 - 🧭 scope guard / 🤫 who knows what (both on)
+        out.update(story_guards.clean_run_option(body))
         n = body.get("beta_readers", 1)  # 👥 idea #14: how many beta readers (1 = one AI; 2-3 = a panel)
         if isinstance(n, bool) or not isinstance(n, int) or not 1 <= n <= 3:
             raise AkoweError("INVALID_INPUT", "/beta_readers", "beta_readers: 1, 2 or 3", status="REJECTED")
@@ -1763,6 +1775,12 @@ class AutoBookService(_Runner):
                     pl = (run.get("planned") or {}).get(rid) or {}
                     if pl.get("flagged"):
                         why += " · ⚠️ planned details not all on the page"
+                if head["module_id"] == "C02":  # 💬 lines that say a feeling outright (subtext_check.py, ≤ 1 AI check)
+                    from . import subtext_check  # noqa: PLC0415
+                    head = subtext_check.chapter_pass(self, run, st, rid, label, chapter_id)
+                if head["module_id"] == "C02" and run["settings"].get("cut_pass") is not False:
+                    from . import cut_pass  # noqa: PLC0415 - ✂ cut about 10% and label every cut (≤ 1 AI call)
+                    head = cut_pass.run_pass(self, run, st, rid, label, chapter_id)
                 self._approve(run, head["ref"], why=why, verdict="APPROVE", slot=rj.slot)
                 checker_record.settle(self.store, run, rid, head["version"], chapter_id=chapter_id)
                 if trust:
@@ -1810,6 +1828,8 @@ class AutoBookService(_Runner):
             for k in ("started", "status", "retry_busy", "check", "on_wait"):
                 setattr(fj, k, getattr(job, k))
             fj.check_problems = (run.get("fix_refusals") or {}).pop(rid, None) or []  # 🩹 the last fix's refusals
+            from . import keep_brief  # noqa: PLC0415 - ✋ the fix keeps the chapter's strongest lines (stopping rule)
+            keep_brief.arm(self, run, fj, "fix", rid)
             try:
                 with ai_activity.doing(f"Fixing {what} (fix {n + 1} of {MAX_FIXES})",
                                        done=f"Fixed {what} (fix {n + 1} of {MAX_FIXES})"):
@@ -1892,6 +1912,8 @@ class AutoBookService(_Runner):
             setattr(fj, k, getattr(job, k))
         fj.check_problems = list(probs) + list((run.get("fix_refusals") or {}).pop(rid, None) or [])
         fj.carry_review = self._carry_review(run, rid)
+        from . import keep_brief  # noqa: PLC0415 - ✋ the repair keeps the chapter's strongest lines
+        keep_brief.arm(self, run, fj, "repair", rid)
         what = the(ai_activity.nice(label))
         try:
             with ai_activity.doing(f"Repairing {what}", done=f"Repaired {what}"):
@@ -2061,6 +2083,8 @@ class AutoBookService(_Runner):
         for k in ("started", "status", "retry_busy", "check", "on_wait"):
             setattr(rj, k, getattr(job, k))
         rj.run_settings = run.get("settings") or {}  # 📏 e.g. the length guard of the rewrites (length_guard.py)
+        from . import keep_brief  # noqa: PLC0415 - ✋ a chapter rewrite is told which lines to keep
+        keep_brief.arm(self, run, rj, kind, rid)
         return rj
 
     # ------------------------------------------------------------------ H14: approved without checks -> notes
@@ -2179,7 +2203,12 @@ class AutoBookService(_Runner):
                 self._made(run, self.bp(run).rec(rid)["ref"])
                 self.event(run, "editor", f"Editor's rewrite of the {label} kept (round {n}): {why}", record_id=rid,
                            code="EDITOR_REWRITE_KEPT")
+                from . import keep_brief  # noqa: PLC0415 - ✋ stopping rule: a kept rewrite with no gain ends the rounds
+                no_gain = keep_brief.editor_stop(self, run, rid, label, craft, new_craft) \
+                    if ed["rounds"] < int(es.get("rounds") or 0) else None
                 craft = new_craft
+                if no_gain:
+                    return self._editor_flag(run, st, ed, craft, self.bp(run).rec(rid), no_gain, "EDITOR_NOTES")
                 continue
             ed["rejected"] = int(ed.get("rejected", 0)) + 1
             try:
@@ -3846,7 +3875,13 @@ class AutoBookService(_Runner):
         st["message"] = f"{n} chapter(s) planned and approved" + (f" · {st['doctor']}" if st.get("doctor") else "")
         self._place_beats(run, st)
         self._place_stages(run, st)
+        from . import predictability  # noqa: PLC0415 - 🔮 can an AI guess the plan's turns? (≤ 2 probes, ≤ 1 revision)
+        predictability.run_probe(self, run, st)
+        if st.get("predict"):
+            st["message"] += f" · {st['predict']}"
         self._build_ledger(run, st)
+        from . import story_guards  # noqa: PLC0415 - 🧭 the scope guard (no AI) and 🤫 who knows what (≤ 1 request)
+        story_guards.after_outline(self, run, st)
         from . import trade_card  # noqa: PLC0415 - 🔧 how the book's trade is really done (≤ 1 request)
         trade_card.run_step(self, run, st)
         tc = (run.get("trade_card") or {}).get("line")
@@ -3989,6 +4024,9 @@ class AutoBookService(_Runner):
                               "Press 🔁 Try again.")
         if run["settings"].get("bible") and not run.get("bible_scenes_seeded"):
             self._seed_scenes(run, outline, chapters)
+        from . import ending_writer, keep_brief  # noqa: PLC0415 - ✋ 🎬 this run's keep briefs / ending writer / fact plan
+        keep_brief.note_run(self.store, run)
+        ending_writer.note_run(self.store, run)
         items = {i["id"]: i for i in st.get("items") or []}
         st["items"] = [items.get(c["chapter_id"]) or {"id": c["chapter_id"], "label": f"Chapter {c['chapter_id']}",
                                                        "state": "pending", "words": 0} for c in chapters]
@@ -3997,6 +4035,8 @@ class AutoBookService(_Runner):
             cid = ch["chapter_id"]
             item = st["items"][idx]
             self._checkpoints(run, st, outline, chapters, idx)  # 🧭 a checkpoint due after the chapters before this one
+            from . import voice_test  # noqa: PLC0415 - 🗣 do the voices differ on the page so far? (≤ 1 AI mid-book)
+            voice_test.before_chapter(self, run, st, outline, chapters, idx)
             # ⚡ #116: every AI call for this chapter shows "chapter N of M" in the AI activity strip
             with ai_activity.doing(None, chapter=idx + 1, chapters=len(chapters), chapter_id=cid):
                 bp = self.bp(run)
@@ -4006,6 +4046,8 @@ class AutoBookService(_Runner):
                     appr = book_import.keep_author_chapter(self.app, run["principal"], run["project_id"],
                                                            run["branch_id"], cid)
                 if appr:
+                    from . import story_guards  # noqa: PLC0415 - 🧭 a guard fix paused before its review: review it now
+                    appr = story_guards.resume(self, run, st, cid, appr) or appr
                     from . import continuity  # noqa: PLC0415
                     if not continuity.tracked(self.store, run["project_id"], run["branch_id"], cid, appr):
                         # approved, but a Pause / Cancel came before its continuity was tracked, or the author changed
@@ -4092,6 +4134,8 @@ class AutoBookService(_Runner):
                             item["cut"] = cuts["cut"]
                             self.event(run, "note", cuts["line"], code="INSTRUCTIONS_CUT", record_id=rid,
                                        chapter_id=cid)
+                    from . import key_scenes  # noqa: PLC0415 - 🎭 a key chapter written twice, the better one kept
+                    key_scenes.after_draft(self, run, st, outline, chapters, cid, idx + 1, rid, item)
                     from . import chapter_polish  # noqa: PLC0415 - 📏 reading level + repeats: ≤ 1 polish, kept if better
                     chapter_polish.after_draft(self, run, st, outline, cid, idx + 1, rid, item)
                     try:
@@ -4113,12 +4157,16 @@ class AutoBookService(_Runner):
                 if idx == 0:  # ✍ the chosen first page leaves the writing brief once chapter 1 is approved
                     from . import first_page  # noqa: PLC0415
                     first_page.after_first_chapter(self, run, cid, rec)
+                from . import story_guards  # noqa: PLC0415 - 🧭🤫 scope creep / knowing too early: ≤ 1 check, ≤ 1 fix
+                rec = story_guards.after_chapter(self, run, st, outline, chapters, idx, rec)
                 if rec:
                     continuity.note_written(self.store, run["project_id"], run["branch_id"], cid, rec, idx + 1)
                     continuity.recheck_done(self.store, run["project_id"], run["branch_id"], cid)
                     claude_code_book.chapter_approved(self, run, cid, idx + 1, rec)  # 🤖 facts + "sounds like AI"
                     from . import writer_record  # noqa: PLC0415 - 🏆 the writer's score joins its track record
                     writer_record.after_chapter(self, run, rec)
+                    from . import book_budgets  # noqa: PLC0415 - 📊 the book budgets: this chapter's counts (no AI)
+                    book_budgets.after_chapter(self, run, outline, cid, idx + 1, rec)
                     # 🔎 PR #117: all the AIs check this chapter before the next one is written (checkpoints.py)
                     due = run.setdefault("chapter_checks_due", [])
                     if cid not in due:
@@ -4153,10 +4201,15 @@ class AutoBookService(_Runner):
         # H11 / H12: the ending keeps the book's promises — the ONE final ending check (the final 🧭 checkpoint does
         # not run its own; the checkpoints before it run the light setups-so-far check, ending_check upto=N)
         self._ending_pass(run, st, outline, chapters)
+        from . import voice_test  # noqa: PLC0415 - 🗣 the finished book's voices: on the page + one blind test
+        voice_test.end_pass(self, run, st, outline, chapters)
         from . import chapter_polish  # noqa: PLC0415 - 📏 both numbers in the run window
         pl = chapter_polish.to_report(self, run)
         if pl:
             self.event(run, "report", pl, step="chapters", code="CHAPTER_POLISH")
+        kb = keep_brief.report_line(run)  # ✋ what the keep lists and stopping rules did
+        if kb:
+            self.event(run, "report", kb, step="chapters", code="KEEP_BRIEFS")
         words = sum(i.get("words") or 0 for i in st["items"])
         target = lengths_mod.of_book(self.store, run["project_id"], len(chapters))
         st["message"] = f"{len(chapters)} chapter(s) written and approved · {words:,} words (target about " \
@@ -4445,6 +4498,9 @@ class AutoBookService(_Runner):
         chapter_polish.to_report(self, run, rep)
         from . import story_doctor  # noqa: PLC0415 - 🩺 the plan check's line in the saved report too
         story_doctor.to_report(self, run, rep)
+        from . import key_scenes, predictability  # noqa: PLC0415 - 🔮 / 🎭 their lines in the saved report too
+        predictability.to_report(self, run, rep)
+        key_scenes.to_report(self, run, rep)
         if agg.get("reviewers"):
             st["message"] = (f"{agg['reviewers']} AI(s) read the whole book · overall {agg.get('overall')}/10"
                              + (f" · ⚠️ they disagree on {', '.join(agg['disagreements'])}" if agg.get("disagreements")

@@ -50,9 +50,16 @@ CHAPTERS_FROM, CHAPTERS_TO = 0.15, 0.9   # where the chapters lie in the run's t
 DEFAULT_AIS = (("AI-1", "AI-1 · Claude", "claude"), ("AI-2", "AI-2 · ChatGPT", "chatgpt"),
                ("AI-3", "AI-3 · Gemini", "gemini"))
 VOICE_SHARE = 0.4             # 🗣 share of books whose voice cards need the one rewrite answer (an estimate)
+SUBTEXT_SHARE = 0.5           # 💬 share of chapters whose dialogue has a line that says a feeling outright (an estimate)
+GUARD_SHARE, GUARD_FIX_SHARE = 0.15, 0.05   # 🧭🤫 share of chapters with a possible / a confirmed scope or knowledge
+#                                              problem (new names are only looked for in the last ~30% of the book)
+PREDICT_SHARE = 0.3           # 🔮 share of plans whose turns are too easy to guess (one revision each, an estimate)
+DOCTOR_REVISED_SHARE = 0.5    # ⚖ share of plans the story doctor revises (then first vs revised meet head to head)
 FRESH_SHARE = 0.5             # 🔁 share of books where a repeated title word or name is renamed (one answer each)
 INSIDE_MEASURED = ("checkers", "writers_room", "human_pass", "first_page", "chapter_polish", "story_doctor",
-                   "voice_contrast", "trade_card", "fresh_names")   # their answers are inside costs' measured steps
+                   "voice_contrast", "trade_card", "fresh_names", "voice_test", "subtext_check", "story_guards",
+                   "predictability_probe", "key_scene_versions", "key_scene_picks",
+                   "pairwise")   # their answers are inside costs' measured steps
 OWN_STEP = {"beta": "beta", "bible": "bible", "improve": "improve", "opening": "opening", "reread": "reread"}   # option -> its own run step (measured when made)
 
 
@@ -100,6 +107,10 @@ def options_of(app, body: dict | None) -> dict:
             "scene_cut_retry": b.get("scene_cut_retry") is not False,
             "story_doctor": b.get("story_doctor") is not False, "voice_contrast": b.get("voice_contrast") is not False,
             "trade_card": b.get("trade_card") is not False, "fresh_names": b.get("fresh_names") is not False,
+            "voice_test": b.get("voice_test") is not False, "subtext_check": b.get("subtext_check") is not False,
+            "scope_guard": b.get("scope_guard") is not False, "knowledge_grid": b.get("knowledge_grid") is not False,
+            "predictability_probe": b.get("predictability_probe") is not False,
+            "key_scene_versions": b.get("key_scene_versions") is not False, "pairwise": b.get("pairwise") is not False,
             "doctor_rounds": b.get("doctor_rounds") if isinstance(b.get("doctor_rounds"), int)
             and not isinstance(b.get("doctor_rounds"), bool) and 1 <= b.get("doctor_rounds") <= 3 else 2,
             "improve_rounds": b.get("improve_rounds") if isinstance(b.get("improve_rounds"), int)
@@ -192,6 +203,42 @@ def option_calls(opts: dict, n: int, ais: int) -> dict:
     out["fresh_names"] = {"calls": 2 * FRESH_SHARE if opts.get("fresh_names") else 0, "to": "all",
                           "label": "🔁 Kept fresh: rename a title word or name your recent books used (only when "
                                    "needed)"}
+    # 🗣 voices on the page (voice_test.py): one blind speaker test in the middle of the book (4+ chapters) and one at
+    # the end; 💬 subtext (subtext_check.py): one check per chapter whose dialogue has on-the-nose lines (counted as
+    # SUBTEXT_SHARE of the chapters), plus the review of a rewrite for about half of those
+    out["voice_test"] = {"calls": (2 if n >= 4 else 1) if opts.get("voice_test") else 0, "to": "others",
+                         "label": "🗣 Voice test on the page: can an AI tell who is speaking?"}
+    out["subtext_check"] = {"calls": round(SUBTEXT_SHARE * n * 1.5, 1) if opts.get("subtext_check") else 0,
+                            "to": "others", "label": "💬 Subtext check: lines that say a feeling outright (only "
+                                                     "when found)"}
+    # 🧭🤫 story guards (story_guards.py): one answer for the who-knows-what grid (the planning AI);
+    # per chapter with a possible problem one independent confirm answer, and for a confirmed one the writer's fix and
+    # its review — counted as expected shares, spread over the AIs (the checks go to another AI than the writer)
+    sg, kg = opts.get("scope_guard", True), opts.get("knowledge_grid", True)
+    out["story_guards"] = {"calls": ((1 if kg else 0) + (GUARD_SHARE + 2 * GUARD_FIX_SHARE) * n) if (sg or kg) else 0,
+                           "to": "all", "label": "🧭 Scope guard and 🤫 who knows what (checked after each chapter; "
+                                                 "fixed once when needed)"}
+    # 🔮 the predictability probe (predictability.py): one probe answer; a plan whose turns are too easy to guess
+    # (counted as its expected share) gets one revision (1 fix + its review), a second probe and the head-to-head pick
+    judges = min(2, ais - 1) if ais > 1 else 0
+    pw = bool(opts.get("pairwise", True))
+    out["predictability_probe"] = {"calls": (1 + PREDICT_SHARE * (2 + 1 + (judges if pw else 0)))
+                                   if opts.get("predictability_probe") else 0, "to": "others",
+                                   "label": "🔮 Predictability probe: can an AI guess the plan's turning points? (a "
+                                            "revision only when it can)"}
+    # 🎭 key scenes written twice (key_scenes.py): for each key chapter (the climax and the major setback, else the
+    # last chapter; at most 3) one more chapter answer by the writer and the head-to-head pick by up to 2 other AIs
+    from . import key_scenes  # noqa: PLC0415
+    keys = min(key_scenes.MAX_KEY, 2 if n >= 6 else 1, max(0, n - 1))   # a short book's setback and climax share
+    ks = bool(opts.get("key_scene_versions"))
+    out["key_scene_versions"] = {"calls": keys if ks else 0, "to": "writer",
+                                 "label": f"🎭 Key scenes written twice, the better kept ({keys} "
+                                          f"chapter{'s' if keys != 1 else ''}: the writer's second versions)"}
+    out["key_scene_picks"] = {"calls": keys * judges if ks and pw else 0, "to": "others",
+                              "label": "🎭 Key scenes: the other AIs pick the better version head to head"}
+    # ⚖ head to head (pairwise.py): the story doctor's first plan against its best revision, when it revised the plan
+    out["pairwise"] = {"calls": DOCTOR_REVISED_SHARE * judges if pw and opts.get("story_doctor") else 0,
+                       "to": "others", "label": "⚖ Head-to-head comparisons instead of two separate scores"}
     out["pictures"] = {"calls": 0, "to": "none", "label": "Character pictures (Stable Diffusion: no AI answers)",
                        "minutes": PICTURES * PICTURE_MIN if opts.get("pictures") else 0}
     # 🧑‍⚖️ the stand-in vote at a story checkpoint the author does not answer: every AI votes on each waiting problem
@@ -247,6 +294,12 @@ def _run_opts(j: dict) -> dict:
             "beta_reread": s.get("beta_reread") is not False,
             "story_doctor": s.get("story_doctor") is True, "voice_contrast": s.get("voice_contrast") is True,
             "trade_card": s.get("trade_card") is True, "fresh_names": s.get("fresh_names") is True,
+            # 🗣 / 💬 counted as part of every measured run unless it was switched off (their few answers are in the
+            # measured chapters already)
+            "voice_test": s.get("voice_test") is not False, "subtext_check": s.get("subtext_check") is not False,
+            "scope_guard": s.get("scope_guard") is True, "knowledge_grid": s.get("knowledge_grid") is True,
+            "predictability_probe": s.get("predictability_probe") is True,
+            "key_scene_versions": s.get("key_scene_versions") is True, "pairwise": s.get("pairwise") is True,
             "doctor_rounds": s.get("doctor_rounds") or 2}
 
 
