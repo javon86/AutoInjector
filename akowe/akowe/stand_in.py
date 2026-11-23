@@ -495,6 +495,11 @@ def voters(app, run: dict, prob: dict) -> list[dict]:
         nonlocal cc_ready
         if cc_ready is None:
             try:
+                from types import SimpleNamespace  # noqa: PLC0415
+                from .claude_code_book import practice_only  # noqa: PLC0415 - 🧪 no real AI in a Practice AI run
+                if practice_only(SimpleNamespace(app=app)):
+                    cc_ready = False
+                    return False
                 ok = claude_code.available(app.store)
                 if ok is None and claude_code.enabled(app.store) and claude_code.cached_status() is None:
                     found = claude_code.detect(app.store)  # the tick runs on its own thread: it may wait for it

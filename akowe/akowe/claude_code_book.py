@@ -196,6 +196,18 @@ def _settings(svc) -> dict:
     return cc.settings(svc.store)
 
 
+def practice_only(svc) -> bool:
+    """🧪 Every AI slot that is set up is the Practice AI (a test run with test text). Never raises."""
+    try:
+        prov = getattr(svc.app.engine.providers, "_base", svc.app.engine.providers)
+        if getattr(prov, "test_adapter", None) is not None:
+            return False  # the test suite's own fake decides for itself
+        kinds = [s.get("adapter_id") for s in prov.slots() if s.get("adapter_id") not in ("none", "manual")]
+        return bool(kinds) and all(k == "practice" for k in kinds)
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def active(svc, run: dict, job: str | None = None) -> bool:
     """The helpers may take this job now: on in Settings and for this run, the job switched on, Claude Code found,
     signed in and not at its limit. Never raises, never waits."""
@@ -206,6 +218,10 @@ def active(svc, run: dict, job: str | None = None) -> bool:
         ps = json.loads(proj["settings"] or "{}") if proj else {}
         if isinstance(ps, dict) and (ps.get("selftest") or ps.get("workflow_test")):
             return False  # 🧪 the smoke tests keep their own fixed AI calls
+        if practice_only(svc):  # 🧪 a Practice AI test run never calls a real AI (Claude Code included)
+            _note_once(run["id"], "off:practice", "🤖 Claude Code helpers stay off: this is a Practice AI test run "
+                       "(test text only)", "CLAUDE_CODE_PRACTICE")
+            return False
         st = _settings(svc)
         if job and not st["jobs"].get(job):
             return False

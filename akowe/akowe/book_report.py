@@ -832,7 +832,9 @@ class ReportService:
         helper = None
         try:
             from . import claude_code as cc  # noqa: PLC0415
-            if CC_SLOT not in used and cc.available(self.store):
+            from .claude_code_book import practice_only  # noqa: PLC0415 - 🧪 never a real AI in a Practice AI run
+            from types import SimpleNamespace  # noqa: PLC0415
+            if CC_SLOT not in used and not practice_only(SimpleNamespace(app=self.app)) and cc.available(self.store):
                 fam = usage.get("writer_family")
                 helper = {"slot_id": CC_SLOT, "name": CC_NAME, "working": True, "helper": True,
                           "independent": fam != "claude", "wrote_most": fam == "claude"}

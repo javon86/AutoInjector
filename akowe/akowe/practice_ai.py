@@ -62,8 +62,9 @@ def fact(s, p, v, a="FACT"):
 def plan_item(item_id, order, objective, pov="mara-vell", loc="gullhaven-harbor"):
     facts = [fact(item_id, "plan.item_id", item_id, "PLAN"), fact(item_id, "plan.order", order, "PLAN"),
              fact(item_id, "plan.parent_id", None, "PLAN"), fact(item_id, "plan.objective", objective, "PLAN"),
-             fact(item_id, "plan.event_ids", [], "PLAN"), fact(item_id, "plan.pov_id", pov, "PLAN"),
-             fact(item_id, "plan.location_id", loc, "PLAN"), fact(item_id, "plan.obligation_ids", [], "PLAN")]
+             fact(item_id, "plan.event_ids", [], "PLAN"), fact(item_id, "plan.pov_id", pov, "PLAN")]
+    facts += [fact(item_id, "plan.location_id", loc or None, "PLAN"),  # null only for a book with no place
+              fact(item_id, "plan.obligation_ids", [], "PLAN")]
     return {"summary": f"{item_id}: {objective}", "facts": facts, "links": []}
 
 
@@ -227,6 +228,7 @@ class PracticeAI:
         self.planned_script: list = []           # scripted planned-to-page checks (P11), one per call
         self.planned_fix = False                 # P11: the writer works missing planned items into the anchor
         self.rule_flags: dict[str, str] = {}     # phrase -> editor dimension (P9 story_rules / protected_mysteries)
+        self.default_location = "gullhaven-harbor"  # B11: replaced by a declared place (context.allowed) when given
         self.max_chapters = 60                   # B11: the outline honours the book's length (up to 60 chapters;
         #                                          the test suite's fake lowers it to 6 for speed)
         self.expand_text = False                 # P15: the writer's continuation adds a paragraph (default: nothing)
@@ -1160,7 +1162,7 @@ class PracticeAI:
         return self.role_override.get(name) or given or None
 
     def _canon_ids(self, ctx):
-        pov, loc = "mara-vell", "gullhaven-harbor"
+        pov, loc = "mara-vell", self.default_location
         for rec in (ctx.get("resolved_inputs") or {}).values():
             for f in ((rec or {}).get("data") or {}).get("facts") or []:
                 if isinstance(f, dict) and f.get("predicate") == "entity.name":
@@ -1168,6 +1170,14 @@ class PracticeAI:
                         pov = f["subject_id"]
                     if rec.get("module_id") == "A04":
                         loc = f["subject_id"]
+        allowed = ctx.get("allowed") if isinstance(ctx.get("allowed"), dict) else {}
+        locs, povs = allowed.get("location_ids"), allowed.get("pov_ids")
+        if isinstance(locs, list) and loc not in locs:  # only a place the canon declares (null when there is none)
+            loc = locs[0] if locs else None
+        if isinstance(povs, list) and povs and pov not in povs:
+            pov = povs[0]
+        if loc is None and not isinstance(locs, list):
+            loc = "gullhaven-harbor"  # no list given: the old default (a request outside the outline step)
         mc = ctx.get("main_character") or {}
         if mc.get("pov_id"):  # ★ the outline follows the book's main character (as a real AI is told to)
             pov = mc["pov_id"]
