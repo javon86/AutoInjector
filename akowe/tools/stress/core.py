@@ -481,6 +481,9 @@ class Harness:
                  time_limit: float = 90.0, likely: str = ""):
         self.id, self.section, self.part, self.stress, self.title = sid, section, part, stress, title
         self.seed, self.time_limit, self.likely = seed, time_limit, likely
+        # the section modules may re-point TMP_BASE, and another section's cleanup may have removed it: make it
+        # again when needed, so the sections can run one after another in the same process
+        Path(TMP_BASE).mkdir(parents=True, exist_ok=True)
         self.tmp = Path(tempfile.mkdtemp(prefix=f"{sid}-", dir=TMP_BASE))
         self.apps: list = []
         self.app = None
