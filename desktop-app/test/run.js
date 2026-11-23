@@ -2824,7 +2824,8 @@ async function testExtractAllLogs() {
   await waitUntil(async () => (await call("state:get", {})).transcript.some((t) => /EXTRACT_MARKER_REPLY/.test(t.text)),
     { label: "a reply is captured into the transcript" });
   const before = (await call("state:get", {})).log.length;
-  const res = await call("logs:extract-all", {});
+  // the private AI conversation is only included when ticked (PR #153): this test asks for it
+  const res = await call("logs:extract-all", { include: { conversation: true } });
   assert(res && res.ok && res.file, `extract wrote a file (${res && res.file})`);
   assert(res.messages >= 1 && res.logEntries >= before, `it reports the counts (msgs=${res.messages}, log=${res.logEntries})`);
   const text = fs.readFileSync(res.file, "utf8");

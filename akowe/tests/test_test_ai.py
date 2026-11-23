@@ -160,6 +160,34 @@ def test_a_whole_make_a_book_run_with_two_practice_slots_finishes_and_says_pract
     assert run.get("files")  # the PDF / EPUB / Word files were made
 
 
+def test_practice_runs_never_call_a_real_ai_and_follow_the_books_length(tmp_path):
+    """🧪 From the end-to-end check: a Practice AI run must not use the Claude Code helpers (a real AI), the
+    outline follows the book's length (a novella's 12 chapters, not the tests' 6), and it only names a place the
+    canon declares."""
+    from types import SimpleNamespace  # noqa: PLC0415
+    from akowe import claude_code_book as ccb  # noqa: PLC0415
+    app = make_app(tmp_path)
+    prov = app.engine.providers
+    prov.configure_slot("AI-1", {"adapter_id": "practice"})
+    prov.configure_slot("AI-2", {"adapter_id": "practice"})
+    assert ccb.practice_only(SimpleNamespace(app=app)) is True
+    run = {"id": "r1", "project_id": "nope", "settings": {}}
+    assert ccb.active(SimpleNamespace(app=app, store=app.store), run, "facts") is False
+    prov.configure_slot("AI-2", {"adapter_id": "ollama", "model": "llama3.1:8b"})
+    assert ccb.practice_only(SimpleNamespace(app=app)) is False  # a real AI is set up too: the helpers may help
+    p = practice_ai.PracticeAI()
+    assert p.max_chapters >= 25 and BookFakeAI().max_chapters == 6
+    ctx = {"request_payload": {"target_length": {"unit": "chapters", "value": 12}},
+           "allowed": {"pov_ids": ["mara-vell"], "location_ids": ["the-old-light"], "chapter_count": 12}}
+    _k, out = p._answer(ctx, {"chapters": {}}, {})  # noqa: SLF001
+    chs = out["chapters"]
+    assert len(chs) == 12
+    locs = {f["value"] for c in chs for f in c["facts"] if f["predicate"] == "plan.location_id"}
+    assert locs == {"the-old-light"}
+    _k, none = p._answer(dict(ctx, allowed={"pov_ids": ["mara-vell"], "location_ids": []}), {"chapters": {}}, {})  # noqa: SLF001
+    assert {f["value"] for c in none["chapters"] for f in c["facts"] if f["predicate"] == "plan.location_id"} == {None}
+
+
 def test_the_practice_ai_answers_any_schema_and_never_records_prompts():
     ai = practice_ai.PracticeAI()
     schema = {"type": "object", "required": ["a", "b"], "properties": {"a": {"type": "string"},
