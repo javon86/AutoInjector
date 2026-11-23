@@ -227,7 +227,8 @@ class PracticeAI:
         self.planned_script: list = []           # scripted planned-to-page checks (P11), one per call
         self.planned_fix = False                 # P11: the writer works missing planned items into the anchor
         self.rule_flags: dict[str, str] = {}     # phrase -> editor dimension (P9 story_rules / protected_mysteries)
-        self.max_chapters = 6                    # B11: at most this many chapters (P15 tests raise it)
+        self.max_chapters = 60                   # B11: the outline honours the book's length (up to 60 chapters;
+        #                                          the test suite's fake lowers it to 6 for speed)
         self.expand_text = False                 # P15: the writer's continuation adds a paragraph (default: nothing)
         self.book_review_script: list = []       # P13: scripted whole-book reviews (dicts or callables(ctx))
         self.compare_script: list = []           # P14: scripted blind comparisons (dicts or callables(ctx))

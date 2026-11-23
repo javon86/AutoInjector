@@ -48,6 +48,7 @@ def trust_one_ai(app, run_id, timeout=120):
 class BookFakeAI(PracticeAI):
     def __init__(self, verdicts=None, default_verdict="APPROVE"):
         super().__init__(verdicts, default_verdict)
+        self.max_chapters = 6                    # B11: short outlines keep the test runs fast (P15 tests raise it)
         self.calls: list[dict] = []
         self.failures: list[AkoweError] = []  # raised before answering, one per call
         self.kind_failures: dict[str, list] = {}  # answer kind -> errors raised instead of that answer
