@@ -2,7 +2,7 @@
 
 Every part of the book-making process (`akowe/akowe/autobook.py` `STEPS`) was stress-tested section by section with
 the harness in `akowe/tools/stress` (see its README). **Findings only: no product code was changed by these tests.**
-Start with **[SUMMARY.md](SUMMARY.md)** — the whole picture, the problems worst first, and the root causes they share. The fix plan for the book-quality findings is **[FIX_PLAN_QUALITY.md](FIX_PLAN_QUALITY.md)** (not started).
+Start with **[SUMMARY.md](SUMMARY.md)** — the whole picture, the problems worst first, and the root causes they share. The fix plan for the book-quality findings is **[FIX_PLAN_QUALITY.md](FIX_PLAN_QUALITY.md)** (not started), and the new step before the book is written is **[PLAY_BY_PLAY_PLAN.md](PLAY_BY_PLAY_PLAN.md)** (not started).
 
 Result IDs: `<Section>-<part>[.<subsection>]-<stress>` (e.g. `B-7-a`, `C-10.2-k`). Stresses a–j are the standard ones
 (a timeout · b busy · c usage limit · d garbage answer · e empty answer · f refusals · g a crash in the part's own code ·
