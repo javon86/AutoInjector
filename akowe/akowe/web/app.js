@@ -8880,9 +8880,11 @@ function renderRun() {
     ? h('p', { class: 'words-warn mb-indep', role: 'note', 'data-testid': 'mb-not-independent' }, h('span', { 'aria-hidden': 'true' }, '⚠️ '),
       rs.same_ai ? `${NOT_INDEPENDENT} (${rs.same_ai} of ${rs.same_ai + (rs.independent || 0)} reviews so far).` : `Only ${working[0].name} works right now, so it will review its own writing: reviews are not independent (the same AI writes and reviews).`,
       h('span', { class: 'small' }, ' When another AI works again, it reviews instead.')) : null;
-  if (doneBox && (r.check_later || []).length) {  // PR #122: approved by the one working AI alone — the author checks them
+  if (doneBox && (r.check_later || []).length) {  // what the author should look at: each line says what and why
+    // PR #122: a chapter named alone was approved by the one working AI (it checked its own writing)
+    const selfChecked = r.check_later.filter(x => !/[:—]/.test(String(x)));
     doneBox.appendChild(h('p', { class: 'words-warn', 'data-testid': 'mb-check-later' }, h('span', { 'aria-hidden': 'true' }, '⚠️ '),
-      `Needs your check later (only one AI was working, so it checked its own writing): ${r.check_later.join(', ')}. They are also listed on the book's home page.`));
+      `Needs your check later: ${r.check_later.join('; ')}.` + (selfChecked.length ? ` (${selfChecked.join(', ')}: only one AI was working, so it checked its own writing — also listed on the book's home page.)` : '')));
   }
   if (doneBox && (rs.independent || rs.same_ai)) {
     doneBox.appendChild(h('p', { class: rs.same_ai ? 'words-warn' : 'small', 'data-testid': 'mb-review-summary' }, rs.same_ai ? h('span', { 'aria-hidden': 'true' }, '⚠️ ') : '🧐 ',

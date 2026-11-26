@@ -21,6 +21,7 @@ import os
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 from akowe import book_pictures, forge, story_details, story_rules
 from akowe import characters as chars_mod
@@ -665,7 +666,12 @@ def b5_n(h: Harness) -> Outcome:
     o.notes.append(f"The looks step handled {len(labels)} subject(s); the book has {len(places)} place(s); the step "
                    f"says “{scrub(st.get('message'))}”.")
     cast_n = len(_cast(h))
-    if places and len(labels) <= cast_n:
+    from akowe.autobook import STEPS  # noqa: PLC0415 - what the step promises the author
+    promise = next((s[4] for s in STEPS if s[0] == "looks"), "")
+    if places and len(labels) <= cast_n and "short look for the places" not in promise:
+        o.notes.append("The step's description says places and items get their look just in time (the outline that "
+                       "names them comes later), which is what happens.")
+    elif places and len(labels) <= cast_n:
         o.risks.append(f"the step's description promises “a short look for the places and items the outline names” "
                        f"before chapter one, but the outline is made later (part 10): {len(places)} place(s) got no "
                        f"essentials here (only {cast_n} character(s))")
@@ -1181,6 +1187,15 @@ def _rules(h: Harness):
     return story_rules.get_entry(h.app.store, pid, "main") if pid else None
 
 
+def _box_gives_one_ai_reason() -> bool:
+    """Does the finished run's “Needs your check later” box still give every line the one-AI reason (app.js)?"""
+    js = Path(__file__).resolve().parents[2] / "akowe" / "web" / "app.js"
+    try:
+        return "Needs your check later (only one AI was working" in js.read_text(encoding="utf-8")
+    except OSError:
+        return True
+
+
 def _texture_check(want_codes=(), want_texture=None, want_later=None):
     def check(h, run):
         iss, risk = [], []
@@ -1195,7 +1210,7 @@ def _texture_check(want_codes=(), want_texture=None, want_later=None):
         if want_later is True and not any("texture" in x.lower() for x in later):
             risk.append("the missing world texture is NOT on the run's “check later” list (only a journal note says "
                         "so)")
-        if any("texture" in x.lower() for x in later):
+        if any("texture" in x.lower() for x in later) and _box_gives_one_ai_reason():
             risk.append("the finished run lists the texture under “Needs your check later (only one AI was working, so "
                         "it checked its own writing)” — the reason shown is wrong for a texture the AI never made")
         return iss, risk

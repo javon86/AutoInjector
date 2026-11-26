@@ -1456,6 +1456,27 @@ def looks_fingerprint(dossier: dict) -> str:
     return hashlib.sha256(art_prompt(dossier, "lock").encode("utf-8")).hexdigest()[:16]
 
 
+def _request_watched(app, body: dict, job) -> dict:
+    """``request_image`` in a worker thread while ``job.check()`` is asked every quarter second: ⏸ Pause / ⏹ Stop let
+    go of a slow picture at once (a picture can take minutes; AutoInjector's late answer is then ignored)."""
+    box: dict = {}
+
+    def worker():
+        try:
+            box["resp"] = request_image(app, body)
+        except BaseException as exc:  # noqa: BLE001 - handed to the caller below
+            box["exc"] = exc
+    t = threading.Thread(target=worker, name="akowe-forge-picture", daemon=True)
+    t.start()
+    while t.is_alive():
+        t.join(0.25)
+        if t.is_alive():
+            job.check()
+    if "exc" in box:
+        raise box["exc"]
+    return box["resp"]
+
+
 def run_art(app, job, pid, branch, rid, what: str, engine: str, views: list[str]) -> None:
     store = app.store
     dossier = public(store, pid, branch, rid)
@@ -1485,12 +1506,12 @@ def run_art(app, job, pid, branch, rid, what: str, engine: str, views: list[str]
         if seed is not None and slot in VIEW_KEYS:
             body["seed"] = seed
         try:
-            resp = request_image(app, body)
+            resp = _request_watched(app, body, job)
         except ArtProblem as exc:
             if exc.code == "NO_LOCK" and not lock_missing:
                 lock_missing = True  # no lock with this name: make it from the prompt alone
                 body.pop("characterLock", None)
-                resp = request_image(app, body)
+                resp = _request_watched(app, body, job)
             else:
                 raise
         data, s = first_picture(resp)

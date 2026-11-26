@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 import types
 
 from .errors import AkoweError
@@ -41,6 +42,11 @@ WORDS = {"portrait": "portrait", "front": "front view", "side": "side view", "ba
 ENGINE_DOWN = frozenset(("IMAGE_BRIDGE_UNREACHABLE", "IMAGE_NOT_WIRED", "IMAGE_BRIDGE_KEY", "SD_NOT_CONNECTED",
                          "NO_IMAGE_ENGINE", "CHATGPT_NOT_READY", "IMAGE_LIMIT", "NO_ENDPOINT", "IMAGE_DISABLED"))
 PROBE_TIMEOUT_S = 8.0
+# ⚡ The run's step never holds up the book for long: a picture that hangs (IMAGE_TIMEOUT) means the picture maker is
+# treated as down for the rest of the step, and the step stops making pictures once this much time has gone by (what
+# is left goes on the to-make list; 🖼 Make the rest has no such limit).
+RUN_HANG_CODES = frozenset(("IMAGE_TIMEOUT",))
+RUN_BUDGET_S = 15 * 60.0
 _LOCK = threading.RLock()
 # One maker of a book's pictures at a time (the run's step, 🖼 Make the rest pressed twice or in two tabs): the next
 # one waits, then sees what is already made and makes only what is still missing.
@@ -240,21 +246,27 @@ def ensure_lock(app, pid, branch, rid) -> dict | None:
     return out
 
 
-def make_for(app, principal, pid, branch, rid, want, engine: str, check=None, on_phase=None, redo=()) -> dict:
+def make_for(app, principal, pid, branch, rid, want, engine: str, check=None, on_phase=None, redo=(),
+             hang_is_down: bool = False) -> dict:
     """Make the character's missing pictures among ``want`` (portrait first, then the views, then the sheet).
     -> {made: [...], failed: [...], code, message, down: bool, lock: dict|None}. Raises only what ``check`` raises
-    (pause / cancel)."""
+    (pause / cancel). ``hang_is_down`` (the run's step): a picture that timed out counts as "the maker is down"."""
     lock = _making_lock(pid, branch)
     while not lock.acquire(timeout=0.5):
         if check:
             check()
     try:
-        return _make_for(app, principal, pid, branch, rid, want, engine, check, on_phase, redo)
+        return _make_for(app, principal, pid, branch, rid, want, engine, check, on_phase, redo, hang_is_down)
     finally:
         lock.release()
 
 
-def _make_for(app, principal, pid, branch, rid, want, engine, check, on_phase, redo=()) -> dict:
+def _is_control(exc: BaseException) -> bool:
+    """Pause / cancel of the run (``control``) or a Stop of a job (assist.Cancelled): never a failed picture."""
+    return bool(getattr(exc, "control", False)) or type(exc).__name__ == "Cancelled"
+
+
+def _make_for(app, principal, pid, branch, rid, want, engine, check, on_phase, redo=(), hang_is_down=False) -> dict:
     from . import forge  # noqa: PLC0415
     store = app.store
     todo = missing(store, pid, branch, rid, want)
@@ -281,15 +293,27 @@ def _make_for(app, principal, pid, branch, rid, want, engine, check, on_phase, r
             out["made"] += got
             out["failed"] += [s for s in slots if s not in got]
             out["code"], out["message"] = exc.code, exc.message
-            if exc.code in ENGINE_DOWN:
+            if exc.code in ENGINE_DOWN or (hang_is_down and exc.code in RUN_HANG_CODES):
                 out["down"] = True
                 done = set(out["made"]) | set(out["failed"])
                 out["failed"] += [s for _w, ss in groups for s in ss if s not in done]
                 break
             continue
         except AkoweError as exc:  # e.g. the picture could not be stored
+            if _is_control(exc):
+                raise
             out["failed"] += slots
             out["code"], out["message"] = exc.code, (exc.errors[0].get("message") if exc.errors else exc.code)
+            continue
+        except Exception as exc:  # noqa: BLE001 - a bug in the picture code: this group goes on the to-make list
+            if _is_control(exc):
+                raise
+            log.exception("pictures of %s (%s)", rid, what)
+            after = have(store, pid, branch, rid)
+            got = [s for s in slots if s in after and s not in before]
+            out["made"] += got
+            out["failed"] += [s for s in slots if s not in got]
+            out["code"], out["message"] = "PICTURE_ERROR", f"Akọwe hit an unexpected problem ({type(exc).__name__})"
             continue
         out["made"] += slots
         if what == "portrait":
@@ -333,10 +357,14 @@ def run_step(svc, run, st) -> None:
     ok, code, why = probe(app, engine)
     made = failed = 0
     down = None if ok else (code, why)
+    t0 = time.monotonic()
     for i, rid, name, want, left in todo:
         if not left:
             continue
         item = st["items"][i]
+        if not down and time.monotonic() - t0 > RUN_BUDGET_S:
+            down = ("PICTURES_TOO_SLOW", f"the picture maker was too slow (over {int(RUN_BUDGET_S // 60)} minutes for "
+                                         "this book's pictures), so the book does not wait for the rest")
         if down:
             note_waiting(store, pid, branch, rid, name, left, down[0], down[1])
             failed += len(left)
@@ -351,7 +379,7 @@ def run_step(svc, run, st) -> None:
         def phase(p, _name=name):
             run["phase"] = f"{_name}: {p}"
         res = make_for(app, run["principal"], pid, branch, rid, left, engine, check=lambda: svc.check(run),
-                       on_phase=phase)
+                       on_phase=phase, hang_is_down=True)
         made += len(res["made"])
         if res["made"]:
             note_made(store, pid, branch, rid, res["made"])
@@ -378,6 +406,27 @@ def run_step(svc, run, st) -> None:
                   code="PICTURES_WAITING")
     st["message"] = (f"{made} picture(s) made" if made else "No pictures made") + (
         f" · {failed} waiting on the to-make list" if failed else "")
+
+
+def note_run_missing(svc, run, code: str, why: str) -> int:
+    """After the run's step itself failed: every picture the step should have made and did not goes on the to-make
+    list by name (so the Book Bible lists them). Returns how many. Never raises."""
+    try:
+        store = svc.app.store
+        pid, branch = run["project_id"], run["branch_id"]
+        prot = protagonist_id(store, pid, branch)
+        from .review import safe_title  # noqa: PLC0415
+        n = 0
+        for r in svc.bp(run).approved("A01"):
+            left = missing(store, pid, branch, r["record_id"], FULL if r["record_id"] == prot else PORTRAIT)
+            if left:
+                note_waiting(store, pid, branch, r["record_id"], safe_title(svc.app.engine.contracts, r), left, code,
+                             why)
+                n += len(left)
+        return n
+    except Exception:  # noqa: BLE001 - "🖼 Make the rest" still finds every missing picture
+        log.exception("could not list the missing pictures")
+        return 0
 
 
 # ====================================================================== 🖼 Make the rest of the pictures (a job)
