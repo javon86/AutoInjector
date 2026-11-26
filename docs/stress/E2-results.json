@@ -2,7 +2,7 @@
  "section": "E",
  "name": "Writing (part 2: 12.7–12.12 and 13)",
  "slug": "writing-part-2",
- "generated_at": "2026-11-23T09:30:22Z",
+ "generated_at": "2026-11-26T01:29:11Z",
  "legend": {
   "✅": "HANDLED",
   "🟡": "SAFE STOP",
@@ -74,7 +74,7 @@
    ],
    "faults_fired": 3,
    "ai_calls": 178,
-   "seconds": 6.74,
+   "seconds": 5.54,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -84,6 +84,7 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
     "GRID_BUILT",
     "TRADE_CARD_MADE",
@@ -108,14 +109,13 @@
     "CHAPTER_POLISH",
     "REPEATS_TO_TRIM",
     "HUMAN_PASS",
-    "OPENING_UNRESOLVED",
-    "IMPROVE_UNRESOLVED"
+    "OPENING_UNRESOLVED"
    ],
    "alert": {},
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.7-b",
@@ -137,7 +137,7 @@
    ],
    "faults_fired": 3,
    "ai_calls": 101,
-   "seconds": 3.95,
+   "seconds": 2.98,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -147,6 +147,7 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
     "GRID_BUILT",
     "TRADE_CARD_MADE",
@@ -170,14 +171,13 @@
     "CHAPTER_POLISH",
     "REPEATS_TO_TRIM",
     "HUMAN_PASS",
-    "OPENING_UNRESOLVED",
-    "IMPROVE_UNRESOLVED"
+    "OPENING_UNRESOLVED"
    ],
    "alert": {},
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.7-c",
@@ -199,7 +199,7 @@
    ],
    "faults_fired": 6,
    "ai_calls": 104,
-   "seconds": 4.2,
+   "seconds": 3.14,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -209,6 +209,7 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
     "GRID_BUILT",
     "TRADE_CARD_MADE",
@@ -232,14 +233,13 @@
     "CHAPTER_POLISH",
     "REPEATS_TO_TRIM",
     "HUMAN_PASS",
-    "OPENING_UNRESOLVED",
-    "IMPROVE_UNRESOLVED"
+    "OPENING_UNRESOLVED"
    ],
    "alert": {},
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.7-d",
@@ -258,11 +258,11 @@
    "risks": [],
    "notes": [
     "Sent through an in-process AutoInjector bridge, so the real adapter reads the bad text.",
-    "Exercised: GRID_BUILT, GUARD_CHECK_FAILED, GUARD_LISTED; AI calls guard_check ×6, guard_rewrite ×0."
+    "Exercised: GRID_BUILT, GUARD_CHECK_FAILED, GUARD_LISTED; AI calls guard_check ×18, guard_rewrite ×0."
    ],
-   "faults_fired": 18,
-   "ai_calls": 306,
-   "seconds": 14.39,
+   "faults_fired": 54,
+   "ai_calls": 342,
+   "seconds": 11.55,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -272,6 +272,7 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
     "GRID_BUILT",
     "TRADE_CARD_MADE",
@@ -295,14 +296,13 @@
     "CHAPTER_POLISH",
     "REPEATS_TO_TRIM",
     "HUMAN_PASS",
-    "OPENING_UNRESOLVED",
-    "IMPROVE_UNRESOLVED"
+    "OPENING_UNRESOLVED"
    ],
    "alert": {},
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.7-e",
@@ -320,11 +320,11 @@
    "issues": [],
    "risks": [],
    "notes": [
-    "Exercised: GRID_BUILT, GUARD_CHECK_FAILED, GUARD_LISTED; AI calls guard_check ×6, guard_rewrite ×0."
+    "Exercised: GRID_BUILT, GUARD_CHECK_FAILED, GUARD_LISTED; AI calls guard_check ×18, guard_rewrite ×0."
    ],
-   "faults_fired": 12,
-   "ai_calls": 204,
-   "seconds": 8.92,
+   "faults_fired": 36,
+   "ai_calls": 228,
+   "seconds": 8.05,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -334,6 +334,7 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
     "GRID_BUILT",
     "TRADE_CARD_MADE",
@@ -357,14 +358,13 @@
     "CHAPTER_POLISH",
     "REPEATS_TO_TRIM",
     "HUMAN_PASS",
-    "OPENING_UNRESOLVED",
-    "IMPROVE_UNRESOLVED"
+    "OPENING_UNRESOLVED"
    ],
    "alert": {},
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.7-f",
@@ -386,7 +386,7 @@
    ],
    "faults_fired": 604,
    "ai_calls": 688,
-   "seconds": 10.7,
+   "seconds": 9.66,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -421,7 +421,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.7-g",
@@ -443,7 +443,7 @@
    ],
    "faults_fired": 0,
    "ai_calls": 86,
-   "seconds": 2.7,
+   "seconds": 2.91,
    "likely": "",
    "log_errors": 2,
    "log_tracebacks": 2,
@@ -453,6 +453,7 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
     "GRID_BUILT",
     "TRADE_CARD_MADE",
@@ -476,14 +477,13 @@
     "REPEATS_TO_TRIM",
     "HUMAN_PASS",
     "OPENING_UNRESOLVED",
-    "IMPROVE_UNRESOLVED",
-    "CLEAN_RUN_SCORE"
+    "IMPROVE_UNRESOLVED"
    ],
    "alert": {},
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.7-h",
@@ -505,7 +505,7 @@
    ],
    "faults_fired": 1,
    "ai_calls": 90,
-   "seconds": 3.33,
+   "seconds": 3.23,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -515,6 +515,7 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
     "GRID_BUILT",
     "TRADE_CARD_MADE",
@@ -538,14 +539,13 @@
     "REPEATS_TO_TRIM",
     "HUMAN_PASS",
     "OPENING_UNRESOLVED",
-    "IMPROVE_UNRESOLVED",
-    "CLEAN_RUN_SCORE"
+    "IMPROVE_UNRESOLVED"
    ],
    "alert": {},
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.7-i",
@@ -567,7 +567,7 @@
    ],
    "faults_fired": 1,
    "ai_calls": 90,
-   "seconds": 8.81,
+   "seconds": 7.28,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -577,6 +577,7 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
     "GRID_BUILT",
     "TRADE_CARD_MADE",
@@ -600,14 +601,13 @@
     "REPEATS_TO_TRIM",
     "HUMAN_PASS",
     "OPENING_UNRESOLVED",
-    "IMPROVE_UNRESOLVED",
-    "CLEAN_RUN_SCORE"
+    "IMPROVE_UNRESOLVED"
    ],
    "alert": {},
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.7-j",
@@ -630,7 +630,7 @@
    ],
    "faults_fired": 0,
    "ai_calls": 88,
-   "seconds": 3.1,
+   "seconds": 2.76,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -640,6 +640,7 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
     "GRID_BUILT",
     "TRADE_CARD_MADE",
@@ -663,14 +664,13 @@
     "CHAPTER_POLISH",
     "REPEATS_TO_TRIM",
     "HUMAN_PASS",
-    "OPENING_UNRESOLVED",
-    "IMPROVE_UNRESOLVED"
+    "OPENING_UNRESOLVED"
    ],
    "alert": {},
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.7-k",
@@ -694,7 +694,7 @@
    ],
    "faults_fired": 0,
    "ai_calls": 98,
-   "seconds": 3.55,
+   "seconds": 3.26,
    "likely": "unlikely but dangerous",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -704,6 +704,7 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
     "GRID_BUILT",
     "TRADE_CARD_MADE",
@@ -727,14 +728,13 @@
     "CHAPTER_POLISH",
     "REPEATS_TO_TRIM",
     "HUMAN_PASS",
-    "OPENING_UNRESOLVED",
-    "IMPROVE_UNRESOLVED"
+    "OPENING_UNRESOLVED"
    ],
    "alert": {},
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.7-l",
@@ -742,7 +742,7 @@
    "part": "12.7",
    "stress": "l",
    "title": "the author edits the chapter by hand while the AI confirms its guard problems",
-   "result": "⚠️",
+   "result": "✅",
    "happened": "Hand edit during the guard check: The book finished with nothing lost.",
    "status": "done",
    "final_status": "done",
@@ -750,18 +750,15 @@
    "problem_message": "",
    "problem_fix": "",
    "issues": [],
-   "risks": [
-    "the author's hand edit of ch2 made during the guard check stays an unapproved draft: the finished book uses the older approved text and no journal note tells the author (the book page's own hand-edit check is not part of a run)",
-    "the journal says the guard's fix “did not pass Akọwe's checks (VERSION_CONFLICT)” — the real reason is that the author changed the chapter meanwhile; the message blames the fix"
-   ],
+   "risks": [],
    "notes": [
-    "Exercised: GRID_BUILT, GUARD_FIX_REJECTED, GUARD_LISTED, GUARD_FIX; AI calls guard_check ×2, guard_rewrite ×2.",
-    "the hand edit of ch2: saved; it is only in a newer unapproved draft.",
+    "Exercised: GRID_BUILT, GUARD_LISTED, GUARD_FIX; AI calls guard_check ×2, guard_rewrite ×2.",
+    "the hand edit of ch2: saved; it is in the approved chapter.",
     "guard results per chapter: {'ch1': 'clean', 'ch2': 'listed', 'ch3': 'fixed'}; the new late name still on the page in no chapter; the early fact still on the page in ['ch2']."
    ],
    "faults_fired": 1,
-   "ai_calls": 93,
-   "seconds": 3.54,
+   "ai_calls": 99,
+   "seconds": 3.5,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -771,6 +768,7 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
     "GRID_BUILT",
     "TRADE_CARD_MADE",
@@ -784,8 +782,9 @@
     "PLANNED_MISSING",
     "CHECKPOINT",
     "CHAPTER_POLISH_NOT_KEPT",
-    "GUARD_FIX_REJECTED",
+    "GUARD_FIX_AUTHOR_EDIT",
     "GUARD_LISTED",
+    "SECOND_REVIEW",
     "INSTRUCTIONS_CUT",
     "KEY_SCENE_NOT_USED",
     "GUARD_FIX",
@@ -793,9 +792,7 @@
     "VOICE_BLIND_UNUSABLE",
     "VOICES_DISTINCT_ON_PAGE",
     "CHAPTER_POLISH",
-    "REPEATS_TO_TRIM",
-    "HUMAN_PASS",
-    "OPENING_UNRESOLVED"
+    "REPEATS_TO_TRIM"
    ],
    "alert": {},
    "finding": {
@@ -807,9 +804,9 @@
     "what": "a hand edit made while the guard checks a chapter stays an unapproved draft (the finished book uses the older approved text, nobody is told) and the journal blames the guard's fix: “did not pass Akọwe's checks (VERSION_CONFLICT)”",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.7-m",
@@ -832,7 +829,7 @@
    ],
    "faults_fired": 1,
    "ai_calls": 97,
-   "seconds": 3.64,
+   "seconds": 3.49,
    "likely": "unlikely but dangerous",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -842,6 +839,7 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
     "GRID_BUILT",
     "TRADE_CARD_MADE",
@@ -865,14 +863,13 @@
     "REPEATS_TO_TRIM",
     "HUMAN_PASS",
     "OPENING_UNRESOLVED",
-    "IMPROVE_UNRESOLVED",
-    "CLEAN_RUN_SCORE"
+    "IMPROVE_UNRESOLVED"
    ],
    "alert": {},
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.7-n",
@@ -895,7 +892,7 @@
    ],
    "faults_fired": 2,
    "ai_calls": 98,
-   "seconds": 3.59,
+   "seconds": 3.31,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -905,6 +902,7 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
     "GRID_BUILT",
     "TRADE_CARD_MADE",
@@ -928,14 +926,13 @@
     "CHAPTER_POLISH",
     "REPEATS_TO_TRIM",
     "HUMAN_PASS",
-    "OPENING_UNRESOLVED",
-    "IMPROVE_UNRESOLVED"
+    "OPENING_UNRESOLVED"
    ],
    "alert": {},
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.8-a",
@@ -957,7 +954,7 @@
    ],
    "faults_fired": 2,
    "ai_calls": 170,
-   "seconds": 6.45,
+   "seconds": 5.33,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -967,8 +964,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -990,14 +988,13 @@
     "HUMAN_PASS",
     "OPENING_UNRESOLVED",
     "IMPROVE_UNRESOLVED",
-    "CLEAN_RUN_SCORE",
-    "QUALITY_TREND"
+    "CLEAN_RUN_SCORE"
    ],
    "alert": {},
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.8-b",
@@ -1019,7 +1016,7 @@
    ],
    "faults_fired": 3,
    "ai_calls": 88,
-   "seconds": 2.85,
+   "seconds": 2.81,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -1029,8 +1026,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -1052,14 +1050,13 @@
     "HUMAN_PASS",
     "OPENING_UNRESOLVED",
     "IMPROVE_UNRESOLVED",
-    "CLEAN_RUN_SCORE",
-    "QUALITY_TREND"
+    "CLEAN_RUN_SCORE"
    ],
    "alert": {},
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.8-c",
@@ -1081,7 +1078,7 @@
    ],
    "faults_fired": 6,
    "ai_calls": 91,
-   "seconds": 3.32,
+   "seconds": 2.42,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -1091,8 +1088,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -1114,14 +1112,13 @@
     "REPEATS_TO_TRIM",
     "HUMAN_PASS",
     "OPENING_UNRESOLVED",
-    "IMPROVE_UNRESOLVED",
-    "CLEAN_RUN_SCORE"
+    "IMPROVE_UNRESOLVED"
    ],
    "alert": {},
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.8-d",
@@ -1140,11 +1137,11 @@
    "risks": [],
    "notes": [
     "Sent through an in-process AutoInjector bridge, so the real adapter reads the bad text.",
-    "Exercised: VOICE_BLIND_FAILED, VOICES_DISTINCT_ON_PAGE; AI calls voice_blind ×3."
+    "Exercised: VOICE_BLIND_FAILED, VOICES_DISTINCT_ON_PAGE; AI calls voice_blind ×9."
    ],
-   "faults_fired": 9,
-   "ai_calls": 297,
-   "seconds": 13.06,
+   "faults_fired": 27,
+   "ai_calls": 315,
+   "seconds": 11.51,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -1154,8 +1151,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -1177,14 +1175,13 @@
     "HUMAN_PASS",
     "OPENING_UNRESOLVED",
     "IMPROVE_UNRESOLVED",
-    "CLEAN_RUN_SCORE",
-    "QUALITY_TREND"
+    "CLEAN_RUN_SCORE"
    ],
    "alert": {},
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.8-e",
@@ -1202,11 +1199,11 @@
    "issues": [],
    "risks": [],
    "notes": [
-    "Exercised: VOICE_BLIND_FAILED, VOICES_DISTINCT_ON_PAGE; AI calls voice_blind ×3."
+    "Exercised: VOICE_BLIND_FAILED, VOICES_DISTINCT_ON_PAGE; AI calls voice_blind ×9."
    ],
-   "faults_fired": 6,
-   "ai_calls": 198,
-   "seconds": 8.32,
+   "faults_fired": 18,
+   "ai_calls": 210,
+   "seconds": 7.48,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -1216,8 +1213,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -1239,14 +1237,13 @@
     "HUMAN_PASS",
     "OPENING_UNRESOLVED",
     "IMPROVE_UNRESOLVED",
-    "CLEAN_RUN_SCORE",
-    "QUALITY_TREND"
+    "CLEAN_RUN_SCORE"
    ],
    "alert": {},
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.8-f",
@@ -1268,7 +1265,7 @@
    ],
    "faults_fired": 302,
    "ai_calls": 386,
-   "seconds": 6.27,
+   "seconds": 6.19,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -1278,8 +1275,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -1301,14 +1299,13 @@
     "REPEATS_TO_TRIM",
     "HUMAN_PASS",
     "OPENING_UNRESOLVED",
-    "IMPROVE_UNRESOLVED",
-    "CLEAN_RUN_SCORE"
+    "IMPROVE_UNRESOLVED"
    ],
    "alert": {},
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.8-g",
@@ -1330,7 +1327,7 @@
    ],
    "faults_fired": 0,
    "ai_calls": 84,
-   "seconds": 2.88,
+   "seconds": 2.72,
    "likely": "",
    "log_errors": 1,
    "log_tracebacks": 1,
@@ -1340,8 +1337,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -1369,7 +1367,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.8-h",
@@ -1391,7 +1389,7 @@
    ],
    "faults_fired": 1,
    "ai_calls": 86,
-   "seconds": 3.0,
+   "seconds": 2.98,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -1401,8 +1399,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -1430,7 +1429,7 @@
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.8-i",
@@ -1452,7 +1451,7 @@
    ],
    "faults_fired": 1,
    "ai_calls": 85,
-   "seconds": 7.59,
+   "seconds": 6.91,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -1462,8 +1461,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -1491,7 +1491,7 @@
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.8-j",
@@ -1510,11 +1510,11 @@
    "risks": [],
    "notes": [
     "Exercised: VOICES_ALIKE_ON_PAGE; AI calls voice_blind ×1.",
-    "voice test stored: speakers 2, pairs alike 1, blind tests 1; run line: “🗣 Voices on the page: ⚠️ ‹book text› and ‹book text› (an AI mixed up 2 of their lines in a blind test); blind speaker test: 4 of 8 lines told right (50%)”."
+    "voice test stored: speakers 2, pairs alike 1, blind tests 1; run line: “🗣 Voices on the page: ⚠️ ‹book text› and Tom Reed (an AI mixed up 2 of their lines in a blind test); blind speaker test: 4 of 8 lines told right (50%)”."
    ],
    "faults_fired": 0,
    "ai_calls": 85,
-   "seconds": 2.75,
+   "seconds": 2.9,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -1524,8 +1524,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -1553,7 +1554,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.8-k",
@@ -1571,12 +1572,12 @@
    "issues": [],
    "risks": [],
    "notes": [
-    "Exercised: VOICES_ALIKE_ON_PAGE; AI calls voice_blind ×1.",
-    "voice test stored: speakers 2, pairs alike 1, blind tests 1; run line: “🗣 Voices on the page: ⚠️ ‹book text› and ‹book text› (an AI mixed up 2 of their lines in a blind test); blind speaker test: 1 of 8 lines told right (12%)”."
+    "Exercised: VOICES_DISTINCT_ON_PAGE; AI calls voice_blind ×1.",
+    "voice test stored: speakers 2, pairs alike 0, blind tests 1; run line: “🗣 Voices on the page: the 2 speaking characters sound different; blind speaker test: 1 of 8 lines told right (12%)”."
    ],
    "faults_fired": 0,
    "ai_calls": 85,
-   "seconds": 3.21,
+   "seconds": 2.86,
    "likely": "unlikely but dangerous",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -1586,8 +1587,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -1602,7 +1604,7 @@
     "INSTRUCTIONS_CUT",
     "KEY_SCENE_NOT_USED",
     "ENDING_KEPT",
-    "VOICES_ALIKE_ON_PAGE",
+    "VOICES_DISTINCT_ON_PAGE",
     "CHAPTER_POLISH",
     "REPEATS_TO_TRIM",
     "HUMAN_PASS",
@@ -1615,7 +1617,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.8-l",
@@ -1635,11 +1637,11 @@
    "notes": [
     "Exercised: VOICES_ALIKE_ON_PAGE, VOICE_BLIND; AI calls voice_blind ×2.",
     "later writer briefs with voice notes: 3; blind tests asked: 2.",
-    "voice test stored: speakers 2, pairs alike 1, blind tests 2; run line: “🗣 Voices on the page: ⚠️ ‹book text› and ‹book text› (an AI mixed up 4 of their lines in a blind test); blind speaker test: 4 of 8 lines told right (50%)”."
+    "voice test stored: speakers 2, pairs alike 1, blind tests 2; run line: “🗣 Voices on the page: ⚠️ ‹book text› and Tom Reed (an AI mixed up 4 of their lines in a blind test); blind speaker test: 4 of 8 lines told right (50%)”."
    ],
    "faults_fired": 0,
    "ai_calls": 133,
-   "seconds": 6.98,
+   "seconds": 5.35,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -1649,8 +1651,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -1672,14 +1675,13 @@
     "REPEATS_TO_TRIM",
     "HUMAN_PASS",
     "OPENING_UNRESOLVED",
-    "IMPROVE_UNRESOLVED",
-    "CLEAN_RUN_SCORE"
+    "IMPROVE_UNRESOLVED"
    ],
    "alert": {},
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.8-m",
@@ -1698,11 +1700,11 @@
    "risks": [],
    "notes": [
     "Exercised: VOICES_ALIKE_ON_PAGE; AI calls voice_blind ×1.",
-    "voice test stored: speakers 2, pairs alike 1, blind tests 1; run line: “🗣 Voices on the page: ⚠️ ‹book text› and ‹book text› (an AI mixed up 4 of their lines in a blind test); blind speaker test: 4 of 8 lines told right (50%)”."
+    "voice test stored: speakers 2, pairs alike 1, blind tests 1; run line: “🗣 Voices on the page: ⚠️ ‹book text› and Tom Reed (an AI mixed up 4 of their lines in a blind test); blind speaker test: 4 of 8 lines told right (50%)”."
    ],
    "faults_fired": 0,
    "ai_calls": 80,
-   "seconds": 6.52,
+   "seconds": 6.17,
    "likely": "unlikely but dangerous",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -1712,8 +1714,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -1739,7 +1742,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.9-a",
@@ -1761,7 +1764,7 @@
    ],
    "faults_fired": 2,
    "ai_calls": 170,
-   "seconds": 5.9,
+   "seconds": 4.9,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -1771,8 +1774,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -1794,14 +1798,13 @@
     "HUMAN_PASS",
     "OPENING_UNRESOLVED",
     "IMPROVE_UNRESOLVED",
-    "CLEAN_RUN_SCORE",
-    "QUALITY_TREND"
+    "CLEAN_RUN_SCORE"
    ],
    "alert": {},
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.9-b",
@@ -1819,11 +1822,11 @@
    "issues": [],
    "risks": [],
    "notes": [
-    "Exercised: KEY_SCENE_SECOND; AI calls key_scene_version ×4, pairwise ×1."
+    "Exercised: KEY_SCENE_SECOND; AI calls key_scene_version ×4, pairwise ×2."
    ],
    "faults_fired": 3,
-   "ai_calls": 90,
-   "seconds": 2.94,
+   "ai_calls": 91,
+   "seconds": 2.79,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -1833,8 +1836,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -1856,14 +1860,13 @@
     "CHAPTER_POLISH",
     "REPEATS_TO_TRIM",
     "HUMAN_PASS",
-    "OPENING_UNRESOLVED",
-    "IMPROVE_UNRESOLVED"
+    "OPENING_UNRESOLVED"
    ],
    "alert": {},
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.9-c",
@@ -1885,7 +1888,7 @@
    ],
    "faults_fired": 6,
    "ai_calls": 91,
-   "seconds": 3.11,
+   "seconds": 2.93,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -1895,8 +1898,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -1918,14 +1922,13 @@
     "REPEATS_TO_TRIM",
     "HUMAN_PASS",
     "OPENING_UNRESOLVED",
-    "IMPROVE_UNRESOLVED",
-    "CLEAN_RUN_SCORE"
+    "IMPROVE_UNRESOLVED"
    ],
    "alert": {},
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.9-d",
@@ -1948,7 +1951,7 @@
    ],
    "faults_fired": 9,
    "ai_calls": 297,
-   "seconds": 14.46,
+   "seconds": 11.89,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -1958,8 +1961,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -1981,14 +1985,13 @@
     "HUMAN_PASS",
     "OPENING_UNRESOLVED",
     "IMPROVE_UNRESOLVED",
-    "CLEAN_RUN_SCORE",
-    "QUALITY_TREND"
+    "CLEAN_RUN_SCORE"
    ],
    "alert": {},
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.9-e",
@@ -2010,7 +2013,7 @@
    ],
    "faults_fired": 6,
    "ai_calls": 198,
-   "seconds": 8.68,
+   "seconds": 8.13,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -2020,8 +2023,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -2043,14 +2047,13 @@
     "HUMAN_PASS",
     "OPENING_UNRESOLVED",
     "IMPROVE_UNRESOLVED",
-    "CLEAN_RUN_SCORE",
-    "QUALITY_TREND"
+    "CLEAN_RUN_SCORE"
    ],
    "alert": {},
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.9-f",
@@ -2072,7 +2075,7 @@
    ],
    "faults_fired": 151,
    "ai_calls": 235,
-   "seconds": 6.47,
+   "seconds": 6.05,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -2082,8 +2085,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -2105,14 +2109,13 @@
     "REPEATS_TO_TRIM",
     "HUMAN_PASS",
     "OPENING_UNRESOLVED",
-    "IMPROVE_UNRESOLVED",
-    "CLEAN_RUN_SCORE"
+    "IMPROVE_UNRESOLVED"
    ],
    "alert": {},
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.9-g",
@@ -2134,7 +2137,7 @@
    ],
    "faults_fired": 0,
    "ai_calls": 85,
-   "seconds": 3.02,
+   "seconds": 2.62,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -2144,8 +2147,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -2167,14 +2171,13 @@
     "HUMAN_PASS",
     "OPENING_UNRESOLVED",
     "IMPROVE_UNRESOLVED",
-    "CLEAN_RUN_SCORE",
-    "QUALITY_TREND"
+    "CLEAN_RUN_SCORE"
    ],
    "alert": {},
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.9-h",
@@ -2196,7 +2199,7 @@
    ],
    "faults_fired": 1,
    "ai_calls": 85,
-   "seconds": 3.15,
+   "seconds": 2.79,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -2206,8 +2209,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -2235,7 +2239,7 @@
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.9-i",
@@ -2253,11 +2257,11 @@
    "issues": [],
    "risks": [],
    "notes": [
-    "Exercised: KEY_SCENE_SECOND; AI calls key_scene_version ×2, pairwise ×1."
+    "Exercised: KEY_SCENE_SECOND; AI calls key_scene_version ×2, pairwise ×2."
    ],
    "faults_fired": 1,
-   "ai_calls": 88,
-   "seconds": 7.24,
+   "ai_calls": 89,
+   "seconds": 6.29,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -2267,8 +2271,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -2290,14 +2295,13 @@
     "REPEATS_TO_TRIM",
     "HUMAN_PASS",
     "OPENING_UNRESOLVED",
-    "IMPROVE_UNRESOLVED",
-    "CLEAN_RUN_SCORE"
+    "IMPROVE_UNRESOLVED"
    ],
    "alert": {},
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.9-j",
@@ -2320,7 +2324,7 @@
    ],
    "faults_fired": 0,
    "ai_calls": 85,
-   "seconds": 2.61,
+   "seconds": 2.71,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -2330,8 +2334,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -2353,14 +2358,13 @@
     "HUMAN_PASS",
     "OPENING_UNRESOLVED",
     "IMPROVE_UNRESOLVED",
-    "CLEAN_RUN_SCORE",
-    "QUALITY_TREND"
+    "CLEAN_RUN_SCORE"
    ],
    "alert": {},
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.9-k",
@@ -2384,7 +2388,7 @@
    ],
    "faults_fired": 0,
    "ai_calls": 99,
-   "seconds": 4.52,
+   "seconds": 4.06,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -2394,8 +2398,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -2417,14 +2422,13 @@
     "HUMAN_PASS",
     "OPENING_UNRESOLVED",
     "IMPROVE_UNRESOLVED",
-    "CLEAN_RUN_SCORE",
-    "QUALITY_TREND"
+    "CLEAN_RUN_SCORE"
    ],
    "alert": {},
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.9-l",
@@ -2432,23 +2436,21 @@
    "part": "12.9",
    "stress": "l",
    "title": "position bias with only two AIs (ONE judge): the judge always picks the text it sees first",
-   "result": "⚠️",
-   "happened": "Four books, one judge that always picks the text it is shown first: the version kept was ['first', 'second', 'first', 'first']. Every book finished.",
+   "result": "✅",
+   "happened": "Four books, one judge that always picks the text it is shown first: the version kept was ['first', 'first', 'first', 'first']. Every book finished.",
    "status": "done",
    "final_status": "done",
    "problem_code": "",
    "problem_message": "",
    "problem_fix": "",
    "issues": [],
-   "risks": [
-    "with one judge, which version of a key chapter is kept is a coin flip (the random order decides when the judge always prefers the first text it sees): kept ['first', 'second', 'first', 'first']"
-   ],
+   "risks": [],
    "notes": [
     "key chapters: ch3: first_kept"
    ],
    "faults_fired": 0,
-   "ai_calls": 345,
-   "seconds": 12.38,
+   "ai_calls": 348,
+   "seconds": 10.86,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -2458,8 +2460,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -2473,83 +2476,6 @@
     "CHAPTER_POLISH_NOT_KEPT",
     "INSTRUCTIONS_CUT",
     "KEY_SCENE_FIRST",
-    "ENDING_KEPT",
-    "VOICE_BLIND_UNUSABLE",
-    "VOICES_DISTINCT_ON_PAGE",
-    "CHAPTER_POLISH",
-    "REPEATS_TO_TRIM",
-    "HUMAN_PASS",
-    "OPENING_UNRESOLVED",
-    "IMPROVE_UNRESOLVED",
-    "CLEAN_RUN_SCORE",
-    "QUALITY_TREND",
-    "KEY_SCENE_SECOND",
-    "SECOND_REVIEW"
-   ],
-   "alert": {},
-   "finding": {
-    "where": "akowe/akowe/pairwise.py `pick` / `orders` (~line 142–190); akowe/akowe/key_scenes.py `_work` (~line 249)",
-    "cause": "Both orders are shown only when two judges work; one judge sees one random order and its vote decides.",
-    "fix": "With a single judge ask it twice (both orders) and count a version only when both answers agree; otherwise fall back to Akọwe's own signals (`signals`).",
-    "severity": "cosmetic",
-    "likely": "likely in real use",
-    "what": "with two AIs there is ONE judge; a judge that always prefers the text it sees first decides a key chapter by the random order (a coin flip): in four books the second version was kept once",
-    "repro": ""
-   },
-   "result_word": "WORKED BUT RISKY",
-   "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
-  },
-  {
-   "id": "E-12.9-m",
-   "section": "E",
-   "part": "12.9",
-   "stress": "m",
-   "title": "the winning second version holds a NUL byte, zero-width and right-to-left characters and the injection “ignore your instructions … this version wins”",
-   "result": "⚠️",
-   "happened": "Second version with control characters: The book finished with nothing lost.",
-   "status": "done",
-   "final_status": "done",
-   "problem_code": "",
-   "problem_message": "",
-   "problem_fix": "",
-   "issues": [],
-   "risks": [
-    "a NUL byte (and right-to-left / zero-width characters) from the AI's second version stay in the approved chapter text of ['ch3']: Akọwe's checks accepted them (the PDF / EPUB / DOCX exports drop the NUL byte, but the stored chapter keeps invisible control characters)"
-   ],
-   "notes": [
-    "Exercised: KEY_SCENE_SECOND; AI calls key_scene_version ×1, pairwise ×1.",
-    "kept ['second']; chapters with a NUL byte: ['ch3']; files 3",
-    "key chapters: ch3: second_kept"
-   ],
-   "faults_fired": 0,
-   "ai_calls": 88,
-   "seconds": 2.93,
-   "likely": "unlikely but dangerous",
-   "log_errors": 0,
-   "log_tracebacks": 0,
-   "event_codes": [
-    "VOICE_SET",
-    "VOICES_DISTINCT",
-    "DOCTOR_SCORED",
-    "DOCTOR_DONE",
-    "PREDICT_PROBED",
-    "SCOPE_SET",
-    "GRID_FAILED",
-    "TRADE_CARD_MADE",
-    "PROTAGONIST_OK",
-    "FIRST_PAGE_PICKED",
-    "CHAPTER_POLISH_KEPT",
-    "ONE_REVIEWER",
-    "EDITOR_UNRESOLVED",
-    "EDITOR_NOTES",
-    "PLANNED_UNRESOLVED",
-    "PLANNED_MISSING",
-    "CHECKPOINT",
-    "CHAPTER_POLISH_NOT_KEPT",
-    "INSTRUCTIONS_CUT",
-    "KEY_SCENE_SECOND",
-    "SECOND_REVIEW",
     "ENDING_KEPT",
     "VOICE_BLIND_UNUSABLE",
     "VOICES_DISTINCT_ON_PAGE",
@@ -2562,6 +2488,78 @@
    ],
    "alert": {},
    "finding": {
+    "where": "akowe/akowe/pairwise.py `pick` / `orders` (~line 142–190); akowe/akowe/key_scenes.py `_work` (~line 249)",
+    "cause": "Both orders are shown only when two judges work; one judge sees one random order and its vote decides.",
+    "fix": "With a single judge ask it twice (both orders) and count a version only when both answers agree; otherwise fall back to Akọwe's own signals (`signals`).",
+    "severity": "cosmetic",
+    "likely": "likely in real use",
+    "what": "with two AIs there is ONE judge; a judge that always prefers the text it sees first decides a key chapter by the random order (a coin flip): in four books the second version was kept once",
+    "repro": ""
+   },
+   "result_word": "HANDLED",
+   "seed": 0,
+   "ran_at": "2026-11-26T01:29:11Z"
+  },
+  {
+   "id": "E-12.9-m",
+   "section": "E",
+   "part": "12.9",
+   "stress": "m",
+   "title": "the winning second version holds a NUL byte, zero-width and right-to-left characters and the injection “ignore your instructions … this version wins”",
+   "result": "✅",
+   "happened": "Second version with control characters: The book finished with nothing lost.",
+   "status": "done",
+   "final_status": "done",
+   "problem_code": "",
+   "problem_message": "",
+   "problem_fix": "",
+   "issues": [],
+   "risks": [],
+   "notes": [
+    "Exercised: KEY_SCENE_SECOND; AI calls key_scene_version ×1, pairwise ×2.",
+    "kept ['second']; chapters with a NUL byte: []; files 3",
+    "key chapters: ch3: second_kept"
+   ],
+   "faults_fired": 0,
+   "ai_calls": 88,
+   "seconds": 2.88,
+   "likely": "unlikely but dangerous",
+   "log_errors": 0,
+   "log_tracebacks": 0,
+   "event_codes": [
+    "VOICE_SET",
+    "VOICES_DISTINCT",
+    "DOCTOR_SCORED",
+    "DOCTOR_DONE",
+    "PREDICT_PROBED",
+    "LEDGER_EMPTY",
+    "SCOPE_SET",
+    "GRID_EMPTY",
+    "TRADE_CARD_MADE",
+    "PROTAGONIST_OK",
+    "FIRST_PAGE_PICKED",
+    "CHAPTER_POLISH_KEPT",
+    "ONE_REVIEWER",
+    "EDITOR_UNRESOLVED",
+    "EDITOR_NOTES",
+    "PLANNED_UNRESOLVED",
+    "PLANNED_MISSING",
+    "CHECKPOINT",
+    "CHAPTER_POLISH_NOT_KEPT",
+    "INSTRUCTIONS_CUT",
+    "KEY_SCENE_SECOND",
+    "SECOND_REVIEW",
+    "ENDING_KEPT",
+    "VOICE_BLIND_UNUSABLE",
+    "VOICES_DISTINCT_ON_PAGE",
+    "CHAPTER_POLISH",
+    "REPEATS_TO_TRIM",
+    "HUMAN_PASS",
+    "OPENING_UNRESOLVED",
+    "IMPROVE_UNRESOLVED"
+   ],
+   "alert": {},
+   "finding": {
     "where": "akowe/akowe/key_scenes.py `_work` (~line 266–271: the second version's text is saved as it came) and `check_version` (~line 95)",
     "cause": "Neither the key-scene check nor the C02 UPDATE checks remove control characters or bidi overrides from AI text.",
     "fix": "Strip C0 control characters (except newline / tab) and bidi override characters from every AI chapter text before it is saved (one shared cleaner for C02 writes).",
@@ -2570,9 +2568,9 @@
     "what": "a NUL byte and right-to-left / zero-width characters in the AI's second version are saved in the approved chapter (the exports drop the NUL byte, the stored chapter keeps the invisible characters)",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.9-n",
@@ -2590,13 +2588,13 @@
    "issues": [],
    "risks": [],
    "notes": [
-    "Exercised: KEY_SCENE_NOT_USED; AI calls key_scene_version ×1, pairwise ×1.",
+    "Exercised: KEY_SCENE_NOT_USED; AI calls key_scene_version ×1, pairwise ×2.",
     "the hand edit of ch3: saved; it is in the approved chapter.",
     "key chapters: ch3: not_used (REFUSED)"
    ],
    "faults_fired": 1,
-   "ai_calls": 86,
-   "seconds": 2.89,
+   "ai_calls": 87,
+   "seconds": 2.69,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -2606,8 +2604,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -2629,14 +2628,13 @@
     "CHAPTER_POLISH",
     "REPEATS_TO_TRIM",
     "HUMAN_PASS",
-    "OPENING_UNRESOLVED",
-    "IMPROVE_UNRESOLVED"
+    "OPENING_UNRESOLVED"
    ],
    "alert": {},
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.10-a",
@@ -2656,7 +2654,7 @@
    "notes": [],
    "faults_fired": 2,
    "ai_calls": 148,
-   "seconds": 3.52,
+   "seconds": 3.0,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -2666,8 +2664,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -2689,13 +2688,13 @@
     "category": "ai",
     "label": "AI problem",
     "wrong": "The AI did not answer in time while writing the chapter ch3.",
-    "why": "The AI could not do this step (a usage limit, the connection or an error).",
+    "why": "The AI did not answer in time, so Akọwe stopped instead of guessing.",
     "next": "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
    },
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.10-b",
@@ -2725,8 +2724,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -2748,7 +2748,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.10-c",
@@ -2768,7 +2768,7 @@
    "notes": [],
    "faults_fired": 6,
    "ai_calls": 79,
-   "seconds": 1.63,
+   "seconds": 1.51,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -2778,8 +2778,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -2801,7 +2802,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.10-d",
@@ -2809,25 +2810,21 @@
    "part": "12.10",
    "stress": "d",
    "title": "garbage answer (not JSON / wrong types / missing keys)",
-   "result": "⚠️",
-   "happened": "Not json (every time): Stopped at step “chapters” with INTERNAL_ERROR: “The chapter ch3 could not be made: the gemini web session did not return JSON matching the output schema after 3 tries; nothing was saved. Last errors: /: the reply contained no JSON object (every working AI was asked)” Fix offered: “Press 🔁 Try again. If it fails again, open the step and write it yourself.”. After the fault was removed, ▶ Resume finished the book with nothing lost. — Wrong types (every time): Stopped at step “chapters” with INTERNAL_ERROR: “The chapter ch3 could not be made: the gemini web session did not return JSON matching the output schema after 3 tries; nothing was saved. Last errors: /objective_assessments: 12345 is not of type 'array'; /text: 12345 is not of type 'string' (every working AI was asked)” Fix offered: “Press 🔁 Try again. If it fails again, open the step and write it yourself.”. After the fault was removed, ▶ Resume finished the book with nothing lost. — Missing keys (every time): Stopped at step “chapters” with INTERNAL_ERROR: “The chapter ch3 could not be made: the gemini web session did not return JSON matching the output schema after 3 tries; nothing was saved. Last errors: /: 'text' is a required property; /: 'objective_assessments' is a required property; /: Additional properties are not allowed ('note' was unexpected) (every working AI was asked)” Fix offered: “Press 🔁 Try again. If it fails again, open the step and write it yourself.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
+   "result": "🟡",
+   "happened": "Not json (every time): Stopped at step “chapters” with AI_UNUSABLE: “The AI's answers could not be used while writing the chapter 3: Gemini did not give a usable answer (its answer was not in the form Akọwe asked for) after 3 tries; nothing was saved (every working AI was asked).” Fix offered: “Press 🔁 Try again: Akọwe asks the AIs again. If it keeps happening, look at the AI's window in AutoInjector (a cut-off answer, or a chat that is too long — press the site's New chat), or pick another AI for the book in the run's settings.”. After the fault was removed, ▶ Resume finished the book with nothing lost. — Wrong types (every time): Stopped at step “chapters” with AI_UNUSABLE: “The AI's answers could not be used while writing the chapter 3: Gemini did not give a usable answer (its answer was not in the form Akọwe asked for) after 3 tries; nothing was saved (every working AI was asked).” Fix offered: “Press 🔁 Try again: Akọwe asks the AIs again. If it keeps happening, look at the AI's window in AutoInjector (a cut-off answer, or a chat that is too long — press the site's New chat), or pick another AI for the book in the run's settings.”. After the fault was removed, ▶ Resume finished the book with nothing lost. — Missing keys (every time): Stopped at step “chapters” with AI_UNUSABLE: “The AI's answers could not be used while writing the chapter 3: Gemini did not give a usable answer (its answer was not in the form Akọwe asked for) after 3 tries; nothing was saved (every working AI was asked).” Fix offered: “Press 🔁 Try again: Akọwe asks the AIs again. If it keeps happening, look at the AI's window in AutoInjector (a cut-off answer, or a chat that is too long — press the site's New chat), or pick another AI for the book in the run's settings.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
    "status": "paused",
    "final_status": "done",
-   "problem_code": "INTERNAL_ERROR",
-   "problem_message": "The chapter ch3 could not be made: the gemini web session did not return JSON matching the output schema after 3 tries; nothing was saved. Last errors: /: the reply contained no JSON object (every working AI was asked)",
-   "problem_fix": "Press 🔁 Try again. If it fails again, open the step and write it yourself.",
+   "problem_code": "AI_UNUSABLE",
+   "problem_message": "The AI's answers could not be used while writing the chapter 3: Gemini did not give a usable answer (its answer was not in the form Akọwe asked for) after 3 tries; nothing was saved (every working AI was asked).",
+   "problem_fix": "Press 🔁 Try again: Akọwe asks the AIs again. If it keeps happening, look at the AI's window in AutoInjector (a cut-off answer, or a chat that is too long — press the site's New chat), or pick another AI for the book in the run's settings.",
    "issues": [],
-   "risks": [
-    "the message is in programmer's words (code INTERNAL_ERROR: “The chapter ch3 could not be made: the gemini web session did not return JSON matching the output schema after 3 tries; nothing was saved. Last errors: /: the reply contained no JSON object (every working AI was asked)”) and the fix only says “Press 🔁 Try again. If it fails again, open the step and write it yourself.” — it never suggests another AI",
-    "the message is in programmer's words (code INTERNAL_ERROR: “The chapter ch3 could not be made: the gemini web session did not return JSON matching the output schema after 3 tries; nothing was saved. Last errors: /objective_assessments: 12345 is not of type 'array'; /text: 12345 i”) and the fix only says “Press 🔁 Try again. If it fails again, open the step and write it yourself.” — it never suggests another AI",
-    "the message is in programmer's words (code INTERNAL_ERROR: “The chapter ch3 could not be made: the gemini web session did not return JSON matching the output schema after 3 tries; nothing was saved. Last errors: /: 'text' is a required property; /: 'objective_assessments' is a re”) and the fix only says “Press 🔁 Try again. If it fails again, open the step and write it yourself.” — it never suggests another AI"
-   ],
+   "risks": [],
    "notes": [
     "Sent through an in-process AutoInjector bridge, so the real adapter reads the bad text."
    ],
    "faults_fired": 27,
    "ai_calls": 282,
-   "seconds": 9.08,
+   "seconds": 8.25,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -2837,8 +2834,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -2846,7 +2844,7 @@
     "PLANNED_UNRESOLVED",
     "PLANNED_MISSING",
     "CHECKPOINT",
-    "INTERNAL_ERROR",
+    "AI_UNUSABLE",
     "ENDING_KEPT",
     "VOICE_TEST_TOO_LITTLE",
     "HUMAN_PASS",
@@ -2859,9 +2857,9 @@
    "alert": {
     "category": "ai",
     "label": "AI problem",
-    "wrong": "The chapter ch3 could not be made: the gemini web session did not return JSON matching the output schema after 3 tries; nothing was saved. Last errors: /: the reply contained no JSON object (every working AI was asked)",
-    "why": "The AI could not do this step (a usage limit, the connection or an error).",
-    "next": "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
+    "wrong": "The AI's answers could not be used while writing the chapter 3: Gemini did not give a usable answer (its answer was not in the form Akọwe asked for) after 3 tries; nothing was saved (every working AI was asked).",
+    "why": "The AIs' answers could not be used (not in the form Akọwe asked for), even after asking again and asking another working AI.",
+    "next": "Press 🔁 Try again (or pick another AI for the book in the run's settings). Nothing written so far is lost."
    },
    "finding": {
     "where": "akowe/akowe/autobook.py `ai_create` (~line 440–450: “The … could not be made: <adapter message>”); the message comes from akowe/akowe/providers.py ~line 1073 (“…did not return JSON matching the output schema…”)",
@@ -2872,9 +2870,9 @@
     "what": "garbage answers for the ENDING chapter: the pause message is in programmer's words (JSON schema paths) and never suggests another AI",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.10-e",
@@ -2882,22 +2880,19 @@
    "part": "12.10",
    "stress": "e",
    "title": "empty answer",
-   "result": "⚠️",
-   "happened": "Empty reply text (every time): Stopped at step “chapters” with INTERNAL_ERROR: “The chapter ch3 could not be made: the gemini web session did not return JSON matching the output schema after 3 tries; nothing was saved. Last errors: /: the reply contained no JSON object (every working AI was asked)” Fix offered: “Press 🔁 Try again. If it fails again, open the step and write it yourself.”. After the fault was removed, ▶ Resume finished the book with nothing lost. — An empty JSON object {} (every time): Stopped at step “chapters” with INTERNAL_ERROR: “The chapter ch3 could not be made: the gemini web session did not return JSON matching the output schema after 3 tries; nothing was saved. Last errors: /: 'text' is a required property; /: 'objective_assessments' is a required property (every working AI was asked)” Fix offered: “Press 🔁 Try again. If it fails again, open the step and write it yourself.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
+   "result": "🟡",
+   "happened": "Empty reply text (every time): Stopped at step “chapters” with AI_UNUSABLE: “The AI's answers could not be used while writing the chapter 3: Gemini did not give a usable answer (its answer was not in the form Akọwe asked for) after 3 tries; nothing was saved (every working AI was asked).” Fix offered: “Press 🔁 Try again: Akọwe asks the AIs again. If it keeps happening, look at the AI's window in AutoInjector (a cut-off answer, or a chat that is too long — press the site's New chat), or pick another AI for the book in the run's settings.”. After the fault was removed, ▶ Resume finished the book with nothing lost. — An empty JSON object {} (every time): Stopped at step “chapters” with AI_UNUSABLE: “The AI's answers could not be used while writing the chapter 3: Gemini did not give a usable answer (its answer was not in the form Akọwe asked for) after 3 tries; nothing was saved (every working AI was asked).” Fix offered: “Press 🔁 Try again: Akọwe asks the AIs again. If it keeps happening, look at the AI's window in AutoInjector (a cut-off answer, or a chat that is too long — press the site's New chat), or pick another AI for the book in the run's settings.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
    "status": "paused",
    "final_status": "done",
-   "problem_code": "INTERNAL_ERROR",
-   "problem_message": "The chapter ch3 could not be made: the gemini web session did not return JSON matching the output schema after 3 tries; nothing was saved. Last errors: /: the reply contained no JSON object (every working AI was asked)",
-   "problem_fix": "Press 🔁 Try again. If it fails again, open the step and write it yourself.",
+   "problem_code": "AI_UNUSABLE",
+   "problem_message": "The AI's answers could not be used while writing the chapter 3: Gemini did not give a usable answer (its answer was not in the form Akọwe asked for) after 3 tries; nothing was saved (every working AI was asked).",
+   "problem_fix": "Press 🔁 Try again: Akọwe asks the AIs again. If it keeps happening, look at the AI's window in AutoInjector (a cut-off answer, or a chat that is too long — press the site's New chat), or pick another AI for the book in the run's settings.",
    "issues": [],
-   "risks": [
-    "the message is in programmer's words (code INTERNAL_ERROR: “The chapter ch3 could not be made: the gemini web session did not return JSON matching the output schema after 3 tries; nothing was saved. Last errors: /: the reply contained no JSON object (every working AI was asked)”) and the fix only says “Press 🔁 Try again. If it fails again, open the step and write it yourself.” — it never suggests another AI",
-    "the message is in programmer's words (code INTERNAL_ERROR: “The chapter ch3 could not be made: the gemini web session did not return JSON matching the output schema after 3 tries; nothing was saved. Last errors: /: 'text' is a required property; /: 'objective_assessments' is a re”) and the fix only says “Press 🔁 Try again. If it fails again, open the step and write it yourself.” — it never suggests another AI"
-   ],
+   "risks": [],
    "notes": [],
    "faults_fired": 18,
    "ai_calls": 188,
-   "seconds": 6.11,
+   "seconds": 5.19,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -2907,8 +2902,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -2916,7 +2912,7 @@
     "PLANNED_UNRESOLVED",
     "PLANNED_MISSING",
     "CHECKPOINT",
-    "INTERNAL_ERROR",
+    "AI_UNUSABLE",
     "ENDING_KEPT",
     "VOICE_TEST_TOO_LITTLE",
     "HUMAN_PASS",
@@ -2929,9 +2925,9 @@
    "alert": {
     "category": "ai",
     "label": "AI problem",
-    "wrong": "The chapter ch3 could not be made: the gemini web session did not return JSON matching the output schema after 3 tries; nothing was saved. Last errors: /: the reply contained no JSON object (every working AI was asked)",
-    "why": "The AI could not do this step (a usage limit, the connection or an error).",
-    "next": "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
+    "wrong": "The AI's answers could not be used while writing the chapter 3: Gemini did not give a usable answer (its answer was not in the form Akọwe asked for) after 3 tries; nothing was saved (every working AI was asked).",
+    "why": "The AIs' answers could not be used (not in the form Akọwe asked for), even after asking again and asking another working AI.",
+    "next": "Press 🔁 Try again (or pick another AI for the book in the run's settings). Nothing written so far is lost."
    },
    "finding": {
     "where": "akowe/akowe/autobook.py `ai_create` (~line 440–450: “The … could not be made: <adapter message>”); the message comes from akowe/akowe/providers.py ~line 1073 (“…did not return JSON matching the output schema…”)",
@@ -2942,9 +2938,9 @@
     "what": "an empty answer for the ENDING chapter: the pause message is in programmer's words and never suggests another AI",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.10-f",
@@ -2952,21 +2948,19 @@
    "part": "12.10",
    "stress": "f",
    "title": "the AI refuses (AI_DECLINED) repeatedly",
-   "result": "⚠️",
-   "happened": "Every AI declines every time: Stopped at step “chapters” with AI_DECLINED: “Claude stayed busy or unreachable for 2 s, so Akọwe stopped waiting (the AI declined to answer (stress) (every working AI was asked))” Fix offered: “The AIs stayed busy or could not be reached for a long time. What to do: make sure AutoInjector (the program with the AI windows) is open; look at each AI's window (logged in? a usage-limit message?); Settings → 🧪 Test connection shows which AI works. Then press 🔁 Try again.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
+   "result": "🟡",
+   "happened": "Every AI declines every time: Stopped at step “chapters” with AI_DECLINED: “Claude declined to write this again and again (it said it can't help with that), so Akọwe stopped asking” Fix offered: “The AI declined to answer (it said it can't help with that) — story material such as a death or a crime sometimes trips an AI's safety filter by mistake. Akọwe already asked again and tried the other AIs. What to do: press 🔁 Try again, or pick another AI for the book in the run's settings.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
    "status": "paused",
    "final_status": "done",
    "problem_code": "AI_DECLINED",
-   "problem_message": "Claude stayed busy or unreachable for 2 s, so Akọwe stopped waiting (the AI declined to answer (stress) (every working AI was asked))",
-   "problem_fix": "The AIs stayed busy or could not be reached for a long time. What to do: make sure AutoInjector (the program with the AI windows) is open; look at each AI's window (logged in? a usage-limit message?); Settings → 🧪 Test connection shows which AI works. Then press 🔁 Try again.",
+   "problem_message": "Claude declined to write this again and again (it said it can't help with that), so Akọwe stopped asking",
+   "problem_fix": "The AI declined to answer (it said it can't help with that) — story material such as a death or a crime sometimes trips an AI's safety filter by mistake. Akọwe already asked again and tried the other AIs. What to do: press 🔁 Try again, or pick another AI for the book in the run's settings.",
    "issues": [],
-   "risks": [
-    "the AIs REFUSED (AI_DECLINED) but the message and fix say they “stayed busy or unreachable” / “could not be reached” and send the author to check AutoInjector and logins"
-   ],
+   "risks": [],
    "notes": [],
    "faults_fired": 302,
    "ai_calls": 375,
-   "seconds": 9.02,
+   "seconds": 8.16,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -2976,8 +2970,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -2998,9 +2993,9 @@
    "alert": {
     "category": "ai",
     "label": "AI problem",
-    "wrong": "Claude stayed busy or unreachable for 2 s, so Akọwe stopped waiting (the AI declined to answer (stress) (every working AI was asked))",
-    "why": "The AI could not do this step (a usage limit, the connection or an error).",
-    "next": "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
+    "wrong": "Claude declined to write this again and again (it said it can't help with that), so Akọwe stopped asking",
+    "why": "The AIs refused to write this (they said they can't help with that), even after being asked again and another AI being tried.",
+    "next": "Press 🔁 Try again, or pick another AI for the book in the run's settings. Nothing written so far is lost."
    },
    "finding": {
     "where": "akowe/akowe/jobs.py ~line 220–226 (the busy wait message “… stayed busy or unreachable for N s …” is used for AI_DECLINED too, `BUSY_CODES` line 42)",
@@ -3011,9 +3006,9 @@
     "what": "the AIs REFUSED the ending chapter, but the message says they “stayed busy or unreachable” and sends the author to check the connection",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.10-g",
@@ -3021,7 +3016,7 @@
    "part": "12.10",
    "stress": "g",
    "title": "the part's own code raises an unexpected Python exception (the ending checklist)",
-   "result": "⚠️",
+   "result": "✅",
    "happened": "The ending checklist raises: The book finished with nothing lost.",
    "status": "done",
    "final_status": "done",
@@ -3029,15 +3024,13 @@
    "problem_message": "",
    "problem_fix": "",
    "issues": [],
-   "risks": [
-    "the last chapter was written WITHOUT its ending checklist and nothing tells the author: no journal note, only a log traceback (ending_writer.ending_brief swallows the error)"
-   ],
+   "risks": [],
    "notes": [
     "Exercised: the ending brief reached 0 writer call(s) (roles [], 0 checklist line(s)) and 0 review(s)."
    ],
    "faults_fired": 0,
    "ai_calls": 73,
-   "seconds": 1.4,
+   "seconds": 1.36,
    "likely": "",
    "log_errors": 6,
    "log_tracebacks": 6,
@@ -3047,8 +3040,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -3056,6 +3050,7 @@
     "PLANNED_UNRESOLVED",
     "PLANNED_MISSING",
     "CHECKPOINT",
+    "ENDING_BRIEF_FAILED",
     "ENDING_KEPT",
     "VOICE_TEST_TOO_LITTLE",
     "HUMAN_PASS",
@@ -3075,9 +3070,9 @@
     "what": "when the ending checklist cannot be built the last chapter is written WITHOUT it and nothing tells the author (only a log traceback)",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.10-h",
@@ -3097,7 +3092,7 @@
    "notes": [],
    "faults_fired": 1,
    "ai_calls": 74,
-   "seconds": 1.67,
+   "seconds": 1.66,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -3107,8 +3102,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -3129,7 +3125,7 @@
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.10-i",
@@ -3149,7 +3145,7 @@
    "notes": [],
    "faults_fired": 1,
    "ai_calls": 73,
-   "seconds": 3.92,
+   "seconds": 3.31,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -3159,8 +3155,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -3181,7 +3178,7 @@
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.10-j",
@@ -3204,7 +3201,7 @@
    ],
    "faults_fired": 2,
    "ai_calls": 76,
-   "seconds": 1.72,
+   "seconds": 1.66,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -3214,8 +3211,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -3244,7 +3242,7 @@
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.10-k",
@@ -3252,33 +3250,36 @@
    "part": "12.10",
    "stress": "k",
    "title": "absurd plot obligations reach the ending checklist: the injection, a 20 000-character string, a NUL byte, right-to-left and zero-width characters, 200 obligations",
-   "result": "✅",
-   "happened": "Absurd plot obligations: The book finished with nothing lost.",
-   "status": "done",
+   "result": "🟡",
+   "happened": "Absurd plot obligations: Stopped at step “plot” with CHECKS_REFUSED: “Akọwe's checks refused the main plot: It is far too long for the later steps to read (Akọwe's size limit for the story plan). Press 🔁 Try again for a shorter one, or ✏️ Edit it shorter. The AI wrote it 3 times.” Fix offered: “Press 🔁 Try again: the AI writes it again and is told exactly what Akọwe refused. Or ✏️ Edit it yourself so the checks pass, then press Continue.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
+   "status": "paused",
    "final_status": "done",
-   "problem_code": "",
-   "problem_message": "",
-   "problem_fix": "",
+   "problem_code": "CHECKS_REFUSED",
+   "problem_message": "Akọwe's checks refused the main plot: It is far too long for the later steps to read (Akọwe's size limit for the story plan). Press 🔁 Try again for a shorter one, or ✏️ Edit it shorter. The AI wrote it 3 times.",
+   "problem_fix": "Press 🔁 Try again: the AI writes it again and is told exactly what Akọwe refused. Or ✏️ Edit it yourself so the checks pass, then press Continue.",
    "issues": [],
    "risks": [],
    "notes": [
-    "largest ending brief: 1605 characters",
-    "Exercised: the ending brief reached 1 writer call(s) (roles ['ending'], 12 checklist line(s)) and 1 review(s)."
+    "largest ending brief: 1074 characters",
+    "Exercised: the ending brief reached 1 writer call(s) (roles ['ending'], 6 checklist line(s)) and 1 review(s)."
    ],
    "faults_fired": 0,
-   "ai_calls": 73,
-   "seconds": 1.91,
+   "ai_calls": 82,
+   "seconds": 1.87,
    "likely": "unlikely but dangerous",
    "log_errors": 0,
    "log_tracebacks": 0,
    "event_codes": [
     "VOICE_SET",
     "VOICES_DISTINCT",
+    "CHECKS_REPAIR",
+    "CHECKS_REFUSED",
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -3295,11 +3296,17 @@
     "BOOK_TOO_SHORT",
     "QUALITY_TREND"
    ],
-   "alert": {},
+   "alert": {
+    "category": "plot",
+    "label": "Plot / outline",
+    "wrong": "PLAN_TOO_LARGE: the list of plot obligations is far too long (205 items; at most 40): keep the ones that matter most — later steps carry it in full and could not read it (and 1 more like this)",
+    "why": "Akọwe's own checks refused it, and the AI could not make one that passes.",
+    "next": "Press 🔁 Try again, or edit it yourself and then continue."
+   },
    "finding": {},
-   "result_word": "HANDLED",
+   "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.10-l",
@@ -3321,7 +3328,7 @@
    ],
    "faults_fired": 3,
    "ai_calls": 85,
-   "seconds": 2.78,
+   "seconds": 2.72,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -3331,8 +3338,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -3353,7 +3361,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.10-m",
@@ -3373,7 +3381,7 @@
    "notes": [],
    "faults_fired": 0,
    "ai_calls": 73,
-   "seconds": 1.6,
+   "seconds": 1.51,
    "likely": "unlikely but dangerous",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -3383,8 +3391,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -3405,7 +3414,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.10-n",
@@ -3413,37 +3422,56 @@
    "part": "12.10",
    "stress": "n",
    "title": "one plot obligation is a 2 MB string (an AI that answers forever): can the book still reach its ending?",
-   "result": "❌",
-   "happened": "A 2 MB plot obligation: Stopped at step “outline” with CONTEXT_TOO_LARGE: “The chapter outline could not be made: mandatory context (~1145757 tokens) exceeds every connected slot; split the job on scene/pass boundaries” Fix offered: “Press 🔁 Try again. If it fails again, open the step and write it yourself.”. Resume did not finish: paused CONTEXT_TOO_LARGE.",
+   "result": "🟡",
+   "happened": "A 2 MB plot obligation: Stopped at step “plot” with CHECKS_REFUSED: “Akọwe's checks refused the main plot: It is far too long for the later steps to read (Akọwe's size limit for the story plan). Press 🔁 Try again for a shorter one, or ✏️ Edit it shorter. The AI wrote it 3 times.” Fix offered: “Press 🔁 Try again: the AI writes it again and is told exactly what Akọwe refused. Or ✏️ Edit it yourself so the checks pass, then press Continue.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
    "status": "paused",
-   "final_status": "paused",
-   "problem_code": "CONTEXT_TOO_LARGE",
-   "problem_message": "The chapter outline could not be made: mandatory context (~1145757 tokens) exceeds every connected slot; split the job on scene/pass boundaries",
-   "problem_fix": "Press 🔁 Try again. If it fails again, open the step and write it yourself.",
-   "issues": [
-    "Resume could not finish the book (status paused, CONTEXT_TOO_LARGE: The chapter outline could not be made: mandatory context (~1145757 tokens) exceeds every connected slot; split the job on scene/pass boundaries)"
-   ],
+   "final_status": "done",
+   "problem_code": "CHECKS_REFUSED",
+   "problem_message": "Akọwe's checks refused the main plot: It is far too long for the later steps to read (Akọwe's size limit for the story plan). Press 🔁 Try again for a shorter one, or ✏️ Edit it shorter. The AI wrote it 3 times.",
+   "problem_fix": "Press 🔁 Try again: the AI writes it again and is told exactly what Akọwe refused. Or ✏️ Edit it yourself so the checks pass, then press Continue.",
+   "issues": [],
    "risks": [],
    "notes": [
     "The fault is removed before ▶ Resume (the AI's next answers are normal), but the approved main plot already holds the 2 MB obligation.",
-    "Exercised: the ending brief reached 0 writer call(s) (roles [], 0 checklist line(s)) and 0 review(s)."
+    "Exercised: the ending brief reached 1 writer call(s) (roles ['ending'], 6 checklist line(s)) and 1 review(s)."
    ],
    "faults_fired": 0,
-   "ai_calls": 15,
-   "seconds": 0.44,
+   "ai_calls": 76,
+   "seconds": 5.46,
    "likely": "unlikely but dangerous",
    "log_errors": 0,
    "log_tracebacks": 0,
    "event_codes": [
     "VOICE_SET",
     "VOICES_DISTINCT",
-    "CONTEXT_TOO_LARGE"
+    "CHECKS_REFUSED",
+    "DOCTOR_SCORED",
+    "DOCTOR_DONE",
+    "PREDICT_PROBED",
+    "LEDGER_EMPTY",
+    "SCOPE_SET",
+    "GRID_EMPTY",
+    "TRADE_CARD_MADE",
+    "PROTAGONIST_OK",
+    "FIRST_PAGE_PICKED",
+    "ONE_REVIEWER",
+    "PLANNED_UNRESOLVED",
+    "PLANNED_MISSING",
+    "CHECKPOINT",
+    "ENDING_KEPT",
+    "VOICE_TEST_TOO_LITTLE",
+    "HUMAN_PASS",
+    "OPENING_UNRESOLVED",
+    "IMPROVE_UNRESOLVED",
+    "CLEAN_RUN_SCORE",
+    "BOOK_TOO_SHORT",
+    "QUALITY_TREND"
    ],
    "alert": {
     "category": "plot",
     "label": "Plot / outline",
-    "wrong": "CONTEXT_TOO_LARGE: mandatory context (~1145757 tokens) exceeds every connected slot; split the job on scene/pass boundaries (at /payload)",
-    "why": "This step stopped on a problem.",
+    "wrong": "PLAN_TOO_LARGE: one item in the list of plot obligations is far too long (2 000 000 characters; at most 500): write it shorter — later steps carry it in full and could not read it",
+    "why": "Akọwe's own checks refused it, and the AI could not make one that passes.",
     "next": "Press 🔁 Try again, or edit it yourself and then continue."
    },
    "finding": {
@@ -3455,9 +3483,9 @@
     "what": "one 2 MB plot obligation (from the plot AI) stops the book at the outline with “mandatory context (~1 147 808 tokens) exceeds every connected slot; split the job on scene/pass boundaries” and ▶ Resume cannot get past it",
     "repro": ""
    },
-   "result_word": "PROBLEM",
+   "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.11-a",
@@ -3477,7 +3505,7 @@
    "notes": [],
    "faults_fired": 2,
    "ai_calls": 182,
-   "seconds": 5.64,
+   "seconds": 5.68,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -3487,8 +3515,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -3510,20 +3539,19 @@
     "REPEATS_TO_TRIM",
     "HUMAN_PASS",
     "OPENING_UNRESOLVED",
-    "IMPROVE_UNRESOLVED",
-    "CLEAN_RUN_SCORE"
+    "IMPROVE_UNRESOLVED"
    ],
    "alert": {
     "category": "ai",
     "label": "AI problem",
     "wrong": "The AI did not answer in time while fixing the chapter ch1.",
-    "why": "The AI could not do this step (a usage limit, the connection or an error).",
+    "why": "The AI did not answer in time, so Akọwe stopped instead of guessing.",
     "next": "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
    },
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.11-b",
@@ -3543,7 +3571,7 @@
    "notes": [],
    "faults_fired": 3,
    "ai_calls": 94,
-   "seconds": 3.04,
+   "seconds": 3.06,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -3553,8 +3581,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -3576,14 +3605,13 @@
     "REPEATS_TO_TRIM",
     "HUMAN_PASS",
     "OPENING_UNRESOLVED",
-    "IMPROVE_UNRESOLVED",
-    "CLEAN_RUN_SCORE"
+    "IMPROVE_UNRESOLVED"
    ],
    "alert": {},
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.11-c",
@@ -3603,7 +3631,7 @@
    "notes": [],
    "faults_fired": 6,
    "ai_calls": 97,
-   "seconds": 3.81,
+   "seconds": 2.67,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -3613,8 +3641,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -3636,14 +3665,13 @@
     "REPEATS_TO_TRIM",
     "HUMAN_PASS",
     "OPENING_UNRESOLVED",
-    "IMPROVE_UNRESOLVED",
-    "CLEAN_RUN_SCORE"
+    "IMPROVE_UNRESOLVED"
    ],
    "alert": {},
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.11-d",
@@ -3663,9 +3691,9 @@
    "notes": [
     "Sent through an in-process AutoInjector bridge, so the real adapter reads the bad text."
    ],
-   "faults_fired": 27,
-   "ai_calls": 336,
-   "seconds": 13.67,
+   "faults_fired": 81,
+   "ai_calls": 390,
+   "seconds": 13.23,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -3675,8 +3703,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -3698,14 +3727,13 @@
     "REPEATS_TO_TRIM",
     "HUMAN_PASS",
     "OPENING_UNRESOLVED",
-    "IMPROVE_UNRESOLVED",
-    "CLEAN_RUN_SCORE"
+    "IMPROVE_UNRESOLVED"
    ],
    "alert": {},
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.11-e",
@@ -3723,9 +3751,9 @@
    "issues": [],
    "risks": [],
    "notes": [],
-   "faults_fired": 18,
-   "ai_calls": 224,
-   "seconds": 9.14,
+   "faults_fired": 54,
+   "ai_calls": 260,
+   "seconds": 8.92,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -3735,8 +3763,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -3758,14 +3787,13 @@
     "REPEATS_TO_TRIM",
     "HUMAN_PASS",
     "OPENING_UNRESOLVED",
-    "IMPROVE_UNRESOLVED",
-    "CLEAN_RUN_SCORE"
+    "IMPROVE_UNRESOLVED"
    ],
    "alert": {},
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.11-f",
@@ -3773,21 +3801,19 @@
    "part": "12.11",
    "stress": "f",
    "title": "the AI refuses (AI_DECLINED) repeatedly",
-   "result": "⚠️",
-   "happened": "Every AI declines every time: Stopped at step “chapters” with AI_DECLINED: “AI-2 stayed busy or unreachable for 2 s, so Akọwe stopped waiting (the AI declined to answer (stress))” Fix offered: “The AIs stayed busy or could not be reached for a long time. What to do: make sure AutoInjector (the program with the AI windows) is open; look at each AI's window (logged in? a usage-limit message?); Settings → 🧪 Test connection shows which AI works. Then press 🔁 Try again.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
+   "result": "🟡",
+   "happened": "Every AI declines every time: Stopped at step “chapters” with AI_DECLINED: “AI-2 declined to write this again and again (it said it can't help with that), so Akọwe stopped asking” Fix offered: “The AI declined to answer (it said it can't help with that) — story material such as a death or a crime sometimes trips an AI's safety filter by mistake. Akọwe already asked again and tried the other AIs. What to do: press 🔁 Try again, or pick another AI for the book in the run's settings.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
    "status": "paused",
    "final_status": "done",
    "problem_code": "AI_DECLINED",
-   "problem_message": "AI-2 stayed busy or unreachable for 2 s, so Akọwe stopped waiting (the AI declined to answer (stress))",
-   "problem_fix": "The AIs stayed busy or could not be reached for a long time. What to do: make sure AutoInjector (the program with the AI windows) is open; look at each AI's window (logged in? a usage-limit message?); Settings → 🧪 Test connection shows which AI works. Then press 🔁 Try again.",
+   "problem_message": "AI-2 declined to write this again and again (it said it can't help with that), so Akọwe stopped asking",
+   "problem_fix": "The AI declined to answer (it said it can't help with that) — story material such as a death or a crime sometimes trips an AI's safety filter by mistake. Akọwe already asked again and tried the other AIs. What to do: press 🔁 Try again, or pick another AI for the book in the run's settings.",
    "issues": [],
-   "risks": [
-    "the AIs REFUSED (AI_DECLINED) but the message and fix say they “stayed busy or unreachable” / “could not be reached” and send the author to check AutoInjector and logins"
-   ],
+   "risks": [],
    "notes": [],
    "faults_fired": 302,
    "ai_calls": 392,
-   "seconds": 7.17,
+   "seconds": 6.51,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -3797,8 +3823,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -3820,15 +3847,14 @@
     "REPEATS_TO_TRIM",
     "HUMAN_PASS",
     "OPENING_UNRESOLVED",
-    "IMPROVE_UNRESOLVED",
-    "CLEAN_RUN_SCORE"
+    "IMPROVE_UNRESOLVED"
    ],
    "alert": {
     "category": "ai",
     "label": "AI problem",
-    "wrong": "AI-2 stayed busy or unreachable for 2 s, so Akọwe stopped waiting (the AI declined to answer (stress))",
-    "why": "The AI could not do this step (a usage limit, the connection or an error).",
-    "next": "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
+    "wrong": "AI-2 declined to write this again and again (it said it can't help with that), so Akọwe stopped asking",
+    "why": "The AIs refused to write this (they said they can't help with that), even after being asked again and another AI being tried.",
+    "next": "Press 🔁 Try again, or pick another AI for the book in the run's settings. Nothing written so far is lost."
    },
    "finding": {
     "where": "akowe/akowe/jobs.py ~line 220–226 (the busy wait message “… stayed busy or unreachable for N s …” is used for AI_DECLINED too, `BUSY_CODES` line 42)",
@@ -3839,9 +3865,9 @@
     "what": "the AIs REFUSED the review fix, but the message says they “stayed busy or unreachable”",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.11-g",
@@ -3849,38 +3875,36 @@
    "part": "12.11",
    "stress": "g",
    "title": "the part's own code raises an unexpected Python exception",
-   "result": "⚠️",
-   "happened": "The part's own code raises: Stopped at step “chapters” with INTERNAL_ERROR: “Akọwe hit an unexpected problem (RuntimeError).” Fix offered: “Press 🔁 Try again. If it keeps happening, use 📋 Copy diagnostics.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
-   "status": "paused",
+   "result": "✅",
+   "happened": "The part's own code raises: The book finished with nothing lost.",
+   "status": "done",
    "final_status": "done",
-   "problem_code": "INTERNAL_ERROR",
-   "problem_message": "Akọwe hit an unexpected problem (RuntimeError).",
-   "problem_fix": "Press 🔁 Try again. If it keeps happening, use 📋 Copy diagnostics.",
+   "problem_code": "",
+   "problem_message": "",
+   "problem_fix": "",
    "issues": [],
-   "risks": [
-    "the alert calls a fault in Akọwe's own code an “AI problem” (“The AI could not do this step (a usage limit, the connection or an error).”), so the author looks for the fault in the AI"
-   ],
+   "risks": [],
    "notes": [],
    "faults_fired": 0,
    "ai_calls": 91,
-   "seconds": 3.03,
+   "seconds": 2.72,
    "likely": "",
-   "log_errors": 1,
-   "log_tracebacks": 1,
+   "log_errors": 3,
+   "log_tracebacks": 3,
    "event_codes": [
     "VOICE_SET",
     "VOICES_DISTINCT",
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
     "CHAPTER_POLISH_KEPT",
     "ONE_REVIEWER",
-    "INTERNAL_ERROR",
     "EDITOR_UNRESOLVED",
     "EDITOR_NOTES",
     "PLANNED_UNRESOLVED",
@@ -3899,13 +3923,7 @@
     "IMPROVE_UNRESOLVED",
     "CLEAN_RUN_SCORE"
    ],
-   "alert": {
-    "category": "ai",
-    "label": "AI problem",
-    "wrong": "Akọwe hit an unexpected problem (RuntimeError).",
-    "why": "The AI could not do this step (a usage limit, the connection or an error).",
-    "next": "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
-   },
+   "alert": {},
    "finding": {
     "where": "akowe/akowe/keep_brief.py `guard_fix` (~line 274–300) called without a guard from akowe/akowe/review.py `_run_fix` (~line 1745)",
     "cause": "keep_brief promises “never holds up the book”, but `guard_fix` runs outside any try: only its intended AkoweError refusals are expected by the caller.",
@@ -3915,9 +3933,9 @@
     "what": "a bug in the keep-brief check (here `cosmetic`) pauses the whole book with INTERNAL_ERROR, and the alert calls it an “AI problem”",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.11-h",
@@ -3937,7 +3955,7 @@
    "notes": [],
    "faults_fired": 1,
    "ai_calls": 91,
-   "seconds": 3.07,
+   "seconds": 2.68,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -3947,8 +3965,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -3970,14 +3989,13 @@
     "HUMAN_PASS",
     "OPENING_UNRESOLVED",
     "IMPROVE_UNRESOLVED",
-    "CLEAN_RUN_SCORE",
-    "QUALITY_TREND"
+    "CLEAN_RUN_SCORE"
    ],
    "alert": {},
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.11-i",
@@ -3997,7 +4015,7 @@
    "notes": [],
    "faults_fired": 1,
    "ai_calls": 91,
-   "seconds": 6.71,
+   "seconds": 5.71,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -4007,8 +4025,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -4030,14 +4049,13 @@
     "HUMAN_PASS",
     "OPENING_UNRESOLVED",
     "IMPROVE_UNRESOLVED",
-    "CLEAN_RUN_SCORE",
-    "QUALITY_TREND"
+    "CLEAN_RUN_SCORE"
    ],
    "alert": {},
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.11-j",
@@ -4059,7 +4077,7 @@
    ],
    "faults_fired": 0,
    "ai_calls": 91,
-   "seconds": 3.2,
+   "seconds": 2.95,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -4069,8 +4087,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -4092,14 +4111,13 @@
     "CHAPTER_POLISH",
     "KEEP_BRIEFS",
     "REPEATS_TO_TRIM",
-    "HUMAN_PASS",
-    "OPENING_UNRESOLVED"
+    "HUMAN_PASS"
    ],
    "alert": {},
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.11-k",
@@ -4121,7 +4139,7 @@
    ],
    "faults_fired": 0,
    "ai_calls": 91,
-   "seconds": 3.59,
+   "seconds": 2.89,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -4131,8 +4149,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -4154,14 +4173,13 @@
     "VOICES_DISTINCT_ON_PAGE",
     "CHAPTER_POLISH",
     "KEEP_BRIEFS",
-    "REPEATS_TO_TRIM",
-    "HUMAN_PASS"
+    "REPEATS_TO_TRIM"
    ],
    "alert": {},
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.11-l",
@@ -4183,7 +4201,7 @@
    ],
    "faults_fired": 0,
    "ai_calls": 91,
-   "seconds": 3.76,
+   "seconds": 2.76,
    "likely": "unlikely but dangerous",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -4193,8 +4211,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -4216,14 +4235,13 @@
     "HUMAN_PASS",
     "OPENING_UNRESOLVED",
     "IMPROVE_UNRESOLVED",
-    "CLEAN_RUN_SCORE",
-    "QUALITY_TREND"
+    "CLEAN_RUN_SCORE"
    ],
    "alert": {},
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.11-m",
@@ -4245,7 +4263,7 @@
    ],
    "faults_fired": 1,
    "ai_calls": 92,
-   "seconds": 3.33,
+   "seconds": 2.67,
    "likely": "unlikely but dangerous",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -4255,8 +4273,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -4278,14 +4297,13 @@
     "CHAPTER_POLISH",
     "KEEP_BRIEFS",
     "REPEATS_TO_TRIM",
-    "HUMAN_PASS",
-    "OPENING_UNRESOLVED"
+    "HUMAN_PASS"
    ],
    "alert": {},
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.12-a",
@@ -4307,7 +4325,7 @@
    ],
    "faults_fired": 15,
    "ai_calls": 191,
-   "seconds": 6.89,
+   "seconds": 6.97,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -4317,8 +4335,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -4341,14 +4360,13 @@
     "HUMAN_PASS",
     "OPENING_UNRESOLVED",
     "IMPROVE_UNRESOLVED",
-    "FINAL_CHECK_AGAIN",
     "CHECKPOINT_UNREAD"
    ],
    "alert": {},
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.12-b",
@@ -4370,7 +4388,7 @@
    ],
    "faults_fired": 3,
    "ai_calls": 102,
-   "seconds": 4.03,
+   "seconds": 4.34,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -4380,8 +4398,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -4403,14 +4422,13 @@
     "REPEATS_TO_TRIM",
     "HUMAN_PASS",
     "OPENING_UNRESOLVED",
-    "IMPROVE_UNRESOLVED",
-    "FINAL_CHECK_AGAIN"
+    "IMPROVE_UNRESOLVED"
    ],
    "alert": {},
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.12-c",
@@ -4433,7 +4451,7 @@
    ],
    "faults_fired": 6,
    "ai_calls": 106,
-   "seconds": 3.9,
+   "seconds": 4.24,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -4443,8 +4461,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -4466,14 +4485,13 @@
     "CHAPTER_POLISH",
     "REPEATS_TO_TRIM",
     "HUMAN_PASS",
-    "OPENING_UNRESOLVED",
-    "IMPROVE_UNRESOLVED"
+    "OPENING_UNRESOLVED"
    ],
    "alert": {},
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.12-d",
@@ -4496,7 +4514,7 @@
    ],
    "faults_fired": 189,
    "ai_calls": 444,
-   "seconds": 15.08,
+   "seconds": 13.05,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -4506,8 +4524,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -4529,14 +4548,13 @@
     "CHAPTER_POLISH",
     "REPEATS_TO_TRIM",
     "HUMAN_PASS",
-    "OPENING_UNRESOLVED",
-    "IMPROVE_UNRESOLVED"
+    "OPENING_UNRESOLVED"
    ],
    "alert": {},
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.12-e",
@@ -4558,7 +4576,7 @@
    ],
    "faults_fired": 126,
    "ai_calls": 296,
-   "seconds": 9.85,
+   "seconds": 8.46,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -4568,8 +4586,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -4591,14 +4610,13 @@
     "CHAPTER_POLISH",
     "REPEATS_TO_TRIM",
     "HUMAN_PASS",
-    "OPENING_UNRESOLVED",
-    "IMPROVE_UNRESOLVED"
+    "OPENING_UNRESOLVED"
    ],
    "alert": {},
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.12-f",
@@ -4620,7 +4638,7 @@
    ],
    "faults_fired": 14,
    "ai_calls": 91,
-   "seconds": 2.97,
+   "seconds": 2.64,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -4630,8 +4648,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -4653,14 +4672,13 @@
     "CHAPTER_POLISH",
     "REPEATS_TO_TRIM",
     "HUMAN_PASS",
-    "OPENING_UNRESOLVED",
-    "IMPROVE_UNRESOLVED"
+    "OPENING_UNRESOLVED"
    ],
    "alert": {},
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.12-g",
@@ -4682,7 +4700,7 @@
    ],
    "faults_fired": 0,
    "ai_calls": 80,
-   "seconds": 2.65,
+   "seconds": 2.43,
    "likely": "",
    "log_errors": 3,
    "log_tracebacks": 3,
@@ -4692,8 +4710,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -4715,14 +4734,13 @@
     "HUMAN_PASS",
     "OPENING_UNRESOLVED",
     "IMPROVE_UNRESOLVED",
-    "CLEAN_RUN_SCORE",
-    "QUALITY_TREND"
+    "CLEAN_RUN_SCORE"
    ],
    "alert": {},
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.12-h",
@@ -4744,7 +4762,7 @@
    ],
    "faults_fired": 1,
    "ai_calls": 101,
-   "seconds": 4.27,
+   "seconds": 4.05,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -4754,8 +4772,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -4777,14 +4796,13 @@
     "HUMAN_PASS",
     "OPENING_UNRESOLVED",
     "IMPROVE_UNRESOLVED",
-    "FINAL_CHECK_AGAIN",
-    "CLEAN_RUN_SCORE"
+    "FINAL_CHECK_AGAIN"
    ],
    "alert": {},
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.12-i",
@@ -4806,7 +4824,7 @@
    ],
    "faults_fired": 1,
    "ai_calls": 101,
-   "seconds": 8.22,
+   "seconds": 8.84,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -4816,8 +4834,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -4839,14 +4858,13 @@
     "HUMAN_PASS",
     "OPENING_UNRESOLVED",
     "IMPROVE_UNRESOLVED",
-    "FINAL_CHECK_AGAIN",
-    "CLEAN_RUN_SCORE"
+    "FINAL_CHECK_AGAIN"
    ],
    "alert": {},
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.12-j",
@@ -4868,7 +4886,7 @@
    ],
    "faults_fired": 0,
    "ai_calls": 85,
-   "seconds": 3.09,
+   "seconds": 2.77,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -4878,8 +4896,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -4901,8 +4920,7 @@
     "REPEATS_TO_TRIM",
     "HUMAN_PASS",
     "OPENING_UNRESOLVED",
-    "IMPROVE_UNRESOLVED",
-    "CLEAN_RUN_SCORE"
+    "IMPROVE_UNRESOLVED"
    ],
    "alert": {
     "category": "continuity",
@@ -4914,7 +4932,7 @@
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.12-k",
@@ -4922,24 +4940,22 @@
    "part": "12.12",
    "stress": "k",
    "title": "absurd checkpoint answers: chapter 0 / -5 / 999 / “two”, an empty problem, 40 copies of one problem, a 2 MB original",
-   "result": "⚠️",
-   "happened": "Absurd checkpoint answers: Stopped at step “chapters” with CHECKPOINT_WAITING: “🧭 Final check of the whole book after chapter 3: 34 problem(s) need you — chapter 2: The stair count differs from chapter 1.” Fix offered: “Read the problems on the 🧭 Continuity page (Checkpoints). If you agree, fix the chapter yourself (✏️ Edit it myself), then press ▶ Continue — or press ▶ Continue to leave it as it is (it stays in the report).”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
+   "result": "🟡",
+   "happened": "Absurd checkpoint answers: Stopped at step “chapters” with CHECKPOINT_WAITING: “🧭 Final check of the whole book after chapter 3: 1 problem(s) need you — chapter 2: The stair count differs from chapter 1.” Fix offered: “Read the problems on the 🧭 Continuity page (Checkpoints). If you agree, fix the chapter yourself (✏️ Edit it myself), then press ▶ Continue — or press ▶ Continue to leave it as it is (it stays in the report).”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
    "status": "paused",
    "final_status": "done",
    "problem_code": "CHECKPOINT_WAITING",
-   "problem_message": "🧭 Final check of the whole book after chapter 3: 34 problem(s) need you — chapter 2: The stair count differs from chapter 1.",
+   "problem_message": "🧭 Final check of the whole book after chapter 3: 1 problem(s) need you — chapter 2: The stair count differs from chapter 1.",
    "problem_fix": "Read the problems on the 🧭 Continuity page (Checkpoints). If you agree, fix the chapter yourself (✏️ Edit it myself), then press ▶ Continue — or press ▶ Continue to leave it as it is (it stays in the report).",
    "issues": [],
-   "risks": [
-    "the same problem reported many times is not merged: the author is told “68 problem(s) need you” for 1 distinct one(s)"
-   ],
+   "risks": [],
    "notes": [
     "the fix's replacement is in chapter 2 1 time(s)",
-    "Exercised: 4 checkpoint(s) / chapter check(s) (done); problems by status {'fixed': 2, 'waiting': 68}; checkpoint calls 10."
+    "Exercised: 4 checkpoint(s) / chapter check(s) (done); problems by status {'fixed': 2, 'waiting': 2}; checkpoint calls 10."
    ],
    "faults_fired": 0,
    "ai_calls": 100,
-   "seconds": 4.03,
+   "seconds": 4.33,
    "likely": "unlikely but dangerous",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -4949,8 +4965,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -4972,8 +4989,7 @@
     "REPEATS_TO_TRIM",
     "HUMAN_PASS",
     "OPENING_UNRESOLVED",
-    "IMPROVE_UNRESOLVED",
-    "FINAL_CHECK_AGAIN"
+    "IMPROVE_UNRESOLVED"
    ],
    "alert": {
     "category": "continuity",
@@ -4991,9 +5007,9 @@
     "what": "the same problem reported many times is not merged: the run pauses with “34 problem(s) need you” for one real problem",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.12-l",
@@ -5001,7 +5017,7 @@
    "part": "12.12",
    "stress": "l",
    "title": "a “small safe fix” that replaces four words with 1 800 characters of new text (the injection repeated)",
-   "result": "⚠️",
+   "result": "🟡",
    "happened": "A huge 'small' fix: Stopped at step “chapters” with CHECKPOINT_WAITING: “🧭 Final check of the whole book after chapter 3: 1 problem(s) need you — chapter 2: The stair count differs from chapter 1.” Fix offered: “Read the problems on the 🧭 Continuity page (Checkpoints). If you agree, fix the chapter yourself (✏️ Edit it myself), then press ▶ Continue — or press ▶ Continue to leave it as it is (it stays in the report).”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
    "status": "paused",
    "final_status": "done",
@@ -5009,16 +5025,14 @@
    "problem_message": "🧭 Final check of the whole book after chapter 3: 1 problem(s) need you — chapter 2: The stair count differs from chapter 1.",
    "problem_fix": "Read the problems on the 🧭 Continuity page (Checkpoints). If you agree, fix the chapter yourself (✏️ Edit it myself), then press ▶ Continue — or press ▶ Continue to leave it as it is (it stays in the report).",
    "issues": [],
-   "risks": [
-    "a “small fix” of 4 words grew chapter 2 by ~1 800 characters (24× the injection sentence) and was approved: nothing bounds a checkpoint fix's replacement against its original"
-   ],
+   "risks": [],
    "notes": [
-    "the injection sentence is in chapter 2 24 time(s)",
-    "Exercised: 4 checkpoint(s) / chapter check(s) (done); problems by status {'waiting': 1, 'fixed': 1}; checkpoint calls 8."
+    "the injection sentence is in chapter 2 0 time(s)",
+    "Exercised: 4 checkpoint(s) / chapter check(s) (done); problems by status {'waiting': 2}; checkpoint calls 8."
    ],
    "faults_fired": 0,
-   "ai_calls": 90,
-   "seconds": 3.62,
+   "ai_calls": 85,
+   "seconds": 2.81,
    "likely": "unlikely but dangerous",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -5028,8 +5042,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -5051,8 +5066,7 @@
     "REPEATS_TO_TRIM",
     "HUMAN_PASS",
     "OPENING_UNRESOLVED",
-    "IMPROVE_UNRESOLVED",
-    "CLEAN_RUN_SCORE"
+    "IMPROVE_UNRESOLVED"
    ],
    "alert": {
     "category": "continuity",
@@ -5070,9 +5084,9 @@
     "what": "a “small safe fix” that replaces four words with ~1 800 characters (the injection repeated) is applied and approved",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.12-m",
@@ -5094,7 +5108,7 @@
    ],
    "faults_fired": 0,
    "ai_calls": 85,
-   "seconds": 3.74,
+   "seconds": 2.94,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -5104,8 +5118,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -5127,8 +5142,7 @@
     "REPEATS_TO_TRIM",
     "HUMAN_PASS",
     "OPENING_UNRESOLVED",
-    "IMPROVE_UNRESOLVED",
-    "CLEAN_RUN_SCORE"
+    "IMPROVE_UNRESOLVED"
    ],
    "alert": {
     "category": "continuity",
@@ -5140,7 +5154,7 @@
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.12-n",
@@ -5162,7 +5176,7 @@
    ],
    "faults_fired": 1,
    "ai_calls": 101,
-   "seconds": 3.92,
+   "seconds": 4.24,
    "likely": "unlikely but dangerous",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -5172,8 +5186,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -5195,14 +5210,13 @@
     "HUMAN_PASS",
     "OPENING_UNRESOLVED",
     "IMPROVE_UNRESOLVED",
-    "FINAL_CHECK_AGAIN",
-    "CLEAN_RUN_SCORE"
+    "FINAL_CHECK_AGAIN"
    ],
    "alert": {},
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-12.12-o",
@@ -5225,7 +5239,7 @@
    ],
    "faults_fired": 8,
    "ai_calls": 160,
-   "seconds": 8.19,
+   "seconds": 8.85,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -5235,8 +5249,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -5258,14 +5273,13 @@
     "REPEATS_TO_TRIM",
     "HUMAN_PASS",
     "OPENING_UNRESOLVED",
-    "IMPROVE_UNRESOLVED",
-    "FINAL_CHECK_AGAIN"
+    "IMPROVE_UNRESOLVED"
    ],
    "alert": {},
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-13-a",
@@ -5273,23 +5287,21 @@
    "part": "13",
    "stress": "a",
    "title": "the AI times out (once; and every time)",
-   "result": "⚠️",
-   "happened": "Once: Stopped at step “chapters” with TIMEOUT: “The AI did not answer in time while checking the planned details of the chapter ch1.” Fix offered: “The AI did not answer in time. Akọwe already waited for a late answer and asked another AI (or the same one again), so it stopped here instead of guessing. What to do: open AutoInjector and look at that AI's window — if it says the chat is too long, press the site's New chat; if it asks you to log in or to confirm you are human, do that. Then press 🔁 Try again.”. After the fault was removed, ▶ Resume finished the book with nothing lost. — Every time: Stopped at step “chapters” with TIMEOUT: “The AI did not answer in time while checking the planned details of the chapter ch1.” Fix offered: “The AI did not answer in time. Akọwe already waited for a late answer and asked another AI (or the same one again), so it stopped here instead of guessing. What to do: open AutoInjector and look at that AI's window — if it says the chat is too long, press the site's New chat; if it asks you to log in or to confirm you are human, do that. Then press 🔁 Try again.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
-   "status": "paused",
+   "result": "✅",
+   "happened": "Once: The book finished with nothing lost. — Every time: The book finished with nothing lost.",
+   "status": "done",
    "final_status": "done",
-   "problem_code": "TIMEOUT",
-   "problem_message": "The AI did not answer in time while checking the planned details of the chapter ch1.",
-   "problem_fix": "The AI did not answer in time. Akọwe already waited for a late answer and asked another AI (or the same one again), so it stopped here instead of guessing. What to do: open AutoInjector and look at that AI's window — if it says the chat is too long, press the site's New chat; if it asks you to log in or to confirm you are human, do that. Then press 🔁 Try again.",
+   "problem_code": "",
+   "problem_message": "",
+   "problem_fix": "",
    "issues": [],
-   "risks": [
-    "this part promises never to hold up the book, but the run paused (TIMEOUT: “The AI did not answer in time while checking the planned details of the chapter ch1.”) — an optional check stopped the whole book until ▶ Resume"
-   ],
+   "risks": [],
    "notes": [
-    "Exercised: PLANNED_UNRESOLVED, PLANNED_MISSING; AI calls planned ×4, planned_rewrite ×3."
+    "Exercised: PLANNED_CHECK_FAILED, PLANNED_UNRESOLVED, PLANNED_MISSING; AI calls planned ×3, planned_rewrite ×2."
    ],
-   "faults_fired": 2,
-   "ai_calls": 150,
-   "seconds": 3.44,
+   "faults_fired": 4,
+   "ai_calls": 142,
+   "seconds": 2.9,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -5299,16 +5311,17 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
     "ONE_REVIEWER",
-    "TIMEOUT",
+    "PLANNED_CHECK_FAILED",
+    "CHECKPOINT",
     "PLANNED_UNRESOLVED",
     "PLANNED_MISSING",
-    "CHECKPOINT",
     "ENDING_KEPT",
     "VOICE_TEST_TOO_LITTLE",
     "HUMAN_PASS",
@@ -5318,13 +5331,7 @@
     "BOOK_TOO_SHORT",
     "QUALITY_TREND"
    ],
-   "alert": {
-    "category": "ai",
-    "label": "AI problem",
-    "wrong": "The AI did not answer in time while checking the planned details of the chapter ch1.",
-    "why": "The AI could not do this step (a usage limit, the connection or an error).",
-    "next": "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
-   },
+   "alert": {},
    "finding": {
     "where": "akowe/akowe/autobook.py `_planned_work` (~line 2444–2448 and 2468–2471: TIMEOUT / BUSY_CODES → `_ai_problem` → StepProblem)",
     "cause": "The planned-to-page check hands a timeout / busy / declined answer to `_ai_problem`, which pauses the run, although the step promises it “never holds up the book” (any other AI error is only a note).",
@@ -5334,9 +5341,9 @@
     "what": "one timeout of the planned-details check pauses the whole book",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-13-b",
@@ -5358,7 +5365,7 @@
    ],
    "faults_fired": 3,
    "ai_calls": 76,
-   "seconds": 1.76,
+   "seconds": 1.68,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -5368,8 +5375,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -5391,7 +5399,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-13-c",
@@ -5413,7 +5421,7 @@
    ],
    "faults_fired": 6,
    "ai_calls": 79,
-   "seconds": 1.65,
+   "seconds": 1.48,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -5423,8 +5431,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -5446,7 +5455,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-13-d",
@@ -5465,11 +5474,11 @@
    "risks": [],
    "notes": [
     "Sent through an in-process AutoInjector bridge, so the real adapter reads the bad text.",
-    "Exercised: PLANNED_CHECK_FAILED, PLANNED_MISSING; AI calls planned ×9, planned_rewrite ×0."
+    "Exercised: PLANNED_CHECK_FAILED, PLANNED_MISSING; AI calls planned ×27, planned_rewrite ×0."
    ],
-   "faults_fired": 27,
-   "ai_calls": 264,
-   "seconds": 8.43,
+   "faults_fired": 81,
+   "ai_calls": 318,
+   "seconds": 8.44,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -5479,8 +5488,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -5501,7 +5511,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-13-e",
@@ -5519,11 +5529,11 @@
    "issues": [],
    "risks": [],
    "notes": [
-    "Exercised: PLANNED_CHECK_FAILED, PLANNED_MISSING; AI calls planned ×9, planned_rewrite ×0."
+    "Exercised: PLANNED_CHECK_FAILED, PLANNED_MISSING; AI calls planned ×27, planned_rewrite ×0."
    ],
-   "faults_fired": 18,
-   "ai_calls": 176,
-   "seconds": 5.64,
+   "faults_fired": 54,
+   "ai_calls": 212,
+   "seconds": 5.26,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -5533,8 +5543,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -5555,7 +5566,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-13-f",
@@ -5563,59 +5574,40 @@
    "part": "13",
    "stress": "f",
    "title": "the AI refuses (AI_DECLINED) repeatedly",
-   "result": "⚠️",
-   "happened": "Every AI declines every time: Stopped at step “chapters” with AI_DECLINED: “Claude stayed busy or unreachable for 2 s, so Akọwe stopped waiting (the AI declined to answer (stress))” Fix offered: “The AIs stayed busy or could not be reached for a long time. What to do: make sure AutoInjector (the program with the AI windows) is open; look at each AI's window (logged in? a usage-limit message?); Settings → 🧪 Test connection shows which AI works. Then press 🔁 Try again.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
-   "status": "paused",
+   "result": "✅",
+   "happened": "Every AI declines every time: The book finished with nothing lost.",
+   "status": "done",
    "final_status": "done",
-   "problem_code": "AI_DECLINED",
-   "problem_message": "Claude stayed busy or unreachable for 2 s, so Akọwe stopped waiting (the AI declined to answer (stress))",
-   "problem_fix": "The AIs stayed busy or could not be reached for a long time. What to do: make sure AutoInjector (the program with the AI windows) is open; look at each AI's window (logged in? a usage-limit message?); Settings → 🧪 Test connection shows which AI works. Then press 🔁 Try again.",
+   "problem_code": "",
+   "problem_message": "",
+   "problem_fix": "",
    "issues": [],
-   "risks": [
-    "the AIs REFUSED (AI_DECLINED) but the message and fix say they “stayed busy or unreachable” / “could not be reached” and send the author to check AutoInjector and logins",
-    "this part promises never to hold up the book, but the run paused (AI_DECLINED: “Claude stayed busy or unreachable for 2 s, so Akọwe stopped waiting (the AI declined to answer (stress))”) — an optional check stopped the whole book until ▶ Resume"
-   ],
+   "risks": [],
    "notes": [
-    "Exercised: PLANNED_UNRESOLVED, PLANNED_MISSING; AI calls planned ×305, planned_rewrite ×3."
+    "Exercised: PLANNED_CHECK_FAILED, PLANNED_MISSING; AI calls planned ×906, planned_rewrite ×0."
    ],
-   "faults_fired": 302,
-   "ai_calls": 376,
-   "seconds": 5.22,
+   "faults_fired": 906,
+   "ai_calls": 973,
+   "seconds": 12.08,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
    "event_codes": [
-    "VOICE_SET",
-    "VOICES_DISTINCT",
-    "DOCTOR_SCORED",
-    "DOCTOR_DONE",
-    "PREDICT_PROBED",
-    "SCOPE_SET",
-    "GRID_FAILED",
-    "TRADE_CARD_MADE",
-    "PROTAGONIST_OK",
-    "FIRST_PAGE_PICKED",
-    "ONE_REVIEWER",
     "AI_DECLINED",
-    "PLANNED_UNRESOLVED",
-    "PLANNED_MISSING",
+    "PLANNED_CHECK_FAILED",
     "CHECKPOINT",
     "ENDING_KEPT",
     "VOICE_TEST_TOO_LITTLE",
+    "PLANNED_MISSING",
     "HUMAN_PASS",
     "OPENING_UNRESOLVED",
     "IMPROVE_UNRESOLVED",
+    "PROTAGONIST_OK",
     "CLEAN_RUN_SCORE",
     "BOOK_TOO_SHORT",
     "QUALITY_TREND"
    ],
-   "alert": {
-    "category": "ai",
-    "label": "AI problem",
-    "wrong": "Claude stayed busy or unreachable for 2 s, so Akọwe stopped waiting (the AI declined to answer (stress))",
-    "why": "The AI could not do this step (a usage limit, the connection or an error).",
-    "next": "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
-   },
+   "alert": {},
    "finding": {
     "where": "akowe/akowe/autobook.py `_planned_work` (~line 2444–2448 and 2468–2471: TIMEOUT / BUSY_CODES → `_ai_problem` → StepProblem)",
     "cause": "The planned-to-page check hands a timeout / busy / declined answer to `_ai_problem`, which pauses the run, although the step promises it “never holds up the book” (any other AI error is only a note).",
@@ -5625,9 +5617,9 @@
     "what": "an AI that declines the planned-details check pauses the whole book (and the message says “busy or unreachable”)",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-13-g",
@@ -5635,60 +5627,50 @@
    "part": "13",
    "stress": "g",
    "title": "the part's own code raises an unexpected Python exception (in a chapter's check; in the book step's check)",
-   "result": "⚠️",
-   "happened": "The chapter's planned check raises: Stopped at step “chapters” with INTERNAL_ERROR: “Akọwe hit an unexpected problem (RuntimeError).” Fix offered: “Press 🔁 Try again. If it keeps happening, use 📋 Copy diagnostics.”. After the fault was removed, ▶ Resume finished the book with nothing lost. — The book step's planned check raises: The book finished with nothing lost.",
-   "status": "paused",
+   "result": "✅",
+   "happened": "The chapter's planned check raises: The book finished with nothing lost. — The book step's planned check raises: The book finished with nothing lost.",
+   "status": "done",
    "final_status": "done",
-   "problem_code": "INTERNAL_ERROR",
-   "problem_message": "Akọwe hit an unexpected problem (RuntimeError).",
-   "problem_fix": "Press 🔁 Try again. If it keeps happening, use 📋 Copy diagnostics.",
+   "problem_code": "",
+   "problem_message": "",
+   "problem_fix": "",
    "issues": [],
-   "risks": [
-    "the alert calls a fault in Akọwe's own code an “AI problem” (“The AI could not do this step (a usage limit, the connection or an error).”), so the author looks for the fault in the AI",
-    "this part promises never to hold up the book, but the run paused (INTERNAL_ERROR: “Akọwe hit an unexpected problem (RuntimeError).”) — an optional check stopped the whole book until ▶ Resume"
-   ],
+   "risks": [],
    "notes": [
-    "Exercised: planned checks 3, fixes asked 3; summary checked=3 fixed=0 flagged=3 book_missing=10; journal: PLANNED_UNRESOLVED, PLANNED_MISSING."
+    "Exercised: planned checks 0, fixes asked 0; summary checked=3 fixed=0 flagged=0 book_missing=11; journal: PLANNED_CHECK_FAILED, PLANNED_MISSING."
    ],
    "faults_fired": 0,
-   "ai_calls": 147,
-   "seconds": 3.11,
+   "ai_calls": 134,
+   "seconds": 2.82,
    "likely": "",
-   "log_errors": 3,
-   "log_tracebacks": 3,
+   "log_errors": 8,
+   "log_tracebacks": 8,
    "event_codes": [
     "VOICE_SET",
     "VOICES_DISTINCT",
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
     "ONE_REVIEWER",
-    "INTERNAL_ERROR",
-    "PLANNED_UNRESOLVED",
-    "PLANNED_MISSING",
+    "PLANNED_CHECK_FAILED",
     "CHECKPOINT",
     "ENDING_KEPT",
     "VOICE_TEST_TOO_LITTLE",
+    "PLANNED_MISSING",
     "HUMAN_PASS",
     "OPENING_UNRESOLVED",
     "IMPROVE_UNRESOLVED",
     "CLEAN_RUN_SCORE",
     "BOOK_TOO_SHORT",
-    "QUALITY_TREND",
-    "PLANNED_CHECK_FAILED"
+    "QUALITY_TREND"
    ],
-   "alert": {
-    "category": "ai",
-    "label": "AI problem",
-    "wrong": "Akọwe hit an unexpected problem (RuntimeError).",
-    "why": "The AI could not do this step (a usage limit, the connection or an error).",
-    "next": "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
-   },
+   "alert": {},
    "finding": {
     "where": "akowe/akowe/autobook.py `_planned_work` (~line 2443–2453: only AkoweError is caught around `checker.check`)",
     "cause": "`_s_planned` catches every exception, `_planned_work` only AkoweError.",
@@ -5698,9 +5680,9 @@
     "what": "a bug in the planned-details check pauses the whole book with INTERNAL_ERROR and the alert calls it an “AI problem” (the book step's own check, by contrast, only notes it)",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-13-h",
@@ -5722,7 +5704,7 @@
    ],
    "faults_fired": 1,
    "ai_calls": 75,
-   "seconds": 1.78,
+   "seconds": 1.56,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -5732,8 +5714,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -5754,7 +5737,7 @@
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-13-i",
@@ -5776,7 +5759,7 @@
    ],
    "faults_fired": 1,
    "ai_calls": 75,
-   "seconds": 3.51,
+   "seconds": 2.95,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -5786,8 +5769,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -5808,7 +5792,7 @@
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-13-j",
@@ -5830,7 +5814,7 @@
    ],
    "faults_fired": 3,
    "ai_calls": 76,
-   "seconds": 1.77,
+   "seconds": 1.5,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -5840,8 +5824,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -5862,7 +5847,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-13-k",
@@ -5884,7 +5869,7 @@
    ],
    "faults_fired": 0,
    "ai_calls": 73,
-   "seconds": 1.58,
+   "seconds": 1.42,
    "likely": "unlikely but dangerous",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -5894,8 +5879,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -5916,7 +5902,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-13-l",
@@ -5938,7 +5924,7 @@
    ],
    "faults_fired": 3,
    "ai_calls": 73,
-   "seconds": 1.74,
+   "seconds": 3.38,
    "likely": "unlikely but dangerous",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -5948,8 +5934,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -5970,7 +5957,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-13-m",
@@ -5978,24 +5965,22 @@
    "part": "13",
    "stress": "m",
    "title": "the author sets a chapter aside (marks it out of date) while the book's planned step runs",
-   "result": "❌",
-   "happened": "Chapter 2 set aside during the planned step: Stopped at step “assemble” with INVALID_INPUT: “Approve every chapter and the book format first.” Fix offered: “Press 🔁 Try again. If it fails again, open the book and do this step yourself.”. Resume did not finish: paused INVALID_INPUT.",
-   "status": "paused",
-   "final_status": "paused",
-   "problem_code": "INVALID_INPUT",
-   "problem_message": "Approve every chapter and the book format first.",
-   "problem_fix": "Press 🔁 Try again. If it fails again, open the book and do this step yourself.",
-   "issues": [
-    "Resume could not finish the book (status paused, INVALID_INPUT: Approve every chapter and the book format first.)"
-   ],
+   "result": "✅",
+   "happened": "Chapter 2 set aside during the planned step: The book finished with nothing lost.",
+   "status": "done",
+   "final_status": "done",
+   "problem_code": "",
+   "problem_message": "",
+   "problem_fix": "",
+   "issues": [],
    "risks": [],
    "notes": [
-    "set aside: done; chapter 2 now: not approved.",
-    "Exercised: planned checks 3, fixes asked 3; summary checked=3 fixed=0 flagged=3 book_missing=10; journal: PLANNED_UNRESOLVED, PLANNED_MISSING."
+    "set aside: done; chapter 2 now: approved.",
+    "Exercised: planned checks 4, fixes asked 4; summary checked=4 fixed=0 flagged=4 book_missing=10; journal: PLANNED_UNRESOLVED, PLANNED_MISSING."
    ],
    "faults_fired": 0,
-   "ai_calls": 69,
-   "seconds": 0.99,
+   "ai_calls": 81,
+   "seconds": 1.79,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -6005,8 +5990,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -6016,15 +6002,15 @@
     "CHECKPOINT",
     "ENDING_KEPT",
     "VOICE_TEST_TOO_LITTLE",
-    "INVALID_INPUT"
+    "BOOK_AGAIN",
+    "HUMAN_PASS",
+    "OPENING_UNRESOLVED",
+    "IMPROVE_UNRESOLVED",
+    "CLEAN_RUN_SCORE",
+    "BOOK_TOO_SHORT",
+    "QUALITY_TREND"
    ],
-   "alert": {
-    "category": "ai",
-    "label": "AI problem",
-    "wrong": "Approve every chapter and the book format first.",
-    "why": "The AI could not do this step (a usage limit, the connection or an error).",
-    "next": "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
-   },
+   "alert": {},
    "finding": {
     "where": "akowe/akowe/autobook.py `_s_planned` (~line 2555) and the assemble step; the message comes from akowe/akowe/book_path.py ~line 1141; the alert category from akowe/akowe/alerts.py (`AI_CODES` / fallback)",
     "cause": "After the chapters step no step re-checks that every chapter is still approved; assemble only refuses.",
@@ -6034,9 +6020,9 @@
     "what": "a chapter set aside while the last steps run: the planned step says nothing, assemble pauses with “Approve every chapter and the book format first.” (no chapter named), the alert calls it an “AI problem”, and ▶ Resume / 🔁 Try again cannot finish — the chapters step is already done and does not write the chapter again",
     "repro": ""
    },
-   "result_word": "PROBLEM",
+   "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   },
   {
    "id": "E-13-n",
@@ -6058,7 +6044,7 @@
    ],
    "faults_fired": 40,
    "ai_calls": 113,
-   "seconds": 1.88,
+   "seconds": 1.94,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -6068,8 +6054,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -6092,7 +6079,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:29:48Z"
+   "ran_at": "2026-11-26T01:29:11Z"
   }
  ]
 }

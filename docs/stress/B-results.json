@@ -2,7 +2,7 @@
  "section": "B",
  "name": "Characters and world",
  "slug": "characters-and-world",
- "generated_at": "2026-11-23T09:11:23Z",
+ "generated_at": "2026-11-26T01:21:02Z",
  "legend": {
   "✅": "HANDLED",
   "🟡": "SAFE STOP",
@@ -60,7 +60,7 @@
    "notes": [],
    "faults_fired": 2,
    "ai_calls": 148,
-   "seconds": 3.18,
+   "seconds": 3.16,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -71,8 +71,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -93,13 +94,13 @@
     "category": "ai",
     "label": "AI problem",
     "wrong": "The AI did not answer in time while making the characters.",
-    "why": "The AI could not do this step (a usage limit, the connection or an error).",
+    "why": "The AI did not answer in time, so Akọwe stopped instead of guessing.",
     "next": "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
    },
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-3-b",
@@ -119,7 +120,7 @@
    "notes": [],
    "faults_fired": 3,
    "ai_calls": 76,
-   "seconds": 1.77,
+   "seconds": 1.43,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -130,8 +131,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -152,7 +154,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-3-c",
@@ -172,7 +174,7 @@
    "notes": [],
    "faults_fired": 6,
    "ai_calls": 79,
-   "seconds": 1.57,
+   "seconds": 1.46,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -183,8 +185,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -205,7 +208,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-3-d",
@@ -213,36 +216,34 @@
    "part": "3",
    "stress": "d",
    "title": "garbage answer (not JSON / wrong types / missing keys)",
-   "result": "⚠️",
-   "happened": "Not json (every time): Stopped at step “canon” with INTERNAL_ERROR: “The characters could not be made: the claude web session did not return JSON matching the output schema after 3 tries; nothing was saved. Last errors: /: the reply contained no JSON object” Fix offered: “Press 🔁 Try again.”. After the fault was removed, ▶ Resume finished the book with nothing lost. — Wrong types (every time): Stopped at step “canon” with INTERNAL_ERROR: “The characters could not be made: the claude web session did not return JSON matching the output schema after 3 tries; nothing was saved. Last errors: /items: 12345 is not of type 'array'; /world_summary: 12345 is not of type 'string'” Fix offered: “Press 🔁 Try again.”. After the fault was removed, ▶ Resume finished the book with nothing lost. — Missing keys (every time): Stopped at step “canon” with INTERNAL_ERROR: “The characters could not be made: the claude web session did not return JSON matching the output schema after 3 tries; nothing was saved. Last errors: /: Additional properties are not allowed ('note' was unexpected); /: 'world_summary' is a required property; /: 'items' is a required property” Fix offered: “Press 🔁 Try again.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
+   "result": "🟡",
+   "happened": "Not json (every time): Stopped at step “canon” with AI_UNUSABLE: “The AI's answers could not be used while making the characters: Gemini did not give a usable answer (its answer was not in the form Akọwe asked for) after 3 tries; nothing was saved (every working AI was asked).” Fix offered: “Press 🔁 Try again: Akọwe asks the AIs again. If it keeps happening, look at the AI's window in AutoInjector (a cut-off answer, or a chat that is too long — press the site's New chat), or pick another AI for the book in the run's settings.”. After the fault was removed, ▶ Resume finished the book with nothing lost. — Wrong types (every time): Stopped at step “canon” with AI_UNUSABLE: “The AI's answers could not be used while making the characters: Gemini did not give a usable answer (its answer was not in the form Akọwe asked for) after 3 tries; nothing was saved (every working AI was asked).” Fix offered: “Press 🔁 Try again: Akọwe asks the AIs again. If it keeps happening, look at the AI's window in AutoInjector (a cut-off answer, or a chat that is too long — press the site's New chat), or pick another AI for the book in the run's settings.”. After the fault was removed, ▶ Resume finished the book with nothing lost. — Missing keys (every time): Stopped at step “canon” with AI_UNUSABLE: “The AI's answers could not be used while making the characters: Gemini did not give a usable answer (its answer was not in the form Akọwe asked for) after 3 tries; nothing was saved (every working AI was asked).” Fix offered: “Press 🔁 Try again: Akọwe asks the AIs again. If it keeps happening, look at the AI's window in AutoInjector (a cut-off answer, or a chat that is too long — press the site's New chat), or pick another AI for the book in the run's settings.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
    "status": "paused",
    "final_status": "done",
-   "problem_code": "INTERNAL_ERROR",
-   "problem_message": "The characters could not be made: the claude web session did not return JSON matching the output schema after 3 tries; nothing was saved. Last errors: /: the reply contained no JSON object",
-   "problem_fix": "Press 🔁 Try again.",
+   "problem_code": "AI_UNUSABLE",
+   "problem_message": "The AI's answers could not be used while making the characters: Gemini did not give a usable answer (its answer was not in the form Akọwe asked for) after 3 tries; nothing was saved (every working AI was asked).",
+   "problem_fix": "Press 🔁 Try again: Akọwe asks the AIs again. If it keeps happening, look at the AI's window in AutoInjector (a cut-off answer, or a chat that is too long — press the site's New chat), or pick another AI for the book in the run's settings.",
    "issues": [],
-   "risks": [
-    "the message is in programmer's words (“…did not return JSON matching the output schema… Last errors: /: 'title' is a required property…”, code INTERNAL_ERROR) and the fix only says “Press 🔁 Try again.” — it never suggests another AI",
-    "only AI-1 was asked: the other 2 working AI(s) never got the call before the run stopped"
-   ],
+   "risks": [],
    "notes": [
     "Sent through an in-process AutoInjector bridge, so the real adapter reads the bad text."
    ],
-   "faults_fired": 9,
-   "ai_calls": 264,
-   "seconds": 9.3,
+   "faults_fired": 27,
+   "ai_calls": 282,
+   "seconds": 8.25,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
    "event_codes": [
     "VOICE_SET",
-    "INTERNAL_ERROR",
+    "AI_UNUSABLE",
     "VOICES_DISTINCT",
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -262,9 +263,9 @@
    "alert": {
     "category": "ai",
     "label": "AI problem",
-    "wrong": "The characters could not be made: the claude web session did not return JSON matching the output schema after 3 tries; nothing was saved. Last errors: /: the reply contained no JSON object",
-    "why": "The AI could not do this step (a usage limit, the connection or an error).",
-    "next": "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
+    "wrong": "The AI's answers could not be used while making the characters: Gemini did not give a usable answer (its answer was not in the form Akọwe asked for) after 3 tries; nothing was saved (every working AI was asked).",
+    "why": "The AIs' answers could not be used (not in the form Akọwe asked for), even after asking again and asking another working AI.",
+    "next": "Press 🔁 Try again (or pick another AI for the book in the run's settings). Nothing written so far is lost."
    },
    "finding": {
     "where": "akowe/akowe/assist.py `AssistService._call_ai_once` (line ~695: the call is pinned to one slot; only UPSTREAM_UNAVAILABLE / AI_DECLINED move on) and the Bible Builder session it runs under (akowe/akowe/autobook.py `_bible_session` line ~3222); the stop is raised in `_bible` (line ~3279-3283: “The characters could not be made: <adapter message>”, fix “Press 🔁 Try again.”)",
@@ -275,9 +276,9 @@
     "what": "Unusable answers from one AI stop the canon step although two other working AIs were never asked; the message shows JSON-schema errors and is coded INTERNAL_ERROR",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-3-e",
@@ -285,34 +286,32 @@
    "part": "3",
    "stress": "e",
    "title": "empty answer",
-   "result": "⚠️",
-   "happened": "Empty reply text (every time): Stopped at step “canon” with INTERNAL_ERROR: “The characters could not be made: the claude web session did not return JSON matching the output schema after 3 tries; nothing was saved. Last errors: /: the reply contained no JSON object” Fix offered: “Press 🔁 Try again.”. After the fault was removed, ▶ Resume finished the book with nothing lost. — An empty JSON object {} (every time): Stopped at step “canon” with INTERNAL_ERROR: “The characters could not be made: the claude web session did not return JSON matching the output schema after 3 tries; nothing was saved. Last errors: /: 'world_summary' is a required property; /: 'items' is a required property” Fix offered: “Press 🔁 Try again.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
+   "result": "🟡",
+   "happened": "Empty reply text (every time): Stopped at step “canon” with AI_UNUSABLE: “The AI's answers could not be used while making the characters: Gemini did not give a usable answer (its answer was not in the form Akọwe asked for) after 3 tries; nothing was saved (every working AI was asked).” Fix offered: “Press 🔁 Try again: Akọwe asks the AIs again. If it keeps happening, look at the AI's window in AutoInjector (a cut-off answer, or a chat that is too long — press the site's New chat), or pick another AI for the book in the run's settings.”. After the fault was removed, ▶ Resume finished the book with nothing lost. — An empty JSON object {} (every time): Stopped at step “canon” with AI_UNUSABLE: “The AI's answers could not be used while making the characters: Gemini did not give a usable answer (its answer was not in the form Akọwe asked for) after 3 tries; nothing was saved (every working AI was asked).” Fix offered: “Press 🔁 Try again: Akọwe asks the AIs again. If it keeps happening, look at the AI's window in AutoInjector (a cut-off answer, or a chat that is too long — press the site's New chat), or pick another AI for the book in the run's settings.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
    "status": "paused",
    "final_status": "done",
-   "problem_code": "INTERNAL_ERROR",
-   "problem_message": "The characters could not be made: the claude web session did not return JSON matching the output schema after 3 tries; nothing was saved. Last errors: /: the reply contained no JSON object",
-   "problem_fix": "Press 🔁 Try again.",
+   "problem_code": "AI_UNUSABLE",
+   "problem_message": "The AI's answers could not be used while making the characters: Gemini did not give a usable answer (its answer was not in the form Akọwe asked for) after 3 tries; nothing was saved (every working AI was asked).",
+   "problem_fix": "Press 🔁 Try again: Akọwe asks the AIs again. If it keeps happening, look at the AI's window in AutoInjector (a cut-off answer, or a chat that is too long — press the site's New chat), or pick another AI for the book in the run's settings.",
    "issues": [],
-   "risks": [
-    "the message is in programmer's words (“…did not return JSON matching the output schema… Last errors: /: 'title' is a required property…”, code INTERNAL_ERROR) and the fix only says “Press 🔁 Try again.” — it never suggests another AI",
-    "only AI-1 was asked: the other 2 working AI(s) never got the call before the run stopped"
-   ],
+   "risks": [],
    "notes": [],
-   "faults_fired": 6,
-   "ai_calls": 176,
-   "seconds": 6.48,
+   "faults_fired": 18,
+   "ai_calls": 188,
+   "seconds": 5.41,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
    "event_codes": [
     "VOICE_SET",
-    "INTERNAL_ERROR",
+    "AI_UNUSABLE",
     "VOICES_DISTINCT",
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -332,9 +331,9 @@
    "alert": {
     "category": "ai",
     "label": "AI problem",
-    "wrong": "The characters could not be made: the claude web session did not return JSON matching the output schema after 3 tries; nothing was saved. Last errors: /: the reply contained no JSON object",
-    "why": "The AI could not do this step (a usage limit, the connection or an error).",
-    "next": "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
+    "wrong": "The AI's answers could not be used while making the characters: Gemini did not give a usable answer (its answer was not in the form Akọwe asked for) after 3 tries; nothing was saved (every working AI was asked).",
+    "why": "The AIs' answers could not be used (not in the form Akọwe asked for), even after asking again and asking another working AI.",
+    "next": "Press 🔁 Try again (or pick another AI for the book in the run's settings). Nothing written so far is lost."
    },
    "finding": {
     "where": "akowe/akowe/assist.py `AssistService._call_ai_once` (line ~695: the call is pinned to one slot; only UPSTREAM_UNAVAILABLE / AI_DECLINED move on) and the Bible Builder session it runs under (akowe/akowe/autobook.py `_bible_session` line ~3222); the stop is raised in `_bible` (line ~3279-3283: “The characters could not be made: <adapter message>”, fix “Press 🔁 Try again.”)",
@@ -345,9 +344,9 @@
     "what": "Empty answers from one AI stop the canon step; the other AIs are never asked",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-3-f",
@@ -355,21 +354,19 @@
    "part": "3",
    "stress": "f",
    "title": "the AI refuses (AI_DECLINED) repeatedly",
-   "result": "⚠️",
-   "happened": "Every AI declines every time: Stopped at step “canon” with AI_DECLINED: “The AI stayed busy while making the characters.” Fix offered: “The AIs stayed busy or could not be reached for a long time. What to do: make sure AutoInjector (the program with the AI windows) is open; look at each AI's window (logged in? a usage-limit message?); Settings → 🧪 Test connection shows which AI works. Then press 🔁 Try again.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
+   "result": "🟡",
+   "happened": "Every AI declines every time: Stopped at step “canon” with AI_DECLINED: “The AIs declined to write this (the characters): they said they can't help with that, several times.” Fix offered: “The AI declined to answer (it said it can't help with that) — story material such as a death or a crime sometimes trips an AI's safety filter by mistake. Akọwe already asked again and tried the other AIs. What to do: press 🔁 Try again, or pick another AI for the book in the run's settings.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
    "status": "paused",
    "final_status": "done",
    "problem_code": "AI_DECLINED",
-   "problem_message": "The AI stayed busy while making the characters.",
-   "problem_fix": "The AIs stayed busy or could not be reached for a long time. What to do: make sure AutoInjector (the program with the AI windows) is open; look at each AI's window (logged in? a usage-limit message?); Settings → 🧪 Test connection shows which AI works. Then press 🔁 Try again.",
+   "problem_message": "The AIs declined to write this (the characters): they said they can't help with that, several times.",
+   "problem_fix": "The AI declined to answer (it said it can't help with that) — story material such as a death or a crime sometimes trips an AI's safety filter by mistake. Akọwe already asked again and tried the other AIs. What to do: press 🔁 Try again, or pick another AI for the book in the run's settings.",
    "issues": [],
-   "risks": [
-    "the AIs REFUSED (AI_DECLINED) but the problem says they “stayed busy” (“The AI stayed busy while making the characters.”) and the fix sends the author to check that the AIs are reachable"
-   ],
+   "risks": [],
    "notes": [],
    "faults_fired": 302,
    "ai_calls": 375,
-   "seconds": 5.25,
+   "seconds": 4.79,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -380,8 +377,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -401,9 +399,9 @@
    "alert": {
     "category": "ai",
     "label": "AI problem",
-    "wrong": "The AI stayed busy while making the characters.",
-    "why": "The AI could not do this step (a usage limit, the connection or an error).",
-    "next": "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
+    "wrong": "The AIs declined to write this (the characters): they said they can't help with that, several times.",
+    "why": "The AIs refused to write this (they said they can't help with that), even after being asked again and another AI being tried.",
+    "next": "Press 🔁 Try again, or pick another AI for the book in the run's settings. Nothing written so far is lost."
    },
    "finding": {
     "where": "akowe/akowe/autobook.py `_bible` (line ~3274-3276: `busy = codes & set(BUSY_CODES)` → “The AI stayed busy while making the characters.” + BUSY_FIX); akowe/akowe/jobs.py `BUSY_CODES` (line ~42 includes AI_DECLINED)",
@@ -414,9 +412,9 @@
     "what": "When every AI refuses to make the characters, the stop says they “stayed busy” and sends the author to check connections",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-3-g",
@@ -424,21 +422,19 @@
    "part": "3",
    "stress": "g",
    "title": "the part's own code raises an unexpected Python exception",
-   "result": "⚠️",
-   "happened": "The part's own code raises: Stopped at step “canon” with INTERNAL_ERROR: “Akọwe hit an unexpected problem (KeyError).” Fix offered: “Press 🔁 Try again. If it keeps happening, use 📋 Copy diagnostics.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
+   "result": "🟡",
+   "happened": "The part's own code raises: Stopped at step “canon” with INTERNAL_ERROR: “Akọwe hit an unexpected error in “Characters and places” — press ▶ Resume to try again.” Fix offered: “Press ▶ Resume to try this step again — nothing written so far is lost. If it happens again, use 📋 Copy diagnostics and send it in.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
    "status": "paused",
    "final_status": "done",
    "problem_code": "INTERNAL_ERROR",
-   "problem_message": "Akọwe hit an unexpected problem (KeyError).",
-   "problem_fix": "Press 🔁 Try again. If it keeps happening, use 📋 Copy diagnostics.",
+   "problem_message": "Akọwe hit an unexpected error in “Characters and places” — press ▶ Resume to try again.",
+   "problem_fix": "Press ▶ Resume to try this step again — nothing written so far is lost. If it happens again, use 📋 Copy diagnostics and send it in.",
    "issues": [],
-   "risks": [
-    "the alert calls a fault in Akọwe's own code an “AI problem” (“The AI could not do this step (a usage limit, the connection or an error).”), so the author looks for the fault in the AI"
-   ],
+   "risks": [],
    "notes": [],
    "faults_fired": 0,
    "ai_calls": 73,
-   "seconds": 1.72,
+   "seconds": 1.48,
    "likely": "",
    "log_errors": 1,
    "log_tracebacks": 1,
@@ -449,8 +445,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -468,11 +465,11 @@
     "QUALITY_TREND"
    ],
    "alert": {
-    "category": "ai",
-    "label": "AI problem",
-    "wrong": "Akọwe hit an unexpected problem (KeyError).",
-    "why": "The AI could not do this step (a usage limit, the connection or an error).",
-    "next": "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
+    "category": "akowe",
+    "label": "Akọwe problem",
+    "wrong": "Akọwe hit an unexpected error in “Characters and places” — press ▶ Resume to try again.",
+    "why": "Something went wrong inside Akọwe itself — not the AI and not your book.",
+    "next": "Press ▶ Resume to try this step again; nothing written so far is lost. If it happens again, use 📋 Copy diagnostics and send it in."
    },
    "finding": {
     "where": "akowe/akowe/alerts.py `category_of` (line ~83-93: INTERNAL_ERROR is in `AI_CODES`, line ~57); the stop is made by akowe/akowe/autobook.py `_run` for any non-Akọwe exception",
@@ -483,9 +480,9 @@
     "what": "A bug in Akọwe's own canon code is shown to the author as an “AI problem”",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-3-h",
@@ -505,7 +502,7 @@
    "notes": [],
    "faults_fired": 2,
    "ai_calls": 148,
-   "seconds": 3.2,
+   "seconds": 2.9,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -515,8 +512,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -537,7 +535,7 @@
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-3-i",
@@ -545,33 +543,31 @@
    "part": "3",
    "stress": "i",
    "title": "pause then resume during this part; cancel during it then start a new book",
-   "result": "❌",
+   "result": "🟡",
    "happened": "Pause pressed in “canon”: the run stopped as paused (“Paused by you. Press ▶ Resume to continue.”). ▶ Resume finished the book. Cancel pressed in “canon”: the run ended as cancelled. A new book started afterwards finished.",
    "status": "paused",
    "final_status": "done",
    "problem_code": "",
    "problem_message": "",
    "problem_fix": "",
-   "issues": [
-    "unexpected traceback in the log (cancel variant)",
-    "unexpected traceback in the log: bible item A01-1 failed; bible item A01-2 failed; bible item A04-1 failed"
-   ],
+   "issues": [],
    "risks": [],
    "notes": [],
    "faults_fired": 1,
    "ai_calls": 74,
-   "seconds": 3.47,
+   "seconds": 2.87,
    "likely": "",
-   "log_errors": 6,
-   "log_tracebacks": 6,
+   "log_errors": 0,
+   "log_tracebacks": 0,
    "event_codes": [
     "VOICE_SET",
     "VOICES_DISTINCT",
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -598,9 +594,9 @@
     "what": "Pausing or cancelling while the characters are made writes ERROR tracebacks (“bible item A01-1 failed”) to the log — noise in 📋 Copy diagnostics; the book itself is fine",
     "repro": ""
    },
-   "result_word": "PROBLEM",
+   "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-3-j",
@@ -622,7 +618,7 @@
    ],
    "faults_fired": 3,
    "ai_calls": 78,
-   "seconds": 1.54,
+   "seconds": 1.3,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -633,8 +629,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -661,7 +658,7 @@
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-3-k",
@@ -683,7 +680,7 @@
    ],
    "faults_fired": 1,
    "ai_calls": 73,
-   "seconds": 1.51,
+   "seconds": 1.55,
    "likely": "unlikely but dangerous",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -693,8 +690,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -715,7 +713,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-3-l",
@@ -737,7 +735,7 @@
    ],
    "faults_fired": 2,
    "ai_calls": 149,
-   "seconds": 3.42,
+   "seconds": 2.84,
    "likely": "unlikely but dangerous",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -749,8 +747,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -772,7 +771,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-3-m",
@@ -780,7 +779,7 @@
    "part": "3",
    "stress": "m",
    "title": "names with `../`, CON, a right-to-left override, a NUL byte, emoji and HTML / prompt injection",
-   "result": "⚠️",
+   "result": "✅",
    "happened": "Weird character names: The book finished with nothing lost.",
    "status": "done",
    "final_status": "done",
@@ -788,15 +787,13 @@
    "problem_message": "",
    "problem_fix": "",
    "issues": [],
-   "risks": [
-    "a right-to-left override is kept in a character's name (it displays reversed)"
-   ],
+   "risks": [],
    "notes": [
-    "Approved names: '../../CON'; 'Ka\\u202e Lo\\u200b'; '‹book text›'"
+    "Approved names: '../../CON'; 'Ka Lo'; '‹book text›'"
    ],
    "faults_fired": 1,
-   "ai_calls": 76,
-   "seconds": 1.99,
+   "ai_calls": 75,
+   "seconds": 1.43,
    "likely": "unlikely but dangerous",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -804,12 +801,13 @@
     "VOICE_SET",
     "PROTAGONIST_MISSING",
     "PROTAGONIST_SET",
-    "VOICES_MADE_DISTINCT",
+    "VOICES_DISTINCT",
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -836,9 +834,9 @@
     "what": "A right-to-left override from the AI stays in a character's name (it can display reversed)",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-3-n",
@@ -860,7 +858,7 @@
    ],
    "faults_fired": 1,
    "ai_calls": 73,
-   "seconds": 2.01,
+   "seconds": 1.66,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -870,8 +868,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -892,7 +891,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-3-o",
@@ -900,34 +899,32 @@
    "part": "3",
    "stress": "o",
    "title": "the AI answers for the WRONG step (a premise instead of the sketch / entry); and in French",
-   "result": "⚠️",
-   "happened": "Always a premise: Stopped at step “canon” with INTERNAL_ERROR: “The characters could not be made: the claude web session did not return JSON matching the output schema after 3 tries; nothing was saved. Last errors: /: Additional properties are not allowed ('concept_summary', 'dramatic_question', 'premise' were unexpected); /: 'world_summary' is a required property; /: 'items' is a required property” Fix offered: “Press 🔁 Try again.”. After the fault was removed, ▶ Resume finished the book with nothing lost. — French names and roles: The book finished with nothing lost.",
+   "result": "🟡",
+   "happened": "Always a premise: Stopped at step “canon” with AI_UNUSABLE: “The AI's answers could not be used while making the characters: Gemini did not give a usable answer (its answer was not in the form Akọwe asked for) after 3 tries; nothing was saved (every working AI was asked).” Fix offered: “Press 🔁 Try again: Akọwe asks the AIs again. If it keeps happening, look at the AI's window in AutoInjector (a cut-off answer, or a chat that is too long — press the site's New chat), or pick another AI for the book in the run's settings.”. After the fault was removed, ▶ Resume finished the book with nothing lost. — French names and roles: The book finished with nothing lost.",
    "status": "paused",
    "final_status": "done",
-   "problem_code": "INTERNAL_ERROR",
-   "problem_message": "The characters could not be made: the claude web session did not return JSON matching the output schema after 3 tries; nothing was saved. Last errors: /: Additional properties are not allowed ('concept_summary', 'dramatic_question', 'premise' were unexpected); /: 'world_summary' is a required property; /: 'items' is a required property",
-   "problem_fix": "Press 🔁 Try again.",
+   "problem_code": "AI_UNUSABLE",
+   "problem_message": "The AI's answers could not be used while making the characters: Gemini did not give a usable answer (its answer was not in the form Akọwe asked for) after 3 tries; nothing was saved (every working AI was asked).",
+   "problem_fix": "Press 🔁 Try again: Akọwe asks the AIs again. If it keeps happening, look at the AI's window in AutoInjector (a cut-off answer, or a chat that is too long — press the site's New chat), or pick another AI for the book in the run's settings.",
    "issues": [],
-   "risks": [
-    "the message is in programmer's words (“…did not return JSON matching the output schema… Last errors: /: 'title' is a required property…”, code INTERNAL_ERROR) and the fix only says “Press 🔁 Try again.” — it never suggests another AI",
-    "only AI-1 was asked: the other 2 working AI(s) never got the call before the run stopped"
-   ],
+   "risks": [],
    "notes": [],
-   "faults_fired": 4,
-   "ai_calls": 163,
-   "seconds": 5.13,
+   "faults_fired": 10,
+   "ai_calls": 169,
+   "seconds": 4.32,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
    "event_codes": [
     "VOICE_SET",
-    "INTERNAL_ERROR",
+    "AI_UNUSABLE",
     "VOICES_DISTINCT",
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -950,9 +947,9 @@
    "alert": {
     "category": "ai",
     "label": "AI problem",
-    "wrong": "The characters could not be made: the claude web session did not return JSON matching the output schema after 3 tries; nothing was saved. Last errors: /: Additional properties are not allowed ('concept_summary'…",
-    "why": "The AI could not do this step (a usage limit, the connection or an error).",
-    "next": "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
+    "wrong": "The AI's answers could not be used while making the characters: Gemini did not give a usable answer (its answer was not in the form Akọwe asked for) after 3 tries; nothing was saved (every working AI was asked).",
+    "why": "The AIs' answers could not be used (not in the form Akọwe asked for), even after asking again and asking another working AI.",
+    "next": "Press 🔁 Try again (or pick another AI for the book in the run's settings). Nothing written so far is lost."
    },
    "finding": {
     "where": "akowe/akowe/assist.py `AssistService._call_ai_once` (line ~695: the call is pinned to one slot; only UPSTREAM_UNAVAILABLE / AI_DECLINED move on) and the Bible Builder session it runs under (akowe/akowe/autobook.py `_bible_session` line ~3222); the stop is raised in `_bible` (line ~3279-3283: “The characters could not be made: <adapter message>”, fix “Press 🔁 Try again.”)",
@@ -963,9 +960,9 @@
     "what": "An AI that answers for the wrong step stops the canon step; the other AIs are never asked",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-3-p",
@@ -985,7 +982,7 @@
    "notes": [],
    "faults_fired": 6,
    "ai_calls": 88,
-   "seconds": 3.13,
+   "seconds": 2.83,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -995,8 +992,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -1017,7 +1015,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-4-a",
@@ -1039,7 +1037,7 @@
    ],
    "faults_fired": 2,
    "ai_calls": 152,
-   "seconds": 3.54,
+   "seconds": 2.92,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -1050,8 +1048,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -1072,13 +1071,13 @@
     "category": "ai",
     "label": "AI problem",
     "wrong": "The AI did not answer in time while writing the sheet and voice of “‹book text›”.",
-    "why": "The AI could not do this step (a usage limit, the connection or an error).",
+    "why": "The AI did not answer in time, so Akọwe stopped instead of guessing.",
     "next": "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
    },
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-4-b",
@@ -1100,7 +1099,7 @@
    ],
    "faults_fired": 3,
    "ai_calls": 78,
-   "seconds": 1.78,
+   "seconds": 1.4,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -1111,8 +1110,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -1133,7 +1133,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-4-c",
@@ -1155,7 +1155,7 @@
    ],
    "faults_fired": 6,
    "ai_calls": 81,
-   "seconds": 1.67,
+   "seconds": 1.59,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -1166,8 +1166,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -1188,7 +1189,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-4-d",
@@ -1196,7 +1197,7 @@
    "part": "4",
    "stress": "d",
    "title": "garbage answer (not JSON / wrong types / missing keys)",
-   "result": "⚠️",
+   "result": "✅",
    "happened": "Not json (every time): The book finished with nothing lost. — Wrong types (every time): The book finished with nothing lost. — Missing keys (every time): The book finished with nothing lost.",
    "status": "done",
    "final_status": "done",
@@ -1204,16 +1205,14 @@
    "problem_message": "",
    "problem_fix": "",
    "issues": [],
-   "risks": [
-    "2 character(s) finished the book without a sheet / voice card; it is not on the run's “check later” list (first variant)"
-   ],
+   "risks": [],
    "notes": [
     "Sent through an in-process AutoInjector bridge, so the real adapter reads the bad text.",
     "The Practice AI's proposals came without sheets (companion off), so this part asked the AI."
    ],
-   "faults_fired": 6,
-   "ai_calls": 91,
-   "seconds": 8.86,
+   "faults_fired": 54,
+   "ai_calls": 315,
+   "seconds": 8.52,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -1223,10 +1222,12 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
+    "CHARACTER_SHEET_RETRIED",
     "FIRST_PAGE_PICKED",
     "SECOND_REVIEW",
     "PLANNED_UNRESOLVED",
@@ -1251,9 +1252,9 @@
     "what": "Garbage sheet answers: the book is written with NO character sheets or voice cards, and the finished run does not list them for a later check",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-4-e",
@@ -1261,7 +1262,7 @@
    "part": "4",
    "stress": "e",
    "title": "empty answer",
-   "result": "⚠️",
+   "result": "✅",
    "happened": "Empty reply text (every time): The book finished with nothing lost. — An empty JSON object {} (every time): The book finished with nothing lost.",
    "status": "done",
    "final_status": "done",
@@ -1269,15 +1270,13 @@
    "problem_message": "",
    "problem_fix": "",
    "issues": [],
-   "risks": [
-    "2 character(s) finished the book without a sheet / voice card; it is not on the run's “check later” list (first variant)"
-   ],
+   "risks": [],
    "notes": [
     "The Practice AI's proposals came without sheets (companion off), so this part asked the AI."
    ],
-   "faults_fired": 6,
-   "ai_calls": 91,
-   "seconds": 6.19,
+   "faults_fired": 36,
+   "ai_calls": 210,
+   "seconds": 6.69,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -1287,10 +1286,12 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
+    "CHARACTER_SHEET_RETRIED",
     "FIRST_PAGE_PICKED",
     "SECOND_REVIEW",
     "PLANNED_UNRESOLVED",
@@ -1315,9 +1316,9 @@
     "what": "Empty sheet answers: the book is written without sheets / voice cards, not listed for a later check",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-4-f",
@@ -1325,23 +1326,21 @@
    "part": "4",
    "stress": "f",
    "title": "the AI refuses (AI_DECLINED) repeatedly",
-   "result": "⚠️",
-   "happened": "Every AI declines every time: Stopped at step “characters” with AI_DECLINED: “AI-2 stayed busy or unreachable for 2 s, so Akọwe stopped waiting (the AI declined to answer (stress))” Fix offered: “The AIs stayed busy or could not be reached for a long time. What to do: make sure AutoInjector (the program with the AI windows) is open; look at each AI's window (logged in? a usage-limit message?); Settings → 🧪 Test connection shows which AI works. Then press 🔁 Try again.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
+   "result": "🟡",
+   "happened": "Every AI declines every time: Stopped at step “characters” with AI_DECLINED: “AI-2 declined to write this again and again (it said it can't help with that), so Akọwe stopped asking” Fix offered: “The AI declined to answer (it said it can't help with that) — story material such as a death or a crime sometimes trips an AI's safety filter by mistake. Akọwe already asked again and tried the other AIs. What to do: press 🔁 Try again, or pick another AI for the book in the run's settings.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
    "status": "paused",
    "final_status": "done",
    "problem_code": "AI_DECLINED",
-   "problem_message": "AI-2 stayed busy or unreachable for 2 s, so Akọwe stopped waiting (the AI declined to answer (stress))",
-   "problem_fix": "The AIs stayed busy or could not be reached for a long time. What to do: make sure AutoInjector (the program with the AI windows) is open; look at each AI's window (logged in? a usage-limit message?); Settings → 🧪 Test connection shows which AI works. Then press 🔁 Try again.",
+   "problem_message": "AI-2 declined to write this again and again (it said it can't help with that), so Akọwe stopped asking",
+   "problem_fix": "The AI declined to answer (it said it can't help with that) — story material such as a death or a crime sometimes trips an AI's safety filter by mistake. Akọwe already asked again and tried the other AIs. What to do: press 🔁 Try again, or pick another AI for the book in the run's settings.",
    "issues": [],
-   "risks": [
-    "the AIs REFUSED (AI_DECLINED) but the message and fix say they “stayed busy or unreachable” / “could not be reached” and send the author to check AutoInjector and logins"
-   ],
+   "risks": [],
    "notes": [
     "The Practice AI's proposals came without sheets (companion off), so this part asked the AI."
    ],
    "faults_fired": 302,
    "ai_calls": 377,
-   "seconds": 5.75,
+   "seconds": 5.03,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -1352,8 +1351,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -1373,9 +1373,9 @@
    "alert": {
     "category": "ai",
     "label": "AI problem",
-    "wrong": "AI-2 stayed busy or unreachable for 2 s, so Akọwe stopped waiting (the AI declined to answer (stress))",
-    "why": "The AI could not do this step (a usage limit, the connection or an error).",
-    "next": "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
+    "wrong": "AI-2 declined to write this again and again (it said it can't help with that), so Akọwe stopped asking",
+    "why": "The AIs refused to write this (they said they can't help with that), even after being asked again and another AI being tried.",
+    "next": "Press 🔁 Try again, or pick another AI for the book in the run's settings. Nothing written so far is lost."
    },
    "finding": {
     "where": "akowe/akowe/jobs.py `wait_and_retry` and BUSY_FIX in akowe/akowe/autobook.py (line ~225)",
@@ -1386,9 +1386,9 @@
     "what": "Every AI refuses the sheet: the stop says the AIs “stayed busy or unreachable”",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-4-g",
@@ -1396,23 +1396,21 @@
    "part": "4",
    "stress": "g",
    "title": "the part's own code raises an unexpected Python exception",
-   "result": "⚠️",
-   "happened": "The part's own code raises: Stopped at step “characters” with INTERNAL_ERROR: “Akọwe hit an unexpected problem (TypeError).” Fix offered: “Press 🔁 Try again. If it keeps happening, use 📋 Copy diagnostics.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
+   "result": "🟡",
+   "happened": "The part's own code raises: Stopped at step “characters” with INTERNAL_ERROR: “Akọwe hit an unexpected error in “Character sheets and voices” — press ▶ Resume to try again.” Fix offered: “Press ▶ Resume to try this step again — nothing written so far is lost. If it happens again, use 📋 Copy diagnostics and send it in.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
    "status": "paused",
    "final_status": "done",
    "problem_code": "INTERNAL_ERROR",
-   "problem_message": "Akọwe hit an unexpected problem (TypeError).",
-   "problem_fix": "Press 🔁 Try again. If it keeps happening, use 📋 Copy diagnostics.",
+   "problem_message": "Akọwe hit an unexpected error in “Character sheets and voices” — press ▶ Resume to try again.",
+   "problem_fix": "Press ▶ Resume to try this step again — nothing written so far is lost. If it happens again, use 📋 Copy diagnostics and send it in.",
    "issues": [],
-   "risks": [
-    "the alert calls a fault in Akọwe's own code an “AI problem” (“The AI could not do this step (a usage limit, the connection or an error).”), so the author looks for the fault in the AI"
-   ],
+   "risks": [],
    "notes": [
     "The Practice AI's proposals came without sheets (companion off), so this part asked the AI."
    ],
    "faults_fired": 0,
    "ai_calls": 75,
-   "seconds": 1.91,
+   "seconds": 1.3,
    "likely": "",
    "log_errors": 1,
    "log_tracebacks": 1,
@@ -1423,8 +1421,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -1442,11 +1441,11 @@
     "QUALITY_TREND"
    ],
    "alert": {
-    "category": "ai",
-    "label": "AI problem",
-    "wrong": "Akọwe hit an unexpected problem (TypeError).",
-    "why": "The AI could not do this step (a usage limit, the connection or an error).",
-    "next": "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
+    "category": "akowe",
+    "label": "Akọwe problem",
+    "wrong": "Akọwe hit an unexpected error in “Character sheets and voices” — press ▶ Resume to try again.",
+    "why": "Something went wrong inside Akọwe itself — not the AI and not your book.",
+    "next": "Press ▶ Resume to try this step again; nothing written so far is lost. If it happens again, use 📋 Copy diagnostics and send it in."
    },
    "finding": {
     "where": "akowe/akowe/alerts.py `category_of` (line ~83-93: INTERNAL_ERROR is in `AI_CODES`, line ~57); the stop is made by akowe/akowe/autobook.py `_run` for any non-Akọwe exception; akowe/akowe/autobook.py `_s_characters` (line ~3061-3106: only AkoweError is caught around the AI call; the loop itself is unguarded)",
@@ -1457,9 +1456,9 @@
     "what": "A bug in the sheets step stops the book and is called an “AI problem”",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-4-h",
@@ -1481,7 +1480,7 @@
    ],
    "faults_fired": 1,
    "ai_calls": 76,
-   "seconds": 1.9,
+   "seconds": 1.52,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -1491,8 +1490,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -1513,7 +1513,7 @@
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-4-i",
@@ -1535,7 +1535,7 @@
    ],
    "faults_fired": 1,
    "ai_calls": 75,
-   "seconds": 3.74,
+   "seconds": 3.13,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -1545,8 +1545,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -1567,7 +1568,7 @@
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-4-j",
@@ -1589,7 +1590,7 @@
    ],
    "faults_fired": 2,
    "ai_calls": 76,
-   "seconds": 1.43,
+   "seconds": 1.35,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -1599,8 +1600,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -1621,7 +1623,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-4-k",
@@ -1641,7 +1643,7 @@
    "notes": [],
    "faults_fired": 2,
    "ai_calls": 87,
-   "seconds": 2.92,
+   "seconds": 2.64,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -1651,8 +1653,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -1673,7 +1676,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-4-l",
@@ -1681,7 +1684,7 @@
    "part": "4",
    "stress": "l",
    "title": "one character's sheet is unusable every time (the others work)",
-   "result": "⚠️",
+   "result": "✅",
    "happened": "The first character's sheet is never JSON: The book finished with nothing lost.",
    "status": "done",
    "final_status": "done",
@@ -1689,13 +1692,11 @@
    "problem_message": "",
    "problem_fix": "",
    "issues": [],
-   "risks": [
-    "1 character(s) finished the book without a sheet / voice card; it is not on the run's “check later” list"
-   ],
+   "risks": [],
    "notes": [],
-   "faults_fired": 3,
-   "ai_calls": 89,
-   "seconds": 2.98,
+   "faults_fired": 9,
+   "ai_calls": 96,
+   "seconds": 2.56,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -1705,10 +1706,12 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
+    "CHARACTER_SHEET_RETRIED",
     "FIRST_PAGE_PICKED",
     "SECOND_REVIEW",
     "PLANNED_UNRESOLVED",
@@ -1733,9 +1736,9 @@
     "what": "One character without a sheet / voice card is not on the finished run's “check later” list (only a journal line)",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-4-m",
@@ -1755,7 +1758,7 @@
    "notes": [],
    "faults_fired": 2,
    "ai_calls": 75,
-   "seconds": 1.66,
+   "seconds": 1.52,
    "likely": "unlikely but dangerous",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -1765,8 +1768,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -1787,7 +1791,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-4-n",
@@ -1795,21 +1799,19 @@
    "part": "4",
    "stress": "n",
    "title": "the author types a character's “wants” in the Character Forge while the AI writes the sheet",
-   "result": "❌",
+   "result": "✅",
    "happened": "The author types “wants” during the sheet call: The book finished with nothing lost.",
    "status": "done",
    "final_status": "done",
    "problem_code": "",
    "problem_message": "",
    "problem_fix": "",
-   "issues": [
-    "the author's own “wants” (typed during the sheet call) was replaced by the AI's (now “‹book text› wants the light kept on their own terms”)"
-   ],
+   "issues": [],
    "risks": [],
    "notes": [],
    "faults_fired": 1,
    "ai_calls": 75,
-   "seconds": 1.86,
+   "seconds": 1.26,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -1819,8 +1821,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -1847,9 +1850,9 @@
     "what": "A character's “wants” the author typed while the AI was writing the sheet is silently replaced by the AI's text",
     "repro": ""
    },
-   "result_word": "PROBLEM",
+   "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-5-a",
@@ -1869,7 +1872,7 @@
    "notes": [],
    "faults_fired": 2,
    "ai_calls": 146,
-   "seconds": 3.43,
+   "seconds": 2.74,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -1880,8 +1883,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -1902,7 +1906,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-5-b",
@@ -1922,7 +1926,7 @@
    "notes": [],
    "faults_fired": 3,
    "ai_calls": 75,
-   "seconds": 1.84,
+   "seconds": 1.47,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -1933,8 +1937,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -1955,7 +1960,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-5-c",
@@ -1977,7 +1982,7 @@
    ],
    "faults_fired": 6,
    "ai_calls": 78,
-   "seconds": 2.14,
+   "seconds": 1.29,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -1988,8 +1993,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -2010,7 +2016,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-5-d",
@@ -2030,9 +2036,9 @@
    "notes": [
     "Sent through an in-process AutoInjector bridge, so the real adapter reads the bad text."
    ],
-   "faults_fired": 9,
-   "ai_calls": 261,
-   "seconds": 8.83,
+   "faults_fired": 27,
+   "ai_calls": 279,
+   "seconds": 7.69,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -2043,8 +2049,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -2065,7 +2072,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-5-e",
@@ -2083,9 +2090,9 @@
    "issues": [],
    "risks": [],
    "notes": [],
-   "faults_fired": 6,
-   "ai_calls": 174,
-   "seconds": 5.44,
+   "faults_fired": 18,
+   "ai_calls": 186,
+   "seconds": 5.16,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -2096,8 +2103,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -2118,7 +2126,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-5-f",
@@ -2138,7 +2146,7 @@
    "notes": [],
    "faults_fired": 2,
    "ai_calls": 74,
-   "seconds": 1.76,
+   "seconds": 1.32,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -2149,8 +2157,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -2171,7 +2180,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-5-g",
@@ -2179,34 +2188,32 @@
    "part": "5",
    "stress": "g",
    "title": "the part's own code raises an unexpected Python exception",
-   "result": "⚠️",
-   "happened": "Saving the decided looks raises: Stopped at step “looks” with INTERNAL_ERROR: “Akọwe hit an unexpected problem (RuntimeError).” Fix offered: “Press 🔁 Try again. If it keeps happening, use 📋 Copy diagnostics.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
-   "status": "paused",
+   "result": "✅",
+   "happened": "Saving the decided looks raises: The book finished with nothing lost.",
+   "status": "done",
    "final_status": "done",
-   "problem_code": "INTERNAL_ERROR",
-   "problem_message": "Akọwe hit an unexpected problem (RuntimeError).",
-   "problem_fix": "Press 🔁 Try again. If it keeps happening, use 📋 Copy diagnostics.",
+   "problem_code": "",
+   "problem_message": "",
+   "problem_fix": "",
    "issues": [],
-   "risks": [
-    "the alert calls a fault in Akọwe's own code an “AI problem” (“The AI could not do this step (a usage limit, the connection or an error).”), so the author looks for the fault in the AI",
-    "the part promises it never holds up the book, but the run paused in “looks” with INTERNAL_ERROR"
-   ],
+   "risks": [],
    "notes": [],
    "faults_fired": 0,
-   "ai_calls": 74,
-   "seconds": 1.73,
+   "ai_calls": 73,
+   "seconds": 1.41,
    "likely": "",
-   "log_errors": 1,
-   "log_tracebacks": 1,
+   "log_errors": 20,
+   "log_tracebacks": 20,
    "event_codes": [
     "VOICE_SET",
     "VOICES_DISTINCT",
-    "INTERNAL_ERROR",
+    "DETAILS_LATER",
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -2223,13 +2230,7 @@
     "BOOK_TOO_SHORT",
     "QUALITY_TREND"
    ],
-   "alert": {
-    "category": "ai",
-    "label": "AI problem",
-    "wrong": "Akọwe hit an unexpected problem (RuntimeError).",
-    "why": "The AI could not do this step (a usage limit, the connection or an error).",
-    "next": "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
-   },
+   "alert": {},
    "finding": {
     "where": "akowe/akowe/story_details.py `essentials_step` (line ~499-537: the AI call is in try/except, but `_accept` at line ~528 is outside it); akowe/akowe/alerts.py `category_of` (line ~83-93: INTERNAL_ERROR is in `AI_CODES`, line ~57); the stop is made by akowe/akowe/autobook.py `_run` for any non-Akọwe exception",
     "cause": "Saving the decided looks is not guarded, so a Python error there stops the whole book (INTERNAL_ERROR, “AI problem”), although the step promises it never blocks the book.",
@@ -2239,9 +2240,9 @@
     "what": "A bug while saving the looks stops the whole book (an optional, never-blocks part)",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-5-h",
@@ -2271,8 +2272,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -2293,7 +2295,7 @@
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-5-i",
@@ -2313,7 +2315,7 @@
    "notes": [],
    "faults_fired": 1,
    "ai_calls": 73,
-   "seconds": 3.41,
+   "seconds": 2.85,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -2323,8 +2325,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -2345,7 +2348,7 @@
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-5-j",
@@ -2367,7 +2370,7 @@
    ],
    "faults_fired": 1,
    "ai_calls": 73,
-   "seconds": 1.42,
+   "seconds": 1.45,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -2377,8 +2380,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -2399,7 +2403,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-5-k",
@@ -2421,7 +2425,7 @@
    ],
    "faults_fired": 1,
    "ai_calls": 73,
-   "seconds": 1.79,
+   "seconds": 1.42,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -2431,8 +2435,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -2453,7 +2458,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-5-l",
@@ -2461,7 +2466,7 @@
    "part": "5",
    "stress": "l",
    "title": "a 2 MB look, control characters and prompt injection in the looks",
-   "result": "⚠️",
+   "result": "✅",
    "happened": "2 MB + control characters in the looks: The book finished with nothing lost.",
    "status": "done",
    "final_status": "done",
@@ -2469,13 +2474,11 @@
    "problem_message": "",
    "problem_fix": "",
    "issues": [],
-   "risks": [
-    "a NUL byte from the AI is kept in a character's look"
-   ],
+   "risks": [],
    "notes": [],
    "faults_fired": 1,
    "ai_calls": 73,
-   "seconds": 2.34,
+   "seconds": 1.74,
    "likely": "unlikely but dangerous",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -2485,8 +2488,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -2513,9 +2517,9 @@
     "what": "A NUL byte from the AI is stored in a character's look",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-5-m",
@@ -2535,7 +2539,7 @@
    "notes": [],
    "faults_fired": 1,
    "ai_calls": 73,
-   "seconds": 1.64,
+   "seconds": 1.54,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -2545,8 +2549,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -2567,7 +2572,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-5-n",
@@ -2575,7 +2580,7 @@
    "part": "5",
    "stress": "n",
    "title": "the places and items the outline names get no looks (the outline does not exist yet at part 5)",
-   "result": "⚠️",
+   "result": "✅",
    "happened": "A normal book: The book finished with nothing lost.",
    "status": "done",
    "final_status": "done",
@@ -2583,15 +2588,14 @@
    "problem_message": "",
    "problem_fix": "",
    "issues": [],
-   "risks": [
-    "the step's description promises “a short look for the places and items the outline names” before chapter one, but the outline is made later (part 10): 1 place(s) got no essentials here (only 2 character(s))"
-   ],
+   "risks": [],
    "notes": [
-    "The looks step handled 2 subject(s); the book has 1 place(s); the step says “Essentials decided for 2 of 2 character(s), place(s) and item(s)”."
+    "The looks step handled 2 subject(s); the book has 1 place(s); the step says “Essentials decided for 2 of 2 character(s), place(s) and item(s)”.",
+    "The step's description says places and items get their look just in time (the outline that names them comes later), which is what happens."
    ],
    "faults_fired": 0,
    "ai_calls": 73,
-   "seconds": 1.97,
+   "seconds": 1.43,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -2601,8 +2605,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -2629,9 +2634,9 @@
     "what": "The looks step never gives places or items a look before chapter one, although its description says it does",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-5-o",
@@ -2651,7 +2656,7 @@
    "notes": [],
    "faults_fired": 1,
    "ai_calls": 60,
-   "seconds": 1.42,
+   "seconds": 1.34,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -2663,8 +2668,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "PLANNED_UNRESOLVED",
@@ -2684,7 +2690,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-6-a",
@@ -2702,15 +2708,13 @@
    "issues": [],
    "risks": [],
    "notes": [
-    "1 picture(s) waited on the to-make list (1 listed by name); 🖼 Make the rest afterwards: done, 0 still missing.",
-    "Image requests in the run: 6 (all, with 🖼 Make the rest: 11).",
     "6 picture(s) waited on the to-make list (6 listed by name); 🖼 Make the rest afterwards: done, 0 still missing.",
-    "Image requests in the run: 4 (all, with 🖼 Make the rest: 14).",
-    "Every picture timed out: 4 request(s) each waited the full picture timeout (ART_TIMEOUT_S = 300 s in real use)."
+    "Image requests in the run: 1 (all, with 🖼 Make the rest: 11).",
+    "Every picture timed out: 1 request(s) each waited the full picture timeout (ART_TIMEOUT_S = 300 s in real use)."
    ],
    "faults_fired": 0,
    "ai_calls": 146,
-   "seconds": 6.66,
+   "seconds": 4.93,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -2721,8 +2725,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -2743,7 +2748,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-6-b",
@@ -2767,7 +2772,7 @@
    ],
    "faults_fired": 0,
    "ai_calls": 73,
-   "seconds": 2.87,
+   "seconds": 2.15,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -2778,8 +2783,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -2800,7 +2806,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-6-c",
@@ -2823,7 +2829,7 @@
    ],
    "faults_fired": 0,
    "ai_calls": 73,
-   "seconds": 2.4,
+   "seconds": 2.27,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -2834,8 +2840,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -2856,7 +2863,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-6-d",
@@ -2879,7 +2886,7 @@
    ],
    "faults_fired": 0,
    "ai_calls": 292,
-   "seconds": 9.66,
+   "seconds": 8.51,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -2890,8 +2897,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -2912,7 +2920,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-6-e",
@@ -2935,7 +2943,7 @@
    ],
    "faults_fired": 0,
    "ai_calls": 146,
-   "seconds": 4.99,
+   "seconds": 4.09,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -2946,8 +2954,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -2968,7 +2977,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-6-f",
@@ -2991,7 +3000,7 @@
    ],
    "faults_fired": 0,
    "ai_calls": 73,
-   "seconds": 2.39,
+   "seconds": 2.25,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -3002,8 +3011,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -3024,7 +3034,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-6-g",
@@ -3032,7 +3042,7 @@
    "part": "6",
    "stress": "g",
    "title": "the part's own code raises an unexpected Python exception",
-   "result": "⚠️",
+   "result": "✅",
    "happened": "The picture code raises RuntimeError: The book finished with nothing lost.",
    "status": "done",
    "final_status": "done",
@@ -3040,19 +3050,17 @@
    "problem_message": "",
    "problem_fix": "",
    "issues": [],
-   "risks": [
-    "the pictures that failed on a code error are not on the to-make list by name (only “Make the rest” finds them)"
-   ],
+   "risks": [],
    "notes": [
-    "6 picture(s) waited on the to-make list (0 listed by name); 🖼 Make the rest afterwards: done, 0 still missing.",
+    "6 picture(s) waited on the to-make list (6 listed by name); 🖼 Make the rest afterwards: done, 0 still missing.",
     "Image requests in the run: 0 (all, with 🖼 Make the rest: 10)."
    ],
    "faults_fired": 0,
    "ai_calls": 73,
-   "seconds": 2.25,
+   "seconds": 2.28,
    "likely": "",
-   "log_errors": 1,
-   "log_tracebacks": 1,
+   "log_errors": 4,
+   "log_tracebacks": 4,
    "event_codes": [
     "VOICE_SET",
     "VOICES_DISTINCT",
@@ -3060,8 +3068,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -3088,9 +3097,9 @@
     "what": "Pictures that failed on a code error are not listed by name on the to-make list",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-6-h",
@@ -3112,7 +3121,7 @@
    ],
    "faults_fired": 0,
    "ai_calls": 73,
-   "seconds": 2.21,
+   "seconds": 1.71,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -3122,8 +3131,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -3144,7 +3154,7 @@
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-6-i",
@@ -3164,7 +3174,7 @@
    "notes": [],
    "faults_fired": 0,
    "ai_calls": 73,
-   "seconds": 4.26,
+   "seconds": 3.73,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -3174,8 +3184,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -3196,7 +3207,7 @@
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-6-j",
@@ -3220,7 +3231,7 @@
    ],
    "faults_fired": 0,
    "ai_calls": 73,
-   "seconds": 2.13,
+   "seconds": 2.38,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -3231,8 +3242,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -3253,7 +3265,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-6-k",
@@ -3276,7 +3288,7 @@
    ],
    "faults_fired": 0,
    "ai_calls": 73,
-   "seconds": 2.35,
+   "seconds": 2.06,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -3287,8 +3299,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -3309,7 +3322,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-6-l",
@@ -3317,7 +3330,7 @@
    "part": "6",
    "stress": "l",
    "title": "Stable Diffusion hangs: no picture ever comes back (each request waits for the full timeout)",
-   "result": "⚠️",
+   "result": "✅",
    "happened": "Every picture request hangs: The book finished with nothing lost.",
    "status": "done",
    "final_status": "done",
@@ -3325,17 +3338,15 @@
    "problem_message": "",
    "problem_fix": "",
    "issues": [],
-   "risks": [
-    "a hanging Stable Diffusion holds the book ≈ 20 min (4 × 300 s): a timeout is not treated as “the picture maker is down”, so every remaining picture waits the full 5 minutes too"
-   ],
+   "risks": [],
    "notes": [
     "6 picture(s) waited on the to-make list (6 listed by name); 🖼 Make the rest afterwards: done, 0 still missing.",
-    "Image requests in the run: 4 (all, with 🖼 Make the rest: 14).",
-    "4 request(s) each waited the whole timeout; with the real ART_TIMEOUT_S (300 s) the book waits about 20 min in this step (2 characters)."
+    "Image requests in the run: 1 (all, with 🖼 Make the rest: 11).",
+    "1 request(s) each waited the whole timeout; with the real ART_TIMEOUT_S (300 s) the book waits about 5 min in this step (2 characters)."
    ],
    "faults_fired": 0,
    "ai_calls": 73,
-   "seconds": 4.48,
+   "seconds": 2.47,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -3346,8 +3357,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -3374,9 +3386,9 @@
     "what": "A hanging Stable Diffusion holds the book about 20 minutes (more with more characters) before the run moves on",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-6-m",
@@ -3384,23 +3396,21 @@
    "part": "6",
    "stress": "m",
    "title": "Pause pressed while Stable Diffusion is slow (a picture takes minutes)",
-   "result": "⚠️",
-   "happened": "Pause pressed during a slow picture; the run read “paused” after 3.0 s; ▶ Resume finished the book.",
+   "result": "🟡",
+   "happened": "Pause pressed during a slow picture; the run read “paused” after 0.2 s; ▶ Resume finished the book.",
    "status": "paused",
    "final_status": "done",
    "problem_code": "",
    "problem_message": "",
    "problem_fix": "",
    "issues": [],
-   "risks": [
-    "Pause waits for the picture being made: while Stable Diffusion is slow, the run keeps “running” for up to 5 min after ⏸ Pause"
-   ],
+   "risks": [],
    "notes": [
-    "The pause took effect 3.0 s after it was pressed; the picture request had 3 s to go (real Stable Diffusion: up to ART_TIMEOUT_S = 300 s)."
+    "The pause took effect 0.2 s after it was pressed; the picture request had 3 s to go (real Stable Diffusion: up to ART_TIMEOUT_S = 300 s)."
    ],
    "faults_fired": 0,
    "ai_calls": 73,
-   "seconds": 5.25,
+   "seconds": 2.46,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -3410,8 +3420,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -3438,9 +3449,9 @@
     "what": "⏸ Pause during a slow picture keeps the run “running” for up to 5 minutes",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-6-n",
@@ -3460,13 +3471,13 @@
    "notes": [
     "6 picture(s) waited on the to-make list (6 listed by name); 🖼 Make the rest afterwards: done, 0 still missing.",
     "Image requests in the run: 0 (all, with 🖼 Make the rest: 10).",
-    "All pictures made in the run (step: “7 picture(s) made”).",
-    "Image requests in the run: 7 (all, with 🖼 Make the rest: 7).",
+    "All pictures made in the run (step: “6 picture(s) made”).",
+    "Image requests in the run: 6 (all, with 🖼 Make the rest: 6).",
     "characterLock names sent: '../../CON 🌊', '../../CON 🌊', '../../CON 🌊'"
    ],
    "faults_fired": 1,
-   "ai_calls": 148,
-   "seconds": 4.38,
+   "ai_calls": 146,
+   "seconds": 3.88,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -3477,8 +3488,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -3493,15 +3505,13 @@
     "IMPROVE_UNRESOLVED",
     "CLEAN_RUN_SCORE",
     "BOOK_TOO_SHORT",
-    "QUALITY_TREND",
-    "PROTAGONIST_MISSING",
-    "PROTAGONIST_SET"
+    "QUALITY_TREND"
    ],
    "alert": {},
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-6-o",
@@ -3524,7 +3534,7 @@
    ],
    "faults_fired": 0,
    "ai_calls": 73,
-   "seconds": 2.32,
+   "seconds": 2.01,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -3535,8 +3545,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -3557,7 +3568,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-7-a",
@@ -3577,7 +3588,7 @@
    "notes": [],
    "faults_fired": 2,
    "ai_calls": 148,
-   "seconds": 3.2,
+   "seconds": 2.71,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -3588,8 +3599,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -3610,13 +3622,13 @@
     "category": "ai",
     "label": "AI problem",
     "wrong": "The AI did not answer in time while writing the story rules.",
-    "why": "The AI could not do this step (a usage limit, the connection or an error).",
+    "why": "The AI did not answer in time, so Akọwe stopped instead of guessing.",
     "next": "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
    },
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-7-b",
@@ -3636,7 +3648,7 @@
    "notes": [],
    "faults_fired": 3,
    "ai_calls": 76,
-   "seconds": 1.65,
+   "seconds": 1.37,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -3647,8 +3659,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -3669,7 +3682,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-7-c",
@@ -3689,7 +3702,7 @@
    "notes": [],
    "faults_fired": 6,
    "ai_calls": 79,
-   "seconds": 1.57,
+   "seconds": 1.56,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -3700,8 +3713,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -3722,7 +3736,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-7-d",
@@ -3742,9 +3756,9 @@
    "notes": [
     "Sent through an in-process AutoInjector bridge, so the real adapter reads the bad text."
    ],
-   "faults_fired": 18,
-   "ai_calls": 264,
-   "seconds": 8.4,
+   "faults_fired": 54,
+   "ai_calls": 303,
+   "seconds": 8.25,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -3752,12 +3766,14 @@
     "VOICE_SET",
     "VOICES_DISTINCT",
     "RULES_FAILED",
-    "TEXTURE_FAILED",
+    "TEXTURE_LATER",
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
+    "TEXTURE_RETRIED",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -3778,7 +3794,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-7-e",
@@ -3796,9 +3812,9 @@
    "issues": [],
    "risks": [],
    "notes": [],
-   "faults_fired": 12,
-   "ai_calls": 176,
-   "seconds": 5.99,
+   "faults_fired": 36,
+   "ai_calls": 202,
+   "seconds": 5.15,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -3806,12 +3822,14 @@
     "VOICE_SET",
     "VOICES_DISTINCT",
     "RULES_FAILED",
-    "TEXTURE_FAILED",
+    "TEXTURE_LATER",
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
+    "TEXTURE_RETRIED",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -3832,7 +3850,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-7-f",
@@ -3840,21 +3858,19 @@
    "part": "7",
    "stress": "f",
    "title": "the AI refuses (AI_DECLINED) repeatedly",
-   "result": "⚠️",
-   "happened": "Every AI declines every time: Stopped at step “world” with AI_DECLINED: “AI-2 stayed busy or unreachable for 2 s, so Akọwe stopped waiting (the AI declined to answer (stress))” Fix offered: “The AIs stayed busy or could not be reached for a long time. What to do: make sure AutoInjector (the program with the AI windows) is open; look at each AI's window (logged in? a usage-limit message?); Settings → 🧪 Test connection shows which AI works. Then press 🔁 Try again.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
+   "result": "🟡",
+   "happened": "Every AI declines every time: Stopped at step “world” with AI_DECLINED: “AI-2 declined to write this again and again (it said it can't help with that), so Akọwe stopped asking” Fix offered: “The AI declined to answer (it said it can't help with that) — story material such as a death or a crime sometimes trips an AI's safety filter by mistake. Akọwe already asked again and tried the other AIs. What to do: press 🔁 Try again, or pick another AI for the book in the run's settings.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
    "status": "paused",
    "final_status": "done",
    "problem_code": "AI_DECLINED",
-   "problem_message": "AI-2 stayed busy or unreachable for 2 s, so Akọwe stopped waiting (the AI declined to answer (stress))",
-   "problem_fix": "The AIs stayed busy or could not be reached for a long time. What to do: make sure AutoInjector (the program with the AI windows) is open; look at each AI's window (logged in? a usage-limit message?); Settings → 🧪 Test connection shows which AI works. Then press 🔁 Try again.",
+   "problem_message": "AI-2 declined to write this again and again (it said it can't help with that), so Akọwe stopped asking",
+   "problem_fix": "The AI declined to answer (it said it can't help with that) — story material such as a death or a crime sometimes trips an AI's safety filter by mistake. Akọwe already asked again and tried the other AIs. What to do: press 🔁 Try again, or pick another AI for the book in the run's settings.",
    "issues": [],
-   "risks": [
-    "the AIs REFUSED (AI_DECLINED) but the message and fix say they “stayed busy or unreachable” / “could not be reached” and send the author to check AutoInjector and logins"
-   ],
+   "risks": [],
    "notes": [],
    "faults_fired": 302,
    "ai_calls": 375,
-   "seconds": 5.89,
+   "seconds": 4.83,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -3865,8 +3881,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -3886,9 +3903,9 @@
    "alert": {
     "category": "ai",
     "label": "AI problem",
-    "wrong": "AI-2 stayed busy or unreachable for 2 s, so Akọwe stopped waiting (the AI declined to answer (stress))",
-    "why": "The AI could not do this step (a usage limit, the connection or an error).",
-    "next": "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
+    "wrong": "AI-2 declined to write this again and again (it said it can't help with that), so Akọwe stopped asking",
+    "why": "The AIs refused to write this (they said they can't help with that), even after being asked again and another AI being tried.",
+    "next": "Press 🔁 Try again, or pick another AI for the book in the run's settings. Nothing written so far is lost."
    },
    "finding": {
     "where": "akowe/akowe/jobs.py `wait_and_retry` and BUSY_FIX in akowe/akowe/autobook.py (line ~225)",
@@ -3899,9 +3916,9 @@
     "what": "Every AI refuses the story rules: the stop says the AIs “stayed busy or unreachable”",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-7-g",
@@ -3909,34 +3926,33 @@
    "part": "7",
    "stress": "g",
    "title": "the part's own code raises an unexpected Python exception",
-   "result": "⚠️",
-   "happened": "The world-texture code raises ValueError: Stopped at step “world” with INTERNAL_ERROR: “Akọwe hit an unexpected problem (ValueError).” Fix offered: “Press 🔁 Try again. If it keeps happening, use 📋 Copy diagnostics.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
-   "status": "paused",
+   "result": "✅",
+   "happened": "The world-texture code raises ValueError: The book finished with nothing lost.",
+   "status": "done",
    "final_status": "done",
-   "problem_code": "INTERNAL_ERROR",
-   "problem_message": "Akọwe hit an unexpected problem (ValueError).",
-   "problem_fix": "Press 🔁 Try again. If it keeps happening, use 📋 Copy diagnostics.",
+   "problem_code": "",
+   "problem_message": "",
+   "problem_fix": "",
    "issues": [],
-   "risks": [
-    "the alert calls a fault in Akọwe's own code an “AI problem” (“The AI could not do this step (a usage limit, the connection or an error).”), so the author looks for the fault in the AI",
-    "the part promises it never holds up the book, but the run paused in “world” with INTERNAL_ERROR"
-   ],
+   "risks": [],
    "notes": [],
    "faults_fired": 0,
-   "ai_calls": 73,
-   "seconds": 1.45,
+   "ai_calls": 72,
+   "seconds": 1.4,
    "likely": "",
-   "log_errors": 1,
-   "log_tracebacks": 1,
+   "log_errors": 2,
+   "log_tracebacks": 2,
    "event_codes": [
     "VOICE_SET",
     "VOICES_DISTINCT",
-    "INTERNAL_ERROR",
+    "TEXTURE_LATER",
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
+    "TEXTURE_FAILED",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -3953,13 +3969,7 @@
     "BOOK_TOO_SHORT",
     "QUALITY_TREND"
    ],
-   "alert": {
-    "category": "ai",
-    "label": "AI problem",
-    "wrong": "Akọwe hit an unexpected problem (ValueError).",
-    "why": "The AI could not do this step (a usage limit, the connection or an error).",
-    "next": "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
-   },
+   "alert": {},
    "finding": {
     "where": "akowe/akowe/autobook.py `_s_world` (line ~2603-2649: only `AkoweError` is caught around `gen(...)`); akowe/akowe/alerts.py `category_of` (line ~83-93: INTERNAL_ERROR is in `AI_CODES`, line ~57); the stop is made by akowe/akowe/autobook.py `_run` for any non-Akọwe exception",
     "cause": "A Python exception inside the texture (or rules) code is not an AkoweError, so it escapes `_s_world` and the run pauses as INTERNAL_ERROR, although the world texture is optional (PR #157: never holds up the book).",
@@ -3969,9 +3979,9 @@
     "what": "A bug in the optional world-texture code stops the whole book, called an “AI problem”",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-7-h",
@@ -3991,7 +4001,7 @@
    "notes": [],
    "faults_fired": 1,
    "ai_calls": 74,
-   "seconds": 1.97,
+   "seconds": 1.35,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -4001,8 +4011,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -4023,7 +4034,7 @@
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-7-i",
@@ -4043,7 +4054,7 @@
    "notes": [],
    "faults_fired": 1,
    "ai_calls": 74,
-   "seconds": 3.65,
+   "seconds": 2.95,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -4053,8 +4064,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -4075,7 +4087,7 @@
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-7-j",
@@ -4095,7 +4107,7 @@
    "notes": [],
    "faults_fired": 454,
    "ai_calls": 600,
-   "seconds": 6.58,
+   "seconds": 6.24,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -4106,9 +4118,10 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "TEXTURE_RETRIED",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -4130,7 +4143,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-7-k",
@@ -4138,7 +4151,7 @@
    "part": "7",
    "stress": "k",
    "title": "the texture times out at the start AND on the retry after the outline",
-   "result": "⚠️",
+   "result": "✅",
    "happened": "Texture times out on both tries: The book finished with nothing lost.",
    "status": "done",
    "final_status": "done",
@@ -4146,13 +4159,11 @@
    "problem_message": "",
    "problem_fix": "",
    "issues": [],
-   "risks": [
-    "the finished run lists the texture under “Needs your check later (only one AI was working, so it checked its own writing)” — the reason shown is wrong for a texture the AI never made"
-   ],
+   "risks": [],
    "notes": [],
    "faults_fired": 2,
    "ai_calls": 74,
-   "seconds": 2.0,
+   "seconds": 1.37,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -4163,9 +4174,10 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "TEXTURE_FAILED",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -4192,9 +4204,9 @@
     "what": "A texture that failed twice is listed under “only one AI was working, so it checked its own writing” — the wrong reason",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-7-l",
@@ -4202,7 +4214,7 @@
    "part": "7",
    "stress": "l",
    "title": "the texture answer is garbage (not JSON) every time — not a timeout, so no retry",
-   "result": "⚠️",
+   "result": "✅",
    "happened": "Texture garbage: The book finished with nothing lost.",
    "status": "done",
    "final_status": "done",
@@ -4210,27 +4222,27 @@
    "problem_message": "",
    "problem_fix": "",
    "issues": [],
-   "risks": [
-    "the missing world texture is NOT on the run's “check later” list (only a journal note says so)"
-   ],
+   "risks": [],
    "notes": [
-    "Codes: TEXTURE_FAILED; texture AI calls: 3."
+    "Codes: TEXTURE_LATER, TEXTURE_FAILED; texture AI calls: 18."
    ],
-   "faults_fired": 3,
-   "ai_calls": 87,
-   "seconds": 2.79,
+   "faults_fired": 18,
+   "ai_calls": 102,
+   "seconds": 2.59,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
    "event_codes": [
     "VOICE_SET",
     "VOICES_DISTINCT",
-    "TEXTURE_FAILED",
+    "TEXTURE_LATER",
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
+    "TEXTURE_FAILED",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -4257,9 +4269,9 @@
     "what": "A garbage texture answer is not retried and not listed for a later check (only a journal note)",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-7-m",
@@ -4279,7 +4291,7 @@
    "notes": [],
    "faults_fired": 1,
    "ai_calls": 74,
-   "seconds": 1.66,
+   "seconds": 1.46,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -4290,9 +4302,10 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "TEXTURE_RETRIED",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -4313,7 +4326,7 @@
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-7-n",
@@ -4336,7 +4349,7 @@
    ],
    "faults_fired": 2,
    "ai_calls": 145,
-   "seconds": 2.79,
+   "seconds": 2.71,
    "likely": "unlikely but dangerous",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -4347,8 +4360,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -4369,7 +4383,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-7-o",
@@ -4377,22 +4391,19 @@
    "part": "7",
    "stress": "o",
    "title": "the author writes their own story rules (and texture) while the AI is writing them",
-   "result": "❌",
+   "result": "✅",
    "happened": "The author saves a rule during the rules call: The book finished with nothing lost. — The author saves a texture detail during the texture call: The book finished with nothing lost.",
    "status": "done",
    "final_status": "done",
    "problem_code": "",
    "problem_message": "",
    "problem_fix": "",
-   "issues": [
-    "the author's own story rule (saved during the AI call) is gone at the end",
-    "the author's own world-texture detail (saved during the AI call) is gone at the end"
-   ],
+   "issues": [],
    "risks": [],
    "notes": [],
    "faults_fired": 2,
    "ai_calls": 146,
-   "seconds": 3.19,
+   "seconds": 2.93,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -4402,8 +4413,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -4430,9 +4442,9 @@
     "what": "Story rules / a texture detail the author saved while the AI was writing them are replaced by the AI's (kept only in the history)",
     "repro": ""
    },
-   "result_word": "PROBLEM",
+   "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-7-p",
@@ -4454,7 +4466,7 @@
    ],
    "faults_fired": 4,
    "ai_calls": 75,
-   "seconds": 1.57,
+   "seconds": 1.29,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -4465,8 +4477,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -4487,7 +4500,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   },
   {
    "id": "B-7-q",
@@ -4519,8 +4532,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -4541,7 +4555,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:11:23Z"
+   "ran_at": "2026-11-26T01:21:02Z"
   }
  ]
 }

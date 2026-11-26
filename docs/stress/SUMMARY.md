@@ -1,4 +1,33 @@
-# ⚡ Make-a-book stress test — summary (2026-11-23)
+# ⚡ Make-a-book stress test — summary
+
+## 0. After the fixes (re-run 2026-11-26)
+
+All 33 ❌ and 136 ⚠️ from the first run were fixed by nine batches (quality Q1–Q4 from FIX_PLAN_QUALITY.md, and
+N1 lost typing + size limits · N2 the run goes back + damaged stored files · N3 unprintable PDF characters (English
+books: shown as □ in the PDF only, never stopping the book) · N4 an unusable answer asks another AI + the right
+message labels · N5 optional steps never stop the book + no silent drops). Then the whole stress test ran again.
+
+| | ✅ handled | 🟡 safe stop | ❌ problem | ⚠️ risky | finished or stopped safely |
+|---|---|---|---|---|---|
+| First run (2026-11-23) | 310 | 109 | 33 | 136 | 419 / 588 (71 %) |
+| **After the fixes (2026-11-26)** | **398** | **188** | **0** | **2** | **586 / 588 (99.7 %)** |
+
+**The two left (both ⚠️, both unlikely):**
+- **F-16-a** — a PDF writer that hangs for ever has no time limit; Pause says "Pausing after this step…" and takes
+  effect only when the writer returns. Left as is: the writer runs in the same process with its database work, a
+  watchdog thread can't stop it safely, and a real writer does not hang.
+- **G-20-k (second case)** — a chapter 1 rewrite that deletes a clue is now refused when the clue is recorded anywhere
+  (promise ledger, planned item, ending set-up). A clue nothing recorded can still be deleted; only the reviewers'
+  re-read judges it then. The Play-by-play step (PLAY_BY_PLAY_PLAN.md) would record every clue and close this.
+
+Stress-harness changes made with the fixes (each says the new behaviour truthfully, none hides a problem): scenarios
+now remove their fault before ▶ Resume where the fault would otherwise last for ever (E-12.10-k), accept the new
+plain journal notes / codes as "told the author", match the new plain message wording, and press 🔁 Try again where
+that is the fix the stop offers (C-10-l).
+
+The rest of this page is the **first run's** analysis (kept for the record).
+
+## First run (2026-11-23)
 
 588 stresses across the 22 parts (7 sections, 18 subsections): **✅ 310 handled · 🟡 109 safe stops · ❌ 33 problems ·
 ⚠️ 136 worked but risky.** No product code was changed; every finding below is documented in its section report

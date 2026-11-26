@@ -2,7 +2,7 @@
  "section": "F",
  "name": "Putting the book together",
  "slug": "putting-the-book-together",
- "generated_at": "2026-11-23T09:40:35Z",
+ "generated_at": "2026-11-26T01:14:49Z",
  "legend": {
   "✅": "HANDLED",
   "🟡": "SAFE STOP",
@@ -58,7 +58,7 @@
    ],
    "faults_fired": 0,
    "ai_calls": 146,
-   "seconds": 9.53,
+   "seconds": 8.96,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -68,8 +68,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -90,7 +91,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:40:21Z"
+   "ran_at": "2026-11-26T01:14:49Z"
   },
   {
    "id": "F-14-b",
@@ -113,7 +114,7 @@
    ],
    "faults_fired": 0,
    "ai_calls": 73,
-   "seconds": 4.78,
+   "seconds": 4.49,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -123,8 +124,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -145,7 +147,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:40:21Z"
+   "ran_at": "2026-11-26T01:14:49Z"
   },
   {
    "id": "F-14-c",
@@ -153,25 +155,22 @@
    "part": "14",
    "stress": "c",
    "title": "every AI at its usage limit → no AI here: the disk is full while the part writes, then space is freed",
-   "result": "⚠️",
-   "happened": "Disk full (“database or disk is full”) while the part writes, then space freed: Stopped at step “format” with UPSTREAM_UNAVAILABLE: “I01 could not be created (BLOCKED).” Fix offered: “Press 🔁 Try again. If it fails again, open the book and do this step yourself.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
+   "result": "🟡",
+   "happened": "Disk full (“database or disk is full”) while the part writes, then space freed: Stopped at step “format” with UPSTREAM_UNAVAILABLE: “The book format could not be saved: the disk is full.” Fix offered: “Free some space on the disk Akọwe saves to, then press 🔁 Try again. Nothing written so far is lost.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
    "status": "paused",
    "final_status": "done",
    "problem_code": "UPSTREAM_UNAVAILABLE",
-   "problem_message": "I01 could not be created (BLOCKED).",
-   "problem_fix": "Press 🔁 Try again. If it fails again, open the book and do this step yourself.",
+   "problem_message": "The book format could not be saved: the disk is full.",
+   "problem_fix": "Free some space on the disk Akọwe saves to, then press 🔁 Try again. Nothing written so far is lost.",
    "issues": [],
-   "risks": [
-    "the alert calls it an “AI problem” (“The AI could not do this step (a usage limit, the connection or an error).”) although this part makes no AI call",
-    "the message is a module code (“I01 could not be created (BLOCKED).”), not what went wrong in plain words"
-   ],
+   "risks": [],
    "notes": [
     "This part makes no AI call; the stress is mapped to the closest real failure of the part's own work: the disk is full while the part writes, then space is freed.",
     "The engine logged the storage failure with its traceback (ERROR “storage unavailable”, on purpose; no book text)."
    ],
    "faults_fired": 0,
    "ai_calls": 73,
-   "seconds": 1.63,
+   "seconds": 1.65,
    "likely": "",
    "log_errors": 1,
    "log_tracebacks": 1,
@@ -181,8 +180,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -201,11 +201,11 @@
     "QUALITY_TREND"
    ],
    "alert": {
-    "category": "ai",
-    "label": "AI problem",
-    "wrong": "I01 could not be created (BLOCKED).",
-    "why": "The AI could not do this step (a usage limit, the connection or an error).",
-    "next": "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
+    "category": "book",
+    "label": "Putting the book together",
+    "wrong": "UPSTREAM_UNAVAILABLE: storage unavailable: database or disk is full",
+    "why": "Akọwe could not finish putting the book together (no AI works in this step).",
+    "next": "Fix the cause it names if you can, then press 🔁 Try again. Nothing written so far is lost."
    },
    "finding": {
     "where": "akowe/akowe/alerts.py `category_of` (line ~83-106): the steps format / assemble / export / check are not in `STEP_CAT` (line ~53) and INTERNAL_ERROR / UPSTREAM_UNAVAILABLE / CAPABILITY_UNAVAILABLE are in `AI_CODES` (line ~57), so every stop here falls through to “ai”; the message comes from akowe/akowe/book_path.py `StepError` (line ~1256: “<op> could not be created (<status>).”) via akowe/akowe/autobook.py `_run` (line ~1495)",
@@ -216,9 +216,9 @@
     "what": "Disk full while the format is made: the stop says “I01 could not be created (BLOCKED).” and calls it an AI problem; nothing says the disk is full (Resume finishes once space is free)",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:40:21Z"
+   "ran_at": "2026-11-26T01:14:49Z"
   },
   {
    "id": "F-14-d",
@@ -226,93 +226,21 @@
    "part": "14",
    "stress": "d",
    "title": "garbage answer → no AI here: the remembered book format is garbage (wrong types in the book's path memory, e.g. from an older version or a hand-edited settings file)",
-   "result": "❌",
-   "happened": "Garbage in the remembered format: Stopped at step “format” with INTERNAL_ERROR: “Akọwe hit an unexpected problem (TypeError).” Fix offered: “Press 🔁 Try again. If it keeps happening, use 📋 Copy diagnostics.”. Resume did not finish: paused INTERNAL_ERROR.",
-   "status": "paused",
-   "final_status": "paused",
-   "problem_code": "INTERNAL_ERROR",
-   "problem_message": "Akọwe hit an unexpected problem (TypeError).",
-   "problem_fix": "Press 🔁 Try again. If it keeps happening, use 📋 Copy diagnostics.",
-   "issues": [
-    "an unexpected Python exception stopped the run (INTERNAL_ERROR)",
-    "Resume could not finish the book (status paused, INTERNAL_ERROR: Akọwe hit an unexpected problem (TypeError).)",
-    "unexpected traceback in the log: make-a-book run run-7d4f89d75027: unexpected problem in step format"
-   ],
-   "risks": [
-    "the alert calls a fault in Akọwe's own code an “AI problem” (“The AI could not do this step (a usage limit, the connection or an error).”), so the author looks for the fault in the AI"
-   ],
+   "result": "✅",
+   "happened": "Garbage in the remembered format: The book finished with nothing lost.",
+   "status": "done",
+   "final_status": "done",
+   "problem_code": "",
+   "problem_message": "",
+   "problem_fix": "",
+   "issues": [],
+   "risks": [],
    "notes": [
     "This part makes no AI call; the stress is mapped to the closest real failure of the part's own work: garbage input (the remembered format record references are wrong types)."
    ],
    "faults_fired": 0,
-   "ai_calls": 69,
-   "seconds": 0.95,
-   "likely": "",
-   "log_errors": 2,
-   "log_tracebacks": 2,
-   "event_codes": [
-    "VOICE_SET",
-    "VOICES_DISTINCT",
-    "DOCTOR_SCORED",
-    "DOCTOR_DONE",
-    "PREDICT_PROBED",
-    "SCOPE_SET",
-    "GRID_FAILED",
-    "TRADE_CARD_MADE",
-    "PROTAGONIST_OK",
-    "FIRST_PAGE_PICKED",
-    "ONE_REVIEWER",
-    "PLANNED_UNRESOLVED",
-    "PLANNED_MISSING",
-    "CHECKPOINT",
-    "ENDING_KEPT",
-    "VOICE_TEST_TOO_LITTLE",
-    "INTERNAL_ERROR"
-   ],
-   "alert": {
-    "category": "ai",
-    "label": "AI problem",
-    "wrong": "Akọwe hit an unexpected problem (TypeError).",
-    "why": "The AI could not do this step (a usage limit, the connection or an error).",
-    "next": "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
-   },
-   "finding": {
-    "where": "akowe/akowe/book_path.py `ref_ok` (line ~340-343: `ref[\"record_id\"]` on a non-dict) called from `status()` (line ~665); `_s_format` (autobook.py line ~4455)",
-    "cause": "A wrong-typed entry in the book's path memory (`book_path:<pid>:<branch>` setting: e.g. a list where a record reference should be) raises TypeError inside `status()`. The run stops with “unexpected problem (TypeError)” (an “AI problem”), and Resume repeats it for ever. `status()` is also the book page's checklist, so the book page breaks the same way.",
-    "fix": "In `ref_ok` return None for anything that is not a dict with record_id / version (and log it once): the step then makes the format again.",
-    "severity": "blocks the book needlessly",
-    "likely": "unlikely but dangerous",
-    "what": "A damaged remembered format (wrong types) stops the run with an unexpected TypeError that Resume can never get past",
-    "repro": ""
-   },
-   "result_word": "PROBLEM",
-   "seed": 0,
-   "ran_at": "2026-11-23T09:40:21Z"
-  },
-  {
-   "id": "F-14-e",
-   "section": "F",
-   "part": "14",
-   "stress": "e",
-   "title": "empty answer → no AI here: the book's title is empty when the format is made (the author cleared it)",
-   "result": "⚠️",
-   "happened": "Stored title empty when the format step starts (restored as the fix): Stopped at step “format” with INVALID_INPUT: “Fill in the book profile (at least the title) first.” Fix offered: “Press 🔁 Try again. If it fails again, open the book and do this step yourself.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
-   "status": "paused",
-   "final_status": "done",
-   "problem_code": "INVALID_INPUT",
-   "problem_message": "Fill in the book profile (at least the title) first.",
-   "problem_fix": "Press 🔁 Try again. If it fails again, open the book and do this step yourself.",
-   "issues": [],
-   "risks": [
-    "the alert calls it an “AI problem” (“The AI could not do this step (a usage limit, the connection or an error).”) although this part makes no AI call"
-   ],
-   "notes": [
-    "This part makes no AI call; the stress is mapped to the closest real failure of the part's own work: empty input (no title for the format's title page and metadata).",
-    "Saving an empty title through the profile form: refused (MISSING_INPUT)."
-   ],
-   "faults_fired": 0,
    "ai_calls": 73,
-   "seconds": 1.95,
+   "seconds": 1.52,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -322,8 +250,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -333,7 +262,71 @@
     "CHECKPOINT",
     "ENDING_KEPT",
     "VOICE_TEST_TOO_LITTLE",
-    "INVALID_INPUT",
+    "HUMAN_PASS",
+    "OPENING_UNRESOLVED",
+    "IMPROVE_UNRESOLVED",
+    "CLEAN_RUN_SCORE",
+    "BOOK_TOO_SHORT",
+    "QUALITY_TREND"
+   ],
+   "alert": {},
+   "finding": {
+    "where": "akowe/akowe/book_path.py `ref_ok` (line ~340-343: `ref[\"record_id\"]` on a non-dict) called from `status()` (line ~665); `_s_format` (autobook.py line ~4455)",
+    "cause": "A wrong-typed entry in the book's path memory (`book_path:<pid>:<branch>` setting: e.g. a list where a record reference should be) raises TypeError inside `status()`. The run stops with “unexpected problem (TypeError)” (an “AI problem”), and Resume repeats it for ever. `status()` is also the book page's checklist, so the book page breaks the same way.",
+    "fix": "In `ref_ok` return None for anything that is not a dict with record_id / version (and log it once): the step then makes the format again.",
+    "severity": "blocks the book needlessly",
+    "likely": "unlikely but dangerous",
+    "what": "A damaged remembered format (wrong types) stops the run with an unexpected TypeError that Resume can never get past",
+    "repro": ""
+   },
+   "result_word": "HANDLED",
+   "seed": 0,
+   "ran_at": "2026-11-26T01:14:49Z"
+  },
+  {
+   "id": "F-14-e",
+   "section": "F",
+   "part": "14",
+   "stress": "e",
+   "title": "empty answer → no AI here: the book's title is empty when the format is made (the author cleared it)",
+   "result": "🟡",
+   "happened": "Stored title empty when the format step starts (restored as the fix): Stopped at step “format” with MISSING_INPUT: “The book has no title, so its format (title page, file names) cannot be made.” Fix offered: “Type a title in the book profile, then press ▶ Resume.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
+   "status": "paused",
+   "final_status": "done",
+   "problem_code": "MISSING_INPUT",
+   "problem_message": "The book has no title, so its format (title page, file names) cannot be made.",
+   "problem_fix": "Type a title in the book profile, then press ▶ Resume.",
+   "issues": [],
+   "risks": [],
+   "notes": [
+    "This part makes no AI call; the stress is mapped to the closest real failure of the part's own work: empty input (no title for the format's title page and metadata).",
+    "Saving an empty title through the profile form: refused (MISSING_INPUT)."
+   ],
+   "faults_fired": 0,
+   "ai_calls": 73,
+   "seconds": 1.48,
+   "likely": "",
+   "log_errors": 0,
+   "log_tracebacks": 0,
+   "event_codes": [
+    "VOICE_SET",
+    "VOICES_DISTINCT",
+    "DOCTOR_SCORED",
+    "DOCTOR_DONE",
+    "PREDICT_PROBED",
+    "LEDGER_EMPTY",
+    "SCOPE_SET",
+    "GRID_EMPTY",
+    "TRADE_CARD_MADE",
+    "PROTAGONIST_OK",
+    "FIRST_PAGE_PICKED",
+    "ONE_REVIEWER",
+    "PLANNED_UNRESOLVED",
+    "PLANNED_MISSING",
+    "CHECKPOINT",
+    "ENDING_KEPT",
+    "VOICE_TEST_TOO_LITTLE",
+    "MISSING_INPUT",
     "HUMAN_PASS",
     "OPENING_UNRESOLVED",
     "IMPROVE_UNRESOLVED",
@@ -342,11 +335,11 @@
     "QUALITY_TREND"
    ],
    "alert": {
-    "category": "ai",
-    "label": "AI problem",
-    "wrong": "Fill in the book profile (at least the title) first.",
-    "why": "The AI could not do this step (a usage limit, the connection or an error).",
-    "next": "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
+    "category": "book",
+    "label": "Putting the book together",
+    "wrong": "The book has no title, so its format (title page, file names) cannot be made.",
+    "why": "Akọwe could not finish putting the book together (no AI works in this step).",
+    "next": "Fix the cause it names if you can, then press 🔁 Try again. Nothing written so far is lost."
    },
    "finding": {
     "where": "akowe/akowe/alerts.py `category_of` (line ~83-106): the steps format / assemble / export / check are not in `STEP_CAT` (line ~53) and INTERNAL_ERROR / UPSTREAM_UNAVAILABLE / CAPABILITY_UNAVAILABLE are in `AI_CODES` (line ~57), so every stop here falls through to “ai”; the message comes from akowe/akowe/book_path.py `StepError` (line ~1256: “<op> could not be created (<status>).”) via akowe/akowe/autobook.py `_run` (line ~1495)",
@@ -357,9 +350,9 @@
     "what": "An empty stored title stops the format with the right words (“Fill in the book profile (at least the title) first.”) but the alert calls it an AI problem",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:40:21Z"
+   "ran_at": "2026-11-26T01:14:49Z"
   },
   {
    "id": "F-14-f",
@@ -367,24 +360,21 @@
    "part": "14",
    "stress": "f",
    "title": "the AI refuses repeatedly → no AI here: the part's module refuses (BLOCKED) every time",
-   "result": "⚠️",
-   "happened": "The part's module refuses (BLOCKED) every time until the cause is removed: Stopped at step “format” with CAPABILITY_UNAVAILABLE: “I01 could not be created (BLOCKED).” Fix offered: “Press 🔁 Try again. If it fails again, open the book and do this step yourself.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
+   "result": "🟡",
+   "happened": "The part's module refuses (BLOCKED) every time until the cause is removed: Stopped at step “format” with CAPABILITY_UNAVAILABLE: “The book format could not be made: stress: the module refuses (BLOCKED).” Fix offered: “Press 🔁 Try again. If it fails again, open the book and do this step yourself.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
    "status": "paused",
    "final_status": "done",
    "problem_code": "CAPABILITY_UNAVAILABLE",
-   "problem_message": "I01 could not be created (BLOCKED).",
+   "problem_message": "The book format could not be made: stress: the module refuses (BLOCKED).",
    "problem_fix": "Press 🔁 Try again. If it fails again, open the book and do this step yourself.",
    "issues": [],
-   "risks": [
-    "the alert calls it an “AI problem” (“The AI could not do this step (a usage limit, the connection or an error).”) although this part makes no AI call",
-    "the message is a module code (“I01 could not be created (BLOCKED).”), not what went wrong in plain words"
-   ],
+   "risks": [],
    "notes": [
     "This part makes no AI call; the stress is mapped to the closest real failure of the part's own work: the part's module refuses its work (BLOCKED) repeatedly."
    ],
    "faults_fired": 0,
    "ai_calls": 73,
-   "seconds": 1.59,
+   "seconds": 1.7,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -394,8 +384,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -414,11 +405,11 @@
     "QUALITY_TREND"
    ],
    "alert": {
-    "category": "ai",
-    "label": "AI problem",
-    "wrong": "I01 could not be created (BLOCKED).",
-    "why": "The AI could not do this step (a usage limit, the connection or an error).",
-    "next": "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
+    "category": "book",
+    "label": "Putting the book together",
+    "wrong": "CAPABILITY_UNAVAILABLE: stress: the module refuses (BLOCKED) (at /payload)",
+    "why": "Akọwe could not finish putting the book together (no AI works in this step).",
+    "next": "Fix the cause it names if you can, then press 🔁 Try again. Nothing written so far is lost."
    },
    "finding": {
     "where": "akowe/akowe/alerts.py `category_of` (line ~83-106): the steps format / assemble / export / check are not in `STEP_CAT` (line ~53) and INTERNAL_ERROR / UPSTREAM_UNAVAILABLE / CAPABILITY_UNAVAILABLE are in `AI_CODES` (line ~57), so every stop here falls through to “ai”; the message comes from akowe/akowe/book_path.py `StepError` (line ~1256: “<op> could not be created (<status>).”) via akowe/akowe/autobook.py `_run` (line ~1495)",
@@ -429,9 +420,9 @@
     "what": "The format module refusing is shown as “I01 could not be created (BLOCKED).”, called an AI problem",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:40:21Z"
+   "ran_at": "2026-11-26T01:14:49Z"
   },
   {
    "id": "F-14-g",
@@ -439,21 +430,19 @@
    "part": "14",
    "stress": "g",
    "title": "the part's own code raises an unexpected Python exception",
-   "result": "⚠️",
-   "happened": "The part's own code raises: Stopped at step “format” with INTERNAL_ERROR: “Akọwe hit an unexpected problem (KeyError).” Fix offered: “Press 🔁 Try again. If it keeps happening, use 📋 Copy diagnostics.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
+   "result": "🟡",
+   "happened": "The part's own code raises: Stopped at step “format” with INTERNAL_ERROR: “Akọwe hit an unexpected error in “Book format” — press ▶ Resume to try again.” Fix offered: “Press ▶ Resume to try this step again — nothing written so far is lost. If it happens again, use 📋 Copy diagnostics and send it in.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
    "status": "paused",
    "final_status": "done",
    "problem_code": "INTERNAL_ERROR",
-   "problem_message": "Akọwe hit an unexpected problem (KeyError).",
-   "problem_fix": "Press 🔁 Try again. If it keeps happening, use 📋 Copy diagnostics.",
+   "problem_message": "Akọwe hit an unexpected error in “Book format” — press ▶ Resume to try again.",
+   "problem_fix": "Press ▶ Resume to try this step again — nothing written so far is lost. If it happens again, use 📋 Copy diagnostics and send it in.",
    "issues": [],
-   "risks": [
-    "the alert calls a fault in Akọwe's own code an “AI problem” (“The AI could not do this step (a usage limit, the connection or an error).”), so the author looks for the fault in the AI"
-   ],
+   "risks": [],
    "notes": [],
    "faults_fired": 0,
    "ai_calls": 73,
-   "seconds": 1.6,
+   "seconds": 1.37,
    "likely": "",
    "log_errors": 1,
    "log_tracebacks": 1,
@@ -463,8 +452,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -483,11 +473,11 @@
     "QUALITY_TREND"
    ],
    "alert": {
-    "category": "ai",
-    "label": "AI problem",
-    "wrong": "Akọwe hit an unexpected problem (KeyError).",
-    "why": "The AI could not do this step (a usage limit, the connection or an error).",
-    "next": "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
+    "category": "akowe",
+    "label": "Akọwe problem",
+    "wrong": "Akọwe hit an unexpected error in “Book format” — press ▶ Resume to try again.",
+    "why": "Something went wrong inside Akọwe itself — not the AI and not your book.",
+    "next": "Press ▶ Resume to try this step again; nothing written so far is lost. If it happens again, use 📋 Copy diagnostics and send it in."
    },
    "finding": {
     "where": "akowe/akowe/autobook.py `_run` (line ~1510: any exception → INTERNAL_ERROR “Akọwe hit an unexpected problem”) and akowe/akowe/alerts.py `category_of` (INTERNAL_ERROR in `AI_CODES`)",
@@ -498,9 +488,9 @@
     "what": "A bug in the part's own code is shown as an “AI problem”",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:40:21Z"
+   "ran_at": "2026-11-26T01:14:49Z"
   },
   {
    "id": "F-14-h",
@@ -520,7 +510,7 @@
    "notes": [],
    "faults_fired": 0,
    "ai_calls": 73,
-   "seconds": 1.75,
+   "seconds": 1.51,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -530,8 +520,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -552,7 +543,7 @@
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:40:21Z"
+   "ran_at": "2026-11-26T01:14:49Z"
   },
   {
    "id": "F-14-i",
@@ -572,7 +563,7 @@
    "notes": [],
    "faults_fired": 0,
    "ai_calls": 73,
-   "seconds": 4.28,
+   "seconds": 3.67,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -582,8 +573,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -604,7 +596,7 @@
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:40:21Z"
+   "ran_at": "2026-11-26T01:14:49Z"
   },
   {
    "id": "F-14-j",
@@ -612,23 +604,19 @@
    "part": "14",
    "stress": "j",
    "title": "the most likely real-life problem: the author renames the book (and changes the page size) right after the format was made, before the book is put together",
-   "result": "❌",
-   "happened": "Renamed after the format: Stopped at step “assemble” with INVALID_INPUT: “Approve every chapter and the book format first.” Fix offered: “Press 🔁 Try again. If it fails again, open the book and do this step yourself.”. Resume did not finish: paused INVALID_INPUT. — Page size changed to 5 × 8 in after the format: Stopped at step “assemble” with INVALID_INPUT: “Approve every chapter and the book format first.” Fix offered: “Press 🔁 Try again. If it fails again, open the book and do this step yourself.”. Resume did not finish: paused INVALID_INPUT.",
-   "status": "paused",
-   "final_status": "paused",
-   "problem_code": "INVALID_INPUT",
-   "problem_message": "Approve every chapter and the book format first.",
-   "problem_fix": "Press 🔁 Try again. If it fails again, open the book and do this step yourself.",
-   "issues": [
-    "Resume could not finish the book (status paused, INVALID_INPUT: Approve every chapter and the book format first.)"
-   ],
-   "risks": [
-    "the alert calls it an “AI problem” (“The AI could not do this step (a usage limit, the connection or an error).”) although this part makes no AI call"
-   ],
+   "result": "✅",
+   "happened": "Renamed after the format: The book finished with nothing lost. — Page size changed to 5 × 8 in after the format: The book finished with nothing lost.",
+   "status": "done",
+   "final_status": "done",
+   "problem_code": "",
+   "problem_message": "",
+   "problem_fix": "",
+   "issues": [],
+   "risks": [],
    "notes": [],
    "faults_fired": 0,
-   "ai_calls": 138,
-   "seconds": 2.05,
+   "ai_calls": 146,
+   "seconds": 2.93,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -638,8 +626,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -649,15 +638,15 @@
     "CHECKPOINT",
     "ENDING_KEPT",
     "VOICE_TEST_TOO_LITTLE",
-    "INVALID_INPUT"
+    "BOOK_AGAIN",
+    "HUMAN_PASS",
+    "OPENING_UNRESOLVED",
+    "IMPROVE_UNRESOLVED",
+    "CLEAN_RUN_SCORE",
+    "BOOK_TOO_SHORT",
+    "QUALITY_TREND"
    ],
-   "alert": {
-    "category": "ai",
-    "label": "AI problem",
-    "wrong": "Approve every chapter and the book format first.",
-    "why": "The AI could not do this step (a usage limit, the connection or an error).",
-    "next": "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
-   },
+   "alert": {},
    "finding": {
     "where": "akowe/akowe/autobook.py `_s_assemble` / `_s_export` / `_s_check` (lines ~4463-4500, ~4665): each one only does its own step; akowe/akowe/book_path.py `a_assemble` (line ~1141 “Approve every chapter and the book format first.”), `a_export` (line ~1199) and `a_check` (line ~1244 “Put the book together and approve it first.”) refuse when an EARLIER step became out of date; the run resumes at its current step (autobook.py `_run`, line ~1371) and never goes back; the out-of-date test is `BookPath.format_out_of_date` (line ~462)",
     "cause": "Renaming the book (or changing the page size) after the format was made marks the format out of date (title / author / trim in the I01 records differ from the profile). `_s_assemble` calls `a_assemble`, which refuses; 🔁 Try again and ▶ Resume start again at assemble and refuse the same way, for ever. This is the root cause of the second half of A-2-u.",
@@ -667,9 +656,9 @@
     "what": "Renaming the book or changing the page size after the format step makes the run stop at assemble with “Approve every chapter and the book format first.”, and Resume can never finish it",
     "repro": ""
    },
-   "result_word": "PROBLEM",
+   "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:40:21Z"
+   "ran_at": "2026-11-26T01:14:49Z"
   },
   {
    "id": "F-14-k",
@@ -677,7 +666,7 @@
    "part": "14",
    "stress": "k",
    "title": "a 3,000-character title and author name with control characters and a NUL byte",
-   "result": "⚠️",
+   "result": "✅",
    "happened": "Stored 3,000-character title, author “Ann⧵0e ESC[31mBell BEL”: The book finished with nothing lost.",
    "status": "done",
    "final_status": "done",
@@ -685,15 +674,13 @@
    "problem_message": "",
    "problem_fix": "",
    "issues": [],
-   "risks": [
-    "the 3,000-character title is used unshortened for the files (file names, metadata)"
-   ],
+   "risks": [],
    "notes": [
     "Through the profile form: title refused (INVALID_INPUT: title is limited to 200 characters); author accepted."
    ],
    "faults_fired": 0,
    "ai_calls": 73,
-   "seconds": 1.88,
+   "seconds": 1.47,
    "likely": "unlikely but dangerous",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -703,8 +690,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -731,9 +719,9 @@
     "what": "A very long stored title is used unshortened in the exported files",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:40:21Z"
+   "ran_at": "2026-11-26T01:14:49Z"
   },
   {
    "id": "F-14-l",
@@ -753,7 +741,7 @@
    "notes": [],
    "faults_fired": 0,
    "ai_calls": 73,
-   "seconds": 1.68,
+   "seconds": 1.35,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -763,8 +751,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -785,7 +774,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:40:21Z"
+   "ran_at": "2026-11-26T01:14:49Z"
   },
   {
    "id": "F-14-m",
@@ -805,7 +794,7 @@
    "notes": [],
    "faults_fired": 0,
    "ai_calls": 146,
-   "seconds": 2.98,
+   "seconds": 2.91,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -815,8 +804,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -837,7 +827,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:40:21Z"
+   "ran_at": "2026-11-26T01:14:49Z"
   },
   {
    "id": "F-15-a",
@@ -861,7 +851,7 @@
    ],
    "faults_fired": 0,
    "ai_calls": 146,
-   "seconds": 9.16,
+   "seconds": 9.03,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -871,8 +861,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -893,7 +884,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:40:21Z"
+   "ran_at": "2026-11-26T01:14:49Z"
   },
   {
    "id": "F-15-b",
@@ -912,11 +903,11 @@
    "risks": [],
    "notes": [
     "This part makes no AI call; the stress is mapped to the closest real failure of the part's own work: the database is busy (a real SQLite write lock held by another program), then frees it.",
-    "Lock taken: True; the part waited and finished after 3.2 s."
+    "Lock taken: True; the part waited and finished after 3.3 s."
    ],
    "faults_fired": 0,
    "ai_calls": 73,
-   "seconds": 4.69,
+   "seconds": 4.42,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -926,8 +917,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -948,7 +940,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:40:21Z"
+   "ran_at": "2026-11-26T01:14:49Z"
   },
   {
    "id": "F-15-c",
@@ -956,25 +948,22 @@
    "part": "15",
    "stress": "c",
    "title": "every AI at its usage limit → no AI here: the disk is full while the part writes, then space is freed",
-   "result": "⚠️",
-   "happened": "Disk full (“database or disk is full”) while the part writes, then space freed: Stopped at step “assemble” with UPSTREAM_UNAVAILABLE: “G02 could not be created (BLOCKED).” Fix offered: “Press 🔁 Try again. If it fails again, open the book and do this step yourself.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
+   "result": "🟡",
+   "happened": "Disk full (“database or disk is full”) while the part writes, then space freed: Stopped at step “assemble” with UPSTREAM_UNAVAILABLE: “The chapter list could not be saved: the disk is full.” Fix offered: “Free some space on the disk Akọwe saves to, then press 🔁 Try again. Nothing written so far is lost.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
    "status": "paused",
    "final_status": "done",
    "problem_code": "UPSTREAM_UNAVAILABLE",
-   "problem_message": "G02 could not be created (BLOCKED).",
-   "problem_fix": "Press 🔁 Try again. If it fails again, open the book and do this step yourself.",
+   "problem_message": "The chapter list could not be saved: the disk is full.",
+   "problem_fix": "Free some space on the disk Akọwe saves to, then press 🔁 Try again. Nothing written so far is lost.",
    "issues": [],
-   "risks": [
-    "the alert calls it an “AI problem” (“The AI could not do this step (a usage limit, the connection or an error).”) although this part makes no AI call",
-    "the message is a module code (“G02 could not be created (BLOCKED).”), not what went wrong in plain words"
-   ],
+   "risks": [],
    "notes": [
     "This part makes no AI call; the stress is mapped to the closest real failure of the part's own work: the disk is full while the part writes, then space is freed.",
     "The engine logged the storage failure with its traceback (ERROR “storage unavailable”, on purpose; no book text)."
    ],
    "faults_fired": 0,
    "ai_calls": 73,
-   "seconds": 1.52,
+   "seconds": 1.78,
    "likely": "",
    "log_errors": 1,
    "log_tracebacks": 1,
@@ -984,8 +973,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -1004,11 +994,11 @@
     "QUALITY_TREND"
    ],
    "alert": {
-    "category": "ai",
-    "label": "AI problem",
-    "wrong": "G02 could not be created (BLOCKED).",
-    "why": "The AI could not do this step (a usage limit, the connection or an error).",
-    "next": "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
+    "category": "book",
+    "label": "Putting the book together",
+    "wrong": "UPSTREAM_UNAVAILABLE: storage unavailable: database or disk is full",
+    "why": "Akọwe could not finish putting the book together (no AI works in this step).",
+    "next": "Fix the cause it names if you can, then press 🔁 Try again. Nothing written so far is lost."
    },
    "finding": {
     "where": "akowe/akowe/alerts.py `category_of` (line ~83-106): the steps format / assemble / export / check are not in `STEP_CAT` (line ~53) and INTERNAL_ERROR / UPSTREAM_UNAVAILABLE / CAPABILITY_UNAVAILABLE are in `AI_CODES` (line ~57), so every stop here falls through to “ai”; the message comes from akowe/akowe/book_path.py `StepError` (line ~1256: “<op> could not be created (<status>).”) via akowe/akowe/autobook.py `_run` (line ~1495)",
@@ -1019,9 +1009,9 @@
     "what": "Disk full while the book is put together: “G02 could not be created (BLOCKED).”, called an AI problem",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:40:21Z"
+   "ran_at": "2026-11-26T01:14:49Z"
   },
   {
    "id": "F-15-d",
@@ -1029,93 +1019,21 @@
    "part": "15",
    "stress": "d",
    "title": "garbage answer → no AI here: the remembered assembly is garbage (wrong types in the book's path memory)",
-   "result": "❌",
-   "happened": "Garbage in the remembered assembly: Stopped at step “assemble” with INTERNAL_ERROR: “Akọwe hit an unexpected problem (TypeError).” Fix offered: “Press 🔁 Try again. If it keeps happening, use 📋 Copy diagnostics.”. Resume did not finish: paused INTERNAL_ERROR.",
-   "status": "paused",
-   "final_status": "paused",
-   "problem_code": "INTERNAL_ERROR",
-   "problem_message": "Akọwe hit an unexpected problem (TypeError).",
-   "problem_fix": "Press 🔁 Try again. If it keeps happening, use 📋 Copy diagnostics.",
-   "issues": [
-    "an unexpected Python exception stopped the run (INTERNAL_ERROR)",
-    "Resume could not finish the book (status paused, INTERNAL_ERROR: Akọwe hit an unexpected problem (TypeError).)",
-    "unexpected traceback in the log: make-a-book run run-a382fe9d8901: unexpected problem in step assemble"
-   ],
-   "risks": [
-    "the alert calls a fault in Akọwe's own code an “AI problem” (“The AI could not do this step (a usage limit, the connection or an error).”), so the author looks for the fault in the AI"
-   ],
-   "notes": [
-    "This part makes no AI call; the stress is mapped to the closest real failure of the part's own work: garbage input (the remembered assembly is wrong types)."
-   ],
-   "faults_fired": 0,
-   "ai_calls": 69,
-   "seconds": 0.97,
-   "likely": "",
-   "log_errors": 2,
-   "log_tracebacks": 2,
-   "event_codes": [
-    "VOICE_SET",
-    "VOICES_DISTINCT",
-    "DOCTOR_SCORED",
-    "DOCTOR_DONE",
-    "PREDICT_PROBED",
-    "SCOPE_SET",
-    "GRID_FAILED",
-    "TRADE_CARD_MADE",
-    "PROTAGONIST_OK",
-    "FIRST_PAGE_PICKED",
-    "ONE_REVIEWER",
-    "PLANNED_UNRESOLVED",
-    "PLANNED_MISSING",
-    "CHECKPOINT",
-    "ENDING_KEPT",
-    "VOICE_TEST_TOO_LITTLE",
-    "INTERNAL_ERROR"
-   ],
-   "alert": {
-    "category": "ai",
-    "label": "AI problem",
-    "wrong": "Akọwe hit an unexpected problem (TypeError).",
-    "why": "The AI could not do this step (a usage limit, the connection or an error).",
-    "next": "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
-   },
-   "finding": {
-    "where": "as F-14-d (`ref_ok` line ~343, via `status()` line ~679)",
-    "cause": "As F-14-d for the remembered assembly.",
-    "fix": "As F-14-d.",
-    "severity": "blocks the book needlessly",
-    "likely": "unlikely but dangerous",
-    "what": "A damaged remembered assembly stops the run with an unexpected TypeError that Resume can never get past",
-    "repro": ""
-   },
-   "result_word": "PROBLEM",
-   "seed": 0,
-   "ran_at": "2026-11-23T09:40:21Z"
-  },
-  {
-   "id": "F-15-e",
-   "section": "F",
-   "part": "15",
-   "stress": "e",
-   "title": "empty answer → no AI here: the author empties a chapter (one space) and approves it just before the book is put together",
-   "result": "⚠️",
-   "happened": "The author empties chapter 2 (one space; refused → a single “.”) and approves it: The book finished with nothing lost.",
+   "result": "✅",
+   "happened": "Garbage in the remembered assembly: The book finished with nothing lost.",
    "status": "done",
    "final_status": "done",
    "problem_code": "",
    "problem_message": "",
    "problem_fix": "",
    "issues": [],
-   "risks": [
-    "a book whose chapter 2 is “.” (empty / one character) was put together, exported and passed the content check; only the general “much shorter than planned” note is shown, nothing names the empty chapter"
-   ],
+   "risks": [],
    "notes": [
-    "This part makes no AI call; the stress is mapped to the closest real failure of the part's own work: empty input (an empty approved chapter).",
-    "Saving a chapter of one space: {'status': 'REJECTED', 'errors': ['INVALID_INPUT']}; a chapter of “.”: {'status': 'DRAFT', 'errors': [], 'approved': True}."
+    "This part makes no AI call; the stress is mapped to the closest real failure of the part's own work: garbage input (the remembered assembly is wrong types)."
    ],
    "faults_fired": 0,
-   "ai_calls": 75,
-   "seconds": 1.56,
+   "ai_calls": 73,
+   "seconds": 1.63,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -1125,8 +1043,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -1136,6 +1055,72 @@
     "CHECKPOINT",
     "ENDING_KEPT",
     "VOICE_TEST_TOO_LITTLE",
+    "HUMAN_PASS",
+    "OPENING_UNRESOLVED",
+    "IMPROVE_UNRESOLVED",
+    "CLEAN_RUN_SCORE",
+    "BOOK_TOO_SHORT",
+    "QUALITY_TREND"
+   ],
+   "alert": {},
+   "finding": {
+    "where": "as F-14-d (`ref_ok` line ~343, via `status()` line ~679)",
+    "cause": "As F-14-d for the remembered assembly.",
+    "fix": "As F-14-d.",
+    "severity": "blocks the book needlessly",
+    "likely": "unlikely but dangerous",
+    "what": "A damaged remembered assembly stops the run with an unexpected TypeError that Resume can never get past",
+    "repro": ""
+   },
+   "result_word": "HANDLED",
+   "seed": 0,
+   "ran_at": "2026-11-26T01:14:49Z"
+  },
+  {
+   "id": "F-15-e",
+   "section": "F",
+   "part": "15",
+   "stress": "e",
+   "title": "empty answer → no AI here: the author empties a chapter (one space) and approves it just before the book is put together",
+   "result": "✅",
+   "happened": "The author empties chapter 2 (one space; refused → a single “.”) and approves it: The book finished with nothing lost.",
+   "status": "done",
+   "final_status": "done",
+   "problem_code": "",
+   "problem_message": "",
+   "problem_fix": "",
+   "issues": [],
+   "risks": [],
+   "notes": [
+    "This part makes no AI call; the stress is mapped to the closest real failure of the part's own work: empty input (an empty approved chapter).",
+    "The run named the almost-empty chapter: “⚠️ Chapter 2 is almost empty (fewer than 60 words) but approved: the book was put together with it as it is. Write more and approve it, then put the book together and export it again.”",
+    "Saving a chapter of one space: {'status': 'REJECTED', 'errors': ['INVALID_INPUT']}; a chapter of “.”: {'status': 'DRAFT', 'errors': [], 'approved': True}."
+   ],
+   "faults_fired": 0,
+   "ai_calls": 75,
+   "seconds": 1.57,
+   "likely": "",
+   "log_errors": 0,
+   "log_tracebacks": 0,
+   "event_codes": [
+    "VOICE_SET",
+    "VOICES_DISTINCT",
+    "DOCTOR_SCORED",
+    "DOCTOR_DONE",
+    "PREDICT_PROBED",
+    "LEDGER_EMPTY",
+    "SCOPE_SET",
+    "GRID_EMPTY",
+    "TRADE_CARD_MADE",
+    "PROTAGONIST_OK",
+    "FIRST_PAGE_PICKED",
+    "ONE_REVIEWER",
+    "PLANNED_UNRESOLVED",
+    "PLANNED_MISSING",
+    "CHECKPOINT",
+    "ENDING_KEPT",
+    "VOICE_TEST_TOO_LITTLE",
+    "CHAPTER_NEARLY_EMPTY",
     "HUMAN_PASS",
     "OPENING_UNRESOLVED",
     "IMPROVE_NOTHING",
@@ -1154,9 +1139,9 @@
     "what": "A practically empty chapter goes into the finished book without a word about that chapter",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:40:21Z"
+   "ran_at": "2026-11-26T01:14:49Z"
   },
   {
    "id": "F-15-f",
@@ -1164,24 +1149,21 @@
    "part": "15",
    "stress": "f",
    "title": "the AI refuses repeatedly → no AI here: the part's module refuses (BLOCKED) every time",
-   "result": "⚠️",
-   "happened": "The part's module refuses (BLOCKED) every time until the cause is removed: Stopped at step “assemble” with CAPABILITY_UNAVAILABLE: “G05 could not be created (BLOCKED).” Fix offered: “Press 🔁 Try again. If it fails again, open the book and do this step yourself.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
+   "result": "🟡",
+   "happened": "The part's module refuses (BLOCKED) every time until the cause is removed: Stopped at step “assemble” with CAPABILITY_UNAVAILABLE: “The typeset book could not be made: stress: the module refuses (BLOCKED).” Fix offered: “Press 🔁 Try again. If it fails again, open the book and do this step yourself.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
    "status": "paused",
    "final_status": "done",
    "problem_code": "CAPABILITY_UNAVAILABLE",
-   "problem_message": "G05 could not be created (BLOCKED).",
+   "problem_message": "The typeset book could not be made: stress: the module refuses (BLOCKED).",
    "problem_fix": "Press 🔁 Try again. If it fails again, open the book and do this step yourself.",
    "issues": [],
-   "risks": [
-    "the alert calls it an “AI problem” (“The AI could not do this step (a usage limit, the connection or an error).”) although this part makes no AI call",
-    "the message is a module code (“G05 could not be created (BLOCKED).”), not what went wrong in plain words"
-   ],
+   "risks": [],
    "notes": [
     "This part makes no AI call; the stress is mapped to the closest real failure of the part's own work: the part's module refuses its work (BLOCKED) repeatedly."
    ],
    "faults_fired": 0,
    "ai_calls": 73,
-   "seconds": 1.68,
+   "seconds": 1.61,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -1191,8 +1173,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -1211,11 +1194,11 @@
     "QUALITY_TREND"
    ],
    "alert": {
-    "category": "ai",
-    "label": "AI problem",
-    "wrong": "G05 could not be created (BLOCKED).",
-    "why": "The AI could not do this step (a usage limit, the connection or an error).",
-    "next": "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
+    "category": "book",
+    "label": "Putting the book together",
+    "wrong": "CAPABILITY_UNAVAILABLE: stress: the module refuses (BLOCKED) (at /payload)",
+    "why": "Akọwe could not finish putting the book together (no AI works in this step).",
+    "next": "Fix the cause it names if you can, then press 🔁 Try again. Nothing written so far is lost."
    },
    "finding": {
     "where": "akowe/akowe/alerts.py `category_of` (line ~83-106): the steps format / assemble / export / check are not in `STEP_CAT` (line ~53) and INTERNAL_ERROR / UPSTREAM_UNAVAILABLE / CAPABILITY_UNAVAILABLE are in `AI_CODES` (line ~57), so every stop here falls through to “ai”; the message comes from akowe/akowe/book_path.py `StepError` (line ~1256: “<op> could not be created (<status>).”) via akowe/akowe/autobook.py `_run` (line ~1495)",
@@ -1226,9 +1209,9 @@
     "what": "An assembly module refusing (G05) is shown as “G05 could not be created (BLOCKED).”, called an AI problem",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:40:21Z"
+   "ran_at": "2026-11-26T01:14:49Z"
   },
   {
    "id": "F-15-g",
@@ -1236,21 +1219,19 @@
    "part": "15",
    "stress": "g",
    "title": "the part's own code raises an unexpected Python exception",
-   "result": "⚠️",
-   "happened": "The part's own code raises: Stopped at step “assemble” with INTERNAL_ERROR: “Akọwe hit an unexpected problem (KeyError).” Fix offered: “Press 🔁 Try again. If it keeps happening, use 📋 Copy diagnostics.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
+   "result": "🟡",
+   "happened": "The part's own code raises: Stopped at step “assemble” with INTERNAL_ERROR: “Akọwe hit an unexpected error in “Put the book together” — press ▶ Resume to try again.” Fix offered: “Press ▶ Resume to try this step again — nothing written so far is lost. If it happens again, use 📋 Copy diagnostics and send it in.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
    "status": "paused",
    "final_status": "done",
    "problem_code": "INTERNAL_ERROR",
-   "problem_message": "Akọwe hit an unexpected problem (KeyError).",
-   "problem_fix": "Press 🔁 Try again. If it keeps happening, use 📋 Copy diagnostics.",
+   "problem_message": "Akọwe hit an unexpected error in “Put the book together” — press ▶ Resume to try again.",
+   "problem_fix": "Press ▶ Resume to try this step again — nothing written so far is lost. If it happens again, use 📋 Copy diagnostics and send it in.",
    "issues": [],
-   "risks": [
-    "the alert calls a fault in Akọwe's own code an “AI problem” (“The AI could not do this step (a usage limit, the connection or an error).”), so the author looks for the fault in the AI"
-   ],
+   "risks": [],
    "notes": [],
    "faults_fired": 0,
    "ai_calls": 73,
-   "seconds": 1.67,
+   "seconds": 1.51,
    "likely": "",
    "log_errors": 1,
    "log_tracebacks": 1,
@@ -1260,8 +1241,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -1280,11 +1262,11 @@
     "QUALITY_TREND"
    ],
    "alert": {
-    "category": "ai",
-    "label": "AI problem",
-    "wrong": "Akọwe hit an unexpected problem (KeyError).",
-    "why": "The AI could not do this step (a usage limit, the connection or an error).",
-    "next": "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
+    "category": "akowe",
+    "label": "Akọwe problem",
+    "wrong": "Akọwe hit an unexpected error in “Put the book together” — press ▶ Resume to try again.",
+    "why": "Something went wrong inside Akọwe itself — not the AI and not your book.",
+    "next": "Press ▶ Resume to try this step again; nothing written so far is lost. If it happens again, use 📋 Copy diagnostics and send it in."
    },
    "finding": {
     "where": "akowe/akowe/autobook.py `_run` (line ~1510: any exception → INTERNAL_ERROR “Akọwe hit an unexpected problem”) and akowe/akowe/alerts.py `category_of` (INTERNAL_ERROR in `AI_CODES`)",
@@ -1295,9 +1277,9 @@
     "what": "A bug in the part's own code is shown as an “AI problem”",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:40:21Z"
+   "ran_at": "2026-11-26T01:14:49Z"
   },
   {
    "id": "F-15-h",
@@ -1317,7 +1299,7 @@
    "notes": [],
    "faults_fired": 0,
    "ai_calls": 73,
-   "seconds": 1.62,
+   "seconds": 1.67,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -1327,8 +1309,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -1349,7 +1332,7 @@
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:40:21Z"
+   "ran_at": "2026-11-26T01:14:49Z"
   },
   {
    "id": "F-15-i",
@@ -1369,7 +1352,7 @@
    "notes": [],
    "faults_fired": 0,
    "ai_calls": 73,
-   "seconds": 4.53,
+   "seconds": 3.92,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -1379,8 +1362,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -1401,7 +1385,7 @@
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:40:21Z"
+   "ran_at": "2026-11-26T01:14:49Z"
   },
   {
    "id": "F-15-j",
@@ -1409,25 +1393,19 @@
    "part": "15",
    "stress": "j",
    "title": "the most likely real-life problem: a chapter holds characters the PDF fonts cannot print (an emoji written by the AI; a stray byte-order mark from pasted text)",
-   "result": "⚠️",
-   "happened": "The AI writes an emoji into chapter 1: Stopped at step “assemble” with CAPABILITY_UNAVAILABLE: “G05 could not be created (BLOCKED).” Fix offered: “Press 🔁 Try again. If it fails again, open the book and do this step yourself.”. After the fault was removed, ▶ Resume finished the book with nothing lost. — A byte-order mark (U+FEFF, invisible) pasted at the start of chapter 2: The book finished with nothing lost.",
-   "status": "paused",
+   "result": "✅",
+   "happened": "The AI writes an emoji into chapter 1: The book finished with nothing lost. — A byte-order mark (U+FEFF, invisible) pasted at the start of chapter 2: The book finished with nothing lost.",
+   "status": "done",
    "final_status": "done",
-   "problem_code": "CAPABILITY_UNAVAILABLE",
-   "problem_message": "G05 could not be created (BLOCKED).",
-   "problem_fix": "Press 🔁 Try again. If it fails again, open the book and do this step yourself.",
+   "problem_code": "",
+   "problem_message": "",
+   "problem_fix": "",
    "issues": [],
-   "risks": [
-    "the stop names the module “G05”, not the chapter or the characters to change",
-    "one unprintable character in one chapter stops the WHOLE book at “Put the book together”: the EPUB and Word files (which could print it) are not made either",
-    "the alert calls it an “AI problem” (“The AI could not do this step (a usage limit, the connection or an error).”) although this part makes no AI call",
-    "the message is a module code (“G05 could not be created (BLOCKED).”), not what went wrong in plain words",
-    "the alert files it as an “AI problem”"
-   ],
+   "risks": [],
    "notes": [],
    "faults_fired": 1,
-   "ai_calls": 150,
-   "seconds": 3.06,
+   "ai_calls": 148,
+   "seconds": 3.28,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -1437,8 +1415,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -1448,24 +1427,17 @@
     "CHECKPOINT",
     "ENDING_KEPT",
     "VOICE_TEST_TOO_LITTLE",
-    "CAPABILITY_UNAVAILABLE",
+    "PDF_LETTERS_REPLACED",
     "HUMAN_PASS",
-    "OPENING_SKIPPED",
+    "OPENING_UNRESOLVED",
     "IMPROVE_UNRESOLVED",
-    "FINAL_CHECK_AGAIN",
     "CLEAN_RUN_SCORE",
     "BOOK_TOO_SHORT",
     "QUALITY_TREND",
-    "OPENING_UNRESOLVED",
-    "IMPROVE_NOTHING"
+    "IMPROVE_NOTHING",
+    "FINAL_CHECK_AGAIN"
    ],
-   "alert": {
-    "category": "ai",
-    "label": "AI problem",
-    "wrong": "G05 could not be created (BLOCKED).",
-    "why": "The AI could not do this step (a usage limit, the connection or an error).",
-    "next": "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
-   },
+   "alert": {},
    "finding": {
     "where": "akowe/akowe/modules/set_g.py G05 `build` (line ~687-691) blocks the whole assembly; the warning at approval (akowe/akowe/book_path.py `letters_warning`, line ~98) is only returned to a hand approval, not to the run",
     "cause": "One character the PDF fonts cannot print (an emoji the AI wrote; an invisible byte-order mark pasted from Notepad / Word) anywhere in one chapter blocks G05, so nothing is assembled and NO file is made — also the EPUB and Word files that could carry it. The stop names “G05”, not the chapter or the character; the alert says “AI problem”.",
@@ -1475,9 +1447,9 @@
     "what": "An emoji written by the AI, or an invisible byte-order mark in pasted text, stops the whole book at assemble with “G05 could not be created (BLOCKED)”",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:40:21Z"
+   "ran_at": "2026-11-26T01:14:49Z"
   },
   {
    "id": "F-15-k",
@@ -1485,27 +1457,21 @@
    "part": "15",
    "stress": "k",
    "title": "A-2-u confirmed and extended: an Arabic (or emoji) title stops the book at assemble; the author renames it and presses Resume / Try again",
-   "result": "❌",
-   "happened": "Arabic title: stopped at “assemble” with CAPABILITY_UNAVAILABLE: “G05 could not be created (BLOCKED).” (alert category “ai”). Try again: paused CAPABILITY_UNAVAILABLE. Renamed to a Latin title (book checklist: format “ready” out of date), ▶ Resume: paused INVALID_INPUT “Approve every chapter and the book format first.”. After the author made and approved the format again by hand, ▶ Resume: done BOOK_TOO_SHORT. — Emoji title: stopped at “assemble” with CAPABILITY_UNAVAILABLE: “G05 could not be created (BLOCKED).” (alert category “ai”). Try again: paused CAPABILITY_UNAVAILABLE. Renamed to a Latin title (book checklist: format “ready” out of date), ▶ Resume: paused INVALID_INPUT “Approve every chapter and the book format first.”. After the author made and approved the format again by hand, ▶ Resume: done BOOK_TOO_SHORT. — Yorùbá + Cyrillic + Greek title (fonts can print it): the book finished (assembled, exported and checked) with nothing lost.",
-   "status": "paused",
+   "result": "✅",
+   "happened": "Arabic title: the book finished (assembled, exported and checked) with nothing lost. — Emoji title: the book finished (assembled, exported and checked) with nothing lost. — Yorùbá + Cyrillic + Greek title (fonts can print it): the book finished (assembled, exported and checked) with nothing lost.",
+   "status": "done",
    "final_status": "done",
-   "problem_code": "CAPABILITY_UNAVAILABLE",
-   "problem_message": "G05 could not be created (BLOCKED).",
-   "problem_fix": "Press 🔁 Try again. If it fails again, open the book and do this step yourself.",
-   "issues": [
-    "the book stops at “assemble” because of the title",
-    "the message names “G05”, not the title",
-    "after renaming, Resume still cannot finish (INVALID_INPUT: “Approve every chapter and the book format first.”) — the run does not go back to remake the format"
-   ],
-   "risks": [
-    "the alert calls it an AI problem"
-   ],
+   "problem_code": "",
+   "problem_message": "",
+   "problem_fix": "",
+   "issues": [],
+   "risks": [],
    "notes": [
-    "What the PDF fonts can print (exporters.unifont.uncovered): Yorùbá ọ ẹ ṣ with tone marks: prints; Greek: prints; Cyrillic: prints; Vietnamese: prints; Arabic: blocks; Hebrew: blocks; Chinese / Japanese: blocks; Hindi (Devanagari): blocks; emoji: blocks; byte-order mark U+FEFF: blocks; NUL: blocks; zero-width space / joiner: prints; right-to-left override: prints."
+    "What the PDF fonts can print (exporters.unifont.uncovered / printable): Yorùbá ọ ẹ ṣ with tone marks: prints; Greek: prints; Cyrillic: prints; Vietnamese: prints; Arabic: □ in the PDF only (never stops the book); Hebrew: □ in the PDF only (never stops the book); Chinese / Japanese: □ in the PDF only (never stops the book); Hindi (Devanagari): □ in the PDF only (never stops the book); emoji: □ in the PDF only (never stops the book); byte-order mark U+FEFF: left out (invisible); NUL: left out (invisible); zero-width space / joiner: prints; right-to-left override: prints."
    ],
    "faults_fired": 3,
    "ai_calls": 219,
-   "seconds": 5.44,
+   "seconds": 4.54,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -1515,8 +1481,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -1526,8 +1493,7 @@
     "CHECKPOINT",
     "ENDING_KEPT",
     "VOICE_TEST_TOO_LITTLE",
-    "CAPABILITY_UNAVAILABLE",
-    "INVALID_INPUT",
+    "PDF_LETTERS_REPLACED",
     "HUMAN_PASS",
     "OPENING_UNRESOLVED",
     "IMPROVE_UNRESOLVED",
@@ -1535,12 +1501,7 @@
     "BOOK_TOO_SHORT",
     "QUALITY_TREND"
    ],
-   "alert": {
-    "category": "ai",
-    "label": "AI problem",
-    "why": "The AI could not do this step (a usage limit, the connection or an error).",
-    "next": "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
-   },
+   "alert": {},
    "finding": {
     "where": "akowe/akowe/modules/set_g.py G05 `build` (line ~687-691: `uncovered(...)` → CAPABILITY_UNAVAILABLE BLOCKED); akowe/akowe/book_path.py `StepError` message (“G05 could not be created (BLOCKED).”); akowe/akowe/autobook.py `_s_profile` (takes any title); then the same no-going-back as F-14-j (`a_assemble` line ~1141)",
     "cause": "A-2-u CONFIRMED and narrowed down. (1) The Arabic / emoji title stops the book at assemble: G05 checks the WHOLE manuscript, title page included, against the PDF fonts; one letter blocks all three files. (2) 🔁 Try again repeats the same refusal. (3) After renaming to a Latin title, ▶ Resume stops with “Approve every chapter and the book format first.” because the format (made with the old title) is now out of date and the run does not go back to remake it (F-14-j). (4) NEW: the way out exists — make the book format again by hand on the Book format page, approve it, press ▶ Resume: the book then finishes with nothing lost; but nothing tells the author to do that. (5) NEW: Yorùbá with tone marks, Greek, Cyrillic and Vietnamese titles print fine; Arabic, Hebrew, Chinese / Japanese, Hindi, emoji, a byte-order mark and NUL block (see the note).",
@@ -1550,9 +1511,9 @@
     "what": "A-2-u confirmed: an Arabic or emoji title stops the book at assemble (“G05 could not be created (BLOCKED)”, called an AI problem); Try again repeats it; renaming then Resume fails because the format is out of date; only remaking the format by hand gets the book out",
     "repro": ""
    },
-   "result_word": "PROBLEM",
+   "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:40:21Z"
+   "ran_at": "2026-11-26T01:14:49Z"
   },
   {
    "id": "F-15-l",
@@ -1560,25 +1521,21 @@
    "part": "15",
    "stress": "l",
    "title": "characters the PDF fonts cannot print in the chapter text, typed by the author (Chinese, Hebrew, Hindi); and a NUL byte",
-   "result": "⚠️",
-   "happened": "Chinese + Hebrew + Hindi words added to chapter 1: Stopped at step “assemble” with CAPABILITY_UNAVAILABLE: “G05 could not be created (BLOCKED).” Fix offered: “Press 🔁 Try again. If it fails again, open the book and do this step yourself.”. After the fault was removed, ▶ Resume finished the book with nothing lost. — A NUL byte added to chapter 1: The book finished with nothing lost.",
-   "status": "paused",
+   "result": "✅",
+   "happened": "Chinese + Hebrew + Hindi words added to chapter 1: The book finished with nothing lost. — A NUL byte added to chapter 1: The book finished with nothing lost.",
+   "status": "done",
    "final_status": "done",
-   "problem_code": "CAPABILITY_UNAVAILABLE",
-   "problem_message": "G05 could not be created (BLOCKED).",
-   "problem_fix": "Press 🔁 Try again. If it fails again, open the book and do this step yourself.",
+   "problem_code": "",
+   "problem_message": "",
+   "problem_fix": "",
    "issues": [],
-   "risks": [
-    "the stop does not say which chapter holds the characters",
-    "the alert calls it an “AI problem” (“The AI could not do this step (a usage limit, the connection or an error).”) although this part makes no AI call",
-    "the message is a module code (“G05 could not be created (BLOCKED).”), not what went wrong in plain words"
-   ],
+   "risks": [],
    "notes": [
     "The author's edit: {'status': 'DRAFT', 'errors': [], 'approved': True}."
    ],
    "faults_fired": 0,
    "ai_calls": 150,
-   "seconds": 3.29,
+   "seconds": 3.37,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -1588,8 +1545,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -1599,7 +1557,7 @@
     "CHECKPOINT",
     "ENDING_KEPT",
     "VOICE_TEST_TOO_LITTLE",
-    "CAPABILITY_UNAVAILABLE",
+    "PDF_LETTERS_REPLACED",
     "HUMAN_PASS",
     "OPENING_SKIPPED",
     "IMPROVE_UNRESOLVED",
@@ -1608,13 +1566,7 @@
     "BOOK_TOO_SHORT",
     "QUALITY_TREND"
    ],
-   "alert": {
-    "category": "ai",
-    "label": "AI problem",
-    "wrong": "G05 could not be created (BLOCKED).",
-    "why": "The AI could not do this step (a usage limit, the connection or an error).",
-    "next": "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
-   },
+   "alert": {},
    "finding": {
     "where": "as F-15-j (set_g.py G05 `build` line ~687-691)",
     "cause": "Chinese, Hebrew or Hindi words (or a NUL byte) in a chapter block G05 the same way; the stop does not say which chapter. After the author removed them and approved, ▶ Resume finished the book.",
@@ -1624,9 +1576,9 @@
     "what": "Foreign-script words typed into a chapter stop the book at assemble without saying which chapter",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:40:21Z"
+   "ran_at": "2026-11-26T01:14:49Z"
   },
   {
    "id": "F-15-m",
@@ -1644,11 +1596,11 @@
    "issues": [],
    "risks": [],
    "notes": [
-    "Whole run 103.3 s; format 0.25 s, assemble 1.63 s, export 1.19 s, content check 0.12 s (seconds of Akọwe's own work; 836 Practice-AI calls)."
+    "Whole run 86.7 s; format 0.18 s, assemble 1.29 s, export 1.26 s, content check 0.21 s (seconds of Akọwe's own work; 836 Practice-AI calls)."
    ],
    "faults_fired": 0,
    "ai_calls": 836,
-   "seconds": 103.35,
+   "seconds": 86.75,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -1676,7 +1628,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:40:21Z"
+   "ran_at": "2026-11-26T01:14:49Z"
   },
   {
    "id": "F-15-n",
@@ -1694,11 +1646,11 @@
    "issues": [],
    "risks": [],
    "notes": [
-    "The edit: {'status': 'DRAFT', 'errors': [], 'approved': True}. Akọwe's own work: format 0.12 s, assemble 15.85 s, export 10.02 s, content check 0.11 s."
+    "The edit: {'status': 'DRAFT', 'errors': [], 'approved': True}. Akọwe's own work: format 0.1 s, assemble 12.94 s, export 8.13 s, content check 0.14 s."
    ],
    "faults_fired": 0,
    "ai_calls": 111,
-   "seconds": 48.11,
+   "seconds": 40.21,
    "likely": "unlikely but dangerous",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -1708,8 +1660,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -1730,7 +1683,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:40:21Z"
+   "ran_at": "2026-11-26T01:14:49Z"
   },
   {
    "id": "F-15-o",
@@ -1738,7 +1691,7 @@
    "part": "15",
    "stress": "o",
    "title": "the author saves a new (unapproved) draft of chapter 1 while the book is being put together",
-   "result": "⚠️",
+   "result": "✅",
    "happened": "A new draft of chapter 1 saved during assembly (not approved): The book finished with nothing lost.",
    "status": "done",
    "final_status": "done",
@@ -1746,13 +1699,13 @@
    "problem_message": "",
    "problem_fix": "",
    "issues": [],
-   "risks": [
-    "the run finished while the author's newer draft of chapter 1 is still waiting (DRAFT); the files carry the older approved text and the finished run does not mention the waiting draft"
+   "risks": [],
+   "notes": [
+    "The finished run named the waiting draft: “📝 Chapter 1 has a newer draft that is not approved: the files carry the approved text. Approve the newer draft in the book if you want it, then put the book together and export it again.”"
    ],
-   "notes": [],
    "faults_fired": 0,
    "ai_calls": 73,
-   "seconds": 1.94,
+   "seconds": 1.74,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -1762,8 +1715,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -1776,6 +1730,7 @@
     "HUMAN_PASS",
     "OPENING_UNRESOLVED",
     "IMPROVE_UNRESOLVED",
+    "DRAFT_WAITING",
     "CLEAN_RUN_SCORE",
     "BOOK_TOO_SHORT",
     "QUALITY_TREND"
@@ -1790,9 +1745,9 @@
     "what": "A newer, unapproved draft saved during the run is silently left out of the files",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:40:21Z"
+   "ran_at": "2026-11-26T01:14:49Z"
   },
   {
    "id": "F-16-a",
@@ -1801,7 +1756,7 @@
    "stress": "a",
    "title": "the AI times out → no AI here: the PDF writer is slow (3 s once; every file 3 s), and the PDF writer stuck until removed",
    "result": "⚠️",
-   "happened": "Once 3 s slower: The book finished with nothing lost. — Every call 3 s slower: The book finished with nothing lost. — PDF writer stuck: after 12 s the run still said “Pausing after the current answer…” (status pausing); ⏸ Pause → status pausing (“Pausing after the current answer…”) while the writer stays stuck. When the writer came back the run ended as paused. ▶ Resume: done.",
+   "happened": "Once 3 s slower: The book finished with nothing lost. — Every call 3 s slower: The book finished with nothing lost. — PDF writer stuck: after 12 s the run still said “Pausing after this step…” (status pausing); ⏸ Pause → status pausing (“Pausing after this step…”) while the writer stays stuck. When the writer came back the run ended as paused. ▶ Resume: done.",
    "status": "hang",
    "final_status": "done",
    "problem_code": "",
@@ -1809,7 +1764,7 @@
    "problem_fix": "",
    "issues": [],
    "risks": [
-    "a stuck PDF writer has no time limit: the run keeps working forever; ⏸ Pause only says “Pausing after the current answer…” (there is no AI answer in this step) and takes effect only when the writer returns"
+    "a stuck PDF writer has no time limit: the run keeps working forever; ⏸ Pause only says “Pausing after this step…” (there is no AI answer in this step) and takes effect only when the writer returns"
    ],
    "notes": [
     "This part makes no AI call; the stress is mapped to the closest real failure of the part's own work: the part's own work is slow (a slow disk, an antivirus scan, a big book).",
@@ -1818,7 +1773,7 @@
    ],
    "faults_fired": 0,
    "ai_calls": 219,
-   "seconds": 23.48,
+   "seconds": 23.15,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -1828,8 +1783,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -1858,7 +1814,7 @@
    },
    "result_word": "WORKED BUT RISKY",
    "seed": 0,
-   "ran_at": "2026-11-23T09:40:21Z"
+   "ran_at": "2026-11-26T01:14:49Z"
   },
   {
    "id": "F-16-b",
@@ -1881,7 +1837,7 @@
    ],
    "faults_fired": 0,
    "ai_calls": 73,
-   "seconds": 4.63,
+   "seconds": 4.53,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -1891,8 +1847,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -1913,7 +1870,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:40:21Z"
+   "ran_at": "2026-11-26T01:14:49Z"
   },
   {
    "id": "F-16-c",
@@ -1921,20 +1878,159 @@
    "part": "16",
    "stress": "c",
    "title": "every AI at its usage limit → no AI here: the disk is full while the PDF is written (ENOSPC), then space is freed",
-   "result": "⚠️",
-   "happened": "Disk full (ENOSPC) for every exported file, then space freed: Stopped at step “export” with INVALID_INPUT: “Some files could not be made.” Fix offered: “Press 🔁 Try again.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
+   "result": "🟡",
+   "happened": "Disk full (ENOSPC) for every exported file, then space freed: Stopped at step “export” with INVALID_INPUT: “The disk is full: the PDF, EPUB, DOCX file could not be saved.” Fix offered: “Free some space on the disk, then press 🔁 Try again.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
    "status": "paused",
    "final_status": "done",
    "problem_code": "INVALID_INPUT",
-   "problem_message": "Some files could not be made.",
-   "problem_fix": "Press 🔁 Try again.",
+   "problem_message": "The disk is full: the PDF, EPUB, DOCX file could not be saved.",
+   "problem_fix": "Free some space on the disk, then press 🔁 Try again.",
    "issues": [],
-   "risks": [
-    "the alert calls it an “AI problem” (“The AI could not do this step (a usage limit, the connection or an error).”) although this part makes no AI call"
-   ],
+   "risks": [],
    "notes": [
     "This part makes no AI call; the stress is mapped to the closest real failure of the part's own work: the disk is full while the exported file is written.",
     "3 file write(s) failed."
+   ],
+   "faults_fired": 0,
+   "ai_calls": 73,
+   "seconds": 1.6,
+   "likely": "",
+   "log_errors": 0,
+   "log_tracebacks": 0,
+   "event_codes": [
+    "VOICE_SET",
+    "VOICES_DISTINCT",
+    "DOCTOR_SCORED",
+    "DOCTOR_DONE",
+    "PREDICT_PROBED",
+    "LEDGER_EMPTY",
+    "SCOPE_SET",
+    "GRID_EMPTY",
+    "TRADE_CARD_MADE",
+    "PROTAGONIST_OK",
+    "FIRST_PAGE_PICKED",
+    "ONE_REVIEWER",
+    "PLANNED_UNRESOLVED",
+    "PLANNED_MISSING",
+    "CHECKPOINT",
+    "ENDING_KEPT",
+    "VOICE_TEST_TOO_LITTLE",
+    "INVALID_INPUT",
+    "HUMAN_PASS",
+    "OPENING_UNRESOLVED",
+    "IMPROVE_UNRESOLVED",
+    "CLEAN_RUN_SCORE",
+    "BOOK_TOO_SHORT",
+    "QUALITY_TREND"
+   ],
+   "alert": {
+    "category": "book",
+    "label": "Putting the book together",
+    "wrong": "PDF: The PDF file could not be made: Akọwe could not save the file (is the disk full or the data folder read-only? OSError). INTERNAL_ERROR: Akọwe could not save the file (is the disk full or the data folder read-only?…",
+    "why": "Akọwe could not finish putting the book together (no AI works in this step).",
+    "next": "Fix the cause it names if you can, then press 🔁 Try again. Nothing written so far is lost."
+   },
+   "finding": {
+    "where": "akowe/akowe/alerts.py `category_of` (line ~83-106): the steps format / assemble / export / check are not in `STEP_CAT` (line ~53) and INTERNAL_ERROR / UPSTREAM_UNAVAILABLE / CAPABILITY_UNAVAILABLE are in `AI_CODES` (line ~57), so every stop here falls through to “ai”; the message comes from akowe/akowe/book_path.py `StepError` (line ~1256: “<op> could not be created (<status>).”) via akowe/akowe/autobook.py `_run` (line ~1495)",
+    "cause": "Section F's parts make no AI call, but the alert's category is chosen from the problem code and the step; neither knows these steps, so the author reads “AI problem — The AI could not do this step (a usage limit, the connection or an error)” and “connect or switch an AI first”. A refusal of a module is shown as its code (“G05 could not be created (BLOCKED).”) while the plain reason sits only in the problem's details.",
+    "fix": "Add format / assemble / export / check to `STEP_CAT` as a “book” category (“Putting the book together”), and build the message from the first error of the refusal (e.g. “The disk is full”, “These letters cannot be printed: …”) instead of the module code.",
+    "severity": "confusing message",
+    "likely": "likely in real use",
+    "what": "Disk full for every exported file: “Some files could not be made.”, called an AI problem; Resume finishes once space is free",
+    "repro": ""
+   },
+   "result_word": "SAFE STOP",
+   "seed": 0,
+   "ran_at": "2026-11-26T01:14:49Z"
+  },
+  {
+   "id": "F-16-d",
+   "section": "F",
+   "part": "16",
+   "stress": "d",
+   "title": "garbage answer → no AI here: the PDF writer returns garbage bytes (not a PDF); and a broken Word file (truncated zip)",
+   "result": "🟡",
+   "happened": "PDF writer returns garbage: Stopped at step “export” with HASH_MISMATCH: “The PDF file Akọwe made does not read back correctly, even when made again: PDF does not parse: missing %PDF- header” Fix offered: “Press 🔁 Try again. If it fails again, use 📋 Copy diagnostics.”. After the fault was removed, ▶ Resume finished the book with nothing lost. — Word writer returns a truncated zip (200 bytes): Stopped at step “export” with HASH_MISMATCH: “The DOCX file Akọwe made does not read back correctly, even when made again: DOCX is not a readable ZIP: File is not a zip file” Fix offered: “Press 🔁 Try again. If it fails again, use 📋 Copy diagnostics.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
+   "status": "paused",
+   "final_status": "done",
+   "problem_code": "HASH_MISMATCH",
+   "problem_message": "The PDF file Akọwe made does not read back correctly, even when made again: PDF does not parse: missing %PDF- header",
+   "problem_fix": "Press 🔁 Try again. If it fails again, use 📋 Copy diagnostics.",
+   "issues": [],
+   "risks": [],
+   "notes": [
+    "This part makes no AI call; the stress is mapped to the closest real failure of the part's own work: garbage output of the file writers."
+   ],
+   "faults_fired": 0,
+   "ai_calls": 146,
+   "seconds": 3.64,
+   "likely": "",
+   "log_errors": 0,
+   "log_tracebacks": 0,
+   "event_codes": [
+    "VOICE_SET",
+    "VOICES_DISTINCT",
+    "DOCTOR_SCORED",
+    "DOCTOR_DONE",
+    "PREDICT_PROBED",
+    "LEDGER_EMPTY",
+    "SCOPE_SET",
+    "GRID_EMPTY",
+    "TRADE_CARD_MADE",
+    "PROTAGONIST_OK",
+    "FIRST_PAGE_PICKED",
+    "ONE_REVIEWER",
+    "PLANNED_UNRESOLVED",
+    "PLANNED_MISSING",
+    "CHECKPOINT",
+    "ENDING_KEPT",
+    "VOICE_TEST_TOO_LITTLE",
+    "EXPORT_REMADE",
+    "HASH_MISMATCH",
+    "HUMAN_PASS",
+    "OPENING_UNRESOLVED",
+    "IMPROVE_UNRESOLVED",
+    "CLEAN_RUN_SCORE",
+    "BOOK_TOO_SHORT",
+    "QUALITY_TREND"
+   ],
+   "alert": {
+    "category": "book",
+    "label": "Putting the book together",
+    "wrong": "PDF: PDF does not parse: missing %PDF- header",
+    "why": "Akọwe could not finish putting the book together (no AI works in this step).",
+    "next": "Fix the cause it names if you can, then press 🔁 Try again. Nothing written so far is lost."
+   },
+   "finding": {
+    "where": "akowe/akowe/autobook.py `_s_export` (line ~4480: `if s[\"state\"] != \"done\"` — when the files exist the step only re-reads them, line ~4490-4496)",
+    "cause": "A bad file that was stored once (here: the PDF writer returned garbage; the Word writer a truncated zip) makes the checklist's export step “done”, so every 🔁 Try again / ▶ Resume only re-reads the same stored bad file and stops again with HASH_MISMATCH “The PDF file does not read back…”. The files are never made again, even after the cause is gone.",
+    "fix": "When the re-read fails, make that file again once (call `_export_under_consent`) before stopping; never store a file that `verify_file` refuses.",
+    "severity": "blocks the book needlessly",
+    "likely": "unlikely but dangerous",
+    "what": "A file that failed its re-read once is never made again: Try again / Resume loop on the same bad file for ever",
+    "repro": ""
+   },
+   "result_word": "SAFE STOP",
+   "seed": 0,
+   "ran_at": "2026-11-26T01:14:49Z"
+  },
+  {
+   "id": "F-16-e",
+   "section": "F",
+   "part": "16",
+   "stress": "e",
+   "title": "empty answer → no AI here: the PDF writer returns 0 bytes",
+   "result": "🟡",
+   "happened": "PDF writer returns 0 bytes: Stopped at step “export” with HASH_MISMATCH: “The PDF file Akọwe made does not read back correctly, even when made again: PDF does not parse: missing %PDF- header” Fix offered: “Press 🔁 Try again. If it fails again, use 📋 Copy diagnostics.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
+   "status": "paused",
+   "final_status": "done",
+   "problem_code": "HASH_MISMATCH",
+   "problem_message": "The PDF file Akọwe made does not read back correctly, even when made again: PDF does not parse: missing %PDF- header",
+   "problem_fix": "Press 🔁 Try again. If it fails again, use 📋 Copy diagnostics.",
+   "issues": [],
+   "risks": [],
+   "notes": [
+    "This part makes no AI call; the stress is mapped to the closest real failure of the part's own work: empty output of the PDF writer."
    ],
    "faults_fired": 0,
    "ai_calls": 73,
@@ -1948,8 +2044,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -1959,7 +2056,8 @@
     "CHECKPOINT",
     "ENDING_KEPT",
     "VOICE_TEST_TOO_LITTLE",
-    "INVALID_INPUT",
+    "EXPORT_REMADE",
+    "HASH_MISMATCH",
     "HUMAN_PASS",
     "OPENING_UNRESOLVED",
     "IMPROVE_UNRESOLVED",
@@ -1968,146 +2066,11 @@
     "QUALITY_TREND"
    ],
    "alert": {
-    "category": "ai",
-    "label": "AI problem",
-    "wrong": "Some files could not be made.",
-    "why": "The AI could not do this step (a usage limit, the connection or an error).",
-    "next": "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
-   },
-   "finding": {
-    "where": "akowe/akowe/alerts.py `category_of` (line ~83-106): the steps format / assemble / export / check are not in `STEP_CAT` (line ~53) and INTERNAL_ERROR / UPSTREAM_UNAVAILABLE / CAPABILITY_UNAVAILABLE are in `AI_CODES` (line ~57), so every stop here falls through to “ai”; the message comes from akowe/akowe/book_path.py `StepError` (line ~1256: “<op> could not be created (<status>).”) via akowe/akowe/autobook.py `_run` (line ~1495)",
-    "cause": "Section F's parts make no AI call, but the alert's category is chosen from the problem code and the step; neither knows these steps, so the author reads “AI problem — The AI could not do this step (a usage limit, the connection or an error)” and “connect or switch an AI first”. A refusal of a module is shown as its code (“G05 could not be created (BLOCKED).”) while the plain reason sits only in the problem's details.",
-    "fix": "Add format / assemble / export / check to `STEP_CAT` as a “book” category (“Putting the book together”), and build the message from the first error of the refusal (e.g. “The disk is full”, “These letters cannot be printed: …”) instead of the module code.",
-    "severity": "confusing message",
-    "likely": "likely in real use",
-    "what": "Disk full for every exported file: “Some files could not be made.”, called an AI problem; Resume finishes once space is free",
-    "repro": ""
-   },
-   "result_word": "WORKED BUT RISKY",
-   "seed": 0,
-   "ran_at": "2026-11-23T09:40:21Z"
-  },
-  {
-   "id": "F-16-d",
-   "section": "F",
-   "part": "16",
-   "stress": "d",
-   "title": "garbage answer → no AI here: the PDF writer returns garbage bytes (not a PDF); and a broken Word file (truncated zip)",
-   "result": "❌",
-   "happened": "PDF writer returns garbage: Stopped at step “export” with HASH_MISMATCH: “The PDF file does not read back: PDF does not parse: missing %PDF- header” Fix offered: “Press 🔁 Try again.”. Resume did not finish: paused HASH_MISMATCH. — Word writer returns a truncated zip (200 bytes): Stopped at step “export” with HASH_MISMATCH: “The DOCX file does not read back: DOCX is not a readable ZIP: File is not a zip file” Fix offered: “Press 🔁 Try again.”. Resume did not finish: paused HASH_MISMATCH.",
-   "status": "paused",
-   "final_status": "paused",
-   "problem_code": "HASH_MISMATCH",
-   "problem_message": "The PDF file does not read back: PDF does not parse: missing %PDF- header",
-   "problem_fix": "Press 🔁 Try again.",
-   "issues": [
-    "Resume could not finish the book (status paused, HASH_MISMATCH: The PDF file does not read back: PDF does not parse: missing %PDF- header)",
-    "Resume could not finish the book (status paused, HASH_MISMATCH: The DOCX file does not read back: DOCX is not a readable ZIP: File is not a zip file)"
-   ],
-   "risks": [
-    "the alert calls it an “AI problem” (“The AI could not do this step (a usage limit, the connection or an error).”) although this part makes no AI call"
-   ],
-   "notes": [
-    "This part makes no AI call; the stress is mapped to the closest real failure of the part's own work: garbage output of the file writers."
-   ],
-   "faults_fired": 0,
-   "ai_calls": 138,
-   "seconds": 2.73,
-   "likely": "",
-   "log_errors": 0,
-   "log_tracebacks": 0,
-   "event_codes": [
-    "VOICE_SET",
-    "VOICES_DISTINCT",
-    "DOCTOR_SCORED",
-    "DOCTOR_DONE",
-    "PREDICT_PROBED",
-    "SCOPE_SET",
-    "GRID_FAILED",
-    "TRADE_CARD_MADE",
-    "PROTAGONIST_OK",
-    "FIRST_PAGE_PICKED",
-    "ONE_REVIEWER",
-    "PLANNED_UNRESOLVED",
-    "PLANNED_MISSING",
-    "CHECKPOINT",
-    "ENDING_KEPT",
-    "VOICE_TEST_TOO_LITTLE",
-    "HASH_MISMATCH"
-   ],
-   "alert": {
-    "category": "ai",
-    "label": "AI problem",
-    "wrong": "The PDF file does not read back: PDF does not parse: missing %PDF- header",
-    "why": "The AI could not do this step (a usage limit, the connection or an error).",
-    "next": "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
-   },
-   "finding": {
-    "where": "akowe/akowe/autobook.py `_s_export` (line ~4480: `if s[\"state\"] != \"done\"` — when the files exist the step only re-reads them, line ~4490-4496)",
-    "cause": "A bad file that was stored once (here: the PDF writer returned garbage; the Word writer a truncated zip) makes the checklist's export step “done”, so every 🔁 Try again / ▶ Resume only re-reads the same stored bad file and stops again with HASH_MISMATCH “The PDF file does not read back…”. The files are never made again, even after the cause is gone.",
-    "fix": "When the re-read fails, make that file again once (call `_export_under_consent`) before stopping; never store a file that `verify_file` refuses.",
-    "severity": "blocks the book needlessly",
-    "likely": "unlikely but dangerous",
-    "what": "A file that failed its re-read once is never made again: Try again / Resume loop on the same bad file for ever",
-    "repro": ""
-   },
-   "result_word": "PROBLEM",
-   "seed": 0,
-   "ran_at": "2026-11-23T09:40:21Z"
-  },
-  {
-   "id": "F-16-e",
-   "section": "F",
-   "part": "16",
-   "stress": "e",
-   "title": "empty answer → no AI here: the PDF writer returns 0 bytes",
-   "result": "❌",
-   "happened": "PDF writer returns 0 bytes: Stopped at step “export” with HASH_MISMATCH: “The PDF file does not read back: PDF does not parse: missing %PDF- header” Fix offered: “Press 🔁 Try again.”. Resume did not finish: paused HASH_MISMATCH.",
-   "status": "paused",
-   "final_status": "paused",
-   "problem_code": "HASH_MISMATCH",
-   "problem_message": "The PDF file does not read back: PDF does not parse: missing %PDF- header",
-   "problem_fix": "Press 🔁 Try again.",
-   "issues": [
-    "Resume could not finish the book (status paused, HASH_MISMATCH: The PDF file does not read back: PDF does not parse: missing %PDF- header)"
-   ],
-   "risks": [
-    "the alert calls it an “AI problem” (“The AI could not do this step (a usage limit, the connection or an error).”) although this part makes no AI call"
-   ],
-   "notes": [
-    "This part makes no AI call; the stress is mapped to the closest real failure of the part's own work: empty output of the PDF writer."
-   ],
-   "faults_fired": 0,
-   "ai_calls": 69,
-   "seconds": 1.4,
-   "likely": "",
-   "log_errors": 0,
-   "log_tracebacks": 0,
-   "event_codes": [
-    "VOICE_SET",
-    "VOICES_DISTINCT",
-    "DOCTOR_SCORED",
-    "DOCTOR_DONE",
-    "PREDICT_PROBED",
-    "SCOPE_SET",
-    "GRID_FAILED",
-    "TRADE_CARD_MADE",
-    "PROTAGONIST_OK",
-    "FIRST_PAGE_PICKED",
-    "ONE_REVIEWER",
-    "PLANNED_UNRESOLVED",
-    "PLANNED_MISSING",
-    "CHECKPOINT",
-    "ENDING_KEPT",
-    "VOICE_TEST_TOO_LITTLE",
-    "HASH_MISMATCH"
-   ],
-   "alert": {
-    "category": "ai",
-    "label": "AI problem",
-    "wrong": "The PDF file does not read back: PDF does not parse: missing %PDF- header",
-    "why": "The AI could not do this step (a usage limit, the connection or an error).",
-    "next": "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
+    "category": "book",
+    "label": "Putting the book together",
+    "wrong": "PDF: PDF does not parse: missing %PDF- header",
+    "why": "Akọwe could not finish putting the book together (no AI works in this step).",
+    "next": "Fix the cause it names if you can, then press 🔁 Try again. Nothing written so far is lost."
    },
    "finding": {
     "where": "as F-16-d",
@@ -2118,9 +2081,9 @@
     "what": "An empty PDF that was stored once is never made again; Resume loops on it",
     "repro": ""
    },
-   "result_word": "PROBLEM",
+   "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:40:21Z"
+   "ran_at": "2026-11-26T01:14:49Z"
   },
   {
    "id": "F-16-f",
@@ -2128,23 +2091,21 @@
    "part": "16",
    "stress": "f",
    "title": "the AI refuses repeatedly → no AI here: the part's module refuses (BLOCKED) every time",
-   "result": "⚠️",
-   "happened": "The part's module refuses (BLOCKED) every time until the cause is removed: Stopped at step “export” with INVALID_INPUT: “Some files could not be made.” Fix offered: “Press 🔁 Try again.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
+   "result": "🟡",
+   "happened": "The part's module refuses (BLOCKED) every time until the cause is removed: Stopped at step “export” with INVALID_INPUT: “Some files could not be made: PDF: The PDF file could not be made: stress: the module refuses (BLOCKED). CAPABILITY_UNAVAILABLE: stress: the module refuses (BLOCKED) (at /payload)” Fix offered: “Press 🔁 Try again.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
    "status": "paused",
    "final_status": "done",
    "problem_code": "INVALID_INPUT",
-   "problem_message": "Some files could not be made.",
+   "problem_message": "Some files could not be made: PDF: The PDF file could not be made: stress: the module refuses (BLOCKED). CAPABILITY_UNAVAILABLE: stress: the module refuses (BLOCKED) (at /payload)",
    "problem_fix": "Press 🔁 Try again.",
    "issues": [],
-   "risks": [
-    "the alert calls it an “AI problem” (“The AI could not do this step (a usage limit, the connection or an error).”) although this part makes no AI call"
-   ],
+   "risks": [],
    "notes": [
     "This part makes no AI call; the stress is mapped to the closest real failure of the part's own work: the part's module refuses its work (BLOCKED) repeatedly."
    ],
    "faults_fired": 0,
    "ai_calls": 73,
-   "seconds": 1.55,
+   "seconds": 1.57,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -2154,8 +2115,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -2174,11 +2136,11 @@
     "QUALITY_TREND"
    ],
    "alert": {
-    "category": "ai",
-    "label": "AI problem",
-    "wrong": "Some files could not be made.",
-    "why": "The AI could not do this step (a usage limit, the connection or an error).",
-    "next": "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
+    "category": "book",
+    "label": "Putting the book together",
+    "wrong": "PDF: The PDF file could not be made: stress: the module refuses (BLOCKED). CAPABILITY_UNAVAILABLE: stress: the module refuses (BLOCKED) (at /payload)",
+    "why": "Akọwe could not finish putting the book together (no AI works in this step).",
+    "next": "Fix the cause it names if you can, then press 🔁 Try again. Nothing written so far is lost."
    },
    "finding": {
     "where": "akowe/akowe/alerts.py `category_of` (line ~83-106): the steps format / assemble / export / check are not in `STEP_CAT` (line ~53) and INTERNAL_ERROR / UPSTREAM_UNAVAILABLE / CAPABILITY_UNAVAILABLE are in `AI_CODES` (line ~57), so every stop here falls through to “ai”; the message comes from akowe/akowe/book_path.py `StepError` (line ~1256: “<op> could not be created (<status>).”) via akowe/akowe/autobook.py `_run` (line ~1495)",
@@ -2189,9 +2151,9 @@
     "what": "Every export module refusing: “Some files could not be made.”, called an AI problem",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:40:21Z"
+   "ran_at": "2026-11-26T01:14:49Z"
   },
   {
    "id": "F-16-g",
@@ -2199,21 +2161,19 @@
    "part": "16",
    "stress": "g",
    "title": "the part's own code raises an unexpected Python exception",
-   "result": "⚠️",
-   "happened": "The part's own code raises: Stopped at step “export” with INTERNAL_ERROR: “Akọwe hit an unexpected problem (KeyError).” Fix offered: “Press 🔁 Try again. If it keeps happening, use 📋 Copy diagnostics.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
+   "result": "🟡",
+   "happened": "The part's own code raises: Stopped at step “export” with INTERNAL_ERROR: “Akọwe hit an unexpected error in “Export PDF, EPUB and Word” — press ▶ Resume to try again.” Fix offered: “Press ▶ Resume to try this step again — nothing written so far is lost. If it happens again, use 📋 Copy diagnostics and send it in.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
    "status": "paused",
    "final_status": "done",
    "problem_code": "INTERNAL_ERROR",
-   "problem_message": "Akọwe hit an unexpected problem (KeyError).",
-   "problem_fix": "Press 🔁 Try again. If it keeps happening, use 📋 Copy diagnostics.",
+   "problem_message": "Akọwe hit an unexpected error in “Export PDF, EPUB and Word” — press ▶ Resume to try again.",
+   "problem_fix": "Press ▶ Resume to try this step again — nothing written so far is lost. If it happens again, use 📋 Copy diagnostics and send it in.",
    "issues": [],
-   "risks": [
-    "the alert calls a fault in Akọwe's own code an “AI problem” (“The AI could not do this step (a usage limit, the connection or an error).”), so the author looks for the fault in the AI"
-   ],
+   "risks": [],
    "notes": [],
    "faults_fired": 0,
    "ai_calls": 73,
-   "seconds": 1.56,
+   "seconds": 1.57,
    "likely": "",
    "log_errors": 1,
    "log_tracebacks": 1,
@@ -2223,8 +2183,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -2243,11 +2204,11 @@
     "QUALITY_TREND"
    ],
    "alert": {
-    "category": "ai",
-    "label": "AI problem",
-    "wrong": "Akọwe hit an unexpected problem (KeyError).",
-    "why": "The AI could not do this step (a usage limit, the connection or an error).",
-    "next": "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
+    "category": "akowe",
+    "label": "Akọwe problem",
+    "wrong": "Akọwe hit an unexpected error in “Export PDF, EPUB and Word” — press ▶ Resume to try again.",
+    "why": "Something went wrong inside Akọwe itself — not the AI and not your book.",
+    "next": "Press ▶ Resume to try this step again; nothing written so far is lost. If it happens again, use 📋 Copy diagnostics and send it in."
    },
    "finding": {
     "where": "akowe/akowe/autobook.py `_run` (line ~1510: any exception → INTERNAL_ERROR “Akọwe hit an unexpected problem”) and akowe/akowe/alerts.py `category_of` (INTERNAL_ERROR in `AI_CODES`)",
@@ -2258,9 +2219,9 @@
     "what": "A bug in the part's own code is shown as an “AI problem”",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:40:21Z"
+   "ran_at": "2026-11-26T01:14:49Z"
   },
   {
    "id": "F-16-h",
@@ -2290,8 +2251,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -2312,7 +2274,7 @@
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:40:21Z"
+   "ran_at": "2026-11-26T01:14:49Z"
   },
   {
    "id": "F-16-i",
@@ -2332,7 +2294,7 @@
    "notes": [],
    "faults_fired": 0,
    "ai_calls": 73,
-   "seconds": 4.23,
+   "seconds": 4.33,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -2342,8 +2304,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -2364,7 +2327,7 @@
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:40:21Z"
+   "ran_at": "2026-11-26T01:14:49Z"
   },
   {
    "id": "F-16-j",
@@ -2372,24 +2335,21 @@
    "part": "16",
    "stress": "j",
    "title": "the most likely real-life problem: the disk fills up while the PDF is being written (the PDF fails, EPUB and Word were fine); space is freed, ▶ Resume",
-   "result": "⚠️",
-   "happened": "Disk full while the PDF is written: Stopped at step “export” with INVALID_INPUT: “Some files could not be made.” Fix offered: “Press 🔁 Try again.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
+   "result": "🟡",
+   "happened": "Disk full while the PDF is written: Stopped at step “export” with INVALID_INPUT: “The disk is full: the PDF file could not be saved.” Fix offered: “Free some space on the disk, then press 🔁 Try again.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
    "status": "paused",
    "final_status": "done",
    "problem_code": "INVALID_INPUT",
-   "problem_message": "Some files could not be made.",
-   "problem_fix": "Press 🔁 Try again.",
+   "problem_message": "The disk is full: the PDF file could not be saved.",
+   "problem_fix": "Free some space on the disk, then press 🔁 Try again.",
    "issues": [],
-   "risks": [
-    "the stop does not say the disk is full (it says “Some files could not be made.” / fix “Press 🔁 Try again.”)",
-    "the alert calls it an “AI problem” (“The AI could not do this step (a usage limit, the connection or an error).”) although this part makes no AI call"
-   ],
+   "risks": [],
    "notes": [
-    "Failed writes: 1. First problem details: PDF: G11 could not be created (BLOCKED)."
+    "Failed writes: 1. First problem details: PDF: The PDF file could not be made: Akọwe could not save the file (is the disk full or the data folder read-only? OSError). INTERNAL_ERROR: Akọwe could not save the file (is the disk full or the data folder read-only? OSError) (at /body)"
    ],
    "faults_fired": 0,
    "ai_calls": 73,
-   "seconds": 1.66,
+   "seconds": 1.68,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -2399,8 +2359,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -2419,11 +2380,11 @@
     "QUALITY_TREND"
    ],
    "alert": {
-    "category": "ai",
-    "label": "AI problem",
-    "wrong": "Some files could not be made.",
-    "why": "The AI could not do this step (a usage limit, the connection or an error).",
-    "next": "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
+    "category": "book",
+    "label": "Putting the book together",
+    "wrong": "PDF: The PDF file could not be made: Akọwe could not save the file (is the disk full or the data folder read-only? OSError). INTERNAL_ERROR: Akọwe could not save the file (is the disk full or the data folder read-only?…",
+    "why": "Akọwe could not finish putting the book together (no AI works in this step).",
+    "next": "Fix the cause it names if you can, then press 🔁 Try again. Nothing written so far is lost."
    },
    "finding": {
     "where": "akowe/akowe/store.py `insert_binary_record` (line ~944-958, a good plain message “Akọwe could not save the file (is the disk full…”) → akowe/akowe/book_path.py `a_export` (line ~1233: `problems_.append(f\"{name}: {exc.message}\")` keeps the module's refusal text) → autobook.py `_s_export` (line ~4485: “Some files could not be made.” / “Press 🔁 Try again.”)",
@@ -2434,9 +2395,9 @@
     "what": "Disk full while the PDF is written: the stop says only “Some files could not be made.”, not that the disk is full",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:40:21Z"
+   "ran_at": "2026-11-26T01:14:49Z"
   },
   {
    "id": "F-16-k",
@@ -2444,25 +2405,21 @@
    "part": "16",
    "stress": "k",
    "title": "the author edits and re-approves a chapter between assemble and export",
-   "result": "❌",
-   "happened": "Chapter 1 edited and approved after the book was put together: Stopped at step “export” with INVALID_INPUT: “Put the book together and approve it first.” Fix offered: “Press 🔁 Try again. If it fails again, open the book and do this step yourself.”. Resume did not finish: paused INVALID_INPUT.",
-   "status": "paused",
-   "final_status": "paused",
-   "problem_code": "INVALID_INPUT",
-   "problem_message": "Put the book together and approve it first.",
-   "problem_fix": "Press 🔁 Try again. If it fails again, open the book and do this step yourself.",
-   "issues": [
-    "Resume could not finish the book (status paused, INVALID_INPUT: Put the book together and approve it first.)"
-   ],
-   "risks": [
-    "the alert calls it an “AI problem” (“The AI could not do this step (a usage limit, the connection or an error).”) although this part makes no AI call"
-   ],
+   "result": "✅",
+   "happened": "Chapter 1 edited and approved after the book was put together: The book finished with nothing lost.",
+   "status": "done",
+   "final_status": "done",
+   "problem_code": "",
+   "problem_message": "",
+   "problem_fix": "",
+   "issues": [],
+   "risks": [],
    "notes": [
     "The edit: {'status': 'DRAFT', 'errors': [], 'approved': True}."
    ],
    "faults_fired": 0,
-   "ai_calls": 69,
-   "seconds": 1.17,
+   "ai_calls": 75,
+   "seconds": 1.95,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -2472,8 +2429,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -2483,15 +2441,16 @@
     "CHECKPOINT",
     "ENDING_KEPT",
     "VOICE_TEST_TOO_LITTLE",
-    "INVALID_INPUT"
+    "BOOK_AGAIN",
+    "HUMAN_PASS",
+    "OPENING_SKIPPED",
+    "IMPROVE_UNRESOLVED",
+    "FINAL_CHECK_AGAIN",
+    "CLEAN_RUN_SCORE",
+    "BOOK_TOO_SHORT",
+    "QUALITY_TREND"
    ],
-   "alert": {
-    "category": "ai",
-    "label": "AI problem",
-    "wrong": "Put the book together and approve it first.",
-    "why": "The AI could not do this step (a usage limit, the connection or an error).",
-    "next": "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
-   },
+   "alert": {},
    "finding": {
     "where": "akowe/akowe/autobook.py `_s_assemble` / `_s_export` / `_s_check` (lines ~4463-4500, ~4665): each one only does its own step; akowe/akowe/book_path.py `a_assemble` (line ~1141 “Approve every chapter and the book format first.”), `a_export` (line ~1199) and `a_check` (line ~1244 “Put the book together and approve it first.”) refuse when an EARLIER step became out of date; the run resumes at its current step (autobook.py `_run`, line ~1371) and never goes back",
     "cause": "The author approved a new version of chapter 1 after the book was put together: the assembly is out of date, `a_export` refuses (“Put the book together and approve it first.”), and Resume starts again at export and refuses again — the run never puts the book together again by itself.",
@@ -2501,9 +2460,9 @@
     "what": "Editing and approving a chapter between assemble and export stops the run at export, and Resume can never finish it",
     "repro": ""
    },
-   "result_word": "PROBLEM",
+   "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:40:21Z"
+   "ran_at": "2026-11-26T01:14:49Z"
   },
   {
    "id": "F-16-l",
@@ -2511,25 +2470,21 @@
    "part": "16",
    "stress": "l",
    "title": "a stored file is damaged between writing and the re-read (bytes flipped; then truncated)",
-   "result": "❌",
-   "happened": "The stored EPUB gets 40 bytes flipped before the re-read: Stopped at step “export” with HASH_MISMATCH: “stored artifact bytes do not match their hash” Fix offered: “Press 🔁 Try again. If it keeps failing, use 📋 Copy diagnostics.”. After the fault was removed, ▶ Resume finished the book with nothing lost. — The stored Word file is cut in half before the re-read (fix: not restored, the author just presses Resume): Stopped at step “export” with HASH_MISMATCH: “stored artifact bytes do not match their hash” Fix offered: “Press 🔁 Try again. If it keeps failing, use 📋 Copy diagnostics.”. Resume did not finish: paused HASH_MISMATCH.",
-   "status": "paused",
-   "final_status": "paused",
-   "problem_code": "HASH_MISMATCH",
-   "problem_message": "stored artifact bytes do not match their hash",
-   "problem_fix": "Press 🔁 Try again. If it keeps failing, use 📋 Copy diagnostics.",
-   "issues": [
-    "Resume could not finish the book (status paused, HASH_MISMATCH: stored artifact bytes do not match their hash)"
-   ],
-   "risks": [
-    "the alert calls it an “AI problem” (“The AI could not do this step (a usage limit, the connection or an error).”) although this part makes no AI call"
-   ],
+   "result": "✅",
+   "happened": "The stored EPUB gets 40 bytes flipped before the re-read: The book finished with nothing lost. — The stored Word file is cut in half before the re-read (fix: not restored, the author just presses Resume): The book finished with nothing lost.",
+   "status": "done",
+   "final_status": "done",
+   "problem_code": "",
+   "problem_message": "",
+   "problem_fix": "",
+   "issues": [],
+   "risks": [],
    "notes": [],
    "faults_fired": 0,
-   "ai_calls": 142,
-   "seconds": 3.0,
+   "ai_calls": 146,
+   "seconds": 3.34,
    "likely": "unlikely but dangerous",
-   "log_errors": 0,
+   "log_errors": 2,
    "log_tracebacks": 0,
    "event_codes": [
     "VOICE_SET",
@@ -2537,8 +2492,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -2548,7 +2504,7 @@
     "CHECKPOINT",
     "ENDING_KEPT",
     "VOICE_TEST_TOO_LITTLE",
-    "HASH_MISMATCH",
+    "EXPORT_REMADE",
     "HUMAN_PASS",
     "OPENING_UNRESOLVED",
     "IMPROVE_UNRESOLVED",
@@ -2556,13 +2512,7 @@
     "BOOK_TOO_SHORT",
     "QUALITY_TREND"
    ],
-   "alert": {
-    "category": "ai",
-    "label": "AI problem",
-    "wrong": "stored artifact bytes do not match their hash",
-    "why": "The AI could not do this step (a usage limit, the connection or an error).",
-    "next": "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
-   },
+   "alert": {},
    "finding": {
     "where": "akowe/akowe/store.py `read_binary` (line ~454-471: HASH_MISMATCH “stored artifact bytes do not match their hash”) reached through akowe/akowe/autobook.py `_s_export` (line ~4490) and the no-remake path of F-16-d (line ~4480)",
     "cause": "The re-read rightly catches a damaged stored file, but (1) the stop is in programmer's words and called an AI problem, and (2) when the damaged file is not restored (a disk error, a cleaned-up assets folder), Resume only re-reads the same damaged file: the step is “done” in the checklist, so the file is never made again (as F-16-d). When the bytes were restored, Resume finished.",
@@ -2572,9 +2522,9 @@
     "what": "A damaged stored export is never made again: Resume loops on the same HASH_MISMATCH",
     "repro": ""
    },
-   "result_word": "PROBLEM",
+   "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:40:21Z"
+   "ran_at": "2026-11-26T01:14:49Z"
   },
   {
    "id": "F-16-m",
@@ -2592,11 +2542,11 @@
    "issues": [],
    "risks": [],
    "notes": [
-    "Save result: {'ok': False, 'problem': \"{'code': 'SAVE_FOLDER_NOT_WRITABLE', 'message': 'Akọwe may not write into the books folder (OSError)', 'fix': 'Choose another folder in Settings › 📁 Where books are saved (for example your Documents folder), or check that the folder still exists and is not read-only, then press 💾 Save again.'}\", 'writes': 2, 'run_save': \"{'last': {'ok': False, 'at': '2026-11-23T09:39:27Z', 'kind': 'auto', 'path': '/dev/shm/stF-28932/books/The ‹book text› (8b999e)', 'problem': {'code': 'SAVE_FOLDER_NOT_WRITABLE', 'message': 'Akọwe may \"}."
+    "Save result: {'ok': False, 'problem': \"{'code': 'SAVE_FOLDER_NOT_WRITABLE', 'message': 'Akọwe may not write into the books folder (OSError)', 'fix': 'Choose another folder in Settings › 📁 Where books are saved (for example your Documents folder), or check that the folder still exists and is not read-only, then press 💾 Save again.'}\", 'writes': 2, 'run_save': \"{'last': {'ok': False, 'at': '2026-11-26T01:13:57Z', 'kind': 'auto', 'path': '/dev/shm/stF-20598/books/The ‹book text› (f24f01)', 'problem': {'code': 'SAVE_FOLDER_NOT_WRITABLE', 'message': 'Akọwe may \"}."
    ],
    "faults_fired": 0,
    "ai_calls": 73,
-   "seconds": 2.34,
+   "seconds": 1.79,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -2606,8 +2556,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -2628,7 +2579,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:40:21Z"
+   "ran_at": "2026-11-26T01:14:49Z"
   },
   {
    "id": "F-16-n",
@@ -2646,11 +2597,11 @@
    "issues": [],
    "risks": [],
    "notes": [
-    "Render calls: 1; run + resume took 1.6 s; the book PDF itself never uses the render bridge (Akọwe's own PDF writer). With no bridge at all (the harness default, 127.0.0.1:9) every other scenario finishes."
+    "Render calls: 1; run + resume took 1.5 s; the book PDF itself never uses the render bridge (Akọwe's own PDF writer). With no bridge at all (the harness default, 127.0.0.1:9) every other scenario finishes."
    ],
    "faults_fired": 0,
    "ai_calls": 73,
-   "seconds": 16.58,
+   "seconds": 16.56,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -2660,8 +2611,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -2682,7 +2634,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:40:21Z"
+   "ran_at": "2026-11-26T01:14:49Z"
   },
   {
    "id": "F-16-o",
@@ -2700,7 +2652,7 @@
    "issues": [],
    "risks": [],
    "notes": [
-    "Whole run 103.3 s; format 0.25 s, assemble 1.63 s, export 1.19 s, content check 0.12 s (seconds of Akọwe's own work; 836 Practice-AI calls)."
+    "Whole run 86.7 s; format 0.18 s, assemble 1.29 s, export 1.26 s, content check 0.21 s (seconds of Akọwe's own work; 836 Practice-AI calls)."
    ],
    "faults_fired": 0,
    "ai_calls": 836,
@@ -2732,7 +2684,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:40:21Z"
+   "ran_at": "2026-11-26T01:14:49Z"
   },
   {
    "id": "F-17-a",
@@ -2756,7 +2708,7 @@
    ],
    "faults_fired": 0,
    "ai_calls": 146,
-   "seconds": 9.8,
+   "seconds": 9.16,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -2766,8 +2718,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -2788,7 +2741,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:40:21Z"
+   "ran_at": "2026-11-26T01:14:49Z"
   },
   {
    "id": "F-17-b",
@@ -2811,7 +2764,7 @@
    ],
    "faults_fired": 0,
    "ai_calls": 73,
-   "seconds": 4.99,
+   "seconds": 4.62,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -2821,8 +2774,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -2843,7 +2797,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:40:21Z"
+   "ran_at": "2026-11-26T01:14:49Z"
   },
   {
    "id": "F-17-c",
@@ -2851,25 +2805,22 @@
    "part": "17",
    "stress": "c",
    "title": "every AI at its usage limit → no AI here: the disk is full while the part writes, then space is freed",
-   "result": "⚠️",
-   "happened": "Disk full (“database or disk is full”) while the part writes, then space freed: Stopped at step “check” with UPSTREAM_UNAVAILABLE: “H05 could not be created (BLOCKED).” Fix offered: “Press 🔁 Try again. If it fails again, open the book and do this step yourself.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
+   "result": "🟡",
+   "happened": "Disk full (“database or disk is full”) while the part writes, then space freed: Stopped at step “check” with UPSTREAM_UNAVAILABLE: “The content check could not be saved: the disk is full.” Fix offered: “Free some space on the disk Akọwe saves to, then press 🔁 Try again. Nothing written so far is lost.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
    "status": "paused",
    "final_status": "done",
    "problem_code": "UPSTREAM_UNAVAILABLE",
-   "problem_message": "H05 could not be created (BLOCKED).",
-   "problem_fix": "Press 🔁 Try again. If it fails again, open the book and do this step yourself.",
+   "problem_message": "The content check could not be saved: the disk is full.",
+   "problem_fix": "Free some space on the disk Akọwe saves to, then press 🔁 Try again. Nothing written so far is lost.",
    "issues": [],
-   "risks": [
-    "the alert calls it an “AI problem” (“The AI could not do this step (a usage limit, the connection or an error).”) although this part makes no AI call",
-    "the message is a module code (“H05 could not be created (BLOCKED).”), not what went wrong in plain words"
-   ],
+   "risks": [],
    "notes": [
     "This part makes no AI call; the stress is mapped to the closest real failure of the part's own work: the disk is full while the part writes, then space is freed.",
     "The engine logged the storage failure with its traceback (ERROR “storage unavailable”, on purpose; no book text)."
    ],
    "faults_fired": 0,
    "ai_calls": 73,
-   "seconds": 1.44,
+   "seconds": 1.58,
    "likely": "",
    "log_errors": 1,
    "log_tracebacks": 1,
@@ -2879,8 +2830,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -2899,11 +2851,11 @@
     "QUALITY_TREND"
    ],
    "alert": {
-    "category": "ai",
-    "label": "AI problem",
-    "wrong": "H05 could not be created (BLOCKED).",
-    "why": "The AI could not do this step (a usage limit, the connection or an error).",
-    "next": "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
+    "category": "book",
+    "label": "Putting the book together",
+    "wrong": "UPSTREAM_UNAVAILABLE: storage unavailable: database or disk is full",
+    "why": "Akọwe could not finish putting the book together (no AI works in this step).",
+    "next": "Fix the cause it names if you can, then press 🔁 Try again. Nothing written so far is lost."
    },
    "finding": {
     "where": "akowe/akowe/alerts.py `category_of` (line ~83-106): the steps format / assemble / export / check are not in `STEP_CAT` (line ~53) and INTERNAL_ERROR / UPSTREAM_UNAVAILABLE / CAPABILITY_UNAVAILABLE are in `AI_CODES` (line ~57), so every stop here falls through to “ai”; the message comes from akowe/akowe/book_path.py `StepError` (line ~1256: “<op> could not be created (<status>).”) via akowe/akowe/autobook.py `_run` (line ~1495)",
@@ -2914,9 +2866,9 @@
     "what": "Disk full while the content check is stored: “H05 could not be created (BLOCKED).”, called an AI problem",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:40:21Z"
+   "ran_at": "2026-11-26T01:14:49Z"
   },
   {
    "id": "F-17-d",
@@ -2924,98 +2876,21 @@
    "part": "17",
    "stress": "d",
    "title": "garbage answer → no AI here: the content check's own result is malformed (findings is a string, no status)",
-   "result": "❌",
-   "happened": "H05 answers with a malformed result: Stopped at step “check” with INTERNAL_ERROR: “Akọwe hit an unexpected problem (AttributeError).” Fix offered: “Press 🔁 Try again. If it keeps happening, use 📋 Copy diagnostics.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
+   "result": "🟡",
+   "happened": "H05 answers with a malformed result: Stopped at step “check” with INVALID_INPUT: “The content check gave an answer Akọwe could not read.” Fix offered: “Press 🔁 Try again. If it keeps happening, use 📋 Copy diagnostics.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
    "status": "paused",
    "final_status": "done",
-   "problem_code": "INTERNAL_ERROR",
-   "problem_message": "Akọwe hit an unexpected problem (AttributeError).",
+   "problem_code": "INVALID_INPUT",
+   "problem_message": "The content check gave an answer Akọwe could not read.",
    "problem_fix": "Press 🔁 Try again. If it keeps happening, use 📋 Copy diagnostics.",
-   "issues": [
-    "an unexpected Python exception stopped the run (INTERNAL_ERROR)",
-    "unexpected traceback in the log: make-a-book run run-e3abe586c1ca: unexpected problem in step check"
-   ],
-   "risks": [
-    "the alert calls a fault in Akọwe's own code an “AI problem” (“The AI could not do this step (a usage limit, the connection or an error).”), so the author looks for the fault in the AI"
-   ],
+   "issues": [],
+   "risks": [],
    "notes": [
     "This part makes no AI call; the stress is mapped to the closest real failure of the part's own work: a malformed result of the content check."
    ],
    "faults_fired": 0,
    "ai_calls": 73,
-   "seconds": 1.62,
-   "likely": "",
-   "log_errors": 1,
-   "log_tracebacks": 1,
-   "event_codes": [
-    "VOICE_SET",
-    "VOICES_DISTINCT",
-    "DOCTOR_SCORED",
-    "DOCTOR_DONE",
-    "PREDICT_PROBED",
-    "SCOPE_SET",
-    "GRID_FAILED",
-    "TRADE_CARD_MADE",
-    "PROTAGONIST_OK",
-    "FIRST_PAGE_PICKED",
-    "ONE_REVIEWER",
-    "PLANNED_UNRESOLVED",
-    "PLANNED_MISSING",
-    "CHECKPOINT",
-    "ENDING_KEPT",
-    "VOICE_TEST_TOO_LITTLE",
-    "INTERNAL_ERROR",
-    "HUMAN_PASS",
-    "OPENING_UNRESOLVED",
-    "IMPROVE_UNRESOLVED",
-    "CLEAN_RUN_SCORE",
-    "BOOK_TOO_SHORT",
-    "QUALITY_TREND"
-   ],
-   "alert": {
-    "category": "ai",
-    "label": "AI problem",
-    "wrong": "Akọwe hit an unexpected problem (AttributeError).",
-    "why": "The AI could not do this step (a usage limit, the connection or an error).",
-    "next": "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
-   },
-   "finding": {
-    "where": "akowe/akowe/book_path.py `a_check` (line ~1249: `f.get(...)` over `findings`)",
-    "cause": "A malformed H05 result (findings not a list of objects) raises AttributeError in `a_check`: “unexpected problem (AttributeError)”, called an AI problem. Resume finishes once H05 answers normally.",
-    "fix": "Read the H05 result defensively (non-dict findings → “the content check's answer could not be read”).",
-    "severity": "confusing message",
-    "likely": "unlikely but dangerous",
-    "what": "A malformed content-check result is an unexpected AttributeError",
-    "repro": ""
-   },
-   "result_word": "PROBLEM",
-   "seed": 0,
-   "ran_at": "2026-11-23T09:40:21Z"
-  },
-  {
-   "id": "F-17-e",
-   "section": "F",
-   "part": "17",
-   "stress": "e",
-   "title": "empty answer → no AI here: the content check's result is empty ({})",
-   "result": "⚠️",
-   "happened": "H05 answers with an empty result: Stopped at step “check” with INVALID_INPUT: “Content check: None.” Fix offered: “Open the book's Quality Checks to see what is missing, then press 🔁 Try again.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
-   "status": "paused",
-   "final_status": "done",
-   "problem_code": "INVALID_INPUT",
-   "problem_message": "Content check: None.",
-   "problem_fix": "Open the book's Quality Checks to see what is missing, then press 🔁 Try again.",
-   "issues": [],
-   "risks": [
-    "the alert calls it an “AI problem” (“The AI could not do this step (a usage limit, the connection or an error).”) although this part makes no AI call",
-    "the stop says “Content check: None.” — no words for the author"
-   ],
-   "notes": [
-    "This part makes no AI call; the stress is mapped to the closest real failure of the part's own work: an empty result of the content check."
-   ],
-   "faults_fired": 0,
-   "ai_calls": 73,
-   "seconds": 1.85,
+   "seconds": 1.6,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -3025,8 +2900,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -3045,11 +2921,81 @@
     "QUALITY_TREND"
    ],
    "alert": {
-    "category": "ai",
-    "label": "AI problem",
-    "wrong": "Content check: None.",
-    "why": "The AI could not do this step (a usage limit, the connection or an error).",
-    "next": "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
+    "category": "book",
+    "label": "Putting the book together",
+    "wrong": "The content check gave an answer Akọwe could not read.",
+    "why": "Akọwe could not finish putting the book together (no AI works in this step).",
+    "next": "Fix the cause it names if you can, then press 🔁 Try again. Nothing written so far is lost."
+   },
+   "finding": {
+    "where": "akowe/akowe/book_path.py `a_check` (line ~1249: `f.get(...)` over `findings`)",
+    "cause": "A malformed H05 result (findings not a list of objects) raises AttributeError in `a_check`: “unexpected problem (AttributeError)”, called an AI problem. Resume finishes once H05 answers normally.",
+    "fix": "Read the H05 result defensively (non-dict findings → “the content check's answer could not be read”).",
+    "severity": "confusing message",
+    "likely": "unlikely but dangerous",
+    "what": "A malformed content-check result is an unexpected AttributeError",
+    "repro": ""
+   },
+   "result_word": "SAFE STOP",
+   "seed": 0,
+   "ran_at": "2026-11-26T01:14:49Z"
+  },
+  {
+   "id": "F-17-e",
+   "section": "F",
+   "part": "17",
+   "stress": "e",
+   "title": "empty answer → no AI here: the content check's result is empty ({})",
+   "result": "🟡",
+   "happened": "H05 answers with an empty result: Stopped at step “check” with INVALID_INPUT: “The content check gave an answer Akọwe could not read.” Fix offered: “Press 🔁 Try again. If it keeps happening, use 📋 Copy diagnostics.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
+   "status": "paused",
+   "final_status": "done",
+   "problem_code": "INVALID_INPUT",
+   "problem_message": "The content check gave an answer Akọwe could not read.",
+   "problem_fix": "Press 🔁 Try again. If it keeps happening, use 📋 Copy diagnostics.",
+   "issues": [],
+   "risks": [],
+   "notes": [
+    "This part makes no AI call; the stress is mapped to the closest real failure of the part's own work: an empty result of the content check."
+   ],
+   "faults_fired": 0,
+   "ai_calls": 73,
+   "seconds": 1.63,
+   "likely": "",
+   "log_errors": 0,
+   "log_tracebacks": 0,
+   "event_codes": [
+    "VOICE_SET",
+    "VOICES_DISTINCT",
+    "DOCTOR_SCORED",
+    "DOCTOR_DONE",
+    "PREDICT_PROBED",
+    "LEDGER_EMPTY",
+    "SCOPE_SET",
+    "GRID_EMPTY",
+    "TRADE_CARD_MADE",
+    "PROTAGONIST_OK",
+    "FIRST_PAGE_PICKED",
+    "ONE_REVIEWER",
+    "PLANNED_UNRESOLVED",
+    "PLANNED_MISSING",
+    "CHECKPOINT",
+    "ENDING_KEPT",
+    "VOICE_TEST_TOO_LITTLE",
+    "INVALID_INPUT",
+    "HUMAN_PASS",
+    "OPENING_UNRESOLVED",
+    "IMPROVE_UNRESOLVED",
+    "CLEAN_RUN_SCORE",
+    "BOOK_TOO_SHORT",
+    "QUALITY_TREND"
+   ],
+   "alert": {
+    "category": "book",
+    "label": "Putting the book together",
+    "wrong": "The content check gave an answer Akọwe could not read.",
+    "why": "Akọwe could not finish putting the book together (no AI works in this step).",
+    "next": "Fix the cause it names if you can, then press 🔁 Try again. Nothing written so far is lost."
    },
    "finding": {
     "where": "akowe/akowe/alerts.py `category_of` (line ~83-106): the steps format / assemble / export / check are not in `STEP_CAT` (line ~53) and INTERNAL_ERROR / UPSTREAM_UNAVAILABLE / CAPABILITY_UNAVAILABLE are in `AI_CODES` (line ~57), so every stop here falls through to “ai”; the message comes from akowe/akowe/book_path.py `StepError` (line ~1256: “<op> could not be created (<status>).”) via akowe/akowe/autobook.py `_run` (line ~1495)",
@@ -3060,9 +3006,9 @@
     "what": "An empty content-check result stops with “Content check: None.” (no words for the author), called an AI problem",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:40:21Z"
+   "ran_at": "2026-11-26T01:14:49Z"
   },
   {
    "id": "F-17-f",
@@ -3070,24 +3016,21 @@
    "part": "17",
    "stress": "f",
    "title": "the AI refuses repeatedly → no AI here: the part's module refuses (BLOCKED) every time",
-   "result": "⚠️",
-   "happened": "The part's module refuses (BLOCKED) every time until the cause is removed: Stopped at step “check” with CAPABILITY_UNAVAILABLE: “H05 could not be created (BLOCKED).” Fix offered: “Press 🔁 Try again. If it fails again, open the book and do this step yourself.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
+   "result": "🟡",
+   "happened": "The part's module refuses (BLOCKED) every time until the cause is removed: Stopped at step “check” with CAPABILITY_UNAVAILABLE: “The content check could not be made: stress: the module refuses (BLOCKED).” Fix offered: “Press 🔁 Try again. If it fails again, open the book and do this step yourself.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
    "status": "paused",
    "final_status": "done",
    "problem_code": "CAPABILITY_UNAVAILABLE",
-   "problem_message": "H05 could not be created (BLOCKED).",
+   "problem_message": "The content check could not be made: stress: the module refuses (BLOCKED).",
    "problem_fix": "Press 🔁 Try again. If it fails again, open the book and do this step yourself.",
    "issues": [],
-   "risks": [
-    "the alert calls it an “AI problem” (“The AI could not do this step (a usage limit, the connection or an error).”) although this part makes no AI call",
-    "the message is a module code (“H05 could not be created (BLOCKED).”), not what went wrong in plain words"
-   ],
+   "risks": [],
    "notes": [
     "This part makes no AI call; the stress is mapped to the closest real failure of the part's own work: the part's module refuses its work (BLOCKED) repeatedly."
    ],
    "faults_fired": 0,
    "ai_calls": 73,
-   "seconds": 1.86,
+   "seconds": 1.4,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -3097,8 +3040,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -3117,11 +3061,11 @@
     "QUALITY_TREND"
    ],
    "alert": {
-    "category": "ai",
-    "label": "AI problem",
-    "wrong": "H05 could not be created (BLOCKED).",
-    "why": "The AI could not do this step (a usage limit, the connection or an error).",
-    "next": "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
+    "category": "book",
+    "label": "Putting the book together",
+    "wrong": "CAPABILITY_UNAVAILABLE: stress: the module refuses (BLOCKED) (at /payload)",
+    "why": "Akọwe could not finish putting the book together (no AI works in this step).",
+    "next": "Fix the cause it names if you can, then press 🔁 Try again. Nothing written so far is lost."
    },
    "finding": {
     "where": "akowe/akowe/alerts.py `category_of` (line ~83-106): the steps format / assemble / export / check are not in `STEP_CAT` (line ~53) and INTERNAL_ERROR / UPSTREAM_UNAVAILABLE / CAPABILITY_UNAVAILABLE are in `AI_CODES` (line ~57), so every stop here falls through to “ai”; the message comes from akowe/akowe/book_path.py `StepError` (line ~1256: “<op> could not be created (<status>).”) via akowe/akowe/autobook.py `_run` (line ~1495)",
@@ -3132,9 +3076,9 @@
     "what": "The content check refusing: “H05 could not be created (BLOCKED).”, called an AI problem",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:40:21Z"
+   "ran_at": "2026-11-26T01:14:49Z"
   },
   {
    "id": "F-17-g",
@@ -3142,21 +3086,19 @@
    "part": "17",
    "stress": "g",
    "title": "the part's own code raises an unexpected Python exception",
-   "result": "⚠️",
-   "happened": "The part's own code raises: Stopped at step “check” with INTERNAL_ERROR: “Akọwe hit an unexpected problem (KeyError).” Fix offered: “Press 🔁 Try again. If it keeps happening, use 📋 Copy diagnostics.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
+   "result": "🟡",
+   "happened": "The part's own code raises: Stopped at step “check” with INTERNAL_ERROR: “Akọwe hit an unexpected error in “Content check” — press ▶ Resume to try again.” Fix offered: “Press ▶ Resume to try this step again — nothing written so far is lost. If it happens again, use 📋 Copy diagnostics and send it in.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
    "status": "paused",
    "final_status": "done",
    "problem_code": "INTERNAL_ERROR",
-   "problem_message": "Akọwe hit an unexpected problem (KeyError).",
-   "problem_fix": "Press 🔁 Try again. If it keeps happening, use 📋 Copy diagnostics.",
+   "problem_message": "Akọwe hit an unexpected error in “Content check” — press ▶ Resume to try again.",
+   "problem_fix": "Press ▶ Resume to try this step again — nothing written so far is lost. If it happens again, use 📋 Copy diagnostics and send it in.",
    "issues": [],
-   "risks": [
-    "the alert calls a fault in Akọwe's own code an “AI problem” (“The AI could not do this step (a usage limit, the connection or an error).”), so the author looks for the fault in the AI"
-   ],
+   "risks": [],
    "notes": [],
    "faults_fired": 0,
    "ai_calls": 73,
-   "seconds": 1.63,
+   "seconds": 1.29,
    "likely": "",
    "log_errors": 1,
    "log_tracebacks": 1,
@@ -3166,8 +3108,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -3186,11 +3129,11 @@
     "QUALITY_TREND"
    ],
    "alert": {
-    "category": "ai",
-    "label": "AI problem",
-    "wrong": "Akọwe hit an unexpected problem (KeyError).",
-    "why": "The AI could not do this step (a usage limit, the connection or an error).",
-    "next": "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
+    "category": "akowe",
+    "label": "Akọwe problem",
+    "wrong": "Akọwe hit an unexpected error in “Content check” — press ▶ Resume to try again.",
+    "why": "Something went wrong inside Akọwe itself — not the AI and not your book.",
+    "next": "Press ▶ Resume to try this step again; nothing written so far is lost. If it happens again, use 📋 Copy diagnostics and send it in."
    },
    "finding": {
     "where": "akowe/akowe/autobook.py `_run` (line ~1510: any exception → INTERNAL_ERROR “Akọwe hit an unexpected problem”) and akowe/akowe/alerts.py `category_of` (INTERNAL_ERROR in `AI_CODES`)",
@@ -3201,9 +3144,9 @@
     "what": "A bug in the part's own code is shown as an “AI problem”",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:40:21Z"
+   "ran_at": "2026-11-26T01:14:49Z"
   },
   {
    "id": "F-17-h",
@@ -3223,7 +3166,7 @@
    "notes": [],
    "faults_fired": 0,
    "ai_calls": 73,
-   "seconds": 1.66,
+   "seconds": 1.28,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -3233,8 +3176,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -3255,7 +3199,7 @@
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:40:21Z"
+   "ran_at": "2026-11-26T01:14:49Z"
   },
   {
    "id": "F-17-i",
@@ -3275,7 +3219,7 @@
    "notes": [],
    "faults_fired": 0,
    "ai_calls": 73,
-   "seconds": 4.56,
+   "seconds": 4.15,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -3285,8 +3229,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -3307,7 +3252,7 @@
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:40:21Z"
+   "ran_at": "2026-11-26T01:14:49Z"
   },
   {
    "id": "F-17-j",
@@ -3327,7 +3272,7 @@
    "notes": [],
    "faults_fired": 0,
    "ai_calls": 73,
-   "seconds": 1.56,
+   "seconds": 1.64,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -3337,8 +3282,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -3359,7 +3305,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:40:21Z"
+   "ran_at": "2026-11-26T01:14:49Z"
   },
   {
    "id": "F-17-k",
@@ -3367,25 +3313,21 @@
    "part": "17",
    "stress": "k",
    "title": "the author edits and re-approves a chapter after the export, before the content check",
-   "result": "❌",
-   "happened": "Chapter 3 edited and approved after the export: Stopped at step “check” with INVALID_INPUT: “Put the book together and approve it first.” Fix offered: “Press 🔁 Try again. If it fails again, open the book and do this step yourself.”. Resume did not finish: paused INVALID_INPUT.",
-   "status": "paused",
-   "final_status": "paused",
-   "problem_code": "INVALID_INPUT",
-   "problem_message": "Put the book together and approve it first.",
-   "problem_fix": "Press 🔁 Try again. If it fails again, open the book and do this step yourself.",
-   "issues": [
-    "Resume could not finish the book (status paused, INVALID_INPUT: Put the book together and approve it first.)"
-   ],
-   "risks": [
-    "the alert calls it an “AI problem” (“The AI could not do this step (a usage limit, the connection or an error).”) although this part makes no AI call"
-   ],
+   "result": "✅",
+   "happened": "Chapter 3 edited and approved after the export: The book finished with nothing lost.",
+   "status": "done",
+   "final_status": "done",
+   "problem_code": "",
+   "problem_message": "",
+   "problem_fix": "",
+   "issues": [],
+   "risks": [],
    "notes": [
     "The edit: {'status': 'DRAFT', 'errors': [], 'approved': True}."
    ],
    "faults_fired": 0,
-   "ai_calls": 69,
-   "seconds": 1.27,
+   "ai_calls": 76,
+   "seconds": 2.1,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -3395,8 +3337,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -3406,15 +3349,16 @@
     "CHECKPOINT",
     "ENDING_KEPT",
     "VOICE_TEST_TOO_LITTLE",
-    "INVALID_INPUT"
+    "BOOK_AGAIN",
+    "HUMAN_PASS",
+    "OPENING_UNRESOLVED",
+    "IMPROVE_UNRESOLVED",
+    "FINAL_CHECK_AGAIN",
+    "CLEAN_RUN_SCORE",
+    "BOOK_TOO_SHORT",
+    "QUALITY_TREND"
    ],
-   "alert": {
-    "category": "ai",
-    "label": "AI problem",
-    "wrong": "Put the book together and approve it first.",
-    "why": "The AI could not do this step (a usage limit, the connection or an error).",
-    "next": "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
-   },
+   "alert": {},
    "finding": {
     "where": "akowe/akowe/autobook.py `_s_assemble` / `_s_export` / `_s_check` (lines ~4463-4500, ~4665): each one only does its own step; akowe/akowe/book_path.py `a_assemble` (line ~1141 “Approve every chapter and the book format first.”), `a_export` (line ~1199) and `a_check` (line ~1244 “Put the book together and approve it first.”) refuse when an EARLIER step became out of date; the run resumes at its current step (autobook.py `_run`, line ~1371) and never goes back",
     "cause": "As F-16-k one step later: a chapter approved after the export makes the assembly out of date; `a_check` refuses and Resume repeats it.",
@@ -3424,9 +3368,9 @@
     "what": "Editing and approving a chapter after the export stops the run at the content check, and Resume can never finish it",
     "repro": ""
    },
-   "result_word": "PROBLEM",
+   "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:40:21Z"
+   "ran_at": "2026-11-26T01:14:49Z"
   },
   {
    "id": "F-17-l",
@@ -3434,26 +3378,21 @@
    "part": "17",
    "stress": "l",
    "title": "two chapters with the same text (the AI wrote chapter 2 twice)",
-   "result": "❌",
-   "happened": "Chapter 2 written with chapter 1's text (the author rewrites chapter 2 as the fix): Stopped at step “check” with INVALID_INPUT: “Content check: FAIL.” Fix offered: “Open the book's Quality Checks to see what is missing, then press 🔁 Try again.”. Resume did not finish: paused INVALID_INPUT.",
+   "result": "🟡",
+   "happened": "Chapter 2 written with chapter 1's text (the author rewrites chapter 2 as the fix): Stopped at step “chapters” with CHECKS_REFUSED: “The AI wrote chapter 2 3 times, and each time its text was the same as chapter 1's.” Fix offered: “Press 🔁 Try again: the AI writes chapter 2 again, told not to repeat chapter 1. If it keeps happening, let another AI write (Settings).”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
    "status": "paused",
-   "final_status": "paused",
-   "problem_code": "INVALID_INPUT",
-   "problem_message": "Content check: FAIL.",
-   "problem_fix": "Open the book's Quality Checks to see what is missing, then press 🔁 Try again.",
-   "issues": [
-    "Resume could not finish the book (status paused, INVALID_INPUT: Put the book together and approve it first.)"
-   ],
-   "risks": [
-    "the alert calls it an “AI problem” (“The AI could not do this step (a usage limit, the connection or an error).”) although this part makes no AI call",
-    "the stop says only “Content check: FAIL.” — not which chapters are duplicated"
-   ],
+   "final_status": "done",
+   "problem_code": "CHECKS_REFUSED",
+   "problem_message": "The AI wrote chapter 2 3 times, and each time its text was the same as chapter 1's.",
+   "problem_fix": "Press 🔁 Try again: the AI writes chapter 2 again, told not to repeat chapter 1. If it keeps happening, let another AI write (Settings).",
+   "issues": [],
+   "risks": [],
    "notes": [
-    "The author's rewrite: {'status': 'DRAFT', 'errors': [], 'approved': True}."
+    "The author's rewrite: None."
    ],
-   "faults_fired": 3,
-   "ai_calls": 70,
-   "seconds": 1.25,
+   "faults_fired": 4,
+   "ai_calls": 82,
+   "seconds": 1.61,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -3463,8 +3402,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -3472,19 +3412,23 @@
     "PLANNED_UNRESOLVED",
     "PLANNED_MISSING",
     "CHECKPOINT",
-    "CHAPTER_POLISH_NOT_KEPT",
-    "INSTRUCTIONS_CUT",
+    "DRAFT_REFUSED_EARLY",
+    "CHECKS_REFUSED",
     "ENDING_KEPT",
     "VOICE_TEST_TOO_LITTLE",
-    "CHAPTER_POLISH",
-    "INVALID_INPUT"
+    "HUMAN_PASS",
+    "OPENING_UNRESOLVED",
+    "IMPROVE_UNRESOLVED",
+    "CLEAN_RUN_SCORE",
+    "BOOK_TOO_SHORT",
+    "QUALITY_TREND"
    ],
    "alert": {
-    "category": "ai",
-    "label": "AI problem",
-    "wrong": "Content check: FAIL.",
-    "why": "The AI could not do this step (a usage limit, the connection or an error).",
-    "next": "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
+    "category": "chapter",
+    "label": "Chapter quality",
+    "wrong": "The AI wrote chapter 2 3 times, and each time its text was the same as chapter 1's.",
+    "why": "Akọwe's own checks refused it, and the AI could not make one that passes.",
+    "next": "Press 🔁 Try again, or edit it yourself and then continue."
    },
    "finding": {
     "where": "akowe/akowe/autobook.py `_s_assemble` / `_s_export` / `_s_check` (lines ~4463-4500, ~4665): each one only does its own step; akowe/akowe/book_path.py `a_assemble` (line ~1141 “Approve every chapter and the book format first.”), `a_export` (line ~1199) and `a_check` (line ~1244 “Put the book together and approve it first.”) refuse when an EARLIER step became out of date; the run resumes at its current step (autobook.py `_run`, line ~1371) and never goes back; the H05 FAIL message is built in `a_check` (line ~1247-1249)",
@@ -3495,9 +3439,9 @@
     "what": "A duplicated chapter is caught only at the content check (“Content check: FAIL.”), and after the author rewrites it Resume can never finish",
     "repro": ""
    },
-   "result_word": "PROBLEM",
+   "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:40:21Z"
+   "ran_at": "2026-11-26T01:14:49Z"
   },
   {
    "id": "F-17-m",
@@ -3505,25 +3449,21 @@
    "part": "17",
    "stress": "m",
    "title": "a second run / the author puts the book together again by hand while the check runs (two runs touching the same book)",
-   "result": "❌",
+   "result": "✅",
    "happened": "The book is put together again by hand at the moment the content check starts: The book finished with nothing lost.",
    "status": "done",
    "final_status": "done",
    "problem_code": "",
    "problem_message": "",
    "problem_fix": "",
-   "issues": [
-    "the finished run left the book's “Put the book together” step needs_you",
-    "the finished run left the book's “Export my book” step blocked",
-    "the finished run left the book's “Check the book” step blocked"
-   ],
+   "issues": [],
    "risks": [],
    "notes": [
     "The second assembly: True."
    ],
    "faults_fired": 0,
    "ai_calls": 73,
-   "seconds": 2.08,
+   "seconds": 1.99,
    "likely": "unlikely but dangerous",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -3533,8 +3473,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -3547,6 +3488,7 @@
     "HUMAN_PASS",
     "OPENING_UNRESOLVED",
     "IMPROVE_UNRESOLVED",
+    "BOOK_AGAIN",
     "CLEAN_RUN_SCORE",
     "BOOK_TOO_SHORT",
     "QUALITY_TREND"
@@ -3561,9 +3503,9 @@
     "what": "A second assembly during the content check leaves a run that says done next to a book whose checklist says the book must be put together again",
     "repro": ""
    },
-   "result_word": "PROBLEM",
+   "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:40:21Z"
+   "ran_at": "2026-11-26T01:14:49Z"
   },
   {
    "id": "F-17-n",
@@ -3581,7 +3523,7 @@
    "issues": [],
    "risks": [],
    "notes": [
-    "Whole run 103.3 s; format 0.25 s, assemble 1.63 s, export 1.19 s, content check 0.12 s (seconds of Akọwe's own work; 836 Practice-AI calls)."
+    "Whole run 86.7 s; format 0.18 s, assemble 1.29 s, export 1.26 s, content check 0.21 s (seconds of Akọwe's own work; 836 Practice-AI calls)."
    ],
    "faults_fired": 0,
    "ai_calls": 836,
@@ -3613,7 +3555,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:40:21Z"
+   "ran_at": "2026-11-26T01:14:49Z"
   },
   {
    "id": "F-17-o",
@@ -3633,7 +3575,7 @@
    "notes": [],
    "faults_fired": 0,
    "ai_calls": 73,
-   "seconds": 1.68,
+   "seconds": 1.55,
    "likely": "unlikely but dangerous",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -3643,8 +3585,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -3665,7 +3608,7 @@
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:40:21Z"
+   "ran_at": "2026-11-26T01:14:49Z"
   }
  ]
 }

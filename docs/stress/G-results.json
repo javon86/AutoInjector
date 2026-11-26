@@ -2,7 +2,7 @@
  "section": "G",
  "name": "Quality at the end",
  "slug": "quality-at-the-end",
- "generated_at": "2026-11-23T09:52:45Z",
+ "generated_at": "2026-11-26T01:26:36Z",
  "legend": {
   "✅": "HANDLED",
   "🟡": "SAFE STOP",
@@ -48,7 +48,7 @@
    "part": "18",
    "stress": "a",
    "title": "the AI times out (once; and every time)",
-   "result": "⚠️",
+   "result": "✅",
    "happened": "Once: The book finished with nothing lost. — Every time: The book finished with nothing lost.",
    "status": "done",
    "final_status": "done",
@@ -56,16 +56,13 @@
    "problem_message": "",
    "problem_fix": "",
    "issues": [],
-   "risks": [
-    "the whole-book review was lost after 1 failed reviewer call(s) of 1 (TIMEOUT): the report is made without any AI review, so the opening and improve passes are skipped too (OPENING_SKIPPED, IMPROVE_SKIPPED)",
-    "the step says “no independent AI was working” although the reviewer AI was working and failed (TIMEOUT): the message blames the wrong thing"
-   ],
+   "risks": [],
    "notes": [
-    "End state of “report”: done — “⚠️ Report made without an AI review: no independent AI was working (📨 Ask the other AIs on the report page later)” (journal: HUMAN_PASS, REPORT_NOT_INDEPENDENT)."
+    "End state of “report”: done — “1 AI(s) read the whole book · overall 7.0/10” (journal: HUMAN_PASS, QUALITY_TREND)."
    ],
-   "faults_fired": 1,
-   "ai_calls": 71,
-   "seconds": 3.92,
+   "faults_fired": 6,
+   "ai_calls": 148,
+   "seconds": 2.55,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -75,8 +72,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -86,12 +84,15 @@
     "CHECKPOINT",
     "ENDING_KEPT",
     "VOICE_TEST_TOO_LITTLE",
-    "REPORT_NOT_INDEPENDENT",
     "HUMAN_PASS",
-    "OPENING_SKIPPED",
-    "IMPROVE_SKIPPED",
+    "OPENING_UNRESOLVED",
+    "IMPROVE_UNRESOLVED",
     "CLEAN_RUN_SCORE",
-    "BOOK_TOO_SHORT"
+    "BOOK_TOO_SHORT",
+    "QUALITY_TREND",
+    "REPORT_NO_REVIEW",
+    "OPENING_SKIPPED",
+    "IMPROVE_SKIPPED"
    ],
    "alert": {},
    "finding": {
@@ -103,9 +104,9 @@
     "what": "One timeout of the reviewer AI loses the whole-book review (and with it the opening and improve passes); the step blames “no independent AI was working”",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-18-b",
@@ -113,7 +114,7 @@
    "part": "18",
    "stress": "b",
    "title": "the AI is busy / rate-limited, then recovers",
-   "result": "⚠️",
+   "result": "✅",
    "happened": "Busy 3 times, then answers: The book finished with nothing lost.",
    "status": "done",
    "final_status": "done",
@@ -121,16 +122,13 @@
    "problem_message": "",
    "problem_fix": "",
    "issues": [],
-   "risks": [
-    "the whole-book review was lost after 3 failed reviewer call(s) of 3 (RATE_LIMITED): the report is made without any AI review, so the opening and improve passes are skipped too (OPENING_SKIPPED, IMPROVE_SKIPPED)",
-    "the step says “no independent AI was working” although the reviewer AI was working and failed (RATE_LIMITED): the message blames the wrong thing"
-   ],
+   "risks": [],
    "notes": [
-    "End state of “report”: done — “⚠️ Report made without an AI review: no independent AI was working (📨 Ask the other AIs on the report page later)” (journal: HUMAN_PASS, REPORT_NOT_INDEPENDENT)."
+    "End state of “report”: done — “1 AI(s) read the whole book · overall 7.0/10” (journal: HUMAN_PASS, QUALITY_TREND, RATE_LIMITED)."
    ],
    "faults_fired": 3,
-   "ai_calls": 73,
-   "seconds": 1.76,
+   "ai_calls": 76,
+   "seconds": 1.53,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -140,8 +138,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -151,12 +150,13 @@
     "CHECKPOINT",
     "ENDING_KEPT",
     "VOICE_TEST_TOO_LITTLE",
-    "REPORT_NOT_INDEPENDENT",
+    "RATE_LIMITED",
     "HUMAN_PASS",
-    "OPENING_SKIPPED",
-    "IMPROVE_SKIPPED",
+    "OPENING_UNRESOLVED",
+    "IMPROVE_UNRESOLVED",
     "CLEAN_RUN_SCORE",
-    "BOOK_TOO_SHORT"
+    "BOOK_TOO_SHORT",
+    "QUALITY_TREND"
    ],
    "alert": {},
    "finding": {
@@ -168,9 +168,9 @@
     "what": "An AI that is busy 3 times and then free still loses the whole-book review, the opening and the improve pass; the message says no independent AI was working",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-18-c",
@@ -178,7 +178,7 @@
    "part": "18",
    "stress": "c",
    "title": "every AI at its usage limit, then recovers",
-   "result": "⚠️",
+   "result": "✅",
    "happened": "Every AI at its usage limit for 6 calls, then free: The book finished with nothing lost.",
    "status": "done",
    "final_status": "done",
@@ -186,17 +186,13 @@
    "problem_message": "",
    "problem_fix": "",
    "issues": [],
-   "risks": [
-    "no USAGE_LIMIT_WAIT note: the author was not told the run waited for usage limits",
-    "the whole-book review was lost after 3 failed reviewer call(s) of 3 (UPSTREAM_UNAVAILABLE): the report is made without any AI review, so the opening and improve passes are skipped too (OPENING_SKIPPED, IMPROVE_SKIPPED)",
-    "the step says “no independent AI was working” although the reviewer AI was working and failed (UPSTREAM_UNAVAILABLE): the message blames the wrong thing"
-   ],
+   "risks": [],
    "notes": [
-    "End state of “report”: done — “⚠️ Report made without an AI review: no independent AI was working (📨 Ask the other AIs on the report page later)” (journal: HUMAN_PASS, REPORT_NOT_INDEPENDENT)."
+    "End state of “report”: done — “1 AI(s) read the whole book · overall 7.0/10” (journal: HUMAN_PASS, QUALITY_TREND, USAGE_LIMIT_WAIT)."
    ],
-   "faults_fired": 3,
-   "ai_calls": 72,
-   "seconds": 1.68,
+   "faults_fired": 6,
+   "ai_calls": 79,
+   "seconds": 1.42,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -206,8 +202,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -217,12 +214,13 @@
     "CHECKPOINT",
     "ENDING_KEPT",
     "VOICE_TEST_TOO_LITTLE",
-    "REPORT_NOT_INDEPENDENT",
+    "USAGE_LIMIT_WAIT",
     "HUMAN_PASS",
-    "OPENING_SKIPPED",
-    "IMPROVE_SKIPPED",
+    "OPENING_UNRESOLVED",
+    "IMPROVE_UNRESOLVED",
     "CLEAN_RUN_SCORE",
-    "BOOK_TOO_SHORT"
+    "BOOK_TOO_SHORT",
+    "QUALITY_TREND"
    ],
    "alert": {},
    "finding": {
@@ -234,9 +232,9 @@
     "what": "A short usage limit loses the whole-book review and both quality passes (no wait, no USAGE_LIMIT_WAIT note); wrong message",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-18-d",
@@ -244,7 +242,7 @@
    "part": "18",
    "stress": "d",
    "title": "garbage answer (not JSON / wrong types / missing keys)",
-   "result": "⚠️",
+   "result": "✅",
    "happened": "Not json (every time): The book finished with nothing lost. — Wrong types (every time): The book finished with nothing lost. — Missing keys (every time): The book finished with nothing lost.",
    "status": "done",
    "final_status": "done",
@@ -252,17 +250,14 @@
    "problem_message": "",
    "problem_fix": "",
    "issues": [],
-   "risks": [
-    "the whole-book review was lost after 6 failed reviewer call(s) of 6 (INTERNAL_ERROR): the report is made without any AI review, so the opening and improve passes are skipped too (OPENING_SKIPPED, IMPROVE_SKIPPED)",
-    "the step says “no independent AI was working” although the reviewer AI was working and failed (INTERNAL_ERROR): the message blames the wrong thing"
-   ],
+   "risks": [],
    "notes": [
     "Sent through an in-process AutoInjector bridge, so the real adapter reads the bad text.",
-    "End state of “report”: done — “⚠️ Report made without an AI review: no independent AI was working (📨 Ask the other AIs on the report page later)” (journal: HUMAN_PASS, REPORT_NOT_INDEPENDENT)."
+    "End state of “report”: done — “⚠️ Report made without an AI review: the reviewer AI could not review it (AI-2 · ChatGPT, AI-3 · Gemini, AI-1 · Claude: its answer could not be used) — 📨 Ask the other AIs on the report page” (journal: HUMAN_PASS, REPORT_NO_REVIEW)."
    ],
-   "faults_fired": 9,
-   "ai_calls": 89,
-   "seconds": 8.96,
+   "faults_fired": 63,
+   "ai_calls": 303,
+   "seconds": 7.56,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -272,8 +267,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -283,7 +279,7 @@
     "CHECKPOINT",
     "ENDING_KEPT",
     "VOICE_TEST_TOO_LITTLE",
-    "REPORT_NOT_INDEPENDENT",
+    "REPORT_NO_REVIEW",
     "HUMAN_PASS",
     "OPENING_SKIPPED",
     "IMPROVE_SKIPPED",
@@ -300,9 +296,9 @@
     "what": "Unusable review answers: the review is lost and the message says “no independent AI was working”",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-18-e",
@@ -310,7 +306,7 @@
    "part": "18",
    "stress": "e",
    "title": "empty answer",
-   "result": "⚠️",
+   "result": "✅",
    "happened": "Empty reply text (every time): The book finished with nothing lost. — An empty JSON object {} (every time): The book finished with nothing lost.",
    "status": "done",
    "final_status": "done",
@@ -318,16 +314,13 @@
    "problem_message": "",
    "problem_fix": "",
    "issues": [],
-   "risks": [
-    "the whole-book review was lost after 6 failed reviewer call(s) of 6 (INTERNAL_ERROR): the report is made without any AI review, so the opening and improve passes are skipped too (OPENING_SKIPPED, IMPROVE_SKIPPED)",
-    "the step says “no independent AI was working” although the reviewer AI was working and failed (INTERNAL_ERROR): the message blames the wrong thing"
-   ],
+   "risks": [],
    "notes": [
-    "End state of “report”: done — “⚠️ Report made without an AI review: no independent AI was working (📨 Ask the other AIs on the report page later)” (journal: HUMAN_PASS, REPORT_NOT_INDEPENDENT)."
+    "End state of “report”: done — “⚠️ Report made without an AI review: the reviewer AI could not review it (AI-2 · ChatGPT, AI-3 · Gemini, AI-1 · Claude: its answer could not be used) — 📨 Ask the other AIs on the report page” (journal: HUMAN_PASS, REPORT_NO_REVIEW)."
    ],
-   "faults_fired": 9,
-   "ai_calls": 89,
-   "seconds": 6.53,
+   "faults_fired": 42,
+   "ai_calls": 202,
+   "seconds": 5.09,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -337,8 +330,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -348,7 +342,7 @@
     "CHECKPOINT",
     "ENDING_KEPT",
     "VOICE_TEST_TOO_LITTLE",
-    "REPORT_NOT_INDEPENDENT",
+    "REPORT_NO_REVIEW",
     "HUMAN_PASS",
     "OPENING_SKIPPED",
     "IMPROVE_SKIPPED",
@@ -365,9 +359,9 @@
     "what": "Empty review answers: the review is lost and the message says “no independent AI was working”",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-18-f",
@@ -375,7 +369,7 @@
    "part": "18",
    "stress": "f",
    "title": "the AI refuses (AI_DECLINED) repeatedly",
-   "result": "⚠️",
+   "result": "✅",
    "happened": "Every AI declines every time: The book finished with nothing lost.",
    "status": "done",
    "final_status": "done",
@@ -383,16 +377,13 @@
    "problem_message": "",
    "problem_fix": "",
    "issues": [],
-   "risks": [
-    "the whole-book review was lost after 4 failed reviewer call(s) of 4 (AI_DECLINED): the report is made without any AI review, so the opening and improve passes are skipped too (OPENING_SKIPPED, IMPROVE_SKIPPED)",
-    "the step says “no independent AI was working” although the reviewer AI was working and failed (AI_DECLINED): the message blames the wrong thing"
-   ],
+   "risks": [],
    "notes": [
-    "End state of “report”: done — “⚠️ Report made without an AI review: no independent AI was working (📨 Ask the other AIs on the report page later)” (journal: HUMAN_PASS, REPORT_NOT_INDEPENDENT)."
+    "End state of “report”: done — “⚠️ Report made without an AI review: the reviewer AI could not review it (AI-2, AI-1 · Claude (API): it refused to review the book) — 📨 Ask the other AIs on the report page” (journal: HUMAN_PASS, REPORT_NO_REVIEW)."
    ],
    "faults_fired": 155,
    "ai_calls": 224,
-   "seconds": 5.01,
+   "seconds": 4.53,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -402,8 +393,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -413,7 +405,7 @@
     "CHECKPOINT",
     "ENDING_KEPT",
     "VOICE_TEST_TOO_LITTLE",
-    "REPORT_NOT_INDEPENDENT",
+    "REPORT_NO_REVIEW",
     "HUMAN_PASS",
     "OPENING_SKIPPED",
     "IMPROVE_SKIPPED",
@@ -430,9 +422,9 @@
     "what": "Refusing reviewers: the message says “no independent AI was working” instead of “the AIs refused”",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-18-g",
@@ -454,7 +446,7 @@
    ],
    "faults_fired": 0,
    "ai_calls": 70,
-   "seconds": 1.62,
+   "seconds": 1.32,
    "likely": "",
    "log_errors": 1,
    "log_tracebacks": 1,
@@ -464,8 +456,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -486,7 +479,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-18-h",
@@ -508,7 +501,7 @@
    ],
    "faults_fired": 1,
    "ai_calls": 74,
-   "seconds": 1.79,
+   "seconds": 1.62,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -518,8 +511,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -540,7 +534,7 @@
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-18-i",
@@ -562,7 +556,7 @@
    ],
    "faults_fired": 1,
    "ai_calls": 74,
-   "seconds": 5.85,
+   "seconds": 4.26,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -572,8 +566,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -594,7 +589,7 @@
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-18-j",
@@ -617,7 +612,7 @@
    ],
    "faults_fired": 2,
    "ai_calls": 73,
-   "seconds": 1.91,
+   "seconds": 1.45,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -627,8 +622,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -649,7 +645,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-18-k",
@@ -657,7 +653,7 @@
    "part": "18",
    "stress": "k",
    "title": "a harsh reviewer gives 1/10 for everything, with no quote and no weakness to back it",
-   "result": "⚠️",
+   "result": "✅",
    "happened": "Every score 1, nothing quoted: The book finished with nothing lost.",
    "status": "done",
    "final_status": "done",
@@ -665,15 +661,13 @@
    "problem_message": "",
    "problem_fix": "",
    "issues": [],
-   "risks": [
-    "a 1/10-everywhere review with no quoted weakness is accepted as it is: the report says 1.0/10 and nothing marks the review as unbacked (only HIGH scores need proof)"
-   ],
+   "risks": [],
    "notes": [
-    "End state of “report”: done — “1 AI(s) read the whole book · overall 1.0/10” (journal: HUMAN_PASS, QUALITY_TREND)."
+    "End state of “report”: done — “⚠️ Report made without an AI review: AI-2 gave the book very low scores without quoting it to back them, even after Akọwe asked once more, so they are not counted — 📨 Ask the other AIs on the report page” (journal: HUMAN_PASS, REPORT_NO_REVIEW)."
    ],
-   "faults_fired": 1,
+   "faults_fired": 2,
    "ai_calls": 72,
-   "seconds": 1.71,
+   "seconds": 1.42,
    "likely": "unlikely but dangerous",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -683,8 +677,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -694,12 +689,12 @@
     "CHECKPOINT",
     "ENDING_KEPT",
     "VOICE_TEST_TOO_LITTLE",
+    "REPORT_NO_REVIEW",
     "HUMAN_PASS",
-    "OPENING_UNRESOLVED",
-    "IMPROVE_NOTHING",
+    "OPENING_SKIPPED",
+    "IMPROVE_SKIPPED",
     "CLEAN_RUN_SCORE",
-    "BOOK_TOO_SHORT",
-    "QUALITY_TREND"
+    "BOOK_TOO_SHORT"
    ],
    "alert": {},
    "finding": {
@@ -711,9 +706,9 @@
     "what": "A 1/10-for-everything review with no quoted weakness is accepted as it is",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-18-l",
@@ -732,12 +727,12 @@
    "risks": [],
    "notes": [
     "Direct: the stored scores were {\"atmosphere\": 1, \"premise\": 7, \"plot_continuity\": 1, \"structure\": 7, \"prose_clarity\": 8, \"realism\": 3, \"rule_rigor\": 7}.",
-    "Through the adapter: AI-2 failed INTERNAL_ERROR; AI-3 failed INTERNAL_ERROR.",
+    "Through the adapter: AI-2 failed INTERNAL_ERROR; AI-3 failed INTERNAL_ERROR; AI-1 failed INTERNAL_ERROR.",
     "End state of “report”: done — “1 AI(s) read the whole book · overall 4.9/10” (journal: HUMAN_PASS, QUALITY_TREND)."
    ],
-   "faults_fired": 8,
-   "ai_calls": 160,
-   "seconds": 5.54,
+   "faults_fired": 20,
+   "ai_calls": 172,
+   "seconds": 4.15,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -747,8 +742,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -765,7 +761,7 @@
     "BOOK_TOO_SHORT",
     "QUALITY_TREND",
     "SECOND_REVIEW",
-    "REPORT_NOT_INDEPENDENT",
+    "REPORT_NO_REVIEW",
     "OPENING_SKIPPED",
     "IMPROVE_SKIPPED"
    ],
@@ -773,7 +769,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-18-m",
@@ -795,7 +791,7 @@
    ],
    "faults_fired": 2,
    "ai_calls": 73,
-   "seconds": 1.79,
+   "seconds": 1.56,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -805,8 +801,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -827,7 +824,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-18-n",
@@ -835,7 +832,7 @@
    "part": "18",
    "stress": "n",
    "title": "the report is made while one chapter's text is missing (chapter 3 has no prose when the report reads the book)",
-   "result": "⚠️",
+   "result": "✅",
    "happened": "Chapter 3 missing while the report reads the book: The book finished with nothing lost.",
    "status": "done",
    "final_status": "done",
@@ -843,16 +840,14 @@
    "problem_message": "",
    "problem_fix": "",
    "issues": [],
-   "risks": [
-    "the report was made from 2 of 3 chapters and does not say a chapter is missing (its scores and word count read as the whole book)"
-   ],
+   "risks": [],
    "notes": [
     "Simulated by hiding the last chapter's prose from BookPath.chapter_prose for the report step only (as if its text was lost); the chapters were complete before and after.",
-    "End state of “report”: done — “1 AI(s) read the whole book · overall 7.0/10” (journal: HUMAN_PASS, QUALITY_TREND)."
+    "End state of “report”: done — “1 AI(s) read the whole book · overall 7.0/10 · ⚠️ Chapter 3 has no text: the report is of an incomplete book” (journal: HUMAN_PASS, QUALITY_TREND, REPORT_INCOMPLETE)."
    ],
    "faults_fired": 0,
    "ai_calls": 73,
-   "seconds": 1.78,
+   "seconds": 1.47,
    "likely": "unlikely but dangerous",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -862,8 +857,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -873,6 +869,7 @@
     "CHECKPOINT",
     "ENDING_KEPT",
     "VOICE_TEST_TOO_LITTLE",
+    "REPORT_INCOMPLETE",
     "HUMAN_PASS",
     "OPENING_UNRESOLVED",
     "IMPROVE_UNRESOLVED",
@@ -890,9 +887,9 @@
     "what": "A report made while a chapter's text is missing does not say a chapter is missing",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-18-o",
@@ -915,7 +912,7 @@
    ],
    "faults_fired": 0,
    "ai_calls": 60,
-   "seconds": 1.53,
+   "seconds": 1.4,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -927,8 +924,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "PLANNED_UNRESOLVED",
@@ -948,7 +946,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-18-p",
@@ -970,7 +968,7 @@
    ],
    "faults_fired": 1,
    "ai_calls": 73,
-   "seconds": 1.84,
+   "seconds": 1.59,
    "likely": "unlikely but dangerous",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -981,8 +979,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -1003,7 +1002,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-18-q",
@@ -1025,7 +1024,7 @@
    ],
    "faults_fired": 2,
    "ai_calls": 85,
-   "seconds": 3.1,
+   "seconds": 2.64,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -1035,8 +1034,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -1057,7 +1057,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-19-a",
@@ -1065,7 +1065,7 @@
    "part": "19",
    "stress": "a",
    "title": "the AI times out (once; and every time)",
-   "result": "⚠️",
+   "result": "✅",
    "happened": "Once: The book finished with nothing lost. — Every time: The book finished with nothing lost.",
    "status": "done",
    "final_status": "done",
@@ -1073,15 +1073,13 @@
    "problem_message": "",
    "problem_fix": "",
    "issues": [],
-   "risks": [
-    "the beta read was lost after 1 failed call(s) (fail:TIMEOUT) and was not tried again: the book is finished without a beta read (BETA_FAILED)"
-   ],
+   "risks": [],
    "notes": [
-    "End state of “beta”: done — “⚠️ The beta reader could not read the book (TIMEOUT); ask one on the 📊 report page” (journal: BETA_FAILED)."
+    "End state of “beta”: done — “AI-2 read it as an adult reader of mystery · interest 6.0/10 · ⚠️ Where the reader's interest sagged; Twists the reader saw coming” (journal: BETA_NOTES)."
    ],
-   "faults_fired": 1,
-   "ai_calls": 74,
-   "seconds": 3.65,
+   "faults_fired": 3,
+   "ai_calls": 152,
+   "seconds": 2.85,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -1091,8 +1089,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -1103,12 +1102,13 @@
     "ENDING_KEPT",
     "VOICE_TEST_TOO_LITTLE",
     "HUMAN_PASS",
-    "BETA_FAILED",
+    "BETA_NOTES",
     "OPENING_UNRESOLVED",
     "IMPROVE_UNRESOLVED",
     "CLEAN_RUN_SCORE",
     "BOOK_TOO_SHORT",
-    "QUALITY_TREND"
+    "QUALITY_TREND",
+    "BETA_FAILED"
    ],
    "alert": {},
    "finding": {
@@ -1120,9 +1120,9 @@
     "what": "One timeout loses the beta read (no second try)",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-19-b",
@@ -1140,11 +1140,11 @@
    "issues": [],
    "risks": [],
    "notes": [
-    "End state of “beta”: done — “AI-2 read it as an adult reader of mystery · interest 6.0/10 · ⚠️ Where the reader's interest sagged; Twists the reader saw coming” (journal: BETA_NOTES)."
+    "End state of “beta”: done — “AI-2 read it as an adult reader of mystery · interest 6.0/10 · ⚠️ Where the reader's interest sagged; Twists the reader saw coming” (journal: BETA_NOTES, RATE_LIMITED)."
    ],
    "faults_fired": 3,
    "ai_calls": 79,
-   "seconds": 1.93,
+   "seconds": 1.43,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -1154,8 +1154,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -1166,6 +1167,7 @@
     "ENDING_KEPT",
     "VOICE_TEST_TOO_LITTLE",
     "HUMAN_PASS",
+    "RATE_LIMITED",
     "BETA_NOTES",
     "OPENING_UNRESOLVED",
     "IMPROVE_UNRESOLVED",
@@ -1177,7 +1179,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-19-c",
@@ -1185,7 +1187,7 @@
    "part": "19",
    "stress": "c",
    "title": "every AI at its usage limit, then recovers",
-   "result": "⚠️",
+   "result": "✅",
    "happened": "Every AI at its usage limit for 6 calls, then free: The book finished with nothing lost.",
    "status": "done",
    "final_status": "done",
@@ -1193,15 +1195,13 @@
    "problem_message": "",
    "problem_fix": "",
    "issues": [],
-   "risks": [
-    "no USAGE_LIMIT_WAIT note: the author was not told the run waited for usage limits"
-   ],
+   "risks": [],
    "notes": [
-    "End state of “beta”: done — “AI-2 read it as an adult reader of mystery · interest 6.0/10 · ⚠️ Where the reader's interest sagged; Twists the reader saw coming” (journal: BETA_NOTES)."
+    "End state of “beta”: done — “AI-2 read it as an adult reader of mystery · interest 6.0/10 · ⚠️ Where the reader's interest sagged; Twists the reader saw coming” (journal: BETA_NOTES, USAGE_LIMIT_WAIT)."
    ],
    "faults_fired": 6,
    "ai_calls": 82,
-   "seconds": 1.7,
+   "seconds": 1.62,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -1211,8 +1211,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -1223,6 +1224,7 @@
     "ENDING_KEPT",
     "VOICE_TEST_TOO_LITTLE",
     "HUMAN_PASS",
+    "USAGE_LIMIT_WAIT",
     "BETA_NOTES",
     "OPENING_UNRESOLVED",
     "IMPROVE_UNRESOLVED",
@@ -1240,9 +1242,9 @@
     "what": "A usage-limit wait during the beta read is not journaled (no USAGE_LIMIT_WAIT)",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-19-d",
@@ -1265,7 +1267,7 @@
    ],
    "faults_fired": 9,
    "ai_calls": 264,
-   "seconds": 9.59,
+   "seconds": 7.53,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -1275,8 +1277,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -1298,7 +1301,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-19-e",
@@ -1320,7 +1323,7 @@
    ],
    "faults_fired": 6,
    "ai_calls": 176,
-   "seconds": 5.22,
+   "seconds": 5.14,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -1330,8 +1333,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -1353,7 +1357,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-19-f",
@@ -1371,11 +1375,11 @@
    "issues": [],
    "risks": [],
    "notes": [
-    "End state of “beta”: done — “⚠️ The beta reader could not read the book (AI_DECLINED); ask one on the 📊 report page” (journal: BETA_FAILED)."
+    "End state of “beta”: done — “⚠️ The beta reader could not read the book (AI_DECLINED); ask one on the 📊 report page” (journal: AI_DECLINED, BETA_FAILED)."
    ],
    "faults_fired": 151,
    "ai_calls": 224,
-   "seconds": 4.92,
+   "seconds": 5.04,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -1385,8 +1389,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -1397,6 +1402,7 @@
     "ENDING_KEPT",
     "VOICE_TEST_TOO_LITTLE",
     "HUMAN_PASS",
+    "AI_DECLINED",
     "BETA_FAILED",
     "OPENING_UNRESOLVED",
     "IMPROVE_UNRESOLVED",
@@ -1408,7 +1414,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-19-g",
@@ -1430,7 +1436,7 @@
    ],
    "faults_fired": 0,
    "ai_calls": 74,
-   "seconds": 1.75,
+   "seconds": 1.56,
    "likely": "",
    "log_errors": 1,
    "log_tracebacks": 1,
@@ -1440,8 +1446,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -1463,7 +1470,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-19-h",
@@ -1485,7 +1492,7 @@
    ],
    "faults_fired": 1,
    "ai_calls": 77,
-   "seconds": 2.42,
+   "seconds": 1.54,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -1495,8 +1502,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -1518,7 +1526,7 @@
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-19-i",
@@ -1540,7 +1548,7 @@
    ],
    "faults_fired": 1,
    "ai_calls": 76,
-   "seconds": 6.7,
+   "seconds": 4.34,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -1550,8 +1558,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -1573,7 +1582,7 @@
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-19-j",
@@ -1581,7 +1590,7 @@
    "part": "19",
    "stress": "j",
    "title": "the most likely real-life problem: the reader paraphrases every quote (none is word for word)",
-   "result": "⚠️",
+   "result": "✅",
    "happened": "Every quote paraphrased: The book finished with nothing lost.",
    "status": "done",
    "final_status": "done",
@@ -1589,15 +1598,13 @@
    "problem_message": "",
    "problem_fix": "",
    "issues": [],
-   "risks": [
-    "a twist “guessed” with a paraphrased (unverified) quote still counts as a major finding (“Twists the reader saw coming”) and goes to the opening and improve passes; unverified reactions are not counted, unverified guesses are"
-   ],
+   "risks": [],
    "notes": [
-    "End state of “beta”: done — “AI-2 read it as an adult reader of mystery · interest 6.0/10 · ⚠️ Where the reader's interest sagged; Twists the reader saw coming” (journal: BETA_NOTES)."
+    "End state of “beta”: done — “AI-2 read it as an adult reader of mystery · interest 6.0/10 · ⚠️ Where the reader's interest sagged” (journal: BETA_NOTES)."
    ],
    "faults_fired": 1,
    "ai_calls": 76,
-   "seconds": 1.82,
+   "seconds": 1.42,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -1607,8 +1614,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -1636,9 +1644,9 @@
     "what": "Guesses with paraphrased (unverified) quotes still count as a twist the reader saw coming",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-19-k",
@@ -1646,7 +1654,7 @@
    "part": "19",
    "stress": "k",
    "title": "the beta reader “guesses the twist” on every page (12 guesses, all with invented quotes)",
-   "result": "⚠️",
+   "result": "✅",
    "happened": "12 unbacked guesses: The book finished with nothing lost.",
    "status": "done",
    "final_status": "done",
@@ -1654,16 +1662,13 @@
    "problem_message": "",
    "problem_fix": "",
    "issues": [],
-   "risks": [
-    "8 guesses whose quotes are not in the book make “Twists the reader saw coming” a MAJOR finding",
-    "the opening pass was told to hide a twist the reader “guessed” only with invented quotes"
-   ],
+   "risks": [],
    "notes": [
-    "End state of “beta”: done — “AI-2 read it as an adult reader of mystery · interest 6.0/10 · ⚠️ Where the reader's interest sagged; Twists the reader saw coming” (journal: BETA_NOTES)."
+    "End state of “beta”: done — “AI-2 read it as an adult reader of mystery · interest 6.0/10 · ⚠️ Where the reader's interest sagged” (journal: BETA_NOTES)."
    ],
    "faults_fired": 2,
-   "ai_calls": 89,
-   "seconds": 3.52,
+   "ai_calls": 93,
+   "seconds": 3.17,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -1673,8 +1678,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -1704,9 +1710,9 @@
     "what": "A beta reader that “guesses the twist” everywhere with invented quotes makes it a MAJOR finding and steers the chapter 1 rewrite",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-19-l",
@@ -1728,7 +1734,7 @@
    ],
    "faults_fired": 1,
    "ai_calls": 74,
-   "seconds": 2.08,
+   "seconds": 1.5,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -1738,8 +1744,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -1761,7 +1768,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-19-m",
@@ -1784,7 +1791,7 @@
    ],
    "faults_fired": 0,
    "ai_calls": 77,
-   "seconds": 1.66,
+   "seconds": 1.48,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -1794,8 +1801,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -1818,7 +1826,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-19-n",
@@ -1840,7 +1848,7 @@
    ],
    "faults_fired": 1,
    "ai_calls": 76,
-   "seconds": 1.69,
+   "seconds": 1.56,
    "likely": "unlikely but dangerous",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -1850,8 +1858,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -1873,7 +1882,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-19-o",
@@ -1896,7 +1905,7 @@
    ],
    "faults_fired": 0,
    "ai_calls": 61,
-   "seconds": 2.14,
+   "seconds": 1.4,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -1908,8 +1917,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "PLANNED_UNRESOLVED",
@@ -1930,7 +1940,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-20-a",
@@ -1952,7 +1962,7 @@
    ],
    "faults_fired": 2,
    "ai_calls": 160,
-   "seconds": 4.64,
+   "seconds": 4.1,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -1962,8 +1972,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -1985,7 +1996,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-20-b",
@@ -2007,7 +2018,7 @@
    ],
    "faults_fired": 3,
    "ai_calls": 88,
-   "seconds": 3.45,
+   "seconds": 2.63,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -2017,8 +2028,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -2041,7 +2053,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-20-c",
@@ -2063,7 +2075,7 @@
    ],
    "faults_fired": 6,
    "ai_calls": 91,
-   "seconds": 3.52,
+   "seconds": 2.84,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -2073,8 +2085,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -2097,7 +2110,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-20-d",
@@ -2118,9 +2131,9 @@
     "Sent through an in-process AutoInjector bridge, so the real adapter reads the bad text.",
     "End state of “opening”: done — “✍ Chapter 1 rewritten with the whole book in view: not kept, the original chapter 1 stays (the writer could not rework it (INTERNAL_ERROR))” (journal: OPENING_PROPOSE_FAILED)."
    ],
-   "faults_fired": 9,
-   "ai_calls": 294,
-   "seconds": 11.5,
+   "faults_fired": 27,
+   "ai_calls": 312,
+   "seconds": 10.37,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -2130,8 +2143,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -2153,7 +2167,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-20-e",
@@ -2173,9 +2187,9 @@
    "notes": [
     "End state of “opening”: done — “✍ Chapter 1 rewritten with the whole book in view: not kept, the original chapter 1 stays (the writer could not rework it (INTERNAL_ERROR))” (journal: OPENING_PROPOSE_FAILED)."
    ],
-   "faults_fired": 6,
-   "ai_calls": 196,
-   "seconds": 7.31,
+   "faults_fired": 18,
+   "ai_calls": 208,
+   "seconds": 6.44,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -2185,8 +2199,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -2208,7 +2223,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-20-f",
@@ -2230,7 +2245,7 @@
    ],
    "faults_fired": 302,
    "ai_calls": 381,
-   "seconds": 6.3,
+   "seconds": 5.77,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -2240,8 +2255,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -2264,7 +2280,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-20-g",
@@ -2286,7 +2302,7 @@
    ],
    "faults_fired": 0,
    "ai_calls": 81,
-   "seconds": 2.27,
+   "seconds": 2.0,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -2296,8 +2312,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -2319,7 +2336,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-20-h",
@@ -2341,7 +2358,7 @@
    ],
    "faults_fired": 2,
    "ai_calls": 172,
-   "seconds": 6.67,
+   "seconds": 6.04,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -2351,8 +2368,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -2374,7 +2392,7 @@
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-20-i",
@@ -2396,7 +2414,7 @@
    ],
    "faults_fired": 1,
    "ai_calls": 86,
-   "seconds": 7.62,
+   "seconds": 7.58,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -2406,8 +2424,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -2429,7 +2448,7 @@
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-20-j",
@@ -2452,7 +2471,7 @@
    ],
    "faults_fired": 0,
    "ai_calls": 74,
-   "seconds": 1.43,
+   "seconds": 1.54,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -2462,8 +2481,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -2484,7 +2504,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-20-k",
@@ -2492,23 +2512,25 @@
    "part": "20",
    "stress": "k",
    "title": "the rewrite of chapter 1 deletes the planted setup (the logbook line in a stranger's hand that the ending pays off) and the reviewers still score it higher",
-   "result": "❌",
-   "happened": "Chapter 1's clue removed by the rewrite: The book finished with nothing lost.",
+   "result": "⚠️",
+   "happened": "Chapter 1's clue (a set-up in the promise ledger) removed by the rewrite: The book finished with nothing lost. — The same line with no record of it as a set-up: The book finished with nothing lost.",
    "status": "done",
    "final_status": "done",
    "problem_code": "",
    "problem_message": "",
    "problem_fix": "",
-   "issues": [
-    "the rewrite that removed chapter 1's planted clue (the stranger's handwriting the ending pays off) was KEPT and nothing in the run, the journal or the final re-read says a setup was lost"
+   "issues": [],
+   "risks": [
+    "a clue nothing recorded as a set-up can still be deleted by the chapter 1 rewrite (only the reviewers' re-read judges it)"
    ],
-   "risks": [],
    "notes": [
-    "End state of “opening”: done — “✍ Chapter 1 rewritten with the whole book in view: kept (7 → 7.8/10)” (journal: OPENING_KEPT, PLANNED_MISSING)."
+    "Opening step: “✍ Chapter 1 rewritten with the whole book in view: not kept, the original chapter 1 stays (the rewrite dropped a set-up the ending needs: “Tom Reed's logbook ends with a final line written in a stranger's hand”)”.",
+    "Without any record of the clue as a set-up (no promise ledger entry, no planned item, no ending set-up) the rewrite was judged by the reviewers' re-read alone and kept.",
+    "End state of “opening”: done — “✍ Chapter 1 rewritten with the whole book in view: not kept, the original chapter 1 stays (the rewrite dropped a set-up the ending needs: “Tom Reed's logbook ends with a final line written in a stranger's hand”)” (journal: OPENING_SETUP_LOST)."
    ],
    "faults_fired": 0,
-   "ai_calls": 80,
-   "seconds": 2.23,
+   "ai_calls": 153,
+   "seconds": 3.61,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -2518,8 +2540,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_BUILT",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -2530,12 +2553,15 @@
     "ENDING_KEPT",
     "VOICE_TEST_TOO_LITTLE",
     "HUMAN_PASS",
-    "OPENING_KEPT",
+    "OPENING_SETUP_LOST",
     "IMPROVE_UNRESOLVED",
-    "FINAL_CHECK_AGAIN",
     "CLEAN_RUN_SCORE",
     "BOOK_TOO_SHORT",
-    "QUALITY_TREND"
+    "QUALITY_TREND",
+    "LEDGER_EMPTY",
+    "OPENING_KEPT",
+    "CHAPTER_NEARLY_EMPTY",
+    "FINAL_CHECK_AGAIN"
    ],
    "alert": {},
    "finding": {
@@ -2547,9 +2573,9 @@
     "what": "A chapter 1 rewrite that deletes the planted clue the ending pays off is KEPT, and nothing says so",
     "repro": ""
    },
-   "result_word": "PROBLEM",
+   "result_word": "WORKED BUT RISKY",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-20-l",
@@ -2573,7 +2599,7 @@
    ],
    "faults_fired": 0,
    "ai_calls": 202,
-   "seconds": 6.46,
+   "seconds": 5.55,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -2583,8 +2609,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -2615,7 +2642,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-20-m",
@@ -2623,7 +2650,7 @@
    "part": "20",
    "stress": "m",
    "title": "the author edits chapter 1 by hand while the reviewers re-read the new chapter 1",
-   "result": "⚠️",
+   "result": "✅",
    "happened": "Hand edit of chapter 1 during the re-read: The book finished with nothing lost.",
    "status": "done",
    "final_status": "done",
@@ -2631,17 +2658,14 @@
    "problem_message": "",
    "problem_fix": "",
    "issues": [],
-   "risks": [
-    "the run says “Chapter 1 rewritten … kept (7 → 7.8/10)” and saves the report with the re-read scores of the rewrite, but the rewrite was never applied (the author's version is in the book)",
-    "the author's unreviewed hand edit was approved by the run's reviewer as if it were the opening pass's rewrite"
-   ],
+   "risks": [],
    "notes": [
-    "Hand edit saved as DRAFT; opening: “✍ Chapter 1 rewritten with the whole book in view: kept (7 → 7.8/10)”.",
-    "End state of “opening”: done — “✍ Chapter 1 rewritten with the whole book in view: kept (7 → 7.8/10)” (journal: OPENING_KEPT, PLANNED_MISSING, SECOND_REVIEW)."
+    "Hand edit saved as DRAFT; opening: “✍ Chapter 1 rewritten with the whole book in view: not kept (you edited chapter 1 meanwhile, so the rewrite was not used; your version stays as you left it)”.",
+    "End state of “opening”: done — “✍ Chapter 1 rewritten with the whole book in view: not kept (you edited chapter 1 meanwhile, so the rewrite was not used; your version stays as you left it)” (journal: OPENING_KEPT, OPENING_SKIPPED_EDITED)."
    ],
    "faults_fired": 1,
-   "ai_calls": 80,
-   "seconds": 2.35,
+   "ai_calls": 74,
+   "seconds": 1.27,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -2651,8 +2675,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -2664,8 +2689,9 @@
     "VOICE_TEST_TOO_LITTLE",
     "HUMAN_PASS",
     "OPENING_KEPT",
-    "SECOND_REVIEW",
+    "OPENING_SKIPPED_EDITED",
     "IMPROVE_UNRESOLVED",
+    "DRAFT_WAITING",
     "CLEAN_RUN_SCORE",
     "BOOK_TOO_SHORT",
     "QUALITY_TREND"
@@ -2680,9 +2706,9 @@
     "what": "Hand edit during the opening pass: the run says “kept (7 → 7.8)”, the rewrite is not in the book, and the author's edit is approved by the run",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-20-n",
@@ -2690,7 +2716,7 @@
    "part": "20",
    "stress": "n",
    "title": "the rewrite blows chapter 1 up to ~20 000 words and the reviewers like it",
-   "result": "⚠️",
+   "result": "✅",
    "happened": "A 20 000-word replacement: The book finished with nothing lost.",
    "status": "done",
    "final_status": "done",
@@ -2698,15 +2724,13 @@
    "problem_message": "",
    "problem_fix": "",
    "issues": [],
-   "risks": [
-    "the oversized rewrite was refused by the length guard (📏 word budget), but the run says “the writer's changes did not match the text word for word” — the wrong reason (its original text matched exactly)"
-   ],
+   "risks": [],
    "notes": [
-    "End state of “opening”: done — “✍ Chapter 1 rewritten with the whole book in view: not kept, the original chapter 1 stays (the writer's changes did not match the text word for word)” (journal: OPENING_UNRESOLVED)."
+    "End state of “opening”: done — “✍ Chapter 1 rewritten with the whole book in view: not kept, the original chapter 1 stays (the rewrite would make chapter 1 longer than the book's word budget allows)” (journal: OPENING_UNRESOLVED)."
    ],
    "faults_fired": 0,
    "ai_calls": 73,
-   "seconds": 1.72,
+   "seconds": 1.52,
    "likely": "unlikely but dangerous",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -2716,8 +2740,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -2744,9 +2769,9 @@
     "what": "An oversized opening rewrite is refused for its length, but the run gives the wrong reason",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-20-o",
@@ -2764,7 +2789,7 @@
    "issues": [],
    "risks": [],
    "notes": [
-    "End state of “opening”: done — “✍ Chapter 1 rewritten with the whole book in view: not kept, the original chapter 1 stays (the writer's changes did not match the text word for word)” (journal: OPENING_UNRESOLVED)."
+    "End state of “opening”: done — “✍ Chapter 1 rewritten with the whole book in view: not kept, the original chapter 1 stays (the AI's “original” appears more than once in the chapter, so Akọwe did not guess which)” (journal: OPENING_UNRESOLVED)."
    ],
    "faults_fired": 0,
    "ai_calls": 73,
@@ -2778,8 +2803,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -2800,7 +2826,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-21-a",
@@ -2822,7 +2848,7 @@
    ],
    "faults_fired": 2,
    "ai_calls": 160,
-   "seconds": 5.0,
+   "seconds": 4.43,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -2832,8 +2858,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -2855,7 +2882,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-21-b",
@@ -2877,7 +2904,7 @@
    ],
    "faults_fired": 3,
    "ai_calls": 88,
-   "seconds": 3.14,
+   "seconds": 2.76,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -2887,8 +2914,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -2911,7 +2939,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-21-c",
@@ -2933,7 +2961,7 @@
    ],
    "faults_fired": 6,
    "ai_calls": 91,
-   "seconds": 3.0,
+   "seconds": 2.85,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -2943,8 +2971,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -2967,7 +2996,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-21-d",
@@ -2988,9 +3017,9 @@
     "Sent through an in-process AutoInjector bridge, so the real adapter reads the bad text.",
     "End state of “improve”: done — “🎯 Weakest scenes: 7.8/10 — the rewritten scenes did not pass Akọwe's checks (the AI could not answer)” (journal: IMPROVE_UNRESOLVED)."
    ],
-   "faults_fired": 9,
-   "ai_calls": 294,
-   "seconds": 11.45,
+   "faults_fired": 27,
+   "ai_calls": 312,
+   "seconds": 10.35,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -3000,8 +3029,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -3023,7 +3053,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-21-e",
@@ -3043,9 +3073,9 @@
    "notes": [
     "End state of “improve”: done — “🎯 Weakest scenes: 7.8/10 — the rewritten scenes did not pass Akọwe's checks (the AI could not answer)” (journal: IMPROVE_UNRESOLVED)."
    ],
-   "faults_fired": 6,
-   "ai_calls": 196,
-   "seconds": 6.98,
+   "faults_fired": 18,
+   "ai_calls": 208,
+   "seconds": 7.08,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -3055,8 +3085,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -3078,7 +3109,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-21-f",
@@ -3100,7 +3131,7 @@
    ],
    "faults_fired": 302,
    "ai_calls": 381,
-   "seconds": 5.92,
+   "seconds": 5.55,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -3110,8 +3141,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -3134,7 +3166,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-21-g",
@@ -3156,7 +3188,7 @@
    ],
    "faults_fired": 0,
    "ai_calls": 75,
-   "seconds": 1.47,
+   "seconds": 1.44,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -3166,8 +3198,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -3188,7 +3221,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-21-h",
@@ -3210,7 +3243,7 @@
    ],
    "faults_fired": 2,
    "ai_calls": 162,
-   "seconds": 4.05,
+   "seconds": 4.27,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -3220,8 +3253,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -3243,7 +3277,7 @@
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-21-i",
@@ -3265,7 +3299,7 @@
    ],
    "faults_fired": 1,
    "ai_calls": 86,
-   "seconds": 8.07,
+   "seconds": 8.16,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -3275,8 +3309,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -3298,7 +3333,7 @@
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-21-j",
@@ -3321,7 +3356,7 @@
    ],
    "faults_fired": 0,
    "ai_calls": 74,
-   "seconds": 1.57,
+   "seconds": 1.53,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -3331,8 +3366,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -3353,7 +3389,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-21-k",
@@ -3377,7 +3413,7 @@
    ],
    "faults_fired": 3,
    "ai_calls": 178,
-   "seconds": 7.35,
+   "seconds": 7.03,
    "likely": "unlikely but dangerous",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -3387,8 +3423,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -3410,7 +3447,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-21-l",
@@ -3418,26 +3455,24 @@
    "part": "21",
    "stress": "l",
    "title": "the scene rewrites break the rules: the main character's name dropped and her death added; a 2 MB scene (and a 2 MB “cut”); a chapter title and a scene break added",
-   "result": "❌",
+   "result": "✅",
    "happened": "Name dropped, death added: The book finished with nothing lost. — 2 MB scene: The book finished with nothing lost. — Title and scene break added: The book finished with nothing lost.",
    "status": "done",
    "final_status": "done",
    "problem_code": "",
    "problem_message": "",
    "problem_fix": "",
-   "issues": [
-    "a scene rewrite that drops the main character's name (her first name → “She”) and adds her death (“She died there.”) was KEPT: the name check only looks for the full names, and nothing checks for a new death or a changed outcome"
-   ],
+   "issues": [],
    "risks": [],
    "notes": [
-    "Name dropped, death added: refused as .",
+    "Name dropped, death added: refused as OUTCOME_CHANGED.",
     "2 MB scene: refused as TOO_LONG.",
     "Title and scene break added: refused as FORM.",
-    "End state of “improve”: done — “🎯 Rewrote 1 weakest scene (ch2 mara questions the harbor): 7 → 7.8 (kept)” (journal: IMPROVE_KEPT, PLANNED_MISSING)."
+    "End state of “improve”: done — “🎯 Weakest scenes: 7/10 — the rewritten scenes did not pass Akọwe's checks (it adds a death the scene did not have, and what happens may not change)” (journal: IMPROVE_UNRESOLVED)."
    ],
    "faults_fired": 0,
-   "ai_calls": 226,
-   "seconds": 6.25,
+   "ai_calls": 219,
+   "seconds": 4.88,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -3447,8 +3482,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -3460,12 +3496,10 @@
     "VOICE_TEST_TOO_LITTLE",
     "HUMAN_PASS",
     "OPENING_UNRESOLVED",
-    "IMPROVE_KEPT",
-    "FINAL_CHECK_AGAIN",
+    "IMPROVE_UNRESOLVED",
     "CLEAN_RUN_SCORE",
     "BOOK_TOO_SHORT",
-    "QUALITY_TREND",
-    "IMPROVE_UNRESOLVED"
+    "QUALITY_TREND"
    ],
    "alert": {},
    "finding": {
@@ -3477,9 +3511,9 @@
     "what": "A weakest-scene rewrite that removes the heroine's name and kills her is kept",
     "repro": ""
    },
-   "result_word": "PROBLEM",
+   "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-21-m",
@@ -3487,7 +3521,7 @@
    "part": "21",
    "stress": "m",
    "title": "the author edits the rewritten chapter by hand while the reviewers re-read the improved book",
-   "result": "⚠️",
+   "result": "✅",
    "happened": "Hand edit of chapter 2 during the re-read: The book finished with nothing lost.",
    "status": "done",
    "final_status": "done",
@@ -3495,16 +3529,14 @@
    "problem_message": "",
    "problem_fix": "",
    "issues": [],
-   "risks": [
-    "the run says “🎯 Rewrote 1 weakest scene (ch2 mara questions the harbor): 7 → 7.8 (kept)” but the rewrite could not be saved (the chapter changed): the report keeps the re-read scores of a text that is not in the book"
-   ],
+   "risks": [],
    "notes": [
-    "Codes: IMPROVE_KEPT.",
-    "End state of “improve”: done — “🎯 Rewrote 1 weakest scene (ch2 mara questions the harbor): 7 → 7.8 (kept)” (journal: IMPROVE_KEPT, PLANNED_MISSING, SECOND_REVIEW)."
+    "Codes: IMPROVE_KEPT, IMPROVE_SKIPPED_EDITED.",
+    "End state of “improve”: done — “🎯 Rewrote 1 weakest scene (ch2 mara questions the harbor): 7 → 7.8 (not kept: you edited chapter 2 meanwhile, so the rewrite was not used; your version stays as you left it)” (journal: IMPROVE_KEPT, IMPROVE_SKIPPED_EDITED)."
    ],
    "faults_fired": 1,
-   "ai_calls": 80,
-   "seconds": 2.32,
+   "ai_calls": 74,
+   "seconds": 1.56,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -3514,8 +3546,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -3528,7 +3561,8 @@
     "HUMAN_PASS",
     "OPENING_UNRESOLVED",
     "IMPROVE_KEPT",
-    "SECOND_REVIEW",
+    "IMPROVE_SKIPPED_EDITED",
+    "DRAFT_WAITING",
     "CLEAN_RUN_SCORE",
     "BOOK_TOO_SHORT",
     "QUALITY_TREND"
@@ -3543,9 +3577,9 @@
     "what": "Hand edit during the improve re-read: the run says the rewrite was kept, but it is not in the book",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-21-n",
@@ -3568,7 +3602,7 @@
    ],
    "faults_fired": 2,
    "ai_calls": 88,
-   "seconds": 2.9,
+   "seconds": 2.69,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -3578,8 +3612,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -3600,7 +3635,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-22-a",
@@ -3620,9 +3655,9 @@
    "notes": [
     "End state of “reread”: done — “🧭 Final check of the whole book after chapter 3 (read again after Akọwe's own rewrites): no problems found · 📖 The beta reader(s) read the final book again: AI-2 read it as an adult reader of mystery · interest 6.0/10 · ” (journal: BETA_AGAIN, FINAL_CHECK_AGAIN)."
    ],
-   "faults_fired": 4,
-   "ai_calls": 178,
-   "seconds": 6.31,
+   "faults_fired": 5,
+   "ai_calls": 179,
+   "seconds": 5.83,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -3632,8 +3667,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -3660,7 +3696,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-22-b",
@@ -3678,11 +3714,11 @@
    "issues": [],
    "risks": [],
    "notes": [
-    "End state of “reread”: done — “🧭 Final check of the whole book after chapter 3 (read again after Akọwe's own rewrites): no problems found · 📖 The beta reader(s) read the final book again: AI-2 read it as an adult reader of mystery · interest 6.0/10 · ” (journal: BETA_AGAIN, FINAL_CHECK_AGAIN)."
+    "End state of “reread”: done — “🧭 Final check of the whole book after chapter 3 (read again after Akọwe's own rewrites): no problems found, checked by AI-2, Claude · 📖 The beta reader(s) read the final book again: AI-2 read it as an adult reader of mys” (journal: BETA_AGAIN, FINAL_CHECK_AGAIN, RATE_LIMITED)."
    ],
    "faults_fired": 3,
-   "ai_calls": 91,
-   "seconds": 3.15,
+   "ai_calls": 92,
+   "seconds": 2.96,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -3692,8 +3728,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -3707,7 +3744,7 @@
     "BETA_NOTES",
     "OPENING_KEPT",
     "IMPROVE_KEPT",
-    "CHECKPOINT_AI_SKIPPED",
+    "RATE_LIMITED",
     "FINAL_CHECK_AGAIN",
     "BETA_AGAIN",
     "CLEAN_RUN_SCORE",
@@ -3718,7 +3755,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-22-c",
@@ -3726,7 +3763,7 @@
    "part": "22",
    "stress": "c",
    "title": "every AI at its usage limit, then recovers",
-   "result": "⚠️",
+   "result": "✅",
    "happened": "Every AI at its usage limit for 6 calls, then free: The book finished with nothing lost.",
    "status": "done",
    "final_status": "done",
@@ -3734,15 +3771,13 @@
    "problem_message": "",
    "problem_fix": "",
    "issues": [],
-   "risks": [
-    "no USAGE_LIMIT_WAIT note: the author was not told the run waited for usage limits"
-   ],
+   "risks": [],
    "notes": [
-    "End state of “reread”: done — “🧭 Final check of the whole book after chapter 3 (read again after Akọwe's own rewrites): no problems found, ⚠️ part of it could not be read (no AI was free) — read again at the next checkpoint · 📖 The beta reader(s) read” (journal: BETA_AGAIN, FINAL_CHECK_AGAIN)."
+    "End state of “reread”: done — “🧭 Final check of the whole book after chapter 3 (read again after Akọwe's own rewrites): no problems found, checked by AI-2, Claude · 📖 The beta reader(s) read the final book again: AI-2 read it as an adult reader of mys” (journal: BETA_AGAIN, FINAL_CHECK_AGAIN, USAGE_LIMIT_WAIT)."
    ],
    "faults_fired": 6,
-   "ai_calls": 93,
-   "seconds": 3.0,
+   "ai_calls": 95,
+   "seconds": 2.9,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -3752,8 +3787,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -3767,8 +3803,7 @@
     "BETA_NOTES",
     "OPENING_KEPT",
     "IMPROVE_KEPT",
-    "CHECKPOINT_AI_SKIPPED",
-    "CHECKPOINT_UNREAD",
+    "USAGE_LIMIT_WAIT",
     "FINAL_CHECK_AGAIN",
     "BETA_AGAIN",
     "CLEAN_RUN_SCORE",
@@ -3785,9 +3820,9 @@
     "what": "A usage-limit wait during the final re-read is not journaled",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-22-d",
@@ -3810,7 +3845,7 @@
    ],
    "faults_fired": 36,
    "ai_calls": 348,
-   "seconds": 14.21,
+   "seconds": 13.53,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -3820,8 +3855,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -3848,7 +3884,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-22-e",
@@ -3870,7 +3906,7 @@
    ],
    "faults_fired": 24,
    "ai_calls": 232,
-   "seconds": 9.81,
+   "seconds": 8.46,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -3880,8 +3916,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -3908,7 +3945,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-22-f",
@@ -3926,41 +3963,25 @@
    "issues": [],
    "risks": [],
    "notes": [
-    "End state of “reread”: done — “🧭 Final check of the whole book after chapter 3 (read again after Akọwe's own rewrites): no problems found, ⚠️ part of it could not be read (no AI was free) — read again at the next checkpoint · ⚠️ The beta reader(s) cou” (journal: BETA_AGAIN, FINAL_CHECK_AGAIN)."
+    "End state of “reread”: done — “🧭 Final check of the whole book after chapter 3 (read again after Akọwe's own rewrites): no problems found, ⚠️ part of it could not be read (no AI was free) — read again at the next checkpoint · ⚠️ The beta reader(s) cou” (journal: AI_DECLINED, BETA_AGAIN, FINAL_CHECK_AGAIN)."
    ],
-   "faults_fired": 153,
-   "ai_calls": 239,
-   "seconds": 6.36,
+   "faults_fired": 453,
+   "ai_calls": 539,
+   "seconds": 13.49,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
    "event_codes": [
-    "VOICE_SET",
-    "VOICES_DISTINCT",
-    "DOCTOR_SCORED",
-    "DOCTOR_DONE",
-    "PREDICT_PROBED",
-    "SCOPE_SET",
-    "GRID_FAILED",
-    "TRADE_CARD_MADE",
-    "PROTAGONIST_OK",
-    "FIRST_PAGE_PICKED",
-    "ONE_REVIEWER",
-    "PLANNED_UNRESOLVED",
-    "PLANNED_MISSING",
-    "CHECKPOINT",
-    "ENDING_KEPT",
-    "VOICE_TEST_TOO_LITTLE",
-    "HUMAN_PASS",
-    "BETA_NOTES",
-    "OPENING_KEPT",
-    "IMPROVE_KEPT",
+    "AI_DECLINED",
     "CHECKPOINT_AI_SKIPPED",
     "CHECKPOINT_UNREAD",
+    "CHECKPOINT",
     "FINAL_CHECK_AGAIN",
     "BETA_FAILED",
     "BETA_AGAIN",
+    "PROTAGONIST_OK",
     "CLEAN_RUN_SCORE",
+    "PLANNED_MISSING",
     "BOOK_TOO_SHORT",
     "QUALITY_TREND"
    ],
@@ -3968,7 +3989,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-22-g",
@@ -3990,7 +4011,7 @@
    ],
    "faults_fired": 0,
    "ai_calls": 87,
-   "seconds": 3.11,
+   "seconds": 3.27,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -4000,8 +4021,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -4025,7 +4047,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-22-h",
@@ -4047,7 +4069,7 @@
    ],
    "faults_fired": 1,
    "ai_calls": 90,
-   "seconds": 3.25,
+   "seconds": 3.21,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -4057,8 +4079,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -4082,7 +4105,7 @@
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-22-i",
@@ -4104,7 +4127,7 @@
    ],
    "faults_fired": 1,
    "ai_calls": 90,
-   "seconds": 9.28,
+   "seconds": 8.67,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -4114,8 +4137,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -4139,7 +4163,7 @@
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-22-j",
@@ -4147,7 +4171,7 @@
    "part": "22",
    "stress": "j",
    "title": "the most likely real-life problem: after the end rewrites the beta reader likes the book much LESS (interest 2/10, would not finish)",
-   "result": "⚠️",
+   "result": "✅",
    "happened": "The second beta read is much worse: The book finished with nothing lost.",
    "status": "done",
    "final_status": "done",
@@ -4155,15 +4179,13 @@
    "problem_message": "",
    "problem_fix": "",
    "issues": [],
-   "risks": [
-    "the beta reader's interest fell from 6.0 to 2.0/10 after Akọwe's own rewrites (and it would no longer finish the book), but the run keeps the rewrites and only says the new numbers — nothing compares the two reads or says the rewrites made it worse"
-   ],
+   "risks": [],
    "notes": [
-    "End state of “reread”: done — “🧭 Final check of the whole book after chapter 3 (read again after Akọwe's own rewrites): no problems found, checked by AI-2, Claude · 📖 The beta reader(s) read the final book again: AI-2 read it as an adult reader of mys” (journal: BETA_AGAIN, FINAL_CHECK_AGAIN)."
+    "End state of “reread”: done — “🧭 Final check of the whole book after chapter 3 (read again after Akọwe's own rewrites): no problems found, checked by AI-2, Claude · 📖 The beta reader(s) read the final book again: AI-2 read it as an adult reader of mys” (journal: BETA_AGAIN, BETA_WORSE, FINAL_CHECK_AGAIN)."
    ],
    "faults_fired": 1,
    "ai_calls": 89,
-   "seconds": 3.37,
+   "seconds": 2.71,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -4173,8 +4195,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -4189,6 +4212,7 @@
     "OPENING_KEPT",
     "IMPROVE_KEPT",
     "FINAL_CHECK_AGAIN",
+    "BETA_WORSE",
     "BETA_AGAIN",
     "CLEAN_RUN_SCORE",
     "BOOK_TOO_SHORT",
@@ -4204,9 +4228,9 @@
     "what": "The final beta re-read is much worse after the end rewrites and nothing says so",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-22-k",
@@ -4229,7 +4253,7 @@
    ],
    "faults_fired": 0,
    "ai_calls": 76,
-   "seconds": 1.48,
+   "seconds": 1.43,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -4239,8 +4263,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -4262,7 +4287,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-22-l",
@@ -4270,7 +4295,7 @@
    "part": "22",
    "stress": "l",
    "title": "the second reads are switched off (reread_after_rewrites and beta_reread false) while the end rewrites were kept",
-   "result": "⚠️",
+   "result": "✅",
    "happened": "Second reads off: The book finished with nothing lost.",
    "status": "done",
    "final_status": "done",
@@ -4278,15 +4303,13 @@
    "problem_message": "",
    "problem_fix": "",
    "issues": [],
-   "risks": [
-    "the beta read shown is for an earlier version of the book and the reread step does not say so (“📏 Length: 195 words (5% of the 4,000-word target) ⚠️ shorter than planned · chap…”)"
-   ],
+   "risks": [],
    "notes": [
-    "End state of “reread”: done — “📏 Length: 195 words (5% of the 4,000-word target) ⚠️ shorter than planned · chapters against their ~1,333-word share: ch1 69 (5%), ch2 62 (5%), ch3 64 (5%)”."
+    "End state of “reread”: done — “📖 The beta read is for an earlier version of the book, before the end rewrites (re-reading is switched off: ask a beta reader again on the 📊 report page) · 📏 Length: 195 words (5% of the 4,000-word target) ⚠️ shorter tha” (journal: BETA_OUT_OF_DATE)."
    ],
    "faults_fired": 0,
    "ai_calls": 86,
-   "seconds": 2.86,
+   "seconds": 3.25,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -4296,8 +4319,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -4311,6 +4335,7 @@
     "BETA_NOTES",
     "OPENING_KEPT",
     "IMPROVE_KEPT",
+    "BETA_OUT_OF_DATE",
     "CLEAN_RUN_SCORE",
     "BOOK_TOO_SHORT",
     "QUALITY_TREND"
@@ -4325,9 +4350,9 @@
     "what": "With the second reads switched off nothing says the beta read is out of date",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-22-m",
@@ -4350,7 +4375,7 @@
    ],
    "faults_fired": 1,
    "ai_calls": 89,
-   "seconds": 2.9,
+   "seconds": 3.12,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -4360,8 +4385,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -4377,6 +4403,7 @@
     "IMPROVE_KEPT",
     "FINAL_CHECK_AGAIN",
     "BETA_AGAIN",
+    "DRAFT_WAITING",
     "CLEAN_RUN_SCORE",
     "BOOK_TOO_SHORT",
     "QUALITY_TREND"
@@ -4385,7 +4412,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   },
   {
    "id": "G-22-n",
@@ -4393,23 +4420,21 @@
    "part": "22",
    "stress": "n",
    "title": "paused during the final re-read and left for 5 days (clock jump), then resumed; and Pause pressed during the beta re-read",
-   "result": "⚠️",
-   "happened": "Paused in the final check's re-read (status “paused”), stored as paused 5 days ago; ▶ Resume finished the book. Pause pressed during the beta re-read: the run finished as done anyway.",
+   "result": "🟡",
+   "happened": "Paused in the final check's re-read (status “paused”), stored as paused 5 days ago; ▶ Resume finished the book. Pause pressed during the beta re-read: paused, ▶ Resume finished.",
    "status": "paused",
    "final_status": "done",
    "problem_code": "",
    "problem_message": "",
    "problem_fix": "",
    "issues": [],
-   "risks": [
-    "Pause pressed while the beta reader re-read the final book is ignored: the journal says “You pressed Pause” and the run then finishes as done (the last step never checks for a pause after its last AI call)"
-   ],
+   "risks": [],
    "notes": [
     "End state of “reread”: done — “🧭 Final check of the whole book after chapter 3 (read again after Akọwe's own rewrites): no problems found, checked by AI-2, Claude · 📖 The beta reader(s) read the final book again: AI-2 read it as an adult reader of mys” (journal: BETA_AGAIN, FINAL_CHECK_AGAIN)."
    ],
    "faults_fired": 1,
    "ai_calls": 90,
-   "seconds": 6.15,
+   "seconds": 6.14,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -4419,8 +4444,9 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -4450,9 +4476,9 @@
     "what": "Pause pressed during the final beta re-read is ignored; the run finishes",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:52:15Z"
+   "ran_at": "2026-11-26T01:26:36Z"
   }
  ]
 }

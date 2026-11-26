@@ -2,7 +2,7 @@
  "section": "C",
  "name": "Planning the story",
  "slug": "planning-the-story",
- "generated_at": "2026-11-23T09:02:06Z",
+ "generated_at": "2026-11-26T01:16:33Z",
  "legend": {
   "✅": "HANDLED",
   "🟡": "SAFE STOP",
@@ -84,7 +84,7 @@
    "notes": [],
    "faults_fired": 2,
    "ai_calls": 148,
-   "seconds": 3.32,
+   "seconds": 3.36,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -118,13 +118,13 @@
     "category": "ai",
     "label": "AI problem",
     "wrong": "The AI did not answer in time while writing the premise.",
-    "why": "The AI could not do this step (a usage limit, the connection or an error).",
+    "why": "The AI did not answer in time, so Akọwe stopped instead of guessing.",
     "next": "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
    },
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-8-b",
@@ -144,7 +144,7 @@
    "notes": [],
    "faults_fired": 3,
    "ai_calls": 76,
-   "seconds": 1.73,
+   "seconds": 1.66,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -178,7 +178,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-8-c",
@@ -198,7 +198,7 @@
    "notes": [],
    "faults_fired": 6,
    "ai_calls": 79,
-   "seconds": 1.74,
+   "seconds": 1.45,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -232,7 +232,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-8-d",
@@ -240,30 +240,28 @@
    "part": "8",
    "stress": "d",
    "title": "garbage answer (not JSON / wrong types / missing keys)",
-   "result": "⚠️",
-   "happened": "Not json (every time): Stopped at step “premise” with INTERNAL_ERROR: “The premise could not be made: the gemini web session did not return JSON matching the output schema after 3 tries; nothing was saved. Last errors: /: the reply contained no JSON object (every working AI was asked)” Fix offered: “Press 🔁 Try again. If it fails again, open the step and write it yourself.”. After the fault was removed, ▶ Resume finished the book with nothing lost. — Wrong types (every time): Stopped at step “premise” with INTERNAL_ERROR: “The premise could not be made: the gemini web session did not return JSON matching the output schema after 3 tries; nothing was saved. Last errors: /concept_summary: 12345 is not of type 'string'; /dramatic_question: 12345 is not of type 'string'; /premise: 12345 is not of type 'string' (every working AI was asked)” Fix offered: “Press 🔁 Try again. If it fails again, open the step and write it yourself.”. After the fault was removed, ▶ Resume finished the book with nothing lost. — Missing keys (every time): Stopped at step “premise” with INTERNAL_ERROR: “The premise could not be made: the gemini web session did not return JSON matching the output schema after 3 tries; nothing was saved. Last errors: /: Additional properties are not allowed ('note' was unexpected); /: 'premise' is a required property; /: 'dramatic_question' is a required property; /: 'concept_summary' is a required property (every working AI was asked)” Fix offered: “Press 🔁 Try again. If it fails again, open the step and write it yourself.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
+   "result": "🟡",
+   "happened": "Not json (every time): Stopped at step “premise” with AI_UNUSABLE: “The AI's answers could not be used while writing the premise: Gemini did not give a usable answer (its answer was not in the form Akọwe asked for) after 3 tries; nothing was saved (every working AI was asked).” Fix offered: “Press 🔁 Try again: Akọwe asks the AIs again. If it keeps happening, look at the AI's window in AutoInjector (a cut-off answer, or a chat that is too long — press the site's New chat), or pick another AI for the book in the run's settings.”. After the fault was removed, ▶ Resume finished the book with nothing lost. — Wrong types (every time): Stopped at step “premise” with AI_UNUSABLE: “The AI's answers could not be used while writing the premise: Gemini did not give a usable answer (its answer was not in the form Akọwe asked for) after 3 tries; nothing was saved (every working AI was asked).” Fix offered: “Press 🔁 Try again: Akọwe asks the AIs again. If it keeps happening, look at the AI's window in AutoInjector (a cut-off answer, or a chat that is too long — press the site's New chat), or pick another AI for the book in the run's settings.”. After the fault was removed, ▶ Resume finished the book with nothing lost. — Missing keys (every time): Stopped at step “premise” with AI_UNUSABLE: “The AI's answers could not be used while writing the premise: Gemini did not give a usable answer (its answer was not in the form Akọwe asked for) after 3 tries; nothing was saved (every working AI was asked).” Fix offered: “Press 🔁 Try again: Akọwe asks the AIs again. If it keeps happening, look at the AI's window in AutoInjector (a cut-off answer, or a chat that is too long — press the site's New chat), or pick another AI for the book in the run's settings.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
    "status": "paused",
    "final_status": "done",
-   "problem_code": "INTERNAL_ERROR",
-   "problem_message": "The premise could not be made: the gemini web session did not return JSON matching the output schema after 3 tries; nothing was saved. Last errors: /: the reply contained no JSON object (every working AI was asked)",
-   "problem_fix": "Press 🔁 Try again. If it fails again, open the step and write it yourself.",
+   "problem_code": "AI_UNUSABLE",
+   "problem_message": "The AI's answers could not be used while writing the premise: Gemini did not give a usable answer (its answer was not in the form Akọwe asked for) after 3 tries; nothing was saved (every working AI was asked).",
+   "problem_fix": "Press 🔁 Try again: Akọwe asks the AIs again. If it keeps happening, look at the AI's window in AutoInjector (a cut-off answer, or a chat that is too long — press the site's New chat), or pick another AI for the book in the run's settings.",
    "issues": [],
-   "risks": [
-    "the message is in programmer's words (“…did not return JSON matching the output schema… Last errors: /: 'title' is a required property…”, code INTERNAL_ERROR) and the fix only says “Press 🔁 Try again. If it fails again, open the step and write it yourself.” — it never suggests another AI"
-   ],
+   "risks": [],
    "notes": [
     "Sent through an in-process AutoInjector bridge, so the real adapter reads the bad text."
    ],
    "faults_fired": 27,
    "ai_calls": 282,
-   "seconds": 9.18,
+   "seconds": 8.32,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
    "event_codes": [
     "VOICE_SET",
     "VOICES_DISTINCT",
-    "INTERNAL_ERROR",
+    "AI_UNUSABLE",
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
@@ -289,9 +287,9 @@
    "alert": {
     "category": "ai",
     "label": "AI problem",
-    "wrong": "The premise could not be made: the gemini web session did not return JSON matching the output schema after 3 tries; nothing was saved. Last errors: /: the reply contained no JSON object (every working AI was asked)",
-    "why": "The AI could not do this step (a usage limit, the connection or an error).",
-    "next": "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
+    "wrong": "The AI's answers could not be used while writing the premise: Gemini did not give a usable answer (its answer was not in the form Akọwe asked for) after 3 tries; nothing was saved (every working AI was asked).",
+    "why": "The AIs' answers could not be used (not in the form Akọwe asked for), even after asking again and asking another working AI.",
+    "next": "Press 🔁 Try again (or pick another AI for the book in the run's settings). Nothing written so far is lost."
    },
    "finding": {
     "where": "akowe/akowe/assist.py `AssistService._call_ai_once` (lines ~700-735, the slot is pinned; only UPSTREAM_UNAVAILABLE / AI_DECLINED move on); akowe/akowe/providers.py `AutoInjectorAdapter.submit` (~1073, INTERNAL_ERROR with `try_other_ai` after the re-asks); akowe/akowe/autobook.py `_planning` (~3640) / `_ai_problem` (~2741)",
@@ -302,9 +300,9 @@
     "what": "One AI's garbage answers stop the premise although the other AIs were never asked; the message is JSON-schema jargon",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-8-e",
@@ -312,28 +310,26 @@
    "part": "8",
    "stress": "e",
    "title": "empty answer",
-   "result": "⚠️",
-   "happened": "Empty reply text (every time): Stopped at step “premise” with INTERNAL_ERROR: “The premise could not be made: the gemini web session did not return JSON matching the output schema after 3 tries; nothing was saved. Last errors: /: the reply contained no JSON object (every working AI was asked)” Fix offered: “Press 🔁 Try again. If it fails again, open the step and write it yourself.”. After the fault was removed, ▶ Resume finished the book with nothing lost. — An empty JSON object {} (every time): Stopped at step “premise” with INTERNAL_ERROR: “The premise could not be made: the gemini web session did not return JSON matching the output schema after 3 tries; nothing was saved. Last errors: /: 'premise' is a required property; /: 'dramatic_question' is a required property; /: 'concept_summary' is a required property (every working AI was asked)” Fix offered: “Press 🔁 Try again. If it fails again, open the step and write it yourself.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
+   "result": "🟡",
+   "happened": "Empty reply text (every time): Stopped at step “premise” with AI_UNUSABLE: “The AI's answers could not be used while writing the premise: Gemini did not give a usable answer (its answer was not in the form Akọwe asked for) after 3 tries; nothing was saved (every working AI was asked).” Fix offered: “Press 🔁 Try again: Akọwe asks the AIs again. If it keeps happening, look at the AI's window in AutoInjector (a cut-off answer, or a chat that is too long — press the site's New chat), or pick another AI for the book in the run's settings.”. After the fault was removed, ▶ Resume finished the book with nothing lost. — An empty JSON object {} (every time): Stopped at step “premise” with AI_UNUSABLE: “The AI's answers could not be used while writing the premise: Gemini did not give a usable answer (its answer was not in the form Akọwe asked for) after 3 tries; nothing was saved (every working AI was asked).” Fix offered: “Press 🔁 Try again: Akọwe asks the AIs again. If it keeps happening, look at the AI's window in AutoInjector (a cut-off answer, or a chat that is too long — press the site's New chat), or pick another AI for the book in the run's settings.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
    "status": "paused",
    "final_status": "done",
-   "problem_code": "INTERNAL_ERROR",
-   "problem_message": "The premise could not be made: the gemini web session did not return JSON matching the output schema after 3 tries; nothing was saved. Last errors: /: the reply contained no JSON object (every working AI was asked)",
-   "problem_fix": "Press 🔁 Try again. If it fails again, open the step and write it yourself.",
+   "problem_code": "AI_UNUSABLE",
+   "problem_message": "The AI's answers could not be used while writing the premise: Gemini did not give a usable answer (its answer was not in the form Akọwe asked for) after 3 tries; nothing was saved (every working AI was asked).",
+   "problem_fix": "Press 🔁 Try again: Akọwe asks the AIs again. If it keeps happening, look at the AI's window in AutoInjector (a cut-off answer, or a chat that is too long — press the site's New chat), or pick another AI for the book in the run's settings.",
    "issues": [],
-   "risks": [
-    "the message is in programmer's words (“…did not return JSON matching the output schema… Last errors: /: 'title' is a required property…”, code INTERNAL_ERROR) and the fix only says “Press 🔁 Try again. If it fails again, open the step and write it yourself.” — it never suggests another AI"
-   ],
+   "risks": [],
    "notes": [],
    "faults_fired": 18,
    "ai_calls": 188,
-   "seconds": 6.04,
+   "seconds": 5.57,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
    "event_codes": [
     "VOICE_SET",
     "VOICES_DISTINCT",
-    "INTERNAL_ERROR",
+    "AI_UNUSABLE",
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
@@ -359,9 +355,9 @@
    "alert": {
     "category": "ai",
     "label": "AI problem",
-    "wrong": "The premise could not be made: the gemini web session did not return JSON matching the output schema after 3 tries; nothing was saved. Last errors: /: the reply contained no JSON object (every working AI was asked)",
-    "why": "The AI could not do this step (a usage limit, the connection or an error).",
-    "next": "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
+    "wrong": "The AI's answers could not be used while writing the premise: Gemini did not give a usable answer (its answer was not in the form Akọwe asked for) after 3 tries; nothing was saved (every working AI was asked).",
+    "why": "The AIs' answers could not be used (not in the form Akọwe asked for), even after asking again and asking another working AI.",
+    "next": "Press 🔁 Try again (or pick another AI for the book in the run's settings). Nothing written so far is lost."
    },
    "finding": {
     "where": "akowe/akowe/assist.py `AssistService._call_ai_once` (lines ~700-735, the slot is pinned; only UPSTREAM_UNAVAILABLE / AI_DECLINED move on); akowe/akowe/providers.py `AutoInjectorAdapter.submit` (~1073, INTERNAL_ERROR with `try_other_ai` after the re-asks); akowe/akowe/autobook.py `_planning` (~3640) / `_ai_problem` (~2741)",
@@ -372,9 +368,9 @@
     "what": "One AI's empty answers stop the premise although the other AIs were never asked; the message is JSON-schema jargon",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-8-f",
@@ -382,21 +378,19 @@
    "part": "8",
    "stress": "f",
    "title": "the AI refuses (AI_DECLINED) repeatedly",
-   "result": "⚠️",
-   "happened": "Every AI declines every time: Stopped at step “premise” with AI_DECLINED: “Claude stayed busy or unreachable for 2 s, so Akọwe stopped waiting (the AI declined to answer (stress) (every working AI was asked))” Fix offered: “The AIs stayed busy or could not be reached for a long time. What to do: make sure AutoInjector (the program with the AI windows) is open; look at each AI's window (logged in? a usage-limit message?); Settings → 🧪 Test connection shows which AI works. Then press 🔁 Try again.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
+   "result": "🟡",
+   "happened": "Every AI declines every time: Stopped at step “premise” with AI_DECLINED: “Claude declined to write this again and again (it said it can't help with that), so Akọwe stopped asking” Fix offered: “The AI declined to answer (it said it can't help with that) — story material such as a death or a crime sometimes trips an AI's safety filter by mistake. Akọwe already asked again and tried the other AIs. What to do: press 🔁 Try again, or pick another AI for the book in the run's settings.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
    "status": "paused",
    "final_status": "done",
    "problem_code": "AI_DECLINED",
-   "problem_message": "Claude stayed busy or unreachable for 2 s, so Akọwe stopped waiting (the AI declined to answer (stress) (every working AI was asked))",
-   "problem_fix": "The AIs stayed busy or could not be reached for a long time. What to do: make sure AutoInjector (the program with the AI windows) is open; look at each AI's window (logged in? a usage-limit message?); Settings → 🧪 Test connection shows which AI works. Then press 🔁 Try again.",
+   "problem_message": "Claude declined to write this again and again (it said it can't help with that), so Akọwe stopped asking",
+   "problem_fix": "The AI declined to answer (it said it can't help with that) — story material such as a death or a crime sometimes trips an AI's safety filter by mistake. Akọwe already asked again and tried the other AIs. What to do: press 🔁 Try again, or pick another AI for the book in the run's settings.",
    "issues": [],
-   "risks": [
-    "the AIs REFUSED (AI_DECLINED) but the message and fix say they “stayed busy or unreachable” / “could not be reached” and send the author to check AutoInjector and logins"
-   ],
+   "risks": [],
    "notes": [],
    "faults_fired": 302,
    "ai_calls": 375,
-   "seconds": 6.2,
+   "seconds": 5.48,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -429,9 +423,9 @@
    "alert": {
     "category": "ai",
     "label": "AI problem",
-    "wrong": "Claude stayed busy or unreachable for 2 s, so Akọwe stopped waiting (the AI declined to answer (stress) (every working AI was asked))",
-    "why": "The AI could not do this step (a usage limit, the connection or an error).",
-    "next": "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
+    "wrong": "Claude declined to write this again and again (it said it can't help with that), so Akọwe stopped asking",
+    "why": "The AIs refused to write this (they said they can't help with that), even after being asked again and another AI being tried.",
+    "next": "Press 🔁 Try again, or pick another AI for the book in the run's settings. Nothing written so far is lost."
    },
    "finding": {
     "where": "akowe/akowe/jobs.py `wait_and_retry` (~222-225) and BUSY_FIX in akowe/akowe/autobook.py `_ai_problem` (~2745)",
@@ -442,9 +436,9 @@
     "what": "When every AI refuses the premise, the stop says they “stayed busy or unreachable” and sends the author to check AutoInjector and logins",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-8-g",
@@ -452,21 +446,19 @@
    "part": "8",
    "stress": "g",
    "title": "the part's own code raises an unexpected Python exception",
-   "result": "⚠️",
-   "happened": "The part's own code raises: Stopped at step “premise” with INTERNAL_ERROR: “Akọwe hit an unexpected problem (RuntimeError).” Fix offered: “Press 🔁 Try again. If it keeps happening, use 📋 Copy diagnostics.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
+   "result": "🟡",
+   "happened": "The part's own code raises: Stopped at step “premise” with INTERNAL_ERROR: “Akọwe hit an unexpected error in “Premise” — press ▶ Resume to try again.” Fix offered: “Press ▶ Resume to try this step again — nothing written so far is lost. If it happens again, use 📋 Copy diagnostics and send it in.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
    "status": "paused",
    "final_status": "done",
    "problem_code": "INTERNAL_ERROR",
-   "problem_message": "Akọwe hit an unexpected problem (RuntimeError).",
-   "problem_fix": "Press 🔁 Try again. If it keeps happening, use 📋 Copy diagnostics.",
+   "problem_message": "Akọwe hit an unexpected error in “Premise” — press ▶ Resume to try again.",
+   "problem_fix": "Press ▶ Resume to try this step again — nothing written so far is lost. If it happens again, use 📋 Copy diagnostics and send it in.",
    "issues": [],
-   "risks": [
-    "the alert calls a fault in Akọwe's own code an “AI problem” (“The AI could not do this step (a usage limit, the connection or an error).”), so the author looks for the fault in the AI"
-   ],
+   "risks": [],
    "notes": [],
    "faults_fired": 0,
    "ai_calls": 73,
-   "seconds": 1.69,
+   "seconds": 1.48,
    "likely": "",
    "log_errors": 1,
    "log_tracebacks": 1,
@@ -497,11 +489,11 @@
     "QUALITY_TREND"
    ],
    "alert": {
-    "category": "ai",
-    "label": "AI problem",
-    "wrong": "Akọwe hit an unexpected problem (RuntimeError).",
-    "why": "The AI could not do this step (a usage limit, the connection or an error).",
-    "next": "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
+    "category": "akowe",
+    "label": "Akọwe problem",
+    "wrong": "Akọwe hit an unexpected error in “Premise” — press ▶ Resume to try again.",
+    "why": "Something went wrong inside Akọwe itself — not the AI and not your book.",
+    "next": "Press ▶ Resume to try this step again; nothing written so far is lost. If it happens again, use 📋 Copy diagnostics and send it in."
    },
    "finding": {
     "where": "akowe/akowe/alerts.py `category_of` (~83; INTERNAL_ERROR is in `AI_CODES`, ~57); the stop comes from akowe/akowe/autobook.py `_run` (~1429-1510)",
@@ -512,9 +504,9 @@
     "what": "A bug in Akọwe's own code is shown as an “AI problem … (a usage limit, the connection or an error)”",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-8-h",
@@ -534,7 +526,7 @@
    "notes": [],
    "faults_fired": 1,
    "ai_calls": 74,
-   "seconds": 1.58,
+   "seconds": 1.54,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -567,7 +559,7 @@
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-8-i",
@@ -587,7 +579,7 @@
    "notes": [],
    "faults_fired": 1,
    "ai_calls": 73,
-   "seconds": 3.8,
+   "seconds": 3.06,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -620,7 +612,7 @@
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-8-j",
@@ -640,7 +632,7 @@
    "notes": [],
    "faults_fired": 2,
    "ai_calls": 76,
-   "seconds": 1.49,
+   "seconds": 1.6,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -681,7 +673,7 @@
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-8-k",
@@ -701,7 +693,7 @@
    "notes": [],
    "faults_fired": 1,
    "ai_calls": 73,
-   "seconds": 1.69,
+   "seconds": 1.33,
    "likely": "unlikely but dangerous",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -735,7 +727,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-8-l",
@@ -743,28 +735,26 @@
    "part": "8",
    "stress": "l",
    "title": "the AI answers for the WRONG step (a main plot instead of the premise) — always; and alternating wrong / right",
-   "result": "⚠️",
-   "happened": "Always a main plot: Stopped at step “premise” with INTERNAL_ERROR: “The premise could not be made: the gemini web session did not return JSON matching the output schema after 3 tries; nothing was saved. Last errors: /: Additional properties are not allowed ('main_plot', 'plot_obligations' were unexpected); /: 'premise' is a required property; /: 'dramatic_question' is a required property; /: 'concept_summary' is a required property (every working AI was asked)” Fix offered: “Press 🔁 Try again. If it fails again, open the step and write it yourself.”. After the fault was removed, ▶ Resume finished the book with nothing lost. — Wrong once, then right: The book finished with nothing lost.",
+   "result": "🟡",
+   "happened": "Always a main plot: Stopped at step “premise” with AI_UNUSABLE: “The AI's answers could not be used while writing the premise: Gemini did not give a usable answer (its answer was not in the form Akọwe asked for) after 3 tries; nothing was saved (every working AI was asked).” Fix offered: “Press 🔁 Try again: Akọwe asks the AIs again. If it keeps happening, look at the AI's window in AutoInjector (a cut-off answer, or a chat that is too long — press the site's New chat), or pick another AI for the book in the run's settings.”. After the fault was removed, ▶ Resume finished the book with nothing lost. — Wrong once, then right: The book finished with nothing lost.",
    "status": "paused",
    "final_status": "done",
-   "problem_code": "INTERNAL_ERROR",
-   "problem_message": "The premise could not be made: the gemini web session did not return JSON matching the output schema after 3 tries; nothing was saved. Last errors: /: Additional properties are not allowed ('main_plot', 'plot_obligations' were unexpected); /: 'premise' is a required property; /: 'dramatic_question' is a required property; /: 'concept_summary' is a required property (every working AI was asked)",
-   "problem_fix": "Press 🔁 Try again. If it fails again, open the step and write it yourself.",
+   "problem_code": "AI_UNUSABLE",
+   "problem_message": "The AI's answers could not be used while writing the premise: Gemini did not give a usable answer (its answer was not in the form Akọwe asked for) after 3 tries; nothing was saved (every working AI was asked).",
+   "problem_fix": "Press 🔁 Try again: Akọwe asks the AIs again. If it keeps happening, look at the AI's window in AutoInjector (a cut-off answer, or a chat that is too long — press the site's New chat), or pick another AI for the book in the run's settings.",
    "issues": [],
-   "risks": [
-    "the message is in programmer's words (“…did not return JSON matching the output schema… Last errors: /: 'title' is a required property…”, code INTERNAL_ERROR) and the fix only says “Press 🔁 Try again. If it fails again, open the step and write it yourself.” — it never suggests another AI"
-   ],
+   "risks": [],
    "notes": [],
    "faults_fired": 10,
    "ai_calls": 180,
-   "seconds": 6.08,
+   "seconds": 5.42,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
    "event_codes": [
     "VOICE_SET",
     "VOICES_DISTINCT",
-    "INTERNAL_ERROR",
+    "AI_UNUSABLE",
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
@@ -790,9 +780,9 @@
    "alert": {
     "category": "ai",
     "label": "AI problem",
-    "wrong": "The premise could not be made: the gemini web session did not return JSON matching the output schema after 3 tries; nothing was saved. Last errors: /: Additional properties are not allowed ('main_plot'…",
-    "why": "The AI could not do this step (a usage limit, the connection or an error).",
-    "next": "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
+    "wrong": "The AI's answers could not be used while writing the premise: Gemini did not give a usable answer (its answer was not in the form Akọwe asked for) after 3 tries; nothing was saved (every working AI was asked).",
+    "why": "The AIs' answers could not be used (not in the form Akọwe asked for), even after asking again and asking another working AI.",
+    "next": "Press 🔁 Try again (or pick another AI for the book in the run's settings). Nothing written so far is lost."
    },
    "finding": {
     "where": "akowe/akowe/assist.py `AssistService._call_ai_once` (lines ~700-735, the slot is pinned; only UPSTREAM_UNAVAILABLE / AI_DECLINED move on); akowe/akowe/providers.py `AutoInjectorAdapter.submit` (~1073, INTERNAL_ERROR with `try_other_ai` after the re-asks); akowe/akowe/autobook.py `_planning` (~3640) / `_ai_problem` (~2741)",
@@ -803,9 +793,9 @@
     "what": "An AI that keeps answering for the wrong step stops the premise; the other AIs are never asked",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-8-m",
@@ -813,31 +803,26 @@
    "part": "8",
    "stress": "m",
    "title": "absurd sizes: a 2 MB premise; and every field an empty string",
-   "result": "❌",
-   "happened": "2 MB premise: Stopped at step “plot” with CONTEXT_TOO_LARGE: “The main plot could not be made: mandatory context (~1801081 tokens) exceeds every connected slot; split the job on scene/pass boundaries” Fix offered: “Press 🔁 Try again. If it fails again, open the step and write it yourself.”. Resume did not finish: paused CONTEXT_TOO_LARGE. — Every premise field empty: Stopped at step “premise” with INTERNAL_ERROR: “The premise could not be made: result does not satisfy B01 OUTPUT: 'concept_summary' is empty: please type some text (spaces alone don't count)” Fix offered: “Press 🔁 Try again. If it fails again, open the step and write it yourself.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
+   "result": "🟡",
+   "happened": "2 MB premise: Stopped at step “premise” with CHECKS_REFUSED: “Akọwe's checks refused the premise: It is far too long for the later steps to read (Akọwe's size limit for the story plan). Press 🔁 Try again for a shorter one, or ✏️ Edit it shorter. The AI wrote it 3 times.” Fix offered: “Press 🔁 Try again: the AI writes it again and is told exactly what Akọwe refused. Or ✏️ Edit it yourself so the checks pass, then press Continue.”. After the fault was removed, ▶ Resume finished the book with nothing lost. — Every premise field empty: Stopped at step “premise” with INTERNAL_ERROR: “The premise could not be made: result does not satisfy B01 OUTPUT: 'concept_summary' is empty: please type some text (spaces alone don't count)” Fix offered: “Press 🔁 Try again. If it fails again, open the step and write it yourself.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
    "status": "paused",
-   "final_status": "paused",
-   "problem_code": "CONTEXT_TOO_LARGE",
-   "problem_message": "The main plot could not be made: mandatory context (~1801081 tokens) exceeds every connected slot; split the job on scene/pass boundaries",
-   "problem_fix": "Press 🔁 Try again. If it fails again, open the step and write it yourself.",
-   "issues": [
-    "Resume could not finish the book (status paused, CONTEXT_TOO_LARGE: The main plot could not be made: mandatory context (~1801081 tokens) exceeds every connected slot; split the job on scene/pass boundaries)"
-   ],
-   "risks": [
-    "a 2048 KB premise was approved and stored without clipping (every later prompt carries it)"
-   ],
+   "final_status": "done",
+   "problem_code": "CHECKS_REFUSED",
+   "problem_message": "Akọwe's checks refused the premise: It is far too long for the later steps to read (Akọwe's size limit for the story plan). Press 🔁 Try again for a shorter one, or ✏️ Edit it shorter. The AI wrote it 3 times.",
+   "problem_fix": "Press 🔁 Try again: the AI writes it again and is told exactly what Akọwe refused. Or ✏️ Edit it yourself so the checks pass, then press Continue.",
+   "issues": [],
+   "risks": [],
    "notes": [],
-   "faults_fired": 2,
-   "ai_calls": 87,
-   "seconds": 3.57,
+   "faults_fired": 4,
+   "ai_calls": 150,
+   "seconds": 40.86,
    "likely": "unlikely but dangerous",
    "log_errors": 0,
    "log_tracebacks": 0,
    "event_codes": [
     "VOICE_SET",
     "VOICES_DISTINCT",
-    "CONTEXT_TOO_LARGE",
-    "INTERNAL_ERROR",
+    "CHECKS_REFUSED",
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
@@ -858,13 +843,14 @@
     "IMPROVE_UNRESOLVED",
     "CLEAN_RUN_SCORE",
     "BOOK_TOO_SHORT",
-    "QUALITY_TREND"
+    "QUALITY_TREND",
+    "INTERNAL_ERROR"
    ],
    "alert": {
     "category": "plot",
     "label": "Plot / outline",
-    "wrong": "CONTEXT_TOO_LARGE: mandatory context (~1801081 tokens) exceeds every connected slot; split the job on scene/pass boundaries (at /payload)",
-    "why": "This step stopped on a problem.",
+    "wrong": "PLAN_TOO_LARGE: the premise is far too long (2 097 152 characters; at most 4 000): write it shorter — later steps carry it in full and could not read it (and 2 more like this)",
+    "why": "Akọwe's own checks refused it, and the AI could not make one that passes.",
     "next": "Press 🔁 Try again, or edit it yourself and then continue."
    },
    "finding": {
@@ -876,9 +862,9 @@
     "what": "A huge premise is approved; the next step stops with CONTEXT_TOO_LARGE forever — Resume can never finish the book",
     "repro": ""
    },
-   "result_word": "PROBLEM",
+   "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-8-n",
@@ -898,7 +884,7 @@
    "notes": [],
    "faults_fired": 1,
    "ai_calls": 85,
-   "seconds": 3.09,
+   "seconds": 2.66,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -931,7 +917,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-8-o",
@@ -939,7 +925,7 @@
    "part": "8",
    "stress": "o",
    "title": "the author's lock list (20 facts) holds injection text, right-to-left / zero-width characters, a NUL byte and Windows-reserved names",
-   "result": "⚠️",
+   "result": "✅",
    "happened": "20 odd lock-list facts: The book finished with nothing lost.",
    "status": "done",
    "final_status": "done",
@@ -947,13 +933,11 @@
    "problem_message": "",
    "problem_fix": "",
    "issues": [],
-   "risks": [
-    "a NUL byte from the lock list is stored in the story rules as typed"
-   ],
+   "risks": [],
    "notes": [],
    "faults_fired": 0,
    "ai_calls": 73,
-   "seconds": 1.89,
+   "seconds": 1.36,
    "likely": "unlikely but dangerous",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -969,6 +953,7 @@
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
+    "INSTRUCTIONS_CUT",
     "ONE_REVIEWER",
     "PLANNED_UNRESOLVED",
     "PLANNED_MISSING",
@@ -992,9 +977,9 @@
     "what": "A NUL byte (and invisible characters) from the author's lock list are stored in the story rules as typed",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-8-p",
@@ -1014,7 +999,7 @@
    "notes": [],
    "faults_fired": 1,
    "ai_calls": 60,
-   "seconds": 1.6,
+   "seconds": 1.43,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -1048,7 +1033,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-9-a",
@@ -1068,7 +1053,7 @@
    "notes": [],
    "faults_fired": 2,
    "ai_calls": 148,
-   "seconds": 3.54,
+   "seconds": 2.93,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -1102,13 +1087,13 @@
     "category": "ai",
     "label": "AI problem",
     "wrong": "The AI did not answer in time while writing the main plot.",
-    "why": "The AI could not do this step (a usage limit, the connection or an error).",
+    "why": "The AI did not answer in time, so Akọwe stopped instead of guessing.",
     "next": "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
    },
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-9-b",
@@ -1128,7 +1113,7 @@
    "notes": [],
    "faults_fired": 3,
    "ai_calls": 76,
-   "seconds": 1.98,
+   "seconds": 1.53,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -1162,7 +1147,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-9-c",
@@ -1182,7 +1167,7 @@
    "notes": [],
    "faults_fired": 6,
    "ai_calls": 79,
-   "seconds": 1.63,
+   "seconds": 1.66,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -1216,7 +1201,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-9-d",
@@ -1224,30 +1209,28 @@
    "part": "9",
    "stress": "d",
    "title": "garbage answer (not JSON / wrong types / missing keys)",
-   "result": "⚠️",
-   "happened": "Not json (every time): Stopped at step “plot” with INTERNAL_ERROR: “The main plot could not be made: the gemini web session did not return JSON matching the output schema after 3 tries; nothing was saved. Last errors: /: the reply contained no JSON object (every working AI was asked)” Fix offered: “Press 🔁 Try again. If it fails again, open the step and write it yourself.”. After the fault was removed, ▶ Resume finished the book with nothing lost. — Wrong types (every time): Stopped at step “plot” with INTERNAL_ERROR: “The main plot could not be made: the gemini web session did not return JSON matching the output schema after 3 tries; nothing was saved. Last errors: /main_plot: 12345 is not of type 'object'; /objectives: 12345 is not of type 'array'; /plot_obligations: 12345 is not of type 'array' (every working AI was asked)” Fix offered: “Press 🔁 Try again. If it fails again, open the step and write it yourself.”. After the fault was removed, ▶ Resume finished the book with nothing lost. — Missing keys (every time): Stopped at step “plot” with INTERNAL_ERROR: “The main plot could not be made: the gemini web session did not return JSON matching the output schema after 3 tries; nothing was saved. Last errors: /: Additional properties are not allowed ('note' was unexpected); /: 'main_plot' is a required property; /: 'objectives' is a required property; /: 'plot_obligations' is a required property (every working AI was asked)” Fix offered: “Press 🔁 Try again. If it fails again, open the step and write it yourself.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
+   "result": "🟡",
+   "happened": "Not json (every time): Stopped at step “plot” with AI_UNUSABLE: “The AI's answers could not be used while writing the main plot: Gemini did not give a usable answer (its answer was not in the form Akọwe asked for) after 3 tries; nothing was saved (every working AI was asked).” Fix offered: “Press 🔁 Try again: Akọwe asks the AIs again. If it keeps happening, look at the AI's window in AutoInjector (a cut-off answer, or a chat that is too long — press the site's New chat), or pick another AI for the book in the run's settings.”. After the fault was removed, ▶ Resume finished the book with nothing lost. — Wrong types (every time): Stopped at step “plot” with AI_UNUSABLE: “The AI's answers could not be used while writing the main plot: Gemini did not give a usable answer (its answer was not in the form Akọwe asked for) after 3 tries; nothing was saved (every working AI was asked).” Fix offered: “Press 🔁 Try again: Akọwe asks the AIs again. If it keeps happening, look at the AI's window in AutoInjector (a cut-off answer, or a chat that is too long — press the site's New chat), or pick another AI for the book in the run's settings.”. After the fault was removed, ▶ Resume finished the book with nothing lost. — Missing keys (every time): Stopped at step “plot” with AI_UNUSABLE: “The AI's answers could not be used while writing the main plot: Gemini did not give a usable answer (its answer was not in the form Akọwe asked for) after 3 tries; nothing was saved (every working AI was asked).” Fix offered: “Press 🔁 Try again: Akọwe asks the AIs again. If it keeps happening, look at the AI's window in AutoInjector (a cut-off answer, or a chat that is too long — press the site's New chat), or pick another AI for the book in the run's settings.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
    "status": "paused",
    "final_status": "done",
-   "problem_code": "INTERNAL_ERROR",
-   "problem_message": "The main plot could not be made: the gemini web session did not return JSON matching the output schema after 3 tries; nothing was saved. Last errors: /: the reply contained no JSON object (every working AI was asked)",
-   "problem_fix": "Press 🔁 Try again. If it fails again, open the step and write it yourself.",
+   "problem_code": "AI_UNUSABLE",
+   "problem_message": "The AI's answers could not be used while writing the main plot: Gemini did not give a usable answer (its answer was not in the form Akọwe asked for) after 3 tries; nothing was saved (every working AI was asked).",
+   "problem_fix": "Press 🔁 Try again: Akọwe asks the AIs again. If it keeps happening, look at the AI's window in AutoInjector (a cut-off answer, or a chat that is too long — press the site's New chat), or pick another AI for the book in the run's settings.",
    "issues": [],
-   "risks": [
-    "the message is in programmer's words (“…did not return JSON matching the output schema… Last errors: /: 'title' is a required property…”, code INTERNAL_ERROR) and the fix only says “Press 🔁 Try again. If it fails again, open the step and write it yourself.” — it never suggests another AI"
-   ],
+   "risks": [],
    "notes": [
     "Sent through an in-process AutoInjector bridge, so the real adapter reads the bad text."
    ],
    "faults_fired": 27,
    "ai_calls": 282,
-   "seconds": 9.46,
+   "seconds": 8.29,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
    "event_codes": [
     "VOICE_SET",
     "VOICES_DISTINCT",
-    "INTERNAL_ERROR",
+    "AI_UNUSABLE",
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
@@ -1273,9 +1256,9 @@
    "alert": {
     "category": "ai",
     "label": "AI problem",
-    "wrong": "The main plot could not be made: the gemini web session did not return JSON matching the output schema after 3 tries; nothing was saved. Last errors: /: the reply contained no JSON object (every working AI was asked)",
-    "why": "The AI could not do this step (a usage limit, the connection or an error).",
-    "next": "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
+    "wrong": "The AI's answers could not be used while writing the main plot: Gemini did not give a usable answer (its answer was not in the form Akọwe asked for) after 3 tries; nothing was saved (every working AI was asked).",
+    "why": "The AIs' answers could not be used (not in the form Akọwe asked for), even after asking again and asking another working AI.",
+    "next": "Press 🔁 Try again (or pick another AI for the book in the run's settings). Nothing written so far is lost."
    },
    "finding": {
     "where": "akowe/akowe/assist.py `AssistService._call_ai_once` (lines ~700-735, the slot is pinned; only UPSTREAM_UNAVAILABLE / AI_DECLINED move on); akowe/akowe/providers.py `AutoInjectorAdapter.submit` (~1073, INTERNAL_ERROR with `try_other_ai` after the re-asks); akowe/akowe/autobook.py `_planning` (~3640) / `_ai_problem` (~2741)",
@@ -1286,9 +1269,9 @@
     "what": "One AI's garbage answers stop the main plot although the other AIs were never asked; the message is JSON-schema jargon",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-9-e",
@@ -1296,28 +1279,26 @@
    "part": "9",
    "stress": "e",
    "title": "empty answer",
-   "result": "⚠️",
-   "happened": "Empty reply text (every time): Stopped at step “plot” with INTERNAL_ERROR: “The main plot could not be made: the gemini web session did not return JSON matching the output schema after 3 tries; nothing was saved. Last errors: /: the reply contained no JSON object (every working AI was asked)” Fix offered: “Press 🔁 Try again. If it fails again, open the step and write it yourself.”. After the fault was removed, ▶ Resume finished the book with nothing lost. — An empty JSON object {} (every time): Stopped at step “plot” with INTERNAL_ERROR: “The main plot could not be made: the gemini web session did not return JSON matching the output schema after 3 tries; nothing was saved. Last errors: /: 'main_plot' is a required property; /: 'objectives' is a required property; /: 'plot_obligations' is a required property (every working AI was asked)” Fix offered: “Press 🔁 Try again. If it fails again, open the step and write it yourself.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
+   "result": "🟡",
+   "happened": "Empty reply text (every time): Stopped at step “plot” with AI_UNUSABLE: “The AI's answers could not be used while writing the main plot: Gemini did not give a usable answer (its answer was not in the form Akọwe asked for) after 3 tries; nothing was saved (every working AI was asked).” Fix offered: “Press 🔁 Try again: Akọwe asks the AIs again. If it keeps happening, look at the AI's window in AutoInjector (a cut-off answer, or a chat that is too long — press the site's New chat), or pick another AI for the book in the run's settings.”. After the fault was removed, ▶ Resume finished the book with nothing lost. — An empty JSON object {} (every time): Stopped at step “plot” with AI_UNUSABLE: “The AI's answers could not be used while writing the main plot: Gemini did not give a usable answer (its answer was not in the form Akọwe asked for) after 3 tries; nothing was saved (every working AI was asked).” Fix offered: “Press 🔁 Try again: Akọwe asks the AIs again. If it keeps happening, look at the AI's window in AutoInjector (a cut-off answer, or a chat that is too long — press the site's New chat), or pick another AI for the book in the run's settings.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
    "status": "paused",
    "final_status": "done",
-   "problem_code": "INTERNAL_ERROR",
-   "problem_message": "The main plot could not be made: the gemini web session did not return JSON matching the output schema after 3 tries; nothing was saved. Last errors: /: the reply contained no JSON object (every working AI was asked)",
-   "problem_fix": "Press 🔁 Try again. If it fails again, open the step and write it yourself.",
+   "problem_code": "AI_UNUSABLE",
+   "problem_message": "The AI's answers could not be used while writing the main plot: Gemini did not give a usable answer (its answer was not in the form Akọwe asked for) after 3 tries; nothing was saved (every working AI was asked).",
+   "problem_fix": "Press 🔁 Try again: Akọwe asks the AIs again. If it keeps happening, look at the AI's window in AutoInjector (a cut-off answer, or a chat that is too long — press the site's New chat), or pick another AI for the book in the run's settings.",
    "issues": [],
-   "risks": [
-    "the message is in programmer's words (“…did not return JSON matching the output schema… Last errors: /: 'title' is a required property…”, code INTERNAL_ERROR) and the fix only says “Press 🔁 Try again. If it fails again, open the step and write it yourself.” — it never suggests another AI"
-   ],
+   "risks": [],
    "notes": [],
    "faults_fired": 18,
    "ai_calls": 188,
-   "seconds": 6.39,
+   "seconds": 5.35,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
    "event_codes": [
     "VOICE_SET",
     "VOICES_DISTINCT",
-    "INTERNAL_ERROR",
+    "AI_UNUSABLE",
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
@@ -1343,9 +1324,9 @@
    "alert": {
     "category": "ai",
     "label": "AI problem",
-    "wrong": "The main plot could not be made: the gemini web session did not return JSON matching the output schema after 3 tries; nothing was saved. Last errors: /: the reply contained no JSON object (every working AI was asked)",
-    "why": "The AI could not do this step (a usage limit, the connection or an error).",
-    "next": "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
+    "wrong": "The AI's answers could not be used while writing the main plot: Gemini did not give a usable answer (its answer was not in the form Akọwe asked for) after 3 tries; nothing was saved (every working AI was asked).",
+    "why": "The AIs' answers could not be used (not in the form Akọwe asked for), even after asking again and asking another working AI.",
+    "next": "Press 🔁 Try again (or pick another AI for the book in the run's settings). Nothing written so far is lost."
    },
    "finding": {
     "where": "akowe/akowe/assist.py `AssistService._call_ai_once` (lines ~700-735, the slot is pinned; only UPSTREAM_UNAVAILABLE / AI_DECLINED move on); akowe/akowe/providers.py `AutoInjectorAdapter.submit` (~1073, INTERNAL_ERROR with `try_other_ai` after the re-asks); akowe/akowe/autobook.py `_planning` (~3640) / `_ai_problem` (~2741)",
@@ -1356,9 +1337,9 @@
     "what": "One AI's empty answers stop the main plot although the other AIs were never asked; the message is JSON-schema jargon",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-9-f",
@@ -1366,21 +1347,19 @@
    "part": "9",
    "stress": "f",
    "title": "the AI refuses (AI_DECLINED) repeatedly",
-   "result": "⚠️",
-   "happened": "Every AI declines every time: Stopped at step “plot” with AI_DECLINED: “Claude stayed busy or unreachable for 2 s, so Akọwe stopped waiting (the AI declined to answer (stress) (every working AI was asked))” Fix offered: “The AIs stayed busy or could not be reached for a long time. What to do: make sure AutoInjector (the program with the AI windows) is open; look at each AI's window (logged in? a usage-limit message?); Settings → 🧪 Test connection shows which AI works. Then press 🔁 Try again.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
+   "result": "🟡",
+   "happened": "Every AI declines every time: Stopped at step “plot” with AI_DECLINED: “Claude declined to write this again and again (it said it can't help with that), so Akọwe stopped asking” Fix offered: “The AI declined to answer (it said it can't help with that) — story material such as a death or a crime sometimes trips an AI's safety filter by mistake. Akọwe already asked again and tried the other AIs. What to do: press 🔁 Try again, or pick another AI for the book in the run's settings.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
    "status": "paused",
    "final_status": "done",
    "problem_code": "AI_DECLINED",
-   "problem_message": "Claude stayed busy or unreachable for 2 s, so Akọwe stopped waiting (the AI declined to answer (stress) (every working AI was asked))",
-   "problem_fix": "The AIs stayed busy or could not be reached for a long time. What to do: make sure AutoInjector (the program with the AI windows) is open; look at each AI's window (logged in? a usage-limit message?); Settings → 🧪 Test connection shows which AI works. Then press 🔁 Try again.",
+   "problem_message": "Claude declined to write this again and again (it said it can't help with that), so Akọwe stopped asking",
+   "problem_fix": "The AI declined to answer (it said it can't help with that) — story material such as a death or a crime sometimes trips an AI's safety filter by mistake. Akọwe already asked again and tried the other AIs. What to do: press 🔁 Try again, or pick another AI for the book in the run's settings.",
    "issues": [],
-   "risks": [
-    "the AIs REFUSED (AI_DECLINED) but the message and fix say they “stayed busy or unreachable” / “could not be reached” and send the author to check AutoInjector and logins"
-   ],
+   "risks": [],
    "notes": [],
    "faults_fired": 302,
    "ai_calls": 375,
-   "seconds": 6.0,
+   "seconds": 5.66,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -1413,9 +1392,9 @@
    "alert": {
     "category": "ai",
     "label": "AI problem",
-    "wrong": "Claude stayed busy or unreachable for 2 s, so Akọwe stopped waiting (the AI declined to answer (stress) (every working AI was asked))",
-    "why": "The AI could not do this step (a usage limit, the connection or an error).",
-    "next": "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
+    "wrong": "Claude declined to write this again and again (it said it can't help with that), so Akọwe stopped asking",
+    "why": "The AIs refused to write this (they said they can't help with that), even after being asked again and another AI being tried.",
+    "next": "Press 🔁 Try again, or pick another AI for the book in the run's settings. Nothing written so far is lost."
    },
    "finding": {
     "where": "akowe/akowe/jobs.py `wait_and_retry` (~222-225) and BUSY_FIX in akowe/akowe/autobook.py `_ai_problem` (~2745)",
@@ -1426,9 +1405,9 @@
     "what": "When every AI refuses the main plot, the stop says they “stayed busy or unreachable” and sends the author to check AutoInjector and logins",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-9-g",
@@ -1436,17 +1415,15 @@
    "part": "9",
    "stress": "g",
    "title": "the part's own code raises an unexpected Python exception",
-   "result": "⚠️",
-   "happened": "The part's own code raises: Stopped at step “plot” with INTERNAL_ERROR: “Akọwe hit an unexpected problem (RuntimeError).” Fix offered: “Press 🔁 Try again. If it keeps happening, use 📋 Copy diagnostics.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
+   "result": "🟡",
+   "happened": "The part's own code raises: Stopped at step “plot” with INTERNAL_ERROR: “Akọwe hit an unexpected error in “Main plot” — press ▶ Resume to try again.” Fix offered: “Press ▶ Resume to try this step again — nothing written so far is lost. If it happens again, use 📋 Copy diagnostics and send it in.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
    "status": "paused",
    "final_status": "done",
    "problem_code": "INTERNAL_ERROR",
-   "problem_message": "Akọwe hit an unexpected problem (RuntimeError).",
-   "problem_fix": "Press 🔁 Try again. If it keeps happening, use 📋 Copy diagnostics.",
+   "problem_message": "Akọwe hit an unexpected error in “Main plot” — press ▶ Resume to try again.",
+   "problem_fix": "Press ▶ Resume to try this step again — nothing written so far is lost. If it happens again, use 📋 Copy diagnostics and send it in.",
    "issues": [],
-   "risks": [
-    "the alert calls a fault in Akọwe's own code an “AI problem” (“The AI could not do this step (a usage limit, the connection or an error).”), so the author looks for the fault in the AI"
-   ],
+   "risks": [],
    "notes": [],
    "faults_fired": 0,
    "ai_calls": 73,
@@ -1481,11 +1458,11 @@
     "QUALITY_TREND"
    ],
    "alert": {
-    "category": "ai",
-    "label": "AI problem",
-    "wrong": "Akọwe hit an unexpected problem (RuntimeError).",
-    "why": "The AI could not do this step (a usage limit, the connection or an error).",
-    "next": "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
+    "category": "akowe",
+    "label": "Akọwe problem",
+    "wrong": "Akọwe hit an unexpected error in “Main plot” — press ▶ Resume to try again.",
+    "why": "Something went wrong inside Akọwe itself — not the AI and not your book.",
+    "next": "Press ▶ Resume to try this step again; nothing written so far is lost. If it happens again, use 📋 Copy diagnostics and send it in."
    },
    "finding": {
     "where": "akowe/akowe/alerts.py `category_of` (~83; INTERNAL_ERROR is in `AI_CODES`, ~57); the stop comes from akowe/akowe/autobook.py `_run` (~1429-1510)",
@@ -1496,9 +1473,9 @@
     "what": "A bug in Akọwe's own code is shown as an “AI problem … (a usage limit, the connection or an error)”",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-9-h",
@@ -1518,7 +1495,7 @@
    "notes": [],
    "faults_fired": 1,
    "ai_calls": 74,
-   "seconds": 1.82,
+   "seconds": 1.55,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -1551,7 +1528,7 @@
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-9-i",
@@ -1571,7 +1548,7 @@
    "notes": [],
    "faults_fired": 1,
    "ai_calls": 73,
-   "seconds": 3.82,
+   "seconds": 3.0,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -1604,7 +1581,7 @@
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-9-j",
@@ -1612,21 +1589,19 @@
    "part": "9",
    "stress": "j",
    "title": "the most likely real-life problem: a web AI's answer is cut off mid-JSON (output limit) — once; and every time",
-   "result": "⚠️",
-   "happened": "Cut off once: The book finished with nothing lost. — Cut off every time: Stopped at step “plot” with INTERNAL_ERROR: “The main plot could not be made: the gemini web session did not return JSON matching the output schema after 3 tries; nothing was saved. Last errors: /: the reply contained no JSON object (every working AI was asked)” Fix offered: “Press 🔁 Try again. If it fails again, open the step and write it yourself.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
+   "result": "🟡",
+   "happened": "Cut off once: The book finished with nothing lost. — Cut off every time: Stopped at step “plot” with AI_UNUSABLE: “The AI's answers could not be used while writing the main plot: Gemini did not give a usable answer (its answer was not in the form Akọwe asked for) after 3 tries; nothing was saved (every working AI was asked).” Fix offered: “Press 🔁 Try again: Akọwe asks the AIs again. If it keeps happening, look at the AI's window in AutoInjector (a cut-off answer, or a chat that is too long — press the site's New chat), or pick another AI for the book in the run's settings.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
    "status": "paused",
    "final_status": "done",
-   "problem_code": "INTERNAL_ERROR",
-   "problem_message": "The main plot could not be made: the gemini web session did not return JSON matching the output schema after 3 tries; nothing was saved. Last errors: /: the reply contained no JSON object (every working AI was asked)",
-   "problem_fix": "Press 🔁 Try again. If it fails again, open the step and write it yourself.",
+   "problem_code": "AI_UNUSABLE",
+   "problem_message": "The AI's answers could not be used while writing the main plot: Gemini did not give a usable answer (its answer was not in the form Akọwe asked for) after 3 tries; nothing was saved (every working AI was asked).",
+   "problem_fix": "Press 🔁 Try again: Akọwe asks the AIs again. If it keeps happening, look at the AI's window in AutoInjector (a cut-off answer, or a chat that is too long — press the site's New chat), or pick another AI for the book in the run's settings.",
    "issues": [],
-   "risks": [
-    "the message is in programmer's words (“…did not return JSON matching the output schema… Last errors: /: 'title' is a required property…”, code INTERNAL_ERROR) and the fix only says “Press 🔁 Try again. If it fails again, open the step and write it yourself.” — it never suggests another AI"
-   ],
+   "risks": [],
    "notes": [],
    "faults_fired": 10,
    "ai_calls": 180,
-   "seconds": 6.25,
+   "seconds": 5.29,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -1654,14 +1629,14 @@
     "CLEAN_RUN_SCORE",
     "BOOK_TOO_SHORT",
     "QUALITY_TREND",
-    "INTERNAL_ERROR"
+    "AI_UNUSABLE"
    ],
    "alert": {
     "category": "ai",
     "label": "AI problem",
-    "wrong": "The main plot could not be made: the gemini web session did not return JSON matching the output schema after 3 tries; nothing was saved. Last errors: /: the reply contained no JSON object (every working AI was asked)",
-    "why": "The AI could not do this step (a usage limit, the connection or an error).",
-    "next": "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
+    "wrong": "The AI's answers could not be used while writing the main plot: Gemini did not give a usable answer (its answer was not in the form Akọwe asked for) after 3 tries; nothing was saved (every working AI was asked).",
+    "why": "The AIs' answers could not be used (not in the form Akọwe asked for), even after asking again and asking another working AI.",
+    "next": "Press 🔁 Try again (or pick another AI for the book in the run's settings). Nothing written so far is lost."
    },
    "finding": {
     "where": "akowe/akowe/assist.py `AssistService._call_ai_once` (lines ~700-735, the slot is pinned; only UPSTREAM_UNAVAILABLE / AI_DECLINED move on); akowe/akowe/providers.py `AutoInjectorAdapter.submit` (~1073, INTERNAL_ERROR with `try_other_ai` after the re-asks); akowe/akowe/autobook.py `_planning` (~3640) / `_ai_problem` (~2741)",
@@ -1672,9 +1647,9 @@
     "what": "A web AI whose plot answer is always cut off mid-JSON stops the book with schema jargon",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-9-k",
@@ -1682,33 +1657,89 @@
    "part": "9",
    "stress": "k",
    "title": "the optional writers' room is on and every AI call of the room times out",
-   "result": "❌",
-   "happened": "Writers' room on, its AI calls time out: Stopped at step “plot” with INTERNAL_ERROR: “Akọwe hit an unexpected problem (KeyError).” Fix offered: “Press 🔁 Try again. If it keeps happening, use 📋 Copy diagnostics.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
-   "status": "paused",
+   "result": "✅",
+   "happened": "Writers' room on, its AI calls time out: The book finished with nothing lost.",
+   "status": "done",
    "final_status": "done",
-   "problem_code": "INTERNAL_ERROR",
-   "problem_message": "Akọwe hit an unexpected problem (KeyError).",
-   "problem_fix": "Press 🔁 Try again. If it keeps happening, use 📋 Copy diagnostics.",
-   "issues": [
-    "an unexpected Python exception stopped the run (INTERNAL_ERROR)",
-    "unexpected traceback in the log: make-a-book run run-2add0958a4f9: unexpected problem in step plot"
-   ],
-   "risks": [
-    "the alert calls a fault in Akọwe's own code an “AI problem” (“The AI could not do this step (a usage limit, the connection or an error).”), so the author looks for the fault in the AI",
-    "the OPTIONAL writers' room stopped the whole book"
-   ],
+   "problem_code": "",
+   "problem_message": "",
+   "problem_fix": "",
+   "issues": [],
+   "risks": [],
    "notes": [],
    "faults_fired": 2,
-   "ai_calls": 87,
-   "seconds": 1.66,
+   "ai_calls": 83,
+   "seconds": 1.54,
    "likely": "likely in real use",
-   "log_errors": 1,
-   "log_tracebacks": 1,
+   "log_errors": 0,
+   "log_tracebacks": 0,
    "event_codes": [
     "VOICE_SET",
     "VOICES_DISTINCT",
-    "INTERNAL_ERROR",
+    "WRITERS_ROOM_FAILED",
+    "DOCTOR_SCORED",
+    "DOCTOR_DONE",
+    "PREDICT_PROBED",
+    "LEDGER_BUILT",
+    "SCOPE_SET",
+    "GRID_BUILT",
+    "TRADE_CARD_MADE",
+    "PROTAGONIST_OK",
+    "FIRST_PAGE_PICKED",
+    "ONE_REVIEWER",
+    "PLANNED_UNRESOLVED",
+    "PLANNED_MISSING",
+    "CHECKPOINT",
     "WRITERS_ROOM",
+    "ENDING_KEPT",
+    "VOICE_TEST_TOO_LITTLE",
+    "HUMAN_PASS",
+    "OPENING_UNRESOLVED",
+    "IMPROVE_UNRESOLVED",
+    "CLEAN_RUN_SCORE",
+    "BOOK_TOO_SHORT",
+    "QUALITY_TREND"
+   ],
+   "alert": {},
+   "finding": {
+    "where": "akowe/akowe/writers_room.py `_run_room` (~895-908) with `_auto_pick` (~869-874)",
+    "cause": "When every pitch failed (here: each AI timed out), `_auto_pick` returns None and `next(p for p in room['pitches'] if p.get('letter') == letter)` then MATCHES a failed pitch (it has no `letter`, so `p.get('letter') == None`). `pitch['title']` raises KeyError outside the try block, so the optional writers' room stops the whole book with INTERNAL_ERROR (called an “AI problem”), traceback in the log. ▶ Resume after the fault was gone finished the book (the room met again).",
+    "fix": "Return early when `letter` is None (note WRITERS_ROOM_FAILED “no idea came back”), and match only pitches with `status == 'done'`.",
+    "severity": "blocks the book needlessly",
+    "likely": "likely in real use",
+    "what": "The optional writers' room crashes the book (KeyError → INTERNAL_ERROR) when every pitch fails",
+    "repro": ""
+   },
+   "result_word": "HANDLED",
+   "seed": 0,
+   "ran_at": "2026-11-26T01:16:33Z"
+  },
+  {
+   "id": "C-9-l",
+   "section": "C",
+   "part": "9",
+   "stress": "l",
+   "title": "absurd plot: 500 plot obligations and a 1 MB summary; the villain named exactly like the hero",
+   "result": "🟡",
+   "happened": "500 obligations + 1 MB summary: Stopped at step “plot” with CHECKS_REFUSED: “Akọwe's checks refused the main plot: It is far too long for the later steps to read (Akọwe's size limit for the story plan). Press 🔁 Try again for a shorter one, or ✏️ Edit it shorter. The AI wrote it 3 times.” Fix offered: “Press 🔁 Try again: the AI writes it again and is told exactly what Akọwe refused. Or ✏️ Edit it yourself so the checks pass, then press Continue.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
+   "status": "paused",
+   "final_status": "done",
+   "problem_code": "CHECKS_REFUSED",
+   "problem_message": "Akọwe's checks refused the main plot: It is far too long for the later steps to read (Akọwe's size limit for the story plan). Press 🔁 Try again for a shorter one, or ✏️ Edit it shorter. The AI wrote it 3 times.",
+   "problem_fix": "Press 🔁 Try again: the AI writes it again and is told exactly what Akọwe refused. Or ✏️ Edit it yourself so the checks pass, then press Continue.",
+   "issues": [],
+   "risks": [],
+   "notes": [],
+   "faults_fired": 3,
+   "ai_calls": 76,
+   "seconds": 3.89,
+   "likely": "unlikely but dangerous",
+   "log_errors": 0,
+   "log_tracebacks": 0,
+   "event_codes": [
+    "VOICE_SET",
+    "VOICES_DISTINCT",
+    "CHECKS_REFUSED",
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
@@ -1732,61 +1763,10 @@
     "QUALITY_TREND"
    ],
    "alert": {
-    "category": "ai",
-    "label": "AI problem",
-    "wrong": "Akọwe hit an unexpected problem (KeyError).",
-    "why": "The AI could not do this step (a usage limit, the connection or an error).",
-    "next": "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
-   },
-   "finding": {
-    "where": "akowe/akowe/writers_room.py `_run_room` (~895-908) with `_auto_pick` (~869-874)",
-    "cause": "When every pitch failed (here: each AI timed out), `_auto_pick` returns None and `next(p for p in room['pitches'] if p.get('letter') == letter)` then MATCHES a failed pitch (it has no `letter`, so `p.get('letter') == None`). `pitch['title']` raises KeyError outside the try block, so the optional writers' room stops the whole book with INTERNAL_ERROR (called an “AI problem”), traceback in the log. ▶ Resume after the fault was gone finished the book (the room met again).",
-    "fix": "Return early when `letter` is None (note WRITERS_ROOM_FAILED “no idea came back”), and match only pitches with `status == 'done'`.",
-    "severity": "blocks the book needlessly",
-    "likely": "likely in real use",
-    "what": "The optional writers' room crashes the book (KeyError → INTERNAL_ERROR) when every pitch fails",
-    "repro": ""
-   },
-   "result_word": "PROBLEM",
-   "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
-  },
-  {
-   "id": "C-9-l",
-   "section": "C",
-   "part": "9",
-   "stress": "l",
-   "title": "absurd plot: 500 plot obligations and a 1 MB summary; the villain named exactly like the hero",
-   "result": "❌",
-   "happened": "500 obligations + 1 MB summary: Stopped at step “outline” with CONTEXT_TOO_LARGE: “The chapter outline could not be made: mandatory context (~337078 tokens) exceeds every connected slot; split the job on scene/pass boundaries” Fix offered: “Press 🔁 Try again. If it fails again, open the step and write it yourself.”. Resume did not finish: paused CONTEXT_TOO_LARGE.",
-   "status": "paused",
-   "final_status": "paused",
-   "problem_code": "CONTEXT_TOO_LARGE",
-   "problem_message": "The chapter outline could not be made: mandatory context (~337078 tokens) exceeds every connected slot; split the job on scene/pass boundaries",
-   "problem_fix": "Press 🔁 Try again. If it fails again, open the step and write it yourself.",
-   "issues": [
-    "Resume could not finish the book (status paused, CONTEXT_TOO_LARGE: The chapter outline could not be made: mandatory context (~337078 tokens) exceeds every connected slot; split the job on scene/pass boundaries)"
-   ],
-   "risks": [
-    "500 plot obligations were approved as the main plot (no cap)"
-   ],
-   "notes": [],
-   "faults_fired": 1,
-   "ai_calls": 15,
-   "seconds": 0.26,
-   "likely": "unlikely but dangerous",
-   "log_errors": 0,
-   "log_tracebacks": 0,
-   "event_codes": [
-    "VOICE_SET",
-    "VOICES_DISTINCT",
-    "CONTEXT_TOO_LARGE"
-   ],
-   "alert": {
     "category": "plot",
     "label": "Plot / outline",
-    "wrong": "CONTEXT_TOO_LARGE: mandatory context (~337078 tokens) exceeds every connected slot; split the job on scene/pass boundaries (at /payload)",
-    "why": "This step stopped on a problem.",
+    "wrong": "PLAN_TOO_LARGE: the list of plot obligations is far too long (500 items; at most 40): keep the ones that matter most — later steps carry it in full and could not read it (and 1 more like this)",
+    "why": "Akọwe's own checks refused it, and the AI could not make one that passes.",
     "next": "Press 🔁 Try again, or edit it yourself and then continue."
    },
    "finding": {
@@ -1798,9 +1778,9 @@
     "what": "An oversized main plot (500 obligations, 1 MB) is approved; the outline then stops with CONTEXT_TOO_LARGE that Resume can never get past",
     "repro": ""
    },
-   "result_word": "PROBLEM",
+   "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-9-m",
@@ -1820,7 +1800,7 @@
    "notes": [],
    "faults_fired": 2,
    "ai_calls": 86,
-   "seconds": 3.48,
+   "seconds": 2.65,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -1853,7 +1833,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-9-n",
@@ -1873,7 +1853,7 @@
    "notes": [],
    "faults_fired": 2,
    "ai_calls": 87,
-   "seconds": 3.1,
+   "seconds": 2.73,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -1906,7 +1886,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-9-o",
@@ -1926,7 +1906,7 @@
    "notes": [],
    "faults_fired": 1,
    "ai_calls": 73,
-   "seconds": 1.84,
+   "seconds": 1.66,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -1959,7 +1939,7 @@
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10-a",
@@ -1979,7 +1959,7 @@
    "notes": [],
    "faults_fired": 2,
    "ai_calls": 148,
-   "seconds": 3.17,
+   "seconds": 3.28,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -2013,13 +1993,13 @@
     "category": "ai",
     "label": "AI problem",
     "wrong": "The AI did not answer in time while writing the chapter outline.",
-    "why": "The AI could not do this step (a usage limit, the connection or an error).",
+    "why": "The AI did not answer in time, so Akọwe stopped instead of guessing.",
     "next": "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
    },
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10-b",
@@ -2039,7 +2019,7 @@
    "notes": [],
    "faults_fired": 3,
    "ai_calls": 76,
-   "seconds": 1.55,
+   "seconds": 1.34,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -2073,7 +2053,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10-c",
@@ -2093,7 +2073,7 @@
    "notes": [],
    "faults_fired": 6,
    "ai_calls": 79,
-   "seconds": 1.96,
+   "seconds": 1.65,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -2127,7 +2107,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10-d",
@@ -2135,30 +2115,28 @@
    "part": "10",
    "stress": "d",
    "title": "garbage answer (not JSON / wrong types / missing keys)",
-   "result": "⚠️",
-   "happened": "Not json (every time): Stopped at step “outline” with INTERNAL_ERROR: “The chapter outline could not be made: the gemini web session did not return JSON matching the output schema after 3 tries; nothing was saved. Last errors: /: the reply contained no JSON object (every working AI was asked)” Fix offered: “Press 🔁 Try again. If it fails again, open the step and write it yourself.”. After the fault was removed, ▶ Resume finished the book with nothing lost. — Wrong types (every time): Stopped at step “outline” with INTERNAL_ERROR: “The chapter outline could not be made: the gemini web session did not return JSON matching the output schema after 3 tries; nothing was saved. Last errors: /chapters: 12345 is not of type 'array'; /unresolved_threads: 12345 is not of type 'array' (every working AI was asked)” Fix offered: “Press 🔁 Try again. If it fails again, open the step and write it yourself.”. After the fault was removed, ▶ Resume finished the book with nothing lost. — Missing keys (every time): Stopped at step “outline” with INTERNAL_ERROR: “The chapter outline could not be made: the gemini web session did not return JSON matching the output schema after 3 tries; nothing was saved. Last errors: /: Additional properties are not allowed ('note' was unexpected); /: 'chapters' is a required property; /: 'unresolved_threads' is a required property (every working AI was asked)” Fix offered: “Press 🔁 Try again. If it fails again, open the step and write it yourself.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
+   "result": "🟡",
+   "happened": "Not json (every time): Stopped at step “outline” with AI_UNUSABLE: “The AI's answers could not be used while writing the chapter outline: Gemini did not give a usable answer (its answer was not in the form Akọwe asked for) after 3 tries; nothing was saved (every working AI was asked).” Fix offered: “Press 🔁 Try again: Akọwe asks the AIs again. If it keeps happening, look at the AI's window in AutoInjector (a cut-off answer, or a chat that is too long — press the site's New chat), or pick another AI for the book in the run's settings.”. After the fault was removed, ▶ Resume finished the book with nothing lost. — Wrong types (every time): Stopped at step “outline” with AI_UNUSABLE: “The AI's answers could not be used while writing the chapter outline: Gemini did not give a usable answer (its answer was not in the form Akọwe asked for) after 3 tries; nothing was saved (every working AI was asked).” Fix offered: “Press 🔁 Try again: Akọwe asks the AIs again. If it keeps happening, look at the AI's window in AutoInjector (a cut-off answer, or a chat that is too long — press the site's New chat), or pick another AI for the book in the run's settings.”. After the fault was removed, ▶ Resume finished the book with nothing lost. — Missing keys (every time): Stopped at step “outline” with AI_UNUSABLE: “The AI's answers could not be used while writing the chapter outline: Gemini did not give a usable answer (its answer was not in the form Akọwe asked for) after 3 tries; nothing was saved (every working AI was asked).” Fix offered: “Press 🔁 Try again: Akọwe asks the AIs again. If it keeps happening, look at the AI's window in AutoInjector (a cut-off answer, or a chat that is too long — press the site's New chat), or pick another AI for the book in the run's settings.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
    "status": "paused",
    "final_status": "done",
-   "problem_code": "INTERNAL_ERROR",
-   "problem_message": "The chapter outline could not be made: the gemini web session did not return JSON matching the output schema after 3 tries; nothing was saved. Last errors: /: the reply contained no JSON object (every working AI was asked)",
-   "problem_fix": "Press 🔁 Try again. If it fails again, open the step and write it yourself.",
+   "problem_code": "AI_UNUSABLE",
+   "problem_message": "The AI's answers could not be used while writing the chapter outline: Gemini did not give a usable answer (its answer was not in the form Akọwe asked for) after 3 tries; nothing was saved (every working AI was asked).",
+   "problem_fix": "Press 🔁 Try again: Akọwe asks the AIs again. If it keeps happening, look at the AI's window in AutoInjector (a cut-off answer, or a chat that is too long — press the site's New chat), or pick another AI for the book in the run's settings.",
    "issues": [],
-   "risks": [
-    "the message is in programmer's words (“…did not return JSON matching the output schema… Last errors: /: 'title' is a required property…”, code INTERNAL_ERROR) and the fix only says “Press 🔁 Try again. If it fails again, open the step and write it yourself.” — it never suggests another AI"
-   ],
+   "risks": [],
    "notes": [
     "Sent through an in-process AutoInjector bridge, so the real adapter reads the bad text."
    ],
    "faults_fired": 27,
    "ai_calls": 282,
-   "seconds": 9.66,
+   "seconds": 8.44,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
    "event_codes": [
     "VOICE_SET",
     "VOICES_DISTINCT",
-    "INTERNAL_ERROR",
+    "AI_UNUSABLE",
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
@@ -2184,9 +2162,9 @@
    "alert": {
     "category": "ai",
     "label": "AI problem",
-    "wrong": "The chapter outline could not be made: the gemini web session did not return JSON matching the output schema after 3 tries; nothing was saved. Last errors: /: the reply contained no JSON object (every working AI was…",
-    "why": "The AI could not do this step (a usage limit, the connection or an error).",
-    "next": "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
+    "wrong": "The AI's answers could not be used while writing the chapter outline: Gemini did not give a usable answer (its answer was not in the form Akọwe asked for) after 3 tries; nothing was saved (every working AI was asked).",
+    "why": "The AIs' answers could not be used (not in the form Akọwe asked for), even after asking again and asking another working AI.",
+    "next": "Press 🔁 Try again (or pick another AI for the book in the run's settings). Nothing written so far is lost."
    },
    "finding": {
     "where": "akowe/akowe/assist.py `AssistService._call_ai_once` (lines ~700-735, the slot is pinned; only UPSTREAM_UNAVAILABLE / AI_DECLINED move on); akowe/akowe/providers.py `AutoInjectorAdapter.submit` (~1073, INTERNAL_ERROR with `try_other_ai` after the re-asks); akowe/akowe/autobook.py `_planning` (~3640) / `_ai_problem` (~2741)",
@@ -2197,9 +2175,9 @@
     "what": "One AI's garbage answers stop the chapter outline although the other AIs were never asked; the message is JSON-schema jargon",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10-e",
@@ -2207,28 +2185,26 @@
    "part": "10",
    "stress": "e",
    "title": "empty answer",
-   "result": "⚠️",
-   "happened": "Empty reply text (every time): Stopped at step “outline” with INTERNAL_ERROR: “The chapter outline could not be made: the gemini web session did not return JSON matching the output schema after 3 tries; nothing was saved. Last errors: /: the reply contained no JSON object (every working AI was asked)” Fix offered: “Press 🔁 Try again. If it fails again, open the step and write it yourself.”. After the fault was removed, ▶ Resume finished the book with nothing lost. — An empty JSON object {} (every time): Stopped at step “outline” with INTERNAL_ERROR: “The chapter outline could not be made: the gemini web session did not return JSON matching the output schema after 3 tries; nothing was saved. Last errors: /: 'chapters' is a required property; /: 'unresolved_threads' is a required property (every working AI was asked)” Fix offered: “Press 🔁 Try again. If it fails again, open the step and write it yourself.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
+   "result": "🟡",
+   "happened": "Empty reply text (every time): Stopped at step “outline” with AI_UNUSABLE: “The AI's answers could not be used while writing the chapter outline: Gemini did not give a usable answer (its answer was not in the form Akọwe asked for) after 3 tries; nothing was saved (every working AI was asked).” Fix offered: “Press 🔁 Try again: Akọwe asks the AIs again. If it keeps happening, look at the AI's window in AutoInjector (a cut-off answer, or a chat that is too long — press the site's New chat), or pick another AI for the book in the run's settings.”. After the fault was removed, ▶ Resume finished the book with nothing lost. — An empty JSON object {} (every time): Stopped at step “outline” with AI_UNUSABLE: “The AI's answers could not be used while writing the chapter outline: Gemini did not give a usable answer (its answer was not in the form Akọwe asked for) after 3 tries; nothing was saved (every working AI was asked).” Fix offered: “Press 🔁 Try again: Akọwe asks the AIs again. If it keeps happening, look at the AI's window in AutoInjector (a cut-off answer, or a chat that is too long — press the site's New chat), or pick another AI for the book in the run's settings.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
    "status": "paused",
    "final_status": "done",
-   "problem_code": "INTERNAL_ERROR",
-   "problem_message": "The chapter outline could not be made: the gemini web session did not return JSON matching the output schema after 3 tries; nothing was saved. Last errors: /: the reply contained no JSON object (every working AI was asked)",
-   "problem_fix": "Press 🔁 Try again. If it fails again, open the step and write it yourself.",
+   "problem_code": "AI_UNUSABLE",
+   "problem_message": "The AI's answers could not be used while writing the chapter outline: Gemini did not give a usable answer (its answer was not in the form Akọwe asked for) after 3 tries; nothing was saved (every working AI was asked).",
+   "problem_fix": "Press 🔁 Try again: Akọwe asks the AIs again. If it keeps happening, look at the AI's window in AutoInjector (a cut-off answer, or a chat that is too long — press the site's New chat), or pick another AI for the book in the run's settings.",
    "issues": [],
-   "risks": [
-    "the message is in programmer's words (“…did not return JSON matching the output schema… Last errors: /: 'title' is a required property…”, code INTERNAL_ERROR) and the fix only says “Press 🔁 Try again. If it fails again, open the step and write it yourself.” — it never suggests another AI"
-   ],
+   "risks": [],
    "notes": [],
    "faults_fired": 18,
    "ai_calls": 188,
-   "seconds": 6.28,
+   "seconds": 5.44,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
    "event_codes": [
     "VOICE_SET",
     "VOICES_DISTINCT",
-    "INTERNAL_ERROR",
+    "AI_UNUSABLE",
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
@@ -2254,9 +2230,9 @@
    "alert": {
     "category": "ai",
     "label": "AI problem",
-    "wrong": "The chapter outline could not be made: the gemini web session did not return JSON matching the output schema after 3 tries; nothing was saved. Last errors: /: the reply contained no JSON object (every working AI was…",
-    "why": "The AI could not do this step (a usage limit, the connection or an error).",
-    "next": "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
+    "wrong": "The AI's answers could not be used while writing the chapter outline: Gemini did not give a usable answer (its answer was not in the form Akọwe asked for) after 3 tries; nothing was saved (every working AI was asked).",
+    "why": "The AIs' answers could not be used (not in the form Akọwe asked for), even after asking again and asking another working AI.",
+    "next": "Press 🔁 Try again (or pick another AI for the book in the run's settings). Nothing written so far is lost."
    },
    "finding": {
     "where": "akowe/akowe/assist.py `AssistService._call_ai_once` (lines ~700-735, the slot is pinned; only UPSTREAM_UNAVAILABLE / AI_DECLINED move on); akowe/akowe/providers.py `AutoInjectorAdapter.submit` (~1073, INTERNAL_ERROR with `try_other_ai` after the re-asks); akowe/akowe/autobook.py `_planning` (~3640) / `_ai_problem` (~2741)",
@@ -2267,9 +2243,9 @@
     "what": "One AI's empty answers stop the chapter outline although the other AIs were never asked; the message is JSON-schema jargon",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10-f",
@@ -2277,21 +2253,19 @@
    "part": "10",
    "stress": "f",
    "title": "the AI refuses (AI_DECLINED) repeatedly",
-   "result": "⚠️",
-   "happened": "Every AI declines every time: Stopped at step “outline” with AI_DECLINED: “Claude stayed busy or unreachable for 2 s, so Akọwe stopped waiting (the AI declined to answer (stress) (every working AI was asked))” Fix offered: “The AIs stayed busy or could not be reached for a long time. What to do: make sure AutoInjector (the program with the AI windows) is open; look at each AI's window (logged in? a usage-limit message?); Settings → 🧪 Test connection shows which AI works. Then press 🔁 Try again.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
+   "result": "🟡",
+   "happened": "Every AI declines every time: Stopped at step “outline” with AI_DECLINED: “Claude declined to write this again and again (it said it can't help with that), so Akọwe stopped asking” Fix offered: “The AI declined to answer (it said it can't help with that) — story material such as a death or a crime sometimes trips an AI's safety filter by mistake. Akọwe already asked again and tried the other AIs. What to do: press 🔁 Try again, or pick another AI for the book in the run's settings.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
    "status": "paused",
    "final_status": "done",
    "problem_code": "AI_DECLINED",
-   "problem_message": "Claude stayed busy or unreachable for 2 s, so Akọwe stopped waiting (the AI declined to answer (stress) (every working AI was asked))",
-   "problem_fix": "The AIs stayed busy or could not be reached for a long time. What to do: make sure AutoInjector (the program with the AI windows) is open; look at each AI's window (logged in? a usage-limit message?); Settings → 🧪 Test connection shows which AI works. Then press 🔁 Try again.",
+   "problem_message": "Claude declined to write this again and again (it said it can't help with that), so Akọwe stopped asking",
+   "problem_fix": "The AI declined to answer (it said it can't help with that) — story material such as a death or a crime sometimes trips an AI's safety filter by mistake. Akọwe already asked again and tried the other AIs. What to do: press 🔁 Try again, or pick another AI for the book in the run's settings.",
    "issues": [],
-   "risks": [
-    "the AIs REFUSED (AI_DECLINED) but the message and fix say they “stayed busy or unreachable” / “could not be reached” and send the author to check AutoInjector and logins"
-   ],
+   "risks": [],
    "notes": [],
    "faults_fired": 302,
    "ai_calls": 375,
-   "seconds": 5.73,
+   "seconds": 5.52,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -2324,9 +2298,9 @@
    "alert": {
     "category": "ai",
     "label": "AI problem",
-    "wrong": "Claude stayed busy or unreachable for 2 s, so Akọwe stopped waiting (the AI declined to answer (stress) (every working AI was asked))",
-    "why": "The AI could not do this step (a usage limit, the connection or an error).",
-    "next": "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
+    "wrong": "Claude declined to write this again and again (it said it can't help with that), so Akọwe stopped asking",
+    "why": "The AIs refused to write this (they said they can't help with that), even after being asked again and another AI being tried.",
+    "next": "Press 🔁 Try again, or pick another AI for the book in the run's settings. Nothing written so far is lost."
    },
    "finding": {
     "where": "akowe/akowe/jobs.py `wait_and_retry` (~222-225) and BUSY_FIX in akowe/akowe/autobook.py `_ai_problem` (~2745)",
@@ -2337,9 +2311,9 @@
     "what": "When every AI refuses the chapter outline, the stop says they “stayed busy or unreachable” and sends the author to check AutoInjector and logins",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10-g",
@@ -2347,21 +2321,19 @@
    "part": "10",
    "stress": "g",
    "title": "the part's own code raises an unexpected Python exception",
-   "result": "⚠️",
-   "happened": "The part's own code raises: Stopped at step “outline” with INTERNAL_ERROR: “Akọwe hit an unexpected problem (RuntimeError).” Fix offered: “Press 🔁 Try again. If it keeps happening, use 📋 Copy diagnostics.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
+   "result": "🟡",
+   "happened": "The part's own code raises: Stopped at step “outline” with INTERNAL_ERROR: “Akọwe hit an unexpected error in “Chapter outline” — press ▶ Resume to try again.” Fix offered: “Press ▶ Resume to try this step again — nothing written so far is lost. If it happens again, use 📋 Copy diagnostics and send it in.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
    "status": "paused",
    "final_status": "done",
    "problem_code": "INTERNAL_ERROR",
-   "problem_message": "Akọwe hit an unexpected problem (RuntimeError).",
-   "problem_fix": "Press 🔁 Try again. If it keeps happening, use 📋 Copy diagnostics.",
+   "problem_message": "Akọwe hit an unexpected error in “Chapter outline” — press ▶ Resume to try again.",
+   "problem_fix": "Press ▶ Resume to try this step again — nothing written so far is lost. If it happens again, use 📋 Copy diagnostics and send it in.",
    "issues": [],
-   "risks": [
-    "the alert calls a fault in Akọwe's own code an “AI problem” (“The AI could not do this step (a usage limit, the connection or an error).”), so the author looks for the fault in the AI"
-   ],
+   "risks": [],
    "notes": [],
    "faults_fired": 0,
    "ai_calls": 73,
-   "seconds": 1.83,
+   "seconds": 1.44,
    "likely": "",
    "log_errors": 1,
    "log_tracebacks": 1,
@@ -2392,11 +2364,11 @@
     "QUALITY_TREND"
    ],
    "alert": {
-    "category": "ai",
-    "label": "AI problem",
-    "wrong": "Akọwe hit an unexpected problem (RuntimeError).",
-    "why": "The AI could not do this step (a usage limit, the connection or an error).",
-    "next": "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
+    "category": "akowe",
+    "label": "Akọwe problem",
+    "wrong": "Akọwe hit an unexpected error in “Chapter outline” — press ▶ Resume to try again.",
+    "why": "Something went wrong inside Akọwe itself — not the AI and not your book.",
+    "next": "Press ▶ Resume to try this step again; nothing written so far is lost. If it happens again, use 📋 Copy diagnostics and send it in."
    },
    "finding": {
     "where": "akowe/akowe/alerts.py `category_of` (~83; INTERNAL_ERROR is in `AI_CODES`, ~57); the stop comes from akowe/akowe/autobook.py `_run` (~1429-1510)",
@@ -2407,9 +2379,9 @@
     "what": "A bug in Akọwe's own code is shown as an “AI problem … (a usage limit, the connection or an error)”",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10-h",
@@ -2429,7 +2401,7 @@
    "notes": [],
    "faults_fired": 1,
    "ai_calls": 74,
-   "seconds": 1.48,
+   "seconds": 1.6,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -2462,7 +2434,7 @@
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10-i",
@@ -2482,7 +2454,7 @@
    "notes": [],
    "faults_fired": 1,
    "ai_calls": 73,
-   "seconds": 3.41,
+   "seconds": 3.13,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -2515,7 +2487,7 @@
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10-j",
@@ -2537,7 +2509,7 @@
    ],
    "faults_fired": 3,
    "ai_calls": 82,
-   "seconds": 2.08,
+   "seconds": 1.65,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -2578,7 +2550,7 @@
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10-k",
@@ -2598,7 +2570,7 @@
    "notes": [],
    "faults_fired": 1,
    "ai_calls": 74,
-   "seconds": 2.68,
+   "seconds": 1.68,
    "likely": "unlikely but dangerous",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -2632,7 +2604,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10-l",
@@ -2640,27 +2612,27 @@
    "part": "10",
    "stress": "l",
    "title": "every chapter identical (same objective) and an outline of 0 chapters",
-   "result": "⚠️",
-   "happened": "Three identical chapters: The book finished with nothing lost. — 0 chapters (every time): Stopped at step “outline” with CHECKS_REFUSED: “Akọwe's checks refused the chapter outline: Akọwe's checks found a problem: TARGET_LENGTH: outline has 0 chapters but target_length is 3 chapters The AI wrote it 3 times.” Fix offered: “Press 🔁 Try again: the AI writes it again and is told exactly what Akọwe refused. Or ✏️ Edit it yourself so the checks pass, then press Continue.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
-   "status": "done",
+   "result": "🟡",
+   "happened": "Three identical chapters: Stopped at step “outline” with CHECKS_REFUSED: “Akọwe's checks refused the chapter outline: Akọwe's checks found a problem: CHAPTER_REPEATED: chapters 1 and 2 have the same objective; every chapter must move the story on with its own objective; CHAPTER_REPEATED: chapters 1 and 3 have the same objective; every chapter must move the story on with its own objective The AI wrote it 3 times.” Fix offered: “Press 🔁 Try again: the AI writes it again and is told exactly what Akọwe refused. Or ✏️ Edit it yourself so the checks pass, then press Continue.”. After the fault was removed, ▶ Resume finished the book with nothing lost. — 0 chapters (every time): Stopped at step “outline” with CHECKS_REFUSED: “Akọwe's checks refused the chapter outline: Akọwe's checks found a problem: TARGET_LENGTH: outline has 0 chapters but target_length is 3 chapters The AI wrote it 3 times.” Fix offered: “Press 🔁 Try again: the AI writes it again and is told exactly what Akọwe refused. Or ✏️ Edit it yourself so the checks pass, then press Continue.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
+   "status": "paused",
    "final_status": "done",
-   "problem_code": "",
-   "problem_message": "",
-   "problem_fix": "",
+   "problem_code": "CHECKS_REFUSED",
+   "problem_message": "Akọwe's checks refused the chapter outline: Akọwe's checks found a problem: CHAPTER_REPEATED: chapters 1 and 2 have the same objective; every chapter must move the story on with its own objective; CHAPTER_REPEATED: chapters 1 and 3 have the same objective; every chapter must move the story on with its own objective The AI wrote it 3 times.",
+   "problem_fix": "Press 🔁 Try again: the AI writes it again and is told exactly what Akọwe refused. Or ✏️ Edit it yourself so the checks pass, then press Continue.",
    "issues": [],
-   "risks": [
-    "an outline whose 3 chapters all have the same objective was approved"
-   ],
+   "risks": [],
    "notes": [],
-   "faults_fired": 4,
-   "ai_calls": 154,
-   "seconds": 3.47,
+   "faults_fired": 6,
+   "ai_calls": 164,
+   "seconds": 3.69,
    "likely": "unlikely but dangerous",
    "log_errors": 0,
    "log_tracebacks": 0,
    "event_codes": [
     "VOICE_SET",
     "VOICES_DISTINCT",
+    "CHECKS_REPAIR",
+    "CHECKS_REFUSED",
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
@@ -2681,11 +2653,15 @@
     "IMPROVE_UNRESOLVED",
     "CLEAN_RUN_SCORE",
     "BOOK_TOO_SHORT",
-    "QUALITY_TREND",
-    "CHECKS_REPAIR",
-    "CHECKS_REFUSED"
+    "QUALITY_TREND"
    ],
-   "alert": {},
+   "alert": {
+    "category": "plot",
+    "label": "Plot / outline",
+    "wrong": "CHAPTER_REPEATED: chapters 1 and 2 have the same objective; every chapter must move the story on with its own objective (and 1 more like this)",
+    "why": "Akọwe's own checks refused it, and the AI could not make one that passes.",
+    "next": "Press 🔁 Try again, or edit it yourself and then continue."
+   },
    "finding": {
     "where": "akowe/akowe/modules/set_b.py B11 checks (~440-480: chapter count, ids, canon — no check of repeated objectives)",
     "cause": "An outline whose chapters all have the same objective passes Akọwe's checks, the AI review (the Practice AI approves) and the story doctor's scoring; nothing compares the chapters with each other. (0 chapters is refused and re-asked: handled.)",
@@ -2695,9 +2671,9 @@
     "what": "An outline whose chapters are all the same is approved without a word",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10-m",
@@ -2717,7 +2693,7 @@
    "notes": [],
    "faults_fired": 2,
    "ai_calls": 80,
-   "seconds": 2.09,
+   "seconds": 1.68,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -2754,7 +2730,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10-n",
@@ -2762,19 +2738,19 @@
    "part": "10",
    "stress": "n",
    "title": "prompt injection in the chapter summaries and objectives",
-   "result": "✅",
-   "happened": "Injected chapter objectives: The book finished with nothing lost.",
-   "status": "done",
+   "result": "🟡",
+   "happened": "Injected chapter objectives: Stopped at step “outline” with CHECKS_REFUSED: “Akọwe's checks refused the chapter outline: Akọwe's checks found a problem: CHAPTER_REPEATED: chapters 1 and 2 have the same objective; every chapter must move the story on with its own objective; CHAPTER_REPEATED: chapters 1 and 3 have the same objective; every chapter must move the story on with its own objective The AI wrote it 3 times.” Fix offered: “Press 🔁 Try again: the AI writes it again and is told exactly what Akọwe refused. Or ✏️ Edit it yourself so the checks pass, then press Continue.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
+   "status": "paused",
    "final_status": "done",
-   "problem_code": "",
-   "problem_message": "",
-   "problem_fix": "",
+   "problem_code": "CHECKS_REFUSED",
+   "problem_message": "Akọwe's checks refused the chapter outline: Akọwe's checks found a problem: CHAPTER_REPEATED: chapters 1 and 2 have the same objective; every chapter must move the story on with its own objective; CHAPTER_REPEATED: chapters 1 and 3 have the same objective; every chapter must move the story on with its own objective The AI wrote it 3 times.",
+   "problem_fix": "Press 🔁 Try again: the AI writes it again and is told exactly what Akọwe refused. Or ✏️ Edit it yourself so the checks pass, then press Continue.",
    "issues": [],
    "risks": [],
    "notes": [],
-   "faults_fired": 1,
-   "ai_calls": 72,
-   "seconds": 1.63,
+   "faults_fired": 3,
+   "ai_calls": 82,
+   "seconds": 1.7,
    "likely": "unlikely but dangerous",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -2782,6 +2758,8 @@
     "VOICE_SET",
     "FRESH_KEPT",
     "VOICES_DISTINCT",
+    "CHECKS_REPAIR",
+    "CHECKS_REFUSED",
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
@@ -2804,11 +2782,17 @@
     "BOOK_TOO_SHORT",
     "QUALITY_TREND"
    ],
-   "alert": {},
+   "alert": {
+    "category": "plot",
+    "label": "Plot / outline",
+    "wrong": "CHAPTER_REPEATED: chapters 1 and 2 have the same objective; every chapter must move the story on with its own objective (and 1 more like this)",
+    "why": "Akọwe's own checks refused it, and the AI could not make one that passes.",
+    "next": "Press 🔁 Try again, or edit it yourself and then continue."
+   },
    "finding": {},
-   "result_word": "HANDLED",
+   "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10-o",
@@ -2830,7 +2814,7 @@
    ],
    "faults_fired": 1,
    "ai_calls": 73,
-   "seconds": 1.61,
+   "seconds": 1.48,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -2863,7 +2847,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.1-a",
@@ -2883,7 +2867,7 @@
    "notes": [],
    "faults_fired": 3,
    "ai_calls": 146,
-   "seconds": 3.81,
+   "seconds": 2.63,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -2918,7 +2902,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.1-b",
@@ -2938,7 +2922,7 @@
    "notes": [],
    "faults_fired": 3,
    "ai_calls": 75,
-   "seconds": 1.67,
+   "seconds": 1.45,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -2972,7 +2956,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.1-c",
@@ -2992,7 +2976,7 @@
    "notes": [],
    "faults_fired": 6,
    "ai_calls": 77,
-   "seconds": 1.9,
+   "seconds": 1.53,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -3026,7 +3010,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.1-d",
@@ -3048,7 +3032,7 @@
    ],
    "faults_fired": 18,
    "ai_calls": 267,
-   "seconds": 10.2,
+   "seconds": 8.39,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -3082,7 +3066,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.1-e",
@@ -3102,7 +3086,7 @@
    "notes": [],
    "faults_fired": 12,
    "ai_calls": 178,
-   "seconds": 6.53,
+   "seconds": 5.43,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -3136,7 +3120,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.1-f",
@@ -3156,7 +3140,7 @@
    "notes": [],
    "faults_fired": 2,
    "ai_calls": 73,
-   "seconds": 1.52,
+   "seconds": 1.51,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -3190,7 +3174,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.1-g",
@@ -3210,7 +3194,7 @@
    "notes": [],
    "faults_fired": 0,
    "ai_calls": 71,
-   "seconds": 1.51,
+   "seconds": 1.37,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -3243,7 +3227,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.1-h",
@@ -3263,7 +3247,7 @@
    "notes": [],
    "faults_fired": 1,
    "ai_calls": 74,
-   "seconds": 1.86,
+   "seconds": 1.25,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -3296,7 +3280,7 @@
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.1-i",
@@ -3316,7 +3300,7 @@
    "notes": [],
    "faults_fired": 1,
    "ai_calls": 74,
-   "seconds": 3.6,
+   "seconds": 3.02,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -3349,7 +3333,7 @@
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.1-j",
@@ -3370,8 +3354,8 @@
     "Doctor line: 🩺 Plan scored 4.0/10; 2 revisions did not score higher, so the first plan is kept (target 8.5)."
    ],
    "faults_fired": 6,
-   "ai_calls": 82,
-   "seconds": 2.18,
+   "ai_calls": 83,
+   "seconds": 1.64,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -3406,7 +3390,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.1-k",
@@ -3429,7 +3413,7 @@
    ],
    "faults_fired": 4,
    "ai_calls": 146,
-   "seconds": 3.91,
+   "seconds": 2.88,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -3462,7 +3446,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.1-l",
@@ -3483,8 +3467,8 @@
     "Doctor line: 🩺 Plan scored 5.2/10; 2 revisions did not score higher, so the first plan is kept (target 8.5)."
    ],
    "faults_fired": 6,
-   "ai_calls": 82,
-   "seconds": 2.25,
+   "ai_calls": 83,
+   "seconds": 1.72,
    "likely": "unlikely but dangerous",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -3519,7 +3503,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.1-m",
@@ -3541,7 +3525,7 @@
    ],
    "faults_fired": 3,
    "ai_calls": 76,
-   "seconds": 2.23,
+   "seconds": 1.52,
    "likely": "unlikely but dangerous",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -3579,7 +3563,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.1-n",
@@ -3598,8 +3582,8 @@
    "risks": [],
    "notes": [],
    "faults_fired": 6,
-   "ai_calls": 82,
-   "seconds": 2.64,
+   "ai_calls": 83,
+   "seconds": 1.68,
    "likely": "unlikely but dangerous",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -3634,7 +3618,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.1-o",
@@ -3652,11 +3636,11 @@
    "issues": [],
    "risks": [],
    "notes": [
-    "3 revision(s); 22 AI calls in the outline step; line: “🩺 Plan scored 9.0/10; 3 revisions did not score higher, so the first plan is kept (target 9.5).”"
+    "3 revision(s); 23 AI calls in the outline step; line: “🩺 Plan scored 9.0/10; 3 revisions did not score higher, so the first plan is kept (target 9.5).”"
    ],
    "faults_fired": 8,
-   "ai_calls": 86,
-   "seconds": 1.91,
+   "ai_calls": 87,
+   "seconds": 1.62,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -3691,7 +3675,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.2-a",
@@ -3699,7 +3683,7 @@
    "part": "10.2",
    "stress": "a",
    "title": "the AI times out (once; and every time)",
-   "result": "⚠️",
+   "result": "✅",
    "happened": "Once: The book finished with nothing lost. — Every time: The book finished with nothing lost.",
    "status": "done",
    "final_status": "done",
@@ -3707,12 +3691,10 @@
    "problem_message": "",
    "problem_fix": "",
    "issues": [],
-   "risks": [
-    "the promise ledger was silently left out: its AI call failed, the book went on without it and no journal note, step line or check-later item tells the author"
-   ],
+   "risks": [],
    "notes": [],
    "faults_fired": 2,
-   "ai_calls": 146,
+   "ai_calls": 148,
    "seconds": 3.29,
    "likely": "",
    "log_errors": 0,
@@ -3723,6 +3705,7 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_FAILED",
     "SCOPE_SET",
     "GRID_BUILT",
     "TRADE_CARD_MADE",
@@ -3732,6 +3715,7 @@
     "PLANNED_UNRESOLVED",
     "PLANNED_MISSING",
     "CHECKPOINT",
+    "LEDGER_BUILT",
     "ENDING_KEPT",
     "VOICE_TEST_TOO_LITTLE",
     "HUMAN_PASS",
@@ -3751,9 +3735,9 @@
     "what": "When the ledger's AI call times out, the book goes on without a promise ledger and nothing tells the author",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.2-b",
@@ -3773,7 +3757,7 @@
    "notes": [],
    "faults_fired": 3,
    "ai_calls": 76,
-   "seconds": 1.77,
+   "seconds": 1.56,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -3807,7 +3791,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.2-c",
@@ -3827,7 +3811,7 @@
    "notes": [],
    "faults_fired": 6,
    "ai_calls": 79,
-   "seconds": 2.2,
+   "seconds": 1.64,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -3861,7 +3845,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.2-d",
@@ -3869,7 +3853,7 @@
    "part": "10.2",
    "stress": "d",
    "title": "garbage answer (not JSON / wrong types / missing keys)",
-   "result": "⚠️",
+   "result": "✅",
    "happened": "Not json (every time): The book finished with nothing lost. — Wrong types (every time): The book finished with nothing lost. — Missing keys (every time): The book finished with nothing lost.",
    "status": "done",
    "final_status": "done",
@@ -3877,15 +3861,13 @@
    "problem_message": "",
    "problem_fix": "",
    "issues": [],
-   "risks": [
-    "the promise ledger was silently left out: its AI call failed, the book went on without it and no journal note, step line or check-later item tells the author"
-   ],
+   "risks": [],
    "notes": [
     "Sent through an in-process AutoInjector bridge, so the real adapter reads the bad text."
    ],
-   "faults_fired": 9,
-   "ai_calls": 261,
-   "seconds": 8.86,
+   "faults_fired": 27,
+   "ai_calls": 282,
+   "seconds": 7.58,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -3895,6 +3877,7 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_FAILED",
     "SCOPE_SET",
     "GRID_BUILT",
     "TRADE_CARD_MADE",
@@ -3904,6 +3887,7 @@
     "PLANNED_UNRESOLVED",
     "PLANNED_MISSING",
     "CHECKPOINT",
+    "LEDGER_BUILT",
     "ENDING_KEPT",
     "VOICE_TEST_TOO_LITTLE",
     "HUMAN_PASS",
@@ -3923,9 +3907,9 @@
     "what": "When the ledger's answer is garbage, the book goes on without a promise ledger and nothing tells the author",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.2-e",
@@ -3933,7 +3917,7 @@
    "part": "10.2",
    "stress": "e",
    "title": "empty answer",
-   "result": "⚠️",
+   "result": "✅",
    "happened": "Empty reply text (every time): The book finished with nothing lost. — An empty JSON object {} (every time): The book finished with nothing lost.",
    "status": "done",
    "final_status": "done",
@@ -3941,13 +3925,11 @@
    "problem_message": "",
    "problem_fix": "",
    "issues": [],
-   "risks": [
-    "the promise ledger was silently left out: its AI call failed, the book went on without it and no journal note, step line or check-later item tells the author"
-   ],
+   "risks": [],
    "notes": [],
-   "faults_fired": 6,
-   "ai_calls": 174,
-   "seconds": 6.04,
+   "faults_fired": 18,
+   "ai_calls": 188,
+   "seconds": 5.45,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -3957,6 +3939,7 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_FAILED",
     "SCOPE_SET",
     "GRID_BUILT",
     "TRADE_CARD_MADE",
@@ -3966,6 +3949,7 @@
     "PLANNED_UNRESOLVED",
     "PLANNED_MISSING",
     "CHECKPOINT",
+    "LEDGER_BUILT",
     "ENDING_KEPT",
     "VOICE_TEST_TOO_LITTLE",
     "HUMAN_PASS",
@@ -3985,9 +3969,9 @@
     "what": "When the ledger's answer is empty, the book goes on without a promise ledger and nothing tells the author",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.2-f",
@@ -3995,7 +3979,7 @@
    "part": "10.2",
    "stress": "f",
    "title": "the AI refuses (AI_DECLINED) repeatedly",
-   "result": "⚠️",
+   "result": "✅",
    "happened": "Every AI declines every time: The book finished with nothing lost.",
    "status": "done",
    "final_status": "done",
@@ -4003,13 +3987,11 @@
    "problem_message": "",
    "problem_fix": "",
    "issues": [],
-   "risks": [
-    "the promise ledger was silently left out: its AI call failed, the book went on without it and no journal note, step line or check-later item tells the author"
-   ],
+   "risks": [],
    "notes": [],
    "faults_fired": 302,
-   "ai_calls": 374,
-   "seconds": 5.2,
+   "ai_calls": 375,
+   "seconds": 4.86,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -4020,6 +4002,7 @@
     "DOCTOR_DONE",
     "PREDICT_PROBED",
     "AI_DECLINED",
+    "LEDGER_FAILED",
     "SCOPE_SET",
     "GRID_BUILT",
     "TRADE_CARD_MADE",
@@ -4029,6 +4012,7 @@
     "PLANNED_UNRESOLVED",
     "PLANNED_MISSING",
     "CHECKPOINT",
+    "LEDGER_BUILT",
     "ENDING_KEPT",
     "VOICE_TEST_TOO_LITTLE",
     "HUMAN_PASS",
@@ -4048,9 +4032,9 @@
     "what": "When every AI declines the ledger, the book goes on without a promise ledger and nothing tells the author",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.2-g",
@@ -4069,11 +4053,11 @@
    "risks": [],
    "notes": [],
    "faults_fired": 0,
-   "ai_calls": 73,
-   "seconds": 1.47,
+   "ai_calls": 74,
+   "seconds": 1.37,
    "likely": "",
-   "log_errors": 1,
-   "log_tracebacks": 1,
+   "log_errors": 2,
+   "log_tracebacks": 2,
    "event_codes": [
     "VOICE_SET",
     "VOICES_DISTINCT",
@@ -4103,7 +4087,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.2-h",
@@ -4123,7 +4107,7 @@
    "notes": [],
    "faults_fired": 1,
    "ai_calls": 74,
-   "seconds": 1.88,
+   "seconds": 1.33,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -4156,7 +4140,7 @@
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.2-i",
@@ -4176,7 +4160,7 @@
    "notes": [],
    "faults_fired": 1,
    "ai_calls": 73,
-   "seconds": 3.6,
+   "seconds": 2.9,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -4209,7 +4193,7 @@
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.2-j",
@@ -4217,7 +4201,7 @@
    "part": "10.2",
    "stress": "j",
    "title": "the most likely real-life problem: the AI lists no promises at all (an empty list)",
-   "result": "⚠️",
+   "result": "✅",
    "happened": "No promises: The book finished with nothing lost.",
    "status": "done",
    "final_status": "done",
@@ -4225,13 +4209,11 @@
    "problem_message": "",
    "problem_fix": "",
    "issues": [],
-   "risks": [
-    "the promise ledger was silently left out: its AI call failed, the book went on without it and no journal note, step line or check-later item tells the author"
-   ],
+   "risks": [],
    "notes": [],
    "faults_fired": 1,
    "ai_calls": 73,
-   "seconds": 1.71,
+   "seconds": 1.55,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -4241,6 +4223,7 @@
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
+    "LEDGER_EMPTY",
     "SCOPE_SET",
     "GRID_BUILT",
     "TRADE_CARD_MADE",
@@ -4269,9 +4252,9 @@
     "what": "When the AI lists no promises, the book goes on without a promise ledger and nothing tells the author",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.2-k",
@@ -4291,7 +4274,7 @@
    "notes": [],
    "faults_fired": 1,
    "ai_calls": 73,
-   "seconds": 1.61,
+   "seconds": 1.48,
    "likely": "unlikely but dangerous",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -4324,7 +4307,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.2-l",
@@ -4347,7 +4330,7 @@
    ],
    "faults_fired": 2,
    "ai_calls": 146,
-   "seconds": 3.03,
+   "seconds": 2.98,
    "likely": "unlikely but dangerous",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -4380,7 +4363,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.2-m",
@@ -4400,7 +4383,7 @@
    "notes": [],
    "faults_fired": 1,
    "ai_calls": 73,
-   "seconds": 1.98,
+   "seconds": 1.52,
    "likely": "unlikely but dangerous",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -4433,7 +4416,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.2-n",
@@ -4455,7 +4438,7 @@
    ],
    "faults_fired": 3,
    "ai_calls": 82,
-   "seconds": 1.8,
+   "seconds": 1.52,
    "likely": "unlikely but dangerous",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -4496,7 +4479,7 @@
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.2-o",
@@ -4504,33 +4487,29 @@
    "part": "10.2",
    "stress": "o",
    "title": "Pause pressed just before the ledger's AI call (during the predictability probe), then Resume",
-   "result": "❌",
-   "happened": "Pause pressed during the predictability probe: the run stopped as paused; ▶ Resume finished the book — without its promise ledger.",
+   "result": "🟡",
+   "happened": "Pause pressed during the predictability probe: the run stopped as paused; ▶ Resume finished the book with its promise ledger.",
    "status": "paused",
    "final_status": "done",
    "problem_code": "",
    "problem_message": "",
    "problem_fix": "",
-   "issues": [
-    "the promise ledger was lost: Pause stopped its AI call, the ledger was marked as made for this outline and Resume never built it again",
-    "the journal says “⚠️ The promise ledger could not be made; the book goes on without it” because the author pressed Pause",
-    "unexpected traceback in the log: promise ledger"
-   ],
+   "issues": [],
    "risks": [],
    "notes": [],
    "faults_fired": 1,
-   "ai_calls": 72,
-   "seconds": 2.35,
+   "ai_calls": 73,
+   "seconds": 1.56,
    "likely": "likely in real use",
-   "log_errors": 1,
-   "log_tracebacks": 1,
+   "log_errors": 0,
+   "log_tracebacks": 0,
    "event_codes": [
     "VOICE_SET",
     "VOICES_DISTINCT",
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
-    "LEDGER_FAILED",
+    "LEDGER_BUILT",
     "SCOPE_SET",
     "GRID_BUILT",
     "TRADE_CARD_MADE",
@@ -4559,9 +4538,9 @@
     "what": "Pressing Pause at the wrong moment silently loses the book's promise ledger (and logs “could not be made” with a traceback)",
     "repro": ""
    },
-   "result_word": "PROBLEM",
+   "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.3-a",
@@ -4581,7 +4560,7 @@
    "notes": [],
    "faults_fired": 2,
    "ai_calls": 146,
-   "seconds": 3.53,
+   "seconds": 2.92,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -4614,7 +4593,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.3-b",
@@ -4634,7 +4613,7 @@
    "notes": [],
    "faults_fired": 3,
    "ai_calls": 75,
-   "seconds": 2.16,
+   "seconds": 1.39,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -4667,7 +4646,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.3-c",
@@ -4687,7 +4666,7 @@
    "notes": [],
    "faults_fired": 3,
    "ai_calls": 75,
-   "seconds": 2.04,
+   "seconds": 1.57,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -4720,7 +4699,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.3-d",
@@ -4742,7 +4721,7 @@
    ],
    "faults_fired": 9,
    "ai_calls": 261,
-   "seconds": 9.72,
+   "seconds": 7.81,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -4775,7 +4754,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.3-e",
@@ -4795,7 +4774,7 @@
    "notes": [],
    "faults_fired": 6,
    "ai_calls": 174,
-   "seconds": 6.5,
+   "seconds": 5.22,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -4828,7 +4807,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.3-f",
@@ -4848,7 +4827,7 @@
    "notes": [],
    "faults_fired": 1,
    "ai_calls": 73,
-   "seconds": 2.04,
+   "seconds": 1.3,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -4881,7 +4860,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.3-g",
@@ -4901,7 +4880,7 @@
    "notes": [],
    "faults_fired": 0,
    "ai_calls": 73,
-   "seconds": 2.06,
+   "seconds": 1.59,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -4934,7 +4913,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.3-h",
@@ -4954,7 +4933,7 @@
    "notes": [],
    "faults_fired": 1,
    "ai_calls": 74,
-   "seconds": 2.12,
+   "seconds": 1.57,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -4987,7 +4966,7 @@
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.3-i",
@@ -4995,32 +4974,29 @@
    "part": "10.3",
    "stress": "i",
    "title": "pause then resume during this part; cancel during it then start a new book",
-   "result": "❌",
+   "result": "🟡",
    "happened": "Pause pressed in “outline”: the run stopped as paused (“Paused by you. Press ▶ Resume to continue.”). ▶ Resume finished the book. Cancel pressed in “outline”: the run ended as cancelled. A new book started afterwards finished.",
    "status": "paused",
    "final_status": "done",
    "problem_code": "",
    "problem_message": "",
    "problem_fix": "",
-   "issues": [
-    "unexpected traceback in the log (cancel variant)",
-    "unexpected traceback in the log: promise ledger"
-   ],
+   "issues": [],
    "risks": [],
    "notes": [],
    "faults_fired": 1,
-   "ai_calls": 72,
-   "seconds": 4.79,
+   "ai_calls": 73,
+   "seconds": 3.26,
    "likely": "",
-   "log_errors": 2,
-   "log_tracebacks": 2,
+   "log_errors": 0,
+   "log_tracebacks": 0,
    "event_codes": [
     "VOICE_SET",
     "VOICES_DISTINCT",
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
     "PREDICT_PROBED",
-    "LEDGER_FAILED",
+    "LEDGER_BUILT",
     "SCOPE_SET",
     "GRID_BUILT",
     "TRADE_CARD_MADE",
@@ -5049,9 +5025,9 @@
     "what": "Cancel during the plan checks writes a traceback and a false “promise ledger could not be made” line to the log/journal",
     "repro": ""
    },
-   "result_word": "PROBLEM",
+   "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.3-j",
@@ -5072,8 +5048,8 @@
     "Probe line: 🔮 Predictability probe: an AI guessed 2 of 2 turning points; a revision was tried (guessed after: 2 of 2) but the first plan was better, so it is kept."
    ],
    "faults_fired": 2,
-   "ai_calls": 77,
-   "seconds": 1.86,
+   "ai_calls": 78,
+   "seconds": 1.56,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -5109,7 +5085,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.3-k",
@@ -5131,7 +5107,7 @@
    ],
    "faults_fired": 1,
    "ai_calls": 73,
-   "seconds": 1.72,
+   "seconds": 1.59,
    "likely": "unlikely but dangerous",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -5164,7 +5140,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.3-l",
@@ -5186,7 +5162,7 @@
    ],
    "faults_fired": 2,
    "ai_calls": 76,
-   "seconds": 1.69,
+   "seconds": 1.64,
    "likely": "unlikely but dangerous",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -5223,7 +5199,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.3-m",
@@ -5243,7 +5219,7 @@
    "notes": [],
    "faults_fired": 1,
    "ai_calls": 73,
-   "seconds": 2.07,
+   "seconds": 1.59,
    "likely": "unlikely but dangerous",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -5276,7 +5252,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.4-a",
@@ -5296,7 +5272,7 @@
    "notes": [],
    "faults_fired": 2,
    "ai_calls": 146,
-   "seconds": 2.72,
+   "seconds": 2.59,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -5329,7 +5305,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.4-b",
@@ -5349,7 +5325,7 @@
    "notes": [],
    "faults_fired": 3,
    "ai_calls": 76,
-   "seconds": 2.09,
+   "seconds": 1.75,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -5383,7 +5359,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.4-c",
@@ -5403,7 +5379,7 @@
    "notes": [],
    "faults_fired": 6,
    "ai_calls": 79,
-   "seconds": 1.96,
+   "seconds": 1.5,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -5437,7 +5413,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.4-d",
@@ -5457,9 +5433,9 @@
    "notes": [
     "Sent through an in-process AutoInjector bridge, so the real adapter reads the bad text."
    ],
-   "faults_fired": 9,
-   "ai_calls": 261,
-   "seconds": 9.66,
+   "faults_fired": 27,
+   "ai_calls": 279,
+   "seconds": 8.3,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -5492,7 +5468,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.4-e",
@@ -5510,9 +5486,9 @@
    "issues": [],
    "risks": [],
    "notes": [],
-   "faults_fired": 6,
-   "ai_calls": 174,
-   "seconds": 6.4,
+   "faults_fired": 18,
+   "ai_calls": 186,
+   "seconds": 5.31,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -5545,7 +5521,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.4-f",
@@ -5565,7 +5541,7 @@
    "notes": [],
    "faults_fired": 302,
    "ai_calls": 374,
-   "seconds": 5.34,
+   "seconds": 5.14,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -5599,7 +5575,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.4-g",
@@ -5619,7 +5595,7 @@
    "notes": [],
    "faults_fired": 0,
    "ai_calls": 73,
-   "seconds": 1.87,
+   "seconds": 1.6,
    "likely": "",
    "log_errors": 1,
    "log_tracebacks": 1,
@@ -5652,7 +5628,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.4-h",
@@ -5672,7 +5648,7 @@
    "notes": [],
    "faults_fired": 1,
    "ai_calls": 74,
-   "seconds": 2.37,
+   "seconds": 1.61,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -5705,7 +5681,7 @@
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.4-i",
@@ -5725,7 +5701,7 @@
    "notes": [],
    "faults_fired": 1,
    "ai_calls": 73,
-   "seconds": 3.38,
+   "seconds": 3.29,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -5758,7 +5734,7 @@
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.4-j",
@@ -5780,7 +5756,7 @@
    ],
    "faults_fired": 1,
    "ai_calls": 73,
-   "seconds": 1.57,
+   "seconds": 1.48,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -5813,7 +5789,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.4-k",
@@ -5833,7 +5809,7 @@
    "notes": [],
    "faults_fired": 1,
    "ai_calls": 73,
-   "seconds": 1.85,
+   "seconds": 1.7,
    "likely": "unlikely but dangerous",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -5866,7 +5842,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.4-l",
@@ -5874,7 +5850,7 @@
    "part": "10.4",
    "stress": "l",
    "title": "a book with no secrets: the AI answers an empty grid",
-   "result": "⚠️",
+   "result": "✅",
    "happened": "Empty grid: The book finished with nothing lost.",
    "status": "done",
    "final_status": "done",
@@ -5882,13 +5858,11 @@
    "problem_message": "",
    "problem_fix": "",
    "issues": [],
-   "risks": [
-    "the journal says “Who knows what could not be worked out (INTERNAL_ERROR)” — an internal-error code for an AI answer that simply had no usable fact"
-   ],
+   "risks": [],
    "notes": [],
    "faults_fired": 1,
    "ai_calls": 73,
-   "seconds": 1.79,
+   "seconds": 1.5,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -5900,7 +5874,7 @@
     "PREDICT_PROBED",
     "LEDGER_BUILT",
     "SCOPE_SET",
-    "GRID_FAILED",
+    "GRID_EMPTY",
     "TRADE_CARD_MADE",
     "PROTAGONIST_OK",
     "FIRST_PAGE_PICKED",
@@ -5927,9 +5901,9 @@
     "what": "An empty who-knows-what answer is logged as an INTERNAL_ERROR failure",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.4-m",
@@ -5951,7 +5925,7 @@
    ],
    "faults_fired": 1,
    "ai_calls": 73,
-   "seconds": 1.81,
+   "seconds": 1.7,
    "likely": "unlikely but dangerous",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -5984,7 +5958,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.5-a",
@@ -6004,7 +5978,7 @@
    "notes": [],
    "faults_fired": 3,
    "ai_calls": 150,
-   "seconds": 3.57,
+   "seconds": 3.44,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -6041,7 +6015,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.5-b",
@@ -6061,7 +6035,7 @@
    "notes": [],
    "faults_fired": 3,
    "ai_calls": 78,
-   "seconds": 1.63,
+   "seconds": 1.73,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -6099,7 +6073,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.5-c",
@@ -6119,7 +6093,7 @@
    "notes": [],
    "faults_fired": 6,
    "ai_calls": 81,
-   "seconds": 1.93,
+   "seconds": 1.79,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -6157,7 +6131,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.5-d",
@@ -6177,9 +6151,9 @@
    "notes": [
     "Sent through an in-process AutoInjector bridge, so the real adapter reads the bad text."
    ],
-   "faults_fired": 18,
-   "ai_calls": 273,
-   "seconds": 8.98,
+   "faults_fired": 54,
+   "ai_calls": 309,
+   "seconds": 9.09,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -6216,7 +6190,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.5-e",
@@ -6234,9 +6208,9 @@
    "issues": [],
    "risks": [],
    "notes": [],
-   "faults_fired": 12,
-   "ai_calls": 182,
-   "seconds": 6.43,
+   "faults_fired": 36,
+   "ai_calls": 206,
+   "seconds": 6.07,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -6273,7 +6247,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.5-f",
@@ -6293,7 +6267,7 @@
    "notes": [],
    "faults_fired": 604,
    "ai_calls": 677,
-   "seconds": 8.79,
+   "seconds": 8.67,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -6327,7 +6301,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.5-g",
@@ -6335,32 +6309,29 @@
    "part": "10.5",
    "stress": "g",
    "title": "the part's own code raises an unexpected Python exception",
-   "result": "⚠️",
-   "happened": "The part's own code raises: Stopped at step “outline” with INTERNAL_ERROR: “Akọwe hit an unexpected problem (RuntimeError).” Fix offered: “Press 🔁 Try again. If it keeps happening, use 📋 Copy diagnostics.”. After the fault was removed, ▶ Resume finished the book with nothing lost.",
-   "status": "paused",
+   "result": "✅",
+   "happened": "The part's own code raises: The book finished with nothing lost.",
+   "status": "done",
    "final_status": "done",
-   "problem_code": "INTERNAL_ERROR",
-   "problem_message": "Akọwe hit an unexpected problem (RuntimeError).",
-   "problem_fix": "Press 🔁 Try again. If it keeps happening, use 📋 Copy diagnostics.",
+   "problem_code": "",
+   "problem_message": "",
+   "problem_fix": "",
    "issues": [],
-   "risks": [
-    "the alert calls a fault in Akọwe's own code an “AI problem” (“The AI could not do this step (a usage limit, the connection or an error).”), so the author looks for the fault in the AI"
-   ],
+   "risks": [],
    "notes": [],
    "faults_fired": 0,
-   "ai_calls": 76,
-   "seconds": 1.89,
+   "ai_calls": 75,
+   "seconds": 1.84,
    "likely": "",
-   "log_errors": 1,
-   "log_tracebacks": 1,
+   "log_errors": 127,
+   "log_tracebacks": 129,
    "event_codes": [
     "VOICE_SET",
     "VOICES_DISTINCT",
     "DOCTOR_SCORED",
     "DOCTOR_DONE",
-    "INTERNAL_ERROR",
-    "SHAPE_PLACED",
-    "KIND_PLACED",
+    "SHAPE_FAILED",
+    "KIND_FAILED",
     "PREDICT_PROBED",
     "LEDGER_BUILT",
     "SCOPE_SET",
@@ -6372,9 +6343,7 @@
     "PLANNED_UNRESOLVED",
     "PLANNED_MISSING",
     "CHECKPOINT",
-    "BEAT_MISSING",
-    "STAGE_MISSING",
-    "ENDING_OPEN",
+    "ENDING_KEPT",
     "VOICE_TEST_TOO_LITTLE",
     "HUMAN_PASS",
     "OPENING_UNRESOLVED",
@@ -6383,13 +6352,7 @@
     "BOOK_TOO_SHORT",
     "QUALITY_TREND"
    ],
-   "alert": {
-    "category": "ai",
-    "label": "AI problem",
-    "wrong": "Akọwe hit an unexpected problem (RuntimeError).",
-    "why": "The AI could not do this step (a usage limit, the connection or an error).",
-    "next": "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
-   },
+   "alert": {},
    "finding": {
     "where": "akowe/akowe/autobook.py `_place_beats` (~4017-4045) and `_place_stages` (~3923-3950): only AkoweError is caught around `story_shape.place` / `story_kind.place`; alerts.py `category_of` (~83)",
     "cause": "Unlike the ledger, grid, doctor, probe and trade card (which catch every exception: “never holds up the book”), the beat/stage placement catches only AkoweError, so a Python bug inside `story_shape.validate` stops the whole book with INTERNAL_ERROR (shown as an “AI problem”).",
@@ -6399,9 +6362,9 @@
     "what": "A Python bug in the OPTIONAL story-shape placement stops the whole book (and is called an “AI problem”)",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.5-h",
@@ -6421,7 +6384,7 @@
    "notes": [],
    "faults_fired": 1,
    "ai_calls": 76,
-   "seconds": 2.12,
+   "seconds": 1.63,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -6458,7 +6421,7 @@
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.5-i",
@@ -6478,7 +6441,7 @@
    "notes": [],
    "faults_fired": 1,
    "ai_calls": 75,
-   "seconds": 3.8,
+   "seconds": 3.52,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -6515,7 +6478,7 @@
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.5-j",
@@ -6537,7 +6500,7 @@
    ],
    "faults_fired": 2,
    "ai_calls": 74,
-   "seconds": 1.35,
+   "seconds": 1.79,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -6573,7 +6536,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.5-k",
@@ -6595,7 +6558,7 @@
    ],
    "faults_fired": 2,
    "ai_calls": 75,
-   "seconds": 1.78,
+   "seconds": 1.59,
    "likely": "unlikely but dangerous",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -6632,7 +6595,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.5-l",
@@ -6654,7 +6617,7 @@
    ],
    "faults_fired": 0,
    "ai_calls": 73,
-   "seconds": 1.65,
+   "seconds": 1.52,
    "likely": "unlikely but dangerous",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -6687,7 +6650,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.5-m",
@@ -6695,7 +6658,7 @@
    "part": "10.5",
    "stress": "m",
    "title": "the author changes the story shape while the beats are being placed",
-   "result": "⚠️",
+   "result": "✅",
    "happened": "Shape changed to Save the Cat during placement: The book finished with nothing lost.",
    "status": "done",
    "final_status": "done",
@@ -6703,13 +6666,11 @@
    "problem_message": "",
    "problem_fix": "",
    "issues": [],
-   "risks": [
-    "the beats of the OLD shape (Three acts) are stored while the book's shape is now Save the Cat"
-   ],
+   "risks": [],
    "notes": [],
    "faults_fired": 1,
-   "ai_calls": 75,
-   "seconds": 1.51,
+   "ai_calls": 76,
+   "seconds": 1.65,
    "likely": "likely in real use",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -6752,9 +6713,9 @@
     "what": "Changing the story shape mid-run keeps the old shape's beats on the chapters",
     "repro": ""
    },
-   "result_word": "WORKED BUT RISKY",
+   "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.6-a",
@@ -6774,7 +6735,7 @@
    "notes": [],
    "faults_fired": 2,
    "ai_calls": 146,
-   "seconds": 3.15,
+   "seconds": 3.04,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -6807,7 +6768,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.6-b",
@@ -6827,7 +6788,7 @@
    "notes": [],
    "faults_fired": 3,
    "ai_calls": 76,
-   "seconds": 1.59,
+   "seconds": 1.46,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -6861,7 +6822,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.6-c",
@@ -6881,7 +6842,7 @@
    "notes": [],
    "faults_fired": 6,
    "ai_calls": 79,
-   "seconds": 1.74,
+   "seconds": 1.49,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -6915,7 +6876,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.6-d",
@@ -6935,9 +6896,9 @@
    "notes": [
     "Sent through an in-process AutoInjector bridge, so the real adapter reads the bad text."
    ],
-   "faults_fired": 9,
-   "ai_calls": 261,
-   "seconds": 8.92,
+   "faults_fired": 27,
+   "ai_calls": 279,
+   "seconds": 8.21,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -6970,7 +6931,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.6-e",
@@ -6988,9 +6949,9 @@
    "issues": [],
    "risks": [],
    "notes": [],
-   "faults_fired": 6,
-   "ai_calls": 174,
-   "seconds": 5.37,
+   "faults_fired": 18,
+   "ai_calls": 186,
+   "seconds": 5.77,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -7023,7 +6984,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.6-f",
@@ -7043,7 +7004,7 @@
    "notes": [],
    "faults_fired": 302,
    "ai_calls": 374,
-   "seconds": 5.38,
+   "seconds": 5.15,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -7077,7 +7038,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.6-g",
@@ -7097,7 +7058,7 @@
    "notes": [],
    "faults_fired": 0,
    "ai_calls": 73,
-   "seconds": 1.95,
+   "seconds": 1.37,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -7130,7 +7091,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.6-h",
@@ -7150,7 +7111,7 @@
    "notes": [],
    "faults_fired": 1,
    "ai_calls": 74,
-   "seconds": 1.8,
+   "seconds": 1.44,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -7183,7 +7144,7 @@
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.6-i",
@@ -7203,7 +7164,7 @@
    "notes": [],
    "faults_fired": 1,
    "ai_calls": 73,
-   "seconds": 3.4,
+   "seconds": 3.37,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -7236,7 +7197,7 @@
    "finding": {},
    "result_word": "SAFE STOP",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.6-j",
@@ -7256,7 +7217,7 @@
    "notes": [],
    "faults_fired": 1,
    "ai_calls": 73,
-   "seconds": 1.74,
+   "seconds": 1.64,
    "likely": "",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -7289,7 +7250,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.6-k",
@@ -7309,7 +7270,7 @@
    "notes": [],
    "faults_fired": 1,
    "ai_calls": 73,
-   "seconds": 1.82,
+   "seconds": 1.53,
    "likely": "unlikely but dangerous",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -7342,7 +7303,7 @@
    "finding": {},
    "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   },
   {
    "id": "C-10.6-l",
@@ -7350,7 +7311,7 @@
    "part": "10.6",
    "stress": "l",
    "title": "the AI answers 50 cards for trades the book does not have (nuclear physics, surgery …)",
-   "result": "⚠️",
+   "result": "✅",
    "happened": "50 cards for unrelated trades: The book finished with nothing lost.",
    "status": "done",
    "final_status": "done",
@@ -7358,13 +7319,72 @@
    "problem_message": "",
    "problem_fix": "",
    "issues": [],
-   "risks": [
-    "2 card(s) for a trade the book does not have were kept (“nuclear physics 0”) and go to the writer and the editor"
-   ],
+   "risks": [],
    "notes": [],
    "faults_fired": 1,
    "ai_calls": 73,
-   "seconds": 1.59,
+   "seconds": 1.61,
+   "likely": "unlikely but dangerous",
+   "log_errors": 0,
+   "log_tracebacks": 0,
+   "event_codes": [
+    "VOICE_SET",
+    "VOICES_DISTINCT",
+    "DOCTOR_SCORED",
+    "DOCTOR_DONE",
+    "PREDICT_PROBED",
+    "LEDGER_BUILT",
+    "SCOPE_SET",
+    "GRID_BUILT",
+    "TRADE_CARD_EMPTY",
+    "PROTAGONIST_OK",
+    "FIRST_PAGE_PICKED",
+    "ONE_REVIEWER",
+    "PLANNED_UNRESOLVED",
+    "PLANNED_MISSING",
+    "CHECKPOINT",
+    "ENDING_KEPT",
+    "VOICE_TEST_TOO_LITTLE",
+    "HUMAN_PASS",
+    "OPENING_UNRESOLVED",
+    "IMPROVE_UNRESOLVED",
+    "CLEAN_RUN_SCORE",
+    "BOOK_TOO_SHORT",
+    "QUALITY_TREND"
+   ],
+   "alert": {},
+   "finding": {
+    "where": "akowe/akowe/trade_card.py `clean` (~230-250: any `craft` name is accepted) and `run_step` (~316)",
+    "cause": "The cards are not matched against the crafts Akọwe asked about (`crafts`); two cards for “nuclear physics” were saved as the book's trade card and go to the writer's brief and the editor.",
+    "fix": "Keep only cards whose craft matches one of the detected crafts (else TRADE_CARD_EMPTY).",
+    "severity": "confusing message",
+    "likely": "unlikely but dangerous",
+    "what": "Cards for trades the book does not have are kept and used",
+    "repro": ""
+   },
+   "result_word": "HANDLED",
+   "seed": 0,
+   "ran_at": "2026-11-26T01:16:33Z"
+  },
+  {
+   "id": "C-10.6-m",
+   "section": "C",
+   "part": "10.6",
+   "stress": "m",
+   "title": "a damaged trade card is already stored with the book (cards = a string, not a list)",
+   "result": "✅",
+   "happened": "A stored card whose cards field is a string: The book finished with nothing lost.",
+   "status": "done",
+   "final_status": "done",
+   "problem_code": "",
+   "problem_message": "",
+   "problem_fix": "",
+   "issues": [],
+   "risks": [],
+   "notes": [],
+   "faults_fired": 0,
+   "ai_calls": 73,
+   "seconds": 1.41,
    "likely": "unlikely but dangerous",
    "log_errors": 0,
    "log_tracebacks": 0,
@@ -7395,68 +7415,6 @@
    ],
    "alert": {},
    "finding": {
-    "where": "akowe/akowe/trade_card.py `clean` (~230-250: any `craft` name is accepted) and `run_step` (~316)",
-    "cause": "The cards are not matched against the crafts Akọwe asked about (`crafts`); two cards for “nuclear physics” were saved as the book's trade card and go to the writer's brief and the editor.",
-    "fix": "Keep only cards whose craft matches one of the detected crafts (else TRADE_CARD_EMPTY).",
-    "severity": "confusing message",
-    "likely": "unlikely but dangerous",
-    "what": "Cards for trades the book does not have are kept and used",
-    "repro": ""
-   },
-   "result_word": "WORKED BUT RISKY",
-   "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
-  },
-  {
-   "id": "C-10.6-m",
-   "section": "C",
-   "part": "10.6",
-   "stress": "m",
-   "title": "a damaged trade card is already stored with the book (cards = a string, not a list)",
-   "result": "❌",
-   "happened": "A stored card whose cards field is a string: The book finished with nothing lost.",
-   "status": "done",
-   "final_status": "done",
-   "problem_code": "",
-   "problem_message": "",
-   "problem_fix": "",
-   "issues": [
-    "unexpected traceback in the log: trade card: the editor's context; trade card: the writing brief"
-   ],
-   "risks": [],
-   "notes": [],
-   "faults_fired": 0,
-   "ai_calls": 72,
-   "seconds": 1.61,
-   "likely": "unlikely but dangerous",
-   "log_errors": 6,
-   "log_tracebacks": 6,
-   "event_codes": [
-    "VOICE_SET",
-    "VOICES_DISTINCT",
-    "DOCTOR_SCORED",
-    "DOCTOR_DONE",
-    "PREDICT_PROBED",
-    "LEDGER_BUILT",
-    "SCOPE_SET",
-    "GRID_BUILT",
-    "PROTAGONIST_OK",
-    "FIRST_PAGE_PICKED",
-    "ONE_REVIEWER",
-    "PLANNED_UNRESOLVED",
-    "PLANNED_MISSING",
-    "CHECKPOINT",
-    "ENDING_KEPT",
-    "VOICE_TEST_TOO_LITTLE",
-    "HUMAN_PASS",
-    "OPENING_UNRESOLVED",
-    "IMPROVE_UNRESOLVED",
-    "CLEAN_RUN_SCORE",
-    "BOOK_TOO_SHORT",
-    "QUALITY_TREND"
-   ],
-   "alert": {},
-   "finding": {
     "where": "akowe/akowe/trade_card.py `get_entry` (~257-262: any truthy `cards` is accepted), `cards_of` (~265) and its users `add_to_brief` (~424-446) / `editor_block` (~479-497)",
     "cause": "A stored card whose `cards` is a string (an older or damaged entry) is “kept” by `run_step`; `cards_of` turns the string into a list of characters and every chapter's brief and editor context raise inside their own try (traceback logged per chapter). The book finishes, but no chapter gets a trade card and nobody is told.",
     "fix": "In `get_entry` accept only a list of dicts (else treat it as missing and make a new card).",
@@ -7465,9 +7423,9 @@
     "what": "A damaged stored trade card is kept: every chapter silently loses the card (tracebacks in the log)",
     "repro": ""
    },
-   "result_word": "PROBLEM",
+   "result_word": "HANDLED",
    "seed": 0,
-   "ran_at": "2026-11-23T09:02:06Z"
+   "ran_at": "2026-11-26T01:16:33Z"
   }
  ]
 }

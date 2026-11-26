@@ -709,6 +709,8 @@ def g20_k(h: Harness) -> Outcome:
                     hh_note.append("Without any record of the clue as a set-up (no promise ledger entry, no planned "
                                    "item, no ending set-up) the rewrite was judged by the reviewers' re-read alone "
                                    "and kept.")
+                    return [], ["a clue nothing recorded as a set-up can still be deleted by the chapter 1 rewrite "
+                                "(only the reviewers' re-read judges it)"]
                 return [], []
             hh_note: list = []
             o2 = h2.standard(label="The same line with no record of it as a set-up: ", check=check2)

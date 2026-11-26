@@ -1,9 +1,9 @@
-# Fix plan — the stress-test findings that affect book quality (not started)
+# Fix plan — the stress-test findings that affect book quality (done 2026-11-26)
 
 Every finding from the stress test (`docs/stress/`) that changes **what ends up in the book, or how good it is**: 47
 finding IDs (31 rows), grouped into **4 batches**. Each batch is one agent's job (small enough to do and test in one go), in its
 own branch, with a regression test per ID; the batches touch different files, so they can run in parallel.
-**Nothing here is implemented yet — waiting for the go-ahead.**
+**Done (2026-11-26):** all four batches were built (branches fix-q1…fix-q4) and every ID re-runs ✅ or 🟡 — see SUMMARY.md.
 
 Conventions for every fix: best workable code with error handling; plain words for the author; logs carry codes only
 (never book text); every new check is bounded, never holds up the book unless it would otherwise lose or damage

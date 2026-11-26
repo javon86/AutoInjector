@@ -953,6 +953,7 @@ def e1210_k(h: Harness) -> Outcome:
     h.make_app()
     h.chaos.plot_obligations = [INJECTION, "x" * 20_000, "Pay\x00off the key", "\u202eyek ssarb eht",
                                 "the\u200blight"] + [f"Obligation {i}" for i in range(200)]
+    h.on_fix(lambda: setattr(h.chaos, "plot_obligations", []))  # the fault is removed before ▶ Resume (as E-12.10-n)
 
     def check(hh, run):
         briefs = [ctx["writing_brief"]["ending_brief"] for _s, ctx in hh.chaos.prompts.get("C02", [])
