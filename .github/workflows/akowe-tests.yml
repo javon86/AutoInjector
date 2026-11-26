@@ -47,10 +47,25 @@ jobs:
       - run: python -m pip install -r requirements.txt -r requirements-test.txt
       # Playwright is not installed here, so tests/campaign/ui is skipped (its conftest ignores it); the job below
       # runs those. The AutoInjector desktop-app e2e skips too (it needs desktop-app/node_modules).
-      # The suite grew past 25 minutes (≈3,900 tests; PR #140's run timed out at 98% with no failure), so the step
-      # gets 40: a time limit, not a skip — every test still runs.
-      - run: python -m pytest -q -p no:cacheprovider
+      # The suite grew past 40 minutes in one process (≈4,800 tests; PR #159's run timed out at 95% with no
+      # failure), so the unit tests and the campaign tests run side by side (two processes, own temp folders): every
+      # test still runs, the job fails if either half fails, and each half's log is printed after.
+      - name: python -m pytest (unit tests and campaign tests side by side)
         timeout-minutes: 40
+        run: |
+          python -m pytest -q -p no:cacheprovider --basetemp="$RUNNER_TEMP/pt-unit" --ignore=tests/campaign > "$RUNNER_TEMP/unit.log" 2>&1 &
+          unit=$!
+          python -m pytest -q -p no:cacheprovider --basetemp="$RUNNER_TEMP/pt-camp" tests/campaign > "$RUNNER_TEMP/camp.log" 2>&1 &
+          camp=$!
+          set +e
+          wait $unit; u=$?
+          wait $camp; c=$?
+          set -e
+          echo "::group::unit tests (exit $u)"; cat "$RUNNER_TEMP/unit.log"; echo "::endgroup::"
+          echo "::group::campaign tests (exit $c)"; cat "$RUNNER_TEMP/camp.log"; echo "::endgroup::"
+          echo "unit tests: $(tail -n 1 "$RUNNER_TEMP/unit.log")"
+          echo "campaign tests: $(tail -n 1 "$RUNNER_TEMP/camp.log")"
+          test "$u" -eq 0 && test "$c" -eq 0
 
   ui-test:
     name: Playwright UI campaign tests (Chromium)

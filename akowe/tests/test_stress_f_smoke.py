@@ -5,6 +5,9 @@ The full Section F run and its report: ``python -m tools.stress.run --section F`
 """
 from __future__ import annotations
 
+import os
+from pathlib import Path
+
 import pytest
 
 from tools.stress import core
@@ -50,4 +53,7 @@ def test_registry_covers_every_part_with_standard_and_extra_stresses(section_f):
     for part in ("14", "15", "16", "17"):
         letters = {s.letter for s in section_f.ordered() if s.part == part}
         assert set("abcdefghij") <= letters and len(letters - set("abcdefghij")) >= 3
-    assert str(core.TMP_BASE).endswith(f"stF-{__import__('os').getpid()}")
+    # the harness works in its own per-process /dev/shm folder (stF-<pid>, or another section's st*-<pid> when that
+    # section's module was imported first in the same pytest run: core.TMP_BASE is one module global)
+    base = core.TMP_BASE
+    assert base.parent == Path("/dev/shm") and base.name.startswith("st") and base.name.endswith(f"-{os.getpid()}")
