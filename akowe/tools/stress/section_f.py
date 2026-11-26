@@ -631,13 +631,19 @@ def f15_e(h: Harness) -> Outcome:
         if run.get("status") == "done":
             ch = [c for c in _chapters(hh, run) if c[1] and c[1]["record_id"] == info.get("rid")]
             t = (ch[0][1]["data"].get("text") or "").strip() if ch else "?"
-            if len(t) < 2:
+            named = [e for e in hh.raw(run.get("id")).get("events") or []
+                     if e.get("code") == "CHAPTER_NEARLY_EMPTY" and 2 in (e.get("chapters") or [])]
+            if len(t) < 2 and named:
+                o_notes.append("The run named the almost-empty chapter: “" + scrub(named[0].get("message")) + "”")
+            elif len(t) < 2:
                 risk.append(f"a book whose chapter 2 is “{t}” (empty / one character) was put together, exported "
                             "and passed the content check; only the general “much shorter than planned” note is "
                             "shown, nothing names the empty chapter")
         return iss, risk
+    o_notes: list = []
     o = _run(h, label="The author empties chapter 2 (one space; refused → a single “.”) and approves it: ",
              check=check)
+    o.notes += o_notes
     o.notes.append(f"Saving a chapter of one space: {info.get('edit')}; a chapter of “.”: {info.get('edit_dot')}.")
     return _note(o, "empty input (an empty approved chapter)")
 
@@ -861,12 +867,19 @@ def f15_o(h: Harness) -> Outcome:
             epub = _zip_text(_file_bytes(hh, run, "EPUB"))
             if "QZXDRAFTEDIT" in epub:
                 iss.append("the unapproved draft went into the exported book")
-            if latest and latest.get("lifecycle") not in ("APPROVED",):
+            told = [e for e in hh.raw(run.get("id")).get("events") or []
+                    if e.get("code") == "DRAFT_WAITING" and 1 in (e.get("chapters") or [])]
+            if latest and latest.get("lifecycle") not in ("APPROVED",) and told:
+                notes.append("The finished run named the waiting draft: “" + scrub(told[0].get("message")) + "”")
+            elif latest and latest.get("lifecycle") not in ("APPROVED",):
                 risk.append(f"the run finished while the author's newer draft of chapter 1 is still waiting "
                             f"({latest.get('lifecycle')}); the files carry the older approved text and the finished "
                             "run does not mention the waiting draft")
         return iss, risk
-    return _run(h, label="A new draft of chapter 1 saved during assembly (not approved): ", check=check)
+    notes: list = []
+    o = _run(h, label="A new draft of chapter 1 saved during assembly (not approved): ", check=check)
+    o.notes += notes
+    return o
 
 
 # ============================================================================================== part 16: export
