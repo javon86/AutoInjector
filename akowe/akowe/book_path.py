@@ -276,7 +276,8 @@ class BookPath:
         self.pid, self.branch = pid, branch
         self.c = engine.contracts
         self.key = f"book_path:{pid}:{branch}"
-        self.mem = self.store.get_setting(self.key) or {}
+        mem = self.store.get_setting(self.key) or {}
+        self.mem = mem if isinstance(mem, dict) else {}  # 🔁 a damaged path memory is made again, never a crash
         self.profile = get_profile(self.store, pid)
         # The AI the author chose for this book (wizard / book profile) writes every AI step of it.
         self.ai_slot = self.profile.get("ai_slot") or ""
@@ -355,8 +356,25 @@ class BookPath:
                               "module_id": rec["module_id"], "reason": reason[:300]})
         self._recs = None
 
+    def mem_part(self, key: str) -> dict:
+        """One part of the path memory (format, assembly, exports, check) as a dict: a damaged part (wrong types, e.g.
+        from an older version or a hand-edited settings file) reads as empty, so the step is made again."""
+        v = self.mem.get(key)
+        return v if isinstance(v, dict) else {}
+
+    @staticmethod
+    def ref_shape_ok(ref) -> bool:
+        return (isinstance(ref, dict) and isinstance(ref.get("record_id"), str) and bool(ref["record_id"])
+                and isinstance(ref.get("version"), int) and not isinstance(ref.get("version"), bool))
+
     def ref_ok(self, ref, approved=True):
         if not ref:
+            return None
+        if not self.ref_shape_ok(ref):  # 🔁 a damaged remembered reference: treated as missing (made again)
+            if not getattr(self, "_bad_ref_logged", False):
+                self._bad_ref_logged = True
+                log.warning("book path: a remembered record reference is damaged (%s); the step is made again",
+                            type(ref).__name__)
             return None
         r = self.rec(ref["record_id"], ref["version"])
         if not r or r.get("stale"):
@@ -513,6 +531,8 @@ class BookPath:
                     "(nothing you wrote changes).")
         made_with = asm.get("title_page")
         cur = self.format_title_author(fmt_recs.get("metadata"))
+        if not isinstance(made_with, (list, tuple)):
+            made_with = None  # a damaged remembered title page: compared as unknown
         if asm.get("format_changed") or (made_with and cur and tuple(made_with) != tuple(cur)):
             return ("The book format changed since the book was put together (for example a new title or author): "
                     "put it together again so the title page shows it.")
@@ -679,7 +699,7 @@ class BookPath:
              chapters=chapters, waiting_for="B11" if not outline else None, action="write_chapter",
              approve=[c["prose"] for c in chapters if c["state"] == "needs_you" and c["prose"]])
         # format
-        fmt = self.mem.get("format") or {}
+        fmt = self.mem_part("format")
         fmt_recs = {k: self.ref_ok(fmt.get(k), approved=False) for k in FORMAT_KEYS}
         fmt_have = all(fmt_recs.values())
         fmt_old = fmt_have and self.format_out_of_date(fmt_recs)
@@ -694,7 +714,7 @@ class BookPath:
              waiting_for=None if prof.get("title") else "profile", out_of_date=fmt_old,
              approve=[item(r) for r in fmt_recs.values() if fmt_have and r and r["lifecycle"] in ("DRAFT", "VALIDATED")])
         # assembly
-        asm = self.mem.get("assembly") or {}
+        asm = self.mem_part("assembly")
         asm_recs = {op: self.ref_ok(asm.get(op), approved=False) for op in ASSEMBLY}
         asm_why = self.assembly_out_of_date(asm, fmt_recs)
         asm_have = all(asm_recs.values()) and asm.get("chapters") == [c["approved"]["record_id"] + ":" + str(
@@ -712,14 +732,14 @@ class BookPath:
              out_of_date=bool(asm_why), reason=asm_why or None,
              approve=[item(r) for r in asm_recs.values() if asm_have and r and r["lifecycle"] in ("DRAFT", "VALIDATED")])
         # exports
-        exports = self.mem.get("exports") or {}
+        exports = self.mem_part("exports")
         wanted = self.release_profiles()
         files = []
         meta_id = (fmt.get("metadata") or {}).get("record_id") if fmt_done else None
         cur_title, cur_author = self.title_author()
         for prof_type in wanted:
             op, fmt_name, mime = EXPORT_FOR[prof_type]
-            e = exports.get(prof_type)
+            e = exports.get(prof_type) if isinstance(exports.get(prof_type), dict) else None
             rec = self.ref_ok(e.get("descriptor"), approved=False) if e else None
             g07_id = asm["G07"]["record_id"] if isinstance(asm.get("G07"), dict) else None
             if rec and g07_id and e.get("assembly") == g07_id:
@@ -745,9 +765,10 @@ class BookPath:
              action="export" if exp_ready and not exp_done else None,
              waiting_for=None if exp_ready else ("assemble" if not asm_done else "format"), files=files)
         # check
-        h05 = (self.mem.get("check") or {}).get("H05")
-        h05_rec = self.ref_ok(h05, approved=False) if h05 and (self.mem.get("check") or {}).get("assembly") == \
-            (asm.get("G01") or {}).get("record_id") else None
+        h05 = self.mem_part("check").get("H05")
+        asm_g01 = asm.get("G01") if isinstance(asm.get("G01"), dict) else {}
+        h05_rec = self.ref_ok(h05, approved=False) if h05 and self.mem_part("check").get("assembly") == \
+            asm_g01.get("record_id") else None
         step("check", "Check the book", "A deterministic check that every chapter is present once and in order "
              "(H05). Full release readiness (H10) is in the Quality Checks set.",
              "done" if h05_rec and asm_done else "ready" if asm_done else "blocked",
@@ -1098,7 +1119,7 @@ class BookPath:
         if not self.profile.get("title"):
             raise StepError.msg("Fill in the book profile (at least the title) first.")
         md = self.metadata()
-        old = self.mem.get("format") or {}
+        old = self.mem_part("format")
         # Remaking the format after the title/author changed: keep the font, page and contents style the assembled
         # book was laid out with; only the records that carry the title/author are made again.
         keep = {k: old[k] for k in ("font_file", "font", "page", "toc_style")
@@ -1257,8 +1278,8 @@ class BookPath:
                                                  "metadata_ref": self._appr(fmt["metadata"])})
                 made[prof_type] = {"descriptor": ref, "assembly": asm["G07"]["record_id"],
                                    "metadata": fmt["metadata"]["record_id"], "title": title, "author": author}
-            except StepError as exc:
-                problems_.append(f"{name}: {exc.message}")
+            except StepError as exc:  # the first plain reason (e.g. the store's "is the disk full"), not only the code
+                problems_.append(f"{name}: {exc.message}" + (f" {exc.problems[0]}" if exc.problems else ""))
         self.remember(lambda m: m.__setitem__("exports", dict(m.get("exports") or {}, **made)))
         if problems_:
             return {"ok": bool(made), "message": "Some files could not be made.", "problems": problems_}
@@ -1266,15 +1287,14 @@ class BookPath:
                 "Use the download buttons."}
 
     def a_check(self, body):
-        asm = self.mem.get("assembly") or {}
+        asm = self.mem_part("assembly")
         st = {s["id"]: s for s in self.status()["steps"]}
         if st["assemble"]["state"] != "done":
             raise StepError.msg("Put the book together and approve it first.")
         ref, r = self.create("H05", {"manuscript_ref": self._appr(asm["G01"]), "chapter_manifest_ref": self._appr(asm["G02"])})
         self.remember(lambda m: m.__setitem__("check", {"H05": ref, "assembly": asm["G01"]["record_id"]}))
-        res = (r.get("result") or {}).get("status")
-        return {"ok": res == "PASS", "message": f"Content check: {res}.", "problems": [] if res == "PASS" else
-                [f.get("message") for f in (r.get("result") or {}).get("findings") or [] if f.get("decision") == "FAIL"][:8]}
+        from .book_again import check_message  # noqa: PLC0415 - the answer in plain words (and read defensively)
+        return check_message(r.get("result"), asm)
 
 
 class StepError(Exception):

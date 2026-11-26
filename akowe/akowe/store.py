@@ -288,6 +288,17 @@ def new_id(prefix: str) -> str:
     return f"{prefix}-{uuid.uuid4().hex[:20]}"
 
 
+def _asset_intact(path, content_hash: str, size: int) -> bool:
+    """True when the content-addressed asset file exists with exactly these bytes. A file damaged on disk (cut short,
+    bytes flipped) is not reused when the same content is saved again: it is written again."""
+    try:
+        if path.stat().st_size != size:
+            return False
+        return sha256_bytes(path.read_bytes()) == content_hash
+    except OSError:
+        return False
+
+
 class CrashInjected(RuntimeError):
     """Raised by fault-injection hooks in tests to simulate a crash mid-commit."""
 
@@ -939,7 +950,7 @@ class Tx:
         content_hash = sha256_bytes(data)
         fname = f"{content_hash}.bin"
         path = self.store.asset_dir / fname
-        if not path.exists():
+        if not _asset_intact(path, content_hash, len(data)):  # 🔁 a damaged file with this content is written again
             tmp = tmp_name(path)
             try:
                 with open(tmp, "xb") as fh:  # a fresh, never-shared temp name (O_EXCL)

@@ -36,7 +36,6 @@ AI availability: busy/unreachable answers wait and retry (jobs.wait_and_retry, s
 from __future__ import annotations
 
 import copy
-import hashlib
 import json
 import logging
 import re
@@ -47,6 +46,7 @@ from datetime import datetime, timezone
 
 from . import ai_activity, ai_check
 from . import approval_trust
+from . import book_again
 from . import assist as assist_mod
 from . import characters as chars_mod
 from . import checker_record
@@ -703,7 +703,8 @@ class AutoBookService(_Runner):
         if status == "interrupted" or (status in ("queued", "running", "waiting", "pausing") and not alive):
             return "interrupted", "Stopped because Akọwe was closed while it worked. Press ▶ Resume."
         if status == "pausing":
-            return "pausing", "Pausing after the current answer."
+            return "pausing", ("Pausing after this step." if run.get("current") in book_again.NO_AI_STEPS else
+                               "Pausing after the current answer.")
         if status == "waiting":
             return "waiting", "Waiting for the AI."
         if status in ("queued", "running"):
@@ -928,7 +929,8 @@ class AutoBookService(_Runner):
         run = self.owned(principal, run_id)
         if self.alive(run_id):
             self._ctl[run_id]["pause"] = True
-            run["status"], run["phase"] = "pausing", "Pausing after the current answer…"
+            run["status"], run["phase"] = "pausing", ("Pausing after this step…" if run.get("current") in
+                                                      book_again.NO_AI_STEPS else "Pausing after the current answer…")
             self.event(run, "pause", "You pressed Pause")
             self.save(run)
         return self.public(run)
@@ -1438,6 +1440,7 @@ class AutoBookService(_Runner):
             # ★ the guarantee: never a finished book without its main character (repaired, else a plain pause)
             run["current"] = "check"
             self._guarantee_main(run, self._step(run, "check"), "before the book is marked done")
+            book_again.finish(self, run)  # 🔁 the book changed while the last steps ran: made again, never "done" on a stale book
             from . import claude_code_speed  # noqa: PLC0415 - 🤖 Step 2: the background extras (capped wait)
             claude_code_speed.finish(self, run)
             self.save(run)
@@ -4455,12 +4458,16 @@ class AutoBookService(_Runner):
         s = {x["id"]: x for x in bp.status()["steps"]}["format"]
         if s["state"] == "done":
             return
+        if s["state"] == "blocked" and not bp.profile.get("title"):  # 🔁 a plain stop the author can act on
+            raise StepProblem("MISSING_INPUT", "The book has no title, so its format (title page, file names) cannot "
+                              "be made.", "Type a title in the book profile, then press ▶ Resume.", step="format")
         if s["state"] != "needs_you":
             bp.a_setup_format({})
         self._approve_step_items(run, "format", "book format made by Akọwe from the profile (deterministic)")
         st["message"] = "Page size and interior design (Book format page), PDF/EPUB/DOCX settings — approved"
 
     def _s_assemble(self, run, st):
+        book_again.before(self, run, "assemble")  # 🔁 the chapters / format made again first when they changed
         bp = self.bp(run)
         s = {x["id"]: x for x in bp.status()["steps"]}["assemble"]
         if s["state"] == "done":
@@ -4475,34 +4482,15 @@ class AutoBookService(_Runner):
                 later = run.setdefault("check_later", [])
                 if w not in later:
                     later.append(w)
+            book_again.nearly_empty(self, run)  # ⚠️ a chapter far below its planned length is named
         self._approve_step_items(run, "assemble", "assembly made by Akọwe from the approved chapters "
                                                   "(deterministic)")
         st["message"] = "The book is put together and approved"
 
     def _s_export(self, run, st):
-        bp = self.bp(run)
-        s = {x["id"]: x for x in bp.status()["steps"]}["export"]
-        if s["state"] != "done":
-            b = self.app.backups.try_backup("before-export")
-            if b:
-                self.event(run, "backup", f"Backup before exporting ({b['name']})")
-            out = self._export_under_consent(run, bp)
-            if not out.get("ok") or out.get("problems"):
-                raise StepProblem("INVALID_INPUT", out.get("message") or "Some files could not be made.",
-                                  "Press 🔁 Try again.", details=(out.get("problems") or [])[:6])
-            s = {x["id"]: x for x in self.bp(run).status()["steps"]}["export"]
-        files = []
-        for f in s.get("files") or []:
-            rec = self.store.get_record(run["project_id"], run["branch_id"], f["record_id"], f["version"])
-            data = self.store.read_binary(rec)
-            ok, why = verify_file(f["format"], data)
-            if not ok:
-                raise StepProblem("HASH_MISMATCH", f"The {f['format']} file does not read back: {why}",
-                                  "Press 🔁 Try again.")
-            files.append(dict(f, bytes=len(data), sha256=hashlib.sha256(data).hexdigest()))
-            self.event(run, "export", f"{f['format']} file made and re-read ({len(data)} bytes)")
-        run["files"] = files
-        st["message"] = "Made and re-read: " + ", ".join(f["format"] for f in files)
+        """Makes the files when they are not current (🔁 the earlier book steps first when they changed), then reads
+        each one back; a file that does not read back is made again once (book_again.export)."""
+        book_again.export(self, run, st)
 
     def _export_under_consent(self, run, bp):
         """BookPath.a_export, with the approval-manifest approval routed through the run's consent check."""
@@ -4668,11 +4656,17 @@ class AutoBookService(_Runner):
                        code="STYLE_MISSING")
 
     def _s_check(self, run, st):
+        book_again.before(self, run, "check")  # 🔁 put together / exported again first when the book changed
         out = self.bp(run).a_check({})
+        if not out.get("ok") and out.get("unreadable"):
+            raise StepProblem("INVALID_INPUT", out.get("message") or "The content check did not pass.",
+                              "Press 🔁 Try again. If it keeps happening, use 📋 Copy diagnostics.",
+                              details=(out.get("problems") or [])[:6], step="check")
         if not out.get("ok"):
             raise StepProblem("INVALID_INPUT", out.get("message") or "The content check did not pass.",
-                              "Open the book's Quality Checks to see what is missing, then press 🔁 Try again.",
-                              details=(out.get("problems") or [])[:6])
+                              "Fix that chapter in the book (rewrite it, or let Akọwe write it again) and approve it, "
+                              "then press ▶ Resume: the book is put together and checked again.",
+                              details=(out.get("problems") or [])[:6], step="check")
         st["message"] = out.get("message") or "PASS"
 
 
