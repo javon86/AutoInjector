@@ -27,6 +27,7 @@ from __future__ import annotations
 import copy
 import logging
 
+from .. import plan_limits
 from .. import plan_rules as pr
 from ..errors import AkoweError
 from . import register
@@ -298,6 +299,7 @@ class PlanHandler(OperationHandler):
         rule = getattr(self, f"_rules_{self.op_id.lower()}", None)
         if rule:
             rule(ctx, data, items, src, add, record_id)
+        plan_limits.check(self.op_id, data, add)  # 📏 R7: a plan no later step could read is never approved
         return out
 
     def _check_undecided(self, ctx: Context, items: list, field: str, add, src: Sources | None = None):

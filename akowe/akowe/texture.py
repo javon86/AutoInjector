@@ -223,8 +223,19 @@ def generate(assist, job, bp, *, note: str | None = None) -> dict:
     if not items:
         raise AkoweError("INTERNAL_ERROR", "/texture", "the AI's answer had no usable texture detail; nothing was "
                              "saved")
-    return save(assist.store, pid, branch, items, by="ai", slot=job.slot, basis_now=basis(bp),
-                how="remade" if cur else "made")
+    # R1: saved only over the list as it was before the AI call; a list the author saved meanwhile is kept as it is
+    try:
+        return save(assist.store, pid, branch, items, by="ai", slot=job.slot, basis_now=basis(bp),
+                    how="remade" if cur else "made", base_version=int((cur or {}).get("version") or 0))
+    except AkoweError as exc:
+        if exc.code != "VERSION_CONFLICT":
+            raise
+    now = get_entry(assist.store, pid, branch)
+    if not now:
+        raise AkoweError("VERSION_CONFLICT", "/version", "the world-texture list changed while the AI was writing it; "
+                         "nothing was saved", status="REJECTED")
+    log.info("world texture: kept the list saved during the AI call (version %s)", now.get("version"))
+    return now
 
 
 # ====================================================================== briefs

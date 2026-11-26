@@ -971,6 +971,13 @@ class AutoBookService(_Runner):
                 from .continuity import chapters_of  # noqa: PLC0415
                 stand_in.settle_votes(self.store, run, prob, "continue",
                                       {c["chapter_id"]: c for c in chapters_of(self.bp(run))})
+            if run.get("status") == "paused" and prob.get("code") == "CHECKS_REFUSED" and \
+                    prob.get("authored_by") != "author":
+                # ▶ Resume after Akọwe's checks refused an AI draft (e.g. a plan far too large, R7): the AI gets new
+                # attempts, like 🔁 Try again — else Resume could only stop again on the same refusal
+                counts = run.setdefault("fix_counts", {})
+                for k in [k for k in counts if k.startswith("redo:")]:
+                    counts[k] = 0
             run["status"], run["phase"], run["problem"], run["pause_reason"] = "running", \
                 "Continuing where it stopped", None, None
             for s in run["steps"]:
@@ -2838,6 +2845,8 @@ class AutoBookService(_Runner):
         if s.get("locks"):  # 📋 6c: the starter sheet's lock list (facts that must stay true)
             wishes["must_stay_true"] = list(s["locks"])
         job = self._job(run, "profile", "B01")
+        from . import author_merge  # noqa: PLC0415 - R1: what the author types during the AI call is kept
+        before = dict(get_profile(self.store, pid))
         st["message"] = "The AI is inventing your book"
         self.save(run)
         from . import story_kind  # noqa: PLC0415 - 📚 "Let the AI decide": the AI picks the kind of story too
@@ -2880,6 +2889,8 @@ class AutoBookService(_Runner):
                                     "tense": old.get("tense") or raw.get("tense")})
         prof["pov"], prof["tense"] = dec["pov"], dec["tense"]
         with self.store.transaction():  # the profile and the book's name are saved together
+            # R1: re-read inside the save: a title / idea / … the author typed while the AI worked is never replaced
+            kept = author_merge.keep_typed(before, get_profile(self.store, pid), prof, author_merge.PROFILE_KEYS)
             save_profile(self.store, pid, prof)
             self._name_book(pid, prof["title"])
         run["title"] = prof["title"]
@@ -2887,7 +2898,11 @@ class AutoBookService(_Runner):
             + f" ({prof['genre'] or 'any genre'}; told in the " \
                         f"{book_promises.POV_WORDS[dec['pov']]}, {dec['tense']} tense)"
         self.event(run, "ai", f"The AI invented the book “{prof['title']}”", slot=job.slot)
-        fresh_names.after_profile(self, run, st)  # 🔁 a repeated title word or name -> one rename (no AI to find)
+        if kept:
+            self.event(run, "note", "✍ Your own " + author_merge.words(kept) + " (typed while the AI was inventing the "
+                       "book) kept; the AI filled only the rest", step="profile", code="AUTHOR_TEXT_KEPT")
+        if not ({"title", "idea"} & set(kept)):  # never renames what the author typed
+            fresh_names.after_profile(self, run, st)  # 🔁 a repeated title word or name -> one rename (no AI to find)
         self._auto_voice(run, pid, raw.get("narrator_voice"))
         if pick:
             try:
