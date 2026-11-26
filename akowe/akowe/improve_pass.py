@@ -251,7 +251,7 @@ def line(res: dict) -> str:
         return "🔁 Improve pass: nothing was changed"
     if res.get("after") is None:
         return f"🔁 Improve pass: {res['before']:g}/10 — {res.get('why') or 'nothing was changed'}"
-    word = "kept" if res.get("keep") else "not kept, the original book stays"
+    word = "kept" if res.get("keep") else "not kept" if res.get("edited") else "not kept, the original book stays"
     return f"🔁 Improve pass: {res['before']:g} → {res['after']:g}/10 ({word}" + (
         "" if res.get("keep") else f": {res.get('why')}") + ")"
 
@@ -621,6 +621,7 @@ def _approve_kept(runner, run, st, mem):
     ap = mem.get("approving") or {}
     ed = runner._review.editor
     back = []
+    edited = list(ap.get("edited") or [])
     for c in ap.get("chapters") or []:
         if c.get("state") == "done":
             continue
@@ -630,6 +631,18 @@ def _approve_kept(runner, run, st, mem):
         old = bp.rec(c["record_id"], c["version"])
         if head is None or old is None:
             c["state"] = "done"
+            continue
+        if edited_meanwhile(runner, run, head, c["version"]):
+            # the author saved their own version while the reviewers re-read the book: it stays exactly as they left
+            # it (not approved by the run), and the rewrite of the older text is not used
+            runner.event(run, "note", f"🔁 Improve pass: not kept: you edited chapter {c['number']} meanwhile, so its "
+                         "rewrite was not used; your version stays as you left it", step="improve",
+                         code="IMPROVE_SKIPPED_EDITED")
+            c["state"] = "done"
+            back.append(c["number"])
+            edited.append(c["number"])
+            ap["edited"] = edited
+            runner.save(run)
             continue
         if head["version"] == c["version"]:
             try:
@@ -674,6 +687,15 @@ def _approve_kept(runner, run, st, mem):
                                    and not c.get("accept")])  # repeat fixes alone leave the other notes waiting
     rp = getattr(app, "reports", None)
     rows = (app.store.get_setting(RESCORE_KEY.format(pid=pid, branch=branch)) or {}).get("reviews") or []
+    if edited:  # the re-read scored a text that is not in the book: its scores are not saved, the round not kept
+        rows = []
+        mem["stop"] = True  # the author is working on the book: no further round
+        landed = [c for c in ap.get("chapters") or [] if c["number"] not in back]
+        for r in mem.get("rounds") or []:
+            if r.get("round") == ap.get("round") and not ap.get("repeat_only"):
+                r["edited"] = sorted(set(edited))
+                if not landed:  # nothing of the round is in the book
+                    r.update(keep=False, why=edited_why(edited))
     if rp and rows and len(back) < len(ap.get("chapters") or []):
         try:
             rep = rp.make(run["principal"], pid, branch, assist=runner._assist, review=runner._review, ai=False,
@@ -692,11 +714,31 @@ def _approve_kept(runner, run, st, mem):
         rf = mem.setdefault("repeat_fixes", {})
         rf["chapters"] = [c["number"] for c in ap.get("chapters") or [] if c["number"] not in back]
         rf["back"] = back
-    else:
+    elif not edited or len(back) < len(ap.get("chapters") or []):
         mem["kept"] = int(mem.get("kept") or 0) + 1
     mem.pop("approving", None)
     _export_again(runner, run)
     runner.save(run)
+
+
+def edited_meanwhile(runner, run, head: dict, version: int) -> bool:
+    """True when the chapter's newest version is not the one the rewrite was made from and not Akọwe's own (an AI
+    revision this run made or asked for): the author edited it while the rewrite waited. Also used by
+    opening_pass."""
+    if head["version"] == version:
+        return False
+    made = getattr(runner, "_ai_made", None)
+    try:
+        return not (made is not None and made(run, head))
+    except Exception:  # noqa: BLE001 - when in doubt, never put Akọwe's text over the author's
+        log.warning("improve pass: could not tell who wrote the newest version of a chapter")
+        return True
+
+
+def edited_why(numbers) -> str:
+    ns = sorted(set(numbers))
+    return ("you edited chapter " + ", ".join(map(str, ns)) + " meanwhile, so the rewrite was not used; your version "
+            "stays as you left it")
 
 
 def _export_again(runner, run):
@@ -714,7 +756,7 @@ def _finish(runner, run, st, mem):
     final = kept[-1]["after"] if kept else first
     mem.update(before=first, after=final, kept=bool(kept), last_try=rs[-1].get("after"))
     res = {"before": first, "after": final if kept else rs[-1].get("after"), "keep": bool(kept),
-           "why": rs[-1].get("why")}
+           "why": rs[-1].get("why"), "edited": bool(rs[-1].get("edited")) and not rs[-1].get("keep")}
     if mem.get("mode") == "scenes":  # 🎯 "Rewrote 3 weakest scenes (ch1 opening, …): 7.9 → 8.4 (kept)"
         labels = [lb for r in (kept or rs[-1:]) for lb in r.get("scenes") or []]
         mem["scenes"] = labels

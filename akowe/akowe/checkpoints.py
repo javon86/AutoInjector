@@ -53,6 +53,16 @@ PART_CHARS = 60000           # characters of chapter text one AI call reads
 LEDGER_CHARS = 6000          # the compact ledger part of a checkpoint call
 LOCKED_CHARS = 3000
 MAX_FIX_ORIGINAL = 600
+FIX_GROWTH, FIX_GROWTH_MIN = 3, 200   # a "small" fix adds at most 3× its original words or 200 characters
+
+
+def small_fix(original: str, replacement: str) -> bool:
+    """A checkpoint fix Akọwe may make by itself: it changes words found in the chapter and does not grow them into a
+    new passage (more than FIX_GROWTH × the original AND more than FIX_GROWTH_MIN characters is not small)."""
+    o, r = original or "", replacement or ""
+    if not o.strip() or not r.strip() or len(o) > MAX_FIX_ORIGINAL or o.strip() == r.strip():
+        return False
+    return not (len(r) > FIX_GROWTH * len(o) and len(r) > FIX_GROWTH_MIN)
 _LOCK = threading.RLock()
 
 _S = {"type": "string"}
@@ -1194,11 +1204,13 @@ def _clean_problems(raw, part: dict, texts: dict, order: list[str]) -> list[dict
             n = int(n)
         cid = by_num.get(n) if isinstance(n, int) else None
         problem = _clip(p.get("problem"), 400)
+        rep = str(p.get("replacement") or "")
         if not cid or not problem:
             continue
         out.append({"chapter_id": cid, "number": n, "quote": _clip(p.get("quote"), 400), "problem": problem,
                     "original": str(p.get("original") or "")[:MAX_FIX_ORIGINAL * 2],
-                    "replacement": str(p.get("replacement") or "")[:MAX_FIX_ORIGINAL * 3],
+                    # a replacement longer than any small fix may be is dropped whole, never cut mid-sentence
+                    "replacement": rep if len(rep) <= MAX_FIX_ORIGINAL * FIX_GROWTH else "",
                     **({"severity": p["severity"]} if p.get("severity") in ("minor", "major", "blocker") else {})})
     return out[:40]
 
@@ -1213,7 +1225,7 @@ def _propose(svc, run: dict, cp: dict) -> None:
             continue
         text = (texts.get(p["chapter_id"]) or {}).get("text") or ""
         o, r = p.get("original") or "", p.get("replacement") or ""
-        if o.strip() and r.strip() and text.count(o) == 1 and len(o) <= MAX_FIX_ORIGINAL and o.strip() != r.strip():
+        if text.count(o) == 1 and small_fix(o, r):
             p["status"] = "proposed"
         else:
             p.update(status="waiting", why="the fix needs you (no small, safe change was offered)")
@@ -1257,6 +1269,9 @@ def _fix(svc, run: dict, st: dict, cp: dict, title: str) -> None:
                     p.update(status="waiting", why="the words to change were not found exactly once in the chapter")
                 elif len(o) > MAX_FIX_ORIGINAL or o.strip() == r.strip():
                     p.update(status="waiting", why="no small, safe change was offered")
+                elif not small_fix(o, r):
+                    p.update(status="waiting", why="the change offered adds a whole new passage, so it is not a small, "
+                                                   "safe fix: it is left for you")
                 elif any(o in q["original"] or q["original"] in o for q in usable):
                     p.update(status="waiting", why="two fixes touch the same words")
                 else:

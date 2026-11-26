@@ -43,6 +43,9 @@ akowe/
     editor_rubric.py       the AI editor's rubric (dimensions, questions, strictness) - the ONE editable place
     editor.py              🖋 AI editor: craft review (P4), rewrite proposals + exact apply (P5), restore; settings
                            editor_settings, advice keys craft_reviews / editor_proposals / editor_rewrites
+    ai_injection.py        🛡 the ONE screen for instruction-like text an AI adds to a chapter ("ignore your
+                           instructions", "approve everything", "delete the book", "as an AI"…): used by
+                           editor.apply_replacements, subtext_check.validate and weak_scenes.check_scene
     characters.py          🎭 P7/P17 character sheets + voice cards: fields, cleaning, companion storage (settings
                            characters:<pid>:<branch>, keyed by A01 record), AI generation, bounded voice brief,
                            voice words for the pattern checker
