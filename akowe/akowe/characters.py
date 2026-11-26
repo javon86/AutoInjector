@@ -35,6 +35,7 @@ import threading
 from datetime import datetime, timezone
 
 from . import story_roles
+from .author_merge import merge_fields
 from .errors import AkoweError
 
 log = logging.getLogger("akowe.characters")
@@ -449,14 +450,21 @@ def generate(assist, job, pid: str, branch: str, rid: str, *, note: str | None =
     if sheet is None or voice is None:
         raise AkoweError("INTERNAL_ERROR", "/character_sheet", "the AI's answer had no usable character sheet and "
                              "voice card; nothing was changed")
-    by = "ai"
-    old = entries.get(rid) or {}
-    if (old.get("made_by") or {}).get("kind") == "author":  # the author's own card: the AI only fills what is empty
-        sheet = dict(sheet, **{k: v for k, v in (old.get("sheet") or {}).items() if v})
-        voice = dict(voice, **{k: v for k, v in (old.get("voice") or {}).items() if v})
-        by = "author"
-    return save_entry(assist.store, pid, branch, rid, sheet=sheet, voice=voice, by=by, slot=job.slot,
-                      name=me["name"], subject_id=me["subject_id"])
+    # R1: re-read the card now (the author may have typed in it while the AI worked) and save against exactly that
+    # version: a save that lands in between is seen on the next try, never overwritten
+    for attempt in range(3):
+        old = get_entry(assist.store, pid, branch, rid) or {}
+        by, s_, v_ = "ai", sheet, voice
+        if (old.get("made_by") or {}).get("kind") == "author":  # the author's own card: the AI only fills what is empty
+            s_, v_ = merge_fields(old.get("sheet"), sheet), merge_fields(old.get("voice"), voice)
+            by = "author"
+        try:
+            return save_entry(assist.store, pid, branch, rid, sheet=s_, voice=v_, by=by, slot=job.slot,
+                              name=me["name"], subject_id=me["subject_id"], base_version=int(old.get("version") or 0))
+        except AkoweError as exc:
+            if exc.code != "VERSION_CONFLICT" or attempt == 2:
+                raise
+    return {}  # never reached: the third pass returns or raises
 
 
 # ====================================================================== prompt briefs

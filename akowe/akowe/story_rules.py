@@ -438,9 +438,21 @@ def generate(assist, job, bp, *, update: bool | None = None, note: str | None = 
     notes = [_clip(x, 200) for x in (raw.get("notes") if isinstance(raw, dict) else None) or [] if _clip(x, 200)][:5]
     b = basis(bp)
     if not upd:
-        e = save(store, pid, branch, apply_choices(rules, choices), by="ai", slot=job.slot, basis=b, how="made")
-        return set_notes(store, pid, branch, e, notes)
-    return propose(store, pid, branch, entry, rules, slot=job.slot, basis_now=b, notes=notes)
+        # R1: saved only over the ledger as it was before the AI call; a ledger the author saved meanwhile is kept and
+        # the AI's rules become suggestions for it (below), never a replacement
+        try:
+            e = save(store, pid, branch, apply_choices(rules, choices), by="ai", slot=job.slot, basis=b, how="made",
+                     base_version=int((entry or {}).get("version") or 0))
+            return set_notes(store, pid, branch, e, notes)
+        except AkoweError as exc:
+            if exc.code != "VERSION_CONFLICT":
+                raise
+    now = get_entry(store, pid, branch) or entry  # R1: compared with the ledger as it is now, not as it was read
+    if not now:
+        raise AkoweError("VERSION_CONFLICT", "/version", "the story rules changed while the AI was writing them; "
+                         "nothing was saved", status="REJECTED")
+    return propose(store, pid, branch, now, [dict(r, id="") for r in rules] if not upd else rules, slot=job.slot,
+                   basis_now=b, notes=notes, adds_only=not upd)
 
 
 def apply_choices(rules: list[dict], choices: dict) -> list[dict]:
@@ -473,10 +485,16 @@ def _same(a: dict, b: dict) -> bool:
                                                               "magic"))
 
 
-def propose(store, pid, branch, entry, new_rules, *, slot, basis_now, notes) -> dict:
-    """Compare the AI's full list with the ledger: add / change / retire proposals (ids p1, p2 …)."""
+def propose(store, pid, branch, entry, new_rules, *, slot, basis_now, notes, adds_only: bool = False) -> dict:
+    """Compare the AI's full list with the ledger: add / change / retire proposals (ids p1, p2 …). ``adds_only``:
+    the AI wrote its list without seeing this ledger (the author saved theirs during the call) — only its new rules
+    are suggested, nothing of the author's is changed or retired."""
     cur = {r["id"]: r for r in active(entry)}
     items, kept = [], set()
+    if adds_only:
+        have = {_norm(r.get("text")) for r in cur.values()}
+        new_rules = [r for r in new_rules if _norm(r.get("text")) not in have]
+        kept = set(cur)
     for r in new_rules:
         old = cur.get(r["id"])
         if old is not None:
@@ -506,6 +524,20 @@ def propose(store, pid, branch, entry, new_rules, *, slot, basis_now, notes) -> 
                                      "retire": sum(1 for i in items if i["action"] == "retire")}))
 
 
+def _norm(text) -> str:
+    return " ".join(str(text or "").lower().split())
+
+
+def author_rules(entry: dict | None) -> set[str]:
+    """Ids of the ledger's rules the author wrote: unchanged since a version the author saved (that version or its
+    history), so an AI suggestion accepted under a Make-a-book run's consent never rewrites or retires them."""
+    e = entry or {}
+    versions = [e] + [h for h in e.get("history") or [] if isinstance(h, dict)]
+    theirs = {(r.get("id"), r.get("text")) for v in versions if (v.get("made_by") or {}).get("kind") == "author"
+              for r in v.get("rules") or [] if isinstance(r, dict)}
+    return {r["id"] for r in e.get("rules") or [] if isinstance(r, dict) and (r.get("id"), r.get("text")) in theirs}
+
+
 def decide_proposals(store, pid, branch, *, accept=None, reject=None, version=None, by="author",
                      run_id: str | None = None) -> dict:
     """Apply the accepted proposals (accept=None: all) to the ledger as a new version; the rest are dropped."""
@@ -520,6 +552,18 @@ def decide_proposals(store, pid, branch, *, accept=None, reject=None, version=No
             raise AkoweError("INVALID_INPUT", f"/{k}", f"{k}: a list of suggestion ids", status="REJECTED")
     props = entry["proposals"]
     take = [i for i in props["items"] if (accept is None or i["id"] in accept) and i["id"] not in (reject or [])]
+    if run_id:  # never change the author's own text: under a run's consent the author's rules are not changed/retired
+        mine = author_rules(entry)
+        take = [i for i in take if i["action"] == "add" or i["target"] not in mine]
+        # … and the very same rule is not added twice: an "add" of a rule the ledger already has keeps that rule
+        # (its "retire" in the same batch is dropped too — the AI only re-listed it without its id)
+        live, again = active(entry), set()
+        for i in take:
+            twin = next((r for r in live if i["action"] == "add" and _same(r, i.get("rule") or {})), None)
+            if twin is not None:
+                again.add(id(i))
+                again.update(id(j) for j in take if j["action"] == "retire" and j["target"] == twin["id"])
+        take = [i for i in take if id(i) not in again]
     rules = [dict(r) for r in entry.get("rules") or []]
     by_id = {r["id"]: r for r in rules}
     for it in take:
