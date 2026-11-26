@@ -1256,7 +1256,10 @@ class StepError(Exception):
             errs = resp.get("errors") or []
             self.code = errs[0].get("code") if errs else resp.get("status")
             self.problems = problems(resp)
-            self.message = message or f"{op} could not be created ({resp.get('status')})."
+            # 🗣 R6: what went wrong in plain words ("The book format could not be saved: the disk is full."), not
+            # the module's code ("I01 could not be created (BLOCKED).") — the code stays in ``problems``
+            from .stop_words import module_failed  # noqa: PLC0415
+            self.message = message or module_failed(op, resp)
         else:
             self.problems = []
             self.message = message or str(op)

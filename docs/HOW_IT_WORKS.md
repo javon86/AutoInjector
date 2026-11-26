@@ -1165,7 +1165,9 @@ check — never by asking an AI):
 | ✔ | Approval needed | a draft only its own AI could check, or an OK that was not sure enough |
 | 🎨 | Picture | character pictures |
 | ⏸ | Paused by you | you pressed Pause |
-| ⚠ | AI problem | an AI did not answer, a usage limit, a connection error, Akọwe was closed |
+| ⚠ | AI problem | an AI did not answer, a usage limit, a connection error, the AIs refused, every AI's answer was unusable, Akọwe was closed |
+| 📚 | Putting the book together | the format, assemble, export and content-check steps (no AI works there: a full disk, a module that refused) |
+| 🛠 | Akọwe problem | an unexpected error in Akọwe's own code (not the AI, not your book): ▶ Resume tries the step again |
 
 The desktop notification reads, for example: title **"📖 The Salt Keeper's Ledger: 🧑 Character issue (step 3 of 19)"**,
 body **"Ansel Marrant (character): His background has a timeline contradiction: … The reviewer and the writer

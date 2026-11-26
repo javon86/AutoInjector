@@ -23,6 +23,7 @@ from __future__ import annotations
 import re
 
 from .review_loop import CHOICE_WORDS, NEG, clip
+from .stop_words import UNUSABLE_CODE, is_own_error
 
 # The fixed list (order = how the docs list them).
 CATEGORIES = {
@@ -39,6 +40,8 @@ CATEGORIES = {
     "picture": ("🎨", "Picture"),
     "paused": ("⏸", "Paused by you"),
     "ai": ("⚠", "AI problem"),
+    "book": ("📚", "Putting the book together"),
+    "akowe": ("🛠", "Akọwe problem"),
 }
 # record kind (module) -> category
 MODULE_CAT = {"A01": "character", "A02": "place", "A03": "place", "A04": "place", "A05": "place", "A06": "place",
@@ -56,7 +59,23 @@ STEP_CAT = {"canon": "character", "characters": "character", "looks": "character
             "human": "style"}
 AI_CODES = {"TIMEOUT", "UPSTREAM_UNAVAILABLE", "RATE_LIMITED", "CAPABILITY_UNAVAILABLE", "USAGE_LIMIT", "SITE_BUSY",
             "SITE_NOT_READY", "NETWORK", "INTERNAL_ERROR", "LOGGED_OUT", "CAPTCHA", "AI_REFUSED",
-            "AI_DECLINED"}
+            "AI_DECLINED", UNUSABLE_CODE}
+# 📚 steps that make no AI call (putting the book together): their stops are never an "AI problem" (stress R6)
+BOOK_STEPS = {"format", "assemble", "export", "check"}
+# 🗣 the "ai" category's why, by what the AI did (a refusal is not a busy AI; an unusable answer is neither)
+AI_WHY = {
+    "AI_DECLINED": "The AIs refused to write this (they said they can't help with that), even after being asked "
+                   "again and another AI being tried.",
+    UNUSABLE_CODE: "The AIs' answers could not be used (not in the form Akọwe asked for), even after asking again "
+                   "and asking another working AI.",
+    "TIMEOUT": "The AI did not answer in time, so Akọwe stopped instead of guessing.",
+}
+AI_NEXT = {
+    "AI_DECLINED": "Press 🔁 Try again, or pick another AI for the book in the run's settings. Nothing written so far "
+                   "is lost.",
+    UNUSABLE_CODE: "Press 🔁 Try again (or pick another AI for the book in the run's settings). Nothing written so "
+                   "far is lost.",
+}
 TRUST_CODES = {"NO_SECOND_AI", "NO_REASON", "LOW_CONFIDENCE"}
 # words in a problem CODE (never in the book text) -> category
 CODE_CAT = (("TIMELINE", "timeline"), ("STORY_MAP", "story_map"), ("MAP_LINK", "story_map"),
@@ -90,6 +109,10 @@ def category_of(run: dict, state: str) -> str:
         return "ai"
     if code in TRUST_CODES:
         return "approval"
+    if is_own_error(prob):  # Akọwe's own code failed: not the AI, not the book
+        return "akowe"
+    if str(prob.get("step") or run.get("current") or "") in BOOK_STEPS and not prob.get("decision"):
+        return "book"  # no AI works in these steps: a full disk or a module refusing is never an "AI problem"
     if code in AI_CODES or code.startswith("HTTP_"):
         return "ai"
     for word, cat in CODE_CAT:
@@ -142,13 +165,20 @@ def describe(run: dict, state: str) -> dict | None:
                f"choose; until then {what} is not approved.") if "keep_original" in opts else \
             (f"Pick one: accept the change, or edit it yourself. The book carries on after you choose; until then "
              f"{what} is not approved.")
+    elif cat == "akowe":
+        wrong = str(prob.get("message") or "Akọwe hit an unexpected error.")
+        why = "Something went wrong inside Akọwe itself — not the AI and not your book."
+        nxt, opts = ("Press ▶ Resume to try this step again; nothing written so far is lost. If it happens again, use "
+                     "📋 Copy diagnostics and send it in."), ["resume"]
     elif cat == "ai":
         wrong = str(prob.get("message") or "The AI could not answer.")
-        why = "The AI could not do this step (a usage limit, the connection or an error)."
-        nxt = "Press 🔁 Try again (connect or switch an AI first if it says so). Nothing written so far is lost."
+        why = AI_WHY.get(code) or "The AI could not do this step (a usage limit, the connection or an error)."
+        nxt = AI_NEXT.get(code) or ("Press 🔁 Try again (connect or switch an AI first if it says so). Nothing "
+                                    "written so far is lost.")
     else:
         wrong = _first_problem(prob)
-        why = WHY.get(code) or "This step stopped on a problem."
+        why = WHY.get(code) or ("Akọwe could not finish putting the book together (no AI works in this step)."
+                                if cat == "book" else "This step stopped on a problem.")
         if code in TRUST_CODES:
             nxt = "Pick one: approve it yourself, or let the AI try again. The book carries on after you choose."
         elif {"approve_anyway", "edit"} <= set(opts):
@@ -156,6 +186,8 @@ def describe(run: dict, state: str) -> dict | None:
                    "you choose.")
         elif code == "CHECKPOINT_WAITING":
             nxt = "Read it on the 🧭 Continuity page, fix it if you agree, then press ▶ Continue."
+        elif cat == "book":
+            nxt = "Fix the cause it names if you can, then press 🔁 Try again. Nothing written so far is lost."
         else:
             nxt = "Press 🔁 Try again, or edit it yourself and then continue."
     opts = opts or ["retry"]  # every stop can at least be tried again (the run window's 🔁 Try again)
