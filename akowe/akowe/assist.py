@@ -45,7 +45,7 @@ from . import CONTRACT_VERSION, __version__, ai_activity
 from . import plan_rules as pr
 from . import characters as chars_mod
 from . import providers as providers_mod
-from . import story_roles
+from . import stop_words, story_roles
 from .canonical import json_pointer
 from .errors import AkoweError
 from .jobs import RetryPolicy, slot_word, wait_and_retry
@@ -697,7 +697,8 @@ class AssistService:
         prov = self._providers(job)
         needed = len(json.dumps(context, ensure_ascii=False)) // 3 + 2000
         failed: list[str] = []  # slots that were not working in THIS call (P18.9: move to the next working AI)
-        for _ in range(3 + len(providers_mod.SLOT_IDS)):
+        reasked: set[str] = set()  # 🗣 R4: slots already asked once more after an unusable answer in THIS call
+        for _ in range(3 + 2 * len(providers_mod.SLOT_IDS)):
             try:
                 slot = self._choose_slot(job, op_for_roles, needed, exclude=failed)
             except AkoweError as exc:
@@ -721,15 +722,28 @@ class AssistService:
                     s = next(x for x in prov.slots() if x["slot_id"] == slot["slot_id"])
                     if exc.code == "CAPABILITY_UNAVAILABLE" and s["active_jobs"] >= s["max_concurrent"]:
                         continue  # another operation grabbed the slot first: wait for it again
-                    if exc.code in ("UPSTREAM_UNAVAILABLE", "AI_DECLINED") and not job.slot_pref and \
+                    # 🗣 R4: an answer that could not be used (garbage, empty, for the wrong step, an unknown verdict)
+                    # is asked again once (unless the adapter already re-asked in the same chat), then of another
+                    # working AI — like a refusal or an AI that is down — before the step stops.
+                    unusable = self._unusable(exc)
+                    if unusable and not getattr(exc, "reasked", False) and slot["slot_id"] not in reasked:
+                        reasked.add(slot["slot_id"])
+                        log.warning("AI slot %s gave no usable answer; asking it once more", slot["slot_id"])
+                        continue
+                    if (exc.code in ("UPSTREAM_UNAVAILABLE", "AI_DECLINED") or unusable) and not job.slot_pref and \
                             self._other_ai(job, prov, op_for_roles, needed, failed + [slot["slot_id"]]):
                         failed.append(slot["slot_id"])
                         job.failovers.append({"from": slot["slot_id"], "from_name": providers_mod.slot_name(slot),
-                                              "code": exc.code, "state": getattr(exc, "site_state", None),
+                                              "code": exc.code, "state": "unusable" if unusable else
+                                              getattr(exc, "site_state", None),
                                               "problem": getattr(exc, "site_problem", None)})
                         log.warning("AI slot %s not working (%s); trying another AI", slot["slot_id"],
                                     getattr(exc, "site_problem", None) or exc.code)
                         continue
+                    if unusable and failed and exc.errors and "every working AI" not in str(exc.errors[0].get(
+                            "message") or ""):
+                        exc.errors[0]["message"] = (str(exc.errors[0].get("message") or "")
+                                                    + " (every working AI was asked)")[:900]
                     raise
             if failed:
                 prov.health.notify({"event": "failover", "from": [f for f in job.failovers
@@ -739,6 +753,13 @@ class AssistService:
             job.model = resource.get("model") or job.model
             return data
         raise AkoweError("RATE_LIMITED", "", "the AI slot stayed busy")
+
+    @staticmethod
+    def _unusable(exc: AkoweError) -> bool:
+        """An AI's answer that could not be used (not a refusal, not an AI that is down or busy, not a timeout)."""
+        if exc.code in ("UPSTREAM_UNAVAILABLE", "AI_DECLINED", "TIMEOUT", "RATE_LIMITED", "CAPABILITY_UNAVAILABLE"):
+            return False
+        return stop_words.exc_unusable(exc) or bool(getattr(exc, "try_other_ai", False))
 
     def _other_ai(self, job: Job, prov, op_for_roles: str, needed: int, exclude: list) -> bool:
         """Is there another AI (not in ``exclude``) this call could move to right now?"""

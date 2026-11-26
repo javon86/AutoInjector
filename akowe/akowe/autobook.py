@@ -47,6 +47,7 @@ from datetime import datetime, timezone
 from . import ai_activity, ai_check
 from . import approval_trust
 from . import book_again
+from . import stop_words
 from . import assist as assist_mod
 from . import characters as chars_mod
 from . import checker_record
@@ -228,6 +229,13 @@ BUSY_FIX = ("The AIs stayed busy or could not be reached for a long time. What t
 DECLINED_FIX = ("The AI declined to answer (it said it can't help with that) — story material such as a death or a "
                 "crime sometimes trips an AI's safety filter by mistake. Akọwe already asked again and tried the other "
                 "AIs. What to do: press 🔁 Try again, or pick another AI for the book in the run's settings.")
+
+
+def _wait_fix(code) -> str:
+    """🗣 R6: the fix for a give-up after waiting: a refusal is not a busy / unreachable AI."""
+    return DECLINED_FIX if code == "AI_DECLINED" else BUSY_FIX
+
+
 CHECKS_FIX = ("Press 🔁 Try again: the AI writes it again and is told exactly what Akọwe refused. Or ✏️ Edit it "
               "yourself so the checks pass, then press Continue.")
 STALE_FIX = ("It was made from a plan or other inputs that changed since, so it is out of date: editing it cannot fix "
@@ -389,9 +397,8 @@ class _Runner:
             log.exception("%s %s crashed", self.KIND, run_id)
             run = self.get(run_id)
             if run:
-                run["status"], run["phase"] = "paused", "Stopped by an unexpected problem — press Resume to try again"
-                run["problem"] = {"code": "INTERNAL_ERROR", "message": "Akọwe hit an unexpected problem.",
-                                  "fix": "Press 🔁 Try again. If it keeps happening, use 📋 Copy diagnostics."}
+                run["status"], run["phase"] = "paused", "Stopped by an unexpected error — press ▶ Resume to try again"
+                run["problem"] = stop_words.own_error_problem("")
                 self.save(run)
         finally:
             try:
@@ -443,6 +450,9 @@ class _Runner:
                                   "Open Settings and connect AutoInjector or add an API key, then press 🔁 Try again.",
                                   op=op)
             from .book_path import problems  # noqa: PLC0415
+            if stop_words.is_unusable(first.get("code"), first.get("message")):  # 🗣 R4: plain words, no schema
+                code_, msg_, fix_ = stop_words.unusable_problem(first.get("message"), f"writing the {label}")
+                raise StepProblem(code_, msg_, fix_, op=op)
             raise StepProblem(first.get("code") or "INVALID_INPUT",
                               f"The {label} could not be made: {first.get('message')}",
                               "Press 🔁 Try again. If it fails again, open the step and write it yourself.",
@@ -456,8 +466,8 @@ class _Runner:
                                       on_wait=lambda info: self.on_wait(run, info), who=self._who(run))
         except AkoweError as exc:
             if exc.code in BUSY_CODES:
-                raise StepProblem(exc.code, exc.errors[0].get("message") or "the AI stayed busy", BUSY_FIX, op=op) \
-                    from None
+                raise StepProblem(exc.code, exc.errors[0].get("message") or "the AI stayed busy", _wait_fix(exc.code),
+                                  op=op) from None
             raise
         finally:
             self.app.work.end(tok)
@@ -594,7 +604,8 @@ class _Runner:
             gone = []
             for f in info.get("from") or []:
                 st = f.get("state")
-                word = {"repairing": "is being repaired", "needs_user": "needs you", "broken": "is not working"}.get(
+                word = {"repairing": "is being repaired", "needs_user": "needs you", "broken": "is not working",
+                        "unusable": "gave no usable answer"}.get(
                     st or "", "did not answer")
                 gone.append(f"{f.get('from_name') or f.get('name') or f.get('from') or f.get('slot_id')} {word}"
                             + (f" ({f['problem']})" if f.get("problem") else ""))
@@ -1370,6 +1381,13 @@ class AutoBookService(_Runner):
     def _step(self, run, sid) -> dict:
         return next(s for s in run["steps"] if s["id"] == sid)
 
+    def _step_title(self, run) -> str:
+        """The current step's title for a stop's words ("" when it cannot be found: the words never fail a stop)."""
+        try:
+            return str(self._step(run, run.get("current") or "backup").get("title") or "")
+        except Exception:  # noqa: BLE001
+            return ""
+
     @staticmethod
     def _ensure_steps(run):
         """A run saved by an older Akọwe (resumed after an update) gets the steps added since, in order."""
@@ -1504,24 +1522,26 @@ class AutoBookService(_Runner):
             self._pause_problem(run, exc.problem)
         except StepError as exc:
             self._pause_problem(run, {"code": exc.code or "INVALID_INPUT", "message": exc.message,
-                                      "fix": "Press 🔁 Try again. If it fails again, open the book and do this step "
-                                             "yourself.", "details": exc.problems[:6]})
+                                      "fix": stop_words.fix_for(exc.message) or "Press 🔁 Try again. If it fails "
+                                             "again, open the book and do this step yourself.",
+                                      "details": exc.problems[:6]})
         except AkoweError as exc:
             e = exc.errors[0] if exc.errors else {}
             code = exc.code
             fix = TIMEOUT_FIX if code == "TIMEOUT" else DECLINED_FIX if code == "AI_DECLINED" else \
                 BUSY_FIX if code in BUSY_CODES else (
                 "Press 🔁 Try again. If it keeps failing, use 📋 Copy diagnostics.")
-            self._pause_problem(run, {"code": code, "message": e.get("message") or code, "fix": fix,
-                                      "path": e.get("path") or ""})
+            said = e.get("message") or code
+            if stop_words.exc_unusable(exc):  # 🗣 R4: an AI's unusable answer, in plain words
+                code, said, fix = stop_words.unusable_problem(said, f"working on “{self._step_title(run)}”")
+            self._pause_problem(run, {"code": code, "message": said, "fix": fix, "path": e.get("path") or ""})
         except Cancelled:
             self._finish_cancel(run)
             self.save(run)
         except Exception as exc:  # noqa: BLE001 - shown as a ⚠️ on the step, logged here
             log.exception("make-a-book run %s: unexpected problem in step %s", run_id, run.get("current"))
-            self._pause_problem(run, {"code": "INTERNAL_ERROR",
-                                      "message": f"Akọwe hit an unexpected problem ({type(exc).__name__}).",
-                                      "fix": "Press 🔁 Try again. If it keeps happening, use 📋 Copy diagnostics."})
+            # 🗣 R6: Akọwe's own fault — a plain safe stop of its own kind (never an "AI problem")
+            self._pause_problem(run, stop_words.own_error_problem(self._step_title(run), exc))
         finally:
             if (run.get("clock") or {}).get("since"):  # ⏳ the run stopped working: its clock stops too
                 run_clock.clock_stop(run)
@@ -2773,7 +2793,10 @@ class AutoBookService(_Runner):
         if exc.code == "TIMEOUT":
             raise StepProblem("TIMEOUT", f"The AI did not answer in time while {what}.", TIMEOUT_FIX, **extra) from None
         if exc.code in BUSY_CODES:
-            raise StepProblem(exc.code, e.get("message") or "the AI stayed busy", BUSY_FIX, **extra) from None
+            raise StepProblem(exc.code, e.get("message") or "the AI stayed busy", _wait_fix(exc.code), **extra) \
+                from None
+        if stop_words.exc_unusable(exc):  # 🗣 R4: every working AI was asked; plain words, no schema
+            raise StepProblem(*stop_words.unusable_problem(e.get("message"), what), **extra) from None
         if exc.code == "CAPABILITY_UNAVAILABLE":
             raise StepProblem(exc.code, f"No AI was ready while {what}.", "Open Settings and connect an AI, then press "
                               "🔁 Try again.", **extra) from None
@@ -3345,6 +3368,8 @@ class AutoBookService(_Runner):
             if "TIMEOUT" in codes:
                 raise StepProblem("TIMEOUT", "The AI did not answer in time while making the characters.", TIMEOUT_FIX)
             busy = codes & set(BUSY_CODES)
+            if busy == {"AI_DECLINED"}:  # 🗣 R6: refused, not busy
+                raise StepProblem("AI_DECLINED", stop_words.declined_message("the characters"), DECLINED_FIX)
             if busy:
                 raise StepProblem(sorted(busy)[0], "The AI stayed busy while making the characters.", BUSY_FIX)
             if strict:
@@ -3352,8 +3377,10 @@ class AutoBookService(_Runner):
                 msg = (run_err.get("message") or (errs[0].get("message") if errs else None) or
                        ("Akọwe's checks refused them: " + "; ".join(digest(refused[0], 3)) if refused else
                         "the AI's characters did not fit Akọwe's forms"))
-                raise StepProblem(run_err.get("code") or (errs[0].get("code") if errs else None) or "INVALID_INPUT",
-                                  f"The characters could not be made: {msg}", "Press 🔁 Try again.")
+                code_ = run_err.get("code") or (errs[0].get("code") if errs else None) or "INVALID_INPUT"
+                if stop_words.is_unusable(code_, msg):  # 🗣 R4: plain words, no schema
+                    raise StepProblem(*stop_words.unusable_problem(msg, "making the characters"))
+                raise StepProblem(code_, f"The characters could not be made: {msg}", "Press 🔁 Try again.")
         out = sess.create(good, {}) if good else {"created": [], "errors": []}
         out = self._fix_create_errors(run, sess, slot, notes, out)
         for c in out["created"]:
@@ -4959,7 +4986,8 @@ class WriteAllService(_Runner):
         except AkoweError as exc:
             if exc.code == "TIMEOUT" or exc.code in BUSY_CODES:
                 raise StepProblem(exc.code, f"The AI did not answer while planning the scenes of "
-                                  f"{item['label'].lower()}.", TIMEOUT_FIX if exc.code == "TIMEOUT" else BUSY_FIX,
+                                  f"{item['label'].lower()}.", TIMEOUT_FIX if exc.code == "TIMEOUT" else
+                                  _wait_fix(exc.code),
                                   chapter_id=item["id"]) from None
             self.event(job, "note", f"⚠️ The scenes of {item['label'].lower()} could not be planned ({exc.code}); it "
                        "is written from the outline", code="SCENES_FAILED")

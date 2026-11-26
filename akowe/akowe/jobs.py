@@ -220,6 +220,11 @@ def wait_and_retry(fn, *, policy: RetryPolicy, check=None, on_wait=None, who: st
             attempt += 1
             delay = policy.delay_for(attempt, exc)
             if waited + delay > policy.max_total_s:
+                if exc.code == "AI_DECLINED":  # 🗣 R6: a refusal is not a busy or unreachable AI
+                    raise AkoweError(exc.code, exc.errors[0].get("path") or "",
+                                     f"{who() if callable(who) else who} declined to write this again and again (it "
+                                     "said it can't help with that), so Akọwe stopped asking", status=exc.status) \
+                        from exc
                 raise AkoweError(exc.code, exc.errors[0].get("path") or "",
                                      f"{who() if callable(who) else who} stayed busy or unreachable for {int(waited)} s, so Akọwe stopped "
                                      f"waiting ({exc.errors[0].get('message')})", status=exc.status) from exc

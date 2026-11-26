@@ -154,8 +154,11 @@ def _export_once(runner, run):
             raise StepProblem("INVALID_INPUT", f"The disk is full: the {', '.join(dict.fromkeys(full))} file could "
                               "not be saved.", "Free some space on the disk, then press 🔁 Try again.",
                               details=probs[:6], step="export")
-        raise StepProblem("INVALID_INPUT", out.get("message") or "Some files could not be made.",
-                          "Press 🔁 Try again.", details=probs[:6], step="export")
+        from . import stop_words  # noqa: PLC0415
+        msg = (out.get("message") or "Some files could not be made.").rstrip(".")
+        msg = f"{msg}: {probs[0]}" if probs else msg + "."  # 🗣 what went wrong, in the module's plain words
+        raise StepProblem("INVALID_INPUT", msg, stop_words.fix_for(msg) or "Press 🔁 Try again.",
+                          details=probs[:6], step="export")
 
 
 def export(runner, run, st):

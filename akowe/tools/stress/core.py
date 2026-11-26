@@ -749,7 +749,7 @@ class Harness:
         blob = msg + " " + fix + " " + json.dumps(prob.get("details") or [], ensure_ascii=False)
         if "Traceback" in blob or 'File "' in blob or ".py\", line" in blob:
             bad.append("traceback text in the problem")
-        if prob.get("code") == "INTERNAL_ERROR" and msg.startswith("Akọwe hit an unexpected problem") and \
+        if prob.get("code") == "INTERNAL_ERROR" and msg.startswith("Akọwe hit an unexpected") and \
                 not expect_internal:
             bad.append("an unexpected Python exception stopped the run (INTERNAL_ERROR)")
         return bad
@@ -860,7 +860,7 @@ class Harness:
             al = run.get("alert") or {}
             o.alert = {k: scrub(al.get(k), self.markers) for k in ("category", "label", "wrong", "why", "next")
                        if al.get(k)}
-            if str(prob.get("message") or "").startswith("Akọwe hit an unexpected problem") and \
+            if str(prob.get("message") or "").startswith("Akọwe hit an unexpected") and \
                     al.get("category") == "ai":
                 o.risks.append("the alert calls a fault in Akọwe's own code an “AI problem” (“" + scrub(al.get("why"))
                                + "”), so the author looks for the fault in the AI")
