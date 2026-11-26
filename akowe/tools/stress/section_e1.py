@@ -341,7 +341,9 @@ def e122_j(h: Harness) -> Outcome:
     h.make_app()
     h.chaos.add(Rule(replace(lambda c: dict(c.out, text=f"Mara climbed stair {pick_chapter(c)} and found nothing.")),
                      kinds="C02", step=STEP))
-    o = h.standard(label="Every chapter one sentence long: ", check=_words_check(lo=300))
+    # lo=40: a one-sentence chapter (7 words) must not reach the book; the Practice AI's own chapters are ~60-word
+    # samples (it never writes to length), so the book finished after ▶ Resume has those
+    o = h.standard(label="Every chapter one sentence long: ", check=_words_check(lo=40))
     o.notes.append(f"chapter words at the end: {chapter_words(h.run())}; expand calls: {asked(h, 'expand')}.")
     return o
 

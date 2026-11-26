@@ -779,7 +779,9 @@ class PracticeAI:
             if self.pov_name:
                 pov = self.pov_name
             objs = self._objectives()
-            return "B11", {"chapters": [plan_item(f"ch{i + 1}", i, objs[i % len(objs)], pov, loc) for i in range(n)],
+            # chapters past the last objective get their own wording (Akọwe's checks refuse repeated objectives)
+            return "B11", {"chapters": [plan_item(f"ch{i + 1}", i, objs[i % len(objs)] + (
+                f", round {i // len(objs) + 1}" if i >= len(objs) else ""), pov, loc) for i in range(n)],
                            "unresolved_threads": []}
         if "objective_assessments" in props:
             req = ctx.get("request_payload") or {}
@@ -889,6 +891,8 @@ class PracticeAI:
         card = sw.get("card") or {}
         body = paras[(i - 1) % len(paras)] + (f" At {card['place']} the {card.get('time') or 'hour'} pressed on."
                                                if card.get("place") else f" Scene {i} went on.")
+        if num > 3:  # its own sentence past the third chapter (Akọwe refuses a chapter that repeats another)
+            body += f" That was night {num} of the search."
         text = (f"# Part of {cid}\n\n" if sw.get("first") else "") + body
         out = {"scene_text": text}
         if "objective_assessments" in props:

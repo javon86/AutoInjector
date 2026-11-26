@@ -434,8 +434,19 @@ class BookPath:
         return "no AI is connected"
 
     def title_author(self) -> tuple[str, str]:
-        title = self.profile.get("title") or (self.store.project(self.pid) or {"name": "Untitled book"})["name"]
-        return title, self.profile.get("author") or "Unknown author"
+        """(title, author) for the book's files: cleaned of invisible / control characters and no longer than the
+        profile form allows (a stored value from an import or an older version may be either)."""
+        from .ai_text import clean  # noqa: PLC0415
+
+        def fit(v, n: int) -> str:
+            v = re.sub(r"\s*[\n\t]\s*", " ", str(clean(v) or "")).strip()
+            if len(v) <= n:
+                return v
+            cut = v[:n].rsplit(" ", 1)[0]
+            return (cut if len(cut) >= n * 3 // 4 else v[:n]).rstrip(" ,;:-")
+        title = fit(self.profile.get("title"), PROFILE_FIELDS["title"]) or fit(
+            dict(self.store.project(self.pid) or {}).get("name"), PROFILE_FIELDS["title"]) or "Untitled book"
+        return title, fit(self.profile.get("author"), PROFILE_FIELDS["author"]) or "Unknown author"
 
     def language_tag(self) -> str:
         """🔤 H18: the book's language from its profile (``language``), else English."""

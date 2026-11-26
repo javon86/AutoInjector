@@ -104,17 +104,30 @@ def test_schema_violations_never_reach_the_book(tmp_path, kind, mangle, step):
         assert outputs(app, pid, op) == []
 
 
-def test_empty_profile_strings_get_safe_defaults(tmp_path):
-    ai = fk.TraceAI(overrides={"profile": lambda ctx, out: dict(out, title="   ", author="", idea="", genre="")})
-    app = fk.make_app(tmp_path, fake=ai)
+def test_empty_profile_strings_are_asked_again(tmp_path):
+    """🧹 A-2-n: an answer without a title or an idea is unusable — asked again (no more "Untitled book" whose idea is
+    "Untitled book"); empty genre / author still get safe defaults."""
+    calls = {"n": 0}
+
+    def first_empty(ctx, out):
+        calls["n"] += 1
+        return dict(out, title="   ", author="", idea="", genre="") if calls["n"] == 1 else dict(out, genre="")
+    app = fk.make_app(tmp_path, fake=fk.TraceAI(overrides={"profile": first_empty}))
     run = fk.run_book(app)
     assert run["status"] == "done", run.get("problem")
     from akowe.book_path import get_profile
     prof = get_profile(app.store, run["project_id"])
     # ✒️ the pen name is never the AI's (pen_name.py): none typed, none saved -> empty, not made up
-    assert prof["title"] == "Untitled book" and prof["author"] == "" and prof["idea"]
-    ex = fk.export_files(app, run["project_id"], run["files"])
-    assert fk.epub_info(ex["EPUB"])["meta"]["title"] == ["Untitled book"]
+    assert calls["n"] == 2 and prof["title"] and prof["title"] != "Untitled book" and prof["author"] == ""
+    assert prof["idea"] and prof["idea"] != prof["title"]
+
+
+def test_a_profile_answer_that_stays_empty_pauses_clearly(tmp_path):
+    ai = fk.TraceAI(overrides={"profile": lambda ctx, out: dict(out, title="   ", author="", idea="", genre="")})
+    app = fk.make_app(tmp_path, fake=ai)
+    run = fk.run_book(app)
+    assert run["status"] == "paused" and run["problem"]["step"] == "profile", run.get("problem")
+    assert "without a title or an idea" in run["problem"]["message"]
 
 
 # ------------------------------------------------------------------------------------------- empty prose

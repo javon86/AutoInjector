@@ -8,7 +8,9 @@ A forced choice between the two, shown blind and in both orders, can (LitBench, 
 the writer's AI family, the checker order's "never checks" respected — the editor's second-opinion choice):
 
 * the two versions are shown as "1" and "2" in a random order; with two judges the second sees the other order, so a
-  judge that always prefers the first (or the second) text cannot decide alone (position bias);
+  judge that always prefers the first (or the second) text cannot decide alone (position bias); with ONE judge it is
+  asked twice, once in each order, and its choice counts only when both answers agree (``split_ok``), else there is
+  no verdict and the caller uses Akọwe's own signals;
 * each judge answers ``{better: "1" | "2" | "same", why}`` (short verdict, no long reasoning); an answer outside that
   is not counted;
 * a version wins only when every counted judge chose it, or most did and nobody chose the other (``verdict``);
@@ -96,6 +98,13 @@ def verdict(votes: list) -> str | None:
     return "tie"
 
 
+def split_ok(votes: list) -> bool:
+    """One judge asked in both orders: its choice counts only when both answers are valid and agree on the version
+    (or both say "same"); "a" then "b" means it followed the order it was shown, not the texts."""
+    valid = [v for v in votes or [] if v in ("a", "b", "tie")]
+    return len(valid) == 2 and valid[0] == valid[1]
+
+
 def orders(n: int, rng=None) -> list[list[str]]:
     """The order each of ``n`` judges sees: the first random, the second the other way round, and so on."""
     r = rng or _rng
@@ -161,6 +170,9 @@ def pick(svc, run: dict, a: str, b: str, *, what: str, criteria: list[str], writ
         return res
     prov = svc.app.engine.providers
     task = TASK.format(what=what)
+    alone = len(slots) == 1
+    if alone:  # ONE judge: asked twice, once in each order, so the order it sees the texts in cannot decide
+        slots = slots * 2
     for sid, order in zip(slots, orders(len(slots), rng)):
         svc.check(run)
         ctx = dict(base, versions=[{"id": "1", "text": texts[order[0]]}, {"id": "2", "text": texts[order[1]]}])
@@ -186,8 +198,12 @@ def pick(svc, run: dict, a: str, b: str, *, what: str, criteria: list[str], writ
         res["votes"].append({"slot": got, "name": cross_check.name_of(prov, got), "order": order, "vote": vote,
                              "why": _plain((raw or {}).get("why")) if isinstance(raw, dict) else "",
                              "code": None if vote else "INVALID"})
-    res["judges"] = sum(1 for v in res["votes"] if v.get("vote"))
+    res["judges"] = len({v["slot"] for v in res["votes"] if v.get("vote")})
     res["winner"] = verdict([v.get("vote") for v in res["votes"]])
+    if alone and not split_ok([v.get("vote") for v in res["votes"]]):
+        # the one judge chose the text shown first (or second) both times, or answered only once: its choice
+        # followed the order, not the texts — no verdict, the caller decides with Akọwe's own signals
+        res.update(winner=None, code="ORDER_DECIDED")
     if res["winner"] is None:
         res["code"] = res["code"] or "NO_VALID_ANSWER"
     log.info("pairwise %s: %s judge(s), winner %s", op_for_roles, res["judges"], res["winner"])

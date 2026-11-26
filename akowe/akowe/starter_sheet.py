@@ -422,9 +422,10 @@ def clean_locks(raw) -> list[str]:
     if not isinstance(raw, list) or len(raw) > LOCKS_MAX or not all(isinstance(x, str) for x in raw):
         raise AkoweError("INVALID_INPUT", "/locks", f"the lock list: up to {LOCKS_MAX} short facts",
                          status="REJECTED")
+    from .ai_text import clean  # noqa: PLC0415 - invisible / control characters only: what the author sees stays
     out = []
     for x in raw:
-        s = re.sub(r"\s+", " ", x).strip()
+        s = re.sub(r"\s+", " ", clean(x)).strip()
         if len(s) > LOCK_MAX:
             raise AkoweError("INVALID_INPUT", "/locks", f"each fact of the lock list: up to {LOCK_MAX} characters",
                              status="REJECTED")

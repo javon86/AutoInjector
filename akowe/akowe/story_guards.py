@@ -405,6 +405,9 @@ def _fix(svc, run, st, cid, number, rec, base, confirmed, findings, mem, outline
     except AkoweError as exc:
         if _is_control(exc):
             raise
+        edited = _edited_meanwhile(svc, run, rid, rec)
+        if edited is not None:
+            return _author_edit(svc, run, st, cid, number, edited, base, confirmed, mem) or rec
         svc.event(run, "note", f"⚠️ The fixed chapter {number} did not pass Akọwe's checks, so it was not saved "
                   f"({exc.code})", step="chapters", code="GUARD_FIX_REJECTED", chapter_id=cid)
         return _listed(svc, run, cid, base, confirmed, mem, "the fix was refused") or rec
@@ -414,6 +417,41 @@ def _fix(svc, run, st, cid, number, rec, base, confirmed, findings, mem, outline
     svc.event(run, "fix", f"🧭 Chapter {number} sent back once to keep to its plan and to who knows what "
               f"({prop['applied']} passage(s))", step="chapters", code="GUARD_FIX", record_id=rid, chapter_id=cid)
     return _approve_fixed(svc, run, st, cid, number, rid, base, confirmed, mem, outline, chapters, idx, old)
+
+
+def _edited_meanwhile(svc, run, rid: str, rec: dict) -> dict | None:
+    """The newest version of the chapter when the author changed it by hand after the guard read it (the guard's fix
+    then no longer fits: a version conflict), else None."""
+    try:
+        now = svc.bp(run).rec(rid)
+        if now is None or now["version"] == rec["version"] or now.get("stale"):
+            return None
+        return None if svc._ai_made(run, now) else now  # noqa: SLF001
+    except Exception:  # noqa: BLE001 - when in doubt: the usual "fix refused" path
+        log.exception("story guards: could not tell whether chapter %s was edited", rid)
+        return None
+
+
+def _author_edit(svc, run, st, cid, number, edited, base, confirmed, mem) -> dict | None:
+    """The author changed the chapter while the guard checked it: the guard's fix is dropped (never written over the
+    author's text) and the author's version is treated like any hand edit — noted, then reviewed and approved under
+    the run's consent before the book goes on; the guard's problems are listed for the author."""
+    from . import continuity  # noqa: PLC0415
+    from .autobook import ChecksRefused as refused  # noqa: PLC0415
+    rid = edited["record_id"]
+    svc.event(run, "note", f"✏️ You changed chapter {number} while Akọwe checked it, so the guard's fix was not "
+              "applied (your text is never written over); your version is reviewed and approved now",
+              step="chapters", code="GUARD_FIX_AUTHOR_EDIT", chapter_id=cid, record_id=rid)
+    _listed(svc, run, cid, base, confirmed, mem, "you changed the chapter meanwhile")
+    try:
+        appr = svc._review_until_approved(run, st, rid, f"chapter {cid}", chapter_id=cid)  # noqa: SLF001
+    except refused as exc:
+        svc._redo_refused(run, st, rid, f"redo:C02:{cid}", f"chapter {cid}", exc)  # noqa: SLF001 - pauses for you
+        return None
+    if appr:
+        continuity.after_chapter(svc, run, cid, appr, None)  # the author's text is tracked
+        mem[cid].update(version=appr.get("version"))
+    return appr
 
 
 def _approve_fixed(svc, run, st, cid, number, rid, base, confirmed, mem, outline, chapters, idx, old) -> dict:
