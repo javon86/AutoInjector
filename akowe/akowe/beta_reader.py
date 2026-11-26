@@ -70,6 +70,7 @@ MAX_REACTIONS = 30
 MAX_GUESSES = 8
 QUOTE_MAX = 200
 PANEL_MAX = 3
+RETRY_ONCE = {"TIMEOUT"}  # G-19-a: a read whose answer did not come in time is asked for once more
 PERSONA_MAX = 600
 TOP_FIXES = 5
 KINDS = {"confused": "😕 Confused", "bored": "🥱 Bored", "guessed": "🔮 Guessed it", "hooked": "🪝 Hooked",
@@ -253,11 +254,18 @@ def _list(nums) -> str:
     return ", ".join(map(str, nums))
 
 
-def _early(read: dict) -> list[dict]:
-    """Guesses that came true before the book revealed them (🔮 never one that only restates the premise:
-    beta_secrets.py)."""
+def _early_all(read: dict) -> list[dict]:
+    """Guesses that came true before the book revealed them, whatever their quote (🔮 never one that only restates
+    the premise: beta_secrets.py)."""
     return [g for g in read.get("guesses") or [] if g["came_true"] in ("yes", "partly") and g["revealed_in_chapter"]
             and g["guessed_in_chapter"] < g["revealed_in_chapter"] and not g.get("premise")]
+
+
+def _early(read: dict) -> list[dict]:
+    """The twists guessed too early that COUNT: only a guess whose quote is in the book word for word (G-19-j/k: an
+    invented or paraphrased quote is no proof the book gave the twist away; such guesses are shown, not counted —
+    like the reactions)."""
+    return [g for g in _early_all(read) if g.get("verified")]
 
 
 def findings(read: dict, n_chapters: int) -> list[dict]:
@@ -311,10 +319,14 @@ def findings(read: dict, n_chapters: int) -> list[dict]:
                    "advice": "Fix that chapter first: it is where a real reader puts the book down."})
     bad = [r for r in read["reactions"] if r["quote"] and not r["verified"]] + \
         [g for g in read["guesses"] if g["quote"] and not g["verified"]]
-    if bad:
+    left_out = len(_early_all(read)) - len(early)
+    if bad or left_out:
         fs.append({"id": "unverified", "severity": "info", "label": "Quotes not found in the book", "chapters": [],
-                   "detail": f"{len(bad)} of the reader's quote(s) are not in the book word for word (they are shown "
-                             "but not counted above).", "advice": "Read those notes with care: the AI may paraphrase."})
+                   "detail": ((f"{len(bad)} of the reader's quote(s) are not in the book word for word (they are "
+                               "shown but not counted above)." if bad else "")
+                              + (f" {left_out} twist guess(es) were left out of “Twists the reader saw coming” because "
+                                 "the line that gave the twist away is not in the book." if left_out else "")).strip(),
+                   "advice": "Read those notes with care: the AI may paraphrase.", "guesses_left_out": left_out})
     return fs
 
 
@@ -739,8 +751,10 @@ class BetaReaderService:
 
     # ------------------------------------------------------------------ one reader
     def _read_one(self, principal, pid, branch, chapters, prof, who, reader, *, assist, view, made_by, run_id,
-                  check) -> dict:
-        """One reader's read (not stored; a failed AI answer is a read with status 'failed', never raised)."""
+                  check, on_wait=None) -> dict:
+        """One reader's read (not stored; a failed AI answer is a read with status 'failed', never raised). An answer
+        that did not come in time is asked for once more (G-19-a). ``on_wait``: told about each busy / usage-limit wait
+        (a ⚡ run journals it, G-19-c)."""
         out = {"id": f"beta-{uuid.uuid4().hex[:10]}", "at": _now(), "version_key": br.version_key(chapters),
                "chapters": len(chapters), "persona": who, "made_by": made_by, "run_id": run_id, "status": "done",
                "reader": {"slot": reader["slot_id"], "name": reader["name"], "independent": reader["independent"]}
@@ -755,6 +769,8 @@ class BetaReaderService:
         job.started, job.status, job.retry_busy, job.cross_pin = time.time(), "running", True, True
         if check is not None:
             job.check = check  # type: ignore[method-assign]
+        if on_wait is not None:
+            job.on_wait = on_wait
         ctx = {"book": view, "reader": dict({k: prof.get(k) for k in ("audience", "genre", "tone") if prof.get(k)},
                                             who=who.get("kind") or "typical"), "chapters": len(chapters)}
         from . import beta_secrets  # noqa: PLC0415 - 🔮 the premise is never a twist (the secrets stay with Akọwe)
@@ -769,10 +785,19 @@ class BetaReaderService:
         kind = str(who.get("kind") or "").replace("_", " ")
         what = (f"Beta reader{f' ({kind} reader)' if kind else ''}: reading "
                 + (f"chapters 1–{n}" if n > 1 else "the book"))
-        try:
+        def ask():
             with ai_activity.doing(what, done=what.replace(": reading", ": read", 1), book_id=pid, branch_id=branch,
                                    link="report"):  # ⚡ #116 the AI activity strip
-                raw = assist._call_ai(job, op_for_roles="C02", task=task, schema=SCHEMA, context=ctx, protected=[])
+                return assist._call_ai(job, op_for_roles="C02", task=task, schema=SCHEMA, context=ctx, protected=[])
+        try:
+            try:
+                raw = ask()
+            except AkoweError as exc:
+                if exc.code not in RETRY_ONCE:
+                    raise
+                log.info("beta read by %s failed (%s); asking once more", reader["slot_id"], exc.code)
+                out["retried"] = True
+                raw = ask()
         except Cancelled:
             raise
         except AkoweError as exc:
@@ -798,7 +823,8 @@ class BetaReaderService:
         return out
 
     def read(self, principal, pid, branch, *, assist=None, review=None, slot: str | None = None,
-             made_by: str = "author", run_id: str | None = None, check=None, persona_text: str | None = None) -> dict:
+             made_by: str = "author", run_id: str | None = None, check=None, persona_text: str | None = None,
+             on_wait=None) -> dict:
         """One beta read of the book's current version (stored; a failed AI answer is stored as status 'failed')."""
         assist = assist or self.app.assist
         review = review or self.app.review
@@ -812,13 +838,14 @@ class BetaReaderService:
             who = custom_persona(persona_text, dict(who, kind="typical"))
         reader = self.pick(principal, pid, branch, chapters, slot)
         out = self._read_one(principal, pid, branch, chapters, prof, who, reader, assist=assist,
-                             view=br.book_view(chapters), made_by=made_by, run_id=run_id, check=check)
+                             view=br.book_view(chapters), made_by=made_by, run_id=run_id, check=check, on_wait=on_wait)
         self._save(pid, branch, out)
         return out
 
     # ------------------------------------------------------------------ 👥 a panel of readers
     def panel(self, principal, pid, branch, *, readers: list[dict], assist=None, review=None, made_by: str = "author",
-              run_id: str | None = None, check=None, resume: str | None = None, on_progress=None) -> dict:
+              run_id: str | None = None, check=None, resume: str | None = None, on_progress=None,
+              on_wait=None) -> dict:
         """2-3 readers, each a different AI with its own description, one after another; saved after each reader
         (status 'incomplete') so ``resume`` (the panel's id) continues with the readers still to read."""
         assist = assist or self.app.assist
@@ -856,7 +883,7 @@ class BetaReaderService:
                 on_progress(len(rec["readers"]), len(rec["plan"]), p)
             reader = {"slot_id": p["slot"], "name": p["name"], "independent": p["independent"]}
             one = self._read_one(principal, pid, branch, chapters, prof, p["persona"], reader, assist=assist,
-                                 view=view, made_by=made_by, run_id=run_id, check=check)
+                                 view=view, made_by=made_by, run_id=run_id, check=check, on_wait=on_wait)
             one["n"] = p["n"]
             rec["readers"].append(one)
             if one["status"] != "done":
@@ -1072,7 +1099,8 @@ def run_step(runner, run: dict, st: dict, control=()) -> None:
     runner.save(run)
     try:
         r = svc.read(run["principal"], run["project_id"], run["branch_id"], assist=runner._assist,
-                     review=runner._review, made_by="run", run_id=run["id"], check=lambda: runner.check(run))
+                     review=runner._review, made_by="run", run_id=run["id"], check=lambda: runner.check(run),
+                     on_wait=_waits(runner, run))
     except (Cancelled, *control):
         raise
     except Exception as exc:  # noqa: BLE001 - a beta read must never stop the book
@@ -1101,6 +1129,12 @@ def run_step(runner, run: dict, st: dict, control=()) -> None:
                  code="BETA_NOTES" if major else None)
 
 
+def _waits(runner, run):
+    """The run's wait notifier (busy AI / usage limits: the run window and the journal show it), or None."""
+    fn = getattr(runner, "on_wait", None)
+    return (lambda info: fn(run, info)) if callable(fn) else None
+
+
 def _run_panel(runner, svc, run, st, size, control):
     """👥 The panel in a ⚡ run: the book's saved reader descriptions (else the defaults), automatic AIs; continues a
     panel this run started before a pause (resumable)."""
@@ -1121,7 +1155,7 @@ def _run_panel(runner, svc, run, st, size, control):
     try:
         r = svc.panel(run["principal"], pid, branch, readers=readers, assist=runner._assist, review=runner._review,
                       made_by="run", run_id=run["id"], check=lambda: runner.check(run), resume=resume,
-                      on_progress=progress)
+                      on_progress=progress, on_wait=_waits(runner, run))
     except (Cancelled, *control):
         raise
     except Exception as exc:  # noqa: BLE001 - a beta read must never stop the book

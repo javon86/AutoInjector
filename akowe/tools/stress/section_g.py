@@ -352,8 +352,9 @@ def g18_q(h: Harness) -> Outcome:
     return h.standard(label="Fenced JSON in markdown: ", check=_rep_check(check))
 
 
-def _review_lost(h: Harness) -> tuple[list, list]:
-    """The report has no AI review because its reviewer FAILED (not because none was working): say so, and how."""
+def _review_lost(h: Harness, rules: list | None = None) -> tuple[list, list]:
+    """The report has no AI review because its reviewer FAILED (not because none was working): say so, and how.
+    ``rules``: the fault rules the scenario added (they are cleared by the time this runs)."""
     risk = []
     rep = G.report(h)
     rows = rep.get("reviews") or []
@@ -363,9 +364,13 @@ def _review_lost(h: Harness) -> tuple[list, list]:
         errs = sorted({str(r.get("error")) for r in failed})
         calls = [t for t in h.chaos.trace if t[2] == "report" and t[1] == "book_review"]
         faults = [t for t in calls if t[4]]
-        risk.append(f"the whole-book review was lost after {len(faults)} failed reviewer call(s) of {len(calls)} "
-                    f"({', '.join(errs)}): the report is made without any AI review, so the opening and improve passes "
-                    "are skipped too (OPENING_SKIPPED, IMPROVE_SKIPPED)")
+        # a fault that stopped (``times``) or a reviewer call that went through: the review could have been made.
+        # When every AI failed every reviewer call, nothing could make it — then only the message is judged.
+        transient = any(r.times is not None for r in (rules or [])) or len(faults) < len(calls)
+        if transient:
+            risk.append(f"the whole-book review was lost after {len(faults)} failed reviewer call(s) of {len(calls)} "
+                        f"({', '.join(errs)}): the report is made without any AI review, so the opening and improve "
+                        "passes are skipped too (OPENING_SKIPPED, IMPROVE_SKIPPED)")
         if "no independent AI was working" in msg:
             risk.append("the step says “no independent AI was working” although the reviewer AI was working and "
                         f"failed ({', '.join(errs)}): the message blames the wrong thing")
@@ -378,8 +383,14 @@ def _with_review_check(part: str, letters: str):
         fn = s.fn
 
         def wrapped(h, fn=fn):
+            seen, add = [], h.chaos.add
+
+            def record(*rules):
+                seen.extend(rules)
+                return add(*rules)
+            h.chaos.add = record
             o = fn(h)
-            _i, risk = _review_lost(h)
+            _i, risk = _review_lost(h, seen)
             if risk:
                 o.risks += [r for r in risk if r not in o.risks]
                 o = h.finish_outcome(o)

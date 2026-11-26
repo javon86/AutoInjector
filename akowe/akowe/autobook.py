@@ -4729,7 +4729,8 @@ class AutoBookService(_Runner):
         try:
             rep = rp.make(run["principal"], run["project_id"], run["branch_id"], assist=self._assist,
                           review=self._review, ai=True, made_by="run", run_id=run["id"],
-                          check=lambda: self.check(run), on_progress=progress)
+                          check=lambda: self.check(run), on_progress=progress, patient=True,
+                          on_wait=lambda info: self.on_wait(run, info))  # G-18: waits, a second try, a stand-in
         except (RunPaused, RunCancelled, Cancelled):
             raise
         except Exception as exc:  # noqa: BLE001 - a report must never stop the book
@@ -4739,6 +4740,7 @@ class AutoBookService(_Runner):
             self.event(run, "note", st["message"], step="report", code="REPORT_FAILED")
             self._human_pass(run, st)
             return
+        from . import book_report as br_mod  # noqa: PLC0415
         agg = rep.get("aggregate") or {}
         run["report"] = {"id": rep["id"], "overall": agg.get("overall"), "reviewers": agg.get("reviewers"),
                          "independent": agg.get("independent"), "disagreements": agg.get("disagreements") or [],
@@ -4754,10 +4756,18 @@ class AutoBookService(_Runner):
             st["message"] = (f"{agg['reviewers']} AI(s) read the whole book · overall {agg.get('overall')}/10"
                              + (f" · ⚠️ they disagree on {', '.join(agg['disagreements'])}" if agg.get("disagreements")
                                 else ""))
+        elif br_mod.lost_line(rep.get("reviews")):  # G-18: the reviewers were asked and failed (or were set aside)
+            st["message"] = (f"⚠️ Report made without an AI review: {br_mod.lost_line(rep.get('reviews'))} — 📨 Ask "
+                             "the other AIs on the report page")
+            self.event(run, "note", st["message"], step="report", code="REPORT_NO_REVIEW")
         else:
             st["message"] = "⚠️ Report made without an AI review: no independent AI was working (📨 Ask the other AIs " \
                             "on the report page later)"
             self.event(run, "note", st["message"], step="report", code="REPORT_NOT_INDEPENDENT")
+        if rep.get("missing_chapters"):  # G-18-n: the report read an incomplete book
+            st["message"] += f" · ⚠️ {br_mod.missing_words(rep['missing_chapters'])}: the report is of an incomplete book"
+            self.event(run, "note", f"⚠️ {br_mod.missing_words(rep['missing_chapters'])} when the report read the "
+                       "book: the report is of an incomplete book", step="report", code="REPORT_INCOMPLETE")
         self.event(run, "report", f"Book report {rep['id']}: {st['message']}", step="report")
         og = (rep.get("originality") or {}).get("line")  # ✨ #20: one line, never blocks the book
         if og:

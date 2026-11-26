@@ -748,7 +748,9 @@ def _run_one(svc, run: dict, st: dict, cp: dict, chapters: list[dict]) -> None:
             _read_part_by_all(svc, run, cp, part, j, rid, ctx, task, checkers, texts, order, title, label, k)
             continue
         job = svc._sub_job(run, "checkpoint", rid, (run.get("settings") or {}).get("slot_id"))  # noqa: SLF001
-        job.retry_busy = False  # a busy AI never holds the book up: the part is read at the next checkpoint
+        # a busy AI never holds the book up: the part is read at the next checkpoint — but the final re-read at the
+        # end of a run has no next checkpoint, so it waits like the run (``wait_busy``, final_reads.py, G-22-c)
+        job.retry_busy = bool(cp.get("wait_busy"))
         review = getattr(svc, "_review", None) or svc.app.review
         tok = review.work.begin(pid, "C02", f"Checkpoint after chapter {cp['after']}")
         what, what_done = activity_words(cp, label, j, k)
@@ -880,7 +882,7 @@ def _read_part_by_all(svc, run: dict, cp: dict, part: dict, j: int, rid: str, ct
             continue
         name = cross_check.name_of(prov, slot)
         job = svc._sub_job(run, "checkpoint", rid, slot)  # noqa: SLF001
-        job.retry_busy, job.cross_pin = False, True
+        job.retry_busy, job.cross_pin = bool(cp.get("wait_busy")), True  # G-22-c: see _run_one
         tok = review.work.begin(pid, "C02", f"Checkpoint after chapter {cp['after']} ({name})")
         try:
             with ai_activity.doing(what, done=what_done):  # ⚡ #116 the AI activity strip (one row per AI)

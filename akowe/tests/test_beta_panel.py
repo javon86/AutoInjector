@@ -227,13 +227,18 @@ def test_a_reader_whose_ai_is_not_working_is_skipped(book):
 
 def test_a_reader_that_fails_is_noted_and_the_others_read(book):
     fake, app, run = book
+    # G-19-a (stress fixes): one slow answer is asked for once more, so both readers read
     fake.fail_kind("beta", AkoweError("TIMEOUT", "/x", "the AI did not answer in time"))
+    r = beta.service_of(app).panel("author", run["project_id"], "main", readers=[{"slot_id": None}] * 2)
+    assert r["status"] == "done" and [x["status"] for x in r["readers"]] == ["done", "done"]
+    assert r["readers"][0].get("retried")
+    fake.fail_kind("beta", *[AkoweError("TIMEOUT", "/x", "the AI did not answer in time")] * 2)
     r = beta.service_of(app).panel("author", run["project_id"], "main", readers=[{"slot_id": None}] * 2)
     assert r["status"] == "done" and [x["status"] for x in r["readers"]] == ["failed", "done"]
     s = r["skipped"][0]
     assert s["failed"] and s["code"] == "TIMEOUT" and "did not answer in time" in s["why"]
     assert r["comparison"]["totals"]["readers"] == 1
-    fake.fail_kind("beta", *[AkoweError("TIMEOUT", "/x", "the AI did not answer in time")] * 2)
+    fake.fail_kind("beta", *[AkoweError("TIMEOUT", "/x", "the AI did not answer in time")] * 4)
     r = beta.service_of(app).panel("author", run["project_id"], "main", readers=[{"slot_id": None}] * 2)
     assert r["status"] == "failed" and "No beta reader could read the book" in r["message"]
 
