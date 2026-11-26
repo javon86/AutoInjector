@@ -445,3 +445,23 @@ def all_text(book: dict) -> str:
             if "text" in b:
                 parts.append(b["text"])
     return "\n".join(parts)
+
+
+def unprintable_lines(book: dict) -> list[str]:
+    """R3: one plain line per part of the book holding characters NO font of the PDF can print (an emoji, Chinese,
+    Arabic …): the PDF shows □ there, the EPUB and Word files keep them. Names the chapter and the count only."""
+    from .unifont import replaced_count  # noqa: PLC0415
+    out = []
+    n = sum(replaced_count(book["meta"].get(k, "")) for k in ("title", "author"))
+    if n:
+        out.append(f"The book's title or author has {n} character(s) the PDF cannot print (shown as □ in the PDF; "
+                   "the EPUB and Word files keep them)")
+    for s in book["sections"]:
+        n = replaced_count(s.get("heading") or "") + sum(
+            replaced_count(b.get(k) or "") for b in s["blocks"] for k in ("text", "caption"))
+        if n:
+            where = f"Chapter {s['number']}" if s.get("kind") == "chapter" and s.get("number") else \
+                {"title_page": "The title page", "toc": "The contents"}.get(s.get("kind"), "A front or back page")
+            out.append(f"{where} has {n} character(s) the PDF cannot print (an emoji or a letter of another "
+                       "alphabet): the PDF shows □ in their place; the EPUB and Word files keep them")
+    return out

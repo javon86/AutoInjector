@@ -4469,7 +4469,12 @@ class AutoBookService(_Runner):
         if b:
             self.event(run, "backup", f"Backup before putting the book together ({b['name']})")
         if s["state"] != "needs_you":
-            bp.a_assemble({})
+            made = bp.a_assemble({}) or {}
+            for w in made.get("warnings") or []:  # R3: letters the PDF prints as □ never stop the book: say where
+                self.event(run, "note", w, step="assemble", code="PDF_LETTERS_REPLACED")
+                later = run.setdefault("check_later", [])
+                if w not in later:
+                    later.append(w)
         self._approve_step_items(run, "assemble", "assembly made by Akọwe from the approved chapters "
                                                   "(deterministic)")
         st["message"] = "The book is put together and approved"

@@ -769,12 +769,14 @@ def f15_k(h: Harness) -> Outcome:
         o3 = one(h3, "Ọkọ̀ Ojú Omi — Москва, Ἀθῆναι", "Yorùbá + Cyrillic + Greek title (fonts can print it): ")
     out = o.worst(o2).worst(o3)
     from akowe.exporters.unifont import uncovered  # noqa: PLC0415
-    cover = {n: ("blocks" if uncovered(s) else "prints") for n, s in (
+    from akowe.exporters.unifont import printable  # noqa: PLC0415
+    cover = {n: ("□ in the PDF only (never stops the book)" if uncovered(s) else
+                 "left out (invisible)" if s and not printable(s) else "prints") for n, s in (
         ("Yorùbá ọ ẹ ṣ with tone marks", "Ọkọ̀ ẹ̀ ṣ"), ("Greek", "Ἀθῆναι"), ("Cyrillic", "Москва"),
         ("Vietnamese", "Tiếng Việt"), ("Arabic", "كتاب"), ("Hebrew", "ספר"), ("Chinese / Japanese", "海の本"),
         ("Hindi (Devanagari)", "हिन्दी"), ("emoji", "🌊"), ("byte-order mark U+FEFF", "﻿"),
         ("NUL", "\x00"), ("zero-width space / joiner", "​‍"), ("right-to-left override", "‮"))}
-    out.notes.append("What the PDF fonts can print (exporters.unifont.uncovered): "
+    out.notes.append("What the PDF fonts can print (exporters.unifont.uncovered / printable): "
                      + "; ".join(f"{k}: {v}" for k, v in cover.items()) + ".")
     return out
 

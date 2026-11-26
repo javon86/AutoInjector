@@ -98,13 +98,31 @@ def _err(code, path, message):
 def letters_warning(text) -> str | None:
     """🔤 H18: letters of a chapter that NO font of the PDF can print (neither the base-14 fonts nor the bundled
     Unicode font). Accents, ọ / ẹ, ł, Greek and Cyrillic are fine; e.g. Chinese or emoji are not. None when fine."""
-    from .exporters.unifont import uncovered  # noqa: PLC0415
+    from .exporters.unifont import replaced_count, uncovered  # noqa: PLC0415
     bad = uncovered(str(text or ""))
     if not bad:
         return None
     shown = " ".join(bad[:12]) + (" …" if len(bad) > 12 else "")
-    return (f"⚠️ This chapter has letters the PDF cannot print: {shown}. The EPUB and Word files are fine, but the "
-            "PDF will refuse the book until they are replaced (or written another way).")
+    return (f"⚠️ This chapter has {replaced_count(text)} character(s) the PDF cannot print: {shown}. The PDF shows □ "
+            "in their place; the EPUB and Word files keep them as written.")
+
+
+def pdf_letters_notes(title: str, chapter_texts: list) -> list[str]:
+    """R3: the ⚠️ lines for a book whose title or chapters hold characters the PDF cannot print (it shows □ there;
+    the book is never stopped for them). Names the chapter number and how many characters, never the text."""
+    from .exporters.unifont import replaced_count  # noqa: PLC0415
+    out = []
+    n = replaced_count(title)
+    if n:
+        out.append(f"⚠️ The book's title has {n} character(s) the PDF cannot print (an emoji or a letter of another "
+                   "alphabet): the PDF shows □ in their place; the EPUB and Word files keep them.")
+    for i, text in enumerate(chapter_texts, start=1):
+        n = replaced_count(text)
+        if n:
+            out.append(f"⚠️ Chapter {i} has {n} character(s) the PDF cannot print (an emoji or a letter of another "
+                       "alphabet): the PDF shows □ in their place; the EPUB and Word files keep them. Change them in "
+                       "the chapter if the PDF matters.")
+    return out
 
 
 def clean_profile(body) -> dict:
@@ -1177,8 +1195,18 @@ class BookPath:
             m["assembly"] = asm
             m.pop("exports", None)
         self.remember(put)
-        return {"ok": True, "message": f"The book is put together from {len(refs)} approved chapter(s). Approve the "
-                "assembly to export it."}
+        out = {"ok": True, "message": f"The book is put together from {len(refs)} approved chapter(s). Approve the "
+               "assembly to export it."}
+        try:  # R3: say which chapters the PDF prints with □ (never stops the book)
+            warns = pdf_letters_notes(asm["title_page"][0] if asm["title_page"] else "",
+                                      [((self.rec(c["record_id"], c["version"]) or {}).get("data") or {})
+                                       .get("text") or "" for c in chapters])
+        except Exception:  # noqa: BLE001 - a note only
+            log.exception("pdf letters note failed")
+            warns = []
+        if warns:
+            out["warnings"] = warns
+        return out
 
     def _title_rules(self):
         """The TITLE_RULES record for chapter headings (made once, reused while it is current)."""

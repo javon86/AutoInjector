@@ -7,8 +7,11 @@ lost their accents or printed "?". Now every run of letters WinAnsi cannot print
 (``subset``: only the glyphs the document uses keep their outlines, so a PDF grows by a few kB, not 380 kB).
 
 * ``covered(ch)`` — does the bundled font have this letter; ``uncovered(text)`` — the letters NO font of the PDF
-  can print (they still block: never silently replaced).
-* ``segments(text, base)`` — the text cut into runs [(text, font)] where ``font`` is ``base`` or ``NAME``.
+  can print (an emoji, Chinese, Arabic …). R3: they never stop the book: the PDF alone shows ``PLACEHOLDER`` (□) in
+  their place and the author gets a ⚠️ note naming the chapter (the EPUB and Word files keep the text as written).
+  Invisible junk (byte-order mark, NUL and other control characters, variation selectors) is simply left out.
+* ``printable(text)`` — the text as the PDF prints it (junk dropped, □ for the unprintable).
+* ``segments(text, base)`` — the printable text cut into runs [(text, font)] where ``font`` is ``base`` or ``NAME``.
 * ``width(text)`` — advance width in 1/1000 em, like the AFM tables of the base-14 fonts.
 * ``pdf_objects(writer, used_chars)`` — the Type0 / CIDFontType2 font (Identity-H, FontFile2 subset, ToUnicode, /W)
   added to a ``PdfWriter``; ``encode(text)`` — the hex string of the glyph ids for a Tj.
@@ -17,13 +20,18 @@ Pure Python (no fontTools): the TrueType tables are read with ``struct``.
 """
 from __future__ import annotations
 
+import re
 import struct
 import threading
 from pathlib import Path
 
 NAME = "DejaVuSerif"                     # the font name the layout ops use for these runs
 FILE = Path(__file__).resolve().parent / "fonts" / "DejaVuSerif.ttf"
+PLACEHOLDER = "\u25a1"                   # □ what the PDF prints for a letter no font of the PDF has
 _LOCK = threading.Lock()
+# Invisible junk the PDF leaves out: C0/C1 controls (not tab / newline / CR), DEL, lone surrogates, the byte-order
+# mark, U+FFFE / U+FFFF and the variation selectors (they only pick a glyph style).
+_JUNK = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f\ud800-\udfff\ufeff\ufffe\uffff\ufe00-\ufe0f]")
 _FONT = None
 
 
@@ -145,16 +153,36 @@ def winansi_ok(ch: str) -> bool:
     return b[0] >= 32
 
 
+def _plain(ch: str) -> bool:
+    return ch in "\n\t\r" or winansi_ok(ch)
+
+
 def uncovered(text: str) -> list[str]:
-    """The letters neither the base-14 fonts (WinAnsi) nor the bundled Unicode font can print (sorted, once)."""
-    return sorted({ch for ch in text if ch not in "\n\t\r" and not winansi_ok(ch) and not covered(ch)})
+    """The letters neither the base-14 fonts (WinAnsi) nor the bundled Unicode font can print (sorted, once). The PDF
+    shows □ for them; invisible junk it leaves out (byte-order mark, NUL …) is not listed."""
+    return sorted({ch for ch in str(text or "") if not _plain(ch) and not _JUNK.match(ch) and not covered(ch)})
+
+
+def replaced_count(text: str) -> int:
+    """How many characters of ``text`` the PDF shows as □ (see ``printable``)."""
+    return sum(1 for ch in str(text or "") if not _plain(ch) and not _JUNK.match(ch) and not covered(ch))
+
+
+def printable(text: str) -> str:
+    """The text as the PDF prints it: invisible junk left out, □ (or "?" without the bundled font) for a letter no
+    font of the PDF has. Only the PDF: the book's own text is never changed."""
+    t = _JUNK.sub("", str(text or ""))
+    if all(_plain(c) for c in t):
+        return t
+    mark = PLACEHOLDER if covered(PLACEHOLDER) else "?"
+    return "".join(c if _plain(c) or covered(c) else mark for c in t)
 
 
 def segments(text: str, base: str) -> list[tuple[str, str]]:
-    """[(run, font)]: the runs WinAnsi can print stay in ``base``; the others go to the Unicode font (a letter the
-    Unicode font lacks too stays in ``base`` — it prints as "?"; G05 blocks such a book before)."""
+    """[(run, font)] of the printable text: the runs WinAnsi can print stay in ``base``; the others go to the Unicode
+    font."""
     out: list[tuple[str, str]] = []
-    for ch in text:
+    for ch in printable(text):
         f = base if winansi_ok(ch) or not covered(ch) else NAME
         if out and out[-1][1] == f:
             out[-1] = (out[-1][0] + ch, f)
@@ -164,7 +192,8 @@ def segments(text: str, base: str) -> list[tuple[str, str]]:
 
 
 def needs(text: str) -> bool:
-    return any(not winansi_ok(ch) and ch not in "\n\t\r" and covered(ch) for ch in text)
+    """Does this text need ``segments`` (a letter WinAnsi lacks, or junk / an unprintable letter to replace)?"""
+    return any(not winansi_ok(ch) and ch not in "\n\t\r" for ch in text)
 
 
 def width(text: str) -> float:
