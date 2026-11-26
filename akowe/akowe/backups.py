@@ -77,6 +77,35 @@ def _seq(name: str) -> int:
     return int(m.group(1)) if m else 0  # older names (auto-<stamp>-...) sort before every numbered backup
 
 
+FAILURE_WORDS = {"DISK_FULL": "the disk is full", "FOLDER_BLOCKED": "the backups folder could not be made",
+                 "READ_ONLY": "the data folder cannot be written", "BACKUP_ERROR": "the backup could not be written"}
+
+
+def failure_code(exc: BaseException) -> str:
+    """One plain code for why a backup failed (looks through the AkoweError to the OS error that caused it)."""
+    import errno  # noqa: PLC0415
+    seen = exc
+    for _ in range(4):
+        if isinstance(seen, OSError):
+            if seen.errno in (errno.ENOSPC, getattr(errno, "EDQUOT", -1)):
+                return "DISK_FULL"
+            if isinstance(seen, (FileExistsError, NotADirectoryError)):
+                return "FOLDER_BLOCKED"
+            if isinstance(seen, PermissionError) or seen.errno == errno.EROFS:
+                return "READ_ONLY"
+            break
+        if isinstance(seen, sqlite3.Error) and "full" in str(seen).lower():
+            return "DISK_FULL"
+        if seen.__cause__ is None:
+            break
+        seen = seen.__cause__
+    return "BACKUP_ERROR"
+
+
+def failure_words(code: str | None) -> str:
+    return FAILURE_WORDS.get(code or "", FAILURE_WORDS["BACKUP_ERROR"])
+
+
 class BackupManager:
     def __init__(self, store: Store, busy=None, exclusive=None, after_restore=None):
         self.store = store
@@ -87,6 +116,7 @@ class BackupManager:
         self.busy = busy  # callable -> str|None: why a restore must wait (e.g. a run is active)
         self.exclusive = exclusive  # context manager factory: no new writer may start while it is held
         self.last_error: str | None = None
+        self.last_code: str | None = None  # why the last ``try_backup`` failed (``failure_code``), else None
         self.on_restored: list = []  # callables run after a restore touched the live data (e.g. drop health caches)
 
     # ------------------------------------------------------------------ settings
@@ -149,13 +179,16 @@ class BackupManager:
         return dict(self._describe(dest), created_at=manifest.get("created_at"), problems=problems[:5])
 
     def try_backup(self, reason: str) -> dict | None:
-        """Best effort (used before big steps): never raises."""
+        """Best effort (used before big steps): never raises. On a failure ``last_code`` says why in one word
+        (DISK_FULL, FOLDER_BLOCKED, READ_ONLY or BACKUP_ERROR; see ``failure_words``)."""
+        self.last_code = None
         try:
             return self.backup(reason)
         except Exception as exc:  # noqa: BLE001
             if not self.last_error:
                 self.last_error = f"{type(exc).__name__}"
-            log.warning("automatic backup (%s) failed: %s", reason, type(exc).__name__)
+            self.last_code = failure_code(exc)
+            log.warning("automatic backup (%s) failed: %s %s", reason, type(exc).__name__, self.last_code)
             return None
 
     def _describe(self, d: Path) -> dict:

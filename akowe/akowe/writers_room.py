@@ -892,8 +892,24 @@ def _run_room(runner, run, st, target: dict, where: str, control: tuple) -> dict
         runner.event(run, "note", f"⚠️ The writers' room ({where}) could not meet ({code}); the book goes on without it",
                      code="WRITERS_ROOM_FAILED")
         return None
+    try:
+        return _decide(runner, run, svc, room, where)
+    except (Cancelled, *control):
+        raise
+    except Exception as exc:  # noqa: BLE001 - a room must never stop the book
+        if getattr(exc, "control", False):
+            raise
+        log.exception("writers' room could not decide in run %s", run["id"])
+        runner.event(run, "note", f"⚠️ The writers' room ({where}) could not decide ({type(exc).__name__}); the book "
+                     "goes on without it", code="WRITERS_ROOM_FAILED")
+        return None
+
+
+def _decide(runner, run, svc, room: dict, where: str) -> dict | None:
+    """The run's consent picks the room's idea (None, noted, when no usable idea came back)."""
     letter = _auto_pick(room)
-    pitch = next((p for p in room["pitches"] if p.get("letter") == letter), None)
+    pitch = next((p for p in room.get("pitches") or [] if letter and p.get("letter") == letter and p.get("title")
+                  and p.get("idea")), None)
     if pitch is None:
         runner.event(run, "note", f"⚠️ The writers' room ({where}): {room.get('message') or 'no idea came back'} — "
                      "the book goes on without it", code="WRITERS_ROOM_FAILED")

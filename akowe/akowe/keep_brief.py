@@ -275,14 +275,16 @@ def guard_fix(job, rec: dict, payload: dict, keep: list[str], review: dict) -> N
     """After the fixer answered, before anything is saved: a revision that drops a KEEP line, or (a review fix) one
     that changes only spacing / punctuation, is refused (AkoweError; the earlier version stays). No-op otherwise."""
     from .errors import AkoweError  # noqa: PLC0415
-    if not getattr(job, "keep_kind", None) or rec.get("module_id") != "C02":
+    try:  # never holds up the book: a bug in the check lets the fix through unchanged (only the refusals below raise)
+        found = _guard_check(job, rec, payload, keep, review)
+    except Exception as exc:  # noqa: BLE001
+        if getattr(exc, "control", False):
+            raise
+        log.exception("keep check of a fix")
         return
-    old = str((rec.get("data") or {}).get("text") or "")
-    new = str((payload or {}).get("text") or "")
-    if not new:
+    if not found:
         return
-    label = getattr(job, "keep_label", "chapter")
-    lost = [q for q in keep or [] if _norm(q) not in _norm(new)]
+    lost, label = found
     if lost:
         _note(job, "KEEP_LOST", f"⚠️ The AI's fix of the {label} cut {len(lost)} line(s) it was told to keep, so it "
                                 "was not saved; the earlier version stays", "refused")
@@ -290,14 +292,32 @@ def guard_fix(job, rec: dict, payload: dict, keep: list[str], review: dict) -> N
                          "so nothing was saved", status="REJECTED")
         err.check_problems = [f"KEEP_LOST: keep this line word for word: “{q[:200]}”" for q in lost]
         raise err
+    # no line lost: the fix changed only spacing or punctuation
+    _note(job, "FIX_COSMETIC", f"⚠️ The AI's fix of the {label} changed only spacing or punctuation, so it was not "
+                               "saved and no more fixes are tried for this version", "stopped")
+    stop = getattr(job, "keep_stop", None)
+    if callable(stop):
+        stop()
+    raise AkoweError("INVALID_INPUT", "/payload", "the revision changed only spacing or punctuation, so nothing "
+                     "was saved", status="REJECTED")
+
+
+def _guard_check(job, rec: dict, payload: dict, keep: list[str], review: dict) -> tuple[list[str], str] | None:
+    """For ``guard_fix``: None when the fix may be saved; else (the KEEP lines it dropped, the label) — an empty list
+    means the fix changed only spacing or punctuation."""
+    if not getattr(job, "keep_kind", None) or rec.get("module_id") != "C02":
+        return None
+    old = str((rec.get("data") or {}).get("text") or "")
+    new = str((payload or {}).get("text") or "")
+    if not new:
+        return None
+    label = getattr(job, "keep_label", "chapter")
+    lost = [q for q in keep or [] if _norm(q) not in _norm(new)]
+    if lost:
+        return lost, label
     if job.keep_kind == "fix" and cosmetic(old, new) and not _about_punctuation(review or {}):
-        _note(job, "FIX_COSMETIC", f"⚠️ The AI's fix of the {label} changed only spacing or punctuation, so it was not "
-                                   "saved and no more fixes are tried for this version", "stopped")
-        stop = getattr(job, "keep_stop", None)
-        if callable(stop):
-            stop()
-        raise AkoweError("INVALID_INPUT", "/payload", "the revision changed only spacing or punctuation, so nothing "
-                         "was saved", status="REJECTED")
+        return [], label
+    return None
 
 
 def for_propose(job, text: str, findings: list) -> list[str]:

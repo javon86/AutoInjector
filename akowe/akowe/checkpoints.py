@@ -1182,8 +1182,20 @@ def _setups_so_far_(svc, run: dict, cp: dict) -> None:
     _put(svc.store, pid, branch, cp)
 
 
+def _same_key(cid: str, p: dict) -> tuple:
+    """Two reports of one problem: the same chapter, quote and fix (original → replacement); without a fix, also the
+    same words for the problem (two different problems about one line stay two)."""
+    def norm(x) -> str:
+        return " ".join(str(x or "").split()).lower()
+    quote, orig, repl = norm(p.get("quote")), norm(p.get("original")), norm(p.get("replacement"))
+    return cid, quote, orig, repl, "" if (orig and repl) else norm(p.get("problem"))
+
+
 def _clean_problems(raw, part: dict, texts: dict, order: list[str]) -> list[dict]:
+    """The AI's problems that are usable: a chapter of this part (chapter 0, -5, 999, "two" or a yes/no are dropped)
+    and a problem in words; the same problem reported many times is kept once (``reports`` counts them)."""
     out = []
+    seen: dict = {}
     probs = raw.get("problems") if isinstance(raw, dict) else None
     by_num = {order.index(c) + 1: c for c in part["chapter_ids"] if c in order}
     for p in probs if isinstance(probs, list) else []:
@@ -1192,14 +1204,19 @@ def _clean_problems(raw, part: dict, texts: dict, order: list[str]) -> list[dict
         n = p.get("chapter")
         if isinstance(n, str) and n.strip().isdigit():
             n = int(n)
-        cid = by_num.get(n) if isinstance(n, int) else None
+        cid = by_num.get(n) if isinstance(n, int) and not isinstance(n, bool) else None
         problem = _clip(p.get("problem"), 400)
         if not cid or not problem:
+            continue
+        key = _same_key(cid, p)
+        if key in seen:
+            seen[key]["reports"] = int(seen[key].get("reports") or 1) + 1
             continue
         out.append({"chapter_id": cid, "number": n, "quote": _clip(p.get("quote"), 400), "problem": problem,
                     "original": str(p.get("original") or "")[:MAX_FIX_ORIGINAL * 2],
                     "replacement": str(p.get("replacement") or "")[:MAX_FIX_ORIGINAL * 3],
                     **({"severity": p["severity"]} if p.get("severity") in ("minor", "major", "blocker") else {})})
+        seen[key] = out[-1]
     return out[:40]
 
 

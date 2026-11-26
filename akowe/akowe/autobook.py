@@ -117,9 +117,9 @@ STEPS = [
      "and how each one talks (a voice card each); the writer gets them in every chapter."),
     ("looks", "A", "A01", "Character looks and voice details", "Only the essentials before chapter one: how each "
      "character looks (height, build, face, eyes, hair, clothes, posture) and how they talk when afraid, angry or "
-     "grieving; a short look for the places and items the outline names. Everything else (fighting style, powers, "
-     "skills, a place's rooms, an item's powers…) is decided just in time, before the chapter that needs it, and "
-     "fixed once a chapter used it."),
+     "grieving. Places and items get their look just in time (the chapter outline that names them comes later), "
+     "like everything else (fighting style, powers, skills, a place's rooms, an item's powers…): decided before the "
+     "chapter that needs it, and fixed once a chapter used it."),
     ("pictures", "A", None, "Character pictures", "A portrait of every character from its description, and the "
      "full set (portrait, front, side and back views, character sheet) for the main character — made with Stable "
      "Diffusion in AutoInjector; each portrait becomes that character's 🔒 lock so later pictures keep the face. "
@@ -2442,13 +2442,18 @@ class AutoBookService(_Runner):
         self.save(run)
         try:
             res = checker.check(self._sub_job(run, "planned_check", rid), rid, round_no=pl["rounds"])
-        except AkoweError as exc:
-            if exc.code == "TIMEOUT" or exc.code in BUSY_CODES or exc.code == "CAPABILITY_UNAVAILABLE":
-                self._ai_problem(exc, f"checking the planned details of the {label}", record_id=rid,
-                                 chapter_id=chapter_id)
-            pl.update(error=exc.code, done_version=head["version"])
-            self.event(run, "note", f"⚠️ The planned-to-page check of the {label} did not work ({exc.code}); the book "
-                       "goes on", code="PLANNED_CHECK_FAILED", record_id=rid)
+        except (RunPaused, RunCancelled, Cancelled):
+            raise
+        except Exception as exc:  # noqa: BLE001 - never holds up the book: no answer, a refusal or a bug is a note
+            if getattr(exc, "control", False):
+                raise
+            ecode = exc.code if isinstance(exc, AkoweError) else "INTERNAL_ERROR"
+            if not isinstance(exc, AkoweError):
+                log.exception("make-a-book run %s: planned-to-page check", run["id"])
+            pl.update(error=ecode, done_version=head["version"])
+            self.event(run, "note", f"⚠️ The planned-to-page check of the {label} did not work ({ecode}); the book "
+                       "goes on (the book's own planned check lists what is missing)", code="PLANNED_CHECK_FAILED",
+                       record_id=rid)
             self._planned_summary(run)
             self.save(run)
             return head
@@ -2465,11 +2470,15 @@ class AutoBookService(_Runner):
             try:
                 prop = checker.propose_fix(self._sub_job(run, "planned_fix", rid, run["settings"].get("slot_id")),
                                            rid, res)
-            except AkoweError as exc:
-                if exc.code == "TIMEOUT" or exc.code in BUSY_CODES or exc.code == "CAPABILITY_UNAVAILABLE":
-                    self._ai_problem(exc, f"working the planned details into the {label}", record_id=rid,
-                                     chapter_id=chapter_id)
-                pl["history"].append({"round": n, "fix": "failed", "code": exc.code, "at": now_iso()})
+            except (RunPaused, RunCancelled, Cancelled):
+                raise
+            except Exception as exc:  # noqa: BLE001 - never holds up the book: the missing items stay flagged ⚠️
+                if getattr(exc, "control", False):
+                    raise
+                ecode = exc.code if isinstance(exc, AkoweError) else "INTERNAL_ERROR"
+                if not isinstance(exc, AkoweError):
+                    log.exception("make-a-book run %s: planned-details fix", run["id"])
+                pl["history"].append({"round": n, "fix": "failed", "code": ecode, "at": now_iso()})
                 break
             if not prop["applied"]:
                 pl["history"].append({"round": n, "fix": "nothing applied", "at": now_iso()})
@@ -2494,10 +2503,11 @@ class AutoBookService(_Runner):
                     self._note_review(run, st, label, r2["review"])
                     if cons == "APPROVE":
                         new_res = checker.check(self._sub_job(run, "planned_check", rid), rid, round_no=n)
-                except AkoweError as exc:
-                    if exc.code == "TIMEOUT" or exc.code in BUSY_CODES:
-                        self._ai_problem(exc, f"checking the reworked {label}", record_id=rid, chapter_id=chapter_id)
+                except AkoweError as exc:  # never holds up the book: an unchecked fix is not kept (text put back)
+                    if getattr(exc, "control", False):
+                        raise
                     cons = cons or f"failed ({exc.code})"
+                    new_res = None
             ok = new_res is not None and self._open(new_res) < self._open(res)
             pl["history"].append({"round": n, "fix": "kept" if ok else "not kept", "applied": prop["applied"],
                                   "consistency": cons, "at": now_iso()})
@@ -2625,22 +2635,32 @@ class AutoBookService(_Runner):
             rj = self._sub_job(run, f"world_{k}", k, run["settings"].get("slot_id"))
             try:
                 e = gen(self._assist, rj, bp)
-            except AkoweError as exc:
-                slow = exc.code == "TIMEOUT" or exc.code in BUSY_CODES or exc.code == "CAPABILITY_UNAVAILABLE"
-                if slow and k == "texture" and not getattr(exc, "control", False):
-                    # 🧺 the world texture is extra colour, not a must: an AI that did not answer in time does not
-                    # stop the book — it is tried once more after the outline, else listed for you to check later
+            except (RunPaused, RunCancelled, Cancelled):
+                raise
+            except Exception as exc:  # noqa: BLE001 - see below: only the story rules' slow AI pauses the step
+                if getattr(exc, "control", False):
+                    raise
+                ecode = exc.code if isinstance(exc, AkoweError) else "INTERNAL_ERROR"
+                if not isinstance(exc, AkoweError):
+                    log.exception("make-a-book run %s: %s", run["id"], k)
+                slow = ecode == "TIMEOUT" or ecode in BUSY_CODES or ecode == "CAPABILITY_UNAVAILABLE"
+                if k == "texture":
+                    # 🧺 the world texture is extra colour, not a must: whatever went wrong (no answer in time, an
+                    # unusable answer, a bug) does not stop the book — it is tried once more after the outline, else
+                    # listed for you to check later
                     run["texture_retry"] = True
-                    item.update(state="failed", note=exc.code)
-                    self.event(run, "note", f"⚠️ The AI did not answer in time for the world texture ({exc.code}); the "
-                               "book goes on and Akọwe tries once more after the chapter outline", code="TEXTURE_LATER")
+                    item.update(state="failed", note=ecode)
+                    self.event(run, "note", (f"⚠️ The AI did not answer in time for the world texture ({ecode})" if slow
+                                             else f"⚠️ The world texture could not be made ({ecode})")
+                               + "; the book goes on and Akọwe tries once more after the chapter outline",
+                               code="TEXTURE_LATER")
                     self.save(run)
                     continue
                 if slow:
                     item["state"] = "paused"
                     self._ai_problem(exc, f"writing the {label.lower()}")
-                item.update(state="failed", note=exc.code)
-                self.event(run, "note", f"⚠️ The {label.lower()} could not be made ({exc.code}); the book goes on — "
+                item.update(state="failed", note=ecode)
+                self.event(run, "note", f"⚠️ The {label.lower()} could not be made ({ecode}); the book goes on — "
                            "make it on the book's 🌍 World rules page", code=code)
                 self.save(run)
                 continue
@@ -2752,9 +2772,36 @@ class AutoBookService(_Runner):
 
     # ------------------------------------------------------------------ steps
     def _s_backup(self, run, st):
-        b = self.app.backups.try_backup("before-run")
-        st["message"] = f"Backup saved ({b['name']})" if b else "Backup could not be written (continuing; see Health)"
-        self.event(run, "backup", st["message"], step="backup")
+        """💾 A safety backup before anything starts. Never holds up the book, but a backup that failed or did not
+        verify is never reported as saved: a ⚠️ note (BACKUP_FAILED / BACKUP_UNVERIFIED) and a check-later line."""
+        from . import backups as backups_mod  # noqa: PLC0415
+        mgr = self.app.backups
+        try:
+            b = mgr.try_backup("before-run")
+        except Exception as exc:  # noqa: BLE001 - try_backup never raises; a backup never holds up the book anyway
+            if getattr(exc, "control", False):
+                raise
+            log.exception("make-a-book run %s: safety backup", run["id"])
+            b, mgr.last_code = None, "BACKUP_ERROR"
+        if b and b.get("verified") is not False:
+            st["message"] = f"Backup saved ({b['name']})"
+            self.event(run, "backup", st["message"], step="backup")
+            return
+        if b:
+            st["message"] = ("⚠️ A backup was made but it did not verify (it may be damaged); the book goes on — "
+                             "see ❤️ Health and press 💾 Back up now")
+            code, line = "BACKUP_UNVERIFIED", ("Safety backup: the backup made before this book did not verify — press "
+                                               "💾 Back up now (❤️ Health)")
+        else:
+            why = backups_mod.failure_words(getattr(mgr, "last_code", None))
+            st["message"] = f"⚠️ The safety backup could not be made ({why}); the book goes on — see ❤️ Health"
+            code, line = "BACKUP_FAILED", (f"Safety backup: this book was made without one ({why}) — "
+                                           + ("free some disk space, then " if "full" in why else "")
+                                           + "press 💾 Back up now (❤️ Health)")
+        self.event(run, "note", st["message"], step="backup", code=code)
+        later = run.setdefault("check_later", [])
+        if line not in later:
+            later.append(line)
 
     def _s_profile(self, run, st):
         s = run["settings"]
@@ -3122,9 +3169,14 @@ class AutoBookService(_Runner):
         except (RunPaused, RunCancelled, Cancelled):
             raise
         except Exception as exc:  # noqa: BLE001 - pictures never stop the book
+            if getattr(exc, "control", False):
+                raise
             log.exception("make-a-book run %s: character pictures", run["id"])
-            st["message"] = f"⚠️ The pictures could not be made now ({type(exc).__name__}); make them later with 🖼 " \
-                            "Make the rest of the pictures in the Book Bible"
+            n = book_pictures.note_run_missing(self, run, "PICTURE_ERROR",
+                                               f"Akọwe hit an unexpected problem ({type(exc).__name__})")
+            st["message"] = f"⚠️ The pictures could not be made now ({type(exc).__name__})" + (
+                f"; {n} picture(s) are on the Book Bible's to-make list" if n else "") + " — make them later with 🖼 " \
+                "Make the rest of the pictures in the Book Bible"
             self.event(run, "note", st["message"], step="pictures", code="PICTURES_WAITING")
 
     def _scene_cards(self, run, st, cid: str, item: dict):
@@ -3935,12 +3987,17 @@ class AutoBookService(_Runner):
         try:
             m = story_kind.place(self._review, self._sub_job(run, "story_kind", outline["record_id"],
                                                              run["settings"].get("slot_id")), bp, outline)
-        except AkoweError as exc:
+        except (RunPaused, RunCancelled, Cancelled):
+            raise
+        except Exception as exc:  # noqa: BLE001 - never holds up the book (a bug included)
             if getattr(exc, "control", False):
                 raise
+            ecode = exc.code if isinstance(exc, AkoweError) else "INTERNAL_ERROR"
+            if not isinstance(exc, AkoweError):
+                log.exception("make-a-book run %s: story kind placement", run["id"])
             self.event(run, "note", f"⚠️ The stages of the kind of story could not be placed on the chapters "
-                       f"({exc.code}); each begins where it usually does", step="outline", code="KIND_FAILED")
-            m = story_kind.mapping(self.store, run["project_id"], run["branch_id"], outline)
+                       f"({ecode}); each begins where it usually does", step="outline", code="KIND_FAILED")
+            m = self._fallback_mapping(run, story_kind, outline)
         done[key] = True
         if m:
             st["kind"] = [story_kind.strip_label(s_) for s_ in m["stages"]][:12]
@@ -3950,8 +4007,8 @@ class AutoBookService(_Runner):
         self.save(run)
 
     def _retry_texture(self, run, st):
-        """🧺 The world texture timed out at the start: one more try now (after the outline). Never holds up the book:
-        a second failure is listed for the author's check later (make it on the 🌍 World rules page)."""
+        """🧺 The world texture could not be made at the start: one more try now (after the outline). Never holds up
+        the book: a second failure is listed for the author's check later (make it on the 🌍 World rules page)."""
         if not run.get("texture_retry"):
             return
         run["texture_retry"] = False
@@ -3961,14 +4018,19 @@ class AutoBookService(_Runner):
         rj = self._sub_job(run, "world_texture", "texture", run["settings"].get("slot_id"))
         try:
             e = texture_mod.generate(self._assist, rj, self.bp(run))
-        except AkoweError as exc:
+        except (RunPaused, RunCancelled, Cancelled):
+            raise
+        except Exception as exc:  # noqa: BLE001 - the world texture never holds up the book
             if getattr(exc, "control", False):
                 raise
+            ecode = exc.code if isinstance(exc, AkoweError) else "INTERNAL_ERROR"
+            if not isinstance(exc, AkoweError):
+                log.exception("make-a-book run %s: world texture (second try)", run["id"])
             later = run.setdefault("check_later", [])
             line = "World texture: the AI did not make it (make it on the 🌍 World rules page)"
             if line not in later:
                 later.append(line)
-            self.event(run, "note", f"⚠️ The world texture could not be made on the second try ({exc.code}); the "
+            self.event(run, "note", f"⚠️ The world texture could not be made on the second try ({ecode}); the "
                        "book goes on without it — it is listed for you to check later", code="TEXTURE_FAILED")
             self.save(run)
             return
@@ -4014,6 +4076,15 @@ class AutoBookService(_Runner):
                        step="outline", code="LEDGER_BUILT")
         self.save(run)
 
+    def _fallback_mapping(self, run, mod, outline):
+        """The story shape's / kind's placement by position after the planner's placement failed (None when even that
+        fails: the chapters are then written without it)."""
+        try:
+            return mod.mapping(self.store, run["project_id"], run["branch_id"], outline)
+        except Exception:  # noqa: BLE001 - never holds up the book
+            log.exception("make-a-book run %s: placement by position", run["id"])
+            return None
+
     def _place_beats(self, run, st):
         """📐 story_shape.py: the planner places each beat of the author's story shape on a chapter of the approved
         outline (one AI call, checked by Akọwe; a beat it leaves out or misplaces is placed by its position). Once per
@@ -4030,12 +4101,17 @@ class AutoBookService(_Runner):
         try:
             m = story_shape.place(self._review, self._sub_job(run, "story_shape", outline["record_id"],
                                                               run["settings"].get("slot_id")), bp, outline)
-        except AkoweError as exc:
+        except (RunPaused, RunCancelled, Cancelled):
+            raise
+        except Exception as exc:  # noqa: BLE001 - never holds up the book (a bug included)
             if getattr(exc, "control", False):
                 raise
-            self.event(run, "note", f"⚠️ The story shape could not be placed on the chapters ({exc.code}); each beat "
+            ecode = exc.code if isinstance(exc, AkoweError) else "INTERNAL_ERROR"
+            if not isinstance(exc, AkoweError):
+                log.exception("make-a-book run %s: story shape placement", run["id"])
+            self.event(run, "note", f"⚠️ The story shape could not be placed on the chapters ({ecode}); each beat "
                        "is placed by its position", step="outline", code="SHAPE_FAILED")
-            m = story_shape.mapping(self.store, run["project_id"], run["branch_id"], outline)
+            m = self._fallback_mapping(run, story_shape, outline)
         done[key] = True
         if m:
             st["shape"] = [story_shape.strip_label(b) for b in m["beats"]][:20]

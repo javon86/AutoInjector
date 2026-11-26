@@ -255,7 +255,11 @@ def chapter_pass(svc, run: dict, st: dict, rid: str, label: str, chapter_id: str
     except Exception as exc:  # noqa: BLE001
         _control(exc)
         code = getattr(exc, "code", None) or type(exc).__name__
-        log.exception("subtext check of %s", rid)
+        from .errors import AkoweError  # noqa: PLC0415
+        if isinstance(exc, AkoweError):  # an ordinary AI failure (timeout, refusal, bad answer): one line, code only
+            log.info("subtext check of %s: %s", rid, code)
+        else:  # a bug: the traceback helps 📋 Copy diagnostics
+            log.exception("subtext check of %s", rid)
         mem.update(done_version=head["version"], error=code)
         svc.event(run, "note", f"⚠️ 💬 The subtext check of the {label} did not work ({code}); the book goes on",
                   code="SUBTEXT_CHECK_FAILED", record_id=rid)

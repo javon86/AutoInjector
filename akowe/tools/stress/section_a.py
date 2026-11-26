@@ -47,7 +47,11 @@ def _no_backup_check(h: Harness, run) -> tuple[list, list]:
     msg = st.get("message") or ""
     hc = _health_backups(h)
     attention = json.dumps(run.get("alert") or {}, ensure_ascii=False) + json.dumps(run.get("problem") or {})
-    told = "backup" in attention.lower()
+    # n5: the finished run's “Needs your check later” list and a ⚠️ BACKUP_FAILED journal note count as telling
+    raw = h.raw() or {}
+    later = " ".join(raw.get("check_later") or [])
+    noted = any(int((raw.get("tally") or {}).get(f"code:{c}") or 0) for c in ("BACKUP_FAILED", "BACKUP_UNVERIFIED"))
+    told = "backup" in attention.lower() or ("backup" in later.lower() and noted)
     if "could not" not in msg:
         iss.append(f"the backup step says “{scrub(msg)}” although no backup was written")
     if not told:

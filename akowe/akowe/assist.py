@@ -1799,9 +1799,13 @@ class BibleSession:
         except AkoweError as exc:
             it.update(status="error", message="Failed", error=_err_of(exc))
         except Exception as exc:  # noqa: BLE001
-            log.exception("bible item %s failed", it["key"])
-            it.update(status="error", message="Failed",
-                      error=_err("INTERNAL_ERROR", f"{type(exc).__name__} while generating this item"))
+            if getattr(exc, "control", False):  # the run's ⏸ Pause / ⏹ Cancel: not a failure (made again on resume)
+                log.info("bible item %s stopped (%s)", it["key"], type(exc).__name__)
+                it.update(status="cancelled", message="Cancelled", error=_err("CANCELLED", "cancelled"))
+            else:
+                log.exception("bible item %s failed", it["key"])
+                it.update(status="error", message="Failed",
+                          error=_err("INTERNAL_ERROR", f"{type(exc).__name__} while generating this item"))
         it.update(slot=job.slot, model=job.model, elapsed_ms=int((time.time() - t0) * 1000))
         self._phase("Item finished", job)
 
