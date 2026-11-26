@@ -205,7 +205,7 @@ def test_default_run_probes_the_plan_and_changes_nothing(tmp_path):
 def test_a_predictable_plan_is_revised_once_and_the_better_plan_kept(tmp_path):
     fake = SlotFake()
     fake.predict_script = [_all_guessed]          # the second probe (default) guesses nothing
-    fake.pairwise_script = [_prefer(MARK_TURN)]
+    fake.pairwise_script = [_prefer(MARK_TURN)] * 2  # one judge: asked in both orders
     app, fake, run = book(tmp_path, fake)
     assert fake.predict_fixes == 1 and len(fake.prompts["predictability_probe"]) == 2
     assert _events(run, "PREDICT_REVISING") and _events(run, "PREDICT_REVISED_KEPT")
@@ -224,7 +224,7 @@ def test_a_predictable_plan_is_revised_once_and_the_better_plan_kept(tmp_path):
 def test_the_first_plan_comes_back_when_it_wins_head_to_head(tmp_path):
     fake = SlotFake()
     fake.predict_script = [_all_guessed, _all_guessed]
-    fake.pairwise_script = [_prefer(MARK_TURN, present=False)]
+    fake.pairwise_script = [_prefer(MARK_TURN, present=False)] * 2  # one judge: asked in both orders
     app, fake, run = book(tmp_path, fake)
     assert fake.predict_fixes == 1 and _events(run, "PREDICT_FIRST_KEPT")
     _bp, outline, _chs = chapters(app, run["project_id"])
@@ -241,7 +241,7 @@ def test_a_key_chapter_is_written_twice_and_the_winner_kept(tmp_path):
     fake = SlotFake()
     fake.chapter_texts = {"ch3": _long("First take.")}
     fake.key_scene_script = [lambda ctx: {"approach": "opens at the reef", "text": _long(MARK_B)}]
-    fake.pairwise_script = [_prefer(MARK_B)]
+    fake.pairwise_script = [_prefer(MARK_B)] * 2  # one judge: asked in both orders
     app, fake, run = book(tmp_path, fake)
     _sys, kctx = fake.prompts["key_scene_version"][0]
     assert kctx["chapter"]["number"] == 3 and kctx["first_version_opening"].startswith("# Chapter")
@@ -296,7 +296,7 @@ def test_the_switches_turn_everything_off(tmp_path):
 def test_the_doctor_keeps_the_plan_that_wins_head_to_head(tmp_path):
     fake = SlotFake()
     fake.plan_review_script = [6, 6]                   # round 1 under the target → one revision → round 2: 9s
-    fake.pairwise_script = [_prefer("(doctor fix)", present=False)]
+    fake.pairwise_script = [_prefer("(doctor fix)", present=False)] * 2  # one judge: asked in both orders
     app, fake, run = book(tmp_path, fake)
     assert fake.doctor_fixes == 1
     mem = app.autobook.get(run["id"])["story_doctor"]

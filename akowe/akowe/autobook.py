@@ -274,6 +274,9 @@ class RunCancelled(Exception):
     control = True
 
 
+PROFILE_ASKS = 3  # 🧹 an AI answer without a title or an idea for the book is asked again, then the run pauses
+
+
 class StepProblem(Exception):
     """Pause the run on this step with a ⚠️ for the author (problem dict as shown in the UI)."""
 
@@ -2936,13 +2939,26 @@ class AutoBookService(_Runner):
             from . import human_voice  # noqa: PLC0415
             schema = dict(schema, properties=dict(schema["properties"], narrator_voice=human_voice.VOICE_FIELD))
             task = task.replace(" Return only the JSON object.", human_voice.VOICE_TASK + " Return only the JSON object.")
-        try:
-            raw = self._assist._call_ai(job, op_for_roles="B01", task=task, schema=schema, context=context,
-                                        protected=[])
-        except AkoweError as exc:
-            self._ai_problem(exc, "inventing the book")
-        raw = raw if isinstance(raw, dict) else {}
-        prof = {k: str(raw.get(k) or "").strip() for k in ("title", "genre", "audience", "tone", "idea")}
+        for attempt in range(PROFILE_ASKS):  # an answer without a title or an idea is unusable: asked again
+            try:
+                raw = self._assist._call_ai(job, op_for_roles="B01", task=task, schema=schema, context=context,
+                                            protected=[])
+            except AkoweError as exc:
+                self._ai_problem(exc, "inventing the book")
+            raw = raw if isinstance(raw, dict) else {}
+            prof = {k: str(raw.get(k) or "").strip() for k in ("title", "genre", "audience", "tone", "idea")}
+            if prof["title"] and (prof["idea"] or s.get("idea")):
+                break
+            self.event(run, "note", "The AI's answer had no title or no idea for the book; it is asked again "
+                       f"({attempt + 1} of {PROFILE_ASKS - 1})" if attempt + 1 < PROFILE_ASKS else
+                       "The AI's answer had no title or no idea for the book again", step="profile",
+                       code="PROFILE_EMPTY")
+        else:
+            raise StepProblem("CHECKS_REFUSED", f"The AI answered {PROFILE_ASKS} times without a title or an idea "
+                              "for the book, so nothing was saved.",
+                              "Press 🔁 Try again: the AI is asked again (another AI may answer better; Settings → "
+                              "🧪 Test connection shows which AI works). Or type the book's idea yourself in "
+                              "⚡ Make a book.")
         if s.get("genre"):
             prof["genre"] = s["genre"]
         prof["title"] = prof["title"][:200] or "Untitled book"
@@ -4214,7 +4230,8 @@ class AutoBookService(_Runner):
         if not outline or not story_shape.of_store(self.store, run["project_id"]):
             return
         done = run.setdefault("beats_placed", {})
-        key = f"{outline['record_id']}:{outline['version']}"
+        # keyed by the shape too: a shape the author changed is placed again
+        key = f"{outline['record_id']}:{outline['version']}:{story_shape.of_store(self.store, run['project_id'])}"
         if done.get(key):
             return
         try:
@@ -4231,7 +4248,7 @@ class AutoBookService(_Runner):
             self.event(run, "note", f"⚠️ The story shape could not be placed on the chapters ({ecode}); each beat "
                        "is placed by its position", step="outline", code="SHAPE_FAILED")
             m = self._fallback_mapping(run, story_shape, outline)
-        done[key] = True
+        done[f"{outline['record_id']}:{outline['version']}:{(m or {}).get('template')}" if m else key] = True
         if m:
             st["shape"] = [story_shape.strip_label(b) for b in m["beats"]][:20]
             self.event(run, "note", f"📐 {m['label']}: " + "; ".join(story_shape.strip_label(b) for b in m["beats"])
@@ -4359,6 +4376,8 @@ class AutoBookService(_Runner):
                                                    done=f"Decided the details chapter {idx + 1} needs"):
                                 story_details.before_chapter(self, run, st, cid, idx + 1, item)
                         payload = bp.prepare_chapter(cid)
+                        from . import draft_guard  # noqa: PLC0415 - 🧹 why its last draft was set aside, if it was
+                        payload = draft_guard.with_note(run, cid, payload)
                         from . import writer_record  # noqa: PLC0415 - 🏆 let the best writer write more
                         prov_ = self._engine.providers
                         if hasattr(prov_, "prefer_writer"):
@@ -4393,6 +4412,12 @@ class AutoBookService(_Runner):
                             item["cut"] = cuts["cut"]
                             self.event(run, "note", cuts["line"], code="INSTRUCTIONS_CUT", record_id=rid,
                                        chapter_id=cid)
+                        try:  # 🧹 the same text as another chapter / far too short or long: written again now
+                            if draft_guard.after_write(self, run, st, outline, chapters, cid, idx, rid, item):
+                                continue
+                        except StepProblem:
+                            item["state"] = "paused"
+                            raise
                     from . import key_scenes  # noqa: PLC0415 - 🎭 a key chapter written twice, the better one kept
                     key_scenes.after_draft(self, run, st, outline, chapters, cid, idx + 1, rid, item)
                     from . import chapter_polish  # noqa: PLC0415 - 📏 reading level + repeats: ≤ 1 polish, kept if better

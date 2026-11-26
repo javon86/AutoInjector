@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import copy
 import logging
+import re
 
 from .. import plan_limits
 from .. import plan_rules as pr
@@ -172,6 +173,48 @@ def outline_events(outline: dict) -> list[str]:
         for e in pr.as_list(it.get("plan.event_ids")):
             if isinstance(e, str) and e not in out:
                 out.append(e)
+    return out
+
+
+def _ai_made(ctx, rid: str | None) -> bool:
+    """Was the outline being checked made by the AI (a CREATE the AI answers, or a record the AI first wrote — its
+    later fixes and repairs are saved as updates)? An outline the author wrote is never refused for what only an AI
+    answer is refused for."""
+    try:
+        if ctx.action == "CREATE":
+            return ctx.manual_candidate is None
+        if not rid:
+            return False
+        row = ctx.store.query_one("SELECT transform FROM provenance WHERE project_id=? AND branch_id=? AND "
+                                  "record_id=? ORDER BY version LIMIT 1", (ctx.project_id, ctx.branch_id, rid))
+        return bool(row) and row["transform"] == "AI"
+    except Exception:  # noqa: BLE001 - when in doubt, the author's: flagged, never refused
+        log.exception("set_b: could not tell who made outline %s", rid)
+        return False
+
+
+_OBJ_WORD = re.compile(r"\w+")
+
+
+def repeated_objectives(items, limit: int = 5) -> list[tuple[int, int]]:
+    """Pairs of chapter numbers (1-based, in outline order) whose objectives are the same text once case,
+    punctuation and spacing are ignored (objectives of fewer than 3 words are not compared). At most ``limit``
+    pairs, each later chapter paired with the first one it repeats."""
+    first: dict[str, int] = {}
+    out = []
+    for it in items:
+        n = it.index + 1
+        obj = it.get("plan.objective")
+        words = _OBJ_WORD.findall(obj.casefold()) if isinstance(obj, str) else []
+        if len(words) < 3:
+            continue
+        key = " ".join(words)
+        if key in first:
+            out.append((first[key], n))
+            if len(out) >= limit:
+                break
+        else:
+            first[key] = n
     return out
 
 
@@ -459,6 +502,11 @@ class PlanHandler(OperationHandler):
             if feature and ((ctx.manifest or {}).get("features") or {}).get(feature) is not True:
                 add("UNSELECTED_PLAN", f"{r['module_id']} is pinned but {feature} is not selected", "BLOCKING", "FAIL",
                     [r["ref"]])
+        repeats = repeated_objectives(items)
+        ai_made = _ai_made(ctx, rid) if repeats else False
+        for a, b in repeats:  # an AI outline is refused (written again); the author's own is only flagged
+            add("CHAPTER_REPEATED", f"chapters {a} and {b} have the same objective; every chapter must move the "
+                "story on with its own objective", "BLOCKING" if ai_made else "MINOR", "FAIL" if ai_made else "UNKNOWN")
         if ctx.action == "CREATE":
             target = ctx.payload.get("target_length")
         else:

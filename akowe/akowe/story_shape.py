@@ -362,37 +362,46 @@ def chapter_beats(store, pid: str, branch: str, outline: dict | None, chapter_id
     return [b for b in (m or {}).get("beats") or [] if b.get("chapter_id") == chapter_id]
 
 
+PLACE_ATTEMPTS = 2  # the shape changed while the AI placed it: place the new one once more
+
+
 def place(review, job, bp, outline: dict) -> dict | None:
     """⚡ After the outline is approved: the planner places each beat (one AI call), Akọwe checks the answer and
     stores it with the outline. Returns the mapping (None without a shape). An AI that does not answer usefully leaves
-    every beat placed by position (still stored, so the page says how each one was placed)."""
+    every beat placed by position (still stored, so the page says how each one was placed). The shape is read again
+    after the AI answers: when the author changed it meanwhile, that answer (for the old shape) is dropped and the new
+    shape is placed (once more; a shape changed again meanwhile is placed by position, nothing stale is stored)."""
     store, pid, branch = bp.store, bp.pid, bp.branch
-    tid = of_store(store, pid)
-    t = template(tid)
     chs = _chapters(outline)
-    if not t or not chs:
-        return None
-    n = len(chs)
-    ctx = {"story_shape": outline_brief(store, pid, n),
-           "chapters": [{"chapter": i + 1, "objective": _clip(c.get("objective"), 400),
-                         "summary": _clip(c.get("summary"), 400)} for i, c in enumerate(chs)]}
-    raw, err = None, None
-    try:
-        job.phase = "The AI places the beats of the story shape on the chapters"
-        raw = review.assist._call_ai(job, op_for_roles="B11", task=PLACE_TASK, schema=PLACE_SCHEMA, context=ctx,
-                                     protected=[])  # noqa: SLF001
-    except AkoweError as exc:
-        if getattr(exc, "control", False) or exc.code in ("PERMISSION_DENIED",):
-            raise
-        err = exc.code
-    beats, problems = validate(tid, (raw or {}).get("placements") if isinstance(raw, dict) else None, n)
-    if err:
-        problems = [f"the AI could not place the beats ({err}): every beat is placed by its position"]
-    by = "ai" if any(b["by"] == "ai" for b in beats) else "position"
-    save(store, pid, branch, {"template": tid, "outline": outline["record_id"], "version": outline["version"],
-                              "chapters": n, "beats": beats, "problems": problems[:12], "by": by,
-                              "slot": getattr(job, "slot", None), "at": _now()})
-    return mapping(store, pid, branch, outline)
+    for _attempt in range(PLACE_ATTEMPTS):
+        tid = of_store(store, pid)
+        t = template(tid)
+        if not t or not chs:
+            return None
+        n = len(chs)
+        ctx = {"story_shape": outline_brief(store, pid, n),
+               "chapters": [{"chapter": i + 1, "objective": _clip(c.get("objective"), 400),
+                             "summary": _clip(c.get("summary"), 400)} for i, c in enumerate(chs)]}
+        raw, err = None, None
+        try:
+            job.phase = "The AI places the beats of the story shape on the chapters"
+            raw = review.assist._call_ai(job, op_for_roles="B11", task=PLACE_TASK, schema=PLACE_SCHEMA, context=ctx,
+                                         protected=[])  # noqa: SLF001
+        except AkoweError as exc:
+            if getattr(exc, "control", False) or exc.code in ("PERMISSION_DENIED",):
+                raise
+            err = exc.code
+        if of_store(store, pid) != tid:
+            continue  # the author chose another shape while the AI worked: this answer is for the old one
+        beats, problems = validate(tid, (raw or {}).get("placements") if isinstance(raw, dict) else None, n)
+        if err:
+            problems = [f"the AI could not place the beats ({err}): every beat is placed by its position"]
+        by = "ai" if any(b["by"] == "ai" for b in beats) else "position"
+        save(store, pid, branch, {"template": tid, "outline": outline["record_id"], "version": outline["version"],
+                                  "chapters": n, "beats": beats, "problems": problems[:12], "by": by,
+                                  "slot": getattr(job, "slot", None), "at": _now()})
+        return mapping(store, pid, branch, outline)
+    return mapping(store, pid, branch, outline)  # the shape kept changing: its beats by position, nothing stored
 
 
 # ====================================================================== what each step is told

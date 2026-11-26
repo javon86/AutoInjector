@@ -556,7 +556,8 @@ def c10_l(h: Harness) -> Outcome:
         objs = {c_.get("objective") for c_ in chs}
         return [], ([f"an outline whose {len(chs)} chapters all have the same objective was approved"]
                     if len(chs) > 1 and len(objs) == 1 else [])
-    o = h.standard(label="Three identical chapters: ", check=same)
+    # Akọwe's checks now refuse it (CHECKS_REFUSED, like the 0-chapter outline below): the offered fix is 🔁 Try again
+    o = h.standard(label="Three identical chapters: ", check=same, retry_first=True)
     with Harness(h.id, h.section, h.part, h.stress, h.title, seed=h.seed, time_limit=h.time_limit) as h2:
         h2.make_app()
         h2.chaos.add(Rule(replace(lambda c: dict(c.out, chapters=[])), kinds="B11", step="outline"))

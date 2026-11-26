@@ -34,7 +34,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from . import ai_activity, legacy, ollama_adapter, practice_ai, stop_words, usage_limits
+from . import ai_activity, ai_text, legacy, ollama_adapter, practice_ai, stop_words, usage_limits
 from .errors import AkoweError
 from .store import Store, new_id, utcnow, write_private
 
@@ -1784,7 +1784,8 @@ class ProviderRegistry:
                     "model": usage.get("model", slot["model"]), "input_tokens": usage.get("input_tokens", 0),
                     "output_tokens": usage.get("output_tokens", 0), "context_tokens_estimate": needed,
                     "provider_request_id": usage.get("provider_request_id"), "at": utcnow()}
-        return data, resource
+        # 🧹 every AI answer, once, before any caller reads it: no control / bidi-override / zero-width characters
+        return ai_text.clean_tree(data), resource
 
     # PR #122: every AI call gets its OWN full time, never what an earlier call of the same operation left over (a
     # chapter written scene by scene makes 2-6 calls under one C02 request: scene 3 used to get 10-60 s and pause).

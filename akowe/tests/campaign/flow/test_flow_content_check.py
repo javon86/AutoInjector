@@ -12,14 +12,20 @@ def _quiet(monkeypatch):
     fk.quiet_provider_sleep(monkeypatch)
 
 
-def test_identical_chapters_fail_the_content_check(tmp_path):
-    ai = fk.TraceAI(overrides={"C02": lambda ctx, out: dict(out, text="The same words.\n\nAgain the same words.")})
+SAME = ("The fog came in off the sea and Mara climbed the hundred steps of the lighthouse with the cold lantern. "
+        "\n\nAt the top she found the logbook open on the desk, the last line written in her master's hand.")
+
+
+def test_identical_chapters_are_refused_before_their_review(tmp_path):
+    """🧹 E-12.2-l: a writer that repeats chapter 1 is caught while the chapters are written (set aside, written again,
+    then a clear pause naming the chapters), no longer only by the content check after every chapter was approved.
+    The content check itself still refuses identical chapters (tests/test_set_h.py)."""
+    ai = fk.TraceAI(overrides={"C02": lambda ctx, out: dict(out, text=SAME)})
     app = fk.make_app(tmp_path, fake=ai)
     run = fk.run_book(app)
-    assert run["status"] == "paused" and run["problem"]["step"] == "check"
-    assert any("identical text" in d for d in run["problem"]["details"]), run["problem"]
-    st = {s["id"]: s for s in fk.bp_of(app, run["project_id"]).status()["steps"]}
-    assert st["check"]["result"] == "FAIL"
+    assert run["status"] == "paused" and run["problem"]["step"] == "chapters", run["problem"]
+    assert run["problem"]["code"] == "CHECKS_REFUSED"
+    assert "same as chapter 1's" in run["problem"]["message"] and "chapter 2" in run["problem"]["message"]
 
 
 def _h05(bp, manuscript_ref, manifest_ref):

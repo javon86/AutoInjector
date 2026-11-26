@@ -241,7 +241,8 @@ def test_a_new_room_is_filled_once_and_an_artifact_used_twice_is_filled_once(tmp
                             "change": "Mara learns who signed the log", "unsaid": "Mara suspects her master",
                             "beat": str((ctx.get("chapter") or {}).get("objective") or "")[:120]}]}
     fake.scene_script = [scenes] * 40
-    fake.chapter_texts["ch8"] = "Mara turned the iron key in the door. The lamp woke."
+    fake.chapter_texts["ch8"] = ("Mara turned the iron key in the door. The lamp woke.\n\nThe fog pressed against the "
+                                 "glass, and far below the harbour bells rang twice for the boats still out.")
     app = make_app(tmp_path, fake=fake)
     run = done(run_book(app, {"length": "novella"}))
     pid = run["project_id"]
