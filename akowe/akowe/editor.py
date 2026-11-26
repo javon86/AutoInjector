@@ -45,7 +45,7 @@ import logging
 import re
 from datetime import datetime, timezone
 
-from . import ai_check, calibration
+from . import ai_check, ai_injection, calibration
 from . import chapter_brief
 from . import characters as chars_mod
 from . import editor_rubric as rubric
@@ -118,6 +118,7 @@ UNRESOLVED_WORDS = {
     "NOT_ASKED": "the AI changed a passage nobody asked it to change",
     "REJECTED_BY_AUTHOR": "you chose not to use this change",
     "TOO_LONG_FOR_BUDGET": "the change made the chapter too long for the book's word budget (length_guard.py)",
+    "INSTRUCTION_LIKE": "the AI's new words read like an instruction to an AI, not like part of the book",
 }
 
 
@@ -285,7 +286,8 @@ def apply_replacements(text: str, replacements: list, findings: list, keep: list
 
     A replacement is used only when its ``original`` occurs exactly once in the (current) text, overlaps the flagged
     passage of its finding (when that passage is in the text), is not far longer than the passage, changes something
-    and keeps every keep quote it contains. Each targeted finding without a usable replacement is unresolved."""
+    and keeps every keep quote it contains, and adds no instruction-like text (ai_injection.py). Each targeted finding
+    without a usable replacement is unresolved."""
     out = text
     by_id = {f["id"]: f for f in findings}
     applied, unresolved, done = [], [], set()
@@ -321,6 +323,8 @@ def apply_replacements(text: str, replacements: list, findings: list, keep: list
                 reason = "NOT_AT_PASSAGE"
             elif any(k in orig and k not in repl for k in keep):
                 reason = "KEEP_LOST"
+            elif ai_injection.added(orig, repl):  # 🛡 never put an instruction to an AI into the book
+                reason = "INSTRUCTION_LIKE"
         if reason:
             if f is not None and fid not in done:
                 unresolved.append({"finding_id": fid, "reason": reason, "message": UNRESOLVED_WORDS[reason]})

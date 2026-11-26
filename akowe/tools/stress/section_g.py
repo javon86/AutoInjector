@@ -657,24 +657,52 @@ def _drop_setup(ctx):
     return {"replacements": [{"finding_id": f["id"], "original": f["passage"], "replacement": new}]}
 
 
+CLUE_PROMISE = {"promise": "Tom Reed's logbook ends with a final line written in a stranger's hand", "plant": 1,
+                "payoff": "The stranger who wrote the last line comes back on the boat", "payoff_from": 2,
+                "payoff_by": 3}
+
+
 @SEC.stress("20", "k", "the rewrite of chapter 1 deletes the planted setup (the logbook line in a stranger's hand "
             "that the ending pays off) and the reviewers still score it higher", likely=LIKELY)
 def g20_k(h: Harness) -> Outcome:
+    def check(hh, run):
+        iss, risk = [], []
+        c1 = (G.chapters(hh) or [{}])[0]
+        txt = c1.get("text") or ""
+        if "a hand she did not know" not in txt and G.OPEN_MARK in txt:
+            flagged = [c for c in G.codes(hh) if c and ("SETUP" in c or "PROMISE" in c or "PLANT" in c)]
+            iss.append("the rewrite that removed chapter 1's planted clue (the stranger's handwriting the ending "
+                       "pays off) was KEPT" + ("" if flagged else " and nothing in the run, the journal or the "
+                                               "final re-read says a setup was lost"))
+        return iss, risk
+    # the clue is a set-up the book knows about: the promise ledger plants it in chapter 1 (the Practice AI's own
+    # ledger is empty, so it is scripted here as a real AI would list it)
     with G.kept(scenes=False, ai=h.chaos):
         h.make_app()
         h.chaos.opening_rewrite_script = G.Forever(_drop_setup)
+        h.chaos.ledger_script = G.Forever(lambda ctx: {"promises": [dict(CLUE_PROMISE)]})
+        o = h.standard(label="Chapter 1's clue (a set-up in the promise ledger) removed by the rewrite: ",
+                       check=check)
+        o.notes.append("Opening step: “" + scrub(G.step(h, "opening").get("message")) + "”.")
+    # nothing records the line as a set-up (no ledger, no planned item, no ending set-up): Akọwe has no way to know
+    # it matters without asking an AI, so the rewrite is judged by the reviewers alone — reported, not hidden
+    with Harness(h.id, h.section, h.part, h.stress, h.title, seed=h.seed, time_limit=h.time_limit) as h2:
+        with G.kept(scenes=False, ai=h2.chaos):
+            h2.make_app()
+            h2.chaos.opening_rewrite_script = G.Forever(_drop_setup)
 
-        def check(hh, run):
-            iss, risk = [], []
-            c1 = (G.chapters(hh) or [{}])[0]
-            txt = c1.get("text") or ""
-            if "a hand she did not know" not in txt and G.OPEN_MARK in txt:
-                flagged = [c for c in G.codes(hh) if c and ("SETUP" in c or "PROMISE" in c or "PLANT" in c)]
-                iss.append("the rewrite that removed chapter 1's planted clue (the stranger's handwriting the ending "
-                           "pays off) was KEPT" + ("" if flagged else " and nothing in the run, the journal or the "
-                                                   "final re-read says a setup was lost"))
-            return iss, risk
-        return h.standard(label="Chapter 1's clue removed by the rewrite: ", check=check)
+            def check2(hh, run):
+                c1 = (G.chapters(hh) or [{}])[0]
+                txt = c1.get("text") or ""
+                if "a hand she did not know" not in txt and G.OPEN_MARK in txt:
+                    hh_note.append("Without any record of the clue as a set-up (no promise ledger entry, no planned "
+                                   "item, no ending set-up) the rewrite was judged by the reviewers' re-read alone "
+                                   "and kept.")
+                return [], []
+            hh_note: list = []
+            o2 = h2.standard(label="The same line with no record of it as a set-up: ", check=check2)
+            o2.notes += hh_note
+    return o.worst(o2)
 
 
 @SEC.stress("20", "l", "a 1-chapter book and a longer book (novelette) through the opening pass", likely=LIKELY)

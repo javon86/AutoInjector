@@ -32,10 +32,16 @@ The keep rule (simple and explainable):
    (``chapter_notes``: their weaknesses that quote chapter 1 or name it / its opening); otherwise the original stays;
 4. the overall score went DOWN → the original stays.
 
+Before the re-read (no AI): a rewrite that makes chapter 1 far longer (``max_words``) or drops a set-up that was on
+its page (``lost_setups``: the promise ledger's plants of chapter 1, its planned "must show" items with the checker's
+quotes, the book's set-ups) is refused at once — the old chapter 1 stays (OPENING_TOO_LONG / OPENING_SETUP_LOST).
+
 A kept chapter 1 goes through the usual review and approval (the reviewer judges it against approved canon); when it
-does not pass, its approved text is put back unchanged. The report is saved with the re-read scores and the book is
-put together and exported again. Never touches a chapter the author wrote. The run window, the run's report box and
-the book report say "✍ Chapter 1 rewritten with the whole book in view: kept (7.6 → 7.8/10)" (or not kept, and why).
+does not pass, its approved text is put back unchanged; when the author saved their own chapter 1 meanwhile, it stays
+exactly as they left it (not approved by the run) and the rewrite is not used (OPENING_SKIPPED_EDITED). The report
+is saved with the re-read scores and the book is put together and exported again. Never touches a chapter the author
+wrote. The run window, the run's report box and the book report say "✍ Chapter 1 rewritten with the whole book in
+view: kept (7.6 → 7.8/10)" (or not kept, and why).
 
 Never blocks the book: an AI problem is a ⚠️ note (only the run's pause / cancel stop it). AI calls go through the
 usual request plumbing (assist._call_ai, usage limits, failover): about 1 rewrite + the reviewers' re-read + 1 chapter
@@ -229,6 +235,87 @@ def findings(ch1: dict, br: dict) -> list[dict]:
     return out[:MAX_FINDINGS]
 
 
+# ====================================================================== checks of the rewrite (no AI)
+GROWTH, GROWTH_MIN = 0.5, 150   # the new chapter 1 may be at most 50 % (or 150 words) longer than the old one
+EDITED_WHY = "you edited chapter 1 meanwhile, so the rewrite was not used; your version stays as you left it"
+
+
+def max_words(old_words: int) -> int:
+    return int(old_words + max(GROWTH * old_words, GROWTH_MIN))
+
+
+def unresolved_why(prop: dict, res: dict) -> str:
+    """Why none of the writer's changes could be used, in plain words: the editor's or the length guard's reason
+    (📏 word budget), else that they did not match the text."""
+    from .editor import UNRESOLVED_WORDS  # noqa: PLC0415
+    reasons = [i.get("reason") for i in (prop or {}).get("items") or [] if not i.get("ok")]
+    reasons += [u.get("reason") for u in (res or {}).get("unresolved") or []]
+    if "TOO_LONG_FOR_BUDGET" in reasons:
+        return "the rewrite would make chapter 1 longer than the book's word budget allows"
+    for r in ("INSTRUCTION_LIKE", "KEEP_LOST", "TOO_LONG", "NOT_AT_PASSAGE", "AMBIGUOUS", "NO_CHANGE"):
+        if r in reasons:
+            return UNRESOLVED_WORDS[r]
+    if not (prop or {}).get("items") or set(reasons) <= {"NO_REPLACEMENT", None}:
+        return "the writer offered no change"
+    return "the writer's changes did not match the text word for word"
+
+
+def _plants(app, bp, chapters: list[dict], ch1: dict, br: dict) -> list[dict]:
+    """What chapter 1 sets up for later: the promise ledger's plants of chapter 1, its planned "must show" items,
+    details and set-ups (with the checker's quotes), and the book's set-ups (ending_check.promises, in ``br``).
+    [{label, text, quote}] — never raises."""
+    from . import promise_ledger  # noqa: PLC0415
+    store, pid, branch = app.store, bp.pid, bp.branch
+    out = []
+    try:
+        from .needs_list import _outline_of  # noqa: PLC0415
+        led = promise_ledger.current(store, pid, branch, _outline_of(store, pid, branch)) or {}
+        out += [{"label": e["promise"], "text": e["promise"], "quote": ""} for e in led.get("entries") or []
+                if e.get("plant") == 1 and e.get("promise")]
+    except Exception:  # noqa: BLE001 - a missing ledger only means fewer checks
+        log.warning("opening pass: could not read the promise ledger")
+    try:
+        checks = store.get_setting(f"planned_checks:{pid}:{branch}") or {}
+        res = checks.get(f"{ch1['record_id']}:{ch1['version']}") if isinstance(checks, dict) else None
+        for it in (res or {}).get("items") or []:
+            if it.get("kind") in ("must_show", "detail", "promise_plant") and it.get("status") == "on_page" and \
+                    it.get("text"):
+                out.append({"label": it["text"], "text": it["text"], "quote": str(it.get("quote") or "")})
+    except Exception:  # noqa: BLE001
+        log.warning("opening pass: could not read the planned-to-page checks")
+    out += [{"label": s, "text": s, "quote": ""} for s in (br or {}).get("setups") or [] if isinstance(s, str)]
+    seen, uniq = set(), []
+    for p in out:
+        k = p["text"].strip().lower()
+        if k and k not in seen and not any(k.startswith(x) for x in seen):  # a ledger set-up named once
+            seen.add(k)
+            uniq.append(p)
+    return uniq
+
+
+def lost_setups(app, bp, chapters: list[dict], ch1: dict, new_text: str, br: dict) -> list[str]:
+    """The set-ups that were on chapter 1's page and are not on the rewritten page (a word check, and the checker's
+    quote when it gave one). No AI."""
+    from . import planned  # noqa: PLC0415
+    from .book_report import _norm  # noqa: PLC0415
+    old_text = ch1.get("text") or ""
+    lost = []
+    for p in _plants(app, bp, chapters, ch1, br):
+        try:
+            q = _norm(p["quote"])
+            was = planned.check_text(old_text, [{"text": p["text"]}])[0]["status"] == "on_page" or \
+                (q and q in _norm(old_text))
+            if not was:
+                continue  # not on chapter 1's page before: the rewrite did not drop it
+            now = planned.check_text(new_text, [{"text": p["text"]}])[0]["status"] == "on_page" or \
+                (q and q in _norm(new_text))
+            if not now:
+                lost.append(p["label"])
+        except Exception:  # noqa: BLE001 - a check that cannot run never refuses the rewrite
+            log.warning("opening pass: a set-up could not be checked")
+    return lost
+
+
 # ====================================================================== keep or not
 def decide(before: dict, after: dict, notes_before: int, notes_after: int) -> dict:
     """The keep rule (module docstring): comparable and higher → keep; same score → keep only if the reviewers'
@@ -259,6 +346,8 @@ def line(res: dict) -> str:
         return f"{head}: not kept, the original chapter 1 stays ({res.get('why') or 'nothing was changed'})"
     if res.get("keep"):
         return f"{head}: kept ({res['before']:g} → {res['after']:g}/10)"
+    if res.get("why") == EDITED_WHY:
+        return f"{head}: not kept ({EDITED_WHY})"
     return f"{head}: not kept, the original chapter 1 stays ({res['before']:g} → {res['after']:g}/10: {res.get('why')})"
 
 
@@ -357,11 +446,27 @@ def _run(runner, run, st, mem):
                                todo, list(prop.get("keep") or [])) if ok else {"applied": []}
     if not res_t["applied"]:
         mem["result"] = {"keep": False, "before": agg.get("overall"), "after": None,
-                         "why": "the writer's changes did not match the text word for word"}
+                         "why": unresolved_why(prop, res_t)}
         runner.event(run, "note", "✍ Chapter 1 last: the writer's changes could not be applied; chapter 1 stays as it "
                      "was", step="opening", code="OPENING_UNRESOLVED")
         return _finish(runner, run, st, mem)
     new_text = res_t["text"]
+    w0, w1 = len(ch1["text"].split()), len(new_text.split())
+    if w1 > max_words(w0):  # 📏 a rewrite far longer than chapter 1 is not an opening pass (no AI spent on it)
+        mem["result"] = {"keep": False, "before": agg.get("overall"), "after": None,
+                         "why": f"the new chapter 1 would be far longer than the old one ({w0} → {w1} words)"}
+        runner.event(run, "note", f"✍ Chapter 1 last: the rewrite would make chapter 1 far longer ({w0} → {w1} "
+                     "words); chapter 1 stays as it was", step="opening", code="OPENING_TOO_LONG")
+        return _finish(runner, run, st, mem)
+    lost = lost_setups(app, bp, chapters, ch1, new_text, b)
+    if lost:  # 📜 the rewrite dropped a set-up the book pays off later: the old chapter 1 stays (no AI spent on it)
+        what = "; ".join(f"“{_clip(x, 120)}”" for x in lost[:3])
+        mem["result"] = {"keep": False, "before": agg.get("overall"), "after": None, "lost": lost[:5],
+                         "why": f"the rewrite dropped a set-up the ending needs: {what}"}
+        log.info("opening pass of run %s: the rewrite dropped %d set-up(s)", run.get("id"), len(lost))
+        runner.event(run, "note", f"✍ Chapter 1 last: the rewrite dropped a set-up the ending needs ({what}); chapter "
+                     "1 stays as it was", step="opening", code="OPENING_SETUP_LOST")
+        return _finish(runner, run, st, mem)
     st["message"] = "The same reviewers re-read the book with the new chapter 1"
     run["phase"] = st["message"]
     runner.save(run)
@@ -406,6 +511,14 @@ def _approve(runner, run, st, mem):
     head = bp.rec(c["record_id"])
     old = bp.rec(c["record_id"], c["version"])
     passed, why_not = False, "the new chapter 1 could not be saved"
+    if head is not None and old is not None and improve_pass.edited_meanwhile(runner, run, head, c["version"]):
+        # the author saved their own chapter 1 while the reviewers re-read the book: it stays exactly as they left it
+        # (not approved by the run), the rewrite of the older text is not used and its re-read scores are not saved
+        why_not = EDITED_WHY
+        runner.event(run, "note", "✍ Chapter 1 last: not kept: you edited chapter 1 meanwhile, so the rewrite was not "
+                     "used; your version stays as you left it", step="opening", code="OPENING_SKIPPED_EDITED")
+        app.store.set_setting(RESCORE_KEY.format(pid=pid, branch=branch), {"reviews": [], "at": _now()})
+        head = None
     if head is not None and old is not None:
         try:
             if head["version"] == c["version"]:

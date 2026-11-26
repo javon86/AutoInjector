@@ -170,7 +170,8 @@ def validate(raw, text: str, cands: list[dict]) -> list[dict]:
     """The AI's confirmed lines → [{id, kind, original, replacement, implied}] that can be applied word for word:
     a candidate id, on_the_nose, an ``original`` found exactly once in the text and inside (overlapping) that
     candidate's line of dialogue, not longer than the line plus a little, a ``replacement`` that changes something,
-    is at most about twice as long and is not on the nose itself. At most ``MAX_FIXES``; never two at one place."""
+    is at most about twice as long, is not on the nose itself and carries no instruction to an AI (ai_injection.py).
+    At most ``MAX_FIXES``; never two at one place."""
     if not isinstance(raw, dict) or not isinstance(raw.get("lines"), list):
         return []
     by = {c["id"]: c for c in cands}
@@ -194,6 +195,9 @@ def validate(raw, text: str, cands: list[dict]) -> list[dict]:
         if repl.strip() == orig.strip() or len(repl) > max(2 * len(orig), len(orig) + 120):
             continue
         if kind_of(repl):
+            continue
+        from .ai_injection import added as injected  # noqa: PLC0415 - 🛡 a line that instructs an AI is refused
+        if injected(orig, repl):
             continue
         used.append((a, b))
         out.append({"id": c["id"], "kind": c["kind"], "original": orig, "replacement": repl,
