@@ -73,7 +73,8 @@ def test_broken_json_pauses_the_step_then_resume_makes_exactly_one(tmp_path):
     run = fk.run_book(app)
     assert_paused_on(run, "premise")
     # asked, then 2 re-asks — on each of the two AIs (PR #122: broken JSON moves to another AI before it pauses)
-    assert "JSON" in run["problem"]["message"] and brain.kinds.count("B01") == 6
+    # R4 (stress test): plain words, no JSON jargon — "could not be used … every working AI was asked"
+    assert "could not be used" in run["problem"]["message"] and brain.kinds.count("B01") == 6
     pid = run["project_id"]
     assert outputs(app, pid, "B01") == []  # nothing half-saved
     broken["on"] = False
@@ -97,7 +98,8 @@ def test_schema_violations_never_reach_the_book(tmp_path, kind, mangle, step):
     app = fk.make_app(tmp_path, fake=fk.TextBridgeAI(brain, render))
     run = fk.run_book(app)
     assert_paused_on(run, step)
-    assert "schema" in run["problem"]["message"] or "valid" in run["problem"]["message"]
+    msg = run["problem"]["message"]  # R4 (stress test): plain words instead of schema jargon
+    assert "could not be used" in msg or "usable" in msg or "valid" in msg
     pid = run["project_id"]
     if pid and kind != "profile":
         op = {"C02": "C02", "B03": "B03", "B01": "B01"}[kind]

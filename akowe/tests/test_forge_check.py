@@ -279,7 +279,7 @@ def test_check_reads_the_written_book(tmp_path, no_provider_sleep):  # noqa: F81
     fake = CheckFake()
     fake.chapter_texts = {"ch1": "# The quay\n\nMara found the brass key in the sand.\n\nThe brass key had been forged "
                                  "in 1820, the smith said.",
-                          "ch2": "# The light\n\nMara climbed the stairs of the lighthouse."}
+                          "ch2": "# The light\n\nMara climbed the stairs of the lighthouse. The sea was calm and grey, and the gulls cried over the empty harbour while the evening slowly came down."}  # ≥ 20 words: the draft guard refuses a one-line chapter
     app = make_app(tmp_path, fake, slots=("AI-1", "AI-2"))
     run = run_book(app, {"slot_id": "AI-1"})
     assert run["status"] == "done", (run["phase"], run.get("problem"))
