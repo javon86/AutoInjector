@@ -772,7 +772,7 @@ def _ledger_boom(h: Harness):
 
 
 LEDGER = Target(step="outline", kinds=("ledger",), own=_ledger_boom)
-LED_OK, LED_FAIL = {"LEDGER_BUILT"}, {"LEDGER_FAILED"}
+LED_OK, LED_FAIL = {"LEDGER_BUILT"}, {"LEDGER_FAILED", "LEDGER_EMPTY"}  # LEDGER_EMPTY: "the AI found no set-up" (a note)
 _sub_std("10.2", LEDGER, LED_OK, LED_FAIL, "the promise ledger")
 
 
@@ -979,7 +979,7 @@ def _grid_boom(h: Harness):
 
 
 GRID = Target(step="outline", kinds=("grid",), own=_grid_boom)
-GR_OK, GR_FAIL = {"GRID_BUILT"}, {"GRID_FAILED"}
+GR_OK, GR_FAIL = {"GRID_BUILT"}, {"GRID_FAILED", "GRID_EMPTY"}  # GRID_EMPTY: "no secret to track" (a note)
 _sub_std("10.4", GRID, GR_OK, GR_FAIL, "the who-knows-what grid")
 
 

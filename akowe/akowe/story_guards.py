@@ -139,6 +139,14 @@ def after_outline(svc, run, st) -> None:
         try:
             job = svc._sub_job(run, "knowledge_grid", outline["record_id"], run["settings"].get("slot_id"))  # noqa: SLF001
             grid = knowledge_grid.build(svc._review, job, bp, outline)  # noqa: SLF001
+        except knowledge_grid.NoFacts as exc:  # the AI answered: no secret in the plan (or none it could place)
+            if exc.empty:
+                svc.event(run, "note", "🤫 Who knows what: the AI found no secret to track in this plan; the book "
+                          "goes on without the grid", step="outline", code="GRID_EMPTY")
+            else:
+                svc.event(run, "note", "⚠️ Who knows what: the AI's answer named no secret Akọwe could place (unknown "
+                          "names or chapters); the book goes on without the grid", step="outline",
+                          code="GRID_FAILED")
         except Exception as exc:  # noqa: BLE001 - guidance only: never a reason to stop the book
             if _is_control(exc):
                 raise

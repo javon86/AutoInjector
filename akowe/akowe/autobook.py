@@ -3087,9 +3087,12 @@ class AutoBookService(_Runner):
                     self._ai_problem(exc, f"writing the sheet and voice of “{item['label']}”")
                 failed += 1
                 item.update(state="failed", note=exc.code)
+                retry = run.setdefault("sheet_retry", [])
+                if rec["record_id"] not in retry:
+                    retry.append(rec["record_id"])  # 📋 one more try after the outline (_retry_sheets)
                 self.event(run, "note", f"⚠️ The sheet and voice of “{item['label']}” could not be made ({exc.code}); "
-                           "the book goes on — make them on the character's page", code="CHARACTER_SHEET_FAILED",
-                           record_id=rec["record_id"])
+                           "the book goes on — Akọwe tries once more after the chapter outline",
+                           code="CHARACTER_SHEET_FAILED", record_id=rec["record_id"])
                 self.save(run)
                 continue
             made += 1
@@ -3977,10 +3980,58 @@ class AutoBookService(_Runner):
                    code="TEXTURE_RETRIED")
         self.save(run)
 
-    def _build_ledger(self, run, st):
+    def _retry_sheets(self, run, st):
+        """📋 A character whose sheet and voice card could not be made in the characters step: one more try now (the
+        plan gives the AI more to go on). A second failure is listed for the author's check later (make them on the
+        character's page); never holds up the book — only a Pause / Cancel goes on up."""
+        todo = list(run.get("sheet_retry") or [])
+        if not todo:
+            return
+        pid, branch = run["project_id"], run["branch_id"]
+        names = {r["record_id"]: safe_title(self.app.engine.contracts, r) for r in self.bp(run).approved("A01")}
+        for rid in todo:
+            self.check(run)
+            if rid not in names:  # set aside meanwhile
+                run["sheet_retry"].remove(rid)
+                continue
+            if chars_mod.complete(chars_mod.get_entry(self.store, pid, branch, rid)):  # made by hand meanwhile
+                run["sheet_retry"].remove(rid)
+                continue
+            st["message"] = f"The AI tries the sheet and voice of “{names[rid]}” once more"
+            run["phase"] = st["message"]
+            self.save(run)
+            rj = self._sub_job(run, "characters", rid, run["settings"].get("slot_id"))
+            try:
+                chars_mod.generate(self._assist, rj, pid, branch, rid)
+                ok, code = chars_mod.complete(chars_mod.get_entry(self.store, pid, branch, rid)), "INCOMPLETE"
+            except Exception as exc:  # noqa: BLE001 - optional here: never a reason to stop the book
+                if getattr(exc, "control", False) or isinstance(exc, (RunPaused, RunCancelled, Cancelled)):
+                    raise
+                if not isinstance(exc, AkoweError):
+                    log.exception("character sheet (second try)")
+                ok, code = False, getattr(exc, "code", None) or type(exc).__name__
+            run["sheet_retry"].remove(rid)
+            if ok:
+                self.event(run, "characters", f"The AI wrote the sheet and voice card of “{names[rid]}” on the second "
+                           "try", slot=rj.slot, record_id=rid, code="CHARACTER_SHEET_RETRIED")
+            else:
+                later = run.setdefault("check_later", [])
+                line = f"{names[rid]}: sheet and voice card missing (make them on the character's page)"
+                if line not in later:
+                    later.append(line)
+                self.event(run, "note", f"⚠️ The sheet and voice of “{names[rid]}” could not be made on the second "
+                           f"try ({code}); the book goes on without them — listed for you to check later",
+                           code="CHARACTER_SHEET_LATER", record_id=rid)
+            self.save(run)
+        run.pop("sheet_retry", None)
+        self.save(run)
+
+    def _build_ledger(self, run, st, *, retry: bool = False):
         """📜 promise_ledger.py: one AI call lists the book's set-ups (promises) with the chapters where each must pay
         off; each chapter is then told what to plant and which payoffs are due, and the planned-to-page check checks
-        them. Once per outline revision; never holds up the book (no answer → no ledger, the book goes on)."""
+        them. Once per outline revision; never holds up the book. An AI that cannot answer is noted (LEDGER_FAILED)
+        and asked once more after chapter 1 (``retry``); an answer without promises is noted (LEDGER_EMPTY); the book
+        report then says the set-ups were not tracked. A Pause / Cancel goes on up: Resume builds the ledger."""
         from . import promise_ledger  # noqa: PLC0415
         bp = self.bp(run)
         outline = bp.outline()
@@ -3988,31 +4039,54 @@ class AutoBookService(_Runner):
             return
         done = run.setdefault("ledger_built", {})
         key = f"{outline['record_id']}:{outline['version']}"
-        if done.get(key):
+        if done.get(key) and not retry:
             return
         try:
-            led = promise_ledger.build(self._review, self._sub_job(run, "promise_ledger", outline["record_id"],
-                                                                   run["settings"].get("slot_id")), bp, outline)
-        except AkoweError as exc:
-            if getattr(exc, "control", False):
-                raise
-            self.event(run, "note", f"⚠️ The promise ledger could not be made ({exc.code}); the book goes on "
-                       "without it and the ending check still looks for set-ups that never paid off",
-                       step="outline", code="LEDGER_FAILED")
-            led = None
-        except Exception:  # noqa: BLE001 - guidance only: never a reason to stop the book
-            log.exception("promise ledger")
-            self.event(run, "note", "⚠️ The promise ledger could not be made; the book goes on without it",
-                       step="outline", code="LEDGER_FAILED")
-            led = None
+            led, why = promise_ledger.try_build(self._review, self._sub_job(run, "promise_ledger",
+                                                                            outline["record_id"],
+                                                                            run["settings"].get("slot_id")),
+                                                bp, outline)
+        except Exception as exc:  # noqa: BLE001 - guidance only: never a reason to stop the book
+            if getattr(exc, "control", False) or isinstance(exc, (RunPaused, RunCancelled, Cancelled)):
+                raise  # ⏸ / ⏹: not a failure — ▶ Resume makes the ledger
+            if not isinstance(exc, AkoweError):
+                log.exception("promise ledger")
+            led, why = None, getattr(exc, "code", None) or type(exc).__name__
         done[key] = True
+        run.pop("ledger_retry", None)
         if led:
             n = len(led["entries"])
             st["ledger"] = n
             self.event(run, "note", f"📜 Promise ledger: {n} set-up(s), each with the chapters where it must pay off"
-                       + (f" ({len(led['problems'])} corrected)" if led.get("problems") else ""),
+                       + (f" ({len(led['problems'])} corrected)" if led.get("problems") else "")
+                       + (" — made on the second try" if retry else ""),
                        step="outline", code="LEDGER_BUILT")
+        elif why == "EMPTY":
+            promise_ledger.note_missing(self.store, run["project_id"], run["branch_id"], outline, why)
+            self.event(run, "note", "📜 Promise ledger: the AI found no set-up to track in this plan; the book goes on "
+                       "without it and the ending check still looks for set-ups that never paid off",
+                       step="outline", code="LEDGER_EMPTY")
+        elif why and why != "TOO_SHORT":
+            promise_ledger.note_missing(self.store, run["project_id"], run["branch_id"], outline, why)
+            if not retry:
+                run["ledger_retry"] = key  # one more try after chapter 1
+            self.event(run, "note", f"⚠️ The promise ledger could not be made ({why}); the book goes on without it "
+                       + ("and the ending check still looks for set-ups that never paid off" if retry else
+                          "and Akọwe tries once more after chapter 1"),
+                       step="chapters" if retry else "outline", code="LEDGER_FAILED")
         self.save(run)
+
+    def _retry_ledger(self, run, st):
+        """📜 The promise ledger could not be made after the outline: one more try (after chapter 1, for the
+        chapters still to write). Only for the outline revision it failed on; never holds up the book."""
+        key = run.get("ledger_retry")
+        if not key:
+            return
+        outline = self.bp(run).outline()
+        if not outline or key != f"{outline['record_id']}:{outline['version']}":
+            run.pop("ledger_retry", None)
+            return
+        self._build_ledger(run, st, retry=True)
 
     def _place_beats(self, run, st):
         """📐 story_shape.py: the planner places each beat of the author's story shape on a chapter of the approved
@@ -4082,6 +4156,7 @@ class AutoBookService(_Runner):
         if not chapters:
             raise StepProblem("INVALID_INPUT", "The chapter outline has no chapters Akọwe can write.",
                               "Press 🔁 Try again.")
+        self._retry_sheets(run, st)  # 📋 a character sheet that failed before the outline: one more try now
         if run["settings"].get("bible") and not run.get("bible_scenes_seeded"):
             self._seed_scenes(run, outline, chapters)
         from . import ending_writer, keep_brief  # noqa: PLC0415 - ✋ 🎬 this run's keep briefs / ending writer / fact plan
@@ -4095,6 +4170,8 @@ class AutoBookService(_Runner):
             cid = ch["chapter_id"]
             item = st["items"][idx]
             self._checkpoints(run, st, outline, chapters, idx)  # 🧭 a checkpoint due after the chapters before this one
+            if idx:
+                self._retry_ledger(run, st)  # 📜 the promise ledger failed after the outline: one more try now
             from . import voice_test  # noqa: PLC0415 - 🗣 do the voices differ on the page so far? (≤ 1 AI mid-book)
             voice_test.before_chapter(self, run, st, outline, chapters, idx)
             # ⚡ #116: every AI call for this chapter shows "chapter N of M" in the AI activity strip
@@ -4180,6 +4257,7 @@ class AutoBookService(_Runner):
                         self._made(run, ref)
                         self.event(run, "ai", f"The AI wrote chapter {cid}", record_id=rid, module_id="C02")
                         claude_code_book.draft_written(self, run, cid, idx + 1, rid)  # 🤖 fact check starts now
+                        ending_writer.after_write(self, run, cid)  # 🎬 a checklist that could not be made is said
                         from . import brief_cuts  # noqa: PLC0415 - H13: say exactly what did not fit
                         cuts = brief_cuts.after_write(self.store, run["project_id"], run["branch_id"], cid, idx + 1, rid,
                                                       payload.get("context_ref"))

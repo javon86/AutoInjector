@@ -187,10 +187,21 @@ def _context(bp, outline: dict) -> dict:
                           "summary": _clip(c.get("summary"), 400)} for i, c in enumerate(_chapters(outline))]}
 
 
+class NoFacts(Exception):
+    """The AI answered, but the grid holds no fact: ``empty`` — it listed none (a book with no secrets), else none of
+    the facts it listed could be used (unknown names, no chapter). Not an error of Akọwe's: the book goes on."""
+
+    def __init__(self, empty: bool):
+        super().__init__("no usable fact")
+        self.empty = empty
+        self.code = "NONE" if empty else "UNUSABLE"
+
+
 def build(review, job, bp, outline: dict) -> dict | None:
     """⚡ After the outline: one AI call makes the grid; Akọwe checks it and stores it with the outline. Returns the
     grid; None when there is nothing to ask about (a one-chapter book, no cast). Raises AkoweError when the AI cannot
-    answer or its answer holds no usable fact (the caller notes it and the book goes on without a grid)."""
+    answer; ``NoFacts`` when its answer holds no usable fact (the caller notes either and the book goes on without a
+    grid)."""
     chs = _chapters(outline)
     n = len(chs)
     if n < 2:
@@ -205,10 +216,12 @@ def build(review, job, bp, outline: dict) -> dict | None:
     except AkoweError as exc:
         log.info("knowledge grid: no answer (%s)", exc.code)
         raise
-    entries, problems = validate((raw or {}).get("who_knows") if isinstance(raw, dict) else None, n, ctx["cast"])
+    listed = (raw or {}).get("who_knows") if isinstance(raw, dict) else None
+    entries, problems = validate(listed, n, ctx["cast"])
     if not entries:
-        log.info("knowledge grid: the answer held no usable fact")
-        raise AkoweError("INTERNAL_ERROR", "/who_knows", "the answer held no usable fact")
+        empty = isinstance(listed, list) and not listed
+        log.info("knowledge grid: the answer held no usable fact (%s)", "empty" if empty else "unusable")
+        raise NoFacts(empty)
     grid = {"outline": outline["record_id"], "version": outline["version"], "chapters": n, "entries": entries,
             "learned": {}, "problems": problems[:12], "slot": getattr(job, "slot", None), "at": _now()}
     save(bp.store, bp.pid, bp.branch, grid)
