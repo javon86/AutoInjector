@@ -171,10 +171,18 @@ def _plan_context(bp, outline: dict) -> dict:
 def build(review, job, bp, outline: dict) -> dict | None:
     """⚡ After the outline is approved: one AI call lists the promises; Akọwe checks them and stores the ledger with
     the outline. Returns the ledger (None when the AI gives nothing usable — the book goes on without one)."""
+    return try_build(review, job, bp, outline)[0]
+
+
+def try_build(review, job, bp, outline: dict) -> tuple[dict | None, str | None]:
+    """``build`` that also says why there is no ledger: (ledger, None) or (None, reason). Reasons: ``TOO_SHORT`` (a
+    book of one chapter: nothing to track), ``EMPTY`` (the AI listed no promise at all), ``UNUSABLE`` (it listed
+    promises, none of them usable) or the AI error's code (TIMEOUT, AI_DECLINED …). Only the run's pause / cancel
+    (and a missing permission) are raised."""
     chs = _chapters(outline)
     n = len(chs)
     if n < 2:
-        return None
+        return None, "TOO_SHORT"
     raw = None
     try:
         job.phase = "The AI lists the book's promises and when each must pay off"
@@ -184,16 +192,43 @@ def build(review, job, bp, outline: dict) -> dict | None:
         if getattr(exc, "control", False) or exc.code in ("PERMISSION_DENIED",):
             raise
         log.info("promise ledger: no answer (%s)", exc.code)
-        return None
-    entries, problems = validate((raw or {}).get("promises") if isinstance(raw, dict) else None, n)
+        return None, exc.code
+    listed = (raw or {}).get("promises") if isinstance(raw, dict) else None
+    entries, problems = validate(listed, n)
     if not entries:
-        log.info("promise ledger: the answer held no usable promise")
-        return None
+        empty = isinstance(listed, list) and not listed
+        log.info("promise ledger: the answer held no usable promise (%s)", "empty" if empty else "unusable")
+        return None, "EMPTY" if empty else "UNUSABLE"
     ledger = {"outline": outline["record_id"], "version": outline["version"], "chapters": n, "entries": entries,
               "problems": problems[:12], "slot": getattr(job, "slot", None), "at": _now()}
     save(bp.store, bp.pid, bp.branch, ledger)
+    note_missing(bp.store, bp.pid, bp.branch, None)
     log.info("promise ledger: %s promise(s) over %s chapters (%s corrected)", len(entries), n, len(problems))
-    return current(bp.store, bp.pid, bp.branch, outline)
+    return current(bp.store, bp.pid, bp.branch, outline), None
+
+
+# ====================================================================== no ledger: said in the book report
+def _missing_key(pid: str, branch: str) -> str:
+    return f"promise_ledger_missing:{pid}:{branch}"
+
+
+def note_missing(store, pid: str, branch: str, outline: dict | None, reason: str | None = None) -> None:
+    """Remember that the ledger of this outline revision could not be made (``outline`` None: forget it), so the book
+    report can say the set-ups were not tracked chapter by chapter. Never raises."""
+    try:
+        store.set_setting(_missing_key(pid, branch), {"outline": outline.get("record_id"), "version":
+                                                      outline.get("version"), "reason": reason}
+                          if outline else None)
+    except Exception:  # noqa: BLE001
+        log.exception("promise ledger: could not note the missing ledger")
+
+
+def missing_line(reason: str | None) -> str:
+    """The plain sentence for a book written without a ledger."""
+    why = ("the AI found no set-up to track" if reason == "EMPTY" else
+           "the AI could not list the book's set-ups")
+    return (f"📜 Promise ledger: not made ({why}), so the set-ups and their payoffs were not tracked chapter by "
+            "chapter; the ending check still looks for set-ups that never paid off.")
 
 
 def current(store, pid: str, branch: str, outline: dict | None) -> dict | None:
@@ -342,7 +377,7 @@ def _written(store, pid: str, branch: str, outline: dict | None) -> int:
 
 def report_info(store, pid: str, branch: str) -> dict | None:
     """For the book report: {line, counts, total, rows: [{promise, payoff, status, plant, payoff_by, paid_in}]} or
-    None without a ledger (never raises)."""
+    None without a ledger; {line, missing: True, …} when the run could not make one (never raises)."""
     try:
         from .needs_list import _outline_of  # noqa: PLC0415
         outline = _outline_of(store, pid, branch)
@@ -351,6 +386,11 @@ def report_info(store, pid: str, branch: str) -> dict | None:
         order = [c["chapter_id"] for c in _chapters(outline)]
         s = summary(store, pid, branch, outline, _written(store, pid, branch, outline))
         if not s:
+            miss = store.get_setting(_missing_key(pid, branch))
+            if isinstance(miss, dict) and miss.get("outline") == outline.get("record_id") \
+                    and miss.get("version") == outline.get("version"):
+                return {"line": missing_line(miss.get("reason")), "missing": True, "total": 0, "rows": [],
+                        "counts": {"resolved": 0, "planted": 0, "open": 0, "overdue": 0}}
             return None
         num = {cid: i + 1 for i, cid in enumerate(order)}
         rows = [{k: r.get(k) for k in ("id", "promise", "payoff", "status", "plant", "payoff_by")}

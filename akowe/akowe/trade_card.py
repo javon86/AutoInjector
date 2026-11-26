@@ -227,9 +227,10 @@ def _watch(v) -> list[str]:
     return out[:3]
 
 
-def clean(raw, *, sourced: bool) -> list[dict]:
-    """The cards of an answer (at most MAX_CRAFTS). Sources only for a Claude Code research (real URLs)."""
-    out = []
+def clean(raw, *, sourced: bool, crafts: list[str] | None = None) -> list[dict]:
+    """The cards of an answer (at most MAX_CRAFTS). Sources only for a Claude Code research (real URLs). ``crafts``:
+    only cards for these trades (the ones Akọwe found in the book) are kept."""
+    out, dropped = [], 0
     for c in (raw or {}).get("craft_cards") or [] if isinstance(raw, dict) else []:
         if not isinstance(c, dict) or not _clip(c.get("craft"), 80):
             continue
@@ -245,8 +246,13 @@ def clean(raw, *, sourced: bool) -> list[dict]:
                 "sources": [{"url": str(s.get("url")).strip()[:400], "about": _clip(s.get("about"), 120)}
                             for s in c.get("sources") or [] if isinstance(s, dict)
                             and _URL.match(str(s.get("url") or "").strip())][:6] if sourced else []}
+        if crafts is not None and not matches_craft(card["craft"], crafts):
+            dropped += 1
+            continue
         if card["how_it_works"] or card["steps"] or card["mistakes"]:
             out.append(card)
+    if dropped:
+        log.info("trade card: %s card(s) for a trade the book does not have were dropped", dropped)
     return out[:MAX_CRAFTS]
 
 
@@ -254,16 +260,47 @@ def _key(pid: str, branch: str) -> str:
     return KEY.format(pid=pid, branch=branch)
 
 
+def _usable(cards) -> bool:
+    """A stored card list Akọwe can use: a non-empty list of cards (dicts with a craft name)."""
+    return isinstance(cards, list) and bool(cards) and all(
+        isinstance(c, dict) and isinstance(c.get("craft"), str) and c["craft"].strip() for c in cards)
+
+
 def get_entry(store, pid: str, branch: str) -> dict | None:
+    """The card stored with the book, or None (also for a damaged entry: it counts as missing and a new one is
+    made)."""
     try:
         cur = store.get_setting(_key(pid, branch))
     except Exception:  # noqa: BLE001
         return None
-    return cur if isinstance(cur, dict) and cur.get("cards") else None
+    return cur if isinstance(cur, dict) and _usable(cur.get("cards")) else None
 
 
 def cards_of(store, pid: str, branch: str) -> list[dict]:
     return list((get_entry(store, pid, branch) or {}).get("cards") or [])
+
+
+_STEM_END = ("ings", "ing", "ers", "er", "ery", "ry", "s")
+
+
+def _stems(text: str) -> set[str]:
+    out = set()
+    for w in re.findall(r"[a-z]+", str(text or "").lower()):
+        for end in _STEM_END:
+            if w.endswith(end) and len(w) - len(end) >= 3:
+                w = w[: -len(end)]
+                break
+        if len(w) >= 3:
+            out.add(w)
+    return out
+
+
+def matches_craft(card_craft: str, crafts: list[str]) -> bool:
+    """Does a card's craft name one of the trades Akọwe found in the book ("lighthouse keeping" ~ "lighthouse
+    keeper", "glassblower" ~ "glassblowing")?"""
+    have = _stems(card_craft)
+    low = str(card_craft or "").lower()
+    return any(c and (c.lower() in low or low in c.lower() or have & _stems(c)) for c in crafts)
 
 
 def save(store, pid: str, branch: str, cards: list[dict], *, by: str, crafts: list[str]) -> None:
@@ -301,7 +338,7 @@ def _by_claude_code(svc, run, ctx: dict) -> list[dict] | None:
         finally:
             ai_activity.call_ended(err)
     ccb._record(run["id"], "trade_card", res.get("seconds") or (time.monotonic() - t0), True, res)  # noqa: SLF001
-    return clean(res.get("data"), sourced=True)
+    return clean(res.get("data"), sourced=True, crafts=ctx.get("crafts"))
 
 
 def _by_web_ai(svc, run, ctx: dict) -> tuple[list[dict], str | None]:
@@ -310,7 +347,7 @@ def _by_web_ai(svc, run, ctx: dict) -> tuple[list[dict], str | None]:
     with ai_activity.doing("Writing how the trade is really done", done="Wrote the trade card"):
         raw = svc._assist._call_ai(job, op_for_roles="A03", task=WEB_AI_TASK, schema=SCHEMA,  # noqa: SLF001
                                    context=ctx, protected=[])
-    return clean(raw, sourced=False), job.slot
+    return clean(raw, sourced=False, crafts=ctx.get("crafts")), job.slot
 
 
 def run_step(svc, run: dict, st: dict) -> None:
@@ -358,9 +395,10 @@ def run_step(svc, run: dict, st: dict) -> None:
         svc.event(run, "note", run["trade_card"]["line"], step="outline", code="TRADE_CARD_FAILED")
         svc.save(run)
         return
-    if not cards:
+    if not cards:  # (cards for a trade the book does not have are dropped by ``clean``)
         run["trade_card"] = {"state": "done", "crafts": len(crafts), "code": "EMPTY",
-                             "line": "⚠️ 🔧 Trade card: the answer had no usable card — the book goes on"}
+                             "line": "⚠️ 🔧 Trade card: the answer had no usable card for the book's trade — the book "
+                                     "goes on"}
         svc.event(run, "note", run["trade_card"]["line"], step="outline", code="TRADE_CARD_EMPTY")
         svc.save(run)
         return

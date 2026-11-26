@@ -920,8 +920,8 @@ def e1210_g(h: Harness) -> Outcome:
     _ending_boom(h)
 
     def check(hh, run):
-        said = [e for e in hh.raw().get("events") or [] if "ending" in str(e.get("message") or "").lower()
-                and "brief" in str(e.get("message") or "").lower()]
+        said = [e for e in hh.raw().get("events") or [] if e.get("code") == "ENDING_BRIEF_FAILED"
+                or ("ending" in str(e.get("message") or "").lower() and "brief" in str(e.get("message") or "").lower())]
         briefs = [1 for _s, ctx in hh.chaos.prompts.get("C02", []) if (ctx.get("writing_brief") or {}).get(
             "ending_brief")]
         if not briefs and not said:

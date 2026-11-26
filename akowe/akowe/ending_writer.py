@@ -97,6 +97,10 @@ def note_run(store, run: dict) -> None:
         s = run.get("settings") or {}
         store.set_setting(FLAG_KEY.format(pid=run["project_id"], branch=run["branch_id"]),
                           {k: s.get(k) is not False for k in SETTINGS} | {"run": run.get("id")})
+        key = FAULT_KEY.format(pid=run["project_id"], branch=run["branch_id"])
+        cur = store.get_setting(key)
+        if not isinstance(cur, dict) or cur.get("run") != run.get("id"):
+            store.set_setting(key, {"run": run.get("id")})  # a new run: the faults of an older one are forgotten
     except Exception:  # noqa: BLE001
         log.exception("could not note the ending-writer settings")
 
@@ -227,7 +231,9 @@ def checklist(store, pid: str, branch: str, outline: dict | None, role: str, num
 
 def ending_brief(store, pid: str, branch: str, outline: dict | None, chapter_id: str) -> dict | None:
     """{role, chapter, chapters, checklist} for the last / climax chapter of a book whose run uses the ending writer,
-    else None. Never raises."""
+    else None. Never raises: a fault while the checklist is made is remembered for the chapter (``_fault``) and the
+    run says it once the chapter is written (``after_write``)."""
+    role = number = None
     try:
         if not flags(store, pid, branch)["ending_writer"]:
             return None
@@ -237,9 +243,57 @@ def ending_brief(store, pid: str, branch: str, outline: dict | None, chapter_id:
         role, number, n = r
         lines = checklist(store, pid, branch, outline, role, number)
         return {"role": role, "chapter": number, "chapters": n, "checklist": lines} if lines else None
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
         log.exception("ending brief")
+        if role:
+            _fault(store, pid, branch, chapter_id, role, number, type(exc).__name__)
         return None
+
+
+# ====================================================================== a checklist that could not be made: said
+FAULT_KEY = "ending_writer_faults:{pid}:{branch}"
+
+
+def _fault(store, pid: str, branch: str, chapter_id: str, role: str, number, code: str) -> None:
+    """Remember that the ending checklist of this chapter could not be made (codes only). Never raises."""
+    try:
+        key = FAULT_KEY.format(pid=pid, branch=branch)
+        cur = store.get_setting(key)
+        cur = cur if isinstance(cur, dict) else {}
+        if not isinstance(cur.get(chapter_id), dict):
+            cur[chapter_id] = {"role": role, "chapter": number, "code": str(code)[:60], "said": False}
+            store.set_setting(key, cur)
+    except Exception:  # noqa: BLE001
+        log.exception("could not note the ending brief fault")
+
+
+def after_write(svc, run: dict, chapter_id: str) -> None:
+    """After a chapter is written: if its ending checklist could not be made, say so once (a ⚠️ journal note,
+    ENDING_BRIEF_FAILED) and list it for the author's check later. Never raises except the run's pause / cancel."""
+    try:
+        pid, branch = run["project_id"], run["branch_id"]
+        key = FAULT_KEY.format(pid=pid, branch=branch)
+        cur = svc.store.get_setting(key)
+        f = cur.get(chapter_id) if isinstance(cur, dict) and chapter_id != "run" else None
+        if not isinstance(f, dict) or f.get("said"):
+            return
+        what = "the climax" if f.get("role") == "climax" else "the last chapter"
+        num = f.get("chapter")
+        svc.event(run, "note", f"⚠️ The ending checklist of {what} (chapter {num}) could not be made ({f.get('code')}); "
+                  "the chapter was written without it — the final ending check still reads the whole book, and it "
+                  "is listed for you to check later", step="chapters", code="ENDING_BRIEF_FAILED")
+        later = run.setdefault("check_later", [])
+        line = f"Chapter {num}: written without its ending checklist (check that the ending pays off what the book " \
+               "set up)"
+        if line not in later:
+            later.append(line)
+        f["said"] = True
+        svc.store.set_setting(key, cur)
+        svc.save(run)
+    except Exception as exc:  # noqa: BLE001
+        if getattr(exc, "control", False):
+            raise
+        log.exception("could not say the ending brief fault")
 
 
 # ====================================================================== 📌 the facts to cite
