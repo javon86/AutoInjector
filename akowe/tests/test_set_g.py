@@ -627,11 +627,13 @@ def test_h18_accented_and_greek_letters_print_in_the_pdf_with_an_embedded_font(h
     assert len(pdf) < 200_000  # a subset, not the whole 380 kB font
 
 
-def test_unencodable_glyphs_block_pdf_path(h):
-    b = Book(h, texts=("# Title\nA line with a snowman ☃ in it.",))
+def test_unprintable_glyphs_never_block_the_pdf_path(h):
+    """R3 (was: such a letter blocked G05 and so the whole book): the PDF shows □, G05 names the chapter."""
+    b = Book(h, texts=("# Title\nA line with a wave 🌊 in it.",))
     g01 = b.g01(b.g02())
     r = h.create("G05", {"font_profile_ref": b.font, "language_tag": "en", "manuscript_ref": g01})
-    assert r["status"] == "BLOCKED" and errors_of(r)[0][0] == "CAPABILITY_UNAVAILABLE"
+    assert r["status"] == "DRAFT", r
+    assert any(f["rule_id"] == "GLYPHS" and "Chapter 1 has 1 character" in f["message"] for f in r["findings"])
     set_release_profiles(h, ["MANUSCRIPT_PDF", "EPUB_REFLOWABLE"])
     r = b.export("G12", g01)  # EPUB is Unicode: unaffected
     assert r["status"] == "DRAFT", r

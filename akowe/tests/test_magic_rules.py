@@ -226,9 +226,9 @@ def test_a_fake_ai_run_checks_the_magic_rules(tmp_path):
     fake = SlotFake()
     fake.rules_script = [MAGIC_RULES] * 8
     fake.chapter_texts = {
-        "ch1": "That night Mara Vell crushed two anchor stones and teleported to the reef. Her nose bled.",
-        "ch2": "At midnight Mara teleported back to the lighthouse with only one anchor stone, and her nose bled.",
-        "ch3": "The lamp blazed. Mara slept, and nobody used any magic at all."}
+        "ch1": "That night Mara Vell crushed two anchor stones and teleported to the reef. Her nose bled. The sea was calm and grey, and the gulls cried over the empty harbour while the evening slowly came down.",
+        "ch2": "At midnight Mara teleported back to the lighthouse with only one anchor stone, and her nose bled. The sea was calm and grey, and the gulls cried over the empty harbour while the evening slowly came down.",
+        "ch3": "The lamp blazed. Mara slept, and nobody used any magic at all. The sea was calm and grey, and the gulls cried over the empty harbour while the evening slowly came down."}
     app = make_app(tmp_path, fake)
     run = run_book(app, {"length": "short_story", "improve_pass": False})
     assert run["status"] == "done", run.get("problem")

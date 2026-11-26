@@ -37,7 +37,7 @@ from datetime import datetime, timezone
 from urllib.parse import quote
 
 from . import providers as providers_mod
-from . import approval_trust, book_promises
+from . import approval_trust, book_promises, plan_limits
 from .assist import (FIX, Cancelled, Job, _compact, _err, _err_of, book_profile_brief, canon_context, is_ref)
 from .book_path import BookPath, StepError, _title
 from .errors import AkoweError
@@ -156,6 +156,7 @@ PLAIN = (
     ("APPROVAL_REQUIRED", "This needs an extra approval record that could not be made. Open it and press Accept."),
     ("VERSION_CONFLICT", "It changed while you were approving it. Open it again and check the newest version."),
     ("PERMISSION_DENIED", "You do not have permission to approve this record."),
+    (plan_limits.RULE, plan_limits.PLAIN_MESSAGE),
 )
 
 

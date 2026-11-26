@@ -8765,7 +8765,7 @@ function whoRead(u, who, at) {
 }
 function renderRun() {
   const r = MB.run; if (!r || !MB.dialog) return;
-  const sig = JSON.stringify([r.status, r.phase, r.current, r.problem && r.problem.code, (r.waiting || {}).retry_at, r.steps.map(s => [s.state, s.message, s.review_note, s.editor_note, s.writer_note, (s.items || []).map(i => [i.state, i.editor, i.scenes, i.phase, i.note, i.planned, i.length, i.continuity, i.memory]), s.planned_note, s.checkpoints]), (r.files || []).length, r.ais, r.ai_alerts, r.review_summary, r.editor_summary, r.planned_summary, r.eta, r.report, r.save, r.costs && [r.costs.calls, r.costs.ais], r.check_later, (r.waiting || {}).message, r.alert && r.alert.key, r.stand_in]);
+  const sig = JSON.stringify([r.status, r.phase, r.current, r.problem && r.problem.code, (r.waiting || {}).retry_at, r.steps.map(s => [s.state, s.message, s.review_note, s.editor_note, s.writer_note, (s.items || []).map(i => [i.state, i.editor, i.scenes, i.phase, i.note, i.planned, i.length, i.continuity, i.memory, i.length_warning]), s.planned_note, s.checkpoints]), (r.files || []).length, r.ais, r.ai_alerts, r.review_summary, r.editor_summary, r.planned_summary, r.eta, r.report, r.save, r.costs && [r.costs.calls, r.costs.ais], r.check_later, (r.waiting || {}).message, r.alert && r.alert.key, r.stand_in]);
   if (sig === MB.sig && MB.dialog.querySelector('.mb-steps')) { updateRunClocks(); return; }
   MB.sig = sig;
   const w = r.state === 'replaced' ? ['↪', 'Replaced by a newer run', 'b-muted'] : r.state === 'interrupted' ? RUN_WORD.interrupted
@@ -8825,7 +8825,9 @@ function renderRun() {
             i.memory.saved_pct > 0 ? ` · 🧠 needs list: ${i.memory.saved_pct}% smaller instructions` : ' · 🧠 needs list used') : null,
           i.planned ? h('span', { class: `small mb-pl${i.planned.flagged ? ' flagged' : ''}`, 'data-testid': 'mb-item-planned' },
             i.planned.flagged ? ` · ⚠️ ${i.planned.missing} planned item(s) not on the page` : ' · ✅ plan on the page',
-            i.planned.fixed ? ` (${i.planned.fixed} fix kept)` : '') : null))) : null));
+            i.planned.fixed ? ` (${i.planned.fixed} fix kept)` : '') : null,
+          i.length_warning ? h('span', { class: 'small mb-pl flagged', 'data-testid': 'mb-item-length-warning' },
+            ` · ⚠️ ${i.length_warning}`) : null))) : null));
     ol.appendChild(li);
   }
   const msg = h('div', { class: 'mb-msg', 'aria-live': 'polite' });
@@ -8880,9 +8882,11 @@ function renderRun() {
     ? h('p', { class: 'words-warn mb-indep', role: 'note', 'data-testid': 'mb-not-independent' }, h('span', { 'aria-hidden': 'true' }, '⚠️ '),
       rs.same_ai ? `${NOT_INDEPENDENT} (${rs.same_ai} of ${rs.same_ai + (rs.independent || 0)} reviews so far).` : `Only ${working[0].name} works right now, so it will review its own writing: reviews are not independent (the same AI writes and reviews).`,
       h('span', { class: 'small' }, ' When another AI works again, it reviews instead.')) : null;
-  if (doneBox && (r.check_later || []).length) {  // PR #122: approved by the one working AI alone — the author checks them
+  if (doneBox && (r.check_later || []).length) {  // what the author should look at: each line says what and why
+    // PR #122: a chapter named alone was approved by the one working AI (it checked its own writing)
+    const selfChecked = r.check_later.filter(x => !/[:—]/.test(String(x)));
     doneBox.appendChild(h('p', { class: 'words-warn', 'data-testid': 'mb-check-later' }, h('span', { 'aria-hidden': 'true' }, '⚠️ '),
-      `Needs your check later (only one AI was working, so it checked its own writing): ${r.check_later.join(', ')}. They are also listed on the book's home page.`));
+      `Needs your check later: ${r.check_later.join('; ')}.` + (selfChecked.length ? ` (${selfChecked.join(', ')}: only one AI was working, so it checked its own writing — also listed on the book's home page.)` : '')));
   }
   if (doneBox && (rs.independent || rs.same_ai)) {
     doneBox.appendChild(h('p', { class: rs.same_ai ? 'words-warn' : 'small', 'data-testid': 'mb-review-summary' }, rs.same_ai ? h('span', { 'aria-hidden': 'true' }, '⚠️ ') : '🧐 ',

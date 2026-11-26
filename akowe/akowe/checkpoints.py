@@ -53,6 +53,16 @@ PART_CHARS = 60000           # characters of chapter text one AI call reads
 LEDGER_CHARS = 6000          # the compact ledger part of a checkpoint call
 LOCKED_CHARS = 3000
 MAX_FIX_ORIGINAL = 600
+FIX_GROWTH, FIX_GROWTH_MIN = 3, 200   # a "small" fix adds at most 3× its original words or 200 characters
+
+
+def small_fix(original: str, replacement: str) -> bool:
+    """A checkpoint fix Akọwe may make by itself: it changes words found in the chapter and does not grow them into a
+    new passage (more than FIX_GROWTH × the original AND more than FIX_GROWTH_MIN characters is not small)."""
+    o, r = original or "", replacement or ""
+    if not o.strip() or not r.strip() or len(o) > MAX_FIX_ORIGINAL or o.strip() == r.strip():
+        return False
+    return not (len(r) > FIX_GROWTH * len(o) and len(r) > FIX_GROWTH_MIN)
 _LOCK = threading.RLock()
 
 _S = {"type": "string"}
@@ -738,7 +748,9 @@ def _run_one(svc, run: dict, st: dict, cp: dict, chapters: list[dict]) -> None:
             _read_part_by_all(svc, run, cp, part, j, rid, ctx, task, checkers, texts, order, title, label, k)
             continue
         job = svc._sub_job(run, "checkpoint", rid, (run.get("settings") or {}).get("slot_id"))  # noqa: SLF001
-        job.retry_busy = False  # a busy AI never holds the book up: the part is read at the next checkpoint
+        # a busy AI never holds the book up: the part is read at the next checkpoint — but the final re-read at the
+        # end of a run has no next checkpoint, so it waits like the run (``wait_busy``, final_reads.py, G-22-c)
+        job.retry_busy = bool(cp.get("wait_busy"))
         review = getattr(svc, "_review", None) or svc.app.review
         tok = review.work.begin(pid, "C02", f"Checkpoint after chapter {cp['after']}")
         what, what_done = activity_words(cp, label, j, k)
@@ -870,7 +882,7 @@ def _read_part_by_all(svc, run: dict, cp: dict, part: dict, j: int, rid: str, ct
             continue
         name = cross_check.name_of(prov, slot)
         job = svc._sub_job(run, "checkpoint", rid, slot)  # noqa: SLF001
-        job.retry_busy, job.cross_pin = False, True
+        job.retry_busy, job.cross_pin = bool(cp.get("wait_busy")), True  # G-22-c: see _run_one
         tok = review.work.begin(pid, "C02", f"Checkpoint after chapter {cp['after']} ({name})")
         try:
             with ai_activity.doing(what, done=what_done):  # ⚡ #116 the AI activity strip (one row per AI)
@@ -1182,8 +1194,20 @@ def _setups_so_far_(svc, run: dict, cp: dict) -> None:
     _put(svc.store, pid, branch, cp)
 
 
+def _same_key(cid: str, p: dict) -> tuple:
+    """Two reports of one problem: the same chapter, quote and fix (original → replacement); without a fix, also the
+    same words for the problem (two different problems about one line stay two)."""
+    def norm(x) -> str:
+        return " ".join(str(x or "").split()).lower()
+    quote, orig, repl = norm(p.get("quote")), norm(p.get("original")), norm(p.get("replacement"))
+    return cid, quote, orig, repl, "" if (orig and repl) else norm(p.get("problem"))
+
+
 def _clean_problems(raw, part: dict, texts: dict, order: list[str]) -> list[dict]:
+    """The AI's problems that are usable: a chapter of this part (chapter 0, -5, 999, "two" or a yes/no are dropped)
+    and a problem in words; the same problem reported many times is kept once (``reports`` counts them)."""
     out = []
+    seen: dict = {}
     probs = raw.get("problems") if isinstance(raw, dict) else None
     by_num = {order.index(c) + 1: c for c in part["chapter_ids"] if c in order}
     for p in probs if isinstance(probs, list) else []:
@@ -1192,14 +1216,21 @@ def _clean_problems(raw, part: dict, texts: dict, order: list[str]) -> list[dict
         n = p.get("chapter")
         if isinstance(n, str) and n.strip().isdigit():
             n = int(n)
-        cid = by_num.get(n) if isinstance(n, int) else None
+        cid = by_num.get(n) if isinstance(n, int) and not isinstance(n, bool) else None
         problem = _clip(p.get("problem"), 400)
+        rep = str(p.get("replacement") or "")
         if not cid or not problem:
+            continue
+        key = _same_key(cid, p)
+        if key in seen:
+            seen[key]["reports"] = int(seen[key].get("reports") or 1) + 1
             continue
         out.append({"chapter_id": cid, "number": n, "quote": _clip(p.get("quote"), 400), "problem": problem,
                     "original": str(p.get("original") or "")[:MAX_FIX_ORIGINAL * 2],
-                    "replacement": str(p.get("replacement") or "")[:MAX_FIX_ORIGINAL * 3],
+                    # a replacement longer than any small fix may be is dropped whole, never cut mid-sentence
+                    "replacement": rep if len(rep) <= MAX_FIX_ORIGINAL * FIX_GROWTH else "",
                     **({"severity": p["severity"]} if p.get("severity") in ("minor", "major", "blocker") else {})})
+        seen[key] = out[-1]
     return out[:40]
 
 
@@ -1213,7 +1244,7 @@ def _propose(svc, run: dict, cp: dict) -> None:
             continue
         text = (texts.get(p["chapter_id"]) or {}).get("text") or ""
         o, r = p.get("original") or "", p.get("replacement") or ""
-        if o.strip() and r.strip() and text.count(o) == 1 and len(o) <= MAX_FIX_ORIGINAL and o.strip() != r.strip():
+        if text.count(o) == 1 and small_fix(o, r):
             p["status"] = "proposed"
         else:
             p.update(status="waiting", why="the fix needs you (no small, safe change was offered)")
@@ -1257,6 +1288,9 @@ def _fix(svc, run: dict, st: dict, cp: dict, title: str) -> None:
                     p.update(status="waiting", why="the words to change were not found exactly once in the chapter")
                 elif len(o) > MAX_FIX_ORIGINAL or o.strip() == r.strip():
                     p.update(status="waiting", why="no small, safe change was offered")
+                elif not small_fix(o, r):
+                    p.update(status="waiting", why="the change offered adds a whole new passage, so it is not a small, "
+                                                   "safe fix: it is left for you")
                 elif any(o in q["original"] or q["original"] in o for q in usable):
                     p.update(status="waiting", why="two fixes touch the same words")
                 else:

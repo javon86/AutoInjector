@@ -43,7 +43,7 @@ from ..exporters.images import ImageInfo, UnsupportedImage, load_image, sniff_mi
 from ..exporters.layout import (Geometry, LayoutError, Typography, make_geometry, mm_to_pt, paginate,
                                 resolve_family)
 from ..exporters import interior as interior_mod
-from ..exporters.unifont import uncovered  # 🔤 H18: what NO font of the PDF can print (WinAnsi + DejaVu Serif)
+from ..exporters.unifont import uncovered  # 🔤 H18: what NO font of the PDF can print (the PDF shows □: R3)
 from ..exporters.pdf import inspect_pdf, render_cover_pdf, render_pdf
 from . import register
 from .base import Context, OperationHandler, Result
@@ -676,7 +676,9 @@ class TypographyHandler(GHandler):
     The renderer sets text in an author-listed base-14 fallback (Times/Helvetica/Courier);
     those need no embedding, so the pinned font_refs files are NOT embedded - recorded as a
     MAJOR/UNKNOWN finding for review. Glyph coverage of the whole manuscript is checked
-    against WinAnsi; uncovered characters block (never silently replaced)."""
+    against WinAnsi + the bundled Unicode font. R3: characters no font can print never block (one emoji must not
+    stop the PDF, the EPUB and the Word file): the PDF shows □ in their place (``unifont.printable``) and a finding
+    names each chapter and how many characters were replaced; the EPUB / Word keep the text as written."""
 
     def build(self, ctx: Context) -> Result:
         fp_rec = ctx.field_record("font_profile_ref")
@@ -684,12 +686,9 @@ class TypographyHandler(GHandler):
         g01_rec = ctx.field_record("manuscript_ref")
         asm = assemble(ctx, g01_rec, "/payload/manuscript_ref")
         typo = typography_from(fp, "/payload/font_profile_ref/fallback_names")
-        bad = uncovered(bookmod.all_text(asm.book))
-        if bad:
-            raise _blocked("CAPABILITY_UNAVAILABLE", "/payload/manuscript_ref",
-                           f"characters not covered by the base-14 WinAnsi fonts: {''.join(bad[:20])!r}",
-                           unresolved=["G05:font_coverage"])
-        findings = [ctx.finding(
+        findings = [ctx.finding("GLYPHS", line, severity="MINOR", decision="UNKNOWN")
+                    for line in bookmod.unprintable_lines(asm.book)]
+        findings += [ctx.finding(
             "FONT_EMBEDDING",
             f"text is set in base-14 {typo.regular}/{typo.bold} (author-listed fallback); base-14 fonts are not "
             f"embedded and the pinned font_refs files are not used (embedding_permitted={fp['embedding_permitted']})",
@@ -722,11 +721,10 @@ class ChapterTitlePages(GHandler):
         g05, _ = load_artifact(ctx, typo_rec, ("G05",), "/payload/typography_ref")
         typography_from(g05, "/payload/typography_ref")
         bad = uncovered(rules["pattern"])
-        if bad:
-            raise _blocked("CAPABILITY_UNAVAILABLE", "/payload/chapter_title_rules_ref",
-                           f"title pattern uses characters the fonts cannot render: {''.join(bad)!r}")
+        findings = [ctx.finding("GLYPHS", f"the chapter heading pattern has {len(bad)} character(s) the PDF cannot "
+                                "print: it shows □ there", severity="MINOR", decision="UNKNOWN")] if bad else []
         return self.publish_json(ctx, {"pattern": rules["pattern"], "include_number": rules["include_number"]},
-                                 source_refs=[rules_rec["ref"], typo_rec["ref"]])
+                                 source_refs=[rules_rec["ref"], typo_rec["ref"]], findings=findings)
 
 
 # =========================================================================== G08 / G09
@@ -786,8 +784,8 @@ class _Matter(GHandler):
         bad = uncovered("\n".join(i["title"] + "\n" + i["text"] for i in items))
         findings = []
         if bad:
-            findings.append(ctx.finding("GLYPHS", f"characters outside WinAnsi: {''.join(bad[:20])!r} (PDF export will "
-                                        "block)", severity="MAJOR", decision="UNKNOWN"))
+            findings.append(ctx.finding("GLYPHS", f"{len(bad)} character(s) the PDF cannot print: it shows □ in their "
+                                        "place (EPUB and Word keep them)", severity="MINOR", decision="UNKNOWN"))
         return self.publish_json(ctx, {"items": items, "source_ref": book_rec["ref"]},
                                  source_refs=[book_rec["ref"], prof_rec["ref"]], findings=findings,
                                  transform=transform, resource=resource)
@@ -842,10 +840,6 @@ class PageLayout(GHandler):
         margins = ctx.payload["margins_pt"]
         geom = make_geometry(page, margins)
         asm = assemble(ctx, g01_rec, "/payload/manuscript_ref")
-        bad = uncovered(bookmod.all_text(asm.book))
-        if bad:
-            raise _blocked("CAPABILITY_UNAVAILABLE", "/payload/manuscript_ref",
-                           f"characters not covered by the fonts: {''.join(bad[:20])!r}")
         # 🎨 the book's interior theme (book profile interior_theme / trim_size, else its genre's look): kept with the
         # layout parameters so every later pass (G07, G11-G13) lays the pages out exactly the same way. Its margins
         # are mirrored, with an inner margin (gutter) that grows with the page count.
@@ -1179,10 +1173,6 @@ class PdfExport(_Export):
             geom = make_geometry(page, {"top": 0, "bottom": 0, "left": 0, "right": 0})
             typo, style = typography_from(fp, "/payload/pdf_profile_ref/font_profile_ref"), None
         self._approvals(ctx, asm, appr)
-        bad = uncovered(bookmod.all_text(asm.book))
-        if bad:
-            raise _blocked("CAPABILITY_UNAVAILABLE", "/payload/final_book_ref",
-                           f"characters not covered by the base-14 fonts: {''.join(bad[:20])!r}")
         try:
             layout = paginate(asm.book, geom, typo, toc_entries=entries, toc_style=style, images=asm.image_dims(),
                               interior=pg.params.get("interior") if pg is not None else None)

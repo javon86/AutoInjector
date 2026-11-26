@@ -103,7 +103,10 @@ def test_no_ledger_answer_leaves_the_book_as_before(tmp_path):
     assert promise_ledger.current(app.store, pid, "main", outline) is None
     assert not any(e.get("code") == "LEDGER_BUILT" for e in run["events"])
     assert promise_ledger.chapter_items(app.store, pid, "main", outline, chs[0][0]) == []
-    assert promise_ledger.report_info(app.store, pid, "main") is None
+    # Q3 (C-10.2-j): the run says so (LEDGER_EMPTY) and the report tells the author the payoffs were not tracked
+    assert any(e.get("code") == "LEDGER_EMPTY" for e in run["events"])
+    info = promise_ledger.report_info(app.store, pid, "main")
+    assert info["missing"] and info["rows"] == [] and "not tracked" in info["line"]
     assert not [i for i in planned_mod.planned_items(bp, outline, chs[0][0]) if i["kind"].startswith("promise_")]
 
 

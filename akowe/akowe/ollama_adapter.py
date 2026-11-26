@@ -280,12 +280,12 @@ class OllamaAdapter:
             if data is None:
                 err = AkoweError("INTERNAL_ERROR", "", "The local model returned invalid JSON. Try again, or "
                                  "choose a larger model in Settings.")
-                err.try_other_ai = True
+                err.try_other_ai = err.unusable = True
                 raise err from None
         if not isinstance(data, dict):
             err = AkoweError("INTERNAL_ERROR", "", "The local model returned JSON that is not an object. Try again, "
                              "or choose a larger model in Settings.")
-            err.try_other_ai = True
+            err.try_other_ai = err.unusable = True
             raise err
         usage = {"input_tokens": int(res.get("prompt_eval_count") or 0), "output_tokens": int(res.get("eval_count")
                                                                                                or 0),

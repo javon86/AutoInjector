@@ -277,7 +277,7 @@ def test_planned_missing_is_flagged_and_never_blocks(tmp_path):
     assert any(e.get("code") == "PLANNED_MISSING" for e in run["events"])
     assert run["planned_summary"]["book"]["missing"] >= 1
     assert "⚠️" in steps(run)["planned"]["message"]
-    # the checker failing never blocks the book either; a TIMEOUT pauses the step
+    # the checker failing never blocks the book either — a TIMEOUT included (n5, E-13-a: it is a ⚠️ note, not a pause)
     fake2 = SlotFake()
     fake2.kind_failures["planned"] = [AkoweError("INTERNAL_ERROR", "", "garbage")] * 3
     app2, fake2, run2 = book(tmp_path, fake2, name="d2")
@@ -287,11 +287,8 @@ def test_planned_missing_is_flagged_and_never_blocks(tmp_path):
     app3 = make_app(tmp_path, fake3, slots=("AI-1", "AI-2"), name="d3")
     app3.review.editor.save_settings({"enabled": False})
     run3 = run_book(app3, {"slot_id": "AI-1"})
-    assert run3["status"] == "paused" and run3["problem"]["code"] == "TIMEOUT"
-    assert "planned" in run3["problem"]["message"]
-    out = app3.autobook.resume("author", run3["id"])
-    app3.autobook.wait_for(out["id"], 180)
-    assert app3.autobook.get(run3["id"])["status"] == "done"
+    assert run3["status"] == "done"
+    assert any(e.get("code") == "PLANNED_CHECK_FAILED" and "TIMEOUT" in e["message"] for e in run3["events"])
 
 
 def test_world_failures_never_block_the_book(tmp_path):
@@ -300,7 +297,10 @@ def test_world_failures_never_block_the_book(tmp_path):
     fake.kind_failures["texture"] = [AkoweError("INTERNAL_ERROR", "", "no")]
     app, fake, run = book(tmp_path, fake)
     codes = {e.get("code") for e in run["events"]}
-    assert {"RULES_FAILED", "TEXTURE_FAILED"} <= codes
+    # the story rules fail with a note; the world texture is tried once more after the outline (n5: every texture
+    # failure, not only a timeout, takes that path) — here the second try works
+    assert {"RULES_FAILED", "TEXTURE_LATER"} <= codes
+    assert "TEXTURE_RETRIED" in codes or "TEXTURE_FAILED" in codes
     assert story_rules.get_entry(app.store, run["project_id"], "main") is None
     # no ledger: the prompts simply have no rules (and nothing breaks)
     assert "story_rules" not in fake.prompts["C02"][0][1]["writing_brief"]

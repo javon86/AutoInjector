@@ -42,6 +42,8 @@ HIGH = 9                  # a score this high needs a quoted piece of evidence
 NEAR_PERFECT_AVG = 8.5    # an average at or above this with too few findings is "too clean"
 MIN_FINDINGS = 3          # the editor must name at least this many concrete, quoted problems
 CAP = 7                   # what an unproven 9/10 (or every score of a too-clean review) counts as
+LOW_AVG = 3.0             # a whole-book average at or below this is "very low" ...
+MIN_LOW_FINDINGS = 2      # ... and needs at least this many quoted weaknesses to be believed (G-18-k)
 MIN_OBS = 3               # leniency observations before an AI's scores are discounted
 LENIENT_AT = 1.0          # leniency (points) from which an AI is discounted
 MAX_DISCOUNT = 2          # never lower a lenient AI's scores by more than this
@@ -182,7 +184,13 @@ def assess_book(raw, review: dict, text_norm: str) -> dict:
     ev = evidence_of(raw, list(scores), text_norm)
     verified = sum(1 for w in review.get("weaknesses") or [] if w.get("verified"))
     j = judge(scores, ev, verified, what="weakness(es)")
-    return dict(j, evidence=ev, weaknesses_verified=verified)
+    # G-18-k: proof is asked of very LOW scores too — a book scored 1/10 everywhere with nothing quoted is no review
+    too_harsh = bool(scores) and float(j["avg"] or 0) <= LOW_AVG and verified < MIN_LOW_FINDINGS
+    if too_harsh:
+        j = dict(j, trusted=False, reasons=list(j["reasons"]) + [
+            f"an average of {j['avg']} with only {verified} quoted weakness(es) (a score this low needs at least "
+            f"{MIN_LOW_FINDINGS})"])
+    return dict(j, evidence=ev, weaknesses_verified=verified, too_harsh=too_harsh)
 
 
 def apply_caps(scores: dict, assessment: dict) -> tuple[dict, dict]:

@@ -73,7 +73,8 @@ def test_broken_json_pauses_the_step_then_resume_makes_exactly_one(tmp_path):
     run = fk.run_book(app)
     assert_paused_on(run, "premise")
     # asked, then 2 re-asks — on each of the two AIs (PR #122: broken JSON moves to another AI before it pauses)
-    assert "JSON" in run["problem"]["message"] and brain.kinds.count("B01") == 6
+    # R4 (stress test): plain words, no JSON jargon — "could not be used … every working AI was asked"
+    assert "could not be used" in run["problem"]["message"] and brain.kinds.count("B01") == 6
     pid = run["project_id"]
     assert outputs(app, pid, "B01") == []  # nothing half-saved
     broken["on"] = False
@@ -97,24 +98,38 @@ def test_schema_violations_never_reach_the_book(tmp_path, kind, mangle, step):
     app = fk.make_app(tmp_path, fake=fk.TextBridgeAI(brain, render))
     run = fk.run_book(app)
     assert_paused_on(run, step)
-    assert "schema" in run["problem"]["message"] or "valid" in run["problem"]["message"]
+    msg = run["problem"]["message"]  # R4 (stress test): plain words instead of schema jargon
+    assert "could not be used" in msg or "usable" in msg or "valid" in msg
     pid = run["project_id"]
     if pid and kind != "profile":
         op = {"C02": "C02", "B03": "B03", "B01": "B01"}[kind]
         assert outputs(app, pid, op) == []
 
 
-def test_empty_profile_strings_get_safe_defaults(tmp_path):
-    ai = fk.TraceAI(overrides={"profile": lambda ctx, out: dict(out, title="   ", author="", idea="", genre="")})
-    app = fk.make_app(tmp_path, fake=ai)
+def test_empty_profile_strings_are_asked_again(tmp_path):
+    """🧹 A-2-n: an answer without a title or an idea is unusable — asked again (no more "Untitled book" whose idea is
+    "Untitled book"); empty genre / author still get safe defaults."""
+    calls = {"n": 0}
+
+    def first_empty(ctx, out):
+        calls["n"] += 1
+        return dict(out, title="   ", author="", idea="", genre="") if calls["n"] == 1 else dict(out, genre="")
+    app = fk.make_app(tmp_path, fake=fk.TraceAI(overrides={"profile": first_empty}))
     run = fk.run_book(app)
     assert run["status"] == "done", run.get("problem")
     from akowe.book_path import get_profile
     prof = get_profile(app.store, run["project_id"])
     # ✒️ the pen name is never the AI's (pen_name.py): none typed, none saved -> empty, not made up
-    assert prof["title"] == "Untitled book" and prof["author"] == "" and prof["idea"]
-    ex = fk.export_files(app, run["project_id"], run["files"])
-    assert fk.epub_info(ex["EPUB"])["meta"]["title"] == ["Untitled book"]
+    assert calls["n"] == 2 and prof["title"] and prof["title"] != "Untitled book" and prof["author"] == ""
+    assert prof["idea"] and prof["idea"] != prof["title"]
+
+
+def test_a_profile_answer_that_stays_empty_pauses_clearly(tmp_path):
+    ai = fk.TraceAI(overrides={"profile": lambda ctx, out: dict(out, title="   ", author="", idea="", genre="")})
+    app = fk.make_app(tmp_path, fake=ai)
+    run = fk.run_book(app)
+    assert run["status"] == "paused" and run["problem"]["step"] == "profile", run.get("problem")
+    assert "without a title or an idea" in run["problem"]["message"]
 
 
 # ------------------------------------------------------------------------------------------- empty prose

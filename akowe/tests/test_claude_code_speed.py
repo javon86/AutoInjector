@@ -229,7 +229,7 @@ class FakeHelper:
         if names & self.fail:
             return None
         self.answered.append(names)
-        return {k: ("ally" if k.endswith("rel_tom") else "grey") for k in schema["required"]}, "claude-code"
+        return {k: ("ally" if k.endswith("rel_tom") else "grey") for k in schema["properties"]}, "claude-code"
 
     def wave_done(self, web_s):
         self.web_s = web_s
@@ -254,7 +254,7 @@ def _fill(monkeypatch, helper, asks: list, accepted: list):
 
     def ask(task, sch, ctx):
         asks.append({s["name"] for s in ctx["subjects"]})
-        return {k: ("ally" if k.endswith("rel_tom") else "web") for k in sch["required"]}, "AI-2"
+        return {k: ("ally" if k.endswith("rel_tom") else "web") for k in sch["properties"]}, "AI-2"
     return whole_bible.fill(None, "p", "main", ask=ask, check=lambda: None, progress=lambda *a: None, by="run:x",
                             helper=helper)
 

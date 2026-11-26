@@ -232,7 +232,8 @@ def test_beta_panel_quotes_checked_again_and_writer_counts_half():
 def test_beta_guess_is_not_shown_as_a_quote():
     read = {"reactions": [], "interest": [], "stop": {"would_finish": True, "chapter": 0, "why": ""},
             "guesses": [{"guess": "Never burned out. Emptied.", "guessed_in_chapter": 1, "revealed_in_chapter": 3,
-                         "came_true": "yes", "quote": "", "verified": False}]}
+                         "came_true": "yes", "quote": "the lamp was cold", "verified": True}]}
+    # (G-19-j/k stress fix: only a guess whose quote is in the book counts, so this one quotes the book)
     f = next(x for x in beta_reader.findings(read, 3) if x["id"] == "guessed")
     assert "“Never burned out" not in f["detail"] and "Guessed: Never burned out" in f["detail"]
 

@@ -418,7 +418,10 @@ def _failed(svc, run, exc, subjects, what: str, step: str):
     if getattr(exc, "control", False):
         raise exc
     code = getattr(exc, "code", type(exc).__name__)
-    _note_later(svc.store, run["project_id"], run["branch_id"], subjects)
+    try:
+        _note_later(svc.store, run["project_id"], run["branch_id"], subjects)
+    except Exception:  # noqa: BLE001 - the note below still says so; the just-in-time pass finds them anyway
+        log.exception("details: the later list could not be saved")
     svc.event(run, "note", f"⚠️ {what} could not be decided now ({code}); the book goes on without them — they are "
                            "asked again with the next chapter", step=step, code="DETAILS_LATER")
 
@@ -499,7 +502,17 @@ def essential_subjects(store, pid, branch) -> list[dict]:
 def essentials_step(svc, run, st) -> None:
     """The run's step "Character looks and voice details". Never blocks the book (only pause / cancel stop it)."""
     store, pid, branch = svc.store, run["project_id"], run["branch_id"]
-    subjects = essential_subjects(store, pid, branch)
+    try:
+        subjects = essential_subjects(store, pid, branch)
+    except Exception as exc:  # noqa: BLE001 - never holds up the book
+        if getattr(exc, "control", False):
+            raise
+        log.exception("essentials: the subjects could not be listed")
+        st["message"] = "⚠️ The looks could not be decided now; they are decided just in time, before each chapter"
+        svc.event(run, "note", f"⚠️ The looks and essentials could not be decided now ({type(exc).__name__}); the book "
+                               "goes on — they are decided before the chapter that needs them", step="looks",
+                  code="DETAILS_LATER")
+        return
     st["items"] = [{"id": s["ref"], "label": s["name"], "state": "pending"} for s in subjects]
     if not subjects:
         st["message"] = "Every character, place and item already has its essentials"
@@ -525,7 +538,16 @@ def essentials_step(svc, run, st) -> None:
             continue
         slot = ans.pop("_slot", None)
         for s, it in zip(batch, st["items"][i:i + BATCH]):
-            got = _accept(svc, run, s, ans.get(s["ref_id"]) or {}, slot, how="essentials", chapter=None)
+            try:
+                got = _accept(svc, run, s, ans.get(s["ref_id"]) or {}, slot, how="essentials", chapter=None)
+            except Exception as exc:  # noqa: BLE001 - saving one subject's looks never holds up the book
+                if getattr(exc, "control", False):
+                    raise
+                log.exception("essentials of one subject could not be saved")
+                _failed(svc, run, exc, [s], f"The essentials of “{s['name']}”", "looks")
+                failed += 1
+                it.update(state="failed", note=getattr(exc, "code", "ERROR"))
+                continue
             it.update(state="done", note=f"{len(got)} part(s)")
             if got:
                 decided += 1
@@ -762,7 +784,14 @@ def before_chapter(svc, run, st, cid: str, number: int, item: dict | None = None
     slot = ans.pop("_slot", None)
     total = 0
     for s in subjects:
-        got = _accept(svc, run, s, ans.get(s["ref_id"]) or {}, slot, how="chapter", chapter=cid)
+        try:
+            got = _accept(svc, run, s, ans.get(s["ref_id"]) or {}, slot, how="chapter", chapter=cid)
+        except Exception as exc:  # noqa: BLE001 - saving one subject's details never holds up the book
+            if getattr(exc, "control", False):
+                raise
+            log.exception("details of one subject could not be saved")
+            _failed(svc, run, exc, [s], f"The story details of “{s['name']}” for chapter {number}", "chapters")
+            continue
         total += len(got)
         if got:
             what = " and ".join(s["why"]) or "details"

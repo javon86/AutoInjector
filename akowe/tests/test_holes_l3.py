@@ -153,7 +153,7 @@ def test_h18_the_book_language_comes_from_the_profile_and_a_chapter_warns_at_app
     r = bp.dispatch("C02", "UPDATE", base_ref=appr["ref"],
                     payload=dict(appr["data"], text=appr["data"]["text"] + " Adẹ́ wrote 中 on the wall."))
     out = bp.approve_ref(r["output_refs"][0])
-    assert out["ok"] and "letters the PDF cannot print: 中" in out["warnings"][0]
+    assert out["ok"] and "character(s) the PDF cannot print: 中" in out["warnings"][0]
     r = bp.dispatch("C02", "UPDATE", base_ref=out["ref"],
                     payload=dict(appr["data"], text=appr["data"]["text"] + " Adẹ́ — Łódź — Ἀθῆναι."))
     assert "warnings" not in bp.approve_ref(r["output_refs"][0])  # accents, ł and Greek print fine now

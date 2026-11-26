@@ -60,7 +60,7 @@ from . import providers as providers_mod
 from .assist import Cancelled, Job, book_profile_brief
 from .book_path import BookPath, get_profile
 from .errors import AkoweError
-from .jobs import now_iso
+from .jobs import RetryPolicy, now_iso, slot_word, wait_and_retry
 
 log = logging.getLogger("akowe.book_report")
 
@@ -113,6 +113,13 @@ MAX_REPORTS = 10
 WHOLE_MAX_CHARS = 60000
 DIGEST_MAX_CHARS = 48000
 DISAGREE = 3
+# ⚡ a run's reviewer that failed with one of these is asked once more before another AI stands in (G-18)
+RETRY_ONCE = {"TIMEOUT", "INTERNAL_ERROR"}
+# why a whole-book reviewer has no review, in plain words (never a code on its own)
+FAIL_WORDS = {"TIMEOUT": "it took too long to answer", "AI_DECLINED": "it refused to review the book",
+              "INVALID_INPUT": "its answer could not be used", "RATE_LIMITED": "it stayed busy",
+              "UPSTREAM_UNAVAILABLE": "it could not be reached", "CAPABILITY_UNAVAILABLE": "it was not working",
+              "INTERNAL_ERROR": "its answer could not be used"}
 QUOTE_MAX = 200
 KEY = "book_reports:{pid}:{branch}"
 
@@ -222,8 +229,9 @@ def _norm(s: str) -> str:
 
 
 # ====================================================================== the book's text and a bounded view of it
-def book_chapters(bp: BookPath) -> list[dict]:
-    """The chapters in outline order: the approved text (or the newest draft, marked) with title and words."""
+def book_chapters(bp: BookPath, missing: list | None = None) -> list[dict]:
+    """The chapters in outline order: the approved text (or the newest draft, marked) with title and words.
+    ``missing``: a list that gets the numbers of the outline's chapters that have no text (they are left out)."""
     outline = bp.outline()
     out = []
     if not outline:
@@ -232,6 +240,8 @@ def book_chapters(bp: BookPath) -> list[dict]:
         _ctx, latest, appr = bp.chapter_prose(outline, ch["chapter_id"])
         rec = appr or latest
         if not rec:
+            if missing is not None:
+                missing.append(i + 1)
             continue
         text = str((rec.get("data") or {}).get("text") or "")
         first = text.lstrip().split("\n", 1)[0]
@@ -361,6 +371,8 @@ def merge_part_rows(rows: list[dict]) -> dict:
                             "reasked": any(c.get("reasked") for c in cals),
                             "reasons": sorted({x for c in cals for x in c.get("reasons") or []}), "capped": capped},
                parts={"read": len(done), "of": len(rows)})
+    if all(r.get("set_aside") for r in done):  # G-18-k: every part unbacked and very low -> the whole review is
+        out["set_aside"] = done[0]["set_aside"]
     failed = [r for r in rows if r.get("status") != "done"]
     if failed:
         out["message"] = f"{len(failed)} of {len(rows)} part(s) could not be read ({failed[0].get('error')})"
@@ -424,19 +436,20 @@ def aggregate(reviews: list[dict]) -> dict:
     """Median per dimension over the reviewers that answered, the range and ⚠️ disagreement (≥ DISAGREE apart)."""
     rows = []
     for d in DIM_KEYS:
-        vals = [r["scores"][d] for r in reviews if r.get("status") == "done" and d in (r.get("scores") or {})]
+        vals = [r["scores"][d] for r in reviews if counted(r) and d in (r.get("scores") or {})]
         if not vals:
             rows.append({"dimension": d, "label": LABELS[d], "n": 0})
             continue
         lo, hi = min(vals), max(vals)
         rows.append({"dimension": d, "label": LABELS[d], "n": len(vals), "median": float(statistics.median(vals)),
                      "min": lo, "max": hi, "spread": hi - lo, "disagree": hi - lo >= DISAGREE,
-                     "by": {r.get("slot"): r["scores"][d] for r in reviews if r.get("status") == "done"
+                     "by": {r.get("slot"): r["scores"][d] for r in reviews if counted(r)
                             and d in (r.get("scores") or {})}})
     scored = [r["median"] for r in rows if r.get("n")]
     return {"dimensions": rows, "overall": round(sum(scored) / len(scored), 1) if scored else None,
-            "reviewers": sum(1 for r in reviews if r.get("status") == "done"),
-            "independent": sum(1 for r in reviews if r.get("status") == "done" and r.get("independent")),
+            "reviewers": sum(1 for r in reviews if counted(r)),
+            "independent": sum(1 for r in reviews if counted(r) and r.get("independent")),
+            "set_aside": sum(1 for r in reviews if r.get("status") == "done" and r.get("set_aside")),
             "disagreements": [r["label"] for r in rows if r.get("disagree")]}
 
 
@@ -453,7 +466,51 @@ def failed_line(r: dict) -> str:
     if r.get("declined") or r.get("error") == "AI_DECLINED":
         line = declined_line(r.get("name")) + ", even after Akọwe said it is fiction under review"
         return line + (f"; {r['replaced_by']} reviewed the book in its place" if r.get("replaced_by") else "")
-    return f"{r.get('name')} could not review ({r.get('error')})"
+    line = f"{r.get('name')} could not review: {fail_words(r.get('error'))}" + (
+        " (asked twice)" if r.get("retried") else "")
+    return line + (f"; {r['replaced_by']} reviewed the book in its place" if r.get("replaced_by") else "")
+
+
+def missing_words(numbers: list) -> str:
+    """'Chapter 3 has no text' / 'Chapters 2 and 5 have no text'."""
+    nums = [str(n) for n in numbers]
+    if len(nums) == 1:
+        return f"Chapter {nums[0]} has no text"
+    return f"Chapters {', '.join(nums[:-1])} and {nums[-1]} have no text"
+
+
+def fail_words(code) -> str:
+    """A reviewer's error code in plain words."""
+    return FAIL_WORDS.get(str(code or ""), "it could not answer")
+
+
+def counted(r: dict) -> bool:
+    """Does this whole-book review count in the scores (an answered review that was not set aside)?"""
+    return r.get("status") == "done" and not r.get("set_aside")
+
+
+def lost_line(reviews: list[dict]) -> str | None:
+    """Why the whole book has no counted AI review although reviewers were asked (G-18), in plain words: None when
+    a review counts or no reviewer was asked."""
+    rows = [r for r in reviews or [] if r.get("status") in ("done", "failed")]
+    if not rows or any(counted(r) for r in rows):
+        return None
+    aside = [r for r in rows if r.get("set_aside")]
+    if aside:
+        return (f"{', '.join(str(r.get('name')) for r in aside)} gave the book very low scores without quoting it to "
+                "back them, even after Akọwe asked once more, so they are not counted")
+    failed = [r for r in rows if r.get("status") == "failed"]
+    why = sorted({fail_words("AI_DECLINED" if r.get("declined") else r.get("error")) for r in failed})
+    who = ", ".join(dict.fromkeys(str(r.get("name")) for r in failed))
+    return f"the reviewer AI could not review it ({who}: {'; '.join(why)})"
+
+
+def low_line(r: dict) -> str:
+    """A very low whole-book review with no quoted weakness to back it (G-18-k): set aside, not counted."""
+    cal = r.get("calibration") or {}
+    return (f"{r.get('name')}'s very low scores are not backed by quotes ({'; '.join(cal.get('reasons') or [])})"
+            + (", even after Akọwe asked once more" if cal.get("reasked") else "")
+            + ": the review is set aside and does not count in the scores or steer the end rewrites.")
 
 
 def flag_line(r: dict) -> str:
@@ -710,8 +767,22 @@ class ReportService:
         return [o for o in opts if o["working"] and o["independent"]][:MAX_REVIEWERS]
 
     def review_with(self, assist, principal, pid, branch, slot: dict, view: dict, prof: dict, det: dict,
-                    text_norm: str, check=None) -> dict:
-        """One whole-book review by one AI (never raises: a failure is a row with status 'failed')."""
+                    text_norm: str, check=None, *, patient: bool = False, on_wait=None) -> dict:
+        """One whole-book review by one AI (never raises: a failure is a row with status 'failed').
+
+        ``patient`` (a ⚡ run): a busy AI or a usage limit is waited for (the run's own wait, told through ``on_wait``
+        so the run window and journal show it), and an answer that did not come in time is asked for once more."""
+        row = self._review_once(assist, principal, pid, branch, slot, view, prof, det, text_norm, check,
+                                patient=patient, on_wait=on_wait)
+        if patient and row.get("status") != "done" and row.get("error") in RETRY_ONCE:
+            log.info("whole-book reviewer %s failed (%s); asking it once more", slot["slot_id"], row.get("error"))
+            row = self._review_once(assist, principal, pid, branch, slot, view, prof, det, text_norm, check,
+                                    patient=patient, on_wait=on_wait)
+            row["retried"] = True
+        return row
+
+    def _review_once(self, assist, principal, pid, branch, slot: dict, view: dict, prof: dict, det: dict,
+                     text_norm: str, check=None, *, patient: bool = False, on_wait=None) -> dict:
         row = {"slot": slot["slot_id"], "name": slot["name"], "independent": slot["independent"], "status": "done",
                "at": _now(), "mode": view["mode"]}
         job = Job("book_review", principal, pid, branch, None, slot["slot_id"])
@@ -722,11 +793,24 @@ class ReportService:
         t0 = time.monotonic()
         task = review_task()
 
+        def once(t):
+            try:
+                return assist._call_ai(job, op_for_roles="C02", task=t, schema=review_schema(DIM_KEYS), context=ctx,
+                                       protected=[])
+            except AkoweError as exc:
+                if exc.code == "AI_DECLINED":
+                    exc.no_wait = True  # a refusal gets the fiction note / a stand-in below, never a long wait
+                raise
+
         def ask(t):
             with ai_activity.doing("Book report: reading the whole book", done="Book report: read the book",
                                    link="report"):  # ⚡ #116 the AI activity strip
-                return assist._call_ai(job, op_for_roles="C02", task=t, schema=review_schema(DIM_KEYS), context=ctx,
-                                       protected=[])
+                if not patient:
+                    return once(t)
+                # ⚡ G-18: a busy AI or a usage limit is waited for, the run window and journal told (``on_wait``)
+                policy = getattr(assist, "retry_policy", None) or RetryPolicy.from_store(self.store)
+                return wait_and_retry(lambda: once(t), policy=policy, check=job.check, on_wait=on_wait,
+                                      who=lambda: slot_word(job.slot_label))
         try:
             try:
                 raw = ask(task)
@@ -766,6 +850,8 @@ class ReportService:
         row["scores_raw"] = dict(clean["scores"])
         if cal["flagged"]:
             row["scores"], cal["capped"] = calibration.apply_caps(clean["scores"], a)
+            if a.get("too_harsh"):
+                row["set_aside"] = "low_unbacked"  # G-18-k: not counted, never steers the end rewrites
         row["calibration"] = cal
         return row
 
@@ -821,6 +907,9 @@ class ReportService:
         row["scores_raw"] = dict(clean["scores"])
         if cal["flagged"]:
             row["scores"], cal["capped"] = calibration.apply_caps(clean["scores"], a)
+            if a.get("too_harsh"):
+                row["set_aside"] = "low_unbacked"
+        cal["too_harsh"] = bool(a.get("too_harsh"))
         row["calibration"] = cal
         return row
 
@@ -884,21 +973,25 @@ class ReportService:
                 job.slot_pref, job.retry_busy = saved
         return clean, {"trusted": a["trusted"], "flagged": not a["trusted"], "reasked": reasked,
                        "reask_error": reask_error, "first_reasons": first, "reasons": a["reasons"],
-                       "too_clean": a["too_clean"], "evidence": a["evidence"],
+                       "too_clean": a["too_clean"], "too_harsh": bool(a.get("too_harsh")), "evidence": a["evidence"],
                        "weaknesses_verified": a["weaknesses_verified"], "capped": {}, "_assessment": a}
 
     # ------------------------------------------------------------------ make a report
     def make(self, principal, pid, branch, *, assist=None, review=None, ai: bool = True, slots: list | None = None,
              made_by: str = "author", run_id: str | None = None, add_to: str | None = None, check=None,
-             on_progress=None, full: bool = False, reviews: list | None = None, note: str | None = None) -> dict:
+             on_progress=None, full: bool = False, reviews: list | None = None, note: str | None = None,
+             patient: bool = False, on_wait=None) -> dict:
         """Build (or extend) the report of the book's current version. ``ai``: ask reviewer AIs (``slots`` or the
         independent working ones). ``add_to``: a report id of the same version to add the new reviews to.
         ``reviews``: whole-book reviews already made (🔁 the improve pass's re-read) — used as they are, no AI asked;
-        ``note``: a line for the report's warnings saying where they come from."""
+        ``note``: a line for the report's warnings saying where they come from. ``patient`` (a ⚡ run, G-18): busy AIs
+        and usage limits are waited for (told through ``on_wait``), a reviewer whose answer did not come is asked once
+        more, and a reviewer that still failed has another working AI stand in for it (as for one that declined)."""
         review = review or self.app.review
         assist = assist or self.app.assist
         bp = BookPath(review.engine, principal, pid, branch)
-        chapters = book_chapters(bp)
+        missing: list[int] = []
+        chapters = book_chapters(bp, missing)
         if not chapters:
             raise AkoweError("INVALID_INPUT", "/book", "this book has no written chapters yet — write (and "
                                  "approve) the chapters first", status="REJECTED")
@@ -916,6 +1009,7 @@ class ReportService:
                         "key": key, "chapters": [f"{c['record_id']}:{c['version']}" for c in chapters],
                         "approved": all(c["approved"] for c in chapters)},
                     "made_by": made_by, "run_id": run_id, "reviews": [], **det}
+        base["missing_chapters"] = missing  # G-18-n: outline chapters with no text when the report read the book
         if base.get("run_id"):  # 🧼 how cleanly the Make-a-book run went (so far, when it is still running)
             try:
                 from . import clean_run  # noqa: PLC0415
@@ -944,7 +1038,8 @@ class ReportService:
                 def review(v):
                     if s.get("helper"):
                         return self.review_with_helper(s, v, prof_brief, base, text_norm, check)
-                    return self.review_with(assist, principal, pid, branch, s, v, prof_brief, base, text_norm, check)
+                    return self.review_with(assist, principal, pid, branch, s, v, prof_brief, base, text_norm, check,
+                                            patient=patient, on_wait=on_wait)
                 if parts:  # 📖 H17: every part read in full, then one merged review per AI
                     rows = []
                     for k, pv in enumerate(parts):
@@ -963,7 +1058,9 @@ class ReportService:
                 one(s, i, len(picks))
             # a reviewer that declined ("I can't help with that", even after the fiction note): another AI stands in,
             # until MIN_REVIEWERS independent reviewers answered (when an AI is there to ask)
-            declined = [r for r in base["reviews"] if r.get("slot") in new and r.get("declined")]
+            # ⚡ in a run (``patient``) a reviewer that failed in any other way (after its second try) too (G-18)
+            declined = [r for r in base["reviews"] if r.get("slot") in new and (
+                r.get("declined") or (patient and r.get("status") == "failed"))]
             if declined:
                 used = {r.get("slot") for r in base["reviews"]} | {p["slot_id"] for p in picks}
                 for s in self.stand_ins(base["usage"], used):
@@ -1148,7 +1245,9 @@ class ReportService:
         if done and not any(r.get("independent") for r in done):
             out.append("⚠️ Not independent: every AI that reviewed the whole book also wrote most of it.")
         for r in done:
-            if (r.get("calibration") or {}).get("flagged"):
+            if r.get("set_aside"):
+                out.append("⚠️ " + low_line(r))
+            elif (r.get("calibration") or {}).get("flagged"):
                 out.append("⚠️ " + flag_line(r))
             if r.get("unbacked_line"):
                 out.append("⚠️ " + r["unbacked_line"])
@@ -1159,6 +1258,10 @@ class ReportService:
             out.append("⚠️ " + "; ".join(failed_line(r) for r in failed))
         if not rep["version"].get("approved"):
             out.append("Some chapters are not approved yet: the report reads their newest drafts.")
+        gone = rep.get("missing_chapters") or []
+        if gone:  # G-18-n: never pass an incomplete book off as the whole book
+            out.append(f"⚠️ {missing_words(gone)}: this report is of an incomplete book (its word count and scores "
+                       "leave it out). Write or approve it, then make a new report.")
         for e in rep.get("unchecked") or []:  # H14: approved anyway / auto-approved / only one AI checked it
             out.append("⚠️ " + str(e.get("line") or e.get("label")))
         return out

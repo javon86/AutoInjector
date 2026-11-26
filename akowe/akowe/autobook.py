@@ -36,7 +36,6 @@ AI availability: busy/unreachable answers wait and retry (jobs.wait_and_retry, s
 from __future__ import annotations
 
 import copy
-import hashlib
 import json
 import logging
 import re
@@ -47,6 +46,8 @@ from datetime import datetime, timezone
 
 from . import ai_activity, ai_check
 from . import approval_trust
+from . import book_again
+from . import stop_words
 from . import assist as assist_mod
 from . import characters as chars_mod
 from . import checker_record
@@ -117,9 +118,9 @@ STEPS = [
      "and how each one talks (a voice card each); the writer gets them in every chapter."),
     ("looks", "A", "A01", "Character looks and voice details", "Only the essentials before chapter one: how each "
      "character looks (height, build, face, eyes, hair, clothes, posture) and how they talk when afraid, angry or "
-     "grieving; a short look for the places and items the outline names. Everything else (fighting style, powers, "
-     "skills, a place's rooms, an item's powers…) is decided just in time, before the chapter that needs it, and "
-     "fixed once a chapter used it."),
+     "grieving. Places and items get their look just in time (the chapter outline that names them comes later), "
+     "like everything else (fighting style, powers, skills, a place's rooms, an item's powers…): decided before the "
+     "chapter that needs it, and fixed once a chapter used it."),
     ("pictures", "A", None, "Character pictures", "A portrait of every character from its description, and the "
      "full set (portrait, front, side and back views, character sheet) for the main character — made with Stable "
      "Diffusion in AutoInjector; each portrait becomes that character's 🔒 lock so later pictures keep the face. "
@@ -228,6 +229,13 @@ BUSY_FIX = ("The AIs stayed busy or could not be reached for a long time. What t
 DECLINED_FIX = ("The AI declined to answer (it said it can't help with that) — story material such as a death or a "
                 "crime sometimes trips an AI's safety filter by mistake. Akọwe already asked again and tried the other "
                 "AIs. What to do: press 🔁 Try again, or pick another AI for the book in the run's settings.")
+
+
+def _wait_fix(code) -> str:
+    """🗣 R6: the fix for a give-up after waiting: a refusal is not a busy / unreachable AI."""
+    return DECLINED_FIX if code == "AI_DECLINED" else BUSY_FIX
+
+
 CHECKS_FIX = ("Press 🔁 Try again: the AI writes it again and is told exactly what Akọwe refused. Or ✏️ Edit it "
               "yourself so the checks pass, then press Continue.")
 STALE_FIX = ("It was made from a plan or other inputs that changed since, so it is out of date: editing it cannot fix "
@@ -264,6 +272,9 @@ class RunPaused(Exception):
 
 class RunCancelled(Exception):
     control = True
+
+
+PROFILE_ASKS = 3  # 🧹 an AI answer without a title or an idea for the book is asked again, then the run pauses
 
 
 class StepProblem(Exception):
@@ -389,9 +400,8 @@ class _Runner:
             log.exception("%s %s crashed", self.KIND, run_id)
             run = self.get(run_id)
             if run:
-                run["status"], run["phase"] = "paused", "Stopped by an unexpected problem — press Resume to try again"
-                run["problem"] = {"code": "INTERNAL_ERROR", "message": "Akọwe hit an unexpected problem.",
-                                  "fix": "Press 🔁 Try again. If it keeps happening, use 📋 Copy diagnostics."}
+                run["status"], run["phase"] = "paused", "Stopped by an unexpected error — press ▶ Resume to try again"
+                run["problem"] = stop_words.own_error_problem("")
                 self.save(run)
         finally:
             try:
@@ -443,6 +453,9 @@ class _Runner:
                                   "Open Settings and connect AutoInjector or add an API key, then press 🔁 Try again.",
                                   op=op)
             from .book_path import problems  # noqa: PLC0415
+            if stop_words.is_unusable(first.get("code"), first.get("message")):  # 🗣 R4: plain words, no schema
+                code_, msg_, fix_ = stop_words.unusable_problem(first.get("message"), f"writing the {label}")
+                raise StepProblem(code_, msg_, fix_, op=op)
             raise StepProblem(first.get("code") or "INVALID_INPUT",
                               f"The {label} could not be made: {first.get('message')}",
                               "Press 🔁 Try again. If it fails again, open the step and write it yourself.",
@@ -456,8 +469,8 @@ class _Runner:
                                       on_wait=lambda info: self.on_wait(run, info), who=self._who(run))
         except AkoweError as exc:
             if exc.code in BUSY_CODES:
-                raise StepProblem(exc.code, exc.errors[0].get("message") or "the AI stayed busy", BUSY_FIX, op=op) \
-                    from None
+                raise StepProblem(exc.code, exc.errors[0].get("message") or "the AI stayed busy", _wait_fix(exc.code),
+                                  op=op) from None
             raise
         finally:
             self.app.work.end(tok)
@@ -594,7 +607,8 @@ class _Runner:
             gone = []
             for f in info.get("from") or []:
                 st = f.get("state")
-                word = {"repairing": "is being repaired", "needs_user": "needs you", "broken": "is not working"}.get(
+                word = {"repairing": "is being repaired", "needs_user": "needs you", "broken": "is not working",
+                        "unusable": "gave no usable answer"}.get(
                     st or "", "did not answer")
                 gone.append(f"{f.get('from_name') or f.get('name') or f.get('from') or f.get('slot_id')} {word}"
                             + (f" ({f['problem']})" if f.get("problem") else ""))
@@ -703,7 +717,8 @@ class AutoBookService(_Runner):
         if status == "interrupted" or (status in ("queued", "running", "waiting", "pausing") and not alive):
             return "interrupted", "Stopped because Akọwe was closed while it worked. Press ▶ Resume."
         if status == "pausing":
-            return "pausing", "Pausing after the current answer."
+            return "pausing", ("Pausing after this step." if run.get("current") in book_again.NO_AI_STEPS else
+                               "Pausing after the current answer.")
         if status == "waiting":
             return "waiting", "Waiting for the AI."
         if status in ("queued", "running"):
@@ -928,7 +943,8 @@ class AutoBookService(_Runner):
         run = self.owned(principal, run_id)
         if self.alive(run_id):
             self._ctl[run_id]["pause"] = True
-            run["status"], run["phase"] = "pausing", "Pausing after the current answer…"
+            run["status"], run["phase"] = "pausing", ("Pausing after this step…" if run.get("current") in
+                                                      book_again.NO_AI_STEPS else "Pausing after the current answer…")
             self.event(run, "pause", "You pressed Pause")
             self.save(run)
         return self.public(run)
@@ -969,6 +985,13 @@ class AutoBookService(_Runner):
                 from .continuity import chapters_of  # noqa: PLC0415
                 stand_in.settle_votes(self.store, run, prob, "continue",
                                       {c["chapter_id"]: c for c in chapters_of(self.bp(run))})
+            if run.get("status") == "paused" and prob.get("code") == "CHECKS_REFUSED" and \
+                    prob.get("authored_by") != "author":
+                # ▶ Resume after Akọwe's checks refused an AI draft (e.g. a plan far too large, R7): the AI gets new
+                # attempts, like 🔁 Try again — else Resume could only stop again on the same refusal
+                counts = run.setdefault("fix_counts", {})
+                for k in [k for k in counts if k.startswith("redo:")]:
+                    counts[k] = 0
             run["status"], run["phase"], run["problem"], run["pause_reason"] = "running", \
                 "Continuing where it stopped", None, None
             for s in run["steps"]:
@@ -1361,6 +1384,13 @@ class AutoBookService(_Runner):
     def _step(self, run, sid) -> dict:
         return next(s for s in run["steps"] if s["id"] == sid)
 
+    def _step_title(self, run) -> str:
+        """The current step's title for a stop's words ("" when it cannot be found: the words never fail a stop)."""
+        try:
+            return str(self._step(run, run.get("current") or "backup").get("title") or "")
+        except Exception:  # noqa: BLE001
+            return ""
+
     @staticmethod
     def _ensure_steps(run):
         """A run saved by an older Akọwe (resumed after an update) gets the steps added since, in order."""
@@ -1438,6 +1468,7 @@ class AutoBookService(_Runner):
             # ★ the guarantee: never a finished book without its main character (repaired, else a plain pause)
             run["current"] = "check"
             self._guarantee_main(run, self._step(run, "check"), "before the book is marked done")
+            book_again.finish(self, run)  # 🔁 the book changed while the last steps ran: made again, never "done" on a stale book
             from . import claude_code_speed  # noqa: PLC0415 - 🤖 Step 2: the background extras (capped wait)
             claude_code_speed.finish(self, run)
             self.save(run)
@@ -1494,24 +1525,26 @@ class AutoBookService(_Runner):
             self._pause_problem(run, exc.problem)
         except StepError as exc:
             self._pause_problem(run, {"code": exc.code or "INVALID_INPUT", "message": exc.message,
-                                      "fix": "Press 🔁 Try again. If it fails again, open the book and do this step "
-                                             "yourself.", "details": exc.problems[:6]})
+                                      "fix": stop_words.fix_for(exc.message) or "Press 🔁 Try again. If it fails "
+                                             "again, open the book and do this step yourself.",
+                                      "details": exc.problems[:6]})
         except AkoweError as exc:
             e = exc.errors[0] if exc.errors else {}
             code = exc.code
             fix = TIMEOUT_FIX if code == "TIMEOUT" else DECLINED_FIX if code == "AI_DECLINED" else \
                 BUSY_FIX if code in BUSY_CODES else (
                 "Press 🔁 Try again. If it keeps failing, use 📋 Copy diagnostics.")
-            self._pause_problem(run, {"code": code, "message": e.get("message") or code, "fix": fix,
-                                      "path": e.get("path") or ""})
+            said = e.get("message") or code
+            if stop_words.exc_unusable(exc):  # 🗣 R4: an AI's unusable answer, in plain words
+                code, said, fix = stop_words.unusable_problem(said, f"working on “{self._step_title(run)}”")
+            self._pause_problem(run, {"code": code, "message": said, "fix": fix, "path": e.get("path") or ""})
         except Cancelled:
             self._finish_cancel(run)
             self.save(run)
         except Exception as exc:  # noqa: BLE001 - shown as a ⚠️ on the step, logged here
             log.exception("make-a-book run %s: unexpected problem in step %s", run_id, run.get("current"))
-            self._pause_problem(run, {"code": "INTERNAL_ERROR",
-                                      "message": f"Akọwe hit an unexpected problem ({type(exc).__name__}).",
-                                      "fix": "Press 🔁 Try again. If it keeps happening, use 📋 Copy diagnostics."})
+            # 🗣 R6: Akọwe's own fault — a plain safe stop of its own kind (never an "AI problem")
+            self._pause_problem(run, stop_words.own_error_problem(self._step_title(run), exc))
         finally:
             if (run.get("clock") or {}).get("since"):  # ⏳ the run stopped working: its clock stops too
                 run_clock.clock_stop(run)
@@ -2442,13 +2475,18 @@ class AutoBookService(_Runner):
         self.save(run)
         try:
             res = checker.check(self._sub_job(run, "planned_check", rid), rid, round_no=pl["rounds"])
-        except AkoweError as exc:
-            if exc.code == "TIMEOUT" or exc.code in BUSY_CODES or exc.code == "CAPABILITY_UNAVAILABLE":
-                self._ai_problem(exc, f"checking the planned details of the {label}", record_id=rid,
-                                 chapter_id=chapter_id)
-            pl.update(error=exc.code, done_version=head["version"])
-            self.event(run, "note", f"⚠️ The planned-to-page check of the {label} did not work ({exc.code}); the book "
-                       "goes on", code="PLANNED_CHECK_FAILED", record_id=rid)
+        except (RunPaused, RunCancelled, Cancelled):
+            raise
+        except Exception as exc:  # noqa: BLE001 - never holds up the book: no answer, a refusal or a bug is a note
+            if getattr(exc, "control", False):
+                raise
+            ecode = exc.code if isinstance(exc, AkoweError) else "INTERNAL_ERROR"
+            if not isinstance(exc, AkoweError):
+                log.exception("make-a-book run %s: planned-to-page check", run["id"])
+            pl.update(error=ecode, done_version=head["version"])
+            self.event(run, "note", f"⚠️ The planned-to-page check of the {label} did not work ({ecode}); the book "
+                       "goes on (the book's own planned check lists what is missing)", code="PLANNED_CHECK_FAILED",
+                       record_id=rid)
             self._planned_summary(run)
             self.save(run)
             return head
@@ -2465,11 +2503,15 @@ class AutoBookService(_Runner):
             try:
                 prop = checker.propose_fix(self._sub_job(run, "planned_fix", rid, run["settings"].get("slot_id")),
                                            rid, res)
-            except AkoweError as exc:
-                if exc.code == "TIMEOUT" or exc.code in BUSY_CODES or exc.code == "CAPABILITY_UNAVAILABLE":
-                    self._ai_problem(exc, f"working the planned details into the {label}", record_id=rid,
-                                     chapter_id=chapter_id)
-                pl["history"].append({"round": n, "fix": "failed", "code": exc.code, "at": now_iso()})
+            except (RunPaused, RunCancelled, Cancelled):
+                raise
+            except Exception as exc:  # noqa: BLE001 - never holds up the book: the missing items stay flagged ⚠️
+                if getattr(exc, "control", False):
+                    raise
+                ecode = exc.code if isinstance(exc, AkoweError) else "INTERNAL_ERROR"
+                if not isinstance(exc, AkoweError):
+                    log.exception("make-a-book run %s: planned-details fix", run["id"])
+                pl["history"].append({"round": n, "fix": "failed", "code": ecode, "at": now_iso()})
                 break
             if not prop["applied"]:
                 pl["history"].append({"round": n, "fix": "nothing applied", "at": now_iso()})
@@ -2494,10 +2536,11 @@ class AutoBookService(_Runner):
                     self._note_review(run, st, label, r2["review"])
                     if cons == "APPROVE":
                         new_res = checker.check(self._sub_job(run, "planned_check", rid), rid, round_no=n)
-                except AkoweError as exc:
-                    if exc.code == "TIMEOUT" or exc.code in BUSY_CODES:
-                        self._ai_problem(exc, f"checking the reworked {label}", record_id=rid, chapter_id=chapter_id)
+                except AkoweError as exc:  # never holds up the book: an unchecked fix is not kept (text put back)
+                    if getattr(exc, "control", False):
+                        raise
                     cons = cons or f"failed ({exc.code})"
+                    new_res = None
             ok = new_res is not None and self._open(new_res) < self._open(res)
             pl["history"].append({"round": n, "fix": "kept" if ok else "not kept", "applied": prop["applied"],
                                   "consistency": cons, "at": now_iso()})
@@ -2625,22 +2668,32 @@ class AutoBookService(_Runner):
             rj = self._sub_job(run, f"world_{k}", k, run["settings"].get("slot_id"))
             try:
                 e = gen(self._assist, rj, bp)
-            except AkoweError as exc:
-                slow = exc.code == "TIMEOUT" or exc.code in BUSY_CODES or exc.code == "CAPABILITY_UNAVAILABLE"
-                if slow and k == "texture" and not getattr(exc, "control", False):
-                    # 🧺 the world texture is extra colour, not a must: an AI that did not answer in time does not
-                    # stop the book — it is tried once more after the outline, else listed for you to check later
+            except (RunPaused, RunCancelled, Cancelled):
+                raise
+            except Exception as exc:  # noqa: BLE001 - see below: only the story rules' slow AI pauses the step
+                if getattr(exc, "control", False):
+                    raise
+                ecode = exc.code if isinstance(exc, AkoweError) else "INTERNAL_ERROR"
+                if not isinstance(exc, AkoweError):
+                    log.exception("make-a-book run %s: %s", run["id"], k)
+                slow = ecode == "TIMEOUT" or ecode in BUSY_CODES or ecode == "CAPABILITY_UNAVAILABLE"
+                if k == "texture":
+                    # 🧺 the world texture is extra colour, not a must: whatever went wrong (no answer in time, an
+                    # unusable answer, a bug) does not stop the book — it is tried once more after the outline, else
+                    # listed for you to check later
                     run["texture_retry"] = True
-                    item.update(state="failed", note=exc.code)
-                    self.event(run, "note", f"⚠️ The AI did not answer in time for the world texture ({exc.code}); the "
-                               "book goes on and Akọwe tries once more after the chapter outline", code="TEXTURE_LATER")
+                    item.update(state="failed", note=ecode)
+                    self.event(run, "note", (f"⚠️ The AI did not answer in time for the world texture ({ecode})" if slow
+                                             else f"⚠️ The world texture could not be made ({ecode})")
+                               + "; the book goes on and Akọwe tries once more after the chapter outline",
+                               code="TEXTURE_LATER")
                     self.save(run)
                     continue
                 if slow:
                     item["state"] = "paused"
                     self._ai_problem(exc, f"writing the {label.lower()}")
-                item.update(state="failed", note=exc.code)
-                self.event(run, "note", f"⚠️ The {label.lower()} could not be made ({exc.code}); the book goes on — "
+                item.update(state="failed", note=ecode)
+                self.event(run, "note", f"⚠️ The {label.lower()} could not be made ({ecode}); the book goes on — "
                            "make it on the book's 🌍 World rules page", code=code)
                 self.save(run)
                 continue
@@ -2743,7 +2796,10 @@ class AutoBookService(_Runner):
         if exc.code == "TIMEOUT":
             raise StepProblem("TIMEOUT", f"The AI did not answer in time while {what}.", TIMEOUT_FIX, **extra) from None
         if exc.code in BUSY_CODES:
-            raise StepProblem(exc.code, e.get("message") or "the AI stayed busy", BUSY_FIX, **extra) from None
+            raise StepProblem(exc.code, e.get("message") or "the AI stayed busy", _wait_fix(exc.code), **extra) \
+                from None
+        if stop_words.exc_unusable(exc):  # 🗣 R4: every working AI was asked; plain words, no schema
+            raise StepProblem(*stop_words.unusable_problem(e.get("message"), what), **extra) from None
         if exc.code == "CAPABILITY_UNAVAILABLE":
             raise StepProblem(exc.code, f"No AI was ready while {what}.", "Open Settings and connect an AI, then press "
                               "🔁 Try again.", **extra) from None
@@ -2752,9 +2808,36 @@ class AutoBookService(_Runner):
 
     # ------------------------------------------------------------------ steps
     def _s_backup(self, run, st):
-        b = self.app.backups.try_backup("before-run")
-        st["message"] = f"Backup saved ({b['name']})" if b else "Backup could not be written (continuing; see Health)"
-        self.event(run, "backup", st["message"], step="backup")
+        """💾 A safety backup before anything starts. Never holds up the book, but a backup that failed or did not
+        verify is never reported as saved: a ⚠️ note (BACKUP_FAILED / BACKUP_UNVERIFIED) and a check-later line."""
+        from . import backups as backups_mod  # noqa: PLC0415
+        mgr = self.app.backups
+        try:
+            b = mgr.try_backup("before-run")
+        except Exception as exc:  # noqa: BLE001 - try_backup never raises; a backup never holds up the book anyway
+            if getattr(exc, "control", False):
+                raise
+            log.exception("make-a-book run %s: safety backup", run["id"])
+            b, mgr.last_code = None, "BACKUP_ERROR"
+        if b and b.get("verified") is not False:
+            st["message"] = f"Backup saved ({b['name']})"
+            self.event(run, "backup", st["message"], step="backup")
+            return
+        if b:
+            st["message"] = ("⚠️ A backup was made but it did not verify (it may be damaged); the book goes on — "
+                             "see ❤️ Health and press 💾 Back up now")
+            code, line = "BACKUP_UNVERIFIED", ("Safety backup: the backup made before this book did not verify — press "
+                                               "💾 Back up now (❤️ Health)")
+        else:
+            why = backups_mod.failure_words(getattr(mgr, "last_code", None))
+            st["message"] = f"⚠️ The safety backup could not be made ({why}); the book goes on — see ❤️ Health"
+            code, line = "BACKUP_FAILED", (f"Safety backup: this book was made without one ({why}) — "
+                                           + ("free some disk space, then " if "full" in why else "")
+                                           + "press 💾 Back up now (❤️ Health)")
+        self.event(run, "note", st["message"], step="backup", code=code)
+        later = run.setdefault("check_later", [])
+        if line not in later:
+            later.append(line)
 
     def _s_profile(self, run, st):
         s = run["settings"]
@@ -2835,6 +2918,8 @@ class AutoBookService(_Runner):
         if s.get("locks"):  # 📋 6c: the starter sheet's lock list (facts that must stay true)
             wishes["must_stay_true"] = list(s["locks"])
         job = self._job(run, "profile", "B01")
+        from . import author_merge  # noqa: PLC0415 - R1: what the author types during the AI call is kept
+        before = dict(get_profile(self.store, pid))
         st["message"] = "The AI is inventing your book"
         self.save(run)
         from . import story_kind  # noqa: PLC0415 - 📚 "Let the AI decide": the AI picks the kind of story too
@@ -2854,13 +2939,26 @@ class AutoBookService(_Runner):
             from . import human_voice  # noqa: PLC0415
             schema = dict(schema, properties=dict(schema["properties"], narrator_voice=human_voice.VOICE_FIELD))
             task = task.replace(" Return only the JSON object.", human_voice.VOICE_TASK + " Return only the JSON object.")
-        try:
-            raw = self._assist._call_ai(job, op_for_roles="B01", task=task, schema=schema, context=context,
-                                        protected=[])
-        except AkoweError as exc:
-            self._ai_problem(exc, "inventing the book")
-        raw = raw if isinstance(raw, dict) else {}
-        prof = {k: str(raw.get(k) or "").strip() for k in ("title", "genre", "audience", "tone", "idea")}
+        for attempt in range(PROFILE_ASKS):  # an answer without a title or an idea is unusable: asked again
+            try:
+                raw = self._assist._call_ai(job, op_for_roles="B01", task=task, schema=schema, context=context,
+                                            protected=[])
+            except AkoweError as exc:
+                self._ai_problem(exc, "inventing the book")
+            raw = raw if isinstance(raw, dict) else {}
+            prof = {k: str(raw.get(k) or "").strip() for k in ("title", "genre", "audience", "tone", "idea")}
+            if prof["title"] and (prof["idea"] or s.get("idea")):
+                break
+            self.event(run, "note", "The AI's answer had no title or no idea for the book; it is asked again "
+                       f"({attempt + 1} of {PROFILE_ASKS - 1})" if attempt + 1 < PROFILE_ASKS else
+                       "The AI's answer had no title or no idea for the book again", step="profile",
+                       code="PROFILE_EMPTY")
+        else:
+            raise StepProblem("CHECKS_REFUSED", f"The AI answered {PROFILE_ASKS} times without a title or an idea "
+                              "for the book, so nothing was saved.",
+                              "Press 🔁 Try again: the AI is asked again (another AI may answer better; Settings → "
+                              "🧪 Test connection shows which AI works). Or type the book's idea yourself in "
+                              "⚡ Make a book.")
         if s.get("genre"):
             prof["genre"] = s["genre"]
         prof["title"] = prof["title"][:200] or "Untitled book"
@@ -2877,6 +2975,8 @@ class AutoBookService(_Runner):
                                     "tense": old.get("tense") or raw.get("tense")})
         prof["pov"], prof["tense"] = dec["pov"], dec["tense"]
         with self.store.transaction():  # the profile and the book's name are saved together
+            # R1: re-read inside the save: a title / idea / … the author typed while the AI worked is never replaced
+            kept = author_merge.keep_typed(before, get_profile(self.store, pid), prof, author_merge.PROFILE_KEYS)
             save_profile(self.store, pid, prof)
             self._name_book(pid, prof["title"])
         run["title"] = prof["title"]
@@ -2884,7 +2984,11 @@ class AutoBookService(_Runner):
             + f" ({prof['genre'] or 'any genre'}; told in the " \
                         f"{book_promises.POV_WORDS[dec['pov']]}, {dec['tense']} tense)"
         self.event(run, "ai", f"The AI invented the book “{prof['title']}”", slot=job.slot)
-        fresh_names.after_profile(self, run, st)  # 🔁 a repeated title word or name -> one rename (no AI to find)
+        if kept:
+            self.event(run, "note", "✍ Your own " + author_merge.words(kept) + " (typed while the AI was inventing the "
+                       "book) kept; the AI filled only the rest", step="profile", code="AUTHOR_TEXT_KEPT")
+        if not ({"title", "idea"} & set(kept)):  # never renames what the author typed
+            fresh_names.after_profile(self, run, st)  # 🔁 a repeated title word or name -> one rename (no AI to find)
         self._auto_voice(run, pid, raw.get("narrator_voice"))
         if pick:
             try:
@@ -3087,9 +3191,12 @@ class AutoBookService(_Runner):
                     self._ai_problem(exc, f"writing the sheet and voice of “{item['label']}”")
                 failed += 1
                 item.update(state="failed", note=exc.code)
+                retry = run.setdefault("sheet_retry", [])
+                if rec["record_id"] not in retry:
+                    retry.append(rec["record_id"])  # 📋 one more try after the outline (_retry_sheets)
                 self.event(run, "note", f"⚠️ The sheet and voice of “{item['label']}” could not be made ({exc.code}); "
-                           "the book goes on — make them on the character's page", code="CHARACTER_SHEET_FAILED",
-                           record_id=rec["record_id"])
+                           "the book goes on — Akọwe tries once more after the chapter outline",
+                           code="CHARACTER_SHEET_FAILED", record_id=rec["record_id"])
                 self.save(run)
                 continue
             made += 1
@@ -3122,9 +3229,14 @@ class AutoBookService(_Runner):
         except (RunPaused, RunCancelled, Cancelled):
             raise
         except Exception as exc:  # noqa: BLE001 - pictures never stop the book
+            if getattr(exc, "control", False):
+                raise
             log.exception("make-a-book run %s: character pictures", run["id"])
-            st["message"] = f"⚠️ The pictures could not be made now ({type(exc).__name__}); make them later with 🖼 " \
-                            "Make the rest of the pictures in the Book Bible"
+            n = book_pictures.note_run_missing(self, run, "PICTURE_ERROR",
+                                               f"Akọwe hit an unexpected problem ({type(exc).__name__})")
+            st["message"] = f"⚠️ The pictures could not be made now ({type(exc).__name__})" + (
+                f"; {n} picture(s) are on the Book Bible's to-make list" if n else "") + " — make them later with 🖼 " \
+                "Make the rest of the pictures in the Book Bible"
             self.event(run, "note", st["message"], step="pictures", code="PICTURES_WAITING")
 
     def _scene_cards(self, run, st, cid: str, item: dict):
@@ -3272,6 +3384,8 @@ class AutoBookService(_Runner):
             if "TIMEOUT" in codes:
                 raise StepProblem("TIMEOUT", "The AI did not answer in time while making the characters.", TIMEOUT_FIX)
             busy = codes & set(BUSY_CODES)
+            if busy == {"AI_DECLINED"}:  # 🗣 R6: refused, not busy
+                raise StepProblem("AI_DECLINED", stop_words.declined_message("the characters"), DECLINED_FIX)
             if busy:
                 raise StepProblem(sorted(busy)[0], "The AI stayed busy while making the characters.", BUSY_FIX)
             if strict:
@@ -3279,8 +3393,10 @@ class AutoBookService(_Runner):
                 msg = (run_err.get("message") or (errs[0].get("message") if errs else None) or
                        ("Akọwe's checks refused them: " + "; ".join(digest(refused[0], 3)) if refused else
                         "the AI's characters did not fit Akọwe's forms"))
-                raise StepProblem(run_err.get("code") or (errs[0].get("code") if errs else None) or "INVALID_INPUT",
-                                  f"The characters could not be made: {msg}", "Press 🔁 Try again.")
+                code_ = run_err.get("code") or (errs[0].get("code") if errs else None) or "INVALID_INPUT"
+                if stop_words.is_unusable(code_, msg):  # 🗣 R4: plain words, no schema
+                    raise StepProblem(*stop_words.unusable_problem(msg, "making the characters"))
+                raise StepProblem(code_, f"The characters could not be made: {msg}", "Press 🔁 Try again.")
         out = sess.create(good, {}) if good else {"created": [], "errors": []}
         out = self._fix_create_errors(run, sess, slot, notes, out)
         for c in out["created"]:
@@ -3935,12 +4051,17 @@ class AutoBookService(_Runner):
         try:
             m = story_kind.place(self._review, self._sub_job(run, "story_kind", outline["record_id"],
                                                              run["settings"].get("slot_id")), bp, outline)
-        except AkoweError as exc:
+        except (RunPaused, RunCancelled, Cancelled):
+            raise
+        except Exception as exc:  # noqa: BLE001 - never holds up the book (a bug included)
             if getattr(exc, "control", False):
                 raise
+            ecode = exc.code if isinstance(exc, AkoweError) else "INTERNAL_ERROR"
+            if not isinstance(exc, AkoweError):
+                log.exception("make-a-book run %s: story kind placement", run["id"])
             self.event(run, "note", f"⚠️ The stages of the kind of story could not be placed on the chapters "
-                       f"({exc.code}); each begins where it usually does", step="outline", code="KIND_FAILED")
-            m = story_kind.mapping(self.store, run["project_id"], run["branch_id"], outline)
+                       f"({ecode}); each begins where it usually does", step="outline", code="KIND_FAILED")
+            m = self._fallback_mapping(run, story_kind, outline)
         done[key] = True
         if m:
             st["kind"] = [story_kind.strip_label(s_) for s_ in m["stages"]][:12]
@@ -3950,8 +4071,8 @@ class AutoBookService(_Runner):
         self.save(run)
 
     def _retry_texture(self, run, st):
-        """🧺 The world texture timed out at the start: one more try now (after the outline). Never holds up the book:
-        a second failure is listed for the author's check later (make it on the 🌍 World rules page)."""
+        """🧺 The world texture could not be made at the start: one more try now (after the outline). Never holds up
+        the book: a second failure is listed for the author's check later (make it on the 🌍 World rules page)."""
         if not run.get("texture_retry"):
             return
         run["texture_retry"] = False
@@ -3961,14 +4082,19 @@ class AutoBookService(_Runner):
         rj = self._sub_job(run, "world_texture", "texture", run["settings"].get("slot_id"))
         try:
             e = texture_mod.generate(self._assist, rj, self.bp(run))
-        except AkoweError as exc:
+        except (RunPaused, RunCancelled, Cancelled):
+            raise
+        except Exception as exc:  # noqa: BLE001 - the world texture never holds up the book
             if getattr(exc, "control", False):
                 raise
+            ecode = exc.code if isinstance(exc, AkoweError) else "INTERNAL_ERROR"
+            if not isinstance(exc, AkoweError):
+                log.exception("make-a-book run %s: world texture (second try)", run["id"])
             later = run.setdefault("check_later", [])
             line = "World texture: the AI did not make it (make it on the 🌍 World rules page)"
             if line not in later:
                 later.append(line)
-            self.event(run, "note", f"⚠️ The world texture could not be made on the second try ({exc.code}); the "
+            self.event(run, "note", f"⚠️ The world texture could not be made on the second try ({ecode}); the "
                        "book goes on without it — it is listed for you to check later", code="TEXTURE_FAILED")
             self.save(run)
             return
@@ -3977,10 +4103,58 @@ class AutoBookService(_Runner):
                    code="TEXTURE_RETRIED")
         self.save(run)
 
-    def _build_ledger(self, run, st):
+    def _retry_sheets(self, run, st):
+        """📋 A character whose sheet and voice card could not be made in the characters step: one more try now (the
+        plan gives the AI more to go on). A second failure is listed for the author's check later (make them on the
+        character's page); never holds up the book — only a Pause / Cancel goes on up."""
+        todo = list(run.get("sheet_retry") or [])
+        if not todo:
+            return
+        pid, branch = run["project_id"], run["branch_id"]
+        names = {r["record_id"]: safe_title(self.app.engine.contracts, r) for r in self.bp(run).approved("A01")}
+        for rid in todo:
+            self.check(run)
+            if rid not in names:  # set aside meanwhile
+                run["sheet_retry"].remove(rid)
+                continue
+            if chars_mod.complete(chars_mod.get_entry(self.store, pid, branch, rid)):  # made by hand meanwhile
+                run["sheet_retry"].remove(rid)
+                continue
+            st["message"] = f"The AI tries the sheet and voice of “{names[rid]}” once more"
+            run["phase"] = st["message"]
+            self.save(run)
+            rj = self._sub_job(run, "characters", rid, run["settings"].get("slot_id"))
+            try:
+                chars_mod.generate(self._assist, rj, pid, branch, rid)
+                ok, code = chars_mod.complete(chars_mod.get_entry(self.store, pid, branch, rid)), "INCOMPLETE"
+            except Exception as exc:  # noqa: BLE001 - optional here: never a reason to stop the book
+                if getattr(exc, "control", False) or isinstance(exc, (RunPaused, RunCancelled, Cancelled)):
+                    raise
+                if not isinstance(exc, AkoweError):
+                    log.exception("character sheet (second try)")
+                ok, code = False, getattr(exc, "code", None) or type(exc).__name__
+            run["sheet_retry"].remove(rid)
+            if ok:
+                self.event(run, "characters", f"The AI wrote the sheet and voice card of “{names[rid]}” on the second "
+                           "try", slot=rj.slot, record_id=rid, code="CHARACTER_SHEET_RETRIED")
+            else:
+                later = run.setdefault("check_later", [])
+                line = f"{names[rid]}: sheet and voice card missing (make them on the character's page)"
+                if line not in later:
+                    later.append(line)
+                self.event(run, "note", f"⚠️ The sheet and voice of “{names[rid]}” could not be made on the second "
+                           f"try ({code}); the book goes on without them — listed for you to check later",
+                           code="CHARACTER_SHEET_LATER", record_id=rid)
+            self.save(run)
+        run.pop("sheet_retry", None)
+        self.save(run)
+
+    def _build_ledger(self, run, st, *, retry: bool = False):
         """📜 promise_ledger.py: one AI call lists the book's set-ups (promises) with the chapters where each must pay
         off; each chapter is then told what to plant and which payoffs are due, and the planned-to-page check checks
-        them. Once per outline revision; never holds up the book (no answer → no ledger, the book goes on)."""
+        them. Once per outline revision; never holds up the book. An AI that cannot answer is noted (LEDGER_FAILED)
+        and asked once more after chapter 1 (``retry``); an answer without promises is noted (LEDGER_EMPTY); the book
+        report then says the set-ups were not tracked. A Pause / Cancel goes on up: Resume builds the ledger."""
         from . import promise_ledger  # noqa: PLC0415
         bp = self.bp(run)
         outline = bp.outline()
@@ -3988,31 +4162,63 @@ class AutoBookService(_Runner):
             return
         done = run.setdefault("ledger_built", {})
         key = f"{outline['record_id']}:{outline['version']}"
-        if done.get(key):
+        if done.get(key) and not retry:
             return
         try:
-            led = promise_ledger.build(self._review, self._sub_job(run, "promise_ledger", outline["record_id"],
-                                                                   run["settings"].get("slot_id")), bp, outline)
-        except AkoweError as exc:
-            if getattr(exc, "control", False):
-                raise
-            self.event(run, "note", f"⚠️ The promise ledger could not be made ({exc.code}); the book goes on "
-                       "without it and the ending check still looks for set-ups that never paid off",
-                       step="outline", code="LEDGER_FAILED")
-            led = None
-        except Exception:  # noqa: BLE001 - guidance only: never a reason to stop the book
-            log.exception("promise ledger")
-            self.event(run, "note", "⚠️ The promise ledger could not be made; the book goes on without it",
-                       step="outline", code="LEDGER_FAILED")
-            led = None
+            led, why = promise_ledger.try_build(self._review, self._sub_job(run, "promise_ledger",
+                                                                            outline["record_id"],
+                                                                            run["settings"].get("slot_id")),
+                                                bp, outline)
+        except Exception as exc:  # noqa: BLE001 - guidance only: never a reason to stop the book
+            if getattr(exc, "control", False) or isinstance(exc, (RunPaused, RunCancelled, Cancelled)):
+                raise  # ⏸ / ⏹: not a failure — ▶ Resume makes the ledger
+            if not isinstance(exc, AkoweError):
+                log.exception("promise ledger")
+            led, why = None, getattr(exc, "code", None) or type(exc).__name__
         done[key] = True
+        run.pop("ledger_retry", None)
         if led:
             n = len(led["entries"])
             st["ledger"] = n
             self.event(run, "note", f"📜 Promise ledger: {n} set-up(s), each with the chapters where it must pay off"
-                       + (f" ({len(led['problems'])} corrected)" if led.get("problems") else ""),
+                       + (f" ({len(led['problems'])} corrected)" if led.get("problems") else "")
+                       + (" — made on the second try" if retry else ""),
                        step="outline", code="LEDGER_BUILT")
+        elif why == "EMPTY":
+            promise_ledger.note_missing(self.store, run["project_id"], run["branch_id"], outline, why)
+            self.event(run, "note", "📜 Promise ledger: the AI found no set-up to track in this plan; the book goes on "
+                       "without it and the ending check still looks for set-ups that never paid off",
+                       step="outline", code="LEDGER_EMPTY")
+        elif why and why != "TOO_SHORT":
+            promise_ledger.note_missing(self.store, run["project_id"], run["branch_id"], outline, why)
+            if not retry:
+                run["ledger_retry"] = key  # one more try after chapter 1
+            self.event(run, "note", f"⚠️ The promise ledger could not be made ({why}); the book goes on without it "
+                       + ("and the ending check still looks for set-ups that never paid off" if retry else
+                          "and Akọwe tries once more after chapter 1"),
+                       step="chapters" if retry else "outline", code="LEDGER_FAILED")
         self.save(run)
+
+    def _fallback_mapping(self, run, mod, outline):
+        """The story shape's / kind's placement by position after the planner's placement failed (None when even that
+        fails: the chapters are then written without it)."""
+        try:
+            return mod.mapping(self.store, run["project_id"], run["branch_id"], outline)
+        except Exception:  # noqa: BLE001 - never holds up the book
+            log.exception("make-a-book run %s: placement by position", run["id"])
+            return None
+
+    def _retry_ledger(self, run, st):
+        """📜 The promise ledger could not be made after the outline: one more try (after chapter 1, for the
+        chapters still to write). Only for the outline revision it failed on; never holds up the book."""
+        key = run.get("ledger_retry")
+        if not key:
+            return
+        outline = self.bp(run).outline()
+        if not outline or key != f"{outline['record_id']}:{outline['version']}":
+            run.pop("ledger_retry", None)
+            return
+        self._build_ledger(run, st, retry=True)
 
     def _place_beats(self, run, st):
         """📐 story_shape.py: the planner places each beat of the author's story shape on a chapter of the approved
@@ -4024,19 +4230,25 @@ class AutoBookService(_Runner):
         if not outline or not story_shape.of_store(self.store, run["project_id"]):
             return
         done = run.setdefault("beats_placed", {})
-        key = f"{outline['record_id']}:{outline['version']}"
+        # keyed by the shape too: a shape the author changed is placed again
+        key = f"{outline['record_id']}:{outline['version']}:{story_shape.of_store(self.store, run['project_id'])}"
         if done.get(key):
             return
         try:
             m = story_shape.place(self._review, self._sub_job(run, "story_shape", outline["record_id"],
                                                               run["settings"].get("slot_id")), bp, outline)
-        except AkoweError as exc:
+        except (RunPaused, RunCancelled, Cancelled):
+            raise
+        except Exception as exc:  # noqa: BLE001 - never holds up the book (a bug included)
             if getattr(exc, "control", False):
                 raise
-            self.event(run, "note", f"⚠️ The story shape could not be placed on the chapters ({exc.code}); each beat "
+            ecode = exc.code if isinstance(exc, AkoweError) else "INTERNAL_ERROR"
+            if not isinstance(exc, AkoweError):
+                log.exception("make-a-book run %s: story shape placement", run["id"])
+            self.event(run, "note", f"⚠️ The story shape could not be placed on the chapters ({ecode}); each beat "
                        "is placed by its position", step="outline", code="SHAPE_FAILED")
-            m = story_shape.mapping(self.store, run["project_id"], run["branch_id"], outline)
-        done[key] = True
+            m = self._fallback_mapping(run, story_shape, outline)
+        done[f"{outline['record_id']}:{outline['version']}:{(m or {}).get('template')}" if m else key] = True
         if m:
             st["shape"] = [story_shape.strip_label(b) for b in m["beats"]][:20]
             self.event(run, "note", f"📐 {m['label']}: " + "; ".join(story_shape.strip_label(b) for b in m["beats"])
@@ -4082,6 +4294,7 @@ class AutoBookService(_Runner):
         if not chapters:
             raise StepProblem("INVALID_INPUT", "The chapter outline has no chapters Akọwe can write.",
                               "Press 🔁 Try again.")
+        self._retry_sheets(run, st)  # 📋 a character sheet that failed before the outline: one more try now
         if run["settings"].get("bible") and not run.get("bible_scenes_seeded"):
             self._seed_scenes(run, outline, chapters)
         from . import ending_writer, keep_brief  # noqa: PLC0415 - ✋ 🎬 this run's keep briefs / ending writer / fact plan
@@ -4095,6 +4308,8 @@ class AutoBookService(_Runner):
             cid = ch["chapter_id"]
             item = st["items"][idx]
             self._checkpoints(run, st, outline, chapters, idx)  # 🧭 a checkpoint due after the chapters before this one
+            if idx:
+                self._retry_ledger(run, st)  # 📜 the promise ledger failed after the outline: one more try now
             from . import voice_test  # noqa: PLC0415 - 🗣 do the voices differ on the page so far? (≤ 1 AI mid-book)
             voice_test.before_chapter(self, run, st, outline, chapters, idx)
             # ⚡ #116: every AI call for this chapter shows "chapter N of M" in the AI activity strip
@@ -4161,6 +4376,8 @@ class AutoBookService(_Runner):
                                                    done=f"Decided the details chapter {idx + 1} needs"):
                                 story_details.before_chapter(self, run, st, cid, idx + 1, item)
                         payload = bp.prepare_chapter(cid)
+                        from . import draft_guard  # noqa: PLC0415 - 🧹 why its last draft was set aside, if it was
+                        payload = draft_guard.with_note(run, cid, payload)
                         from . import writer_record  # noqa: PLC0415 - 🏆 let the best writer write more
                         prov_ = self._engine.providers
                         if hasattr(prov_, "prefer_writer"):
@@ -4180,6 +4397,7 @@ class AutoBookService(_Runner):
                         self._made(run, ref)
                         self.event(run, "ai", f"The AI wrote chapter {cid}", record_id=rid, module_id="C02")
                         claude_code_book.draft_written(self, run, cid, idx + 1, rid)  # 🤖 fact check starts now
+                        ending_writer.after_write(self, run, cid)  # 🎬 a checklist that could not be made is said
                         from . import brief_cuts  # noqa: PLC0415 - H13: say exactly what did not fit
                         cuts = brief_cuts.after_write(self.store, run["project_id"], run["branch_id"], cid, idx + 1, rid,
                                                       payload.get("context_ref"))
@@ -4194,6 +4412,12 @@ class AutoBookService(_Runner):
                             item["cut"] = cuts["cut"]
                             self.event(run, "note", cuts["line"], code="INSTRUCTIONS_CUT", record_id=rid,
                                        chapter_id=cid)
+                        try:  # 🧹 the same text as another chapter / far too short or long: written again now
+                            if draft_guard.after_write(self, run, st, outline, chapters, cid, idx, rid, item):
+                                continue
+                        except StepProblem:
+                            item["state"] = "paused"
+                            raise
                     from . import key_scenes  # noqa: PLC0415 - 🎭 a key chapter written twice, the better one kept
                     key_scenes.after_draft(self, run, st, outline, chapters, cid, idx + 1, rid, item)
                     from . import chapter_polish  # noqa: PLC0415 - 📏 reading level + repeats: ≤ 1 polish, kept if better
@@ -4455,12 +4679,16 @@ class AutoBookService(_Runner):
         s = {x["id"]: x for x in bp.status()["steps"]}["format"]
         if s["state"] == "done":
             return
+        if s["state"] == "blocked" and not bp.profile.get("title"):  # 🔁 a plain stop the author can act on
+            raise StepProblem("MISSING_INPUT", "The book has no title, so its format (title page, file names) cannot "
+                              "be made.", "Type a title in the book profile, then press ▶ Resume.", step="format")
         if s["state"] != "needs_you":
             bp.a_setup_format({})
         self._approve_step_items(run, "format", "book format made by Akọwe from the profile (deterministic)")
         st["message"] = "Page size and interior design (Book format page), PDF/EPUB/DOCX settings — approved"
 
     def _s_assemble(self, run, st):
+        book_again.before(self, run, "assemble")  # 🔁 the chapters / format made again first when they changed
         bp = self.bp(run)
         s = {x["id"]: x for x in bp.status()["steps"]}["assemble"]
         if s["state"] == "done":
@@ -4469,35 +4697,21 @@ class AutoBookService(_Runner):
         if b:
             self.event(run, "backup", f"Backup before putting the book together ({b['name']})")
         if s["state"] != "needs_you":
-            bp.a_assemble({})
+            made = bp.a_assemble({}) or {}
+            for w in made.get("warnings") or []:  # R3: letters the PDF prints as □ never stop the book: say where
+                self.event(run, "note", w, step="assemble", code="PDF_LETTERS_REPLACED")
+                later = run.setdefault("check_later", [])
+                if w not in later:
+                    later.append(w)
+            book_again.nearly_empty(self, run)  # ⚠️ a chapter far below its planned length is named
         self._approve_step_items(run, "assemble", "assembly made by Akọwe from the approved chapters "
                                                   "(deterministic)")
         st["message"] = "The book is put together and approved"
 
     def _s_export(self, run, st):
-        bp = self.bp(run)
-        s = {x["id"]: x for x in bp.status()["steps"]}["export"]
-        if s["state"] != "done":
-            b = self.app.backups.try_backup("before-export")
-            if b:
-                self.event(run, "backup", f"Backup before exporting ({b['name']})")
-            out = self._export_under_consent(run, bp)
-            if not out.get("ok") or out.get("problems"):
-                raise StepProblem("INVALID_INPUT", out.get("message") or "Some files could not be made.",
-                                  "Press 🔁 Try again.", details=(out.get("problems") or [])[:6])
-            s = {x["id"]: x for x in self.bp(run).status()["steps"]}["export"]
-        files = []
-        for f in s.get("files") or []:
-            rec = self.store.get_record(run["project_id"], run["branch_id"], f["record_id"], f["version"])
-            data = self.store.read_binary(rec)
-            ok, why = verify_file(f["format"], data)
-            if not ok:
-                raise StepProblem("HASH_MISMATCH", f"The {f['format']} file does not read back: {why}",
-                                  "Press 🔁 Try again.")
-            files.append(dict(f, bytes=len(data), sha256=hashlib.sha256(data).hexdigest()))
-            self.event(run, "export", f"{f['format']} file made and re-read ({len(data)} bytes)")
-        run["files"] = files
-        st["message"] = "Made and re-read: " + ", ".join(f["format"] for f in files)
+        """Makes the files when they are not current (🔁 the earlier book steps first when they changed), then reads
+        each one back; a file that does not read back is made again once (book_again.export)."""
+        book_again.export(self, run, st)
 
     def _export_under_consent(self, run, bp):
         """BookPath.a_export, with the approval-manifest approval routed through the run's consent check."""
@@ -4540,7 +4754,8 @@ class AutoBookService(_Runner):
         try:
             rep = rp.make(run["principal"], run["project_id"], run["branch_id"], assist=self._assist,
                           review=self._review, ai=True, made_by="run", run_id=run["id"],
-                          check=lambda: self.check(run), on_progress=progress)
+                          check=lambda: self.check(run), on_progress=progress, patient=True,
+                          on_wait=lambda info: self.on_wait(run, info))  # G-18: waits, a second try, a stand-in
         except (RunPaused, RunCancelled, Cancelled):
             raise
         except Exception as exc:  # noqa: BLE001 - a report must never stop the book
@@ -4550,6 +4765,7 @@ class AutoBookService(_Runner):
             self.event(run, "note", st["message"], step="report", code="REPORT_FAILED")
             self._human_pass(run, st)
             return
+        from . import book_report as br_mod  # noqa: PLC0415
         agg = rep.get("aggregate") or {}
         run["report"] = {"id": rep["id"], "overall": agg.get("overall"), "reviewers": agg.get("reviewers"),
                          "independent": agg.get("independent"), "disagreements": agg.get("disagreements") or [],
@@ -4565,10 +4781,18 @@ class AutoBookService(_Runner):
             st["message"] = (f"{agg['reviewers']} AI(s) read the whole book · overall {agg.get('overall')}/10"
                              + (f" · ⚠️ they disagree on {', '.join(agg['disagreements'])}" if agg.get("disagreements")
                                 else ""))
+        elif br_mod.lost_line(rep.get("reviews")):  # G-18: the reviewers were asked and failed (or were set aside)
+            st["message"] = (f"⚠️ Report made without an AI review: {br_mod.lost_line(rep.get('reviews'))} — 📨 Ask "
+                             "the other AIs on the report page")
+            self.event(run, "note", st["message"], step="report", code="REPORT_NO_REVIEW")
         else:
             st["message"] = "⚠️ Report made without an AI review: no independent AI was working (📨 Ask the other AIs " \
                             "on the report page later)"
             self.event(run, "note", st["message"], step="report", code="REPORT_NOT_INDEPENDENT")
+        if rep.get("missing_chapters"):  # G-18-n: the report read an incomplete book
+            st["message"] += f" · ⚠️ {br_mod.missing_words(rep['missing_chapters'])}: the report is of an incomplete book"
+            self.event(run, "note", f"⚠️ {br_mod.missing_words(rep['missing_chapters'])} when the report read the "
+                       "book: the report is of an incomplete book", step="report", code="REPORT_INCOMPLETE")
         self.event(run, "report", f"Book report {rep['id']}: {st['message']}", step="report")
         og = (rep.get("originality") or {}).get("line")  # ✨ #20: one line, never blocks the book
         if og:
@@ -4663,11 +4887,17 @@ class AutoBookService(_Runner):
                        code="STYLE_MISSING")
 
     def _s_check(self, run, st):
+        book_again.before(self, run, "check")  # 🔁 put together / exported again first when the book changed
         out = self.bp(run).a_check({})
+        if not out.get("ok") and out.get("unreadable"):
+            raise StepProblem("INVALID_INPUT", out.get("message") or "The content check did not pass.",
+                              "Press 🔁 Try again. If it keeps happening, use 📋 Copy diagnostics.",
+                              details=(out.get("problems") or [])[:6], step="check")
         if not out.get("ok"):
             raise StepProblem("INVALID_INPUT", out.get("message") or "The content check did not pass.",
-                              "Open the book's Quality Checks to see what is missing, then press 🔁 Try again.",
-                              details=(out.get("problems") or [])[:6])
+                              "Fix that chapter in the book (rewrite it, or let Akọwe write it again) and approve it, "
+                              "then press ▶ Resume: the book is put together and checked again.",
+                              details=(out.get("problems") or [])[:6], step="check")
         st["message"] = out.get("message") or "PASS"
 
 
@@ -4791,7 +5021,8 @@ class WriteAllService(_Runner):
         except AkoweError as exc:
             if exc.code == "TIMEOUT" or exc.code in BUSY_CODES:
                 raise StepProblem(exc.code, f"The AI did not answer while planning the scenes of "
-                                  f"{item['label'].lower()}.", TIMEOUT_FIX if exc.code == "TIMEOUT" else BUSY_FIX,
+                                  f"{item['label'].lower()}.", TIMEOUT_FIX if exc.code == "TIMEOUT" else
+                                  _wait_fix(exc.code),
                                   chapter_id=item["id"]) from None
             self.event(job, "note", f"⚠️ The scenes of {item['label'].lower()} could not be planned ({exc.code}); it "
                        "is written from the outline", code="SCENES_FAILED")

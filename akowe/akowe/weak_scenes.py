@@ -20,8 +20,9 @@ fixing the exact scenes the reviewers quote. So, per round (``improve_rounds``: 
    before and after it (continuity), the voice cards and the author's style card when there is one, the protected
    facts, the lines the editor said to keep, and a word budget (never more than ``GROWTH`` longer).
 4. **Checks before anything is judged** (no AI, ``check_scene``): the budget, not cut to less than ``SHRINK`` of the
-   scene, every name and every kept line of the scene still there, no new chapter title or scene break. A scene that
-   fails keeps its text.
+   scene, every name and every kept line of the scene still there (each part of a character's name, the main
+   character's first name too), no new chapter title or scene break, no new death (``OUTCOME_CHANGED``) and no
+   instruction to an AI (ai_injection.py). A scene that fails keeps its text.
 
    📏 **A book at its length cap** (length_guard.BOOK_CAP, 115 % of its target; run setting ``length_guard``): the
    scenes are still rewritten, but each scene's budget shrinks to what the book has left (``scene_max``): at the cap,
@@ -123,7 +124,12 @@ REJECT_WORDS = {"EMPTY": "the answer had no scene", "TOO_LONG": "longer than the
                 "TOO_SHORT": "much shorter than the scene (cut off?)", "NAME_LOST": "a name of the scene was lost",
                 "KEEP_LOST": "a line the editor said to keep was lost", "NO_CHANGE": "nothing changed",
                 "FORM": "it added a chapter title or a scene break", "FAILED": "the AI could not answer",
-                "BOOK_TOO_LONG": "it would make the book longer than its length allows"}
+                "BOOK_TOO_LONG": "it would make the book longer than its length allows",
+                "OUTCOME_CHANGED": "it adds a death the scene did not have, and what happens may not change",
+                "INSTRUCTION": "its new words read like an instruction to an AI"}
+# 🎯 words that mean someone dies: a rewrite that adds one changes what happens in the story (never the writer's call)
+DEATH = re.compile(r"\b(die[ds]?|dying|dead|death|deaths|kill(?:s|ed|ing)?|murder(?:s|ed|ing)?|drown(?:s|ed)|"
+                   r"slain|slew|perish(?:es|ed)?|corpses?|lifeless|suicide)\b", re.I)
 
 
 def _now() -> str:
@@ -483,7 +489,42 @@ def check_scene(old: str, new, keep=(), names=(), max_words: int | None = None) 
     for n in names:
         if n and re.search(rf"\b{re.escape(n)}\b", old) and not re.search(rf"\b{re.escape(n)}\b", new):
             return "NAME_LOST", new
+    if outcome_added(old, new):
+        return "OUTCOME_CHANGED", new
+    from .ai_injection import added as injected  # noqa: PLC0415
+    if injected(old, new):
+        return "INSTRUCTION", new
     return None, new
+
+
+def outcome_added(old: str, new: str) -> list[str]:
+    """The death words the rewrite has more often than the scene had (lower case): a new death changes the story."""
+    def count(t):
+        out: dict[str, int] = {}
+        for m in DEATH.finditer(t or ""):
+            out[m.group(0).lower()] = out.get(m.group(0).lower(), 0) + 1
+        return out
+    a, b = count(old), count(new)
+    return sorted(w for w, n in b.items() if n > a.get(w, 0))
+
+
+def scene_names(store, pid: str, branch: str) -> list[str]:
+    """The approved characters' names and the main character's name (each part is checked: "Mara" of "Mara Vell").
+    Never raises: no names just means fewer checks."""
+    out = []
+    try:
+        from . import characters as chars_mod  # noqa: PLC0415
+        out += [c["name"] for c in chars_mod.canon_characters(store, pid, branch) if c.get("name")]
+    except Exception:  # noqa: BLE001
+        log.warning("weak scenes: could not read the characters' names")
+    try:
+        from . import story_roles  # noqa: PLC0415
+        p = story_roles.protagonist_of(store, pid, branch)
+        if p and p.get("name"):
+            out.append(p["name"])
+    except Exception:  # noqa: BLE001
+        log.warning("weak scenes: could not read the main character")
+    return list(dict.fromkeys(str(n) for n in out if isinstance(n, str) and n.strip()))
 
 
 def splice(text: str, changes: list[tuple[int, int, str]]) -> str:
@@ -523,6 +564,7 @@ def propose(runner, run, chosen: dict, total: int) -> tuple[list[dict], list[dic
         names = ed.names(pid, branch)
     except Exception:  # noqa: BLE001
         names = []
+    names = list(dict.fromkeys(list(names) + scene_names(app.store, pid, branch)))  # every name part is kept
     try:
         voices = ed._voices(pid, branch)  # noqa: SLF001
     except Exception:  # noqa: BLE001
@@ -687,5 +729,6 @@ def line(res: dict, labels: list[str], rounds: int = 1) -> str:
         return "🎯 Weakest scenes: nothing was changed"
     if res.get("after") is None:
         return f"🎯 Weakest scenes: {res['before']:g}/10 — {res.get('why') or 'nothing was changed'}"
-    word = "kept" if res.get("keep") else f"not kept, the original book stays: {res.get('why')}"
+    word = "kept" if res.get("keep") else f"not kept: {res.get('why')}" if res.get("edited") else \
+        f"not kept, the original book stays: {res.get('why')}"
     return f"{head}: {res['before']:g} → {res['after']:g} ({word})" + (f" · {rounds} rounds" if rounds > 1 else "")

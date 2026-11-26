@@ -43,6 +43,10 @@ log = logging.getLogger("akowe.whole_bible")
 CALL_KEYS = 36          # fields per AI call (several sections, several records)
 CHUNK_KEYS = 24         # fields of one record in one call at most
 PASSES = 2              # a second round for what the first one made possible (new relationship rows)
+GIVE_UP_AFTER = 3       # the AI not answering this many calls in a row: the rest is left for later (D-11-a)
+QUIET_CODES = ("TIMEOUT", "UPSTREAM_UNAVAILABLE", "RATE_LIMITED", "CAPABILITY_UNAVAILABLE", "QUOTA_EXCEEDED")
+RUN_MAX_CALLS = 100     # the ⚡ run step asks at most this many calls; the rest is decided just in time (D-11-m)
+SECONDS_PER_CALL = 40   # a web AI's usual time for one batch (only for the estimate the author is shown)
 TEXT_MAX = 600
 SKIP_KEYS = frozenset(("supplied_canon", "proposed_additions", "record_controls", "component_readiness",
                        "verification_scope", "artwork_note", "unresolved_choices", "linked_records"))
@@ -276,8 +280,10 @@ def base_context(app, pid: str, branch: str) -> dict:
 
 
 def schema(parts: list[dict]) -> dict:
+    """No key is required: a web AI that leaves out a field or two of a big batch still fills the rest (``read_answer``
+    takes what came; what it left empty is asked again in the next round or decided just in time)."""
     keys = [f"{u['ref_id']}__{_akey(u, k)}" for u in parts for k in u["keys"]]
-    return {"type": "object", "additionalProperties": False, "required": keys,
+    return {"type": "object", "additionalProperties": False, "required": [],
             "properties": {k: {"type": "string"} for k in keys}}
 
 
@@ -299,6 +305,54 @@ def read_answer(raw, parts: list[dict]) -> dict:
         t = clip(v, TEXT_MAX)
         if t and not re.match(r"^\s*(n/?a|none|unknown|not stated|-)\s*$", t, re.I):
             out.setdefault(ref_id, {})[k] = t
+    return out
+
+
+_NAME_STOP = frozenset(("the", "and", "of", "old", "new", "great", "little", "chapter", "book", "house", "place",
+                        "lady", "lord", "mister", "miss", "mrs", "sir", "saint", "master", "captain"))
+
+
+def _name_marks(name: str) -> list[str]:
+    """What names a subject in a text: its whole name and its distinctive capitalised words ("Mara Vell" → Mara Vell,
+    Mara, Vell)."""
+    name = " ".join(str(name or "").split())
+    if len(name) < 3:
+        return []
+    out = [name]
+    for w in re.findall(r"[^\W\d_][\w'’-]*", name):
+        if len(w) >= 3 and w[0].isupper() and w.lower() not in _NAME_STOP and w not in out:
+            out.append(w)
+    return out
+
+
+def _names_in(text: str, marks: list[str]) -> bool:
+    return any(re.search(r"(?<!\w)" + re.escape(m) + r"(?!\w)", text) for m in marks)
+
+
+def mixed_up(parts: list[dict], ans: dict) -> list[str]:
+    """The ref_ids of a batch whose answers describe ANOTHER subject of the same batch (an AI that swapped two rows):
+    at least half of a subject's answered values (and two or more) name another subject of the batch and not its own.
+    Those answers are dropped and the subject is asked again on its own (D-11-l)."""
+    if len(parts) < 2:
+        return []
+    marks = {p["ref_id"]: _name_marks(p.get("name")) for p in parts}
+    out = []
+    for p in parts:
+        vals = list((ans.get(p["ref_id"]) or {}).values())
+        own = set(marks[p["ref_id"]])
+        others = [m for q in parts if q["ref_id"] != p["ref_id"] for m in marks[q["ref_id"]] if m not in own]
+        if len(vals) < 2 or not others:
+            continue
+        fulls = [q.get("name") for q in parts if q["ref_id"] != p["ref_id"] and q.get("name")
+                 and q.get("name") != p.get("name")]
+
+        def own_named(v: str) -> bool:  # "Ivo Vell" does not name "Mara Vell" through the family name they share
+            for f in fulls:
+                v = re.sub(r"(?<!\w)" + re.escape(" ".join(str(f).split())) + r"(?!\w)", " ", v)
+            return _names_in(v, list(own))
+        wrong = sum(1 for v in vals if _names_in(v, others) and not own_named(v))
+        if wrong >= 2 and wrong * 2 >= len(vals):
+            out.append(p["ref_id"])
     return out
 
 
@@ -400,23 +454,106 @@ def waves(us: list[dict]) -> list[list[list[dict]]]:
 
 
 def fill(app, pid: str, branch: str, *, ask, check, progress, by: str | None, skip: dict | None = None,
-         on_call=None, helper=None) -> dict:
+         on_call=None, helper=None, max_calls: int | None = None) -> dict:
     """Fill every open field. ``ask(task, schema, ctx) -> (raw, slot)`` makes one AI call; ``check()`` raises on
     pause / cancel / Stop; ``progress(done_calls, total_calls, names)``; ``by``: the run's consent (approve at once)
     or None (proposals wait for the author); ``on_call(parts, filled)`` after each call. Returns the summary
     (``summary()``). 🤖 ``helper`` (claude_code_speed.BibleHelper): each wave's calls run side by side as helper
     jobs; their answers are read and accepted here, in order, exactly like ``ask``'s; a call the helper did not
-    answer is asked with ``ask`` as before."""
+    answer is asked with ``ask`` as before.
+
+    Never lost to one bad batch: an AI error, a record deleted meanwhile (NOT_FOUND) or a fault while an answer is
+    saved costs only that batch (``res["failed"]`` / ``res["errors"]``). After ``GIVE_UP_AFTER`` calls in a row the
+    AI did not answer (time-outs, unreachable) — or at once when every AI is at its usage limit — the rest is left
+    for later (``res["gave_up"]``). ``max_calls``: ask at most this many calls (``res["capped"]``)."""
     skip = {k: list(v) for k, v in (skip or {}).items()}
     us, info = units(app, pid, branch, skip=skip)
     plan = waves(us) if helper is not None else [chunks(us)]
     calls = [c for w in plan for c in w]
     base = base_context(app, pid, branch) if calls else {}
     res = {"calls": len(calls), "done_calls": 0, "filled": {}, "asked": {}, "failed": [], "stopped": False,
-           "info": info, "units": list(us)}
-    progress(0, len(calls), "")
+           "info": info, "units": list(us), "errors": [], "gave_up": None, "capped": None, "mixed": 0,
+           "left_empty": 0, "planned_calls": len(calls)}
+    if max_calls is not None and len(calls) > max_calls:
+        res["capped"] = {"planned": len(calls), "max": max_calls}
+        res["calls"] = max_calls
+    streak = {"n": 0, "logged": False}
+
+    def budget_left() -> bool:
+        return max_calls is None or res["done_calls"] < max_calls
+
+    def failed(parts, names, code, *, quiet: bool):
+        res["failed"].append({"names": names, "code": code, "keys": sum(len(p["keys"]) for p in parts),
+                              "refs": [p["ref"] for p in parts]})
+        for p in parts:
+            res["asked"].setdefault(p["ref"], [])
+        res["done_calls"] += 1
+        streak["n"] = streak["n"] + 1 if quiet else 0
+
+    def ask_once(parts, names, pre=None):
+        """(raw, slot) or None when the AI did not answer (noted)."""
+        ctx = context(app, pid, branch, parts, base)
+        try:
+            if pre is not None:
+                return pre
+            return ask(FILL_TASK, schema(parts), ctx)
+        except AkoweError as exc:
+            if getattr(exc, "control", False):
+                raise
+            from . import usage_limits  # noqa: PLC0415
+            lim = usage_limits.of_error(exc)
+            failed(parts, names, exc.code, quiet=exc.code in QUIET_CODES or lim is not None)
+            if lim is not None:  # every AI is at its usage limit (the run already waited for one to reset)
+                res["gave_up"] = {"code": exc.code, "limit": True, "reset_at": lim.get("reset_at")}
+            elif streak["n"] >= GIVE_UP_AFTER:
+                res["gave_up"] = {"code": exc.code, "limit": False, "reset_at": None}
+            return None
+
+    def take(parts, raw, slot, names):
+        """Read and save one answer; a subject whose answer describes another subject of the batch is asked again on
+        its own. A record gone meanwhile or a fault while saving costs only that subject."""
+        ans = read_answer(raw, parts)
+        bad = mixed_up(parts, ans)
+        if bad:
+            res["mixed"] += len(bad)
+            log.info("whole bible: %s subject(s) of a batch were answered for another subject; asked again alone",
+                     len(bad))
+        filled = []
+        for p in parts:
+            if p["ref_id"] in bad:
+                continue
+            mine = ans.get(p["ref_id"]) or {}
+            try:
+                got = accept(app, pid, branch, p, mine, slot, by=by)
+            except Exception as exc:  # noqa: BLE001 - one subject's save never stops the fill
+                if getattr(exc, "control", False):
+                    raise
+                code = getattr(exc, "code", None) or type(exc).__name__
+                if not isinstance(exc, AkoweError):
+                    if not streak["logged"]:
+                        log.exception("whole bible: could not save a batch's answer")
+                        streak["logged"] = True
+                    else:
+                        log.warning("whole bible: could not save a batch's answer (%s)", code)
+                res["errors"].append({"ref": p["ref"], "name": p["name"], "code": code,
+                                      "gone": code == "NOT_FOUND"})
+                res["asked"].setdefault(p["ref"], []).extend(p["keys"])
+                continue
+            res["filled"].setdefault(p["ref"], []).extend(got)
+            res["asked"].setdefault(p["ref"], []).extend(p["keys"])
+            res["left_empty"] += len([k for k in p["keys"] if k not in got])
+            filled.append((p, got))
+        res["done_calls"] += 1
+        if on_call:
+            on_call(parts, filled)
+        progress(res["done_calls"], res["calls"], names)
+        return [p for p in parts if p["ref_id"] in bad]
+
+    progress(0, res["calls"], "")
     try:
         for round_ in range(PASSES):
+            if res["gave_up"] or not budget_left():
+                break
             if round_:  # what the first round made possible (a new relationship row has a type to give …)
                 more = {k: list(dict.fromkeys(skip.get(k, []) + v)) for k, v in res["asked"].items()}
                 us, _i = units(app, pid, branch, skip=dict(skip, **more))
@@ -424,8 +561,15 @@ def fill(app, pid: str, branch: str, *, ask, check, progress, by: str | None, sk
                     break
                 res["units"] += us
                 plan = waves(us) if helper is not None else [chunks(us)]
-                res["calls"] += sum(len(w) for w in plan)
+                n_more = sum(len(w) for w in plan)
+                res["planned_calls"] += n_more
+                res["calls"] = min(res["calls"] + n_more, max_calls) if max_calls is not None else \
+                    res["calls"] + n_more
+                if max_calls is not None and res["planned_calls"] > max_calls:
+                    res["capped"] = {"planned": res["planned_calls"], "max": max_calls}
             for wave in plan:
+                if res["gave_up"] or not budget_left():
+                    break
                 if helper is not None:  # 🤖 the whole wave starts side by side
                     def build(parts):
                         ctx_ = context(app, pid, branch, parts, base)  # (names the parts: before the schema)
@@ -433,40 +577,33 @@ def fill(app, pid: str, branch: str, *, ask, check, progress, by: str | None, sk
                     helper.start(wave, build)
                 web_s = 0.0
                 for i, parts in enumerate(wave):
+                    if res["gave_up"] or not budget_left():
+                        break
                     check()
                     names = ", ".join(dict.fromkeys(f"“{p['name']}”" for p in parts))
                     progress(res["done_calls"], res["calls"], names)
-                    ctx = context(app, pid, branch, parts, base)
                     pre = helper.result(i) if helper is not None else None
+                    t_ask = time.monotonic()
                     try:
-                        if pre is not None:
-                            raw, slot = pre
-                        else:
-                            t_ask = time.monotonic()
-                            try:
-                                raw, slot = ask(FILL_TASK, schema(parts), ctx)
-                            finally:
-                                web_s += time.monotonic() - t_ask
-                    except AkoweError as exc:
-                        if getattr(exc, "control", False):
-                            raise
-                        res["failed"].append({"names": names, "code": exc.code,
-                                              "keys": sum(len(p["keys"]) for p in parts)})
-                        for p in parts:
-                            res["asked"].setdefault(p["ref"], [])
-                        res["done_calls"] += 1
+                        got = ask_once(parts, names, pre)
+                    finally:
+                        if pre is None:
+                            web_s += time.monotonic() - t_ask
+                    if got is None:
                         continue
-                    ans = read_answer(raw, parts)
-                    filled = []
-                    for p in parts:
-                        got = accept(app, pid, branch, p, ans.get(p["ref_id"]) or {}, slot, by=by)
-                        res["filled"].setdefault(p["ref"], []).extend(got)
-                        res["asked"].setdefault(p["ref"], []).extend(p["keys"])
-                        filled.append((p, got))
-                    res["done_calls"] += 1
-                    if on_call:
-                        on_call(parts, filled)
-                    progress(res["done_calls"], res["calls"], names)
+                    streak["n"] = 0
+                    again = take(parts, got[0], got[1], names)
+                    for p in again:  # asked again on its own: no other subject to mix it up with
+                        if res["gave_up"] or not budget_left():
+                            res["asked"].setdefault(p["ref"], [])
+                            break
+                        check()
+                        one = f"“{p['name']}”"
+                        res["calls"] += 1 if max_calls is None or res["calls"] < max_calls else 0
+                        got1 = ask_once([p], one)
+                        if got1 is not None:
+                            streak["n"] = 0
+                            take([p], got1[0], got1[1], one)
                 if helper is not None:
                     helper.wave_done(web_s)
     except Exception as exc:  # noqa: BLE001 - a Stop / pause keeps what is filled, then goes on up
@@ -492,10 +629,17 @@ def summary(app, pid: str, branch: str, res: dict) -> dict:
             if k in u["keys"]:
                 filled_secs.add((u["ref"], _unit_section(u, k)))
     failed_names = " ".join(f["names"] for f in res.get("failed") or [])
+    failed_refs = {r for f in res.get("failed") or [] for r in f.get("refs") or ()}
+    gone = {e["ref"] for e in res.get("errors") or [] if not e.get("gone")}
+    later = ("left for later: every AI is at its usage limit" if (res.get("gave_up") or {}).get("limit") else
+             "left for later: the AI stopped answering" if res.get("gave_up") else
+             f"left for later: this step asks at most {res['capped']['max']} AI calls" if res.get("capped") else
+             "not reached")
     for u in left:
-        why = ("the AI did not answer for it" if f"“{u['name']}”" in failed_names else
+        why = ("the AI did not answer for it" if u["ref"] in failed_refs or f"“{u['name']}”" in failed_names else
+               "Akọwe could not save the answer" if u["ref"] in gone else
                "stopped before it was reached" if res.get("stopped") and u["ref"] not in res["asked"] else
-               "the AI had nothing to add yet" if u["ref"] in res["asked"] else "not reached")
+               "the AI had nothing to add yet" if u["ref"] in res["asked"] else later)
         for k in u["keys"]:
             empty.setdefault(why, set()).add((u["ref"], _unit_section(u, k)))
             asked_left[(u["ref"], _unit_section(u, k))] = why
@@ -505,26 +649,45 @@ def summary(app, pid: str, branch: str, res: dict) -> dict:
     words = f"{n_filled} section{'s' if n_filled != 1 else ''} filled, {n_empty} still empty"
     if reasons:
         words += " (" + "; ".join(f"{r['sections']}: {r['why']}" for r in reasons) + ")"
+    if res.get("left_empty"):
+        words += f"; the AI left {res['left_empty']} field{'s' if res['left_empty'] != 1 else ''} empty"
     names = sorted({c for _r, c in filled_secs})
     return {"filled_sections": n_filled, "empty_sections": n_empty, "reasons": reasons,
             "fields": sum(len(v) for v in res["filled"].values()), "codes": names[:40], "message": words,
-            "derived": DERIVED, "made_dossiers": (res.get("info") or {}).get("made_dossiers", 0)}
+            "derived": DERIVED, "made_dossiers": (res.get("info") or {}).get("made_dossiers", 0),
+            "left_empty": res.get("left_empty", 0), "gave_up": res.get("gave_up"), "capped": res.get("capped")}
 
 
 # ====================================================================== 1. the run step (⚡ "before writing")
 def run_step(svc, run, st) -> None:
     """The run step "Fill the whole Book Bible" (only when the run asked for it). Never holds up the book: a failed
-    AI call is a plain event and the just-in-time pass fills the rest later."""
+    AI call, a record deleted meanwhile or a fault in Akọwe's own code is a plain note and the just-in-time pass
+    fills the rest later; only the run's pause / cancel go on up. At a usage limit the step waits for one AI to reset
+    like every other step (once); an AI that keeps not answering is given up after a few calls; a very big Book
+    Bible is asked for at most ``RUN_MAX_CALLS`` calls."""
+    from . import usage_limits  # noqa: PLC0415
     pid, branch = run["project_id"], run["branch_id"]
     by = f"run:{run['id']}"
     skip = st.get("asked") if isinstance(st.get("asked"), dict) else {}
+    waited = {"limit": False}
 
     def ask(task, sch, ctx):
         first = ctx["subjects"][0]["name"] if ctx.get("subjects") else "bible"
         job = svc._sub_job(run, "bible_fill", str(first)[:40], (run.get("settings") or {}).get("slot_id"))  # noqa: SLF001
         job.retry_busy = False
-        raw = svc._assist._call_ai(job, op_for_roles="A01", task=task, schema=sch, context=ctx,  # noqa: SLF001
-                                   protected=[])
+
+        def call():
+            return svc._assist._call_ai(job, op_for_roles="A01", task=task, schema=sch, context=ctx,  # noqa: SLF001
+                                        protected=[])
+        try:
+            raw = call()
+        except AkoweError as exc:
+            if getattr(exc, "control", False) or waited["limit"] or usage_limits.of_error(exc) is None:
+                raise
+            waited["limit"] = True  # ⏳ every AI at its usage limit: wait for one to reset, like every other step
+            job.retry_busy = True
+            raw = call()
+            waited["limit"] = False  # it reset: a later limit is waited for again
         return raw, job.slot
 
     def progress(i, n, names):
@@ -547,20 +710,75 @@ def run_step(svc, run, st) -> None:
     from .claude_code_speed import bible_helper  # noqa: PLC0415 - 🤖 Step 2: side by side (None = one after another)
     try:
         res = fill(svc.app, pid, branch, ask=ask, check=lambda: svc.check(run), progress=progress, by=by,
-                   skip=skip, on_call=on_call, helper=bible_helper(svc, run))
-    except Exception as exc:
+                   skip=skip, on_call=on_call, helper=bible_helper(svc, run), max_calls=RUN_MAX_CALLS)
+    except Exception as exc:  # noqa: BLE001 - optional step: only the run's pause / cancel go on up
         res = getattr(exc, "whole_bible", None)
         if res:
             st["summary"] = res["summary"]
-        raise
-    for f in res["failed"]:
-        svc.event(run, "note", f"⚠️ The Book Bible details of {f['names']} could not be filled now ({f['code']}); the "
-                               "book goes on — they are decided just in time, before the chapter that needs them",
-                  step="bible", code="BIBLE_FILL_LATER")
+        if _control(exc):
+            raise
+        code = getattr(exc, "code", None) or type(exc).__name__
+        if not isinstance(exc, AkoweError):
+            log.exception("whole bible: the fill stopped")
+        msg = (f"⚠️ Filling the whole Book Bible stopped ({code}); the book goes on — what is still empty is "
+               "decided just in time, before the chapter that needs it, or press 📖 Fill in the whole Book Bible")
+        svc.event(run, "note", msg, step="bible", code="BIBLE_FILL_FAILED")
+        sm = (res or {}).get("summary") or {}
+        st["items"] = [{"id": "bible", "label": "Book Bible sections", "state": "failed",
+                        "note": sm.get("message") or code}]
+        st["message"] = "Book Bible: " + (sm.get("message") + " · " if sm.get("message") else "") + \
+            f"⚠️ stopped ({code})"
+        return
+    _notes(svc, run, res)
     st["summary"] = res["summary"]
     st["items"] = [{"id": "bible", "label": "Book Bible sections", "state": "done",
                     "note": res["summary"]["message"]}]
     st["message"] = "Book Bible: " + res["summary"]["message"]
+
+
+def _control(exc) -> bool:
+    """The run's pause / cancel / Stop (and a stop for the author): never swallowed as "the fill failed"."""
+    from .story_guards import _is_control  # noqa: PLC0415
+    return _is_control(exc)
+
+
+def _notes(svc, run, res: dict) -> None:
+    """The run's journal: ONE note per kind of trouble (never one per batch), in plain words."""
+    from . import usage_limits  # noqa: PLC0415
+    tail = ("the book goes on — they are decided just in time, before the chapter that needs them, or press 📖 Fill "
+            "in the whole Book Bible later")
+    if res.get("capped"):
+        c = res["capped"]
+        mins = max(1, round(c["planned"] * SECONDS_PER_CALL / 60))
+        svc.event(run, "note", f"📖 The whole Book Bible would take about {c['planned']} AI calls (with a web AI about "
+                               f"{mins} minutes); this step asked at most {c['max']} — the rest is decided just in "
+                               "time, before the chapter that needs it, or press 📖 Fill in the whole Book Bible",
+                  step="bible", code="BIBLE_FILL_CAPPED")
+    gu = res.get("gave_up")
+    by_code: dict[str, int] = {}
+    for f in res.get("failed") or []:
+        by_code[f["code"]] = by_code.get(f["code"], 0) + 1
+    if gu and gu.get("limit"):
+        when = f" (one resets at about {usage_limits.clock(gu['reset_at'])})" if isinstance(
+            gu.get("reset_at"), (int, float)) else ""
+        svc.event(run, "note", f"⚠️ Every AI is at its usage limit{when}, so Akọwe stopped filling the Book Bible; "
+                               + tail, step="bible", code="BIBLE_FILL_LATER")
+    elif gu:
+        svc.event(run, "note", f"⚠️ The AI stopped answering ({gu['code']} {GIVE_UP_AFTER} times in a row), so Akọwe "
+                               "stopped filling the Book Bible; " + tail, step="bible", code="BIBLE_FILL_LATER")
+    else:
+        for code, n in by_code.items():
+            svc.event(run, "note", f"⚠️ {n} Book Bible batch(es) could not be filled now ({code}); " + tail,
+                      step="bible", code="BIBLE_FILL_LATER")
+    errs = res.get("errors") or []
+    gone = [e for e in errs if e.get("gone")]
+    other = [e for e in errs if not e.get("gone")]
+    if gone:
+        svc.event(run, "note", f"📖 {len(gone)} Book Bible page(s) were deleted while the AI filled them; their "
+                               "answers were left out", step="bible", code="BIBLE_FILL_GONE")
+    if other:
+        svc.event(run, "note", f"⚠️ Akọwe could not save the AI's answers for {len(other)} Book Bible page(s) "
+                               f"({other[0]['code']}); " + tail, step="bible", code="BIBLE_FILL_FAILED")
 
 
 # ====================================================================== 2. the button (📖 At a glance)

@@ -34,7 +34,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from . import ai_activity, legacy, ollama_adapter, practice_ai, usage_limits
+from . import ai_activity, ai_text, legacy, ollama_adapter, practice_ai, stop_words, usage_limits
 from .errors import AkoweError
 from .store import Store, new_id, utcnow, write_private
 
@@ -417,10 +417,13 @@ class AnthropicAdapter:
                      if getattr(b, "type", "") == "text"), "")
         try:
             data = json.loads(text)
-        except ValueError as exc:
-            raise AkoweError("INTERNAL_ERROR", "", "provider returned invalid JSON") from exc
+        except ValueError:
+            data = None
         if not isinstance(data, dict):
-            raise AkoweError("INTERNAL_ERROR", "", "provider returned JSON that is not an object")
+            # 🗣 an unusable answer: plain words, and the call may go to another working AI (stop_words.py)
+            err = AkoweError("INTERNAL_ERROR", "", stop_words.unusable_message("The Claude API", 1))
+            err.unusable = err.try_other_ai = True
+            raise err
         usage_obj = getattr(response, "usage", None)
         usage = {"input_tokens": getattr(usage_obj, "input_tokens", 0) or 0,
                  "output_tokens": getattr(usage_obj, "output_tokens", 0) or 0,
@@ -1070,9 +1073,12 @@ class AutoInjectorAdapter:
             err.refusal = err.declined = True
             err.no_wait = True  # already asked MAX_REASKS + 1 times: another AI, never the same one again after a wait
         else:
-            err = AkoweError("INTERNAL_ERROR", "", f"the {site} web session did not return JSON matching the output "
-                                 f"schema after {self.MAX_REASKS + 1} tries; nothing was saved. Last errors: "
-                                 + "; ".join(errors[:5]))
+            # 🗣 plain words for the author (stop_words.py); the schema pointers stay on the error for diagnostics
+            err = AkoweError("INTERNAL_ERROR", "", stop_words.unusable_message(SITE_NAMES.get(site, site),
+                                                                               self.MAX_REASKS + 1))
+            err.unusable = True
+            err.schema_errors = [str(e)[:200] for e in errors[:5]]
+        err.reasked = True       # already asked again in the same chat: the next try is another AI
         err.try_other_ai = True  # PR #122: the registry gives the call to another working AI before it pauses
         raise err
 
@@ -1778,7 +1784,8 @@ class ProviderRegistry:
                     "model": usage.get("model", slot["model"]), "input_tokens": usage.get("input_tokens", 0),
                     "output_tokens": usage.get("output_tokens", 0), "context_tokens_estimate": needed,
                     "provider_request_id": usage.get("provider_request_id"), "at": utcnow()}
-        return data, resource
+        # 🧹 every AI answer, once, before any caller reads it: no control / bidi-override / zero-width characters
+        return ai_text.clean_tree(data), resource
 
     # PR #122: every AI call gets its OWN full time, never what an earlier call of the same operation left over (a
     # chapter written scene by scene makes 2-6 calls under one C02 request: scene 3 used to get 10-60 s and pause).

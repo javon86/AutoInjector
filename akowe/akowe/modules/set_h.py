@@ -982,19 +982,25 @@ class MissingDuplicateContent(HReport):
                 bad = True
         if not bad:
             review.ok("CHAPTER_SET", f"{len(ids)} selected chapter(s) present once, in order, at manifest pins")
-        # empty / duplicated content
+        # empty / duplicated content (named by chapter number for the author when the manifest knows it)
+        number_of = {r.get("record_id"): n + 1 for n, r in enumerate(refs) if isinstance(r, dict)}
+
+        def named(c) -> str:
+            n = number_of.get(c["rec"].get("record_id"))
+            return f"chapter {n}" if n else f"section {c['id']}"
         dup_found = False
         by_text: dict = {}
         for c in chunks:
             text = c["text"] or ""
             if not text.strip():
-                review.add("EMPTY_CHAPTER", f"section {c['id']} is empty", source_refs=[c["rec"]["ref"]])
+                review.add("EMPTY_CHAPTER", f"{named(c)} is empty", source_refs=[c["rec"]["ref"]])
                 dup_found = True
                 continue
             norm = " ".join(text.split())
             if norm in by_text and by_text[norm]["rec"]["record_id"] != c["rec"]["record_id"]:
                 o = by_text[norm]
-                review.add("DUPLICATE_CHAPTER_TEXT", f"sections {o['id']} and {c['id']} have identical text",
+                pair = f"{named(o)} and {named(c)}"
+                review.add("DUPLICATE_CHAPTER_TEXT", (pair[0].upper() + pair[1:]) + " have the same text",
                            evidence=[span_evidence(o["rec"], o["text"], 0, len(o["text"])),
                                      span_evidence(c["rec"], text, 0, len(text))])
                 dup_found = True
