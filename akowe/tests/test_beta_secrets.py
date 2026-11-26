@@ -17,8 +17,9 @@ INFO = {"premise": "A piano tuner hears her drowned brother Teo singing under th
 
 
 def _guess(text, ch=1, rv=3):
-    return {"guess": text, "guessed_in_chapter": ch, "quote": "", "revealed_in_chapter": rv, "came_true": "yes",
-            "verified": False, "in_chapter": False}
+    # G-19-j/k (stress fixes): only a guess whose quote is in the book counts, so these readers quote the book
+    return {"guess": text, "guessed_in_chapter": ch, "quote": "the notes rang under her hands", "revealed_in_chapter": rv,
+            "came_true": "yes", "verified": True, "in_chapter": True}
 
 
 def _read(n, guesses):

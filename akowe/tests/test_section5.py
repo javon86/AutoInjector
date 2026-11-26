@@ -392,7 +392,12 @@ def test_report_failure_never_blocks_the_book(tmp_path):
     run = run_book(app, {"slot_id": "AI-1"})
     assert run["status"] == "done"
     rep = app.reports.latest(run["project_id"], "main")
-    assert {r["status"] for r in rep["reviews"]} == {"failed"} and any("could not review" in w for w in rep["warnings"])
+    # G-18 (stress fixes): in a run the slow reviewer is asked once more and another AI stands in for the one whose
+    # answer could not be used; the failed reviewer is still listed in plain words
+    rows = {r["slot"]: r for r in rep["reviews"]}
+    assert rows["AI-2"]["status"] == "failed" and rows["AI-3"]["status"] == "done" and rows["AI-3"]["retried"]
+    assert rows["AI-1"]["stand_in_for"] and any("could not review: its answer could not be used" in w
+                                                for w in rep["warnings"])
 
 
 def test_ask_other_ais_job_api_and_downloads(tmp_path):
