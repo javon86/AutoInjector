@@ -5,7 +5,7 @@ the harness in `akowe/tools/stress` (see its README). The first run (2026-11-23)
 were then fixed (branches fix-q1…q4, fix-n1…n5) and the whole stress test was run again (2026-11-26). The reports
 below are the **re-run after the fixes**. Start with **[SUMMARY.md](SUMMARY.md)**: the before / after, what is left,
 and the original root causes. The quality fix plan is **[FIX_PLAN_QUALITY.md](FIX_PLAN_QUALITY.md)** (done); the
-new step before the book is written is **[PLAY_BY_PLAY_PLAN.md](PLAY_BY_PLAY_PLAN.md)** (not started).
+new step before the book is written is **[PLAY_BY_PLAY_PLAN.md](PLAY_BY_PLAY_PLAN.md)** (not started). Round 2 (2026-11-28): A–G re-run unchanged on main; new sections R and RD; their fix list is **[FIX_PLAN_ROUND2.md](FIX_PLAN_ROUND2.md)** (not started).
 
 Result IDs: `<Section>-<part>[.<subsection>]-<stress>` (e.g. `B-7-a`, `C-10.2-k`). Stresses a–j are the standard ones
 (a timeout · b busy · c usage limit · d garbage answer · e empty answer · f refusals · g a crash in the part's own code ·
@@ -24,7 +24,9 @@ h program restart · i pause / cancel · j the most likely real-life problem); k
 | E. Writing (part 2) | E-12.7 scope guard & knowledge check · E-12.8 voice test · E-12.9 key scenes twice · E-12.10 ending writer · E-12.11 keep briefs · E-12.12 continuity checkpoints · E-13 planned details on the page | 97 | 67 | 30 | 0 | 0 | 59 / 22 / 2 / 14 | [E2-writing-part-2.md](E2-writing-part-2.md) |
 | F. Putting the book together | F-14 format · F-15 assemble · F-16 export · F-17 content check | 58 | 29 | 28 | 0 | 1 | 16 / 9 / 12 / 21 | [F-putting-the-book-together.md](F-putting-the-book-together.md) |
 | G. Quality at the end | G-18 report · G-19 beta reader · G-20 rewrite chapter 1 last · G-21 improve · G-22 read again | 75 | 63 | 11 | 0 | 1 | 44 / 10 / 2 / 19 | [G-quality-at-the-end.md](G-quality-at-the-end.md) |
-| **All** | **22 parts, 18 subsections** | **588** | **398** | **188** | **0** | **2** | **310 / 109 / 33 / 136** | |
+| R. The real-world run (round 2) | from the 2026-11-27 log, Akọwe's side | 31 | 8 | 2 | 0 | 21 | new | [R-real-world-run.md](R-real-world-run.md) |
+| RD. The real-world run (round 2) | from the 2026-11-27 log, AutoInjector's side | 18 | 3 | 1 | 1 | 13 | new | [RD-desktop-real-run.md](RD-desktop-real-run.md) |
+| **All A–G** | **22 parts, 18 subsections** | **588** | **398** | **188** | **0** | **2** | **310 / 109 / 33 / 136** | |
 
 Each section report has: a summary table, one section per part (what it does, every stress with its result, the ❌ / ⚠️
 findings with Where / What happens / How to reproduce / Likely cause / Suggested fix / How likely) and all findings
